@@ -8,10 +8,8 @@ from scripts.swarm import dev_red
 from scripts.swarm.store import PREFIX, RedisStore
 from tests.swarm.test_tick import FakeLedger
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 ENDPOINT = "repos/{owner}/{repo}/actions/workflows/test.yml/runs?branch=dev&event=push&status=completed&per_page=20"
-JQ = ".workflow_runs[] | {id, conclusion} | @json"
+JQ = ".workflow_runs[] | {id, conclusion, head_sha, html_url} | @json"
 GREEN = [{"id": 42, "conclusion": "success"}]
 
 
@@ -100,7 +98,7 @@ def test_a_green_dev_run_at_or_after_the_red_one_reopens_the_task_and_comments(s
         dev_red.REOPENED == "Dev Tests passed again after the red run that blocked this task, so the swarm reopened it."
     )
     assert store.redis.hgetall(dev_red.key("sw")) == {}
-    assert store.claims("sw", "t1") == 2
+    assert store.claims("sw", "t1") == 3
 
 
 @pytest.mark.parametrize(

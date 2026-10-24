@@ -6,8 +6,6 @@ from scripts.routing.master_account import MasterAccount
 from scripts.routing.settings import FileSettings, RedisSettings
 from scripts.routing.slots import INTERACTIVE, SUBSCRIPTION
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 ENV = {"AH_CC_TOKEN_luna": "t", "AH_CX_TOKEN_work": "t"}
 
 
@@ -44,6 +42,17 @@ def test_an_unknown_codex_token_slug_is_refused_and_nothing_is_written(store):
     with pytest.raises(ValueError, match="unknown codex token slug gone: no AH_CX_TOKEN_gone is set"):
         master_account.declare(store, {"claude": ("luna", None), "codex": ("gone", None)}, ENV, "operator", 1.0)
     assert store.history() == []
+
+
+def test_a_claim_declares_only_an_undeclared_harness_and_returns_the_holder(store):
+    assert master_account.claim(store, "claude", "luna", ENV, "master@a", 1.0) == "luna"
+    assert master_account.claim(store, "claude", "other", ENV, "master@b", 2.0) == "luna"
+    assert master_account.declared(store, ENV)["claude"] == MasterAccount("claude", "luna", "", SUBSCRIPTION)
+    with pytest.raises(ValueError, match="unknown codex token slug gone"):
+        master_account.claim(store, "codex", "gone", ENV, "master@a", 3.0)
+    assert [(entry["key"], entry["actor"], entry["at"]) for entry in store.history()] == [
+        ("master-account-claude", "master@a", 1.0)
+    ]
 
 
 def test_clear_removes_the_named_harnesses_only(store):

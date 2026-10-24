@@ -82,8 +82,10 @@ def test_a_codex_launcher_runs_through_the_codex_router(monkeypatch, tmp_path):
     text = launcher.read_text()
     report = launcher.with_suffix(".route")
     assert (
-        f"/usr/bin/agentihooks codex --agentihooks-report {report} -c 'model_reasoning_effort=\"high\"' --model o3 "
-        f'"$(cat {prompt_file})"'
+        f'set --; [ -n "${{AGENTIHOOKS_PROMPT_AFTER_START:-}}" ] || set -- "$(cat {prompt_file})"; '
+        "unset AGENTIHOOKS_PROMPT_AFTER_START; "
+        f"/usr/bin/agentihooks codex --agentihooks-report {report} -c 'model_reasoning_effort=\"medium\"' --model o3 "
+        '"$@"'
     ) in text
     assert "status=direct" not in text and "agentihooks claude" not in text
 
@@ -119,11 +121,12 @@ def test_one_codex_account_quota_uses_its_week_band(monkeypatch):
 
     now = time.time()
     readings = {"seen": CodexQuota(observed_at=now, plan_type="pro", seven_day=QuotaWindow(used=95.1))}
+    monkeypatch.setattr(codex_router, "default_signed_in", lambda environ, run=None: True)
     monkeypatch.setattr("scripts.codex_quota.latest_codex_quota", lambda environ=None, keep=None: readings["seen"])
     assert agent_choice.account_has_quota("codex", codex_router.CODEX_DEFAULT, {}) is False
     readings["seen"] = CodexQuota(observed_at=now, plan_type="pro", seven_day=QuotaWindow(used=95.0))
     assert agent_choice.account_has_quota("codex", codex_router.CODEX_DEFAULT, {}) is True
-    readings["seen"] = CodexQuota(observed_at=now - 901, plan_type="pro", seven_day=QuotaWindow(used=50.0))
+    readings["seen"] = CodexQuota(observed_at=now - 6 * 3600 - 1, plan_type="pro", seven_day=QuotaWindow(used=50.0))
     assert agent_choice.account_has_quota("codex", codex_router.CODEX_DEFAULT, {}) is None
     assert agent_choice.account_has_quota("codex", "nobody", {}) is None
 

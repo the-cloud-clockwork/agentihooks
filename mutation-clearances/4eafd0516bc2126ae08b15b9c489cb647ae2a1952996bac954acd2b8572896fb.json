@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_v2/kubernetes/grants.py:scripts.swarm_v2.kubernetes.grants.x\u01c1PodGrants\u01c1hand__mutmut_11:d9ec1c537e7b04cedf3fe1a0c90c5b7e2ad5ee1d46664fb99942a85a60a8169b": {
+    "reader": "standards_reader",
+    "reason": "Missing containers yields empty list or None; both are falsy, skip the digest branch, and are unused afterward."
+  }
+}

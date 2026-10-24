@@ -1,11 +1,14 @@
 x-swarm-env: &swarm-env
   AGENTIHOOKS_DEPLOYMENT: ${AGENTIHOOKS_DEPLOYMENT:-compose}
-  AGENTIHOOKS_SWARM_REDIS_URL: ${SWARM_REDIS_SCHEME:-redis}://swarm:${SWARM_REDIS_PASSWORD:?set SWARM_REDIS_PASSWORD, see deploy/compose/.env.example}@redis:6379/0
+  AGENTIHOOKS_SWARM_DATABASE_URL: ${AGENTIHOOKS_SWARM_DATABASE_URL:-}
+  AGENTIHOOKS_BUS: ${AGENTIHOOKS_BUS:-nats}
+  AGENTIHOOKS_BUS_URL: ${AGENTIHOOKS_BUS_URL:-nats://nats:4222}
+  AGENTIHOOKS_SWARM_REDIS_URL: ${AGENTIHOOKS_SWARM_REDIS_URL:-${SWARM_REDIS_SCHEME:-redis}://swarm:${SWARM_REDIS_PASSWORD:?set SWARM_REDIS_PASSWORD, see deploy/compose/.env.example}@redis:6379/0}
   SSL_CERT_FILE: ${SWARM_CA_FILE:-/etc/ssl/certs/ca-certificates.crt}
 
 services:
   swarm:
-    image: ghcr.io/the-cloud-clockwork/agentihooks-swarm:dev
+    image: ghcr.io/the-cloud-clockwork/agentihooks-swarm:${SWARM_IMAGE_TAG:-dev}
     build: .
     ports:
       - "${SWARM_BIND:-127.0.0.1}:${SWARM_PORT:-8765}:8765"
@@ -24,9 +27,11 @@ services:
     depends_on:
       redis:
         condition: service_healthy
+      nats:
+        condition: service_healthy
     restart: unless-stopped
   controller:
-    image: ghcr.io/the-cloud-clockwork/agentihooks-swarm:dev
+    image: ghcr.io/the-cloud-clockwork/agentihooks-swarm:${SWARM_IMAGE_TAG:-dev}
     command:
       - sh
       - -c
@@ -37,6 +42,7 @@ services:
         && exec agentihooks controller run
     environment:
       <<: *swarm-env
+      AGENTIHOOKS_SWARM_REDIS_URL: ${SWARM_REDIS_SCHEME:-redis}://swarm:${SWARM_REDIS_PASSWORD:?set SWARM_REDIS_PASSWORD, see deploy/compose/.env.example}@redis:6379/0
       LEDGER_URL: http://swarm:8765
       SWARM_HIVE_ID: ${SWARM_HIVE_ID:-compose-controller}
     volumes:
@@ -54,15 +60,17 @@ services:
       timeout: 5s
       retries: 3
       start_period: 70s
-      start_interval: 5s
+      start_interval: 1s
     depends_on:
       redis:
+        condition: service_healthy
+      nats:
         condition: service_healthy
       swarm:
         condition: service_healthy
     restart: unless-stopped
   hive:
-    image: ghcr.io/the-cloud-clockwork/agentihooks-swarm:dev
+    image: ghcr.io/the-cloud-clockwork/agentihooks-swarm:${SWARM_IMAGE_TAG:-dev}
     profiles: [join]
     command:
       - agentihooks
@@ -76,6 +84,7 @@ services:
       - "${SWARM_BIND:-127.0.0.1}:${SWARM_HIVE_PORT:-8770}:8770"
     environment:
       <<: *swarm-env
+      AGENTIHOOKS_SWARM_REDIS_URL: ${SWARM_REDIS_SCHEME:-redis}://swarm:${SWARM_REDIS_PASSWORD:?set SWARM_REDIS_PASSWORD, see deploy/compose/.env.example}@redis:6379/0
     volumes:
       - ${SWARM_TLS_DIR:-./deploy/compose/tls}:/tls:ro
     healthcheck:
@@ -83,12 +92,16 @@ services:
       interval: 5s
       timeout: 3s
       retries: 5
+      start_period: 30s
+      start_interval: 1s
     depends_on:
       redis:
         condition: service_healthy
+      nats:
+        condition: service_healthy
     restart: unless-stopped
   redis:
-    image: redis:7
+    image: mirror.gcr.io/library/redis:7
     command: [bash, /compose/start.sh]
     ports:
       - "${SWARM_BIND:-127.0.0.1}:${SWARM_REDIS_PORT:-6379}:6379"
@@ -106,7 +119,23 @@ services:
       interval: 5s
       timeout: 3s
       retries: 5
+      start_period: 30s
+      start_interval: 1s
+    restart: unless-stopped
+  nats:
+    image: mirror.gcr.io/library/nats:2.15.1-alpine
+    command: [--jetstream, --store_dir=/data, --http_port=8222]
+    volumes:
+      - nats-data:/data
+    healthcheck:
+      test: [CMD, wget, -q, -O-, "http://127.0.0.1:8222/healthz?js-enabled-only=true"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 30s
+      start_interval: 1s
     restart: unless-stopped
 volumes:
   swarm-data:
   redis-data:
+  nats-data:

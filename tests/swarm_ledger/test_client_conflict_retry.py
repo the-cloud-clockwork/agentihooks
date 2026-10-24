@@ -6,10 +6,9 @@ import urllib.error
 import pytest
 
 from scripts.swarm_ledger.api import client as api_client
+from tests.mutation_trace import traced
 from tests.swarm_ledger.test_api_v1 import authority_live, live  # noqa: F401
 from tests.swarm_ledger.test_ledger_authority import SLUG
-
-pytestmark = pytest.mark.xdist_group("fakeredis")
 
 CONFLICT = b'{"error": {"code": "revision_conflict", "message": "Resource changed since the expected revision"}}'
 
@@ -130,6 +129,24 @@ def test_the_exhausted_message_names_the_resource_the_server_reports(pauses):
     assert json.loads(error.value.read())["error"]["details"] == {"path": "chat"}
 
 
+def pin(name, revision):
+    return {"op": "set", "id": name, "path": f"phases/p1/{name}", "value": True, "expected_revision": revision}
+
+
+def test_a_batch_pinning_two_revisions_on_one_resource_is_refused_before_sending(pauses):
+    client = Scripted()
+    with pytest.raises(ValueError, match="phases/p1") as error:
+        client.mutate(SLUG, [pin("a", "p0"), pin("b", "p1")])
+    assert "p0" in str(error.value) and "p1" in str(error.value)
+    assert client.calls == []
+
+
+def test_a_batch_pinning_the_same_revision_twice_still_sends(pauses):
+    client = Scripted({"applied": ["a", "b"]})
+    client.mutate(SLUG, [pin("a", "p0"), pin("b", "p0")])
+    assert [(path, payload["guards"]) for path, payload in client.calls] == [("operations", {"phases/p1": "p0"})]
+
+
 def test_an_unnamed_conflict_names_every_fetched_resource_and_keeps_the_reply(pauses):
     def unnamed():
         return urllib.error.HTTPError("http://ledger.test/ops", 409, "Conflict", {"X-Seen": "1"}, io.BytesIO(CONFLICT))
@@ -161,20 +178,28 @@ TITLES = [
     "Meadow falcon copper",
     "Silver garden willow",
     "Lantern compass thunder",
+    "Pebble ocean marble",
+    "Cedar rocket velvet",
+    "Hollow piano saffron",
+    "Glacier biscuit anchor",
+    "Quartz meadowlark tunnel",
+    "Tundra lemon cathedral",
+    "Walnut orbit festival",
+    "Juniper vault mosaic",
+    "Prairie kettle nebula",
+    "Coral engine sparrow",
 ]
 
 
 class Crowded(api_client.ResourceClient):
     def __init__(self, base, credentials, barrier, conflicts):
-        super().__init__(base, credentials)
+        super().__init__(base, credentials, traced(10))
         self.barrier, self.conflicts = barrier, conflicts
 
     def request(self, slug, path, payload=None):
-        if path == "tasks" and self.barrier is not None:
-            reply = super().request(slug, path, payload)
+        if path == "operations" and self.barrier is not None:
             self.barrier, barrier = None, self.barrier
             barrier.wait()
-            return reply
         try:
             return super().request(slug, path, payload)
         except urllib.error.HTTPError as exc:
@@ -182,7 +207,11 @@ class Crowded(api_client.ResourceClient):
             raise
 
 
-def test_a_burst_of_writers_reading_one_revision_all_land(live):  # noqa: F811
+def task_add(n, task):
+    return {"op": "task_add", "id": f"burst-{n}", "by": "swarm", "task": task, "lane": "eng", "title": TITLES[n]}
+
+
+def test_sixteen_concurrent_adds_of_different_ids_all_land_without_a_conflict(live):  # noqa: F811
     from tests.swarm_ledger.test_ledger_authority import ledger
 
     writers, conflicts, results = len(TITLES), [], {}
@@ -190,15 +219,54 @@ def test_a_burst_of_writers_reading_one_revision_all_land(live):  # noqa: F811
 
     def add(n):
         client = Crowded(ledger.BASE, ledger.credentials(SLUG, service=True), barrier, conflicts)
-        operation = {"op": "task_add", "id": f"burst-{n}", "by": "swarm", "task": f"b{n}", "lane": "eng"}
-        results[n] = client.mutate(SLUG, [{**operation, "title": TITLES[n]}])["applied"]
+        results[n] = client.mutate(SLUG, [task_add(n, f"b{n}")])["applied"]
 
     threads = [threading.Thread(target=add, args=(n,)) for n in range(writers)]
     for thread in threads:
         thread.start()
     for thread in threads:
         thread.join()
+    assert writers == 16
     assert results == {n: [f"burst-{n}"] for n in range(writers)}
-    assert conflicts.count(409) >= writers - 1
+    assert conflicts == []
     client = api_client.ResourceClient(ledger.BASE, ledger.credentials(SLUG, service=True))
     assert {f"b{n}" for n in range(writers)} <= {row["id"] for row in client.collection(SLUG, "tasks")}
+
+
+def test_an_add_of_a_used_id_is_refused_naming_the_task_it_repeats(live):  # noqa: F811
+    from tests.swarm_ledger.test_ledger_authority import ledger
+
+    client = api_client.ResourceClient(ledger.BASE, ledger.credentials(SLUG, service=True))
+    assert client.mutate(SLUG, [task_add(0, "dup")])["applied"] == ["burst-0"]
+    reply = client.mutate(SLUG, [task_add(1, "dup"), {"op": "add", "id": "m-9", "thread": "chat", "text": "Hi"}])
+    assert (reply["applied"], reply["rejected"]) == (["m-9"], ["burst-1"])
+    taken = f'task dup already exists as "{TITLES[0]}" (open): pick another id, or pass - as the id to mint one'
+    assert taken in reply["_meta"]["warnings"]
+    assert client.request(SLUG, "tasks/dup")["data"]["title"] == TITLES[0]
+
+
+def test_a_task_add_sends_no_guard_and_reads_nothing(pauses):
+    client = Scripted({"applied": ["burst-3"]})
+    operation = task_add(3, "t3")
+    client.mutate(SLUG, [operation])
+    assert [(path, payload["guards"]) for path, payload in client.calls] == [("operations", {})]
+    assert client.calls[0][1]["ops"] == [{key: value for key, value in operation.items() if key != "operation_id"}]
+    assert "expected_revision" not in operation
+
+
+def test_a_task_add_beside_a_guarded_write_guards_only_that_write(pauses):
+    client = Scripted({"revision": "r0"}, {"applied": ["burst-3", "m-1"]})
+    client.mutate(SLUG, [task_add(3, "t3"), *chat_add()])
+    assert [(path, payload and payload["guards"]) for path, payload in client.calls] == [
+        ("chat", None),
+        ("operations", {"chat": "r0"}),
+    ]
+    assert [op["op"] for op in client.calls[1][1]["ops"]] == ["task_add", "add"]
+
+
+def test_a_conflict_on_a_task_add_batch_is_not_retried(pauses):
+    client = Scripted(conflict("tasks"))
+    with pytest.raises(urllib.error.HTTPError):
+        client.mutate(SLUG, [task_add(3, "t3")])
+    assert len(client.calls) == 1
+    assert pauses == []

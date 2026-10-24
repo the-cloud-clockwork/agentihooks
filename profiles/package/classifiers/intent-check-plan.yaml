@@ -1,0 +1,53 @@
+version: 1
+purpose: intent-check
+fallbacks: cli
+questions:
+  - name: aligned
+    type: yesno
+    instructions: >-
+      Judge a plan for work not built yet: planned_pieces lists what the engineer will build, each with the areas it
+      touches and why, and planned_areas the files it will touch. No code, test, pull request or proof exists yet, and
+      none is expected at this stage. Does the planned work serve the phase intent, given the project overview and the
+      task?
+    "true": the planned work serves the phase
+    "false": the planned work serves something other than the phase
+  - name: covers
+    type: yesno
+    instructions: >-
+      Judge a plan for work not built yet: planned_pieces lists what the engineer will build. No code, test or proof
+      exists yet, and none is expected at this stage. Does the plan promise the behaviour and the seams the task text
+      asks for?
+    "true": the plan covers what the task text asks for
+    "false": the plan leaves out part of what the task text asks for
+  - name: weakens
+    type: yesno
+    instructions: >-
+      Judge a plan for work not built yet. Would the planned work turn off, loosen, weaken or bypass anything the phase
+      builds, such as a gate default, a threshold, a check, a published record or a review step?
+    "true": the planned work weakens what the phase builds
+    "false": the planned work weakens nothing the phase builds
+  - name: underdelivers
+    type: yesno
+    instructions: Does the plan leave out anything the plan chunk asks for?
+    "true": the plan leaves out part of the plan chunk
+    "false": the plan covers every item of the plan chunk
+  - name: overdelivers
+    type: yesno
+    instructions: >-
+      Does the plan add scope the plan chunk does not ask for? A planned behaviour, file, command or feature the plan
+      chunk does not ask for is scope.
+    "true": the plan adds scope beyond the plan chunk
+    "false": the plan stays within the plan chunk
+  - name: misses_line
+    type: yesno
+    each: rows
+    instructions: 'Does the plan leave out what plan line {item[0]} asks for: "{item[1]}"?'
+    "true": the plan leaves out what this line asks for
+    "false": the plan covers what this line asks for, or the line asks for nothing
+thresholds:
+  fail: 0.3
+  reason: 0.5
+  weaken: 0.5
+  chunk: 0.5
+rule:
+  type: code

@@ -1,0 +1,6 @@
+{
+  "scripts/hive/join.py:scripts.hive.join.x_enroll__mutmut_3:17bb13be0c70d09c9d38a088cfd69b1e910f95f2786d086a3bd9824807ee1a5e": {
+    "reader": "standards_reader",
+    "reason": "Equivalent: independent source inspection confirms False and None select identical literal parsing in dotenv_values and DotEnv.dict, with equivalent output."
+  }
+}

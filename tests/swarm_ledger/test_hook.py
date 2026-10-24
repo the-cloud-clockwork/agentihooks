@@ -11,8 +11,6 @@ from pathlib import Path
 
 import pytest
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 SCRIPTS = Path(__file__).resolve().parents[2] / "scripts" / "swarm_ledger"
 sys.path.insert(0, str(SCRIPTS))
 import ledger_core as core  # noqa: E402
@@ -56,7 +54,7 @@ def make_ledger(done=False):
         "questions": [],
         "followups": [],
     }
-    html_path, json_path = core.paths(SLUG)
+    html_path, json_path = legacy_page.paths(SLUG, core)
     core.LEDGER_DIR.mkdir(parents=True, exist_ok=True)
     html_path.write_text(legacy_page.render(new_ledger.build_doc(content), SLUG, 8765), encoding="utf-8")
     json_path.unlink(missing_ok=True)
@@ -223,9 +221,15 @@ class Gate(unittest.TestCase):
 
     def test_block_budget_then_allow(self):
         ask("still there", 3)
-        start = time.monotonic()
         results = [hook("Stop") for _ in range(4)]
         self.assertEqual([bool(r) for r in results], [True, True, True, False])
+
+    @pytest.mark.wall_clock
+    def test_four_stops_answer_within_two_seconds(self):
+        ask("still there", 3)
+        start = time.monotonic()
+        for _ in range(4):
+            hook("Stop")
         self.assertLess(time.monotonic() - start, 2)
 
     def test_work_without_recording_blocks_stop(self):

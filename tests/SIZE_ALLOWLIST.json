@@ -6,10 +6,6 @@
  "hooks/context/bash_output_filter.py::truncate_test_output": {
   "PLR0912": 13
  },
- "hooks/context/branch_guard.py::check_branch_guard": {
-  "C901": 15,
-  "PLR0912": 14
- },
  "hooks/context/conditions.py::create_condition": {
   "PLR0913": 11
  },
@@ -25,8 +21,8 @@
   "PLR0913": 8
  },
  "hooks/context/kubectl_mutation_guard.py::check_kubectl_mutation_command": {
-  "C901": 20,
-  "PLR0912": 19
+  "C901": 17,
+  "PLR0912": 16
  },
  "hooks/context/quota_policy.py::decide": {
   "PLR0913": 12
@@ -45,12 +41,12 @@
  "hooks/hook_manager.py::on_post_tool_use": {
   "C901": 56,
   "PLR0912": 56,
-  "function-lines": 305
+  "function-lines": 304
  },
  "hooks/hook_manager.py::on_pre_tool_use": {
-  "C901": 79,
-  "PLR0912": 84,
-  "function-lines": 513
+  "C901": 78,
+  "PLR0912": 83,
+  "function-lines": 511
  },
  "hooks/hook_manager.py::on_session_end": {
   "C901": 19,
@@ -63,10 +59,6 @@
  "hooks/hook_manager.py::on_stop": {
   "C901": 23,
   "PLR0912": 22
- },
- "hooks/hook_manager.py::on_user_prompt_submit": {
-  "C901": 45,
-  "PLR0912": 45
  },
  "hooks/hook_manager.py::parse_transcript_metrics": {
   "C901": 17,
@@ -142,9 +134,6 @@
  "scripts/ci_mutation/runner.py::run_gate": {
   "PLR0912": 14
  },
- "scripts/ci_mutation/selection.py::run_selected": {
-  "C901": 14
- },
  "scripts/claude_quota_balancer.py::collect_results": {
   "PLR0913": 8
  },
@@ -159,7 +148,6 @@
   "PLR0913": 8
  },
  "scripts/inbox/wake.py::wake_pass": {
-  "C901": 13,
   "PLR0913": 8
  },
  "scripts/init_agent.py::main": {
@@ -167,7 +155,7 @@
   "PLR0912": 27
  },
  "scripts/install.py": {
-  "file-lines": 7068
+  "file-lines": 6900
  },
  "scripts/install.py::_clean_state_dir": {
   "C901": 14,
@@ -200,8 +188,8 @@
   "PLR0912": 16
  },
  "scripts/install.py::_install_global_inner": {
-  "C901": 40,
-  "PLR0912": 39
+  "C901": 29,
+  "PLR0912": 28
  },
  "scripts/install.py::_link_profile_link": {
   "C901": 17,
@@ -223,18 +211,18 @@
   "PLR0912": 17
  },
  "scripts/install.py::cmd_init_unified": {
-  "C901": 27,
-  "PLR0912": 27
+  "C901": 25,
+  "PLR0912": 25
  },
  "scripts/install.py::cmd_migrate": {
   "C901": 20,
   "PLR0912": 20
  },
  "scripts/install.py::main": {
-  "C901": 69,
-  "PLR0912": 72,
-  "PLR0915": 328,
-  "function-lines": 671
+  "C901": 67,
+  "PLR0912": 70,
+  "PLR0915": 317,
+  "function-lines": 658
  },
  "scripts/install.py::uninstall_global": {
   "C901": 35,
@@ -259,14 +247,6 @@
  "scripts/swarm/tick.py::_spawn": {
   "PLR0913": 8
  },
- "scripts/swarm_ledger/ledger.py::cmd_task": {
-  "C901": 17,
-  "PLR0912": 16
- },
- "scripts/swarm_ledger/ledger_agent_ops.py::check": {
-  "C901": 17,
-  "PLR0912": 16
- },
  "scripts/swarm_ledger/ledger_core.py::apply_op": {
   "C901": 18,
   "PLR0912": 18
@@ -280,19 +260,14 @@
   "PLR0912": 15
  },
  "scripts/swarm_ledger/ledger_server.py::Handler.do_GET": {
-  "C901": 16,
-  "PLR0912": 15
+  "C901": 13
  },
  "scripts/swarm_ledger/ledger_server.py::Handler.do_POST": {
-  "C901": 14,
-  "PLR0912": 13
+  "C901": 13
  },
  "scripts/swarm_ledger/ledger_server.py::control_argv": {
-  "C901": 21,
-  "PLR0912": 20
- },
- "scripts/swarm_ledger/ledger_tasks.py::_update": {
-  "C901": 13
+  "C901": 19,
+  "PLR0912": 18
  },
  "scripts/targets/codex_target.py::CodexAdapter.teardown": {
   "C901": 20,

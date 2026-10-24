@@ -27,31 +27,28 @@ to the prepush gate. CI runs the whole suite, not `-m unit`.
 
 ## Release dance
 
-agentihooks is open source; it has releases, not snapshots. "Do the release dance"
-means, in order:
+`dev` integrates worktree pull requests. Green promotion checks let CI promote
+the graded head to `main`, tag a release and publish versioned and `:release`
+images. CI alone opens and merges promotion pull requests; agents never create
+or merge pull requests into `main`, `master` or `v1`. Red promotion checks hold
+the release while `dev` keeps merging.
 
-1. **Release notes** — a `CHANGELOG.md` entry for the new version, PR'd into `dev`.
-2. **Release** — `gh workflow run release.yml --ref dev -f bump=patch|minor|major`
-   computes the next version from the latest stable git tag, tags the existing
-   `dev` commit and creates the GitHub release with generated notes. It creates
-   no commit. Package metadata derives its version from the tag through
-   setuptools-scm. `publish_pypi` stays off. Add `-f dry_run=true` to tag and
-   verify a build only inside the CI checkout, without pushing or releasing.
-3. **PR to `main`** — `gh pr create --base main --head dev`, after step 2 and
-   before anything else merges into `dev`: step 5 refuses to publish unless the
-   tag's tree matches `main`.
-4. **Merge the PR** — `gh pr merge --rebase` (`--squash` only when GitHub cannot
-   rebase; then merge `origin/main` back into `dev` at once and check that
-   `git rev-parse HEAD^{tree}` is unchanged, or the next PR replays every file as a
-   phantom conflict).
-5. **Publish to PyPI from `main`** — `gh workflow run publish-pypi.yml --ref main`,
-   builds the latest stable tag after checking its tree matches `main`, then
-   verify `https://pypi.org/pypi/agentihooks/X.Y.Z/json` answers 200 and a
-   clean install reports the version.
+"Do the release dance" authorizes only publication of that release to PyPI:
 
-The phrase "release dance" is itself the operator's PR and release signal, so
-steps 3 and 4 pass the `main` gate. `git fetch` updates `origin/dev`, not your
-local branch. Pull before any merge; the release workflow never changes `dev`.
+1. Run `gh workflow run publish-pypi.yml --ref main`. The workflow builds the
+   latest stable tag and refuses unless its tree matches `main`.
+2. Verify the workflow succeeded, the package index serves that version and a
+   clean install reports it. Record the run and observed version.
+
+For pull request, merge queue and promotion check ownership, read
+`docs/reference/delivery-tiers.md`.
+
+## Ledger front end
+
+`DESIGN.md` and `.impeccable/design.json` are the ledger front end's design record; their Named Rules and Don'ts are hard
+constraints. Read both before editing anything under `scripts/swarm_ledger/static/` or `palette.css`, and use the
+impeccable skill to shape and critique the change. `tests/swarm_ledger/test_design_system.py` enforces the record;
+a test there that a change has to rewrite means the change is wrong, not the test.
 
 ## The Four Pillars
 
@@ -143,7 +140,7 @@ live session cap, computed from each account's five-hour window left (6 at
 below 5% of the week either), counted from `/proc` by
 `hooks/context/account_sessions.py`. `hooks/context/quota_policy.py` is pure code
 deciding HANDOFF / WAIT / STOP / PUSH from the session's statusline quota and the
-router cache; PreToolUse blocks on STOP and WAIT. `init-agent --handoff` runs
+router cache; STOP and WAIT are alerts injected at PreToolUse and never block a tool. `init-agent --handoff` runs
 the handoff and marks the old session `handed_off`. Register the real agent PID
 (`agent_pid()`), never `os.getppid()` — that is the hook's short-lived shell.
 Docs: `docs/pillars/load-balancing.md`.

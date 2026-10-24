@@ -14,7 +14,7 @@ from scripts.swarm.store import PREFIX
 ENDPOINT = (
     f"repos/{{owner}}/{{repo}}/actions/workflows/{WORKFLOW}/runs?branch=dev&event=push&status=completed&per_page=20"
 )
-JQ = ".workflow_runs[] | {id, conclusion} | @json"
+JQ = ".workflow_runs[] | {id, conclusion, head_sha, html_url} | @json"
 REOPENED = "Dev Tests passed again after the red run that blocked this task, so the swarm reopened it."
 READ_ERRORS = (subprocess.SubprocessError, OSError, ValueError, KeyError)
 
@@ -65,7 +65,6 @@ def reopen_pass(slug, config, store, ledger, rows, run: Callable = subprocess.ru
         rows[task_id].update(live)
         hold(store.redis, slug, task_id, None)
         if live.get("state") == "open":
-            store.refund_claim(slug, task_id)
             ledger.comment(slug, task_id, REOPENED, by="swarm")
             actions.append(f"task {task_id} reopened, dev Tests passed after the red run that blocked it")
     return actions

@@ -104,10 +104,34 @@ class TestFilterSignal:
             "remove the ui slop filter",
             "set the front end slop filter",
             "add filters for the judge",
+            "set a filter",
+            "add a filter rule for ledger writes",
+            "add a filter for the ui slop list",
+            "add a filter to the list endpoint, then set a condition for bash.git",
         ],
     )
     def test_arms(self, prompt):
         assert conditions.contains_condition_signal(prompt)
+
+    @pytest.mark.parametrize(
+        "prompt",
+        [
+            "add a filter to the list endpoint",
+            "add a list filter",
+            "add a column filter to the grid",
+            "set a filter query",
+            "Add a filter on the Query builder",
+            "create a classifier for the table rows",
+            "add a filter for the slop list",
+            "remove the endpoints filter",
+            "update the queries filter",
+            "add the tables filter",
+            "add a filter to sort columns",
+            "add a condition to the query",
+        ],
+    )
+    def test_a_code_noun_beside_it_keeps_the_gate_closed(self, prompt):
+        assert not conditions.contains_condition_signal(prompt)
 
     @pytest.mark.parametrize(
         "prompt",

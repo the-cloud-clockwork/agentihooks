@@ -4,13 +4,13 @@ from pathlib import Path
 
 import pytest
 
-from scripts.gates import catalog, entry, lift, modes
+from scripts.gates import catalog, entry, intent, lift, modes
 from scripts.swarm import clearance, cli
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
 from scripts.swarm_ledger import ledger_server
 from tests.swarm.test_tick import FakeLedger, FakeRuntime
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 
 MASTER, ENGINEER, PLANNER, STRANGER = (
     "master@a1b2c3-0001",
@@ -58,7 +58,7 @@ FAMILIES = {
     "lifecycle": (["pause"], "master a1b2c3 0001 changed the swarm state with pause from running to paused."),
     "capacity": (
         ["set", "max-eng-agents=5", "effort-max=max", "master-agent=codex"],
-        "master a1b2c3 0001 changed max eng agents from 2 to 5, effort max from high to max, "
+        "master a1b2c3 0001 changed max eng agents from 2 to 5, effort max from xhigh to max, "
         "master agent from claude to codex.",
     ),
     "autonomy": (["set", "autonomy=full"], "master a1b2c3 0001 changed autonomy from delegate to full."),
@@ -83,6 +83,20 @@ def test_the_master_of_the_swarm_uses_each_control_and_the_ledger_records_it(swa
     acting(monkeypatch, MASTER, "demo")
     assert cli.main(["demo", *argv]) == 0
     assert ledger.notes == [record]
+
+
+def test_the_master_lift_reads_the_task_lift_against_its_pull_request_head(swarm, monkeypatch):
+    store, ledger = swarm
+    ledger.rows["t1"] = {"id": "t1", "pr_url": "https://github.com/o/r/pull/7"}
+    head = ["a1"]
+    monkeypatch.setattr(intent, "pr_head", lambda url: head[0])
+    acting(monkeypatch, MASTER, "demo")
+    assert cli.main(["demo", "lift", ENGINEER, "watch"]) == 0
+    head[0] = "b2"
+    assert cli.main(["demo", "lift", ENGINEER, "watch"]) == 0
+    assert cli.main(["demo", "lift", ENGINEER, "talk"]) == 0
+    record = "master a1b2c3 0001 changed {} gate lift for engineer a1b2c3 0002 from not lifted to lifted."
+    assert ledger.notes == [record.format("watch"), record.format("watch"), record.format("talk")]
 
 
 @pytest.mark.parametrize(
@@ -145,6 +159,13 @@ def test_a_finished_master_holds_no_clearance(swarm, monkeypatch, capsys):
     assert capsys.readouterr().err == refused(MASTER)
 
 
+def test_the_holder_judges_the_operator_by_the_environment_it_is_given(swarm, monkeypatch):
+    from scripts.gates import Who
+
+    acting(monkeypatch, "engineer@unregistered-0009", "")
+    assert clearance.holder(swarm[0], "demo", Who(), {}) == clearance.OPERATOR
+
+
 @pytest.mark.parametrize("argv", [["pause"], ["--as", MASTER, "pause"], ["set", "intent-gate=coach"]])
 def test_an_agent_that_drops_its_swarm_pin_is_still_refused_by_its_session_name(swarm, monkeypatch, capsys, argv):
     store, ledger = swarm
@@ -178,7 +199,14 @@ def test_a_master_stop_that_outlives_its_retirement_records_the_settled_state(sw
     ]
 
 
-SAMPLES = {"compact_limit": 200, "effort_min": "low", "effort_max": "max", "master_agent": "codex"}
+SAMPLES = {
+    "compact_limit": 200,
+    "effort_min": "low",
+    "effort_max": "max",
+    "master_agent": "codex",
+    "claude_model": "opus",
+    "codex_model": "gpt-6.1-sol",
+}
 NOT_SWARM = {"apply", "doctor_start", "doctor_stop"}
 
 
@@ -209,8 +237,17 @@ def test_the_walk_finds_every_panel_control_family():
 
 @pytest.mark.parametrize("body", list(panel_bodies()), ids=str)
 def test_every_panel_control_is_a_cleared_command_the_command_line_takes(swarm, monkeypatch, body):
+    from unittest.mock import patch
+
+    from scripts.swarm import model_catalog
+
     store, _ = swarm
-    argv = ledger_server.control_argv(body)
-    assert argv[0] in clearance.COMMANDS
-    acting(monkeypatch, MASTER, "demo")
-    assert cli.main(["demo", *argv]) == 0
+    models = {"claude": [{"model": "opus"}], "codex": [{"model": "gpt-6.1-sol"}]}
+    with (
+        patch.object(model_catalog, "catalog", return_value=models),
+        patch.object(ledger_server, "swarm_models", return_value=models),
+    ):
+        argv = ledger_server.control_argv(body)
+        assert argv[0] in clearance.COMMANDS
+        acting(monkeypatch, MASTER, "demo")
+        assert cli.main(["demo", *argv]) == 0

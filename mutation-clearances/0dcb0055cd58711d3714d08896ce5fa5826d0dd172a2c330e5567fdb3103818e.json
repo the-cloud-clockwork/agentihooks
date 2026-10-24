@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/ledger_read.py:scripts.swarm.ledger_read.x__hosted__mutmut_7:c54c214412ec080bb0c318fb35c56f7eed66ad1f6e4e01dad2172ce4c2ed8057": {
+    "reader": "Standards reader",
+    "reason": "HTTP header names are case insensitive; urllib transmission and server header lookup preserve identical credential authentication."
+  }
+}

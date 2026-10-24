@@ -6,13 +6,13 @@ has_children: true
 
 # Hook System
 
-AgentiHooks intercepts Claude Code's lifecycle events using the [hooks system](https://docs.anthropic.com/en/docs/claude-code/hooks). When a hook event fires, Claude Code runs a shell command and passes a JSON payload via stdin. AgentiHooks reads that payload and dispatches it to the appropriate handler.
+AgentiHooks handles lifecycle events from **Claude Code and Codex**. Each harness runs a configured command with a JSON payload on stdin. AgentiHooks normalizes and dispatches it to shared handlers. The examples below use Claude Code settings; see the [Codex reference](../reference/CODEX-COMPAT.md) for `hooks.json`, permission and context-delivery differences.
 
 ## How it works
 
 ```mermaid
 flowchart LR
-    CC[Claude Code] -->|"hook_event_name + payload\n(via stdin)"| HM["python -m hooks"]
+    CC[Claude Code or Codex] -->|"hook_event_name + payload\n(via stdin)"| HM["python -m hooks"]
     HM -->|dispatch| H1[SessionStart handler]
     HM -->|dispatch| H2[PreToolUse handler]
     HM -->|dispatch| H3[Stop handler]
@@ -60,9 +60,10 @@ Hook arrays are **replaced, not merged**, across scopes. All hooks must live in 
 | Page | What it covers |
 |------|---------------|
 | [Events](events.md) | All 10 hook events with payload schemas and handler behavior |
+| [Hook Injection Budget](injection-budget.md) | Claude event limits, context priority, shortening notices and tool memory configuration |
 | [Context Preprocessor](context-preprocessor.md) | Token compression for injected banners and tool output (scope=all) |
 | [MCP Transport](mcp-transport.md) | Running `agentihooks` over `sse`/`streamable-http` instead of stdio, for clients that filter stdio MCP servers out. Covers the daemon `agentihooks init` now starts, `agentihooks mcp status` for diagnosing config-vs-reality drift, the systemd and pidfile supervisors, and the explicit `session_id` the network mode requires. |
-| [**Broadcast System**](broadcast.md) | **Real-time fleet messaging** — send a message to every active Claude Code session simultaneously. Deploy freezes, incident response, credential rotation, team coordination. Optional channel filtering via `AGENTIHOOKS_BASE_CHANNELS` env var for targeted delivery. |
+| [**Broadcast System**](broadcast.md) | **Real-time fleet messaging** — send messages to Claude Code and Codex sessions sharing the broadcast store. Deploy freezes, incident response, credential rotation, team coordination. Optional channel filtering via `AGENTIHOOKS_BASE_CHANNELS` env var for targeted delivery. |
 
 {: .highlight }
 **Broadcast System** is one of AgentiHooks' most powerful features. One command reaches every active session — no servers, no daemons, no pub/sub infrastructure required. [Learn more →](broadcast.md)

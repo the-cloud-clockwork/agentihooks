@@ -1,0 +1,12 @@
+{
+  "case": "T-SV2-MST-05-B",
+  "independent_runs": 2,
+  "test": "test_hive_item_delivery_race_has_one_handler",
+  "observed": {
+    "concurrent_delivery_attempts": 2,
+    "accepted_handlers": 1,
+    "wrong_master_delivery_refused": true,
+    "operation_replay_answers": 1,
+    "event_replay_empty": true
+  }
+}

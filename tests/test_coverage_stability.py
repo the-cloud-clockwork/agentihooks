@@ -173,3 +173,9 @@ def test_the_scheduled_job_compares_the_newest_dev_runs_and_fails_on_any_differe
     assert 'python -m tests.coverage_stability --work "$RUNNER_TEMP/coverage-stability" latest' in compare["run"]
     assert "set -o pipefail" in compare["run"]
     assert all("continue-on-error" not in step and "if" not in step for step in job["steps"])
+
+
+def test_stability_reads_every_coverage_shard_the_unit_job_splits():
+    unit = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())["jobs"]["unit"]["strategy"]["matrix"]
+    assert unit["python-version"] == ["3.12"]
+    assert stability.SHARDS == len(unit["shard"])

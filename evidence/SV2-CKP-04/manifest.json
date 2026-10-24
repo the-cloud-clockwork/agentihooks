@@ -1,0 +1,25 @@
+{
+  "tested_commit": "804a1f3cc99726fcab5f3b006c08a2094d322676",
+  "proofs_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38183349005",
+  "evidence_class": "mocked: a local durable directory backend behind a granted artifact store, fixture launch registrations, a backend wrapper that loses acknowledgements and a fake clock; no object store, worker Pod or harness was used",
+  "inputs": {
+    "tests/fixtures/swarm_v2/checkpoints/context-only.json": "0bef305b2565a336c5021606d2bf4b1a6f4b35f9cade44aee8c6720da27e5fda",
+    "tests/sv2_ckp04_cases.py": "a8dcaf9001d1528a15cd89028a3c44ce51afb9a71714f829bf2b54b4f535ebee",
+    "tests/sv2_ckp02_cases.py": "8dc6674fa1e8ae427a649060b2cd594df845a4c8b87949bdf1eea61c9a2a4c79",
+    "tests/test_swarm_v2_checkpoints_publisher.py": "9dfc8ce850c9984ea43d354dfa240018ef98d7ff897765b086bdb187cc6d1f28",
+    "tests/test_swarm_v2_worker_supervisor.py": "31e7edb9a036fa89859bdfe498df806887ff7d97c9f206e4e6d98423bdeb2668",
+    "scripts/swarm_v2/checkpoints/publisher.py": "7353ec0ba55e5476989c52732aec026c31b82b67e1954424f78fa6a72c0c2fcb",
+    "scripts/swarm_v2/worker/supervisor.py": "33d7f482ade870570660a78e631054a134109c4da39a93dd45c8e85bce7d93e6",
+    "scripts/swarm_v2/checkpoints/model.py": "760d5dfb8cc76722b87fc3315a9fd7a3fdc21e431e9581b6d0d3d62ff07cda39",
+    "scripts/swarm_v2/artifacts/base.py": "bcc39bf6c81f689e35ce11ceebe9c2994519522fd3e8e337538e4c82dc8b02ea",
+    "scripts/swarm_v2/artifacts/local.py": "57b3baf4a360307b1995f2068aee79370a03863c6902837fe2c0739a938c306d",
+    "scripts/swarm_v2/contracts.py": "056758cf9db948379b5777cd77aba632b1bd7d8f5a95f809352f2f75ea661442",
+    "scripts/swarm_v2/checkpoints/redaction.py": "d2fb66f6ff82520d14900397915552d4a278f07056c3844b4d951571932ecbeb",
+    "scripts/swarm_v2/checkpoints/native.py": "e8d2bccd0f68131498c531a99f86b1778d7907ca34cc4155bff911c2df10ec90",
+    "hooks/secrets.py": "db7bfe9e14018cad7913363aa3688ed81330f50cf989bd2153ad231b4efba05b",
+    "tests/test_swarm_v2_checkpoints_redaction.py": "5ccae9915e6ddf2dc3e338038734f8f73018f42642b93e91582c57b19da31f84",
+    "tests/test_swarm_v2_checkpoints_native.py": "18bcae466f381f757316fa34b733df63f4f5d7b0dd1da53ba69276f4632acf97",
+    "tests/test_secrets.py": "9ac038c589230e1a1126a468a0eaba4b713d3904dbb04989841fa7ec666ce2ad"
+  },
+  "mutation_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38183349005"
+}

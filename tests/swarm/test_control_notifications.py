@@ -1,14 +1,16 @@
+from argparse import Namespace
 from dataclasses import replace
 
 import pytest
 
 from scripts.inbox.store import InboxStore
-from scripts.swarm import cli
+from scripts.swarm import cli, control_notifications
+from scripts.swarm.health.findings import Finding
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
 from scripts.swarm.tick import tick
 from tests.swarm.test_tick import FakeLedger, FakeRuntime
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 
 
 @pytest.fixture
@@ -37,7 +39,9 @@ def controls(monkeypatch):
 def test_stop_now_notice_does_not_restart_the_swarm_on_the_next_tick(controls, monkeypatch):
     store, ledger, master = controls
     runtime = FakeRuntime()
-    monkeypatch.setattr(cli, "run_tick", lambda store, slug=None: tick(slug or "demo", store, ledger, runtime, 1))
+    monkeypatch.setattr(
+        cli, "run_tick", lambda store, slug=None, scheduled=False: tick(slug or "demo", store, ledger, runtime, 1)
+    )
     assert cli.main(["demo", "stop", "--now"]) == 0
     assert store.config("demo").state == "stopped"
     assert cli.main(["tick"]) == 0
@@ -95,3 +99,70 @@ def test_another_named_caller_is_refused_and_the_master_hears_nothing(controls, 
     assert store.config("demo").state == "running"
     assert InboxStore(store.redis).mailbox(master.name) == []
     assert ledger.said == []
+
+
+def _idle_finding(store):
+    cli.verdict_store(store, "demo").visible(
+        [Finding("idle", "worker", "Idle worker", ("Idle",), "One minute", 1)], 1, 60_000
+    )
+
+
+def test_a_second_masters_verdict_sends_no_inbox_item(controls, monkeypatch):
+    store, ledger, master = controls
+    second = AgentRecord("demo-master-2", "master", "master", seat="master-2@demo")
+    store.put_agent("demo", second)
+    _idle_finding(store)
+    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", second.name)
+    assert cli.main(["demo", "verdict", "idle/worker", "resolved"]) == 0
+    inbox = InboxStore(store.redis)
+    assert inbox.mailbox(master.name) == [] and inbox.mailbox(second.name) == []
+    assert ledger.said == []
+
+
+def test_a_master_named_by_its_session_sends_no_verdict_notice(controls, monkeypatch):
+    store, ledger, master = controls
+    second = AgentRecord("demo-master-2", "master", "master", seat="master-2@demo")
+    store.put_agent("demo", second)
+    _idle_finding(store)
+    monkeypatch.delenv("AGENTIHOOKS_AGENT_NAME")
+    monkeypatch.setattr(cli.Who, "from_env", classmethod(lambda cls, environ=None: cls(name=second.name)))
+    assert cli.main(["demo", "verdict", "idle/worker", "resolved"]) == 0
+    assert InboxStore(store.redis).mailbox(master.name) == []
+    assert ledger.said == []
+
+
+def test_notify_takes_the_verdict_caller_before_the_environment(controls):
+    store, ledger, master = controls
+    store.put_agent("demo", AgentRecord("demo-master-2", "master", "master", seat="master-2@demo"))
+    args = Namespace(slug="demo", by="demo-master-2", name=None, finding="idle/worker", verdict="resolved")
+    control_notifications.notify(store, args, ledger, master, "verdict")
+    assert InboxStore(store.redis).mailbox(master.name) == []
+    assert ledger.said == [] and ledger.notes == []
+
+
+def test_notify_takes_the_named_caller_before_the_environment(controls):
+    store, ledger, master = controls
+    control_notifications.notify(store, Namespace(slug="demo", name=master.name), ledger, master, "pause")
+    assert InboxStore(store.redis).mailbox(master.name) == []
+    assert ledger.said == [] and ledger.notes == []
+
+
+def test_notify_names_the_operator_when_no_caller_is_known(controls, monkeypatch):
+    store, ledger, master = controls
+    monkeypatch.delenv("AGENTIHOOKS_AGENT_NAME")
+    control_notifications.notify(store, Namespace(slug="demo"), ledger, master, "pause")
+    items = InboxStore(store.redis).mailbox(master.name)
+    assert [item.sender for item in items] == ["operator"]
+    assert items[0].text.startswith("The operator paused the swarm")
+
+
+def test_an_operator_verdict_notice_names_the_finding(controls):
+    store, ledger, master = controls
+    _idle_finding(store)
+    assert cli.main(["demo", "verdict", "idle/worker", "resolved"]) == 0
+    items = InboxStore(store.redis).mailbox(master.name)
+    assert len(items) == 1
+    assert items[0].text == (
+        "The operator gave the health finding idle/worker a verdict from the command line. "
+        "The swarm is running. The verdict is resolved."
+    )

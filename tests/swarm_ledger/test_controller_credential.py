@@ -16,7 +16,6 @@ from tests.swarm_ledger.test_remote_ledger_client import hive as _remote_hive
 
 remote_hive = _remote_hive
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
 
 live = _authority_live
 CONTROLLER = {"AGENTIHOOKS_DEPLOYMENT": "compose", "LEDGER_URL": "https://hub.example"}

@@ -34,6 +34,14 @@ def test_purge_removes_only_the_named_ledgers_media():
     assert kept.exists()
 
 
+def test_served_media_is_the_stored_file_of_that_ledger():
+    make_ledger("served-media")
+    entry = ledger_media.store("served-media", png(2, 3))
+    assert ledger_media.served("served-media", entry["id"]) == png(2, 3)
+    with pytest.raises(ValueError, match="no stored image"):
+        ledger_media.served("kept", entry["id"])
+
+
 def test_cleanup_removes_old_orphans_and_keeps_references_and_pending_uploads():
     make_ledger("sweep-media")
     files = [ledger_media.store("sweep-media", png(n, n)) for n in range(1, 6)]

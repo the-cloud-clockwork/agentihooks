@@ -1,11 +1,9 @@
-from pathlib import Path
-
 import pytest
 
 from tests.swarm_ledger.ledger_page import ledger_state, shell_html, show
 
-TEMPLATE = Path(__file__).resolve().parents[2] / "scripts" / "swarm_ledger" / "template.html"
 DOC = {"title": "Caps columns", "overview": "o", "phases": []}
+STATUS = {"config": {"state": "running", "max_eng": 3, "max_ci": 1}, "agents": [], "tasks": {}, "findings": []}
 
 
 @pytest.fixture(scope="module")
@@ -24,14 +22,14 @@ def caps_boxes(browser, width):
     tab = browser.new_page(viewport={"width": width, "height": 900})
     try:
         html = shell_html()
-        show(tab, html, ledger=ledger_state(DOC))
+        show(tab, html, ledger=ledger_state(DOC), swarm=STATUS)
         return tab.evaluate(
             """() => {
               document.getElementById("swarm").hidden = false;
               for (const [id, v] of [["cap-eng", "3"], ["cap-ci", "1"], ["cap-plan", "1"], ["cap-compact", "600"], ["cap-effort_min", "medium"], ["cap-effort_max", "high"]]) document.getElementById(id).value = v;
               const box = (el) => { const r = el.getBoundingClientRect(); return { top: r.top, bottom: r.bottom, left: r.left, right: r.right }; };
               return {
-                caps: [...document.querySelectorAll("#capacity-box .sw-cap:not(.sw-affinity)")].map((cap) => [...cap.children].map(box)),
+                caps: [...document.querySelectorAll("#capacity-box .sw-cap:has(.sw-step)")].map((cap) => [...cap.children].map(box)),
                 strip: box(document.getElementById("capacity-box")),
               };
             }"""
@@ -43,7 +41,7 @@ def caps_boxes(browser, width):
 @pytest.mark.parametrize("width", [1300, 390])
 def test_each_cap_keeps_its_name_minus_value_and_plus_on_one_line_inside_the_strip(browser, width):
     boxes = caps_boxes(browser, width)
-    assert len(boxes["caps"]) == 6
+    assert len(boxes["caps"]) == 7
     for name, minus, value, plus in boxes["caps"]:
         middle = (value["top"] + value["bottom"]) / 2
         for part in (name, minus, plus):

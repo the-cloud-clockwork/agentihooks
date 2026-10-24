@@ -11,11 +11,14 @@ TOOLS = {
     "serve": ("ledger_server", []),
     "watch": ("watch_ledger", []),
     "chat": ("chat_ledger", []),
-    "decline": ("ledger_decline", []),
+    "proof": ("proof_ledger", []),
 }
 
 
 def run(argv):
+    from scripts.swarm_ledger import composition
+
+    composition.wire()
     if str(HERE) not in sys.path:
         sys.path.insert(0, str(HERE))
     known = bool(argv) and argv[0] in TOOLS

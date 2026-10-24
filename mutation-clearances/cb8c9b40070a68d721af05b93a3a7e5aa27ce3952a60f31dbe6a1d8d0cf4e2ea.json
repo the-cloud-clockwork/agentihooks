@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_v2/worker/completion.py:scripts.swarm_v2.worker.completion.x_report__mutmut_13:0f6d8aa2abd3f6b1deb0d0037e8980e75926478a43eb4519e2162a5ebebc25f5": {
+    "reader": "standards-reader",
+    "reason": "JSON serialization escapes non ASCII characters by default. The payload bytes are identical under the supported worker locale encodings with implicit or explicit UTF8."
+  }
+}

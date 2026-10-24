@@ -1,17 +1,44 @@
 import { $, h } from "./dom.js";
-import { writeSwarm } from "./api.js";
+import { readModels, writeSwarm } from "./api.js";
 import { setChatTo, showChat } from "./chat.js";
 import { capDraft, doctorOn, overlayChanges, pending, renderSwarm, saveRouting, swarm, swarmControl, toggleOverlay } from "./swarm.js";
+import { wireHives } from "./hives.js";
+import { lifecycleBody, sendLifecycle, unresolved } from "./lifecycle.js";
+import { meta } from "./sync.js";
 
 const GATE_MODES = ["enforce", "observe", "off"];
 const GATE_LABELS = { enforce: "deny", observe: "log only", off: "skip" };
-const STEPS = { eng: ["max_eng", 1, 0, 50], ci: ["max_ci", 1, 0, 50], plan: ["max_plan", 1, 0, 50], compact: ["compact_limit", 50, 100, 1000, "compact limit"] };
-const EFFORTS = ["low", "medium", "high", "max"];
+const STEPS = { eng: ["max_eng", 1], ci: ["max_ci", 1], plan: ["max_plan", 1], masters: ["masters_step", 1, "masters step"], compact: ["compact_limit", 50, "compact limit"] };
 const EFFORT_CAPS = { effort_min: "effort floor", effort_max: "effort ceiling" };
 const MASTER_AGENTS = ["claude", "codex"];
 
-let noteTimer = 0;
 let noteError = false;
+let models = {};
+let applied = null;
+
+async function loadModels() {
+  try {
+    const response = await readModels();
+    models = (response.ok && (await response.json()).data) || {};
+  } catch {
+    models = {};
+  }
+  renderControls();
+}
+
+function renderModels(values) {
+  for (const harness of ["claude", "codex"]) {
+    const key = `${harness}_model`, current = values[key] || "";
+    const options = [...(models[harness] || [])];
+    if (current && !options.length) options.unshift({ model: current, label: current });
+    const select = $(`cap-${key}`), stamp = JSON.stringify(options);
+    if (select.dataset.options !== stamp) {
+      select.replaceChildren(...options.map((entry) => h("option", { value: entry.model, text: entry.label || entry.model })));
+      select.dataset.options = stamp;
+    }
+    select.value = current;
+  }
+}
 
 export function clearNoteError() {
   noteError = false;
@@ -37,37 +64,46 @@ function capValues(sw) {
   return { ...sw.config, compact_limit: sw.compact_limit, master_agent: affinityValue(sw) };
 }
 
-function capStep(values, lane, up) {
+function pageLimits() {
+  const limits = meta.limits || {};
+  return { capacity: limits.capacity || {}, efforts: limits.efforts || [] };
+}
+
+function capStep(values, lane, up, limits) {
+  const efforts = limits.efforts;
   if (lane in EFFORT_CAPS) {
-    const [low, high] = lane === "effort_min" ? [0, EFFORTS.indexOf(values.effort_max)] : [EFFORTS.indexOf(values.effort_min), EFFORTS.length - 1];
-    return { [lane]: EFFORTS[Math.min(high, Math.max(low, EFFORTS.indexOf(values[lane]) + (up ? 1 : -1)))] };
+    return { [lane]: efforts[Math.min(efforts.length - 1, Math.max(0, efforts.indexOf(values[lane]) + (up ? 1 : -1)))] };
   }
-  const [key, step, low, high] = STEPS[lane];
+  const [key, step] = STEPS[lane], [low, high] = limits.capacity[key] || [];
   return { [key]: Math.min(high, Math.max(low, (Number(values[key]) || 0) + (up ? step : -step))) };
 }
 
-function capChanges(values, draft) {
-  const body = { action: "set" }, bad = [];
-  for (const [lane, [key, , low, high, name]] of Object.entries(STEPS)) {
+function capChanges(values, draft, limits, catalog = {}) {
+  const body = { action: "set" }, bad = [], efforts = limits.efforts;
+  for (const [lane, [key, , name]] of Object.entries(STEPS)) {
     if (!(key in draft)) continue;
+    const [low, high] = limits.capacity[key] || [];
     const text = String(draft[key]).trim();
     const value = /^\d+$/.test(text) ? Number(text) : NaN;
     if (!(value >= low && value <= high)) bad.push(`${name || lane} must be a whole number from ${low} to ${high}`);
     else if (value !== Number(values[key])) body[key] = value;
   }
-  const range = { ...values, ...draft };
   for (const [key, name] of Object.entries(EFFORT_CAPS)) {
     if (!(key in draft)) continue;
     const value = String(draft[key]).trim();
-    if (!EFFORTS.includes(value)) bad.push(`${name} must be one of ${EFFORTS.join(", ")}`);
+    if (!efforts.includes(value)) bad.push(`${name} must be one of ${efforts.join(", ")}`);
     else if (value !== values[key]) body[key] = value;
+  }
+  for (const harness of ["claude", "codex"]) {
+    const key = `${harness}_model`;
+    if (!(key in draft) || draft[key] === values[key]) continue;
+    if (!(catalog[harness] || []).some((entry) => entry.model === draft[key])) bad.push(`${harness} model must be listed in the catalog`);
+    else body[key] = draft[key];
   }
   if ("master_agent" in draft) {
     if (!MASTER_AGENTS.includes(draft.master_agent)) bad.push("master affinity must be Claude or Codex");
     else if (draft.master_agent !== values.master_agent) body.master_agent = draft.master_agent;
   }
-  const [floor, ceiling] = [range.effort_min, range.effort_max].map((v) => EFFORTS.indexOf(String(v).trim()));
-  if (floor >= 0 && ceiling >= 0 && floor > ceiling) bad.push("effort floor must not be above the effort ceiling");
   return { body, bad };
 }
 
@@ -75,43 +111,41 @@ function capCurrent() {
   return { ...capValues(swarm), ...capDraft };
 }
 
-function capBounds(values) {
-  const off = {};
-  for (const [lane, [key, , low, high]] of Object.entries(STEPS)) {
+function capBounds(values, limits) {
+  const off = {}, efforts = limits.efforts;
+  for (const [lane, [key]] of Object.entries(STEPS)) {
+    const [low, high] = limits.capacity[key] || [];
     off[`${lane}_down`] = !(Number(values[key]) > low);
     off[`${lane}_up`] = !(Number(values[key]) < high);
   }
-  const low = EFFORTS.indexOf(values.effort_min), high = EFFORTS.indexOf(values.effort_max);
-  Object.assign(off, { effort_min_down: !(low > 0), effort_min_up: !(low >= 0 && low < high), effort_max_down: !(high > low && low >= 0), effort_max_up: !(high >= 0 && high < EFFORTS.length - 1) });
+  for (const key of Object.keys(EFFORT_CAPS)) {
+    const at = efforts.indexOf(values[key]);
+    Object.assign(off, { [`${key}_down`]: !(at > 0), [`${key}_up`]: !(at >= 0 && at < efforts.length - 1) });
+  }
   return off;
 }
 
 function opNote(phase, action, error) {
   const name = { start: "Start", pause: "Pause", stop: "Stop", stop_now: "Stop now", close: "Close ledger", terminate: "Terminate", reopen: "Reopen", doctor_start: "Start doctor", doctor_stop: "Stop doctor", autonomy: "Set autonomy", gate: "Set gate mode",
-    eng_down: "Lower eng cap", eng_up: "Raise eng cap", ci_down: "Lower ci cap", ci_up: "Raise ci cap", plan_down: "Lower planner cap", plan_up: "Raise planner cap",
+    eng_down: "Lower eng cap", eng_up: "Raise eng cap", ci_down: "Lower ci cap", ci_up: "Raise ci cap", plan_down: "Lower planner cap", plan_up: "Raise planner cap", masters_down: "Lower masters step", masters_up: "Raise masters step",
     compact_down: "Lower compact limit", compact_up: "Raise compact limit",
-    effort_min_down: "Lower effort floor", effort_min_up: "Raise effort floor", effort_max_down: "Lower effort ceiling", effort_max_up: "Raise effort ceiling", apply: "Apply capacity", overlays: "Apply overlays", verdict: "Verdict", lift: "Lift the gate", quota_refresh: "Refresh quota", routing: "Set routing" }[action] || action;
-  if (phase === "pending") return { cls: "pending", text: `${name}: sending` };
-  if (phase === "queued") return { cls: "pending", text: `${name}: pending, waiting for the hive tick` };
-  if (phase === "accepted") return { cls: "pending", text: `${name}: accepted by the hive tick` };
-  if (phase === "done" || phase === "acknowledged") return { cls: "ok", text: `${name}: acknowledged` };
+    effort_min_down: "Lower effort floor", effort_min_up: "Raise effort floor", effort_max_down: "Lower effort ceiling", effort_max_up: "Raise effort ceiling", apply: "Apply capacity", overlays: "Apply overlays", lift: "Lift the gate", quota_refresh: "Refresh quota", routing: "Set routing", hive: "Set hive", master_move: "Move master",
+    attach: "Attach", drain: "Drain", cancel: "Cancel", force_stop: "Force stop" }[action] || action;
   return { cls: "bad", text: `Could not ${name.toLowerCase()}${["start", "pause", "stop"].includes(action) ? " the swarm" : ""}: ${error}. Try again or ask the master.` };
 }
 
 export function showNote(phase, action, error) {
-  const note = opNote(phase, action, error);
   noteError = phase === "error";
-  clearTimeout(noteTimer);
-  $("swarm-note").className = `sw-note ${note.cls}`;
-  $("swarm-note").textContent = note.text;
-  $("swarm-note").title = note.text;
-  if (phase === "done") noteTimer = setTimeout(() => { $("swarm-note").textContent = ""; }, 4000);
+  const text = noteError ? opNote(phase, action, error).text : "";
+  $("swarm-note").className = "sw-note bad";
+  $("swarm-note").textContent = text;
+  $("swarm-note").title = text;
 }
 
 export function renderControls() {
   const config = swarm ? swarm.config : {};
-  const changes = swarm ? capChanges(capValues(swarm), capDraft) : { body: {}, bad: [] };
-  const off = swarm ? { ...swarmControls(config.state), ...capBounds(capCurrent()), apply: Object.keys(changes.body).length < 2 && !changes.bad.length } : swarmControls("");
+  const changes = swarm ? capChanges(capValues(swarm), capDraft, pageLimits(), models) : { body: {}, bad: [] };
+  const off = swarm ? { ...swarmControls(config.state), ...capBounds(capCurrent(), pageLimits()), apply: !unsent(changes.body) && !changes.bad.length } : swarmControls("");
   for (const btn of [...$("swarm-box").querySelectorAll("button[data-swarm]"), ...$("closed-banner").querySelectorAll("button[data-swarm]")]) {
     const action = btn.dataset.swarm;
     btn.hidden = (action === "doctor_start" && doctorOn(swarm)) || (action === "doctor_stop" && !doctorOn(swarm));
@@ -124,12 +158,12 @@ export function renderControls() {
     btn.disabled = !swarm || !!pending;
   }
   for (const btn of $("swarm-gates").querySelectorAll("button[data-gate]")) btn.disabled = !swarm || !!pending;
+  if (swarm) renderModels(capCurrent());
   for (const input of $("capacity-box").querySelectorAll("[data-cap]")) {
     if (swarm && !(input.dataset.cap in capDraft)) input.value = capValues(swarm)[input.dataset.cap] ?? "";
-    input.setAttribute("aria-invalid", String(input.dataset.cap in capDraft && !!capChanges({}, { [input.dataset.cap]: capDraft[input.dataset.cap] }).bad.length));
+    input.setAttribute("aria-invalid", String(input.dataset.cap in capDraft && !!capChanges({}, { [input.dataset.cap]: capDraft[input.dataset.cap] }, pageLimits(), models).bad.length));
     input.disabled = !swarm || pending === "apply";
   }
-  renderCommands((swarm && swarm.commands) || []);
   const command = swarm && (swarm.commands || []).at(-1);
   if (!pending && !noteError && command) {
     const phase = { pending: "queued", accepted: "accepted", acknowledged: "acknowledged", failed: "error" }[command.state];
@@ -145,17 +179,8 @@ function commandAction(command) {
   if (command.command === "quota") return "quota_refresh";
   if (command.command === "doctor") return `doctor_${command.argv[0]}`;
   const action = command.argv[0] === "--as" ? command.argv[2] : command.argv[0];
+  if (action === "set" && command.argv.some((pair) => pair.startsWith("autonomy="))) return "autonomy";
   return action === "stop" && command.argv.includes("--now") ? "stop_now" : action;
-}
-
-function renderCommands(commands) {
-  $("command-log").hidden = !commands.length;
-  const counts = ["pending", "accepted", "failed"].map((state) => [state, commands.filter((command) => command.state === state).length]);
-  $("command-count").textContent = counts.filter(([, count]) => count).map(([state, count]) => `${count} ${state}`).join(" · ");
-  $("command-rows").replaceChildren(...[...commands].reverse().map((command) => h("p", { class: "sw-command" },
-    h("span", { text: opNote("pending", commandAction(command)).text.split(":")[0] }),
-    h("span", { text: command.state }),
-    command.error && h("span", { text: command.error }))));
 }
 
 export function renderGates(sw) {
@@ -186,13 +211,33 @@ export async function refreshQuota() {
   btn.setAttribute("aria-busy", "false");
 }
 
+export function appliedCaps(body, sw) {
+  for (const key of Object.keys(capDraft)) if (!(key in body)) delete capDraft[key];
+  applied = { body, draft: { ...capDraft }, keys: Object.keys(body).filter((key) => key !== "action"), id: ((sw && sw.commands) || []).at(-1)?.id };
+  settleCaps(sw);
+}
+
+export function settleCaps(sw) {
+  if (!applied || !sw) return;
+  const row = applied.id && (sw.commands || []).find((c) => c.id === applied.id), values = capValues(sw);
+  const done = row && (row.state === "failed" || (row.state === "acknowledged" && sw.last_tick >= row.acknowledged_at));
+  applied.keys = applied.keys.filter((key) => String(capDraft[key]).trim() === String(applied.draft[key]).trim());
+  for (const key of applied.keys) if (done || String(values[key]) === String(applied.body[key])) delete capDraft[key];
+  if (!applied.keys.some((key) => key in capDraft)) applied = null;
+}
+
+function unsent(body) {
+  return Object.keys(body).some((key) => key !== "action" && !(applied && applied.keys.includes(key) && String(applied.body[key]) === String(body[key])));
+}
+
 function applyCaps() {
-  const { body, bad } = capChanges(capValues(swarm), capDraft);
+  const { body, bad } = capChanges(capValues(swarm), capDraft, pageLimits(), models);
   if (bad.length) return showNote("error", "apply", bad.join("; "));
-  if (Object.keys(body).length > 1) swarmControl(body, "apply");
+  if (unsent(body)) swarmControl(body, "apply");
 }
 
 export function wireSwarm() {
+  loadModels();
   $("quota-refresh").addEventListener("click", refreshQuota);
 
   $("closed-banner").addEventListener("click", (event) => {
@@ -217,6 +262,13 @@ export function wireSwarm() {
       if (confirm(`Terminate ${name}? Work in progress stays in its worktree.`)) swarmControl({ action: "terminate", name }, "terminate");
       return;
     }
+    const life = event.target.closest("button[data-lifecycle]");
+    if (life && !life.disabled) {
+      const agent = life.dataset.agent, control = swarm.lifecycle.controls.find((c) => c.action === life.dataset.lifecycle);
+      if (pending || unresolved()[agent] || !swarm.lifecycle.agents[agent]) return;
+      if (control.destructive && !confirm(`${control.label} ${agent}? ${control.consequence}`)) return;
+      return sendLifecycle(lifecycleBody(swarm, agent, control.action));
+    }
     const lift = event.target.closest("button[data-lift]");
     if (lift && !lift.disabled) return swarmControl({ action: "lift", agent: lift.dataset.agent, gate: lift.dataset.lift });
     const overlay = event.target.closest("button[data-overlay]");
@@ -230,9 +282,9 @@ export function wireSwarm() {
     const btn = event.target.closest("button[data-swarm]");
     if (!btn || btn.disabled) return;
     const action = btn.dataset.swarm;
-    const step = action.match(/^(eng|ci|plan|compact|effort_min|effort_max)_(up|down)$/);
+    const step = action.match(/^(eng|ci|plan|masters|compact|effort_min|effort_max)_(up|down)$/);
     if (step) {
-      const change = capStep(capCurrent(), step[1], step[2] === "up");
+      const change = capStep(capCurrent(), step[1], step[2] === "up", pageLimits());
       Object.assign(capDraft, change);
       $("cap-" + step[1]).value = Object.values(change)[0];
       return renderControls();
@@ -263,10 +315,5 @@ export function wireSwarm() {
     if (input) saveRouting(input);
   });
 
-  $("health").addEventListener("change", (event) => {
-    const pick = event.target.closest("select.hl-pick");
-    if (!pick || !pick.value) return;
-    const row = pick.closest("tr");
-    swarmControl({ action: "verdict", id: pick.dataset.verdict, verdict: pick.value, note: row.querySelector(".hl-note").value.trim() });
-  });
+  wireHives();
 }

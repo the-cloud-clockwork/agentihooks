@@ -1,8 +1,8 @@
 """A denied or unreachable read is never evidence that a Pod is gone."""
 
 import json
-from collections.abc import Iterable, Mapping
-from dataclasses import asdict, dataclass
+from collections.abc import Callable, Iterable, Mapping
+from dataclasses import asdict, dataclass, replace
 from enum import StrEnum
 from typing import Any
 
@@ -13,6 +13,7 @@ MODE_VARIABLE = "AGENTIHOOKS_OBSERVATION_MODE"
 RUNNING, PENDING = "Running", "Pending"
 ENDED = frozenset(("Succeeded", "Failed"))
 HANDSHAKE, EXITED, QUOTA_WAIT = "confirmed", "exited", "quota_wait"
+LOSS = frozenset({*(("kubernetes", phase) for phase in ENDED), ("supervisor", EXITED)})
 
 
 class Source(StrEnum):
@@ -73,6 +74,11 @@ class Mode(StrEnum):
     CONSERVATIVE = "conservative"
 
 
+class Ruling(StrEnum):
+    LOST = "lost"
+    WORKING = "working"
+
+
 class ObservationRefused(ValueError):
     def __init__(self, message: str, error_class: str, retryable: bool = False):
         super().__init__(message)
@@ -117,6 +123,10 @@ class Classification:
     proof_since: float = 0.0
     needs_operator: bool = False
     recovered: bool = False
+    ruling: str = ""
+    ruling_reason: str = ""
+    ruled_by: str = ""
+    ruled_at: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -154,6 +164,12 @@ def _terminal(found: Seen | None) -> Terminal:
     return Terminal.REACHABLE if found.reading is Reading.OK else Terminal.DEGRADED
 
 
+def _lost(source: Source, reading: Reading, value: str) -> bool:
+    if source is Source.KUBERNETES and reading is Reading.NOT_FOUND:
+        return True
+    return reading is Reading.OK and (source, value) in LOSS
+
+
 def _alive(gone: bool, values: dict[Source, str], current: dict[Source, str]) -> tuple[State, Failure, Confidence]:
     if gone:
         return State.SUSPECT, Failure.WORKER_LOSS, Confidence.UNCERTAIN
@@ -173,7 +189,7 @@ def _judge(
     pod = latest[Source.KUBERNETES].reading if Source.KUBERNETES in latest else Reading.UNREACHABLE
     values = _values(latest)
     phase, supervisor = values.get(Source.KUBERNETES), values.get(Source.SUPERVISOR)
-    gone = pod is Reading.NOT_FOUND or phase in ENDED or supervisor == EXITED
+    gone = any(_lost(source, found.reading, found.value) for source, found in latest.items())
     if fresh:
         return _alive(gone, values, _values(current))
     if gone:
@@ -207,6 +223,30 @@ def _settled(state: State, kept: Classification | None, thresholds: Thresholds, 
     return state
 
 
+def _lost_after(sources: dict[str, dict[str, Any]], at: float) -> bool:
+    return any(
+        entry["observed_at"] > at and _lost(Source(name), Reading(entry["reading"]), entry["value"])
+        for name, entry in sources.items()
+    )
+
+
+def _ruled(kept: Classification | None, seen: Classification) -> Classification:
+    if kept is None or kept.ruling != Ruling.WORKING or seen.state not in (State.SUSPECT, State.LOST):
+        return seen
+    if _lost_after(seen.sources, kept.ruled_at):
+        return seen
+    return replace(
+        seen,
+        state=State.WORKING,
+        suspect_since=0.0,
+        needs_operator=False,
+        ruling=kept.ruling,
+        ruling_reason=kept.ruling_reason,
+        ruled_by=kept.ruled_by,
+        ruled_at=kept.ruled_at,
+    )
+
+
 def classify(
     execution_id: str,
     generation: int,
@@ -231,7 +271,7 @@ def classify(
     state = _settled(state, kept, thresholds, now)
     was_suspect = kept is not None and kept.state is State.SUSPECT
     confirmed = [found.observed_at for found in latest.values() if found.reading is Reading.OK]
-    return Classification(
+    seen = Classification(
         execution_id,
         generation,
         state,
@@ -251,6 +291,7 @@ def classify(
         thresholds.mode is Mode.CONSERVATIVE and state is State.SUSPECT,
         was_suspect and state in ALIVE,
     )
+    return _ruled(kept, seen)
 
 
 def _decode(raw: str | None) -> Classification | None:
@@ -275,6 +316,56 @@ def _key(store: Any, slug: str, kind: str = "observations") -> str:
 
 def stored(store: Any, slug: str, execution_id: str) -> Classification | None:
     return _decode(store.redis.hget(_key(store, slug), execution_id))
+
+
+def _write(
+    store: Any, slug: str, execution_id: str, decide: Callable[[Classification | None], Classification]
+) -> Classification:
+    from redis.exceptions import WatchError
+
+    key = _key(store, slug)
+    for _ in range(WRITE_ATTEMPTS):
+        with store.redis.pipeline() as pipe:
+            try:
+                pipe.watch(key)
+                prior = _decode(pipe.hget(key, execution_id))
+                seen = decide(prior)
+                if seen is prior:
+                    return prior
+                pipe.multi()
+                pipe.hset(key, execution_id, json.dumps(asdict(seen)))
+                if seen.state is State.LOST:
+                    pipe.rpush(_key(store, slug, "observation-audit"), json.dumps(asdict(seen)))
+                pipe.execute()
+                return seen
+            except WatchError:
+                continue
+    raise ObservationRefused("observation record kept changing; nothing recorded", "revision_conflict", True)
+
+
+def rule(store: Any, slug: str, execution_id: str, ruling: str, reason: str, by: str, now: float) -> Classification:
+    if not reason.strip():
+        raise ObservationRefused("a classification needs a reason", "invalid_request")
+    if ruling not in set(Ruling):
+        raise ObservationRefused("a classification is one of lost, working", "invalid_request")
+    chosen = Ruling(ruling)
+
+    def decide(prior: Classification | None) -> Classification:
+        if prior is None or not prior.needs_operator:
+            raise ObservationRefused("execution attempt does not need an operator classification", "not_suspect")
+        return replace(
+            prior,
+            state=State(chosen.value),
+            classified_at=now,
+            suspect_since=prior.suspect_since if chosen is Ruling.LOST else 0.0,
+            needs_operator=False,
+            ruling=chosen.value,
+            ruling_reason=reason.strip(),
+            ruled_by=by,
+            ruled_at=now,
+        )
+
+    return _write(store, slug, execution_id, decide)
 
 
 class Observer:
@@ -310,23 +401,9 @@ class Observer:
         }
 
     def _record(self, slug: str, agent: AgentRecord, signals: list[Signal], now: float) -> Classification:
-        from redis.exceptions import WatchError
+        def decide(prior: Classification | None) -> Classification:
+            if prior and (prior.generation, prior.classified_at) > (agent.generation, now):
+                return prior
+            return classify(agent.execution_id, agent.generation, signals, prior, self.thresholds, now)
 
-        key = _key(self.store, slug)
-        for _ in range(WRITE_ATTEMPTS):
-            with self.store.redis.pipeline() as pipe:
-                try:
-                    pipe.watch(key)
-                    prior = _decode(pipe.hget(key, agent.execution_id))
-                    if prior and (prior.generation, prior.classified_at) > (agent.generation, now):
-                        return prior
-                    seen = classify(agent.execution_id, agent.generation, signals, prior, self.thresholds, now)
-                    pipe.multi()
-                    pipe.hset(key, agent.execution_id, json.dumps(asdict(seen)))
-                    if seen.state is State.LOST and (prior is None or prior.state is not State.LOST):
-                        pipe.rpush(_key(self.store, slug, "observation-audit"), json.dumps(asdict(seen)))
-                    pipe.execute()
-                    return seen
-                except WatchError:
-                    continue
-        raise ObservationRefused("observation record kept changing; nothing recorded", "revision_conflict", True)
+        return _write(self.store, slug, agent.execution_id, decide)

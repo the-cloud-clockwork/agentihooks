@@ -1,0 +1,238 @@
+{{- define "swarm.workerHive" }}
+{{- $root := .root }}
+{{- $workers := .workers }}
+{{- $suffix := .suffix }}
+{{- $github := $workers.githubAuth }}
+{{- if not (has $github.mode (list "token" "app")) }}
+{{- fail "workers.githubAuth.mode must be token or app" }}
+{{- end }}
+{{- $credential := $workers.credentialSecret }}
+{{- if not $credential.name }}
+{{- fail "workers need a credentialSecret" }}
+{{- end }}
+{{- if gt (int $workers.replicas) 1 }}
+{{- fail "workers.replicas above 1 is refused: one hive credential is one hive, so every replica would report the same hive id and agent limit; install one release per hive credential to scale" }}
+{{- end }}
+{{- if lt (int $workers.maxAgents) 1 }}
+{{- fail "workers.maxAgents must be positive" }}
+{{- end }}
+{{- if and $workers.ssh.enabled (lt (int $workers.ssh.port) 1024) }}
+{{- fail "workers.ssh.port must be 1024 or higher: sshd runs as the unprivileged worker" }}
+{{- end }}
+{{- $perAgent := $workers.memoryPerAgentMi }}
+{{- if or (lt (int $perAgent.request) 1) (lt (int $perAgent.limit) (int $perAgent.request)) }}
+{{- fail "workers.memoryPerAgentMi needs a positive request and a limit no lower than it" }}
+{{- end }}
+{{- if or (hasKey ($workers.resources.requests | default dict) "memory") (hasKey ($workers.resources.limits | default dict) "memory") }}
+{{- fail "set worker hive memory with workers.memoryPerAgentMi, not workers.resources" }}
+{{- end }}
+{{- if ne (len $workers.homeVolume) 1 }}
+{{- fail "workers.homeVolume needs exactly one volume source; set emptyDir: null beside a hostPath or persistentVolumeClaim" }}
+{{- end }}
+{{- $memory := dict "requests" (dict "memory" (printf "%dMi" (mul $workers.maxAgents $perAgent.request))) "limits" (dict "memory" (printf "%dMi" (mul $workers.maxAgents $perAgent.limit))) }}
+{{- $worktrees := dict "WT_MIN_FREE_GB" ($workers.worktreeMinFreeGb | toString) "WT_MAX_PER_REPO" ($workers.worktreeMaxPerRepo | toString) "WT_STALE_DAYS" ($workers.worktreeStaleDays | toString) }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "swarm.fullname" $root }}-worktrees{{ $suffix }}
+  labels:
+    {{- include "swarm.labels" $root | nindent 4 }}
+    app.kubernetes.io/component: worker-hive{{ $suffix }}
+data:
+  {{- toYaml $worktrees | nindent 2 }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "swarm.fullname" $root }}-worker-hive{{ $suffix }}
+  labels:
+    {{- include "swarm.labels" $root | nindent 4 }}
+    app.kubernetes.io/component: worker-hive{{ $suffix }}
+spec:
+  replicas: {{ $workers.replicas }}
+  {{- if not (hasKey $workers.homeVolume "emptyDir") }}
+  strategy:
+    type: Recreate
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "swarm.selector" (dict "root" $root "component" (printf "worker-hive%s" $suffix)) | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "swarm.labels" $root | nindent 8 }}
+        app.kubernetes.io/component: worker-hive{{ $suffix }}
+      annotations:
+        checksum/worktrees: {{ toJson $worktrees | sha256sum }}
+    spec:
+      {{- include "swarm.podSecurity" $root | nindent 6 }}
+      {{- with $workers.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $workers.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $workers.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      terminationGracePeriodSeconds: {{ add $workers.drainSeconds 30 }}
+      containers:
+        - name: worker-hive
+          image: {{ include "swarm.image" (dict "Values" (dict "image" $workers.image)) }}
+          imagePullPolicy: {{ $workers.image.pullPolicy }}
+          lifecycle:
+            preStop:
+              exec:
+                command: ["agentihooks", "hive", "drain", "--wait", {{ $workers.drainSeconds | int | quote }}]
+          {{- include "swarm.containerSecurity" $root | nindent 10 }}
+          env:
+            {{- if $github.secretName }}
+            - name: HIVE_GITHUB_AUTH_MODE
+              value: {{ $github.mode | quote }}
+            {{- $keys := dict "GITHUB_TOKEN" $github.tokenKey }}
+            {{- if eq $github.mode "app" }}
+            {{- $keys = dict "GITHUB_APP_ID" $github.appIdKey "GITHUB_APP_INSTALLATION_ID" $github.installationIdKey "GITHUB_APP_PRIVATE_KEY" $github.privateKeyKey }}
+            {{- end }}
+            {{- range $name, $key := $keys }}
+            - name: {{ $name }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $github.secretName }}
+                  key: {{ required "each selected workers.githubAuth Secret key is required" $key }}
+            {{- end }}
+            {{- end }}
+            - name: SWARM_HIVE_ID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: AGENTIHOOKS_DEPLOYMENT
+              value: {{ $root.Values.deployment | quote }}
+            - name: HIVE_EXCLUDED
+              value: {{ join "," $workers.excluded | quote }}
+            - name: HIVE_MAX_AGENTS
+              value: {{ $workers.maxAgents | quote }}
+            - name: HIVE_REPOSITORIES
+              value: {{ $workers.repositories | toJson | quote }}
+            - name: HIVE_CREDENTIAL_FILE
+              value: /run/hive-join/credential
+            {{- with $workers.hiveUrl }}
+            - name: AGENTIHOOKS_HIVE_URL
+              value: {{ . | quote }}
+            {{- end }}
+            {{- if $workers.caSecret.name }}
+            - name: SSL_CERT_FILE
+              value: /run/hive-ca/ca.pem
+            {{- end }}
+            {{- if $workers.ssh.enabled }}
+            - name: HIVE_SSH_AUTHORIZED_KEYS_FILE
+              value: /run/hive-join/ssh/authorized_keys
+            - name: HIVE_SSH_HOST_KEY_FILE
+              value: /run/hive-join/ssh/host_key
+            - name: HIVE_SSH_PORT
+              value: {{ $workers.ssh.port | quote }}
+            {{- end }}
+          {{- if $workers.ssh.enabled }}
+          ports:
+            - name: ssh
+              containerPort: {{ $workers.ssh.port }}
+          {{- end }}
+          envFrom:
+            - configMapRef:
+                name: {{ include "swarm.fullname" $root }}-worktrees{{ $suffix }}
+            {{- range $workers.envFromSecrets }}
+            - secretRef:
+                name: {{ . }}
+            {{- end }}
+          volumeMounts:
+            - name: join
+              mountPath: /run/hive-join
+              readOnly: true
+            - name: home
+              mountPath: /home/worker
+            - name: tmp
+              mountPath: /tmp
+            {{- if $workers.caSecret.name }}
+            - name: ca
+              mountPath: /run/hive-ca
+              readOnly: true
+            {{- end }}
+          resources:
+            {{- toYaml (mergeOverwrite (deepCopy $workers.resources) $memory) | nindent 12 }}
+      volumes:
+        - name: join
+          secret:
+            secretName: {{ $credential.name }}
+            defaultMode: 0440
+            items:
+              - key: {{ required "worker join Secret key is required" $credential.key }}
+                path: credential
+              {{- if $workers.ssh.enabled }}
+              - key: authorized_keys
+                path: ssh/authorized_keys
+              - key: host_key
+                path: ssh/host_key
+              {{- end }}
+        - name: home
+          {{- toYaml $workers.homeVolume | nindent 10 }}
+        - name: tmp
+          emptyDir: {}
+        {{- if $workers.caSecret.name }}
+        - name: ca
+          secret:
+            secretName: {{ $workers.caSecret.name }}
+            items:
+              - key: {{ required "workers.caSecret.key is required" $workers.caSecret.key }}
+                path: ca.pem
+        {{- end }}
+{{- end }}
+{{- $hives := list }}
+{{- if gt (int .Values.workers.replicas) 0 }}
+{{- $hives = append $hives (dict "suffix" "" "workers" .Values.workers) }}
+{{- end }}
+{{- $names := dict }}
+{{- $credentials := dict }}
+{{- $homes := dict }}
+{{- if gt (int .Values.workers.replicas) 0 }}
+{{- $_ := set $credentials (toString .Values.workers.credentialSecret.name) true }}
+{{- $_ := set $homes (include "swarm.homeSource" .Values.workers.homeVolume) true }}
+{{- end }}
+{{- range .Values.workers.hives }}
+{{- $name := toString .name }}
+{{- $credential := toString (dig "credentialSecret" "name" "" .) }}
+{{- if or (not $credential) (hasKey $credentials $credential) }}
+{{- fail (printf "workers.hives %s needs its own credentialSecret: one credential is one hive" (toString .name)) }}
+{{- end }}
+{{- $_ := set $credentials $credential true }}
+{{- if hasKey . "replicas" }}
+{{- fail (printf "workers.hives %s sets replicas: each entry is one pod; remove the entry to stop it" (toString .name)) }}
+{{- end }}
+{{- if not (regexMatch "^[a-z0-9]([-a-z0-9]{0,18}[a-z0-9])?$" (toString .name)) }}
+{{- fail (printf "workers.hives name %q must be a lowercase DNS label of at most 20 characters" (toString .name)) }}
+{{- end }}
+{{- if hasKey $names $name }}
+{{- fail (printf "workers.hives name %s appears twice" $name) }}
+{{- end }}
+{{- $_ := set $names $name true }}
+{{- $hive := deepCopy (omit $.Values.workers "hives") }}
+{{- range $key, $value := omit . "name" }}
+{{- $_ := set $hive $key $value }}
+{{- end }}
+{{- $_ := set $hive "replicas" 1 }}
+{{- $_ := set $hive "homeVolume" (deepCopy $hive.homeVolume) }}
+{{- if and (hasKey $hive.homeVolume "emptyDir") (kindIs "invalid" $hive.homeVolume.emptyDir) }}
+{{- $_ := unset $hive.homeVolume "emptyDir" }}
+{{- end }}
+{{- $home := include "swarm.homeSource" $hive.homeVolume }}
+{{- if and (not (hasKey $hive.homeVolume "emptyDir")) (hasKey $homes $home) }}
+{{- fail (printf "workers.hives %s shares its home volume with another hive; give it its own homeVolume" $name) }}
+{{- end }}
+{{- $_ := set $homes $home true }}
+{{- $hives = append $hives (dict "suffix" (printf "-%s" $name) "workers" $hive) }}
+{{- end }}
+{{- range $hives }}
+---
+{{- include "swarm.workerHive" (dict "root" $ "workers" .workers "suffix" .suffix) }}
+{{- end }}

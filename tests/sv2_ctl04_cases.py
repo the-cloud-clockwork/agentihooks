@@ -33,7 +33,7 @@ class Rig:
         self.store = RedisStore(fakeredis.FakeRedis(server=fakeredis.FakeServer(), decode_responses=True))
         self.store.create(SwarmConfig(data["swarm"], "agentihooks", 1, 0))
         self.clock = [1000]
-        patch.setattr(lease, "now_ms", lambda store: self.clock[0])
+        patch.setattr("time.time", lambda: self.clock[0] / 1000)
         self.transport, self.pods, self.grant = Transport(), Pods(pods), {"allowed": True}
 
     def controller(self, cleanup=True):

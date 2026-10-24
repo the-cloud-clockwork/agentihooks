@@ -1,0 +1,6 @@
+{
+  "scripts/inbox/store.py:scripts.inbox.store.x__entry__mutmut_1:5d666abc35a79c3ffafb8bcebecd846f6ec3c05eb15b17253d5a6e9ac06058aa": {
+    "reader": "standards_reader",
+    "reason": "Delivered-history callers explicitly supply delivery_session; other states omit the session field. Its changed default affects no production output."
+  }
+}

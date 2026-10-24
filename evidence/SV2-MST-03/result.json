@@ -1,0 +1,125 @@
+{
+  "package": "SV2-MST-03",
+  "dependency": [
+    "SV2-MST-01",
+    "SV2-MST-02"
+  ],
+  "dependents": [
+    "SV2-MST-04"
+  ],
+  "integration_gate": "G10",
+  "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/2455",
+  "pull_request": "https://github.com/the-cloud-clockwork/agentihooks/pull/2579",
+  "tested_commit": "aa222468b4a2",
+  "status": "mocked-acceptance-qualified",
+  "package_complete": false,
+  "evidence_class": "fakeredis swarm store, inbox and masters channel, a fake herdr runtime and a fixture ledger document with sixteen phases, growing from five to twenty agents and back; no live swarm. Live G10 qualification is separate.",
+  "interfaces": [
+    "agentihooks swarm SLUG set master-per=N|hive|off: stores the scaling rule beside the master seat count after every other pair is checked; anything else is refused by name and stores nothing; off keeps the manual masters=N count",
+    "master_scale.wanted(rule, agents): one master seat per N working agents rounded up, or one per distinct hive, with a floor of one; masters and finished agents never count",
+    "master_scale.run, the tick pass: raises the count at once, holds a shrink for HOLD_MS, asks each extra seat's live master once to hand off, lowers the count only past seats whose master left, forwards a retired seat's handoff and open items to the lead, then calls master_fill.run with a limit so a retiring seat is never refilled",
+    "MastersChannel.announce(slug, text, at): a post by the tick itself, seat and author swarm, carrying the new phase owners after each count change",
+    "master_scale.measurements(redis, slug): master_seat_count and master_retire_seconds",
+    "masters.is_lead(slug, agent): every single master lookup in the tick, tick_master, affinity, control_notifications and take_master reads only the lead seat, so an extra master never stands in for the lead"
+  ],
+  "supported_versions": {
+    "python": "3.11 and 3.12 unit shards on the pull request",
+    "compatibility": "A swarm with no rule keeps its manual master count and routes exactly as SV2-MST-01 left it (INV-R11); a single master swarm launches no extra seat"
+  },
+  "states": {
+    "observed": "The wanted count is computed from the working agents and the rule on every tick",
+    "committed": "The count, the rule, the shrink start, the retiring seats with their ask item and the retire seconds are written to the swarm's masters hash; owners are rebalanced by MasterSeats.owners under its watch",
+    "externally_verified": "None; no live multi master swarm on Anton yet"
+  },
+  "authoritative_objects": [
+    "The swarm masters hash in Redis holds the seat count, the scaling rule, the shrink start and the retiring seats",
+    "The masters channel list holds each count change announcement",
+    "The ledger document stays the single writer of phases and tasks; this package never writes it"
+  ],
+  "rollback_rehearsal": {
+    "action": "agentihooks swarm SLUG set master-per=off: the count stays where the operator sets it with masters=N and the tick only fills its seats",
+    "test": "tests/test_swarm_v2_master_scale.py::test_without_a_rule_the_count_stays_manual_and_its_empty_seats_are_launched",
+    "data_safety": "A retired seat's handoff and open items move to the lead; no inbox item, handoff or ledger record is deleted"
+  },
+  "remaining_limitations": [
+    "Measurements are kept in the masters hash and returned by master_scale.measurements; they are not shipped to the metrics outbox yet, proposed as a ledger follow up",
+    "Extra master seats are stored as working rather than starting, because only the lead has a start tracker; a seat whose process is gone is reaped as lost once the startup grace from its spawn has passed, then no longer counts as occupied, and its seat refills",
+    "Owner fenced writes between masters are SV2-MST-04",
+    "Phases of an emptied lower seat stay assigned to it in the masters hash until the count falls past it; the tick posts on the masters channel that the lead answers them, and masters.route sends their items to the lead, because their owner seat has no live master"
+  ],
+  "validation": {
+    "red": "Tests run https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38070883896 on 630a627b4 failed collecting tests/test_swarm_v2_master_scale.py with ImportError for master_scale",
+    "ci_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38140039236",
+    "unit": "Tests run https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38140039236 on the pull request at aa222468b4a2 passed every unit shard on Python 3.11 and 3.12, including the three package cases run twice each and judged against their spec checks, with the test count, coverage, shard check and sonar gates",
+    "mutation": "Pull request mutation shards in Tests run https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38140039236 and Mutation preflight https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38140036120 on aa222468b4a2: green. Earlier pull request mutation runs left 12, then 45, then 1 survivor; all killed by exact value tests, removed as redundant code, or cleared as equivalent by the Standards reader",
+    "review": "Standards and Spec readers, three rounds each. Standards closed every finding and ruled nine mutants equivalent. Spec closed every finding but one, upheld: an emptied lower seat keeps its phases until the count falls; recorded as an unmet spec line on the pull request and issue 2455 and filed as a ledger follow up",
+    "local": "No local tests or mutation ran; static prepush passed on every commit",
+    "measurements": "Fixture clock values from case C of Tests run https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38133520913 on 581dd49ef: each extra master hands off one fixture minute after its ask, so master_retire_seconds reads the fake clock step, not a live latency; live values come with G10 qualification",
+    "merge": "dev was merged at b8e784ed8 after SV2-MST-01 hive ownership and master_fill (pull request 2580) landed: master_fill launches seats two and up, master_scale resizes and then calls master_fill.run with a seat limit, and the lead only outage filter in the tick was returned to the merged rule that any live master holds off the master down notice"
+  },
+  "measurements": {
+    "master_seat_count": 1,
+    "master_retire_seconds": [
+      60,
+      60,
+      60
+    ]
+  },
+  "cases": {
+    "a": "evidence/SV2-MST-03/a-result.json",
+    "b": "evidence/SV2-MST-03/b-result.json",
+    "c": "evidence/SV2-MST-03/c-result.json",
+    "manifest": "evidence/SV2-MST-03/manifest.json"
+  },
+  "decisions": [
+    "A grow raises the count at once; a shrink waits HOLD_MS so a brief dip never cycles masters",
+    "The count falls only to the highest extra seat that still holds a live master, so no seat is cut mid answer",
+    "A retired seat moves every open item to the lead, read ones included, because an item a departed master read but never closed would otherwise be stranded",
+    "Regrowth after the asks withdraws them and keeps every seat",
+    "An extra seat below a live higher seat that empties after its ask forwards its handoff and open items to the lead at once; the count still falls only past seats whose master left"
+  ],
+  "obligations": {
+    "input_preparation": {
+      "met_by": "tests/sv2_mst03_cases.py builds the five to twenty and back swarm from tests/fixtures/swarm_v2/master-scaling.json",
+      "tests": [
+        "tests/test_swarm_v2_master_scale.py::test_package_cases_match_their_committed_evidence",
+        "tests/test_swarm_v2_master_scale.py::test_the_manifest_names_the_hash_of_every_case_input"
+      ]
+    },
+    "output_contract": {
+      "met_by": "Twenty agents at one seat per five give four seats, three launched masters, four phases each and one announcement",
+      "tests": [
+        "tests/test_swarm_v2_master_scale.py::test_growing_from_five_to_twenty_agents_launches_a_master_in_each_new_seat_and_posts_the_owners",
+        "tests/test_swarm_v2_master_scale.py::test_the_fixture_wants_one_master_seat_per_five_working_agents",
+        "tests/test_swarm_v2_master_scale.py::test_the_tick_runs_the_scaling_pass_with_its_swarm_and_ledger_document",
+        "tests/test_swarm_v2_master_scale.py::test_a_launched_seat_is_primed_with_its_seat_handoff",
+        "tests/test_swarm_v2_master_scale.py::test_growing_from_two_to_four_seats_keeps_every_phase_the_new_seats_do_not_take"
+      ]
+    },
+    "rejection_contract": {
+      "met_by": "An unknown rule is refused by name; a shrink inside the hold window or with live extra masters never lowers the count; a retire ask goes once",
+      "tests": [
+        "tests/test_swarm_v2_master_scale.py::test_any_other_rule_is_refused",
+        "tests/test_swarm_v2_master_scale.py::test_a_shrink_inside_the_hold_window_asks_nobody_and_a_regrowth_restarts_the_window",
+        "tests/test_swarm_v2_master_scale.py::test_a_retire_ask_goes_once_and_a_live_extra_master_keeps_its_seat",
+        "tests/test_swarm_v2_master_scale.py::test_swarm_set_stores_a_rule_and_refuses_an_unknown_one"
+      ]
+    },
+    "recovery_contract": {
+      "met_by": "Twenty back to five returns the count to one once each extra master hands off; the handoffs and pending items reach the lead and a restart reads the same owners",
+      "tests": [
+        "tests/test_swarm_v2_master_scale.py::test_twenty_back_to_five_retires_extra_seats_through_their_handoffs",
+        "tests/test_swarm_v2_master_scale.py::test_a_retired_seat_moves_items_its_master_read_but_never_closed",
+        "tests/test_swarm_v2_master_scale.py::test_regrowth_after_the_asks_withdraws_them_and_keeps_every_seat",
+        "tests/test_swarm_v2_master_scale.py::test_an_emptied_lower_seat_is_not_relaunched_while_a_higher_seat_retires",
+        "tests/test_swarm_v2_master_scale.py::test_an_extra_master_handoff_through_the_swarm_command_reaches_the_lead"
+      ]
+    },
+    "mutation_scope": {
+      "met_by": "Only the swarm masters hash, master agent records, inbox items and masters channel posts change",
+      "tests": [
+        "tests/test_swarm_v2_master_scale.py::test_the_fixture_swarm_grows_and_shrinks_through_every_step"
+      ]
+    }
+  }
+}

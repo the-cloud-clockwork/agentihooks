@@ -1,11 +1,17 @@
 import json
+import re
 import secrets
 import sqlite3
 import threading
 from contextlib import contextmanager, suppress
 from pathlib import Path
 
-from .events import append_events, read_events, write_events
+from scripts.swarm_ledger import request_metrics
+
+from . import artifact_files, heap, hierarchy, media_files, outbox, refresh
+from .entry import Entry
+from .events import append_events, read_events, trim_events, write_events
+from .fragments import document
 from .rows import TABLES, assemble, diff, encode, flatten, read_rows, write_rows
 from .seeds import read_seeds, sync_values, write_seeds
 
@@ -18,35 +24,55 @@ CREATE TABLE IF NOT EXISTS seed_deltas (slug TEXT, revision TEXT, path TEXT, val
 CREATE TABLE IF NOT EXISTS events (slug TEXT, key TEXT, revision INTEGER, position INTEGER, value TEXT, PRIMARY KEY(slug,key));
 CREATE INDEX IF NOT EXISTS events_revision ON events(slug,revision);
 CREATE INDEX IF NOT EXISTS events_position ON events(slug,position);
+CREATE TABLE IF NOT EXISTS relay_journal (kind TEXT, slug TEXT, revision INTEGER, PRIMARY KEY(kind,slug,revision));
+CREATE TABLE IF NOT EXISTS outbox (id TEXT PRIMARY KEY, slug TEXT NOT NULL, revision INTEGER NOT NULL, subject TEXT NOT NULL, value TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS outbox_sent (id TEXT PRIMARY KEY, sent_at INTEGER NOT NULL DEFAULT 0);
+CREATE TABLE IF NOT EXISTS artifact_files (slug TEXT, id TEXT, data TEXT, PRIMARY KEY(slug,id));
+CREATE TABLE IF NOT EXISTS media_files (slug TEXT, id TEXT, data TEXT, saved_at INTEGER, PRIMARY KEY(slug,id));
 """
+ROWS_SCHEMA = "".join(
+    f"CREATE TABLE IF NOT EXISTS {table} (slug TEXT, path TEXT, parent TEXT, key TEXT, "
+    "position INTEGER, kind TEXT, value TEXT, PRIMARY KEY(slug,path));\n"
+    for table in TABLES
+)
 DATABASE = "ledgers.sqlite3"
 BEGIN = "BEGIN"
 REGISTRY = "SELECT path,value FROM registry WHERE slug=?"
 PATH_END = "\x7f"
-PER_LEDGER = (*TABLES, "ledgers", "revisions", "seed_base", "seed_deltas", "events")
+PER_LEDGER = (*TABLES, "ledgers", "revisions", "seed_base", "seed_deltas", "events", "row_changes")
 GENERATION_SHIFT = 20
+CHANGES_KEPT = 256
 BEGIN_IMMEDIATE = "BEGIN IMMEDIATE"
 STORED = "SELECT 1 FROM ledgers WHERE slug=?"
 GENERATION = "SELECT generation FROM ledgers WHERE slug=?"
 TOKEN = "SELECT token FROM ledgers WHERE slug=?"
 SUMMARIES = "SELECT summary FROM ledgers ORDER BY touched_at DESC, slug"
 SLUGS = "SELECT slug FROM ledgers ORDER BY slug"
-ROOT = "[]"
+ROOT = refresh.ROOT
 REGISTRY_TABLE = "registry"
 UPDATE = "UPDATE ledgers SET revision=?, generation=?, summary=?, touched_at=? WHERE slug=?"
 INSERT = "INSERT INTO ledgers VALUES (?, ?, ?, ?, ?, ?)"
 SUMMARY_KEYS = ("slug", "title", "overview", "closed_at", "size", "open", "done", "updated_at")
+HELD = "SELECT kind, slug, revision FROM relay_journal ORDER BY kind, slug, revision"
+HOLD = "INSERT OR IGNORE INTO relay_journal VALUES (?, ?, ?)"
+RELEASE = "DELETE FROM relay_journal WHERE kind=? AND slug=? AND revision BETWEEN ? AND ?"
+DROP = "DELETE FROM relay_journal WHERE kind=? AND slug=?"
+REGISTRIES = "SELECT slug,path,value FROM registry WHERE path=? ORDER BY slug,path"
+ADD_REGISTRY = "INSERT INTO registry VALUES (?,?,?)"
+DROP_REGISTRIES = "DELETE FROM registry WHERE path=?"
+TABLES_SQL = "SELECT name FROM sqlite_master WHERE type='table'"
+FENCES = "CREATE TABLE IF NOT EXISTS hosted_fences (slug TEXT PRIMARY KEY, destination TEXT NOT NULL)"
+FENCED = "SELECT destination FROM hosted_fences WHERE slug IN (?, '*')"
+UNFENCE = "DELETE FROM hosted_fences WHERE destination=?"
+FROZEN = "SELECT 1 FROM hosted_fences WHERE slug='*'"
+FENCE_DESTINATIONS = "SELECT destination FROM hosted_fences WHERE slug IN (?, '*') OR ?='*'"
+TABLE_ID = re.compile(r"[a-z_]+\Z")
+# a fenced ledger's last relay must still be able to hold its revision
+UNFENCED = ("hosted_fences", "relay_journal")
 
 
 class Missing(KeyError, ValueError):
     pass
-
-
-class Entry:
-    """One ledger as last stored: its generation, canonical text and a parsed copy no caller receives."""
-
-    def __init__(self, generation, text, state):
-        self.generation, self.text, self.state = generation, text, state
 
 
 def summarize(slug: str, state: dict) -> dict:
@@ -108,12 +134,17 @@ def key_parts(key: str) -> list:
 @contextmanager
 def read_only(directory):
     """A read only connection to the folder's database, or None when it holds none."""
+    if hasattr(directory, "read_only"):
+        with directory.read_only() as connection:
+            yield connection
+        return
     path = Path(directory) / DATABASE
     if not path.exists():
         yield None
         return
     connection = sqlite3.connect(f"{path.as_uri()}?mode=ro", uri=True, timeout=5)
     try:
+        connection.execute("PRAGMA foreign_keys=ON")
         yield connection
     finally:
         connection.close()
@@ -149,13 +180,15 @@ def read_ids(directory, slug: str, collection: str) -> tuple:
         if connection is None:
             return ()
         try:
-            rows = [
-                row
-                for table in TABLES
-                for row in connection.execute(
-                    f"SELECT position, path FROM {table} WHERE slug=? AND parent=?", (slug, parent)
-                )
-            ]
+            with connection:
+                connection.execute(BEGIN)
+                rows = [
+                    row
+                    for table in TABLES
+                    for row in connection.execute(
+                        f"SELECT position, path FROM {table} WHERE slug=? AND parent=?", (slug, parent)
+                    )
+                ]
         except sqlite3.OperationalError:
             return ()
     found = (json.loads(path)[1] for _, path in sorted(rows))
@@ -209,13 +242,149 @@ def read_document(directory, slug: str) -> dict | None:
             return None
 
 
+def registry_rows(connection, slug: str) -> list:
+    return [list(row) for row in connection.execute(REGISTRIES, (slug,))]
+
+
 def without_events(state: dict) -> dict:
     """The document as its rows hold it: the event log lives in its own table."""
     return {**state, "_meta": {key: value for key, value in state["_meta"].items() if key != "events"}}
 
 
+def fenced(directory: Path, slug: str) -> bool:
+    """Whether the hosted migration fenced this ledger, or every ledger, in the folder's database."""
+    return fence_row(directory, FENCED, (slug,))
+
+
+def frozen(directory: Path) -> bool:
+    return fence_row(directory, FROZEN, ())
+
+
+def fence_row(directory: Path, query: str, parameters: tuple) -> bool:
+    with read_only(directory) as connection:
+        exists = (
+            connection is not None
+            and connection.execute("SELECT 1 FROM sqlite_master WHERE name='hosted_fences'").fetchone()
+        )
+        return bool(exists and connection.execute(query, parameters).fetchone())
+
+
+class Transaction:
+    """One immediate write transaction on the store, held under the core lock."""
+
+    def __init__(self, repository: "SQLiteLedgerRepository", connection):
+        self.repository, self.connection, self.written = repository, connection, {}
+
+    def exists(self, slug: str) -> bool:
+        return self.connection.execute(STORED, (slug,)).fetchone() is not None
+
+    def entry(self, slug: str) -> Entry:
+        return self.repository._entry(self.connection, slug)
+
+    def hierarchy(self, slug: str) -> tuple[dict, set]:
+        return hierarchy.stored(self.connection, slug)
+
+    def write(self, slug: str, entry: Entry, state: dict, events: list) -> Entry:
+        written = self.written[slug] = self.repository._write(self.connection, slug, entry, state, events)
+        return written
+
+    def insert(self, slug: str, state: dict, seeds: dict | None, token: str) -> None:
+        self.repository._insert(self.connection, slug, state, token, seeds)
+
+    def add_registries(self, rows: list) -> None:
+        self.connection.executemany(ADD_REGISTRY, rows)
+
+    def replace_registries(self, slug: str, rows: list) -> None:
+        self.connection.execute(DROP_REGISTRIES, (slug,))
+        self.add_registries(rows)
+
+    def registries(self, slug: str) -> list:
+        return registry_rows(self.connection, slug)
+
+    def purge(self, slug: str) -> None:
+        self.repository.purge(slug, self.connection)
+        self.connection.execute(DROP_REGISTRIES, (slug,))
+
+    def export(self, slug: str) -> dict:
+        return self.repository._export(self.connection, slug)
+
+    def prepare_fence(self, slug: str, destination: str) -> None:
+        connection = self.connection
+        connection.execute(FENCES)
+        previous = connection.execute(FENCE_DESTINATIONS, (slug, slug)).fetchall()
+        if any(row[0] != destination for row in previous):
+            raise ValueError("ledger already has a different hosted destination")
+        if slug != "*" and not self.exists(slug):
+            raise ValueError("no such ledger")
+        for (table,) in connection.execute(TABLES_SQL).fetchall():
+            if table in UNFENCED or not TABLE_ID.fullmatch(table):
+                continue
+            columns = {row[1] for row in connection.execute(f"PRAGMA table_info({table})")}
+            if "slug" not in columns:
+                continue
+            column = "path" if table == "registry" else "slug"
+            for action, reference in (("INSERT", "NEW"), ("UPDATE", "OLD"), ("DELETE", "OLD")):
+                connection.execute(
+                    f"CREATE TRIGGER IF NOT EXISTS hosted_{table}_{action} BEFORE {action} ON {table} "
+                    f"WHEN EXISTS(SELECT 1 FROM hosted_fences WHERE slug IN ({reference}.{column}, '*')) "
+                    "BEGIN SELECT RAISE(ABORT,'ledger moved to hosted service'); END"
+                )
+
+    def fence(self, slug: str, destination: str) -> None:
+        self.connection.execute("INSERT OR IGNORE INTO hosted_fences VALUES (?,?)", (slug, destination))
+        self.connection.commit()
+
+    def unfence(self, destination: str) -> None:
+        self.connection.execute(FENCES)
+        self.connection.execute(UNFENCE, (destination,))
+
+
+class Snapshot:
+    """One read only snapshot of the stored folder."""
+
+    def __init__(self, repository: "SQLiteLedgerRepository", connection):
+        self.repository, self.connection = repository, connection
+
+    def slugs(self) -> list:
+        return [slug for (slug,) in self.connection.execute(SLUGS)]
+
+    def document(self, slug: str) -> dict:
+        """The ledger as its rows hold it, without its event log."""
+        rows = read_rows(self.connection, slug)
+        if not rows:
+            raise Missing(slug)
+        return assemble(rows)
+
+    def hierarchy(self, slug: str) -> tuple[dict, set]:
+        tables = {row[0] for row in self.connection.execute(TABLES_SQL)}
+        nodes = (
+            {
+                node: (kind, parent, position)
+                for node, kind, parent, position in self.connection.execute(hierarchy.NODES, (slug,))
+            }
+            if "work_nodes" in tables
+            else {}
+        )
+        dependencies = (
+            set(self.connection.execute(hierarchy.DEPENDENCIES, (slug,))) if "work_dependencies" in tables else set()
+        )
+        return nodes, dependencies
+
+    def export(self, slug: str) -> dict:
+        return self.repository._export(self.connection, slug)
+
+    def registries(self, slug: str) -> list:
+        return registry_rows(self.connection, slug)
+
+    def token(self, slug: str) -> str | None:
+        row = self.connection.execute(TOKEN, (slug,)).fetchone()
+        return None if row is None else row[0]
+
+
 class SQLiteLedgerRepository:
     """The durable ledger record: one row per JSON value, written only where a mutation changed it."""
+
+    adopts = True
 
     def __init__(self, path: Path | None = None, domain=None):
         self._path = None if path is None else Path(path)
@@ -223,6 +392,7 @@ class SQLiteLedgerRepository:
         self.trace = None
         self._ready = set()
         self._cache = {}
+        self._loads = {}
         self._guard = threading.Lock()
 
     @property
@@ -246,7 +416,7 @@ class SQLiteLedgerRepository:
         if domain is self.domain or self._path is not None:
             return self
         twin = SQLiteLedgerRepository(domain=domain)
-        twin._cache, twin._ready, twin._guard = self._cache, self._ready, self._guard
+        twin._cache, twin._loads, twin._ready, twin._guard = self._cache, self._loads, self._ready, self._guard
         return twin
 
     @contextmanager
@@ -255,20 +425,26 @@ class SQLiteLedgerRepository:
         path.parent.mkdir(parents=True, exist_ok=True)
         connection = sqlite3.connect(path, timeout=30)
         try:
+            connection.execute("PRAGMA foreign_keys=ON")
             if path not in self._ready:
-                connection.execute("PRAGMA journal_mode=WAL")
-                connection.executescript(SCHEMA)
-                for table in TABLES:
-                    connection.execute(
-                        f"CREATE TABLE IF NOT EXISTS {table} (slug TEXT, path TEXT, parent TEXT, key TEXT, "
-                        "position INTEGER, kind TEXT, value TEXT, PRIMARY KEY(slug,path))"
-                    )
-                self._ready.add(path)
+                self._set_up(connection, path)
             connection.execute("PRAGMA synchronous=FULL")
             connection.set_trace_callback(self.trace)
             yield connection
         finally:
             connection.close()
+
+    def _set_up(self, connection, path: Path) -> None:
+        with self._guard:
+            if path in self._ready:
+                return
+            connection.execute("PRAGMA journal_mode=WAL")
+            connection.executescript(SCHEMA)
+            connection.executescript(hierarchy.SCHEMA)
+            connection.executescript(ROWS_SCHEMA)
+            connection.executescript(refresh.SCHEMA)
+            outbox.migrate(connection)
+            self._ready.add(path)
 
     def _key(self, slug):
         return str(self.path), slug
@@ -281,12 +457,28 @@ class SQLiteLedgerRepository:
         cached = self._cache.get(self._key(slug))
         if cached is not None and cached.generation >= row[0]:
             return cached
-        state = assemble(read_rows(connection, slug))
-        if "events" in state["_meta"]:
-            state["_meta"]["events"] = read_events(connection, slug)
-        entry = Entry(row[0], encode(state), state)
-        self._remember(slug, entry)
+        with self._guard:
+            loading = self._loads.setdefault(self._key(slug), threading.Lock())
+        with loading:
+            cached = self._cache.get(self._key(slug))
+            if cached is not None and cached.generation >= row[0]:
+                return cached
+            state = None if cached is None else self._refreshed(connection, slug, cached, row[0])
+            whole = state is None
+            if whole:
+                state = assemble(read_rows(connection, slug))
+            if "events" in state["_meta"]:
+                state["_meta"] = {**state["_meta"], "events": read_events(connection, slug)}
+            fragments = document(state, None if whole else cached.fragments)
+            entry = Entry(row[0], None, fragments.value, fragments)
+            self._remember(slug, entry)
+        if whole:
+            heap.release()
         return entry
+
+    def _refreshed(self, connection, slug: str, cached: Entry, generation: int) -> dict | None:
+        paths = refresh.changed_paths(connection, slug, cached.generation, generation, CHANGES_KEPT)
+        return None if paths is None else refresh.refreshed(connection, slug, cached.state, paths)
 
     def _remember(self, slug: str, entry: Entry) -> None:
         with self._guard:
@@ -310,6 +502,25 @@ class SQLiteLedgerRepository:
             connection.execute(BEGIN)
             return json.loads(self._entry(connection, slug).text)
 
+    def current(self, slug: str) -> Entry:
+        """The stored entry: its generation, text and a parsed copy that callers only read."""
+        self._adopt(slug)
+        with self.connect() as connection, connection:
+            connection.execute(BEGIN)
+            return self._entry(connection, slug)
+
+    def encoded_view(self, slug: str, view) -> str:
+        """view(state) of the stored ledger, built once per generation and keyed by view, so view is a module
+        level function that never changes the state it reads."""
+        self._adopt(slug)
+        with self.connect() as connection, connection:
+            connection.execute(BEGIN)
+            entry = self._entry(connection, slug)
+        if view not in entry.views:
+            entry.views[view] = view(entry.state)
+            heap.release()
+        return entry.views[view]
+
     def read(self, slug: str, *keys: str) -> dict:
         """Only the named parts of a ledger, such as `overview`, `_meta.members` or `tasks/t1`."""
         self._adopt(slug)
@@ -324,36 +535,53 @@ class SQLiteLedgerRepository:
         return None if row is None else row[0]
 
     def apply_ops(
-        self, slug: str, changes: list | None = None, ops: list | None = None, gate=None
+        self, slug: str, changes: list | None = None, ops: list | None = None, gate=None, *, copy_state: bool = True
     ) -> tuple[dict, list]:
         from . import mutation
 
         self._adopt(slug)
-        with self.domain.LOCK, self.connect() as connection:
+        with request_metrics.locked(self.domain.LOCK), self.connect() as connection:
             with connection:
-                connection.execute(BEGIN_IMMEDIATE)
+                request_metrics.begin(connection, BEGIN_IMMEDIATE)
                 entry = self._entry(connection, slug)
-                state = json.loads(entry.text)
+                state = entry.mutable()
                 rejected, ctx = mutation.apply(slug, state, self.domain, changes, ops, gate)
                 written = self._write(connection, slug, entry, state, ctx.events if ctx.changed else [])
+            artifact_files.drop(slug, ctx.unstored)
+            media_files.drop(slug, ctx.unstored)
             self._remember(slug, written)
-        return json.loads(written.text), rejected
+        return (written.mutable() if copy_state else written.state), rejected
 
     def _write(self, connection, slug: str, entry: Entry, state: dict, events: list) -> Entry:
-        before, after = diff(*(without_events(document) for document in (entry.state, state)))
-        write_rows(connection, slug, before, after)
-        append_events(connection, slug, events, self.domain.EVENTS_KEPT)
+        meta, previous = state["_meta"], entry.state["_meta"]
+        meta["task_revision"] = (
+            meta["rev"]
+            if state.get("tasks", []) != entry.state.get("tasks", [])
+            else previous.get("task_revision", previous["rev"])
+        )
+        fragments = document(state, entry.fragments)
+        state = fragments.value
+        before, after = diff(*(without_events(value) for value in (entry.state, state)))
+        paths = write_rows(connection, slug, before, after)
+        hierarchy.sync(connection, slug, state)
+        kept = len(state["_meta"].get("events", []))
+        append_events(connection, slug, events, kept)
+        if not events and "events" in state["_meta"]:
+            trim_events(connection, slug, kept)
+        outbox.write(connection, slug, state["_meta"]["rev"], entry.state, state)
         generation = entry.generation + 1
+        refresh.record(connection, slug, generation, paths, CHANGES_KEPT)
         connection.execute(
             UPDATE,
             (state["_meta"]["rev"], generation, encode(summarize(slug, state)), self.domain.now_ms(), slug),
         )
-        return Entry(generation, encode(state), state)
+        return Entry(generation, None, state, fragments)
 
     def _insert(self, connection, slug: str, state: dict, token: str, seeds: dict | None = None) -> None:
         previous = connection.execute(GENERATION, (slug,)).fetchone()
         now = self.domain.now_ms()
         generation = now << GENERATION_SHIFT if previous is None else max(now << GENERATION_SHIFT, previous[0] + 1)
+        before = {} if previous is None else self._entry(connection, slug).state
         for table in PER_LEDGER:
             connection.execute(f"DELETE FROM {table} WHERE slug=?", (slug,))
         stored = {**state, "_meta": {**state["_meta"]}}
@@ -363,6 +591,7 @@ class SQLiteLedgerRepository:
         write_rows(connection, slug, {}, flatten(stored))
         write_events(connection, slug, events)
         write_seeds(connection, slug, seeds or {})
+        outbox.write(connection, slug, state["_meta"]["rev"], before, state)
         connection.execute(
             INSERT,
             (
@@ -374,6 +603,7 @@ class SQLiteLedgerRepository:
                 now,
             ),
         )
+        hierarchy.sync(connection, slug, state)
         self._cache.pop(self._key(slug), None)
 
     def create_document(
@@ -382,8 +612,8 @@ class SQLiteLedgerRepository:
         """Store a ledger built from content: its first sync derives priorities, notifications and rev 1."""
         from . import mutation
 
-        with self.domain.LOCK, self.connect() as connection, connection:
-            connection.execute(BEGIN_IMMEDIATE)
+        with request_metrics.locked(self.domain.LOCK), self.connect() as connection, connection:
+            request_metrics.begin(connection, BEGIN_IMMEDIATE)
             if not replace and connection.execute(STORED, (slug,)).fetchone():
                 return False
             state = {**doc, "_meta": meta}
@@ -397,8 +627,8 @@ class SQLiteLedgerRepository:
         seeds = stored["_meta"].get("seeds")
         if seeds is not None:
             stored["_meta"]["seeds"] = {}
-        with self.domain.LOCK, self.connect() as connection, connection:
-            connection.execute(BEGIN_IMMEDIATE)
+        with request_metrics.locked(self.domain.LOCK), self.connect() as connection, connection:
+            request_metrics.begin(connection, BEGIN_IMMEDIATE)
             if not replace and connection.execute(STORED, (slug,)).fetchone():
                 raise ValueError(f"ledger {slug} exists; import refuses to replace it")
             self._insert(connection, slug, stored, token or secrets.token_urlsafe(24), seeds)
@@ -419,9 +649,23 @@ class SQLiteLedgerRepository:
             connection.execute(BEGIN)
             return self._export(connection, slug)
 
+    def rebuild(self, slug: str) -> dict:
+        self._adopt(slug)
+        with request_metrics.locked(self.domain.LOCK), self.connect() as connection, connection:
+            request_metrics.begin(connection, BEGIN_IMMEDIATE)
+            return hierarchy.rebuild(connection, slug, self._entry(connection, slug).state)
+
+    def nodes(self, slug: str, read: str, node: str | None = None) -> list:
+        """Hierarchy rows: `children`, `ancestors`, `subtree` or `dependents` of a node, or of the ledger root."""
+        self._adopt(slug)
+        with self.connect() as connection, connection:
+            connection.execute(BEGIN)
+            return hierarchy.read(connection, slug, read, node)
+
     def events_since(self, slug: str, revision: int) -> list:
         self._adopt(slug)
         with self.connect() as connection:
+            connection.execute(BEGIN)
             if connection.execute(STORED, (slug,)).fetchone() is None:
                 raise Missing(slug)
             return read_events(connection, slug, revision)
@@ -438,7 +682,10 @@ class SQLiteLedgerRepository:
         return [{key: summary[key] for key in SUMMARY_KEYS} for summary in self.summaries()]
 
     def purge(self, slug: str, connection) -> None:
-        for table in PER_LEDGER:
+        if connection.execute(STORED, (slug,)).fetchone():
+            before = self._entry(connection, slug).state
+            outbox.write(connection, slug, before["_meta"]["rev"], before, {})
+        for table in (*PER_LEDGER, artifact_files.TABLE, media_files.TABLE):
             connection.execute(f"DELETE FROM {table} WHERE slug=?", (slug,))
         self._cache.pop(self._key(slug), None)
 
@@ -462,3 +709,47 @@ class SQLiteLedgerRepository:
         from . import bin_storage
 
         return bin_storage.restore(slug, now)
+
+    @contextmanager
+    def transaction(self):
+        """One immediate write transaction under the core lock; entries it wrote are cached once it commits."""
+        with request_metrics.locked(self.domain.LOCK), self.connect() as connection:
+            with connection:
+                request_metrics.begin(connection, BEGIN_IMMEDIATE)
+                transaction = Transaction(self, connection)
+                yield transaction
+        for slug, entry in transaction.written.items():
+            self._remember(slug, entry)
+
+    @contextmanager
+    def snapshot(self):
+        """One read only snapshot of the stored folder, or None when it holds no database."""
+        with read_only(self.directory) as connection:
+            if connection is None:
+                yield None
+                return
+            connection.execute(BEGIN)
+            yield Snapshot(self, connection)
+
+    def held_revisions(self) -> dict:
+        """{kind: {slug: [revisions]}} the inbox could not take; kept on disk because Redis is what was down."""
+        held = {}
+        with self.connect() as connection:
+            for kind, slug, revision in connection.execute(HELD):
+                held.setdefault(kind, {}).setdefault(slug, []).append(revision)
+        return held
+
+    def hold_revision(self, kind: str, slug: str, revision: int) -> None:
+        with self.connect() as connection, connection:
+            request_metrics.begin(connection, BEGIN_IMMEDIATE)
+            connection.execute(HOLD, (kind, slug, revision))
+
+    def release_revisions(self, kind: str, slug: str, since: int, revision: int) -> None:
+        with self.connect() as connection, connection:
+            request_metrics.begin(connection, BEGIN_IMMEDIATE)
+            connection.execute(RELEASE, (kind, slug, since, revision))
+
+    def drop_revisions(self, kind: str, slug: str) -> None:
+        with self.connect() as connection, connection:
+            request_metrics.begin(connection, BEGIN_IMMEDIATE)
+            connection.execute(DROP, (kind, slug))

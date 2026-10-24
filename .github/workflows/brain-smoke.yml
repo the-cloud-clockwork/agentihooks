@@ -7,25 +7,46 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow == 'brain-smoke' && format('hosted-lane-{0}', ((endsWith(github.run_id, '0') || endsWith(github.run_id, '1') || endsWith(github.run_id, '2')) && 'a') || ((endsWith(github.run_id, '3') || endsWith(github.run_id, '4') || endsWith(github.run_id, '5')) && 'b') || 'c') || format('brain-smoke-{0}', github.run_id) }}
+  queue: ${{ github.workflow == 'brain-smoke' && 'max' || 'single' }}
+
 jobs:
   smoke:
-    runs-on: ubuntu-latest
+    runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && (github.event_name == 'merge_group' && 'anton-oss-queue' || 'anton-oss') || 'ubuntu-latest' }}
     timeout-minutes: 5
     services:
       otel-collector:
-        image: otel/opentelemetry-collector-contrib:0.96.0
+        image: ghcr.io/open-telemetry/opentelemetry-collector-releases/opentelemetry-collector-contrib:0.96.0
         ports:
           - 4318:4318
           - 4317:4317
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Read the collector service image
+        id: collector
+        env:
+          SERVICE: ${{ job.services.otel-collector.id }}
+        run: echo "image=$(docker inspect --format '{{.Image}}' "$SERVICE")" >> "$GITHUB_OUTPUT"
+
+      - name: Key the declared inputs
+        id: key
+        uses: ./.github/actions/input-key
+        with:
+          job: brain-smoke
+          environment: otel-collector=${{ steps.collector.outputs.image }}
 
       - name: Set up Python
+        if: steps.key.outputs.hit != 'true'
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: '3.12'
 
       - name: Set up uv
+        if: steps.key.outputs.hit != 'true'
         uses: astral-sh/setup-uv@v10.2.0
         with:
           version: "0.12.23"
@@ -34,11 +55,13 @@ jobs:
           enable-cache: false
 
       - name: Create venv and install
+        if: steps.key.outputs.hit != 'true'
         run: |
           uv venv .venv
           uv pip install --python .venv/bin/python -e ".[all]"
 
       - name: Seed brain-feed fixtures
+        if: steps.key.outputs.hit != 'true'
         run: |
           mkdir -p $HOME/.agentihooks/brain-feed
           cat > $HOME/.agentihooks/brain-feed/hot-arcs.md <<'EOF'
@@ -56,6 +79,7 @@ jobs:
           EOF
 
       - name: Run brain-smoke
+        if: steps.key.outputs.hit != 'true'
         env:
           OTEL_HOOKS_ENABLED: 'true'
           OTEL_EXPORTER_OTLP_ENDPOINT: 'http://localhost:4318'
@@ -65,3 +89,9 @@ jobs:
           LOG_HOOKS: 'true'
         run: |
           ./scripts/brain-smoke --no-color
+
+      - name: Save the passed input key
+        if: steps.key.outputs.hit == 'false' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+        uses: ./.github/actions/input-key/save
+        with:
+          key: ${{ steps.key.outputs.key }}

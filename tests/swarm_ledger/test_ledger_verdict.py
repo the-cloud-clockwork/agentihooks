@@ -33,7 +33,7 @@ def make_ledger():
         "followups": [{"text": "check disk"}],
         "tasks": [{"title": "Wave one gate shims", "description": "d", "phase": "p1", "lane": "eng"}],
     }
-    html_path, json_path = core.paths(SLUG)
+    html_path, json_path = legacy_page.paths(SLUG, core)
     core.LEDGER_DIR.mkdir(parents=True, exist_ok=True)
     html_path.write_text(legacy_page.render(new_ledger.build_doc(content), SLUG, 8765), encoding="utf-8")
     json_path.unlink(missing_ok=True)
@@ -189,6 +189,7 @@ def run_page(body):
         "const h = (tag, attrs, ...kids) => ({ tag, attrs: attrs || {}, kids: kids.filter(Boolean) });"
         "const scopeDot = () => ({ tag: 'scope', attrs: {}, kids: [] }); const queued = [];"
         "const queue = (op) => queued.push(op); const newId = (noun) => `${noun[0]}-1`;"
+        "const doc = { freezes: [] }; const frozen = () => false; const freezeButton = () => null;"
     )
     names = ("verdictButton", "itemActions", "itemOf", "applyOp")
     script = stubs + "\n".join(function_source(n) for n in names) + "\n" + body

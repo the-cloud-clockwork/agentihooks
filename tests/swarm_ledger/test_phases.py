@@ -20,7 +20,7 @@ def phase_ledger_dir(ledger_dir, monkeypatch):
 
 def make_ledger(phases=None):
     content = {"title": "Demo", "phases": phases or [{"title": "First"}]}
-    html, state = core.paths(SLUG)
+    html, state = legacy_page.paths(SLUG, core)
     html.write_text(legacy_page.render(new_ledger.build_doc(content), SLUG, 8765))
     state.unlink(missing_ok=True)
     return core.sync(SLUG)[0]
@@ -437,7 +437,8 @@ def test_content_preserves_titles_descriptions_and_optional_fields():
         (
             "phase_update",
             {"fields": {"review": {}}},
-            "phase fields may set only ('title', 'description', 'depends_on', 'planning', 'release', 'plan_url', 'plan_ref')",
+            "phase fields may set only "
+            "('title', 'description', 'depends_on', 'planning', 'release', 'plan_url', 'plan_ref', 'plan')",
         ),
         ("phase_review", {"title": "bad"}, "phase_review writes only the review record"),
         ("phase_review", {"state": "bad"}, "review state must be one of ('pending', 'approved', 'sent_back')"),

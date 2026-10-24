@@ -1,0 +1,6 @@
+{
+  "scripts/gate_protected.py:scripts.gate_protected.x__duration_problems__mutmut_44:8274bc776694e30acb8c50aa59c057d965612e4ab4e58b9f9f5ff8bdf7d56ede": {
+    "reader": "Standards",
+    "reason": "Diagnostic-only capitalization; finding, rejection and exit status remain unchanged."
+  }
+}

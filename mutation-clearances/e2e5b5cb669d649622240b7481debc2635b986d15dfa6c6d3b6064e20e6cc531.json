@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/metrics_outbox.py:scripts.swarm.metrics_outbox.x\u01c1Outbox\u01c1flush__mutmut_41:ebade753a6a234e405a05abc733f3c824b64a85aa59063610480844a6bf69697": {
+    "reader": "Standards",
+    "reason": "Equivalent cursor upsert: SQLite treats these unquoted table and column identifiers, including excluded.tbl, case insensitively. The same fixed cursor row and bound last table are written."
+  }
+}

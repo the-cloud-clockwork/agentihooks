@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_v2/checkpoints/capture.py:scripts.swarm_v2.checkpoints.capture.x_transcript__mutmut_29:72df0248dacdcafb6a800cac7b6b7128ce04f82ea1bd093477141c078c779cb1": {
+    "reader": "standards_reader",
+    "reason": "JSONEncoder selects ASCII escaping by ensure_ascii truthiness. False and None both select the non-ASCII encoder, producing identical JSON strings, UTF-8 bytes, and scrubbed transcript outputs."
+  }
+}

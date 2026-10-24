@@ -1,0 +1,6 @@
+{
+  "scripts/ci_mutation/reuse.py:scripts.ci_mutation.reuse.x_only_tests_added__mutmut_30:068137270c6ad630d7487b07922114b5cf28c7cf21ec751f84896104416c6e92": {
+    "reader": "standards_reader",
+    "reason": "Equivalent: `weakened_tests` and `adds_only_tests` use `root` only as the `cwd=` of the `git diff` and `git show` subprocesses in `blob`, and `Path.cwd()` is the process working directory that `cwd=None` already inherits, so both run git in the same directory."
+  }
+}

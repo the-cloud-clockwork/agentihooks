@@ -1,0 +1,96 @@
+{
+  "cases": [
+    "A",
+    "B",
+    "C"
+  ],
+  "checks": {
+    "mutation": "image_attestation 384 killed, image_probe 264 killed, no survivors; preflight failure belongs to the dependency worker_health module",
+    "red": "tests collected red with ModuleNotFoundError for both new modules",
+    "sonar": "step refused with HTTP 403 by the Sonar API; not graded",
+    "spec_review": "closed after three rounds",
+    "standards_review": "closed after three rounds",
+    "unit": "every unit shard green on 3.11 and 3.12"
+  },
+  "code_evidence": {
+    "branch_url": "https://github.com/the-cloud-clockwork/agentihooks/tree/engineer-323133-0923",
+    "issue_url": "https://github.com/the-cloud-clockwork/agentihooks/issues/2370"
+  },
+  "implementation_status": "qualified on the dependency branch; pull request pending the SV2-IMG-04 merge",
+  "integration_gate": "G2",
+  "interfaces": [
+    "scripts.swarm_v2.image_attestation qualify, attest, promote and its attest and promote commands",
+    "scripts.swarm_v2.image_probe in-image headless herdr and harness hook probe",
+    "docker/swarm-node/qualify.sh and publish.sh",
+    ".github/workflows/swarm-node-image.yml on GitHub hosted runners"
+  ],
+  "limitations": [
+    "workflow_dispatch becomes available only once the workflow reaches the default branch; until then dev and proof branch pushes run it",
+    "a rerun of an already published commit ends red because image builds are not reproducible; the accepted digest stays",
+    "Linux amd64 only",
+    "production deployment by digest and any floating tag are antoncore decisions"
+  ],
+  "mocked": false,
+  "package": "SV2-IMG-05",
+  "proof_commit": "81c1d8cc (test-only change after the image proof)",
+  "rollback_rehearsal": {
+    "action": "point deployment at the last accepted digest without rebuilding or retagging",
+    "observed": "after two replays the proof repository still holds sha-8c9765ee at sha256:1637b64152707ce58af273d029c55a8415a4846995ccb5c045ba71abe8281004 and sha-13654b4a at sha256:bff25cb56014d1008ee2cafb647d374714cc3cfd5ea7be6c153cb75dfd72dca8; both replays refused to publish a rebuilt image",
+    "production_rollout": "not exercised; deployment selection belongs to antoncore GitOps"
+  },
+  "state": {
+    "accepted": "attestation promotable for the valid image, refused for the incompatible herdr image",
+    "committed": "qualified images pushed to the proof repository under commit tags",
+    "externally_verified": "registry package versions listed by the GitHub packages API; production rollout and merge not run",
+    "observed": "real GitHub hosted builds and offline isolated containers"
+  },
+  "status": "passed",
+  "supported_versions": {
+    "baseline": "local herdr 0.9.1 runtime path",
+    "herdr_methods": [
+      "agent.get",
+      "agent.list",
+      "agent.prompt",
+      "agent.rename",
+      "pane.close",
+      "pane.list",
+      "pane.process_info",
+      "pane.read",
+      "pane.send_keys",
+      "pane.send_text",
+      "pane.split",
+      "pane.wait_for_output",
+      "server.stop",
+      "tab.close",
+      "tab.create",
+      "tab.list",
+      "workspace.close",
+      "workspace.create",
+      "workspace.list"
+    ],
+    "herdr_protocol": 22,
+    "herdr_server_capabilities": {
+      "endpoint_protocol_generation": 1,
+      "health_check": true
+    },
+    "targets": {
+      "claude": "2.1.295 (Claude Code)",
+      "codex": "codex-cli 0.162.0",
+      "herdr": "herdr 0.9.1"
+    }
+  },
+  "tested_commit": "13654b4a725ccff96384786575614fad00752a08",
+  "worker_image_qualified_targets": {
+    "incompatible_herdr": 2,
+    "valid": 3
+  },
+  "workflow_runs": {
+    "earlier_image_proof_and_replay": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38049030723",
+    "first_image_run_that_showed_foreground_herdr_reports_no_detached_daemon": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38048489606",
+    "full_tests_unit_green": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38049031132",
+    "image_proof": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38049448237",
+    "image_proof_replay": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38049448237/attempts/2",
+    "mutation_preflight_task_files_clean": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38049532033",
+    "red_tests": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38048181801"
+  }
+}

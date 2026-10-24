@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "playwright-cmd": {
+      "command": "cmd.exe",
+      "args": ["/c", "npx", "@playwright/mcp@latest", "--browser", "chrome", "--isolated"]
+    },
+    "gateway-tools": {
+      "type": "http",
+      "url": "http://gateway.fixture.invalid/toolset/engineer/mcp",
+      "headers": {"Authorization": "Bearer ${MCP_KEY_FIXTURE}"}
+    }
+  }
+}

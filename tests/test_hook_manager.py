@@ -173,6 +173,8 @@ def test_brain_reader_session_start_dispatch(enabled, brain_dispatch, monkeypatc
         monkeypatch.setattr(config, flag, False)
     monkeypatch.setattr("hooks.lifecycle.guard.session_event", Mock())
     monkeypatch.setattr("hooks.lifecycle.deps_kick.kick", Mock())
+    codex_refresh_kick = Mock()
+    monkeypatch.setattr("hooks.lifecycle.codex_refresh_kick.kick", codex_refresh_kick)
     monkeypatch.setattr("hooks.context.injection_trace.record_session_start", Mock())
     monkeypatch.setattr("hooks.context.enforcement.get_session_start_enforcements", Mock(return_value=""))
     monkeypatch.setattr("hooks.context.voice_output.cleanup_stale_flags", Mock(return_value=0))
@@ -180,10 +182,156 @@ def test_brain_reader_session_start_dispatch(enabled, brain_dispatch, monkeypatc
     monkeypatch.setattr("hooks.context.brain_adapter.inject_on_session_start", inject)
     EVENT_HANDLERS["SessionStart"]({"session_id": "session", "cwd": str(tmp_path)})
 
+    codex_refresh_kick.assert_called_once_with()
     if enabled:
         inject.assert_called_once_with("session", str(tmp_path))
     else:
         inject.assert_not_called()
+
+
+_START_PAYLOADS = {
+    "claude": {
+        "hook_event_name": "SessionStart",
+        "session_id": "claude-start",
+        "transcript_path": "/scratch/claude/transcript.jsonl",
+        "source": "startup",
+    },
+    "codex": {
+        "session_id": "01a1135e-b0f0-7750-a468-f9edd4ea4e11",
+        "transcript_path": "/scratch/codex/rollout.jsonl",
+        "hook_event_name": "SessionStart",
+        "model": "gpt-6.1-sol",
+        "permission_mode": "bypassPermissions",
+        "source": "startup",
+    },
+}
+
+
+@pytest.fixture
+def quiet_session_start(monkeypatch):
+    from unittest.mock import Mock
+
+    from hooks import config, hook_manager
+
+    for flag in (
+        "PROJECT_BRIDGE_ENABLED",
+        "MCP_SESSION_ID_BANNER_ENABLED",
+        "MCP_HYGIENE_ENABLED",
+        "EFFORT_POLICY_ENABLED",
+        "AGENTIHOOKS_FORCE_DEV_BRANCH",
+        "CI_MANIFESTO_ENABLED",
+        "BROADCAST_ENABLED",
+        "BRAIN_ENABLED",
+    ):
+        monkeypatch.setattr(config, flag, False)
+    monkeypatch.setattr(config, "CONDITIONS_ENABLED", True)
+    monkeypatch.setattr("hooks.lifecycle.guard.session_event", Mock())
+    monkeypatch.setattr("hooks.lifecycle.deps_kick.kick", Mock())
+    monkeypatch.setattr("hooks.lifecycle.codex_refresh_kick.kick", Mock())
+    monkeypatch.setattr("hooks.context.injection_trace.record_session_start", Mock())
+    monkeypatch.setattr("hooks.context.enforcement.get_session_start_enforcements", Mock(return_value=""))
+    monkeypatch.setattr("hooks.context.voice_output.cleanup_stale_flags", Mock(return_value=0))
+    monkeypatch.setattr(hook_manager.otel, "flush", Mock())
+    monkeypatch.setattr(hook_manager.os, "_exit", Mock())
+
+
+@pytest.fixture
+def start_condition(tmp_path, quiet_session_start):
+    from hooks.context import profile_chain
+
+    bundle = tmp_path / "bundle"
+    conditions_dir = bundle / ".claude" / "conditions"
+    conditions_dir.mkdir(parents=True)
+    (conditions_dir / "start-greet.sh").write_text("echo hello from a start condition\n")
+    state = profile_chain.state_path()
+    state.parent.mkdir(parents=True, exist_ok=True)
+    profiles = {"claude": {"profile": "alpha"}, "codex": {"profile": "alpha"}}
+    state.write_text(json.dumps({"bundle": {"path": str(bundle)}, "targets": {"global": profiles}}))
+    return tmp_path
+
+
+def _session_start_stdout(target: str, cwd: Path, monkeypatch, capsys) -> str:
+    import io
+
+    from hooks import hook_manager
+
+    monkeypatch.setenv("AGENTIHOOKS_TARGET", target)
+    payload = {**_START_PAYLOADS[target], "cwd": str(cwd)}
+    monkeypatch.setattr(hook_manager.sys, "stdin", io.StringIO(json.dumps(payload)))
+    hook_manager.main()
+    return capsys.readouterr().out
+
+
+def test_claude_session_start_prints_start_condition_context(start_condition, monkeypatch, capsys):
+    out = _session_start_stdout("claude", start_condition, monkeypatch, capsys)
+    assert "[condition start-greet.sh]\nhello from a start condition" in out
+
+
+def test_codex_session_start_envelope_carries_start_condition_context(start_condition, monkeypatch, capsys):
+    out = _session_start_stdout("codex", start_condition, monkeypatch, capsys)
+    output = json.loads(out)["hookSpecificOutput"]
+    assert output["hookEventName"] == "SessionStart"
+    assert "[condition start-greet.sh]\nhello from a start condition" in output["additionalContext"]
+
+
+def test_start_condition_failure_fails_open(quiet_session_start, monkeypatch, tmp_path):
+    from hooks import hook_manager
+    from hooks.context import conditions
+    from hooks.hook_manager import EVENT_HANDLERS
+
+    monkeypatch.setenv("AGENTIHOOKS_TARGET", "claude")
+
+    def broken(payload):
+        raise RuntimeError("index unreadable")
+
+    monkeypatch.setattr(conditions, "start_effect", broken)
+    logged = []
+    monkeypatch.setattr(hook_manager, "log", lambda *a, **k: logged.append(a))
+
+    EVENT_HANDLERS["SessionStart"]({"session_id": "session", "cwd": str(tmp_path)})
+
+    assert ("conditions session_start failed", {"error": "index unreadable"}) in logged
+
+
+def test_start_conditions_skip_a_target_that_cannot_inject_at_session_start(quiet_session_start, monkeypatch, tmp_path):
+    from unittest.mock import Mock
+
+    from hooks.context import conditions
+    from hooks.hook_manager import EVENT_HANDLERS
+
+    monkeypatch.setenv("AGENTIHOOKS_TARGET", "codex")
+    monkeypatch.setattr("hooks.targets.capabilities._CODEX_NO_CONTEXT_EVENTS", frozenset({"SessionStart"}))
+    start_effect = Mock(return_value=None)
+    monkeypatch.setattr(conditions, "start_effect", start_effect)
+
+    EVENT_HANDLERS["SessionStart"]({"session_id": "session", "cwd": str(tmp_path)})
+
+    start_effect.assert_not_called()
+
+
+def test_pretool_blocks_handed_off_session(monkeypatch, tmp_path):
+    from unittest.mock import Mock
+
+    from hooks import config, hook_manager
+
+    reason = "BLOCKED: This session already handed off to its successor."
+    policy = Mock(return_value=(reason, None))
+    monkeypatch.setattr(config, "QUOTA_POLICY_ENABLED", True)
+    monkeypatch.setattr("hooks.context.conditions.write_guard", Mock(return_value=None))
+    monkeypatch.setattr("hooks.context.conditions.pre_effect", Mock(return_value=None))
+    monkeypatch.setattr("hooks.context.quota_policy.pretool", policy)
+    payload = {
+        "session_id": "handed-off-session",
+        "tool_name": "Read",
+        "tool_input": {},
+        "cwd": str(tmp_path),
+    }
+
+    with pytest.raises(hook_manager.BlockAction) as exc:
+        hook_manager.on_pre_tool_use(payload)
+
+    assert str(exc.value) == reason
+    policy.assert_called_once_with("handed-off-session", "Read", str(tmp_path))
 
 
 @pytest.mark.parametrize(

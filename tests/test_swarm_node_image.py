@@ -2,6 +2,8 @@ import hashlib
 import io
 import json
 import tarfile
+import threading
+import urllib.error
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, call
@@ -44,8 +46,11 @@ def locked(tmp_path):
     return path, lock, payloads
 
 
-def test_lock_accepts_pinned_fixture(locked):
+@pytest.mark.parametrize("registry", ["", "public.ecr.aws/docker/library/"])
+def test_lock_accepts_pinned_fixture(locked, registry):
     path, lock, _ = locked
+    lock["base_image"] = registry + lock["base_image"]
+    path.write_text(json.dumps(lock))
     assert worker_image.load_lock(path, "amd64") == lock
 
 
@@ -111,6 +116,76 @@ def test_install_native_binaries_and_reject_wrong_version(locked, tmp_path, monk
     assert str(error.value) == "binary version mismatch: herdr"
 
 
+def test_install_reuses_only_verified_cached_downloads(locked, tmp_path, monkeypatch):
+    _, lock, payloads = locked
+    download = Mock(side_effect=lambda url, timeout: io.BytesIO(payloads[url]))
+    monkeypatch.setattr(worker_image.urllib.request, "urlopen", download)
+    cache = tmp_path / "cache"
+    cache.mkdir()
+    first = tmp_path / "first"
+    first.mkdir()
+    worker_image.install_tools(lock, first, cache)
+    assert download.call_count == 3
+    assert {p.name: p.read_bytes() for p in cache.iterdir()} == {
+        tool["sha256"]: payloads[tool["url"]] for tool in lock["tools"].values()
+    }
+    herdr = lock["tools"]["herdr"]
+    (cache / herdr["sha256"]).write_bytes(b"tampered")
+    download.reset_mock()
+    second = tmp_path / "second"
+    second.mkdir()
+    worker_image.install_tools(lock, second, cache)
+    assert download.call_args_list == [call(herdr["url"], timeout=120)]
+    assert (cache / herdr["sha256"]).read_bytes() == payloads[herdr["url"]]
+    assert {p.name: p.read_bytes() for p in second.iterdir()} == {p.name: p.read_bytes() for p in first.iterdir()}
+
+
+def test_download_fetches_every_locked_tool_concurrently(locked, tmp_path, monkeypatch):
+    _, lock, payloads = locked
+    barrier = threading.Barrier(len(lock["tools"]), timeout=5)
+
+    def download(url, timeout):
+        barrier.wait()
+        return io.BytesIO(payloads[url])
+
+    monkeypatch.setattr(worker_image.urllib.request, "urlopen", download)
+    cache = tmp_path / "cache"
+    cache.mkdir()
+    worker_image.download_tools(lock, cache)
+    assert {p.name: p.read_bytes() for p in cache.iterdir()} == {
+        tool["sha256"]: payloads[tool["url"]] for tool in lock["tools"].values()
+    }
+
+
+def test_download_fails_when_any_locked_tool_fails(locked, tmp_path, monkeypatch):
+    _, lock, payloads = locked
+    payloads[lock["tools"]["codex"]["url"]] = b"wrong binary"
+    monkeypatch.setattr(worker_image.urllib.request, "urlopen", lambda url, timeout: io.BytesIO(payloads[url]))
+    cache = tmp_path / "cache"
+    cache.mkdir()
+    with pytest.raises(ValueError) as error:
+        worker_image.download_tools(lock, cache)
+    assert str(error.value) == "artifact checksum mismatch: codex"
+    assert lock["tools"]["codex"]["sha256"] not in {p.name for p in cache.iterdir()}
+
+
+def test_install_never_caches_a_mismatched_download(locked, tmp_path, monkeypatch):
+    _, lock, payloads = locked
+    codex = lock["tools"]["codex"]
+    payloads[codex["url"]] = b"wrong binary"
+    monkeypatch.setattr(worker_image.urllib.request, "urlopen", lambda url, timeout: io.BytesIO(payloads[url]))
+    cache = tmp_path / "cache"
+    cache.mkdir()
+    (cache / codex["sha256"]).write_bytes(b"also wrong")
+    destination = tmp_path / "bin"
+    destination.mkdir()
+    with pytest.raises(ValueError) as error:
+        worker_image.install_tools(lock, destination, cache)
+    assert str(error.value) == "artifact checksum mismatch: codex"
+    assert (cache / codex["sha256"]).read_bytes() == b"also wrong"
+    assert list(destination.iterdir()) == []
+
+
 def test_codex_archive_installs_only_named_binary(locked, tmp_path, monkeypatch):
     _, lock, payloads = locked
     url = lock["tools"]["codex"]["url"]
@@ -163,9 +238,29 @@ def test_committed_image_inputs_pin_base_and_keep_profiles_outside_home():
     assert "FROM ${BASE_IMAGE}" in dockerfile
     assert '--base-image "$BASE_IMAGE"' in dockerfile
     assert "COPY profiles/ /opt/agentihooks/templates/" in dockerfile
+    assert "COPY profiles/package/roles/ /opt/agentihooks/templates/" in dockerfile
     assert "USER 10001:10001" in dockerfile
     assert "DISABLE_AUTOUPDATER=1" in dockerfile
     assert "--require-hashes" in dockerfile
+    assert "--require-hashes -d /downloads/pip -r /opt/swarm-node/requirements.lock" in dockerfile
+    python_stage = dockerfile.split("FROM ${BASE_IMAGE} AS python-downloads\n", 1)[1].split("\n\n", 1)[0]
+    assert python_stage.splitlines()[0] == "COPY docker/swarm-node/requirements.lock /opt/swarm-node/"
+    assert "versions.lock" not in python_stage
+    assert (
+        'worker_image.py download --architecture "$TARGETARCH" --cache /downloads/tools\n\nFROM ${BASE_IMAGE} AS worker\n'
+        in dockerfile.split("FROM ${BASE_IMAGE} AS tool-downloads\n", 1)[1]
+    )
+    assert 'worker_image.py install --architecture "$TARGETARCH" --cache /downloads/tools \\\n' in dockerfile
+    smoke = (inputs / "smoke.sh").read_text()
+    assert "docker build --no-cache-filter worker --platform" in smoke
+    assert "--mount=type=bind,from=python-downloads,source=/downloads/pip,target=/downloads/pip" in dockerfile
+    assert "--mount=type=bind,from=tool-downloads,source=/downloads/tools,target=/downloads/tools" in dockerfile
+    assert "--no-index --find-links /downloads/pip --require-hashes" in dockerfile
+    assert "--cache /downloads/tools \\\n    && chmod -R a-w /opt/venv\nCOPY pyproject" in dockerfile
+    assert "&& find /opt/venv \\! -type l -perm /222 -exec chmod a-w {} + \\\n" in dockerfile
+    assert dockerfile.count("chmod -R a-w") == 2 and "a-w /opt/agentihooks/templates /opt/swarm-node \\\n" in dockerfile
+    assert dockerfile.endswith('CMD ["python", "/opt/swarm-node/worker_image.py", "report"]\n')
+    assert dockerfile.count("FROM ") == 3
 
 
 @pytest.mark.parametrize(
@@ -298,24 +393,42 @@ def test_build_rejects_selected_base_that_differs_from_lock(locked, monkeypatch)
     assert str(error.value) == "base image differs from lock"
 
 
-@pytest.mark.parametrize("action", ["validate", "install", "manifest", "report", "shell-packages"])
+@pytest.mark.parametrize("action", ["validate", "download", "install", "manifest", "report", "shell-packages"])
 def test_build_command_routes_locked_actions(locked, monkeypatch, capsys, action):
     path, lock, _ = locked
     lock["shell_packages"].update(bash="5.2", curl="7.88")
     path.write_text(json.dumps(lock))
     monkeypatch.setattr(
         "sys.argv",
-        ["worker_image", action, "--lock", str(path), "--architecture", "amd64", "--source-revision", "tested"],
+        [
+            "worker_image",
+            action,
+            "--lock",
+            str(path),
+            "--architecture",
+            "amd64",
+            "--source-revision",
+            "tested",
+            "--cache",
+            "/var/cache/tools",
+        ],
     )
+    fetch = Mock()
     install = Mock()
     manifest = Mock()
     report = Mock(return_value={"zeta": 2, "alpha": 1})
+    monkeypatch.setattr(worker_image, "fetch", fetch)
     monkeypatch.setattr(worker_image, "install_tools", install)
     monkeypatch.setattr(worker_image, "write_manifest", manifest)
     monkeypatch.setattr(worker_image, "report", report)
     worker_image.main()
-    if action == "install":
-        install.assert_called_once_with(lock, Path("/usr/local/bin"))
+    if action == "download":
+        assert fetch.call_args_list == [
+            call(name, artifact, Path("/var/cache/tools")) for name, artifact in lock["tools"].items()
+        ]
+        install.assert_not_called()
+    elif action == "install":
+        install.assert_called_once_with(lock, Path("/usr/local/bin"), Path("/var/cache/tools"))
     elif action == "manifest":
         manifest.assert_called_once_with(path, "amd64", "tested", Path("/opt/agentihooks/templates"))
     elif action == "report":
@@ -324,6 +437,7 @@ def test_build_command_routes_locked_actions(locked, monkeypatch, capsys, action
     elif action == "shell-packages":
         assert capsys.readouterr().out == "git=1:2.39.5-0+deb12u3 bash=5.2 curl=7.88\n"
     else:
+        fetch.assert_not_called()
         install.assert_not_called()
         manifest.assert_not_called()
         report.assert_not_called()
@@ -394,3 +508,166 @@ def test_command_rejects_unknown_actions(monkeypatch, capsys):
         worker_image.main()
     assert error.value.code == 2
     assert "invalid choice: 'unexpected'" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("action", ["download", "install"])
+def test_a_named_tool_limits_download_and_install_to_that_tool(locked, monkeypatch, action):
+    path, lock, _ = locked
+    argv = ["worker_image", action, "--lock", str(path), "--tool", "herdr", "--cache", "/var/cache/tools"]
+    monkeypatch.setattr("sys.argv", argv)
+    fetch = Mock()
+    install = Mock()
+    monkeypatch.setattr(worker_image, "fetch", fetch)
+    monkeypatch.setattr(worker_image, "install_tools", install)
+    worker_image.main()
+    herdr = lock["tools"]["herdr"]
+    if action == "download":
+        assert fetch.call_args_list == [call("herdr", herdr, Path("/var/cache/tools"))]
+    else:
+        install.assert_called_once_with(
+            {**lock, "tools": {"herdr": herdr}}, Path("/usr/local/bin"), Path("/var/cache/tools")
+        )
+
+
+def test_a_named_tool_installs_and_checks_only_that_binary(locked, tmp_path, monkeypatch):
+    path, lock, payloads = locked
+    monkeypatch.setattr(worker_image.urllib.request, "urlopen", lambda url, timeout: io.BytesIO(payloads[url]))
+    installed = Mock(wraps=worker_image.install_tools)
+    monkeypatch.setattr(worker_image, "install_tools", lambda lock, _, cache: installed(lock, tmp_path, cache))
+    monkeypatch.setattr("sys.argv", ["worker_image", "install", "--lock", str(path), "--tool", "herdr"])
+    worker_image.main()
+    assert [entry.name for entry in tmp_path.iterdir() if entry.name in lock["tools"]] == ["herdr"]
+
+
+def test_command_rejects_an_unlocked_tool(locked, monkeypatch, capsys):
+    path, _, _ = locked
+    monkeypatch.setattr("sys.argv", ["worker_image", "install", "--lock", str(path), "--tool", "curl"])
+    with pytest.raises(SystemExit) as error:
+        worker_image.main()
+    assert error.value.code == 2
+    assert "invalid choice: 'curl'" in capsys.readouterr().err
+
+
+def test_a_named_package_limits_shell_packages_to_that_package(locked, monkeypatch, capsys):
+    path, lock, _ = locked
+    lock["shell_packages"].update(bash="5.2", **{"openssh-client": "1:9.2p1-2+deb12u7"})
+    path.write_text(json.dumps(lock))
+    argv = ["worker_image", "shell-packages", "--lock", str(path), "--package", "openssh-client", "--package", "git"]
+    monkeypatch.setattr("sys.argv", argv)
+    worker_image.main()
+    assert capsys.readouterr().out == "openssh-client=1:9.2p1-2+deb12u7 git=1:2.39.5-0+deb12u3\n"
+
+
+def test_an_unlocked_package_is_refused(locked, monkeypatch, capsys):
+    path, _, _ = locked
+    argv = ["worker_image", "shell-packages", "--lock", str(path), "--package", "zsh", "--package", "curl"]
+    monkeypatch.setattr("sys.argv", argv)
+    with pytest.raises(SystemExit) as error:
+        worker_image.main()
+    assert error.value.code == 2
+    assert "--package names packages the lock does not pin: curl, zsh" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("action", ["install", "download"])
+@pytest.mark.parametrize("failure", [500, 504, 599, "timeout", "wrapped-timeout", "read-timeout"])
+@pytest.mark.parametrize("failures", [1, 4, 5])
+def test_image_tool_commands_recover_from_a_server_error(locked, tmp_path, monkeypatch, action, failure, failures):
+    path, lock, payloads = locked
+    herdr = lock["tools"]["herdr"]
+    attempts = []
+    sleeps = Mock()
+    monkeypatch.setattr("time.sleep", sleeps)
+    if isinstance(failure, int):
+        error = urllib.error.HTTPError(herdr["url"], failure, "Server error", {}, None)
+    elif failure == "wrapped-timeout":
+        error = urllib.error.URLError(TimeoutError("timed out"))
+    else:
+        error = TimeoutError("timed out")
+
+    def opened(url, timeout):
+        assert timeout == 120
+        attempts.append(url)
+        response = io.BytesIO(payloads[url])
+        if attempts.count(url) <= failures:
+            if failure == "read-timeout":
+                response.read = Mock(side_effect=error)
+            else:
+                raise error
+        return response
+
+    monkeypatch.setattr(worker_image.urllib.request, "urlopen", opened)
+    install = worker_image.install_tools
+    monkeypatch.setattr(worker_image, "install_tools", lambda lock, _, cache: install(lock, tmp_path, cache))
+    cache = tmp_path / "cache"
+    cache.mkdir()
+    argv = ["worker_image", action, "--lock", str(path), "--cache", str(cache)]
+    if action == "install":
+        argv.extend(["--tool", "herdr"])
+    monkeypatch.setattr("sys.argv", argv)
+    selected = {"herdr": herdr} if action == "install" else lock["tools"]
+    if failures == 5:
+        with pytest.raises(type(error)) as caught:
+            worker_image.main()
+        assert caught.value is error
+        assert not list(cache.iterdir())
+        assert not any((tmp_path / name).exists() for name in selected)
+    else:
+        worker_image.main()
+        for name, tool in selected.items():
+            assert (cache / tool["sha256"]).read_bytes() == payloads[tool["url"]]
+            if action == "install":
+                assert (tmp_path / name).read_bytes() == payloads[tool["url"]]
+    expected_attempts, delays = {
+        1: (2, [1]),
+        4: (5, [1, 2, 4, 8]),
+        5: (5, [1, 2, 4, 8]),
+    }[failures]
+    assert {url: attempts.count(url) for url in attempts} == {
+        tool["url"]: expected_attempts for tool in selected.values()
+    }
+    assert sorted(entry.args[0] for entry in sleeps.call_args_list) == sorted(delays * len(selected))
+
+
+@pytest.mark.parametrize("status", [404, 499, 600, "dns"])
+def test_tool_download_does_not_retry_permanent_errors(locked, tmp_path, monkeypatch, status):
+    _, lock, _ = locked
+    tool = lock["tools"]["herdr"]
+    error = (
+        urllib.error.URLError("name resolution failed")
+        if status == "dns"
+        else urllib.error.HTTPError(tool["url"], status, "Permanent error", {}, None)
+    )
+    opened = Mock(side_effect=error)
+    sleeps = Mock()
+    monkeypatch.setattr(worker_image.urllib.request, "urlopen", opened)
+    monkeypatch.setattr("time.sleep", sleeps)
+    with pytest.raises(type(error)) as caught:
+        worker_image.fetch("herdr", tool, tmp_path)
+    assert caught.value is error
+    opened.assert_called_once_with(tool["url"], timeout=120)
+    sleeps.assert_not_called()
+    assert not (tmp_path / tool["sha256"]).exists()
+
+
+@pytest.mark.parametrize("action", ["install", "download"])
+def test_image_tool_commands_reject_bad_checksums_without_retry(locked, tmp_path, monkeypatch, action):
+    path, lock, payloads = locked
+    herdr = lock["tools"]["herdr"]
+    opened = Mock(side_effect=lambda url, timeout: io.BytesIO(b"corrupt" if url == herdr["url"] else payloads[url]))
+    sleeps = Mock()
+    monkeypatch.setattr(worker_image.urllib.request, "urlopen", opened)
+    monkeypatch.setattr("time.sleep", sleeps)
+    install = worker_image.install_tools
+    monkeypatch.setattr(worker_image, "install_tools", lambda lock, _, cache: install(lock, tmp_path, cache))
+    cache = tmp_path / "cache"
+    cache.mkdir()
+    argv = ["worker_image", action, "--lock", str(path), "--cache", str(cache)]
+    if action == "install":
+        argv.extend(["--tool", "herdr"])
+    monkeypatch.setattr("sys.argv", argv)
+    with pytest.raises(ValueError, match="artifact checksum mismatch: herdr"):
+        worker_image.main()
+    assert opened.call_args_list.count(call(herdr["url"], timeout=120)) == 1
+    sleeps.assert_not_called()
+    assert not (cache / herdr["sha256"]).exists()
+    assert not (tmp_path / "herdr").exists()

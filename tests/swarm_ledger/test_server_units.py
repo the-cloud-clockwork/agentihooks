@@ -37,7 +37,9 @@ def test_a_page_save_answers_applied_rejected_and_bounded_warnings(quiet, monkey
     monkeypatch.setattr(server, "repository", SimpleNamespace(apply_ops=apply_ops))
     h = handler("/api/demo")
     h.reply_state("demo", ops=[{"id": "a"}, {"id": "b"}], refusals={"c": "refused c"})
-    assert calls == [("demo", None, [{"id": "a"}, {"id": "b"}], "budget demo")]
+    gate = calls[0][3]
+    assert calls == [("demo", None, [{"id": "a"}, {"id": "b"}], gate)]
+    assert (type(gate).__name__, gate.slug, gate.inner.inner) == ("Fence", "demo", "budget demo")
     assert h.sent == [
         (
             200,
@@ -58,6 +60,15 @@ def test_the_retired_whole_ledger_read_answers_gone_with_the_new_address(quiet, 
     h.exists = lambda slug: slug == "demo"
     h.do_GET()
     assert h.sent == [(410, "read the ledger from /api/v1/ledgers/demo", "text/plain")]
+
+
+def test_health_reports_the_served_ledger_folder_without_a_server_process(quiet, tmp_path, monkeypatch):
+    monkeypatch.setattr(server.core, "LEDGER_DIR", tmp_path)
+    h = handler("/healthz?probe=1")
+    h.do_GET()
+    assert [(code, json.loads(body), ctype) for code, body, ctype in h.sent] == [
+        (200, {"dir": str(tmp_path)}, "application/json")
+    ]
 
 
 def test_a_ledger_request_is_judged_against_that_ledgers_token(quiet, monkeypatch):
@@ -90,7 +101,13 @@ def test_serve_runs_the_ledger_watch_on_a_daemon_thread(monkeypatch, tmp_path):
             pass
 
     class Server:
-        def __init__(self, address, handler_class):
+        def __init__(self, address, handler_class, bind_and_activate=True):
+            pass
+
+        def server_bind(self):
+            pass
+
+        def server_activate(self):
             pass
 
         def serve_forever(self):
@@ -106,7 +123,9 @@ def test_serve_runs_the_ledger_watch_on_a_daemon_thread(monkeypatch, tmp_path):
     monkeypatch.setattr(server.legacy, "adopt", adopted.append)
     monkeypatch.setattr(server, "PIDFILE", tmp_path / ".server.pid")
     server.serve()
-    assert threads == [{"target": server.watch_ledgers, "daemon": True}]
+    assert [thread["daemon"] for thread in threads] == [True, True]
+    assert threads[0]["target"] is server.adopt_disk_files
+    assert threads[1]["target"].__wrapped__ is server.watch_ledgers
     assert adopted == [server.stored]
 
 
@@ -122,7 +141,68 @@ def test_the_ledger_watch_sleeps_two_seconds_between_passes(monkeypatch):
     monkeypatch.setattr(server.ledger_bin, "tidy", lambda: None)
     monkeypatch.setattr(server, "bin_closed_without_swarm", lambda: None)
     monkeypatch.setattr(server, "sample_streams", lambda: None)
-    monkeypatch.setattr(server.time, "sleep", sleep)
+    monkeypatch.setattr("scripts.scheduler.process_timer.wait", sleep)
     with pytest.raises(StopIteration):
         server.watch_ledgers()
     assert slept == [2.0]
+
+
+def test_serve_follows_a_shared_database_on_its_own_daemon_thread(monkeypatch, tmp_path):
+    threads = []
+
+    class Thread:
+        def __init__(self, **kwargs):
+            threads.append(kwargs)
+
+        def start(self):
+            pass
+
+    class Server:
+        def __init__(self, address, handler_class, bind_and_activate=True):
+            pass
+
+        def server_bind(self):
+            pass
+
+        def server_activate(self):
+            pass
+
+        def serve_forever(self):
+            pass
+
+        def server_close(self):
+            pass
+
+    monkeypatch.setattr(server.threading, "Thread", Thread)
+    monkeypatch.setattr(server, "ThreadingHTTPServer", Server)
+    monkeypatch.setattr(server.server_lifetime, "watch", lambda *args: threading.Event())
+    monkeypatch.setattr(server.legacy, "adopt", lambda repository: None)
+    monkeypatch.setattr(server, "PIDFILE", tmp_path / ".server.pid")
+    monkeypatch.setattr(server.storage, "shared", lambda: "postgresql://ledger@db.test/ledger")
+    server.serve()
+    assert [thread["daemon"] for thread in threads] == [True, True, True]
+    assert threads[0]["target"] is server.adopt_disk_files
+    assert [thread["target"].__wrapped__ for thread in threads[1:]] == [server.watch_ledgers, server.follow_shared]
+
+
+def test_the_shared_follow_reads_every_watched_ledger_each_quarter_second(monkeypatch, capsys):
+    read, slept = [], []
+
+    def current(slug):
+        read.append(slug)
+        if slug == "broken":
+            raise ValueError("unreadable")
+
+    def sleep(seconds):
+        slept.append(seconds)
+        raise StopIteration
+
+    monkeypatch.setattr(server, "SCHEDULER_UNAVAILABLE", threading.Event())
+    monkeypatch.setattr(server.HUB, "watched", lambda: ["broken", "kept"])
+    monkeypatch.setattr(server.repository, "current", current)
+    monkeypatch.setattr("scripts.scheduler.process_timer.wait", sleep)
+    with pytest.raises(StopIteration):
+        server.follow_shared()
+    assert read == ["broken", "kept"]
+    assert slept == [0.25]
+    assert capsys.readouterr().err == "shared follow broken: unreadable\n"

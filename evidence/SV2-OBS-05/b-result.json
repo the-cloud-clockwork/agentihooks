@@ -1,0 +1,26 @@
+{
+  "case": "T-SV2-OBS-05-B",
+  "evidence_class": "mixed: the two live runs of the recorded SV2-CAP-02 scaling canary on the Anton anton-k3s-swarm group, joined with synthetic quota wait, stale checkpoint and denied cross brain query readings, plus two independent synthetic traces, a fakeredis incident store behind a server that can be disconnected and an in process notification sink that can fail; no live controller, deployed brain or alert backend was used",
+  "input_sha256": {
+    "fleet-canary-overlay.json": "2def3d0c2158e8569db200752ee289b623767c97003d4afd0c11b17d6e04df6c",
+    "fleet-dashboard-second.json": "dfc4eeee2456710da17662a2a2587c0ee7b02670b9cce302b5d9ab32f9b1178e",
+    "fleet-dashboard.json": "6cd33879f00facc2cdb1e1cadb945fd61f2532e397ba19e34b7a781a395b0c2b",
+    "scaling-canary-sv2-cap-02.json": "b51bcbf1ea93fb6f29172b6a29a5b43b8e513f30fa3e871fc31b49ad04829693"
+  },
+  "observed": {
+    "alert_leaked": [],
+    "labelled_grant": "a viewer grant names its brains as a list of brain ids",
+    "operator_sees_title": [
+      true
+    ],
+    "store_unchanged": true,
+    "swarm_denials": [
+      [
+        "[withheld outside the viewer's brain grant]",
+        "[withheld outside the viewer's brain grant]"
+      ]
+    ],
+    "swarm_leaked": []
+  },
+  "state": "passed"
+}

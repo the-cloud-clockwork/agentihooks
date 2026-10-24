@@ -1,0 +1,6 @@
+{
+  "scripts/events/memory.py:scripts.events.memory.xǁ_Runtimeǁ__init____mutmut_3:7cfd7a541ffe43e09d54eb3b137de1ca7d4e6567b7fed0cdabaea06a7f28126d": {
+    "reader": "standards_reader",
+    "reason": "closed is only read for truthiness in require_open and take and is only ever set to True on close, so starting it as None instead of False changes no output."
+  }
+}

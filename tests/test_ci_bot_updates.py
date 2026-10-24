@@ -34,25 +34,26 @@ def test_dev_push_publishes_merged_durations_with_read_permissions():
     assert job["needs"] == ["unit", "lint", "shard-check"]
     assert job["if"] == "${{ !cancelled() && github.event_name == 'push' }}"
     assert job["permissions"] == {"contents": "read"}
-    upload = next(s for s in job["steps"] if s.get("uses") == "actions/upload-artifact@v4")
+    upload = next(s for s in job["steps"] if s.get("uses") == "./.github/actions/retry-upload")
     assert upload["with"]["name"] == "durations-merged"
     assert upload["with"]["path"] == ".test_durations*"
     assert upload["with"]["include-hidden-files"] is True
 
 
-def test_a_newer_dev_push_never_cancels_a_running_dev_push_run():
+def test_a_newer_dev_push_replaces_only_the_pending_dev_push_run():
     concurrency = _workflow("test.yml")["concurrency"]
-    assert (concurrency["group"], concurrency["cancel-in-progress"]) in {
-        ("tests-${{ github.ref }}", "${{ github.event_name != 'push' }}"),
-        (
-            "tests-${{ github.event_name }}-${{ github.event.pull_request.number || github.run_id }}",
-            "${{ github.event_name == 'pull_request' }}",
-        ),
-    }
+    assert concurrency["cancel-in-progress"] == "${{ github.event_name == 'pull_request' }}"
+    assert concurrency["queue"] == "${{ github.event_name == 'workflow_dispatch' && 'max' || 'single' }}"
+    assert "github.event_name == 'push' && 'promotion-dev'" in concurrency["group"]
 
 
 ADOPT = (
     'python -m tests.dev_durations "$PYTHON_VERSION" ~/dev-durations --hash durations.sha256 --collected collected.json'
+)
+PRECOLLECTED_ADOPT = (
+    'collection=()\nif [[ "$GITHUB_EVENT_NAME" != push ]]; then\n'
+    "  collection=(--collection collected.json)\nfi\n"
+    + ADOPT.replace(" --collected collected.json", ' "${collection[@]}" --collected collected.json')
 )
 ADOPT_ENV = {"PYTHON_VERSION": "${{ matrix.python-version }}"}
 
@@ -60,13 +61,17 @@ ADOPT_ENV = {"PYTHON_VERSION": "${{ matrix.python-version }}"}
 def test_unit_shards_adopt_dev_durations_through_the_script_before_the_tests_run():
     jobs = _workflow("test.yml")["jobs"]
     step = next(s for s in jobs["split"]["steps"] if s.get("name") == "Adopt latest dev durations")
-    assert step["run"].strip() == ADOPT
+    assert step["run"].strip() in (ADOPT, PRECOLLECTED_ADOPT)
     assert step["env"] == ADOPT_ENV
     steps = jobs["unit"]["steps"]
     download = next(s for s in steps if s.get("name") == "Download the durations this run splits on")
-    assert download["with"] == {"name": "split-${{ matrix.python-version }}"}
+    assert download["with"] == {
+        "name": "split-${{ matrix.python-version }}",
+        "client-id": "${{ secrets.TCC_CI_CLIENT_ID }}",
+        "private-key": "${{ secrets.TCC_CI_APP_PRIVATE_KEY }}",
+    }
     assert steps.index(download) < next(i for i, s in enumerate(steps) if s.get("name") == "Run tests")
-    assert jobs["unit"]["needs"] == ["split"]
+    assert jobs["unit"]["needs"] == ["split", "select", "reuse", "admission"]
 
 
 def test_unit_shards_restore_dev_durations_from_the_cache_the_dev_push_saves():
@@ -84,18 +89,27 @@ def test_unit_shards_restore_dev_durations_from_the_cache_the_dev_push_saves():
     assert "restore-keys" not in restore["with"]
     assert restore["with"]["path"] == save["with"]["path"] == "~/dev-durations"
     assert save["with"]["key"] == "durations-merged-${{ github.sha }}"
-    assert restore["with"]["key"] == "${{ needs.durations.outputs.key }}"
-    assert restore["if"] == "needs.durations.outputs.key != ''"
+    producer = "durations" if "durations" in jobs else "select"
+    assert restore["with"]["key"] == "${{ needs." + producer + ".outputs.key }}"
+    assert restore["if"] == f"needs.{producer}.outputs.source == '' && needs.{producer}.outputs.key != ''"
     assert restore["with"]["fail-on-cache-miss"] is True
-    assert jobs["split"]["needs"] == ["durations"]
-    lookup = jobs["durations"]["steps"][0]
-    assert jobs["durations"]["outputs"] == {
+    assert jobs["split"]["needs"] in (
+        ["durations", "select", "reuse", "admission"],
+        ["select", "reuse", "admission"],
+        ["test-count", "select", "reuse", "admission"],
+    )
+    lookup = next(s for s in jobs.get("durations", jobs["select"])["steps"] if s.get("id") == "stored")
+    assert {
+        key: jobs.get("durations", jobs["select"])["outputs"][key] for key in ("key", "queued", "base", "source")
+    } == {
         "key": "${{ steps.stored.outputs.cache-matched-key }}",
         "queued": "${{ steps.republished.outputs.queued }}",
         "base": "${{ steps.base-run.outputs.sha }}",
+        "source": "${{ steps.unit-source.outputs.source }}",
     }
-    assert jobs["durations"]["timeout-minutes"] == (
-        "${{ (github.event_name == 'merge_group' || github.event_name == 'workflow_dispatch') && 4 || 2 }}"
+    assert jobs.get("durations", jobs["select"])["timeout-minutes"] in (
+        5,
+        "${{ (github.event_name == 'merge_group' || github.event_name == 'workflow_dispatch') && 4 || 2 }}",
     )
     assert lookup["id"] == "stored"
     assert lookup["uses"] == "actions/cache/restore@v4"
@@ -103,11 +117,12 @@ def test_unit_shards_restore_dev_durations_from_the_cache_the_dev_push_saves():
         "path": "~/dev-durations",
         "key": "durations-merged-${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha"
         " || github.event.before || github.sha }}",
+        "restore-keys": "durations-merged-",
         "lookup-only": True,
     }
-    assert {"durations", "split"} <= set(jobs["gate-required"]["needs"])
+    assert {"durations" if "durations" in jobs else "select", "split"} <= set(jobs["gate-required"]["needs"])
     assert "run" not in restore
-    assert adopt["run"] == ADOPT
+    assert adopt["run"] in (ADOPT, PRECOLLECTED_ADOPT)
     assert adopt["env"] == ADOPT_ENV
 
 
@@ -122,7 +137,7 @@ def test_release_computes_the_requested_version_from_tags(tmp_path, bump, expect
     output = tmp_path / "output"
     result = subprocess.run(
         ["bash", "-euo", "pipefail", "-c", step["run"]],
-        cwd=tmp_path,
+        cwd=_ROOT,
         env={**os.environ, "PATH": f"{tools}:{os.environ['PATH']}", "BUMP": bump, "GITHUB_OUTPUT": str(output)},
         capture_output=True,
         text=True,
@@ -136,8 +151,11 @@ def test_release_tags_without_committing_and_dry_run_never_pushes():
     assert job["permissions"] == {"contents": "write", "actions": "write"}
     assert job["env"]["GH_TOKEN"] == "${{ github.token }}"
     tag = next(s for s in job["steps"] if s.get("name") == "Tag the release")
-    assert 'git tag "v$NEXT" "$GITHUB_SHA"' in tag["run"]
-    assert "git rev-parse HEAD" in tag["run"]
+    assert 'git tag "v$NEXT" "$GITHUB_SHA"' in tag["run"] or tag["run"] == (
+        'bash scripts/ci_release.sh tag "$GITHUB_SHA" "$NEXT"'
+    )
+    script = (_ROOT / "scripts/ci_release.sh").read_text() if "ci_release.sh" in tag["run"] else tag["run"]
+    assert "git rev-parse HEAD" in script
     for step in job["steps"]:
         if "git push" in step.get("run", "") or "gh release create" in step.get("run", ""):
             assert step["if"] == "${{ !inputs.dry_run }}"

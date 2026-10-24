@@ -3,14 +3,18 @@ import os
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 
+from scripts.hive import admission, placement_waits
+from scripts.hive.placement import LOCAL_FULL
 from scripts.inbox.seats import seat_address
 from scripts.inbox.store import CLOSED, InboxStore
-from scripts.swarm import capacity, timing
+from scripts.swarm import capacity, freeze, timing
 from scripts.swarm.health.findings import Finding
 from scripts.swarm.ledger_client import LedgerGone
 
 STALL_MS = 600_000
 REF = "spawn-stall:"
+LOCAL_CAP = "local cap"
+LOCAL_REFUSAL = "spawn-stall-local"
 
 
 def read(store, slug: str) -> dict:
@@ -30,7 +34,7 @@ def eligible(store, slug: str, ledger, at: int, runtime) -> bool:
     if config.state != "running":
         return False
     try:
-        rows, ready = capacity.ready_work(slug, store, ledger.state(slug))
+        rows, ready = capacity.ready_work(slug, store, freeze.watched(slug, store, ledger, ledger.state(slug)))
     except LedgerGone:
         return False
     demand = {lane: len(tasks) for lane, tasks in ready.items()}
@@ -41,13 +45,18 @@ def eligible(store, slug: str, ledger, at: int, runtime) -> bool:
         requirements = runtime.quota_requirements(config, prepared)
     if reader := getattr(runtime, "quota_capacity", None):
         runtime.quota_previous(capacity.read(store, slug))
+        capacity.feed_spent(runtime, store, at)
         decision = reader(config, agents, at / 1000, demand, requirements, refresh=False)
     else:
         inputs = capacity.live_inputs(slug, store, ledger, dict(os.environ), at)
-        config, _ = capacity.autoscaled(config, inputs)
+        host = capacity.granted(capacity.host_room(config, inputs), inputs.previous, inputs.now_ms)
+        config, _ = capacity.autoscaled(config, inputs, host)
         decision = capacity.calculate(
             config, inputs.observations, inputs.agents, inputs.demand, requirements, warned=inputs.warned
         )
+        decision["host"] = host
+    if (decision.get("host") or {}).get("room") == 0:
+        return False
     return any(decision["placements"].values())
 
 
@@ -62,7 +71,7 @@ def launched(store, slug: str) -> int:
 def observe(store, slug: str, ledger, at: int, runtime) -> dict:
     state = read(store, slug)
     last = launched(store, slug)
-    if not eligible(store, slug, ledger, at, runtime):
+    if capped(store, slug, state.get("at", 0)) or not eligible(store, slug, ledger, at, runtime):
         state = {}
     elif "since" not in state or last > state["launch"]:
         state = {"since": at, "launch": last}
@@ -71,13 +80,59 @@ def observe(store, slug: str, ledger, at: int, runtime) -> dict:
     return state
 
 
+def capped(store, slug: str, since: int) -> bool:
+    local = json.loads(store.redis.get(store.key(slug, LOCAL_REFUSAL)) or "{}")
+    if not local or local["at"] < since:
+        return False
+    from scripts.swarm import local_slots
+
+    return local_slots.occupancy(store, local["machine"])[1] >= local["maximum"]
+
+
+def refuse_local(store, slug: str, machine: str, taken: int, maximum: int, at: int) -> None:
+    row = {"machine": machine, "taken": taken, "maximum": maximum, "at": at}
+    store.redis.set(store.key(slug, LOCAL_REFUSAL), json.dumps(row))
+
+
+def _refused(reason: str) -> list[tuple[str, str]]:
+    head = reason.partition(LOCAL_FULL)[0]
+    _, has_room, held = head.partition(" has room: ")
+    found = [(admission.category(part), part.partition(" ")[0]) for part in held.split("; ")] if has_room else []
+    return found or ([(admission.category(head), "")] if head else [])
+
+
+def _label(reason: str, host: str, count: str) -> str:
+    return f"{reason} on {host} ({count})" if host else f"{reason} ({count})"
+
+
+def refusals(waits: dict, local: dict, since: int) -> str:
+    latest, counts = {}, {}
+    for row in waits.values():
+        seen = row.get("seen_at", row["started_at"])
+        if seen < since:
+            continue
+        for found in set(_refused(row["reason"])):
+            latest[found] = max(latest.get(found, 0), seen)
+            counts[found] = counts.get(found, 0) + 1
+    shown = {found: _label(*found, f"{count} task{'s' if count > 1 else ''}") for found, count in counts.items()}
+    if local and local["at"] >= since:
+        found = (LOCAL_CAP, local["machine"])
+        latest[found] = local["at"]
+        shown[found] = _label(*found, f"{local['taken']} of {local['maximum']} agents")
+    ordered = sorted(shown, key=lambda found: (-latest[found], found))
+    return f"Admission refusals, latest first: {', '.join(shown[found] for found in ordered)}" if ordered else ""
+
+
 def findings(store, slug: str) -> list[Finding]:
     state = read(store, slug)
     if "since" not in state or state["at"] - state["since"] < STALL_MS:
         return []
     failure = json.loads(store.redis.get(store.key(slug, "tick-failure")) or "{}")
     evidence = ("A lane has a free seat, quota and claimable work",)
-    if failure:
+    local = json.loads(store.redis.get(store.key(slug, LOCAL_REFUSAL)) or "{}")
+    if refused := refusals(placement_waits.read(store, slug), local, state["since"]):
+        evidence += (refused,)
+    if "at" in failure and failure["at"] >= state["since"]:
         evidence += (f"Last failed step {failure['step']}: {failure['error']}",)
     return [Finding("spawn stall", slug, "No agent has launched for ten minutes", evidence, "ten minutes", 1)]
 
@@ -111,7 +166,7 @@ def watch(store, slug: str, ledger, clock: Callable[[], int], runtime) -> Iterat
         if error is previous:
             return
         previous = error
-        failure = {"step": step, "error": f"{type(error).__name__}: {error}"}
+        failure = {"step": step, "error": f"{type(error).__name__}: {error}", "at": clock()}
         timing.keep()
         store.redis.set(store.key(slug, "tick-failure"), json.dumps(failure))
 

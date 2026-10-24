@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+set -uo pipefail
+S=/home/iamroot/scratchpad/agentihooks/rig-grade-swarm-cxc9
+id="$1"; pattern="$2"; limit="${3:-600}"
+start=$(date +%s)
+while true; do
+  out=$(bash "$S/dr.sh" item "$id" 2>&1)
+  if grep -qE "$pattern" <<<"$out"; then echo "$out"; exit 0; fi
+  if (( $(date +%s) - start > limit )); then echo "TIMEOUT $out"; exit 1; fi
+  sleep 2
+done

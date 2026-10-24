@@ -1,0 +1,6 @@
+{
+  "hooks/hook_manager.py:hooks.hook_manager.x__inject_after_tool__mutmut_37:7dcb90d361501c95672288652fb9b5574118432bba3e2cb521e180bcd8b4c6a8": {
+    "reader": "standards_reader",
+    "reason": "hooks.common.inject_context reads also_log only as `if also_log and LOG_ENABLED`; None and False are both falsy, so the logging decision and every output are identical."
+  }
+}

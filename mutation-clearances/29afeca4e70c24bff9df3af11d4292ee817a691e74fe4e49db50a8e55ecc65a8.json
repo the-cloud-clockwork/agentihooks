@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/repository/rows.py:scripts.swarm_ledger.repository.rows.x_children__mutmut_4:4a341d17624adbf93ff7ac8a9d7c0ca32f5387d7f9a53031dc486b626a6762fa": {
+    "reader": "Standards",
+    "reason": "Index identities have unique numeric indices, so encoding rather than tuple keys does not alter occurrence counts or paths; string IDs still use tuples."
+  }
+}

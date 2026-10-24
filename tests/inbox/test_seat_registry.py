@@ -2,8 +2,6 @@ import pytest
 
 from scripts.inbox.seats import Occupancy, SeatRegistry, is_seat, seat_address
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 
 @pytest.fixture
 def seats():
@@ -90,7 +88,7 @@ def test_agent_seats_read_every_seat_at_once_and_page_the_legacy_scan(seats, mon
     monkeypatch.setattr(seats.redis, "get", lambda key: pytest.fail(key) if f"{PREFIX}-of:" in key else get(key))
     monkeypatch.setattr(seats.redis, "mget", lambda keys: reads.append(len(keys)) or mget(keys))
     assert seats.agent_seats("rig") == [("rig-eng-9", "eng-3@rig"), (minted[0], "eng-1@rig"), (minted[2], "eng-2@rig")]
-    assert reads == [4]
+    assert reads == [3, 4]
     assert seats.agent_names("rig") == ["rig-eng-9", minted[0], minted[2]]
     assert scans == [{"match": f"{PREFIX}-of:rig-*", "count": 1000}] * 2
 

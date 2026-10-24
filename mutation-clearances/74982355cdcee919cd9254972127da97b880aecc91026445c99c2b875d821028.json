@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_v2/master_fence.py:scripts.swarm_v2.master_fence.x_check_send__mutmut_11:9e0a9c127b21404d48aac37d0cbbf8eb0833e2ae83214c253a817f94d7cb69a6": {
+    "reader": "standards_reader",
+    "reason": "check_send reaches this line only when inbox.receiver_task finds a seat occupancy for the exact address, and ledger slugs must match the ledger SLUG_RE which excludes @, so master_of returns master@<slug> with one @ and partition and rpartition yield the same slug."
+  }
+}

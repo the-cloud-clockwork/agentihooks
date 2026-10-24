@@ -1,0 +1,615 @@
+import contextlib
+import hashlib
+import json
+import os
+import shutil
+import signal
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+import pytest
+
+from scripts.swarm_v2 import supervision_runtime
+from scripts.swarm_v2.broadcast_bridge import grant_path
+from scripts.swarm_v2.supervision import Launch, LaunchRefused
+from scripts.swarm_v2.supervision_agent import native_command
+from scripts.swarm_v2.supervision_protocol import checkpoint, write
+from scripts.swarm_v2.supervision_runtime import Supervisor, main
+from scripts.swarm_v2.worker import lease_renewal
+
+
+def launch_files(tmp_path):
+    attempt = tmp_path / "attempt"
+    attempt.mkdir()
+    (attempt / "homes" / "codex").mkdir(parents=True)
+    authority = {
+        "execution_id": "exe-" + "a" * 32,
+        "generation": 1,
+        "task_id": "fixture",
+        "seat_id": "eng-1",
+        "swarm_id": "fixture",
+        "grant_id": "lgr-" + "b" * 32,
+    }
+    record = {"attempt": authority["execution_id"], "homes": {"codex": "homes/codex"}}
+    (attempt / "execution.json").write_text(json.dumps(record))
+    (attempt / "registration.json").write_text(json.dumps(authority))
+    spec = {"schema_version": 1, "authority": authority, "harness": "codex", "agent": ["true"], "exporter": ["true"]}
+    path = tmp_path / "launch.json"
+    path.write_text(json.dumps(spec))
+    return attempt, path, spec
+
+
+def test_launch_binds_registered_authority_and_private_home(tmp_path):
+    attempt, path, spec = launch_files(tmp_path)
+    launch = Launch.load(attempt, path)
+    assert launch.authority == spec["authority"]
+    assert launch.home == attempt / "homes/codex"
+    assert launch.herdr == ("herdr", "server")
+
+
+def test_a_launch_without_an_exporter_loads_with_none(tmp_path):
+    attempt, path, spec = launch_files(tmp_path)
+    del spec["exporter"]
+    path.write_text(json.dumps(spec))
+
+    assert Launch.load(attempt, path).exporter is None
+
+
+@pytest.mark.parametrize("value", [None, [], [""], ["ok", 1], "exporter", ["a\0b"]])
+def test_a_launch_with_a_malformed_exporter_is_refused(tmp_path, value):
+    attempt, path, spec = launch_files(tmp_path)
+    spec["exporter"] = value
+    path.write_text(json.dumps(spec))
+
+    with pytest.raises(LaunchRefused) as refused:
+        Launch.load(attempt, path)
+
+    assert str(refused.value) == "invalid command"
+
+
+@pytest.mark.parametrize("field,value", [("generation", 2), ("execution_id", "exe-" + "c" * 32), ("grant_id", "other")])
+def test_launch_refuses_authority_changes_before_creating_runtime(tmp_path, field, value):
+    attempt, path, spec = launch_files(tmp_path)
+    spec["authority"][field] = value
+    path.write_text(json.dumps(spec))
+    with pytest.raises(LaunchRefused, match="authority"):
+        Launch.load(attempt, path)
+    assert not (attempt / "run").exists()
+
+
+@pytest.mark.parametrize("value", [0, -1, True, float("inf")])
+def test_launch_refuses_unbounded_deadline(tmp_path, value):
+    attempt, path, spec = launch_files(tmp_path)
+    spec["quiesce_seconds"] = value
+    path.write_text(json.dumps(spec))
+    with pytest.raises(LaunchRefused, match="deadline"):
+        Launch.load(attempt, path)
+
+
+def test_launch_refuses_home_escape(tmp_path):
+    attempt, path, _ = launch_files(tmp_path)
+    (attempt / "execution.json").write_text(
+        json.dumps({"attempt": "exe-" + "a" * 32, "homes": {"codex": str(tmp_path)}})
+    )
+    with pytest.raises(LaunchRefused, match="home"):
+        Launch.load(attempt, path)
+
+
+def test_a_launch_carries_the_opening_prompt_of_its_record(tmp_path):
+    attempt, path, spec = launch_files(tmp_path)
+    path.write_text(json.dumps({**spec, "prompt": "Your one task is fixture."}))
+
+    assert Launch.load(attempt, path).prompt == "Your one task is fixture."
+
+
+def test_a_launch_without_a_prompt_or_a_prepared_checkout_opens_bare_in_its_attempt(tmp_path):
+    attempt, path, _ = launch_files(tmp_path)
+
+    launch = Launch.load(attempt, path)
+
+    assert (launch.prompt, launch.checkout) == ("", None)
+
+
+@pytest.mark.parametrize("value", ["", 7, ["text"], "a\0b", None])
+def test_a_launch_with_a_malformed_prompt_is_refused(tmp_path, value):
+    attempt, path, spec = launch_files(tmp_path)
+    path.write_text(json.dumps({**spec, "prompt": value}))
+
+    with pytest.raises(LaunchRefused) as refused:
+        Launch.load(attempt, path)
+
+    assert str(refused.value) == "invalid prompt"
+
+
+def recorded_checkout(attempt, task, tree):
+    folder = attempt / "spool" / "workspaces"
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / f"{task}.json").write_text(json.dumps({"path": str(tree)}))
+
+
+def checked_out_launch(tmp_path, task="fixture"):
+    attempt, path, spec = launch_files(tmp_path)
+    spec["authority"]["task_id"] = task
+    (attempt / "registration.json").write_text(json.dumps(spec["authority"]))
+    path.write_text(json.dumps({**spec, "checkout": {"project": "github.com/o/r", "agent": "engineer@323133-1222"}}))
+    return attempt, path
+
+
+def test_a_launch_opens_in_the_worktree_its_task_recorded(tmp_path):
+    attempt, path = checked_out_launch(tmp_path)
+    tree = attempt / "worktrees" / "engineer-323133-1222"
+    tree.mkdir(parents=True)
+    recorded_checkout(attempt, "fixture", tree)
+
+    assert Launch.load(attempt, path).checkout == tree.resolve()
+
+
+def test_a_launch_without_a_checkout_ignores_a_recorded_worktree(tmp_path):
+    attempt, path, _ = launch_files(tmp_path)
+    tree = attempt / "worktrees" / "engineer-323133-1222"
+    tree.mkdir(parents=True)
+    recorded_checkout(attempt, "fixture", tree)
+
+    assert Launch.load(attempt, path).checkout is None
+
+
+@pytest.mark.parametrize(
+    "where", ["outside", "missing", "root", "absent", "unnamed", "empty", "garbled", "folder", "loop"]
+)
+def test_a_launch_whose_checkout_has_no_valid_worktree_is_refused(tmp_path, where):
+    attempt, path = checked_out_launch(tmp_path)
+    (attempt / "worktrees").mkdir()
+    (attempt / "worktrees" / "loop").symlink_to(attempt / "worktrees" / "loop")
+    trees = {
+        "outside": tmp_path,
+        "missing": attempt / "worktrees" / "gone",
+        "root": attempt / "worktrees",
+        "empty": "",
+        "loop": attempt / "worktrees" / "loop",
+    }
+    if where in trees:
+        recorded_checkout(attempt, "fixture", trees[where])
+    held = attempt / "spool" / "workspaces" / "fixture.json"
+    if where in ("unnamed", "garbled", "folder"):
+        held.parent.mkdir(parents=True)
+    if where == "unnamed":
+        held.write_text(json.dumps({"tree": "elsewhere"}))
+    if where == "garbled":
+        held.write_text("{not json")
+    if where == "folder":
+        held.mkdir()
+
+    with pytest.raises(LaunchRefused) as refused:
+        Launch.load(attempt, path)
+
+    assert str(refused.value) == "invalid checkout"
+
+
+def test_a_checkout_for_a_task_id_no_workspace_can_hold_is_refused(tmp_path):
+    attempt, path = checked_out_launch(tmp_path, "Fixture")
+    tree = attempt / "worktrees" / "engineer-323133-1222"
+    tree.mkdir(parents=True)
+    recorded_checkout(attempt, "Fixture", tree)
+
+    with pytest.raises(LaunchRefused) as refused:
+        Launch.load(attempt, path)
+
+    assert str(refused.value) == "invalid checkout"
+
+
+def wait_for(path, child):
+    deadline = time.monotonic() + 8
+    while time.monotonic() < deadline:
+        if path.exists():
+            return json.loads(path.read_text())
+        if child.poll() is not None:
+            result_path = path.parent / "result.json"
+            outcome = json.loads(result_path.read_text()) if result_path.exists() else {}
+            detail = {key: outcome.get(key) for key in ("reason", "failure_class", "failure_stage")}
+            raise AssertionError(f"supervisor exited before {path.name}: {child.returncode}; {detail}")
+        time.sleep(0.02)
+    raise AssertionError(f"no {path.name} receipt")
+
+
+def subprocess_environment():
+    environment = {key: value for key, value in os.environ.items() if "REDIS" not in key}
+    if environment.get("MUTANT_UNDER_TEST") == "stats":
+        environment.pop("MUTANT_UNDER_TEST")
+    return environment
+
+
+@pytest.mark.parametrize(
+    "value,expected",
+    [
+        ("stats", None),
+        ("fail", "fail"),
+        ("scripts.swarm_v2.supervision.x_mutant_1", "scripts.swarm_v2.supervision.x_mutant_1"),
+    ],
+)
+def test_subprocess_keeps_actual_mutant_and_fail_sentinel(monkeypatch, value, expected):
+    monkeypatch.setenv("MUTANT_UNDER_TEST", value)
+    assert subprocess_environment().get("MUTANT_UNDER_TEST") == expected
+
+
+def fixture_processes(fixture):
+    found = []
+    for entry in Path("/proc").iterdir():
+        if not entry.name.isdigit():
+            continue
+        try:
+            command = (entry / "cmdline").read_bytes()
+        except OSError:
+            continue
+        if str(fixture).encode() in command:
+            found.append(int(entry.name))
+    return found
+
+
+def reap(fixture):
+    deadline = time.monotonic() + 8
+    while (found := fixture_processes(fixture)) and time.monotonic() < deadline:
+        for pid in found:
+            with contextlib.suppress(ProcessLookupError):
+                os.kill(pid, signal.SIGKILL)
+        time.sleep(0.05)
+    assert not found, f"fixture processes survived teardown: {found}"
+
+
+@contextlib.contextmanager
+def supervised(tmp_path):
+    attempt, path, spec = launch_files(tmp_path)
+    fixture = tmp_path / "process_fixture.py"
+    shutil.copyfile(Path(__file__).parent / "integration/swarm_node/process_fixture.py", fixture)
+    spec.update(
+        herdr=[sys.executable, str(fixture), "herdr", "server"],
+        agent=[sys.executable, str(fixture), "agent", "cooperative"],
+        exporter=[sys.executable, str(fixture), "exporter", "0.1", "complete"],
+        startup_seconds=3,
+        quiesce_seconds=1,
+        checkpoint_seconds=0.4,
+        kill_seconds=0.2,
+    )
+    children = []
+
+    def start(**changes):
+        spec.update(changes)
+        path.write_text(json.dumps(spec))
+        environment = subprocess_environment()
+        environment["PYTHONPATH"] = str(Path(__file__).resolve().parent.parent)
+        child = subprocess.Popen(
+            [
+                sys.executable,
+                "-c",
+                "from scripts.swarm_v2.supervision_runtime import main; raise SystemExit(main())",
+                str(attempt),
+                str(path),
+            ],
+            env=environment,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        children.append(child)
+        return child
+
+    try:
+        yield start, attempt, spec
+        for child in children:
+            if child.poll() is None:
+                child.terminate()
+            child.wait(timeout=8)
+    finally:
+        for child in children:
+            child.kill()
+        reap(fixture)
+
+
+@pytest.fixture
+def worker(tmp_path):
+    with supervised(tmp_path) as value:
+        yield value
+
+
+def test_a_worker_whose_supervisor_died_leaves_no_fixture_process(tmp_path):
+    with supervised(tmp_path) as (start, attempt, _):
+        child = start()
+        root = runtime_directory(attempt, child)
+        wait_for(root / "running.json", child)
+        wait_for(root / "fixture-grandchild-two.json", child)
+        wait_for(root / "heartbeat-exporter.json", child)
+        child.kill()
+        child.wait(timeout=8)
+    assert fixture_processes(tmp_path / "process_fixture.py") == []
+
+
+def runtime_directory(attempt, child):
+    deadline = time.monotonic() + 8
+    while time.monotonic() < deadline:
+        directories = sorted((attempt / "run/supervision").glob("*/context.json"))
+        if directories:
+            return directories[-1].parent
+        if child.poll() is not None:
+            raise AssertionError(f"supervisor launch failed: {child.returncode}")
+        time.sleep(0.02)
+    raise AssertionError("supervisor did not create a launch context")
+
+
+def assert_stale_acknowledgement_rejected(attempt, root, checkpoint_seconds):
+    receipt = root / "exporter.checkpoint.json"
+    assert receipt.exists(), "no acknowledgement was written before the checkpoint wait ended"
+    landed = receipt.stat().st_mtime - (root / "quiesced.json").stat().st_mtime
+    assert landed < checkpoint_seconds, f"acknowledgement landed {landed:.3f} s after quiesce, past the wait"
+    acknowledgement = json.loads(receipt.read_text())
+    scope = json.loads((root / "context.json").read_text())
+    assert checkpoint(attempt, acknowledgement, scope) is None
+    assert checkpoint(attempt, {**acknowledgement, "incarnation": scope["incarnation"]}, scope) == root.name
+
+
+@pytest.mark.parametrize("ack,expected", [("complete", "complete"), ("stale", "incomplete"), ("missing", "incomplete")])
+def test_sigterm_during_tool_reports_observed_checkpoint(worker, ack, expected):
+    start, attempt, spec = worker
+    exporter = [*spec["exporter"][:-1], ack]
+    child = start(exporter=exporter, checkpoint_seconds=0.4 if ack == "missing" else 5)
+    root = runtime_directory(attempt, child)
+    wait_for(root / "running.json", child)
+    wait_for(root / "fixture-grandchild-two.json", child)
+    child.send_signal(signal.SIGTERM)
+    result = wait_for(root / "result.json", child)
+    assert child.wait(timeout=8) == (0 if expected == "complete" else 75), {
+        key: result.get(key) for key in ("reason", "checkpoint_status", "quiescence", "child_exits")
+    }
+    assert result["reason"] == "termination"
+    assert result["checkpoint_status"] == expected
+    assert result["quiescence"] == "clean"
+    assert result["supervisor_child_exit_total"] >= 2
+    if ack == "stale":
+        assert_stale_acknowledgement_rejected(attempt, root, spec["checkpoint_seconds"])
+
+
+def test_exporter_readiness_precedes_agent_launch(worker):
+    start, attempt, spec = worker
+    child = start(exporter=[sys.executable, "-c", "import time; time.sleep(20)"], startup_seconds=1)
+    root = runtime_directory(attempt, child)
+    result = wait_for(root / "result.json", child)
+    assert child.wait(timeout=8) == 70
+    assert result["reason"] == "exporter_startup_failure"
+    assert not (root / "fixture-agent.json").exists()
+
+
+def test_detaching_viewers_keeps_agent_exporter_and_grandchildren_alive(worker):
+    start, attempt, _ = worker
+    child = start()
+    root = runtime_directory(attempt, child)
+    wait_for(root / "running.json", child)
+    roles = ("agent", "tool", "grandchild-one", "grandchild-two", "exporter")
+    for role in roles:
+        wait_for(root / f"heartbeat-{role}.json", child)
+
+    def ticks():
+        return {role: json.loads((root / f"heartbeat-{role}.json").read_text())["tick"] for role in roles}
+
+    viewer = subprocess.Popen([sys.executable, "-c", "pass"])
+    assert viewer.wait() == 0
+    before = ticks()
+    deadline = time.monotonic() + 5
+    after = ticks()
+    while not all(after[role] > before[role] for role in roles) and time.monotonic() < deadline:
+        time.sleep(0.02)
+        after = ticks()
+    assert all(after[role] > before[role] for role in roles), [role for role in roles if after[role] <= before[role]]
+    assert child.poll() is None
+
+
+@pytest.mark.parametrize("mode,reason,code", [("complete", "agent_completed", 0), ("fail", "agent_failure", 70)])
+def test_agent_completion_is_distinct_from_failure(worker, mode, reason, code):
+    start, attempt, spec = worker
+    child = start(agent=[*spec["agent"][:-1], mode], checkpoint_seconds=5 if mode == "complete" else 0.4)
+    root = runtime_directory(attempt, child)
+    result = wait_for(root / "result.json", child)
+    assert child.wait(timeout=8) == code
+    assert result["reason"] == reason
+
+
+def test_stubborn_grandchildren_force_incomplete_checkpoint(worker):
+    start, attempt, spec = worker
+    child = start(agent=[*spec["agent"][:-1], "stubborn"])
+    root = runtime_directory(attempt, child)
+    wait_for(root / "fixture-grandchild-two.json", child)
+    child.terminate()
+    result = wait_for(root / "result.json", child)
+    assert child.wait(timeout=8) == 75
+    assert result["quiescence"] == "forced"
+    assert result["checkpoint_status"] == "incomplete"
+
+
+def test_main_agent_abrupt_death_is_observed_without_exit_receipt(worker):
+    start, attempt, _ = worker
+    child = start()
+    root = runtime_directory(attempt, child)
+    ready = wait_for(root / "agent.json", child)
+    os.kill(ready["pid"], signal.SIGKILL)
+    result = wait_for(root / "result.json", child)
+    assert child.wait(timeout=8) == 70
+    assert result["reason"] == "agent_failure"
+
+
+def test_only_one_supervisor_owns_an_attempt(worker):
+    start, attempt, _ = worker
+    first = start()
+    root = runtime_directory(attempt, first)
+    wait_for(root / "running.json", first)
+    second = start()
+    assert second.wait(timeout=8) == 64
+    assert first.poll() is None
+    assert len(list((attempt / "run/supervision").glob("*/context.json"))) == 1
+
+
+def test_private_native_homes_override_inherited_workstation_settings(tmp_path, monkeypatch):
+    attempt, path, _ = launch_files(tmp_path)
+    monkeypatch.setenv("CODEX_HOME", "/workstation/codex")
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", "/workstation/claude")
+    monkeypatch.setenv("HERDR_SESSION", "workstation")
+    worker = Supervisor(Launch.load(attempt, path))
+    assert worker.environment["CODEX_HOME"] == str(attempt / "homes/codex/.codex")
+    assert worker.environment["CLAUDE_CONFIG_DIR"] == str(attempt / "homes/codex/.claude")
+    assert "HERDR_SESSION" not in worker.environment
+    assert worker.environment["HERDR_CONFIG_PATH"].startswith(str(attempt))
+
+
+def test_native_codex_trust_is_scoped_to_admitted_directory(tmp_path):
+    result = native_command(("codex", "exec", "fixture"), tmp_path, {})
+    assert result == (
+        "codex",
+        "-c",
+        f'projects={{{json.dumps(str(tmp_path))}={{trust_level="trusted"}}}}',
+        "exec",
+        "fixture",
+    )
+
+
+@pytest.mark.parametrize("fault", ["hash", "scope", "status", "absolute", "traversal", "missing", "not-object"])
+def test_checkpoint_requires_matching_durable_manifest(tmp_path, fault):
+    attempt = tmp_path
+    scope = {"authority": {"execution_id": "fixture", "generation": 1}, "incarnation": "current"}
+    manifest = attempt / "checkpoints/current/manifest.json"
+    manifest.parent.mkdir(parents=True)
+    write(manifest, {**scope, "status": "complete", "checkpoint_id": "checkpoint"})
+    receipt = {
+        **scope,
+        "status": "complete",
+        "manifest": "checkpoints/current/manifest.json",
+        "sha256": hashlib.sha256(manifest.read_bytes()).hexdigest(),
+    }
+    assert checkpoint(attempt, receipt, scope) == "checkpoint"
+    if fault == "hash":
+        receipt["sha256"] = "unverified"
+    elif fault == "scope":
+        receipt["incarnation"] = "old"
+    elif fault == "status":
+        receipt["status"] = "uploading"
+    elif fault == "absolute":
+        receipt["manifest"] = str(manifest)
+    elif fault == "traversal":
+        receipt["manifest"] = "checkpoints/../checkpoints/current/manifest.json"
+    elif fault == "missing":
+        receipt["manifest"] = "checkpoints/absent.json"
+    else:
+        manifest.write_text("[]")
+        receipt["sha256"] = hashlib.sha256(manifest.read_bytes()).hexdigest()
+    assert checkpoint(attempt, receipt, scope) is None
+
+
+def test_launch_refusal_never_prints_user_input(capsys):
+    assert main(["fixture"]) == 64
+    assert "requires attempt directory" in capsys.readouterr().err
+
+
+def test_checkpoint_uses_the_exact_acknowledged_bytes(tmp_path, monkeypatch):
+    scope = {"authority": {"execution_id": "fixture"}, "incarnation": "current"}
+    path = tmp_path / "checkpoints/current/manifest.json"
+    path.parent.mkdir(parents=True)
+    write(path, {**scope, "status": "complete", "checkpoint_id": "acknowledged"})
+    raw = path.read_bytes()
+    receipt = {
+        **scope,
+        "status": "complete",
+        "manifest": "checkpoints/current/manifest.json",
+        "sha256": hashlib.sha256(raw).hexdigest(),
+    }
+    original = Path.read_bytes
+
+    def replace_after_read(file):
+        result = original(file)
+        if file == path:
+            write(path, {**scope, "status": "complete", "checkpoint_id": "unacknowledged"})
+        return result
+
+    monkeypatch.setattr(Path, "read_bytes", replace_after_read)
+    assert checkpoint(tmp_path, receipt, scope) == "acknowledged"
+
+
+def test_successful_herdr_command_without_json_output_is_accepted(tmp_path, monkeypatch):
+    attempt, path, _ = launch_files(tmp_path)
+    supervisor = Supervisor(Launch.load(attempt, path))
+    monkeypatch.setattr(
+        subprocess, "run", lambda *args, **kwargs: subprocess.CompletedProcess(args[0], 0, stdout=b"", stderr=b"")
+    )
+    assert supervisor.herdr(["pane", "run", "fixture", "true"], time.monotonic() + 5) == {}
+
+
+class LapsingLease:
+    def __init__(self) -> None:
+        self.lost, self.ticks = None, 0
+
+    def tick(self) -> None:
+        self.ticks += 1
+        if self.ticks == 3:
+            self.lost = "heartbeat_refused_409"
+
+
+def test_a_launch_without_an_admission_runs_without_a_lease(tmp_path):
+    attempt, path, _ = launch_files(tmp_path)
+
+    assert isinstance(Supervisor(Launch.load(attempt, path)).lease, lease_renewal.Unleased)
+
+
+def test_an_admitted_launch_renews_its_lease_from_the_attempt(tmp_path):
+    attempt, path, spec = launch_files(tmp_path)
+    (attempt / "run").mkdir()
+    grant_path(attempt).write_text("sv2.grant-fixture")
+    (attempt / "launch.json").write_text(json.dumps({**spec, "control_url": "http://controller.invalid:8780"}))
+    admission = {
+        "execution_id": spec["authority"]["execution_id"],
+        "task_id": "fixture",
+        "task_generation": 2,
+        "controller_epoch": 1,
+        "owner_identity": "engineer@fixture",
+        "lease_deadline_ms": int(time.time() * 1000) + 60_000,
+    }
+    (attempt / lease_renewal.ADMISSION).write_text(json.dumps(admission))
+
+    lease = Supervisor(Launch.load(attempt, path)).lease
+
+    assert isinstance(lease, lease_renewal.Renewer)
+    assert lease.authority["task_generation"] == 2
+
+
+def test_a_lost_lease_stops_the_running_worker(tmp_path, monkeypatch):
+    attempt, path, _ = launch_files(tmp_path)
+    supervisor = Supervisor(Launch.load(attempt, path))
+    supervisor.lease = LapsingLease()
+    monkeypatch.setattr(supervisor, "wait", lambda: None)
+
+    assert supervisor.running() == "lease_lost"
+    assert supervisor.lease.ticks == 3
+
+
+def test_a_worker_without_a_lease_runs_until_its_agent_completes(tmp_path, monkeypatch):
+    attempt, path, _ = launch_files(tmp_path)
+    supervisor = Supervisor(Launch.load(attempt, path))
+    supervisor.exits["agent"] = 0
+    monkeypatch.setattr(supervisor, "wait", lambda: None)
+
+    assert isinstance(supervisor.lease, lease_renewal.Unleased)
+    assert supervisor.running() == "agent_completed"
+
+
+def test_a_drain_after_a_lost_lease_writes_no_checkpoint(tmp_path, monkeypatch):
+    attempt, path, _ = launch_files(tmp_path)
+    supervisor = Supervisor(Launch.load(attempt, path))
+    supervisor.root.mkdir(parents=True)
+    supervisor.lease = LapsingLease()
+    supervisor.lease.lost = "lease_expired"
+
+    def refused(*args):
+        raise AssertionError("checkpoint read after the lease was lost")
+
+    monkeypatch.setattr(supervision_runtime, "checkpoint", refused)
+    monkeypatch.setattr(supervision_runtime.trees, "living", lambda *args: {})
+    monkeypatch.setattr(supervision_runtime.trees, "cleanup", lambda *args: True)
+
+    result = supervisor.drain("lease_lost")
+
+    assert result["checkpoint_status"] == "incomplete"
+    assert result["reason"] == "lease_lost"

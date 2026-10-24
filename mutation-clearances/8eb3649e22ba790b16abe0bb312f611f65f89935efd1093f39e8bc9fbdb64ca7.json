@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_v2/master_scale.py:scripts.swarm_v2.master_scale.x__retire__mutmut_12:03bd69245326855d62db6bf7a48affccb35361d890f73958c0bf61247f1ddd0e": {
+    "reader": "standards_reader",
+    "reason": "Changes the no ask sentinel of _retire from an empty string to XXXX. The sentinel is only compared with inbox item ids, which are generated hex ids and never equal either value, so the same items are withdrawn and redirected and every output is unchanged. Equivalent."
+  }
+}

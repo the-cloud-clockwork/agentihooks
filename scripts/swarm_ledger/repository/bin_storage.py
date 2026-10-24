@@ -4,14 +4,17 @@ import ledger_bin as domain
 import ledger_core as core
 import ledger_media
 
-from hooks.context import operator_words
+from scripts.swarm_ledger import ports, request_metrics
 
-from .sqlite import BEGIN_IMMEDIATE, read_registry
+from .sqlite import BEGIN_IMMEDIATE
 
 
 def _repository():
-    from . import legacy, repository
+    from scripts.swarm_ledger import storage
 
+    from . import legacy
+
+    repository = storage.default()
     legacy.adopt_bin(repository)
     return repository
 
@@ -19,13 +22,15 @@ def _repository():
 @contextmanager
 def _transaction():
     repository = _repository()
-    with domain.LOCK, repository.connect() as connection, connection:
-        connection.execute(BEGIN_IMMEDIATE)
+    with request_metrics.locked(domain.LOCK), repository.connect() as connection, connection:
+        request_metrics.begin(connection, BEGIN_IMMEDIATE)
         yield repository, connection
 
 
 def _registry(name):
-    return read_registry(_repository().directory, name)
+    from scripts.swarm_ledger import storage
+
+    return storage.read_registry(_repository().directory, name)
 
 
 def restored():
@@ -83,7 +88,7 @@ def purge_expired(now=None):
             repository.save_registry(connection, "bin", found)
     for slug in expired:
         ledger_media.purge(slug)
-        operator_words.forget(slug)
+        ports.hooks().operator_words.forget(slug)
     return expired
 
 

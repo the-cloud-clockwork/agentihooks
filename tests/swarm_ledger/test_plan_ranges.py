@@ -3,7 +3,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from scripts.swarm_ledger import ledger, ledger_artifacts, ledger_publish
+from scripts.swarm_ledger import ledger, ledger_artifacts, ledger_plans, ledger_publish
 from scripts.swarm_ledger import ledger_core as core
 from tests.swarm_ledger import test_plan_kind
 from tests.swarm_ledger.test_plan_kind import add, update
@@ -14,8 +14,18 @@ plan_ledger = test_plan_kind.plan_ledger
 PLAN = "# Plan\n\n## Build\n<!-- slice: first -->\n### First\nOne\n<!-- slice: second -->\n### Second\nTwo\n<!-- slice: third -->\n### Third\nThree\n## Ship\nOther\n"
 
 
+UNSLICED = (
+    "phase p1 has a plan with slice anchors: name the task's slice with --plan-slice on task add or plan_slice= "
+    "on task set, one of first, second, third"
+)
+
+
 @pytest.fixture
 def published(plan_ledger, tmp_path, monkeypatch, capsys):
+    return publish(plan_ledger, tmp_path, monkeypatch, capsys)
+
+
+def publish(plan_ledger, tmp_path, monkeypatch, capsys):
     core.sync(plan_ledger, ops=[{"op": "join", "id": "join", "by": "planner", "role": "member"}])
     path = tmp_path / "plan.md"
     path.write_text(PLAN)
@@ -41,6 +51,8 @@ def test_issue_publication_always_stores_artifact():
             stderr="",
             stdout=json.dumps({"hasIssuesEnabled": True})
             if argv[1] == "repo"
+            else "[]"
+            if argv[2] == "list"
             else "https://github.com/acme/app/issues/1\n",
         )
 
@@ -54,7 +66,7 @@ def test_issue_publication_always_stores_artifact():
         issue_title="Build",
     )
     assert saved == [("plan.md", "Build")]
-    assert calls[1] == [
+    assert calls[2] == [
         "gh",
         "issue",
         "create",
@@ -84,11 +96,125 @@ def test_publication_and_three_computed_ranges(published, monkeypatch):
     assert task(state, "plan")["state"] == "done"
 
 
+def test_explicit_no_plan_lines_normalizes_slice_metadata_only():
+    fields = {"plan_slice": "none", "slice": "slices/old", "description": "Independent work", "phase": "p1"}
+    assert ledger_plans.with_plan_slice({}, fields) == {
+        "description": "Independent work",
+        "phase": "p1",
+        "follow_up": True,
+    }
+    assert fields["plan_slice"] == "none"
+    assert fields["slice"] == "slices/old"
+
+
+@pytest.mark.parametrize("existing", [False, True])
+def test_task_cli_accepts_explicit_no_plan_lines(published, monkeypatch, capsys, existing):
+    if existing:
+        add(published, "loose", plan_slice="first")
+        cli(monkeypatch, published, "task", "set", "loose", "plan_slice=none", "description=Independent work")
+    else:
+        cli(
+            monkeypatch,
+            published,
+            "task",
+            "add",
+            "loose",
+            "Independent work",
+            "--phase",
+            "p1",
+            "--plan-slice",
+            "none",
+            "--description",
+            "Independent work",
+        )
+    row = task(core.sync(published)[0], "loose")
+    assert row["description"] == "Independent work"
+    assert row["follow_up"] is True
+    assert not row.get("plan_slice")
+    assert not row.get("plan_lines")
+    assert not row.get("slice")
+
+
 def test_missing_anchor_refused(published):
     state, rejected = add(published, "missing", plan_slice="missing")
     assert rejected == ["add-missing"]
     assert "slice anchor missing is missing" in state["_meta"]["warnings"][0]
     assert not any(t["id"] == "missing" for t in state["tasks"])
+
+
+def test_a_task_without_a_slice_is_refused_in_a_phase_whose_plan_has_anchors(published):
+    state, rejected = add(published, "loose")
+    assert rejected == ["add-loose"]
+    assert state["_meta"]["warnings"] == [UNSLICED]
+    state, rejected = add(published, "mastered", by="master@abcdef-0001")
+    assert (rejected, state["_meta"]["warnings"]) == (["add-mastered"], [UNSLICED])
+    assert not any(t["id"] in ("loose", "mastered") for t in state["tasks"])
+
+
+def test_a_task_moved_without_a_slice_into_an_anchored_phase_drops_its_slice_as_a_follow_up(published):
+    later = {"op": "phase_add", "id": "add-p2", "by": "planner", "phase": "p2", "title": "Later"}
+    core.check_op(later)
+    assert core.sync(published, ops=[later])[1] == []
+    add(published, "elsewhere", phase="p2")
+    op = {"op": "task_update", "id": "move", "by": "planner", "item": "tasks/elsewhere", "fields": {"phase": "p1"}}
+    core.check_op(op)
+    state, rejected = core.sync(published, ops=[op])
+    assert rejected == []
+    moved = task(state, "elsewhere")
+    assert (moved["phase"], moved["follow_up"]) == ("p1", True)
+    assert (moved.get("plan_slice", ""), moved.get("plan_lines", ""), moved.get("slice", "")) == ("", "", "")
+    sliced = {**op, "id": "move-sliced", "fields": {"phase": "p2"}}
+    core.check_op(sliced)
+    assert core.sync(published, ops=[sliced])[1] == []
+    named = {**op, "id": "move-named", "fields": {"phase": "p1", "plan_slice": "second"}}
+    core.check_op(named)
+    state, rejected = core.sync(published, ops=[named])
+    assert rejected == []
+    moved = task(state, "elsewhere")
+    assert (moved["phase"], moved["plan_slice"], moved["plan_lines"], moved["follow_up"]) == (
+        "p1",
+        "second",
+        "7-9",
+        False,
+    )
+    wrong = {**op, "id": "move-wrong", "fields": {"phase": "p2", "plan_slice": "missing"}}
+    core.check_op(wrong)
+    state, rejected = core.sync(published, ops=[wrong])
+    assert rejected == ["move-wrong"]
+    assert (task(state, "elsewhere")["phase"], task(state, "elsewhere")["plan_lines"]) == ("p1", "7-9")
+
+
+def test_plan_tasks_and_tasks_the_swarm_queues_need_no_slice(published):
+    state, rejected = add(published, "plan", lane="plan", kind="plan")
+    assert rejected == []
+    state, rejected = add(published, "release", kind="ops", by="swarm")
+    assert rejected == []
+    assert [t["id"] for t in state["tasks"]] == ["plan", "release"]
+
+
+def test_a_phase_without_anchors_takes_tasks_without_a_slice(plan_ledger):
+    state, rejected = add(plan_ledger, "free", plan_url="https://github.com/acme/app/issues/1")
+    assert rejected == []
+    assert [t["id"] for t in state["tasks"]] == ["free"]
+
+
+def test_anchors_are_read_inside_the_phase_range_or_from_a_stored_plan_link(published):
+    from scripts.swarm_ledger import plan_ranges
+
+    state = core.sync(published)[0]
+    phase = state["phases"][0]
+    ref = phase["plan_ref"]
+    assert plan_ranges.anchors(state, phase) == ["first", "second", "third"]
+    assert plan_ranges.anchors(state, {"plan_ref": {**ref, "lines": "13-14"}}) == []
+    assert plan_ranges.anchors(state, {"plan_url": ref["artifact"]}) == ["first", "second", "third"]
+    for other in ({}, {"plan_url": "https://github.com/acme/app/issues/1"}):
+        assert plan_ranges.anchors(state, other) == []
+    assert plan_ranges.anchors(state, {"plan_ref": {**ref, "lines": "4-6"}}) == ["first"]
+    assert plan_ranges.anchors(state, {"plan_ref": {**ref, "lines": "4-4"}}) == ["first"]
+    lead = ledger_artifacts.store(published, "lead.md", b"<!-- slice: lead -->\nLead\n")
+    doc = {"artifacts": [{"plan": True, "file": lead}]}
+    linked = {"plan_url": f"{ref['artifact'].rsplit('/', 1)[0]}/{lead['id']}"}
+    assert plan_ranges.anchors(doc, linked) == ["lead"]
 
 
 def test_slice_without_range_refused(plan_ledger):
@@ -274,3 +400,34 @@ def test_slice_tasks_of_a_missing_phase_or_without_a_slice_are_invalid():
 
     doc = {"phases": [], "artifacts": [], "tasks": [{"id": "a", "plan_slice": "a"}, {"id": "b"}, {"id": "c"}]}
     assert plan_ranges.invalid_tasks({"phase": "gone"}, doc, ["a", "b"]) == ["a", "b"]
+
+
+MARKED = "## Build\n<!-- slice: one -->\n### A\n<!-- slice: two -->\n### B\n## Ship\n<!-- slice: three -->\n### C\n"
+
+
+def test_slice_anchors_are_the_markers_inside_a_range():
+    from scripts.swarm_ledger import plan_ranges
+
+    assert plan_ranges.slice_anchors(MARKED, "1-5") == ["one", "two"]
+    assert plan_ranges.slice_anchors(MARKED, "2-2") == ["one"]
+    assert plan_ranges.slice_anchors(MARKED, "6-8") == ["three"]
+    assert plan_ranges.slice_anchors(MARKED, "3-3") == []
+
+
+@pytest.mark.parametrize(
+    ("ranges", "repeated"),
+    [
+        ({"p1": "1-5", "p2": "6-8"}, ""),
+        ({"p1": "1-5", "p2": "1-5"}, "one, two"),
+        ({"p1": "1-3", "p2": "1-5"}, "one"),
+    ],
+)
+def test_require_markers_refuses_a_slice_name_used_twice_across_phases(ranges, repeated):
+    from scripts.swarm_ledger import plan_ranges
+
+    if not repeated:
+        assert plan_ranges.require_markers(MARKED, ranges) is None
+        return
+    with pytest.raises(ValueError) as raised:
+        plan_ranges.require_markers(MARKED, ranges)
+    assert str(raised.value) == f"each slice marker needs its own name across the plan's phases: {repeated}"

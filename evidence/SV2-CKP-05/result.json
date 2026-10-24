@@ -1,0 +1,76 @@
+{
+  "browser": {
+    "mocked": true,
+    "proof": "workspace:vckp5/recovery-cards-1920x1080.png",
+    "viewport": [
+      1920,
+      1080
+    ]
+  },
+  "cases": [
+    "A",
+    "B",
+    "C"
+  ],
+  "deployment": {
+    "admission_evidence": {
+      "authority_claim_exists": true,
+      "image_builds": [
+        38209292872,
+        38209292266
+      ],
+      "merge_commit": "803514b722dd8c6d7da3a9429c3cca9e86ffc8c1",
+      "worker_start": "prepared"
+    },
+    "admission_pr": "https://github.com/the-cloud-clockwork/agentihooks/pull/2770",
+    "configuration_pr": "https://github.com/the-cloud-clockwork/antoncore/pull/720",
+    "status": "checkpoint_restore_proof_pending"
+  },
+  "fixture_inputs": {
+    "conversation_mismatch": "native directive naming a session other than the checkpoint's",
+    "corrupt_object": "native session object of ckpt-1 overwritten after commit",
+    "duplicated_restore_request": "resume requested twice after a controller restart, then fresh",
+    "valid_checkpoint": "ckpt-1 captured from the context-only transcript and committed authoritative",
+    "version_changed": "unsupported harness version: claude 9.0.0 against a checkpoint captured on 2.1"
+  },
+  "interfaces": [
+    "Recovery.request",
+    "Recovery.confirm",
+    "Restorer.restore",
+    "Validator.verify",
+    "capture.publish",
+    "Checkpoints.list",
+    "Checkpoints.fetch",
+    "RecoveryAPI restore outcome and checkpoint endpoints",
+    "worker prepare and supervisor native command"
+  ],
+  "metrics": "restore_outcomes_by_type counts authenticated verified worker outcomes",
+  "mocked": true,
+  "package": "SV2-CKP-05",
+  "pull_request": "https://github.com/the-cloud-clockwork/agentihooks/pull/4813",
+  "remaining_limitations": [
+    "Live capture and restore on Anton is unproven: the isolated proof controller was removed and the primary controller must be healthy first.",
+    "Approved spec exception, recorded by the swarm master on ledger task vckp5 on 19 October: while restore automation is on and not paused, a spawn superseded as a legacy specification is replaced fresh without a choice, because it never applied and holds no conversation; with automation off or paused it waits for a master or operator decision like any other failure.",
+    "Duplicate restore requests are idempotent per execution and choice; there is no separate request identity.",
+    "Supported harness versions are claude 2.1 and codex 0.162; any other version refuses native resume."
+  ],
+  "rollback_rehearsal": "C retained checkpoint and awaiting decision state while automation was paused",
+  "status": "fixture_verified",
+  "supported_harness_versions": {
+    "claude": [
+      "2.1"
+    ],
+    "codex": [
+      "0.162"
+    ]
+  },
+  "test_outputs": {
+    "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39266331075": "red before the directive fix: 1 failed, assert 'native' == 'fresh'",
+    "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39266839665": "229 passed in 11.77s"
+  },
+  "tested_commit": "64671965a1f1f0e39080da80a8b0f0bd4ef5484d",
+  "tests": [
+    "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39266331075",
+    "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39266839665"
+  ]
+}

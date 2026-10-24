@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_v2/startup_stages.py:scripts.swarm_v2.startup_stages.x_failure__mutmut_20:d60f1fc976b10bd15d6cad41b603eead4bb0bdc4b114d96f9bfef62526167d7f": {
+    "reader": "Standards reader for SV2-PRF-02",
+    "reason": "Failed events always carry a message key because _event sets it for every MESSAGE_REASONS entry, so the default is never read; even if it were, lowercased XXXX does not contain pull, the same as the empty default."
+  }
+}

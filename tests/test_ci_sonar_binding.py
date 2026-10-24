@@ -27,7 +27,7 @@ def test_sonar_requires_the_bound_gate_with_a_separate_reader(tmp_path, binding,
     assert step is not None
     assert step["env"] == {"SONAR_READ_TOKEN": "${{ secrets.SONAR_READ_TOKEN }}"}
     assert step.get("continue-on-error", False) is False
-    assert step["if"] == "steps.current.outputs.superseded != 'true'"
+    assert step["if"] == "success() && steps.proxy.outcome == 'success'"
     assert steps.index(next(s for s in steps if s.get("id") == "proxy")) < steps.index(step)
     assert steps.index(step) < steps.index(next(s for s in steps if s.get("name") == "SonarQube Scan"))
     curl = tmp_path / "curl"
@@ -43,6 +43,7 @@ def test_sonar_requires_the_bound_gate_with_a_separate_reader(tmp_path, binding,
         env=dict(
             os.environ,
             PATH=f"{tmp_path}:{os.environ['PATH']}",
+            GITHUB_WORKSPACE=str(ROOT),
             SONAR_READ_TOKEN="reader-test",
             BINDING=json.dumps(binding),
             API_STATUS=str(api_status),
@@ -73,7 +74,7 @@ def test_missing_reader_secret_cannot_pass_as_an_anonymous_public_project_read(t
     curl.chmod(0o755)
     result = subprocess.run(
         ["bash", "-eo", "pipefail", "-c", step["run"]],
-        env=dict(os.environ, PATH=f"{tmp_path}:{os.environ['PATH']}", SONAR_READ_TOKEN=""),
+        env=dict(os.environ, PATH=f"{tmp_path}:{os.environ['PATH']}", GITHUB_WORKSPACE=str(ROOT), SONAR_READ_TOKEN=""),
         capture_output=True,
         text=True,
     )

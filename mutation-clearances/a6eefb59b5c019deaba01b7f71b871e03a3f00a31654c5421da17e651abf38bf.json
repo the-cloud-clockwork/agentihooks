@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_v2/startup_bench.py:scripts.swarm_v2.startup_bench.x_main__mutmut_59:08894aedde76c5fedece7cc100f4bdb02fa0e89a2d2bec92d67aacbbe0c57a47": {
+    "reader": "Standards reader for SV2-PRF-02",
+    "reason": "sort_keys=False yields the same output as sort_keys=True because the refused dict keys (pods) are already in sorted order from attribute() and the top-level keys are already sorted in source."
+  }
+}

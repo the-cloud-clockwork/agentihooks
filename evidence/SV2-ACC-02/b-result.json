@@ -1,0 +1,55 @@
+{
+  "package": "SV2-ACC-02",
+  "case": "T-SV2-ACC-02-B",
+  "title": "rejection and containment: a stale attempt cannot free a slot held by its replacement",
+  "tested_commit": "6ab5b7036792e591123b1f04999b089af814f8d0",
+  "evidence_class": "mocked",
+  "ci_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38052074829",
+  "fixture": "tests/fixtures/swarm_v2/account-capacity.json: account fixture with cap 2, seat eng-1 holding one slot, and two simultaneous launch requests from seats eng-2 and eng-3",
+  "fixture_clock": "build() patches time.time to the fixture clock; AccountCapacity reads the same list",
+  "tests": [
+    {
+      "test": "tests/test_swarm_v2_accounts.py::test_a_stale_attempt_cannot_free_the_slot_its_replacement_holds",
+      "job": 114213747910,
+      "output": "PASSED at 2026-10-10T12:35:59.9410725Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_accounts.py::test_another_execution_at_the_held_generation_cannot_take_the_slot",
+      "job": 114213747917,
+      "output": "PASSED at 2026-10-10T12:36:41.1060238Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_accounts.py::test_a_request_without_a_grant_of_this_swarm_is_refused",
+      "job": 114213747871,
+      "output": "PASSED at 2026-10-10T12:35:18.5520162Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_accounts.py::test_a_freeze_landing_mid_reservation_refuses_it",
+      "job": 114213747888,
+      "output": "PASSED at 2026-10-10T12:36:25.0414740Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_accounts.py::test_a_registry_close_landing_mid_occupancy_refuses_it",
+      "job": 114213747917,
+      "output": "PASSED at 2026-10-10T12:36:41.2224187Z"
+    }
+  ],
+  "rejections": {
+    "stale_release": "stale_generation",
+    "stale_reserve": "stale_generation",
+    "stale_occupy": "stale_generation",
+    "same_generation_other_execution": "stale_generation",
+    "no_grant_or_foreign_swarm": "forbidden_scope",
+    "freeze_mid_reservation": "reservations_frozen",
+    "registry_close_mid_occupancy": "unregistered"
+  },
+  "state_assertion": "account hash rows are byte-equal before and after every refused request",
+  "disclosure_assertion": "refusals carry only the error class; no token or grant field",
+  "recovery_isolation": "the replacement keeps its generation 2 slot; a new valid request needs a current grant",
+  "account_reservation_conflicts_total": {
+    "value": 0,
+    "dimension": "account fixture, stale requests"
+  },
+  "cleanup": "fakeredis per test; no live resource mutations",
+  "passed": true
+}

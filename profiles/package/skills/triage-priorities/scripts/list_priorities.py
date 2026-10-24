@@ -3,7 +3,7 @@
 
 Usage: list_priorities.py SLUG [--clear-resolved] [--skip ID...] [--as NAME]
 
-Reads LEDGER_DIR/SLUG.json (default ~/development-ledger). Prints JSON {"open": [...], "resolved": [...]}.
+Reads the priorities collection and each referenced item through the ledger API. Prints JSON {"open": [...], "resolved": [...]}.
 --clear-resolved clears every resolved priority through `agentihooks ledger priority clear`.
 --skip leaves out the priorities the operator already decided this run.
 """
@@ -13,7 +13,7 @@ import json
 import os
 import subprocess
 import sys
-from pathlib import Path
+from urllib.error import HTTPError
 
 # The last comments carry the item's current ask; older ones are history.
 RECENT = 3
@@ -21,16 +21,31 @@ RECENT = 3
 GROUP_ORDER = ("questions", "approvals", "blocked", "follow ups", "phases", "tasks")
 
 
-def ledger_path(slug):
-    return Path(os.environ.get("LEDGER_DIR") or Path.home() / "development-ledger") / f"{slug}.json"
-
-
 def load(slug):
-    path = ledger_path(slug)
+    from scripts.swarm_ledger import ledger
+
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
+        priorities = ledger.resource(slug, "priorities", collection=True)
+        doc = {"priorities": priorities}
+        for path in dict.fromkeys(row["item"] for row in priorities):
+            name, _, _ = path.partition("/")
+            item = read_item(slug, path)
+            if item is not None:
+                doc.setdefault(name, []).append(item)
+        return doc
     except (OSError, ValueError) as exc:
-        sys.exit(f"cannot read ledger {slug} in {path.parent}: {exc}. Check the slug with: agentihooks ledger list")
+        sys.exit(f"cannot read ledger {slug}: {exc}. Check the slug with: agentihooks ledger list")
+
+
+def read_item(slug: str, path: str) -> dict | None:
+    from scripts.swarm_ledger import ledger
+
+    try:
+        return ledger.resource(slug, path)
+    except HTTPError as exc:
+        if exc.code != 404:
+            raise
+        return None
 
 
 def find(doc, item):

@@ -5,12 +5,13 @@ from collections.abc import Mapping
 from pathlib import Path
 
 from hooks.proc import Process
-from scripts.swarm.store import AgentRecord
+from scripts.swarm.store import AgentRecord, SwarmError
 from scripts.swarm_v2.runtime.base import Unqualified
 
 BOOT_ID = Path("/proc/sys/kernel/random/boot_id")
 PID_NAMESPACE = Path("/proc/self/ns/pid")
 IDENTITY = ("process_namespace", "pid", "pid_start")
+LAUNCH_LABELS = {"process_namespace": "process namespace", "pid": "process number", "pid_start": "start time"}
 
 
 def local_namespace(boot_id: Path = BOOT_ID, pid_namespace: Path = PID_NAMESPACE) -> str:
@@ -18,6 +19,39 @@ def local_namespace(boot_id: Path = BOOT_ID, pid_namespace: Path = PID_NAMESPACE
         return f"{boot_id.read_text().strip()}/{pid_namespace.readlink()}"
     except OSError:
         return ""
+
+
+def previous_boot(recorded: str, current: str) -> bool:
+    recorded_boot, _, recorded_pid = recorded.partition("/")
+    current_boot, _, current_pid = current.partition("/")
+    return bool(recorded_boot and recorded_pid and current_boot and current_pid and recorded_boot != current_boot)
+
+
+def reopened_process(agent: AgentRecord) -> Process | None:
+    if not agent.conversation_id:
+        return None
+    from scripts.terminate_agent import sessions
+
+    for session in sessions():
+        if (
+            session.name == agent.name
+            and session.session_id == agent.conversation_id
+            and session.target == agent.harness
+            and session.status == "alive"
+        ):
+            return session.process
+    return None
+
+
+def launch_target(pid: object, namespace: str, table: Mapping[int, Process]) -> dict:
+    number = max(pid, 0) if type(pid) is int else 0
+    found = table.get(number)
+    target = {"process_namespace": namespace, "pid": number, "pid_start": found.start_time if found else 0}
+    missing = [LAUNCH_LABELS[field] for field in IDENTITY if not target[field]]
+    if missing:
+        named = f"{', '.join(missing[:-1])} and {missing[-1]}" if len(missing) > 1 else missing[0]
+        raise SwarmError(f"local launch refused: its {named} could not be read")
+    return target
 
 
 def resolve(agent: AgentRecord, namespace: str, table: Mapping[int, Process]) -> Unqualified | int | None:

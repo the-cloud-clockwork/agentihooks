@@ -15,8 +15,6 @@ from tests.swarm_ledger import legacy_page
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts" / "swarm_ledger"))
 import ledger_core as core  # noqa: E402
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 
 @pytest.fixture
 def store():
@@ -104,6 +102,29 @@ def test_snapshot_writes_one_document_with_the_ledger_and_worktrees(store, tmp_p
     assert doc["ledger"] == {"tasks": [{"id": "t1"}], "_meta": {"rev": 1}}
     assert doc["worktrees"] == {"engineer@a1b2c3-0001": "/wt/engineer-a1b2c3-0001", "master@a1b2c3-0001": ""}
     assert _values(doc["state"]) == _values(json.loads(json.dumps(store.export("sw"))))
+
+
+def test_a_host_without_git_finds_no_worktrees():
+    def missing(argv, **kw):
+        raise FileNotFoundError(2, "No such file or directory", "git")
+
+    assert snapshot.worktrees("github.com/o/r", ["engineer@a1b2c3-0001"], missing) == {"engineer@a1b2c3-0001": ""}
+
+
+def test_worktrees_list_the_repo_in_porcelain_text_with_a_bound():
+    calls = []
+
+    def git(argv, **kw):
+        calls.append((argv, kw))
+        return subprocess.CompletedProcess(argv, 0, "worktree /wt/a\nbranch refs/heads/engineer-a1b2c3-0001\n", "")
+
+    assert snapshot.worktrees("/repo", ["engineer@a1b2c3-0001"], git) == {"engineer@a1b2c3-0001": "/wt/a"}
+    assert calls == [
+        (
+            ["git", "-C", "/repo", "worktree", "list", "--porcelain"],
+            {"capture_output": True, "text": True, "timeout": 30},
+        )
+    ]
 
 
 def test_restore_refuses_while_an_agent_of_the_swarm_is_live(store):

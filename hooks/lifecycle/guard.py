@@ -47,8 +47,13 @@ def caller_holder(session_id: str, proc: Path = Path("/proc"), start: int | None
     return None
 
 
+def _running(holder: Holder, proc: Path = Path("/proc")) -> bool:
+    process = _process(holder.pid, proc)
+    return bool(process) and process.start_time == holder.start_time
+
+
 def candidate_paths(tool_input: dict) -> list[str]:
-    found = [str(tool_input[key]) for key in ("file_path", "notebook_path", "path") if tool_input.get(key)]
+    found = [str(tool_input[key]) for key in ("file_path", "notebook_path", "path", "workdir") if tool_input.get(key)]
     found += PATH_TOKEN.findall(str(tool_input.get("command", "")))
     return [os.path.expanduser(item) for item in found]
 
@@ -82,10 +87,10 @@ def claim(payload: dict, roots: list[Root] | None = None, home: Path | None = No
         if being_removed(home, str(unit)):
             return f"BLOCKED: agentihooks gc is removing {unit} right now. Retry in a minute or work elsewhere."
         lease = read_lease(unit, kind)
-        if lease and session and any(item.session_id == session for item in lease.holders):
+        if lease and session and any(item.session_id == session and _running(item) for item in lease.holders):
             continue
         holder = holder or caller_holder(session)
-        if holder:
+        if holder and not (lease and holder in lease.holders):
             add_holder(unit, kind, holder, time.time())
     return ""
 
@@ -102,16 +107,12 @@ def free_gb() -> float:
 
 
 def kick(force: bool = False, home: Path | None = None) -> None:
-    from hooks.lifecycle.timer import start_now
-
     stamp = (home or _home()) / "gc.stamp"
     interval = float(_setting("AGENTIHOOKS_GC_INTERVAL_MIN", "60")) * 60
     if not force and stamp.exists() and time.time() - stamp.stat().st_mtime < interval:
         return
     stamp.parent.mkdir(parents=True, exist_ok=True)
     stamp.touch()
-    if start_now():
-        return
     from hooks._async import fork_and_call
     from hooks.lifecycle.run import sweep
 

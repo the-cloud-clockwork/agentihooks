@@ -5,15 +5,14 @@ import { disconnected, receiveLedger, resume } from "./sync.js";
 import { receiveSwarm, swarmLost } from "./swarm.js";
 
 let eventCursor = null;
+let snapshot = null;
 const latest = { ledger: null, swarm: null };
 
 function onStreamEvent(name, data) {
   if (name === "snapshot") {
-    const same = (key) => JSON.stringify(data[key]) === JSON.stringify(latest[key]);
-    const changed = { ledger: !same("ledger"), swarm: !same("swarm") };
     Object.assign(latest, data);
-    if (changed.swarm || latest.swarm === null) receiveSwarm(latest.swarm);
-    if (changed.ledger && latest.ledger) receiveLedger(latest.ledger);
+    receiveSwarm(latest.swarm);
+    if (latest.ledger) receiveLedger(latest.ledger);
   } else if (name === "ledger") {
     latest.ledger = applyPatch(latest.ledger, data.patch);
     receiveLedger(latest.ledger);
@@ -25,7 +24,7 @@ function onStreamEvent(name, data) {
   }
 }
 
-function takeFrame(block) {
+async function takeFrame(block) {
   let name = "message", id = null;
   const data = [];
   for (const line of block.split("\n")) {
@@ -38,7 +37,16 @@ function takeFrame(block) {
   }
   if (!data.length) return;
   try {
-    onStreamEvent(name, JSON.parse(data.join("\n")));
+    const raw = data.join("\n");
+    if (name === "snapshot" && raw === snapshot) resume();
+    else {
+      await scheduler.postTask(() => {}, { priority: "background" });
+      const parsed = JSON.parse(raw);
+      await scheduler.postTask(() => {}, { priority: "background" });
+      onStreamEvent(name, parsed);
+      if (name === "snapshot") snapshot = raw;
+      else if (name === "ledger" || name === "swarm") snapshot = null;
+    }
   } catch (error) {
     eventCursor = null;
     throw error;
@@ -55,7 +63,7 @@ async function readStream(body) {
     buffer = (buffer + value).replace(/\r\n?/g, "\n");
     let end;
     while ((end = buffer.indexOf("\n\n")) >= 0) {
-      takeFrame(buffer.slice(0, end));
+      await takeFrame(buffer.slice(0, end));
       buffer = buffer.slice(end + 2);
     }
   }

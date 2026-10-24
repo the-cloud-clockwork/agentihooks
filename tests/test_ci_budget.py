@@ -24,7 +24,7 @@ def _job(name, created, completed, conclusion="success"):
 
 
 JOBS = [
-    _job("durations", "00:05", "00:40"),
+    _job("select", "00:05", "00:40"),
     _job("unit (3.12, 1)", "02:00", "05:00"),
     _job("unit (3.11, 4)", "02:10", "06:30"),
     _job("swarm-image / smoke", "00:05", "01:00"),
@@ -61,7 +61,7 @@ def test_stage_of_names_the_job_or_reusable_workflow_id(name, stage):
 
 def test_a_stage_spans_first_job_creation_to_last_job_end():
     assert ci_budget.stages(JOBS) == {
-        "durations": 35,
+        "select": 35,
         "unit": 270,
         "swarm-image": 95,
         "mutation": 600,
@@ -90,6 +90,20 @@ def test_a_stage_at_its_budget_and_a_run_at_fifteen_minutes_are_inside_budget():
     assert ci_budget.run_state(901) == "over"
 
 
+@pytest.mark.parametrize(
+    ("name", "completed", "expected"),
+    [
+        ("admission", "00:30", "ok"),
+        ("admission", "00:31", "over"),
+        ("mutation-plan", "01:00", "ok"),
+        ("mutation-plan", "01:01", "over"),
+    ],
+)
+def test_dispatch_admission_and_mutation_planning_have_bounded_wall_times(name, completed, expected):
+    result = ci_budget.report({"run_started_at": START}, [_job(name, "00:00", completed)], 0)
+    assert ci_budget.verdict(result["stages"][0]) == expected
+
+
 def test_render_prints_every_stage_and_the_run_against_the_budget():
     result = ci_budget.report({"run_started_at": START}, JOBS, ci_budget.seconds("2026-10-09T07:16:00Z"))
     assert [line.split() for line in ci_budget.render(result)] == [
@@ -97,7 +111,7 @@ def test_render_prints_every_stage_and_the_run_against_the_budget():
         ["mutation", "10m00s", "8m00s", "over"],
         ["unit", "4m30s", "5m00s", "ok"],
         ["swarm-image", "1m35s", "3m00s", "ok"],
-        ["durations", "0m35s", "1m00s", "ok"],
+        ["select", "0m35s", "1m00s", "ok"],
         ["brand-new", "0m10s", "none", "no", "budget"],
         ["push", "to", "this", "report", "16m00s", "15m00s", "over"],
     ]
@@ -147,7 +161,7 @@ def test_cli_prints_the_table_summary_and_annotations(tmp_path, monkeypatch, cap
             "| Stage | Wall | Budget | Verdict |",
             "| --- | ---: | ---: | --- |",
             "| mutation | 10m00s | 8m00s | over |",
-            "| durations | 0m35s | 1m00s | ok |",
+            "| select | 0m35s | 1m00s | ok |",
             "| brand-new | 0m10s | none | no budget |",
             "| push to this report | 16m00s | 15m00s | over |",
             "",
@@ -186,9 +200,13 @@ def test_cli_requires_both_files(tmp_path, dropped):
 def test_stage_budget_runs_after_every_gate_need_and_gate_required_needs_it():
     jobs = _workflow_jobs()
     job, gate = jobs[ci_budget.SELF], jobs["gate-required"]
-    assert set(job["needs"]) == set(gate["needs"]) - {ci_budget.SELF}
+    assert set(job["needs"]) == set(gate["needs"]) - {ci_budget.SELF, ci_budget.WATCHER}
     assert ci_budget.SELF in gate["needs"]
-    assert job["if"] == "${{ always() }}"
+    assert job["if"] in (
+        "${{ always() }}",
+        "${{ always() && github.event_name != 'merge_group' && github.event_name != 'pull_request' }}",
+        "${{ always() && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') }}",
+    )
     assert "permissions" not in job and "continue-on-error" not in job
     mint, read, report = job["steps"][1:]
     assert mint["uses"] == "actions/create-github-app-token@v3.2.0"

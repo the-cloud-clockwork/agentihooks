@@ -5,14 +5,15 @@ The lead lists `group_members`; each member carries `merged_into` and leaves the
 
 import re
 
-from scripts.swarm_ledger import ledger_kinds
+from scripts.swarm_ledger import ledger_kinds, ports
 
 OPS = ("task_group", "task_ungroup")
 MAX_TASKS = 5
-CEILING = "M"
 MINUTES = {"S": 10, "M": 25, "L": 40}
+CEILING = MINUTES["M"]
+FOLD_CEILING = 2 * MINUTES["L"]
 GROUPED_KINDS = ("code", "ci")
-WORKER_LANES = ("eng", "ci")
+REFUSED_LANES = ("eng", "ci", "plan")
 AUTHOR_RE = re.compile(r"^[A-Za-z][\w.@-]{0,63}$")
 ID_RE = re.compile(r"^[A-Za-z0-9][\w.-]{0,63}$")
 ITEM_RE = re.compile(r"^tasks/[^/]+$")
@@ -41,7 +42,7 @@ def check(op):
         raise ValueError(f"a group holds at most {MAX_TASKS} tasks")
 
 
-def refusal(tasks: list[dict], known: dict) -> str:
+def refusal(tasks: list[dict], known: dict, ceiling: int = CEILING) -> str:
     """Why these tasks cannot form one group, or '' when they can."""
     if len({(t.get("lane"), t.get("profile") or "", ledger_kinds.kind(t)) for t in tasks}) > 1:
         return "grouped tasks share the same lane, profile and kind"
@@ -63,8 +64,8 @@ def refusal(tasks: list[dict], known: dict) -> str:
     if len(tasks) > MAX_TASKS:
         return f"a group holds at most {MAX_TASKS} tasks"
     sizes = [t["difficulty"] for t in tasks]
-    if any(s != "S" for s in sizes) and sum(MINUTES[s] for s in sizes) > MINUTES[CEILING]:
-        return f"together they pass {CEILING}"
+    if any(s != "S" for s in sizes) and sum(MINUTES[s] for s in sizes) > ceiling:
+        return f"together they pass {ceiling} minutes of work"
     return ""
 
 
@@ -76,9 +77,9 @@ def _upstream(task, known):
 
 
 def apply(doc, op, ctx):
-    from scripts.swarm.naming import lane_of
+    lane_of = ports.swarm().naming.lane_of
 
-    if lane_of(op["by"]) in WORKER_LANES:
+    if lane_of(op["by"]) in REFUSED_LANES:
         verb = "release" if op["op"] == "task_ungroup" else "set"
         ctx.refused.append(f"{op['by']} works in the {lane_of(op['by'])} lane and cannot {verb} a task group")
         return False
@@ -91,7 +92,7 @@ def _group(known, op, ctx):
     if any(task_id not in known for task_id in (lead_id, *op["members"])):
         return False
     group = [known[lead_id], *(known[m] for m in op["members"])]
-    if reason := refusal(group, known):
+    if reason := refusal(group, known, FOLD_CEILING):
         ctx.refused.append(f"{op['item']} cannot lead this group: {reason}")
         return False
     known[lead_id]["group_members"] = list(op["members"])

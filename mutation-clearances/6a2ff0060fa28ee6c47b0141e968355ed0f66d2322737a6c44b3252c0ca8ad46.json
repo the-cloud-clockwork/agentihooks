@@ -1,0 +1,6 @@
+{
+  "scripts/ci_access_audit.py:scripts.ci_access_audit.x_inventory__mutmut_10:994332a7116b3880803bec4a90be5ef00e2ea32cac828339d63526bfee5bc9ee": {
+    "reader": "standards_reader",
+    "reason": "Diagnostic only: the malformed collaborator response still raises ValueError before using entries; audit main catches that class and writes the same generic failure report, alert and nonzero status. Only the internal exception message differs."
+  }
+}

@@ -8,8 +8,6 @@ from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
 from tests.inbox.test_wake import FakeHerdr
 from tests.swarm.test_tick import FakeLedger, FakeRuntime
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 
 @pytest.fixture
 def store():
@@ -200,7 +198,7 @@ def test_controller_fences_ledger_and_spawn_writes(store):
     ledger = FakeLedger([])
     held = lease.acquire(store, "sw", "home")
     guarded_ledger = controller.FencedLedger(store, "sw", held, ledger)
-    guarded_runtime = controller.FencedRuntime(store, "sw", held, runtime, True)
+    guarded_runtime = controller.FencedRuntime(store, "sw", held, runtime, "local")
     assert guarded_ledger.state("sw") == ledger.state("sw")
     guarded_runtime.spawn(store.config("sw"), "eng", "one", {"id": "t"})
     assert runtime.tasks[0]["controller_epoch"] == 1
@@ -229,12 +227,14 @@ def test_spawn_receiver_refuses_epoch_after_launch_preparation(store, monkeypatc
     assert lease.release(store, "sw", held)
     lease.acquire(store, "sw", "other")
     with pytest.raises(SwarmError) as error:
-        receiver._launch(SimpleNamespace(slug="sw"), "eng", "t", "one", ["--agent", "claude"], controller_epoch=1)
+        receiver._launch(
+            SimpleNamespace(slug="sw"), "eng", "t", "one", ["--dir", "/repo", "--agent", "claude"], controller_epoch=1
+        )
     assert str(error.value) == "the controller lease is stale"
     assert calls == []
 
 
-def test_new_epoch_can_tick_while_the_old_tick_is_still_locked(store, monkeypatch):
+def test_new_epoch_waits_while_the_old_tick_is_still_locked(store, monkeypatch):
     from scripts.swarm import lease
 
     monkeypatch.setenv("SWARM_HIVE_ID", "home")
@@ -243,10 +243,13 @@ def test_new_epoch_can_tick_while_the_old_tick_is_still_locked(store, monkeypatc
     assert cli.run_tick(store, "sw", FakeLedger([]), FakeRuntime(), FakeHerdr({})) == ["another tick is running"]
     assert lease.release(store, "sw", held)
     monkeypatch.setenv("SWARM_HIVE_ID", "other")
-    result = cli.run_tick(store, "sw", FakeLedger([]), FakeRuntime(), FakeHerdr({}))
-    assert "another tick is running" not in result
+    assert cli.run_tick(store, "sw", FakeLedger([]), FakeRuntime(), FakeHerdr({})) == ["another tick is running"]
     assert lease.current(store, "sw").epoch == 2
     assert lease.current(store, "sw").owner == "other"
+    assert store.redis.get(store.key("sw", "tick-lock")) == '{"epoch": 1, "token": "old tick"}'
+    store.redis.delete(store.key("sw", "tick-lock"))
+    result = cli.run_tick(store, "sw", FakeLedger([]), FakeRuntime(), FakeHerdr({}))
+    assert "another tick is running" not in result
     assert store.redis.get(store.key("sw", "tick-lock")) is None
 
 
@@ -261,6 +264,8 @@ def test_old_tick_cannot_release_a_new_epochs_lock(store):
     assert store.redis.pttl(store.key("sw", "tick-lock")) > 9000
     assert lease.release(store, "sw", first)
     second = lease.acquire(store, "sw", "other")
+    assert controller.take_tick_lock(store, "sw", second, 10000) is None
+    store.redis.delete(store.key("sw", "tick-lock"))
     new = controller.take_tick_lock(store, "sw", second, 10000)
     assert json.loads(new)["epoch"] == 2
     assert old != new
@@ -342,11 +347,11 @@ def test_fenced_adapters_preserve_arguments_and_refuse_disabled_spawn(store):
         has_capacity=lambda saved: False,
         spawn=lambda *args: calls.append(args) or "placed",
     )
-    enabled = controller.FencedRuntime(store, "sw", held, receiver, True)
+    enabled = controller.FencedRuntime(store, "sw", held, receiver, "local")
     assert enabled.has_capacity(config) is False
     assert enabled.spawn(config, "eng", "one", {"id": "t"}) == "placed"
     assert calls[-1] == (config, "eng", "one", {"id": "t", "controller_epoch": 1})
-    disabled = controller.FencedRuntime(store, "sw", held, receiver, False)
+    disabled = controller.FencedRuntime(store, "sw", held, receiver, "compose")
     with pytest.raises(SwarmError) as error:
         disabled.spawn(config, "eng", "one", {"id": "t"})
     assert str(error.value) == "controller spawning is disabled in this deployment mode"
@@ -387,9 +392,9 @@ def test_run_once_passes_the_supplied_tick_interfaces(store, monkeypatch):
 
     ledger, runtime, messenger = object(), object(), object()
     calls = []
-    monkeypatch.setattr(cli, "run_tick", lambda *args: calls.append(args) or ["done"])
+    monkeypatch.setattr(cli, "run_tick", lambda *args, **kwargs: calls.append((args, kwargs)) or ["done"])
     assert controller.run_once(store, ledger, runtime, messenger) == {"sw": ["done"]}
-    assert calls == [(store, "sw", ledger, runtime, messenger)]
+    assert calls == [((store, "sw", ledger, runtime, messenger), {"scheduled": True})]
 
 
 def test_runtime_spawn_carries_epoch_to_launch_receiver(store, monkeypatch, tmp_path):
@@ -426,5 +431,40 @@ def test_launch_receiver_accepts_the_current_epoch(store, monkeypatch, tmp_path)
     receiver = runtime.HerdrRuntime(home=tmp_path, run=launch)
     config = SimpleNamespace(slug="sw", autonomy="delegate", compact_limit=0)
     with pytest.raises(SwarmError) as error:
-        receiver._launch(config, "eng", "t", "one", ["--agent", "claude"], controller_epoch=held.epoch)
+        receiver._launch(
+            config, "eng", "t", "one", ["--dir", "/repo", "--agent", "claude"], controller_epoch=held.epoch
+        )
     assert str(error.value) == "launch reached"
+
+
+@pytest.mark.parametrize(
+    ("mode", "member_url", "member", "expected"),
+    [
+        ("compose", "rediss://hive:6379/0", "m1", "m1"),
+        ("local", "rediss://hive:6379/0", "m1", "home"),
+        ("compose", "", "m1", "home"),
+        ("compose", "rediss://hive:6379/0", "", "home"),
+    ],
+)
+def test_a_joined_member_beats_under_its_member_id_only_when_it_uses_the_member_redis(
+    monkeypatch, mode, member_url, member, expected
+):
+    monkeypatch.delenv("AGENTIHOOKS_SWARM_REDIS_URL", raising=False)
+    monkeypatch.setenv("SWARM_HIVE_ID", "home")
+    monkeypatch.setenv("AGENTIHOOKS_HIVE_ID", member)
+    monkeypatch.setenv("AGENTIHOOKS_DEPLOYMENT", mode)
+    monkeypatch.setenv("AGENTIHOOKS_HIVE_REDIS_URL", member_url)
+
+    assert commands.hive_id() == expected
+
+
+def test_publish_hands_the_tick_view_to_the_status_report(store, monkeypatch):
+    seen = []
+    monkeypatch.setattr(command_runner, "status_report", lambda *args: seen.append(args) or {})
+
+    def view(url):
+        return None
+
+    command_runner.publish(store, "sw", {"tasks": []}, view)
+    command_runner.publish(store, "sw", {"tasks": []})
+    assert seen == [(store, "sw", {"tasks": []}, None, view), (store, "sw", {"tasks": []}, None, None)]

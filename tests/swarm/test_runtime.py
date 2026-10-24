@@ -35,7 +35,7 @@ def test_spawn_hands_init_agent_the_swarm_lane_and_task(tmp_path, monkeypatch):
 
 def test_spawn_stamps_the_launch_start_before_init_agent_runs(tmp_path, monkeypatch):
     clock = iter([5_000.0, 9_000.0])
-    monkeypatch.setattr("scripts.swarm.runtime.time.time", lambda: next(clock))
+    monkeypatch.setattr("scripts.swarm.runtime.time", SimpleNamespace(time=lambda: next(clock), sleep=lambda _: None))
 
     def run(argv, **kwargs):
         return SimpleNamespace(returncode=0, stdout=validated(argv, "status=started\nroute_status=routed\n"), stderr="")
@@ -56,7 +56,7 @@ def test_spawn_stamps_the_launch_start_before_init_agent_runs(tmp_path, monkeypa
 def test_spawn_records_each_launch_step_and_the_host_load(tmp_path, monkeypatch):
     clock = iter([5_000.0, 9_000.0])
     loads = iter([(7.25, 6.5, 5.0), (12.0, 8.0, 6.0)])
-    monkeypatch.setattr("scripts.swarm.runtime.time.time", lambda: next(clock))
+    monkeypatch.setattr("scripts.swarm.runtime.time", SimpleNamespace(time=lambda: next(clock), sleep=lambda _: None))
     monkeypatch.setattr("scripts.swarm.runtime.os.getloadavg", lambda: next(loads))
     out = "status=started\nlauncher_at=5001000\nroute_status=routed\nharness_at=5004000\n"
 
@@ -139,6 +139,23 @@ def test_status_and_nudge_address_the_agents_own_pane_id(tmp_path):
     assert prompts == [["agent", "prompt", "w:p9", "[swarm delivery] wake"]]
 
 
+def test_a_delivered_nudge_reports_no_failure(tmp_path):
+    runtime = HerdrRuntime(home=tmp_path, herdr=lambda args: {})
+    assert runtime.nudge(AgentRecord("engineer@a1b2c3-0001", "eng", "t", pane_id="w:p9"), "wake") is None
+
+
+@pytest.mark.parametrize(
+    ("error", "reason"),
+    [(RuntimeError("agent_not_found"), "agent_not_found"), (TimeoutError(), "TimeoutError")],
+)
+def test_a_nudge_herdr_fails_to_deliver_returns_the_failure(tmp_path, error, reason):
+    def herdr(args):
+        raise error
+
+    runtime = HerdrRuntime(home=tmp_path, herdr=herdr)
+    assert runtime.nudge(AgentRecord("engineer@a1b2c3-0001", "eng", "t", pane_id="w:p9"), "wake") == reason
+
+
 class NamedPanes:
     def __init__(self, panes):
         self.panes, self.renamed = panes, []
@@ -171,7 +188,13 @@ def test_status_names_a_running_pane_spawned_without_its_herdr_name(tmp_path):
     runtime = HerdrRuntime(home=tmp_path, herdr=herdr)
 
     def agent(seat, pane, conversation=""):
-        return SimpleNamespace(name=f"{slug}-{seat}", pane_id=pane, conversation_id=conversation)
+        return SimpleNamespace(
+            name=f"{slug}-{seat}",
+            pane_id=pane,
+            conversation_id=conversation,
+            runtime_backend="local",
+            runtime_target={},
+        )
 
     assert runtime.status(agent("eng-3", "w:p4", "c3")) == "working"
     assert runtime.status(agent("master-1", "w:p1")) == "idle"
@@ -187,7 +210,10 @@ def test_status_names_a_running_pane_spawned_without_its_herdr_name(tmp_path):
 def test_a_pane_already_carrying_its_herdr_name_is_not_renamed(tmp_path):
     herdr = NamedPanes({"w:p1": {"name": "master-a1b2c3-0001", "agent_status": "idle"}})
     runtime = HerdrRuntime(home=tmp_path, herdr=herdr)
-    assert runtime.name_pane(SimpleNamespace(name="master@a1b2c3-0001", pane_id="w:p1", conversation_id="")) is False
+    agent = SimpleNamespace(
+        name="master@a1b2c3-0001", pane_id="w:p1", conversation_id="", runtime_backend="local", runtime_target={}
+    )
+    assert runtime.name_pane(agent) is False
     assert herdr.renamed == []
 
 
@@ -241,10 +267,9 @@ def _spawn_env(tmp_path, monkeypatch, task=None, **config):
     runtime.spawn(
         SimpleNamespace(
             slug="sw",
-            repo=str(tmp_path),
             code="a1b2c3",
             lanes={},
-            **{"autonomy": "delegate", **config},
+            **{"repo": str(tmp_path), "autonomy": "delegate", **config},
         ),
         "eng",
         "engineer@a1b2c3-0001",
@@ -261,8 +286,33 @@ def test_spawn_without_a_swarm_compact_limit_leaves_the_default(tmp_path, monkey
     assert "AGENTIHOOKS_COMPACT_LIMIT" not in _spawn_env(tmp_path, monkeypatch, compact_limit=0)
 
 
+def test_spawn_hands_agents_the_local_checkout_of_the_swarm_repo(tmp_path, monkeypatch):
+    from scripts.hive import daemon
+
+    monkeypatch.setattr(daemon, "local_checkout", lambda repo: f"/hive/dev/{repo.rsplit('/', 1)[-1]}")
+    spawned = _spawn_env(tmp_path, monkeypatch, compact_limit=0, repo="github.com/the-cloud-clockwork/agentihooks")
+    assert spawned["AGENTIHOOKS_SWARM_REPO"] == "/hive/dev/agentihooks"
+
+
 def test_spawn_marks_the_launch_as_the_tick_s_own(tmp_path, monkeypatch):
     assert _spawn_env(tmp_path, monkeypatch, compact_limit=0)["AGENTIHOOKS_SWARM_SPAWN"] == "1"
+
+
+def test_spawn_hands_each_agent_its_own_ledger_token_and_never_the_server_secret(tmp_path, monkeypatch):
+    from scripts.swarm_ledger.ledger_authority import agent_token
+
+    monkeypatch.setenv("SWARM_SECRET", "seed-one")
+    monkeypatch.setenv("AGENTIHOOKS_LEDGER_AGENT_TOKEN", "the-tick-s-own")
+    env = _spawn_env(tmp_path, monkeypatch, compact_limit=0)
+    assert env["AGENTIHOOKS_LEDGER_AGENT_TOKEN"] == agent_token("seed-one", "sw", "engineer@a1b2c3-0001")
+    assert "SWARM_SECRET" not in env
+
+
+def test_spawn_without_the_server_secret_never_passes_on_the_tick_s_token(tmp_path, monkeypatch):
+    monkeypatch.delenv("SWARM_SECRET", raising=False)
+    monkeypatch.setenv("AGENTIHOOKS_LEDGER_AGENT_TOKEN", "the-tick-s-own")
+    env = _spawn_env(tmp_path, monkeypatch, compact_limit=0)
+    assert "AGENTIHOOKS_LEDGER_AGENT_TOKEN" not in env and "SWARM_SECRET" not in env
 
 
 def test_spawn_names_the_predecessor_conversation_of_an_attached_transfer(tmp_path, monkeypatch):
@@ -285,7 +335,7 @@ def test_spawn_without_a_known_predecessor_names_none(tmp_path, monkeypatch, ext
     assert "AGENTIHOOKS_PREDECESSOR_SESSION" not in env
 
 
-def _spawn_seen(tmp_path, lanes, lane="eng"):
+def _spawn_seen(tmp_path, lanes, lane="eng", config=None):
     seen = {}
 
     def run(argv, **kwargs):
@@ -297,7 +347,7 @@ def _spawn_seen(tmp_path, lanes, lane="eng"):
         return requested or "claude", "requested" if requested else "priority"
 
     runtime = HerdrRuntime(home=tmp_path, run=run, choose=choose)
-    config = SimpleNamespace(
+    config = config or SimpleNamespace(
         slug="sw",
         repo=str(tmp_path),
         code="a1b2c3",
@@ -307,6 +357,21 @@ def _spawn_seen(tmp_path, lanes, lane="eng"):
     )
     runtime.spawn(config, lane, "engineer@a1b2c3-0001", {"id": "t1", "title": "x"})
     return seen
+
+
+@pytest.mark.parametrize("lane", ["eng", "ci", "master", "plan"])
+def test_claude_swarm_display_name_is_mentionable(tmp_path, lane):
+    seen = _spawn_seen(tmp_path, {lane: {"agent": "claude"}}, lane=lane)
+    argv = seen["argv"]
+    assert argv[argv.index("--name") + 1] == "engineer-a1b2c3-0001"
+
+
+def test_claude_resume_uses_a_mentionable_display_name(tmp_path):
+    runtime, config, agent, seen = _resuming(tmp_path, "c0ffee")
+    runtime.resume(config, agent, "you were restored")
+    argv = seen["runs"][0]
+    assert argv[argv.index("--name") + 1] == "engineer-a1b2c3-0001"
+    assert seen["env"]["AGENTIHOOKS_AGENT_NAME"] == "engineer@a1b2c3-0001"
 
 
 @pytest.mark.parametrize("pin", ["claude", "codex"])
@@ -335,7 +400,7 @@ def test_a_lane_pin_wins_over_an_opposite_saved_harness(tmp_path, monkeypatch, p
         seen["argv"] = argv
         return SimpleNamespace(returncode=0, stdout=validated(argv, "status=started\nroute_status=routed\n"), stderr="")
 
-    def pick(harness, lane, task, environ):
+    def pick(harness, lane, task, environ, bounds, default_model):
         seen["classifier_harness"] = harness
         return model_pick.ModelPick("", "high", "classifier", 0.9)
 
@@ -449,17 +514,17 @@ def test_only_a_codex_planner_starts_read_only(tmp_path, lane, agent):
 
 def test_an_auto_lane_falls_back_to_the_automatic_choice(tmp_path):
     seen = _spawn_seen(tmp_path, {"eng": {"agent": "auto", "model": "auto", "effort": "auto"}})
-    assert seen["requested"] == "" and _passed(seen["argv"]) == ["--model", "opus", "--effort", "high"]
+    assert seen["requested"] == "" and _passed(seen["argv"]) == ["--model", "opus", "--effort", "medium"]
 
 
 def test_a_lane_without_an_entry_falls_back_to_the_automatic_choice(tmp_path):
     seen = _spawn_seen(tmp_path, {"eng": {"agent": "codex"}}, lane="ci")
-    assert seen["requested"] == "" and _passed(seen["argv"]) == ["--model", "opus", "--effort", "high"]
+    assert seen["requested"] == "" and _passed(seen["argv"]) == ["--model", "opus", "--effort", "medium"]
 
 
 def test_a_lane_model_goes_to_the_automatically_chosen_agent(tmp_path):
     seen = _spawn_seen(tmp_path, {"eng": {"agent": "auto", "model": "sonnet", "effort": "auto"}})
-    assert seen["requested"] == "" and _passed(seen["argv"]) == ["--model", "sonnet", "--effort", "high"]
+    assert seen["requested"] == "" and _passed(seen["argv"]) == ["--model", "sonnet", "--effort", "xhigh"]
 
 
 def test_the_lane_role_replaces_the_default_role_in_the_prompt(tmp_path):
@@ -677,13 +742,42 @@ def test_a_resume_herdr_never_shows_in_its_conversation_is_closed_and_fails(tmp_
     assert ["pane", "close", "w2:p9"] in seen["herdr"]
 
 
+def test_a_resume_whose_launch_fails_terminates_that_agent(tmp_path):
+    from scripts.swarm.tick import SpawnError
+
+    runtime, config, agent, seen = _resuming(tmp_path, "c0ffee")
+    launched = runtime.run
+    refused = "agentihooks init-agent: the harness did not report its route within 90s"
+
+    def failing(argv, **kwargs):
+        if "init-agent" in argv:
+            seen["runs"].append(argv)
+            return SimpleNamespace(returncode=3, stdout="", stderr=refused + "\n")
+        return launched(argv, **kwargs)
+
+    runtime.run = failing
+    with pytest.raises(SpawnError) as error:
+        runtime.resume(config, agent, "you were restored")
+    assert str(error.value) == refused
+    assert [argv[1:] for argv in seen["runs"] if "terminate-agent" in argv] == [
+        ["terminate-agent", "engineer@a1b2c3-0001", "--force-shared"]
+    ]
+
+
+def test_a_codex_launch_must_start_its_harness_inside_the_start_timeout(tmp_path):
+    runtime, config, agent, seen = _resuming(tmp_path, "c0ffee", harness="codex")
+    runtime.resume(config, agent, "you were restored")
+    argv = seen["runs"][0]
+    assert (argv[argv.index("--start-timeout") + 1], argv[argv.index("--route-timeout") + 1]) == ("30", "30")
+
+
 @pytest.mark.parametrize(
     "lane,harness,launch,source",
     [
         ("master", "claude", ["--model", "opus", "--effort", "high"], "frontier"),
         ("master", "codex", ["-m", "gpt-6.1-sol", "-c", 'model_reasoning_effort="high"'], "frontier"),
-        ("eng", "claude", ["--model", "opus", "--effort", "high"], "lane-default"),
-        ("eng", "codex", ["-m", "gpt-6.1-sol", "-c", 'model_reasoning_effort="high"'], "lane-default"),
+        ("eng", "claude", ["--model", "opus", "--effort", "medium"], "lane-default"),
+        ("eng", "codex", ["-m", "gpt-6.1-sol", "-c", 'model_reasoning_effort="medium"'], "lane-default"),
     ],
 )
 def test_resume_uses_defaults_when_no_resolved_model_was_recorded(tmp_path, monkeypatch, lane, harness, launch, source):
@@ -811,6 +905,25 @@ def test_spawn_preserves_profile_and_prompt_boundary_arguments(tmp_path, monkeyp
     assert observed == ["profile", "prompt"]
 
 
+def test_spawn_passes_the_pinned_claim_to_the_shared_launcher(tmp_path):
+    import json
+
+    seen = {}
+
+    def run(argv, **kwargs):
+        seen["argv"] = argv
+        return SimpleNamespace(returncode=0, stdout=validated(argv, "status=started\nroute_status=routed\n"), stderr="")
+
+    runtime = HerdrRuntime(home=tmp_path, run=run, choose=lambda *_: ("claude", "open"))
+    config = SimpleNamespace(
+        slug="swarm-buildout", repo=str(tmp_path), code="a1b2c3", compact_limit=0, lanes={}, autonomy="delegate"
+    )
+    fence = {"key": "claim-a", "revision": 7}
+    runtime.spawn(config, "eng", "swarm-buildout-eng-4", {"id": "t4", "title": "x", "claim_fence": fence})
+    args = seen["argv"]
+    assert json.loads(args[args.index("--claim-fence") + 1]) == fence
+
+
 SEAT_TASKS = {
     "eng": {"id": "t1", "title": "x"},
     "ci": {"id": "t1", "title": "x"},
@@ -821,7 +934,7 @@ SEAT_TASKS = {
 
 @pytest.mark.parametrize("lane", sorted(SEAT_TASKS))
 @pytest.mark.parametrize("handoff", [None, "# Handoff\n<!-- handoff complete -->"])
-def test_every_seat_launch_carries_opus_and_high_effort_for_claude(tmp_path, monkeypatch, lane, handoff):
+def test_every_seat_launch_carries_opus_and_its_lane_effort_for_claude(tmp_path, monkeypatch, lane, handoff):
     from scripts.swarm.templates import DEFAULT_PROFILES
 
     transfer = (
@@ -840,7 +953,8 @@ def test_every_seat_launch_carries_opus_and_high_effort_for_claude(tmp_path, mon
         else {}
     )
     task = {**SEAT_TASKS[lane], **transfer}
-    assert _launched(tmp_path, monkeypatch, lane, task) == ["--model", "opus", "--effort", "high"]
+    effort = "high" if handoff or lane == "master" else "medium"
+    assert _launched(tmp_path, monkeypatch, lane, task) == ["--model", "opus", "--effort", effort]
 
 
 @pytest.mark.parametrize("lane", ["master", "plan"])
@@ -869,27 +983,69 @@ def test_a_master_launches_on_the_frontier_model_at_high_effort_whatever_the_lan
     assert _launched(tmp_path, monkeypatch, "master", task, lanes, harness=harness, env=env) == launch
 
 
+MASTER_RANGES = [(("medium", "xhigh"), "high:xhigh"), (("low", "medium"), "high:high")]
+
+
+@pytest.mark.parametrize("bounds,handed", MASTER_RANGES)
+def test_a_master_handoff_successor_launches_at_high_effort_whatever_its_saved_launch_or_the_range_names(
+    tmp_path, monkeypatch, bounds, handed
+):
+    monkeypatch.delenv("AGENTIHOOKS_CLAUDE_EFFORT", raising=False)
+    seen = {}
+
+    def run(argv, **kwargs):
+        seen.update(argv=argv, env=kwargs["env"])
+        return SimpleNamespace(returncode=0, stdout=validated(argv, "status=started\nroute_status=routed\n"), stderr="")
+
+    runtime = HerdrRuntime(home=tmp_path, run=run, choose=lambda *_: ("claude", "open"))
+    config = SimpleNamespace(
+        slug="sw",
+        repo=str(tmp_path),
+        code="a1b2c3",
+        compact_limit=0,
+        lanes={},
+        autonomy="delegate",
+        effort_min=bounds[0],
+        effort_max=bounds[1],
+    )
+    launch = {"profile": "master", "harness": "claude", "model": "opus", "effort": "medium"}
+    task = {"id": "master", "peer": "", "handoff": "# Handoff", "handoff_envelope": {"launch": launch}}
+    runtime.spawn(config, "master", "master@a1b2c3-0002", task)
+    assert _passed(seen["argv"]) == ["--model", "opus", "--effort", "high"]
+    assert seen["env"]["AGENTIHOOKS_SWARM_EFFORT_RANGE"] == handed
+
+
+@pytest.mark.parametrize("bounds,handed", MASTER_RANGES)
+def test_a_resumed_master_launches_at_high_effort_whatever_its_previous_agent_or_the_range_names(
+    tmp_path, bounds, handed
+):
+    from dataclasses import replace
+
+    runtime, config, agent, seen = _resuming(tmp_path, "c0ffee")
+    config.effort_min, config.effort_max = bounds
+    master = replace(agent, name="master@a1b2c3-0001", lane="master", task="master", profile="master", effort="medium")
+    runtime.resume(config, master, "you were restored")
+    assert _passed(seen["runs"][0]) == ["--route", "a1", "--model", "opus", "--effort", "high"]
+    assert seen["env"]["AGENTIHOOKS_SWARM_EFFORT_RANGE"] == handed
+
+
 def _lowest_pick(*args, **kwargs):
     from hooks.classifier import Answer, DecisionResult
 
-    return DecisionResult({"effort": Answer("score", score=0, confidence=0.95)}, "luna")
+    return DecisionResult({"option": Answer("choice", choice="lower", confidence=0.95)}, "luna")
 
 
-@pytest.mark.parametrize("lane", sorted(SEAT_TASKS))
-@pytest.mark.parametrize(
-    "harness,launch",
-    [
-        ("claude", ["--model", "opus", "--effort", "high"]),
-        ("codex", ["-m", "gpt-6.1-sol", "-c", 'model_reasoning_effort="high"']),
-    ],
-)
-def test_a_live_classifier_never_launches_a_seat_below_the_default_model_and_high_effort(
-    tmp_path, monkeypatch, lane, harness, launch
+@pytest.mark.parametrize("lane,effort", [("eng", "medium"), ("ci", "medium"), ("plan", "medium"), ("master", "high")])
+@pytest.mark.parametrize("harness,model", [("claude", "opus"), ("codex", "gpt-6.1-sol")])
+def test_a_live_classifier_never_launches_a_seat_below_the_default_model_and_its_lane_floor(
+    tmp_path, monkeypatch, lane, effort, harness, model
 ):
+    from scripts.init_agent import model_flags
     from scripts.swarm import model_pick
 
     monkeypatch.setattr(model_pick, "decide", _lowest_pick)
-    assert _launched(tmp_path, monkeypatch, lane, SEAT_TASKS[lane], harness=harness) == launch
+    launched = _launched(tmp_path, monkeypatch, lane, SEAT_TASKS[lane], harness=harness)
+    assert launched == model_flags(harness, model, effort)
 
 
 def test_a_swarm_config_model_launches_as_named_with_the_classifier_live(tmp_path, monkeypatch):
@@ -901,8 +1057,68 @@ def test_a_swarm_config_model_launches_as_named_with_the_classifier_live(tmp_pat
         "--model",
         "sonnet",
         "--effort",
-        "high",
+        "xhigh",
     ]
+
+
+@pytest.mark.parametrize("harness,model", [("claude", "sonnet"), ("codex", "gpt-6-sol")])
+@pytest.mark.parametrize("lane", ["eng", "ci", "plan", "master"])
+def test_configured_models_reach_each_launch_lane(tmp_path, monkeypatch, harness, model, lane):
+    for agent in ("CLAUDE", "CODEX"):
+        for field in ("MODEL", "EFFORT"):
+            monkeypatch.delenv(f"AGENTIHOOKS_{agent}_{field}", raising=False)
+    lanes = {lane: {"agent": harness, "model": "auto", "effort": "auto"}}
+    config = SwarmConfig(
+        "sw",
+        str(tmp_path),
+        2,
+        1,
+        code="a1b2c3",
+        lanes=lanes,
+        claude_model="sonnet",
+        codex_model="gpt-6-sol",
+    )
+    passed = _passed(_spawn_seen(tmp_path, lanes, lane, config)["argv"])
+    model_flag = "-m" if harness == "codex" else "--model"
+    assert passed[passed.index(model_flag) + 1] == model
+    effort = "high" if lane == "master" else "xhigh" if harness == "claude" and lane in ("eng", "ci") else "medium"
+    if harness == "codex":
+        assert f'model_reasoning_effort="{effort}"' in passed
+    else:
+        assert passed[passed.index("--effort") + 1] == effort
+
+
+def test_the_classifier_receives_the_launch_environment(tmp_path, monkeypatch):
+    from scripts.swarm import model_pick
+
+    original = model_pick.pick
+    monkeypatch.setenv("MODEL_CONTEXT_PROOF", "present")
+
+    def pick(harness, lane, task, environ, bounds, default_model):
+        context_present = bool(environ) and environ.get("MODEL_CONTEXT_PROOF") == "present"
+        assert context_present
+        return original(harness, lane, task, environ, bounds, default_model)
+
+    monkeypatch.setattr(model_pick, "pick", pick)
+    _spawn_seen(tmp_path, {"eng": {"agent": "codex", "model": "auto", "effort": "auto"}})
+
+
+def test_an_empty_lane_model_uses_the_configured_default(tmp_path, monkeypatch):
+    monkeypatch.delenv("AGENTIHOOKS_CLAUDE_MODEL", raising=False)
+    lanes = {"eng": {"agent": "claude", "effort": "medium"}}
+    config = SwarmConfig("sw", str(tmp_path), 2, 1, code="a1b2c3", lanes=lanes, claude_model="sonnet")
+    passed = _passed(_spawn_seen(tmp_path, lanes, config=config)["argv"])
+    assert passed[passed.index("--model") + 1] == "sonnet"
+
+
+def test_an_unrecorded_resume_uses_the_configured_model(tmp_path):
+    from dataclasses import replace
+
+    runtime, config, agent, seen = _resuming(tmp_path, "c0ffee")
+    config.claude_model = "sonnet"
+    runtime.resume(config, replace(agent, model=""), "resume")
+    passed = _passed(seen["runs"][0])
+    assert passed[passed.index("--model") + 1] == "sonnet"
 
 
 @pytest.mark.parametrize("lane", sorted(SEAT_TASKS))
@@ -1015,6 +1231,8 @@ def test_quota_capacity_reads_this_environment_and_hands_demand_on(tmp_path, mon
     runtime.quota_capacity(config, [], 5.0, {"eng": 1})
     assert seen == {"environ": dict(os.environ), "now": 5.0, "refresh": True, "demand": {"eng": 1}}
     runtime.quota_capacity(config, [], 5.0, {"eng": 0})
+    assert seen["refresh"] is True
+    runtime.quota_capacity(config, [], 5.0, {"eng": 0}, refresh=False)
     assert seen["refresh"] is False
 
 

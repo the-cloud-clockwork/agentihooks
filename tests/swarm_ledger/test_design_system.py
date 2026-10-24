@@ -12,7 +12,9 @@ sys.path.insert(0, str(SCRIPTS))
 import ledger_core as core  # noqa: E402
 import ledger_server as server  # noqa: E402
 
+from scripts.swarm_ledger import page_assets  # noqa: E402
 from tests.swarm_ledger.ledger_page import page_source  # noqa: E402
+from tests.swarm_ledger.test_swarm_layout import NOW_MS, browser, open_page, status  # noqa: E402, F401
 
 LITERAL = re.compile(r"#[0-9a-fA-F]{3,8}\b|rgba?\(|hsla?\(|(?<![-\w])(white|black)(?![-\w])")
 ROLES = ("canvas", "surface-1", "surface-2", "overlay", "text", "muted", "dim", "rule", "edge")
@@ -57,7 +59,7 @@ class Palette(unittest.TestCase):
         def value(role):
             return tokens[tokens[role][len("var(") : -1]]
 
-        expected = {"--canvas": "#010104", "--accent": "#3b82f6", "--signal": "#ef4444", "--destructive": "#ef4444"}
+        expected = {"--canvas": "#050812", "--accent": "#3b82f6", "--signal": "#ef4444", "--destructive": "#ef4444"}
         for role, colour in expected.items():
             self.assertEqual(value(role), colour, role)
         self.assertEqual(value("--warn"), "#facc15")
@@ -88,7 +90,7 @@ class PaletteReachesEveryPage(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             edited = Path(tmp) / "palette.css"
             edited.write_text(palette().replace("--accent:", "--accent: var(--red-500); --was:"), encoding="utf-8")
-            with mock.patch.object(core, "PALETTE", edited):
+            with mock.patch.object(page_assets, "PALETTE", edited):
                 self.assertNotEqual(core.page_version(), before)
 
 
@@ -164,6 +166,30 @@ def resolve(name):
     return value
 
 
+RECORD_ROWS = (".prio", ".item", ".stat")
+TILE_PROPS = ("background", "background-color", "border-radius", "box-shadow", "border")
+ROW_STATES = (":hover", ":focus-visible", ":focus-within")
+
+
+def tiled_rows(css):
+    """Record rows and sibling-spaced rows that paint their own surface instead of a hairline."""
+    found = []
+    rules = re.findall(r"([^{}]+)\{([^{}]*)\}", css)
+    gapped = {m.group(1) for heads, _ in rules for m in re.finditer(r"(\.[\w-]+)\s*\+\s*\1\b", heads)}
+    for heads, body in rules:
+        props = {line.split(":", 1)[0].strip() for line in body.split(";") if ":" in line}
+        if not props & set(TILE_PROPS):
+            continue
+        for part in heads.split(","):
+            last = re.split(r"[\s>+~]+", part.strip())[-1]
+            if any(state in last for state in ROW_STATES):
+                continue
+            row = re.match(r"\.[\w-]+", last)
+            if row and (row.group(0) in RECORD_ROWS or row.group(0) in gapped) and row.group(0) not in found:
+                found.append(row.group(0))
+    return found
+
+
 def declared(css, selector):
     merged = {}
     for heads, body in re.findall(r"([^{}]+)\{([^{}]*)\}", css):
@@ -182,7 +208,7 @@ class BluePalette(unittest.TestCase):
 
     def test_the_ramp_holds_the_approved_blue_values(self):
         expected = {
-            "--ink-950": "#010104",
+            "--ink-950": "#050812",
             "--steel-060": "#0e131b",
             "--steel-100": "#151c29",
             "--steel-160": "#1b2636",
@@ -196,7 +222,7 @@ class BluePalette(unittest.TestCase):
 
     def test_roles_take_the_blue_ramp_instead_of_white_lifts(self):
         expected = {
-            "--canvas": "#010104",
+            "--canvas": "#050812",
             "--veil": "#0e131b",
             "--hover": "#151c29",
             "--rule": "#151c29",
@@ -289,6 +315,116 @@ class LandingBays(unittest.TestCase):
             "bin": re.search(r"<main([^>]*)>", server.index_page("bin")).group(1),
         }
         self.assertEqual(mains, {"ledger": "", "home": ' class="home"', "bin": ' class="bin"'})
+
+    def test_priority_item_and_stat_rows_are_hairline_rows(self):
+        css = css_of(page_source())
+        for row in RECORD_ROWS:
+            self.assertEqual(declared(css, row).get("border-top"), "1px solid var(--rule)", row)
+            self.assertEqual(declared(css, f"{row}:first-child").get("border-top"), "0", row)
+
+    def test_no_record_row_is_painted_as_a_tile(self):
+        self.assertEqual(tiled_rows(css_of(page_source()) + home_style()), [])
+
+    def test_the_tile_check_turns_red_on_a_planted_tile(self):
+        clean = css_of(page_source())
+        planted = {
+            ".prio": ".prio { background: var(--surface-2); border-radius: 6px; }",
+            ".item": "#ledger .item { padding: 12px 14px; background: var(--surface-1); }",
+            ".stat": ".stat { box-shadow: 0 0 0 1px var(--edge); }",
+            ".note-row": ".note-row { background: var(--surface-2); }\n.note-row + .note-row { margin-top: 6px; }",
+        }
+        for row, rule in planted.items():
+            self.assertIn(row, tiled_rows(clean + "\n" + rule), row)
+
+    def test_stat_labels_sit_on_a_fixed_track(self):
+        columns = declared(css_of(page_source()), "#stats .stat")["grid-template-columns"]
+        self.assertRegex(columns, r"^\d+px minmax\(0, 1fr\)$")
+
+    def test_stat_values_stay_on_one_line(self):
+        value = declared(css_of(page_source()), ".stat dd")
+        self.assertEqual(
+            (value.get("white-space"), value.get("overflow"), value.get("text-overflow")),
+            ("nowrap", "hidden", "ellipsis"),
+        )
+
+
+def test_every_overflowing_agent_cell_ellipsizes_and_exposes_its_full_text(open_page):  # noqa: F811
+    payload = status()
+    agent = payload["agents"][1]
+    agent.update(
+        profile="engineer with a long profile",
+        overlays=["brain", "review", "research"],
+        promoted=True,
+        capabilities={"push_inbox": False, "native_terminal_attach": True},
+    )
+    payload["agents"][0]["remote_control"] = {"state": "live", "detail": "Remote session with complete detail"}
+    payload["agents"][0]["capabilities"] = {"push_inbox": True, "native_terminal_attach": False}
+    payload["executions"] = {
+        agent["name"]: {
+            "backend": "kubernetes",
+            "generation": 2,
+            "pool": "standard worker pool",
+            "observed": "working",
+            "seen_at": NOW_MS - 120_000,
+            "terminal_behind": True,
+        }
+    }
+    payload["terminals"] = {
+        agent["name"]: {
+            "state": "live",
+            "checked_at": NOW_MS - 300_000,
+            "live_at": NOW_MS - 300_000,
+            "fresh_ms": 30_000,
+            "reason": "connection_unavailable",
+        }
+    }
+    page = open_page(payload, width=1920, clock=True)
+    page.tab.set_viewport_size({"width": 1920, "height": 1080})
+    page.tab.evaluate("""() => {
+        document.querySelectorAll('#agents-table th').forEach(th => th.style.width = '48px');
+        const table = document.querySelector('#agents-table');
+        table.style.width = '576px';
+        table.style.minWidth = '0';
+    }""")
+    found = page.tab.eval_on_selector_all(
+        "#swarm-agents tr:not(.page-more) td:not(:has(> .sw-acts))",
+        """cells => cells.filter(c => c.textContent.trim()).map(c => {
+            const style = getComputedStyle(c);
+            const tips = [c, ...c.querySelectorAll('*')].map(el => window.ledgerTip(el));
+            return {text: c.innerText, tips, overflow: style.overflow, ellipsis: style.textOverflow};
+        })""",
+    )
+    for cell in found:
+        assert cell["overflow"] == "hidden", cell
+        assert cell["ellipsis"] == "ellipsis", cell
+        assert cell["tips"][0], cell
+        assert all(tip == cell["tips"][0] for tip in cell["tips"]), cell
+        for word in cell["text"].lower().split():
+            assert word in cell["tips"][0].lower(), cell
+    assert any("standard worker pool" in cell["tips"][0] for cell in found)
+    assert any("connection unavailable" in cell["tips"][0] for cell in found)
+    assert any(
+        "Remote session with complete detail" in cell["tips"][0] and "no native terminal" in cell["tips"][0]
+        for cell in found
+    )
+    nested = page.tab.eval_on_selector_all(
+        "#swarm-agents :is(.sw-transport, .sw-promoted, .sw-sub)",
+        """els => els.map(el => {
+            const style = getComputedStyle(el);
+            return [el.className, style.display, style.overflow, style.textOverflow];
+        })""",
+    )
+    for name, display, overflow, ellipsis in nested:
+        if name == "sw-sub":
+            assert (overflow, ellipsis) == ("hidden", "ellipsis")
+        else:
+            assert display == "inline", name
+    execution = page.tab.locator("#swarm-agents tr").nth(1).locator("td").nth(8)
+    execution.scroll_into_view_if_needed()
+    page.tab.clock.run_for(100)
+    execution.hover()
+    page.tab.clock.run_for(1100)
+    assert page.tab.locator(".ledger-tip:popover-open").inner_text() == execution.get_attribute("data-tip")
 
 
 if __name__ == "__main__":

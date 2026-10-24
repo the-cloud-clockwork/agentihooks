@@ -1,0 +1,539 @@
+version: 1
+notes: Seeded from the classifier decision log. Historic states for this classifier could not be rebuilt, so each case state
+  was rebuilt from its ledger; a case whose notes say it was asked once during seeding on 2026-10-09 UTC takes its samples
+  from that logged ask, and a case whose notes say it matched a state logged before seeding takes the answers logged for it
+  then. Expected verdicts were written by a separate reader agent that saw only each case state and its question, never the
+  thresholds or the rule. Every case holds one group, so the one verdict is that group's.
+cases:
+- name: rig-grade-swarm-tc105,tc111
+  state:
+    overview: 'Borrow what OpenRig does that we lack, while keeping the ledger, quota routing and herdr: durable Claude and
+      Codex messaging, seats, intent, work beyond code, swarm health.'
+    groups:
+    - - id: tc105
+        title: Overlay names line up with the role text in the overlays section
+        description: Two operator fixes in the swarm panel, one pull request. First, in the overlays section the offered overlay
+          name for the engineer row starts further right than the no overlay text in the other rows; align every value cell
+          to the same left edge, following the ui doctrine. Second, remove the commands dropdown that lists every queued page
+          command such as refresh quota and set session cap; the operator never asked for it. A failed command still shows
+          its error where its control was pressed. Browser check at 1920 by 1080 on a scratch ledger with one offered overlay.
+          Done when the pull request merges with the screenshot on the task proof.
+        difficulty: S
+        territory: []
+      - id: tc111
+        title: Ledger priority, item and stat rows read as separate tiles
+        description: With the palette fill alone the priority, item and stat rows merge into one band. Give them a small gap
+          and side padding in the ledger stylesheet, then the raised bay fill, so each reads as its own tile like the Atlas
+          landing. Browser check at 1920 by 1080 on a scratch ledger. Done when the pull request merges with before and after
+          screenshots on the task proof.
+        difficulty: S
+        territory: []
+  params:
+    groups:
+    - tc105 titled Overlay names line up with the role text in the overlays section, tc111 titled Ledger priority, item and
+      stat rows read as separate tiles
+  expected:
+    group: true
+  control: false
+  samples:
+  - source: liquid-d1
+    latency_ms: 248
+    answers:
+      group_0:
+        type: noul
+        noul: 0.11920290324780274
+  notes: state digest c4b5f9492d8aeb8b, state rebuilt from the ledger and asked once during seeding on 2026-10-09 UTC so the
+    decision log recorded it; internal names masked for the package; the same state was also logged before seeding, first
+    on 2026-10-08
+- name: rig-grade-swarm-sz38,sz40
+  state:
+    overview: 'Borrow what OpenRig does that we lack, while keeping the ledger, quota routing and herdr: durable Claude and
+      Codex messaging, seats, intent, work beyond code, swarm health.'
+    groups:
+    - - id: sz38
+        title: Check completion notices name the queue command
+        description: 'Cut from the queue command task. Seam: the notice the tick sends when a pull request''s checks complete.
+          It tells the agent to queue with the agentihooks queue command instead of gh pr merge. Done when the pull request
+          lands with a test on the notice text.'
+        difficulty: S
+        territory:
+        - scripts/swarm
+        - tests/swarm
+      - id: sz40
+        title: The herdr runtime takes its quota accounts through a public argument
+        description: 'Tests hand the herdr runtime its quota accounts by setting a private attribute. Seam: the herdr runtime
+          constructor. Accept the accounts as a public constructor argument and move the tests to it. Done when the pull request
+          lands with the tests using the argument.'
+        difficulty: S
+        territory:
+        - scripts
+  params:
+    groups:
+    - sz38 titled Check completion notices name the queue command, sz40 titled The herdr runtime takes its quota accounts
+      through a public argument
+  expected:
+    group: false
+  control: false
+  samples:
+  - source: liquid-d1
+    latency_ms: 244
+    answers:
+      group_0:
+        type: noul
+        noul: 0.1329642436335826
+  notes: state digest 73f9f15d11d4c8ee, state rebuilt from the ledger and asked once during seeding on 2026-10-09 UTC so the
+    decision log recorded it; the same state was also logged before seeding, first on 2026-10-08
+- name: rig-grade-swarm-jdg1,jdg2
+  state:
+    overview: 'Borrow what OpenRig does that we lack, while keeping the ledger, quota routing and herdr: durable Claude and
+      Codex messaging, seats, intent, work beyond code, swarm health.'
+    groups:
+    - - id: jdg1
+        title: Case and evidence set schema
+        description: A new evidence package defines the case and the evidence set, loads and validates them, and shuffles
+          evidence with a fresh random seed per judging. Read the slice with agentihooks plan read. Done when the slice tests
+          pass in CI and the pull request merges.
+        difficulty: S
+        territory:
+        - scripts/evidence
+        - tests/evidence
+      - id: jdg2
+        title: Judge role profile and verdict schema
+        description: A judge role in the package with its doctrine, and a verdict schema where pass carries no notes. Read
+          the slice with agentihooks plan read. Done when the slice tests pass in CI, the role resolves with agentihooks init,
+          and the pull request merges.
+        difficulty: S
+        territory:
+        - profiles/package/roles/judge
+        - scripts/evidence/verdict.schema.json
+  params:
+    groups:
+    - jdg1 titled Case and evidence set schema, jdg2 titled Judge role profile and verdict schema
+  expected:
+    group: false
+  control: false
+  samples:
+  - source: liquid-d1
+    latency_ms: 229
+    answers:
+      group_0:
+        type: noul
+        noul: 0.4378234991142019
+  notes: state digest 310e8e6f91964d80, state rebuilt from the ledger and asked once during seeding on 2026-10-09 UTC so the
+    decision log recorded it
+- name: rig-grade-swarm-t278,t283
+  state:
+    overview: 'Borrow what OpenRig does that we lack, while keeping the ledger, quota routing and herdr: durable Claude and
+      Codex messaging, seats, intent, work beyond code, swarm health.'
+    groups:
+    - - id: t278
+        title: A health finding lists the writes or events behind its count, marking which the task or doctrine required
+        description: 'Parent: swarm runtime fixes; the master must judge a finding from its evidence, not from a number. Cause:
+          a ceremony finding shows only eleven talk writes since its last outcome and the threshold of ten; it never lists
+          the writes. Error seen on the ninth of October: the master gave both ceremony findings on engineers 0824 and 0827
+          insufficient evidence because it could not see that 0824''s writes were thirteen comments its task required and
+          0827''s were progress lines around seven pushes the hook missed; only the Doctor''s reading of Redis records found
+          that, issue 2194. Possible fix: each finding stores the rows it counted, with time, kind, target and a short text,
+          plus the agent''s last recorded outcome; swarm status and the ledger page Swarm health panel print them under the
+          finding, and each row is marked required when it answers a task contract, a spec line or a doctrine progress rule.
+          Red first: a ceremony finding prints its counted rows. Done when status shows the rows for every detector kind and
+          the pull request merges with CI green.'
+        difficulty: M
+        territory:
+        - scripts/swarm
+        - tests/swarm
+      - id: t283
+        title: 'Finish the Doctor''s open talk budget fix: outcomes counted on every harness, counting starts at the first
+          outcome'
+        description: 'Parent: swarm runtime fixes. The Doctor crew closed on the ninth of October with its fix for issue 2194
+          still a draft pull request, number 2195, on branch engineer d44a5a 0220, checks green except one still running.
+          It covers the Doctor''s part of the split: the push pattern accepts a push on its own line and a push wrapped in
+          bash with the login flag, Codex sessions reach the outcome recorder, and counting starts at the first outcome so
+          required writes before it do not count. Seams already in that branch; this task restacks it onto dev, reads its
+          review state, finishes any open finding, marks it ready, merges it and closes issue 2194. Done when pull request
+          2195 merges with CI green and the issue is closed.'
+        difficulty: M
+        territory:
+        - hooks/context
+        - scripts/gates
+        - scripts/swarm_ledger
+        - tests/swarm
+        - tests/swarm_ledger
+  params:
+    groups:
+    - 't278 titled A health finding lists the writes or events behind its count, marking which the task or doctrine required,
+      t283 titled Finish the Doctor''s open talk budget fix: outcomes counted on every harness, counting starts at the first
+      outcome'
+  expected:
+    group: false
+  control: false
+  samples:
+  - source: liquid-d1
+    latency_ms: 477
+    answers:
+      group_0:
+        type: noul
+        noul: 0.0038244840988075806
+  notes: state digest b8ec08ce45f090d7, state rebuilt from the ledger and asked once during seeding on 2026-10-09 UTC so the
+    decision log recorded it
+- name: rig-grade-swarm-vret2,vret4
+  state:
+    overview: 'Borrow what OpenRig does that we lack, while keeping the ledger, quota routing and herdr: durable Claude and
+      Codex messaging, seats, intent, work beyond code, swarm health.'
+    groups:
+    - - id: vret2
+        title: Propagate deletion and access revocation
+        description: 'Swarm v2 work package SV2-RET-02, tier 8 of 8. Spec: read section SV2-RET-02 of /home/user/dev/fleet-ecosystem/agentihooks/Swarm-v2.md
+          (also Swarm-v2.md at the root of your agentihooks worktree) in full, fixture, boundary obligations, acceptance tests,
+          rollback and completion, plus sections 1 to 3. Repository: agentihooks. Integration gate: G12. Intended change:
+          Keep direct retrieval, search, context caches, and derived knowledge consistent after a scope change. Required fixture:
+          One source referenced by search results, a cached pack, and an inferred lesson. Name SV2-RET-02 in the pull request.
+          antoncore changes go through GitOps, never live patches. Priority: Atlas compute first, because the operator''s
+          workstation memory is the bottleneck.'
+        difficulty: M
+        territory:
+        - swarm v2 RET
+      - id: vret4
+        title: Implement backup manifests and restore drills
+        description: 'Swarm v2 work package SV2-RET-04, tier 8 of 8. Spec: read section SV2-RET-04 of /home/user/dev/fleet-ecosystem/agentihooks/Swarm-v2.md
+          (also Swarm-v2.md at the root of your agentihooks worktree) in full, fixture, boundary obligations, acceptance tests,
+          rollback and completion, plus sections 1 to 3. Repository: agentihooks. Integration gate: G12. Intended change:
+          Prove durable state can be recovered independently of currently running Pods. Required fixture: Catalog backup,
+          immutable objects, brain backup, and one deliberately missing source object. Name SV2-RET-04 in the pull request.
+          antoncore changes go through GitOps, never live patches. Priority: Atlas compute first, because the operator''s
+          workstation memory is the bottleneck.'
+        difficulty: M
+        territory:
+        - swarm v2 RET
+  params:
+    groups:
+    - vret2 titled Propagate deletion and access revocation, vret4 titled Implement backup manifests and restore drills
+  expected:
+    group: false
+  control: false
+  samples:
+  - source: liquid-d1
+    latency_ms: 258
+    answers:
+      group_0:
+        type: noul
+        noul: 0.01243164902375476
+  notes: state digest f4a99c353553cb5f, state rebuilt from the ledger and asked once during seeding on 2026-10-09 UTC so the
+    decision log recorded it; internal names masked for the package
+- name: rig-grade-swarm-vgat3,vgat4
+  state:
+    overview: 'Borrow what OpenRig does that we lack, while keeping the ledger, quota routing and herdr: durable Claude and
+      Codex messaging, seats, intent, work beyond code, swarm health.'
+    groups:
+    - - id: vgat3
+        title: Deliver task context through target capabilities
+        description: 'Swarm v2 work package SV2-GAT-03, tier 7 of 8. Spec: read section SV2-GAT-03 of /home/user/dev/fleet-ecosystem/agentihooks/Swarm-v2.md
+          (also Swarm-v2.md at the root of your agentihooks worktree) in full, fixture, boundary obligations, acceptance tests,
+          rollback and completion, plus sections 1 to 3. Repository: agentihooks. Integration gate: G6. Intended change: Confirm
+          context reaches both target CLIs through their actual supported hook envelopes. Required fixture: Claude and Codex
+          hook fixtures plus a live smoke session for each pinned target. Name SV2-GAT-03 in the pull request. antoncore changes
+          go through GitOps, never live patches. Priority: Atlas compute first, because the operator''s workstation memory
+          is the bottleneck.'
+        difficulty: M
+        territory:
+        - swarm v2 GAT
+      - id: vgat4
+        title: Implement revision-bound consultation gates
+        description: 'Swarm v2 work package SV2-GAT-04, tier 7 of 8. Spec: read section SV2-GAT-04 of /home/user/dev/fleet-ecosystem/agentihooks/Swarm-v2.md
+          (also Swarm-v2.md at the root of your agentihooks worktree) in full, fixture, boundary obligations, acceptance tests,
+          rollback and completion, plus sections 1 to 3. Repository: agentihooks. Integration gate: G6. Intended change: Require
+          relevant consultation at task transitions without querying on every tool action. Required fixture: First write,
+          unchanged repeated tool calls, changed task spec, unrelated receipt, and valid empty result. Name SV2-GAT-04 in
+          the pull request. antoncore changes go through GitOps, never live patches. Priority: Atlas compute first, because
+          the operator''s workstation memory is the bottleneck.'
+        difficulty: M
+        territory:
+        - swarm v2 GAT
+  params:
+    groups:
+    - vgat3 titled Deliver task context through target capabilities, vgat4 titled Implement revision-bound consultation gates
+  expected:
+    group: false
+  control: false
+  samples:
+  - source: liquid-d1
+    latency_ms: 255
+    answers:
+      group_0:
+        type: noul
+        noul: 0.022977374593338037
+  notes: state digest 6bc1663d939ba0c6, state rebuilt from the ledger and asked once during seeding on 2026-10-09 UTC so the
+    decision log recorded it; internal names masked for the package
+- name: rig-grade-swarm-t273,t283
+  state:
+    overview: 'Borrow what OpenRig does that we lack, while keeping the ledger, quota routing and herdr: durable Claude and
+      Codex messaging, seats, intent, work beyond code, swarm health.'
+    groups:
+    - - id: t273
+        title: Ledger page header count browser test waits for counts before reading them
+        description: 'Parent: swarm runtime fixes keep flaky tests from blocking merges. Two ledger page browser tests passed
+          on their pull request and failed in the merge queue on the same code tree on the ninth of October: the header count
+          test read every count text empty on a pull request that changed only skill text, and the alerts panel fold reload
+          test failed on task pch13. Seams: the header count test waits until the counts are rendered before asserting; the
+          fold reload test waits until the fold state is saved before it reloads. Red first: a delayed count render and a
+          delayed fold save each fail the old waits. Done when the pull request merges with CI green.'
+        difficulty: M
+        territory:
+        - tests/swarm_ledger
+      - id: t283
+        title: 'Finish the Doctor''s open talk budget fix: outcomes counted on every harness, counting starts at the first
+          outcome'
+        description: 'Parent: swarm runtime fixes. The Doctor crew closed on the ninth of October with its fix for issue 2194
+          still a draft pull request, number 2195, on branch engineer d44a5a 0220, checks green except one still running.
+          It covers the Doctor''s part of the split: the push pattern accepts a push on its own line and a push wrapped in
+          bash with the login flag, Codex sessions reach the outcome recorder, and counting starts at the first outcome so
+          required writes before it do not count. Seams already in that branch; this task restacks it onto dev, reads its
+          review state, finishes any open finding, marks it ready, merges it and closes issue 2194. Done when pull request
+          2195 merges with CI green and the issue is closed.'
+        difficulty: M
+        territory:
+        - hooks/context
+        - scripts/gates
+        - scripts/swarm_ledger
+        - tests/swarm
+        - tests/swarm_ledger
+  params:
+    groups:
+    - 't273 titled Ledger page header count browser test waits for counts before reading them, t283 titled Finish the Doctor''s
+      open talk budget fix: outcomes counted on every harness, counting starts at the first outcome'
+  expected:
+    group: false
+  control: false
+  samples:
+  - source: liquid-d1
+    latency_ms: 236
+    answers:
+      group_0:
+        type: noul
+        noul: 0.001325022328481215
+  notes: state digest 0e7b1f47cea87c0d, state rebuilt from the ledger and asked once during seeding on 2026-10-09 UTC so the
+    decision log recorded it
+- name: rig-grade-swarm-sz51,tc143
+  state:
+    overview: 'Borrow what OpenRig does that we lack, while keeping the ledger, quota routing and herdr: durable Claude and
+      Codex messaging, seats, intent, work beyond code, swarm health.'
+    groups:
+    - - id: sz51
+        title: Test leaks sweep runs on dispatch, not on pull requests
+        description: The test leaks sweep still runs its hour long job on pull requests that touch it. Move it to a dispatch
+          run and retire its wiring exemption before that expires next month. Done when the pull request lands and the wiring
+          check passes without the exemption.
+        difficulty: S
+        territory:
+        - .github/workflows
+      - id: tc143
+        title: Dev push saves durations from every shard that ran, even when one shard fails
+        description: 'Parent: swarm runtime fixes keep pull request shard splits current. Dev push runs skip the stored durations
+          save when one flaky unit shard fails, so later pull requests split on stale durations; two of five dev push runs
+          this evening skipped it. Seam: the dev push durations save runs unless the run was cancelled, merges the durations
+          of every shard that completed, and keeps the previous stored entries for tests of a failed shard. Red first: a workflow
+          test showing the save is skipped today when one shard fails. Done when the pull request merges and a dev push run
+          with one red shard shows the durations saved.'
+        difficulty: M
+        territory:
+        - .github/workflows
+  params:
+    groups:
+    - sz51 titled Test leaks sweep runs on dispatch, not on pull requests, tc143 titled Dev push saves durations from every
+      shard that ran, even when one shard fails
+  expected:
+    group: false
+  control: false
+  samples:
+  - source: liquid-d1
+    latency_ms: 232
+    answers:
+      group_0:
+        type: noul
+        noul: 0.09009300862044806
+  notes: state digest d7e5399ed68e656e, state rebuilt from the ledger and asked once during seeding on 2026-10-09 UTC so the
+    decision log recorded it
+- name: rig-grade-swarm-t283,t284
+  state:
+    overview: 'Borrow what OpenRig does that we lack, while keeping the ledger, quota routing and herdr: durable Claude and
+      Codex messaging, seats, intent, work beyond code, swarm health.'
+    groups:
+    - - id: t283
+        title: 'Finish the Doctor''s open talk budget fix: outcomes counted on every harness, counting starts at the first
+          outcome'
+        description: 'Parent: swarm runtime fixes. The Doctor crew closed on the ninth of October with its fix for issue 2194
+          still a draft pull request, number 2195, on branch engineer d44a5a 0220, checks green except one still running.
+          It covers the Doctor''s part of the split: the push pattern accepts a push on its own line and a push wrapped in
+          bash with the login flag, Codex sessions reach the outcome recorder, and counting starts at the first outcome so
+          required writes before it do not count. Seams already in that branch; this task restacks it onto dev, reads its
+          review state, finishes any open finding, marks it ready, merges it and closes issue 2194. Done when pull request
+          2195 merges with CI green and the issue is closed.'
+        difficulty: M
+        territory:
+        - hooks/context
+        - scripts/gates
+        - scripts/swarm_ledger
+        - tests/swarm
+        - tests/swarm_ledger
+      - id: t284
+        title: The master carries the operator's typed order to start, stop or scale its linked Doctor swarm
+        description: 'Parent: swarm runtime fixes; the operator runs the swarms through the master. On the ninth of October
+          the operator told the master in its pane to restart the Doctor crew with two engineers. The master was refused twice:
+          doctor start answered that the master cannot write as doctor, and the Doctor swarm''s set command answered that
+          only the operator or the Doctor''s own master may use its controls, and the closed Doctor has no master. Possible
+          fix: the linked Doctor''s start, stop and lane caps accept the watched swarm''s master when it relays the operator''s
+          words typed in its pane within thirty minutes, checked the same way the condition relay checks them, and record
+          the relay on both ledgers. Red first: the master relaying a fresh operator order starts the Doctor with the given
+          cap, and without a fresh order it is still refused. Done when the pull request merges with CI green.'
+        difficulty: M
+        territory:
+        - scripts/swarm
+        - scripts/doctor
+        - tests/swarm
+  params:
+    groups:
+    - 't283 titled Finish the Doctor''s open talk budget fix: outcomes counted on every harness, counting starts at the first
+      outcome, t284 titled The master carries the operator''s typed order to start, stop or scale its linked Doctor swarm'
+  expected:
+    group: false
+  control: false
+  samples:
+  - source: liquid-d1
+    latency_ms: 323
+    answers:
+      group_0:
+        type: noul
+        noul: 0.006692849933647288
+  notes: state digest 4ba727df0a1f0cb6, state rebuilt from the ledger and asked once during seeding on 2026-10-09 UTC so the
+    decision log recorded it
+- name: rig-grade-swarm-ving4,ving5
+  state:
+    overview: 'Borrow what OpenRig does that we lack, while keeping the ledger, quota routing and herdr: durable Claude and
+      Codex messaging, seats, intent, work beyond code, swarm health.'
+    groups:
+    - - id: ving4
+        title: Bound synthesis and serialize knowledge mutations
+        description: 'Swarm v2 work package SV2-ING-04, tier 7 of 8. Spec: read section SV2-ING-04 of /home/user/dev/fleet-ecosystem/agentihooks/Swarm-v2.md
+          (also Swarm-v2.md at the root of your agentihooks worktree) in full, fixture, boundary obligations, acceptance tests,
+          rollback and completion, plus sections 1 to 3. Repository: agentibrain-kernel. Integration gate: G6. Intended change:
+          Handle swarm write bursts without corrupting files or launching unbounded inference work. Required fixture: Simultaneous
+          marker writes, scheduled tick, manual tick, and malformed synthesis output. Name SV2-ING-04 in the pull request.
+          antoncore changes go through GitOps, never live patches. Priority: Atlas compute first, because the operator''s
+          workstation memory is the bottleneck.'
+        difficulty: M
+        territory:
+        - swarm v2 ING
+      - id: ving5
+        title: Record learning quality and promotion evidence
+        description: 'Swarm v2 work package SV2-ING-05, tier 7 of 8. Spec: read section SV2-ING-05 of /home/user/dev/fleet-ecosystem/agentihooks/Swarm-v2.md
+          (also Swarm-v2.md at the root of your agentihooks worktree) in full, fixture, boundary obligations, acceptance tests,
+          rollback and completion, plus sections 1 to 3. Repository: agentibrain-kernel. Integration gate: G6. Intended change:
+          Reward useful evidence-backed knowledge rather than larger numbers of lessons or edges. Required fixture: Unsupported
+          confident claim, independently verified lesson, repeated echo, and later contradiction. Name SV2-ING-05 in the pull
+          request. antoncore changes go through GitOps, never live patches. Priority: Atlas compute first, because the operator''s
+          workstation memory is the bottleneck.'
+        difficulty: M
+        territory:
+        - swarm v2 ING
+  params:
+    groups:
+    - ving4 titled Bound synthesis and serialize knowledge mutations, ving5 titled Record learning quality and promotion evidence
+  expected:
+    group: false
+  control: false
+  samples:
+  - source: liquid-d1
+    latency_ms: 229
+    answers:
+      group_0:
+        type: noul
+        noul: 0.01322282253002531
+  notes: state digest c2d5010b7fe9b9cb, state rebuilt from the ledger and asked once during seeding on 2026-10-09 UTC so the
+    decision log recorded it; internal names masked for the package
+- name: rig-grade-swarm-vses2,vses5
+  state:
+    overview: 'Borrow what OpenRig does that we lack, while keeping the ledger, quota routing and herdr: durable Claude and
+      Codex messaging, seats, intent, work beyond code, swarm health.'
+    groups:
+    - - id: vses2
+        title: Implement byte-safe tailing and durable cursors
+        description: 'Swarm v2 work package SV2-SES-02, tier 6 of 8. Spec: read section SV2-SES-02 of /home/user/dev/fleet-ecosystem/agentihooks/Swarm-v2.md
+          (also Swarm-v2.md at the root of your agentihooks worktree) in full, fixture, boundary obligations, acceptance tests,
+          rollback and completion, plus sections 1 to 3. Repository: agentihooks. Integration gate: G4. Intended change: Avoid
+          missing complete appended lines and avoid consuming incomplete trailing JSON. Required fixture: UTF-8 boundary split,
+          partial final line, rotated file, truncated file, and appended first line. Name SV2-SES-02 in the pull request.
+          antoncore changes go through GitOps, never live patches. Priority: Atlas compute first, because the operator''s
+          workstation memory is the bottleneck.'
+        difficulty: L
+        territory:
+        - swarm v2 SES
+      - id: vses5
+        title: Backfill historical provider sessions with provenance
+        description: 'Swarm v2 work package SV2-SES-05, tier 6 of 8. Spec: read section SV2-SES-05 of /home/user/dev/fleet-ecosystem/agentihooks/Swarm-v2.md
+          (also Swarm-v2.md at the root of your agentihooks worktree) in full, fixture, boundary obligations, acceptance tests,
+          rollback and completion, plus sections 1 to 3. Repository: agentihooks. Integration gate: G4. Intended change: Recover
+          useful past evidence without assigning unknown history to an invented project. Required fixture: Old Claude transcript,
+          Codex rollout, missing source file, and ambiguous duplicate repository basename. Name SV2-SES-05 in the pull request.
+          antoncore changes go through GitOps, never live patches. Priority: Atlas compute first, because the operator''s
+          workstation memory is the bottleneck.'
+        difficulty: M
+        territory:
+        - swarm v2 SES
+  params:
+    groups:
+    - vses2 titled Implement byte-safe tailing and durable cursors, vses5 titled Backfill historical provider sessions with
+      provenance
+  expected:
+    group: false
+  control: false
+  samples:
+  - source: liquid-d1
+    latency_ms: 244
+    answers:
+      group_0:
+        type: noul
+        noul: 0.001597845660419315
+  notes: state digest 13a23d768aa6b485, state rebuilt from the ledger and asked once during seeding on 2026-10-09 UTC so the
+    decision log recorded it; internal names masked for the package
+- name: rig-grade-swarm-asc1,asc8
+  state:
+    overview: 'Borrow what OpenRig does that we lack, while keeping the ledger, quota routing and herdr: durable Claude and
+      Codex messaging, seats, intent, work beyond code, swarm health.'
+    groups:
+    - - id: asc1
+        title: Host room from load and memory
+        description: 'Parent: quota driven autoscaling bounded by the host. A pure function plus a thin reader gives how many
+          more agents this machine takes from the one minute load per CPU, available memory and every live agent session on
+          the machine, with high and low load watermarks as hysteresis: above high the room shrinks, below low it may grow,
+          between them the previous room holds. The default memory per agent is measured from live agent sessions here and
+          named in the pull request. Red first: high load gives zero room, low load with free memory gives room, the band
+          between watermarks holds the previous room, memory alone limits room. Done when the pull request merges with CI
+          green.'
+        difficulty: S
+        territory:
+        - scripts/swarm/host_budget.py
+        - tests/swarm/test_host_budget.py
+      - id: asc8
+        title: Host room counts Copilot sessions beside Claude and Codex
+        description: 'Parent: quota driven autoscaling bounded by the host. Live agent counting for host room covers Claude
+          and Codex sessions only; Copilot sessions on the machine are not counted. Seam: a Copilot session counter next to
+          the other two, read the same way, feeding host room. Red test first with a fixture process list holding a Copilot
+          session. Done when the pull request merges with CI green.'
+        difficulty: M
+        territory:
+        - scripts/swarm/host_budget.py
+  params:
+    groups:
+    - asc1 titled Host room from load and memory, asc8 titled Host room counts Copilot sessions beside Claude and Codex
+  expected:
+    group: true
+  control: false
+  samples:
+  - source: liquid-d1
+    latency_ms: 232
+    answers:
+      group_0:
+        type: noul
+        noul: 0.25683200276421697
+  notes: state digest 6707d4d23020efff, state rebuilt from the ledger and asked once during seeding on 2026-10-09 UTC so the
+    decision log recorded it

@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/incidents.py:scripts.swarm.incidents.x_mail__mutmut_56:db62172a6db7a6df71fed49724ef1f41cca77eb722e2e2b6613b1a1acf40ed71": {
+    "reader": "standards_reader",
+    "reason": "Identical truthiness"
+  }
+}

@@ -9,6 +9,7 @@ from hooks.lifecycle.model import Finding, Lease, Root
 PROTECTED = {"dev", "main", "master"}
 CLEAN_IDLE = 2 * 3600
 DIRTY_IDLE = 24 * 3600
+DAY = 24 * 3600
 NESTED_DEPTH = 8
 
 
@@ -86,14 +87,42 @@ def _held(state: TreeState, lease: Lease | None, snap: Snapshot) -> str:
     return ""
 
 
-def _idle_verdict(state: TreeState, lease: Lease | None, idle: float) -> tuple[str, str]:
-    if lease and lease.kind == "ephemeral":
-        return ("remove", "throwaway checkout, owner gone") if idle >= CLEAN_IDLE else ("keep", "throwaway, recent")
+def pinned(state: TreeState, lease: Lease | None, snap: Snapshot) -> bool:
+    return state.path == state.primary or state.branch in PROTECTED or lease_alive(lease, snap)
+
+
+def stale_after() -> float:
+    try:
+        days = float(os.environ.get("WT_STALE_DAYS") or 7)
+    except ValueError:
+        days = 7.0
+    return (days if days > 0 else 7.0) * DAY
+
+
+def scratch_repository(state: TreeState, root: Root) -> bool:
+    return root.kind == "scratch" and Path(state.primary).is_relative_to(root.path)
+
+
+def _throwaway(lease: Lease | None) -> bool:
+    return bool(lease) and lease.kind == "ephemeral"
+
+
+def needs_rescue(state: TreeState, lease: Lease | None) -> bool:
+    return bool(state.dirty or state.unpushed) and not _throwaway(lease)
+
+
+def _idle_verdict(state: TreeState, lease: Lease | None, idle: float) -> tuple[str, str, bool]:
+    if _throwaway(lease):
+        if idle >= CLEAN_IDLE:
+            return "remove", "throwaway checkout, owner gone", False
+        return "keep", "throwaway, recent", False
     if not state.dirty and not state.unpushed:
-        return ("remove", "clean and on a remote") if idle >= CLEAN_IDLE else ("keep", "clean, recent")
+        if lease and lease.holders:
+            return "remove", "clean and on a remote, owner left", True
+        return ("remove", "clean and on a remote", False) if idle >= CLEAN_IDLE else ("keep", "clean, recent", False)
     if idle >= DIRTY_IDLE:
-        return "snapshot", "unique work, owner gone: push to wip/ then remove"
-    return "keep", "unique work, recent"
+        return "snapshot", "unique work, owner gone: push to wip/ then remove", False
+    return "keep", "unique work, recent", False
 
 
 def classify(path: Path, root: Root, snap: Snapshot) -> Finding:
@@ -101,8 +130,17 @@ def classify(path: Path, root: Root, snap: Snapshot) -> Finding:
     if state is None:
         return Finding(str(path), root.id, "worktree", "skip", "unreadable worktree")
     lease = read_lease(path, "worktree")
+    idle = snap.now - state.last_touch
     held = _held(state, lease, snap)
-    action, reason = ("keep", held) if held else _idle_verdict(state, lease, snap.now - state.last_touch)
-    if state.busy and held == f"git {state.busy} in progress":
+    action, reason, immediate = ("keep", held, False) if held else _idle_verdict(state, lease, idle)
+    if action == "keep" and idle >= stale_after() and not pinned(state, lease, snap):
+        action = "snapshot" if needs_rescue(state, lease) else "remove"
+        reason = f"untouched over {stale_after() / DAY:g} days though {reason}"
+    elif state.busy and held == f"git {state.busy} in progress":
         action = "skip"
-    return Finding(str(path), root.id, "worktree", action, reason, state.last_touch)
+    disposable = action == "snapshot" and scratch_repository(state, root)
+    if disposable:
+        reason += "; scratch repository: removed if the push fails"
+    return Finding(
+        str(path), root.id, "worktree", action, reason, state.last_touch, immediate=immediate, disposable=disposable
+    )

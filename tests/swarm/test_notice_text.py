@@ -179,6 +179,12 @@ class _Store:
     def agents(self, slug):
         return []
 
+    def config(self, slug):
+        return SwarmConfig(slug, "/repo", max_eng=1, max_ci=0)
+
+    def peer(self, slug):
+        return ""
+
 
 class _RefusingLedger:
     def state(self, slug):
@@ -219,8 +225,8 @@ class _CapStore:
     def handoff_envelope(self, slug, task_id):
         return None
 
-    def launch_failure(self, slug, task_id):
-        return None
+    def launches(self, slug):
+        return []
 
     def reset_claims(self, slug, task_id):
         self.lives = 0

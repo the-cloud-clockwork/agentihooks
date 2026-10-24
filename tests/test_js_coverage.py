@@ -158,6 +158,64 @@ def test_a_report_missing_either_kind_of_recorded_run_is_red(tmp_path, recorded,
     assert not (tmp_path / "lcov.info").exists()
 
 
+def convert_selected(root, captures, out):
+    return subprocess.run(
+        [
+            sys.executable,
+            str(CONVERT),
+            "--root",
+            str(root),
+            "--captures",
+            str(captures),
+            "--out",
+            str(out),
+            "--selected",
+        ],
+        capture_output=True,
+        text=True,
+    )
+
+
+def test_a_selected_run_without_page_coverage_writes_an_empty_report(tmp_path):
+    captures = tmp_path / "captures"
+    captures.mkdir()
+    (captures / "capture-browser-empty.json").write_text('{"result": []}')
+    out = tmp_path / "lcov.info"
+    result = convert_selected(tmp_path, captures, out)
+    assert result.returncode == 0
+    assert out.read_text() == ""
+    assert result.stdout == (
+        f"The selected tests recorded no browser or node coverage under {captures}; the page report is empty\n"
+    )
+
+
+@pytest.mark.parametrize("recorded", ["node", "browser"], ids=["node-only", "browser-only"])
+def test_a_selected_run_with_partial_page_coverage_maps_its_report(tmp_path, recorded):
+    text = "export const answer = total + offset;\n"
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / "scripts/page.js").write_text(text)
+    captures = tmp_path / "captures"
+    (captures / "sources").mkdir(parents=True)
+    (captures / "sources" / "page-run.js").write_text(text)
+    entry = {"source": "page-run", "functions": [{"ranges": [{"startOffset": 0, "endOffset": len(text), "count": 1}]}]}
+    (captures / f"capture-{recorded}-page-run.json").write_text(json.dumps({"result": [entry]}))
+    (captures / "capture-browser-empty.json").write_text('{"result": []}')
+    out = tmp_path / "lcov.info"
+    result = convert_selected(tmp_path, captures, out)
+    assert result.returncode == 0
+    assert result.stdout == "Mapped 2 captured runs of 1 scripts onto 1 page sources\n"
+    assert out.read_text() == "TN:\nSF:scripts/page.js\nDA:1,1\nLF:1\nLH:1\nend_of_record\n"
+
+
+def test_the_coverage_merge_marks_a_selected_scope_for_the_page_report():
+    workflow = yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())
+    merge = next(step for step in workflow["jobs"]["sonar"]["steps"] if step.get("id") == "merge")
+    assert merge["env"]["SCOPE"] == "${{ needs.select.outputs.scope }}"
+    combine = (ROOT / ".github/coverage/combine.sh").read_text()
+    assert 'if [[ "${SCOPE:-}" == selected ]]; then selected=(--selected); fi' in combine
+    assert '--out lcov.info "${selected[@]}"' in combine
+
+
 def test_code_two_page_files_share_counts_in_neither(tmp_path):
     for name in ("a", "b"):
         page = tmp_path / f"scripts/swarm_ledger/static/js/{name}.js"
@@ -186,7 +244,15 @@ def test_the_coverage_shards_capture_node_runs_and_sonar_imports_the_report():
     names = [step.get("name") for step in steps]
     browser = steps[names.index("Install the browser that page tests drive")]
     assert browser["uses"] == "./.github/actions/browser-cache"
-    assert browser["if"] == "matrix.python-version == '3.12'"
+    if browser["if"].endswith(" && github.event_name != 'merge_group'"):
+        condition = "needs.split.outputs.source == '' && matrix.python-version == '3.12'"
+        assert browser["if"] == f"{condition} && github.event_name != 'merge_group'"
+        offline = next(step for step in steps if "use-image.sh" in step.get("run", ""))
+        assert offline["if"] == f"{condition} && github.event_name == 'merge_group'"
+        assert offline["env"]["PLAYWRIGHT_BROWSERS_PATH"] == "${{ github.workspace }}/.playwright"
+        assert steps.index(offline) < steps.index(run)
+    else:
+        assert browser["if"] == "needs.split.outputs.source == '' && matrix.python-version == '3.12'"
     assert names.index("Install the browser that page tests drive") < names.index("Run tests")
     upload = next(step for step in steps if step.get("name") == "Upload coverage")
     assert "js-coverage/" in upload["with"]["path"].split()
@@ -254,3 +320,15 @@ def test_a_page_test_that_cannot_launch_chromium_fails_while_coverage_is_recorde
     report = SimpleNamespace(outcome=outcome, skipped=outcome == "skipped", longrepr=("f.py", 1, f"Skipped: {reason}"))
     browser_coverage.failed_launch(report)
     assert report.outcome == after
+
+
+def test_only_test_files_that_reach_playwright_count_as_browser_tests():
+    from tests import browser_coverage
+
+    root = Path(__file__).resolve().parents[1]
+    browser_coverage.drives_browser.cache_clear()
+    try:
+        assert browser_coverage.drives_browser(root, "tests/test_ci_gate_workflow.py") is False
+        assert browser_coverage.drives_browser(root, "tests/swarm_ledger/test_mutation_deadlines.py") is True
+    finally:
+        browser_coverage.drives_browser.cache_clear()

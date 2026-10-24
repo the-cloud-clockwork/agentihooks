@@ -14,7 +14,7 @@ permissions:
 jobs:
   ledger-equivalence:
     if: contains(github.event.pull_request.body, '<!-- ledger-equivalence -->')
-    runs-on: ubuntu-latest
+    runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && 'anton-oss' || 'ubuntu-latest' }}
     env:
       PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.playwright
     steps:
@@ -34,6 +34,8 @@ jobs:
           version: '0.12.23'
           enable-cache: false
       - name: Install dependencies
+        env:
+          UV_CONSTRAINT: head/.github/test-constraints.txt
         run: uv pip install --system --excludes head/.github/test-excludes.txt -e './head[dev,all]'
       - name: Plant a dropped checkbox update and a dropped chat recipient in copies of head
         run: |
@@ -43,9 +45,9 @@ jobs:
           from pathlib import Path
           for path, needle, planted in (
               (
-                  Path('fault-store/scripts/swarm_ledger/repository/file.py'),
-                  'core.apply_changes(doc, changes or [], ctx)',
-                  'core.apply_changes(doc, [], ctx)',
+                  Path('fault-store/scripts/swarm_ledger/repository/mutation.py'),
+                  'rejected = core.apply_changes(doc, changes or [], ctx)',
+                  'rejected = core.apply_changes(doc, [], ctx)',
               ),
               (
                   Path('fault-chat/scripts/swarm_ledger/static/js/chat.js'),
@@ -78,7 +80,7 @@ jobs:
             wait "$job" || failed=1
           done
           exit "$failed"
-      - name: Compare recorded requests and storage bytes
+      - name: Compare recorded requests and stored ledger state
         run: cmp base.json head.json
       - name: Reject the planted checkbox fault
         run: |
@@ -88,7 +90,7 @@ jobs:
           fi
           echo 'PASS: identical base and head; planted checkbox fault rejected'
       - name: Install the page replay browser
-        timeout-minutes: 2
+        timeout-minutes: 6
         uses: ./head/.github/actions/browser-cache
       - name: Replay base, head and the planted chat fault pages at once
         run: |

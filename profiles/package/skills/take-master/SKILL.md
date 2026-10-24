@@ -15,6 +15,18 @@ swarm's master. It names an unnamed session `master@<code>-<n>`, occupies the
 master seat, reopens a closed ledger, sets a stopped swarm running and prints
 the full master priming.
 
+## Plans versus standalone tasks
+
+- A full plan is a plan file a master or planner writes and publishes to the
+  artifacts; every task built from it carries its slice.
+- Follow ups, open questions, operator notes and orders the operator types or
+  gives are standalone tasks with no plan and no slice.
+- A standalone task that a master or planner expands because it grew wide
+  becomes a plan: write and publish the plan with slice markers, then add its
+  tasks with their slices.
+- Small self explanatory changes, such as a style tweak or a loose layout
+  change, stay standalone and never get a plan.
+
 ## Run
 
 Run it inside this session's own shell, never through another agent:
@@ -36,6 +48,14 @@ as your standing instructions from now on: the seat handoff, the culture, the
 recaps, the learned notes, the ledger summary and the standing duties. Pass
 `--as <your master name>` on every `agentihooks swarm` and `agentihooks ledger`
 command it names.
+
+Every plan you publish puts each phase under a heading with its exact title,
+each task under a heading one level deeper, and one unique
+`<!-- slice: <id> -->` anchor naming the task immediately before its heading.
+Publish it with
+`agentihooks ledger --slug <slug> --as <name> publish-plan <plan-file> --phase <phase-ids>`
+and add every task built from it with `--plan-slice <id>`, so its agent reads
+only its chunk.
 
 Completion criterion: the priming is printed, `agentihooks swarm <slug> status`
 lists this session's master name once, and its first ledger chat line follows

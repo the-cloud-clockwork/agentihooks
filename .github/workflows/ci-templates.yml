@@ -1,0 +1,42 @@
+name: CI templates
+
+on:
+  push:
+    branches-ignore: [main, dev, 'gh-readonly-queue/**', 'wip/**', 'diffcheck/**']
+    paths:
+      - profiles/package/templates/ci/**
+      - .github/workflows/ci-templates.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow == 'CI templates' && format('hosted-lane-{0}', ((endsWith(github.run_id, '0') || endsWith(github.run_id, '1') || endsWith(github.run_id, '2')) && 'a') || ((endsWith(github.run_id, '3') || endsWith(github.run_id, '4') || endsWith(github.run_id, '5')) && 'b') || 'c') || format('ci-templates-{0}', github.run_id) }}
+  queue: ${{ github.workflow == 'CI templates' && 'max' || 'single' }}
+
+jobs:
+  actionlint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+          cache: false
+      - name: Install actionlint
+        run: go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.7
+      - name: Validate packaged workflows
+        run: actionlint -shellcheck='' profiles/package/templates/ci/*.yml
+      - name: Prove invalid workflows fail
+        shell: bash
+        run: |
+          mkdir -p "$RUNNER_TEMP/ci-template-control"
+          printf 'name: Invalid\non: push\njobs:\n  broken:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo broken\n        if: unknown_context.value\n' > "$RUNNER_TEMP/ci-template-control/invalid.yml"
+          if actionlint -shellcheck='' "$RUNNER_TEMP/ci-template-control/invalid.yml"; then
+            echo '::error::actionlint accepted the invalid workflow'
+            exit 1
+          fi

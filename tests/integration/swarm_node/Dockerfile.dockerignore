@@ -1,0 +1,12 @@
+**
+!tests/
+!tests/integration/
+!tests/integration/swarm_node/
+!tests/integration/swarm_node/*.py
+!docker/
+!docker/swarm-node/
+!docker/swarm-node/fixtures/
+!docker/swarm-node/fixtures/profiles/
+!docker/swarm-node/fixtures/profiles/**
+**/__pycache__
+**/*.pyc

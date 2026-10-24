@@ -5,6 +5,9 @@ from hooks.classifier.result import DecisionRequest
 from hooks.secrets import redact
 from scripts.gates.log import gates_dir
 
+URL_LISTS = ("judged_pull_requests", "unread_pull_requests")
+URL_COUNT = 10
+
 
 def append(slug: str, record: dict, home=None) -> None:
     path = gates_dir(slug, home) / "intent" / "history.jsonl"
@@ -44,7 +47,12 @@ def bounded(value: object, limit: int) -> object:
 
 def prepare(state: dict) -> dict:
     safe = masked(state)
-    return {
-        key: bounded(value, 32768 if key in ("reviewer_findings", "plan_chunk") else 8192)
-        for key, value in safe.items()
-    }
+    return {key: _bound(key, value) for key, value in safe.items()}
+
+
+def _bound(key: str, value: object) -> object:
+    if key in URL_LISTS and isinstance(value, list):
+        return value[:URL_COUNT]
+    if key == "pull_requests" and isinstance(value, list):
+        return [{**item, **{part: bounded(item.get(part), 8192) for part in ("diff", "files")}} for item in value]
+    return bounded(value, 32768 if key in ("reviewer_findings", "plan_chunk") else 8192)

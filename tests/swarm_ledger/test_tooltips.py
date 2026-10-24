@@ -6,7 +6,15 @@ from unittest.mock import patch
 
 import pytest
 
-from tests.swarm_ledger.ledger_page import fulfill_events, is_events, ledger_state, serve_modules, served, shell_html
+from tests.swarm_ledger.ledger_page import (
+    fulfill_events,
+    is_events,
+    ledger_state,
+    loaded,
+    serve_modules,
+    served,
+    shell_html,
+)
 from tests.swarm_ledger.test_caps_columns import browser as chromium_browser
 
 browser = chromium_browser
@@ -16,6 +24,7 @@ sys.path.insert(0, str(LEDGER))
 
 from scripts.swarm_ledger import ledger_core as core  # noqa: E402
 from scripts.swarm_ledger import ledger_server as server  # noqa: E402
+from scripts.swarm_ledger import page_assets  # noqa: E402
 
 URL = "http://ledger.test/tips"
 CONTROLS = 'button, [role="tab"], [role="button"], [role="switch"], a.sync, a.fab'
@@ -82,12 +91,12 @@ def route(r, html):
         fulfill_events(r, ledger=ledger_state(DOC), swarm=STATUS)
     elif rows is not None:
         r.fulfill(json={"data": rows, "next_cursor": None})
-    elif "/api/swarm/" in url:
+    elif "/swarm/" in url:
         r.fulfill(json=STATUS)
+    elif "/files/" in url:
+        r.fulfill(body="# Shot", content_type="text/markdown")
     elif "/api/" in url:
         r.fulfill(json={})
-    elif "/media/" in url or "/artifacts/" in url:
-        r.fulfill(body="# Shot", content_type="text/markdown")
     else:
         r.fulfill(body=html, content_type="text/html")
 
@@ -133,6 +142,7 @@ def assert_every_control_has_a_short_tip(page, least):
 
 def test_every_button_like_control_on_the_ledger_page_has_a_tip_of_at_most_25_words(tab):
     page = tab(ledger_html(), "#swarm")
+    loaded(page)
     for row in ("#swarm-agents [data-terminate]", "[data-restore-choice]", ".phase-review button"):
         page.locator(row).first.wait_for(state="attached")
     page.locator("#chat-fab").click()
@@ -187,6 +197,7 @@ def hover_stop_now(page):
 
 def test_the_tip_appears_exactly_one_second_after_the_pointer_rests(tab):
     page = tab(ledger_html())
+    loaded(page)
     hover_stop_now(page)
     page.clock.run_for(999)
     assert tip_shown(page) is None
@@ -235,15 +246,15 @@ def test_a_home_row_tip_hides_on_click_or_scroll(tab, leave):
 
 def test_an_empty_row_tip_leaves_the_enclosing_control_its_own_tip(tab):
     page = tab(home_html("home"))
-    page.locator("li.row button.fold").wait_for()
+    page.locator("li.row a.title").first.wait_for()
     found = page.evaluate(
-        """() => { const fold = document.querySelector("li.row button.fold");
+        """() => { const title = document.querySelector("li.row a.title");
           const empty = document.createElement("span");
           empty.dataset.tip = "";
-          fold.append(empty);
-          return [ledgerTip(empty), ledgerTip(fold)]; }"""
+          title.append(empty);
+          return [ledgerTip(empty), ledgerTip(title)]; }"""
     )
-    assert found == ["Show this ledger's full title and overview, or fold it back to one line."] * 2
+    assert found == [ROW_TITLE] * 2
 
 
 @pytest.mark.parametrize("view", ["home", "bin"])
@@ -299,6 +310,7 @@ def test_a_ledger_row_button_shows_the_ledger_tip_exactly_one_second_after_the_p
 @pytest.mark.parametrize("leave", ["pointer", "click", "scroll"])
 def test_the_tip_hides_on_pointer_leave_click_or_scroll(tab, leave):
     page = tab(ledger_html())
+    loaded(page)
     button = hover_stop_now(page)
     page.clock.run_for(1000)
     assert tip_shown(page)
@@ -342,7 +354,7 @@ def test_the_page_version_follows_the_tip_module(tmp_path):
     before = core.page_version()
     changed = tmp_path / "tooltips.js"
     changed.write_text(core.TOOLTIPS.read_text() + ";")
-    with patch.object(core, "TOOLTIPS", changed):
+    with patch.object(page_assets, "TOOLTIPS", changed):
         after = core.page_version()
     assert re.fullmatch(r"[0-9a-f]{12}", before)
     assert after != before

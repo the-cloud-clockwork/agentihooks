@@ -39,3 +39,5 @@ class Finding:
     size: int = 0
     due: bool = False
     outcome: str = ""
+    immediate: bool = False
+    disposable: bool = False

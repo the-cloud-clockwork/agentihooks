@@ -12,9 +12,11 @@ import ledger_server as server  # noqa: E402
 import new_ledger  # noqa: E402
 
 from scripts.swarm.store import SwarmError  # noqa: E402
-from scripts.swarm_ledger.repository import repository as storage  # noqa: E402
+from scripts.swarm_ledger.storage import default as default_repository  # noqa: E402
 from tests.swarm_ledger import legacy_page  # noqa: E402
 from tests.swarm_ledger.ledger_page import chromium, rendered_home  # noqa: E402
+
+storage = default_repository()
 
 MINUTE = 60 * 1000
 SWARM_STATE = server.swarm_state
@@ -48,7 +50,7 @@ def one_row(browser, now, **fields):
 def make(slug, title="T", overview="O", size="swarm", phases=()):
     content = {"title": title, "overview": overview, "sources": [], "phases": list(phases), "questions": []}
     content["followups"] = []
-    core.paths(slug)[0].write_text(
+    legacy_page.paths(slug, core)[0].write_text(
         legacy_page.render(new_ledger.build_doc(content, size), slug, 8765), encoding="utf-8"
     )
 
@@ -165,14 +167,17 @@ def test_the_header_brands_home_without_a_ledger_count_and_names_each_column(bro
     assert count > 1
     assert (
         '<header><a class="logo-link" href="/" aria-label="HOME"><span class="logo" aria-hidden="true"></span></a><span class="brand">agentihooks</span><h1>HOME</h1>'
-        '<button class="act toggle-all" id="fold-all" type="button">Expand all</button></header>' in page
+        "</header>" in page
     )
     assert 'class="total"' not in page
-    head = re.search(r'<div class="row head">(.*?)</div>', page).group(1)
+    assert 'id="fold-all"' not in page
+    head = re.search(
+        r'<div class="row head">(.*?)</div>', re.sub(r'<span class="col-grip"[^>]*></span>', "", page)
+    ).group(1)
     arrow = '<i aria-hidden="true">▼</i></button>'
     still = '<i aria-hidden="true">↕</i></button>'
     assert head == (
-        f'<span></span><span>Ledger</span><button class="sort" type="button" data-sort="kind">Kind{still}'
+        f'<span>Ledger</span><button class="sort" type="button" data-sort="kind">Kind{still}'
         f'<span>Overview</span><button class="sort r" type="button" data-sort="open">Open{still}'
         f'<button class="sort r" type="button" data-sort="done">Done{still}'
         f'<button class="sort" type="button" data-sort="swarm">Swarm{still}'
@@ -197,7 +202,8 @@ def test_the_bin_lists_days_left_and_a_restore_button(browser, updated_at):
         in page
     )
     assert 'class="watermark"' not in page
-    assert '<span class="r">Deleted</span><span class="r">Left</span><span></span></div>' in page
+    head = re.sub(r'<span class="col-grip"[^>]*></span>', "", page)
+    assert '<span class="r">Deleted</span><span class="r">Left</span><span></span></div>' in head
     assert 'id="home-fab" href="/"' in page
     with patch.object(
         server, "bin_summaries", return_value=[{**summary(SLUG), "deleted_at": updated_at, "days_left": 30}]
@@ -335,7 +341,7 @@ def test_the_home_shell_bins_nothing_and_the_watch_loop_bins_closed_ledgers_with
     with (
         patch.object(server, "swarm_store", return_value=Swarms()),
         patch.object(server, "sample_streams"),
-        patch.object(server.time, "sleep", finish),
+        patch.object(server, "scheduled_wait", finish),
         pytest.raises(RuntimeError, match="watch ended"),
     ):
         server.watch_ledgers()

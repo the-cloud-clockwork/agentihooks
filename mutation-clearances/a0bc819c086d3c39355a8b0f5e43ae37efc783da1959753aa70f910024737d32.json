@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/controller.py:scripts.swarm.controller.x__dead__mutmut_18:8908e6a23301f34087c8025a15ad92e1fae5501d74d8d1ef058e4654a7ce0e14": {
+    "reader": "Independent equivalence reader, sub agent of ci@d44a5a-0025",
+    "reason": "The subset test runs only after the host guard passed with a non empty host, so the held record always carries a host key besides pid and start. Its keys are then always a proper superset of pid and start, where non strict and strict subset agree. The lock writer always adds epoch, token and host, so the boundary case never occurs."
+  }
+}

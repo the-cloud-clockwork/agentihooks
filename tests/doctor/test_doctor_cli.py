@@ -1,4 +1,5 @@
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -7,7 +8,7 @@ import pytest
 from scripts.doctor import cli as doctor
 from scripts.inbox.store import InboxStore
 from scripts.swarm import cli as swarm_cli
-from scripts.swarm import prompt
+from scripts.swarm import controller, prompt
 from scripts.swarm.health.findings import Finding
 from scripts.swarm.ledger_client import LedgerClient
 from scripts.swarm.status import status_report
@@ -20,7 +21,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts" / "swarm_
 import ledger_core as core  # noqa: E402
 import new_ledger  # noqa: E402
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
 WATCHED, DOCTOR = "watch", "watch-doctor"
 PR = "https://github.com/o/r/pull/9"
 
@@ -40,8 +40,19 @@ class FileLedger(LedgerClient):
         return state
 
     def _resource(self, slug, path, collection=False):
-        from scripts.swarm_ledger.api.resources import value
+        from scripts.swarm_ledger.api.resources import hierarchy_read, value
+        from scripts.swarm_ledger.storage import default as default_repository
 
+        repository = default_repository()
+
+        if path.startswith("hierarchy"):
+            rows, query = [], {"limit": 100}
+            while True:
+                reply = hierarchy_read(repository.bound(core), slug, path, query)
+                rows += reply["data"]
+                if reply["next_cursor"] is None:
+                    return rows
+                query["cursor"] = reply["next_cursor"]
         return value(self._call(slug), path)
 
 
@@ -62,6 +73,7 @@ def env(monkeypatch, tmp_path):
     monkeypatch.setattr(swarm_cli.delivery, "HerdrMessenger", lambda: FakeHerdr({}))
     monkeypatch.setattr(doctor, "linked_bundle", lambda: tmp_path / "bundle")
     monkeypatch.setattr(doctor.detect, "readers", lambda *args, **kwargs: {})
+    monkeypatch.setattr(doctor.loop, "speed", lambda *args: [])
     assert swarm_cli.main([WATCHED, "create", "--repo", "/repo"]) == 0
     return store, rt, tmp_path
 
@@ -140,6 +152,93 @@ def test_a_second_start_adds_no_second_link(env):
     assert len(state(WATCHED)["sources"]) == len(state(DOCTOR)["sources"]) == 1
     assert len(pointers(WATCHED)) == 1
     assert len([i for i in InboxStore(store.redis).inbox(f"master@{WATCHED}") if not i.fyi]) == 1
+
+
+MASTER = "master@323133-0106"
+
+
+class PinnedLedger(FileLedger):
+    """The file ledger behind the server's write as check: a pinned session's credential binds its own name."""
+
+    def _call(self, slug, ops=None):
+        from scripts.swarm.ledger_client import SERVICE_AUTHORS
+        from scripts.swarm_ledger import ledger_authority
+
+        pinned = os.environ.get("AGENTIHOOKS_SWARM") and os.environ.get("AGENTIHOOKS_AGENT_NAME", "")
+        if pinned and not all(op.get("by") in SERVICE_AUTHORS for op in ops or ()):
+            for op in ops or ():
+                if refused := ledger_authority.refusal(pinned, op):
+                    raise SwarmError(f"ledger {slug} refused: {refused}")
+        return super()._call(slug, ops)
+
+
+def pin(monkeypatch, name=MASTER, lane="master"):
+    monkeypatch.setattr(swarm_cli, "LedgerClient", PinnedLedger)
+    monkeypatch.setenv("AGENTIHOOKS_SWARM", WATCHED)
+    monkeypatch.setenv("AGENTIHOOKS_SWARM_LANE", lane)
+    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", name)
+
+
+@pytest.fixture
+def pinned_master(monkeypatch):
+    pin(monkeypatch)
+
+
+def test_the_watched_master_starts_its_doctor_and_authors_the_links_as_itself(env, pinned_master, capsys):
+    store, _, _ = env
+    assert doctor.main([WATCHED, "start"]) == 0, capsys.readouterr().err
+    assert state(DOCTOR)["sources"] == [ledger_link.page_url(WATCHED)]
+    assert state(WATCHED)["sources"] == [ledger_link.page_url(DOCTOR)]
+    assert state(DOCTOR)["_meta"]["stamps"]["sources"]["by"] == MASTER
+    assert state(WATCHED)["_meta"]["stamps"]["sources"]["by"] == MASTER
+    assert (store.peer(WATCHED), store.peer(DOCTOR)) == (DOCTOR, WATCHED)
+    assert store.config(DOCTOR).state in ("running", "drained") and store.agents(DOCTOR)
+
+
+def test_the_watched_master_reopens_its_closed_doctor_as_itself(env, monkeypatch, capsys):
+    store, _, _ = env
+    assert doctor.main([WATCHED, "start"]) == 0
+    assert doctor.main([WATCHED, "stop"]) == 0
+    assert state(DOCTOR)["closed_at"]
+    pin(monkeypatch)
+    assert doctor.main([WATCHED, "start"]) == 0, capsys.readouterr().err
+    assert not state(DOCTOR)["closed_at"]
+    assert state(DOCTOR)["_meta"]["stamps"]["closed_at"]["by"] == MASTER
+
+
+def test_the_watched_master_stops_its_doctor_as_itself(env, pinned_master, capsys):
+    store, _, _ = env
+    assert doctor.main([WATCHED, "start"]) == 0, capsys.readouterr().err
+    assert doctor.main([WATCHED, "stop"]) == 0, capsys.readouterr().err
+    assert state(DOCTOR)["closed_at"]
+    assert state(DOCTOR)["_meta"]["stamps"]["closed_at"]["by"] == MASTER
+    assert state(DOCTOR)["_meta"]["stamps"]["overview"]["by"] == MASTER
+    assert store.config(DOCTOR).state == "stopped"
+
+
+def test_the_operator_shell_still_starts_the_doctor_as_doctor(env, monkeypatch, capsys):
+    monkeypatch.delenv("AGENTIHOOKS_AGENT_NAME", raising=False)
+    assert doctor.main([WATCHED, "start"]) == 0, capsys.readouterr().err
+    assert state(DOCTOR)["_meta"]["stamps"]["sources"]["by"] == doctor.BY
+    assert state(WATCHED)["_meta"]["stamps"]["sources"]["by"] == doctor.BY
+    assert doctor.main([WATCHED, "stop"]) == 0
+    assert state(DOCTOR)["_meta"]["stamps"]["closed_at"]["by"] == doctor.BY
+    assert doctor.main([WATCHED, "start"]) == 0, capsys.readouterr().err
+    assert not state(DOCTOR)["closed_at"]
+    assert state(DOCTOR)["_meta"]["stamps"]["closed_at"]["by"] == doctor.BY
+
+
+@pytest.mark.parametrize("name", [MASTER, "engineer@323133-1244"])
+def test_a_pinned_agent_still_cannot_write_the_doctor_ledger_as_doctor(env, monkeypatch, name):
+    from scripts.swarm_ledger import ledger_authority
+
+    op = {"op": "source_add", "id": "s1", "by": doctor.BY, "source": ledger_link.page_url(WATCHED)}
+    assert ledger_authority.refusal(name, op) == f"{name} cannot write as {doctor.BY}"
+    pin(monkeypatch, name, "eng")
+    with pytest.raises(SwarmError) as refused:
+        swarm_cli.LedgerClient().add_source(WATCHED, ledger_link.page_url(DOCTOR), doctor.BY)
+    assert str(refused.value) == f"ledger {WATCHED} refused: {name} cannot write as {doctor.BY}"
+    assert state(WATCHED)["sources"] == []
 
 
 LONG = "a" * 40 + "-2026-10"
@@ -433,6 +532,69 @@ def test_the_swarm_tick_closes_a_quiet_doctor_with_its_note(env, monkeypatch):
     assert not any("no new finding" in action for action in tick(store, rt))
 
 
+READERS = doctor.detect.readers
+UNTRACED = Finding(
+    "untraced session", "watch-eng-2", "working session with no Langfuse trace", ("agent watch-eng-2",), "a trace", 1
+)
+
+
+def reading_traces(monkeypatch):
+    reads, passes = [], []
+
+    def readers(store, ledger, slug, now_ms, **kwargs):
+        found = READERS(store, ledger, slug, now_ms, **kwargs)
+        passes.append(set(found) if isinstance(now_ms, int) else now_ms)
+        return {"health": lambda: [STALE], **{name: found[name] for name in ("trace",) if name in found}}
+
+    def client(environ):
+        reads.append(environ)
+        return lambda path, params: {}
+
+    monkeypatch.setattr(doctor.detect, "readers", readers)
+    monkeypatch.setattr(doctor.detect.traces_read, "client", client)
+    monkeypatch.setattr(doctor.detect.traces_read, "record", lambda *args: {"traces": []})
+    monkeypatch.setattr(doctor.detect.traces, "findings", lambda data, limits: [UNTRACED])
+    return reads, passes
+
+
+def sent(store):
+    return "\n".join(item.text for item in InboxStore(store.redis).inbox(f"master@{DOCTOR}"))
+
+
+@pytest.mark.parametrize(
+    "scheduled",
+    [
+        lambda store, rt: swarm_cli._tick_one(store, DOCTOR),
+        lambda store, rt: controller.run_once(store, FileLedger(), rt, FakeHerdr({})),
+    ],
+    ids=["timer", "controller"],
+)
+def test_a_doctor_start_leaves_the_first_telemetry_pass_to_the_scheduled_tick(env, monkeypatch, scheduled):
+    store, rt, _ = env
+    reads, passes = reading_traces(monkeypatch)
+    every = {
+        "health",
+        "inbox",
+        "handoff",
+        "spawn",
+        "master launch",
+        "startup",
+        "context overrun",
+        "ci",
+        "dev workflow",
+        "trace",
+        "runtime storage",
+        "scheduled tick",
+    }
+    assert doctor.main([WATCHED, "start"]) == 0
+    assert reads == [] and passes == [every - {"trace"}]
+    assert STALE.id in sent(store) and UNTRACED.id not in sent(store)
+    doctor.loop.reset(store, DOCTOR)
+    scheduled(store, rt)
+    assert len(reads) == 1 and passes[1:] == [every]
+    assert UNTRACED.id in sent(store)
+
+
 def test_intervene_refuses_a_forbidden_action_and_logs_nothing(env, capsys):
     doctor.main([WATCHED, "start"])
     before = len(state(WATCHED)["chat"])
@@ -460,6 +622,7 @@ def test_failed_spawn_measure_uses_only_the_spawn_reader(env, monkeypatch, capsy
     store, _, _ = env
     assert doctor.main([WATCHED, "start"]) == 0
     capsys.readouterr()
+    monkeypatch.setattr(FileLedger, "tasks", lambda self, slug: [{"id": "mu1"}])
     since, until = "2026-10-07T09:58:24Z", "2026-10-07T12:58:24Z"
     monkeypatch.setattr(swarm_cli, "now_ms", lambda: 1791388800000)
 
@@ -516,7 +679,7 @@ def test_failed_spawn_measure_uses_only_the_spawn_reader(env, monkeypatch, capsy
         (
             "health/f1",
             ["--since", "2026-10-07T09:00Z", "--until", "2026-10-07T12:00Z"],
-            "journal bounds are only supported for failed-spawn findings",
+            "journal bounds are only supported for failed-spawn and CI speed findings and master-launch-missed",
         ),
     ],
 )
@@ -530,10 +693,93 @@ def test_failed_spawn_measure_refuses_invalid_bounds(env, monkeypatch, capsys, f
     assert output.out == ""
 
 
+@pytest.mark.parametrize("detectors,count", [("before", 12), ("after", 0)])
+def test_master_launch_missed_measure_replays_the_recorded_outage(env, monkeypatch, capsys, detectors, count):
+    from scripts.doctor import loop, master_launches
+    from tests.doctor.recorded import load
+
+    store, _, _ = env
+    assert doctor.main([WATCHED, "start"]) == 0
+    capsys.readouterr()
+    record = {**load("master_outage"), "journal_error": ""}
+    for finding_id, stored in record["verdicts"].items():
+        store.redis.hset(loop.verdicts(store, DOCTOR).key, finding_id, json.dumps(stored))
+    monkeypatch.setattr(swarm_cli, "now_ms", lambda: 1791588800000)
+    seen = []
+
+    def read(actual_store, slug, **kwargs):
+        seen.append((actual_store, slug, kwargs))
+        return record
+
+    monkeypatch.setattr(doctor.spawn_read, "master_records", read)
+    passed = []
+
+    def passes(slug, **kwargs):
+        passed.append((slug, kwargs))
+        return tuple(record["passes"])
+
+    monkeypatch.setattr(doctor.spawn_read, "doctor_passes", passes)
+    if detectors == "before":
+        monkeypatch.setattr(master_launches, "DETECTORS", (master_launches.journal_hour,))
+    since, until = "2026-10-09T19:50Z", "2026-10-09T20:35Z"
+    assert doctor.main([WATCHED, "measure", "master-launch-missed", "--since", since, "--until", until]) == 0
+    assert capsys.readouterr().out == f"master-launch-missed {count}\n"
+    start = doctor._at_ms(since) - master_launches.JOURNAL_MS
+    end = doctor._at_ms(until) + master_launches.MATCH_MS
+    journal = {"since": f"@{start / 1000:.3f}", "until": f"@{end / 1000:.3f}"}
+    assert seen == [(store, WATCHED, journal)]
+    assert passed == [(DOCTOR, journal)]
+
+
+def test_master_launch_missed_measure_refuses_an_unreadable_journal(env, monkeypatch, capsys):
+    assert doctor.main([WATCHED, "start"]) == 0
+    capsys.readouterr()
+    record = {"slug": WATCHED, "transfers": [], "restored": [], "agents": [], "journal": None, "journal_error": "gone"}
+    monkeypatch.setattr(doctor.spawn_read, "master_records", lambda store, slug, **kwargs: record)
+    monkeypatch.setattr(doctor.spawn_read, "doctor_passes", lambda slug, **kwargs: ())
+    assert doctor.main([WATCHED, "measure", "master-launch-missed"]) == 1
+    output = capsys.readouterr()
+    assert output.err == "doctor: master-launch-missed unavailable: gone\n"
+    assert output.out == ""
+
+
+def test_master_launch_missed_measure_refuses_times_without_a_zone(env, monkeypatch, capsys):
+    assert doctor.main([WATCHED, "start"]) == 0
+    capsys.readouterr()
+    monkeypatch.setattr(swarm_cli, "now_ms", lambda: 1791588800000)
+    flags = ["--since", "2026-10-09T21:50", "--until", "2026-10-09T22:35"]
+    assert doctor.main([WATCHED, "measure", "master-launch-missed", *flags]) == 1
+    assert (
+        capsys.readouterr().err == "doctor: master-launch-missed takes times with a zone, such as 2026-10-09T19:50Z\n"
+    )
+
+
+def test_master_launch_missed_measure_defaults_to_the_last_hour_with_the_doctor_timings(env, monkeypatch, capsys):
+    from scripts.doctor import master_launches
+
+    assert doctor.main([WATCHED, "start"]) == 0
+    capsys.readouterr()
+    for name in ("AGENTIHOOKS_DOCTOR_INTERVAL_MINUTES", "AGENTIHOOKS_HEALTH_COOLDOWN_MINUTES"):
+        monkeypatch.delenv(name, raising=False)
+    now = 1791588800000
+    monkeypatch.setattr(swarm_cli, "now_ms", lambda: now)
+    record = {"slug": WATCHED, "transfers": [], "restored": [], "agents": [], "journal": [], "journal_error": ""}
+    monkeypatch.setattr(doctor.spawn_read, "master_records", lambda store, slug, **kwargs: record)
+    monkeypatch.setattr(doctor.spawn_read, "doctor_passes", lambda slug, **kwargs: (5,))
+    calls = []
+    monkeypatch.setattr(master_launches, "missed", lambda *args: calls.append(args) or 3)
+    assert doctor.main([WATCHED, "measure", "master-launch-missed"]) == 0
+    assert capsys.readouterr().out == "master-launch-missed 3\n"
+    [(_, replay, window, _)] = calls
+    assert window == (now - 3_600_000, now)
+    assert (replay.cooldown_ms, replay.interval_ms, replay.passes) == (3_600_000, 600_000, (5,))
+
+
 def test_failed_spawn_measure_accepts_a_window_ending_now(env, monkeypatch, capsys):
     store, _, _ = env
     assert doctor.main([WATCHED, "start"]) == 0
     capsys.readouterr()
+    monkeypatch.setattr(FileLedger, "tasks", lambda self, slug: [{"id": "mu1"}])
     monkeypatch.setattr(swarm_cli, "now_ms", lambda: 1791388800000)
     seen = []
     monkeypatch.setattr(
@@ -552,13 +798,13 @@ def test_other_measures_read_every_detector_at_one_instant(env, monkeypatch, cap
     monkeypatch.setattr(swarm_cli, "now_ms", lambda: 1791388800000)
     calls = []
 
-    def readers(actual_store, ledger, slug, now):
-        calls.append((actual_store, type(ledger), slug, now))
+    def readers(actual_store, ledger, slug, now, telemetry):
+        calls.append((actual_store, type(ledger), slug, now, telemetry))
         return {"health": lambda: [STALE], "inbox": lambda: 1 / 0}
 
     monkeypatch.setattr(doctor.detect, "readers", readers)
     assert doctor.main([WATCHED, "measure", STALE.id]) == 0
-    assert calls == [(store, swarm_cli.LedgerClient, WATCHED, 1791388800000)]
+    assert calls == [(store, swarm_cli.LedgerClient, WATCHED, 1791388800000, doctor.traces_read.measured_client)]
     output = capsys.readouterr()
     assert output.out == f"{STALE.id} {STALE.measure}\n"
     assert output.err == "the inbox detector failed: ZeroDivisionError: division by zero\n"

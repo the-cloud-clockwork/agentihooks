@@ -1,6 +1,7 @@
 import { FOLD_KEY, TOGGLES_KEY } from "./config.js";
 import { $, store, stored } from "./dom.js";
 import { rememberComment } from "./threads.js";
+import { doc } from "./sync.js";
 import { outlineBoxes, sectionBoxes } from "./outline.js";
 
 export const toggles = stored(TOGGLES_KEY, {});
@@ -58,6 +59,7 @@ export function collapsible(box) {
 
 export function setAllComments(section, open) {
   if (open) section.querySelector("details.fold").open = true;
+  if (section.id === "sec-phases") for (const p of doc.phases) rememberComment(`phases/${p.id}`, open);
   for (const box of commentBoxes(section)) {
     rememberComment(box.dataset.key, open);
     box.open = open;

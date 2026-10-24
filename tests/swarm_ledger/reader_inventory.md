@@ -6,7 +6,7 @@ the one time legacy import in the repository's `legacy` module.
 
 Evidence: reproduce with
 `rg -n 'read_ledgers?\(|read_document\(|read_slugs\(|read_ids\(|read_registry\(|repository\.[a-z_]+\(' hooks scripts --glob '*.py'` for the call
-sites below, and `rg -n 'core\.paths|load_state|parse_seed|read_token|\{slug\}\.(json|html)' hooks scripts --glob
+sites below, and `rg -n 'load_state|parse_seed|read_token|\{slug\}\.(json|html)' hooks scripts --glob
 '*.py'`, which finds no ledger document reader outside the repository's `legacy` module (the remaining hits are
 session, telemetry and install state files).
 
@@ -33,9 +33,9 @@ session, telemetry and install state files).
 | ledger_decision._bound | bound ledger still live | read_registry(bin), read_ledger(title) |
 | correlation task lookup | task row | read_ledger(root, slug, "tasks/<id>") |
 | gates.build.task_territory, task_ids | task territory, task ids | read_ledger, read_ids |
-| swarm.prompt.summary_lines | overview | read_ledger, read only |
+| swarm.prompt.summary_lines | overview | swarm.ledger_read.parts: read_ledger, read only; the hosted ledger server when deployed |
 | swarm.prompt.ledger_read | how an agent reads the ledger | names `agentihooks ledger --slug S show` |
-| swarm.profile_choice._ledger | overview, phases | read_ledger, read only |
+| swarm.profile_choice._ledger | overview, phases | swarm.ledger_read.parts: read_ledger, read only; the hosted ledger server when deployed |
 | swarm.snapshot.take, restore | whole ledger in a snapshot | repository.export_document; repository.import_document on restore |
 | swarm.resume, master_launch | ledger read instruction | snapshot.ledger_source |
 | storage_migration export, load, cutover | interchange | repository.export_document, import_document, list_summaries |

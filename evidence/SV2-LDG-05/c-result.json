@@ -1,0 +1,93 @@
+{
+  "case": "T-SV2-LDG-05-C",
+  "independent_runs": 2,
+  "observed": {
+    "case": "T-SV2-LDG-05-C",
+    "evidence_class": "mocked Redis and server clock; fixture network; signed fixture grants",
+    "input_sha256": "8228171c01e6568f9185b5a77df62336814091f915daec25c7d6b26ba160c029",
+    "observed": {
+      "after_lost_ack": [
+        "accepted",
+        []
+      ],
+      "after_lost_completion": [
+        "completed",
+        [
+          [
+            "answer",
+            {
+              "text": "Use the second plan"
+            }
+          ]
+        ]
+      ],
+      "calls": [
+        [
+          "GET",
+          "commands",
+          200,
+          1
+        ],
+        [
+          "POST",
+          "ack",
+          200,
+          null
+        ],
+        [
+          "POST",
+          "ack",
+          200,
+          null
+        ],
+        [
+          "POST",
+          "complete",
+          200,
+          null
+        ],
+        [
+          "GET",
+          "commands",
+          200,
+          0
+        ],
+        [
+          "POST",
+          "complete",
+          200,
+          null
+        ],
+        [
+          "GET",
+          "commands",
+          200,
+          0
+        ]
+      ],
+      "conflicting_replay": [
+        409,
+        "revision_conflict",
+        "new_request"
+      ],
+      "handlers_ran": [
+        [
+          "answer",
+          {
+            "text": "Use the second plan"
+          }
+        ]
+      ],
+      "stored": [
+        "completed",
+        {
+          "status": "succeeded"
+        }
+      ],
+      "worker_command_ack_lag_seconds": [
+        0.0
+      ]
+    },
+    "state": "passed"
+  }
+}

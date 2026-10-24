@@ -1,32 +1,24 @@
 import json
 
+from scripts.swarm_ledger import models
+
 FIELDS, RESOURCES, THREADS = TABLES = ("fields", "resources", "threads")
-COLLECTIONS = frozenset(
-    (
-        "phases",
-        "tasks",
-        "questions",
-        "followups",
-        "notes",
-        "chat",
-        "artifacts",
-        "artifact_trash",
-        "priorities",
-        "notifications",
-        "alerts",
-    )
-)
+COLLECTIONS = models.RECORD_COLLECTIONS
+THREAD_NAMES = models.THREAD_NAMES
+
+
+ENCODER = json.JSONEncoder(ensure_ascii=False, separators=(",", ":"), allow_nan=False)
 
 
 def encode(value: object) -> str:
-    return json.dumps(value, ensure_ascii=False, separators=(",", ":"), allow_nan=False)
+    return ENCODER.encode(value)
 
 
 def children(item, parts, table):
     """(child, parts, key, position, table) of a container, in the path scheme flatten stores."""
     if isinstance(item, dict):
         for index, (name, child) in enumerate(item.items()):
-            bucket = THREADS if name in ("comments", "answers") else table
+            bucket = THREADS if name in THREAD_NAMES else table
             if not parts and name in COLLECTIONS:
                 bucket = RESOURCES
             yield child, [*parts, name], name, index, bucket
@@ -34,7 +26,7 @@ def children(item, parts, table):
         seen = {}
         for index, child in enumerate(item):
             identity = ["id", child["id"]] if isinstance(child, dict) and "id" in child else ["index", index]
-            token = encode(identity)
+            token = tuple(identity) if identity[0] == "index" or type(identity[1]) is str else encode(identity)
             occurrence = seen.get(token, 0)
             seen[token] = occurrence + 1
             yield child, [*parts, [*identity, occurrence]], index, index, table
@@ -54,6 +46,43 @@ def flatten(value: object) -> dict:
     return rows
 
 
+def _list_paths(children):
+    paths = [child[1][-1] for child in children]
+    return paths if all(path[0] == "index" or type(path[1]) is str for path in paths) else None
+
+
+def _dict_paths_match(left, right):
+    return (
+        all(type(key) is str for key in left)
+        and all(type(key) is str for key in right)
+        and list(left) == list(right)[: len(left)]
+    )
+
+
+def _child_paths_match(left, right, old_children, new_children):
+    if type(left) is list:
+        old_paths, new_paths = _list_paths(old_children), _list_paths(new_children)
+        if old_paths is not None and new_paths is not None:
+            return old_paths == new_paths[: len(old_paths)]
+    names = [encode(child[1]) for child in old_children]
+    return names == [encode(child[1]) for child in new_children[: len(names)]]
+
+
+def _walk_dictionary(left, right, parts, table, walk, after):
+    encoded_parent = encode(parts)
+    for index, (name, child) in enumerate(right.items()):
+        if index < len(left) and left[name] is child and type(child) is not float:
+            continue
+        bucket = THREADS if name in THREAD_NAMES else table
+        if not parts and name in COLLECTIONS:
+            bucket = RESOURCES
+        child_parts = [*parts, name]
+        if index < len(left):
+            walk(left[name], child, child_parts, encoded_parent, name, index, bucket)
+        else:
+            visit(after, child, child_parts, encoded_parent, name, index, bucket)
+
+
 def diff(old: object, new: object) -> tuple[dict, dict]:
     """The stored rows of `old` and `new` under every path that differs, descending only into changed values."""
     before, after = {}, {}
@@ -63,14 +92,17 @@ def diff(old: object, new: object) -> tuple[dict, dict]:
             return
         same_shape = type(left) is type(right) and isinstance(left, (dict, list))
         if same_shape:
+            if type(left) is dict and _dict_paths_match(left, right):
+                _walk_dictionary(left, right, parts, table, walk, after)
+                return
             old_children = list(children(left, parts, table))
             new_children = list(children(right, parts, table))
-            names = [encode(child[1]) for child in old_children]
-            if names == [encode(child[1]) for child in new_children[: len(names)]]:
+            if _child_paths_match(left, right, old_children, new_children):
+                encoded_parent = encode(parts)
                 for (old_child, child_parts, name, index, bucket), new_child in zip(old_children, new_children):
-                    walk(old_child, new_child[0], child_parts, encode(parts), name, index, bucket)
-                for child, child_parts, name, index, bucket in new_children[len(names) :]:
-                    visit(after, child, child_parts, encode(parts), name, index, bucket)
+                    walk(old_child, new_child[0], child_parts, encoded_parent, name, index, bucket)
+                for child, child_parts, name, index, bucket in new_children[len(old_children) :]:
+                    visit(after, child, child_parts, encoded_parent, name, index, bucket)
                 return
         visit(before, left, parts, parent, key, position, table)
         visit(after, right, parts, parent, key, position, table)
@@ -93,7 +125,10 @@ def assemble(rows: dict) -> object:
             return [build(key) for key, _ in ordered]
         return {json.loads(child[2]): build(key) for key, child in ordered}
 
-    return build("[]")
+    try:
+        return build("[]")
+    finally:
+        build = None
 
 
 def read_rows(connection, slug: str) -> dict:
@@ -115,13 +150,20 @@ def changes(before: dict, after: dict) -> dict:
     }
 
 
-def write_rows(connection, slug: str, before: dict, after: dict) -> None:
-    for path, row in changes(before, after).items():
+def write_rows(connection, slug: str, before: dict, after: dict) -> list:
+    deletes, upserts = {}, {}
+    changed = changes(before, after)
+    for path, row in changed.items():
         old = before.get(path)
         if old and (row is None or old[0] != row[0]):
-            connection.execute(f"DELETE FROM {old[0]} WHERE slug=? AND path=?", (slug, path))
+            deletes.setdefault(old[0], []).append((slug, path))
         if row is not None:
-            connection.execute(
-                f"INSERT INTO {row[0]} VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(slug,path) DO UPDATE SET parent=excluded.parent,key=excluded.key,position=excluded.position,kind=excluded.kind,value=excluded.value",
-                (slug, path, *row[1:]),
-            )
+            upserts.setdefault(row[0], []).append((slug, path, *row[1:]))
+    for table, rows in deletes.items():
+        connection.executemany(f"DELETE FROM {table} WHERE slug=? AND path=?", rows)
+    for table, rows in upserts.items():
+        connection.executemany(
+            f"INSERT INTO {table} VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(slug,path) DO UPDATE SET parent=excluded.parent,key=excluded.key,position=excluded.position,kind=excluded.kind,value=excluded.value",
+            rows,
+        )
+    return list(changed)

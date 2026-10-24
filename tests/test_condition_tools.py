@@ -547,8 +547,9 @@ class TestCreate:
             ({"matcher": "bad*"}, "invalid characters"),
             ({"name": "has-dash"}, "letters, digits"),
             ({"language": "ruby"}, "language"),
-            ({"step": "start"}, "unknown step"),
+            ({"step": "boot"}, "unknown step"),
             ({"step": "stop"}, "expected stop-<name>"),
+            ({"step": "start"}, "expected start-<name>"),
             ({"script": "  "}, "empty"),
             ({"scope": "everywhere"}, "scope must be"),
         ],
@@ -568,6 +569,12 @@ class TestCreate:
         conditions.arm_gate(SID)
         result = _create(step="stop", matcher=matcher, name="idle")
         assert (result["file"], result["step"], result["matcher"]) == ("stop-idle.sh", "stop", "any")
+
+    @pytest.mark.parametrize("matcher", ["", "any"])
+    def test_a_start_condition_takes_no_matcher(self, bundle, matcher):
+        conditions.arm_gate(SID)
+        result = _create(step="start", matcher=matcher, name="greet")
+        assert (result["file"], result["step"], result["matcher"]) == ("start-greet.sh", "start", "any")
 
 
 class TestLayers:

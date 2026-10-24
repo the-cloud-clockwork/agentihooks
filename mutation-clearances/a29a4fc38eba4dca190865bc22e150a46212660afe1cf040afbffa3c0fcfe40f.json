@@ -1,0 +1,6 @@
+{
+  "hooks/context/scheduled_broadcasts.py:hooks.context.scheduled_broadcasts.x_save__mutmut_29:a3479bf156e9e3a06091d5d6fbd767dd978e1d686a5cd84fb1ff8d5d4a0aeff3": {
+    "reader": "Standards",
+    "reason": "Only ASCII identifier capitalization changes. SQLite resolves EMISSIONS and ID identically; the bound parameter, existence result and message filtering remain unchanged."
+  }
+}

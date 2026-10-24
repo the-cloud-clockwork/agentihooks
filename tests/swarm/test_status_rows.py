@@ -5,7 +5,6 @@ import pytest
 from scripts.swarm import status
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
 MIDNIGHT = 1_791_244_800_000
 HOUR = 3_600_000
 
@@ -197,6 +196,35 @@ def test_status_report_carries_the_page_rows_without_handoff_text(store, monkeyp
     assert "long text" not in json.dumps(report["handoffs"])
 
 
+def test_status_agent_list_omits_gone_processes_and_keeps_live_processes(store, monkeypatch):
+    from scripts.swarm.runtime import HerdrRuntime
+
+    store.create(SwarmConfig("sw", "/repo", 1, 1))
+    store.put_agent("sw", AgentRecord("live", "eng", "t1", seat="eng-1@sw"))
+    store.put_agent("sw", AgentRecord("gone", "ci", "t2", seat="ci-1@sw"))
+    monkeypatch.setattr(HerdrRuntime, "live_names", lambda self: {"live"})
+    report = status.status_report(store, "sw", {"tasks": []})
+    assert [agent["name"] for agent in report["agents"]] == ["live"]
+    assert {agent.name for agent in store.agents("sw")} == {"live", "gone"}
+
+
+@pytest.mark.parametrize(
+    ("backend", "target"),
+    [("kubernetes", {"pod_namespace": "workers", "pod_name": "worker"}), ("local", {"host_id": "other-hive"})],
+)
+def test_status_keeps_remote_agents_outside_the_local_process_table(store, monkeypatch, backend, target):
+    from scripts.swarm.runtime import HerdrRuntime
+
+    store.create(SwarmConfig("sw", "/repo", 1, 1))
+    name = store.next_name("sw", "eng", 1_000)
+    store.start_execution(
+        "sw", AgentRecord(name, "eng", "t1", seat="eng-1@sw", runtime_backend=backend, runtime_target=target)
+    )
+    monkeypatch.setattr(HerdrRuntime, "live_names", lambda self: set())
+    report = status.status_report(store, "sw", {"tasks": []})
+    assert [agent["name"] for agent in report["agents"]] == [name]
+
+
 def test_status_raises_a_base_miss_as_a_finding(store, monkeypatch):
     from scripts.swarm import launch_check
 
@@ -208,3 +236,25 @@ def test_status_raises_a_base_miss_as_a_finding(store, monkeypatch):
     report = status.status_report(store, "sw", {"tasks": []})
     assert report["launch_checks"] == [saved]
     assert [f["id"] for f in report["findings"]] == ["launch-check/engineer@a1b2c3-0001/base"]
+
+
+def test_status_reports_each_closed_failed_launch_pane_with_its_lines(store, monkeypatch):
+    store.create(SwarmConfig("sw", "/repo", 1, 1))
+    agent = AgentRecord("engineer@a1b2c3-0001", "eng", "t1", started_at=10, pane_id="w1:p9")
+    store.record_launch("sw", agent, "failed", "account not found")
+    store.note_launch_pane("sw", agent.name, ["account not found", "$"])
+    monkeypatch.setattr(status, "page_quota", lambda: {})
+    report = status.status_report(store, "sw", {"tasks": []})
+    assert report["failed_launch_panes"] == [
+        {
+            "agent": agent.name,
+            "task": "t1",
+            "at": 10,
+            "state": "failed",
+            "error": "account not found",
+            "pane_id": "w1:p9",
+            "after": "",
+            "head": "",
+            "pane_lines": ["account not found", "$"],
+        }
+    ]

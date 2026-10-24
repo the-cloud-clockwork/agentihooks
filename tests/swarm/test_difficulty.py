@@ -7,8 +7,6 @@ from scripts.swarm.store import RedisStore, SwarmConfig
 from scripts.swarm.tick import tick
 from tests.swarm.test_tick import FakeLedger, FakeRuntime
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 DOC = {"phases": [{"id": "p1", "title": "Sizing", "description": "Every task carries a size"}]}
 TASK = {
     "id": "t1",
@@ -97,7 +95,6 @@ def test_ops_kind_is_large_without_infrastructure_territory():
         [
             "scripts/swarm_ledger/home.html",
             "scripts/swarm_ledger/shell.html",
-            "scripts/swarm_ledger/template.html",
             "scripts/swarm_ledger/palette.css",
             "scripts/swarm_ledger/tooltips.js",
         ],
@@ -255,10 +252,10 @@ def test_pass_goes_on_past_a_refused_task(asked):
     asked("S", 0.9)
 
     class Refusing(FakeLedger):
-        def update_task(self, slug, task_id, fields, by="swarm", if_state=()):
+        def update_task(self, slug, task_id, fields, by="swarm", if_state=(), if_match=None):
             if task_id == "a":
                 raise LedgerRefused("refused")
-            return super().update_task(slug, task_id, fields, by, if_state)
+            return super().update_task(slug, task_id, fields, by, if_state, if_match)
 
     ledger = Refusing([{**TASK, "id": "a"}, {**TASK, "id": "b"}])
     assert difficulty.size_pass("sw", ledger, {**DOC, "tasks": ledger.tasks("sw")}) == [
@@ -324,3 +321,23 @@ def test_written_sizes_pass_the_ledger_task_check(fields):
     from scripts.swarm_ledger import ledger
 
     ledger.ledger_tasks.check({"op": "task_update", "by": "swarm", "item": "tasks/t1", "fields": dict(fields)})
+
+
+def test_difficulty_confidence_is_read_from_its_definition(monkeypatch):
+    monkeypatch.setenv("AGENTIHOOKS_CLASSIFIER_TASK_DIFFICULTY_CONFIDENCE", "0.7")
+    assert difficulty.MIN_CONFIDENCE == 0.7
+    with pytest.raises(AttributeError) as missing:
+        difficulty.ABSENT
+    assert missing.value.args == ("ABSENT",)
+
+
+def test_a_refused_definition_is_logged_before_the_default_size(monkeypatch, tmp_path):
+    from hooks import config
+    from hooks.classifier import decision_log
+
+    monkeypatch.setattr(config, "AGENTIHOOKS_HOME", tmp_path)
+    monkeypatch.setenv("AGENTIHOOKS_CLASSIFIER_TASK_DIFFICULTY_CONFIDENCE", "1.5")
+    monkeypatch.setattr(difficulty, "decide", lambda *a, **k: pytest.fail("sized without a definition"))
+    assert difficulty.classify({"id": "t1", "title": "Size me"}, {}) == difficulty.sized("M", "default", 0.0)
+    [entry] = decision_log.read("task-difficulty")
+    assert entry["failures"] == [{"model": "definition", "reason": "threshold confidence must be between zero and one"}]

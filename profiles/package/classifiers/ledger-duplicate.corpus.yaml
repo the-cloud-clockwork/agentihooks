@@ -1,0 +1,1610 @@
+version: 1
+notes: Seeded from the classifier decision log. Historic states for this classifier could not be rebuilt, so each case state
+  was rebuilt from its ledger; a case whose notes say it was asked once during seeding on 2026-10-09 UTC takes its samples
+  from that logged ask, and a case whose notes say it matched a state logged before seeding takes the answers logged for it
+  then. Expected verdicts were written by a separate reader agent that saw only each case state and its question, never the
+  thresholds or the rule. Every case asks about one new item, so the one verdict is that item's.
+cases:
+- name: rig-grade-swarm-ef2
+  state:
+    new:
+    - ref: 0
+      title: Swarm effort range setting, default medium to high
+      description: 'Operator rule: the swarm configuration carries an effort range beside the caps, and by default it filters
+        out low and max. Evidence read by the master: with lane effort auto the model pick classifier scores effort from low
+        to max for Claude and nothing bounds it, so engineers 0095 and 0096 started at opus max; the master pinned the eng,
+        ci and plan lanes to high as a stopgap. Seams: a swarm setting effort range with a floor and a ceiling, set with swarm
+        set effort-min and effort-max and shown and editable in the swarm panel caps row, default medium to high, mapped for
+        Codex so xhigh is filtered too; every effort a lane agent starts with is clamped into the range after the classifier,
+        after lane settings and templates, and at the init agent launch, so no path escapes it; setting a lane effort outside
+        the range is refused with the range named. Red first: a classifier answer of max yields high and low yields medium;
+        set eng effort max is refused; a range widened to low to max lets both through. Done when merged, the ledger server
+        restarted, the eng, ci and plan lanes set back to auto, and swarm status showing new agents inside the range pasted
+        on the task proof.'
+    existing:
+    - kind: task
+      id: cxm1
+      title: Agents table shows model and effort for Codex agents
+      description: 'Operator approved follow up from the master model engineer: the Agents table in swarm status and on the
+        ledger page prints only the word codex for every Codex agent, so a Codex master running Sol at high effort never shows
+        its model or effort. Seams: the agent record keeps the model and effort a Codex agent was spawned with, and the Agents
+        table renders them for Codex rows the same way it does for Claude rows. Red first: a Codex agent spawned with a model
+        and effort shows both in swarm status and in the page''s Agents table. Done when merged, the ledger server restarted,
+        and swarm status output with a Codex row showing model and effort pasted on the task proof.'
+    - kind: task
+      id: md2
+      title: Every swarm agent runs Opus high, the automatic model classifier no longer downgrades
+      description: 'Operator order: every agent in the fleet runs Opus with high effort, masters and engineers alike. The
+        earlier fix only covered the master. Evidence read by the master: a freshly spawned engineer on the plugins task shows
+        Sonnet medium in its status line, and swarm status lists it as sonnet medium, picked by the automatic model classifier
+        for an auto lane. Seams: lanes default to Opus and high effort for Claude; the classifier may only raise effort, never
+        pick a model below Opus, unless the swarm config names a model explicitly. Failing test per lane first. Done when
+        merged and a freshly spawned engineer pane shows Opus with high effort, with the pane capture as proof.'
+    - kind: task
+      id: md1
+      title: Every swarm spawn and recycle starts Claude on Opus with high effort
+      description: 'Bug seen by the operator: the master recycle handoff started the new master on Sonnet, not Opus. The init
+        agent launcher defaults are Opus and high effort, so some swarm spawn, respawn or handoff path passes its own model
+        or drops the defaults. Seams: every launch the swarm tick builds for master, eng, ci and plan seats, first spawn and
+        handoff successor alike, carries model opus and effort high for Claude unless the swarm config names another model.
+        Find the path that started Sonnet, add a failing test per path that reads the built launch command, then fix. Done
+        when the tests pass, the pull request is merged, and a recycled master pane shows Opus at startup with the pane capture
+        as proof.'
+    - kind: task
+      id: md3
+      title: Masters always run the frontier model at high effort, and the Agents table shows the real model
+      description: 'Operator order, repeated: every master runs the frontier model at high effort by default, Opus high on
+        Claude and Sol high on Codex, first spawn, respawn, handoff successor and resume alike. Evidence read by the master:
+        the live Swarm tab lists this master as sonnet low because the classifier picked that at its spawn, and the operator
+        switched it to Opus by hand, which the swarm never sees. Seams: the master seat never goes through the model classifier,
+        it always gets the frontier model and high effort for its harness; the agent record updates its model and effort from
+        what the running session reports, the status line or heartbeat, so the Agents table shows the real model after a manual
+        switch. Failing test per seam first. Done when merged, a recycled master pane shows Opus high, and the Agents table
+        matches the panes.'
+  params:
+    pairs:
+    - new: 0
+      slot: 0
+      kind: task
+      id: cxm1
+      title: Agents table shows model and effort for Codex agents
+    - new: 0
+      slot: 1
+      kind: task
+      id: md2
+      title: Every swarm agent runs Opus high, the automatic model classifier no longer downgrades
+    - new: 0
+      slot: 2
+      kind: task
+      id: md1
+      title: Every swarm spawn and recycle starts Claude on Opus with high effort
+    - new: 0
+      slot: 3
+      kind: task
+      id: md3
+      title: Masters always run the frontier model at high effort, and the Agents table shows the real model
+  expected:
+    duplicate: false
+  control: false
+  samples:
+  - source: liquid-d1
+    latency_ms: 1426
+    answers:
+      new_0_existing_0:
+        type: noul
+        noul: 0.004331502149093663
+      new_0_existing_1:
+        type: noul
+        noul: 0.0052201248423797645
+      new_0_existing_2:
+        type: noul
+        noul: 0.004609573615172905
+      new_0_existing_3:
+        type: noul
+        noul: 0.0007554054977545243
+  notes: state digest da354dc7d44c1038, state rebuilt from the ledger and asked once during seeding on 2026-10-09 UTC so the
+    decision log recorded it
+- name: rig-grade-swarm-sz15
+  state:
+    new:
+    - ref: 0
+      title: Every collected test runs in exactly one shard
+      description: A dev Tests run went green while about seven hundred tests ran in no shard, so the suite passed by omission.
+        Add a gate check that every collected test ran in exactly one shard per Python version, failing on any test run zero
+        times or twice, with a plant proof that a dropped test turns it red. Done when the pull request merges with green
+        and red runs recorded.
+    existing:
+    - kind: task
+      id: sz24
+      title: Rebalance the slow Python 3.11 shard three group
+      description: 'Python 3.11 shard three took one hundred thirty four seconds against ninety nine for the next slowest
+        shard of the same version, a thirty five second lead. Seam: the stored durations and shard assignment. Rebalance its
+        slow group so the lead drops under thirty seconds while every collected test still runs in exactly one shard. Done
+        when the pull request merges and a dev push run shows the 3.11 slowest shard within thirty seconds of the next.'
+    - kind: task
+      id: ci10
+      title: Stored durations check never turns an unrelated pull request red
+      description: 'Seam: the CI check that compares stored test durations against collected tests. Today it counts missing
+        tests per shard, so tests added by one merged pull request turn other open pull requests red in one shard while dev
+        stays green; it has happened twice today. Make the check judge coverage over the whole suite, or make missing durations
+        fall back to an even split with a warning, and keep the stored durations fresh on a schedule or on push to dev. Red
+        test first: a durations file missing a few new tests must not fail the shard check. Plant a fault to show the check
+        still goes red when durations are badly stale. Done when merged with CI green and both ways proof pasted on the task.'
+    - kind: task
+      id: sz12
+      title: 'Repair red dev: stored test durations cover the suite'
+      description: 'Dev is red since the difficulty change merged: the dev push Tests run fails the check that stored test
+        durations cover the collected suite, with about fourteen hundred tests lacking a stored duration, and every pull request
+        that takes dev fails the same check. Find why the stored durations lost coverage at that merge, restore coverage by
+        script, never by hand, and keep the check strict. Done when the pull request merges and the dev push Tests run at
+        its merge passes.'
+    - kind: task
+      id: t153
+      title: Dispatched Tests runs fall back to the newest finished dev run for their base
+      description: 'A dispatched Tests run on the default base fails at the durations job while the newest dev push run is
+        still going, so every proof run needs a hand pinned base. Seam: with no base given, a dispatched run picks the newest
+        finished and passed dev push run and reads its durations and baseline, without any GitHub API quota per shard. Red
+        first: a dispatch while a dev run is in progress resolves to the newest finished one; a given base is still honoured.
+        Done when the pull request merges with CI green and one dispatch made during a running dev push passes its durations
+        step, run id on the task.'
+  params:
+    pairs:
+    - new: 0
+      slot: 0
+      kind: task
+      id: sz24
+      title: Rebalance the slow Python 3.11 shard three group
+    - new: 0
+      slot: 1
+      kind: task
+      id: ci10
+      title: Stored durations check never turns an unrelated pull request red
+    - new: 0
+      slot: 2
+      kind: task
+      id: sz12
+      title: 'Repair red dev: stored test durations cover the suite'
+    - new: 0
+      slot: 3
+      kind: task
+      id: t153
+      title: Dispatched Tests runs fall back to the newest finished dev run for their base
+  expected:
+    duplicate: false
+  control: false
+  samples:
+  - source: liquid-d1
+    latency_ms: 367
+    answers:
+      new_0_existing_0:
+        type: noul
+        noul: 0.0023231624190190956
+      new_0_existing_1:
+        type: noul
+        noul: 0.0075772422763482235
+      new_0_existing_2:
+        type: noul
+        noul: 0.007121428113564034
+      new_0_existing_3:
+        type: noul
+        noul: 1.8925144862021476e-05
+  notes: state digest 20c40c8d82116190, state rebuilt from the ledger and asked once during seeding on 2026-10-09 UTC so the
+    decision log recorded it
+- name: rig-grade-swarm-rb10
+  state:
+    new:
+    - ref: 0
+      title: Role profile homes stop loading the global atlas persona
+      description: 'Seen live in the passing imports proof: a Claude agent started in the engineer profile home still loaded
+        the global Claude persona file from the default Claude home, about 53 thousand characters of atlas persona, next to
+        the engineer home''s own persona and rules. Claude warned that 28 instruction files add up to 187.6 thousand characters,
+        over its 150 thousand limit, and the status line named the atlas and brain profiles. Seam: how a rendered home keeps
+        Claude from reading the default home''s persona and rules when the working folder sits under the user''s home. Red
+        test first on a rendered home, then a live Claude spawn in the engineer home whose pane shows no size warning and
+        no atlas persona file. Done when merged with CI green and that pane shown on the task.'
+    existing:
+    - kind: task
+      id: rb11
+      title: Status line names the profile the session runs
+      description: 'Seen live: in a rendered engineer home the status line still prints agentihooks atlas and brain for both
+        profile and settings, because it reads the global install state, not the selected profile. Seam: the status line''s
+        profile source. Name the profile from the selected run profile when one is set, else the global install. Red test
+        first. Done when merged with CI green and a live engineer home pane shows engineer in the status line.'
+    - kind: task
+      id: rb9
+      title: Claude agents in a profile home start without the external imports prompt
+      description: 'Seen live: since swarm templates name a profile, a Claude engineer spawned into the rendered engineer
+        profile home stopped at the Claude Code prompt Allow external CLAUDE.md file imports, because the rendered rules import
+        bundle files outside the working folder and the new config home has no saved approval. It sat there over thirty minutes
+        holding the planner lane task; Codex agents are not affected. Seam: profile rendering for the Claude target. Make
+        a rendered home start with no prompt, either by recording the approval in the home''s Claude config at render time
+        or by rendering imported rules so nothing is imported from outside. Red test on the rendered home first. Done when
+        a swarm Claude spawn with a profile reaches its first tool call with no prompt, shown by reading its pane, and the
+        pull request is merged.'
+    - kind: task
+      id: sv2
+      title: Swarm flags an agent stuck at a startup prompt instead of calling it working
+      description: 'Seen live: a Claude engineer sat over thirty minutes on the Claude startup prompt Allow external CLAUDE.md
+        file imports while swarm status and the page showed it working, and only reading its pane revealed it. Seam: the pane
+        state classifier the tick uses. Treat a Claude or Codex selection prompt (a question with arrow choices and Enter
+        to confirm, trust and import dialogs included) as waiting on input, show that state in status and on the agent card,
+        and raise a health finding naming the agent and the prompt title when it holds a claim through that state for more
+        than three ticks. Never answer the prompt. Red test first from a saved pane capture of the import prompt. Done when
+        merged with CI green and a scratch proof shows the state and the finding.'
+    - kind: task
+      id: br2
+      title: Every swarm agent runs with the brain overlay on
+      description: 'Bug seen by the operator: swarm agents load the right profile, master, engineer, cicd or planner, but
+        the status line shows no brain overlay, only the profile, settings and channels. The swarm base profile allows the
+        brain overlay but nothing turns it on for spawned agents. Seams: every launch the swarm tick builds, first spawn,
+        respawn and handoff successor, for every seat and both Claude and Codex, renders its profile home with the brain overlay
+        active, and the status line names it. Decide in the bundle or the launcher whether brain is a default overlay for
+        the whole fleet; the operator wants every agent in the fleet on brain. Failing test per seam first, then the fix,
+        one pull request per repo touched. Done when merged and a freshly spawned agent pane shows the brain overlay in its
+        status line, with the pane capture as proof.'
+  params:
+    pairs:
+    - new: 0
+      slot: 0
+      kind: task
+      id: rb11
+      title: Status line names the profile the session runs
+    - new: 0
+      slot: 1
+      kind: task
+      id: rb9
+      title: Claude agents in a profile home start without the external imports prompt
+    - new: 0
+      slot: 2
+      kind: task
+      id: sv2
+      title: Swarm flags an agent stuck at a startup prompt instead of calling it working
+    - new: 0
+      slot: 3
+      kind: task
+      id: br2
+      title: Every swarm agent runs with the brain overlay on
+  expected:
+    duplicate: false
+  control: false
+  samples:
+  - source: liquid-d1
+    latency_ms: 302
+    answers:
+      new_0_existing_0:
+        type: noul
+        noul: 0.015906388912772775
+      new_0_existing_1:
+        type: noul
+        noul: 0.02442308898897509
+      new_0_existing_2:
+        type: noul
+        noul: 9.610240189642527e-05
+      new_0_existing_3:
+        type: noul
+        noul: 0.006692849586924174
+  notes: state digest f89dca02580301f0, state rebuilt from the ledger and asked once during seeding on 2026-10-09 UTC so the
+    decision log recorded it; internal names masked for the package
+- name: rig-grade-swarm-t80
+  state:
+    new:
+    - ref: 0
+      title: Strict masking covers every secret key name, nested bearer header and private key body
+      description: 'Found by the independent trace stress task: strict masking misses some secret key names, nested bearer
+        headers and private key bodies; details are on the strict masking issue. Seam: the trace redaction function. Each
+        missed shape gets a red test, then the least code that masks it.'
+    existing:
+    - kind: task
+      id: t82
+      title: The Doctor catches a lost acknowledgement after paging and repeats a wrong profile finding
+      description: 'Found by the trace stress task: the Doctor misses a lost acknowledgement once a session pages, and does
+        not send a repeated wrong profile again within one agent life. Seam: the two Doctor detectors. Red test for each,
+        then fix.'
+    - kind: task
+      id: t83
+      title: Trace coverage keeps large tool output, links transfers and covers Codex exec
+      description: 'Found by the trace stress task: large Claude tool output is cut to a preview, transfers carry no predecessor
+        link, and Codex exec sessions cannot compact. Seam: the exporter. Each gap gets a test or a stated reason it stays,
+        recorded on the task.'
+    - kind: task
+      id: t211
+      title: Resumed parked tasks of every kind name their recorded branch
+      description: 'Parent: swarm runtime fixes. A parked task whose kind is not code or ci resumes from its handoff alone,
+        and its prompt never names the branch recorded at park. Seam, red test first: the continue steps of a resumed parked
+        task name its recorded branch for every task kind. Done when the pull request merges.'
+    - kind: task
+      id: tc24
+      title: Bin action schemas refuse partly valid ledger names
+      description: 'From the versioned resources task: the bin action request schemas accept partly valid ledger names, so
+        such a request reaches the repository and returns missing ledger instead of the central schema refusal. Seam: the
+        bin action request schemas. Done when a red then green test shows a partly valid ledger name is refused by the schema
+        with the standard refusal and a valid name still works.'
+  params:
+    pairs:
+    - new: 0
+      slot: 0
+      kind: task
+      id: t82
+      title: The Doctor catches a lost acknowledgement after paging and repeats a wrong profile finding
+    - new: 0
+      slot: 1
+      kind: task
+      id: t83
+      title: Trace coverage keeps large tool output, links transfers and covers Codex exec
+    - new: 0
+      slot: 2
+      kind: task
+      id: t211
+      title: Resumed parked tasks of every kind name their recorded branch
+    - new: 0
+      slot: 3
+      kind: task
+      id: tc24
+      title: Bin action schemas refuse partly valid ledger names
+  expected:
+    duplicate: false
+  control: false
+  samples:
+  - source: liquid-d1
+    latency_ms: 267
+    answers:
+      new_0_existing_0:
+        type: noul
+        noul: 4.737907344388041e-07
+      new_0_existing_1:
+        type: noul
+        noul: 0.00029595715319227474
+      new_0_existing_2:
+        type: noul
+        noul: 3.9278613515277845e-07
+      new_0_existing_3:
+        type: noul
+        noul: 1.7983074655212024e-07
+  notes: state digest 4c80c0809530eddf, state rebuilt from the ledger and asked once during seeding on 2026-10-09 UTC so the
+    decision log recorded it
+- name: rig-grade-swarm-cxc0
+  state:
+    new:
+    - ref: 0
+      title: Commit the Codex Channels plan into resources plans
+      description: 'Spec: section cxc0 of the decoupled swarm runtime plan, lines 419 to 431 of the plan artifact on this
+        phase. Read only those lines, ten lines of margin each side. Done when a sha256sum match of the source against the
+        committed body without the note, pasted, and the pull request merges.'
+    existing:
+    - kind: task
+      id: cxc5
+      title: cxch-05 replies and input provenance (source section 8, section 12 cxch-05)
+      description: 'Spec: section cxc5 of the decoupled swarm runtime plan, lines 522 to 535 of the plan artifact on this
+        phase. Read only those lines, ten lines of margin each side. Done when ci run id, and the pull request merges.'
+    - kind: task
+      id: mst1
+      title: Master-account declaration
+      description: 'Spec: section mst1 of the decoupled swarm runtime plan, lines 297 to 308 of the plan artifact on this
+        phase. Read only those lines, ten lines of margin each side. Done when ci run id, and the pull request merges.'
+    - kind: task
+      id: cxc2
+      title: cxch-02 execution transport, launch and transport setting (source section 6, section 11, section 12 cxch-02)
+      description: 'Spec: section cxc2 of the decoupled swarm runtime plan, lines 452 to 479 of the plan artifact on this
+        phase. Read only those lines, ten lines of margin each side. Done when ci run id, and the pull request merges.'
+    - kind: task
+      id: cxc4
+      title: cxch-04 push pump and turn arbitration (source section 7, section 12 cxch-04)
+      description: 'Spec: section cxc4 of the decoupled swarm runtime plan, lines 501 to 521 of the plan artifact on this
+        phase. Read only those lines, ten lines of margin each side. Done when ci run id, and the pull request merges.'
+  params:
+    pairs:
+    - new: 0
+      slot: 0
+      kind: task
+      id: cxc5
+      title: cxch-05 replies and input provenance (source section 8, section 12 cxch-05)
+    - new: 0
+      slot: 1
+      kind: task
+      id: mst1
+      title: Master-account declaration
+    - new: 0
+      slot: 2
+      kind: task
+      id: cxc2
+      title: cxch-02 execution transport, launch and transport setting (source section 6, section 11, section 12 cxch-02)
+    - new: 0
+      slot: 3
+      kind: task
+      id: cxc4
+      title: cxch-04 push pump and turn arbitration (source section 7, section 12 cxch-04)
+  expected:
+    duplicate: false
+  control: false
+  samples:
+  - source: liquid-d1
+    latency_ms: 270
+    answers:
+      new_0_existing_0:
+        type: noul
+        noul: 1.0451549842731493e-05
+      new_0_existing_1:
+        type: noul
+        noul: 5.594338046881657e-06
+      new_0_existing_2:
+        type: noul
+        noul: 4.2647449439227236e-05
+      new_0_existing_3:
+        type: noul
+        noul: 1.3007127012835138e-05
+  notes: state digest 1b189c8d4cea3526, state rebuilt from the ledger and asked once during seeding on 2026-10-09 UTC so the
+    decision log recorded it
+- name: rig-grade-swarm-asc2
+  state:
+    new:
+    - ref: 0
+      title: Autoscale ceiling algorithm with hysteresis
+      description: 'Parent: quota driven autoscaling. A pure function takes live agents per lane, free quota seats per harness,
+        host room, ready demand per lane and the previous decision with its pending raise count, and returns a ceiling per
+        lane, the pending raise state and a plain words reason naming quota seats, host room and any held raise. Total ceiling
+        is live agents plus the smaller of free quota seats and host room, at most fifty, split by ready demand in the order
+        plan, ci, eng, the rest to eng. A lower target applies at once; a higher one only after three ticks in a row and at
+        most two seats per tick. Red first: more accounts raise the ceiling after three ticks, a reset raises it the same
+        way, draining quota lowers it at once, host room caps it, a raise climbs at most two per tick, lane split follows
+        demand. Done when the pull request merges with CI green.'
+    existing:
+    - kind: task
+      id: asc4
+      title: The tick sets lane ceilings from autoscale
+      description: 'Parent: quota driven autoscaling. Wire the host room and the autoscale ceiling into the capacity step
+        the tick runs every minute: under auto the ceilings replace the configured caps as lane limits, under manual nothing
+        changes. The pending raise state persists in the stored capacity decision so hysteresis survives across ticks. Add
+        a read only swarm autoscale command that prints the decision for a live swarm, or for a fixture file of accounts and
+        host readings, for proofs. Red first: a manual swarm''s decisions stay unchanged, an auto swarm with fresh quota and
+        host room gets ceilings above its old configured caps, a held raise survives across ticks. Done when the pull request
+        merges with CI green.'
+    - kind: task
+      id: asc1
+      title: Host room from load and memory
+      description: 'Parent: quota driven autoscaling bounded by the host. A pure function plus a thin reader gives how many
+        more agents this machine takes from the one minute load per CPU, available memory and every live agent session on
+        the machine, with high and low load watermarks as hysteresis: above high the room shrinks, below low it may grow,
+        between them the previous room holds. The default memory per agent is measured from live agent sessions here and named
+        in the pull request. Red first: high load gives zero room, low load with free memory gives room, the band between
+        watermarks holds the previous room, memory alone limits room. Done when the pull request merges with CI green.'
+    - kind: task
+      id: asc8
+      title: Host room counts Copilot sessions beside Claude and Codex
+      description: 'Parent: quota driven autoscaling bounded by the host. Live agent counting for host room covers Claude
+        and Codex sessions only; Copilot sessions on the machine are not counted. Seam: a Copilot session counter next to
+        the other two, read the same way, feeding host room. Red test first with a fixture process list holding a Copilot
+        session. Done when the pull request merges with CI green.'
+    - kind: task
+      id: hot1
+      title: 'Hotfix: the capacity step passes the plain words check and saves its decision when a comment is refused'
+      description: 'Outage in both swarms: no agent spawned for thirty six minutes. The capacity step appends a clause naming
+        free seats to its reason, so its ledger comment carries three semicolons; the ledger refuses it, the step raises before
+        saving its decision, and spawns filter on a stale task list. Seams: one, the capacity comment passes the plain words
+        check, at most one semicolon. Two, the step saves its decision even when its comment is refused. Red test first for
+        each. Done when the pull request merges, the tick journal shows no refused capacity write, and a new agent spawns
+        in both swarms.'
+  params:
+    pairs:
+    - new: 0
+      slot: 0
+      kind: task
+      id: asc4
+      title: The tick sets lane ceilings from autoscale
+    - new: 0
+      slot: 1
+      kind: task
+      id: asc1
+      title: Host room from load and memory
+    - new: 0
+      slot: 2
+      kind: task
+      id: asc8
+      title: Host room counts Copilot sessions beside Claude and Codex
+    - new: 0
+      slot: 3
+      kind: task
+      id: hot1
+      title: 'Hotfix: the capacity step passes the plain words check and saves its decision when a comment is refused'
+  expected:
+    duplicate: false
+  control: false
+  samples:
+  - source: liquid-d1
+    latency_ms: 295
+    answers:
+      new_0_existing_0:
+        type: noul
+        noul: 0.035144842358443895
+      new_0_existing_1:
+        type: noul
+        noul: 0.004331502807808297
+      new_0_existing_2:
+        type: noul
+        noul: 0.004070136870255261
+      new_0_existing_3:
+        type: noul
+        noul: 0.00013135178532304502
+  notes: state digest deaa1f6506e52b0a, state rebuilt from the ledger and asked once during seeding on 2026-10-09 UTC so the
+    decision log recorded it
+- name: rig-grade-swarm-tc109
+  state:
+    new:
+    - ref: 0
+      title: Overlay handoffs render from a clean copy of the recorded bundle commit
+      description: When the bundle moves on, a handoff or resume of an overlay agent is refused until someone checks out the
+        recorded bundle commit by hand. Render from a clean temporary copy of that commit instead, so no person ever checks
+        anything out and the shared bundle checkout is never moved. Done when the pull request merges and a resume after the
+        bundle advanced renders from the recorded commit with no manual step.
+    existing:
+    - kind: task
+      id: tc62
+      title: Overlay renders pin the bundle to the commit the launch recorded
+      description: 'Parent: swarm overlays must render the same profile on any hive. Overlay launches record the bundle commit,
+        but rendering reads the bundle working tree. Render from the recorded commit, and refuse with a clear message when
+        the local bundle differs from it. Red first: a launch record naming one commit with a bundle working tree at another
+        is refused. Done when the pull request merges with CI green.'
+    - kind: task
+      id: sz36
+      title: A priority on an out of scope item shows no Approve
+      description: 'A priority an agent adds by hand on an out of scope item still shows Approve in Priorities, because the
+        priority write never checks out of scope. Seam: the priority add operation and the derived priorities list. Refuse
+        a hand added priority on an out of scope item with a plain reason, and drop rows for items marked out of scope when
+        priorities are listed. Done when the pull request lands with tests for both.'
+    - kind: task
+      id: gb14
+      title: Coverage ratchet follows rewritten moved modules and never grades dev against itself
+      description: The coverage ratchet misses a module rewritten and moved below the rename similarity, and a manual run
+        on dev grades the head against itself. Track moved modules by more than rename similarity, and grade a manual dev
+        run against the previous dev commit. Done when a planted rewritten move and a planted coverage drop on a manual dev
+        run both turn the ratchet red, and the pull request merges.
+    - kind: task
+      id: tc3
+      title: Profile freshness checks include shared package doctrine
+      description: 'From the render invalidation task, merged as pull request 1222, and a later engineer report: profile freshness
+        checks hash the bundle commit and profile sources but neither the shared package doctrine rules nor each linked profile''s
+        revision, such as the brain profile. New launches therefore keep cached instructions after a package rule changes,
+        and a live engineer home lacked the new brain memory skill. Seams: the profile render freshness stamp and the mounted
+        profile check. Done when red then green tests show a change to a package rule or to a linked profile revision marks
+        the rendered home stale and the next launch renders fresh, while a running agent stays valid against the persona it
+        launched with.'
+  params:
+    pairs:
+    - new: 0
+      slot: 0
+      kind: task
+      id: tc62
+      title: Overlay renders pin the bundle to the commit the launch recorded
+    - new: 0
+      slot: 1
+      kind: task
+      id: sz36
+      title: A priority on an out of scope item shows no Approve
+    - new: 0
+      slot: 2
+      kind: task
+      id: gb14
+      title: Coverage ratchet follows rewritten moved modules and never grades dev against itself
+    - new: 0
+      slot: 3
+      kind: task
+      id: tc3
+      title: Profile freshness checks include shared package doctrine
+  expected:
+    duplicate: false
+  control: false
+  samples:
+  - source: liquid-d1
+    latency_ms: 314
+    answers:
+      new_0_existing_0:
+        type: noul
+        noul: 0.3923368301671084
+      new_0_existing_1:
+        type: noul
+        noul: 4.936987717219379e-06
+      new_0_existing_2:
+        type: noul
+        noul: 2.753570147472288e-05
+      new_0_existing_3:
+        type: noul
+        noul: 0.00010229979680506539
+  notes: state digest c4d1e6dec1f1c825, state rebuilt from the ledger and asked once during seeding on 2026-10-09 UTC so the
+    decision log recorded it
+- name: rig-grade-swarm-ss1
+  state:
+    new:
+    - ref: 0
+      title: A stats check delivers a computed review the master judges
+      description: 'Operator: a stats refresh must make the master re-review everything; the master left time left stale.
+        Deterministic first: when the operator asks for a stats check, code computes and delivers with the event every phase
+        whose done state disagrees with its tasks, every undecided follow up, open, claimed and pr counts, the task close
+        rate over the last hour and a time left from that rate and the remaining dependency chain; the master judges, fixes
+        what is stale and acks. Done: on a scratch ledger a stats click delivers that review to the master and a planted stale
+        phase and stale time left show in it; PR merged.'
+    existing:
+    - kind: task
+      id: sr1
+      title: Stats refresh button shows that the master got and answered the check
+      description: 'Operator report: he clicked the stats refresh button and saw nothing happen, so he believed nobody got
+        it. Evidence: the master received the stats sync in its inbox and answered on the page chat a minute later, but the
+        button and the stats card show no sign of either. Seams: after a click the button shows sent until the master''s ack
+        of that sync, then answered with the time, and the master''s reply is linked from the card. Done: on a scratch ledger
+        and spare port, a click shows sent, a scripted master ack turns it to answered; screenshots on the task; PR merged.'
+    - kind: task
+      id: sr3
+      title: Remove the stats check row from the stats card
+      description: 'Operator: he never asked for the stats check row at the bottom of the stats card, the line reading answered
+        with a time and a reply link. The master''s spec for the refresh feedback task added it by mistake. Seams: remove
+        that row and its reply link; keep the sent and answered state beside the refresh button in the card header. Done:
+        on a scratch ledger and spare port the card shows no stats check row while the header still shows answered after a
+        scripted master ack; screenshot on the task; PR merged.'
+    - kind: task
+      id: tc98
+      title: Time left survives an outage
+      description: Urgent. After the eight hour tick outage the page shows over fifteen days left because time left takes
+        the close rate from one hour only and the mean claim to done time of the few tasks closed in that hour, which sat
+        claimed through the outage at about seven hours each, then multiplies that mean by the fifty three task chain. Use
+        the close rate and the median task time over the last twenty four hours, so one bad hour cannot swing the estimate,
+        and keep the stats line naming its inputs. Done when the pull request merges and a test with an outage hour in its
+        events gives an estimate within a quarter of the steady state value.
+    - kind: task
+      id: t27
+      title: Stats refresh applies the computed estimate promptly without waiting for a master turn
+      description: 'Operator requested a stats refresh, the computed review reached the master inbox and named the old time
+        estimate stale, but the page kept the old value while the master handled other work. The master has now applied the
+        computed estimate manually. Make the deterministic part of refresh own its full round trip: current task/phase/followup
+        counts and time estimate come from the existing code calculator, are persisted and displayed promptly when the request
+        completes, and the request status shows pending, refreshed or failed with accurate age. Human judgement of open followups
+        stays a separate master action. Do not require the master to copy a code computed duration, and do not acknowledge
+        a refresh as complete before the persisted values match its calculation. Use the latest revision, prevent an older
+        calculation overwriting a newer one, preserve the existing stale/reliable calculation policy and show a named evidence
+        gap rather than fabricate an estimate when insufficient data exists. Refresh failures keep the prior value with visible
+        status and a retry path. Red first: refresh with a deliberately busy master still updates the time and clears its
+        deterministic pending state; stale response cannot replace a newer revision; failed refresh remains visible. Preserve
+        user scope and all background cadence, no new polling owner. Coordinate with the existing stats sync and refresh helpers
+        rather than duplicate them. If page presentation changes, use headless MCP at 1920 by 1080 and inspect its screenshot
+        before PR. Done when merged and a real scratch request with a busy master shows the new code computed estimate promptly,
+        with invocation and output on proof.'
+  params:
+    pairs:
+    - new: 0
+      slot: 0
+      kind: task
+      id: sr1
+      title: Stats refresh button shows that the master got and answered the check
+    - new: 0
+      slot: 1
+      kind: task
+      id: sr3
+      title: Remove the stats check row from the stats card
+    - new: 0
+      slot: 2
+      kind: task
+      id: tc98
+      title: Time left survives an outage
+    - new: 0
+      slot: 3
+      kind: task
+      id: t27
+      title: Stats refresh applies the computed estimate promptly without waiting for a master turn
+  expected:
+    duplicate: false
+  control: false
+  samples:
+  - source: liquid-d1
+    latency_ms: 327
+    answers:
+      new_0_existing_0:
+        type: noul
+        noul: 0.056652422122527184
+      new_0_existing_1:
+        type: noul
+        noul: 0.014957083519529351
+      new_0_existing_2:
+        type: noul
+        noul: 0.029312234143221275
+      new_0_existing_3:
+        type: noul
+        noul: 0.13296423676207594
+  notes: state digest 967a1e05fc850608, state rebuilt from the ledger and asked once during seeding on 2026-10-09 UTC so the
+    decision log recorded it
+- name: rig-grade-swarm-tc35
+  state:
+    new:
+    - ref: 0
+      title: Brain ingestion never clones a repository named only in prose
+      description: 'Seam: the brain ingest path that detects a repository in ingested content. A ci agent ingested plain prose
+        CI findings and ingestion tried to clone an unrelated private repository. Find where repository detection runs (agentihooks
+        brain adapter or agentibrain kernel ingest), make it act only on an explicit repository field, never on prose, and
+        prove with a test that prose naming a repository triggers no clone. One pull request per repo touched, merged.'
+    existing:
+    - kind: task
+      id: bi1
+      title: Brain ingest treats pull request and issue links as page references, not repositories
+      description: 'Agentibrain kernel: when an ingested document carries a GitHub pull request or issue link, ingestion''s
+        repository enrichment tries to clone that link as a repository and fails; the raw record is kept but enrichment is
+        lost. Seen twice today on swarm proof ingests. Seams: the kernel''s ingest enrichment that infers repositories from
+        links. A pull request, issue or comment link resolves to its owning repository and is kept as a page reference; only
+        a bare repository link is cloned. Red first: a unit test ingesting text with a pull request link fails today and passes
+        after. Done when merged in agentibrain kernel, deployed by its CI, and one live ingest with a pull request link shows
+        enrichment succeeded, output on the task.'
+    - kind: task
+      id: sz46
+      title: Brain kernel outbox drains send each file's recorded idempotency key
+      description: 'A marker first posted under the new namespaced idempotency key can be duplicated by a kernel outbox replay,
+        because the drain does not send the key recorded in each outbox file. Seam: the outbox drain in the agentibrain kernel
+        repo. Send the recorded key on replay. Done when the pull request in the kernel repo lands with a test where a replayed
+        marker is not duplicated.'
+    - kind: task
+      id: pm3
+      title: Open the brain kernel issue for project scoped memory
+      description: 'Operator request: after agentihooks ships project scoped brain context, open an issue in the agentibrain
+        kernel GitHub repo. It explains the problem in the operator''s words (the brain is a mix of everything, opening a
+        project should bring that project''s memory), what agentihooks changed with the merged pull request, and what the
+        kernel must add, taken from the research document: a project on every entry, a per project intent instead of one fleet
+        wide guess, a per project feed. Only open the issue, no kernel code.'
+    - kind: task
+      id: fx8
+      title: Conditions timeout test never fails at random with no such process
+      description: 'The conditions test that times out a slow script and checks its process group was killed failed once in
+        CI with a no such process error and passed on rerun and locally, so it can fail any pull request at random. Seam:
+        the conditions runner''s timeout path, observed through its step result and through the child process being gone.
+        Find where the no such process error is raised, the runner or the test, prove it red with a forced race (the group
+        already gone before the kill), and make that path tolerate a process that already exited. Done when the forced race
+        test is green, the original test passes, and the pull request is merged into dev.'
+  params:
+    pairs:
+    - new: 0
+      slot: 0
+      kind: task
+      id: bi1
+      title: Brain ingest treats pull request and issue links as page references, not repositories
+    - new: 0
+      slot: 1
+      kind: task
+      id: sz46
+      title: Brain kernel outbox drains send each file's recorded idempotency key
+    - new: 0
+      slot: 2
+      kind: task
+      id: pm3
+      title: Open the brain kernel issue for project scoped memory
+    - new: 0
+      slot: 3
+      kind: task
+      id: fx8
+      title: Conditions timeout test never fails at random with no such process
+  expected:
+    duplicate: false
+  control: false
+  samples:
+  - source: liquid-d1
+    latency_ms: 335
+    answers:
+      new_0_existing_0:
+        type: noul
+        noul: 0.022977371917159397
+      new_0_existing_1:
+        type: noul
+        noul: 1.5057010747412342e-06
+      new_0_existing_2:
+        type: noul
+        noul: 4.785094887057313e-06
+      new_0_existing_3:
+        type: noul
+        noul: 2.457994143901738e-07
+  notes: state digest e8072fe6150331f2, state rebuilt from the ledger and asked once during seeding on 2026-10-09 UTC so the
+    decision log recorded it
+- name: rig-grade-swarm-sb4
+  state:
+    new:
+    - ref: 0
+      title: 'Leak gate: nothing internal in the package'
+      description: 'Repo agentihooks. Nothing internal may leak into the open source package. A test walks every file under
+        the package folder and fails on atlas, agent, fleet, example, model gateway, secret store, board, tool gateway, a
+        private network address, the word doctrine, or the operator''s name or email. The toolbelt rule mentions atlas twice
+        in its observability lines today: rewrite them generically. Red first: the gate fails on a planted name, then passes
+        on the tree. Done when merged and both runs are pasted on the task proof.'
+    existing:
+    - kind: task
+      id: sb1
+      title: Base role profiles master, engineer, cicd, planner and qa in the package
+      description: 'Repo agentihooks. Base role profiles master, engineer, cicd, planner and qa in the package roles folder:
+        a short CLAUDE file, one role rule written only in agentihooks commands, and settings. Master, planner and qa get
+        the no code edits and no serena writes guards. No doctrine text, no private MCP servers, nothing internal. The guards
+        live in a conditions folder the condition gate keeps agents out of: when you reach them, ask the master, who relays
+        the operator''s typed condition request. Red first: with no bundle linked each role renders with its role file and,
+        for master, planner and qa, its guards. Done when merged and the render output is pasted on the task proof.'
+    - kind: task
+      id: sb3
+      title: One role skill per role that works in any setup
+      description: 'Repo agentihooks. Operator rule: the swarm needs skills for the master, engineer, ci and planner profiles
+        that work in any setup. Write one role skill per role in the package. Each covers that role''s loop in agentihooks
+        terms only: joining the ledger and its watch, the inbox and how to answer, handoff, the proof contract its task kind
+        needs, waits and blocks. No doctrine text, nothing internal, passing the skill gate. Red first: the skill gate and
+        the leak gate pass on all four; a test checks each role profile lists its own role skill. Done when merged and the
+        gate output is pasted on the task proof.'
+    - kind: task
+      id: se3
+      title: Reading a conditions file passes the condition write gate
+      description: 'Repo agentihooks. Seen by the master: reading a conditions file through git show was blocked by the condition
+        write gate as if it created a condition. Reads of condition files must pass; only writes stay gated by the operator''s
+        typed request. Red first: a read only command naming a conditions file passes; a write into a conditions folder is
+        still blocked. Done when merged and both outputs are pasted on the task proof.'
+    - kind: task
+      id: sd3
+      title: An unbound plan naming an existing ledger is offered that ledger first
+      description: 'Repo agentihooks. An unbound session that accepts a plan whose file names an existing ledger slug is offered
+        that ledger first, with the plan phases command, before the new swarm directive. A plan that names no ledger gets
+        today''s swarm directive. Red first: a plan naming an existing slug yields the offer naming it; a plan naming none
+        yields the swarm directive. Done when merged and both outputs are pasted on the task proof.'
+  params:
+    pairs:
+    - new: 0
+      slot: 0
+      kind: task
+      id: sb1
+      title: Base role profiles master, engineer, cicd, planner and qa in the package
+    - new: 0
+      slot: 1
+      kind: task
+      id: sb3
+      title: One role skill per role that works in any setup
+    - new: 0
+      slot: 2
+      kind: task
+      id: se3
+      title: Reading a conditions file passes the condition write gate
+    - new: 0
+      slot: 3
+      kind: task
+      id: sd3
+      title: An unbound plan naming an existing ledger is offered that ledger first
+  expected:
+    duplicate: false
+  control: false
+  samples:
+  - source: liquid-d1
+    latency_ms: 270
+    answers:
+      new_0_existing_0:
+        type: noul
+        noul: 0.0040701374742844335
+      new_0_existing_1:
+        type: noul
+        noul: 0.010328155260920612
+      new_0_existing_2:
+        type: noul
+        noul: 9.028036122935002e-05
+      new_0_existing_3:
+        type: noul
+        noul: 1.9333574070180246e-06
+  notes: state digest c6b0ea6f73d66ac9, state rebuilt from the ledger and asked once during seeding on 2026-10-09 UTC so the
+    decision log recorded it; internal names masked for the package
+- name: rig-grade-swarm-ap1
+  state:
+    new:
+    - ref: 0
+      title: Approve and Deny buttons on priorities and on every item
+      description: "Operator request. Agents often raise a priority that only needs his approval or his words set a condition.\
+        \ 1) Each Priorities row gets a flat green Approve button next to Clear. Approve posts an operator comment on the\
+        \ referenced item and clears the priority. 2) Every item row, tasks, phases, open questions and follow ups, gets flat\
+        \ Approve and Deny buttons next to Out of Scope, in the same flat button style the page already uses, colours only\
+        \ from the palette file. Deny posts a denial comment on the item and clears any priority on it. 3) The approval comment\
+        \ carries the ask itself: when the priority text asks for set a condition, the comment reads approved, set a condition,\
+        \ so the condition gate opens for that task exactly as a typed page comment does. Any other ask posts approved with\
+        \ the ask text. Each comment reaches the item's claimant or the master through the inbox like any operator comment.\
+        \ Seams: approve on a priority writes one operator comment on the item and removes the priority; approve and deny\
+        \ on an item write one comment each; an approval of a condition ask opens the condition gate for that task in a test.\
+        \ Done when the pull request is merged, tests cover the seams, and a screenshot on a scratch ledger with a spare port\
+        \ shows the buttons. Follow the ui doctrine skill.\n\nOperator approved layout, build exactly this:\n\nPRIORITIES\
+        \                                                        3\n----------------------------------------------------------------------\n\
+        \ g12  Wave one gate shims                            APPROVE   CLEAR\n      Wave one gate shims need your words set\
+        \ a condition\n----------------------------------------------------------------------\n QUESTION  Tool gateway for\
+        \ swarm agents: which tools   APPROVE   CLEAR\n           each role gets, and through which overlay\n      Which tool\
+        \ gateway each swarm role gets\n----------------------------------------------------------------------\n FOLLOW UP\
+        \  The quiet claim gate is merged ...           APPROVE   CLEAR\n      Decide: the ci agents still need the same condition\n\
+        ----------------------------------------------------------------------\n  red label + exact item title      green\
+        \ flat     existing flat\n  second line = the ask             button         button\n\nItem row, every task, phase,\
+        \ question and follow up:\n\n g12  Wave one gate shims                 APPROVE  DENY  o OUT OF SCOPE\n eng  CODE \
+        \ claimed  p8  claimed by engineer@323133-0170\n   > COMMENTS\n\nAfter APPROVE on the g12 priority:\n\n g12  Wave\
+        \ one gate shims                 APPROVE  DENY  o OUT OF SCOPE\n   v COMMENTS\n     operator  21:14  approved, set\
+        \ a condition        <- posted for him\n\nAPPROVE: one operator comment carrying the ask, delivered to the claimant\
+        \ or the master, priority cleared. DENY: posts denied on the item, clears any priority on it. Flat buttons, no frames,\
+        \ Approve green, Deny red, palette file only."
+    existing:
+    - kind: task
+      id: pt1
+      title: Priorities show the exact title of the item they point at, with a red label like task ids
+      description: 'Operator report: entries in the Priorities block show a raw link label such as add item and a random suffix
+        for questions and follow ups, which is hard to find later. Each priority must name its item the way the task list
+        does: a red label in the same style as task ids, then the exact title or text of the referenced item. Tasks show their
+        id in red and the task title; phases show their phase id in red and the phase title; open questions show a red question
+        label and the question text; follow ups show a red follow up label and the follow up text. The ask text written by
+        whoever raised the priority stays below as the second line. Clicking the entry still jumps to the item. Seams: the
+        priority row render for each of the four item kinds returns the red label and the referenced item''s own title or
+        text, never the internal item id; a priority whose item was removed says so. Done when the pull request is merged,
+        a test covers all four kinds, and a screenshot of the Priorities block on a scratch ledger with a spare port shows
+        them. Colours only from the palette file, follow the ui doctrine skill.'
+    - kind: task
+      id: t15
+      title: Remove repeated priority asks and add explicit bulk priority actions
+      description: 'Audit findings: 5, 9. Parent: the Swarm Design System keeps ledger, quota routing, herdr and durable agent
+        coordination; this audit phase makes its presentation accessible and its cost proportional to changed resources. Keep
+        the operator approved red item label, exact referenced title, green Approve, Clear and distinct ask line. Suppress
+        only a normalized exact duplicate ask; do not discard a different request or condition wording. Add explicit selection
+        for priority rows and flat bulk Approve or Clear actions, selected count and keyboard accessible controls. Route each
+        selected action through the existing verdict and clear semantics; Approve still posts the operator ask, including
+        set a condition when present, and delivers it once to the owner or master. Selection never acts implicitly; exclude
+        removed items, handle revision conflicts and report individual results without clearing failed rows. No bulk task
+        completion or new authority. Seams: duplicate versus distinct ask, selection and deselection, mixed action results,
+        condition approval and no duplicate inbox dispatch. Done when: Repeated asks display once and selected priorities
+        can be approved or cleared with the existing operator semantics. One PR into dev, gates green, Standards and Spec
+        reviews closed, merged; record SHA and CI run. For every page change, use headless MCP browser tools on an isolated
+        scratch ledger and spare port at 1920 by 1080, inspect and attach the screenshot to task proof, then close the browser.
+        Missing browser tools block page work. '
+    - kind: task
+      id: nt1
+      title: Operator notes get comment threads like phases, questions and follow ups
+      description: 'Code merged in pull request 599: operator notes have comment threads. Only the live proof remains; it
+        was lost when the local Redis flush dropped the scratch swarm. Create a scratch ledger with a scratch swarm on a spare
+        port, never the live ledger. Post an operator comment under a note, show it arrives as an inbox item for the master
+        seat master@323133-0001 (send it the scratch address and the exact reply command), and show the master''s reply sits
+        under the same note on the page. Done when both outputs and a screenshot are on the task.'
+    - kind: task
+      id: tc23
+      title: An item marked out of scope hides its Approve and Deny actions
+      description: 'Operator request with a screenshot of Open questions: when an item is marked out of scope, its Approve
+        and Deny actions must go away; only the out of scope mark stays, and clearing it brings the two actions back. Apply
+        the same rule to every ledger item that shows these three actions, follow ups included. Seams: the ledger page render
+        of item actions and the out of scope state. Done when a red then green page test shows an out of scope question with
+        no Approve or Deny and an in scope one with both, and the change is checked by eye on a scratch ledger at 1920 by
+        1080 with the screenshot on the task proof.'
+  params:
+    pairs:
+    - new: 0
+      slot: 0
+      kind: task
+      id: pt1
+      title: Priorities show the exact title of the item they point at, with a red label like task ids
+    - new: 0
+      slot: 1
+      kind: task
+      id: t15
+      title: Remove repeated priority asks and add explicit bulk priority actions
+    - new: 0
+      slot: 2
+      kind: task
+      id: nt1
+      title: Operator notes get comment threads like phases, questions and follow ups
+    - new: 0
+      slot: 3
+      kind: task
+      id: tc23
+      title: An item marked out of scope hides its Approve and Deny actions
+  expected:
+    duplicate: false
+  control: false
+  samples:
+  - source: liquid-d1
+    latency_ms: 352
+    answers:
+      new_0_existing_0:
+        type: noul
+        noul: 0.0038244846665206177
+      new_0_existing_1:
+        type: noul
+        noul: 0.002631673857549191
+      new_0_existing_2:
+        type: noul
+        noul: 2.190781615220905e-06
+      new_0_existing_3:
+        type: noul
+        noul: 0.014957088349504917
+  notes: state digest 03a391db0b8c9102, state rebuilt from the ledger and asked once during seeding on 2026-10-09 UTC so the
+    decision log recorded it; internal names masked for the package
+- name: rig-grade-swarm-tc79
+  state:
+    new:
+    - ref: 0
+      title: Read only role guard admits the agent's own task folder and Codex patch edits
+      description: 'Parent: planners and other read only roles record progress and proof in the task folder the tick gives
+        them. A Codex planner''s patch adding progress and proof files in its own task folder was denied by the no code edits
+        role guard, which allows only the scratchpad and the Claude plans folder. Two seams. One, in the shared role guard
+        used by master, planner and qa: admit writes inside the task folder of the swarm task the session holds, from the
+        swarm and task environment, and nothing else under the swarm home. Two, in the Codex tool normalizer: a patch''s file
+        path is taken from its first target only, so a patch whose first file sits in the scratchpad and whose second sits
+        in a repo passes the guard; carry every target so the guard judges each one and denies when any is outside the allowed
+        folders. Red first for both seams, plus a test that a repo path stays denied. Done when merged with CI green and a
+        live Codex planner writes progress in its task folder.'
+    existing:
+    - kind: task
+      id: mp1
+      title: Master and planner may write their plan files
+      description: 'Operator request, urgent, blocks the master''s plan mode. The bundle no code edits guard lets master,
+        planner and qa write only under the scratchpad, so the plan file in the profile plans folder is refused (seen in the
+        master pane: master cannot edit outside scratchpad). Seams: in the agentihooks-bundle guard, also allow master and
+        planner writes whose resolved target is inside the session plans folder (the config dir plans folder and the folder
+        it links to); every other path stays refused, qa unchanged. Red test first, planted fault proof. Done: the bundle
+        PR is merged into its dev, a master session in plan mode writes its plan file, and a write to a repo file is still
+        refused; paste both outputs on the task.'
+    - kind: task
+      id: sb1
+      title: Base role profiles master, engineer, cicd, planner and qa in the package
+      description: 'Repo agentihooks. Base role profiles master, engineer, cicd, planner and qa in the package roles folder:
+        a short CLAUDE file, one role rule written only in agentihooks commands, and settings. Master, planner and qa get
+        the no code edits and no serena writes guards. No doctrine text, no private MCP servers, nothing internal. The guards
+        live in a conditions folder the condition gate keeps agents out of: when you reach them, ask the master, who relays
+        the operator''s typed condition request. Red first: with no bundle linked each role renders with its role file and,
+        for master, planner and qa, its guards. Done when merged and the render output is pasted on the task proof.'
+    - kind: task
+      id: se3
+      title: Reading a conditions file passes the condition write gate
+      description: 'Repo agentihooks. Seen by the master: reading a conditions file through git show was blocked by the condition
+        write gate as if it created a condition. Reads of condition files must pass; only writes stay gated by the operator''s
+        typed request. Red first: a read only command naming a conditions file passes; a write into a conditions folder is
+        still blocked. Done when merged and both outputs are pasted on the task proof.'
+    - kind: task
+      id: rb10
+      title: Role profile homes stop loading the global atlas persona
+      description: 'Seen live in the passing imports proof: a Claude agent started in the engineer profile home still loaded
+        the global Claude persona file from the default Claude home, about 53 thousand characters of atlas persona, next to
+        the engineer home''s own persona and rules. Claude warned that 28 instruction files add up to 187.6 thousand characters,
+        over its 150 thousand limit, and the status line named the atlas and brain profiles. Seam: how a rendered home keeps
+        Claude from reading the default home''s persona and rules when the working folder sits under the user''s home. Red
+        test first on a rendered home, then a live Claude spawn in the engineer home whose pane shows no size warning and
+        no atlas persona file. Done when merged with CI green and that pane shown on the task.'
+  params:
+    pairs:
+    - new: 0
+      slot: 0
+      kind: task
+      id: mp1
+      title: Master and planner may write their plan files
+    - new: 0
+      slot: 1
+      kind: task
+      id: sb1
+      title: Base role profiles master, engineer, cicd, planner and qa in the package
+    - new: 0
+      slot: 2
+      kind: task
+      id: se3
+      title: Reading a conditions file passes the condition write gate
+    - new: 0
+      slot: 3
+      kind: task
+      id: rb10
+      title: Role profile homes stop loading the global atlas persona
+  expected:
+    duplicate: false
+  control: false
+  samples:
+  - source: liquid-d1
+    latency_ms: 284
+    answers:
+      new_0_existing_0:
+        type: noul
+        noul: 0.01243164938964095
+      new_0_existing_1:
+        type: noul
+        noul: 6.205050064584296e-05
+      new_0_existing_2:
+        type: noul
+        noul: 6.144175082877298e-06
+      new_0_existing_3:
+        type: noul
+        noul: 2.785270666142162e-07
+  notes: state digest ba8a1807e36dc70e, state rebuilt from the ledger and asked once during seeding on 2026-10-09 UTC so the
+    decision log recorded it; internal names masked for the package
+- name: rig-grade-swarm-add_item-f535935391
+  state:
+    new:
+    - ref: 0
+      title: 'Agentihooks: init warns Codex approval never and full access are hand set although they equal the managed values.
+        Seam: Codex managed key apply. Done when a test shows matching values are recorded silently and a different value
+        still warns.'
+      description: ''
+    existing:
+    - kind: task
+      id: tc10
+      title: Init stays quiet when Codex approval and sandbox already equal the managed values
+      description: 'From the init audit task: init warns that Codex approval never and full access are hand set although they
+        equal the managed values. Seam: the Codex managed key apply. Done when a red then green test shows matching values
+        are recorded silently and a different hand set value still warns.'
+    - kind: task
+      id: tc8
+      title: Init keeps unchanged Claude rules instead of deleting and recopying them
+      description: 'From the init audit task: every agentihooks init deletes and silently recopies all sixteen managed Claude
+        rules. Seam: the Claude rule file installer. Done when a red then green test shows an unchanged rerun removes nothing
+        and only a rule dropped from the profile is removed.'
+    - kind: task
+      id: tc13
+      title: Init gives Codex hooks trust advice only when the hooks file changed
+      description: 'From the init audit task, issue https://github.com/the-cloud-clockwork/agentihooks/issues/1236: init asks
+        the operator to trust Codex hooks by hand every run, even with an unchanged hooks file. Seam: the Codex hooks writer.
+        Done when a red then green test shows an unchanged rerun prints no trust advice and a changed hooks file still does.
+        Per the standing decision, prefer removing the manual step altogether if the code can do it.'
+    - kind: task
+      id: t104
+      title: 'QA: audit what a plain agentihooks init does today and plan fixes for each regression'
+      description: 'Operator ran agentihooks init at fifteen twenty one and sees output that was not there before. Verify
+        each item with commands, judge it bug, regression or expected, and file a follow up with repo, seam and done check
+        for each real one; do not fix here. Items seen: one, the profile chain now reads swarm base, then atlas, then brain
+        linked, so the operator''s personal atlas install inherits the swarm base persona and swarm enforcements. Two, init
+        removes all sixteen managed rules then the files reappear, with no line saying they were rewritten. Three, it warns
+        it kept the operator''s existing agentibrain MCP because a profile defines the same name, and the rendered atlas home
+        has no agentibrain at all; the overlay task covers the brain side, link it. Four, it skips the MCP ledger reconcile
+        because not every profile in the chain resolved, a transient source loss with no name. Five, Codex config warnings
+        call values hand set when they equal the managed value, such as never and danger full access. Six, init tells the
+        operator to run the hooks trust step in Codex by hand, while launches now restore the trusted order themselves. Seven,
+        the Claude pass renders atlas and agent homes but the Codex pass does not. Eight, a multi line env value warning prints
+        twice on every run. Nine, Codex AGENTS file is 105 of 131 kilobytes. Ten, herdr writes its own hook into the Codex
+        hooks file after agentihooks; check it never changes the trusted order. Compare with an install from a dev commit
+        of a week ago where useful.'
+  params:
+    pairs:
+    - new: 0
+      slot: 0
+      kind: task
+      id: tc10
+      title: Init stays quiet when Codex approval and sandbox already equal the managed values
+    - new: 0
+      slot: 1
+      kind: task
+      id: tc8
+      title: Init keeps unchanged Claude rules instead of deleting and recopying them
+    - new: 0
+      slot: 2
+      kind: task
+      id: tc13
+      title: Init gives Codex hooks trust advice only when the hooks file changed
+    - new: 0
+      slot: 3
+      kind: task
+      id: t104
+      title: 'QA: audit what a plain agentihooks init does today and plan fixes for each regression'
+  expected:
+    duplicate: true
+  control: false
+  samples:
+  - source: liquid-d1
+    latency_ms: 391
+    answers:
+      new_0_existing_0:
+        type: noul
+        noul: 0.9525741308615412
+      new_0_existing_1:
+        type: noul
+        noul: 7.484626040937911e-05
+      new_0_existing_2:
+        type: noul
+        noul: 0.003172683408005215
+      new_0_existing_3:
+        type: noul
+        noul: 0.027585279828507708
+  notes: state digest e884a8230552644d, state rebuilt from the ledger and asked once during seeding on 2026-10-09 UTC so the
+    decision log recorded it; internal names masked for the package
+- name: rig-grade-swarm-add_item-07ca73c817
+  state:
+    new:
+    - ref: 0
+      title: Codex question answers arrive as a JSON string, so operator words and the release and branch signal detection
+        never read a Codex answer. Parse that string shape the same way as the Claude answers.
+      description: ''
+    existing:
+    - kind: task
+      id: cq1
+      title: Codex question answers are read like Claude answers
+      description: 'Codex question answers arrive as a JSON string, so operator words and the release and branch signal detection
+        never read a Codex answer. Seams: parse that string shape the same way as the Claude answers in operator words and
+        signal detection. Done: tests with a recorded Codex answer show the operator words and a signal detected; PR merged.'
+    - kind: task
+      id: cxm1
+      title: Agents table shows model and effort for Codex agents
+      description: 'Operator approved follow up from the master model engineer: the Agents table in swarm status and on the
+        ledger page prints only the word codex for every Codex agent, so a Codex master running Sol at high effort never shows
+        its model or effort. Seams: the agent record keeps the model and effort a Codex agent was spawned with, and the Agents
+        table renders them for Codex rows the same way it does for Claude rows. Red first: a Codex agent spawned with a model
+        and effort shows both in swarm status and in the page''s Agents table. Done when merged, the ledger server restarted,
+        and swarm status output with a Codex row showing model and effort pasted on the task proof.'
+    - kind: task
+      id: t236
+      title: Master profile carries a fable priorities triage sub agent
+      description: 'Parent: operator order of 9 October; the master triages Priorities with a fable sub agent and resolves
+        what agents may decide. Masters run on Claude and on Codex, and Codex has no custom sub agent registry, as the master
+        told the operator at 09:40 on 9 October; Copilot reads the same agent markdown. So ship one instruction source two
+        ways in the bundle master overlay, where the canon puts role extensions: a Claude sub agent definition named priorities-triage
+        with model fable and read only tools, and a skill of the same name that a Codex master runs inline. Its instruction:
+        think hard about one priority; decide whether it truly needs the operator, meaning a secret, a credential, money,
+        an account, a repository or ruleset admin setting, a merge to main or a release, or his personal taste, or whether
+        it is a coding, architecture or design call a master may answer from its own authority to unblock the work; return
+        the verdict, the evidence read, and the exact answer or task change the master should write. It never writes to the
+        ledger itself. If the master render does not copy agent definitions from an overlay, add that to the agentihooks render
+        in its own pull request first, red test first in CI. Done when the pull requests merge and fresh Claude and Codex
+        master renders carry priorities-triage.'
+    - kind: task
+      id: t252
+      title: Master profile carries a fable priorities triage sub agent and skill
+      description: 'Parent: operator order of 9 October; the master triages Priorities with a fable sub agent and resolves
+        what agents may decide. Masters run on Claude and on Codex, and Codex has no custom sub agent registry, as the master
+        told the operator at 09:40 on 9 October; Copilot reads the same agent markdown. So ship one instruction source two
+        ways in the bundle master overlay, where the canon puts role extensions: a Claude sub agent definition named priorities-triage
+        with model fable and read only tools, and a skill of the same name that a Codex master runs inline. Its instruction:
+        think hard about one priority; decide whether it truly needs the operator, meaning a secret, a credential, money,
+        an account, a repository or ruleset admin setting, a merge to main or a release, or his personal taste, or whether
+        it is a coding, architecture or design call a master may answer from its own authority to unblock the work; return
+        the verdict, the evidence read, and the exact answer or task change the master should write. It never writes to the
+        ledger itself. If the master render does not copy agent definitions from an overlay, add that to the agentihooks render
+        in its own pull request first, red test first in CI. Done when the pull requests merge and fresh Claude and Codex
+        master renders carry priorities-triage.'
+  params:
+    pairs:
+    - new: 0
+      slot: 0
+      kind: task
+      id: cq1
+      title: Codex question answers are read like Claude answers
+    - new: 0
+      slot: 1
+      kind: task
+      id: cxm1
+      title: Agents table shows model and effort for Codex agents
+    - new: 0
+      slot: 2
+      kind: task
+      id: t236
+      title: Master profile carries a fable priorities triage sub agent
+    - new: 0
+      slot: 3
+      kind: task
+      id: t252
+      title: Master profile carries a fable priorities triage sub agent and skill
+  expected:
+    duplicate: true
+  control: false
+  samples:
+  - source: liquid-d1
+    latency_ms: 275
+    answers:
+      new_0_existing_0:
+        type: noul
+        noul: 0.9947798748674456
+      new_0_existing_1:
+        type: noul
+        noul: 0.00040448149784208087
+      new_0_existing_2:
+        type: noul
+        noul: 1.8925147118031986e-05
+      new_0_existing_3:
+        type: noul
+        noul: 1.0783315034923109e-05
+  notes: state digest 3c51af5e25ba14dc, state rebuilt from the ledger and asked once during seeding on 2026-10-09 UTC so the
+    decision log recorded it
+- name: rig-grade-swarm-add_item-df99b0b9e7
+  state:
+    new:
+    - ref: 0
+      title: 'Agentihooks: init deletes and silently recopies all sixteen managed Claude rules every run. Seam: Claude rule
+        file installer. Done when a test shows an unchanged rerun removes nothing and only a dropped rule is removed.'
+      description: ''
+    existing:
+    - kind: task
+      id: tc8
+      title: Init keeps unchanged Claude rules instead of deleting and recopying them
+      description: 'From the init audit task: every agentihooks init deletes and silently recopies all sixteen managed Claude
+        rules. Seam: the Claude rule file installer. Done when a red then green test shows an unchanged rerun removes nothing
+        and only a rule dropped from the profile is removed.'
+    - kind: task
+      id: tc13
+      title: Init gives Codex hooks trust advice only when the hooks file changed
+      description: 'From the init audit task, issue https://github.com/the-cloud-clockwork/agentihooks/issues/1236: init asks
+        the operator to trust Codex hooks by hand every run, even with an unchanged hooks file. Seam: the Codex hooks writer.
+        Done when a red then green test shows an unchanged rerun prints no trust advice and a changed hooks file still does.
+        Per the standing decision, prefer removing the manual step altogether if the code can do it.'
+    - kind: task
+      id: tc10
+      title: Init stays quiet when Codex approval and sandbox already equal the managed values
+      description: 'From the init audit task: init warns that Codex approval never and full access are hand set although they
+        equal the managed values. Seam: the Codex managed key apply. Done when a red then green test shows matching values
+        are recorded silently and a different hand set value still warns.'
+    - kind: task
+      id: t85
+      title: Only the installed agentihooks may write the shared swarm timer units
+      description: 'Observed at thirteen twelve: a proof run from an engineer''s scratch copy rewrote the shared swarm tick
+        and inbox waker units so their start command pointed at that scratch copy, and every agent launch in both swarms failed
+        with this run comes from a worktree, not the installed agentihooks. Seam: the timer unit writer. It writes the shared
+        user units only when the running agentihooks is the installed one, the same check init agent already makes, and otherwise
+        refuses with the reason or writes into a scratch unit folder the proof names. Done when a test shows a worktree or
+        scratch run refused and the installed run writing, and the shared units are unchanged after a scratch proof.'
+  params:
+    pairs:
+    - new: 0
+      slot: 0
+      kind: task
+      id: tc8
+      title: Init keeps unchanged Claude rules instead of deleting and recopying them
+    - new: 0
+      slot: 1
+      kind: task
+      id: tc13
+      title: Init gives Codex hooks trust advice only when the hooks file changed
+    - new: 0
+      slot: 2
+      kind: task
+      id: tc10
+      title: Init stays quiet when Codex approval and sandbox already equal the managed values
+    - new: 0
+      slot: 3
+      kind: task
+      id: t85
+      title: Only the installed agentihooks may write the shared swarm timer units
+  expected:
+    duplicate: true
+  control: false
+  samples:
+  - source: liquid-d1
+    latency_ms: 256
+    answers:
+      new_0_existing_0:
+        type: noul
+        noul: 0.975576911898635
+      new_0_existing_1:
+        type: noul
+        noul: 8.398068843882795e-06
+      new_0_existing_2:
+        type: noul
+        noul: 2.7535704244265758e-05
+      new_0_existing_3:
+        type: noul
+        noul: 2.8130187415868627e-06
+  notes: state digest 4d267613be1f468d, state rebuilt from the ledger and asked once during seeding on 2026-10-09 UTC so the
+    decision log recorded it
+- name: rig-grade-swarm-add_item-aceb9a5012
+  state:
+    new:
+    - ref: 0
+      title: The server lifetime owner check and the terminate agent tool count only a zombie as ended, so a process being
+        reaped reads as alive for one more poll. Count the dead state too.
+      description: ''
+    existing:
+    - kind: task
+      id: tc97
+      title: A process being reaped counts as ended
+      description: The server lifetime owner check and the terminate agent tool count only a zombie as ended, so a process
+        in the dead state reads as alive for one more poll. Count the dead state as ended in both. Done when the pull request
+        merges with a test for each caller.
+    - kind: task
+      id: tc118
+      title: Terminate agent ignores dead agent processes
+      description: The terminate agent tool still lists a dead agent process as a live session, and accepts a target whose
+        own process ended while a sibling lives. Check that the target's own process is alive before listing or terminating
+        it. Done when tests show a dead agent left out of the list and a target with a dead process refused while its sibling
+        lives, and the pull request merges.
+    - kind: task
+      id: tc88
+      title: Detached ledger server always stops when its run ends
+      description: 'Parent: the required gate goes red only on real defects, and no ledger server outlives its owner. The
+        detached server test that a server stops when its run ends, in its serve variant without a port and the exit case,
+        failed on the execution identity branch, whose diff only touches agent metadata, so the failure is outside it. The
+        server survived its ended run. This seam differs from the vanished process fix that merged earlier. Show the root
+        cause by evidence from the failed CI job, which the identity engineer retained, make the stop deterministic or the
+        test''s wait honest, red first by reproducing the survival. Done when the fix merges with CI green and the test passes
+        repeated runs.'
+    - kind: task
+      id: ce2
+      title: Ceremony check skips an agent whose task merged
+      description: 'Gap left by the ceremony fix: it skips the owner of a green open pull request, but once the task merges
+        and closes done, a single task engineer with more than twenty ledger moves still trips the check, since one outcome
+        reads the same as none in the ratio. Seams: an agent whose claimed task closed done with its proof counts as having
+        its outcome and raises no ceremony finding; thresholds unchanged. Failing test first. Done when merged and a finished
+        single task engineer raises no finding.'
+  params:
+    pairs:
+    - new: 0
+      slot: 0
+      kind: task
+      id: tc97
+      title: A process being reaped counts as ended
+    - new: 0
+      slot: 1
+      kind: task
+      id: tc118
+      title: Terminate agent ignores dead agent processes
+    - new: 0
+      slot: 2
+      kind: task
+      id: tc88
+      title: Detached ledger server always stops when its run ends
+    - new: 0
+      slot: 3
+      kind: task
+      id: ce2
+      title: Ceremony check skips an agent whose task merged
+  expected:
+    duplicate: true
+  control: false
+  samples:
+  - source: liquid-d1
+    latency_ms: 260
+    answers:
+      new_0_existing_0:
+        type: noul
+        noul: 0.9553191246389617
+      new_0_existing_1:
+        type: noul
+        noul: 0.11920292828022305
+      new_0_existing_2:
+        type: noul
+        noul: 0.004070137715896127
+      new_0_existing_3:
+        type: noul
+        noul: 2.406102868559163e-06
+  notes: state digest a34a1f6b89442c02, state rebuilt from the ledger and asked once during seeding on 2026-10-09 UTC so the
+    decision log recorded it
+- name: rig-grade-swarm-add_item-e25d5f46cb
+  state:
+    new:
+    - ref: 0
+      title: When a typed worktree name is refused, the message tells the agent to run the worktree script with the word worktree
+        instead of the word new. A one word fix in the agentihooks name command.
+      description: ''
+    existing:
+    - kind: task
+      id: nw1
+      title: Refused worktree name message names the right script word
+      description: 'Follow up: when a typed worktree name is refused, the message tells the agent to run the worktree script
+        with the word worktree instead of new. Fix the word in the agentihooks name command and assert the message text in
+        a test. Done when merged.'
+    - kind: task
+      id: sz38
+      title: Check completion notices name the queue command
+      description: 'Cut from the queue command task. Seam: the notice the tick sends when a pull request''s checks complete.
+        It tells the agent to queue with the agentihooks queue command instead of gh pr merge. Done when the pull request
+        lands with a test on the notice text.'
+    - kind: task
+      id: sm1
+      title: Scratch profile render works when started with python dash m
+      description: 'From the worktree render isolation engineer. Starting the scratch profile render through python with the
+        module flag fails, because the render launches its child process with the module name main instead of its real module
+        name. Fix: launch the child by its real module name whichever way the parent was started. Seam: the scratch render
+        started both as a module and as the agentihooks command renders the same scratch home. Done when merged with a test
+        on both entry paths.'
+    - kind: task
+      id: t85
+      title: Only the installed agentihooks may write the shared swarm timer units
+      description: 'Observed at thirteen twelve: a proof run from an engineer''s scratch copy rewrote the shared swarm tick
+        and inbox waker units so their start command pointed at that scratch copy, and every agent launch in both swarms failed
+        with this run comes from a worktree, not the installed agentihooks. Seam: the timer unit writer. It writes the shared
+        user units only when the running agentihooks is the installed one, the same check init agent already makes, and otherwise
+        refuses with the reason or writes into a scratch unit folder the proof names. Done when a test shows a worktree or
+        scratch run refused and the installed run writing, and the shared units are unchanged after a scratch proof.'
+  params:
+    pairs:
+    - new: 0
+      slot: 0
+      kind: task
+      id: nw1
+      title: Refused worktree name message names the right script word
+    - new: 0
+      slot: 1
+      kind: task
+      id: sz38
+      title: Check completion notices name the queue command
+    - new: 0
+      slot: 2
+      kind: task
+      id: sm1
+      title: Scratch profile render works when started with python dash m
+    - new: 0
+      slot: 3
+      kind: task
+      id: t85
+      title: Only the installed agentihooks may write the shared swarm timer units
+  expected:
+    duplicate: true
+  control: false
+  samples:
+  - source: liquid-d1
+    latency_ms: 277
+    answers:
+      new_0_existing_0:
+        type: noul
+        noul: 0.9928785732561398
+      new_0_existing_1:
+        type: noul
+        noul: 8.398071409251684e-06
+      new_0_existing_2:
+        type: noul
+        noul: 1.1478769923053105e-05
+      new_0_existing_3:
+        type: noul
+        noul: 4.539787952563966e-05
+  notes: state digest 0fca3bd32704f3a7, state rebuilt from the ledger and asked once during seeding on 2026-10-09 UTC so the
+    decision log recorded it
+- name: rig-grade-swarm-add_item-f6a33b4bf3
+  state:
+    new:
+    - ref: 0
+      title: 'Swarm status lists the last twenty gate rows, and the proof budget writes a count row per sub agent call and
+        CI rerun, so denies can scroll out. Proposed: list only deny, observe, lift and fail open rows there.'
+      description: ''
+    existing:
+    - kind: task
+      id: gs1
+      title: Swarm status gate list shows only decisions
+      description: 'Swarm status lists the last twenty gate log rows, and the proof budget writes a count row per sub agent
+        call and CI rerun, so denies scroll out. Seams: the status gate list shows only deny, observe, lift and fail open
+        rows; count rows stay in the log for doctor rates. Done: a test with thirty count rows and one deny shows the deny
+        in status; PR merged.'
+    - kind: task
+      id: cxm1
+      title: Agents table shows model and effort for Codex agents
+      description: 'Operator approved follow up from the master model engineer: the Agents table in swarm status and on the
+        ledger page prints only the word codex for every Codex agent, so a Codex master running Sol at high effort never shows
+        its model or effort. Seams: the agent record keeps the model and effort a Codex agent was spawned with, and the Agents
+        table renders them for Codex rows the same way it does for Claude rows. Red first: a Codex agent spawned with a model
+        and effort shows both in swarm status and in the page''s Agents table. Done when merged, the ledger server restarted,
+        and swarm status output with a Codex row showing model and effort pasted on the task proof.'
+    - kind: task
+      id: gm2
+      title: Gate modes come from the swarm config set by the operator
+      description: 'Server and tick gates such as the talk budget must read enforce, observe or off from the swarm config,
+        set only by the operator; today modes come only from the agent environment. Seams: a swarm set field per gate mode,
+        refused for any writer but the operator, read by server and tick gates, environment only as fallback outside a swarm;
+        a ledger page control per gate mode beside the other swarm settings, writing the same field. Done: on a scratch swarm,
+        switching a gate to observe from the page changes its verdict to logged only, and an agent write of the mode is refused;
+        PR merged.'
+    - kind: task
+      id: cap1
+      title: A failed launch spends one of a task's three claim lives
+      description: 'From the troubleshoot on the claim cap, issue 1179: the tick writes the ledger claim before launching
+        the agent but counts the claim only after a launch succeeds, so failed launches never count and one task was claimed
+        thirty six times with the claims gate in deny. Seams: the swarm tick spawn path and the claim counter the claims gate
+        reads. Count each claim when the ledger claim lands, before the launch. The fourth claim of a task is blocked, and
+        the block comment names the last launch failure reason as well as the last handoff reason. Done when red tests show
+        a task blocked after three failed launches, a successful launch still counted once, and the block carrying the failure
+        reason, and the issue is closed by hand after merge.'
+  params:
+    pairs:
+    - new: 0
+      slot: 0
+      kind: task
+      id: gs1
+      title: Swarm status gate list shows only decisions
+    - new: 0
+      slot: 1
+      kind: task
+      id: cxm1
+      title: Agents table shows model and effort for Codex agents
+    - new: 0
+      slot: 2
+      kind: task
+      id: gm2
+      title: Gate modes come from the swarm config set by the operator
+    - new: 0
+      slot: 3
+      kind: task
+      id: cap1
+      title: A failed launch spends one of a task's three claim lives
+  expected:
+    duplicate: true
+  control: false
+  samples:
+  - source: liquid-d1
+    latency_ms: 304
+    answers:
+      new_0_existing_0:
+        type: noul
+        noul: 0.9850429146143439
+      new_0_existing_1:
+        type: noul
+        noul: 4.092910104658105e-06
+      new_0_existing_2:
+        type: noul
+        noul: 2.7535692755793414e-05
+      new_0_existing_3:
+        type: noul
+        noul: 7.967299977046305e-05
+  notes: state digest 9e85b2fb82d9ad2e, state rebuilt from the ledger and asked once during seeding on 2026-10-09 UTC so the
+    decision log recorded it

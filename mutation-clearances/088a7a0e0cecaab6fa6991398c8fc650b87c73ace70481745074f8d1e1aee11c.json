@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_v2/runtime/operations.py:scripts.swarm_v2.runtime.operations.x\u01c1OperationJournal\u01c1settle__mutmut_9:3d5f4f705c2e6e018f4e7401e56aab2aa6f4c28c1bc938e8f77874abe57dbc8b": {
+    "reader": "standards_reader",
+    "reason": "The settled dict is used only in the identity comparison in OperationJournal.settle, where setting attempted to True or False replaces the same field on both current and operation, so the field is excluded from the comparison under either value and the check's outcome is unchanged."
+  }
+}

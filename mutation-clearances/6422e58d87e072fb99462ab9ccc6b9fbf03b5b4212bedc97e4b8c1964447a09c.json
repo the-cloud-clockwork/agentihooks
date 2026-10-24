@@ -1,0 +1,6 @@
+{
+  "scripts/gates/intent.py:scripts.gates.intent.x_judge__mutmut_30:9ceb6d732c549b203fbfaeceb0b58b183199cbd5b48c623b17469fee0d2717e2": {
+    "reader": "standards_reader",
+    "reason": "Changes only nonsemantic XX padding in the operator-facing message 'the tests first part may change gate behaviour'. The named shortfall and action remain present, with the same verdict and branch condition; exact typography is not part of the behavior contract."
+  }
+}

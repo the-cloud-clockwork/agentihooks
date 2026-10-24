@@ -46,6 +46,9 @@
         "task_generation": {
           "$ref": "urn:swarm-v2:common#/$defs/generation"
         },
+        "execution_generation": {
+          "$ref": "urn:swarm-v2:common#/$defs/generation"
+        },
         "project_id": {
           "$ref": "urn:swarm-v2:common#/$defs/project_id"
         }
@@ -143,6 +146,71 @@
       "type": "array",
       "items": {
         "type": "string"
+      }
+    },
+    "continuation": {
+      "enum": [
+        "native",
+        "context"
+      ]
+    },
+    "branch_state": {
+      "enum": [
+        "pushed",
+        "bundled"
+      ]
+    },
+    "inventory": {
+      "type": "object",
+      "propertyNames": {
+        "pattern": "^[a-z][a-z0-9_]{0,63}$"
+      },
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "sha256",
+          "size"
+        ],
+        "properties": {
+          "sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "size": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      }
+    },
+    "reconstruction": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "harness",
+        "image_digest",
+        "task_revision",
+        "execution_generation"
+      ],
+      "properties": {
+        "harness": {
+          "enum": [
+            "claude",
+            "codex",
+            "copilot"
+          ]
+        },
+        "image_digest": {
+          "$ref": "urn:swarm-v2:common#/$defs/digest"
+        },
+        "task_revision": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "execution_generation": {
+          "$ref": "urn:swarm-v2:common#/$defs/generation"
+        }
       }
     }
   }

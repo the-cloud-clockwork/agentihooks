@@ -24,7 +24,7 @@ def measured(tmp_path, monkeypatch):
 
 def test_cached_base_uses_the_requested_commit_with_the_same_tree(measured):
     root, target = measured
-    base = next(ratchet._cached_runs(root, "squash", 1, target))
+    base = next(ratchet._cached_runs(root, "squash", target))
     assert base.commit == "squash"
     assert base.executed == {"hooks/example.py": {1, 2}}
     assert base.source("hooks/example.py") == "one\ntwo\nthree\n"
@@ -42,6 +42,27 @@ def test_cached_grading_does_not_read_github(measured, monkeypatch, covered, los
     args = argparse.Namespace(head=root, base="base", shards=1, base_baseline=target)
     _, _, result = ratchet._grade(args, [shard], root)
     assert result.lost == lost
+
+
+def test_a_head_split_another_way_grades_against_the_cached_base(measured, monkeypatch):
+    root, target = measured
+    shards = []
+    for index, covered in enumerate([{1}, {2}], start=1):
+        data = CoverageData(basename=str(root / f"shard-{index}.coverage"))
+        data.add_lines({"hooks/example.py": covered})
+        data.write()
+        shards.append(root / f"shard-{index}.coverage")
+    monkeypatch.setattr(ratchet, "renamed", lambda *args: {})
+    args = argparse.Namespace(head=root, base="base", shards=len(shards), base_baseline=target)
+    _, _, result = ratchet._grade(args, shards, root)
+    assert result.lost == {}
+
+
+def test_the_ratchet_refuses_a_cached_base_from_another_tree(measured, monkeypatch):
+    root, target = measured
+    monkeypatch.setattr(ratchet, "git", lambda *args, **kwargs: "another-tree")
+    with pytest.raises(ValueError, match="tree differs"):
+        next(ratchet._cached_runs(root, "base", target))
 
 
 def test_cache_miss_fails_the_cli_with_recovery_guidance(measured, capsys):
@@ -79,7 +100,8 @@ def test_queue_grading_consumes_the_restored_exact_base():
 
     workflow = yaml.safe_load((Path(__file__).parents[1] / ".github/workflows/test.yml").read_text())
     job = workflow["jobs"]["coverage-ratchet"]
-    assert "queue-baseline" in job["needs"]
+    assert "queue-baseline" not in workflow["jobs"]
+    assert "queue-baseline" not in job["needs"]
     assert "!cancelled()" in job["if"]
     steps = {step.get("name"): step for step in job["steps"]}
     base = steps["Resolve the measured base tree"]
@@ -88,7 +110,7 @@ def test_queue_grading_consumes_the_restored_exact_base():
     restore = steps["Restore the exact coverage baseline"]
     assert restore["if"] == "github.event_name != 'merge_group' && github.event_name != 'workflow_dispatch'"
     download = steps["Download the queue base coverage baseline"]
-    assert download["if"] == "github.event_name == 'merge_group' || github.event_name == 'workflow_dispatch'"
+    assert download["if"] == "github.event_name == 'workflow_dispatch'"
     assert download["with"]["name"] == "queue-coverage-baseline"
     assert download["with"]["path"] == "~/coverage-baseline"
     assert "git merge-base" not in steps["Hold every line the base ran"]["run"]

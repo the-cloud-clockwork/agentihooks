@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/ledger_client.py:scripts.swarm.ledger_client.xǁLedgerClientǁtask__mutmut_9:a721c7c5610b6bbbeca28bfdd04ff7bc18d3917e41bf2bc817ce1d9a2ea0dbe0": {
+    "reader": "standards_reader",
+    "reason": "Equivalent: urllib.parse.quote never escapes ASCII letters under any safe value; an exhaustive check over every code point found no difference between safe='' and safe='XXXX'."
+  }
+}

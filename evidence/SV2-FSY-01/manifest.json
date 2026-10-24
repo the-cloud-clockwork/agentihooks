@@ -1,0 +1,17 @@
+{
+  "package": "SV2-FSY-01",
+  "tested_commit": "9698d0aacfa190b7d538aa9b8cdd1a66d29df0df",
+  "evidence_class": "local isolated fixture in CI; not live rollout proof",
+  "ci_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38059486223",
+  "fixture": "tests/fixtures/swarm_v2/filesystem.json: two isolated execution bases a and b under pytest tmp_path, attempt fsy-1, relative path escapes, archive parent, absolute, link, hard link and chained link escapes",
+  "cleanup": "pytest tmp_path per test; no live resource mutations",
+  "inputs": {
+    "docker/swarm-node/layout.json": "41fc01753018c5b59967476af90ba7ece797cac9d39a734635759aae2aeaf379",
+    "docker/swarm-node/Dockerfile": "aac488eedea618efaa5d3ce3f217307d4496d0e11b1519ac489bbbe7fb37fba2",
+    "scripts/swarm_v2/filesystem.py": "dc68198b130f0b94b24e399e246c85f562a95e820e111b28c5f1374da7ebf2e2",
+    "scripts/swarm_v2/worker_home.py": "f0039db1cc109d20505f1c447168f77ccbfac64ea8d279850de32c3b135edd18",
+    "tests/fixtures/swarm_v2/filesystem.json": "e9f78cf57a5de63ef85982d3ad20bff40ac980fd517c2be484b49ede315de8e5",
+    "tests/test_swarm_v2_filesystem.py": "c77615cfa3d7e23e56f5d433a349e7ec017c956af73661bf599a45c3cb9fa3cf",
+    "tests/test_worker_home.py": "fbfd756afc93689188f91b2b99cc9c49ec0fb891bea83180ba29973f3777e78d"
+  }
+}

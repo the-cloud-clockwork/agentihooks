@@ -40,6 +40,10 @@ def test_balance_set_writes_through_the_store_and_prints_before_and_after(monkey
         "master-account-codex=unset",
         "master-tier-claude=unset",
         "master-tier-codex=unset",
+        "master-account-claude-2=unset",
+        "master-account-claude-3=unset",
+        "master-account-claude-4=unset",
+        "master-account-claude-5=unset",
     ]
 
 
@@ -124,7 +128,7 @@ def test_the_balance_help_names_every_flag_and_subcommand(monkeypatch, capsys):
     def shows(text, page):
         return re.search(rf"(?m)(?:^|\s){re.escape(text)}$", page) is not None
 
-    assert shows("Probe and rank Claude OAuth accounts without launching workload", top)
+    assert shows("One table for every Claude and Codex account, without launching anything", top)
     for text in (
         "Report routing state without launching Claude",
         "Include the separate Fable weekly quota",

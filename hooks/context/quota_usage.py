@@ -1,10 +1,12 @@
 import json
 import os
 import time
+from collections.abc import Mapping
 from datetime import datetime, timezone
 from pathlib import Path
 
 from hooks.config import AGENTIHOOKS_HOME, QUOTA_USAGE_STALE_SEC, QUOTA_USAGE_TOOL_CALLS
+from hooks.context.account_sessions import INTERACTIVE_PREFIX
 
 _TITLE = "ATTENTION TO QOUTA USAGE"
 
@@ -14,7 +16,7 @@ def _snapshot_path(session_id: str) -> Path:
     return AGENTIHOOKS_HOME / "quota_usage" / f"{safe_id}.json"
 
 
-def record_rate_limits(session_id: str, rate_limits: dict) -> None:
+def record_rate_limits(session_id: str, rate_limits: dict, environ: Mapping[str, str] = os.environ) -> None:
     if not session_id or not isinstance(rate_limits, dict):
         return
     windows = {}
@@ -28,13 +30,43 @@ def record_rate_limits(session_id: str, rate_limits: dict) -> None:
         }
     if not windows:
         return
+    snapshot = {"updated_at": time.time(), "rate_limits": windows}
+    interactive = {
+        name.removeprefix(INTERACTIVE_PREFIX)
+        for name, value in environ.items()
+        if value and name.startswith(INTERACTIVE_PREFIX) and name != INTERACTIVE_PREFIX
+    }
+    if len(interactive) == 1:
+        snapshot["account"] = interactive.pop()
     path = _snapshot_path(session_id)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.parent.chmod(0o700)
     temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
-    temporary.write_text(json.dumps({"updated_at": time.time(), "rate_limits": windows}), encoding="utf-8")
+    temporary.write_text(json.dumps(snapshot), encoding="utf-8")
     temporary.chmod(0o600)
     os.replace(temporary, path)
+
+
+def _snapshots(account: str) -> list[tuple[float, dict]]:
+    found = []
+    for path in (AGENTIHOOKS_HOME / "quota_usage").glob("*.json"):
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            updated = float(data["updated_at"])
+            if data.get("account") == account and isinstance(data.get("rate_limits"), dict):
+                found.append((updated, data["rate_limits"]))
+        except (OSError, ValueError, TypeError, KeyError):
+            continue
+    return found
+
+
+def account_snapshot(account: str, now: float) -> tuple[float, dict] | None:
+    fresh = [entry for entry in _snapshots(account) if now - entry[0] <= QUOTA_USAGE_STALE_SEC]
+    return max(fresh, key=lambda entry: entry[0], default=None)
+
+
+def latest_snapshot(account: str) -> tuple[float, dict] | None:
+    return max(_snapshots(account), key=lambda entry: entry[0], default=None)
 
 
 def clear_session_state(session_id: str) -> None:

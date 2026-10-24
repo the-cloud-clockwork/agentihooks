@@ -247,6 +247,27 @@ def test_an_incomplete_trace_listing_raises_no_untraced_session():
     assert "trace listing stopped at its page cap" in found.evidence
 
 
+def test_partial_coverage_names_the_traces_past_the_listing_cap_apart_from_the_unread():
+    historical = {"listed": False, "unlisted": 1430, "traces": 2000, "covered": 1990, "complete": False}
+    [found] = traces.findings(_record(historical=historical), LIMITS)
+    assert found.summary == "observations of 10 traces not read yet"
+    assert found.measure == 10
+    assert "1430 traces past where the listing stopped not counted" in found.evidence
+
+
+def test_traces_read_up_to_the_observation_page_cap_are_named_and_not_counted_unread():
+    historical = {"traces": 100, "covered": 90, "capped": 4, "complete": False}
+    [found] = traces.findings(_record(historical=historical), LIMITS)
+    assert found.summary == "observations of 6 traces not read yet"
+    assert found.measure == 6
+    assert "4 traces read up to the observation page cap" in found.evidence
+
+
+def test_complete_coverage_within_a_capped_listing_raises_no_coverage_finding():
+    historical = {"listed": False, "unlisted": 1430, "traces": 2000, "covered": 2000, "complete": True}
+    assert traces.reader(_record(historical=historical), LIMITS) == []
+
+
 def test_measures_report_each_active_binding_and_the_coverage():
     stuck = _binding(local=_local(generated_bytes=5000, oldest_unaccepted=NOW - 90_000))
     found = traces.measures(_record(stuck, historical={"traces": 3, "covered": 2, "complete": False}))
@@ -374,27 +395,65 @@ def test_exactly_at_a_threshold_nothing_is_raised(binding):
     assert traces.findings(_record(binding), LIMITS) == []
 
 
-def test_a_reader_outage_reads_in_full_and_keeps_five_failures():
-    failures = [f"failure {n}" for n in range(7)]
+def test_a_reader_outage_keeps_the_detail_of_every_failed_read():
+    failures = [f"failure {n}" for n in range(11)]
     record = _record(_binding(read=False, traces=[], remote=None), failures=failures, down_since=NOW, historical=None)
     assert traces.reader(record, LIMITS) == [
         traces.Finding(
             "trace reader unavailable",
             f"s.{NOW}",
-            "7 Langfuse reads failed or ran out of time",
+            "11 Langfuse reads failed or ran out of time",
             (
-                *failures[:5],
+                *failures,
                 "active bindings read 0 of 1",
                 "observations read for 0 of 0 traces",
                 "unread bindings are not judged on Langfuse evidence",
             ),
             f"any failed or unfinished Langfuse read, {CADENCE}",
-            7,
+            11,
         )
     ]
 
 
-def test_partial_coverage_reads_in_full_and_keeps_three_unreadable_traces():
+def test_a_reader_outage_bounds_its_failure_detail_per_pass():
+    failures = [f"failure {n}" for n in range(53)]
+    record = _record(_binding(read=False, traces=[], remote=None), failures=failures, down_since=NOW, historical=None)
+    [found] = traces.reader(record, LIMITS)
+    assert found.evidence[:51] == (*failures[:50], "3 more failed reads past the bound of 50 per pass")
+    assert found.evidence[51] == "active bindings read 0 of 1"
+    assert found.measure == 53
+
+
+def test_a_reader_outage_keeps_unreadable_traces_of_the_pass_without_counting_them():
+    unreadable = ["trace t1 unreadable: TimeoutError", "trace t2 unreadable: TimeoutError"]
+    historical = {"traces": 2, "covered": 0, "complete": False, "unreadable": unreadable}
+    record = _record(
+        _binding(read=False, traces=[], remote=None), failures=["f"], down_since=NOW, historical=historical
+    )
+    [found] = traces.reader(record, LIMITS)
+    assert found.evidence[:4] == ("f", *unreadable, "active bindings read 0 of 1")
+    assert found.measure == 1
+
+
+def test_a_reader_outage_at_the_bound_keeps_every_failure_with_no_overflow_line():
+    failures = [f"failure {n}" for n in range(50)]
+    record = _record(_binding(read=False, traces=[], remote=None), failures=failures, down_since=NOW, historical=None)
+    [found] = traces.reader(record, LIMITS)
+    assert found.evidence[:51] == (*failures, "active bindings read 0 of 1")
+
+
+def test_a_reader_outage_one_past_the_bound_names_the_one_dropped_failure():
+    failures = [f"failure {n}" for n in range(51)]
+    record = _record(_binding(read=False, traces=[], remote=None), failures=failures, down_since=NOW, historical=None)
+    [found] = traces.reader(record, LIMITS)
+    assert found.evidence[:52] == (
+        *failures[:50],
+        "1 more failed reads past the bound of 50 per pass",
+        "active bindings read 0 of 1",
+    )
+
+
+def test_partial_coverage_reads_in_full_and_keeps_every_unreadable_trace():
     unreadable = [f"trace t{n} unreadable: TimeoutError" for n in range(5)]
     record = _record(historical={"traces": 10, "covered": 4, "complete": False, "unreadable": unreadable})
     assert traces.reader(record, LIMITS) == [
@@ -404,7 +463,7 @@ def test_partial_coverage_reads_in_full_and_keeps_three_unreadable_traces():
             "observations of 6 traces not read yet",
             (
                 "observations read for 4 of 10 traces",
-                *unreadable[:3],
+                *unreadable,
                 "tool error, task cost and turn gap findings cover only the read traces",
                 "each Doctor scan reads more within its read budget",
             ),

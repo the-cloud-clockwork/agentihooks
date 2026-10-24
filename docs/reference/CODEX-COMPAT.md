@@ -1,7 +1,6 @@
 # CODEX-COMPAT — OpenAI Codex CLI as an AgentiHooks target
 
-Reference for the `codex` install target, and the companion to
-[COPILOT-COMPAT.md](COPILOT-COMPAT.md).
+Reference for Codex, one of the two supported harnesses alongside Claude Code.
 
 **Provenance.** This page was reconstructed from the adapter implementation
 (`scripts/targets/codex_target.py`, `hooks/targets/`) and its test suite after
@@ -55,27 +54,28 @@ that flag the whole hook layer is dead weight. Events map to groups of command
 hooks pointing at `~/.codex/agentihooks-hook.sh`, which sets
 `AGENTIHOOKS_TARGET=codex` and execs `python -m hooks`.
 
-Codex trusts hooks **by content hash**. Until trusted, it SILENTLY skips them —
-run `/hooks` once inside a codex session, or launch automation with
-`--dangerously-bypass-hook-trust`. `init` leaves an unchanged `hooks.json`
-untouched and prints the trust advice only when it rewrites the file.
+Codex trusts hooks **by content hash**. Until trusted, it SILENTLY skips them,
+and a TUI session stops at its hook review prompt. `init`, the herdr step of
+`init` and every rendered Codex profile home write `hooks.state` trust for each
+command entry in `hooks.json`, foreign groups such as herdr's included, with the
+hash Codex computes (`scripts.targets.codex_hook_trust`). A rendered home
+re-renders when the operator `hooks.json` changes.
 
 ### §2.3 stdout contract
 
 Codex parses hook stdout as exactly one JSON object, unlike Claude Code which
 concatenates every raw stdout line. Handlers buffer through
 `hooks/targets/emitter.py` and flush once at process exit. The predicate is
-`buffers_single_envelope()` — copilot shares the property, so it is a target
-capability rather than a codex identity check.
+`buffers_single_envelope()` expresses this as a target capability.
 
 ### §2.4 Permission channel
 
-| | claude | codex | copilot |
-|---|---|---|---|
-| `permissionDecision` | allow/deny/ask | **deny only** | allow/deny/ask |
-| `additionalContext` size before spilling | uncapped | **~2,500 tokens unless `additionalContextLimit` says otherwise** | uncapped |
-| `additionalContext` on PreToolUse | yes | **no** | yes |
-| `modifiedArgs` | no | no | yes |
+| | claude | codex |
+|---|---|---|
+| `permissionDecision` | allow/deny/ask | **deny only** |
+| `additionalContext` size before spilling | uncapped | **~2,500 tokens unless `additionalContextLimit` says otherwise** |
+| `additionalContext` on PreToolUse | yes | **no** |
+| `modifiedArgs` | no | no |
 
 Encoded in `hooks/targets/capabilities.py`. Blocking via exit code 2 + stderr
 works on every codex event, same as Claude — which is why
@@ -119,6 +119,89 @@ session id — rollouts live at
 for the transcript-driven events (`SessionEnd`, `Stop`, `SubagentStop`,
 `PreCompact`), so a filesystem lookup is not charged to every tool call.
 
+#### Shell working folder
+
+Codex 0.162.1 sends a shell `PreToolUse` with only `tool_input.command` and the
+session's `cwd`, the folder the session started in, as captured live with a
+stdin dump hook for pull request 4804. The `workdir` the model gave
+`exec_command` is not in the payload. It is in the rollout, inside the code mode
+`exec` program, which Codex has written to disk when the hook fires.
+
+`normalize_payload` copies that `workdir` into `tool_input` so the hooks that
+read `tool_input.workdir` see the folder the command really runs in: the
+`one-push` gate, the prepush guard and the lifecycle guard that records the
+agent as a worktree lease holder and blocks calls on a worktree or scratch
+folder while it is being removed (see
+[Lease holders and resumed agents](cli-commands.md#lease-holders-and-resumed-agents)). For
+a `Bash` call with no `workdir` of its own it:
+
+1. Opens the rollout from `transcript_path`, or from `codex_rollout_path()` with
+   the session id when the payload has none.
+2. Reads the last 1 MiB of the file and takes the newest line whose payload is
+   `{"type": "custom_tool_call", "name": "exec"}`.
+3. Parses every `exec_command({...})` call in that program's `input`. Keys may
+   be bare (`cmd:`) or JSON quoted (`"cmd":`); string values are JavaScript
+   string literals.
+4. Keeps the calls whose decoded `cmd` equals the hook's `command`
+   exactly. When they all name the same non-empty `workdir`, that value
+   becomes `tool_input.workdir`.
+
+A rollout line and the payload it produces:
+
+```text
+{"type":"response_item","payload":{"type":"custom_tool_call","name":"exec","input":"text(await tools.exec_command({cmd:\"git status -sb && gh pr ready 4746\",workdir:\"/home/me/dev/worktrees/agentihooks/ci-1\"}));"}}
+```
+
+```json
+{
+  "hook_event_name": "PreToolUse",
+  "cwd": "/home/me/dev/agentihooks",
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "git status -sb && gh pr ready 4746",
+    "workdir": "/home/me/dev/worktrees/agentihooks/ci-1"
+  }
+}
+```
+
+The `one-push` gate and the prepush guard then join `cwd` with `workdir` (a
+relative `workdir` resolves against `cwd`, `~` expands) and apply any `cd` or
+`git -C` in the command on top. The lifecycle guard compares `workdir` after `~`
+expansion with the worktree and scratch roots, so a relative `workdir` never
+matches there.
+
+No `workdir` is added, and the hooks fall back to the session's `cwd`, when:
+
+- the payload already carries a `workdir`, which is kept as sent;
+- the rollout cannot be found or read, or holds no `exec` program in its last
+  1 MiB;
+- no `exec_command` call in the newest program runs exactly the hook's command,
+  or the matching calls name different folders, or one of them has none;
+- any string value in the newest program cannot be decoded, even in a call
+  that runs another command.
+
+To see what the hook will read for a session, print the newest `exec` program
+from its rollout:
+
+```bash
+SID='<session id>'
+R=$(ls "${CODEX_HOME:-$HOME/.codex}"/sessions/*/*/*/rollout-*"$SID".jsonl)
+tail -c 1048576 "$R" | jq -rR 'fromjson? | .payload
+  | select(type == "object" and .type == "custom_tool_call" and .name == "exec")
+  | .input' | tail -n 1
+```
+
+Set `SID` to the session id. Swarm Codex sessions run with their own
+`CODEX_HOME`; use the session's value. When `CODEX_HOME` lists several folders
+separated by commas, the hooks read only the first; put that one in the
+command. The `cmd` and `workdir` strings printed there are JavaScript literals
+with `\"` escapes; the normalizer compares and copies their decoded values.
+
+Delivered in
+[pull request 4804](https://github.com/the-cloud-clockwork/agentihooks/pull/4804);
+[pull request 5676](https://github.com/the-cloud-clockwork/agentihooks/pull/5676)
+added JSON quoted keys.
+
 ## §3 Feature-kind mapping
 
 | row | Bundle kind | Codex behaviour |
@@ -139,7 +222,7 @@ for the transcript-driven events (`SessionEnd`, `Stop`, `SubagentStop`,
 exactly-one-installed-target recall → interactive TTY prompt → non-interactive
 multi-target warning + default → `DEFAULT_TARGET` (`claude`).
 
-Target-neutral helpers shared with the copilot adapter live in
+Target-neutral helpers live in
 `scripts/targets/_common.py` — notably `build_persona()` and `write_persona()`,
 so the identity preamble and the operator-tail preservation rules cannot drift
 between targets.
@@ -257,8 +340,7 @@ scanning.
 - http → `{url, http_headers}`, codex infers the type from the url alone
 
 **SSE is skipped with a warning** — codex has no SSE client. Expose a
-streamable-HTTP endpoint and re-run init. (Copilot diverges here: it ships an SSE
-client, so its adapter must not copy this branch.)
+streamable-HTTP endpoint and re-run init.
 
 **Header placeholders.** Claude Code expands `${VAR}` in header values at connect
 time; codex sends them **literally** (verified: gateway 401 on the raw
@@ -280,6 +362,14 @@ written to disk — a HARD FLOOR path.
   `CODEX_HOOK_EVENTS`; it has no `hook_manager` handler today.
 - **`PostCompact`** fires in codex-cli 0.160.0. It remains unregistered because
   the subsequent compact `SessionStart` restores swarm intent (§2.1).
+
+### Inbox transport
+
+Codex executions in a swarm made by `swarm create` take inbox work through the
+supervised `codex app-server` (`codex-inbox-transport=app_server`); `legacy` keeps the
+typed wake and the master's `wait --inbox` loop. `doctor` prints the default and
+the rollback command. The setting, qualified versions, canary order and rollback
+are in [Codex inbox transport](codex-inbox-transport.md).
 
 ## §9 Verification
 

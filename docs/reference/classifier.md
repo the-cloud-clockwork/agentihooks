@@ -94,13 +94,18 @@ method (the `Backend` protocol) that raises `BackendFailure` when it cannot answ
 | `AGENTIHOOKS_CLASSIFIER_URL` | none | LiteLLM base address; `/v1/decisions` is appended. Unset means the API is not tried |
 | `AGENTIHOOKS_CLASSIFIER_LITELLM_KEY` | none | The LiteLLM key, read at call time and sent only in the Authorization header. Unset means the API is not tried |
 | `AGENTIHOOKS_CLASSIFIER_MODELS` | `liquid-d1,jev-1.13,pplx-decider-v1-27b` | Model order |
-| `AGENTIHOOKS_CLASSIFIER_TIMEOUT_S` | `5` | Timeout per API call |
+| `AGENTIHOOKS_CLASSIFIER_TIMEOUT_S` | `5` | Timeout per API call for an input up to 35,000 estimated tokens; a larger input gets one second per 7,000 tokens, capped at 30 seconds unless this value is higher |
 | `AGENTIHOOKS_CLASSIFIER_DOWN_TTL_S` | `120` | How long a failed API stays marked down |
 | `AGENTIHOOKS_CLASSIFIER_FALLBACK_TIMEOUT_S` | `60` | Timeout per CLI fallback |
 | `AGENTIHOOKS_CLASSIFIER_LUNA_MODEL` | model catalog, then `gpt-6-luna` | Override the Codex fallback model |
 
 The key never appears in a log line, an exception text or the decision log. It comes
 from the shell (loaded from OpenBao), never from a bundle file.
+
+The swarm tick and the controller run outside an agent session, so at start they add
+each `AGENTIHOOKS_CLASSIFIER_*` name they lack from the installed Claude settings env,
+then, while the address or the key is still missing, from the operator's login shell,
+as the hooks of an agent session see them.
 
 ## Decision log and stats
 
@@ -141,27 +146,77 @@ form, one object per name:
 It prints the result JSON and exits 0; 2 for an input or request error; 1 when no
 backend answered.
 
+## Corpus and eval
+
+A corpus file `<name>.corpus.yaml` sits next to the definition file the loader selects
+(package, bundle or `$AGENTIHOOKS_HOME/classifiers`). Each case holds the state, the
+definition parameters, the expected verdict per question, a control flag and recorded
+answer samples in the decisions wire shape:
+
+```yaml
+version: 1
+cases:
+  - name: one_line_typo
+    state: {task: "Fix the spelling of 'recieve' in the README heading"}
+    params: {instructions: "Is this task a change to a single line of text?", "true": "One line", "false": "More"}
+    expected: {verdict: true}
+    control: false
+    samples:
+      - source: liquid-d1
+        latency_ms: 557
+        answers:
+          verdict: {type: noul, noul: 0.98}
+```
+
+A yes rule expects `true` or `false`, a choice rule an option key, and a score rule a
+`[min, max]` range. A choice or score rule with a threshold may expect `null`, meaning
+the answer falls below its confidence floor. A control case may expect only rejections:
+`false` or `null`. Definitions with a code rule have no corpus.
+
+```bash
+agentihooks classifier eval NAME             # replay the recorded samples
+agentihooks classifier eval NAME --live N    # ask every API model, haiku and luna N times per case
+```
+
+Replay calls no backend and runs in the CI tests. `--live` runs only on demand and is
+refused whenever `CI` is set. Both print wrong cases, held controls (controls whose every
+sample was rejected), and samples and latency per backend. They exit 1 on any wrong
+sample or when no backend answered, and 2 for a malformed definition or corpus. With
+`AGENTIHOOKS_METRICS_URL` and `AGENTIHOOKS_METRICS_USER` set, each sample is a row in
+`swarm.classifier_evals`.
+
 ## Auto swarm lanes
 
-When an eng or ci lane's effort is `auto`, the spawn runtime asks the classifier
-how much reasoning the task needs, following harness routing, using its title,
-description, kind and territory size. The answer only raises effort above the
-launch default (`high` unless `AGENTIHOOKS_CLAUDE_EFFORT` or
-`AGENTIHOOKS_CODEX_EFFORT` names another): Claude launches high or max, Codex high
-or xhigh. A launch default outside those levels is kept without asking. The
-classifier never picks a model: a lane model of `auto` launches the harness
-default, opus for Claude and gpt-6.1-sol for Codex unless
-`AGENTIHOOKS_CLAUDE_MODEL` or `AGENTIHOOKS_CODEX_MODEL` names another. Explicit
-model and effort values remain unchanged, and master and plan seats never consult
-the classifier. A master always launches on the frontier model at high effort for
-its harness, whatever its lane or the environment names, and records `frontier`.
-Decisions use purpose `model-pick` in the classifier log.
+When an eng or ci lane's effort is `auto`, the spawn runtime picks the model and
+effort from a band that code builds from the task's size (`S`, `M` or `L`; unsized
+counts as `M`) and rank. The Claude ladder is Sonnet at xhigh, Opus at medium, Opus at
+high and Opus at xhigh. Size `S` offers Sonnet xhigh or Opus medium, `M` Opus medium
+or Opus high, `L` Opus high or Opus xhigh. Rank `urgent` and `high` move the band up
+one step, `low` moves it down one, `normal` leaves it, and the band stays inside the
+ladder. Codex uses the same effort column on gpt-6.1-sol with the Sonnet step removed,
+so a Codex band can hold one option, which launches without asking.
 
-`AGENTIHOOKS_MODEL_PICK_MIN_CONFIDENCE` defaults to 0.6. The effort answer's
-confidence must meet it; otherwise the lane keeps its launch defaults. An
-unavailable classifier also preserves those defaults.
+The classifier answers one choice question, `lower` or `higher`, carrying the task's
+title, description, kind, territory size, size and rank, with a plain description of
+each band option. Code maps the answer to model and effort. The band floor is its
+first Opus or Sol option, so Sonnet launches only on a confident answer, and only at
+xhigh: the Sonnet step is offered only when the swarm effort range reaches xhigh and the
+lane model is `auto`. A lane with an explicit model keeps that model, never takes the
+Sonnet step and takes the picked effort; otherwise the Opus or Sol steps use the
+harness default model, which `AGENTIHOOKS_CLAUDE_MODEL` or `AGENTIHOOKS_CODEX_MODEL`
+can name.
+Explicit lane efforts never consult the classifier, planners launch the medium
+default, and a master always launches on the frontier model at high effort for its
+harness, whatever its lane or the environment names, and records `frontier`.
+Each decision it asks for uses purpose `model-pick` in the classifier log.
+
+The `model-pick` definition's `confidence` threshold defaults to 0.6;
+`AGENTIHOOKS_CLASSIFIER_MODEL_PICK_CONFIDENCE` overrides it, and the older
+`AGENTIHOOKS_MODEL_PICK_MIN_CONFIDENCE` still applies when that is unset. The
+answer's confidence must meet it; otherwise the launch takes the band floor. An
+unavailable classifier also launches the band floor, recorded as source `band`.
 Agent records, swarm status and the page carry `model_source` and
 `model_confidence`; low confidence retains the attempted classifier's metadata,
-and an explicit or unavailable pick records `lane-default` without confidence.
+an explicit lane records `lane-default` and an unavailable classifier `band`, both without confidence.
 A running session that reports another model or effort replaces both on the
 record with source `session` and no confidence.

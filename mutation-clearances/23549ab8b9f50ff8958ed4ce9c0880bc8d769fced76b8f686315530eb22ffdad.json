@@ -1,0 +1,6 @@
+{
+  "scripts/init_agent.py:scripts.init_agent.x__parser__mutmut_4:c5dd34c88c1f3b96385e84b92986c9d1e1e4de3124ced02933909828b566ad71": {
+    "reader": "Standards reader for cxc2",
+    "reason": "Setting the --codex-transport help to None removes only its --help description; choices, default and parsing are unchanged."
+  }
+}

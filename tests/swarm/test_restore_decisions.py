@@ -77,3 +77,65 @@ def test_restored_session_can_confirm_before_the_launcher_returns(store, tmp_pat
     results = resume.reopen(store, "sw", {}, runtime, 2, tmp_path, has_quota=lambda *_: True)
     assert results[0].outcome == "resumed"
     assert transfers.list_transfers(store, "sw")[-1]["continuity"]["state"] == "confirmed"
+
+
+class _Hashes:
+    def __init__(self):
+        self.rows = {}
+
+    def hset(self, key, field, value):
+        self.rows.setdefault(key, {})[field] = value
+
+
+class _PodStore:
+    def __init__(self, agent):
+        self.agent, self.redis = agent, _Hashes()
+
+    def agents(self, slug):
+        return [self.agent]
+
+    def key(self, slug, name):
+        return f"swarm:{slug}:{name}"
+
+    def restored(self, slug):
+        raise AssertionError("a Pod attempt never reads the local restore list")
+
+
+def _pod_agent(**changes):
+    from dataclasses import replace
+
+    from scripts.swarm.store import AgentRecord
+
+    agent = AgentRecord("sw-eng-1", "eng", "t1", conversation_id="s-1", state="awaiting-decision")
+    return replace(agent, **{"execution_id": "exe-1", "runtime_backend": "kubernetes", **changes})
+
+
+@pytest.mark.parametrize("choice", ["resume", "fresh"])
+def test_a_pod_attempt_choice_is_requested_for_the_controller_and_nothing_starts_here(choice):
+    pods = _PodStore(_pod_agent())
+    runtime = ResumingRuntime()
+    outcome = resume.decide(pods, "sw", "sw-eng-1", choice, runtime, 5000, FakeLedger([]))
+    assert outcome == resume.Outcome(
+        "sw-eng-1", "eng", "t1", "awaiting-decision", f"Recovery requested: {choice}", "s-1", 5000
+    )
+    assert pods.redis.rows == {"swarm:sw:recovery-requests": {"exe-1": choice}}
+    assert not runtime.spawned
+    assert not runtime.resumed
+    again = resume.decide(pods, "sw", "sw-eng-1", choice, runtime, 5001, FakeLedger([]))
+    assert again.at == 5001
+    assert pods.redis.rows == {"swarm:sw:recovery-requests": {"exe-1": choice}}
+
+
+def test_a_pod_attempt_refuses_an_unknown_choice_and_requests_nothing():
+    pods = _PodStore(_pod_agent())
+    with pytest.raises(resume.SwarmError, match="^Choose resume or fresh$"):
+        resume.decide(pods, "sw", "sw-eng-1", "recovery_pending", ResumingRuntime(), 5000, FakeLedger([]))
+    assert pods.redis.rows == {}
+
+
+@pytest.mark.parametrize("changes", [{"runtime_backend": "local"}, {"execution_id": ""}])
+def test_only_a_pod_attempt_takes_the_controller_path(changes):
+    pods = _PodStore(_pod_agent(**changes))
+    with pytest.raises(AssertionError, match="local restore list"):
+        resume.decide(pods, "sw", "sw-eng-1", "fresh", ResumingRuntime(), 5000, FakeLedger([]))
+    assert (resume.KUBERNETES, resume.RECOVERY_REQUESTS) == ("kubernetes", "recovery-requests")

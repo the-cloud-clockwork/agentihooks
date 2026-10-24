@@ -1,0 +1,155 @@
+{{- $join := .Values.hive.join }}
+{{- if and $join.enabled (not .Values.hiveOnly) }}
+{{- if not $join.tlsSecretName }}
+{{- fail "hive.join.tlsSecretName is required: the join endpoint hands out credentials, so it serves only TLS" }}
+{{- end }}
+{{- if not $join.memberRedisUrl }}
+{{- fail "hive.join.memberRedisUrl is required: it is the Redis URL members connect to" }}
+{{- end }}
+{{- if contains "@" $join.memberRedisUrl }}
+{{- fail "hive.join.memberRedisUrl must not carry credentials; each member gets its own Redis user" }}
+{{- end }}
+{{- if not $join.ingressFrom }}
+{{- fail "hive.join.ingressFrom needs at least one peer: an empty peer list would admit every source to the join port" }}
+{{- end }}
+{{- $signer := $join.natsSigner }}
+{{- if and $signer.secretName (not $signer.trustedOperator) }}
+{{- fail "hive.join.natsSigner.trustedOperator is required with natsSigner.secretName: the endpoint refuses to sign for an operator NATS does not trust" }}
+{{- end }}
+{{- $fullname := include "swarm.fullname" . }}
+{{- $reload := list $join.tlsSecretName }}
+{{- with $signer.secretName }}
+{{- $reload = append $reload . }}
+{{- end }}
+{{- with ($join.redisSecret.name | default .Values.redis.existingSecret.name) }}
+{{- $reload = append $reload . }}
+{{- end }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $fullname }}-hive-join
+  annotations:
+    secret.reloader.stakater.com/reload: {{ join "," $reload | quote }}
+  labels:
+    {{- include "swarm.labels" . | nindent 4 }}
+    app.kubernetes.io/component: hive-join
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "swarm.selector" (dict "root" . "component" "hive-join") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "swarm.labels" . | nindent 8 }}
+        app.kubernetes.io/component: hive-join
+    spec:
+      {{- include "swarm.podSecurity" . | nindent 6 }}
+      {{- with $join.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $join.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: hive-join
+          image: {{ include "swarm.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          {{- include "swarm.containerSecurity" . | nindent 10 }}
+          command:
+            - agentihooks
+            - hive
+            - serve
+            - --host=0.0.0.0
+            - --port={{ $join.port }}
+            - --redis-url={{ $join.memberRedisUrl }}
+            - --tls-cert=/tls/tls.crt
+            - --tls-key=/tls/tls.key
+          env:
+            - name: AGENTIHOOKS_DEPLOYMENT
+              value: {{ .Values.deployment | quote }}
+            {{- if $join.redisSecret.name }}
+            - name: AGENTIHOOKS_SWARM_REDIS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $join.redisSecret.name }}
+                  key: {{ required "hive.join.redisSecret.key names the key holding the administrator Redis URL" $join.redisSecret.key }}
+            {{- else }}
+            {{- include "swarm.redisEnv" (dict "Values" .Values "Chart" .Chart "Release" .Release "role" "hive-join") | nindent 12 }}
+            {{- end }}
+            {{- if $join.serveLedgerCa }}
+            {{- include "swarm.ledgerCa" . | nindent 12 }}
+            {{- end }}
+            {{- if $signer.secretName }}
+            - name: AGENTIHOOKS_NATS_SIGNER
+              value: file:/nats-signer
+            - name: AGENTIHOOKS_NATS_TRUSTED_OPERATOR
+              value: {{ $signer.trustedOperator | quote }}
+            {{- end }}
+          ports:
+            - name: join
+              containerPort: {{ $join.port }}
+          readinessProbe:
+            tcpSocket:
+              port: join
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: join
+            initialDelaySeconds: 20
+            periodSeconds: 20
+          resources:
+            {{- toYaml $join.resources | nindent 12 }}
+          volumeMounts:
+            - name: tls
+              mountPath: /tls
+              readOnly: true
+            {{- if $signer.secretName }}
+            - name: nats-signer
+              mountPath: /nats-signer
+              readOnly: true
+            {{- end }}
+      volumes:
+        - name: tls
+          secret: {secretName: {{ $join.tlsSecretName | quote }}}
+        {{- with $signer.secretName }}
+        - name: nats-signer
+          secret: {secretName: {{ . | quote }}}
+        {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $fullname }}-hive-join
+  labels:
+    {{- include "swarm.labels" . | nindent 4 }}
+    app.kubernetes.io/component: hive-join
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "swarm.selector" (dict "root" . "component" "hive-join") | nindent 4 }}
+  ports:
+    - name: join
+      port: {{ $join.port }}
+      targetPort: join
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $fullname }}-hive-join
+  labels:
+    {{- include "swarm.labels" . | nindent 4 }}
+    app.kubernetes.io/component: hive-join
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "swarm.selector" (dict "root" . "component" "hive-join") | nindent 6 }}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        {{- toYaml $join.ingressFrom | nindent 8 }}
+      ports:
+        - port: join
+{{- end }}

@@ -1,0 +1,6 @@
+{
+  "scripts/targets/codex_hook_trust.py:scripts.targets.codex_hook_trust.x_hook_hash__mutmut_65:9042a05d15b16549cec52b9f5c605b74030f4ed92243e8dd063cfbfa4865d91a": {
+    "reader": "standards_reader",
+    "reason": "Equivalent: CPython json tests ensure_ascii only for truthiness (JSONEncoder encode and iterencode, and the dumps fast path guard), so None and False produce identical bytes for every input; the non-ASCII statusMessage fixture still kills a True mutant."
+  }
+}

@@ -29,11 +29,51 @@ app.kubernetes.io/component: {{ .component }}
 {{- end -}}
 
 {{- define "swarm.ledgerUrl" -}}
-{{- printf "http://%s-ledger:%v" (include "swarm.fullname" .) .Values.ledger.port -}}
+{{- printf "%s://%s-ledger:%v" (ternary "https" "http" (not (empty .Values.ledger.tls.secretName))) (include "swarm.fullname" .) .Values.ledger.port -}}
+{{- end -}}
+
+{{- define "swarm.busUrl" -}}
+{{- if .Values.hub.bus.url -}}
+{{- .Values.hub.bus.url -}}
+{{- else if .Values.nats.enabled -}}
+{{- $name := default "nats" .Values.nats.nameOverride -}}
+{{- $service := ternary .Release.Name (printf "%s-%s" .Release.Name $name) (contains $name .Release.Name) -}}
+{{- printf "nats://%s:4222" (default $service .Values.nats.fullnameOverride | trunc 63 | trimSuffix "-") -}}
+{{- end -}}
+{{- end -}}
+
+{{- define "swarm.ledgerCa" -}}
+{{- with .Values.ledger.tls.secretName }}
+- name: LEDGER_CA_PEM
+  valueFrom:
+    secretKeyRef:
+      name: {{ . | quote }}
+      key: ca.crt
+{{- end }}
 {{- end -}}
 
 {{- define "swarm.redisEnv" -}}
-{{- if .Values.redis.existingSecret.name }}
+{{- $roles := .Values.redis.roles | default dict -}}
+{{- $named := list -}}
+{{- range $role := list "ledger" "controller" "worker" }}
+{{- if (get $roles $role | default dict).name }}
+{{- $named = append $named $role -}}
+{{- end }}
+{{- end }}
+{{- if and $named (ne (len $named) 3) }}
+{{- fail "redis.roles sets every role or none: ledger, controller and worker each name their own Secret" }}
+{{- end }}
+{{- if and $named (ne (toString .role) "hive-join") }}
+{{- $ref := get $roles (required "swarm.redisEnv needs a role when redis.roles is set" .role) }}
+{{- if eq $ref.name .Values.redis.existingSecret.name }}
+{{- fail (printf "redis.roles.%s must not name the administrator Redis Secret %s" .role $ref.name) }}
+{{- end }}
+- name: AGENTIHOOKS_SWARM_REDIS_URL
+  valueFrom:
+    secretKeyRef:
+      name: {{ $ref.name }}
+      key: {{ required (printf "redis.roles.%s.key names the key holding the Redis URL" .role) $ref.key }}
+{{- else if .Values.redis.existingSecret.name }}
 - name: AGENTIHOOKS_SWARM_REDIS_URL
   valueFrom:
     secretKeyRef:
@@ -54,19 +94,36 @@ app.kubernetes.io/component: {{ .component }}
 {{- end -}}
 
 {{- define "swarm.env" -}}
+{{- $role := .role -}}
+{{- with .root -}}
 - name: AGENTIHOOKS_DEPLOYMENT
   value: {{ .Values.deployment | quote }}
 - name: LEDGER_URL
   value: {{ include "swarm.ledgerUrl" . | quote }}
+{{ include "swarm.ledgerCa" . }}
 - name: SWARM_HIVE_ID
   value: {{ .Values.hive.id | default (include "swarm.fullname" .) | quote }}
-{{ include "swarm.redisEnv" . }}
+{{ include "swarm.redisEnv" (dict "Values" .Values "Chart" .Chart "Release" .Release "role" $role) }}
 {{- range .Values.secretEnv }}
 - name: {{ .name }}
   valueFrom:
     secretKeyRef:
       name: {{ .secretName }}
       key: {{ .key }}
+{{- end }}
+{{- end }}
+{{- end -}}
+
+{{- define "swarm.secretKeyEnv" -}}
+{{- range . }}
+- name: {{ .name }}
+  valueFrom:
+    secretKeyRef:
+      name: {{ .secretName }}
+      key: {{ .key }}
+      {{- if .optional }}
+      optional: true
+      {{- end }}
 {{- end }}
 {{- end -}}
 
@@ -89,6 +146,10 @@ envFrom:
 
 {{- define "swarm.podSecurity" -}}
 automountServiceAccountToken: false
+{{ include "swarm.podSecurityContext" . }}
+{{- end -}}
+
+{{- define "swarm.podSecurityContext" -}}
 securityContext:
   runAsNonRoot: true
   runAsUser: 10001
@@ -110,5 +171,19 @@ exec:
   command:
     - python
     - -c
+    {{- if .Values.ledger.tls.secretName }}
+    - import os, ssl, urllib.request; c = ssl.create_default_context(cadata=os.environ["LEDGER_CA_PEM"]); c.check_hostname = False; urllib.request.urlopen("https://127.0.0.1:" + os.environ["LEDGER_PORT"] + "/healthz", timeout=2, context=c).read()
+    {{- else }}
     - import os, urllib.request; urllib.request.urlopen("http://127.0.0.1:" + os.environ["LEDGER_PORT"] + "/healthz", timeout=2).read()
+    {{- end }}
 {{- end -}}
+
+{{- define "swarm.homeSource" -}}
+{{- if .hostPath -}}
+hostPath:{{ .hostPath.path }}
+{{- else if .persistentVolumeClaim -}}
+claim:{{ .persistentVolumeClaim.claimName }}
+{{- else -}}
+{{ toJson . }}
+{{- end -}}
+{{- end }}

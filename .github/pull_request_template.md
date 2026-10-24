@@ -16,6 +16,6 @@ Brief description of what this PR does.
 ## Checklist
 
 - [ ] README updated (if adding new category/tool)
-- [ ] CHANGELOG entry added under `[Unreleased]`
+- [ ] Changelog fragment added as `changelog.d/<branch>.md`
 - [ ] `_registry.py` updated (if adding new category)
 - [ ] `hooks_list_tools` in `utilities.py` updated (if adding new tools)

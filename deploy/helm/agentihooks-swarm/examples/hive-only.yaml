@@ -1,0 +1,18 @@
+# One release installs one worker hive; its member credential carries one hive id.
+hiveOnly: true
+
+nats:
+  enabled: false
+
+workers:
+  replicas: 1
+  maxAgents: 4
+  image:
+    tag: release
+  credentialSecret:
+    name: hive-invite
+    key: invite
+  githubAuth:
+    mode: token
+    secretName: hive-github
+    tokenKey: token

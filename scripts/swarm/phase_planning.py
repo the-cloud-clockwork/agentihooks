@@ -112,7 +112,7 @@ def _approve(mail, slug, phase, ledger, size):
 def _release_due(phase, doc):
     if not phase.get("release"):
         return False
-    rid = f"release-{phase['id']}"
+    rid = slice_check.RELEASE.format(phase["id"])
     mine = [t for t in doc["tasks"] if t.get("phase") == phase["id"] and not t.get("out_of_scope")]
     return bool(mine) and all(t["id"] != rid and t.get("state") == "done" for t in mine)
 
@@ -121,7 +121,7 @@ def _add_release(slug, phase, ledger):
     pid, title = phase["id"], phase["title"]
     named = f"Release phase {title}"
     task = {
-        "task": f"release-{pid}",
+        "task": slice_check.RELEASE.format(pid),
         "title": "Release this phase" if ledger_comments.problems(named, "item") else named,
         "lane": "eng",
         "kind": "ops",

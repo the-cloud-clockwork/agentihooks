@@ -1,0 +1,72 @@
+name: Retried artifact upload
+description: Upload an artifact of this run, retried in place up to two more times. Every attempt overwrites the name, so a retry replaces a copy an earlier attempt finalized.
+inputs:
+  name:
+    description: Artifact name
+    required: true
+  path:
+    description: Files to upload
+    required: true
+  retention-days:
+    description: Days to keep the artifact
+    required: true
+  include-hidden-files:
+    description: Upload hidden files
+    required: false
+    default: "false"
+  if-no-files-found:
+    description: warn, error or ignore when the path matches nothing
+    required: false
+    default: warn
+runs:
+  using: composite
+  steps:
+    - name: Upload, attempt 1
+      id: first
+      continue-on-error: true
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ inputs.name }}
+        path: ${{ inputs.path }}
+        include-hidden-files: ${{ inputs.include-hidden-files }}
+        if-no-files-found: ${{ inputs.if-no-files-found }}
+        retention-days: ${{ inputs.retention-days }}
+        overwrite: true
+    - name: Wait before attempt 2
+      if: steps.first.outcome == 'failure'
+      shell: bash
+      env:
+        ARTIFACT: ${{ inputs.name }}
+      run: |
+        echo "::warning title=Retried upload::Attempt 1 to upload $ARTIFACT failed; retrying in place."
+        sleep 10
+    - name: Upload, attempt 2
+      id: second
+      if: steps.first.outcome == 'failure'
+      continue-on-error: true
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ inputs.name }}
+        path: ${{ inputs.path }}
+        include-hidden-files: ${{ inputs.include-hidden-files }}
+        if-no-files-found: ${{ inputs.if-no-files-found }}
+        retention-days: ${{ inputs.retention-days }}
+        overwrite: true
+    - name: Wait before attempt 3
+      if: steps.second.outcome == 'failure'
+      shell: bash
+      env:
+        ARTIFACT: ${{ inputs.name }}
+      run: |
+        echo "::warning title=Retried upload::Attempt 2 to upload $ARTIFACT failed; retrying in place."
+        sleep 20
+    - name: Upload, attempt 3
+      if: steps.second.outcome == 'failure'
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ inputs.name }}
+        path: ${{ inputs.path }}
+        include-hidden-files: ${{ inputs.include-hidden-files }}
+        if-no-files-found: ${{ inputs.if-no-files-found }}
+        retention-days: ${{ inputs.retention-days }}
+        overwrite: true

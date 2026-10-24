@@ -1,4 +1,5 @@
 import argparse
+import importlib.util
 import os
 import subprocess
 import sys
@@ -52,10 +53,11 @@ def tests_for(root: Path, names: list[str]) -> list[str]:
 
 
 def plan(root: Path, base: str, grade: Path) -> list[tuple[str, list[str]]]:
+    merge_base = _git(root, "merge-base", base, "HEAD")
     for name in (ALLOWLIST, GRADER):
         target = grade / name
         target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(_git(root, "show", f"{base}:{name}") + "\n")
+        target.write_text(_git(root, "show", f"{merge_base}:{name}") + "\n")
     python = sys.executable
     steps = [
         ("ruff check", [python, "-m", "ruff", "check", *LINTED]),
@@ -83,7 +85,10 @@ def run(root: Path, base: str, execute: Callable[..., subprocess.CompletedProces
         for name, command in plan(root, base, Path(grade)):
             print(f"ci_prepush: {name}")
             sys.stdout.flush()
-            if execute(command, cwd=root, env=env).returncode != 0:
+            if command[1] == "-m" and importlib.util.find_spec(command[2]) is None:
+                print(f"ci_prepush: missing gate tool {command[2]}; interpreter: {command[0]}")
+                failed.append(name)
+            elif execute(command, cwd=root, env=env).returncode != 0:
                 failed.append(name)
     if failed:
         print(f"ci_prepush: {', '.join(failed)} failed; fix them, commit and run again before pushing.")

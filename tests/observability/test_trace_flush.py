@@ -1,4 +1,7 @@
+import contextlib
 import fcntl
+import gc
+import http.client
 import http.server
 import json
 import os
@@ -6,9 +9,11 @@ import subprocess
 import sys
 import threading
 import time
+import warnings
 
 import pytest
 from opentelemetry.proto.collector.trace.v1.trace_service_pb2 import ExportTraceServiceRequest
+from opentelemetry.proto.trace.v1.trace_pb2 import ResourceSpans, ScopeSpans, Span
 
 from hooks.observability import agent_trace, otel, trace_flush
 
@@ -136,7 +141,13 @@ def test_exporter_flushes_during_an_active_turn_and_once_after_the_owner_exits(h
         return True
 
     result = trace_flush.supervise(
-        "session", trace_flush.Budget(15, 5, 3), send, clock, clock.sleep, lambda owner: state["alive"]
+        "session",
+        trace_flush.Budget(15, 5, 3),
+        send,
+        clock,
+        clock.sleep,
+        lambda owner: state["alive"],
+        timer_wait=clock.sleep,
     )
     assert result == "owner exited"
     assert [(at, trigger) for at, trigger, _ in calls] == [
@@ -161,6 +172,7 @@ def test_owner_exit_drains_new_records_with_a_final_trigger(home, tmp_path):
         clock,
         clock.sleep,
         lambda owner: state["alive"],
+        timer_wait=clock.sleep,
     )
     assert calls == [(0, "request:start"), (3, "final")]
 
@@ -178,6 +190,7 @@ def test_failed_export_retries_three_times_per_wake_and_keeps_pending_work(home,
         clock,
         clock.sleep,
         lambda owner: state["alive"],
+        timer_wait=clock.sleep,
     )
     assert calls == [(0, "request:start")] * 3 + [(15, "interval")] * 3 + [(30, "interval")] * 3 + [(40, "final")] * 3
 
@@ -197,6 +210,7 @@ def test_a_request_wakes_the_exporter_before_its_interval(home, tmp_path):
         clock,
         clock.sleep,
         lambda owner: state["alive"],
+        timer_wait=clock.sleep,
     )
     assert calls == [(0, "request:start"), (4, "request:stop")]
 
@@ -215,6 +229,7 @@ def test_requests_do_not_wake_a_failing_exporter_before_its_interval(home, tmp_p
         clock,
         clock.sleep,
         lambda owner: state["alive"],
+        timer_wait=clock.sleep,
     )
     assert calls == [(0, "request:start")] * 3 + [(15, "request:stop")] * 3 + [(20, "final")] * 3
 
@@ -237,9 +252,9 @@ def test_a_resumed_owner_takes_over_the_running_exporter(home, tmp_path):
         owners.append(owner.pid)
         return owner.pid == os.getpid() and clock() < 20
 
-    assert trace_flush.supervise("session", trace_flush.Budget(15, 5, 3), send, clock, clock.sleep, is_alive) == (
-        "owner exited"
-    )
+    assert trace_flush.supervise(
+        "session", trace_flush.Budget(15, 5, 3), send, clock, clock.sleep, is_alive, timer_wait=clock.sleep
+    ) == ("owner exited")
     assert calls == [(0, "final"), (0, "request:start")]
     assert owners[0] == 1 and os.getpid() in owners
     me = {"supervisor_pid": os.getpid(), "supervisor_start": trace_flush.start_time(os.getpid())}
@@ -270,7 +285,13 @@ def test_supervisor_waits_for_a_draining_owner_lock(home, tmp_path):
     clock = Clock()
     clock.hooks.append((10, held.close))
     result = trace_flush.supervise(
-        "session", trace_flush.Budget(15, 5, 3), lambda *a: True, clock, clock.sleep, lambda owner: False
+        "session",
+        trace_flush.Budget(15, 5, 3),
+        lambda *a: True,
+        clock,
+        clock.sleep,
+        lambda owner: False,
+        timer_wait=clock.sleep,
     )
     assert result == "owner exited"
     assert clock() == 10
@@ -283,14 +304,22 @@ def test_codex_transcript_is_resolved_when_the_hook_had_none(home, monkeypatch):
     assert trace_flush._transcript("s", {"target": "claude"}) == ""
 
 
-def test_an_attempt_is_killed_at_its_timeout(tmp_path, monkeypatch, capsys):
+def slow_attempt(tmp_path, monkeypatch):
     slow = tmp_path / "slow"
     slow.write_text("#!/bin/sh\nsleep 30\n")
     slow.chmod(0o755)
     monkeypatch.setattr(trace_flush.sys, "executable", str(slow))
     started = time.monotonic()
-    assert trace_flush.attempt("s", "/t", 0.5, "interval") is False
-    assert time.monotonic() - started < 5
+    return trace_flush.attempt("s", "/t", 0.5, "interval"), time.monotonic() - started
+
+
+@pytest.mark.wall_clock
+def test_an_attempt_is_killed_within_seconds_of_its_timeout(tmp_path, monkeypatch):
+    assert slow_attempt(tmp_path, monkeypatch)[1] < 5
+
+
+def test_an_attempt_is_killed_at_its_timeout(tmp_path, monkeypatch, capsys):
+    assert slow_attempt(tmp_path, monkeypatch)[0] is False
     assert capsys.readouterr().err == "trace_flush s: attempt timed out after 0.5s\n"
     quick = tmp_path / "quick"
     quick.write_text(f'#!/bin/sh\ntest "${trace_flush.TRIGGER_ENV}" = interval\n')
@@ -303,17 +332,19 @@ class Receiver(http.server.BaseHTTPRequestHandler):
     spans: list = []
     posts = 0
     delay = 0.0
+    release = threading.Event()
 
     def do_POST(self):
+        spans = type(self).spans
         body = self.rfile.read(int(self.headers["Content-Length"]))
         type(self).posts += 1
-        time.sleep(type(self).delay)
+        type(self).release.wait(type(self).delay)
         request = ExportTraceServiceRequest.FromString(body)
         for resource in request.resource_spans:
             for scope in resource.scope_spans:
                 for span in scope.spans:
                     attributes = {a.key: a.value for a in span.attributes}
-                    type(self).spans.append((span.name, attributes))
+                    spans.append((span.name, attributes))
         self.send_response(200)
         self.end_headers()
 
@@ -321,13 +352,44 @@ class Receiver(http.server.BaseHTTPRequestHandler):
         pass
 
 
-@pytest.fixture
-def receiver():
+@contextlib.contextmanager
+def _serving():
     Receiver.spans, Receiver.posts, Receiver.delay = [], 0, 0.0
+    Receiver.release = threading.Event()
     server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Receiver)
     threading.Thread(target=server.serve_forever, daemon=True).start()
-    yield server
-    server.shutdown()
+    try:
+        yield server
+    finally:
+        Receiver.release.set()
+        server.shutdown()
+        server.server_close()
+
+
+@pytest.fixture
+def receiver():
+    with _serving() as server:
+        yield server
+
+
+def test_a_slow_request_in_flight_at_teardown_leaves_no_unclosed_socket():
+    before = set(threading.enumerate())
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        with _serving() as server:
+            Receiver.delay = 30.0
+            port = server.server_port
+            connection = http.client.HTTPConnection("127.0.0.1", port, timeout=15)
+            connection.request("POST", "/", ExportTraceServiceRequest().SerializeToString())
+            assert _wait(lambda: Receiver.posts == 1, 5), "the request never reached the receiver"
+        del server
+        for thread in set(threading.enumerate()) - before:
+            thread.join(15)
+            assert not thread.is_alive()
+        connection.getresponse().read()
+        gc.collect()
+    leaked = [str(w.message) for w in caught if issubclass(w.category, ResourceWarning)]
+    assert [m for m in leaked if f"laddr=('127.0.0.1', {port})" in m] == []
 
 
 def _records(stamp="2026-10-07T10:00:00Z"):
@@ -370,7 +432,12 @@ def _supervise_in_background(session):
     result = {}
     thread = threading.Thread(
         target=lambda: result.update(
-            outcome=trace_flush.supervise(session, trace_flush.Budget(1, 5, 3), sleep=lambda s: time.sleep(0.1))
+            outcome=trace_flush.supervise(
+                session,
+                trace_flush.Budget(1, 5, 3),
+                sleep=lambda s: time.sleep(0.1),
+                timer_wait=lambda s: time.sleep(0.1),
+            )
         ),
         daemon=True,
     )
@@ -385,6 +452,23 @@ def _wait(predicate, seconds):
             return True
         time.sleep(0.1)
     return False
+
+
+def test_a_late_post_lands_in_the_spans_current_when_it_arrived(receiver):
+    Receiver.delay = 5.0
+    body = ExportTraceServiceRequest(
+        resource_spans=[ResourceSpans(scope_spans=[ScopeSpans(spans=[Span(name="late")])])]
+    ).SerializeToString()
+    earlier = Receiver.spans
+    connection = http.client.HTTPConnection("127.0.0.1", receiver.server_port, timeout=15)
+    post = threading.Thread(target=lambda: (connection.request("POST", "/", body), connection.getresponse().read()))
+    post.start()
+    assert _wait(lambda: Receiver.posts == 1, 5), "late POST never reached the receiver"
+    Receiver.spans = []
+    post.join(15)
+    connection.close()
+    assert Receiver.spans == []
+    assert earlier == [("late", {})]
 
 
 def test_live_exporter_ships_an_open_turn_and_the_rest_after_the_owner_is_killed(live_export, tmp_path):
@@ -412,16 +496,24 @@ def test_live_exporter_ships_an_open_turn_and_the_rest_after_the_owner_is_killed
     assert final["agentihooks.export.trigger"].string_value == "final"
 
 
-def test_slow_endpoint_is_bounded_per_attempt_and_retried_later(live_export, tmp_path):
+def slow_drain(live_export, tmp_path):
     Receiver.delay = 30.0
     transcript = tmp_path / "t.jsonl"
     transcript.write_text("".join(json.dumps(r) + "\n" for r in _records()))
     _request("session", transcript, owner=live_export.pid)
     started = time.monotonic()
-    assert (
-        trace_flush._drain("session", str(transcript), trace_flush.Budget(1, 8, 1), trace_flush.attempt, "x") is False
-    )
-    assert time.monotonic() - started < 8 + 4
+    drained = trace_flush._drain("session", str(transcript), trace_flush.Budget(1, 8, 1), trace_flush.attempt, "x")
+    return transcript, drained, time.monotonic() - started
+
+
+@pytest.mark.wall_clock
+def test_slow_endpoint_is_bounded_per_attempt(live_export, tmp_path):
+    assert slow_drain(live_export, tmp_path)[2] < 8 + 4
+
+
+def test_slow_endpoint_is_retried_later(live_export, tmp_path):
+    transcript, drained, _ = slow_drain(live_export, tmp_path)
+    assert drained is False
     assert Receiver.posts, "the attempt never reached the endpoint"
     assert agent_trace._cursor("session")["pending"]
     Receiver.delay = 0.0
@@ -550,8 +642,13 @@ def test_flush_once_reports_pending_work(monkeypatch, home):
 def test_stopped_codex_cursor_replays_all_pages_once(home, monkeypatch):
     from tests.observability.test_trace_paging import Receiver, _codex, _line
 
+    monkeypatch.setattr(trace_flush.time, "monotonic", Clock())
     transcript = home / "rollout.jsonl"
     transcript.write_text("".join(_line(record) for record in _codex(6, 2)))
+    monkeypatch.setattr("hooks.config.LANGFUSE_FIELD_MAX_CHARS", 500)
+    monkeypatch.setattr(
+        agent_trace, "identity_from_env", lambda session: agent_trace.Identity(session_id=session, account="test")
+    )
     receiver = Receiver()
     monkeypatch.setattr(agent_trace, "PENDING_MAX_BYTES", 6000)
     monkeypatch.setattr(otel, "langfuse_exporter", lambda: receiver)
@@ -743,7 +840,9 @@ def _run(session, limits, outcome, clock, state):
         calls.append((clock(), trigger, timeout, path))
         return outcome
 
-    result = trace_flush.supervise(session, limits, send, clock, clock.sleep, lambda owner: state["alive"])
+    result = trace_flush.supervise(
+        session, limits, send, clock, clock.sleep, lambda owner: state["alive"], timer_wait=clock.sleep
+    )
     return result, calls
 
 
@@ -822,7 +921,15 @@ def test_the_owner_record_names_the_running_exporter_until_it_exits(home, tmp_pa
         seen.append(json.loads(trace_flush.owner_path("session").read_text()))
         return True
 
-    trace_flush.supervise("session", trace_flush.Budget(15, 5, 3), send, clock, clock.sleep, lambda o: state["alive"])
+    trace_flush.supervise(
+        "session",
+        trace_flush.Budget(15, 5, 3),
+        send,
+        clock,
+        clock.sleep,
+        lambda o: state["alive"],
+        timer_wait=clock.sleep,
+    )
     assert seen == [me, me]
     assert not trace_flush.owner_path("session").exists()
 
@@ -831,9 +938,9 @@ def test_exporters_create_their_state_folder_and_run_one_after_another(tmp_path,
     monkeypatch.setattr(agent_trace, "CURSOR_DIR", tmp_path / "a" / "b")
     for _ in range(2):
         clock = Clock()
-        assert trace_flush.supervise("s", trace_flush.Budget(15, 5, 3), None, clock, clock.sleep, lambda o: False) == (
-            "owner exited"
-        )
+        assert trace_flush.supervise(
+            "s", trace_flush.Budget(15, 5, 3), None, clock, clock.sleep, lambda o: False, timer_wait=clock.sleep
+        ) == ("owner exited")
 
 
 def test_root_reports_the_trigger_and_unwritten_events(monkeypatch, home):
@@ -872,7 +979,13 @@ def test_the_exporter_checks_the_owner_named_in_the_request(home, tmp_path):
     owners = []
     clock = Clock()
     trace_flush.supervise(
-        "session", trace_flush.Budget(15, 5, 3), lambda *a: True, clock, clock.sleep, lambda o: owners.append(o)
+        "session",
+        trace_flush.Budget(15, 5, 3),
+        lambda *a: True,
+        clock,
+        clock.sleep,
+        lambda o: owners.append(o),
+        timer_wait=clock.sleep,
     )
     assert owners[0] == trace_flush.Owner(os.getpid(), trace_flush.start_time(os.getpid()))
 
@@ -900,5 +1013,207 @@ def test_a_missing_owner_record_does_not_stop_the_final_drain(home, tmp_path):
         trace_flush.owner_path("session").unlink()
         return True
 
-    result = trace_flush.supervise("session", trace_flush.Budget(15, 5, 3), send, clock, clock.sleep, lambda o: False)
+    result = trace_flush.supervise(
+        "session", trace_flush.Budget(15, 5, 3), send, clock, clock.sleep, lambda o: False, timer_wait=clock.sleep
+    )
     assert result == "owner exited"
+
+
+def test_default_supervisor_wait_uses_scheduler_signals(home, tmp_path, monkeypatch):
+    from unittest.mock import MagicMock
+
+    from scripts.scheduler import process_timer
+
+    transcript = tmp_path / "transcript.jsonl"
+    _grow(transcript)
+    _request("session", transcript)
+    clock, state = Clock(), {"alive": True}
+    clock.hooks.append((1, lambda: state.update(alive=False)))
+    timer = MagicMock()
+    timer.return_value.__enter__.return_value.wait.side_effect = lambda timeout=None: clock.sleep(trace_flush.POLL_SEC)
+    monkeypatch.setattr(process_timer, "Timer", timer)
+    assert (
+        trace_flush.supervise(
+            "session",
+            trace_flush.Budget(15, 5, 3),
+            lambda *args: True,
+            clock,
+            clock.sleep,
+            lambda owner: state["alive"],
+        )
+        == "owner exited"
+    )
+    timer.assert_called_once_with(trace_flush.POLL_SEC, redis=None)
+
+
+@pytest.mark.parametrize("failure", ["timeout", "connection"])
+def test_exporter_reconnects_a_lost_scheduler_and_drains_source_backlog(home, tmp_path, monkeypatch, failure):
+    from unittest.mock import Mock
+
+    from redis.exceptions import ConnectionError, TimeoutError
+
+    from scripts.scheduler import process_timer
+
+    transcript = tmp_path / "transcript.jsonl"
+    _grow(transcript)
+    _request("session", transcript)
+    clock, state, accepted = Clock(), {"alive": True}, []
+    clock.hooks += [(1, lambda: _grow(transcript)), (20, lambda: _grow(transcript))]
+    clock.hooks += [(40, lambda: state.update(alive=False))]
+    clients = []
+
+    def connect():
+        client = Mock()
+        clients.append(client)
+
+        def pop(key, timeout):
+            assert key.startswith("wake:")
+            assert timeout == process_timer.RECHECK_S
+            clock.sleep(trace_flush.POLL_SEC)
+            if len(clients) == 1:
+                error = TimeoutError if failure == "timeout" else ConnectionError
+                raise error("scheduler did not answer")
+            return key, "delivered"
+
+        client.blpop.side_effect = pop
+        return client
+
+    scheduler = Mock()
+    scheduler.key.side_effect = lambda key: key
+    scheduler.timer.return_value.scheduler = scheduler
+    monkeypatch.setattr(process_timer, "blocking_client", connect)
+    monkeypatch.setattr(process_timer, "Scheduler", Mock(return_value=scheduler))
+    monkeypatch.setattr(process_timer.service, "ensure_running", lambda: None)
+
+    def send(session, path, timeout, trigger):
+        assert session == "session"
+        assert path == str(transcript)
+        accepted.append(transcript.stat().st_size)
+        return True
+
+    assert (
+        trace_flush.supervise(
+            "session", trace_flush.Budget(15, 5, 3), send, clock, clock.sleep, lambda owner: state["alive"]
+        )
+        == "owner exited"
+    )
+    assert len(clients) > 1
+    assert len(accepted) == 3
+    assert accepted[0] < accepted[1] < accepted[2] == transcript.stat().st_size
+    for client in clients:
+        client.close.assert_called_once_with()
+    assert scheduler.retire.call_count == len(clients)
+
+
+@pytest.mark.parametrize("failure", ["timeout", "connection"])
+def test_scheduler_connection_failures_back_off_before_retrying(monkeypatch, failure):
+    from unittest.mock import Mock, call
+
+    from redis.exceptions import ConnectionError, TimeoutError
+
+    clock = Clock()
+    error = TimeoutError if failure == "timeout" else ConnectionError
+    wait = Mock(side_effect=[error("offline"), error("offline"), None])
+    monkeypatch.setattr(trace_flush, "timer_wait", wait)
+    monkeypatch.setattr(trace_flush.time, "sleep", clock.sleep)
+    for _ in range(3):
+        trace_flush.scheduled_wait(trace_flush.POLL_SEC)
+    assert clock.now == 2
+    assert wait.call_args_list == [call(trace_flush.POLL_SEC)] * 3
+
+
+def test_scheduler_wait_preserves_interruption(monkeypatch):
+    from unittest.mock import Mock
+
+    wait = Mock(side_effect=KeyboardInterrupt)
+    sleep = Mock()
+    monkeypatch.setattr(trace_flush, "timer_wait", wait)
+    monkeypatch.setattr(trace_flush.time, "sleep", sleep)
+    with pytest.raises(KeyboardInterrupt):
+        trace_flush.scheduled_wait(trace_flush.POLL_SEC)
+    wait.assert_called_once_with(trace_flush.POLL_SEC)
+    sleep.assert_not_called()
+
+
+IDENTITY = {
+    "AGENTIHOOKS_SWARM": "watched",
+    "AGENTIHOOKS_AGENT_NAME": "engineer@owner",
+    "AGENTIHOOKS_SWARM_TASK": "t1",
+    "AGENTIHOOKS_SWARM_LANE": "eng",
+    "AGENTIHOOKS_PROFILE": "engineer",
+    "AGENTIHOOKS_PROFILE_REPORT": "/run/owner.json",
+    "AGENTIHOOKS_TARGET": "codex",
+    "AGENTIHOOKS_PREDECESSOR_SESSION": "before",
+}
+
+
+def _identity_seen(tmp_path, monkeypatch, session):
+    seen = tmp_path / "seen"
+    stub = tmp_path / "stub"
+    keys = " ".join(f'"{key}=${{{key}-unset}}"' for key in IDENTITY)
+    stub.write_text(f"#!/bin/sh\nprintf '%s\\n' {keys} > {seen}\n")
+    stub.chmod(0o755)
+    monkeypatch.setattr(trace_flush.sys, "executable", str(stub))
+    for key in IDENTITY:
+        monkeypatch.setenv(key, f"caller-{key}")
+    assert trace_flush.attempt(session, "/t", 5, "recovery") is True
+    return dict(line.split("=", 1) for line in seen.read_text().splitlines())
+
+
+def test_an_attempt_exports_with_the_identity_its_session_recorded(home, enabled, tmp_path, monkeypatch):
+    for key, value in IDENTITY.items():
+        monkeypatch.setenv(key, value)
+    trace_flush.request("owned", "/t", "stop", owner_pid=os.getpid(), spawn=lambda s: None)
+    assert _identity_seen(tmp_path, monkeypatch, "owned") == IDENTITY
+
+
+def test_an_attempt_drops_the_callers_identity_for_a_session_that_recorded_none(home, tmp_path, monkeypatch):
+    _request("legacy", "/t")
+    assert _identity_seen(tmp_path, monkeypatch, "legacy") == dict.fromkeys(IDENTITY, "unset")
+
+
+def _account_names_seen(tmp_path, monkeypatch, owner):
+    for name in [name for name in os.environ if name.startswith("AH_")]:
+        monkeypatch.delenv(name)
+    for name in owner:
+        monkeypatch.setenv(name, "owner-value")
+    trace_flush.request("owned", "/t", "stop", owner_pid=os.getpid(), spawn=lambda s: None)
+    for name in owner:
+        monkeypatch.delenv(name)
+    monkeypatch.setenv("AH_CC_TOKEN_caller", "caller-value")
+    monkeypatch.setenv("AH_ROUTE_INTERACTIVE_caller", "1")
+    seen = tmp_path / "seen"
+    stub = tmp_path / "stub"
+    stub.write_text(f"#!/bin/sh\nenv | cut -d= -f1 | grep '^AH_' | sort > {seen}\n")
+    stub.chmod(0o755)
+    monkeypatch.setattr(trace_flush.sys, "executable", str(stub))
+    trace_flush.attempt("owned", "/t", 5, "recovery")
+    return seen.read_text().split()
+
+
+@pytest.mark.parametrize(
+    ("owner", "seen"),
+    [
+        (["AH_CC_TOKEN_owner"], ["AH_ROUTE_INTERACTIVE_owner"]),
+        (["AH_ROUTE_API"], ["AH_ROUTE_API"]),
+        ([], []),
+    ],
+)
+def test_an_attempt_carries_the_sessions_account_never_the_callers(home, enabled, tmp_path, monkeypatch, owner, seen):
+    assert _account_names_seen(tmp_path, monkeypatch, owner) == seen
+    recorded = json.loads(trace_flush.request_path("owned").read_text())["identity"]
+    assert {name: value for name, value in recorded.items() if name.startswith("AH_")} == dict.fromkeys(seen, "1")
+
+
+def test_an_attempt_applies_only_identity_names_from_the_request(home, tmp_path, monkeypatch):
+    seen = tmp_path / "seen"
+    stub = tmp_path / "stub"
+    stub.write_text(f'#!/bin/sh\nprintf "%s|%s" "$AGENTIHOOKS_SWARM" "$PATH" > {seen}\n')
+    stub.chmod(0o755)
+    monkeypatch.setattr(trace_flush.sys, "executable", str(stub))
+    trace_flush._write(
+        trace_flush.request_path("tampered"),
+        {"identity": {"AGENTIHOOKS_SWARM": "watched", "PATH": "/nowhere"}},
+    )
+    trace_flush.attempt("tampered", "/t", 5, "recovery")
+    assert seen.read_text() == f"watched|{os.environ['PATH']}"

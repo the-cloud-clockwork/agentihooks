@@ -1,0 +1,6 @@
+{
+  "scripts/doctor/traces.py:scripts.doctor.traces.x__uncovered_ms__mutmut_16:5df3a476addc753faea5a70a7e575ea6ba29851fd5a78eb8704827df5b87c8e9": {
+    "reader": "standards-reader",
+    "reason": "Equivalent: when right equals left, the mutant adds left minus cursor to uncovered and advances cursor to left. Their contributions to uncovered plus end minus cursor cancel exactly. If left exceeds cursor it equals the current sorted wait start, so later waits cannot cover that prefix; if left equals cursor neither value changes. The independently reviewed comparison changes no reported duration."
+  }
+}

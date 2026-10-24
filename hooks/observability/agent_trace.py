@@ -120,8 +120,11 @@ def _blocks(entry: dict) -> list:
 
 
 def _is_prompt(entry: dict) -> bool:
-    if entry.get("type") != "user" or entry.get("isMeta"):
+    if entry.get("type") != "user":
         return False
+    if entry.get("isMeta"):
+        origin = entry.get("origin")
+        return isinstance(origin, dict) and origin.get("kind") == "channel" and origin.get("server") == "inbox"
     text = _text(_blocks(entry))
     if (
         entry.get("uuid", "").startswith("codex-")
@@ -597,6 +600,9 @@ def _stage_source(state: dict, transcript_path: str) -> None:
     legacy = "legacy_turns" in state and not merged
     point = _resume_point(state, transcript_path)
     position, count, unsupported = point["offset"], point["records"], point["unsupported"]
+    revisions = state.setdefault("source_revisions", {})
+    staged_bytes = 0
+    state.pop("deferred_source", None)
     size = _pending_bytes(state, merged, state["pending"])
     waiting = bool(_waiting(state, merged))
     empty = not state["pending"]
@@ -606,6 +612,13 @@ def _stage_source(state: dict, transcript_path: str) -> None:
             unsupported, position = unsupported + 1, end
             continue
         key = record_id(record)
+        revision = _record_revisions({key: record})[key]
+        if key in merged and revisions.get(key) == revision:
+            position, count = end, count + 1
+            continue
+        if staged_bytes >= 256 * 1024:
+            state["deferred_source"] = True
+            break
         masked = mask_value(record)
         source_id = str(count) if legacy and record.get("type") == "response_item" else key
         masked["_source_id"] = merged.get(key, {}).get("_source_id", source_id)
@@ -617,6 +630,8 @@ def _stage_source(state: dict, transcript_path: str) -> None:
                 break
             size, empty, waiting = size + weight, False, True
             merged[key] = masked
+            staged_bytes += end - position
+        revisions[key] = revision
         position, count = end, count + 1
     state["records"] = merged
     state["unsupported_records"] = unsupported
@@ -955,6 +970,9 @@ def _page_accepted(session_id: str, state: dict) -> None:
     state["records"] = {keys[index]: values[index] for index in kept}
     for name in ("accepted_records", "pending_records"):
         state[name] = {key: value for key, value in state[name].items() if key in state["records"]}
+    state["source_revisions"] = {
+        key: value for key, value in state["source_revisions"].items() if key in state["records"]
+    }
     state["paged"] = target
 
 

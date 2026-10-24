@@ -1,10 +1,12 @@
 import { $, h, headCount, newId, noticeTime } from "./dom.js";
 import { doc, queue } from "./sync.js";
+import { hiddenDone } from "./state.js";
 import { verdictButton } from "./render.js";
 import { jumpTo } from "./outline.js";
 import { foldSaved } from "./folds.js";
 import { showChat } from "./chat.js";
 import { firstPage, moreButton, wanted } from "./pages.js";
+import { viewCount, viewVisible } from "./frozen_view.js";
 
 export function anchorPanel(panel, icon) {
   panel.style.setProperty("--anchor-top", `${icon.getBoundingClientRect().top}px`);
@@ -22,12 +24,13 @@ function prioritySubject(item) {
   const [field, noun] = PRIORITY_KINDS[list];
   const found = doc[list].find((i) => i.id === id && !i.deleted);
   const label = field === "title" ? id : noun;
-  return found ? { label, title: found[field] } : { label, title: `This ${noun} was removed`, gone: true };
+  if (found) return { label, title: found[field] };
+  return hiddenDone(doc, list).has(id) ? { label, title: `This ${noun} is done` } : { label, title: `This ${noun} was removed`, gone: true };
 }
 
 export function renderPriorities() {
-  const list = doc.priorities;
-  $("prio-count").textContent = headCount([[list.length]]);
+  const list = doc.priorities.filter((p) => viewVisible(p.item));
+  $("prio-count").textContent = headCount([[list.length]]) + viewCount("priorities", doc.priorities);
   $("tab-ledger").textContent = list.length ? `Ledger · ${list.length}` : "Ledger";
   if (list.length && typeof foldSaved()["prio-box"] !== "boolean") $("prio-box").open = true;
   document.querySelector(".prio-head").hidden = !list.length;
@@ -42,7 +45,7 @@ export function renderPriorities() {
       verdictButton(p.item, "approved", "approve", "Approve"),
       h("button", { class: "link danger", type: "button", text: "Clear", on: { click: () => clearPriority(p.id) } }));
   }), moreButton("priorities", list.length, "more priorities", renderPriorities) || "");
-  if (!list.length) $("priorities").append(h("li", { class: "empty", text: "Nothing waits on you." }));
+  if (!list.length) $("priorities").append(h("li", { class: "empty", text: doc.priorities.length ? "All priorities are hidden." : "Nothing waits on you." }));
 }
 
 function jumpToNotice(ev, item) {
@@ -128,3 +131,26 @@ export function showNotifications(open) {
   renderNotifications();
   if (open) anchorPanel($("notif"), $("bell"));
 }
+export function statKey(label) {
+  return label.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+}
+
+export function statGrip(label) {
+  return h("button", { type: "button", class: "stat-grip", "aria-label": `Move ${label}`,
+    "data-tip": "Drag to reorder Stats, or use the up and down arrow keys. Every browser keeps the order." });
+}
+
+function measuredAge(top) {
+  const minutes = /^(\d+) minutes? ago$/.exec(top.measured || "");
+  return minutes ? `${minutes[1]}m ago` : "never";
+}
+
+export function bottleneckStat(top) {
+  return h("div", { class: "stat top-bottleneck", "data-stat": statKey("Top bottleneck") },
+    h("dt", {}, statGrip("Top bottleneck"), top ? `Top bottleneck · ${measuredAge(top)}` : "Top bottleneck"),
+    h("dd", {}, h("ul", { class: "bottleneck-list" }, h("li", { class: "bottleneck-stage", text: top ? top.label || "none" : "unavailable" }),
+      h("li", { text: `Trend ${top && top.trend || "unknown"}` }),
+      h("li", { text: `Last action ${top && top.last_action || "none recorded"}` }),
+      ...((top && top.waits) || []).map((text) => h("li", { class: "bottleneck-wait", text })))));
+}
+

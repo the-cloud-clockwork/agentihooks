@@ -51,7 +51,8 @@ _STANDARD_PATTERNS: list[_Pattern] = [
     _Pattern(
         "private_key",
         re.compile(
-            r"-----BEGIN\s+(RSA|EC|OPENSSH|PGP)\s+PRIVATE KEY-----(?:.*?-----END\s+\1\s+PRIVATE KEY-----|.*)", re.DOTALL
+            r"-----BEGIN\s+((?:[A-Z0-9]+\s+)?)PRIVATE KEY-----(?:.*?-----END\s+\1PRIVATE KEY-----|.*)",
+            re.DOTALL,
         ),
     ),
     _Pattern(
@@ -76,6 +77,14 @@ _STANDARD_PATTERNS: list[_Pattern] = [
 ]
 
 _STRICT_PATTERNS: list[_Pattern] = [
+    _Pattern(
+        "nested_secret",
+        re.compile(
+            r"""(?:PASSWORD|PASSWD|SECRET|API_KEY|PRIVATE_KEY|ACCESS_TOKEN)["']\s*:\s*\{[^{}]*"""
+            r"""["'](?:VALUE|PASSWORD|PASSWD|TOKEN|SECRET)["']\s*:\s*["'][^\s"'$<{]{8,}""",
+            re.IGNORECASE,
+        ),
+    ),
     _Pattern(
         "slack_token",
         re.compile(r"xox[bpors]-[A-Za-z0-9\-]{10,}"),

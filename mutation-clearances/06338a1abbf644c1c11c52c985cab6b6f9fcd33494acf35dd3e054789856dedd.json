@@ -1,0 +1,6 @@
+{
+  "scripts/init_agent.py:scripts.init_agent.x__parser__mutmut_16:57fdb176405325d760ba66d59b101255d294977b117f393fda588a18a73650c6": {
+    "reader": "Standards reader for cxc2",
+    "reason": "Only the --codex-transport help text is uppercased, shown only by --help and read by no program or test."
+  }
+}

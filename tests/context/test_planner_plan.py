@@ -3,7 +3,7 @@ import json
 import pytest
 
 import hooks.hook_manager as hm
-from hooks.context import planner_plan
+from hooks.context import operator_mode, planner_plan
 from hooks.targets import emitter
 
 PLAN = {"plan": "1. Slice the phase.", "planFilePath": "/home/u/.claude/plans/p.md"}
@@ -87,6 +87,24 @@ def test_pre_tool_use_leaves_the_planner_plan_exit_to_the_permission_request(
 
 
 @pytest.mark.parametrize(("lane", "tool"), [("eng", "ExitPlanMode"), ("plan", "Bash")])
-def test_anything_else_still_gets_the_pane_prompt(forced_claude, monkeypatch, capsys, tmp_path, lane, tool):
+def test_non_swarm_sessions_get_the_pane_prompt_after_operator_on(
+    forced_claude, monkeypatch, capsys, tmp_path, lane, tool
+):
+    import fakeredis
+
+    redis = fakeredis.FakeRedis(decode_responses=True)
+    monkeypatch.setattr("scripts.swarm.store.redis_client", lambda: redis)
+    monkeypatch.setattr("scripts.scheduler.service.ensure_running", lambda: True)
     _planner(monkeypatch, lane)
+    monkeypatch.delenv("AGENTIHOOKS_SWARM")
+    operator_mode.observe("sid-planner-plan", "operator on", True, now=100)
     assert _hook("PermissionRequest", tmp_path, capsys, tool) == {}
+
+
+def test_a_non_swarm_plan_exit_is_denied_until_operator_on(forced_claude, monkeypatch, capsys, tmp_path):
+    _planner(monkeypatch, "eng")
+    monkeypatch.delenv("AGENTIHOOKS_SWARM")
+    assert _hook("PermissionRequest", tmp_path, capsys)["decision"] == {
+        "behavior": "deny",
+        "message": operator_mode.PROMPT_REFUSAL.format(tool="ExitPlanMode"),
+    }

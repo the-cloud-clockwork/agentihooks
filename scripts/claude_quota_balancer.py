@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from hooks.context.account_sessions import API_ACCOUNT
-from scripts import session_bands
+from scripts import operator_env, session_bands
 from scripts.claude_config import claude_home
 from scripts.routing import claude_api, envs, place
 from scripts.routing.envs import subscription_child
@@ -26,6 +26,7 @@ from scripts.routing.slots import API, API_UNBOUNDED, INTERACTIVE, SUBSCRIPTION,
 
 if TYPE_CHECKING:
     from scripts.routing.master_account import MasterAccount
+    from scripts.routing.reservation import Reservation
 
 TOKEN_PREFIX = "AH_CC_TOKEN_"
 HARNESS = "claude"
@@ -104,6 +105,7 @@ class RouteDecision:
 class RowMarks:
     current: str = ""
     master: "MasterAccount | None" = None
+    reserved: str = ""
 
 
 class RoutingError(RuntimeError):
@@ -113,11 +115,12 @@ class RoutingError(RuntimeError):
 
 
 def discover_credentials(environ: Mapping[str, str]) -> list[Credential]:
-    return [
-        Credential(name, environ[name])
-        for name in sorted(environ)
+    names = [
+        name
+        for name in environ
         if name.startswith(TOKEN_PREFIX) and name.removeprefix(TOKEN_PREFIX) not in ("", API_ACCOUNT) and environ[name]
     ]
+    return [Credential(name, environ[name]) for name in operator_env.distinct(environ, names)]
 
 
 def credential_for_slug(credentials: list[Credential], slug: str) -> Credential:
@@ -413,6 +416,15 @@ def probe_credential(
     include_fable: bool = False,
     claude_bin: str = "claude",
 ) -> ProbeResult:
+    if not include_fable:
+        from scripts import claude_usage  # claude_usage imports this module
+
+        try:
+            return claude_usage.probe(
+                credential.account, credential.token, model, timeout=min(timeout, claude_usage.TIMEOUT_S)
+            )
+        except claude_usage.Unreachable:
+            pass
     started = time.monotonic()
     try:
         completed = subprocess.run(
@@ -561,6 +573,22 @@ def _entry_is_fresh(entry: object, now: float, include_fable: bool) -> bool:
     return all(window.resets_at is None or window.resets_at > now for window in windows)
 
 
+def _current_tokens(environ: Mapping[str, str]) -> set[str]:
+    filled = dict(environ)
+    if not operator_env.files(filled):
+        return set()
+    operator_env.fill(filled)
+    return {credential.env_name for credential in discover_credentials(filled)}
+
+
+def _drop_tokenless(modes: dict, probed: set[str], current: set[str]) -> None:
+    if not current:
+        return
+    for data in modes.values():
+        if isinstance(data, dict) and isinstance(data.get("accounts"), dict):
+            data["accounts"] = {name: entry for name, entry in data["accounts"].items() if name in probed | current}
+
+
 def collect_results(
     credentials: list[Credential],
     *,
@@ -617,6 +645,7 @@ def collect_results(
                 )
                 new_entries[credential.env_name] = {"observed_at": observed_at, "result": _result_data(result)}
         modes[mode] = {"accounts": new_entries}
+        _drop_tokenless(modes, probed, _current_tokens(active_env))
         with contextlib.suppress(OSError):
             _write_cache(path, cache)
 
@@ -641,7 +670,9 @@ def _metric(value: float | None) -> float:
     return -1.0 if value is None else value
 
 
-def account_cap(result: ProbeResult, now: float | None = None, include_fable: bool = False) -> int | None:
+def account_cap(
+    result: ProbeResult, now: float | None = None, include_fable: bool = False, ceiling: int | None = None
+) -> int | None:
     """Live sessions the account may hold under the session bands; None without a full reading."""
     if result.provider_status == "rejected":
         return 0
@@ -649,7 +680,8 @@ def account_cap(result: ProbeResult, now: float | None = None, include_fable: bo
     weeks = [result.seven_day, *([result.fable] if include_fable else [])]
     left = [session_bands.left(window.used, window.resets_at, timestamp) for window in weeks]
     five = session_bands.left(result.five_hour.used, result.five_hour.resets_at, timestamp)
-    return session_bands.cap(five, None if None in left else min(left))
+    week = None if None in left else min(left)
+    return session_bands.cap(five, week) if ceiling is None else session_bands.scaled_cap(five, week, ceiling)
 
 
 def is_routable(result: ProbeResult, now: float | None = None, include_fable: bool = False) -> bool:
@@ -680,6 +712,7 @@ class ClaudeTokenSource:
     options: Mapping[str, Any] = field(default_factory=dict)
     sessions: Mapping[str, int] = field(default_factory=dict)
     exclude: frozenset[str] = frozenset()
+    held: "Reservation | None" = None
 
     def results(self, environ: Mapping[str, str], now: float | None = None) -> tuple[list[ProbeResult], str]:
         credentials = discover_credentials(environ)
@@ -689,6 +722,8 @@ class ClaudeTokenSource:
         return collect_results(credentials, **self.options, environ=environ, **timing)
 
     def cap(self, result: ProbeResult, now: float) -> int | None:
+        if self.held is not None and self.held.closes(result.account, result.seven_day.used):
+            return 0
         return account_cap(result, now, bool(self.options.get("include_fable")))
 
     def offer(self, results: list[ProbeResult], now: float) -> list[Slot]:
@@ -734,7 +769,9 @@ def select_credential(
         "cache_file": cache_file,
         "claude_bin": claude_bin,
     }
-    tokens = ClaudeTokenSource(options, live, frozenset(excluded))
+    from scripts.routing import reservation
+
+    tokens = ClaudeTokenSource(options, live, frozenset(excluded), reservation.for_worker(HARNESS, active_env))
     results, source = tokens.results(active_env)
     seats = tokens.offer(results, timestamp)
     reserve = {
@@ -950,6 +987,8 @@ def render_table(
     errors = [f"{result.account}: {result.error}" for result in rank_results(results, include_fable) if result.error]
     if errors:
         lines.extend(["", *errors])
+    if master and marks.reserved:
+        lines.extend(["", f"{master.slug}: {marks.reserved}"])
     known = {result.account for result in results} | {slot.account for slot in api}
     known |= {interactive.slug} if interactive else set()
     unlisted = {account: count for account, count in (sessions or {}).items() if account not in known}

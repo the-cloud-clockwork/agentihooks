@@ -67,6 +67,10 @@ def _feed_path(scope: Namespace) -> Path:
     return _state_dir() / f"{key(scope, 'feed')}.json"
 
 
+def feed_file() -> Path:
+    return _feed_path(namespace())
+
+
 def store_feed(entries: list) -> None:
     from hooks.context.broadcast import _file_lock
 
@@ -118,7 +122,7 @@ def _swarm_overview() -> str:
     if not swarm:
         return ""
     from scripts.swarm_ledger.repository.folder import ledger_folder
-    from scripts.swarm_ledger.repository.sqlite import read_ledger
+    from scripts.swarm_ledger.storage import read_ledger
 
     ledger = read_ledger(ledger_folder(os.environ), swarm, "overview") or {}
     return str(ledger.get("overview", ""))

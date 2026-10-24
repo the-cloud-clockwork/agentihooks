@@ -1,0 +1,6 @@
+{
+  "scripts/events/memory.py:scripts.events.memory.x\u01c1MemoryBus\u01c1for_swarm__mutmut_27:146e344fe064484a9dcf3b1f615cb19fb75951e15d397a5f6b63b25c8be696c6": {
+    "reader": "standards-reader",
+    "reason": "The internal scoped setting is only truth tested. False and None take the same branches and produce identical behavior."
+  }
+}

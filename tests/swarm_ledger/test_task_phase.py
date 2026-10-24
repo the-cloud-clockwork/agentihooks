@@ -17,7 +17,7 @@ def ledger_dir(tmp_path, monkeypatch):
     monkeypatch.setitem(core.EXTENSION_OPS, "task_update", ledger_tasks)
     phases = [{"title": "one", "description": "d"}, {"title": "two", "description": "e"}]
     content = {"title": "Demo", "overview": "o", "sources": [], "phases": phases}
-    html_path, _ = core.paths(SLUG)
+    html_path, _ = legacy_page.paths(SLUG, core)
     html_path.write_text(legacy_page.render(new_ledger.build_doc(content), SLUG, 8765), encoding="utf-8")
     add = {"op": "task_add", "id": "seed", "by": "swarm", "task": "t1", "title": "a", "lane": "eng", "phase": "p1"}
     core.sync(SLUG, ops=[add])

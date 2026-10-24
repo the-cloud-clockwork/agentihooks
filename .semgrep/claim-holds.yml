@@ -1,0 +1,22 @@
+rules:
+  - id: claim-filter-bypasses-claim-hold
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A claim filter asks scripts.swarm.claim_hold.hold why a task is held. The urgent unclaimable health finding
+      reports only the holds that function names, so a phase, freeze or dependency hold applied here drops urgent
+      tasks from the claim without that finding.
+    patterns:
+      - pattern-inside: |
+          def $FILTER(...):
+            ...
+      - metavariable-regex:
+          metavariable: $FILTER
+          regex: .*(ready|claim).*
+      - pattern-either:
+          - pattern: phase_state.admits(...)
+          - pattern: freeze.held(...)
+          - pattern: task_dependencies.ready(...)
+          - pattern: scripts.swarm.phase_state.admits(...)
+          - pattern: scripts.swarm.freeze.held(...)
+          - pattern: scripts.swarm_ledger.task_dependencies.ready(...)

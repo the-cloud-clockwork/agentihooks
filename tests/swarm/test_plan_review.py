@@ -7,7 +7,6 @@ from scripts.swarm import phase_state, plan_review, prompt
 from scripts.swarm.store import AgentRecord
 from tests.swarm.test_phase_planning import DONE_WHEN, SLUG, env, phase, run, set_phase, slice_done, state  # noqa: F401
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
 MASTER = "master@a1b2c3-0001"
 ENGINEER = "engineer@a1b2c3-0002"
 BUTTONS = "use Approve plan or Send back on the phase in the ledger page"

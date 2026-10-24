@@ -56,6 +56,41 @@ def test_validate_leaves_out_group_members_that_ended(monkeypatch, state):
     assert validate(item, [item]) == [item.process]
 
 
+@pytest.mark.parametrize("state", ["Z", "X"])
+def test_validate_refuses_a_dead_target_with_a_live_sibling(monkeypatch, state):
+    item = session()
+    ended = Process(200, 1, 190, 190, 100, state, "claude", item.process.argv)
+    sibling = process(201, ppid=200, pgid=190, sid=190, comm="node", argv=("node",))
+    table = {100: process(100, comm="python"), 200: ended, 201: sibling}
+    monkeypatch.setattr("scripts.terminate_agent.processes", lambda proc=Path("/proc"): table)
+    monkeypatch.setattr("scripts.terminate_agent.os.getpid", lambda: 100)
+    with pytest.raises(ValueError) as error:
+        validate(item, [item], force_shared=True)
+    assert str(error.value) == "target process has ended"
+
+
+@pytest.mark.parametrize("state", ["Z", "X"])
+@pytest.mark.parametrize("registered", [False, True])
+def test_sessions_omit_a_dead_agent_with_a_live_sibling(tmp_path, state, registered):
+    from scripts.terminate_agent import sessions
+
+    ended = Process(200, 1, 190, 190, 100, state, "claude", ("claude",))
+    sibling = process(201, ppid=200, pgid=190, sid=190, argv=("claude", "--name", "sibling"))
+    registry = {"dead": {"pid": 200, "status": "alive"}} if registered else {}
+    with patch("scripts.terminate_agent.processes", return_value={200: ended, 201: sibling}):
+        found = sessions(tmp_path / "proc", registry=registry)
+    assert [item.process.pid for item in found] == [201]
+
+
+def test_sessions_omit_a_registered_non_agent_process(tmp_path):
+    from scripts.terminate_agent import sessions
+
+    item = process(200, comm="python", argv=("python",))
+    registry = {"non-agent": {"pid": 200, "status": "alive"}}
+    with patch("scripts.terminate_agent.processes", return_value={200: item}):
+        assert sessions(tmp_path / "proc", registry=registry) == []
+
+
 @pytest.mark.parametrize("state,alive", [("S", True), ("Z", False), ("X", False)])
 def test_alive_counts_a_zombie_or_a_process_being_reaped_as_ended(monkeypatch, state, alive):
     from scripts.terminate_agent import _alive
@@ -86,6 +121,162 @@ def test_main_terminates_after_validation(monkeypatch, capsys):
     monkeypatch.setattr("scripts.terminate_agent.terminate", lambda selected, members, timeout: True)
     assert main(["uuid-1", "--type", "claude"]) == 0
     assert "result=terminated escalation=SIGKILL" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    ("environ", "recorded"),
+    [
+        (("rig", "engineer@a1b2c3-0001"), [("rig", "engineer@a1b2c3-0001")]),
+        (("", "engineer@a1b2c3-0001"), []),
+        (("rig", ""), []),
+    ],
+)
+def test_main_records_a_deliberate_exit_for_a_terminated_swarm_agent(monkeypatch, capsys, environ, recorded):
+    item = session()
+    seen, order = [], []
+    store = object()
+    monkeypatch.setattr("scripts.terminate_agent.sessions", lambda: [item])
+    monkeypatch.setattr(
+        "scripts.terminate_agent.validate", lambda selected, items, force_shared=False: [selected.process]
+    )
+    monkeypatch.setattr("scripts.terminate_agent.herdr_pane", lambda pid: ("", ""))
+
+    def environ_of(pid, keys, proc=Path("/proc")):
+        assert pid == 200
+        if keys == ("AGENTIHOOKS_SWARM", "AGENTIHOOKS_AGENT_NAME"):
+            order.append("environ")
+            return environ
+        return tuple("" for _ in keys)
+
+    def stop(selected, members, timeout):
+        order.append("terminate")
+        return False
+
+    def record(target, slug, name, at):
+        assert target is store
+        assert isinstance(at, int) and at > 0
+        order.append("record")
+        seen.append((slug, name))
+
+    monkeypatch.setattr("scripts.terminate_agent.agent_environ", environ_of)
+    monkeypatch.setattr("scripts.terminate_agent.terminate", stop)
+    monkeypatch.setattr("scripts.swarm.store.connect", lambda: store)
+    monkeypatch.setattr("scripts.swarm.deliberate_exit.record", record)
+
+    assert main(["uuid-1", "--type", "claude"]) == 0
+
+    assert seen == recorded
+    out = capsys.readouterr().out
+    if recorded:
+        assert order == ["environ", "record", "terminate"]
+        assert "swarm_exit=recorded" in out.splitlines()
+    else:
+        assert "swarm_exit" not in out
+
+
+@pytest.mark.parametrize("where", ["connect", "write"])
+def test_main_reports_a_deliberate_exit_the_swarm_store_refused(monkeypatch, capsys, where):
+    import redis
+
+    from scripts.swarm.store import Unreachable
+
+    item = session()
+    monkeypatch.setattr("scripts.terminate_agent.sessions", lambda: [item])
+    monkeypatch.setattr(
+        "scripts.terminate_agent.validate", lambda selected, items, force_shared=False: [selected.process]
+    )
+    monkeypatch.setattr("scripts.terminate_agent.herdr_pane", lambda pid: ("", ""))
+    monkeypatch.setattr("scripts.terminate_agent.agent_environ", lambda pid, keys, proc=Path("/proc"): ("rig", "e@1"))
+    monkeypatch.setattr("scripts.terminate_agent.terminate", lambda selected, members, timeout: False)
+
+    def refuse(*args):
+        raise Unreachable("down") if where == "connect" else redis.RedisError("down")
+
+    monkeypatch.setattr("scripts.swarm.store.connect", refuse if where == "connect" else lambda: object())
+    monkeypatch.setattr("scripts.swarm.deliberate_exit.record", refuse)
+
+    assert main(["uuid-1", "--type", "claude"]) == 0
+    lines = capsys.readouterr().out.splitlines()
+    assert "swarm_exit=not-recorded (down)" in lines
+    assert "result=terminated escalation=none" in lines
+
+
+def test_main_withdraws_the_deliberate_exit_when_the_terminate_fails(monkeypatch, capsys):
+    item = session()
+    store = object()
+    taken = []
+    monkeypatch.setattr("scripts.terminate_agent.sessions", lambda: [item])
+    monkeypatch.setattr(
+        "scripts.terminate_agent.validate", lambda selected, items, force_shared=False: [selected.process]
+    )
+    monkeypatch.setattr("scripts.terminate_agent.herdr_pane", lambda pid: ("", ""))
+    monkeypatch.setattr("scripts.terminate_agent.agent_environ", lambda pid, keys, proc=Path("/proc"): ("rig", "e@1"))
+    monkeypatch.setattr("scripts.swarm.store.connect", lambda: store)
+    monkeypatch.setattr("scripts.swarm.deliberate_exit.record", lambda target, slug, name, at: None)
+    monkeypatch.setattr(
+        "scripts.swarm.deliberate_exit.take", lambda target, slug, name: taken.append((target, slug, name))
+    )
+
+    def fail(selected, members, timeout):
+        raise RuntimeError("target processes survived SIGKILL: 200")
+
+    monkeypatch.setattr("scripts.terminate_agent.terminate", fail)
+
+    assert main(["uuid-1", "--type", "claude"]) == 1
+    assert taken == [(store, "rig", "e@1")]
+    assert "terminate-agent: target processes survived SIGKILL: 200" in capsys.readouterr().err
+
+
+def test_a_failed_terminate_withdraws_no_exit_when_none_was_recorded(monkeypatch):
+    from scripts.terminate_agent import _withdraw_exit
+
+    monkeypatch.setattr("scripts.swarm.store.connect", lambda: pytest.fail("no store call without a mark"))
+
+    _withdraw_exit("", "e@1")
+    _withdraw_exit("rig", "")
+
+
+def test_a_withdrawal_the_swarm_store_refuses_is_reported(monkeypatch, capsys):
+    from scripts.swarm.store import Unreachable
+    from scripts.terminate_agent import _withdraw_exit
+
+    def refuse():
+        raise Unreachable("down")
+
+    monkeypatch.setattr("scripts.swarm.store.connect", refuse)
+
+    _withdraw_exit("rig", "e@1")
+
+    assert capsys.readouterr().out.splitlines() == ["swarm_exit=not-withdrawn (down)"]
+
+
+@pytest.mark.parametrize(
+    ("environ", "refused", "expected"),
+    [
+        (("rig", "e@1"), False, ("rig", "e@1")),
+        (("rig", "e@1"), True, ("", "")),
+        (("", "e@1"), False, ("", "")),
+        (("rig", ""), False, ("", "")),
+    ],
+)
+def test_mark_exit_returns_the_mark_it_recorded(monkeypatch, environ, refused, expected):
+    from scripts.swarm.store import Unreachable
+    from scripts.terminate_agent import _mark_exit
+
+    seen = []
+
+    def record(target, slug, name, at):
+        if refused:
+            raise Unreachable("down")
+        seen.append((slug, name, at))
+
+    monkeypatch.setattr("scripts.terminate_agent.agent_environ", lambda pid, keys, proc=Path("/proc"): environ)
+    monkeypatch.setattr("scripts.terminate_agent.time.time", lambda: 1792607.25)
+    monkeypatch.setattr("scripts.swarm.store.connect", lambda: object())
+    monkeypatch.setattr("scripts.swarm.deliberate_exit.record", record)
+
+    assert _mark_exit(200) == expected
+    assert seen == ([("rig", "e@1", 1792607250)] if expected[0] else [])
 
 
 def test_terminate_uses_process_group(monkeypatch):
@@ -250,6 +441,18 @@ def test_an_agent_without_a_name_argument_is_named_from_its_environment(tmp_path
     assert resolve(found, "smoke-codex", "codex").process.pid == 300
 
 
+def test_claude_display_name_keeps_the_canonical_process_identity(tmp_path):
+    from scripts.terminate_agent import sessions
+
+    item = process(300, comm="claude", argv=("claude", "--name", "engineer-a1b2c3-0001"))
+    proc = _herdr_env(tmp_path, 300, AGENTIHOOKS_AGENT_NAME="engineer@a1b2c3-0001")
+    with patch("scripts.terminate_agent.processes", return_value={300: item}):
+        found = sessions(proc, registry={})
+    assert [(s.target, s.name) for s in found] == [("claude", "engineer@a1b2c3-0001")]
+    assert resolve(found, "engineer@a1b2c3-0001", "claude").process.pid == 300
+    assert resolve(found, "engineer-a1b2c3-0001", "claude").process.pid == 300
+
+
 def test_a_child_agent_process_does_not_inherit_its_parents_name(tmp_path):
     from scripts.terminate_agent import sessions
 
@@ -260,6 +463,7 @@ def test_a_child_agent_process_does_not_inherit_its_parents_name(tmp_path):
     (proc / "301" / "environ").write_bytes((proc / "300" / "environ").read_bytes())
     with patch("scripts.terminate_agent.processes", return_value={300: parent, 301: child}):
         found = sessions(proc, registry={})
+    assert {s.process.pid: s.name for s in found} == {300: "smoke-codex", 301: ""}
     assert resolve(found, "smoke-codex", "codex").process.pid == 300
 
 
@@ -335,6 +539,36 @@ def test_claude_sessions_list_from_their_own_records(tmp_path, monkeypatch):
     assert [(s.target, s.name, s.session_id, s.cwd, s.status) for s in found] == [
         ("claude", "engineer", "uuid-1", "/repo", "alive")
     ]
+
+
+def test_a_record_from_another_process_namespace_never_claims_a_local_pid(tmp_path, monkeypatch):
+    from scripts.terminate_agent import sessions
+
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path / "codex"))
+    item = process(400, argv=("claude", "--name", "engineer"))
+    registry = {
+        "remote": {"status": "alive", "pid": 400, "cwd": "/pod", "process_namespace": "boot-worker/pid:[1]"},
+        "local": {"status": "alive", "pid": 400, "cwd": "/repo", "process_namespace": "boot-anton/pid:[1]"},
+    }
+    with patch("scripts.terminate_agent.processes", return_value={400: item}):
+        here = sessions(tmp_path / "proc", registry=registry, namespace="boot-anton/pid:[1]")
+        alone = sessions(tmp_path / "proc", registry={"remote": registry["remote"]}, namespace="boot-anton/pid:[1]")
+    assert [(s.session_id, s.cwd, s.status) for s in here] == [("local", "/repo", "alive")]
+    assert [(s.session_id, s.process.pid, s.status) for s in alone] == [("", 400, "unregistered")]
+    with pytest.raises(ValueError, match="no live claude session exactly matches 'remote'"):
+        resolve(alone, "remote", "claude")
+
+
+def test_sessions_read_the_local_namespace_when_none_is_given(tmp_path, monkeypatch):
+    from scripts.terminate_agent import sessions
+
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path / "codex"))
+    monkeypatch.setattr("scripts.swarm_v2.runtime.process.local_namespace", lambda: "boot-anton/pid:[1]")
+    item = process(400, argv=("claude", "--name", "engineer"))
+    registry = {"remote": {"status": "alive", "pid": 400, "cwd": "/pod", "process_namespace": "boot-worker/pid:[1]"}}
+    with patch("scripts.terminate_agent.processes", return_value={400: item}):
+        found = sessions(tmp_path / "proc", registry=registry)
+    assert [(s.session_id, s.status) for s in found] == [("", "unregistered")]
 
 
 def test_sessions_name_a_registered_session_from_its_record(monkeypatch):

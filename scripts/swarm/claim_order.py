@@ -6,6 +6,8 @@ Phase order is never used; ledger order breaks the remaining ties.
 
 from scripts.swarm_ledger import ledger_rank
 
+FIX = "fix"
+
 
 def key(rows: dict):
     waiting = _waiting(rows)
@@ -23,7 +25,7 @@ def key(rows: dict):
 
 
 def resumed(task: dict) -> bool:
-    return bool(task.get("branch") or task.get("pr_url") or task.get("parked_on"))
+    return bool(task.get("branch") or task.get("pr_url") or task.get("parked_on") or task.get("awaiting") == FIX)
 
 
 def depths(rows: dict) -> dict[str, int]:

@@ -11,7 +11,6 @@ from scripts.swarm.tick import Placed
 from tests.swarm.profile_fixture import validated
 from tests.swarm.test_cli import env, run  # noqa: F401
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
 ROLES = {"planner": "planner", "engineer": "engineer", "qa": "qa", "cicd": "cicd", "frontend": "engineer"}
 
 
@@ -40,7 +39,7 @@ def test_a_role_or_overlay_profile_resolves_to_its_base_role_and_name_lane(roles
     [
         ("master", "the master comes online with agentihooks swarm <id> master up"),
         ("ghost", "profile ghost is not installed: install it with agentihooks init"),
-        ("bare", "profile bare wears no base role among planner, engineer, qa, cicd"),
+        ("bare", "profile bare wears no base role among planner, engineer, qa, cicd, documentation"),
     ],
 )
 def test_a_master_missing_or_roleless_profile_is_refused(roles, profile, message):
@@ -61,7 +60,9 @@ def test_the_role_of_an_installed_profile_comes_from_its_chain(monkeypatch):
         _resolve_profile_dir=lambda name: "dir" if name in chains else None,
         _resolve_profile_chain=lambda name: chains[name],
     )
-    monkeypatch.setattr("scripts.targets._common._install_module", lambda: installer)
+    from importlib import import_module
+
+    monkeypatch.setattr(import_module("scripts.targets._common"), "_install_module", lambda: installer)
     assert (agent_up._role("qa-plus"), agent_up._role("flat"), agent_up._role("none")) == ("qa", "", None)
 
 
@@ -241,7 +242,7 @@ def test_the_operator_launch_opens_claude_in_the_swarm_space_with_the_inbox_chan
         "--dir",
         str(tmp_path),
         "--name",
-        "planner@a1b2c3-0001",
+        "planner-a1b2c3-0001",
         "--agent",
         "claude",
         "--start-timeout",
@@ -261,9 +262,17 @@ def test_the_operator_launch_opens_claude_in_the_swarm_space_with_the_inbox_chan
 def test_the_operator_launch_starts_on_the_frontier_model_inside_the_swarm_effort_range(tmp_path, monkeypatch):
     from scripts.swarm import model_pick
 
-    monkeypatch.setattr(model_pick, "frontier", lambda harness: model_pick.ModelPick(f"{harness}-top", "max"))
+    monkeypatch.setattr(
+        model_pick, "frontier", lambda harness, default_model: model_pick.ModelPick(f"{harness}-top", "max")
+    )
     _, seen = _operator_launch(tmp_path, monkeypatch, effort_min="low", effort_max="medium")
     assert seen["argv"][seen["argv"].index("--") + 1 :] == ["--model", "claude-top", "--effort", "medium"]
+
+
+def test_the_operator_launch_uses_the_configured_frontier_model(tmp_path, monkeypatch):
+    _, seen = _operator_launch(tmp_path, monkeypatch, claude_model="sonnet")
+    passed = seen["argv"][seen["argv"].index("--") + 1 :]
+    assert passed[:4] == ["--model", "sonnet", "--effort", "high"]
 
 
 @pytest.mark.parametrize(("lane", "slug"), [("operator", ""), ("plan", "sw"), ("", "sw")])
@@ -279,7 +288,8 @@ def test_the_planner_prompt_plans_with_the_operator_then_registers_the_plan_and_
         "You are planner@a1b2c3-0001, a planner profile agent the operator launched on swarm sw over the repo /repo "
         "with agentihooks swarm sw planner up. You hold no task and no lane slot, and the swarm never nudges or "
         "retires you. You answer to the operator in this pane: wait for his first message.",
-        f"Read the swarm ledger with {prompt.ledger_read('sw')} for context; change nothing on it until the "
+        "Read the relevant item through the ledger API with agentihooks ledger --slug sw get <item> "
+        "(tasks/<id>, phases/<id>, questions/<id> or priorities/<id>) for context; change nothing on it until the "
         "operator accepts a plan.",
         'Other sessions reach you as inbox messages: answer one with agentihooks msg reply <id> "<text>" and reach '
         'the master with agentihooks msg send master@sw "<text>".',
@@ -312,7 +322,8 @@ def test_another_role_works_with_the_operator_and_exits_when_he_says_so():
         "retires you. You answer to the operator in this pane: wait for his first message."
     )
     assert lines[1] == (
-        f"Read the swarm ledger with {prompt.ledger_read('sw')} for context; change nothing on it unless the "
+        "Read the relevant item through the ledger API with agentihooks ledger --slug sw get <item> "
+        "(tasks/<id>, phases/<id>, questions/<id> or priorities/<id>) for context; change nothing on it unless the "
         "operator asks."
     )
     assert lines[4:] == [

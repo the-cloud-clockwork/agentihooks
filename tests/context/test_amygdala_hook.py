@@ -1,4 +1,4 @@
-from unittest.mock import Mock
+from unittest.mock import Mock, call
 
 import pytest
 
@@ -58,3 +58,16 @@ def test_signal_file_publishes_broadcast(signal_file, content, message, severity
         "amygdala",
         [{"message": message, "severity": severity, "persistent": True, "source": "amygdala-hook"}],
     )
+
+
+@pytest.mark.parametrize("payload, cleared", [(None, []), ({"active": False}, [call("amygdala", [])])])
+def test_a_brain_answer_leaves_the_signal_file_unread(signal_file, monkeypatch, payload, cleared):
+    path, get, reconcile = signal_file
+    path.write_text("Worker unavailable")
+    monkeypatch.setattr("hooks._brain_http.brain_http_enabled", lambda: True)
+    get.return_value = payload
+
+    amygdala_hook.check_amygdala("session")
+
+    get.assert_called_once_with("/signal")
+    assert reconcile.call_args_list == cleared

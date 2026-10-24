@@ -11,7 +11,6 @@ def _process_admission(address, barrier, outcomes):
     from redis import Redis
 
     store = RedisStore(Redis(host=address[0], port=address[1], decode_responses=True, protocol=3, socket_timeout=2))
-    lease.now_ms = lambda store: 1000
     controller = Controller(store, "fixture", [], lambda: True)
     barrier.wait(timeout=10)
     won = controller.acquire()

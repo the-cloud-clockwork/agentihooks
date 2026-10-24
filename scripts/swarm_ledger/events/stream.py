@@ -54,8 +54,11 @@ def serve(handler, hub, slug, load):
             if not pending:
                 handler.wfile.write(frame("heartbeat", {}))
             handler.wfile.flush()
-            pending = hub.wait(slug, seq, HEARTBEAT_S)
-    except (Expired, OSError):
+            try:
+                pending = hub.wait(slug, seq, HEARTBEAT_S)
+            except Expired:
+                seq, pending = hub.snapshot(slug)
+    except OSError:
         return None
     finally:
         hub.close(slug)

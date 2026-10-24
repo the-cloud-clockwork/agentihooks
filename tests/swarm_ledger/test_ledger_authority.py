@@ -19,11 +19,15 @@ from scripts.swarm.ledger_client import LedgerClient  # noqa: E402
 from scripts.swarm.store import SwarmError  # noqa: E402
 from scripts.swarm_ledger import ledger, ledger_server  # noqa: E402
 from scripts.swarm_ledger import ledger_authority as authority  # noqa: E402
-from scripts.swarm_ledger.repository import repository  # noqa: E402
+from scripts.swarm_ledger.storage import default as default_repository  # noqa: E402
+from tests.mutation_trace import traced  # noqa: E402
 from tests.swarm_ledger import legacy_page  # noqa: E402
+from tests.swarm_ledger.api_fakes import as_services  # noqa: E402
 
 server = ledger_server
 from tests.swarm_ledger.test_media import png  # noqa: E402
+
+repository = default_repository()
 
 SLUG = "authority-proof"
 WORKER = "engineer@323133-0256"
@@ -31,11 +35,12 @@ OTHER = "engineer@323133-0257"
 MASTER = "master@323133-0001"
 
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
-
 def operation(kind, **fields):
     return {"op": kind, "id": uuid.uuid4().hex, **fields}
+
+
+class Burst(ThreadingHTTPServer):
+    request_queue_size = 64
 
 
 def pinned(name=WORKER):
@@ -45,12 +50,12 @@ def pinned(name=WORKER):
 @pytest.fixture(scope="module")
 def live():
     core.LEDGER_DIR.mkdir(parents=True, exist_ok=True)
-    httpd = ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
+    httpd = Burst(("127.0.0.1", 0), server.Handler)
     port = httpd.server_address[1]
     host = f"127.0.0.1:{port}"
     content = {"title": "Authority", "phases": [{"title": "Proof", "description": "word " * 101}]}
     page = legacy_page.render(new_ledger.build_doc(content), SLUG, port)
-    core.paths(SLUG)[0].write_text(page)
+    legacy_page.paths(SLUG, core)[0].write_text(page)
     thread = threading.Thread(target=httpd.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True)
     with (
         patch("hooks._redis.get_redis", return_value=None),
@@ -71,7 +76,8 @@ def live():
 
 
 def send(live, method, path, body=b"", **headers):
-    conn = http.client.HTTPConnection("127.0.0.1", live["port"], timeout=5)
+    timeout = traced(5)
+    conn = http.client.HTTPConnection("127.0.0.1", live["port"], timeout=timeout)
     try:
         conn.request(method, path, body, {"Host": live["host"], **headers})
         response = conn.getresponse()
@@ -129,6 +135,24 @@ def test_pinned_worker_cannot_write_as_another_worker_or_the_operator(crew):
     assert "Other worker" not in texts
     assert "Operator words" not in texts
     assert "only the operator writes without an author" in reply["_meta"]["warnings"]
+
+
+def phase_comments(reply):
+    return [entry["text"] for entry in next(p for p in reply["phases"] if p["id"] == "p1")["comments"]]
+
+
+def test_a_worker_token_cannot_answer_the_operator_on_an_entry_but_the_service_relay_can(crew):
+    thread = "phases/p1/comments"
+    answer = operation("add", by=WORKER, thread=thread, to="operator", text="Worker answer")
+    with pinned():
+        reply = ledger.request(SLUG, [answer])
+    assert answer["id"] in reply["rejected"]
+    refused = f"{WORKER} cannot answer the operator on an entry; the swarm relay posts that answer"
+    assert refused in reply["_meta"]["warnings"]
+    assert "Worker answer" not in phase_comments(ledger.request(SLUG))
+    relayed = operation("add", by=WORKER, thread=thread, to="operator", text="Relayed answer")
+    assert relayed["id"] not in ledger.request(SLUG, [relayed], service=True)["rejected"]
+    assert "Relayed answer" in phase_comments(ledger.request(SLUG))
 
 
 def test_a_worker_cannot_raise_its_own_role_but_a_master_can_join_as_orchestrator(crew):
@@ -330,7 +354,7 @@ def launched():
 
     client = fakeredis.FakeRedis(decode_responses=True)
     client.hset(NameRegistry.key("name", LAUNCHED), mapping={"swarm": "sw", "operator": "frontend", "retired_at": 0})
-    with patch.object(authority.store, "redis_client", lambda: client):
+    with patch("scripts.swarm.store.redis_client", lambda: client):
         yield
 
 
@@ -348,7 +372,7 @@ def test_the_claim_check_lets_the_claim_through_when_redis_is_down():
     def down():
         raise Down("no redis")
 
-    with patch.object(authority.store, "redis_client", down):
+    with patch("scripts.swarm.store.redis_client", down):
         assert authority.claim_refusal(LAUNCHED) == ""
 
 
@@ -483,16 +507,16 @@ def _epoch_mutation_server(rejected):
         if rejected:
             raise SwarmError("the controller lease is stale")
 
-    def apply_ops(slug, ops, gate):
+    def apply_ops(slug, ops, gate, *, copy_state):
         assert slug == "sw"
         refused = [op["id"] for op in ops if not gate.apply(doc, op, ctx, None)]
         return doc, refused
 
     server = SimpleNamespace(
-        repository=SimpleNamespace(get_document=lambda *args, **kwargs: doc, apply_ops=apply_ops),
+        repository=SimpleNamespace(current=lambda *args, **kwargs: SimpleNamespace(state=doc), apply_ops=apply_ops),
         authority=SimpleNamespace(refusal=lambda *args: "", fence=fence),
         core=SimpleNamespace(check_body=lambda *args: None),
-        talk=SimpleNamespace(Budget=lambda slug: SimpleNamespace(apply=lambda *args: True)),
+        write_gate=lambda slug: SimpleNamespace(apply=lambda *args: True, publish=lambda rejected: None),
         ledger_media=SimpleNamespace(resolve=lambda *args: None),
         ledger_artifacts=SimpleNamespace(resolve=lambda *args: None),
         relay_to_inbox=lambda *args: None,
@@ -508,7 +532,7 @@ def test_mutation_receiver_checks_epoch_before_and_after_domain_apply():
     from scripts.swarm_ledger.api import mutations
 
     server, payload, seen = _epoch_mutation_server(False)
-    reply = mutations.apply(server, "sw", "", payload)
+    reply = mutations.apply(as_services(server), "sw", "", payload)
     assert seen == [("sw", 1), ("sw", 1)]
     assert reply == {"applied": ["one"], "rejected": [], "_meta": {"rev": 1, "warnings": []}}
 
@@ -519,7 +543,7 @@ def test_mutation_receiver_returns_exact_stale_epoch_error():
 
     server, payload, seen = _epoch_mutation_server(True)
     with pytest.raises(APIError) as error:
-        mutations.apply(server, "sw", "", payload)
+        mutations.apply(as_services(server), "sw", "", payload)
     assert seen == [("sw", 1)]
     assert error.value.status == 409
     assert error.value.code == "stale_controller"
