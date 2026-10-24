@@ -1,7 +1,9 @@
 """Operator mode trust for the swarm NATS: keys kept once in the hub signer record, service users signed from a list."""
 
-from collections.abc import Mapping
+import time
+from collections.abc import Mapping, Sequence
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import yaml
 
@@ -9,6 +11,9 @@ from scripts import openbao_kv
 from scripts.events import nkey
 from scripts.events.config import CREDENTIALS_FIELD
 from scripts.hive import auth, nats_grant
+
+if TYPE_CHECKING:
+    from redis import Redis
 
 SIGNER_PATH = f"{nats_grant.HUB_PATH}nats-signer"
 SYSTEM_ACCOUNT_NAME = "SYS"
@@ -30,6 +35,15 @@ def load_users(path: Path | str) -> list[dict]:
     return listed
 
 
+def load_retired(path: Path | str) -> list[dict]:
+    listed = (yaml.safe_load(Path(path).read_text()) or {}).get("retired") or []
+    if not isinstance(listed, list) or any(
+        not isinstance(entry, dict) or not entry.get("user") or not entry.get("openbao") for entry in listed
+    ):
+        raise auth.HiveError(f"every retired user in {path} needs a user name and the openbao record to delete")
+    return listed
+
+
 def _subjects(rules) -> dict:
     if not isinstance(rules, dict):
         rules = {"allow": rules}
@@ -45,8 +59,12 @@ def service_claims(entry: Mapping) -> dict:
     return claims
 
 
+def service_user(account: nkey.KeyPair, name: str) -> nkey.KeyPair:
+    return nkey.derive(account, nkey.USER, f"service-{name}")
+
+
 def service_creds(account: nkey.KeyPair, entry: Mapping) -> str:
-    user = nkey.derive(account, nkey.USER, f"service-{entry['user']}")
+    user = service_user(account, entry["user"])
     return nkey.creds(nkey.encode_jwt(account, user.public, entry["user"], service_claims(entry)), user.seed)
 
 
@@ -74,7 +92,14 @@ def _keys(bao: openbao_kv.OpenBao, url: str) -> dict[str, nkey.KeyPair]:
         raise auth.HiveError(f"the NATS signer record {SIGNER_PATH} cannot be used ({exc})") from None
 
 
-def trust_values(keys: Mapping[str, nkey.KeyPair]) -> dict:
+def revocations(redis: "Redis", account: nkey.KeyPair, retired: Sequence[Mapping]) -> dict[str, int]:
+    now = int(time.time())
+    for entry in retired:
+        redis.hsetnx(nats_grant.REVOKED, service_user(account, entry["user"]).public, now)
+    return nats_grant.revoked(redis)
+
+
+def trust_values(keys: Mapping[str, nkey.KeyPair], revoked: Mapping[str, int]) -> dict:
     operator, system = keys["operator"], keys["system"]
     operator_claims = {"type": "operator", "version": 2, "system_account": system.public}
     system_claims = {"type": "account", "version": 2, "limits": SYSTEM_LIMITS}
@@ -85,17 +110,24 @@ def trust_values(keys: Mapping[str, nkey.KeyPair]) -> dict:
                 "system_account": system.public,
                 "resolver_preload": {
                     system.public: nkey.encode_jwt(operator, system.public, SYSTEM_ACCOUNT_NAME, system_claims),
-                    keys["account"].public: nats_grant.account_jwt(operator, keys["account"], {}),
+                    keys["account"].public: nats_grant.account_jwt(operator, keys["account"], revoked),
                 },
             }
         }
     }
 
 
-def bootstrap(bao: openbao_kv.OpenBao, users: list[dict], url: str) -> tuple[dict, list[str]]:
+def bootstrap(
+    bao: openbao_kv.OpenBao, redis: "Redis", users: list[dict], url: str, retired: Sequence[Mapping] = ()
+) -> tuple[dict, list[str]]:
     keys = _keys(bao, url)
     lines = [f"operator {keys['operator'].public}, swarm account {keys['account'].public}"]
     for entry in users:
         total = openbao_kv.merge(bao, entry["openbao"], {CREDENTIALS_FIELD: service_creds(keys["account"], entry)})
         lines.append(f"{entry['user']}: {openbao_kv.summary(entry['openbao'], [CREDENTIALS_FIELD], total)}")
-    return trust_values(keys), lines
+    revoked = revocations(redis, keys["account"], retired)
+    for entry in retired:
+        openbao_kv.delete(bao, entry["openbao"])
+        user = service_user(keys["account"], entry["user"]).public
+        lines.append(f"{entry['user']}: revoked {user}, deleted OpenBao {openbao_kv.MOUNT}/{entry['openbao']}")
+    return trust_values(keys, revoked), lines
