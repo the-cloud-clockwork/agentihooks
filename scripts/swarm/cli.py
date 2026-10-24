@@ -1336,6 +1336,16 @@ def cmd_names(store, args):
         )
 
 
+def cmd_merge_path(store, args):
+    from scripts.swarm import merge_path
+
+    until_s = now_ms() / 1000
+    repo, found = merge_path.collect(store.config(args.slug).repo, (until_s - args.hours * 3600, until_s))
+    print(json.dumps({"repo": repo, **found}) if args.json else merge_path.render(repo, found))
+    if args.post:
+        LedgerClient().comment_item(args.slug, args.post, merge_path.render(repo, found))
+
+
 def cmd_rename(store, args):
     from scripts.herdr_host import HerdrError
     from scripts.swarm.rename import rename_swarm
@@ -2161,6 +2171,10 @@ def build_parser():
     scale.add_argument("--json", action="store_true")
     sub.add_parser("controller").add_argument("action", nargs="?", choices=("release",), default=None)
     sub.add_parser("names").add_argument("--json", action="store_true")
+    path = sub.add_parser("merge-path")
+    path.add_argument("--hours", type=float, default=24.0)
+    path.add_argument("--json", action="store_true")
+    path.add_argument("--post", default="", metavar="ITEM")
     verdict = sub.add_parser("verdict")
     verdict.add_argument("finding")
     verdict.add_argument("verdict")
