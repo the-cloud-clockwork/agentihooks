@@ -2,13 +2,15 @@
 
 import re
 
-KINDS = ("code", "ci", "ops", "troubleshoot", "tune", "research", "plan")
+KINDS = ("code", "ci", "ops", "troubleshoot", "tune", "research", "plan", "workflow")
 BRANCHED = ("code", "ci")
+WORKFLOW_FIELDS = ("workflow", "case")
+WORKFLOW_PROOF = {"workflow": "passed", "verdict": "pass"}
 CONTRACT_KEYS = ("must", "check", "judge")
 CONTRACT_TIMES = ("after_at",)
 CONTRACT_FLAGS = ("push", "after")
 FLAG_VALUES = ("yes", "no")
-PROOF_KEYS = ("command", "output", "root_cause", "evidence", "fix", "filed", "finding", "slice")
+PROOF_KEYS = ("command", "output", "root_cause", "evidence", "fix", "filed", "finding", "slice", *WORKFLOW_PROOF)
 LINK_RE = re.compile(r"^https?://[^\s]+$")
 NEEDS = {
     "plan": ("slice",),
@@ -16,6 +18,7 @@ NEEDS = {
     "tune": ("command", "output"),
     "troubleshoot": ("root_cause", "evidence"),
     "research": ("finding",),
+    "workflow": tuple(WORKFLOW_PROOF),
 }
 
 
@@ -48,6 +51,18 @@ def check(fields):
     for flag in CONTRACT_FLAGS:
         if fields.get("contract", {}).get(flag, "no") not in FLAG_VALUES:
             raise ValueError(f"contract {flag} must be yes or no")
+    check_workflow(fields)
+
+
+def check_workflow(fields):
+    named = {key: fields[key] for key in WORKFLOW_FIELDS if key in fields}
+    if not all(isinstance(value, str) for value in named.values()):
+        raise ValueError(f"{' and '.join(WORKFLOW_FIELDS)} must be strings")
+    workflow = fields.get("kind") == "workflow"
+    if workflow != bool(named.get("workflow", "").strip()):
+        raise ValueError("a workflow task names its workflow, and only a workflow task takes one")
+    if workflow and fields.get("lane", "eng") != "eng":
+        raise ValueError("workflow tasks use the eng lane")
 
 
 def unmet(task):
@@ -59,4 +74,6 @@ def unmet(task):
         missing.append("fix or filed")
     if kind(task) == "research" and "finding" not in missing and not LINK_RE.match(proof["finding"].strip()):
         missing.append("finding")
+    if kind(task) == "workflow":
+        missing = [key for key, value in WORKFLOW_PROOF.items() if str(proof.get(key, "")).strip() != value]
     return missing
