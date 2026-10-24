@@ -1,8 +1,8 @@
 """Dev promotion watch: the newest finished push run of Tests on dev files one urgent ci task per failed job and
 raises a ledger alert; the failed jobs that lost their runner, and the failed jobs whose own error is the missing
-output of a unit shard that lost its runner, share one runner outage task instead. The next green run closes those
-tasks and the alert. A run whose only failure is the Sonar job finding dev already moved past its commit is reported as superseded and files
-nothing.
+output of a unit shard that lost its runner, share one runner outage task instead. The next green run whose promote
+job succeeded closes those tasks and the alert. A run whose only failure is the Sonar job finding dev already moved
+past its commit is reported as superseded and files nothing.
 
 The minute tick calls it; CI runners cannot reach the ledger, so the fixer tasks are filed from the machine that can.
 """
@@ -79,6 +79,8 @@ CLOSABLE = ("open", "blocked")
 WORKING = ("claimed", "pr")
 CLEARED = "A later dev push run of Tests passed, so the swarm closed this promotion task."
 REPLACED = "Dev push run {run_id} of Tests failed on a new cause, so the swarm raised a new promotion alert."
+PROMOTE_JOB = "promote"
+HELD = "dev push run {run_id} passed but its promote job did not succeed, so the promotion red stays open"
 
 
 def key(slug: str, part: str) -> str:
@@ -225,6 +227,11 @@ def failed_jobs(found: list[dict]) -> list[str]:
     return [name for name in failed if name != GATE] or failed
 
 
+def promoted(found: list[dict]) -> bool:
+    runs = [j["conclusion"] for j in found if j["name"].split(" / ")[0] == PROMOTE_JOB]
+    return bool(runs) and all(conclusion == "success" for conclusion in runs)
+
+
 def title(job: str) -> str:
     named = "Promotion red: " + " ".join(re.sub(r"[—–_/]", " ", job).split())
     return UNNAMED if ledger_comments.problems(named, "item") else named
@@ -348,7 +355,7 @@ def _refresh(
         last = dev_red.latest(config.repo, run)
         if last is None or int(redis.get(key(slug, "seen")) or 0) >= last["id"]:
             return []
-        found = jobs(config.repo, last["id"], run) if last["conclusion"] == "failure" else []
+        found = jobs(config.repo, last["id"], run)
         failed = failed_jobs(found)
         stale = bool(failed) and all(superseded(config.repo, j, run) for j in found if j["name"] in failed)
         named = {j["name"]: j for j in found}
@@ -362,6 +369,8 @@ def _refresh(
         actions = [f"dev push run {last['id']} was superseded before Sonar analysis"]
     elif last["conclusion"] == "failure":
         actions = _red(slug, store, ledger, doc, last, causes, config.repo)
+    elif not promoted(found):
+        actions = [HELD.format(run_id=last["id"])]
     else:
         actions = _recover(slug, redis, ledger, doc, last, config.repo)
     redis.set(key(slug, "seen"), last["id"])
