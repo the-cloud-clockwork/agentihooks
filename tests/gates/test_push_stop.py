@@ -1064,3 +1064,13 @@ def test_a_merge_wait_never_holds_uncommitted_changes(rig):
     rig.gate._github = lambda url: PullRequest("OPEN", None, 1, False, True, queued=True)
     wait_on(rig, {"kind": "merge", "target": "https://github.com/o/r/pull/8"})
     assert rig.stop().reason == TEMPLATE
+
+
+def test_a_pull_request_in_another_repo_does_not_answer_for_pushed_work_in_this_one(rig):
+    rig.ledger.task["pr_url"] = "https://github.com/o/elsewhere/pull/3"
+    rig.commit()
+    decision = rig.stop()
+    assert (decision.allowed, decision.reason) == (False, TEMPLATE)
+    assert rig.remote_head()
+    rig.ledger.task["pr_url"] = "https://github.com/O/R/pull/7"
+    assert rig.stop().allowed

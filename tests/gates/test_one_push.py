@@ -533,3 +533,34 @@ def test_ready_refusal_names_the_shell_checkout(tree, tmp_path):
     decision = gate(target="codex").decide(bash(f"cd {tree} && gh pr ready 1", tmp_path), ME, state(tmp_path))
     assert not decision.allowed
     assert f"Checked worktree: {tree}" in decision.reason
+
+
+@pytest.fixture
+def other_repo(tmp_path):
+    work = tmp_path / "other"
+    git(tmp_path, "init", "-q", "-b", "task", str(work))
+    git(work, "remote", "add", "origin", "https://github.com/o/b.git")
+    return work
+
+
+def test_a_cross_repo_push_through_a_shell_variable_passes_while_the_other_repos_checks_run(
+    tree, other_repo, tmp_path, monkeypatch
+):
+    monkeypatch.setenv("OTHER_REPO", str(other_repo))
+    for command in (
+        f'B={other_repo}; cd "$B" && git push origin task',
+        'cd "$OTHER_REPO" && git push origin task',
+        "git -C ${OTHER_REPO} push origin HEAD:task",
+    ):
+        assert gate(pull()).decide(bash(command, tree), ME, state(tmp_path)).allowed, command
+
+
+def test_a_push_through_a_shell_variable_into_the_pull_request_repo_is_still_refused(tree, other_repo, tmp_path):
+    decision = gate(pull()).decide(bash(f'A={tree}; cd "$A" && git push origin task', other_repo), ME, state(tmp_path))
+    assert (decision.allowed, decision.reason) == (False, push_refusal("demo", URL))
+    assert not gate(pull()).decide(bash("git push origin task", tree), ME, state(tmp_path)).allowed
+
+
+def test_a_push_from_a_folder_that_is_no_checkout_holds_nothing(tree, tmp_path):
+    command = 'cd "$NO_SUCH_REPO_FOLDER" && git push origin task'
+    assert gate(pull()).decide(bash(command, tree), ME, state(tmp_path)).allowed
