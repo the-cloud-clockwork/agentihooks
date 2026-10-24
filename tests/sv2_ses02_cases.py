@@ -12,7 +12,10 @@ from hooks.memory.cursors import CursorConflict, CursorStore
 from hooks.memory.transcript_reader import iter_transcript_records
 
 FIXTURE = Path(__file__).parent / "fixtures/swarm_v2/transcript-tailing.json"
-EVIDENCE_CLASS = "mocked: local files in a temporary folder stand in for a provider transcript; no provider process, spool or network runs"
+EVIDENCE_CLASS = (
+    "mocked: local files in a temporary folder stand in for a provider transcript; "
+    "no provider process, spool or network runs"
+)
 
 
 def line(entry):
@@ -34,7 +37,8 @@ class Sink:
         self.calls += 1
         if self.fail:
             raise OSError("destination unavailable")
-        self.accepted.setdefault(batch.identity, [record["text"] for record in batch.records])
+        assert batch.identity not in self.accepted
+        self.accepted[batch.identity] = [record["text"] for record in batch.records]
 
     def texts(self):
         return [text for texts in self.accepted.values() for text in texts]
@@ -73,6 +77,8 @@ def positive(inputs, root, source):
     assert [record["text"] for record in appended.records] == [inputs["appended"]["message"]["content"][0]["text"]]
     assert appended.start == boundary
     assert (rotated.replayed, truncated.replayed, regrown.replayed) == (True, True, True)
+    assert truncated.cursor.offset < rotated.cursor.offset < regrown.cursor.offset
+    assert sink.texts().count(inputs["appended"]["message"]["content"][0]["text"]) == 1
     return {
         "accepted_texts": sink.texts(),
         "committed_offsets": steps,
@@ -140,7 +146,13 @@ def recovery(inputs, root, source):
     with pytest.raises(CursorConflict) as stale:
         restarted.commit(interrupted.cursor)
     whole = [record["text"] for record in iter_transcript_records(source)]
+    assert whole == sink.texts()
+    rebuilt = Sink()
+    Collector(CursorStore(root / "replay")).poll(source, rebuilt)
+    assert rebuilt.texts() == sink.texts()
+    assert restarted.load(str(source)) == completed.cursor
     return {
+        "controlled_replay_texts": rebuilt.texts(),
         "resumed_offset": resumed.offset,
         "completed_start": completed.start,
         "completed_texts": [record["text"] for record in completed.records],

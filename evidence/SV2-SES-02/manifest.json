@@ -3,7 +3,7 @@
   "cases": ["T-SV2-SES-02-A", "T-SV2-SES-02-B", "T-SV2-SES-02-C"],
   "evidence_class": "mocked: local files in a temporary folder stand in for a provider transcript; no provider process, spool or network runs",
   "inputs": {
-    "tests/fixtures/swarm_v2/transcript-tailing.json": "2ee8606705605efe43acb86e3b166c18fa4a479081c53afb6a5fe751ea361025"
+    "tests/fixtures/swarm_v2/transcript-tailing.json": "7bc831c971fa610d3b2593aefd7d31adfbe092712112efa374efa20fd192481f"
   },
   "red_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/40082171822",
   "records_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/40082210817",

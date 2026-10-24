@@ -35,7 +35,7 @@
   "rollback_rehearsal": {
     "action": "Stop the collector and retain cursor files with their generation, offset and revision so a controlled replay can rebuild projections.",
     "authoritative_objects": "Source transcript files and the cursor files; cursors are never deleted as caches.",
-    "proof": "Case C keeps one cursor file after restart and the unchanged whole-file reader iter_transcript_records still returns every record."
+    "proof": "Case C keeps one cursor file after restart, the unchanged whole-file reader iter_transcript_records returns exactly the accepted records, and a collector on a fresh cursor folder replays the source into the same records."
   },
   "remaining_limitations": [
     "Records a rotated file had not yet delivered before rotation are not read; the collector restarts on the new file.",

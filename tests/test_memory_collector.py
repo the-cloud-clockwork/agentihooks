@@ -138,6 +138,24 @@ def test_the_anchor_covers_only_the_bytes_before_the_offset(source):
     assert read_batch(source, cursor).replayed is True
 
 
+@pytest.mark.parametrize(("back", "replayed"), [(ANCHOR_BYTES, True), (ANCHOR_BYTES + 1, False)])
+def test_the_anchor_window_is_exactly_anchor_bytes_wide(source, back, replayed):
+    long = line("x" * (ANCHOR_BYTES * 2))
+    source.write_bytes(long)
+    cursor = replace(read_batch(source, Cursor(str(source))).cursor, revision=1)
+    changed = bytearray(long)
+    changed[len(long) - back] = ord("y")
+    source.write_bytes(bytes(changed))
+    assert read_batch(source, cursor).replayed is replayed
+
+
+def test_a_replaced_source_resets_format_and_turn_state(source):
+    source.write_bytes(sv2_ses02_cases.line({"type": "session_meta", "payload": {}}))
+    old = Cursor(str(source), device=1, inode=1, offset=0, fmt="claude", turn={"assistant_seen": True}, revision=1)
+    batch = read_batch(source, old)
+    assert (batch.replayed, batch.cursor.fmt, batch.cursor.turn) == (True, "codex", {"assistant_seen": False})
+
+
 def test_a_never_committed_cursor_does_not_count_a_replay(source):
     source.write_bytes(line("one"))
     batch = read_batch(source, Cursor(str(source), device=1, inode=1, offset=5))
@@ -185,6 +203,72 @@ def test_store_sums_replays_across_sources(store):
     store.commit(Cursor("a", replays=2))
     store.commit(Cursor("b", replays=3))
     assert store.replays_total() == 5
+
+
+def test_store_commit_syncs_the_file_then_the_folder(store, monkeypatch):
+    events, opened = [], []
+    real_open, real_fsync, real_close, real_replace = os.open, os.fsync, os.close, Path.replace
+
+    def record_open(path, flags):
+        fd = real_open(path, flags)
+        opened.append(fd)
+        events.append(("open", Path(path) == store.root))
+        return fd
+
+    def record_fsync(fd):
+        events.append(("fsync", fd in opened))
+        real_fsync(fd)
+
+    def record_close(fd):
+        events.append(("close", fd in opened))
+        real_close(fd)
+
+    def record_replace(self, target):
+        events.append(("replace", self.suffix))
+        return real_replace(self, target)
+
+    monkeypatch.setattr(os, "open", record_open)
+    monkeypatch.setattr(os, "fsync", record_fsync)
+    monkeypatch.setattr(os, "close", record_close)
+    monkeypatch.setattr(Path, "replace", record_replace)
+    store.commit(Cursor("s"))
+    assert [event for event in events if event[0] != "close" or event[1]] == [
+        ("fsync", False),
+        ("replace", ".tmp"),
+        ("open", True),
+        ("fsync", True),
+        ("close", True),
+    ]
+
+
+def test_an_interrupted_commit_keeps_the_previous_cursor(store, monkeypatch):
+    first = store.commit(Cursor("s", offset=5))
+
+    def fail(self, target):
+        raise OSError("crash before replace")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(Path, "replace", fail)
+        with pytest.raises(OSError):
+            store.commit(replace(first, offset=9))
+    assert store.load("s") == first
+    assert list(store.root.glob("*.tmp"))
+    assert store.commit(replace(first, offset=9)).offset == 9
+    assert store.load("s").offset == 9
+
+
+def test_a_losing_poller_accepts_the_same_batch_identity_then_conflicts(source, store):
+    source.write_bytes(line("one"))
+    winner, loser, seen = Collector(store), Collector(store), []
+
+    def accept_and_race(batch):
+        seen.append(batch.identity)
+        winner.poll(source, lambda inner: seen.append(inner.identity))
+
+    with pytest.raises(CursorConflict):
+        loser.poll(source, accept_and_race)
+    assert seen[0] == seen[1]
+    assert store.load(str(source)).revision == 1
 
 
 def test_poll_commits_only_after_acceptance(source, store):

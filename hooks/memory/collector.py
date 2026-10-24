@@ -1,10 +1,4 @@
-"""Byte-safe incremental transcript tailing.
-
-Only newline-terminated records are decoded, so a record cut inside a UTF-8
-character or a JSON value stays on disk for the next poll. A changed device or
-inode, a file shorter than the committed offset, or changed bytes just before
-it restart the read from offset zero and count one replay.
-"""
+"""Byte-safe transcript tailing; ``accept`` must be idempotent on ``Batch.identity``: a losing poller calls it too."""
 
 import hashlib
 import json

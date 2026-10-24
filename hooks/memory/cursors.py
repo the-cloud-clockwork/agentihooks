@@ -1,11 +1,4 @@
-"""Durable per-source transcript cursors.
-
-A cursor holds only what was accepted: the source generation (device and
-inode), the committed byte offset, an anchor hash of the bytes just before it,
-the detected format and the decoder turn state. Each commit is a
-compare-and-set on ``revision`` under a store lock, written atomically, so a
-stale cursor never overwrites a newer accepted one.
-"""
+"""Durable transcript cursors; a commit is a compare-and-set on ``revision``."""
 
 import fcntl
 import hashlib
@@ -64,7 +57,7 @@ class CursorStore:
                 json.dump(asdict(committed), handle, sort_keys=True)
                 handle.flush()
                 os.fsync(handle.fileno())
-            os.replace(temporary, path)
+            temporary.replace(path)
             directory = os.open(self.root, os.O_RDONLY)
             try:
                 os.fsync(directory)
