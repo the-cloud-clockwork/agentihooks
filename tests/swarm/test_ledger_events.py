@@ -441,8 +441,8 @@ def test_merged_reminders_wait_for_the_after_window_then_deliver_once(store, hol
     assert texts(store, MASTER_SEAT) == []
     for stamp in (due, due + 1):
         run(store, doc, now_ms=stamp, github=lambda url: merged)
-    assert len(texts(store, ENG_SEAT)) == 1
-    assert len(texts(store, MASTER_SEAT)) == 1
+        assert len(texts(store, ENG_SEAT)) == 1
+        assert len(texts(store, MASTER_SEAT)) == 1
 
 
 @pytest.mark.parametrize("deadline", [None, "", 0, -1])
@@ -454,6 +454,22 @@ def test_due_or_absent_after_windows_keep_merged_reminders(store, deadline):
         doc["tasks"][0]["contract"] = {"after_at": str(now + deadline) if deadline else ""}
     run(store, recorded())
     run(store, doc, now_ms=now, github=lambda url: merged)
+    assert len(texts(store, ENG_SEAT)) == 1
+    assert len(texts(store, MASTER_SEAT)) == 1
+
+
+def test_a_held_merged_task_does_not_delay_later_merged_reminders(store):
+    merged = answer("merged")
+    now = merged.merged_at + 21 * MINUTE
+    doc = in_pr()
+    doc["tasks"][0]["contract"] = {"after_at": now + MINUTE}
+    later = "https://github.com/o/r/pull/10"
+    doc["tasks"].append({**doc["tasks"][0], "id": "t2", "pr_url": later, "contract": {}})
+    run(store, recorded())
+    assert run(store, doc, now_ms=now, github=lambda url: merged) == [
+        f"told {ENG_SEAT}: {later}:merged:engineer",
+        f"told {MASTER_SEAT}: {later}:merged:master",
+    ]
     assert len(texts(store, ENG_SEAT)) == 1
     assert len(texts(store, MASTER_SEAT)) == 1
 
