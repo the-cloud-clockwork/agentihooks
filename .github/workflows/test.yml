@@ -1534,35 +1534,24 @@ jobs:
           ref: ${{ github.event_name == 'pull_request' && github.base_ref || github.event.merge_group.base_sha || github.event_name == 'push' && github.sha || github.event.before || (inputs.base == 'origin/dev' && 'dev' || inputs.base) }}
           persist-credentials: false
 
-      - *python
-
-      - name: Install grader dependencies
-        run: python -m pip install "pytest>=8.0"
-
-      - name: Download shard durations
-        uses: actions/download-artifact@v4
-        with:
-          pattern: durations-${{ matrix.python-version }}-*
-          path: shard-durations
-
       - name: Download collected tests
         uses: actions/download-artifact@v4
         with:
-          name: collected-${{ matrix.python-version }}
-          path: collected-data
+          pattern: "{durations,flakes,collected,reused-tests}-${{ matrix.python-version }}{,-*}"
+          path: shard-durations
 
-      - name: Download the test plan
-        if: needs.unit.outputs.reused != '' && needs.unit.outputs.reused != '0'
-        uses: actions/download-artifact@v4
-        with:
-          name: reused-tests-${{ matrix.python-version }}
-          path: reused-plan
-
-      - name: Download shard flake reports
-        uses: actions/download-artifact@v4
-        with:
-          pattern: flakes-${{ matrix.python-version }}-*
-          path: shard-flakes
+      - name: Arrange shard verification data
+        shell: bash
+        env:
+          PYTHON_VERSION: ${{ matrix.python-version }}
+          REUSED: ${{ needs.unit.outputs.reused }}
+        run: |
+          mv "shard-durations/collected-$PYTHON_VERSION" collected-data
+          mkdir shard-flakes
+          mv shard-durations/flakes-* shard-flakes/
+          if [[ -n "$REUSED" && "$REUSED" != '0' ]]; then
+            mv "shard-durations/reused-tests-$PYTHON_VERSION" reused-plan
+          fi
 
       - name: Check every collected test ran in exactly one shard
         env:
