@@ -365,7 +365,17 @@ a.sw-task:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
 .outline details { margin: 0; }
 .outline summary { display: flex; }
 .outline summary > a { flex: 1; min-width: 0; }
-.ol-tools { display: flex; gap: 14px; padding: 0 10px 10px; }
+.ol-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; padding: 0 10px 10px; }
+.ol-filter, .ol-state { min-width: 0; padding: 4px 0; border: 0; border-radius: 0; background: transparent; color: var(--text); font: inherit;
+  box-shadow: inset 0 -1px 0 var(--edge); }
+.ol-filter { flex: 1 0 100%; }
+.ol-filter::placeholder { color: var(--muted); }
+.ol-state { flex: 1; cursor: pointer; }
+.ol-state option { background: var(--panel); color: var(--text); }
+.ol-filter:focus, .ol-state:focus { outline: none; box-shadow: inset 0 -1px 0 var(--accent); }
+.ol-filter:focus-visible, .ol-state:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+.outline .ol-group { padding: 6px 10px 2px 24px; color: var(--muted); letter-spacing: .08em; text-transform: uppercase;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .sec-tools { display: flex; justify-content: flex-end; margin: -4px 0 8px; }
 .outline .ol-sec summary > a { font-weight: 700; letter-spacing: .14em; text-transform: uppercase; color: var(--text-2); }
 .outline .ol-items a { position: relative; padding-left: 24px; }

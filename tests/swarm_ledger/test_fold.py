@@ -306,14 +306,17 @@ class OutlineFolds(unittest.TestCase):
             + "const PAGE_SIZE = 50;"
             + "const FULL_PAGE"
             + page().split("  const FULL_PAGE", 1)[1].split("\n", 1)[0]
-            + "const shown = {}; const wanted = { id: null };"
+            + "const shown = {}; const wanted = { id: null }; const filter = { text: '', state: '' };"
             + "".join(
                 function_source(n) + "\n"
                 for n in (
                     "h",
                     "itemState",
+                    "outlineEntry",
                     "outlineOf",
                     "outlineLink",
+                    "outlineRow",
+                    "filtering",
                     "outlineAgain",
                     "limit",
                     "include",
@@ -357,7 +360,7 @@ class OutlineFolds(unittest.TestCase):
         self.assertEqual(out["wired"], [f"ol-{h['id']}" for h in self.HEADS])
 
     def test_outline_has_one_fold_all_control_and_entries_still_jump(self):
-        self.assertIn('id: "outline-all", on: { click: foldAll }', function_source("renderOutline"))
+        self.assertIn('id: "outline-all", on: { click: foldAll }', function_source("outlineTools"))
         self.assertIn('$("outline").querySelectorAll("details.fold")', function_source("outlineBoxes"))
         self.assertIn("ev.preventDefault();", page().split('$("outline").addEventListener("click"', 1)[1])
 

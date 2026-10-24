@@ -1,6 +1,7 @@
 import { $, h } from "./dom.js";
 import { itemState } from "./state.js";
 import { closedLeft, doc, pageIn, pagedOut } from "./sync.js";
+import { searchClosed } from "./api.js";
 import { noticeTarget, showAlerts, showNotifications } from "./notices.js";
 import { showArtifacts } from "./artifacts.js";
 import { renderSwarm, swarm } from "./swarm.js";
@@ -70,9 +71,14 @@ function land(el) {
   el.classList.add("flash");
 }
 
+function outlineEntry(list) {
+  return (i, n) => typeof i === "string" ? { id: `item-${list}-${n}`, title: i }
+    : { id: `item-${list}-${i.id}`, title: list === "tasks" ? `${i.id} ${i.title}` : i.title || i.text || i.item || i.id, state: itemState(list, i),
+      ...(list === "tasks" ? { status: i.state || "open", phase: i.phase || "" } : {}) };
+}
+
 function outlineOf(doc, heads) {
-  const entry = (list) => (i, n) => typeof i === "string" ? { id: `item-${list}-${n}`, title: i }
-    : { id: `item-${list}-${i.id}`, title: list === "tasks" ? `${i.id} ${i.title}` : i.title || i.text || i.item || i.id, state: itemState(list, i) };
+  const entry = outlineEntry;
   return heads.map((head) => {
     const all = (head.list ? doc[head.list] || [] : []).filter((i) => !i.deleted);
     const list = viewItems(head.list, all);
@@ -94,13 +100,102 @@ function outlineAgain() {
   renderOutline();
 }
 
+const SEARCHED = ["phases", "tasks", "questions"];
+const filter = { text: "", state: "" };
+const remote = {};
+let searchTurn = 0;
+let searchTimer = 0;
+
+function filtering() {
+  return !!(filter.text || filter.state);
+}
+
+function statusOf(i) {
+  return i.state === "out" ? "out" : i.status || i.state;
+}
+
+function matches(i) {
+  return (!filter.text || i.title.toLowerCase().includes(filter.text)) && (!filter.state || statusOf(i) === filter.state);
+}
+
+export function completeList(list) {
+  if (!["phases", "tasks", "questions", "followups"].includes(list)) return false;
+  const rows = (doc[list] || []).filter((i) => !i.deleted);
+  return (rows.length > 0 || closedLeft(list) > 0) && rows.every((i) => itemState(list, i) === "done");
+}
+
+function byPhase(items) {
+  if (!items.some((i) => i.phase)) return items;
+  const order = doc.phases.map((p) => p.id);
+  const titles = Object.fromEntries(doc.phases.map((p) => [p.id, p.title || p.id]));
+  const rank = (i) => (order.includes(i.phase) ? order.indexOf(i.phase) : order.length);
+  const sorted = [...items].sort((a, b) => rank(a) - rank(b) || (rank(a) === order.length ? a.phase.localeCompare(b.phase) : 0));
+  const grouped = [];
+  for (const [n, i] of sorted.entries()) {
+    if (!n || sorted[n - 1].phase !== i.phase) grouped.push({ id: `ol-group-${i.phase || "none"}`, group: i.phase ? titles[i.phase] || i.phase : "No phase" });
+    grouped.push(i);
+  }
+  return grouped;
+}
+
+function shapeOutline(tree) {
+  return tree.map((s) => {
+    const list = s.id.replace(/^sec-/, "");
+    const known = new Set(s.items.map((i) => i.id));
+    const found = (remote[list] || []).map(outlineEntry(list)).filter((i) => !known.has(i.id));
+    const items = [...s.items, ...found].filter((i) => !filtering() || matches(i));
+    return { ...s, items: list === "tasks" ? byPhase(items) : items, hits: items.length, complete: completeList(list) };
+  }).filter((s) => !filtering() || s.hits);
+}
+
+async function searchRemote() {
+  const turn = ++searchTurn;
+  for (const list of SEARCHED) delete remote[list];
+  if (filter.text && ["", "done"].includes(filter.state)) {
+    for (const list of SEARCHED.filter((name) => closedLeft(name))) {
+      try {
+        const resp = await searchClosed(list, filter.text);
+        if (turn !== searchTurn) return;
+        if (resp.ok) remote[list] = (await resp.json()).data;
+      } catch (e) { /* offline: the loaded rows still filter */ }
+    }
+  }
+  if (turn === searchTurn) renderOutline();
+}
+
+function setFilter(text, state) {
+  filter.text = text.trim().toLowerCase();
+  filter.state = state;
+  renderOutline();
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(searchRemote, 200);
+}
+
+const STATES = [["", "Any state"], ["open", "Open"], ["claimed", "Claimed"], ["pr", "In PR"], ["blocked", "Blocked"], ["done", "Done"], ["out", "Out of scope"]];
+
+function outlineTools() {
+  const input = h("input", { class: "ol-filter", id: "outline-filter", type: "search", placeholder: "Filter", autocomplete: "off",
+    "aria-label": "Filter the outline by title or id" });
+  const pick = h("select", { class: "ol-state", id: "outline-state", "aria-label": "Filter the outline by state" },
+    ...STATES.map(([value, text]) => h("option", { value, text })));
+  const again = () => setFilter(input.value, pick.value);
+  input.addEventListener("input", again);
+  pick.addEventListener("change", again);
+  return h("div", { class: "ol-tools" }, input, pick, h("button", { class: "link", type: "button", id: "outline-all", on: { click: foldAll } }));
+}
+
+function outlineRow(i) {
+  return i.group ? h("li", { class: "ol-group", text: i.group }) : h("li", {}, outlineLink(i));
+}
+
 function outlineGroup(s) {
-  const box = h("details", { class: "fold", id: `ol-${s.id}`, open: "" }, h("summary", {}, outlineLink(s)));
-  collapsible(box);
+  const box = h("details", { class: "fold", id: `ol-${s.id}`, open: filtering() || !s.complete ? "" : false }, h("summary", {}, outlineLink(s)));
+  if (box.open) box.dataset.fresh = "";
+  if (!filtering()) collapsible(box);
   const key = `ol-${s.id}`;
   return h("li", { class: "ol-sec" }, lazy(box, () => h("ul", { class: "ol-items" },
-    ...firstPage(key, s.items, (i) => i.id).map((i) => h("li", {}, outlineLink(i))), moreButton(key, s.items.length, "more items", outlineAgain) || "",
-    (s.items.length && closedMore(s.id.replace(/^sec-/, ""), "done", () => render())) || "")));
+    ...firstPage(key, s.items, (i) => i.id).map(outlineRow), moreButton(key, s.items.length, "more items", outlineAgain) || "",
+    (s.items.length && !filtering() && closedMore(s.id.replace(/^sec-/, ""), "done", () => render())) || "")));
 }
 
 export function outlineBoxes() {
@@ -132,13 +227,17 @@ function pageHeads() {
 
 export function renderOutline() {
   const tree = outlineOf(doc, pageHeads());
+  const shaped = shapeOutline(tree);
   const nav = $("outline");
-  const sig = JSON.stringify(tree);
+  const sig = JSON.stringify(shaped);
   if (nav.dataset.sig !== sig) {
     nav.dataset.sig = sig;
     $("jump-to").replaceChildren(h("option", { value: "", text: "Choose a section" }), ...tree.map((s) => h("option", { value: s.id, text: s.title })));
-    nav.replaceChildren(h("div", { class: "ol-tools" }, h("button", { class: "link", type: "button", id: "outline-all", on: { click: foldAll } })),
-      h("ul", {}, ...tree.map(outlineGroup)));
+    if (!$("outline-filter")) nav.replaceChildren(outlineTools());
+    const list = h("ul", { id: "outline-list" }, ...shaped.map(outlineGroup));
+    const old = $("outline-list");
+    if (old) old.replaceWith(list);
+    else nav.append(list);
   }
   scheduleOutline();
   markPending();
@@ -218,12 +317,39 @@ export function showOutline(open) {
   $("outline-toggle").setAttribute("aria-expanded", String(open));
 }
 
+const WALKS = ["#outline a[data-target]", "#tasks .item-title > a.task-id"];
+const STEPS = { ArrowDown: 1, ArrowUp: -1, j: 1, k: -1 };
+
+function typing(el) {
+  return !!el && (el.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(el.tagName));
+}
+
+function walkKeys(ev) {
+  const step = STEPS[ev.key];
+  if (!step || ev.defaultPrevented || ev.altKey || ev.ctrlKey || ev.metaKey || ev.shiftKey || typing(ev.target)) return;
+  const at = document.activeElement;
+  const walk = WALKS.find((selector) => at && at.matches(selector));
+  if (!walk && ev.key.startsWith("Arrow")) return;
+  const links = [...document.querySelectorAll(walk || WALKS[0])].filter((a) => a.getClientRects().length);
+  if (!links.length) return;
+  ev.preventDefault();
+  const n = links.indexOf(at);
+  const next = n < 0 ? links.find((a) => a.classList.contains("on")) || links[0] : links[Math.min(links.length - 1, Math.max(0, n + step))];
+  next.focus();
+  next.scrollIntoView({ block: "nearest" });
+}
+
 export function wireOutline() {
   $("outline-toggle").addEventListener("click", () => showOutline(!$("outline").classList.contains("open")));
   document.querySelector(".col").addEventListener("toggle", scheduleOutline, true);
   document.addEventListener("scroll", (ev) => { if (ev.target !== $("outline")) scheduleOutline(); }, { capture: true, passive: true });
   $("outline").addEventListener("click", (ev) => {
     const a = ev.target.closest("a[data-target]");
+    if (a && pageTo(a.dataset.target)) {
+      ev.preventDefault();
+      showOutline(false);
+      return;
+    }
     const el = a && revealTarget(a.dataset.target);
     if (!el) return;
     ev.preventDefault();
@@ -232,6 +358,7 @@ export function wireOutline() {
     showOutline(false);
     markOutline();
   });
+  document.addEventListener("keydown", walkKeys);
   const userScroll = () => { outlinePick = null; };
   for (const ev of ["wheel", "touchstart", "keydown"]) window.addEventListener(ev, userScroll, { passive: true });
   for (const ev of ["scroll", "resize"]) window.addEventListener(ev, scheduleOutline, { passive: true });

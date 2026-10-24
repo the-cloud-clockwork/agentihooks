@@ -67,7 +67,7 @@ HEADS = [
     {"id": "sec-questions", "title": "Questions", "list": "questions"},
     {"id": "sec-followups", "title": "Follow ups", "list": "followups"},
 ]
-OUTLINE_FNS = ["outlineOf", "itemState"]
+OUTLINE_FNS = ["outlineEntry", "outlineOf", "itemState"]
 
 
 def states(doc):

@@ -258,6 +258,9 @@ Small, quiet radii: 4px for inline controls, checkboxes and code, 6px for panels
 
 ### Navigation
 - **Outline:** a fixed left list of section links, muted at rest, white on hover with the hover lift, accent when current. Items lead with a red or green bullet for open or done.
+- **Outline filter:** a line input and a state select above the list filter it by title, id and state; done items not yet loaded are searched on the server. Swarm tasks sit under muted uppercase phase labels that never fold.
+- **Fresh defaults:** an outline category or Ledger section whose every item is done or answered starts closed for a viewer with no saved choice.
+- **Keyboard:** ArrowUp and ArrowDown, or j and k outside form controls, move focus through the visible outline links or task ids; Enter reveals the target.
 
 ## Do's and Don'ts
 

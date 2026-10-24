@@ -35,6 +35,10 @@ export function readClosed(name, offset) {
   return fetch(`${API_V1}/${name}?state=done&offset=${offset}&limit=10`, { cache: "no-store", headers: { "X-Ledger-Token": TOKEN } });
 }
 
+export function searchClosed(name, text) {
+  return fetch(`${API_V1}/${name}?state=done&q=${encodeURIComponent(text)}&offset=0&limit=20`, { cache: "no-store", headers: { "X-Ledger-Token": TOKEN } });
+}
+
 export function readArchitecture() {
   return fetch(`${API_V1}/architecture`, { cache: "no-store", headers: { "X-Ledger-Token": TOKEN } });
 }
