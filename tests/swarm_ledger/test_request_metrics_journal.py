@@ -225,13 +225,51 @@ def test_corrupt_journal_lines_are_skipped(tmp_path, monkeypatch, now):
     assert coverage["held_since"] == START - 10.0
 
 
-def test_reload_persists_a_stop_before_exec(tmp_path, now):
-    path = tmp_path / "metrics.jsonl"
-    request_metrics.restore(path)
-    request_metrics.record("POST", OPERATIONS, 1.0, 0.0, 0.0)
-    calls = []
-    assert server.reload_if_changed(-1, (tmp_path,), lambda *args: calls.append(path.read_text()))
-    assert json.loads(calls[0].splitlines()[-1])[0] == "stop"
+def test_a_stopping_server_persists_a_stop_before_it_releases_the_writer(tmp_path, now, monkeypatch):
+    path = tmp_path / request_metrics.JOURNAL_NAME
+    seen = []
+
+    class Lease:
+        def __init__(self, directory):
+            pass
+
+        def acquire(self, claimant, wait):
+            return self
+
+        def release(self):
+            seen.append(path.read_text())
+
+    class Server:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def server_bind(self):
+            pass
+
+        def server_activate(self):
+            pass
+
+        def serve_forever(self, poll_interval):
+            request_metrics.record("POST", OPERATIONS, 1.0, 0.0, 0.0)
+
+        def drained(self, timeout):
+            return True
+
+        def server_close(self):
+            pass
+
+    monkeypatch.setattr(server.core, "LEDGER_DIR", tmp_path)
+    monkeypatch.setattr(server, "PIDFILE", tmp_path / ".server.pid")
+    monkeypatch.setattr(server.ports.swarm().ledger_writer, "WriterLease", Lease)
+    monkeypatch.setattr(server, "ThreadingHTTPServer", Server)
+    monkeypatch.setattr(server.threading, "Thread", lambda **kwargs: SimpleNamespace(start=lambda: None))
+    monkeypatch.setattr(server.server_lifetime, "watch", lambda *args: threading.Event())
+    monkeypatch.setattr(server.server_code, "record", lambda *args, **kwargs: None)
+    monkeypatch.setattr(server.legacy, "adopt", lambda stored: None)
+    monkeypatch.setattr(server, "adopt_unrelayed", lambda: None)
+    monkeypatch.setattr(server, "HUB", SimpleNamespace(drain=lambda: None))
+    server.serve()
+    assert json.loads(seen[0].splitlines()[-1])[0] == "stop"
 
 
 def test_endpoint_and_command_return_route_records(tmp_path, now, metrics_url, capsys):
@@ -447,7 +485,13 @@ def test_serve_restores_then_stops_the_journal(monkeypatch, tmp_path, now):
         def __init__(self, *args, **kwargs):
             pass
 
-        server_bind = server_activate = serve_forever = server_close = lambda self: None
+        server_bind = server_activate = server_close = lambda self: None
+
+        def serve_forever(self, seconds):
+            pass
+
+        def drained(self, seconds):
+            return True
 
     monkeypatch.setattr(server.core, "LEDGER_DIR", tmp_path)
     monkeypatch.setattr(server, "PIDFILE", tmp_path / ".server.pid")

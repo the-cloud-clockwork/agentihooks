@@ -1,0 +1,7 @@
+[
+  {"question": "t1", "expect": "tasks/t1"},
+  {"question": "pull request 42", "expect": ["tasks/t1"]},
+  {"question": "semantic search", "expect": "followups/f1"},
+  {"question": "remember this decision", "expect": "fixture/notes/n1", "scope": "fixture", "kinds": ["note"]},
+  {"question": "kubernetes rollout", "expect": "tasks/t1"}
+]

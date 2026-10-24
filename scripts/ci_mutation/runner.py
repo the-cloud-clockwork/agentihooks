@@ -97,17 +97,19 @@ def read_paths(call: ast.Call, bindings: dict[str, ast.AST]) -> list[str]:
 
 
 def fixture_literals(node: ast.AST) -> list[str]:
+    nodes = list(ast.walk(node))
     bindings = {
         target.id: assignment.value
-        for assignment in ast.walk(node)
+        for assignment in nodes
         if isinstance(assignment, ast.Assign)
         for target in assignment.targets
         if isinstance(target, ast.Name)
         and target.id not in {part.id for part in ast.walk(assignment.value) if isinstance(part, ast.Name)}
     }
-    functions = {function.name: function for function in ast.walk(node) if isinstance(function, ast.FunctionDef)}
+    functions = {function.name: function for function in nodes if isinstance(function, ast.FunctionDef)}
+    calls = [part for part in nodes if isinstance(part, ast.Call)]
     parameters = {}
-    for call in (part for part in ast.walk(node) if isinstance(part, ast.Call)):
+    for call in calls:
         if isinstance(call.func, ast.Name) and call.func.id in functions:
             for parameter, value in zip(functions[call.func.id].args.args, call.args):
                 if parameter.arg not in {part.id for part in ast.walk(value) if isinstance(part, ast.Name)}:
@@ -117,7 +119,7 @@ def fixture_literals(node: ast.AST) -> list[str]:
             if len(names) == 1:
                 bindings[names[0]] = call.args[1]
     bindings.update({name: ast.List(elts=values) for name, values in parameters.items()})
-    return [path for call in ast.walk(node) if isinstance(call, ast.Call) for path in read_paths(call, bindings)]
+    return [path for call in calls for path in read_paths(call, bindings)]
 
 
 def fixture_candidates(root: Path, work: Path, literal: str) -> list[Path]:
@@ -161,6 +163,14 @@ def fixture_files(root: Path, work: Path, tests: list[str]) -> list[str]:
     return sorted(files)
 
 
+# mutmut copies the workspace into mutants/ before any test runs, so the workspace itself is only read.
+def link_or_copy(source: str, target: str) -> None:
+    try:
+        os.link(source, target)
+    except OSError:
+        shutil.copy2(source, target)
+
+
 def prepare_workspace(root: Path, work: Path, paths: list[str], tests: list[str]) -> None:
     for name in (
         "hooks",
@@ -177,7 +187,12 @@ def prepare_workspace(root: Path, work: Path, paths: list[str], tests: list[str]
     ):
         source = root / name
         if source.is_dir():
-            shutil.copytree(source, work / name, ignore=shutil.ignore_patterns("__pycache__", "*.pyc", work.name))
+            shutil.copytree(
+                source,
+                work / name,
+                ignore=shutil.ignore_patterns("__pycache__", "*.pyc", work.name),
+                copy_function=link_or_copy,
+            )
     root_files = sorted(
         path.name
         for path in root.iterdir()

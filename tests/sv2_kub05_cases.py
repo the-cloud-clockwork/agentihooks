@@ -296,7 +296,7 @@ def _rejection() -> tuple[dict, bool]:
         == {
             "stale_controller": "the controller lease is stale",
             "unsupported_reason": "unsupported failure reason",
-            "unknown_choice": "a recovery decision is fresh or resume",
+            "unknown_choice": "a recovery decision is native, context, fresh or resume",
             "resume_without_checkpoint": "no complete compatible checkpoint to resume from",
             "nothing_pending": "no recovery decision is pending for this attempt",
             "revoked_grant": "a scoped controller grant is required",
