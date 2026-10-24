@@ -23,6 +23,7 @@ PULL_REPO = re.compile(r"github\.com/([^/]+/[^/]+)/pull/\d+")
 MATCHED = re.compile(r"\bpush\b|\bpr\s+(?:create|ready)\b")
 VARIABLE = re.compile(r"\$(?:\{(\w+)\}|(\w+))")
 ASSIGNED = re.compile(r"[A-Za-z_]\w*=.*")
+DECLARES = frozenset({"export", "declare", "typeset", "local", "readonly"})
 
 
 def _git_args(here, args):
@@ -50,12 +51,12 @@ def actions(command, cwd):
     here, assigned = Path(cwd or "."), {}
     for words in simple_commands(command):
         index = program_index(words)
-        if index is None or words[index] == "export":
+        if index is None or words[index] in DECLARES:
             for name, value in (word.split("=", 1) for word in words if ASSIGNED.fullmatch(word)):
                 assigned[name] = expand(value, assigned)
             continue
         program, rest = PurePosixPath(words[index]).name, words[index + 1 :]
-        if program == "cd" and rest:
+        if program in ("cd", "pushd") and rest:
             here = here / Path(expand(rest[0], assigned)).expanduser()
         elif program == "gh" and _gh_args(rest)[:2] in OPENS and not DRAFTS.intersection(rest):
             yield "open", here, ()
