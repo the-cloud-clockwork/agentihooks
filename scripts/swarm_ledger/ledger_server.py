@@ -488,8 +488,8 @@ def restore_decision_argv(body):
     agent, choice = body.get("agent"), body.get("choice")
     if not isinstance(agent, str) or not re.fullmatch(r"[A-Za-z][A-Za-z0-9@_.-]{0,127}", agent):
         raise ValueError("A restore decision needs an agent name")
-    if choice not in {"resume", "fresh"}:
-        raise ValueError("Choose resume or fresh")
+    if choice not in {"resume", "native", "context", "fresh"}:
+        raise ValueError("Choose native, context, fresh or resume")
     return ["restore-decision", agent, choice]
 
 
