@@ -125,11 +125,13 @@ NO_DOCTOR = ("", False)
 
 def page_view(state, fix_phase, watched):
     meta = {key: item for key, item in state["_meta"].items() if key not in ("seeds", "api_operations")}
-    marks = ports.swarm().freeze.marks(state, hierarchy.project(state)[0], fix_phase, watched)
+    swarm = ports.swarm()
+    marks = swarm.freeze.marks(state, hierarchy.project(state)[0], fix_phase, watched)
+    status = swarm.phase_state.status({"tasks": [], **state})
     rows, closed = ledger_closed.trimmed(state)
     if closed:
         meta["closed"] = closed
-    return {**state, **rows, "marks": marks, "_meta": {**meta, "limits": PAGE_LIMITS}}
+    return {**state, **rows, "marks": marks, "phase_status": status, "_meta": {**meta, "limits": PAGE_LIMITS}}
 
 
 def doctor_holds(slug):
@@ -186,18 +188,6 @@ def bin_summaries(now=None):
     return sorted(found, key=lambda s: s["deleted_at"], reverse=True)
 
 
-ICON = (
-    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" '
-    'stroke-linejoin="round" aria-hidden="true">{}</svg>'
-)
-TRASH = ICON.format(
-    '<path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M6 6l1 14h10l1-14"/><path d="M10 11v6M14 11v6"/>'
-)
-HOME_ICON = ICON.format('<path d="M3 11l9-8 9 8"/><path d="M5 10v10h14V10"/><path d="M10 20v-6h4v6"/>')
-HEADS = {
-    "home": ("Ledger", "Kind:kind", "Overview", ">Open:open", ">Done:done", "Swarm:swarm", ">Activity:at", ""),
-    "bin": ("Ledger", "Kind", "Overview", ">Deleted", ">Left", ""),
-}
 PAGE_POLICY = page_policy.policy(os.environ, core.LEDGER_DIR, PORT)
 STATIC_RE = re.compile(r"/static/([0-9a-f]{12})/((?:[a-z]+/)?[a-z_]+\.(js|css))")
 STATIC_TYPES = {"js": "text/javascript; charset=utf-8", "css": "text/css; charset=utf-8"}
@@ -209,38 +199,9 @@ def home_summaries():
     return [{**s, "swarm": swarm_state(s["slug"])} for s in ledger_summaries()]
 
 
-def head_cell(label):
-    label, _, key = label.partition(":")
-    css = ' class="r"' if label.startswith(">") else ""
-    label = label.removeprefix(">")
-    if not key:
-        return f"<span{css}>{label}</span>"
-    css = ' class="sort r"' if css else ' class="sort"'
-    return f'<button{css} type="button" data-sort="{key}">{label}<i aria-hidden="true">&#8597;</i></button>'
-
-
-def index_page(view="home"):
-    """The HOME or BIN shell; its rows load from the v1 ledger and bin collections."""
-    if view == "bin":
-        heading, total, watermark = "BIN", '<span class="total" id="total"></span>', ""
-        fab = f'<a class="fab" id="home-fab" href="/" aria-label="HOME">{HOME_ICON}</a>'
-    else:
-        heading, total, watermark = "HOME", "", '<div class="watermark" aria-hidden="true"></div>'
-        fab = f'<a class="fab" id="bin-fab" href="/?view=bin" aria-label="Bin">{TRASH}</a>'
-    values = {
-        "HEADING": heading,
-        "PAGE": served_version(),
-        "WATERMARK": watermark,
-        "VIEW": view,
-        "TOTAL": total,
-        "HEAD": "".join(head_cell(label) for label in HEADS[view]),
-        "FAB": fab,
-    }
-    return re.sub(
-        r"__HOME_(HEADING|PAGE|WATERMARK|VIEW|TOTAL|HEAD|FAB)__",
-        lambda m: values[m.group(1)],
-        core.HOME.read_text(encoding="utf-8"),
-    )
+def index_page():
+    """The HOME and BIN shell; its script builds the view and loads its rows from the v1 ledger and bin collections."""
+    return core.HOME.read_bytes().decode().replace("__HOME_PAGE__", served_version())
 
 
 def page_for(slug):
@@ -1008,8 +969,7 @@ class Handler(BaseHTTPRequestHandler):
         if route.startswith("/static/"):
             return self.send_static(route)
         if route == "/":
-            view = "bin" if "view=bin" in self.path.partition("?")[2].split("&") else "home"
-            return self.send(200, index_page(view), "text/html; charset=utf-8")
+            return self.send(200, index_page(), "text/html; charset=utf-8")
         if route == "/api/layout":
             return self.send(200, json.dumps(ledger_layout.read()), "application/json")
         if route.startswith("/api/swarm/"):

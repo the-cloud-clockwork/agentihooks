@@ -227,7 +227,7 @@ Small, quiet radii: 4px for inline controls, checkboxes and code, 6px for panels
 
 ### Folding (operator rule 2026-10-12)
 - Only four things fold, each remembering its choice per viewer: the Ledger tab's sections below Overview, the Swarm tab panels below Capacity, the outline categories (with Expand all / Collapse all) and comment dropdowns (with Show all / Hide all comments).
-- Nothing else folds: Overview, Stats, the chat, artifacts, alerts and notifications windows, the Swarm control bar and Capacity, HOME and BIN. A fold anywhere else fails its test.
+- Nothing else folds: Overview, Stats, the chat, artifacts, alerts and notifications windows, the Swarm control bar and Capacity, HOME and BIN, and inside a section the plan groups, phase rows, done groups and task contract and proof blocks. A fold anywhere else fails its test.
 - A button inside a fold header (quota refresh, overlays apply) acts without folding its panel.
 
 ### Overview
@@ -245,7 +245,7 @@ Small, quiet radii: 4px for inline controls, checkboxes and code, 6px for panels
 - Apply sits in the panel header after the count and appears only when an overlay change is pending.
 
 ### Freeze marks
-- A snowflake marks a frozen or held item. On a plan row it sits inside the header between the fold arrow and the title; it never floats outside its panel.
+- A snowflake marks a frozen or held item. On a plan row it sits inside the header before the title; it never floats outside its panel.
 
 ### Outline marks
 - An outline entry with a pending notification carries a `+` placed against its own link, section headers included.

@@ -72,8 +72,8 @@ export function jsonTree(value, key) {
     return h("div", { class: "json-leaf" }, label, h("span", { class: `json-${kind}`, text: JSON.stringify(value) }));
   }
   const list = Array.isArray(value);
-  return h("details", { open: "" },
-    h("summary", { text: label + (list ? "[" : "{"), "data-close": list ? "]" : "}" }),
+  return h("div", { class: "json-node" },
+    h("div", { class: "json-open", text: label + (list ? "[" : "{") }),
     ...keys.map((k) => jsonTree(value[k], list ? undefined : k)),
     h("div", { class: "json-close", text: list ? "]" : "}" }));
 }
