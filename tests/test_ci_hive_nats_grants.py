@@ -311,7 +311,8 @@ def test_a_wider_antoncore_controller_user_fails(tmp_path, capsys):
     status, lines = _run(capsys, agentihooks, antoncore)
     assert status == 1
     assert lines == [
-        f"::error::publish allow $JS.API.> is granted only by the antoncore swarm-controller user ({grants.HIVE_VALUES})."
+        "::error::publish allow $JS.API.> is granted only by the antoncore swarm-controller user"
+        f" ({grants.HIVE_VALUES})."
     ]
 
 

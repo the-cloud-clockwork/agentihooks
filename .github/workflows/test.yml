@@ -2059,7 +2059,7 @@ jobs:
           repositories: antoncore
           permission-contents: read
 
-      # antoncore dev owns the dashboard and its checker, so the pull request head is only the data they grade.
+      # antoncore dev owns the dashboard, its checker and the swarm NATS users, so the pull request head is only the data they grade.
       - name: Check out the antoncore dashboard column checker
         if: ${{ !cancelled() && steps.antoncore-token.outcome == 'success' }}
         uses: actions/checkout@v4

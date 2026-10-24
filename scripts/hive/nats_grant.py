@@ -71,6 +71,7 @@ CONTROLLER_PUBLISH = (
     "agentihooks.queue.>",
     "$JS.API.STREAM.LIST",
     "$JS.API.STREAM.CREATE.*",
+    "$JS.API.STREAM.UPDATE.*",
     "$JS.API.STREAM.INFO.*",
     "$JS.API.STREAM.MSG.GET.*",
     "$JS.API.CONSUMER.CREATE.>",

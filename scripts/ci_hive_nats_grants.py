@@ -8,9 +8,17 @@ import yaml
 
 MEMBER_SOURCE = "scripts/hive/nats_grant.py"
 MEMBER_KEY = "UMEMBER"
-RENDER = "import json, sys; sys.path.insert(0, sys.argv[1]); from scripts.hive import nats_grant; print(json.dumps({}))"
-RENDER_MEMBER = RENDER.format(f"nats_grant.member_claims({MEMBER_KEY!r})")
-RENDER_CONTROLLER = RENDER.format("nats_grant.controller_claims()")
+
+
+def _render(call: str) -> str:
+    return (
+        "import json, sys; sys.path.insert(0, sys.argv[1]); from scripts.hive import nats_grant;"
+        f" print(json.dumps({call}))"
+    )
+
+
+RENDER_MEMBER = _render(f"nats_grant.member_claims({MEMBER_KEY!r})")
+RENDER_CONTROLLER = _render("nats_grant.controller_claims()")
 # The shared swarm-hive password user cannot carry a per member reply prefix, so its _INBOX.> stands for this one.
 MEMBER_INBOX = f"_INBOX.{MEMBER_KEY}.>"
 SHARED_INBOX = "_INBOX.>"
