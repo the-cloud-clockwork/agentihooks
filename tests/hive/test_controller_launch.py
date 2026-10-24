@@ -1220,7 +1220,6 @@ def test_saved_assignment_precedes_the_lane_harness(setup, harness):
 
     from scripts.hive import launch
     from scripts.hive.placement import Wait
-
     from scripts.swarm.capacity import Account
 
     if harness == "codex":
