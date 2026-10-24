@@ -28,4 +28,4 @@ def test_overrun_request_ends_with_its_departing_life(redis, address, state):
         exits.sweep(inbox, "sw", store, dict)
     after = inbox.get(item.id)
     assert after.state == "done"
-    assert after.reason == "sw-eng-1 handed off its seat; its overrun request ended with it"
+    assert after.reason == "done: sw-eng-1 handed off its seat; its overrun request ended with it"
