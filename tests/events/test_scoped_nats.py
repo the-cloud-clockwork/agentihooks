@@ -307,8 +307,7 @@ def test_hive_heartbeat_keeps_beating_on_a_fresh_bus_until_the_hub_creates_the_s
     from scripts.hive import account_slots, buckets, daemon
 
     redis = fakeredis.FakeRedis(server=fakeredis.FakeServer(), decode_responses=True)
-    report = {"slots": [{"harness": "claude", "account": "a", "cap": 1}], "interactive": {}, "repos": []}
-    report.update(sessions={"claude:a": 0}, quota={})
+    report = {"slots": [], "interactive": {}, "repos": [], "sessions": {}, "quota": {}}
     hosted = {"executions": {}, "names": []}
     client, beats = member(signer), []
 
