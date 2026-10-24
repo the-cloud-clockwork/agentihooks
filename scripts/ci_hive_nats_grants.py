@@ -102,7 +102,7 @@ def differences(ours: dict, theirs: dict, credential: str, user: str) -> list[st
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        description="Fail when hive member or controller NATS grants differ from the antoncore users."
+        description="Fail when hive or controller NATS grants differ from antoncore users."
     )
     parser.add_argument("--agentihooks", required=True)
     parser.add_argument("--antoncore", type=Path, required=True)

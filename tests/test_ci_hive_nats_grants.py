@@ -220,7 +220,7 @@ def test_the_help_states_what_the_check_fails_on(capsys):
     with pytest.raises(SystemExit):
         grants.main(["--help"])
     lines = capsys.readouterr().out.splitlines()
-    assert "Fail when hive member or controller NATS grants differ from the antoncore users." in lines
+    assert "Fail when hive or controller NATS grants differ from antoncore users." in lines
 
 
 def test_the_member_grants_render_the_minted_member_claims():
