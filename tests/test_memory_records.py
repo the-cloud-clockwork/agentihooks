@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from hooks.memory.records import DECODERS, TurnState, normalize_entries
+from hooks.memory.records import CODEX_TYPES, DECODERS, TurnState, is_copilot_type, normalize_entries
 from hooks.memory.transcript_reader import _load_entries, detect_transcript_format, iter_transcript_records
 
 pytestmark = pytest.mark.unit
@@ -180,3 +180,317 @@ def test_codex_rollout_golden_records():
         ("assistant_text", "Done.\n<!-- @lesson -->\ncodex rollouts use response_item records\n<!-- @/lesson -->"),
         ("token_usage", None),
     ]
+
+
+_CLAUDE_BLOCKS = [
+    "x",
+    {"type": "text"},
+    {"type": "tool_use"},
+    {"type": "tool_result"},
+    {"type": "image"},
+    {"type": "text", "text": "t"},
+    {"type": "tool_use", "id": "u", "name": "N", "input": {"a": 1}},
+    {"type": "tool_result", "tool_use_id": "u", "content": "c", "is_error": "yes"},
+]
+_CODEX_TEXTS = [
+    {"type": "input_text", "text": "a"},
+    {"type": "output_text", "text": "b"},
+    {"type": "text", "text": "c"},
+    {"type": "image", "text": "no"},
+    "s",
+    {"type": "input_text"},
+]
+
+DECODE_CASES = [
+    ("claude", {"type": "system", "message": "m"}, False, [], False),
+    ("claude", {"type": "user", "message": "hi"}, True, [{"kind": "user_text", "text": "hi"}], True),
+    (
+        "claude",
+        {"type": "assistant", "message": {"content": "ok"}},
+        False,
+        [{"kind": "assistant_text", "text": "ok"}],
+        False,
+    ),
+    ("claude", {"type": "user", "isMeta": True, "message": "r"}, False, [{"kind": "system_text", "text": "r"}], False),
+    (
+        "claude",
+        {"type": "assistant", "isMeta": True, "message": "a"},
+        False,
+        [{"kind": "assistant_text", "text": "a"}],
+        False,
+    ),
+    ("claude", {"type": "assistant", "message": {"content": 5}}, False, [], False),
+    ("claude", {"type": "assistant"}, False, [], False),
+    ("claude", {"type": "assistant", "message": {}}, False, [], False),
+    (
+        "claude",
+        {"type": "assistant", "message": {"content": _CLAUDE_BLOCKS}},
+        False,
+        [
+            {"kind": "assistant_text", "text": ""},
+            {"kind": "tool_call", "tool_name": "", "tool_input": None, "tool_use_id": ""},
+            {"kind": "tool_result", "tool_result": None, "tool_use_id": "", "is_error": False},
+            {"kind": "assistant_text", "text": "t"},
+            {"kind": "tool_call", "tool_name": "N", "tool_input": {"a": 1}, "tool_use_id": "u"},
+            {"kind": "tool_result", "tool_result": "c", "tool_use_id": "u", "is_error": True},
+        ],
+        False,
+    ),
+    ("codex", {"type": "response_item", "payload": "s"}, False, [], False),
+    ("codex", {"type": "session_meta"}, False, [{"kind": "meta"}], False),
+    ("codex", {"type": "turn_context", "payload": {}}, False, [], False),
+    (
+        "codex",
+        {"type": "response_item", "payload": {"type": "message", "role": "user", "content": _CODEX_TEXTS}},
+        True,
+        [{"kind": "user_text", "text": "a\nb\nc\n"}],
+        False,
+    ),
+    (
+        "codex",
+        {
+            "type": "response_item",
+            "payload": {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "r"}]},
+        },
+        False,
+        [{"kind": "assistant_text", "text": "r"}],
+        True,
+    ),
+    (
+        "codex",
+        {"type": "response_item", "payload": {"type": "message", "content": [{"type": "text", "text": "d"}]}},
+        True,
+        [{"kind": "system_text", "text": "d"}],
+        True,
+    ),
+    ("codex", {"type": "response_item", "payload": {"type": "message", "role": "assistant"}}, False, [], False),
+    (
+        "codex",
+        {"type": "response_item", "payload": {"type": "message", "role": "user", "content": []}},
+        True,
+        [],
+        False,
+    ),
+    (
+        "codex",
+        {"type": "response_item", "payload": {"type": "function_call", "name": "n", "arguments": "{}", "call_id": "c"}},
+        False,
+        [{"kind": "tool_call", "tool_name": "n", "tool_input": "{}", "tool_use_id": "c"}],
+        False,
+    ),
+    (
+        "codex",
+        {"type": "response_item", "payload": {"type": "local_shell_call", "action": {"x": 1}}},
+        False,
+        [{"kind": "tool_call", "tool_name": "local_shell_call", "tool_input": {"x": 1}, "tool_use_id": ""}],
+        False,
+    ),
+    (
+        "codex",
+        {"type": "response_item", "payload": {"type": "custom_tool_call", "arguments": "", "action": "a"}},
+        False,
+        [{"kind": "tool_call", "tool_name": "custom_tool_call", "tool_input": "a", "tool_use_id": ""}],
+        False,
+    ),
+    (
+        "codex",
+        {"type": "response_item", "payload": {"type": "function_call_output", "output": "o", "call_id": "c"}},
+        False,
+        [{"kind": "tool_result", "tool_result": "o", "tool_use_id": "c", "is_error": False}],
+        False,
+    ),
+    (
+        "codex",
+        {"type": "response_item", "payload": {"type": "custom_tool_call_output"}},
+        False,
+        [{"kind": "tool_result", "tool_result": None, "tool_use_id": "", "is_error": False}],
+        False,
+    ),
+    ("codex", {"type": "response_item", "payload": {"type": "reasoning"}}, True, [], True),
+    ("codex", {"type": "event_msg", "payload": {"type": "token_count"}}, True, [{"kind": "token_usage"}], True),
+    (
+        "codex",
+        {"type": "event_msg", "payload": {"type": "task_complete"}},
+        False,
+        [{"kind": "turn_complete", "text": ""}],
+        False,
+    ),
+    (
+        "codex",
+        {"type": "event_msg", "payload": {"type": "task_complete", "last_agent_message": "m"}},
+        False,
+        [{"kind": "turn_complete", "text": "m"}],
+        False,
+    ),
+    ("codex", {"type": "event_msg", "payload": {"type": "task_complete", "last_agent_message": "m"}}, True, [], False),
+    ("codex", {"type": "event_msg", "payload": {"type": "task_started"}}, True, [], True),
+    ("copilot", {"type": "user", "data": {"content": "u"}}, False, [], False),
+    ("copilot", {"type": "user.message", "ephemeral": True, "data": {"content": "u"}}, True, [], True),
+    ("copilot", {"type": "assistant.usage", "ephemeral": True, "data": {}}, False, [{"kind": "token_usage"}], False),
+    ("copilot", {"type": "user.message", "data": "u"}, True, [], True),
+    ("copilot", {"type": "user.message"}, True, [], True),
+    (
+        "copilot",
+        {"type": "user.message", "data": {"content": "ctx", "source": "system"}},
+        True,
+        [{"kind": "system_text", "text": "ctx"}],
+        True,
+    ),
+    ("copilot", {"type": "user.message", "data": {"content": "", "source": "system"}}, True, [], True),
+    (
+        "copilot",
+        {"type": "user.message", "data": {"content": "u", "source": "user"}},
+        True,
+        [{"kind": "user_text", "text": "u"}],
+        False,
+    ),
+    ("copilot", {"type": "user.message", "data": {"content": ""}}, True, [], False),
+    ("copilot", {"type": "user.message", "data": {}}, True, [], False),
+    (
+        "copilot",
+        {"type": "assistant.message", "data": {"content": "a"}},
+        False,
+        [{"kind": "assistant_text", "text": "a"}],
+        True,
+    ),
+    ("copilot", {"type": "assistant.message", "data": {}}, False, [], False),
+    (
+        "copilot",
+        {"type": "system.message", "data": {"content": "s"}},
+        True,
+        [{"kind": "system_text", "text": "s"}],
+        True,
+    ),
+    ("copilot", {"type": "system.message", "data": {}}, False, [], False),
+    (
+        "copilot",
+        {"type": "tool.execution_start", "data": {}},
+        False,
+        [{"kind": "tool_call", "tool_name": "", "tool_input": None, "tool_use_id": ""}],
+        False,
+    ),
+    (
+        "copilot",
+        {"type": "tool.execution_start", "data": {"toolName": "view", "arguments": {"p": 1}, "toolCallId": "k"}},
+        False,
+        [{"kind": "tool_call", "tool_name": "view", "tool_input": {"p": 1}, "tool_use_id": "k"}],
+        False,
+    ),
+    (
+        "copilot",
+        {"type": "tool.execution_complete", "data": {}},
+        False,
+        [{"kind": "tool_result", "tool_result": None, "tool_use_id": "", "is_error": False}],
+        False,
+    ),
+    (
+        "copilot",
+        {
+            "type": "tool.execution_complete",
+            "data": {"success": False, "error": {"message": "boom"}, "toolCallId": "k"},
+        },
+        False,
+        [{"kind": "tool_result", "tool_result": "boom", "tool_use_id": "k", "is_error": True}],
+        False,
+    ),
+    (
+        "copilot",
+        {"type": "tool.execution_complete", "data": {"success": False, "error": {}}},
+        False,
+        [{"kind": "tool_result", "tool_result": "", "tool_use_id": "", "is_error": True}],
+        False,
+    ),
+    (
+        "copilot",
+        {"type": "tool.execution_complete", "data": {"success": False, "error": "e", "result": {"content": "r"}}},
+        False,
+        [{"kind": "tool_result", "tool_result": "r", "tool_use_id": "", "is_error": True}],
+        False,
+    ),
+    (
+        "copilot",
+        {
+            "type": "tool.execution_complete",
+            "data": {"error": {"message": "x"}, "result": {"content": "", "detailedContent": "d"}},
+        },
+        False,
+        [{"kind": "tool_result", "tool_result": "d", "tool_use_id": "", "is_error": False}],
+        False,
+    ),
+    (
+        "copilot",
+        {
+            "type": "tool.execution_complete",
+            "data": {"result": {"contents": [{"text": "a"}, {"text": ""}, "x", {"type": "t"}, {"text": "b"}]}},
+        },
+        False,
+        [{"kind": "tool_result", "tool_result": "a\nb", "tool_use_id": "", "is_error": False}],
+        False,
+    ),
+    (
+        "copilot",
+        {"type": "tool.execution_complete", "data": {"result": {"content": 3, "contents": [{"text": ""}]}}},
+        False,
+        [
+            {
+                "kind": "tool_result",
+                "tool_result": {"content": 3, "contents": [{"text": ""}]},
+                "tool_use_id": "",
+                "is_error": False,
+            }
+        ],
+        False,
+    ),
+    (
+        "copilot",
+        {"type": "tool.execution_complete", "data": {"result": {"contents": "no"}}},
+        False,
+        [{"kind": "tool_result", "tool_result": {"contents": "no"}, "tool_use_id": "", "is_error": False}],
+        False,
+    ),
+    (
+        "copilot",
+        {"type": "tool.execution_complete", "data": {"result": "plain"}},
+        False,
+        [{"kind": "tool_result", "tool_result": "plain", "tool_use_id": "", "is_error": False}],
+        False,
+    ),
+    ("copilot", {"type": "assistant.usage", "data": {}}, True, [{"kind": "token_usage"}], True),
+    ("copilot", {"type": "session.task_complete", "data": {}}, False, [{"kind": "turn_complete", "text": ""}], False),
+    (
+        "copilot",
+        {"type": "session.task_complete", "data": {"summary": "s"}},
+        False,
+        [{"kind": "turn_complete", "text": "s"}],
+        False,
+    ),
+    ("copilot", {"type": "session.task_complete", "data": {"summary": "s"}}, True, [], False),
+    ("copilot", {"type": "session.start", "data": {}}, True, [{"kind": "meta"}], True),
+    ("copilot", {"type": "hook.start", "data": {"content": "h"}}, True, [], True),
+]
+
+
+@pytest.mark.parametrize(("fmt", "entry", "seen", "expected", "seen_after"), DECODE_CASES)
+def test_decoder_records_exactly(fmt, entry, seen, expected, seen_after):
+    state = TurnState(assistant_seen=seen)
+    assert list(DECODERS[fmt](entry, state)) == [dict(rec, raw=entry) for rec in expected]
+    assert state.assistant_seen is seen_after
+
+
+@pytest.mark.parametrize(
+    "prefix", ["session.", "user.", "assistant.", "tool.", "system.", "hook.", "subagent.", "mcp.", "permission."]
+)
+def test_every_copilot_prefix_is_recognised(prefix):
+    assert is_copilot_type(f"{prefix}event")
+    assert not is_copilot_type(prefix.rstrip("."))
+
+
+def test_non_string_type_is_not_copilot():
+    assert not is_copilot_type(None)
+
+
+@pytest.mark.parametrize("etype", ["session_meta", "response_item", "event_msg", "turn_context", "world_state"])
+def test_every_codex_type_detects_codex(tmp_path, etype):
+    path = _write(tmp_path, "rollout.jsonl", [{"type": etype, "payload": {}}])
+    assert detect_transcript_format(path) == "codex"
+    assert etype in CODEX_TYPES

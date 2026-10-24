@@ -26,7 +26,7 @@ from pathlib import Path
 from typing import Iterator, List, Optional
 
 from hooks.config import AGENTIHOOKS_HOME
-from hooks.memory.records import CODEX_TYPES, TranscriptRecord, TurnState, is_copilot_type, normalize_entries
+from hooks.memory.records import CODEX_TYPES, TranscriptRecord, is_copilot_type, normalize_entries
 
 
 def detect_transcript_format(path: str | Path) -> str:
@@ -95,7 +95,7 @@ def iter_transcript_records(path: str | Path) -> Iterator[TranscriptRecord]:
     entries = _load_entries(p)
     if not entries:
         return
-    yield from normalize_entries(detect_transcript_format(p), entries, TurnState())
+    yield from normalize_entries(detect_transcript_format(p), entries)
 
 
 _AGENT_LOG = os.getenv("AGENT_LOG_FILE", str(AGENTIHOOKS_HOME / "logs" / "agent.log"))
