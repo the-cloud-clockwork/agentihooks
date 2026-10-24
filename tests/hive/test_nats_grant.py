@@ -243,7 +243,7 @@ def test_a_member_takes_hub_offered_work_but_is_refused_creating_a_stream_or_dur
     assert f"permissions violation for publish to {durable}" in refused
 
 
-def test_hive_members_share_account_capacity_through_the_hub_slot_service(admin, signer):
+def test_hive_members_share_account_capacity_through_the_hub_slot_service(admin, signer, capfd):
     from scripts.events import nats
     from scripts.hive import account_slots, buckets
     from scripts.hub import slots
@@ -259,9 +259,17 @@ def test_hive_members_share_account_capacity_through_the_hub_slot_service(admin,
         buckets.provision(hub)
         slots.serve(hub, clock=lambda: 1000)
         report = {"slots": [{"harness": "claude", "account": "a", "cap": 1}], "sessions": {"claude:a": 0}}
-        first = account_slots.Remote(account_slots.asker(members[0], "rig"), "m1", lambda: report)
-        second = account_slots.Remote(account_slots.asker(members[1], "other"), "m2", lambda: report)
+        first = account_slots.Remote(account_slots.asker(members[0], "rig", "m1"), "m1", lambda: report)
+        second = account_slots.Remote(account_slots.asker(members[1], "other", "m2"), "m2", lambda: report)
         assert first.take("one", "claude") == "a"
+        assert second.take("two", "claude") is None
+        posing = account_slots.Remote(account_slots.asker(members[1], "rig", "m1", 500), "m1")
+        with pytest.raises(TimeoutError, match="^no responders for 'slots.rig.m1'$"):
+            posing.release("one", "claude", "a")
+        refusal = "slot request names hive 'm2' but the sending credential is bound to hive 'm1'"
+        with pytest.raises(account_slots.Unavailable, match=f"^{refusal}$"):
+            account_slots.Remote(account_slots.asker(members[0], "rig", "m1"), "m2").release("one", "claude", "a")
+        assert f"hub: refused a release in swarm rig: {refusal}\n" in capfd.readouterr().err
         assert second.take("two", "claude") is None
         first.release("one", "claude", "a")
         assert second.take("two", "claude") == "a"
@@ -650,7 +658,6 @@ def test_a_member_credential_carries_exactly_the_hive_member_claims():
     )
     publish = [
         "swarm.*.execution.>",
-        "swarm.*.slots",
         "dead.*",
         "dead.*.*",
         "$JS.API.INFO",
@@ -661,6 +668,7 @@ def test_a_member_credential_carries_exactly_the_hive_member_claims():
         *(f"$KV.{bucket}.>" for bucket in buckets),
         *(f"$JS.API.STREAM.INFO.KV_{bucket}" for bucket in buckets),
         *(f"$JS.API.STREAM.MSG.GET.KV_{bucket}" for bucket in buckets),
+        "slots.*.m1",
     ]
     assert claims["nats"] == {
         "type": "user",
