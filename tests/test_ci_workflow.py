@@ -364,14 +364,18 @@ def test_queue_environment_matches_the_baked_browser_and_invalidates_old_venvs()
 
 
 def test_every_job_sharing_the_test_environment_installs_the_baked_browser_version():
-    sharing = []
+    sharing, unpinned = [], []
     for path in sorted((_ROOT / ".github/workflows").glob("*.yml")):
         for name, job in (yaml.safe_load(path.read_text())["jobs"] or {}).items():
-            keys = [str(step.get("with", {}).get("key", "")) for step in job.get("steps", [])]
+            keys = [str((step.get("with") or {}).get("key", "")) for step in job.get("steps", [])]
             if any(key.startswith("venv-") for key in keys):
-                sharing.append((path.name, name, (job.get("env") or {}).get("UV_CONSTRAINT")))
-    assert ("count-record.yml", "count-record") in [(workflow, name) for workflow, name, _ in sharing]
-    assert [entry for entry in sharing if entry[2] != "${{ github.workspace }}/.github/test-constraints.txt"] == []
+                sharing.append(f"{path.name}:{name}")
+                if (job.get("env") or {}).get(
+                    "UV_CONSTRAINT"
+                ) != "${{ github.workspace }}/.github/test-constraints.txt":
+                    unpinned.append(f"{path.name}:{name}")
+    assert "count-record.yml:count-record" in sharing
+    assert unpinned == []
 
 
 def test_queue_browser_setup_cannot_enter_the_downloading_action():
