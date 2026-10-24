@@ -388,7 +388,7 @@ def test_running_prioritizes_requested_termination(supervisor, monkeypatch):
 def test_quiesce_excludes_exporter_and_bounds_descendants(supervisor, monkeypatch, forced):
     supervisor.children["exporter"] = SimpleNamespace(pid=321)
     remaining = [SimpleNamespace(pid=123)]
-    living = Mock(side_effect=[remaining, remaining if forced else [], []] if forced else [remaining, []])
+    living = Mock(side_effect=[remaining, remaining, remaining, []] if forced else [remaining, [], []])
     monkeypatch.setattr(runtime.trees, "living", living)
     send = Mock()
     monkeypatch.setattr(runtime.trees, "send", send)
@@ -860,7 +860,7 @@ def test_main_routes_the_admitted_paths(monkeypatch, tmp_path, implicit):
 
 def test_forced_quiescence_waits_for_the_kill_window(supervisor, monkeypatch):
     remaining = {123: SimpleNamespace(pid=123)}
-    monkeypatch.setattr(runtime.trees, "living", Mock(side_effect=[remaining, remaining, []]))
+    monkeypatch.setattr(runtime.trees, "living", Mock(side_effect=[remaining, remaining, remaining, []]))
     monkeypatch.setattr(runtime.trees, "send", lambda *_: None)
     monkeypatch.setattr(runtime.time, "monotonic", Mock(side_effect=[0, 1, 1, 1]))
     wait = Mock()
