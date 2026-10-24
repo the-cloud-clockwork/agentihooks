@@ -428,14 +428,14 @@ class HiveLaunch:
             return Outcome("spawn", Status.REFUSED, HIVE, detail=GONE)
         _match("ack host", order.hive, ack.target.get("host_id"))
         if agent.runtime_target != ack.target:
-            ended = replace(
+            bound = replace(
                 agent,
                 runtime_target=ack.target,
                 pane_id=ack.execution["pane_id"],
                 launched_at=ack.execution["launched_at"],
                 launch_timings=ack.execution["launch_timings"],
             )
-            self.store.execution_registry.update(self.slug, ended)
+            self.store.execution_registry.update(self.slug, bound)
         return Outcome("spawn", Status.OK, HIVE)
 
     def expire(self, request: SpawnRequest) -> bool | None:
