@@ -423,6 +423,41 @@ def test_a_task_left_in_pr_after_its_merge_goes_to_its_engineer_then_the_master(
     assert len(texts(store, ENG_SEAT)) == 1
 
 
+@pytest.mark.parametrize("hold", ["deadline", "wait"])
+def test_merged_reminders_wait_for_the_after_window_then_deliver_once(store, hold):
+    from scripts.swarm import idle
+
+    merged = answer("merged")
+    now = merged.merged_at + 21 * MINUTE
+    due = now + MINUTE
+    doc = in_pr()
+    if hold == "deadline":
+        doc["tasks"][0]["contract"] = {"after_at": str(due)}
+    else:
+        idle.declare_wait(store.redis, "sw", "sw-eng-1", due, "after measurement", now)
+    run(store, recorded())
+    assert run(store, doc, now_ms=now, github=lambda url: merged) == []
+    assert texts(store, ENG_SEAT) == []
+    assert texts(store, MASTER_SEAT) == []
+    for stamp in (due, due + 1):
+        run(store, doc, now_ms=stamp, github=lambda url: merged)
+    assert len(texts(store, ENG_SEAT)) == 1
+    assert len(texts(store, MASTER_SEAT)) == 1
+
+
+@pytest.mark.parametrize("deadline", [None, "", 0, -1])
+def test_due_or_absent_after_windows_keep_merged_reminders(store, deadline):
+    merged = answer("merged")
+    now = merged.merged_at + 21 * MINUTE
+    doc = in_pr()
+    if deadline is not None:
+        doc["tasks"][0]["contract"] = {"after_at": str(now + deadline) if deadline else ""}
+    run(store, recorded())
+    run(store, doc, now_ms=now, github=lambda url: merged)
+    assert len(texts(store, ENG_SEAT)) == 1
+    assert len(texts(store, MASTER_SEAT)) == 1
+
+
 def test_a_pull_request_closed_unmerged_goes_to_its_engineer_once(store):
     closed = answer("closed_unmerged")
     run(store, recorded())
