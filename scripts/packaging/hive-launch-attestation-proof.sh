@@ -7,7 +7,9 @@ label="hive-attestation-proof=${proof_dir##*.}"
 registry="hive-attestation-registry-${proof_dir##*.}"
 daemon="hive-attestation-daemon-${proof_dir##*.}"
 original_docker_host="${DOCKER_HOST:-unix:///var/run/docker.sock}"
+negative=""
 cleanup() {
+  if [[ -n "$negative" ]]; then kill "$negative" 2>/dev/null || true; fi
   docker --host "$original_docker_host" ps -aq --filter "label=$label" | xargs -r docker --host "$original_docker_host" rm -f
   rm -f "$proof_dir/override.yaml" "$proof_dir/pull.log"
   rmdir "$proof_dir"
