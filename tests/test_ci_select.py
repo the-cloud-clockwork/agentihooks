@@ -508,7 +508,7 @@ def workflow_legs():
     return int(words[words.index("--legs") + 1])
 
 
-def test_the_workflow_runs_a_swarm_tick_sized_selection_selected(repo):
+def test_the_workflow_selects_nine_legs_for_a_large_change(repo):
     write(repo, {f"tests/test_tick{index}.py": "from hooks import sample\n" for index in range(1, 10)})
     durations = seconds(test_sample=15.0, **{f"test_tick{index}": 160.0 for index in range(1, 10)})
     scope, legs = decide(repo, ["hooks/sample.py"], durations, workflow_legs())
