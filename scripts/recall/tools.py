@@ -1,6 +1,6 @@
 import os
 from collections.abc import Callable, Mapping
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from functools import wraps
 
 from .reindex import binned, ledger_dir
@@ -45,22 +45,21 @@ def _kinds(kinds: str) -> tuple[str, ...]:
     return tuple(kind.strip() for kind in kinds.split(",") if kind.strip())
 
 
+def filters(scope: str = "", kinds: str = "", author: str = "", seat: str = "", period: str = "") -> Filters:
+    since, _, until = period.partition("..")
+    return Filters(scope, _kinds(kinds), author, seat, since.strip() or None, until.strip() or None)
+
+
+def _scoped(chosen: Filters | None, environ: Mapping[str, str]) -> Filters:
+    chosen = chosen or filters()
+    return replace(chosen, scope=default_scope(chosen.scope, environ))
+
+
 @_answer
-def search(
-    query: str,
-    scope: str = "",
-    kinds: str = "",
-    author: str = "",
-    seat: str = "",
-    since: str = "",
-    until: str = "",
-    limit: int = 10,
-    environ: Mapping[str, str] = os.environ,
-) -> dict:
+def search(query: str, chosen: Filters | None = None, limit: int = 10, environ: Mapping[str, str] = os.environ) -> dict:
     store = _store(environ)
-    scope = default_scope(scope, environ)
-    filters = Filters(scope, _kinds(kinds), author, seat, since or None, until or None)
-    return {"scope": scope, "hits": [asdict(hit) for hit in search_hits(store, query, filters, limit)]}
+    scoped = _scoped(chosen, environ)
+    return {"scope": scoped.scope, "hits": [asdict(hit) for hit in search_hits(store, query, scoped, limit)]}
 
 
 @_answer
@@ -74,18 +73,10 @@ def get(ref: str, scope: str = "", environ: Mapping[str, str] = os.environ) -> d
 
 
 @_answer
-def timeline(
-    scope: str = "",
-    kinds: str = "",
-    since: str = "",
-    until: str = "",
-    limit: int = 200,
-    environ: Mapping[str, str] = os.environ,
-) -> dict:
+def timeline(chosen: Filters | None = None, limit: int = 200, environ: Mapping[str, str] = os.environ) -> dict:
     store = _store(environ)
-    scope = default_scope(scope, environ)
-    filters = Filters(scope, _kinds(kinds), since=since or None, until=until or None)
-    return {"scope": scope, "entries": [asdict(entry) for entry in timeline_entries(store, filters, limit)]}
+    scoped = _scoped(chosen, environ)
+    return {"scope": scoped.scope, "entries": [asdict(entry) for entry in timeline_entries(store, scoped, limit)]}
 
 
 @_answer

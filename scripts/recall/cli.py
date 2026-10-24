@@ -52,16 +52,17 @@ def _eval(golden: str, environ: Mapping[str, str]) -> int:
 
 
 def _query(args: argparse.Namespace, environ: Mapping[str, str]) -> dict:
-    kinds = ",".join(getattr(args, "kind", []))
-    if args.command == "search":
-        return tools.search(
-            args.query, args.scope, kinds, args.author, args.seat, args.since, args.until, args.limit, environ
-        )
     if args.command == "get":
         return tools.get(args.ref, args.scope, environ)
-    if args.command == "timeline":
-        return tools.timeline(args.scope, kinds, args.since, args.until, args.limit, environ)
-    return tools.sources(environ)
+    if args.command == "sources":
+        return tools.sources(environ)
+    period = f"{args.since}..{args.until}"
+    chosen = tools.filters(
+        args.scope, ",".join(args.kind), getattr(args, "author", ""), getattr(args, "seat", ""), period
+    )
+    if args.command == "search":
+        return tools.search(args.query, chosen, args.limit, environ)
+    return tools.timeline(chosen, args.limit, environ)
 
 
 def main(argv: list[str], environ: Mapping[str, str] = os.environ) -> int:

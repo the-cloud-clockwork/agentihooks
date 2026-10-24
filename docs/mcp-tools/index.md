@@ -33,14 +33,14 @@ The recall tools read the recall archive (`$AGENTIHOOKS_HOME/recall/recall.sqlit
 
 | Tool | Returns |
 |------|---------|
-| `recall_search(query, scope, kinds, author, seat, since, until, limit)` | `hits`: ranked items, each with its item key, kind, ref, title, author, time, snippet, archived flag and parent chain. A task id, ref or pull request number in the query comes first |
+| `recall_search(query, scope, kinds, author, seat, period, limit)` | `hits`: ranked items, each with its item key, kind, ref, title, author, time, snippet, archived flag and parent chain. A task id, ref or pull request number in the query comes first |
 | `recall_get(ref, scope)` | `item`: one item in full, all of its text, its parent chain and its comments and answers, replies nested under each |
-| `recall_timeline(scope, kinds, since, until, limit)` | `entries`: items oldest first |
+| `recall_timeline(scope, kinds, period, limit)` | `entries`: items oldest first |
 | `recall_sources()` | `sources`: each indexed ledger or swarm with its record count, item count, archived item count, last indexed time in epoch milliseconds and whether its slug sits in the ledger bin |
 
 - `scope` empty means the caller's own swarm, read from the session identity; outside a swarm it means every source. A ledger or swarm slug narrows it, and `all` crosses swarms.
 - `kinds` is a comma separated list of record kinds such as `task,comment`.
-- `since` and `until` take an ISO time, epoch milliseconds or a span such as `1d` or `3h`.
+- `period` is `SINCE`, `SINCE..UNTIL` or `..UNTIL`, each an ISO time, epoch milliseconds or a span back from now such as `1d` or `3h`.
 - `ref` in `recall_get` is an item key from a search hit (`<ledger>/tasks/<id>`) or a ref inside the scope (`tasks/<id>`). A ref that names items in several ledgers is refused with the item keys to choose from.
 - Every result is JSON: `{"success": true, ...}`, or `{"success": false, "error": "..."}`.
 

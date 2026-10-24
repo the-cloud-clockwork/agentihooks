@@ -27,8 +27,7 @@ def register(mcp):
         kinds: str = "",
         author: str = "",
         seat: str = "",
-        since: str = "",
-        until: str = "",
+        period: str = "",
         limit: int = 10,
     ) -> str:
         """Search tasks, phases, comments, chat, handoffs and learned notes of earlier
@@ -41,13 +40,13 @@ def register(mcp):
             kinds: comma separated record kinds, e.g. "task,comment,handoff".
             author: only records by this author.
             seat: only records under seats/<seat>/.
-            since: ISO time, epoch milliseconds or a span such as 1d or 3h.
-            until: as since.
+            period: "SINCE", "SINCE..UNTIL" or "..UNTIL"; each an ISO time, epoch milliseconds
+                or a span back from now such as 1d or 3h.
             limit: most hits returned.
         """
         return _respond(
             "recall_search",
-            lambda tools: tools.search(query, scope, kinds, author, seat, since, until, limit),
+            lambda tools: tools.search(query, tools.filters(scope, kinds, author, seat, period), limit),
         )
 
     @mcp.tool()
@@ -61,17 +60,18 @@ def register(mcp):
         return _respond("recall_get", lambda tools: tools.get(ref, scope))
 
     @mcp.tool()
-    def recall_timeline(scope: str = "", kinds: str = "", since: str = "", until: str = "", limit: int = 200) -> str:
+    def recall_timeline(scope: str = "", kinds: str = "", period: str = "", limit: int = 200) -> str:
         """List recall items in time order, oldest first.
 
         Args:
             scope: as in recall_search.
             kinds: as in recall_search.
-            since: as in recall_search.
-            until: as in recall_search.
+            period: as in recall_search.
             limit: most entries returned.
         """
-        return _respond("recall_timeline", lambda tools: tools.timeline(scope, kinds, since, until, limit))
+        return _respond(
+            "recall_timeline", lambda tools: tools.timeline(tools.filters(scope, kinds, period=period), limit)
+        )
 
     @mcp.tool()
     def recall_sources() -> str:

@@ -6,7 +6,7 @@ from hooks.mcp import recall as recall_mcp
 from scripts.recall import tools
 from scripts.recall.cli import main
 from scripts.recall.models import RecallRecord
-from scripts.recall.search import DAY
+from scripts.recall.search import DAY, Filters
 from scripts.recall.store import SQLiteRecallStore, default_path
 from scripts.swarm_ledger.repository.sqlite import DATABASE, SQLiteLedgerRepository
 
@@ -103,11 +103,11 @@ def test_search_defaults_to_the_callers_swarm(environ):
 
 
 def test_search_with_scope_all_crosses_swarms_and_a_slug_narrows(environ):
-    assert set(items(tools.search("shared", scope="all", environ=in_swarm(environ)))) == {
+    assert set(items(tools.search("shared", tools.filters("all"), environ=in_swarm(environ)))) == {
         "alpha/tasks/t1",
         "beta/tasks/t1",
     }
-    assert items(tools.search("shared", scope="beta", environ=in_swarm(environ))) == ["beta/tasks/t1"]
+    assert items(tools.search("shared", tools.filters("beta"), environ=in_swarm(environ))) == ["beta/tasks/t1"]
 
 
 def test_search_outside_a_swarm_searches_every_source(environ):
@@ -119,18 +119,26 @@ def test_search_outside_a_swarm_searches_every_source(environ):
 def test_search_hits_carry_parents_and_filters_apply(environ):
     hit = tools.search("shared", environ=in_swarm(environ))["hits"][0]
     assert [parent["ref"] for parent in hit["parents"]] == ["phases/p1", "ledger"]
-    kinds = tools.search("words", kinds="phase, ledger", environ=in_swarm(environ))
+    kinds = tools.search("words", tools.filters(kinds="phase, ledger"), environ=in_swarm(environ))
     assert items(kinds) == ["alpha/phases/p1"]
-    assert items(tools.search("comment", author="operator", environ=in_swarm(environ))) == [
+    assert items(tools.search("comment", tools.filters(author="operator"), environ=in_swarm(environ))) == [
         "alpha/tasks/t1/comments/c1"
     ]
-    assert len(tools.search("words", limit=1, scope="all", environ=environ)["hits"]) == 1
+    assert len(tools.search("words", tools.filters("all"), 1, environ=environ)["hits"]) == 1
 
 
 def test_search_refuses_an_unreadable_time(environ):
-    result = tools.search("words", since="yesterday-ish", environ=environ)
+    result = tools.search("words", tools.filters(period="yesterday-ish"), environ=environ)
     assert result["success"] is False
     assert "yesterday-ish" in result["error"]
+
+
+def test_filters_read_kinds_and_a_period():
+    assert tools.filters("alpha", " task, ,comment ", "operator", "eng-1", "2d..1d") == Filters(
+        "alpha", ("task", "comment"), "operator", "eng-1", "2d", "1d"
+    )
+    assert tools.filters(period="..2026-10-01") == Filters("", (), "", "", None, "2026-10-01")
+    assert tools.filters(period="3h") == Filters("", (), "", "", "3h", None)
 
 
 def test_get_returns_the_whole_item_with_parents_and_comments(environ):
@@ -171,7 +179,7 @@ def test_timeline_lists_items_in_time_order_within_scope(environ):
         "tasks/t1/comments/c1/comments/c2",
         "tasks/t1/answers/a1",
     ]
-    narrowed = tools.timeline(scope="all", kinds="task", until=str(T0 - 2 * DAY), environ=environ)
+    narrowed = tools.timeline(tools.filters("all", "task", period=f"..{T0 - 2 * DAY}"), environ=environ)
     assert [entry["item"] for entry in narrowed["entries"]] == ["beta/tasks/t1"]
 
 
@@ -205,7 +213,7 @@ def test_a_missing_archive_is_an_error_and_never_created(tmp_path):
 
 def test_the_cli_prints_the_same_json(environ, capsys):
     assert main(["search", "shared", "--scope", "beta"], in_swarm(environ)) == 0
-    assert json.loads(capsys.readouterr().out) == tools.search("shared", scope="beta", environ=environ)
+    assert json.loads(capsys.readouterr().out) == tools.search("shared", tools.filters("beta"), environ=environ)
     assert main(["get", "alpha/tasks/t1"], environ) == 0
     assert json.loads(capsys.readouterr().out)["item"]["text"].endswith("second part")
     assert main(["timeline", "--kind", "task", "--kind", "phase", "--limit", "1"], in_swarm(environ)) == 0
