@@ -7,14 +7,13 @@ import argparse
 import json
 import os
 import re
-import subprocess
-import time
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-ATTEMPTS = 3
+from scripts.ci_storage import rows
+
 WORKERS = 8
 HOUR = timedelta(hours=1)
 STAMP = "%Y-%m-%dT%H:%M:%SZ"
@@ -39,9 +38,7 @@ def job_name(name: str) -> str:
 def seconds(job: dict) -> float:
     if not job.get("started_at") or not job.get("completed_at"):
         return 0.0
-    began = datetime.fromisoformat(job["started_at"])
-    ended = datetime.fromisoformat(job["completed_at"])
-    return max(0.0, (ended - began).total_seconds())
+    return (datetime.fromisoformat(job["completed_at"]) - datetime.fromisoformat(job["started_at"])).total_seconds()
 
 
 def on_anton(job: dict) -> bool:
@@ -69,8 +66,8 @@ def aggregate(runs: list[dict], jobs: list[dict], merged: int) -> dict:
         return round(value / merged, 1) if merged else None
 
     def ranked(table, key):
-        rows = sorted(table.items(), key=lambda item: -item[1])
-        return [{**key(name), "minutes": round(spent, 1), "per_merged": per(spent)} for name, spent in rows]
+        ordered = sorted(table.items(), key=lambda item: -item[1])
+        return [{**key(name), "minutes": round(spent, 1), "per_merged": per(spent)} for name, spent in ordered]
 
     return {
         "runs": len(runs),
@@ -85,9 +82,9 @@ def aggregate(runs: list[dict], jobs: list[dict], merged: int) -> dict:
     }
 
 
-def render(result: dict, since: str, until: str) -> str:
+def render(result: dict) -> str:
     lines = [
-        f"## Anton runner minutes {since} to {until}",
+        f"## Anton runner minutes {result['since']} to {result['until']}",
         "",
         f"{result['runs']} runs, {result['jobs']} jobs, {result['merged']} pull requests merged into dev.",
         f"Anton minutes {result['anton_minutes']}, per merged pull request {result['anton_per_merged']}; "
@@ -112,75 +109,49 @@ def render(result: dict, since: str, until: str) -> str:
     return "\n".join(lines)
 
 
-def _gh(path: str, jq: str) -> list[dict]:
-    for attempt in range(ATTEMPTS):
-        try:
-            done = subprocess.run(
-                ["gh", "api", "--paginate", path, "--jq", jq], capture_output=True, text=True, check=True, timeout=300
-            )
-        except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
-            if attempt == ATTEMPTS - 1:
-                raise
-            time.sleep(attempt + 1)
-        else:
-            return [json.loads(line) for line in done.stdout.splitlines() if line]
-
-
 def read_runs(repo: str, since: datetime, until: datetime) -> list[dict]:
     hours = []
     start = since
     while start < until:
         hours.append((start, min(start + HOUR, until) - timedelta(seconds=1)))
         start += HOUR
-    jq = ".workflow_runs[] | {id, path, event, head_branch}"
 
     def read(window):
         first, last = (moment.strftime(STAMP) for moment in window)
-        return _gh(f"repos/{repo}/actions/runs?created={first}..{last}&per_page=100", jq)
+        return rows(f"repos/{repo}/actions/runs?created={first}..{last}&per_page=100", "workflow_runs")
 
     with ThreadPoolExecutor(WORKERS) as pool:
-        found = [run for rows in pool.map(read, hours) for run in rows]
+        found = [run for listed in pool.map(read, hours) for run in listed]
     return list({run["id"]: run for run in found}.values())
 
 
 def read_jobs(repo: str, runs: list[dict]) -> list[dict]:
-    jq = ".jobs[] | {run_id, name, labels, started_at, completed_at}"
-
     def read(run):
-        return _gh(f"repos/{repo}/actions/runs/{run['id']}/jobs?filter=all&per_page=100", jq)
+        return rows(f"repos/{repo}/actions/runs/{run['id']}/jobs?filter=all&per_page=100", "jobs")
 
     with ThreadPoolExecutor(WORKERS) as pool:
-        return [job for rows in pool.map(read, runs) for job in rows]
+        return [job for listed in pool.map(read, runs) for job in listed]
 
 
 def merged_count(repo: str, since: datetime, until: datetime) -> int:
-    window = f"{since.strftime(STAMP)}..{until.strftime(STAMP)}"
-    query = f"repo:{repo}+is:pr+is:merged+base:dev+merged:{window}"
-    done = subprocess.run(
-        ["gh", "api", f"search/issues?q={query}&per_page=1", "--jq", ".total_count"],
-        capture_output=True,
-        text=True,
-        check=True,
-        timeout=60,
-    )
-    return int(done.stdout)
+    query = f"repo:{repo}+is:pr+is:merged+base:dev+merged:{since.strftime(STAMP)}..{until.strftime(STAMP)}"
+    return len(rows(f"search/issues?q={query}&per_page=100", "items"))
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--repo", required=True)
-    parser.add_argument("--until", help="UTC end of the window, default now")
+    parser.add_argument("--until")
     parser.add_argument("--hours", type=int, default=24)
     parser.add_argument("--out", type=Path, default=Path("ci-minutes.json"))
     args = parser.parse_args(argv)
     until = datetime.strptime(args.until, STAMP).replace(tzinfo=UTC) if args.until else datetime.now(UTC)
-    until = until.replace(microsecond=0)
     since = until - timedelta(hours=args.hours)
     runs = read_runs(args.repo, since, until)
     result = aggregate(runs, read_jobs(args.repo, runs), merged_count(args.repo, since, until))
     result.update(since=since.strftime(STAMP), until=until.strftime(STAMP))
     args.out.write_text(json.dumps(result, indent=2))
-    report = render(result, result["since"], result["until"])
+    report = render(result)
     print(report)
     if summary := os.environ.get("GITHUB_STEP_SUMMARY"):
         with Path(summary).open("a") as handle:
