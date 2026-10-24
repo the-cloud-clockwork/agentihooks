@@ -45,7 +45,7 @@ agentihooks hive create
 | invite | `hive invite` into `k8s/agentihooks-hive-<name>`, like `k8s/agentihooks-swarm-workstation-hive` | the record holds a credential |
 | ssh keys | a new ed25519 host key and every `~/.ssh/*.pub` as `ssh_host_key`, `ssh_host_public_key` and `ssh_authorized_keys` in the same record | the record holds a host key |
 | manifests | renders antoncore `k8s/templates/agentihooks-hive.yaml` and opens one pull request into antoncore `dev`; the rendered manifests make the hive's NFS home folder, so the NFS server never restarts | the saved create holds the pull request |
-| merge | `gh pr merge --squash --auto`, then waits for the merge | the pull request merged |
+| merge | `gh pr merge --squash --auto`; where the repository refuses auto merge, waits for the pull request checks to pass and runs `gh pr merge --squash`; then waits for the merge. A failed check stops the create naming it | the pull request merged |
 | settings | `hive setup` into the hive settings record | never; it rewrites the same keys |
 | live | waits for the member's heartbeat | never; a live hive passes at once |
 | herdr | trusts the host key in `~/.ssh/known_hosts`, then `hive add ssh://worker@<LAN address>:<port> --label <name>` | the saved create holds the added member |

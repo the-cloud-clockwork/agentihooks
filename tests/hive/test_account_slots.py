@@ -447,7 +447,7 @@ def test_public_release_returns_the_requested_hive_execution_and_closes_the_bus(
     assert closed == [True]
     assert recording.sent == [
         (
-            "swarm.rig.slots",
+            "slots.rig.one",
             {"op": "release", "hive": "one", "execution": "one", "harness": "claude", "account": "a"},
             account_slots.REQUEST_TIMEOUT_MS,
         )
@@ -550,7 +550,7 @@ def test_a_member_launch_asks_the_hub_on_the_swarm_its_launch_names(rig, monkeyp
     monkeypatch.setattr(account_slots, "_reading", lambda hive: reading())
     env = {account_slots.HIVE_ENV: "one", account_slots.EXECUTION_ENV: "execution", SWARMS_ENV: "rig"}
     assert account_slots.execute("claude", "a", env, lambda child: child) == {SWARMS_ENV: "rig"}
-    assert {subject for subject, _, _ in recording.sent} == {"swarm.rig.slots"}
+    assert {subject for subject, _, _ in recording.sent} == {"slots.rig.one"}
 
 
 def test_two_real_nats_clients_share_atomic_account_capacity(tmp_path):

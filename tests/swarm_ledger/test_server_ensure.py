@@ -49,7 +49,7 @@ def test_client_waits_for_a_reloading_server_without_starting_another(
         "if os.environ['RELEASE_SOCKET'] == 'True': httpd.server_close()\n"
         "(server.core.LEDGER_DIR / 'reloading').touch()\n"
         "time.sleep(0.3)\n"
-        "server.reload_if_changed(0, (server.core.LEDGER_DIR,))\n"
+        "os.execv(sys.executable, [sys.executable, str(server.CODE_DIR / 'ledger_server.py'), '--serve'])\n"
     )
     env = {**os.environ, "LEDGER_DIR": str(tmp_path), "LEDGER_PORT": str(port)}
     env["RELEASE_SOCKET"] = str(release_socket)

@@ -139,6 +139,7 @@ testpaths = ["tests"]
 markers = [
     "unit: Unit tests",
     "wall_clock: asserts an elapsed real time bound; the mutation stats pass deselects it",
+    "codex_rollouts: runs the real Codex rollout lookup instead of the conftest stub",
 ]
 asyncio_mode = "auto"
 
