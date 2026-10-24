@@ -727,6 +727,34 @@ def test_main_writes_one_matrix_entry_per_shard(tmp_path, monkeypatch, capsys):
     assert "Mutation shards: 4\nStats parts: 3\n" in text
 
 
+@pytest.mark.parametrize("changed", [{}, {"scripts/sample.py": {2}}])
+def test_main_reads_the_recorded_coverage_only_when_a_module_changed(tmp_path, monkeypatch, capsys, changed):
+    _project(tmp_path, {})
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("sys.argv", ["plan", "--base", "base", "--repository", "owner/repo"])
+    monkeypatch.setenv("GITHUB_OUTPUT", str(tmp_path / "github-output"))
+    calls = []
+
+    def since(root, base, head):
+        calls.append(("since", root, base, head))
+        return changed
+
+    def record(repository):
+        calls.append(("record", repository))
+        return None, ""
+
+    monkeypatch.setattr(plan, "changes_since", since)
+    monkeypatch.setattr(plan, "read_record", record)
+    monkeypatch.setattr(plan, "own_bases", lambda *args: ["base"])
+    monkeypatch.setattr(plan, "discover_changes", lambda *args: changed)
+    assert plan.main() == 0
+    assert calls[0] == ("since", tmp_path, "base", "HEAD")
+    assert (("record", "owner/repo") in calls) == bool(changed)
+    assert f"changed={len(changed)}\n" in (tmp_path / "github-output").read_text()
+    if not changed:
+        assert "No hook or script module changed, so the recorded dev coverage is not read.\n" in capsys.readouterr().out
+
+
 @pytest.mark.parametrize("source, matched", [("sample", False), ("sample", True), ("plain", False)])
 def test_planning_refuses_an_unmatched_module_before_publishing_statistics(tmp_path, monkeypatch, source, matched):
     _project(tmp_path, {})
