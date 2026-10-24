@@ -490,7 +490,7 @@ def test_a_fresh_spawn_keeps_its_handoff_without_the_original_run_options():
 class UnsupportedHandoffRuntime(LaterUnresolvedRuntime):
     def placement_refusal(self, lane, task):
         self.checked.append(task.get("id"))
-        if task.get("id") == "t1" and self.checked.count("t1") > 1:
+        if task.get("id") == "t1" and self.checked.count("t1") > 2:
             profile_choice.transfer({"handoff": "## Next\nGo on\n", "handoff_envelope": {"launch": {"profile": "x"}}})
         return ""
 
