@@ -20,7 +20,16 @@ DURATION_JOB = (
 )
 UNIT = {DURATION_JOB, "split", "unit", "shard-check", "test-count"}
 QUEUE = UNIT | {"queue-fail-fast"}
-PULL_REQUEST = UNIT | {"select", "lint", "semgrep", "sonar", "mutation-plan", "mutation-stats", "mutation"}
+PULL_REQUEST = UNIT | {
+    "select",
+    "lint",
+    "semgrep",
+    "sonar",
+    "mutation-plan",
+    "mutation-stats",
+    "mutation",
+    "writer-lock",
+}
 SELECTED = PULL_REQUEST - {"split", "unit", "shard-check"} | {"unit-selected"}
 UNSELECTED = PULL_REQUEST - {"split", "unit", "shard-check"}
 TIERS = [
@@ -33,7 +42,7 @@ TIERS = [
 
 def _gate_steps(*, docs=False):
     options = {"consolidated": True} if DURATION_JOB == "select" else {}
-    return ci_reuse.gate_steps(queue_tier=True, docs=docs, **options)
+    return ci_reuse.postgres_required(ci_reuse.gate_steps(queue_tier=True, docs=docs, **options))
 
 
 def gate(event, needs, mutation="true", scope="full"):

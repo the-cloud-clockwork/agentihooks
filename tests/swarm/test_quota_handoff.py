@@ -559,9 +559,27 @@ def test_successor_falls_back_to_codex_and_respects_profile_and_floor():
 
 @pytest.mark.parametrize("target", ["claude", "codex"])
 @pytest.mark.parametrize("lane", ["eng", "ci", "plan", "master"])
-def test_quota_transfer_routes_to_best_account_and_preserves_profile(tmp_path, monkeypatch, target, lane):
+@pytest.mark.parametrize("cached", [False, True])
+@pytest.mark.parametrize("custom_reader", [False, True])
+def test_quota_transfer_routes_to_best_account_and_preserves_profile(
+    tmp_path, monkeypatch, target, lane, cached, custom_reader
+):
     rt = runtime.HerdrRuntime(home=tmp_path, choose=lambda *_: ("claude", "priority"))
-    rt._quota_accounts = [account("old", state="DRAIN"), account("best", target, five=10, week=20)]
+    rows = [account("old", state="DRAIN"), account("best", target, five=10, week=20)]
+    reads = []
+
+    def read(environ, now, *, refresh):
+        assert environ == dict(os.environ)
+        assert now == 123.0
+        assert refresh is False
+        reads.append(True)
+        return rows
+
+    monkeypatch.setattr(runtime.time, "time", lambda: 123.0)
+    monkeypatch.setattr(rt, "quota_accounts", read if custom_reader else None)
+    monkeypatch.setattr(capacity, "accounts", read)
+    if cached:
+        rt._quota_accounts = rows
     rt._quota_cap, rt._quota_floor, rt._quota_share = 3, 5, 0
     seen = []
     monkeypatch.setattr(runtime.plugins, "claude_only", lambda _: False)
@@ -582,11 +600,28 @@ def test_quota_transfer_routes_to_best_account_and_preserves_profile(tmp_path, m
     }
     placed = rt.spawn(config, lane, "engineer@a1b2c3-0002", task)
     assert placed.harness == target
+    assert reads == ([] if cached else [True])
     assert seen[0][seen[0].index("--route") + 1] == "best"
     assert seen[0][seen[0].index("--profile") + 1] == "engineer"
     assert seen[0][seen[0].index("--agent") + 1] == target
     if target == "codex":
         assert "opus" not in seen[0]
+
+
+@pytest.mark.parametrize("lane", ["eng", "master"])
+def test_a_fresh_quota_handoff_without_accounts_is_refused(tmp_path, monkeypatch, lane):
+    rt = runtime.HerdrRuntime(home=tmp_path)
+    monkeypatch.setattr(capacity, "accounts", lambda *_args, **_kwargs: [])
+    task = {
+        "id": "e",
+        "title": "Continue task",
+        "handoff": "Saved Handoff v2",
+        "handoff_envelope": {"reason": "quota", "launch": LAUNCH},
+    }
+    config = SwarmConfig("sw", str(tmp_path), max_eng=1, max_ci=0, code="a1b2c3")
+    with pytest.raises(runtime.SpawnError, match="no accounts were observed") as caught:
+        rt.spawn(config, lane, "engineer@a1b2c3-0002", task)
+    assert caught.value.status == "unavailable"
 
 
 @pytest.mark.parametrize(

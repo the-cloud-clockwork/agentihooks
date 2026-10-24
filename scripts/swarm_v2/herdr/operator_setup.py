@@ -465,7 +465,8 @@ def main(
     environ = os.environ if environ is None else environ
     root = home or Path(environ.get("AGENTIHOOKS_HOME") or Path.home() / ".agentihooks")
     try:
-        outside_agent(Who.from_env() if who is None else who)
+        if args.command != "install":
+            outside_agent(Who.from_env() if who is None else who)
     except SetupRefused as refused:
         print(f"operator terminal {args.command} refused: {refused}", file=sys.stderr)
         return 1

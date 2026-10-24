@@ -6,6 +6,7 @@ import { renderChatTo } from "./chat.js";
 import { appliedCaps, clearNoteError, renderControls, renderGates, settleCaps, showNote } from "./controls.js";
 import { firstPage, moreButton } from "./pages.js";
 import { doc, queue } from "./sync.js";
+import { tips } from "./state.js";
 import { snowflake, targetText } from "./freezes.js";
 import { agentActions, reconcile, settle, titlePause } from "./lifecycle.js";
 import { quotaCount, renderHives } from "./hives.js";
@@ -15,7 +16,6 @@ import { renderHandoffs, renderRecovery } from "./recovery.js";
 
 const LIVE_LANES = [["eng", "max_eng"], ["ci", "max_ci"], ["plan", "max_plan"]];
 const ROLES = ["master", "engineer", "planner", "qa", "cicd", "documentation"];
-const OVERLAY_CAP = 3;
 export let swarm = null;
 let swarmReadError = false;
 export let pending = "";
@@ -177,7 +177,7 @@ export function overlayChanges(sw) {
 
 export function toggleOverlay(sw, role, name) {
   const worn = wornOverlays(sw, role);
-  overlayDraft[role] = worn.includes(name) ? worn.filter((n) => n !== name) : worn.length < OVERLAY_CAP ? [...worn, name] : worn;
+  overlayDraft[role] = worn.includes(name) ? worn.filter((n) => n !== name) : worn.length >= tips.overlays ? worn : [...worn, name];
 }
 
 function overlayRow(sw, role) {
@@ -185,13 +185,13 @@ function overlayRow(sw, role) {
   const names = [...new Set([...(sw.overlays_available || []).filter((o) => (o.wears || []).includes(role)).map((o) => o.name), ...worn])];
   return h("div", { class: "sw-ovl-row", role: "group", "aria-label": `Overlays the ${role} role wears` }, h("span", { class: "sw-cap-name", text: role }),
     names.length ? h("div", { class: "sw-ctl" }, ...names.map((name) => h("button", { class: "sw-btn sw-mode", type: "button", "data-overlay-role": role, "data-overlay": name,
-      "aria-pressed": String(worn.includes(name)), disabled: !!pending || (!worn.includes(name) && worn.length >= OVERLAY_CAP), text: name })))
+      "aria-pressed": String(worn.includes(name)), disabled: !!pending || (!worn.includes(name) && worn.length >= tips.overlays), text: name })))
       : h("span", { class: "sw-ovl-none", text: "no overlay in the bundle wears this role" }));
 }
 
 function renderOverlays(sw) {
   const offered = (sw && sw.overlays_available) || [];
-  $("overlays-count").textContent = `${offered.length} offered · ${OVERLAY_CAP} max`;
+  $("overlays-count").textContent = `${offered.length} offered` + (tips.overlays ? ` · ${tips.overlays} max` : "");
   $("swarm-overlays").replaceChildren(...(sw ? ROLES.map((role) => overlayRow(sw, role)) : []));
   $("overlays-apply").disabled = !sw || !!pending || !Object.keys(overlayChanges(sw)).length;
 }

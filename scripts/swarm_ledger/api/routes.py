@@ -131,6 +131,10 @@ def global_resource(handler: object, services: Services, parts: list) -> dict:
         from . import hives
 
         return hives.route(handler, services, parts, body)
+    if parts == ["tips"] and handler.command == "GET":
+        from scripts.swarm_ledger import page_tips
+
+        return {"data": page_tips.values()}
     if parts == ["layout"]:
         return admin.layout(handler, services, None if handler.command == "GET" else body(handler, services))
     if handler.command == "GET" and parts[0] in ("ledgers", "bin"):

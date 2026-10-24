@@ -151,6 +151,16 @@ if [[ -n "$(ledger_reload)" ]]; then
   printf 'the plain http ledger StatefulSet asked Reloader to watch a TLS secret\n' >&2
   exit 1
 fi
+arenas="$(helm template "$release" "$chart" --show-only templates/ledger.yaml | python3 -c '
+import sys, yaml
+found = [doc for doc in yaml.safe_load_all(sys.stdin) if doc and doc["kind"] == "StatefulSet"]
+ledger = next(c for c in found[0]["spec"]["template"]["spec"]["containers"] if c["name"] == "ledger")
+print(next((e.get("value", "") for e in ledger["env"] if e["name"] == "MALLOC_ARENA_MAX"), ""))')"
+if [[ $arenas != 2 ]]; then
+  printf 'the ledger container sets MALLOC_ARENA_MAX to %s, not 2 as the Compose ledger does\n' "${arenas:-nothing}" >&2
+  exit 1
+fi
+printf 'the ledger container limits malloc arenas to two\n'
 ledger_values="$(mktemp)"
 printf 'ledger:\n  secretEnv:\n    - {name: AGENTIHOOKS_SWARM_DATABASE_URL, secretName: swarm-ledger-database, key: url}\n' >"$ledger_values"
 helm template "$release" "$chart" "${secrets[@]}" -f "$ledger_values" \

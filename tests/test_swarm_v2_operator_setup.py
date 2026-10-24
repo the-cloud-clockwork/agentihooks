@@ -527,14 +527,35 @@ def test_install_command_names_an_unreachable_scheduler_redis_and_keeps_the_old_
     assert sorted(path.name for path in units.iterdir()) == sorted(LEGACY)
 
 
-def test_install_command_refuses_inside_an_agent_session(tmp_path, monkeypatch):
-    monkeypatch.setattr(operator_setup, "install", lambda root, address: pytest.fail("installed in an agent session"))
+@pytest.mark.parametrize("who", [Who(name="engineer@abc-1"), Who(swarm="rig"), Who(name="master@abc-2", swarm="rig")])
+def test_install_command_schedules_inside_an_agent_launch(tmp_path, monkeypatch, who):
+    calls = []
+    monkeypatch.setattr(operator_setup, "install", lambda root, address: calls.append((root, address)))
 
-    code, out, err = run_main(["install"], {}, Who(name="engineer@abc-1"), tmp_path / "home")
+    code, out, err = run_main(["install", "--redis-address", "hive:6379"], {}, who, tmp_path / "home")
+
+    assert (code, out, err) == (0, "", "")
+    assert calls == [(tmp_path / "home", "hive:6379")]
+
+
+def test_install_check_reads_the_schedule_inside_an_agent_launch(tmp_path, monkeypatch):
+    calls = []
+    monkeypatch.setattr(operator_setup, "installed", lambda root, address: calls.append((root, address)) or True)
+
+    code, out, err = run_main(["install", "--check"], {}, Who(name="engineer@abc-1"), tmp_path / "home")
+
+    assert (code, out, err) == (0, "", "")
+    assert calls == [(tmp_path / "home", "")]
+
+
+def test_sync_command_refuses_inside_an_agent_session(tmp_path, monkeypatch):
+    monkeypatch.setattr(operator_setup, "sync_once", lambda environ, root: pytest.fail("synced in an agent session"))
+
+    code, out, err = run_main(["sync"], {}, Who(name="engineer@abc-1"), tmp_path / "home")
 
     assert (code, out) == (1, "")
     assert err == (
-        "operator terminal install refused: the operator terminal setup runs only outside agent sessions, "
+        "operator terminal sync refused: the operator terminal setup runs only outside agent sessions, "
         "and engineer@abc-1 is one\n"
     )
 

@@ -13,7 +13,7 @@ import ledger_core as core  # noqa: E402
 import ledger_server as server  # noqa: E402
 
 from scripts.swarm_ledger import page_assets  # noqa: E402
-from tests.swarm_ledger.ledger_page import page_source  # noqa: E402
+from tests.swarm_ledger.ledger_page import page_source, rendered_home  # noqa: E402
 from tests.swarm_ledger.test_swarm_layout import NOW_MS, browser, open_page, status  # noqa: E402, F401
 
 LITERAL = re.compile(r"#[0-9a-fA-F]{3,8}\b|rgba?\(|hsla?\(|(?<![-\w])(white|black)(?![-\w])")
@@ -35,8 +35,8 @@ def home_style():
     return css.replace("\n", "")
 
 
-def home_page_source(view):
-    page = server.index_page(view)
+def home_page_source():
+    page = server.index_page()
     version = server.served_version()
     for name, path in core.static_assets().items():
         href = f'<link rel="stylesheet" href="/static/{version}/{name}">'
@@ -81,9 +81,8 @@ class PaletteReachesEveryPage(unittest.TestCase):
         self.assertIn(palette().strip(), css_of(page))
         self.assertNotIn("__LEDGER_PALETTE__", page)
 
-    def test_home_and_bin_carry_the_palette(self):
-        for view in ("home", "bin"):
-            self.assertIn(palette().strip(), css_of(home_page_source(view)))
+    def test_the_home_and_bin_shell_carries_the_palette(self):
+        self.assertIn(palette().strip(), css_of(home_page_source()))
 
     def test_a_palette_edit_changes_the_page_version(self):
         before = core.page_version()
@@ -308,13 +307,12 @@ class LandingBays(unittest.TestCase):
         self.assertEqual(resolve("--surface-1"), "transparent")
         self.assertEqual(resolve("--surface-2"), "#1b2636")
 
-    def test_only_home_falls_outside_the_bay_scope(self):
+    def test_the_static_ledger_and_home_shells_carry_no_main_class(self):
         mains = {
             "ledger": re.search(r"<main([^>]*)>", page_source()).group(1),
-            "home": re.search(r"<main([^>]*)>", server.index_page("home")).group(1),
-            "bin": re.search(r"<main([^>]*)>", server.index_page("bin")).group(1),
+            "home": re.search(r"<main([^>]*)>", server.index_page()).group(1),
         }
-        self.assertEqual(mains, {"ledger": "", "home": ' class="home"', "bin": ' class="bin"'})
+        self.assertEqual(mains, {"ledger": "", "home": ""})
 
     def test_priority_item_and_stat_rows_are_hairline_rows(self):
         css = css_of(page_source())
@@ -425,6 +423,13 @@ def test_every_overflowing_agent_cell_ellipsizes_and_exposes_its_full_text(open_
     execution.hover()
     page.tab.clock.run_for(1100)
     assert page.tab.locator(".ledger-tip:popover-open").inner_text() == execution.get_attribute("data-tip")
+
+
+def test_the_home_script_scopes_home_and_bin_on_main(browser):  # noqa: F811
+    for view in ("home", "bin"):
+        with mock.patch.object(server, f"{view}_summaries", return_value=[{"slug": "a", "closed_at": 0}]):
+            page = rendered_home(server, browser, view)
+        assert re.search(r"<main([^>]*)>", page).group(1) == f' class="{view}"'
 
 
 if __name__ == "__main__":
