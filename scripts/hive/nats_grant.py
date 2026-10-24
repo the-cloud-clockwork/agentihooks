@@ -223,11 +223,13 @@ def push(signer: Signer, jwt: str) -> None:
         raise auth.HiveError(f"NATS refused the account update ({answer['error'].get('description')})")
 
 
+def revoked(redis: "Redis") -> dict[str, int]:
+    return {key: int(value) for key, value in redis.hgetall(REVOKED).items()}
+
+
 def revoke(redis: "Redis", signer: Signer, member_id: str) -> str:
     redis.hset(REVOKED, member_user(signer, member_id).public, int(time.time()))
-    jwt = account_jwt(
-        signer.operator, signer.account, {key: int(value) for key, value in redis.hgetall(REVOKED).items()}
-    )
+    jwt = account_jwt(signer.operator, signer.account, revoked(redis))
     issuer = nkey.claims(jwt)["iss"]
     if issuer != signer.trusted_operator:
         raise auth.HiveError(
