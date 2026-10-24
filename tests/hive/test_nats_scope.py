@@ -204,7 +204,7 @@ def test_scoped_claims_carry_the_canonical_per_resource_policy(signer):
         "STATE_hive-executions",
         "STATE_execution-starts",
     )
-    expected = {"swarm.rig.>"}
+    expected = {"swarm.rig.>", "slots.rig.m1"}
     for resource in resources:
         stream = f"AGENTIHOOKS_726967_{resource}"
         expected.update(

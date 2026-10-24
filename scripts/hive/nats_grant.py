@@ -39,7 +39,6 @@ ACCOUNT_LIMITS = {
 }
 MEMBER_PUBLISH = (
     "swarm.*.execution.>",
-    "swarm.*.slots",
     "dead.*",
     "dead.*.*",
     "$JS.API.INFO",
@@ -159,14 +158,14 @@ def user_claims() -> dict:
     return {"type": "user", "version": 2, "pub": {}, "sub": {}, **UNLIMITED}
 
 
-def member_claims(user: str, swarms: tuple[str, ...] | None = None) -> dict:
+def member_claims(user: str, swarms: tuple[str, ...] | None = None, *, member: str) -> dict:
     if swarms is None:
         return {
             **user_claims(),
-            "pub": {"allow": list(MEMBER_PUBLISH)},
+            "pub": {"allow": [*MEMBER_PUBLISH, f"{subjects.SLOTS}.*.{member}"]},
             "sub": {"allow": [f"{subjects.inbox(user)}.>"]},
         }
-    publish = [subject for swarm in swarms for subject in swarm_publish(swarm)]
+    publish = [subject for swarm in swarms for subject in (*swarm_publish(swarm), subjects.slot_request(swarm, member))]
     return {
         **user_claims(),
         "pub": {"allow": publish} if publish else {"deny": [">"]},
@@ -189,7 +188,7 @@ def mint(signer: Signer, member_id: str) -> str:
     user = member_user(signer, member_id)
     require_listed(signer, member_id)
     swarms = None if signer.member_swarms is None else signer.member_swarms[member_id]
-    claims = member_claims(user.public, swarms)
+    claims = member_claims(user.public, swarms, member=member_id)
     return nkey.creds(nkey.encode_jwt(signer.account, user.public, f"hive-{member_id}", claims), user.seed)
 
 

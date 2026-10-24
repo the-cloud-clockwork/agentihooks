@@ -16,7 +16,6 @@ ENDED = frozenset({"exited", "dead"})
 
 HIVE_ENV = "AGENTIHOOKS_SLOT_HIVE"
 EXECUTION_ENV = "AGENTIHOOKS_SLOT_EXECUTION"
-SLOTS = "slots"
 UNBOUND = "hive"
 REQUEST_TIMEOUT_MS = 10_000
 
@@ -147,13 +146,13 @@ class Slots:
             raise
 
 
-def request_subject(swarm: str) -> str:
-    return subjects.subject(swarm, SLOTS)
+def request_subject(swarm: str, hive: str) -> str:
+    return subjects.slot_request(swarm, hive)
 
 
-def asker(bus: Any, swarm: str, timeout_ms: int = REQUEST_TIMEOUT_MS) -> Callable[[dict], Any]:
+def asker(bus: Any, swarm: str, hive: str, timeout_ms: int = REQUEST_TIMEOUT_MS) -> Callable[[dict], Any]:
     def ask(request: dict) -> Any:
-        answer = json.loads(bus.request(request_subject(swarm), json.dumps(request).encode(), timeout_ms))
+        answer = json.loads(bus.request(request_subject(swarm, hive), json.dumps(request).encode(), timeout_ms))
         if not answer["ok"]:
             raise Unavailable(answer["error"])
         return answer["result"]
@@ -183,7 +182,7 @@ def _swarm(environ: Mapping[str, str]) -> str:
 def _slots(bus: Bus, backend: str, hive: str, read: Callable[[], dict], environ: Mapping[str, str]) -> Slots:
     if backend == "memory":
         return Slots(bus, hive, read)
-    return Remote(asker(bus, _swarm(environ)), hive, read)
+    return Remote(asker(bus, _swarm(environ), hive), hive, read)
 
 
 def _reading(hive: str) -> dict:
@@ -227,7 +226,7 @@ def _remote(hive: str, act: Callable[["Remote"], None]) -> None:
         return
     bus = open_bus(config)
     try:
-        act(Remote(asker(bus, _swarm(os.environ)), hive))
+        act(Remote(asker(bus, _swarm(os.environ), hive), hive))
     finally:
         bus.close()
 

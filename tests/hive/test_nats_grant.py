@@ -650,7 +650,6 @@ def test_a_member_credential_carries_exactly_the_hive_member_claims():
     )
     publish = [
         "swarm.*.execution.>",
-        "slots.*.m1",
         "dead.*",
         "dead.*.*",
         "$JS.API.INFO",
@@ -661,6 +660,7 @@ def test_a_member_credential_carries_exactly_the_hive_member_claims():
         *(f"$KV.{bucket}.>" for bucket in buckets),
         *(f"$JS.API.STREAM.INFO.KV_{bucket}" for bucket in buckets),
         *(f"$JS.API.STREAM.MSG.GET.KV_{bucket}" for bucket in buckets),
+        "slots.*.m1",
     ]
     assert claims["nats"] == {
         "type": "user",
