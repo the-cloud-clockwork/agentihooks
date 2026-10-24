@@ -89,6 +89,7 @@ from scripts.swarm import (
     dev_red,
     dispatch_seat,
     dispatcher,
+    doc_report,
     done_gate,
     failed_panes,
     idle,
@@ -400,6 +401,7 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None, scheduled=F
                 doc,
             )
             actions += skip_refused(quiet.quiet_pass, store, slug, rows, now_ms())
+            actions += skip_refused(doc_report.report_pass, inbox, ledger, slug, doc["tasks"], now_ms())
             actions += skip_refused(dispatcher.priorities, store, slug, doc, ledger, view, now_ms())
             if scheduled:
                 from scripts.swarm import refresh_job
@@ -1681,8 +1683,9 @@ def cmd_done(store, args):
     if refused:
         raise SwarmError(refused)
     fields = {"state": "done", **({"pr_url": args.pr} if args.pr else {}), **({"proof": proof} if proof else {})}
-    ledger.update_task(args.slug, agent.task, fields, by=agent.name)
+    closed = ledger.update_task(args.slug, agent.task, fields, by=agent.name)
     _close_members(ledger, args.slug, agent, row, {**fields, "pr_url": args.pr or row.get("pr_url")})
+    doc_report.report(InboxStore(store.redis), ledger, args.slug, closed, now_ms(), by=agent.name)
     waits.settle_notices(InboxStore(store.redis), agent, "done")
     _retire(store, args.slug, agent, "finished its task and exited")
     fallback = {"pull_request": pull.fallback} if pull is not None and pull.fallback else {}
