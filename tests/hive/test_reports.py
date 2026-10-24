@@ -997,3 +997,14 @@ def test_a_later_execution_cannot_inherit_a_removed_hive_absence_lease(remote, i
     assert not remote.runtime.hive.removed(successor, NOW + registry.LIVE_MS * 2)
     assert not remote.runtime.hive.removed(successor, NOW + registry.LIVE_MS * 3 - 1)
     assert remote.runtime.hive.removed(successor, NOW + registry.LIVE_MS * 3)
+
+
+@pytest.mark.parametrize("state", ["working", "starting", "retiring", "awaiting-decision"])
+def test_absent_hive_evidence_cannot_settle_a_nonfinished_execution(remote, state):
+    from scripts.hive import registry
+
+    remote.redis.srem(registry.INDEX, HIVE)
+    agent = replace(remote.agent, state=state)
+
+    assert not remote.runtime.hive.removed(agent, NOW)
+    assert not remote.runtime.hive.removed(agent, NOW + registry.LIVE_MS)
