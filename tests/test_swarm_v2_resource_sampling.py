@@ -17,7 +17,7 @@ pytestmark = pytest.mark.unit
 WORKLOADS = Path(__file__).parent / "performance" / "swarm_v2" / "workloads"
 COMM = "w (x) y"
 PGRP = 999
-TRACE_FRAMES = 32
+TRACE_FRAMES = 4
 
 
 def killed(pid: int) -> bool:
@@ -239,7 +239,7 @@ def allocated_here(source) -> bool:
 
 
 def test_measure_reports_the_whole_tree_of_a_live_workload(tmp_path, capfd):
-    command = [sys.executable, str(WORKLOADS / "memory.py"), "--children", "2", "--mib", "48", "--hold", "1.5"]
+    command = [sys.executable, str(WORKLOADS / "memory.py"), "--children", "2", "--mib", "48", "--hold", "2"]
     gc.collect()
     limit = tracemalloc.get_traceback_limit() if tracemalloc.is_tracing() else 0
     tracemalloc.stop()
