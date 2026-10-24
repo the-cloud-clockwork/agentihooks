@@ -1041,9 +1041,14 @@ def test_a_planner_publishes_a_plan_and_plan_read_prints_its_sliced_task(live, t
         {"op": "join", "id": "planner-master-join", "by": "boss", "role": "orchestrator"},
         {"op": "join", "id": "planner-join", "by": planner},
         {"op": "task_add", "id": "planner-task-seed", "by": "boss", **plan_task},
-        {"op": "task_update", "id": "planner-claim-seed", "by": "swarm", "item": "tasks/tp"},
+        {
+            "op": "task_update",
+            "id": "planner-claim-seed",
+            "by": "swarm",
+            "item": "tasks/tp",
+            "fields": {"claimed_by": planner, "state": "claimed"},
+        },
     ]
-    seed[-1]["fields"] = {"claimed_by": planner, "state": "claimed"}
     assert [client.mutate(SLUG, [op]).get("rejected") for op in seed] == [[], [], [], []]
     monkeypatch.setattr(ledger_core, "LEDGER_DIR", core.LEDGER_DIR)
     one = "".join(f"One detail {n}\n" for n in range(12))
