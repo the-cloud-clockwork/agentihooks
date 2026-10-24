@@ -73,9 +73,12 @@ def _settle_taken_seat_mail(inbox: "InboxStore", name: str, exit_text: str, goes
 
 def _settle_taken(inbox: "InboxStore", item, held: str, name: str, exit_text: str, goes_on: bool) -> None:
     """Seat mail a gone life took: back to pending for the seat's next occupant when the work goes on, else closed."""
+    if goes_on and not _task_continues(inbox, item, held):
+        exit_text = f"left its seat and task {item.task}"
+        goes_on = False
     if ended := _life_notice_end(item, name, exit_text):
         inbox.close(item.id, BY, "done", ended)
-    elif goes_on and _task_continues(inbox, item, held):
+    elif goes_on:
         inbox.redirect(item.id, BY, held, f"{name} {exit_text}; back to {held} for its next occupant", held, name)
     elif (
         inbox.withdraw(item.id, BY, f"cancelled: {name} {exit_text} before closing it", held, name)
@@ -85,7 +88,17 @@ def _settle_taken(inbox: "InboxStore", item, held: str, name: str, exit_text: st
 
 
 def _task_continues(inbox: "InboxStore", item, seat: str) -> bool:
-    task = inbox.receiver_task(seat)
+    from scripts.swarm.store import RedisStore
+
+    occupant = inbox.names.resolve(inbox.seats.occupant(seat).occupant)
+    task = next(
+        (
+            agent.task
+            for agent in RedisStore(inbox.redis).agents(seat.split("@", 1)[1])
+            if agent.name == occupant and agent.seat == seat and agent.state != "finished"
+        ),
+        "",
+    )
     return item.fyi or not item.task or not task or item.task == task
 
 
