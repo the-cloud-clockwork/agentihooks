@@ -820,4 +820,8 @@ html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
   details > summary, .freeze, .scope { min-height: 44px; }
   .sw-fold > summary.sw-blockhead { align-items: center; }
   input[type=checkbox] { width: 24px; height: 24px; }
+  .outline a { padding-block: 10px; }
+  #agents-table a, #swarm-agents a { display: inline-block; padding-block: 8px; }
+  .title-pen, .logo-link { min-width: 32px; min-height: 32px; place-content: center; }
+  #jump-to { min-width: 216px; }
 }
