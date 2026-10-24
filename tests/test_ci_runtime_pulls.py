@@ -127,7 +127,7 @@ def tools_with(tmp_path, docker):
     return tools
 
 
-def pull_runtime(tmp_path, failures, manifest_failures=0, stalls=0, manifest_stalls=0):
+def pull_runtime(tmp_path, failures, manifest_failures=0, stalls=0, manifest_stalls=0, extra_env=None):
     tools = tools_with(tmp_path, LAYER_DOCKER)
     log, waits = tmp_path / "docker.log", tmp_path / "waits.log"
     result = subprocess.run(
@@ -142,6 +142,7 @@ def pull_runtime(tmp_path, failures, manifest_failures=0, stalls=0, manifest_sta
             "STALLS": str(stalls),
             "MANIFEST_STALLS": str(manifest_stalls),
             "PULL_ATTEMPT_SECONDS": "1",
+            **(extra_env or {}),
         },
         text=True,
         capture_output=True,
@@ -169,6 +170,26 @@ def test_runtime_pull_stops_at_three_attempts_and_keeps_the_final_failure(tmp_pa
     assert len(waits) == 2
     assert not tags
     assert result.stderr.rstrip().endswith("not found on attempt 3")
+
+
+@pytest.mark.parametrize("extra_env,delay", [(None, "10"), ({"PULL_RETRY_SECONDS": "1"}, "1")])
+def test_runtime_pull_waits_the_configured_retry_delay_between_all_three_attempts(tmp_path, extra_env, delay):
+    result, pulls, tags, waits = pull_runtime(tmp_path, 99, extra_env=extra_env)
+    assert result.returncode == 17
+    assert len(pulls) == 3
+    assert waits == [delay, delay]
+    assert result.stderr.count(f"retrying in {delay} seconds") == 2
+
+
+def test_attestation_proof_runs_its_negative_pull_beside_the_positive_one():
+    proof = (ROOT / "scripts/packaging/hive-launch-attestation-proof.sh").read_text()
+    negative = proof.index("PULL_RETRY_SECONDS=1 bash scripts/packaging/pull-runtime-image.sh")
+    positive = proof.index("bash scripts/packaging/pull-runtime-image.sh 127.0.0.1:5000/proof:present")
+    assert negative < positive
+    assert '--insecure > "$proof_dir/pull.log" 2>&1 &\nnegative=$!' in proof
+    assert proof.index('if wait "$negative"; then') > positive
+    assert "grep -c 'failed on attempt' \"$proof_dir/pull.log\" | grep -x 2" in proof
+    assert proof.index('wait "$daemon_start"') < proof.index("for attempt in {1..30}")
 
 
 def test_runtime_pull_retries_a_failed_digest_lookup_within_the_same_bound(tmp_path):

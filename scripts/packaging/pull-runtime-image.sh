@@ -6,6 +6,7 @@ shift
 docker_host="${DOCKER_HOST:-unix:///var/run/docker.sock}"
 attempts=3
 limit="${PULL_ATTEMPT_SECONDS:-120}"
+delay="${PULL_RETRY_SECONDS:-10}"
 if [[ ${SWARM_SMOKE_RUNTIME_IMAGES_READY:-} == true &&
       ( "$image" == mirror.gcr.io/library/redis:7 || "$image" == mirror.gcr.io/library/redis:7-alpine ||
         "$image" == mirror.gcr.io/library/nats:2.15.1-alpine ) ]] &&
@@ -38,7 +39,7 @@ for attempt in $(seq "$attempts"); do
   if (( attempt == attempts )); then
     exit "$status"
   fi
-  printf 'Pull of %s failed on attempt %s of %s; retrying in 10 seconds\n' "$image" "$attempt" "$attempts" >&2
-  sleep 10
+  printf 'Pull of %s failed on attempt %s of %s; retrying in %s seconds\n' "$image" "$attempt" "$attempts" "$delay" >&2
+  sleep "$delay"
 done
 docker --host "$docker_host" tag "$source@$digest" "$image"
