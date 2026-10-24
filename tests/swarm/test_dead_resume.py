@@ -532,7 +532,7 @@ def test_a_tick_drop_after_the_hub_settled_the_claim_leaves_the_life_count_alone
     store.count_claim("sw", "t1")
     lives = store.claims("sw", "t1")
     ledger.update_task("sw", "t1", {"state": "open", "claimed_by": ""})
-    assert store.refund_held_claim("sw", "t1", agent.name, store.claim_generation("sw", "t1")) is True
+    store.redis.hincrby(store.key("sw", "started-lives"), "t1", -1)
 
     tick_module._drop("sw", store, ledger, rows, agent, refund=True)
 

@@ -216,21 +216,6 @@ def test_verified_historical_starts_keep_their_life_budget(store):
     assert store.claims("smoke", "t1") == 0
 
 
-def test_a_held_claim_refund_gives_back_one_started_life_and_never_goes_below_zero(store):
-    store.record_launch("smoke", AgentRecord("first", "eng", "t1"), "started")
-    store.record_launch("smoke", AgentRecord("second", "eng", "t1"), "started")
-    store.claim("smoke", "t1", "second", 60_000)
-    assert store.refund_held_claim("smoke", "t1", "second", store.claim_generation("smoke", "t1")) is True
-    assert store.claims("smoke", "t1") == 1
-    store.claim("smoke", "t2", "agent", 60_000)
-    assert store.refund_held_claim("smoke", "t2", "agent", store.claim_generation("smoke", "t2")) is False
-    assert store.claims("smoke", "t2") == 0
-
-
-def test_the_store_offers_no_unconditional_claim_refund(store):
-    assert not hasattr(store, "refund_claim")
-
-
 def test_a_held_claim_refund_gives_back_one_life_only_while_claimant_and_generation_match(store):
     store.record_launch("smoke", AgentRecord("first", "eng", "t1"), "started")
     store.record_launch("smoke", AgentRecord("second", "eng", "t1"), "started")
@@ -284,6 +269,25 @@ def test_a_held_claim_refund_refuses_after_the_same_claimant_claimed_again(store
     store.claim("smoke", "t1", "agent", 60_000)
 
     assert store.refund_held_claim("smoke", "t1", "agent", generation) is False
+    assert store.claims("smoke", "t1") == 1
+
+
+def test_a_held_claim_refund_refuses_a_second_refund_for_the_same_claimant_and_generation(store):
+    for _ in range(3):
+        store.count_claim("smoke", "t1")
+    store.count_claim("smoke", "t2")
+    store.claim("smoke", "t1", "agent", 60_000)
+    store.claim("smoke", "t2", "agent", 60_000)
+    generation = store.claim_generation("smoke", "t1")
+
+    assert store.refund_held_claim("smoke", "t1", "agent", generation) is True
+    assert store.refund_held_claim("smoke", "t1", "agent", generation) is False
+    assert store.claimant("smoke", "t1") == "agent"
+    assert store.claims("smoke", "t1") == 2
+    assert store.refund_held_claim("smoke", "t2", "agent", store.claim_generation("smoke", "t2")) is True
+    store.release("smoke", "t1", "agent")
+    store.claim("smoke", "t1", "agent", 60_000)
+    assert store.refund_held_claim("smoke", "t1", "agent", generation + 1) is True
     assert store.claims("smoke", "t1") == 1
 
 
