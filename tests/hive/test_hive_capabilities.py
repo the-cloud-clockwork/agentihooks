@@ -1,6 +1,5 @@
 from types import SimpleNamespace
 
-import fakeredis
 import pytest
 
 from scripts.hive import launch, placement, placement_waits, registry
@@ -18,6 +17,8 @@ HEADED = {"id": "browse", "seat": "eng-1@fixture", "needs": ["headed"]}
 
 
 def test_a_hive_declares_its_capabilities_and_starts_with_none():
+    import fakeredis
+
     redis = fakeredis.FakeRedis(decode_responses=True)
     assert registry._default("desk")["capabilities"] == []
     record = registry.update(redis, "desk", ["capabilities=headed, gpu,headed"])
@@ -76,16 +77,22 @@ def test_runtime_placement_keeps_a_task_with_needs_off_backends_without_capabili
 
 
 def test_swarm_status_prints_each_agents_hive(monkeypatch, capsys):
+    import fakeredis
+
     store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
     store.create(SwarmConfig("sw", "/r", 4, 0))
-    store.put_agent("sw", AgentRecord("on-desk", "eng", "t1", harness="claude", seat="eng-1@sw", hive="desk"))
-    store.put_agent("sw", AgentRecord("nowhere", "eng", "t2", harness="claude", seat="eng-2@sw"))
+    names = {
+        hive: store.start_execution(
+            "sw", AgentRecord(store.next_name("sw", "eng", slot), "eng", f"t{slot}", seat=f"eng-{slot}@sw", hive=hive)
+        ).name
+        for slot, hive in enumerate(("desk", ""), start=1)
+    }
     monkeypatch.setattr(cli, "LedgerClient", lambda: FakeLedger([]))
-    monkeypatch.setattr(status.HerdrRuntime, "live_names", lambda self: {"on-desk", "nowhere"})
+    monkeypatch.setattr(status.HerdrRuntime, "live_names", lambda self: set(names.values()))
     monkeypatch.setattr(commands, "hive_id", lambda: "")
     cli.cmd_status(store, SimpleNamespace(slug="sw", json=False))
     lines = capsys.readouterr().out.splitlines()
     start = next(i for i, line in enumerate(lines) if line.startswith("Agent\t"))
     head, *rows = [line.split("\t") for line in lines[start : start + 3]]
     column = head.index("Hive")
-    assert {row[0]: row[column] for row in rows} == {"on-desk": "desk", "nowhere": "-"}
+    assert {row[0]: row[column] for row in rows} == {names["desk"]: "desk", names[""]: "-"}
