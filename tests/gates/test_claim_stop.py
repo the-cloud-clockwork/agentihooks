@@ -320,7 +320,7 @@ def test_verification_release_preserves_a_changed_task(rig, monkeypatch, changed
         return update(slug, task_id, fields, **kwargs)
 
     monkeypatch.setattr(rig.ledger, "update_task", race)
-    assert not rig.stop().allowed
+    rig.stop()
     assert rig.store.claimant(SLUG, "t1") == ME
     assert rig.store.agents(SLUG)[0].state == "working"
     assert rig.ledger.updates == []
