@@ -831,7 +831,8 @@ def _select_host(requested: str, environ: dict[str, str]) -> tuple[str, bool]:
 
 def _start_herdr(launcher: Path, directory: Path, name: str, args, agent: str, environ: dict[str, str]) -> list[str]:
     started = herdr_host.ensure_server(environ)
-    env = {"HERDR_AGENT": agent, **({PROMPT_AFTER_START: "1"} if _held_prompt(launcher, agent) else {})}
+    held = _held_prompt(launcher, agent) and not args.resume
+    env = {"HERDR_AGENT": agent, **({PROMPT_AFTER_START: "1"} if held else {})}
     placed = herdr_host.open_pane(directory, args.title or name, env, args.placement, args.workspace, environ)
     herdr_panes.record(placed, "init-agent", name, environ, int(time.time() * 1000))
     herdr_host.run(placed.pane_id, launcher, environ)
@@ -915,6 +916,11 @@ def _send_opening(pane: str, opening: str, environ: dict[str, str], ready: bool,
 def _names_pane(route: dict, launcher: Path, agent: str) -> bool:
     """Codex may start after the route wait ends with no report."""
     return route.get("status") in STARTED_ROUTES or (not route.get("status") and bool(_held_prompt(launcher, agent)))
+
+
+def _served(args) -> bool:
+    """A resumed thread is already named, like a served viewer's, so nothing is typed into its pane."""
+    return args.codex_transport == APP_SERVER or bool(args.resume)
 
 
 def _name_codex_session(pane: str, name: str, environ: dict[str, str], since: float, ready: bool) -> list[str]:
@@ -1109,7 +1115,7 @@ def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -
             active_env,
             _held_prompt(launcher, agent),
             Launch(launcher_at / 1000, deadline=launch),
-            served=args.codex_transport == APP_SERVER,
+            served=_served(args),
         )
         if channel:
             report.append(f"channel_warning={_answer_channel_warning(pane, active_env)}")
