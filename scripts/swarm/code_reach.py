@@ -333,7 +333,7 @@ class Program:
             self.scoped[id(unit)] = self._nested(unit)
         scope = self.scoped[id(unit)]
         if isinstance(func, ast.Name):
-            bound = func.id in scope or func.id in self.scopes[unit.module] or func.id in dir(builtins)
+            bound = func.id in scope or func.id in self.scopes[unit.module] or hasattr(builtins, func.id)
             return self.resolve(unit.module, func.id, scope) if bound else None
         if not isinstance(func, ast.Attribute):
             return None
