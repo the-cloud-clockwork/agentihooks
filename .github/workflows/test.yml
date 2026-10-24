@@ -2373,6 +2373,7 @@ jobs:
           misses=0
           queue_misses=0
           while true; do
+            poll=15
             if queue_head=$(gh api "repos/$GITHUB_REPOSITORY/git/matching-refs/${GITHUB_REF#refs/}" --jq ".[] | select(.ref == \"$GITHUB_REF\") | .object.sha"); then
               queue_misses=0
               if [[ "$queue_head" != "$GITHUB_SHA" ]]; then
@@ -2390,16 +2391,19 @@ jobs:
             fi
             if python3 -m scripts.ci_budget.jobs "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT/jobs" > "$RUNNER_TEMP/jobs.jsonl"; then
               misses=0
-              verdict=$(python3 -m scripts.ci_queue_fail_fast "$RUNNER_TEMP/jobs.jsonl" --repo "$GITHUB_REPOSITORY" --seen "$RUNNER_TEMP/shard-logs.json") || { echo "::warning::The shard log check failed; this poll waits."; verdict=wait; }
+              verdict=$(python3 -m scripts.ci_queue_fail_fast "$RUNNER_TEMP/jobs.jsonl" --repo "$GITHUB_REPOSITORY" --seen "$RUNNER_TEMP/shard-logs.json") || { echo "::warning::The shard log check failed; this poll waits."; sleep 15; continue; }
               if [[ "$verdict" != wait ]]; then
                 echo "$verdict" >> "$GITHUB_OUTPUT"
                 exit 0
+              fi
+              if jq -se 'any(.[]; .name | startswith("unit (")) and all(.[]; (.name | startswith("unit (") | not) or .status == "completed")' "$RUNNER_TEMP/jobs.jsonl"; then
+                poll=5
               fi
             elif (( ++misses == 10 )); then
               echo "::warning::Ten reads of this run's jobs failed in a row; the entry waits for Gate Required."
               exit 0
             fi
-            sleep 15
+            sleep "$poll"
           done
 
       - name: Cancel this queue run so the queue drops the entry
