@@ -496,3 +496,28 @@ def test_main_budgets_on_the_given_durations_with_later_files_winning(heavy, mon
     arguments = ["--base", "HEAD~1", "--head", "HEAD", "--event", "pull_request", "--legs", "3", "--root", str(heavy)]
     assert ci_select.main([*arguments, "--durations", str(first), str(second)]) == 0
     assert output.read_text().splitlines()[:3] == ["scope=selected", "legs=[1, 2]", "count=2"]
+
+
+def jobs():
+    return yaml.safe_load(WORKFLOW.read_text())["jobs"]
+
+
+def workflow_legs():
+    step = next(s for s in jobs()["select"]["steps"] if s.get("id") == "select")
+    words = shlex.split(next(line for line in step["run"].splitlines() if "scripts.ci_select" in line))
+    return int(words[words.index("--legs") + 1])
+
+
+def test_the_workflow_runs_a_swarm_tick_sized_selection_selected(repo):
+    write(repo, {f"tests/test_tick{index}.py": "from hooks import sample\n" for index in range(1, 10)})
+    durations = seconds(test_sample=15.0, **{f"test_tick{index}": 160.0 for index in range(1, 10)})
+    scope, legs = decide(repo, ["hooks/sample.py"], durations, workflow_legs())
+    assert scope == "selected"
+    assert len(legs) == 9
+
+
+def test_the_workflow_hands_every_leg_its_files():
+    count = workflow_legs()
+    outputs = {key: value for key, value in jobs()["select"]["outputs"].items() if key.startswith("files_")}
+    assert outputs == {f"files_{leg}": f"${{{{ steps.select.outputs.files_{leg} }}}}" for leg in range(1, count + 1)}
+    assert jobs()["unit-selected"]["env"]["FILES"] == "${{ needs.select.outputs[format('files_{0}', matrix.leg)] }}"
