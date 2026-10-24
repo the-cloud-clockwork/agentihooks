@@ -261,7 +261,11 @@ def _settle_seat_notices(inbox: "InboxStore", seats: set, active: set) -> None:
                 reason = f"{owner} left its seat before picking task {task} back up"
             else:
                 outcome = inbox.seats.exit_of(owner)
-                reason = _life_notice_end(item, owner, outcome.get("reason", "left its seat"))
+                reason = (
+                    push_stop.left(owner, "left its seat")
+                    if push_stop.is_notice(item)
+                    else _life_notice_end(item, owner, outcome.get("reason", "left its seat"))
+                )
             inbox.close(item.id, BY, "done", reason)
 
 
