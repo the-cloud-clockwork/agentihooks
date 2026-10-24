@@ -83,9 +83,14 @@ def beat(redis: "Redis", local_id: str) -> None:
     from scripts.hive.execution_events import observe as publish_executions
 
     publish_executions(local_id, hosted)
+    from nats.errors import Error as NatsError
+
     from scripts.hive import account_slots
 
-    account_slots.publish(local_id, report, hosted)
+    try:
+        account_slots.publish(local_id, report, hosted)
+    except (NatsError, TimeoutError, account_slots.Unavailable) as exc:
+        print(f"hive account slot heartbeat failed ({type(exc).__name__}: {exc}); retrying next beat", file=sys.stderr)
     publish_config(redis, local_id, report["repos"])
     close_dead_tabs(set(hosted["names"]))
 
