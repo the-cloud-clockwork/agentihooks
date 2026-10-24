@@ -767,9 +767,8 @@ def test_postgres_aggregation_accepts_only_the_canonical_transition(postgres):
     from scripts import ci_reuse
 
     base, head = _aggregators()
-    head["jobs"]["gate-required"]["steps"] = ci_reuse.gate_steps(
-        queue_tier=True, consolidated=True, docs=True, postgres=postgres
-    )
+    steps = ci_reuse.gate_steps(queue_tier=True, consolidated=True, docs=True)
+    head["jobs"]["gate-required"]["steps"] = ci_reuse.postgres_required(steps) if postgres else steps
     head["jobs"]["docs"] = {"runs-on": "ubuntu-latest"}
     head["jobs"]["gate-required"]["needs"].append("docs")
     assert _grade({"test.yml": head}, base={"test.yml": base}) == []
@@ -777,6 +776,19 @@ def test_postgres_aggregation_accepts_only_the_canonical_transition(postgres):
         '"sonar"', '"semgrep"'
     )
     assert _grade({"test.yml": head}, base={"test.yml": base})
+
+
+def test_the_tests_gate_may_start_requiring_the_postgres_scenario_on_pull_requests():
+    from scripts import ci_reuse
+
+    base = {path.name: yaml.safe_load(path.read_text()) for path in (_ROOT / ".github/workflows").glob("*.yml")}
+    head = copy.deepcopy(base)
+    gate = head["test.yml"]["jobs"]["gate-required"]
+    gate["steps"] = ci_reuse.postgres_required(gate["steps"])
+    assert '"sonar", "writer-lock"]' in gate["steps"][0]["run"]
+    config = json.loads((_ROOT / ".github/gate-wiring.json").read_text())
+    policy = json.loads((_ROOT / ".github/workflows/trusted-actors.json").read_text())
+    assert gate_protected.grade(base, config, head, config, _TODAY, policy) == []
 
 
 @pytest.mark.parametrize("existing", [False, True])
