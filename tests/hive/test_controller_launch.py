@@ -1362,6 +1362,7 @@ def test_launch_counts_remote_sessions_already_in_capacity_once(setup, monkeypat
     monkeypatch.setattr("scripts.routing.aggregate.enabled", lambda: False)
     monkeypatch.setattr("scripts.swarm.commands.hive_id", lambda: "local")
     setup.herdr._quota_accounts = [Account("claude", "account", "room", 5, 80, 80, 6)]
+    write_hive(setup, max_agents=10)
     setup.store.redis.set(f"{registry.key('remote')}:sessions", '{"claude:account": 4}')
 
     assert setup.launcher.select(setup.config, "eng", {"id": "task"}).account.name == "account"
@@ -1383,7 +1384,7 @@ def test_account_selection_orders_room_by_usage_then_name(setup):
 
 @pytest.mark.parametrize(
     ("row", "seats"),
-    [(("codex", 0, 6), ""), (("claude", 6, 6), "account 6 here and 0 on hives of 6")],
+    [(("codex", 0, 6), ""), (("claude", 6, 6), "account 6 sessions of 6")],
 )
 def test_non_claude_and_full_accounts_cannot_place_a_worker(setup, row, seats):
     from scripts.hive.placement import Wait
