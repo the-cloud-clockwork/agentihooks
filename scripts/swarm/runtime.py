@@ -643,7 +643,7 @@ class HerdrRuntime:
         if saved.get("model"):
             picked = model_pick.ModelPick(
                 saved["model"],
-                saved.get("effort") or _lane_default(lane, agent, chosen, config).effort,
+                chosen.get("effort"),
                 source=saved.get("model_source", "handoff"),
                 confidence=saved.get("model_confidence"),
             )
