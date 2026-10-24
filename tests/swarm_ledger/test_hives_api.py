@@ -30,7 +30,7 @@ def store(monkeypatch):
         record = registry._default(hive_id)
         record.update(
             ui=ui,
-            roles=["master", "eng"] if ui == "yes" else ["eng"],
+            excluded=[] if ui == "yes" else ["master"],
             max_agents=4,
             heartbeat_at=beat,
             slots=[{"harness": "claude", "account": "luna", "kind": "subscription", "cap": 6}],
@@ -110,17 +110,71 @@ def test_a_read_lists_every_hive_with_liveness_slots_agents_and_its_master(store
 
     reply = dispatch(request("GET", token=None, slug=None), store)
     desk, pod = reply["data"]
-    assert (desk["id"], desk["live"], desk["ui"], desk["roles"], desk["max_agents"]) == (
+    assert (desk["id"], desk["live"], desk["ui"], desk["excluded"], desk["max_agents"]) == (
         "desk",
         True,
         "yes",
-        ["master", "eng"],
+        [],
         4,
     )
     assert desk["slots"] == [{"harness": "claude", "account": "luna", "kind": "subscription", "cap": 6, "agents": 2}]
     assert desk["master"] == {"slug": "sw", "name": store.agents("sw")[0].name}
     assert (pod["id"], pod["live"], pod["master"], pod["slots"][0]["agents"]) == ("pod", False, None, 0)
     assert reply["revision"] == resources.revision(reply["data"])
+
+
+def test_a_hive_that_never_beat_or_went_quiet_past_a_day_is_not_listed_and_keeps_its_record(store):
+    from scripts.hive import registry
+    from scripts.swarm_ledger.api import hives
+
+    for hive_id, beat in (("never", 0), ("gone", NOW_MS - hives.GONE_MS - 1), ("edge", NOW_MS - hives.GONE_MS)):
+        record = {**registry._default(hive_id), "heartbeat_at": beat}
+        store.redis.hset(registry.key(hive_id), mapping={k: registry._encode(k, v) for k, v in record.items()})
+        store.redis.sadd(registry.INDEX, hive_id)
+    reply = dispatch(request("GET", token=None, slug=None), store)
+    assert [hive["id"] for hive in reply["data"]] == ["desk", "edge", "pod"]
+    assert refusal(request("GET", "/api/v1/hives/never"), store) == (404, "resource_missing", "No such hive")
+    assert {"never", "gone"} <= set(store.redis.smembers(registry.INDEX))
+    assert registry.show(store.redis, "gone")["heartbeat_at"] == NOW_MS - hives.GONE_MS - 1
+
+
+def test_a_hive_named_by_its_id_shows_its_member_name_and_a_set_name_wins(store):
+    from scripts.hive import auth, registry
+
+    store.redis.hset(f"{auth.PREFIX}:member:desk", mapping={"name": "workstation"})
+    store.redis.hset(f"{auth.PREFIX}:member:pod", mapping={"name": "anton pod"})
+    store.redis.hset(registry.key("pod"), "name", "Pod one")
+    reply = dispatch(request("GET", token=None, slug=None), store)
+    assert [(hive["id"], hive["name"]) for hive in reply["data"]] == [("desk", "workstation"), ("pod", "Pod one")]
+    store.redis.delete(f"{auth.PREFIX}:member:desk")
+    assert dispatch(request("GET", token=None, slug=None), store)["data"][0]["name"] == "desk"
+
+
+def test_a_hive_that_beat_at_this_moment_is_listed_as_live(store):
+    from scripts.hive import registry
+
+    store.redis.hset(registry.key("desk"), "heartbeat_at", registry._encode("heartbeat_at", NOW_MS))
+    reply = dispatch(request("GET", token=None, slug=None), store)
+    assert [(hive["id"], hive["live"]) for hive in reply["data"]] == [("desk", True), ("pod", False)]
+
+
+def test_a_quiet_hive_inside_the_day_is_listed_and_readable_by_id(store):
+    from scripts.hive import registry
+    from scripts.swarm_ledger.api import hives
+
+    beat = NOW_MS - hives.GONE_MS + 1
+    store.redis.hset(registry.key("pod"), "heartbeat_at", registry._encode("heartbeat_at", beat))
+    found = dispatch(request("GET", "/api/v1/hives/pod", token=None, slug=None), store)["data"]
+    assert (found["id"], found["live"], found["heartbeat_at"]) == ("pod", False, beat)
+
+
+def test_a_hive_gone_past_a_day_is_not_found_by_id(store):
+    from scripts.hive import registry
+    from scripts.swarm_ledger.api import hives
+
+    store.redis.hset(registry.key("pod"), "heartbeat_at", registry._encode("heartbeat_at", NOW_MS - hives.GONE_MS - 1))
+    assert refusal(request("GET", "/api/v1/hives/pod"), store) == (404, "resource_missing", "No such hive")
+    assert registry.show(store.redis, "pod") is not None
 
 
 def test_a_read_of_one_hive_answers_that_hive_and_a_missing_one_is_not_found(store):
@@ -146,12 +200,12 @@ def test_a_finished_master_or_one_without_a_hive_is_not_shown(store):
 def test_the_operator_writes_settings_through_the_hive_registry(store):
     from scripts.hive import registry
 
-    body = {"name": "Desk", "roles": ["master", "eng", "ci"], "prefer": {"eng": 2, "ci": 1}, "max_agents": 6}
+    body = {"name": "Desk", "excluded": ["qa"], "prefer": {"eng": 2, "ci": 1}, "max_agents": 6}
     reply = dispatch(request("PATCH", "/api/v1/hives/desk", body), store)
     stored = registry.show(store.redis, "desk")
-    assert (stored["name"], stored["roles"], stored["prefer"], stored["max_agents"]) == (
+    assert (stored["name"], stored["excluded"], stored["prefer"], stored["max_agents"]) == (
         "Desk",
-        ["master", "eng", "ci"],
+        ["qa"],
         {"eng": 2, "ci": 1},
         6,
     )
@@ -169,8 +223,8 @@ def test_flags_reach_the_registry_as_yes_or_no(store):
 def test_settings_become_registry_pairs():
     from scripts.swarm_ledger.api import hives
 
-    assert hives.pairs({"roles": ["eng", "ci"], "prefer": {"eng": 1}, "max_agents": 3, "ui": "no"}) == [
-        "roles=eng,ci",
+    assert hives.pairs({"excluded": ["eng", "ci"], "prefer": {"eng": 1}, "max_agents": 3, "ui": "no"}) == [
+        "excluded=eng,ci",
         "prefer=eng:1",
         "max-agents=3",
         "ui=no",
@@ -180,9 +234,9 @@ def test_settings_become_registry_pairs():
 @pytest.mark.parametrize(
     ("body", "message"),
     [
-        ({"roles": ["qa"]}, "role qa needs a UI, and this hive has ui=no"),
+        ({"prefer": {"master": 1}}, "prefer names master, a role this hive excludes"),
         ({"max_agents": 0}, "max-agents must be a positive whole number, not '0'"),
-        ({"prefer": {"ci": 1}}, "prefer names ci, a role this hive does not take"),
+        ({"excluded": ["bad name"]}, "excluded takes lane roles or profiles, not 'bad name'"),
     ],
 )
 def test_the_registry_refuses_settings_it_does_not_accept(store, body, message):
@@ -193,7 +247,9 @@ def test_the_registry_refuses_settings_it_does_not_accept(store, body, message):
     assert registry.show(store.redis, "pod") == before
 
 
-@pytest.mark.parametrize("body", [{}, {"color": "red"}, {"ui": "maybe"}, {"roles": ["boss"]}, {"max_agents": "3"}])
+@pytest.mark.parametrize(
+    "body", [{}, {"color": "red"}, {"ui": "maybe"}, {"roles": ["eng"]}, {"excluded": [""]}, {"max_agents": "3"}]
+)
 def test_the_schema_refuses_bodies_outside_the_settings(store, body):
     expected = (400, "schema_invalid", "Request does not match the resource schema")
     assert refusal(request("PATCH", "/api/v1/hives/pod", body), store) == expected

@@ -10,7 +10,7 @@ import time
 from collections.abc import Mapping
 from pathlib import Path
 
-from scripts import codex_router, select_profile
+from scripts import codex_router, profile_telemetry, select_profile
 from scripts.codex_session import supervisor
 from scripts.codex_session.binding import BindingError
 from scripts.routing import codex_api, envs
@@ -23,6 +23,7 @@ ROUTE_FLAG = "--route"
 ROUTE_PREFIX = f"{ROUTE_FLAG}="
 EFFORT_PREFIX = "model_reasoning_effort="
 QUOTE = '"'
+PUMP_EXITED = "agentihooks codex-session: inbox pump exited with status {}; stopping the app server"
 
 
 def take_route(args: list[str]) -> tuple[str, list[str]]:
@@ -110,10 +111,12 @@ def prepare(args: argparse.Namespace, agent_args: list[str], environ: dict[str, 
     slug, lane, task, name = (environ[name] for name in IDENTITY_ENV)
     route, agent_args = take_route(agent_args)
     environ = {**environ, select_profile.BUNDLE_REVISION: args.bundle_revision}
-    profile_env, flags = select_profile.prepare(args.profile, "codex", "", "", agent_args, environ, args.overlay)
+    pushed = {**environ, select_profile.PUSH: "1"}
+    profile_env, flags = select_profile.prepare(args.profile, "codex", "", "", agent_args, pushed, args.overlay)
     model, effort, server_args = server_options(flags)
     environ.update(profile_env)
     account, placement, child = route_account(environ, route, args.exclude)
+    child.update(profile_telemetry.agentihooks_langfuse_keys())
     codex_router._report(args.report, status="routed", account=account.name, placement=placement)
     agent = AgentRecord(
         name,
@@ -186,6 +189,7 @@ def main(
             except subprocess.TimeoutExpired:
                 pass
         else:
+            print(PUMP_EXITED.format(pump.returncode), file=sys.stderr)
             return pump.returncode or 3
     finally:
         if pump is not None:

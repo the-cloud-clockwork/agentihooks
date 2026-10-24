@@ -1,0 +1,6 @@
+{
+  "scripts/recall/search.py:scripts.recall.search.x__parents__mutmut_10:7ca9fee517a08a845e6109a300bac559c22a0f26d736ea0477d9a0f5cb83ab5d": {
+    "reader": "standards_reader",
+    "reason": "Only keyword and identifier case changes in the parent lookup SQL, which SQLite treats as case-insensitive."
+  }
+}

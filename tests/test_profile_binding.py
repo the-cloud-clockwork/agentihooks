@@ -265,6 +265,8 @@ def test_launch_success_requires_live_binding_canary(tmp_path, monkeypatch, caps
         str(tmp_path),
         "--route-timeout",
         "0.1",
+        "--canary-timeout",
+        "0.1",
     ]
     native = (
         ["--model", "configured-model", "--effort", "medium"]
@@ -294,7 +296,8 @@ def test_launch_success_requires_live_binding_canary(tmp_path, monkeypatch, caps
         reasons = {
             "wrong": "live harness profile mismatch with requested choice",
             "missing": f"missing profile home: {tmp_path / 'missing'}",
-            "absent": "mounted profile canary did not validate before timeout",
+            "absent": "mounted profile canary did not validate before timeout: "
+            f"the {target} agent reported no canary within 0.1s",
             "account": "live process account differs from requested route",
         }
         assert output.err == f"agentihooks init-agent: {reasons[control]}\n"
@@ -375,7 +378,13 @@ def test_swarm_refuses_a_started_process_without_validation(tmp_path):
     runtime = HerdrRuntime(home=tmp_path, run=run)
     config = SimpleNamespace(slug="proof", repo=str(tmp_path), autonomy="delegate", compact_limit=0)
     with pytest.raises(SpawnError, match="validation is missing"):
-        runtime._launch(config, "eng", "task", "worker", ["init-agent", "--agent", "codex", "--profile", "engineer"])
+        runtime._launch(
+            config,
+            "eng",
+            "task",
+            "worker",
+            ["init-agent", "--dir", "/repo", "--agent", "codex", "--profile", "engineer"],
+        )
     assert calls[-1][1:] == ["terminate-agent", "worker", "--force-shared"]
 
 

@@ -3,7 +3,7 @@ import { $, store, stored } from "./dom.js";
 import { readLayout, writeLayout } from "./api.js";
 import { showArtifacts } from "./artifacts.js";
 import { anchorPanel, showAlerts, showNotifications } from "./notices.js";
-import { revealTarget } from "./outline.js";
+import { pageTo, revealTarget } from "./outline.js";
 import { renderSwarm, swarm } from "./swarm.js";
 
 const tabScroll = {};
@@ -30,7 +30,10 @@ export function openHash() {
   const target = id && revealTarget(id);
   if (target) {
     requestAnimationFrame(() => target.scrollIntoView({ block: "start" }));
-  } else selectTab(stored(`plan-ledger:${SLUG}:tab`, "ledger"), false);
+    return;
+  }
+  selectTab(stored(`plan-ledger:${SLUG}:tab`, "ledger"), false);
+  pageTo(id);
 }
 
 export function wireTabs() {
@@ -52,8 +55,13 @@ export function wireTabs() {
 let layout = {};
 let layoutSave = 0;
 
+function knownRows(next) {
+  const rows = new Set([...document.querySelectorAll("#swarm-box [data-grip]")].map((grip) => grip.dataset.row));
+  return Object.fromEntries(Object.entries(next).filter(([key]) => ["columns", "stats"].includes(key) || rows.has(key)));
+}
+
 function applyLayout(next) {
-  layout = next && typeof next === "object" && !Array.isArray(next) ? next : {};
+  layout = next && typeof next === "object" && !Array.isArray(next) ? knownRows(next) : {};
   for (const grip of document.querySelectorAll("#swarm-box [data-grip]")) {
     const row = $(grip.dataset.row), value = (layout[row.id] || {})[grip.dataset.grip];
     const [cls, prop, unit] = grip.dataset.grip === "height" ? ["sized", "--h", "px"] : ["split", "--split", "%"];

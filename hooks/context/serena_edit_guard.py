@@ -7,12 +7,14 @@ and the gates require formatted code. AGENTIHOOKS_SERENA=false turns the guard o
 """
 
 import glob
+import os
 import re
 import shlex
 from itertools import takewhile
 from pathlib import Path
 
 from hooks.hook_manager import BlockAction
+from scripts.swarm import naming
 
 _FILE_TOOLS = frozenset({"Edit", "MultiEdit", "Write"})
 _CD = re.compile(r"(?:^|&&|;|\()\s*cd\s+(\S+)\s*(?=&&|;)")
@@ -103,9 +105,20 @@ def _patch_deletions(tool_input: dict, cwd: Path) -> set[Path]:
     return {path for path, kinds in actions.items() if kinds == {"Delete File"}}
 
 
+def _own_worktree(root: Path) -> bool:
+    base = Path(os.environ.get("WORKTREE_ROOT") or Path.home() / "dev" / "worktrees").resolve()
+    tmp = root.parent.name == "_tmp"
+    if (root.parent.parent.parent if tmp else root.parent.parent) != base:
+        return False
+    try:
+        return naming.is_worktree(root.name, os.environ, tmp=tmp)
+    except naming.NamingError:
+        return False
+
+
 def _foreign_root(target: Path, session: Path | None) -> Path | None:
     root = _checkout_root(target)
-    if not root or root == session:
+    if not root or root == session or _own_worktree(root):
         return None
     if target.is_dir():
         return root if any(target.rglob("*.py")) else None

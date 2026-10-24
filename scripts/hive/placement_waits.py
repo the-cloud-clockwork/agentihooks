@@ -22,11 +22,13 @@ def observe(store: RedisStore, slug: str, lane: str, task: str, reason: str, now
                 pipe.watch(key)
                 raw = pipe.hget(key, task)
                 previous = json.loads(raw) if raw else {}
+                started = now
                 if reason and previous.get("reason") == reason and previous.get("lane") == lane:
-                    return
+                    started = previous["started_at"]
                 pipe.multi()
                 if reason:
-                    pipe.hset(key, task, json.dumps({"lane": lane, "reason": reason, "started_at": now}))
+                    row = {"lane": lane, "reason": reason, "started_at": started, "seen_at": now}
+                    pipe.hset(key, task, json.dumps(row))
                 else:
                     pipe.hdel(key, task)
                 pipe.execute()

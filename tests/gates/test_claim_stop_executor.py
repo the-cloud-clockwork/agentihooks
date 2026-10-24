@@ -42,15 +42,14 @@ MERGED = {
 
 @pytest.fixture
 def rig(tmp_path, monkeypatch, ledger_port):
-    import redis
-    from fakeredis import TcpFakeServer
+    from fakeredis import FakeRedis, TcpFakeServer
 
     from tests.scheduler.process_service import start_scheduler, stop_scheduler
 
     server = TcpFakeServer(("127.0.0.1", 0), server_type="redis")
     threading.Thread(target=server.serve_forever, daemon=True).start()
     url = f"redis://127.0.0.1:{server.server_address[1]}/0?protocol=3"
-    client = redis.Redis.from_url(url, decode_responses=True)
+    client = FakeRedis(server=server.fake_server, decode_responses=True, protocol=3)
     ledgers = tmp_path / "ledgers"
     ledgers.mkdir()
     monkeypatch.setattr(core, "LEDGER_DIR", ledgers)

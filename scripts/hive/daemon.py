@@ -1,7 +1,10 @@
 import json
 import os
+import re
 import shutil
 import subprocess
+import sys
+import threading
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -9,8 +12,8 @@ from typing import TYPE_CHECKING
 
 from hooks.context import account_sessions, broadcast
 from scripts import claude_quota_balancer as balancer
-from scripts import codex_router, session_bands
-from scripts.hive import registry
+from scripts import codex_router, github_app_cli, master_claude_login, session_bands
+from scripts.hive import quota_refresh, registry
 from scripts.routing import claude_api, codex_api
 from scripts.scheduler.process_timer import wait as scheduled_wait
 from scripts.swarm.commands import hive_id
@@ -23,42 +26,108 @@ if TYPE_CHECKING:
 
 BEAT_SECONDS = 15
 TTL_SECONDS = BEAT_SECONDS * 3
+# A launch inside a beat can run for minutes, so headroom publishes on its own thread well inside its stale window.
+HEADROOM_SECONDS = 10
+RETRY_SECONDS = (1, 2, 4, 8, 16, 30)
+CONNECT_TIMEOUT_S = 3
+READ_TIMEOUT_S = 5
+# The wait client times out at BEAT_SECONDS, so a scheduled wake must land before it.
+WAKE_SLACK_S = 2
 UNIT = "agentihooks-hive.service"
+ORIGIN = re.compile(r'\[remote "origin"\][^\[]*?\burl\s*=\s*(\S+)')
+REMOTE = re.compile(r"(?:[a-z+]+://)?(?:[^@/]+@)?([^/:]+)[:/](.+?)(?:\.git)?/?")
 
 
 def beat(redis: "Redis", local_id: str) -> None:
     from scripts.hive import reports
-    from scripts.hive.orders import Consumer
+    from scripts.hive.orders import Consumer, alive
     from scripts.routing.reservation import LaunchSlots
 
+    alive(redis, local_id)
     consumer = Consumer.local(redis, local_id)
     fenced = fence(redis, local_id, consumer.runtime)
     processes = account_sessions.local_processes()
     executions = _executions(redis, local_id, processes)
     report = observe(processes=processes)
+    adopt_caps(redis, report)
     if executions:
         report["sessions"]["_executions"] = executions
     key = registry.key(local_id)
     # The member Redis user cannot write the hive index or launch slots; join, revoke and the controller maintain them.
     member = local_id == os.environ.get("AGENTIHOOKS_HIVE_ID")
+    registry.migrate(redis, local_id)
     with redis.pipeline() as pipe:
-        for field, value in registry._default(local_id).items():
-            pipe.hsetnx(key, field, registry._encode(field, value))
+        registry.seed(pipe, local_id)
         fields = {name: json.dumps(report[name]) for name in ("slots", "interactive", "repos")}
-        fields["heartbeat_at"] = str(int(time.time() * 1000))
+        fields["master_login"] = json.dumps({"claude": master_claude_login.signed_in()})
+        beat_ms = int(time.time() * 1000)
+        fields["heartbeat_at"] = str(beat_ms)
         pipe.hset(key, mapping=fields)
         if not member:
             pipe.sadd(registry.INDEX, local_id)
         for field in ("sessions", "quota"):
             pipe.set(f"{key}:{field}", json.dumps(report[field]), ex=TTL_SECONDS)
         pipe.execute()
+    from scripts.hive import headroom, join_report
+
+    headroom.publish(redis, local_id, beat_ms)
     if not member:
         LaunchSlots(redis).refresh([execution for ids in executions.values() for execution in ids])
     if not fenced:
         consumer.poll()
     consumer.poll_commands()
+    consumer.sync_workspaces(TTL_SECONDS)
+    join_report.heartbeat(redis, local_id, int(time.time() * 1000))
     hosted = execution_report(redis, local_id, consumer.runtime.herdr)
     redis.set(reports.key(local_id), json.dumps(hosted), ex=TTL_SECONDS)
+    from scripts.hive.execution_events import observe as publish_executions
+
+    publish_executions(local_id, hosted)
+    from scripts.hive import account_slots
+
+    try:
+        account_slots.publish(local_id, report, hosted)
+    except _slot_errors() as exc:
+        print(f"hive account slot heartbeat failed ({type(exc).__name__}: {exc}); retrying next beat", file=sys.stderr)
+    publish_config(redis, local_id, report["repos"])
+    close_dead_tabs(set(hosted["names"]))
+
+
+def _slot_errors() -> tuple[type[Exception], ...]:
+    """Evaluated only once a publish raised, so a hive without the nats extra never imports it."""
+    from nats.errors import Error as NatsError
+
+    from scripts.hive import account_slots
+
+    return NatsError, TimeoutError, account_slots.Unavailable
+
+
+def adopt_caps(redis: "Redis", report: dict) -> None:
+    """A subscription slot takes the cap of a newer reading another live hive published, since quota is per account."""
+    now = int(time.time() * 1000)
+    for hive in registry.hives(redis):
+        if not registry.live(hive, now):
+            continue
+        quotas = json.loads(redis.get(f"{registry.key(hive['id'])}:quota") or "{}")
+        caps = {f"{slot['harness']}:{slot['account']}": slot["cap"] for slot in hive["slots"] if "cap" in slot}
+        for slot in report["slots"]:
+            name = f"{slot['harness']}:{slot['account']}"
+            reading = quotas.get(name)
+            if slot["kind"] == "subscription" and name in caps and _newer(reading, report["quota"][name]):
+                slot["cap"] = caps[name]
+                report["quota"][name] = reading
+
+
+def _newer(reading: dict | None, mine: dict) -> bool:
+    if reading is None or reading["observed_at"] is None:
+        return False
+    return mine["observed_at"] is None or reading["observed_at"] > mine["observed_at"]
+
+
+def publish_config(redis: "Redis", local_id: str, repos: list[str]) -> None:
+    from scripts.hive import config
+
+    config.publish(redis, local_id, repos)
 
 
 def fence(redis: "Redis", local_id: str, runtime: "LocalHerdrRuntime") -> bool:
@@ -78,12 +147,84 @@ def fence(redis: "Redis", local_id: str, runtime: "LocalHerdrRuntime") -> bool:
     return redis.hlen(key) > 0
 
 
-def run(redis: "Redis") -> None:
+def publish_headroom(redis: "Redis", waiter: "Redis", local_id: str, stop: threading.Event) -> None:
+    from redis.exceptions import ConnectionError, RedisError, TimeoutError
+
+    from scripts.hive import headroom, orders
+
+    while not stop.is_set():
+        try:
+            scheduled_wait(HEADROOM_SECONDS, redis=waiter, timeout=HEADROOM_SECONDS + WAKE_SLACK_S)
+        except (ConnectionError, TimeoutError):
+            return
+        if stop.is_set():
+            return
+        try:
+            headroom.publish(redis, local_id, int(time.time() * 1000))
+            orders.alive(redis, local_id)
+        except (RedisError, ValueError, KeyError) as exc:
+            print(f"hive headroom publish failed ({type(exc).__name__}: {exc})", file=sys.stderr)
+
+
+def run(connect: Callable[[], tuple["Redis", "Redis"]]) -> None:
+    from redis.exceptions import ConnectionError, TimeoutError
+
+    lost = (ConnectionError, TimeoutError)
     local_id = hive_id()
+    quota_refresh.refresh(os.environ)
+    worker, attempted_at = None, time.time()
+    renewed = time.time()
+    failures = 0
     while True:
-        started = time.monotonic()
-        beat(redis, local_id)
-        scheduled_wait(max(0, BEAT_SECONDS - (time.monotonic() - started)))
+        stop = threading.Event()
+        try:
+            redis, waiter = connect()
+            threading.Thread(target=publish_headroom, args=(redis, waiter, local_id, stop), daemon=True).start()
+            while True:
+                started = time.monotonic()
+                worker, attempted_at = quota_refresh.start(os.environ, worker, attempted_at)
+                renewed = github_app_cli.renew(renewed, time.time())
+                beat(redis, local_id)
+                elapsed = time.monotonic() - started
+                delay = max(0, BEAT_SECONDS - max(WAKE_SLACK_S, elapsed))
+                scheduled_wait(delay, redis=waiter, timeout=max(delay, BEAT_SECONDS - elapsed - WAKE_SLACK_S / 2))
+                failures = 0
+        except lost as exc:
+            stop.set()
+            _back_off(exc, failures)
+            failures += 1
+        finally:
+            stop.set()
+
+
+def _back_off(exc: Exception, failures: int) -> None:
+    delay = RETRY_SECONDS[min(failures, len(RETRY_SECONDS) - 1)]
+    print(f"hive Redis connection lost ({type(exc).__name__}: {exc}); reconnecting in {delay}s", file=sys.stderr)
+    time.sleep(delay)
+
+
+def clients(source: "Redis") -> tuple["Redis", "Redis"]:
+    from redis import ConnectionPool, Redis
+    from redis.backoff import NoBackoff
+    from redis.retry import Retry
+
+    pool = source.connection_pool
+    options = {
+        **pool.connection_kwargs,
+        "socket_connect_timeout": CONNECT_TIMEOUT_S,
+        "socket_keepalive": True,
+        "health_check_interval": BEAT_SECONDS,
+        "retry": Retry(NoBackoff(), 0),
+    }
+    source.close()
+    return tuple(
+        Redis(
+            connection_pool=ConnectionPool(
+                connection_class=pool.connection_class, **options | {"socket_timeout": timeout}
+            )
+        )
+        for timeout in (READ_TIMEOUT_S, BEAT_SECONDS)
+    )
 
 
 def unit(binary: str) -> str:
@@ -162,11 +303,8 @@ def claude_signed_in() -> bool:
 def _subscriptions(environ, counts: dict, now: float) -> tuple[list, dict]:
     observed = {result.account: (at, result) for at, result in balancer.cached_observations(environ=environ)}
     _claude_snapshots(observed)
-    claude = {
-        name.removeprefix(balancer.TOKEN_PREFIX)
-        for name in environ
-        if name.startswith(balancer.TOKEN_PREFIX) and environ[name]
-    }
+    claude = {credential.account for credential in balancer.discover_credentials(environ)}
+    claude.update(_native_accounts(environ, observed))
     claude.update(counts["claude"])
     claude.discard(account_sessions.API_ACCOUNT)
     if claude_signed_in():
@@ -174,7 +312,11 @@ def _subscriptions(environ, counts: dict, now: float) -> tuple[list, dict]:
     slots, quota = [], {}
     for account in sorted(claude):
         at, result = observed.get(account, (None, None))
-        cap = balancer.account_cap(result, now) if result and session_bands.fresh(at, now) else None
+        cap = (
+            balancer.account_cap(result, now, ceiling=session_bands.hive_ceiling(environ))
+            if result and session_bands.fresh(at, now)
+            else None
+        )
         kind = "interactive" if account == account_sessions.UNROUTED else "subscription"
         slots.append({"harness": "claude", "account": account, "kind": kind, "cap": cap or 0})
         quota[f"claude:{account}"] = (
@@ -182,7 +324,7 @@ def _subscriptions(environ, counts: dict, now: float) -> tuple[list, dict]:
             if result
             else _reading(balancer.QuotaWindow(), balancer.QuotaWindow(), None)
         )
-    pool = [account for account in codex_router.accounts(environ) if account.signed_in]
+    pool = codex_router.routed([account for account in codex_router.accounts(environ) if account.signed_in], environ)
     readings = codex_router.quotas(pool, environ)
     for account in pool:
         reading = readings.get(account.name)
@@ -203,7 +345,48 @@ def _subscriptions(environ, counts: dict, now: float) -> tuple[list, dict]:
     return slots, quota
 
 
+def _native_accounts(environ, observed: dict) -> set[str]:
+    from hooks.context import quota_usage
+    from scripts.routing import master_account
+
+    accounts = {account for account in master_claude_login.logins().values() if account}
+    declared = master_account.load(environ).get("claude")
+    if declared:
+        accounts.add(declared.slug)
+    for account in accounts:
+        snapshot = quota_usage.latest_snapshot(account)
+        if not snapshot:
+            continue
+        at, windows = snapshot
+        if at <= observed.get(account, (0, None))[0]:
+            continue
+        five, week = windows.get("five_hour") or {}, windows.get("seven_day") or {}
+        observed[account] = (
+            at,
+            balancer.ProbeResult(
+                account,
+                "allowed",
+                "UNKNOWN",
+                None,
+                balancer.QuotaWindow(five.get("used_percentage"), five.get("resets_at")),
+                balancer.QuotaWindow(week.get("used_percentage"), week.get("resets_at")),
+            ),
+        )
+    return accounts
+
+
 def repositories() -> list[str]:
+    checkouts = _checkouts()
+    identities = {origin(path) for path in checkouts} - {""}
+    return sorted(identities | {str(path) for path in checkouts})
+
+
+def local_checkout(repo: str) -> str:
+    matches = sorted(str(path) for path in _checkouts() if origin(path) == repo)
+    return matches[0] if matches else repo
+
+
+def _checkouts() -> list[Path]:
     root = Path(os.environ.get("HIVE_REPO_ROOT") or Path.home() / "dev").expanduser()
     if not root.is_dir():
         return []
@@ -214,7 +397,26 @@ def repositories() -> list[str]:
         if parent.is_dir() and not (parent / ".git").exists()
         for child in parent.iterdir()
     ]
-    return sorted(str(path) for path in candidates + nested if (path / ".git").exists())
+    return [path for path in candidates + nested if (path / ".git").exists()]
+
+
+def origin(checkout: Path) -> str:
+    """The checkout's origin remote as a lowercase host/owner/name, the name a hosted swarm gives its repo."""
+    try:
+        found = ORIGIN.search((_common_gitdir(checkout) / "config").read_text())
+    except OSError:
+        return ""
+    remote = found and REMOTE.fullmatch(found.group(1).strip())
+    return f"{remote.group(1)}/{remote.group(2)}".lower() if remote else ""
+
+
+def _common_gitdir(checkout: Path) -> Path:
+    git = checkout / ".git"
+    if git.is_file():
+        git = checkout / git.read_text().removeprefix("gitdir:").strip()
+        if (git / "commondir").is_file():
+            git = git / (git / "commondir").read_text().strip()
+    return git
 
 
 def observe(processes: dict[str, dict[int, str]] | None = None) -> dict:
@@ -283,6 +485,13 @@ def _executions(redis: "Redis", local_id: str, processes: dict[str, dict[int, st
     return found
 
 
+def _pane_ids(herdr: "HerdrRuntime") -> list[str] | None:
+    try:
+        return [pane["pane_id"] for pane in herdr.herdr(["pane", "list"])["panes"]]
+    except (RuntimeError, OSError, subprocess.SubprocessError, KeyError, TypeError):
+        return None
+
+
 def execution_report(redis: "Redis", local_id: str, herdr: "HerdrRuntime") -> dict:
     from dataclasses import asdict
 
@@ -298,6 +507,11 @@ def execution_report(redis: "Redis", local_id: str, herdr: "HerdrRuntime") -> di
     report = {"names": sorted(herdr.live_names()), "panes": {}, "executions": {}}
     if not hosted:
         return report
+    from scripts.swarm_v2.runtime.process import local_namespace
+
+    report["observed_at"] = int(time.time() * 1000)
+    report["process_namespace"] = local_namespace()
+    report["pane_ids"] = _pane_ids(herdr)
     facts = herdr.bindings([agent for _, agent in hosted])
     report["panes"] = herdr.conversations() or {}
     for slug, agent in hosted:
@@ -310,3 +524,15 @@ def execution_report(redis: "Redis", local_id: str, herdr: "HerdrRuntime") -> di
             "pane": asdict(herdr.observe(agent)),
         }
     return report
+
+
+def close_dead_tabs(live: set[str]) -> list[str]:
+    from scripts import herdr_gc, herdr_host
+
+    environ = dict(os.environ)
+    if not herdr_host.binary() or not herdr_host.server_running(environ):
+        return []
+    try:
+        return herdr_gc.close_dead_tabs(environ, int(time.time() * 1000), herdr_gc.Herdr(environ), live)
+    except herdr_gc.READ_ERRORS:
+        return []

@@ -1,12 +1,13 @@
 import copy
 import gc
 import json
+import sqlite3
 import weakref
 
 import pytest
 
-from scripts.swarm_ledger.repository.rows import assemble, diff, encode, flatten
-from scripts.swarm_ledger.repository.sqlite import SQLiteLedgerRepository
+from scripts.swarm_ledger.repository.rows import assemble, diff, encode, flatten, read_rows, write_rows
+from scripts.swarm_ledger.repository.sqlite import ROWS_SCHEMA, SQLiteLedgerRepository
 from tests.swarm_ledger.test_sqlite import document
 
 
@@ -211,3 +212,37 @@ def test_numeric_list_ids_keep_distinct_literal_occurrence_paths():
     }
     assert stored['[["id",true,0]]'][3] == 0
     assert stored['[["id",1,0]]'][3] == 1
+
+
+class Recorder:
+    def __init__(self):
+        self.calls = []
+
+    def execute(self, sql, parameters=()):
+        self.calls.append(("execute", sql, [parameters]))
+
+    def executemany(self, sql, rows):
+        self.calls.append(("executemany", sql, list(rows)))
+
+
+def receipts(first):
+    return {"_meta": {"api_operations": {f"op{n}": {"digest": f"d{n}"} for n in range(first, first + 1000)}}}
+
+
+def test_a_write_sends_its_changed_rows_as_one_batch_per_table_and_kind():
+    before, after = diff(receipts(0), receipts(1))
+    recorder = Recorder()
+    write_rows(recorder, "ledger", before, after)
+    assert [(kind, sql.split()[0], len(rows)) for kind, sql, rows in recorder.calls] == [
+        ("executemany", "DELETE", 2),
+        ("executemany", "INSERT", 1001),
+    ]
+
+
+def test_batched_row_writes_store_the_new_tree():
+    connection = sqlite3.connect(":memory:")
+    connection.executescript(ROWS_SCHEMA)
+    old, new = receipts(0), {**receipts(1), "chat": [{"id": "m1", "text": "moved"}]}
+    write_rows(connection, "ledger", {}, flatten(old))
+    write_rows(connection, "ledger", *diff(old, new))
+    assert read_rows(connection, "ledger") == flatten(new)

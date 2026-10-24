@@ -6,7 +6,7 @@ import urllib.error
 
 from scripts.swarm.store import RedisStore
 from scripts.swarm_ledger import ledger
-from scripts.swarm_ledger.api.client import ResourceClient, failure
+from scripts.swarm_ledger.api import client as hub_client
 from scripts.swarm_v2.api.tasks import RECEIPTS, RevisionConflict, spec_revision
 from scripts.swarm_v2.auth_context import GrantRefused
 
@@ -47,8 +47,8 @@ class HostedLedger:
     def __init__(self, base: str, credential: str, store: RedisStore) -> None:
         self.base, self.credential, self.store = base, credential, store
 
-    def client(self) -> ResourceClient:
-        return ResourceClient(self.base, {"X-Controller-Credential": self.credential})
+    def client(self) -> hub_client.ResourceClient:
+        return hub_client.ResourceClient(self.base, {"X-Controller-Credential": self.credential})
 
     def fetch(self, slug: str, key: str) -> tuple[dict | None, str | None]:
         try:
@@ -138,7 +138,7 @@ class _Write:
         )
 
     def _refusal(self, error: urllib.error.HTTPError) -> GrantRefused:
-        detail = failure(error)[1]
+        detail = hub_client.failure(error)[1]
         if detail.get("code") == "stale_generation":
             return GrantRefused("stale_generation", "the task generation is no longer current")
         if detail.get("code") == "operation_conflict":

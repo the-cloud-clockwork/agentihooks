@@ -1,13 +1,14 @@
 """Every task second in the window lands in exactly one named stage.
 
 Base phases run claim wait, build, ci run and review; overlays take an instant from its base in a fixed priority,
-and an instant of claim wait while host samples hold spawns is that holder's hold. Claim wait starts when the task
+and an instant of claim wait while host samples hold spawns is that holder's hold for as many waiting tasks as it
+held spawns, earliest ready first. Claim wait starts when the task
 became claimable and is reported as seat wait or queue wait.
 """
 
 import json
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from scripts.swarm import bottleneck, freeze, metrics_outbox
 from scripts.swarm.store import RedisStore
@@ -39,6 +40,7 @@ class Span:
     start: float
     end: float
     label: str = ""
+    count: int = 0
 
     def covers(self, at: float) -> bool:
         return self.start <= at < self.end
@@ -190,9 +192,9 @@ class Claim:
         self.graph = hierarchy.project(doc)[0]
 
     def __call__(self, task: dict) -> bool:
-        from scripts.swarm import tick
+        from scripts.swarm import readiness
 
-        return tick.ready(task, self.rows, self.doc, self.graph, self.fix_phase)
+        return readiness.ready(task, self.rows, self.doc, self.graph, self.fix_phase)
 
     def opens(self, task: dict) -> Callable[["Mark"], bool]:
         chain = freeze.ancestry(task, self.graph)
@@ -277,45 +279,41 @@ def timelines(rows: dict, tasks: list, now_ms: int, ready: Claim | None = None) 
 
 def holds(samples: list, now_ms: int) -> list[Span]:
     held = [
-        Span(f"{share}_hold", start, end, harness)
+        Span(f"{share}_hold", start, end, harness, count)
         for share, start, end, count, harness in bottleneck.held_spans(samples, now_ms)
         if count > 0
     ]
     merged = []
     for span in held:
-        if (
-            merged
-            and merged[-1].stage == span.stage
-            and merged[-1].label == span.label
-            and merged[-1].end == span.start
+        if merged and (merged[-1].stage, merged[-1].label, merged[-1].count, merged[-1].end) == (
+            span.stage,
+            span.label,
+            span.count,
+            span.start,
         ):
-            merged[-1] = Span(span.stage, merged[-1].start, span.end, span.label)
+            merged[-1] = replace(merged[-1], end=span.end)
         else:
             merged.append(span)
     return merged
 
 
-def _stage_at(timeline: Timeline, held: list[Span], at: float) -> tuple[str, str]:
+def _stage_at(timeline: Timeline, at: float) -> tuple[str, str]:
     ranked = sorted(timeline.overlays, key=lambda span: OVERLAYS.index(span.stage))
     span = next(span for span in (*ranked, *timeline.base) if span.covers(at))
-    if span.stage == CLAIM_WAIT:
-        hold = next((hold for hold in held if hold.covers(at)), None)
-        if hold is not None:
-            return hold.stage, hold.label
     return span.stage, span.label
 
 
-def _segments(timeline: Timeline, held: list[Span], window: bottleneck.Window):
+def _segments(timeline: Timeline, window: bottleneck.Window):
     low = max(timeline.start, window.start)
     high = max(low, min(timeline.end, window.end))
-    spans = [*timeline.base, *timeline.overlays, *held]
+    spans = [*timeline.base, *timeline.overlays]
     points = sorted({low, high, *(min(max(edge, low), high) for span in spans for edge in (span.start, span.end))})
     for start, end in zip(points, points[1:]):
-        yield (start, end, *_stage_at(timeline, held, (start + end) / 2))
+        yield (start, end, *_stage_at(timeline, (start + end) / 2))
 
 
-def _charges(timeline: Timeline, held: list[Span], window: bottleneck.Window, span: Span) -> bool:
-    return any((stage, label) == (span.stage, span.label) for _, _, stage, label in _segments(timeline, held, window))
+def _charges(timeline: Timeline, window: bottleneck.Window, span: Span) -> bool:
+    return any((stage, label) == (span.stage, span.label) for _, _, stage, label in _segments(timeline, window))
 
 
 def _split(pieces: list, lives: list, cap: int | None) -> list[tuple]:
@@ -335,27 +333,54 @@ def _split(pieces: list, lives: list, cap: int | None) -> list[tuple]:
     return found
 
 
+def _held_pieces(pieces: list, held: list[Span]) -> tuple[list, dict]:
+    charged, cut = [], {}
+    under = [piece for _, piece in pieces]
+    for hold in held:
+        edges = {min(max(edge, hold.start), hold.end) for _, start, end, *_ in under for edge in (start, end)}
+        points = sorted(edges | {hold.start, hold.end})
+        for low, high in zip(points, points[1:]):
+            for piece in sorted(piece for piece in under if piece[1] <= low and high <= piece[2])[: hold.count]:
+                charged.append((piece[3], hold.stage, hold.label, (high - low) / 1000))
+                cut.setdefault(piece, []).append((low, high))
+    waiting = {}
+    for lane, piece in pieces:
+        waiting.setdefault(lane, []).extend(_uncut(piece, cut.get(piece, [])))
+    return charged, waiting
+
+
+def _uncut(piece: tuple, taken: list) -> list[tuple]:
+    found, cursor = [], piece[1]
+    for low, high in sorted(taken):
+        if cursor < low:
+            found.append((piece[0], cursor, low, *piece[3:]))
+        cursor = max(cursor, high)
+    return found + ([(piece[0], cursor, piece[2], *piece[3:])] if cursor < piece[2] else [])
+
+
 def _charged(rows: dict, tasks: list, now_ms: int, window_ms: int, ready: Claim | None) -> list[tuple]:
     window = bottleneck.Window(now_ms - window_ms, now_ms)
     held = holds(rows["host_samples"], now_ms)
     found = timelines(rows, tasks, now_ms, ready)
     seats = ready.seats if ready else None
-    lives, pieces, seconds = {}, {}, [{} for _ in found]
+    lives, pieces, seconds = {}, [], [{} for _ in found]
     for index, timeline in enumerate(found):
         lives.setdefault(timeline.lane, []).extend(timeline.seats)
-        for start, end, stage, label in _segments(timeline, held, window):
+        for start, end, stage, label in _segments(timeline, window):
             if stage == CLAIM_WAIT:
-                pieces.setdefault(timeline.lane, []).append(((timeline.start, timeline.task), start, end, index, label))
+                pieces.append((timeline.lane, ((timeline.start, timeline.task), start, end, index, label)))
             else:
                 seconds[index][stage, label] = seconds[index].get((stage, label), 0.0) + (end - start) / 1000
-    for lane, waiting in pieces.items():
+    taken, waiting = _held_pieces(pieces, held)
+    for lane, rest in waiting.items():
         cap = None if seats is None else seats.get(lane, 0)
-        for index, stage, label, value in _split(waiting, lives[lane], cap):
-            seconds[index][stage, label] = seconds[index].get((stage, label), 0.0) + value
+        taken += _split(rest, lives[lane], cap)
+    for index, stage, label, value in taken:
+        seconds[index][stage, label] = seconds[index].get((stage, label), 0.0) + value
     return list(zip(found, seconds))
 
 
-def _overrun_episodes(rows, timeline, branch, held, window):
+def _overrun_episodes(rows, timeline, branch, window):
     episodes = set()
     for run in rows["ci_runs"]:
         if not branch or run["branch"] != branch:
@@ -364,21 +389,20 @@ def _overrun_episodes(rows, timeline, branch, held, window):
             if span.stage != "ci_overrun":
                 continue
             clipped = bottleneck.Window(max(window.start, span.start), min(window.end, span.end))
-            if _charges(timeline, held, clipped, span):
+            if _charges(timeline, clipped, span):
                 episodes.add(str(run["run_id"]))
     return episodes
 
 
 def observations(rows: dict, tasks: list, now_ms: int, window_ms: int, ready: Claim | None = None) -> dict:
     window = bottleneck.Window(now_ms - window_ms, now_ms)
-    held = holds(rows["host_samples"], now_ms)
     branches = {task["id"]: task.get("branch") for task in tasks}
     found = {}
     for timeline, seconds in _charged(rows, tasks, now_ms, window_ms, ready):
         for stage, _ in seconds:
             if stage != "ci_overrun":
                 found.setdefault(stage, set()).add(f"{stage}:{timeline.task}:{int(timeline.start)}")
-        overruns = _overrun_episodes(rows, timeline, branches.get(timeline.task), held, window)
+        overruns = _overrun_episodes(rows, timeline, branches.get(timeline.task), window)
         if overruns:
             found.setdefault("ci_overrun", set()).update(overruns)
     return {stage: sorted(episodes) for stage, episodes in found.items()}

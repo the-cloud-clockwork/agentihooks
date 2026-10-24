@@ -53,6 +53,12 @@ def _live(scheduler: Scheduler, entry_id: str) -> bool:
         return False
 
 
+def cancel(scheduler: Scheduler) -> None:
+    for entry in scheduler.owned(OWNER):
+        entry.cancel()
+    scheduler.redis.delete(scheduler.key("swarm-tick"))
+
+
 def fire(event: dict, delivery_id: str, redis: "Redis") -> None:
     directory = runtime_dir()
     directory.mkdir(parents=True, exist_ok=True)
@@ -86,6 +92,13 @@ def undelivered(scheduler: Scheduler, installed: Path | str, now: float) -> str:
     if age > FRESH_S:
         return f"the last swarm tick was delivered {int(age)} seconds ago"
     return ""
+
+
+def delivered_at(scheduler: Scheduler) -> float:
+    try:
+        return float(json.loads(scheduler.redis.get(scheduler.key(DELIVERED)))["at"])
+    except (ValueError, KeyError, TypeError):
+        return 0.0
 
 
 def command(binary: str) -> list[str]:

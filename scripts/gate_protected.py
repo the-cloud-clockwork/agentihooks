@@ -11,6 +11,16 @@ from scripts import ci_branch_lanes, ci_reuse, ci_runner_trust, ci_wiring
 
 GATE = ci_wiring.GATE
 WORKFLOWS = ".github/workflows"
+SHALLOW_PREFLIGHT_CHECKOUT = {
+    "fetch-depth": 1,
+    "sparse-checkout": (
+        "/.github/workflows/\n/scripts/__init__.py\n/scripts/gh_config.py\n/scripts/ci_branch_lanes.py\n"
+    ),
+    "sparse-checkout-cone-mode": False,
+}
+FULL_PREFLIGHT_CHECKOUT = {"fetch-depth": 0}
+PREFLIGHT_FETCH = 'git fetch --no-tags origin "$GITHUB_SHA"'
+SHALLOW_PREFLIGHT_FETCH = 'git fetch --no-tags --depth 1 origin "$GITHUB_SHA"'
 
 
 def _gates(workflows: dict[str, dict]) -> list[tuple[str, str, dict]]:
@@ -77,8 +87,17 @@ def _aggregator_problems(
             and base_id == "gate-required"
             and head_job.get("steps")
             in [
-                ci_reuse.gate_steps(
-                    **form, summary=summary, docs="docs" in ci_wiring.needs_of(head_job), watcher_loss=watcher_loss
+                finish(
+                    rerun(
+                        shape(
+                            ci_reuse.gate_steps(
+                                **form,
+                                summary=summary,
+                                docs="docs" in ci_wiring.needs_of(head_job),
+                                watcher_loss=watcher_loss,
+                            )
+                        )
+                    )
                 )
                 for form in (
                     {},
@@ -90,6 +109,9 @@ def _aggregator_problems(
                 )
                 for summary in (False, True)
                 for watcher_loss in (False, True)
+                for rerun in (list, ci_reuse.lost_rerun)
+                for shape in (list, ci_reuse.inline_mutation)
+                for finish in (list, ci_reuse.pipefail_summary)
             ]
         )
         and not (field == "runs-on" and head_job.get(field) in runners(policy))
@@ -172,7 +194,27 @@ def grade(
     problems = _aggregator_problems(base_gates[0], head_gates[0], policy, retired)
     problems += _reuse_problems(base_workflows[file]["jobs"], head_jobs, policy)
     problems += duration_problems
-    return problems + ci_wiring.check(head_workflows, _protected_config(base_config, head_config), today)
+    config = _protected_config(base_config, head_config)
+    summary = head_jobs.get("test-summary")
+    if summary is not None:
+        canonical = [
+            {
+                "needs": ["unit", "unit-selected"],
+                "if": "${{ always() }}",
+                "runs-on": runner,
+                "timeout-minutes": 5,
+                "steps": finish(ci_reuse.summary_steps()),
+            }
+            for runner in runners(policy)
+            for finish in (list, ci_reuse.pipefail_summary)
+        ]
+        if summary not in canonical:
+            problems.append("The test summary must use the reviewed reporting job.")
+        else:
+            key = f"{file}/test-summary"
+            if key in head_config.get("not_gates", {}):
+                config["not_gates"].setdefault(key, head_config["not_gates"][key])
+    return problems + ci_wiring.check(head_workflows, config, today)
 
 
 def _git(root: Path, *args: str) -> str:
@@ -199,9 +241,33 @@ def _preflight_problems(base_workflows: dict[str, dict], head_workflows: dict[st
     ignored = (events.get("push") or {}).get("branches-ignore", [])
     if "diffcheck/**" in ignored:
         ignored.remove("diffcheck/**")
-    if head_workflows.get("branch-lanes.yml") in (baseline, expanded):
+    if head_workflows.get("branch-lanes.yml") in (
+        baseline,
+        expanded,
+        *_checkout_forms(baseline),
+        *_checkout_forms(expanded),
+    ):
         return []
     return ["The head changes or removes the trusted branch lane preflight."]
+
+
+def _checkout_forms(preflight: dict) -> list[dict]:
+    forms = []
+    for checkout, fetch in (
+        (SHALLOW_PREFLIGHT_CHECKOUT, SHALLOW_PREFLIGHT_FETCH),
+        (FULL_PREFLIGHT_CHECKOUT, PREFLIGHT_FETCH),
+    ):
+        form = deepcopy(preflight)
+        steps = ((form.get("jobs") or {}).get("grade") or {}).get("steps") or [{}]
+        settings = steps[0].get("with", {})
+        for key in SHALLOW_PREFLIGHT_CHECKOUT:
+            settings.pop(key, None)
+        settings.update(checkout)
+        for step in steps:
+            if step.get("run") in (PREFLIGHT_FETCH, SHALLOW_PREFLIGHT_FETCH):
+                step["run"] = fetch
+        forms.append(form)
+    return forms
 
 
 def main(argv: list[str] | None = None) -> int:

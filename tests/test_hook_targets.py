@@ -25,7 +25,7 @@ from hooks.targets.capabilities import (
     supports_arg_mutation,
 )
 from hooks.targets.emitter import buffer_context, drain, flush, has_buffered
-from hooks.targets.normalizer import normalize_payload
+from hooks.targets.normalizer import exec_calls, normalize_payload
 
 
 @pytest.fixture
@@ -160,6 +160,10 @@ class TestCodexToolNames:
         program = 'const r = await tools.exec_command({cmd: "sudo rm -rf /srv"});'
         payload = normalize_payload({"tool_name": "exec", "tool_input": {"input": program}})
         assert payload["tool_input"]["command"] == program
+
+    def test_program_strings_decode_javascript_escapes(self):
+        program = 'await tools.exec_command({cmd:"it\\\'s\\v \\\nok\\q"});'
+        assert exec_calls(program) == [{"cmd": "it's\x0b okq"}]
 
     def test_unmapped_name_passes_through(self, codex):
         payload = normalize_payload({"tool_name": "update_plan", "tool_input": {"plan": []}})

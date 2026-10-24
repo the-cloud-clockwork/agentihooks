@@ -94,6 +94,8 @@ def test_a_successor_spawn_receives_the_stored_envelope(store, lane, monkeypatch
     }
     monkeypatch.setattr("scripts.swarm.tick.reclaim", lambda *args, **kwargs: continuation)
     envelope = {"reason": "recycle", "agent": first.name, "task": first.task, **continuation}
+    if lane == MASTER:
+        envelope["launch"] = {"profile": "master", "harness": "claude", "model": "claude-opus-5-5", "effort": "high"}
     store.put_handoff("sw", first.task, "document", seat=first.seat, envelope=envelope)
     store.put_agent("sw", replace(first, state="finished"))
     tick("sw", store, ledger, runtime, 2)

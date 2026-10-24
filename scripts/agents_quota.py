@@ -186,6 +186,7 @@ def codex_rows(
                 five_hour_resets_at=quota.five_hour.resets_at if quota else None,
                 observed_at=quota.observed_at if quota else None,
                 cap=cap,
+                kind=account.kind,
                 routing_left=week if account.signed_in else None,
                 identity=(identities or {}).get(account.name, ""),
             )
@@ -377,7 +378,7 @@ def _codex(now: float, force: bool = False) -> list[QuotaRow]:
 
     pool = codex_router.CodexAccountSource().pool(os.environ)
     sessions = codex_sessions_by_account()
-    live = codex_router.live_accounts(pool, sessions)
+    live = codex_router.routed_live(pool, sessions, os.environ)
     quotas = codex_router.fresh_quotas(pool, os.environ, now, force=force)
     quotas.update(codex_router.quotas(live, os.environ))
     identities = fingerprints(pool + live, os.environ)
@@ -491,7 +492,7 @@ def _page_quota(now: float) -> dict:
     pool = codex_router.CodexAccountSource().pool(os.environ)
     live = account_sessions.sessions_by_account()
     codex_live = account_sessions.codex_sessions_by_account()
-    elsewhere = codex_router.live_accounts(pool, codex_live)
+    elsewhere = codex_router.routed_live(pool, codex_live, os.environ)
     quotas = codex_router.quotas(pool + elsewhere, os.environ)
     claude = claude_rows([result for _, result in cached], live, "cached", observed, now)
     claude += api_rows(ClaudeApiSource(live), "claude", now)

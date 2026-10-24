@@ -114,6 +114,9 @@ class World:
     def decisions(self):
         return self.doc()["_meta"].get(master_fence.DECISIONS, {})
 
+    def cross(self):
+        return self.doc()["_meta"].get(master_fence.CROSS, {})
+
     def posts(self):
         return [post.text for post in MastersChannel(self.redis).read(SLUG, self.lead)]
 
@@ -121,25 +124,29 @@ class World:
         return master_fence.measurements(self.redis, SLUG)["master_write_refusals_total"]
 
 
-def names_lead(warnings):
-    """Master two loses either before the lead writes (routing) or after (the lead's decider record)."""
-    text = warnings[0] if len(warnings) == 1 else ""
-    routed = text == f"{FOLLOWUP} belongs to {LEAD}, so {SECOND} cannot decide it"
-    decided = text.startswith(f"{FOLLOWUP} was decided by {LEAD} at revision ")
-    return routed or (decided and text.endswith(f", so {SECOND} cannot decide it"))
+def _recorded(world):
+    return {
+        "deciders": {item: row["seat"] for item, row in world.decisions().items()},
+        "cross": {
+            item: [[row["owner"], row["seat"], row["by"]] for row in rows] for item, rows in world.cross().items()
+        },
+    }
 
 
 def _positive(world):
-    raced = world.race()
-    own_task = world.set_task(SECOND_NAME, "t2")
-    task = next(t for t in world.doc()["tasks"] if t["id"] == "t2")
+    accepted = {
+        "decide": world.decide(SECOND_NAME)["accepted"],
+        "answer": world.answer(SECOND_NAME)["accepted"],
+        "set_task": world.set_task(SECOND_NAME, "t1")["accepted"],
+        "own_task": world.set_task(SECOND_NAME, "t2")["accepted"],
+    }
+    doc = world.doc()
     return {
-        "race": {name: result["accepted"] for name, result in sorted(raced.items())},
-        "second_refusal_names_lead": names_lead(raced[SECOND_NAME]["warnings"]),
+        "accepted": accepted,
         "followup_done": world.followup()["done"],
-        "deciders": {item: row["seat"] for item, row in world.decisions().items()},
-        "own_task_accepted": own_task["accepted"],
-        "task_description": task["description"],
+        "answered": len(next(q["answers"] for q in doc["questions"] if q["id"] == INPUTS["question"]["id"])),
+        "t1_description": next(t.get("description", "") for t in doc["tasks"] if t["id"] == "t1"),
+        **_recorded(world),
         "posts": world.posts(),
         "refusals": world.refusals(),
     }
@@ -147,10 +154,9 @@ def _positive(world):
 
 def _negative(world):
     refused = {
-        "decide": world.decide(SECOND_NAME)["warnings"],
-        "answer": world.answer(SECOND_NAME)["warnings"],
-        "set_task": world.set_task(SECOND_NAME, "t1")["warnings"],
-        "former": world.decide(FORMER)["warnings"],
+        "decide": world.decide(FORMER)["warnings"],
+        "answer": world.answer(FORMER)["warnings"],
+        "set_task": world.set_task(FORMER, "t1")["warnings"],
     }
     doc = world.doc()
     world.operator_sets(True)
@@ -159,11 +165,17 @@ def _negative(world):
         "followup_done": next(f["done"] for f in doc["followups"] if f["id"] == INPUTS["followup"]["id"]),
         "answers": next(q["answers"] for q in doc["questions"] if q["id"] == INPUTS["question"]["id"]),
         "t1_description": next(t.get("description", "") for t in doc["tasks"] if t["id"] == "t1"),
-        "decisions": world.decisions(),
+        **_recorded(world),
         "posts": world.posts(),
         "refusals": world.refusals(),
         "operator_write_kept": world.followup()["done"] is True,
     }
+
+
+def _refused_naming(warnings, owner, writer):
+    text = warnings[0] if len(warnings) == 1 else ""
+    decided = text.startswith(f"{FOLLOWUP} was decided by {owner} at revision ")
+    return decided and text.endswith(f", so {writer} cannot decide it")
 
 
 def _recovery(world):
@@ -172,20 +184,20 @@ def _recovery(world):
     world.down(LEAD_NAME)
     by_acting_lead = world.decide(SECOND_NAME)
     world.seat(SUCCESSOR, LEAD)
-    stale = world.decide(SUCCESSOR, value=False)
-    world.operator_sets(False)
-    after_reopen = world.decide(SUCCESSOR, n=1)
+    successor = world.decide(SUCCESSOR, value=False)
+    world.down(SECOND_NAME)
+    gone = world.decide(SECOND_NAME, n=1)
     restarted = fakeredis.FakeRedis(server=world.server, decode_responses=True)
-    second_again = world.write(
-        {"op": "set", "id": "set-again", "by": SECOND_NAME, "path": f"{FOLLOWUP}/done", "value": False},
+    again = world.write(
+        {"op": "set", "id": "set-again", "by": SUCCESSOR, "path": f"{FOLLOWUP}/done", "value": True},
         connect=lambda: restarted,
     )
     return {
         "acting_lead_accepted": by_acting_lead["accepted"],
-        "stale_successor": [stale["accepted"], stale["warnings"]],
-        "after_reopen_accepted": after_reopen["accepted"],
-        "decisions": world.decisions(),
-        "second_after_restart": [second_again["accepted"], second_again["warnings"]],
+        "successor_accepted": successor["accepted"],
+        "gone_second": [gone["accepted"], _refused_naming(gone["warnings"], SECOND, SECOND_NAME)],
+        "after_restart_accepted": again["accepted"],
+        **_recorded(world),
         "followup_done": world.followup()["done"],
         "posts": world.posts(),
         "refusals": world.refusals(),
@@ -193,42 +205,41 @@ def _recovery(world):
 
 
 def _meets_positive(o):
-    lead_won = o["race"] == {LEAD_NAME: True, SECOND_NAME: False}
-    refused = o["second_refusal_names_lead"] is True
-    recorded = o["deciders"] == {FOLLOWUP: LEAD}
-    posted = o["posts"] == [f"{LEAD} set {FOLLOWUP}/done to true", f"{SECOND} set tasks/t2: description"]
-    own = o["own_task_accepted"] and o["task_description"] == f"Updated by {SECOND_NAME}"
-    return lead_won and refused and o["followup_done"] is True and recorded and posted and own and o["refusals"] == 1
+    accepted = all(o["accepted"].values()) and o["refusals"] == 0
+    written = o["followup_done"] is True and o["answered"] == 1 and o["t1_description"] == f"Updated by {SECOND_NAME}"
+    owners = o["deciders"] == {FOLLOWUP: LEAD, QUESTION: LEAD}
+    by_second = [[LEAD, SECOND, SECOND_NAME]]
+    recorded = o["cross"] == {FOLLOWUP: by_second, QUESTION: by_second, "tasks/t1": by_second}
+    posted = o["posts"] == [
+        f"{SECOND} set {FOLLOWUP}/done to true for {LEAD}",
+        f"{SECOND} answered {QUESTION} for {LEAD}: Use the spare one",
+        f"{SECOND} set tasks/t1: description for {LEAD}",
+        f"{SECOND} set tasks/t2: description",
+    ]
+    return accepted and written and owners and recorded and posted
 
 
 def _meets_negative(o):
     expected = {
-        "decide": [f"{FOLLOWUP} belongs to {LEAD}, so {SECOND} cannot decide it"],
-        "answer": [f"{QUESTION} belongs to {LEAD}, so {SECOND} cannot answer it"],
-        "set_task": [f"tasks/t1 belongs to {LEAD}, so {SECOND} cannot set it"],
-        "former": [f"{FOLLOWUP} belongs to {LEAD}, so {FORMER} cannot decide it"],
+        "decide": [f"{FOLLOWUP} belongs to {LEAD}, so {FORMER} cannot decide it"],
+        "answer": [f"{QUESTION} belongs to {LEAD}, so {FORMER} cannot answer it"],
+        "set_task": [f"tasks/t1 belongs to {LEAD}, so {FORMER} cannot set it"],
     }
     unchanged = o["followup_done"] is False and o["answers"] == [] and o["t1_description"] == ""
-    quiet = o["decisions"] == {} and o["posts"] == [] and o["refusals"] == 4
+    quiet = o["deciders"] == {} and o["cross"] == {} and o["posts"] == [] and o["refusals"] == 3
     return o["refused"] == expected and unchanged and quiet and o["operator_write_kept"]
 
 
 def _meets_recovery(o):
-    stale_rev = None
-    stale = o["stale_successor"]
-    if stale[0] is False and len(stale[1]) == 1:
-        stale_rev = stale[1][0].removeprefix(f"{FOLLOWUP} was decided by {SECOND} at revision ").partition(",")[0]
-    named = stale_rev is not None and stale[1][0] == (
-        f"{FOLLOWUP} was decided by {SECOND} at revision {stale_rev}, so {LEAD} cannot decide it"
-    )
-    record = o["decisions"].get(FOLLOWUP, {})
-    after = o["second_after_restart"]
-    kept = after[0] is False and after[1] == [
-        f"{FOLLOWUP} was decided by {LEAD} at revision {record.get('rev')}, so {SECOND} cannot decide it"
+    accepted = o["acting_lead_accepted"] and o["successor_accepted"] and o["after_restart_accepted"]
+    kept = o["deciders"] == {FOLLOWUP: SECOND} and o["cross"] == {FOLLOWUP: [[SECOND, LEAD, SUCCESSOR]] * 2}
+    posted = o["posts"] == [
+        f"{SECOND} set {FOLLOWUP}/done to true",
+        f"{LEAD} set {FOLLOWUP}/done to false for {SECOND}",
+        f"{LEAD} set {FOLLOWUP}/done to true for {SECOND}",
     ]
-    posted = o["posts"] == [f"{SECOND} set {FOLLOWUP}/done to true", f"{LEAD} set {FOLLOWUP}/done to true"]
-    decided = o["acting_lead_accepted"] and o["after_reopen_accepted"] and record.get("seat") == LEAD
-    return named and decided and kept and posted and o["followup_done"] is True and o["refusals"] == 2
+    gone = o["gone_second"] == [False, True]
+    return accepted and kept and posted and gone and o["followup_done"] is True and o["refusals"] == 1
 
 
 SPEC = {"a": _meets_positive, "b": _meets_negative, "c": _meets_recovery}

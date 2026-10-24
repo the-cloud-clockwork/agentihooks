@@ -1,0 +1,24 @@
+{
+  "attempts": {
+    "context_only": {
+      "seat": "eng-1",
+      "run": "first",
+      "reason": "node_lost",
+      "checkpoints": [
+        {"bundle": "context-only.json", "sequence": 1},
+        {"bundle": "native-resume.json", "sequence": 2, "corrupt_role": "native_session"}
+      ],
+      "choice": "context"
+    },
+    "native": {
+      "seat": "eng-2",
+      "run": "second",
+      "reason": "oom_killed",
+      "checkpoints": [{"bundle": "native-resume.json", "sequence": 1}],
+      "choice": "native"
+    }
+  },
+  "refused_native": {"seat": "eng-1", "choice": "native"},
+  "local": {"name": "sv2-ux-03-local", "seat": "eng-3", "task": "t-local", "reason": "worktree gone", "conversation_id": "claude-session-local"},
+  "wait_ms": 90000
+}

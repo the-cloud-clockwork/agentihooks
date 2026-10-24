@@ -93,18 +93,18 @@ def test_event_relay_sends_hive_items_once_to_the_owner(world, kind):
     assert ledger_events.event_pass(inbox, world.store, cases.SLUG, doc, None, 0) == []
 
 
-def test_question_is_decided_only_by_its_hive_owner_and_posted_once(world):
+def test_question_is_answered_by_any_live_master_keeps_its_hive_owner_and_is_posted_once(world):
     from scripts.swarm_v2.masters_channel import MastersChannel
 
     add(world, "questions")
     op = {"op": "answer", "id": "answer", "by": world.lead_name, "item": "questions/targeted", "text": "Proceed"}
-    assert not world.write(op)["accepted"]
-    op = {**op, "by": world.second_name}
     assert world.write(op)["accepted"]
     assert world.write(op)["accepted"]
     posts = MastersChannel(world.redis).read(cases.SLUG, world.lead_name)
-    assert len(posts) == 1
-    assert posts[0].seat == cases.SECOND
+    assert [(post.seat, post.text) for post in posts] == [
+        (cases.LEAD, f"{cases.LEAD} answered questions/targeted for {cases.SECOND}: Proceed")
+    ]
+    assert world.doc()["_meta"]["master_decisions"]["questions/targeted"]["seat"] == cases.SECOND
     assert len(next(q for q in world.doc()["questions"] if q["id"] == "targeted")["answers"]) == 1
 
 
@@ -238,8 +238,9 @@ def test_two_hives_steer_separate_phases_and_coordinate_privately(world, repeat)
     agents = world.store.agents(cases.SLUG)
     assert {(a.seat, a.hive) for a in agents} == {(cases.LEAD, "local"), (cases.SECOND, "anton")}
     assert world.set_task(world.lead_name, "t1")["accepted"]
-    assert not world.set_task(world.lead_name, "t2")["accepted"]
+    assert world.set_task(world.lead_name, "t2")["accepted"]
     assert world.set_task(world.second_name, "t2")["accepted"]
+    assert world.doc()["_meta"]["master_cross_writes"]["tasks/t2"][0]["owner"] == cases.SECOND
     channel = MastersChannel(world.redis)
     channel.post(cases.SLUG, world.lead_name, "Local phase ready", repeat)
     channel.post(cases.SLUG, world.second_name, "Anton phase ready", repeat)

@@ -61,7 +61,7 @@ def test_a_focused_proof_sizes_pytest_workers_from_the_cpu_quota():
     lines = [line.strip() for line in step["run"].splitlines() if "pytest" in line]
     assert lines == [
         'workers=$(python -m scripts.ci_cpu_quota) && python -m pytest "${paths[@]}" -v -n "$workers" '
-        "--dist loadgroup --tb=short"
+        "--dist loadgroup -p tests.flake_ledger --tb=short"
     ]
 
 

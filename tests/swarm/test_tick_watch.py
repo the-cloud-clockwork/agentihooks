@@ -1,5 +1,6 @@
 import json
 import os
+import threading
 
 import pytest
 
@@ -311,6 +312,272 @@ def test_the_watcher_run_passes_over_every_swarm_once_a_minute(store, capsys):
     assert "sw: told master@sw the tick is stale" in capsys.readouterr().out
 
 
+def test_the_watcher_beats_its_watchdog_each_pass_and_after_every_swarm_even_a_failing_one(store, monkeypatch):
+    store.create(SwarmConfig("other", "/repo", max_eng=1, max_ci=0))
+    events = []
+
+    def judged(store, slug, *args):
+        events.append(slug)
+        if slug == "other":
+            raise RuntimeError("redis went away")
+        return []
+
+    monkeypatch.setattr(tick_watch, "watch_pass", judged)
+    tick_watch.run(
+        store, lambda: START, None, lambda seconds: events.append("wait"), passes=2, beat=lambda: events.append("beat")
+    )
+
+    one = ["beat"] + [step for slug in store.slugs() for step in (slug, "beat")] + ["wait"]
+    assert events == one + one
+
+
+def test_the_watcher_beats_the_systemd_watchdog_by_default(store, tmp_path, monkeypatch):
+    import socket
+
+    path = str(tmp_path / "notify")
+    monkeypatch.setenv("NOTIFY_SOCKET", path)
+    with socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM) as sock:
+        sock.bind(path)
+        sock.settimeout(0.5)
+        tick_watch.run(store, lambda: START, None, bounded(1), passes=1)
+
+        beats = 1 + len(store.slugs())
+        assert [sock.recv(64) for _ in range(beats)] == [b"WATCHDOG=1"] * beats
+        with pytest.raises(TimeoutError):
+            sock.recv(64)
+
+
+def test_the_pause_between_passes_ends_on_its_own_clock_never_on_the_scheduler_it_judges(store, monkeypatch):
+    slept = []
+    monkeypatch.setattr(tick_watch.time, "sleep", slept.append)
+
+    tick_watch.run(store, lambda: START, None, passes=2, beat=capped([], 200))
+
+    assert slept == [tick_watch.PASS_S, tick_watch.PASS_S]
+
+
+def test_a_given_wait_replaces_the_clock_pause(store, monkeypatch):
+    def slept(seconds):
+        raise AssertionError("the watcher slept on the clock despite a given wait")
+
+    monkeypatch.setattr(tick_watch.time, "sleep", slept)
+    waits = []
+
+    tick_watch.run(store, lambda: START, None, waits.append, passes=2, beat=capped([], 200))
+
+    assert waits == [tick_watch.PASS_S, tick_watch.PASS_S]
+
+
+def test_the_watch_beat_slice_sits_well_inside_the_systemd_watchdog():
+    from scripts.swarm import timer
+
+    unit = timer.units("/installed/bin/agentihooks")["agentihooks-tick-watch.service"]
+
+    assert "WatchdogSec=600\n" in unit
+    assert (tick_watch.PASS_S, tick_watch.SLUG_PASS_S, tick_watch.BEAT_S, tick_watch.BLOCKED_LIMIT) == (60, 120, 30, 5)
+    assert tick_watch.BEAT_S * 4 <= 600
+
+
+def capped(events, limit):
+    def beat():
+        events.append("beat")
+        assert events.count("beat") <= limit, "the watch spun on its beat"
+
+    return beat
+
+
+def blocking(store, monkeypatch, healthy=None):
+    store.create(SwarmConfig("other", "/repo", max_eng=1, max_ci=0))
+    gates, threads, real = [], [], healthy or tick_watch.watch_pass
+
+    def judged(store, slug, *args):
+        if slug != "other":
+            return real(store, slug, *args)
+        gates.append(threading.Event())
+        threads.append(threading.current_thread())
+        gates[-1].wait(30)
+        return []
+
+    def release():
+        for gate in gates:
+            gate.set()
+        for thread in threads:
+            thread.join(5)
+
+    monkeypatch.setattr(tick_watch, "watch_pass", judged)
+    monkeypatch.setattr(tick_watch, "SLUG_PASS_S", 0.3)
+    monkeypatch.setattr(tick_watch, "BEAT_S", 0.05)
+    return release, threads
+
+
+def test_a_blocked_call_in_one_swarm_pass_keeps_the_watchdog_beating_and_the_stale_check_running(
+    store, monkeypatch, capsys
+):
+    release, threads = blocking(store, monkeypatch)
+    monkeypatch.setattr(tick_watch, "SLUG_PASS_S", 1.0)
+    beat(store, START - LIMIT)
+    events = []
+    try:
+        tick_watch.run(
+            store,
+            lambda: START,
+            None,
+            lambda seconds: events.append("wait"),
+            passes=2,
+            beat=capped(events, 200),
+        )
+    finally:
+        release()
+
+    out = capsys.readouterr()
+    baseline = 2 * (1 + len(store.slugs()))
+    assert events.count("wait") == 2
+    assert baseline + 2 <= events.count("beat") <= baseline + 2 * 22
+    assert f"sw: told {FRONT_DOOR} the tick is stale" in out.out
+    assert out.err.count("other: its pass is still blocked after 1.0 seconds; the watch goes on") == 2
+    assert len(threads) == 2 and all(thread.daemon for thread in threads)
+
+
+def test_a_pass_blocked_through_the_limit_of_passes_exits_the_watcher_so_systemd_restarts_it(store, monkeypatch):
+    release, threads = blocking(store, monkeypatch, healthy=lambda *args: [])
+    monkeypatch.setattr(tick_watch, "BLOCKED_LIMIT", 3)
+    waits = []
+    try:
+        with pytest.raises(RuntimeError) as raised:
+            tick_watch.run(store, lambda: START, None, waits.append, passes=5, beat=capped([], 200))
+    finally:
+        release()
+
+    assert str(raised.value) == "the pass of other stayed blocked through 3 passes; the watcher exits"
+    assert waits == [tick_watch.PASS_S, tick_watch.PASS_S]
+    assert len(threads) == 3
+
+
+def test_a_blocked_pass_that_ends_lets_the_next_pass_start_its_count_afresh(store, monkeypatch, capsys):
+    release, threads = blocking(store, monkeypatch, healthy=lambda *args: [])
+    monkeypatch.setattr(tick_watch, "BLOCKED_LIMIT", 2)
+    try:
+        tick_watch.run(store, lambda: START, None, lambda seconds: release(), passes=3, beat=capped([], 200))
+    finally:
+        release()
+
+    assert len(threads) == 3
+    assert capsys.readouterr().err.count("other: its pass is still blocked") == 3
+
+
+def alerts(store):
+    return [text for text in texts(store, FRONT_DOOR) if "is stale" in text]
+
+
+def test_a_stuck_first_check_does_not_stop_the_second_pass_from_alerting(store, monkeypatch):
+    monkeypatch.setattr(tick_watch, "SLUG_PASS_S", 0.3)
+    monkeypatch.setattr(tick_watch, "BEAT_S", 0.05)
+    beat(store, START - LIMIT)
+    gate, stuck, real = threading.Event(), [], tick_heartbeat.read
+
+    def read(store, slug):
+        if not stuck:
+            stuck.append(threading.current_thread())
+            gate.wait(30)
+        return real(store, slug)
+
+    monkeypatch.setattr(tick_heartbeat, "read", read)
+    clock = [START]
+
+    def wait(seconds):
+        clock[0] += MINUTE
+
+    try:
+        tick_watch.run(store, lambda: clock[0], None, wait, passes=2, beat=capped([], 200))
+        assert len(alerts(store)) == 1
+    finally:
+        gate.set()
+        stuck[0].join(5)
+
+    assert not stuck[0].is_alive()
+    assert len(alerts(store)) == 1
+
+
+def test_a_stuck_check_that_ends_after_the_next_pass_saw_the_tick_recover_never_alerts(store, monkeypatch):
+    monkeypatch.setattr(tick_watch, "SLUG_PASS_S", 0.3)
+    monkeypatch.setattr(tick_watch, "BEAT_S", 0.05)
+    beat(store, START - LIMIT)
+    gate, stuck, real = threading.Event(), [], tick_heartbeat.stale
+
+    def stale(*args, **kwargs):
+        found = real(*args, **kwargs)
+        if not stuck:
+            stuck.append(threading.current_thread())
+            gate.wait(30)
+        return found
+
+    monkeypatch.setattr(tick_heartbeat, "stale", stale)
+    clock = [START]
+
+    def wait(seconds):
+        clock[0] += MINUTE
+        beat(store, clock[0], rev=2)
+
+    try:
+        tick_watch.run(store, lambda: clock[0], None, wait, passes=2, beat=capped([], 200))
+    finally:
+        gate.set()
+        stuck[0].join(5)
+
+    assert not stuck[0].is_alive()
+    assert alerts(store) == []
+
+
+def test_a_check_that_ends_after_a_newer_check_decided_is_dropped(store):
+    beat(store, START - LIMIT)
+    guard = tick_watch.Guard()
+    guard.decided = START + MINUTE
+
+    repaired = []
+
+    assert tick_watch.watch_pass(store, "sw", START, START, lambda slug, now: repaired.append(slug), guard) == []
+    assert (alerts(store), repaired) == ([], [])
+    assert guard.decided == START + MINUTE
+
+
+def test_a_check_at_the_same_moment_as_the_last_decision_still_decides(store):
+    beat(store, START - LIMIT)
+    guard = tick_watch.Guard()
+    assert tick_watch.watch_pass(store, "sw", START, START, guard=guard) == [f"told {FRONT_DOOR} the tick is stale"]
+    beat(store, START, rev=2)
+
+    assert tick_watch.watch_pass(store, "sw", START, START, guard=guard) == [f"told {FRONT_DOOR} the tick runs again"]
+    assert guard.decided == START
+
+
+class Stuck:
+    def __init__(self, clock, joins, ends_after=None):
+        self.clock, self.joins, self.ends_after = clock, joins, ends_after
+
+    def join(self, timeout):
+        assert len(self.joins) < 10, "the await spun past its deadline"
+        self.joins.append(timeout)
+        self.clock[0] += timeout
+
+    def is_alive(self):
+        return self.ends_after is None or len(self.joins) < self.ends_after
+
+
+@pytest.mark.parametrize(
+    ("ends_after", "awaited", "joins", "beats"),
+    [(None, False, [50, 50, 20], [1050, 1100]), (2, True, [50, 50], [1050]), (1, True, [50], [])],
+)
+def test_a_pass_is_awaited_in_beat_slices_up_to_its_deadline(monkeypatch, ends_after, awaited, joins, beats):
+    monkeypatch.setattr(tick_watch, "SLUG_PASS_S", 120)
+    monkeypatch.setattr(tick_watch, "BEAT_S", 50)
+    clock, seen, beaten = [1000], [], []
+    monkeypatch.setattr(tick_watch.time, "monotonic", lambda: clock[0])
+
+    found = tick_watch._awaited(Stuck(clock, seen, ends_after), lambda: beaten.append(clock[0]))
+
+    assert (found, seen, beaten) == (awaited, joins, beats)
+
+
 def test_the_watch_command_runs_without_a_parsed_swarm(monkeypatch):
     ran = []
     monkeypatch.setattr(cli, "connect", lambda: "store")
@@ -385,6 +652,27 @@ def test_respawn_master_leaves_a_swarm_another_hive_ticks(store, monkeypatch):
     assert runtime.masters == []
 
 
+def test_respawn_master_spawns_nothing_for_a_swarm_stopped_while_it_took_the_tick_lock(store, monkeypatch):
+    from scripts.swarm import controller, tick
+    from tests.swarm.test_tick import FakeRuntime
+
+    monkeypatch.setenv("SWARM_HIVE_ID", "home")
+    runtime = FakeRuntime()
+    agent(store, "master@a1b2c3-0001", FRONT_DOOR, lane=MASTER)
+    take = controller.take_tick_lock
+
+    def stop_then_take(*args):
+        store.update("sw", state="stopped")
+        return take(*args)
+
+    monkeypatch.setattr(controller, "take_tick_lock", stop_then_take)
+
+    assert tick.respawn_master("sw", store, runtime, START) == []
+    assert runtime.masters == []
+    assert [found.name for found in store.agents("sw")] == ["master@a1b2c3-0001"]
+    assert not store.redis.exists(store.key("sw", "tick-lock"))
+
+
 def test_a_swarm_in_a_ledger_outage_is_alerted_but_never_repaired(store, tmp_path, monkeypatch):
     from scripts.swarm import outage
 
@@ -442,10 +730,22 @@ def test_the_watcher_reports_a_failing_swarm_and_goes_on(store, monkeypatch, cap
     assert f"sw: told {FRONT_DOOR} the tick is stale" in out.out
 
 
-@pytest.mark.parametrize(("deployment", "respawns"), [(None, True), ("local", True), ("distributed", False)])
-def test_the_watch_command_respawns_only_on_a_workstation(monkeypatch, deployment, respawns):
+@pytest.mark.parametrize(
+    ("deployment", "hub", "respawns"),
+    [
+        (None, "", True),
+        ("local", "", True),
+        ("distributed", "", False),
+        (None, "https://hub.example:8765", False),
+        ("local", "https://hub.example:8765", True),
+    ],
+)
+def test_the_watch_command_respawns_on_a_workstation_and_places_the_master_in_a_cluster(
+    monkeypatch, deployment, hub, respawns
+):
     from scripts.swarm import tick
 
+    monkeypatch.setenv("LEDGER_URL", hub)
     if deployment is None:
         monkeypatch.delenv("AGENTIHOOKS_DEPLOYMENT", raising=False)
     else:
@@ -456,19 +756,21 @@ def test_the_watch_command_respawns_only_on_a_workstation(monkeypatch, deploymen
     monkeypatch.setattr(cli, "HerdrRuntime", lambda: "herdr")
     monkeypatch.setattr(cli, "now_ms", lambda: START)
     monkeypatch.setattr(tick, "respawn_master", lambda *args: asked.append(args) or ["spawned"])
+    monkeypatch.setattr(tick, "place_master", lambda *args: asked.append(("placed", *args)) or ["placed"])
     monkeypatch.setattr(tick_watch, "run", lambda *args: ran.append(args))
 
     cli.cmd_tick_watch("store", None)
 
     (args,) = ran
     assert args[:2] == ("store", cli.now_ms)
+    assert routed_with == ["herdr"]
     if respawns:
-        assert routed_with == ["herdr"]
         assert args[2].restart is scheduled_tick.restart
         assert args[2].respawn("sw") == ["spawned"]
         assert asked == [("sw", "store", runtime, START)]
     else:
-        assert args[2] is None
+        assert args[2]("sw", START + MINUTE) == ["placed"]
+        assert asked == [("placed", "sw", "store", runtime, START + MINUTE)]
 
 
 def test_the_repair_restarts_the_scheduler_once_per_stale_window_and_respawns_every_pass():
@@ -538,6 +840,23 @@ def test_the_watcher_run_hands_its_repair_to_every_stale_swarm(store):
     tick_watch.run(store, lambda: START, lambda slug, now: asked.append((slug, now)) or [], bounded(1), passes=1)
 
     assert asked == [("sw", START)]
+
+
+def test_a_stale_swarm_is_alerted_before_its_repair_runs_so_a_blocked_repair_never_holds_the_alert(store):
+    beat(store, START)
+
+    def repair(slug, now):
+        raise TimeoutError("the scheduler restart hung")
+
+    with pytest.raises(TimeoutError):
+        tick_watch.watch_pass(store, "sw", START + LIMIT, START, repair)
+
+    assert texts(store, FRONT_DOOR) == [
+        tick_watch.ALERT.format(
+            slug="sw",
+            evidence=f"no tick pass has completed for 10 minutes, the last ended at {tick_heartbeat.clock(START)}",
+        )
+    ]
 
 
 def test_an_alert_joins_every_piece_of_evidence(store):
@@ -611,3 +930,79 @@ def test_respawn_master_keeps_a_finished_or_starting_master_record(store, monkey
 
     assert "dropped the gone master master@a1b2c3-0001" not in actions
     assert "master@a1b2c3-0001" in {a.name for a in store.agents("sw")}
+
+
+def test_place_master_places_a_front_door_master_into_an_empty_seat_through_the_cluster_deployment(store, monkeypatch):
+    from scripts.swarm import controller, tick
+    from tests.swarm.test_tick import FakeRuntime
+
+    monkeypatch.setenv("SWARM_HIVE_ID", "home")
+    monkeypatch.setenv("AGENTIHOOKS_DEPLOYMENT", "distributed")
+    agent(store, "master@a1b2c3-0001", FRONT_DOOR, lane=MASTER, state="finished")
+    deployments, fenced = [], controller.FencedRuntime
+
+    def recorded(store, slug, held, runtime, deployment):
+        deployments.append(deployment)
+        return fenced(store, slug, held, runtime, controller.LOCAL)
+
+    monkeypatch.setattr(controller, "FencedRuntime", recorded)
+    runtime = FakeRuntime()
+
+    actions = tick.place_master("sw", store, runtime, START)
+
+    assert deployments == ["distributed"]
+    assert len(runtime.masters) == 1
+    assert actions[-1].startswith("spawned master ")
+    assert not store.redis.exists(store.key("sw", "tick-lock"))
+
+
+@pytest.mark.parametrize("state", ["working", "starting"])
+def test_place_master_leaves_a_seat_a_cluster_master_holds(store, monkeypatch, state):
+    from scripts.swarm import tick
+    from tests.swarm.test_tick import FakeRuntime
+
+    monkeypatch.setenv("SWARM_HIVE_ID", "home")
+    agent(store, "master@a1b2c3-0001", FRONT_DOOR, lane=MASTER, state=state)
+    runtime = FakeRuntime()
+
+    assert tick.place_master("sw", store, runtime, START) == []
+    assert runtime.masters == []
+    assert "master@a1b2c3-0001" in {a.name for a in store.agents("sw")}
+
+
+def test_place_master_waits_while_a_master_start_is_pending(store, monkeypatch):
+    from scripts.swarm import master_start, tick
+    from tests.swarm.test_tick import FakeRuntime
+
+    monkeypatch.setenv("SWARM_HIVE_ID", "home")
+    master_start.begin(store, "sw", "master@a1b2c3-0002", {"id": MASTER}, START - MINUTE)
+    runtime = FakeRuntime()
+
+    assert tick.place_master("sw", store, runtime, START) == []
+    assert runtime.masters == []
+
+
+def test_place_master_leaves_a_swarm_another_hive_ticks(store, monkeypatch):
+    from scripts.swarm import tick
+    from tests.swarm.test_tick import FakeRuntime
+
+    monkeypatch.setenv("SWARM_HIVE_ID", "home")
+    assert lease.acquire(store, "sw", "anton") is not None
+    runtime = FakeRuntime()
+
+    assert tick.place_master("sw", store, runtime, START) == []
+    assert runtime.masters == []
+
+
+@pytest.mark.parametrize("state", ["stopping", "stopped"])
+def test_place_master_leaves_a_stopping_or_stopped_swarm(store, monkeypatch, state):
+    from scripts.swarm import tick
+    from tests.swarm.test_tick import FakeRuntime
+
+    monkeypatch.setenv("SWARM_HIVE_ID", "home")
+    store.update("sw", state=state)
+    runtime = FakeRuntime()
+
+    assert tick.place_master("sw", store, runtime, START) == []
+    assert runtime.masters == []
+    assert lease.current(store, "sw") is None

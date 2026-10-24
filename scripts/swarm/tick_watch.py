@@ -3,17 +3,22 @@
 import hashlib
 import json
 import sys
+import time
 from collections.abc import Callable
+from threading import Lock, Thread
 
 from scripts.inbox.store import DuplicateItem, InboxStore
-from scripts.scheduler.process_timer import wait as scheduled_wait
-from scripts.swarm import tick_heartbeat, timing
+from scripts.swarm import sd_notify, tick_heartbeat, timing
 from scripts.swarm.store import RedisStore
 from scripts.swarm_v2 import front_door
 
 KEY = "tick-watch"
 SENDER = "swarm"
 PASS_S = 60
+SLUG_PASS_S = 120
+BEAT_S = 30
+BLOCKED_LIMIT = 5
+WATCHDOG = "WATCHDOG=1"
 ALERT = (
     "The tick of swarm {slug} is stale: {evidence}. Until it recovers no swarm alert, nudge, merge or spawn happens; "
     "keep working your own task and do not wait on the tick. The watchdog restarts the tick, and a resolved notice "
@@ -31,30 +36,54 @@ def recipients(store: RedisStore, slug: str) -> list[str]:
     return sorted(seats)
 
 
+class Guard:
+    """One swarm's checks decide one at a time, and a check older than the last decision is dropped.
+
+    A check stuck while it decides holds the later ones back until the blocked limit exits the watcher.
+    """
+
+    def __init__(self):
+        self.lock, self.decided, self.stuck = Lock(), None, []
+
+
 def watch_pass(
-    store: RedisStore, slug: str, now: int, since: int, repair: Callable[[str, int], list[str]] | None = None
+    store: RedisStore,
+    slug: str,
+    now: int,
+    since: int,
+    repair: Callable[[str, int], list[str]] | None = None,
+    guard: Guard | None = None,
 ) -> list[str]:
-    episode = _read(store, slug)
-    if store.config(slug).state not in tick_heartbeat.JUDGED:
-        return _resolve(store, slug, now, episode, UNWATCHED, "is no longer watched") if episode else []
+    guard = guard or Guard()
+    judged = store.config(slug).state in tick_heartbeat.JUDGED
     beat = tick_heartbeat.read(store, slug)
     evidence = tick_heartbeat.stale(beat, now, None if beat else since)
-    if evidence:
-        repaired = repair(slug, now) if repair and not tick_heartbeat.halted(store, slug) else []
-        return _alert(store, slug, now, episode, evidence) + repaired
-    return _resolve(store, slug, now, episode, RESOLVED, "runs again") if episode else []
+    with guard.lock:
+        if guard.decided is not None and now < guard.decided:
+            return []
+        guard.decided = now
+        episode = _read(store, slug)
+        if not judged:
+            return _resolve(store, slug, now, episode, UNWATCHED, "is no longer watched") if episode else []
+        if not evidence:
+            return _resolve(store, slug, now, episode, RESOLVED, "runs again") if episode else []
+        told = _alert(store, slug, now, episode, evidence)
+        return told + (repair(slug, now) if repair and not tick_heartbeat.halted(store, slug) else [])
 
 
 class Repair:
     """The scheduler serves every swarm on the machine, so it restarts at most once per stale window."""
 
     def __init__(self, restart: Callable[[], str], respawn: Callable[[str], list[str]]):
-        self.restart, self.respawn, self.restarted = restart, respawn, None
+        self.restart, self.respawn, self.restarted, self.lock = restart, respawn, None, Lock()
 
     def __call__(self, slug: str, now: int) -> list[str]:
         actions = []
-        if self.restarted is None or now - self.restarted >= tick_heartbeat.LIMIT_MS:
-            self.restarted = now
+        with self.lock:
+            due = self.restarted is None or now - self.restarted >= tick_heartbeat.LIMIT_MS
+            if due:
+                self.restarted = now
+        if due:
             actions.append(self.restart())
         return actions + self.respawn(slug)
 
@@ -97,14 +126,49 @@ def _save(store, slug, episode) -> None:
     store.redis.set(store.key(slug, KEY), json.dumps(episode))
 
 
-def run(store: RedisStore, now: Callable[[], int], repair=None, wait=None, passes: int | None = None) -> None:
-    since, done = now(), 0
+def run(
+    store: RedisStore, now: Callable[[], int], repair=None, wait=None, passes: int | None = None, beat=None
+) -> None:
+    beat = beat or _watchdog
+    since, done, held = now(), 0, {}
     while passes is None or done < passes:
+        beat()
         for slug in store.slugs():
-            try:
-                for action in watch_pass(store, slug, now(), since, repair):
-                    timing.emit(sys.stdout, f"{slug}: {action}")
-            except Exception as exc:
-                timing.emit(sys.stderr, f"{slug}: {type(exc).__name__}: {exc}")
+            _judge(store, slug, now(), since, repair, held, beat)
+            beat()
         done += 1
-        (wait or scheduled_wait)(PASS_S)
+        (wait or time.sleep)(PASS_S)
+
+
+def _judge(store, slug, now, since, repair, held, beat) -> None:
+    guard = held[slug] = held.get(slug) or Guard()
+    worker = Thread(target=_pass, args=(store, slug, now, since, repair, guard), daemon=True)
+    worker.start()
+    guard.stuck = [thread for thread in guard.stuck if thread.is_alive()]
+    if _awaited(worker, beat):
+        return
+    guard.stuck.append(worker)
+    if len(guard.stuck) >= BLOCKED_LIMIT:
+        raise RuntimeError(f"the pass of {slug} stayed blocked through {BLOCKED_LIMIT} passes; the watcher exits")
+    timing.emit(sys.stderr, f"{slug}: its pass is still blocked after {SLUG_PASS_S} seconds; the watch goes on")
+
+
+def _pass(store, slug, now, since, repair, guard) -> None:
+    try:
+        for action in watch_pass(store, slug, now, since, repair, guard):
+            timing.emit(sys.stdout, f"{slug}: {action}")
+    except Exception as exc:
+        timing.emit(sys.stderr, f"{slug}: {type(exc).__name__}: {exc}")
+
+
+def _awaited(worker: Thread, beat: Callable[[], None]) -> bool:
+    deadline = time.monotonic() + SLUG_PASS_S
+    while True:
+        worker.join(min(BEAT_S, deadline - time.monotonic()))
+        if not worker.is_alive() or time.monotonic() >= deadline:
+            return not worker.is_alive()
+        beat()
+
+
+def _watchdog() -> None:
+    sd_notify.notify(WATCHDOG)

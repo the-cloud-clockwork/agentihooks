@@ -1,6 +1,7 @@
 import os
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -13,6 +14,7 @@ LEDGER = {
     "tasks": [{"id": "t1", "workspace": "w"}, {"id": "t2"}, {"id": "bad id", "workspace": "w"}],
     "_meta": {"rev": 3},
 }
+NO_AGENTS = SimpleNamespace(agents=lambda slug: [])
 
 
 from scripts.swarm import command_runner, commands
@@ -45,11 +47,11 @@ def test_a_work_folder_read_returns_the_lines_the_tick_last_published(folders, m
     assert server.workspace_tails("s", "t1") == {}
     progress.write_text("first step\n")
     assert server.workspace_tails("s", "t1") == {}
-    command_runner.publish("store", "s", {"tasks": [LEDGER["tasks"][0]]})
+    command_runner.publish(NO_AGENTS, "s", {"tasks": [LEDGER["tasks"][0]]})
     assert server.workspace_tails("s", "t1") == {"latest_progress": "first step"}
     progress.write_text("first step\nsecond step\n")
     (folders / "t1" / "proof.md").write_text("run green\n")
-    command_runner.publish("store", "s", {"tasks": [LEDGER["tasks"][0]]})
+    command_runner.publish(NO_AGENTS, "s", {"tasks": [LEDGER["tasks"][0]]})
     assert server.workspace_tails("s", "t1") == {
         "latest_progress": "first step\nsecond step",
         "latest_proof": "run green",
@@ -180,7 +182,7 @@ def test_sampling_leaves_work_folder_changes_to_the_lazy_read(folders, monkeypat
     server.HUB.open("empty", lambda: {"swarm": None})
     server.HUB.open("s", lambda: {"ledger": LEDGER, "swarm": None})
     (folders / "t1" / "progress.md").write_text("step one\n")
-    command_runner.publish("store", "s", {"tasks": [LEDGER["tasks"][0]]})
+    command_runner.publish(NO_AGENTS, "s", {"tasks": [LEDGER["tasks"][0]]})
     tails = counted(monkeypatch, ledger_workspace, "tails")
     reads = counted(monkeypatch, commands, "workspaces")
     server.sample_streams()

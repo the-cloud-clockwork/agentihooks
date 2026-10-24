@@ -243,6 +243,35 @@ def test_a_run_returns_its_problems_and_its_measured_write_p95(monkeypatch, tmp_
     assert ledger_load.run(tmp_path) == ([], 0.7)
 
 
+@pytest.mark.parametrize("unwritable_log", [False, True])
+def test_a_server_that_fails_at_startup_names_its_exit_status_and_stderr(monkeypatch, tmp_path, unwritable_log):
+    script = tmp_path / "failing_server.py"
+    script.write_text("import sys\nsys.stderr.write('ledger database is locked\\n')\nsys.exit(120)\n")
+    monkeypatch.setattr(ledger_load, "ledger_server", SimpleNamespace(__file__=str(script)))
+    log_path = Path("/dev/full") if unwritable_log else tmp_path / "server.log"
+    with log_path.open("w") as log, pytest.raises(SystemExit) as exited:
+        ledger_load.start_server(tmp_path, ledger_load.free_port(), log)
+    assert "ledger server exited with 120 before listening" in str(exited.value)
+    assert "ledger database is locked" in str(exited.value)
+    if not unwritable_log:
+        assert log_path.read_text() == "ledger database is locked\n"
+
+
+def test_a_server_that_never_listens_names_its_stderr(monkeypatch, tmp_path):
+    script = tmp_path / "silent_server.py"
+    script.write_text(
+        "import sys, time\nsys.stderr.write('waiting on the ledger lock\\n')\nsys.stderr.flush()\ntime.sleep(60)\n"
+    )
+    monkeypatch.setattr(ledger_load, "ledger_server", SimpleNamespace(__file__=str(script)))
+    monkeypatch.setattr(ledger_load, "SERVER_WAIT_S", 2.0)
+    monkeypatch.setattr(ledger_load, "RELAYS", {})
+    with (tmp_path / "server.log").open("w") as log, pytest.raises(SystemExit) as exited:
+        ledger_load.start_server(tmp_path, ledger_load.free_port(), log)
+    assert "did not listen on port" in str(exited.value)
+    assert "waiting on the ledger lock" in str(exited.value)
+    assert not ledger_load.RELAYS
+
+
 def resource_samples(threads=0, memory=0):
     return [(float(n), 12 + threads * n, 100_000 + memory * n) for n in range(91)]
 
@@ -352,3 +381,90 @@ def test_every_client_reads_one_single_resource_a_second_that_the_ledger_holds()
     assert ledger_load.READS_PER_SECOND == 1.0
     assert items[1] == ["tasks/t100", "phases/p1", "followups/f-1"]
     assert all(set(paths) <= held for paths in items)
+
+
+class Clock:
+    def __init__(self):
+        self.now = 0.0
+
+    def monotonic(self) -> float:
+        return self.now
+
+    def sleep(self, seconds: float) -> None:
+        self.now += seconds
+
+
+class Api:
+    def mutate(self, slug, ops):
+        return {}
+
+    def request(self, slug, path):
+        return {}
+
+
+def test_a_client_stops_at_the_deadline_without_sleeping_toward_a_write_it_will_not_send(monkeypatch):
+    clock = Clock()
+    monkeypatch.setattr(ledger_load, "time", clock)
+    results = {"writes": [], "reads": [], "errors": []}
+    deadline = 2.5 * ledger_load.write_every()
+    ledger_load.client(Api(), "ci@ab0000-0000", "tasks/t0", 0.0, deadline, results)
+    assert (len(results["writes"]), len(results["reads"]), results["errors"]) == (3, 3, [])
+    assert clock.now <= deadline
+
+
+def test_a_reader_stops_at_the_deadline_without_sleeping_toward_a_read_it_will_not_send(monkeypatch):
+    clock = Clock()
+    monkeypatch.setattr(ledger_load, "time", clock)
+    results = {"item_reads": [], "errors": []}
+    ledger_load.reader(Api(), ledger_load.single_items(0), 0.0, 2.5, results)
+    assert (len(results["item_reads"]), results["errors"]) == (3, [])
+    assert clock.now <= 2.5
+
+
+class EventStream:
+    def __init__(self, clock, chunks):
+        self.clock = clock
+        self.chunks = iter(chunks)
+        self.timeout = ledger_load.TIMEOUT_S
+        self.fp = SimpleNamespace(raw=SimpleNamespace(_sock=self))
+        self.closed = False
+
+    def settimeout(self, seconds):
+        self.timeout = seconds
+
+    def read1(self, count):
+        delay, chunk = next(self.chunks)
+        self.clock.sleep(min(delay, self.timeout))
+        if delay > self.timeout:
+            raise TimeoutError("silent event stream")
+        return chunk
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        self.closed = True
+
+
+def test_the_event_stream_stops_at_the_window_end_without_waiting_for_the_next_heartbeat(monkeypatch):
+    clock = Clock()
+    stream = EventStream(clock, [(0.0, b"heartbeat"), (ledger_load.TIMEOUT_S, b"heartbeat")])
+    monkeypatch.setattr(ledger_load, "time", clock)
+    monkeypatch.setattr(ledger_load.urllib.request, "urlopen", lambda *args, **kwargs: stream)
+    results = {"errors": []}
+    ledger_load.watcher("http://localhost", {}, 2.5, results)
+    assert clock.now == 2.5
+    assert results["errors"] == []
+    assert stream.closed
+
+
+def test_a_silent_event_stream_inside_the_window_stays_red(monkeypatch):
+    clock = Clock()
+    stream = EventStream(clock, [(0.0, b"heartbeat"), (ledger_load.TIMEOUT_S + 1, b"heartbeat")])
+    monkeypatch.setattr(ledger_load, "time", clock)
+    monkeypatch.setattr(ledger_load.urllib.request, "urlopen", lambda *args, **kwargs: stream)
+    results = {"errors": []}
+    ledger_load.watcher("http://localhost", {}, ledger_load.TIMEOUT_S * 2, results)
+    assert clock.now == ledger_load.TIMEOUT_S
+    assert results["errors"] == ["event stream: TimeoutError: silent event stream"]
+    assert stream.closed

@@ -91,6 +91,15 @@ def test_prepare_isolates_only_swarm_codex(profile, agent, swarm):
     assert env[key] == str(root / "rendered" / "qa" / agent)
 
 
+@pytest.mark.parametrize(("agent", "options"), [("codex", {"isolate": True, "push": True}), ("claude", {})])
+def test_prepare_renders_a_push_profile_only_for_codex(profile, agent, options):
+    _, renderer = profile
+
+    select_profile.prepare("qa", agent, "", "", [], {"AGENTIHOOKS_SWARM": "crew", "AGENTIHOOKS_CODEX_PUSH": "1"})
+
+    renderer.assert_called_once_with(agent, "qa", overlays=(), bundle_revision="", **options)
+
+
 @pytest.mark.parametrize("alias", [False, True])
 def test_swarm_codex_prepare_refuses_the_real_home(profile, monkeypatch, alias):
     root, _ = profile
@@ -178,7 +187,11 @@ def test_init_agent_profile_uses_selector_and_keeps_route_report(profile, monkey
     )
     launcher = next((tmp_path / "agentihooks-claude-terminal").glob("*.sh"))
     text = launcher.read_text()
-    assert "select-profile engineer --agent claude -- --agentihooks-fallback-bare --agentihooks-report" in text
+    home = tmp_path / "rendered" / "engineer" / "claude"
+    assert (
+        f"select-profile engineer --home={home} --agent claude -- --agentihooks-fallback-bare --agentihooks-report"
+        in text
+    )
     assert "--model opus --effort medium" in text
     assert "profile=engineer" in capsys.readouterr().out
 
@@ -306,7 +319,8 @@ def test_init_codex_profile_resume_preserves_route_and_trust(profile, monkeypatc
     )
     launcher = next((tmp_path / "agentihooks-claude-terminal").glob("*.sh"))
     text = launcher.read_text()
-    assert "select-profile qa --agent codex -- --agentihooks-report" in text
+    home = tmp_path / "rendered" / "qa" / "codex"
+    assert f"select-profile qa --home={home} --agent codex -- --agentihooks-report" in text
     assert "resume conversation" in text
     assert "model_reasoning_effort=" in text
     assert "trust_level" in text
@@ -489,7 +503,7 @@ def test_a_dependency_restart_relaunches_through_the_original_profile(profile, m
     monkeypatch.setattr(init_agent.shutil, "which", lambda name: "/bin/agentihooks" if name == "agentihooks" else None)
     assert init_agent.main(["--dry-run", *launch[2:]], {"HOME": str(tmp_path), "XDG_RUNTIME_DIR": str(tmp_path)}) == 0
     text = next((tmp_path / "agentihooks-claude-terminal").glob("*.sh")).read_text()
-    assert "select-profile engineer --agent claude --" in text
+    assert f"select-profile engineer --home={tmp_path / 'rendered' / 'engineer' / 'claude'} --agent claude --" in text
     assert "--model opus --effort high" in text
     assert "--resume sid-1" in text
     assert "profile=engineer" in capsys.readouterr().out
@@ -522,7 +536,8 @@ def test_init_agent_passes_each_overlay_to_the_selector(profile, monkeypatch, tm
     monkeypatch.setattr(init_agent.shutil, "which", lambda name: "/bin/agentihooks" if name == "agentihooks" else None)
     assert _dry_launch(tmp_path, ["--profile", "engineer", "--overlay", "tuner", "--overlay", "trader"]) == 0
     text = next((tmp_path / "agentihooks-claude-terminal").glob("*.sh")).read_text()
-    assert "select-profile engineer --overlay=tuner --overlay=trader --agent claude -- " in text
+    home = tmp_path / "rendered" / "engineer+tuner+trader" / "claude"
+    assert f"select-profile engineer --overlay=tuner --overlay=trader --home={home} --agent claude -- " in text
     assert "export AGENTIHOOKS_OVERLAYS=tuner,trader\n" in text
     assert "overlays=tuner,trader\n" in capsys.readouterr().out
     renderer.assert_called_once_with("claude", "engineer", overlays=["tuner", "trader"], bundle_revision="")
@@ -616,7 +631,8 @@ def test_init_agent_pins_the_render_to_the_recorded_bundle_commit(profile, monke
     assert init_agent.main(argv, {"HOME": str(tmp_path), "XDG_RUNTIME_DIR": str(tmp_path)}) == 0
     renderer.assert_called_once_with("claude", "engineer", overlays=["tuner"], bundle_revision="abc123")
     launcher = next((tmp_path / "agentihooks-claude-terminal").glob("*.sh"))
-    assert "select-profile engineer --overlay=tuner --bundle-revision=abc123 --agent claude --" in launcher.read_text()
+    worn = f"--overlay=tuner --bundle-revision=abc123 --home={tmp_path / 'rendered' / 'engineer+tuner' / 'claude'}"
+    assert f"select-profile engineer {worn} --agent claude --" in launcher.read_text()
 
 
 def test_a_continued_session_pins_the_bundle_commit_of_its_environment(profile, monkeypatch, tmp_path):
@@ -628,7 +644,8 @@ def test_a_continued_session_pins_the_bundle_commit_of_its_environment(profile, 
     assert _dry_launch(tmp_path, ["--resume", "conversation"], environ) == 0
     renderer.assert_called_once_with("claude", "engineer", overlays=["tuner"], bundle_revision="abc123")
     launcher = next((tmp_path / "agentihooks-claude-terminal").glob("*.sh"))
-    assert "select-profile engineer --overlay=tuner --bundle-revision=abc123 --agent claude --" in launcher.read_text()
+    worn = f"--overlay=tuner --bundle-revision=abc123 --home={tmp_path / 'rendered' / 'engineer+tuner' / 'claude'}"
+    assert f"select-profile engineer {worn} --agent claude --" in launcher.read_text()
 
 
 def test_a_fresh_launch_drops_the_bundle_commit_its_caller_carries(profile, monkeypatch, tmp_path):
@@ -656,3 +673,4 @@ def test_both_launch_commands_document_the_bundle_commit_flag(capsys):
         select_profile.main(["--help"])
     shown = " ".join(capsys.readouterr().out.split())
     assert "--bundle-revision BUNDLE_REVISION Render only from this bundle commit" in shown
+    assert "--home HOME Mount this rendered home instead of rendering" in shown

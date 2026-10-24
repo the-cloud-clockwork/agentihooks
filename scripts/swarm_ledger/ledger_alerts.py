@@ -5,8 +5,19 @@ from scripts.inbox import outbox
 
 OPS = ("alert_claim", "alert_close", "alert_raise")
 SIZE, SYNC, PROMOTION, RELEASE = "size", "sync", "promotion", "release"
-TARGETS = {SIZE: "master", SYNC: "master", PROMOTION: "master", RELEASE: "master"}
-RAISED = (PROMOTION, RELEASE)
+SEAT, SPAWN, MERGE = "seat", "spawn", "merge"
+WRITER = "writer"
+TARGETS = {
+    WRITER: "master",
+    SIZE: "master",
+    SYNC: "master",
+    PROMOTION: "master",
+    RELEASE: "master",
+    SEAT: "master",
+    SPAWN: "master",
+    MERGE: "master",
+}
+RAISED = (PROMOTION, RELEASE, SEAT, SPAWN, MERGE)
 OPEN, CLAIMED, DONE = "open", "claimed", "done"
 OPERATOR = "operator"
 SENDER = "ledger"

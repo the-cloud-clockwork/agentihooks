@@ -1,7 +1,6 @@
 import re
+from collections.abc import Callable
 from urllib.parse import urlsplit
-
-from scripts.swarm_ledger import ledger_artifacts
 
 ANCHOR = re.compile(r"^\s*<!--\s*slice:\s*([\w.-]+)\s*-->\s*$")
 LINES = re.compile(r"([1-9][0-9]*)-([1-9][0-9]*)")
@@ -150,7 +149,7 @@ def _owner(entries: list[tuple[int, int, str]], anchor: int) -> tuple[int, int]:
     return anchor, headings[-1] if headings else 6
 
 
-def stored_text(ref: dict, doc: dict) -> str:
+def stored_text(ref: dict, doc: dict, load: Callable[[str, str], bytes] | None = None) -> str:
     check_ref(ref)
     parts = urlsplit(ref["artifact"]).path.split("/")
     if len(parts) != 4 or parts[1] != "artifacts":
@@ -158,7 +157,11 @@ def stored_text(ref: dict, doc: dict) -> str:
     _, _, slug, file_id = parts
     if not any(row.get("plan") is True and row["file"]["id"] == file_id for row in doc.get("artifacts", ())):
         raise ValueError("plan artifact is missing or is not marked as a plan")
-    return ledger_artifacts.path_of(slug, file_id).read_bytes().decode()
+    if load:
+        return load(slug, file_id).decode()
+    from scripts.swarm_ledger import ledger_artifacts
+
+    return ledger_artifacts.read(slug, file_id).decode()
 
 
 def check_phase_ref(doc: dict, phase: dict) -> None:

@@ -267,7 +267,8 @@ condition that blocks on every Stop keeps the agent working forever: read
 
 ## Start step
 
-A `start` condition runs at SessionStart. Its stdin is the SessionStart
+A `start` condition runs at SessionStart, after swarm refocus on compaction and
+before the handler's remaining context injection. Its stdin is the SessionStart
 payload: `session_id`, `cwd`, `source` (`startup`, `resume`, `clear`,
 `compact`), `transcript_path`. A `start` condition can only add context —
 `tool_input`, `tool_output` and `decision` are never read from it, so it can

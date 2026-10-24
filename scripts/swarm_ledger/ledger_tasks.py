@@ -6,7 +6,7 @@ from pathlib import Path
 import ledger_comments
 import ledger_kinds
 
-from scripts.swarm_ledger import ledger_plans, ledger_rank, task_dependencies
+from scripts.swarm_ledger import ledger_plans, ledger_rank, ports, task_dependencies
 
 AUTHOR_RE = re.compile(r"^[A-Za-z][\w.@-]{0,63}$")
 ID_RE = re.compile(r"^[A-Za-z0-9][\w.-]{0,63}$")
@@ -50,9 +50,10 @@ UPDATABLE = (
     "pull_scopes",
     "after_release",
     "applied_at",
+    "workstation",
     "recovery",
 )
-BOOL_FIELDS = ("artifact", "follow_up")
+BOOL_FIELDS = ("artifact", "follow_up", "workstation")
 DIFFICULTIES = ("S", "M", "L")
 DIFFICULTY_SOURCES = ("operator", "rule", "classifier", "default")
 DIFFICULTY_FIELDS = ("difficulty", "difficulty_source", "difficulty_confidence")
@@ -360,6 +361,7 @@ def _add(doc, op, ctx):
         "repository_branches",
         "slice",
         "follow_up",
+        "workstation",
     ):
         if key in op:
             task[key] = op[key]
@@ -391,7 +393,7 @@ def _add(doc, op, ctx):
 
 
 def add_refusal(tasks, op, appended):
-    from scripts.swarm.naming import lane_of
+    lane_of = ports.swarm().naming.lane_of
 
     by, lane = op["by"], lane_of(op["by"])
     if lane in WORKER_LANES:
@@ -433,7 +435,7 @@ def unsliced_refusal(doc: dict, task: dict, by: str) -> str:
 
 
 def rank_refusal(by, field="rank"):
-    from scripts.swarm.naming import lane_of
+    lane_of = ports.swarm().naming.lane_of
 
     lane = lane_of(by)
     if field == "rank":
@@ -537,7 +539,7 @@ def _update_fields(task: dict, fields: dict) -> dict:
 
 
 def _block_author(by: str) -> bool:
-    from scripts.swarm.naming import lane_of
+    lane_of = ports.swarm().naming.lane_of
 
     return by == "operator" or lane_of(by) == "master"
 

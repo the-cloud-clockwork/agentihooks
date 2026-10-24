@@ -20,14 +20,17 @@
 /tests/coverage_*.py @nestorcolt
 /tests/dep_inputs.py @nestorcolt
 /tests/dep_manifest.py @nestorcolt
+/tests/mutation_line_selection_proof.py @nestorcolt
 /tests/reused_coverage.py @nestorcolt
 /tests/test_coverage_*.py @nestorcolt
 /tests/dev_durations.py @nestorcolt
+/tests/chaos/ @nestorcolt
 /tests/flake_budget.py @nestorcolt
 /tests/leaks.py @nestorcolt
 /tests/refresh_durations.py @nestorcolt
 /tests/shard_budget.py @nestorcolt
 /tests/shard_check.py @nestorcolt
+/tests/shard_summary.py @nestorcolt
 /tests/shards.py @nestorcolt
 /tests/queue_shards.py @nestorcolt
 /tests/test_ci_*.py @nestorcolt
@@ -36,6 +39,7 @@
 /tests/swarm_ledger/receipt_stats_probe.py @nestorcolt
 /tests/ledger_load/paired.py @nestorcolt
 /tests/ledger_load/memory.py @nestorcolt
+/tests/ledger_load/hierarchy_paired.py @nestorcolt
 /tests/test_count_floor.py @nestorcolt
 /tests/test_dev_durations.py @nestorcolt
 /tests/test_gate_protected.py @nestorcolt
@@ -43,6 +47,7 @@
 /tests/test_github_access.py @nestorcolt
 /tests/test_shard_budget.py @nestorcolt
 /tests/test_shard_check.py @nestorcolt
+/tests/test_shard_summary.py @nestorcolt
 /tests/test_shards.py @nestorcolt
 /tests/test_queue_shards.py @nestorcolt
 /tests/test_size_limits.py @nestorcolt
@@ -50,3 +55,5 @@
 /mutation-clearances/ @nestorcolt
 /delivery.yaml @nestorcolt
 /.github/workflows/trusted-actors.json @nestorcolt
+/deploy/helm/agentihooks-swarm/charts/ @nestorcolt
+/deploy/helm/agentihooks-swarm-deps.sha256 @nestorcolt

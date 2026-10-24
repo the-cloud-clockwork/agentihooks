@@ -7,6 +7,9 @@ from pathlib import Path
 import pytest
 import yaml
 
+from scripts import ci_dev_reuse, ci_test_plan
+from tests import coverage_stability, refresh_durations
+
 pytestmark = pytest.mark.unit
 ROOT = Path(__file__).resolve().parents[1]
 API_CALL = re.compile(r"\b_?gh\b(?!-)|api\.github\.com|GITHUB_API_URL")
@@ -53,7 +56,7 @@ def _all_steps():
             if isinstance(values, dict) and TOKEN.search(_values(values)):
                 yield name, {"name": f"job {key}", "env": values}, ROOT
         for step in job.get("steps", []):
-            action = step.get("uses", "")
+            action = step.get("uses", "").replace("./.workflow-revision/", "./", 1)
             if action.startswith("./.github/actions/"):
                 folder = ROOT / action
                 for inner in yaml.safe_load((folder / "action.yml").read_text())["runs"]["steps"]:
@@ -145,6 +148,7 @@ def test_no_script_a_step_runs_calls_the_api():
         ".github/coverage/flatten.py",
         ".github/coverage/proxy.py",
         ".github/coverage/sonar-retry.sh",
+        ".github/scripts/pypi-retry.sh",
         "deploy/helm/agentihooks-swarm/ci/kind-smoke.sh",
         "docker/swarm-node/base-copy.sh",
         "docker/swarm-node/pull-base.sh",
@@ -159,6 +163,7 @@ def test_no_script_a_step_runs_calls_the_api():
         "scripts/ci_dependency_audit.py",
         "scripts/ci_dev_reuse.py",
         "scripts/ci_gate_summary.py",
+        "scripts/ci_hive_nats_grants.py",
         "scripts/ci_input_key.py",
         "scripts/ci_mutation/__main__.py",
         "scripts/ci_mutation/plan.py",
@@ -167,8 +172,12 @@ def test_no_script_a_step_runs_calls_the_api():
         "scripts/ci_queue_rebuild.py",
         "scripts/ci_release.sh",
         "scripts/ci_semgrep.py",
+        "scripts/ci_unit_rerun.py",
         "scripts/ci_wiring.py",
+        "scripts/hive/nats_grant.py",
         "scripts/packaging/compose-hive-smoke.sh",
+        "scripts/packaging/compose-recovery-drill.sh",
+        "scripts/packaging/compose-task-smoke.sh",
         "scripts/packaging/hive-join-smoke.sh",
         "scripts/packaging/hive-launch-attestation-proof.sh",
         "scripts/packaging/hive-launch-smoke.sh",
@@ -180,12 +189,19 @@ def test_no_script_a_step_runs_calls_the_api():
         "scripts/size_limits.py",
         "scripts/swarm_ledger/artifact_sanity.py",
         "scripts/swarm_ledger/ledger_server.py",
+        "tests/chart_examples.py",
+        "tests/chart_github_auth.py",
+        "tests/chart_hive_home.py",
         "tests/chart_hive_join.py",
+        "tests/chart_hive_only.py",
+        "tests/chart_hub.py",
+        "tests/chart_nats.py",
         "tests/chart_network.py",
         "tests/chart_redis.py",
         "tests/chart_secrets.py",
         "tests/chart_workers.py",
         "tests/count_floor.py",
+        "tests/coverage_check.py",
         "tests/coverage_baseline.py",
         "tests/coverage_ratchet.py",
         "tests/dep_manifest.py",
@@ -195,18 +211,25 @@ def test_no_script_a_step_runs_calls_the_api():
         "tests/js_lcov.py",
         "tests/kind_request.py",
         "tests/ledger_load/gate.py",
+        "tests/ledger_load/hierarchy_paired.py",
+        "tests/ledger_load/hierarchy_probe.py",
+        "tests/ledger_load/memory.py",
         "tests/ledger_load/paired.py",
         "tests/ledger_load/streams.py",
         "tests/refresh_durations.py",
         "tests/reused_coverage.py",
         "tests/shard_budget.py",
         "tests/shard_check.py",
+        "tests/shard_summary.py",
         "scripts/ci_select.py",
         "tests/__init__.py",
         "tests/browser_coverage.py",
         "tests/flake_ledger.py",
         "tests/routing/test_codex_api.py",
         "tests/shards.py",
+        "tests/swarm_ledger/test_postgres_writer_lock.py",
+        "tests/swarm_ledger/test_postgres_outbox.py",
+        "tests/swarm_ledger/test_postgres_writer_floor.py",
         "tests/test_suite_speed.py",
         "scripts/ci_reuse.py",
         "scripts/ci_runner_classes.py",
@@ -477,10 +500,31 @@ def test_sonar_downloads_this_runs_coverage_after_the_shards():
     assert download["with"] == {"pattern": "coverage-3.12-*", "path": ".coverage-shards"}
     assert steps.index(download) < steps.index(merge)
     assert merge["env"] == {
-        "SHARDS": "${{ needs.select.outputs.scope == 'selected' && needs.select.outputs.count || 12 }}",
+        "SHARDS": "${{ needs.select.outputs.scope == 'selected' && needs.select.outputs.count || 20 }}",
         "SCOPE": "${{ needs.select.outputs.scope }}",
     }
     assert 'bash .github/coverage/combine.sh --downloaded "$SHARDS" ||' in merge["run"]
+
+
+def test_every_reader_of_the_unit_shard_count_matches_the_matrix():
+    jobs = _jobs()
+    shards = jobs["unit"]["strategy"]["matrix"]["shard"]
+    count = len(shards)
+    assert shards == list(range(1, count + 1))
+    run = next(step for step in jobs["unit"]["steps"] if step.get("name") == "Run tests")
+    assert (
+        run["env"]["SHARD"]
+        == f"${{{{ matrix.shard }}}}/${{{{ matrix.python-version == '3.12' && {count} || {count} }}}}"
+    )
+    floor = jobs["unit"]["strategy"]["matrix"]["exclude"]
+    assert [entry["shard"] for entry in floor] == shards[12:]
+    assert ci_test_plan.UNIT_JOBS == {f"unit (3.12, {shard})" for shard in shards}
+    assert ci_test_plan.COVERAGE == {f"coverage-3.12-{shard}" for shard in shards}
+    assert {f"coverage-3.12-{shard}" for shard in shards} <= ci_dev_reuse.artifact_names()
+    assert coverage_stability.SHARDS == refresh_durations.SHARDS == count
+    workflow = (ROOT / ".github/workflows/test.yml").read_text()
+    assert workflow.count(f"--shards {count} \\") == 2
+    assert f"needs.select.outputs.count || {count} }}}}" in workflow
 
 
 @pytest.mark.parametrize("job", ["unit", "shard-check", "test-count", "lint"])

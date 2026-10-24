@@ -182,6 +182,7 @@ class Supervisor:
         while remaining and time.monotonic() < deadline:
             self.wait()
             remaining = trees.living(os.getpid(), pid)
+        remaining = trees.living(os.getpid(), pid)
         if remaining:
             trees.send(remaining, signal.SIGKILL)
             kill_deadline = time.monotonic() + self.launch.budgets.kill

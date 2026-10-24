@@ -347,6 +347,47 @@ class TestSessionRegistry:
             register_session("sess-a", pid=4242, cwd="/tmp", model="opus", name="solo-1")
             assert session_name(4242) == "sw-master-1"
 
+    def test_a_session_registered_again_without_its_inherited_name_drops_it(self, broadcast_dir):
+        from hooks.context.broadcast import _load_sessions, register_session, session_name
+
+        sessions_file = broadcast_dir / "active-sessions.json"
+        with patch("hooks.context.broadcast._sessions_path", return_value=sessions_file):
+            register_session("sess-a", pid=4242, cwd="/tmp", model="opus", name="engineer@d44a5a-0926")
+            register_session("sess-a", pid=4242, cwd="/tmp", model="opus")
+            assert session_name(4242) == ""
+            assert "name" not in _load_sessions()["sess-a"]
+            register_session("sess-a", pid=4242, cwd="/tmp", model="opus", name="engineer@d44a5a-0926")
+            register_session("sess-a", pid=4242, cwd="/tmp", model="opus", name="solo-2")
+            assert session_name(4242) == "solo-2"
+
+    def test_a_launcher_name_survives_a_resume_without_a_name(self, broadcast_dir):
+        from hooks.context.broadcast import name_session, register_session, session_name
+
+        sessions_file = broadcast_dir / "active-sessions.json"
+        with patch("hooks.context.broadcast._sessions_path", return_value=sessions_file):
+            register_session("sess-a", pid=4242, cwd="/tmp", model="opus", name="engineer@d44a5a-0926")
+            name_session(4242, "sw-master-1")
+            register_session("sess-a", pid=4242, cwd="/tmp", model="opus")
+            register_session("sess-a", pid=4242, cwd="/tmp", model="opus")
+            assert session_name(4242) == "sw-master-1"
+
+    def test_a_launcher_name_moves_to_the_session_that_supersedes_it_on_the_same_process(self, broadcast_dir):
+        from hooks.context.broadcast import _load_sessions, name_session, register_session, session_name
+
+        sessions_file = broadcast_dir / "active-sessions.json"
+        with patch("hooks.context.broadcast._sessions_path", return_value=sessions_file):
+            register_session("sess-a", pid=4242, cwd="/tmp", model="opus")
+            name_session(4242, "sw-master-1")
+            register_session("agent-1", pid=4242, cwd="/tmp", model="opus", supersede=False)
+            register_session("sess-b", pid=4242, cwd="/tmp", model="opus")
+            sessions = _load_sessions()
+            assert session_name(4242) == "sw-master-1"
+            assert sessions["sess-b"]["name"] == "sw-master-1"
+            assert sessions["sess-a"]["superseded_at"] == sessions["sess-b"]["started_at"]
+            assert "name" not in sessions["agent-1"]
+            register_session("sess-c", pid=5151, cwd="/tmp", model="opus")
+            assert "name" not in _load_sessions()["sess-c"]
+
     def test_handed_off_session_is_marked_and_reported(self, broadcast_dir):
         from hooks.context.broadcast import mark_handed_off, register_session, session_status
 

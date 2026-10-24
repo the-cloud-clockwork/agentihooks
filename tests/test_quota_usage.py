@@ -312,6 +312,23 @@ def test_account_snapshot_picks_one_of_two_snapshots_written_at_the_same_second(
     assert limits["seven_day"]["used_percentage"] in (20.0, 40.0)
 
 
+def test_latest_snapshot_is_the_newest_of_that_account_however_old(monkeypatch, tmp_path):
+    import hooks.context.quota_usage as quota_usage
+
+    monkeypatch.setattr(quota_usage, "AGENTIHOOKS_HOME", tmp_path)
+    for session, at, limits in (
+        ("old", 10.0, _limits(1, 2)),
+        ("left", 20.0, _limits(10, 20)),
+        ("right", 20.0, _limits(30, 40)),
+    ):
+        monkeypatch.setattr(quota_usage.time, "time", lambda at=at: at)
+        quota_usage.record_rate_limits(session, limits, {"AH_ROUTE_INTERACTIVE_main": "1"})
+    at, limits = quota_usage.latest_snapshot("main")
+    assert at == 20.0
+    assert limits["seven_day"]["used_percentage"] in (20.0, 40.0)
+    assert quota_usage.latest_snapshot("absent") is None
+
+
 def test_the_statusline_snapshot_reads_the_session_environment(monkeypatch, tmp_path):
     import hooks.context.quota_usage as quota_usage
 

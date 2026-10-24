@@ -7,6 +7,8 @@ the entry carries those words, of any length and in any wording.
 
 import re
 
+from scripts.swarm_ledger import ports
+
 ITEM_RE = re.compile(r"^(phases|questions|followups|tasks|notes)/[^/]+$")
 AUTHOR_RE = re.compile(r"^[A-Za-z][\w.@-]{0,63}$")
 OPS = ("relay",)
@@ -30,10 +32,11 @@ def check(op):
 def watched_masters(by: str) -> list[str]:
     from redis.exceptions import RedisError
 
-    from hooks._redis import get_redis
-    from hooks.context import operator_words
     from scripts.doctor.priming import TEMPLATE
-    from scripts.swarm.store import RedisStore, SwarmError
+
+    get_redis = ports.hooks().redis
+    operator_words = ports.hooks().operator_words
+    RedisStore, SwarmError = ports.swarm().store.RedisStore, ports.swarm().store.SwarmError
 
     redis = get_redis()
     if redis is None:
@@ -52,8 +55,8 @@ def watched_masters(by: str) -> list[str]:
 
 def speakers(by):
     """Every address of the relaying agent, then every master and planner of its swarm with recorded words."""
-    from hooks.context import operator_words
-    from scripts.swarm.naming import addresses, parse
+    operator_words = ports.hooks().operator_words
+    addresses, parse = ports.swarm().naming.addresses, ports.swarm().naming.parse
 
     names = addresses(by)
     codes = sorted({agent.code for agent in map(parse, names) if agent})
@@ -63,7 +66,7 @@ def speakers(by):
 
 def verified(by, quote, within=None):
     """The quoted span, as the operator wrote it, of recorded words from any master or planner of the relaying agent's swarm."""
-    from hooks.context import operator_words
+    operator_words = ports.hooks().operator_words
 
     if len(quote.split()) < 3:
         return ""
@@ -82,12 +85,20 @@ def apply(doc, op, ctx):
     name, item_id = op["item"].split("/")
     item = next((i for i in doc[name] if i["id"] == item_id), None)
     if item is None:
+        ctx.refused.append(f"relay on {op['item']} refused: the entry does not exist")
         return False
     thread = "answers" if name == "questions" else "comments"
     if any(e["id"] == op["id"] for e in item[thread]):
         return True
-    words = relayed(op, ctx.meta)
+    if ctx.meta["members"].get(op["by"], {}).get("role") != "orchestrator":
+        ctx.refused.append(f"relay on {op['item']} refused: {op['by']} is not an orchestrator of this ledger")
+        return False
+    words = verified(op["by"], op["quote"])
     if not words:
+        ctx.refused.append(
+            f"relay on {op['item']} refused: the server could not verify at least three quoted operator words "
+            "in its recorded prompts or answers"
+        )
         return False
     marks = {"relayed_by": op["by"], "relayed_from": RELAYED_FROM, "quote": words}
     text = op["text"].strip()
