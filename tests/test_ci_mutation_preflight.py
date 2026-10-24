@@ -186,14 +186,14 @@ def test_preflight_sizes_its_stats_parts_and_shards_from_the_plan(tmp_path, monk
     module = command.index("-m") + 1
     assert command[module] == "scripts.ci_mutation.plan"
     monkeypatch.setattr("sys.argv", command[module:])
-    calls = []
+    calls, records = [], []
 
     def bases(root, base, head, *args):
         calls.append((root, base, head))
         return ["resolved-base"]
 
     def record(repository, *args):
-        calls.append(repository)
+        records.append(repository)
         return None
 
     monkeypatch.setattr(planner, "own_bases", bases)
@@ -202,7 +202,8 @@ def test_preflight_sizes_its_stats_parts_and_shards_from_the_plan(tmp_path, monk
     output = tmp_path / "output"
     monkeypatch.setenv("GITHUB_OUTPUT", str(output))
     assert planner.main() == 0
-    assert calls == [(tmp_path, "chosen-base", "HEAD"), "org/repo"]
+    assert calls == [(tmp_path, "chosen-base", "HEAD")]
+    assert records == ["org/repo"]
     assert json.loads((tmp_path / ".mutation-selection.json").read_text()) == {
         "scripts/sample.py": ["tests/test_sample.py"]
     }
