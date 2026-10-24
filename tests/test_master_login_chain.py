@@ -244,6 +244,7 @@ def test_browser_ignores_an_outcome_for_another_request_or_master(tmp_path, monk
 @pytest.mark.parametrize("failing_operation", ["send", "get"])
 def test_inbox_outage_ends_native_auth_and_returns_browser_failure(tmp_path, monkeypatch, failing_operation):
     from redis.exceptions import RedisError
+
     from scripts.inbox import store
 
     target = tmp_path / "slot" / "claude"
