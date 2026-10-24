@@ -203,3 +203,39 @@ def test_browser_timeout_cleans_up_native_auth_before_returning(tmp_path, monkey
         "already exited": ["terminate"],
     }
     assert events == expected[cleanup]
+
+
+@pytest.mark.parametrize("reply_ref,reply_sender", [("old request", "master@proof"), ("request", "other@proof")])
+def test_browser_ignores_an_outcome_for_another_request_or_master(tmp_path, monkeypatch, reply_ref, reply_sender):
+    from scripts.inbox import store
+
+    target = tmp_path / "slot" / "claude"
+    target.mkdir(parents=True)
+    request = SimpleNamespace(id="request", state="done", reason="done: replied with message answer")
+    answer = SimpleNamespace(id="answer", ref=reply_ref, sender=reply_sender, text="success")
+    closed = []
+
+    class Inbox:
+        def send(self, *args, **kwargs):
+            return request
+
+        def get(self, item):
+            return {"request": request, "answer": answer}[item]
+
+        def acts_for(self, sender, recipient):
+            return sender == recipient
+
+        def close(self, *args):
+            closed.append(args)
+
+    def spawn(*args, **kwargs):
+        kwargs["stdout"].write("https://claude.ai/oauth/authorize?state=proof\n")
+        kwargs["stdout"].flush()
+        return SimpleNamespace(poll=lambda: 0)
+
+    monkeypatch.setattr(store, "connect", lambda _: Inbox())
+    monkeypatch.setattr(subprocess, "Popen", spawn)
+    monkeypatch.setattr(chain.time, "sleep", lambda _: None)
+    env = {"AGENTIHOOKS_SWARM": "proof", "AGENTIHOOKS_AGENT_NAME": "engineer@proof"}
+    assert chain.authorize(env, target, timeout=0.002) == "failure"
+    assert closed == []
