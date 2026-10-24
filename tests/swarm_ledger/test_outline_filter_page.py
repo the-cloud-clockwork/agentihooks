@@ -249,6 +249,7 @@ def test_typing_in_a_form_control_is_never_taken_for_navigation(ledger):
     page.keyboard.press("j")
     page.keyboard.press("k")
     assert page.evaluate("() => document.activeElement.id") == "outline-state"
+    page.fill("#outline-filter", "")
     link = page.locator("#outline a[data-target]").first
     link.focus()
     page.keyboard.press("Control+j")
