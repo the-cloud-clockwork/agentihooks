@@ -479,10 +479,6 @@ class RedisStore:
         self.redis.hsetnx(self.key(slug, "started-lives"), task, self._started_lives(slug, task))
         return self.redis.hincrby(self.key(slug, "started-lives"), task)
 
-    def refund_claim(self, slug, task):
-        self.redis.hsetnx(self.key(slug, "started-lives"), task, self._started_lives(slug, task))
-        return self.redis.hincrby(self.key(slug, "started-lives"), task, -1)
-
     def refund_held_claim(self, slug: str, task: str, agent: str, generation: int) -> bool:
         from redis.exceptions import WatchError
 
