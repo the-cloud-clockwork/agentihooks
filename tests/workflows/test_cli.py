@@ -59,6 +59,7 @@ def test_list_exits_zero_when_every_file_loads(resolved, capsys):
 
 
 def test_show_prints_the_workflow_with_defaults_filled_in(resolved, capsys):
+    resolved["errors"].clear()
     code = cli.main(["show", "tiny"])
 
     out = capsys.readouterr().out
@@ -106,7 +107,7 @@ def test_validate_by_name_fails_while_any_layer_file_is_broken(resolved, capsys)
 
 
 def test_show_reports_broken_layer_files_beside_the_workflow(resolved, capsys):
-    assert cli.main(["show", "tiny"]) == 0
+    assert cli.main(["show", "tiny"]) == 1
     assert capsys.readouterr().err == f"{resolved['errors'][0]}\n"
 
 

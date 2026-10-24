@@ -44,13 +44,13 @@ def list_workflows(args: argparse.Namespace) -> int:
 
 def show(args: argparse.Namespace) -> int:
     found, errors = loader.resolve(Path.cwd())
-    report(errors)
     if args.name not in found:
+        report(errors)
         return refuse(f"no workflow named {args.name}")
     entry = found[args.name]
     print(f"# {entry.layer}: {entry.path}")
     print(yaml.safe_dump(entry.workflow.to_document(), default_flow_style=False, sort_keys=False), end="")
-    return 0
+    return report(errors)
 
 
 def validate(args: argparse.Namespace) -> int:
