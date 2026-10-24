@@ -60,7 +60,7 @@ def test_scan_and_charts_run_on_the_select_runner_expression():
     assert jobs["scan"]["with"]["runs_on"] == jobs["charts"]["runs-on"] == select["runs-on"]
 
 
-def test_charts_render_the_chart_timer_guard():
+def test_charts_run_the_chart_timer_guard():
     steps = _jobs()["charts"]["steps"]
     assert steps[-1]["run"] == "python tests/ci_charts/chart_timers.py"
     assert (_ROOT / "tests/ci_charts/chart_timers.py").is_file()
@@ -78,5 +78,4 @@ def test_wrapper_holds_only_read_permission():
 
 def test_charts_is_the_only_wrapper_job_on_a_runner_class():
     classes = json.loads((_ROOT / ".github/runner-classes.json").read_text())
-    assert classes["semgrep.yml/charts"] == "light"
-    assert "semgrep.yml/scan" not in classes
+    assert {key for key in classes if key.startswith("semgrep.yml/")} == {"semgrep.yml/charts"}
