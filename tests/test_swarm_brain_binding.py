@@ -37,6 +37,15 @@ RELOADED = (
     "AMYGDALA_SIGNAL_PATH",
     "_ENV_FINGERPRINT",
 )
+BRAIN_KEYS = (
+    "BRAIN_URL",
+    "BRAIN_HTTP_TOKEN",
+    "KB_ROUTER_TOKEN",
+    "BRAIN_ENABLED",
+    "BRAIN_SOURCE_TYPE",
+    "BRAIN_WRITER_ENABLED",
+    "AGENTIHOOKS_SWARM_BRAIN",
+)
 REFUSED = {"status": "refused", "reason": "r"}
 BOUND = {
     "status": "bound",
@@ -90,6 +99,12 @@ def _environ(tmp_path, **extra):
     return {"HOME": str(tmp_path), "AGENTIHOOKS_HOME": str(tmp_path / ".agentihooks"), **CREDENTIALS, **extra}
 
 
+def _absent(monkeypatch, *keys):
+    for key in keys:
+        monkeypatch.setenv(key, "")
+        monkeypatch.delenv(key)
+
+
 def _managed(binding: dict) -> dict:
     return {brain_binding.VARIABLE: json.dumps(binding)}
 
@@ -118,37 +133,59 @@ def test_a_cluster_launch_binds_service_dns_and_an_explicit_binding_path(tmp_pat
 
 
 def test_named_credential_references_replace_the_defaults(tmp_path):
-    credentials = _credentials(api__env="HIVE_BRAIN_API", mcp__env="HIVE_BRAIN_MCP")
+    credentials = _credentials(api__env="SWARM_BRAIN_HIVE_API", mcp__env="SWARM_BRAIN_HIVE_MCP")
     _binding(tmp_path / ".agentihooks", _document(credentials=credentials))
-    environ = {**_environ(tmp_path), "HIVE_BRAIN_API": "a", "HIVE_BRAIN_MCP": "b"}
+    environ = {**_environ(tmp_path), "SWARM_BRAIN_HIVE_API": "a", "SWARM_BRAIN_HIVE_MCP": "b"}
 
     bound = brain_binding.resolve(environ)
 
-    assert (bound["api_env"], bound["mcp_env"]) == ("HIVE_BRAIN_API", "HIVE_BRAIN_MCP")
+    assert (bound["api_env"], bound["mcp_env"]) == ("SWARM_BRAIN_HIVE_API", "SWARM_BRAIN_HIVE_MCP")
+
+
+def _origin_doc(api):
+    return _document(lan={"api": api, "mcp": MCP})
+
+
+def _credential_doc(**changes):
+    return _document(credentials=_credentials(**changes))
+
+
+UNAUTHORIZED = "is not an authorized brain origin"
+NOT_PLAIN = "is not a plain origin"
+MALFORMED = "the api credential header is malformed"
+NOT_SWARM = "credential reference must be a SWARM_BRAIN_ variable"
 
 
 @pytest.mark.parametrize(
     ("doc", "unset", "reason"),
     [
-        (_document(lan={"api": "http://brain.example.test", "mcp": MCP}), (), "is not an authorized brain origin"),
-        (_document(lan={"api": CLUSTER_API, "mcp": MCP}), (), "is not an authorized brain origin"),
-        (_document(lan={"api": "ftp://brain.example.test", "mcp": MCP}), (), "is not an authorized brain origin"),
-        (_document(lan={"api": "https://someone@brain.example.test", "mcp": MCP}), (), "is not a plain origin"),
-        (_document(lan={"api": API + "?audience=x", "mcp": MCP}), (), "is not a plain origin"),
-        (_document(lan={"api": API + "#x", "mcp": MCP}), (), "is not a plain origin"),
-        (_document(lan={"api": "https:///feed", "mcp": MCP}), (), "is not a plain origin"),
-        (_document(lan={"api": 7, "mcp": MCP}), (), "the binding names no endpoint"),
+        (_origin_doc("http://brain.example.test"), (), f"endpoint http://brain.example.test {UNAUTHORIZED}"),
+        (_origin_doc(CLUSTER_API), (), f"endpoint {CLUSTER_API} {UNAUTHORIZED}"),
+        (_origin_doc("ftp://brain.example.test"), (), f"endpoint ftp://brain.example.test {UNAUTHORIZED}"),
+        (
+            _origin_doc("https://someone@brain.example.test"),
+            (),
+            f"endpoint https://someone@brain.example.test {NOT_PLAIN}",
+        ),
+        (_origin_doc(API + "?audience=x"), (), f"endpoint {API} {NOT_PLAIN}"),
+        (_origin_doc(API + "#x"), (), f"endpoint {API} {NOT_PLAIN}"),
+        (_origin_doc("https:///feed"), (), f"endpoint https:// {NOT_PLAIN}"),
+        (_origin_doc(7), (), "the binding names no endpoint"),
         (_document(lan={"api": API, "mcp": API + "/mcp"}), (), "the API and MCP endpoints share one origin"),
         ({**_document(), "origins": {"cluster": {}}}, (), "the binding has no lan origins"),
         (_document(credentials={"mcp": {"header": "X-API-Key"}}), (), "the binding names no api credential"),
-        (_document(credentials=_credentials(api__header="Bad Header")), (), "the api credential header is malformed"),
-        (_document(credentials=_credentials(api__header=3)), (), "the api credential header is malformed"),
-        (_document(credentials=_credentials(api__scheme=3)), (), "the api credential header is malformed"),
-        (_document(credentials=_credentials(mcp__env="BRAIN_HTTP_TOKEN")), (), "must be a swarm variable"),
-        (_document(credentials=_credentials(api__env="KB_ROUTER_TOKEN")), (), "must be a swarm variable"),
-        (_document(credentials=_credentials(api__env="lower")), (), "must be a swarm variable"),
-        (_document(credentials=_credentials(api__header="X-API-Key")), (), "an Authorization Bearer token"),
-        (_document(credentials=_credentials(api__scheme="Token")), (), "an Authorization Bearer token"),
+        (_credential_doc(api__header="Bad Header"), (), MALFORMED),
+        (_credential_doc(api__header=3), (), MALFORMED),
+        (_credential_doc(api__scheme=3), (), MALFORMED),
+        (_credential_doc(api__scheme="Bearer evil"), (), MALFORMED),
+        (_credential_doc(mcp__scheme="Token"), (), "the mcp credential header is malformed"),
+        (_credential_doc(mcp__env="BRAIN_HTTP_TOKEN"), (), f"the mcp {NOT_SWARM}"),
+        (_credential_doc(api__env="KB_ROUTER_TOKEN"), (), f"the api {NOT_SWARM}"),
+        (_credential_doc(api__env="ANTHROPIC_API_KEY"), (), f"the api {NOT_SWARM}"),
+        (_credential_doc(api__env="SWARM_BRAIN_"), (), f"the api {NOT_SWARM}"),
+        (_credential_doc(api__env=4), (), f"the api {NOT_SWARM}"),
+        (_credential_doc(api__header="X-API-Key"), (), "the API credential must be an Authorization Bearer token"),
+        (_credential_doc(api__scheme=""), (), "the API credential must be an Authorization Bearer token"),
         (_document(), ("SWARM_BRAIN_API_TOKEN",), "credential SWARM_BRAIN_API_TOKEN is unset"),
         (_document(), ("SWARM_BRAIN_MCP_KEY",), "credential SWARM_BRAIN_MCP_KEY is unset"),
         (
@@ -162,33 +199,30 @@ def test_an_unusable_binding_refuses_the_managed_brain(tmp_path, doc, unset, rea
     _binding(tmp_path / ".agentihooks", doc)
     environ = {k: v for k, v in _environ(tmp_path).items() if k not in unset}
 
-    decided = brain_binding.decide(environ)
-
-    assert decided["status"] == "refused"
-    assert reason in decided["reason"]
-    assert set(decided) == {"status", "reason"}
+    assert brain_binding.decide(environ) == {"status": "refused", "reason": reason}
 
 
 def test_a_binding_must_be_an_operator_owned_regular_file(tmp_path):
     home = tmp_path / ".agentihooks"
     path = home / "swarm" / "brain-binding.json"
-    assert brain_binding.decide(_environ(tmp_path)) == {
-        "status": "refused",
-        "reason": f"no swarm brain binding at {path}",
-    }
+
+    def refused(reason):
+        return brain_binding.decide(_environ(tmp_path)) == {"status": "refused", "reason": reason}
+
+    assert refused(f"no swarm brain binding at {path}")
     for mode in (0o620, 0o602):
         _binding(home, mode=mode)
-        assert "is not an operator owned file" in brain_binding.decide(_environ(tmp_path))["reason"]
+        assert refused(f"swarm brain binding {path} is not an operator owned file")
     real = _binding(tmp_path / "repo")
     path.unlink()
     path.symlink_to(real)
-    assert "is not an operator owned file" in brain_binding.decide(_environ(tmp_path))["reason"]
+    assert refused(f"swarm brain binding {path} is not an operator owned file")
     path.unlink()
     path.write_text("{not json")
     path.chmod(0o600)
-    assert "is not readable JSON" in brain_binding.decide(_environ(tmp_path))["reason"]
+    assert refused(f"swarm brain binding {path} is not readable JSON")
     path.write_text("[]")
-    assert "is not a JSON object" in brain_binding.decide(_environ(tmp_path))["reason"]
+    assert refused(f"swarm brain binding {path} is not a JSON object")
 
 
 def test_the_binding_path_defaults_below_home_without_an_agentihooks_home(tmp_path):
@@ -301,10 +335,7 @@ def test_the_credential_goes_only_to_the_bound_api_origin(tmp_path):
 def hook_env(tmp_path, monkeypatch):
     from hooks import config
 
-    for key in ("BRAIN_URL", "BRAIN_HTTP_TOKEN", "KB_ROUTER_TOKEN", "BRAIN_ENABLED", "BRAIN_SOURCE_TYPE"):
-        monkeypatch.delenv(key, raising=False)
-    monkeypatch.delenv("BRAIN_WRITER_ENABLED", raising=False)
-    monkeypatch.delenv(brain_binding.VARIABLE, raising=False)
+    _absent(monkeypatch, *BRAIN_KEYS)
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path / ".agentihooks"))
     monkeypatch.setenv("AGENTIBRAIN_HOME", str(tmp_path / ".agentibrain"))
@@ -393,7 +424,7 @@ def test_every_role_mounts_one_managed_brain_and_restores_the_overlay_without_it
     _brain_roles(world)
     monkeypatch.setenv("AGENTIHOOKS_MCP_URLS", json.dumps({"agentibrain": REPO_ENDPOINT + "/mcp"}))
     monkeypatch.setenv("SWARM_BRAIN_MCP_KEY", MCP_FIXTURE)
-    monkeypatch.delenv(brain_binding.VARIABLE, raising=False)
+    _absent(monkeypatch, brain_binding.VARIABLE)
 
     personal = _brains(_rendered(harness, role))
     monkeypatch.setenv(brain_binding.VARIABLE, json.dumps(BOUND))
@@ -425,7 +456,7 @@ def launch(monkeypatch, tmp_path):
     monkeypatch.setattr(init_agent.agent_choice, "choose", lambda requested, environ: (requested, "rotation"))
     monkeypatch.setattr(init_agent, "_handoff_exclude", lambda agent, environ: "")
     monkeypatch.setattr(binding, "continuation", lambda flags, agent, environ=None: flags)
-    monkeypatch.delenv(brain_binding.VARIABLE, raising=False)
+    _absent(monkeypatch, brain_binding.VARIABLE)
     seen = []
 
     def prepare(name, agent, model, effort, flags, environ, overlays=()):

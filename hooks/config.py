@@ -6,6 +6,7 @@ import sys
 from pathlib import Path
 
 from scripts import gh_config
+from scripts.swarm import brain_binding
 
 # A name outside this shape cannot be a shell variable, and a mistyped line can
 # put a secret in the name, so such a line is reported by position only.
@@ -155,9 +156,6 @@ _BRAIN_KEYS_FROM_KERNEL = (
 # let the brain's file start beating an agentihooks .env that also defines them.
 _BRAIN_FILE_OWNED: set[str] = set()
 
-# Set by a managed swarm launch: the session's brain comes only from the operator's swarm binding.
-_SWARM_BRAIN = "AGENTIHOOKS_SWARM_BRAIN"
-
 
 def _agentibrain_home() -> Path:
     """The brain's config directory. Mirrors AGENTIHOOKS_HOME's convention."""
@@ -192,7 +190,7 @@ def _load_brain_env(*, override_file_owned: bool = False) -> None:
     .env already set is left alone, so this is a default, not an override.
     """
     env_file = _brain_env_file()
-    if os.environ.get(_SWARM_BRAIN) or not env_file.is_file():
+    if os.environ.get(brain_binding.VARIABLE) or not env_file.is_file():
         return
     try:
         lines = env_file.read_text(encoding="utf-8").splitlines()
@@ -297,10 +295,8 @@ def _env_files_fingerprint() -> tuple:
 
 
 def _guard_swarm_brain() -> None:
-    if not os.environ.get(_SWARM_BRAIN):
+    if not os.environ.get(brain_binding.VARIABLE):
         return
-    from scripts.swarm import brain_binding
-
     os.environ["BRAIN_SOURCE_TYPE"] = "none"
     if not brain_binding.audience(os.environ):
         for key in ("BRAIN_URL", "BRAIN_HTTP_TOKEN", "KB_ROUTER_TOKEN"):

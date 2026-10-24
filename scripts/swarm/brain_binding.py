@@ -24,9 +24,9 @@ SERVER = "agentibrain"
 BOUND, REFUSED = "bound", "refused"
 KINDS = ("api", "mcp")
 REFERENCES = {"api": "SWARM_BRAIN_API_TOKEN", "mcp": "SWARM_BRAIN_MCP_KEY"}
-PERSONAL = frozenset({"BRAIN_URL", "BRAIN_HTTP_TOKEN", "KB_ROUTER_TOKEN"})
+SCHEMES = ("", "Bearer")
 CLUSTER_HOSTS = (".svc", ".svc.cluster.local")
-_NAME = re.compile(r"[A-Z_][A-Z0-9_]*")
+_NAME = re.compile(r"SWARM_BRAIN_[A-Z0-9_]+")
 _HEADER = re.compile(r"[A-Za-z0-9-]+")
 
 
@@ -84,10 +84,10 @@ def _credential(doc: dict, kind: str) -> dict:
         raise Refused(f"the binding names no {kind} credential")
     header, scheme = spec.get("header"), spec.get("scheme") or ""
     reference = spec.get("env") or REFERENCES[kind]
-    if not isinstance(header, str) or not _HEADER.fullmatch(header) or not isinstance(scheme, str):
+    if not isinstance(header, str) or not _HEADER.fullmatch(header) or scheme not in SCHEMES:
         raise Refused(f"the {kind} credential header is malformed")
-    if not isinstance(reference, str) or not _NAME.fullmatch(reference) or reference in PERSONAL:
-        raise Refused(f"the {kind} credential reference must be a swarm variable, not a personal brain one")
+    if not isinstance(reference, str) or not _NAME.fullmatch(reference):
+        raise Refused(f"the {kind} credential reference must be a SWARM_BRAIN_ variable")
     return {f"{kind}_header": header, f"{kind}_scheme": scheme, f"{kind}_env": reference}
 
 
