@@ -649,6 +649,13 @@ body.resizing-x { cursor: col-resize; user-select: none; }
 .lbl.live, .lbl.confirmed { color: var(--positive); }
 .lbl.idle, .lbl.waiting, .lbl.pending, .lbl.awaiting-decision, .lbl.unknown { color: var(--warn); }
 .lbl.stalled, .lbl.absent { color: var(--destructive); }
+.lbl.recoverable { color: var(--positive); }
+.lbl.context-only { color: var(--warn); }
+.lbl.fresh-only, .lbl.path-only { color: var(--destructive); }
+.sw-lines { display: flex; flex-direction: column; gap: 2px; max-width: 36ch; }
+#recovery-table td { vertical-align: top; }
+#recovery-table td:nth-child(4), #recovery-table td:nth-child(5) { color: var(--text-2); }
+.sw-lines > span { overflow: hidden; text-overflow: ellipsis; }
 .lbl.promoted { color: var(--warn); }
 .lbl.approved { color: var(--positive); }
 .lbl.awaiting-approval { color: var(--warn); }

@@ -471,7 +471,9 @@ def _codex_skills(bundle: Path | None, dirs: list[tuple[str, Path]], stamp: dict
     return below, plugins.layer_skills(_roots(bundle, dirs))
 
 
-def render_codex(name: str, force: bool = False, overlays: Sequence[str] = (), isolate: bool = False) -> Path | None:
+def render_codex(
+    name: str, force: bool = False, overlays: Sequence[str] = (), isolate: bool = False, push: bool = False
+) -> Path | None:
     import tomlkit
 
     from scripts.profiles import codex_master
@@ -493,6 +495,7 @@ def render_codex(name: str, force: bool = False, overlays: Sequence[str] = (), i
         "hooks": _file_digest(operator / "hooks.json"),
         "login": (operator / "auth.json").is_file(),
         "isolate": isolate,
+        **({"push": True} if push else {}),
         "skills": {skill: str(path) for skill, path in {**below, **above}.items()},
     }
     root = profile_dir(name, overlays)
@@ -520,7 +523,7 @@ def render_codex(name: str, force: bool = False, overlays: Sequence[str] = (), i
         agents = out / "AGENTS.md"
         if agents.is_symlink():
             agents.unlink()
-        _atomic_write(agents, codex_master.persona((claude / "CLAUDE.md").read_text()))
+        _atomic_write(agents, codex_master.persona((claude / "CLAUDE.md").read_text(), push))
     else:
         _link(out / "AGENTS.md", claude / "CLAUDE.md")
     _relink(out / "skills", {**below, **{p.name: p for p in sorted((claude / "skills").iterdir())}, **above})
@@ -592,11 +595,12 @@ def render(
     overlays: Sequence[str] = (),
     bundle_revision: str = "",
     isolate: bool = False,
+    push: bool = False,
 ) -> Path | None:
     renderers = {"claude": render_claude, "codex": render_codex, "copilot": render_copilot}
     if target not in renderers:
         raise ValueError(f"{target} per-run profiles are not supported")
-    options = {"isolate": isolate} if target == "codex" else {}
+    options = {"isolate": isolate, "push": push} if target == "codex" else {}
     if bundle_revision:
         with bundle_copy.recorded(_bundle(), bundle_revision, rendered_root()):
             return renderers[target](name, force=force, overlays=overlays, **options)
