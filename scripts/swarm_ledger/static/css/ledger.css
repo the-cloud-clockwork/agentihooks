@@ -806,6 +806,8 @@ html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
   .title-pen, .logo-link, .prio-link { position: relative; }
   .title-pen::after, .logo-link::after { content: ""; position: absolute; inset: -10px; }
   .prio-link::after { content: ""; position: absolute; inset: -10px -4px; }
+  .prio-title { position: relative; }
+  .prio-title::after { content: ""; position: absolute; inset: -12px -4px; }
   .jump-menu select { min-height: 44px; }
   .sw-gate .sw-mode, .sw-ovl-row .sw-mode, .sw-num, .hl-pick, .add { min-height: 32px; }
   .sw-btn.sw-icon { min-width: 32px; min-height: 32px; justify-content: center; }
@@ -815,7 +817,7 @@ html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
   .sw-btn.sw-step { min-width: 44px; min-height: 44px; }
   .sw-num { min-width: 44px; min-height: 44px; text-align: center; }
   .overview-head .title-pen::after { inset: -14px; }
-  .sw-doctor a { display: inline-block; padding-block: 10px; }
+  .sw-doctor a { display: inline-block; padding-block: 13px; }
   .sw-gate .sw-mode { min-width: 44px; min-height: 44px; }
   .sw-cap.sw-gate { gap: 12px; }
   .prio > .link { min-width: 44px; }
@@ -823,7 +825,7 @@ html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
   details > summary, .freeze, .scope { min-height: 44px; }
   .sw-fold > summary.sw-blockhead { align-items: center; }
   input[type=checkbox] { width: 24px; height: 24px; }
-  .outline a { padding-block: 10px; }
+  .outline a { padding-block: 13px; }
   #agents-table a, #swarm-agents a { display: inline-block; padding-block: 8px; }
   .title-pen, .logo-link { min-width: 32px; min-height: 32px; place-content: center; }
   #jump-to { min-width: 216px; }
