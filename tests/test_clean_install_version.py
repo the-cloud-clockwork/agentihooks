@@ -10,6 +10,8 @@ from uv import find_uv_bin
 
 REPO = Path(__file__).resolve().parents[1]
 WHEEL_VERSION = "0.0.0.dev4242"
+# Other workers write into the checkout while the suite runs, so the build copies only what the wheel reads.
+WHEEL_INPUTS = ("pyproject.toml", "README.md", "LICENSE", "hooks", "scripts", "profiles")
 
 
 def _run(cmd, **kwargs):
@@ -20,20 +22,14 @@ def _run(cmd, **kwargs):
 
 def _tagged_wheel(tmp_path):
     src = tmp_path / "src"
-    ignore = shutil.ignore_patterns(
-        ".git",
-        ".venv",
-        "mutants",
-        ".mutation-gate",
-        "__pycache__",
-        ".pytest_cache",
-        "dist",
-        "build",
-        "*.egg-info",
-        ".coverage",
-        ".coverage.*",
-    )
-    shutil.copytree(REPO, src, ignore=ignore)
+    src.mkdir(parents=True)
+    ignore = shutil.ignore_patterns("__pycache__", "*.egg-info")
+    for name in WHEEL_INPUTS:
+        path = REPO / name
+        if path.is_dir():
+            shutil.copytree(path, src / name, ignore=ignore)
+        elif path.is_file():
+            shutil.copy2(path, src / name)
     pyproject = src / "pyproject.toml"
     text = pyproject.read_text()
     current = next((line for line in text.splitlines() if line.startswith("version = ")), None)
