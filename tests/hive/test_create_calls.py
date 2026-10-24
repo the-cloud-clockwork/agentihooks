@@ -208,6 +208,57 @@ def test_a_pull_request_that_never_merges_times_out_naming_it(world):
         create.create(world.tools, create.Options(timeout_s=0))
 
 
+ROLLUP = ["gh", "pr", "view", PR, "--json", "statusCheckRollup"]
+STATE = ["gh", "pr", "view", PR, "--json", "state", "--jq", ".state"]
+AUTO_REFUSED = "GraphQL: Auto merge is not allowed for this repository (enablePullRequestAutoMerge)"
+
+
+def _merge_calls(run):
+    return [argv for argv in run.calls if argv[:2] == ["gh", "pr"] and argv[2] in ("view", "merge")]
+
+
+def test_a_refused_auto_merge_waits_for_checks_then_squash_merges(world):
+    world.run.merge_error = AUTO_REFUSED
+    world.run.checks = [
+        [{"__typename": "CheckRun", "name": "Gate", "status": "QUEUED", "conclusion": ""}],
+        [{"__typename": "CheckRun", "name": "Gate", "status": "COMPLETED", "conclusion": "SUCCESS"}],
+    ]
+    create.create(world.tools, create.Options(timeout_s=60))
+
+    assert _merge_calls(world.run) == [
+        STATE,
+        ["gh", "pr", "merge", PR, "--squash", "--auto"],
+        ROLLUP,
+        ROLLUP,
+        ["gh", "pr", "merge", PR, "--squash"],
+        STATE,
+    ]
+    assert world.sleeps[0] == create.POLL_S
+    assert f"hive create {NAME}: merge: merged {PR}" in world.lines
+
+
+def test_a_failed_check_stops_the_create_without_merging(world):
+    world.run.merge_error = AUTO_REFUSED
+    world.run.checks = [[{"__typename": "StatusContext", "context": "Gate", "state": "FAILURE"}]]
+    with pytest.raises(auth.HiveError, match=f"pull request {PR} has failed checks: Gate;"):
+        create.create(world.tools, create.Options(timeout_s=60))
+    assert ["gh", "pr", "merge", PR, "--squash"] not in world.run.calls
+
+
+def test_checks_that_never_pass_time_out_naming_them(world):
+    world.run.merge_error = AUTO_REFUSED
+    world.run.checks = [[]]
+    with pytest.raises(auth.HiveError, match=f"waiting for pull request {PR} checks to pass; rerun hive create"):
+        create.create(world.tools, create.Options(timeout_s=0))
+
+
+def test_a_merge_error_other_than_the_auto_merge_refusal_stops_the_create(world):
+    world.run.merge_error = "Pull request is not mergeable"
+    with pytest.raises(auth.HiveError, match="gh pr merge exited 1: Pull request is not mergeable"):
+        create.create(world.tools, create.Options(timeout_s=60))
+    assert ROLLUP not in world.run.calls
+
+
 def test_a_stale_heartbeat_is_not_live(world):
     world.run.on_merge = lambda: world.beat(NOW * 1000 - registry.LIVE_MS - 1)
     with pytest.raises(auth.HiveError, match="waiting for hive .* to send a heartbeat"):
