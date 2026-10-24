@@ -1309,7 +1309,7 @@ def test_hive_sessions_force_a_full_account_to_fall_back_to_one_with_room(setup,
     monkeypatch.setattr("scripts.routing.aggregate.enabled", lambda: False)
     monkeypatch.setattr("scripts.swarm.commands.hive_id", lambda: "local")
     setup.herdr._quota_accounts = [
-        Account("claude", "full_on_hives", "room", 0, 80, 80, 6),
+        Account("claude", "full_on_hives", "room", 6, 80, 80, 6),
         Account("claude", "account", "room", 1, 80, 80, 6),
     ]
     write_hive(
@@ -1335,10 +1335,10 @@ def test_full_hive_accounts_report_local_and_remote_session_counts(setup, monkey
     monkeypatch.setattr("scripts.routing.aggregate.enabled", lambda: False)
     monkeypatch.setattr("scripts.swarm.commands.hive_id", lambda: "local")
     setup.herdr._quota_accounts = [
-        Account("claude", "account", "room", 2, 80, 80, 6),
+        Account("claude", "account", "room", 6, 80, 80, 6),
         Account("codex", "other", "room", 0, 80, 80, 6),
-        Account("claude", "second", "room", 3, 80, 80, 4),
-        Account("claude", "third", "room", 1, 80, 80, 2),
+        Account("claude", "second", "room", 4, 80, 80, 4),
+        Account("claude", "third", "room", 2, 80, 80, 2),
     ]
     setup.store.redis.set(
         f"{registry.key('remote')}:sessions", '{"claude:account": 4, "claude:second": 1, "claude:third": 1}'
@@ -1349,11 +1349,23 @@ def test_full_hive_accounts_report_local_and_remote_session_counts(setup, monkey
 
     assert isinstance(result, placement.Wait)
     assert result.reason == (
-        "no Claude account has room after hive sessions: account 2 here and 4 on hives of 6, "
-        "second 3 here and 1 on hives of 4, third 1 here and 1 on hives of 2"
-        + ("; pinned to account" if account else "")
+        "no Claude account has room after hive sessions: account 6 sessions of 6, "
+        "second 4 sessions of 4, third 2 sessions of 2" + ("; pinned to account" if account else "")
     )
     assert result.role == "eng"
+
+
+def test_launch_counts_remote_sessions_already_in_capacity_once(setup, monkeypatch):
+    from scripts.hive import registry
+    from scripts.swarm.capacity import Account
+
+    monkeypatch.setattr("scripts.routing.aggregate.enabled", lambda: False)
+    monkeypatch.setattr("scripts.swarm.commands.hive_id", lambda: "local")
+    setup.herdr._quota_accounts = [Account("claude", "account", "room", 5, 80, 80, 6)]
+    write_hive(setup, max_agents=10)
+    setup.store.redis.set(f"{registry.key('remote')}:sessions", '{"claude:account": 4}')
+
+    assert setup.launcher.select(setup.config, "eng", {"id": "task"}).account.name == "account"
 
 
 def test_account_selection_orders_room_by_usage_then_name(setup):
@@ -1372,7 +1384,7 @@ def test_account_selection_orders_room_by_usage_then_name(setup):
 
 @pytest.mark.parametrize(
     ("row", "seats"),
-    [(("codex", 0, 6), ""), (("claude", 6, 6), "account 6 here and 0 on hives of 6")],
+    [(("codex", 0, 6), ""), (("claude", 6, 6), "account 6 sessions of 6")],
 )
 def test_non_claude_and_full_accounts_cannot_place_a_worker(setup, row, seats):
     from scripts.hive.placement import Wait

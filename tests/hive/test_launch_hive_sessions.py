@@ -18,9 +18,13 @@ def _rows():
 
 
 def test_an_account_the_hives_already_fill_has_no_open_seat():
-    hived = {"full-on-hives": 6, "room-left": 5}
+    from dataclasses import replace
 
-    assert [row.name for row in launch._open_claude_rows(_rows(), hived)] == ["room_left", "last_seat"]
+    rows = _rows()
+    rows[0] = replace(rows[0], sessions=6)
+    rows[1] = replace(rows[1], sessions=5)
+
+    assert [row.name for row in launch._open_claude_rows(rows)] == ["room_left", "last_seat"]
 
 
 def test_an_outright_account_beats_an_earlier_fallback_and_the_first_fallback_is_kept():
@@ -45,6 +49,7 @@ def test_an_outright_account_beats_an_earlier_fallback_and_the_first_fallback_is
 def test_hive_sessions_count_each_remote_hive_once_and_skip_this_machine(monkeypatch):
     import fakeredis
 
+    from hooks.context.account_sessions import hive_held
     from scripts.hive import registry
 
     redis = fakeredis.FakeRedis(decode_responses=True)
@@ -62,19 +67,22 @@ def test_hive_sessions_count_each_remote_hive_once_and_skip_this_machine(monkeyp
     monkeypatch.setattr(registry, "live", lambda hive, now: hive["id"] != "stale")
     monkeypatch.setattr("scripts.swarm.commands.hive_id", lambda: "local")
 
-    assert launch._hive_sessions(redis, 0) == {"full-on-hives": 8, "room-left": 1, "account:label": 3}
+    monkeypatch.setattr("scripts.swarm.store.redis_client", lambda: redis)
+
+    assert hive_held("claude") == {"full_on_hives": 8, "room_left": 1, "account:label": 3, "": 99}
 
 
 def test_an_aggregated_router_counts_hive_sessions_once(monkeypatch):
     monkeypatch.setattr("scripts.routing.aggregate.enabled", lambda: True)
     monkeypatch.setattr("scripts.hive.registry.hives", lambda redis: (_ for _ in ()).throw(AssertionError))
 
-    assert launch._hive_sessions(None, 0) == {}
+    assert [row.name for row in launch._open_claude_rows(_rows())] == ["full_on_hives", "room_left", "last_seat"]
 
 
 def test_hive_sessions_count_launch_reservations_no_hive_reports_yet(monkeypatch):
     import fakeredis
 
+    from hooks.context.account_sessions import hive_held
     from scripts.hive import registry
     from scripts.swarm.keyspace import ROOT
 
@@ -105,4 +113,6 @@ def test_hive_sessions_count_launch_reservations_no_hive_reports_yet(monkeypatch
     monkeypatch.setattr(registry, "live", lambda hive, now: True)
     monkeypatch.setattr("scripts.swarm.commands.hive_id", lambda: "local")
 
-    assert launch._hive_sessions(redis, 0) == {"room-left": 2, "full-on-hives": 1}
+    monkeypatch.setattr("scripts.swarm.store.redis_client", lambda: redis)
+
+    assert hive_held("claude") == {"room_left": 2, "full_on_hives": 1}
