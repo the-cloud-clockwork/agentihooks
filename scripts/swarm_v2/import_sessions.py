@@ -10,19 +10,13 @@ from hooks.memory.importer import ImportLedger, ImportPlan, SourceRoot, import_s
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="python -m scripts.swarm_v2.import_sessions", description=__doc__)
-    parser.add_argument("--catalog", required=True, help="session catalog SQLite file")
-    parser.add_argument("--imports", required=True, help="import ledger SQLite file")
-    parser.add_argument("--corpus", required=True, help="corpus every root is approved for")
-    parser.add_argument("--principal", required=True)
-    parser.add_argument("--project", action="append", default=[], help="granted project id")
-    parser.add_argument("--root", action="append", default=[], help="PROVIDER:INSTALLATION:FOLDER")
-    parser.add_argument("--alias", action="append", default=[], help="ABSOLUTE_FOLDER=PROJECT")
-    parser.add_argument("--expected", action="append", default=[], help="PROVIDER:INSTALLATION:RELATIVE_PATH")
+    parser = argparse.ArgumentParser()
+    for name in ("--catalog", "--imports", "--corpus", "--principal"):
+        parser.add_argument(name, required=True)
+    for name in ("--project", "--root", "--alias", "--expected"):
+        parser.add_argument(name, action="append", default=[])
     parser.add_argument("--dry-run", action="store_true")
-    parser.add_argument(
-        "--retire", metavar="EXPORT", help="write a full export there, then remove the import projections"
-    )
+    parser.add_argument("--retire")
     return parser
 
 

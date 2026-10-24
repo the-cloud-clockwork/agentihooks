@@ -13,7 +13,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
-from hooks.memory.api.ingest import SCHEMA_VERSION, Grant, digest, ingest
+from hooks.memory.api.ingest import SCHEMA_VERSION, Grant, canonical, digest, ingest
 from hooks.memory.catalog import Catalog
 from hooks.memory.records import TurnState, normalize_entries
 
@@ -80,7 +80,7 @@ def resolve_project(cwd: object, aliases: Mapping[str, str]) -> str | None:
     if not isinstance(cwd, str) or not _absolute(cwd):
         return None
     matches = [folder for folder in aliases if PurePosixPath(cwd).is_relative_to(folder)]
-    return aliases[max(matches, key=len)] if matches else None
+    return aliases[max(matches)] if matches else None
 
 
 def _observed(provider: str, entry: dict) -> tuple[object, object, object]:
@@ -237,7 +237,7 @@ class ImportLedger:
             for session in self.sessions(domain, current=True)
             for event in catalog.events(domain, session["session_uid"], session["source_generation"])
             if event["project_id"] is None or event["project_id"] in grant.projects
-            if needle in " ".join(str(event["record"][key]) for key in SEARCHED if key in event["record"]).casefold()
+            if any(needle in str(event["record"][key]).casefold() for key in SEARCHED if key in event["record"])
         ]
 
     def export(self, catalog: Catalog, domain: str) -> dict:
@@ -266,20 +266,20 @@ class ImportLedger:
     def _retire(self, catalog: Catalog, domain: str, destination: Path) -> dict:
         current = self.export(catalog, domain)
         try:
-            _write_durably(destination, json.dumps(current, ensure_ascii=False, sort_keys=True))
+            _write_durably(destination, canonical(current))
         except FileExistsError:
             return {"state": "rejected", "error": {"class": "export_exists", "detail": EXISTS}}
-        if digest(json.loads(destination.read_text(encoding="utf-8"))["records"]) != current["digest"]:
+        if digest(json.loads(destination.read_bytes())["records"]) != current["digest"]:
             return {"state": "rejected", "error": {"class": "export_mismatch", "detail": MISMATCH}}
         self.db.execute(RETIRE, (domain,))
         manifest = {key: current[key] for key in ("digest", "sessions", "events")}
         return {"state": "retired", "catalog_events_kept": current["events"], "export": manifest}
 
 
-def _write_durably(destination: Path, text: str) -> None:
+def _write_durably(destination: Path, data: bytes) -> None:
     destination.parent.mkdir(parents=True, exist_ok=True)
-    with open(destination, "x", encoding="utf-8") as handle:
-        handle.write(text)
+    with open(destination, "xb") as handle:
+        handle.write(data)
         handle.flush()
         os.fsync(handle.fileno())
     folder = os.open(destination.parent, os.O_RDONLY)
@@ -389,6 +389,7 @@ def import_sessions(
         "state": "completed",
         "dry_run": dry_run,
         "importer_version": IMPORTER_VERSION,
+        "principal": grant.principal,
         "sources": [],
         "missing_roots": [],
         "missing_sources": [],

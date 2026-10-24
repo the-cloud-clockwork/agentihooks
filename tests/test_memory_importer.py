@@ -364,6 +364,14 @@ def test_a_source_that_vanishes_before_it_is_read_is_reported_missing(stores, tm
     ]
 
 
+def test_the_import_ledger_creates_its_folder_and_reopens(tmp_path):
+    path = tmp_path / "a/b/imports.sqlite3"
+    ImportLedger(path).close()
+    reopened = ImportLedger(path)
+    assert reopened.snapshot() == []
+    reopened.close()
+
+
 def test_discovery_walks_nested_transcripts_in_order_and_skips_other_files(tmp_path):
     for name in ("b/2.jsonl", "a/sub/1.jsonl", "a/notes.txt", "c.jsonl"):
         (tmp_path / name).parent.mkdir(parents=True, exist_ok=True)
@@ -490,7 +498,7 @@ def test_retire_writes_a_full_export_first_and_removes_only_import_projections(s
     catalog, imports = stores
     expected = imports.export(catalog, "corpus-a")
     events = catalog.snapshot()["session_event"]
-    destination = tmp_path / "rollback/export.json"
+    destination = tmp_path / "rollback/deep/export.json"
     assert imports.retire(catalog, "corpus-a", destination) == {
         "state": "retired",
         "catalog_events_kept": 2,
@@ -531,7 +539,7 @@ def test_retire_refuses_an_existing_destination_and_a_mismatched_written_export(
         "error": {"class": "export_exists", "detail": "the export destination already exists; nothing was retired"},
     }
     assert taken.read_text() == "keep"
-    monkeypatch.setattr(Path, "read_text", lambda self, encoding=None: '{"records": []}')
+    monkeypatch.setattr(Path, "read_bytes", lambda self: b'{"records": []}')
     assert imports.retire(catalog, "corpus-a", tmp_path / "fresh.json") == {
         "state": "rejected",
         "error": {
@@ -551,33 +559,62 @@ def test_import_ledgers_keep_access_domains_apart(stores, tmp_path):
     assert imports.sessions("corpus-b") == [] and imports.unknown_attribution("corpus-b") == 0
 
 
-def test_the_cli_imports_explicit_roots_and_prints_the_report(tmp_path, capsys):
-    folder = tmp_path / "claude"
-    (folder / "p").mkdir(parents=True)
-    (folder / "p/s-1.jsonl").write_bytes(claude("one"))
-    args = [
+def cli_args(tmp_path, folder):
+    return [
         "--catalog", str(tmp_path / "c.sqlite3"),
         "--imports", str(tmp_path / "i.sqlite3"),
         "--corpus", "corpus-a",
         "--principal", "operator",
         "--project", PROJECT,
+        "--project", "p=q",
         "--root", f"claude:host-a:{folder}",
         "--alias", f"/work/app={PROJECT}",
+        "--alias", "/work/lib=p=q",
         "--expected", "claude:host-a:p/lost.jsonl",
     ]  # fmt: skip
+
+
+def printed(capsys):
+    out = capsys.readouterr().out
+    report = json.loads(out)
+    assert out == json.dumps(report, indent=2, ensure_ascii=False) + "\n"
+    return report
+
+
+def test_the_cli_imports_explicit_roots_and_prints_the_report(tmp_path, capsys):
+    folder = tmp_path / "claude:roots"
+    (folder / "p").mkdir(parents=True)
+    (folder / "p/sé-1.jsonl").write_bytes(claude("one") + claude("two", cwd="/work/lib"))
+    args = cli_args(tmp_path, folder)
     assert cli.main([*args, "--dry-run"]) == 0
-    assert only(json.loads(capsys.readouterr().out))["outcome"] == "would_import"
+    assert only(printed(capsys))["outcome"] == "would_import"
     assert cli.main(args) == 0
-    report = json.loads(capsys.readouterr().out)
-    assert only(report)["outcome"] == "committed"
-    assert report["missing_sources"][0]["relative_path"] == "p/lost.jsonl"
+    report = printed(capsys)
+    assert report["principal"] == "operator"
+    assert {key: only(report)[key] for key in ("provider", "installation", "relative_path", "outcome")} == {
+        "provider": "claude",
+        "installation": "host-a",
+        "relative_path": "p/sé-1.jsonl",
+        "outcome": "committed",
+    }
+    assert report["missing_sources"] == [
+        {
+            "provider": "claude",
+            "installation": "host-a",
+            "relative_path": "p/lost.jsonl",
+            "reason": "expected source is absent",
+        }
+    ]
+    imports = ImportLedger(tmp_path / "i.sqlite3")
+    assert imports.sessions("corpus-a")[0]["provenance"]["projects"] == [PROJECT, "p=q"]
+    imports.close()
     assert cli.main([*args[:-4], "--alias", f"app={PROJECT}"]) == 2
-    assert json.loads(capsys.readouterr().out)["error"]["class"] == "invalid_plan"
+    assert printed(capsys)["error"]["class"] == "invalid_plan"
     retire = [*args[:8], "--retire", str(tmp_path / "export.json")]
     assert cli.main(retire) == 0
-    assert json.loads(capsys.readouterr().out)["export"]["sessions"] == 1
+    assert printed(capsys)["export"]["sessions"] == 1
     assert cli.main(retire) == 2
-    assert json.loads(capsys.readouterr().out)["error"]["class"] == "export_exists"
+    assert printed(capsys)["error"]["class"] == "export_exists"
 
 
 def test_the_cli_exits_two_when_a_source_is_refused(tmp_path, capsys, monkeypatch):
@@ -591,24 +628,47 @@ def test_the_cli_exits_two_when_a_source_is_refused(tmp_path, capsys, monkeypatc
     monkeypatch.setattr(Catalog, "commit", unavailable)
     base = ["--catalog", str(tmp_path / "c"), "--imports", str(tmp_path / "i"), "--corpus", "corpus-a"]
     assert cli.main([*base, "--principal", "p", "--root", f"claude:h:{folder}"]) == 2
-    assert only(json.loads(capsys.readouterr().out))["outcome"] == "refused"
+    assert only(printed(capsys))["outcome"] == "refused"
 
 
 @pytest.mark.parametrize(
-    "bad",
+    ("bad", "message"),
     [
-        ["--root", "claude:host-a"],
-        ["--alias", "noequals"],
-        ["--expected", "claude:x"],
-        ["--retire", "export.json"],
-        ["--retire", "export.json", "--dry-run"],
+        (["--root", "claude:host-a"], "--root must be PROVIDER:INSTALLATION:PATH"),
+        (["--root", "claude::folder"], "--root must be PROVIDER:INSTALLATION:PATH"),
+        (["--expected", "claude:x"], "--expected must be PROVIDER:INSTALLATION:PATH"),
+        (["--expected", "codex:h:lost.jsonl"], "--expected names a root that no --root declares"),
+        (["--expected", "claude:other:lost.jsonl"], "--expected names a root that no --root declares"),
+        (["--alias", "noequals"], "--alias must be FOLDER=PROJECT"),
+        (["--alias", "=project"], "--alias must be FOLDER=PROJECT"),
+        (["--alias", "/folder="], "--alias must be FOLDER=PROJECT"),
+        (["--retire", "export.json"], "--retire takes no --dry-run or --root"),
     ],
 )
-def test_the_cli_refuses_malformed_arguments(tmp_path, bad):
+def test_the_cli_refuses_malformed_arguments(tmp_path, capsys, bad, message):
     base = ["--catalog", "c", "--imports", "i", "--corpus", "c", "--principal", "p", "--root", f"claude:h:{tmp_path}"]
     with pytest.raises(SystemExit) as raised:
         cli.main([*base, *bad])
     assert raised.value.code == 2
+    assert capsys.readouterr().err.splitlines()[-1].endswith(f"error: {message}")
+
+
+def test_the_cli_refuses_a_retire_with_a_dry_run(capsys):
+    with pytest.raises(SystemExit):
+        cli.main(
+            ["--catalog", "c", "--imports", "i", "--corpus", "c", "--principal", "p", "--retire", "e", "--dry-run"]
+        )
+    assert capsys.readouterr().err.splitlines()[-1].endswith("error: --retire takes no --dry-run or --root")
+
+
+@pytest.mark.parametrize("missing", ["--catalog", "--imports", "--corpus", "--principal"])
+def test_the_cli_requires_its_stores_corpus_and_principal(missing, capsys):
+    values = {"--catalog": "c", "--imports": "i", "--corpus": "k", "--principal": "p"}
+    argv = [part for name, value in values.items() if name != missing for part in (name, value)]
+    with pytest.raises(SystemExit) as raised:
+        cli.main(argv)
+    assert raised.value.code == 2
+    assert missing in capsys.readouterr().err
 
 
 @pytest.mark.parametrize("case", ["a", "b", "c"])
