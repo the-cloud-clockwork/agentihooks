@@ -885,6 +885,7 @@ GitHub runs `workflow_run` workflows from the default branch, `main`. A change t
    - `The runner has received a shutdown signal`
    - `lost communication with the server`
    - `The job was not acquired by Runner`
+   - `The job log could not be read`, recorded when the job log API refuses the read, as it does for a shard lost before it uploaded a log
 
    One red shard beside a lost one refuses the requeue.
 4. The pull request number comes from the merge group branch, `gh-readonly-queue/<base>/pr-<number>-<sha>`.

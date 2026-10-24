@@ -13,7 +13,9 @@ RUNNER_LOSS = re.compile(
     r"The runner has received a shutdown signal"
     r"|lost communication with the server"
     r"|The job was not acquired by Runner"
+    r"|The job log could not be read"
 )
+UNREADABLE_LOG = "The job log could not be read"
 QUEUE_BRANCH = re.compile(r"^gh-readonly-queue/.+/pr-(\d+)-[0-9a-f]+$")
 EXIT_POLLS = 60
 EXIT_POLL_SECONDS = 30
@@ -68,7 +70,10 @@ def log_errors(repo: str, job_id: int) -> list[str]:
 def job_text(repo: str, job_id: int, log: bool) -> str:
     notes = [note["message"] for note in json.loads(_api(f"repos/{repo}/check-runs/{job_id}/annotations"))]
     if log:
-        notes += log_errors(repo, job_id)
+        try:
+            notes += log_errors(repo, job_id)
+        except subprocess.CalledProcessError:
+            notes.append(UNREADABLE_LOG)
     return "\n".join(notes)
 
 
