@@ -21,7 +21,7 @@ def _agentihooks(tmp_path: Path, pub: dict, sub: dict, body: str | None = None) 
     source.parent.mkdir(parents=True)
     for package in (root / "scripts", source.parent):
         (package / "__init__.py").write_text("")
-    source.write_text(body or f"def member_claims(user, member):\n    return {{'pub': {pub!r}, 'sub': {sub!r}}}\n")
+    source.write_text(body or f"def member_claims(user):\n    return {{'pub': {pub!r}, 'sub': {sub!r}}}\n")
     return root
 
 
@@ -199,11 +199,10 @@ def test_the_help_states_what_the_check_fails_on(capsys):
 
 
 def test_the_member_grants_render_the_minted_member_claims():
-    claims = nats_grant.member_claims(grants.MEMBER_KEY, member=grants.MEMBER_ID)
+    claims = nats_grant.member_claims(grants.MEMBER_KEY)
     rendered = grants.member_grants(str(ROOT))
     assert claims["sub"] == {"allow": [grants.MEMBER_INBOX]}
-    assert grants.MEMBER_SLOTS in claims["pub"]["allow"]
-    publish = frozenset({*nats_grant.MEMBER_PUBLISH, grants.SHARED_SLOTS})
+    publish = frozenset({*nats_grant.MEMBER_PUBLISH, "slots.*.*"})
     assert rendered["publish"] == {"allow": publish, "deny": frozenset()}
     assert rendered["subscribe"] == {"allow": frozenset({"_INBOX.>"}), "deny": frozenset()}
 
@@ -214,16 +213,6 @@ def test_the_member_reply_inbox_stands_for_the_shared_user_inbox(tmp_path, capsy
     assert _run(capsys, agentihooks, antoncore) == (
         0,
         ["The hive member NATS grants match antoncore: 2 publish and 1 subscribe subjects."],
-    )
-
-
-def test_the_member_slot_subject_stands_for_the_shared_user_slot_subjects(tmp_path, capsys):
-    antoncore = _antoncore(tmp_path, {"publish": {"allow": [*PUBLISH, "slots.*.*"]}, "subscribe": {"allow": SUBSCRIBE}})
-    own = {"allow": [*PUBLISH, "slots.*.MEMBER"]}
-    agentihooks = _agentihooks(tmp_path / "own", own, {"allow": SUBSCRIBE})
-    assert _run(capsys, agentihooks, antoncore) == (
-        0,
-        ["The hive member NATS grants match antoncore: 3 publish and 1 subscribe subjects."],
     )
 
 

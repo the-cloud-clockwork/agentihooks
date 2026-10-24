@@ -25,6 +25,8 @@ REVOKED = f"{auth.PREFIX}:nats-revoked"
 CLAIMS_UPDATE = "$SYS.REQ.CLAIMS.UPDATE"
 PUSH_TIMEOUT_S = 10
 UNLIMITED = {"subs": -1, "data": -1, "payload": -1}
+# The shared swarm-hive password user serves every hive, so the grant rendered for it names no one hive.
+ANY_HIVE = "*"
 ACCOUNT_LIMITS = {
     **UNLIMITED,
     "imports": -1,
@@ -158,14 +160,14 @@ def user_claims() -> dict:
     return {"type": "user", "version": 2, "pub": {}, "sub": {}, **UNLIMITED}
 
 
-def member_claims(user: str, swarms: tuple[str, ...] | None = None, *, member: str) -> dict:
+def member_claims(user: str, swarms: tuple[str, ...] | None = None, member: str = ANY_HIVE) -> dict:
     if swarms is None:
         return {
             **user_claims(),
             "pub": {"allow": [*MEMBER_PUBLISH, f"{subjects.SLOTS}.*.{member}"]},
             "sub": {"allow": [f"{subjects.inbox(user)}.>"]},
         }
-    publish = [subject for swarm in swarms for subject in (*swarm_publish(swarm), subjects.slot_request(swarm, member))]
+    publish = [subject for swarm in swarms for subject in (*swarm_publish(swarm), f"{subjects.SLOTS}.{swarm}.{member}")]
     return {
         **user_claims(),
         "pub": {"allow": publish} if publish else {"deny": [">"]},

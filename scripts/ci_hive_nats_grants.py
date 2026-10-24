@@ -8,14 +8,10 @@ import yaml
 
 MEMBER_SOURCE = "scripts/hive/nats_grant.py"
 MEMBER_KEY = "UMEMBER"
-MEMBER_ID = "MEMBER"
 RENDER_MEMBER = (
     "import json, sys; sys.path.insert(0, sys.argv[1]); from scripts.hive import nats_grant;"
-    f" print(json.dumps(nats_grant.member_claims({MEMBER_KEY!r}, member={MEMBER_ID!r})))"
+    f" print(json.dumps(nats_grant.member_claims({MEMBER_KEY!r})))"
 )
-# The shared swarm-hive password user serves every hive, so its slots.*.* stands for one member's own slot subject.
-MEMBER_SLOTS = f"slots.*.{MEMBER_ID}"
-SHARED_SLOTS = "slots.*.*"
 # The shared swarm-hive password user cannot carry a per member reply prefix, so its _INBOX.> stands for this one.
 MEMBER_INBOX = f"_INBOX.{MEMBER_KEY}.>"
 SHARED_INBOX = "_INBOX.>"
@@ -50,9 +46,7 @@ def member_grants(agentihooks: str) -> dict[str, dict[str, frozenset[str]]]:
     subscribe["allow"] = frozenset(
         SHARED_INBOX if subject == MEMBER_INBOX else subject for subject in subscribe["allow"]
     )
-    publish = _direction(claims.get("pub"))
-    publish["allow"] = frozenset(SHARED_SLOTS if subject == MEMBER_SLOTS else subject for subject in publish["allow"])
-    return {"publish": publish, "subscribe": subscribe}
+    return {"publish": _direction(claims.get("pub")), "subscribe": subscribe}
 
 
 def hive_grants(antoncore: Path) -> dict[str, dict[str, frozenset[str]]]:
