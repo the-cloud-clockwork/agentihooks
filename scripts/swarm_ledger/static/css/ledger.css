@@ -722,8 +722,11 @@ html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
   #main-content { transition: opacity .25s cubic-bezier(.4, 0, .2, 1); }
   body.stats-open #main-content { opacity: .35; }
   .stats-toggle { display: grid; place-content: center; position: fixed; z-index: 21; top: 50%; right: 0; width: 28px; height: 72px; padding: 0; border: 0;
-    border-radius: 8px 0 0 8px; background: var(--overlay); color: var(--accent); cursor: pointer; transform: translateY(-50%);
-    transition: right .25s cubic-bezier(.4, 0, .2, 1); }
+    border-radius: 8px 0 0 8px; background: transparent; color: var(--accent); cursor: pointer; transform: translateY(-50%);
+    transition: right .25s cubic-bezier(.4, 0, .2, 1), background .15s; }
+  .stats-toggle:hover, .stats-toggle:focus-visible { background: var(--hover); }
+  .notif:not([hidden]) ~ .stats-toggle, .chat-panel:not([hidden]) ~ .stats-toggle { display: none; }
+  .chat-panel, .chat-panel.big { bottom: 88px; height: min(560px, calc(100dvh - 176px)); }
   .stats-toggle svg { width: 18px; height: 18px; transition: transform .25s cubic-bezier(.4, 0, .2, 1); }
   body.stats-open .stats-toggle { right: var(--drawer-w); }
   body.stats-open .stats-toggle svg { transform: rotate(180deg); }
@@ -742,7 +745,6 @@ html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
   .tabs .tab { flex: 1 1 0; min-height: 44px; white-space: nowrap; }
   header .status { flex: none; white-space: nowrap; }
   .workspace { padding: 12px 16px 16px; }
-  #main-content { padding-right: 0; }
   section { padding: 14px 12px; margin-bottom: var(--space-row); }
   .sw-row { padding: 12px; }
   .sw-head { gap: var(--space-tight); }
