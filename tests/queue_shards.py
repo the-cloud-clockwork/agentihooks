@@ -19,6 +19,7 @@ WORKERS = 4
 STEP_SECONDS = step_seconds("unit")
 STARTUP_SECONDS = 30
 SLOWDOWN = 1.15
+TARGET_SECONDS = 195
 MAX_SHARDS = 30
 
 
@@ -26,15 +27,16 @@ def matrix(root: Path, versions: dict[str, dict[str, float]], counts: dict[str, 
     files = discover_test_files(root)
     grouped = grouped_files(root, files)
     sizes = source_sizes(root, files)
+    target = min(TARGET_SECONDS, STEP_SECONDS / 2)
     result = []
     for version, durations in versions.items():
         count = counts[version] if counts else 12
         while True:
             predicted = _predicted(durations, count, grouped, sizes)
-            if counts or predicted < STEP_SECONDS / 2 or count == MAX_SHARDS:
+            if counts or predicted < target or count == MAX_SHARDS:
                 break
             count += 1
-        print(f"Python {version}: {count} queue shards, predicted slowest {predicted:.1f}s of {STEP_SECONDS / 2:.0f}s")
+        print(f"Python {version}: {count} queue shards, predicted slowest {predicted:.1f}s of {target:.0f}s")
         result.extend(
             {"python-version": version, "shard": shard, "total": count, "predicted_seconds": predicted}
             for shard in range(1, count + 1)
