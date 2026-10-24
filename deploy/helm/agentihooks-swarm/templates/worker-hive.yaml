@@ -1,6 +1,11 @@
 {{- define "swarm.workerHive" }}
 {{- $root := .root }}
 {{- $workers := .workers }}
+{{- range $swarm := ($workers.masterSwarms | default list) }}
+{{- if not (regexMatch "^[A-Za-z0-9][A-Za-z0-9._-]*$" (toString $swarm)) }}
+{{- fail "each workers.masterSwarms entry must be a swarm slug: letters, digits, dots, dashes or underscores" }}
+{{- end }}
+{{- end }}
 {{- $suffix := .suffix }}
 {{- $github := $workers.githubAuth }}
 {{- if not (has $github.mode (list "token" "app")) }}

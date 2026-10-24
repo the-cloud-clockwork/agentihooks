@@ -23,7 +23,12 @@
 {{- fail "controller.api.proof needs controller.api.swarm to name the proof swarm, proof-<code>-<task>-<n>" }}
 {{- end }}
 {{- end }}
+{{- $scratchNames := list }}
 {{- range $scratch := .Values.controller.scratchSwarms }}
+{{- if has $scratch.swarm $scratchNames }}
+{{- fail "controller.scratchSwarms lists a swarm more than once" }}
+{{- end }}
+{{- $scratchNames = append $scratchNames $scratch.swarm }}
 {{- if not (and $scratch.swarm $scratch.agent $scratch.task $scratch.repo) }}
 {{- fail "each controller.scratchSwarms entry needs swarm, agent, task and repo: the controller names its ledger from the agent and task" }}
 {{- end }}

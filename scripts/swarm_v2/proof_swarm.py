@@ -19,6 +19,7 @@ PROJECTS_ENV = "AGENTIHOOKS_LAUNCH_PROJECTS"
 SWARM_ENV = "AGENTIHOOKS_CONTROL_SWARM"
 MALFORMED = f"{PROOF_ENV} must be a JSON object naming an agent and a task"
 SCRATCH_ENV = "AGENTIHOOKS_CONTROL_SCRATCH_SWARMS"
+HOST_SWARMS_ENV = "AGENTIHOOKS_CONTROL_HOST_SWARMS"
 SCRATCH_FIELDS = ("swarm", "agent", "task", "repo")
 SCRATCH_MALFORMED = f"{SCRATCH_ENV} must be a JSON list of objects naming a proof swarm, an agent, a task and a repo"
 CONTENT = {
@@ -75,7 +76,10 @@ def reconcile(
         _configured(environ, slug, ledger, asked, require)
     for name, entry in listed.items():
         if name not in store.slugs():
-            lines.append(_create(environ, store, name, ledger, entry, entry["repo"]))
+            try:
+                lines.append(_create(environ, store, name, ledger, entry, entry["repo"]))
+            except SwarmError as error:
+                lines.append(f"controller: scratch swarm {name} is not created: {error}")
     return lines
 
 
@@ -96,7 +100,13 @@ def _scratch(environ: Mapping[str, str]) -> dict[str, dict]:
             raise SwarmError(SCRATCH_MALFORMED)
         if not naming.PROOF_RE.fullmatch(entry["swarm"]):
             raise SwarmError(SCRATCH_MALFORMED)
-    return {entry["swarm"]: entry for entry in entries}
+    listed = {entry["swarm"]: entry for entry in entries}
+    if len(listed) != len(entries):
+        raise SwarmError(f"{SCRATCH_ENV} lists a scratch swarm more than once")
+    hosted = sorted(set(listed) & {name.strip() for name in environ.get(HOST_SWARMS_ENV, "").split(",")})
+    if hosted:
+        raise SwarmError(f"{', '.join(hosted)} is ticked by its own host and may not be a scratch swarm")
+    return listed
 
 
 def _configured(
@@ -178,6 +188,8 @@ def _remove(
     if agents and require is not None:
         agents = _end(store, slug, agents, require)
     if agents:
+        if require is None:
+            store.update(slug, state="stopping")
         return f"controller: proof swarm {slug} has its ledger removed and waits for its agents to end"
     store.remove(slug)
     return f"controller: removed proof swarm {slug}"

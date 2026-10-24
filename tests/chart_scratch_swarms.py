@@ -15,6 +15,8 @@ REFUSED = [
         {"controller": {"scratchSwarms": [SCRATCH], "hostSwarms": [SCRATCH["swarm"]]}},
         "must not be in controller.hostSwarms",
     ),
+    ({"controller": {"scratchSwarms": [SCRATCH, SCRATCH]}}, "lists a swarm more than once"),
+    ({"workers": {"masterSwarms": ["a,b"]}}, "each workers.masterSwarms entry must be a swarm slug"),
 ]
 START = '"master-swarms=${HIVE_MASTER_SWARMS-}"'
 

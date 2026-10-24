@@ -65,12 +65,56 @@ def test_a_scratch_swarm_dropped_from_the_list_is_removed_and_the_live_swarm_kep
 def test_a_listed_scratch_swarm_whose_ledger_takes_another_name_is_refused(store):
     ledger = Ledger(named=OTHER_SCRATCH)
 
-    with pytest.raises(SwarmError) as refused:
-        proof_swarm.reconcile(scratch(ENTRY), store, "", ledger)
-
-    assert str(refused.value) == f"the proof ledger is named {OTHER_SCRATCH} but the controller serves {SCRATCH}"
+    assert proof_swarm.reconcile(scratch(ENTRY), store, "", ledger) == [
+        f"controller: scratch swarm {SCRATCH} is not created: "
+        f"the proof ledger is named {OTHER_SCRATCH} but the controller serves {SCRATCH}"
+    ]
     assert ledger.removed == [(OTHER_SCRATCH, scratch(ENTRY))]
     assert store.slugs() == []
+
+
+def test_a_binned_scratch_ledger_leaves_the_served_proof_and_later_entries_served(store):
+    later = {**ENTRY, "swarm": OTHER_SCRATCH}
+    ledger = Ledger(named=OTHER_SCRATCH, binned={SCRATCH})
+    environ = {**ENV, proof_swarm.SCRATCH_ENV: json.dumps([ENTRY, later])}
+    store.create(SwarmConfig(SLUG, PROJECT, 1, 0))
+
+    assert proof_swarm.reconcile(environ, store, SLUG, ledger) == [
+        f"controller: scratch swarm {SCRATCH} is not created: "
+        f"the proof ledger {SCRATCH} is in the bin: name a new proof or restore it",
+        f"controller: created proof swarm {OTHER_SCRATCH} with one engineer task",
+    ]
+    assert sorted(store.slugs()) == sorted([SLUG, OTHER_SCRATCH])
+
+
+def test_a_dropped_scratch_swarm_with_agents_is_stopped_until_they_end(store):
+    from scripts.swarm.store import AgentRecord
+
+    store.create(SwarmConfig(SCRATCH, PROJECT, 1, 0))
+    store.put_agent(SCRATCH, AgentRecord("master@323133-0001", "master", "seat"))
+
+    assert proof_swarm.reconcile(scratch(), store, "", Ledger(live={SCRATCH})) == [
+        f"controller: proof swarm {SCRATCH} has its ledger removed and waits for its agents to end"
+    ]
+    assert store.config(SCRATCH).state == "stopping"
+
+
+def test_a_scratch_swarm_listed_twice_is_refused(store):
+    with pytest.raises(SwarmError) as refused:
+        proof_swarm.reconcile(scratch(ENTRY, {**ENTRY, "task": "t2"}), store, "", Ledger())
+
+    assert str(refused.value) == f"{proof_swarm.SCRATCH_ENV} lists a scratch swarm more than once"
+
+
+def test_a_host_ticked_swarm_may_not_be_a_scratch_swarm(store):
+    environ = {**scratch(ENTRY), proof_swarm.HOST_SWARMS_ENV: f"{LIVE}, {SCRATCH}"}
+    ledger = Ledger()
+
+    with pytest.raises(SwarmError) as refused:
+        proof_swarm.reconcile(environ, store, "", ledger)
+
+    assert str(refused.value) == f"{SCRATCH} is ticked by its own host and may not be a scratch swarm"
+    assert (ledger.asked, store.slugs()) == ([], [])
 
 
 @pytest.mark.parametrize(
