@@ -1,9 +1,10 @@
-"""The one brain a managed swarm launch connects to, read from the operator's binding file and never from personal config.
+"""The one brain a managed swarm launch connects to, from the operator's binding file and never personal config.
 
 The binding file is the swarm-brain-binding document Anton publishes: an instance name, an API and an MCP origin per
 site, and for each the header, scheme and credential the client sends. That operator owned file is the authority for
-which origins are authorized; this module only refuses origins no brain client may use. A launch carries only the resolved origins and
-the names of the variables holding each credential, so no value is written to a launcher, a profile home or a record.
+which origins are authorized; this module only refuses origins no brain client may use. A launch carries only the
+resolved origins and the names of the variables holding each credential, so no value is written to a launcher, a
+profile home or a record.
 """
 
 from __future__ import annotations
@@ -91,8 +92,11 @@ def _credential(doc: dict, kind: str) -> dict:
     return {f"{kind}_header": header, f"{kind}_scheme": scheme, f"{kind}_env": reference}
 
 
-def resolve(environ: Mapping[str, str]) -> dict:
-    """The bound connection for this launch; Refused names why there is none."""
+def resolve(environ: Mapping[str, str], credentials: Mapping[str, str] | None = None) -> dict:
+    """The bound connection for this launch; Refused names why there is none.
+
+    ``credentials`` is where the credential variables must be set, when that is not ``environ`` itself.
+    """
     doc = _operator_file(path(environ))
     where = site(environ)
     origins = (doc.get("origins") or {}).get(where)
@@ -106,15 +110,16 @@ def resolve(environ: Mapping[str, str]) -> dict:
         bound.update(_credential(doc, kind))
     if (bound["api_header"].lower(), bound["api_scheme"]) != ("authorization", "Bearer"):
         raise Refused("the API credential must be an Authorization Bearer token")
-    unset = [bound[f"{kind}_env"] for kind in KINDS if not environ.get(bound[f"{kind}_env"])]
+    held = environ if credentials is None else credentials
+    unset = [bound[f"{kind}_env"] for kind in KINDS if not held.get(bound[f"{kind}_env"])]
     if unset:
         raise Refused(f"credential {', '.join(unset)} is unset")
     return bound
 
 
-def decide(environ: Mapping[str, str]) -> dict:
+def decide(environ: Mapping[str, str], credentials: Mapping[str, str] | None = None) -> dict:
     try:
-        return resolve(environ)
+        return resolve(environ, credentials)
     except Refused as exc:
         return {"status": REFUSED, "reason": str(exc)}
 

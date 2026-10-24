@@ -220,9 +220,9 @@ def _bind_brain(environ: dict[str, str]) -> None:
     os.environ.pop(brain_binding.VARIABLE, None)
     environ.pop(brain_binding.VARIABLE, None)
     if environ.get("AGENTIHOOKS_SWARM"):
-        environ[brain_binding.VARIABLE] = os.environ[brain_binding.VARIABLE] = json.dumps(
-            brain_binding.decide(environ), sort_keys=True
-        )
+        # A herdr pane gets credentials only from the env files its launcher sources.
+        decided = brain_binding.decide(environ, operator_env.values(environ))
+        environ[brain_binding.VARIABLE] = os.environ[brain_binding.VARIABLE] = json.dumps(decided, sort_keys=True)
 
 
 def _with_predecessor(environ: dict[str, str], handoff: bool) -> dict[str, str]:

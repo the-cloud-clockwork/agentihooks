@@ -468,10 +468,14 @@ def launch(monkeypatch, tmp_path):
     monkeypatch.setattr(select_profile, "prepare", prepare)
     _personal_files(tmp_path)
 
-    def run(role, harness, mode, swarm=True, **extra):
+    def run(role, harness, mode, swarm=True, filed=CREDENTIALS, **extra):
         runtime = tmp_path / "runtime"
+        _write(tmp_path / ".agentihooks" / "swarm-brain.env", "".join(f"{k}={v}\n" for k, v in filed.items()))
         environ = {
-            **_environ(tmp_path, XDG_RUNTIME_DIR=str(runtime), SHELL="/bin/bash"),
+            "HOME": str(tmp_path),
+            "AGENTIHOOKS_HOME": str(tmp_path / ".agentihooks"),
+            "XDG_RUNTIME_DIR": str(runtime),
+            "SHELL": "/bin/bash",
             "BRAIN_URL": PERSONAL,
             "BRAIN_HTTP_TOKEN": PERSONAL_FIXTURE,
             "AGENTIHOOKS_TARGET": harness,
@@ -512,10 +516,24 @@ def test_every_managed_launch_and_recycle_carries_one_bound_brain(launch, tmp_pa
 def test_a_managed_launch_without_a_token_refuses_the_brain_and_never_falls_back(launch, tmp_path, harness):
     _binding(tmp_path / ".agentihooks")
 
-    text, rendered = launch("engineer", harness, "launch", SWARM_BRAIN_API_TOKEN="")
+    filed = {"SWARM_BRAIN_MCP_KEY": MCP_FIXTURE}
+    text, rendered = launch("engineer", harness, "launch", filed=filed, SWARM_BRAIN_API_TOKEN="")
 
     assert json.loads(rendered) == {"status": "refused", "reason": "credential SWARM_BRAIN_API_TOKEN is unset"}
     assert "unset BRAIN_URL BRAIN_HTTP_TOKEN\n" in text and "export BRAIN_URL=" not in text
+
+
+def test_a_credential_only_in_the_launching_process_never_mounts_the_brain(launch, tmp_path):
+    _binding(tmp_path / ".agentihooks")
+
+    text, rendered = launch("engineer", "claude", "launch", filed={}, **CREDENTIALS)
+
+    assert json.loads(rendered) == {
+        "status": "refused",
+        "reason": "credential SWARM_BRAIN_API_TOKEN, SWARM_BRAIN_MCP_KEY is unset",
+    }
+    assert "export BRAIN_URL=" not in text
+    assert brain_binding.apply({"agentibrain": {"url": PERSONAL}}, _managed(json.loads(rendered))) == {}
 
 
 def test_a_managed_launch_to_an_arbitrary_endpoint_refuses_the_brain(launch, tmp_path):
