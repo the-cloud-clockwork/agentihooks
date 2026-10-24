@@ -644,7 +644,7 @@ class HerdrRuntime:
         if saved.get("model"):
             picked = model_pick.ModelPick(
                 saved["model"],
-                saved["effort"],
+                chosen.get("effort"),
                 source=saved.get("model_source", "handoff"),
                 confidence=saved.get("model_confidence"),
             )
@@ -661,7 +661,7 @@ class HerdrRuntime:
         else:
             picked = _lane_default(lane, agent, {} if quota_transfer else chosen, config)
         picked = replace(picked, model=_set(picked.model) or default_models.model(config, agent))
-        picked = replace(picked, effort=saved["effort"]) if saved else picked
+        picked = replace(picked, effort=saved["effort"]) if saved.get("effort") else picked
         mode = [] if lane != "plan" else PLAN_MODE if agent == "claude" else codex_plan_mode(environ)
         front = front_door.holds(config.slug, task.get("seat", ""))
         login = master_claude_login.enabled(config.slug, task.get("seat", ""), lane, agent)
