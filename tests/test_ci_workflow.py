@@ -747,8 +747,10 @@ def test_a_fork_split_waits_for_the_collection_instead_of_polling_without_a_toke
     assert fork["if"] == guard["if"].replace("token != ''", "token == ''")
     assert fork["uses"] == "./.github/actions/await-download"
     assert fork["with"] == {"name": upload["with"]["name"]}
-    assert steps.index(download) < steps.index(fork) < steps.index(
-        next(step for step in steps if step.get("name") == "Adopt latest dev durations")
+    assert (
+        steps.index(download)
+        < steps.index(fork)
+        < steps.index(next(step for step in steps if step.get("name") == "Adopt latest dev durations"))
     )
 
 
