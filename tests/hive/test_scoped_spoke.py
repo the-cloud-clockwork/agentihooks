@@ -80,6 +80,18 @@ def test_an_unscoped_join_grant_names_no_swarms(admin, signer):
     assert "bus_swarms" not in grant
 
 
+def test_a_scoped_grant_for_a_member_without_listed_swarms_names_none(monkeypatch, signer):
+    from dataclasses import replace
+
+    from scripts.hive import auth, server
+
+    monkeypatch.setattr(auth, "member_of", lambda redis, value: None)
+    monkeypatch.setattr(auth, "refresh", lambda redis, value, url: {"id": "new"})
+    grant = server._grant("refresh", None, "token", "redis://r", replace(signer, member_swarms={}))
+    assert grant["bus_scoped"] is True
+    assert grant["bus_swarms"] == []
+
+
 def test_the_join_env_lists_every_member_swarm_in_order():
     from scripts.hive import auth
 
