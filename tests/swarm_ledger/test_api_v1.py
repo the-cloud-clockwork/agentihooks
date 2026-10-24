@@ -1074,6 +1074,8 @@ def test_a_planner_publishes_a_plan_and_plan_read_prints_its_sliced_task(live, t
     ledger.cmd_task(ledger.build_parser().parse_args([*add, "--plan-slice", "two"]))
     assert json.loads(capsys.readouterr().out) == {"task": "t2", "added": "Two"}
     plan_id = ledger_plans.plan_id(file["id"])
+    status, stored = request(live, "GET", f"plans/{plan_id}")
+    assert (status, stored["data"]["artifact"]) == (200, url)
     status, stored = request(live, "GET", f"slices/{plan_id}.two")
     assert (status, stored["data"]["lines"]) == (200, "16-18")
     status, task = request(live, "GET", "tasks/t2")
