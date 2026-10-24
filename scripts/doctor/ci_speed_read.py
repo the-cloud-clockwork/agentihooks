@@ -169,9 +169,10 @@ def read(
             "unverified": unverified,
         }
     except FAILURES as exc:
+        error_type = RuntimeError if isinstance(exc, _BudgetExhausted) else type(exc)
         return {
             "complete": False,
-            "error": f"Actions API read failed: {type(exc).__name__}: {exc}",
+            "error": f"Actions API read failed: {error_type.__name__}: {exc}",
             **({"paused": True} if progress and isinstance(exc, _BudgetExhausted) else {}),
             "runs": records,
             "api_calls": api.calls,
