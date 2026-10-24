@@ -121,7 +121,7 @@ api.create_pod(with_terminal(pod, Endpoint(grant_scope(registration), namespace)
 exposure = deployed._terminal(env[deployed.TERMINAL_ENV])
 refused = TerminalObjects(api, exposure, HostKeys(store)).open(registration, api.read_pod(name))
 scratch.cleanup()
-print(json.dumps({"pod": name, "execution": agent.execution_id, "generation": agent.generation, "refused": refused}))
+print(json.dumps({"pod": name, "execution": agent.execution_id, "agent": agent.name, "generation": agent.generation, "refused": refused}))
 EOF
 )"
 token="$(kubectl create token swarm-grant-proof --duration 10m)"
@@ -173,3 +173,5 @@ if [[ $machines != *"$execution"* ]]; then
   exit 1
 fi
 printf 'the controller saved the worker attempt as a herdr machine: %s\n' "$machines"
+agent="$(python3 -c 'import json, sys; print(json.loads(sys.argv[1])["agent"])' "$opened")"
+bash deploy/helm/agentihooks-swarm/ci/terminal-identity-proof.sh "$release" "$slug" "$execution" "$agent"
