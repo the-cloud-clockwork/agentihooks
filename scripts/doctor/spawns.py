@@ -68,7 +68,9 @@ def _silent_local(agent: dict, hooked: dict, now_ms: int) -> list[Finding]:
         Finding(
             "no hook event",
             agent["name"],
-            "spawned agent has run no tool since it started",
+            "starting launch has no recorded harness or pane"
+            if agent.get("state") == "starting" and not (agent.get("harness") or agent.get("pane_id"))
+            else "spawned agent has run no tool since it started",
             (
                 f"started at {started}",
                 f"harness {agent.get('harness', '')}",
