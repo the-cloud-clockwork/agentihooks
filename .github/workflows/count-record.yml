@@ -22,6 +22,8 @@ jobs:
       github.triggering_actor))) && (github.event_name == 'merge_group' && 'anton-oss-queue' || 'anton-oss') || 'ubuntu-latest'
       }}
     timeout-minutes: 6
+    env:
+      UV_CONSTRAINT: ${{ github.workspace }}/.github/test-constraints.txt
     permissions:
       contents: read
     strategy:
