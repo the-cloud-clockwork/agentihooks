@@ -1,4 +1,3 @@
-import json
 import re
 import sqlite3
 import time
@@ -9,7 +8,7 @@ from .store import SQLiteRecallStore
 
 DAY = 86_400_000
 SPANS = {"m": 60_000, "h": 3_600_000, "d": DAY, "w": 7 * DAY}
-SPAN = re.compile(r"(\d+|an?|one)\s*(m|mins?|minutes?|h|hours?|d|days?|w|weeks?)")
+SPAN = re.compile(r"(\d+|(?:an?|one)(?=\s))\s*(m|mins?|minutes?|h|hours?|d|days?|w|weeks?)")
 WORD = re.compile(r"[\w-]+")
 REF = re.compile(r"\b[a-z]+/[\w./@-]+")
 PR_NUMBER = re.compile(r"(?:#|\bpr\s*#?|\bpull request\s*#?)(\d+)\b", re.IGNORECASE)
@@ -147,8 +146,8 @@ def _where(filters: Filters, now: int) -> tuple[str, list]:
         params.append(filters.author)
     if filters.seat:
         prefix = f"seats/{filters.seat}/"
-        clauses.append("(substr(records.ref, 1, ?) = ? OR instr(records.text, ?) > 0)")
-        params += [len(prefix), prefix, json.dumps({"seat": filters.seat})[1:-1]]
+        clauses.append("substr(records.ref, 1, ?) = ?")
+        params += [len(prefix), prefix]
     for bound, operator in ((filters.since, ">="), (filters.until, "<=")):
         moment = parse_time(bound, now)
         if moment is not None:

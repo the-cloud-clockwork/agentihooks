@@ -72,6 +72,10 @@ def test_parse_time_refuses_text_that_is_no_time():
     with pytest.raises(ValueError) as caught:
         parse_time("2 months", NOW)
     assert str(caught.value) == "not an ISO time, epoch milliseconds or span such as 1d: 2 months"
+    for text in ("am", "ad", "oneday"):
+        with pytest.raises(ValueError) as caught:
+            parse_time(text, NOW)
+        assert str(caught.value) == f"not an ISO time, epoch milliseconds or span such as 1d: {text}"
 
 
 def test_scope_narrows_to_a_ledger_or_a_swarm_slug(store):
@@ -104,16 +108,16 @@ def test_author_keeps_only_that_author(store):
     assert refs(store, "alpha", author="master@1") == ["chat/a"]
 
 
-def test_seat_matches_seat_records_and_handoffs_naming_the_seat(store):
+def test_seat_matches_only_records_held_under_that_seat(store):
     put(
         store,
         record("seats/eng-1@s/learned/x", "alpha"),
         record("seats/eng-10@s/learned/y", "alpha"),
-        record("tasks/t1/handoff/done", '{"seat": "eng-1@s", "task": "t1"}\n\nalpha', kind="handoff"),
-        record("tasks/t2/handoff/done", '{"seat": "eng-10@s", "task": "t2"}\n\nalpha', kind="handoff"),
+        record("seats/eng-1@s/handoffs/h1", "alpha", kind="handoff"),
+        record("tasks/t2/handoff/done", '{"seat": "eng-1@s", "task": "t2"}\n\nalpha', kind="handoff"),
         record("chat/z", "alpha eng-1@s"),
     )
-    assert sorted(refs(store, "alpha", seat="eng-1@s")) == ["seats/eng-1@s/learned/x", "tasks/t1/handoff/done"]
+    assert sorted(refs(store, "alpha", seat="eng-1@s")) == ["seats/eng-1@s/handoffs/h1", "seats/eng-1@s/learned/x"]
 
 
 def test_since_and_until_bound_the_record_time(store):
