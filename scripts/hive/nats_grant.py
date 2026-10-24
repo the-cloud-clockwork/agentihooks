@@ -80,6 +80,7 @@ CONTROLLER_PUBLISH = (
     "$JS.API.CONSUMER.MSG.NEXT.>",
     "$JS.ACK.>",
     *(f"$KV.{bucket}.>" for bucket in CONTROLLER_BUCKETS),
+    "_INBOX.>",
 )
 
 
@@ -205,7 +206,11 @@ def member_claims(user: str, swarms: tuple[str, ...] | None = None) -> dict:
 
 
 def controller_claims() -> dict:
-    return {**user_claims(), "pub": {"allow": list(CONTROLLER_PUBLISH)}, "sub": {"allow": ["_INBOX.>"]}}
+    return {
+        **user_claims(),
+        "pub": {"allow": list(CONTROLLER_PUBLISH)},
+        "sub": {"allow": ["_INBOX.>", "swarm.*.slots"]},
+    }
 
 
 def member_user(signer: Signer, member_id: str) -> nkey.KeyPair:

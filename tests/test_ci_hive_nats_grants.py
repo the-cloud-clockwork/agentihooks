@@ -399,6 +399,15 @@ def test_the_controller_grant_keeps_legacy_event_routing_and_swarm_discovery():
     assert "$JS.API.STREAM.LIST" in nats_grant.CONTROLLER_PUBLISH
 
 
+def test_the_controller_grant_serves_hub_slot_requests():
+    from scripts.events.subjects import PREFIX
+    from scripts.hive import account_slots
+
+    claims = nats_grant.controller_claims()
+    assert f"{PREFIX}.*.{account_slots.SLOTS}" in claims["sub"]["allow"]
+    assert "_INBOX.>" in claims["pub"]["allow"]
+
+
 def test_lint_checks_out_the_antoncore_service_users():
     steps = yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())["jobs"]["lint"]["steps"]
     checkout = next(s for s in steps if s.get("with", {}).get("repository") == "the-cloud-clockwork/antoncore")
