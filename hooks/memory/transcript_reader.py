@@ -23,48 +23,12 @@ problem — "parse a JSONL conversation log into a usable record stream":
 import json
 import os
 from pathlib import Path
-from typing import Iterator, List, Optional, TypedDict
+from typing import Iterator, List, Optional
 
 from hooks.config import AGENTIHOOKS_HOME
+from hooks.memory.records import CODEX_TYPES, TranscriptRecord, TurnState, is_copilot_type, normalize_entries
 
-
-class TranscriptRecord(TypedDict, total=False):
-    kind: str  # user_text | assistant_text | system_text | tool_call | tool_result | token_usage | turn_complete | meta
-    # turn_complete is a fallback only: emitted for a codex turn when no
-    # assistant_text record was produced for it (e.g. a rollout truncated
-    # before the response_item message landed). A turn that already yielded
-    # assistant_text never also yields turn_complete, so consumers that
-    # treat the two kinds as equivalent digest text don't double-count.
-    text: str
-    tool_name: str
-    tool_input: object
-    tool_result: object
-    tool_use_id: str
-    is_error: bool
-    raw: dict
-
-
-_CODEX_TYPES = ("session_meta", "response_item", "event_msg", "turn_context", "world_state")
-
-# Copilot session events are ``{id, timestamp, parentId, type, data}`` where
-# ``type`` is a dotted namespace string ("user.message", "tool.execution_start").
-# Neither claude nor codex ever writes a dotted type, so the prefix alone is a
-# sound discriminator.
-_COPILOT_TYPE_PREFIXES = (
-    "session.",
-    "user.",
-    "assistant.",
-    "tool.",
-    "system.",
-    "hook.",
-    "subagent.",
-    "mcp.",
-    "permission.",
-)
-
-
-def _is_copilot_type(value: object) -> bool:
-    return isinstance(value, str) and value.startswith(_COPILOT_TYPE_PREFIXES)
+__all__ = ["TranscriptRecord", "detect_transcript_format", "iter_transcript_records"]
 
 
 def detect_transcript_format(path: str | Path) -> str:
@@ -89,9 +53,9 @@ def detect_transcript_format(path: str | Path) -> str:
                 except json.JSONDecodeError:
                     continue
                 checked += 1
-                if first.get("type") in _CODEX_TYPES:
+                if first.get("type") in CODEX_TYPES:
                     return "codex"
-                if _is_copilot_type(first.get("type")):
+                if is_copilot_type(first.get("type")):
                     return "copilot"
                 if checked >= 5:
                     break
@@ -125,203 +89,6 @@ def _load_entries(path: Path) -> list[dict]:
     return entries
 
 
-def _iter_claude_records(entries: list[dict]) -> Iterator[TranscriptRecord]:
-    for entry in entries:
-        etype = entry.get("type")
-        if etype not in ("user", "assistant"):
-            continue
-        message = entry.get("message")
-        kind = "assistant_text" if etype == "assistant" else "user_text"
-        if isinstance(message, str):
-            yield {"kind": kind, "text": message, "raw": entry}
-            continue
-        content = message.get("content", []) if isinstance(message, dict) else []
-        if isinstance(content, str):
-            yield {"kind": kind, "text": content, "raw": entry}
-            continue
-        if not isinstance(content, list):
-            continue
-        for block in content:
-            if not isinstance(block, dict):
-                continue
-            btype = block.get("type")
-            if btype == "text":
-                yield {"kind": kind, "text": block.get("text", ""), "raw": entry}
-            elif btype == "tool_use":
-                yield {
-                    "kind": "tool_call",
-                    "tool_name": block.get("name", ""),
-                    "tool_input": block.get("input"),
-                    "tool_use_id": block.get("id", ""),
-                    "raw": entry,
-                }
-            elif btype == "tool_result":
-                yield {
-                    "kind": "tool_result",
-                    "tool_result": block.get("content"),
-                    "tool_use_id": block.get("tool_use_id", ""),
-                    "is_error": bool(block.get("is_error")),
-                    "raw": entry,
-                }
-
-
-def _iter_codex_records(entries: list[dict]) -> Iterator[TranscriptRecord]:
-    # A codex turn yields its assistant text via a response_item message
-    # record; task_complete's last_agent_message repeats the same text as a
-    # turn-boundary marker. Emitting both double-counts every turn for
-    # consumers that treat assistant_text/turn_complete as equivalent (auto
-    # save, brain_writer). Track whether this turn already produced
-    # assistant_text and only fall back to the task_complete text when it
-    # didn't (e.g. a rollout truncated before the message record landed).
-    assistant_seen_this_turn = False
-    for entry in entries:
-        etype = entry.get("type")
-        payload = entry.get("payload", {})
-        if not isinstance(payload, dict):
-            continue
-        if etype == "response_item":
-            ptype = payload.get("type")
-            if ptype == "message":
-                role = payload.get("role", "")
-                kind = {
-                    "assistant": "assistant_text",
-                    "user": "user_text",
-                }.get(role, "system_text")
-                if role == "user":
-                    assistant_seen_this_turn = False
-                texts = [
-                    b.get("text", "")
-                    for b in payload.get("content", [])
-                    if isinstance(b, dict) and b.get("type") in ("input_text", "output_text", "text")
-                ]
-                if texts:
-                    if kind == "assistant_text":
-                        assistant_seen_this_turn = True
-                    yield {"kind": kind, "text": "\n".join(texts), "raw": entry}
-            elif ptype in ("function_call", "local_shell_call", "custom_tool_call"):
-                yield {
-                    "kind": "tool_call",
-                    "tool_name": payload.get("name", ptype),
-                    "tool_input": payload.get("arguments") or payload.get("action"),
-                    "tool_use_id": payload.get("call_id", ""),
-                    "raw": entry,
-                }
-            elif ptype in ("function_call_output", "custom_tool_call_output"):
-                output = payload.get("output")
-                yield {
-                    "kind": "tool_result",
-                    "tool_result": output,
-                    "tool_use_id": payload.get("call_id", ""),
-                    # Codex does not carry an is_error flag on outputs; leave
-                    # False and let consumers pattern-match the content.
-                    "is_error": False,
-                    "raw": entry,
-                }
-        elif etype == "event_msg":
-            ptype = payload.get("type")
-            if ptype == "token_count":
-                yield {"kind": "token_usage", "raw": entry}
-            elif ptype == "task_complete":
-                # Only a fallback: skip when the turn's assistant_text was
-                # already yielded above to avoid re-counting the same reply.
-                if not assistant_seen_this_turn:
-                    yield {
-                        "kind": "turn_complete",
-                        "text": payload.get("last_agent_message") or "",
-                        "raw": entry,
-                    }
-                assistant_seen_this_turn = False
-        elif etype == "session_meta":
-            yield {"kind": "meta", "raw": entry}
-
-
-def _copilot_result_text(result: object) -> object:
-    """Pull the model-facing text out of a copilot tool result, else pass through."""
-    if not isinstance(result, dict):
-        return result
-    for key in ("content", "detailedContent"):
-        value = result.get(key)
-        if isinstance(value, str) and value:
-            return value
-    blocks = result.get("contents")
-    if isinstance(blocks, list):
-        texts = [b.get("text", "") for b in blocks if isinstance(b, dict) and b.get("text")]
-        if texts:
-            return "\n".join(texts)
-    return result
-
-
-def _iter_copilot_records(entries: list[dict]) -> Iterator[TranscriptRecord]:
-    # Same turn-boundary rule as the codex reader: session.task_complete
-    # repeats the turn's summary, so it is only emitted as turn_complete when
-    # the turn produced no assistant.message (a log truncated mid-turn).
-    # Ephemeral events are streaming deltas and re-renders, never durable
-    # content — including them would multiply-count every reply.
-    assistant_seen_this_turn = False
-    for entry in entries:
-        etype = entry.get("type")
-        if not _is_copilot_type(etype):
-            continue
-        if entry.get("ephemeral") and etype != "assistant.usage":
-            continue
-        data = entry.get("data")
-        if not isinstance(data, dict):
-            continue
-        if etype == "user.message":
-            text = data.get("content", "")
-            # Hook-injected context rides in as a user.message with
-            # source="system" (observed live, v1.0.80) — counting it as a
-            # user turn would charge every additionalContext injection as a
-            # turn of its own.
-            if data.get("source") == "system":
-                if text:
-                    yield {"kind": "system_text", "text": text, "raw": entry}
-                continue
-            assistant_seen_this_turn = False
-            if text:
-                yield {"kind": "user_text", "text": text, "raw": entry}
-        elif etype == "assistant.message":
-            text = data.get("content", "")
-            if text:
-                assistant_seen_this_turn = True
-                yield {"kind": "assistant_text", "text": text, "raw": entry}
-        elif etype == "system.message":
-            text = data.get("content", "")
-            if text:
-                yield {"kind": "system_text", "text": text, "raw": entry}
-        elif etype == "tool.execution_start":
-            yield {
-                "kind": "tool_call",
-                "tool_name": data.get("toolName", ""),
-                "tool_input": data.get("arguments"),
-                "tool_use_id": data.get("toolCallId", ""),
-                "raw": entry,
-            }
-        elif etype == "tool.execution_complete":
-            # Unlike codex, copilot states success explicitly, so error
-            # scanning does not have to pattern-match the result content.
-            failed = not data.get("success", True)
-            error = data.get("error")
-            result = data.get("result")
-            yield {
-                "kind": "tool_result",
-                "tool_result": (
-                    error.get("message", "") if failed and isinstance(error, dict) else _copilot_result_text(result)
-                ),
-                "tool_use_id": data.get("toolCallId", ""),
-                "is_error": failed,
-                "raw": entry,
-            }
-        elif etype == "assistant.usage":
-            yield {"kind": "token_usage", "raw": entry}
-        elif etype == "session.task_complete":
-            if not assistant_seen_this_turn:
-                yield {"kind": "turn_complete", "text": data.get("summary") or "", "raw": entry}
-            assistant_seen_this_turn = False
-        elif etype == "session.start":
-            yield {"kind": "meta", "raw": entry}
-
-
 def iter_transcript_records(path: str | Path) -> Iterator[TranscriptRecord]:
     """Yield unified records from a Claude, Codex or Copilot transcript."""
     p = Path(path)
@@ -330,13 +97,7 @@ def iter_transcript_records(path: str | Path) -> Iterator[TranscriptRecord]:
     entries = _load_entries(p)
     if not entries:
         return
-    fmt = detect_transcript_format(p)
-    if fmt == "codex":
-        yield from _iter_codex_records(entries)
-    elif fmt == "copilot":
-        yield from _iter_copilot_records(entries)
-    else:
-        yield from _iter_claude_records(entries)
+    yield from normalize_entries(detect_transcript_format(p), entries, TurnState())
 
 
 _AGENT_LOG = os.getenv("AGENT_LOG_FILE", str(AGENTIHOOKS_HOME / "logs" / "agent.log"))

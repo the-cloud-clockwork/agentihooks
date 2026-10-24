@@ -4,8 +4,8 @@ import json
 from pathlib import Path
 
 import pytest
-from hooks.memory.records import DECODERS, TurnState, normalize_entries
 
+from hooks.memory.records import DECODERS, TurnState, normalize_entries
 from hooks.memory.transcript_reader import _load_entries, detect_transcript_format, iter_transcript_records
 
 pytestmark = pytest.mark.unit
