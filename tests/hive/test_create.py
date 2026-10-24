@@ -6,7 +6,7 @@ from types import SimpleNamespace
 import pytest
 
 import scripts.swarm.store as swarm_store
-from scripts.hive import auth, cli, create, create_github, create_render, invite, registry
+from scripts.hive import auth, cli, create, create_github, create_render, invite, nats_grant, registry
 from tests.hive.test_invite import CA, LIKE, SWARM, Bao, _bao, _credential
 
 pytestmark = pytest.mark.unit
@@ -33,6 +33,17 @@ SERVICES = {
     ]
 }
 TARGET = "ssh://worker@10.10.30.207:2225"
+SIGNER = "agentihooks/hub/nats-signer"
+RESYNC = [
+    "kubectl",
+    "-n",
+    "agentihooks-swarm",
+    "annotate",
+    "externalsecret",
+    "agentihooks-swarm-nats-signer",
+    f"force-sync={NOW}",
+    "--overwrite",
+]
 
 
 class Run:
@@ -122,8 +133,17 @@ def world(tmp_path, monkeypatch):
     registry.update(redis, "root", ["ui=yes"])
     (tmp_path / ".ssh").mkdir()
     (tmp_path / ".ssh" / "id_ed25519.pub").write_text("ssh-ed25519 OPERATOR operator\n")
-    bao = Bao({LIKE: {"credential": _credential(), "swarm_url": SWARM, "ca_pem": CA}})
-    environ = {"HOME": str(tmp_path), "AGENTIHOOKS_HOME": str(tmp_path / "agentihooks")}
+    bao = Bao(
+        {
+            LIKE: {"credential": _credential(), "swarm_url": SWARM, "ca_pem": CA},
+            SIGNER: {"member_swarms": {"old": ["demo"]}},
+        }
+    )
+    environ = {
+        "HOME": str(tmp_path),
+        "AGENTIHOOKS_HOME": str(tmp_path / "agentihooks"),
+        nats_grant.SIGNER_ENV: SIGNER,
+    }
     run, lines = Run(), []
     published = []
     monkeypatch.setattr(create.setup, "publish", lambda env, path, dry: published.append(dry) or f"settings {dry}")
@@ -361,3 +381,82 @@ def test_cli_create_defaults_are_the_options_defaults(monkeypatch, capsys):
     monkeypatch.setattr(create, "create", lambda tools, options: seen.update(options=options) or "created")
     assert cli.main(["create"]) == 0
     assert seen["options"] == create.Options()
+
+
+@pytest.mark.parametrize("signer", [None, "file:/nats-signer", "k8s/nats-signer"])
+@pytest.mark.parametrize("dry_run", [True, False])
+def test_create_without_the_hub_signer_record_refuses_before_anything_is_named(world, signer, dry_run):
+    del world.tools.environ[nats_grant.SIGNER_ENV]
+    if signer:
+        world.tools.environ[nats_grant.SIGNER_ENV] = signer
+    with pytest.raises(auth.HiveError) as refused:
+        create.create(world.tools, create.Options(dry_run=dry_run))
+    assert str(refused.value) == (
+        "hive create lists the new hive member on the hub NATS signer record, "
+        "so AGENTIHOOKS_NATS_SIGNER must name an OpenBao record under agentihooks/hub/"
+    )
+    assert world.run.calls == []
+    assert world.bao.written == []
+    assert not (world.home / "agentihooks" / create.STATE_FILE).exists()
+
+
+def test_create_lists_the_new_member_and_its_swarms_and_resyncs_the_hub(world):
+    create.create(world.tools, create.Options(timeout_s=60))
+
+    member = invite._env(world.bao.records[RECORD]["credential"])[invite.HIVE_ID]
+    assert world.bao.records[SIGNER]["member_swarms"] == {"old": ["demo"], member: ["demo"]}
+    assert invite._env(world.bao.records[RECORD]["credential"])["AGENTIHOOKS_BUS_SCOPED"] == "1"
+    assert world.run.named("kubectl", "-n") == [RESYNC]
+    assert world.run.calls.index(RESYNC) < world.run.calls.index(world.run.named("ssh-keygen")[0])
+    line = next(line for line in world.lines if line.startswith(f"hive create {NAME}: invite: "))
+    assert line.endswith(f"; listed {member} on the hub signer record {SIGNER} for demo and resynced it on the hub")
+
+
+def test_a_kept_member_left_unlisted_is_listed_on_the_rerun(world):
+    world.bao.records[RECORD] = {"credential": _credential("feedfacefeedface")}
+    world.bao.versions[RECORD] = 1
+
+    create.create(world.tools, create.Options(timeout_s=60))
+
+    assert world.bao.records[SIGNER]["member_swarms"] == {"old": ["demo"], "feedfacefeedface": ["demo"]}
+    assert world.run.named("kubectl", "-n") == [RESYNC]
+    assert world.lines[0] == (
+        f"hive create {NAME}: invite: kept hive member feedfacefeedface in OpenBao secret/{RECORD}; "
+        f"listed feedfacefeedface on the hub signer record {SIGNER} for demo and resynced it on the hub"
+    )
+
+
+def test_a_kept_member_already_listed_needs_no_resync(world):
+    world.bao.records[RECORD] = {"credential": _credential("feedfacefeedface")}
+    world.bao.versions[RECORD] = 1
+    world.bao.records[SIGNER] = {"member_swarms": {"feedfacefeedface": ["demo"]}}
+
+    create.create(world.tools, create.Options(timeout_s=60))
+
+    assert world.run.named("kubectl", "-n") == []
+    assert world.lines[0] == (
+        f"hive create {NAME}: invite: kept hive member feedfacefeedface in OpenBao secret/{RECORD}; "
+        f"kept feedfacefeedface on the hub signer record {SIGNER}"
+    )
+
+
+def test_a_hub_record_without_member_swarms_scopes_no_member(world):
+    world.bao.records[SIGNER] = {"url": "nats://hub"}
+
+    create.create(world.tools, create.Options(timeout_s=60))
+
+    assert world.bao.records[SIGNER] == {"url": "nats://hub"}
+    assert world.run.named("kubectl", "-n") == []
+    line = next(line for line in world.lines if line.startswith(f"hive create {NAME}: invite: "))
+    assert line.endswith(f"; the hub signer record {SIGNER} lists no member swarms, so the hub scopes no member")
+
+
+def test_the_dry_run_names_the_listing_and_writes_no_hub_record(world):
+    create.create(world.tools, create.Options(dry_run=True))
+
+    assert world.bao.written == []
+    assert world.run.named("kubectl", "-n") == []
+    assert world.lines[0] == (
+        f"hive create {NAME}: invite: would mint a hive member into OpenBao secret/{RECORD} like {LIKE} "
+        f"and list it on the hub signer record {SIGNER} for demo"
+    )
