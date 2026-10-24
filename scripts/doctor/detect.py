@@ -69,18 +69,11 @@ def _traces(store, tasks, slug, now_ms, env, trace_client=None):
         started,
         traces_read.Budget(),
     )
-    reader = record.get("reader", {})
-    historical = reader.get("historical", {})
-    complete = (
-        historical.get("listed", False)
-        and historical.get("complete", False)
-        and not historical.get("capped")
-        and not reader.get("failures")
-    )
-    record["task_cost_candidates"] = set(merged) - judged if complete else set()
+    candidates = traces.task_cost_candidates(record) - judged
+    record["task_cost_candidates"] = candidates
     found = traces.findings(record, limits)
-    if complete:
-        store.redis.set(key, json.dumps(sorted(judged | set(merged))))
+    if candidates:
+        store.redis.set(key, json.dumps(sorted(judged | candidates)))
     return found
 
 
