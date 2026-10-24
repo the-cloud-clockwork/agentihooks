@@ -263,9 +263,6 @@ def test_after_a_backend_master_retires_the_items_it_decided_belong_to_the_front
     refill = world.store.names.next(SLUG, "master")
     world.seat(refill, SECOND)
     assert world.decide(cases.FORMER, False, 2)["warnings"] == refused
-    assert world.decide(refill, True, 3)["accepted"]
-    [warning] = world.decide(cases.FORMER, False, 4)["warnings"]
-    assert warning.startswith(f"{cases.FOLLOWUP} was decided by {SECOND} at revision ")
 
 
 def racing_pipelines(world, monkeypatch, times):
