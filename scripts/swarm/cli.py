@@ -762,12 +762,14 @@ def stop_now(store, slug, runtime, ledger):
         if not runtime.retire(agent, homes=reaper.scratch_homes(slug, agent.task)):
             left.append(agent.name)
             continue
+        row = rows.get(agent.task, {})
+        reopen = agent.state != "finished" and row.get("state") in ("claimed", "pr")
+        reopen = reopen and row.get("claimed_by") == agent.name
+        if reopen:
+            store.refund_held_claim(slug, agent.task, agent.name, store.claim_generation(slug, agent.task))
         store.release(slug, agent.task, agent.name)
         store.drop_agent(slug, agent.name)
-        row = rows.get(agent.task, {})
-        if agent.state != "finished" and row.get("state") in ("claimed", "pr") and row.get("claimed_by") == agent.name:
-            if store.claims(slug, agent.task) > 0:
-                store.refund_claim(slug, agent.task)
+        if reopen:
             try:
                 ledger.update_task(slug, agent.task, {"state": "open", "claimed_by": ""})
             except LedgerRefused as exc:
@@ -1372,7 +1374,7 @@ def _master_or_operator(store, args, message):
 
 
 def cmd_verdict(store, args):
-    by = _master_or_operator(store, args, "only the master or the operator gives a finding a verdict")
+    by = args.by = _master_or_operator(store, args, "only the master or the operator gives a finding a verdict")
     verdict = verdict_store(store, args.slug).judge(args.finding, args.verdict, args.note, by, now_ms())
     minutes = health.limits().cooldown_minutes
     print(json.dumps({"finding": args.finding, "verdict": verdict["value"], "hidden_minutes": minutes}))
@@ -1751,6 +1753,8 @@ def block_agent(store, slug, agent, note, ledger, red_run=None):
     ledger.update_task(slug, agent.task, {"state": "blocked"}, by=agent.name)
     ledger.comment(slug, agent.task, note, by=agent.name)
     waits.settle_notices(InboxStore(store.redis), agent, "a block")
+    if red_run is not None:
+        store.refund_held_claim(slug, agent.task, agent.name, store.claim_generation(slug, agent.task))
     _retire(store, slug, agent, "blocked its task and exited")
 
 

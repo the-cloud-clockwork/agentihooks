@@ -129,6 +129,28 @@ def test_tests_workflow_cache_restores_bound_download_timeout():
         assert step.get("env", {}).get("SEGMENT_DOWNLOAD_TIMEOUT_MINS") == "1", step.get("name", step["with"]["path"])
 
 
+def test_nats_server_download_retries_fit_inside_every_step_timeout():
+    action = yaml.safe_load((_ROOT / ".github/actions/nats-server/action.yml").read_text())
+    lines = [line for step in action["runs"]["steps"] for line in step.get("run", "").splitlines()]
+    curl = next(line.split() for line in lines if line.strip().startswith("curl "))
+    flags = {flag: curl[i + 1] for i, flag in enumerate(curl[:-1]) if flag.startswith("--")}
+    attempts = int(flags["--retry"]) + 1
+    budget = attempts * (int(flags["--max-time"]) + int(flags["--retry-delay"]))
+    assert int(flags["--connect-timeout"]) < int(flags["--max-time"])
+    steps = [
+        step
+        for pattern in ("*.yml", "*.yaml")
+        for workflow in (_ROOT / ".github/workflows").glob(pattern)
+        for job in (yaml.safe_load(workflow.read_text()).get("jobs") or {}).values()
+        for step in job.get("steps", [])
+        if step.get("uses", "").endswith("/actions/nats-server")
+    ]
+    assert steps
+    for step in steps:
+        assert "timeout-minutes" in step, step
+        assert budget < int(step["timeout-minutes"]) * 60, step
+
+
 def test_unit_setup_python_restores_no_pip_cache():
     (step,) = _setup_python_steps("unit")
     assert "cache" not in step["with"]
