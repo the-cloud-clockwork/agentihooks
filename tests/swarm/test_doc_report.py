@@ -91,6 +91,15 @@ def test_a_cancelled_report_counts_as_answered_and_raises_no_priority(world):
     assert state(SLUG)["priorities"] == []
 
 
+def test_a_report_closed_as_blocked_is_still_unacknowledged(world):
+    inbox, _ = world
+    sweep(world)
+    inbox.close(doc_report.report_id(SLUG, "t1", PR), WATCHDOG, "blocked", "the doc is unreachable")
+    late = AT + doc_report.ack_ms()
+    assert sweep(world, late) == ["raised a Priority for the unacknowledged doc item report of t1"]
+    assert "ack" not in task("t1")["watchdog"]
+
+
 def test_a_completion_with_a_new_pull_request_sends_a_new_report(world):
     inbox, ledger = world
     sweep(world)

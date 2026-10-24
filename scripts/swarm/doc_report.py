@@ -4,12 +4,13 @@ import hashlib
 import os
 from datetime import UTC, datetime
 
-from scripts.inbox.store import CLOSED, DuplicateItem, InboxError, InboxStore, replied
+from scripts.inbox.store import DuplicateItem, InboxError, InboxStore, replied
 
 ADDRESS_ENV, DEFAULT_ADDRESS = "AGENTIHOOKS_WATCHDOG_ADDRESS", "master-watchdog"
 ACK_MINUTES_ENV, DEFAULT_ACK_MINUTES = "AGENTIHOOKS_WATCHDOG_ACK_MINUTES", 30
 FIELD, ITEMS = "watchdog", "doc_items"
 SENDER = "swarm"
+ANSWERED = ("done", "cancelled")
 STAMP = "%Y-%m-%dT%H:%M:%SZ"
 ASK = "The watchdog has not acknowledged the doc item report for this task. Ask it to read its inbox and reply."
 
@@ -73,7 +74,7 @@ def report(inbox: InboxStore, ledger, slug: str, task: dict, at_ms: int, by: str
 
 
 def _answer(inbox: InboxStore, item) -> str | None:
-    if item.state not in CLOSED:
+    if item.state not in ANSWERED:
         return None
     detail = item.reason.removeprefix(f"{item.state}: ")
     if detail.startswith(replied("")):
@@ -96,8 +97,8 @@ def _settle(inbox: InboxStore, ledger, slug: str, task: dict, at_ms: int) -> str
         return f"recorded the watchdog acknowledgment of {task['id']}"
     if record.get("priority") or at_ms - _ms(record["sent_at"]) < ack_ms():
         return ""
-    ledger.update_task(slug, task["id"], {FIELD: {**record, "priority": utc(at_ms)}})
     ledger.priority(slug, f"tasks/{task['id']}", ASK)
+    ledger.update_task(slug, task["id"], {FIELD: {**record, "priority": utc(at_ms)}})
     return f"raised a Priority for the unacknowledged doc item report of {task['id']}"
 
 
