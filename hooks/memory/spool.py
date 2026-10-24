@@ -57,7 +57,7 @@ class FlushResult:
 
 
 def _checksum(sequence: int, identity: str, created: float, records: list) -> str:
-    body = json.dumps([sequence, identity, created, records], sort_keys=True, ensure_ascii=False)
+    body = json.dumps([sequence, identity, created, records], sort_keys=True)
     return hashlib.sha256(body.encode()).hexdigest()
 
 
@@ -66,7 +66,7 @@ def _key(identity: str) -> str:
 
 
 def _sequence(path: Path) -> int:
-    return int(path.name.partition("-")[0])
+    return int(path.name[:20])
 
 
 def _sync_dir(path: Path) -> None:
@@ -109,7 +109,7 @@ class Spool:
 
     def _files(self) -> list[Path]:
         settled = self._ack()["settled"]
-        return [path for path in sorted(self.batches.glob("*.json"), key=_sequence) if _sequence(path) > settled]
+        return [path for path in sorted(self.batches.glob("*.json")) if _sequence(path) > settled]
 
     def _read(self, path: Path) -> Entry | None:
         try:
@@ -136,7 +136,7 @@ class Spool:
             created = self.clock()
             body = {"sequence": sequence, "identity": identity, "created": created, "records": records}
             body["sha256"] = _checksum(sequence, identity, created, records)
-            data = json.dumps(body, sort_keys=True, ensure_ascii=False).encode()
+            data = json.dumps(body, ensure_ascii=False).encode()
             if sum(path.stat().st_size for path in files) + len(data) > self.config.max_bytes:
                 raise SpoolFull("spool_full")
             path = self.batches / f"{sequence:020d}-{_key(identity)}.json"
@@ -171,7 +171,7 @@ class Spool:
         sequence = _sequence(path)
         if sequence <= ack["settled"]:
             return
-        recent = ack["recent"] if lost else {**ack["recent"], path.stem.partition("-")[2]: sequence}
+        recent = ack["recent"] if lost else {**ack["recent"], path.stem[21:]: sequence}
         ack = {
             "settled": sequence,
             "lost": ack["lost"] + ([sequence] if lost else []),
@@ -183,7 +183,7 @@ class Spool:
         with self._locked("spool"):
             self._acknowledge(path, lost)
             if lost:
-                self.quarantine.mkdir(parents=True, exist_ok=True)
+                self.quarantine.mkdir(exist_ok=True)
                 path.replace(self.quarantine / path.name)
                 _sync_dir(self.quarantine)
             else:
@@ -196,16 +196,13 @@ class Spool:
         with self._locked("flush"):
             for path in self._files():
                 entry = self._read(path)
-                if entry is None:
-                    self._settle(path, lost=True)
-                    lost.append(_sequence(path))
-                    continue
-                try:
-                    upload(entry)
-                except Exception as error:
-                    return FlushResult(uploaded, lost, type(error).__name__)
-                self._settle(path, lost=False)
-                uploaded.append(entry.sequence)
+                if entry is not None:
+                    try:
+                        upload(entry)
+                    except Exception as error:
+                        return FlushResult(uploaded, lost, type(error).__name__)
+                self._settle(path, lost=entry is None)
+                (uploaded if entry else lost).append(_sequence(path))
         return FlushResult(uploaded, lost)
 
 

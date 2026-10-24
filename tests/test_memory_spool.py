@@ -251,14 +251,33 @@ def test_the_batch_file_stays_until_its_acknowledgement_is_written(spool, monkey
     assert len(batch_files(spool)) == 1
 
 
-def test_every_lock_is_exclusive(spool, monkeypatch):
+def test_every_lock_is_exclusive_and_named_by_scope(spool, config, monkeypatch):
     calls = []
     real = spool_module.fcntl.flock
-    monkeypatch.setattr(spool_module.fcntl, "flock", lambda handle, mode: calls.append(mode) or real(handle, mode))
+    monkeypatch.setattr(
+        spool_module.fcntl,
+        "flock",
+        lambda handle, mode: calls.append((Path(handle.name).name, mode)) or real(handle, mode),
+    )
     spool.append("a", records("one"))
     spool.status()
     spool.flush(lambda entry: None)
-    assert calls == [spool_module.fcntl.LOCK_EX] * 4
+    exclusive = spool_module.fcntl.LOCK_EX
+    assert calls == [(".spool.lock", exclusive)] * 2 + [(".flush.lock", exclusive), (".spool.lock", exclusive)]
+
+
+def test_spool_folders_sit_under_the_root(spool, config):
+    root = Path(config.root)
+    assert (spool.batches, spool.quarantine, spool.ack_path) == (root / "batches", root / "lost", root / "ack.json")
+
+
+def test_two_corrupt_batches_share_the_quarantine(spool):
+    for name in "ab":
+        spool.append(name, records(name))
+    for path in spool.batches.glob("*.json"):
+        path.write_bytes(b"{}")
+    assert spool.flush(lambda entry: pytest.fail("no upload")) == FlushResult([], [1, 2])
+    assert sorted(path.name[:20] for path in spool.quarantine.glob("*.json")) == [f"{n:020d}" for n in (1, 2)]
 
 
 @pytest.mark.parametrize(
