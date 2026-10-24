@@ -97,8 +97,7 @@ def test_check_workflow_takes_a_named_workflow_in_the_eng_lane_or_by_default_and
 
 def test_task_add_documents_the_workflow_kind_and_its_options():
     parser = ledger.build_parser()
-    for name in ("task", "add"):
-        parser = next(a for a in parser._actions if isinstance(a, argparse._SubParsersAction)).choices[name]
+    parser = next(a for a in parser._actions if isinstance(a, argparse._SubParsersAction)).choices["task"]
     helps = {action.dest: action.help for action in parser._actions}
     assert helps["kind"] == "code (default), ci, ops, troubleshoot, tune, research, workflow"
     assert helps["workflow"] == "workflow kind: the workflow name"
