@@ -136,6 +136,41 @@ def test_a_missing_log_waits_and_is_read_again_next_poll(monkeypatch):
     assert seen == {}
 
 
+@pytest.mark.parametrize(
+    ("notes", "lost"),
+    [
+        ([], True),
+        (["The runner has received a shutdown signal."], True),
+        (["Process completed with exit code 1.", "The runner has received a shutdown signal."], True),
+        (["Process completed with exit code 1."], False),
+        (["== 1 failed, 3 passed in 4.10s =="], False),
+        (["The action 'Run tests' has timed out after 12 minutes."], False),
+        (
+            ["The action 'Run tests' has timed out after 12 minutes.", "The runner has received a shutdown signal."],
+            False,
+        ),
+    ],
+)
+def test_missing_logs_use_annotations_before_the_watcher_allows_recovery(monkeypatch, notes, lost):
+    calls = []
+
+    def api(path, *flags):
+        calls.append(path)
+        if path == "repos/o/r/actions/jobs/41/logs":
+            raise subprocess.CalledProcessError(1, ["gh", "api", path])
+        assert path == "repos/o/r/check-runs/41/annotations"
+        return json.dumps([{"message": note} for note in notes])
+
+    monkeypatch.setattr(fail_fast_retry, "_api", api)
+    shard = {**_job("unit (3.12, 4)", "failure"), "id": 41}
+    seen = {}
+    assert fail_fast.failed([shard], lambda job: fail_fast.logged_loss("o/r", job, seen)) == (
+        None if lost else shard["name"]
+    )
+    assert calls == ["repos/o/r/actions/jobs/41/logs", "repos/o/r/check-runs/41/annotations"]
+    assert seen == {}
+
+
 def test_a_judged_shard_log_is_not_read_again(monkeypatch):
     monkeypatch.setattr(fail_fast_retry, "_api", lambda *args: pytest.fail("read again"))
     assert fail_fast.logged_loss("o/r", {"id": 41}, {"41": False}) is False
