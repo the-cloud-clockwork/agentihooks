@@ -19,8 +19,9 @@ cleanup() {
 trap cleanup EXIT
 {
   kind create cluster --name "$cluster" --image mirror.gcr.io/kindest/node:v1.37.0 --wait 120s
-  docker exec "$cluster-control-plane" crictl pull ghcr.io/the-cloud-clockwork/agentihooks-worker:dev
-  docker exec "$cluster-control-plane" crictl pull mirror.gcr.io/library/redis:7-alpine
+  for warm in ghcr.io/the-cloud-clockwork/agentihooks-worker:dev mirror.gcr.io/library/redis:7-alpine; do
+    docker exec "$cluster-control-plane" crictl pull "$warm" || echo "the node could not pre-pull $warm; the proof loads or pulls it later"
+  done
 } > "$out/cluster.log" 2>&1 &
 cluster_pid=$!
 build_started="$SECONDS"
@@ -199,12 +200,16 @@ else:
 PY
 }
 held="$(hold_agent start)"
+started="$(kubectl get pod "$pod" -o jsonpath='{.status.containerStatuses[0].state.running.startedAt}')"
+[[ -n "$started" ]]
 kubectl patch deployment "$deployment" --type merge -p '{"spec":{"strategy":{"type":"Recreate","rollingUpdate":null}}}'
 kubectl rollout restart "deployment/$deployment"
 hold_agent draining
-sleep 5
-[[ -n "$(kubectl get pod "$pod" -o jsonpath='{.status.containerStatuses[0].state.running.startedAt}')" ]] || { echo "the hive drain preStop let $pod stop while an agent worked" >&2; exit 1; }
-[[ "$(kubectl get pods -l app.kubernetes.io/component=worker-hive -o name)" == "pod/$pod" ]] || { echo "a replacement hive pod started while $pod drained" >&2; exit 1; }
+for _ in {1..5}; do
+  sleep 1
+  [[ "$(kubectl get pod "$pod" -o jsonpath='{.status.containerStatuses[0].state.running.startedAt}')" == "$started" ]] || { echo "the hive drain preStop let $pod stop while an agent worked" >&2; exit 1; }
+  [[ "$(kubectl get pods -l app.kubernetes.io/component=worker-hive -o name)" == "pod/$pod" ]] || { echo "a replacement hive pod started while $pod drained" >&2; exit 1; }
+done
 echo "the hive drain preStop marked $pod draining and kept it running while its agent worked, with no replacement pod" | tee "$out/drain.txt"
 hold_agent finish "$held"
 kubectl wait --for=delete "pod/$pod" --timeout=25s
