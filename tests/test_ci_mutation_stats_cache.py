@@ -719,8 +719,8 @@ def test_dynamic_import_stats_track_the_modules_the_collection_loaded(tmp_path, 
         calls
         == {
             "unloaded": [files],
-            "loaded": [files, files],
-            "loaded_resource": [files, files],
+            "loaded": [files, [files[0]]],
+            "loaded_resource": [files, [files[0]]],
             "other_test": [files, [files[1]]],
         }[changed]
     )

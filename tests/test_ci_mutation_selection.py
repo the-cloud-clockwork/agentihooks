@@ -655,7 +655,14 @@ def test_shard_stats_run_in_stats_mode_with_their_own_basetemp_and_record_everyt
     ]
     result = json.loads(output.read_text())
     assert 0 <= result.pop("cpu") <= process_time()
-    assert result == {"status": 4, "tests": {"m.x_f": ["a::t", "b::t"]}, "durations": {"a::t": 2.5}}
+    modules = result.pop("modules")
+    assert modules == sorted(modules) and "tests/test_ci_mutation_selection.py" in modules
+    assert result == {
+        "status": 4,
+        "tests": {"m.x_f": ["a::t", "b::t"]},
+        "durations": {"a::t": 2.5},
+        "files": ["tests/test_a.py"],
+    }
 
 
 WALL_CLOCK_SPLITS = {
