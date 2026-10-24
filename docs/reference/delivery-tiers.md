@@ -390,7 +390,7 @@ gh api "repos/the-cloud-clockwork/agentihooks/actions/runs/$run/attempts/1/jobs"
   --jq '.jobs[] | select(.name | startswith("unit (")) | [.name, .created_at, .started_at, .completed_at] | @tsv'
 ```
 
-A shard's runner wait is `started_at` minus `created_at`. Count the shards: more than 30, or start times that fall into two groups minutes apart, means a second wave. The Doctor measure prints the run attempt's queue tier wall time in seconds:
+A shard's runner wait is `started_at` minus `created_at`. Count the shards: more than 24, or start times that fall into two groups minutes apart, means a second wave. The Doctor measure prints the run attempt's queue tier wall time in seconds:
 
 ```bash
 agentihooks doctor rig-grade-swarm measure "ci-tier-wall-time/<run id>-<attempt>"
