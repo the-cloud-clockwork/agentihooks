@@ -50,6 +50,10 @@ def test_a_headed_hive_claims_the_headed_task_over_a_preferred_normal_hive(setup
     assert setup.launcher.select(setup.config, "eng", {**HEADED, "needs": ["headed", "gpu"]}) == Wait(
         placement.NEEDS_CAPABILITY.format(needs="gpu")
     )
+    write_hive(setup, capabilities=["gpu"])
+    assert setup.launcher.select(setup.config, "eng", {**HEADED, "needs": ["headed", "gpu"]}) == Wait(
+        "the task needs a hive with headed, gpu, and no single hive declares all of them"
+    )
 
 
 def test_a_hybrid_controller_never_overflows_a_headed_task_to_a_local_machine_without_it(setup, monkeypatch):
