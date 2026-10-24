@@ -1,4 +1,5 @@
 import json
+import re
 import subprocess
 import threading
 import time
@@ -41,17 +42,31 @@ class _Api:
         with self.lock:
             if self.responses is not None and endpoint in self.responses:
                 return self.responses[endpoint]
-            remaining = self.deadline - time.monotonic()
-            if self.calls >= self.max_calls or remaining <= 0:
-                raise _BudgetExhausted("Actions API request or time budget exhausted")
-            self.calls += 1
-        response = self.run(
-            ["gh", "api", endpoint], capture_output=True, text=True, check=True, timeout=min(25, remaining)
-        )
-        body = json.loads(response.stdout)
+        body = self.request(endpoint)
         if self.responses is not None and "/actions/jobs/" not in endpoint:
             self.responses[endpoint] = body
         return body
+
+    def request(self, endpoint: str) -> dict:
+        for attempt in range(2):
+            with self.lock:
+                remaining = self.deadline - time.monotonic()
+                if self.calls >= self.max_calls or remaining <= 0:
+                    raise _BudgetExhausted("Actions API request or time budget exhausted")
+                self.calls += 1
+            try:
+                response = self.run(
+                    ["gh", "api", endpoint], capture_output=True, text=True, check=True, timeout=min(25, remaining)
+                )
+            except subprocess.CalledProcessError as exc:
+                status = re.search(r"\bHTTP ([1-5][0-9]{2})\b", exc.stderr or "")
+                if not status:
+                    raise
+                code = status[1]
+                if attempt == 0 and code in ("502", "503", "504"):
+                    continue
+                raise RuntimeError(f"Actions API request failed: HTTP {code}; endpoint={endpoint}") from None
+            return json.loads(response.stdout)
 
     def pages(self, endpoint: str, field: str, settles: int) -> list[dict]:
         separator = "&" if "?" in endpoint else "?"
@@ -157,7 +172,8 @@ def read(
                 try:
                     records.append({**jobs[future], "jobs": future.result()})
                 except FAILURES as exc:
-                    failure = failure or exc
+                    if failure is None or isinstance(failure, _BudgetExhausted):
+                        failure = exc
             if failure:
                 raise failure
             unverified = _reread(api, pool, records, now_ms)
