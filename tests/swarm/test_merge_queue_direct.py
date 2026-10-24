@@ -24,6 +24,7 @@ class GitHub:
         self.conclusions = list(conclusions)
         self.heads = list(heads)
         self.commit = None
+        self.check_error = None
         self.states = list(states)
         self.rollup = rollup
         self.merge_error = merge_error
@@ -48,12 +49,17 @@ class GitHub:
             "body": "",
         }
 
-    def answer(self, command, payload, code=0):
-        return subprocess.CompletedProcess(command, code, json.dumps(payload), "" if code == 0 else "gh: failed")
+    def answer(self, command, payload, code=0, stderr="gh: failed"):
+        return subprocess.CompletedProcess(command, code, json.dumps(payload), "" if code == 0 else stderr)
 
     def checks(self, command):
         if not self.rollup:
-            return self.answer(command, {"data": {"resource": {"state": "OPEN"}}, "errors": [FORBIDDEN]}, 1)
+            return self.answer(
+                command,
+                {"data": {"resource": {"state": "OPEN"}}, "errors": [FORBIDDEN]},
+                1,
+                self.check_error or "gh: Resource not accessible by integration",
+            )
         conclusion = self.conclusions.pop(0) if len(self.conclusions) > 1 else self.conclusions[0]
         commit = {
             "id": "commit",
@@ -159,7 +165,7 @@ def test_a_refused_direct_merge_names_the_missing_token_permission():
         merge_queue.operate("queue", URL, github)
     assert str(caught.value) == (
         "squash merge refused: Resource not accessible by integration; "
-        "the GitHub token needs the pull requests write permission"
+        "the GitHub App token needs the pull requests write permission"
     )
 
 
@@ -199,4 +205,30 @@ def test_a_base_without_a_queue_refuses_a_moved_head():
     with pytest.raises(SwarmError) as caught:
         merge_queue.operate("queue", URL, github, attempts=3)
     assert str(caught.value) == "the pull request head moved; merge the new head once its checks pass"
+    assert github.merged == []
+
+
+def test_a_merge_refused_for_another_reason_keeps_its_own_message():
+    github = GitHub(merge_error="Pull request is not mergeable")
+    with pytest.raises(SwarmError) as caught:
+        merge_queue.operate("queue", URL, github)
+    assert str(caught.value) == "Pull request is not mergeable"
+
+
+def test_pending_required_checks_that_never_finish_name_the_pending_state():
+    github = GitHub(rollup=True, conclusions=(None,))
+    with pytest.raises(SwarmError) as caught:
+        merge_queue.operate("queue", URL, github, attempts=2)
+    assert str(caught.value) == (
+        "required checks on the current pull request head must pass before merging; merge state PENDING"
+    )
+    assert github.merged == []
+
+
+def test_a_check_read_failing_for_another_reason_is_not_taken_for_an_unreadable_rollup():
+    github = GitHub()
+    github.check_error = "gh: HTTP 502"
+    with pytest.raises(SwarmError) as caught:
+        merge_queue.operate("queue", URL, github)
+    assert str(caught.value) == "gh: HTTP 502"
     assert github.merged == []

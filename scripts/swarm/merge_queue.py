@@ -100,17 +100,27 @@ def require_green(url: str, head: str, run) -> None:
         raise SwarmError(f"required checks on the current pull request head must pass before queueing{failed}")
 
 
+def readable_view(url: str, run) -> "ledger_events.PullRequest | None":
+    try:
+        return required_view(url, run)
+    except SwarmError as exc:
+        if "not accessible by integration" not in str(exc):
+            raise
+        return None
+
+
 def settle(url: str, head: str, run, attempts: int) -> None:
     status = "UNKNOWN"
     for attempt in range(attempts):
         if attempt:
             time.sleep(POLL)
-        pull = required_view(url, run)
+        pull = readable_view(url, run)
         if pull is not None:
             if pull.head != head or pull.red:
                 require_green(url, head, run)
             if pull.resolved:
                 return
+            status = "PENDING"
             continue
         raw = graphql(STATE, {"url": url}, run)["resource"]
         if raw["headRefOid"] != head:
@@ -125,8 +135,10 @@ def squash(raw: dict, run) -> str | None:
     try:
         merged = graphql(MERGE, {"id": raw["id"], "head": raw["headRefOid"]}, run)
     except SwarmError as exc:
+        if "not accessible by integration" not in str(exc):
+            raise
         raise SwarmError(
-            f"squash merge refused: {exc}; the GitHub token needs the pull requests write permission"
+            f"squash merge refused: {exc}; the GitHub App token needs the pull requests write permission"
         ) from exc
     return ((merged["mergePullRequest"]["pullRequest"] or {}).get("mergeCommit") or {}).get("oid")
 
