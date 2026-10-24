@@ -6,8 +6,8 @@ from pathlib import Path
 ACTORS = ".github/workflows/trusted-actors.json"
 LOADER = "the-cloud-clockwork/agentihooks/.github/workflows/runner-trust.yml@dev"
 POOLS = ("anton-oss", "anton-oss-light", "anton-oss-batch")
-# The org shared workflows place their job on the runner named by their runs_on input.
-SHARED = "the-cloud-clockwork/.github/.github/workflows/"
+# The only org shared workflow known to place its job on the runner named by its runs_on input.
+SHARED = "the-cloud-clockwork/.github/.github/workflows/semgrep-reusable.yml@main"
 QUEUE_POOLS = {"anton-oss": "anton-oss-queue"}
 GUARD = (
     "github.event_name != 'pull_request_target' && "
@@ -153,7 +153,7 @@ def _selector(runner: object, policy: object) -> bool:
 
 def _trusted_runner(job: dict, actors: object) -> bool:
     uses = job.get("uses", "")
-    if uses and not uses.lower().startswith(SHARED):
+    if uses and uses.lower() != SHARED:
         return False
     runner = (job.get("with") or {}).get("runs_on") if uses else job.get("runs-on")
     return _hosted(runner) or _selector(runner, actors)

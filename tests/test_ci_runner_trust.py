@@ -477,6 +477,9 @@ def test_shared_workflow_call_passes_with_a_hosted_or_trusted_runner_input(runne
         (SHARED_SEMGREP, "${{ inputs.runner }}"),
         (SHARED_SEMGREP, selector("anton-oss-light").replace("github.triggering_actor) ||", "github.actor) ||")),
         ("someone/else/.github/workflows/semgrep-reusable.yml@main", "ubuntu-latest"),
+        ("The-Cloud-Clockwork/.github/.github/workflows/docker-publish-reusable.yml@main", "ubuntu-latest"),
+        ("The-Cloud-Clockwork/.github/.github/workflows/semgrep-reusable.yml@feature", "ubuntu-latest"),
+        ("The-Cloud-Clockwork/.github/.github/workflows/x/../semgrep-reusable.yml@main", "ubuntu-latest"),
         ("The-Cloud-Clockwork/agentihooks/.github/workflows/semgrep.yml@dev", "ubuntu-latest"),
     ],
 )
