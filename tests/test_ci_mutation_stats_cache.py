@@ -233,6 +233,43 @@ def test_incompatible_source_fixture_and_runtime_stats_are_recollected(tmp_path,
     assert calls == [files, files]
 
 
+@pytest.mark.parametrize(
+    ("package", "before", "after", "recollected"),
+    [
+        ("sample-project", "1.2.dev3+gabc", "1.2.dev4+gdef", False),
+        ("sample-project", "1.2.dev3", "1.2.dev4", False),
+        ("sample-project", "1.2+gabc", "1.2+gdef", False),
+        ("sample-project", "1.2.dev3+gabc", "1.3.dev1+gdef", True),
+        ("dependency", "1.2+gabc", "1.2+gdef", True),
+        ("dependency", "1.2.dev3", "1.2.dev4", True),
+    ],
+)
+def test_the_project_build_number_alone_keeps_stats(tmp_path, monkeypatch, package, before, after, recollected):
+    from importlib import metadata
+    from types import SimpleNamespace
+
+    from scripts.ci_mutation.stats_cache import collect_cached_stats
+
+    root = tmp_path / "repo"
+    files = ["tests/test_sample.py"]
+    _repository(
+        root,
+        {files[0]: "def test_sample():\n    pass\n", "pyproject.toml": '[project]\nname = "sample-project"\n'},
+    )
+    calls = []
+
+    def collect(chosen):
+        calls.append(chosen)
+        return [{"status": 0, "tests": {}, "durations": {}, "cpu": 1}]
+
+    cache = tmp_path / "cache"
+    for version in (before, after):
+        distribution = SimpleNamespace(metadata={"Name": package}, version=version)
+        monkeypatch.setattr(metadata, "distributions", lambda distribution=distribution: [distribution])
+        collect_cached_stats(root, cache, {}, files, [], collect)
+    assert calls == ([files, files] if recollected else [files])
+
+
 def test_persisted_stats_reuse_survives_a_new_python_process(tmp_path):
     import json
     import os

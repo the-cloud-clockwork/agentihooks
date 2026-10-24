@@ -4,6 +4,7 @@ import hashlib
 import json
 import subprocess
 import sys
+import tomllib
 from collections.abc import Callable
 from importlib import metadata
 from pathlib import Path
@@ -97,6 +98,18 @@ def current_input(root: Path, changes: dict, digests: dict[str, str | None], nam
     return [digests[name], changes.get(name)]
 
 
+def distribution_versions(root: Path) -> dict[str, str]:
+    config = root / "pyproject.toml"
+    own = tomllib.loads(config.read_text()).get("project", {}).get("name") if config.is_file() else None
+    # The project's own build number names its commit, while its files already key the stats by content.
+    return {
+        distribution.metadata["Name"]: distribution.version.partition("+")[0].partition(".dev")[0]
+        if distribution.metadata["Name"] == own
+        else distribution.version
+        for distribution in metadata.distributions()
+    }
+
+
 def reusable_entry(file: Path, opened: bool, check: Callable[[str], list]) -> dict | None:
     entry = json.loads(file.read_text()) if file.is_file() else None
     if (
@@ -142,7 +155,7 @@ def collect_cached_stats(
         for path in tracked
         if path and (path in CONFIGURATION or path.startswith("scripts/ci_mutation/")) and (root / path).is_file()
     }
-    versions = {distribution.metadata["Name"]: distribution.version for distribution in metadata.distributions()}
+    versions = distribution_versions(root)
     context = dict(zip(CONTEXT_FIELDS, (SCHEMA, sources, options, [sys.version, sys.platform, versions])))
     modules = {module_name(Path(path)): path for path in tracked if Path(path).suffix == ".py"}
     records = {}
