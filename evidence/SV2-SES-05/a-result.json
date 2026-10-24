@@ -1,0 +1,377 @@
+{
+  "case": "T-SV2-SES-05-A",
+  "evidence_class": "mocked: fixture transcript files in a temporary folder and SQLite catalog and import ledger files stand in for the operator's real Claude and Codex homes and the central database; no live provider home was read",
+  "input_sha256": {
+    "session-import.json": "74cf01fbdee514d0c49a3d9db6eb37b261c43dc1717cf1c14fd753d0661901fb"
+  },
+  "observed": {
+    "dry_run": {
+      "dry_run": true,
+      "historical_import_unknown_attribution": 3,
+      "importer_version": "1",
+      "losses": [
+        {
+          "byte_end": 217,
+          "byte_start": 187,
+          "installation": "workstation-a",
+          "provider": "claude",
+          "reason": "unparseable line",
+          "relative_path": "-fixture-dev-agentihooks/0a1b2c3d-old.jsonl"
+        },
+        {
+          "byte_end": 1110,
+          "byte_start": 956,
+          "installation": "workstation-a",
+          "provider": "codex",
+          "reason": "truncated final line",
+          "relative_path": "2026/02/10/rollout-2026-02-10T08-00-00-0199aa00-codex.jsonl"
+        }
+      ],
+      "missing_roots": [
+        {
+          "installation": "retired-host",
+          "provider": "codex"
+        }
+      ],
+      "missing_sources": [
+        {
+          "installation": "workstation-a",
+          "provider": "claude",
+          "reason": "expected source is absent",
+          "relative_path": "-fixture-dev-agentihooks/7c3d-lost.jsonl"
+        }
+      ],
+      "sources": [
+        {
+          "events": 4,
+          "installation": "workstation-a",
+          "outcome": "would_import",
+          "provider": "claude",
+          "relative_path": "-fixture-dev-agentihooks/0a1b2c3d-old.jsonl",
+          "session_uid": "swarm-fixture:claude:workstation-a:0a1b2c3d-old",
+          "source_sha256": "714df998849714465a0d31f177206097478e17078a951f9543e815d313c10908",
+          "unknown_attribution_events": 1
+        },
+        {
+          "events": 2,
+          "installation": "workstation-a",
+          "outcome": "would_import",
+          "provider": "claude",
+          "relative_path": "-fixture-personal-agentihooks/5e6f-dup.jsonl",
+          "session_uid": "swarm-fixture:claude:workstation-a:5e6f-dup",
+          "source_sha256": "4e05f76295b0cf7f76a06f0f69c5f67642b92708928296f82e30f3bb2ac31f2e",
+          "unknown_attribution_events": 2
+        },
+        {
+          "events": 5,
+          "installation": "workstation-a",
+          "outcome": "would_import",
+          "provider": "codex",
+          "relative_path": "2026/02/10/rollout-2026-02-10T08-00-00-0199aa00-codex.jsonl",
+          "session_uid": "swarm-fixture:codex:workstation-a:0199aa00-codex",
+          "source_sha256": "6b13698cbb01c26b17838e56c8b561d4feadb24209ba39da587419a0eaf6041c",
+          "unknown_attribution_events": 0
+        }
+      ],
+      "state": "completed"
+    },
+    "event_projects": {
+      "swarm-fixture:claude:workstation-a:0a1b2c3d-old": [
+        "None",
+        "github.com/acme/agentihooks"
+      ],
+      "swarm-fixture:claude:workstation-a:5e6f-dup": [
+        "None"
+      ],
+      "swarm-fixture:codex:workstation-a:0199aa00-codex": [
+        "github.com/acme/agentihooks"
+      ]
+    },
+    "metrics": {
+      "historical_import_unknown_attribution": 3
+    },
+    "provenance": [
+      {
+        "provenance": {
+          "ambiguous_basenames": [],
+          "first_event_time": "2025-01-05T10:00:00Z",
+          "importer_version": "1",
+          "installation": "workstation-a",
+          "last_event_time": "2025-01-05T10:01:00Z",
+          "losses": [
+            {
+              "byte_end": 217,
+              "byte_start": 187,
+              "reason": "unparseable line"
+            }
+          ],
+          "native_session_id": "0a1b2c3d-old",
+          "projects": [
+            "github.com/acme/agentihooks"
+          ],
+          "provider": "claude",
+          "provider_version": null,
+          "relative_path": "-fixture-dev-agentihooks/0a1b2c3d-old.jsonl",
+          "session_id_source": "transcript",
+          "source_bytes": 741,
+          "source_sha256": "714df998849714465a0d31f177206097478e17078a951f9543e815d313c10908",
+          "unknown": [
+            "provider_version",
+            "project"
+          ],
+          "unknown_attribution_events": 1,
+          "working_folders": [
+            "/fixture/dev/agentihooks",
+            "/fixture/scratch"
+          ]
+        },
+        "session_uid": "swarm-fixture:claude:workstation-a:0a1b2c3d-old",
+        "source_generation": "import:714df998849714465a0d31f177206097478e17078a951f9543e815d313c10908"
+      },
+      {
+        "provenance": {
+          "ambiguous_basenames": [
+            "/fixture/personal/agentihooks"
+          ],
+          "first_event_time": "2026-03-01T09:00:00Z",
+          "importer_version": "1",
+          "installation": "workstation-a",
+          "last_event_time": "2026-03-01T09:00:03Z",
+          "losses": [],
+          "native_session_id": "5e6f-dup",
+          "projects": [],
+          "provider": "claude",
+          "provider_version": "2.0.14",
+          "relative_path": "-fixture-personal-agentihooks/5e6f-dup.jsonl",
+          "session_id_source": "file name",
+          "source_bytes": 383,
+          "source_sha256": "4e05f76295b0cf7f76a06f0f69c5f67642b92708928296f82e30f3bb2ac31f2e",
+          "unknown": [
+            "project"
+          ],
+          "unknown_attribution_events": 2,
+          "working_folders": [
+            "/fixture/personal/agentihooks"
+          ]
+        },
+        "session_uid": "swarm-fixture:claude:workstation-a:5e6f-dup",
+        "source_generation": "import:4e05f76295b0cf7f76a06f0f69c5f67642b92708928296f82e30f3bb2ac31f2e"
+      },
+      {
+        "provenance": {
+          "ambiguous_basenames": [],
+          "first_event_time": "2026-02-10T08:00:00Z",
+          "importer_version": "1",
+          "installation": "workstation-a",
+          "last_event_time": "2026-02-10T08:00:05Z",
+          "losses": [
+            {
+              "byte_end": 1110,
+              "byte_start": 956,
+              "reason": "truncated final line"
+            }
+          ],
+          "native_session_id": "0199aa00-codex",
+          "projects": [
+            "github.com/acme/agentihooks"
+          ],
+          "provider": "codex",
+          "provider_version": "0.147.0",
+          "relative_path": "2026/02/10/rollout-2026-02-10T08-00-00-0199aa00-codex.jsonl",
+          "session_id_source": "transcript",
+          "source_bytes": 1110,
+          "source_sha256": "6b13698cbb01c26b17838e56c8b561d4feadb24209ba39da587419a0eaf6041c",
+          "unknown": [],
+          "unknown_attribution_events": 0,
+          "working_folders": [
+            "/fixture/dev/agentihooks/hooks"
+          ]
+        },
+        "session_uid": "swarm-fixture:codex:workstation-a:0199aa00-codex",
+        "source_generation": "import:6b13698cbb01c26b17838e56c8b561d4feadb24209ba39da587419a0eaf6041c"
+      }
+    ],
+    "report": {
+      "dry_run": false,
+      "historical_import_unknown_attribution": 3,
+      "importer_version": "1",
+      "losses": [
+        {
+          "byte_end": 217,
+          "byte_start": 187,
+          "installation": "workstation-a",
+          "provider": "claude",
+          "reason": "unparseable line",
+          "relative_path": "-fixture-dev-agentihooks/0a1b2c3d-old.jsonl"
+        },
+        {
+          "byte_end": 1110,
+          "byte_start": 956,
+          "installation": "workstation-a",
+          "provider": "codex",
+          "reason": "truncated final line",
+          "relative_path": "2026/02/10/rollout-2026-02-10T08-00-00-0199aa00-codex.jsonl"
+        }
+      ],
+      "missing_roots": [
+        {
+          "installation": "retired-host",
+          "provider": "codex"
+        }
+      ],
+      "missing_sources": [
+        {
+          "installation": "workstation-a",
+          "provider": "claude",
+          "reason": "expected source is absent",
+          "relative_path": "-fixture-dev-agentihooks/7c3d-lost.jsonl"
+        }
+      ],
+      "sources": [
+        {
+          "events": 4,
+          "installation": "workstation-a",
+          "outcome": "committed",
+          "provider": "claude",
+          "relative_path": "-fixture-dev-agentihooks/0a1b2c3d-old.jsonl",
+          "session_uid": "swarm-fixture:claude:workstation-a:0a1b2c3d-old",
+          "source_sha256": "714df998849714465a0d31f177206097478e17078a951f9543e815d313c10908",
+          "unknown_attribution_events": 1
+        },
+        {
+          "events": 2,
+          "installation": "workstation-a",
+          "outcome": "committed",
+          "provider": "claude",
+          "relative_path": "-fixture-personal-agentihooks/5e6f-dup.jsonl",
+          "session_uid": "swarm-fixture:claude:workstation-a:5e6f-dup",
+          "source_sha256": "4e05f76295b0cf7f76a06f0f69c5f67642b92708928296f82e30f3bb2ac31f2e",
+          "unknown_attribution_events": 2
+        },
+        {
+          "events": 5,
+          "installation": "workstation-a",
+          "outcome": "committed",
+          "provider": "codex",
+          "relative_path": "2026/02/10/rollout-2026-02-10T08-00-00-0199aa00-codex.jsonl",
+          "session_uid": "swarm-fixture:codex:workstation-a:0199aa00-codex",
+          "source_sha256": "6b13698cbb01c26b17838e56c8b561d4feadb24209ba39da587419a0eaf6041c",
+          "unknown_attribution_events": 0
+        }
+      ],
+      "state": "completed"
+    },
+    "search_breaker": [
+      {
+        "byte_end": 186,
+        "byte_start": 0,
+        "event_id": "abf4c8f6b6eb345f08bce9b0f1013424cb87c119bfeac8a8c362b36733f4ec26",
+        "project_id": "github.com/acme/agentihooks",
+        "record": {
+          "kind": "user_text",
+          "source_time": "2025-01-05T10:00:00Z",
+          "text": "why does the retry breaker trip early"
+        },
+        "sequence": 1,
+        "session_uid": "swarm-fixture:claude:workstation-a:0a1b2c3d-old",
+        "source": {
+          "importer_version": "1",
+          "installation": "workstation-a",
+          "provider": "claude",
+          "relative_path": "-fixture-dev-agentihooks/0a1b2c3d-old.jsonl",
+          "source_sha256": "714df998849714465a0d31f177206097478e17078a951f9543e815d313c10908"
+        },
+        "source_generation": "import:714df998849714465a0d31f177206097478e17078a951f9543e815d313c10908"
+      },
+      {
+        "byte_end": 520,
+        "byte_start": 218,
+        "event_id": "bd77ad2eb9b4e180ad2c50f3cbee7ef1d27f3513e477c20f68bea4c3a00f0ac9",
+        "project_id": "github.com/acme/agentihooks",
+        "record": {
+          "kind": "assistant_text",
+          "source_time": "2025-01-05T10:00:05Z",
+          "text": "the breaker counts identical failures"
+        },
+        "sequence": 2,
+        "session_uid": "swarm-fixture:claude:workstation-a:0a1b2c3d-old",
+        "source": {
+          "importer_version": "1",
+          "installation": "workstation-a",
+          "provider": "claude",
+          "relative_path": "-fixture-dev-agentihooks/0a1b2c3d-old.jsonl",
+          "source_sha256": "714df998849714465a0d31f177206097478e17078a951f9543e815d313c10908"
+        },
+        "source_generation": "import:714df998849714465a0d31f177206097478e17078a951f9543e815d313c10908"
+      },
+      {
+        "byte_end": 740,
+        "byte_start": 521,
+        "event_id": "f6219f16e418aee6450349120db6252a4fd72b8c0f6ddc4c2ffe59ed0990a975",
+        "project_id": null,
+        "record": {
+          "is_error": false,
+          "kind": "tool_result",
+          "source_time": "2025-01-05T10:01:00Z",
+          "tool_result": "breaker log café",
+          "tool_use_id": "toolu_old"
+        },
+        "sequence": 4,
+        "session_uid": "swarm-fixture:claude:workstation-a:0a1b2c3d-old",
+        "source": {
+          "importer_version": "1",
+          "installation": "workstation-a",
+          "provider": "claude",
+          "relative_path": "-fixture-dev-agentihooks/0a1b2c3d-old.jsonl",
+          "source_sha256": "714df998849714465a0d31f177206097478e17078a951f9543e815d313c10908"
+        },
+        "source_generation": "import:714df998849714465a0d31f177206097478e17078a951f9543e815d313c10908"
+      }
+    ],
+    "search_rollout_cursor": [
+      {
+        "byte_end": 325,
+        "byte_start": 156,
+        "event_id": "a3ff37456e4a5da3e3e53d96b4a19e4129cdf755fdd01600e36c7e6ed1dfe4ec",
+        "project_id": "github.com/acme/agentihooks",
+        "record": {
+          "kind": "user_text",
+          "source_time": "2026-02-10T08:00:01Z",
+          "text": "tail the rollout cursor"
+        },
+        "sequence": 2,
+        "session_uid": "swarm-fixture:codex:workstation-a:0199aa00-codex",
+        "source": {
+          "importer_version": "1",
+          "installation": "workstation-a",
+          "provider": "codex",
+          "relative_path": "2026/02/10/rollout-2026-02-10T08-00-00-0199aa00-codex.jsonl",
+          "source_sha256": "6b13698cbb01c26b17838e56c8b561d4feadb24209ba39da587419a0eaf6041c"
+        },
+        "source_generation": "import:6b13698cbb01c26b17838e56c8b561d4feadb24209ba39da587419a0eaf6041c"
+      },
+      {
+        "byte_end": 813,
+        "byte_start": 634,
+        "event_id": "a162e1ac13249c42398e8ac58e1d34c1c18752a811d1a11f6795f57b72f4bfa5",
+        "project_id": "github.com/acme/agentihooks",
+        "record": {
+          "kind": "assistant_text",
+          "source_time": "2026-02-10T08:00:04Z",
+          "text": "the rollout cursor advances"
+        },
+        "sequence": 5,
+        "session_uid": "swarm-fixture:codex:workstation-a:0199aa00-codex",
+        "source": {
+          "importer_version": "1",
+          "installation": "workstation-a",
+          "provider": "codex",
+          "relative_path": "2026/02/10/rollout-2026-02-10T08-00-00-0199aa00-codex.jsonl",
+          "source_sha256": "6b13698cbb01c26b17838e56c8b561d4feadb24209ba39da587419a0eaf6041c"
+        },
+        "source_generation": "import:6b13698cbb01c26b17838e56c8b561d4feadb24209ba39da587419a0eaf6041c"
+      }
+    ]
+  },
+  "state": "passed"
+}
