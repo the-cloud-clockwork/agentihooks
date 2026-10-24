@@ -236,12 +236,23 @@ def free_port() -> int:
 def start_server(folder: Path, port: int, log: TextIO) -> subprocess.Popen:
     env = {**os.environ, "LEDGER_DIR": str(folder), "LEDGER_PORT": str(port), "SWARM_RELOAD": "0"}
     server = subprocess.Popen(
-        [sys.executable, ledger_server.__file__, "--serve"], env=env, stdout=log, stderr=log, stdin=subprocess.DEVNULL
+        [sys.executable, ledger_server.__file__, "--serve"],
+        env=env,
+        stdout=log,
+        stderr=subprocess.PIPE,
+        stdin=subprocess.DEVNULL,
+        text=True,
     )
+    stderr: list[str] = []
+    relay = threading.Thread(target=relay_stderr, args=(server.stderr, log, stderr), daemon=True)
+    relay.start()
     deadline = time.monotonic() + SERVER_WAIT_S
     while time.monotonic() < deadline:
         if server.poll() is not None:
-            raise SystemExit(f"ledger server exited with {server.returncode}")
+            relay.join(timeout=5)
+            raise SystemExit(
+                f"ledger server exited with {server.returncode} before listening; its stderr:\n" + "".join(stderr)
+            )
         try:
             with socket.create_connection(("127.0.0.1", port), timeout=1):
                 return server
@@ -249,6 +260,15 @@ def start_server(folder: Path, port: int, log: TextIO) -> subprocess.Popen:
             time.sleep(0.2)
     server.kill()
     raise SystemExit(f"ledger server did not listen on port {port} within {SERVER_WAIT_S}s")
+
+
+def relay_stderr(pipe: TextIO, log: TextIO, lines: list[str]) -> None:
+    for line in pipe:
+        lines.append(line)
+        try:
+            os.write(log.fileno(), line.encode())
+        except OSError:
+            pass
 
 
 def stop_server(server: subprocess.Popen) -> None:
