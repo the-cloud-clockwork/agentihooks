@@ -119,6 +119,55 @@ def test_a_test_that_passes_on_retry_passes_and_is_recorded_as_a_flake(tmp_path,
 
 
 @pytest.mark.parametrize("workers", ["0", "2"])
+def test_retry_pass_publishes_the_first_attempt_traceback(tmp_path, workers, capsys):
+    from tests import flake_budget
+
+    probes = """
+attempt = 0
+
+def failing_operation():
+    raise RuntimeError("first attempt traceback marker " + "x" * 400 + " retained tail")
+
+def test_fails_once():
+    global attempt
+    attempt += 1
+    if attempt == 1:
+        failing_operation()
+"""
+    result, records = _run(tmp_path, "test_fails_once", workers=workers, probes=probes, extra=("--tb=short",))
+    assert result.returncode == 0, result.stdout + result.stderr
+    traceback = records[0]["tracebacks"][0]
+    for marker in ("in failing_operation", "raise RuntimeError", "retained tail"):
+        assert marker in traceback
+        assert marker in result.stdout
+
+    reports = tmp_path / "reports"
+    reports.mkdir()
+    (reports / "flakes.jsonl").write_text((tmp_path / "flakes.jsonl").read_text())
+    out = tmp_path / "flake-budget.json"
+    assert (
+        flake_budget.main(
+            [
+                "--history",
+                str(tmp_path / "history.jsonl"),
+                "--reports",
+                str(reports),
+                "--out",
+                str(out),
+                "--now",
+                "100",
+            ]
+        )
+        == 0
+    )
+    evidence = json.loads(out.read_text())["retried"][0]["reports"]
+    assert evidence == records
+    print(result.stdout)
+    print(out.read_text())
+    assert "in failing_operation" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("workers", ["0", "2"])
 def test_a_test_failing_every_attempt_fails_after_three_attempts(tmp_path, workers):
     result, records = _run(tmp_path, workers=workers)
     assert result.returncode == 1, result.stdout + result.stderr
