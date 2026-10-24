@@ -35,6 +35,7 @@ def unseated(tmp_path, monkeypatch):
     monkeypatch.delenv("AGENTIHOOKS_SWARM", raising=False)
     monkeypatch.delenv("AGENTIHOOKS_SWARM_TASK", raising=False)
     monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path / "ah"))
+    monkeypatch.setenv("LEDGER_DIR", str(tmp_path / "ledgers"))
     return tmp_path
 
 

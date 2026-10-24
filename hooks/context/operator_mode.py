@@ -145,7 +145,7 @@ def question_block(tool_name, session_id, environ=None):
 
 def _heard(session_id, environ=None):
     env = os.environ if environ is None else environ
-    return not _attached(env, session_id) or bool(session_id) and bool(_load(session_id).get("on"))
+    return not _attached(env, session_id) or (bool(session_id) and bool(_load(session_id).get("on")))
 
 
 def _away(session_id, environ, now):

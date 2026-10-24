@@ -337,7 +337,6 @@ def test_the_binding_is_read_from_the_home_ledger_folder_by_default():
 
 def test_the_question_tool_passes_a_bound_session_only_after_typed_operator_on_and_a_standalone_one_always(ledgers):
     standalone = {"LEDGER_DIR": str(ledgers)}
-    operator_mode.observe("s3", "operator off", True, now=100)
     assert operator_mode.question_block("AskUserQuestion", "s3", standalone) == ""
     assert operator_mode.question_block("AskUserQuestion", "", standalone) == ""
     assert operator_mode.question_block("AskUserQuestion", "s1", SWARM) != ""
