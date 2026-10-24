@@ -521,6 +521,7 @@ def test_a_cursor_with_nothing_staged_has_no_generated_progress(cursors):
         "accepted_at": 0,
         "exporter_alive": False,
         "requested_at": 0,
+        "stopped": False,
     }
 
 
