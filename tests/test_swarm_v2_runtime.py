@@ -571,6 +571,20 @@ def test_a_failed_tick_spawn_or_resume_raises_its_typed_spawn_error(status):
         assert (str(raised.value), raised.value.status) == ("no seat", status)
 
 
+def test_a_reservation_refusal_retains_the_selected_harness():
+    def launch(request):
+        return Outcome("spawn", Status.UNAVAILABLE, "hive", {"harness": "codex"}, detail="account reservation is full")
+
+    router = SimpleNamespace(spawn_backend=lambda request: "hive")
+    runtime = RoutedRuntime(FakeHerdr(), router, launch=launch)
+    with pytest.raises(SpawnError) as raised:
+        runtime.spawn("cfg", "eng", "engineer", {"id": "t1"})
+    assert raised.value.harness == "codex"
+    assert str(raised.value) == "account reservation is full"
+    assert raised.value.status is Status.UNAVAILABLE
+    assert raised.value.pane_id == ""
+
+
 def test_a_tick_observation_of_another_backend_is_unknown_and_touches_nothing():
     herdr = FakeHerdr()
     runtime = tick_runtime(herdr)
