@@ -47,6 +47,17 @@ gate commands' environment. Local tests run only when
 `AGENTIHOOKS_ALLOW_LOCAL_TEST_RUN=true`; see
 [Local test guard](local-test-guard.md).
 
+## Push spacing
+
+The push guard also refuses a passed `git push` to a branch whose last push
+from this clone is younger than `AGENTIHOOKS_PUSH_SPACING_S` seconds (default
+300; `0` turns it off). The time comes from the `update by push` entries in the
+remote tracking reflog, so the check costs no GitHub call. A pull request Tests
+run takes at least four and a half minutes, so a push inside that window
+cancels the run the previous push started. The refusal names the time the push
+may go; keep committing and push once, so one run grades every commit. Delete
+pushes, dry runs and `diffcheck/` pushes are not spaced.
+
 ## How the size stage picks its base
 
 The gate computes `git merge-base <base> HEAD` and copies two files from that

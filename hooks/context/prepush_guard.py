@@ -1,5 +1,7 @@
 import os
 import subprocess
+import time
+from datetime import UTC, datetime
 from pathlib import Path
 
 from hooks.common import log
@@ -120,24 +122,77 @@ def _folder(cwd: Path, folders: list[str]) -> Path:
     return cwd
 
 
-def _unpassed(payload: dict) -> Path | None:
+def _pushes(payload: dict) -> list[tuple[Path, list[str]]]:
     from hooks.context.shell_commands import located
-    from scripts.ci_prepush import passed
 
     tool_input = payload["tool_input"]
     command = tool_input.get("command") or tool_input.get("cmd")
     if not command:
-        return None
+        return []
     cwd = Path(payload.get("cwd") or os.getcwd(), _path(tool_input.get("workdir") or ""))
     selected = bool(tool_input.get("workdir"))
+    found = []
     for tokens, folders in located(command):
         push = _push(tokens)
         if push is None or _exempt(push[1]):
             continue
         base = _push_directory(_folder(cwd, folders), selected or bool(folders) or bool(push[0]))
         root = _require_directory(_toplevel(base.joinpath(*map(_path, push[0]))), "repository lookup")
-        if root and (root / "scripts" / "ci_prepush" / "__init__.py").is_file() and not passed(root):
+        if root:
+            found.append((root, push[1]))
+    return found
+
+
+def _unpassed(pushes: list[tuple[Path, list[str]]]) -> Path | None:
+    from scripts.ci_prepush import passed
+
+    for root, _ in pushes:
+        if (root / "scripts" / "ci_prepush" / "__init__.py").is_file() and not passed(root):
             return root
+    return None
+
+
+def _branches(root: Path, args: list[str]) -> tuple[str, list[str]]:
+    words = [arg for arg in args if not arg.startswith("-")]
+    branches = []
+    for spec in words[1:] or ["HEAD"]:
+        branch = spec.lstrip("+").split(":")[-1].removeprefix("refs/heads/")
+        if branch == "HEAD":
+            result = subprocess.run(
+                ["git", "-C", str(root), "rev-parse", "--abbrev-ref", "HEAD"], capture_output=True, text=True
+            )
+            branch = result.stdout.strip()
+        branches.append(branch)
+    return (words[0] if words else "origin"), branches
+
+
+def _last_push(root: Path, remote: str, branch: str) -> float | None:
+    common = _common_dir(root)
+    log_file = Path(common or "", "logs", "refs", "remotes", remote, branch)
+    if not common or not log_file.is_file():
+        return None
+    stamps = [
+        float(head.rsplit(" ", 2)[1])
+        for head, _, message in (line.partition("\t") for line in log_file.read_text().splitlines())
+        if message.startswith("update by push")
+    ]
+    return stamps[-1] if stamps else None
+
+
+def _crowded(pushes: list[tuple[Path, list[str]]], now: float) -> str | None:
+    spacing = int(os.getenv("AGENTIHOOKS_PUSH_SPACING_S", "300"))
+    for root, args in pushes:
+        remote, branches = _branches(root, args)
+        for branch in branches:
+            last = _last_push(root, remote, branch)
+            if last is not None and 0 <= now - last < spacing:
+                wait = int(last + spacing - now) + 1
+                after = datetime.fromtimestamp(last + spacing, UTC).strftime("%H:%M:%S")
+                return (
+                    f"BLOCKED: the last push to {branch} was {int(now - last)} s ago and its Tests run is still "
+                    f"running; pushing now cancels it. Keep committing locally and push {branch} after "
+                    f"{after} UTC, in {wait} s, so one run grades every commit. Never leave the final commit unpushed."
+                )
     return None
 
 
@@ -145,12 +200,16 @@ def check_prepush(payload: dict) -> None:
     import shlex
 
     try:
-        root = _unpassed(payload)
+        pushes = _pushes(payload)
+        root = _unpassed(pushes)
+        crowded = None if root else _crowded(pushes, time.time())
     except BlockAction:
         raise
     except Exception as exc:
         log("prepush_guard failed", {"error": str(exc)})
         return
+    if crowded:
+        raise BlockAction(crowded)
     if root is None:
         return
     command = "python -m scripts.ci_prepush"

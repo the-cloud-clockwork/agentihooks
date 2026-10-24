@@ -602,3 +602,75 @@ def test_codex_explicit_directory_without_a_repository_is_refused(repo, tmp_path
         "BLOCKED: Could not resolve the push directory (repository lookup). "
         "Use git -C /absolute/path/to/worktree push with the intended repository."
     )
+
+
+def _pushed(root, branch, *entries, remote="origin"):
+    log_file = root / ".git" / "logs" / "refs" / "remotes" / remote / branch
+    log_file.parent.mkdir(parents=True, exist_ok=True)
+    zero = "0" * 40
+    log_file.write_text("".join(f"{zero} {zero} t <t@example.com> {stamp} +0000\t{why}\n" for stamp, why in entries))
+
+
+def _spacing(root, command, now):
+    return prepush_guard._crowded(prepush_guard._pushes(_bash(command, root)), now)
+
+
+def test_a_push_inside_the_spacing_names_when_it_may_go(repo):
+    _pushed(repo, "work", (1000, "update by push"))
+    assert _spacing(repo, "git push origin HEAD", 1120) == (
+        "BLOCKED: the last push to work was 120 s ago and its Tests run is still running; pushing now cancels it. "
+        "Keep committing locally and push work after 00:21:40 UTC, in 181 s, so one run grades every commit. "
+        "Never leave the final commit unpushed."
+    )
+
+
+@pytest.mark.parametrize(("now", "blocked"), [(1000, True), (1299, True), (1300, False), (999, False)])
+def test_the_spacing_holds_from_the_last_push_for_its_whole_window(repo, now, blocked):
+    _pushed(repo, "work", (1000, "update by push"))
+    assert (_spacing(repo, "git push", now) is not None) is blocked
+
+
+def test_only_the_newest_push_entry_counts_and_fetches_are_ignored(repo):
+    _pushed(repo, "work", (100, "update by push"), (1000, "update by push"), (1250, "fetch: fast-forward"))
+    assert _spacing(repo, "git push", 1301) is None
+    assert _spacing(repo, "git push", 1299) is not None
+
+
+@pytest.mark.parametrize(
+    ("command", "branch", "remote"),
+    [
+        ("git push origin HEAD:other", "other", "origin"),
+        ("git push -u upstream +refs/heads/work:refs/heads/other", "other", "upstream"),
+        ("git push --force-with-lease origin work", "work", "origin"),
+    ],
+)
+def test_the_spacing_reads_the_branch_and_remote_the_push_targets(repo, command, branch, remote):
+    _pushed(repo, branch, (1000, "update by push"), remote=remote)
+    assert f"the last push to {branch} was 10 s ago" in _spacing(repo, command, 1010)
+    assert _spacing(repo, command.replace(f" {remote} ", " unrecorded "), 1010) is None
+
+
+def test_a_branch_never_pushed_from_this_clone_goes_at_once(repo):
+    assert _spacing(repo, "git push origin HEAD", 1000) is None
+
+
+def test_zero_spacing_turns_the_check_off(repo, monkeypatch):
+    monkeypatch.setenv("AGENTIHOOKS_PUSH_SPACING_S", "0")
+    _pushed(repo, "work", (1000, "update by push"))
+    assert _spacing(repo, "git push", 1000) is None
+
+
+def test_a_passed_push_inside_the_spacing_is_refused_and_a_delete_is_not(repo):
+    _stamp(repo)
+    _pushed(repo, "work", (prepush_guard.time.time(), "update by push"))
+    with pytest.raises(BlockAction) as blocked:
+        check_prepush(_bash("git push origin HEAD", repo))
+    assert str(blocked.value).startswith("BLOCKED: the last push to work was ")
+    check_prepush(_bash("git push origin --delete work", repo))
+
+
+def test_an_unpassed_push_names_the_gate_before_the_spacing(repo):
+    _pushed(repo, "work", (prepush_guard.time.time(), "update by push"))
+    with pytest.raises(BlockAction) as blocked:
+        check_prepush(_bash("git push origin HEAD", repo))
+    assert str(blocked.value) == _message(repo)
