@@ -933,6 +933,46 @@ def test_a_head_running_the_summary_under_pipefail_bash_is_green(form, shell, pr
     assert "shell" not in ci_reuse.gate_steps(**form, summary=True)[-1]
 
 
+_SELECTION_DIAGNOSTIC = """selection=$(jq -r '.select.result // ""' <<< "$NEEDS")
+if [[ "$selection" == failure || "$selection" == cancelled ]]; then
+  echo "::error::Test selection $selection; fix selection before downstream test and coverage checks."
+  exit 1
+fi
+"""
+
+
+@pytest.mark.parametrize("diagnostic", [False, True])
+def test_selection_diagnostic_preserves_the_current_required_gate(diagnostic):
+    base = yaml.safe_load((Path(__file__).resolve().parents[1] / ".github/workflows/test.yml").read_text())
+    head = copy.deepcopy(base)
+    if diagnostic:
+        step = head["jobs"]["gate-required"]["steps"][0]
+        step["run"] = _SELECTION_DIAGNOSTIC + step["run"]
+    assert _grade({"test.yml": head}, base={"test.yml": base}) == []
+
+
+@pytest.mark.parametrize("diagnostic", [False, True])
+@pytest.mark.parametrize(
+    ("before", "after"),
+    [
+        ('then .value.result == "success"', 'then .value.result != "failure"'),
+        ('"semgrep", "sonar"', '"semgrep"'),
+        ("exit 1", "exit 0"),
+    ],
+)
+def test_selection_diagnostic_cannot_weaken_required_success(diagnostic, before, after):
+    base = yaml.safe_load((Path(__file__).resolve().parents[1] / ".github/workflows/test.yml").read_text())
+    head = copy.deepcopy(base)
+    step = head["jobs"]["gate-required"]["steps"][0]
+    assert before in step["run"]
+    step["run"] = step["run"].replace(before, after)
+    if diagnostic:
+        step["run"] = _SELECTION_DIAGNOSTIC + step["run"]
+    assert "The head's Gate — Required changes its steps; the protected branch grades with its own." in _grade(
+        {"test.yml": head}, base={"test.yml": base}
+    )
+
+
 @pytest.mark.parametrize("weaken", ["trusted output", "no skip guard"])
 def test_a_head_weakening_the_inline_mutation_form_is_red(weaken):
     from scripts import ci_reuse
