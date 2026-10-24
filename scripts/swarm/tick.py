@@ -1196,7 +1196,7 @@ def _not_launched(slug, store, ledger, runtime, rows, failed, now_ms):
     try:
         refused = _room_wait(runtime, record.lane, task)
     except SpawnError:
-        refused = ""
+        return _spawn_failed(slug, store, ledger, runtime, rows, failed, now_ms)
     if refused:
         return [_room_refused(slug, store, ledger, runtime, rows, failed, refused)]
     return _spawn_failed(slug, store, ledger, runtime, rows, failed, now_ms)
