@@ -173,6 +173,18 @@ def test_runs_are_read_one_hour_at_a_time_and_kept_once(monkeypatch):
     assert len(calls) == 2
 
 
+def test_an_hour_at_the_listing_cap_fails_instead_of_undercounting(monkeypatch):
+    since = datetime(2026, 10, 24, 0, tzinfo=UTC)
+    until = datetime(2026, 10, 24, 1, tzinfo=UTC)
+    monkeypatch.setattr(ci_minutes, "rows", lambda path, key: [run(n, "push") for n in range(999)])
+    assert len(ci_minutes.read_runs("o/r", since, until)) == 999
+    monkeypatch.setattr(ci_minutes, "rows", lambda path, key: [run(n, "push") for n in range(1000)])
+    with pytest.raises(
+        RuntimeError, match="^2026-10-24T00:00:00Z..2026-10-24T00:59:59Z listed 1000 runs, the most GitHub returns$"
+    ):
+        ci_minutes.read_runs("o/r", since, until)
+
+
 def test_jobs_are_read_for_every_attempt_of_every_run(monkeypatch):
     calls = []
 

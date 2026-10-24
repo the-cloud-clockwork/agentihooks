@@ -1,7 +1,4 @@
-"""Measures Anton runner minutes per merged pull request, split by tier, workflow and job, from Actions job timings.
-
-GitHub lists at most 1000 runs for one filtered query, so runs are read one hour at a time.
-"""
+"""GitHub lists at most 1000 runs for one filtered query, so runs are read one hour at a time and a full hour fails."""
 
 import argparse
 import json
@@ -15,6 +12,7 @@ from pathlib import Path
 from scripts.ci_storage import rows
 
 HOUR = timedelta(hours=1)
+LISTED_CAP = 1000
 STAMP = "%Y-%m-%dT%H:%M:%SZ"
 ANTON = "anton"
 MATRIX = re.compile(r" \(.*\)$")
@@ -117,7 +115,10 @@ def read_runs(repo: str, since: datetime, until: datetime) -> list[dict]:
 
     def read(window):
         first, last = (moment.strftime(STAMP) for moment in window)
-        return rows(f"repos/{repo}/actions/runs?created={first}..{last}&per_page=100", "workflow_runs")
+        listed = rows(f"repos/{repo}/actions/runs?created={first}..{last}&per_page=100", "workflow_runs")
+        if len(listed) >= LISTED_CAP:
+            raise RuntimeError(f"{first}..{last} listed {len(listed)} runs, the most GitHub returns")
+        return listed
 
     with ThreadPoolExecutor() as pool:
         found = [run for listed in pool.map(read, hours) for run in listed]
