@@ -485,3 +485,31 @@ def test_a_fresh_spawn_keeps_its_handoff_without_the_original_run_options():
     assert profile_choice.transfer({**lost, profile_choice.FRESH: True}) == {}
     assert profile_choice.transfer({**lost, "handoff_envelope": {"launch": complete}, profile_choice.FRESH: True}) == {}
     assert profile_choice.transfer({**lost, "handoff_envelope": {"launch": complete}}) == complete
+
+
+class UnsupportedHandoffRuntime(LaterUnresolvedRuntime):
+    def placement_refusal(self, lane, task):
+        self.checked.append(task.get("id"))
+        if task.get("id") == "t1" and self.checked.count("t1") > 1:
+            profile_choice.transfer({"handoff": "## Next\nGo on\n", "handoff_envelope": {"launch": {"profile": "x"}}})
+        return ""
+
+    def spawn(self, config, lane, name, task):
+        if task["id"] == "t1":
+            raise tick.SpawnError("unsupported handoff: original profile and run options are missing", "unsupported")
+        return super(LaterUnresolvedRuntime, self).spawn(config, lane, name, task)
+
+
+def test_a_failed_launch_whose_placement_check_raises_is_recorded_and_the_rest_still_launch(monkeypatch):
+    import fakeredis
+
+    two = store.RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    two.create(store.SwarmConfig("sw", "/repo", max_eng=2, max_ci=0))
+    decision = profile_choice.ProfileDecision("engineer", "classifier", "engineer", "m1", 0.9, True)
+    monkeypatch.setattr(profile_choice, "classify", lambda slug, task, environ: decision)
+    ledger = _commenting(tasks(("t1", "eng"), ("t2", "eng")))
+    rt = UnsupportedHandoffRuntime()
+    tick.tick("sw", two, ledger, rt, now_ms=1_000)
+    assert [task_id for _, _, task_id in rt.spawned] == ["t2"]
+    assert "run options are missing" in two.launch_failure("sw", "t1")
+    assert {row["state"] for row in two.launches("sw") if row["task"] == "t1"} == {"failed"}
