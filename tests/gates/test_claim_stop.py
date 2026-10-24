@@ -262,7 +262,8 @@ def test_future_verification_stop_passes_and_releases_its_claim(rig, offset):
     assert next(a for a in rig.store.agents(SLUG) if a.name == "other") == other
     assert next(a for a in rig.store.agents(SLUG) if a.name == ME).state == "finished"
     assert rig.task["awaiting"] == "verify"
-    assert rig.task["state"] == "pr"
+    assert rig.task["state"] == "open"
+    assert rig.task["claimed_by"] == ""
     assert rig.rows() == []
 
 
