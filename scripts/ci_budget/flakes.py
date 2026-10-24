@@ -129,5 +129,5 @@ def refresh(
             continue
         redis.set(raised, now_ms, ex=RAISED_TTL_S)
         if sent is not False:
-            actions.append("filed a ledger follow up for a test flaky in two dev runs within seven days")
+            actions.append(f"filed a ledger follow up for a test flaky in {len(current)} dev runs within seven days")
     return actions

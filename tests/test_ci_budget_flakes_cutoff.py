@@ -58,6 +58,6 @@ def test_followups_only_count_retry_passes_after_the_latest_test_fix(last_retry,
         assert not store.redis.exists(defects.key("sw", "flaky", TEST))
     before = 2 - remaining
     assert actions == ([f"{before} retry passes were before the newest merged test change"] if before else []) + (
-        ["filed a ledger follow up for a test flaky in two dev runs within seven days"] if remaining else []
+        [f"filed a ledger follow up for a test flaky in {remaining} dev runs within seven days"] if remaining else []
     )
     assert len(calls) == (4 if merged else 2)

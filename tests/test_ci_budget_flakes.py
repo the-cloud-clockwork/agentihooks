@@ -92,7 +92,7 @@ def test_a_test_flaky_in_two_runs_is_filed_once_in_plain_words(swarm):
         ),
     ]
     assert all(ledger_comments.problems(text, "item") == [] and plain(text, "item") == text for _, text in ledger.added)
-    assert actions == ["filed a ledger follow up for a test flaky in two dev runs within seven days"] * 2
+    assert actions == ["filed a ledger follow up for a test flaky in 2 dev runs within seven days"] * 2
     assert calls[0][0][4] == JQ and calls[0][1]["cwd"] == "/repo"
     raised = f"{PREFIX}:sw:ci-budget:flaky:{TEST}"
     assert flakes.RAISED_TTL_S == 604800
