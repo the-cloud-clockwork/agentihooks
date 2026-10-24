@@ -104,6 +104,7 @@ from scripts.swarm import (
     naming,
     outage,
     overlays,
+    overrun,
     phase_planning,
     phase_state,
     phases,
@@ -396,6 +397,18 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None, scheduled=F
                     now_ms(),
                     released=release_wait.checker(config.repo),
                     reread=ledger_events.view,
+                ),
+                doc,
+            )
+            actions += skip_refused(
+                overrun.overrun_pass,
+                overrun.Watch(
+                    store,
+                    slug,
+                    ledger,
+                    frozenset(live),
+                    lambda agent: runtime.retire(agent, homes=reaper.scratch_homes(slug, agent.task)),
+                    now_ms(),
                 ),
                 doc,
             )
