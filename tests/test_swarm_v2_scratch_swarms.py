@@ -10,7 +10,8 @@ pytestmark = pytest.mark.unit
 LIVE = "rig-grade-swarm"
 SCRATCH = "proof-323133-t1199-1"
 OTHER_SCRATCH = "proof-323133-t1199-2"
-ENTRY = {"swarm": SCRATCH, "agent": "engineer@323133-3110", "task": "t1199", "repo": PROJECT}
+SCRATCH_REPO = "github.com/the-cloud-clockwork/antoncore"
+ENTRY = {"swarm": SCRATCH, "agent": "engineer@323133-3110", "task": "t1199", "repo": SCRATCH_REPO}
 CLEARED = {key: value for key, value in ENV.items() if key != proof_swarm.PROOF_ENV}
 
 
@@ -36,7 +37,7 @@ def test_a_listed_scratch_swarm_is_created_beside_the_live_swarm(store):
     assert (environ["AGENTIHOOKS_AGENT_NAME"], environ["AGENTIHOOKS_SWARM_TASK"]) == ("engineer@323133-3110", "t1199")
     assert content == proof_swarm.CONTENT
     config = store.config(SCRATCH)
-    assert (config.repo, config.scratch, config.max_eng, config.max_ci) == (PROJECT, True, 1, 0)
+    assert (config.repo, config.scratch, config.max_eng, config.max_ci) == (SCRATCH_REPO, True, 1, 0)
     assert sorted(store.slugs()) == sorted([LIVE, SCRATCH])
     assert store.config(LIVE).max_eng == 16
 
@@ -106,8 +107,9 @@ def test_a_scratch_swarm_listed_twice_is_refused(store):
     assert str(refused.value) == f"{proof_swarm.SCRATCH_ENV} lists a scratch swarm more than once"
 
 
-def test_a_host_ticked_swarm_may_not_be_a_scratch_swarm(store):
-    environ = {**scratch(ENTRY), proof_swarm.HOST_SWARMS_ENV: f"{LIVE}, {SCRATCH}"}
+@pytest.mark.parametrize("hosts", [f"{LIVE},{SCRATCH}", f"{LIVE}, {SCRATCH} "])
+def test_a_host_ticked_swarm_may_not_be_a_scratch_swarm(store, hosts):
+    environ = {**scratch(ENTRY), proof_swarm.HOST_SWARMS_ENV: hosts}
     ledger = Ledger()
 
     with pytest.raises(SwarmError) as refused:
@@ -115,6 +117,16 @@ def test_a_host_ticked_swarm_may_not_be_a_scratch_swarm(store):
 
     assert str(refused.value) == f"{SCRATCH} is ticked by its own host and may not be a scratch swarm"
     assert (ledger.asked, store.slugs()) == ([], [])
+
+
+def test_every_host_ticked_scratch_swarm_is_named_in_the_refusal(store):
+    entries = (ENTRY, {**ENTRY, "swarm": OTHER_SCRATCH})
+    environ = {**scratch(*entries), proof_swarm.HOST_SWARMS_ENV: f"{OTHER_SCRATCH},{SCRATCH}"}
+
+    with pytest.raises(SwarmError) as refused:
+        proof_swarm.reconcile(environ, store, "", Ledger())
+
+    assert str(refused.value) == f"{SCRATCH}, {OTHER_SCRATCH} is ticked by its own host and may not be a scratch swarm"
 
 
 @pytest.mark.parametrize(
