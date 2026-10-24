@@ -583,3 +583,18 @@ def test_an_unset_variable_or_an_exported_one_still_finds_the_pull_request_check
 def test_a_folder_named_by_a_command_substitution_is_held_as_the_task_repo(tree, other_repo, tmp_path):
     command = 'B=$(wt.sh path); cd "$B" && git push origin task'
     assert not gate(pull()).decide(bash(command, other_repo), ME, state(tmp_path)).allowed
+
+
+def test_expand_puts_in_assigned_and_environment_names_and_empties_unset_ones(monkeypatch):
+    from scripts.gates.one_push import expand
+
+    monkeypatch.setenv("SET_NAME", "/env")
+    monkeypatch.delenv("UNSET_NAME", raising=False)
+    assert expand("$UNSET_NAME/x", {}) == "/x"
+    assert expand("${SET_NAME}/$A/$(c)", {"A": "a"}) == "/env/a/$(c)"
+
+
+def test_assignments_split_at_their_first_equals_and_read_earlier_ones():
+    command = 'R=/r; B=$R/b=c; cd "$B" && git push'
+    assert list(actions(command, "/x")) == [("push", Path("/r/b=c"), [])]
+    assert list(actions("cd - && git push", "/x")) == [("push", Path("/x/$OLDPWD"), [])]
