@@ -40,8 +40,8 @@ def test_finished_runs_are_mentioned_once_when_group_members_join_leave_or_retur
     if judged:
         monkeypatch.setenv("AGENTIHOOKS_HEALTH_COOLDOWN_MINUTES", "0")
         details = store.redis.hgetall(store.key(DOCTOR, "doctor-findings"))
-        for identity, raw in details.items():
-            if json.loads(raw)["kind"] == kind:
+        for identity in details:
+            if identity.startswith(f"{kind.replace(' ', '-')}/"):
                 loop.verdicts(store, DOCTOR).judge(identity, "established", "investigated", "reader", NOW)
     batch[:] = [second, finished(103, kind, "cancelled"), finished(104, kind, "superseded")]
     loop.speed(RedisStore(store.redis), DOCTOR, WATCHED, NOW + 60000)
