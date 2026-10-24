@@ -1,9 +1,11 @@
 import ast
+import hashlib
 import json
 import os
 import re
 import subprocess
 import sys
+import tarfile
 import tomllib
 from importlib.metadata import entry_points
 from pathlib import Path
@@ -135,7 +137,9 @@ def test_nats_server_download_retries_fit_inside_every_step_timeout():
     curl = next(line.split() for line in lines if line.strip().startswith("curl "))
     flags = {flag: curl[i + 1] for i, flag in enumerate(curl[:-1]) if flag.startswith("--")}
     attempts = int(flags["--retry"]) + 1
-    budget = attempts * (int(flags["--max-time"]) + int(flags["--retry-delay"]))
+    restores = [step for step in action["runs"]["steps"] if step.get("uses", "").startswith("actions/cache/restore")]
+    restore_seconds = sum(int(step["env"]["SEGMENT_DOWNLOAD_TIMEOUT_MINS"]) * 60 for step in restores)
+    budget = restore_seconds + attempts * (int(flags["--max-time"]) + int(flags["--retry-delay"]))
     assert int(flags["--connect-timeout"]) < int(flags["--max-time"])
     steps = [
         step
@@ -149,6 +153,85 @@ def test_nats_server_download_retries_fit_inside_every_step_timeout():
     for step in steps:
         assert "timeout-minutes" in step, step
         assert budget < int(step["timeout-minutes"]) * 60, step
+
+
+def _nats_server_steps() -> dict[str, dict]:
+    action = yaml.safe_load((_ROOT / ".github/actions/nats-server/action.yml").read_text())
+    return {step["name"]: step for step in action["runs"]["steps"]}
+
+
+def test_nats_server_archive_is_cached_on_its_pinned_release_and_checksum():
+    steps = _nats_server_steps()
+    names = list(steps)
+    restore = steps["Restore the pinned nats server archive"]
+    install = steps["Install the pinned nats server"]
+    save = steps["Save the pinned nats server archive"]
+    assert names.index("Resolve the pinned nats server") < names.index(restore["name"]) < names.index(install["name"])
+    assert names.index(install["name"]) < names.index(save["name"])
+    assert restore["uses"] == "actions/cache/restore@v4"
+    assert restore["with"] == {
+        "path": "${{ steps.pin.outputs.archive }}",
+        "key": "${{ steps.pin.outputs.name }}-${{ steps.pin.outputs.sha }}",
+    }
+    assert install["env"]["CACHE_HIT"] == "${{ steps.cache.outputs.cache-hit }}"
+    assert save["uses"] == "actions/cache/save@v4"
+    assert save["if"] == "steps.cache.outputs.cache-hit != 'true' && github.ref == 'refs/heads/main'"
+    assert save["with"] == {"path": restore["with"]["path"], "key": "${{ steps.cache.outputs.cache-primary-key }}"}
+
+
+def _run_nats_install(tmp_path: Path, cache_hit: str, cached: str) -> list[str]:
+    name = "nats-server-v0-linux-amd64"
+    binary = tmp_path / "src" / name / "nats-server"
+    binary.parent.mkdir(parents=True)
+    binary.write_text("#!/bin/sh\necho nats-server: v0\n")
+    binary.chmod(0o755)
+    good = tmp_path / "good.tar.gz"
+    with tarfile.open(good, "w:gz") as tar:
+        tar.add(binary.parent, arcname=name)
+    archive = tmp_path / "runner" / f"{name}.tar.gz"
+    archive.parent.mkdir()
+    if cached == "valid":
+        archive.write_bytes(good.read_bytes())
+    elif cached == "corrupt":
+        archive.write_bytes(b"corrupt")
+    calls = tmp_path / "curl.log"
+    stub = tmp_path / "bin" / "curl"
+    stub.parent.mkdir()
+    stub.write_text(
+        '#!/usr/bin/env bash\necho "$@" >> "$CURL_LOG"\n'
+        'while [[ $# -gt 0 ]]; do [[ "$1" == -o ]] && cp "$GOOD" "$2"; shift; done\n'
+    )
+    stub.chmod(0o755)
+    env = {
+        **os.environ,
+        "PATH": f"{stub.parent}:{os.environ['PATH']}",
+        "CURL_LOG": str(calls),
+        "GOOD": str(good),
+        "RUNNER_TEMP": str(archive.parent),
+        "GITHUB_PATH": str(tmp_path / "path"),
+        "GITHUB_ENV": str(tmp_path / "env"),
+        "CACHE_HIT": cache_hit,
+        "NATS_SERVER_RELEASE": "v0",
+        "NATS_SERVER_NAME": name,
+        "NATS_SERVER_SHA256": hashlib.sha256(good.read_bytes()).hexdigest(),
+        "NATS_SERVER_ARCHIVE": str(archive),
+    }
+    run = _nats_server_steps()["Install the pinned nats server"]["run"]
+    subprocess.run(["bash", "-c", run], env=env, check=True, capture_output=True, text=True)
+    assert (tmp_path / "env").read_text() == "NATS_SERVER_REQUIRED=1\n"
+    return calls.read_text().splitlines() if calls.exists() else []
+
+
+def test_nats_server_install_skips_the_download_on_a_verified_cache_hit(tmp_path):
+    assert _run_nats_install(tmp_path, "true", "valid") == []
+
+
+def test_nats_server_install_downloads_on_a_cache_miss(tmp_path):
+    assert len(_run_nats_install(tmp_path, "", "none")) == 1
+
+
+def test_nats_server_install_downloads_again_when_the_cached_archive_fails_its_checksum(tmp_path):
+    assert len(_run_nats_install(tmp_path, "true", "corrupt")) == 1
 
 
 def test_unit_setup_python_restores_no_pip_cache():
@@ -252,6 +335,18 @@ def test_main_seeds_the_codex_cache_that_unit_shards_restore():
     assert restore["if"] == "runner.environment == 'self-hosted'"
     assert install["if"] == "steps.codex.outcome == 'success' && steps.codex.outputs.cache-hit != 'true'"
     assert "releases/download/${CODEX_RELEASE}/codex-x86_64-unknown-linux-musl.tar.gz" in install["run"]
+
+
+def test_main_seeds_the_nats_server_cache_that_unit_shards_restore():
+    steps = yaml.safe_load((_ROOT / ".github/workflows/codex-cache.yml").read_text())["jobs"]["seed"]["steps"]
+    names = [step.get("name") for step in steps]
+    take = steps[names.index("Take the nats server action")]
+    seed = steps[names.index("Seed the pinned nats server")]
+    assert take["uses"] == "actions/checkout@v4"
+    assert take["with"] == {"sparse-checkout": ".github/actions/nats-server"}
+    assert seed["uses"] == "./.github/actions/nats-server"
+    assert take["if"] == seed["if"] == "runner.environment == 'self-hosted'"
+    assert steps.index(take) < steps.index(seed)
 
 
 def test_unit_install_keeps_playwright_and_excludes_the_grpc_exporter():
