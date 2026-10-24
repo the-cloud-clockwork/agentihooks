@@ -149,6 +149,7 @@ def test_no_script_a_step_runs_calls_the_api():
         ".github/coverage/proxy.py",
         ".github/coverage/sonar-retry.sh",
         ".github/scripts/pypi-retry.sh",
+        "deploy/helm/agentihooks-swarm/ci/kind-published.sh",
         "deploy/helm/agentihooks-swarm/ci/kind-smoke.sh",
         "docker/swarm-node/base-copy.sh",
         "docker/swarm-node/pull-base.sh",

@@ -181,6 +181,7 @@ def test_proofs_reuse_selected_mutation_and_smoke_execution():
         ("swarm-image", "swarm-smoke"),
         ("brain-smoke", "brain-smoke"),
         ("helm-kind", "helm-kind"),
+        ("helm-kind-published", "helm-kind-published"),
     ):
         job = jobs[proof]
         assert job["uses"] == f"./.github/workflows/{reusable}.yml"
