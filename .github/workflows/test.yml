@@ -2075,6 +2075,7 @@ jobs:
             stacks/observability/provisioning/dashboards/Swarm/
             k8s/values-overlays/agentihooks-swarm-nats/values.yaml
             k8s/values-overlays/agentihooks-swarm-nats/users.yaml
+            k8s/values-overlays/agentihooks-swarm-nats/trust.yaml
 
       - name: Run every Swarm Ledger dashboard query against this head's metrics tables
         if: ${{ !cancelled() }}
