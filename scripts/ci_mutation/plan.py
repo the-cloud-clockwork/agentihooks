@@ -6,7 +6,6 @@ import os
 import subprocess
 import time
 import zipfile
-from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from difflib import SequenceMatcher
 from functools import cache
@@ -14,7 +13,7 @@ from pathlib import Path
 
 from scripts.ci_cpu_quota import worker_count as quota_workers
 from scripts.ci_mutation.browser import needs_browser
-from scripts.ci_mutation.scope import changes_since, discover_changes, graded_green, own_bases, select_tests, test_file
+from scripts.ci_mutation.scope import discover_changes, graded_green, own_bases, select_tests, test_file
 from scripts.ci_mutation.selection import changed_mutations, file_seconds, split_parts, stats_shards
 from scripts.ci_test_plan import find_record
 from tests.dep_manifest import GLOBAL_FILES, MEASURED, _spans, changed_units, line_units, node
@@ -260,17 +259,14 @@ def main() -> int:
     parser.add_argument("--repository")
     args = parser.parse_args()
     root = Path.cwd()
-    modules_changed = bool(args.repository and changes_since(root, args.base, args.head))
-    if args.repository and not modules_changed:
-        print("No hook or script module changed, so the recorded dev coverage is not read.")
-    with ThreadPoolExecutor() as pool:
-        record = pool.submit(read_record, args.repository) if modules_changed else None
-        bases = own_bases(root, args.base, args.head, graded_green)
-        print(f"Mutation bases: {' '.join(bases)}")
-        changes = discover_changes(root, bases, args.head)
+    bases = own_bases(root, args.base, args.head, graded_green)
+    print(f"Mutation bases: {' '.join(bases)}")
+    changes = discover_changes(root, bases, args.head)
     manifest, failure = None, ""
-    if record is not None:
-        found, failure = record.result()
+    if args.repository and not changes:
+        print("No hook or script module changed, so the recorded dev coverage is not read.")
+    elif args.repository:
+        found, failure = read_record(args.repository)
         if failure:
             print(
                 "::warning title=Mutation selection fallback::The recorded dev coverage could not be read, so every"

@@ -735,21 +735,19 @@ def test_main_reads_the_recorded_coverage_only_when_a_module_changed(tmp_path, m
     monkeypatch.setenv("GITHUB_OUTPUT", str(tmp_path / "github-output"))
     calls = []
 
-    def since(root, base, head):
-        calls.append(("since", root, base, head))
+    def discover(root, bases, head):
+        calls.append(("discover", root, bases, head))
         return changed
 
     def record(repository):
         calls.append(("record", repository))
         return None, ""
 
-    monkeypatch.setattr(plan, "changes_since", since)
     monkeypatch.setattr(plan, "read_record", record)
     monkeypatch.setattr(plan, "own_bases", lambda *args: ["base"])
-    monkeypatch.setattr(plan, "discover_changes", lambda *args: changed)
+    monkeypatch.setattr(plan, "discover_changes", discover)
     assert plan.main() == 0
-    assert calls[0] == ("since", tmp_path, "base", "HEAD")
-    assert (("record", "owner/repo") in calls) == bool(changed)
+    assert calls == [("discover", tmp_path, ["base"], "HEAD"), *[("record", "owner/repo")] * bool(changed)]
     assert f"changed={len(changed)}\n" in (tmp_path / "github-output").read_text()
     if not changed:
         assert (
