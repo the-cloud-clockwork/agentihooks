@@ -883,7 +883,10 @@ def test_dynamic_import_stats_track_the_modules_the_collection_loaded(tmp_path, 
         {
             files[0]: "import importlib\nimport sys\nimportlib.import_module(sys.argv[0])\n",
             files[1]: "def test_other():\n    pass\n",
-            "scripts/a.py": "from pathlib import Path\nvalue = Path('assets/data').read_text()\n",
+            "scripts/a.py": (
+                "import importlib\nimport sys\nfrom pathlib import Path\n"
+                "importlib.import_module(sys.argv[0])\nvalue = Path('assets/data').read_text()\n"
+            ),
             "scripts/unloaded.py": "value = 1\n",
             "assets/data": "original",
         },
