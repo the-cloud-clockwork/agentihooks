@@ -598,6 +598,31 @@ def test_only_a_called_local_helper_can_explain_a_deleted_subject(tmp_path, dele
     assert ("test_subject is admitted" in result.stdout) == admitted
 
 
+@pytest.mark.parametrize("deleted", [True, False], ids=["deleted", "retained"])
+@pytest.mark.parametrize("executable", [True, False], ids=["code", "data"])
+def test_a_deleted_executable_fixture_explains_only_its_own_lost_test(tmp_path, deleted, executable):
+    fixture = json.dumps({"steps": [{"run": "printf retired"}]} if executable else {"label": "retired"})
+    tests = (
+        "import json\nfrom pathlib import Path\n\n"
+        "_ROOT = Path(__file__).resolve().parents[1]\n\n"
+        "def fixture():\n    return json.loads((_ROOT / 'tests/fixtures/watch.json').read_text())\n\n"
+        "def test_fixture():\n    assert fixture()\n\n"
+        "def test_kept():\n    assert True\n"
+    )
+    result = _floor(
+        tmp_path,
+        {"test_mod.py": tests},
+        {"test_mod.py": "def test_kept():\n    assert True\n"},
+        {
+            "base": {"tests/fixtures/watch.json": fixture},
+            "head": {} if deleted else {"tests/fixtures/watch.json": fixture},
+        },
+    )
+    admitted = deleted and executable
+    assert result.returncode == (0 if admitted else 1), result.stdout + result.stderr
+    assert ("test_fixture is admitted" in result.stdout) == admitted
+
+
 @pytest.mark.parametrize(
     "survivor",
     [
