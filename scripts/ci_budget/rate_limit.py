@@ -42,7 +42,7 @@ def gh_api(args: list[str], *, timeout: float, text: bool = False) -> subprocess
 
 
 def report(name: str) -> None:
-    print(f"{name} made {calls} GitHub API calls")
+    print(f"{name} made {calls} GitHub API calls", file=sys.stderr)
 
 
 if __name__ == "__main__":
