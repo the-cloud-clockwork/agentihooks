@@ -381,7 +381,7 @@ def test_ledger_and_swarm_collectors_run_once_per_interval_while_every_pass_writ
     monkeypatch.setattr(metrics, "_ledger", lambda slug, now_ms, errors, box, swarm=None: seen.append(now_ms))
     monkeypatch.setattr(metrics, "_collect", lambda *args: None)
     clock = [NOW]
-    monkeypatch.setattr(store.redis, "set", _expiring(store.redis.set, clock))
+    monkeypatch.setattr(store.redis, "set", _expiring(store.redis, clock))
     environ = ON if minutes is None else {**ON, "AGENTIHOOKS_METRICS_EVERY_MINUTES": minutes}
     swarm = metrics.metrics_swarm.TickInput(store, {"tasks": []}, [], lambda url: None, None)
     passes = [NOW, NOW + 180_000, NOW + 360_000, NOW + 600_000]
@@ -399,17 +399,27 @@ def test_ledger_and_swarm_collectors_run_once_per_interval_while_every_pass_writ
     assert sorted(set(ticks)) == passes
 
 
-def _expiring(real_set, clock):
-    expiry = {}
+def _expiring(redis, clock):
+    real_set, expiry = redis.set, {}
 
     def set_(name, value, nx=False, px=None, **kwargs):
-        if nx and name in expiry and clock[0] < expiry[name]:
+        if nx and redis.exists(name) and clock[0] < expiry[name]:
             return None
         if px is not None:
             expiry[name] = clock[0] + px
         return real_set(name, value, **kwargs)
 
     return set_
+
+
+def test_a_one_millisecond_metrics_interval_is_accepted(spool, sent):
+    import fakeredis
+
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    store.create(SwarmConfig("sw", "/repo", 0, 0))
+    swarm = metrics.metrics_swarm.TickInput(store, {"tasks": []}, [], lambda url: None, None)
+    environ = {**ON, "AGENTIHOOKS_METRICS_EVERY_MINUTES": repr(1 / 60_000)}
+    assert metrics.record_pass("sw", NOW, 1, environ, swarm) == []
 
 
 @pytest.mark.parametrize("minutes", ["0", "-1", "0.00001", "inf", "nan"])
