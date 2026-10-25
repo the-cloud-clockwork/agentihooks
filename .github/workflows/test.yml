@@ -2796,6 +2796,24 @@ jobs:
         if: steps.reuse.outputs.reused != 'true'
         run: bash "$RUNNER_TEMP/workflow/.github/scripts/pypi-retry.sh" "Install dependencies" -- uv pip install --system "mutmut==3.6.0" "pytest>=8.0" "pyyaml>=6.0" "tomlkit>=0.12"
 
+      - name: Restore latest dev durations
+        if: github.event_name == 'pull_request' && steps.reuse.outputs.reused != 'true'
+        uses: actions/cache/restore@v4
+        env:
+          SEGMENT_DOWNLOAD_TIMEOUT_MINS: "1"
+        with:
+          path: ~/dev-durations
+          key: durations-merged-${{ github.event.pull_request.base.sha }}
+          restore-keys: durations-merged-
+
+      - name: Adopt latest dev durations
+        if: steps.reuse.outputs.reused != 'true'
+        env:
+          PYTHON_VERSION: "3.12"
+        run: |
+          [[ -f ~/dev-durations/.test_durations ]] || { echo "Using committed durations"; exit 0; }
+          python -c 'import json, sys; from pathlib import Path; from tests.dev_durations import adopt; Path(".test_durations").write_text(json.dumps(adopt(Path(sys.argv[1]), sys.argv[2]), indent=4, sort_keys=True) + "\n")' ~/dev-durations "$PYTHON_VERSION"
+
       - name: Size mutation shards from stored timings
         id: plan
         if: steps.reuse.outputs.reused != 'true'
@@ -2915,6 +2933,24 @@ jobs:
         run: |
           echo "::error::Chromium setup failed or exceeded its six minute timeout; mutation tests cannot run."
           exit 1
+
+      - name: Restore latest dev durations
+        if: github.event_name == 'pull_request' && needs.mutation-plan.outputs.forwarded != 'true'
+        uses: actions/cache/restore@v4
+        env:
+          SEGMENT_DOWNLOAD_TIMEOUT_MINS: "1"
+        with:
+          path: ~/dev-durations
+          key: durations-merged-${{ github.event.pull_request.base.sha }}
+          restore-keys: durations-merged-
+
+      - name: Adopt latest dev durations
+        if: needs.mutation-plan.outputs.forwarded != 'true'
+        env:
+          PYTHON_VERSION: "3.12"
+        run: |
+          [[ -f ~/dev-durations/.test_durations ]] || { echo "Using committed durations"; exit 0; }
+          python -c 'import json, sys; from pathlib import Path; from tests.dev_durations import adopt; Path(".test_durations").write_text(json.dumps(adopt(Path(sys.argv[1]), sys.argv[2]), indent=4, sort_keys=True) + "\n")' ~/dev-durations "$PYTHON_VERSION"
 
       - name: Restore compatible test stats
         if: needs.mutation-plan.outputs.forwarded != 'true'
@@ -3049,6 +3085,24 @@ jobs:
         run: |
           echo "::error::Chromium setup failed or exceeded its six minute timeout; mutation tests cannot run."
           exit 1
+
+      - name: Restore latest dev durations
+        if: github.event_name == 'pull_request' && needs.mutation-plan.outputs.forwarded != 'true'
+        uses: actions/cache/restore@v4
+        env:
+          SEGMENT_DOWNLOAD_TIMEOUT_MINS: "1"
+        with:
+          path: ~/dev-durations
+          key: durations-merged-${{ github.event.pull_request.base.sha }}
+          restore-keys: durations-merged-
+
+      - name: Adopt latest dev durations
+        if: needs.mutation-plan.outputs.forwarded != 'true'
+        env:
+          PYTHON_VERSION: "3.12"
+        run: |
+          [[ -f ~/dev-durations/.test_durations ]] || { echo "Using committed durations"; exit 0; }
+          python -c 'import json, sys; from pathlib import Path; from tests.dev_durations import adopt; Path(".test_durations").write_text(json.dumps(adopt(Path(sys.argv[1]), sys.argv[2]), indent=4, sort_keys=True) + "\n")' ~/dev-durations "$PYTHON_VERSION"
 
       - name: Download the shared mutation stats
         if: needs.mutation-plan.outputs.forwarded != 'true'
