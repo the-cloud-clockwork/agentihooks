@@ -1,4 +1,5 @@
 import ast
+import fnmatch
 import functools
 import hashlib
 import json
@@ -31,9 +32,12 @@ def loader_name(node: ast.AST) -> str | None:
 
 
 def discovery_inputs(nodes: list[ast.AST], names: set[str], resources: dict[str, set[str]]) -> set[str]:
-    scanners = {"glob", "rglob", "iterdir", "listdir", "scandir", "walk", "iter_modules", "walk_packages"}
+    scanners = {
+        name: name
+        for name in ("glob", "rglob", "iterdir", "listdir", "scandir", "walk", "iter_modules", "walk_packages")
+    }
     scanners.update(
-        alias.asname or alias.name
+        (alias.asname or alias.name, alias.name)
         for node in nodes
         if isinstance(node, ast.ImportFrom) and node.module in ("glob", "os", "pkgutil")
         for alias in node.names
@@ -61,7 +65,23 @@ def discovery_inputs(nodes: list[ast.AST], names: set[str], resources: dict[str,
         }
         if any(isinstance(part, ast.Attribute) and part.attr == "__path__" for part in parts):
             scoped.update(path for name in names for path in resources.get(name.replace(".", "/") + "/", ()))
-        inputs.update(scoped or {path for paths in resources.values() for path in paths})
+        candidates = scoped or {path for paths in resources.values() for path in paths}
+        kind = scanners[loader_name(node.func)]
+        if kind in ("iter_modules", "walk_packages"):
+            candidates = {path for path in candidates if Path(path).suffix == ".py"}
+        elif (
+            kind in ("glob", "rglob")
+            and node.args
+            and isinstance(node.args[0], ast.Constant)
+            and isinstance(node.args[0].value, str)
+        ):
+            pattern = node.args[0].value
+            candidates = {
+                path
+                for path in candidates
+                if fnmatch.fnmatchcase(path, pattern) or fnmatch.fnmatchcase(Path(path).name, pattern)
+            }
+        inputs.update(candidates)
     return inputs
 
 

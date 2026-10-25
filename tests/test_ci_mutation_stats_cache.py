@@ -502,6 +502,10 @@ def test_measured_stats_recollect_new_dynamically_discovered_modules(tmp_path, d
 
     cache = tmp_path / "cache"
     collect_cached_stats(root, cache, {}, [path], [], collect)
+    (root / "plugins/notes.md").write_text("unrelated\n")
+    subprocess.run(["git", "add", "--", "plugins/notes.md"], cwd=root, check=True)
+    collect_cached_stats(root, cache, {}, [path], [], collect)
+    assert calls == [[path]]
     (root / "plugins/b.py").write_text("value = 2\n")
     subprocess.run(["git", "add", "--", "plugins/b.py"], cwd=root, check=True)
     warm = collect_cached_stats(root, cache, {}, [path], [], collect)
@@ -539,6 +543,10 @@ def test_measured_stats_recollect_unbounded_discovery_additions(tmp_path, discov
 
     cache = tmp_path / "cache"
     collect_cached_stats(root, cache, {}, [path], [], collect)
+    (root / "NOTES.md").write_text("unrelated\n")
+    subprocess.run(["git", "add", "--", "NOTES.md"], cwd=root, check=True)
+    collect_cached_stats(root, cache, {}, [path], [], collect)
+    assert calls == [[path]]
     added = f"{folder}plugin_b.py"
     (root / added).write_text("value = 2\n")
     subprocess.run(["git", "add", "--", added], cwd=root, check=True)
