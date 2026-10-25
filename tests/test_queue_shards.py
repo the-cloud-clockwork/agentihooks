@@ -404,6 +404,26 @@ def test_a_capped_plan_at_the_step_timeout_warns(tmp_path, capsys, monkeypatch):
     )
 
 
+@pytest.mark.parametrize("seconds", [210.0, 368.8, 420.0, 500.0])
+def test_a_ceiling_sized_queue_plan_over_budget_warns_and_succeeds(tmp_path, capsys, seconds):
+    from tests.queue_shards import MAX_SHARDS, main
+
+    plan = [
+        {"python-version": "3.12", "shard": shard, "total": MAX_SHARDS, "predicted_seconds": seconds}
+        for shard in range(1, MAX_SHARDS + 1)
+    ]
+    output = tmp_path / "queue-plan.txt"
+    contents = f"queue_312={json.dumps(plan)[1:-1]}\n"
+    output.write_text(contents)
+
+    main(["combine", "--from-output", str(output)])
+
+    assert output.read_text() == contents
+    out = capsys.readouterr().out
+    assert f"::warning::The capped queue plan predicts {seconds:.1f}s, over 210s of the planning budget\n" in out
+    assert f"40 queue jobs fit one wave of 40 runners; predicted slowest test step {seconds:.1f}s" in out
+
+
 @pytest.mark.parametrize("seconds", [210.0, 500.0])
 def test_an_uncapped_plan_at_half_the_step_timeout_refuses(seconds):
     from tests.queue_shards import main
