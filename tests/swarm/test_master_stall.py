@@ -285,6 +285,20 @@ def test_master_stalled_after_a_failed_or_denied_call_is_recycled(store, monkeyp
     assert run(store, runtime, START + 11 * MINUTE)[0].startswith(f"asked {agent.name}")
 
 
+def test_allowed_tool_call_stays_open_after_its_pre_tool_hook(tmp_path, monkeypatch):
+    from hooks import hook_manager
+
+    monkeypatch.setattr(activity, "default_root", lambda: tmp_path)
+    monkeypatch.setenv("AGENTIHOOKS_SWARM", "sw")
+    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "master@sw-1")
+    monkeypatch.setattr(
+        hook_manager, "on_pre_tool_use", lambda payload: activity.record("Bash", {}, call_id=payload["tool_use_id"])
+    )
+    hook_manager.EVENT_HANDLERS["PreToolUse"]({"tool_use_id": "toolu_allowed"})
+    assert activity.open_calls("sw", "master@sw-1") == ["toolu_allowed"]
+    assert activity.finished_events("sw") == {}
+
+
 def test_turn_end_drops_calls_a_denied_call_left_open(tmp_path, monkeypatch):
     import fakeredis
 
