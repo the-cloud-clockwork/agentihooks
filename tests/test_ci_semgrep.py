@@ -1,4 +1,5 @@
 import json
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -72,7 +73,7 @@ def test_charts_grade_the_guard_rules_against_the_base_floors():
     guard = next(
         step for step in steps if step.get("name") == "Guard rules hold on their fixtures and at their computed floors"
     )
-    assert install["run"] == "python -m pip install pyyaml==6.0.2 semgrep==1.177.0"
+    assert install["env"] == {"SEMGREP_VERSION": "1.177.0"}
     assert guard["env"] == {"BASE": "${{ inputs.base }}"}
     assert guard["run"].splitlines() == [
         'git fetch --no-tags --depth=1 origin "${BASE#origin/}"',
@@ -84,6 +85,35 @@ def test_charts_grade_the_guard_rules_against_the_base_floors():
         'python "$grader" check --base FETCH_HEAD',
     ]
     assert steps.index(install) < steps.index(guard) < len(steps) - 1
+
+
+def _run_install(tmp_path, image_version, installed_version):
+    install = next(step for step in _jobs()["charts"]["steps"] if step.get("name") == "Install PyYAML and Semgrep")
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    calls = tmp_path / "calls"
+    (bin_dir / "python").write_text(f'#!/usr/bin/env bash\necho "$*" >> "{calls}"\n')
+    (bin_dir / "semgrep").write_text(f"#!/usr/bin/env bash\necho {installed_version}\n")
+    for tool in bin_dir.iterdir():
+        tool.chmod(0o755)
+    env = {"PATH": f"{bin_dir}:/usr/bin:/bin", **install["env"]}
+    if image_version:
+        env["ARC_SEMGREP_VERSION"] = image_version
+    done = subprocess.run(["bash", "-euo", "pipefail", "-c", install["run"]], env=env, capture_output=True, text=True)
+    return done.returncode, calls.read_text().splitlines() if calls.exists() else []
+
+
+def test_charts_use_the_image_semgrep_when_it_matches_the_pin(tmp_path):
+    assert _run_install(tmp_path, "1.177.0", "1.177.0") == (0, ["-m pip install pyyaml==6.0.2"])
+
+
+@pytest.mark.parametrize("image_version", ["", "1.176.0"])
+def test_charts_install_the_pinned_semgrep_without_a_matching_image(tmp_path, image_version):
+    assert _run_install(tmp_path, image_version, "1.177.0") == (0, ["-m pip install pyyaml==6.0.2 semgrep==1.177.0"])
+
+
+def test_charts_fail_when_the_semgrep_on_path_is_not_the_pin(tmp_path):
+    assert _run_install(tmp_path, "1.177.0", "1.176.0")[0] != 0
 
 
 def test_no_semgrep_job_or_step_can_pass_on_a_skip_or_an_error():
