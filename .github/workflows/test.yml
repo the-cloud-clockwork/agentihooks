@@ -2764,7 +2764,7 @@ jobs:
         run: bash "$RUNNER_TEMP/workflow/.github/scripts/pypi-retry.sh" "Install dependencies" -- uv pip install --system "mutmut==3.6.0" "pytest>=8.0" "pyyaml>=6.0" "tomlkit>=0.12"
 
       - name: Restore latest dev durations
-        if: steps.reuse.outputs.reused != 'true' && github.event_name == 'pull_request'
+        if: github.event_name == 'pull_request' && steps.reuse.outputs.reused != 'true'
         uses: actions/cache/restore@v4
         env:
           SEGMENT_DOWNLOAD_TIMEOUT_MINS: "1"
@@ -2902,7 +2902,7 @@ jobs:
           exit 1
 
       - name: Restore latest dev durations
-        if: needs.mutation-plan.outputs.forwarded != 'true' && github.event_name == 'pull_request'
+        if: github.event_name == 'pull_request' && needs.mutation-plan.outputs.forwarded != 'true'
         uses: actions/cache/restore@v4
         env:
           SEGMENT_DOWNLOAD_TIMEOUT_MINS: "1"
@@ -3054,7 +3054,7 @@ jobs:
           exit 1
 
       - name: Restore latest dev durations
-        if: needs.mutation-plan.outputs.forwarded != 'true' && github.event_name == 'pull_request'
+        if: github.event_name == 'pull_request' && needs.mutation-plan.outputs.forwarded != 'true'
         uses: actions/cache/restore@v4
         env:
           SEGMENT_DOWNLOAD_TIMEOUT_MINS: "1"
