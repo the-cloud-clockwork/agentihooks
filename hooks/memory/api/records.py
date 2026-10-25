@@ -30,10 +30,7 @@ VISIBLE = (
     "AND e.project_id IN (SELECT value FROM json_each(?))) ORDER BY r.session_uid"
 )
 CHUNK = "SELECT record FROM search_chunk WHERE access_domain = ? AND session_uid = ? AND chunk_id = ?"
-ISSUE = (
-    "INSERT INTO session_cursor VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT (access_domain, cursor_id) "
-    "DO UPDATE SET expires_at = excluded.expires_at"
-)
+ISSUE = "INSERT OR IGNORE INTO session_cursor VALUES (?, ?, ?, ?, ?, ?, ?)"
 PRUNE = "DELETE FROM session_cursor WHERE access_domain = ? AND expires_at <= ?"
 CURSOR = (
     "SELECT grant_digest, request_digest, position, fingerprint, expires_at FROM session_cursor "

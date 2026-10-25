@@ -375,13 +375,16 @@ def test_a_cursor_expires_at_its_lifetime(inputs, bank):
     assert error(late)["detail"] == records.CURSOR_EXPIRED
 
 
-def test_a_reissued_cursor_gets_a_fresh_lifetime_and_expired_rows_are_pruned(inputs, bank):
+def test_a_reissued_cursor_keeps_its_lifetime_and_expired_rows_are_pruned(inputs, bank):
     now = inputs["clock"]["now"]
     cursor = bank.ask("session_list", body(inputs, limit=1), now)["next_cursor"]
-    bank.ask("session_list", body(inputs, limit=1), now + 600)
+    assert bank.ask("session_list", body(inputs, limit=1), now + 600)["next_cursor"] == cursor
     later = now + records.CURSOR_SECONDS + 1
-    assert bank.ask("session_list", body(inputs, limit=1, cursor=cursor), later)["state"] == "answered"
-    bank.ask("session_list", body(inputs, limit=1), now + 10 * records.CURSOR_SECONDS)
+    assert error(bank.ask("session_list", body(inputs, limit=1, cursor=cursor), later))["detail"] == (
+        records.CURSOR_EXPIRED
+    )
+    reissued = bank.ask("session_list", body(inputs, limit=1), now + 10 * records.CURSOR_SECONDS)["next_cursor"]
+    assert reissued == cursor
     rows = bank.corpus.catalog.db.execute("SELECT expires_at FROM session_cursor").fetchall()
     assert rows == [(now + 11 * records.CURSOR_SECONDS,)]
 

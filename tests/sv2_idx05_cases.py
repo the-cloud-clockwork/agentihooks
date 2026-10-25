@@ -8,6 +8,7 @@ from unittest import mock
 from hooks.mcp import sessions as mcp_sessions
 from hooks.memory import archive
 from hooks.memory.api import records
+from hooks.memory.api import search as search_api
 from hooks.memory.api.ingest import SCHEMA_VERSION, Grant
 from tests.sv2_idx04_cases import Corpus
 
@@ -108,6 +109,24 @@ def refused(answer):
     return {"state": answer["state"], "error": answer.get("error")}
 
 
+def metric(bank, name):
+    return {
+        "access_domain": bank.inputs["grant"]["corpus"],
+        "principal": bank.inputs["grant"]["principal"],
+        "value": bank.counter(name),
+    }
+
+
+ADDED = ("citation", "omitted_chars", "session")
+
+
+def same_as_accepted_search(bank, answer):
+    request = body(bank.inputs, query=bank.inputs["queries"]["hit"], context=0)
+    accepted = search_api.search(bank.tools.searcher, grant(bank.inputs), request)
+    shown = {**answer, "results": [{k: v for k, v in item.items() if k not in ADDED} for item in answer["results"]]}
+    return all(shown[key] == value for key, value in accepted.items() if key not in ("operation_id",))
+
+
 def positive(inputs, root):
     bank = Bank(inputs, root)
     before = bank.protected()
@@ -123,6 +142,7 @@ def positive(inputs, root):
         and [item["event_id"] for item in expanded["records"] if item["cited"]] == cited["event_ids"]
     )
     assert authoritative(bank, cited, expanded) and not resume_keys and bank.protected() == before
+    assert same_as_accepted_search(bank, searched)
     second = Bank(inputs, root / "second")
     assert walk(second, body(inputs, limit=2)) == pages and hit(second)[1]["citation"] == cited
     return {
@@ -151,7 +171,7 @@ def positive(inputs, root):
         "session_get": {key: value for key, value in got["session"].items() if key != "session_uid"},
         "second_fixture_matches": True,
         "authoritative_state_unchanged": True,
-        records.RESOLUTION_FAILURES: bank.counter(records.RESOLUTION_FAILURES),
+        records.RESOLUTION_FAILURES: metric(bank, records.RESOLUTION_FAILURES),
     }
 
 
@@ -159,14 +179,26 @@ def rejection(inputs, root):
     bank = Bank(inputs, root)
     _, top = hit(bank)
     cited = top["citation"]
+    readme = bank.ask("session_search", body(inputs, query=inputs["queries"]["readme"]))["results"][0]["citation"]
+    narrow = grant(inputs, narrow=True)
+    narrowed = {
+        "search_under_a_narrow_grant": bank.ask(
+            "session_search", body(inputs, query=inputs["queries"]["hit"]), None, narrow
+        ),
+        "records_under_a_narrow_grant": bank.ask("session_records", body(inputs, citation=cited), None, narrow),
+    }
     revision = bank.revoke("lock")
+    restricted = bank.revoke("readme", "restricted")
     before = bank.protected()
     stale = {**cited, "first_sequence": cited["first_sequence"] + 1}
     attempts = {
-        "records_after_revocation": bank.ask("session_records", body(inputs, citation=cited)),
-        "alias_get_session_segment": bank.ask("get_session_segment", body(inputs, citation=cited)),
-        "alias_get_session": bank.ask("get_session", body(inputs, session_uid=cited["session_uid"])),
-        "session_get_after_revocation": bank.ask("session_get", body(inputs, session_uid=cited["session_uid"])),
+        "records_after_deletion": bank.ask("session_records", body(inputs, citation=cited)),
+        "alias_get_session_segment_after_deletion": bank.ask("get_session_segment", body(inputs, citation=cited)),
+        "alias_get_session_after_deletion": bank.ask("get_session", body(inputs, session_uid=cited["session_uid"])),
+        "session_get_after_deletion": bank.ask("session_get", body(inputs, session_uid=cited["session_uid"])),
+        "records_after_restriction": bank.ask("session_records", body(inputs, citation=readme)),
+        "alias_get_session_segment_after_restriction": bank.ask("get_session_segment", body(inputs, citation=readme)),
+        "records_under_a_narrow_grant": narrowed["records_under_a_narrow_grant"],
     }
     searched = bank.ask("search_sessions", body(inputs, query=inputs["queries"]["hit"]))
     listing = bank.ask("list_sessions", body(inputs))
@@ -174,43 +206,44 @@ def rejection(inputs, root):
     scoped = {
         "foreign_corpus": bank.ask("session_list", {**body(inputs), "access_domain": inputs["foreign_corpus"]}),
         "cursor_from_another_grant": bank.ask(
-            "session_list", body(inputs, limit=1, cursor=first["next_cursor"]), granted=grant(inputs, narrow=True)
+            "session_list", body(inputs, limit=1, cursor=first["next_cursor"]), None, narrow
         ),
         "stale_citation": bank.ask(
-            "session_records", body(inputs, citation={**stale, "session_uid": bank.uid("readme")})
+            "session_records", body(inputs, citation={**stale, "session_uid": bank.uid("kernel")})
         ),
     }
-    diagnostics = json.dumps({**attempts, **scoped}, ensure_ascii=False)
+    unsupported = {
+        "old_schema_version": bank.ask("session_list", {**body(inputs), "schema_version": "1.0"}),
+        "unknown_field": bank.ask("session_get", body(inputs, session_uid=bank.uid("kernel"), resume=True)),
+        "malformed_citation": bank.ask("session_records", body(inputs, citation={"session_uid": bank.uid("kernel")})),
+    }
+    rejected = {**attempts, **scoped, **unsupported}
+    diagnostics = json.dumps(rejected, ensure_ascii=False)
     untouched = bank.protected() == before
-    assert all(answer["state"] == "rejected" for answer in {**attempts, **scoped}.values())
+    assert all(answer["state"] == "rejected" for answer in rejected.values())
     assert {answer["error"]["class"] for answer in attempts.values()} == {"evidence_unavailable"}
-    assert searched["results"] == [] and "lock" not in listed(bank, listing) and untouched
+    assert {answer["error"]["class"] for answer in unsupported.values()} == {"invalid_request"}
+    assert narrowed["search_under_a_narrow_grant"]["results"] == []
+    assert searched["results"] == [] and listed(bank, listing) == ["kernel"] and untouched
     assert not any(hidden in diagnostics for hidden in HIDDEN)
     failures = bank.counter(records.RESOLUTION_FAILURES)
-    _, fresh = hit(Bank(inputs, root / "fresh"))
-    corrected = bank.ask(
-        "session_records",
-        body(
-            inputs,
-            citation=bank.ask("session_search", body(inputs, query=inputs["queries"]["readme"]))["results"][0][
-                "citation"
-            ],
-        ),
-    )
+    kernel = bank.ask("session_search", body(inputs, query="kernel feed"))["results"][0]["citation"]
+    corrected = bank.ask("session_records", body(inputs, citation=kernel))
     assert corrected["state"] == "answered" and bank.counter(records.RESOLUTION_FAILURES) == failures
     return {
-        "revoked_revision": revision,
+        "revoked_revisions": {"deleted": revision, "restricted": restricted},
         "rejected": {name: refused(answer) for name, answer in attempts.items()},
+        "narrow_grant_search_results": len(narrowed["search_under_a_narrow_grant"]["results"]),
         "alias_search_results_after_revocation": len(searched["results"]),
         "alias_list_after_revocation": listed(bank, listing),
         "alias_metadata": listing["alias"],
         "scope_and_cursor": {name: refused(answer) for name, answer in scoped.items()},
+        "unsupported": {name: refused(answer) for name, answer in unsupported.items()},
         "protected_state_unchanged": untouched,
         "hidden_names_absent_from_diagnostics": True,
         "corrected_with_a_new_citation": {"state": corrected["state"], "records": len(corrected["records"])},
-        "unrevoked_fixture_still_cites_the_hit": bank.short(fresh["session_uid"]),
-        records.RESOLUTION_FAILURES: failures,
-        records.ALIAS_CALLS: bank.counter(records.ALIAS_CALLS),
+        records.RESOLUTION_FAILURES: metric(bank, records.RESOLUTION_FAILURES),
+        records.ALIAS_CALLS: metric(bank, records.ALIAS_CALLS),
     }
 
 
@@ -262,37 +295,59 @@ def expand(bank, request, cursor, now):
     return pages
 
 
+def cursor_rows(bank):
+    return bank.corpus.catalog.db.execute("SELECT COUNT(*) FROM session_cursor").fetchone()[0]
+
+
 def recovery(inputs, root):
     bank = Bank(inputs, root)
     clock = inputs["clock"]
+    before = bank.protected()
     first = bank.ask("session_list", body(inputs, limit=1))
     page = bank.ask("session_list", body(inputs, limit=1, cursor=first["next_cursor"]))
     _, top = hit(bank)
     expansion = body(inputs, citation=top["citation"], after=1, limit=2)
     head = bank.ask("session_records", expansion)
+    rows = cursor_rows(bank)
     bank.restart()
     resumed = bank.ask("session_list", body(inputs, limit=1, cursor=first["next_cursor"]), clock["later"])
     replayed = bank.ask("session_list", body(inputs, limit=1, cursor=first["next_cursor"]), clock["later"])
     tail = expand(bank, expansion, head["next_cursor"], clock["later"])
+    rows_after_tail = cursor_rows(bank)
+    tail_again = expand(bank, expansion, head["next_cursor"], clock["later"])
+    rows_after_replay = cursor_rows(bank)
     expired = bank.ask("session_list", body(inputs, limit=1, cursor=first["next_cursor"]), clock["expired"])
     fresh = bank.ask("session_list", body(inputs, limit=1), clock["expired"])
     bank.revoke("kernel", "restricted")
     moved = bank.ask("session_list", body(inputs, limit=1, cursor=fresh["next_cursor"]), clock["expired"])
     restarted = bank.ask("session_list", body(inputs, limit=1), clock["expired"])
+    newer = bank.ask("session_list", body(inputs, limit=1, cursor=restarted["next_cursor"]), clock["expired"])
+    stale_again = bank.ask("session_list", body(inputs, limit=1, cursor=fresh["next_cursor"]), clock["expired"])
     joined = [item["sequence"] for item in head["records"]] + [item["sequence"] for chunk in tail for item in chunk]
     assert resumed == page == replayed and joined == sorted(set(joined)) and len(joined) == head["total"]
+    assert tail_again == tail and rows_after_replay == rows_after_tail >= rows
     assert expired["error"]["detail"] == records.CURSOR_EXPIRED and moved["error"]["detail"] == records.CURSOR_MOVED
-    assert listed(bank, restarted) == ["lock"]
+    assert listed(bank, restarted) == ["lock"] and listed(bank, newer) == ["readme"] and stale_again == moved
+    protected = {name: table for name, table in bank.protected().items() if name != "session_record"}
+    assert protected == {name: table for name, table in before.items() if name != "session_record"}
     return {
         "cursor_page_before_restart": listed(bank, page),
         "cursor_page_after_restart_identical": resumed == page,
         "cursor_replay_identical": replayed == resumed,
         "expansion_across_restart": {"head": outline(head), "tail_pages": len(tail), "sequences": joined},
+        "expansion_replay_identical": tail_again == tail,
+        "cursor_rows": {"before_restart": rows, "after_tail": rows_after_tail, "after_replay": rows_after_replay},
         "expired_cursor": refused(expired),
         "changed_listing_cursor": refused(moved),
-        "listing_restarted_without_cursor": listed(bank, restarted),
+        "stale_cursor_after_newer_listing": refused(stale_again),
+        "listing_restarted_without_cursor": [listed(bank, restarted), listed(bank, newer)],
+        "durability": {
+            "survived_restart": ["catalog events, sources, records and archive objects", "issued cursor rows"],
+            "expired": ["cursor past its lifetime", "cursor whose listing changed"],
+            "authoritative_rows_changed": ["session_record state of the restricted session"],
+        },
         "rollback_rehearsal": rollback(bank, bank.corpus.root),
-        records.RESOLUTION_FAILURES: bank.counter(records.RESOLUTION_FAILURES),
+        records.RESOLUTION_FAILURES: metric(bank, records.RESOLUTION_FAILURES),
     }
 
 

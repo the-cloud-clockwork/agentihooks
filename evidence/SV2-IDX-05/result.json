@@ -13,7 +13,7 @@
     "session_search answers through the SV2-IDX-04 search and adds to every hit a citation (session, source generation, first and last sequence, event ids), its omitted character count and the session's harness, task ids and source timestamps; no hit carries a provider resume command",
     "session_get returns one visible session's summary; a session outside the grant, narrowed away or no longer retained is unavailable",
     "session_records expands a citation to the exact catalog records and the archived source text of every event in the cited sequence range, widened by up to twenty events on each side and paged by up to two hundred, after checking every cited event id is still held at the cited sequences; the archive verifies each object's digest and range",
-    "Pagination cursors are rows of the session_cursor table bound to the grant, the request without its cursor, the position and a fingerprint of the full listing; they survive a restart, expire after nine hundred seconds of the caller's clock, and a changed listing expires them instead of returning a mismatched page",
+    "Pagination cursors are rows of the session_cursor table bound to the grant, the request without its cursor, the position and a fingerprint of the full listing; they survive a restart, expire nine hundred seconds after first issue by the caller's clock, a reissue never extends that lifetime, and a changed listing expires them instead of returning a mismatched page",
     "Compatibility aliases list_sessions, get_session, get_session_segment, search_sessions and search_semantic terminate in their target tools under the same grant, carry their owner and expiry in the answer, count session_alias_calls, and are refused after their expiry",
     "hooks.mcp.sessions registers session_list, session_search, session_get and session_records in the agentihooks MCP server only when AGENTIHOOKS_SESSION_CATALOG is set, and the aliases only when AGENTIHOOKS_SESSION_ALIASES is 1; the grant comes from AGENTIHOOKS_SESSION_CORPUS, AGENTIHOOKS_SESSION_PROJECTS and the agent name"
   ],
@@ -24,13 +24,13 @@
     "aliases": "until 2027-01-31T00:00:00Z"
   },
   "states": {
-    "observed": "Cases A, B and C each ran twice from independent temporary folders with identical records.",
+    "observed": "Pending the green CI run named in manifest.json: each case runs twice from independent temporary folders and the test requires identical records.",
     "accepted": "A tool request is accepted when its envelope, scope and cursor pass; it answers in one call with state answered.",
     "committed": "The tools write only cursor rows and the resolution failure, alias call and scope rejection counters; every event, source, record, archive and chunk row stays as captured.",
     "externally_verified": "Not yet: no deployed session service, MCP transport or central database ran; a live check belongs to the G4 rollout gate."
   },
   "metrics": {
-    "evidence_reference_resolution_failures": "count of citations or session references refused because the session is no longer available to the grant, a cited event is not held as cited, or the archived bytes fail their digest or range, kept under the grant's corpus",
+    "evidence_reference_resolution_failures": "count of citations or session references refused because the session is no longer available to the grant, a cited event is not held as cited, or the archived bytes fail their digest or range, kept under the grant's corpus; case records report it with its access domain and principal dimensions",
     "session_alias_calls": "count of calls through a compatibility alias, kept under the grant's corpus"
   },
   "cases": {
@@ -48,8 +48,9 @@
     "Task ids and source timestamps come from task_id and timestamp fields on captured records; a capture that does not write them reports no tasks and null timestamps.",
     "Expansion reads each event's archived range separately; a wide range costs one archive read per event.",
     "Search hits are not paged by cursor; the SV2-IDX-04 limit of fifty bounds them.",
-    "No consumer of the retired service's tool names was found in this repository, so the aliases stay off unless AGENTIHOOKS_SESSION_ALIASES is 1."
+    "No consumer of the retired service's tool names was found in this repository, so the aliases stay off unless AGENTIHOOKS_SESSION_ALIASES is 1.",
+    "The consumer inventory covers this repository only; callers elsewhere are inventoried by SV2-MIG-01."
   ],
-  "compatibility": "Compared with the preceding accepted SV2-IDX-04 search, session_search returns the same answer fields and adds citation, omitted_chars and session to each hit; the aliases take the new request shape rather than the retired service's arguments.",
+  "compatibility": "Explicitly local compatibility path. Case A compares session_search with the preceding accepted SV2-IDX-04 search on the same request: every SV2-IDX-04 answer field is identical and each hit only adds citation, omitted_chars and session. The aliases keep the retired service's tool names but take the new request shape, so a caller passing the retired arguments is refused as invalid_request rather than answered from another store.",
   "authority": "The caller's Grant decides corpus and projects; a request may only narrow them, a cursor from another grant reads as expired, and a refusal reveals no titles, text or counts."
 }
