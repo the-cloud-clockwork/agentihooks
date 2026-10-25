@@ -724,7 +724,8 @@ def test_workspace_preserves_git_reads_without_copying_repository_configuration(
         assert directory_trust(stage, {}) == directory_trust(root, {})
 
 
-def test_workspace_reports_a_failed_git_initialization(tmp_path, monkeypatch):
+@pytest.mark.parametrize("operation", ["init", "config"])
+def test_workspace_reports_a_failed_git_metadata_command(tmp_path, monkeypatch, operation):
     import os
     import shlex
     import shutil
@@ -736,18 +737,24 @@ def test_workspace_reports_a_failed_git_initialization(tmp_path, monkeypatch):
     root.mkdir()
     (root / "pyproject.toml").write_text("[tool.pytest.ini_options]\n")
     subprocess.run(["git", "init", "-q", str(root)], check=True)
+    subprocess.run(
+        ["git", "remote", "add", "origin", "https://github.com/fixture-owner/repository.git"], cwd=root, check=True
+    )
+    work = tmp_path / "work"
+    work.mkdir()
     binary = tmp_path / "bin"
     binary.mkdir()
     git = binary / "git"
     git.write_text(
         "#!/usr/bin/env bash\nset -euo pipefail\n"
-        'if [[ "$1" == init ]]; then exit 37; fi\n'
+        'if [[ "$1" == init && "$FAIL_OPERATION" == init ]] || '
+        '[[ "$1" == -C && "$2" == "$FAIL_WORK" && "$3" == config && "$FAIL_OPERATION" == config ]]; then exit 37; fi\n'
         f'exec {shlex.quote(shutil.which("git"))} "$@"\n'
     )
     git.chmod(0o755)
     monkeypatch.setenv("PATH", f"{binary}:{os.environ['PATH']}")
-    work = tmp_path / "work"
-    work.mkdir()
+    monkeypatch.setenv("FAIL_OPERATION", operation)
+    monkeypatch.setenv("FAIL_WORK", str(work))
     with pytest.raises(subprocess.CalledProcessError) as error:
         prepare_workspace(root, work, ["hooks/sample.py"], [])
     assert error.value.returncode == 37
