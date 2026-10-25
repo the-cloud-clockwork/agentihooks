@@ -5,6 +5,7 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+
 def source_path(filename: str, work: Path, root: Path, tracked: set[str] | None = None) -> str | None:
     path = Path(filename).resolve()
     for prefix in (work.resolve(), root.resolve()):
