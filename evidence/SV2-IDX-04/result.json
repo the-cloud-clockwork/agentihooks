@@ -46,6 +46,7 @@
     "Lexical matching scans the scoped chunks in process; no full text index backs it, so cost grows with the corpus size inside the grant.",
     "Vector similarity is computed in process over the generation's vectors; no vector database is wired.",
     "A session touching any project outside the allowed set is excluded whole rather than chunk by chunk.",
+    "No provider adapter ships here: the outage path is proven only with the fixture embedder raising TransientEmbeddingError, which the Embedder contract requires of every adapter for an outage; any other exception surfaces as a defect.",
     "Session tools and citation ready range expansion belong to SV2-IDX-05."
   ],
   "compatibility": "Explicitly local compatibility path: the catalog, chunk and index tables and functions are unchanged; search only reads them and adds one counter name.",
