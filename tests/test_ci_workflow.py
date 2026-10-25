@@ -15,6 +15,7 @@ import pytest
 import yaml
 from _pytest.config import default_plugins
 
+from scripts import ci_gate_queue
 from tests import refresh_durations
 from tests.refresh_durations import ci_run_ids, ci_samples, median_durations
 
@@ -921,6 +922,47 @@ def test_promotion_shard_reports_use_the_pushed_grader_and_prs_keep_the_base():
     assert "github.event_name == 'push' && github.sha" in ref
     assert "github.event_name == 'pull_request' && github.base_ref" in ref
     assert ref.index("github.event_name == 'push' && github.sha") < ref.index("github.event.before")
+
+
+def test_shard_verification_starts_from_the_plan_and_prefetches_complete_reports():
+    jobs = _workflow()["jobs"]
+    job = jobs["shard-check"]
+    assert set(job["needs"]) == {"split", "select", "reuse", "admission"}
+    stream = next(step for step in job["steps"] if "python -m scripts.ci_gate_shards" in step.get("run", ""))
+    assert stream["env"]["GH_TOKEN"] == "${{ steps.app-token.outputs.token }}"
+    mint = next(step for step in job["steps"] if step.get("id") == "app-token")
+    assert "if" not in mint
+    assert mint["with"]["permission-actions"] == "read"
+    assert (
+        stream["env"]["QUEUE_PLAN"]
+        == "${{ github.event_name == 'merge_group' && format('[{0}]', needs.split.outputs.queue_312) || '' }}"
+    )
+    assert f"seq 1 {len(jobs['unit']['strategy']['matrix']['shard'])}" in stream["run"]
+    assert "jq -ce '[.[].shard]'" in stream["run"]
+    check = next(
+        step["run"]
+        for step in job["steps"]
+        if step.get("name") == "Check every collected test ran in exactly one shard"
+    )
+    assert (
+        "tests.shard_check shard-reports/durations-*/durations.json --collected collected-data/collected.json" in check
+    )
+    assert "REUSED" in check
+    assert job["timeout-minutes"] == 25
+    assert job["permissions"] == {"contents": "read"}
+
+
+def test_queue_gate_is_the_early_verifier_and_the_standard_gate_summarizes_queue_runs():
+    workflow = _workflow()
+    jobs = workflow["jobs"]
+    summary = jobs["gate-required"]
+    assert summary["name"] == ci_gate_queue.SUMMARY_NAME
+    assert jobs["queue-fail-fast"] == ci_gate_queue.watcher(summary["runs-on"])
+    normalized = ci_gate_queue.normalize({"test.yml": workflow})["test.yml"]["jobs"]
+    assert normalized["gate-required"]["name"] == "Gate — Required"
+    assert normalized["queue-fail-fast"]["name"] == "queue-fail-fast"
+    labels = [job.get("name", key) for key, job in jobs.items()]
+    assert sum("Gate — Required" in label for label in labels) == 2
 
 
 def test_unit_shards_check_out_full_history_without_old_file_contents():

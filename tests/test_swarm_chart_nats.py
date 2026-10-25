@@ -40,7 +40,7 @@ def test_the_bundled_nats_runs_by_default_with_jetstream_and_the_hub_address_lef
 
     assert values["nats"]["enabled"] is True
     assert values["nats"]["config"]["jetstream"]["enabled"] is True
-    assert values["hub"]["bus"] == {"backend": "nats", "url": ""}
+    assert values["hub"]["bus"] == {"backend": "nats", "url": "", "scoped": False}
 
 
 def test_the_kind_proof_verifies_the_dependency_before_any_render_and_checks_the_nats_switch():
