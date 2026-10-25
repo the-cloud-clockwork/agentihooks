@@ -252,11 +252,24 @@ def tracked(root: Path, record: dict) -> str:
 def target_branch(root: Path, task: dict, branch: str, record: dict) -> str:
     for candidate in (continuation.retained(task), tracked(root, record), task.get("branch")):
         if candidate:
-            ref = f"refs/remotes/origin/{candidate}"
-            done = subprocess.run(["git", "merge-base", "--is-ancestor", ref, "HEAD"], cwd=root, capture_output=True)
-            if done.returncode == 0:
+            if descends(root, candidate):
                 return candidate
     return branch
+
+
+def descends(root: Path, branch: str) -> bool:
+    ref = f"refs/remotes/origin/{branch}"
+    return not subprocess.run(
+        ["git", "merge-base", "--is-ancestor", ref, "HEAD"], cwd=root, capture_output=True
+    ).returncode
+
+
+def delivery_branch(root: Path, task: dict, branch: str) -> str:
+    head = publish_queue.open_head(git(root, "remote", "get-url", "--push", "origin"), task.get("pr_url"))
+    if not head or head in continuation.PROTECTED:
+        return branch
+    git(root, "fetch", "origin", f"+refs/heads/{head}:refs/remotes/origin/{head}")
+    return head if descends(root, head) else branch
 
 
 def gate_python(repo: Path) -> str:
@@ -301,14 +314,15 @@ def grade_and_push(root: Path, primary: Path, fields: dict, head: str) -> None:
 
 def publish(slug: str, agent: AgentRecord, repo: str, ledger: LedgerClient, message: str, files: list[str]) -> dict:
     task = task_row(slug, agent, ledger)
-    root, primary, _ = publishing_root(repo, task, agent)
+    root, primary, scoped = publishing_root(repo, task, agent)
     if root is None:
         raise SwarmError(f"task worktree missing; Next: agentihooks swarm {shlex.quote(slug)} prepare")
     fields = checkout_fields(root)
-    ledger.update_task(slug, agent.task, branch_record(fields, primary, task), by=agent.name)
     selected = selected_files(root, files)
     retry = shlex.join(["agentihooks", "swarm", slug, "publish", "--message", message, "--", *files])
     try:
+        fields["branch"] = delivery_branch(root, scoped, fields["branch"])
+        ledger.update_task(slug, agent.task, branch_record(fields, primary, task), by=agent.name)
         stage_files(root, selected)
         changed = bool(git(root, "diff", "--cached", "--name-only", "-z"))
         if changed:

@@ -1,6 +1,8 @@
+import json
 import os
 import re
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -147,3 +149,108 @@ def test_shard_summary_step_passes_and_writes_a_normal_summary(tmp_path, interpr
     assert result.returncode == 0
     assert "Ran 12 tests" in result.stdout
     assert "Ran 12 tests" in summary
+
+
+@pytest.mark.parametrize(
+    "case", ["complete", "missing", "duplicate", "reused", "missing_collection", "missing_flakes", "missing_plan"]
+)
+def test_grouped_download_preserves_shard_integrity_without_installed_dependencies(tmp_path, case):
+    steps = _jobs()["shard-check"]["steps"]
+    downloads = [step for step in steps if step.get("uses", "").startswith("actions/download-artifact@")]
+    assert len(downloads) == 1
+    assert downloads[0]["with"] == {
+        "pattern": "{durations,flakes,collected,reused-tests}-${{ matrix.python-version }}{,-*}",
+        "path": "shard-durations",
+    }
+    assert not any(step.get("name") == "Install grader dependencies" for step in steps)
+    assert not any(step.get("uses", "").startswith("actions/setup-python@") for step in steps)
+    layout = next(step for step in steps if step.get("name") == "Arrange shard verification data")
+    root = tmp_path / "shard-durations"
+    for index, nodeids in enumerate(
+        (["suite::a"], ["suite::a", "suite::b"] if case == "duplicate" else ["suite::b"]), 1
+    ):
+        if case == "missing" and index == 2:
+            continue
+        directory = root / f"durations-3.12-{index}"
+        directory.mkdir(parents=True)
+        (directory / "durations.json").write_text(json.dumps(dict.fromkeys(nodeids, 0.1)))
+        (directory / "durations.sha256").write_text("a" * 64)
+        if case != "missing_flakes":
+            directory = root / f"flakes-3.12-{index}"
+            directory.mkdir()
+            (directory / "flakes.jsonl").write_text("")
+    if case != "missing_collection":
+        directory = root / "collected-3.12"
+        directory.mkdir()
+        collected = ["suite::a", "suite::b", *(["suite::reused"] if case == "reused" else [])]
+        (directory / "collected.json").write_text(json.dumps(collected))
+    if case == "reused":
+        directory = root / "reused-tests-3.12"
+        directory.mkdir()
+        (directory / "reused-tests.json").write_text(json.dumps({"tests": ["suite::reused"]}))
+    arranged = subprocess.run(
+        ["bash", "-e", "-o", "pipefail", "-c", layout["run"]],
+        cwd=tmp_path,
+        env={**os.environ, "PYTHON_VERSION": "3.12", "REUSED": "1" if case in {"reused", "missing_plan"} else "0"},
+        capture_output=True,
+        text=True,
+    )
+    if case in {"missing_collection", "missing_flakes", "missing_plan"}:
+        assert arranged.returncode != 0
+        return
+    assert arranged.returncode == 0, arranged.stdout + arranged.stderr
+    command = [
+        sys.executable,
+        "-S",
+        "-m",
+        "tests.shard_check",
+        *(str(path) for path in sorted(root.glob("*/durations.json"))),
+        "--collected",
+        str(tmp_path / "collected-data/collected.json"),
+    ]
+    if case == "reused":
+        command.extend(["--reused", str(tmp_path / "reused-plan/reused-tests.json")])
+    result = subprocess.run(command, cwd=Path(__file__).resolve().parents[1], capture_output=True, text=True)
+    assert result.returncode == (1 if case in {"missing", "duplicate"} else 0), result.stdout + result.stderr
+    if case == "missing":
+        assert "suite::b ran 0 times" in result.stdout
+    elif case == "duplicate":
+        assert "suite::a ran 2 times" in result.stdout
+    else:
+        assert "0 ran zero times or more than once" in result.stdout
+
+
+@pytest.mark.parametrize("module", ["shard_check", "shard_summary", "shard_budget"])
+def test_shard_verifier_commands_run_with_only_system_python3(tmp_path, module):
+    step = next(step for step in _jobs()["shard-check"]["steps"] if f"-m tests.{module} " in step.get("run", ""))
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    (bin_dir / "python3").symlink_to(sys.executable)
+    (bin_dir / "tee").symlink_to("/usr/bin/tee")
+    durations = tmp_path / "shard-durations/one"
+    durations.mkdir(parents=True)
+    (durations / "durations.json").write_text(json.dumps({"suite::a": 0.1}))
+    (durations / "durations.sha256").write_text("a" * 64)
+    collection = tmp_path / "collected-data"
+    collection.mkdir()
+    (collection / "collected.json").write_text(json.dumps(["suite::a"]))
+    flakes = tmp_path / "shard-flakes/one"
+    flakes.mkdir(parents=True)
+    (flakes / "flakes.jsonl").write_text("")
+    result = subprocess.run(
+        ["/bin/bash", "-e", "-o", "pipefail", "-c", step["run"]],
+        cwd=tmp_path,
+        env={
+            "PATH": str(bin_dir),
+            "PYTHONPATH": str(Path(__file__).resolve().parents[1]),
+            "PYTHON_VERSION": "3.12",
+            "REUSED": "",
+            "PLAN": "reused-plan/reused-tests.json",
+            "REPORT": "",
+            "GITHUB_STEP_SUMMARY": str(tmp_path / "summary.md"),
+        },
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
