@@ -1,5 +1,6 @@
 """agentihooks hive add: a UI hive saves a machine in herdr and delivers its member credential over SSH."""
 
+import itertools
 import json
 import subprocess
 from collections.abc import Callable
@@ -15,6 +16,8 @@ if TYPE_CHECKING:
     from redis import Redis
 
 REMOTE_SESSION = "default"
+NAME_PREFIX = "swarm-hive-"
+MACHINES = f"{auth.PREFIX}:machines"
 LIST = ("herdr", "machine", "list", "--json")
 HERDR_TIMEOUT_S = 300
 SSH_TIMEOUT_S = 60
@@ -36,8 +39,33 @@ class Delivery:
     ledger_ca: str | None = None
 
 
-def label(now: float) -> str:
-    return f"swarm-hive-{int(now)}"
+def name(redis: "Redis", machine: str, assign: bool = True) -> str:
+    from redis.exceptions import WatchError
+
+    with redis.pipeline() as pipe:
+        while True:
+            try:
+                pipe.watch(MACHINES)
+                named = pipe.hgetall(MACHINES)
+                if machine in named:
+                    return named[machine]
+                taken = set(named.values())
+                found = next(
+                    f"{NAME_PREFIX}{ordinal:03d}"
+                    for ordinal in itertools.count(1)
+                    if f"{NAME_PREFIX}{ordinal:03d}" not in taken
+                )
+                if assign:
+                    pipe.multi()
+                    pipe.hset(MACHINES, machine, found)
+                    pipe.execute()
+                return found
+            except WatchError:
+                continue
+
+
+def host(target: str) -> str:
+    return urlsplit(target if "://" in target else f"ssh://{target}").hostname
 
 
 def add(
@@ -48,7 +76,13 @@ def add(
     delivery: Delivery,
     run: Callable[..., subprocess.CompletedProcess] = subprocess.run,
 ) -> dict:
-    save(redis, local_id, target, label, run)
+    _ui(redis, local_id)
+    listed = _listed(run)
+    _one_per_machine(listed, target, label)
+    member = _member(redis, label)
+    if member and any(saved.get("label") == label for saved in listed):
+        return {"id": member, "name": label}
+    _keep(listed, target, label, run)
     grant = auth.mint(redis, label, delivery.redis_url)
     try:
         run_checked(
@@ -62,23 +96,44 @@ def add(
     return grant
 
 
+def _one_per_machine(listed: list[dict], target: str, label: str) -> None:
+    machine = host(target)
+    for saved in listed:
+        if saved.get("label") != label and saved.get("target") and host(saved["target"]) == machine:
+            raise auth.HiveError(
+                f"{machine} already runs hive {saved.get('label')}; one machine runs one hive, "
+                "so grow it with more max agents"
+            )
+
+
+def _member(redis: "Redis", label: str) -> str | None:
+    for key in redis.scan_iter(match=f"{auth.PREFIX}:member:*"):
+        if redis.hget(key, "name") == label:
+            return key.rsplit(":", 1)[1]
+    return None
+
+
 def save(
     redis: "Redis", local_id: str, target: str, label: str, run: Callable[..., subprocess.CompletedProcess]
 ) -> None:
+    _ui(redis, local_id)
+    _keep(_listed(run), target, label, run)
+
+
+def _ui(redis: "Redis", local_id: str) -> None:
     local = registry.show(redis, local_id)
     if local is None or local["ui"] != YES:
         raise auth.HiveError(f"hive {local_id} is headless; only a UI hive adds machines")
-    if not _saved(run, target):
+
+
+def _keep(listed: list[dict], target: str, label: str, run: Callable[..., subprocess.CompletedProcess]) -> None:
+    if not any(saved.get("target") == target or saved.get("label") == label for saved in listed):
         run_checked(
             run,
             ["herdr", "machine", "add", "--label", label, "--remote-session", REMOTE_SESSION, target],
             None,
             HERDR_TIMEOUT_S,
         )
-
-
-def _saved(run: Callable[..., subprocess.CompletedProcess], target: str) -> bool:
-    return any(machine.get("target") == target for machine in _listed(run))
 
 
 def _listed(run: Callable[..., subprocess.CompletedProcess]) -> list[dict]:

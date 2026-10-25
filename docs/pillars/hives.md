@@ -34,11 +34,16 @@ agentihooks hive add ssh://worker@lab-vm:22 \
 agentihooks hive install          # user service that runs agentihooks hive run
 ```
 
-- `hive add <ssh target> --url <url> [--redis-url URL]` names the machine `swarm-hive-<epoch seconds>` from the
-  clock; a typed label is refused. It refuses unless the local hive record has
-  `ui=yes`, with `hive add refused: hive <id> is headless; only a UI hive adds machines`. On a UI hive it runs
-  `herdr machine add --label swarm-hive-<epoch seconds> --remote-session default <target>` (300 second timeout) unless
-  `herdr machine list --json` already holds that target, so a rerun only redelivers the credential; it mints a hive member
+- `hive add <ssh target> --url <url> [--redis-url URL]` names the hive after its machine, the target's host: the
+  first add of a host gives it the lowest free name `swarm-hive-001`, `swarm-hive-002` and so on, kept in the Redis
+  hash `agentihooks-hive:machines`, and every later add of that host reuses the name. A typed label is refused. It
+  refuses unless the local hive record has `ui=yes`, with
+  `hive add refused: hive <id> is headless; only a UI hive adds machines`. One machine runs one hive: a herdr machine
+  already saved on the same host under another label refuses the add with
+  `<host> already runs hive <label>; one machine runs one hive, so grow it with more max agents`. When herdr already
+  holds the label and a hive member carries it, the add keeps that member and herdr entry and mints nothing. Otherwise
+  it runs `herdr machine add --label <name> --remote-session default <target>` (300 second timeout) unless
+  `herdr machine list --json` already holds that target or label; it mints a hive member
   named after the label, and delivers it: `ssh -o BatchMode=yes <target>` (60 second timeout) writes the member's
   `hive.env` (mode 0600) into `${AGENTIHOOKS_HOME:-$HOME/.agentihooks}/hive.env` on the remote machine. If delivery
   fails, the minted member is revoked and the command exits 1. On success it prints
@@ -72,7 +77,8 @@ agentihooks hive install          # user service that runs agentihooks hive run
   is left it revokes the member and its Redis user, removes the herdr machine saved under the hive's label and that
   machine's host key from `~/.ssh/known_hosts`, deletes the hive record and every key below it, and deletes the
   OpenBao record (`k8s/agentihooks-hive-<label>`, or `--path`). With `--antoncore <checkout>` it also stages the
-  removal of the hive's Argo application, manifests folder and values overlay there, for a pull request. The label
+  removal of the hive's Argo application, manifests folder and values overlay there, for a pull request: the release
+  is the label itself for a `swarm-hive-` name and `agentihooks-hive-<label>` otherwise. The label
   defaults to the member's name (`--label` overrides; a rerun after the member is revoked needs it). After `--wait` seconds (default 3600) with agents still on
   the hive it stops with their names and leaves the hive draining; run it again to keep waiting. Every step skips a
   piece that is already gone, so a rerun finishes an interrupted remove. `OPENBAO_URL` and `OPENBAO_TOKEN` must
