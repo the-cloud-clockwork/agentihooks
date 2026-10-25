@@ -5,10 +5,14 @@ so it prints account names only, never a credential."""
 import sys
 import time
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from scripts import master_claude_login as login
 from scripts import master_logins, quota_state
 from scripts.swarm_v2 import front_door
+
+if TYPE_CHECKING:
+    from scripts.swarm.store import RedisStore
 
 TOKEN = "{slug} front door {name} runs on a quota token while the stored login {login} has room"
 SPREAD = "front doors sit on different logins, {logins}, while the preferred login {login} has room"
@@ -27,7 +31,7 @@ def _held() -> dict[str, str]:
     return {owner: stored[number] for number in stored for owner in login.holders(login.root(number))}
 
 
-def front_doors(store) -> list[FrontDoor]:
+def front_doors(store: "RedisStore") -> list[FrontDoor]:
     held = _held()
     return [
         FrontDoor(slug, agent.name, held.get(agent.name, ""), agent.account)
@@ -62,7 +66,7 @@ def _line(door: FrontDoor) -> str:
     return f"{door.slug} front door {door.name} runs on {route}"
 
 
-def main(store=None) -> int:
+def main(store: "RedisStore | None" = None) -> int:
     if store is None:
         from scripts.swarm.store import RedisStore, redis_client
 
