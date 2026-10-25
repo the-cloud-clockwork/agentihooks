@@ -157,13 +157,27 @@ def pushed_branches(repo: str, task: dict, agent: AgentRecord) -> dict:
     return record
 
 
+def merged_record(repo: str, task: dict) -> bool:
+    if not task.get("branch") or not task.get("pr_url"):
+        return False
+    pull = json.loads(execute(["gh", "pr", "view", task["pr_url"], "--json", "state,headRefName"], Path(repo)))
+    return pull["state"] == "MERGED" and pull["headRefName"] == task["branch"]
+
+
 def prepare(slug: str, agent: AgentRecord, repo: str, ledger: LedgerClient) -> dict:
     task = task_row(slug, agent, ledger)
+    retired = merged_record(repo, task)
+    cleared = {}
+    if retired:
+        cleared = {"branch": "", "repository_branches": {}, "pr_url": ""}
+        for key in ("handoff_envelope", "reclaim"):
+            cleared[key] = {name: value for name, value in (task.get(key) or {}).items() if name != "continue_from"}
+        task = {**task, **cleared}
     fields = []
     repositories = dict.fromkeys(local_repository(value, repo) for value in task.get("repositories") or [repo])
     for repository in repositories:
         scoped = repository_task(repository, task)
-        root = existing(repository, scoped, agent)
+        root = None if retired else existing(repository, scoped, agent)
         if root is None:
             command = ["bash", str(stack.WT_SCRIPT), "new", "--repo", str(repository)]
             if scoped.get("branch"):
@@ -177,7 +191,7 @@ def prepare(slug: str, agent: AgentRecord, repo: str, ledger: LedgerClient) -> d
         fields.append({**checkout, "branch": delivery, "repository": str(repository)})
     update = branch_record(fields[-1], Path(fields[-1]["repository"]), task)
     update["repository_branches"].update({entry["repository"]: entry["branch"] for entry in fields})
-    ledger.update_task(slug, agent.task, update, by=agent.name)
+    ledger.update_task(slug, agent.task, {**cleared, **update}, by=agent.name)
     result = fields[0] if len(fields) == 1 else {"worktrees": fields}
     return {**result, "repository_source": "task" if task.get("repositories") else "swarm default"}
 

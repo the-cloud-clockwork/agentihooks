@@ -1311,7 +1311,7 @@ def test_a_missing_branch_never_descends_and_prints_nothing(publication, capfd):
     assert capfd.readouterr() == ("", "")
 
 
-def test_prepare_records_the_worktree_branch_when_it_does_not_descend_from_the_pull_request(publication):
+def test_prepare_records_the_worktree_branch_when_it_does_not_descend_from_the_pull_request(publication, monkeypatch):
     from scripts.swarm import publish
 
     repository = publication.repo
@@ -1319,6 +1319,14 @@ def test_prepare_records_the_worktree_branch_when_it_does_not_descend_from_the_p
     git(repository, "push", "origin", f"{parked}:refs/heads/predecessor")
     git(repository, "fetch", "origin")
     publication.task.update(branch="predecessor", pr_url="https://github.com/example/repo/pull/7", state="pr")
+    native = publish.execute
+
+    def execute(command, root):
+        if command[:3] == ["gh", "pr", "view"]:
+            return json.dumps({"state": "OPEN", "headRefName": "predecessor"})
+        return native(command, root)
+
+    monkeypatch.setattr(publish, "execute", execute)
 
     result = publish.prepare("swarm", publication.agent, str(repository), publication.ledger)
 
