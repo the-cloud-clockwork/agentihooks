@@ -10,7 +10,7 @@ URL = "https://github.com/o/r/pull/7"
 
 
 @pytest.fixture
-def waiting(env, monkeypatch):
+def waiting(env, monkeypatch):  # noqa: F811
     store, ledger, runtime = env
     assert run("sw", "create", "--repo", "/repo") == 0
     store.put_agent("sw", AgentRecord(name=ME, lane="eng", task="t1", seat="eng-1@sw"))
