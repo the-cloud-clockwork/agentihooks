@@ -116,6 +116,19 @@ def test_each_merge_group_run_has_its_own_finding(skipped_run):
     assert [finding.subject for finding in found] == ["39282034448-1", "39282034449-1"]
 
 
+@pytest.mark.parametrize(
+    "decided,expected",
+    [("2026-10-25T05:06:38Z", []), ("2026-10-25T05:16:50Z", []), ("2026-10-25T05:16:51Z", [372])],
+)
+def test_a_rerun_record_pairs_only_with_a_skip_decision_from_its_own_attempt(skipped_run, decided, expected):
+    skipped_run.update(id=40164331089, run_attempt=2, run_started_at="2026-10-25T05:16:51Z")
+    skipped_run["jobs"][0].update(created_at="2026-10-25T05:17:01Z", completed_at="2026-10-25T05:17:30Z")
+    skipped_run["jobs"][1].update(
+        name="lint", created_at="2026-10-25T05:17:01Z", started_at="2026-10-25T05:23:03Z", completed_at=decided
+    )
+    assert [finding.measure for finding in crossings(skipped_run)] == expected
+
+
 def test_timer_delivers_one_skipped_record_finding_per_run_to_both_masters(skipped_run, monkeypatch):
     import fakeredis
 
