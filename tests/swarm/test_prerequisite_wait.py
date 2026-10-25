@@ -2,9 +2,11 @@ import json
 
 import pytest
 
+from scripts.hive import auth
+from scripts.inbox.store import InboxStore
 from scripts.swarm import cli, idle, merge_queue, prerequisite_wait
 from scripts.swarm.ledger_events import PullRequest
-from scripts.swarm.store import AgentRecord
+from scripts.swarm.store import AgentRecord, RedisStore
 from tests.swarm.test_cli import env, run  # noqa: F401
 
 ME = "engineer@a1b2c3-0001"
@@ -404,10 +406,6 @@ MEMBER_READS = {
 def test_a_hive_member_credential_declares_checked_waits_through_the_cli(waiting, monkeypatch, kind):
     import fakeredis
 
-    from scripts.hive import auth
-    from scripts.inbox.store import InboxStore
-    from scripts.swarm.store import RedisStore
-
     _, _, state = waiting
     state["entry"]["position"] = 1
     server = fakeredis.FakeServer()
@@ -424,7 +422,7 @@ def test_a_hive_member_credential_declares_checked_waits_through_the_cli(waiting
         channels=auth.ACL_PATTERNS,
     )
 
-    # fakeredis drops %R~ read selectors, so reads the member's %R~ grant allows go through the admin client.
+    # fakeredis drops %R~ read selectors, so direct reads go through the admin client; pipelines stay on the member.
     class Member(fakeredis.FakeRedis):
         def execute_command(self, *args, **options):
             if str(args[0]).upper() in MEMBER_READS:
