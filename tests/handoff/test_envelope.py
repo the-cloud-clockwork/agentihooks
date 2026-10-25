@@ -335,6 +335,12 @@ def test_a_reclaim_with_listed_heads_starts_fresh_when_no_life_is_listed():
     }
 
 
+def test_a_reclaim_with_an_empty_listing_starts_fresh_without_reading_the_remote():
+    verdict = reclaim("/repo", [OLDER], "", run=_no_git, heads={})
+    assert verdict["continue_from"] == "fresh"
+    assert verdict["fresh_reason"] == "no earlier life pushed a branch: checked engineer-a1b2c3-0001 on the remote"
+
+
 def test_remote_heads_lists_every_branch_head_in_one_call():
     calls = []
 
