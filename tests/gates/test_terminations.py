@@ -23,7 +23,7 @@ def test_it_is_a_gate_that_ships_log_only():
     gate = Terminations()
     assert isinstance(gate, Gate)
     assert (gate.name, gate.default_mode) == ("terminations", "observe")
-    assert entry.HOST_GATES["terminations"] is not None
+    assert isinstance(entry.HOST_GATES["terminations"], Terminations)
 
 
 def test_terminating_commands_are_recognised():
@@ -38,6 +38,7 @@ def test_listing_dry_runs_and_other_processes_are_not_terminations():
     assert not terminates("agentihooks terminate-agent engineer-a --dry-run")
     assert not terminates("pkill -f ledger_server")
     assert not terminates("echo terminate-agent")
+    assert not terminates("kill -9 4242")
 
 
 def test_a_master_termination_is_a_would_be_deny_and_others_pass():

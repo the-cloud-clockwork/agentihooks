@@ -28,8 +28,9 @@ def refusal(found):
 
 
 def caps(text):
-    found = {f"--nodes {pool}": int(top) for top, pool in POOL_MAXIMUM.findall(text)}
-    for key, value in NAMED_CAP.findall(text):
+    found = {}
+    pairs = [(f"--nodes {pool}", top) for top, pool in POOL_MAXIMUM.findall(text)] + NAMED_CAP.findall(text)
+    for key, value in pairs:
         found[key] = max(found.get(key, 0), int(value))
     return found
 

@@ -1,5 +1,5 @@
-"""The termination gate: a master that terminates or kills an agent acts only on the operator's order. It ships log
-only.
+"""The termination gate: a master that runs terminate-agent, or pkill or killall on claude or codex, acts only on the
+operator's order. A bare kill names a pid, not an agent, so it is left to the master rule. It ships log only.
 """
 
 from pathlib import PurePosixPath

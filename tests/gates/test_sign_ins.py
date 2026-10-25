@@ -20,7 +20,7 @@ def test_it_is_a_gate_that_ships_log_only():
     gate = SignIns()
     assert isinstance(gate, Gate)
     assert (gate.name, gate.default_mode) == ("sign-ins", "observe")
-    assert entry.HOST_GATES["sign-ins"] is not None
+    assert isinstance(entry.HOST_GATES["sign-ins"], SignIns)
 
 
 def test_it_matches_playwright_tools_only():
@@ -50,12 +50,12 @@ def test_password_sign_in_and_captcha_elements_are_named():
     assert sign_in(EXT + "browser_type", {"element": "Password field", "ref": "e3", "text": "x"}) == (
         "a password, sign in or CAPTCHA element"
     )
-    assert sign_in(EXT + "browser_click", {"element": "Sign in button", "ref": "e9"}) != ""
-    assert sign_in(EXT + "browser_click", {"element": "I'm not a robot checkbox", "ref": "e1"}) != ""
+    assert sign_in(EXT + "browser_click", {"element": "Sign in button", "ref": "e9"}) == ELEMENT
+    assert sign_in(EXT + "browser_click", {"element": "I'm not a robot checkbox", "ref": "e1"}) == ELEMENT
     form = {
         "fields": [{"name": "Email", "type": "textbox", "ref": "e1", "value": "a"}, {"name": "pw", "type": "password"}]
     }
-    assert sign_in(EXT + "browser_fill_form", form) != ""
+    assert sign_in(EXT + "browser_fill_form", form) == ELEMENT
     assert sign_in(EXT + "browser_click", {"element": "Approve plan button", "ref": "e2"}) == ""
     assert sign_in(EXT + "browser_click", {"element": "Design in progress tab", "ref": "e5"}) == ""
     assert sign_in(EXT + "browser_click", {"element": "Catalog in sidebar", "ref": "e6"}) == ""

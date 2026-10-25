@@ -2,7 +2,7 @@ import io
 import json
 
 from scripts.gates import Call, Gate, Who, entry, modes
-from scripts.gates.node_caps import NodeCaps, raises, refusal, resizes
+from scripts.gates.node_caps import NodeCaps, caps, raises, refusal, resizes
 
 ME = Who(name="engineer@1-1", swarm="demo", lane="eng", task="t1")
 AUTOSCALER = "            - --nodes=0:15:$(OCI_INSTANCE_POOL_ID)\n            - --nodes=2:8:$(OCI_SWARM_POOL_ID)\n"
@@ -17,12 +17,25 @@ def test_it_is_a_gate_that_ships_log_only():
     gate = NodeCaps()
     assert isinstance(gate, Gate)
     assert (gate.name, gate.default_mode) == ("node-caps", "observe")
-    assert entry.HOST_GATES["node-caps"] is not None
+    assert isinstance(entry.HOST_GATES["node-caps"], NodeCaps)
 
 
 def test_a_raised_autoscaler_pool_maximum_is_named():
     after = AUTOSCALER.replace("0:15:", "0:20:")
     assert raises(AUTOSCALER, after) == ["--nodes $(OCI_INSTANCE_POOL_ID) 15 to 20"]
+
+
+def test_a_repeated_cap_is_read_as_its_largest_value():
+    text = "--nodes=0:4:pool\n--nodes=0:9:pool\nmaxRunners: 3\nmaxRunners: 7\n"
+    assert caps(text) == {"--nodes pool": 9, "maxRunners": 7}
+
+
+def test_a_multi_edit_skips_entries_that_are_not_edits(tmp_path):
+    target = tmp_path / "values.yaml"
+    target.write_text("maxRunners: 30\n")
+    edits = ["30", {"old_string": "30", "new_string": "35"}]
+    call = Call("MultiEdit", {"file_path": str(target), "edits": edits})
+    assert NodeCaps().decide(call, ME, None).reason == refusal(["maxRunners 30 to 35"])
 
 
 def test_lowered_unchanged_and_new_caps_are_not_raises():
