@@ -453,7 +453,7 @@ def test_prepare_selects_fresh_dev_after_the_recorded_pull_request_merged(
         "branch": "predecessor",
         "pr_url": pr_url,
         "repository_branches": {str(repository): "predecessor"},
-        "handoff_envelope": {"continue_from": "origin/predecessor"},
+        "handoff_envelope": {"continue_from": "origin/predecessor", "source": "origin/predecessor"},
     }
     native = publish.execute
     native_git = publish.git
@@ -485,6 +485,11 @@ def test_prepare_selects_fresh_dev_after_the_recorded_pull_request_merged(
     assert result["branch"] == task["branch"] == expected_branch
     assert task["repository_branches"] == {str(repository): expected_branch}
     assert task["pr_url"] == ("" if retired else pr_url)
+    assert task["handoff_envelope"] == (
+        {"source": "origin/predecessor"}
+        if retired
+        else {"continue_from": "origin/predecessor", "source": "origin/predecessor"}
+    )
     assert publish.prepare("swarm", agent, str(repository), ledger) == result
 
 

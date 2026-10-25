@@ -181,7 +181,7 @@ def prepare(slug: str, agent: AgentRecord, repo: str, ledger: LedgerClient) -> d
                     for name, value in (task.get(key) or {}).items()
                     if name != "continue_from" or value != f"origin/{scoped['branch']}"
                 }
-            scoped = {**scoped, **cleared, "branch": "", "repository_branches": {}}
+            scoped = {**scoped, **cleared, "branch": ""}
         root = None if retired else existing(repository, scoped, agent)
         if root is None:
             command = ["bash", str(stack.WT_SCRIPT), "new", "--repo", str(repository)]
