@@ -46,6 +46,12 @@ def run(store, runtime, at, slug="sw", ledger=None):
     return master_stall.run(slug, store.config(slug), store, ledger or FakeLedger([]), runtime, at)
 
 
+class SlugLedger(FakeLedger):
+    def tasks(self, slug):
+        assert slug == "sw"
+        return super().tasks(slug)
+
+
 def test_stalled_master_is_asked_for_a_handoff_then_recycled_in_its_seat(store):
     agent, runtime = master(store)
     asked = run(store, runtime, START + 10 * MINUTE)
@@ -56,11 +62,12 @@ def test_stalled_master_is_asked_for_a_handoff_then_recycled_in_its_seat(store):
         f"waiting on {agent.name}'s handoff before retiring it: busy with no tool call for 10 minutes"
     ]
     assert store.agents("sw")[0].state != "finished"
-    recycled = run(store, runtime, START + 15 * MINUTE)
+    recycled = run(store, runtime, START + 15 * MINUTE, ledger=SlugLedger([]))
     assert recycled == [f"recycled master {agent.name} in its seat after 15 minutes busy with no tool call"]
     assert [a.state for a in store.agents("sw")] == ["finished"]
     handoff = store.handoff("sw", MASTER)
-    assert "busy with no tool call for 15 minutes" in handoff and handoff.endswith("<!-- handoff complete -->\n")
+    assert f"Continue as the master of sw; {agent.name} was busy with no tool call for 15 minutes" in handoff
+    assert handoff.endswith("<!-- handoff complete -->\n")
     assert store.handoff_seat("sw", MASTER) == agent.seat
     found = store.handoff_envelope("sw", MASTER)
     assert (found["agent"], found["seat"], found["reason"], found["ledger"]) == (
@@ -69,8 +76,10 @@ def test_stalled_master_is_asked_for_a_handoff_then_recycled_in_its_seat(store):
         "recycle",
         "sw",
     )
+    assert found["claims"] == []
     [row] = transfers.list_transfers(store, "sw")
     assert (row["reason"], row["predecessor"], row["seat"]) == (master_stall.STALLED, agent.name, agent.seat)
+    assert row["at"] == START + 15 * MINUTE
     assert runtime.killed == []
     assert run(store, runtime, START + 16 * MINUTE) == []
 
@@ -168,11 +177,18 @@ def test_tool_call_after_the_ask_withdraws_it(store, done):
     assert store.agents("sw")[0].state != "finished"
 
 
-def test_other_retire_reasons_are_left_alone(store):
+@pytest.mark.parametrize("reason", ["the swarm is stopping", "busy elsewhere"])
+def test_other_retire_reasons_are_left_alone(store, reason):
     agent, runtime = master(store, pane="idle")
-    master_retire.hold(store, "sw", agent, "the swarm is stopping", True, START)
+    master_retire.hold(store, "sw", agent, reason, True, START)
     assert run(store, runtime, START + MINUTE) == []
-    assert master_retire.reason(store, "sw", agent.name) == "the swarm is stopping"
+    assert master_retire.reason(store, "sw", agent.name) == reason
+
+
+def test_master_whose_first_tool_call_is_still_running_stays(store):
+    agent, runtime = master(store, called=False)
+    call("sw", agent.name, START + MINUTE, done=False)
+    assert run(store, runtime, START + 60 * MINUTE) == []
 
 
 @pytest.mark.parametrize("state", ["stopping", "stopped"])
