@@ -20,6 +20,10 @@ def beat(state, environ=None, redis=None, now_ms=None):
 
         redis = redis_client(env)
     idle.beat(redis, slug, name, state, time.time_ns() // 1_000_000 if now_ms is None else now_ms)
+    if state == idle.IDLE:
+        from scripts.swarm.health import activity
+
+        activity.end_turn(slug, name)
     return True
 
 
