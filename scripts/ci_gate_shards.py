@@ -8,12 +8,21 @@ import zipfile
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
+RETRY_DELAYS = (5, 10, 20, None)
+
 
 def api(endpoint: str, *, binary: bool = False) -> list | bytes:
     command = ["gh", "api", endpoint]
     if not binary:
         command.extend(["--paginate", "--slurp"])
-    result = subprocess.run(command, check=True, capture_output=True, timeout=60)
+    for delay in RETRY_DELAYS:
+        try:
+            result = subprocess.run(command, check=True, capture_output=True, timeout=60)
+            break
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
+            if delay is None:
+                raise
+            time.sleep(delay)
     return result.stdout if binary else json.loads(result.stdout)
 
 
