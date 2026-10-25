@@ -1664,11 +1664,36 @@ jobs:
           ref: ${{ github.sha }}
           fetch-depth: 0
 
+      - name: Decide whether Sonar has changed source
+        id: source
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.sha }}
+          EVENT: ${{ github.event_name }}
+        run: |
+          test_only=false
+          if [[ "$EVENT" == pull_request ]]; then
+            git diff --no-ext-diff --no-renames --name-only -z "$BASE" "$HEAD" > "$RUNNER_TEMP/sonar-paths"
+            test_only=true
+            count=0
+            while IFS= read -r -d '' path; do
+              count=$((count + 1))
+              [[ "$path" == tests/* ]] || test_only=false
+            done < "$RUNNER_TEMP/sonar-paths"
+            [[ "$count" -gt 0 ]] || test_only=false
+          fi
+          echo "test_only=$test_only" >> "$GITHUB_OUTPUT"
+          echo "SONAR_TEST_ONLY=$test_only" >> "$GITHUB_ENV"
+          printf 'event=%s\nbase=%s\nhead=%s\ntest_only=%s\n' "$EVENT" "$BASE" "$HEAD" "$test_only" > sonar-scope.txt
+          cat sonar-scope.txt
+
       - uses: actions/setup-python@v5
+        if: steps.source.outputs.test_only != 'true'
         with:
           python-version: "3.12"
 
       - name: Install coverage
+        if: steps.source.outputs.test_only != 'true'
         run: python -m pip install "coverage>=7.4" PyYAML==6.0.3
 
       - name: Download shard coverage
@@ -1686,6 +1711,7 @@ jobs:
           SHARDS: ${{ needs.select.outputs.scope == 'selected' && needs.select.outputs.count || 20 }}
           SCOPE: ${{ needs.select.outputs.scope }}
         run: |
+          [[ "${SONAR_TEST_ONLY:-false}" != true ]] || exit 0
           (
             status=0
             bash .github/coverage/combine.sh --downloaded "$SHARDS" || status=$?
@@ -1697,7 +1723,7 @@ jobs:
       # Builds beside the scan, outside the scanned tree; the wait after the scan holds its result.
       - name: Build the test dependency manifest
         id: manifest
-        if: needs.select.outputs.scope == 'full'
+        if: steps.source.outputs.test_only != 'true' && needs.select.outputs.scope == 'full'
         env:
           ENVIRONMENT: py3.12-${{ hashFiles('pyproject.toml') }}
         run: |
@@ -1716,6 +1742,7 @@ jobs:
 
       - name: Start Cloudflare Access proxy
         id: proxy
+        if: steps.source.outputs.test_only != 'true'
         env:
           SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
           CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
@@ -1772,7 +1799,9 @@ jobs:
         timeout-minutes: 5
         env:
           MERGE_PID: ${{ steps.merge.outputs.pid }}
+          TEST_ONLY: ${{ steps.source.outputs.test_only }}
         run: |
+          [[ "${TEST_ONLY:-false}" != true ]] || exit 0
           until [[ -s "$RUNNER_TEMP/combine.status" ]]; do
             if ! kill -0 "$MERGE_PID" 2> /dev/null && [[ ! -s "$RUNNER_TEMP/combine.status" ]]; then
               echo "::error::The coverage merge ended without a status."
@@ -1792,6 +1821,7 @@ jobs:
           ARGS: ${{ steps.queued.outputs.args || steps.dispatched.outputs.args }}
           SONAR_SCANNER_JAVA_OPTS: -Xmx3g -Xlog:gc:file=${{ runner.temp }}/sonar-gc.log
         run: |
+          [[ "${SONAR_TEST_ONLY:-false}" != true ]] || exit 0
           scanner="$RUNNER_TOOL_CACHE/sonar-scanner-cli/$SONAR_SCANNER_VERSION/linux-x64"
           if [[ ! -x "$scanner/bin/sonar-scanner" ]]; then
             archive="$RUNNER_TEMP/sonar-scanner.zip"
@@ -1809,7 +1839,7 @@ jobs:
           [[ ! -s "$RUNNER_TEMP/sonar-gc.log" ]] || awk '/Pause/ { n++; sub(/ms$/, "", $NF); t += $NF } END { printf "GC pauses %d, %.0f ms\n", n, t }' "$RUNNER_TEMP/sonar-gc.log"
 
       - name: Wait for the test dependency manifest
-        if: needs.select.outputs.scope == 'full'
+        if: steps.source.outputs.test_only != 'true' && needs.select.outputs.scope == 'full'
         timeout-minutes: 5
         env:
           MANIFEST_PID: ${{ steps.manifest.outputs.pid }}
@@ -1826,7 +1856,7 @@ jobs:
           exit "$(< "$RUNNER_TEMP/manifest.status")"
 
       - name: Upload the test dependency manifest
-        if: needs.select.outputs.scope == 'full'
+        if: steps.source.outputs.test_only != 'true' && needs.select.outputs.scope == 'full'
         uses: actions/upload-artifact@v4
         with:
           name: dep-manifest
@@ -1841,6 +1871,7 @@ jobs:
         with:
           name: sonar-report
           path: |
+            sonar-scope.txt
             coverage.xml
             lcov.info
             .scannerwork/report-task.txt
@@ -1856,6 +1887,7 @@ jobs:
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         run: |
+          [[ "${SONAR_TEST_ONLY:-false}" != true ]] || exit 0
           set -o pipefail
           api() { bash "$GITHUB_WORKSPACE/.github/coverage/sonar-retry.sh" "Sonar $1" -- curl --fail --silent --show-error --max-time 10 -H "Authorization: Bearer $SONAR_TOKEN" "http://127.0.0.1:9000/api/$1"; }
           task=$(sed -n 's/^ceTaskId=//p' .scannerwork/report-task.txt)
