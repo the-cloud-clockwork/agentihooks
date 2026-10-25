@@ -300,6 +300,8 @@ def _line_project(tmp_path, monkeypatch, mode):
     source = "def f(value):\n    if value:\n        return value + 1\n    return value - 1\n"
     if mode == "repeated":
         source = "def f(value):\n    if value:\n        value += 1\n" + "    pass\n" * 300
+    elif mode == "constant":
+        source += "\nSETTING = 1\n"
     (tmp_path / "scripts/core.py").write_text(source)
     (tmp_path / "scripts/helper.py").write_text("from scripts.core import f\n")
     (tmp_path / "scripts/aaa.py").write_text("def other():\n    return 1\n")
@@ -364,6 +366,7 @@ def _line_contexts(tmp_path, manifest, mode):
         "separate",
         "data",
         "module",
+        "constant",
         "new",
         "deleted",
         "trailing",
@@ -379,6 +382,8 @@ def test_statistics_select_only_contexts_executing_the_edited_branch(tmp_path, m
         new = source.replace("value + 1", "value + 2")
     elif mode == "module":
         new = source + "\nSETTING = 1\n"
+    elif mode == "constant":
+        new = new.replace("SETTING = 1", "SETTING = 2")
     elif mode == "trailing":
         new = source + "\n"
     elif mode == "repeated":
