@@ -83,7 +83,13 @@ def lost_jobs(jobs: list[dict], runners: set[str], now: datetime, grace: timedel
         and job["runner_name"] not in runners
         and job.get("runner_group_name") != HOSTED_GROUP
         and now - datetime.fromisoformat(job["started_at"]) >= grace
+        and not _ran_every_step(job)
     ]
+
+
+def _ran_every_step(job: dict) -> bool:
+    steps = job.get("steps") or []
+    return bool(steps) and all(step["status"] == "completed" for step in steps)
 
 
 def job_ids(workflow: dict) -> dict[str, str]:
