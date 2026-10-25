@@ -281,7 +281,7 @@ def test_launch_rechecks_mail_after_capacity_checks(mailbox, monkeypatch, capsys
         assert store.redis.hkeys(store.key(SLUG, dispatch_seat.SENT)) == expected
 
 
-@pytest.mark.parametrize("change", ["read", "redirected"])
+@pytest.mark.parametrize("change", ["read", "confirmed", "redirected", "delivered"])
 @pytest.mark.parametrize("boundary", ["before", "capacity"])
 def test_launch_needs_mail_still_waiting_for_the_dispatcher(mailbox, monkeypatch, capsys, change, boundary):
     store, inbox = mailbox
@@ -290,19 +290,25 @@ def test_launch_needs_mail_still_waiting_for_the_dispatcher(mailbox, monkeypatch
     item = json.loads(capsys.readouterr().out)["id"]
 
     def settle(*args):
+        occupant = inbox.seats.occupant(f"dispatcher@{SLUG}").occupant
         if change == "read":
-            assert inbox.read(item, inbox.seats.occupant(f"dispatcher@{SLUG}").occupant).state == "read"
-        else:
+            assert inbox.read(item, occupant).state == "read"
+        elif change == "redirected":
             assert inbox.redirect(item, "swarm", "alice", "taken up by alice").address == "alice"
+        else:
+            assert inbox.deliver(item, occupant).state == "delivered"
+        if change == "confirmed":
+            assert inbox.confirm(item, occupant).state == "confirmed"
         return ""
 
     if boundary == "before":
         settle()
     else:
         monkeypatch.setattr(dispatch_seat.seat_spawn, "host_hold", settle)
-    assert run(store, runtime, doc()) == []
-    assert runtime.spawned == []
-    assert seats(store) == []
+    launches = change == "delivered"
+    assert bool(run(store, runtime, doc())) == launches
+    assert len(runtime.spawned) == int(launches)
+    assert len(seats(store)) == int(launches)
 
 
 @pytest.mark.parametrize("lane,state", [("eng", "working"), ("dispatch", "finished")])
