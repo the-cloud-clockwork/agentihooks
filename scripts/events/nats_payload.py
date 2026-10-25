@@ -21,9 +21,7 @@ def validate(client: Client, subject: str, data: bytes, headers: dict[str, str] 
         raise ValueError(f"{subject}: payload {size} exceeds server limit {client.max_payload}")
 
 
-async def publish(
-    js: JetStreamContext, subject: str, data: bytes, *, stream: str, headers: dict[str, str]
-) -> PubAck:
+async def publish(js: JetStreamContext, subject: str, data: bytes, *, stream: str, headers: dict[str, str]) -> PubAck:
     headers = {**headers, "Nats-Expected-Stream": stream}
     validate(js._nc, subject, data, headers)
     return await js.publish(subject, data, stream=stream, headers=headers)
