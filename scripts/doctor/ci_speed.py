@@ -1,4 +1,5 @@
 import json
+import re
 from statistics import median
 
 from scripts.doctor.words import plural
@@ -262,6 +263,7 @@ def grouped(groups: dict) -> list[Finding]:
                 (*evidence, *(member["evidence"] for member in members)),
                 THRESHOLDS[entry["kind"]],
                 max(measures),
+                metrics=(max(measures), median(measures)),
                 evidence_identity=(
                     *[member["run"] for member in members],
                     max((member["measure"] for member in members if not member.get("open")), default=0),
@@ -269,6 +271,19 @@ def grouped(groups: dict) -> list[Finding]:
             )
         )
     return found
+
+
+def class_growth(finding: Finding, verdict: dict, grew: bool) -> bool:
+    if verdict["value"] != "established" or finding.kind not in ("ci runner wait", "ci tier wall time"):
+        return grew
+    if not finding.metrics:
+        return grew
+    baseline = verdict.get("metrics")
+    if baseline is None:
+        match = re.search(r", median ([\d.]+) seconds, runs ", verdict["evidence"][0])
+        baseline = (verdict["measure"], float(match[1]) if match else finding.metrics[1])
+    worst, middle = finding.metrics
+    return worst > baseline[0] * (1 + GROWTH_MARGIN) or middle > baseline[1]
 
 
 def fresh_groups(groups: dict, eligible: set[str], raised: set[str]) -> tuple[dict, set[str]]:

@@ -48,7 +48,7 @@ def hive_rows(store, slug: str, now_ms: int) -> list[dict]:
             "hive": hive["id"],
             "name": hive["name"],
             "live": int(registry.live(hive, now_ms)),
-            "heartbeat_age_s": (now_ms - hive["heartbeat_at"]) / 1000 if hive["heartbeat_at"] > 0 else -1.0,
+            "heartbeat_age_s": max(now_ms - hive["heartbeat_at"], 0) / 1000 if hive["heartbeat_at"] > 0 else -1.0,
         }
         for hive in registry.hives(store.redis)
     ]

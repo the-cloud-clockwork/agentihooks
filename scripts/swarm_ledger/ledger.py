@@ -64,6 +64,8 @@ Usage: ledger.py --slug SLUG --as NAME <command> [args]
                                       --artifact marks a file the operator asked for, so the task may publish it;
                                       --workstation keeps a task that acts on the workstation checkout or its
                                       task folders off every remote hive (task set workstation=yes or no);
+                                      --needs CAPS claims it only on a hive declaring every capability in CAPS,
+                                      such as headed (task set needs=CAPS);
                                       R is the queue rank, urgent, high, normal (default) or low, next meaning
                                       urgent: the swarm claims eligible tasks highest rank first, then by
                                       critical path; only the master, a planner or the operator sets it;
@@ -835,6 +837,7 @@ def _task_add_fields(args):
             ("territory", args.territory),
             ("overlays", args.overlays),
             ("repositories", args.repositories),
+            ("needs", args.needs),
         )
         if v
     }
@@ -866,7 +869,7 @@ def _task_set_fields(values):
     fields = dict(value.split("=", 1) for value in values if "=" in value)
     if len(fields) != len(values):
         sys.exit("task set takes FIELD=VALUE pairs")
-    for key in ("depends_on", "territory", "overlays", "repositories", "split_pulls", "doc_items"):
+    for key in ("depends_on", "territory", "overlays", "repositories", "split_pulls", "needs", "doc_items"):
         if key in fields:
             fields[key] = task_list(key, fields[key])
     for key in [key for key in ("artifact", "follow_up", "workstation") if key in fields]:
@@ -1071,6 +1074,7 @@ def build_parser():
     )
     task.add_argument("--profile")
     task.add_argument("--overlays", help="comma separated overlays this task's agent wears, at most three")
+    task.add_argument("--needs", help="comma separated hive capabilities, such as headed, that its hive must declare")
     task.add_argument(
         "--repositories", help="comma separated absolute local repository paths; defaults to the swarm repository"
     )
