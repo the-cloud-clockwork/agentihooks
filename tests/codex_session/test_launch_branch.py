@@ -207,14 +207,14 @@ def test_the_app_server_imports_the_launching_package_never_the_agent_directory(
     import scripts
 
     _, _, argv = launched(tmp_path, app_server_spec())
-    assert imported_scripts(argv, tmp_path / "agent") == scripts.__file__
+    assert imported_scripts(argv, tmp_path) == scripts.__file__
 
 
 def test_the_viewer_imports_the_launching_package_never_the_agent_directory(tmp_path):
     import scripts
 
     line = init_agent._viewer_lines("serve", tmp_path / "x.sh", "engineer@abc-0001", {"AGENTIHOOKS_SWARM": "sw"}, [])
-    assert imported_scripts(shlex.split(line.splitlines()[1]), tmp_path / "agent") == scripts.__file__
+    assert imported_scripts(shlex.split(line.splitlines()[1]), tmp_path) == scripts.__file__
 
 
 @pytest.mark.parametrize(("transport", "served"), [("app_server", True), ("legacy", False)])
