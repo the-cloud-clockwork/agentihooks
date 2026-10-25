@@ -432,15 +432,12 @@ def test_a_hive_member_credential_declares_checked_waits_through_the_cli(waiting
     member = Member(server=server, decode_responses=True, username="hive-m1")
     member.auth("", username="hive-m1")
     assert member.acl_whoami() == "hive-m1"
-    target = {
-        "checks": "https://github.com/o/r/actions/runs/40200544185",
-        "merge": URL,
-        "reply": InboxStore(admin).send("operator", ME, "which branch?").id,
-    }[kind]
     admin.hset(prerequisite_wait.key("sw"), "t1", "{}")
     monkeypatch.setenv("AGENTIHOOKS_DEPLOYMENT", "distributed")
     monkeypatch.setenv("AGENTIHOOKS_HIVE_ID", "m1")
     monkeypatch.setenv("AGENTIHOOKS_HIVE_REDIS_URL", "redis://hive.example:6380/2")
+    runs = {"checks": "https://github.com/o/r/actions/runs/40200544185", "merge": URL}
+    target = runs[kind] if kind in runs else InboxStore(member).send(ME, "operator", "which branch?").id
     monkeypatch.setattr(cli, "connect", lambda: RedisStore(member))
     # The agent lookup runs a read-only script the fake server checks as a write; real Redis grants it by %R~.
     agent = RedisStore(admin).agents("sw")[0]
