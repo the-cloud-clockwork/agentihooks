@@ -14,15 +14,11 @@ def _tests(root: Path) -> dict[str, str]:
     for path in (root / "tests").rglob("*.py"):
         if not (path.name.startswith("test_") or path.name.endswith("_test.py")):
             continue
-        source = path.read_text()
-        tree = ast.parse(source)
-        for node in ast.walk(tree):
-            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                for decorator in node.decorator_list:
-                    if isinstance(decorator, ast.Call) and ast.unparse(decorator.func) == "pytest.mark.feature":
-                        parents = [c.name for c in ast.walk(tree) if isinstance(c, ast.ClassDef) and node in c.body]
-                        test_id = "::".join([path.relative_to(root).as_posix(), *parents, node.name])
-                        marked[test_id] = ast.literal_eval(decorator.args[0])
+        nodes = _suite_nodes(ast.parse(path.read_text()).body, path.relative_to(root).as_posix())
+        for test_id, node in nodes.items():
+            for decorator in node.decorator_list:
+                if isinstance(decorator, ast.Call) and ast.unparse(decorator.func) == "pytest.mark.feature":
+                    marked[test_id] = ast.literal_eval(decorator.args[0])
     return marked
 
 
@@ -58,13 +54,13 @@ def _live_target(root: Path, command: list[str]) -> bool:
     return target.resolve().is_relative_to(root.resolve()) and target.is_file()
 
 
-def _suite_nodes(body: list[ast.stmt], prefix: str) -> set[str]:
+def _suite_nodes(body: list[ast.stmt], prefix: str) -> dict[str, ast.FunctionDef | ast.AsyncFunctionDef]:
     if any(isinstance(node, ast.Assign) and ast.unparse(node) == "__test__ = False" for node in body):
-        return set()
-    result = set()
+        return {}
+    result = {}
     for node in body:
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name.startswith("test_"):
-            result.add(f"{prefix}::{node.name}")
+            result[f"{prefix}::{node.name}"] = node
         if isinstance(node, ast.ClassDef) and node.name.startswith("Test"):
             if not any(
                 isinstance(item, ast.FunctionDef) and item.name in {"__init__", "__new__"} for item in node.body

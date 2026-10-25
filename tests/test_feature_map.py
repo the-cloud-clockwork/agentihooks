@@ -276,6 +276,17 @@ def test_non_string_live_arguments_cannot_enter_the_doctor_command(mapped_repo):
         feature_map.validate(root, path)
 
 
+def test_nested_suite_classes_keep_the_full_test_node_id(mapped_repo):
+    root, path, entry = mapped_repo
+    (root / "tests/test_login.py").write_text(
+        "import pytest\nclass TestOuter:\n    class TestInner:\n"
+        '        @pytest.mark.feature("login")\n        async def test_shared(self):\n            pass\n'
+    )
+    entry["behaviour_test"] = "tests/test_login.py::TestOuter::TestInner::test_shared"
+    path.write_text(json.dumps({"features": [entry]}))
+    assert feature_map.validate(root, path) == 1
+
+
 @pytest.mark.parametrize(
     ("jobs", "success"),
     [
