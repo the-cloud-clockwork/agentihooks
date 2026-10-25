@@ -495,9 +495,10 @@ def prepare(environ: Mapping[str, str], cwd: Path) -> tuple[Path, str]:
         shared = any(owner != name for owner in holders(folder)) and (target / binding.FILE).is_file()
         if not shared:
             target = _rebuild(folder, rendered)
+        if environ.get(binding.REPORT):
+            binding.rehome(Path(environ[binding.REPORT]), target, shared=shared)
+        if not shared:
             restore(copy, target)
-    if environ.get(binding.REPORT):
-        binding.rehome(Path(environ[binding.REPORT]), target, shared=shared)
     found = account(target, environ, number=number)
     keep(bao, target, epoch, number)
     return target, found
