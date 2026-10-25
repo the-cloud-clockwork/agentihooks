@@ -293,10 +293,10 @@ def test_every_stats_part_restores_one_merged_cache_saved_once_after_all_parts_f
     assert "if" not in restore
     single = steps[names.index("Save the merged test stats")]
     assert single["uses"] == "actions/cache/save@v4"
-    assert single["if"] == "strategy.job-total == 1"
+    assert single["if"] == "success() && strategy.job-total == 1"
     assert single["with"] == {"path": ".mutation-stats-cache", "key": key}
     part = steps[names.index("Upload this part's test stats cache")]
-    assert part["if"] == "strategy.job-total != 1"
+    assert part["if"] == "success() && strategy.job-total != 1"
     assert part["uses"] == "actions/upload-artifact@v4"
     assert part["with"] == {
         "name": "mutation-test-stats-cache-${{ matrix.part }}",
