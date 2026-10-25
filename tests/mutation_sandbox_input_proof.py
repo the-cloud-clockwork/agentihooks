@@ -16,7 +16,7 @@ from scripts.ci_mutation.runner import prepare_workspace
     [
         pytest.param(stage, group, id=f"{stage}-{group}")
         for stage in ("source", "workspace", "mutants")
-        for group in range(1, 5)
+        for group in range(1, 9)
     ],
 )
 def test_full_selection_reads_the_same_repository_inputs(tmp_path, stage, group):
@@ -49,7 +49,7 @@ def test_full_selection_reads_the_same_repository_inputs(tmp_path, stage, group)
             "-n",
             str(worker_count(os.cpu_count() or 1, quota_cpus())),
             "--splits",
-            "4",
+            "8",
             "--group",
             str(group),
             "--dist",
