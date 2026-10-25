@@ -97,6 +97,24 @@ def test_a_limit_that_never_clears_raises_after_bounded_waits(monkeypatch, clock
     assert commands.count(["gh", "api", "repos/x"]) == rate_limit.WAITS + 1
 
 
+def test_the_last_attempt_keeps_the_caller_timeout_and_text(monkeypatch, clock):
+    seen = []
+    limited = LIMITED.decode()
+
+    def run(command, **kwargs):
+        if command == ["gh", "api", "rate_limit"]:
+            return subprocess.CompletedProcess(command, 0, stdout=json.dumps({"resources": {"core": {"reset": 1120}}}))
+        seen.append(kwargs)
+        if len(seen) <= rate_limit.WAITS:
+            raise subprocess.CalledProcessError(1, command, stderr=limited)
+        return subprocess.CompletedProcess(command, 0, stdout="{}")
+
+    monkeypatch.setattr(rate_limit.subprocess, "run", run)
+    assert rate_limit.gh_api(["repos/x"], timeout=45, text=True).stdout == "{}"
+    assert seen[-1] == {"capture_output": True, "check": True, "timeout": 45, "text": True}
+    assert len(seen) == rate_limit.WAITS + 1
+
+
 def test_a_far_reset_waits_at_most_the_cap(monkeypatch, clock):
     monkeypatch.setattr(rate_limit.time, "time", lambda: 0.0)
     monkeypatch.setattr(rate_limit.subprocess, "run", _gh(iter([LIMITED, b"{}"]), []))
