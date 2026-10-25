@@ -55,9 +55,11 @@ def fetch(repository: str, run: str, destination: Path, downloaded: dict) -> Non
         folder = destination / artifact["name"]
         folder.mkdir(parents=True, exist_ok=True)
         with zipfile.ZipFile(io.BytesIO(payload)) as archive:
-            for name in archive.namelist():
-                if name in {"durations.json", "durations.sha256", "elapsed.json", "flakes.jsonl"}:
-                    (folder / name).write_bytes(archive.read(name))
+            for name in ("durations.json", "durations.sha256", "elapsed.json", "flakes.jsonl"):
+                target = folder / name
+                target.unlink(missing_ok=True)
+                if name in archive.namelist():
+                    target.write_bytes(archive.read(name))
         return artifact["name"], artifact["id"]
 
     with ThreadPoolExecutor(max_workers=8) as pool:
