@@ -119,13 +119,24 @@ def test_a_saved_label_without_a_member_is_not_added_to_herdr_again(admin):
     assert _members(admin) == [f"{auth.PREFIX}:member:{grant['id']}"]
 
 
-def test_a_member_whose_herdr_entry_is_gone_is_replaced_by_the_new_one(admin):
+def test_a_hive_whose_herdr_entry_is_gone_is_saved_again_with_its_member(admin):
     first = _add(admin, Run())
+    run = Run()
 
-    second = _add(admin, Run())
+    again = _add(admin, run)
 
-    assert second["id"] != first["id"]
-    assert _members(admin) == [f"{auth.PREFIX}:member:{second['id']}"]
+    assert again == {"id": first["id"], "name": "swarm-hive-001"}
+    assert run.calls == [["herdr", "machine", "add", "--label", "swarm-hive-001", "--remote-session", "default", CLOUD]]
+    assert _members(admin) == [f"{auth.PREFIX}:member:{first['id']}"]
+
+
+def test_a_saved_machine_without_a_host_does_not_stop_the_add(admin):
+    run = Run([{"id": "a1", "label": "broken", "target": "ssh://"}, {"id": "a2", "label": "bare"}])
+
+    grant = _add(admin, run)
+
+    assert [argv[0] for argv in run.calls] == ["herdr", "ssh"]
+    assert _members(admin) == [f"{auth.PREFIX}:member:{grant['id']}"]
 
 
 def test_a_target_without_a_host_is_refused():

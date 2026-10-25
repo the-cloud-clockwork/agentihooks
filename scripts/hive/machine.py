@@ -65,10 +65,14 @@ def name(redis: "Redis", machine: str, assign: bool = True) -> str:
 
 
 def host(target: str) -> str:
-    found = urlsplit(target if "://" in target else f"ssh://{target}").hostname
+    found = _hostname(target)
     if not found:
         raise auth.HiveError(f"the SSH target {target!r} names no host")
     return found
+
+
+def _hostname(target: str) -> str | None:
+    return urlsplit(target if "://" in target else f"ssh://{target}").hostname
 
 
 def add(
@@ -83,9 +87,9 @@ def add(
     listed = _listed(run)
     _one_per_machine(listed, target, label)
     member = _member(redis, label)
-    if member and any(saved.get("label") == label for saved in listed):
-        return {"id": member, "name": label}
     _keep(listed, target, label, run)
+    if member:
+        return {"id": member, "name": label}
     grant = auth.mint(redis, label, delivery.redis_url)
     try:
         run_checked(
@@ -96,15 +100,13 @@ def add(
     except auth.HiveError:
         auth.revoke(redis, grant["id"])
         raise
-    if member:
-        auth.revoke(redis, member)
     return grant
 
 
 def _one_per_machine(listed: list[dict], target: str, label: str) -> None:
     machine = host(target)
     for saved in listed:
-        if saved.get("label") != label and saved.get("target") and host(saved["target"]) == machine:
+        if saved.get("label") != label and _hostname(saved.get("target") or "") == machine:
             raise auth.HiveError(
                 f"{machine} already runs hive {saved.get('label')}; one machine runs one hive, "
                 "so grow it with more max agents"

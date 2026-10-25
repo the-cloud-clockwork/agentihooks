@@ -40,8 +40,9 @@ agentihooks hive install          # user service that runs agentihooks hive run
   refuses unless the local hive record has `ui=yes`, with
   `hive add refused: hive <id> is headless; only a UI hive adds machines`. One machine runs one hive: a herdr machine
   already saved on the same host under another label refuses the add with
-  `<host> already runs hive <label>; one machine runs one hive, so grow it with more max agents`. When herdr already
-  holds the label and a hive member carries it, the add keeps that member and herdr entry and mints nothing. Otherwise
+  `<host> already runs hive <label>; one machine runs one hive, so grow it with more max agents`. When a hive member
+  already carries the label, the add keeps that member, saves the herdr entry again if it is gone, and mints and
+  delivers nothing; `hive remove` is the only way a machine's member is retired. Otherwise
   it runs `herdr machine add --label <name> --remote-session default <target>` (300 second timeout) unless
   `herdr machine list --json` already holds that target or label; it mints a hive member
   named after the label, and delivers it: `ssh -o BatchMode=yes <target>` (60 second timeout) writes the member's

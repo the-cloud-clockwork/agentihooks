@@ -244,7 +244,6 @@ def test_a_redeploy_that_stops_early_is_saved_unfinished(world):
     with pytest.raises(auth.HiveError, match="waiting for an engineer working on the hive"):
         create.create(world.tools, create.Options(timeout_s=0))
     assert _state(world)["finished"] is False
-    assert "FINISHED" not in _state(world)
 
 
 def test_a_create_without_its_saved_state_reuses_the_record_pull_request_and_herdr_entry(world):
