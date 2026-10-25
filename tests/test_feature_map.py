@@ -147,6 +147,34 @@ def test_class_test_nodes_are_resolved(mapped_repo):
 
 
 @pytest.mark.parametrize(
+    "source",
+    [
+        'class Helper:\n    @pytest.mark.feature("login")\n    def test_shared(self):\n        pass\n',
+        'class TestLogin:\n    def __init__(self):\n        pass\n    @pytest.mark.feature("login")\n    def test_shared(self):\n        pass\n',
+        'class TestLogin:\n    __test__ = False\n    @pytest.mark.feature("login")\n    def test_shared(self):\n        pass\n',
+        '__test__ = False\n@pytest.mark.feature("login")\ndef test_shared():\n    pass\n',
+    ],
+)
+def test_noncollectable_ast_names_are_not_suite_tests(mapped_repo, source):
+    root, path, entry = mapped_repo
+    (root / "tests/test_login.py").write_text("import pytest\n" + source)
+    if source.startswith("class"):
+        entry["behaviour_test"] = "tests/test_login.py::" + source.split()[1].rstrip(":") + "::test_shared"
+    path.write_text(json.dumps({"features": [entry]}))
+    with pytest.raises(ValueError, match="missing behaviour test"):
+        feature_map.validate(root, path)
+
+
+def test_suffix_named_feature_tests_cannot_escape_ownership(mapped_repo):
+    root, path, _ = mapped_repo
+    (root / "tests/login_test.py").write_text(
+        'import pytest\n@pytest.mark.feature("orphan")\ndef test_other():\n    pass\n'
+    )
+    with pytest.raises(ValueError, match="unmapped feature test.*login_test.py::test_other"):
+        feature_map.validate(root, path)
+
+
+@pytest.mark.parametrize(
     ("jobs", "success"),
     [
         (

@@ -11,7 +11,9 @@ import yaml
 
 def _tests(root: Path) -> dict[str, str]:
     marked = {}
-    for path in (root / "tests").rglob("test_*.py"):
+    for path in (root / "tests").rglob("*.py"):
+        if not (path.name.startswith("test_") or path.name.endswith("_test.py")):
+            continue
         source = path.read_text()
         tree = ast.parse(source)
         for node in ast.walk(tree):
@@ -56,22 +58,31 @@ def _live_target(root: Path, command: list[str]) -> bool:
     return target.resolve().is_relative_to(root.resolve()) and target.is_file()
 
 
+def _suite_nodes(body: list[ast.stmt], prefix: str) -> set[str]:
+    if any(isinstance(node, ast.Assign) and ast.unparse(node) == "__test__ = False" for node in body):
+        return set()
+    result = set()
+    for node in body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name.startswith("test_"):
+            result.add(f"{prefix}::{node.name}")
+        if isinstance(node, ast.ClassDef) and node.name.startswith("Test"):
+            if not any(
+                isinstance(item, ast.FunctionDef) and item.name in {"__init__", "__new__"} for item in node.body
+            ):
+                result.update(_suite_nodes(node.body, f"{prefix}::{node.name}"))
+    return result
+
+
 def _behaviour_test(root: Path, node_id: str, name: str, tests: dict[str, str]) -> None:
-    parts = node_id.split("::")
-    path = root / parts[0]
+    filename = node_id.split("::")[0]
+    path = root / filename
     if not path.resolve().is_relative_to((root / "tests").resolve()) or not path.is_file():
         raise ValueError(f"{name}: missing behaviour test {node_id}")
-    body = ast.parse(path.read_text()).body
-    for part in parts[1:]:
-        matches = [
-            node
-            for node in body
-            if isinstance(node, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == part
-        ]
-        if not matches:
-            raise ValueError(f"{name}: missing behaviour test {node_id}")
-        body = matches[0].body
-    if len(parts) < 2 or not parts[-1].startswith("test_") or tests.get(node_id) != name:
+    if not (path.name.startswith("test_") or path.name.endswith("_test.py")) or path.suffix != ".py":
+        raise ValueError(f"{name}: missing behaviour test {node_id}")
+    if node_id not in _suite_nodes(ast.parse(path.read_text()).body, filename):
+        raise ValueError(f"{name}: missing behaviour test {node_id}")
+    if tests.get(node_id) != name:
         raise ValueError(f"{name}: behaviour test requires matching feature marker")
 
 
