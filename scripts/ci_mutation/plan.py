@@ -155,6 +155,72 @@ def covering_tests(manifest: dict, units: set[int], paths: set[str]) -> set[str]
     }
 
 
+def _statement(node: ast.stmt) -> str:
+    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+        return "\0".join(["def", node.name, *map(ast.dump, node.decorator_list)])
+    if isinstance(node, ast.ClassDef):
+        heads = [*map(ast.dump, node.bases), *map(ast.dump, node.keywords), *map(ast.dump, node.decorator_list)]
+        return "\0".join(["class", node.name, *heads, *map(_statement, node.body)])
+    return ast.dump(node)
+
+
+def binds_only_new_names(old: str, new: str) -> bool:
+    try:
+        before, after = ast.parse(old), ast.parse(new)
+    except SyntaxError:
+        return False
+    pending, bound = list(before.body), set()
+    for statement in after.body:
+        match = next((kept for kept in pending if _statement(kept) == _statement(statement)), None)
+        if match is None and isinstance(statement, ast.ImportFrom):
+            match = _extended_import(pending, statement)
+            present = {ast.dump(alias) for alias in match.names} if match else set()
+            bound.update(_bound(alias) for alias in statement.names if ast.dump(alias) not in present)
+        elif match is None and isinstance(statement, ast.Import):
+            bound.update(_bound(alias) for alias in statement.names)
+        elif (
+            match is None
+            and isinstance(statement, ast.Assign)
+            and all(isinstance(t, ast.Name) for t in statement.targets)
+        ):
+            bound.update(target.id for target in statement.targets)
+        elif match is None:
+            return False
+        if match is not None:
+            pending.remove(match)
+    return not pending and "*" not in bound and not bound & _known_names(before)
+
+
+def _bound(alias: ast.alias) -> str:
+    return (alias.asname or alias.name).partition(".")[0]
+
+
+def _extended_import(pending: list[ast.stmt], statement: ast.ImportFrom) -> ast.ImportFrom | None:
+    names = {ast.dump(alias) for alias in statement.names}
+    return next(
+        (
+            kept
+            for kept in pending
+            if isinstance(kept, ast.ImportFrom)
+            and (kept.module, kept.level) == (statement.module, statement.level)
+            and {ast.dump(alias) for alias in kept.names} <= names
+        ),
+        None,
+    )
+
+
+def _known_names(tree: ast.Module) -> set[str]:
+    known = set()
+    for found in ast.walk(tree):
+        if isinstance(found, ast.Name):
+            known.add(found.id)
+        elif isinstance(found, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            known.add(found.name)
+        elif isinstance(found, (ast.Import, ast.ImportFrom)):
+            known.update(_bound(alias) for alias in found.names)
+    return known
+
+
 def recorded_lines(root: Path, manifest: dict, changes: dict[str, set[int]]) -> tuple[dict[str, set[int]], set[int]]:
     lines = {path: set(found) for path, found in changes.items()}
     fallback = set()
@@ -184,9 +250,10 @@ def recorded_lines(root: Path, manifest: dict, changes: dict[str, set[int]]) -> 
             for line in range(first, body)
         }
         fallback.update(headers[line] for line in affected if line in headers)
-        if any(line not in by_line and line not in headers for line in affected) or "<module>" in changed_units(
+        module = any(line not in by_line and line not in headers for line in affected) or "<module>" in changed_units(
             old, new
-        ):
+        )
+        if module and not binds_only_new_names(old, new):
             fallback.update(number for unit, number in index.items() if unit.startswith(f"{path}::"))
         lines[path] = affected | {mapping[line] for line in changes.get(path, ()) if line in mapping}
     return lines, fallback
