@@ -47,7 +47,9 @@ def embedder(inputs, name="model", down=False):
 
 def session_inputs(inputs, item):
     keys = ("session_uid", "source_generation", "origin")
-    return {**inputs, **{key: item[key] for key in keys}, "grant": {**inputs["grant"], "projects": [item["project"]]}}
+    fields = {key: item[key] for key in keys}
+    projects = {**inputs["grant"], "projects": [item["project"]]}
+    return {**inputs, **fields, "parent_session_uid": None, "grant": projects}
 
 
 def request(inputs, query, **fields):
