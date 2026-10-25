@@ -175,3 +175,31 @@ def test_statistics_collect_runtime_dependencies_with_plugin_discovery_disabled(
     assert "scripts/sample.py" in result["dependencies"][node]
     assert "tests/test_sample.py" in result["dependencies"][node]
     assert "scripts/untracked.py" not in result["dependencies"][node]
+
+
+def test_a_stats_bucket_returns_while_a_test_left_a_thread_running(tmp_path, monkeypatch):
+    import threading
+    import time
+    from types import SimpleNamespace
+
+    from scripts.ci_mutation.selection import run_stats_buckets
+
+    node = "tests/test_sample.py::test_value"
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("MUTATION_STATS_CACHE", raising=False)
+
+    class Runner:
+        _pytest_add_cli_args = []
+
+        def run_stats(self, *, tests):
+            threading.Thread(target=time.sleep, args=(60,)).start()
+            engine.duration_by_test[node] = 1
+            return 0
+
+    engine = SimpleNamespace(tests_by_mangled_function_name={}, duration_by_test={})
+    started = time.monotonic()
+    results = run_stats_buckets(SimpleNamespace(mutmut=engine), Runner(), [["tests/test_sample.py"]], tmp_path)
+    assert time.monotonic() - started < 30
+    assert [result["status"] for result in results] == [0]
+    assert results[0]["durations"] == {node: 1}
+    assert results[0]["files"] == ["tests/test_sample.py"]
