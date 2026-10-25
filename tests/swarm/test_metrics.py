@@ -331,7 +331,7 @@ def test_a_swarm_pass_measures_the_stages_of_the_ledger_tasks_and_reports_a_flee
 
 
 @pytest.mark.parametrize("minutes,collected", [(None, [NOW, NOW + 600_000]), ("5", [NOW, NOW + 360_000])])
-def test_swarm_collectors_run_once_per_interval_while_every_pass_writes_its_tick_row(
+def test_ledger_and_swarm_collectors_run_once_per_interval_while_every_pass_writes_its_tick_row(
     spool, sent, monkeypatch, minutes, collected
 ):
     import fakeredis
@@ -371,3 +371,15 @@ def _expiring(real_set, clock):
         return real_set(name, value, **kwargs)
 
     return set_
+
+
+def test_a_non_positive_metrics_interval_is_reported_and_the_tick_row_still_ships(spool, sent):
+    import fakeredis
+
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    store.create(SwarmConfig("sw", "/repo", 0, 0))
+    swarm = metrics.metrics_swarm.TickInput(store, {"tasks": []}, [], lambda url: None, None)
+    environ = {**ON, "AGENTIHOOKS_METRICS_EVERY_MINUTES": "0"}
+    assert metrics.record_pass("sw", NOW, 1, environ, swarm) == [
+        "metrics outbox failed: metrics collectors need a positive interval in minutes"
+    ]

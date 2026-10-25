@@ -113,6 +113,17 @@ def test_a_held_span_names_the_held_harness_and_none_for_an_older_sample():
     ]
 
 
+def test_a_held_sample_counts_until_the_next_collector_pass_of_a_ten_minute_interval():
+    late = 9 * H + 13 * 60_000
+    assert bottleneck.held_spans([sample(9 * H, 1, "host"), sample(late, 1, "host")], NOW)[0] == (
+        "host",
+        9 * H,
+        late,
+        1,
+        "",
+    )
+
+
 def test_a_sample_spooled_before_the_held_by_column_counts_as_quota():
     older = {"ledger": SLUG, "ts_ms": 9 * H, "held_spawns": 2, "reason": "accounts have quota"}
     assert bottleneck.report(rows(host=[older]), [], NOW)["seconds"] == seconds(quota=600.0)

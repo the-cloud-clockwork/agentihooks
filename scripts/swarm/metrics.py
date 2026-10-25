@@ -73,17 +73,23 @@ def _ledger(slug, now_ms, errors, box, swarm=None):
         errors.append(f"ledger metrics failed: {exc}")
 
 
+def _interval_ms(environ):
+    minutes = float(environ.get("AGENTIHOOKS_METRICS_EVERY_MINUTES", "10"))
+    if minutes <= 0:
+        raise ValueError("metrics collectors need a positive interval in minutes")
+    return int(minutes * 60_000)
+
+
+def _claim_interval(slug, store, now_ms, environ):
+    return bool(store.redis.set(store.key(slug, "metrics-collected"), now_ms, nx=True, px=_interval_ms(environ)))
+
+
 def _pass(slug, now_ms, swarm, errors, box, environ):
+    if swarm is not None and not _claim_interval(slug, swarm.store, now_ms, environ):
+        return
     timing.call(_ledger, slug, now_ms, errors, box, swarm)
     if swarm is not None:
         timing.call(_collect, slug, now_ms, swarm, box, errors, environ)
-
-
-def _due(slug, swarm, now_ms, environ):
-    if swarm is None:
-        return True
-    every_ms = int(float(environ.get("AGENTIHOOKS_METRICS_EVERY_MINUTES", "10")) * 60_000)
-    return bool(swarm.store.redis.set(swarm.store.key(slug, "metrics-collected"), now_ms, nx=True, px=every_ms))
 
 
 def record_pass(
@@ -96,5 +102,5 @@ def record_pass(
     if swarm is not None and swarm.store.config(slug).scratch:
         return []
     errors = []
-    extra = partial(_pass, slug, now_ms, swarm, errors, environ=environ) if _due(slug, swarm, now_ms, environ) else None
+    extra = partial(_pass, slug, now_ms, swarm, errors, environ=environ)
     return [*record(TICKS, [tick_row(slug, now_ms, actions)], now_ms, environ, extra), *errors]

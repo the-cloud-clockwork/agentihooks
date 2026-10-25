@@ -11,6 +11,7 @@ pytestmark = pytest.mark.unit
 
 H = 3_600_000
 NOW = 1_791_744_000_000
+FIVE = {"AGENTIHOOKS_STAGE_DETECTOR_TICKS": "5"}
 
 
 def replay():
@@ -418,9 +419,6 @@ def test_detector_defaults_and_the_longest_equal_windows_are_supported():
     assert stage_detector.settings({"AGENTIHOOKS_STAGE_DETECTOR_WINDOW_HOURS": "12"}) == stage_detector.Settings(
         1, 12 * H
     )
-
-
-FIVE = {"AGENTIHOOKS_STAGE_DETECTOR_TICKS": "5"}
 
 
 def test_each_ledger_has_its_own_detector_cadence(tmp_path, store):
