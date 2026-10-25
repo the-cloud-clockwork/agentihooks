@@ -57,7 +57,7 @@ class MasterPool:
         live = live_masters(self.redis, slug)
         if any(self.inbox.home(seat) != self.inbox.world for seat in live):
             return []
-        return live if len(live) > 1 else []
+        return live if len(live) > 1 or (live and address not in live) else []
 
     def stage_add(self, pipe, item) -> None:
         """pipe is in MULTI; the score is the item's place in its front door's arrival order."""
