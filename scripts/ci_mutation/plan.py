@@ -171,7 +171,7 @@ def binds_only_new_names(old: str, new: str) -> bool:
         return False
     pending, bound = list(before.body), set()
     for statement in after.body:
-        match = next((kept for kept in pending if _statement(kept) == _statement(statement)), None)
+        match = next((kept for kept in pending[:1] if _statement(kept) == _statement(statement)), None)
         if match is None and isinstance(statement, ast.ImportFrom):
             match = _extended_import(pending, statement)
             present = {ast.dump(alias) for alias in match.names} if match else set()
@@ -200,7 +200,7 @@ def _extended_import(pending: list[ast.stmt], statement: ast.ImportFrom) -> ast.
     return next(
         (
             kept
-            for kept in pending
+            for kept in pending[:1]
             if isinstance(kept, ast.ImportFrom)
             and (kept.module, kept.level) == (statement.module, statement.level)
             and {ast.dump(alias) for alias in kept.names} <= names
