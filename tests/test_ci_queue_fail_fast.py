@@ -210,9 +210,33 @@ def test_passing_skipped_and_running_jobs_and_the_watcher_itself_name_nothing():
         ([_job("stage-budget")], False),
         ([_job("stage-budget", status="in_progress")], False),
         ([_job("lint", "success"), _job("stage-budget", "success")], True),
+        ([_job("unit (3.12, 1)", "success"), _job("unit (3.12, 2)", "success"), _job("stage-budget")], True),
+        ([_job("unit (3.12, 1)", "success"), _job("unit (3.12, 2)", status="in_progress")], False),
+        ([_job("unit (3.12, 1)", "success"), _job("unit (3.12, 2)")], False),
+        ([_job("unit (3.12, 1)", "success"), _job("unit (3.12, 2)", "failure"), _job("stage-budget")], False),
+        ([_job("unit (3.12, 1)", "success"), _job("unit (3.12, 2)", "cancelled"), _job("unit-lost")], False),
+        ([_job("unit-lost", "success"), _job("unit rerun (3.12, 2)", "success")], False),
+        (
+            [
+                _job("unit (3.12, 1)", "success"),
+                _job("unit (3.12, 2)", "failure"),
+                _job("unit rerun (3.12, 2)", "success"),
+                _job("stage-budget"),
+            ],
+            True,
+        ),
+        (
+            [
+                _job("unit (3.12, 1)", "failure"),
+                _job("unit (3.12, 2)", "failure"),
+                _job("unit rerun (3.12, 2)", "success"),
+                _job("unit rerun (3.12, 1)", status="in_progress"),
+            ],
+            False,
+        ),
     ],
 )
-def test_the_run_settles_only_once_stage_budget_completed(jobs, expected):
+def test_the_run_settles_once_every_unit_shard_passed_or_stage_budget_completed(jobs, expected):
     assert fail_fast.settled(jobs) is expected
 
 
@@ -224,6 +248,8 @@ def test_the_run_settles_only_once_stage_budget_completed(jobs, expected):
         ([_job("lint", "failure")], "failed=lint"),
         ([_job("stage-budget", "success"), _job("sonar", "failure")], "failed=sonar"),
         ([_job("lint", "success"), _job("stage-budget", "success")], "failed="),
+        ([_job("unit (3.12, 1)", "success"), _job("shard-check (3.12)"), _job("stage-budget")], "failed="),
+        ([_job("unit (3.12, 1)", "success"), _job("test-count (3.12)", "failure")], "failed=test-count (3.12)"),
     ],
 )
 def test_the_verdict_names_a_failure_settles_or_waits(jobs, expected):
@@ -389,19 +415,39 @@ def test_the_watch_step_stops_without_a_name_once_every_graded_job_settled(tmp_p
     assert sleeps == []
 
 
-@pytest.mark.parametrize(("unit_result", "expected_sleep"), [("", "15"), ("success", "5")])
-def test_the_watch_step_polls_faster_only_after_unit_jobs_finish(tmp_path, unit_result, expected_sleep):
+def test_the_watch_step_stops_once_every_unit_shard_passed_before_later_jobs_finish(tmp_path):
     result, output, sleeps, _ = _watch(
         tmp_path,
         [
-            [_job("unit (3.12, 1)", "success"), _job("unit (3.12, 2)", unit_result), _job("stage-budget")],
-            [_job("unit (3.12, 1)", "success"), _job("unit (3.12, 2)", "success"), _job("stage-budget", "success")],
+            [_job("unit (3.12, 1)", "success"), _job("unit (3.12, 2)"), _job("stage-budget")],
+            [_job("unit (3.12, 1)", "success"), _job("unit (3.12, 2)", "success"), _job("shard-check (3.12)")],
         ],
     )
 
     assert result.returncode == 0, result.stderr
     assert output == "failed=\n"
-    assert sleeps == [expected_sleep]
+    assert sleeps == ["15"]
+
+
+def test_the_watch_step_polls_faster_while_a_lost_shard_waits_for_its_rerun(tmp_path):
+    lost = {**_job("unit (3.12, 2)", "failure"), "id": 41}
+    result, output, sleeps, _ = _watch(
+        tmp_path,
+        [
+            [_job("unit (3.12, 1)", "success"), lost, _job("stage-budget")],
+            [],
+            [
+                _job("unit (3.12, 1)", "success"),
+                lost,
+                _job("unit rerun (3.12, 2)", "success"),
+                _job("stage-budget", "success"),
+            ],
+        ],
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert output == "failed=\n"
+    assert sleeps == ["5"]
 
 
 def test_the_watch_step_keeps_error_backoff_when_completed_units_cannot_be_classified(tmp_path):
