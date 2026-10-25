@@ -87,7 +87,7 @@ def test_spawn_order_shares_one_handoff_batch_across_lanes_and_queue_sort(store,
     monkeypatch.setattr(profile_first, "placeable", lambda slug, config, store, runtime, lane, ready, cap: (ready, []))
     seen = []
 
-    def ready(slug, store, rows, doc, lane, dispatched):
+    def ready(slug, store, rows, doc, lane, dispatched, claims=None):
         seen.append(lane)
         return sorted([task for task in tasks if task["lane"] == lane], key=dispatched)
 

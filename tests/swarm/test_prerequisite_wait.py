@@ -1,3 +1,5 @@
+import json
+
 import pytest
 
 from scripts.swarm import cli, idle, merge_queue, prerequisite_wait
@@ -192,7 +194,7 @@ def test_another_claimant_cannot_consume_an_old_prerequisite_offer(waiting, monk
         ledger.rows["t2"].update(state="claimed", claimed_by=ME)
         task_id = "t2"
     else:
-        store.redis.set(f"{store.key('sw', 'claim', 't1')}:generation", 1)
+        ledger.rows["t1"]["claim_generation"] = 2
         task_id = "t1"
     assert run("sw", "--as", ME, "block", f"Stack published; next step restack after {URL}") == 0
     monkeypatch.setattr(cli.ledger_events, "view", lambda url: pytest.fail("stale offer must not read GitHub"))
@@ -334,14 +336,46 @@ def test_unbound_merge_waits_preserve_admission_without_final_confirmation(waiti
     assert run("sw", "--as", ME, "wait", "--on", "merge", URL, "--final") == 1
 
 
-@pytest.mark.parametrize("ledger_generation,store_generation", [(1, 0), (0, 1)])
-def test_a_changed_claim_is_rejected_before_recording_a_prerequisite(
-    waiting, capsys, ledger_generation, store_generation
-):
+def test_a_changed_claim_is_rejected_before_recording_a_prerequisite(waiting, capsys):
     store, ledger, _ = waiting
-    ledger.rows["t1"]["claim_generation"] = ledger_generation
-    store.redis.set(f"{store.key('sw', 'claim', 't1')}:generation", store_generation)
+    ledger.rows["t1"]["claimed_by"] = "engineer@a1b2c3-0009"
     assert run("sw", "--as", ME, "wait", "--on", "merge", URL) == 1
     assert capsys.readouterr().err.strip() == "swarm: task claim changed; refresh the task before waiting"
     assert idle.wait(store.redis, "sw", ME) is None
     assert store.redis.hget(prerequisite_wait.key("sw"), "t1") is None
+
+
+def reclaimed(store, ledger):
+    ledger.rows["t1"]["claim_generation"] = 5
+    store.redis.set(f"{store.key('sw', 'claim', 't1')}:generation", 3)
+
+
+def test_a_reclaimed_tasks_current_claimant_can_wait_on_its_merge(waiting):
+    store, ledger, state = waiting
+    reclaimed(store, ledger)
+    state["entry"]["position"] = 3
+    ledger.rows["t1"]["pr_url"] = URL
+    assert run("sw", "--as", ME, "wait", "--on", "merge", URL) == 0
+    assert idle.wait(store.redis, "sw", ME)["on"] == {"kind": "merge", "target": URL}
+    assert run("sw", "--as", ME, "wait", "--on", "merge", URL, "--final") == 0
+
+
+def test_a_reclaimed_tasks_prerequisite_reopens_after_it_merges(waiting, monkeypatch):
+    store, ledger, _ = waiting
+    reclaimed(store, ledger)
+    assert run("sw", "--as", ME, "wait", "--on", "merge", URL) == 1
+    assert run("sw", "--as", ME, "block", f"Stack published; next step restack after {URL}") == 0
+    monkeypatch.setattr(cli.ledger_events, "view", lambda url: PullRequest("MERGED", 2, 1, False))
+    assert prerequisite_wait.reopen_pass("sw", store, ledger, ledger.rows) == [
+        f"task t1 reopened after prerequisite {URL} merged"
+    ]
+
+
+@pytest.mark.parametrize("record_agent,generation,accepted", [(ME, 5, True), (ME, 4, False), ("other", 5, False)])
+def test_prerequisite_offer_matches_the_ledger_claim_identity(waiting, record_agent, generation, accepted):
+    store, ledger, _ = waiting
+    ledger.rows["t1"]["claim_generation"] = 5
+    record = {"agent": record_agent, "generation": generation, "target": URL}
+    store.redis.hset(prerequisite_wait.key("sw"), "t1", json.dumps(record))
+    agent = AgentRecord(name=ME, lane="eng", task="t1", seat="eng-1@sw")
+    assert prerequisite_wait.offered(store, "sw", agent, ledger.rows["t1"]) == (record if accepted else {})

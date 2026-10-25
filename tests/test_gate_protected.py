@@ -538,6 +538,60 @@ def test_protected_provenance_checkout_accepts_only_exact_git_bounds(bounded, ch
     assert problems == (["The head skips reuse without protected durations provenance."] if change else [])
 
 
+@pytest.mark.parametrize(
+    ("change", "red"),
+    [
+        ({}, False),
+        ({"drop": ("files_1", "files_2", "files_3")}, False),
+        ({"drop": ("files_1",)}, True),
+        ({"drop": ("files_1", "files_2", "files_3", "legs")}, True),
+        ({"drop": ("legs",)}, True),
+        ({"set": {"files_1": "${{ steps.other.outputs.files_1 }}"}}, True),
+        ({"drop": ("files_1", "files_2", "files_3"), "set": {"extra": "1"}}, True),
+        ({"absent": ("files_3",), "drop": ("files_1", "files_2")}, True),
+    ],
+)
+def test_protected_select_outputs_admit_only_dropping_the_unused_file_outputs(change, red):
+    from scripts import ci_reuse
+
+    base = _workflow()
+    base["jobs"]["reuse"] = {"if": "github.event_name != 'merge_group' && github.event_name != 'pull_request'"}
+    base["jobs"]["select"] = {
+        "outputs": {
+            "legs": "${{ steps.select.outputs.legs }}",
+            **{f"files_{leg}": f"${{{{ steps.select.outputs.files_{leg} }}}}" for leg in (1, 2, 3)},
+        },
+        "steps": ci_reuse.duration_provenance_steps(),
+    }
+    for key in change.get("absent", ()):
+        del base["jobs"]["select"]["outputs"][key]
+    base["jobs"]["gate"]["needs"].append("select")
+    head = copy.deepcopy(base)
+    outputs = head["jobs"]["select"]["outputs"]
+    for key in change.get("drop", ()):
+        del outputs[key]
+    outputs.update(change.get("set", {}))
+    problems = gate_protected.grade({"test.yml": base}, {}, {"test.yml": head}, {}, _TODAY)
+    assert problems == (["The head changes the durations provenance context outputs."] if red else [])
+
+
+def test_protected_durations_outputs_may_not_drop_the_unused_select_file_outputs():
+    from scripts import ci_reuse
+
+    base = _workflow()
+    base["jobs"]["reuse"] = {"if": "github.event_name != 'merge_group' && github.event_name != 'pull_request'"}
+    base["jobs"]["select"] = {
+        "outputs": {f"files_{leg}": f"${{{{ steps.select.outputs.files_{leg} }}}}" for leg in (1, 2, 3)},
+        "steps": ci_reuse.duration_provenance_steps(),
+    }
+    base["jobs"]["gate"]["needs"].append("select")
+    head = copy.deepcopy(base)
+    head["jobs"]["durations"] = {"outputs": {}, "steps": ci_reuse.duration_provenance_steps()}
+    head["jobs"]["gate"]["needs"].append("durations")
+    problems = gate_protected.grade({"test.yml": base}, {}, {"test.yml": head}, {}, _TODAY)
+    assert "The head changes the durations provenance context outputs." in problems
+
+
 def _provenance_workflow(job="select", permissions=None):
     from scripts import ci_reuse
 
@@ -1061,7 +1115,7 @@ fi
 def test_selection_diagnostic_preserves_the_current_required_gate(diagnostic):
     base = ci_wiring.load(_ROOT)
     legacy = base["test.yml"]["jobs"]["gate-required"]["steps"][0]
-    legacy["run"] = legacy["run"].removeprefix(_SELECTION_DIAGNOSTIC)
+    legacy["run"] = _without_forwarded_stats(legacy["run"])
     head = copy.deepcopy(base)
     if diagnostic:
         step = head["test.yml"]["jobs"]["gate-required"]["steps"][0]
@@ -1535,9 +1589,13 @@ _FORWARDED_STATS = """NEEDS=$(jq 'if ."mutation-plan".result == "success" and ."
 """
 
 
+def _without_forwarded_stats(run):
+    return run.removeprefix(_SELECTION_DIAGNOSTIC).removeprefix(_FORWARDED_STATS)
+
+
 def _with_forwarded_stats(run):
     assert run.startswith(_SELECTION_DIAGNOSTIC)
-    return _SELECTION_DIAGNOSTIC + _FORWARDED_STATS + run.removeprefix(_SELECTION_DIAGNOSTIC)
+    return _SELECTION_DIAGNOSTIC + _FORWARDED_STATS + _without_forwarded_stats(run)
 
 
 def test_the_current_required_gate_accepts_the_forwarded_statistics_form():
@@ -1574,7 +1632,7 @@ def test_the_forwarded_statistics_line_without_the_selection_diagnostic_is_red(p
     base = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())
     head = copy.deepcopy(base)
     step = head["jobs"]["gate-required"]["steps"][0]
-    step["run"] = _FORWARDED_STATS + prefix + step["run"].removeprefix(_SELECTION_DIAGNOSTIC)
+    step["run"] = _FORWARDED_STATS + prefix + _without_forwarded_stats(step["run"])
     assert "The head's Gate — Required changes its steps; the protected branch grades with its own." in _grade(
         {"test.yml": head}, base={"test.yml": base}
     )
