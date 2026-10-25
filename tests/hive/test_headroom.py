@@ -125,6 +125,24 @@ def test_summary_names_each_number_or_missing_telemetry():
     assert headroom.summary(None) == "headroom=missing"
 
 
+@pytest.mark.parametrize(
+    ("node", "pod", "shown"),
+    [(10356, 2576, 2576), (1900, 2576, 1900)],
+)
+def test_summary_shows_the_tighter_of_node_and_pod_memory_with_the_pod_limit(node, pod, shown):
+    record = {
+        "cpus": 16,
+        "load5": 4.73,
+        "available_mb": node,
+        "total_mb": 29857,
+        "pod_total_mb": 4200,
+        "pod_available_mb": pod,
+        "pending": 0,
+        "measured_at": 1,
+    }
+    assert headroom.summary(record) == (f"cpus=16\tload5=4.73\tavailable-mb={shown}\tpod-limit-mb=4200\tpending=0")
+
+
 def test_beat_publishes_headroom_at_the_beat_time_in_whole_milliseconds(redis, monkeypatch):
     calls = []
     monkeypatch.setattr(
