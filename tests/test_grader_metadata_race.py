@@ -47,7 +47,7 @@ DIR *opendir(const char *path) {
     int fd = open("/proc/self/cmdline", O_RDONLY);
     ssize_t n = read(fd, command, sizeof(command));
     close(fd);
-    if (n > 0 && memmem(command, n, "maintenance", 11) && strstr(path, "worktrees")) {
+    if (n > 0 && memmem(command, n, "\0maintenance\0", 13) && strstr(path, "worktrees")) {
         fprintf(stderr, "PROBE pid=%d maintenance opendir=%s\n", getpid(), path);
         mark("PROBE_MAINTENANCE");
         wait_for("PROBE_CREATED");
@@ -161,10 +161,10 @@ def test_fetch_maintenance_removes_initializing_grader(tmp_path, disable_mainten
         fetch_output = fetch.communicate(timeout=20)
     finally:
         release.touch()
-        for process in (add, fetch):
+        for name, process in (("add", add), ("fetch", fetch)):
             if process.poll() is None:
                 process.kill()
-                process.communicate()
+            print("cleanup", name, process.returncode, *process.communicate(), flush=True)
     print("fetch", fetch.returncode, *fetch_output, flush=True)
     print("worktree", add.returncode, *add_output, flush=True)
     events = [json.loads(line) for line in trace.read_text().splitlines()]
