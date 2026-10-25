@@ -263,6 +263,73 @@ def test_committed_image_inputs_pin_base_and_keep_profiles_outside_home():
     assert dockerfile.count("FROM ") == 3
 
 
+def companion(lock, payloads, name="codex-code-mode-host", version="1.2.3"):
+    content = f'#!/bin/sh\n[ "$1" = "--help" ] || exit 2\nprintf "Usage: {name} [OPTIONS]\\n"\n'.encode()
+    lock["tools"][name] = {
+        "version": version,
+        "url": f"https://example.test/{version}/{name}",
+        "sha256": hashlib.sha256(content).hexdigest(),
+        "companion": "codex",
+    }
+    payloads[lock["tools"][name]["url"]] = content
+    return lock["tools"][name]
+
+
+def test_committed_lock_installs_the_code_mode_host_beside_codex():
+    root = Path(__file__).resolve().parents[1]
+    tools = worker_image.load_lock(root / "docker/swarm-node/versions.lock", "amd64")["tools"]
+    host = tools["codex-code-mode-host"]
+    assert host["companion"] == "codex" and host["version"] == tools["codex"]["version"]
+    assert host["url"] == tools["codex"]["url"].replace("/codex-", "/codex-code-mode-host-")
+    assert host["member"] == tools["codex"]["member"].replace("codex-", "codex-code-mode-host-")
+    assert host["sha256"] != tools["codex"]["sha256"]
+
+
+def test_companion_installs_beside_codex_and_checks_its_identity(locked, tmp_path, monkeypatch):
+    path, lock, payloads = locked
+    companion(lock, payloads)
+    path.write_text(json.dumps(lock))
+    assert worker_image.load_lock(path, "amd64") == lock
+    monkeypatch.setattr(worker_image.urllib.request, "urlopen", lambda url, timeout: io.BytesIO(payloads[url]))
+    destination = tmp_path / "bin"
+    destination.mkdir()
+    worker_image.install_tools(lock, destination)
+    assert (destination / "codex-code-mode-host").stat().st_mode & 0o777 == 0o755
+    assert worker_image.tool_versions(lock, destination)["codex-code-mode-host"] == "codex-code-mode-host 1.2.3"
+    (destination / "codex-code-mode-host").write_text("#!/bin/sh\nprintf 'Usage: other [OPTIONS]\\n'\n")
+    with pytest.raises(ValueError) as error:
+        worker_image.tool_versions(lock, destination)
+    assert str(error.value) == "binary identity mismatch: codex-code-mode-host"
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"version": "1.2.4", "url": "https://example.test/1.2.4/codex-code-mode-host"},
+        {"companion": "missing"},
+        {"companion": "codex-code-mode-host"},
+        {"version_output": "codex-code-mode-host 1.2.3"},
+        {"sha256": ""},
+    ],
+)
+def test_lock_rejects_a_companion_off_its_codex_release(locked, change):
+    path, lock, payloads = locked
+    companion(lock, payloads).update(change)
+    path.write_text(json.dumps(lock))
+    with pytest.raises(ValueError) as error:
+        worker_image.load_lock(path, "amd64")
+    assert str(error.value) == "invalid artifact lock: codex-code-mode-host"
+
+
+def test_lock_rejects_an_extra_tool_without_a_companion(locked):
+    path, lock, payloads = locked
+    del companion(lock, payloads)["companion"]
+    path.write_text(json.dumps(lock))
+    with pytest.raises(ValueError) as error:
+        worker_image.load_lock(path, "amd64")
+    assert str(error.value) == "invalid artifact lock: codex-code-mode-host"
+
+
 @pytest.mark.parametrize(
     "field,value",
     [

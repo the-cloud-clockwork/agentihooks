@@ -101,6 +101,10 @@ if [[ "$proof" != profiles ]]; then
         -v "$context/tests/contracts/swarm_v2/fixtures/checkpoint/current.json:/checkpoint.json:ro" \
         "$image" python -c 'import json; from pathlib import Path; from scripts.swarm_v2.contracts import load; load()["validators"]["checkpoint"].validate(json.loads(Path("/checkpoint.json").read_text())); print("installed checkpoint contract accepted")' \
         > "$output/checkpoint-contracts.log"
+    chmod a+r "$context/tests/swarm_node/code_mode_probe.py"
+    docker run --rm --network none --read-only --tmpfs /home/worker:uid=10001,gid=10001 --tmpfs /tmp \
+        -v "$context/tests/swarm_node/code_mode_probe.py:/opt/probe/code_mode_probe.py:ro" \
+        "$image" python /opt/probe/code_mode_probe.py /usr/local/bin/codex > "$output/codex-code-mode.json"
 
 fi
 
