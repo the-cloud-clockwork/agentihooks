@@ -77,7 +77,6 @@ def test_measured_dependencies_include_collection_phases_and_preloaded_modules(t
     from types import SimpleNamespace
 
     from coverage import CoverageData
-
     from scripts.ci_mutation.stats_dependencies import measured_dependencies
 
     root = tmp_path / "source"
