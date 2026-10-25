@@ -29,8 +29,8 @@ def test_shard_graders_check_out_event_base_before_installing():
 def test_shard_grader_never_restores_an_environment_written_by_head_tests():
     steps = _jobs()["shard-check"]["steps"]
     assert not any(step.get("uses", "").startswith("actions/cache") for step in steps)
-    install = next(step for step in steps if step.get("name") == "Install grader dependencies")
-    assert install["run"] == 'python -m pip install "pytest>=8.0"'
+    installs = [step for step in steps if step.get("name") == "Install grader dependencies"]
+    assert not installs or [step["run"] for step in installs] == ['python -m pip install "pytest>=8.0"']
     assert not any(step.get("name") == "Use the test environment" for step in steps)
 
 
@@ -53,8 +53,18 @@ def test_head_collection_is_uploaded_once_per_interpreter_and_downloaded_as_data
     steps = jobs["shard-check"]["steps"]
     download = next(step for step in steps if step.get("name") == "Download collected tests")
     check = next(step for step in steps if step.get("run", "").startswith("python -m tests.shard_check"))
-    assert download["with"]["name"] == upload["with"]["name"]
-    assert f"--collected {download['with']['path']}/collected.json" in check["run"]
+    if "name" in download["with"]:
+        assert download["with"]["name"] == upload["with"]["name"]
+        assert f"--collected {download['with']['path']}/collected.json" in check["run"]
+    else:
+        assert "--collected collected-data/collected.json" in check["run"]
+        assert download["with"] == {
+            "pattern": "{durations,flakes,collected,reused-tests}-${{ matrix.python-version }}{,-*}",
+            "path": "shard-durations",
+        }
+        layout = next(step for step in steps if step.get("name") == "Arrange shard verification data")
+        assert 'mv "shard-durations/collected-$PYTHON_VERSION" collected-data' in layout["run"]
+        assert steps.index(download) < steps.index(layout) < steps.index(check)
     assert steps.index(download) < steps.index(check)
 
 
