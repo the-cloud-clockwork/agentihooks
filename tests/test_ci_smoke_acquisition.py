@@ -17,7 +17,7 @@ def test_hive_join_acquires_redis_before_starting_without_another_pull():
     assert " --pull never " in start
 
 
-def test_smoke_pulls_redis_from_the_ledger_load_registry():
+def test_smoke_retags_redis_to_the_ledger_load_registry():
     load = yaml.safe_load((ROOT / ".github/workflows/ledger-load.yml").read_text())["jobs"]["load"]
     registry = load["services"]["redis"]["image"].rsplit(":", 1)[0]
     assert registry == "mirror.gcr.io/library/redis"
