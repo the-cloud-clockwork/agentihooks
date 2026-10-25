@@ -63,7 +63,7 @@ def grade(base: dict, head: dict, recorded: dict | None) -> list[str]:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--base", type=Path)
+    parser.add_argument("--base")
     parser.add_argument("--head", type=Path, default=Path.cwd())
     parser.add_argument("--write", action="store_true")
     args = parser.parse_args(argv)

@@ -173,7 +173,7 @@ def test_grading_without_a_base_is_refused(tmp_path, capsys):
     with pytest.raises(SystemExit) as raised:
         swallowed_exceptions.main(["--head", str(tmp_path)])
     assert raised.value.code == 2
-    assert "grading needs --base" in capsys.readouterr().err
+    assert capsys.readouterr().err.endswith(": error: grading needs --base\n")
 
 
 def test_a_failing_ruff_cannot_grade(tmp_path, monkeypatch):
