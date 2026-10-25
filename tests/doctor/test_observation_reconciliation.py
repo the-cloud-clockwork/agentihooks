@@ -85,7 +85,10 @@ def test_remote_identity_pages_are_all_read(cursors):
     assert calls == [1, 2]
 
 
-@pytest.mark.parametrize("total,rows", [(101, [{"id": "one"}]), (201, [{"id": "one"}, {"id": "one"}])])
+@pytest.mark.parametrize(
+    "total,rows",
+    [(101, [{"id": "one"}]), (201, [{"id": "one"}, {"id": "one"}]), (2, [{"id": "one"}, {"id": "one"}])],
+)
 def test_incomplete_remote_identity_listing_is_unknown(cursors, total, rows):
     from scripts.doctor import observation_reconciliation
 
@@ -95,6 +98,21 @@ def test_incomplete_remote_identity_listing_is_unknown(cursors, total, rows):
         assert path == "observations"
         assert params == {"traceId": "tr", "limit": 100, "page": 1}
         return {"data": rows, "meta": {"totalItems": total}}
+
+    with pytest.raises(ValueError, match="^observation identity listing is incomplete$"):
+        observation_reconciliation.reconcile(get, "sid", "claude", "tr")
+
+
+@pytest.mark.parametrize("repeat_page", [1, 2])
+def test_repeated_remote_identities_are_unknown(cursors, repeat_page):
+    from scripts.doctor import observation_reconciliation
+
+    _session(cursors, "sid", [], 0, accepted={"one": "rev"})
+    pages = [[{"id": str(i)} for i in range(100)], [{"id": "100"}]]
+    pages[repeat_page - 1][-1] = {"id": "0"}
+
+    def get(path, params):
+        return {"data": pages[params["page"] - 1], "meta": {"totalItems": 101}}
 
     with pytest.raises(ValueError, match="^observation identity listing is incomplete$"):
         observation_reconciliation.reconcile(get, "sid", "claude", "tr")
