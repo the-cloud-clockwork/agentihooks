@@ -979,7 +979,7 @@ fi
 def test_selection_diagnostic_preserves_the_current_required_gate(diagnostic):
     base = ci_wiring.load(_ROOT)
     legacy = base["test.yml"]["jobs"]["gate-required"]["steps"][0]
-    legacy["run"] = legacy["run"].removeprefix(_SELECTION_DIAGNOSTIC)
+    legacy["run"] = legacy["run"].removeprefix(_SELECTION_DIAGNOSTIC).removeprefix(_FORWARDED_STATS)
     head = copy.deepcopy(base)
     if diagnostic:
         step = head["test.yml"]["jobs"]["gate-required"]["steps"][0]
@@ -1455,7 +1455,11 @@ _FORWARDED_STATS = """NEEDS=$(jq 'if ."mutation-plan".result == "success" and ."
 
 def _with_forwarded_stats(run):
     assert run.startswith(_SELECTION_DIAGNOSTIC)
-    return _SELECTION_DIAGNOSTIC + _FORWARDED_STATS + run.removeprefix(_SELECTION_DIAGNOSTIC)
+    return (
+        _SELECTION_DIAGNOSTIC
+        + _FORWARDED_STATS
+        + run.removeprefix(_SELECTION_DIAGNOSTIC).removeprefix(_FORWARDED_STATS)
+    )
 
 
 def test_the_current_required_gate_accepts_the_forwarded_statistics_form():
@@ -1492,7 +1496,9 @@ def test_the_forwarded_statistics_line_without_the_selection_diagnostic_is_red(p
     base = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())
     head = copy.deepcopy(base)
     step = head["jobs"]["gate-required"]["steps"][0]
-    step["run"] = _FORWARDED_STATS + prefix + step["run"].removeprefix(_SELECTION_DIAGNOSTIC)
+    step["run"] = (
+        _FORWARDED_STATS + prefix + step["run"].removeprefix(_SELECTION_DIAGNOSTIC).removeprefix(_FORWARDED_STATS)
+    )
     assert "The head's Gate — Required changes its steps; the protected branch grades with its own." in _grade(
         {"test.yml": head}, base={"test.yml": base}
     )
