@@ -1,8 +1,8 @@
 """Session memory MCP tools: list, search, get and record range expansion over the session catalog.
 
 Registered only when AGENTIHOOKS_SESSION_CATALOG names the catalog; unset, the tools are hidden and the catalog
-and archive stay as they are. The grant comes from the operator's AGENTIHOOKS_SESSION_CORPUS and
-AGENTIHOOKS_SESSION_PROJECTS, never from a tool argument. Search results are evidence, not resume commands.
+and archive stay as they are. The grant comes from the operator's AGENTIHOOKS_SESSION_PRINCIPAL,
+AGENTIHOOKS_SESSION_CORPUS and AGENTIHOOKS_SESSION_PROJECTS, never from a tool argument or the agent's name. Search results are evidence, not resume commands.
 """
 
 import json
@@ -21,6 +21,7 @@ CATALOG_ENV = "AGENTIHOOKS_SESSION_CATALOG"
 OBJECTS_ENV = "AGENTIHOOKS_SESSION_OBJECTS"
 CORPUS_ENV = "AGENTIHOOKS_SESSION_CORPUS"
 PROJECTS_ENV = "AGENTIHOOKS_SESSION_PROJECTS"
+PRINCIPAL_ENV = "AGENTIHOOKS_SESSION_PRINCIPAL"
 ALIASES_ENV = "AGENTIHOOKS_SESSION_ALIASES"
 TOOL_FAILED = "the session tool failed before answering; the log names the cause"
 BAD_JSON = "the JSON argument could not be parsed"
@@ -45,7 +46,7 @@ def grant() -> "Grant":
     from hooks.memory.api.ingest import Grant
 
     projects = frozenset(item.strip() for item in os.getenv(PROJECTS_ENV, "").split(",") if item.strip())
-    return Grant(os.getenv("AGENTIHOOKS_AGENT_NAME", ""), os.getenv(CORPUS_ENV, ""), projects)
+    return Grant(os.getenv(PRINCIPAL_ENV, ""), os.getenv(CORPUS_ENV, ""), projects)
 
 
 def _failed(name: str, error_class: str, retry: str, detail: str) -> str:

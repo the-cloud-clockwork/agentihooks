@@ -271,8 +271,9 @@ def registered(environment):
     return sorted(recorder.names)
 
 
-def unrevoked(protected):
-    return {name: table for name, table in protected.items() if name != "session_record"}
+def unrevoked(protected, session_uid):
+    kept = [row for row in protected["session_record"] if row[1] != session_uid]
+    return {**protected, "session_record": kept}
 
 
 def rollback(bank, root, before):
@@ -286,7 +287,7 @@ def rollback(bank, root, before):
     complete = archive.evidence(bank.corpus.catalog, store, grant(inputs), inputs["grant"]["corpus"], bank.uid("lock"))
     assert hidden == [] and len(shown) == 4 and len(aliased) == 4 + len(records.ALIASES)
     assert accepted["state"] == "answered" and accepted["results"] and complete["complete"]
-    assert unrevoked(bank.protected()) == unrevoked(before)
+    assert unrevoked(bank.protected(), bank.uid("kernel")) == unrevoked(before, bank.uid("kernel"))
     return {
         "tools_with_catalog": shown,
         "tools_with_aliases": aliased,
@@ -323,8 +324,13 @@ def recovery(inputs, root):
     _, top = hit(bank)
     expansion = body(inputs, citation=top["citation"], after=1, limit=2)
     head = bank.ask("session_records", expansion)
-    rows = cursor_rows(bank)
+    rows, objects = (
+        cursor_rows(bank),
+        sorted(path.name for path in (root / "central/objects").rglob("*") if path.is_file()),
+    )
     bank.restart()
+    rows_after_restart = cursor_rows(bank)
+    survived = {name: len(table) for name, table in bank.protected().items()}
     resumed = bank.ask("session_list", body(inputs, limit=1, cursor=first["next_cursor"]), clock["later"])
     replayed = bank.ask("session_list", body(inputs, limit=1, cursor=first["next_cursor"]), clock["later"])
     tail = expand(bank, expansion, head["next_cursor"], clock["later"])
@@ -343,7 +349,12 @@ def recovery(inputs, root):
     assert tail_again == tail and rows_after_replay == rows_after_tail >= rows
     assert expired["error"]["detail"] == records.CURSOR_EXPIRED and moved["error"]["detail"] == records.CURSOR_MOVED
     assert listed(bank, restarted) == ["lock"] and listed(bank, newer) == ["readme"] and stale_again == moved
-    assert unrevoked(bank.protected()) == unrevoked(before)
+    after = bank.protected()
+    changed = sorted(row[1] for row in set(after["session_record"]) - set(before["session_record"]))
+    objects_after = sorted(path.name for path in (root / "central/objects").rglob("*") if path.is_file())
+    assert unrevoked(after, bank.uid("kernel")) == unrevoked(before, bank.uid("kernel"))
+    assert rows_after_restart == rows and survived == {name: len(table) for name, table in before.items()}
+    assert objects_after == objects and changed == [bank.uid("kernel")]
     return {
         "cursor_page_before_restart": listed(bank, page),
         "cursor_page_after_restart_identical": resumed == page,
@@ -356,9 +367,14 @@ def recovery(inputs, root):
         "stale_cursor_after_newer_listing": refused(stale_again),
         "listing_restarted_without_cursor": [listed(bank, restarted), listed(bank, newer)],
         "durability": {
-            "survived_restart": ["catalog events, sources, records and archive objects", "issued cursor rows"],
-            "expired": ["cursor past its lifetime", "cursor whose listing changed"],
-            "authoritative_rows_changed": ["session_record state of the restricted session"],
+            "cursor_rows_survived_restart": {"before": rows, "after": rows_after_restart},
+            "authoritative_rows_survived_restart": survived,
+            "archive_objects_unchanged": {"before": len(objects), "after": len(objects_after)},
+            "expired": {
+                "lifetime": refused(expired)["error"]["class"],
+                "listing_changed": refused(moved)["error"]["class"],
+            },
+            "authoritative_rows_changed": [bank.short(uid) for uid in changed],
         },
         "rollback_rehearsal": rollback(bank, bank.corpus.root, before),
         records.RESOLUTION_FAILURES: metric(bank, records.RESOLUTION_FAILURES),
