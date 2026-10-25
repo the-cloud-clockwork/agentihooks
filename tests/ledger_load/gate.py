@@ -475,7 +475,11 @@ def budgets(source: str) -> dict:
         if isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name)
     }
     table = assigned.get("BUDGETS")
-    if not isinstance(table, ast.Dict) or not all(isinstance(pick, ast.Name) for pick in table.values):
+    if (
+        not isinstance(table, ast.Dict)
+        or None in table.keys
+        or not all(isinstance(pick, ast.Name) for pick in table.values)
+    ):
         sys.exit("the base gate names no BUDGETS table of min or max picks")
     picks = {ast.literal_eval(key): pick.id for key, pick in zip(table.keys, table.values)}
     if loosened := sorted(

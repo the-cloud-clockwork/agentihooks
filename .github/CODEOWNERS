@@ -39,6 +39,7 @@
 /tests/test_codeowners.py @nestorcolt
 /tests/swarm_ledger/receipt_mutation_probe.py @nestorcolt
 /tests/swarm_ledger/receipt_stats_probe.py @nestorcolt
+/tests/ledger_load/gate.py @nestorcolt
 /tests/ledger_load/paired.py @nestorcolt
 /tests/ledger_load/memory.py @nestorcolt
 /tests/ledger_load/hierarchy_paired.py @nestorcolt

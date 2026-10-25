@@ -145,7 +145,9 @@ def table_source(table: dict) -> str:
     return "".join(f"{name} = {getattr(ledger_load, name)!r}\n" for name in ledger_load.BUDGETS) + picks_source(table)
 
 
-@pytest.mark.parametrize("table", ["", "BUDGETS = None\n", "BUDGETS = {'WRITE_P95_S': lambda a, b: a}\n"])
+@pytest.mark.parametrize(
+    "table", ["", "BUDGETS = None\n", "BUDGETS = {'WRITE_P95_S': lambda a, b: a}\n", "BUDGETS = {**{}}\n"]
+)
 def test_a_base_without_a_table_of_min_or_max_picks_is_red(table):
     values = "".join(f"{name} = {getattr(ledger_load, name)!r}\n" for name in ledger_load.BUDGETS)
     with pytest.raises(SystemExit, match="names no BUDGETS table"):
