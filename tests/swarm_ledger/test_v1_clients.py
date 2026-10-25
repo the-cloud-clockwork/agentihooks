@@ -52,7 +52,8 @@ def request_rows(path):
 
 
 def test_chat_command_posts_through_the_versioned_operations_route(routes, monkeypatch, capsys):
-    monkeypatch.setattr(sys, "argv", ["chat_ledger.py", SLUG, "--as", "api-reader", "Through v1"])
+    cli_ledger.call(SLUG, [{"op": "add", "id": "o-0", "thread": "chat", "text": "Where are we"}])
+    monkeypatch.setattr(sys, "argv", ["chat_ledger.py", SLUG, "--as", "api-reader", "--reply-to", "o-0", "Through v1"])
     chat_ledger.main()
     posted = json.loads(capsys.readouterr().out)["posted"]
     assert [row["text"] for row in chat_rows() if row["id"] == posted] == ["Through v1"]
@@ -62,7 +63,7 @@ def test_chat_command_posts_through_the_versioned_operations_route(routes, monke
 
 def test_chat_command_reports_a_dead_server(monkeypatch):
     monkeypatch.setattr(cli_ledger, "BASE", "http://127.0.0.1:9")
-    monkeypatch.setattr(sys, "argv", ["chat_ledger.py", SLUG, "--as", "api-reader", "Nobody"])
+    monkeypatch.setattr(sys, "argv", ["chat_ledger.py", SLUG, "--as", "api-reader", "--reply-to", "o-0", "Nobody"])
     with pytest.raises(SystemExit) as exit_:
         chat_ledger.main()
     assert str(exit_.value).startswith("ledger server not answering on http://127.0.0.1:9: ")
@@ -87,7 +88,7 @@ def test_stop_gate_bypass_never_raises_when_the_server_is_gone(monkeypatch):
 
 def test_tick_client_writes_and_reads_only_versioned_routes(routes):
     client = LedgerClient()
-    client.say(SLUG, "From the tick", by="swarm")
+    client.say(SLUG, "From the tick")
     client.followup(SLUG, "Tick follow up")
     client.comment_phase(SLUG, "p1", "Tick phase note", by="swarm")
     assert "From the tick" in [row["text"] for row in client.chat(SLUG)]

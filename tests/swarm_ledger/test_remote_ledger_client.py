@@ -137,24 +137,17 @@ def test_a_client_without_a_hive_credential_and_agent_is_refused(live, hive, hea
     assert (status, reply["error"]["code"]) == (403, "forbidden")
 
 
-def test_a_remote_client_with_a_hive_credential_joins_and_comments(live, hive):
+def test_a_remote_client_with_a_hive_credential_joins_and_writes(live, hive):
     with patch.dict(os.environ, {**REMOTE, "AGENTIHOOKS_HIVE_LEDGER_CREDENTIAL": CREDENTIAL}):
         os.environ.pop("AGENTIHOOKS_LEDGER_AGENT_TOKEN", None)
         with patch.object(ledger.repository, "token", server_only(ledger.repository.token)):
             join = {"op": "join", "id": uuid.uuid4().hex, "by": WORKER}
-            say = {
-                "op": "add",
-                "id": uuid.uuid4().hex,
-                "by": WORKER,
-                "thread": "chat",
-                "text": "Remote hello",
-                "to": "operator",
-            }
+            say = {"op": "add_item", "id": uuid.uuid4().hex, "by": WORKER, "list": "followups", "text": "Remote hello"}
             reply = ledger.request(SLUG, [join, say])
             state = ledger.request(SLUG)
     assert not {join["id"], say["id"]} & set(reply["rejected"])
     assert WORKER in state["_meta"]["members"]
-    assert any(entry.get("text") == "Remote hello" for entry in state["chat"])
+    assert any(entry.get("text") == "Remote hello" for entry in state["followups"])
 
 
 def test_remote_swarm_state_uses_the_callers_agent_credential(live, hive):

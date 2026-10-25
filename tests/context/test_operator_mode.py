@@ -491,7 +491,7 @@ def test_away_turns_end_without_a_report_to_him_and_a_typed_turn_keeps_normal_re
     run_prompt(monkeypatch, capsys, "s1", "You are master@a1-1, the master of swarm demo")
     away = run_prompt(monkeypatch, capsys, "s1", delivery.marked("continue"))
     assert "End the turn with no report, summary or ask addressed to him" in away
-    assert "Put anything he must decide only in Priorities" in away
+    assert "Never write to him first; answer only what he writes." in away
     present = run_prompt(monkeypatch, capsys, "s1", "Explain the result")
     assert operator_mode.TURN_NOTICE in present
     assert "addressed to him" not in present
