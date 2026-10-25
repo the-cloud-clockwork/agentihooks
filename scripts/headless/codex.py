@@ -30,6 +30,10 @@ READ_ONLY_FEATURES = ("apps", "plugins", "multi_agent", "hooks")
 CATALOG_DROPPED = ("tool_mode", "apply_patch_tool_type", "web_search_tool_type", "multi_agent_version")
 
 
+def toml_string(value: str) -> str:
+    return json.dumps(value, ensure_ascii=False).replace("\x7f", "\\u007f")
+
+
 def arguments(request: Request, work: Path) -> list[str]:
     sealed = request.clamp == SEALED
     args = ["exec", "--ignore-user-config", "--ignore-rules", "--ephemeral", "--skip-git-repo-check"]
@@ -38,9 +42,9 @@ def arguments(request: Request, work: Path) -> list[str]:
         args += ["--disable", feature]
     if sealed:
         args += ["-c", 'web_search="disabled"', "-c", "project_doc_max_bytes=0"]
-        args += ["-c", f"model_catalog_json={json.dumps(str(work / 'catalog-sealed.json'), ensure_ascii=False)}"]
-    args += ["-c", f"model_reasoning_effort={json.dumps(request.effort, ensure_ascii=False)}"]
-    args += ["-c", f"developer_instructions={json.dumps(request.profile_prompt, ensure_ascii=False)}"]
+        args += ["-c", f"model_catalog_json={toml_string(str(work / 'catalog-sealed.json'))}"]
+    args += ["-c", f"model_reasoning_effort={toml_string(request.effort)}"]
+    args += ["-c", f"developer_instructions={toml_string(request.profile_prompt)}"]
     return [*args, "-m", request.model, "--", request.user_input]
 
 

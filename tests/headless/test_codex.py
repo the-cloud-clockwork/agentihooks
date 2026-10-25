@@ -124,18 +124,18 @@ def test_route_seeds_an_api_key(monkeypatch):
 
 
 def test_config_values_keep_characters_outside_the_basic_plane_valid_toml():
-    request = Request("sealed", "PRO \U0001f600", "INPUT", SCHEMA, "m", "l\u00f6w")
+    request = Request("sealed", "PRO \U0001f600 \x7f", "INPUT", SCHEMA, "m", "l\u00f6w")
     args = codex.arguments(request, Path("/w\u00e9"))
     values = [args[at + 1] for at, arg in enumerate(args) if arg == "-c"]
     assert values[2:] == [
         'model_catalog_json="/w\u00e9/catalog-sealed.json"',
         'model_reasoning_effort="l\u00f6w"',
-        'developer_instructions="PRO \U0001f600"',
+        'developer_instructions="PRO \U0001f600 \\u007f"',
     ]
     assert [tomllib.loads(value) for value in values[2:]] == [
         {"model_catalog_json": "/w\u00e9/catalog-sealed.json"},
         {"model_reasoning_effort": "l\u00f6w"},
-        {"developer_instructions": "PRO \U0001f600"},
+        {"developer_instructions": "PRO \U0001f600 \x7f"},
     ]
 
 
