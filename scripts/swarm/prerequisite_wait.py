@@ -66,9 +66,9 @@ def dependencies(store: RedisStore, slug: str, agent: AgentRecord, task: dict, n
     return [] if record and record["target"] in waits.PULL_URL.findall(note) else task.get("depends_on", [])
 
 
-def hold(store: RedisStore, slug: str, agent: AgentRecord, note: str, task: dict) -> None:
-    record = offered(store, slug, agent, task)
-    if not record or record["target"] not in waits.PULL_URL.findall(note):
+def hold(store: RedisStore, slug: str, agent: AgentRecord, note: str) -> None:
+    record = json.loads(store.redis.hget(key(slug), agent.task) or "{}")
+    if record.get("agent") != agent.name or record["target"] not in waits.PULL_URL.findall(note):
         return
     record["blocked"] = True
     store.redis.hset(key(slug), agent.task, json.dumps(record))
