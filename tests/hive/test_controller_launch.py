@@ -33,6 +33,7 @@ def setup():
     store.redis.sadd(registry.INDEX, "remote")
     publish_room(store, "remote", hive["max_agents"])
     herdr = Mock(spec=HerdrRuntime)
+    herdr.pass_memo = None
     herdr.choose = Mock()
     herdr._profile_decision.return_value = ProfileDecision("engineer", "task", "engineer")
     herdr._quota_accounts = [Account("claude", "account", "room", 0, 80, 80, 6)]
@@ -1891,7 +1892,7 @@ def test_a_master_seat_owning_a_kubernetes_hive_follows_the_ui_host_rule_instead
     placement = Placement("kubernetes", master_seats=lambda: frozenset(("master-2",)))
     original = RoutedRuntime(setup.herdr, RuntimeRouter([backend], disabled=disabled, placement=placement))
     fenced = FencedRuntime(setup.store, "fixture", setup.held, original, "distributed")
-    monkeypatch.setattr(controller, "_workstation_herdr", lambda: False)
+    monkeypatch.setattr(controller, "_workstation_herdr", lambda memo=None: False)
     task = {"id": "master-2"}
     refused = (
         DISABLED.format(backend="hive")
@@ -1902,7 +1903,7 @@ def test_a_master_seat_owning_a_kubernetes_hive_follows_the_ui_host_rule_instead
     with pytest.raises(SwarmError, match=refused):
         fenced.spawn(setup.config, "master", "master name", task)
     backend.spawn.assert_not_called()
-    monkeypatch.setattr(controller, "_workstation_herdr", lambda: True)
+    monkeypatch.setattr(controller, "_workstation_herdr", lambda memo=None: True)
     assert fenced.placement_refusal("master", task) == ""
 
 
