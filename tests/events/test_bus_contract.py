@@ -65,7 +65,7 @@ def _nats(tmp_path) -> Iterator[Harness]:
         return fresh
 
     with nats_server.running(tmp_path / "jetstream") as url, patch.object(nats, "_publish", recorded):
-        bus = nats.open_bus(BusConfig(backend="nats", url=url, dedupe_window_ms=dedupe_ms, queue=policy))
+        bus = nats.open_bus(BusConfig(backend="nats", url=url, dedupe_window_ms=dedupe_ms + 100, queue=policy))
 
         def advance(ms: int) -> None:
             time.sleep(ms / 1000)
