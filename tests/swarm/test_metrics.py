@@ -249,6 +249,26 @@ def test_a_failing_collector_pass_leaves_the_interval_open_for_the_next_pass(spo
     assert runs == [0, 1]
 
 
+def test_a_reported_ledger_failure_leaves_the_interval_open_for_the_next_pass(spool, sent, monkeypatch):
+    import fakeredis
+
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    store.create(SwarmConfig("sw", "/repo", 0, 0))
+    calls = []
+
+    def ledger_record(*args):
+        calls.append(len(calls))
+        if len(calls) == 1:
+            raise SwarmError("ledger unavailable")
+
+    monkeypatch.setattr(metrics.metrics_ledger, "record", ledger_record)
+    monkeypatch.setattr(metrics, "_collect", lambda *args: None)
+    swarm = metrics.metrics_swarm.TickInput(store, {"tasks": []}, [], lambda url: None, None)
+    assert metrics.record_pass("sw", NOW, 0, ON, swarm) == ["ledger metrics failed: ledger unavailable"]
+    assert metrics.record_pass("sw", NOW + 60_000, 0, ON, swarm) == []
+    assert calls == [0, 1]
+
+
 def test_a_ledger_without_tasks_still_names_the_bottleneck(spool, sent, monkeypatch):
     import fakeredis
 

@@ -91,12 +91,14 @@ def _pass(slug, now_ms, swarm, errors, box, environ):
         return
     if not _claim_interval(slug, swarm.store, now_ms, environ):
         return
+    reported, failed = len(errors), True
     try:
         timing.call(_ledger, slug, now_ms, errors, box, swarm)
         timing.call(_collect, slug, now_ms, swarm, box, errors, environ)
-    except Exception:
-        swarm.store.redis.delete(swarm.store.key(slug, "metrics-collected"))
-        raise
+        failed = len(errors) > reported
+    finally:
+        if failed:
+            swarm.store.redis.delete(swarm.store.key(slug, "metrics-collected"))
 
 
 def record_pass(

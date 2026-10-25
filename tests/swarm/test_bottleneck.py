@@ -51,7 +51,7 @@ def sample(at, held, held_by):
     return {"ledger": SLUG, "ts_ms": int(at), "held_spawns": held, "held_by": held_by}
 
 
-def every_five_minutes(start, end, held, held_by):
+def every_gap(start, end, held, held_by):
     return [sample(at, held, held_by) for at in range(start, end, bottleneck.SAMPLE_GAP_MS)]
 
 
@@ -93,7 +93,7 @@ def test_a_ci_heavy_window_names_ci_with_its_numbers():
 
 def test_a_host_held_window_names_host():
     found = bottleneck.report(
-        rows(agent=[claim("t2", 9 * H)], host=every_five_minutes(6 * H, NOW, 2, "host")),
+        rows(agent=[claim("t2", 9 * H)], host=every_gap(6 * H, NOW, 2, "host")),
         open_task("t2", "claimed"),
         NOW,
     )
