@@ -22,9 +22,6 @@ report = functools.partial(print, flush=True)
 encode = functools.partial(json.dumps, sort_keys=True)
 
 
-_SEEDED = set()
-
-
 def loader_name(node: ast.AST) -> str | None:
     if isinstance(node, ast.Name):
         return node.id
@@ -104,12 +101,9 @@ def collect_cached_stats(
     collect: Callable[[list[str]], list[dict]],
 ) -> list[dict]:
     if base := os.environ.get("MUTATION_STATS_SEED_BASE"):
-        from scripts.ci_mutation.stats_seed import seed
+        from scripts.ci_mutation.stats_seed import seed_once
 
-        identity = (root, folder, base)
-        if identity not in _SEEDED:
-            seed(root, folder, base)
-            _SEEDED.add(identity)
+        seed_once(root, folder, base)
     tracked = subprocess.check_output(TRACKED, cwd=root, text=True).split("\0")
     sources = {
         path: hashlib.sha256((root / path).read_bytes()).hexdigest()

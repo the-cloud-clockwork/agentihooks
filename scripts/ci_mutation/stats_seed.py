@@ -2,6 +2,7 @@ import io
 import re
 import subprocess
 import zipfile
+from functools import cache
 from pathlib import Path
 
 from scripts.ci_mutation.reuse import api
@@ -39,3 +40,8 @@ def seed(root: Path, folder: Path, base: str) -> int:
                 if count:
                     return count
     return 0
+
+
+@cache
+def seed_once(root: Path, folder: Path, base: str) -> int:
+    return seed(root, folder, base)
