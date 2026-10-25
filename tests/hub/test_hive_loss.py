@@ -187,6 +187,24 @@ def test_the_hub_logs_the_lost_hive_with_the_execution_it_exits(rig, capsys):
     ]
 
 
+def test_the_hub_logs_every_execution_of_the_lost_hive_on_one_line(rig, capsys):
+    from scripts.events.envelope import Envelope
+    from scripts.hive import presence
+
+    assert rig.first.spoke.poll() == "started"
+    rig.hub.run_once()
+    rig.bus.state("spoke-work").create("claim-b", json.dumps({"state": "started", "claim_revision": 1}).encode())
+    data = {"claim_key": "claim-b", "claim_revision": 1, "hive": "hive-a", "task": "task-b"}
+    rig.loss.handle(
+        Envelope("started:b", "execution.started", "rig", "execution", "execution-b", 1, T0, "hive-a", data)
+    )
+    rig.loss._emit = Mock()
+    advance(rig, T0 + presence.TTL_MS)
+    assert capsys.readouterr().err.splitlines() == [
+        "hub: hive hive-a of swarm rig lost; exited execution execution-a of task task, execution execution-b of task task-b"
+    ]
+
+
 def test_a_beating_hive_logs_no_loss(rig, capsys):
     from scripts.hive import presence
 

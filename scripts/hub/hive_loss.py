@@ -95,7 +95,7 @@ class HiveLoss:
                     data={**start.data, "reason": REASON},
                 )
                 self._emit(self._bus, exited)
-                ended.append(f"execution {start.key} of task {start.data.get('task', '')}")
+                ended.append(f"execution {start.key} of task {start.data['task']}")
             done.append(key)
         return done, ended
 
