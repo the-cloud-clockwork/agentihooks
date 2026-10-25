@@ -599,6 +599,46 @@ def test_workspace_preserves_valid_fixture_names_containing_line_breaks(tmp_path
     assert (work / name).read_text() == "fixture"
 
 
+@pytest.mark.parametrize(
+    "source",
+    [
+        'import json\nfor name in json.loads((ROOT / "inputs.json").read_text()):\n    (ROOT / name).read_bytes()',
+        'for name in ("extra",):\n    assert (ROOT / name).is_dir()',
+        'folder = ROOT / "extra"\nassert folder.exists()',
+    ],
+)
+def test_workspace_preserves_data_dependent_repository_inputs_in_both_stages(tmp_path, source):
+    import shutil
+    import tomllib
+
+    from scripts.ci_mutation.runner import prepare_workspace
+
+    root = tmp_path / "repo"
+    (root / "tests").mkdir(parents=True)
+    (root / "extra/nested").mkdir(parents=True)
+    (root / "extra/nested/input.bin").write_bytes(b"repository input")
+    (root / "inputs.json").write_text('["extra/nested/input.bin"]')
+    (root / "pyproject.toml").write_text("[tool.pytest.ini_options]\n")
+    (root / "tests/test_inputs.py").write_text(
+        "from pathlib import Path\nROOT = Path(__file__).resolve().parents[1]\n" + source + "\n"
+    )
+    work = tmp_path / "work"
+    work.mkdir()
+    prepare_workspace(root, work, ["hooks/sample.py"], ["tests/test_inputs.py"])
+    assert (work / "extra/nested/input.bin").read_bytes() == b"repository input"
+    config = tomllib.loads((work / "pyproject.toml").read_text())["tool"]["mutmut"]
+    mutants = work / "mutants"
+    mutants.mkdir()
+    for name in config["also_copy"]:
+        path = work / name
+        if path.is_dir():
+            shutil.copytree(path, mutants / name, dirs_exist_ok=True)
+        elif path.is_file():
+            (mutants / name).parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(path, mutants / name)
+    assert (mutants / "extra/nested/input.bin").read_bytes() == b"repository input"
+
+
 def test_workspace_handles_a_selected_test_probing_an_invalid_null_path(tmp_path):
     from scripts.ci_mutation.runner import prepare_workspace
 
