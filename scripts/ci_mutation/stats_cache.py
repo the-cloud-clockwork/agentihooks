@@ -299,8 +299,7 @@ def collect_cached_stats(
             for index in range(len(parts)):
                 resources.setdefault("/".join(parts[index:]), set()).add(path)
             for parent in Path(path).parents:
-                if str(parent) != ".":
-                    resources.setdefault(str(parent) + "/", set()).add(path)
+                resources.setdefault(str(parent) + "/", set()).add(path)
     inputs = StatsInputs(root, modules, resources, changes)
     stored = StoredStats(root, folder, context, changes)
     compatible = {

@@ -503,7 +503,8 @@ def test_measured_stats_recollect_new_dynamically_discovered_modules(tmp_path, d
     cache = tmp_path / "cache"
     collect_cached_stats(root, cache, {}, [path], [], collect)
     (root / "plugins/notes.md").write_text("unrelated\n")
-    subprocess.run(["git", "add", "--", "plugins/notes.md"], cwd=root, check=True)
+    (root / "outside.py").write_text("value = 3\n")
+    subprocess.run(["git", "add", "--", "plugins/notes.md", "outside.py"], cwd=root, check=True)
     collect_cached_stats(root, cache, {}, [path], [], collect)
     assert calls == [[path]]
     (root / "plugins/b.py").write_text("value = 2\n")
@@ -553,6 +554,68 @@ def test_measured_stats_recollect_unbounded_discovery_additions(tmp_path, discov
     warm = collect_cached_stats(root, cache, {}, [path], [], collect)
     assert calls == [[path], [path]]
     assert "plugin_b.x_value" in warm[0]["tests"]
+
+
+@pytest.mark.parametrize(
+    "expression",
+    [
+        "Path('pluginsX/').glob('*.py')",
+        "Path('pluginsX/').rglob('*.py')",
+        "Path('pluginsX/').iterdir()",
+        "os.listdir('pluginsX/')",
+        "os.scandir('pluginsX/')",
+        "os.walk('pluginsX/')",
+        "scan('pluginsX/')",
+    ],
+)
+def test_directory_discovery_keeps_its_scope_and_glob_filter(expression):
+    import ast
+
+    from scripts.ci_mutation.stats_cache import discovery_inputs
+
+    resources = {"pluginsX/": {"pluginsX/a.py", "pluginsX/note.txt"}, "elsewhere/": {"elsewhere/b.py"}}
+    nodes = list(ast.walk(ast.parse("from os import listdir as scan\n" + expression)))
+    expected = {"pluginsX/a.py"} if "glob" in expression else resources["pluginsX/"]
+    assert discovery_inputs(nodes, set(), resources) == expected
+
+
+@pytest.mark.parametrize("module", ["glob", "os"])
+def test_imported_scanner_aliases_use_the_imported_module(module):
+    import ast
+
+    from scripts.ci_mutation.stats_cache import discovery_inputs
+
+    source = (
+        "from glob import glob as scan\nscan('pluginsX/*.py')"
+        if module == "glob"
+        else "from os import scandir as scan\nscan('pluginsX/')"
+    )
+    resources = {"pluginsX/": {"pluginsX/a.py", "pluginsX/note.txt"}, "elsewhere/": {"elsewhere/b.py"}}
+    expected = {"pluginsX/a.py"} if module == "glob" else resources["pluginsX/"]
+    assert discovery_inputs(list(ast.walk(ast.parse(source))), set(), resources) == expected
+
+
+@pytest.mark.parametrize("scanner", ["iter_modules", "walk_packages"])
+@pytest.mark.parametrize("package", ["plugins", "plugins.nested"])
+def test_package_discovery_keeps_nested_package_scope_and_python_files(scanner, package):
+    import ast
+
+    from scripts.ci_mutation.stats_cache import discovery_inputs
+
+    folder = package.replace(".", "/")
+    resources = {folder + "/": {folder + "/a.py", folder + "/note.txt"}, "elsewhere/": {"elsewhere/b.py"}}
+    source = f"pkgutil.{scanner}({package}.__path__)"
+    assert discovery_inputs(list(ast.walk(ast.parse(source))), {package}, resources) == {folder + "/a.py"}
+
+
+def test_ast_walk_does_not_add_repository_discovery_or_skip_later_scans():
+    import ast
+
+    from scripts.ci_mutation.stats_cache import discovery_inputs
+
+    resources = {"pluginsX/": {"pluginsX/a.py"}, "elsewhere/": {"elsewhere/b.py"}}
+    source = "ast.walk(tree)\nPath('pluginsX/').glob('*.py')"
+    assert discovery_inputs(list(ast.walk(ast.parse(source))), set(), resources) == {"pluginsX/a.py"}
 
 
 @pytest.mark.parametrize("changed", ["documentation", "unrelated_fixture", "comment", "initializer"])
