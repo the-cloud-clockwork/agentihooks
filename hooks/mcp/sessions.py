@@ -2,7 +2,8 @@
 
 Registered only when AGENTIHOOKS_SESSION_CATALOG names the catalog; unset, the tools are hidden and the catalog
 and archive stay as they are. The grant comes from the operator's AGENTIHOOKS_SESSION_PRINCIPAL,
-AGENTIHOOKS_SESSION_CORPUS and AGENTIHOOKS_SESSION_PROJECTS, never from a tool argument or the agent's name. Search results are evidence, not resume commands.
+AGENTIHOOKS_SESSION_CORPUS and AGENTIHOOKS_SESSION_PROJECTS, never from a tool argument or the agent's name.
+Search results are evidence, not resume commands.
 """
 
 import json
