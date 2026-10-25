@@ -140,6 +140,7 @@ def test_only_the_reviewed_pair_of_event_names_and_canonical_watcher_normalizes(
                     ],
                 },
                 "queue-fail-fast": watcher,
+                "reuse": {"if": "github.event_name != 'merge_group' && github.event_name != 'pull_request'"},
             }
         }
     }
@@ -484,6 +485,25 @@ def test_context_normalization_rejects_extra_partial_and_incomplete_forms():
             del jobs["gate-required"]["needs"]
         with pytest.raises(ValueError, match=re.compile("context pair|inventory", re.I)):
             ci_gate_queue.normalize(workflow)
+
+
+@pytest.mark.parametrize("condition", [None, "true", "github.event_name == 'merge_group'"])
+def test_early_gate_compatibility_preserves_the_existing_producer_exclusion(condition):
+    workflow = paired()
+    assert ci_gate_queue.normalize(workflow)
+    if condition is None:
+        del workflow["test.yml"]["jobs"]["reuse"]["if"]
+    else:
+        workflow["test.yml"]["jobs"]["reuse"]["if"] = condition
+    with pytest.raises(ValueError, match=re.compile("reuse", re.I)):
+        ci_gate_queue.normalize(workflow)
+
+
+def test_a_stale_queue_group_emits_the_annotation_used_to_count_rebuilds(monkeypatch, capsys):
+    monkeypatch.setattr(ci_gate_queue, "api", lambda endpoint: [])
+    with pytest.raises(ValueError):
+        ci_gate_queue.current("owner/repo", "refs/queue", "head")
+    assert "::error::queue group is no longer current" in capsys.readouterr().out
 
 
 def test_paired_names_and_api_waits_remain_exact_dependencies_of_originals_and_reruns():

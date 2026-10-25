@@ -69,6 +69,21 @@ def test_a_job_with_no_conclusion_counts_as_red():
     assert drops.classify([*watcher_only(3), job(6, "lint", None)], lambda job_id: []) is None
 
 
+@pytest.mark.parametrize("messages,expected", [([], "drop"), (["queue group is no longer current"], "rebuild")])
+def test_the_early_required_context_and_late_summary_preserve_watcher_drop_classification(messages, expected):
+    jobs = [
+        job(11, "Gate — Required", "failure"),
+        job(12, "Queue gate summary", "cancelled"),
+        job(13, "unit (3.12, 1)", "success"),
+    ]
+    seen = []
+    assert drops.classify(jobs, lambda job_id: seen.append(job_id) or messages) == expected
+    assert seen == [11]
+    assert drops.classify(jobs[:1] + jobs[2:], lambda job_id: []) is None
+    jobs[-1]["conclusion"] = "failure"
+    assert drops.classify(jobs, lambda job_id: []) is None
+
+
 def test_count_reads_each_failed_merge_group_run_of_the_day_and_splits_drops_from_rebuilds():
     api = Api(
         runs=[11, 12, 13],

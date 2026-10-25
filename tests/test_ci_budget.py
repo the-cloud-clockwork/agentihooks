@@ -72,6 +72,19 @@ def test_a_stage_spans_first_job_creation_to_last_job_end():
     }
 
 
+def test_early_queue_gating_excludes_the_watcher_and_budgets_the_diagnostic_summary():
+    jobs = [
+        _job("Gate — Required", "00:00", "05:00"),
+        _job("unit (3.12, 1)", "00:10", "04:59"),
+        _job("Queue gate summary", "05:02", "05:05"),
+    ]
+    assert ci_budget.stage_of("Queue gate summary") == "test-summary"
+    assert ci_budget.stages(jobs) == {"unit": 289.0, "test-summary": 3.0}
+    assert ci_budget.stages(jobs[:2]) == {"gate-required": 300.0, "unit": 289.0}
+    jobs[-1]["name"] = "test-summary"
+    assert ci_budget.stages(jobs)["gate-required"] == 300.0
+
+
 def test_report_orders_stages_slowest_first_then_by_name():
     jobs = [_job("semgrep", "00:00", "00:10"), _job("kind-due", "00:00", "00:10"), _job("lint", "00:00", "00:20")]
     result = ci_budget.report({"run_started_at": START}, jobs, ci_budget.seconds("2026-10-09T07:01:00Z"))
