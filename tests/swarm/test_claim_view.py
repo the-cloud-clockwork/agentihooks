@@ -33,7 +33,7 @@ def test_a_spawn_order_pass_builds_one_claim_view_for_every_lane(store, monkeypa
     rows = ledger()
     order, _ = tick_module._spawn_order("sw", store.config("sw"), store, [], rows.rows, rows.state("sw"), FakeRuntime())
     assert calls == [("sw", store)]
-    assert [(lane, task["id"]) for _, lane, task in order] == [("eng", "t1"), ("ci", "t3"), ("eng", "t4")]
+    assert [(lane, task["id"]) for lane, task in order] == [("eng", "t1"), ("ci", "t3"), ("eng", "t4")]
 
 
 def test_ready_in_order_reads_the_same_tasks_from_a_prebuilt_claim_view(store):
