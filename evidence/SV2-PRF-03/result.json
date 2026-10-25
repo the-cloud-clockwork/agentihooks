@@ -1,0 +1,52 @@
+{
+  "package": "SV2-PRF-03",
+  "dependencies": ["SV2-PRF-02", "SV2-IDX-04"],
+  "dependency_evidence": "evidence/SV2-IDX-04/result.json records the scoped search this load drives, evidence/SV2-IDX-03/result.json the bounded index worker and evidence/SV2-PRF-02/result.json the preceding performance package; no capture, archive, index or search code changes here",
+  "integration_gate": "G10",
+  "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/7331",
+  "pull_request": "",
+  "package_complete": false,
+  "evidence_class": "mocked: interleaved writers in one process, a SQLite catalog file, a local content addressed object folder, execution local spool and cursor folders and a deterministic hash embedder stand in for concurrent agents, the central database, the archive bucket and the embedding provider; ack latency and lag run on a fake clock, and search wall time is measured separately by the wall clock test; no model, HTTP server, vector database or Pod runs",
+  "interfaces": [
+    "tests.performance.session_memory.load.Run replays the workload: each writer appends one turn per tick to its own Claude transcript, sometimes leaving half a line for the next tick; each execution polls hooks.memory.collector.Collector into its own hooks.memory.spool.Spool every tick and flushes to the central archive and ingest every second tick",
+    "Duplicate delivery is scheduled, not random: a lost cursor commit spools the same batch twice and a lost acknowledgement commits centrally, raises before the spool settles and is delivered again on the next flush",
+    "Overload takes the central service down and pauses embeddings for a tick window; capture keeps spooling, and the drain phase runs until spools, writers and the embedding queue are empty",
+    "Run.verify compares every transcript with the authoritative store: the event sequences, the archived bytes over the whole complete transcript and their hash, the spool backlog, embedding coverage and whether any chunk text was embedded twice; any gap marks the run failed",
+    "Restricted project queries run on every second tick with a single project grant, a two project grant narrowed to one and an unnarrowed two project grant; a request for the restricted project is refused; every result is checked against the allowed projects",
+    "python -m tests.performance.session_memory.load [--seed N] prints the measured wall times for search, ingest acknowledgement percentiles and the verdict for each seed, and exits non zero when a run is incomplete"
+  ],
+  "supported_versions": {
+    "python": "3.11 and later",
+    "transcript_format": "Claude JSON lines with string message content",
+    "storage": "SQLite catalog, chunk tables and index tables of SV2-IDX-01 to SV2-IDX-04"
+  },
+  "states": {
+    "observed": "Cases A, B and C each ran twice from independent temporary folders with identical records; case A also ran a second independent seed.",
+    "accepted": "A batch is accepted when the central archive holds its bytes and ingest answers committed or replayed; only then does the spool settle it and the fake clock stamp its acknowledgement.",
+    "committed": "Events, archive entries, chunks and vectors commit in the SQLite catalog; the transcript, cursor and spool files commit with fsync in each execution folder.",
+    "externally_verified": "Not yet: no deployed session service, Postgres, archive bucket or embedding provider ran; the measured search wall time comes from the CI runner, and a live canary belongs to the G10 rollout gate."
+  },
+  "metrics": {
+    "ingest_ack_latency_seconds": "fake clock seconds from the moment a line is complete in its transcript to the flush that acknowledged it, as count, p50, p95 and max over all lines and over lines written during overload",
+    "search_latency_seconds": "wall seconds per search call, asserted below its p95 budget by the wall clock test and printed by the measure command; the case records hold only the number of searches because wall time varies by machine"
+  },
+  "cases": {
+    "a": "evidence/SV2-PRF-03/a-result.json",
+    "b": "evidence/SV2-PRF-03/b-result.json",
+    "c": "evidence/SV2-PRF-03/c-result.json"
+  },
+  "rollback_rehearsal": {
+    "action": "Pause optional embeddings while retaining durable capture: case C pauses the index generation for the whole central outage, restarts every process in the middle of it, and resumes with no chunk text embedded twice.",
+    "authoritative_objects": "Transcripts, archive entries, archived objects and session events are authoritative; spool batches are authoritative until settled; chunks and vectors are derived and can be rebuilt.",
+    "proof": "evidence/SV2-PRF-03/c-result.json rollback_rehearsal and series"
+  },
+  "remaining_limitations": [
+    "Writers interleave in one process; there is no real thread or process concurrency against one SQLite file.",
+    "The uploader counts newlines in the execution's own transcript to number events, so a transcript deleted before its spool drains cannot be uploaded by this harness.",
+    "One provider format with string content is replayed; tool calls, Codex and Copilot records are not in the workload.",
+    "Search wall time is measured on the CI runner with in process lexical scans and in process vector scoring; Postgres, pgvector and the HTTP service are not measured.",
+    "Spool capacity under pressure is lowered only for the outage window; a single uncaptured batch larger than the spool would stay refused until capacity returns."
+  ],
+  "compatibility": "Explicitly local compatibility path: no production module changes; the harness drives the accepted collector, spool, archive, ingest, chunk, index and search interfaces as they are.",
+  "authority": "Each execution ingests with a grant for its own project only, chunking and indexing use a fixture indexer grant, and searches use searcher grants whose projects come from the workload; no display name or session label widens a grant."
+}

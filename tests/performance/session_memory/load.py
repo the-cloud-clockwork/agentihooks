@@ -536,10 +536,10 @@ def measure(seed: int, spec: dict) -> dict:
     return {
         "seed": seed,
         "wall_seconds": round(elapsed, 3),
-        "search_latency_seconds": percentiles(run.search_seconds),
         **drained,
         "verdict": {"complete": verdict["complete"], "failures": verdict["failures"]},
         **run.metrics(),
+        "search_latency_seconds": {"clock": "wall", **percentiles(run.search_seconds)},
     }
 
 

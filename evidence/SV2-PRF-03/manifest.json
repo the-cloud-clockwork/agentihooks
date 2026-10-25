@@ -1,0 +1,18 @@
+{
+  "package": "SV2-PRF-03",
+  "cases": [
+    "T-SV2-PRF-03-A",
+    "T-SV2-PRF-03-B",
+    "T-SV2-PRF-03-C"
+  ],
+  "evidence_class": "mocked: interleaved writers in one process, a SQLite catalog file, a local content addressed object folder, execution local spool and cursor folders and a deterministic hash embedder stand in for concurrent agents, the central database, the archive bucket and the embedding provider; ack latency and lag run on a fake clock, and search wall time is measured separately by the wall clock test; no model, HTTP server, vector database or Pod runs",
+  "inputs": {
+    "tests/performance/session_memory/workload.json": "2c04a9f6ee697bc62f66913889c79524cc419e896ff630e18ee50df3b3946c53",
+    "tests/performance/session_memory/load.py": "318c745f9d47e93bfcc3d56891f35085e6489ac33310a3e54d15fc23ae5fda14",
+    "tests/sv2_prf03_cases.py": "841b11deefbc5aa3b8d3e3d180a6e5c5f7188f8a3c09ca841e9fa4c428f25320"
+  },
+  "records_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/40220884350",
+  "records_commit": "4bb688c836739b0e50be9144f0de36f4778824de",
+  "red_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/40220611135",
+  "tested_commit": ""
+}

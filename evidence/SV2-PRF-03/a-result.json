@@ -1,0 +1,531 @@
+{
+  "case": "T-SV2-PRF-03-A",
+  "evidence_class": "mocked: interleaved writers in one process, a SQLite catalog file, a local content addressed object folder, execution local spool and cursor folders and a deterministic hash embedder stand in for concurrent agents, the central database, the archive bucket and the embedding provider; ack latency and lag run on a fake clock, and search wall time is measured separately by the wall clock test; no model, HTTP server, vector database or Pod runs",
+  "input_sha256": {
+    "workload.json": "2c04a9f6ee697bc62f66913889c79524cc419e896ff630e18ee50df3b3946c53"
+  },
+  "observed": {
+    "independent_fixtures_differ": true,
+    "runs": {
+      "11": {
+        "counts": {
+          "acknowledgements_lost": 3,
+          "cursor_commits_lost": 3,
+          "cursor_moved_on_refusal": 0,
+          "dropped_batches": 0,
+          "needle_hits": 1400,
+          "out_of_scope_results": 0,
+          "restricted_searches_refused": 11,
+          "searches_answered": 81,
+          "spool_full_refusals": 0
+        },
+        "drained_at_tick": 22,
+        "ingest_ack_latency_seconds": {
+          "all": {
+            "count": 288,
+            "max": 9.0,
+            "p50": 1.0,
+            "p95": 7.0
+          },
+          "clock": "fake",
+          "written_during_overload": {
+            "count": 108,
+            "max": 6.0,
+            "p50": 4.0,
+            "p95": 6.0
+          }
+        },
+        "marker_visibility_lag_seconds": {
+          "clock": "fake",
+          "count": 48,
+          "max": 1.0,
+          "p50": 1.0,
+          "p95": 1.0
+        },
+        "markers_never_visible": 0,
+        "peak": {
+          "archive_lag_seconds": 8.0,
+          "embedding_backlog_age_seconds": 5.0,
+          "embedding_pending_chunks": 66,
+          "spool_pending_batches": 65
+        },
+        "search_latency_seconds": {
+          "clock": "wall, asserted by the wall clock test and printed by the measure command, not recorded here",
+          "searches": 92
+        },
+        "seed": 11,
+        "series": [
+          {
+            "archive_lag_seconds": 0.0,
+            "central": "available",
+            "embedding_backlog_age_seconds": 0.0,
+            "embedding_pending_chunks": 0,
+            "embeddings": "drained",
+            "spool_pending_batches": 9,
+            "tick": 1
+          },
+          {
+            "archive_lag_seconds": 0.0,
+            "central": "available",
+            "embedding_backlog_age_seconds": 0.0,
+            "embedding_pending_chunks": 6,
+            "embeddings": "bounded",
+            "spool_pending_batches": 0,
+            "tick": 2
+          },
+          {
+            "archive_lag_seconds": 0.0,
+            "central": "available",
+            "embedding_backlog_age_seconds": 0.0,
+            "embedding_pending_chunks": 0,
+            "embeddings": "drained",
+            "spool_pending_batches": 9,
+            "tick": 3
+          },
+          {
+            "archive_lag_seconds": 1.0,
+            "central": "available",
+            "embedding_backlog_age_seconds": 0.0,
+            "embedding_pending_chunks": 6,
+            "embeddings": "bounded",
+            "spool_pending_batches": 2,
+            "tick": 4
+          },
+          {
+            "archive_lag_seconds": 2.0,
+            "central": "available",
+            "embedding_backlog_age_seconds": 0.0,
+            "embedding_pending_chunks": 0,
+            "embeddings": "drained",
+            "spool_pending_batches": 11,
+            "tick": 5
+          },
+          {
+            "archive_lag_seconds": 3.0,
+            "central": "unavailable",
+            "embedding_backlog_age_seconds": 0.0,
+            "embedding_pending_chunks": 0,
+            "embeddings": "paused",
+            "spool_pending_batches": 20,
+            "tick": 6
+          },
+          {
+            "archive_lag_seconds": 4.0,
+            "central": "unavailable",
+            "embedding_backlog_age_seconds": 0.0,
+            "embedding_pending_chunks": 0,
+            "embeddings": "paused",
+            "spool_pending_batches": 29,
+            "tick": 7
+          },
+          {
+            "archive_lag_seconds": 5.0,
+            "central": "unavailable",
+            "embedding_backlog_age_seconds": 0.0,
+            "embedding_pending_chunks": 0,
+            "embeddings": "paused",
+            "spool_pending_batches": 38,
+            "tick": 8
+          },
+          {
+            "archive_lag_seconds": 6.0,
+            "central": "unavailable",
+            "embedding_backlog_age_seconds": 0.0,
+            "embedding_pending_chunks": 0,
+            "embeddings": "paused",
+            "spool_pending_batches": 47,
+            "tick": 9
+          },
+          {
+            "archive_lag_seconds": 7.0,
+            "central": "unavailable",
+            "embedding_backlog_age_seconds": 0.0,
+            "embedding_pending_chunks": 0,
+            "embeddings": "paused",
+            "spool_pending_batches": 56,
+            "tick": 10
+          },
+          {
+            "archive_lag_seconds": 8.0,
+            "central": "unavailable",
+            "embedding_backlog_age_seconds": 0.0,
+            "embedding_pending_chunks": 0,
+            "embeddings": "paused",
+            "spool_pending_batches": 65,
+            "tick": 11
+          },
+          {
+            "archive_lag_seconds": 0.0,
+            "central": "available",
+            "embedding_backlog_age_seconds": 0.0,
+            "embedding_pending_chunks": 66,
+            "embeddings": "bounded",
+            "spool_pending_batches": 0,
+            "tick": 12
+          },
+          {
+            "archive_lag_seconds": 0.0,
+            "central": "available",
+            "embedding_backlog_age_seconds": 1.0,
+            "embedding_pending_chunks": 54,
+            "embeddings": "bounded",
+            "spool_pending_batches": 9,
+            "tick": 13
+          },
+          {
+            "archive_lag_seconds": 1.0,
+            "central": "available",
+            "embedding_backlog_age_seconds": 2.0,
+            "embedding_pending_chunks": 59,
+            "embeddings": "bounded",
+            "spool_pending_batches": 2,
+            "tick": 14
+          },
+          {
+            "archive_lag_seconds": 2.0,
+            "central": "available",
+            "embedding_backlog_age_seconds": 3.0,
+            "embedding_pending_chunks": 47,
+            "embeddings": "bounded",
+            "spool_pending_batches": 11,
+            "tick": 15
+          },
+          {
+            "archive_lag_seconds": 1.0,
+            "central": "available",
+            "embedding_backlog_age_seconds": 4.0,
+            "embedding_pending_chunks": 53,
+            "embeddings": "bounded",
+            "spool_pending_batches": 2,
+            "tick": 16
+          },
+          {
+            "archive_lag_seconds": 0.0,
+            "central": "available",
+            "embedding_backlog_age_seconds": 5.0,
+            "embedding_pending_chunks": 43,
+            "embeddings": "bounded",
+            "spool_pending_batches": 0,
+            "tick": 17
+          },
+          {
+            "archive_lag_seconds": 0.0,
+            "central": "available",
+            "embedding_backlog_age_seconds": 4.0,
+            "embedding_pending_chunks": 31,
+            "embeddings": "bounded",
+            "spool_pending_batches": 0,
+            "tick": 18
+          },
+          {
+            "archive_lag_seconds": 0.0,
+            "central": "available",
+            "embedding_backlog_age_seconds": 3.0,
+            "embedding_pending_chunks": 19,
+            "embeddings": "bounded",
+            "spool_pending_batches": 0,
+            "tick": 19
+          },
+          {
+            "archive_lag_seconds": 0.0,
+            "central": "available",
+            "embedding_backlog_age_seconds": 4.0,
+            "embedding_pending_chunks": 7,
+            "embeddings": "bounded",
+            "spool_pending_batches": 0,
+            "tick": 20
+          },
+          {
+            "archive_lag_seconds": 0.0,
+            "central": "available",
+            "embedding_backlog_age_seconds": 0.0,
+            "embedding_pending_chunks": 0,
+            "embeddings": "drained",
+            "spool_pending_batches": 0,
+            "tick": 21
+          },
+          {
+            "archive_lag_seconds": 0.0,
+            "central": "available",
+            "embedding_backlog_age_seconds": 0.0,
+            "embedding_pending_chunks": 0,
+            "embeddings": "drained",
+            "spool_pending_batches": 0,
+            "tick": 22
+          }
+        ],
+        "verdict": {
+          "authoritative_events": 378,
+          "complete": true,
+          "duplicate_events_total": 6,
+          "embedded_texts": 196,
+          "failures": [],
+          "re_embedded_texts": 0,
+          "sessions": 36,
+          "source_sha256": "bed788ae0596f67272f6d734261ee4d7515baf5741df111e9e5d46120aff069b",
+          "transcript_lines": 378
+        }
+      },
+      "7": {
+        "counts": {
+          "acknowledgements_lost": 3,
+          "cursor_commits_lost": 3,
+          "cursor_moved_on_refusal": 0,
+          "dropped_batches": 0,
+          "needle_hits": 1400,
+          "out_of_scope_results": 0,
+          "restricted_searches_refused": 11,
+          "searches_answered": 81,
+          "spool_full_refusals": 0
+        },
+        "drained_at_tick": 22,
+        "ingest_ack_latency_seconds": {
+          "all": {
+            "count": 288,
+            "max": 9.0,
+            "p50": 1.0,
+            "p95": 7.0
+          },
+          "clock": "fake",
+          "written_during_overload": {
+            "count": 108,
+            "max": 6.0,
+            "p50": 4.0,
+            "p95": 6.0
+          }
+        },
+        "marker_visibility_lag_seconds": {
+          "clock": "fake",
+          "count": 48,
+          "max": 1.0,
+          "p50": 1.0,
+          "p95": 1.0
+        },
+        "markers_never_visible": 0,
+        "peak": {
+          "archive_lag_seconds": 8.0,
+          "embedding_backlog_age_seconds": 5.0,
+          "embedding_pending_chunks": 66,
+          "spool_pending_batches": 65
+        },
+        "search_latency_seconds": {
+          "clock": "wall, asserted by the wall clock test and printed by the measure command, not recorded here",
+          "searches": 92
+        },
+        "seed": 7,
+        "series": [
+          {
+            "archive_lag_seconds": 0.0,
+            "central": "available",
+            "embedding_backlog_age_seconds": 0.0,
+            "embedding_pending_chunks": 0,
+            "embeddings": "drained",
+            "spool_pending_batches": 9,
+            "tick": 1
+          },
+          {
+            "archive_lag_seconds": 0.0,
+            "central": "available",
+            "embedding_backlog_age_seconds": 0.0,
+            "embedding_pending_chunks": 6,
+            "embeddings": "bounded",
+            "spool_pending_batches": 0,
+            "tick": 2
+          },
+          {
+            "archive_lag_seconds": 0.0,
+            "central": "available",
+            "embedding_backlog_age_seconds": 0.0,
+            "embedding_pending_chunks": 0,
+            "embeddings": "drained",
+            "spool_pending_batches": 9,
+            "tick": 3
+          },
+          {
+            "archive_lag_seconds": 1.0,
+            "central": "available",
+            "embedding_backlog_age_seconds": 0.0,
+            "embedding_pending_chunks": 6,
+            "embeddings": "bounded",
+            "spool_pending_batches": 2,
+            "tick": 4
+          },
+          {
+            "archive_lag_seconds": 2.0,
+            "central": "available",
+            "embedding_backlog_age_seconds": 0.0,
+            "embedding_pending_chunks": 0,
+            "embeddings": "drained",
+            "spool_pending_batches": 11,
+            "tick": 5
+          },
+          {
+            "archive_lag_seconds": 3.0,
+            "central": "unavailable",
+            "embedding_backlog_age_seconds": 0.0,
+            "embedding_pending_chunks": 0,
+            "embeddings": "paused",
+            "spool_pending_batches": 20,
+            "tick": 6
+          },
+          {
+            "archive_lag_seconds": 4.0,
+            "central": "unavailable",
+            "embedding_backlog_age_seconds": 0.0,
+            "embedding_pending_chunks": 0,
+            "embeddings": "paused",
+            "spool_pending_batches": 29,
+            "tick": 7
+          },
+          {
+            "archive_lag_seconds": 5.0,
+            "central": "unavailable",
+            "embedding_backlog_age_seconds": 0.0,
+            "embedding_pending_chunks": 0,
+            "embeddings": "paused",
+            "spool_pending_batches": 38,
+            "tick": 8
+          },
+          {
+            "archive_lag_seconds": 6.0,
+            "central": "unavailable",
+            "embedding_backlog_age_seconds": 0.0,
+            "embedding_pending_chunks": 0,
+            "embeddings": "paused",
+            "spool_pending_batches": 47,
+            "tick": 9
+          },
+          {
+            "archive_lag_seconds": 7.0,
+            "central": "unavailable",
+            "embedding_backlog_age_seconds": 0.0,
+            "embedding_pending_chunks": 0,
+            "embeddings": "paused",
+            "spool_pending_batches": 56,
+            "tick": 10
+          },
+          {
+            "archive_lag_seconds": 8.0,
+            "central": "unavailable",
+            "embedding_backlog_age_seconds": 0.0,
+            "embedding_pending_chunks": 0,
+            "embeddings": "paused",
+            "spool_pending_batches": 65,
+            "tick": 11
+          },
+          {
+            "archive_lag_seconds": 0.0,
+            "central": "available",
+            "embedding_backlog_age_seconds": 0.0,
+            "embedding_pending_chunks": 66,
+            "embeddings": "bounded",
+            "spool_pending_batches": 0,
+            "tick": 12
+          },
+          {
+            "archive_lag_seconds": 0.0,
+            "central": "available",
+            "embedding_backlog_age_seconds": 1.0,
+            "embedding_pending_chunks": 54,
+            "embeddings": "bounded",
+            "spool_pending_batches": 9,
+            "tick": 13
+          },
+          {
+            "archive_lag_seconds": 1.0,
+            "central": "available",
+            "embedding_backlog_age_seconds": 2.0,
+            "embedding_pending_chunks": 58,
+            "embeddings": "bounded",
+            "spool_pending_batches": 2,
+            "tick": 14
+          },
+          {
+            "archive_lag_seconds": 2.0,
+            "central": "available",
+            "embedding_backlog_age_seconds": 3.0,
+            "embedding_pending_chunks": 46,
+            "embeddings": "bounded",
+            "spool_pending_batches": 11,
+            "tick": 15
+          },
+          {
+            "archive_lag_seconds": 1.0,
+            "central": "available",
+            "embedding_backlog_age_seconds": 4.0,
+            "embedding_pending_chunks": 52,
+            "embeddings": "bounded",
+            "spool_pending_batches": 2,
+            "tick": 16
+          },
+          {
+            "archive_lag_seconds": 0.0,
+            "central": "available",
+            "embedding_backlog_age_seconds": 5.0,
+            "embedding_pending_chunks": 42,
+            "embeddings": "bounded",
+            "spool_pending_batches": 0,
+            "tick": 17
+          },
+          {
+            "archive_lag_seconds": 0.0,
+            "central": "available",
+            "embedding_backlog_age_seconds": 4.0,
+            "embedding_pending_chunks": 30,
+            "embeddings": "bounded",
+            "spool_pending_batches": 0,
+            "tick": 18
+          },
+          {
+            "archive_lag_seconds": 0.0,
+            "central": "available",
+            "embedding_backlog_age_seconds": 3.0,
+            "embedding_pending_chunks": 18,
+            "embeddings": "bounded",
+            "spool_pending_batches": 0,
+            "tick": 19
+          },
+          {
+            "archive_lag_seconds": 0.0,
+            "central": "available",
+            "embedding_backlog_age_seconds": 4.0,
+            "embedding_pending_chunks": 6,
+            "embeddings": "bounded",
+            "spool_pending_batches": 0,
+            "tick": 20
+          },
+          {
+            "archive_lag_seconds": 0.0,
+            "central": "available",
+            "embedding_backlog_age_seconds": 0.0,
+            "embedding_pending_chunks": 0,
+            "embeddings": "drained",
+            "spool_pending_batches": 0,
+            "tick": 21
+          },
+          {
+            "archive_lag_seconds": 0.0,
+            "central": "available",
+            "embedding_backlog_age_seconds": 0.0,
+            "embedding_pending_chunks": 0,
+            "embeddings": "drained",
+            "spool_pending_batches": 0,
+            "tick": 22
+          }
+        ],
+        "verdict": {
+          "authoritative_events": 378,
+          "complete": true,
+          "duplicate_events_total": 6,
+          "embedded_texts": 195,
+          "failures": [],
+          "re_embedded_texts": 0,
+          "sessions": 36,
+          "source_sha256": "9a27837b74e0d2d5108bec00264fe1e053c513497b6d4d2a109d0e38939bd502",
+          "transcript_lines": 378
+        }
+      }
+    }
+  },
+  "state": "passed"
+}

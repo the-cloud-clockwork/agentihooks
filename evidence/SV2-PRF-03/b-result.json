@@ -1,0 +1,126 @@
+{
+  "case": "T-SV2-PRF-03-B",
+  "evidence_class": "mocked: interleaved writers in one process, a SQLite catalog file, a local content addressed object folder, execution local spool and cursor folders and a deterministic hash embedder stand in for concurrent agents, the central database, the archive bucket and the embedding provider; ack latency and lag run on a fake clock, and search wall time is measured separately by the wall clock test; no model, HTTP server, vector database or Pod runs",
+  "input_sha256": {
+    "workload.json": "2c04a9f6ee697bc62f66913889c79524cc419e896ff630e18ee50df3b3946c53"
+  },
+  "observed": {
+    "dropping_uploader": {
+      "ack_latency_written_during_overload": {
+        "count": 54,
+        "max": 3.0,
+        "p50": 2.0,
+        "p95": 3.0
+      },
+      "authoritative_events": 304,
+      "drained_at_tick": 18,
+      "drop_older_than_seconds": 3.0,
+      "dropped_batches": 38,
+      "failure_kinds": {
+        "archive_incomplete": 9,
+        "events_missing": 9
+      },
+      "graded": "failed",
+      "honest_ack_latency_written_during_overload": {
+        "count": 108,
+        "max": 6.0,
+        "p50": 4.0,
+        "p95": 6.0
+      },
+      "transcript_lines": 378
+    },
+    "scope": {
+      "corrected": {
+        "out_of_scope": 0,
+        "results": 50,
+        "state": "answered"
+      },
+      "hidden_names_absent_from_diagnostics": true,
+      "protected_state_unchanged": true,
+      "rejected": {
+        "foreign_corpus": {
+          "class": "forbidden_scope",
+          "detail": "the grant does not cover the requested search scope",
+          "retry": "never"
+        },
+        "project_outside_a_narrow_grant": {
+          "class": "forbidden_scope",
+          "detail": "the grant does not cover the requested search scope",
+          "retry": "never"
+        },
+        "restricted_project": {
+          "class": "forbidden_scope",
+          "detail": "the grant does not cover the requested search scope",
+          "retry": "never"
+        },
+        "restricted_with_granted": {
+          "class": "forbidden_scope",
+          "detail": "the grant does not cover the requested search scope",
+          "retry": "never"
+        }
+      },
+      "session_search_scope_rejections": 15
+    },
+    "spool_pressure": {
+      "counts": {
+        "acknowledgements_lost": 3,
+        "cursor_commits_lost": 2,
+        "cursor_moved_on_refusal": 0,
+        "dropped_batches": 0,
+        "needle_hits": 1400,
+        "out_of_scope_results": 0,
+        "restricted_searches_refused": 11,
+        "searches_answered": 81,
+        "spool_full_refusals": 38
+      },
+      "drained_at_tick": 22,
+      "ingest_ack_latency_seconds": {
+        "all": {
+          "count": 288,
+          "max": 9.0,
+          "p50": 1.0,
+          "p95": 7.0
+        },
+        "clock": "fake",
+        "written_during_overload": {
+          "count": 108,
+          "max": 6.0,
+          "p50": 4.0,
+          "p95": 6.0
+        }
+      },
+      "marker_visibility_lag_seconds": {
+        "clock": "fake",
+        "count": 48,
+        "max": 1.0,
+        "p50": 1.0,
+        "p95": 1.0
+      },
+      "markers_never_visible": 0,
+      "peak": {
+        "archive_lag_seconds": 8.0,
+        "embedding_backlog_age_seconds": 5.0,
+        "embedding_pending_chunks": 66,
+        "spool_pending_batches": 27
+      },
+      "search_latency_seconds": {
+        "clock": "wall, asserted by the wall clock test and printed by the measure command, not recorded here",
+        "searches": 92
+      },
+      "seed": 7,
+      "spool_max_bytes_while_central_down": 3000,
+      "verdict": {
+        "authoritative_events": 378,
+        "complete": true,
+        "duplicate_events_total": 6,
+        "embedded_texts": 195,
+        "failures": [],
+        "re_embedded_texts": 0,
+        "sessions": 36,
+        "source_sha256": "9a27837b74e0d2d5108bec00264fe1e053c513497b6d4d2a109d0e38939bd502",
+        "transcript_lines": 378
+      }
+    }
+  },
+  "state": "passed"
+}
