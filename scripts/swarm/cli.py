@@ -1835,6 +1835,8 @@ def cmd_wait_inbox(store, args, agent):
 
 def cmd_wait(store, args):
     agent = _me(store, args)
+    if args.final and (not args.on or args.on[0] != "merge"):
+        raise SwarmError("--final requires --on merge for the task final deliverable")
     if args.inbox:
         return cmd_wait_inbox(store, args, agent)
     held = waits.on(*args.on, task=agent.task) if args.on else None
@@ -1851,7 +1853,7 @@ def cmd_wait(store, args):
         get = InboxStore(store.redis).get
         if problem := waits.target_problem(held["kind"], held["target"], agent.task, rows, get):
             raise SwarmError(problem)
-        prerequisite_wait.admit(store, args.slug, agent, held, LedgerClient(), now_ms())
+        prerequisite_wait.admit(store, args.slug, agent, held, LedgerClient(), now_ms(), args.final)
         if held["kind"] == "checks" and waits.PULL_URL.fullmatch(held["target"]):
             head = ledger_events.head(held["target"])
             if head == "":
@@ -2260,7 +2262,7 @@ def build_parser():
             decision.set_defaults(override="")
     wait = sub.add_parser("wait")
     wait.add_argument("minutes", type=int, nargs="?")
-    wait.add_argument("--on", nargs=2, metavar=("KIND", "TARGET"))
+    prerequisite_wait.arguments(wait)
     wait.add_argument("--reason", default="")
     wait.add_argument("--inbox", action="store_true")
     reported = sub.add_parser("progress")

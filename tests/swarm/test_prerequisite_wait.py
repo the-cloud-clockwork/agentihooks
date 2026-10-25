@@ -47,7 +47,7 @@ def test_a_short_or_unknown_prerequisite_queue_preserves_merge_waits(waiting, po
 def test_the_tasks_final_deliverable_can_wait_at_any_queue_position(waiting):
     store, ledger, _ = waiting
     ledger.rows["t1"]["pr_url"] = URL
-    assert run("sw", "--as", ME, "wait", "--on", "merge", URL) == 0
+    assert run("sw", "--as", ME, "wait", "--on", "merge", URL, "--final") == 0
     assert idle.wait(store.redis, "sw", ME)["on"]["target"] == URL
 
 
@@ -207,3 +207,23 @@ def test_a_recorded_prerequisite_still_requires_continuation(waiting):
     ledger.rows["t1"]["description"] = "This pull request is the compatibility prerequisite; implementation follows."
     assert run("sw", "--as", ME, "wait", "--on", "merge", URL) == 1
     assert idle.wait(store.redis, "sw", ME) is None
+
+
+@pytest.mark.parametrize("options", [[], ["--on", "checks", URL], ["--inbox"], ["--on", "reply", "item"]])
+def test_final_confirmation_requires_a_merge_wait(waiting, capsys, options):
+    assert run("sw", "--as", ME, "wait", *options, "--final") == 1
+    assert "--final requires --on merge" in capsys.readouterr().err
+
+
+def test_final_confirmation_cannot_name_another_pull_request(waiting, capsys):
+    assert run("sw", "--as", ME, "wait", "--on", "merge", URL, "--final") == 1
+    assert "--final requires the current task pull request" in capsys.readouterr().err
+
+
+def test_merge_wait_help_names_final_confirmation_and_existing_target_labels(capsys):
+    with pytest.raises(SystemExit) as stopped:
+        cli.build_parser().parse_args(["sw", "wait", "--help"])
+    assert stopped.value.code == 0
+    text = capsys.readouterr().out
+    assert "--on KIND TARGET" in text
+    assert "--final" in text

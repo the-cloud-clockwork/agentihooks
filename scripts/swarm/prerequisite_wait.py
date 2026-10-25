@@ -1,5 +1,6 @@
 import json
 import subprocess
+from argparse import ArgumentParser
 
 from scripts.swarm import idle, ledger_events, merge_queue, waits
 from scripts.swarm.store import PREFIX, AgentRecord, RedisStore, SwarmError
@@ -9,13 +10,22 @@ def key(slug: str) -> str:
     return f"{PREFIX}:{slug}:prerequisite-waits"
 
 
-def admit(store: RedisStore, slug: str, agent: AgentRecord, held: dict, ledger, at: int) -> None:
+def arguments(parser: ArgumentParser) -> None:
+    parser.add_argument("--on", nargs=2, metavar=("KIND", "TARGET"))
+    parser.add_argument("--final", action="store_true")
+
+
+def admit(store: RedisStore, slug: str, agent: AgentRecord, held: dict, ledger, at: int, final: bool) -> None:
     store.redis.hdel(key(slug), agent.task)
-    if held["kind"] != "merge" or not agent.task:
+    if held["kind"] != "merge":
         return
-    task = ledger.task(slug, agent.task)
+    task = ledger.task(slug, agent.task) if agent.task else None
     target = held["target"]
-    if not task or task.get("pr_url") == target:
+    if final:
+        if not task or task.get("pr_url") != target:
+            raise SwarmError("--final requires the current task pull request")
+        return
+    if not task:
         return
     pull = ledger_events.view(target)
     if pull is None or not pull.queued:
@@ -36,7 +46,8 @@ def admit(store: RedisStore, slug: str, agent: AgentRecord, held: dict, ledger, 
     raise SwarmError(
         f"prerequisite {target} is at queue position {position}; stack the next change on the prerequisite branch "
         "and publish it, or block with this prerequisite URL, the stack and next step in the notes; "
-        "the swarm will reopen after it merges"
+        "the swarm will reopen after it merges. For the task's final deliverable, "
+        f"confirm it with wait --on merge {target} --final"
     )
 
 
