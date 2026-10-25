@@ -1327,13 +1327,19 @@ def test_prepare_and_publish_keep_the_open_pull_requests_delivery_branch(publica
         repository_branches={str(p.repo): "predecessor"},
         pr_url="https://github.com/example/repo/pull/7",
     )
-    monkeypatch.setattr(publish.publish_queue, "open_head", lambda remote, url: "predecessor")
+
+    def open_head(remote, url):
+        assert remote == str(p.repo.parent / "remote.git")
+        assert url == "https://github.com/example/repo/pull/7"
+        return "predecessor"
+
+    monkeypatch.setattr(publish.publish_queue, "open_head", open_head)
     result = publish.prepare("swarm", p.agent, str(p.repo), p.ledger)
     assert result["worktree"] == str(p.root)
     assert git(p.root, "branch", "--show-current") == "engineer-test"
     assert p.task["branch"] == "predecessor"
     assert p.task["repository_branches"] == {str(p.repo): "predecessor"}
-    monkeypatch.chdir(p.root)
+    monkeypatch.chdir(p.repo)
     published = publish.publish("swarm", p.agent, str(p.repo), p.ledger, "Continue pull request", ["chosen.txt"])
     assert published["branch"] == p.task["branch"] == "predecessor"
     assert git(p.repo, "ls-remote", "origin", "refs/heads/predecessor").split()[0] == published["head"]

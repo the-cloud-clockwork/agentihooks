@@ -99,6 +99,8 @@ def test_prepare_starts_from_dev_after_the_recorded_branch_merged_and_was_delete
 
     def execute(command, cwd):
         if command[0] == "gh":
+            assert command == ["gh", "pr", "view", p.task["pr_url"], "--json", "state,baseRefName,headRefName"]
+            assert cwd == root
             return '{"state":"MERGED","baseRefName":"dev","headRefName":"predecessor"}'
         return original(command, cwd)
 
