@@ -56,8 +56,9 @@ Swarms created before the setting existed read as `legacy`. Any other value is r
    `swarm.<slug>.ready.<lane>`. The bus drops a repeat of the same id that arrives within 120 seconds, so a task
    nobody claims is offered again after that window. Each work queue is its own
    stream on `agentihooks.queue.<name>`.
-3. **Pull.** A hive's spoke takes an offer only when it has room. Before it acts, it checks the offer against a fresh
-   ledger read. It terminates an offer that is stale: the task is gone, claimed, no longer open, on a different
+3. **Pull.** A hive's spoke takes an offer only when it has room. Before it acts, the offer is checked against a
+   fresh ledger read: by a master spoke itself, and by the hub when it admits an eng, ci or plan offer. A stale offer
+   is terminated: the task is gone, claimed, no longer open, on a different
    generation or lane, or held.
 4. **Claim and launch.** The spoke records its claim in the hive buckets and launches the agent. It publishes
    `execution.started` with the claim, the task generation, the hive and the pane, then acknowledges the offer.
@@ -84,8 +85,10 @@ exits, verification, the dispatcher, the lane split, master scaling and the prom
 engines. Master agents are reaped by the tick under either engine.
 
 The hub offers eng, ci and plan tasks, and the spoke code is the same for every lane. With
-`AGENTIHOOKS_DEPLOYMENT=distributed`, a workstation runs the master lane spoke with `agentihooks swarm spoke`. That
-spoke launches only master offers that carry an execution identity.
+`AGENTIHOOKS_DEPLOYMENT=distributed`, a workstation runs the master lane spoke and the eng, ci and plan spokes with
+`agentihooks swarm spoke`, and every worker hive runs the lane spokes it does not exclude inside
+`agentihooks hive run`. The master spoke launches only master offers that carry an execution identity; a lane spoke
+launches what the hub admitted (see [Pulling work from the hub](hives.md#pulling-work-from-the-hub)).
 
 ## Agent names
 
@@ -871,7 +874,7 @@ The Swarm panel's controls (`start`, `pause`, `stop`, `stop --now`, `close`, `re
 | `agentihooks swarm init --no-start` | Check Docker and the Compose plugin, write the stack files, `.env` (adoption included with `--adopt`) and `client.env`, then stop: no service, swarm or ledger is started or created. |
 | `agentihooks swarm list` | One line per swarm: state, caps, agent count, repo. |
 | `agentihooks swarm tick-watch` | The stale tick watcher, run by its own user service: one inbox alert per stale tick episode to the front door master seat and every live agent seat, a resolved notice when a fresh pass lands, on a workstation a scheduler tick restart and a respawn of an empty front door master while the tick is stale, and in a cluster a placement of an empty front door master (see [Tick heartbeat and stale watcher](#tick-heartbeat-and-stale-watcher)). |
-| `agentihooks swarm spoke` | The workstation spoke, run by the `agentihooks-spoke` user service when `AGENTIHOOKS_DEPLOYMENT=distributed`: a master lane spoke per swarm takes master work from the bus as this hive and launches it in a herdr pane. Refused in any other mode. |
+| `agentihooks swarm spoke` | The workstation spoke, run by the `agentihooks-spoke` user service when `AGENTIHOOKS_DEPLOYMENT=distributed`: a master lane spoke per swarm takes master work from the bus as this hive and launches it in a herdr pane, beside an eng, ci and plan spoke per `events` swarm that launches what the hub admits. Refused in any other mode. |
 | `agentihooks swarm tick` | One reconcile pass over every swarm (the scheduler runs it every minute). |
 | `agentihooks swarm <id> controller` | Show the controller owner, epoch and expiry. |
 | `agentihooks swarm <id> controller release` | Release this hive's lease so another controller can take over at a higher epoch. |

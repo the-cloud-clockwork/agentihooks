@@ -549,13 +549,22 @@ Limitations:
 ## Pulling work from the hub
 
 A swarm on the `events` engine (see [Event driven engine](swarm.md#event-driven-engine)) places no agent on a
-hive. Hives pull offers from the hub over NATS JetStream instead, through one spoke per swarm and lane. Today only the
-workstation's master lane spoke is started for real (see [Running a spoke](#running-a-spoke)). The eng lane spoke
-runs only in the Compose task smoke and the recovery drill. On every pass a spoke:
+hive. Hives pull offers from the hub over NATS JetStream instead, through one spoke per swarm and lane (see
+[Running a spoke](#running-a-spoke)). On every pass a spoke:
 
 1. Recovers its own unfinished claims.
 2. Checks the hive's admission room.
-3. Takes one offer from the lane work queue, rechecks it against the ledger and launches the agent.
+3. Takes one offer from the lane work queue, has it admitted and launches the agent.
+
+A master spoke rechecks its offer against the ledger itself. An eng, ci or plan spoke asks the hub to admit it,
+because a member's Redis user cannot claim a task, name an agent or take a seat, and a remote hive makes no service
+ledger reads. The hub answers `admit` on the same `slots.<swarm>.<hive>` request subject as account slots, which a
+member's credential may publish only for its own hive; a request naming another hive than its subject is refused. It rechecks the offer against the ledger, claims the task,
+starts the execution on that hive, occupies a seat, marks the task claimed (or back in `pr`) and returns the primed
+spawn task. A repeat from the same hive returns the same admission, so a retried launch keeps its agent; any other
+hive gets none. When the offer runs out of deliveries, the spoke sends `reopen`, which returns the task to `open`.
+Unlike a tick launch, a hub admission scaffolds no task work folder on the hub and resolves no reclaim continuation,
+stack base, overlaps or group; the spawn task carries the seat's handoff, recaps and learned notes.
 
 The hub creates the hive buckets; members are not allowed to create them:
 
@@ -589,9 +598,14 @@ that a hive reports gone. An execution on a lost hive ends with reason `lost`.
 
 ### Running a spoke
 
-With `AGENTIHOOKS_DEPLOYMENT=distributed`, `agentihooks swarm spoke` runs the master lane spoke on the workstation.
-It takes master work from the bus and binds to the hub's streams instead of creating them. Outside distributed mode it
-refuses, because the workstation then runs the swarm engine itself. The bus settings a hive needs arrive with its
+With `AGENTIHOOKS_DEPLOYMENT=distributed`, `agentihooks swarm spoke` runs the master lane spoke on the workstation,
+and `agentihooks hive run`, the worker hive image's last start step, runs beside its telemetry loop an eng, ci and
+plan spoke for every swarm on the `events` engine, leaving out the lanes in `HIVE_EXCLUDED`. The workstation spoke
+runs the same lane spokes for every lane. Legacy engine swarms get no lane spoke. Each new spoke logs
+`hive spoke for swarm <slug> lane <lane> takes swarm.<slug>.ready.<lane>`, and a stopped set of lane spokes logs
+why and starts again after 30 seconds. Spokes take work from the bus and bind to the hub's streams instead of
+creating them. Outside distributed mode `agentihooks swarm spoke` refuses and `agentihooks hive run` starts no
+spoke, because the workstation then runs the swarm engine itself. The bus settings a hive needs arrive with its
 invite; see [The hub and the bus](../reference/deployment-modes.md#the-hub-and-the-bus).
 
 ## Workstation fallback
