@@ -69,6 +69,41 @@ def test_a_failed_launch_stamps_its_absent_binding_when_it_fails(setup, monkeypa
     assert retry["at"] == 101
 
 
+def test_starting_master_stays_pending_until_observed_ready(setup):
+    store, old = setup
+    old = replace(old, name="master@old", lane="master", task="master", seat="master@sw")
+    store.put_agent("sw", old)
+    transfer = transfers.record(store, "sw", old, "recycle", DOC, 30)
+    new = replace(old, name="master@new", state="starting")
+    store.put_agent("sw", new)
+    store.seats.occupy(new.seat, new.name, 2)
+    transfers.attach(store, "sw", new)
+
+    transfers.observe(store, "sw", set())
+    result = transfers.get(store, "sw", transfer["id"])
+    assert result["binding"] == {"state": "pending"}
+
+    transfers.observe(store, "sw", {new.name})
+    result = transfers.get(store, "sw", transfer["id"])
+    assert result["binding"]["state"] == "live"
+    assert result["binding"]["session"] == new.name
+    assert result["continuity"]["state"] == "pending"
+
+
+def test_observation_preserves_explicit_launch_failure(setup):
+    store, old = setup
+    transfer = transfers.record(store, "sw", old, "recycle", DOC, 30)
+    new = replace(old, name="sw-eng-2")
+    store.seats.occupy(new.seat, new.name, 2)
+    transfers.attach(store, "sw", new)
+    transfers.failed(store, "sw", new)
+    failed = transfers.get(store, "sw", transfer["id"])
+
+    transfers.observe(store, "sw", set())
+
+    assert transfers.get(store, "sw", transfer["id"])["binding"] == failed["binding"]
+
+
 def test_detach_frees_only_the_waiting_spawns_unbound_transfers(setup):
     store, old = setup
     other = transfers.record(store, "sw", old, "recycle", DOC, 10)
