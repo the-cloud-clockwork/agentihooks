@@ -1,5 +1,7 @@
 import copy
+import json
 import re
+import subprocess
 
 import pytest
 
@@ -291,17 +293,16 @@ def test_watch_waits_for_complete_attempt_jobs_and_rechecks_queue_identity(monke
     assert sleeps == [5]
 
 
-def test_watch_reads_every_job_of_a_poll_in_one_100_job_page(monkeypatch):
-    from scripts.ci_budget import jobs as reader
-
+def test_watch_requests_the_jobs_listing_as_one_100_job_page(monkeypatch):
     commands = []
 
     def run(command, **kwargs):
         commands.append(command)
-        return reader.subprocess.CompletedProcess(command, 0, stdout=reader.json.dumps({"jobs": complete()}))
+        return subprocess.CompletedProcess(command, 0, stdout=json.dumps({"jobs": complete()}))
 
-    monkeypatch.setattr(reader.subprocess, "run", run)
+    monkeypatch.setattr(subprocess, "run", run)
     monkeypatch.setattr(ci_gate_queue, "api", lambda endpoint: [[{"ref": "refs/queue", "object": {"sha": "head"}}]])
+    monkeypatch.setattr(ci_gate_queue.time, "sleep", lambda seconds: None)
     ci_gate_queue.watch("owner/repo", "123", "2", [2, 7], "refs/queue", "head")
     assert commands == [["gh", "api", "repos/owner/repo/actions/runs/123/attempts/2/jobs?per_page=100&page=1"]]
 
