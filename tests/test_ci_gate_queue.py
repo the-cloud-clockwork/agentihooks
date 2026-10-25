@@ -52,6 +52,16 @@ def test_parallel_split_replaces_only_the_serial_split_grade(conclusion):
             ci_gate_queue.verify(jobs, [2, 7])
 
 
+@pytest.mark.parametrize("conclusion", ["success", "failure", "cancelled"])
+def test_parallel_split_keeps_the_other_tiers_excluded(conclusion):
+    jobs = complete()
+    next(job for job in jobs if job["name"] == "split")["conclusion"] = "skipped"
+    jobs.append({"id": 1000, "name": "queue-split (3.12)", "status": "completed", "conclusion": "success"})
+    next(job for job in jobs if job["name"] == "lint")["conclusion"] = conclusion
+    with pytest.raises(ValueError, match="lint"):
+        ci_gate_queue.verify(jobs, [2, 7])
+
+
 @pytest.mark.parametrize("state", ["missing", "queued", "in_progress", "duplicate"])
 def test_parallel_split_cannot_pass_without_one_completed_producer(state):
     jobs = complete()
