@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 from importlib import metadata
 from pathlib import Path
 
-from scripts.ci_mutation.scope import imported_names, module_name, selects, test_file
+from scripts.ci_mutation.scope import imported_names, module_name, selected_name, selects, test_file
 
 SCHEMA = 4
 CONTEXT_FIELDS = ("schema", "sources", "options", "runtime")
@@ -214,8 +214,7 @@ def fresh_by_path(paths: list[str], fresh: list[dict]) -> dict[str, list[dict]]:
 
 
 def selecting_entries(entries: set[str], test: str) -> list[str]:
-    suffix = test.rfind("@")
-    name = test[:suffix] if suffix >= 0 and not {"[", "]"} & set(test[suffix:]) else test
+    name = selected_name(test)
     cuts = {name[:index] for index in range(len(name)) if name.startswith(("::", "["), index)} | {name}
     return [entry for entry in cuts if entry in entries and selects(entry, test)]
 
