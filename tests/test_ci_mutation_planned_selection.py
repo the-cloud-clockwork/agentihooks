@@ -638,6 +638,37 @@ def test_selection_keeps_whole_files_where_recorded_coverage_cannot_speak(tmp_pa
     assert selection == {"scripts/core.py": WHOLE}
 
 
+def test_a_changed_tests_data_file_adds_only_the_tests_that_read_it(tmp_path, monkeypatch):
+    manifest = _recorded_project(tmp_path, monkeypatch)
+    manifest["tests"]["tests/test_core.py::test_other"]["files"] = ["tests/data/rules.json"]
+    (tmp_path / "tests/data").mkdir()
+    (tmp_path / "tests/data/rules.json").write_text("{}\n")
+    _commit(tmp_path, "data")
+    selection = {}
+    plan.estimate(tmp_path, {"scripts/core.py": {6}}, selection, manifest)
+    assert selection == {"scripts/core.py": sorted([*NARROWED, "tests/test_core.py::test_other"])}
+
+
+WORKFLOW = "jobs:\n  split:\n    runs-on: x\n  unit:\n    needs: split\n    steps:\n      - run: {unit}\n  lint:\n    steps:\n      - run: {lint}\n"
+
+
+@pytest.mark.parametrize(
+    "edit,expected",
+    [({"unit": "pytest", "lint": "ruff check"}, NARROWED), ({"unit": "pytest -x", "lint": "ruff"}, WHOLE)],
+)
+def test_a_workflow_edit_drops_narrowing_only_when_it_changes_the_test_command(tmp_path, monkeypatch, edit, expected):
+    manifest = _recorded_project(tmp_path, monkeypatch)
+    workflow = tmp_path / ".github/workflows/test.yml"
+    workflow.parent.mkdir(parents=True)
+    workflow.write_text(WORKFLOW.format(unit="pytest", lint="ruff"))
+    manifest["commit"] = _commit(tmp_path, "recorded workflow")
+    workflow.write_text(WORKFLOW.format(**edit))
+    _commit(tmp_path, "workflow")
+    selection = {}
+    plan.estimate(tmp_path, {"scripts/core.py": {6}}, selection, manifest)
+    assert selection == {"scripts/core.py": expected}
+
+
 def test_a_path_whose_covering_tests_are_gone_keeps_its_selected_files(tmp_path, monkeypatch):
     manifest = _recorded_project(tmp_path, monkeypatch)
     manifest["commit"] = subprocess.check_output([*GIT, "-C", str(tmp_path), "rev-parse", "HEAD"], text=True).strip()
