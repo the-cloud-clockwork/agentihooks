@@ -104,10 +104,12 @@ class FencedRuntime:
     def begin_placement_pass(self) -> None:
         if launch := getattr(self.runtime, "hive_launch", None):
             launch.placement_cache = {}
+            launch.herdr.pass_memo = {}
 
     def end_placement_pass(self) -> None:
         if launch := getattr(self.runtime, "hive_launch", None):
             launch.placement_cache = None
+            launch.herdr.pass_memo = None
 
     def placement_refusal(self, lane: str, task: dict) -> str:
         refused = self._refusal(lane, task)
@@ -183,7 +185,11 @@ class FencedRuntime:
         return found, held, min(maximum, running + found.room)
 
     def _overflow(self, lane: str, task: dict, waited: "Wait", claim: str) -> str:
-        if self.deployment != HYBRID or task.get("hive") or not _workstation_herdr():
+        if (
+            self.deployment != HYBRID
+            or task.get("hive")
+            or not _workstation_herdr(self.runtime.hive_launch.herdr.pass_memo)
+        ):
             return waited.reason
         from scripts.hive import admission, placement_waits, registry
         from scripts.hive.placement import LOCAL_FULL, Choice, equipped, hosts, overflow
@@ -310,10 +316,15 @@ def _master_task(lane: str, task: dict) -> dict:
     return {"id": "master", **task} if lane == "master" else task
 
 
-def _workstation_herdr() -> bool:
+def _workstation_herdr(memo: dict | None = None) -> bool:
     from scripts import herdr_host
+    from scripts.swarm import timing
 
-    return herdr_host.server_running(dict(os.environ))
+    if memo is None:
+        return timing.call(herdr_host.server_running, dict(os.environ))
+    if "workstation_herdr" not in memo:
+        memo["workstation_herdr"] = timing.call(herdr_host.server_running, dict(os.environ))
+    return memo["workstation_herdr"]
 
 
 def _read(path: str) -> str:
