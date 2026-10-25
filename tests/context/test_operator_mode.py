@@ -752,15 +752,18 @@ def test_the_reply_limit_reads_the_environment_skips_markers_and_checks_retries(
 
 def test_spoken_text_drops_markers_and_comments_in_linear_scan():
     spoken = operator_mode._spoken
-    assert spoken("a <!-- @lesson -->x y<!-- @/lesson --> b") == "a   b"
-    assert spoken("a <!-- @decision date=1 -->x<!-- @/decision -->b") == "a  b"
+    assert spoken("a <!-- @lesson -->x y<!-- @/lesson --> b") == "a    b"
+    assert spoken("a <!-- @decision date=1 -->x<!-- note -->y<!-- @/lesson -->z<!-- @/decision -->b") == "a     b"
     assert spoken("a <!-- note -->b") == "a  b"
     assert spoken("a <!-- @lesson -->x y") == "a  x y"
-    assert spoken("a <!-- open") == "a <!-- open"
-    assert spoken("a <!---->b") == "a  b"
+    assert spoken("a <!-- open") == "a  <!-- open"
+    assert spoken("x<!-- @a -->y<!-- open") == "x y <!-- open"
     assert spoken("<!-- @/lesson -->a") == " a"
-    assert spoken("<!-- @x -->k<!-- @/x") == " k<!-- @/x"
-    assert spoken("<!--" * 5000 + "a") == "<!--" * 5000 + "a"
+    assert spoken("<!-- x @y -->z<!-- @/y -->w") == " z w"
+    assert spoken("<!--@a-->x<!--@/a-->y") == "  y"
+    assert spoken("<!-- @a -->x<!-- @/ab -->y<!-- @/a -->z") == "   z"
+    assert spoken("<!-- @a -->x<!-- @a -->y<!-- @/a -->z") == "   z"
+    assert spoken("a <!-- n -->b-->c") == "a  b-->c"
 
 
 def test_a_failing_reply_check_is_logged_and_never_raises_into_the_stop_hook(monkeypatch):

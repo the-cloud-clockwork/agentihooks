@@ -32,7 +32,7 @@ REPLY_REFUSAL = (
     "Reply again in at most {words} words, machine style: result only, no explanation."
 )
 REPLY_RETRIES = 3
-MARKER = re.compile(r"\s*@(\w+)")
+MARKER = re.compile(r"\s*@(/?)(\w+)")
 QUESTION_TOOL = "AskUserQuestion"
 ASK_REFUSAL = (
     "The operator is not present in this pane, so the question tool is off. Put the question on the ledger with "
@@ -175,16 +175,20 @@ def _reminder_text(environ, session_id):
 
 
 def _spoken(text):
-    parts, at = [], 0
-    while (start := text.find("<!--", at)) >= 0 and (end := text.find("-->", start + 4)) >= 0:
-        parts.append(text[at:start])
-        at = end + 3
-        tag = MARKER.match(text, start + 4, end)
-        close = text.find("@/" + tag.group(1), at) if tag else -1
-        tail = text.find("-->", close) if close >= 0 else -1
-        if tail >= 0:
-            at = tail + 3
-    parts.append(text[at:])
+    first, *chunks = text.split("<!--")
+    parts, inside = [first], ""
+    for chunk in chunks:
+        body, closed, rest = chunk.partition("-->")
+        tag = MARKER.match(body)
+        if not closed:
+            parts.append("<!--" + chunk)
+        elif inside:
+            inside = "" if tag and tag.group(1) and tag.group(2) == inside else inside
+            parts.append("" if inside else rest)
+        else:
+            opened = tag.group(2) if tag and not tag.group(1) else ""
+            inside = opened if "@/" + opened in text else ""
+            parts.append("" if inside else rest)
     return " ".join(parts)
 
 
