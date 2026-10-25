@@ -1772,4 +1772,4 @@ def test_the_repository_registry_freezes_the_grader_and_rulesets_at_their_curren
     rulesets = {str(path.relative_to(_ROOT)) for path in (_ROOT / ".github/rulesets").glob("*.json")}
     assert set(registry) == {"scripts/gate_protected.py", ".github/workflows/gate-protected.yml", *rulesets}
     for path, accepted in registry.items():
-        assert _hash((_ROOT / path).read_text()) in accepted, path
+        assert _git(_ROOT, "hash-object", path) in accepted, path
