@@ -589,6 +589,64 @@ def test_a_second_event_key_spelling_cannot_widen_a_trusted_conditional_lane(tmp
     }
 
 
+FILTERED = {"pull_request": {"branches": ["dev"], "paths": ["scripts/**"], "paths-ignore": ["docs/**"]}}
+
+
+@pytest.mark.parametrize(
+    "on",
+    [
+        {"pull_request": {"branches": ["dev"]}},
+        {"pull_request": {"branches": ["dev"], "paths-ignore": ["docs/**"]}},
+        {"pull_request": {"branches": ["dev"], "paths": ["scripts/**"]}},
+    ],
+)
+def test_deleting_pull_request_path_filters_keeps_the_base_trusted(tmp_path, monkeypatch, on):
+    baseline = _workflow()
+    baseline["on"] = FILTERED
+    updated = _workflow(replay={"runs-on": "x", "steps": [{"run": "echo changed"}]})
+    updated["on"] = on
+    base, head, sha = _repo(tmp_path, {"replay.yml": updated})
+    (base / lanes.WORKFLOWS / "replay.yml").write_text(yaml.safe_dump(baseline))
+    monkeypatch.chdir(head)
+    assert lanes.refused(sha, base) == {}
+
+
+def test_deleting_the_only_pull_request_filter_keeps_the_base_trusted(tmp_path, monkeypatch):
+    baseline = _workflow()
+    baseline["on"] = {"pull_request": {"paths": ["scripts/**"]}}
+    updated = _workflow()
+    updated["on"] = {"pull_request": None}
+    base, head, sha = _repo(tmp_path, {"replay.yml": updated})
+    (base / lanes.WORKFLOWS / "replay.yml").write_text(yaml.safe_dump(baseline))
+    monkeypatch.chdir(head)
+    assert lanes.refused(sha, base) == {}
+
+
+@pytest.mark.parametrize(
+    ("base_on", "head_on"),
+    [
+        (FILTERED, {"pull_request": {"branches": ["main"]}}),
+        (FILTERED, {"pull_request": {"branches": ["dev"], "types": ["opened"]}}),
+        (FILTERED, {"pull_request": {"branches": ["dev"]}, "workflow_dispatch": None}),
+        (FILTERED, {"pull_request_target": {"branches": ["dev"]}}),
+        ({"push": {"branches": ["dev"], "paths": ["scripts/**"]}}, {"push": {"branches": ["dev"]}}),
+        ({"pull_request_target": {"paths": ["scripts/**"]}}, {"pull_request_target": None}),
+        ({"pull_request": {"branches": ["dev"]}}, FILTERED),
+    ],
+)
+def test_any_other_event_change_still_loses_the_base_trust(tmp_path, monkeypatch, base_on, head_on):
+    baseline = _workflow()
+    baseline["on"] = base_on
+    updated = _workflow()
+    updated["on"] = head_on
+    base, head, sha = _repo(tmp_path, {"replay.yml": updated})
+    (base / lanes.WORKFLOWS / "replay.yml").write_text(yaml.safe_dump(baseline))
+    monkeypatch.chdir(head)
+    assert lanes.refused(sha, base) == {
+        f"{lanes.WORKFLOWS}/replay.yml": ["job replay has no shared hosted lane concurrency group"]
+    }
+
+
 @pytest.mark.parametrize(("job", "stage", "index"), [("stats", "stats", "part"), ("mutation-shard", "shard", "shard")])
 @pytest.mark.parametrize("change", [None, "runs-on", "queue", "cancel", "stage", "index", "group", "untrusted"])
 def test_a_trusted_mutation_leg_may_move_to_a_group_of_its_own_run(job, stage, index, change):
