@@ -496,6 +496,41 @@ def test_a_failed_cutoff_save_retries_without_a_second_gate_row(swarm, monkeypat
     assert [row["kind"] for row in gate_log.recent(SLUG)] == ["observe"]
 
 
+def test_a_retried_cutoff_keeps_one_gate_row_after_an_agent_leaves(swarm, monkeypatch):
+    store, ledger = swarm
+    real, failed = run_window._save, []
+
+    def save(store, key, marks, **stamp):
+        if "cutoff" in stamp and not failed:
+            failed.append(stamp)
+            raise ConnectionError("redis gone")
+        real(store, key, marks, **stamp)
+
+    monkeypatch.setattr(run_window, "_save", save)
+    with pytest.raises(ConnectionError):
+        _step(store, ledger, END)
+    run_window.step(SLUG, store.config(SLUG), store, ledger, {"tasks": []}, END + MINUTE)
+    assert [row["reason"] for row in gate_log.recent(SLUG)] == [
+        "The run window ended at 25 October 12:00 UTC: new claims stop and 1 agent in flight hand off: "
+        "engineer@abc-0001."
+    ]
+
+
+def test_the_count_fallback_notice_fits_with_every_task_state():
+    from scripts.swarm_ledger.ledger_notifications import TEXT_KEPT
+
+    states = ("open", "claimed", "blocked", "pr", "done")
+    rows = {f"t{n}": {"state": states[n % 5]} for n in range(5000)}
+    flying = [AgentRecord(f"engineer@abc-{n:04d}", "eng", f"t{n}") for n in range(1000)]
+    text = run_window.notice("enforce", (START, END), rows, flying)
+    assert len(text) <= TEXT_KEPT
+    assert text == (
+        "Run window ended 25 October 12:00 UTC, gate deny. Tasks: 1000 blocked, 1000 claimed, 1000 done, 1000 open, "
+        "1000 pr. In flight: 1000 agents. Agents in flight hand off and claims stay stopped. Full handoff: "
+        "master-watchdog."
+    )
+
+
 def test_a_cutoff_with_two_agents_in_flight_counts_them(swarm):
     store, ledger = swarm
     store.put_agent(SLUG, AgentRecord("engineer@abc-0002", "eng", "t4", seat="eng-2@sw", started_at=START))

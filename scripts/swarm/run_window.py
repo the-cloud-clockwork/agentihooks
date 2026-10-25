@@ -218,8 +218,10 @@ def _gate(slug, mode, store, rows, bounds, now_ms):
         kind = "deny" if mode == "enforce" else "observe"
         names = ", ".join(agent.name for agent in flying) or "none"
         reason = CUTOFF.format(end=end, agents=_count(len(flying), "agent"), names=names)
+        opening = CUTOFF.split("{agents}")[0].format(end=end)
         logged = any(
-            row.get("gate") == GATE.name and row.get("reason") == reason for row in gate_log.since(slug, bounds[1])
+            row.get("gate") == GATE.name and str(row.get("reason")).startswith(opening)
+            for row in gate_log.since(slug, bounds[1])
         )
         if not logged:
             gate_log.append(slug, gate_log.Row.of(GATE.name, kind, Who(name=SENDER), reason=reason, now_ms=now_ms))
