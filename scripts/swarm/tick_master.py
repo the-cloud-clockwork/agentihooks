@@ -95,7 +95,9 @@ def run(slug, config, store, ledger, runtime, now_ms, launch) -> list[str]:
         state = {**state, "forced_at": now_ms}
         if not _starting(store, slug):
             state["failure"] = "; ".join(launched) or NO_LAUNCH
-    elif _starting(store, slug) and now_ms - state.get("forced_at", now_ms) >= master_start.DEADLINE_MS:
+    elif _starting(store, slug) and now_ms - state.get("forced_at", now_ms) >= max(
+        map(master_start.deadline_ms, _masters(store, slug))
+    ):
         state["failure"] = NO_HOOK
     if state.get("failure"):
         state, promoted_actions = _promote(slug, store, ledger, runtime, state, minutes, now_ms)

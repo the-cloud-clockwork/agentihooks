@@ -656,6 +656,22 @@ def _profile_canary(args, agent: str, environ: dict[str, str], launch, route: di
     return launch.run("profile canary", canary, lambda seconds: _binding_result(environ, seconds, route))
 
 
+def _detach() -> bool:
+    if os.fork():
+        return True
+    os.setsid()
+    null = os.open(os.devnull, os.O_RDWR)
+    for stream in (0, 1, 2):
+        os.dup2(null, stream)
+    return False
+
+
+def _detached(args, environ: dict[str, str]) -> bool:
+    """A deferred launch returns once its launcher starts; a detached child waits on the route, names the pane and
+    answers the channel warning, because a master login can hold the route for minutes."""
+    return bool(args.defer_canary and _binding_deferred(environ)) and _detach()
+
+
 def _selection_refused(environ: dict[str, str]) -> bool:
     from scripts.profiles import binding
 
@@ -1138,6 +1154,9 @@ def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -
     marker.unlink(missing_ok=True)
     report.append("status=started")
     report.append(f"launcher_at={launcher_at}")
+    if _detached(args, active_env):
+        print("\n".join([*report, "route_status=pending", *_binding_deferred(active_env)]))
+        return 0
 
     route_path = _route_report(launcher)
     deadline = time.monotonic() + args.route_timeout

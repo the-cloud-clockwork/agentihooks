@@ -281,7 +281,7 @@ def _launch_timeouts(agent: str, passed: list[str], argv: list[str]) -> tuple[li
     return routed, BUDGET.spawn
 
 
-def _validation(fields: dict, profile: str, agent: str) -> dict:
+def _validation(fields: dict, profile: str, agent: str, timeout: float) -> dict:
     if fields.get("profile_validation") != "pending":
         return binding.fields(fields, profile, agent)
     if not fields.get("profile_report"):
@@ -292,7 +292,15 @@ def _validation(fields: dict, profile: str, agent: str) -> dict:
         "profile": profile,
         "harness": agent,
         "account": fields.get("account", ""),
+        "deadline_ms": int(timeout * 1000),
     }
+
+
+def _routed(fields: dict) -> bool:
+    """A deferred launch returns before its route; the launch check confirms the session later."""
+    return fields.get("route_status") in STARTED_ROUTES or (
+        fields.get("route_status") == "pending" and fields.get("profile_validation") == "pending"
+    )
 
 
 def deferring(herdr: "HerdrRuntime") -> "HerdrRuntime":
@@ -977,13 +985,13 @@ class HerdrRuntime:
         for step in ("launcher_at", "harness_at"):
             if step in fields and fields[step].isdigit():
                 timings[step] = int(fields[step])
-        if proc.returncode or fields.get("status") != "started" or fields.get("route_status") not in STARTED_ROUTES:
+        if proc.returncode or fields.get("status") != "started" or not _routed(fields):
             self._terminate(name)
             tail = (proc.stderr or proc.stdout).strip().splitlines()
             message = tail[-1] if tail else f"init-agent exit {proc.returncode}"
             raise SpawnError(message, pane_id=fields.get("pane_id") or _opened_pane(name, launched_at), harness=agent)
         try:
-            validated = _validation(fields, argv[argv.index("--profile") + 1], agent)
+            validated = _validation(fields, argv[argv.index("--profile") + 1], agent, timeout)
         except ValueError as exc:
             self._terminate(name)
             raise SpawnError(str(exc), pane_id=fields.get("pane_id", ""), harness=agent) from exc
