@@ -189,7 +189,6 @@ class EmailClient:
         return False
 
     def reachable(self, timeout: float = 3.0) -> bool:
-        """True when the relay name, else its fallback address, accepts a TCP connection."""
         hosts = [self._smtp_server, self._smtp_server_ip] if self._smtp_server else []
         for host in filter(None, hosts):
             try:

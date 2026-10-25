@@ -131,6 +131,14 @@ def test_reachable_probes_only_the_relay_name_without_an_address(monkeypatch):
     assert calls == [(("relay", 25), 3.0)]
 
 
+def test_reachable_ignores_an_address_without_a_relay_name(monkeypatch):
+    calls = _probe(monkeypatch, {"10.0.0.9"})
+    monkeypatch.delenv("SMTP_SERVER", raising=False)
+    monkeypatch.setenv("SMTP_SERVER_IP", "10.0.0.9")
+    assert EmailClient().reachable() is False
+    assert calls == []
+
+
 def test_reachable_is_false_without_a_relay(monkeypatch):
     calls = _probe(monkeypatch, {"relay"})
     monkeypatch.delenv("SMTP_SERVER", raising=False)

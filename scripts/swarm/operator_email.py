@@ -7,7 +7,7 @@ DEFAULT_NOTIFY_URL = "https://email.homeofanton.com/api/v1/send"
 
 
 def send(subject: str, text: str, environ: dict, repo: str) -> str:
-    """An empty answer when sent, else why not. SMTP when its relay answers, else the Anton notifications API."""
+    """An empty answer when sent, else why not."""
     to = environ.get(MAIL_TO) or _git_email(repo)
     if not to:
         return f"no operator email: set {MAIL_TO}"
