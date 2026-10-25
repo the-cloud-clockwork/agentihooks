@@ -683,7 +683,7 @@ def test_workspace_preserves_git_reads_without_copying_repository_configuration(
     root.mkdir()
     (root / "pyproject.toml").write_text("[tool.pytest.ini_options]\n")
     (root / "input.txt").write_text("trusted revision")
-    subprocess.run(["git", "init", "-q", str(root)], check=True)
+    subprocess.run(["git", "init", "-q", "-b", "fixture", str(root)], check=True)
     subprocess.run(["git", "add", "input.txt"], cwd=root, check=True)
     subprocess.run(
         ["git", "-c", "user.name=fixture", "-c", "user.email=fixture@example.invalid", "commit", "-qm", "fixture"],
@@ -691,6 +691,8 @@ def test_workspace_preserves_git_reads_without_copying_repository_configuration(
         check=True,
     )
     subprocess.run(["git", "pack-refs", "--all"], cwd=root, check=True)
+    subprocess.run(["git", "update-ref", "refs/heads/unpacked", "HEAD"], cwd=root, check=True)
+    revision = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=root, text=True).strip()
     subprocess.run(["git", "config", "fixture.source", "original"], cwd=root, check=True)
     work = tmp_path / "work"
     work.mkdir()
@@ -710,8 +712,38 @@ def test_workspace_preserves_git_reads_without_copying_repository_configuration(
         assert subprocess.check_output(["git", "rev-parse", "--show-toplevel"], cwd=stage, text=True).strip() == str(
             stage
         )
+        assert subprocess.check_output(["git", "rev-parse", "unpacked"], cwd=stage, text=True).strip() == revision
         original = subprocess.run(["git", "config", "--get", "fixture.source"], cwd=stage, capture_output=True)
         assert original.returncode == 1
+
+
+def test_workspace_reports_a_failed_git_initialization(tmp_path, monkeypatch):
+    import os
+    import shlex
+    import shutil
+    import subprocess
+
+    from scripts.ci_mutation.runner import prepare_workspace
+
+    root = tmp_path / "repo"
+    root.mkdir()
+    (root / "pyproject.toml").write_text("[tool.pytest.ini_options]\n")
+    subprocess.run(["git", "init", "-q", str(root)], check=True)
+    binary = tmp_path / "bin"
+    binary.mkdir()
+    git = binary / "git"
+    git.write_text(
+        "#!/usr/bin/env bash\nset -euo pipefail\n"
+        'if [[ "$1" == init ]]; then exit 37; fi\n'
+        f'exec {shlex.quote(shutil.which("git"))} "$@"\n'
+    )
+    git.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{binary}:{os.environ['PATH']}")
+    work = tmp_path / "work"
+    work.mkdir()
+    with pytest.raises(subprocess.CalledProcessError) as error:
+        prepare_workspace(root, work, ["hooks/sample.py"], [])
+    assert error.value.returncode == 37
 
 
 def test_workspace_handles_a_selected_test_probing_an_invalid_null_path(tmp_path):
