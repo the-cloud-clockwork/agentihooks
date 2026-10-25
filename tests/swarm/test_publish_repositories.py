@@ -81,6 +81,32 @@ def test_prepare_keeps_one_worktree_per_repository(repositories):
     assert p.task["repository_branches"] == {str(p.swarm): "engineer-test", str(p.bundle): "engineer-test"}
 
 
+@pytest.mark.parametrize("repository", ["swarm", "bundle"])
+def test_prepare_starts_from_dev_after_the_recorded_branch_merged_and_was_deleted(repositories, monkeypatch, repository):
+    p = repositories
+    root = getattr(p, repository)
+    git(root, "push", "origin", "HEAD:predecessor")
+    git(root, "push", "origin", "--delete", "predecessor")
+    p.task.update(
+        repositories=[str(root)],
+        branch="predecessor",
+        repository_branches={str(root): "predecessor"},
+        pr_url="https://github.com/example/repo/pull/7",
+    )
+    original = publish.execute
+
+    def execute(command, cwd):
+        if command[0] == "gh":
+            return '{"state":"MERGED","baseRefName":"dev","headRefName":"predecessor"}'
+        return original(command, cwd)
+
+    monkeypatch.setattr(publish, "execute", execute)
+    result = publish.prepare("swarm", p.agent, str(p.swarm), p.ledger)
+    assert git(result["worktree"], "rev-parse", "HEAD") == git(root, "rev-parse", "origin/dev")
+    assert p.task["branch"] == "engineer-test"
+    assert p.task["repository_branches"] == {str(root): "engineer-test"}
+
+
 def test_prepare_names_the_default_repository_without_inferring_prose(repositories):
     p = repositories
     p.task["description"] = f"Work in {p.bundle}"
