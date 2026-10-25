@@ -96,3 +96,29 @@ def test_spawn_pass_ends_the_placement_cache_for_later_launches(setup):  # noqa:
     write_hive(setup, excluded=[])
     assert launch.select(setup.config, "eng", task).hive
     assert launch.hives.call_count == 2
+
+
+def test_a_running_tick_ends_the_placement_pass_after_spawning():
+    import fakeredis
+
+    from scripts.swarm.store import RedisStore, SwarmConfig
+    from scripts.swarm.tick import tick
+    from tests.swarm.test_tick import FakeRuntime
+
+    class PassRuntime(FakeRuntime):
+        def __init__(self):
+            super().__init__()
+            self.passes = []
+
+        def begin_placement_pass(self):
+            self.passes.append(("begin", len(self.spawned)))
+
+        def end_placement_pass(self):
+            self.passes.append(("end", len(self.spawned)))
+
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    store.create(SwarmConfig("sw", "/repo", max_eng=2, max_ci=1))
+    runtime = PassRuntime()
+    tick("sw", store, FakeLedger([{"id": "t1", "lane": "eng"}]), runtime, now_ms=1_000)
+    assert runtime.spawned
+    assert runtime.passes[-1] == ("end", len(runtime.spawned))
