@@ -1,12 +1,13 @@
 import io
 import sys
 import uuid
+from contextlib import nullcontext
 from types import SimpleNamespace
-
-from scripts import init_agent
 
 
 def test_hive_codex_server_launch_captures_its_receipt(tmp_path):
+    from scripts import init_agent
+
     spec = init_agent.AgentSpec(agent="codex", profile="engineer", execution="execution-one")
     command = init_agent._app_server_command(
         spec,
@@ -46,7 +47,18 @@ def test_failed_server_log_survives_pod_files_and_keeps_receipt_generation(tmp_p
     local_log = tmp_path / "server.log"
     local_log.write_text(f"upstream connection refused\npassword={sensitive}\n")
     process = SimpleNamespace(stdout=io.StringIO(local_log.read_text()), wait=lambda: 3)
-    monkeypatch.setattr(launch_logs.subprocess, "Popen", lambda *args, **kwargs: process)
+
+    def spawn(argv, **kwargs):
+        assert argv == ["server"]
+        assert kwargs == {
+            "stdout": launch_logs.subprocess.PIPE,
+            "stderr": launch_logs.subprocess.STDOUT,
+            "text": True,
+            "errors": "replace",
+        }
+        return nullcontext(process)
+
+    monkeypatch.setattr(launch_logs.subprocess, "Popen", spawn)
     output = io.StringIO()
     monkeypatch.setattr(launch_logs.sys, "stdout", output)
 

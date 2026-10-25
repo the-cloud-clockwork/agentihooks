@@ -370,7 +370,7 @@ def _profile_command(command: list[str], spec: AgentSpec) -> list[str]:
 def _app_server_command(
     spec: AgentSpec, report: Path, agent_args: list[str], environ: dict[str, str], directory: Path, opening: Path | None
 ) -> list[str]:
-    return [
+    command = [
         sys.executable,
         "-m",
         "scripts.codex_session",
@@ -397,6 +397,19 @@ def _app_server_command(
         *_model_args("codex", agent_args, environ),
         *agent_args,
     ]
+    if environ.get("AGENTIHOOKS_SLOT_HIVE") and spec.execution:
+        command = [
+            sys.executable,
+            "-m",
+            "scripts.hive.launch_logs",
+            "--slug",
+            environ["AGENTIHOOKS_SWARM"],
+            "--execution",
+            spec.execution,
+            "--",
+            *command,
+        ]
+    return command
 
 
 def _viewer_lines(serve: str, launcher: Path, name: str, environ: dict[str, str], inputs: list[str]) -> str:
