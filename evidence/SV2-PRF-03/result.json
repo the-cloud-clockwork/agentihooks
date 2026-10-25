@@ -4,7 +4,7 @@
   "dependency_evidence": "evidence/SV2-IDX-04/result.json records the scoped search this load drives, evidence/SV2-IDX-03/result.json the bounded index worker and evidence/SV2-PRF-02/result.json the preceding performance package; no capture, archive, index or search code changes here",
   "integration_gate": "G10",
   "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/7331",
-  "pull_request": "",
+  "pull_request": "https://github.com/the-cloud-clockwork/agentihooks/pull/7339",
   "package_complete": false,
   "evidence_class": "mocked: interleaved writers in one process, a SQLite catalog file, a local content addressed object folder, execution local spool and cursor folders and a deterministic hash embedder stand in for concurrent agents, the central database, the archive bucket and the embedding provider; ack latency and lag run on a fake clock, and search wall time is measured separately by the wall clock test; no model, HTTP server, vector database or Pod runs",
   "interfaces": [
