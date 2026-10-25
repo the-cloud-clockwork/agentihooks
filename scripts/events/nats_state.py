@@ -98,7 +98,7 @@ class ScopedStateStore:
         message = await self._last(key)
         if message is None:
             raise ValueError(f"state page {key!r} is missing")
-        return message.data or b""
+        return message.data
 
     def update(self, key: str, value: bytes, revision: int) -> int:
         current = self._root._loop.run(self._last(key))

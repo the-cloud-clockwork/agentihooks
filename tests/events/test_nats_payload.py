@@ -36,6 +36,8 @@ def test_large_state_round_trips_with_atomic_revisions_and_history(bus, compress
     second = first + b"changed"
     revision = store.create("deadlines", first)
     assert store.get("deadlines").value == first
+    store.create("same-value", first)
+    assert store.get("same-value").value == first
     with pytest.raises(StateConflict):
         store.create("deadlines", first)
     rebound = (
@@ -92,13 +94,16 @@ def test_exact_encoded_header_budget_is_allowed_and_one_extra_byte_is_refused():
         nats_payload.validate(client, "subject", b"x" * 82, {"x": "é"})
 
 
-def test_a_reconnecting_bus_serves_a_hub_after_the_server_closes_the_connection(tmp_path):
+def test_a_reconnecting_bus_serves_a_hub_after_the_server_closes_the_connection(tmp_path, monkeypatch):
     import asyncio
 
     from scripts.hub import registry, runner
 
+    connect = mock.Mock(wraps=nats.nats_client.connect)
+    monkeypatch.setattr(nats.nats_client, "connect", connect)
     with nats_server.running(tmp_path / "jetstream") as url:
         opened = nats.open_bus(BusConfig(backend="nats", url=url, reconnect=True))
+        connect.assert_called_once_with(url, allow_reconnect=True, max_reconnect_attempts=-1)
         handler = mock.Mock()
         hosted = runner.HubRunner(
             opened, registry.Registry([registry.Reactor("worker", "swarm.*.task.>", handler)]), "hub"
