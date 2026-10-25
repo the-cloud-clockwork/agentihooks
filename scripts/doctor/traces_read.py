@@ -52,7 +52,7 @@ class Budget:
 def client(environ: Mapping[str, str], timeout: float = Budget.request_seconds) -> Callable[[str, dict], dict]:
     host = (environ.get("LANGFUSE_HOST") or DEFAULT_HOST).rstrip("/")
     auth = (environ.get("LANGFUSE_PUBLIC_KEY", ""), environ.get("LANGFUSE_SECRET_KEY", ""))
-    send = _through_ingress if host == DEFAULT_HOST else httpx.get
+    send = _through_ingress if host == DEFAULT_HOST else _direct
 
     def get(path: str, params: dict) -> dict:
         if not all(auth):
@@ -99,6 +99,11 @@ class _Timings:
             f"request {path} started at {self.started_at}, {reached}, "
             f"total {elapsed() - self.start:.3f} s, failed {self.phase}"
         )
+
+
+def _direct(url: str, **options) -> httpx.Response:
+    with httpx.Client() as session:
+        return session.get(url, **options)
 
 
 def _through_ingress(url: str, extensions: dict, **options) -> httpx.Response:

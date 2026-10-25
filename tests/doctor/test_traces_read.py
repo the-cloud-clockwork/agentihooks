@@ -456,12 +456,12 @@ def test_the_client_names_the_missing_keys_and_calls_langfuse_with_auth_params_a
         def json(self):
             return {"data": []}
 
-    def get(url, extensions, **kw):
+    def direct(url, extensions, **kw):
         assert list(extensions) == ["trace"]
         calls.append((url, kw))
         return Response()
 
-    monkeypatch.setattr(traces_read.httpx, "get", get)
+    monkeypatch.setattr(traces_read, "_direct", direct)
     env = {"LANGFUSE_HOST": "https://lf/", "LANGFUSE_PUBLIC_KEY": "pk", "LANGFUSE_SECRET_KEY": "sk"}
     assert traces_read.client(env, timeout=3)("traces", {"page": 1}) == {"data": []}
     assert calls == [
@@ -480,7 +480,7 @@ def test_each_request_is_capped_under_half_the_active_read_budget(monkeypatch):
         def json(self):
             return {"data": []}
 
-    monkeypatch.setattr(traces_read.httpx, "get", lambda url, **kw: timeouts.append(kw["timeout"]) or Response())
+    monkeypatch.setattr(traces_read, "_direct", lambda url, **kw: timeouts.append(kw["timeout"]) or Response())
     traces_read.client({"LANGFUSE_HOST": "https://lf", "LANGFUSE_PUBLIC_KEY": "pk", "LANGFUSE_SECRET_KEY": "sk"})(
         "traces", {}
     )
@@ -499,7 +499,6 @@ def _routes(monkeypatch, internal):
 
     transport = httpx.MockTransport(handler)
     monkeypatch.setattr(traces_read.httpx, "Client", lambda: client(transport=transport))
-    monkeypatch.setattr(traces_read.httpx, "get", lambda url, **kw: client(transport=transport).get(url, **kw))
     return sent
 
 
