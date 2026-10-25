@@ -185,6 +185,13 @@ def grade(
     today: date,
     policy: object = None,
 ) -> list[str]:
+    from scripts import ci_gate_queue
+
+    try:
+        base_workflows = ci_gate_queue.normalize(base_workflows)
+        head_workflows = ci_gate_queue.normalize(head_workflows)
+    except ValueError as error:
+        return [str(error)]
     base_gates, head_gates = _gates(base_workflows), _gates(head_workflows)
     if len(base_gates) != 1:
         return [f"The base holds {len(base_gates)} jobs named {GATE}; nothing protected can grade."]

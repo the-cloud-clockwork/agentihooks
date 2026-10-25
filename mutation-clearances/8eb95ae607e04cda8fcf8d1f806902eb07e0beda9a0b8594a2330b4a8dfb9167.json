@@ -1,0 +1,6 @@
+{
+  "scripts/ci_gate_queue.py:scripts.ci_gate_queue.x_recovery__mutmut_46:a95d07c1d09e52444fc3f97aa571c0cb09199f8e145378fd6aed20ff8096aaea": {
+    "reader": "standards-reader",
+    "reason": "Diagnostic capitalization or wrapping only; exception type, failure decision and every diagnostic fact remain unchanged. Independently approved from complete CI report 40165669788."
+  }
+}

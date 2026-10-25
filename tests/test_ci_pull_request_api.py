@@ -19,10 +19,14 @@ WORKSPACE = re.compile(r"\$\{?GITHUB_WORKSPACE\}?")
 # These API functions run only in local downloads or steps bound to the App token.
 LOCAL_ONLY = {
     ROOT / "scripts/ci_budget/jobs.py": {"read_page"},
+    ROOT / "scripts/ci_gate_shards.py": {"api"},
     ROOT / "scripts/ci_mutation/reuse.py": {"api"},
     ROOT / "tests/refresh_durations.py": {"_gh", "ci_run_ids", "ci_download"},
 }
-METADATA_ONLY = {ROOT / "scripts/ci_reuse.py": {"paged_reuse_job"}}
+METADATA_ONLY = {
+    ROOT / "scripts/ci_reuse.py": {"paged_reuse_job"},
+    ROOT / "scripts/ci_gate_queue.py": {"watcher"},
+}
 TOKEN = re.compile(
     r"github\s*(\.\s*token|\[\s*['\"]token['\"]\s*\])"
     r"|secrets\s*(\.|\[\s*['\"])\s*(github|gh)(_\w*|\w*(token|pat)(?![a-z]))"
@@ -247,6 +251,7 @@ def test_no_script_a_step_runs_calls_the_api():
         "tests/test_ci_runner_classes.py",
         "tests/test_ci_runner_trust.py",
     ]
+    expected += [name for name in ("scripts/ci_gate_shards.py", "scripts/ci_gate_queue.py") if ROOT / name in calls]
     assert sorted(str(path.relative_to(ROOT)) for path in calls) in (
         sorted(expected),
         sorted(expected + routing_contracts),
@@ -268,6 +273,13 @@ def test_the_reuse_factory_exemption_contains_only_command_replacements():
         source = path.read_text()
         functions = {node.name: node for node in ast.parse(source).body if isinstance(node, ast.FunctionDef)}
         for name in names:
+            if path == ROOT / "scripts/ci_gate_queue.py":
+                assert name == "watcher"
+                assert len(functions[name].body) == 1
+                assert isinstance(functions[name].body[0], ast.Return)
+                assert isinstance(functions[name].body[0].value, ast.Dict)
+                assert not any(isinstance(node, ast.Call) for node in ast.walk(functions[name]))
+                continue
             calls = [
                 node
                 for node in ast.walk(functions[name])
