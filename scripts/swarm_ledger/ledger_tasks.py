@@ -650,7 +650,7 @@ def _relay_rank(doc, op, ctx):
 
     task = next((t for t in doc["tasks"] if t["id"] == op["item"].split("/")[1]), None)
     rank, words = ledger_rank.canonical(op["fields"]["rank"]), relayed(op, ctx.meta)
-    if refusal := _unrelayed(task, op, ctx.meta, rank, words):
+    if refusal := _relay_refusal(task, op, ctx.meta, rank, words):
         ctx.refused.append(refusal)
         return False
     if refusal := ledger_rank.urgent_refusal({**task, "rank": rank}, doc):
@@ -674,7 +674,7 @@ def _changed(task, fields, op, ctx):
     return changed
 
 
-def _unrelayed(task, op, meta, rank, words):
+def _relay_refusal(task, op, meta, rank, words):
     if task is None:
         return UNRELAYED_TASK
     if meta["members"].get(op["by"], {}).get("role") != "orchestrator":
