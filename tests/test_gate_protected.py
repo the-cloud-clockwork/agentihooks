@@ -1447,3 +1447,72 @@ def test_the_required_grader_leaves_equivalence_alone_before_its_base_grades(rep
     _git(repo, "checkout", "-q", "dev")
     assert gate_protected.main(["--root", str(repo), "--head", added]) == 0
     assert "ledger equivalence" not in capsys.readouterr().out
+
+
+_FORWARDED_STATS = """NEEDS=$(jq 'if ."mutation-plan".result == "success" and ."mutation-plan".outputs.forwarded == "true" and ."mutation-stats".result == "skipped" then ."mutation-stats".result = "success" else . end' <<< "$NEEDS")
+"""
+
+
+def _with_forwarded_stats(run):
+    assert run.startswith(_SELECTION_DIAGNOSTIC)
+    return _SELECTION_DIAGNOSTIC + _FORWARDED_STATS + run.removeprefix(_SELECTION_DIAGNOSTIC)
+
+
+def test_the_current_required_gate_accepts_the_forwarded_statistics_form():
+    base = ci_wiring.load(_ROOT)
+    head = copy.deepcopy(base)
+    step = head["test.yml"]["jobs"]["gate-required"]["steps"][0]
+    step["run"] = _with_forwarded_stats(step["run"])
+    config = json.loads((_ROOT / ci_wiring.CONFIG).read_text())
+    actors = json.loads((_ROOT / ".github/workflows/trusted-actors.json").read_text())
+    assert gate_protected.grade(base, config, head, config, _TODAY, actors) == []
+
+
+@pytest.mark.parametrize(
+    ("before", "after"),
+    [
+        (' and ."mutation-plan".outputs.forwarded == "true"', ""),
+        ('."mutation-plan".result == "success" and ', ""),
+        ('."mutation-stats".result == "skipped"', '."mutation-stats".result != "success"'),
+        ('."mutation-stats".result = "success"', '."mutation".result = "success"'),
+    ],
+)
+def test_a_weakened_forwarded_statistics_form_is_red(before, after):
+    base = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())
+    head = copy.deepcopy(base)
+    step = head["jobs"]["gate-required"]["steps"][0]
+    step["run"] = _with_forwarded_stats(step["run"]).replace(before, after, 1)
+    assert "The head's Gate — Required changes its steps; the protected branch grades with its own." in _grade(
+        {"test.yml": head}, base={"test.yml": base}
+    )
+
+
+def test_the_forwarded_statistics_transform_only_prepends_the_reviewed_line():
+    from scripts import ci_reuse
+
+    steps = ci_reuse.gate_steps(queue_tier=True, promotion=True, consolidated=True, summary=True)
+    original = copy.deepcopy(steps)
+    assert ci_reuse.forwarded_stats(steps) == [
+        {**original[0], "run": _FORWARDED_STATS + original[0]["run"]},
+        *original[1:],
+    ]
+    assert steps == original
+
+
+@pytest.mark.parametrize("plan", ["success", "failure", "skipped"])
+@pytest.mark.parametrize("forwarded", ["true", "false", None])
+@pytest.mark.parametrize("stats", ["success", "failure", "cancelled", "skipped"])
+def test_the_forwarded_statistics_form_passes_only_a_forwarded_skip(plan, forwarded, stats):
+    from scripts import ci_reuse
+
+    [step] = ci_reuse.gate_steps(queue_tier=True, consolidated=True)
+    needs = {name: {"result": "success"} for name in ("test-count", "lint", "semgrep", "sonar", "mutation")}
+    needs["select"] = {"result": "success", "outputs": {"scope": "none"}}
+    needs["mutation-plan"] = {"result": plan, "outputs": {} if forwarded is None else {"forwarded": forwarded}}
+    needs["mutation-stats"] = {"result": stats}
+    env = dict(os.environ, NEEDS=json.dumps(needs), MUTATION="true", KIND="false", EVENT="pull_request", REUSED="false")
+    result = subprocess.run(
+        ["bash", "-e", "-c", _FORWARDED_STATS + step["run"]], env=env, capture_output=True, text=True
+    )
+    expected = plan == "success" and (stats == "success" or (stats == "skipped" and forwarded == "true"))
+    assert (result.returncode == 0) == expected, result.stdout + result.stderr
