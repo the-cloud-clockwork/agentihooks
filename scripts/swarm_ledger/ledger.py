@@ -886,6 +886,23 @@ def _task_set_fields(values):
     return fields
 
 
+def task_branch_fields(args, fields: dict) -> dict:
+    if "branch" not in fields:
+        return fields
+    swarm = ports.swarm()
+    try:
+        repo = swarm.store.connect().config(args.slug).repo
+    except swarm.store.SwarmError:
+        return fields
+    task = resource(args.slug, f"tasks/{args.id}")
+    branches = {**task.get("repository_branches", {}), **fields.get("repository_branches", {})}
+    if fields["branch"]:
+        branches[repo] = fields["branch"]
+    else:
+        branches.pop(repo, None)
+    return {**fields, "repository_branches": branches}
+
+
 def cmd_task(args):
     refuse_unset_quote(args)
     if args.action == "add":
@@ -902,6 +919,7 @@ def cmd_task(args):
         return
     fields = _task_set_fields(args.values)
     refuse_plain_objects(fields)
+    fields = task_branch_fields(args, fields)
     quote = vars(args).get("quote")
     send(args, "task_update", item=f"tasks/{args.id}", fields=fields, **({"quote": quote} if quote else {}))
     print(json.dumps({"task": args.id, **fields}))
