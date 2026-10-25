@@ -1,6 +1,5 @@
 import json
 
-import fakeredis
 import pytest
 
 from scripts.hive import registry
@@ -12,6 +11,8 @@ NOW = 1_800_000_000_000
 
 @pytest.fixture
 def store():
+    import fakeredis
+
     store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
     store.create(SwarmConfig("sw", "/repo", max_eng=1, max_ci=0))
     return store
@@ -85,3 +86,62 @@ def test_record_appends_probe_and_hive_rows_to_the_outbox(store, tmp_path):
         box.close()
 
     assert tables == ["hive_samples", "ledger_probes"]
+
+
+ON = {"AGENTIHOOKS_METRICS_URL": "http://ch:8123", "AGENTIHOOKS_METRICS_USER": "writer"}
+
+
+@pytest.fixture
+def quiet_pass(tmp_path, monkeypatch):
+    from scripts.swarm import metrics
+
+    monkeypatch.setattr(metrics_outbox, "spool_path", lambda: tmp_path / "swarm" / "metrics-outbox.sqlite")
+    sent = []
+    monkeypatch.setattr(metrics_outbox, "post", lambda sink, query, body: sent.append((query, body)) or True)
+    monkeypatch.setattr(metrics.metrics_ledger, "record", lambda *args: None)
+    monkeypatch.setattr(metrics.metrics_swarm, "pull_rows", lambda box, now_ms, swarm: {})
+    monkeypatch.setattr(metrics.metrics_swarm, "record_pass", lambda *args: None)
+    monkeypatch.setattr(metrics.bottleneck, "record", lambda *args, **kwargs: None)
+    monkeypatch.setattr(metrics.stage_detector, "record", lambda *args, **kwargs: None)
+    monkeypatch.setattr(metrics.metrics_fleet, "record", lambda *args, **kwargs: None)
+    monkeypatch.setattr(metrics.freeze, "watched", lambda slug, store, ledger, doc: doc)
+    return metrics, sent
+
+
+def test_a_swarm_pass_ships_the_probe_and_hive_rows(store, quiet_pass):
+    metrics, sent = quiet_pass
+    _probe(store)
+    registry.update(store.redis, "h1", ["name=anton-1"])
+    swarm = metrics.metrics_swarm.TickInput(store, {"tasks": []}, [], lambda url: None, None)
+
+    assert metrics.record_pass("sw", NOW, 0, ON, swarm) == []
+    inserted = {query.split()[2] for query, _ in sent if query.startswith("INSERT")}
+    assert {"swarm.ledger_probes", "swarm.hive_samples"} <= inserted
+
+
+@pytest.mark.parametrize("error", [ValueError("bad row"), KeyError("read_s")])
+def test_a_failing_service_reading_is_reported_and_the_pass_goes_on(store, quiet_pass, monkeypatch, error):
+    metrics, sent = quiet_pass
+
+    def broken(*args):
+        raise error
+
+    monkeypatch.setattr(metrics.metrics_service, "record", broken)
+    swarm = metrics.metrics_swarm.TickInput(store, {"tasks": []}, [], lambda url: None, None)
+
+    assert metrics.record_pass("sw", NOW, 0, ON, swarm) == [f"service metrics failed: {error}"]
+    assert any(query.startswith("INSERT INTO swarm.ticks") for query, _ in sent)
+
+
+def test_a_refused_hive_index_is_reported(store, quiet_pass, monkeypatch):
+    from redis.exceptions import NoPermissionError
+
+    metrics, _ = quiet_pass
+
+    def refused(redis):
+        raise NoPermissionError("no smembers")
+
+    monkeypatch.setattr(metrics_service.registry, "hives", refused)
+    swarm = metrics.metrics_swarm.TickInput(store, {"tasks": []}, [], lambda url: None, None)
+
+    assert metrics.record_pass("sw", NOW, 0, ON, swarm) == ["service metrics failed: no smembers"]
