@@ -682,6 +682,77 @@ def test_statistics_collection_filters_wall_clock_and_rejects_collection_errors(
     assert failed.value.code == 1
 
 
+@pytest.mark.parametrize("override", [False, True])
+def test_statistics_timings_keep_maxima_and_normalize_groups_from_each_cache_location(tmp_path, monkeypatch, override):
+    from scripts.ci_mutation.selection import file_seconds, recorded_seconds
+
+    test = "tests/test_sample.py::test_value"
+    (tmp_path / ".test_durations").write_text(json.dumps({f"{test}@port": 0.75}))
+    cache = tmp_path / ("external" if override else ".mutation-stats-cache")
+    cache.mkdir()
+    if override:
+        monkeypatch.setenv("MUTATION_STATS_CACHE", str(cache))
+    else:
+        monkeypatch.delenv("MUTATION_STATS_CACHE", raising=False)
+    (cache / "success.json").write_text(json.dumps({"status": 0, "durations": {test: 0.25}}))
+    (cache / "failed.json").write_text(json.dumps({"status": 1, "durations": {test: 20}}))
+    assert recorded_seconds(tmp_path) == {test: 0.75}
+    assert file_seconds(tmp_path, [test, "tests/test_new.py"], split=True) == {
+        test: 0.76,
+        "tests/test_new.py": 0.01,
+    }
+
+
+def test_statistics_collection_sets_the_mutmut_mode_and_preserves_runner_options(tmp_path, monkeypatch):
+    from scripts.ci_mutation.selection import collect_test_ids
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("PYTEST_DISABLE_PLUGIN_AUTOLOAD", "1")
+    monkeypatch.setenv("MUTANT_UNDER_TEST", "parent")
+    test = "test_mode.py"
+    (tmp_path / test).write_text(
+        "import os\nassert os.environ['MUTANT_UNDER_TEST'] == 'stats'\ndef test_keep(): pass\ndef test_omit(): pass\n"
+    )
+    runner = SimpleNamespace(_pytest_add_cli_args=["-k", "keep"])
+    assert collect_test_ids(runner, [test], tmp_path) == [f"{test}::test_keep"]
+    assert os.environ["MUTANT_UNDER_TEST"] == "parent"
+
+
+def test_statistics_collection_exceptions_exit_the_fork_child_with_failure(tmp_path, monkeypatch):
+    from scripts.ci_mutation.selection import collect_test_ids
+
+    class Process:
+        def __init__(self, *, target):
+            self.target = target
+            self.exitcode = None
+
+        def start(self):
+            try:
+                self.target()
+            except SystemExit as error:
+                self.exitcode = error.code
+
+        def join(self):
+            pass
+
+    def context(method):
+        assert method == "fork"
+        return SimpleNamespace(Process=Process)
+
+    def fail(*args, **kwargs):
+        raise RuntimeError("collection failed")
+
+    def exit_child(code):
+        raise SystemExit(code)
+
+    monkeypatch.setattr("multiprocessing.get_context", context)
+    monkeypatch.setattr(pytest, "main", fail)
+    monkeypatch.setattr("os._exit", exit_child)
+    with pytest.raises(SystemExit) as failed:
+        collect_test_ids(SimpleNamespace(_pytest_add_cli_args=[]), ["test_mode.py"], tmp_path)
+    assert failed.value.code == 1
+
+
 def test_shard_stats_run_in_stats_mode_with_their_own_basetemp_and_record_everything(tmp_path, monkeypatch):
     from time import process_time
 

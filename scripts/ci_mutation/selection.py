@@ -112,7 +112,7 @@ def file_seconds(root: Path, files: list[str], *, split: bool = False) -> dict[s
     for nodeid, duration in durations.items():
         for entry in by_file.get(test_file(nodeid), ()):
             if selects(entry, nodeid):
-                key = re.sub(r"@[^\[\]]*$", "", nodeid) if split else entry
+                key = nodeid if split else entry
                 seconds[key] = seconds.get(key, 0.01) + duration
                 matched.add(entry)
     for entry in files:
