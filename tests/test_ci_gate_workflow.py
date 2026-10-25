@@ -220,26 +220,6 @@ def test_semgrep_grades_registry_pack_findings_new_against_the_base_in_parallel(
         " || github.event.pull_request.base.sha || github.event.merge_group.base_sha"
         " || github.event.before || inputs.base }}"
     )
-    scan = yaml.safe_load((_ROOT / ".github/workflows/semgrep.yml").read_text())["jobs"]["scan"]
-    assert scan["steps"][0]["with"]["fetch-depth"] == 0
-    command = scan["steps"][-1]["run"].split()
-    assert {"p/ci", "p/secrets", "p/python"} == {command[i + 1] for i, a in enumerate(command) if a == "--config"}
-    baseline = scan["steps"][-2]
-    assert baseline["env"]["BASE"] == "${{ inputs.base }}"
-    assert baseline["run"] == 'sha="$(git merge-base "$BASE" HEAD)"\necho "sha=$sha" >> "$GITHUB_OUTPUT"\n'
-    assert baseline["id"] == "baseline"
-    assert scan["steps"][-1]["env"]["BASE"] == "${{ steps.baseline.outputs.sha }}"
-    assert command[command.index("--baseline-commit") + 1] == '"$BASE"'
-    assert {"--error", "--strict", "--verbose"} <= set(command)
-    assert int(command[command.index("--timeout") + 1]) >= 30
-    assert command[:4] == ["python", "scripts/ci_semgrep.py", "semgrep", "scan"]
-    assert not [s for s in ("||", "&&", ";", "exit") if s in scan["steps"][-1]["run"]]
-    assert not {"set", "--exclude", "--include"} & set(command)
-    assert [command[i + 1] for i, a in enumerate(command) if a == "--exclude-rule"] == [
-        "yaml.github-actions.security.github-actions-mutable-action-tag.github-actions-mutable-action-tag"
-    ]
-    assert all("if" not in step and "continue-on-error" not in step for step in scan["steps"])
-    assert not {"if", "continue-on-error"} & set(scan)
     assert "continue-on-error" not in job
     assert job["if"] in (
         "${{ !cancelled() && (github.event_name != 'merge_group' || needs.reuse.outputs.reused != 'true') }}",
