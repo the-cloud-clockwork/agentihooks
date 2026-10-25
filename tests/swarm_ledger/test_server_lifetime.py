@@ -68,6 +68,11 @@ def test_detached_server_stops_when_its_run_ends(tmp_path, ending, explicit_owne
             time.sleep(0.01)
         pid = int((tmp_path / ".server.pid").read_text())
         assert running(pid)
+        deadline = time.monotonic() + 10
+        while ledger_link.serving(timeout=0.1, url=f"http://127.0.0.1:{port}") != str(tmp_path):
+            assert run.poll() is None
+            assert time.monotonic() < deadline
+            time.sleep(0.01)
         if ending == "exit":
             (tmp_path / "end").touch()
         else:
@@ -93,6 +98,7 @@ def test_detached_server_cleanup_accepts_a_process_reaped_after_the_running_chec
     run = Mock()
     run.poll.return_value = 0
     monkeypatch.setattr(subprocess, "Popen", Mock(return_value=run))
+    monkeypatch.setattr(ledger_link, "serving", lambda **kwargs: str(tmp_path))
     monkeypatch.setitem(globals(), "running", Mock(side_effect=[True, False, False, True]))
     kill = Mock(side_effect=ProcessLookupError(3, "No such process"))
     monkeypatch.setattr(os, "kill", kill)
