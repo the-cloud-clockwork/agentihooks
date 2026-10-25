@@ -145,13 +145,16 @@ def test_inbox_receivers_carry_when_the_live_occupant_bound_its_seat(redis):
     from scripts.swarm.store import AgentRecord
 
     store, box = RedisStore(redis), InboxStore(redis)
-    seat = f"eng-1@{SLUG}"
-    store.seats.occupy(seat, f"{SLUG}-eng-1", 10)
-    store.seats.occupy(seat, f"{SLUG}-eng-2", 40)
+    seat, legacy = f"eng-1@{SLUG}", f"eng-2@{SLUG}"
+    for n, at in enumerate((10, 20, 40), 1):
+        store.seats.occupy(seat, f"{SLUG}-eng-{n}", at)
     store.seats.note(seat, "handoff", "noted", 70)
-    store.put_agent(SLUG, AgentRecord(name=f"{SLUG}-eng-2", lane="eng", task="t2"))
-    receivers = read.inbox_receivers(store, box, SLUG, [{"address": seat, "history": []}])
-    assert receivers[seat].bound_at == 40
+    redis.hset(store.seats.key(legacy), mapping={"occupant": f"{SLUG}-eng-4", "generation": 1})
+    for n in (3, 4):
+        store.put_agent(SLUG, AgentRecord(name=f"{SLUG}-eng-{n}", lane="eng", task=f"t{n}"))
+    items = [{"address": seat, "history": []}, {"address": legacy, "history": []}]
+    receivers = read.inbox_receivers(store, box, SLUG, items)
+    assert (receivers[seat].bound_at, receivers[legacy].bound_at) == (40, 0)
 
 
 @pytest.mark.parametrize("count", [10, 200])

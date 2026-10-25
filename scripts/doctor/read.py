@@ -90,7 +90,7 @@ def inbox_receivers(store, inbox, slug, items):
     occupancies = dict(zip(seats, map(_occupancy, rows[: len(seats)])))
     bound = {
         address: _bound_at(occupancies[address].generation, history)
-        for address, history in zip(seats, rows[len(seats) : 2 * len(seats)])
+        for address, history in zip(seats, rows[len(seats) :])
     }
     configs = dict(zip(seat_slugs, rows[2 * len(seats) :]))
     held = {address: occupancies[address].occupant if address in occupancies else address for address in addresses}
