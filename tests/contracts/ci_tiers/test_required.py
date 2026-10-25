@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from scripts import ci_reuse, gate_protected
+from scripts import ci_gate_queue, ci_reuse, gate_protected
 
 pytestmark = pytest.mark.unit
 
@@ -182,6 +182,10 @@ def test_the_protected_grader_accepts_only_the_exact_tiered_aggregation_and_reus
     head["test.yml"]["jobs"]["gate-required"]["steps"] = _gate_steps(
         docs="docs" in head["test.yml"]["jobs"]["gate-required"]["needs"]
     )
+    head["test.yml"]["jobs"]["reuse"]["if"] = "false"
+    assert grade() == ["The early queue gate requires the existing whole queue reuse exclusion"]
+    head["test.yml"]["jobs"]["reuse"]["if"] = base["test.yml"]["jobs"]["reuse"]["if"]
+    base, head = ci_gate_queue.normalize(base), ci_gate_queue.normalize(head)
     head["test.yml"]["jobs"]["reuse"]["if"] = "false"
     assert any("changes the protected reuse job" in problem for problem in grade())
 

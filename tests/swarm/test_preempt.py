@@ -151,7 +151,29 @@ def test_a_successor_yields_just_behind_urgent_work_while_an_urgent_task_is_open
     assert sorted(tasks, key=key) == [tasks[1], tasks[0], tasks[2]]
 
 
-def test_ordering_is_untouched_without_an_open_urgent_task_or_a_dispatcher_key(store):
+def test_yield_sort_reads_one_batch_and_refreshes_only_for_the_next_pass(store, monkeypatch):
+    from unittest.mock import Mock
+
+    tasks = [{"id": "g", "state": "open"}, {"id": "u", "rank": "urgent", "state": "open"}, {"id": "n", "state": "open"}]
+    store.put_handoff(SLUG, "g", "pushed")
+    batch = Mock(wraps=store.redis.mget)
+    monkeypatch.setattr(store.redis, "mget", batch)
+    key = preempt.yielding(store, SLUG, {"tasks": tasks}, Keyed())
+    batch.assert_called_once_with([store.key(SLUG, "handoff", task["id"]) for task in tasks])
+    monkeypatch.setattr(store, "handoff", Mock(side_effect=AssertionError("sort performed a Redis GET")))
+    store.clear_handoff(SLUG, "g")
+    for _ in range(3):
+        assert sorted(tasks, key=key) == [tasks[1], tasks[0], tasks[2]]
+    batch.assert_called_once()
+    refreshed = preempt.yielding(store, SLUG, {"tasks": tasks}, Keyed())
+    assert sorted(tasks, key=refreshed) == tasks
+    assert batch.call_count == 2
+
+
+def test_ordering_is_untouched_without_an_open_urgent_task_or_a_dispatcher_key(store, monkeypatch):
+    from unittest.mock import Mock
+
+    monkeypatch.setattr(store.redis, "mget", Mock(side_effect=AssertionError("unneeded Redis batch")))
     store.put_handoff(SLUG, "g", "pushed")
     keyed = Keyed()
     claimed = [{"id": "g", "state": "open"}, {"id": "u", "rank": "urgent", "state": "claimed"}]
