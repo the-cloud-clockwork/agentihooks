@@ -54,9 +54,11 @@ def yielding(store, slug: str, doc: dict, dispatched):
     if dispatched is None or not any(t.get("rank") == URGENT and t.get("state") == "open" for t in doc["tasks"]):
         return dispatched
 
+    handoffs = store.handoff_tasks(slug, [task["id"] for task in doc["tasks"]])
+
     def key(task):
         band, position = dispatched(task)
-        if task.get("rank") != URGENT and store.handoff(slug, task["id"]):
+        if task.get("rank") != URGENT and task["id"] in handoffs:
             return max(band, YIELDED), position
         return band, position
 
