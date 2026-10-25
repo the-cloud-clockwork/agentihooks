@@ -14,6 +14,7 @@ pytestmark = pytest.mark.unit
 @pytest.fixture
 def command(buses, monkeypatch):
     import nats
+    from nats.js.client import JetStreamContext
 
     _, scoped = buses
     monkeypatch.setenv("AGENTIHOOKS_BUS", "nats")
@@ -27,6 +28,13 @@ def command(buses, monkeypatch):
         return await original(url, *args, **kwargs)
 
     monkeypatch.setattr(nats, "connect", connect)
+    inventory = JetStreamContext.streams_info_iterator
+
+    async def streams(client, *, offset=0):
+        assert offset >= 0
+        return await inventory(client, offset=offset)
+
+    monkeypatch.setattr(JetStreamContext, "streams_info_iterator", streams)
     return importlib.import_module("scripts.events.migrate_ready")
 
 
