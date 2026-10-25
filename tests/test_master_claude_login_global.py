@@ -82,6 +82,19 @@ def test_several_primary_masters_hold_the_login_at_once_and_one_name_once(ah):
     assert login.claim("master@rig-1", 30, lambda pid: pid != 10) == 3
 
 
+@pytest.mark.parametrize("exclusive", ["", "master@rig-1"])
+def test_a_shared_claim_never_invents_an_exclusive_holder(ah, exclusive):
+    held = {"holders": {"XXXX": 10, "master@rig-1": 20}, "epoch": 1}
+    if exclusive:
+        held["alone"] = exclusive
+    login._write(login.root() / login.OWNER, held)
+    assert login.claim("master@doctor-1", 30, lambda pid: True) == 2
+    assert json.loads((login.root() / login.OWNER).read_text()) == {
+        "holders": {"XXXX": 10, "master@rig-1": 20, "master@doctor-1": 30},
+        "epoch": 2,
+    }
+
+
 def test_a_front_door_joins_a_legacy_exclusive_live_master(ah, tmp_path, rendered):
     import os
 

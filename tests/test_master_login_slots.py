@@ -48,16 +48,20 @@ def _room(monkeypatch, **left):
     monkeypatch.setattr(master_logins, "left", lambda account, now: left[account] + 0 * now)
 
 
-def test_two_live_front_doors_share_the_preferred_stored_login(monkeypatch, rendered):
+@pytest.mark.parametrize("number", [1, 2])
+def test_two_live_front_doors_share_the_preferred_stored_login(monkeypatch, rendered, number):
     _stored(1, "one@example.com")
     _stored(2, "two@example.com")
-    _room(monkeypatch, oneatexample_com=50.0, twoatexample_com=40.0)
+    _room(monkeypatch, oneatexample_com=50.0 if number == 1 else 40.0, twoatexample_com=50.0 if number == 2 else 40.0)
     first, first_account = _launch_elsewhere(monkeypatch, rendered, "master@rig-1")
+    (first / "live-session").write_text("keep")
     second, second_account = login.prepare(_environ(rendered, "master@doctor-1"), rendered.parent)
-    assert (first, first_account) == (login.home(1), "oneatexample_com")
+    assert first == login.home(number)
+    assert first_account == ("oneatexample_com" if number == 1 else "twoatexample_com")
     assert (second, second_account) == (first, first_account)
-    assert login.holders(login.root(1)) == {"master@rig-1": os.getppid(), "master@doctor-1": os.getpid()}
-    assert login.holders(login.root(2)) == {}
+    assert (second / "live-session").read_text() == "keep"
+    assert login.holders(login.root(number)) == {"master@rig-1": os.getppid(), "master@doctor-1": os.getpid()}
+    assert login.holders(login.root(3 - number)) == {}
 
 
 def test_a_master_launches_on_the_stored_login_with_the_most_room(monkeypatch, rendered):
