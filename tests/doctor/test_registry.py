@@ -370,6 +370,17 @@ def test_a_failure_before_the_budget_ends_keeps_its_text(cursors, read_clock):
     assert failures == [f"active read of engineer@1-0001 failed at {read_clock}: ConnectionError: refused{_at(get, 3)}"]
 
 
+def test_a_failure_line_carries_every_note_of_its_exception_in_order():
+    try:
+        raise TimeoutError("timed out")
+    except TimeoutError as exc:
+        exc.add_note("first note")
+        exc.add_note("second note")
+        line, raised_at = registry.failure(exc), exc.__traceback__.tb_lineno
+    assert line.startswith("TimeoutError: timed out at ")
+    assert line.endswith(f":{raised_at}; first note; second note")
+
+
 def test_no_retry_starts_after_the_budget_ends(cursors):
     release, retried = threading.Event(), threading.Event()
     tries = []

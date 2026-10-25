@@ -6,6 +6,7 @@ import subprocess
 import sys
 import tomllib
 from collections.abc import Callable
+from dataclasses import dataclass, field
 from importlib import metadata
 from pathlib import Path
 
@@ -33,9 +34,11 @@ def test_inputs(
     root: Path,
     path: str,
     modules: dict[str, str],
-    records: dict[str, tuple[str, set[str]]],
+    records: dict[str, tuple[str, set[str], list[ast.AST]]],
     resources: dict[str, set[str]],
+    dynamic_imports: bool = True,
 ) -> dict[str, str]:
+    dynamic_modules = modules.values() if dynamic_imports else ()
     pending = {path} | {
         str(parent / "conftest.py") for parent in Path(path).parents if str(parent / "conftest.py") in modules.values()
     }
@@ -84,6 +87,8 @@ def test_inputs(
                     if isinstance(node, ast.Constant) and isinstance(node.value, str) and node.value
                 }
                 dependencies.update(resource for value in literals for resource in resources.get(value, ()))
+            if unresolved:
+                dependencies.update(dynamic_modules)
             records[current] = (hashlib.sha256(content).hexdigest(), dependencies, unresolved)
         digest, dependencies, _ = records[current]
         inputs[current] = digest
@@ -135,8 +140,70 @@ def loaded_inputs(
         names &= {name for result in chosen for name in result["modules"]} - collected
     closure = {}
     for name in names:
-        closure.update(test_inputs(root, name, modules, records, resources))
+        closure.update(test_inputs(root, name, modules, records, resources, False))
     return {name: check(name) for name in closure}
+
+
+@dataclass
+class StatsInputs:
+    root: Path
+    modules: dict
+    resources: dict
+    changes: dict
+    records: dict = field(default_factory=lambda: {True: {}, False: {}})
+    traced: dict = field(default_factory=dict)
+
+    def for_test(self, path: str, covered: list[str] | None, fresh: list[dict] | None = None) -> dict:
+        measured = covered is not None
+        name = test_file(path)
+        group = (name, measured)
+        if group not in self.traced:
+            self.traced[group] = test_inputs(
+                self.root, name, self.modules, self.records[measured], self.resources, not measured
+            )
+        inputs = dict(self.traced[group])
+        if covered == [] and fresh is not None and any(self.records[measured][name][2] for name in inputs):
+            check = functools.partial(current_input, self.root, self.changes, {})
+            loaded = loaded_inputs(
+                self.root, inputs, path, fresh, (self.modules, self.records[measured], self.resources), check
+            )
+            inputs.update({name: value[0] for name, value in loaded.items()})
+        for source in covered or []:
+            inputs.update(test_inputs(self.root, source, self.modules, self.records[measured], self.resources, False))
+        if not any(not name.startswith("tests/") for name in inputs):
+            for source in self.changes.keys() & self.resources:
+                inputs.update(
+                    test_inputs(self.root, source, self.modules, self.records[measured], self.resources, not measured)
+                )
+        return inputs
+
+
+def per_test_stats(path: str, fresh: list[dict], count: int) -> tuple[dict | None, list[str] | None]:
+    durations = {
+        test: seconds for result in fresh for test, seconds in result["durations"].items() if selects(path, test)
+    }
+    dependencies = {
+        test: paths for result in fresh for test, paths in result.get("dependencies", {}).items() if test in durations
+    }
+    measured = bool(durations) and all(dependencies.get(test) for test in durations)
+    if any("dependencies" in result for result in fresh) and not measured:
+        return None, None
+    tests = {
+        function: sorted({test for result in fresh for test in result["tests"].get(function, []) if test in durations})
+        for function in {function for result in fresh for function in result["tests"]}
+    }
+    result = {
+        "status": 0,
+        "tests": tests,
+        "durations": durations,
+        "cpu": sum(result["cpu"] for result in fresh) / count,
+    }
+    if measured:
+        result["dependencies"] = dependencies
+    covered = sorted({source for paths in dependencies.values() for source in paths}) if measured else None
+    if not measured and any("modules" in result for result in fresh):
+        covered = []
+    return result, covered
 
 
 def collect_cached_stats(
@@ -147,6 +214,8 @@ def collect_cached_stats(
     options: list[str],
     collect: Callable[[list[str]], list[dict]],
 ) -> list[dict]:
+    from scripts.ci_mutation.stats_dependencies import StoredStats
+
     tracked = subprocess.check_output(TRACKED, cwd=root, text=True).split("\0")
     sources = {
         path: hashlib.sha256((root / path).read_bytes()).hexdigest()
@@ -155,8 +224,8 @@ def collect_cached_stats(
     }
     versions = distribution_versions(root)
     context = dict(zip(CONTEXT_FIELDS, (SCHEMA, sources, options, [sys.version, sys.platform, versions])))
+    context["inventory"] = sorted(filter(None, tracked))
     modules = {module_name(Path(path)): path for path in tracked if Path(path).suffix == ".py"}
-    records = {}
     folder.mkdir(parents=True, exist_ok=True)
     resources = {}
     for path in tracked:
@@ -164,60 +233,19 @@ def collect_cached_stats(
             parts = Path(path).parts
             for index in range(len(parts)):
                 resources.setdefault("/".join(parts[index:]), set()).add(path)
-    traced = {}
-    for name in dict.fromkeys(map(test_file, files)):
-        traced[name] = test_inputs(root, name, modules, records, resources)
-    inputs = {path: dict(traced[test_file(path)]) for path in files}
-    for dependencies in inputs.values():
-        if not any(not name.startswith("tests/") for name in dependencies):
-            for source in changes.keys() & resources:
-                dependencies.update(test_inputs(root, source, modules, records, resources))
-    keys = {
-        path: hashlib.sha256(
-            encode(
-                {
-                    **context,
-                    **dict(zip(KEY_FIELDS, (path, dependencies))),
-                    **{source: lines for source, lines in changes.items() if source in dependencies},
-                }
-            ).encode()
-        ).hexdigest()
-        for path, dependencies in inputs.items()
-    }
-    # A dynamic import may load any module, so those files are checked against the modules the collection loaded.
-    opened = {path for path, dependencies in inputs.items() if any(records[name][2] for name in dependencies)}
-    check = functools.partial(current_input, root, changes, {})
-    graph = (modules, records, resources)
-    stored = {
-        path: entry
-        for path, key in keys.items()
-        if (entry := reusable_entry(folder / f"{key}.json", path in opened, check)) is not None
-    }
-    reused = [{field: value for field, value in entry.items() if field != "loaded"} for entry in stored.values()]
-    missing = [path for path in keys if path not in stored]
+    inputs = StatsInputs(root, modules, resources, changes)
+    stored = StoredStats(root, folder, context, changes)
+    compatible = {path: record for path in files if (record := stored.load(path)) is not None}
+    reused = list(compatible.values())
+    missing = [path for path in files if path not in compatible]
     report(f"Mutation stats cache: reused {len(reused)} test files; collect {len(missing)}")
     fresh = collect(missing) if missing else []
     if any(result["status"] != 0 for result in fresh):
         raise SystemExit(1)
     for path in missing:
-        durations = {
-            test: seconds for result in fresh for test, seconds in result["durations"].items() if selects(path, test)
-        }
-        tests = {
-            function: sorted(
-                {test for result in fresh for test in result["tests"].get(function, []) if test in durations}
-            )
-            for function in {function for result in fresh for function in result["tests"]}
-        }
-        entry = {
-            "status": 0,
-            "tests": tests,
-            "durations": durations,
-            "cpu": sum(result["cpu"] for result in fresh) / len(missing),
-        }
-        if path in opened:
-            entry["loaded"] = loaded_inputs(root, inputs[path], path, fresh, graph, check)
-        (folder / f"{keys[path]}.json").write_text(json.dumps(entry))
+        result, covered = per_test_stats(path, fresh, len(missing))
+        if result is not None:
+            stored.save(path, result, inputs.for_test(path, covered, fresh), covered is not None)
     return reused + [
-        {field: value for field, value in result.items() if field not in ("files", "modules")} for result in fresh
+        {name: value for name, value in result.items() if name not in ("files", "modules")} for result in fresh
     ]

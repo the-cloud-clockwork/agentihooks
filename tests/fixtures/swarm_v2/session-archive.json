@@ -1,0 +1,19 @@
+{
+  "grant": {"principal": "catalog-fixture", "corpus": "swarm-fixture", "projects": ["agentihooks"]},
+  "session_uid": "swarm-fixture:claude:worker-a:session-long",
+  "provider": "claude",
+  "retention": "retain-until-deleted",
+  "generations": [
+    {"source_generation": "device-1:inode-9:anchor-0", "origin": "worker-a:projects/agentihooks/session-long.jsonl", "split_after_line": 7},
+    {"source_generation": "device-1:inode-11:anchor-0", "origin": "worker-a:projects/agentihooks/session-long.1.jsonl", "split_after_line": 2}
+  ],
+  "turns": [
+    {"kind": "user_text", "text": "café long transcript prompt", "repeat": 90},
+    {"kind": "assistant_text", "text": "日本 long transcript reply", "repeat": 110},
+    {"kind": "tool_call", "tool_name": "Bash", "tool_input": {"command": "ls"}, "tool_use_id": "toolu_1"},
+    {"kind": "tool_result", "tool_result": "archive ✓", "tool_use_id": "toolu_1", "is_error": false}
+  ],
+  "rounds": 3,
+  "missing_generation": 1,
+  "foreign_corpus": "personal-corpus"
+}

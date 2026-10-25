@@ -28,7 +28,8 @@ REMOTE_FIELDS = {
 
 def failure(exc: BaseException) -> str:
     frame = traceback.extract_tb(exc.__traceback__)[-1]
-    return f"{type(exc).__name__}: {exc} at {frame.filename}:{frame.lineno}"
+    notes = "".join(f"; {note}" for note in getattr(exc, "__notes__", ()))
+    return f"{type(exc).__name__}: {exc} at {frame.filename}:{frame.lineno}{notes}"
 
 
 def read_at() -> str:
