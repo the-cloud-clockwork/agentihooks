@@ -874,6 +874,40 @@ def test_launch_preparation_reports_a_refused_operator_email(ah, rendered, tmp_p
     assert capsys.readouterr().err == "[agenti] operator login email refused: email failed: down\n"
 
 
+def test_launch_preparation_emails_once_when_no_slot_can_take_the_browser(ah, rendered, tmp_path, monkeypatch):
+    from scripts import master_login_chain as chain
+    from scripts.swarm import operator_email
+
+    def refused(*_):
+        raise login.LoginRefused(login.NO_LOGIN)
+
+    def held(*_):
+        raise login.LoginRefused("every stored master claude ai login is held")
+
+    sent = []
+    monkeypatch.setattr(login, "prepare", refused)
+    monkeypatch.setattr(login, "browser_home", held)
+    monkeypatch.setattr(chain, "authorize", lambda *_: pytest.fail("no slot means no browser request"))
+    monkeypatch.setattr(operator_email, "send", lambda *args: sent.append(args) or "")
+    env = _environ(rendered)
+    assert login.prepare_launch(env, tmp_path) is None
+    assert login.prepare_launch(env, tmp_path) is None
+    assert sent == [
+        (
+            "Master login fell back to token routing",
+            "master@a-1 runs on subscription token routing without Remote Control: "
+            "the current claude.ai session failed and the browser authorization ended in failure.",
+            env,
+            str(tmp_path),
+        )
+    ]
+    folder = login._token_folder(env)
+    assert folder.stat().st_mode & 0o777 == 0o700
+    assert [json.loads(line) for line in (folder / "login-notifications.jsonl").read_text().splitlines()] == [
+        {"step": "token", "outcome": "failure", "transport": "email", "agent": "master@a-1"}
+    ]
+
+
 def test_browser_preparation_skips_a_slot_held_by_another_process(ah, rendered, tmp_path, monkeypatch):
     from scripts import master_login_chain as chain
     from scripts.routing import native_login

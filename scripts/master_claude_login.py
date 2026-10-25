@@ -516,7 +516,8 @@ def prepare_launch(environ: Mapping[str, str], cwd: Path) -> tuple[Path, str] | 
         try:
             target = target or browser_home(environ)
         except LoginRefused:
-            return "failure"
+            reported = "failure"
+            return reported
         chain.notification(target, "current", "unavailable")
         reported = chain.authorize(environ, target)
         return reported
@@ -524,7 +525,11 @@ def prepare_launch(environ: Mapping[str, str], cwd: Path) -> tuple[Path, str] | 
     def token():
         if target is not None:
             release(target, environ)
-        refused = chain.alert(environ, target, reported, str(cwd)) if reported in ("captcha", "failure") else ""
+        if reported not in ("captcha", "failure"):
+            return None
+        alerted = target or _token_folder(environ) / "claude"
+        alerted.parent.mkdir(mode=PRIVATE_DIR, parents=True, exist_ok=True)
+        refused = chain.alert(environ, alerted, reported, str(cwd))
         if refused:
             print(f"[agenti] operator login email refused: {refused}", file=sys.stderr)
         return None
@@ -532,9 +537,12 @@ def prepare_launch(environ: Mapping[str, str], cwd: Path) -> tuple[Path, str] | 
     return chain.run(current, browser, token)
 
 
+def _token_folder(environ: Mapping[str, str]) -> Path:
+    return Path(hooks_config.AGENTIHOOKS_HOME) / "master-token" / aicode_tokens.slug(environ["AGENTIHOOKS_AGENT_NAME"])
+
+
 def token_home(environ: Mapping[str, str]) -> Path:
-    name = aicode_tokens.slug(environ["AGENTIHOOKS_AGENT_NAME"])
-    folder = Path(hooks_config.AGENTIHOOKS_HOME) / "master-token" / name
+    folder = _token_folder(environ)
     with _locked(folder):
         target = _rebuild(folder, Path(environ["CLAUDE_CONFIG_DIR"]))
         (target / CREDENTIALS).unlink(missing_ok=True)
