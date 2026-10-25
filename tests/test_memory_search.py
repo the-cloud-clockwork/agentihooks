@@ -70,6 +70,7 @@ def test_tokens_keep_identifiers_and_drop_edge_punctuation():
         "ok",
     ]
     assert search.tokens(". : .:") == []
+    assert search.tokens("X.Y:") == ["x.y"]
 
 
 def test_parse_splits_phrases_from_terms_and_drops_stopwords():
@@ -144,6 +145,7 @@ def test_relevance_reports_recall_and_reciprocal_rank():
     assert search.relevance(results, ["b", "x"]) == {"recall": 0.5, "reciprocal_rank": 0.5}
     assert search.relevance(results, ["z"]) == {"recall": 0.0, "reciprocal_rank": 0.0}
     assert search.relevance(results, ["c", "a"]) == {"recall": 1.0, "reciprocal_rank": 1.0}
+    assert search.relevance(results, ["a", "x", "y"]) == {"recall": 0.333333, "reciprocal_rank": 1.0}
 
 
 def test_grouped_keeps_first_appearance_and_its_score():
@@ -192,6 +194,7 @@ def test_a_scope_refusal_counts_against_the_grant_corpus(inputs, corpus):
     assert corpus.searcher.scope_rejections_total(DOMAIN) == 2
     assert corpus.searcher.scope_rejections_total(inputs["foreign_corpus"]) == 0
     corpus.searcher.search(granted, Query(DOMAIN, "x", (inputs["project"],)))
+    corpus.searcher.search(granted, Query(DOMAIN, "x", tuple(sorted(granted.projects))))
     assert corpus.searcher.scope_rejections_total(DOMAIN) == 2
 
 
@@ -418,23 +421,33 @@ def test_search_answers_with_operation_id(inputs, corpus):
 
 
 def test_search_refusals_map_to_classes(inputs, corpus, monkeypatch):
-    scoped = api.search(corpus.searcher, grant(inputs), request(inputs, "x", projects=[inputs["unauthorized_project"]]))
+    def operation(body):
+        return f"search:{digest(body)[:16]}"
+
+    body = request(inputs, "x", projects=[inputs["unauthorized_project"]])
+    scoped = api.search(corpus.searcher, grant(inputs), body)
     assert scoped == {
         "schema_version": SCHEMA_VERSION,
-        "operation_id": scoped["operation_id"],
+        "operation_id": operation(body),
         "state": "rejected",
         "error": {"class": "forbidden_scope", "retry": "never", "detail": search.SCOPE_REFUSED},
     }
-    bounded = api.search(corpus.searcher, grant(inputs), request(inputs, "x", limit=0))
+    body = request(inputs, "x", limit=0)
+    bounded = api.search(corpus.searcher, grant(inputs), body)
     assert bounded["error"] == {"class": "invalid_request", "retry": "never", "detail": search.BAD_BOUNDS}
+    assert bounded["operation_id"] == operation(body)
     invalid = api.search(corpus.searcher, grant(inputs), {"query": "x"})
     assert invalid["error"]["detail"] == "unsupported schema_version"
+    assert invalid["operation_id"] == operation({"query": "x"})
+    shapeless = api.search(corpus.searcher, grant(inputs), ["x"])
+    assert shapeless["error"] == {"class": "invalid_request", "retry": "never", "detail": "request must be an object"}
 
     def locked(*args):
         raise sqlite3.OperationalError("database is locked")
 
     monkeypatch.setattr(corpus.searcher, "search", locked)
     failed = api.search(corpus.searcher, grant(inputs), request(inputs, "x"))
+    assert failed["operation_id"] == operation(request(inputs, "x"))
     assert failed["error"] == {"class": "dependency_unavailable", "retry": "same_request", "detail": api.SEARCH_FAILED}
 
 

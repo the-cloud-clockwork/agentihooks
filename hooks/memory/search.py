@@ -196,7 +196,7 @@ class SessionSearch:
         scored = [
             (row[0], round(cosine(wanted, json.loads(row[2])), 6)) for row in rows if current.get(row[0]) == row[1]
         ]
-        ranked = sorted((item for item in scored if item[1] > 0), key=lambda item: (-item[1], item[0]))
+        ranked = sorted((item for item in scored if item[1] > 0), key=lambda item: -item[1])
         return ranked[: query.limit * CANDIDATE_FACTOR], label
 
     def search(self, grant: Grant, query: Query, embedder: Embedder | None = None) -> dict:
