@@ -363,6 +363,7 @@ def hive(monkeypatch):
     monkeypatch.setenv("AGENTIHOOKS_CONTROLLER_CREDENTIAL", "")
     monkeypatch.setenv("HOSTNAME", "hub-0")
     monkeypatch.setattr(runner, "open_bus", lambda config: memory.open_bus(BusConfig()))
+    monkeypatch.setattr(runner, "scheduled_wait", lambda seconds: None)
     return redis
 
 

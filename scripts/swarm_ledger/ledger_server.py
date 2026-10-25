@@ -1041,6 +1041,14 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(400, str(exc), "text/plain")
         return self.send(200, json.dumps(saved), "application/json")
 
+    def send_export(self, data):
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(data)
+
     def send_logo(self):
         try:
             data = LOGO.read_bytes()
