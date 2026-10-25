@@ -572,6 +572,23 @@ def test_protected_select_outputs_admit_only_dropping_the_unused_file_outputs(ch
     assert problems == (["The head changes the durations provenance context outputs."] if red else [])
 
 
+def test_protected_durations_outputs_may_not_drop_the_unused_select_file_outputs():
+    from scripts import ci_reuse
+
+    base = _workflow()
+    base["jobs"]["reuse"] = {"if": "github.event_name != 'merge_group' && github.event_name != 'pull_request'"}
+    base["jobs"]["select"] = {
+        "outputs": {f"files_{leg}": f"${{{{ steps.select.outputs.files_{leg} }}}}" for leg in (1, 2, 3)},
+        "steps": ci_reuse.duration_provenance_steps(),
+    }
+    base["jobs"]["gate"]["needs"].append("select")
+    head = copy.deepcopy(base)
+    head["jobs"]["durations"] = {"outputs": {}, "steps": ci_reuse.duration_provenance_steps()}
+    head["jobs"]["gate"]["needs"].append("durations")
+    problems = gate_protected.grade({"test.yml": base}, {}, {"test.yml": head}, {}, _TODAY)
+    assert "The head changes the durations provenance context outputs." in problems
+
+
 @pytest.mark.parametrize("weakened", [False, True])
 @pytest.mark.parametrize("anton", [False, True])
 def test_the_protected_grader_admits_only_the_exact_paged_reuse_variant(weakened, anton):
