@@ -56,3 +56,29 @@ def test_command_inventories_then_keeps_every_ready_offer(buses, monkeypatch, ca
             delivery.ack()
         assert received == expected
         assert target.take(20) is None
+
+
+def test_command_reports_observed_counts_when_migration_fails_after_copy(buses, monkeypatch, capsys):
+    legacy, scoped = buses
+    offer = Envelope("retained", "task.ready", "doctor", "task", "work", 1, 0, "hub", {"lane": "eng"})
+    legacy.queue("swarm.doctor.ready.eng", QueuePolicy()).offer(offer)
+    monkeypatch.setenv("AGENTIHOOKS_BUS", "nats")
+    monkeypatch.setenv(URL_ENV, scoped._config.url)
+    monkeypatch.setenv(CREDENTIALS_ENV, scoped._config.credentials)
+    monkeypatch.delenv("AGENTIHOOKS_BUS_BIND", raising=False)
+    command = importlib.import_module("scripts.events.migrate_ready")
+    migrate = command.NatsBus.migrate_queue
+
+    def interrupted(bus, swarm, name, policy):
+        migrate(bus, swarm, name, policy)
+        raise RuntimeError("interrupted after copy")
+
+    monkeypatch.setattr(command.NatsBus, "migrate_queue", interrupted)
+    assert command.main(["--apply", "--quiescent", "--swarm", "doctor"]) == 1
+    report = json.loads(capsys.readouterr().out)
+    assert report["retained"] == report["kept"] == 1
+    assert report["remaining"] == 0
+    assert report["queues"][0]["kept"] == 1
+    assert report["queues"][0]["remaining"] == 0
+    assert report["failures"] == [{"swarm": "doctor", "lane": "eng", "error": "interrupted after copy"}]
+    assert scoped.for_swarm("doctor").queue("eng", QueuePolicy()).take(1000).event == offer
