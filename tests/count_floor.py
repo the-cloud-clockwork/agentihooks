@@ -326,7 +326,11 @@ def _imports(
                 bound = alias.asname or alias.name
                 names.setdefault(bound, set()).add((statement.module, alias.name))
                 modules.setdefault(bound, set()).add(f"{statement.module}.{alias.name}")
-    return names, modules
+    shadowed = _local_bindings(module)
+    return (
+        {name: subjects for name, subjects in names.items() if name not in shadowed},
+        {name: targets for name, targets in modules.items() if name not in shadowed},
+    )
 
 
 def _test_function(module: ast.Module, scopes: list[str]) -> ast.FunctionDef | ast.AsyncFunctionDef | None:
@@ -504,8 +508,14 @@ def _body_nodes(function: ast.Module | ast.FunctionDef | ast.AsyncFunctionDef) -
             pending.extend(ast.iter_child_nodes(node))
 
 
-def _local_bindings(function: ast.FunctionDef | ast.AsyncFunctionDef) -> set[str]:
-    names = {node.arg for node in ast.walk(function.args) if isinstance(node, ast.arg)}
+def _local_bindings(
+    function: ast.Module | ast.FunctionDef | ast.AsyncFunctionDef, include_definitions: bool = True
+) -> set[str]:
+    names = (
+        {node.arg for node in ast.walk(function.args) if isinstance(node, ast.arg)}
+        if isinstance(function, _FUNCTIONS)
+        else set()
+    )
     for node in _body_nodes(function):
         if isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del)):
             names.add(node.id)
@@ -513,10 +523,8 @@ def _local_bindings(function: ast.FunctionDef | ast.AsyncFunctionDef) -> set[str
             names.add(node.name)
         elif isinstance(node, ast.MatchMapping) and node.rest:
             names.add(node.rest)
-        elif isinstance(node, _DEFINITIONS):
+        elif isinstance(node, _DEFINITIONS) and include_definitions:
             names.add(node.name)
-        elif isinstance(node, (ast.Import, ast.ImportFrom)):
-            names.update(alias.asname or alias.name.split(".")[0] for alias in node.names)
     return names
 
 
@@ -529,7 +537,13 @@ def referenced_subjects(tree: Path, nodeid: str) -> set[tuple[str, str]]:
     if (node := _test_function(module, scopes)) is None:
         return set()
     names, modules = _imports(module)
-    helpers = {child.name: child for child in module.body if isinstance(child, _FUNCTIONS)}
+    rebound = _local_bindings(module, include_definitions=False) | names.keys() | modules.keys()
+    rebound.update(
+        child.name for child in _body_nodes(module) if isinstance(child, _DEFINITIONS) and child not in module.body
+    )
+    helpers = {
+        child.name: child for child in module.body if isinstance(child, _FUNCTIONS) and child.name not in rebound
+    }
     subjects, visited, pending = set(), set(), [node]
     while pending:
         function = pending.pop()
@@ -540,6 +554,7 @@ def referenced_subjects(tree: Path, nodeid: str) -> set[tuple[str, str]]:
         local_names = {name: subjects for name, subjects in names.items() if name not in shadowed}
         local_modules = {name: targets for name, targets in modules.items() if name not in shadowed}
         imported_names, imported_modules = _imports(function)
+        shadowed |= imported_names.keys() | imported_modules.keys()
         local_names.update(imported_names)
         local_modules.update(imported_modules)
         for child in _body_nodes(function):
