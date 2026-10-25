@@ -1,0 +1,6 @@
+{
+  "scripts/ci_gate_shards.py:scripts.ci_gate_shards.x_watch__mutmut_41:acabde1420a66b3e527581d32f6af2973ec207d1370ea2e30190481f6568fca3": {
+    "reader": "standards-reader",
+    "reason": "Diagnostic decoration only; timeout still raises RuntimeError before evidence acceptance, preserving failure and timing."
+  }
+}

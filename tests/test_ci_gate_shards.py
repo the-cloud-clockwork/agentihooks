@@ -1,5 +1,6 @@
 import io
 import subprocess
+import threading
 import zipfile
 from unittest.mock import patch
 
@@ -138,6 +139,13 @@ def test_github_reads_paginate_metadata_and_preserve_zip_bytes(binary):
     run.assert_called_once_with(command, check=True, capture_output=True, timeout=60)
 
 
+def test_metadata_is_decoded_and_paginated_when_binary_is_omitted():
+    result = subprocess.CompletedProcess([], 0, stdout=b'[{"artifacts": []}]')
+    with patch.object(ci_gate_shards.subprocess, "run", return_value=result) as run:
+        assert ci_gate_shards.api("repos/org/repo/actions") == [{"artifacts": []}]
+    assert run.call_args.args[0] == ["gh", "api", "repos/org/repo/actions", "--paginate", "--slurp"]
+
+
 def test_github_failure_is_never_replaced_with_empty_evidence():
     with (
         patch.object(ci_gate_shards.subprocess, "run", side_effect=subprocess.CalledProcessError(1, ["gh"])),
@@ -171,6 +179,25 @@ def test_fetch_reads_every_page_and_ignores_foreign_and_expired_artifacts(tmp_pa
         "repos/org/repo/actions/artifacts/1/zip",
         "repos/org/repo/actions/artifacts/2/zip",
     }
+
+
+def test_eight_report_downloads_overlap_even_on_a_small_cpu_runner(tmp_path):
+    barrier = threading.Barrier(8)
+    artifacts = [{"id": shard, "name": f"durations-3.12-{shard}", "expired": False} for shard in range(1, 9)]
+
+    def api(endpoint, *, binary=False):
+        if not binary:
+            return [{"artifacts": artifacts}]
+        barrier.wait(timeout=10)
+        return _zip()
+
+    with (
+        patch.object(ci_gate_shards.os, "cpu_count", return_value=1),
+        patch.object(ci_gate_shards, "api", side_effect=api),
+    ):
+        downloaded = {}
+        ci_gate_shards.fetch("org/repo", "123", tmp_path, downloaded)
+    assert len(downloaded) == 8
 
 
 def test_download_keeps_all_report_members_and_ignores_other_archive_paths(tmp_path):
@@ -209,6 +236,37 @@ def test_wait_accepts_complete_recovered_shards_and_refreshes_final_artifacts(tm
         assert ci_gate_shards.watch("org/repo", "123", "2", [1, 2], tmp_path) is None
     assert download.call_count == 2
     assert download.call_args.args[:3] == ("org/repo", "123", tmp_path)
+
+
+def test_wait_prefetches_into_a_new_destination_using_the_same_run_and_repository(tmp_path):
+    polls = 0
+    downloads = []
+
+    def api(endpoint, *, binary=False):
+        nonlocal polls
+        assert endpoint.startswith("repos/org/repo/actions/")
+        if endpoint == "repos/org/repo/actions/runs/123/artifacts?per_page=100":
+            artifacts = [
+                {"id": f"{kind}-{shard}", "name": f"{kind}-3.12-{shard}", "expired": False}
+                for kind in ["durations", "flakes"]
+                for shard in range(1, min(polls + 1, 2) + 1)
+            ]
+            return [{"artifacts": artifacts}]
+        if endpoint == "repos/org/repo/actions/runs/123/attempts/2/jobs?per_page=100":
+            polls += 1
+            return [
+                {"jobs": [{"name": f"unit (3.12, {shard})", "conclusion": "success"} for shard in range(1, polls + 1)]}
+            ]
+        assert binary
+        downloads.append((polls, endpoint))
+        return _zip()
+
+    destination = tmp_path / "new" / "reports"
+    with patch.object(ci_gate_shards, "api", side_effect=api), patch.object(ci_gate_shards.time, "sleep"):
+        ci_gate_shards.watch("org/repo", "123", "2", [1, 2], destination)
+    assert (0, "repos/org/repo/actions/artifacts/durations-1/zip") in downloads
+    assert len(downloads) == 4
+    assert (destination / "durations-3.12-2" / "durations.json").is_file()
 
 
 def test_wait_times_out_red_when_a_planned_shard_never_finishes(tmp_path):
