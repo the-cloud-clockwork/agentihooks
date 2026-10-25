@@ -1,0 +1,203 @@
+{
+ "hooks/_async.py": {
+  "BLE001": 2
+ },
+ "hooks/_brain_http.py": {
+  "BLE001": 2
+ },
+ "hooks/_redis.py": {
+  "BLE001": 1
+ },
+ "hooks/common.py": {
+  "BLE001": 8
+ },
+ "hooks/context/account_sessions.py": {
+  "BLE001": 1
+ },
+ "hooks/context/auto_dev_switch.py": {
+  "BLE001": 2
+ },
+ "hooks/context/brain_adapter.py": {
+  "BLE001": 8
+ },
+ "hooks/context/branch_guard.py": {
+  "BLE001": 20
+ },
+ "hooks/context/broadcast.py": {
+  "BLE001": 2
+ },
+ "hooks/context/ci_manifesto.py": {
+  "BLE001": 3
+ },
+ "hooks/context/claim_fence.py": {
+  "BLE001": 1
+ },
+ "hooks/context/claude_md_sanity.py": {
+  "BLE001": 6
+ },
+ "hooks/context/conditions.py": {
+  "BLE001": 2
+ },
+ "hooks/context/controls_toggle.py": {
+  "BLE001": 6
+ },
+ "hooks/context/credential_guard.py": {
+  "BLE001": 1
+ },
+ "hooks/context/documentation_session.py": {
+  "BLE001": 1
+ },
+ "hooks/context/enforcement.py": {
+  "BLE001": 4
+ },
+ "hooks/context/file_read_cache.py": {
+  "BLE001": 3
+ },
+ "hooks/context/injection_trace.py": {
+  "BLE001": 1
+ },
+ "hooks/context/kubectl_mutation_guard.py": {
+  "BLE001": 1
+ },
+ "hooks/context/plan_read_guard.py": {
+  "BLE001": 2
+ },
+ "hooks/context/preprocessor.py": {
+  "BLE001": 3
+ },
+ "hooks/context/prepush_guard.py": {
+  "BLE001": 1
+ },
+ "hooks/context/prod_lockdown.py": {
+  "BLE001": 17
+ },
+ "hooks/context/retry_breaker.py": {
+  "BLE001": 4
+ },
+ "hooks/context/rules_refresh.py": {
+  "BLE001": 1
+ },
+ "hooks/context/trace_sweep.py": {
+  "BLE001": 1
+ },
+ "hooks/context/voice_output.py": {
+  "BLE001": 16
+ },
+ "hooks/filters/check.py": {
+  "BLE001": 1
+ },
+ "hooks/filters/runner.py": {
+  "BLE001": 1
+ },
+ "hooks/hook_manager.py": {
+  "BLE001": 116
+ },
+ "hooks/integrations/aws.py": {
+  "BLE001": 1
+ },
+ "hooks/integrations/base.py": {
+  "BLE001": 1
+ },
+ "hooks/integrations/dynamodb.py": {
+  "BLE001": 8
+ },
+ "hooks/integrations/lambda_invoke.py": {
+  "BLE001": 6
+ },
+ "hooks/integrations/mailer.py": {
+  "BLE001": 6
+ },
+ "hooks/integrations/postgres.py": {
+  "BLE001": 9
+ },
+ "hooks/integrations/session_state.py": {
+  "BLE001": 5
+ },
+ "hooks/integrations/storage.py": {
+  "BLE001": 5
+ },
+ "hooks/lifecycle/codex_refresh_kick.py": {
+  "BLE001": 1
+ },
+ "hooks/lifecycle/guard.py": {
+  "BLE001": 2
+ },
+ "hooks/mcp/__init__.py": {
+  "BLE001": 1
+ },
+ "hooks/mcp/channels.py": {
+  "BLE001": 6
+ },
+ "hooks/mcp/conditions.py": {
+  "BLE001": 4
+ },
+ "hooks/mcp/enforcement.py": {
+  "BLE001": 3
+ },
+ "hooks/mcp/recall.py": {
+  "BLE001": 1
+ },
+ "hooks/mcp/scheduler.py": {
+  "BLE001": 1
+ },
+ "hooks/memory/auto_save.py": {
+  "BLE001": 1
+ },
+ "hooks/memory/server.py": {
+  "BLE001": 7
+ },
+ "hooks/memory/spool.py": {
+  "BLE001": 1
+ },
+ "hooks/memory/store.py": {
+  "BLE001": 1
+ },
+ "hooks/observability/agent_log_stream.py": {
+  "BLE001": 4
+ },
+ "hooks/observability/agent_trace.py": {
+  "BLE001": 1
+ },
+ "hooks/observability/context_audit.py": {
+  "BLE001": 3
+ },
+ "hooks/observability/correlation.py": {
+  "BLE001": 1
+ },
+ "hooks/observability/event_relay.py": {
+  "BLE001": 12
+ },
+ "hooks/observability/otel.py": {
+  "BLE001": 4
+ },
+ "hooks/observability/token_monitor.py": {
+  "BLE001": 4
+ },
+ "hooks/observability/transcript.py": {
+  "BLE001": 3
+ },
+ "hooks/serena_router/pool.py": {
+  "BLE001": 1
+ },
+ "hooks/statusline.py": {
+  "BLE001": 8
+ },
+ "hooks/targets/notify_shim.py": {
+  "BLE001": 1
+ },
+ "hooks/telemetry.py": {
+  "BLE001": 10
+ },
+ "hooks/tool_memory.py": {
+  "BLE001": 6
+ },
+ "scripts/gates/entry.py": {
+  "BLE001": 1
+ },
+ "scripts/gates/intent.py": {
+  "BLE001": 1
+ },
+ "scripts/gates/talk.py": {
+  "BLE001": 1
+ }
+}
