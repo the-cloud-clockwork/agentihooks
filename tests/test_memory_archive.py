@@ -335,6 +335,40 @@ def test_an_object_whose_size_differs_from_its_range_is_altered(catalog, store):
     assert catalog.integrity_failures_total("corpus-a") == 1
 
 
+def archived_events(catalog, store, ranges):
+    catalog.register(source())
+    data = b"".join(LINES)
+    for start, end in ranges:
+        catalog.archive(entry(start, end, store.put(data[start:end])))
+    body = {
+        "schema_version": SCHEMA_VERSION,
+        "batch_id": "batch-gen-1",
+        "access_domain": "corpus-a",
+        "session_uid": "s1",
+        "source_generation": "gen-1",
+        "events": events(),
+    }
+    assert ingest(catalog, Grant("collector", "corpus-a", frozenset({"project-a"})), body)["state"] == "committed"
+    return data
+
+
+@pytest.mark.parametrize("ranges", [[(0, 21)], [(0, 21), (22, 68)], [(1, 68)]])
+def test_events_beyond_the_archived_ranges_refuse_the_session_and_are_counted(catalog, store, ranges):
+    archived_events(catalog, store, ranges)
+    message = refused(archive.EvidenceIntegrityError, lambda: archive.evidence(catalog, store, GRANT, "corpus-a", "s1"))
+    assert message == archive.UNCOVERED
+    assert catalog.integrity_failures_total("corpus-a") == 1
+
+
+def test_an_object_inside_an_earlier_object_still_covers_the_session(catalog, store):
+    data = archived_events(catalog, store, [(0, 68), (5, 10)])
+    assert len(data) == 68
+    found = archive.evidence(catalog, store, GRANT, "corpus-a", "s1")
+    assert found["complete"] is True
+    assert [item["byte_end"] for item in found["sources"][0]["archive"]] == [68, 10]
+    assert catalog.integrity_failures_total("corpus-a") == 0
+
+
 @pytest.mark.parametrize("state", ["restricted", "deleted"])
 def test_a_session_that_is_not_retained_is_refused_uncounted(catalog, store, state):
     captured(catalog, store)

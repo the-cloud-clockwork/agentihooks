@@ -61,12 +61,25 @@
       "replayed",
       "replayed"
     ],
+    "restricted_evidence": {
+      "detail": "the session is not retained",
+      "error": "EvidenceRefused"
+    },
+    "rollback_rehearsal": {
+      "legacy_event_reads_match_evidence": true,
+      "retained_rows": {
+        "archive_manifest": 4,
+        "session_event": 24,
+        "session_record": 1,
+        "session_source": 2
+      }
+    },
     "source_ranges_exact_after_restart": true,
     "stale_revision_refused": true,
     "survived_restart": {
-      "complete": null,
+      "provider": "claude",
+      "retention": "retain-until-deleted",
       "revision": 2,
-      "sources": [],
       "state": "restricted"
     }
   },

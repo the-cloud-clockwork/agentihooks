@@ -18,6 +18,9 @@ EVIDENCE_CLASS = (
 )
 
 
+ROLLBACK_TABLES = ("session_record", "session_source", "archive_manifest", "session_event")
+
+
 def grant(inputs):
     data = inputs["grant"]
     return Grant(data["principal"], data["corpus"], frozenset(data["projects"]))
@@ -221,7 +224,8 @@ def recovery(inputs, root):
     revision = first.set_state(domain, uid, "restricted", 1)
     first.close()
     restarted = Catalog(path)
-    survived = shape({**restarted.session(domain, uid), "complete": None, "sources": []})
+    survived = restarted.session(domain, uid)
+    restricted = refusal(lambda: archive.evidence(restarted, store, grant(inputs), domain, uid))
     revision = restarted.set_state(domain, uid, "retained", revision)
     exact = ranges_match(inputs, restarted, store)
     replayed = capture(inputs, restarted, store, root / "worker")
@@ -229,8 +233,14 @@ def recovery(inputs, root):
         restarted.set_state(domain, uid, "deleted", 1)
     found = archive.evidence(restarted, store, grant(inputs), domain, uid)
     assert exact and found["revision"] == revision == 3
+    assert restricted["error"] == "EvidenceRefused"
+    legacy = [restarted.events(domain, uid, item["source_generation"]) for item in found["sources"]]
+    retained = {table: len(rows) for table, rows in restarted.snapshot().items() if table in ROLLBACK_TABLES}
+    assert legacy == [item["events"] for item in found["sources"]] and all(retained.values())
     return {
         "survived_restart": survived,
+        "restricted_evidence": restricted,
+        "rollback_rehearsal": {"legacy_event_reads_match_evidence": True, "retained_rows": retained},
         "source_ranges_exact_after_restart": exact,
         "replayed": [item["state"] for item in replayed],
         "stale_revision_refused": True,

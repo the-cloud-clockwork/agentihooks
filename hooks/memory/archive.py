@@ -102,6 +102,16 @@ def _counted(catalog, domain: str, read):
         raise
 
 
+def _covered(entries: list[dict], events: list[dict]) -> None:
+    cursor = 0
+    for entry in entries:
+        if entry["byte_start"] > cursor:
+            raise EvidenceIntegrityError(UNCOVERED)
+        cursor = max(cursor, entry["byte_end"])
+    if any(event["byte_end"] > cursor for event in events):
+        raise EvidenceIntegrityError(UNCOVERED)
+
+
 def evidence(catalog: Catalog, store: ObjectStore, grant: Grant, domain: str, session_uid: str) -> dict:
     found, sources = _readable(catalog, grant, domain, session_uid)
 
@@ -113,6 +123,7 @@ def evidence(catalog: Catalog, store: ObjectStore, grant: Grant, domain: str, se
                 {**entry, "byte_size": len(_verified(store, entry))}
                 for entry in catalog.manifest(domain, session_uid, generation)
             ]
+            _covered(source["archive"], source["events"])
         return sources
 
     verified_sources = _counted(catalog, domain, read)
