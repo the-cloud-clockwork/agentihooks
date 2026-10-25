@@ -45,7 +45,8 @@ RESUMED = (
 RECORD_FIELDS = {f.name for f in fields(AgentRecord)}
 LEAD_STARTING = ("starting", SUSPECT)
 STARTING = (
-    "the front door master {name} is {state} and the swarm has {count} master seat{s}, so no second master starts; "
+    "the front door master {name} is {state} and every one of the swarm's {count} master seats is held, so no "
+    "other master starts; "
     "the tick binds or replaces it, or run master up --replace to retire it first"
 )
 
@@ -242,11 +243,7 @@ def _fresh(store, slug, runtime, at, live, replace_live=False):
     if starting and not replace_live:
         count = master_seats.MasterSeats(store.redis).count(slug)
         if _free_seat(store, slug, live) > count:
-            raise SwarmError(
-                STARTING.format(
-                    name=starting[0].name, state=starting[0].state, count=count, s="" if count == 1 else "s"
-                )
-            )
+            raise SwarmError(STARTING.format(name=starting[0].name, state=starting[0].state, count=count))
     if (front or starting) and not replace_live:
         return _beside(store, slug, runtime, at, live)
     take_master.retired(store, slug, runtime, front)
