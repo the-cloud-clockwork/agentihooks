@@ -270,7 +270,10 @@ def test_watch_waits_for_complete_attempt_jobs_and_rechecks_queue_identity(monke
     first = [job for job in complete() if job["name"] != "shard-check (3.12)"]
     snapshots = iter([first, complete()])
     monkeypatch.setattr(
-        ci_gate_queue, "read_jobs", lambda endpoint, size: reads.append((endpoint, size)) or next(snapshots), raising=False
+        ci_gate_queue,
+        "read_jobs",
+        lambda endpoint, size: reads.append((endpoint, size)) or next(snapshots),
+        raising=False,
     )
     monkeypatch.setattr(
         ci_gate_queue,
