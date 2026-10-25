@@ -59,6 +59,7 @@ from scripts.swarm import (
     outage,
     pane_evidence,
     preempt,
+    prerequisite_wait,
     profile_first,
     promotion_watch,
     readiness,
@@ -231,6 +232,7 @@ def tick(slug, store, ledger, runtime, now_ms):
     if config.engine != EVENTS_ENGINE:
         actions += skip_refused(_orphans, slug, store, ledger, rows)
     actions += skip_refused(dev_red.reopen_pass, slug, config, store, ledger, rows)
+    actions += skip_refused(prerequisite_wait.reopen_pass, slug, store, ledger, rows)
     actions += skip_refused(promotion_watch.refresh, slug, config, store, ledger, doc, now_ms)
     actions += skip_refused(release_wait.alert_pass, slug, config, ledger, doc)
     actions += skip_refused(run_window.step, slug, config, store, ledger, doc, now_ms)
