@@ -892,9 +892,14 @@ def test_launch_preparation_emails_once_when_no_slot_can_take_the_browser(ah, re
     monkeypatch.setattr(login, "browser_home", held)
     monkeypatch.setattr(chain, "authorize", lambda *_: pytest.fail("no slot means no browser request"))
     monkeypatch.setattr(operator_email, "send", lambda *args: sent.append(args) or "")
+    from unittest.mock import Mock, call
+
+    alerted = Mock(wraps=chain.alert)
+    monkeypatch.setattr(chain, "alert", alerted)
     env = _environ(rendered)
     assert login.prepare_launch(env, tmp_path) is None
     assert login.prepare_launch(env, tmp_path) is None
+    assert alerted.call_args_list == [call(env, login._token_folder(env) / "claude", "failure", str(tmp_path))] * 2
     assert sent == [
         (
             "Master login fell back to token routing",
