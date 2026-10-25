@@ -1,5 +1,8 @@
 import json
+import subprocess
 import sys
+
+import pytest
 
 from scripts.doctor import detect, features
 
@@ -61,3 +64,74 @@ def test_the_doctor_pass_runs_the_feature_map(tmp_path, monkeypatch):
     store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
     [found] = detect.readers(store, None, "sw", 1, environ={}, telemetry=False)["feature"]()
     assert found.subject == "feature-1"
+
+
+def test_checks_run_from_the_map_root_with_a_deadline(tmp_path, monkeypatch):
+    path = _map(tmp_path / "feature-map.json", ["python", "-m", "check"])
+    calls = []
+
+    def execute(command, **kwargs):
+        calls.append((command, kwargs))
+        return subprocess.CompletedProcess(command, 1, "first\nsecond\n", "third\n")
+
+    monkeypatch.setattr(features.subprocess, "run", execute)
+    [found] = features.findings(path)
+    assert calls == [
+        (
+            [sys.executable, "-m", "check"],
+            {
+                "cwd": tmp_path,
+                "capture_output": True,
+                "text": True,
+                "timeout": 120,
+                "check": False,
+            },
+        )
+    ]
+    assert found.threshold == "a feature map live check that does not exit zero"
+    assert found.measure == 1
+    assert found.evidence == (
+        f"operator words: {WORDS}",
+        "ordered 2026-10-25 in ledger:rig-grade-swarm-doctor/tasks/t853",
+        "live check python -m check exited 1",
+        "output: first",
+        "output: second",
+        "output: third",
+    )
+
+
+@pytest.mark.parametrize(
+    ("error", "ended"),
+    [
+        (subprocess.TimeoutExpired(["check"], 120), "timed out after 120 seconds"),
+        (OSError("unavailable"), "could not run: OSError: unavailable"),
+    ],
+)
+def test_unavailable_checks_preserve_the_failure_reason(tmp_path, monkeypatch, error, ended):
+    def execute(*args, **kwargs):
+        raise error
+
+    monkeypatch.setattr(features.subprocess, "run", execute)
+    [found] = features.findings(_map(tmp_path / "feature-map.json", ["check"]))
+    assert found.evidence[-1] == f"live check check {ended}"
+    assert len(found.evidence) == 3
+
+
+def test_check_output_is_redacted_normalized_and_bounded(monkeypatch):
+    calls = []
+
+    def scrub(line, *, mode):
+        calls.append((line, mode))
+        return line.replace("private", "[redacted]")
+
+    monkeypatch.setattr(features, "redact", scrub)
+    lines = ["first", "", "two   words", "private", "four", "five", "six", "x" * 400]
+    assert features._output("\n".join(lines)) == (
+        "output: two words",
+        "output: [redacted]",
+        "output: four",
+        "output: five",
+        "output: six",
+        "output: " + "x" * 300,
+    )
+    assert calls == [(line, "strict") for line in lines]

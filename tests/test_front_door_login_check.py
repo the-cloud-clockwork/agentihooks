@@ -3,10 +3,10 @@ import os
 from types import SimpleNamespace
 
 import pytest
-from scripts.feature_checks import front_door_login as check
 
 from scripts import master_claude_login as login
 from scripts import master_logins
+from scripts.feature_checks import front_door_login as check
 
 
 @pytest.fixture(autouse=True)
@@ -96,3 +96,58 @@ def test_front_doors_may_spread_once_the_preferred_login_is_spent(monkeypatch):
     _room(monkeypatch, oneatexample_com=3.0, twoatexample_com=90.0)
     monkeypatch.setenv(login.ORDER_ENV, "one@example.com,two@example.com")
     assert check.violations(check.front_doors(_store()), check.ordered(1.0)) == []
+
+
+def test_live_routes_keep_the_swarm_front_door_and_account(monkeypatch):
+    _stored(1, "one@example.com", "master@rig-1")
+    current = _store()
+    current.swarms["rig"][0].seat = "master@rig"
+    _stored(2, "two@example.com", "master@doctor-1")
+    assert check.front_doors(current) == [
+        check.FrontDoor("doctor", "master@doctor-1", "twoatexample_com", ""),
+        check.FrontDoor("rig", "master@rig-1", "oneatexample_com", "tokenatexample_com"),
+    ]
+    assert check.front_doors(Store({"rig": [_agent("master@token", account="route")]})) == [
+        check.FrontDoor("rig", "master@token", "", "route")
+    ]
+
+
+def test_login_order_uses_preference_then_room_then_slot(monkeypatch):
+    monkeypatch.setattr(login, "logins", lambda: {1: "z", 2: "a", 3: "first", 4: "more"})
+    monkeypatch.setattr(login, "_preferred", lambda: {"first": 0})
+    _room(monkeypatch, z=30, a=30, first=10, more=60)
+    assert check.ordered(1) == [("first", 10), ("more", 60), ("z", 30), ("a", 30)]
+
+
+def test_default_main_reads_live_store_and_reports_all_routes(monkeypatch, capsys):
+    from scripts.swarm import store
+
+    connection = object()
+    current = _store()
+    seen = []
+    monkeypatch.setattr(store, "redis_client", lambda: connection)
+
+    def connected(value):
+        seen.append(value)
+        return current
+
+    monkeypatch.setattr(store, "RedisStore", connected)
+    _stored(1, "one@example.com", "master@doctor-1")
+    _stored(2, "two@example.com")
+    _room(monkeypatch, oneatexample_com=60, twoatexample_com=20)
+    assert check.main() == 1
+    assert seen == [connection]
+    assert capsys.readouterr().out.splitlines() == [
+        "stored logins in order: oneatexample_com 60% left, twoatexample_com 20% left",
+        "doctor front door master@doctor-1 runs on the claude ai login oneatexample_com",
+        "rig front door master@rig-1 runs on a quota token tokenatexample_com",
+        "FAIL: rig front door master@rig-1 runs on a quota token while the stored login oneatexample_com has room",
+    ]
+
+
+def test_no_stored_logins_reports_unknown_token_route(capsys):
+    assert check.main(Store({"rig": [_agent("master@unknown")]})) == 0
+    assert capsys.readouterr().out.splitlines() == [
+        "stored logins in order: none",
+        "rig front door master@unknown runs on a quota token unknown",
+    ]
