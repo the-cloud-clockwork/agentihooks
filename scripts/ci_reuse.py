@@ -232,6 +232,13 @@ def paged_reuse_job() -> dict:
     return job
 
 
+def retried_reuse_job() -> dict:
+    job = paged_reuse_job()
+    [publish] = [step for step in job["steps"] if step.get("name") == "Publish protected tested tree evidence"]
+    publish["uses"] = "./.github/actions/retry-upload"
+    return job
+
+
 def _git(*args):
     return subprocess.check_output(["git", *args], text=True).strip()
 
