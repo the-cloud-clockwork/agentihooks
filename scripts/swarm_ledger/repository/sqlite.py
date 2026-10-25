@@ -536,8 +536,8 @@ class SQLiteLedgerRepository:
 
     def encoded_view(self, slug: str, view) -> str | bytes:
         """view(state) of the stored ledger, built once per generation and keyed by view, so view is a module
-        level function that never changes the state it reads. Builds run one at a time: each holds a whole
-        encoded copy of a ledger, and overlapping builds pushed the hosted server past its memory limit."""
+        level function that never changes the state it reads. Builds run one at a time under VIEW_BUILD, since each
+        holds a whole encoded copy of a ledger, so a view must not call encoded_view."""
         self._adopt(slug)
         with self.connect() as connection, connection:
             connection.execute(BEGIN)
