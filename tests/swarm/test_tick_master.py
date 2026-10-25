@@ -313,6 +313,30 @@ def test_a_master_starting_before_any_forced_launch_is_not_a_failure():
     assert tick_master.read(swarm, "sw") == {"since": 1}
 
 
+def test_a_starting_master_without_a_kept_start_is_timed_from_the_forced_launch():
+    swarm, _ = direct(AgentRecord("master@a1b2c3-0002", MASTER, MASTER, state="starting", seat=MASTER_SEAT))
+    assert tick_master._hookless(swarm, "sw", {"forced_at": 1}, 120_000) is False
+    assert tick_master._hookless(swarm, "sw", {"forced_at": 1}, 120_001) is True
+    assert tick_master._hookless(swarm, "sw", {"forced_at": 1, "started_at": 60_000}, 120_001) is False
+    assert tick_master._hookless(swarm, "sw", {}, 120_001) is False
+
+
+def test_a_forced_tick_keeps_the_first_start_only_while_a_master_starts():
+    starting = AgentRecord("master@a1b2c3-0002", MASTER, MASTER, state="starting", seat=MASTER_SEAT)
+    swarm, _ = direct(starting)
+    kept = tick_master._forced(swarm, "sw", {"since": 1, "started_at": 5}, 10, ["refused"])
+    assert kept == {"since": 1, "started_at": 5, "forced_at": 10}
+    assert tick_master._forced(swarm, "sw", {"since": 1}, 10, []) == {"since": 1, "started_at": 10, "forced_at": 10}
+    empty, _ = direct()
+    dropped = tick_master._forced(empty, "sw", {"since": 1, "started_at": 5}, 10, ["refused"])
+    assert dropped == {"since": 1, "forced_at": 10, "failure": "refused"}
+    assert tick_master._forced(empty, "sw", {"since": 1}, 10, []) == {
+        "since": 1,
+        "forced_at": 10,
+        "failure": tick_master.NO_LAUNCH,
+    }
+
+
 def test_a_finished_master_record_counts_as_no_master():
     engineer = AgentRecord(ENGINEER, "eng", "t1", state="working", seat="eng-1@sw")
     finished = AgentRecord("master@a1b2c3-0002", MASTER, MASTER, state="finished", seat=MASTER_SEAT)

@@ -84,6 +84,28 @@ def test_the_detached_child_of_a_deferred_launch_still_waits_on_the_route(tmp_pa
     }
 
 
+def test_a_spent_route_wait_never_sleeps(tmp_path, monkeypatch):
+    monkeypatch.setattr(init_agent.time, "monotonic", lambda: 5.0)
+    monkeypatch.setattr(init_agent.time, "sleep", lambda seconds: pytest.fail("the route wait slept"))
+    assert init_agent._await_route(tmp_path / "route", 0, {}) == ({}, None)
+
+
+def test_the_route_wait_reads_a_report_written_while_it_sleeps(tmp_path, monkeypatch):
+    route = tmp_path / "route"
+    slept = []
+
+    def sleep(seconds):
+        slept.append(seconds)
+        route.write_text("status=routed\naccount=acct\n")
+
+    monkeypatch.setattr(init_agent.time, "sleep", sleep)
+    found, written = init_agent._await_route(route, 30, {})
+    assert found == {"status": "routed", "account": "acct"}
+    assert isinstance(written, int)
+    assert slept == [0.25]
+    assert not route.exists()
+
+
 def test_only_a_deferred_launch_refuses_its_profile_request(tmp_path):
     report = tmp_path / "report.json"
     binding.request(report, "master", "claude")
@@ -115,7 +137,15 @@ def test_only_a_deferred_launch_with_a_profile_request_detaches(monkeypatch):
 
 def test_detach_returns_in_the_caller_and_carries_on_in_a_new_session():
     read, write, caller = *os.pipe(), os.getpid()
-    detached = init_agent._detach()
+    held, (stdin, feed) = os.dup(0), os.pipe()
+    os.dup2(stdin, 0)
+    try:
+        detached = init_agent._detach()
+    finally:
+        if os.getpid() == caller:
+            os.dup2(held, 0)
+            for descriptor in (held, stdin, feed):
+                os.close(descriptor)
     if os.getpid() != caller:
         try:
             streams = [os.readlink(f"/proc/self/fd/{number}") for number in (0, 1, 2)]
