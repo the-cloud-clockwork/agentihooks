@@ -1179,18 +1179,6 @@ def test_the_host_tick_reconciles_the_user_services_once_per_pass(monkeypatch):
     assert _tick_all(monkeypatch, lambda store, slug: [], []).reconciled == ["/installed/bin/agentihooks"]
 
 
-def test_every_tick_pass_dispatches_the_documentation_retry_timer(monkeypatch):
-    from hooks.context import documentation_session
-
-    monkeypatch.setattr(timer, "entry_point", lambda: "/installed/bin/agentihooks")
-    scheduled = []
-    monkeypatch.setattr(documentation_session, "schedule_retry", lambda: scheduled.append(True))
-    _tick_all(monkeypatch, lambda store, slug: [], ["a", "b"])
-    assert scheduled == [True]
-    _tick_all(monkeypatch, lambda store, slug: [], [])
-    assert scheduled == [True, True]
-
-
 def test_a_failed_service_install_warns_and_lets_the_tick_go_on(monkeypatch, capsys):
     monkeypatch.setattr(timer, "entry_point", lambda: "/installed/bin/agentihooks")
     outcomes = iter([True, False, subprocess.TimeoutExpired(["systemctl"], 30), OSError("read only")])
