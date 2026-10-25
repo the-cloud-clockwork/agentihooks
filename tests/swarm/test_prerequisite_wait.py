@@ -49,3 +49,22 @@ def test_the_tasks_final_deliverable_can_wait_at_any_queue_position(waiting):
     ledger.rows["t1"]["pr_url"] = URL
     assert run("sw", "--as", ME, "wait", "--on", "merge", URL) == 0
     assert idle.wait(store.redis, "sw", ME)["on"]["target"] == URL
+
+
+def test_block_retains_the_stack_and_tick_reopens_only_after_prerequisite_merge(waiting, env, monkeypatch):  # noqa: F811
+    store, ledger, _ = waiting
+    note = "Stack published on continuation branch; next step restack after prerequisite merge"
+    ledger.rows["t1"].update(branch="continuation", pr_url="https://github.com/o/r/pull/8")
+    assert run("sw", "--as", ME, "wait", "--on", "merge", URL) == 1
+    assert run("sw", "--as", ME, "block", note) == 0
+    assert ledger.rows["t1"]["state"] == "blocked"
+    assert ledger.rows["t1"]["branch"] == "continuation"
+    assert any(row[:2] == ("t1", note) for row in ledger.comments)
+    assert store.agents("sw")[0].state == "finished"
+    cli.tick("sw", store, ledger, env[2], 2_000)
+    assert ledger.rows["t1"]["state"] == "blocked"
+    monkeypatch.setattr(cli.ledger_events, "view", lambda url: PullRequest("MERGED", 2, 1, False))
+    cli.tick("sw", store, ledger, env[2], 3_000)
+    assert ledger.rows["t1"]["state"] == "open"
+    assert ledger.rows["t1"]["claimed_by"] == ""
+    assert ledger.rows["t1"]["branch"] == "continuation"
