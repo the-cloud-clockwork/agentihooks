@@ -37,7 +37,7 @@ def test_the_app_server_branch_runs_the_supervisor_with_the_opening_prompt_file(
     )
     launcher, prompt_file, argv = launched(tmp_path, spec)
     split = argv.index("--")
-    assert argv[:4] == [sys.executable, "-m", "scripts.codex_session", "serve"]
+    assert argv[:5] == [sys.executable, "-P", "-m", "scripts.codex_session", "serve"]
     assert argv[argv.index("--cwd") + 1] == str(tmp_path)
     assert argv[argv.index("--profile") + 1] == "engineer"
     assert argv[argv.index("--seat") + 1] == "eng-1@sw"

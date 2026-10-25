@@ -213,11 +213,12 @@ def test_the_app_server_pane_runs_the_server_in_its_own_session_and_the_viewer_i
     log = launcher.with_name(f"{launcher.stem}.serve.log")
     assert words[:4] == ["setsid", "-f", "sh", "-c"]
     server, _, removed = words[4].removeprefix(init_agent.LAUNCHER_PIN).partition("; rm -f ")
-    assert shlex.split(server)[:4] == [sys.executable, "-m", "scripts.codex_session", "serve"]
+    assert shlex.split(server)[:5] == [sys.executable, "-P", "-m", "scripts.codex_session", "serve"]
     assert shlex.split(removed) == [str(opening), str(init_agent._route_report(launcher))]
     assert words[5:] == ["</dev/null", f">>{log}", "2>&1"]
     assert shlex.split(lines[serve + 1]) == [
         sys.executable,
+        "-P",
         "-m",
         "scripts.codex_session",
         "attach",

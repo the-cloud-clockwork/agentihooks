@@ -372,6 +372,7 @@ def _app_server_command(
 ) -> list[str]:
     return [
         sys.executable,
+        "-P",
         "-m",
         "scripts.codex_session",
         "serve",
@@ -404,6 +405,7 @@ def _viewer_lines(serve: str, launcher: Path, name: str, environ: dict[str, str]
     log = launcher.with_name(f"{launcher.stem}.serve.log")
     viewer = [
         sys.executable,
+        "-P",
         "-m",
         "scripts.codex_session",
         "attach",
