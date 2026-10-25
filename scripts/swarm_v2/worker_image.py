@@ -25,13 +25,13 @@ def validate_artifact(name: str, artifact: dict, tools: dict) -> None:
     companion = artifact.get("companion")
     if companion is not None and (companion not in TOOLS or "version_output" in artifact):
         raise ValueError(f"invalid artifact lock: {name}")
-    version_output = tools.get(companion, {}) if companion else artifact
+    source = tools[companion] if companion else artifact
     if (
         not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", version)
         or not re.fullmatch(r"[a-f0-9]{64}", artifact.get("sha256") or "")
         or not artifact.get("url", "").startswith("https://")
         or version not in re.findall(r"[0-9]+\.[0-9]+\.[0-9]+", artifact["url"])
-        or re.findall(r"[0-9]+\.[0-9]+\.[0-9]+", version_output.get("version_output", "")) != [version]
+        or re.findall(r"[0-9]+\.[0-9]+\.[0-9]+", str(source.get("version_output"))) != [version]
     ):
         raise ValueError(f"invalid artifact lock: {name}")
 
@@ -110,11 +110,11 @@ def tool_versions(lock: dict, destination: Path) -> dict:
             if not result.stdout.startswith(f"Usage: {name} "):
                 raise ValueError(f"binary usage mismatch: {name}")
             versions[name] = f"{name} {artifact['version']} sha256:{checksum(destination / name)}"
-            continue
-        result = subprocess.run([str(destination / name), "--version"], check=True, capture_output=True, text=True)
-        if result.stdout.strip() != artifact["version_output"]:
-            raise ValueError(f"binary version mismatch: {name}")
-        versions[name] = result.stdout.strip()
+        else:
+            result = subprocess.run([str(destination / name), "--version"], check=True, capture_output=True, text=True)
+            if result.stdout.strip() != artifact["version_output"]:
+                raise ValueError(f"binary version mismatch: {name}")
+            versions[name] = result.stdout.strip()
     return versions
 
 

@@ -1,6 +1,7 @@
 import hashlib
 import io
 import json
+import subprocess
 import tarfile
 import threading
 import urllib.error
@@ -307,6 +308,22 @@ def test_companion_installs_beside_codex_and_checks_its_identity(locked, tmp_pat
     with pytest.raises(ValueError) as error:
         worker_image.tool_versions(lock, destination)
     assert str(error.value) == "binary usage mismatch: codex-code-mode-host"
+
+
+def test_companion_check_rejects_a_failed_binary_with_matching_usage(locked, tmp_path):
+    _, lock, payloads = locked
+    companion(lock, payloads)
+    lock["tools"] = {"codex-code-mode-host": lock["tools"]["codex-code-mode-host"], **lock["tools"]}
+    destination = tmp_path / "bin"
+    destination.mkdir()
+    for name in lock["tools"]:
+        (destination / name).write_bytes(payloads[lock["tools"][name]["url"]])
+        (destination / name).chmod(0o755)
+    assert list(worker_image.tool_versions(lock, destination)) == list(lock["tools"])
+    host = destination / "codex-code-mode-host"
+    host.write_text("#!/bin/sh\nprintf 'Usage: codex-code-mode-host [OPTIONS]\\n'\nexit 1\n")
+    with pytest.raises(subprocess.CalledProcessError):
+        worker_image.tool_versions(lock, destination)
 
 
 @pytest.mark.parametrize(
