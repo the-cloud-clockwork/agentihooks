@@ -169,6 +169,7 @@ def test_measurement_preserves_every_evidence_field_and_newest_pull_request_orde
         None,
     )
     assert stats.measure("owner/repo", 2, until)["count"] == 2
+    assert stats.measure("owner/repo", 3, until, since)["count"] == 2
 
 
 def test_measurement_without_matching_merged_pull_requests_reports_zero(monkeypatch):
