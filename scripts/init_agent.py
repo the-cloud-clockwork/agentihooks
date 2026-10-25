@@ -94,6 +94,7 @@ class AgentSpec:
     transport: str = ""
     seat: str = ""
     previous_execution: str = ""
+    execution: str = ""
     title: str = ""
     home: str = ""
 
@@ -386,6 +387,7 @@ def _app_server_command(
         "--report",
         str(report),
         *(["--previous-execution", spec.previous_execution] if spec.previous_execution else []),
+        *(["--execution", spec.execution] if spec.execution else []),
         *(["--resume", spec.resume] if spec.resume else []),
         *(["--prompt-file", str(opening)] if opening else []),
         "--",
@@ -815,6 +817,7 @@ def _parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--seat", default="", help="Codex app-server: the swarm seat this execution occupies")
     parser.add_argument("--previous-execution", default="", help="Codex app-server: the execution this launch replaces")
+    parser.add_argument("--execution", default="", help="Codex app-server: the admitted execution this launch serves")
     parser.add_argument(
         "--inbox-channel",
         action="store_true",
@@ -964,9 +967,18 @@ def _codex_named(environ: dict[str, str], name: str, since: float) -> Callable[[
     return named
 
 
+def _launch_seconds(args) -> float:
+    from scripts.master_login_chain import BUDGET
+
+    if args.agent in ("", "claude") and _flag_value(args.claude_args, ("--route",)) == "master-login":
+        args.route_timeout = max(args.route_timeout, BUDGET.route)
+        return BUDGET.launch
+    return LAUNCH_DEADLINE_S
+
+
 def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -> int:
     args = _parser().parse_args(argv)
-    launch = LaunchDeadline(LAUNCH_DEADLINE_S)
+    launch = LaunchDeadline(_launch_seconds(args))
     active_env = dict(os.environ if environ is None else environ)
     active_env.pop("AGENTIHOOKS_PROFILE_REPORT", None)
     operator_env.fill(active_env)
@@ -1018,6 +1030,7 @@ def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -
                 transport=_transport(args, agent),
                 seat=args.seat,
                 previous_execution=args.previous_execution,
+                execution=args.execution,
                 title=args.title,
                 home=_recorded_home(agent, active_env),
             ),

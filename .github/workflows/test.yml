@@ -449,7 +449,9 @@ jobs:
               jobs=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run/jobs?per_page=100" --paginate --jq '.jobs[]')
               if ! jq -s -e '
                 [.[] | select(.name | startswith("unit ("))] as $units |
-                ($units | length == 18 and all(.[]; .conclusion == "success")) and
+                ($units | length > 0 and all(.[]; .conclusion == "success") and
+                  (map(.name | capture("^unit \\((?<v>[^,]+), (?<s>[0-9]+)\\)$")? // {v: "", s: "0"} | .s |= tonumber) |
+                    group_by(.v) | all(.[]; map(.s) | sort == [range(1; length + 1)]))) and
                 any(.[];
                   .name == "coverage-baseline" and .conclusion == "success" and
                   any(.steps[]?; .name == "Compute the coverage baseline" and .conclusion == "success") and
@@ -704,7 +706,7 @@ jobs:
           permission-actions: read
 
       - name: Fetch the base suite count recorded on dev
-        if: steps.app-token.outcome == 'success' && github.event_name == 'pull_request'
+        if: steps.app-token.outcome == 'success' && (github.event_name == 'pull_request' || github.event_name == 'merge_group')
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           RECORD: count-record-${{ matrix.python-version }}
@@ -827,6 +829,27 @@ jobs:
           retention-days: 7
           overwrite: true
 
+      # The next group's base is this head, and its dev record lands only after that group has started.
+      - name: Record the head count for the next queue group
+        if: github.event_name == 'merge_group'
+        continue-on-error: true
+        run: |
+          cmp -s "$RUNNER_TEMP/base/tests/count_floor.py" tests/count_floor.py || exit 0
+          git worktree add --detach "$RUNNER_TEMP/head" HEAD
+          mkdir -p "$RUNNER_TEMP/count-record"
+          cd "$RUNNER_TEMP/base"
+          python -m tests.count_floor --record "$RUNNER_TEMP/count-record/record.json" --head "$RUNNER_TEMP/head" --collected "$RUNNER_TEMP/collected.json"
+
+      - name: Upload the head count for the next queue group
+        if: github.event_name == 'merge_group'
+        uses: actions/upload-artifact@v4
+        with:
+          name: count-record-${{ matrix.python-version }}
+          path: ${{ runner.temp }}/count-record/record.json
+          if-no-files-found: ignore
+          retention-days: 7
+          overwrite: true
+
       - name: Save exact count collections
         if: steps.counts.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
@@ -839,7 +862,7 @@ jobs:
     if: ${{ !cancelled() && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && (github.event_name != 'pull_request' || needs.select.outputs.scope == 'full') }}
     needs: [select, reuse, admission]
     runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && (github.event_name == 'merge_group' && 'anton-oss-queue' || 'anton-oss') || 'ubuntu-latest' }}
-    timeout-minutes: 20
+    timeout-minutes: 25
     permissions:
       contents: read
     strategy:
@@ -915,15 +938,11 @@ jobs:
           permission-actions: read
 
       - name: Require successful early collection
-        if: github.event_name != 'push' && needs.select.outputs.source == ''
+        if: github.event_name != 'push' && needs.select.outputs.source == '' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           COLLECTION_JOB: test-count (${{ matrix.python-version }})
         run: |
-          if [[ -z "$GH_TOKEN" ]]; then
-            echo "A fork pull request mints no App token; Gate Required still holds the count."
-            exit 0
-          fi
           while :; do
             state="$(gh api --paginate "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/jobs?filter=latest&per_page=100" \
               --jq ".jobs[] | select(.name == \"$COLLECTION_JOB\") | \"\(.status) \(.conclusion)\"")" || state=""
@@ -935,12 +954,18 @@ jobs:
           done
 
       - name: Download the early collection
-        if: github.event_name != 'push' && needs.select.outputs.source == ''
+        if: github.event_name != 'push' && needs.select.outputs.source == '' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
         uses: ./.github/actions/retry-download
         with:
           name: early-collected-${{ matrix.python-version }}
           client-id: ${{ secrets.TCC_CI_CLIENT_ID }}
           private-key: ${{ secrets.TCC_CI_APP_PRIVATE_KEY }}
+
+      - name: Wait for the early collection on a fork
+        if: github.event_name != 'push' && needs.select.outputs.source == '' && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository
+        uses: ./.github/actions/await-download
+        with:
+          name: early-collected-${{ matrix.python-version }}
 
       - name: Download the queued run's dev durations
         if: needs.select.outputs.source == '' && needs.select.outputs.queued == 'true'
@@ -2224,7 +2249,9 @@ jobs:
             jobs=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run/jobs?per_page=100" --paginate --jq '.jobs[]')
             if ! jq -s -e --arg event "$event" '
               [.[] | select(.name | startswith("unit ("))] as $units |
-              (($units | length == 18 and all(.[]; .conclusion == "success")) or
+              (($units | length > 0 and all(.[]; .conclusion == "success") and
+                (map(.name | capture("^unit \\((?<v>[^,]+), (?<s>[0-9]+)\\)$")? // {v: "", s: "0"} | .s |= tonumber) |
+                  group_by(.v) | all(.[]; map(.s) | sort == [range(1; length + 1)]))) or
                ($event == "merge_group" and
                 all(.[] | select(.name == "unit" or (.name | startswith("unit ("))); .conclusion == "skipped") and
                 any(.[]; .name == "reuse" and .conclusion == "success" and

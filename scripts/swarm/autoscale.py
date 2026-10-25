@@ -1,4 +1,4 @@
-from typing import NotRequired, TypedDict
+from typing import TypedDict
 
 
 class PendingRaise(TypedDict):
@@ -10,19 +10,6 @@ class Decision(TypedDict):
     ceilings: dict[str, int]
     pending_raise: PendingRaise
     reason: str
-    shift: NotRequired[int]
-
-
-def _shifted(ceilings: dict[str, int], live: dict[str, int], demand: dict[str, int], shift: int) -> tuple[dict, str]:
-    giver, taker = ("eng", "ci") if shift > 0 else ("ci", "eng")
-    floor = live.get(giver, 0) + bool(demand.get(giver))
-    needed = max(0, live.get(taker, 0) + demand.get(taker, 0) - ceilings[taker])
-    moved = min(abs(shift), max(0, ceilings[giver] - floor), needed)
-    ceilings[giver] -= moved
-    ceilings[taker] += moved
-    return {
-        "shift": moved if giver == "eng" else -moved
-    }, f"; lane shift {moved} from {giver} to {taker}" if moved else ""
 
 
 def _ceilings(live: dict[str, int], demand: dict[str, int], total: int) -> dict[str, int]:
@@ -51,7 +38,6 @@ def calculate(
     host_room: int | None,
     demand: dict[str, int],
     previous: Decision | None = None,
-    shift: int = 0,
 ) -> Decision:
     seats = sum(free_seats.values())
     target = min(50, sum(live.values()) + (seats if host_room is None else min(seats, host_room)))
@@ -67,7 +53,6 @@ def calculate(
             pending = {"target": None, "ticks": 0}
     total = max(total, min(target, sum(live.values()) + sum(bool(count) for count in demand.values())))
     ceilings = _ceilings(live, demand, total)
-    extra, shifted = _shifted(ceilings, live, demand, shift) if shift else ({}, "")
     harnesses = ", ".join(f"{harness} {seats}" for harness, seats in sorted(free_seats.items()))
     host_text = "unknown" if host_room is None else host_room
     allocated = sum(ceilings.values())
@@ -81,11 +66,9 @@ def calculate(
             if pending["ticks"] < 3
             else "; raise held by the two seat per tick limit"
         )
-    reason += shifted
     decision: Decision = {
         "ceilings": ceilings,
         "pending_raise": pending,
         "reason": reason + ".",
-        **extra,
     }
     return decision

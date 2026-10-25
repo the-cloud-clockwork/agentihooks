@@ -119,16 +119,34 @@ class FakeQueue:
         return subprocess.CompletedProcess(command, 0, json.dumps(data), "")
 
 
-@pytest.mark.parametrize("queued, expected", [(False, [1, 9, 2, 3]), (True, [1, 9, 4, 2, 3])])
+@pytest.mark.parametrize("queued, expected", [(False, [1, 9, 2, 3]), (True, [1, 9, 2, 3, 4])])
 def test_priority_preserves_displaced_order_and_running_entries(queued, expected):
     queue = FakeQueue(queued)
     result = merge_queue.prioritize(URL, run=queue.run)
     assert [int(e["pullRequest"]["id"][1:]) for e in queue.entries] == expected
-    assert queue.mutations == [("dequeue", 3), ("dequeue", 2)] + ([] if queued else [("queue", 9)]) + [
-        ("queue", 2),
-        ("queue", 3),
+    later = [4] if queued else []
+    assert queue.mutations == [("dequeue", n) for n in [*later, 3, 2]] + ([] if queued else [("queue", 9)]) + [
+        ("queue", n) for n in [2, 3, *later]
     ]
-    assert result["displaced"] == [URL[:-1] + "2", URL[:-1] + "3"]
+    assert result["displaced"] == [URL[:-1] + str(n) for n in [2, 3, *later]]
+
+
+def test_priority_keeps_displaced_ahead_of_later_arrivals_in_one_pass():
+    queue = FakeQueue(queued=True)
+    queue.entries += [queue.entry(5), queue.entry(6)]
+    result = merge_queue.prioritize(URL, run=queue.run)
+    assert [int(e["pullRequest"]["id"][1:]) for e in queue.entries] == [1, 9, 2, 3, 4, 5, 6]
+    assert queue.mutations == [("dequeue", n) for n in (6, 5, 4, 3, 2)] + [("queue", n) for n in (2, 3, 4, 5, 6)]
+    assert result == {"url": URL, "displaced": [URL[:-1] + str(n) for n in (2, 3, 4, 5, 6)], "errors": []}
+
+
+def test_priority_leaves_earlier_priority_targets_in_place_on_either_side():
+    queue = FakeQueue(queued=True)
+    queue.entries += [queue.entry(5)]
+    result = merge_queue.prioritize(URL, run=queue.run, ahead=(URL[:-1] + "2", URL[:-1] + "5"))
+    assert [int(e["pullRequest"]["id"][1:]) for e in queue.entries] == [1, 2, 9, 5, 3, 4]
+    assert queue.mutations == [("dequeue", 4), ("dequeue", 3), ("queue", 3), ("queue", 4)]
+    assert result["displaced"] == [URL[:-1] + "3", URL[:-1] + "4"]
 
 
 @pytest.mark.parametrize("errors, status", [([], 0), (["restore refused", "second refusal"], 1)])
@@ -255,10 +273,10 @@ def test_priority_reenqueues_a_critical_entry_ejected_during_reorder():
 
     result = merge_queue.prioritize(URL, run=run)
     assert result["errors"] == []
-    assert [e["pullRequest"]["id"] for e in queue.entries] == ["P1", "P4", "P9", "P2", "P3"]
+    assert [e["pullRequest"]["id"] for e in queue.entries] == ["P1", "P9", "P2", "P3", "P4"]
 
 
-def test_priority_attempts_every_restoration_after_one_is_refused():
+def test_priority_stops_restoring_at_the_first_refusal_so_the_rest_keep_their_order():
     queue = FakeQueue()
 
     def run(command, **kwargs):
@@ -267,14 +285,31 @@ def test_priority_attempts_every_restoration_after_one_is_refused():
         return queue.run(command, **kwargs)
 
     result = merge_queue.prioritize(URL, run=run)
-    assert result["displaced"] == [URL[:-1] + "3"]
-    assert "could not restore" in result["errors"][0]
-    assert [e["pullRequest"]["id"] for e in queue.entries] == ["P1", "P9", "P3"]
+    assert result == {"url": URL, "displaced": [], "errors": [f"could not restore {URL[:-1]}2: restore refused"]}
+    assert [e["pullRequest"]["id"] for e in queue.entries] == ["P1", "P9"]
 
 
-def test_priority_preserves_order_across_queue_pages():
+def test_priority_requeues_a_queued_target_ejected_before_a_dequeue_fails():
+    queue = FakeQueue(queued=True)
+
+    def run(command, **kwargs):
+        dequeue = "dequeuePullRequest" in " ".join(command)
+        if dequeue and "id=P3" in command:
+            return subprocess.CompletedProcess(command, 1, "", "dequeue refused")
+        done = queue.run(command, **kwargs)
+        if dequeue and "id=P4" in command:
+            queue.entries = [e for e in queue.entries if e["pullRequest"]["id"] != "P9"]
+        return done
+
+    result = merge_queue.prioritize(URL, run=run)
+    assert result == {"url": URL, "displaced": [URL[:-1] + "4"], "errors": ["dequeue refused"]}
+    assert [e["pullRequest"]["id"] for e in queue.entries] == ["P1", "P2", "P3", "P9", "P4"]
+
+
+@pytest.mark.parametrize("queued, split", [(False, 2), (True, 4)])
+def test_priority_preserves_order_across_queue_pages(queued, split):
     queue = FakeQueue()
-    queue.entries += [queue.entry(4), queue.entry(5)]
+    queue.entries += ([queue.entry(9)] if queued else []) + [queue.entry(4), queue.entry(5)]
     pages = []
 
     def run(command, **kwargs):
@@ -284,11 +319,11 @@ def test_priority_preserves_order_across_queue_pages():
             args.pop("query")
             if not pages:
                 assert args == {}
-                nodes = queue.entries[:2]
+                nodes = queue.entries[:split]
                 info = {"hasNextPage": True, "endCursor": "cursor"}
             else:
                 assert args == {"after": "cursor"}
-                nodes = queue.entries[2:]
+                nodes = queue.entries[split:]
                 info = {"hasNextPage": False, "endCursor": None}
             pages.append(nodes.copy())
             data = {
@@ -312,10 +347,21 @@ def test_priority_does_not_remove_an_entry_that_started_running():
             queue.entries[1]["state"] = "AWAITING_CHECKS"
         return done
 
-    result = merge_queue.prioritize(URL, run=run)
+    displaced = Displaced(queue)
+    result = merge_queue.prioritize(URL, run=run, displaced=displaced)
     assert result == {"url": URL, "displaced": [URL[:-1] + "3"], "errors": []}
     assert queue.mutations == [("dequeue", 3), ("queue", 9), ("queue", 3)]
     assert [e["pullRequest"]["id"] for e in queue.entries] == ["P1", "P2", "P9", "P3"]
+    assert displaced.pulls == {}
+
+
+def test_priority_checks_each_restored_entry_with_an_empty_body_when_it_has_none(monkeypatch):
+    queue, checked = FakeQueue(), []
+    monkeypatch.setattr(
+        merge_queue.staged_compatibility, "require", lambda url, head, body, run: checked.append((url, head, body))
+    )
+    merge_queue.prioritize(URL, run=queue.run)
+    assert checked == [(URL[:-1] + str(n), f"head{n}", "") for n in (9, 2, 3)]
 
 
 def test_master_priority_defers_without_cancelling_running_head(monkeypatch, capsys):
@@ -387,7 +433,7 @@ def test_priority_records_each_entry_before_it_leaves_the_queue():
     assert [e["pullRequest"]["id"] for e in queue.entries] == ["P1"]
 
 
-@pytest.mark.parametrize("refused, kept", [("", []), ("P2", [URL[:-1] + "2"])])
+@pytest.mark.parametrize("refused, kept", [("", []), ("P2", [URL[:-1] + "2", URL[:-1] + "3"])])
 def test_priority_clears_each_entry_once_it_is_back(refused, kept):
     queue = FakeQueue()
     displaced = Displaced(queue)

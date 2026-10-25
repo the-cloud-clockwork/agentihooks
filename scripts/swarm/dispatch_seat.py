@@ -4,7 +4,7 @@ At full autonomy a trigger wakes the live seat through its inbox or, unless the 
 seat spawn helper; below full, once every trigger closes, or once the seat left the ledger, the seat is marked finished
 and the reap pass retires it. Triggers that a departed seat had received spawn no new seat; a new trigger spawns one
 primed with every open trigger. A trigger is a priority the sweep left unresolved for fifteen minutes, a bottleneck no
-lane rule covers held for the lane split's ticks, or a red dev holding blocked tasks, where a freeze or focus may be
+lane rule covers named by three reports running, or a red dev holding blocked tasks, where a freeze or focus may be
 worth proposing. A priority that waits on an operator decision, or that a dispatcher seat handed to him by raising it
 again under its own name, is no trigger.
 """
@@ -17,7 +17,6 @@ from scripts.swarm import (
     bottleneck,
     capacity,
     dev_red,
-    lane_split,
     launch_check,
     lifetime,
     priority_sweep,
@@ -31,6 +30,8 @@ LANE = DISPATCH
 SEAT = "dispatcher"
 SENDER = "swarm"
 STALE_MS = 15 * 60 * 1000
+STREAK = "bottleneck-streak"
+TICKS = 3
 SENT = "dispatch-sent"
 LEFT = "dispatch-left"
 CLOSED = "its triggers closed"
@@ -79,17 +80,30 @@ def _routing_applied(store, slug: str, write: bool) -> bool:
 
 
 def uncovered(store, slug: str, now_ms: int, write: bool = True) -> list[dict]:
-    held = json.loads(store.redis.get(store.key(slug, lane_split.KEY)) or "{}")
+    key = store.key(slug, STREAK)
+    previous = json.loads(store.redis.get(key) or "{}")
+    found = bottleneck.read(store, slug)
+    held = streak(previous, found)
+    if write and held is not previous:
+        store.redis.set(key, json.dumps(held))
     named = held.get("named")
-    if not named or named in lane_split.MOVES or held["ticks"] < lane_split.TICKS or now_ms - held["at"] > STALE_MS:
+    if not named or held["ticks"] < TICKS or now_ms - held["at"] > STALE_MS:
         _forget_quota_lanes(store, slug, write)
         return []
     if named != "quota":
         _forget_quota_lanes(store, slug, write)
     elif _routing_applied(store, slug, write):
         return []
-    text = bottleneck.line(bottleneck.read(store, slug), now_ms)
+    text = bottleneck.line(found, now_ms)
     return [{"id": f"{BOTTLENECK}{named}", "kind": "bottleneck", "ticks": held["ticks"], "text": text}]
+
+
+def streak(previous: dict, found: dict) -> dict:
+    if not found or found.get("at") == previous.get("at"):
+        return previous
+    named = found["bottleneck"]
+    ticks = previous["ticks"] + 1 if named == previous.get("named") else 1
+    return {"named": named, "ticks": ticks, "at": found["at"]}
 
 
 def _forget_quota_lanes(store, slug: str, write: bool) -> None:

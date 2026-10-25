@@ -2114,6 +2114,7 @@ def test_export_encodes_once_per_ledger_generation(live, monkeypatch):
     assert json.loads(first) == stored()
     monkeypatch.setattr(json, "loads", decode)
     monkeypatch.setattr(json, "dumps", encode)
+    json.loads(server.repository.inner.current(SLUG).text)
     server.repository.inner.get_document(SLUG)
     assert counts == {"decode": 1, "encode": 0}
     counts.update(decode=0)

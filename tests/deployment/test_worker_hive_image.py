@@ -53,16 +53,17 @@ def judge(tmp_path, *, diff=0, pull=0, run=0, fetch=0):
 
 
 def test_kind_proof_layers_only_the_hive_on_a_current_base():
-    assert len(builds()) == 3
-    published, rebuilt_base, rebuilt_hive = builds()
-    assert "--pull" not in published
-    assert "-f deploy/worker/Dockerfile" in published
-    assert "--build-arg WORKER_IMAGE" not in published
+    assert len(builds()) == 2
+    rebuilt_base, hive = builds()
+    assert f"base-current.sh {BASE}; then\n  worker_base=published\n  docker tag {BASE} local/worker-base:dev\n" in (
+        PROOF.read_text()
+    )
     assert f"ARG WORKER_IMAGE={BASE}\n" in (ROOT / "deploy/worker/Dockerfile").read_text()
     assert "-f docker/swarm-node/Dockerfile" in rebuilt_base
-    assert "--build-arg WORKER_IMAGE=local/worker-base:dev" in rebuilt_hive
-    for hive in (published, rebuilt_hive):
-        assert '--build-arg AGENTIHOOKS_REF="${AGENTIHOOKS_REF:-dev}"' in hive
+    assert "--pull" not in hive
+    assert "-f deploy/worker/Dockerfile" in hive
+    assert "--build-arg WORKER_IMAGE=local/worker-base:dev" in hive
+    assert '--build-arg AGENTIHOOKS_REF="${AGENTIHOOKS_REF:-dev}"' in hive
 
 
 def worker_stage(name):
@@ -229,3 +230,36 @@ def test_a_release_builds_the_hive_worker_on_its_released_worker_and_moves_relea
 def test_the_proven_image_skips_the_artifact_round_trip():
     assert "docker save" not in PROOF.read_text()
     assert all("image.tar" not in str(step) for job in hive_jobs().values() for step in job["steps"])
+
+
+def test_kind_proof_pulls_the_base_and_redis_into_the_node_while_the_hive_builds():
+    lines = PROOF.read_text().splitlines()
+    start = lines.index("{")
+    assert lines[start + 1].startswith('  kind create cluster --name "$cluster"')
+    assert lines[start + 2 : start + 6] == [
+        f"  for warm in {BASE} mirror.gcr.io/library/redis:7-alpine; do",
+        '    docker exec "$cluster-control-plane" crictl pull "$warm" || echo "the node could not pre-pull $warm; the proof loads or pulls it later"',
+        "  done",
+        '} > "$out/cluster.log" 2>&1 &',
+    ]
+    load = lines.index('kind load docker-image "$image" --name "$cluster" &')
+    assert lines.index('wait "$cluster_pid"') < load < lines.index('wait "$load_pid"')
+    assert lines.index('wait "$load_pid"') < lines.index("kubectl apply -f - <<EOF")
+
+
+def test_kind_proof_ends_the_drain_hold_once_the_hive_reads_draining():
+    text = PROOF.read_text()
+    assert "sleep 45" not in text
+    lines = text.splitlines()
+    started = (
+        'started="$(kubectl get pod "$pod" -o jsonpath=\'{.status.containerStatuses[0].state.running.startedAt}\')"'
+    )
+    restart = lines.index('kubectl rollout restart "deployment/$deployment"')
+    assert lines.index(started) < restart
+    assert lines[restart + 1 : restart + 4] == ["hold_agent draining", "for _ in {1..5}; do", "  sleep 1"]
+    window = lines[restart + 4 : restart + 7]
+    assert window[0].startswith('  [[ "$(kubectl get pod "$pod" -o jsonpath=')
+    assert '== "$started" ]]' in window[0]
+    assert '== "pod/$pod" ]]' in window[1]
+    assert window[2] == "done"
+    assert "        if registry.show(store.redis, os.environ['HIVE'])['draining'] == 'yes':" in lines
