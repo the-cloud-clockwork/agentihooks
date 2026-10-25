@@ -76,7 +76,7 @@ def test_no_holder_is_asked_while_a_seat_is_free(store):  # noqa: F811
 
 class FocusedLedger(FakeLedger):
     def state(self, slug):
-        return {**super().state(slug), "freezes": [{"verb": "focus", "target": "tasks/t3"}]}
+        return {**super().state(slug), "freezes": getattr(self, "freezes", [])}
 
 
 def test_a_focused_normal_task_preempts_unfocused_work_and_the_unfocused_successor_yields(store):  # noqa: F811
@@ -84,6 +84,7 @@ def test_a_focused_normal_task_preempts_unfocused_work_and_the_unfocused_success
     runtime = FakeRuntime()
     tick("sw", store, ledger, runtime, now_ms=1_000)
     ledger.rows["t3"] = {"id": "t3", "lane": "eng", "state": "open", "claimed_by": ""}
+    ledger.freezes = [{"verb": "focus", "target": "tasks/t3"}]
     tick("sw", store, ledger, runtime, now_ms=2_000)
     tick("sw", store, ledger, runtime, now_ms=3_000)
     victim = next(a for a in workers(store) if a.task == "t2")
