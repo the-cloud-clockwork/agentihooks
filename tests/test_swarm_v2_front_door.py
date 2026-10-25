@@ -188,10 +188,11 @@ ASKS = [
 
 @pytest.mark.parametrize("ask", ASKS, ids=lambda ask: ask["id"])
 @pytest.mark.parametrize("by", [LEAD_NAME, SECOND_NAME, ENGINEER])
-def test_every_agent_ask_to_the_operator_is_refused(world, ask, by):
-    accepted, warnings = write(world, {**ask, "by": by})
+def test_every_agent_ask_to_the_operator_is_refused(world, ask, by, tmp_path):
+    accepted, warnings = write(world, {**ask, "by": by}, home=tmp_path)
 
     assert (accepted, warnings) == (False, [front_door.ask_refusal(SLUG, by)])
+    assert [(r["kind"], r["agent"]) for r in gate_rows(tmp_path)] == [("deny", by)]
 
 
 @pytest.mark.parametrize(
