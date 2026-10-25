@@ -429,20 +429,23 @@ def test_the_wake_window_setting_bounds_how_long_the_front_door_waits(world, mon
 
 
 def test_outage_time_does_not_count_toward_a_backend_masters_wake_window(world, monkeypatch):
+    from scripts.inbox import store as inbox_store
     from scripts.swarm import outage
 
-    item = waiting_on_the_backend_master(world, 301)
+    created = inbox(world).get(waiting_on_the_backend_master(world, 0).id).created_at
+    now = created + 301_000
     seen = []
 
-    def paused(slug, since, now):
-        seen.append((slug, since))
-        return 2_000
+    def paused(slug, since, until):
+        seen.append((slug, since, until))
+        return 1_000
 
+    monkeypatch.setattr(inbox_store, "now_ms", lambda: now)
     monkeypatch.setattr(outage, "paused_ms", paused)
 
     with pytest.raises(InboxError, match=f"so {LEAD} cannot message its claimant"):
         master_fence.check_send(inbox(world), LEAD_NAME, OWN_CLAIMANT)
-    assert seen == [(SLUG, inbox(world).get(item.id).created_at)]
+    assert seen == [(SLUG, created, now)]
 
 
 def test_the_front_door_replies_to_a_stuck_backend_masters_claimant(world):
@@ -487,7 +490,7 @@ def test_a_retiring_seat_hands_its_claimants_to_the_front_door_with_its_handoff(
 
     assert world.refusals() == 0
     assert master_fence.Seats(SLUG, world.store, {}).live == [LEAD]
-    assert master_fence.handed_off(world.store, SLUG, masters.MasterSeats(world.redis)) == {SECOND}
+    assert master_fence.handed_off(world.store, SLUG) == {SECOND}
 
 
 def test_the_front_door_keeps_a_retired_seats_claimants_after_the_tick_retires_the_seat(world):
