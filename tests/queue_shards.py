@@ -20,6 +20,7 @@ WORKERS = 4
 STEP_SECONDS = step_seconds("unit")
 STARTUP_SECONDS = 30
 SLOWDOWN = 1.85
+TARGET_SECONDS = 195
 MAX_SHARDS = 24
 
 
@@ -27,8 +28,8 @@ def matrix(root: Path, versions: dict[str, dict[str, float]], counts: dict[str, 
     files = discover_test_files(root)
     grouped = grouped_files(root, files)
     sizes = source_sizes(root, files)
+    target = min(TARGET_SECONDS, STEP_SECONDS / 2)
     result = []
-    target = min(240, STEP_SECONDS / 2)
     for version, durations in versions.items():
         count = counts[version] if counts else 12
         total = sum(seconds for node, seconds in durations.items() if node.split("::", 1)[0] in sizes)
