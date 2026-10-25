@@ -210,7 +210,8 @@ def test_protected_grading_accepts_the_exact_early_pair_and_rejects_any_weakened
 
     root = Path(__file__).resolve().parents[1]
     policy = json.loads((root / ci_runner_trust.ACTORS).read_text())
-    workflows, config = gate_protected.load(Path(__file__).resolve().parents[1], "HEAD")
+    workflows = ci_wiring.load(root)
+    config = json.loads((root / ci_wiring.CONFIG).read_text())
     candidate = copy.deepcopy(workflows)
     jobs = candidate["test.yml"]["jobs"]
     jobs["gate-required"]["name"] = ci_gate_queue.SUMMARY_NAME
