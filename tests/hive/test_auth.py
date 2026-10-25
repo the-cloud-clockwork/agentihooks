@@ -533,3 +533,45 @@ def test_redis_client_connects_over_tls_for_a_rediss_url(redis_lib, monkeypatch)
 
     assert client.connection_pool.connection_class is redis_lib.connection.SSLConnection
     assert client.connection_pool.connection_kwargs["username"] == "hive-a"
+
+
+def test_a_member_credential_runs_a_checked_wait_and_a_cover_and_no_other_writes(monkeypatch):
+    import fakeredis
+    from redis.exceptions import NoPermissionError
+
+    from scripts.swarm import idle, prerequisite_wait, stage_cover
+
+    server = fakeredis.FakeServer()
+    admin = fakeredis.FakeRedis(server=server, decode_responses=True)
+    admin.acl_setuser(
+        "hive-m1",
+        enabled=True,
+        nopass=True,
+        categories=auth.ACL_CATEGORIES,
+        keys=auth._acl_keys("m1"),
+        channels=auth.ACL_PATTERNS,
+    )
+    member = fakeredis.FakeRedis(server=server, decode_responses=True, username="hive-m1")
+    member.auth("", username="hive-m1")
+    assert member.acl_whoami() == "hive-m1"
+    monkeypatch.setenv("AGENTIHOOKS_DEPLOYMENT", "distributed")
+    monkeypatch.setenv("AGENTIHOOKS_HIVE_ID", "m1")
+    monkeypatch.setenv("AGENTIHOOKS_HIVE_REDIS_URL", "redis://hive.example:6380/2")
+    swarm = store.RedisStore(member)
+    agent = store.AgentRecord(name="engineer@0001-0001", lane="eng", task="t1")
+    held = {"kind": "checks", "target": "https://github.com/o/r/pull/1"}
+    admin.hset(prerequisite_wait.key("proof"), "t1", "{}")
+
+    prerequisite_wait.admit(swarm, "proof", agent, held, None, 1_000, False)
+    idle.declare_wait(member, "proof", agent.name, 61_000, "checks", 1_000, on=held)
+    covered = stage_cover.cover(
+        swarm, "proof", {"phases": [{"id": "p1"}]}, stage_cover.Request("build", "phases/p1", "fix", "d"), 1_000
+    )
+
+    assert not admin.hexists(prerequisite_wait.key("proof"), "t1")
+    assert idle.wait(member, "proof", agent.name)["on"] == held
+    assert admin.exists(f"{ROOT}:hive:m1:swarm:proof:wait:{agent.name}")
+    assert json.loads(admin.hget(swarm.key("proof", stage_cover.KEY), "build")) == covered
+    for forbidden in (f"{ROOT}:hive:m2:swarm:proof:wait:{agent.name}", swarm.key("proof", "config")):
+        with pytest.raises(NoPermissionError):
+            member.set(forbidden, "write")
