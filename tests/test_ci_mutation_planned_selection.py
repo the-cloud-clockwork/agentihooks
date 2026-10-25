@@ -482,6 +482,63 @@ def test_a_changed_nested_signature_adds_the_tests_reaching_the_nested_function(
     ]
 
 
+@pytest.mark.parametrize(
+    ("mode", "line", "expected"),
+    [
+        ("import", 12, ["tests/test_core.py::test_g"]),
+        ("constant", 11, ["tests/test_core.py::test_g"]),
+        ("from", 11, ["tests/test_core.py::test_g"]),
+        (
+            "rebound",
+            11,
+            [
+                "tests/test_core.py::TestSpawn::test_child",
+                "tests/test_core.py::test_f",
+                "tests/test_core.py::test_g",
+                "tests/test_core.py::test_other",
+            ],
+        ),
+    ],
+)
+def test_a_module_edit_that_only_binds_new_names_keeps_the_selection_narrow(
+    tmp_path, monkeypatch, mode, line, expected
+):
+    from coverage import CoverageData
+
+    from tests.dep_manifest import build
+
+    _recorded_project(tmp_path, monkeypatch)
+    source = (
+        "from os import path\n\n\n"
+        "def f(value):\n    return value + 1\n\n\n"
+        "def g(value):\n    if value:\n        return value + 1\n    return value - 1\n"
+    )
+    (tmp_path / "scripts/core.py").write_text(source)
+    commit = _commit(tmp_path, "two functions")
+    data = CoverageData(basename=str(tmp_path / ".coverage"))
+    for test, lines in (
+        ("tests/test_core.py::test_f", [5]),
+        ("tests/test_core.py::test_g", [9, 11]),
+        ("tests/test_core.py::test_other", [9, 10]),
+        ("tests/test_core.py::TestSpawn::test_child", [9, 10]),
+    ):
+        data.set_context(f"{test}|run")
+        data.add_lines({str(tmp_path / "scripts/core.py"): lines})
+    data.write()
+    manifest = build(tmp_path / ".coverage", [], tmp_path, commit, "test")
+    edited = {
+        "import": source.replace("from os import path\n", "from os import path\nimport json\n"),
+        "constant": source + "\n\nLIMIT = 3\n",
+        "from": source.replace("from os import path\n", "from os import path, sep\n"),
+        "rebound": source + "\n\npath = None\n",
+    }[mode]
+    (tmp_path / "scripts/core.py").write_text(edited.replace("value - 1", "value - 2"))
+    _commit(tmp_path, "module edit")
+    selection = {}
+    plan.estimate(tmp_path, {"scripts/core.py": {line}}, selection, manifest)
+    assert selection["scripts/core.py"] == [*expected, "tests/test_edited.py", "tests/test_fresh.py"]
+
+
 def test_plan_publishes_covering_test_ids_and_checks_their_files(tmp_path, monkeypatch):
     manifest = _recorded_project(tmp_path, monkeypatch)
     monkeypatch.setenv("GITHUB_OUTPUT", str(tmp_path / "output"))
