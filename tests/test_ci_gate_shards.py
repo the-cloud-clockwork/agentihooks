@@ -330,6 +330,7 @@ def test_nonqueue_prefetch_waits_for_pending_units_ignores_other_jobs_and_accept
     with (
         patch.object(ci_gate_shards, "fetch", side_effect=reports),
         patch.object(ci_gate_shards, "api", side_effect=pages),
+        patch.object(ci_gate_shards.time, "monotonic", side_effect=[0, 0, 0, 1200]),
         patch.object(ci_gate_shards.time, "sleep") as sleep,
     ):
         ci_gate_shards.watch("org/repo", "123", "2", [1], tmp_path, recover=False)
@@ -348,5 +349,7 @@ def test_existing_watch_callers_keep_queue_recovery_without_a_new_argument(tmp_p
     with (
         patch.object(ci_gate_shards, "fetch", side_effect=reports),
         patch.object(ci_gate_shards, "api", return_value=[{"jobs": jobs}]),
+        patch.object(ci_gate_shards.time, "monotonic", side_effect=[0, 0, 1200]),
+        patch.object(ci_gate_shards.time, "sleep"),
     ):
         ci_gate_shards.watch("org/repo", "123", "2", [1], tmp_path)

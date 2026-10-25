@@ -167,6 +167,11 @@ def normalize(workflows: dict[str, dict]) -> dict[str, dict]:
         summary, early = jobs.get("gate-required", {}), jobs.get("queue-fail-fast", {})
         if len(dynamic) != 2 or summary.get("name") != SUMMARY_NAME or early != watcher(summary.get("runs-on")):
             raise ValueError("The early queue gate must use the exact reviewed context pair and verifier")
+        if (
+            jobs.get("reuse", {}).get("if")
+            != "github.event_name != 'merge_group' && github.event_name != 'pull_request'"
+        ):
+            raise ValueError("The early queue gate requires the existing whole queue reuse exclusion")
         expected = REQUIRED | SKIPPED | {"unit", "unit-lost", "unit-rerun", "queue-fail-fast"}
         if set(summary.get("needs", [])) != expected:
             raise ValueError("The early queue gate must preserve the reviewed graded inventory")
@@ -179,6 +184,7 @@ def current(repository: str, ref: str, head: str) -> None:
     pages = api(f"repos/{repository}/git/matching-refs/{ref.removeprefix('refs/')}")
     heads = [row["object"]["sha"] for page in pages for row in page if row["ref"] == ref]
     if heads != [head]:
+        print("::error::queue group is no longer current")
         raise ValueError("The queue group is no longer current")
 
 

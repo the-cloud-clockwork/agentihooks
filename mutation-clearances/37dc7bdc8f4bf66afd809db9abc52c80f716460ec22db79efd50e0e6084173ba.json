@@ -1,6 +1,0 @@
-{
-  "scripts/ci_gate_queue.py:scripts.ci_gate_queue.x_normalize__mutmut_39:4f905aaa0b3ec4a53f727ec547aab18dd416c1a2c31198768a703a58c0dbd07f": {
-    "reader": "standards-reader",
-    "reason": "An absent early job defaults to None or an empty object; both differ from the nonempty canonical watcher and raise the identical ValueError before any later access. Independently approved from complete CI report 40165669788."
-  }
-}
