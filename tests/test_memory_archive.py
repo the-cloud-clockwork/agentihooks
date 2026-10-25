@@ -377,7 +377,7 @@ def test_a_session_that_is_not_retained_is_refused_uncounted(catalog, store, sta
         lambda: archive.evidence(catalog, store, GRANT, "corpus-a", "s1"),
         lambda: archive.source_range(catalog, store, GRANT, reference(0, 5)),
     ):
-        assert refused(archive.EvidenceRefused, call) == "the session is not retained"
+        assert refused(archive.EvidenceRefused, call) == "the session is not available to this grant"
     assert catalog.integrity_failures_total("corpus-a") == 0
 
 
@@ -395,13 +395,15 @@ def test_another_corpus_is_forbidden_before_any_read(catalog, store):
         assert refused(archive.EvidenceRefused, call) == "the grant does not cover this session"
 
 
-def test_an_event_outside_the_project_grant_forbids_the_session_and_its_ranges(catalog, store):
+def test_an_event_outside_the_project_grant_refuses_the_session_like_an_unknown_one(catalog, store):
     captured(catalog, store, projects=("project-a", "project-b", None))
     for call in (
         lambda: archive.evidence(catalog, store, GRANT, "corpus-a", "s1"),
         lambda: archive.source_range(catalog, store, GRANT, reference(0, 5)),
     ):
-        assert refused(archive.EvidenceRefused, call) == archive.FORBIDDEN
+        assert refused(archive.EvidenceRefused, call) == archive.UNAVAILABLE
+    unknown = refused(archive.EvidenceRefused, lambda: archive.evidence(catalog, store, GRANT, "corpus-a", "s2"))
+    assert unknown == archive.UNAVAILABLE
     wider = Grant("reader", "corpus-a", frozenset({"project-a", "project-b"}))
     assert archive.evidence(catalog, store, wider, "corpus-a", "s1")["complete"] is True
 

@@ -1,6 +1,7 @@
 {
   "package": "SV2-IDX-01",
   "dependency": "SV2-SES-05",
+  "dependency_evidence": "evidence/SV2-SES-05/result.json records the SV2-SES-05 importer contract this package archives; its tested commit is 2e383a033 and the importer and ingest tables are unchanged here",
   "integration_gate": "G4",
   "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/7028",
   "pull_request": "https://github.com/the-cloud-clockwork/agentihooks/pull/7033",
@@ -46,5 +47,5 @@
     "Redis is not touched by this package; it remains coordination and cache only."
   ],
   "compatibility": "Explicitly local compatibility path: ingest, its event identity and quarantine rules and the SV2-SES-04 tables are unchanged; the new tables are additive.",
-  "authority": "Corpus and projects come from the caller's Grant; a session is readable only when its domain is the grant's corpus and every event's project is in the grant or unattributed, and only while its state is retained."
+  "authority": "Corpus and projects come from the caller's Grant; a session is readable only when its domain is the grant's corpus and every event's project is in the grant or unattributed, and only while its state is retained. Events with no project, such as tool calls the SV2-SES-01 decoders leave unattributed, are readable within the granted corpus. An unknown session, a session the grant's projects do not cover and a session that is not retained are refused with the same message, so a refusal does not reveal that a session exists."
 }

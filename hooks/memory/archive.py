@@ -14,7 +14,7 @@ MISSING = "an archived object is missing; the evidence is incomplete and was not
 ALTERED = "an archived object does not match its digest or range; the evidence is incomplete and was not returned"
 UNCOVERED = "the requested range is not covered by archived objects; the evidence is incomplete and was not returned"
 FORBIDDEN = "the grant does not cover this session"
-UNAVAILABLE = "the session is not retained"
+UNAVAILABLE = "the session is not available to this grant"
 BAD_NAME = "an object name must be a sha256 hex digest"
 BAD_RANGE = "a byte range must start at zero or later and end at or after its start"
 DIGEST = re.compile(r"[0-9a-f]{64}")
@@ -90,7 +90,7 @@ def _readable(catalog, grant, domain: str, session_uid: str) -> tuple[dict, list
     for source in catalog.sources(domain, session_uid):
         events = catalog.events(domain, session_uid, source["source_generation"])
         if any(event["project_id"] not in (None, *grant.projects) for event in events):
-            raise EvidenceRefused(FORBIDDEN)
+            raise EvidenceRefused(UNAVAILABLE)
         sources.append({**source, "events": events})
     return found, sources
 

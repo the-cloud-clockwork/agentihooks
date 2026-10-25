@@ -62,7 +62,7 @@
       "replayed"
     ],
     "restricted_evidence": {
-      "detail": "the session is not retained",
+      "detail": "the session is not available to this grant",
       "error": "EvidenceRefused"
     },
     "rollback_rehearsal": {
