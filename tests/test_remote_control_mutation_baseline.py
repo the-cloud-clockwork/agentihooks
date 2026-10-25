@@ -6,11 +6,12 @@ import pytest
 from _pytest.faulthandler import fault_handler_stderr_fd_key
 
 from scripts.ci_mutation.runner import mutate_files
+from scripts.ci_mutation.selection import selected_mutant_names
 from scripts.ci_mutation.stats import SharedStats
 
 # One xdist worker builds the baseline pass once; a module cache behind a function fixture keeps that pass inside
 # the function scoped home isolation, which a module fixture would run before.
-pytestmark = pytest.mark.xdist_group("remote_control_mutation")
+pytestmark = [pytest.mark.xdist_group("remote_control_mutation"), pytest.mark.timeout(method="signal")]
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE = "scripts/swarm/commands.py"
 DEADLINE = 120
@@ -61,8 +62,9 @@ def test_remote_control_statistics_baseline_feeds_mutant_grading(baseline, tmp_p
     monkeypatch.setenv("PYTEST_DISABLE_PLUGIN_AUTOLOAD", "1")
     grading = tmp_path / "grading"
     grading.mkdir()
+    mutants = selected_mutant_names(SOURCE, (ROOT / SOURCE).read_text(), selected[SOURCE][0])
     results, error = mutate_files(
-        ROOT, grading, selected, time.monotonic() + DEADLINE, (0, 1), SharedStats(stats.folder, stats.head)
+        ROOT, grading, selected, time.monotonic() + DEADLINE, (0, len(mutants)), SharedStats(stats.folder, stats.head)
     )
     assert error == "", (grading / "run.log").read_text()
     assert len(results[SOURCE]) == 1, results
