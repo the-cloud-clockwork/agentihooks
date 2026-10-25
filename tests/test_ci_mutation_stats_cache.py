@@ -643,6 +643,48 @@ def test_stats_cache_refuses_a_root_outside_git(tmp_path):
         collect_cached_stats(tmp_path, tmp_path / "cache", {}, [], [], lambda files: [])
 
 
+@pytest.mark.parametrize("record", ["stale", "failed"])
+def test_stats_cache_recollects_a_record_that_does_not_match_its_current_inputs(tmp_path, record):
+    import json
+
+    from scripts.ci_mutation.stats_cache import collect_cached_stats
+
+    root = tmp_path / "repo"
+    files = ["tests/test_a.py"]
+    _repository(root, {"scripts/a.py": "value = 1\n", files[0]: "from scripts.a import value\n"})
+    calls = []
+
+    def collect(chosen):
+        calls.append(chosen)
+        return [
+            {
+                "status": 0,
+                "tests": {"scripts.a.x_value": ["tests/test_a.py::test_value"]},
+                "durations": {"tests/test_a.py::test_value": 1},
+                "cpu": 1,
+            }
+        ]
+
+    cache = tmp_path / "cache"
+    cold = collect_cached_stats(root, cache, {}, files, [], collect)
+    original = next(cache.glob("*.json"))
+    stale = original.read_text()
+    assert collect_cached_stats(root, cache, {}, files, [], collect) == cold
+    assert calls == [files]
+    (root / "scripts/a.py").write_text("value = 2\n")
+    collect_cached_stats(root, cache, {}, files, [], collect)
+    assert calls == [files, files]
+    if record == "stale":
+        next(path for path in cache.glob("*.json") if path != original).write_text(stale)
+    else:
+        for path in cache.glob("*.json"):
+            value = json.loads(path.read_text())
+            value["status"] = 1
+            path.write_text(json.dumps(value))
+    collect_cached_stats(root, cache, {}, files, [], collect)
+    assert calls == [files, files, files]
+
+
 def test_file_stats_pass_sorted_changed_lines_and_runner_options_to_the_cache(tmp_path, monkeypatch):
     import json
     from types import SimpleNamespace
