@@ -484,8 +484,8 @@ def test_say_addresses_and_strangers_are_refused(env, capsys):
     assert ledger.said == []
     [item] = InboxStore(store.redis).inbox("ci@a1b2c3-0001")
     assert (item.sender, item.text, item.state) == ("engineer@a1b2c3-0001", "the docs task is merged", "pending")
-    assert run("sw", "--as", "engineer@a1b2c3-0001", "say", "status for the page only") == 0
-    assert ledger.said[-1] == ("status for the page only", "engineer@a1b2c3-0001")
+    assert run("sw", "--as", "engineer@a1b2c3-0001", "say", "status for the page only") == 1
+    assert ledger.said == [] and "msg send master@sw" in capsys.readouterr().err
     assert [i.text for i in InboxStore(store.redis).inbox("ci@a1b2c3-0001")] == ["the docs task is merged"]
 
     assert run("sw", "--as", "stranger", "say", "hello") == 1
@@ -507,17 +507,16 @@ def test_say_to_an_agent_a_lane_or_everyone_never_posts_to_chat(env, to, capsys)
     assert "engineer@a1b2c3-0001" in json.loads(capsys.readouterr().out)["sent"]
 
 
-def test_say_to_the_operator_posts_to_chat_and_reaches_no_inbox(env, capsys):
+def test_say_to_the_operator_is_refused_naming_the_front_door_inbox(env, capsys):
     store, ledger, _ = env
     run("sw", "create", "--repo", "/repo")
     run("sw", "start")
     ledger.said.clear()
-    ledger.say = lambda slug, text, by=None: ledger.said.append((slug, text, by))
     capsys.readouterr()
-    assert run("sw", "--as", "engineer@a1b2c3-0001", "say", "phase one is done", "--to", "operator") == 0
-    assert ledger.said == [("sw", "phase one is done", "engineer@a1b2c3-0001")]
+    assert run("sw", "--as", "engineer@a1b2c3-0001", "say", "phase one is done", "--to", "operator") == 1
+    assert 'agentihooks msg send master@sw "<text>"' in capsys.readouterr().err
+    assert ledger.said == []
     assert InboxStore(store.redis).inbox("ci@a1b2c3-0001") == []
-    assert json.loads(capsys.readouterr().out) == {"posted": True}
 
 
 @pytest.mark.parametrize("flag, env_name", [("engineer@a1b2c3-0001", ""), ("", "engineer@a1b2c3-0001")])

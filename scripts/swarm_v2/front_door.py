@@ -32,7 +32,6 @@ def chat_write(op: dict) -> bool:
 
 
 def asks_operator(op: dict) -> bool:
-    """An op that puts an ask in front of the operator: a question, a priority or a needs operator follow up."""
     kind = op.get("op")
     if kind == "priority":
         return True
@@ -47,6 +46,13 @@ def route(slug: str) -> str:
 
 def refusal(slug: str, held: str) -> str:
     return f"page chat belongs to the front door master {seat(slug)}, so {held} cannot write it; {route(slug)}"
+
+
+def say_refusal(slug: str, by: str) -> str:
+    return (
+        f"no agent writes to the operator first, so {by} cannot say to him; the front door answers him only when "
+        f"he writes; {route(slug)}"
+    )
 
 
 def ask_refusal(slug: str, by: str) -> str:

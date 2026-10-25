@@ -137,14 +137,13 @@ def relay_to_page(inbox, slug, agents, ledger):
     return shown
 
 
-def show(ledger, slug, item, sender, entry, line=""):
+def show(ledger, slug, item, sender, entry, line):
     if entry:
         return ledger.relay_comment(slug, entry, item.text, sender, item.id)
     return ledger.relay(slug, item.text, sender, item.id, line)
 
 
 def operator_line(inbox, slug, item):
-    """The operator chat line an answer replies to by its id, '' for an item that answers none."""
     if not item.ref:
         return ""
     try:

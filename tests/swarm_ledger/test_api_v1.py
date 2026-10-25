@@ -1658,7 +1658,7 @@ def test_operator_doctor_phrase_keeps_the_ledger(live, monkeypatch):
     assert state["chat"][-1]["text"] == server.DOCTOR_PHRASE
 
 
-def test_mutations_enforce_the_ledger_talk_budget(live, monkeypatch):
+def test_mutations_enforce_the_ledger_talk_budget_on_phase_comments(live, monkeypatch):
     import fakeredis
 
     from scripts.gates import progress, talk
