@@ -115,15 +115,16 @@ def _serve(
         try:
             wait(RETRY_S)
         except Exception:
-            exc = sys.exception()
-            print(
-                f"hive lane spokes retry wait failed ({type(exc).__name__}: {exc}); sleeping instead", file=sys.stderr
-            )
+            _wait_failed(sys.exception())
             sleep(RETRY_S)
 
 
 def _stopped(exc: BaseException | None) -> None:
     print(f"hive lane spokes stopped ({type(exc).__name__}: {exc}); starting again", file=sys.stderr)
+
+
+def _wait_failed(exc: BaseException | None) -> None:
+    print(f"hive lane spokes retry wait failed ({type(exc).__name__}: {exc}); sleeping instead", file=sys.stderr)
 
 
 def serve(environ: Mapping[str, str] = os.environ) -> threading.Thread | None:
