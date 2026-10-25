@@ -563,3 +563,45 @@ def test_a_cutoff_with_two_agents_in_flight_counts_them(swarm):
         "in flight hand off: engineer@abc-0001, engineer@abc-0002.",
         "run window: asked 2 agents in flight to hand off",
     ]
+
+
+def test_the_window_counts_from_its_first_millisecond(swarm):
+    store, ledger = swarm
+    assert _step(store, ledger, START) == []
+    marks = store.redis.hgetall(store.key(SLUG, "run-window"))
+    assert (marks["elapsed_minutes"], marks["remaining_minutes"]) == ("0", "720")
+
+
+def test_a_finished_agent_is_not_in_flight(swarm):
+    store, _ = swarm
+    store.put_agent(SLUG, AgentRecord(OWNER, "eng", "t1", seat="eng-1@sw", started_at=START, state="finished"))
+    rows = {row["id"]: row for row in _doc()["tasks"]}
+    assert run_window.in_flight(store, SLUG, rows) == []
+
+
+def test_the_watchdog_item_carries_the_window_ref(swarm):
+    from scripts.inbox.store import InboxStore
+
+    store, ledger = swarm
+    _step(store, ledger, END)
+    [item] = InboxStore(store.redis).inbox("master-watchdog")
+    assert item.ref == f"sw:run-window:final:{START}-{END}"
+
+
+def test_an_untitled_task_and_an_empty_cutoff_read_plainly(swarm):
+    store, ledger = swarm
+    flying = [AgentRecord(OWNER, "eng", "t1")]
+    assert run_window.final(SLUG, "off", (START, END), {"t1": {"state": "claimed"}}, flying) == (
+        "## Intent\nRun window on swarm sw, 25 October 00:00 UTC to 25 October 12:00 UTC, window gate skip.\n\n"
+        "## Done\nTasks by state: 1 claimed.\n\n"
+        "## Stopped at\nIn flight at the cutoff: engineer@abc-0001 on t1.\n\n"
+        "## Decisions and promises\nOnly swarm set changes the window.\n\n"
+        "## Next\nthe gate is off, so claims continue.\n\n"
+        "## Read first\n- ledger:sw/tasks/t1\n\n"
+        "<!-- handoff complete -->"
+    )
+    run_window.step(SLUG, store.config(SLUG), store, ledger, {"tasks": []}, END)
+    assert [row["reason"] for row in gate_log.recent(SLUG)] == [
+        "The run window 25 October 00:00 UTC to 25 October 12:00 UTC ended: new claims stop and 0 agents in flight "
+        "hand off: none."
+    ]
