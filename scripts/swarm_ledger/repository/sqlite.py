@@ -542,10 +542,11 @@ class SQLiteLedgerRepository:
         with self.connect() as connection, connection:
             connection.execute(BEGIN)
             entry = self._entry(connection, slug)
-        with VIEW_BUILD:
-            if view not in entry.views:
-                entry.views[view] = view(entry.state)
-                heap.release()
+        if view not in entry.views:
+            with VIEW_BUILD:
+                if view not in entry.views:
+                    entry.views[view] = view(entry.state)
+                    heap.release()
         return entry.views[view]
 
     def read(self, slug: str, *keys: str) -> dict:
