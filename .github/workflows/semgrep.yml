@@ -41,7 +41,7 @@ jobs:
         run: python -m pip install semgrep==1.177.0
 
       - name: Operator feature regressions and passing fixtures
-        run: "true"
+        run: semgrep --metrics off --test .semgrep/features
 
   charts:
     concurrency:
