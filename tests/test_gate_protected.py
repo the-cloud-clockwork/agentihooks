@@ -588,6 +588,7 @@ def test_selection_permissions_reject_every_other_form(previous, permissions):
 
 
 @pytest.mark.parametrize("job", ["select", "durations"])
+@pytest.mark.parametrize("permissions", [{"contents": "read"}, {"contents": "read", "actions": "read"}])
 @pytest.mark.parametrize(
     ("field", "value"),
     [
@@ -601,8 +602,8 @@ def test_selection_permissions_reject_every_other_form(previous, permissions):
         ("concurrency", "untrusted"),
     ],
 )
-def test_selection_permission_compatibility_preserves_other_provenance_context(job, field, value):
-    base = _provenance_workflow(job)
+def test_selection_permission_compatibility_preserves_other_provenance_context(job, permissions, field, value):
+    base = _provenance_workflow(job, permissions)
     head = copy.deepcopy(base)
     head["jobs"][job][field] = value
     assert gate_protected.grade({"test.yml": base}, {}, {"test.yml": head}, {}, _TODAY) == [
