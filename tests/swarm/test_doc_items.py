@@ -4,6 +4,20 @@ from unittest.mock import Mock
 import pytest
 
 
+def test_command_help_and_required_inputs(capsys):
+    from scripts.swarm.doc_items import main
+
+    with pytest.raises(SystemExit) as help_exit:
+        main(["--help"])
+    assert help_exit.value.code == 0
+    assert "Map watchdog document items to their ledger tasks" in capsys.readouterr().out.splitlines()
+    for args, missing in [(["--slug", "sw"], "--document"), (["--document", "doc.md"], "--slug")]:
+        with pytest.raises(SystemExit) as error_exit:
+            main(args)
+        assert error_exit.value.code == 2
+        assert f"the following arguments are required: {missing}" in capsys.readouterr().err
+
+
 def test_mapping_keeps_every_open_item_and_expands_task_ranges():
     from scripts.swarm.doc_items import parse
 
@@ -13,6 +27,7 @@ def test_mapping_keeps_every_open_item_and_expands_task_ranges():
 3. [open] Range item. [Ledger: t4 to t6, t1]
 4. [open] No assignment.
 5. [open] Another item. [Ledger: t1]
+6. [open] One task range. [Ledger: t7 to t7]
 """
     assert parse(document) == {
         "t1": ["1 First item, with punctuation.", "3 Range item.", "5 Another item."],
@@ -20,6 +35,7 @@ def test_mapping_keeps_every_open_item_and_expands_task_ranges():
         "t4": ["3 Range item."],
         "t5": ["3 Range item."],
         "t6": ["3 Range item."],
+        "t7": ["6 One task range."],
     }
 
 
@@ -40,6 +56,7 @@ def test_mapping_updates_done_tasks_preserves_links_and_is_idempotent():
     assert rows[1]["doc_items"] == ["2 Second item"]
     assert sync(ledger, "sw", mapping) == []
     assert ledger.update_task.call_count == 2
+    ledger.tasks.assert_called_with("sw")
 
 
 def test_unknown_tag_refuses_before_any_task_changes():
