@@ -501,6 +501,24 @@ def test_one_remaining_admission_slot_takes_without_waiting_and_reports_queue_fa
     assert worker.poll() == "retry"
 
 
+@pytest.mark.parametrize("boundary", ["queue", "presence"])
+def test_a_failed_poll_is_logged_with_its_swarm_lane_and_error(monkeypatch, capsys, boundary):
+    from scripts.hive import spoke
+
+    bus = Mock()
+    bus.for_swarm.return_value = bus
+    bus.state.return_value.get.return_value = None
+    monkeypatch.setattr(spoke.admission, "room", lambda value: SimpleNamespace(room=1))
+    if boundary == "queue":
+        bus.queue.side_effect = RuntimeError("unavailable")
+    else:
+        monkeypatch.setattr(spoke.presence, "Heartbeat", Mock(side_effect=RuntimeError("unavailable")))
+    worker = spoke.Spoke(spoke.SpokeConfig(SimpleNamespace(slug="rig"), "eng", "hive-a"), bus, Mock(), Mock(), reading)
+
+    assert worker.poll() == "retry"
+    assert "hive spoke for swarm rig lane eng poll failed (RuntimeError: unavailable)" in capsys.readouterr().err
+
+
 def test_claim_and_pending_ownership_are_visible_before_request_loading(rig):
     from scripts.hive.spoke import Spoke
 

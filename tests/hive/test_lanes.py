@@ -183,11 +183,49 @@ def test_lane_spokes_start_only_in_the_distributed_deployment(monkeypatch):
 
     assert lanes.serve({"AGENTIHOOKS_DEPLOYMENT": "local"}) is None
     assert lanes.serve({}) is None
-    thread = lanes.serve({"AGENTIHOOKS_DEPLOYMENT": "distributed", "HIVE_EXCLUDED": "master"})
+    environ = {"AGENTIHOOKS_DEPLOYMENT": "distributed", "AGENTIHOOKS_BUS": "nats", "HIVE_EXCLUDED": "master"}
+    thread = lanes.serve(environ)
     thread.join(5)
 
     assert thread.daemon and thread.name == "lane-spokes"
-    assert started == [{"AGENTIHOOKS_DEPLOYMENT": "distributed", "HIVE_EXCLUDED": "master"}]
+    assert started == [environ]
+
+
+@pytest.mark.parametrize("bus", [{}, {"AGENTIHOOKS_BUS": ""}, {"AGENTIHOOKS_BUS": "memory"}])
+def test_a_distributed_hive_refuses_lane_spokes_on_the_memory_bus_and_says_why(monkeypatch, capsys, bus):
+    started = []
+    monkeypatch.setattr(lanes, "_serve", lambda environ: started.append(environ))
+
+    assert lanes.serve({"AGENTIHOOKS_DEPLOYMENT": "distributed", **bus}) is None
+
+    assert started == []
+    logged = capsys.readouterr().err
+    assert "hive lane spokes refused: the memory bus never sees the hub's ready offers" in logged
+    assert "AGENTIHOOKS_BUS=nats and AGENTIHOOKS_BUS_URL" in logged
+
+
+def test_a_failing_retry_wait_is_logged_and_the_loop_sleeps_and_starts_again(monkeypatch, capsys):
+    attempts = iter([RuntimeError("nats down"), RuntimeError("nats down"), None])
+    loops = []
+
+    def fail(*args):
+        loops.append(args)
+        error = next(attempts)
+        if error:
+            raise error
+        raise SystemExit
+
+    def wait(delay):
+        raise ConnectionError("redis down")
+
+    monkeypatch.setattr(lanes, "_loop", fail)
+    sleeps = []
+    with pytest.raises(SystemExit):
+        lanes._serve({}, wait, sleeps.append)
+
+    assert sleeps == [lanes.RETRY_S, lanes.RETRY_S]
+    assert len(loops) == 3
+    assert "hive lane spokes retry wait failed (ConnectionError: redis down)" in capsys.readouterr().err
 
 
 def test_a_failed_lane_loop_is_logged_and_started_again(monkeypatch, capsys):
