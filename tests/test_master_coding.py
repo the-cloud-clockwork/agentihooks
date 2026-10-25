@@ -124,7 +124,9 @@ def test_a_taken_master_keeps_protection_checks_without_env(unseated, monkeypatc
     ("tool", "key"),
     [("Edit", "file_path"), ("Write", "file_path"), ("mcp__serena__replace_symbol_body", "relative_path")],
 )
-def test_a_master_subagent_edits_only_inside_a_worktree_without_a_window(master, tool, key):
+@pytest.mark.parametrize("seat", ["master", "master-2"])
+def test_a_master_subagent_edits_only_inside_a_worktree_without_a_window(master, monkeypatch, tool, key, seat):
+    monkeypatch.setenv("AGENTIHOOKS_SWARM_TASK", seat)
     tree = master / "dev" / "worktrees" / "agentihooks" / "child"
     payload = {
         "tool_name": tool,
