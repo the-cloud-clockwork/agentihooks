@@ -694,9 +694,11 @@ def test_statistics_timings_keep_maxima_and_normalize_groups_from_each_cache_loc
         monkeypatch.setenv("MUTATION_STATS_CACHE", str(cache))
     else:
         monkeypatch.delenv("MUTATION_STATS_CACHE", raising=False)
-    (cache / "success.json").write_text(json.dumps({"status": 0, "durations": {test: 0.25}}))
+    (cache / "success.json").write_text(
+        json.dumps({"status": 0, "durations": {test: 0.25, "tests/test_sample.py::test_cached": 0.5}})
+    )
     (cache / "failed.json").write_text(json.dumps({"status": 1, "durations": {test: 20}}))
-    assert recorded_seconds(tmp_path) == {test: 0.75}
+    assert recorded_seconds(tmp_path) == {test: 0.75, "tests/test_sample.py::test_cached": 0.5}
     assert file_seconds(tmp_path, [test, "tests/test_new.py"], split=True) == {
         test: 0.76,
         "tests/test_new.py": 0.01,
