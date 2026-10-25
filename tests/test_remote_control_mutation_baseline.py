@@ -79,7 +79,7 @@ def baseline_cache():
 
 @pytest.fixture
 def baseline(baseline_cache, tmp_path_factory, monkeypatch):
-    # A cached pass that recorded an error is rebuilt, so a rerun can recover from a load-bound overrun.
+    # A cached pass that recorded an error is rebuilt, so a rerun or the next test retries a load-bound overrun.
     if not baseline_cache or baseline_cache[0][4]:
         baseline_cache.clear()
         line = next(
