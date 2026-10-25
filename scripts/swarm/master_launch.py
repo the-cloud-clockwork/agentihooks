@@ -22,7 +22,7 @@ from scripts.swarm.resume import blocker
 from scripts.swarm.snapshot import ledger_source
 from scripts.swarm.store import MASTER, AgentRecord, SwarmError
 from scripts.swarm.templates import DEFAULT_PROFILES
-from scripts.swarm.tick import placed_record, primed
+from scripts.swarm.tick import SUSPECT, placed_record, primed
 from scripts.swarm_v2 import master_fill
 from scripts.swarm_v2 import masters as master_seats
 
@@ -43,7 +43,7 @@ RESUMED = (
     "never {ledger}, then continue as master."
 )
 RECORD_FIELDS = {f.name for f in fields(AgentRecord)}
-LEAD_STARTING = ("starting", "suspect")
+LEAD_STARTING = ("starting", SUSPECT)
 STARTING = (
     "the front door master {name} is still starting and the swarm has {count} master seat{s}, so no second master "
     "starts; the tick binds or replaces it, or run master up --replace to retire it first"
