@@ -117,7 +117,7 @@ class FencedRuntime:
 
     def _pass_memo(self) -> dict | None:
         launch = getattr(self.runtime, "hive_launch", None)
-        return launch.herdr.pass_memo if launch else None
+        return getattr(launch.herdr, "pass_memo", None) if launch else None
 
     def _refusal(self, lane: str, task: dict, claim: str = "") -> str:
         task = _master_task(lane, task)
