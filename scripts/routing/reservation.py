@@ -164,22 +164,22 @@ for _, hive in ipairs(redis.call('SMEMBERS', KEYS[3])) do
     end
 end
 if mode == 'release' then
-    if not held or held.state == 'exited' then return {0, used} end
+    if not held or held.state == 'exited' then return 0 end
     held.state = 'exited'
     redis.call('SET', KEYS[2], cjson.encode(held), 'PX', 45000)
-    return {1, used}
+    return 1
 end
 if mode == 'ack' then
-    if held and held.state == 'exited' then return {0, used} end
-    if held and held.state == 'live' then return {1, used} end
+    if held and held.state == 'exited' then return 0 end
+    if held and held.state == 'live' then return 1 end
     if not held then
-        if slot == '' then return {0, used} end
+        if slot == '' then return 0 end
         held = {slot=slot}
         redis.call('SADD', KEYS[1], execution)
     end
     held.state = 'live'
     redis.call('SET', KEYS[2], cjson.encode(held), 'PX', ARGV[5])
-    return {1, used}
+    return 1
 end
 if held then
     if held.slot ~= slot or held.state == 'exited' then return {0, used} end
@@ -221,11 +221,11 @@ class SlotReading:
 class LaunchSlots:
     redis: object
 
-    def _call(self, mode: str, slot: str, execution: str, cap: int, ttl_ms: int, previous: str = "") -> SlotReading:
+    def _call(self, mode: str, slot: str, execution: str, cap: int, ttl_ms: int, previous: str = "") -> object:
         from scripts.hive import registry
         from scripts.swarm.keyspace import ROOT
 
-        accepted, used = self.redis.eval(
+        return self.redis.eval(
             _LAUNCH,
             3,
             f"{ROOT}:launch-slots",
@@ -239,7 +239,6 @@ class LaunchSlots:
             ROOT,
             previous,
         )
-        return SlotReading(bool(accepted), used)
 
     def reserve(self, slot: str, execution: str, cap: int, ttl_ms: int, previous: str = "") -> bool:
         return self.reserve_reading(slot, execution, cap, ttl_ms, previous).accepted
@@ -247,14 +246,15 @@ class LaunchSlots:
     def reserve_reading(self, slot: str, execution: str, cap: int, ttl_ms: int, previous: str = "") -> SlotReading:
         if type(cap) is not int or cap < 0 or type(ttl_ms) is not int or not 0 < ttl_ms <= 300000:
             raise ValueError("invalid launch slot cap or lifetime")
-        return self._call("reserve", slot, execution, cap, ttl_ms, previous)
+        accepted, used = self._call("reserve", slot, execution, cap, ttl_ms, previous)
+        return SlotReading(bool(accepted), used)
 
     def acknowledge(self, execution: str, slot: str = "") -> bool:
         """A named slot records a row that expired before its acknowledgement was read as live again."""
-        return self._call("ack", slot, execution, 0, 45000).accepted
+        return bool(self._call("ack", slot, execution, 0, 45000))
 
     def release(self, execution: str) -> bool:
-        return self._call("release", "", execution, 0, 0).accepted
+        return bool(self._call("release", "", execution, 0, 0))
 
     def counts(self, seen: set[str] | None = None) -> dict[str, int]:
         import json
