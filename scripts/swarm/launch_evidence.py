@@ -57,7 +57,7 @@ def retain(
     if pane:
         try:
             screen = text(reader(pane, 80))
-        except (KeyError, OSError, RuntimeError, ValueError) as exc:
+        except Exception as exc:
             screen_error = str(exc)
     validation = _validation(fields)
     row = {

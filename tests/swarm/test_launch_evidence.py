@@ -139,15 +139,18 @@ def test_nested_validation_strings_are_redacted_before_json_escaping(tmp_path):
     assert row["error"] == "[REDACTED:bearer_value]\n[REDACTED:bearer_value]"
 
 
-def test_a_malformed_pane_response_still_leaves_diagnostics(tmp_path):
+@pytest.mark.parametrize(
+    "failure", [KeyError("text"), TypeError("missing CLI"), subprocess.CalledProcessError(1, "herdr")]
+)
+def test_a_malformed_pane_response_still_leaves_diagnostics(tmp_path, failure):
     attempt = launch_evidence.Attempt(tmp_path, "agent", "task", "codex", 12)
 
     def read(pane, lines):
         assert (pane, lines) == ("pane", 80)
-        return {}["text"]
+        raise failure
 
     path = launch_evidence.retain(attempt, {"pane_id": "pane"}, "", "", read, "timed out")
     row = json.loads(path.read_text())
-    assert row["screen_error"] == "'text'"
+    assert row["screen_error"] == str(failure)
     assert row["error"] == "timed out"
     assert row["failure"] == "timeout"
