@@ -458,3 +458,45 @@ def test_an_exhausted_request_without_a_reason_is_abandoned_as_unknown_and_logge
     row = json.loads(path.read_text())
     assert (row["status"], row["outcome"]) == ("abandoned", "gave up after 5 attempts: unknown")
     assert logged == [("documentation request abandoned", {"outcome": row["outcome"], "session": "s"})]
+
+
+def stored(path, **row):
+    path.write_text(json.dumps({"session": path.stem, "swarm": "fixture", "status": "pending", **row}))
+    return path
+
+
+def test_process_leaves_finished_and_not_yet_due_requests_untouched(tmp_path, monkeypatch):
+    finished = []
+    monkeypatch.setattr(documentation_session, "_finish", lambda path, row: finished.append(path))
+    done = stored(tmp_path / "done.json", status="complete")
+    early = stored(tmp_path / "early.json", retry_at=100.0)
+    before = (done.read_text(), early.read_text())
+    documentation_session.process(done)
+    documentation_session.process(early, 50.0)
+    assert (done.read_text(), early.read_text()) == before
+    assert finished == []
+
+
+def test_process_records_the_attempt_before_the_worker_runs(tmp_path, monkeypatch):
+    seen = []
+    monkeypatch.setattr(documentation_session, "time", Clock(1000.0))
+    monkeypatch.setattr(documentation_session, "_finish", lambda path, row: seen.append(json.loads(path.read_text())))
+    documentation_session.process(stored(tmp_path / "request.json"), 1000.0)
+    assert [(row["attempts"], row["retry_at"]) for row in seen] == [
+        (1, 1000.0 + documentation_session.RETRY_DELAYS_S[0])
+    ]
+
+
+def test_retry_pending_runs_due_requests_oldest_write_first(tmp_path, monkeypatch):
+    processed = []
+    monkeypatch.setattr(documentation_session, "HOME", tmp_path)
+    monkeypatch.setattr(documentation_session, "time", Clock(0.0))
+    monkeypatch.setattr(documentation_session, "process", lambda path, now: processed.append((path.name, now)))
+    folder = tmp_path / "documentation"
+    folder.mkdir()
+    older = stored(folder / "b.json")
+    stored(folder / "a.json")
+    stored(folder / "later.json", retry_at=10.0)
+    os.utime(older, ns=(1, 1))
+    documentation_session.retry_pending()
+    assert processed == [("b.json", 0.0), ("a.json", 0.0)]
