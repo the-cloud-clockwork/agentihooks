@@ -2134,7 +2134,7 @@ def test_export_encodes_once_per_ledger_generation(live, monkeypatch):
 
 def test_export_body_hides_seeds_and_receipts_and_keeps_text_unescaped():
     state = {"title": "café", "_meta": {"seeds": [1], "api_operations": {"a": 1}, "members": ["m"]}}
-    assert routes.export_body(state) == '{"data": {"title": "café", "_meta": {"members": ["m"]}}}'.encode()
+    assert routes.export_body(state) == '{"data": {"title": "café", "_meta": {"members": ["m"]}}}'
 
 
 def test_raw_upload_headers_reject_invalid_lengths_and_names(live):
