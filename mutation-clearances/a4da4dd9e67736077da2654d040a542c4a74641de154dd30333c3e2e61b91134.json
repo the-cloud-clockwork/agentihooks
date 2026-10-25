@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/launch_evidence.py:scripts.swarm.launch_evidence.x_retain__mutmut_38:ef0d9aabd0e7d6a905309ffa3dbb81eb7794f42aec45422c46bd7d60ac1fa289": {
+    "reader": "standards_reader",
+    "reason": "Equivalent: both newline and XX newline XX preserve each classification substring and prevent cross field matches. The joined string is never retained; only the identical classification is exposed."
+  }
+}
