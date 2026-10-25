@@ -6,6 +6,8 @@ from pathlib import Path
 from scripts import init_agent
 from scripts.profiles import binding
 
+requested = []
+
 
 def _slow_route(tmp_path, monkeypatch, detach, route_timeout):
     from scripts import select_profile
@@ -22,7 +24,12 @@ def _slow_route(tmp_path, monkeypatch, detach, route_timeout):
     renamed = []
     monkeypatch.setattr(init_agent.herdr_host, "rename_agent", lambda *a: renamed.append(a) or True)
     request = binding.request
-    monkeypatch.setattr(binding, "request", lambda report, profile, agent, home: request(report, profile, agent))
+    requested.clear()
+    monkeypatch.setattr(
+        binding,
+        "request",
+        lambda report, profile, agent, home: requested.append(report) or request(report, profile, agent),
+    )
 
     def launch(launcher, directory, name, args, agent, environ):
         init_agent._started_marker(launcher).touch()
@@ -57,9 +64,7 @@ def test_the_detached_child_of_a_deferred_launch_still_waits_on_the_route(tmp_pa
     assert renamed == []
     captured = capsys.readouterr()
     assert captured.err == "agentihooks init-agent: the harness did not report its route within 1s\n"
-    (report,) = [
-        line.removeprefix("profile_report=") for line in captured.out.splitlines() if "profile_report=" in line
-    ]
+    (report,) = requested
     assert json.loads(Path(report).read_text()) == {
         "profile": "master",
         "harness": "claude",

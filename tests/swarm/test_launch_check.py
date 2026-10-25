@@ -912,7 +912,7 @@ CANARY_BINDING = {
     "persona": "a" * 64,
     "sources": "b" * 64,
     "account": "acct",
-    "validated_at": (LAUNCH + 500) / 1000,
+    "validated_at": LAUNCH / 1000,
 }
 
 
@@ -1036,7 +1036,7 @@ def test_a_confirmed_canary_fills_the_route_account_and_harness_start(store, mon
     confirmed, found = launch_check.canary(store, "sw", agent)
     assert found == {}
     assert confirmed.account == "acct"
-    assert confirmed.launch_timings == {"launched_at": LAUNCH, "harness_at": LAUNCH + 500}
+    assert confirmed.launch_timings == {"launched_at": LAUNCH, "harness_at": LAUNCH}
     assert _master_record(store, first) == confirmed
     kept = replace(agent, account="routed", launch_timings={"harness_at": LAUNCH + 5})
     confirmed, _ = launch_check.canary(store, "sw", kept)
