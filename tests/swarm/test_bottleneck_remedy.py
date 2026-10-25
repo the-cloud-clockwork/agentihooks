@@ -136,7 +136,7 @@ def proposed(targeted, why):
     return bottleneck_remedy.PROPOSED.format(targeted=targeted, why=why)
 
 
-def test_seat_wait_moves_no_seat_and_proposes_a_fix_task(store, home, shipped):
+def test_seat_wait_moves_no_seat_and_proposes_to_the_master(store, home, shipped):
     fire(store, "seat_wait", value=7.5)
     text = proposed(CLAIM, bottleneck_remedy.UNMECHANICAL)
     assert run(store) == [text]
