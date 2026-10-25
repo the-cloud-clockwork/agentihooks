@@ -1,5 +1,5 @@
-import argparse
 import subprocess
+import sys
 from collections.abc import Iterable
 from pathlib import Path
 
@@ -21,10 +21,8 @@ def triggered(paths: Iterable[str]) -> bool:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Decide from the base copy whether a merge commit reaches the ledger.")
-    parser.add_argument("--root", type=Path, required=True, help="Checkout of the pull request merge commit.")
-    args = parser.parse_args(argv)
-    print(f"run={str(triggered(changed(args.root))).lower()}")
+    [root] = sys.argv[1:] if argv is None else argv
+    print(f"run={str(triggered(changed(Path(root)))).lower()}")
     return 0
 
 

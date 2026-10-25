@@ -32,7 +32,7 @@ jobs:
             echo run=true >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          python -I base/scripts/ci_equivalence_trigger.py --root head | tee -a "$GITHUB_OUTPUT"
+          python -I base/scripts/ci_equivalence_trigger.py head | tee -a "$GITHUB_OUTPUT"
       - uses: astral-sh/setup-uv@v10.2.0
         if: steps.trigger.outputs.run == 'true'
         with:

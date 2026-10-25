@@ -664,7 +664,7 @@ def test_equivalence_replays_wait_on_the_base_copy_of_the_trigger():
     [base] = [step for step in steps if step.get("with", {}).get("path") == "base"]
     assert base["with"]["ref"] == "${{ github.event.pull_request.base.sha }}"
     [trigger] = [step for step in steps if step.get("id") == "trigger"]
-    assert "python -I base/scripts/ci_equivalence_trigger.py --root head" in trigger["run"]
+    assert "python -I base/scripts/ci_equivalence_trigger.py head" in trigger["run"]
     assert "[[ ! -f base/scripts/ci_equivalence_trigger.py ]]" in trigger["run"]
     assert steps.index(base) < steps.index(trigger)
     for step in steps[steps.index(trigger) + 1 :]:

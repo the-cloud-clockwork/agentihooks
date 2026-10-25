@@ -67,13 +67,21 @@ def test_changed_names_both_sides_of_a_rename_out_of_the_ledger(tmp_path):
     assert sorted(ci_equivalence_trigger.changed(tmp_path)) == ["scripts/other.py", "scripts/swarm_ledger/server.py"]
 
 
-def test_main_prints_the_run_output_for_a_ledger_change(tmp_path, capsys):
+def test_changed_fails_when_the_checkout_has_no_parent_to_diff(tmp_path):
+    _git(tmp_path, "init", "-q")
+    _git(tmp_path, "-c", "user.email=ci@example.com", "-c", "user.name=ci", "commit", "-q", "--allow-empty", "-m", "a")
+    with pytest.raises(subprocess.CalledProcessError):
+        ci_equivalence_trigger.changed(tmp_path)
+
+
+def test_main_prints_the_run_output_for_a_ledger_change(tmp_path, capsys, monkeypatch):
     _merge_commit(tmp_path, {"README.md": "a\n"}, {"tests/swarm_ledger/case.py": "x\n"})
-    assert ci_equivalence_trigger.main(["--root", str(tmp_path)]) == 0
+    monkeypatch.setattr("sys.argv", ["ci_equivalence_trigger.py", str(tmp_path)])
+    assert ci_equivalence_trigger.main() == 0
     assert capsys.readouterr().out == "run=true\n"
 
 
 def test_main_skips_a_change_that_misses_the_ledger(tmp_path, capsys):
     _merge_commit(tmp_path, {"README.md": "a\n"}, {"docs/note.md": "x\n"})
-    assert ci_equivalence_trigger.main(["--root", str(tmp_path)]) == 0
+    assert ci_equivalence_trigger.main([str(tmp_path)]) == 0
     assert capsys.readouterr().out == "run=false\n"
