@@ -1302,7 +1302,7 @@ def _commit_equivalence(repo, workflow, message):
         _after_page('echo x >> "$GITHUB_ENV"'),
         _after_page('echo x >> "$GITHUB_PATH"'),
         _after_page("bash head/tests/swarm_ledger/equivalence.sh"),
-        None,
+        pytest.param(None, id="drop_workflow"),
     ],
 )
 def test_the_required_grader_refuses_a_head_that_rewrites_the_equivalence_grading(repo, capsys, fault):
