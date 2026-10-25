@@ -13,6 +13,35 @@ AT = 1_792_850_000_000
 WATCHDOG = "master-watchdog"
 
 
+def test_configured_watchdog_receives_tick_and_done_reports(env, monkeypatch):  # noqa: F811
+    from scripts.swarm import cli
+    from scripts.swarm.store import RedisStore
+
+    store, ledger, runtime = env
+    run("sw", "create", "--repo", "/repo")
+    assert run("sw", "set", "watchdog-address=watchdog-session") == 0
+    assert RedisStore(store.redis).config("sw").watchdog_address == "watchdog-session"
+    monkeypatch.setenv(doc_report.ADDRESS_ENV, "wrong-address")
+    run("sw", "start")
+    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "engineer@a1b2c3-0001")
+    ledger.rows["t1"]["doc_items"] = ["1 First item"]
+    assert run("sw", "done", "--pr", PR) == 0
+    inbox = InboxStore(store.redis)
+    assert len(inbox.inbox("watchdog-session")) == 1
+    ledger.rows["t2"].update(state="done", pr_url=PR, doc_items=["2 Second item"])
+    cli.run_tick(store, "sw", ledger=ledger, runtime=runtime)
+    assert {item.task for item in inbox.inbox("watchdog-session")} == {"t1", "t2"}
+    assert not inbox.inbox("wrong-address")
+
+
+def test_configured_address_precedes_environment_with_legacy_fallback(monkeypatch):
+    monkeypatch.setenv(doc_report.ADDRESS_ENV, "environment-watchdog")
+    assert doc_report.address("configured-watchdog") == "configured-watchdog"
+    assert doc_report.address("") == "environment-watchdog"
+    monkeypatch.delenv(doc_report.ADDRESS_ENV)
+    assert doc_report.address("") == WATCHDOG
+
+
 @pytest.fixture
 def world(monkeypatch, tmp_path):
     import fakeredis
