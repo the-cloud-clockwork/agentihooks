@@ -43,7 +43,11 @@ def _eight(store):
     return tasks(*((f"t{n}", "eng") for n in range(1, 9)))
 
 
-def test_eight_launches_of_one_pass_run_at_once(store):
+def test_eight_launches_of_one_pass_run_at_once(store, monkeypatch):
+    import os
+
+    monkeypatch.setattr(os, "cpu_count", lambda: 1)
+    monkeypatch.setattr(os, "process_cpu_count", lambda: 1, raising=False)
     ledger, pooled = _eight(store), PooledRuntime(8, barrier=threading.Barrier(8, timeout=10))
     actions = tick("sw", store, ledger, pooled, now_ms=1_000)
     assert sorted(task for _, _, task in pooled.spawned) == [f"t{n}" for n in range(1, 9)]
@@ -111,6 +115,30 @@ def test_a_failed_launch_in_the_pool_releases_its_task_and_the_rest_start(store)
     assert sorted(task for _, _, task in pooled.spawned) == [f"t{n}" for n in range(1, 9) if n != 3]
     assert any(action.startswith("spawn failed for t3") for action in actions)
     assert store.claimant("sw", "t3") is None
+
+
+def test_a_task_that_fails_before_its_launch_reopens_and_the_pool_launches_the_rest(store, monkeypatch):
+    ledger, pooled = _eight(store), PooledRuntime(8)
+    attach = tick_module.transfers.attach
+
+    def attaching(store_, slug, record):
+        if record.task == "t2":
+            raise RuntimeError("attach broke")
+        return attach(store_, slug, record)
+
+    monkeypatch.setattr(tick_module.transfers, "attach", attaching)
+    actions = tick("sw", store, ledger, pooled, now_ms=1_000)
+    assert sorted(task for _, _, task in pooled.spawned) == [f"t{n}" for n in range(1, 9) if n != 2]
+    assert [action for action in actions if action.startswith("spawn failed for t2")][0].endswith(": attach broke")
+    assert ledger.rows["t2"]["state"] == "open"
+    assert store.claimant("sw", "t2") is None
+
+
+def test_the_spawn_stop_counts_no_launch_in_flight_unless_told(store):
+    _decide(store, 1, granted_at=1_000)
+    config = store.config("sw")
+    assert tick_module._spawn_stop("sw", config, store, FakeRuntime(), 1_000) == ""
+    assert tick_module._spawn_stop("sw", config, store, FakeRuntime(), 1_000, 1).startswith("holding spawns: host")
 
 
 def test_a_launch_names_the_overlapping_peer_launched_beside_it(store):
