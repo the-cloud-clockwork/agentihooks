@@ -183,9 +183,10 @@ def test_clear_with_nothing_to_clear_names_its_reason(target, dismissed, reason)
 def test_clear_all_with_nothing_listed_is_accepted_without_a_reason():
     from scripts.swarm_ledger import ledger_priorities
 
-    doc, ctx = {"phases": [], "priorities": []}, _context()
+    doc, ctx = {"phases": []}, _context()
     assert ledger_priorities.apply(doc, {"op": "priority_clear", "id": "c", "target": "all"}, ctx) is True
     assert ctx.refused == []
+    assert doc["priorities"] == []
 
 
 def test_cli_clears_a_blocked_task_priority_once_then_names_why(monkeypatch, capsys):
