@@ -1209,7 +1209,7 @@ def _equivalence_steps(workflow):
 
 
 def _graded(steps, group):
-    return next(step for step in steps if step.get("run", "").endswith(f"equivalence.sh {group}"))
+    return next(step for step in steps if step.get("run", "").endswith(f'equivalence.sh" {group}'))
 
 
 def _skip_store(workflow):
