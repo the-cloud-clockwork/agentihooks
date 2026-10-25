@@ -1,0 +1,6 @@
+{
+  "scripts/ci_gate_queue.py:scripts.ci_gate_queue.x_normalize__mutmut_21:7ae0aca6fdc8e08855b1b9333b27a02d27b16891ace5376e00300ed175175d31": {
+    "reader": "standards-reader",
+    "reason": "Missing names default to empty or unrelated strings; neither contains the required context substring, preserving context detection. Independently approved from complete CI report 40165669788."
+  }
+}

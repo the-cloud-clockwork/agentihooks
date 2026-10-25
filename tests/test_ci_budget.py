@@ -38,7 +38,10 @@ JOBS = [
 
 
 def _workflow_jobs():
-    return yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())["jobs"]
+    from scripts import ci_gate_queue
+
+    workflow = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())
+    return ci_gate_queue.normalize({"test.yml": workflow})["test.yml"]["jobs"]
 
 
 def test_seconds_reads_github_timestamps_as_utc():
