@@ -1,5 +1,6 @@
 import hashlib
 import json
+import sys
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, replace
@@ -66,7 +67,13 @@ class Spoke:
             with presence.Heartbeat(self.bus, self.config.hive, self.clock) as heartbeat:
                 return self._poll(timeout_ms, heartbeat)
         except Exception:
-            return "retry"
+            return self._failed()
+
+    def _failed(self) -> str:
+        exc = sys.exception()
+        swarm, lane = self.config.swarm.slug, self.config.lane
+        print(f"hive spoke for swarm {swarm} lane {lane} poll failed ({type(exc).__name__}: {exc})", file=sys.stderr)
+        return "retry"
 
     def _poll(self, timeout_ms: int, heartbeat: presence.Heartbeat) -> str:
         recovered = self._recover()
@@ -79,13 +86,14 @@ class Spoke:
             queue = self.bus.queue(readiness.queue_name(self.config.swarm.slug, self.config.lane), self.config.policy)
             delivery = readiness.take(queue, self.view, timeout_ms)
         except Exception:
-            return "retry"
+            return self._failed()
         if delivery is None:
             return recovered or "empty"
         try:
             heartbeat.check()
             return self._apply(delivery, heartbeat)
         except Exception:
+            self._failed()
             return self._retry(delivery)
 
     def _retry(self, delivery: Delivery) -> str:
@@ -93,7 +101,7 @@ class Spoke:
             if delivery.attempt >= self.config.policy.max_deliver:
                 return self._exhaust(delivery)
         except Exception:
-            pass
+            self._failed()
         steps = self.config.policy.backoff_ms or (self.config.policy.ack_wait_ms,)
         delivery.nak(steps[min(delivery.attempt - 1, len(steps) - 1)])
         return "retry"

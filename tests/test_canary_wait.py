@@ -36,6 +36,7 @@ def _launch(tmp_path, monkeypatch, target, extra):
 
     monkeypatch.setattr(init_agent, "_start_herdr", launch)
     monkeypatch.setattr(binding, "wait", wait)
+    monkeypatch.setattr(init_agent, "_detach", lambda: False)
     argv = ["--host", "herdr", "--agent", target, "--profile", "engineer", "--dir", str(tmp_path)]
     result = init_agent.main([*argv, "--route-timeout", "30", *extra], {"XDG_RUNTIME_DIR": str(tmp_path / "rt")})
     assert result == 0
