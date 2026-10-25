@@ -134,7 +134,7 @@ def test_stopping_swarm_is_left_to_its_stop(store, state):
 
 def proof(store, parent_state):
     slug = "proof-01df01-t1199-1"
-    store.create(SwarmConfig(slug, "/repo"))
+    store.create(SwarmConfig(slug, "/repo", max_eng=2, max_ci=1))
     store.redis.hset(store.key(slug, "proof-creator"), mapping={"parent": "sw", "owner": "engineer@01df01-0001"})
     return slug, FakeLedger([{"id": "t1199", "state": parent_state}, {"id": "t1", "state": "blocked"}])
 
@@ -159,7 +159,7 @@ def test_proof_swarm_with_a_working_parent_task_recycles_its_master(store, paren
 
 def test_proof_swarm_without_a_recorded_parent_recycles_its_master(store):
     slug = "proof-01df01-t1199-2"
-    store.create(SwarmConfig(slug, "/repo"))
+    store.create(SwarmConfig(slug, "/repo", max_eng=2, max_ci=1))
     agent, runtime = master(store, slug)
     ledger = FakeLedger([{"id": "t1199", "state": "blocked"}])
     assert run(store, runtime, START + 10 * MINUTE, slug, ledger)[0].startswith(f"asked {agent.name}")
