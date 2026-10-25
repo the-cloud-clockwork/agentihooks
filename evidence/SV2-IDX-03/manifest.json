@@ -10,6 +10,6 @@
   },
   "package": "SV2-IDX-03",
   "red_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/40182806818",
-  "run": "",
-  "tested_commit": ""
+  "run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/40184086400",
+  "tested_commit": "c5a74dc935b045a3416b2f57459807ebcc5a62a0"
 }

@@ -4,7 +4,7 @@
   "dependency_evidence": "evidence/SV2-IDX-02/result.json records the chunk generations, stable chunk ids and content hashes this worker reads; the chunk tables and ChunkIndex are unchanged here",
   "integration_gate": "G4",
   "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/7129",
-  "pull_request": "",
+  "pull_request": "https://github.com/the-cloud-clockwork/agentihooks/pull/7145",
   "package_complete": false,
   "evidence_class": "mocked: an in-process caller, a SQLite catalog file, a local content addressed object folder and a deterministic hash embedder stand in for the session service, the central database, the archive bucket and the embedding provider; no model, HTTP server or Pod runs",
   "interfaces": [
