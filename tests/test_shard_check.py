@@ -137,9 +137,7 @@ def test_shard_check_grades_every_unit_shard_before_the_required_gate():
             "pattern": "{collected,reused-tests}-${{ matrix.python-version }}",
             "path": "shard-data",
         }
-        prefetch = next(
-            step for step in steps if step.get("name") == "Prefetch reports while every planned shard finishes"
-        )
+        prefetch = next(step for step in steps if step.get("name") == "Wait for every planned shard")
         assert prefetch["env"]["GH_TOKEN"] == "${{ steps.app-token.outputs.token }}"
         assert "python -m scripts.ci_gate_shards" in prefetch["run"]
         assert steps.index(prefetch) < next(

@@ -5,6 +5,7 @@ import re
 from collections.abc import Callable
 
 from scripts.inbox.seats import SeatRegistry, seat_address
+from scripts.swarm.naming import seat_label
 from scripts.swarm.store import MASTER, PREFIX, RedisStore, SwarmError
 
 DEFAULT_COUNT = 1
@@ -24,7 +25,7 @@ class MasterError(SwarmError):
 
 
 def seat(index: int) -> str:
-    return MASTER if index == 1 else f"{MASTER}-{index}"
+    return seat_label(MASTER, index)
 
 
 def title(slug: str, address: str) -> str:

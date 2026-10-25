@@ -49,7 +49,7 @@ Swarms created before the setting existed read as `legacy`. Any other value is r
 
 1. **Ledger write.** Every task and phase change goes through the ledger outbox, which relays it within a second as a
    `task.changed`, `task.removed`, `phase.changed` or `phase.removed` event on `swarm.<slug>.task.<id>` or
-   `swarm.<slug>.phase.<id>`. All events live in the `AGENTIHOOKS_EVENTS` stream. Each time `claimed_by` changes, the
+   `swarm.<slug>.phase.<id>`. All events live in the `AGENTIHOOKS-EVENTS` stream. Each time `claimed_by` changes, the
    task's `claim_generation` goes up by one.
 2. **Offer.** The hub's `readiness` reactor offers each claimable task of an `events` swarm on every pass. The
    offer is a `task.ready` event, with id `ready:<slug>:<task>:<generation>`, on the lane work queue
@@ -67,7 +67,7 @@ Swarms created before the setting existed read as `legacy`. Any other value is r
 6. **Redelivery.**
    - An offer that is not acknowledged within 30 seconds comes back, up to 5 deliveries.
    - A claim conflict, or another live hive holding the claim, sends the offer back for later.
-   - After the last delivery the spoke writes a `dead_lettered` event to `AGENTIHOOKS_DEAD` and reopens the task.
+   - After the last delivery the spoke writes a `dead_lettered` event to `AGENTIHOOKS-DEAD` and reopens the task.
 7. **Exit.** When the agent ends, `execution.exited` reaches the hub's `lifecycle` reactor. Only for the claim and
    generation it started, it releases the slot and the claim, then settles the task: `done`, or back to `open` with no
    claimant.
