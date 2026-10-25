@@ -423,6 +423,53 @@ def test_a_finished_front_door_still_running_keeps_its_seat(up, monkeypatch, cap
     assert printed(capsys)["seat"] == "master-2@sw"
 
 
+@pytest.mark.parametrize("live", [True, False])
+def test_a_starting_front_door_in_a_one_seat_pool_gets_no_second_master(up, monkeypatch, capsys, live):
+    store, _, rt = up
+    front = AgentRecord("master@a1b2c3-0005", MASTER, MASTER, state="starting", seat="master@sw", started_at=5)
+    store.put_agent("sw", front)
+    if live:
+        rt.live.add(front.name)
+    answers(monkeypatch)
+    assert run("sw", "master", "up", "--new") == 1
+    assert (
+        "the front door master master@a1b2c3-0005 is starting and every master seat is held (master seat count 1)"
+        in capsys.readouterr().err
+    )
+    assert rt.masters == [] and [a.name for a in masters(store)] == [front.name]
+
+
+def test_a_starting_front_door_with_a_free_counted_seat_gets_its_master_in_that_seat(up, monkeypatch, capsys):
+    from scripts.swarm_v2 import masters as master_seats
+
+    store, _, rt = up
+    front = AgentRecord("master@a1b2c3-0005", MASTER, MASTER, state="starting", seat="master@sw", started_at=5)
+    store.put_agent("sw", front)
+    master_seats.MasterSeats(store.redis).set_count("sw", 2)
+    answers(monkeypatch)
+    assert run("sw", "master", "up", "--new") == 0
+    assert printed(capsys)["seat"] == "master-2@sw"
+    assert {a.seat for a in masters(store) if a.state != "finished"} == {"master@sw", "master-2@sw"}
+
+
+def test_a_finished_master_still_running_holds_its_counted_seat_beside_a_starting_front_door(up, monkeypatch, capsys):
+    from scripts.swarm_v2 import masters as master_seats
+
+    store, _, rt = up
+    front = AgentRecord("master@a1b2c3-0005", MASTER, MASTER, state="suspect", seat="master@sw", started_at=5)
+    held = AgentRecord("master@a1b2c3-0006", MASTER, "master-2", state="finished", seat="master-2@sw", started_at=5)
+    for record in (front, held):
+        store.put_agent("sw", record)
+    rt.live.add(held.name)
+    master_seats.MasterSeats(store.redis).set_count("sw", 2)
+    answers(monkeypatch)
+    assert run("sw", "master", "up", "--new") == 1
+    assert (
+        "master@a1b2c3-0005 is suspect and every master seat is held (master seat count 2)" in capsys.readouterr().err
+    )
+    assert rt.masters == []
+
+
 def test_a_failed_launch_beside_the_front_door_says_why_and_leaves_no_record(up, monkeypatch, capsys):
     store, _, rt = up
     live = AgentRecord("master@a1b2c3-0005", MASTER, MASTER, harness="claude", seat="master@sw", started_at=5)

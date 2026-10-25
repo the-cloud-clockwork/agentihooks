@@ -65,7 +65,7 @@ def _grant(operation: str, redis: "Redis", value: str, redis_url: str, signer: "
     if signer.member_swarms is not None and (member := auth.member_of(redis, value)):
         nats_grant.require_listed(signer, member)
     grant = getattr(auth, operation)(redis, value, redis_url)
-    grant = {**grant, "nats_credentials": nats_grant.mint(signer, grant["id"])}
+    grant = {**grant, "nats_credentials": nats_grant.mint(signer, grant["id"]), "bus_url": signer.url}
     if signer.member_swarms is None:
         return {**grant, "bus_scoped": False}
     return {**grant, "bus_scoped": True, "bus_swarms": list(signer.member_swarms[grant["id"]])}

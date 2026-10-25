@@ -658,6 +658,35 @@ def _profile_canary(args, agent: str, environ: dict[str, str], launch, route: di
     return launch.run("profile canary", canary, lambda seconds: _binding_result(environ, seconds, route))
 
 
+def _detach() -> bool:
+    if os.fork():
+        return True
+    os.setsid()
+    null = os.open(os.devnull, os.O_RDWR)
+    for stream in (0, 1, 2):
+        os.dup2(null, stream)
+    return False
+
+
+def _detached(args, environ: dict[str, str]) -> bool:
+    """The detached child's output goes to /dev/null; its failures reach the caller only through the binding report."""
+    return bool(args.defer_canary and _binding_deferred(environ)) and _detach()
+
+
+def _refuse_deferred(args, environ: dict[str, str], exc: Exception) -> None:
+    from scripts.profiles import binding
+
+    if args.defer_canary and environ.get(binding.REPORT):
+        binding.refuse(Path(environ[binding.REPORT]), str(exc))
+
+
+def _codex_hooks(agent: str, environ: dict[str, str]) -> list[str]:
+    if agent != "codex":
+        return []
+    moved = restore_hook_order(codex_home(environ))
+    return [f"codex_hooks=restored:{','.join(moved)}" if moved else "codex_hooks=unchanged"]
+
+
 def _selection_refused(environ: dict[str, str]) -> bool:
     from scripts.profiles import binding
 
@@ -1097,9 +1126,7 @@ def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -
                 f"agentihooks init-agent: Claude does not trust {directory} ({why}); {claude_trust.WAIT_NOTICE}",
                 file=sys.stderr,
             )
-    if agent == "codex":
-        moved = restore_hook_order(codex_home(active_env))
-        report.append(f"codex_hooks=restored:{','.join(moved)}" if moved else "codex_hooks=unchanged")
+    report += _codex_hooks(agent, active_env)
     marker = _started_marker(launcher)
     if host == "herdr":
         try:
@@ -1140,6 +1167,9 @@ def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -
     marker.unlink(missing_ok=True)
     report.append("status=started")
     report.append(f"launcher_at={launcher_at}")
+    if _detached(args, active_env):
+        print("\n".join([*report, "route_status=pending", *_binding_deferred(active_env)]))
+        return 0
 
     route_path = _route_report(launcher)
     deadline = time.monotonic() + args.route_timeout
@@ -1180,6 +1210,7 @@ def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -
         _route_reported(active_env, args.route_timeout, route)
         report += _profile_canary(args, agent, active_env, launch, route)
     except (OSError, ValueError) as exc:
+        _refuse_deferred(args, active_env, exc)
         print("\n".join([*report, "profile_validation=failed"]))
         print(f"agentihooks init-agent: {exc}", file=sys.stderr)
         return 3

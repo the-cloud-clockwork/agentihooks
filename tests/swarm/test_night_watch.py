@@ -429,6 +429,7 @@ def sent(monkeypatch):
         return mailer.EmailResult(success=True, recipients_count=1)
 
     monkeypatch.setattr(mailer, "send_email", send_email)
+    monkeypatch.setattr(mailer.EmailClient, "reachable", lambda self: True)
     return mails
 
 
