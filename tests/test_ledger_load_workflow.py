@@ -37,6 +37,20 @@ def test_the_ledger_load_gate_runs_beside_the_shards_with_redis_inside_the_budge
     assert gate["if"] == "${{ !inputs.streams && !inputs.compare && steps.key.outputs.hit != 'true' }}"
 
 
+def test_every_ledger_load_service_pulls_redis_from_the_google_mirror():
+    jobs = yaml.safe_load((WORKFLOWS / "ledger-load.yml").read_text())["jobs"]
+    images = {name: job["services"]["redis"]["image"] for name, job in jobs.items() if "services" in job}
+    assert images == {
+        "load": "mirror.gcr.io/library/redis:7-alpine",
+        "compare": "mirror.gcr.io/library/redis:7-alpine",
+    }
+    assert all(
+        not service["image"].startswith("public.ecr.aws/")
+        for job in jobs.values()
+        for service in job.get("services", {}).values()
+    )
+
+
 def test_the_ledger_load_gate_grades_with_the_budgets_of_the_fetched_base():
     workflow = yaml.safe_load((WORKFLOWS / "ledger-load.yml").read_text())
     triggers = workflow[True]
