@@ -55,6 +55,8 @@ ENV_FILE = "hive.env"
 NATS_CREDS_FILE = "hive.creds"
 # Below the home, where the hooks' *.env autoload never puts it into other processes.
 CONTROLLER_ENV_FILE = "controller/credential.env"
+# A service holder that stops renewing, such as a replaced hub pod, loses its credential with its key.
+SERVICE_TTL_S = 300
 
 
 class HiveError(Exception):
@@ -211,8 +213,19 @@ def issue_controller(redis: "Redis") -> str:
     return credential
 
 
+def issue_service(redis: "Redis", holder: str) -> str:
+    credential = f"{holder}.{secrets.token_urlsafe()}"
+    keep_service(redis, credential)
+    return credential
+
+
+def keep_service(redis: "Redis", credential: str) -> None:
+    redis.set(f"{PREFIX}:controller:{credential.rpartition('.')[0]}", _digest(credential), ex=SERVICE_TTL_S)
+
+
 def controller(redis: "Redis", credential: str) -> bool:
-    expected = redis.get(f"{PREFIX}:controller")
+    holder, service, _ = (credential or "").rpartition(".")
+    expected = redis.get(f"{PREFIX}:controller:{holder}" if service else f"{PREFIX}:controller")
     return bool(credential and expected) and hmac.compare_digest(expected, _digest(credential))
 
 

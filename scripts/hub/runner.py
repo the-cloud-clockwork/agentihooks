@@ -5,12 +5,14 @@ import signal
 import socket
 import sys
 import traceback
+from collections.abc import Callable
+from time import monotonic
 
 from scripts.events.bus import Bus, Delivery, StateConflict, StateStore
 from scripts.events.config import BusConfig
 from scripts.events.envelope import Envelope
 from scripts.events.factory import open_bus
-from scripts.hive import buckets
+from scripts.hive import auth, buckets
 from scripts.hub import lease, registry, slots
 from scripts.hub.registry import Reactor, Registry
 from scripts.scheduler.process_timer import wait as scheduled_wait
@@ -20,6 +22,8 @@ IDLE_S = 5.0
 BATCH = 32
 FETCH_TIMEOUT_MS = 500
 LEASE_TTL_MS = 15_000
+CREDENTIAL_ENV = "AGENTIHOOKS_CONTROLLER_CREDENTIAL"
+KEEP_S = auth.SERVICE_TTL_S / 3
 
 
 def handled_key(reactor: Reactor, event: Envelope) -> str:
@@ -116,16 +120,37 @@ class HubRunner:
         return "handled"
 
 
-def _run(hub: HubRunner, once: bool) -> int:
+def _run(hub: HubRunner, once: bool, keep: Callable[[], None] = lambda: None) -> int:
     while True:
         passes = hub.run_once()
         for name, outcomes in passes.items():
             for outcome in outcomes:
                 print(f"{name}: {outcome}")
+        keep()
         if once:
             return 0
         if all(outcomes == ["standby"] for outcomes in passes.values()):
             scheduled_wait(IDLE_S)
+
+
+def _ledger_authority(holder: str) -> Callable[[], None]:
+    from scripts.swarm import store
+    from scripts.swarm_ledger import ledger_link
+
+    if not ledger_link.remote():
+        return lambda: None
+    redis = store.redis_client()
+    credential = auth.issue_service(redis, f"hub-{holder}")
+    os.environ[CREDENTIAL_ENV] = credential
+    kept = [monotonic()]
+
+    def keep() -> None:
+        now = monotonic()
+        if now - kept[0] >= KEEP_S:
+            auth.keep_service(redis, credential)
+            kept[0] = now
+
+    return keep
 
 
 def main(argv: list[str]) -> int:
@@ -133,13 +158,15 @@ def main(argv: list[str]) -> int:
     parser.add_argument("action", choices=("run",))
     parser.add_argument("--once", action="store_true")
     args = parser.parse_args(argv)
+    holder = os.environ.get("HOSTNAME") or socket.gethostname()
+    keep = _ledger_authority(holder)
     bus = open_bus(BusConfig.from_environ(os.environ))
     buckets.provision(bus)
     slots.serve(bus)
-    hub = HubRunner(bus, registry.configured(bus), os.environ.get("HOSTNAME") or socket.gethostname())
+    hub = HubRunner(bus, registry.configured(bus), holder)
     previous = signal.signal(signal.SIGTERM, lambda *_: sys.exit(143))
     try:
-        return {"run": _run}[args.action](hub, args.once)
+        return {"run": _run}[args.action](hub, args.once, keep)
     finally:
         hub.stop()
         bus.close()
