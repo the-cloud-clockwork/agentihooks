@@ -49,7 +49,14 @@ def test_only_nonempty_test_only_pull_request_diffs_avoid_analysis(tmp_path, pat
     result = subprocess.run(
         ["bash", "-e", "-o", "pipefail", "-c", _step("Decide whether Sonar has changed source")["run"]],
         cwd=tmp_path,
-        env=dict(os.environ, BASE=base, HEAD=git("rev-parse", "HEAD"), EVENT=event, GITHUB_OUTPUT=str(output), RUNNER_TEMP=str(tmp_path)),
+        env=dict(
+            os.environ,
+            BASE=base,
+            HEAD=git("rev-parse", "HEAD"),
+            EVENT=event,
+            GITHUB_OUTPUT=str(output),
+            RUNNER_TEMP=str(tmp_path),
+        ),
         capture_output=True,
         text=True,
     )
@@ -69,7 +76,14 @@ def test_a_failed_diff_cannot_publish_a_test_only_decision(tmp_path):
     result = subprocess.run(
         ["bash", "-e", "-o", "pipefail", "-c", _step("Decide whether Sonar has changed source")["run"]],
         cwd=tmp_path,
-        env=dict(os.environ, BASE="missing", HEAD="missing", EVENT="pull_request", GITHUB_OUTPUT=str(output), RUNNER_TEMP=str(tmp_path)),
+        env=dict(
+            os.environ,
+            BASE="missing",
+            HEAD="missing",
+            EVENT="pull_request",
+            GITHUB_OUTPUT=str(output),
+            RUNNER_TEMP=str(tmp_path),
+        ),
         capture_output=True,
         text=True,
     )
