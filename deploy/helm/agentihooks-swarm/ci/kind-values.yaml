@@ -19,6 +19,10 @@ controller:
     timeoutSeconds: 5
     failureThreshold: 6
   terminationGracePeriodSeconds: 30
+  # The proofs run their Python through kubectl exec in this container, beside probes every second.
+  resources:
+    limits:
+      memory: 1Gi
   # Never created in kind; optional lets the controller start without it.
   secretEnv:
     - name: AGENTIHOOKS_WORKER_TERMINAL
