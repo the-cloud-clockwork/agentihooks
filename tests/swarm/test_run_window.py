@@ -348,3 +348,47 @@ def test_a_failed_gate_row_retries_without_asking_an_agent_twice(swarm, monkeypa
     assert calls == ["deny", "deny"]
     assert [row["kind"] for row in gate_log.recent(SLUG)] == ["deny"]
     assert len(_items(store, OWNER)) == 1
+
+
+@pytest.fixture
+def away_zone(monkeypatch):
+    import time
+
+    monkeypatch.setenv("TZ", "Asia/Kolkata")
+    time.tzset()
+    yield
+    monkeypatch.undo()
+    time.tzset()
+
+
+def test_window_times_stay_in_utc_on_a_host_in_another_zone(away_zone):
+    assert run_window.setting({}, "window-start", "2026-10-25T00:00:00Z", 0) == {"start_ms": START}
+    assert run_window.final(SLUG, "off", (START, END), {}, []).startswith(
+        "## Intent\nRun window on swarm sw, 25 October 00:00 UTC to 25 October 12:00 UTC, window gate skip.\n\n"
+    )
+
+
+def test_the_final_handoff_names_every_agent_in_flight():
+    rows = {
+        "t1": {"title": "Fix the claim", "state": "claimed"},
+        "t4": {"title": "Ship it", "state": "pr"},
+    }
+    flying = [AgentRecord(OWNER, "eng", "t1"), AgentRecord("engineer@abc-0002", "eng", "t4")]
+    assert run_window.final(SLUG, "observe", (START, END), rows, flying) == (
+        "## Intent\nRun window on swarm sw, 25 October 00:00 UTC to 25 October 12:00 UTC, window gate log only.\n\n"
+        "## Done\nTasks by state: 1 claimed, 1 pr.\n\n"
+        "## Stopped at\nIn flight at the cutoff: engineer@abc-0001 on t1 Fix the claim; "
+        "engineer@abc-0002 on t4 Ship it.\n\n"
+        "## Decisions and promises\nOnly swarm set changes the window.\n\n"
+        "## Next\nthe gate only logged, so claims continue; set window-gate=deny to enforce the next cutoff.\n\n"
+        "## Read first\n- ledger:sw/tasks/t1\n- ledger:sw/tasks/t4\n\n"
+        "<!-- handoff complete -->"
+    )
+
+
+def test_the_hand_off_ask_carries_its_task(swarm):
+    from scripts.inbox.store import InboxStore
+
+    store, ledger = swarm
+    _step(store, ledger, END, gates={"window": "enforce"})
+    assert [item.task for item in InboxStore(store.redis).inbox(OWNER)] == ["t1"]
