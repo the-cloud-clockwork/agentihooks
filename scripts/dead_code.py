@@ -36,12 +36,10 @@ def hits(tree: Path) -> dict[str, list[str]]:
     if scanner.exit_code == ExitCode.InvalidInput:
         raise GradeError(f"vulture cannot parse every graded file in {tree}; its error is above")
     found = {}
-    for item in scanner.get_unused_code(min_confidence=MIN_CONFIDENCE):
-        path = Path(item.filename)
-        # Vulture's own whitelists carry relative names; every graded file is absolute.
-        if not path.is_absolute():
-            continue
-        unit = path.relative_to(tree).as_posix()
+    # Vulture's own whitelists carry relative names; every graded file is absolute.
+    graded = [item for item in scanner.get_unused_code(min_confidence=MIN_CONFIDENCE) if item.filename.is_absolute()]
+    for item in graded:
+        unit = item.filename.relative_to(tree).as_posix()
         found.setdefault(unit, []).append(f"{unit}:{item.first_lineno}: {item.message} ({item.confidence}% confidence)")
     return found
 

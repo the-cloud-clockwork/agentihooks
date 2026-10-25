@@ -115,11 +115,11 @@ def test_noqa_and_config_in_the_graded_tree_hide_nothing(tmp_path):
         tmp_path,
         {
             "hooks/guard.py": PLANTED.replace("def planted():", "def planted():  # noqa")
-            + "\n\nimport os  # noqa: F401 kept for side effects\n",
+            + "\n\nimport os  # noqa: F401 kept for side effects\n\n\ndef kept():  # noqa: F401\n    return 4\n",
             "pyproject.toml": '[tool.vulture]\nexclude = ["hooks"]\nignore_names = ["planted"]\n',
         },
     )
-    assert dead_code.measure(tree) == {"hooks/guard.py": 2}
+    assert dead_code.measure(tree) == {"hooks/guard.py": 3}
 
 
 def test_a_file_cannot_grow_back_into_slack_the_base_still_records(tmp_path, capsys):
@@ -140,6 +140,31 @@ def test_an_allowlist_without_integer_counts_cannot_grade(tmp_path, capsys, text
     code, out = _grade(base, head, capsys)
     assert code == 1
     assert out == f"::error::{base / dead_code.ALLOWLIST} holds no object of per file counts\n"
+
+
+def test_a_file_the_base_measures_but_never_recorded_has_no_allowance(tmp_path, capsys):
+    base = _tree(tmp_path / "base", {"hooks/guard.py": PLANTED})
+    (base / dead_code.ALLOWLIST).write_text("{}")
+    head = _recorded(tmp_path / "head", {"hooks/guard.py": PLANTED})
+    code, out = _grade(base, head, capsys)
+    assert code == 1
+    assert "::error::hooks/guard.py has 1 unused names; the base allows 0\n" in out
+
+
+def test_the_slack_notice_counts_what_the_head_still_holds(tmp_path, capsys):
+    base = _recorded(tmp_path / "base", {"hooks/guard.py": PLANTED + "\n\ndef other():\n    return 3\n"})
+    head = _tree(tmp_path / "head", {"hooks/guard.py": PLANTED})
+    (head / dead_code.ALLOWLIST).write_text((base / dead_code.ALLOWLIST).read_text())
+    code, out = _grade(base, head, capsys)
+    assert code == 0, out
+    assert "::notice::tests/DEAD_CODE_ALLOWLIST.json allows 1 more than the head holds;" in out
+
+
+def test_an_unreadable_file_cannot_be_graded(tmp_path):
+    tree = _tree(tmp_path, {"hooks/guard.py": USED})
+    (tree / "hooks/guard.py").write_bytes(b"x = '\xff'\n")
+    with pytest.raises(size_limits.GradeError, match=r"^vulture cannot read /.+/hooks/guard\.py: $"):
+        dead_code.measure(tree)
 
 
 def test_unused_imports_and_attributes_are_counted(tmp_path):
@@ -163,8 +188,10 @@ def test_measurement_resolves_a_symlinked_tree(tmp_path):
 
 
 def test_the_allowlist_is_written_sorted_one_space_indented(tmp_path):
-    tree = _recorded(tmp_path, {"hooks/b.py": PLANTED, "hooks/a.py": PLANTED.replace("planted", "spare")})
-    assert (tree / dead_code.ALLOWLIST).read_text() == '{\n "hooks/a.py": 1,\n "hooks/b.py": 1\n}\n'
+    files = {"hooks/b.py": PLANTED, "hooks/a.py": PLANTED.replace("planted", "spare")}
+    tree = _recorded(tmp_path, files | {"hooks/C.py": PLANTED.replace("planted", "third")})
+    # Vulture orders by lowercased path; the allowlist orders by exact key, so C sorts first.
+    assert (tree / dead_code.ALLOWLIST).read_text() == '{\n "hooks/C.py": 1,\n "hooks/a.py": 1,\n "hooks/b.py": 1\n}\n'
 
 
 @pytest.mark.parametrize("side", ["base", "head"])
