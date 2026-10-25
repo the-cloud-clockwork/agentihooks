@@ -12,6 +12,8 @@ TOKEN = "ghp_value_that_never_reaches_disk"
 
 @pytest.fixture
 def clock(monkeypatch):
+    for name in ("GH_TOKEN", "GITHUB_TOKEN", "GH_CONFIG_DIR"):
+        monkeypatch.delenv(name, raising=False)
     now = [1_000.0]
     monkeypatch.setattr(mutation_wait, "_now", lambda: now[0])
     return now
