@@ -18,6 +18,7 @@ EVIDENCE_CLASS = (
     "concept embedder stand in for the session service, the central database, the archive bucket and the embedding "
     "provider; no model, HTTP server, vector database or Pod runs"
 )
+BATCH_SPAN = 100
 HIDDEN = ("antoncore-private", "personal-corpus", "agentibrain-kernel", "database is locked", "search-kernel")
 
 
@@ -52,6 +53,12 @@ def session_inputs(inputs, item):
     return {**inputs, **fields, "parent_session_uid": None, "grant": projects}
 
 
+def open_session(inputs, item, root, position):
+    session = Session(session_inputs(inputs, item), root)
+    session.batches = BATCH_SPAN * position
+    return session
+
+
 def request(inputs, query, **fields):
     body = {"schema_version": SCHEMA_VERSION, "access_domain": inputs["grant"]["corpus"], "query": query}
     return {**body, **fields}
@@ -60,10 +67,12 @@ def request(inputs, query, **fields):
 class Corpus:
     def __init__(self, inputs, root):
         self.inputs, self.root = inputs, root
-        self.sessions = {item["name"]: Session(session_inputs(inputs, item), root) for item in inputs["sessions"]}
+        self.sessions = {
+            item["name"]: open_session(inputs, item, root, position) for position, item in enumerate(inputs["sessions"])
+        }
         for item in inputs["sessions"]:
             session = self.sessions[item["name"]]
-            session.append(item["turns"])
+            assert session.append(item["turns"])["state"] == "committed"
             session.build()
             session.validate()
             session.activate("current", 0)

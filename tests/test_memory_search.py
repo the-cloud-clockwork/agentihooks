@@ -13,8 +13,7 @@ from hooks.memory.catalog import Catalog
 from hooks.memory.embeddings import EmbeddingModel
 from hooks.memory.search import Query, ScopeRefused, SessionSearch
 from tests import sv2_idx04_cases
-from tests.sv2_idx02_cases import Session
-from tests.sv2_idx04_cases import Corpus, embedder, grant, request, session_inputs
+from tests.sv2_idx04_cases import Corpus, embedder, grant, open_session, request
 
 pytestmark = pytest.mark.unit
 
@@ -198,16 +197,19 @@ def test_projects_narrow_inside_retrieval(inputs, corpus):
 
 def test_a_session_not_retained_is_not_searched(inputs, corpus):
     uid = inputs["sessions"][2]["session_uid"]
+    labels = corpus.labels()
+    before = corpus.searcher.search(grant(inputs), query(inputs), embedder(inputs))
     revision = corpus.catalog.session(DOMAIN, uid)["revision"]
     corpus.catalog.set_state(DOMAIN, uid, "restricted", revision)
     wide = corpus.searcher.search(grant(inputs), query(inputs), embedder(inputs))
-    assert not any(label.startswith("kernel:") for label in labelled(corpus, wide))
+    assert any(label.startswith("kernel:") for label in sv2_idx04_cases.named(labels, before))
+    assert not any(label.startswith("kernel:") for label in sv2_idx04_cases.named(labels, wide))
 
 
 def test_a_session_without_an_active_chunk_generation_is_not_searched(inputs, corpus, tmp_path):
     item = {**inputs["sessions"][1], "session_uid": "swarm-fixture:claude:worker-a:unactivated"}
-    extra = Session(session_inputs(inputs, item), tmp_path)
-    extra.append(item["turns"])
+    extra = open_session(inputs, item, tmp_path, len(inputs["sessions"]))
+    assert extra.append(item["turns"])["state"] == "committed"
     extra.build()
     extra.validate()
     answer = corpus.searcher.search(grant(inputs), query(inputs, inputs["queries"]["symbol"]), embedder(inputs))
