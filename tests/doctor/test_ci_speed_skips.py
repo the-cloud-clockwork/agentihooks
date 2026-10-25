@@ -141,6 +141,11 @@ def test_a_two_attempt_run_raises_no_lag_for_a_skip_decision_carried_from_the_fi
     second.update(run_attempt=2, run_started_at="2026-10-25T05:16:51Z")
     second["jobs"][1].update(created_at="2026-10-25T05:17:01Z", started_at="2026-10-25T05:17:09Z")
     assert crossings(first) == crossings(second) == []
+    own = copy.deepcopy(second["jobs"][1])
+    own.update(id=118171818683, name="kind-due", started_at="2026-10-25T05:23:03Z", completed_at="2026-10-25T05:16:52Z")
+    second["jobs"].append(own)
+    [finding] = crossings(second)
+    assert (finding.measure, finding.summary.split()[0]) == (371, "kind-due")
 
 
 def test_timer_delivers_one_skipped_record_finding_per_run_to_both_masters(skipped_run, monkeypatch):
