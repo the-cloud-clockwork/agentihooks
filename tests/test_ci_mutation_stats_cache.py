@@ -685,6 +685,41 @@ def test_stats_cache_recollects_a_record_that_does_not_match_its_current_inputs(
     assert calls == [files, files, files]
 
 
+def test_stats_collection_seeds_once_and_exports_records_for_the_next_merged_run(tmp_path, monkeypatch):
+    from scripts.ci_mutation import stats_cache, stats_seed
+
+    root = tmp_path / "repo"
+    files = ["tests/test_a.py"]
+    _repository(root, {"scripts/a.py": "value = 1\n", files[0]: "from scripts.a import value\n"})
+    cache = tmp_path / "cache"
+    exported = tmp_path / "stats" / "cache"
+    monkeypatch.setenv("MUTATION_STATS_SEED_BASE", "origin/dev")
+    monkeypatch.setenv("MUTATION_STATS_EXPORT", str(exported))
+    calls = []
+    monkeypatch.setattr(stats_seed, "seed", lambda *args: calls.append(args) or 0)
+    collected = []
+
+    def collect(chosen):
+        collected.append(chosen)
+        return [
+            {
+                "status": 0,
+                "tests": {"scripts.a.x_value": ["tests/test_a.py::test_value"]},
+                "durations": {"tests/test_a.py::test_value": 1},
+                "cpu": 1,
+            }
+        ]
+
+    stats_cache.collect_cached_stats(root, cache, {}, files, [], collect)
+    stats_cache.collect_cached_stats(root, cache, {}, files, [], collect)
+    assert calls == [(root, cache, "origin/dev")]
+    assert collected == [files]
+    assert {path.name: path.read_bytes() for path in exported.glob("*.json")} == {
+        path.name: path.read_bytes() for path in cache.glob("*.json")
+    }
+    assert list(exported.glob("*.json"))
+
+
 def test_file_stats_pass_sorted_changed_lines_and_runner_options_to_the_cache(tmp_path, monkeypatch):
     import json
     from types import SimpleNamespace
