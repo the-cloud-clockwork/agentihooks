@@ -12,7 +12,6 @@ from scripts.hive import account_slots, workstation
 from scripts.hive.spoke import Spoke, SpokeConfig
 from scripts.scheduler.process_timer import wait as scheduled_wait
 from scripts.swarm import readiness
-from scripts.swarm.store import EVENTS_ENGINE
 from scripts.swarm_v2.runtime.base import SpawnRequest
 
 LANES = ("eng", "ci", "plan")
@@ -53,10 +52,8 @@ def lanes(excluded: str) -> tuple[str, ...]:
 
 def spokes(store, bus, runtime, hive: str, taken: Iterable[str], held: dict) -> list[Spoke]:
     current = []
-    for slug in store.slugs():
+    for slug in readiness.Source(store).slugs():
         config = store.config(slug)
-        if config.engine != EVENTS_ENGINE:
-            continue
         for lane in taken:
             if (slug, lane) not in held:
                 tasks = LaneTasks(bus, hive, store.config)

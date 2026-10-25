@@ -29,6 +29,8 @@ def rig():
         if row["state"] in if_state and all(
             row.get(key, "" if key == "claimed_by" else 0) == value for key, value in (if_match or {}).items()
         ):
+            if fields.get("claimed_by", row.get("claimed_by", "")) != row.get("claimed_by", ""):
+                row["claim_generation"] = row.get("claim_generation", 0) + 1
             row.update(fields)
         return dict(row)
 
@@ -63,8 +65,9 @@ def test_the_hub_admits_an_offer_by_claiming_starting_seating_and_marking_it_cla
     assert (spawned["execution_id"], spawned["execution_generation"], spawned["claim_generation"]) == (
         agent.execution_id,
         agent.generation,
-        0,
+        1,
     )
+    assert spawned["claim_generation"] == rig.rows["t1"]["claim_generation"]
     json.dumps(admitted)
 
 
@@ -96,6 +99,17 @@ def test_an_offer_the_ledger_no_longer_backs_is_withdrawn_without_a_claim(rig, f
 def test_a_ledger_that_refuses_the_claim_releases_the_claim_and_the_agent(rig):
     rig.ledger.update_task = lambda *args, **kwargs: {**rig.rows["t1"], "state": "claimed", "claimed_by": "other"}
     assert rig.admitter.admit(SLUG, ask()) is None
+    assert rig.store.claimant(SLUG, "t1") is None
+    assert rig.store.agents(SLUG) == []
+
+
+def test_a_ledger_outage_during_the_claim_releases_the_claim_and_the_agent(rig):
+    def down(*args, **kwargs):
+        raise ConnectionError("ledger down")
+
+    rig.ledger.update_task = down
+    with pytest.raises(ConnectionError, match="^ledger down$"):
+        rig.admitter.admit(SLUG, ask())
     assert rig.store.claimant(SLUG, "t1") is None
     assert rig.store.agents(SLUG) == []
 

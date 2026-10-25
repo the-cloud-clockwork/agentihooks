@@ -553,11 +553,13 @@ hive. Hives pull offers from the hub over NATS JetStream instead, through one sp
 
 A master spoke rechecks its offer against the ledger itself. An eng, ci or plan spoke asks the hub to admit it,
 because a member's Redis user cannot claim a task, name an agent or take a seat, and a remote hive makes no service
-ledger reads. The hub answers `admit` on the same `slots.<swarm>.<hive>` request subject as account slots, refused
-when the hive differs from the sending credential's. It rechecks the offer against the ledger, claims the task,
+ledger reads. The hub answers `admit` on the same `slots.<swarm>.<hive>` request subject as account slots, which a
+member's credential may publish only for its own hive; a request naming another hive than its subject is refused. It rechecks the offer against the ledger, claims the task,
 starts the execution on that hive, occupies a seat, marks the task claimed (or back in `pr`) and returns the primed
 spawn task. A repeat from the same hive returns the same admission, so a retried launch keeps its agent; any other
 hive gets none. When the offer runs out of deliveries, the spoke sends `reopen`, which returns the task to `open`.
+Unlike a tick launch, a hub admission scaffolds no task work folder on the hub and resolves no reclaim continuation,
+stack base, overlaps or group; the spawn task carries the seat's handoff, recaps and learned notes.
 
 The hub creates the hive buckets; members are not allowed to create them:
 

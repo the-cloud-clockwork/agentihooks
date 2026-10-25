@@ -3,10 +3,14 @@
 import json
 import sys
 from collections.abc import Callable
+from typing import TYPE_CHECKING
 
 from scripts.events.bus import Bus
 from scripts.events.subjects import SLOTS
 from scripts.hive import account_slots, presence
+
+if TYPE_CHECKING:
+    from scripts.hub.admission import Admission
 
 BUCKETS = ("account-slots", "hive-slot-accounts")
 QUEUE = "hub-slots"
@@ -17,7 +21,7 @@ OPERATIONS = {
 }
 
 
-def _answer(bus: Bus, subject: str, data: bytes, clock: Callable[[], int], admitter):
+def _answer(bus: Bus, subject: str, data: bytes, clock: Callable[[], int], admitter: "Admission | None"):
     from scripts.hub import admission
 
     parts = subject.split(".")
@@ -39,7 +43,9 @@ def _answer(bus: Bus, subject: str, data: bytes, clock: Callable[[], int], admit
     return operation(account_slots.Slots(bus, request["hive"], lambda: request["report"], clock), request)
 
 
-def handle(bus: Bus, subject: str, data: bytes, clock: Callable[[], int] = presence.now_ms, admitter=None) -> bytes:
+def handle(
+    bus: Bus, subject: str, data: bytes, clock: Callable[[], int] = presence.now_ms, admitter: "Admission | None" = None
+) -> bytes:
     try:
         answer = {"ok": True, "result": _answer(bus, subject, data, clock, admitter)}
     except KeyError as exc:
@@ -49,7 +55,7 @@ def handle(bus: Bus, subject: str, data: bytes, clock: Callable[[], int] = prese
     return json.dumps(answer).encode()
 
 
-def serve(bus: Bus, clock: Callable[[], int] = presence.now_ms, admitter=None) -> None:
+def serve(bus: Bus, clock: Callable[[], int] = presence.now_ms, admitter: "Admission | None" = None) -> None:
     from scripts.hub import admission
 
     admitter = admitter or admission.Admission()
