@@ -874,7 +874,7 @@ class Handler(BaseHTTPRequestHandler):
         if self.path.startswith("/api/v1/") and code >= 400 and ctype != "application/json":
             body = json.dumps({"error": {"code": "forbidden" if code == 403 else "request_refused", "message": body}})
             ctype = "application/json"
-        data = body if isinstance(body, bytes) else body.encode("utf-8")
+        data = body.encode("utf-8")
         self.send_response(code)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(data)))
@@ -1040,6 +1040,16 @@ class Handler(BaseHTTPRequestHandler):
         except ValueError as exc:
             return self.send(400, str(exc), "text/plain")
         return self.send(200, json.dumps(saved), "application/json")
+
+    def send_export(self, data):
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Cache-Control", "no-store")
+        if self.headers.get("Origin") == FILE_ORIGIN:
+            self.send_header("Access-Control-Allow-Origin", FILE_ORIGIN)
+        self.end_headers()
+        self.wfile.write(data)
 
     def send_logo(self):
         try:

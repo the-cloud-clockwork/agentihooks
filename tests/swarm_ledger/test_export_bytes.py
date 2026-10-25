@@ -6,13 +6,13 @@ __all__ = ["authority_live", "live"]
 
 
 def test_export_sends_the_cached_view_bytes_without_copying_them(live, monkeypatch):
-    sent, send_reply = [], ledger_server.Handler.send
+    sent, send_export = [], ledger_server.Handler.send_export
 
-    def capture(handler, code, body, ctype):
-        sent.append(body)
-        return send_reply(handler, code, body, ctype)
+    def capture(handler, data):
+        sent.append(data)
+        return send_export(handler, data)
 
-    monkeypatch.setattr(ledger_server.Handler, "send", capture)
+    monkeypatch.setattr(ledger_server.Handler, "send_export", capture)
     headers = {"X-Ledger-Token": live["admin"], "Content-Type": "application/json"}
     replies = [send(live, "POST", f"/api/v1/ledgers/{SLUG}/export", b"{}", **headers) for _ in range(2)]
     assert [reply[0] for reply in replies] == [200, 200]

@@ -180,7 +180,7 @@ def ledger_operation(handler: object, services: Services, slug: str, path: str, 
             if status is None:
                 raise APIError(404, "swarm_missing", "No swarm for this ledger")
             return {"data": status}
-        return services.repository.encoded_view(slug, export_body)
+        return handler.send_export(services.repository.encoded_view(slug, export_body))
     if path == "operations":
         return mutations.apply(services, slug, principal, payload)
     if path == "architecture/actions":
@@ -211,7 +211,7 @@ def handle(handler: object, services: Services) -> None:
     except (OSError, ValueError):
         logging.getLogger(__name__).exception("Ledger API storage failure")
         status, result = 500, APIError(500, "storage_error", "Resource could not be read or written").envelope()
-    encoded = result if isinstance(result, (str, bytes)) else json.dumps(result, ensure_ascii=False)
+    encoded = result if isinstance(result, str) else json.dumps(result, ensure_ascii=False)
     return handler.send(status, encoded, "application/json")
 
 
