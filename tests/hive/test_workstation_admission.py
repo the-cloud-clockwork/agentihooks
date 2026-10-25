@@ -214,3 +214,51 @@ def test_an_explicit_route_master_ignores_worker_caps_but_reserves_resources(set
     assert setup.launcher.reserve_room(SimpleNamespace(name="master", lane="master", task=task), selected) == ""
     assert setup.store.redis.hgetall(local_slots.key("workstation")) == {}
     assert admission.pending(setup.store.redis, "workstation") == 1
+
+
+def local_fenced(setup, monkeypatch, cpus, load5=0.0):
+    from scripts.hive import headroom
+    from scripts.swarm.controller import FencedRuntime
+
+    monkeypatch.setattr(commands, "hive_id", lambda: "workstation")
+    reading = {"cpus": cpus, "load5": load5, "available_mb": 10**6, "total_mb": 10**6}
+    monkeypatch.setattr(headroom, "measure", lambda pending, now, previous: reading)
+    return FencedRuntime(setup.store, setup.config.slug, setup.held, setup.herdr, "local")
+
+
+@pytest.mark.parametrize("lane", ["eng", "ci", "plan"])
+def test_a_local_launch_over_the_swarm_share_is_refused_with_its_reason(setup, monkeypatch, lane):
+    fenced = local_fenced(setup, monkeypatch, 3)
+    local_agents(setup, 2)
+    reason = (
+        ", and the local machine runs 2 of its 2 agents: cpu: 2 swarm agents at 0.5 CPU each on 3 CPUs, "
+        "fits 0 more under the 40 percent swarm share"
+    )
+    assert fenced.placement_refusal(lane, {"id": "task"}) == reason
+    with pytest.raises(SpawnError) as raised:
+        fenced.spawn(setup.config, lane, "next", {"id": "task"})
+    assert (str(raised.value), raised.value.status) == (reason, "unavailable")
+    setup.herdr.spawn.assert_not_called()
+
+
+def test_a_local_launch_over_the_host_line_is_refused_when_it_is_tighter_than_the_share(setup, monkeypatch):
+    fenced = local_fenced(setup, monkeypatch, 10, load5=8.0)
+    with pytest.raises(SpawnError) as raised:
+        fenced.spawn(setup.config, "eng", "next", {"id": "task"})
+    assert str(raised.value) == (
+        ", and the local machine runs 0 of its 0 agents: cpu: five minute load 8.00 on 10 CPUs, "
+        "0.5 CPU per agent, fits 0 more under the 80 percent line"
+    )
+    setup.herdr.spawn.assert_not_called()
+
+
+def test_an_over_budget_local_master_still_starts_and_counts_against_the_workstation(setup, monkeypatch):
+    from scripts.hive import admission
+
+    fenced = local_fenced(setup, monkeypatch, 10, load5=8.0)
+    assert fenced.placement_refusal("master", {"id": "master"}) == ""
+    assert fenced.spawn(setup.config, "master", "master-new", {"id": "master"}) == setup.herdr.spawn.return_value
+    assert admission.pending(setup.store.redis, "workstation") == 1
+    assert fenced.placement_refusal("eng", {"id": "task"}).endswith(
+        "0.5 CPU per agent with 1 pending launches, fits 0 more under the 80 percent line"
+    )
