@@ -1,0 +1,6 @@
+{
+  "scripts/ci_gate_queue.py:scripts.ci_gate_queue.x_normalize__mutmut_98:7fac7770487737866512d54ecf3d02c2c7af46236ac2475ee2c8f5c54038aaef": {
+    "reader": "standards-reader",
+    "reason": "Only diagnostic capitalization changes; ValueError branch and every diagnostic fact are preserved. Independently approved from complete CI report 40169108156."
+  }
+}

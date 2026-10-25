@@ -29,7 +29,13 @@ def _job(name, conclusion=None, status=None):
 
 
 def _jobs():
-    return yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())["jobs"]
+    from scripts import ci_gate_queue
+
+    workflow = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())
+    jobs = ci_gate_queue.normalize({"test.yml": workflow})["test.yml"]["jobs"]
+    if workflow["jobs"]["queue-fail-fast"].get("name") == ci_gate_queue.GATE_NAME:
+        jobs["queue-fail-fast"] = json.loads((_ROOT / "tests/fixtures/ci_queue_legacy_watch.json").read_text())
+    return jobs
 
 
 def _gate_needs(jobs):

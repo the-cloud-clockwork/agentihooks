@@ -660,7 +660,11 @@ def test_record_passes_its_budget_clock_and_cache_to_both_reads(tmp_path, read_c
     assert (tmp_path / "s" / traces_read.CACHE_DIR / "a.json").exists()
     langfuse.calls.clear()
     data = traces_read.record("s", [], agents, 2000, langfuse, home=tmp_path, budget=traces_read.Budget(active_page=3))
-    assert [c[1]["limit"] for c in langfuse.calls if c[0] == "observations"] == [3, 1]
+    assert [(c[1].get("type"), c[1]["limit"]) for c in langfuse.calls if c[0] == "observations"] == [
+        ("AGENT", 1),
+        (None, 3),
+        (None, 1),
+    ]
     assert data["reader"]["historical"]["covered"] == 1
 
 

@@ -314,6 +314,32 @@ def test_the_env_file_is_private_and_holds_both_credentials(tmp_path):
     )
 
 
+@pytest.mark.parametrize("bus_url", ["nats://bus.example.test:4222", "tls://other.example.test:4443"])
+def test_joined_settings_select_the_delivered_nats_bus(tmp_path, bus_url):
+    from dotenv import dotenv_values
+
+    from scripts.events.config import BusConfig
+
+    grant = {
+        "id": "worker",
+        "ledger_credential": "fixture",
+        "redis_url": "redis://redis.example.test/0",
+        "nats_credentials": "fixture bus credential",
+        "bus_url": bus_url,
+        "bus_scoped": True,
+        "bus_swarms": ["rig"],
+    }
+    path = auth.write_env(tmp_path, "https://hive.example.test", grant)
+    saved = dotenv_values(path)
+    config = BusConfig.from_environ(saved)
+    assert config.backend == "nats"
+    assert config.url == bus_url
+    assert saved["AGENTIHOOKS_BUS_BIND"] == "1"
+    assert saved["AGENTIHOOKS_BUS_SCOPED"] == "1"
+    assert saved["AGENTIHOOKS_BUS_SWARMS"] == "rig"
+    assert saved["AGENTIHOOKS_BUS_CREDENTIALS"] == str(tmp_path / auth.NATS_CREDS_FILE)
+
+
 def test_rejoining_tightens_an_existing_env_file(tmp_path):
     (tmp_path / "hive.env").write_text("old\n")
     (tmp_path / "hive.env").chmod(0o644)

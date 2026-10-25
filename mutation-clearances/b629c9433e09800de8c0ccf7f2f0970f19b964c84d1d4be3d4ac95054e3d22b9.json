@@ -1,0 +1,6 @@
+{
+  "scripts/ci_gate_queue.py:scripts.ci_gate_queue.x_inventory__mutmut_12:4651d2e81c82ad03ac484a86d5c0539ccf8afacb3d58c1a88238cac6b49c761a": {
+    "reader": "standards-reader",
+    "reason": "The first split field is identical for positive maxsplit one, two or unbounded, including malformed repeated separators. Independently approved from complete CI report 40165669788."
+  }
+}
