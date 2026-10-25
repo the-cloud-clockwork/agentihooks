@@ -5,7 +5,7 @@ from . import resources
 
 PAGES_KEPT = 32
 ENCODER = json.JSONEncoder(ensure_ascii=False)
-LEDGERS_KEPT = 8
+LEDGERS_KEPT = 4
 
 
 class Page(dict):

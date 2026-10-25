@@ -91,14 +91,24 @@ def rebuilt(connection: Connection, slug: str, path: str, old: list, paths: set)
     if path in paths:
         return None
     parts, dirty, items = json.loads(path), touched(paths), list(old)
-    known = {encode(child_parts): index for index, (_, child_parts, *_) in enumerate(children(old, parts, None))}
     for child in {encode(json.loads(changed)[: len(parts) + 1]) for changed in paths}:
-        index, row = known.get(child), stored_row(connection, slug, child)
-        if index is None or row is None or row[0] != index:
+        row = stored_row(connection, slug, child)
+        if row is None or not same_child(old, row[0], json.loads(child)[-1]):
             return None
-        if row[1] == "value":
-            items[index] = json.loads(row[2])
+        position, kind, value = row
+        if kind == "value":
+            items[position] = json.loads(value)
         else:
-            pairs = build(connection, slug, child, old[index], dirty)
-            items[index] = [item for _, item in pairs] if row[1] == "array" else dict(pairs)
+            pairs = build(connection, slug, child, old[position], dirty)
+            items[position] = [item for _, item in pairs] if kind == "array" else dict(pairs)
     return items
+
+
+def same_child(old: list, position: int, identity: list) -> bool:
+    """Whether the child stored at position is the old child named by identity, as children() names it."""
+    if position >= len(old) or identity[2] != 0:
+        return False
+    item = old[position]
+    if identity[0] == "id":
+        return isinstance(item, dict) and item.get("id") == identity[1]
+    return identity[1] == position and not (isinstance(item, dict) and "id" in item)
