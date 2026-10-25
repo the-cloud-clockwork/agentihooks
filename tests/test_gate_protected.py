@@ -1228,9 +1228,7 @@ def test_a_head_that_skips_its_equivalence_check_is_refused():
     forced = _equivalence()
     [trigger] = [step for step in forced["jobs"]["ledger-equivalence"]["steps"] if step.get("id") == "trigger"]
     trigger["run"] = 'echo run=false >> "$GITHUB_OUTPUT"'
-    assert _equivalence_grade(forced) == [
-        "The head changes the ledger equivalence steps up to its protected trigger."
-    ]
+    assert _equivalence_grade(forced) == ["The head changes the ledger equivalence steps up to its protected trigger."]
 
     filtered = _equivalence()
     filtered[True]["pull_request"]["paths"] = ["docs/**"]
