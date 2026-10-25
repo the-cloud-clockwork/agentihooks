@@ -743,6 +743,30 @@ def test_fixture_admission_never_reads_outside_the_base(tmp_path, monkeypatch, e
 
 
 @pytest.mark.parametrize(
+    "helper,admitted",
+    [
+        ("def first():\n    from pkg.mod import subject\n    subject = lambda: 1\n    return subject()\n", False),
+        ("def first():\n    return subject()\nfirst = lambda: 1\n", False),
+        ("def first():\n    from pkg.mod import subject\n    return subject()\n", True),
+    ],
+    ids=["rebound-import", "rebound-helper", "local-import"],
+)
+def test_rebound_names_do_not_restore_an_unreached_subject(tmp_path, helper, admitted):
+    result = _floor(
+        tmp_path,
+        {
+            "test_mod.py": "from pkg.mod import subject, other\n\n"
+            + helper
+            + "\ndef test_subject():\n    assert first() == 1\n\ndef test_other():\n    assert other() == 2\n"
+        },
+        {"test_mod.py": OTHER_TEST},
+        {"base": _package(mod=SUBJECT + "\n\n" + KEPT), "head": _package(mod=KEPT)},
+    )
+    assert result.returncode == (0 if admitted else 1), result.stdout + result.stderr
+    assert ("test_subject is admitted" in result.stdout) == admitted
+
+
+@pytest.mark.parametrize(
     "survivor",
     [
         "class Runner:\n    def subject(self):\n        return 1\n",
