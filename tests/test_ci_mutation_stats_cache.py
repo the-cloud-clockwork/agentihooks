@@ -757,6 +757,8 @@ def test_real_fixture_imports_do_not_invalidate_measured_unrelated_test_stats(tm
     warm = collect_cached_stats(root, cache, {}, files, [], collect)
     assert calls == [files]
     assert warm[0]["durations"] == {node: 1}
+    assert warm[0]["dependencies"] == {node: ["scripts/cache_covered_probe.py"]}
+    assert warm[0]["reused"] is True
     (root / "scripts/cache_covered_probe.py").write_text("value = 2\n")
     collect_cached_stats(root, cache, {}, files, [], collect)
     assert calls == [files, files]
@@ -787,6 +789,55 @@ def test_stored_statistics_validate_record_inputs_and_mutation_scope(tmp_path, c
     else:
         next(folder.glob("*.json")).write_text('{"key":"stale","status":0,"inputs":{},"scope":{},"measured":true}')
     assert cache.load("tests/test_module.py") is None
+
+
+@pytest.mark.parametrize(
+    "evidence", [{}, {"tests/test_a.py::test_one": []}, {"tests/test_a.py::test_one": ["module.py"]}]
+)
+def test_partial_runtime_statistics_are_never_reused(tmp_path, evidence):
+    from scripts.ci_mutation.stats_cache import collect_cached_stats
+
+    root = tmp_path / "repo"
+    files = ["tests/test_a.py"]
+    _repository(root, {"module.py": "value = 1\n", files[0]: "import module\n"})
+    calls = []
+
+    def collect(chosen):
+        calls.append(chosen)
+        return [
+            {
+                "status": 0,
+                "tests": {},
+                "durations": {files[0] + "::test_one": 1, files[0] + "::test_two": 1},
+                "cpu": 1,
+                "dependencies": evidence,
+            }
+        ]
+
+    folder = tmp_path / "cache"
+    collect_cached_stats(root, folder, {}, files, [], collect)
+    collect_cached_stats(root, folder, {}, files, [], collect)
+    assert calls == [files, files]
+    assert list(folder.iterdir()) == []
+
+
+def test_stored_statistics_are_portable_across_metadata_ordering(tmp_path):
+    import hashlib
+
+    from scripts.ci_mutation.stats_dependencies import StoredStats
+
+    root = tmp_path / "repo"
+    folder = tmp_path / "cache"
+    folder.mkdir()
+    _repository(root, {"a.py": "value = 1\n", "b.py": "value = 2\n"})
+    inputs = {name: hashlib.sha256((root / name).read_bytes()).hexdigest() for name in ("a.py", "b.py")}
+    first = StoredStats(root, folder, {"inventory": ["a.py", "b.py"], "runtime": "same"}, {})
+    result = {"status": 0, "tests": {}, "durations": {"test": 1}, "cpu": 1}
+    first.save("tests/test_a.py", result, inputs, True)
+    second = StoredStats(root, folder, {"runtime": "same", "inventory": ["a.py", "b.py"]}, {})
+    assert second.load("tests/test_a.py") == {**result, "reused": True}
+    second.save("tests/test_a.py", result, dict(reversed(list(inputs.items()))), True)
+    assert len(list(folder.glob("*.json"))) == 1
 
 
 def test_file_stats_pass_sorted_changed_lines_and_runner_options_to_the_cache(tmp_path, monkeypatch):

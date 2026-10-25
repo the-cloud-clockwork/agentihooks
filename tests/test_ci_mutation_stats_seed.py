@@ -38,6 +38,7 @@ def test_statistics_seed_requires_a_successful_run_merged_into_the_current_base(
     with zipfile.ZipFile(archive, "w") as zipped:
         for key in keys:
             zipped.writestr(f"cache/{key}.json", json.dumps({"key": key, "status": 0}))
+        zipped.writestr(f"cache/{'f' * 64}.index", keys[0])
         zipped.writestr("../escaped.json", "{}")
     calls = []
 
@@ -51,20 +52,26 @@ def test_statistics_seed_requires_a_successful_run_merged_into_the_current_base(
             assert query["sort"] == ["updated"]
             assert query["direction"] == ["desc"]
             assert 1 <= int(query["per_page"][0]) <= 100
+            if source == "merged":
+                return [{**pull, "merged_at": None}, {**pull, "merge_commit_sha": "c" * 40}, pull]
             return [pull]
         if parsed.path in ("actions/workflows/test.yml/runs", "actions/workflows/mutation-preflight.yml/runs"):
             assert query["head_sha"] == [head]
             assert query["status"] == ["success"]
             assert 1 <= int(query["per_page"][0]) <= 100
+            if source == "merged":
+                return {"workflow_runs": [{**run, "conclusion": "failure"}, {**run, "head_sha": "d" * 40}, run]}
             return {"workflow_runs": [run]}
         if endpoint == "actions/runs/42/artifacts?per_page=100":
             return {
                 "artifacts": [
+                    {"id": 8, "name": "other", "expired": False},
+                    {"id": 9, "name": "mutation-stats-1", "expired": True},
                     {
                         "id": 7,
                         "name": "other" if source == "unrelated" else "mutation-stats-0",
                         "expired": source == "expired",
-                    }
+                    },
                 ]
             }
         assert endpoint == "actions/artifacts/7/zip"
@@ -76,10 +83,12 @@ def test_statistics_seed_requires_a_successful_run_merged_into_the_current_base(
     if source == "merged":
         folder.mkdir(parents=True)
     count = stats_seed.seed(root, folder, base)
-    assert count == (2 if source == "merged" else 0)
+    assert count == (3 if source == "merged" else 0)
     assert sorted(path.name for path in folder.glob("*.json")) == (
         [f"{key}.json" for key in keys] if source == "merged" else []
     )
+    if source == "merged":
+        assert (folder / f"{'f' * 64}.index").read_text() == keys[0]
     assert not (folder.parent / "escaped.json").exists()
     if source != "merged":
         assert "actions/artifacts/7/zip" not in calls

@@ -28,14 +28,14 @@ def measured_dependencies(
         filename = getattr(module, "__file__", None)
         if isinstance(filename, str) and (path := source_path(filename, work, root, tracked)):
             shared.add(path)
-    for filename in data.measured_files():
+    for filename in sorted(data.measured_files()):
         if not (path := source_path(filename, work, root, tracked)):
             continue
         contexts = {context for values in data.contexts_by_lineno(filename).values() for context in values}
         if "" in contexts:
             shared.add(path)
         for context in filter(None, contexts):
-            found.setdefault(context.partition("|")[0], set()).add(path)
+            found.setdefault(context.rpartition("|")[0], set()).add(path)
     if not all(node in found for node in nodeids):
         return {}
     return {node: sorted(found[node] | shared) for node in nodeids}
