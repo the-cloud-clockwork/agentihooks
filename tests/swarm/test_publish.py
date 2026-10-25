@@ -191,6 +191,41 @@ def test_publish_from_second_worktree_pushes_and_records_its_branch(
     assert git(second, "rev-parse", "--abbrev-ref", "@{upstream}") == "origin/engineer-test-2"
 
 
+@pytest.mark.parametrize("binding", ["recorded", "tracked", "continuation"])
+def test_stacked_publication_records_its_current_branch_before_pushing(publication, monkeypatch, binding):
+    from scripts.swarm import publish
+
+    root = publication.root
+    git(root, "push", "origin", "HEAD:prerequisite")
+    original = git(root, "rev-parse", "HEAD")
+    publication.task.update(branch="prerequisite", pr_url="https://github.com/example/repo/pull/7")
+    if binding == "tracked":
+        git(root, "branch", "--set-upstream-to=origin/prerequisite")
+    if binding == "continuation":
+        publication.task["handoff_envelope"] = {"continue_from": "origin/prerequisite"}
+    monkeypatch.chdir(root)
+    native = publish.execute
+    pushes = []
+
+    def observe(argv, where):
+        if argv[:2] == ["git", "push"]:
+            assert publication.task["branch"] == "engineer-test"
+            assert publication.task["repository_branches"] == {str(publication.repo): "engineer-test"}
+            pushes.append(argv)
+        return native(argv, where)
+
+    monkeypatch.setattr(publish, "execute", observe)
+    result = publish.publish(
+        "swarm", publication.agent, str(publication.repo), publication.ledger, "Change chosen", ["chosen.txt"]
+    )
+
+    head = git(root, "rev-parse", "HEAD")
+    assert result["branch"] == publication.task["branch"] == "engineer-test"
+    assert len(pushes) == 1
+    assert git(root, "ls-remote", "origin", "refs/heads/engineer-test").split()[0] == head
+    assert git(root, "ls-remote", "origin", "refs/heads/prerequisite").split()[0] == original
+
+
 def test_publish_from_a_prepared_continuation_pushes_only_the_retained_pull_request_branch(
     publication, tmp_path, monkeypatch
 ):
