@@ -8,6 +8,7 @@ import zipfile
 import zlib
 from datetime import datetime, timezone
 
+from scripts.swarm import github_reads
 from scripts.swarm.lost_runner import home as _backoff_home
 from scripts.swarm.store import SwarmError
 
@@ -58,13 +59,14 @@ def admitted_pending(target):
     _record({"at": _now(), "admitted_pending": target})
 
 
-def _api(endpoint, binary=False):
+def _api(endpoint, binary=False, caller="mutation_wait"):
     if backing_off():
         raise RateLimited(f"gh api {endpoint}: GitHub API rate limited until {_stamp(_held_until())}")
     try:
         done = subprocess.run(["gh", "api", endpoint], capture_output=True, timeout=20)
     except (OSError, subprocess.SubprocessError) as error:
         raise Unreachable(f"gh api {endpoint}: {error}") from error
+    github_reads.charge(caller, endpoint, _now())
     if done.returncode:
         stderr = (done.stderr or b"").decode(errors="replace").strip()
         if rate_limited(stderr):
@@ -77,6 +79,11 @@ def _api(endpoint, binary=False):
         return json.loads(done.stdout)
     except ValueError as error:
         raise Unreachable(f"gh api {endpoint}: {error}") from error
+
+
+def _run(repo, number, caller):
+    endpoint = f"repos/{repo}/actions/runs/{number}"
+    return github_reads.run(endpoint, _now(), lambda: _api(endpoint, caller=caller))
 
 
 def _now():
@@ -135,7 +142,7 @@ def read(target: str) -> dict | None:
         return None
     repo, number = match.groups()
     try:
-        return _api(f"repos/{repo}/actions/runs/{number}")
+        return _run(repo, number, "waits.mutation")
     except RateLimited:
         raise
     except (OSError, subprocess.SubprocessError, ValueError):
@@ -349,7 +356,7 @@ def run_resolution(target: str) -> str:
     repo, number = RUN_URL.fullmatch(target).groups()
     outcome = f"checks on {target}"
     try:
-        run = _api(f"repos/{repo}/actions/runs/{number}")
+        run = _run(repo, number, "waits.checks")
     except Unreachable as error:
         return f"{outcome}, missing; GitHub has no such run" if "HTTP 404" in str(error) else ""
     if run.get("status") != "completed":
@@ -367,7 +374,7 @@ def run_resolution(target: str) -> str:
 
 def _failed_jobs(repo, number):
     try:
-        jobs = _api(f"repos/{repo}/actions/runs/{number}/jobs?per_page=100")["jobs"]
+        jobs = _api(f"repos/{repo}/actions/runs/{number}/jobs?per_page=100", caller="waits.checks")["jobs"]
         failed = [f"{job['name']} {job['conclusion']}" for job in jobs if job.get("conclusion") in JOB_FAILURES]
     except RateLimited:
         raise
