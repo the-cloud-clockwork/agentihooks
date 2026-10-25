@@ -1299,6 +1299,42 @@ def test_initial_placement_reads_global_account_reports_without_a_credential_pro
     accounts.assert_called_once_with(environ, now / 1000, refresh=False)
 
 
+def test_placement_shares_accounts_in_a_pass_and_rereads_in_the_next_pass(setup):
+    from unittest.mock import patch
+
+    from scripts.hive import launch, placement
+
+    rows = setup.herdr._quota_accounts
+    del setup.herdr._quota_accounts
+    with patch.object(launch.capacity, "accounts", side_effect=[rows, []]) as accounts:
+        assert setup.launcher.select(setup.config, "eng", {"id": "first"}).hive == "remote"
+        assert setup.launcher.select(setup.config, "eng", {"id": "second"}).hive == "remote"
+        accounts.assert_called_once()
+        next_pass = launch.HiveLaunch(setup.store, setup.config.slug, setup.held, setup.herdr)
+        assert isinstance(next_pass.select(setup.config, "eng", {"id": "first"}), placement.Wait)
+        assert isinstance(next_pass.select(setup.config, "eng", {"id": "second"}), placement.Wait)
+    assert accounts.call_count == 2
+
+
+@pytest.mark.parametrize("available", [False, True])
+def test_runtime_quota_snapshot_supersedes_the_placement_fallback(setup, available):
+    from unittest.mock import patch
+
+    from scripts.hive import launch, placement
+
+    rows = setup.herdr._quota_accounts
+    del setup.herdr._quota_accounts
+    with patch.object(launch.capacity, "accounts", return_value=rows) as accounts:
+        assert setup.launcher.select(setup.config, "eng", {"id": "first"}).hive == "remote"
+        setup.herdr._quota_accounts = rows if available else []
+        selected = setup.launcher.select(setup.config, "eng", {"id": "second"})
+    accounts.assert_called_once()
+    if available:
+        assert selected.hive == "remote"
+    else:
+        assert isinstance(selected, placement.Wait)
+
+
 @pytest.mark.parametrize("pin", ["saved", "planned"])
 def test_selected_account_is_frozen_ahead_of_less_used_accounts(setup, pin):
     from scripts.swarm.capacity import Account
