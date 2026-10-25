@@ -635,6 +635,7 @@ def test_a_successor_uses_the_recorded_worktree_among_other_checkouts(publicatio
 @pytest.mark.parametrize("branch", [None, "", "XXXX"])
 def test_a_detached_checkout_never_becomes_the_unrecorded_task_worktree(publication, tmp_path, capfd, branch):
     from scripts.swarm import publish
+    from scripts.swarm.store import SwarmError
 
     root = publication.root
     git(root, "worktree", "add", "--detach", str(tmp_path / "detached"))
@@ -642,11 +643,18 @@ def test_a_detached_checkout_never_becomes_the_unrecorded_task_worktree(publicat
         publication.task.pop("branch")
     else:
         publication.task["branch"] = branch
-    result = publish.publish(
-        "swarm", publication.agent, str(publication.repo), publication.ledger, "Change chosen", ["chosen.txt"]
-    )
-    assert result["worktree"] == str(root)
-    assert result["branch"] == publication.task["branch"] == "engineer-test"
+    if branch == "XXXX":
+        with pytest.raises(SwarmError, match="engineer-test.*registered.*XXXX"):
+            publish.publish(
+                "swarm", publication.agent, str(publication.repo), publication.ledger, "Change chosen", ["chosen.txt"]
+            )
+        assert publication.updates == []
+    else:
+        result = publish.publish(
+            "swarm", publication.agent, str(publication.repo), publication.ledger, "Change chosen", ["chosen.txt"]
+        )
+        assert result["worktree"] == str(root)
+        assert result["branch"] == publication.task["branch"] == "engineer-test"
     assert "fatal" not in capfd.readouterr().err
 
 
