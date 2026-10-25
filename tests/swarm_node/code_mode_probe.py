@@ -61,7 +61,9 @@ class Model(BaseHTTPRequestHandler):
 
 
 def code_mode_model(codex: str, env: dict) -> str:
-    catalog = json.loads(subprocess.run([codex, "debug", "models"], check=True, capture_output=True, text=True, env=env).stdout)
+    catalog = json.loads(
+        subprocess.run([codex, "debug", "models"], check=True, capture_output=True, text=True, env=env).stdout
+    )
     return next(m["slug"] for m in catalog["models"] if m.get("tool_mode") == "code_mode_only")
 
 
@@ -79,7 +81,17 @@ def main() -> None:
             "model_providers.probe.wire_api": '"responses"',
             "model_providers.probe.env_key": '"CODEX_PROBE_KEY"',
         }
-        command = [codex, "exec", "--skip-git-repo-check", "--ephemeral", "--json", "-s", "danger-full-access", "-m", model]
+        command = [
+            codex,
+            "exec",
+            "--skip-git-repo-check",
+            "--ephemeral",
+            "--json",
+            "-s",
+            "danger-full-access",
+            "-m",
+            model,
+        ]
         for key, value in provider.items():
             command += ["-c", f"{key}={value}"]
         result = subprocess.run(
@@ -87,7 +99,11 @@ def main() -> None:
         )
     server.shutdown()
     events = [json.loads(line) for line in result.stdout.splitlines() if line.startswith("{")]
-    errors = [e["item"]["message"] for e in events if e.get("item", {}).get("type") == "error" and "Code Mode" in e["item"]["message"]]
+    errors = [
+        e["item"]["message"]
+        for e in events
+        if e.get("item", {}).get("type") == "error" and "Code Mode" in e["item"]["message"]
+    ]
     returned = "".join(json.dumps(o.get("output")) for o in Model.outputs)
     report = {"model": model, "exit": result.returncode, "code_mode_errors": errors, "host_output": MARKER in returned}
     print(json.dumps(report))
