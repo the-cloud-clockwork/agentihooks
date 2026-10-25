@@ -62,11 +62,11 @@ def test_head_collection_is_uploaded_once_per_interpreter_and_downloaded_as_data
     else:
         assert "--collected collected-data/collected.json" in check["run"]
         assert download["with"] == {
-            "pattern": "{durations,flakes,collected,reused-tests}-${{ matrix.python-version }}{,-*}",
-            "path": "shard-durations",
+            "pattern": "{collected,reused-tests}-${{ matrix.python-version }}",
+            "path": "shard-data",
         }
         layout = next(step for step in steps if step.get("name") == "Arrange shard verification data")
-        assert 'mv "shard-durations/collected-$PYTHON_VERSION" collected-data' in layout["run"]
+        assert 'mv "shard-data/collected-$PYTHON_VERSION" collected-data' in layout["run"]
         assert steps.index(download) < steps.index(layout) < steps.index(check)
     assert steps.index(download) < steps.index(check)
 
@@ -75,6 +75,12 @@ def test_shard_grading_keeps_head_data_separate_from_base_modules():
     steps = _jobs()["shard-check"]["steps"]
     commands = [_as_python(step.get("run", "")) for step in steps]
     commands = [command for command in commands if command.startswith("python -m tests.shard_")]
+    commands = [
+        command.replace("shard-reports/durations-*", "shard-durations/*").replace(
+            "shard-reports/flakes-*", "shard-flakes/*"
+        )
+        for command in commands
+    ]
     assert commands == [
         "python -m tests.shard_check shard-durations/*/durations.json --collected collected-data/collected.json $REUSED",
         'python -m tests.shard_summary --version "$PYTHON_VERSION" --durations shard-durations/*/durations.json \\\n'
@@ -145,34 +151,31 @@ def test_shard_summary_step_passes_and_writes_a_normal_summary(tmp_path, interpr
     assert "Ran 12 tests" in summary
 
 
-@pytest.mark.parametrize(
-    "case", ["complete", "missing", "duplicate", "reused", "missing_collection", "missing_flakes", "missing_plan"]
-)
+@pytest.mark.parametrize("case", ["complete", "missing", "duplicate", "reused", "missing_collection", "missing_plan"])
 def test_grouped_download_preserves_shard_integrity_without_installed_dependencies(tmp_path, case):
     steps = _jobs()["shard-check"]["steps"]
     downloads = [step for step in steps if step.get("uses", "").startswith("actions/download-artifact@")]
     assert len(downloads) == 1
     assert downloads[0]["with"] == {
-        "pattern": "{durations,flakes,collected,reused-tests}-${{ matrix.python-version }}{,-*}",
-        "path": "shard-durations",
+        "pattern": "{collected,reused-tests}-${{ matrix.python-version }}",
+        "path": "shard-data",
     }
     assert not any(step.get("name") == "Install grader dependencies" for step in steps)
-    assert not any(step.get("uses", "").startswith("actions/setup-python@") for step in steps)
+    prefetch = next(step for step in steps if "python -m scripts.ci_gate_shards" in step.get("run", ""))
     layout = next(step for step in steps if step.get("name") == "Arrange shard verification data")
-    root = tmp_path / "shard-durations"
+    assert steps.index(layout) < steps.index(prefetch)
+    root = tmp_path / "shard-data"
+    reports = tmp_path / "shard-reports"
     for index, nodeids in enumerate(
         (["suite::a"], ["suite::a", "suite::b"] if case == "duplicate" else ["suite::b"]), 1
     ):
         if case == "missing" and index == 2:
             continue
-        directory = root / f"durations-3.12-{index}"
+        directory = reports / f"durations-3.12-{index}"
         directory.mkdir(parents=True)
         (directory / "durations.json").write_text(json.dumps(dict.fromkeys(nodeids, 0.1)))
         (directory / "durations.sha256").write_text("a" * 64)
-        if case != "missing_flakes":
-            directory = root / f"flakes-3.12-{index}"
-            directory.mkdir()
-            (directory / "flakes.jsonl").write_text("")
+    root.mkdir()
     if case != "missing_collection":
         directory = root / "collected-3.12"
         directory.mkdir()
@@ -189,7 +192,7 @@ def test_grouped_download_preserves_shard_integrity_without_installed_dependenci
         capture_output=True,
         text=True,
     )
-    if case in {"missing_collection", "missing_flakes", "missing_plan"}:
+    if case in {"missing_collection", "missing_plan"}:
         assert arranged.returncode != 0
         return
     assert arranged.returncode == 0, arranged.stdout + arranged.stderr
@@ -198,7 +201,7 @@ def test_grouped_download_preserves_shard_integrity_without_installed_dependenci
         "-S",
         "-m",
         "tests.shard_check",
-        *(str(path) for path in sorted(root.glob("*/durations.json"))),
+        *(str(path) for path in sorted(reports.glob("durations-*/durations.json"))),
         "--collected",
         str(tmp_path / "collected-data/collected.json"),
     ]
@@ -221,14 +224,14 @@ def test_shard_verifier_commands_run_with_only_system_python3(tmp_path, module):
     bin_dir.mkdir()
     (bin_dir / "python3").symlink_to(sys.executable)
     (bin_dir / "tee").symlink_to("/usr/bin/tee")
-    durations = tmp_path / "shard-durations/one"
+    durations = tmp_path / "shard-reports/durations-3.12-1"
     durations.mkdir(parents=True)
     (durations / "durations.json").write_text(json.dumps({"suite::a": 0.1}))
     (durations / "durations.sha256").write_text("a" * 64)
     collection = tmp_path / "collected-data"
     collection.mkdir()
     (collection / "collected.json").write_text(json.dumps(["suite::a"]))
-    flakes = tmp_path / "shard-flakes/one"
+    flakes = tmp_path / "shard-reports/flakes-3.12-1"
     flakes.mkdir(parents=True)
     (flakes / "flakes.jsonl").write_text("")
     result = subprocess.run(

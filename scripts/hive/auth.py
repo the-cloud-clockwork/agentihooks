@@ -267,6 +267,8 @@ def env_text(url: str, grant: dict) -> str:
         if grant.get("bus_credentials")
         else ""
     )
+    if grant.get("bus_url"):
+        bus += f"AGENTIHOOKS_BUS=nats\nAGENTIHOOKS_BUS_URL={grant['bus_url']}\n"
     if grant.get("bus_scoped"):
         bus += "AGENTIHOOKS_BUS_SCOPED=1\n"
     if grant.get("bus_swarms"):

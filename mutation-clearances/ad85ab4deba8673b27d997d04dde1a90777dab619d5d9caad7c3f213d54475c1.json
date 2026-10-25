@@ -1,0 +1,6 @@
+{
+  "scripts/ci_gate_queue.py:scripts.ci_gate_queue.x_current__mutmut_21:be6999ddcd6210b566813dccf24fefc019cc3d3d3e35e54f293e33af661250ea": {
+    "reader": "standards-reader",
+    "reason": "ValueError capitalization changes; exact error annotation, every diagnostic fact and failure outcome remain unchanged. Independently approved from complete CI report 40169108156."
+  }
+}

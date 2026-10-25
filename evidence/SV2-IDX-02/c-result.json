@@ -1,0 +1,173 @@
+{
+  "case": "T-SV2-IDX-02-C",
+  "evidence_class": "mocked: an in-process caller, a SQLite catalog file and a local content addressed object folder stand in for the session service, the central database and the archive bucket; no embedding model, HTTP server or Pod runs",
+  "input_sha256": {
+    "session-chunks.json": "9442886fae1a111dd590083f652183da056ac6a5e7e41339344d139b9b695242"
+  },
+  "observed": {
+    "active_before_cutover": "turn-v1",
+    "cutover": {
+      "chunker_version": "turn-v2",
+      "chunks": [
+        {
+          "chunk_id": "chunk-c775d3542e782c6bc455063e9464eed2a1c6e068",
+          "content_hash": "c435c9ba359256ab5fd1ea1ae8b3af75b1134033b887cb4dcac7aeab27b4ba47",
+          "kind": "turn",
+          "omitted_chars": 0,
+          "preview_chars": 201,
+          "sequences": [
+            1,
+            2,
+            8
+          ],
+          "tool": null,
+          "truncated": false,
+          "turn_id": "turn-c5c77709e348ad9240add43d4eef5dc9a47b3355"
+        },
+        {
+          "chunk_id": "chunk-baa8243449895d3caeaedf36f8cabc7a84d1504f",
+          "content_hash": "88280ab3fa3c1a9284ba2335f093597c252218e2702f5b6bb2b83b88fec27c82",
+          "kind": "tool",
+          "omitted_chars": 0,
+          "preview_chars": 82,
+          "sequences": [
+            3,
+            5
+          ],
+          "tool": {
+            "call_event_id": "416875836b088957e3401bf24e3f3c732c84b6220a1b063605f60aebaad28f66",
+            "is_error": false,
+            "result_event_id": "e61dc3608c8da3a1a151a6b5bb8f99e034d2a92477daaf91e8ffc45203ee21fd",
+            "tool_name": "Bash",
+            "tool_use_id": "toolu_ls"
+          },
+          "truncated": false,
+          "turn_id": "turn-c5c77709e348ad9240add43d4eef5dc9a47b3355"
+        },
+        {
+          "chunk_id": "chunk-8a6ff53e418b7e243276b76ad948b36533794f0d",
+          "content_hash": "ee4c681e4bee9a01f49702680d6dbd1ec4d359245b03ac4fac83e0369561a02b",
+          "kind": "tool",
+          "omitted_chars": 0,
+          "preview_chars": 105,
+          "sequences": [
+            4,
+            6
+          ],
+          "tool": {
+            "call_event_id": "8b9c75a4fa111f779537d686d96ab2ceff6a929162a0e0f62baa86e809480cf6",
+            "is_error": false,
+            "result_event_id": "f01f5d3448e34a1c0f6019070fc4cb8def94206f61ca8dea5c679ba91785b565",
+            "tool_name": "Read",
+            "tool_use_id": "toolu_read"
+          },
+          "truncated": false,
+          "turn_id": "turn-c5c77709e348ad9240add43d4eef5dc9a47b3355"
+        },
+        {
+          "chunk_id": "chunk-dee52144e7fcd83e97a9e0c84dc267a1373f8d63",
+          "content_hash": "1aa35b71b292fc31358f00a36d10906d8058aab8e2713ea987e49c63203e794f",
+          "kind": "turn",
+          "omitted_chars": 0,
+          "preview_chars": 118,
+          "sequences": [
+            9,
+            12
+          ],
+          "tool": null,
+          "truncated": false,
+          "turn_id": "turn-f9d5b879a9a7ea8d83c761d2476e2be0b92fc770"
+        },
+        {
+          "chunk_id": "chunk-8a23ed1dcf3722f92bdbd1dfe72e111b33902cae",
+          "content_hash": "9128485eb4f662a1aafc04b7fe31bcee2372c34ee20287a8deb0e27decdaec51",
+          "kind": "tool",
+          "omitted_chars": 7370,
+          "preview_chars": 600,
+          "sequences": [
+            10,
+            11
+          ],
+          "tool": {
+            "call_event_id": "9b4ce8ac2d878ff1e1ea45e823ba152488be8e4eea6c6f72c98481157ec485fa",
+            "is_error": true,
+            "result_event_id": "c1720d60c0491a05a28669a3884de96b9c221d15b1af7ba3edfcac491c853911",
+            "tool_name": "Bash",
+            "tool_use_id": "toolu_build"
+          },
+          "truncated": true,
+          "turn_id": "turn-f9d5b879a9a7ea8d83c761d2476e2be0b92fc770"
+        },
+        {
+          "chunk_id": "chunk-d2cf8266936254049141183808004b8de56e088e",
+          "content_hash": "3c0ce9d8fcd45d414cefc7cef91f9e148757add80138fac0b0b1fd2c9c93d4c1",
+          "kind": "turn",
+          "omitted_chars": 0,
+          "preview_chars": 74,
+          "sequences": [
+            13,
+            16
+          ],
+          "tool": null,
+          "truncated": false,
+          "turn_id": "turn-ecfe45fec2b8c814b0d94cfca995090879b61e9c"
+        },
+        {
+          "chunk_id": "chunk-0630c8c8e27b470be6de0b067e1e87e8ad56b557",
+          "content_hash": "1b56d93d2ec8aeffb3564f26ccd59364bcd5c80c0c3fd890872eda32a8c67aae",
+          "kind": "tool",
+          "omitted_chars": 0,
+          "preview_chars": 79,
+          "sequences": [
+            14,
+            15
+          ],
+          "tool": {
+            "call_event_id": "0f31a5c14abd92486716311268d1cea726fb7188e61321bf5d3106802d5fe867",
+            "is_error": false,
+            "result_event_id": "43b42976b5923c37e6a44e753db7dd66f280313fef14bc7b4b0c005a5c2fb0e5",
+            "tool_name": "Bash",
+            "tool_use_id": "toolu_status"
+          },
+          "truncated": false,
+          "turn_id": "turn-ecfe45fec2b8c814b0d94cfca995090879b61e9c"
+        }
+      ],
+      "revision": 2
+    },
+    "cutover_survived_restart": {
+      "chunker_version": "turn-v1",
+      "revision": 1
+    },
+    "metrics": {
+      "access_domain": "swarm-fixture",
+      "chunks_rebuilt_without_content_change": 0
+    },
+    "replayed_build": {
+      "inserted": [],
+      "superseded": [],
+      "unchanged": 7
+    },
+    "rollback_rehearsal": {
+      "chunks_match_prior_generation": true,
+      "restored": "turn-v1",
+      "revision": 3,
+      "source_event_ids_unchanged": true
+    },
+    "staged_generation": {
+      "chunker_version": "turn-v2",
+      "generation_state": "built",
+      "unchanged": 0
+    },
+    "staged_inserted": 7,
+    "stale_build": {
+      "detail": "the build read fewer events than the stored generation; nothing changed",
+      "error": "Conflict"
+    },
+    "stale_cutover": {
+      "detail": "the cutover revision is stale; nothing changed",
+      "error": "Conflict"
+    }
+  },
+  "state": "passed"
+}

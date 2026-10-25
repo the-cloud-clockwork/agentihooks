@@ -197,6 +197,7 @@ class HiveLaunch:
         self.orders, self.slots = Orders(store.redis), LaunchSlots(store.redis)
         self.sleep = time.sleep
         self.opening = orders.build_opening
+        self._quota_accounts = None
 
     def hives(self) -> list[dict]:
         return placement.for_swarm(loaded_hives(self.store), self.slug)
@@ -223,7 +224,10 @@ class HiveLaunch:
         if harness not in ("claude", "codex"):
             return self._record_wait(lane, task, placement.Wait(f"unsupported hive harness: {harness}", role))
         rows = getattr(self.herdr, "_quota_accounts", None)
-        rows = capacity.accounts(dict(os.environ), now / 1000, refresh=False) if rows is None else rows
+        if rows is None:
+            if self._quota_accounts is None:
+                self._quota_accounts = capacity.accounts(dict(os.environ), now / 1000, refresh=False)
+            rows = self._quota_accounts
         if lane == "master" and not task.get("route_kind"):
             front = front_door.holds(self.slug, task.get("seat", ""))
             selected = self._master_selection(config, decision, hives, now, rows, front)

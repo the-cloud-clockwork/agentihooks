@@ -29,7 +29,10 @@ LINT_SETUP = [
 
 
 def _workflow():
-    return yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())
+    from scripts import ci_gate_queue
+
+    workflow = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())
+    return ci_gate_queue.normalize({"test.yml": workflow})["test.yml"]
 
 
 def test_stored_durations_share_selection_admission_before_both_shard_paths():
