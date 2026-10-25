@@ -123,7 +123,7 @@ def test_the_base_budgets_are_read_from_the_commit_not_the_working_file(monkeypa
 def test_budgets_are_read_from_the_source_given_not_the_running_module():
     planted = {name: n + 0.5 for n, name in enumerate(ledger_load.BUDGETS)}
     source = "".join(f"{name} = {value}\n" for name, value in planted.items()) + "TIMEOUT_S = 99.0\n"
-    assert ledger_load.budgets(source) == planted
+    assert ledger_load.budgets(source + picks_source(ledger_load.BUDGETS)) == planted
 
 
 def test_a_base_without_the_gate_is_red():
@@ -133,13 +133,23 @@ def test_a_base_without_the_gate_is_red():
 
 def test_a_base_without_a_budget_is_red():
     with pytest.raises(SystemExit, match="LEDGER_BYTES"):
-        ledger_load.budgets("WRITE_P95_S = 2.0\nCPU_CORES = 1.0\n")
+        ledger_load.budgets("WRITE_P95_S = 2.0\nCPU_CORES = 1.0\n" + picks_source(ledger_load.BUDGETS))
+
+
+def picks_source(table: dict) -> str:
+    picks = ", ".join(f"{name!r}: {pick.__name__}" for name, pick in table.items())
+    return f"BUDGETS = {{{picks}}}\n"
 
 
 def table_source(table: dict) -> str:
+    return "".join(f"{name} = {getattr(ledger_load, name)!r}\n" for name in ledger_load.BUDGETS) + picks_source(table)
+
+
+@pytest.mark.parametrize("table", ["", "BUDGETS = None\n", "BUDGETS = {'WRITE_P95_S': lambda a, b: a}\n"])
+def test_a_base_without_a_table_of_min_or_max_picks_is_red(table):
     values = "".join(f"{name} = {getattr(ledger_load, name)!r}\n" for name in ledger_load.BUDGETS)
-    picks = ", ".join(f"{name!r}: {pick.__name__}" for name, pick in table.items())
-    return values + f"BUDGETS = {{{picks}}}\n"
+    with pytest.raises(SystemExit, match="names no BUDGETS table"):
+        ledger_load.budgets(values + table)
 
 
 def test_a_head_that_drops_a_budget_the_base_grades_is_red(monkeypatch):
