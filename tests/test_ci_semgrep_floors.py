@@ -304,6 +304,11 @@ def test_a_floor_dropped_with_a_rule_change_is_red(rules_dir, monkeypatch):
     ]
 
 
+def test_a_rule_change_that_keeps_its_floor_is_accepted(rules_dir, monkeypatch):
+    found = [_finding("a"), _finding("a")]
+    assert _floor_errors(monkeypatch, [_rule(rules_dir, "a")], found, {"a": 2}, {"a": 2}, {"a"}) == []
+
+
 def test_a_rule_without_a_floor_is_red(rules_dir, monkeypatch):
     errors = _floor_errors(monkeypatch, [_rule(rules_dir, "a")], [], {}, {})
     assert errors == ["a: no floor; run python -m scripts.ci_semgrep_floors record"]
