@@ -2809,7 +2809,7 @@ process tree. Lower `swap-floor` only on a host with little memory, where a
 
 ### Host samples
 
-Each tick's metrics pass writes one `host_samples` row to the swarm metrics
+Each metrics collector pass writes one `host_samples` row to the swarm metrics
 outbox (`~/.agentihooks/swarm/metrics-outbox.sqlite`, relayed to the ClickHouse
 `swarm` database): `available_mb`, `load_per_cpu`, `live_agents`,
 `swap_used_mb`, `swap_total_mb`, `agent_mb` (the measured mean, 0 when no tree
