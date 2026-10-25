@@ -8,6 +8,7 @@ import time
 from pathlib import Path
 
 NAME_RE = re.compile(r"^[A-Za-z0-9][\w.@-]{0,63}$")
+CALL_RE = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
 WATCH_TOOLS = ("Monitor", "TaskOutput", "BashOutput")
 ACT_TOOLS = ("Edit", "Write", "MultiEdit", "NotebookEdit")
 SERENA_EDITS = (
@@ -53,7 +54,7 @@ def classify(tool_name, tool_input):
     return "watch" if WATCH_RE.search(command) else ""
 
 
-def record(tool_name, tool_input, environ=None, root=None, now_ms=None):
+def record(tool_name, tool_input, environ=None, root=None, now_ms=None, call_id=""):
     env = os.environ if environ is None else environ
     slug, name = env.get("AGENTIHOOKS_SWARM", ""), env.get("AGENTIHOOKS_AGENT_NAME", "")
     if not (NAME_RE.match(slug) and NAME_RE.match(name)):
@@ -65,6 +66,9 @@ def record(tool_name, tool_input, environ=None, root=None, now_ms=None):
         folder.mkdir(parents=True, exist_ok=True)
         first.write_text(str(at), encoding="utf-8")
     (folder / f"{name}.last").write_text(str(at), encoding="utf-8")
+    if CALL_RE.match(call_id):
+        (folder / f"{name}.open").mkdir(exist_ok=True)
+        (folder / f"{name}.open" / call_id).write_text(str(at), encoding="utf-8")
     kind = classify(tool_name, tool_input)
     if not kind:
         return
@@ -77,7 +81,7 @@ def record(tool_name, tool_input, environ=None, root=None, now_ms=None):
         f.write(json.dumps(entry) + "\n")
 
 
-def finish(environ=None, root=None, now_ms=None):
+def finish(environ=None, root=None, now_ms=None, call_id=""):
     env = os.environ if environ is None else environ
     slug, name = env.get("AGENTIHOOKS_SWARM", ""), env.get("AGENTIHOOKS_AGENT_NAME", "")
     if not (NAME_RE.match(slug) and NAME_RE.match(name)):
@@ -86,6 +90,14 @@ def finish(environ=None, root=None, now_ms=None):
     folder.mkdir(parents=True, exist_ok=True)
     at = int(time.time() * 1000) if now_ms is None else now_ms
     (folder / f"{name}.done").write_text(str(at), encoding="utf-8")
+    if CALL_RE.match(call_id):
+        (folder / f"{name}.open" / call_id).unlink(missing_ok=True)
+
+
+def open_calls(slug, name, root=None) -> list[str]:
+    """Tool calls the agent began and has not finished; a subagent's calls run inside its Agent call."""
+    folder = Path(root or default_root()) / slug / f"{name}.open"
+    return sorted(path.name for path in folder.iterdir()) if folder.is_dir() else []
 
 
 def mark_revived(slug, name, root=None, now_ms=None):

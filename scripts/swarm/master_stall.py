@@ -47,7 +47,9 @@ def quiet_minutes(store, slug, master, now_ms):
         return None
     last, done = activity.last_events(slug).get(master.name), activity.finished_events(slug).get(master.name)
     started = launch_check.session_started_at(master)
-    if last is None or done is None or done < last or now_ms - started <= STARTUP_GRACE_MS:
+    if last is None or done is None or done < last or activity.open_calls(slug, master.name):
+        return None
+    if now_ms - started <= STARTUP_GRACE_MS:
         return None
     return (now_ms - max(done, started)) // health.MINUTE_MS
 

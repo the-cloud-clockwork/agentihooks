@@ -105,6 +105,32 @@ def test_master_inside_a_tool_call_is_never_recycled(store):
     assert InboxStore(store.redis).pending_items(agent.name) == []
 
 
+def test_master_inside_an_agent_call_whose_subagent_called_tools_is_never_recycled(store):
+    agent, runtime = master(store)
+    environ = {"AGENTIHOOKS_SWARM": "sw", "AGENTIHOOKS_AGENT_NAME": agent.name}
+    activity.record("Agent", {}, environ, None, START + MINUTE, call_id="toolu_outer")
+    activity.record("Bash", {"command": "ls"}, environ, None, START + 2 * MINUTE, call_id="toolu_inner")
+    activity.finish(environ, None, START + 3 * MINUTE, call_id="toolu_inner")
+    assert activity.open_calls("sw", agent.name) == ["toolu_outer"]
+    for minutes in (13, 18, 60):
+        assert run(store, runtime, START + minutes * MINUTE) == []
+    activity.finish(environ, None, START + 61 * MINUTE, call_id="toolu_outer")
+    assert activity.open_calls("sw", agent.name) == []
+    assert run(store, runtime, START + 71 * MINUTE)[0].startswith(f"asked {agent.name}")
+
+
+def test_unsafe_call_ids_leave_no_open_call(tmp_path):
+    environ = {"AGENTIHOOKS_SWARM": "sw", "AGENTIHOOKS_AGENT_NAME": "master@sw-1"}
+    activity.record("Bash", {}, environ, tmp_path, 1, call_id="../escape")
+    activity.record("Bash", {}, environ, tmp_path, 2, call_id="")
+    assert activity.open_calls("sw", "master@sw-1", tmp_path) == []
+    activity.record("Bash", {}, environ, tmp_path, 3, call_id="toolu_a")
+    activity.finish(environ, tmp_path, 4, call_id="../toolu_a")
+    assert activity.open_calls("sw", "master@sw-1", tmp_path) == ["toolu_a"]
+    activity.finish(environ, tmp_path, 5, call_id="toolu_a")
+    assert activity.open_calls("sw", "master@sw-1", tmp_path) == []
+
+
 def test_threshold_follows_a_longer_stall_limit(store, monkeypatch):
     monkeypatch.setenv("AGENTIHOOKS_HEALTH_STALLED_MINUTES", "30")
     _, runtime = master(store)
@@ -208,9 +234,10 @@ def test_tool_end_is_recorded_after_every_tool_call(monkeypatch):
     monkeypatch.setattr(hook_manager, "_swarm_outcome", lambda payload: None)
     monkeypatch.setattr(hook_manager, "_hive_join", lambda payload, event: None)
     monkeypatch.setattr(hook_manager, "_swarm_ledger", lambda payload: None)
-    monkeypatch.setattr(activity, "finish", lambda: ended.append(True))
-    hook_manager._swarm_after_tool({})
-    assert ended == [True]
+    monkeypatch.setattr(activity, "finish", lambda call_id: ended.append(call_id))
+    hook_manager._swarm_after_tool({"tool_use_id": "toolu_x"})
+    hook_manager._swarm_after_tool({"tool_use_id": None})
+    assert ended == ["toolu_x", ""]
 
 
 def test_tool_end_failure_is_logged_not_raised(monkeypatch):
@@ -218,7 +245,7 @@ def test_tool_end_failure_is_logged_not_raised(monkeypatch):
 
     logged = []
 
-    def broken():
+    def broken(call_id):
         raise OSError("disk full")
 
     monkeypatch.setattr(hook_manager, "_swarm_outcome", lambda payload: None)

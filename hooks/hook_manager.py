@@ -1210,7 +1210,7 @@ def _swarm_after_tool(payload: dict) -> None:
     try:
         from scripts.swarm.health.activity import finish
 
-        finish()
+        finish(call_id=payload.get("tool_use_id") or "")
     except Exception as e:
         log("swarm activity finish failed", {"error": str(e)})
     _hive_join(payload, "tool")
@@ -1460,7 +1460,7 @@ def on_pre_tool_use(payload: dict) -> None:
     try:
         from scripts.swarm.health.activity import record as _record_swarm_activity
 
-        _record_swarm_activity(tool_name, tool_input)
+        _record_swarm_activity(tool_name, tool_input, call_id=payload.get("tool_use_id") or "")
     except Exception as e:
         log("swarm activity record failed", {"error": str(e)})
     _swarm_heartbeat("working", payload=payload)
