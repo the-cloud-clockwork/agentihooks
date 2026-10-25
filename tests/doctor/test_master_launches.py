@@ -417,9 +417,7 @@ def test_confirmed_master_launch_failure_is_still_detected(evidence):
     if evidence == "binding":
         row["binding"]["reason"] = "Launch failed"
     elif evidence == "retry":
-        record["transfers"].append(
-            {**absent("retry", at=1000), "retry_of": row["id"], "binding": {"state": "pending"}}
-        )
+        record["transfers"].append({**absent("retry", at=1000), "retry_of": row["id"], "binding": {"state": "pending"}})
     elif evidence == "restore":
         record["restored"].append(
             {"transfer": row["id"], "outcome": "awaiting-decision", "reason": "resume failed", "at": 1000}
