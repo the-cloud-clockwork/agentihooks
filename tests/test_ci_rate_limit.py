@@ -15,7 +15,7 @@ def _gh(responses, commands):
         if command == ["gh", "api", "rate_limit"]:
             return subprocess.CompletedProcess(command, 0, stdout=json.dumps({"resources": {"core": {"reset": 1120}}}))
         response = next(responses)
-        if isinstance(response, bytes):
+        if "rate limit" in str(response) or "Not Found" in str(response):
             raise subprocess.CalledProcessError(1, command, stderr=response)
         return subprocess.CompletedProcess(command, 0, stdout=response)
 
@@ -56,9 +56,25 @@ def test_other_failures_raise_without_waiting(monkeypatch, clock):
     assert clock == []
 
 
+def test_a_limit_that_never_clears_raises_after_bounded_waits(monkeypatch, clock):
+    commands = []
+    monkeypatch.setattr(rate_limit.subprocess, "run", _gh(iter([LIMITED] * (rate_limit.WAITS + 1)), commands))
+    with pytest.raises(subprocess.CalledProcessError):
+        rate_limit.gh_api(["repos/x"], timeout=60)
+    assert clock == [121] * rate_limit.WAITS
+    assert commands.count(["gh", "api", "repos/x"]) == rate_limit.WAITS + 1
+
+
+def test_a_far_reset_waits_at_most_the_cap(monkeypatch, clock):
+    monkeypatch.setattr(rate_limit.time, "time", lambda: 0.0)
+    monkeypatch.setattr(rate_limit.subprocess, "run", _gh(iter([LIMITED, b"{}"]), []))
+    rate_limit.gh_api(["repos/x"], timeout=60)
+    assert clock == [rate_limit.MAX_WAIT]
+
+
 def test_the_job_reader_survives_a_rate_limit(monkeypatch, clock):
     page = json.dumps({"jobs": [{"name": "unit (3.12, 1)"}]})
-    monkeypatch.setattr(rate_limit.subprocess, "run", _gh(iter([LIMITED, page]), []))
+    monkeypatch.setattr(rate_limit.subprocess, "run", _gh(iter([LIMITED.decode(), page]), []))
     assert jobs.read_jobs("repos/x/jobs", 100) == [{"name": "unit (3.12, 1)"}]
     assert clock == [121]
 
