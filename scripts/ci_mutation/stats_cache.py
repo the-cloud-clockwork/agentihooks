@@ -173,7 +173,9 @@ class StatsInputs:
         return inputs
 
 
-def per_test_stats(path: str, fresh: list[dict], count: int) -> tuple[dict | None, list[str] | None]:
+def per_test_stats(
+    path: str, fresh: list[dict], count: int, functions: set[str]
+) -> tuple[dict | None, list[str] | None]:
     durations = {
         test: seconds for result in fresh for test, seconds in result["durations"].items() if selects(path, test)
     }
@@ -185,7 +187,7 @@ def per_test_stats(path: str, fresh: list[dict], count: int) -> tuple[dict | Non
         return None, None
     tests = {
         function: sorted({test for result in fresh for test in result["tests"].get(function, []) if test in durations})
-        for function in {function for result in fresh for function in result["tests"]}
+        for function in functions
     }
     result = {
         "status": 0,
@@ -199,6 +201,38 @@ def per_test_stats(path: str, fresh: list[dict], count: int) -> tuple[dict | Non
     if not measured and any("modules" in result for result in fresh):
         covered = []
     return result, covered
+
+
+def fresh_by_path(paths: list[str], fresh: list[dict]) -> dict[str, list[dict]]:
+    entries = set(paths)
+    owners: dict[str, list[str]] = {}
+
+    def owned(test: str) -> list[str]:
+        if test not in owners:
+            cuts = {test[:index] for index in range(len(test)) if test.startswith(("::", "["), index)} | {test}
+            owners[test] = [entry for entry in cuts if entry in entries and selects(entry, test)]
+        return owners[test]
+
+    sliced: dict[str, list[dict]] = {path: [] for path in paths}
+    for result in fresh:
+        kept = {key: result[key] for key in ("status", "cpu", "files", "modules") if key in result}
+        parts = {path: {**kept, "durations": {}, "tests": {}} for path in paths}
+        for test, seconds in result["durations"].items():
+            for path in owned(test):
+                parts[path]["durations"][test] = seconds
+        if "dependencies" in result:
+            for path in paths:
+                parts[path]["dependencies"] = {}
+            for test, dependencies in result["dependencies"].items():
+                for path in owned(test):
+                    parts[path]["dependencies"][test] = dependencies
+        for function, tests in result["tests"].items():
+            for test in tests:
+                for path in owned(test):
+                    parts[path]["tests"].setdefault(function, []).append(test)
+        for path in paths:
+            sliced[path].append(parts[path])
+    return sliced
 
 
 def collect_cached_stats(
@@ -237,8 +271,10 @@ def collect_cached_stats(
     fresh = collect(missing) if missing else []
     if any(result["status"] != 0 for result in fresh):
         raise SystemExit(1)
+    functions = {function for result in fresh for function in result["tests"]}
+    sliced = fresh_by_path(missing, fresh)
     for path in missing:
-        result, covered = per_test_stats(path, fresh, len(missing))
+        result, covered = per_test_stats(path, sliced[path], len(missing), functions)
         if result is not None:
             stored.save(path, result, inputs.for_test(path, covered, fresh), covered is not None)
     return reused + [
