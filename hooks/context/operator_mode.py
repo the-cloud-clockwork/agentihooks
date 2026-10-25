@@ -16,7 +16,11 @@ from hooks.context.ledger_decision import _bound
 WINDOW_SEC = 1800
 QUIET_EVERY = 2
 QUIET_WORDS = 20
-REMINDER = "Operator not present: replies stay within {words} words."
+REMINDER = (
+    "Operator not present: he never reads this pane. End the turn with no report, summary or ask addressed to him "
+    "and skip the response template; any pane text stays within {words} words. "
+    "Put anything he must decide only in Priorities with agentihooks ledger priority add."
+)
 SWITCH = re.compile(r"(?<![\w-])operator (on|off)(?![\w-])")
 ON_NOTICE = "Operator on: the operator is present in this pane until he types operator off or the session restarts."
 OFF_NOTICE = "Operator off: the operator is not present in this pane."
