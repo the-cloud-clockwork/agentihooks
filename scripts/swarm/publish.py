@@ -14,6 +14,13 @@ from scripts.swarm.ledger_client import LedgerClient
 from scripts.swarm.store import AgentRecord, SwarmError
 
 
+class PublicationRefusal(SwarmError):
+    def __init__(self, repository: Path, branch: str, reason: str) -> None:
+        super().__init__(reason)
+        self.repository = str(repository)
+        self.branch = branch
+
+
 def execute(argv: list[str], root: Path) -> str:
     done = subprocess.run(argv, cwd=root, capture_output=True, text=True)
     if done.returncode:
@@ -159,6 +166,9 @@ def preparation_base(repository: Path, task: dict) -> dict:
     branch = task.get("branch")
     if not branch or remote_head(repository, branch) or not task.get("pr_url"):
         return task
+    remote = stack.repo_key(git(repository, "remote", "get-url", "origin"))
+    if stack.repo_key(task["pr_url"].split("/pull/")[0]) != remote:
+        return task
     pull = json.loads(
         execute(["gh", "pr", "view", task["pr_url"], "--json", "state,baseRefName,headRefName"], repository)
     )
@@ -172,21 +182,27 @@ def prepare(slug: str, agent: AgentRecord, repo: str, ledger: LedgerClient) -> d
     fields = []
     repositories = dict.fromkeys(local_repository(value, repo) for value in task.get("repositories") or [repo])
     for repository in repositories:
-        scoped = preparation_base(repository, repository_task(repository, task))
-        root = existing(repository, scoped, agent)
-        if root is None:
-            command = ["bash", str(stack.WT_SCRIPT), "new", "--repo", str(repository)]
-            if scoped.get("branch"):
-                command.extend(["--from", f"origin/{scoped['branch']}"])
-            output = execute(command, repository)
-            root = Path(output.splitlines()[-1])
-        checkout = checkout_fields(root)
-        delivery = target_branch(root, scoped, checkout["branch"], task)
-        if delivery != checkout["branch"]:
-            git(root, "branch", f"--set-upstream-to=origin/{delivery}")
-            if publish_queue.open_head(checkout["branch_repo"], task.get("pr_url", "")) == delivery:
-                checkout["branch"] = delivery
-        fields.append({**checkout, "repository": str(repository)})
+        scoped = task
+        try:
+            scoped = repository_task(repository, task)
+            base = preparation_base(repository, scoped)
+            root = existing(repository, base, agent)
+            if root is None:
+                command = ["bash", str(stack.WT_SCRIPT), "new", "--repo", str(repository)]
+                if base.get("branch"):
+                    command.extend(["--from", f"origin/{base['branch']}"])
+                output = execute(command, repository)
+                root = Path(output.splitlines()[-1])
+            checkout = checkout_fields(root)
+            delivery = target_branch(root, base, checkout["branch"], task)
+            if delivery != checkout["branch"]:
+                git(root, "branch", f"--set-upstream-to=origin/{delivery}")
+                if publish_queue.open_head(checkout["branch_repo"], task.get("pr_url", "")) == delivery:
+                    checkout["branch"] = delivery
+            fields.append({**checkout, "repository": str(repository)})
+        except SwarmError as exc:
+            branch = scoped.get("repository_branches", {}).get(str(repository), scoped.get("branch", ""))
+            raise PublicationRefusal(repository, branch, str(exc)) from exc
     update = branch_record(fields[-1], Path(fields[-1]["repository"]), task)
     update["repository_branches"].update({entry["repository"]: entry["branch"] for entry in fields})
     ledger.update_task(slug, agent.task, update, by=agent.name)
@@ -328,13 +344,14 @@ def grade_and_push(root: Path, primary: Path, fields: dict, head: str) -> None:
 
 def publish(slug: str, agent: AgentRecord, repo: str, ledger: LedgerClient, message: str, files: list[str]) -> dict:
     task = task_row(slug, agent, ledger)
-    root, primary, scoped = publishing_root(repo, task, agent)
-    if root is None:
-        raise SwarmError(f"task worktree missing; Next: agentihooks swarm {shlex.quote(slug)} prepare")
-    fields = checkout_fields(root)
-    selected = selected_files(root, files)
+    primary, scoped, fields = Path(repo), task, {}
     retry = shlex.join(["agentihooks", "swarm", slug, "publish", "--message", message, "--", *files])
     try:
+        root, primary, scoped = publishing_root(repo, task, agent)
+        if root is None:
+            raise SwarmError(f"task worktree missing; Next: agentihooks swarm {shlex.quote(slug)} prepare")
+        fields = checkout_fields(root)
+        selected = selected_files(root, files)
         fields["branch"] = delivery_branch(root, scoped, fields["branch"])
         ledger.update_task(slug, agent.task, branch_record(fields, primary, task), by=agent.name)
         stage_files(root, selected)
@@ -353,5 +370,5 @@ def publish(slug: str, agent: AgentRecord, repo: str, ledger: LedgerClient, mess
         detail = str(exc)
         if fields.get("gate") == "AgentiHooks touched Python fallback":
             detail = f"AgentiHooks touched Python fallback for {root}: {detail}"
-        raise SwarmError(f"{detail}; Next: {retry}") from exc
+        raise PublicationRefusal(primary, scoped.get("branch", ""), f"{detail}; Next: {retry}") from exc
     return {**fields, "head": head}

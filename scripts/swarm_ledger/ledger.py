@@ -886,7 +886,7 @@ def _task_set_fields(values):
     return fields
 
 
-def task_branch_fields(args, fields: dict) -> dict:
+def task_branch_fields(args: argparse.Namespace, fields: dict) -> dict:
     if "branch" not in fields:
         return fields
     swarm = ports.swarm()

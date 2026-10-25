@@ -1585,7 +1585,7 @@ def origin_repo(run=subprocess.run):
     return stack.public_url(done.stdout.strip()) if done.returncode == 0 else ""
 
 
-def publication_command(store, args) -> dict:
+def publication_command(store: RedisStore, args: argparse.Namespace) -> dict:
     import syslog
 
     from scripts.swarm import publish
@@ -1600,7 +1600,11 @@ def publication_command(store, args) -> dict:
             return publish.prepare(args.slug, agent, repo, ledger)
         return publish.publish(args.slug, agent, repo, ledger, args.message, args.files)
     except SwarmError as exc:
-        branch = task.get("repository_branches", {}).get(repo, task.get("branch", ""))
+        branch = (
+            exc.branch
+            if isinstance(exc, publish.PublicationRefusal)
+            else task.get("repository_branches", {}).get(repo, task.get("branch", ""))
+        )
         syslog.openlog("agentihooks-swarm")
         syslog.syslog(
             syslog.LOG_WARNING,
