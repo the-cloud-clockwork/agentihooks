@@ -1,12 +1,13 @@
 from dataclasses import replace
 
 from scripts.inbox.store import InboxStore
+from scripts.swarm import preempt
 from scripts.swarm.tick import tick
 from tests.swarm.test_tick import FakeLedger, FakeRuntime, store, workers  # noqa: F401
 
 
 def asks(store, name):  # noqa: F811
-    return [item for item in InboxStore(store.redis).open_items(name) if item.sender == "swarm"]
+    return [item for item in InboxStore(store.redis).open_items(name) if item.ref.startswith(f"{preempt.REF}:")]
 
 
 def busy_with_normal_work(store):  # noqa: F811
@@ -38,6 +39,17 @@ def test_an_urgent_task_waiting_past_one_tick_with_every_seat_busy_asks_the_lowe
     assert "freezes" not in ledger.state("sw")
 
 
+def test_an_unanswered_ask_passes_to_the_next_lowest_holder_after_the_answer_window(store):  # noqa: F811
+    ledger, runtime = busy_with_normal_work(store)
+    tick("sw", store, ledger, runtime, now_ms=3_000)
+    tick("sw", store, ledger, runtime, now_ms=4_000)
+    other = next(a for a in workers(store) if a.task == "t1")
+    tick("sw", store, ledger, runtime, now_ms=4_000 + preempt.ANSWER_MS - 1)
+    assert asks(store, other.name) == []
+    tick("sw", store, ledger, runtime, now_ms=4_000 + preempt.ANSWER_MS)
+    assert len(asks(store, other.name)) == 1
+
+
 def test_the_freed_seat_goes_to_the_urgent_task_and_the_normal_successor_yields(store):  # noqa: F811
     ledger, runtime = busy_with_normal_work(store)
     tick("sw", store, ledger, runtime, now_ms=3_000)
@@ -50,6 +62,7 @@ def test_the_freed_seat_goes_to_the_urgent_task_and_the_normal_successor_yields(
     assert [task for _, _, task in runtime.spawned][2:] == ["t3"]
     assert ledger.rows["t3"]["state"] == "claimed"
     assert (ledger.rows["t2"]["state"], ledger.rows["t2"]["claimed_by"]) == ("open", "")
+    assert "t2" not in {a.task for a in workers(store)}
 
 
 def test_no_holder_is_asked_while_a_seat_is_free(store):  # noqa: F811
@@ -59,3 +72,25 @@ def test_no_holder_is_asked_while_a_seat_is_free(store):  # noqa: F811
         tick("sw", store, ledger, runtime, now_ms=now)
     assert sorted(task for _, _, task in runtime.spawned) == ["t1", "t2", "t3"]
     assert all(asks(store, a.name) == [] for a in workers(store))
+
+
+class FocusedLedger(FakeLedger):
+    def state(self, slug):
+        return {**super().state(slug), "freezes": [{"verb": "focus", "target": "tasks/t3"}]}
+
+
+def test_a_focused_normal_task_preempts_unfocused_work_and_the_unfocused_successor_yields(store):  # noqa: F811
+    ledger = FocusedLedger([{"id": "t1", "rank": "high"}, {"id": "t2"}])
+    runtime = FakeRuntime()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    ledger.rows["t3"] = {"id": "t3", "lane": "eng", "state": "open", "claimed_by": ""}
+    tick("sw", store, ledger, runtime, now_ms=2_000)
+    tick("sw", store, ledger, runtime, now_ms=3_000)
+    victim = next(a for a in workers(store) if a.task == "t2")
+    assert len(asks(store, victim.name)) == 1
+    store.put_handoff("sw", "t2", "pushed, preempted for focused work", seat=victim.seat)
+    store.put_agent("sw", replace(victim, state="finished"))
+    tick("sw", store, ledger, runtime, now_ms=4_000)
+    assert [task for _, _, task in runtime.spawned][2:] == ["t3"]
+    assert ledger.rows["t2"]["state"] == "open" and "t2" not in {a.task for a in workers(store)}
+    assert ledger.state("sw")["freezes"] == [{"verb": "focus", "target": "tasks/t3"}]

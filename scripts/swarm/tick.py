@@ -907,15 +907,23 @@ def _claimable(slug, store, rows, doc, lane, dispatched=None):
 
 
 def _launch_order(slug, store, tasks, dispatched=None):
+    urgent = any(task.get("rank") == URGENT for task in tasks)
     return sorted(
         tasks,
         key=lambda task: (
+            _band(slug, store, task, dispatched, urgent),
             task.get("rank") != URGENT,
-            dispatched(task)[0] if dispatched else ledger_rank.order(task),
             bool(store.launch_failure(slug, task["id"])),
             not claim_order.resumed(task),
         ),
     )
+
+
+def _band(slug, store, task, dispatched, urgent):
+    band = dispatched(task)[0] if dispatched else ledger_rank.order(task)
+    if urgent and task.get("rank") != URGENT and store.handoff(slug, task["id"]):
+        return max(band, ledger_rank.RANKS.index(URGENT))
+    return band
 
 
 def _parked(task, rows):
@@ -1300,10 +1308,11 @@ def _spawn_order(slug, config, store, agents, rows, doc, runtime):
         ready, refused = profile_first.placeable(slug, config, store, runtime, lane, ready, max(cap - busy, 0))
         queue += [(busy + rank, lane, task) for rank, task in enumerate(ready)]
         waits += refused
+    urgent = any(task.get("rank") == URGENT for _, _, task in queue)
     queue.sort(
         key=lambda entry: (
+            _band(slug, store, entry[2], dispatched, urgent),
             entry[2].get("rank") != URGENT,
-            dispatched(entry[2])[0] if dispatched else ledger_rank.order(entry[2]),
             bool(store.launch_failure(slug, entry[2]["id"])),
             entry[0],
         )

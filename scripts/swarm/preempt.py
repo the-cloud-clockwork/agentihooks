@@ -13,6 +13,7 @@ SENDER = "swarm"
 REF = "preempt"
 WAITING = "preempt-waiting"
 ASKED = "preempt-asked"
+ANSWER_MS = 10 * 60_000
 TEXT = (
     "Operator priority on swarm {slug}: task {waiting} is urgent or focused and waits for a seat while every {lane} "
     "seat is busy, and your task {task} ranks lower. Push your branch now, write a Handoff v2 with the handoff skill "
@@ -33,20 +34,27 @@ def step(slug: str, store, rows: dict, doc: dict, full: dict, now_ms: int) -> li
     graph, redis = hierarchy.project(doc)[0], store.redis
     seen, asked = redis.hgetall(store.key(slug, WAITING)), redis.hgetall(store.key(slug, ASKED))
     holding = {a.name for _, holders in full.values() for a in holders}
-    asked = {name: task_id for name, task_id in asked.items() if name in holding}
+    asked = {name: entry for name, entry in asked.items() if name in holding}
     waiting, actions = {}, []
     for lane, (ready, holders) in full.items():
         for task in (t for t in ready if preferred(t, doc, graph)):
             waiting[task["id"]] = seen.get(task["id"], str(now_ms))
-            if task["id"] not in seen or task["id"] in asked.values():
+            if task["id"] not in seen or _pending(asked, task["id"], now_ms):
                 continue
             victim = _victim([a for a in holders if a.name not in asked], rows, doc, graph)
             if victim is not None:
-                asked[victim.name] = task["id"]
+                asked[victim.name] = f"{task['id']}:{now_ms}"
                 actions += _ask(InboxStore(redis), slug, lane, victim, task["id"])
     _replace(redis, store.key(slug, WAITING), waiting)
     _replace(redis, store.key(slug, ASKED), asked)
     return actions
+
+
+def _pending(asked: dict, task_id: str, now_ms: int) -> bool:
+    return any(
+        target == task_id and now_ms - int(at) < ANSWER_MS
+        for target, _, at in (entry.rpartition(":") for entry in asked.values())
+    )
 
 
 def _victim(holders, rows, doc, graph):
