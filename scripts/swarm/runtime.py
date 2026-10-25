@@ -590,7 +590,27 @@ class HerdrRuntime:
             native_login.check(os.environ, "native", self.run)
         except native_login.LoginError:
             return "subscription"
-        return "interactive"
+        return "subscription" if self._master_account_spent() else "interactive"
+
+    def _master_account_spent(self):
+        from redis.exceptions import RedisError
+
+        from scripts.routing import master_account
+
+        if not hasattr(self, "_quota_accounts"):
+            return False
+        try:
+            declared = master_account.load(os.environ).get("claude")
+        except (OSError, RedisError):
+            return False
+        listed = {row.name for row in self._quota_accounts if row.harness == "claude"}
+        if declared is None or declared.slug not in listed:
+            return False
+        unspent = {row.name for row in self._quota_open(MASTER) if row.harness == "claude"}
+        others = [
+            row for row in self._quota_eligible("claude", MASTER) if row.kind != "api" and row.name != declared.slug
+        ]
+        return declared.slug not in unspent and bool(others)
 
     def spawn(self, config, lane, name, task):
         chosen, environ = config.lanes.get(lane, {}), dict(os.environ)

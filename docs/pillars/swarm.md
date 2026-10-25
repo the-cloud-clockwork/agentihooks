@@ -212,6 +212,13 @@ an interactive login has no token to probe; its quota reading comes from its
 own sessions, as described under
 [Quota readings for an interactive master account](load-balancing.md#quota-readings-for-an-interactive-master-account).
 
+A declared master account past its quota warning does not take a new master
+while another Claude account has a free seat: the master launches on token
+routing instead. A master already on the declared account gets a quota handoff
+once 95 percent of its week is used, to a free claude.ai master login when one
+has room, otherwise to the open subscription account with the most room, never
+the API.
+
 For the lead Claude master to appear in the Claude app, the operator enables
 the optional master login and signs in from their own terminal:
 
