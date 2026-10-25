@@ -319,17 +319,26 @@ class NatsStateStore:
             js.create_key_value(bucket=bucket, history=KV_HISTORY) if provision else js.key_value(bucket)
         )
 
+    async def _create_chunk(self, key: str, value: bytes) -> None:
+        try:
+            await self._kv.create(key, value)
+        except KeyWrongLastSequenceError:
+            return
+
+    async def _read_chunk(self, key: str) -> bytes:
+        return (await self._kv.get(key)).value
+
     def get(self, key: str) -> StateEntry | None:
         try:
             entry = self._loop.run(self._kv.get(key))
         except KeyNotFoundError:
             return None
-        value = self._loop.run(nats_payload.decode(self._kv, entry.value))
+        value = self._loop.run(nats_payload.decode(self._read_chunk, entry.value))
         return StateEntry(key=key, value=value, revision=entry.revision)
 
     def create(self, key: str, value: bytes) -> int:
         limit = self._js._nc.max_payload - nats_payload.KV_HEADER_BUDGET
-        value = self._loop.run(nats_payload.encode(self._kv, value, limit))
+        value = self._loop.run(nats_payload.encode(self._create_chunk, value, limit))
         try:
             return self._loop.run(self._kv.create(key, value))
         except KeyWrongLastSequenceError as err:
@@ -337,7 +346,7 @@ class NatsStateStore:
 
     def update(self, key: str, value: bytes, revision: int) -> int:
         limit = self._js._nc.max_payload - nats_payload.KV_HEADER_BUDGET
-        value = self._loop.run(nats_payload.encode(self._kv, value, limit))
+        value = self._loop.run(nats_payload.encode(self._create_chunk, value, limit))
         try:
             return self._loop.run(self._kv.update(key, value, last=revision))
         except KeyWrongLastSequenceError as err:
@@ -348,7 +357,7 @@ class NatsStateStore:
         sequence = max(from_revision, 1)
         while (msg := self._loop.run(self._next(subject, sequence))) is not None:
             sequence = msg.seq + 1
-            value = self._loop.run(nats_payload.decode(self._kv, msg.data or b""))
+            value = self._loop.run(nats_payload.decode(self._read_chunk, msg.data or b""))
             yield StateEntry(key=key, value=value, revision=msg.seq)
 
     async def _next(self, subject: str, sequence: int):
@@ -368,7 +377,12 @@ class NatsBus:
         self._views: dict[str, Bus] = {}
         try:
             self._nc = self._loop.run(
-                nats_client.connect(url, allow_reconnect=False, **auth_options(config.credentials))
+                nats_client.connect(
+                    url,
+                    allow_reconnect=config.reconnect,
+                    **({"max_reconnect_attempts": -1} if config.reconnect else {}),
+                    **auth_options(config.credentials),
+                )
             )
             self._js = self._nc.jetstream()
             if config.provision:

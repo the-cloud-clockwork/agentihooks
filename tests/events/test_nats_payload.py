@@ -24,15 +24,25 @@ def bus(tmp_path):
 
 
 @pytest.mark.parametrize("compressible", [False, True])
-def test_large_state_round_trips_with_atomic_revisions_and_history(bus, compressible):
-    store = bus.state("hub-timers")
+@pytest.mark.parametrize("scoped", [False, True])
+def test_large_state_round_trips_with_atomic_revisions_and_history(bus, compressible, scoped):
+    if scoped:
+        from scripts.events.nats_state import ScopedStateStore
+
+        store = ScopedStateStore(bus, "crew", "hub-timers")
+    else:
+        store = bus.state("hub-timers")
     first = b"a" * (2 * 1024 * 1024) if compressible else random.Random(1).randbytes(2 * 1024 * 1024)
     second = first + b"changed"
     revision = store.create("deadlines", first)
     assert store.get("deadlines").value == first
     with pytest.raises(StateConflict):
         store.create("deadlines", first)
-    rebound = nats.NatsStateStore(bus._loop, bus._js, "hub-timers", False)
+    rebound = (
+        ScopedStateStore(bus, "crew", "hub-timers")
+        if scoped
+        else nats.NatsStateStore(bus._loop, bus._js, "hub-timers", False)
+    )
     assert rebound.get("deadlines").value == first
     updated = store.update("deadlines", second, revision)
     assert store.get("deadlines").revision == updated
@@ -80,3 +90,32 @@ def test_exact_encoded_header_budget_is_allowed_and_one_extra_byte_is_refused():
     nats_payload.validate(client, "subject", b"x" * 81, {"x": "é"})
     with pytest.raises(ValueError, match="subject: payload 101 exceeds server limit 100"):
         nats_payload.validate(client, "subject", b"x" * 82, {"x": "é"})
+
+
+def test_a_reconnecting_bus_serves_a_hub_after_the_server_closes_the_connection(tmp_path):
+    import asyncio
+
+    from scripts.hub import registry, runner
+
+    with nats_server.running(tmp_path / "jetstream") as url:
+        opened = nats.open_bus(BusConfig(backend="nats", url=url, reconnect=True))
+        handler = mock.Mock()
+        hosted = runner.HubRunner(
+            opened, registry.Registry([registry.Reactor("worker", "swarm.*.task.>", handler)]), "hub"
+        )
+
+        async def disconnect_and_recover():
+            await opened._nc._process_op_err(OSError("server refused publish"))
+            async with asyncio.timeout(10):
+                while not opened._nc.is_connected:
+                    await asyncio.sleep(0.01)
+            await opened._nc.flush(timeout=2)
+
+        try:
+            opened._loop.run(disconnect_and_recover())
+            opened.events.publish("swarm.s.task.claimed", event())
+            assert hosted.run_once(timeout_ms=100) == {"worker": ["handled"]}
+            handler.assert_called_once_with(event())
+        finally:
+            hosted.stop()
+            opened.close()

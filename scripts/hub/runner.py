@@ -6,6 +6,7 @@ import socket
 import sys
 import threading
 import traceback
+from dataclasses import replace
 from typing import TYPE_CHECKING
 
 from scripts.events.bus import Bus, Delivery, StateConflict, StateStore
@@ -184,7 +185,8 @@ def main(argv: list[str]) -> int:
     if issued:
         os.environ[CREDENTIAL_ENV] = issued[1]
         _renewal(*issued)
-    bus = open_bus(BusConfig.from_environ(os.environ))
+    config = BusConfig.from_environ(os.environ)
+    bus = open_bus(replace(config, reconnect=True) if config.backend == "nats" else config)
     buckets.provision(bus)
     slots.serve(bus)
     hub = HubRunner(bus, registry.configured(bus), holder)

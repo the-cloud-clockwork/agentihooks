@@ -1,12 +1,11 @@
 import hashlib
 import json
 import zlib
+from collections.abc import Awaitable, Callable
 
 from nats.aio.client import Client
 from nats.js import JetStreamContext
 from nats.js.api import PubAck
-from nats.js.errors import KeyWrongLastSequenceError
-from nats.js.kv import KeyValue
 
 COMPRESSED = b"\x00agentihooks-state-zlib:"
 PAGED = b"\x00agentihooks-state-pages:"
@@ -27,7 +26,7 @@ async def publish(js: JetStreamContext, subject: str, data: bytes, *, stream: st
     return await js.publish(subject, data, stream=stream, headers=headers)
 
 
-async def encode(kv: KeyValue, value: bytes, limit: int) -> bytes:
+async def encode(write: Callable[[str, bytes], Awaitable[None]], value: bytes, limit: int) -> bytes:
     if limit < 128:
         raise ValueError("server payload budget is too small for state references")
     if len(value) <= limit and not value.startswith((COMPRESSED, PAGED)):
@@ -39,18 +38,15 @@ async def encode(kv: KeyValue, value: bytes, limit: int) -> bytes:
     count = (len(value) + limit - 1) // limit
     for index in range(count):
         key = f"_chunks.{token}.{index}"
-        try:
-            await kv.create(key, value[index * limit : (index + 1) * limit])
-        except KeyWrongLastSequenceError:
-            continue
+        await write(key, value[index * limit : (index + 1) * limit])
     return PAGED + json.dumps([token, count]).encode()
 
 
-async def decode(kv: KeyValue, value: bytes) -> bytes:
+async def decode(read: Callable[[str], Awaitable[bytes]], value: bytes) -> bytes:
     if value.startswith(PAGED):
         token, count = json.loads(value[len(PAGED) :])
-        chunks = [await kv.get(f"_chunks.{token}.{index}") for index in range(count)]
-        value = b"".join(chunk.value for chunk in chunks)
+        chunks = [await read(f"_chunks.{token}.{index}") for index in range(count)]
+        value = b"".join(chunks)
     if value.startswith(COMPRESSED):
         return zlib.decompress(value[len(COMPRESSED) :])
     return value
