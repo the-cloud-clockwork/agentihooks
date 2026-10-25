@@ -1130,6 +1130,44 @@ def test_cli_prepares_and_publishes_from_the_primary_checkout(publication, monke
     assert git(publication.repo, "ls-remote", "origin", "refs/heads/engineer-test").split()[0] == head
 
 
+@pytest.mark.parametrize("command", ["prepare", "publish"])
+def test_cli_journals_each_publication_refusal_with_task_branch_and_reason(publication, monkeypatch, command):
+    import syslog
+
+    from scripts.swarm import cli, publish
+
+    p = publication
+    p.task["repository_branches"] = {str(p.repo): "recorded-delivery"}
+    monkeypatch.setattr(cli, "_worker", lambda store, args: p.agent)
+    monkeypatch.setattr(cli, "_local_repo", lambda store, slug: str(p.repo))
+    monkeypatch.setattr(cli, "LedgerClient", lambda: p.ledger)
+    opened, logged = [], []
+    monkeypatch.setattr(syslog, "openlog", lambda ident: opened.append(ident))
+    monkeypatch.setattr(syslog, "syslog", lambda priority, message: logged.append((priority, json.loads(message))))
+
+    def refuse(*args):
+        raise publish.SwarmError("recorded branch is missing")
+
+    monkeypatch.setattr(publish, command, refuse)
+    args = SimpleNamespace(slug="swarm", command=command, message="Continue", files=["chosen.txt"])
+    with pytest.raises(publish.SwarmError, match="recorded branch is missing"):
+        getattr(cli, f"cmd_{command}")(None, args)
+    assert opened == ["agentihooks-swarm"]
+    assert logged == [
+        (
+            syslog.LOG_WARNING,
+            {
+                "event": "swarm_publication_refused",
+                "slug": "swarm",
+                "command": command,
+                "task": "t1",
+                "branch": "recorded-delivery",
+                "reason": "recorded branch is missing",
+            },
+        )
+    ]
+
+
 def test_publication_preserves_the_enforced_build_gate(publication, monkeypatch):
     import fakeredis
 
