@@ -297,7 +297,7 @@ def _validation(fields: dict, profile: str, agent: str, timeout: float) -> dict:
 
 
 def _routed(fields: dict) -> bool:
-    """A deferred launch returns before its route; the launch check confirms the session later."""
+    """Only a deferred launch reports a pending profile validation, and it returns before its route."""
     return fields.get("route_status") in STARTED_ROUTES or (
         fields.get("route_status") == "pending" and fields.get("profile_validation") == "pending"
     )

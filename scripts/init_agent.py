@@ -667,9 +667,15 @@ def _detach() -> bool:
 
 
 def _detached(args, environ: dict[str, str]) -> bool:
-    """A deferred launch returns once its launcher starts; a detached child waits on the route, names the pane and
-    answers the channel warning, because a master login can hold the route for minutes."""
+    """The detached child's output goes to /dev/null, so its failures reach the caller only through the binding report."""
     return bool(args.defer_canary and _binding_deferred(environ)) and _detach()
+
+
+def _refuse_deferred(args, environ: dict[str, str], exc: Exception) -> None:
+    from scripts.profiles import binding
+
+    if args.defer_canary and environ.get(binding.REPORT):
+        binding.refuse(Path(environ[binding.REPORT]), str(exc))
 
 
 def _await_route(route_path: Path, timeout: float, active_env: dict[str, str]) -> tuple[dict[str, str], int | None]:
@@ -1200,6 +1206,7 @@ def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -
         _route_reported(active_env, args.route_timeout, route)
         report += _profile_canary(args, agent, active_env, launch, route)
     except (OSError, ValueError) as exc:
+        _refuse_deferred(args, active_env, exc)
         print("\n".join([*report, "profile_validation=failed"]))
         print(f"agentihooks init-agent: {exc}", file=sys.stderr)
         return 3

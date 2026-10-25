@@ -96,7 +96,7 @@ def run(slug, config, store, ledger, runtime, now_ms, launch) -> list[str]:
         if not _starting(store, slug):
             state["failure"] = "; ".join(launched) or NO_LAUNCH
     elif _starting(store, slug) and now_ms - state.get("forced_at", now_ms) >= max(
-        map(master_start.deadline_ms, _masters(store, slug))
+        map(master_start.deadline_ms, _masters(store, slug)), default=master_start.DEADLINE_MS
     ):
         state["failure"] = NO_HOOK
     if state.get("failure"):

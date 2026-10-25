@@ -29,7 +29,7 @@ def _slow_route(tmp_path, monkeypatch, detach, route_timeout):
         return ["pane_id=w1:p1"]
 
     monkeypatch.setattr(init_agent, "_start_herdr", launch)
-    monkeypatch.setattr(init_agent, "_detach", lambda: detach, raising=False)
+    monkeypatch.setattr(init_agent, "_detach", lambda: detach)
     argv = ["--host", "herdr", "--agent", "claude", "--profile", "master", "--dir", str(tmp_path), "--defer-canary"]
     started = time.monotonic()
     result = init_agent.main([*argv, "--route-timeout", str(route_timeout)], {"XDG_RUNTIME_DIR": str(tmp_path / "rt")})
@@ -55,7 +55,35 @@ def test_the_detached_child_of_a_deferred_launch_still_waits_on_the_route(tmp_pa
     assert result == 3
     assert seconds >= 1
     assert renamed == []
-    assert capsys.readouterr().err == "agentihooks init-agent: the harness did not report its route within 1s\n"
+    captured = capsys.readouterr()
+    assert captured.err == "agentihooks init-agent: the harness did not report its route within 1s\n"
+    (report,) = [
+        line.removeprefix("profile_report=") for line in captured.out.splitlines() if "profile_report=" in line
+    ]
+    assert json.loads(Path(report).read_text()) == {
+        "profile": "master",
+        "harness": "claude",
+        "state": "failed",
+        "reason": "the harness did not report its route within 1s",
+    }
+
+
+def test_only_a_deferred_launch_refuses_its_profile_request(tmp_path):
+    report = tmp_path / "report.json"
+    binding.request(report, "master", "claude")
+    plain = init_agent._parser().parse_args([])
+    init_agent._refuse_deferred(plain, {binding.REPORT: str(report)}, ValueError("route lost"))
+    assert json.loads(report.read_text())["state"] == "pending"
+    deferred = init_agent._parser().parse_args(["--defer-canary"])
+    init_agent._refuse_deferred(deferred, {}, ValueError("route lost"))
+    assert json.loads(report.read_text())["state"] == "pending"
+    init_agent._refuse_deferred(deferred, {binding.REPORT: str(report)}, ValueError("route lost"))
+    assert json.loads(report.read_text()) == {
+        "profile": "master",
+        "harness": "claude",
+        "state": "failed",
+        "reason": "route lost",
+    }
 
 
 def test_only_a_deferred_launch_with_a_profile_request_detaches(monkeypatch):
@@ -72,9 +100,11 @@ def test_only_a_deferred_launch_with_a_profile_request_detaches(monkeypatch):
 def test_detach_returns_in_the_caller_and_carries_on_in_a_new_session():
     read, write = os.pipe()
     if not init_agent._detach():
-        streams = [os.readlink(f"/proc/self/fd/{number}") for number in (0, 1, 2)]
-        os.write(write, json.dumps([os.getsid(0) == os.getpid(), *streams]).encode())
-        os._exit(0)
+        try:
+            streams = [os.readlink(f"/proc/self/fd/{number}") for number in (0, 1, 2)]
+            os.write(write, json.dumps([os.getsid(0) == os.getpid(), *streams]).encode())
+        finally:
+            os._exit(0)
     os.close(write)
     seen = b""
     while chunk := os.read(read, 4096):
