@@ -40,6 +40,10 @@ JUMP = """() => {
   pick.value = "sec-followups";
   pick.dispatchEvent(new Event("change", { bubbles: true }));
 }"""
+FLUSH = """() => new Promise((done) => {
+  const probe = new IntersectionObserver(() => { probe.disconnect(); done(); });
+  probe.observe(document.documentElement);
+})"""
 CAPTURE = """() => {
   const body = document.body.cloneNode(true);
   for (const s of body.querySelectorAll("script")) s.remove();
@@ -133,6 +137,7 @@ def quiet(page):
     last, same = None, 0
     for _ in range(200):
         time.sleep(0.05)
+        page.evaluate(FLUSH)
         now = page.evaluate(f"() => [window.__inflight, JSON.stringify(({CAPTURE})())]")
         same = same + 1 if now[0] == 0 and now == last else 0
         if same == 3:
