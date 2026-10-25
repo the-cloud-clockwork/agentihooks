@@ -214,7 +214,9 @@ def fresh_by_path(paths: list[str], fresh: list[dict]) -> dict[str, list[dict]]:
 
 
 def selecting_entries(entries: set[str], test: str) -> list[str]:
-    cuts = {test[:index] for index in range(len(test)) if test.startswith(("::", "["), index)} | {test}
+    suffix = test.rfind("@")
+    name = test[:suffix] if suffix >= 0 and not {"[", "]"} & set(test[suffix:]) else test
+    cuts = {name[:index] for index in range(len(name)) if name.startswith(("::", "["), index)} | {name}
     return [entry for entry in cuts if entry in entries and selects(entry, test)]
 
 

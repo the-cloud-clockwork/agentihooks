@@ -1116,3 +1116,20 @@ def test_selected_test_ids_read_the_collected_stats_once_not_once_per_id(tmp_pat
         ],
         key=str,
     )
+
+
+def test_selected_test_ids_keep_durations_recorded_with_an_at_suffix():
+    from scripts.ci_mutation.stats_cache import fresh_by_path
+
+    entries = ["tests/test_a.py::test_x", "tests/test_a.py::test_y[1]", "tests/test_a.py"]
+    fresh = [
+        {
+            "cpu": 1,
+            "tests": {"m.x_f": ["tests/test_a.py::test_x@1", "tests/test_a.py::test_y[1]@2"]},
+            "durations": {"tests/test_a.py::test_x@1": 1, "tests/test_a.py::test_y[1]@2": 2},
+        }
+    ]
+    sliced = fresh_by_path(entries, fresh)
+    assert sliced["tests/test_a.py::test_x"][0]["durations"] == {"tests/test_a.py::test_x@1": 1}
+    assert sliced["tests/test_a.py::test_y[1]"][0]["tests"] == {"m.x_f": ["tests/test_a.py::test_y[1]@2"]}
+    assert sliced["tests/test_a.py"][0]["durations"] == fresh[0]["durations"]
