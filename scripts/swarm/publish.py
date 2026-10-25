@@ -265,7 +265,7 @@ def descends(root: Path, branch: str) -> bool:
 
 
 def delivery_branch(root: Path, task: dict, branch: str) -> str:
-    head = publish_queue.open_head(git(root, "remote", "get-url", "--push", "origin"), task.get("pr_url", ""))
+    head = publish_queue.open_head(git(root, "remote", "get-url", "--push", "origin"), task.get("pr_url"))
     if not head or head in continuation.PROTECTED:
         return branch
     git(root, "fetch", "origin", f"+refs/heads/{head}:refs/remotes/origin/{head}")

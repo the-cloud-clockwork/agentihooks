@@ -1185,13 +1185,15 @@ def test_a_continuation_publishes_onto_its_open_pull_request_branch(publication,
         git(root, "push", "origin", "HEAD:predecessor")
     publication.task.update(branch="predecessor", pr_url=pr_url, state="pr")
     native = publish.git
-    pushes = []
+    pushes, fetches = [], []
 
     def git_call(where, *args):
         if args == ("remote", "get-url", "--push", "origin"):
             return "git@github.com:Example/Repo.git"
         if args[:1] == ("push",):
             pushes.append(args)
+        if args[:1] == ("fetch",):
+            fetches.append(args)
         return native(where, *args)
 
     def query(document, variables):
@@ -1218,6 +1220,8 @@ def test_a_continuation_publishes_onto_its_open_pull_request_branch(publication,
     head = git(root, "rev-parse", "HEAD")
     target, other = ("predecessor", "engineer-test") if reused else ("engineer-test", "predecessor")
     assert len(pushes) == 1
+    looked_up = ("fetch", "origin", "+refs/heads/predecessor:refs/remotes/origin/predecessor")
+    assert (looked_up in fetches) == (reused or behind)
     assert result["branch"] == publication.task["branch"] == target
     assert publication.task["repository_branches"] == {str(repository): target}
     assert publication.task["pr_url"] == pr_url
@@ -1239,6 +1243,14 @@ def test_a_recorded_url_that_names_no_pull_request_keeps_the_current_branch(monk
 
     monkeypatch.setattr(merge_queue, "graphql", lambda document, variables: {"resource": None})
     assert publish_queue.open_head("git@github.com:example/repo.git", "https://github.com/example/repo/issues/7") == ""
+
+
+def test_a_missing_branch_never_descends_and_prints_nothing(publication, capfd):
+    from scripts.swarm import publish
+
+    capfd.readouterr()
+    assert publish.descends(publication.root, "missing") is False
+    assert capfd.readouterr() == ("", "")
 
 
 def test_prepare_records_the_worktree_branch_when_it_does_not_descend_from_the_pull_request(publication):
