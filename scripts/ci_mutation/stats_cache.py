@@ -30,6 +30,41 @@ def loader_name(node: ast.AST) -> str | None:
     return None
 
 
+def discovery_inputs(nodes: list[ast.AST], names: set[str], resources: dict[str, set[str]]) -> set[str]:
+    scanners = {"glob", "rglob", "iterdir", "listdir", "scandir", "walk", "iter_modules", "walk_packages"}
+    scanners.update(
+        alias.asname or alias.name
+        for node in nodes
+        if isinstance(node, ast.ImportFrom) and node.module in ("glob", "os", "pkgutil")
+        for alias in node.names
+        if alias.name in scanners
+    )
+    inputs = set()
+    for node in nodes:
+        if not isinstance(node, ast.Call) or loader_name(node.func) not in scanners:
+            continue
+        if (
+            isinstance(node.func, ast.Attribute)
+            and isinstance(node.func.value, ast.Name)
+            and node.func.value.id == "ast"
+        ):
+            continue
+        expressions = [*node.args, *(keyword.value for keyword in node.keywords)]
+        if isinstance(node.func, ast.Attribute):
+            expressions.append(node.func.value)
+        parts = [part for expression in expressions for part in ast.walk(expression)]
+        scoped = {
+            path
+            for part in parts
+            if isinstance(part, ast.Constant) and isinstance(part.value, str)
+            for path in resources.get(part.value, ())
+        }
+        if any(isinstance(part, ast.Attribute) and part.attr == "__path__" for part in parts):
+            scoped.update(path for name in names for path in resources.get(name.replace(".", "/"), ()))
+        inputs.update(scoped or {path for paths in resources.values() for path in paths})
+    return inputs
+
+
 def test_inputs(
     root: Path,
     path: str,
@@ -86,12 +121,8 @@ def test_inputs(
                     for node in nodes
                     if isinstance(node, ast.Constant) and isinstance(node.value, str) and node.value
                 }
-                if any(
-                    isinstance(node, ast.Call) and loader_name(node.func) in ("iter_modules", "walk_packages")
-                    for node in nodes
-                ):
-                    literals.update(name.replace(".", "/") for name in names)
                 dependencies.update(resource for value in literals for resource in resources.get(value, ()))
+                dependencies.update(discovery_inputs(nodes, names, resources))
             if unresolved:
                 dependencies.update(dynamic_modules)
             records[current] = (hashlib.sha256(content).hexdigest(), dependencies, unresolved)
