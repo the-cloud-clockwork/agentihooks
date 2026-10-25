@@ -122,3 +122,35 @@ def test_only_interactive_spawn_skips_subscription_quota(tmp_path, has_quota, ki
     placed = runtime.spawn(config, "master", "agent", task)
     assert placed.route_kind == "interactive"
     assert _passed(seen[0])[:2] == ["--route", "interactive"]
+
+
+@pytest.mark.parametrize("week_left,route", [(3.0, "open"), (60.0, "interactive")])
+def test_a_master_successor_leaves_the_spent_reserved_account_for_an_open_one(tmp_path, monkeypatch, week_left, route):
+    from scripts.routing import master_account
+    from scripts.swarm.capacity import Account
+
+    seen = []
+
+    def run(argv, **kwargs):
+        seen.append(argv)
+        return SimpleNamespace(returncode=0, stdout=validated(argv, "status=started\nroute_status=routed\n"), stderr="")
+
+    declared = {"claude": master_account.MasterAccount("claude", "main")}
+    monkeypatch.setattr(master_account, "load", lambda environ: declared)
+    runtime = HerdrRuntime(home=tmp_path, run=run, choose=lambda *_: ("claude", "requested"))
+    runtime._quota_accounts = [
+        Account("claude", "main", "OPEN", 0, 90.0, week_left, 6),
+        Account("claude", "open", "OPEN", 0, 90.0, 60.0, 6),
+    ]
+    config = SimpleNamespace(
+        slug="proof",
+        repo=str(tmp_path),
+        code="a1b2c3",
+        compact_limit=0,
+        lanes={"master": {"agent": "claude"}},
+        autonomy="delegate",
+    )
+    placed = runtime.spawn(config, "master", "agent", {"id": "master", "title": "proof"})
+    passed = _passed(seen[0])
+    assert passed[passed.index("--route") + 1] == route
+    assert placed.route_kind == ("interactive" if route == "interactive" else "subscription")
