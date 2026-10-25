@@ -435,10 +435,7 @@ def test_the_away_word_limit_defaults_to_twenty_and_reads_the_environment(monkey
     assert operator_mode.reminder("default", SWARM, now=100) == REMINDER
     monkeypatch.setenv("AGENTIHOOKS_OPERATOR_OFF_MAX_WORDS", "35")
     assert operator_mode.reminder("default", now=100, environ=SWARM) == ""
-    assert (
-        operator_mode.reminder("default", now=100, environ=SWARM)
-        == REMINDER
-    )
+    assert operator_mode.reminder("default", now=100, environ=SWARM) == REMINDER
     for key, value in SWARM.items():
         monkeypatch.setenv(key, value)
     assert operator_mode.reminder("custom", now=100) == ""
