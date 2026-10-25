@@ -120,7 +120,8 @@ def test_measured_dependencies_include_collection_phases_and_preloaded_modules(t
     assert measured_dependencies(coverage_file, work, root, ["tests/test_missing.py::test_missing"], tracked) == {}
 
 
-def test_statistics_collect_runtime_dependencies_with_plugin_discovery_disabled(tmp_path, monkeypatch):
+@pytest.mark.parametrize("inherited", ["before", None])
+def test_statistics_collect_runtime_dependencies_with_plugin_discovery_disabled(tmp_path, monkeypatch, inherited):
     import os
     import subprocess
     import sys
@@ -147,7 +148,10 @@ def test_statistics_collect_runtime_dependencies_with_plugin_discovery_disabled(
     monkeypatch.setenv("PYTEST_DISABLE_PLUGIN_AUTOLOAD", "1")
     monkeypatch.setenv("MUTATION_STATS_CACHE", str(tmp_path / "cache"))
     monkeypatch.setenv("MUTATION_STATS_ROOT", str(original))
-    monkeypatch.setenv("COVERAGE_FILE", str(tmp_path / "before"))
+    if inherited:
+        monkeypatch.setenv("COVERAGE_FILE", str(tmp_path / inherited))
+    else:
+        monkeypatch.delenv("COVERAGE_FILE", raising=False)
     engine = SimpleNamespace(
         tests_by_mangled_function_name={"scripts.sample.x_value": {node}}, duration_by_test={node: 1}
     )
@@ -176,6 +180,7 @@ def test_statistics_collect_runtime_dependencies_with_plugin_discovery_disabled(
     )
     result = json.loads(output.read_text())
     assert exported == [None]
+    assert (tmp_path / "part.coveragerc").read_text() == f"[run]\ndata_file = {(tmp_path / 'part.coverage').resolve()}\n"
     assert result["status"] == 0
     assert result["durations"] == {node: 1}
     assert "scripts/sample.py" in result["dependencies"][node]
