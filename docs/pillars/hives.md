@@ -438,7 +438,11 @@ each limit, and the smallest limit wins.
 ```bash
 agentihooks hive list
 # vm  live  ui=no  max-agents=20  excluded=none  cpus=8  load5=1.42  available-mb=21034  pending=0
+# anton-2  live  ui=no  max-agents=8  excluded=master  cpus=16  load5=4.73  available-mb=2576  pod-limit-mb=4200  pending=0
 ```
+
+A hive in a pod with a cgroup memory limit shows `available-mb` as the tighter of the node and pod figures, and
+`pod-limit-mb` names the pod limit; admission counts the same tighter figure.
 
 Hive workers load code at start. A hive still on code from before the 10 second publisher writes headroom only
 after the beat's launch poll, so its reading lapses during a long launch; restart its `agentihooks-hive` service,
