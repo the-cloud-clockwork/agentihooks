@@ -232,12 +232,12 @@ jobs:
           echo "::error::Chromium setup failed or exceeded its six minute timeout; mutation tests cannot run."
           exit 1
 
-      - name: Restore compatible test stats
+      - name: Restore the merged test stats
         uses: actions/cache/restore@v4
         with:
           path: .mutation-stats-cache
-          key: mutation-test-stats-v1-${{ runner.os }}-${{ matrix.part }}-${{ github.run_id }}-${{ github.run_attempt }}
-          restore-keys: mutation-test-stats-v1-${{ runner.os }}-${{ matrix.part }}-
+          key: mutation-test-stats-v2-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: mutation-test-stats-v2-${{ runner.os }}-
 
       - name: Collect one stats part for every mutation shard
         env:
@@ -247,11 +247,23 @@ jobs:
           PARTS: ${{ strategy.job-total }}
         run: mkdir -p .mutation-stats && touch ".mutation-stats/collected-$PART" && python -m scripts.ci_mutation --bases "$BASES" --budget 1080 --stats .mutation-stats --stats-part "$PART" --stats-parts "$PARTS"
 
-      - name: Store successful test stats
+      - name: Save the merged test stats
+        if: strategy.job-total == 1
         uses: actions/cache/save@v4
         with:
           path: .mutation-stats-cache
-          key: mutation-test-stats-v1-${{ runner.os }}-${{ matrix.part }}-${{ github.run_id }}-${{ github.run_attempt }}
+          key: mutation-test-stats-v2-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}
+
+      - name: Upload this part's test stats cache
+        if: strategy.job-total != 1
+        uses: actions/upload-artifact@v4
+        with:
+          name: mutation-test-stats-cache-${{ matrix.part }}
+          path: .mutation-stats-cache/
+          include-hidden-files: true
+          if-no-files-found: ignore
+          retention-days: 1
+          overwrite: true
 
       - name: Upload mutation stats part
         uses: actions/upload-artifact@v4
@@ -337,6 +349,20 @@ jobs:
           pattern: mutation-stats-*
           path: .mutation-stats
           merge-multiple: true
+
+      - name: Download every part's test stats cache
+        uses: actions/download-artifact@v4
+        with:
+          pattern: mutation-test-stats-cache-*
+          path: .mutation-stats-cache
+          merge-multiple: true
+
+      - name: Save the merged test stats
+        if: hashFiles('.mutation-stats-cache/**') != ''
+        uses: actions/cache/save@v4
+        with:
+          path: .mutation-stats-cache
+          key: mutation-test-stats-v2-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}
 
       - name: Download planned mutation test selection
         uses: actions/download-artifact@v4
