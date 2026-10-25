@@ -59,6 +59,31 @@ def test_task_cli_sends_explicit_repositories(monkeypatch):
     assert sent[2][1]["fields"] == {"repositories": []}
 
 
+def test_task_branch_setting_updates_the_swarm_repository_map(monkeypatch):
+    from types import SimpleNamespace
+
+    sent = []
+    task = {"repository_branches": {"/workspace/agentihooks": "deleted", "/workspace/bundle": "bundle-work"}}
+    store = SimpleNamespace(config=lambda slug: SimpleNamespace(repo="/workspace/agentihooks"))
+    monkeypatch.setattr(ledger.ports, "swarm", lambda: SimpleNamespace(store=SimpleNamespace(connect=lambda: store)))
+    monkeypatch.setattr(ledger, "resource", lambda slug, path: task)
+    monkeypatch.setattr(ledger, "send", lambda args, kind, **fields: sent.append((kind, fields)))
+    args = ledger.build_parser().parse_args(["--slug", SLUG, "--as", "swarm", "task", "set", "t1", "branch=dev"])
+    ledger.cmd_task(args)
+    assert sent == [
+        (
+            "task_update",
+            {
+                "item": "tasks/t1",
+                "fields": {
+                    "branch": "dev",
+                    "repository_branches": {"/workspace/agentihooks": "dev", "/workspace/bundle": "bundle-work"},
+                },
+            },
+        )
+    ]
+
+
 @pytest.mark.parametrize("value", ("bundle", [""], [3], ["relative/repository"]))
 def test_task_repositories_require_absolute_local_paths(value):
     with pytest.raises(ValueError) as error:
