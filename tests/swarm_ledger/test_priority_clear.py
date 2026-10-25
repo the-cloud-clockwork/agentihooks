@@ -31,7 +31,7 @@ def test_cli_rejected_clear_exits_nonzero_and_reports_only_successes(monkeypatch
     args = ledger.build_parser().parse_args(["--slug", SLUG, "--as", "boss", "priority", "clear", *targets])
     with pytest.raises(SystemExit) as exc:
         ledger.cmd_priority(args)
-    assert exc.value.code == ledger.unexplained({"op": "priority_clear", "target": "followups/unknown"})
+    assert exc.value.code == "No priority waits on followups/unknown to clear."
     result = json.loads(capsys.readouterr().out)
     assert result["cleared"] == cleared
     assert len(result["rejected"]) == 1
@@ -115,3 +115,96 @@ def test_clear_applies_with_or_without_a_reason(extra, by, recorded):
             **({"reason": recorded} if recorded else {}),
         }
     ]
+
+
+def _blocked_doc():
+    task = {
+        "id": "t1",
+        "title": "Ship the fix",
+        "state": "blocked",
+        "comments": [{"id": "c1", "by": "eng", "text": "Needs the token."}],
+    }
+    return {"phases": [], "priorities": [], "tasks": [task]}
+
+
+def _context(dismissed=None):
+    meta = {"rev": 0, "stamps": {}, "events": []}
+    if dismissed is not None:
+        meta["priorities_dismissed"] = dismissed
+    return core.Context(meta, 5)
+
+
+def test_clear_by_task_item_clears_the_block_priority_before_it_is_listed():
+    from scripts.swarm_ledger import ledger_priorities
+
+    doc, ctx = _blocked_doc(), _context()
+    op = {"op": "priority_clear", "id": "c", "by": "boss", "target": "tasks/t1"}
+    assert ledger_priorities.apply(doc, op, ctx) is True
+    assert ctx.refused == []
+    assert ctx.meta["priorities_dismissed"] == {"tasks/t1": "Blocked: Needs the token."}
+    assert ctx.events == [
+        {
+            "rev": 1,
+            "at": 5,
+            "by": "boss",
+            "kind": "priority cleared",
+            "target": "tasks/t1",
+            "id": "auto-tasks-t1",
+            "text": "Blocked: Needs the token.",
+        }
+    ]
+    ledger_priorities.derive(doc, ctx)
+    assert doc["priorities"] == []
+
+
+@pytest.mark.parametrize(
+    "target, dismissed, reason",
+    [
+        (
+            "tasks/t1",
+            {"tasks/t1": "Blocked: Needs the token."},
+            "The priority on tasks/t1 is already cleared and returns only when its ask changes.",
+        ),
+        ("tasks/t9", None, "No priority waits on tasks/t9 to clear."),
+        ("pr-9", None, "No priority waits on pr-9 to clear."),
+    ],
+)
+def test_clear_with_nothing_to_clear_names_its_reason(target, dismissed, reason):
+    from scripts.swarm_ledger import ledger_priorities
+
+    doc, ctx = _blocked_doc(), _context(dismissed)
+    op = {"op": "priority_clear", "id": "c", "by": "boss", "target": target}
+    assert ledger_priorities.apply(doc, op, ctx) is False
+    assert ctx.refused == [reason]
+    assert ctx.events == []
+
+
+def test_clear_all_with_nothing_listed_is_accepted_without_a_reason():
+    from scripts.swarm_ledger import ledger_priorities
+
+    doc, ctx = {"phases": [], "priorities": []}, _context()
+    assert ledger_priorities.apply(doc, {"op": "priority_clear", "id": "c", "target": "all"}, ctx) is True
+    assert ctx.refused == []
+
+
+def test_cli_clears_a_blocked_task_priority_once_then_names_why(monkeypatch, capsys):
+    state = make_ledger()
+    phase = state["phases"][0]["id"]
+    add_task = {"op": "task_add", "id": "ta", "task": "t1", "by": "boss", "phase": phase, "title": "x", "description": "y"}
+    block = {"op": "task_update", "id": "tu", "by": "boss", "item": "tasks/t1", "fields": {"state": "blocked"}}
+    core.sync(SLUG, ops=[add_task])
+    core.sync(SLUG, ops=[block])
+
+    def call(slug, ops):
+        state, rejected = core.sync(slug, ops=ops)
+        return {**state, "rejected": rejected}
+
+    monkeypatch.setattr(ledger, "call", call)
+    args = ledger.build_parser().parse_args(["--slug", SLUG, "--as", "boss", "priority", "clear", "tasks/t1"])
+    ledger.cmd_priority(args)
+    assert json.loads(capsys.readouterr().out) == {"cleared": ["tasks/t1"], "rejected": []}
+    state, _ = core.sync(SLUG)
+    assert "tasks/t1" not in [p["item"] for p in state["priorities"]]
+    with pytest.raises(SystemExit) as exc:
+        ledger.cmd_priority(args)
+    assert exc.value.code == "The priority on tasks/t1 is already cleared and returns only when its ask changes."
