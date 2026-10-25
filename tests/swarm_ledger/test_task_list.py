@@ -1,4 +1,5 @@
 import json
+import time
 
 import pytest
 
@@ -9,8 +10,8 @@ class Repository:
     def __init__(self, state: dict) -> None:
         self.state, self.reads = state, 0
 
-    def task_revision(self, slug: str) -> int:
-        return self.state["_meta"]["task_revision"]
+    def task_version(self, slug: str) -> tuple[int, int]:
+        return self.state["_meta"]["task_revision"], 0
 
     def read(self, slug: str, *keys: str) -> dict:
         assert keys == ("tasks", "_meta.task_revision", "_meta.rev")
@@ -103,24 +104,39 @@ def test_rows_carry_the_revision_read_with_them_when_a_write_lands_between():
     from scripts.swarm_ledger.api import task_list
 
     repository = Repository(ledger(6, "Newer"))
-    repository.task_revision = lambda slug: 5
+    repository.task_version = lambda slug: (5, 0)
     reply = task_list.read(repository, "raced", {"limit": 1})
     assert reply["revision"] == f"{6:064x}"
     assert reply["data"][0]["title"] == "Newer"
 
 
-def test_stored_task_revision_reads_its_own_row_and_falls_back_to_the_ledger_rev(tmp_path):
+def test_stored_task_version_reads_its_own_rows_and_moves_its_epoch_only_on_insert(tmp_path):
     from scripts.swarm_ledger.repository.sqlite import SQLiteLedgerRepository
 
     repository = SQLiteLedgerRepository(tmp_path / "ledger.sqlite3")
     repository.import_document("rows", {"title": "Rows", "tasks": [], "_meta": {"rev": 3}})
-    assert repository.task_revision("rows") == 3
+    revision, created = repository.task_version("rows")
+    assert revision == 3 and created > 0
+    time.sleep(0.002)
     repository.import_document("rows", {"title": "Rows", "_meta": {"rev": 4, "task_revision": 9}}, replace=True)
-    assert repository.task_revision("rows") == 9
+    revision, replaced = repository.task_version("rows")
+    assert revision == 9 and replaced > created
     entry = repository.current("rows")
     state = {**entry.mutable(), "title": "Renamed"}
     state["_meta"]["rev"] = 5
     with repository.connect() as connection, connection:
         repository._write(connection, "rows", entry, state, [])
-    assert repository.task_revision("rows") == 9
-    assert repository.task_revision("absent") == 0
+    assert repository.task_version("rows") == (9, replaced)
+    assert repository.task_version("absent") == (0, 0)
+
+
+def test_a_ledger_inserted_again_with_an_equal_task_revision_is_read_again(tmp_path):
+    from scripts.swarm_ledger.api import task_list
+    from scripts.swarm_ledger.repository.sqlite import SQLiteLedgerRepository
+
+    repository = SQLiteLedgerRepository(tmp_path / "ledger.sqlite3")
+    repository.import_document("again", {"title": "Again", **ledger(2, "Before")})
+    assert task_list.read(repository, "again", {})["data"][0]["title"] == "Before"
+    time.sleep(0.002)
+    repository.import_document("again", {"title": "Again", **ledger(2, "After")}, replace=True)
+    assert task_list.read(repository, "again", {})["data"][0]["title"] == "After"

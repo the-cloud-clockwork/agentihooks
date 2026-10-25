@@ -21,9 +21,9 @@ class Page(dict):
 
 
 class Tasks:
-    def __init__(self, repository: object, revision: str) -> None:
-        self.repository, self.revision, self.lock = repository, revision, threading.Lock()
-        self.rows, self.revisions, self.pages = None, None, {}
+    def __init__(self, repository: object, version: tuple) -> None:
+        self.repository, self.version, self.lock = repository, version, threading.Lock()
+        self.revision, self.rows, self.revisions, self.pages = None, None, None, {}
 
     def load(self, slug: str) -> None:
         state = self.repository.read(slug, "tasks", "_meta.task_revision", "_meta.rev")
@@ -46,11 +46,11 @@ GUARD = threading.Lock()
 
 
 def read(repository: object, slug: str, query: dict) -> Page:
-    revision = f"{repository.task_revision(slug):064x}"
+    version = repository.task_version(slug)
     with GUARD:
         held = HELD.get(slug)
-        if held is None or held.repository is not repository or held.revision != revision:
-            held = Tasks(repository, revision)
+        if held is None or held.repository is not repository or held.version != version:
+            held = Tasks(repository, version)
         HELD.pop(slug, None)
         HELD[slug] = held
         while len(HELD) > LEDGERS_KEPT:

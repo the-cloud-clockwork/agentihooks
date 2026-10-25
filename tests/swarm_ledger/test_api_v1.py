@@ -66,7 +66,13 @@ def request(live, method, resource, body=None, **headers):
 def stored(monkeypatch, document):
     from types import SimpleNamespace
 
+    from scripts.swarm_ledger.api import resources, task_list
+
     monkeypatch.setattr(server.repository, "current", lambda slug: SimpleNamespace(state=document, views={}))
+    monkeypatch.setattr(server.repository, "read", lambda slug, *keys: document)
+    revision = int(resources.resource_revision(document, "tasks"), 16)
+    monkeypatch.setattr(server.repository, "task_version", lambda slug: (revision, 0))
+    monkeypatch.setattr(task_list, "HELD", {})
 
 
 def test_invalid_schema_leaves_resource_unchanged(live):

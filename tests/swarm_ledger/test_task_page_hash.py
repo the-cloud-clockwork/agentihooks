@@ -81,7 +81,7 @@ def test_task_route_reuses_entry_revision(monkeypatch):
     server = as_services(
         SimpleNamespace(
             repository=SimpleNamespace(
-                read=lambda slug, *keys: entry.state, task_revision=lambda slug: {1: 7, 2: 8}[entry.generation]
+                read=lambda slug, *keys: entry.state, task_version=lambda slug: ({1: 7, 2: 8}[entry.generation], 0)
             )
         )
     )
@@ -120,7 +120,7 @@ def test_task_route_peak_allocation_is_bounded_by_page():
     server = as_services(
         SimpleNamespace(
             repository=SimpleNamespace(
-                read=lambda slug, *keys: entry.state, task_revision=lambda slug: {1: 7, 2: 8}[entry.generation]
+                read=lambda slug, *keys: entry.state, task_version=lambda slug: ({1: 7, 2: 8}[entry.generation], 0)
             )
         )
     )
