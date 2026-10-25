@@ -263,7 +263,7 @@ def test_an_unreadable_log_beside_a_step_exit_is_not_a_runner_loss(monkeypatch):
 
 
 @pytest.mark.parametrize("unreadable", [False, True])
-@pytest.mark.parametrize("loss", ["", "The runner has received a shutdown signal."])
+@pytest.mark.parametrize("loss", ["", "The runner has received a shutdown signal."], ids=["no-loss", "runner-shutdown"])
 def test_a_step_timeout_is_not_retried_even_with_a_loss_signature(monkeypatch, unreadable, loss):
     timeout = "The action 'Run tests' has timed out after 12 minutes."
     api = unreadable_log_api("failure", [timeout, loss])

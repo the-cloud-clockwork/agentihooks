@@ -22,7 +22,7 @@ from scripts.swarm.resume import blocker
 from scripts.swarm.snapshot import ledger_source
 from scripts.swarm.store import MASTER, AgentRecord, SwarmError
 from scripts.swarm.templates import DEFAULT_PROFILES
-from scripts.swarm.tick import placed_record, primed
+from scripts.swarm.tick import SUSPECT, placed_record, primed
 from scripts.swarm_v2 import master_fill
 from scripts.swarm_v2 import masters as master_seats
 
@@ -43,6 +43,12 @@ RESUMED = (
     "never {ledger}, then continue as master."
 )
 RECORD_FIELDS = {f.name for f in fields(AgentRecord)}
+LEAD_STARTING = ("starting", SUSPECT)
+STARTING = (
+    "the front door master {name} is {state} and every master seat is held (master seat count {count}), so no "
+    "other master starts; "
+    "the tick binds or replaces it, or run master up --replace to retire it first"
+)
 
 
 @dataclass(frozen=True)
@@ -202,6 +208,10 @@ def _front_doors(store, slug, live):
     return [a for a in store.agents(slug) if master_seats.is_lead(slug, a) and a.name in live]
 
 
+def _starting_leads(store, slug):
+    return [a for a in store.agents(slug) if master_seats.is_lead(slug, a) and a.state in LEAD_STARTING]
+
+
 def _free_seat(store, slug, live):
     taken = master_fill.taken_seats(store, slug, live)
     return next(
@@ -229,7 +239,12 @@ def _beside(store, slug, runtime, at, live):
 
 def _fresh(store, slug, runtime, at, live, replace_live=False):
     front = _front_doors(store, slug, live)
-    if front and not replace_live:
+    starting = _starting_leads(store, slug)
+    if starting and not replace_live:
+        count = master_seats.MasterSeats(store.redis).count(slug)
+        if _free_seat(store, slug, live) > count:
+            raise SwarmError(STARTING.format(name=starting[0].name, state=starting[0].state, count=count))
+    if (front or starting) and not replace_live:
         return _beside(store, slug, runtime, at, live)
     take_master.retired(store, slug, runtime, front)
     return _new(store, slug, runtime, at)

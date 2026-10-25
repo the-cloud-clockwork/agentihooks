@@ -15,7 +15,15 @@ from hooks.context.ledger_decision import _bound
 
 QUIET_EVERY = 2
 QUIET_WORDS = 20
-REMINDER = "Operator not present: replies stay within {words} words."
+REMINDER = (
+    "Operator not present: he never reads this pane. End the turn with no report, summary or ask addressed to him "
+    "and skip the response template; any pane text stays within {words} words. {route}"
+)
+MASTER_ROUTE = "Put anything he must decide only in Priorities with agentihooks ledger priority add."
+WORKER_ROUTE = (
+    "Put anything he must decide in a ledger question with agentihooks ledger question add; "
+    "the master answers it or raises it to him."
+)
 SWITCH = re.compile(r"(?<![\w-])operator (on|off)(?![\w-])")
 ON_NOTICE = "Operator on: the operator is present in this pane until he types operator off or the session restarts."
 OFF_NOTICE = "Operator off: the operator is not present in this pane."
@@ -106,7 +114,7 @@ def notice(payload, typed, now=None):
     word = observe(session_id, payload.get("prompt"), typed, now)
     text = {"on": ON_NOTICE, "off": OFF_NOTICE}.get(word, "")
     if _away(session_id, None):
-        return "\n".join(filter(None, (text, _reminder_text(None))))
+        return "\n".join(filter(None, (text, _reminder_text(None, session_id))))
     return text
 
 
@@ -159,8 +167,11 @@ def _limit(environ):
     return int(env.get("AGENTIHOOKS_OPERATOR_OFF_MAX_WORDS", QUIET_WORDS))
 
 
-def _reminder_text(environ):
-    return REMINDER.format(words=_limit(environ))
+def _reminder_text(environ, session_id):
+    env = os.environ if environ is None else environ
+    _, name = _binding(env, session_id)
+    route = MASTER_ROUTE if name.startswith("master@") else WORKER_ROUTE
+    return REMINDER.format(words=_limit(env), route=route)
 
 
 def reply_refusal(payload, environ=None):
@@ -193,4 +204,4 @@ def reminder(session_id, environ=None, now=None):
         state = _load(session_id)
         calls = state.get("calls", 0) + 1
         _save(session_id, {**state, "calls": calls})
-    return _reminder_text(environ) if calls % QUIET_EVERY == 0 else ""
+    return _reminder_text(environ, session_id) if calls % QUIET_EVERY == 0 else ""
