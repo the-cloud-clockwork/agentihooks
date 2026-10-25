@@ -1,6 +1,7 @@
 /.github/ @nestorcolt
 /.semgrep/ @nestorcolt
 /scripts/ci_mutation/ @nestorcolt
+/scripts/ci_budget/rate_limit.py @nestorcolt
 /scripts/ci_*.py @nestorcolt
 /scripts/ci_reuse_job.yml @nestorcolt
 /scripts/ci_gate_summary_steps.yml @nestorcolt
