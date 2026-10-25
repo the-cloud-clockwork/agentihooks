@@ -1,0 +1,84 @@
+import json
+import os
+import time
+from pathlib import Path
+
+from scripts import init_agent
+from scripts.profiles import binding
+
+
+def _slow_route(tmp_path, monkeypatch, detach, route_timeout):
+    from scripts import select_profile
+
+    home = tmp_path / "master" / "claude"
+    home.mkdir(parents=True)
+    monkeypatch.setattr(
+        select_profile,
+        "prepare",
+        lambda *a: ({"AGENTIHOOKS_PROFILE": "master", binding.HOMES["claude"]: str(home)}, a[4]),
+    )
+    monkeypatch.setattr(init_agent.agent_choice, "choose", lambda *a: ("claude", "explicit"))
+    monkeypatch.setattr(init_agent.claude_trust, "ensure_trusted", lambda *a: ("trusted", ""))
+    renamed = []
+    monkeypatch.setattr(init_agent.herdr_host, "rename_agent", lambda *a: renamed.append(a) or True)
+    request = binding.request
+    monkeypatch.setattr(binding, "request", lambda report, profile, agent, home: request(report, profile, agent))
+
+    def launch(launcher, directory, name, args, agent, environ):
+        init_agent._started_marker(launcher).touch()
+        return ["pane_id=w1:p1"]
+
+    monkeypatch.setattr(init_agent, "_start_herdr", launch)
+    monkeypatch.setattr(init_agent, "_detach", lambda: detach, raising=False)
+    argv = ["--host", "herdr", "--agent", "claude", "--profile", "master", "--dir", str(tmp_path), "--defer-canary"]
+    started = time.monotonic()
+    result = init_agent.main([*argv, "--route-timeout", str(route_timeout)], {"XDG_RUNTIME_DIR": str(tmp_path / "rt")})
+    return result, time.monotonic() - started, renamed
+
+
+def test_a_deferred_launch_returns_before_a_slow_route(tmp_path, monkeypatch, capsys):
+    result, seconds, renamed = _slow_route(tmp_path, monkeypatch, detach=True, route_timeout=10)
+    assert result == 0
+    assert seconds < 5
+    assert renamed == []
+    lines = capsys.readouterr().out.splitlines()
+    assert lines[0] == "host=herdr"
+    assert lines[-5] == "status=started"
+    assert lines[-4].startswith("launcher_at=")
+    assert lines[-3:-1] == ["route_status=pending", "profile_validation=pending"]
+    report = lines[-1].removeprefix("profile_report=")
+    assert json.loads(Path(report).read_text()) == {"profile": "master", "harness": "claude", "state": "pending"}
+
+
+def test_the_detached_child_of_a_deferred_launch_still_waits_on_the_route(tmp_path, monkeypatch, capsys):
+    result, seconds, renamed = _slow_route(tmp_path, monkeypatch, detach=False, route_timeout=1)
+    assert result == 3
+    assert seconds >= 1
+    assert renamed == []
+    assert capsys.readouterr().err == "agentihooks init-agent: the harness did not report its route within 1s\n"
+
+
+def test_only_a_deferred_launch_with_a_profile_request_detaches(monkeypatch):
+    calls = []
+    monkeypatch.setattr(init_agent, "_detach", lambda: calls.append(1) or True)
+    deferred, plain = init_agent._parser().parse_args(["--defer-canary"]), init_agent._parser().parse_args([])
+    assert init_agent._detached(plain, {binding.REPORT: "/r.json"}) is False
+    assert init_agent._detached(deferred, {}) is False
+    assert calls == []
+    assert init_agent._detached(deferred, {binding.REPORT: "/r.json"}) is True
+    assert calls == [1]
+
+
+def test_detach_returns_in_the_caller_and_carries_on_in_a_new_session():
+    read, write = os.pipe()
+    if not init_agent._detach():
+        streams = [os.readlink(f"/proc/self/fd/{number}") for number in (0, 1, 2)]
+        os.write(write, json.dumps([os.getsid(0) == os.getpid(), *streams]).encode())
+        os._exit(0)
+    os.close(write)
+    seen = b""
+    while chunk := os.read(read, 4096):
+        seen += chunk
+    os.close(read)
+    os.wait()
+    assert json.loads(seen) == [True, os.devnull, os.devnull, os.devnull]
