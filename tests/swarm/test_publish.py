@@ -1159,6 +1159,79 @@ def test_stacked_delivery_publishes_its_current_branch_with_one_push(publication
     assert git(root, "branch", "--show-current") == "engineer-test"
 
 
+@pytest.mark.parametrize(
+    "pull, reused",
+    [
+        ({}, True),
+        ({"state": "CLOSED"}, False),
+        ({"state": "MERGED"}, False),
+        ({"isCrossRepository": True}, False),
+        ({"repository": {"nameWithOwner": "example/other"}}, False),
+        ({"headRefName": "dev"}, False),
+        ({"behind": True}, False),
+    ],
+)
+def test_a_continuation_publishes_onto_its_open_pull_request_branch(publication, monkeypatch, pull, reused):
+    from scripts.swarm import merge_queue, publish
+
+    root, repository = publication.root, publication.repo
+    pr_url = "https://github.com/example/repo/pull/7"
+    if pull.pop("behind", False):
+        parked = git(repository, "commit-tree", "HEAD^{tree}", "-p", "HEAD", "-m", "Diverged predecessor work")
+        git(repository, "push", "origin", f"{parked}:refs/heads/predecessor")
+    else:
+        git(root, "push", "origin", "HEAD:predecessor")
+    publication.task.update(branch="predecessor", pr_url=pr_url, state="pr")
+    native = publish.git
+    pushes = []
+
+    def git_call(where, *args):
+        if args == ("remote", "get-url", "--push", "origin"):
+            return "git@github.com:Example/Repo.git"
+        if args[:1] == ("push",):
+            pushes.append(args)
+        return native(where, *args)
+
+    def query(document, variables):
+        if "resource" in document:
+            assert "headRefName" in document and "isCrossRepository" in document and "nameWithOwner" in document
+            assert variables == {"url": pr_url}
+            resource = {
+                "state": "OPEN",
+                "headRefName": "predecessor",
+                "isCrossRepository": False,
+                "repository": {"nameWithOwner": "example/repo"},
+                **pull,
+            }
+            return {"resource": resource}
+        assert variables["owner"] == "Example" and variables["name"] == "Repo"
+        return {"repository": {"pullRequests": {"nodes": [], "pageInfo": {"hasNextPage": False}}}}
+
+    monkeypatch.setattr(publish, "git", git_call)
+    monkeypatch.setattr(merge_queue, "graphql", query)
+    result = publish.publish(
+        "swarm", publication.agent, str(repository), publication.ledger, "Change chosen", ["chosen.txt"]
+    )
+
+    head = git(root, "rev-parse", "HEAD")
+    target, other = ("predecessor", "engineer-test") if reused else ("engineer-test", "predecessor")
+    assert len(pushes) == 1
+    assert result["branch"] == publication.task["branch"] == target
+    assert publication.task["repository_branches"] == {str(repository): target}
+    assert publication.task["pr_url"] == pr_url
+    assert git(root, "ls-remote", "origin", f"refs/heads/{target}").split()[0] == head
+    assert git(root, "ls-remote", "origin", f"refs/heads/{other}").split()[:1] != [head]
+    assert git(root, "rev-parse", "--abbrev-ref", "@{upstream}") == f"origin/{target}"
+
+
+def test_a_pull_request_on_another_host_is_never_looked_up(monkeypatch):
+    from scripts.swarm import merge_queue, publish_queue
+
+    monkeypatch.setattr(merge_queue, "graphql", lambda *args: pytest.fail("looked up"))
+    assert publish_queue.open_head("/srv/remote.git", "https://github.com/example/repo/pull/7") == ""
+    assert publish_queue.open_head("git@github.com:example/repo.git", "") == ""
+
+
 def test_prepare_records_the_worktree_branch_when_it_does_not_descend_from_the_pull_request(publication):
     from scripts.swarm import publish
 
