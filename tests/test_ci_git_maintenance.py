@@ -27,7 +27,7 @@ def _worktree_jobs() -> list[tuple[str, str, dict]]:
     ]
 
 
-def test_every_worktree_job_turns_off_maintenance_before_its_first_checkout():
+def test_every_worktree_job_turns_off_maintenance_before_it_touches_the_repository():
     jobs = _worktree_jobs()
     assert {(file, job_id) for file, job_id, _ in jobs} >= {
         ("test.yml", "select"),
@@ -62,7 +62,7 @@ def test_select_keeps_its_protected_provenance_context():
 
 
 def test_git_reads_maintenance_off_from_the_environment(tmp_path):
-    environment = {**os.environ, "GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_NOSYSTEM": "1"}
+    environment = {**os.environ, "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_COUNT": "0"}
     subprocess.run(["git", "init", "-q", str(tmp_path)], env=environment, check=True)
     read = ["git", "-C", str(tmp_path), "config", "--get", "maintenance.auto"]
     assert subprocess.run(read, env=environment, capture_output=True, text=True).returncode == 1
