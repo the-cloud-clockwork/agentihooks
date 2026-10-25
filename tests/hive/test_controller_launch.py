@@ -580,10 +580,7 @@ def test_reservation_contention_ends_the_unlaunched_execution(setup):
     for index in range(6):
         assert setup.launcher.slots.reserve("claude:account", f"other-{index}", 6, 300000)
     result = setup.launcher.spawn(request)
-    refused = (
-        "account reservation is full: account=claude:account sessions=6 cap=6 "
-        "five_left=80 week_left=80"
-    )
+    refused = "account reservation is full: account=claude:account sessions=6 cap=6 five_left=80 week_left=80"
     assert result.status is Status.UNAVAILABLE
     assert result.detail == refused
     assert result.value == {"harness": "claude"}
