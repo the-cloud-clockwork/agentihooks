@@ -413,6 +413,64 @@ def test_prepare_stacks_on_the_recorded_branch_and_publish_pushes_its_current_br
     assert git(repository, "ls-remote", "origin", "refs/heads/predecessor").split()[0] != head
 
 
+@pytest.mark.parametrize("state, deleted", [("MERGED", True), ("MERGED", False), ("OPEN", False)])
+def test_prepare_selects_fresh_dev_after_the_recorded_pull_request_merged(
+    repository, tmp_path, monkeypatch, state, deleted
+):
+    from scripts.swarm import publish, stack
+
+    git(repository, "push", "origin", "HEAD:predecessor")
+    old_head = git(repository, "rev-parse", "HEAD")
+    fresh = git(repository, "commit-tree", "HEAD^{tree}", "-p", "HEAD", "-m", "New dev")
+    git(repository, "push", "origin", f"{fresh}:refs/heads/dev")
+    if deleted:
+        git(repository, "push", "origin", "--delete", "predecessor")
+    worktree = tmp_path / "worktrees" / "repo" / "engineer-test"
+    script = tmp_path / "wt.sh"
+    script.write_text(
+        "#!/usr/bin/env bash\nset -euo pipefail\n"
+        'git -C "$3" fetch origin dev >&2\n'
+        "base=origin/dev\n"
+        'if [[ "${4:-}" == --from ]]; then base="$5"; fi\n'
+        'git -C "$3" worktree add -b engineer-test "$PUBLISH_PREPARED" "$base" >&2\n'
+        'printf "%s\\n" "$PUBLISH_PREPARED"\n'
+    )
+    monkeypatch.setattr(stack, "WT_SCRIPT", script)
+    monkeypatch.setenv("PUBLISH_PREPARED", str(worktree))
+    pr_url = "https://github.com/example/repo/pull/7"
+    task = {
+        "id": "t1",
+        "claimed_by": "engineer@test",
+        "state": "claimed",
+        "branch": "predecessor",
+        "pr_url": pr_url,
+        "repository_branches": {str(repository): "predecessor"},
+        "handoff_envelope": {"continue_from": "origin/predecessor"},
+    }
+    native = publish.execute
+
+    def execute(command, root):
+        if command[:3] == ["gh", "pr", "view"]:
+            assert command[3] == pr_url
+            return json.dumps({"state": state, "baseRefName": "dev", "headRefName": "predecessor"})
+        return native(command, root)
+
+    monkeypatch.setattr(publish, "execute", execute)
+    ledger = SimpleNamespace(
+        tasks=lambda slug: [task], update_task=lambda slug, task_id, fields, by: task.update(fields)
+    )
+    agent = AgentRecord("engineer@test", "ci", "t1")
+
+    result = publish.prepare("swarm", agent, str(repository), ledger)
+
+    expected_branch = "engineer-test" if state == "MERGED" else "predecessor"
+    assert git(worktree, "rev-parse", "HEAD") == (fresh if state == "MERGED" else old_head)
+    assert result["branch"] == task["branch"] == expected_branch
+    assert task["repository_branches"] == {str(repository): expected_branch}
+    assert task["pr_url"] == ("" if state == "MERGED" else pr_url)
+    assert publish.prepare("swarm", agent, str(repository), ledger) == result
+
+
 def test_publish_uses_its_current_branch_over_inherited_tracking(publication):
     from scripts.swarm import publish
 
