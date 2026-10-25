@@ -1,0 +1,63 @@
+{
+  "case": "T-SV2-IDX-02-B",
+  "evidence_class": "mocked: an in-process caller, a SQLite catalog file and a local content addressed object folder stand in for the session service, the central database and the archive bucket; no embedding model, HTTP server or Pod runs",
+  "input_sha256": {
+    "session-chunks.json": "9442886fae1a111dd590083f652183da056ac6a5e7e41339344d139b9b695242"
+  },
+  "observed": {
+    "corrected_after_object_restored": {
+      "chunker_version": "turn-v1",
+      "chunks": 7,
+      "state": "validated"
+    },
+    "long_result_retrievable_whole": true,
+    "long_tool_chunk": {
+      "chunk_id": "chunk-1a12dbfdb1e6c24ec4ae59ae208b86a5109274b9",
+      "content_hash": "a1842cc78eed0545f57cf2bc8f2e6b558f724cc26a1022524989c02de2e1e80a",
+      "kind": "tool",
+      "omitted_chars": 5970,
+      "preview_chars": 2000,
+      "sequences": [
+        10,
+        11
+      ],
+      "tool": {
+        "call_event_id": "9b4ce8ac2d878ff1e1ea45e823ba152488be8e4eea6c6f72c98481157ec485fa",
+        "is_error": true,
+        "result_event_id": "c1720d60c0491a05a28669a3884de96b9c221d15b1af7ba3edfcac491c853911",
+        "tool_name": "Bash",
+        "tool_use_id": "toolu_build"
+      },
+      "truncated": true,
+      "turn_id": "turn-b5c224856ba89d49c08228706ae77c57856a3051"
+    },
+    "metrics": {
+      "access_domain": "swarm-fixture",
+      "chunks_rebuilt_without_content_change": 0
+    },
+    "protected_state_unchanged": true,
+    "rejected": {
+      "activate_unvalidated": {
+        "detail": "only a validated chunk generation can become active",
+        "error": "Conflict"
+      },
+      "foreign_corpus": {
+        "detail": "the grant does not cover this session",
+        "error": "EvidenceRefused"
+      },
+      "policy_changed_under_same_version": {
+        "detail": "this chunker version was built with another policy; a policy change needs a new version",
+        "error": "Conflict"
+      },
+      "unbounded_policy": {
+        "detail": "a chunker policy needs a version and a positive character bound",
+        "error": "ValueError"
+      },
+      "validate_missing_archive_object": {
+        "detail": "an archived object is missing; the evidence is incomplete and was not returned",
+        "error": "EvidenceIntegrityError"
+      }
+    }
+  },
+  "state": "passed"
+}
