@@ -1744,6 +1744,14 @@ def test_announcing_and_landing_in_one_pull_request_is_red(frozen, capsys):
     assert "and the frozen gate file scripts/gate.py together" in out
 
 
+@pytest.mark.parametrize("registry", ["{}", None])
+def test_dropping_a_path_from_the_registry_is_red(frozen, capsys, registry):
+    head = _put(frozen, {gate_protected.FROZEN: registry}, "unfreeze")
+    code, out = _frozen_grade(frozen, head, capsys)
+    assert code == 1
+    assert "::error::The head drops the frozen gate file scripts/gate.py from" in out
+
+
 def test_a_head_behind_a_landed_frozen_change_is_green(frozen, capsys):
     head = _put(frozen, {"notes.txt": "unrelated\n"}, "unrelated")
     _git(frozen, "checkout", "-q", "dev")

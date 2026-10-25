@@ -343,7 +343,11 @@ def _frozen_problems(root: Path, merge_base: str, base: str, head: str) -> list[
         return _blob(root, head, path) not in {_blob(root, merge_base, path), _blob(root, base, path)}
 
     if changed(FROZEN):
+        kept = json.loads(_git(root, "show", f"{head}:{FROZEN}")) if _blob(root, head, FROZEN) else {}
         return [
+            f"The head drops the frozen gate file {path} from {FROZEN}; a frozen file stays frozen."
+            for path in sorted(set(registry) - set(kept))
+        ] + [
             f"The head changes {FROZEN} and the frozen gate file {path} together; "
             "land the registry by its own pull request first."
             for path in sorted(registry)
