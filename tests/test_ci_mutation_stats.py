@@ -1,6 +1,8 @@
 import json
 from pathlib import Path
 
+import pytest
+
 from scripts.ci_mutation.stats import SharedStats, load_parts, stats_key, write_part
 
 SELECTED = {"hooks/a.py": ({3, 1}, ["tests/test_b.py", "tests/test_a.py"]), "hooks/b.py": (set(), [])}
@@ -175,3 +177,90 @@ def test_statistics_collect_runtime_dependencies_with_plugin_discovery_disabled(
     assert "scripts/sample.py" in result["dependencies"][node]
     assert "tests/test_sample.py" in result["dependencies"][node]
     assert "scripts/untracked.py" not in result["dependencies"][node]
+
+
+@pytest.mark.wall_clock
+def test_a_stats_bucket_returns_while_a_test_left_a_thread_running(tmp_path, monkeypatch):
+    import threading
+    import time
+    from types import SimpleNamespace
+
+    from scripts.ci_mutation.selection import run_stats_buckets
+
+    node = "tests/test_sample.py::test_value"
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("MUTATION_STATS_CACHE", raising=False)
+
+    class Runner:
+        _pytest_add_cli_args = []
+
+        def run_stats(self, *, tests):
+            threading.Thread(target=time.sleep, args=(60,)).start()
+            engine.duration_by_test[node] = 1
+            return 0
+
+    engine = SimpleNamespace(tests_by_mangled_function_name={}, duration_by_test={})
+    started = time.monotonic()
+    results = run_stats_buckets(SimpleNamespace(mutmut=engine), Runner(), [["tests/test_sample.py"]], tmp_path)
+    assert time.monotonic() - started < 30
+    assert [result["status"] for result in results] == [0]
+    assert results[0]["durations"] == {node: 1}
+    assert results[0]["files"] == ["tests/test_sample.py"]
+
+
+@pytest.mark.wall_clock
+def test_a_failing_stats_bucket_reports_exit_one_and_its_error_while_a_thread_runs(tmp_path, monkeypatch, capfd):
+    import threading
+    import time
+    from types import SimpleNamespace
+
+    from scripts.ci_mutation.selection import run_stats_buckets
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("MUTATION_STATS_CACHE", raising=False)
+
+    class Runner:
+        _pytest_add_cli_args = []
+
+        def run_stats(self, *, tests):
+            threading.Thread(target=time.sleep, args=(60,)).start()
+            raise RuntimeError("stats broke")
+
+    engine = SimpleNamespace(tests_by_mangled_function_name={}, duration_by_test={})
+    started = time.monotonic()
+    with pytest.raises(SystemExit) as stopped:
+        run_stats_buckets(SimpleNamespace(mutmut=engine), Runner(), [["tests/test_sample.py"]], tmp_path)
+    assert time.monotonic() - started < 30
+    assert stopped.value.code == 1
+    output = capfd.readouterr()
+    assert "failed to collect stats. runner returned [1]" in output.out
+    assert "RuntimeError: stats broke" in output.err
+
+
+def test_a_stats_bucket_passes_its_arguments_and_exits_zero_or_one_in_process(monkeypatch, capfd):
+    from scripts.ci_mutation import selection
+
+    arguments = (object(), object(), ["tests/test_sample.py"], Path("stats-0.json"), "base")
+    calls = []
+
+    class Exited(Exception):
+        pass
+
+    def exit_now(code):
+        raise Exited(code)
+
+    def collect(*given):
+        calls.append(given)
+        if len(calls) == 2:
+            raise RuntimeError("stats broke")
+
+    monkeypatch.setattr(selection, "collect_shard_stats", collect)
+    monkeypatch.setattr(selection.os, "_exit", exit_now)
+    codes = []
+    for _ in range(2):
+        with pytest.raises(Exited) as exited:
+            selection.collect_and_exit(*arguments)
+        codes.append(exited.value.args[0])
+    assert codes == [0, 1]
+    assert calls == [arguments, arguments]
+    assert "RuntimeError: stats broke" in capfd.readouterr().err
