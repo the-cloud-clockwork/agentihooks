@@ -215,7 +215,7 @@ def _spawn(slug, config, store, runtime, found, now_ms):
 
     def prepare(record):
         nonlocal found
-        task = tick.primed(store, slug, record.seat, {"id": SEAT, "title": "Dispatch", "triggers": found})
+        task = tick.primed(store, slug, record.seat, {"id": SEAT, "title": "Dispatch"})
         found = _launch_triggers(store, found)
         if not found:
             raise _NoTriggers
