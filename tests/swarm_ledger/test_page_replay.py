@@ -24,6 +24,10 @@ class LateOutline:
             return self.polls >= 2
         return [0, "outline marked" if self.delivered else "outline pending"]
 
+    def wait_for_function(self, script, **kwargs):
+        while not self.evaluate(script):
+            pass
+
 
 class StalledOutline:
     def __init__(self):
@@ -35,6 +39,9 @@ class StalledOutline:
         if script != page_replay.FLUSH:
             self.captures += 1
         return None
+
+    def wait_for_function(self, script, **kwargs):
+        raise TimeoutError("observer delivery did not complete")
 
 
 def test_quiet_drains_a_real_observer_delivery_under_the_paused_clock(browser):
