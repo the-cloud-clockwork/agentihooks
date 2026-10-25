@@ -47,6 +47,8 @@ BEGIN_IMMEDIATE = "BEGIN IMMEDIATE"
 STORED = "SELECT 1 FROM ledgers WHERE slug=?"
 GENERATION = "SELECT generation FROM ledgers WHERE slug=?"
 TOKEN = "SELECT token FROM ledgers WHERE slug=?"
+TASK_REVISION = "SELECT path, value FROM fields WHERE slug=? AND path IN (?, ?)"
+TASK_REVISION_PATHS = (encode(["_meta", "task_revision"]), encode(["_meta", "rev"]))
 SUMMARIES = "SELECT summary FROM ledgers ORDER BY touched_at DESC, slug"
 SLUGS = "SELECT slug FROM ledgers ORDER BY slug"
 ROOT = refresh.ROOT
@@ -561,6 +563,14 @@ class SQLiteLedgerRepository:
         with self.connect() as connection:
             row = connection.execute(TOKEN, (slug,)).fetchone()
         return None if row is None else row[0]
+
+    def task_revision(self, slug: str) -> int:
+        """`_meta.task_revision` of the stored ledger, else its `_meta.rev`, read from those two rows alone."""
+        self._adopt(slug)
+        with self.connect() as connection:
+            values = dict(connection.execute(TASK_REVISION, (slug, *TASK_REVISION_PATHS)))
+        found = [json.loads(values[path]) for path in TASK_REVISION_PATHS if path in values]
+        return found[0] if found else 0
 
     def apply_ops(
         self, slug: str, changes: list | None = None, ops: list | None = None, gate=None, *, copy_state: bool = True

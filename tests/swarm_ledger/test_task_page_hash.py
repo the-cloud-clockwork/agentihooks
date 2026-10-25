@@ -7,6 +7,11 @@ import pytest
 pytestmark = pytest.mark.unit
 
 
+def stored_task_revision(state: dict) -> int:
+    meta = state.get("_meta", {})
+    return meta.get("task_revision", meta.get("rev", 0))
+
+
 def test_task_page_hash_tracks_only_returned_content():
     from scripts.swarm_ledger.api import resources
 
@@ -78,7 +83,13 @@ def test_task_route_reuses_entry_revision(monkeypatch):
     doc = {"tasks": [{"title": "Visible é", "id": "t1"}, {"id": "t2", "title": "Outside"}], "_meta": {"rev": 7}}
     expected = f"{7:064x}"
     entry = Entry(1, "", doc)
-    server = as_services(SimpleNamespace(repository=SimpleNamespace(current=lambda slug: entry)))
+    server = as_services(
+        SimpleNamespace(
+            repository=SimpleNamespace(
+                read=lambda slug, *keys: entry.state, task_revision=lambda slug: stored_task_revision(entry.state)
+            )
+        )
+    )
     original = resources.revision
 
     def refuse_collection_hash(value):
@@ -111,7 +122,13 @@ def test_task_route_peak_allocation_is_bounded_by_page():
 
     doc = {"tasks": [{"id": f"t{index}", "title": "é" * 4096} for index in range(2000)]}
     entry = Entry(1, "", doc)
-    server = as_services(SimpleNamespace(repository=SimpleNamespace(current=lambda slug: entry)))
+    server = as_services(
+        SimpleNamespace(
+            repository=SimpleNamespace(
+                read=lambda slug, *keys: entry.state, task_revision=lambda slug: stored_task_revision(entry.state)
+            )
+        )
+    )
     tracemalloc.start()
     try:
         reply = routes.ledger_read(server, "ledger", "tasks", {"limit": 2})
