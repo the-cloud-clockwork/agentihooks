@@ -58,6 +58,25 @@ def test_quiet_drains_a_real_observer_delivery_under_the_paused_clock(browser):
     assert '<a id="link" class="on">' in json.loads(now[1])["html"]
 
 
+def test_capture_ignores_empty_outline_class_but_preserves_real_page_changes(browser):
+    page = browser.new_page()
+    try:
+        page.route("http://replay.test/", lambda route: route.fulfill(body=""))
+        page.goto("http://replay.test/", wait_until="domcontentloaded")
+        page.set_content('<main id="main-content"><a id="link">Operator notes</a></main>')
+        absent = page.evaluate(page_replay.CAPTURE)
+        page.locator("#link").evaluate('(link) => link.className = ""')
+        empty = page.evaluate(page_replay.CAPTURE)
+        assert empty == absent
+        assert page.locator("#link").get_attribute("class") == ""
+        page.locator("#link").evaluate('(link) => link.className = "on"')
+        assert page.evaluate(page_replay.CAPTURE) != absent
+        page.locator("#link").evaluate('(link) => { link.removeAttribute("class"); link.textContent = "Changed notes"; }')
+        assert page.evaluate(page_replay.CAPTURE) != absent
+    finally:
+        page.close()
+
+
 def test_quiet_waits_for_pending_outline_deliveries_before_capture():
     assert page_replay.quiet(LateOutline()) == [0, "outline marked"]
 
