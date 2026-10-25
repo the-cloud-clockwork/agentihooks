@@ -52,7 +52,7 @@ def record_seat(session_id: str, slug: str, name: str) -> None:
 
 
 def is_master(session_id: str | None = None) -> bool:
-    if os.environ.get("AGENTIHOOKS_SWARM") and MASTER_TASK.fullmatch(os.environ.get("AGENTIHOOKS_SWARM_TASK") or ""):
+    if os.environ.get("AGENTIHOOKS_SWARM") and MASTER_TASK.fullmatch(str(os.environ.get("AGENTIHOOKS_SWARM_TASK"))):
         return True
     return bool(session_id) and seat_path(session_id).is_file()
 
