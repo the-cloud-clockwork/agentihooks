@@ -10,6 +10,30 @@ from tests.hive.test_controller_launch import request_for, setup, write_hive  # 
 from tests.swarm.test_tick import FakeLedger
 
 
+def test_cached_placements_keep_each_task_and_lane_separate(setup):  # noqa: F811
+    from dataclasses import replace
+
+    from scripts.hive.placement import Wait
+
+    setup.config = replace(setup.config, lanes={"ci": {"agent": "codex"}})
+    original = RoutedRuntime(setup.herdr, RuntimeRouter([]))
+    runtime = controller.FencedRuntime(setup.store, setup.config.slug, setup.held, original, "compose")
+    launch = runtime.runtime.hive_launch
+    launch.hives = Mock(wraps=launch.hives)
+    one, two = {"id": "one"}, {"id": "two"}
+    ordered(setup, runtime, one)
+    first = launch.select(setup.config, "eng", one)
+    second = launch.select(setup.config, "eng", two)
+    ci = launch.select(setup.config, "ci", one)
+    assert first.account.name == second.account.name == "account"
+    assert isinstance(ci, Wait)
+    assert launch.hives.call_count == 3
+    assert launch.select(setup.config, "eng", one) is first
+    assert launch.select(setup.config, "eng", two) is second
+    assert launch.select(setup.config, "ci", one) is ci
+    assert launch.hives.call_count == 3
+
+
 def ordered(world, runtime, task):
     ledger = FakeLedger([task])
     return _spawn_order(
