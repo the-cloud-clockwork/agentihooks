@@ -2,6 +2,7 @@ import io
 import json
 import re
 import subprocess
+import time
 import zipfile
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -20,6 +21,22 @@ def ready(jobs: list[dict], shards: list[int]) -> bool:
     return bool(shards) and all(
         f"unit (3.12, {shard})" in passed or f"unit-rerun (3.12, {shard})" in passed for shard in shards
     )
+
+
+def watch(repository: str, run: str, attempt: str, shards: list[int], destination: Path) -> None:
+    downloaded = {}
+    expected = {f"{kind}-3.12-{shard}" for kind in ("durations", "flakes") for shard in shards}
+    deadline = time.monotonic() + 1200
+    while time.monotonic() < deadline:
+        fetch(repository, run, destination, downloaded)
+        pages = api(f"repos/{repository}/actions/runs/{run}/attempts/{attempt}/jobs?per_page=100")
+        if ready([job for page in pages for job in page["jobs"]], shards):
+            fetch(repository, run, destination, downloaded)
+            if missing := expected - downloaded.keys():
+                raise RuntimeError(f"Missing shard reports: {sorted(missing)}")
+            return
+        time.sleep(5)
+    raise RuntimeError("Shard verification timed out before every expected shard succeeded")
 
 
 def fetch(repository: str, run: str, destination: Path, downloaded: dict) -> None:

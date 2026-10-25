@@ -67,6 +67,7 @@ def test_wait_downloads_reports_before_the_last_shard_and_rejects_a_missing_repo
         "repos/org/repo/actions/runs/123/attempts/2/jobs?per_page=100",
         "download",
         "repos/org/repo/actions/runs/123/attempts/2/jobs?per_page=100",
+        "download",
     ]
 
 
