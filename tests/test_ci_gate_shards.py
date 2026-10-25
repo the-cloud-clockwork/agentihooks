@@ -163,7 +163,7 @@ def test_github_failure_is_never_replaced_with_empty_evidence(capsys):
     "failure",
     [subprocess.CalledProcessError(1, ["gh"], stderr=b"HTTP 502"), subprocess.TimeoutExpired(["gh"], 60)],
 )
-def test_a_transient_github_failure_is_retried_before_the_wait_gives_up(failure, capsys):
+def test_a_transient_github_failure_is_retried_by_api(failure, capsys):
     result = subprocess.CompletedProcess([], 0, stdout=b'[{"artifacts": []}]')
     with (
         patch.object(ci_gate_shards.subprocess, "run", side_effect=[failure, result]) as run,
