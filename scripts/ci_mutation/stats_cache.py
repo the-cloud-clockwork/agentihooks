@@ -57,10 +57,10 @@ def discovery_inputs(nodes: list[ast.AST], names: set[str], resources: dict[str,
             path
             for part in parts
             if isinstance(part, ast.Constant) and isinstance(part.value, str)
-            for path in resources.get(part.value, ())
+            for path in resources.get(part.value.rstrip("/") + "/", ())
         }
         if any(isinstance(part, ast.Attribute) and part.attr == "__path__" for part in parts):
-            scoped.update(path for name in names for path in resources.get(name.replace(".", "/"), ()))
+            scoped.update(path for name in names for path in resources.get(name.replace(".", "/") + "/", ()))
         inputs.update(scoped or {path for paths in resources.values() for path in paths})
     return inputs
 
@@ -122,7 +122,7 @@ def test_inputs(
                     if isinstance(node, ast.Constant) and isinstance(node.value, str) and node.value
                 }
                 dependencies.update(resource for value in literals for resource in resources.get(value, ()))
-                dependencies.update(discovery_inputs(nodes, names, resources))
+
             if unresolved:
                 dependencies.update(dynamic_modules)
             records[current] = (hashlib.sha256(content).hexdigest(), dependencies, unresolved)
@@ -179,6 +179,7 @@ class StatsInputs:
     changes: dict
     records: dict = field(default_factory=lambda: {True: {}, False: {}})
     traced: dict = field(default_factory=dict)
+    discovered: dict = field(default_factory=dict)
 
     def for_test(self, path: str, covered: list[str] | None, fresh: list[dict] | None = None) -> dict:
         measured = covered is not None
@@ -204,8 +205,20 @@ class StatsInputs:
                 )
         return inputs
 
-    def matches(self, path: str, inputs: dict, measured: bool) -> bool:
-        return self.for_test(path, list(inputs) if measured else None) == inputs
+    def matches(self, path: str, inputs: dict, measured: bool, discovery: str) -> bool:
+        return self.for_test(path, list(inputs) if measured else None) == inputs and self.discovery(inputs) == discovery
+
+    def discovery(self, inputs: dict) -> str:
+        paths = set()
+        for source in inputs:
+            if Path(source).suffix != ".py":
+                continue
+            if source not in self.discovered:
+                text = (self.root / source).read_text()
+                names = set(imported_names(text, Path(source).parent.parts))
+                self.discovered[source] = discovery_inputs(list(ast.walk(ast.parse(text))), names, self.resources)
+            paths.update(self.discovered[source])
+        return hashlib.sha256(encode(sorted(paths)).encode()).hexdigest()
 
 
 def per_test_stats(path: str, fresh: list[dict], count: int) -> tuple[dict | None, list[str] | None]:
@@ -265,7 +278,7 @@ def collect_cached_stats(
                 resources.setdefault("/".join(parts[index:]), set()).add(path)
             for parent in Path(path).parents:
                 if str(parent) != ".":
-                    resources.setdefault(str(parent), set()).add(path)
+                    resources.setdefault(str(parent) + "/", set()).add(path)
     inputs = StatsInputs(root, modules, resources, changes)
     stored = StoredStats(root, folder, context, changes)
     compatible = {
@@ -282,7 +295,8 @@ def collect_cached_stats(
     for path in missing:
         result, covered = per_test_stats(path, fresh, len(missing))
         if result is not None:
-            stored.save(path, result, inputs.for_test(path, covered, fresh), covered is not None)
+            dependencies = inputs.for_test(path, covered, fresh)
+            stored.save(path, result, dependencies, covered is not None, inputs.discovery(dependencies))
     return reused + [
         {name: value for name, value in result.items() if name not in ("files", "modules")} for result in fresh
     ]

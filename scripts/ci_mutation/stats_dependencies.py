@@ -60,11 +60,20 @@ class StoredStats:
     def scope(self, inputs: dict) -> dict:
         return {source: lines for source, lines in self.changes.items() if source in inputs}
 
-    def identity(self, path: str, inputs: dict, scope: dict, measured: bool) -> str:
+    def identity(self, path: str, inputs: dict, scope: dict, measured: bool, discovery: str = "") -> str:
         context = {name: value for name, value in self.context.items() if name != "inventory"}
-        return digest({"context": context, "path": path, "inputs": inputs, "scope": scope, "measured": measured})
+        return digest(
+            {
+                "context": context,
+                "path": path,
+                "inputs": inputs,
+                "scope": scope,
+                "measured": measured,
+                "discovery": discovery,
+            }
+        )
 
-    def load(self, path: str, check: Callable[[dict, bool], bool] | None = None) -> dict | None:
+    def load(self, path: str, check: Callable[[dict, bool, str], bool] | None = None) -> dict | None:
         pointer = self.pointer(path)
         if not pointer.is_file():
             return None
@@ -73,7 +82,12 @@ class StoredStats:
             return None
         record = json.loads(record_file.read_text())
         inputs, scope, measured = record["inputs"], record["scope"], record["measured"]
-        if record["key"] != key or record["status"] != 0 or key != self.identity(path, inputs, scope, measured):
+        discovery = record.get("discovery", "")
+        if (
+            record["key"] != key
+            or record["status"] != 0
+            or key != self.identity(path, inputs, scope, measured, discovery)
+        ):
             return None
         if not inputs.keys() <= set(self.context["inventory"]) or scope != self.scope(inputs):
             return None
@@ -83,14 +97,18 @@ class StoredStats:
             for name, fingerprint in inputs.items()
         ):
             return None
-        if check is not None and not check(inputs, measured):
+        if check is not None and not check(inputs, measured, discovery):
             return None
-        result = {name: value for name, value in record.items() if name not in {"key", "inputs", "scope", "measured"}}
+        result = {
+            name: value
+            for name, value in record.items()
+            if name not in {"key", "inputs", "scope", "measured", "discovery"}
+        }
         return {**result, "reused": True} if measured else result
 
-    def save(self, path: str, result: dict, inputs: dict, measured: bool) -> None:
+    def save(self, path: str, result: dict, inputs: dict, measured: bool, discovery: str = "") -> None:
         scope = self.scope(inputs)
-        key = self.identity(path, inputs, scope, measured)
-        record = {**result, "key": key, "inputs": inputs, "scope": scope, "measured": measured}
+        key = self.identity(path, inputs, scope, measured, discovery)
+        record = {**result, "key": key, "inputs": inputs, "scope": scope, "measured": measured, "discovery": discovery}
         (self.folder / f"{key}.json").write_text(json.dumps(record))
         self.pointer(path).write_text(key)
