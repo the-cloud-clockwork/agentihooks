@@ -564,6 +564,15 @@ def test_selection_permissions_accept_the_current_or_compatible_grader(previous,
 
 
 @pytest.mark.parametrize("previous", [{"contents": "read"}, {"contents": "read", "actions": "read"}])
+@pytest.mark.parametrize("permissions", [{"contents": "read"}, {"contents": "read", "actions": "read"}])
+def test_selection_provenance_accepts_exactly_both_read_permission_forms(previous, permissions):
+    base = _provenance_workflow(permissions=previous)
+    head = copy.deepcopy(base)
+    head["jobs"]["select"]["permissions"] = permissions
+    assert gate_protected.grade({"test.yml": base}, {}, {"test.yml": head}, {}, _TODAY) == []
+
+
+@pytest.mark.parametrize("previous", [{"contents": "read"}, {"contents": "read", "actions": "read"}])
 @pytest.mark.parametrize(
     "permissions",
     [
