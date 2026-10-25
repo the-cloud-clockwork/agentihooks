@@ -404,6 +404,10 @@ def test_the_ledger_server_names_the_master_agent_choices():
 CANARY_S = 300
 
 
+def _launcher_flags(argv):
+    return argv[: argv.index("--")] if "--" in argv else argv
+
+
 def _timed_spawn(tmp_path, monkeypatch, lane, defer):
     for key in ("MODEL", "EFFORT"):
         for agent in ("CLAUDE", "CODEX"):
@@ -413,7 +417,7 @@ def _timed_spawn(tmp_path, monkeypatch, lane, defer):
     def run_init(argv, **kwargs):
         seen["argv"] = argv
         started = "status=started\nroute_status=routed\naccount=acct\n"
-        if "--defer-canary" in argv[: argv.index("--")]:
+        if "--defer-canary" in _launcher_flags(argv):
             pending = f"profile_validation=pending\nprofile_report={tmp_path / 'report.json'}\n"
             return SimpleNamespace(returncode=0, stdout=started + pending, stderr="")
         seen["canary_s"] += CANARY_S
@@ -435,7 +439,7 @@ def _timed_spawn(tmp_path, monkeypatch, lane, defer):
 def test_a_tick_master_launch_returns_before_a_slow_canary(tmp_path, monkeypatch):
     seen, placed = _timed_spawn(tmp_path, monkeypatch, MASTER, defer=True)
     assert seen["canary_s"] < 5
-    assert "--defer-canary" in seen["argv"][: seen["argv"].index("--")]
+    assert "--defer-canary" in _launcher_flags(seen["argv"])
     assert placed.profile_decision["validation"] == {
         "state": "pending",
         "report": str(tmp_path / "report.json"),

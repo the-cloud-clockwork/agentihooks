@@ -650,7 +650,7 @@ def _binding_deferred(environ: dict[str, str]) -> list[str]:
 
 
 def _profile_canary(args, agent: str, environ: dict[str, str], launch, route: dict) -> list[str]:
-    if deferred := args.defer_canary and _binding_deferred(environ):
+    if args.defer_canary and (deferred := _binding_deferred(environ)):
         return deferred
     canary = CANARY_TIMEOUT_S[agent] if args.canary_timeout is None else args.canary_timeout
     return launch.run("profile canary", canary, lambda seconds: _binding_result(environ, seconds, route))
