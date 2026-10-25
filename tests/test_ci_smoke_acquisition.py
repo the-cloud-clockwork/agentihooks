@@ -20,11 +20,14 @@ def test_hive_join_acquires_redis_before_starting_without_another_pull():
 def test_smoke_pulls_redis_from_the_ledger_load_registry():
     load = yaml.safe_load((ROOT / ".github/workflows/ledger-load.yml").read_text())["jobs"]["load"]
     registry = load["services"]["redis"]["image"].rsplit(":", 1)[0]
-    assert registry == "public.ecr.aws/docker/library/redis"
+    assert registry == "mirror.gcr.io/library/redis"
     workflow = yaml.safe_load((ROOT / ".github/workflows/swarm-smoke.yml").read_text())
     step = next(step for step in workflow["jobs"]["smoke"]["steps"] if step.get("name") == "Build the swarm image")
     for tag in ("7", "7-alpine"):
-        assert f"bash scripts/packaging/pull-runtime-image.sh {registry}:{tag} &&" in step["run"]
+        assert (
+            f"bash scripts/packaging/pull-runtime-image.sh public.ecr.aws/docker/library/redis:{tag} &&" in step["run"]
+        )
+        assert f"docker tag public.ecr.aws/docker/library/redis:{tag} {registry}:{tag}" in step["run"]
     assert "pull-runtime-image.sh mirror.gcr.io/library/redis" not in step["run"]
 
 
