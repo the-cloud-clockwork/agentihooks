@@ -755,6 +755,7 @@ def test_spoken_text_drops_markers_and_comments_in_linear_scan():
     assert spoken("a <!-- @lesson -->x y<!-- @/lesson --> b") == "a    b"
     assert spoken("a <!-- @decision date=1 -->x<!-- note -->y<!-- @/lesson -->z<!-- @/decision -->b") == "a     b"
     assert spoken("a <!-- note -->b") == "a  b"
+    assert spoken("a <!-- note -->b @/XXXX") == "a  b @/XXXX"
     assert spoken("a <!-- @lesson -->x y") == "a  x y"
     assert spoken("a <!-- open") == "a  <!-- open"
     assert spoken("x<!-- @a -->y<!-- open") == "x y <!-- open"
