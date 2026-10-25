@@ -256,6 +256,15 @@ def test_an_object_is_written_through_a_temporary_file_beside_it(store, monkeypa
     assert directories == [object_path(store, digest).parent]
 
 
+def test_a_failed_write_leaves_no_temporary_file_and_no_object(store, monkeypatch):
+    def failing(descriptor):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(archive.os, "fsync", failing)
+    assert refused(OSError, lambda: store.put(b"evidence")) == "disk full"
+    assert list(object_path(store, sha(b"evidence")).parent.iterdir()) == []
+
+
 def test_a_missing_object_is_an_integrity_error(store):
     message = refused(archive.EvidenceIntegrityError, lambda: store.get(sha(b"absent")))
     assert message == "an archived object is missing; the evidence is incomplete and was not returned"

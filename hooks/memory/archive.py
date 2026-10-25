@@ -6,6 +6,9 @@ import re
 import tempfile
 from pathlib import Path
 
+from hooks.memory.api.ingest import Grant
+from hooks.memory.catalog import Catalog
+
 LEGACY_PREVIEW_CHARS = 4000
 MISSING = "an archived object is missing; the evidence is incomplete and was not returned"
 ALTERED = "an archived object does not match its digest or range; the evidence is incomplete and was not returned"
@@ -33,7 +36,7 @@ def _sync(path: Path) -> None:
 
 
 class ObjectStore:
-    def __init__(self, root):
+    def __init__(self, root: str | Path) -> None:
         self.root = Path(root)
 
     def _path(self, digest: str) -> Path:
@@ -46,11 +49,15 @@ class ObjectStore:
         path = self._path(digest)
         path.parent.mkdir(parents=True, exist_ok=True)
         descriptor, temporary = tempfile.mkstemp(dir=path.parent)
-        with os.fdopen(descriptor, "wb") as handle:
-            handle.write(data)
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.replace(temporary, path)
+        try:
+            with os.fdopen(descriptor, "wb") as handle:
+                handle.write(data)
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(temporary, path)
+        except BaseException:
+            os.unlink(temporary)
+            raise
         _sync(path.parent)
         return digest
 
@@ -95,7 +102,7 @@ def _counted(catalog, domain: str, read):
         raise
 
 
-def evidence(catalog, store, grant, domain, session_uid):
+def evidence(catalog: Catalog, store: ObjectStore, grant: Grant, domain: str, session_uid: str) -> dict:
     found, sources = _readable(catalog, grant, domain, session_uid)
 
     def read():
@@ -131,13 +138,13 @@ def _slice(catalog, store, reference: dict) -> bytes:
     return b"".join(parts)
 
 
-def source_range(catalog, store, grant, reference):
+def source_range(catalog: Catalog, store: ObjectStore, grant: Grant, reference: dict) -> bytes:
     domain = reference["access_domain"]
     _readable(catalog, grant, domain, reference["session_uid"])
     return _counted(catalog, domain, lambda: _slice(catalog, store, reference))
 
 
-def preview(found, limit=LEGACY_PREVIEW_CHARS):
+def preview(found: dict, limit: int = LEGACY_PREVIEW_CHARS) -> dict:
     text = "\n".join(
         event["record"]["text"]
         for source in found["sources"]
