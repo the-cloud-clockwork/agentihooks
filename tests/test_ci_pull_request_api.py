@@ -137,7 +137,7 @@ def _reached_source(path: Path) -> str:
     lines = path.read_text().splitlines()
     exemptions = LOCAL_ONLY.get(path, set()) | METADATA_ONLY.get(path, set())
     for node in ast.parse("\n".join(lines)).body if exemptions else []:
-        if isinstance(node, ast.FunctionDef) and node.name in exemptions:
+        if isinstance(node, ast.FunctionDef) and node.name.removeprefix("x_").partition("__mutmut_")[0] in exemptions:
             lines[node.lineno - 1 : node.end_lineno] = [""] * (node.end_lineno - node.lineno + 1)
     return "\n".join(lines)
 
