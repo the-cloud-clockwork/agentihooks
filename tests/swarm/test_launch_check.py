@@ -912,6 +912,7 @@ CANARY_BINDING = {
     "persona": "a" * 64,
     "sources": "b" * 64,
     "account": "acct",
+    "validated_at": LAUNCH / 1000,
 }
 
 
@@ -1012,3 +1013,32 @@ def test_a_pending_canary_is_due_at_the_harness_canary_deadline(harness, seconds
     assert not launch_check.due(agent, failed, LAUNCH + launch_check.DEADLINE_MS - 1)
     assert launch_check.due(agent, failed, LAUNCH + launch_check.DEADLINE_MS)
     assert launch_check.due(agent, {"joined": {}}, LAUNCH + launch_check.DEADLINE_MS)
+
+
+def test_a_pending_canary_waits_for_the_launch_budget_it_carries():
+    budget = {"validation": {"state": "pending", "deadline_ms": 660_000}}
+    agent = AgentRecord("master@a1b2c3-0001", MASTER, MASTER, harness="claude", started_at=LAUNCH)
+    agent = replace(agent, profile_decision=budget)
+    pending = {"canary": {"expected": "validated", "actual": "pending"}}
+    assert not launch_check.due(agent, pending, LAUNCH + 659_999)
+    assert launch_check.due(agent, pending, LAUNCH + 660_000)
+    assert launch_check.due(agent, {"joined": {}}, LAUNCH + launch_check.DEADLINE_MS)
+    short = replace(agent, profile_decision={"validation": {"state": "pending", "deadline_ms": 1_000}})
+    assert not launch_check.due(short, pending, LAUNCH + 119_999)
+    assert launch_check.due(short, pending, LAUNCH + 120_000)
+
+
+def test_a_confirmed_canary_fills_the_route_account_and_harness_start(store, monkeypatch, tmp_path):
+    _, _, report, first = _deferred_master(store, monkeypatch, tmp_path)
+    data = json.loads(report.read_text())
+    report.write_text(json.dumps({**data, "state": "validated", "validation": CANARY_BINDING}))
+    agent = replace(_master_record(store, first), account="", launch_timings={"launched_at": LAUNCH})
+    confirmed, found = launch_check.canary(store, "sw", agent)
+    assert found == {}
+    assert confirmed.account == "acct"
+    assert confirmed.launch_timings == {"launched_at": LAUNCH, "harness_at": LAUNCH}
+    assert _master_record(store, first) == confirmed
+    kept = replace(agent, account="routed", launch_timings={"harness_at": LAUNCH + 5})
+    confirmed, _ = launch_check.canary(store, "sw", kept)
+    assert confirmed.account == "routed"
+    assert confirmed.launch_timings == {"harness_at": LAUNCH + 5}
