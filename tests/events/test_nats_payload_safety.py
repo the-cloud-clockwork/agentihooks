@@ -73,10 +73,16 @@ def test_requests_and_replies_report_the_refused_subject_before_sending():
 def test_scoped_page_write_refusal_and_missing_page_are_reported():
     client = SimpleNamespace(max_payload=2048)
     refusal = APIError(code=403, err_code=10072, description="page refused")
+
+    async def publish(subject, *args, **kwargs):
+        if "._chunks." in subject:
+            raise refusal
+        return SimpleNamespace(seq=1)
+
     js = SimpleNamespace(
         _nc=client,
         stream_info=AsyncMock(return_value=SimpleNamespace(config=SimpleNamespace(metadata={}))),
-        publish=AsyncMock(side_effect=refusal),
+        publish=AsyncMock(side_effect=publish),
         get_last_msg=AsyncMock(side_effect=NotFoundError()),
     )
     root = SimpleNamespace(
