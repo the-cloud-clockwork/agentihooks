@@ -115,7 +115,9 @@ def test_only_the_reviewed_pair_of_event_names_and_canonical_watcher_normalizes(
     for field, value in [("needs", []), ("steps", []), ("if", "true"), ("timeout-minutes", 100), ("runs-on", "other")]:
         changed = copy.deepcopy(workflow)
         changed["test.yml"]["jobs"]["queue-fail-fast"][field] = value
-        assert ci_gate_queue.normalize(changed) == changed
+        with pytest.raises(ValueError):
+            ci_gate_queue.normalize(changed)
     changed = copy.deepcopy(workflow)
     changed["test.yml"]["jobs"]["gate-required"]["name"] = "other"
-    assert ci_gate_queue.normalize(changed) == changed
+    with pytest.raises(ValueError):
+        ci_gate_queue.normalize(changed)
