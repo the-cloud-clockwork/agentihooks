@@ -1613,7 +1613,7 @@ jobs:
           permission-actions: read
           permission-contents: read
 
-      - name: Prefetch reports while every planned shard finishes
+      - name: Wait for every planned shard
         shell: bash
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
@@ -1625,7 +1625,18 @@ jobs:
             SHARDS="$(seq 1 20 | jq -sc '.')"
           fi
           export SHARDS
+          echo "SHARDS=$SHARDS" >> "$GITHUB_ENV"
           python -m scripts.ci_gate_shards
+
+      # The artifact service download spends none of the App installation's hourly REST budget.
+      - name: Download shard reports
+        uses: actions/download-artifact@v4
+        with:
+          pattern: "{durations,flakes}-${{ matrix.python-version }}-*"
+          path: shard-reports
+
+      - name: Require every planned shard report
+        run: python -m scripts.ci_gate_shards reports
 
       - name: Check every collected test ran in exactly one shard
         env:
