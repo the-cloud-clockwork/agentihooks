@@ -65,7 +65,10 @@ def name(redis: "Redis", machine: str, assign: bool = True) -> str:
 
 
 def host(target: str) -> str:
-    return urlsplit(target if "://" in target else f"ssh://{target}").hostname
+    found = urlsplit(target if "://" in target else f"ssh://{target}").hostname
+    if not found:
+        raise auth.HiveError(f"the SSH target {target!r} names no host")
+    return found
 
 
 def add(
@@ -93,6 +96,8 @@ def add(
     except auth.HiveError:
         auth.revoke(redis, grant["id"])
         raise
+    if member:
+        auth.revoke(redis, member)
     return grant
 
 

@@ -262,7 +262,7 @@ def test_a_create_without_its_saved_state_keeps_the_port_of_the_hive_service(wor
 
     assert (
         f"--- k8s/manifests/{NAME}/ssh-lan.yaml\nport: 2223\nnode: worker-001\nkey: {RECORD}\nip: 10.10.30.207\n"
-        in (world.lines)
+        in world.lines
     )
 
 

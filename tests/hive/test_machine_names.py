@@ -90,6 +90,22 @@ def test_a_saved_label_without_a_member_is_not_added_to_herdr_again(admin):
     assert _members(admin) == [f"{auth.PREFIX}:member:{grant['id']}"]
 
 
+def test_a_member_whose_herdr_entry_is_gone_is_replaced_by_the_new_one(admin):
+    first = _add(admin, Run())
+
+    second = _add(admin, Run())
+
+    assert second["id"] != first["id"]
+    assert _members(admin) == [f"{auth.PREFIX}:member:{second['id']}"]
+
+
+def test_a_target_without_a_host_is_refused():
+    with pytest.raises(auth.HiveError) as refused:
+        machine.host("ssh://")
+
+    assert str(refused.value) == "the SSH target 'ssh://' names no host"
+
+
 def test_a_second_hive_on_a_machine_that_has_one_is_refused(admin):
     run = Run([{"id": "a1", "label": "swarm-hive-1792604647", "target": "ssh://worker@203.0.113.9:2222"}])
 
