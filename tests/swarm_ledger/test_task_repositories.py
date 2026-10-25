@@ -64,9 +64,9 @@ def test_task_branch_setting_updates_the_swarm_repository_map(monkeypatch):
 
     sent = []
     task = {"repository_branches": {"/workspace/agentihooks": "deleted", "/workspace/bundle": "bundle-work"}}
-    store = SimpleNamespace(config=lambda slug: SimpleNamespace(repo="/workspace/agentihooks"))
+    store = SimpleNamespace(config=lambda slug: {SLUG: SimpleNamespace(repo="/workspace/agentihooks")}[slug])
     monkeypatch.setattr(ledger.ports, "swarm", lambda: SimpleNamespace(store=SimpleNamespace(connect=lambda: store)))
-    monkeypatch.setattr(ledger, "resource", lambda slug, path: task)
+    monkeypatch.setattr(ledger, "resource", lambda slug, path: {(SLUG, "tasks/t1"): task}[slug, path])
     monkeypatch.setattr(ledger, "send", lambda args, kind, **fields: sent.append((kind, fields)))
     args = ledger.build_parser().parse_args(["--slug", SLUG, "--as", "swarm", "task", "set", "t1", "branch=dev"])
     ledger.cmd_task(args)

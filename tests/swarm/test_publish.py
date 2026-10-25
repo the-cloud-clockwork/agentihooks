@@ -1404,6 +1404,28 @@ def test_publish_refuses_unverified_or_diverged_retained_delivery(publication, m
     assert git(p.repo, "ls-remote", "origin", "refs/heads/predecessor").split()[0] == commit
 
 
+@pytest.mark.parametrize("command", ["prepare", "publish"])
+def test_missing_pull_request_never_authorizes_retained_delivery(publication, monkeypatch, command):
+    from scripts.swarm import publish
+
+    p = publication
+    git(p.root, "push", "origin", "HEAD:predecessor")
+    p.task["branch"] = "predecessor"
+
+    def open_head(remote, url):
+        assert remote == str(p.repo.parent / "remote.git")
+        assert url == ""
+        return ""
+
+    monkeypatch.setattr(publish.publish_queue, "open_head", open_head)
+    if command == "prepare":
+        result = publish.prepare("swarm", p.agent, str(p.repo), p.ledger)
+        assert result["branch"] == p.task["branch"] == "engineer-test"
+    else:
+        with pytest.raises(publish.SwarmError, match="differs from registered branch predecessor"):
+            publish.publish("swarm", p.agent, str(p.repo), p.ledger, "Do not redirect", ["chosen.txt"])
+
+
 def test_a_restacked_successor_publishes_its_prepared_branch_not_the_parked_one(publication):
     from scripts.swarm import publish
 
