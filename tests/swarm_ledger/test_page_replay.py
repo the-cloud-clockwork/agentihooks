@@ -71,7 +71,9 @@ def test_capture_ignores_empty_outline_class_but_preserves_real_page_changes(bro
         assert page.locator("#link").get_attribute("class") == ""
         page.locator("#link").evaluate('(link) => link.className = "on"')
         assert page.evaluate(page_replay.CAPTURE) != absent
-        page.locator("#link").evaluate('(link) => { link.removeAttribute("class"); link.textContent = "Changed notes"; }')
+        page.locator("#link").evaluate(
+            '(link) => { link.removeAttribute("class"); link.textContent = "Changed notes"; }'
+        )
         assert page.evaluate(page_replay.CAPTURE) != absent
     finally:
         page.close()
