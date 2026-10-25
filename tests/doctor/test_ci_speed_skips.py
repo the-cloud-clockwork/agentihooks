@@ -128,6 +128,21 @@ def test_a_rerun_record_pairs_only_with_a_skip_decision_from_its_own_attempt(ski
     assert [finding.measure for finding in crossings(skipped_run)] == expected
 
 
+def test_a_two_attempt_run_raises_no_lag_for_a_skip_decision_carried_from_the_first_attempt(skipped_run):
+    first = copy.deepcopy(skipped_run)
+    first.update(id=40164331089, run_attempt=1, run_started_at="2026-10-25T05:06:37Z")
+    first["jobs"][1].update(
+        name="lint",
+        created_at="2026-10-25T05:06:38Z",
+        started_at="2026-10-25T05:06:38Z",
+        completed_at="2026-10-25T05:06:38Z",
+    )
+    second = copy.deepcopy(first)
+    second.update(run_attempt=2, run_started_at="2026-10-25T05:16:51Z")
+    second["jobs"][1].update(created_at="2026-10-25T05:17:01Z", started_at="2026-10-25T05:17:09Z")
+    assert crossings(first) == crossings(second) == []
+
+
 def test_timer_delivers_one_skipped_record_finding_per_run_to_both_masters(skipped_run, monkeypatch):
     import fakeredis
 
