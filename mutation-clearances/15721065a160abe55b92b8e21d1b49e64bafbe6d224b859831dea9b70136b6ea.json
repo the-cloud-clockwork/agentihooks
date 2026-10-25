@@ -1,0 +1,6 @@
+{
+  "scripts/ci_stats_minutes.py:scripts.ci_stats_minutes.x_measure__mutmut_34:a948fc9939ccbed5aefc1a521ee531e54fbfa9e56f15937e83c3aca5369ad52e": {
+    "reader": "standards-reader",
+    "reason": "ASCII X is always unreserved in urllib.parse.quote. Adding only repeated X to safe cannot alter encoding for any branch name, so the API endpoint and measured runs remain identical."
+  }
+}
