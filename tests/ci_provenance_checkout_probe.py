@@ -12,6 +12,7 @@ import yaml
 ROOT = Path(__file__).resolve().parents[1]
 
 
+@pytest.mark.wall_clock
 @pytest.mark.parametrize("stall", [False, True], ids=["normal", "stalled-once"])
 def test_real_protected_checkout_recovers_within_budget(tmp_path, stall):
     action = Path(os.environ["RUNNER_WORKSPACE"]).parent / "_actions/actions/checkout/v4/dist/index.js"
