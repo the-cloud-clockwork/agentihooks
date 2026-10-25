@@ -40,10 +40,12 @@ JUMP = """() => {
   pick.value = "sec-followups";
   pick.dispatchEvent(new Event("change", { bubbles: true }));
 }"""
-FLUSH = """() => new Promise((done) => {
-  const probe = new IntersectionObserver(() => { probe.disconnect(); done(); });
+FLUSH = """() => {
+  window.__flushed = false;
+  const probe = new IntersectionObserver(() => { probe.disconnect(); window.__flushed = true; });
   probe.observe(document.documentElement);
-})"""
+}"""
+FLUSHED = "() => window.__flushed"
 CAPTURE = """() => {
   const body = document.body.cloneNode(true);
   for (const s of body.querySelectorAll("script")) s.remove();
@@ -135,10 +137,13 @@ class FakeApi:
 
 def quiet(page):
     last, same = None, 0
+    page.evaluate(FLUSH)
     for _ in range(200):
         time.sleep(0.05)
-        page.evaluate(FLUSH)
+        if not page.evaluate(FLUSHED):
+            continue
         now = page.evaluate(f"() => [window.__inflight, JSON.stringify(({CAPTURE})())]")
+        page.evaluate(FLUSH)
         same = same + 1 if now[0] == 0 and now == last else 0
         if same == 3:
             return now

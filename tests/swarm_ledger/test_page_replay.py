@@ -1,4 +1,4 @@
-import unittest
+import pytest
 
 from tests.swarm_ledger import page_replay
 
@@ -8,16 +8,33 @@ class LateOutline:
         self.delivered = False
 
     def evaluate(self, script):
-        if script == getattr(page_replay, "FLUSH", None):
+        if script == page_replay.FLUSH:
             self.delivered = True
             return None
+        if script == page_replay.FLUSHED:
+            return self.delivered
         return [0, "outline marked" if self.delivered else "outline pending"]
 
 
-class QuietTest(unittest.TestCase):
-    def test_quiet_waits_for_pending_outline_deliveries_before_capture(self):
-        self.assertEqual(page_replay.quiet(LateOutline()), [0, "outline marked"])
+class StalledOutline:
+    def __init__(self):
+        self.captures = 0
+
+    def evaluate(self, script):
+        if script == page_replay.FLUSHED:
+            return False
+        if script != page_replay.FLUSH:
+            self.captures += 1
+        return None
 
 
-if __name__ == "__main__":
-    unittest.main()
+def test_quiet_waits_for_pending_outline_deliveries_before_capture():
+    assert page_replay.quiet(LateOutline()) == [0, "outline marked"]
+
+
+def test_quiet_times_out_instead_of_capturing_while_a_delivery_stays_pending(monkeypatch):
+    monkeypatch.setattr(page_replay.time, "sleep", lambda seconds: None)
+    page = StalledOutline()
+    with pytest.raises(TimeoutError):
+        page_replay.quiet(page)
+    assert page.captures == 0
