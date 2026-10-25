@@ -4,6 +4,8 @@ import uuid
 from contextlib import nullcontext
 from types import SimpleNamespace
 
+import pytest
+
 
 def test_hive_codex_server_launch_captures_its_receipt(tmp_path):
     from scripts import init_agent
@@ -75,3 +77,53 @@ def test_failed_server_log_survives_pod_files_and_keeps_receipt_generation(tmp_p
     assert not replacement.redis.exists(
         Orders(replacement.redis).launch_receipt("hive-one", "fixture", "execution-one", 8)
     )
+
+
+@pytest.mark.parametrize("kind", ["", "RSA ", "OPENSSH "])
+@pytest.mark.parametrize("closed", [True, False])
+def test_multiline_keys_are_redacted_before_any_output(kind, closed):
+    from scripts.hive.launch_logs import redacted_lines
+
+    body = str(uuid.uuid4())
+    begin = "-" * 5 + f"BEGIN {kind}PRIVATE KEY" + "-" * 5
+    end = "-" * 5 + f"END {kind}PRIVATE KEY" + "-" * 5
+    lines = ["launch starting\n", begin + "\n", body + "\n"]
+    if closed:
+        lines += [end + "\n", "connection refused\n"]
+    clean = list(redacted_lines(lines))
+    assert (
+        clean == ["launch starting\n", "[REDACTED:private_key]\n", "connection refused\n"]
+        if closed
+        else clean == ["launch starting\n", "[REDACTED:private_key]"]
+    )
+    assert body not in "".join(clean)
+
+
+def test_log_is_persisted_before_server_exit_and_retention_is_bounded(monkeypatch):
+    import fakeredis
+
+    from scripts.hive import launch_logs
+    from scripts.swarm.store import RedisStore
+
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    agent = SimpleNamespace(execution_id="execution", generation=2, runtime_target={"host_id": "hive"})
+    monkeypatch.setattr(store.execution_registry, "get", lambda slug, execution: agent)
+    monkeypatch.setattr(launch_logs, "connect", lambda: store)
+    monkeypatch.setattr(
+        launch_logs.sys, "argv", ["capture", "--slug", "fixture", "--execution", "execution", "--", "server"]
+    )
+    from scripts.hive.orders import Orders
+
+    receipt = Orders(store.redis).launch_receipt("hive", "fixture", "execution", 2)
+    first = "a" * launch_logs.LOG_LIMIT + "\n"
+
+    def lines():
+        yield first
+        assert store.redis.hget(receipt, "supervisor_log") == "a" * (launch_logs.LOG_LIMIT - 1) + "\n"
+        yield "failed\n"
+
+    process = SimpleNamespace(stdout=lines(), wait=lambda: 9)
+    monkeypatch.setattr(launch_logs.subprocess, "Popen", lambda *args, **kwargs: nullcontext(process))
+    monkeypatch.setattr(launch_logs.sys, "stdout", io.StringIO())
+    assert launch_logs.main() == 9
+    assert store.redis.hget(receipt, "supervisor_log") == "a" * (launch_logs.LOG_LIMIT - 8) + "\nfailed\n"

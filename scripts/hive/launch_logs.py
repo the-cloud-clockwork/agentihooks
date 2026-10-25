@@ -1,12 +1,29 @@
 import argparse
+import re
 import subprocess
 import sys
+from collections.abc import Iterable, Iterator
 
 from hooks.secrets import redact
 from scripts.hive.orders import Orders
 from scripts.swarm.store import connect
 
 LOG_LIMIT = 1024 * 1024
+PRIVATE_KEY = re.compile(r"-----BEGIN\s+((?:[A-Z0-9]+\s+)?)PRIVATE KEY-----")
+
+
+def redacted_lines(lines: Iterable[str]) -> Iterator[str]:
+    pending = ""
+    for line in lines:
+        pending += line
+        if matches := list(PRIVATE_KEY.finditer(pending)):
+            opened = matches[-1]
+            if f"-----END {opened[1]}PRIVATE KEY-----" not in pending[opened.end() :]:
+                continue
+        yield redact(pending, mode="strict")
+        pending = ""
+    if pending:
+        yield redact(pending, mode="strict")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -26,8 +43,7 @@ def main(argv: list[str] | None = None) -> int:
     with subprocess.Popen(
         arguments[split + 1 :], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, errors="replace"
     ) as process:
-        for line in process.stdout:
-            clean = redact(line, mode="strict")
+        for clean in redacted_lines(process.stdout):
             retained = (retained + clean)[-LOG_LIMIT:]
             store.redis.hset(receipt, "supervisor_log", retained)
             print(clean, end="", flush=True)
