@@ -115,15 +115,6 @@ def distribution_versions(root: Path) -> dict[str, str]:
     }
 
 
-def reusable_entry(file: Path, opened: bool, check: Callable[[str], list]) -> dict | None:
-    entry = json.loads(file.read_text()) if file.is_file() else None
-    if entry is None or (
-        opened and ("loaded" not in entry or any(check(name) != value for name, value in entry["loaded"].items()))
-    ):
-        return None
-    return entry
-
-
 def loaded_inputs(
     root: Path,
     static: dict[str, str],
