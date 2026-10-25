@@ -37,7 +37,7 @@ def pinned_revision(image: str) -> tuple[str, str]:
         manifest = get(f"{v2}/manifests/{digest}", token)[0]
     config = get(f"{v2}/blobs/{manifest['config']['digest']}", token)[0]
     revision = (config["config"].get("Labels") or {}).get("org.opencontainers.image.revision")
-    if not digest or not revision:
+    if config.get("architecture") != "amd64" or not digest or not revision:
         sys.exit(f"{image} has no amd64 image with a revision label")
     return f"{name}@{digest}", revision
 

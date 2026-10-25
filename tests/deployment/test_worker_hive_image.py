@@ -202,7 +202,7 @@ class Reply(io.BytesIO):
         self.headers = {"Docker-Content-Digest": digest} if digest else {}
 
 
-def registry(monkeypatch, labels, *, index=True):
+def registry(monkeypatch, labels, *, index=True, architecture="amd64"):
     image = "/v2/the-cloud-clockwork/agentihooks-worker"
     platform = {"config": {"digest": "sha256:config"}}
     blobs = {
@@ -220,7 +220,7 @@ def registry(monkeypatch, labels, *, index=True):
             "sha256:index" if index else "sha256:amd64",
         ),
         f"{image}/manifests/sha256:amd64": (platform, "sha256:amd64"),
-        f"{image}/blobs/sha256:config": ({"config": {"Labels": labels}}, None),
+        f"{image}/blobs/sha256:config": ({"architecture": architecture, "config": {"Labels": labels}}, None),
     }
     seen = []
 
@@ -247,6 +247,12 @@ def test_base_revision_reads_the_amd64_label_from_the_registry_without_pulling(m
     assert {auth for _, auth, _ in seen} == {None}
     assert {auth for _, _, auth in seen[1:]} == {"Bearer t"}
     assert len(seen) == (4 if index else 3)
+
+
+def test_base_revision_refuses_a_single_manifest_of_another_architecture(monkeypatch):
+    registry(monkeypatch, {"org.opencontainers.image.revision": "rev123"}, index=False, architecture="arm64")
+    with pytest.raises(SystemExit, match="no amd64 image with a revision label"):
+        pinned_revision(BASE)
 
 
 def test_base_revision_keeps_a_registry_port(monkeypatch):
