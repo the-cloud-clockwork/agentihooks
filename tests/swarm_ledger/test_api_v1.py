@@ -2134,7 +2134,22 @@ def test_export_encodes_once_per_ledger_generation(live, monkeypatch):
 
 def test_export_body_hides_seeds_and_receipts_and_keeps_text_unescaped():
     state = {"title": "café", "_meta": {"seeds": [1], "api_operations": {"a": 1}, "members": ["m"]}}
-    assert routes.export_body(state) == '{"data": {"title": "café", "_meta": {"members": ["m"]}}}'
+    assert routes.export_body(state) == '{"data": {"title": "café", "_meta": {"members": ["m"]}}}'.encode()
+
+
+def test_export_sends_the_cached_view_bytes_without_copying_them(live, monkeypatch):
+    sent, send_reply = [], ledger_server.Handler.send
+
+    def capture(handler, code, body, ctype):
+        sent.append(body)
+        return send_reply(handler, code, body, ctype)
+
+    monkeypatch.setattr(ledger_server.Handler, "send", capture)
+    headers = {"X-Ledger-Token": live["admin"], "Content-Type": "application/json"}
+    replies = [send(live, "POST", f"/api/v1/ledgers/{SLUG}/export", b"{}", **headers) for _ in range(2)]
+    assert [reply[0] for reply in replies] == [200, 200]
+    assert replies[0][1] == replies[1][1] == sent[0]
+    assert type(sent[0]) is bytes and sent[0] is sent[1]
 
 
 def test_raw_upload_headers_reject_invalid_lengths_and_names(live):
