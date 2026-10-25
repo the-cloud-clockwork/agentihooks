@@ -18,6 +18,7 @@ ORDER = [
     "one-push",
     "claims",
     "trace-plan",
+    "window",
     "stall",
     "lane-split",
     "nightwatch",
