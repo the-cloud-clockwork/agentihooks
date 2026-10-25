@@ -49,6 +49,8 @@ def test_failed_codex_launch_retains_redacted_evidence_before_termination(tmp_pa
     launcher = runtime.HerdrRuntime(home=tmp_path, run=run, herdr=herdr)
     config = SimpleNamespace(slug="sw", autonomy="delegate", lanes={}, compact_limit=0)
     with pytest.raises(SpawnError):
-        launcher._launch(config, "eng", "t1", "engineer-test", ["init-agent", "--agent", "codex", "--dir", str(tmp_path)])
+        launcher._launch(
+            config, "eng", "t1", "engineer-test", ["init-agent", "--agent", "codex", "--dir", str(tmp_path)]
+        )
     assert len(terminated) == 1
     assert list((tmp_path / "sw" / "launch-evidence").glob("*.json"))
