@@ -2,12 +2,28 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 import time
 from pathlib import Path
 
 
 def test_page_replay_driver_rejects_the_chat_fault(tmp_path):
     root = Path(__file__).resolve().parents[2]
+    subprocess.run(
+        [
+            "uv",
+            "pip",
+            "install",
+            "--system",
+            "--python",
+            sys.executable,
+            "--constraint",
+            str(root / ".github/test-constraints.txt"),
+            "playwright",
+        ],
+        check=True,
+        timeout=120,
+    )
     for name in ("base", "head"):
         (tmp_path / name).symlink_to(root if name == "base" else tmp_path / "fault-chat", target_is_directory=True)
     fault = tmp_path / "fault-chat"
