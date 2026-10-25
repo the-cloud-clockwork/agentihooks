@@ -172,7 +172,7 @@ def prepare(slug: str, agent: AgentRecord, repo: str, ledger: LedgerClient) -> d
     fields = []
     repositories = dict.fromkeys(local_repository(value, repo) for value in task.get("repositories") or [repo])
     for repository in repositories:
-        scoped = repository_task(repository, task)
+        scoped = preparation_base(repository, repository_task(repository, task))
         root = existing(repository, scoped, agent)
         if root is None:
             command = ["bash", str(stack.WT_SCRIPT), "new", "--repo", str(repository)]
