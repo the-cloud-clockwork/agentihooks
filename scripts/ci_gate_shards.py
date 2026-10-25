@@ -1,5 +1,6 @@
 import io
 import json
+import os
 import re
 import subprocess
 import time
@@ -45,8 +46,7 @@ def fetch(repository: str, run: str, destination: Path, downloaded: dict) -> Non
         artifact["name"]: artifact
         for page in pages
         for artifact in page["artifacts"]
-        if re.fullmatch(r"(?:durations|flakes)-3\.12-\d+", artifact["name"])
-        and not artifact["expired"]
+        if re.fullmatch(r"(?:durations|flakes)-3\.12-\d+", artifact["name"]) and not artifact["expired"]
     }
     for name in downloaded.keys() - available.keys():
         del downloaded[name]
@@ -66,3 +66,17 @@ def fetch(repository: str, run: str, destination: Path, downloaded: dict) -> Non
 
     with ThreadPoolExecutor(max_workers=8) as pool:
         downloaded.update(pool.map(download, pending))
+
+
+def main() -> None:
+    watch(
+        os.environ["GITHUB_REPOSITORY"],
+        os.environ["GITHUB_RUN_ID"],
+        os.environ["GITHUB_RUN_ATTEMPT"],
+        json.loads(os.environ["SHARDS"]),
+        Path("shard-reports"),
+    )
+
+
+if __name__ == "__main__":
+    main()

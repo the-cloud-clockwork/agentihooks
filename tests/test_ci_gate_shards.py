@@ -101,6 +101,24 @@ def test_incomplete_or_failed_shards_never_finish_verification(conclusion):
     assert ci_gate_shards.ready(jobs, [1, 2])
 
 
+def test_workflow_entry_uses_the_current_attempt_and_exact_planned_shards():
+    with (
+        patch.dict(
+            ci_gate_shards.os.environ,
+            {
+                "GITHUB_REPOSITORY": "org/repo",
+                "GITHUB_RUN_ID": "123",
+                "GITHUB_RUN_ATTEMPT": "2",
+                "SHARDS": "[1, 2, 13]",
+            },
+        ),
+        patch.object(ci_gate_shards, "watch") as watch,
+    ):
+        ci_gate_shards.main()
+    assert watch.call_args.args[:4] == ("org/repo", "123", "2", [1, 2, 13])
+    assert str(watch.call_args.args[4]) == "shard-reports"
+
+
 def test_no_plan_or_an_unrelated_success_never_verifies_a_shard():
     assert not ci_gate_shards.ready([], [])
     assert not ci_gate_shards.ready([{"name": "unit-selected (3.12, 1)", "conclusion": "success"}], [1])
