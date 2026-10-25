@@ -32,20 +32,22 @@ def preferred(task: dict, doc: dict, graph: dict) -> bool:
 def step(slug: str, store, rows: dict, doc: dict, full: dict, now_ms: int) -> list[str]:
     """full maps each lane whose every seat is busy to its claimable tasks in claim order and its live holders."""
     graph, redis = hierarchy.project(doc)[0], store.redis
-    seen, asked = redis.hgetall(store.key(slug, WAITING)), redis.hgetall(store.key(slug, ASKED))
+    seen, asked = redis.smembers(store.key(slug, WAITING)), redis.hgetall(store.key(slug, ASKED))
     holding = {a.name for _, holders in full.values() for a in holders}
     asked = {name: entry for name, entry in asked.items() if name in holding}
-    waiting, actions = {}, []
+    waiting, actions = set(), []
     for lane, (ready, holders) in full.items():
         for task in (t for t in ready if preferred(t, doc, graph)):
-            waiting[task["id"]] = seen.get(task["id"], str(now_ms))
+            waiting.add(task["id"])
             if task["id"] not in seen or _pending(asked, task["id"], now_ms):
                 continue
             victim = _victim([a for a in holders if a.name not in asked], rows, doc, graph)
             if victim is not None:
                 asked[victim.name] = f"{task['id']}:{now_ms}"
                 actions += _ask(InboxStore(redis), slug, lane, victim, task["id"])
-    _replace(redis, store.key(slug, WAITING), waiting)
+    redis.delete(store.key(slug, WAITING))
+    if waiting:
+        redis.sadd(store.key(slug, WAITING), *waiting)
     _replace(redis, store.key(slug, ASKED), asked)
     return actions
 

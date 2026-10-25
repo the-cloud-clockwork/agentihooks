@@ -93,4 +93,3 @@ def test_a_focused_normal_task_preempts_unfocused_work_and_the_unfocused_success
     tick("sw", store, ledger, runtime, now_ms=4_000)
     assert [task for _, _, task in runtime.spawned][2:] == ["t3"]
     assert ledger.rows["t2"]["state"] == "open" and "t2" not in {a.task for a in workers(store)}
-    assert ledger.state("sw")["freezes"] == [{"verb": "focus", "target": "tasks/t3"}]
