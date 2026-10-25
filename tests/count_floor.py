@@ -341,6 +341,75 @@ def _resolve(
     return set()
 
 
+def _resource_path(
+    node: ast.expr,
+    bindings: dict[str, ast.expr],
+    source: Path,
+    constructors: set[str],
+    seen: frozenset[str] = frozenset(),
+) -> Path | str | None:
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return node.value
+    if isinstance(node, ast.Name):
+        if node.id == "__file__":
+            return source
+        if node.id in bindings and node.id not in seen:
+            return _resource_path(bindings[node.id], bindings, source, constructors, seen | {node.id})
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div):
+        left = _resource_path(node.left, bindings, source, constructors, seen)
+        right = _resource_path(node.right, bindings, source, constructors, seen)
+        if isinstance(left, Path) and isinstance(right, str):
+            return left / right
+    if isinstance(node, ast.Attribute) and node.attr == "parent":
+        value = _resource_path(node.value, bindings, source, constructors, seen)
+        if isinstance(value, Path):
+            return value.parent
+    if isinstance(node, ast.Subscript) and isinstance(node.value, ast.Attribute) and node.value.attr == "parents":
+        value = _resource_path(node.value.value, bindings, source, constructors, seen)
+        if isinstance(value, Path) and isinstance(node.slice, ast.Constant):
+            index = node.slice.value
+            if isinstance(index, int) and 0 <= index < len(value.parents):
+                return value.parents[index]
+    if isinstance(node, ast.Call) and not node.keywords:
+        if isinstance(node.func, ast.Name) and node.func.id in constructors and len(node.args) == 1:
+            value = _resource_path(node.args[0], bindings, source, constructors, seen)
+            if isinstance(value, (str, Path)):
+                return Path(value)
+        if isinstance(node.func, ast.Attribute) and node.func.attr == "resolve" and not node.args:
+            value = _resource_path(node.func.value, bindings, source, constructors, seen)
+            if isinstance(value, Path):
+                return value.resolve()
+    return None
+
+
+def _fixture_subject(tree: Path, source: Path, module: ast.Module, call: ast.Call) -> set[tuple[str, str]]:
+    if not isinstance(call.func, ast.Attribute) or call.func.attr not in {"read_text", "read_bytes"}:
+        return set()
+    names, _ = _imports(module)
+    constructors = {name for name, subjects in names.items() if ("pathlib", "Path") in subjects}
+    bindings = {
+        statement.targets[0].id: statement.value
+        for statement in module.body
+        if isinstance(statement, ast.Assign)
+        and len(statement.targets) == 1
+        and isinstance(statement.targets[0], ast.Name)
+    }
+    path = _resource_path(call.func.value, bindings, source, constructors)
+    if not isinstance(path, Path) or not path.is_relative_to(tree) or path.suffix != ".json":
+        return set()
+    try:
+        fixture = json.loads(path.read_bytes())
+    except (OSError, ValueError):
+        return set()
+    if isinstance(fixture, dict) and isinstance(fixture.get("steps"), list):
+        if any(
+            isinstance(step, dict) and isinstance(step.get("run"), str) and step["run"].strip()
+            for step in fixture["steps"]
+        ):
+            return {("@fixture", path.relative_to(tree).as_posix())}
+    return set()
+
+
 def referenced_subjects(tree: Path, nodeid: str) -> set[tuple[str, str]]:
     path, *scopes = nodeid.split("[", 1)[0].split("::")
     try:
@@ -360,6 +429,7 @@ def referenced_subjects(tree: Path, nodeid: str) -> set[tuple[str, str]]:
         for child in (descendant for statement in function.body for descendant in ast.walk(statement)):
             subjects.update(_resolve(child, names, modules))
             if isinstance(child, ast.Call):
+                subjects.update(_fixture_subject(tree, tree / path, module, child))
                 if isinstance(child.func, ast.Name) and (helper := helpers.get(child.func.id)):
                     pending.append(helper)
                 subjects.update(
@@ -405,7 +475,17 @@ def main(argv: list[str] | None = None) -> int:
         }
         deleted |= set() if opaque else deleted_branches(args.base, args.head, args.tests)
         for nodeid in lost:
-            if subjects := sorted(".".join(subject) for subject in referenced_subjects(args.base, nodeid) & deleted):
+            referenced = referenced_subjects(args.base, nodeid)
+            removed_fixtures = (
+                set()
+                if opaque
+                else {
+                    subject
+                    for subject in referenced
+                    if subject[0] == "@fixture" and not (args.head / subject[1]).exists()
+                }
+            )
+            if subjects := sorted(".".join(subject) for subject in referenced & (deleted | removed_fixtures)):
                 admitted[nodeid] = subjects
                 print(f"{nodeid} is admitted: the head deletes {', '.join(subjects)}, which it referenced")
     floor = len(base) - len(admitted)
