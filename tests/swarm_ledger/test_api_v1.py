@@ -2534,6 +2534,7 @@ def test_cli_collection_consumers_read_all_pages(live, tmp_path, capsys, monkeyp
         artifact=False,
         follow_up=False,
         workstation=False,
+        needs="",
         profile="",
         rank="",
         difficulty=None,
