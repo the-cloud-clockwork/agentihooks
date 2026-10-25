@@ -640,6 +640,34 @@ def test_workspace_preserves_data_dependent_repository_inputs_in_both_stages(tmp
     assert "pyproject.toml/" not in config["also_copy"]
 
 
+def test_workspace_discovers_tracked_inputs_without_copying_generated_statistics(tmp_path):
+    import subprocess
+    import tomllib
+
+    from scripts.ci_mutation.runner import prepare_workspace
+
+    root = tmp_path / "repo"
+    (root / "tests").mkdir(parents=True)
+    (root / "inputs").mkdir()
+    (root / "inputs/fixture.txt").write_text("tracked fixture")
+    (root / "pyproject.toml").write_text("[tool.pytest.ini_options]\n")
+    (root / "tests/test_input.py").write_text(
+        "from pathlib import Path\nROOT = Path(__file__).resolve().parents[1]\n"
+        "def test_input(name):\n    return (ROOT / name).read_text()\n"
+    )
+    subprocess.run(["git", "init", "-q", str(root)], check=True)
+    subprocess.run(["git", "add", "tests", "inputs", "pyproject.toml"], cwd=root, check=True)
+    (root / ".mutation-stats/killers").mkdir(parents=True)
+    (root / ".mutation-stats/killers/generated.json").write_text("{}")
+    work = tmp_path / "work"
+    work.mkdir()
+    prepare_workspace(root, work, ["hooks/sample.py"], ["tests/test_input.py"])
+    assert (work / "inputs/fixture.txt").read_text() == "tracked fixture"
+    assert not (work / ".mutation-stats").exists()
+    config = tomllib.loads((work / "pyproject.toml").read_text())["tool"]["mutmut"]
+    assert ".mutation-stats/" not in config["also_copy"]
+
+
 def test_workspace_handles_a_selected_test_probing_an_invalid_null_path(tmp_path):
     from scripts.ci_mutation.runner import prepare_workspace
 

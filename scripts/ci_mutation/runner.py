@@ -148,6 +148,11 @@ def fixture_files(root: Path, work: Path, tests: list[str]) -> list[str]:
     sources = {root / test.split("::")[0] for test in tests}
     for source in tuple(sources):
         sources.update(parent / "conftest.py" for parent in source.parents if parent.is_relative_to(root))
+    tracked = (
+        set(subprocess.check_output(["git", "ls-files", "-z"], cwd=root, text=True).split("\0"))
+        if (root / ".git").exists()
+        else None
+    )
     files = set()
     candidates = {}
     for source in sorted(sources):
@@ -158,6 +163,8 @@ def fixture_files(root: Path, work: Path, tests: list[str]) -> list[str]:
                 candidates[literal] = fixture_candidates(root, work, literal)
             for candidate in candidates[literal]:
                 name = candidate.relative_to(root)
+                if tracked is not None and name.as_posix() not in tracked:
+                    continue
                 if name == Path("pyproject.toml") or any(
                     part in {".git", "__pycache__", work.name} for part in name.parts
                 ):
