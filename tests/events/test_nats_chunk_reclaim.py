@@ -121,7 +121,7 @@ def test_reclaim_purges_only_unreferenced_chunks_written_before_the_head():
         purge_stream=mock.AsyncMock(),
     )
     referenced = nats_payload.PAGED + json.dumps([f"{owner}.3.kept", 2]).encode()
-    history = mock.AsyncMock(return_value=[b"plain", b"", referenced])
+    history = mock.AsyncMock(return_value=[b"plain", b"", referenced, referenced])
     asyncio.run(nats_payload.reclaim(js, "stream", "pre.", "deadlines", history, 5))
     js.stream_info.assert_awaited_once_with("stream", subjects_filter=f"{pattern}>")
     assert js.purge_stream.await_args_list == [
@@ -163,3 +163,39 @@ def test_discard_removes_only_the_failed_write_token():
     value = nats_payload.PAGED + json.dumps(["owner.42.failed", 3]).encode()
     asyncio.run(nats_payload.discard(js, "stream", "pre.", value))
     js.purge_stream.assert_awaited_once_with("stream", subject="pre._chunks.owner.42.failed.>")
+
+
+@pytest.mark.parametrize("store_type", [nats.NatsStateStore, nats_state.ScopedStateStore])
+def test_history_visits_each_sequence_and_preserves_empty_values(store_type):
+    fetch = mock.AsyncMock(side_effect=[SimpleNamespace(seq=1, data=b"first"), SimpleNamespace(seq=2, data=None), None])
+    store = SimpleNamespace(_next=fetch)
+    assert asyncio.run(store_type._history(store, "key")) == [b"first", b""]
+    assert fetch.await_args_list == [mock.call("key", 1), mock.call("key", 2), mock.call("key", 3)]
+
+
+def test_scoped_reclaim_compares_local_sequences_after_migration():
+    reclaim = mock.AsyncMock()
+    write = mock.AsyncMock(return_value=109)
+    store = SimpleNamespace(
+        _root=SimpleNamespace(_nc=SimpleNamespace(max_payload=2048)),
+        _create_chunk=mock.AsyncMock(),
+        _write_raw=write,
+        _revision_base=100,
+        _reclaim=reclaim,
+    )
+    assert asyncio.run(nats_state.ScopedStateStore._write(store, "key", b"small", 3)) == 109
+    write.assert_awaited_once_with("key", b"small", 3)
+    reclaim.assert_awaited_once_with("key", 9)
+
+
+def test_paged_tokens_use_a_fixed_nonce_budget(monkeypatch):
+    nonce = mock.Mock(return_value="nonce")
+    monkeypatch.setattr(nats_payload.secrets, "token_hex", nonce)
+    write = mock.AsyncMock()
+    value = bytes(range(256)) * 8
+    encoded = asyncio.run(nats_payload.encode(write, value, 128, "owner.3"))
+    nonce.assert_called_once_with(16)
+    token, count = json.loads(encoded[len(nats_payload.PAGED) :])
+    assert token == "owner.3.nonce"
+    assert count == write.await_count
+    assert [call.args[0] for call in write.await_args_list] == [f"_chunks.owner.3.nonce.{i}" for i in range(count)]
