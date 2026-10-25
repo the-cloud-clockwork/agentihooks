@@ -15,7 +15,20 @@ def waiting(env, monkeypatch):  # noqa: F811
     assert run("sw", "create", "--repo", "/repo") == 0
     store.put_agent("sw", AgentRecord(name=ME, lane="eng", task="t1", seat="eng-1@sw"))
     ledger.rows["t1"].update(state="claimed", claimed_by=ME)
-    monkeypatch.setattr(cli.ledger_events, "view", lambda url: PullRequest("OPEN", None, 1, False, queued=True))
+    read_task = ledger.task
+
+    def task(slug, task_id):
+        assert task_id
+        assert slug == "sw"
+        return read_task(slug, task_id)
+
+    monkeypatch.setattr(ledger, "task", task)
+
+    def queued(url):
+        assert url in {URL, "https://github.com/o/r/pull/8"}
+        return PullRequest("OPEN", None, 1, False, queued=True)
+
+    monkeypatch.setattr(cli.ledger_events, "view", queued)
     state = {"state": "OPEN", "queued": True, "entry": {"position": 15}}
 
     def read(action, url):
@@ -217,12 +230,12 @@ def test_a_recorded_prerequisite_still_requires_continuation(waiting):
 @pytest.mark.parametrize("options", [[], ["--on", "checks", URL], ["--inbox"], ["--on", "reply", "item"]])
 def test_final_confirmation_requires_a_merge_wait(waiting, capsys, options):
     assert run("sw", "--as", ME, "wait", *options, "--final") == 1
-    assert "--final requires --on merge" in capsys.readouterr().err
+    assert capsys.readouterr().err.strip() == "swarm: --final requires --on merge for the task final deliverable"
 
 
 def test_final_confirmation_cannot_name_another_pull_request(waiting, capsys):
     assert run("sw", "--as", ME, "wait", "--on", "merge", URL, "--final") == 1
-    assert "--final requires the current task pull request" in capsys.readouterr().err
+    assert capsys.readouterr().err.strip() == "swarm: --final requires the current task pull request"
 
 
 def test_merge_wait_help_names_final_confirmation_and_existing_target_labels(capsys):
@@ -309,3 +322,26 @@ def test_reopening_checks_the_claim_and_block_state_atomically(waiting, monkeypa
     monkeypatch.setattr(cli.ledger_events, "view", raced)
     assert prerequisite_wait.reopen_pass("sw", store, ledger, snapshot) == []
     assert all(ledger.rows["t1"][field] == value for field, value in change.items())
+
+
+@pytest.mark.parametrize("task_id", ["", "missing"])
+def test_unbound_merge_waits_preserve_admission_without_final_confirmation(waiting, monkeypatch, task_id):
+    store, _, _ = waiting
+    store.put_agent("sw", AgentRecord(name=ME, lane="eng", task=task_id, seat="eng-1@sw"))
+    monkeypatch.setattr(cli.ledger_events, "view", lambda url: pytest.fail("unbound wait needs no queue read"))
+    assert run("sw", "--as", ME, "wait", "--on", "merge", URL) == 0
+    assert idle.wait(store.redis, "sw", ME)["on"]["target"] == URL
+    assert run("sw", "--as", ME, "wait", "--on", "merge", URL, "--final") == 1
+
+
+@pytest.mark.parametrize("ledger_generation,store_generation", [(1, 0), (0, 1)])
+def test_a_changed_claim_is_rejected_before_recording_a_prerequisite(
+    waiting, capsys, ledger_generation, store_generation
+):
+    store, ledger, _ = waiting
+    ledger.rows["t1"]["claim_generation"] = ledger_generation
+    store.redis.set(f"{store.key('sw', 'claim', 't1')}:generation", store_generation)
+    assert run("sw", "--as", ME, "wait", "--on", "merge", URL) == 1
+    assert capsys.readouterr().err.strip() == "swarm: task claim changed; refresh the task before waiting"
+    assert idle.wait(store.redis, "sw", ME) is None
+    assert store.redis.hget(prerequisite_wait.key("sw"), "t1") is None

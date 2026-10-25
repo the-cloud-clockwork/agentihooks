@@ -21,6 +21,9 @@ def admit(store: RedisStore, slug: str, agent: AgentRecord, held: dict, ledger, 
         return
     task = ledger.task(slug, agent.task) if agent.task else None
     target = held["target"]
+    generation = store.claim_generation(slug, agent.task)
+    if task and task.get("claim_generation", 0) != generation:
+        raise SwarmError("task claim changed; refresh the task before waiting")
     if final:
         if not task or task.get("pr_url") != target:
             raise SwarmError("--final requires the current task pull request")
@@ -40,7 +43,7 @@ def admit(store: RedisStore, slug: str, agent: AgentRecord, held: dict, ledger, 
     store.redis.hset(
         key(slug),
         agent.task,
-        json.dumps({"agent": agent.name, "generation": store.claim_generation(slug, agent.task), "target": target}),
+        json.dumps({"agent": agent.name, "generation": generation, "target": target}),
     )
     idle.end_wait(store.redis, slug, agent.name, at)
     raise SwarmError(
@@ -63,12 +66,11 @@ def dependencies(store: RedisStore, slug: str, agent: AgentRecord, task: dict, n
     return [] if record and record["target"] in waits.PULL_URL.findall(note) else task.get("depends_on", [])
 
 
-def hold(store: RedisStore, slug: str, agent: AgentRecord, ledger, note: str) -> None:
+def hold(store: RedisStore, slug: str, agent: AgentRecord, note: str) -> None:
     record = offered(store, slug, agent)
     if not record or record["target"] not in waits.PULL_URL.findall(note):
         return
-    task = ledger.task(slug, agent.task)
-    record.update(blocked=True, generation=task.get("claim_generation", 0))
+    record["blocked"] = True
     store.redis.hset(key(slug), agent.task, json.dumps(record))
 
 
