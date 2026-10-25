@@ -1,12 +1,10 @@
 import hashlib
 import json
-import os
 from collections.abc import Callable, Mapping
 from typing import Any
 
 from scripts.events import subjects
 from scripts.events.bus import Bus, StateConflict
-from scripts.events.config import SWARMS_ENV
 from scripts.hive import presence
 
 TTL_MS = presence.TTL_MS
@@ -16,8 +14,7 @@ ENDED = frozenset({"exited", "dead"})
 
 HIVE_ENV = "AGENTIHOOKS_SLOT_HIVE"
 EXECUTION_ENV = "AGENTIHOOKS_SLOT_EXECUTION"
-SLOTS = "slots"
-UNBOUND = "hive"
+SLOTS = subjects.SLOTS
 REQUEST_TIMEOUT_MS = 10_000
 
 
@@ -147,13 +144,9 @@ class Slots:
             raise
 
 
-def request_subject(swarm: str) -> str:
-    return subjects.subject(swarm, SLOTS)
-
-
-def asker(bus: Any, swarm: str, timeout_ms: int = REQUEST_TIMEOUT_MS) -> Callable[[dict], Any]:
+def asker(bus: Any, hive: str, timeout_ms: int = REQUEST_TIMEOUT_MS) -> Callable[[dict], Any]:
     def ask(request: dict) -> Any:
-        answer = json.loads(bus.request(request_subject(swarm), json.dumps(request).encode(), timeout_ms))
+        answer = json.loads(bus.request(subjects.slots(hive), json.dumps(request).encode(), timeout_ms))
         if not answer["ok"]:
             raise Unavailable(answer["error"])
         return answer["result"]
@@ -176,14 +169,10 @@ class Remote(Slots):
         self.ask({"op": "release", "hive": self.hive, "execution": execution, "harness": harness, "account": account})
 
 
-def _swarm(environ: Mapping[str, str]) -> str:
-    return next((swarm for swarm in environ.get(SWARMS_ENV, "").split(",") if swarm), UNBOUND)
-
-
-def _slots(bus: Bus, backend: str, hive: str, read: Callable[[], dict], environ: Mapping[str, str]) -> Slots:
+def _slots(bus: Bus, backend: str, hive: str, read: Callable[[], dict]) -> Slots:
     if backend == "memory":
         return Slots(bus, hive, read)
-    return Remote(asker(bus, _swarm(environ)), hive, read)
+    return Remote(asker(bus, hive), hive, read)
 
 
 def _reading(hive: str) -> dict:
@@ -208,7 +197,7 @@ def execute(harness: str, account: str, environ: Mapping[str, str], invoke: Call
     config = BusConfig.from_environ()
     bus = open_bus(config)
     try:
-        slots = _slots(bus, config.backend, hive, lambda: _reading(hive), environ)
+        slots = _slots(bus, config.backend, hive, lambda: _reading(hive))
         return slots.launch(environ[EXECUTION_ENV], harness, account, lambda selected: invoke(child))
     finally:
         bus.close()
@@ -227,7 +216,7 @@ def _remote(hive: str, act: Callable[["Remote"], None]) -> None:
         return
     bus = open_bus(config)
     try:
-        act(Remote(asker(bus, _swarm(os.environ)), hive))
+        act(Remote(asker(bus, hive), hive))
     finally:
         bus.close()
 

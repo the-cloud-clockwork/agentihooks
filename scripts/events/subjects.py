@@ -1,6 +1,7 @@
 import re
 
 PREFIX = "swarm"
+SLOTS = "slots"
 
 _TOKEN = re.compile(r"[^.*>\s]+")
 
@@ -19,6 +20,10 @@ def subject(swarm: str, *tokens: str) -> str:
 
 def inbox(user: str) -> str:
     return f"_INBOX.{_token(user)}"
+
+
+def slots(hive: str) -> str:
+    return f"{SLOTS}.{_token(hive)}"
 
 
 def stream_name(swarm: str, resource: str) -> str:
