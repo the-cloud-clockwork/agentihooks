@@ -1,3 +1,4 @@
+import itertools
 import json
 import re
 import subprocess
@@ -26,12 +27,12 @@ def reset_wait() -> float:
 
 def gh_api(args: list[str], *, timeout: float, text: bool = False) -> subprocess.CompletedProcess:
     global calls, slept
-    for waited in range(WAITS + 1):
+    for waited in itertools.count():
         calls += 1
         try:
             return subprocess.run(["gh", "api", *args], capture_output=True, check=True, timeout=timeout, text=text)
         except subprocess.CalledProcessError as error:
-            stderr = error.stderr if isinstance(error.stderr, str) else (error.stderr or b"").decode(errors="replace")
+            stderr = str(error.stderr)
             left = MAX_WAIT - slept if deadline is None else min(MAX_WAIT - slept, deadline - time.monotonic())
             if waited == WAITS or left <= 0 or not LIMITED.search(stderr):
                 raise
