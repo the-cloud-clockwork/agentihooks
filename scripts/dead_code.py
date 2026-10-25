@@ -1,10 +1,10 @@
 import argparse
 import json
-from collections import defaultdict
 from pathlib import Path
 
 import vulture
-from vulture.utils import ExitCode
+from vulture.noqa import NOQA_REGEXP
+from vulture.utils import ExitCode, VultureInputException, read_file
 
 from scripts.size_limits import GradeError, files
 
@@ -12,11 +12,6 @@ VULTURE_VERSION = "2.14"
 MIN_CONFIDENCE = 60
 SCOPE = ("hooks/", "scripts/")
 ALLOWLIST = Path("tests/DEAD_CODE_ALLOWLIST.json")
-
-
-class _Vulture(vulture.Vulture):
-    # A noqa comment in the graded tree hides nothing.
-    noqa_lines = property(lambda self: defaultdict(set), lambda self, value: None)
 
 
 def _graded(tree: Path) -> list[Path]:
@@ -28,18 +23,26 @@ def _graded(tree: Path) -> list[Path]:
 
 def hits(tree: Path) -> dict[str, list[str]]:
     tree = tree.resolve()
-    scanner = _Vulture()
-    scanner.scavenge(_graded(tree))
+    scanner = vulture.Vulture()
+    for path in _graded(tree):
+        try:
+            code = read_file(path)
+        except VultureInputException as exc:
+            raise GradeError(f"vulture cannot read {path}: {exc}") from exc
+        # A noqa comment in the graded tree hides nothing. Per line, since the pattern's trailing \s takes newlines.
+        scanner.scan("\n".join(NOQA_REGEXP.sub("#", line) for line in code.split("\n")), filename=path)
+    # No paths left to scan, so this adds only vulture's whitelists for the imported modules.
+    scanner.scavenge([])
     if scanner.exit_code == ExitCode.InvalidInput:
         raise GradeError(f"vulture cannot parse every graded file in {tree}; its error is above")
     found = {}
     for item in scanner.get_unused_code(min_confidence=MIN_CONFIDENCE):
         path = Path(item.filename)
-        if path.is_relative_to(tree):
-            unit = path.relative_to(tree).as_posix()
-            found.setdefault(unit, []).append(
-                f"{unit}:{item.first_lineno}: {item.message} ({item.confidence}% confidence)"
-            )
+        # Vulture's own whitelists carry relative names; every graded file is absolute.
+        if not path.is_absolute():
+            continue
+        unit = path.relative_to(tree).as_posix()
+        found.setdefault(unit, []).append(f"{unit}:{item.first_lineno}: {item.message} ({item.confidence}% confidence)")
     return found
 
 
@@ -49,19 +52,25 @@ def measure(tree: Path) -> dict[str, int]:
 
 def load(tree: Path) -> dict[str, int] | None:
     path = tree / ALLOWLIST
-    return json.loads(path.read_text()) if path.is_file() else None
+    if not path.is_file():
+        return None
+    recorded = json.loads(path.read_text())
+    if not isinstance(recorded, dict) or not all(type(count) is int for count in recorded.values()):
+        raise GradeError(f"{path} holds no object of per file counts")
+    return recorded
 
 
 def write(tree: Path) -> None:
     (tree / ALLOWLIST).write_text(json.dumps(measure(tree), indent=1, sort_keys=True) + "\n")
 
 
-def grade(base: dict, head: dict[str, list[str]], recorded: dict) -> list[str]:
+def grade(base: dict, measured: dict[str, int], head: dict[str, list[str]], recorded: dict) -> list[str]:
     errors = []
     for unit, found in sorted(head.items()):
-        allowed = base.get(unit, 0)
+        # A count the base recorded but no longer holds is slack, never room to grow back into.
+        allowed = min(base.get(unit, 0), measured.get(unit, 0))
         if len(found) > allowed:
-            errors.append(f"{unit} has {len(found)} unused names; the base allowlist allows {allowed}")
+            errors.append(f"{unit} has {len(found)} unused names; the base allows {allowed}")
             errors.extend(found)
     for unit in sorted(set(head) | set(recorded)):
         count, written, allowed = len(head.get(unit, ())), recorded.get(unit, 0), base.get(unit, 0)
@@ -95,10 +104,11 @@ def main(argv: list[str] | None = None) -> int:
         base = load(Path(args.base))
         if base is None:
             raise GradeError(f"the base has no {ALLOWLIST}, so the head cannot be graded")
+        measured = measure(Path(args.base))
     except (GradeError, ValueError, OSError) as exc:
         print(f"::error::{exc}")
         return 1
-    errors = grade(base, head, recorded)
+    errors = grade(base, measured, head, recorded)
     print(f"{len(head)} files hold dead code, {len(base)} on the base allowlist, {len(errors)} errors")
     for error in errors:
         print(f"::error::{error}")

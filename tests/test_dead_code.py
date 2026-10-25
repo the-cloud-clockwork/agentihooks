@@ -41,7 +41,7 @@ def test_a_planted_unused_function_in_a_hook_is_red(tmp_path, capsys):
     code, out = _grade(base, head, capsys)
     assert code == 1
     assert "1 files hold dead code, 0 on the base allowlist, 3 errors" in out
-    assert "::error::hooks/guard.py has 1 unused names; the base allowlist allows 0\n" in out
+    assert "::error::hooks/guard.py has 1 unused names; the base allows 0\n" in out
     assert "::error::hooks/guard.py:8: unused function 'planted' (60% confidence)\n" in out
     assert (
         "::error::tests/DEAD_CODE_ALLOWLIST.json records 0 for hooks/guard.py, below the head's 1;"
@@ -55,7 +55,7 @@ def test_a_pull_request_cannot_allowlist_its_own_dead_code(tmp_path, capsys):
     assert dead_code.load(head) == {"scripts/tool.py": 1}
     code, out = _grade(base, head, capsys)
     assert code == 1
-    assert "scripts/tool.py has 1 unused names; the base allowlist allows 0" in out
+    assert "scripts/tool.py has 1 unused names; the base allows 0" in out
     assert "tests/DEAD_CODE_ALLOWLIST.json records 1 for scripts/tool.py, above the base allowlist's 0" in out
 
 
@@ -82,7 +82,7 @@ def test_an_allowlisted_file_may_stay_but_not_grow(tmp_path, capsys):
     assert "1 files hold dead code, 1 on the base allowlist, 0 errors" in out
     code, out = _grade(base, head, capsys)
     assert code == 1
-    assert "hooks/guard.py has 2 unused names; the base allowlist allows 1" in out
+    assert "hooks/guard.py has 2 unused names; the base allows 1" in out
 
 
 def test_a_shrunk_file_may_keep_its_recorded_count_until_written(tmp_path, capsys):
@@ -114,11 +114,32 @@ def test_noqa_and_config_in_the_graded_tree_hide_nothing(tmp_path):
     tree = _tree(
         tmp_path,
         {
-            "hooks/guard.py": PLANTED.replace("def planted():", "def planted():  # noqa"),
+            "hooks/guard.py": PLANTED.replace("def planted():", "def planted():  # noqa")
+            + "\n\nimport os  # noqa: F401 kept for side effects\n",
             "pyproject.toml": '[tool.vulture]\nexclude = ["hooks"]\nignore_names = ["planted"]\n',
         },
     )
-    assert dead_code.measure(tree) == {"hooks/guard.py": 1}
+    assert dead_code.measure(tree) == {"hooks/guard.py": 2}
+
+
+def test_a_file_cannot_grow_back_into_slack_the_base_still_records(tmp_path, capsys):
+    base = _tree(tmp_path / "base", {"hooks/guard.py": USED})
+    (base / dead_code.ALLOWLIST).write_text(json.dumps({"hooks/guard.py": 1}))
+    head = _recorded(tmp_path / "head", {"hooks/guard.py": PLANTED})
+    code, out = _grade(base, head, capsys)
+    assert code == 1
+    assert "::error::hooks/guard.py has 1 unused names; the base allows 0\n" in out
+    assert "records 1 for hooks/guard.py, above" not in out
+
+
+@pytest.mark.parametrize("text", ["[]", '{"hooks/guard.py": "1"}', '{"hooks/guard.py": true}'])
+def test_an_allowlist_without_integer_counts_cannot_grade(tmp_path, capsys, text):
+    base = _recorded(tmp_path / "base", {"hooks/guard.py": USED})
+    head = _recorded(tmp_path / "head", {"hooks/guard.py": USED})
+    (base / dead_code.ALLOWLIST).write_text(text)
+    code, out = _grade(base, head, capsys)
+    assert code == 1
+    assert out == f"::error::{base / dead_code.ALLOWLIST} holds no object of per file counts\n"
 
 
 def test_unused_imports_and_attributes_are_counted(tmp_path):
