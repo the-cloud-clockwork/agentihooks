@@ -120,7 +120,8 @@ def test_measured_dependencies_include_collection_phases_and_preloaded_modules(t
     assert measured_dependencies(coverage_file, work, root, ["tests/test_missing.py::test_missing"], tracked) == {}
 
 
-def test_statistics_collect_runtime_dependencies_with_plugin_discovery_disabled(tmp_path, monkeypatch):
+@pytest.mark.parametrize("inherited", ["before", None])
+def test_statistics_collect_runtime_dependencies_with_plugin_discovery_disabled(tmp_path, monkeypatch, inherited):
     import os
     import subprocess
     import sys
@@ -145,17 +146,25 @@ def test_statistics_collect_runtime_dependencies_with_plugin_discovery_disabled(
     subprocess.run(["git", "add", *files], cwd=original, check=True)
     monkeypatch.chdir(work)
     monkeypatch.setenv("PYTEST_DISABLE_PLUGIN_AUTOLOAD", "1")
+    # collect_shard_stats sets MUTANT_UNDER_TEST; restoring it keeps a mutation run's later tests on their mutant.
+    monkeypatch.setenv("MUTANT_UNDER_TEST", os.environ.get("MUTANT_UNDER_TEST", ""))
     monkeypatch.setenv("MUTATION_STATS_CACHE", str(tmp_path / "cache"))
     monkeypatch.setenv("MUTATION_STATS_ROOT", str(original))
-    monkeypatch.setenv("COVERAGE_FILE", str(tmp_path / "before"))
+    if inherited:
+        monkeypatch.setenv("COVERAGE_FILE", str(tmp_path / inherited))
+    else:
+        monkeypatch.delenv("COVERAGE_FILE", raising=False)
     engine = SimpleNamespace(
         tests_by_mangled_function_name={"scripts.sample.x_value": {node}}, duration_by_test={node: 1}
     )
+
+    exported = []
 
     class Runner:
         _pytest_add_cli_args = []
 
         def run_stats(self, *, tests):
+            exported.append(os.environ.get("COVERAGE_FILE"))
             done = subprocess.run(
                 [sys.executable, "-m", "pytest", "-q", *self._pytest_add_cli_args, *tests],
                 cwd=work / "mutants",
@@ -172,6 +181,10 @@ def test_statistics_collect_runtime_dependencies_with_plugin_discovery_disabled(
         SimpleNamespace(mutmut=engine), Runner(), ["tests/test_sample.py"], output, str(tmp_path / "base")
     )
     result = json.loads(output.read_text())
+    assert exported == [None]
+    assert (
+        tmp_path / "part.coveragerc"
+    ).read_text() == f"[run]\ndata_file = {(tmp_path / 'part.coverage').resolve()}\n"
     assert result["status"] == 0
     assert result["durations"] == {node: 1}
     assert "scripts/sample.py" in result["dependencies"][node]

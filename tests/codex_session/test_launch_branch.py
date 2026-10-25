@@ -37,7 +37,7 @@ def test_the_app_server_branch_runs_the_supervisor_with_the_opening_prompt_file(
     )
     launcher, prompt_file, argv = launched(tmp_path, spec)
     split = argv.index("--")
-    assert argv[:4] == [sys.executable, "-m", "scripts.codex_session", "serve"]
+    assert argv[:5] == [sys.executable, "-P", "-m", "scripts.codex_session", "serve"]
     assert argv[argv.index("--cwd") + 1] == str(tmp_path)
     assert argv[argv.index("--profile") + 1] == "engineer"
     assert argv[argv.index("--seat") + 1] == "eng-1@sw"
@@ -190,6 +190,31 @@ def test_the_app_server_command_names_the_admitted_execution_only_when_given(tmp
     assert admitted.index("--execution") < admitted.index("--")
     plain = init_agent._app_server_command(app_server_spec(), tmp_path / "route", [], {}, tmp_path, None)
     assert "--execution" not in plain
+
+
+def imported_scripts(interpreter, directory):
+    shadow = directory / "scripts"
+    shadow.mkdir(parents=True)
+    (shadow / "__init__.py").write_text("")
+    probe = [*interpreter[: interpreter.index("-m")], "-c", "import scripts; print(scripts.__file__)"]
+    import scripts
+
+    environ = {**os.environ, "PYTHONPATH": os.path.dirname(os.path.dirname(scripts.__file__))}
+    return subprocess.run(probe, cwd=directory, env=environ, capture_output=True, text=True, check=True).stdout.strip()
+
+
+def test_the_app_server_imports_the_launching_package_never_the_agent_directory(tmp_path):
+    import scripts
+
+    _, _, argv = launched(tmp_path, app_server_spec())
+    assert imported_scripts(argv, tmp_path) == scripts.__file__
+
+
+def test_the_viewer_imports_the_launching_package_never_the_agent_directory(tmp_path):
+    import scripts
+
+    line = init_agent._viewer_lines("serve", tmp_path / "x.sh", "engineer@abc-0001", {"AGENTIHOOKS_SWARM": "sw"}, [])
+    assert imported_scripts(shlex.split(line.splitlines()[1]), tmp_path) == scripts.__file__
 
 
 @pytest.mark.parametrize(("transport", "served"), [("app_server", True), ("legacy", False)])

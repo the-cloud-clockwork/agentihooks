@@ -178,22 +178,22 @@ A cache miss preserves normal grading. Token creation is a separate workflow ste
 
 Admission is computed only when the head collects fewer tests than the base. Everything comes from parsing the two checkouts; there is no list of exempt tests.
 
-A test id in the base and not in the head is admitted when it referenced a subject the head deletes. There are two kinds of subject: a top level name (a function, class or constant) and a keyword branch of a function.
+A test id in the base and not in the head is admitted when it referenced code the head deletes: a top level name, a keyword branch, or executable steps in a JSON fixture.
 
 ### Deleted definitions and constants
 
 A lost test is admitted through a definition when all of these hold:
 
-1. **The test referenced a subject.** In the base, the test function's body (parametrize ids stripped, `Test` classes resolved) uses a name imported by its own file with `from X import n`, or an attribute of a module the file imports (`import pkg.mod` then `pkg.mod.f`, or `from pkg import mod` then `mod.f`). Only the statements of the test function's body are read, so decorators on the test, fixtures, relative imports and attributes of anything that is not an imported module never count.
+1. **The test referenced a subject.** In the base, the test function's body (parametrize ids stripped, `Test` classes resolved) uses a name imported by its own file with `from X import n`, or an attribute of a module the file imports (`import pkg.mod` then `pkg.mod.f`, or `from pkg import mod` then `mod.f`). Calls into module level helpers in that test file are followed with cycle detection. Parameters and local bindings shadow imported names and helpers; uncalled nested function and class bodies are excluded. Decorators, implicit pytest fixture execution, relative imports and attributes of anything that is not an imported module do not establish a reference.
 2. **The subject was a top level definition in the base.** In a base file outside `tests/`, at module level, including inside a module level `if` or `try` (not `try`/`except*`):
 
    - a function, async function or class;
    - a constant, meaning any module level name that is the target of an assignment or annotation: the name on the left of a plain assignment (`LIMIT = 3`, `log = getLogger()`, each name of `A = B = 3`) or of an annotation, with or without a value (`LIMIT: int = 3`, `LIMIT: int`). Unpacking (`A, B = ...`), augmented assignment (`LIMIT += 1`) and attribute targets do not define a constant.
 
    The module name comes from the file path.
-3. **The head deletes it.** No Python file anywhere in the head, `tests/` included, binds the subject's name at any depth: no function, method or class of that name, no assignment target, no import alias, no `except ... as` or `match` capture. A subject moved to another module, or into `tests/`, still binds its name and admits nothing.
+3. **The head deletes it.** The subject's own module no longer binds its name. An unchanged binding of the same name in another module does not conceal that deletion. A new or changed binding of that name anywhere in the head, `tests/` included, blocks admission. Binding comparisons include the syntax of their definitions or enclosing binding statements, so moving a subject into an existing same-name definition still admits nothing. Methods, assignments, import aliases, `except ... as` names and `match` captures count as bindings.
 
-A test that reads a constant is admitted once the head removes every binding of it:
+A test that reads a constant is admitted once the head deletes that binding without introducing or replacing another binding of its name:
 
 ```python
 # base pkg/limits.py
@@ -205,6 +205,12 @@ from pkg.limits import RETRY_LIMIT
 def test_retry_limit_is_three():
     assert RETRY_LIMIT == 3
 ```
+
+### Executable fixtures and module entry points
+
+A lost test may reference a JSON fixture through `Path.read_text()` or `Path.read_bytes()`, directly or through a called local helper. The path must resolve statically from imported `pathlib.Path`, `__file__`, module level assignments, parent access and literal path joins. The resolved file must stay inside the base checkout and contain nonempty shell `run` strings in a `steps` list. Ordinary data, unresolved paths and paths escaping through `..` or symlinks establish no admission. The fixture must disappear at its old path and none of its executable step strings may survive in another JSON file in the head.
+
+An explicit `runpy.run_module("pkg.mod", run_name="__main__")` resolves calls inside that module's `if __name__ == "__main__"` guard. A called function must satisfy the same deletion rules as a direct import. A dynamic module target, an ordinary module import, or a surviving entry point admits nothing.
 
 ### Deleted keyword branches
 
@@ -255,16 +261,17 @@ The floor then grades by count alone.
 ### Limits
 
 - Names bound dynamically (`globals()`, `setattr`, `exec`, a module `__getattr__`) are not seen, so a subject kept alive that way can still admit its tests.
-- Matching is by name in the head: an unrelated binding of the same name anywhere in the head, a local variable included, keeps the subject alive and the lost test red. This applies to constants as much as to functions.
+- An unrelated unchanged binding is tolerated; a new or changed same-name binding conservatively blocks admission, even when it serves another purpose. This applies to constants as much as to functions.
 - Keyword branches are found only in `if`, `elif`, conditional expression and `while` conditions. A parameter that only drives a `match`, a comprehension filter, an `assert` or a boolean expression outside such a condition, or is only passed on to another call, is not a branch, so its tests stay red.
 - The subject is matched by the module path the test imported it from. A name re-exported through a package (`from pkg import f` where `f` is defined in `pkg/impl.py`) does not match its definition, so its lost tests stay red.
 - Count masking is unchanged: an unrelated lost test passes when the head adds as many tests.
 
 ## Deleting dead code with its tests
 
-Delete the function, class or constant and the tests that exercised it in the same pull request, and remove every other binding of its name. To retire one branch of a function that stays, delete the branch, its keyword parameter and the tests that passed that keyword together, and add no parameter to the function in the same change. The `test-count` log names each admitted test and the deleted subject. If a lost test stays red, the log lists it:
+Delete the covered code and its tests in the same pull request. Keep unrelated same-name bindings unchanged. To retire one branch of a function that stays, delete the branch, its keyword parameter and the tests that passed that keyword together, and add no parameter to the function in the same change. The `test-count` log names each admitted test and the deleted subject. If a lost test stays red, the log lists it:
 
-- for a definition or constant, check that the test body referenced it through an import and that no head file still binds the name;
+- for a definition or constant, check the resolved import or called helper and confirm deletion from its module with no new or changed same-name binding;
+- for an executable fixture, check the resolved base path and confirm that its code disappears rather than moving;
 - for a keyword branch, check that the test passed the keyword by name, that the base function tested it in a branch condition and never reassigned it, and that the head copy sits in the same module with no `**kwargs` and no new parameter.
 
 ## Proof
