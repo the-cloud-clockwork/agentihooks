@@ -290,7 +290,7 @@ def test_watch_waits_for_complete_attempt_jobs_and_rechecks_queue_identity(monke
     ci_gate_queue.watch("owner/repo", "123", "2", [2, 7], "refs/heads/gh-readonly-queue/dev/pr-1", "queue-head")
     assert reads == [("repos/owner/repo/actions/runs/123/attempts/2/jobs", 100)] * 2
     assert queries == ["repos/owner/repo/git/matching-refs/heads/gh-readonly-queue/dev/pr-1"] * 3
-    assert sleeps == [5]
+    assert sleeps == [15]
 
 
 def test_watch_requests_the_jobs_listing_as_one_100_job_page(monkeypatch):
