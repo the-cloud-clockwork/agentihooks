@@ -1,3 +1,5 @@
+import json
+
 import pytest
 
 from scripts.swarm import cli, idle, merge_queue, prerequisite_wait
@@ -375,5 +377,5 @@ def test_prerequisite_offer_matches_the_ledger_claim_identity(waiting, record_ag
     ledger.rows["t1"]["claim_generation"] = 5
     record = {"agent": record_agent, "generation": generation, "target": URL}
     store.redis.hset(prerequisite_wait.key("sw"), "t1", json.dumps(record))
-    agent = store.get_agent("sw", ME)
+    agent = AgentRecord(name=ME, lane="eng", task="t1", seat="eng-1@sw")
     assert prerequisite_wait.offered(store, "sw", agent, ledger.rows["t1"]) == (record if accepted else {})
