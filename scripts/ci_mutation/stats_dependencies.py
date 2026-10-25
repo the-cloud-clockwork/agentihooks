@@ -2,6 +2,7 @@ import hashlib
 import json
 import re
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -53,15 +54,17 @@ class StoredStats:
     changes: dict
 
     def pointer(self, path: str) -> Path:
-        return self.folder / f"{digest({'context': self.context, 'path': path})}.index"
+        context = {name: value for name, value in self.context.items() if name != "inventory"}
+        return self.folder / f"{digest({'context': context, 'path': path})}.index"
 
     def scope(self, inputs: dict) -> dict:
         return {source: lines for source, lines in self.changes.items() if source in inputs}
 
     def identity(self, path: str, inputs: dict, scope: dict, measured: bool) -> str:
-        return digest({"context": self.context, "path": path, "inputs": inputs, "scope": scope, "measured": measured})
+        context = {name: value for name, value in self.context.items() if name != "inventory"}
+        return digest({"context": context, "path": path, "inputs": inputs, "scope": scope, "measured": measured})
 
-    def load(self, path: str) -> dict | None:
+    def load(self, path: str, check: Callable[[dict, bool], bool] | None = None) -> dict | None:
         pointer = self.pointer(path)
         if not pointer.is_file():
             return None
@@ -79,6 +82,8 @@ class StoredStats:
             or hashlib.sha256((self.root / name).read_bytes()).hexdigest() != fingerprint
             for name, fingerprint in inputs.items()
         ):
+            return None
+        if check is not None and not check(inputs, measured):
             return None
         result = {name: value for name, value in record.items() if name not in {"key", "inputs", "scope", "measured"}}
         return {**result, "reused": True} if measured else result

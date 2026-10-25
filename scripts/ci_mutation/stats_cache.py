@@ -168,6 +168,9 @@ class StatsInputs:
                 )
         return inputs
 
+    def matches(self, path: str, inputs: dict, measured: bool) -> bool:
+        return self.for_test(path, list(inputs) if measured else None) == inputs
+
 
 def per_test_stats(path: str, fresh: list[dict], count: int) -> tuple[dict | None, list[str] | None]:
     durations = {
@@ -226,7 +229,11 @@ def collect_cached_stats(
                 resources.setdefault("/".join(parts[index:]), set()).add(path)
     inputs = StatsInputs(root, modules, resources, changes)
     stored = StoredStats(root, folder, context, changes)
-    compatible = {path: record for path in files if (record := stored.load(path)) is not None}
+    compatible = {
+        path: record
+        for path in files
+        if (record := stored.load(path, functools.partial(inputs.matches, path))) is not None
+    }
     reused = list(compatible.values())
     missing = [path for path in files if path not in compatible]
     report(f"Mutation stats cache: reused {len(reused)} test files; collect {len(missing)}")

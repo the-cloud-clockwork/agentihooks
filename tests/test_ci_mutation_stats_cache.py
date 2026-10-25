@@ -435,7 +435,7 @@ def test_unrelated_inventory_changes_keep_stats_and_function_mapping(tmp_path, c
     cache = tmp_path / "cache"
     cold = collect_cached_stats(root, cache, {"scripts/a.py": [1]}, [path], [], collect)
     if change == "remove_source":
-        subprocess.run(["git", "rm", "--", "other.py"], cwd=root, check=True)
+        subprocess.run(["git", "rm", "-f", "--", "other.py"], cwd=root, check=True)
     else:
         added = {"add_source": "unrelated.py", "add_test": "tests/test_other.py", "add_document": "NOTES.md"}[change]
         (root / added).write_text("value = 3\n")
