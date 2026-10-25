@@ -40,6 +40,7 @@ def test_the_read_only_arguments_keep_the_shell_inside_the_read_only_sandbox():
         'developer_instructions="PRO \\"FILE\\""',
         "-m",
         "gpt-6.1-sol",
+        "--",
         "INPUT",
     ]
 

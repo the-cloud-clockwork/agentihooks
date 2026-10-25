@@ -75,6 +75,7 @@ def test_a_sealed_claude_run_invokes_exactly_the_sealed_flag_set(fake_cli, route
             "sonnet",
             "--effort",
             "low",
+            "--",
             "INPUT",
         ]
     ]
@@ -113,6 +114,7 @@ def test_a_sealed_codex_run_invokes_exactly_the_sealed_flag_set(fake_cli, routed
         'developer_instructions="PROFILE"',
         "-m",
         "gpt-6-luna",
+        "--",
         "INPUT",
     ]
 

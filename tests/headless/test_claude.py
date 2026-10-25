@@ -40,6 +40,7 @@ def test_the_read_only_command_offers_only_read_search_and_web_tools():
         "opus",
         "--effort",
         "high",
+        "--",
         "INPUT",
     ]
 

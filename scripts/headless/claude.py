@@ -33,6 +33,7 @@ def command(request: Request) -> list[str]:
         request.model,
         "--effort",
         request.effort,
+        "--",
         request.user_input,
     ]
 

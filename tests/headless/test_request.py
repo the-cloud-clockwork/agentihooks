@@ -28,8 +28,8 @@ def test_execute_closes_stdin_and_bounds_the_run(monkeypatch):
     }
 
 
-def test_execute_raises_with_the_exit_code_and_stderr_tail():
+def test_execute_raises_with_the_exit_code_and_never_the_stderr():
     script = "import sys; sys.stderr.write('x' * 600 + 'TAIL\\n'); sys.exit(3)"
     with pytest.raises(request.HeadlessError) as caught:
         request.execute([sys.executable, "-c", script], {})
-    assert str(caught.value) == f"{sys.executable} exited 3: {('x' * 600 + 'TAIL')[-500:]}"
+    assert str(caught.value) == f"{sys.executable} exited 3"

@@ -41,7 +41,7 @@ def arguments(request: Request, work: Path) -> list[str]:
         args += ["-c", f"model_catalog_json={json.dumps(str(work / 'catalog-sealed.json'))}"]
     args += ["-c", f"model_reasoning_effort={json.dumps(request.effort)}"]
     args += ["-c", f"developer_instructions={json.dumps(request.profile_prompt)}"]
-    return [*args, "-m", request.model, request.user_input]
+    return [*args, "-m", request.model, "--", request.user_input]
 
 
 def sealed_catalog(listing: str) -> dict:
