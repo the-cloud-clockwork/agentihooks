@@ -99,11 +99,18 @@ def beat(redis: "Redis", local_id: str) -> None:
 def poll_orders(consumer: "Consumer", member: bool) -> None:
     from scripts.swarm_ledger import authority_context
 
-    if member or not consumer.store.redis.xlen(consumer.orders.stream(consumer.hive)):
+    pending = not member and consumer.store.redis.xlen(consumer.orders.stream(consumer.hive))
+    secret = authority_context.hosted() if pending else None
+    if not secret:
         consumer.poll()
         return
-    with authority_context.bound(authority_context.hosted() or authority_context.secret()):
-        consumer.poll()
+    kept = os.environ.get("SWARM_SECRET")
+    try:
+        with authority_context.bound(secret):
+            consumer.poll()
+    finally:
+        if kept is not None:
+            os.environ["SWARM_SECRET"] = kept
 
 
 def _index_hive(redis: "Redis", local_id: str) -> None:
