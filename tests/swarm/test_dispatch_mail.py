@@ -341,7 +341,7 @@ def test_launch_moves_dispatcher_mail_into_the_hive_its_new_occupant_runs_on(mai
 
     def on_hive(config, lane, name, task):
         placed = spawn(config, lane, name, task)
-        record = next(agent for agent in store.agents(SLUG) if agent.name == name)
+        record = store.execution_occupants(SLUG)[f"dispatcher@{SLUG}"]
         return replace(placed, execution=replace(record, hive="m1"))
 
     runtime.spawn = on_hive
