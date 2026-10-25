@@ -183,14 +183,19 @@ def test_unpushed_commits_reach_origin_and_the_task_until_the_agent_records_prog
     head = rig.commit()
     first = rig.stop()
     assert first.returncode == 2, (first.stderr, rig.rows())
-    assert TEMPLATE in first.stderr
+    progress = (
+        "Pushed work has no recorded progress since the push. "
+        f'Run agentihooks swarm {SLUG} progress --doing "Describe current work" --ends-when "Describe completion". '
+        "A checks wait does not waive recording progress."
+    )
+    assert progress in first.stderr
     assert rig.remote_head() == head
     comments = rig.ledger_task()["comments"]
     assert [(c["by"], c["text"]) for c in comments] == [
         ("swarm", f"The stop hook pushed the task branch {BRANCH} to origin")
     ]
     inbox = rig.redis.zrange(f"{KEY_ROOT}:inbox:address:{ME}", 0, -1)
-    assert [rig.redis.hget(f"{KEY_ROOT}:inbox:item:{item}", "text") for item in inbox] == [TEMPLATE]
+    assert [rig.redis.hget(f"{KEY_ROOT}:inbox:item:{item}", "text") for item in inbox] == [progress]
     rig.cli("comment", f"tasks/{rig.task}", "Pushed the first slice of the work.")
     second = rig.stop()
     assert second.returncode == 0, (second.stderr, rig.rows())
