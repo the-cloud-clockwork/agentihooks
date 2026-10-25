@@ -117,8 +117,20 @@ def plan_shards(costs: dict[str, float], target: float = 240, limit: int = 10, s
     }
 
 
+def measured_plan(
+    groups: list[tuple[list[str], list[dict]]], memory: KillMemory | None = None, limit: int = 10
+) -> dict:
+    # Each unit of a split mutant holds its own batch runner, so a few mutants never split wider than their count.
+    limit = min(limit, sum(len(names) for names, _ in groups))
+    costs, splits = {}, {}
+    for names, results in groups:
+        costs.update(measured_costs(names, results, memory))
+        splits.update(measured_splits(names, results, limit))
+    return plan_shards(costs, limit=limit, splits=splits)
+
+
 def refine_plan(root: Path, selected: dict, stats: SharedStats) -> dict:
-    costs, splits, keys = {}, {}, []
+    groups, keys = [], []
     selected = {
         path: value
         for path, value in selected.items()
@@ -142,9 +154,8 @@ def refine_plan(root: Path, selected: dict, stats: SharedStats) -> dict:
         for path, (lines, _) in scope.items():
             generated = selected_mutant_names(path, (root / path).read_text(), lines)
             names.extend(get_mutant_name(Path(path), name) for name in generated)
-        costs.update(measured_costs(names, results, KillMemory(stats.folder / "killers")))
-        splits.update(measured_splits(names, results))
-    return {**plan_shards(costs, splits=splits), "keys": keys, "head": stats.head}
+        groups.append((names, results))
+    return {**measured_plan(groups, KillMemory(stats.folder / "killers")), "keys": keys, "head": stats.head}
 
 
 def main() -> int:
