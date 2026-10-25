@@ -800,7 +800,7 @@ def test_evaluate_leaves_a_master_on_its_account_at_the_ceiling(monkeypatch):
     assert _evaluate(monkeypatch, 10.0, 70.0, MASTER_HELD, agent="master@1")[1] == []
 
 
-def _master_at(monkeypatch, week_used, five_used=10.0, logins=()):
+def _master_at(monkeypatch, week_used, five_used=10.0, logins=(), held=MASTER_HELD, push=False):
     from hooks.context import account_sessions
     from scripts.routing import reservation
     from scripts.swarm_v2 import quota
@@ -822,8 +822,8 @@ def _master_at(monkeypatch, week_used, five_used=10.0, logins=()):
     ]
     monkeypatch.setattr(qp, "_other_accounts", lambda sessions, observed: others)
     monkeypatch.setattr(qp, "_api_accounts", lambda sessions: [qp.Candidate("api", None, None, 0, 0.0, 4)])
-    monkeypatch.setattr(qp, "push_active", lambda session_id: False)
-    monkeypatch.setattr(reservation, "current", lambda harness, environ: MASTER_HELD)
+    monkeypatch.setattr(qp, "push_active", lambda session_id: push and session_id == "s")
+    monkeypatch.setattr(reservation, "current", lambda harness, environ: held)
     return qp.evaluate("s")
 
 
@@ -837,13 +837,42 @@ def test_a_master_hands_off_at_98_percent_of_the_week_to_the_claude_ai_login_wit
         "third",
     )
     assert "agentihooks swarm sw handoff DOC --reason quota" in qp.render(decision, "s", "/repo")
-    assert _master_at(monkeypatch, 97.9, logins=[("third", 20.0)]) is None
+    assert _master_at(monkeypatch, 97.9, logins=[("third", 20.0)], held=None) is None
 
 
-def test_a_master_is_never_handed_to_a_token_or_the_api(monkeypatch):
-    decision = _master_at(monkeypatch, 98.0)
+def test_a_master_off_the_reserved_account_is_never_handed_to_a_token_or_the_api(monkeypatch):
+    decision = _master_at(monkeypatch, 98.0, held=None)
     assert (decision.action, decision.target) == ("stop", None)
     assert [c.account for c in decision.others] == ["main"]
+
+
+def test_a_master_on_the_reserved_account_at_3_percent_hands_off_to_an_open_account(monkeypatch):
+    from scripts.routing import reservation
+
+    assert reservation.MASTER_LEAVES == 95.0
+    decision = _master_at(monkeypatch, 97.0)
+    assert (decision.action, decision.trigger, decision.account, decision.target.account) == (
+        "handoff",
+        "week",
+        "main",
+        "token",
+    )
+    assert (decision.week_used, decision.week_limit) == (97.0, 95.0)
+    assert "agentihooks swarm sw handoff DOC --reason quota" in qp.render(decision, "s", "/repo")
+    assert _master_at(monkeypatch, 97.0, logins=[("second", 20.0)]).target.account == "second"
+    assert _master_at(monkeypatch, 94.9) is None
+
+
+def test_a_master_on_the_spent_reserved_account_is_never_handed_to_the_api(monkeypatch):
+    monkeypatch.setattr(qp, "reserved", lambda candidates, held: [c for c in candidates if c.account != "token"])
+    decision = _master_at(monkeypatch, 97.0)
+    assert (decision.action, decision.target) == ("stop", None)
+    assert _master_at(monkeypatch, 97.0, push=True).action == "push"
+
+
+def test_an_interactive_session_on_the_reserved_account_ignores_the_ceiling(monkeypatch):
+    monkeypatch.setenv("AH_ROUTE_INTERACTIVE_main", "1")
+    assert _evaluate(monkeypatch, 10.0, 70.0, MASTER_HELD)[1] == []
 
 
 def test_a_master_hands_off_at_99_percent_of_the_five_hour_window_while_another_login_is_free(monkeypatch):
