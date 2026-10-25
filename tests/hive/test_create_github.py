@@ -8,6 +8,7 @@ from scripts.hive import auth, create_github
 pytestmark = pytest.mark.unit
 
 PR = "https://github.com/the-cloud-clockwork/antoncore/pull/7"
+REQUIRED = ("Gate — Required",)
 
 
 def _run(rollup, required=()):
@@ -41,9 +42,6 @@ def test_required_checks_are_read_from_the_base_branch_rules():
     ]
 
 
-REQUIRED = ("Gate — Required",)
-
-
 def test_only_required_checks_are_graded_when_the_base_requires_some():
     rollup = [_check("SUCCESS", name="Gate — Required"), _check("FAILURE", name="Gate — Protected")]
     assert create_github.checks_passed(_run(rollup), PR, REQUIRED) is True
@@ -59,6 +57,18 @@ def test_a_failed_required_check_refuses():
 def test_a_required_check_not_yet_reported_has_not_passed():
     rollup = [_check("SUCCESS", name="Detect"), _check("FAILURE", name="Gate — Protected")]
     assert create_github.checks_passed(_run(rollup), PR, REQUIRED) is False
+
+
+@pytest.mark.parametrize("order", [1, -1])
+def test_a_rerun_required_check_that_passed_passes_in_either_order(order):
+    rollup = [_check("FAILURE", name="Gate — Required"), _check("SUCCESS", name="Gate — Required")][::order]
+    assert create_github.checks_passed(_run(rollup), PR, REQUIRED) is True
+
+
+@pytest.mark.parametrize("order", [1, -1])
+def test_a_rerun_required_check_still_running_waits_in_either_order(order):
+    rollup = [_check("FAILURE", name="Gate — Required"), _check("", status="IN_PROGRESS", name="Gate — Required")]
+    assert create_github.checks_passed(_run(rollup[::order]), PR, REQUIRED) is False
 
 
 @pytest.mark.parametrize(

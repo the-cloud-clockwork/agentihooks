@@ -12,7 +12,7 @@ RAW = "Accept: application/vnd.github.raw"
 AUTO_REFUSED = "auto merge is not allowed"
 PASSED = ("SUCCESS", "NEUTRAL", "SKIPPED")
 WAITING = (None, "PENDING", "EXPECTED")
-REQUIRED = '[.[] | select(.type == "required_status_checks") | .parameters.required_status_checks[].context]'
+REQUIRED = '[.[] | select(.type == "required_status_checks") | .parameters.required_status_checks[].context] | unique'
 
 
 def gh(run: Run, argv: list[str], body: dict | None = None) -> str:
@@ -89,14 +89,21 @@ def checks_passed(run: Run, url: str, required: Sequence[str] = ()) -> bool:
         (check.get("name") or check.get("context"), check.get("conclusion") or check.get("state")) for check in rollup
     ]
     if required:
-        latest = dict(results)
-        results = [(name, latest.get(name)) for name in required]
+        results = [(name, _best([result for found, result in results if found == name])) for name in required]
     failed = [name for name, result in results if result not in (*PASSED, *WAITING)]
     if failed:
         raise auth.HiveError(
             f"pull request {url} has failed checks: {', '.join(failed)}; fix them and rerun hive create"
         )
     return bool(results) and all(result in PASSED for _, result in results)
+
+
+def _best(results: list[str | None]) -> str | None:
+    for group in (PASSED, WAITING):
+        found = [result for result in results if result in group]
+        if found:
+            return found[0]
+    return results[0] if results else None
 
 
 def squash(run: Run, url: str) -> None:
