@@ -132,7 +132,12 @@ def test_a_lost_acknowledgement_after_paging_is_a_stale_finding(cursors):
         **registry.bindings([{**AGENT, "conversation_id": "sid", "started_at": now - 600_000}])[0],
         "read": True,
         "traces": [],
-        "remote": {"trace": "tr-1", "fresh_ms": now - 130_000, "observations": 44},
+        "remote": {
+            "trace": "tr-1",
+            "fresh_ms": now - 130_000,
+            "observations": 44,
+            "reconciliation": {"accepted": 46, "missing": ["lost"], "drift": 0},
+        },
         "local": local,
     }
     record = {"slug": "s", "now_ms": now, "active": [binding]}

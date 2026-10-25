@@ -198,11 +198,17 @@ def _read_binding(get, slug: str, binding: dict, marks: dict, kept: dict, page: 
     mark = _freshness(get, current["id"], marks.get(current["id"], {}), page)
     kept[current["id"]] = mark
     total = get("observations", {"traceId": current["id"], "limit": 1, "page": 1})["meta"].get("totalItems") or 0
+    from scripts.doctor.observation_reconciliation import reconcile
+
+    reconciled = reconcile(get, own or current["session_id"], binding["harness"], current["id"])
+    remote = {"trace": current["id"], "fresh_ms": mark["fresh_ms"], "observations": int(total)}
+    if reconciled is not None:
+        remote["reconciliation"] = reconciled
     return {
         "read": True,
         "traces": found,
         "session_id": own or current["session_id"],
-        "remote": {"trace": current["id"], "fresh_ms": mark["fresh_ms"], "observations": int(total)},
+        "remote": remote,
     }
 
 

@@ -336,10 +336,7 @@ def _unconfirmed(binding, record, limits):
     if not (binding["read"] and local and remote):
         return None
     reconciliation = remote.get("reconciliation")
-    if "reconciliation" in remote:
-        if reconciliation is None or not reconciliation["missing"]:
-            return None
-    elif local["accepted"] <= remote["observations"]:
+    if reconciliation is None or not reconciliation["missing"]:
         return None
     waited = _ago(now, local["accepted_at"])
     if waited <= limits.active_stale_seconds:
@@ -351,11 +348,7 @@ def _unconfirmed(binding, record, limits):
         (
             *_who(binding),
             f"exporter recorded {local['accepted']} accepted observations, Langfuse holds {remote['observations']}",
-            *(
-                (f"{len(reconciliation['missing'])} accepted observation identities missing from Langfuse",)
-                if reconciliation is not None
-                else ()
-            ),
+            f"{len(reconciliation['missing'])} accepted observation identities missing from Langfuse",
             f"last acceptance {waited} seconds ago",
             _remote_fresh(binding, now),
         ),
