@@ -22,6 +22,7 @@ from scripts.swarm_v2.runtime.base import HIVE_LANES
 from scripts.swarm_v2.runtime.base import LOCAL as WORKSTATION_BACKEND
 
 if TYPE_CHECKING:
+    from scripts.hive.admission import Room
     from scripts.hive.placement import Wait
     from scripts.swarm_v2.control_service import ControlService
 
@@ -143,30 +144,18 @@ class FencedRuntime:
         from scripts.swarm.commands import hive_id
 
         machine = hive_id()
-        maximum = local_slots.maximum(self.store, self.slug, self.store.config(self.slug).local_max_agents)
-        taken = (
-            local_slots.claim(self.store, machine, self.slug, task["id"], name, maximum)
-            if name
-            else local_slots.held(self.store, machine, self.slug, task["id"])
-        )
+        found, held, maximum = self._workstation_room(machine, task)
+        taken = local_slots.claim(self.store, machine, self.slug, task["id"], name, maximum) if name else held
         if taken >= maximum:
             self._local_full(machine, taken, maximum)
-            return f"{LOCAL_FULL}{taken} of its {maximum} agents"
+            return f"{LOCAL_FULL}{taken} of its {maximum} agents: {found.reason}: {found.detail}"
         if name:
             admission.record(self.store.redis, machine, f"{self.slug}/{name}")
         return ""
 
-    def _overflow(self, lane: str, task: dict, waited: "Wait", claim: str) -> str:
-        if self.deployment != HYBRID or task.get("hive") or not _workstation_herdr():
-            return waited.reason
-        from scripts.hive import admission, headroom, placement_waits, registry
-        from scripts.hive.placement import LOCAL_FULL, Choice, hosts, overflow
-        from scripts.swarm.commands import hive_id
+    def _workstation_room(self, machine: str, task: dict) -> tuple["Room", int, int]:
+        from scripts.hive import admission, headroom
 
-        machine = hive_id()
-        local = registry.show(self.store.redis, machine)
-        if local is not None and not hosts(waited.role, local, (lane,)):
-            return waited.reason
         running = local_slots.running(self.store, self.slug, task["id"])
         held = local_slots.held(self.store, machine, self.slug, task["id"])
         pending = max(0, admission.pending(self.store.redis, machine) - (held - running))
@@ -176,7 +165,20 @@ class FencedRuntime:
         )
         maximum = local_slots.maximum(self.store, self.slug, running + found.room)
         found = admission.capped(found, running, maximum)
-        local_max = min(maximum, running + found.room)
+        return found, held, min(maximum, running + found.room)
+
+    def _overflow(self, lane: str, task: dict, waited: "Wait", claim: str) -> str:
+        if self.deployment != HYBRID or task.get("hive") or not _workstation_herdr():
+            return waited.reason
+        from scripts.hive import admission, placement_waits, registry
+        from scripts.hive.placement import LOCAL_FULL, Choice, hosts, overflow
+        from scripts.swarm.commands import hive_id
+
+        machine = hive_id()
+        local = registry.show(self.store.redis, machine)
+        if local is not None and not hosts(waited.role, local, (lane,)):
+            return waited.reason
+        found, held, local_max = self._workstation_room(machine, task)
         refused = f": {found.reason}: {found.detail}"
         chosen = overflow(waited.role, waited, held, local_max)
         if not isinstance(chosen, Choice):
@@ -230,6 +232,11 @@ class FencedRuntime:
             raise SpawnError(refused, "unavailable")
         if refused and not workstation:
             raise SwarmError(refused)
+        if lane == "master" and (workstation or self.deployment == LOCAL):
+            from scripts.hive import admission
+            from scripts.swarm.commands import hive_id
+
+            admission.record(self.store.redis, hive_id(), f"{self.slug}/{name}")
         with lease.kept(self.store, self.slug, self.held):
             runtime = self.runtime
             if workstation:
