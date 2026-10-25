@@ -709,6 +709,19 @@ def test_shards_wait_only_on_the_durations_lookup():
     assert jobs["lint"]["needs"] in (["reuse"], ["reuse", "admission"])
 
 
+def test_queue_split_starts_beside_selection_and_keeps_the_same_unit_inputs():
+    jobs = _workflow()["jobs"]
+    split = jobs.get("queue-split", jobs["split"])
+    assert "select" not in split["needs"]
+    assert split["needs"] == jobs["select"]["needs"]
+    assert "needs.select" not in split["if"]
+    assert split["strategy"] == jobs["split"]["strategy"]
+    assert split["steps"] == jobs["split"]["steps"]
+    assert "queue-split" in jobs["unit"]["needs"]
+    assert "needs.queue-split.outputs.queue_312" in jobs["unit"]["strategy"]["matrix"]["include"]
+    assert "queue-split" in jobs["gate-required"]["needs"]
+
+
 def test_full_suite_collection_starts_beside_selection_and_feeds_split():
     jobs = _workflow()["jobs"]
     assert "collect" not in jobs
