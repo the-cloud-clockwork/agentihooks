@@ -29,6 +29,7 @@ from hooks.memory.spool import Spool, SpoolConfig, SpoolFull
 WORKLOAD = Path(__file__).parent / "workload.json"
 GENERATION = "g1"
 NEEDLE = "spoolwatermark"
+EXPECTED_FLUSH_ERRORS = ("", "CentralUnavailable", "LostAcknowledgement")
 PEAKS = ("spool_pending_batches", "archive_lag_seconds", "embedding_pending_chunks", "embedding_backlog_age_seconds")
 WORDS = (
     "archive backlog batch build catalog chunk cursor drain embed evidence flush grant index ingest lease ledger "
@@ -183,7 +184,7 @@ class Central:
             cursor += len(encoded)
         body = {
             "schema_version": SCHEMA_VERSION,
-            "batch_id": f"capture:{start}:{end}",
+            "batch_id": f"capture:{writer.uid}:{start}:{end}",
             "access_domain": self.domain,
             "session_uid": writer.uid,
             "source_generation": GENERATION,
@@ -289,7 +290,9 @@ class Run:
             execution.delivered.append(entry)
 
         before = len(execution.acked)
-        execution.spool.flush(upload)
+        result = execution.spool.flush(upload)
+        if result.error not in EXPECTED_FLUSH_ERRORS:
+            raise RuntimeError(f"{execution.writer.name} flush failed with {result.error}")
         for start, end in execution.acked[before:]:
             self.acknowledged(execution.writer, start, end)
         if execution.acked[before:]:
