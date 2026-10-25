@@ -198,10 +198,15 @@ class HiveLaunch:
         self.sleep = time.sleep
         self.opening = orders.build_opening
         self.placement_cache: dict[tuple[str, str], Selection | placement.Wait] | None = None
+        self._pass_hives: tuple[dict, list[dict]] | None = None
         self._quota_accounts = None
 
     def hives(self) -> list[dict]:
-        return placement.for_swarm(loaded_hives(self.store), self.slug)
+        if self.placement_cache is None:
+            return placement.for_swarm(loaded_hives(self.store), self.slug)
+        if self._pass_hives is None or self._pass_hives[0] is not self.placement_cache:
+            self._pass_hives = (self.placement_cache, placement.for_swarm(loaded_hives(self.store), self.slug))
+        return self._pass_hives[1]
 
     def _record_wait(self, lane: str, task: dict, selected: Selection | placement.Wait) -> Selection | placement.Wait:
         reason = selected.reason if isinstance(selected, placement.Wait) else ""
