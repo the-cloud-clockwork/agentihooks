@@ -103,11 +103,13 @@ def _serve(environ: Mapping[str, str], wait: Callable[[float], object] = schedul
     while True:
         try:
             _loop(environ)
-        except Exception as exc:
-            print(
-                f"hive lane spokes stopped ({type(exc).__name__}: {exc}); starting again", file=sys.stderr, flush=True
-            )
+        except Exception:
+            _stopped(sys.exception())
             wait(RETRY_S)
+
+
+def _stopped(exc: BaseException | None) -> None:
+    print(f"hive lane spokes stopped ({type(exc).__name__}: {exc}); starting again", file=sys.stderr, flush=True)
 
 
 def serve(environ: Mapping[str, str] = os.environ) -> threading.Thread | None:
