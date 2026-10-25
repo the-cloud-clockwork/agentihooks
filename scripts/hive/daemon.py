@@ -154,8 +154,8 @@ def _slot_errors() -> tuple[type[Exception], ...]:
 def adopt_capabilities(redis: "Redis", local_id: str) -> None:
     """Launches inherit the daemon environment, so a render sees the capabilities this hive's record declares."""
     os.environ.pop(profile_chain.HIVE_CAPABILITIES, None)
-    record = registry.show(redis, local_id) or {}
-    os.environ[profile_chain.HIVE_CAPABILITIES] = ",".join(record.get("capabilities") or ())
+    declared = json.loads(redis.hget(registry.key(local_id), "capabilities") or "[]")
+    os.environ[profile_chain.HIVE_CAPABILITIES] = ",".join(declared)
 
 
 def adopt_caps(redis: "Redis", report: dict) -> None:

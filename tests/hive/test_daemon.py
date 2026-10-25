@@ -79,10 +79,13 @@ def test_an_unreadable_record_withdraws_the_exported_capabilities(redis, monkeyp
     from hooks.context import profile_chain
 
     monkeypatch.setenv(profile_chain.HIVE_CAPABILITIES, "headed")
-    monkeypatch.setattr(daemon.registry, "show", Mock(side_effect=registry.HiveError("unreadable")))
-    with pytest.raises(registry.HiveError):
+    redis.hset(registry.key("machine"), "capabilities", "not json")
+    with pytest.raises(ValueError):
         daemon.adopt_capabilities(redis, "machine")
     assert profile_chain.HIVE_CAPABILITIES not in daemon.os.environ
+    redis.delete(registry.key("machine"))
+    daemon.adopt_capabilities(redis, "machine")
+    assert daemon.os.environ[profile_chain.HIVE_CAPABILITIES] == ""
 
 
 def test_hive_heartbeat_renews_account_counters_from_its_own_quota_and_executions(redis, monkeypatch):
