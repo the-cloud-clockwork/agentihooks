@@ -548,6 +548,30 @@ def test_checked_retries_the_native_check_against_the_recovered_target(tmp_path,
     assert seen == [(str(target), "masteratexample_com")] * 2
 
 
+def test_restore_reads_a_missing_expiry_and_generation_as_zero(tmp_path):
+    target = _home(tmp_path, grant={"accessToken": "no expiry"})
+    newer = {"grant": json.dumps(GRANT), "account": json.dumps(MASTER_ACCOUNT), "generation": "1"}
+    assert login.restore(newer, target) is True
+    (target / login.CREDENTIALS).write_text(json.dumps({login.GRANT: {**GRANT, "expiresAt": 0}}))
+    unnumbered = {"grant": json.dumps({**GRANT, "accessToken": "other"}), "account": "{}"}
+    assert login.restore(unnumbered, target) is False
+
+
+def test_recover_refuses_a_home_outside_every_slot(ah, tmp_path):
+    assert login.recover(tmp_path / "elsewhere", {}) is False
+
+
+def test_checked_fails_when_the_recovered_login_is_still_refused(tmp_path, monkeypatch):
+    from scripts.routing import native_login
+
+    def check(environ, account):
+        raise native_login.LoginError(native_login.EXPIRED)
+
+    monkeypatch.setattr(native_login, "check", check)
+    monkeypatch.setattr(login, "recover", lambda found, environ: True)
+    assert login.checked(_home(tmp_path), {}, "masteratexample_com") is False
+
+
 def test_stored_reads_the_swarm_copy_and_reports_an_outage(monkeypatch, capsys):
     FakeBao({"epoch": "3"}).install(monkeypatch)
     assert login.stored("bao") == {"epoch": "3"}
