@@ -171,7 +171,11 @@ def normalize(workflows: dict[str, dict]) -> dict[str, dict]:
             continue
         summary, early = jobs.get("gate-required", {}), jobs.get("queue-fail-fast", {})
         parallel = "queue-split" in jobs
-        if len(dynamic) != 2 or summary.get("name") != SUMMARY_NAME or early != watcher(summary.get("runs-on"), parallel):
+        if (
+            len(dynamic) != 2
+            or summary.get("name") != SUMMARY_NAME
+            or early != watcher(summary.get("runs-on"), parallel)
+        ):
             raise ValueError("The early queue gate must use the exact reviewed context pair and verifier")
         if (
             jobs.get("reuse", {}).get("if")
