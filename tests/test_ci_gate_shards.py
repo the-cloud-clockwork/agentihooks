@@ -192,7 +192,9 @@ def test_every_planned_report_present_passes(tmp_path):
 def test_a_missing_report_stays_red(tmp_path):
     (tmp_path / "durations-3.12-1").mkdir()
     (tmp_path / "flakes-3.12-2").write_text("not a report folder")
-    with pytest.raises(RuntimeError, match=r"Missing shard reports: \['flakes-3.12-1', 'flakes-3.12-2'\]"):
+    with pytest.raises(
+        RuntimeError, match=r"Missing shard reports: \['durations-3.12-2', 'flakes-3.12-1', 'flakes-3.12-2'\]"
+    ):
         ci_gate_shards.reports(tmp_path, [1, 2])
 
 
