@@ -289,10 +289,9 @@ def run(store, doctor, now_ms, collect, close, environ=None, speed=None):
     return actions
 
 
-def _free_stem(finding, tasks):
+def _free_stem(finding, base, tasks):
     """The first pair stem the ledger does not hold, and the done pair before it; an open pair refuses."""
-    done = {task["id"]: task["done"] for task in tasks}
-    base, earlier = "fx-" + hashlib.sha1(finding["id"].encode()).hexdigest()[:8], []
+    done, earlier = {task["id"]: task["done"] for task in tasks}, []
     for n in itertools.count(1):
         stem = base if n == 1 else f"{base}-{n}"
         held = [task for task in (f"{stem}-{part}" for part in ("cause", *FIXES)) if task in done]
@@ -310,7 +309,8 @@ def fix_tasks(watched, finding, verdict, fix, tasks):
         raise SwarmError(f"finding {finding['id']} has {value}; only established or early-real findings become tasks")
     if fix not in FIXES:
         raise SwarmError("a fix task is code or tune")
-    stem, earlier = _free_stem(finding, tasks)
+    stem = "fx-" + hashlib.sha1(finding["id"].encode()).hexdigest()[:8]
+    stem, earlier = _free_stem(finding, stem, tasks)
     before = f" Earlier pair {' and '.join(earlier)} is done; read its proof first." if earlier else ""
     kind, measure = finding["kind"], f"agentihooks doctor {watched} measure {finding['id']}"
     number = f"the {kind} measure on {finding['subject']}, {finding['measure']} when judged"
