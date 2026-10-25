@@ -73,6 +73,7 @@ def test_statistics_keep_declared_inputs_and_the_trusted_published_map(tmp_path,
         "tests/swarm/test_redis_commands.py::test_the_published_map_drops_calls_on_receivers_that_hold_no_redis_client",
         "tests/test_compose_stack.py::test_swarm_init_ships_the_repository_stack_byte_for_byte",
         "tests/test_ci_semgrep.py::test_scan_reads_the_domain_rules_folder_that_holds_rule_files",
+        "tests/test_tailnet_compose.py",
     ]
     work = tmp_path / "workspace"
     work.mkdir()
