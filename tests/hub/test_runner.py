@@ -395,17 +395,7 @@ def test_a_hub_with_a_remote_ledger_writes_as_its_own_service_and_renews_that_cr
     assert 0 < hive.ttl(f"{auth.PREFIX}:controller:hub-hub-0") <= auth.SERVICE_TTL_S
 
 
-class Waits:
-    def __init__(self, passes):
-        self.seen = []
-        self.passes = passes
-
-    def wait(self, seconds):
-        self.seen.append(seconds)
-        return len(self.seen) > self.passes
-
-
-def test_the_renewal_thread_renews_every_keep_interval_past_a_failed_renewal(monkeypatch, hive, capsys):
+def test_the_renewal_loop_renews_every_keep_interval_past_a_failed_renewal(monkeypatch, hive, capsys):
     from redis.exceptions import ConnectionError as RedisDown
 
     from scripts.hive import auth
@@ -414,7 +404,7 @@ def test_the_renewal_thread_renews_every_keep_interval_past_a_failed_renewal(mon
     key = f"{auth.PREFIX}:controller:hub-a"
     hive.delete(key)
     keep_service = auth.keep_service
-    calls = []
+    calls, waits = [], []
 
     def flaky(redis, kept):
         calls.append(kept)
@@ -422,16 +412,35 @@ def test_the_renewal_thread_renews_every_keep_interval_past_a_failed_renewal(mon
             raise RedisDown("down")
         keep_service(redis, kept)
 
+    def wait(seconds):
+        waits.append(seconds)
+        if len(waits) > 2:
+            raise Stop
+
     monkeypatch.setattr(auth, "keep_service", flaky)
-    waits = Waits(2)
-    thread = runner._renewal(hive, credential, waits)
-    thread.join(timeout=5)
-    assert (thread.daemon, thread.is_alive()) == (True, False)
-    assert waits.seen == [runner.KEEP_S] * 3
+    monkeypatch.setattr(runner, "scheduled_wait", wait)
+    with pytest.raises(Stop):
+        runner._renew_forever(hive, credential)
+    assert waits == [runner.KEEP_S] * 3
     assert calls == [credential, credential]
     assert auth.controller(hive, credential)
     assert 0 < hive.ttl(key) <= auth.SERVICE_TTL_S
     assert capsys.readouterr().err.startswith("hub: service credential renewal failed\nTraceback")
+
+
+def test_the_renewal_runs_on_a_daemon_thread(monkeypatch, hive):
+    import threading
+
+    started = threading.Event()
+
+    def renew(redis, credential):
+        assert (redis, credential) == (hive, "hub-a.t")
+        started.set()
+
+    monkeypatch.setattr(runner, "_renew_forever", renew)
+    thread = runner._renewal(hive, "hub-a.t")
+    assert started.wait(5)
+    assert thread.daemon
 
 
 def test_a_hub_with_a_local_ledger_issues_no_service_credential(monkeypatch, hive):

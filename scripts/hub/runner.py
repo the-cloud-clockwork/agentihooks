@@ -144,18 +144,18 @@ def _issued_credential(holder: str) -> tuple["Redis", str] | None:
     return redis, auth.issue_service(redis, f"hub-{holder}")
 
 
-def _renewal(redis: "Redis", credential: str, stopped: threading.Event | None = None) -> threading.Thread:
-    stopped = stopped or threading.Event()
+def _renew_forever(redis: "Redis", credential: str) -> None:
+    while True:
+        scheduled_wait(KEEP_S)
+        try:
+            auth.keep_service(redis, credential)
+        except Exception:
+            print("hub: service credential renewal failed", file=sys.stderr)
+            traceback.print_exc()
 
-    def renew() -> None:
-        while not stopped.wait(KEEP_S):
-            try:
-                auth.keep_service(redis, credential)
-            except Exception:
-                print("hub: service credential renewal failed", file=sys.stderr)
-                traceback.print_exc()
 
-    thread = threading.Thread(target=renew, daemon=True)
+def _renewal(redis: "Redis", credential: str) -> threading.Thread:
+    thread = threading.Thread(target=_renew_forever, args=(redis, credential), daemon=True)
     thread.start()
     return thread
 
