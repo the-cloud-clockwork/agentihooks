@@ -399,11 +399,12 @@ MEMBER_READS = {
 
 
 @pytest.mark.parametrize("kind", ["checks", "merge", "reply"])
-def test_a_hive_member_credential_declares_checked_waits_through_the_cli(waiting, monkeypatch, kind):
+def test_a_hive_member_credential_declares_checked_waits_under_claim_generation_drift(waiting, monkeypatch, kind):
     import fakeredis
 
-    _, _, state = waiting
+    _, ledger, state = waiting
     state["entry"]["position"] = 1
+    ledger.rows["t1"]["claim_generation"] = 7
     server = fakeredis.FakeServer()
     admin = fakeredis.FakeRedis(server=server, decode_responses=True)
     monkeypatch.setattr(cli, "connect", lambda: RedisStore(admin))
@@ -429,6 +430,7 @@ def test_a_hive_member_credential_declares_checked_waits_through_the_cli(waiting
     member.auth("", username="hive-m1")
     assert member.acl_whoami() == "hive-m1"
     admin.hset(prerequisite_wait.key("sw"), "t1", "{}")
+    admin.set(f"{RedisStore(admin).key('sw', 'claim', 't1')}:generation", 3)
     monkeypatch.setenv("AGENTIHOOKS_DEPLOYMENT", "distributed")
     monkeypatch.setenv("AGENTIHOOKS_HIVE_ID", "m1")
     monkeypatch.setenv("AGENTIHOOKS_HIVE_REDIS_URL", "redis://hive.example:6380/2")
