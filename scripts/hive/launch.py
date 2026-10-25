@@ -408,7 +408,7 @@ class HiveLaunch:
     def collect(self, request: SpawnRequest) -> Outcome:
         order = self.orders_for(request.task["id"])
         previous = order and self.store.execution_registry.get(self.slug, order.execution_id)
-        if previous and previous.state == "finished" and request.task.get("state") == "blocked":
+        if previous and previous.state == "finished":
             return self.finished(request, order, previous)
         if not previous or previous.state in ("ended", "finished"):
             return Outcome("spawn", Status.REFUSED, HIVE, detail=GONE)
