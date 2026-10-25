@@ -454,7 +454,7 @@ def test_listed_sessions_carry_the_same_summary_as_get(inputs, bank):
     for session in listed:
         got = bank.ask("session_get", body(inputs, session_uid=session["session_uid"]))["session"]
         assert session == got and session["events"] > 0
-    assert {session["harness"] for session in listed} == {"claude", "codex"}
+    assert [session["task_ids"] for session in listed] == [["fixture-lock"], [], ["fixture-readme"]]
 
 
 def test_list_and_records_defaults_page_at_their_constants(inputs, bank, monkeypatch):
@@ -468,7 +468,7 @@ def test_each_hit_carries_its_own_session_metadata(inputs, bank):
     answer = bank.ask("session_search", body(inputs, query=inputs["queries"]["readme"]))
     assert answer["results"] and {item["session_uid"] for item in answer["results"]} == {bank.uid("readme")}
     assert answer["results"][0]["session"] == {
-        "harness": "codex",
+        "harness": "claude",
         "task_ids": ["fixture-readme"],
         "first_timestamp": "2026-10-21T10:00:00Z",
         "last_timestamp": "2026-10-21T10:00:20Z",
