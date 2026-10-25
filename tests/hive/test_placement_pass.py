@@ -1,3 +1,4 @@
+import os
 from unittest.mock import Mock
 
 import pytest
@@ -236,8 +237,41 @@ def test_a_master_moved_to_the_workstation_shares_the_pass_herdr_check(monkeypat
     assert controller._to_workstation("master", refused, memo) is True
     assert controller._to_workstation("master", refused, memo) is True
     assert len(checks) == 1
+    assert checks[0] == dict(os.environ)
     assert memo == {"workstation_herdr": True}
     assert controller._to_workstation("master", refused) is True
     assert len(checks) == 2
     assert controller._to_workstation("eng", refused, memo) is False
     assert len(checks) == 2
+
+
+class _Stop(Exception):
+    pass
+
+
+@pytest.mark.parametrize("step", ["placement_refusal", "spawn"])
+def test_master_placement_and_spawn_hand_the_pass_memo_to_the_workstation_check(
+    setup,  # noqa: F811
+    monkeypatch,
+    step,
+):
+    original = RoutedRuntime(setup.herdr, RuntimeRouter([]))
+    runtime = controller.FencedRuntime(setup.store, setup.config.slug, setup.held, original, controller.HYBRID)
+    refused = controller.WORKSTATION.format(lane="master")
+    monkeypatch.setattr(runtime, "_refusal", lambda lane, task, claim="": refused)
+    memos = []
+
+    def to_workstation(lane, seen, memo=None):
+        memos.append(memo)
+        raise _Stop
+
+    monkeypatch.setattr(controller, "_to_workstation", to_workstation)
+    runtime.begin_placement_pass()
+    pass_memo = runtime.runtime.hive_launch.herdr.pass_memo
+    with pytest.raises(_Stop):
+        if step == "spawn":
+            runtime._spawn(setup.config, "master", "master@x-1", {"id": "master"})
+        else:
+            runtime.placement_refusal("master", {"id": "master"})
+    assert len(memos) == 1
+    assert memos[0] is pass_memo
