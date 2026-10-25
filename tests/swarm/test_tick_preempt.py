@@ -65,7 +65,7 @@ def test_the_freed_seat_goes_to_the_urgent_task_and_the_normal_successor_yields(
     assert "t2" not in {a.task for a in workers(store)}
 
 
-def test_spawn_order_shares_one_handoff_batch_across_lanes_and_queue_sort(store, monkeypatch):
+def test_spawn_order_shares_one_handoff_batch_across_lanes_and_queue_sort(store, monkeypatch):  # noqa: F811
     from importlib import import_module
     from unittest.mock import Mock
 
