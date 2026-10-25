@@ -3,7 +3,7 @@ import threading
 
 from . import resources
 
-PAGES_KEPT = 64
+PAGES_KEPT = 32
 LEDGERS_KEPT = 8
 
 
@@ -21,14 +21,13 @@ class Page(dict):
 
 
 class Tasks:
-    def __init__(self, repository: object, revision: int) -> None:
+    def __init__(self, repository: object, revision: str) -> None:
         self.repository, self.revision, self.lock = repository, revision, threading.Lock()
         self.rows, self.revisions, self.pages = None, None, {}
 
     def load(self, slug: str) -> None:
         state = self.repository.read(slug, "tasks", "_meta.task_revision", "_meta.rev")
-        meta = state.get("_meta") or {}
-        self.revision = meta.get("task_revision", meta.get("rev", 0))
+        self.revision = resources.resource_revision(state, "tasks")
         self.rows = state.get("tasks") or []
         self.revisions = resources.collection_revisions(self.rows)[1]
 
@@ -37,7 +36,7 @@ class Tasks:
         if key not in self.pages:
             if len(self.pages) >= PAGES_KEPT:
                 self.pages.clear()
-            reply = resources.page(self.rows, f"{self.revision:064x}", query, self.revisions, True)
+            reply = resources.page(self.rows, self.revision, query, self.revisions, True)
             self.pages[key] = Page(reply)
         return self.pages[key]
 
@@ -47,7 +46,7 @@ GUARD = threading.Lock()
 
 
 def read(repository: object, slug: str, query: dict) -> Page:
-    revision = repository.task_revision(slug)
+    revision = f"{repository.task_revision(slug):064x}"
     with GUARD:
         held = HELD.get(slug)
         if held is None or held.repository is not repository or held.revision != revision:

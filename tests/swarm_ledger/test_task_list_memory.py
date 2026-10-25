@@ -124,6 +124,9 @@ def test_hundred_concurrent_full_task_list_reads_stay_under_a_fixed_peak(stored)
     try:
         SQLiteLedgerRepository(stored).current(SLUG)
         _, whole = tracemalloc.get_traced_memory()
+        tracemalloc.reset_peak()
+        SQLiteLedgerRepository(stored).read(SLUG, "tasks")
+        _, tasks = tracemalloc.get_traced_memory()
     finally:
         tracemalloc.stop()
     server = services(SQLiteLedgerRepository(stored))
@@ -148,4 +151,8 @@ def test_hundred_concurrent_full_task_list_reads_stay_under_a_fixed_peak(stored)
         tracemalloc.stop()
     assert not failures, failures[0]
     assert len(pages) == READERS and len(set(pages)) == 1 and pages[0] > 1
-    assert peak < whole / 2, f"{READERS} task list walks peaked at {peak} bytes; one whole ledger load peaks at {whole}"
+    report = (
+        f"{READERS} task list walks peaked at {peak} bytes; one load peaks at {whole} whole, {tasks} task rows only"
+    )
+    assert peak < whole / 2, report
+    assert peak < tasks * 1.5, report
