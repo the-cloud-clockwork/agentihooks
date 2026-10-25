@@ -1,3 +1,4 @@
+import io
 import json
 import logging
 import os
@@ -199,7 +200,11 @@ def export_body(state: dict) -> str:
 
 
 def export_bytes(state: dict) -> bytes:
-    return export_body(state).encode()
+    meta = {key: item for key, item in state["_meta"].items() if key not in ("seeds", "api_operations")}
+    with io.BytesIO() as stream:
+        for chunk in json.JSONEncoder(ensure_ascii=False).iterencode({"data": {**state, "_meta": meta}}):
+            stream.write(chunk.encode())
+        return stream.getvalue()
 
 
 def handle(handler: object, services: Services) -> None:
