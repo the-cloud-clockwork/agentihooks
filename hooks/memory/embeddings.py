@@ -22,6 +22,8 @@ class TransientEmbeddingError(Exception):
 
 
 class Embedder(Protocol):
+    """An adapter raises TransientEmbeddingError for a provider outage; any other exception is a defect."""
+
     model: EmbeddingModel
 
     def embed(self, texts: list[str]) -> list[list[float]]: ...
