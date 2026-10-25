@@ -1221,6 +1221,10 @@ def _pass_store(workflow):
     _graded(_equivalence_steps(workflow), "store")["run"] = "true"
 
 
+def _pass_page(workflow):
+    _graded(_equivalence_steps(workflow), "page")["run"] = "true"
+
+
 def _grade_from_head(workflow):
     [pick] = [step for step in _equivalence_steps(workflow) if step.get("name") == "Pick the protected grader"]
     pick["run"] = 'echo "GRADER=$PWD/head" >> "$GITHUB_ENV"'
@@ -1234,9 +1238,14 @@ def _swap_grader(workflow):
     )
 
 
-def _redirect_grader(workflow):
-    steps = _equivalence_steps(workflow)
-    steps.insert(steps.index(_graded(steps, "plant")), {"run": 'echo "GRADER=$PWD/head" >> "$GITHUB_ENV"'})
+def _copy_into_base(workflow):
+    [install] = [step for step in _equivalence_steps(workflow) if step.get("name") == "Install dependencies"]
+    install["run"] += " && cp -r head/tests/swarm_ledger/. base/tests/swarm_ledger/"
+
+
+def _head_browser(workflow):
+    [browser] = [step for step in _equivalence_steps(workflow) if "browser-cache" in step.get("uses", "")]
+    browser["uses"] = "./head/.github/actions/browser-cache"
 
 
 def _tolerate_failure(workflow):
@@ -1247,8 +1256,24 @@ def _hook_shell(workflow):
     workflow["jobs"]["ledger-equivalence"]["env"]["BASH_ENV"] = "head/hook.sh"
 
 
+def _container(workflow):
+    workflow["jobs"]["ledger-equivalence"]["container"] = "ghcr.io/head/grader:latest"
+
+
 def _stop_triggering(workflow):
     workflow[True]["pull_request"]["paths"] = ["docs/**"]
+
+
+def _rename_job(workflow):
+    workflow["jobs"]["renamed"] = workflow["jobs"].pop("ledger-equivalence")
+
+
+def _after_page(text):
+    def plant(workflow):
+        _equivalence_steps(workflow).append({"run": text})
+
+    plant.__name__ = f"after_page_{text.split()[-1]}"
+    return plant
 
 
 def _commit_equivalence(repo, workflow, message):
@@ -1263,12 +1288,20 @@ def _commit_equivalence(repo, workflow, message):
     [
         _skip_store,
         _pass_store,
+        _pass_page,
         _grade_from_head,
         _swap_grader,
-        _redirect_grader,
+        _copy_into_base,
+        _head_browser,
         _tolerate_failure,
         _hook_shell,
+        _container,
         _stop_triggering,
+        _rename_job,
+        _after_page("echo GRADER"),
+        _after_page('echo x >> "$GITHUB_ENV"'),
+        _after_page('echo x >> "$GITHUB_PATH"'),
+        _after_page("bash head/tests/swarm_ledger/equivalence.sh"),
         None,
     ],
 )
@@ -1293,7 +1326,8 @@ def test_the_required_grader_passes_equivalence_edits_outside_the_grading(repo, 
     head = _equivalence()
     head["jobs"]["ledger-equivalence"]["timeout-minutes"] = 20
     steps = _equivalence_steps(head)
-    steps.insert(steps.index(_graded(steps, "page")) + 1, {"run": "ls -la"})
+    steps[steps.index(_graded(steps, "page")) + 1]["with"]["retention-days"] = 1
+    steps.append({"run": "ls -la"})
     changed = _commit_equivalence(repo, head, "tune the job")
     _git(repo, "checkout", "-q", "dev")
     assert gate_protected.main(["--root", str(repo), "--head", changed]) == 0

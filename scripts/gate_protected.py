@@ -23,6 +23,7 @@ PREFLIGHT_FETCH = 'git fetch --no-tags origin "$GITHUB_SHA"'
 SHALLOW_PREFLIGHT_FETCH = 'git fetch --no-tags --depth 1 origin "$GITHUB_SHA"'
 EQUIVALENCE = ("equivalence.yml", "ledger-equivalence")
 EQUIVALENCE_WORDS = ("GRADER", "GITHUB_ENV", "GITHUB_PATH", "equivalence.sh")
+EQUIVALENCE_TUNABLE = ("steps", "timeout-minutes")
 
 
 def _gates(workflows: dict[str, dict]) -> list[tuple[str, str, dict]]:
@@ -279,24 +280,20 @@ def _checkout_forms(preflight: dict) -> list[dict]:
 
 def _equivalence_problems(base_workflows: dict[str, dict], head_workflows: dict[str, dict]) -> list[str]:
     file, job_id = EQUIVALENCE
-    base = base_workflows.get(file) or {}
-    base_job = (base.get("jobs") or {}).get(job_id) or {}
-    base_steps = base_job.get("steps") or []
-    graded = [step for step in base_steps if "GRADER" in str(step.get("run", ""))]
+    base, head = base_workflows.get(file) or {}, head_workflows.get(file) or {}
+    base_job, head_job = ((workflow.get("jobs") or {}).get(job_id) or {} for workflow in (base, head))
+    base_steps, head_steps = base_job.get("steps") or [], head_job.get("steps") or []
+    graded = [index for index, step in enumerate(base_steps) if "$GRADER" in str(step.get("run"))]
     if not graded:
         return []
-    head = head_workflows.get(file) or {}
-    head_job = (head.get("jobs") or {}).get(job_id) or {}
-    head_steps = head_job.get("steps") or []
-    setup = base_steps[: base_steps.index(graded[0])]
-    protected = [*setup, *graded]
-    others = [step for step in head_steps if step not in protected]
+    end = graded[-1] + 1
     if (
-        [step for step in head_steps if step in protected] != protected
-        or head_steps[: len(setup)] != setup
-        or any(word in json.dumps(step) for step in others for word in EQUIVALENCE_WORDS)
-        or any(head.get(key) != base.get(key) for key in (True, "on", "env", "defaults"))
-        or any(head_job.get(key) != base_job.get(key) for key in ("if", "continue-on-error", "env", "defaults"))
+        head_steps[:end] != base_steps[:end]
+        or any(word in json.dumps(step) for step in head_steps[end:] for word in EQUIVALENCE_WORDS)
+        or {key: value for key, value in head.items() if key != "jobs"}
+        != {key: value for key, value in base.items() if key != "jobs"}
+        or {key: value for key, value in head_job.items() if key not in EQUIVALENCE_TUNABLE}
+        != {key: value for key, value in base_job.items() if key not in EQUIVALENCE_TUNABLE}
     ):
         return ["The head changes the ledger equivalence grading; the protected branch grades with its own."]
     return []
