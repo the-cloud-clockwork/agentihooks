@@ -6,8 +6,6 @@ from pathlib import Path
 from scripts import init_agent
 from scripts.profiles import binding
 
-requested = []
-
 
 def _slow_route(tmp_path, monkeypatch, detach, route_timeout):
     from scripts import select_profile
@@ -24,7 +22,7 @@ def _slow_route(tmp_path, monkeypatch, detach, route_timeout):
     renamed = []
     monkeypatch.setattr(init_agent.herdr_host, "rename_agent", lambda *a: renamed.append(a) or True)
     request = binding.request
-    requested.clear()
+    requested = []
     monkeypatch.setattr(
         binding,
         "request",
@@ -40,11 +38,11 @@ def _slow_route(tmp_path, monkeypatch, detach, route_timeout):
     argv = ["--host", "herdr", "--agent", "claude", "--profile", "master", "--dir", str(tmp_path), "--defer-canary"]
     started = time.monotonic()
     result = init_agent.main([*argv, "--route-timeout", str(route_timeout)], {"XDG_RUNTIME_DIR": str(tmp_path / "rt")})
-    return result, time.monotonic() - started, renamed
+    return result, time.monotonic() - started, renamed, requested
 
 
 def test_a_deferred_launch_returns_before_a_slow_route(tmp_path, monkeypatch, capsys):
-    result, seconds, renamed = _slow_route(tmp_path, monkeypatch, detach=True, route_timeout=10)
+    result, seconds, renamed, _ = _slow_route(tmp_path, monkeypatch, detach=True, route_timeout=10)
     assert result == 0
     assert seconds < 5
     assert renamed == []
@@ -58,7 +56,7 @@ def test_a_deferred_launch_returns_before_a_slow_route(tmp_path, monkeypatch, ca
 
 
 def test_the_detached_child_of_a_deferred_launch_still_waits_on_the_route(tmp_path, monkeypatch, capsys):
-    result, seconds, renamed = _slow_route(tmp_path, monkeypatch, detach=False, route_timeout=1)
+    result, seconds, renamed, requested = _slow_route(tmp_path, monkeypatch, detach=False, route_timeout=1)
     assert result == 3
     assert seconds >= 1
     assert renamed == []

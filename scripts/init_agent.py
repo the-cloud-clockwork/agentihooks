@@ -667,7 +667,7 @@ def _detach() -> bool:
 
 
 def _detached(args, environ: dict[str, str]) -> bool:
-    """The detached child's output goes to /dev/null, so its failures reach the caller only through the binding report."""
+    """The detached child's output goes to /dev/null; its failures reach the caller only through the binding report."""
     return bool(args.defer_canary and _binding_deferred(environ)) and _detach()
 
 
