@@ -80,6 +80,21 @@ def test_the_cache_lives_in_the_agentihooks_home(actions, clock, monkeypatch, tm
     assert sorted(path.suffix for path in github_reads.home().iterdir()) == [".json", ".jsonl"]
 
 
+def test_a_missing_agentihooks_home_is_created_for_the_cache_and_the_counts(actions, clock, monkeypatch, tmp_path):  # noqa: F811
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path / "missing" / "home"))
+    assert mutation_wait.run_resolution(RUN) == ""
+    assert mutation_wait.run_resolution(RUN) == ""
+    assert actions["asked"] == [READ]
+    assert github_reads.counts(0, 2_000) == {"waits.checks": 1}
+
+
+def test_each_run_has_its_own_entry(actions, clock):  # noqa: F811
+    other = RUN.replace("/123", "/456")
+    assert mutation_wait.run_resolution(RUN) == ""
+    assert mutation_wait.run_resolution(other) == ""
+    assert actions["asked"] == [READ, ["gh", "api", ENDPOINT.replace("/123", "/456")]]
+
+
 def test_a_corrupt_entry_is_read_again(actions, clock):  # noqa: F811
     assert mutation_wait.run_resolution(RUN) == ""
     for body in ("not json", "[]", "{}"):
