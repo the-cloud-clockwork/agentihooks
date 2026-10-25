@@ -56,6 +56,7 @@ from scripts.swarm import (
     master_alarm,
     master_move,
     master_retire,
+    master_stall,
     master_start,
     master_wake,
     outage,
@@ -228,6 +229,7 @@ def tick(slug, store, ledger, runtime, now_ms):
     if config.state not in {"stopped", "stopping"}:
         actions += skip_refused(master_wake.run, slug, store, runtime, doc, now_ms)
     actions += skip_refused(lifetime.retire_idle_master, slug, store, ledger, runtime, rows, now_ms)
+    actions += skip_refused(master_stall.run, slug, config, store, ledger, runtime, now_ms)
     sleeping = lifetime.sleeping(slug, store, rows)
     if not sleeping and config.state == "drained" and any(_claimable(slug, store, rows, doc, lane) for lane in LANES):
         config = store.update(slug, state="running")
@@ -914,6 +916,7 @@ class Claims:
 
 def claim_view(slug, store, rows, doc, dispatched=None):
     awaiting = _owned_tasks(slug, store)
+    claimed = store.claimed(slug, [task_id for task_id, t in rows.items() if t.get("state") == "open"])
     held = [t.get("territory") or [] for t in rows.values() if t.get("state") in ACTIVE]
     config = store.config(slug)
     graph, fix = hierarchy.project(doc)[0], freeze.fix_phase(config)
@@ -924,18 +927,19 @@ def claim_view(slug, store, rows, doc, dispatched=None):
         doc,
         graph,
         fix,
-        lambda task_id: task_id in awaiting or store.claimant(slug, task_id) is not None,
+        lambda task_id: task_id in awaiting or task_id in claimed,
         lambda task: released(task) and applied(task),
     )
     return Claims(view, held, sorted(rows.values(), key=dispatched or claim_order.key(rows)))
 
 
 def _launch_order(slug, store, tasks, dispatched=None):
+    failed = store.launch_failures(slug)
     return sorted(
         tasks,
         key=lambda task: (
             dispatched(task)[0] if dispatched else ledger_rank.order(task),
-            bool(store.launch_failure(slug, task["id"])),
+            bool(failed.get(task["id"])),
             not claim_order.resumed(task),
         ),
     )

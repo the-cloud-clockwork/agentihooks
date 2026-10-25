@@ -138,6 +138,19 @@ def test_a_bound_session_gets_the_block_again_after_compaction(bound, capsys):
     assert "Inject a refocus block." not in _pre(capsys)
 
 
+def test_each_tool_call_records_its_call_id_for_the_stall_clock(bound, monkeypatch, capsys):
+    from scripts.swarm.health import activity
+
+    seen = []
+    monkeypatch.setattr(activity, "record", lambda name, tool_input, call_id: seen.append((name, call_id)))
+    for call_id in ("toolu_x", None):
+        payload = {"session_id": "s1", "tool_name": "Bash", "tool_input": {}, "cwd": "/", "tool_use_id": call_id}
+        hook_manager.on_pre_tool_use(payload)
+    flush("PreToolUse")
+    capsys.readouterr()
+    assert seen == [("Bash", "toolu_x"), ("Bash", "")]
+
+
 def test_an_unbound_session_gets_nothing(unbound, capsys):
     assert "Inject a refocus block." not in _prompt(capsys)
     _compact()

@@ -78,7 +78,13 @@ def test_task_route_reuses_entry_revision(monkeypatch):
     doc = {"tasks": [{"title": "Visible é", "id": "t1"}, {"id": "t2", "title": "Outside"}], "_meta": {"rev": 7}}
     expected = f"{7:064x}"
     entry = Entry(1, "", doc)
-    server = as_services(SimpleNamespace(repository=SimpleNamespace(current=lambda slug: entry)))
+    server = as_services(
+        SimpleNamespace(
+            repository=SimpleNamespace(
+                read=lambda slug, *keys: entry.state, task_version=lambda slug: ({1: 7, 2: 8}[entry.generation], 0)
+            )
+        )
+    )
     original = resources.revision
 
     def refuse_collection_hash(value):
@@ -111,7 +117,13 @@ def test_task_route_peak_allocation_is_bounded_by_page():
 
     doc = {"tasks": [{"id": f"t{index}", "title": "é" * 4096} for index in range(2000)]}
     entry = Entry(1, "", doc)
-    server = as_services(SimpleNamespace(repository=SimpleNamespace(current=lambda slug: entry)))
+    server = as_services(
+        SimpleNamespace(
+            repository=SimpleNamespace(
+                read=lambda slug, *keys: entry.state, task_version=lambda slug: ({1: 7, 2: 8}[entry.generation], 0)
+            )
+        )
+    )
     tracemalloc.start()
     try:
         reply = routes.ledger_read(server, "ledger", "tasks", {"limit": 2})

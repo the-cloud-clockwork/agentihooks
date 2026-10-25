@@ -64,9 +64,9 @@ def request(live, method, resource, body=None, **headers):
 
 
 def stored(monkeypatch, document):
-    from types import SimpleNamespace
+    from tests.swarm_ledger.api_fakes import serve_document
 
-    monkeypatch.setattr(server.repository, "current", lambda slug: SimpleNamespace(state=document, views={}))
+    serve_document(monkeypatch, server.repository, document)
 
 
 def test_invalid_schema_leaves_resource_unchanged(live):
@@ -2084,7 +2084,8 @@ def test_export_validates_its_body_and_hides_receipts(live, monkeypatch):
 
 
 def test_export_encodes_once_per_ledger_generation(live, monkeypatch):
-    loads, dumps, counts = json.loads, json.dumps, {"decode": 0, "encode": 0}
+    loads, dumps, iterencode = json.loads, json.dumps, json.JSONEncoder.iterencode
+    counts = {"decode": 0, "encode": 0}
 
     def ledger(value):
         return isinstance(value, dict) and "_meta" in value
@@ -2094,9 +2095,9 @@ def test_export_encodes_once_per_ledger_generation(live, monkeypatch):
         counts["decode"] += ledger(value)
         return value
 
-    def encode(value, *args, **kwargs):
+    def encode(self, value, *args, **kwargs):
         counts["encode"] += ledger(value) or (isinstance(value, dict) and ledger(value.get("data")))
-        return dumps(value, *args, **kwargs)
+        return iterencode(self, value, *args, **kwargs)
 
     def export():
         headers = {"X-Ledger-Token": live["admin"], "Content-Type": "application/json"}
@@ -2113,7 +2114,7 @@ def test_export_encodes_once_per_ledger_generation(live, monkeypatch):
     first = export()
     assert json.loads(first) == stored()
     monkeypatch.setattr(json, "loads", decode)
-    monkeypatch.setattr(json, "dumps", encode)
+    monkeypatch.setattr(json.JSONEncoder, "iterencode", encode)
     json.loads(server.repository.inner.current(SLUG).text)
     server.repository.inner.get_document(SLUG)
     assert counts == {"decode": 1, "encode": 0}
@@ -2134,7 +2135,7 @@ def test_export_encodes_once_per_ledger_generation(live, monkeypatch):
 
 def test_export_body_hides_seeds_and_receipts_and_keeps_text_unescaped():
     state = {"title": "café", "_meta": {"seeds": [1], "api_operations": {"a": 1}, "members": ["m"]}}
-    assert routes.export_body(state) == '{"data": {"title": "café", "_meta": {"members": ["m"]}}}'
+    assert routes.export_bytes(state).decode("utf-8") == '{"data": {"title": "café", "_meta": {"members": ["m"]}}}'
 
 
 def test_raw_upload_headers_reject_invalid_lengths_and_names(live):
@@ -2536,6 +2537,7 @@ def test_cli_collection_consumers_read_all_pages(live, tmp_path, capsys, monkeyp
         artifact=False,
         follow_up=False,
         workstation=False,
+        needs="",
         profile="",
         rank="",
         difficulty=None,

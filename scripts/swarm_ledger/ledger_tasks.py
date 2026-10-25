@@ -51,6 +51,7 @@ UPDATABLE = (
     "after_release",
     "applied_at",
     "workstation",
+    "needs",
     "doc_items",
     "watchdog",
     "recovery",
@@ -68,6 +69,7 @@ LIST_FIELDS = (
     "overlays",
     "split_pulls",
     "repositories",
+    "needs",
     "doc_items",
 )
 OVERLAY_CAP = 3
@@ -382,6 +384,7 @@ def _add(doc, op, ctx):
         "slice",
         "follow_up",
         "workstation",
+        "needs",
         *ledger_kinds.WORKFLOW_FIELDS,
     ):
         if key in op:

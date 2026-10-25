@@ -141,6 +141,11 @@ def _pinned(hives: list[dict], task: dict, role: str) -> tuple[list[dict], place
 
     if task.get("hive"):
         hives = [hive for hive in hives if hive["id"] == task["hive"]]
+    if task.get("needs"):
+        equipped = [hive for hive in hives if placement.equipped(task, hive)]
+        if not equipped:
+            return equipped, placement.Wait(placement.needs_refusal(task, hives), role)
+        hives = equipped
     if not task.get("workstation"):
         return hives, None
     kept = [hive for hive in hives if hive["id"] == hive_id()]
@@ -198,10 +203,15 @@ class HiveLaunch:
         self.sleep = time.sleep
         self.opening = orders.build_opening
         self.placement_cache: dict[tuple[str, str], Selection | placement.Wait] | None = None
+        self._pass_hives: tuple[dict, list[dict]] | None = None
         self._quota_accounts = None
 
     def hives(self) -> list[dict]:
-        return placement.for_swarm(loaded_hives(self.store), self.slug)
+        if self.placement_cache is None:
+            return placement.for_swarm(loaded_hives(self.store), self.slug)
+        if self._pass_hives is None or self._pass_hives[0] is not self.placement_cache:
+            self._pass_hives = (self.placement_cache, placement.for_swarm(loaded_hives(self.store), self.slug))
+        return self._pass_hives[1]
 
     def _record_wait(self, lane: str, task: dict, selected: Selection | placement.Wait) -> Selection | placement.Wait:
         reason = selected.reason if isinstance(selected, placement.Wait) else ""
@@ -245,13 +255,13 @@ class HiveLaunch:
         from scripts.swarm.commands import hive_id
 
         if lane != placement.MASTER:
-            for hive in hives:
+            for index, hive in enumerate(hives):
                 if hive["id"] == hive_id():
                     bound = local_slots.maximum(self.store, self.slug, hive["max_agents"])
                     taken = local_slots.held(self.store, hive["id"], self.slug, task["id"])
                     limited = admission.capped(admission.Room(hive["room"], **ROOM_DETAILS), taken, bound)
                     if limited.room < hive["room"]:
-                        hive["room"], hive["refusal"] = limited.room, admission.refusal(limited)
+                        hives[index] = {**hive, "room": limited.room, "refusal": admission.refusal(limited)}
         placing = _Placing(config, task, saved, decision, role, rows, hives, now)
         found = self._account_selection(placing, harness)
         if auto and harness == "codex" and isinstance(found, placement.Wait):

@@ -276,6 +276,10 @@ class RedisStore:
     def claimant(self, slug, task):
         return self.redis.get(self.key(slug, "claim", task))
 
+    def claimed(self, slug: str, tasks: list[str]) -> set[str]:
+        found = self.redis.mget([self.key(slug, "claim", task) for task in tasks]) if tasks else []
+        return {task for task, claimant in zip(tasks, found) if claimant is not None}
+
     def claim_generation(self, slug: str, task: str) -> int:
         return int(self.redis.get(f"{self.key(slug, 'claim', task)}:generation") or 0)
 
@@ -534,6 +538,9 @@ class RedisStore:
 
     def launch_failure(self, slug, task):
         return self.redis.hget(self.key(slug, "launch-failures"), task) or ""
+
+    def launch_failures(self, slug: str) -> dict:
+        return self.redis.hgetall(self.key(slug, "launch-failures"))
 
     def failed_harness(self, slug, task):
         return self.redis.hget(self.key(slug, "launch-failure-harness"), task) or ""
