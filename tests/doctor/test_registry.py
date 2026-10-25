@@ -236,7 +236,16 @@ class Langfuse:
     def __call__(self, path, params):
         self.calls.append((path, dict(params)))
         if path == "traces":
-            return {"data": self.traces, "meta": {"page": 1, "totalPages": 1}}
+            io = "io" in params["fields"].split(",")
+            rows = [{key: v for key, v in t.items() if io or key not in ("metadata", "input")} for t in self.traces]
+            return {"data": rows, "meta": {"page": 1, "totalPages": 1}}
+        if params.get("type") == "AGENT":
+            roots = [
+                {"id": f"root-{t['id']}", "type": "AGENT", "metadata": t["metadata"]}
+                for t in self.traces
+                if "metadata" in t
+            ]
+            return {"data": [r for r in roots if r["id"] == f"root-{params['traceId']}"], "meta": {}}
         if params["limit"] == 1:
             return {"data": self.observations[:1], "meta": {"totalItems": self.total}}
         since = params.get("fromStartTime")
@@ -263,13 +272,17 @@ def test_read_joins_the_newest_trace_and_reads_freshness_from_a_watermark(cursor
         "traces",
         {
             "tags": ["swarm:s", "agent:engineer@1-0001"],
-            "fields": "core,io",
+            "fields": "core",
             "orderBy": "timestamp.desc",
             "limit": registry.TRACES_LIMIT,
             "page": 1,
         },
     )
-    assert langfuse.calls[1] == ("observations", {"traceId": "tr-new", "limit": 50, "page": 1})
+    assert langfuse.calls[1:3] == [
+        ("observations", {"traceId": "tr-new", "type": "AGENT", "limit": 1, "page": 1}),
+        ("observations", {"traceId": "tr-old", "type": "AGENT", "limit": 1, "page": 1}),
+    ]
+    assert langfuse.calls[3] == ("observations", {"traceId": "tr-new", "limit": 50, "page": 1})
     assert found["read"] is True and found["session_id"] == "sid-new"
     assert found["remote"] == {"trace": "tr-new", "fresh_ms": 1791360040000, "observations": 40}
     assert found["traces"][0] == {
@@ -410,17 +423,34 @@ def test_bindings_are_read_at_the_same_time(cursors):
     assert failures == [] and [b["read"] for b in found] == [True, True]
 
 
-def test_every_binding_is_read_in_one_round(cursors):
-    agents = [{**AGENT, "name": f"engineer@1-{n:04d}"} for n in range(1, 25)]
-    langfuse = Langfuse([], [])
-    everyone = threading.Barrier(len(agents), timeout=5)
+def test_at_most_readers_bindings_are_read_at_once(cursors):
+    agents = [{**AGENT, "name": f"engineer@1-{n:04d}"} for n in range(1, registry.READERS + 4)]
+    langfuse, lock, full = Langfuse([], []), threading.Lock(), threading.Event()
+    flight = {"now": 0, "peak": 0}
 
     def get(path, params):
-        everyone.wait()
+        with lock:
+            flight["now"] += 1
+            flight["peak"] = max(flight["peak"], flight["now"])
+            if flight["now"] == registry.READERS:
+                full.set()
+        full.wait(5)
+        with lock:
+            flight["now"] -= 1
         return langfuse(path, params)
 
     found, failures = registry.read("s", agents, get, {}, 15, 50)
     assert failures == [] and all(b["read"] for b in found)
+    assert flight["peak"] == registry.READERS
+
+
+def test_a_trace_without_a_root_observation_reads_empty_correlation(cursors):
+    langfuse = Langfuse([{"id": "tr-orphan", "sessionId": "sid"}], [])
+    [found], failures = registry.read("s", [AGENT], langfuse, {}, 15, 50)
+    assert failures == []
+    assert found["traces"] == [
+        {"id": "tr-orphan", "session_id": "sid", "life": "", "seat": "", "task": "", "harness": "", "profile": ""}
+    ]
 
 
 def test_no_bindings_read_nothing(cursors):
@@ -547,8 +577,8 @@ def test_sub_millisecond_times_round_down(cursors):
 
 
 def test_a_trace_row_missing_fields_reads_as_empty(cursors):
-    row = {"id": "tr", "metadata": {"attributes": {"agentihooks.correlation.task": "t1"}}}
-    assert registry._remote_trace(row) == {
+    root = {"metadata": {"attributes": {"agentihooks.correlation.task": "t1"}}}
+    assert registry._remote_trace({"id": "tr"}, root) == {
         "id": "tr",
         "session_id": "",
         "life": "",
@@ -564,7 +594,7 @@ def test_a_scan_with_no_new_observations_keeps_its_watermark_and_counts_a_missin
     langfuse = Langfuse([_trace("tr", "sid")], observations)
     state = {}
     registry.read("s", [AGENT], langfuse, state, 15, 50)
-    assert langfuse.calls[2] == ("observations", {"traceId": "tr", "limit": 1, "page": 1})
+    assert langfuse.calls[3] == ("observations", {"traceId": "tr", "limit": 1, "page": 1})
     langfuse.observations = []
     langfuse.total = None
     [found], _ = registry.read("s", [AGENT], langfuse, state, 15, 50)
