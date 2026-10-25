@@ -555,9 +555,19 @@ def test_a_member_credential_runs_a_checked_wait_and_a_cover_and_no_other_writes
         keys=auth._acl_keys("m1"),
         channels=auth.ACL_PATTERNS,
     )
-    member = fakeredis.FakeRedis(server=server, decode_responses=True, username="hive-m1")
+    reads = {"GET", "HGET", "HGETALL", "HEXISTS", "EXISTS", "SMEMBERS", "SISMEMBER", "MGET", "HKEYS", "TTL", "PTTL"}
+
+    # fakeredis drops %R~ read selectors, so reads the member's %R~ grant allows go through the admin client.
+    class Member(fakeredis.FakeRedis):
+        def execute_command(self, *args, **options):
+            if str(args[0]).upper() in reads:
+                return admin.execute_command(*args, **options)
+            return super().execute_command(*args, **options)
+
+    member = Member(server=server, decode_responses=True, username="hive-m1")
     member.auth("", username="hive-m1")
     assert member.acl_whoami() == "hive-m1"
+    assert f"%R~{ROOT}:*" in auth._acl_keys("m1")
     monkeypatch.setenv("AGENTIHOOKS_DEPLOYMENT", "distributed")
     monkeypatch.setenv("AGENTIHOOKS_HIVE_ID", "m1")
     monkeypatch.setenv("AGENTIHOOKS_HIVE_REDIS_URL", "redis://hive.example:6380/2")
