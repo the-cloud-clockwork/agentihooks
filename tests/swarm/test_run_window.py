@@ -168,7 +168,11 @@ FINAL_OBSERVE = (
     "## Read first\n- ledger:sw/tasks/t1\n\n"
     "<!-- handoff complete -->"
 )
-ON_LEDGER = " ".join(FINAL_OBSERVE.split())
+ON_LEDGER = (
+    "Run window ended 25 October 12:00 UTC, gate log only. Tasks: 1 claimed, 1 done, 1 open. In flight: "
+    "engineer@abc-0001 on t1. Claims continue; window-gate=deny enforces the next cutoff. Full handoff: "
+    "master-watchdog."
+)
 
 
 def test_the_cutoff_logs_only_and_publishes_the_final_handoff(swarm):
@@ -211,10 +215,10 @@ def test_an_enforced_cutoff_stops_claims_and_asks_agents_to_hand_off(swarm):
         "agentihooks swarm sw publish, write a Handoff v2 for task t1, run agentihooks swarm sw handoff <doc> and "
         "stop. No new task starts until swarm set changes the window."
     ]
-    assert (
-        " ## Next the agents in flight hand off and no new task starts until swarm set changes the window. ## Read"
-        in ledger.notices[0]
-    )
+    assert ledger.notices == [
+        "Run window ended 25 October 12:00 UTC, gate deny. Tasks: 1 claimed, 1 done, 1 open. In flight: "
+        "engineer@abc-0001 on t1. Agents in flight hand off and claims stay stopped. Full handoff: master-watchdog."
+    ]
     config = store.config(SLUG)
     assert run_window.claims_stopped(config, END - 1) == ""
     assert run_window.claims_stopped(config, END) == (
@@ -231,7 +235,10 @@ def test_an_off_gate_skips_the_gate_and_still_publishes_the_final_handoff(swarm)
         "run window: published the final state to the ledger and the watchdog",
     ]
     assert gate_log.recent(SLUG) == [] and _items(store, OWNER) == []
-    assert " ## Next the gate is off, so claims continue. ## Read first - ledger:sw/tasks/t1 <!--" in ledger.notices[0]
+    assert ledger.notices == [
+        "Run window ended 25 October 12:00 UTC, gate skip. Tasks: 1 claimed, 1 done, 1 open. In flight: "
+        "engineer@abc-0001 on t1. Claims continue. Full handoff: master-watchdog."
+    ]
     assert _items(store, "master@sw") == []
     assert run_window.claims_stopped(store.update(SLUG, gates={"window": "off"}), END) == ""
 
@@ -392,3 +399,26 @@ def test_the_hand_off_ask_carries_its_task(swarm):
     store, ledger = swarm
     _step(store, ledger, END, gates={"window": "enforce"})
     assert [item.task for item in InboxStore(store.redis).inbox(OWNER)] == ["t1"]
+
+
+def test_the_ledger_notice_fits_the_notifications_window():
+    from scripts.swarm_ledger.ledger_notifications import TEXT_KEPT
+
+    rows = {"t1": {"state": "claimed"}}
+    blank = run_window.notice("observe", (START, END), rows, [AgentRecord("", "eng", "t1")])
+    fits = [AgentRecord("e" * (TEXT_KEPT - len(blank)), "eng", "t1")]
+    assert len(run_window.notice("observe", (START, END), rows, fits)) == TEXT_KEPT
+    over = [AgentRecord("e" * (TEXT_KEPT - len(blank) + 1), "eng", "t1")]
+    assert run_window.notice("observe", (START, END), rows, over) == (
+        "Run window ended 25 October 12:00 UTC, gate log only. Tasks: 1 claimed. In flight: 1 agents. Claims "
+        "continue; window-gate=deny enforces the next cutoff. Full handoff: master-watchdog."
+    )
+
+
+def test_the_ledger_notice_names_every_agent_in_flight():
+    rows = {"t1": {"state": "claimed"}, "t4": {"state": "pr"}}
+    flying = [AgentRecord(OWNER, "eng", "t1"), AgentRecord("engineer@abc-0002", "eng", "t4")]
+    assert run_window.notice("off", (START, END), rows, flying) == (
+        "Run window ended 25 October 12:00 UTC, gate skip. Tasks: 1 claimed, 1 pr. In flight: engineer@abc-0001 on "
+        "t1, engineer@abc-0002 on t4. Claims continue. Full handoff: master-watchdog."
+    )

@@ -14,6 +14,7 @@ from scripts.inbox.seats import seat_address
 from scripts.inbox.store import DuplicateItem, InboxStore
 from scripts.swarm import capacity, doc_report
 from scripts.swarm.store import MASTER, SwarmError
+from scripts.swarm_ledger import ledger_notifications
 
 MINUTE_MS = 60_000
 ALERT_MINUTES = 30
@@ -47,6 +48,12 @@ ASK = (
     "No new task starts until swarm set changes the window."
 )
 STOPPED = "the run window ended at {end}, no new claims until swarm set changes the window"
+SHORT = {
+    "enforce": "Agents in flight hand off and claims stay stopped.",
+    "observe": "Claims continue; window-gate=deny enforces the next cutoff.",
+    "off": "Claims continue.",
+}
+NOTICE = "Run window ended {end}, gate {mode}. Tasks: {counts}. In flight: {flying}. {next} Full handoff: {watchdog}."
 FINAL = (
     "## Intent\nRun window on swarm {slug}, {start} to {end}, window gate {mode}.\n\n"
     "## Done\nTasks by state: {counts}.\n\n"
@@ -151,17 +158,35 @@ def in_flight(store, slug, rows: dict) -> list:
 
 
 def final(slug, mode, bounds, rows, flying) -> str:
-    counts = Counter(row.get("state") for row in rows.values())
     return FINAL.format(
         slug=slug,
         start=_spoken(bounds[0]),
         end=_spoken(bounds[1]),
         mode=modes.label(mode),
-        counts=", ".join(f"{count} {state}" for state, count in sorted(counts.items())) or "none",
+        counts=_counts(rows),
         flying="; ".join(f"{a.name} on {a.task} {rows[a.task].get('title', '')}".strip() for a in flying) or "none",
         next=NEXT[mode],
         read="\n".join(f"- ledger:{slug}/tasks/{a.task}" for a in flying) or "None",
     )
+
+
+def notice(mode, bounds, rows, flying) -> str:
+    fields = {
+        "end": _spoken(bounds[1]),
+        "mode": modes.label(mode),
+        "counts": _counts(rows),
+        "next": SHORT[mode],
+        "watchdog": doc_report.address(),
+    }
+    text = NOTICE.format(flying=", ".join(f"{a.name} on {a.task}" for a in flying) or "none", **fields)
+    if len(text) <= ledger_notifications.TEXT_KEPT:
+        return text
+    return NOTICE.format(flying=f"{len(flying)} agents", **fields)
+
+
+def _counts(rows) -> str:
+    counts = Counter(row.get("state") for row in rows.values())
+    return ", ".join(f"{count} {state}" for state, count in sorted(counts.items())) or "none"
 
 
 def _spoken(at_ms: int) -> str:
@@ -195,10 +220,9 @@ def _gate(slug, config, store, rows, bounds, now_ms):
 
 
 def _publish(slug, config, store, ledger, rows, bounds):
-    text = final(slug, modes.configured(GATE, config.gates), bounds, rows, in_flight(store, slug, rows))
-    _send_once(store, doc_report.address(), text, f"{slug}:{KEY}:final:{bounds[0]}")
-    # The ledger notifications window does not keep line breaks, so the notice carries the body on one line.
-    ledger.notify(slug, " ".join(text.split()))
+    mode, flying = modes.configured(GATE, config.gates), in_flight(store, slug, rows)
+    _send_once(store, doc_report.address(), final(slug, mode, bounds, rows, flying), f"{slug}:{KEY}:final:{bounds[0]}")
+    ledger.notify(slug, notice(mode, bounds, rows, flying))
     return "run window: published the final state to the ledger and the watchdog"
 
 
