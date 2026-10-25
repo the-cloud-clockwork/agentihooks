@@ -33,7 +33,7 @@ def test_a_seat_reopens_the_same_server_consumer_and_only_confirmation_acks(tmp_
             assert not successor.confirm(first)
             assert successor.confirm(second)
             assert successor.fetch(1, 100) == []
-            consumers = second_bus._loop.run(second_bus._js.consumers_info("AGENTIHOOKS_EVENTS"))
+            consumers = second_bus._loop.run(second_bus._js.consumers_info("AGENTIHOOKS-EVENTS"))
             assert {entry.name for entry in consumers} == {durable, mail.consumer("eng-2@swarm", "new").durable}
         finally:
             second_bus.close()

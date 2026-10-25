@@ -7,7 +7,7 @@ from unittest import mock
 
 import pytest
 from nats.js import api
-from nats.js.errors import APIError, BucketNotFoundError
+from nats.js.errors import APIError, BucketNotFoundError, NotFoundError
 
 from scripts.events import factory, nats
 from scripts.events.bus import Bus, Consumer, Delivery, EventLog, StateConflict, StateStore, WorkQueue
@@ -320,10 +320,11 @@ def test_a_work_queue_stream_keeps_work_queue_retention(bus):
 
 
 def test_queue_names_have_stable_bounded_nats_stream_identifiers():
-    assert nats.queue_stream("work") == "AGENTIHOOKS_QUEUE_work"
-    assert nats.queue_stream("Work_9-a") == "AGENTIHOOKS_QUEUE_Work_9-a"
+    assert nats.queue_stream("work") == "AGENTIHOOKS-QUEUE-work"
+    assert nats.queue_stream("Work-9-a") == "AGENTIHOOKS-QUEUE-Work-9-a"
+    assert nats.queue_stream("Work_9-a") != nats.queue_stream("Work-9-a")
     assert nats.queue_stream("swarm.rig.ready.eng") == (
-        "AGENTIHOOKS_QUEUE_hca99d3a2340278a9654e1cae8e2a90ce639c9f79f5d643206ccde38b8a0fd396"
+        "AGENTIHOOKS-QUEUE-hca99d3a2340278a9654e1cae8e2a90ce639c9f79f5d643206ccde38b8a0fd396"
     )
     assert nats.queue_stream("swarm-rig-ready-eng") != nats.queue_stream("swarm.rig.ready.eng")
     assert len(nats.queue_stream("x" * 1000)) == 83
@@ -341,6 +342,122 @@ def test_a_readiness_subject_can_name_a_real_nats_work_queue(bus):
     assert delivery.attempt == 1
     delivery.ack()
     assert queue.take(10) is None
+
+
+def test_new_consumer_names_accept_dotted_logical_names(bus):
+    from scripts.events.subjects import consumer_name
+
+    reader = bus.events.consumer("hub.task_ready", "swarm.>")
+    assert bus.events.publish("swarm.s.task.ready", event("dotted"))
+    delivery = reader.fetch(1, 500)[0]
+    assert delivery.event.id == "dotted"
+    delivery.ack()
+    configured = _consumer_config(bus, nats.EVENT_STREAM, consumer_name("hub.task_ready"))
+    assert "." not in configured.durable_name and "_" not in configured.durable_name
+
+
+def test_existing_scoped_queue_messages_survive_new_name_generation(bus):
+    from dataclasses import replace
+
+    bus._config = replace(bus._config, scoped=True)
+    from scripts.events.resource_names import legacy_stream_name
+
+    legacy = legacy_stream_name("rig", "QUEUE_eng")
+    bus._loop.run(
+        bus._js.add_stream(name=legacy, subjects=["swarm.rig.queue.eng.>"], retention=api.RetentionPolicy.WORK_QUEUE)
+    )
+    offered = Envelope(
+        id="retained", type="task.ready", swarm="rig", entity="task", key="one", version=1, time=0, author="a", data={}
+    )
+    bus._loop.run(bus._js.publish("swarm.rig.queue.eng.work", offered.encode(), stream=legacy))
+    queue = bus.for_swarm("rig").queue("eng", POLICY)
+    assert queue._stream == legacy
+    delivery = queue.take(500)
+    assert delivery.event == offered
+    bus._loop.run(delivery._msg.ack_sync())
+    assert bus._loop.run(bus._js.stream_info(legacy)).state.messages == 0
+
+
+def test_existing_legacy_queue_and_consumer_keep_their_bindings(bus):
+    from scripts.events.resource_names import legacy_queue_stream
+
+    legacy = legacy_queue_stream("work_old")
+    target = "agentihooks.queue.work_old"
+    bus._loop.run(bus._js.add_stream(name=legacy, subjects=[target], retention=api.RetentionPolicy.WORK_QUEUE))
+    bus._loop.run(bus._js.add_consumer(legacy, config=nats._consumer_config("work_old", target, POLICY)))
+    bus._loop.run(bus._js.publish(target, event("retained").encode(), stream=legacy))
+    queue = bus.queue("work_old", POLICY)
+    assert queue._stream == legacy
+    delivery = queue.take(500)
+    assert delivery.event.id == "retained"
+    delivery.ack()
+    assert _consumer_config(bus, legacy, "work_old").durable_name == "work_old"
+
+
+def test_new_scoped_streams_and_queues_use_hyphens(bus):
+    from dataclasses import replace
+
+    bus._config = replace(bus._config, scoped=True)
+    from scripts.swarm.readiness import queue_name
+
+    view = bus.for_swarm("rig")
+    queue = view.queue(queue_name("rig", "eng"), POLICY)
+    assert "." not in queue._stream and "_" not in queue._stream
+    offered = Envelope(
+        id="new", type="task.ready", swarm="rig", entity="task", key="one", version=1, time=0, author="a", data={}
+    )
+    assert queue.offer(offered)
+    delivery = queue.take(500)
+    assert delivery.event == offered
+    delivery.ack()
+    assert all(
+        "." not in info.config.name and "_" not in info.config.name for info in bus._loop.run(bus._js.streams_info())
+    )
+
+
+def test_existing_event_and_dead_streams_survive_reopening(bus, url):
+    bus._loop.run(bus._js.delete_stream(nats.EVENT_STREAM))
+    bus._loop.run(bus._js.delete_stream("AGENTIHOOKS-DEAD"))
+    bus._loop.run(nats.provision_events(bus._js, "AGENTIHOOKS_EVENTS", 120.0))
+    bus._loop.run(bus._js.add_stream(name="AGENTIHOOKS_DEAD", subjects=["dead.>"]))
+    assert bus._loop.run(
+        bus._js.publish("legacy.swarm.s.task.ready", event("retained-log").encode(), stream="AGENTIHOOKS_EVENTS")
+    )
+    opened = nats.open_bus(BusConfig(backend="nats", url=url, queue=LOG_POLICY))
+    try:
+        assert opened.events._stream == "AGENTIHOOKS_EVENTS"
+        assert opened.dead._stream == "AGENTIHOOKS_DEAD"
+        delivery = opened.events.consumer("reader", "swarm.>").fetch(1, 500)[0]
+        assert delivery.event.id == "retained-log"
+        delivery.ack()
+    finally:
+        opened.close()
+
+
+def test_dead_letter_migration_reads_the_selected_legacy_stream(bus, url):
+    bus._loop.run(bus._js.delete_stream("AGENTIHOOKS-DEAD"))
+    bus._loop.run(bus._js.add_stream(name="AGENTIHOOKS_DEAD", subjects=["dead.>"]))
+    letter = Envelope(
+        id="old-letter",
+        type="dead_lettered",
+        swarm="rig",
+        entity="task",
+        key="one",
+        version=1,
+        time=0,
+        author="a",
+        data={},
+    )
+    bus._loop.run(bus._js.publish("dead.rig", letter.encode(), stream="AGENTIHOOKS_DEAD"))
+    hub = nats.open_bus(BusConfig(backend="nats", url=url, scoped=True))
+    try:
+        assert hub._legacy_dead._stream == "AGENTIHOOKS_DEAD"
+        hub.migrate_dead("rig")
+        [delivery] = hub.for_swarm("rig").dead.consumer("reader", "dead.>").fetch(1, 500)
+        assert delivery.event == letter
+        delivery.ack()
+    finally:
+        hub.close()
 
 
 def test_the_bus_connects_without_reconnecting(url, monkeypatch):
@@ -418,7 +535,7 @@ def test_a_dead_letter_is_published_before_the_original_is_terminated():
     async def publish(subject, data, *, stream, headers):
         letter = Envelope.decode(data)
         assert subject == f"dead.s.{letter.id}"
-        assert stream == "AGENTIHOOKS_DEAD"
+        assert stream == "AGENTIHOOKS-DEAD"
         assert headers == {"Nats-Msg-Id": letter.id, "Nats-Expected-Last-Subject-Sequence": "0"}
         assert letter.data == {"event": event().to_dict(), "source": "queue.work", "attempts": 3}
         assert letter.cause == event().id
@@ -429,6 +546,7 @@ def test_a_dead_letter_is_published_before_the_original_is_terminated():
     subscription = SimpleNamespace(fetch=mock.AsyncMock(return_value=[message]))
     js = SimpleNamespace(
         _nc=SimpleNamespace(max_payload=1048576),
+        stream_info=mock.AsyncMock(side_effect=NotFoundError()),
         publish=mock.AsyncMock(side_effect=OSError("dead stream unavailable")),
     )
     loop = nats._Loop()
@@ -440,6 +558,35 @@ def test_a_dead_letter_is_published_before_the_original_is_terminated():
         js.publish = publish
         assert consumer.fetch(1, 100) == []
         assert calls == ["publish", "term"]
+    finally:
+        loop.close()
+
+
+def test_old_restricted_credentials_dead_letter_without_metadata_discovery(monkeypatch):
+    monkeypatch.setattr(nats.nkey, "parse_creds", lambda value: ("jwt", "key") if value == "old-creds" else None)
+    monkeypatch.setattr(
+        nats.nkey,
+        "claims",
+        lambda value: {"nats": {"pub": {"allow": ["$JS.API.CONSUMER.INFO.>"]}}} if value == "jwt" else None,
+    )
+    message = SimpleNamespace(
+        data=event().encode(), metadata=SimpleNamespace(num_delivered=4), headers=None, term=mock.AsyncMock()
+    )
+    js = SimpleNamespace(
+        _nc=SimpleNamespace(max_payload=1048576),
+        stream_info=mock.AsyncMock(side_effect=AssertionError("metadata is forbidden")),
+        publish=mock.AsyncMock(return_value=SimpleNamespace(duplicate=False)),
+    )
+    subscription = SimpleNamespace(fetch=mock.AsyncMock(return_value=[message]))
+    loop = nats._Loop()
+    try:
+        consumer = nats.NatsConsumer(
+            loop, subscription, js, QueuePolicy(max_deliver=3), "queue.work", credentials="old-creds"
+        )
+        assert consumer.fetch(1, 100) == []
+        js.stream_info.assert_not_awaited()
+        assert js.publish.await_args.kwargs["stream"] == "AGENTIHOOKS_DEAD"
+        message.term.assert_awaited_once_with()
     finally:
         loop.close()
 
@@ -458,7 +605,7 @@ def test_a_fetch_that_times_out_returns_no_deliveries(error):
 
 def test_a_dead_consumer_keeps_a_server_side_attempt_cap(bus):
     bus.dead.consumer("dead-reader", "dead.>")
-    config = _consumer_config(bus, "AGENTIHOOKS_DEAD", "dead-reader")
+    config = _consumer_config(bus, "AGENTIHOOKS-DEAD", "dead-reader")
     assert config.max_deliver == 3
     assert config.filter_subject == "dead.>"
 
@@ -466,7 +613,7 @@ def test_a_dead_consumer_keeps_a_server_side_attempt_cap(bus):
 def test_the_dead_stream_uses_the_configured_dedupe_window(url):
     opened = nats.open_bus(BusConfig(backend="nats", url=url, dedupe_window_ms=1_234))
     try:
-        config = opened._loop.run(opened._js.stream_info("AGENTIHOOKS_DEAD")).config
+        config = opened._loop.run(opened._js.stream_info("AGENTIHOOKS-DEAD")).config
         assert config.duplicate_window == 1.234
     finally:
         opened.close()
@@ -520,6 +667,7 @@ def test_a_dead_letter_publish_refusal_requires_the_same_retained_event(stored_i
     refusal = APIError(code=400, err_code=10071, description="subject sequence differs")
     js = SimpleNamespace(
         _nc=SimpleNamespace(max_payload=1048576),
+        stream_info=mock.AsyncMock(side_effect=NotFoundError()),
         publish=mock.AsyncMock(side_effect=refusal),
         get_last_msg=mock.AsyncMock(return_value=SimpleNamespace(data=stored.encode())),
     )
@@ -531,7 +679,7 @@ def test_a_dead_letter_publish_refusal_requires_the_same_retained_event(stored_i
             with pytest.raises(APIError) as raised:
                 loop.run(nats._publish_dead(js, event(), "queue.work", 3))
             assert raised.value is refusal
-        js.get_last_msg.assert_awaited_once_with("AGENTIHOOKS_DEAD", f"dead.s.{letter.id}")
+        js.get_last_msg.assert_awaited_once_with("AGENTIHOOKS-DEAD", f"dead.s.{letter.id}")
     finally:
         loop.close()
 
