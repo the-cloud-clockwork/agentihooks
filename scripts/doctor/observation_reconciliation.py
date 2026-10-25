@@ -29,7 +29,7 @@ def _accepted(session_id, harness, cancelled):
         if record is None:
             raise ValueError("accepted transcript contains an unreadable record")
         key = record_id(record)
-        records[key] = {**record, "_source_id": key}
+        records[key] = record
         position = offset
     if position != end:
         raise ValueError("accepted transcript boundary is unavailable")

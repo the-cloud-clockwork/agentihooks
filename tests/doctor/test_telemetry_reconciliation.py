@@ -13,9 +13,22 @@ def _reconciled(missing, drift=6):
 
 
 def test_inflated_cursor_count_with_complete_identities_is_drift_instead_of_loss():
-    found = traces.active(_record(_reconciled([])), LIMITS)
-    assert [f.kind for f in found] == ["telemetry count drift"]
-    assert found[0].measure == 6
+    binding = _reconciled([])
+    [found] = traces.active(_record(binding), LIMITS)
+    assert found.kind == "telemetry count drift"
+    assert found.subject == binding["life"]
+    assert found.measure == 6
+    assert found.summary == "exporter aggregate differs from accepted observation identities"
+    assert found.threshold == "exporter accepted aggregate agrees with its observation identities"
+    assert found.evidence == (
+        f"agent {binding['agent']}",
+        "seat eng-1@s",
+        "task t1",
+        "session sid-1",
+        "exporter recorded 324 accepted observations",
+        "reconstructed 318 accepted observation identities",
+        "0 accepted observation identities missing from Langfuse",
+    )
 
 
 def test_a_missing_accepted_identity_is_stale_even_beside_an_inflated_counter():

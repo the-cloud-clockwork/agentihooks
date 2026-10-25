@@ -96,7 +96,7 @@ def test_incomplete_remote_identity_listing_is_unknown(cursors, total, rows):
         assert params == {"traceId": "tr", "limit": 100, "page": 1}
         return {"data": rows, "meta": {"totalItems": total}}
 
-    with pytest.raises(ValueError, match="identity listing is incomplete"):
+    with pytest.raises(ValueError, match="^observation identity listing is incomplete$"):
         observation_reconciliation.reconcile(get, "sid", "claude", "tr")
 
 
@@ -113,7 +113,7 @@ def test_remote_identity_pagination_is_bounded(cursors, monkeypatch):
         assert len(pages) <= 2
         return {"data": [], "meta": {"totalItems": 1000}}
 
-    with pytest.raises(ValueError, match="page budget exhausted"):
+    with pytest.raises(ValueError, match="^observation identity page budget exhausted$"):
         observation_reconciliation.reconcile(get, "sid", "claude", "tr")
     assert pages == [1, 2]
 
@@ -131,7 +131,12 @@ def test_unavailable_accepted_source_boundary_is_unknown(cursors, end):
     def get(path, params):
         raise AssertionError((path, params))
 
-    with pytest.raises(ValueError, match="accepted"):
+    message = (
+        "accepted observation identities unavailable for paged cursor"
+        if end == 0
+        else "accepted transcript boundary is unavailable"
+    )
+    with pytest.raises(ValueError, match=f"^{message}$"):
         observation_reconciliation.reconcile(get, "sid", "claude", "tr")
 
 
@@ -180,7 +185,8 @@ def test_active_read_cancellation_stops_identity_work(cursors, paged):
     def get(path, params):
         raise AssertionError((path, params))
 
-    with pytest.raises(TimeoutError, match="cancelled"):
+    message = "accepted identity reconstruction cancelled" if paged else "observation identity read cancelled"
+    with pytest.raises(TimeoutError, match=f"^{message}$"):
         observation_reconciliation.reconcile(get, "sid", "claude", "tr", lambda: True)
 
 
@@ -197,7 +203,7 @@ def test_unreadable_accepted_record_is_unknown(cursors):
     def get(path, params):
         raise AssertionError((path, params))
 
-    with pytest.raises(ValueError, match="unreadable record"):
+    with pytest.raises(ValueError, match="^accepted transcript contains an unreadable record$"):
         observation_reconciliation.reconcile(get, "sid", "claude", "tr")
 
 
@@ -211,5 +217,110 @@ def test_missing_paged_transcript_is_unknown(cursors, monkeypatch):
     def get(path, params):
         raise AssertionError((path, params))
 
-    with pytest.raises(ValueError, match="identities unavailable"):
+    with pytest.raises(ValueError, match="^accepted observation identities unavailable for paged cursor$"):
         observation_reconciliation.reconcile(get, "sid", "claude", "tr")
+
+
+def test_paged_source_without_an_acceptance_boundary_is_unknown(cursors):
+    from scripts.doctor import observation_reconciliation
+
+    _session(cursors, "sid", ["2026-10-07T08:00:00Z"], 1, paged={"spans": 9})
+    path = agent_trace._cursor_path("sid")
+    cursor = json.loads(path.read_text())
+    cursor.pop("source")
+    path.write_text(json.dumps(cursor))
+
+    def get(path, params):
+        raise AssertionError((path, params))
+
+    with pytest.raises(ValueError, match="^accepted observation identities unavailable for paged cursor$"):
+        observation_reconciliation.reconcile(get, "sid", "claude", "tr")
+
+
+def test_transcript_fallback_receives_the_session_and_native_harness(cursors, monkeypatch):
+    from hooks.observability import trace_flush
+    from scripts.doctor import observation_reconciliation
+
+    transcript = _session(cursors, "sid", ["2026-10-07T08:00:00Z"], 1, paged={"spans": 2})
+    trace_flush.request_path("sid").unlink()
+
+    def resolve(session, request):
+        assert session == "sid"
+        assert request == {"target": "codex"}
+        return str(transcript)
+
+    monkeypatch.setattr(trace_flush, "_transcript", resolve)
+    records = agent_trace.read_entries(str(transcript))
+    rows = [{"id": f"{span.span_id:016x}"} for span in agent_trace.session_spans(records, agent_trace.Identity("sid"))]
+
+    def get(path, params):
+        assert path == "observations"
+        assert params == {"traceId": "tr", "limit": 100, "page": 1}
+        return {"data": rows, "meta": {"totalItems": len(rows)}}
+
+    assert observation_reconciliation.reconcile(get, "sid", "codex", "tr") == {"accepted": 2, "missing": [], "drift": 0}
+
+
+def test_paged_legacy_ids_are_excluded_but_current_accepted_ids_are_retained(cursors):
+    from scripts.doctor import observation_reconciliation
+
+    transcript = _session(cursors, "sid", ["2026-10-07T08:00:00Z"], 1, paged={"spans": 2})
+    spans = agent_trace.session_spans(agent_trace.read_entries(str(transcript)), agent_trace.Identity("sid"))
+    ids = [f"{span.span_id:016x}" for span in spans]
+    path = agent_trace._cursor_path("sid")
+    cursor = json.loads(path.read_text())
+    cursor["accepted"] = {ids[0]: "legacy", ids[1]: "revision", "extra": "revision"}
+    path.write_text(json.dumps(cursor))
+
+    def get(path, params):
+        assert path == "observations"
+        assert params == {"traceId": "tr", "limit": 100, "page": 1}
+        return {"data": [{"id": ids[1]}, {"id": "extra"}], "meta": {"totalItems": 2}}
+
+    assert observation_reconciliation.reconcile(get, "sid", "claude", "tr") == {
+        "accepted": 2,
+        "missing": [],
+        "drift": 2,
+    }
+
+
+def test_an_exact_page_of_remote_identities_ends_without_an_extra_read(cursors):
+    from scripts.doctor import observation_reconciliation
+
+    _session(cursors, "sid", [], 0, accepted={"99": "rev"})
+
+    def get(path, params):
+        assert path == "observations"
+        assert params == {"traceId": "tr", "limit": 100, "page": 1}
+        return {"data": [{"id": str(i)} for i in range(100)], "meta": {"totalItems": 100}}
+
+    assert observation_reconciliation.reconcile(get, "sid", "claude", "tr") == {
+        "accepted": 1,
+        "missing": [],
+        "drift": 0,
+    }
+
+
+@pytest.mark.parametrize("conversation", ["sid", ""])
+def test_registry_passes_the_joined_session_harness_trace_and_cancellation(cursors, monkeypatch, conversation):
+    from scripts.doctor import observation_reconciliation
+
+    backend = Langfuse([_trace("tr", "sid")], [], total=0)
+    checks = []
+
+    def reconcile(get, session, harness, trace, cancelled):
+        assert get is backend
+        assert session == "sid"
+        assert harness == "codex"
+        assert trace == "tr"
+        assert callable(cancelled) and not cancelled()
+        checks.append(session)
+        return {"accepted": 1, "missing": ["missing"], "drift": 0}
+
+    monkeypatch.setattr(observation_reconciliation, "reconcile", reconcile)
+    [binding], failures = registry.read(
+        "s", [{**AGENT, "conversation_id": conversation, "harness": "codex"}], backend, {}, 15, 50
+    )
+    assert failures == []
+    assert checks == ["sid"]
+    assert binding["remote"]["reconciliation"] == {"accepted": 1, "missing": ["missing"], "drift": 0}
