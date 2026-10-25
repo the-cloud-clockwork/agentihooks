@@ -352,6 +352,60 @@ def test_notification_appends_private_records_without_email(tmp_path):
     ]
 
 
+def test_token_fallback_emails_the_operator_once_per_login_attempt(tmp_path, monkeypatch):
+    from scripts.swarm import operator_email
+
+    target = tmp_path / "slot" / "claude"
+    target.mkdir(parents=True)
+    sent = []
+    answers = ["email failed: down", "", ""]
+    monkeypatch.setattr(operator_email, "send", lambda *args: sent.append(args) or answers.pop(0))
+    first = {"AGENTIHOOKS_AGENT_NAME": "master@proof-1"}
+    text = (
+        "master@proof-1 runs on subscription token routing without Remote Control: "
+        "the current claude.ai session failed and the browser authorization ended in captcha."
+    )
+    assert chain.alert(first, target, "captcha", "/repo") == "email failed: down"
+    assert not (tmp_path / "slot" / "login-notifications.jsonl").exists()
+    assert chain.alert(first, target, "captcha", "/repo") == ""
+    assert chain.alert(first, target, "failure", "/repo") == ""
+    expected = ("Master login fell back to token routing", text, first, "/repo")
+    assert sent == [expected, expected]
+    path = tmp_path / "slot" / "login-notifications.jsonl"
+    assert [json.loads(line) for line in path.read_text().splitlines()] == [
+        {"step": "token", "outcome": "captcha", "transport": "email", "agent": "master@proof-1"},
+    ]
+    second = {"AGENTIHOOKS_AGENT_NAME": "master@proof-2"}
+    assert chain.alert(second, target, "failure", "/repo") == ""
+    assert sent[-1] == (
+        "Master login fell back to token routing",
+        "master@proof-2 runs on subscription token routing without Remote Control: "
+        "the current claude.ai session failed and the browser authorization ended in failure.",
+        second,
+        "/repo",
+    )
+    assert json.loads(path.read_text().splitlines()[-1]) == {
+        "step": "token",
+        "outcome": "failure",
+        "transport": "email",
+        "agent": "master@proof-2",
+    }
+
+
+def test_token_fallback_alert_ignores_other_records_of_the_same_agent(tmp_path, monkeypatch):
+    from scripts.swarm import operator_email
+
+    target = tmp_path / "claude"
+    sent = []
+    monkeypatch.setattr(operator_email, "send", lambda *args: sent.append(args) or "")
+    chain.notification(target, "browser", "captcha", "inbox")
+    (tmp_path / "login-notifications.jsonl").open("a").write(
+        json.dumps({"step": "token", "outcome": "captcha", "transport": "none", "agent": "master@proof-1"}) + "\n"
+    )
+    assert chain.alert({"AGENTIHOOKS_AGENT_NAME": "master@proof-1"}, target, "captcha", "/repo") == ""
+    assert len(sent) == 1
+
+
 @pytest.mark.parametrize(
     "kind,detail",
     [

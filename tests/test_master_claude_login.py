@@ -829,15 +829,31 @@ def test_launch_preparation_checks_live_login_then_waits_for_browser(
 
     monkeypatch.setattr(native_login, "check", check)
     monkeypatch.setattr(chain, "authorize", browser, raising=False)
-    monkeypatch.setattr(operator_email, "send", lambda *_: pytest.fail("login must not send email"))
+    sent = []
+    monkeypatch.setattr(operator_email, "send", lambda *args: sent.append(args) or "")
     prepared = login.prepare_launch(_environ(rendered), tmp_path)
+    records = [
+        json.loads(line) for line in (login.home().parent / "login-notifications.jsonl").read_text().splitlines()
+    ]
     if valid or outcome == "success":
         assert prepared == (login.home(), "masteratexample_com")
         assert calls == (["current"] if valid else ["current", "browser", "current"])
+        assert sent == []
+        assert all(record["transport"] != "email" for record in records)
     else:
         assert prepared is None
         assert calls == ["current", "browser"]
         assert login.holders(login.root()) == {}
+        assert sent == [
+            (
+                "Master login fell back to token routing",
+                "master@a-1 runs on subscription token routing without Remote Control: "
+                f"the current claude.ai session failed and the browser authorization ended in {outcome}.",
+                _environ(rendered),
+                str(tmp_path),
+            )
+        ]
+        assert records[-1] == {"step": "token", "outcome": outcome, "transport": "email", "agent": "master@a-1"}
 
 
 def test_browser_preparation_skips_a_slot_held_by_another_process(ah, rendered, tmp_path, monkeypatch):
