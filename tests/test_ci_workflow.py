@@ -654,6 +654,7 @@ def test_equivalence_runs_on_every_ledger_pull_request_without_a_body_marker():
     assert all("pull_request.body" not in str(step.get("if", "")) for step in job["steps"])
     [head] = [step for step in job["steps"] if step.get("with", {}).get("path") == "head"]
     assert "ref" not in head["with"]
+    assert "paths" not in workflow[True]["pull_request"]
 
 
 def test_equivalence_replays_wait_on_the_base_copy_of_the_trigger():

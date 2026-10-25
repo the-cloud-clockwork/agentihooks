@@ -1,11 +1,14 @@
 import os
 import subprocess
+import time
+from collections.abc import Iterator
 from pathlib import Path
 
 from hooks.common import log
 from hooks.hook_manager import BlockAction
 
 _PASS_ARGS = frozenset({"--delete", "-d", "--dry-run", "-n"})
+_VALUE_OPTIONS = frozenset({"-o", "--push-option", "--exec", "--receive-pack", "--repo"})
 
 
 def _push(tokens: list[str]) -> tuple[list[str], list[str]] | None:
@@ -20,14 +23,15 @@ def _push(tokens: list[str]) -> tuple[list[str], list[str]] | None:
     return (dirs, rest[1:]) if rest[:1] == ["push"] else None
 
 
+def _unspaced(spec: str) -> bool:
+    return spec.startswith(":") or spec.split(":")[-1].removeprefix("refs/heads/").startswith("diffcheck/")
+
+
 def _exempt(args: list[str]) -> bool:
     if _PASS_ARGS.intersection(args):
         return True
     refspecs = [arg for arg in args if not arg.startswith("-")][1:]
-    return bool(refspecs) and all(
-        spec.startswith(":") or spec.split(":")[-1].removeprefix("refs/heads/").startswith("diffcheck/")
-        for spec in refspecs
-    )
+    return bool(refspecs) and all(_unspaced(spec) for spec in refspecs)
 
 
 def _toplevel(cwd: Path) -> Path | None:
@@ -120,14 +124,13 @@ def _folder(cwd: Path, folders: list[str]) -> Path:
     return cwd
 
 
-def _unpassed(payload: dict) -> Path | None:
+def _pushes(payload: dict) -> Iterator[tuple[Path, list[str]]]:
     from hooks.context.shell_commands import located
-    from scripts.ci_prepush import passed
 
     tool_input = payload["tool_input"]
     command = tool_input.get("command") or tool_input.get("cmd")
     if not command:
-        return None
+        return
     cwd = Path(payload.get("cwd") or os.getcwd(), _path(tool_input.get("workdir") or ""))
     selected = bool(tool_input.get("workdir"))
     for tokens, folders in located(command):
@@ -136,8 +139,78 @@ def _unpassed(payload: dict) -> Path | None:
             continue
         base = _push_directory(_folder(cwd, folders), selected or bool(folders) or bool(push[0]))
         root = _require_directory(_toplevel(base.joinpath(*map(_path, push[0]))), "repository lookup")
-        if root and (root / "scripts" / "ci_prepush" / "__init__.py").is_file() and not passed(root):
+        if root:
+            yield root, push[1]
+
+
+def _unpassed(pushes: Iterator[tuple[Path, list[str]]], seen: list[tuple[Path, list[str]]]) -> Path | None:
+    from scripts.ci_prepush import passed
+
+    for root, args in pushes:
+        seen.append((root, args))
+        if (root / "scripts" / "ci_prepush" / "__init__.py").is_file() and not passed(root):
             return root
+    return None
+
+
+def _branches(root: Path, args: list[str]) -> tuple[str, list[str]]:
+    words, rest = [], iter(args)
+    for arg in rest:
+        if arg in _VALUE_OPTIONS:
+            next(rest, None)
+        elif not arg.startswith("-"):
+            words.append(arg)
+    current = subprocess.run(
+        ["git", "-C", str(root), "rev-parse", "--abbrev-ref", "HEAD"], capture_output=True, text=True
+    ).stdout.strip()
+    if not words:
+        pushed = subprocess.run(
+            ["git", "-C", str(root), "for-each-ref", "--format=%(push:short)", f"refs/heads/{current}"],
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        remote, _, branch = pushed.partition("/")
+        if branch:
+            return remote, [branch]
+    branches = []
+    for spec in words[1:] or ["HEAD"]:
+        if _unspaced(spec):
+            continue
+        branch = spec.removeprefix("+").split(":")[-1].removeprefix("refs/heads/")
+        branches.append(current if branch == "HEAD" else branch)
+    return (words[0] if words else "origin"), branches
+
+
+def _last_push(root: Path, remote: str, branch: str) -> float | None:
+    common = _common_dir(root)
+    if not common:
+        return None
+    named = subprocess.run(["git", "-C", str(root), "remote"], capture_output=True, text=True).stdout.split()
+    log_file = Path(common, "logs", "refs", "remotes", remote, branch)
+    if remote not in named or not log_file.is_file():
+        return None
+    stamps = [
+        float(line.split("\t")[0].split()[-2])
+        for line in log_file.read_text().splitlines()
+        if line.endswith("\tupdate by push")
+    ]
+    return stamps[-1] if stamps else None
+
+
+def _crowded(pushes: list[tuple[Path, list[str]]], now: float) -> str | None:
+    spacing = int(os.getenv("AGENTIHOOKS_PUSH_SPACING_S", "300"))
+    for root, args in pushes:
+        remote, branches = _branches(root, args)
+        for branch in branches:
+            last = _last_push(root, remote, branch)
+            if last is not None and 0 <= now - last < spacing:
+                wait = int(last + spacing - now) + 1
+                after = time.strftime("%H:%M:%S", time.gmtime(last + spacing))
+                return (
+                    f"BLOCKED: the last push to {branch} was {int(now - last)} s ago and its Tests run is still "
+                    f"running; pushing now cancels it. Keep committing locally and push {branch} after "
+                    f"{after} UTC, in {wait} s, so one run grades every commit. Never leave the final commit unpushed."
+                )
     return None
 
 
@@ -145,12 +218,16 @@ def check_prepush(payload: dict) -> None:
     import shlex
 
     try:
-        root = _unpassed(payload)
+        pushes = []
+        root = _unpassed(_pushes(payload), pushes)
+        crowded = None if root else _crowded(pushes, time.time())
     except BlockAction:
         raise
     except Exception as exc:
         log("prepush_guard failed", {"error": str(exc)})
         return
+    if crowded:
+        raise BlockAction(crowded)
     if root is None:
         return
     command = "python -m scripts.ci_prepush"
