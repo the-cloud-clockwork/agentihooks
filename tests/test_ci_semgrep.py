@@ -18,8 +18,8 @@ def _jobs():
     return _semgrep()["jobs"]
 
 
-def test_wrapper_runs_only_the_shared_scan_and_the_chart_guard():
-    assert set(_jobs()) == {"scan", "charts"}
+def test_wrapper_runs_the_shared_scan_feature_tests_and_chart_guard():
+    assert set(_jobs()) == {"scan", "feature-tests", "charts"}
 
 
 def test_scan_calls_the_shared_workflow_on_its_main_branch():
