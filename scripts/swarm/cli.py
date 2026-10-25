@@ -111,6 +111,7 @@ from scripts.swarm import (
     phase_state,
     phases,
     plan_review,
+    prerequisite_wait,
     priming_trace,
     prompt,
     queue_exit,
@@ -1849,6 +1850,7 @@ def cmd_wait(store, args):
         get = InboxStore(store.redis).get
         if problem := waits.target_problem(held["kind"], held["target"], agent.task, rows, get):
             raise SwarmError(problem)
+        prerequisite_wait.admit(store, args.slug, agent, held, LedgerClient())
         if held["kind"] == "checks" and waits.PULL_URL.fullmatch(held["target"]):
             head = ledger_events.head(held["target"])
             if head == "":
