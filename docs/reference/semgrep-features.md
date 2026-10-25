@@ -17,6 +17,8 @@ Add `<feature>.yml` and a same-basename fixture such as `<feature>.py` or
 that regresses the feature, and `# ok: feature-<name>` before code that preserves
 it. YAML fixtures use separate documents for independent cases. Keep both cases
 in every fixture pair; use the exact rule id in the annotations.
+For YAML, use pattern ellipses where surrounding mapping fields or list items
+are allowed, and keep those surrounding fields in the fixtures.
 
 The Semgrep workflow runs `semgrep --metrics off --test .semgrep/features` in
 its parallel `feature-tests` job. Test mode fails when the regression stops
