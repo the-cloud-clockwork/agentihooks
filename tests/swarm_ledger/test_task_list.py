@@ -65,7 +65,7 @@ def test_a_page_reuses_the_row_revisions_taken_at_load(monkeypatch):
     monkeypatch.setattr(resources, "revision", lambda value: hashed.append(value) or revision(value))
     reply = task_list.read(repository, "hashes", {"limit": 2})
     assert [row["revision"] for row in reply["data"]] == [revision(row) for row in repository.state["tasks"]]
-    assert len(hashed) == 1
+    assert hashed == [[], reply["data"]]
 
 
 def test_a_new_task_revision_or_repository_loads_the_rows_again():
