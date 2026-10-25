@@ -88,6 +88,16 @@ def master_before_login(binary, args, environ, report):
     return prepared
 
 
+def master_between_login_and_guard(binary, args, environ, report):
+    prepared = login.prepare_launch(environ, cwd)
+    # ruleid: feature-shared-preferred-master-login
+    login.launch_token(binary, args, environ, report)
+    if prepared is None:
+        # ok: feature-shared-preferred-master-login
+        return login.launch_token(binary, args, environ, report)
+    return prepared
+
+
 def master_after_login(binary, args, environ, report):
     prepared = login.prepare_launch(environ, cwd)
     if prepared is None:
