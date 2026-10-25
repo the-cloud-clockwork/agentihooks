@@ -126,7 +126,7 @@ def test_unit_shards_restore_dev_durations_from_the_cache_the_dev_push_saves():
     assert adopt["env"] == ADOPT_ENV
 
 
-@pytest.mark.parametrize("name", ["mutation-stats", "mutation"])
+@pytest.mark.parametrize("name", ["mutation-plan", "mutation-stats", "mutation"])
 def test_mutation_jobs_adopt_dev_durations_before_the_sandbox_copies_the_record(name):
     steps = _workflow("test.yml")["jobs"][name]["steps"]
     names = [step.get("name") for step in steps]
@@ -136,7 +136,8 @@ def test_mutation_jobs_adopt_dev_durations_before_the_sandbox_copies_the_record(
     assert names.index("Restore latest dev durations") + 1 == names.index("Adopt latest dev durations") < mutate
     assert restore["uses"] == "actions/cache/restore@v4"
     assert restore["with"]["path"] == "~/dev-durations"
-    assert restore["with"]["key"] == "durations-merged-${{ github.event.pull_request.base.sha || github.sha }}"
+    assert restore["with"]["key"] == "durations-merged-${{ github.event.pull_request.base.sha }}"
+    assert restore["if"].endswith(" && github.event_name == 'pull_request'")
     assert restore["with"]["restore-keys"] == "durations-merged-"
     assert "from tests.dev_durations import adopt" in adopt["run"]
     assert 'Path(".test_durations").write_text' in adopt["run"]
