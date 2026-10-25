@@ -1,4 +1,8 @@
+import asyncio
+import json
 import random
+from types import SimpleNamespace
+from unittest import mock
 
 import pytest
 
@@ -82,3 +86,42 @@ def test_a_stale_large_update_leaves_no_chunks_behind(bus, monkeypatch):
         store.update("deadlines", large(bus, "stale"), revision)
     assert chunk_bytes(bus, stream, pattern) == before
     assert store.get("deadlines").revision == current
+
+
+def test_reclaim_purges_only_unreferenced_chunks_written_before_the_head():
+    owner = nats_payload.scope("deadlines", 0).split(".")[0]
+    pattern = f"pre._chunks.{owner}."
+    subjects = {f"{pattern}{name}": 1 for name in ("3.kept.0", "3.kept.1", "4.gone.0", "4.gone.1", "5.flight.0")}
+    js = SimpleNamespace(
+        stream_info=mock.AsyncMock(return_value=SimpleNamespace(state=SimpleNamespace(subjects=subjects))),
+        purge_stream=mock.AsyncMock(),
+    )
+    referenced = nats_payload.PAGED + json.dumps([f"{owner}.3.kept", 2]).encode()
+    history = mock.AsyncMock(return_value=[b"plain", b"", referenced])
+    asyncio.run(nats_payload.reclaim(js, "stream", "pre.", "deadlines", history, 5))
+    js.stream_info.assert_awaited_once_with("stream", subjects_filter=f"{pattern}>")
+    assert js.purge_stream.await_args_list == [
+        mock.call("stream", subject=f"{pattern}4.gone.0"),
+        mock.call("stream", subject=f"{pattern}4.gone.1"),
+    ]
+
+
+def test_reclaim_skips_history_when_no_chunk_precedes_the_head():
+    owner = nats_payload.scope("deadlines", 7).split(".")[0]
+    state = SimpleNamespace(subjects={f"p._chunks.{owner}.7.x.0": 1})
+    js = SimpleNamespace(
+        stream_info=mock.AsyncMock(return_value=SimpleNamespace(state=state)),
+        purge_stream=mock.AsyncMock(),
+    )
+    history = mock.AsyncMock()
+    asyncio.run(nats_payload.reclaim(js, "s", "p.", "deadlines", history, 7))
+    state.subjects = None
+    asyncio.run(nats_payload.reclaim(js, "s", "p.", "deadlines", history, 9))
+    history.assert_not_awaited()
+    js.purge_stream.assert_not_awaited()
+
+
+def test_chunk_scopes_separate_keys_and_bases():
+    assert nats_payload.scope("a", 1) == f"{nats_payload.scope('a', 0).split('.')[0]}.1"
+    assert nats_payload.scope("a", 0) != nats_payload.scope("b", 0)
+    assert len(nats_payload.scope("a", 0).split(".")[0]) == 32
