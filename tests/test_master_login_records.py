@@ -136,8 +136,17 @@ def test_the_operator_order_outranks_room(monkeypatch, rendered, tmp_path):
     _stored(1, {"emailAddress": "one@example.com"})
     _stored(2, TWO)
     _room(monkeypatch, oneatexample_com=10.0, twoatexample_com=80.0)
-    monkeypatch.setenv(login.ORDER_ENV, "not a slug!, one@example.com,twoatexample_com")
+    monkeypatch.setenv(login.ORDER_ENV, " , one@example.com,twoatexample_com")
     assert login.prepare(_environ(rendered), tmp_path)[0] == login.home(1)
+
+
+def test_no_operator_order_ranks_by_room_alone(monkeypatch, rendered, tmp_path):
+    monkeypatch.setattr(openbao_kv, "from_env", lambda environ: None)
+    monkeypatch.delenv(login.ORDER_ENV, raising=False)
+    _stored(1, {"emailAddress": "XXXX"})
+    _stored(2, TWO)
+    _room(monkeypatch, xxxx=10.0, twoatexample_com=80.0)
+    assert login.prepare(_environ(rendered), tmp_path)[0] == login.home(2)
 
 
 def test_a_held_first_choice_falls_to_the_next_in_the_operator_order(monkeypatch, rendered, tmp_path):
