@@ -23,6 +23,9 @@ jobs:
       runs_on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && 'anton-oss-light' || 'ubuntu-latest' }}
 
   feature-tests:
+    concurrency:
+      group: ${{ github.workflow == 'Semgrep' && format('hosted-lane-{0}', ((endsWith(github.run_id, '0') || endsWith(github.run_id, '1') || endsWith(github.run_id, '2')) && 'a') || ((endsWith(github.run_id, '3') || endsWith(github.run_id, '4') || endsWith(github.run_id, '5')) && 'b') || 'c') || format('semgrep-features-{0}', github.run_id) }}
+      queue: ${{ github.workflow == 'Semgrep' && 'max' || 'single' }}
     runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && 'anton-oss-light' || 'ubuntu-latest' }}
     timeout-minutes: 5
     steps:
@@ -38,7 +41,7 @@ jobs:
         run: python -m pip install semgrep==1.177.0
 
       - name: Operator feature regressions and passing fixtures
-        run: "true"
+        run: semgrep --test --metrics off .semgrep/features
 
   charts:
     concurrency:

@@ -1,4 +1,5 @@
 # ruleid: feature-semgrep-feature-tests
+name: Semgrep
 jobs:
   scan:
     uses: fleet/semgrep.yml@main
