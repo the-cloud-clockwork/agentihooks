@@ -219,7 +219,7 @@ def selecting_entries(entries: set[str], test: str) -> list[str]:
 
 
 def result_by_path(result: dict, paths: list[str], owners: dict[str, list[str]]) -> dict[str, dict]:
-    kept = {key: result[key] for key in ("status", "cpu", "files", "modules") if key in result}
+    kept = {key: result[key] for key in ("cpu", "modules") if key in result}
     names = [name for name in ("durations", "dependencies") if name in result]
     parts = {path: {**kept, "tests": {}, **{name: {} for name in names}} for path in paths}
     for name in names:
