@@ -289,6 +289,30 @@ def test_pushed_work_without_a_pull_request_or_a_line_since_the_push_is_refused(
     assert rig.inbox() == [TEMPLATE]
 
 
+@pytest.mark.parametrize("debt", ["progress", "git", "both"])
+def test_refusal_names_the_missing_step_and_progress_command(rig, debt):
+    if debt == "git":
+        refuse_the_push(rig)
+    else:
+        rig.commit()
+        rig.stop()
+        if debt == "both":
+            (rig.tree / "readme").write_text("changed\n")
+    wait_on(rig, {"kind": "checks", "target": "https://github.com/o/r/pull/7", "task": "t1"})
+    decision = rig.stop()
+    assert not decision.allowed
+    command = f'agentihooks swarm {SLUG} progress --doing "Describe current work" --ends-when "Describe completion"'
+    if debt in {"progress", "both"}:
+        assert "Pushed work has no recorded progress since the push." in decision.reason
+        assert command in decision.reason
+        assert "A checks wait does not waive recording progress." in decision.reason
+    if debt == "progress":
+        assert "uncommitted or unpushed" not in decision.reason
+    else:
+        assert "uncommitted or unpushed" in decision.reason
+    assert decision.reason in rig.inbox()
+
+
 def test_a_ledger_line_by_the_agent_after_the_push_lets_the_stop_through(rig):
     rig.commit()
     rig.stop()
