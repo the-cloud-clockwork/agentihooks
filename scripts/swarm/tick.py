@@ -1100,6 +1100,14 @@ def _owner_hold(slug, store, runtime, task):
 
 
 def _spawn(slug, config, store, ledger, runtime, rows, doc, now_ms):
+    try:
+        return _spawn_ordered(slug, config, store, ledger, runtime, rows, doc, now_ms)
+    finally:
+        if end := getattr(runtime, "end_placement_pass", None):
+            end()
+
+
+def _spawn_ordered(slug, config, store, ledger, runtime, rows, doc, now_ms):
     agents = store.agents(slug)
     taken = {a.seat for a in agents}
     held = timing.timed(_held_for_master, slug, store, now_ms)

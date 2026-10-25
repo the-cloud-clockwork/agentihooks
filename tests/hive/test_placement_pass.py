@@ -73,3 +73,24 @@ def test_ordering_and_spawn_reuse_one_placement_and_the_next_pass_refreshes(setu
     assert len(queue) == (1 if refused else 0)
     assert bool(waits) is not refused
     assert launch.hives.call_count == 2
+
+
+def test_spawn_pass_ends_the_placement_cache_for_later_launches(setup):  # noqa: F811
+    from scripts.swarm.tick import _spawn
+
+    task = {"id": "task", "title": "Launch on a hive"}
+    write_hive(setup, excluded=["engineer"])
+    original = RoutedRuntime(setup.herdr, RuntimeRouter([]))
+    runtime = controller.FencedRuntime(setup.store, setup.config.slug, setup.held, original, "compose")
+    launch = runtime.runtime.hive_launch
+    launch.hives = Mock(wraps=launch.hives)
+    ledger = FakeLedger([task])
+    slug = setup.config.slug
+
+    _spawn(slug, setup.config, setup.store, ledger, runtime, ledger.rows, ledger.state(slug), 0)
+    assert launch.hives.call_count == 1
+    assert launch.placement_cache is None
+
+    write_hive(setup, excluded=[])
+    assert launch.select(setup.config, "eng", task).hive
+    assert launch.hives.call_count == 2

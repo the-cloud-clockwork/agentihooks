@@ -105,6 +105,10 @@ class FencedRuntime:
         if launch := getattr(self.runtime, "hive_launch", None):
             launch.placement_cache = {}
 
+    def end_placement_pass(self) -> None:
+        if launch := getattr(self.runtime, "hive_launch", None):
+            launch.placement_cache = None
+
     def placement_refusal(self, lane: str, task: dict) -> str:
         refused = self._refusal(lane, task)
         return "" if _to_workstation(lane, refused) else refused
