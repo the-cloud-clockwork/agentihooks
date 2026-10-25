@@ -4,7 +4,7 @@ import json
 import os
 from contextlib import suppress
 
-from scripts.swarm import live_binding, profile_choice, seat_spawn
+from scripts.swarm import live_binding, profile_choice, seat_spawn, timing
 from scripts.swarm.store import RedisStore, SwarmConfig
 
 KEY = "profile-decisions"
@@ -26,9 +26,9 @@ def placeable(
     for task in ready:
         if slots == room:
             break
-        decided(slug, config, store, runtime, lane, task)
+        timing.timed(decided, slug, config, store, runtime, lane, task)
         try:
-            refused = seat_spawn.placed_elsewhere(runtime, lane, task)
+            refused = timing.timed(seat_spawn.placed_elsewhere, runtime, lane, task)
         except profile_choice.ProfileUnresolved as exc:
             found.append({**task, UNRESOLVED: str(exc)})
             continue
