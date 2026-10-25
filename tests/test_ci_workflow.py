@@ -706,8 +706,22 @@ def test_shards_wait_only_on_the_durations_lookup():
         ["select", "reuse", "admission"],
         ["test-count", "select", "reuse", "admission"],
     )
-    assert jobs["unit"]["needs"] == ["split", "select", "reuse", "admission"]
+    assert jobs["unit"]["needs"] == ["split", "queue-split", "select", "reuse", "admission"]
     assert jobs["lint"]["needs"] in (["reuse"], ["reuse", "admission"])
+
+
+def test_queue_split_starts_beside_selection_and_keeps_the_same_unit_inputs():
+    jobs = _workflow()["jobs"]
+    split = jobs["queue-split"]
+    assert split["needs"] == jobs["select"]["needs"]
+    assert "select" not in split["needs"]
+    assert "needs.select" not in str(split)
+    assert split["strategy"] == jobs["split"]["strategy"]
+    assert split["steps"] == jobs["split"]["steps"]
+    assert "queue-split" in jobs["unit"]["needs"]
+    assert "needs.queue-split.outputs.queue_312" in jobs["unit"]["strategy"]["matrix"]["include"]
+    assert "queue-split" in jobs["gate-required"]["needs"]
+    assert "github.event_name != 'merge_group'" in jobs["split"]["if"]
 
 
 def test_full_suite_collection_starts_beside_selection_and_feeds_split():
