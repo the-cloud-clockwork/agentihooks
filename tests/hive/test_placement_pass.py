@@ -13,7 +13,7 @@ from tests.swarm.test_tick import FakeLedger
 def ordered(world, runtime, task):
     ledger = FakeLedger([task])
     return _spawn_order(
-        setup.config.slug, setup.config, setup.store, [], ledger.rows, ledger.state(setup.config.slug), runtime
+        world.config.slug, world.config, world.store, [], ledger.rows, ledger.state(world.config.slug), runtime
     )
 
 
@@ -38,7 +38,7 @@ def test_ordering_and_spawn_reuse_one_placement_and_the_next_pass_refreshes(setu
         assert _room_wait(runtime, "eng", request.task) == ""
         runtime.spawn(setup.config, "eng", request.name, request.task)
         order = launch.orders_for(request.task["id"])
-        assert order.hive_id == first.hive
+        assert order.hive == first.hive
     assert launch.hives.call_count == 1
 
     write_hive(setup, excluded=[] if refused else ["engineer"])
