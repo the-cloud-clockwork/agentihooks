@@ -936,7 +936,7 @@ def test_shard_verification_starts_from_the_plan_and_prefetches_complete_reports
     )
     assert "REUSED" in check
     assert job["timeout-minutes"] == 25
-    assert job["permissions"]["actions"] == "read"
+    assert job["permissions"] == {"contents": "read"}
 
 
 def test_queue_gate_is_the_early_verifier_and_the_standard_gate_summarizes_queue_runs():

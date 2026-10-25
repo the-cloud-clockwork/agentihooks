@@ -1557,7 +1557,6 @@ jobs:
     timeout-minutes: 25
     permissions:
       contents: read
-      actions: read
     strategy:
       fail-fast: false
       matrix:
@@ -2366,17 +2365,18 @@ jobs:
         run: python3 -m scripts.ci_budget --run "$RUNNER_TEMP/run.json" --jobs "$RUNNER_TEMP/jobs.jsonl"
 
   queue-fail-fast:
+    name: ${{ github.event_name == 'merge_group' && 'Gate — Required' || 'queue-fail-fast' }}
     outputs:
       failed: ${{ steps.watch.outputs.failed }}
     if: ${{ !cancelled() && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && (github.event_name != 'merge_group' || needs.reuse.outputs.reused != 'true') && github.event_name != 'pull_request' }}
-    needs: [reuse, admission]
+    needs: [split, select, reuse, admission]
     runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && 'anton-oss-light' || 'ubuntu-latest' }}
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
         if: github.event_name == 'merge_group'
         with:
-          ref: ${{ github.sha }}
+          ref: ${{ github.event.merge_group.base_sha }}
           persist-credentials: false
 
       - name: Mint the tcc main ci App token
@@ -2391,59 +2391,22 @@ jobs:
           permission-contents: read
           permission-pull-requests: read
 
-      - name: Watch for the first failed graded job
+      - name: Verify every queue gate while the units finish
         id: watch
         if: github.event_name == 'merge_group'
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
-        run: |
-          misses=0
-          queue_misses=0
-          while true; do
-            poll=15
-            if queue_head=$(gh api "repos/$GITHUB_REPOSITORY/git/matching-refs/${GITHUB_REF#refs/}" --jq ".[] | select(.ref == \"$GITHUB_REF\") | .object.sha"); then
-              queue_misses=0
-              if [[ "$queue_head" != "$GITHUB_SHA" ]]; then
-                record=$(python3 -m scripts.ci_queue_rebuild "$queue_head") || record="record unavailable"
-                echo "failed=queue group is no longer current ($record)" >> "$GITHUB_OUTPUT"
-                exit 0
-              fi
-            else
-              if (( ++queue_misses == 10 )); then
-                echo "::error::Ten reads of this queue reference failed in a row; queue liveness is unknown."
-                exit 1
-              fi
-              sleep 15
-              continue
-            fi
-            if python3 -m scripts.ci_budget.jobs "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT/jobs" > "$RUNNER_TEMP/jobs.jsonl"; then
-              misses=0
-              verdict=$(python3 -m scripts.ci_queue_fail_fast "$RUNNER_TEMP/jobs.jsonl" --repo "$GITHUB_REPOSITORY" --seen "$RUNNER_TEMP/shard-logs.json") || { echo "::warning::The shard log check failed; this poll waits."; sleep 15; continue; }
-              if [[ "$verdict" != wait ]]; then
-                echo "$verdict" >> "$GITHUB_OUTPUT"
-                exit 0
-              fi
-              if jq -se 'any(.[]; .name | startswith("unit (")) and all(.[]; (.name | startswith("unit (") | not) or .status == "completed")' "$RUNNER_TEMP/jobs.jsonl"; then
-                poll=5
-              fi
-            elif (( ++misses == 10 )); then
-              echo "::warning::Ten reads of this run's jobs failed in a row; the entry waits for Gate Required."
-              exit 0
-            fi
-            sleep "$poll"
-          done
+          QUEUE_PLAN: ${{ format('[{0}]', needs.split.outputs.queue_312) }}
+        run: python3 -m scripts.ci_gate_queue || { echo "failed=queue verification" >> "$GITHUB_OUTPUT"; exit 1; }
 
-      - name: Cancel this queue run so the queue drops the entry
-        if: steps.watch.outputs.failed != ''
+      - name: Cancel a rejected queue run
+        if: failure() && github.event_name == 'merge_group'
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
-          FAILED: ${{ steps.watch.outputs.failed }}
-        run: |
-          echo "::error::$FAILED failed, so Gate Required cannot pass; cancelling this queue run."
-          gh run cancel "$GITHUB_RUN_ID" -R "$GITHUB_REPOSITORY"
+        run: gh run cancel "$GITHUB_RUN_ID" -R "$GITHUB_REPOSITORY"
 
   gate-required:
-    name: Gate — Required
+    name: ${{ github.event_name == 'merge_group' && 'Queue gate summary' || 'Gate — Required' }}
     needs: [select, split, unit, unit-lost, unit-rerun, unit-selected, shard-check, test-count, coverage-ratchet, lint, docs, sonar, mutation-plan, mutation-stats, mutation, swarm-image, worker-image, brain-smoke, writer-lock, kind-due, helm-kind, semgrep, ledger-load, stage-budget, reuse, queue-fail-fast]
     if: ${{ always() }}
     runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && 'anton-oss-light' || 'ubuntu-latest' }}
