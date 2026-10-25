@@ -9,16 +9,19 @@ from pathlib import Path
 import yaml
 
 
-def _tests(root: Path) -> dict[str, str]:
+def _tests(root: Path) -> dict[str, str | None]:
     marked = {}
-    for path in (root / "tests").rglob("*.py"):
+    for path in sorted((root / "tests").rglob("*.py")):
         if not (path.name.startswith("test_") or path.name.endswith("_test.py")):
             continue
         nodes = _suite_nodes(ast.parse(path.read_text()).body, path.relative_to(root).as_posix())
         for test_id, node in nodes.items():
+            marked[test_id] = None
             for decorator in node.decorator_list:
                 if isinstance(decorator, ast.Call) and ast.unparse(decorator.func) == "pytest.mark.feature":
                     marked[test_id] = ast.literal_eval(decorator.args[0])
+                    if not isinstance(marked[test_id], str) or not marked[test_id].strip():
+                        raise ValueError(f"{test_id}: feature marker requires an id")
     return marked
 
 
@@ -69,20 +72,14 @@ def _suite_nodes(body: list[ast.stmt], prefix: str) -> dict[str, ast.FunctionDef
     return result
 
 
-def _behaviour_test(root: Path, node_id: str, name: str, tests: dict[str, str]) -> None:
-    filename = node_id.split("::")[0]
-    path = root / filename
-    if not path.resolve().is_relative_to((root / "tests").resolve()) or not path.is_file():
+def _behaviour_test(node_id: str, name: str, tests: dict[str, str | None]) -> None:
+    if node_id not in tests:
         raise ValueError(f"{name}: missing behaviour test {node_id}")
-    if not (path.name.startswith("test_") or path.name.endswith("_test.py")) or path.suffix != ".py":
-        raise ValueError(f"{name}: missing behaviour test {node_id}")
-    if node_id not in _suite_nodes(ast.parse(path.read_text()).body, filename):
-        raise ValueError(f"{name}: missing behaviour test {node_id}")
-    if tests.get(node_id) != name:
+    if tests[node_id] != name:
         raise ValueError(f"{name}: behaviour test requires matching feature marker")
 
 
-def _entry(entry: dict, root: Path, rules: set[str], tests: dict[str, str]) -> None:
+def _entry(entry: dict, root: Path, rules: set[str], tests: dict[str, str | None]) -> None:
     required = ("id", "operator_words", "ordered_at", "ledger_item", "behaviour", "semgrep_rule", "behaviour_test")
     for key in required:
         if not isinstance(entry.get(key), str) or not entry[key].strip():
@@ -96,7 +93,7 @@ def _entry(entry: dict, root: Path, rules: set[str], tests: dict[str, str]) -> N
         raise ValueError(f"{name}: invalid ledger_item")
     if entry["semgrep_rule"] not in rules:
         raise ValueError(f"{name}: missing rule {entry['semgrep_rule']}")
-    _behaviour_test(root, entry["behaviour_test"], name, tests)
+    _behaviour_test(entry["behaviour_test"], name, tests)
     command = entry.get("live_check")
     if not isinstance(command, list) or not command or not all(isinstance(arg, str) and arg for arg in command):
         raise ValueError(f"{name}: requires live_check argument list")
@@ -120,7 +117,7 @@ def validate(root: Path, map_path: Path) -> int:
         owned_tests.add(entry["behaviour_test"])
     if missing := rules - owned_rules:
         raise ValueError(f"unmapped rule: {sorted(missing)}")
-    if missing := tests.keys() - owned_tests:
+    if missing := {node_id for node_id, feature in tests.items() if feature is not None} - owned_tests:
         raise ValueError(f"unmapped feature test: {sorted(missing)}")
     return len(entries)
 
