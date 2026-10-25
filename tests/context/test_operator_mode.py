@@ -750,6 +750,19 @@ def test_the_reply_limit_reads_the_environment_skips_markers_and_checks_retries(
     assert operator_mode.reply_refusal({"session_id": "s1"}, env) == ""
 
 
+def test_spoken_text_drops_markers_and_comments_in_linear_scan():
+    spoken = operator_mode._spoken
+    assert spoken("a <!-- @lesson -->x y<!-- @/lesson --> b") == "a   b"
+    assert spoken("a <!-- @decision date=1 -->x<!-- @/decision -->b") == "a  b"
+    assert spoken("a <!-- note -->b") == "a  b"
+    assert spoken("a <!-- @lesson -->x y") == "a  x y"
+    assert spoken("a <!-- open") == "a <!-- open"
+    assert spoken("a <!---->b") == "a  b"
+    assert spoken("<!-- @/lesson -->a") == " a"
+    assert spoken("<!-- @x -->k<!-- @/x") == " k<!-- @/x"
+    assert spoken("<!--" * 5000 + "a") == "<!--" * 5000 + "a"
+
+
 def test_a_failing_reply_check_is_logged_and_never_raises_into_the_stop_hook(monkeypatch):
     logged = []
     monkeypatch.setattr(operator_mode, "reply_refusal", lambda *a: (_ for _ in ()).throw(OSError("disk full")))

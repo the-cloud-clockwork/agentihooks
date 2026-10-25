@@ -32,7 +32,7 @@ REPLY_REFUSAL = (
     "Reply again in at most {words} words, machine style: result only, no explanation."
 )
 REPLY_RETRIES = 3
-MARKER = re.compile(r"<!--\s*@(\w+).*?<!--\s*@/\1\s*-->|<!--.*?-->", re.DOTALL)
+MARKER = re.compile(r"\s*@(\w+)")
 QUESTION_TOOL = "AskUserQuestion"
 ASK_REFUSAL = (
     "The operator is not present in this pane, so the question tool is off. Put the question on the ledger with "
@@ -174,6 +174,20 @@ def _reminder_text(environ, session_id):
     return REMINDER.format(words=_limit(env), route=route)
 
 
+def _spoken(text):
+    parts, at = [], 0
+    while (start := text.find("<!--", at)) >= 0 and (end := text.find("-->", start + 4)) >= 0:
+        parts.append(text[at:start])
+        at = end + 3
+        tag = MARKER.match(text, start + 4, end)
+        close = text.find("@/" + tag.group(1), at) if tag else -1
+        tail = text.find("-->", close) if close >= 0 else -1
+        if tail >= 0:
+            at = tail + 3
+    parts.append(text[at:])
+    return " ".join(parts)
+
+
 def reply_refusal(payload, environ=None):
     """The refusal of a final reply over the word limit while the operator is away, at most REPLY_RETRIES per stop."""
     from hooks.context import operator_expiry
@@ -181,7 +195,7 @@ def reply_refusal(payload, environ=None):
     session_id = payload.get("session_id")
     if not _away(session_id, environ):
         return ""
-    count = len(MARKER.sub(" ", str(payload.get("last_assistant_message") or "")).split())
+    count = len(_spoken(str(payload.get("last_assistant_message") or "")).split())
     words = _limit(environ)
     if count <= words:
         return ""
