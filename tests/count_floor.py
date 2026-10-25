@@ -270,27 +270,29 @@ def deleted_branches(base: Path, head: Path, tests: str) -> set[tuple[str, str]]
     return deleted
 
 
-def bound_names(tree: Path) -> tuple[set[str], list[Path]]:
+def bound_names(tree: Path) -> tuple[set[tuple[str, str]], list[Path]]:
     names, opaque = set(), []
     for path in _sources(tree, set()):
+        relative = path.relative_to(tree)
+        module_name = _module_name(relative)
         try:
             module = ast.parse(path.read_bytes())
         except (OSError, SyntaxError, ValueError):
-            opaque.append(path.relative_to(tree))
+            opaque.append(relative)
             continue
         for node in ast.walk(module):
             if isinstance(node, ast.alias) and node.name == "*":
-                opaque.append(path.relative_to(tree))
+                opaque.append(relative)
             elif isinstance(node, _DEFINITIONS):
-                names.add(node.name)
+                names.add((module_name, node.name))
             elif isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
-                names.add(node.id)
+                names.add((module_name, node.id))
             elif isinstance(node, ast.alias):
-                names.add(node.asname or node.name.split(".")[0])
+                names.add((module_name, node.asname or node.name.split(".")[0]))
             elif isinstance(node, (ast.ExceptHandler, ast.MatchAs, ast.MatchStar)) and node.name:
-                names.add(node.name)
+                names.add((module_name, node.name))
             elif isinstance(node, ast.MatchMapping) and node.rest:
-                names.add(node.rest)
+                names.add((module_name, node.rest))
     return names, opaque
 
 
@@ -388,7 +390,11 @@ def main(argv: list[str] | None = None) -> int:
         for path in opaque:
             print(f"{path} hides its names in the head (unparseable or a star import), so no lost test is admitted")
         definitions = set() if opaque else top_level_definitions(args.base, args.tests)
-        deleted = {definition for definition in definitions if definition[1] not in surviving}
+        previous, _ = bound_names(args.base)
+        introduced = {name for _, name in surviving - previous}
+        deleted = {
+            definition for definition in definitions if definition not in surviving and definition[1] not in introduced
+        }
         deleted |= set() if opaque else deleted_branches(args.base, args.head, args.tests)
         for nodeid in lost:
             if subjects := sorted(".".join(subject) for subject in referenced_subjects(args.base, nodeid) & deleted):
