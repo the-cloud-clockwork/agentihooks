@@ -1,4 +1,5 @@
 import json
+import re
 import time
 
 import pytest
@@ -77,6 +78,50 @@ def test_a_ledger_without_tasks_pages_an_empty_collection():
     repository = Repository({"_meta": {"task_revision": 3}})
     reply = task_list.read(repository, "empty", {})
     assert reply["data"] == [] and reply["next_cursor"] is None
+
+
+def test_the_task_route_reads_task_rows_without_the_stored_entry():
+    from types import SimpleNamespace
+
+    from scripts.swarm_ledger.api import routes, task_list
+
+    repository = Repository(ledger(8, "Routed"))
+    repository.current = None
+    reply = routes.ledger_read(SimpleNamespace(repository=repository), "routed", "tasks", {"limit": 1})
+    assert isinstance(reply, task_list.Page)
+    assert reply["data"][0]["title"] == "Routed"
+
+
+@pytest.mark.parametrize("query", [{"state": "done"}, {"offset": 0}, {"q": "Done"}])
+def test_closed_task_queries_read_the_stored_entry(query):
+    from types import SimpleNamespace
+
+    from scripts.swarm_ledger.api import resources, routes
+
+    doc = ledger(9, "Open")
+    entry = SimpleNamespace(state=doc, views={})
+    host = SimpleNamespace(repository=SimpleNamespace(current=lambda slug: entry))
+    try:
+        expected = resources.read(doc, "tasks", query)
+    except resources.APIError as error:
+        with pytest.raises(resources.APIError, match=re.escape(str(error))):
+            routes.ledger_read(host, "closed", "tasks", query)
+    else:
+        assert routes.ledger_read(host, "closed", "tasks", query) == expected
+
+
+def test_a_shared_page_is_sent_as_its_encoded_text(monkeypatch):
+    from types import SimpleNamespace
+
+    from scripts.swarm_ledger.api import routes, task_list
+
+    page = task_list.Page({"data": [{"title": "Café"}], "revision": "r", "next_cursor": None})
+    sent = []
+    handler = SimpleNamespace(path="/api/v1/ledgers/sent/tasks", send=lambda *args: sent.append(args))
+    monkeypatch.setattr(routes, "dispatch", lambda handler, services: page)
+    routes.handle(handler, None)
+    assert sent == [(200, page.text(), "application/json")]
+    assert '"Café"' in sent[0][1]
 
 
 def test_pages_kept_per_revision_are_capped(monkeypatch):

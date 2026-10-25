@@ -565,7 +565,6 @@ class SQLiteLedgerRepository:
         return None if row is None else row[0]
 
     def task_version(self, slug: str) -> tuple[int, int]:
-        self._adopt(slug)
         with self.connect() as connection:
             values = dict(connection.execute(TASK_REVISION, (slug, *TASK_REVISION_PATHS)))
             row = connection.execute(GENERATION, (slug,)).fetchone()

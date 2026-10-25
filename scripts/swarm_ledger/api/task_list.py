@@ -4,6 +4,7 @@ import threading
 from . import resources
 
 PAGES_KEPT = 32
+ENCODER = json.JSONEncoder(ensure_ascii=False)
 LEDGERS_KEPT = 8
 
 
@@ -16,28 +17,26 @@ class Page(dict):
     def text(self) -> str:
         with self._lock:
             if self._text is None:
-                self._text = json.dumps(self, ensure_ascii=False)
+                self._text = ENCODER.encode(self)
             return self._text
 
 
 class Tasks:
     def __init__(self, repository: object, version: tuple) -> None:
         self.repository, self.version, self.lock = repository, version, threading.Lock()
-        self.revision, self.rows, self.revisions, self.pages = None, None, None, {}
+        self.revision, self.rows, self.pages = None, None, {}
 
     def load(self, slug: str) -> None:
         state = self.repository.read(slug, "tasks", "_meta.task_revision", "_meta.rev")
         self.revision = resources.resource_revision(state, "tasks")
         self.rows = state.get("tasks") or []
-        self.revisions = resources.collection_revisions(self.rows)[1]
 
     def page(self, query: dict) -> Page:
         key = (query.get("cursor"), query.get("limit"))
         if key not in self.pages:
             if len(self.pages) >= PAGES_KEPT:
                 self.pages.clear()
-            reply = resources.page(self.rows, self.revision, query, self.revisions, True)
-            self.pages[key] = Page(reply)
+            self.pages[key] = Page(resources.page(self.rows, self.revision, query, hash_page=True))
         return self.pages[key]
 
 
