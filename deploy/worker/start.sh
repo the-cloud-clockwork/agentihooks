@@ -46,6 +46,9 @@ bundle_dir="$HIVE_REPO_ROOT/agentihooks-bundle"
 if [[ -n "${HIVE_BUNDLE_URL:-}" && ! -d "$bundle_dir/.git" ]]; then
   git clone --branch "${HIVE_BUNDLE_REF:-dev}" -- "$HIVE_BUNDLE_URL" "$bundle_dir" \
     || echo "worker-hive: bundle clone failed; init runs on the package roles alone" >&2
+elif [[ -n "${HIVE_BUNDLE_URL:-}" ]]; then
+  git -C "$bundle_dir" pull --ff-only -- "$HIVE_BUNDLE_URL" "${HIVE_BUNDLE_REF:-dev}" \
+    || echo "worker-hive: bundle fast forward failed; init runs on the kept clone" >&2
 fi
 
 python3 - <<'PY'
