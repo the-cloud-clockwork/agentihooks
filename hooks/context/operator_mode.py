@@ -13,7 +13,6 @@ from pathlib import Path
 
 from hooks.context.ledger_decision import _bound
 
-WINDOW_SEC = 1800
 QUIET_EVERY = 2
 QUIET_WORDS = 20
 REMINDER = "Operator not present: replies stay within {words} words."
@@ -71,10 +70,6 @@ def _on(state, now):
 def switch(prompt):
     words = SWITCH.findall(" ".join(str(prompt).lower().split()))
     return "off" if "off" in words else "on" if words else ""
-
-
-def _turn(state, now):
-    return state.get("turn_at") is not None and now - state["turn_at"] < WINDOW_SEC
 
 
 def observe(session_id, prompt, typed, now=None):

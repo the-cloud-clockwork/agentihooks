@@ -13,7 +13,7 @@ from scripts.swarm.store import AgentRecord
 from scripts.swarm.tick import NUDGE
 
 SWARM = {"AGENTIHOOKS_SWARM": "demo", "AGENTIHOOKS_AGENT_NAME": "master@a1-1"}
-WINDOW = operator_mode.WINDOW_SEC
+WINDOW = 1800
 
 
 @pytest.fixture(autouse=True)
@@ -254,7 +254,7 @@ def test_a_cross_session_message_never_switches_presence_or_uncaps_the_turn(monk
     out = run_prompt(monkeypatch, capsys, "s1", peer.format(words="operator on"))
     assert not operator_mode.present("s1", SWARM)
     assert operator_mode.ON_NOTICE not in out
-    assert operator_mode.TURN_NOTICE not in out
+    assert "Operator present for this turn" not in out
     assert operator_mode.ON_NOTICE in run_prompt(monkeypatch, capsys, "s1", "operator on")
     assert operator_mode.present("s1", SWARM)
 
@@ -492,7 +492,7 @@ def test_the_typed_turn_window_never_opens_the_question_tool(monkeypatch):
     for key, value in SWARM.items():
         monkeypatch.setenv(key, value)
     operator_mode.notice({"session_id": "s1", "prompt": "Explain"}, True, now=100)
-    assert operator_mode._turn(operator_mode._load("s1"), 101)
+    assert operator_mode._load("s1")["turn_at"] == 100
     assert operator_mode.question_block("AskUserQuestion", "s1", SWARM) == MASTER_ASK.format(
         slug="demo", name="master@a1-1"
     )
