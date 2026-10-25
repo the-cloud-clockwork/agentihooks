@@ -1,5 +1,4 @@
 import io
-import itertools
 import json
 import os
 import re
@@ -10,22 +9,24 @@ import zipfile
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
+RETRY_DELAYS = (5, 10, 20, None)
 
-def api(endpoint: str, *, binary: bool = False, attempts: int = 3) -> list | bytes:
+
+def api(endpoint: str, *, binary: bool = False) -> list | bytes:
     command = ["gh", "api", endpoint]
     if not binary:
         command.extend(["--paginate", "--slurp"])
-    for attempt in itertools.count(1):
+    for delay in RETRY_DELAYS:
         try:
             result = subprocess.run(command, check=True, capture_output=True, timeout=60)
+            break
         except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as error:
             stderr = (error.stderr or b"").decode(errors="replace").strip()
-            print(f"gh api {endpoint} attempt {attempt} of {attempts} failed: {stderr or error}", file=sys.stderr)
-            if attempt == attempts:
+            print(f"gh api {endpoint} failed: {stderr or error}", file=sys.stderr)
+            if delay is None:
                 raise
-            time.sleep(5 * attempt)
-        else:
-            return result.stdout if binary else json.loads(result.stdout)
+            time.sleep(delay)
+    return result.stdout if binary else json.loads(result.stdout)
 
 
 def ready(jobs: list[dict], shards: list[int]) -> bool:
