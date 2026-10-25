@@ -52,6 +52,7 @@ def test_repeated_large_updates_keep_only_chunks_of_retained_revisions(bus, scop
     store, stream, pattern = open_store(bus, scoped, monkeypatch)
     neighbour = large(bus, "neighbour")
     store.create("neighbour", neighbour)
+    single = chunk_bytes(bus, stream, pattern)
     values = [large(bus, index) for index in range(UPDATES + 1)]
     revisions = [store.create("deadlines", values[0])]
     for value in values[1:]:
@@ -59,6 +60,7 @@ def test_repeated_large_updates_keep_only_chunks_of_retained_revisions(bus, scop
     stored = chunk_bytes(bus, stream, pattern)
     bound = (HISTORY + 1) * (len(values[0]) + nats_payload.KV_HEADER_BUDGET)
     assert stored <= bound, f"stored chunk bytes {stored} after {UPDATES} large updates exceed {bound}"
+    assert stored == (HISTORY + 1) * single == 4 * 1047903
     retained = [(row.value, row.revision) for row in store.watch("deadlines")]
     assert retained == list(zip(values, revisions, strict=True))[-HISTORY:]
     assert store.get("deadlines").value == values[-1]
