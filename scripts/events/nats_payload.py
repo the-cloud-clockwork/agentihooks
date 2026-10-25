@@ -21,8 +21,7 @@ def validate(client: Client, subject: str, data: bytes, headers: dict[str, str] 
 
 
 async def publish(js: JetStreamContext, subject: str, data: bytes, *, stream: str, headers: dict[str, str]) -> PubAck:
-    headers = {**headers, "Nats-Expected-Stream": stream}
-    validate(js._nc, subject, data, headers)
+    validate(js._nc, subject, data, {**headers, "Nats-Expected-Stream": stream})
     return await js.publish(subject, data, stream=stream, headers=headers)
 
 
