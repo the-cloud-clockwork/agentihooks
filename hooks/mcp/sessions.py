@@ -23,6 +23,7 @@ CORPUS_ENV = "AGENTIHOOKS_SESSION_CORPUS"
 PROJECTS_ENV = "AGENTIHOOKS_SESSION_PROJECTS"
 ALIASES_ENV = "AGENTIHOOKS_SESSION_ALIASES"
 TOOL_FAILED = "the session tool failed before answering; the log names the cause"
+BAD_JSON = "the JSON argument could not be parsed"
 
 _tools = None
 
@@ -47,9 +48,21 @@ def grant() -> "Grant":
     return Grant(os.getenv("AGENTIHOOKS_AGENT_NAME", ""), os.getenv(CORPUS_ENV, ""), projects)
 
 
+def _failed(name: str, error_class: str, retry: str, detail: str) -> str:
+    from hooks.memory.api.ingest import SCHEMA_VERSION
+
+    error = {"class": error_class, "retry": retry, "detail": detail}
+    return json.dumps(
+        {"schema_version": SCHEMA_VERSION, "operation_id": f"{name}:failed", "state": "rejected", "error": error}
+    )
+
+
 def respond(name: str, build: Callable[[], dict]) -> str:
     try:
         fields = build()
+    except json.JSONDecodeError:
+        return _failed(name, "invalid_request", "never", BAD_JSON)
+    try:
         from hooks.memory.api import records
         from hooks.memory.api.ingest import SCHEMA_VERSION
 
@@ -58,7 +71,7 @@ def respond(name: str, build: Callable[[], dict]) -> str:
         return json.dumps(records.call(_session_tools(), name, caller, request, time.time()))
     except Exception as e:
         log(f"MCP {name} failed", {"error": str(e)})
-        return json.dumps({"success": False, "error": TOOL_FAILED})
+        return _failed(name, "dependency_unavailable", "same_request", TOOL_FAILED)
 
 
 def _projects(projects: str) -> dict:

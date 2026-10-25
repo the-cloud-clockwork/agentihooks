@@ -524,7 +524,12 @@ def test_mcp_failures_answer_without_raising(served, monkeypatch):
     logged = []
     monkeypatch.setattr(mcp_sessions, "log", lambda message, fields: logged.append((message, fields)))
     answer = json.loads(functions["session_get"]("s"))
-    assert answer == {"success": False, "error": mcp_sessions.TOOL_FAILED}
+    assert answer == {
+        "schema_version": SCHEMA_VERSION,
+        "operation_id": "session_get:failed",
+        "state": "rejected",
+        "error": {"class": "dependency_unavailable", "retry": "same_request", "detail": mcp_sessions.TOOL_FAILED},
+    }
     assert logged == [("MCP session_get failed", {"error": f"'{mcp_sessions.CATALOG_ENV}'"})]
 
 
@@ -533,8 +538,29 @@ def test_mcp_malformed_json_answers_without_raising(served, monkeypatch, name, a
     _, functions = served
     logged = []
     monkeypatch.setattr(mcp_sessions, "log", lambda message, fields: logged.append(message))
-    assert json.loads(functions[name](argument)) == {"success": False, "error": mcp_sessions.TOOL_FAILED}
-    assert logged == [f"MCP {name} failed"]
+    assert json.loads(functions[name](argument)) == {
+        "schema_version": SCHEMA_VERSION,
+        "operation_id": f"{name}:failed",
+        "state": "rejected",
+        "error": {"class": "invalid_request", "retry": "never", "detail": mcp_sessions.BAD_JSON},
+    }
+    assert logged == []
+
+
+def test_a_failing_case_keeps_its_reproduction(monkeypatch):
+    def failing(inputs, root):
+        assert root is None
+
+    monkeypatch.setitem(sv2_idx05_cases.CASES, "c", failing)
+    record = sv2_idx05_cases.run_case("c")
+    assert record["state"] == "failed" and "observed" not in record
+    assert record["reproduce"] == {
+        "fixture": "tests/fixtures/swarm_v2/session-tools.json",
+        "case": "c",
+        "line": failing.__code__.co_firstlineno + 1,
+        "assertion": "assert root is None",
+    }
+    assert record["input_sha256"] == sv2_idx05_cases.run_case("a")["input_sha256"]
 
 
 def test_a_hit_whose_chunk_is_gone_is_a_stale_citation(inputs, bank):

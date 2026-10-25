@@ -1,7 +1,9 @@
 import hashlib
 import json
 import os
+import sys
 import tempfile
+import traceback
 from pathlib import Path
 from unittest import mock
 
@@ -269,20 +271,33 @@ def registered(environment):
     return sorted(recorder.names)
 
 
-def rollback(bank, root):
-    before = bank.protected()
-    shown = registered({mcp_sessions.CATALOG_ENV: str(root / "central/catalog.sqlite3")})
-    aliased = registered(
-        {mcp_sessions.CATALOG_ENV: str(root / "central/catalog.sqlite3"), mcp_sessions.ALIASES_ENV: "1"}
-    )
+def unrevoked(protected):
+    return {name: table for name, table in protected.items() if name != "session_record"}
+
+
+def rollback(bank, root, before):
+    catalog = str(root / "central/catalog.sqlite3")
+    shown = registered({mcp_sessions.CATALOG_ENV: catalog})
+    aliased = registered({mcp_sessions.CATALOG_ENV: catalog, mcp_sessions.ALIASES_ENV: "1"})
     hidden = registered({})
+    inputs = bank.inputs
+    accepted = search_api.search(bank.tools.searcher, grant(inputs), body(inputs, query=inputs["queries"]["hit"]))
+    store = archive.ObjectStore(root / "central/objects")
+    complete = archive.evidence(bank.corpus.catalog, store, grant(inputs), inputs["grant"]["corpus"], bank.uid("lock"))
     assert hidden == [] and len(shown) == 4 and len(aliased) == 4 + len(records.ALIASES)
-    assert bank.protected() == before
+    assert accepted["state"] == "answered" and accepted["results"] and complete["complete"]
+    assert unrevoked(bank.protected()) == unrevoked(before)
     return {
         "tools_with_catalog": shown,
         "tools_with_aliases": aliased,
         "tools_hidden": hidden,
-        "archive_unchanged": True,
+        "accepted_search_after_hiding": {"state": accepted["state"], "results": len(accepted["results"])},
+        "archive_evidence_after_hiding": {"complete": complete["complete"], "sources": len(complete["sources"])},
+        "authoritative_state_matches_case_start": True,
+        "rows_the_tools_write": [
+            "session_cursor rows",
+            "evidence_reference_resolution_failures, session_alias_calls and session_search_scope_rejections counters",
+        ],
     }
 
 
@@ -328,8 +343,7 @@ def recovery(inputs, root):
     assert tail_again == tail and rows_after_replay == rows_after_tail >= rows
     assert expired["error"]["detail"] == records.CURSOR_EXPIRED and moved["error"]["detail"] == records.CURSOR_MOVED
     assert listed(bank, restarted) == ["lock"] and listed(bank, newer) == ["readme"] and stale_again == moved
-    protected = {name: table for name, table in bank.protected().items() if name != "session_record"}
-    assert protected == {name: table for name, table in before.items() if name != "session_record"}
+    assert unrevoked(bank.protected()) == unrevoked(before)
     return {
         "cursor_page_before_restart": listed(bank, page),
         "cursor_page_after_restart_identical": resumed == page,
@@ -346,7 +360,7 @@ def recovery(inputs, root):
             "expired": ["cursor past its lifetime", "cursor whose listing changed"],
             "authoritative_rows_changed": ["session_record state of the restricted session"],
         },
-        "rollback_rehearsal": rollback(bank, bank.corpus.root),
+        "rollback_rehearsal": rollback(bank, bank.corpus.root, before),
         records.RESOLUTION_FAILURES: metric(bank, records.RESOLUTION_FAILURES),
     }
 
@@ -356,12 +370,16 @@ CASES = {"a": positive, "b": rejection, "c": recovery}
 
 def run_case(case):
     inputs = json.loads(FIXTURE.read_text(encoding="utf-8"))
-    with tempfile.TemporaryDirectory() as folder:
-        observed = CASES[case](inputs, Path(folder))
-    return {
+    record = {
         "case": f"T-SV2-IDX-05-{case.upper()}",
-        "state": "passed",
         "evidence_class": EVIDENCE_CLASS,
         "input_sha256": {FIXTURE.name: hashlib.sha256(FIXTURE.read_bytes()).hexdigest()},
-        "observed": observed,
     }
+    with tempfile.TemporaryDirectory() as folder:
+        try:
+            observed = CASES[case](inputs, Path(folder))
+        except AssertionError:
+            failed = traceback.extract_tb(sys.exc_info()[2])[-1]
+            reproduce = {"fixture": f"tests/fixtures/swarm_v2/{FIXTURE.name}", "case": case, "line": failed.lineno}
+            return {**record, "state": "failed", "reproduce": {**reproduce, "assertion": failed.line}}
+    return {**record, "state": "passed", "observed": observed}
