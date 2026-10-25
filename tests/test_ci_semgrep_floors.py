@@ -174,6 +174,7 @@ def test_fixture_test_names_every_reported_and_every_mismatched_fixture(rules_di
     ("code", "stdout"),
     [
         (0, ""),
+        (2, "usage: semgrep"),
         (0, json.dumps({"config_with_errors": []})),
         (0, json.dumps(_report(config_with_errors=[{"path": "rules/a.yml"}]))),
         (
@@ -184,7 +185,7 @@ def test_fixture_test_names_every_reported_and_every_mismatched_fixture(rules_di
         ),
         (2, json.dumps(_report({"a": {"/t/rules/a.red.py": _lines([1], [1])}}))),
     ],
-    ids=["no-output", "no-results", "config-errors", "check-errors", "exit-without-mismatch"],
+    ids=["no-output", "not-json", "no-results", "config-errors", "check-errors", "exit-without-mismatch"],
 )
 def test_a_fixture_test_that_could_not_run_is_red(rules_dir, monkeypatch, code, stdout):
     monkeypatch.setattr(floors, "_semgrep", lambda *a, cwd=None: _done(code, stdout, "boom"))

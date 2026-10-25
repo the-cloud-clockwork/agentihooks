@@ -64,15 +64,21 @@ def fixture_test(rule_files: list[Path]) -> tuple[set[str], set[str]]:
             for path in (rule, *_fixtures(rule)):
                 shutil.copy(path, copy / path.name)
         done = _semgrep("--test", "--json", "--config", "rules", "rules", cwd=Path(folder))
-    report = json.loads(done.stdout or "{}")
-    checks = [check for result in report.get("results", {}).values() for check in result["checks"].values()]
-    if "results" not in report or report.get("config_with_errors") or any(check["errors"] for check in checks):
-        raise SystemExit(f"semgrep could not test the guard rule fixtures (exit {done.returncode}):\n{done.stderr}")
+    failed = f"semgrep could not test the guard rule fixtures (exit {done.returncode}):\n{done.stderr}"
+    try:
+        report = json.loads(done.stdout or "{}")
+    except json.JSONDecodeError:
+        report = {}
+    if "results" not in report or report.get("config_with_errors"):
+        raise SystemExit(failed)
+    checks = [check for result in report["results"].values() for check in result["checks"].values()]
+    if any(check["errors"] for check in checks):
+        raise SystemExit(failed)
     matches = [(Path(target).name, lines) for check in checks for target, lines in check["matches"].items()]
     reported = {name for name, _ in matches}
     mismatched = {name for name, lines in matches if lines["expected_lines"] != lines["reported_lines"]}
     if done.returncode and not mismatched:
-        raise SystemExit(f"semgrep could not test the guard rule fixtures (exit {done.returncode}):\n{done.stderr}")
+        raise SystemExit(failed)
     return reported, mismatched
 
 
