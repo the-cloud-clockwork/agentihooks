@@ -128,8 +128,9 @@ def test_a_failure_inside_a_timed_call_names_the_call_frame(capsys):
     with pytest.raises(json.JSONDecodeError), timing.tick("sw"):
         timing.call(json.loads, "{")
     finished = json.loads(capsys.readouterr().err.splitlines()[-1])
-    line = timing.call.__code__.co_firstlineno + 3
-    assert finished["raised_at"] == f"scripts/swarm/timing.py:{line} call"
+    original = getattr(timing, "x_call__mutmut_orig", timing.call)
+    line = original.__code__.co_firstlineno + 3
+    assert finished["raised_at"] == f"scripts/swarm/timing.py:{line} {original.__name__}"
 
 
 def _raised_in(root, monkeypatch, name):
