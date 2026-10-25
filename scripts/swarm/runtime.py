@@ -281,11 +281,31 @@ def _launch_timeouts(agent: str, passed: list[str], argv: list[str]) -> tuple[li
     return routed, BUDGET.spawn
 
 
+def _validation(fields: dict, profile: str, agent: str) -> dict:
+    if fields.get("profile_validation") != "pending":
+        return binding.fields(fields, profile, agent)
+    if not fields.get("profile_report"):
+        raise ValueError("pending profile validation names no request")
+    return {
+        "state": "pending",
+        "report": fields["profile_report"],
+        "profile": profile,
+        "harness": agent,
+        "account": fields.get("account", ""),
+    }
+
+
+def deferring(herdr: "HerdrRuntime") -> "HerdrRuntime":
+    herdr.defer_master_canary = True
+    return herdr
+
+
 class HerdrRuntime:
     quota_accounts: Callable[..., list] | None = None
 
-    def __init__(self, home=SWARM_HOME, run=subprocess.run, choose=None, herdr=herdr_call):
+    def __init__(self, home=SWARM_HOME, run=subprocess.run, choose=None, herdr=herdr_call, defer_master_canary=False):
         self.home, self.run, self.herdr = home, run, herdr
+        self.defer_master_canary = defer_master_canary
         self.choose = choose or agent_choice.choose
         self.sleep = time.sleep
         self._binding_pids = {}
@@ -687,6 +707,7 @@ class HerdrRuntime:
         timing.call(priming_trace.write, self.home, config.slug, name, task)
         argv = self._argv(config, name, agent, text, f"{name}.md", profile, decision.overlays)
         argv += ["--claim-fence", json.dumps(task["claim_fence"])] if task.get("claim_fence") else []
+        argv += ["--defer-canary"] if lane == MASTER and self.defer_master_canary else []
         argv += _titled(config.slug, lane, task.get("seat", ""))
         argv += codex.arguments(config, agent, task)
         argv += _pinned(decision.overlays, decision.bundle_revision)
@@ -962,7 +983,7 @@ class HerdrRuntime:
             message = tail[-1] if tail else f"init-agent exit {proc.returncode}"
             raise SpawnError(message, pane_id=fields.get("pane_id") or _opened_pane(name, launched_at), harness=agent)
         try:
-            validated = binding.fields(fields, argv[argv.index("--profile") + 1], agent)
+            validated = _validation(fields, argv[argv.index("--profile") + 1], agent)
         except ValueError as exc:
             self._terminate(name)
             raise SpawnError(str(exc), pane_id=fields.get("pane_id", ""), harness=agent) from exc
