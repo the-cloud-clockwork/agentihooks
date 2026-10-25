@@ -37,9 +37,15 @@ def test_results(log: str, job: str = "") -> list[dict]:
 
 def _gh(args, run):
     endpoint = args[1]
-    caller = "doctor.ci.job_log" if endpoint.endswith("/logs") else "doctor.ci"
-    github_reads.charge(caller, endpoint, time.time())
-    return run(["gh", *args], capture_output=True, text=True, check=True, timeout=60).stdout
+
+    def fetch():
+        caller = "doctor.ci.job_log" if endpoint.endswith("/logs") else "doctor.ci"
+        github_reads.charge(caller, endpoint, time.time())
+        return run(["gh", *args], capture_output=True, text=True, check=True, timeout=60).stdout
+
+    if "/check-runs?" in endpoint or "/actions/runs?" in endpoint:
+        return github_reads.snapshot(json.dumps(args), time.time(), lambda: {"stdout": fetch()})["stdout"]
+    return fetch()
 
 
 def _pages(endpoint, field, run):
