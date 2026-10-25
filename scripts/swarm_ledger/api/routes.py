@@ -214,13 +214,14 @@ SINCE_SCHEMA = {
     "additionalProperties": False,
 }
 HIDDEN_META = ("seeds", "api_operations")
+HIDDEN_PATHS = [[key] for key in HIDDEN_META]
 
 
 def change_unit(path: str) -> tuple | None:
     parts = json.loads(path)
     if parts[:1] != ["_meta"]:
         return tuple(encode(part) for part in parts[:2])
-    if parts[1:2] and parts[1] in HIDDEN_META:
+    if parts[1:2] in HIDDEN_PATHS:
         return None
     return tuple(encode(part) for part in parts[: 3 if parts[1:2] == ["stamps"] else 2])
 
@@ -243,13 +244,14 @@ def export_changes(state: dict, paths: set) -> str:
         if isinstance(parent, list):
             items = dict(zip(identities(parent), parent))
             touched = changes["lists"].setdefault(path[0], {"order": list(items), "items": {}})
-            if unit[-1] in items:
-                touched["items"][unit[-1]] = items[unit[-1]]
+            _, identity = unit
+            if identity in items:
+                touched["items"][identity] = items[identity]
         elif path[-1] in parent:
             changes["set"].append([path, parent[path[-1]]])
         else:
             changes["drop"].append(path)
-    return json.dumps({"changes": changes}, ensure_ascii=False)
+    return json.dumps({"changes": changes})
 
 
 def handle(handler: object, services: Services) -> None:

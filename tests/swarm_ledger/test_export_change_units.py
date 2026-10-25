@@ -25,6 +25,7 @@ PATHS = {
     '["tasks",["id","t9",0]]',
     '["overview"]',
     '["gone"]',
+    '["absent"]',
     '["summary","b"]',
     '["_meta","stamps","a"]',
     '["_meta","rev"]',
@@ -43,7 +44,7 @@ def test_changes_name_each_changed_item_once():
                 [["_meta", "stamps", "a"], 1],
                 [["overview"], "o"],
             ],
-            "drop": [["gone"], ["summary", "b"]],
+            "drop": [["absent"], ["gone"], ["summary", "b"]],
             "lists": {
                 "tasks": {"order": ['["id","t1",0]', '["id","t2",0]'], "items": {'["id","t2",0]': {"id": "t2", "s": 1}}}
             },
@@ -53,11 +54,25 @@ def test_changes_name_each_changed_item_once():
 
 def test_a_changed_container_carries_its_changed_children():
     paths = {'["_meta","stamps"]', '["_meta","stamps","a"]', '["summary"]', '["summary","b"]'}
-    assert json.loads(export_changes(NEW, paths))["changes"]["set"] == [
+    assert json.loads(export_changes(NEW, paths))["changes"] == {
+        "set": [[["_meta", "events"], [{"e": 1}]], [["_meta", "stamps"], {"a": 1, "b": 2}], [["summary"], {"a": 1}]],
+        "drop": [],
+        "lists": {},
+    }
+
+
+def test_stamps_change_per_stamp_and_other_meta_per_key():
+    state = {**NEW, "_meta": {**NEW["_meta"], "members": {"x": {"role": "r"}}}}
+    paths = {'["_meta","stamps","a","deep"]', '["_meta","members","x","role"]'}
+    assert json.loads(export_changes(state, paths))["changes"]["set"] == [
         [["_meta", "events"], [{"e": 1}]],
-        [["_meta", "stamps"], {"a": 1, "b": 2}],
-        [["summary"], {"a": 1}],
+        [["_meta", "members"], {"x": {"role": "r"}}],
+        [["_meta", "stamps", "a"], 1],
     ]
+
+
+def test_a_changed_meta_hides_seeds_and_receipts():
+    assert json.loads(export_changes(NEW, {'["_meta"]'}))["changes"]["set"] == [[["_meta"], VIEW["_meta"]]]
 
 
 def test_changes_rebuild_the_new_export_from_the_old():
@@ -70,7 +85,7 @@ class Server:
         self.replies, self.sent = list(replies), []
 
     def __call__(self, client, slug, path, payload=None):
-        self.sent.append((client.base, path, payload))
+        self.sent.append((client.base, slug, path, payload))
         reply = self.replies.pop(0)
         if isinstance(reply, Exception):
             raise reply
@@ -108,7 +123,7 @@ def test_kept_exports_are_per_server(monkeypatch):
         api.KEPT[("http://b", "t")] = (6, {})
         client.export("s")
         assert api.KEPT[("http://b", "s")] == (8, {})
-    assert server.sent == [("http://b", "export", {"since": 0})]
+    assert server.sent == [("http://b", "s", "export", {"since": 0})]
 
 
 def test_a_server_without_changes_answers_the_plain_export(monkeypatch):
@@ -117,7 +132,7 @@ def test_a_server_without_changes_answers_the_plain_export(monkeypatch):
         api.KEPT[("http://a", "s")] = (5, {})
         assert client.export("s") == {"chat": []}
         assert api.KEPT == {}
-    assert [payload for *_, payload in server.sent] == [{"since": 5}, {}]
+    assert server.sent == [("http://a", "s", "export", {"since": 5}), ("http://a", "s", "export", {})]
 
 
 def test_other_refusals_reach_the_caller(monkeypatch):
@@ -135,3 +150,12 @@ def test_changes_that_do_not_fit_the_kept_export_read_it_whole(monkeypatch):
         assert api.KEPT[("http://a", "s")] == (7, {"tasks": []})
     assert [payload for *_, payload in server.sent] == [{"since": 5}, {"since": 0}]
     assert api.KEPT is None
+
+
+def test_a_first_read_refused_or_unfit_needs_nothing_kept(monkeypatch):
+    unfit = {"generation": 6, "changes": {"lists": {}, "set": [[["chat"], [1]]], "drop": []}}
+    client, server = reader(monkeypatch, refused(400), {"data": {}}, unfit, {"generation": 7, "data": {"chat": []}})
+    with api.kept_exports():
+        assert client.export("s") == {}
+        assert client.export("s") == {"chat": []}
+    assert [payload for *_, payload in server.sent] == [{"since": 0}, {}, {"since": 0}, {"since": 0}]
