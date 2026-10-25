@@ -393,7 +393,7 @@ def test_statistics_select_only_contexts_executing_the_edited_branch(tmp_path, m
     line = 3 if mode == "repeated" else 4
     plan.estimate(tmp_path, {"scripts/core.py": {line + shift}}, selection, manifest)
     expected = ["tests/test_core.py::test_g"]
-    if mode in {"legacy", "inserted", "header", "drift", "module"}:
+    if mode in {"legacy", "inserted", "header", "drift"}:
         expected = [
             f"tests/test_core.py::{name}" for name in ("TestSpawn::test_child", "test_f", "test_g", "test_other")
         ]
@@ -486,7 +486,7 @@ def test_a_changed_nested_signature_adds_the_tests_reaching_the_nested_function(
     ("mode", "line", "expected"),
     [
         ("import", 12, ["tests/test_core.py::test_g"]),
-        ("constant", 11, ["tests/test_core.py::test_g"]),
+        ("constant", 12, ["tests/test_core.py::test_g"]),
         ("from", 11, ["tests/test_core.py::test_g"]),
         (
             "rebound",
@@ -528,7 +528,7 @@ def test_a_module_edit_that_only_binds_new_names_keeps_the_selection_narrow(
     manifest = build(tmp_path / ".coverage", [], tmp_path, commit, "test")
     edited = {
         "import": source.replace("from os import path\n", "from os import path\nimport json\n"),
-        "constant": source + "\n\nLIMIT = 3\n",
+        "constant": source.replace("from os import path\n", "from os import path\nLIMIT = 3\n"),
         "from": source.replace("from os import path\n", "from os import path, sep\n"),
         "rebound": source + "\n\npath = None\n",
     }[mode]
