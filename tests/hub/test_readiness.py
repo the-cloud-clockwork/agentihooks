@@ -51,13 +51,14 @@ def source():
 
 class CountingLedger:
     def __init__(self, document):
-        self.document, self.rev, self.exports = document, 1, 0
+        self.document, self.rev, self.exports, self.read = document, 1, 0, set()
 
     def state(self, slug):
         self.exports += 1
         return self.document
 
     def metadata(self, slug):
+        self.read.add(slug)
         return {"_meta": {"rev": self.rev}}
 
 
@@ -165,6 +166,7 @@ def test_readiness_passes_export_a_large_ledger_once_per_revision(monkeypatch):
         )
         assert "task-b" in provider.snapshot("rig").rows
         assert ledger.exports == 2
+        assert ledger.read == {"rig"}
 
 
 def test_the_source_forgets_the_export_of_a_swarm_that_left_the_events_engine():
