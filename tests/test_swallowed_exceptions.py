@@ -10,7 +10,7 @@ from scripts import size_limits, swallowed_exceptions
 _ROOT = Path(__file__).resolve().parents[1]
 pytestmark = pytest.mark.unit
 
-SWALLOWED = "def guard():\n    try:\n        return 1\n    except Exception:\n        pass\n"
+SWALLOWED = "def guard():\n    try:\n        return 1\n    except Exception:\n        return 0\n"
 NARROW = "def guard():\n    try:\n        return 1\n    except ValueError:\n        return 0\n"
 
 
