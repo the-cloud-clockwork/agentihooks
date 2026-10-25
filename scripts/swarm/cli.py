@@ -223,6 +223,8 @@ TICK_LOCK_MS = 10 * 60 * 1000
 TICK_SECONDS = 60
 # The scheduled tick holder stops a pass at scheduled_tick.TIMEOUT_S; leave an extra tick room to finish.
 EXTRA_TICKS_UNTIL = 420
+# every swarm ticks in a thread of one process; at the default 5 ms a CPU heavy swarm stalls the others' round trips
+TICK_SWITCH_INTERVAL_S = 0.0005
 SLUG_RE = re.compile(r"^[a-z][a-z0-9-]{0,47}$")
 ONLY_MASTER_CANON = "only the master or the operator makes a learned note canon"
 ONLY_MASTER_RETIRE = "only the master or the operator retires a learned note"
@@ -609,6 +611,7 @@ def _tick_host(store, started):
             "and the host scheduler ticks every 60 seconds"
         )
     operator_env.classifier(os.environ)
+    sys.setswitchinterval(TICK_SWITCH_INTERVAL_S)
     with authority_context.for_tick(store) as slugs:
         _reconcile_services()
         if slugs:
