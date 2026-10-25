@@ -623,6 +623,29 @@ def test_a_deleted_executable_fixture_explains_only_its_own_lost_test(tmp_path, 
     assert ("test_fixture is admitted" in result.stdout) == admitted
 
 
+@pytest.mark.parametrize("deleted", [True, False], ids=["deleted", "retained"])
+@pytest.mark.parametrize("run_name", ["__main__", "other"], ids=["entrypoint", "import"])
+def test_a_runpy_entrypoint_explains_only_deleted_executed_code(tmp_path, deleted, run_name):
+    entrypoint = SUBJECT.replace("subject", "main")
+    tests = (
+        "import runpy\nfrom pkg.mod import other\n\n"
+        "def test_subject():\n    assert runpy.run_module('pkg.mod', run_name=" + repr(run_name) + ")\n\n"
+        "def test_other():\n    assert other() == 2\n"
+    )
+    result = _floor(
+        tmp_path,
+        {"test_mod.py": tests},
+        {"test_mod.py": OTHER_TEST},
+        {
+            "base": _package(mod=entrypoint + "\n\n" + KEPT + "\nif __name__ == '__main__':\n    main()\n"),
+            "head": _package(mod=("" if deleted else entrypoint) + "\n\n" + KEPT),
+        },
+    )
+    admitted = deleted and run_name == "__main__"
+    assert result.returncode == (0 if admitted else 1), result.stdout + result.stderr
+    assert ("test_subject is admitted" in result.stdout) == admitted
+
+
 @pytest.mark.parametrize(
     "survivor",
     [
