@@ -65,3 +65,13 @@ def as_services(server: object) -> Services:
             max_body=getattr(server, "MAX_BODY", 0),
         ),
     )
+
+
+def serve_document(monkeypatch, repository: object, document: dict) -> None:
+    from scripts.swarm_ledger.api import resources, task_list
+
+    monkeypatch.setattr(repository, "current", lambda slug: SimpleNamespace(state=document, views={}))
+    monkeypatch.setattr(repository, "read", lambda slug, *keys: document)
+    version = (int(resources.resource_revision(document, "tasks"), 16), 0)
+    monkeypatch.setattr(repository, "task_version", lambda slug: version)
+    monkeypatch.setattr(task_list, "HELD", {})
