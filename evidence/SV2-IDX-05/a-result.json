@@ -1,0 +1,100 @@
+{
+  "case": "T-SV2-IDX-05-A",
+  "evidence_class": "mocked: an in-process caller, a SQLite catalog file and a local content addressed object folder stand in for the session service, the central database and the archive bucket, and a recording stub stands in for the MCP server; no model, HTTP server, MCP transport or Pod runs",
+  "input_sha256": {
+    "session-tools.json": "88df786b2ad1eb5fbf9875b1735643b1ddbb09ac66b8a04cc1c01b358764a69d"
+  },
+  "observed": {
+    "authoritative_state_unchanged": true,
+    "evidence_reference_resolution_failures": 0,
+    "expansion": {
+      "complete": true,
+      "records": [
+        {
+          "cited": true,
+          "kind": "tool_call",
+          "project_id": null,
+          "sequence": 2,
+          "task_id": "fixture-lock",
+          "timestamp": "2026-10-20T09:00:05Z"
+        },
+        {
+          "cited": true,
+          "kind": "tool_result",
+          "project_id": "github.com/the-cloud-clockwork/agentihooks",
+          "sequence": 3,
+          "task_id": "fixture-lock",
+          "timestamp": "2026-10-20T09:00:09Z"
+        },
+        {
+          "cited": false,
+          "kind": "assistant_text",
+          "project_id": "github.com/the-cloud-clockwork/agentihooks",
+          "sequence": 4,
+          "task_id": "fixture-lock",
+          "timestamp": "2026-10-20T09:00:12Z"
+        }
+      ],
+      "total": 3,
+      "truncated": false
+    },
+    "expansion_matches_catalog_and_archive": true,
+    "list_pages": [
+      [
+        "lock",
+        "kernel"
+      ],
+      [
+        "readme"
+      ]
+    ],
+    "search": {
+      "mode": "lexical_only",
+      "resume_fields_in_results": [],
+      "top": {
+        "citation_events": 2,
+        "citation_sequences": [
+          2,
+          3
+        ],
+        "kind": "tool",
+        "omitted_chars": 0,
+        "session": "lock",
+        "session_metadata": {
+          "first_timestamp": "2026-10-20T09:00:00Z",
+          "harness": "claude",
+          "last_timestamp": "2026-10-20T09:05:30Z",
+          "task_ids": [
+            "fixture-lock"
+          ]
+        },
+        "truncated": false
+      },
+      "vector": {
+        "reason": "no_active_index",
+        "state": "unavailable"
+      }
+    },
+    "second_fixture_matches": true,
+    "session_get": {
+      "events": 6,
+      "first_timestamp": "2026-10-20T09:00:00Z",
+      "harness": "claude",
+      "last_timestamp": "2026-10-20T09:05:30Z",
+      "project_ids": [
+        "github.com/the-cloud-clockwork/agentihooks"
+      ],
+      "sources": [
+        {
+          "durable_through": 6,
+          "events": 6,
+          "source_generation": "device-3:inode-51:anchor-0"
+        }
+      ],
+      "task_ids": [
+        "fixture-lock"
+      ]
+    }
+  },
+  "state": "passed"
+}

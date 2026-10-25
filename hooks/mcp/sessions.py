@@ -8,15 +8,21 @@ AGENTIHOOKS_SESSION_PROJECTS, never from a tool argument. Search results are evi
 import json
 import os
 import time
+from collections.abc import Callable
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from hooks.common import log
+
+if TYPE_CHECKING:
+    from hooks.memory.api.ingest import Grant
 
 CATALOG_ENV = "AGENTIHOOKS_SESSION_CATALOG"
 OBJECTS_ENV = "AGENTIHOOKS_SESSION_OBJECTS"
 CORPUS_ENV = "AGENTIHOOKS_SESSION_CORPUS"
 PROJECTS_ENV = "AGENTIHOOKS_SESSION_PROJECTS"
 ALIASES_ENV = "AGENTIHOOKS_SESSION_ALIASES"
+TOOL_FAILED = "the session tool failed before answering; the log names the cause"
 
 _tools = None
 
@@ -34,15 +40,16 @@ def _session_tools():
     return _tools
 
 
-def grant():
+def grant() -> "Grant":
     from hooks.memory.api.ingest import Grant
 
     projects = frozenset(item.strip() for item in os.getenv(PROJECTS_ENV, "").split(",") if item.strip())
     return Grant(os.getenv("AGENTIHOOKS_AGENT_NAME", ""), os.getenv(CORPUS_ENV, ""), projects)
 
 
-def respond(name: str, fields: dict) -> str:
+def respond(name: str, build: Callable[[], dict]) -> str:
     try:
+        fields = build()
         from hooks.memory.api import records
         from hooks.memory.api.ingest import SCHEMA_VERSION
 
@@ -51,7 +58,7 @@ def respond(name: str, fields: dict) -> str:
         return json.dumps(records.call(_session_tools(), name, caller, request, time.time()))
     except Exception as e:
         log(f"MCP {name} failed", {"error": str(e)})
-        return json.dumps({"success": False, "error": str(e)})
+        return json.dumps({"success": False, "error": TOOL_FAILED})
 
 
 def _projects(projects: str) -> dict:
@@ -65,7 +72,7 @@ def _cursor(cursor: str) -> dict:
 
 def _alias(mcp, name: str, target: str) -> None:
     def alias(request: str = "{}") -> str:
-        return respond(name, json.loads(request))
+        return respond(name, lambda: json.loads(request))
 
     alias.__doc__ = f"Compatibility alias for {target}; takes the {target} request as a JSON object and expires."
     mcp.tool(name=name)(alias)
@@ -84,7 +91,7 @@ def register(mcp):
             limit: most sessions per page, 1 to 50.
             cursor: next_cursor from an earlier page of the same listing.
         """
-        return respond("session_list", {**_projects(projects), "limit": limit, **_cursor(cursor)})
+        return respond("session_list", lambda: {**_projects(projects), "limit": limit, **_cursor(cursor)})
 
     @mcp.tool()
     def session_search(query: str, projects: str = "", limit: int = 10, context: int = 1) -> str:
@@ -96,8 +103,9 @@ def register(mcp):
             limit: most hits, 1 to 50.
             context: neighbouring chunks shown on each side, 0 to 3.
         """
-        fields = {"query": query, **_projects(projects), "limit": limit, "context": context}
-        return respond("session_search", fields)
+        return respond(
+            "session_search", lambda: {"query": query, **_projects(projects), "limit": limit, "context": context}
+        )
 
     @mcp.tool()
     def session_get(session_uid: str) -> str:
@@ -106,7 +114,7 @@ def register(mcp):
         Args:
             session_uid: a session_uid from session_list or a search hit.
         """
-        return respond("session_get", {"session_uid": session_uid})
+        return respond("session_get", lambda: {"session_uid": session_uid})
 
     @mcp.tool()
     def session_records(citation: str, before: int = 0, after: int = 0, limit: int = 50, cursor: str = "") -> str:
@@ -119,8 +127,17 @@ def register(mcp):
             limit: most records per page, 1 to 200.
             cursor: next_cursor from an earlier page of the same expansion.
         """
-        fields = {"citation": json.loads(citation), "before": before, "after": after, "limit": limit}
-        return respond("session_records", {**fields, **_cursor(cursor)})
+
+        def fields() -> dict:
+            return {
+                "citation": json.loads(citation),
+                "before": before,
+                "after": after,
+                "limit": limit,
+                **_cursor(cursor),
+            }
+
+        return respond("session_records", fields)
 
     if os.getenv(ALIASES_ENV) == "1":
         from hooks.memory.api.records import ALIASES

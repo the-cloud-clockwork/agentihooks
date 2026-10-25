@@ -8,6 +8,7 @@ lifetime or a changed listing expires them explicitly instead of returning a mis
 
 import json
 import sqlite3
+from datetime import datetime
 
 from hooks.memory import archive
 from hooks.memory import search as core
@@ -51,7 +52,7 @@ RESOLUTION_FAILURES = "evidence_reference_resolution_failures"
 ALIAS_CALLS = "session_alias_calls"
 ALIAS_OWNER = "agentihooks session memory"
 ALIAS_EXPIRES = "2027-01-31T00:00:00Z"
-ALIAS_EXPIRES_AT = 1801353600.0
+ALIAS_EXPIRES_AT = datetime.fromisoformat(ALIAS_EXPIRES).timestamp()
 ALIASES = {
     "list_sessions": "session_list",
     "get_session": "session_get",
@@ -236,6 +237,8 @@ class SessionTools:
 
     def _chunk(self, domain: str, result: dict) -> dict:
         row = self.catalog.db.execute(CHUNK, (domain, result["session_uid"], result["chunk_id"])).fetchone()
+        if row is None:
+            raise Unresolved(STALE_CITATION)
         return json.loads(row[0])
 
     def session_search(self, grant: Grant, request: dict, now: float, embedder: Embedder | None = None) -> dict:

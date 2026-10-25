@@ -1,0 +1,82 @@
+{
+  "case": "T-SV2-IDX-05-C",
+  "evidence_class": "mocked: an in-process caller, a SQLite catalog file and a local content addressed object folder stand in for the session service, the central database and the archive bucket, and a recording stub stands in for the MCP server; no model, HTTP server, MCP transport or Pod runs",
+  "input_sha256": {
+    "session-tools.json": "88df786b2ad1eb5fbf9875b1735643b1ddbb09ac66b8a04cc1c01b358764a69d"
+  },
+  "observed": {
+    "changed_listing_cursor": {
+      "error": {
+        "class": "cursor_expired",
+        "detail": "the listing changed since the cursor was issued; start the listing again without a cursor",
+        "retry": "never"
+      },
+      "state": "rejected"
+    },
+    "cursor_page_after_restart_identical": true,
+    "cursor_page_before_restart": [
+      "kernel"
+    ],
+    "cursor_replay_identical": true,
+    "evidence_reference_resolution_failures": 0,
+    "expansion_across_restart": {
+      "head": [
+        {
+          "cited": true,
+          "kind": "tool_call",
+          "project_id": null,
+          "sequence": 2,
+          "task_id": "fixture-lock",
+          "timestamp": "2026-10-20T09:00:05Z"
+        },
+        {
+          "cited": true,
+          "kind": "tool_result",
+          "project_id": "github.com/the-cloud-clockwork/agentihooks",
+          "sequence": 3,
+          "task_id": "fixture-lock",
+          "timestamp": "2026-10-20T09:00:09Z"
+        }
+      ],
+      "sequences": [
+        2,
+        3,
+        4
+      ],
+      "tail_pages": 1
+    },
+    "expired_cursor": {
+      "error": {
+        "class": "cursor_expired",
+        "detail": "the cursor is unknown or expired; start the listing again without a cursor",
+        "retry": "never"
+      },
+      "state": "rejected"
+    },
+    "listing_restarted_without_cursor": [
+      "lock"
+    ],
+    "rollback_rehearsal": {
+      "archive_unchanged": true,
+      "tools_hidden": [],
+      "tools_with_aliases": [
+        "get_session",
+        "get_session_segment",
+        "list_sessions",
+        "search_semantic",
+        "search_sessions",
+        "session_get",
+        "session_list",
+        "session_records",
+        "session_search"
+      ],
+      "tools_with_catalog": [
+        "session_get",
+        "session_list",
+        "session_records",
+        "session_search"
+      ]
+    }
+  },
+  "state": "passed"
+}

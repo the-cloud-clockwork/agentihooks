@@ -9,7 +9,7 @@
     "tests/fixtures/swarm_v2/session-tools.json": "88df786b2ad1eb5fbf9875b1735643b1ddbb09ac66b8a04cc1c01b358764a69d"
   },
   "package": "SV2-IDX-05",
-  "red_run": "pending",
+  "red_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/40200544185",
   "run": "pending",
   "tested_commit": "pending"
 }

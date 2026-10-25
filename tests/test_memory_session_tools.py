@@ -521,8 +521,24 @@ def test_mcp_failures_answer_without_raising(served, monkeypatch):
     logged = []
     monkeypatch.setattr(mcp_sessions, "log", lambda message, fields: logged.append((message, fields)))
     answer = json.loads(functions["session_get"]("s"))
-    assert answer["success"] is False and answer["error"]
-    assert logged == [("MCP session_get failed", {"error": answer["error"]})]
+    assert answer == {"success": False, "error": mcp_sessions.TOOL_FAILED}
+    assert logged == [("MCP session_get failed", {"error": f"'{mcp_sessions.CATALOG_ENV}'"})]
+
+
+@pytest.mark.parametrize("name,argument", [("session_records", "not json"), ("get_session", "not json")])
+def test_mcp_malformed_json_answers_without_raising(served, monkeypatch, name, argument):
+    _, functions = served
+    logged = []
+    monkeypatch.setattr(mcp_sessions, "log", lambda message, fields: logged.append(message))
+    assert json.loads(functions[name](argument)) == {"success": False, "error": mcp_sessions.TOOL_FAILED}
+    assert logged == [f"MCP {name} failed"]
+
+
+def test_a_hit_whose_chunk_is_gone_is_a_stale_citation(inputs, bank):
+    result = {"session_uid": bank.uid("lock"), "chunk_id": "chunk-gone"}
+    with pytest.raises(records.Unresolved) as raised:
+        bank.tools._chunk(inputs["grant"]["corpus"], result)
+    assert str(raised.value) == records.STALE_CITATION
 
 
 @pytest.mark.parametrize("case", ["a", "b", "c"])

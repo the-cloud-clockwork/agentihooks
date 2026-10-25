@@ -1,0 +1,91 @@
+{
+  "case": "T-SV2-IDX-05-B",
+  "evidence_class": "mocked: an in-process caller, a SQLite catalog file and a local content addressed object folder stand in for the session service, the central database and the archive bucket, and a recording stub stands in for the MCP server; no model, HTTP server, MCP transport or Pod runs",
+  "input_sha256": {
+    "session-tools.json": "88df786b2ad1eb5fbf9875b1735643b1ddbb09ac66b8a04cc1c01b358764a69d"
+  },
+  "observed": {
+    "alias_list_after_revocation": [
+      "kernel",
+      "readme"
+    ],
+    "alias_metadata": {
+      "expires": "2027-01-31T00:00:00Z",
+      "name": "list_sessions",
+      "owner": "agentihooks session memory",
+      "target": "session_list"
+    },
+    "alias_search_results_after_revocation": 0,
+    "corrected_with_a_new_citation": {
+      "records": 2,
+      "state": "answered"
+    },
+    "evidence_reference_resolution_failures": 5,
+    "hidden_names_absent_from_diagnostics": true,
+    "protected_state_unchanged": true,
+    "rejected": {
+      "alias_get_session": {
+        "error": {
+          "class": "evidence_unavailable",
+          "detail": "the cited evidence is not available to this grant",
+          "retry": "never"
+        },
+        "state": "rejected"
+      },
+      "alias_get_session_segment": {
+        "error": {
+          "class": "evidence_unavailable",
+          "detail": "the cited evidence is not available to this grant",
+          "retry": "never"
+        },
+        "state": "rejected"
+      },
+      "records_after_revocation": {
+        "error": {
+          "class": "evidence_unavailable",
+          "detail": "the cited evidence is not available to this grant",
+          "retry": "never"
+        },
+        "state": "rejected"
+      },
+      "session_get_after_revocation": {
+        "error": {
+          "class": "evidence_unavailable",
+          "detail": "the cited evidence is not available to this grant",
+          "retry": "never"
+        },
+        "state": "rejected"
+      }
+    },
+    "revoked_revision": 2,
+    "scope_and_cursor": {
+      "cursor_from_another_grant": {
+        "error": {
+          "class": "cursor_expired",
+          "detail": "the cursor is unknown or expired; start the listing again without a cursor",
+          "retry": "never"
+        },
+        "state": "rejected"
+      },
+      "foreign_corpus": {
+        "error": {
+          "class": "forbidden_scope",
+          "detail": "the grant does not cover the requested search scope",
+          "retry": "never"
+        },
+        "state": "rejected"
+      },
+      "stale_citation": {
+        "error": {
+          "class": "evidence_unavailable",
+          "detail": "the cited records are not held as cited; search again for a current citation",
+          "retry": "never"
+        },
+        "state": "rejected"
+      }
+    },
+    "session_alias_calls": 4,
+    "unrevoked_fixture_still_cites_the_hit": "lock"
+  },
+  "state": "passed"
+}
