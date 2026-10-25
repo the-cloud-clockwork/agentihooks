@@ -46,6 +46,9 @@ bundle_dir="$HIVE_REPO_ROOT/agentihooks-bundle"
 if [[ -n "${HIVE_BUNDLE_URL:-}" && ! -d "$bundle_dir/.git" ]]; then
   git clone --branch "${HIVE_BUNDLE_REF:-dev}" -- "$HIVE_BUNDLE_URL" "$bundle_dir" \
     || echo "worker-hive: bundle clone failed; init runs on the package roles alone" >&2
+elif [[ -n "${HIVE_BUNDLE_URL:-}" ]]; then
+  git -C "$bundle_dir" pull --ff-only -- "$HIVE_BUNDLE_URL" "${HIVE_BUNDLE_REF:-dev}" \
+    || echo "worker-hive: bundle fast forward failed; init runs on the kept clone" >&2
 fi
 
 python3 - <<'PY'
@@ -169,5 +172,5 @@ agentihooks deps ensure \
   || echo "worker-hive: agentihooks deps ensure failed; each launch retries the bundle dependencies" >&2
 member="$(python3 -c 'import hooks.config; from scripts.swarm.commands import hive_id; print(hive_id())')"
 agentihooks hive set --keep "$member" ui=no ephemeral=yes draining=no \
-  "excluded=${HIVE_EXCLUDED-master}" "max-agents=${HIVE_MAX_AGENTS:-20}"
+  "excluded=${HIVE_EXCLUDED-master}" "master-swarms=${HIVE_MASTER_SWARMS-}" "max-agents=${HIVE_MAX_AGENTS:-20}"
 exec agentihooks hive run

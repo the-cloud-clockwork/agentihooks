@@ -265,7 +265,7 @@
       "name": "Outline Navigation",
       "kind": "nav",
       "refersTo": "outline",
-      "description": "Fixed left list of section links; red bullet for open items, accent when current.",
+      "description": "Fixed left list of section links; red bullet for open items, accent when current. A line filter and a state select above it filter by title, id and state, searching unloaded done items on the server; swarm tasks sit under muted phase labels that never fold; completed or answered categories start closed for a viewer with no saved choice; arrows, or j and k outside form controls, walk visible links and Enter reveals.",
       "html": "<nav class=\"ds-outline\"><a href=\"#\" class=\"on\">Claude and Codex messaging</a><a href=\"#\">Seats and continuity</a></nav>",
       "css": ".ds-outline { display: flex; flex-direction: column; width: 248px; font: 13px/1.6 ui-monospace, 'JetBrains Mono', monospace; } .ds-outline a { position: relative; display: block; padding: 3px 10px 3px 24px; border-radius: 4px; color: var(--muted); text-decoration: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; } .ds-outline a::before { content: '\u2022'; position: absolute; left: 11px; color: var(--signal); } .ds-outline a:hover { background: var(--hover); color: var(--text); } .ds-outline a.on { color: var(--accent); } .ds-outline a:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }"
     }

@@ -4,6 +4,7 @@ import signal
 import subprocess
 import sys
 import threading
+import time
 from contextlib import contextmanager, suppress
 from dataclasses import replace
 
@@ -374,6 +375,84 @@ def test_a_live_agent_without_a_pid_or_owned_pane_is_refused(tmp_path, monkeypat
         "refusal": "no owned pane for unrecorded process",
     }
     assert ["pane", "close", "w1:p1"] not in calls
+
+
+def test_a_live_agent_with_no_pid_and_no_recorded_pane_retires_by_its_session_name(tmp_path, monkeypatch):
+    from scripts import terminate_agent
+
+    herdr, calls = herdr_runtime(tmp_path, monkeypatch, panes={})
+    herdr.end = reaper.retire
+    inherited = {key: value for key, value in os.environ.items() if not key.startswith("HERDR_")}
+    environment = {**inherited, "AGENTIHOOKS_AGENT_NAME": NAME, "AGENTIHOOKS_SWARM_TASK": "t1"}
+    child = subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(60)"], env=environment, start_new_session=True
+    )
+    try:
+        table = processes()
+        for _ in range(100):
+            if child.pid in table and table[child.pid].pgid == child.pid:
+                break
+            time.sleep(0.05)
+            table = processes()
+        assert child.pid in table
+        session = terminate_agent.Session("", "claude", NAME, table[child.pid], "", "alive")
+        monkeypatch.setattr(terminate_agent, "sessions", lambda: [session])
+        local = LocalHerdrRuntime(herdr, namespace=lambda: ANTON, table=lambda: table)
+        agent = replace(record(pid=None, start=None), pane_id="", state="finished")
+        assert RuntimeRouter([local]).terminate(agent).ok
+        assert child.wait(timeout=5) == -signal.SIGTERM
+        assert not any(call[:2] == ["pane", "close"] for call in calls)
+    finally:
+        if child.poll() is None:
+            child.kill()
+        child.wait(timeout=5)
+
+
+def test_named_retirement_passes_the_process_start_and_skips_a_vanished_recorded_pane(tmp_path, monkeypatch):
+    herdr, calls = herdr_runtime(tmp_path, monkeypatch, panes={})
+    ended = []
+    herdr.end = lambda *args: ended.append(args) or reaper.Outcome()
+    monkeypatch.setattr(herdr, "live_names", lambda: {NAME})
+    monkeypatch.setattr("scripts.swarm.runtime._named_process", lambda agent: proc(start=999))
+    agent = replace(record(pid=None, start=None), pane_id="w7:p7", state="finished")
+    assert herdr.retire_pane(agent)
+    assert ended == [(NAME, PID, [], 999)]
+    assert ["pane", "close", "w7:p7"] not in calls
+
+
+@pytest.mark.parametrize(
+    ("recorded", "task", "carried", "retired"),
+    [
+        ("", "t1", ("", "", "t1"), True),
+        ("w7:p7", "t1", ("w7:p7", "/owned/herdr.sock", "t1"), True),
+        ("w7:p7", "t1", ("w9:p9", "/owned/herdr.sock", "t1"), False),
+        ("", "t1", ("w9:p9", "/other/herdr.sock", "t1"), False),
+        ("", "t1", ("", "", "t2"), False),
+        ("", "t1", ("", "", ""), False),
+        ("", "", ("", "", ""), False),
+    ],
+)
+def test_named_retirement_ends_only_a_process_of_this_task_pane_and_server(
+    tmp_path, monkeypatch, recorded, task, carried, retired
+):
+    from scripts import terminate_agent
+
+    herdr, calls = herdr_runtime(tmp_path, monkeypatch, panes={})
+    ended = []
+    herdr.end = lambda *args: ended.append(args) or reaper.Outcome()
+    monkeypatch.setattr(herdr, "live_names", lambda: {NAME})
+    monkeypatch.setenv("HERDR_SOCKET_PATH", "/owned/herdr.sock")
+    session = terminate_agent.Session("", "claude", NAME, proc(), "", "alive")
+    monkeypatch.setattr(terminate_agent, "sessions", lambda: [session])
+    monkeypatch.setattr(terminate_agent, "validate", lambda *args, **kwargs: [])
+    asked = []
+    monkeypatch.setattr(terminate_agent, "agent_environ", lambda pid, keys: asked.append((pid, keys)) or carried)
+    agent = replace(record(pid=None, start=None), task=task, pane_id=recorded, state="finished")
+    assert herdr.retire_pane(agent) is retired
+    assert asked == [(PID, ("HERDR_PANE_ID", "HERDR_SOCKET_PATH", "AGENTIHOOKS_SWARM_TASK"))]
+    assert ended == ([(NAME, PID, [], STARTED)] if retired else [])
+    if not retired:
+        assert herdr.refusal(agent) == {"process": 0, "refusal": "no owned pane for unrecorded process"}
 
 
 @pytest.mark.parametrize(("pane_id", "socket"), [("w9:p9", "/owned/herdr.sock"), ("w1:p1", "/other/herdr.sock")])

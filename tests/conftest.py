@@ -469,6 +469,28 @@ def _swarm_tick_reaps_no_real_process(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _workstation_headroom_is_roomy(monkeypatch):
+    """Workstation admission reads a roomy fixed machine instead of the test runner's own load."""
+    from scripts.hive import headroom
+
+    measure = headroom.measure
+
+    def roomy(pending, now_ms, proc=None, previous=None):
+        if proc is not None:
+            return measure(pending, now_ms, proc, previous)
+        return {
+            "cpus": 1000,
+            "load5": 0.0,
+            "available_mb": 10**7,
+            "total_mb": 10**7,
+            "pending": pending,
+            "measured_at": now_ms,
+        }
+
+    monkeypatch.setattr(headroom, "measure", roomy)
+
+
+@pytest.fixture(autouse=True)
 def _codex_resumes_find_their_rollout(request, monkeypatch):
     """A fake Codex resume finds its rollout unless the test is marked codex_rollouts."""
     if request.node.get_closest_marker("codex_rollouts"):

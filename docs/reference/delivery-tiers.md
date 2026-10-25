@@ -400,7 +400,7 @@ It prints `<finding> <seconds>`, for example `ci-tier-wall-time/39269601765-1 57
 
 ### Concurrent merge groups on one pool
 
-The shard cap keeps one merge group inside one wave, but the queue then built up to three entries at a time (`max_entries_to_build` 3; `.github/rulesets/dev-no-delete.json` now sets 1) and every group sent its shards to the same `anton-oss-queue` pool. Two groups that reach their unit stage together ask for up to 60 runners, so the later group's shards wait for the earlier group's shards to finish. That wait, not the shard plan, is what pushed merge group tiers over 15 minutes on the night of 19 to 20 October.
+The shard cap keeps one merge group inside one wave, but the queue then built up to three entries at a time (`max_entries_to_build` 3; `.github/rulesets/dev-no-delete.json` now sets 5) and every group sent its shards to the same `anton-oss-queue` pool. Two groups that reach their unit stage together ask for up to 60 runners, so the later group's shards wait for the earlier group's shards to finish. That wait, not the shard plan, is what pushed merge group tiers over 15 minutes on the night of 19 to 20 October.
 
 Doctor finding `ci-tier-wall-time/39346819295-1` fired on merge group run [39346819295](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39346819295), which took 911 s: 201 s before the unit stage, 599 s in it and 111 s after it. Its 30 shards were created while 27 shards of merge group run 39346300411 were still waiting or running, a demand of 57 on the 30 runners the pool held then. Its shards waited a median 128 s and up to 293 s for a runner.
 
@@ -455,7 +455,7 @@ The queue pool changed after the finding: antoncore pull request [1036](https://
 | Symptom | Cause | Fix |
 |---|---|---|
 | `Queue plan exceeds 360s of the step timeout` | 24 shards cannot bring the slowest shard under half the step timeout, often one slow test or a slow serial group | Split or speed up the slow test file; the planner log names the predicted seconds |
-| Shards wait minutes for a runner while each group plans 24 or fewer | Several merge groups build at once and share the 24 runners; the queue builds up to three entries at a time | Read the runner waits of every group running in the same minutes before changing the plan; see [Concurrent merge groups on one pool](#concurrent-merge-groups-on-one-pool) |
+| Shards wait minutes for a runner while each group plans 24 or fewer | Several merge groups build at once and share the 24 runners; the queue builds up to five entries at a time | Read the runner waits of every group running in the same minutes before changing the plan; see [Concurrent merge groups on one pool](#concurrent-merge-groups-on-one-pool) |
 | More than 24 `unit` jobs in one run | `MAX_SHARDS` no longer matches the pool, or a second Python version was added without the capped path | Compare `MAX_SHARDS` with the antoncore scale set `maxRunners` |
 
 ### Delivery evidence
@@ -769,7 +769,7 @@ A merge group unit shard that loses its runner is rerun once inside the same Tes
 
 ## Lost fail fast watcher
 
-`queue-fail-fast` holds one `anton-oss-light` runner for the whole merge group Tests run. It polls the run's jobs every 15 seconds until a graded job fails or the run ends, so it is the longest job of the run and the one most exposed to a lost runner. `Gate — Required` grades what the watcher reports, not whether its runner survived: a merge group whose graded jobs all passed stays green when the watcher's runner is lost or the watcher is cancelled.
+`queue-fail-fast` holds one `anton-oss-light` runner from the start of the merge group Tests run. It polls the run's jobs every 15 seconds until a graded job fails, every unit shard or its rerun has passed, or the run ends, so it is the longest job of the run and the one most exposed to a lost runner. A failure after the unit shards settle, such as in `shard-check`, still fails `Gate — Required`; it is not cancelled early. `Gate — Required` grades what the watcher reports, not whether its runner survived: a merge group whose graded jobs all passed stays green when the watcher's runner is lost or the watcher is cancelled.
 
 ### What the watcher reports
 
@@ -1170,7 +1170,7 @@ On 20 October one pull request took 109 minutes from enqueue to merge while its 
 
 ### Window and queue settings
 
-The window ran from 2026-10-20T02:00Z to 2026-10-21T02:00Z. It held 301 merge group Tests runs: 170 `success`, 126 `cancelled`, 5 still queued and none `failure`. The `dev` merge queue then built up to five entries at once (`max_entries_to_build` 5), merged up to five, grouped `ALLGREEN`, waited one minute for entries and timed checks out after 45 minutes. `.github/rulesets/dev-no-delete.json` now sets `max_entries_to_build` to 1; the other values are unchanged.
+The window ran from 2026-10-20T02:00Z to 2026-10-21T02:00Z. It held 301 merge group Tests runs: 170 `success`, 126 `cancelled`, 5 still queued and none `failure`. The `dev` merge queue then built up to five entries at once (`max_entries_to_build` 5), merged up to five, grouped `ALLGREEN`, waited one minute for entries and timed checks out after 45 minutes. `.github/rulesets/dev-no-delete.json` set `max_entries_to_build` to 1 after this window and back to 5 on 25 October; the other values are unchanged.
 
 ### How each cancelled run was attributed
 

@@ -94,6 +94,7 @@ class AgentSpec:
     transport: str = ""
     seat: str = ""
     previous_execution: str = ""
+    execution: str = ""
     title: str = ""
     home: str = ""
 
@@ -386,6 +387,7 @@ def _app_server_command(
         "--report",
         str(report),
         *(["--previous-execution", spec.previous_execution] if spec.previous_execution else []),
+        *(["--execution", spec.execution] if spec.execution else []),
         *(["--resume", spec.resume] if spec.resume else []),
         *(["--prompt-file", str(opening)] if opening else []),
         "--",
@@ -639,6 +641,21 @@ def _binding_result(environ: dict[str, str], timeout: float, route: dict) -> lis
     ]
 
 
+def _binding_deferred(environ: dict[str, str]) -> list[str]:
+    from scripts.profiles import binding
+
+    if not environ.get(binding.REPORT):
+        return []
+    return ["profile_validation=pending", f"profile_report={environ[binding.REPORT]}"]
+
+
+def _profile_canary(args, agent: str, environ: dict[str, str], launch, route: dict) -> list[str]:
+    if args.defer_canary and (deferred := _binding_deferred(environ)):
+        return deferred
+    canary = CANARY_TIMEOUT_S[agent] if args.canary_timeout is None else args.canary_timeout
+    return launch.run("profile canary", canary, lambda seconds: _binding_result(environ, seconds, route))
+
+
 def _selection_refused(environ: dict[str, str]) -> bool:
     from scripts.profiles import binding
 
@@ -775,6 +792,12 @@ def _parser() -> argparse.ArgumentParser:
         help="Seconds to wait for the new session to run its profile canary; default 120 for Claude, 90 for Codex",
     )
     parser.add_argument(
+        "--defer-canary",
+        action="store_true",
+        help="Return once the session is routed and print its pending profile validation request for the caller "
+        "to confirm later",
+    )
+    parser.add_argument(
         "--handoff",
         action="store_true",
         help="Quota handoff: route to an account other than this session's, never fall back to bare "
@@ -815,6 +838,7 @@ def _parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--seat", default="", help="Codex app-server: the swarm seat this execution occupies")
     parser.add_argument("--previous-execution", default="", help="Codex app-server: the execution this launch replaces")
+    parser.add_argument("--execution", default="", help="Codex app-server: the admitted execution this launch serves")
     parser.add_argument(
         "--inbox-channel",
         action="store_true",
@@ -1027,6 +1051,7 @@ def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -
                 transport=_transport(args, agent),
                 seat=args.seat,
                 previous_execution=args.previous_execution,
+                execution=args.execution,
                 title=args.title,
                 home=_recorded_home(agent, active_env),
             ),
@@ -1151,8 +1176,7 @@ def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -
         return 3
     try:
         _route_reported(active_env, args.route_timeout, route)
-        canary = CANARY_TIMEOUT_S[agent] if args.canary_timeout is None else args.canary_timeout
-        report += launch.run("profile canary", canary, lambda seconds: _binding_result(active_env, seconds, route))
+        report += _profile_canary(args, agent, active_env, launch, route)
     except (OSError, ValueError) as exc:
         print("\n".join([*report, "profile_validation=failed"]))
         print(f"agentihooks init-agent: {exc}", file=sys.stderr)

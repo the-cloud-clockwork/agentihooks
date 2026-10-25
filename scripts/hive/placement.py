@@ -44,6 +44,15 @@ def hosts(role: str, hive: dict, aliases: tuple[str, ...] = ()) -> bool:
     return hive.get("draining") != YES and not {role, *aliases} & set(hive["excluded"])
 
 
+def for_swarm(hives: list[dict], slug: str) -> list[dict]:
+    return [
+        {**hive, "excluded": [role for role in hive["excluded"] if role != MASTER]}
+        if slug in hive.get("master_swarms", ())
+        else hive
+        for hive in hives
+    ]
+
+
 def _room(hive: dict) -> int:
     return hive["room"]
 

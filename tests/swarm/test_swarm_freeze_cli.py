@@ -63,7 +63,30 @@ def test_the_master_without_the_operators_words_is_refused(swarm, monkeypatch, c
     assert cli.main(["demo", "focus", "plans/a"]) == 1
     assert ledger.freezes == []
     assert capsys.readouterr().err == (
-        "swarm: the master writes freezes only with the operator's words: pass them with --quote\n"
+        "swarm: below full autonomy the master writes freezes only with the operator's words: pass them with --quote\n"
+    )
+
+
+@pytest.mark.parametrize("verb", ["freeze", "focus", "unfreeze"])
+def test_the_master_at_full_autonomy_writes_each_verb_under_its_own_name(swarm, monkeypatch, capsys, verb):
+    store, ledger = swarm
+    store.update("demo", autonomy="full")
+    acting(monkeypatch, MASTER, "demo")
+    assert cli.main(["demo", verb, "plans/a", "--reason", "ship first"]) == 0
+    assert ledger.freezes == [("demo", verb, "plans/a", {"by": MASTER, "reason": "ship first", "quote": ""})]
+    assert json.loads(capsys.readouterr().out) == {verb: "plans/a", "by": MASTER}
+
+
+@pytest.mark.parametrize("autonomy", ["manual", "assist", "delegate"])
+@pytest.mark.parametrize("verb", ["freeze", "focus", "unfreeze"])
+def test_the_master_below_full_autonomy_without_a_quote_is_refused(swarm, monkeypatch, capsys, autonomy, verb):
+    store, ledger = swarm
+    store.update("demo", autonomy=autonomy)
+    acting(monkeypatch, MASTER, "demo")
+    assert cli.main(["demo", verb, "plans/a"]) == 1
+    assert ledger.freezes == []
+    assert capsys.readouterr().err == (
+        "swarm: below full autonomy the master writes freezes only with the operator's words: pass them with --quote\n"
     )
 
 

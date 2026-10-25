@@ -392,6 +392,42 @@ def test_a_missing_record_file_collects_the_base(tmp_path):
     assert collected
 
 
+def test_a_record_from_an_exported_collection_matches_a_collected_record_without_collecting(tmp_path):
+    tree = _collection_tree(tmp_path)
+    collected = tmp_path / "collected.json"
+    collected_record, exported_record = tmp_path / "collected-record.json", tmp_path / "exported-record.json"
+    record = [sys.executable, "-m", "tests.count_floor", "--head", str(tree)]
+    subprocess.run([*record, "--record", str(collected_record)], cwd=_ROOT, check=True, capture_output=True)
+    collected.write_text(json.dumps(json.loads(collected_record.read_text())["nodeids"]))
+    runs_before = (tree / ".collection-runs").read_text()
+    result = subprocess.run(
+        [*record, "--record", str(exported_record), "--collected", str(collected)],
+        cwd=_ROOT,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert (tree / ".collection-runs").read_text() == runs_before
+    assert json.loads(exported_record.read_text()) == json.loads(collected_record.read_text())
+
+
+@pytest.mark.parametrize("exported", ["[]", "[3]", "{}", "not json", None])
+def test_an_unusable_exported_collection_writes_no_record(tmp_path, exported):
+    tree = _collection_tree(tmp_path)
+    collected, record = tmp_path / "collected.json", tmp_path / "record.json"
+    if exported is not None:
+        collected.write_text(exported)
+    result = subprocess.run(
+        [sys.executable, "-m", "tests.count_floor", "--head", str(tree), "--record", str(record)]
+        + ["--collected", str(collected)],
+        cwd=_ROOT,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 1
+    assert not record.exists()
+
+
 @pytest.mark.parametrize(
     "artifact, picked",
     [
@@ -400,8 +436,10 @@ def test_a_missing_record_file_collects_the_base(tmp_path):
         ({"head_sha": "f" * 40}, False),
         ({"head_repository_id": 2}, False),
         ({"expired": True}, False),
+        ({"head_branch": "gh-readonly-queue/dev/pr-1-" + "b" * 40}, True),
+        ({"head_branch": "gh-readonly-queue/main/pr-1-" + "b" * 40}, False),
     ],
-    ids=["dev-push", "pull-request-branch", "other-commit", "fork", "expired"],
+    ids=["dev-push", "pull-request-branch", "other-commit", "fork", "expired", "dev-queue-group", "main-queue-group"],
 )
 def test_only_an_artifact_from_dev_for_the_exact_base_commit_is_trusted(artifact, picked):
     from tests.count_floor import dev_record

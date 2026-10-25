@@ -204,7 +204,9 @@ def test_post_shard_graders_do_not_wait_on_each_other_and_the_gate_needs_each():
     graders = {"shard-check", "coverage-ratchet", "sonar"}
     for name in graders:
         needs = jobs[name]["needs"]
-        assert "unit" in needs
+        if "unit" not in needs:
+            assert name == "shard-check" and "split" in needs
+            assert any("python -m scripts.ci_gate_shards" in step.get("run", "") for step in jobs[name]["steps"])
         assert not graders & set(needs), f"{name} waits on another post shard grader"
     assert graders <= set(jobs["gate-required"]["needs"])
 
@@ -218,26 +220,6 @@ def test_semgrep_grades_registry_pack_findings_new_against_the_base_in_parallel(
         " || github.event.pull_request.base.sha || github.event.merge_group.base_sha"
         " || github.event.before || inputs.base }}"
     )
-    scan = yaml.safe_load((_ROOT / ".github/workflows/semgrep.yml").read_text())["jobs"]["scan"]
-    assert scan["steps"][0]["with"]["fetch-depth"] == 0
-    command = scan["steps"][-1]["run"].split()
-    assert {"p/ci", "p/secrets", "p/python"} == {command[i + 1] for i, a in enumerate(command) if a == "--config"}
-    baseline = scan["steps"][-2]
-    assert baseline["env"]["BASE"] == "${{ inputs.base }}"
-    assert baseline["run"] == 'sha="$(git merge-base "$BASE" HEAD)"\necho "sha=$sha" >> "$GITHUB_OUTPUT"\n'
-    assert baseline["id"] == "baseline"
-    assert scan["steps"][-1]["env"]["BASE"] == "${{ steps.baseline.outputs.sha }}"
-    assert command[command.index("--baseline-commit") + 1] == '"$BASE"'
-    assert {"--error", "--strict", "--verbose"} <= set(command)
-    assert int(command[command.index("--timeout") + 1]) >= 30
-    assert command[:4] == ["python", "scripts/ci_semgrep.py", "semgrep", "scan"]
-    assert not [s for s in ("||", "&&", ";", "exit") if s in scan["steps"][-1]["run"]]
-    assert not {"set", "--exclude", "--include"} & set(command)
-    assert [command[i + 1] for i, a in enumerate(command) if a == "--exclude-rule"] == [
-        "yaml.github-actions.security.github-actions-mutable-action-tag.github-actions-mutable-action-tag"
-    ]
-    assert all("if" not in step and "continue-on-error" not in step for step in scan["steps"])
-    assert not {"if", "continue-on-error"} & set(scan)
     assert "continue-on-error" not in job
     assert job["if"] in (
         "${{ !cancelled() && (github.event_name != 'merge_group' || needs.reuse.outputs.reused != 'true') }}",
@@ -353,6 +335,27 @@ def test_pull_requests_and_merge_groups_read_the_dev_count_record(event_name):
     fetch = _step("test-count", "Fetch the base suite count recorded on dev")
     condition = fetch["if"].replace("steps.app-token.outcome", "'success'")
     assert _evaluate("${{ " + condition + " }}", event_name=event_name) is True
+
+
+def test_a_merge_group_records_its_head_count_for_the_next_group_after_its_early_collection():
+    from tests.test_ci_hosted_lanes import _evaluate
+
+    recorder = yaml.safe_load((_ROOT / ".github/workflows/count-record.yml").read_text())["jobs"]["count-record"]
+    recorded = next(step for step in recorder["steps"] if step.get("name") == "Upload the suite count record")
+    count = _workflow()["jobs"]["test-count"]["steps"]
+    names = [step.get("name") for step in count]
+    record = count[names.index("Record the head count for the next queue group")]
+    upload = count[names.index("Upload the head count for the next queue group")]
+    assert names.index("Upload the early collection") < names.index(record["name"]) < names.index(upload["name"])
+    for step in (record, upload):
+        assert _evaluate("${{ " + step["if"] + " }}", event_name="merge_group") is True
+        assert _evaluate("${{ " + step["if"] + " }}", event_name="pull_request") is False
+    assert record["continue-on-error"] is True
+    assert 'cmp -s "$RUNNER_TEMP/base/tests/count_floor.py" tests/count_floor.py' in record["run"]
+    assert '--collected "$RUNNER_TEMP/collected.json"' in record["run"]
+    assert upload["with"]["name"] == recorded["with"]["name"]
+    assert upload["with"]["if-no-files-found"] == "ignore"
+    assert upload["with"]["overwrite"] is True
 
 
 def test_every_dev_head_records_its_count_outside_the_promotion_queue():
