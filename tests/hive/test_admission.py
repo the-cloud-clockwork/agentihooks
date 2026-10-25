@@ -120,7 +120,7 @@ def test_the_swarm_share_never_binds_below_the_hive_max_agents_on_a_quiet_host()
     )
 
 
-def test_the_swarm_share_still_binds_at_or_above_the_hive_max_agents():
+def test_the_swarm_share_still_binds_when_it_equals_the_hive_slots_left():
     found = admission.room(reading(cpus=16), swarm_agents=10, max_agents=12)
     assert found == admission.Room(
         2,
