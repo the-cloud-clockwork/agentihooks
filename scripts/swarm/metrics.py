@@ -79,6 +79,13 @@ def _pass(slug, now_ms, swarm, errors, box, environ):
         timing.call(_collect, slug, now_ms, swarm, box, errors, environ)
 
 
+def _due(slug, swarm, now_ms, environ):
+    if swarm is None:
+        return True
+    every_ms = int(float(environ.get("AGENTIHOOKS_METRICS_EVERY_MINUTES", "10")) * 60_000)
+    return bool(swarm.store.redis.set(swarm.store.key(slug, "metrics-collected"), now_ms, nx=True, px=every_ms))
+
+
 def record_pass(
     slug: str,
     now_ms: int,
@@ -89,5 +96,5 @@ def record_pass(
     if swarm is not None and swarm.store.config(slug).scratch:
         return []
     errors = []
-    extra = partial(_pass, slug, now_ms, swarm, errors, environ=environ)
+    extra = partial(_pass, slug, now_ms, swarm, errors, environ=environ) if _due(slug, swarm, now_ms, environ) else None
     return [*record(TICKS, [tick_row(slug, now_ms, actions)], now_ms, environ, extra), *errors]
