@@ -113,6 +113,18 @@ def test_a_failed_launch_in_the_pool_releases_its_task_and_the_rest_start(store)
     assert store.claimant("sw", "t3") is None
 
 
+def test_a_launch_names_the_overlapping_peer_launched_beside_it(store):
+    from tests.swarm.test_tick import FakeLedger
+
+    ledger = FakeLedger([{"id": "t1", "territory": ["hooks"]}, {"id": "t2", "territory": ["hooks/x.py"]}])
+    pooled = PooledRuntime(8)
+    tick("sw", store, ledger, pooled, now_ms=1_000)
+    sent = {task["id"]: task for task in pooled.tasks}
+    claimant = ledger.rows["t1"]["claimed_by"]
+    assert sent["t2"]["overlaps"] == [{"task": "t1", "claimant": claimant, "areas": ["hooks/x.py"]}]
+    assert sent["t1"]["overlaps"] == []
+
+
 def test_a_pool_whose_every_launch_failed_spares_the_spawn_budget(store, monkeypatch):
     from types import SimpleNamespace
 
@@ -152,6 +164,26 @@ def test_a_started_pool_spends_the_spawn_budget_for_the_next_one(store, monkeypa
     actions = tick("sw", store, ledger, pooled, now_ms=1_000)
     assert sorted(task for _, _, task in pooled.spawned) == ["t1", "t2"]
     assert "spent this pass's 20 second launch budget, t3 waits a pass" in actions
+
+
+def test_the_next_pool_is_priced_at_a_whole_pool_not_one_launch(store, monkeypatch):
+    from types import SimpleNamespace
+
+    store.update("sw", max_eng=9)
+    ledger, pooled = tasks(*((f"t{n}", "eng") for n in range(1, 10))), PooledRuntime(8)
+    clock = [0.0]
+    monkeypatch.setattr(tick_module, "time", SimpleNamespace(monotonic=lambda: clock[0]))
+    spawn = pooled.spawn
+
+    def launch(config, lane, name, task):
+        if lane != "master":
+            clock[0] = 10.0
+        return spawn(config, lane, name, task)
+
+    pooled.spawn = launch
+    actions = tick("sw", store, ledger, pooled, now_ms=1_000)
+    assert len(pooled.spawned) == 8
+    assert "spent this pass's 20 second launch budget, t9 waits a pass" in actions
 
 
 def _quota_launch(launching, fail=False):

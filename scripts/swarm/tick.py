@@ -1116,7 +1116,7 @@ def _spawn(slug, config, store, ledger, runtime, rows, doc, now_ms):
         ]
         if any(stop):
             return actions + _launch_all(run, clock, batch) + stop
-        launch, prepared = _prepare(run, lane, task, taken, clock.failing)
+        launch, prepared = _prepare(run, lane, task, taken, clock.failing, {peer.record.name for peer in batch})
         actions += prepared
         batch += [launch] if launch else []
         if batch and len(batch) >= _launch_room(runtime, config):
@@ -1144,7 +1144,7 @@ class Launch:
     primed: dict
 
 
-def _prepare(run, lane, task, taken, failing):
+def _prepare(run, lane, task, taken, failing, peers):
     slug, config, store, ledger, runtime = run.slug, run.config, run.store, run.ledger, run.runtime
     rows, doc, now_ms = run.rows, run.doc, run.now_ms
     expected = {"claimed_by": task.get("claimed_by", ""), "claim_generation": task.get("claim_generation", 0)}
@@ -1171,7 +1171,7 @@ def _prepare(run, lane, task, taken, failing):
         task["reclaim"] = continuation.resolve(config.repo, task, rows, lives, {}, reclaim)
         store.put_reclaim(slug, name, task["reclaim"])
     task["stack_base"] = _stack_base(task, rows, config.repo)
-    task["overlaps"] = _sharing(task, rows, [a for a in store.agents(slug) if runtime.reported(a)])
+    task["overlaps"] = _sharing(task, rows, [a for a in store.agents(slug) if runtime.reported(a) or a.name in peers])
     task["group"] = [
         {key: rows[m][key] for key in ("id", "title", "description")}
         for m in task.get("group_members") or []
