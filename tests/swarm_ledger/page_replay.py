@@ -54,6 +54,7 @@ FLUSHED = "() => window.__flushed"
 CAPTURE = """() => {
   const body = document.body.cloneNode(true);
   for (const s of body.querySelectorAll("script")) s.remove();
+  for (const el of body.querySelectorAll('[class=""]')) el.removeAttribute("class");
   const storage = {};
   for (let i = 0; i < localStorage.length; i++) storage[localStorage.key(i)] = localStorage.getItem(localStorage.key(i));
   const fields = [...document.querySelectorAll("input, textarea, select")].map((el) =>
