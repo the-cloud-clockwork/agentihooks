@@ -1,5 +1,5 @@
+import argparse
 import subprocess
-import sys
 from collections.abc import Iterable
 from pathlib import Path
 
@@ -21,8 +21,10 @@ def triggered(paths: Iterable[str]) -> bool:
 
 
 def main(argv: list[str] | None = None) -> int:
-    [root] = sys.argv[1:] if argv is None else argv
-    print(f"run={str(triggered(changed(Path(root)))).lower()}")
+    parser = argparse.ArgumentParser()
+    parser.add_argument("root")
+    args = parser.parse_args(argv)
+    print(f"run={str(triggered(changed(Path(args.root)))).lower()}")
     return 0
 
 
