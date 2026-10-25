@@ -102,6 +102,32 @@ def test_detached_server_cleanup_accepts_a_process_reaped_after_the_running_chec
     kill.assert_called_once_with(42, signal.SIGTERM)
 
 
+def test_detached_server_stop_deadline_excludes_startup_after_pid_publication(tmp_path, monkeypatch, ledger_port):
+    startup = tmp_path / "startup"
+    startup.mkdir()
+    (startup / "sitecustomize.py").write_text(
+        "import time\n"
+        "from pathlib import Path\n"
+        "write_text = Path.write_text\n"
+        "def publish(self, *args, **kwargs):\n"
+        "    result = write_text(self, *args, **kwargs)\n"
+        "    if self.name == '.server.pid':\n"
+        "        write_text(self.parent / 'startup-paused', 'yes')\n"
+        "        time.sleep(4)\n"
+        "    return result\n"
+        "Path.write_text = publish\n"
+    )
+    popen = subprocess.Popen
+
+    def start(*args, **kwargs):
+        kwargs["env"]["PYTHONPATH"] = os.pathsep.join((str(startup), kwargs["env"]["PYTHONPATH"]))
+        return popen(*args, **kwargs)
+
+    monkeypatch.setattr(subprocess, "Popen", start)
+    test_detached_server_stops_when_its_run_ends(tmp_path, "kill", True, "--ensure", ledger_port)
+    assert (tmp_path / "startup-paused").read_text() == "yes"
+
+
 def fake_process(proc, pid=7, ppid=1, start=99, state="S", comm="python", argv=(b"python",)):
     root = proc / str(pid)
     root.mkdir(parents=True, exist_ok=True)
