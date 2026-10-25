@@ -524,6 +524,17 @@ def test_only_the_verified_default_origin_is_sent_to_the_internal_ingress(monkey
     assert [str(request.url) for request in sent] == [f"{host}/api/public/traces"]
 
 
+def test_another_host_is_read_directly_with_its_params_auth_timeout_and_timing_hook(monkeypatch):
+    sent = _routes(monkeypatch, lambda request: httpx.Response(200, json={"data": []}))
+    env = {"LANGFUSE_HOST": "https://lf", "LANGFUSE_PUBLIC_KEY": "pk", "LANGFUSE_SECRET_KEY": "sk"}
+    assert traces_read.client(env)("traces", {"page": 1}) == {"data": []}
+    [request] = sent
+    assert str(request.url) == "https://lf/api/public/traces?page=1"
+    assert request.headers["Authorization"] == "Basic cGs6c2s="
+    assert request.extensions["timeout"]["read"] == traces_read.Budget.request_seconds
+    assert isinstance(request.extensions["trace"], traces_read._Timings)
+
+
 @pytest.mark.parametrize("failure", ["backend 503", "internal timeout"])
 def test_a_real_backend_failure_on_the_internal_path_still_raises_the_reader_finding(
     monkeypatch, tmp_path, failure, read_clock
@@ -542,7 +553,7 @@ def test_a_real_backend_failure_on_the_internal_path_still_raises_the_reader_fin
 
 
 def _phased(monkeypatch, steps, end, outcome):
-    now = [0.0]
+    now = [100.0]
     monkeypatch.setattr(traces_read, "elapsed", lambda: now[0])
 
     def internal(request):
@@ -553,9 +564,9 @@ def _phased(monkeypatch, steps, end, outcome):
                 trace(f"{name}.failed", {"exception": "kept out"})
             if at in (None, "failed"):
                 break
-            now[0] = at
+            now[0] = 100 + at
             trace(f"{name}.complete", {"return_value": "kept out"})
-        now[0] = end
+        now[0] = 100 + end
         return outcome(request)
 
     return _routes(monkeypatch, internal)
