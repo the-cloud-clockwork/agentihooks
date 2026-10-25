@@ -101,9 +101,10 @@ def test_a_finding_with_no_earlier_pair_names_none_in_its_description():
     assert "earlier" not in cause["description"].lower()
 
 
+@pytest.mark.parametrize("earlier", ["code", "tune"])
 @pytest.mark.parametrize("open_part", [0, 1])
-def test_a_finding_whose_pair_is_still_open_is_refused(open_part):
-    tasks = pair()
+def test_a_finding_whose_pair_is_still_open_is_refused(open_part, earlier):
+    tasks = pair(earlier)
     tasks[open_part]["done"] = False
     with pytest.raises(SwarmError, match="still open"):
         loop.fix_tasks(WATCHED, *judged("established"), "code", tasks)

@@ -321,7 +321,8 @@ def fix_tasks(watched, finding, verdict, fix, tasks):
         "phase": FIX_PHASE,
         "kind": "troubleshoot",
         "description": f"Doctor finding {finding['id']}: {finding['summary']}. Threshold: {finding['threshold']}. "
-        f"Evidence: {'; '.join(finding['evidence'])}. Show the root cause with evidence, then fix it or file it.{before}",
+        f"Evidence: {'; '.join(finding['evidence'])}. Show the root cause with evidence, then fix it or file it."
+        f"{before}",
         "contract": {
             "must": f"the root cause of {finding['summary']} is shown by evidence",
             "check": "the evidence in the task proof",
