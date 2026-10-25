@@ -581,6 +581,7 @@ def _tickable(slug):
 def cmd_tick(store, args):
     from scripts.hive import workstation
     from scripts.swarm import scheduled_tick, tick_reaper
+    from scripts.swarm_ledger.api import client as ledger_api
 
     if not workstation.runs_engine(os.environ):
         print(workstation.NO_ENGINE, file=sys.stderr)
@@ -595,7 +596,8 @@ def cmd_tick(store, args):
                     f"reaped leftover swarm tick process {left.pid} after {left.age_s} seconds "
                     f"with {left.signal}: {left.command}"
                 )
-            _tick_host(store, started)
+            with ledger_api.kept_exports():
+                _tick_host(store, started)
     except scheduled_tick.AlreadyRunning:
         print("another swarm tick is running on this machine", file=sys.stderr)
 
