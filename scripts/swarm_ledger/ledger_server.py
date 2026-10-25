@@ -1046,8 +1046,6 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(data)))
         self.send_header("Cache-Control", "no-store")
-        if self.headers.get("Origin") == FILE_ORIGIN:
-            self.send_header("Access-Control-Allow-Origin", FILE_ORIGIN)
         self.end_headers()
         self.wfile.write(data)
 
