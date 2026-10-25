@@ -3,6 +3,7 @@ from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from itertools import islice
+from unittest.mock import patch
 
 import pytest
 
@@ -53,10 +54,27 @@ def _nats(tmp_path) -> Iterator[Harness]:
     from scripts.events import nats
 
     policy = QueuePolicy(max_deliver=3, ack_wait_ms=600)
-    with nats_server.running(tmp_path / "jetstream") as url:
-        bus = nats.open_bus(BusConfig(backend="nats", url=url, dedupe_window_ms=1_500, queue=policy))
+    dedupe_ms = 1_500
+    offered: list[tuple[str, str, str, float]] = []
+    publish = nats._publish
+
+    async def recorded(js, subject: str, stream: str, event: Envelope) -> bool:
+        fresh = await publish(js, subject, stream, event)
+        if fresh:
+            offered.append((subject, stream, event.id, time.monotonic()))
+        return fresh
+
+    with nats_server.running(tmp_path / "jetstream") as url, patch.object(nats, "_publish", recorded):
+        bus = nats.open_bus(BusConfig(backend="nats", url=url, dedupe_window_ms=dedupe_ms, queue=policy))
+
+        def advance(ms: int) -> None:
+            time.sleep(ms / 1000)
+            for entry in [entry for entry in offered if time.monotonic() - entry[3] >= dedupe_ms / 1000]:
+                nats_server.wait_forgotten(bus, *entry[:3])
+                offered.remove(entry)
+
         try:
-            yield Harness(bus, policy, 1_500, 300, lambda ms: time.sleep(ms / 1000), 50)
+            yield Harness(bus, policy, dedupe_ms, 300, advance, 50)
         finally:
             bus.close()
 
