@@ -84,6 +84,7 @@ def test_several_primary_masters_hold_the_login_at_once_and_one_name_once(ah):
 
 @pytest.mark.parametrize("exclusive", ["", "master@rig-1"])
 def test_a_shared_claim_never_invents_an_exclusive_holder(ah, exclusive):
+    login.root().mkdir(parents=True)
     held = {"holders": {"XXXX": 10, "master@rig-1": 20}, "epoch": 1}
     if exclusive:
         held["alone"] = exclusive
