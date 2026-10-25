@@ -1,3 +1,5 @@
+import json
+import os
 from pathlib import Path
 
 import pytest
@@ -46,11 +48,57 @@ def master(tmp_path, monkeypatch):
 
 
 def ask(*questions, tool="AskUserQuestion"):
-    return {"session_id": SID, "tool_name": tool, "tool_input": {"questions": list(questions)}}
+    tool_input = {"questions": list(questions)}
+    transcript = Path(os.environ["AGENTIHOOKS_HOME"]) / "master.jsonl"
+    transcript.parent.mkdir(parents=True, exist_ok=True)
+    transcript.write_text(
+        json.dumps(
+            {
+                "type": "assistant",
+                "sessionId": SID,
+                "isSidechain": False,
+                "message": {
+                    "role": "assistant",
+                    "content": [{"type": "tool_use", "id": "ask-1", "name": tool, "input": tool_input}],
+                },
+            }
+        )
+        + "\n"
+    )
+    return {
+        "session_id": SID,
+        "tool_name": tool,
+        "tool_input": tool_input,
+        "tool_use_id": "ask-1",
+        "transcript_path": str(transcript),
+    }
 
 
 def typed_at(at):
     operator_mode._save(SID, {"on": True, "turn_at": at})
+
+
+@pytest.mark.parametrize(
+    "question",
+    [
+        {
+            "question": "What would you type next?",
+            "options": [{"label": "Status of the hub fix?"}, {"label": "Raise the node cap"}],
+        },
+        {
+            "question": "Want the batch runner after-hour count when it ends?",
+            "options": [{"label": "Run batch after count"}, {"label": "Check hub fix status"}],
+        },
+    ],
+)
+def test_unattributed_suggestions_are_denied_without_ledger_writes(master, monkeypatch, question):
+    from scripts.swarm import ledger_client
+
+    payload = ask(question)
+    Path(payload["transcript_path"]).write_text("")
+    monkeypatch.setattr(ledger_client, "LedgerClient", lambda: master)
+    assert hook_manager._operator_question(payload) == operator_mode.question_block("AskUserQuestion", SID)
+    assert master.questions == []
 
 
 def test_a_master_whose_operator_typed_in_the_last_ten_minutes_may_ask(master):
