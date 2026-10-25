@@ -199,3 +199,11 @@ def test_a_queue_that_grows_long_clears_the_previous_idle_wait(waiting):
     state["entry"]["position"] = 15
     assert run("sw", "--as", ME, "wait", "--on", "merge", URL) == 1
     assert idle.wait(store.redis, "sw", ME) is None
+
+
+def test_a_recorded_prerequisite_still_requires_continuation(waiting):
+    store, ledger, _ = waiting
+    ledger.rows["t1"]["pr_url"] = URL
+    ledger.rows["t1"]["description"] = "This pull request is the compatibility prerequisite; implementation follows."
+    assert run("sw", "--as", ME, "wait", "--on", "merge", URL) == 1
+    assert idle.wait(store.redis, "sw", ME) is None
