@@ -113,6 +113,13 @@ def poll_orders(consumer: "Consumer", member: bool) -> None:
             os.environ["SWARM_SECRET"] = kept
 
 
+def fill_operator_env(local_id: str) -> None:
+    from scripts import operator_env
+
+    if local_id != os.environ.get("AGENTIHOOKS_HIVE_ID"):
+        operator_env.fill(os.environ)
+
+
 def _index_hive(redis: "Redis", local_id: str) -> None:
     from redis.exceptions import NoPermissionError
 
@@ -210,10 +217,8 @@ def run(connect: Callable[[], tuple["Redis", "Redis"]]) -> None:
     from redis.exceptions import ConnectionError, TimeoutError
 
     lost = (ConnectionError, TimeoutError)
-    from scripts import operator_env
-
     local_id = hive_id()
-    operator_env.fill(os.environ)
+    fill_operator_env(local_id)
     quota_refresh.refresh(os.environ)
     worker, attempted_at = None, time.time()
     renewed = time.time()

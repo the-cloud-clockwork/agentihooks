@@ -125,3 +125,26 @@ def test_an_agent_launched_while_orders_apply_carries_its_ledger_agent_token(mon
 
     assert launched == [{"AGENTIHOOKS_LEDGER_AGENT_TOKEN": agent_token("hosted-secret", "fixture", "engineer@1-1")}]
     assert runtime._ledger_token("fixture", "engineer@1-1") == {}
+
+
+def test_only_a_workstation_hive_loads_the_operator_env(monkeypatch):
+    import os
+
+    from scripts import operator_env
+    from scripts.hive import daemon
+
+    filled = []
+
+    def fill(environ):
+        assert environ is os.environ
+        filled.append(1)
+        return []
+
+    monkeypatch.setattr(operator_env, "fill", fill)
+    monkeypatch.setenv("AGENTIHOOKS_HIVE_ID", "member")
+
+    daemon.fill_operator_env("member")
+    assert filled == []
+
+    daemon.fill_operator_env("root")
+    assert filled == [1]
