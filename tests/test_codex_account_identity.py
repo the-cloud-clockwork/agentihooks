@@ -357,6 +357,18 @@ def test_two_names_holding_one_token_without_an_email_claim_keep_the_email_shape
     assert [account.name for account in codex_router.token_accounts(environ)] == ["devatexample_com"]
 
 
+def test_a_live_session_on_the_dropped_name_of_one_token_is_not_a_second_account(tmp_path):
+    token = _jwt_with_email("acct-1", "Nestor.Colt@gmail.com")
+    environ = {
+        "HOME": str(tmp_path),
+        "AH_CX_TOKEN_alpha": token,
+        "AH_CX_TOKEN_nestor_coltatgmail_com": token,
+        "AH_CX_TOKEN_gamma": _jwt("acct-2"),
+    }
+    live = codex_router.routed_live([], {"alpha": 1, "gamma": 1, "other": 1}, environ)
+    assert live == [CodexAccount("gamma", "AH_CX_TOKEN_gamma"), CodexAccount("other", "AH_CX_TOKEN_other")]
+
+
 def test_without_an_email_claim_an_email_shaped_slug_is_kept_over_an_earlier_name(tmp_path):
     environ = {
         "HOME": str(tmp_path),

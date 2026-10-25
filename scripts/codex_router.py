@@ -365,8 +365,19 @@ def routed(pool: list[CodexAccount], environ: Mapping[str, str]) -> list[CodexAc
 def routed_live(
     pool: list[CodexAccount], sessions: Mapping[str, int], environ: Mapping[str, str]
 ) -> list[CodexAccount]:
-    repeated = duplicates(token_accounts(environ), environ)
+    tokens = token_accounts(environ)
+    repeated = set(duplicates(tokens, environ)) | _shadowed(tokens, environ)
     return [account for account in live_accounts(pool, sessions) if account.name not in repeated]
+
+
+def _shadowed(tokens: list[CodexAccount], environ: Mapping[str, str]) -> set[str]:
+    kept = {account.env_name for account in tokens}
+    held = {environ[name] for name in kept}
+    return {
+        name.removeprefix(CODEX_TOKEN_PREFIX)
+        for name in environ
+        if name.startswith(CODEX_TOKEN_PREFIX) and name not in kept and environ[name] in held
+    }
 
 
 def identity_warnings(environ: Mapping[str, str]) -> list[str]:
