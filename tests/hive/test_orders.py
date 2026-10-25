@@ -107,6 +107,7 @@ def test_order_ack_and_live_execution(setup):
     assert request.task["description"] == "launch this task"
     assert request.task["controller_epoch"] == setup.held.epoch
     assert request.task["route_kind"] == "subscription"
+    assert request.task["admitted_execution_id"] == setup.agent.execution_id
     assert request.config.lanes["eng"]["agent"] == "codex"
     assert request.config.lanes["eng"]["role"] == "engineer"
     config = setup.store.config("fixture")

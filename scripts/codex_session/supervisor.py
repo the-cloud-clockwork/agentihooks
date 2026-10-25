@@ -51,6 +51,7 @@ LONG_SOCKET = f"socket path is longer than {SOCKET_PATH_MAX} bytes"
 DAEMON_REFUSED = "app-server takes no --no-daemon flag"
 FOREIGN_CREDENTIALS = "child environment carries other account credentials: {}"
 OTHER_TRANSPORT = "swarm {} runs the {} Codex inbox transport"
+NOT_ADMITTED = "execution {} is not this seat's launching Codex app-server execution on this hive"
 EXITED_EARLY = "app-server exited with status {} before it answered"
 PID_TAKEN = "the server pid no longer belongs to the started process"
 NEVER_ANSWERED = "app-server started but never answered initialize in time"
@@ -78,6 +79,7 @@ class Launch:
     environ: Mapping[str, str]
     server_args: tuple = ()
     previous_execution_id: str = ""
+    execution_id: str = ""
     resume_thread: str = ""
     opening: str = ""
     account_type: str = ""
@@ -165,8 +167,22 @@ def admit(store: RedisStore, launch: Launch, deps: Deps) -> AgentRecord:
     target = {"pid": os.getpid(), "pid_start": pid_start} if pid_start else {}
     from scripts.swarm.commands import hive_id
 
+    if launch.execution_id:
+        return adopt(store, launch, chosen, hive_id())
     agent = replace(launch.agent, harness="codex", transport=chosen, hive=hive_id(), runtime_target=target)
     return store.start_execution(launch.slug, agent, launch.previous_execution_id)
+
+
+def adopt(store: RedisStore, launch: Launch, chosen: str, hive: str) -> AgentRecord:
+    agent = store.execution_registry.get(launch.slug, launch.execution_id)
+    current = store.execution_occupants(launch.slug).get(launch.agent.seat)
+    if (
+        current is None
+        or current.execution_id != agent.execution_id
+        or (agent.state, agent.harness, agent.transport, agent.hive) != ("launching", "codex", chosen, hive)
+    ):
+        raise LaunchFailure("execution", NOT_ADMITTED.format(launch.execution_id))
+    return replace(agent, model=launch.agent.model, effort=launch.agent.effort)
 
 
 def wait_ready(

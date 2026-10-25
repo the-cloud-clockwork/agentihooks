@@ -646,12 +646,13 @@ def cmd_prober(store, args):
 def cmd_spoke(store, args):
     from scripts.events import factory
     from scripts.events.config import BusConfig
-    from scripts.hive import workstation
+    from scripts.hive import lanes, workstation
     from scripts.swarm import commands
     from scripts.swarm_v2.runtime.local import LocalHerdrRuntime
 
     if workstation.runs_engine(os.environ):
         raise SwarmError(workstation.ENGINE_RUNS)
+    lanes.serve(os.environ)
     bus = factory.open_bus(replace(BusConfig.from_environ(os.environ), provision=False))
     try:
         workstation.run(store, bus, LocalHerdrRuntime(HerdrRuntime()), commands.hive_id())
