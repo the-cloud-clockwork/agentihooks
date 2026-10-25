@@ -101,6 +101,7 @@ def _run_summary_step(tmp_path, python_body):
     fake = bin_dir / "python"
     fake.write_text(f"#!/usr/bin/env bash\n{python_body}\n")
     fake.chmod(0o755)
+    (bin_dir / "python3").symlink_to(fake)
     script = tmp_path / "step.sh"
     script.write_text(step["run"])
     summary = tmp_path / "summary.md"
