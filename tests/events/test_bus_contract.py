@@ -55,13 +55,13 @@ def _nats(tmp_path) -> Iterator[Harness]:
 
     policy = QueuePolicy(max_deliver=3, ack_wait_ms=600)
     dedupe_ms = 1_500
-    offered: list[tuple[str, str, str, float]] = []
+    offered: dict[tuple[str, str, str], float] = {}
     publish = nats._publish
 
     async def recorded(js, subject: str, stream: str, event: Envelope) -> bool:
         fresh = await publish(js, subject, stream, event)
         if fresh:
-            offered.append((subject, stream, event.id, time.monotonic()))
+            offered[(subject, stream, event.id)] = time.monotonic()
         return fresh
 
     with nats_server.running(tmp_path / "jetstream") as url, patch.object(nats, "_publish", recorded):
@@ -69,9 +69,9 @@ def _nats(tmp_path) -> Iterator[Harness]:
 
         def advance(ms: int) -> None:
             time.sleep(ms / 1000)
-            for entry in [entry for entry in offered if time.monotonic() - entry[3] >= dedupe_ms / 1000]:
-                nats_server.wait_forgotten(bus, *entry[:3])
-                offered.remove(entry)
+            for key in [key for key, at in offered.items() if time.monotonic() - at >= dedupe_ms / 1000]:
+                nats_server.wait_forgotten(bus, *key)
+                del offered[key]
 
         try:
             yield Harness(bus, policy, dedupe_ms, 300, advance, 50)

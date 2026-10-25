@@ -14,6 +14,7 @@ from scripts.events import nats
 
 REQUIRED_ENV = "NATS_SERVER_REQUIRED"
 UNMATCHED_MSG_ID = "never-a-last-msg-id"
+WRONG_LAST_MSG_ID = 10070
 
 
 def binary() -> str:
@@ -52,13 +53,18 @@ def remembers(bus, subject: str, stream: str, event_id: str) -> bool:
     headers = {nats.MSG_ID: event_id, "Nats-Expected-Last-Msg-Id": UNMATCHED_MSG_ID}
     try:
         ack = bus._loop.run(bus._js.publish(subject, b"", stream=stream, headers=headers))
-    except APIError:
+    except APIError as error:
+        if error.err_code != WRONG_LAST_MSG_ID:
+            raise
         return False
     return ack.duplicate
 
 
-def wait_forgotten(bus, subject: str, stream: str, event_id: str) -> None:
+def wait_forgotten(bus, subject: str, stream: str, event_id: str, deadline_s: float = 10) -> None:
+    stop = time.monotonic() + deadline_s
     while remembers(bus, subject, stream, event_id):
+        if time.monotonic() >= stop:
+            pytest.fail(f"{stream} still remembers message id {event_id!r} after {deadline_s}s")
         time.sleep(0.01)
 
 
