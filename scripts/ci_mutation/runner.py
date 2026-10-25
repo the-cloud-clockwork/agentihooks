@@ -71,7 +71,7 @@ def path_parts(node: ast.AST, bindings: dict[str, ast.AST]) -> list[str]:
         return [
             str(Path(left) / right)
             for left in path_parts(node.left, bindings)
-            for right in path_parts(node.right, bindings)
+            for right in (path_parts(node.right, bindings) or ["**/*"])
         ]
     if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in {"Path", "str"} and node.args:
         return path_parts(node.args[0], bindings)
@@ -92,7 +92,7 @@ def read_paths(call: ast.Call, bindings: dict[str, ast.AST]) -> list[str]:
     operation = call.func.attr
     if operation in {"run", "Popen", "call", "check_call", "check_output"}:
         return path_parts(call.args[0], bindings) if call.args else []
-    if operation not in {"read_text", "read_bytes", "open", "glob", "rglob", "iterdir", "is_file", "exists"}:
+    if operation not in {"read_text", "read_bytes", "open", "glob", "rglob", "iterdir", "is_file", "is_dir", "exists"}:
         return []
     paths = path_parts(call.func.value, bindings)
     if operation in {"glob", "rglob", "iterdir"}:
@@ -134,10 +134,12 @@ def fixture_candidates(root: Path, work: Path, literal: str) -> list[Path]:
         return []
     if any(len(part) > 255 for part in relative.parts) or relative == Path("pyproject.toml"):
         return []
-    if (work / relative).exists():
-        return []
     target = root / relative
     if any(part.is_symlink() for part in (target, *target.parents) if part != root):
+        return []
+    if target.is_dir():
+        return list(target.rglob("*"))
+    if (work / relative).is_file():
         return []
     return list(root.glob(literal))
 
@@ -146,14 +148,26 @@ def fixture_files(root: Path, work: Path, tests: list[str]) -> list[str]:
     sources = {root / test.split("::")[0] for test in tests}
     for source in tuple(sources):
         sources.update(parent / "conftest.py" for parent in source.parents if parent.is_relative_to(root))
+    tracked = (
+        set(subprocess.check_output(["git", "ls-files", "-z"], cwd=root, text=True).split("\0"))
+        if (root / ".git").exists()
+        else None
+    )
     files = set()
+    candidates = {}
     for source in sorted(sources):
         if not source.is_file():
             continue
         for literal in fixture_literals(ast.parse(source.read_text())):
-            for candidate in fixture_candidates(root, work, literal):
+            if literal not in candidates:
+                candidates[literal] = fixture_candidates(root, work, literal)
+            for candidate in candidates[literal]:
                 name = candidate.relative_to(root)
-                if any(part in {".git", "__pycache__", work.name} for part in name.parts):
+                if tracked is not None and name.as_posix() not in tracked:
+                    continue
+                if name == Path("pyproject.toml") or any(
+                    part in {".git", "__pycache__", work.name} for part in name.parts
+                ):
                     continue
                 if candidate.name.startswith(".env") and candidate.suffix not in {
                     ".example",
@@ -175,6 +189,34 @@ def link_or_copy(source: str, target: str) -> None:
         os.link(source, target)
     except OSError:
         shutil.copy2(source, target)
+
+
+def prepare_git_inputs(root: Path, work: Path) -> list[str]:
+    from hooks.context.conditions import _remote_owner
+
+    if not (root / ".git").exists():
+        return []
+    metadata, common = (
+        Path(path)
+        for path in subprocess.check_output(
+            ["git", "rev-parse", "--path-format=absolute", "--git-dir", "--git-common-dir"],
+            cwd=root,
+            text=True,
+        ).splitlines()
+    )
+    subprocess.run(["git", "init", "--quiet", "--template=", str(work)], check=True)
+    target = work / ".git"
+    (target / "objects/info/alternates").write_text(f"{common / 'objects'}\n")
+    shutil.copy2(metadata / "HEAD", target / "HEAD")
+    for source in (metadata / "index", common / "packed-refs"):
+        if source.is_file():
+            shutil.copy2(source, target / source.name)
+    shutil.copytree(common / "refs", target / "refs", dirs_exist_ok=True)
+    owner = _remote_owner(root)
+    if owner != "":
+        origin = f"https://github.com/{owner}/mutation-sandbox.git" if owner else "unresolved"
+        subprocess.run(["git", "-C", str(work), "config", "remote.origin.url", origin], check=True)
+    return [".git/"]
 
 
 def prepare_workspace(root: Path, work: Path, paths: list[str], tests: list[str]) -> None:
@@ -213,6 +255,7 @@ def prepare_workspace(root: Path, work: Path, paths: list[str], tests: list[str]
     for name in extra_files:
         (work / name).parent.mkdir(parents=True, exist_ok=True)
         shutil.copy(root / name, work / name)
+    git_files = prepare_git_inputs(root, work)
     pytest_args = ["-q", "-x", "-o", "addopts=", "-p", "pytest_asyncio.plugin"]
     # pytest would load the plugin from its own mutated copy, whose hooks raise in mutmut's forced fail run.
     if IDENTITY not in paths:
@@ -231,6 +274,7 @@ def prepare_workspace(root: Path, work: Path, paths: list[str], tests: list[str]
             ".agentihooks/conditions/",
             "deploy/helm/agentihooks-swarm/ci/",
             *root_files,
+            *git_files,
             *(f"{name}/" for name in sorted({Path(path).parts[0] for path in extra_files})),
         ],
         "pytest_add_cli_args_test_selection": tests,
