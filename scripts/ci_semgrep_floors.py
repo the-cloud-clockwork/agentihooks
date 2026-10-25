@@ -29,7 +29,7 @@ def findings(rule_files: list[Path], target: str) -> list[dict]:
 
 
 def _rule_id(finding: dict) -> str:
-    return finding["check_id"].rsplit(".", 1)[-1]
+    return finding["check_id"].rpartition(".")[2]
 
 
 def tally(rule_files: list[Path], found: list[dict]) -> dict[str, int]:

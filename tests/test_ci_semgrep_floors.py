@@ -104,8 +104,10 @@ def test_tally_counts_each_rule_by_its_short_id_and_zero_when_absent(rules_dir):
 
 def test_counts_tally_the_findings_of_the_target(rules_dir, monkeypatch):
     rule_files = [_rule(rules_dir, "a")]
-    monkeypatch.setattr(floors, "findings", lambda files, target: [_finding("a")] if target == "t" else [])
+    seen = []
+    monkeypatch.setattr(floors, "findings", lambda files, target: seen.append((files, target)) or [_finding("a")])
     assert floors.counts(rule_files, "t") == {"a": 1}
+    assert seen == [(rule_files, "t")]
 
 
 @pytest.mark.parametrize("missing", ["red", "clean"])
@@ -199,6 +201,15 @@ def test_a_floor_raised_against_the_base_is_red(rules_dir, monkeypatch):
 def test_a_rule_without_a_floor_is_red(rules_dir, monkeypatch):
     errors = _floor_errors(monkeypatch, [_rule(rules_dir, "a")], [], {}, {})
     assert errors == ["a: no floor; run python -m scripts.ci_semgrep_floors record"]
+
+
+def test_a_rule_without_a_floor_still_grades_the_rules_after_it(rules_dir, monkeypatch):
+    rule_files = [_rule(rules_dir, "a"), _rule(rules_dir, "b")]
+    errors = _floor_errors(monkeypatch, rule_files, [_finding("b")], {"b": 0}, {"b": 0})
+    assert errors == [
+        "a: no floor; run python -m scripts.ci_semgrep_floors record",
+        "b: 1 findings above the floor of 0:\n  hooks/a.py:3",
+    ]
 
 
 def test_a_floor_without_a_rule_file_is_red(rules_dir, monkeypatch):
