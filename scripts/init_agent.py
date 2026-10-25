@@ -447,7 +447,7 @@ def _agent_command(
         ]
         command = _profile_command(command, spec)
         if environ.get("AGENTIHOOKS_SWARM"):
-            command = [sys.executable, "-m", "scripts.codex_input", "--", *command]
+            command = [sys.executable, "-P", "-m", "scripts.codex_input", "--", *command]
         return command, ""
     command = [
         agentihooks_bin,
@@ -505,11 +505,11 @@ def _write_launcher(
     from scripts import session_exit
 
     exit_record = session_exit.path_for(launcher, environ)
-    exit_command = shlex.join([sys.executable, "-m", "scripts.session_exit", str(exit_record)])
+    exit_command = shlex.join([sys.executable, "-P", "-m", "scripts.session_exit", str(exit_record)])
     exit_identity = shlex.join([spec.agent, identity])
     command_text = shlex.join(command)
     if environ.get("HIVE_GITHUB_AUTH_MODE"):
-        command_text = f"{shlex.join([sys.executable, '-m', 'scripts.github_app_cli', 'exec'])} {command_text}"
+        command_text = f"{shlex.join([sys.executable, '-P', '-m', 'scripts.github_app_cli', 'exec'])} {command_text}"
     inputs = [*([str(prompt_file)] if prompt_file is not None else []), str(_route_report(launcher))]
     if app_server:
         command_text = _viewer_lines(command_text, launcher, name, environ, inputs)
