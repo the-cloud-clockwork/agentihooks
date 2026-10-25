@@ -280,6 +280,7 @@ def test_workspace_scopes_mutmut_and_preserves_the_pytest_config(tmp_path):
 
 
 def test_workspace_carries_the_repository_root_files_into_the_mutants_copy(tmp_path):
+    import subprocess
     import tomllib
 
     from scripts.ci_mutation.runner import prepare_workspace
@@ -288,8 +289,9 @@ def test_workspace_carries_the_repository_root_files_into_the_mutants_copy(tmp_p
     (root / "tests").mkdir(parents=True)
     (root / "pyproject.toml").write_text('[project]\nreadme = "README.md"\n\n[tool.pytest.ini_options]\n')
     copied = ("README.md", "LICENSE", "index.md", "compose.yaml", "sonar-project.properties", ".test_durations")
-    for name in (*copied, ".env", ".env.example", ".git"):
+    for name in (*copied, ".env", ".env.example"):
         (root / name).write_text(name)
+    subprocess.run(["git", "init", "-q", str(root)], check=True)
     (tmp_path / "outside.txt").write_text("outside")
     (root / "linked.md").symlink_to(tmp_path / "outside.txt")
     work = tmp_path / "work"
