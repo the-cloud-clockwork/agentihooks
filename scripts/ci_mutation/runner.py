@@ -192,6 +192,8 @@ def link_or_copy(source: str, target: str) -> None:
 
 
 def prepare_git_inputs(root: Path, work: Path) -> list[str]:
+    from hooks.context.conditions import _remote_owner
+
     if not (root / ".git").exists():
         return []
     metadata, common = (
@@ -210,6 +212,10 @@ def prepare_git_inputs(root: Path, work: Path) -> list[str]:
         if source.is_file():
             shutil.copy2(source, target / source.name)
     shutil.copytree(common / "refs", target / "refs", dirs_exist_ok=True)
+    owner = _remote_owner(root)
+    if owner != "":
+        origin = f"https://github.com/{owner}/mutation-sandbox.git" if owner else "unresolved"
+        subprocess.run(["git", "-C", str(work), "config", "remote.origin.url", origin], check=True)
     return [".git/"]
 
 

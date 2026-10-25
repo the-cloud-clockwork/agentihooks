@@ -672,7 +672,8 @@ def test_workspace_discovers_tracked_inputs_without_copying_generated_statistics
     assert ".mutation-stats/" not in config["also_copy"]
 
 
-def test_workspace_preserves_git_reads_without_copying_repository_configuration(tmp_path):
+@pytest.mark.parametrize("origin", ["", "https://github.com/fixture-owner/repository.git", "unresolved"])
+def test_workspace_preserves_git_reads_without_copying_repository_configuration(tmp_path, origin):
     import shutil
     import subprocess
     import tomllib
@@ -694,6 +695,8 @@ def test_workspace_preserves_git_reads_without_copying_repository_configuration(
     subprocess.run(["git", "update-ref", "refs/heads/unpacked", "HEAD"], cwd=root, check=True)
     revision = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=root, text=True).strip()
     subprocess.run(["git", "config", "fixture.source", "original"], cwd=root, check=True)
+    if origin:
+        subprocess.run(["git", "remote", "add", "origin", origin], cwd=root, check=True)
     work = tmp_path / "work"
     work.mkdir()
     prepare_workspace(root, work, ["hooks/sample.py"], [])
@@ -715,6 +718,10 @@ def test_workspace_preserves_git_reads_without_copying_repository_configuration(
         assert subprocess.check_output(["git", "rev-parse", "unpacked"], cwd=stage, text=True).strip() == revision
         original = subprocess.run(["git", "config", "--get", "fixture.source"], cwd=stage, capture_output=True)
         assert original.returncode == 1
+        from hooks.context.conditions import _remote_owner, directory_trust
+
+        assert _remote_owner(stage) == _remote_owner(root)
+        assert directory_trust(stage, {}) == directory_trust(root, {})
 
 
 def test_workspace_reports_a_failed_git_initialization(tmp_path, monkeypatch):
