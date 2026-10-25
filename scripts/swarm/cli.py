@@ -158,6 +158,7 @@ from scripts.swarm.store import (
     DEFAULT_MASTERS_STEP,
     DELEGATE,
     DISPATCH,
+    FULL,
     MASTER,
     RedisStore,
     SwarmConfig,
@@ -1286,8 +1287,11 @@ def cmd_status(store, args):
 def cmd_freeze(store, args):
     writer = clearance.freezer(store, args.slug, Who.from_env())
     by = None if writer == clearance.OPERATOR else writer
-    if by and naming.lane_of(by) != DISPATCH and not args.quote:
-        raise SwarmError("the master writes freezes only with the operator's words: pass them with --quote")
+    full = store.config(args.slug).autonomy == FULL
+    if by and not args.quote and not full:
+        raise SwarmError(
+            "below full autonomy the master writes freezes only with the operator's words: pass them with --quote"
+        )
     LedgerClient().freeze(args.slug, args.command, args.target, by=by, reason=args.reason, quote=args.quote)
     print(json.dumps({args.command: args.target, "by": writer}))
 

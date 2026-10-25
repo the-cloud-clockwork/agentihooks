@@ -449,7 +449,9 @@ jobs:
               jobs=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run/jobs?per_page=100" --paginate --jq '.jobs[]')
               if ! jq -s -e '
                 [.[] | select(.name | startswith("unit ("))] as $units |
-                ($units | length == 18 and all(.[]; .conclusion == "success")) and
+                ($units | length > 0 and all(.[]; .conclusion == "success") and
+                  (map(.name | capture("^unit \\((?<v>[^,]+), (?<s>[0-9]+)\\)$")? // {v: "", s: "0"} | .s |= tonumber) |
+                    group_by(.v) | all(.[]; map(.s) | sort == [range(1; length + 1)]))) and
                 any(.[];
                   .name == "coverage-baseline" and .conclusion == "success" and
                   any(.steps[]?; .name == "Compute the coverage baseline" and .conclusion == "success") and
@@ -2247,7 +2249,9 @@ jobs:
             jobs=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run/jobs?per_page=100" --paginate --jq '.jobs[]')
             if ! jq -s -e --arg event "$event" '
               [.[] | select(.name | startswith("unit ("))] as $units |
-              (($units | length == 18 and all(.[]; .conclusion == "success")) or
+              (($units | length > 0 and all(.[]; .conclusion == "success") and
+                (map(.name | capture("^unit \\((?<v>[^,]+), (?<s>[0-9]+)\\)$")? // {v: "", s: "0"} | .s |= tonumber) |
+                  group_by(.v) | all(.[]; map(.s) | sort == [range(1; length + 1)]))) or
                ($event == "merge_group" and
                 all(.[] | select(.name == "unit" or (.name | startswith("unit ("))); .conclusion == "skipped") and
                 any(.[]; .name == "reuse" and .conclusion == "success" and
