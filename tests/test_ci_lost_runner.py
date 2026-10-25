@@ -124,9 +124,17 @@ def test_a_young_live_unassigned_hosted_or_finished_job_is_not_lost(candidate):
 
 
 def test_job_ids_map_base_names_to_workflow_keys():
+    from scripts import ci_gate_queue
+
     ids = ci_lost_runner.job_ids(WORKFLOW)
-    assert ids["Gate — Required"] == "gate-required"
-    assert ids["queue-fail-fast"] == "queue-fail-fast"
+    if WORKFLOW["jobs"]["gate-required"]["name"] == "Gate — Required":
+        assert ids["Gate — Required"] == "gate-required"
+        assert ids["queue-fail-fast"] == "queue-fail-fast"
+    else:
+        assert WORKFLOW["jobs"]["gate-required"]["name"] == ci_gate_queue.SUMMARY_NAME
+        assert WORKFLOW["jobs"]["queue-fail-fast"]["name"] == ci_gate_queue.GATE_NAME
+        assert ids["Gate — Required"] == "queue-fail-fast"
+        assert ids["Queue gate summary"] == "gate-required"
     assert ids["unit"] == "unit"
     assert ids["shard-check"] == "shard-check"
 

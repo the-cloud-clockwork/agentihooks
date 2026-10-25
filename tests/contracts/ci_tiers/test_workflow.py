@@ -177,7 +177,10 @@ def test_the_shard_time_budget_grades_pull_requests_and_reports_on_promotion():
     flag = budget["env"]["REPORT"]
     assert _resolve({"group": flag}, event_name="push")["group"] == "--report"
     assert _resolve({"group": flag}, event_name="pull_request")["group"] == ""
-    assert re.fullmatch(r"python3? -m tests\.shard_budget \$REPORT shard-durations/\*/durations\.json", budget["run"])
+    assert re.fullmatch(
+        r"python3? -m tests\.shard_budget \$REPORT (shard-durations/\*|shard-reports/durations-\*)/durations\.json",
+        budget["run"],
+    )
 
 
 def _concurrency(event, run_id, number=None):

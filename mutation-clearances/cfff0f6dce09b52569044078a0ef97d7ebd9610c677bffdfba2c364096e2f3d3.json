@@ -1,0 +1,6 @@
+{
+  "scripts/ci_gate_queue.py:scripts.ci_gate_queue.x_watcher__mutmut_94:4684068b007b83b4378921cb0b734641f74e1e06309060f5fda76c51b0130b2a": {
+    "reader": "standards-reader",
+    "reason": "Cosmetic title value capitalization or wrapping retains every title fact and all identifiers, conditions, commands, credential scopes and outputs; schema keys remain unchanged. Independently approved from complete CI report 40165669788."
+  }
+}

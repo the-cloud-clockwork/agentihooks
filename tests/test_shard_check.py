@@ -114,7 +114,10 @@ def test_a_shard_without_durations_is_red_and_named(tmp_path):
 def test_shard_check_grades_every_unit_shard_before_the_required_gate():
     jobs = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())["jobs"]
     job = jobs["shard-check"]
-    assert job["needs"] == ["unit", "unit-rerun", "select", "reuse", "admission"]
+    assert job["needs"] in (
+        ["unit", "unit-rerun", "select", "reuse", "admission"],
+        ["split", "select", "reuse", "admission"],
+    )
     assert job["if"] in (
         "${{ !cancelled() && (github.event_name != 'merge_group' || needs.reuse.outputs.reused != 'true') }}",
         "${{ !cancelled() && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && (github.event_name != 'merge_group' || needs.reuse.outputs.reused != 'true') }}",
@@ -128,10 +131,23 @@ def test_shard_check_grades_every_unit_shard_before_the_required_gate():
     steps = job["steps"]
     assert all("steps.lookup" not in step.get("if", "") for step in steps)
     download = next(step for step in steps if step.get("uses", "").startswith("actions/download-artifact"))
-    assert download["with"]["pattern"] in (
-        "durations-${{ matrix.python-version }}-*",
-        "{durations,flakes,collected,reused-tests}-${{ matrix.python-version }}{,-*}",
-    )
+    if job["needs"][0] == "split":
+        assert download["with"] == {"name": "collected-${{ matrix.python-version }}", "path": "collected-data"}
+        prefetch = next(
+            step for step in steps if step.get("name") == "Prefetch reports while every planned shard finishes"
+        )
+        assert prefetch["env"]["GH_TOKEN"] == "${{ steps.app-token.outputs.token }}"
+        assert "python -m scripts.ci_gate_shards" in prefetch["run"]
+        assert steps.index(prefetch) < next(
+            i
+            for i, step in enumerate(steps)
+            if step.get("run", "").startswith(("python -m tests.shard_check", "python3 -m tests.shard_check"))
+        )
+    else:
+        assert download["with"]["pattern"] in (
+            "durations-${{ matrix.python-version }}-*",
+            "{durations,flakes,collected,reused-tests}-${{ matrix.python-version }}{,-*}",
+        )
     check = next(
         step
         for step in steps

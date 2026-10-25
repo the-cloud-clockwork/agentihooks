@@ -1,0 +1,54 @@
+{
+  "outputs": {
+    "failed": "${{ steps.watch.outputs.failed }}"
+  },
+  "if": "${{ !cancelled() && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && (github.event_name != 'merge_group' || needs.reuse.outputs.reused != 'true') && github.event_name != 'pull_request' }}",
+  "needs": [
+    "reuse",
+    "admission"
+  ],
+  "runs-on": "${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('[\"nestorcolt\",\"agenticore-app[bot]\",\"tcc-main-ci[bot]\"]'), github.actor) && contains(fromJSON('[\"nestorcolt\",\"agenticore-app[bot]\",\"tcc-main-ci[bot]\"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('[\"nestorcolt\",\"agenticore-app[bot]\",\"tcc-main-ci[bot]\"]'), github.triggering_actor))) && 'anton-oss-light' || 'ubuntu-latest' }}",
+  "timeout-minutes": 60,
+  "steps": [
+    {
+      "uses": "actions/checkout@v4",
+      "if": "github.event_name == 'merge_group'",
+      "with": {
+        "ref": "${{ github.sha }}",
+        "persist-credentials": false
+      }
+    },
+    {
+      "name": "Mint the tcc main ci App token",
+      "id": "app-token",
+      "if": "github.event_name == 'merge_group'",
+      "uses": "actions/create-github-app-token@v3.2.0",
+      "with": {
+        "client-id": "${{ secrets.TCC_CI_CLIENT_ID }}",
+        "private-key": "${{ secrets.TCC_CI_APP_PRIVATE_KEY }}",
+        "repositories": "${{ github.event.repository.name }}",
+        "permission-actions": "write",
+        "permission-contents": "read",
+        "permission-pull-requests": "read"
+      }
+    },
+    {
+      "name": "Watch for the first failed graded job",
+      "id": "watch",
+      "if": "github.event_name == 'merge_group'",
+      "env": {
+        "GH_TOKEN": "${{ steps.app-token.outputs.token }}"
+      },
+      "run": "misses=0\nqueue_misses=0\nwhile true; do\n  poll=15\n  if queue_head=$(gh api \"repos/$GITHUB_REPOSITORY/git/matching-refs/${GITHUB_REF#refs/}\" --jq \".[] | select(.ref == \\\"$GITHUB_REF\\\") | .object.sha\"); then\n    queue_misses=0\n    if [[ \"$queue_head\" != \"$GITHUB_SHA\" ]]; then\n      record=$(python3 -m scripts.ci_queue_rebuild \"$queue_head\") || record=\"record unavailable\"\n      echo \"failed=queue group is no longer current ($record)\" >> \"$GITHUB_OUTPUT\"\n      exit 0\n    fi\n  else\n    if (( ++queue_misses == 10 )); then\n      echo \"::error::Ten reads of this queue reference failed in a row; queue liveness is unknown.\"\n      exit 1\n    fi\n    sleep 15\n    continue\n  fi\n  if python3 -m scripts.ci_budget.jobs \"repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT/jobs\" > \"$RUNNER_TEMP/jobs.jsonl\"; then\n    misses=0\n    verdict=$(python3 -m scripts.ci_queue_fail_fast \"$RUNNER_TEMP/jobs.jsonl\" --repo \"$GITHUB_REPOSITORY\" --seen \"$RUNNER_TEMP/shard-logs.json\") || { echo \"::warning::The shard log check failed; this poll waits.\"; sleep 15; continue; }\n    if [[ \"$verdict\" != wait ]]; then\n      echo \"$verdict\" >> \"$GITHUB_OUTPUT\"\n      exit 0\n    fi\n    if jq -se 'any(.[]; .name | startswith(\"unit (\")) and all(.[]; (.name | startswith(\"unit (\") | not) or .status == \"completed\")' \"$RUNNER_TEMP/jobs.jsonl\"; then\n      poll=5\n    fi\n  elif (( ++misses == 10 )); then\n    echo \"::warning::Ten reads of this run's jobs failed in a row; the entry waits for Gate Required.\"\n    exit 0\n  fi\n  sleep \"$poll\"\ndone\n"
+    },
+    {
+      "name": "Cancel this queue run so the queue drops the entry",
+      "if": "steps.watch.outputs.failed != ''",
+      "env": {
+        "GH_TOKEN": "${{ steps.app-token.outputs.token }}",
+        "FAILED": "${{ steps.watch.outputs.failed }}"
+      },
+      "run": "echo \"::error::$FAILED failed, so Gate Required cannot pass; cancelling this queue run.\"\ngh run cancel \"$GITHUB_RUN_ID\" -R \"$GITHUB_REPOSITORY\"\n"
+    }
+  ]
+}

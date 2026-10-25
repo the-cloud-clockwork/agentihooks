@@ -75,6 +75,12 @@ def test_shard_grading_keeps_head_data_separate_from_base_modules():
     steps = _jobs()["shard-check"]["steps"]
     commands = [_as_python(step.get("run", "")) for step in steps]
     commands = [command for command in commands if command.startswith("python -m tests.shard_")]
+    commands = [
+        command.replace("shard-reports/durations-*", "shard-durations/*").replace(
+            "shard-reports/flakes-*", "shard-flakes/*"
+        )
+        for command in commands
+    ]
     assert commands == [
         "python -m tests.shard_check shard-durations/*/durations.json --collected collected-data/collected.json $REUSED",
         'python -m tests.shard_summary --version "$PYTHON_VERSION" --durations shard-durations/*/durations.json \\\n'
