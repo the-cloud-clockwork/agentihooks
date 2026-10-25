@@ -720,6 +720,48 @@ def test_stats_collection_seeds_once_and_exports_records_for_the_next_merged_run
     assert list(exported.glob("*.json"))
 
 
+def test_real_fixture_imports_do_not_invalidate_measured_unrelated_test_stats(tmp_path):
+    from scripts.ci_mutation.stats_cache import collect_cached_stats
+
+    source = Path(subprocess.check_output(["git", "rev-parse", "--show-toplevel"], text=True).strip())
+    tracked = subprocess.check_output(["git", "ls-files", "-z"], cwd=source, text=True).split("\0")
+    content = {path: (source / path).read_text() for path in tracked if path.endswith(".py")}
+    content.update(
+        {
+            "scripts/cache_unrelated_probe.py": "value = 1\n",
+            "scripts/cache_covered_probe.py": "value = 1\n",
+            "tests/test_cache_measured_probe.py": "from scripts.cache_covered_probe import value\n",
+        }
+    )
+    root = tmp_path / "repo"
+    _repository(root, content)
+    files = ["tests/test_cache_measured_probe.py"]
+    node = files[0] + "::test_value"
+    calls = []
+
+    def collect(chosen):
+        calls.append(chosen)
+        return [
+            {
+                "status": 0,
+                "tests": {"scripts.cache_covered_probe.x_value": [node]},
+                "durations": {node: 1},
+                "cpu": 1,
+                "dependencies": {node: ["scripts/cache_covered_probe.py"]},
+            }
+        ]
+
+    cache = tmp_path / "cache"
+    collect_cached_stats(root, cache, {}, files, [], collect)
+    (root / "scripts/cache_unrelated_probe.py").write_text("value = 2\n")
+    warm = collect_cached_stats(root, cache, {}, files, [], collect)
+    assert calls == [files]
+    assert warm[0]["durations"] == {node: 1}
+    (root / "scripts/cache_covered_probe.py").write_text("value = 2\n")
+    collect_cached_stats(root, cache, {}, files, [], collect)
+    assert calls == [files, files]
+
+
 def test_file_stats_pass_sorted_changed_lines_and_runner_options_to_the_cache(tmp_path, monkeypatch):
     import json
     from types import SimpleNamespace
