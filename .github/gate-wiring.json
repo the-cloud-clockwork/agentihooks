@@ -12,11 +12,6 @@
       "owner": "ci-1@rig-grade-swarm",
       "expires": "2026-11-08"
     },
-    "equivalence.yml/trigger": {
-      "reason": "Selects whether the opt in ledger equivalence replay runs from the import graph of its replays; the equivalence gate task wires both into the gate.",
-      "owner": "ci-7@rig-grade-swarm",
-      "expires": "2026-11-08"
-    },
     "gate-protected.yml/grade": {
       "reason": "Grades the head's Gate Required wiring from the base branch on pull_request_target and reports its verdict as the Gate Required status, so the aggregator it guards cannot need it.",
       "owner": "ci-2@rig-grade-swarm",
