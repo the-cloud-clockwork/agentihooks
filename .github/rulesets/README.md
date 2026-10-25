@@ -33,13 +33,12 @@ The queue groups with `ALLGREEN`: every entry is built on dev plus the
 entries ahead of it and merges only on its own passing run, so a red pull
 request never lands. A failing entry leaves the queue and the entries behind
 it rebuild without it. Merge groups run on the `anton-oss-queue` pool, which
-serves only merge queue runs. The queue builds one entry at a time
+serves only merge queue runs. The queue builds up to five entries at a time
 and merges groups of up to five, waits at most one minute for a group to fill, and a
 check that has not reported within 45 minutes fails the entry. Build
 concurrency counts entries, not groups, and under `ALLGREEN` each entry
-merges only on its own passing run. `max_entries_to_build` is one to prevent
-simultaneous full unit suites competing for the capped queue runner pool;
-`max_entries_to_merge` remains five.
+merges only on its own passing run, so `max_entries_to_build` is five: at one,
+every group carried a single pull request.
 An entry ejected only because a unit shard lost its runner is requeued once by
 the Queue retry workflow; see
 [Lost runner requeue](../../docs/reference/delivery-tiers.md#lost-runner-requeue).
