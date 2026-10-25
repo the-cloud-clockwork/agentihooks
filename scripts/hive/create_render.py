@@ -69,5 +69,13 @@ def next_port(services: list[dict], lan_ip: str) -> int:
     return port
 
 
+def kept_port(services: list[dict], name: str) -> int | None:
+    for service in services:
+        if (service.get("metadata") or {}).get("name") == f"{name}-ssh-lan":
+            ports = (service.get("spec") or {}).get("ports") or []
+            return ports[0].get("port") if ports else None
+    return None
+
+
 def _annotations(service: dict) -> dict:
     return (service.get("metadata") or {}).get("annotations") or {}

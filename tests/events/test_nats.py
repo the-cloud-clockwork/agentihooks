@@ -427,7 +427,10 @@ def test_a_dead_letter_is_published_before_the_original_is_terminated():
 
     message.term = terminate
     subscription = SimpleNamespace(fetch=mock.AsyncMock(return_value=[message]))
-    js = SimpleNamespace(publish=mock.AsyncMock(side_effect=OSError("dead stream unavailable")))
+    js = SimpleNamespace(
+        _nc=SimpleNamespace(max_payload=1048576),
+        publish=mock.AsyncMock(side_effect=OSError("dead stream unavailable")),
+    )
     loop = nats._Loop()
     try:
         consumer = nats.NatsConsumer(loop, subscription, js, QueuePolicy(max_deliver=3), "queue.work")
@@ -516,6 +519,7 @@ def test_a_dead_letter_publish_refusal_requires_the_same_retained_event(stored_i
     stored = letter if stored_id == "expected" else event("other")
     refusal = APIError(code=400, err_code=10071, description="subject sequence differs")
     js = SimpleNamespace(
+        _nc=SimpleNamespace(max_payload=1048576),
         publish=mock.AsyncMock(side_effect=refusal),
         get_last_msg=mock.AsyncMock(return_value=SimpleNamespace(data=stored.encode())),
     )

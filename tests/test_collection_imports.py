@@ -19,6 +19,7 @@ _IMPORT_BODY = (
 )
 _IMPORT = re.compile(r"(?:^|;[ \t]*)" + _IMPORT_BODY, re.MULTILINE)
 _ANY_IMPORT = re.compile(r"(?:^[ \t]*|;[ \t]*)" + _IMPORT_BODY, re.MULTILINE)
+_FUNCTION = re.compile(r"([ \t]*)(?:async[ \t]+)?def[ \t]+(\w+)\b")
 SDK_GROUP = 'xdist_group("mcp-sdk")'
 
 
@@ -62,19 +63,24 @@ def loads_heavy(name: str, seen: set[str]) -> bool:
 
 
 @cache
-def _function_imports(path: Path, function: str) -> frozenset[str]:
+def _function_sources(path: Path) -> dict[str, str]:
     lines = path.read_text().splitlines(keepends=True)
-    head = re.compile(rf"([ \t]*)(?:async[ \t]+)?def[ \t]+{re.escape(function)}\b")
+    bodies = {}
     for i, line in enumerate(lines):
-        if match := head.match(line):
+        if (match := _FUNCTION.match(line)) and match[2] not in bodies:
             body = []
             for rest in lines[i + 1 :]:
                 stripped = rest.lstrip()
                 if stripped and len(rest) - len(stripped) <= len(match[1]) and not stripped.startswith(")"):
                     break
                 body.append(rest)
-            return frozenset(_import_names("".join(body), _ANY_IMPORT))
-    return frozenset()
+            bodies[match[2]] = "".join(body)
+    return bodies
+
+
+@cache
+def _function_imports(path: Path, function: str) -> frozenset[str]:
+    return frozenset(_import_names(_function_sources(path).get(function, ""), _ANY_IMPORT))
 
 
 def calls_heavy(name: str, seen: set[str]) -> bool:
@@ -168,6 +174,23 @@ def test_the_run_check_reads_imports_inside_functions():
     assert loads_sdk_when_run("def f():\n    from hooks.mcp import build_server\n")
     assert not loads_sdk_when_run("def f():\n    from hooks.mcp._session import resolve_session_id\n")
     assert not loads_sdk_when_run("def f():\n    from hooks.mcp import resolve_transport\n")
+
+
+def test_function_imports_read_each_module_once(tmp_path, monkeypatch):
+    path = tmp_path / "functions.py"
+    path.write_text("def first():\n    import mcp\n\nasync def second():\n    import os\n")
+    reads = []
+    read_text = Path.read_text
+
+    def read(module):
+        reads.append(module)
+        return read_text(module)
+
+    monkeypatch.setattr(Path, "read_text", read)
+    assert _function_imports(path, "first") == {"mcp"}
+    assert _function_imports(path, "second") == {"os"}
+    assert _function_imports(path, "missing") == set()
+    assert reads == [path]
 
 
 def test_test_modules_that_load_the_mcp_sdk_when_run_share_one_worker():
