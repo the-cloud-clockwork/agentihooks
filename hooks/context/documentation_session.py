@@ -30,6 +30,7 @@ DOCUMENTATION_INSTRUCTIONS = (
     "Extend the existing documentation and navigation with complete usage and configuration examples. "
     "Follow the project's documentation conventions; default to docs when no source exists."
 )
+NO_PULL_REQUEST = "none recorded on the source task, so no delivered diff is attached"
 NOTICE_COMMAND = "Start it here: agentihooks init-agent --profile documentation"
 NOTICE_SUBJECT_LENGTH = 160
 TASK_HASH_LENGTH = 16
@@ -126,7 +127,7 @@ def _queue(ledger: LedgerClient, row: dict, source: dict, evidence: dict, verdic
         return task
     description = (
         f"Document the delivered behavior of {source.get('title', evidence['summary'])}.\n"
-        f"Source task: {row['task']}. Delivered pull request: {source.get('pr_url', '')}.\n"
+        f"Source task: {row['task']}. Delivered pull request: {source.get('pr_url') or NO_PULL_REQUEST}.\n"
         f"Change size: {verdict['size']}.\n"
         f"Source requirements: {source.get('description', '')}\n"
         f"Documentation sources: {json.dumps(evidence['doc_sources'])}\n"
