@@ -71,6 +71,52 @@ def test_the_decision_uses_immutable_event_revisions_and_retains_source_renames(
     assert "--no-renames" in step["run"]
 
 
+@pytest.mark.parametrize(
+    ("before", "after", "expected"),
+    [
+        ("hooks/old.py", "tests/test_new.py", False),
+        ("tests/test_old.py", "hooks/new.py", False),
+        ("tests/test_old.py", "tests/test_new.py", True),
+        ("hooks/old.py", None, False),
+        ("tests/test_old.py", None, True),
+    ],
+)
+def test_moves_and_deletions_keep_both_sides_of_the_source_boundary(tmp_path, before, after, expected):
+    def git(*args):
+        return subprocess.check_output(["git", *args], cwd=tmp_path, text=True).strip()
+
+    git("init", "-q")
+    old = tmp_path / before
+    old.parent.mkdir(parents=True)
+    old.write_text("unchanged contents\n")
+    git("add", "--", before)
+    git("-c", "user.name=proof", "-c", "user.email=proof@example.invalid", "commit", "-qm", "base")
+    base = git("rev-parse", "HEAD")
+    if after:
+        (tmp_path / after).parent.mkdir(parents=True, exist_ok=True)
+        git("mv", before, after)
+    else:
+        git("rm", before)
+    git("-c", "user.name=proof", "-c", "user.email=proof@example.invalid", "commit", "-qm", "head")
+    output = tmp_path / "output"
+    result = subprocess.run(
+        ["bash", "-e", "-o", "pipefail", "-c", _step("Decide whether Sonar has changed source")["run"]],
+        cwd=tmp_path,
+        env=dict(
+            os.environ,
+            BASE=base,
+            HEAD=git("rev-parse", "HEAD"),
+            EVENT="pull_request",
+            GITHUB_OUTPUT=str(output),
+            RUNNER_TEMP=str(tmp_path),
+        ),
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert f"test_only={str(expected).lower()}" in output.read_text().splitlines()
+
+
 def test_a_failed_diff_cannot_publish_a_test_only_decision(tmp_path):
     output = tmp_path / "output"
     result = subprocess.run(
