@@ -94,7 +94,7 @@ def test_an_offer_the_ledger_no_longer_backs_is_withdrawn_without_a_claim(rig, f
 
 
 def test_a_ledger_that_refuses_the_claim_releases_the_claim_and_the_agent(rig):
-    rig.rows["t1"]["claim_generation"] = 4
+    rig.ledger.update_task = lambda *args, **kwargs: {**rig.rows["t1"], "state": "claimed", "claimed_by": "other"}
     assert rig.admitter.admit(SLUG, ask()) is None
     assert rig.store.claimant(SLUG, "t1") is None
     assert rig.store.agents(SLUG) == []
