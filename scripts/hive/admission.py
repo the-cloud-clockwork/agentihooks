@@ -120,23 +120,28 @@ def _pod(measured: dict, pending: int) -> list[tuple[int, str, str]]:
     return limits
 
 
-def _swarm(measured: dict, agents: int) -> list[tuple[int, str, str]]:
+def _swarm(measured: dict, agents: int, max_agents: int | None) -> list[tuple[int, str, str]]:
     cpus, total = measured["cpus"], measured["total_mb"]
     cpu = int(SWARM_PERCENT * cpus / (100 * AGENT_CPU)) - agents
     ram = SWARM_PERCENT * total // (100 * AGENT_MB) - agents
     share = f"under the {SWARM_PERCENT} percent swarm share"
-    return [
+    limits = [
         (cpu, CPU, f"{agents} swarm agents at {AGENT_CPU:g} CPU each on {cpus} CPUs, fits {{}} more {share}"),
         (ram, RAM, f"{agents} swarm agents at {AGENT_MB} MB each in {total} MB, fits {{}} more {share}"),
     ]
+    if max_agents is None:
+        return limits
+    return [limit for limit in limits if limit[0] >= max_agents - agents]
 
 
-def room(measured: dict | None, swarm_agents: int | None = None, pending: int = 0) -> Room:
+def room(
+    measured: dict | None, swarm_agents: int | None = None, pending: int = 0, max_agents: int | None = None
+) -> Room:
     if measured is None or any(field not in measured for field in CORE_FIELDS):
         return Room(0, MISSING, NO_READING)
     limits = _host(measured, pending) + _pod(measured, pending)
     if swarm_agents is not None and all(field in measured for field in RAM_FIELDS):
-        limits += _swarm(measured, swarm_agents)
+        limits += _swarm(measured, swarm_agents, max_agents)
     count, reason, detail = min(limits, key=lambda limit: limit[0])
     count = max(0, count)
     return Room(count, reason, detail.format(count))
