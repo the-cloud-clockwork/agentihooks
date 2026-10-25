@@ -33,7 +33,7 @@ def test_the_master_opening_prompt_orders_no_first_contact(monkeypatch, tmp_path
     text = prompt.build_master("sw", "/repo", "sw-master-1", {"seat": "master@sw"})
     assert [phrase for phrase in FIRST_CONTACT if phrase in text] == []
     assert prompt.FIRST_CONTACT in text
-    assert "closes the message. Answer what the operator types in this pane here." in text
+    assert "on the page and closes the message. Answer what the operator types in this pane here.\n" in text
     assert (
         "When he asks for his ledger link, answer with the line agentihooks swarm sw --as sw-master-1 url prints."
         in text
