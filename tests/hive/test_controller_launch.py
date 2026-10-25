@@ -576,20 +576,23 @@ def test_reservation_contention_ends_the_unlaunched_execution(setup):
     from scripts.swarm_v2.runtime.base import Status
 
     request = request_for(setup)
-    from unittest.mock import patch
-
     setup.launcher.wait = Mock(return_value="pending")
-    with patch.object(type(setup.launcher.slots), "reserve", return_value=False):
-        result = setup.launcher.spawn(request)
+    for index in range(6):
+        assert setup.launcher.slots.reserve("claude:account", f"other-{index}", 6, 300000)
+    result = setup.launcher.spawn(request)
+    refused = (
+        "account reservation is full: account=claude:account sessions=6 cap=6 "
+        "five_left=80 week_left=80"
+    )
     assert result.status is Status.UNAVAILABLE
-    assert result.detail == "account reservation is full"
+    assert result.detail == refused
     assert result.value == {"harness": "claude"}
     assert result.operation == "spawn"
     assert result.backend == "hive"
     ended = setup.store.execution_registry.records("fixture")[0]
     assert ended.state == "ended"
     assert json.loads(setup.store.redis.hget(setup.store.key("fixture", "launch-endings"), ended.execution_id)) == {
-        "reason": "account reservation is full",
+        "reason": refused,
         "generation": ended.generation,
     }
     assert setup.store.redis.xrange(setup.launcher.orders.stream("remote")) == []
