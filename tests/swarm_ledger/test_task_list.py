@@ -56,6 +56,18 @@ def test_queries_get_their_own_pages_from_the_loaded_rows():
     assert repository.reads == 1
 
 
+def test_a_page_reuses_the_row_revisions_taken_at_load(monkeypatch):
+    from scripts.swarm_ledger.api import resources, task_list
+
+    repository = Repository(ledger(11, "First", "Second"))
+    task_list.read(repository, "hashes", {"limit": 1})
+    hashed, revision = [], resources.revision
+    monkeypatch.setattr(resources, "revision", lambda value: hashed.append(value) or revision(value))
+    reply = task_list.read(repository, "hashes", {"limit": 2})
+    assert [row["revision"] for row in reply["data"]] == [revision(row) for row in repository.state["tasks"]]
+    assert len(hashed) == 1
+
+
 def test_a_new_task_revision_or_repository_loads_the_rows_again():
     from scripts.swarm_ledger.api import resources, task_list
 
