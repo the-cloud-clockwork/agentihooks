@@ -8,7 +8,7 @@ Usage: ledger.py --slug SLUG --as NAME <command> [args]
   status                              crew, my unhandled operator events
   events                              my unhandled operator events, one line each
   ack [--rev N]                       mark operator events up to N (default: latest) as handled
-  say TEXT [--long]                   chat message (TEXT "-" reads stdin); --long only when the operator asked to expand
+  say TEXT --reply-to ID [--long]     answer an operator chat line by its id (TEXT "-" reads stdin); --long only when he asked to expand
   comment ITEM TEXT [--image PATH]    attach an image (repeatable) to your status on phases/<id>, questions/<id> or followups/<id>; amends your last one
   artifact PATH TITLE [--task ID] [--request ENTRY]
                                       publish a markdown, JSON, SVG or image file the operator asked for; its task
@@ -467,6 +467,8 @@ def cmd_say(args):
         "by": args.name,
         "to": "operator",
     }
+    if vars(args).get("reply_to"):
+        op["reply_to"] = args.reply_to
     if args.long:
         op["long"] = True
     posted(call(args.slug, [op]), [op])
@@ -956,6 +958,7 @@ def build_parser():
     say = sub.add_parser("say")
     say.add_argument("text")
     say.add_argument("--long", action="store_true")
+    say.add_argument("--reply-to", default="", help="id of the operator chat line this answers")
     for name, first, second in (("comment", "item", "text"), ("retext", "item", "text")):
         parser_ = sub.add_parser(name)
         parser_.add_argument(first)

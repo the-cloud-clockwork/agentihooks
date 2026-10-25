@@ -20,10 +20,9 @@ REMINDER = (
     "Operator not present: he never reads this pane. End the turn with no report, summary or ask addressed to him "
     "and skip the response template; any pane text stays within {words} words. {route}"
 )
-MASTER_ROUTE = "Put anything he must decide only in Priorities with agentihooks ledger priority add."
+MASTER_ROUTE = "Never write to him first; answer only what he writes."
 WORKER_ROUTE = (
-    "Put anything he must decide in a ledger question with agentihooks ledger question add; "
-    "the master answers it or raises it to him."
+    "Never write to him: send anything he must decide to the front door master by inbox with agentihooks msg send."
 )
 SWITCH = re.compile(r"(?<![\w-])operator (on|off)(?![\w-])")
 ON_NOTICE = "Operator on: the operator is present in this pane until he types operator off or the session restarts."
@@ -31,14 +30,12 @@ OFF_NOTICE = "Operator off: the operator is not present in this pane."
 TURN_NOTICE = "Operator present for this turn: reply without a word limit."
 QUESTION_TOOL = "AskUserQuestion"
 ASK_REFUSAL = (
-    "The operator is not present in this pane, so the question tool is off. Put the question on the ledger with "
-    'agentihooks ledger --slug {slug} --as {name} question add "<the question in plain words>" '
-    "and keep working; the master answers it or raises it to the operator."
+    "The operator is not present in this pane, so the question tool is off. Send the question to the front door "
+    'master by inbox with agentihooks msg send master@{slug} "<the question in plain words>" and keep working.'
 )
 MASTER_ASK_REFUSAL = (
-    "The operator is not present in this pane, so the question tool is off. Never write the questions as chat text. "
-    "Say only one short line, type operator on to answer the questions here, or leave them in Priorities with "
-    'agentihooks ledger --slug {slug} --as {name} priority add <item> "<the ask in plain words>".'
+    "The operator is not present in this pane, so the question tool is off. Never write to him first, as chat text "
+    "or anywhere else: hold the question until he writes, then answer what he asks."
 )
 PROMPT_REFUSAL = (
     "Denied {tool}: the operator is not present in this pane, and only his typed operator on opens this prompt. "
