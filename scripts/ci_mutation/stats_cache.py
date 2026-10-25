@@ -1,4 +1,5 @@
 import ast
+import fnmatch
 import functools
 import hashlib
 import json
@@ -28,6 +29,60 @@ def loader_name(node: ast.AST) -> str | None:
     if isinstance(node, ast.Attribute):
         return node.attr
     return None
+
+
+def discovery_inputs(nodes: list[ast.AST], names: set[str], resources: dict[str, set[str]]) -> set[str]:
+    scanners = {
+        name: name
+        for name in ("glob", "rglob", "iterdir", "listdir", "scandir", "walk", "iter_modules", "walk_packages")
+    }
+    scanners.update(
+        (alias.asname or alias.name, alias.name)
+        for node in nodes
+        if isinstance(node, ast.ImportFrom) and node.module in ("glob", "os", "pkgutil")
+        for alias in node.names
+        if alias.name in scanners
+    )
+    inputs = set()
+    for node in nodes:
+        if not isinstance(node, ast.Call) or loader_name(node.func) not in scanners:
+            continue
+        if (
+            isinstance(node.func, ast.Attribute)
+            and isinstance(node.func.value, ast.Name)
+            and node.func.value.id == "ast"
+        ):
+            continue
+        expressions = [*node.args, *(keyword.value for keyword in node.keywords)]
+        if isinstance(node.func, ast.Attribute):
+            expressions.append(node.func.value)
+        parts = [part for expression in expressions for part in ast.walk(expression)]
+        scoped = {
+            path
+            for part in parts
+            if isinstance(part, ast.Constant) and isinstance(part.value, str)
+            for path in resources.get(part.value.rstrip("/") + "/", ())
+        }
+        if any(isinstance(part, ast.Attribute) and part.attr == "__path__" for part in parts):
+            scoped.update(path for name in names for path in resources.get(name.replace(".", "/") + "/", ()))
+        candidates = scoped or {path for paths in resources.values() for path in paths}
+        kind = scanners[loader_name(node.func)]
+        if kind in ("iter_modules", "walk_packages"):
+            candidates = {path for path in candidates if Path(path).suffix == ".py"}
+        elif (
+            kind in ("glob", "rglob")
+            and node.args
+            and isinstance(node.args[0], ast.Constant)
+            and isinstance(node.args[0].value, str)
+        ):
+            pattern = node.args[0].value
+            candidates = {
+                path
+                for path in candidates
+                if fnmatch.fnmatchcase(path, pattern) or fnmatch.fnmatchcase(Path(path).name, pattern)
+            }
+        inputs.update(candidates)
+    return inputs
 
 
 def test_inputs(
@@ -91,7 +146,10 @@ def test_inputs(
                     for node in nodes
                     if isinstance(node, ast.Constant) and isinstance(node.value, str) and node.value
                 }
-                dependencies.update(resource for value in literals for resource in resources.get(value, ()))
+                dependencies.update(
+                    resource for value in literals if not value.endswith("/") for resource in resources.get(value, ())
+                )
+
             if unresolved:
                 dependencies.update(dynamic_modules)
             records[current] = (hashlib.sha256(content).hexdigest(), dependencies, unresolved)
@@ -147,6 +205,7 @@ class StatsInputs:
     records: dict = field(default_factory=lambda: {True: {}, False: {}})
     traced: dict = field(default_factory=dict)
     covered: dict = field(default_factory=dict)
+    discovered: dict = field(default_factory=dict)
 
     def for_test(self, path: str, covered: list[str] | None, fresh: list[dict] | None = None) -> dict:
         measured = covered is not None
@@ -177,6 +236,21 @@ class StatsInputs:
                 test_inputs(self.root, changed, self.modules, self.records[measured], self.resources, not measured)
             )
         return inputs
+
+    def matches(self, path: str, inputs: dict, measured: bool, discovery: str) -> bool:
+        return self.for_test(path, list(inputs) if measured else None) == inputs and self.discovery(inputs) == discovery
+
+    def discovery(self, inputs: dict) -> str:
+        paths = set()
+        for source in inputs:
+            if Path(source).suffix != ".py":
+                continue
+            if source not in self.discovered:
+                text = (self.root / source).read_text()
+                names = set(imported_names(text, Path(source).parent.parts))
+                self.discovered[source] = discovery_inputs(list(ast.walk(ast.parse(text))), names, self.resources)
+            paths.update(self.discovered[source])
+        return hashlib.sha256(encode(sorted(paths)).encode()).hexdigest()
 
 
 def per_test_stats(path: str, fresh: list[dict], count: int) -> tuple[dict | None, list[str] | None]:
@@ -234,9 +308,15 @@ def collect_cached_stats(
             parts = Path(path).parts
             for index in range(len(parts)):
                 resources.setdefault("/".join(parts[index:]), set()).add(path)
+            for parent in Path(path).parents:
+                resources.setdefault(str(parent) + "/", set()).add(path)
     inputs = StatsInputs(root, modules, resources, changes)
     stored = StoredStats(root, folder, context, changes)
-    compatible = {path: record for path in files if (record := stored.load(path)) is not None}
+    compatible = {
+        path: record
+        for path in files
+        if (record := stored.load(path, functools.partial(inputs.matches, path))) is not None
+    }
     reused = list(compatible.values())
     missing = [path for path in files if path not in compatible]
     report(f"Mutation stats cache: reused {len(reused)} test files; collect {len(missing)}")
@@ -246,7 +326,8 @@ def collect_cached_stats(
     for path in missing:
         result, covered = per_test_stats(path, fresh, len(missing))
         if result is not None:
-            stored.save(path, result, inputs.for_test(path, covered, fresh), covered is not None)
+            dependencies = inputs.for_test(path, covered, fresh)
+            stored.save(path, result, dependencies, covered is not None, inputs.discovery(dependencies))
     return reused + [
         {name: value for name, value in result.items() if name not in ("files", "modules")} for result in fresh
     ]
