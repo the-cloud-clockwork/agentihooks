@@ -497,6 +497,18 @@ def test_restore_keeps_a_live_login_and_skips_an_empty_copy(tmp_path):
     assert not (empty / login.CREDENTIALS).exists()
 
 
+def test_restore_replaces_a_stale_local_grant_with_a_newer_stored_copy(tmp_path):
+    target = _home(tmp_path)
+    fresh = {**GRANT, "accessToken": "fresh", "expiresAt": 3000}
+    copy = {"grant": json.dumps(fresh), "account": json.dumps(MASTER_ACCOUNT), "generation": "3000"}
+    assert login.restore(copy, target) is True
+    assert json.loads((target / login.CREDENTIALS).read_text()) == {login.GRANT: fresh}
+    older = {"grant": json.dumps({**GRANT, "accessToken": "older"}), "account": "{}", "generation": "1000"}
+    assert login.restore(older, target) is False
+    assert login.restore(older, target, force=True) is True
+    assert json.loads((target / login.CREDENTIALS).read_text())[login.GRANT]["accessToken"] == "older"
+
+
 def test_stored_reads_the_swarm_copy_and_reports_an_outage(monkeypatch, capsys):
     FakeBao({"epoch": "3"}).install(monkeypatch)
     assert login.stored("bao") == {"epoch": "3"}
@@ -875,6 +887,31 @@ def test_launch_preparation_reports_a_refused_operator_email(ah, rendered, tmp_p
     monkeypatch.setattr(operator_email, "send", lambda *_: "email failed: down")
     assert login.prepare_launch(_environ(rendered), tmp_path) is None
     assert capsys.readouterr().err == "[agenti] operator login email refused: email failed: down\n"
+
+
+def test_launch_preparation_recovers_the_stored_login_before_any_browser_step(ah, rendered, tmp_path, monkeypatch):
+    from scripts import master_login_chain as chain
+    from scripts.routing import native_login
+
+    _seed(rendered)
+    fresh = {**GRANT, "accessToken": "fresh"}
+    copy = {"grant": json.dumps(fresh), "account": json.dumps(MASTER_ACCOUNT), "generation": "1"}
+    monkeypatch.setattr(openbao_kv, "from_env", lambda environ: "bao")
+    monkeypatch.setattr(login, "stored", lambda bao, number=None: copy if (bao, number) == ("bao", 1) else {})
+    monkeypatch.setattr(login, "keep", lambda *_: False)
+    calls = []
+
+    def check(environ, account):
+        grant = json.loads((login.home() / login.CREDENTIALS).read_text())[login.GRANT]
+        calls.append(grant["accessToken"])
+        if grant != fresh:
+            raise native_login.LoginError(native_login.EXPIRED)
+        return dict(native_login.PROOF)
+
+    monkeypatch.setattr(native_login, "check", check)
+    monkeypatch.setattr(chain, "authorize", lambda *_: calls.append("browser") or "failure", raising=False)
+    assert login.prepare_launch(_environ(rendered), tmp_path) == (login.home(), "masteratexample_com")
+    assert calls == ["access", "fresh"]
 
 
 def test_launch_preparation_emails_once_when_no_slot_can_take_the_browser(ah, rendered, tmp_path, monkeypatch):
