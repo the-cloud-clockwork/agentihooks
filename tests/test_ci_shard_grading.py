@@ -250,3 +250,26 @@ def test_shard_verifier_commands_run_with_only_system_python3(tmp_path, module):
         timeout=30,
     )
     assert result.returncode == 0, result.stdout + result.stderr
+
+
+@pytest.mark.parametrize("missing", [None, "durations-3.12-1", "flakes-3.12-2"])
+def test_downloaded_reports_check_needs_no_new_base_grader(tmp_path, missing):
+    step = next(
+        step for step in _jobs()["shard-check"]["steps"] if step.get("name") == "Require every planned shard report"
+    )
+    for kind in ("durations", "flakes"):
+        for shard in (1, 2):
+            name = f"{kind}-3.12-{shard}"
+            if name != missing:
+                (tmp_path / "shard-reports" / name).mkdir(parents=True)
+    result = subprocess.run(
+        ["/bin/bash", "-e", "-o", "pipefail", "-c", step["run"]],
+        cwd=tmp_path,
+        env={"PATH": os.defpath, "SHARDS": "[1,2]"},
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert (result.returncode == 0) == (missing is None), result.stdout + result.stderr
+    if missing:
+        assert missing in result.stdout + result.stderr
