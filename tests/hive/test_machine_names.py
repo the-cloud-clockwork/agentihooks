@@ -49,6 +49,13 @@ def test_each_machine_keeps_the_lowest_free_ordinal_it_was_given(admin):
     assert admin.hgetall(machine.MACHINES) == {"worker-001": "swarm-hive-001", "worker-002": "swarm-hive-002"}
 
 
+def test_a_new_machine_takes_the_lowest_ordinal_left_free(admin):
+    admin.hset(machine.MACHINES, mapping={"worker-002": "swarm-hive-002", "worker-003": "swarm-hive-003"})
+
+    assert machine.name(admin, "worker-009") == "swarm-hive-001"
+    assert machine.name(admin, "worker-010") == "swarm-hive-004"
+
+
 def test_a_name_taken_while_it_was_chosen_is_chosen_again(admin, monkeypatch):
     real = admin.pipeline
 

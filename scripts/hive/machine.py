@@ -48,11 +48,14 @@ def name(redis: "Redis", machine: str, assign: bool = True) -> str:
                 named = pipe.hgetall(MACHINES)
                 if machine in named:
                     return named[machine]
-                taken = set(named.values())
+                used = sorted(named.values())
                 found = next(
-                    f"{NAME_PREFIX}{ordinal:03d}"
-                    for ordinal in range(1, len(taken) + 2)
-                    if f"{NAME_PREFIX}{ordinal:03d}" not in taken
+                    (
+                        f"{NAME_PREFIX}{ordinal:03d}"
+                        for ordinal, held in enumerate(used, 1)
+                        if held != f"{NAME_PREFIX}{ordinal:03d}"
+                    ),
+                    f"{NAME_PREFIX}{len(used) + 1:03d}",
                 )
                 if assign:
                     pipe.multi()
