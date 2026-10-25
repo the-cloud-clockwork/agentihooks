@@ -164,7 +164,8 @@ class Seats:
         self.slug, self.doc = slug, doc
         self.names = {a.name: a.seat or a.name for a in agents if a.lane == MASTER and a.state != "finished"}
         self.names.update({name: seat for seat, name in held.items()})
-        self.live = [address for address in held if address not in handed_off(store, slug)]
+        handed = handed_off(store, slug)
+        self.live = [address for address in held if address not in handed]
         self.lead = masters.lead_of(slug, self.live)
         self.table = masters.MasterSeats(store.redis)
         self.count = self.table.count(slug)
