@@ -101,7 +101,7 @@ def current_input(root: Path, changes: dict, digests: dict[str, str | None], nam
 def distribution_versions(root: Path) -> dict[str, str]:
     config = root / "pyproject.toml"
     own = tomllib.loads(config.read_text()).get("project", {}).get("name") if config.is_file() else None
-    # The project's own build number names its commit, while its files already key the stats by content.
+    # The project's own dev and local version segments change with every commit; its files already key the stats.
     return {
         distribution.metadata["Name"]: distribution.version.partition("+")[0].partition(".dev")[0]
         if distribution.metadata["Name"] == own
@@ -112,10 +112,8 @@ def distribution_versions(root: Path) -> dict[str, str]:
 
 def reusable_entry(file: Path, opened: bool, check: Callable[[str], list]) -> dict | None:
     entry = json.loads(file.read_text()) if file.is_file() else None
-    if (
-        entry is None
-        or opened
-        and ("loaded" not in entry or any(check(name) != value for name, value in entry["loaded"].items()))
+    if entry is None or (
+        opened and ("loaded" not in entry or any(check(name) != value for name, value in entry["loaded"].items()))
     ):
         return None
     return entry

@@ -7,6 +7,7 @@ import sys
 import tempfile
 from pathlib import Path
 from time import process_time
+from types import ModuleType
 
 from mutmut.utils.format_utils import get_mutant_name
 
@@ -132,7 +133,7 @@ def stats_shards(root: Path, files: list[str], count: int, seconds: dict[str, fl
     return [sorted(shard) for shard in shards]
 
 
-def loaded_files(bases: list[Path], modules: dict = sys.modules) -> list[str]:
+def loaded_files(bases: list[Path], modules: dict[str, ModuleType] = sys.modules) -> list[str]:
     found = set()
     for module in list(modules.values()):
         if origin := getattr(module, "__file__", None):
