@@ -24,7 +24,7 @@ TRACKED_FILES = ("ls-files", "-z")
 COMMIT_SUBJECT = ("log", "-1", "--format=%s")
 GH_OPTIONS = {"text": True, "stderr": subprocess.DEVNULL, "timeout": 60}
 DIFF_SECTION = re.compile(r"^(?=diff --git )", re.MULTILINE)
-DIFF_PATH = re.compile(r"diff --git a/\S+ b/(\S+)")
+DIFF_PATH = re.compile(r"diff --git a/.+? b/(.+)")
 EXCLUDED_DOCS = {"AGENTS.md", "CLAUDE.md"}
 READ_OPTIONS = {"errors": "replace"}
 REDACT_OPTIONS = {"mode": "memory"}

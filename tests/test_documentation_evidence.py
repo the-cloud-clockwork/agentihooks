@@ -135,6 +135,7 @@ PULL_REQUEST_DIFF = (
     "diff --git a/policy.py b/policy.py\n--- a/policy.py\n+++ b/policy.py\n@@ -1 +1,2 @@\n"
     "-enabled = False\n+class WidgetPolicy:\n+    retries = 3\n"
     "diff --git a/.env b/.env\n--- a/.env\n+++ b/.env\n@@ -0,0 +1 @@\n+CREDENTIAL_SENTINEL\n"
+    "diff --git a/user guide.md b/user guide.md\n--- a/user guide.md\n+++ b/user guide.md\n@@ -0,0 +1 @@\n+Retries\n"
 )
 
 
@@ -151,7 +152,7 @@ def test_a_source_task_takes_its_changes_from_its_own_pull_request(tmp_path, mon
     monkeypatch.setattr(documentation_evidence, "pull_request_diff", lambda url: asked.append(url) or PULL_REQUEST_DIFF)
     result = documentation_evidence.collect(tmp_path, base, {"id": "t1", "pr_url": PULL_REQUEST})
     assert asked == [PULL_REQUEST]
-    assert result["files"] == ["policy.py"]
+    assert result["files"] == ["policy.py", "user guide.md"]
     assert "+class WidgetPolicy:" in result["changes"]
     assert "LoginRecovery" not in result["changes"]
     assert "CREDENTIAL_SENTINEL" not in result["changes"]

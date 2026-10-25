@@ -6,13 +6,19 @@ import pytest
 from hooks.classifier.errors import ClassifierUnavailable
 from hooks.classifier.result import Answer, DecisionResult
 from hooks.context import documentation, documentation_session
-from tests.test_documentation_evidence import git, pull, repository
+from tests.test_documentation_evidence import git, pull, repository, unrelated
 
 
 class Ledger:
     def __init__(self):
-        self.source = {"id": "t1", "title": "Add retry policy", "phase": "p1", "profile": "engineer", "state": "done"}
-        self.source["pr_url"] = "https://example.test/pull/7"
+        self.source = {
+            "id": "t1",
+            "title": "Add retry policy",
+            "phase": "p1",
+            "profile": "engineer",
+            "state": "done",
+            "pr_url": "https://example.test/pull/7",
+        }
         self.added = []
 
     def task(self, slug, task_id):
@@ -31,7 +37,7 @@ def world(tmp_path, monkeypatch):
     monkeypatch.setattr(
         documentation_session.documentation_evidence,
         "pull_request_diff",
-        lambda url: git(root, "diff", baseline, "HEAD"),
+        lambda url: git(root, "diff", baseline, "HEAD", "--", "policy.py"),
     )
     monkeypatch.setattr(documentation_session, "HOME", tmp_path / "state")
     monkeypatch.setattr(documentation_session, "LedgerClient", lambda **kwargs: ledger)
@@ -64,6 +70,7 @@ def answer(needed=0.95, covered=0.05):
 def test_session_end_queues_one_documentation_task_with_source_and_docs_evidence(world, monkeypatch):
     root, payload, ledger, jobs = world
     monkeypatch.setattr(documentation.runner, "decide", answer())
+    unrelated(root)
     documentation_session.end(payload)
     assert not ledger.added
     fn, args = jobs.pop()
@@ -80,6 +87,7 @@ def test_session_end_queues_one_documentation_task_with_source_and_docs_evidence
     assert "handbook/policy.md" in task["description"]
     assert "small" in task["description"]
     assert "WidgetPolicy" in task["description"]
+    assert "LoginRecovery" not in task["description"]
 
 
 def test_a_source_task_without_a_pull_request_queues_documentation_with_no_diff_and_says_so(world, monkeypatch):
