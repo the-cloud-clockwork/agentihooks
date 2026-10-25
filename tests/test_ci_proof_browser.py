@@ -57,7 +57,9 @@ def test_proof_baked_browser_drift_fails_without_a_download(tmp_path):
     baked.mkdir()
     calls = tmp_path / "calls"
     python = tmp_path / "python"
-    python.write_text('#!/usr/bin/env bash\nset -euo pipefail\necho "$*" >> "$CALLS"\nexit 47\n')
+    python.write_text(
+        '#!/usr/bin/env bash\nset -euo pipefail\n[[ "$*" != *install* ]]\necho launch >> "$CALLS"\nexit 47\n'
+    )
     python.chmod(0o755)
     target = tmp_path / ".playwright"
     result = subprocess.run(
