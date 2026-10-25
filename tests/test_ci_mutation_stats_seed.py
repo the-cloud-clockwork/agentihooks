@@ -37,7 +37,7 @@ def test_statistics_seed_requires_a_successful_run_merged_into_the_current_base(
     archive = io.BytesIO()
     with zipfile.ZipFile(archive, "w") as zipped:
         for key in keys:
-            zipped.writestr(f"{key}.json", json.dumps({"key": key, "status": 0}))
+            zipped.writestr(f"cache/{key}.json", json.dumps({"key": key, "status": 0}))
         zipped.writestr("../escaped.json", "{}")
     calls = []
 
@@ -62,7 +62,7 @@ def test_statistics_seed_requires_a_successful_run_merged_into_the_current_base(
                 "artifacts": [
                     {
                         "id": 7,
-                        "name": "other" if source == "unrelated" else "mutation-test-stats-0",
+                        "name": "other" if source == "unrelated" else "mutation-stats-0",
                         "expired": source == "expired",
                     }
                 ]
@@ -73,7 +73,8 @@ def test_statistics_seed_requires_a_successful_run_merged_into_the_current_base(
 
     monkeypatch.setattr(stats_seed, "api", api)
     folder = tmp_path / "nested" / "cache"
-    folder.mkdir(parents=True)
+    if source == "merged":
+        folder.mkdir(parents=True)
     count = stats_seed.seed(root, folder, base)
     assert count == (2 if source == "merged" else 0)
     assert sorted(path.name for path in folder.glob("*.json")) == (

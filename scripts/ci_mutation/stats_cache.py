@@ -2,6 +2,8 @@ import ast
 import functools
 import hashlib
 import json
+import os
+import shutil
 import subprocess
 import sys
 from collections.abc import Callable
@@ -18,6 +20,9 @@ CONFIGURATION = {"pyproject.toml", "pytest.ini", "setup.cfg", "tox.ini", "uv.loc
 TRACKED = ("git", "ls-files", "-z")
 report = functools.partial(print, flush=True)
 encode = functools.partial(json.dumps, sort_keys=True)
+
+
+_SEEDED = set()
 
 
 def loader_name(node: ast.AST) -> str | None:
@@ -98,6 +103,13 @@ def collect_cached_stats(
     options: list[str],
     collect: Callable[[list[str]], list[dict]],
 ) -> list[dict]:
+    if base := os.environ.get("MUTATION_STATS_SEED_BASE"):
+        from scripts.ci_mutation.stats_seed import seed
+
+        identity = (root, folder, base)
+        if identity not in _SEEDED:
+            seed(root, folder, base)
+            _SEEDED.add(identity)
     tracked = subprocess.check_output(TRACKED, cwd=root, text=True).split("\0")
     sources = {
         path: hashlib.sha256((root / path).read_bytes()).hexdigest()
@@ -169,4 +181,6 @@ def collect_cached_stats(
                 }
             )
         )
+    if exported := os.environ.get("MUTATION_STATS_EXPORT"):
+        shutil.copytree(folder, exported, dirs_exist_ok=True)
     return reused + fresh

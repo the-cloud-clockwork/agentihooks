@@ -27,14 +27,14 @@ def seed(root: Path, folder: Path, base: str) -> int:
                 artifacts = api(f"actions/runs/{run['id']}/artifacts?per_page=100")["artifacts"]
                 count = 0
                 for artifact in artifacts:
-                    if artifact["expired"] or not artifact["name"].startswith("mutation-test-stats-"):
+                    if artifact["expired"] or not artifact["name"].startswith("mutation-stats-"):
                         continue
                     with zipfile.ZipFile(
                         io.BytesIO(api(f"actions/artifacts/{artifact['id']}/zip", binary=True))
                     ) as zipped:
                         for name in zipped.namelist():
-                            if re.fullmatch(r"[0-9a-f]{64}\.json", name):
-                                (folder / name).write_bytes(zipped.read(name))
+                            if re.fullmatch(r"cache/[0-9a-f]{64}\.json", name):
+                                (folder / Path(name).name).write_bytes(zipped.read(name))
                                 count += 1
                 if count:
                     return count
