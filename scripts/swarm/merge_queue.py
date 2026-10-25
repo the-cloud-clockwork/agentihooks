@@ -1,5 +1,6 @@
 import json
 import subprocess
+import time
 from collections.abc import Callable
 
 from scripts.swarm import ledger_events, mutation_wait, staged_compatibility
@@ -9,7 +10,7 @@ FRESHNESS = """query($url: URI!) { resource(url: $url) { ... on PullRequest {
     repository { nameWithOwner }
     baseRefName baseRef { branchProtectionRule { requiredStatusCheckContexts requiredStatusChecks { context app { databaseId } } } }
 } } }"""
-FIELDS = 'id state headRefOid baseRefName mergeQueueEntry { id position state } isDraft mergeable reviewDecision statusCheckRollup { state } repository { mergeQueue(branch: "dev") { id } } body'
+FIELDS = 'id state headRefOid baseRefName mergeQueueEntry { id position state } isDraft mergeable mergeStateStatus reviewDecision repository { mergeQueue(branch: "dev") { id } } body'
 STATE = "query($url: URI!) { resource(url: $url) { ... on PullRequest { " + FIELDS + " } } }"
 QUEUE = """mutation($id: ID!, $head: GitObjectID!) {
     enqueuePullRequest(input: {pullRequestId: $id, expectedHeadOid: $head}) { mergeQueueEntry { id } }
@@ -22,9 +23,12 @@ DEQUEUE = """mutation($id: ID!) {
 
 MERGE = """mutation($id: ID!, $head: GitObjectID!) {
   mergePullRequest(input: {pullRequestId: $id, expectedHeadOid: $head, mergeMethod: SQUASH}) {
-    pullRequest { state }
+    pullRequest { state mergeCommit { oid } }
   }
 }"""
+POLL = 15
+ATTEMPTS = 40
+MERGEABLE = ("CLEAN", "HAS_HOOKS", "UNSTABLE")
 
 
 def graphql(query: str, variables: dict, run=subprocess.run) -> dict:
@@ -89,11 +93,59 @@ def required_view(url: str, run) -> "ledger_events.PullRequest | None":
     return ledger_events.view(url, read, required_checks=expected)
 
 
+def refuse(pull: "ledger_events.PullRequest | None") -> None:
+    failed = f"; failed: {', '.join(pull.failed)}" if pull and pull.failed else ""
+    raise SwarmError(f"required checks on the current pull request head must pass before queueing{failed}")
+
+
 def require_green(url: str, head: str, run) -> None:
     pull = required_view(url, run)
     if pull is None or pull.head != head or not pull.resolved or pull.red:
-        failed = f"; failed: {', '.join(pull.failed)}" if pull and pull.failed else ""
-        raise SwarmError(f"required checks on the current pull request head must pass before queueing{failed}")
+        refuse(pull)
+
+
+def readable_view(url: str, run) -> "ledger_events.PullRequest | None":
+    try:
+        return required_view(url, run)
+    except SwarmError as exc:
+        if "not accessible by integration" not in str(exc):
+            raise
+        return None
+
+
+def settle(url: str, head: str, run, attempts: int) -> None:
+    status = "PENDING"
+    for attempt in range(attempts):
+        if attempt:
+            time.sleep(POLL)
+        pull = readable_view(url, run)
+        if pull is not None:
+            if pull.head != head or pull.red:
+                refuse(pull)
+            if pull.resolved:
+                return
+            continue
+        raw = graphql(STATE, {"url": url}, run)["resource"]
+        if raw["headRefOid"] != head:
+            raise SwarmError("the pull request head moved; merge the new head once its checks pass")
+        status = raw["mergeStateStatus"]
+        if status in MERGEABLE:
+            return
+        if status == "DIRTY":
+            raise SwarmError("the pull request conflicts with dev; merge dev into it before merging")
+    raise SwarmError(f"required checks on the current pull request head must pass before merging; merge state {status}")
+
+
+def squash(raw: dict, run) -> str | None:
+    try:
+        merged = graphql(MERGE, {"id": raw["id"], "head": raw["headRefOid"]}, run)
+    except SwarmError as exc:
+        if "not accessible by integration" not in str(exc):
+            raise
+        raise SwarmError(
+            f"squash merge refused: {exc}; the GitHub App token needs the pull requests write permission"
+        ) from exc
+    return ((merged["mergePullRequest"]["pullRequest"] or {}).get("mergeCommit") or {}).get("oid")
 
 
 def journaled(journal, action: str, url: str, head: str, call: Callable[[], dict]) -> dict:
@@ -110,12 +162,13 @@ def journaled(journal, action: str, url: str, head: str, call: Callable[[], dict
         journal.write(action, url, head, before, journal.groups(), errors)
 
 
-def operate(action: str, url: str, run=subprocess.run, admit=None, journal=None) -> dict:
+def operate(action: str, url: str, run=subprocess.run, admit=None, journal=None, attempts: int = 1) -> dict:
     raw = graphql(STATE, {"url": url}, run)["resource"]
     if not raw:
         raise SwarmError("GitHub URL does not identify a pull request")
     if action != "state" and raw["baseRefName"] != "dev":
         raise SwarmError("swarm merge queue operations require a pull request into dev")
+    merged = {}
     if action == "queue" and raw["mergeQueueEntry"] is None:
         staged_compatibility.require(url, raw["headRefOid"], raw.get("body") or "", run)
         if admit is not None:
@@ -123,8 +176,8 @@ def operate(action: str, url: str, run=subprocess.run, admit=None, journal=None)
         if raw["repository"]["mergeQueue"] is None:
             if raw["isDraft"] or raw["reviewDecision"] not in (None, "APPROVED"):
                 raise SwarmError("squash merge requires a ready pull request with green checks and no pending review")
-            require_green(url, raw["headRefOid"], run)
-            graphql(MERGE, {"id": raw["id"], "head": raw["headRefOid"]}, run)
+            settle(url, raw["headRefOid"], run, attempts)
+            merged = {"merge_commit": squash(raw, run)}
         else:
             require_green(url, raw["headRefOid"], run)
             variables = {"id": raw["id"], "head": raw["headRefOid"]}
@@ -139,6 +192,7 @@ def operate(action: str, url: str, run=subprocess.run, admit=None, journal=None)
         "head": raw["headRefOid"],
         "queued": raw["mergeQueueEntry"] is not None,
         "entry": raw["mergeQueueEntry"],
+        **merged,
     }
 
 
