@@ -1,7 +1,8 @@
 """Wake pass run by the swarm tick: prompt idle herdr panes holding pending inbox items, escalate items nobody reads.
 
 Ladder per pending item: up to three wakes one retry window apart, then an inbox item for the swarm master,
-then a follow-up on the ledger page. Every step is appended to the item's history, so the count survives restarts.
+then a ledger alert any master or agent can claim. Every step is appended to the item's history, so the count
+survives restarts.
 """
 
 from dataclasses import dataclass, replace
@@ -14,7 +15,7 @@ from scripts.inbox.store import Item, redelivery_ms
 from scripts.swarm import capabilities, idle, outage
 from scripts.swarm.delivery import READY, post
 from scripts.swarm.store import MASTER, RedisStore, SwarmError
-from scripts.swarm_ledger import ledger_comments
+from scripts.swarm_ledger import ledger_alerts, ledger_comments
 
 MAX_WAKES = 3
 WINDOW_ENV = "AGENTIHOOKS_INBOX_RETRY_WINDOW_S"
@@ -172,11 +173,11 @@ def _wake_world(inbox, slug, agents, herdr, ledger, clock: _Clock, items):
             inbox.note(item.id, TO_MASTER, BY, raised_note(master, raised.id), now_ms)
             actions.append(f"raised message {item.id} to {master}")
         elif step in (TO_MASTER, TO_OPERATOR):
-            if not post(inbox, item, lambda: ledger.followup(slug, _operator_text(item), needs_operator=True)):
+            if not post(inbox, item, lambda: ledger.raise_alert(slug, ledger_alerts.INBOX, _operator_text(item))):
                 actions.append(f"the ledger page refused message {item.id}, closed it")
                 continue
-            inbox.note(item.id, TO_OPERATOR, BY, "shown to the operator on the ledger page", now_ms)
-            actions.append(f"raised message {item.id} to the operator")
+            inbox.note(item.id, TO_OPERATOR, BY, "raised as a ledger alert the swarm can claim", now_ms)
+            actions.append(f"raised message {item.id} as a ledger alert")
     return actions
 
 

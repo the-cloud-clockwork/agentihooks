@@ -14,6 +14,7 @@ OPS = ("priority", "priority_clear")
 DERIVED_WORDS = 16
 NOTHING = "No priority waits on {target} to clear."
 CLEARED = "The priority on {target} is already cleared and returns only when its ask changes."
+_NOTHING_PREFIX, _NOTHING_SUFFIX = NOTHING.split("{target}")
 
 
 def check(op):
@@ -64,6 +65,11 @@ def _clear(doc, op, ctx):
         reason = {"reason": op["reason"]} if "reason" in op else {}
         ctx.record(op.get("by", "operator"), "priority cleared", row["item"], id=row["id"], text=row["text"], **reason)
     return True
+
+
+def is_noop_refusal(text):
+    """A priority_clear with nothing to clear: a no-op, never a sync problem."""
+    return text.startswith(_NOTHING_PREFIX) and text.endswith(_NOTHING_SUFFIX)
 
 
 def apply(doc, op, ctx):

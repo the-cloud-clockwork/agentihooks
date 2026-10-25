@@ -11,23 +11,14 @@ pytestmark = pytest.mark.unit
 class Ledger:
     def __init__(self):
         self.doc = {"_meta": {"rev": 1, "events": []}, "followups": [], "questions": [], "tasks": []}
-        self.followups = []
+        self.alerts = []
         self.now = 0
 
     def state(self, slug):
         return self.doc
 
-    def followup(self, slug, text, needs_operator=False):
-        self.followups.append(text)
-        meta = self.doc["_meta"]
-        meta["rev"] += 1
-        row = {"id": f"f{meta['rev']}", "text": text, "comments": [], "done": False}
-        self.doc["followups"].append({**row, **({"needs_operator": True} if needs_operator else {})})
-        if needs_operator:
-            target = f"followups/{row['id']}"
-            self.doc.setdefault("priorities", []).append({"item": target, "text": "Decide: it", "by": "ledger"})
-        added = {"rev": meta["rev"], "at": self.now, "by": "swarm", "kind": "added", "text": text}
-        meta["events"].append({**added, "target": f"followups/{row['id']}"})
+    def raise_alert(self, slug, source, text):
+        self.alerts.append((slug, source, text))
 
     def priority(self, slug, item, text):
         pass
@@ -87,7 +78,7 @@ def test_a_followup_closed_before_the_wake_never_reaches_the_master(crew):
     assert inbox.pending() == []
     assert inbox.get(item.id).state == "done"
     assert herdr.prompts == []
-    assert ledger.followups == []
+    assert ledger.alerts == []
 
 
 def test_an_open_followup_stays_pending_for_the_master_without_a_typed_wake(crew):
@@ -128,7 +119,7 @@ def test_other_ledger_decisions_close_the_event(crew, collection, kind, fields):
     wake(crew, item.created_at + 300_001)
     assert inbox.pending() == []
     assert herdr.prompts == []
-    assert ledger.followups == []
+    assert ledger.alerts == []
 
 
 @pytest.mark.parametrize(
@@ -189,5 +180,5 @@ def test_an_unread_master_item_yields_one_follow_up_that_never_returns_to_the_ma
         ledger.now = item.created_at + n * 300_000
         wake(crew, ledger.now)
         event_pass(inbox, store, "sw", ledger.doc, ledger, ledger.now)
-    assert len(ledger.followups) == 1
+    assert len(ledger.alerts) == 1
     assert [i.id for i in inbox.inbox("master@sw")] == [item.id]

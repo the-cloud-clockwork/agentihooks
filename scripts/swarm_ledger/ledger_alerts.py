@@ -6,6 +6,7 @@ from scripts.inbox import outbox
 OPS = ("alert_claim", "alert_close", "alert_raise")
 SIZE, SYNC, PROMOTION, RELEASE = "size", "sync", "promotion", "release"
 SEAT, SPAWN, MERGE = "seat", "spawn", "merge"
+INBOX = "inbox"
 WRITER = "writer"
 TARGETS = {
     WRITER: "master",
@@ -16,8 +17,10 @@ TARGETS = {
     SEAT: "master",
     SPAWN: "master",
     MERGE: "master",
+    INBOX: "master",
 }
-RAISED = (PROMOTION, RELEASE, SEAT, SPAWN, MERGE)
+RAISED = (PROMOTION, RELEASE, SEAT, SPAWN, MERGE, INBOX)
+MULTI = (INBOX,)
 OPEN, CLAIMED, DONE = "open", "claimed", "done"
 OPERATOR = "operator"
 SENDER = "ledger"
@@ -41,7 +44,10 @@ def check_raise(op):
 
 
 def raise_source(doc, ctx, source, text):
-    if not any(a["source"] == source and a["state"] != DONE for a in doc.setdefault("alerts", [])):
+    def matches(a):
+        return a["source"] == source and (source not in MULTI or a["text"] == text)
+
+    if not any(matches(a) and a["state"] != DONE for a in doc.setdefault("alerts", [])):
         raise_warning(doc, ctx, (source, text), [])
     return True
 

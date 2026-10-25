@@ -710,8 +710,8 @@ def test_a_raised_release_alert_opens_one_alert_for_the_master():
 
 
 RAISE_REFUSED = (
-    "alert_raise takes by, a source among ('promotion', 'release', 'seat', 'spawn', 'merge') and a text of up to "
-    "2000 characters"
+    "alert_raise takes by, a source among ('promotion', 'release', 'seat', 'spawn', 'merge', 'inbox') and a text "
+    "of up to 2000 characters"
 )
 
 
@@ -799,3 +799,51 @@ def test_expiry_waits_one_scan_interval_after_startup(monkeypatch):
     with pytest.raises(InterruptedError, match="scan observed"):
         ledger_server.watch_ledgers(interval=0)
     assert len(sleeps) == 16
+
+
+def raise_inbox(op_id, text):
+    return {"op": "alert_raise", "id": op_id, "by": "swarm", "source": "inbox", "text": text}
+
+
+def test_distinct_inbox_alerts_do_not_collapse_by_source():
+    make_ledger()
+    sync(ops=[raise_inbox("r1", "message m1 to eng-1 is still unread")])
+    state, rejected = sync(ops=[raise_inbox("r2", "message m2 to eng-2 is still unread")])
+    assert rejected == []
+    assert [a["text"] for a in state["alerts"] if a["source"] == "inbox"] == [
+        "message m1 to eng-1 is still unread",
+        "message m2 to eng-2 is still unread",
+    ]
+
+
+def test_a_repeated_inbox_alert_keeps_its_stable_id_instead_of_duplicating():
+    make_ledger()
+    state, _ = sync(ops=[raise_inbox("r1", "message m1 to eng-1 is still unread")])
+    [alert] = [a for a in state["alerts"] if a["source"] == "inbox"]
+    state, rejected = sync(ops=[raise_inbox("r2", "message m1 to eng-1 is still unread")])
+    assert rejected == []
+    assert [a["id"] for a in state["alerts"] if a["source"] == "inbox"] == [alert["id"]]
+
+
+def test_a_priority_clear_with_nothing_to_clear_raises_no_sync_alert():
+    from scripts.swarm_ledger.repository import mutation
+
+    state = make_ledger()
+    rejected, _ = mutation.apply(
+        SLUG, state, core, ops=[{"op": "priority_clear", "id": "p1", "target": "tasks/missing"}]
+    )
+    assert rejected == ["p1"]
+    assert state["alerts"] == []
+
+
+def test_an_already_cleared_priority_still_raises_a_sync_alert():
+    from scripts.swarm_ledger.repository import mutation
+
+    state = make_ledger()
+    state["tasks"] = [{"id": "t1", "state": "blocked", "title": "Fix it"}]
+    clear = {"op": "priority_clear", "id": "p1", "target": "tasks/t1"}
+    rejected, _ = mutation.apply(SLUG, state, core, ops=[clear])
+    assert rejected == [] and state["alerts"] == []
+    rejected, _ = mutation.apply(SLUG, state, core, ops=[{**clear, "id": "p2"}])
+    assert rejected == ["p2"]
+    assert [a["source"] for a in state["alerts"]] == ["sync"]

@@ -223,9 +223,9 @@ in the terminal (a busy pane, one waiting on input, one holding typed text or on
 operator prompted inside `AGENTIHOOKS_INBOX_QUIET_S` never), retried every
 `AGENTIHOOKS_INBOX_RETRY_WINDOW_S` (default 300) up to three times. The master pane is
 the operator's and is never typed into. Still unread one window later, the swarm master
-gets an item; one more window, the operator gets a follow-up on the ledger page. A
+gets an item; one more window, a ledger alert any master or agent can claim is raised. A
 session with no typed wake is escalated one window after the send. An item for the
-master, or in a swarm without one, goes straight to the operator. Each wake and
+master, or in a swarm without one, goes straight to that alert. Each wake and
 escalation is kept in the item's history. The wake window is separate from the
 receiver confirmation window.
 
