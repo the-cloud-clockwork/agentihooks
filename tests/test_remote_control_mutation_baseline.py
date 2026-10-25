@@ -1,5 +1,8 @@
 import faulthandler
+import subprocess
+import sys
 import time
+from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
@@ -23,6 +26,31 @@ def hung_test_dump_past_both_passes(request):
     # one minute dump would interrupt.
     if float(request.config.getini("faulthandler_timeout") or 0):
         faulthandler.dump_traceback_later(2 * DEADLINE + 10, file=request.config.stash[fault_handler_stderr_fd_key])
+
+
+@contextmanager
+def mutation_children(monkeypatch):
+    yield
+
+
+@pytest.fixture(autouse=True)
+def clean_mutation_children(monkeypatch):
+    with mutation_children(monkeypatch):
+        yield
+
+
+def test_mutation_children_exit_when_the_watchdog_interrupts(monkeypatch):
+    child = None
+    try:
+        with pytest.raises(pytest.fail.Exception, match="watchdog"):
+            with mutation_children(monkeypatch):
+                child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"], start_new_session=True)
+                pytest.fail("watchdog")
+        assert child.poll() is not None
+    finally:
+        if child is not None:
+            child.kill()
+            child.wait()
 
 
 @pytest.fixture(scope="module")
