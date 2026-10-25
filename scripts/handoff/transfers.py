@@ -126,15 +126,19 @@ def detach(store, slug: str, agent) -> None:
 
 
 def observe(store, slug: str, live: set[str]) -> None:
+    starting = {a.name for a in store.agents(slug) if a.lane == "master" and a.state == "starting"}
     for row in list_transfers(store, slug):
-        if row["successor"] not in live or row["binding"]["state"] == "live":
+        if not row["successor"] or row["binding"]["state"] == "live" or row["successor"] in starting:
             continue
         occupancy = store.seats.occupant(row["seat"])
         if occupancy.occupant != row["successor"] or occupancy.generation != row["generation"]:
             continue
+        state = "live" if row["successor"] in live else "absent"
+        if row["binding"]["state"] == state:
+            continue
 
-        def change(current):
-            current["binding"] = {"state": "live", "at": now_ms(), "session": current["successor"]}
+        def change(current, state=state):
+            current["binding"] = {"state": state, "at": now_ms(), "session": current["successor"]}
 
         _change(store, slug, row["id"], change)
 
