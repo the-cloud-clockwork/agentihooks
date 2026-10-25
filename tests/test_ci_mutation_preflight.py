@@ -236,6 +236,7 @@ def test_both_mutation_planners_restore_statistics_timings_before_sizing():
             "name": "Restore measured statistics timings",
             "if": condition,
             "uses": "actions/cache/restore@v4",
+            "env": {"SEGMENT_DOWNLOAD_TIMEOUT_MINS": "1"},
             "with": {
                 "path": ".mutation-stats-cache",
                 "key": "mutation-test-stats-v2-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}",
