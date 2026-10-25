@@ -176,6 +176,26 @@ def test_the_exit_is_the_one_exit_of_that_start_and_names_the_lost_hive(rig):
     assert exited.data["hive"] == "hive-a"
 
 
+def test_the_hub_logs_the_lost_hive_once_with_each_execution_it_exits(rig, capsys):
+    from scripts.hive import presence
+
+    assert rig.first.spoke.poll() == "started"
+    rig.hub.run_once()
+    advance(rig, T0 + presence.TTL_MS + 10_000)
+    assert capsys.readouterr().err.splitlines() == [
+        "hub: hive hive-a of swarm rig lost; exited execution execution-a of task task"
+    ]
+
+
+def test_a_beating_hive_logs_no_loss(rig, capsys):
+    from scripts.hive import presence
+
+    assert rig.first.spoke.poll() == "started"
+    rig.hub.run_once()
+    advance(rig, T0 + 4 * presence.TTL_MS, beating=["hive-a"])
+    assert capsys.readouterr().err == ""
+
+
 def test_a_start_that_already_exited_is_dropped_without_an_exit(rig):
     from scripts.hive import presence
     from scripts.hub import hive_loss
