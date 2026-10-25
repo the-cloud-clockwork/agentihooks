@@ -285,3 +285,34 @@ def test_wait_times_out_red_when_a_planned_shard_never_finishes(tmp_path):
     ):
         ci_gate_shards.watch("org/repo", "123", "2", [1], tmp_path)
     sleep.assert_called_once_with(5)
+
+
+@pytest.mark.parametrize("conclusion", ["failure", "cancelled", "timed_out", "skipped"])
+def test_nonqueue_verification_rejects_a_terminal_failed_original_without_waiting_for_recovery(tmp_path, conclusion):
+    jobs = [{"name": "unit (3.12, 1)", "status": "completed", "conclusion": conclusion}]
+    with (
+        patch.object(ci_gate_shards, "fetch"),
+        patch.object(ci_gate_shards, "api", return_value=[{"jobs": jobs}]),
+        patch.object(ci_gate_shards.time, "sleep", side_effect=AssertionError("must not wait")),
+        pytest.raises(RuntimeError, match="unit \\(3.12, 1\\)"),
+    ):
+        ci_gate_shards.watch("org/repo", "123", "2", [1], tmp_path, recover=False)
+
+
+@pytest.mark.parametrize("event", ["pull_request", "push", "workflow_dispatch", "merge_group"])
+def test_the_workflow_waits_for_recovery_only_in_the_queue(event):
+    with (
+        patch.dict(
+            ci_gate_shards.os.environ,
+            {
+                "GITHUB_EVENT_NAME": event,
+                "GITHUB_REPOSITORY": "org/repo",
+                "GITHUB_RUN_ID": "123",
+                "GITHUB_RUN_ATTEMPT": "2",
+                "SHARDS": "[1]",
+            },
+        ),
+        patch.object(ci_gate_shards, "watch") as watch,
+    ):
+        ci_gate_shards.main()
+    assert watch.call_args.kwargs == {"recover": event == "merge_group"}

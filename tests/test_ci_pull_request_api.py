@@ -274,6 +274,13 @@ def test_the_reuse_factory_exemption_contains_only_command_replacements():
         source = path.read_text()
         functions = {node.name: node for node in ast.parse(source).body if isinstance(node, ast.FunctionDef)}
         for name in names:
+            if path == ROOT / "scripts/ci_gate_queue.py":
+                assert name == "watcher"
+                assert len(functions[name].body) == 1
+                assert isinstance(functions[name].body[0], ast.Return)
+                assert isinstance(functions[name].body[0].value, ast.Dict)
+                assert not any(isinstance(node, ast.Call) for node in ast.walk(functions[name]))
+                continue
             calls = [
                 node
                 for node in ast.walk(functions[name])

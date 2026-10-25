@@ -205,20 +205,24 @@ def test_protected_grading_accepts_the_exact_early_pair_and_rejects_any_weakened
     from datetime import date
     from pathlib import Path
 
-    from scripts import ci_wiring, gate_protected
+    import json
 
+    from scripts import ci_runner_trust, ci_wiring, gate_protected
+
+    root = Path(__file__).resolve().parents[1]
+    policy = json.loads((root / ci_runner_trust.ACTORS).read_text())
     workflows, config = gate_protected.load(Path(__file__).resolve().parents[1], "HEAD")
     candidate = copy.deepcopy(workflows)
     jobs = candidate["test.yml"]["jobs"]
     jobs["gate-required"]["name"] = ci_gate_queue.SUMMARY_NAME
     jobs["queue-fail-fast"] = ci_gate_queue.watcher(jobs["gate-required"]["runs-on"])
     today = date(2026, 10, 25)
-    assert gate_protected.grade(workflows, config, candidate, config, today) == []
+    assert gate_protected.grade(workflows, config, candidate, config, today, policy) == []
     assert ci_wiring.check(candidate, config, today) == []
     for field, value in [("needs", []), ("steps", []), ("if", "true")]:
         changed = copy.deepcopy(candidate)
         changed["test.yml"]["jobs"]["queue-fail-fast"][field] = value
-        assert gate_protected.grade(workflows, config, changed, config, today)
+        assert gate_protected.grade(workflows, config, changed, config, today, policy)
         assert ci_wiring.check(changed, config, today)
 
 
@@ -285,7 +289,7 @@ def test_missing_jobs_timeout_and_an_api_failure_never_claims_success(monkeypatc
         ci_gate_queue, "api", lambda endpoint: [[{"ref": "refs/queue", "object": {"sha": "head"}}]], raising=False
     )
     monkeypatch.setattr(ci_gate_queue, "read_jobs", lambda endpoint: [], raising=False)
-    clock = iter([0, 0, 1201])
+    clock = iter([0, 0, 1200])
     monkeypatch.setattr(ci_gate_queue.time, "monotonic", lambda: next(clock))
     monkeypatch.setattr(ci_gate_queue.time, "sleep", lambda seconds: None)
     with pytest.raises(TimeoutError):
@@ -355,3 +359,24 @@ def test_watch_checks_queue_identity_again_after_every_gate_passed(monkeypatch):
     monkeypatch.setattr(ci_gate_queue, "read_jobs", lambda endpoint: complete(), raising=False)
     with pytest.raises(ValueError):
         ci_gate_queue.watch("owner/repo", "123", "2", [2, 7], "refs/queue", "head")
+
+
+def test_reuse_resolves_the_watcher_nonqueue_name_as_well_as_the_required_context():
+    from scripts import ci_reuse
+
+    workflow = {
+        "jobs": {
+            "gate-required": {"name": ci_gate_queue.SUMMARY_NAME, "needs": ["unit", "queue-fail-fast"]},
+            "unit": {},
+            "queue-fail-fast": {"name": ci_gate_queue.GATE_NAME},
+        }
+    }
+    jobs = [{"name": name, "conclusion": "success"} for name in ["Gate — Required", "unit", "queue-fail-fast"]]
+    assert ci_reuse._passed(workflow, jobs)
+
+
+@pytest.mark.parametrize("shards", [[], [2, 2], [True]])
+def test_watch_rejects_an_invalid_plan_before_any_api_read(monkeypatch, shards):
+    monkeypatch.setattr(ci_gate_queue, "api", lambda endpoint: (_ for _ in ()).throw(AssertionError("must not read")))
+    with pytest.raises(ValueError):
+        ci_gate_queue.watch("owner/repo", "123", "2", shards, "refs/queue", "head")
