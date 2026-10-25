@@ -1,5 +1,6 @@
 /.github/ @nestorcolt
 /.semgrep/ @nestorcolt
+/.semgrep-guards/ @nestorcolt
 /scripts/ci_mutation/ @nestorcolt
 /scripts/ci_*.py @nestorcolt
 /scripts/ci_reuse_job.yml @nestorcolt

@@ -1,0 +1,38 @@
+rules:
+  - id: guard-except-returns-allow
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A guard that raises BlockAction returns from an exception handler, so a crash inside the guard lets the tool
+      call through unchecked. Raise BlockAction from the handler, or let the error propagate.
+    patterns:
+      - pattern-inside: |
+          def $GUARD(...):
+              ...
+              raise BlockAction(...)
+              ...
+      - pattern-either:
+          - pattern: |
+              try:
+                  ...
+              except $EXC:
+                  ...
+                  return
+          - pattern: |
+              try:
+                  ...
+              except $EXC:
+                  ...
+                  return $RESULT
+          - pattern: |
+              try:
+                  ...
+              except $EXC as $ERROR:
+                  ...
+                  return
+          - pattern: |
+              try:
+                  ...
+              except $EXC as $ERROR:
+                  ...
+                  return $RESULT

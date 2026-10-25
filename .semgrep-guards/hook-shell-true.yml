@@ -1,0 +1,12 @@
+rules:
+  - id: hook-shell-true
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A hook runs a command through a shell, so quoting in a tool input can change what runs. Pass an argument list
+      to subprocess without shell=True.
+    pattern-either:
+      - pattern: subprocess.$CALL(..., shell=True, ...)
+      - pattern: os.system(...)
+      - pattern: os.popen(...)
+      - pattern: asyncio.create_subprocess_shell(...)

@@ -173,6 +173,7 @@ def test_no_script_a_step_runs_calls_the_api():
         "scripts/ci_mutation/plan.py",
         "scripts/ci_mutation/reuse.py",
         "scripts/ci_release.sh",
+        "scripts/ci_semgrep_floors.py",
         "scripts/ci_unit_rerun.py",
         "scripts/ci_wiring.py",
         "scripts/hive/nats_grant.py",

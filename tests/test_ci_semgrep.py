@@ -66,6 +66,21 @@ def test_charts_run_the_chart_timer_guard():
     assert (_ROOT / "tests/ci_charts/chart_timers.py").is_file()
 
 
+def test_charts_grade_the_guard_rules_against_the_base_floors():
+    steps = _jobs()["charts"]["steps"]
+    install = next(step for step in steps if step.get("name") == "Install PyYAML and Semgrep")
+    guard = next(
+        step for step in steps if step.get("name") == "Guard rules hold on their fixtures and at their computed floors"
+    )
+    assert install["run"] == "python -m pip install pyyaml==6.0.2 semgrep==1.177.0"
+    assert guard["env"] == {"BASE": "${{ inputs.base }}"}
+    assert guard["run"].splitlines() == [
+        'git fetch --no-tags --depth=1 origin "${BASE#origin/}"',
+        "python -m scripts.ci_semgrep_floors check --base FETCH_HEAD",
+    ]
+    assert steps.index(install) < steps.index(guard) < len(steps) - 1
+
+
 def test_no_semgrep_job_or_step_can_pass_on_a_skip_or_an_error():
     jobs = _jobs()
     assert not {"if", "continue-on-error"} & (set(jobs["scan"]) | set(jobs["charts"]))
