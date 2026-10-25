@@ -188,6 +188,10 @@ def left(seat, doc: dict) -> bool:
     return seat.name not in members and launch_check.joined_at(seat, doc) is not None
 
 
+class _NoTriggers(Exception):
+    pass
+
+
 def _launch_triggers(store, found):
     inbox = InboxStore(store.redis)
     live = []
@@ -210,12 +214,20 @@ def _spawn(slug, config, store, runtime, found, now_ms):
     from scripts.swarm import tick
 
     def prepare(record):
-        return tick.primed(store, slug, record.seat, {"id": SEAT, "title": "Dispatch", "triggers": found})
+        nonlocal found
+        task = tick.primed(store, slug, record.seat, {"id": SEAT, "title": "Dispatch", "triggers": found})
+        found = _launch_triggers(store, found)
+        if not found:
+            raise _NoTriggers
+        task["triggers"] = found
+        return task
 
     try:
         record, placed = seat_spawn.place(slug, config, store, runtime, LANE, now_ms, prepare)
     except seat_spawn.SeatFailed as failed:
         store.drop_agent(slug, failed.record.name)
+        if isinstance(failed.error, _NoTriggers):
+            return []
         return [f"dispatcher spawn failed: {failed.error}"]
     store.put_agent(slug, tick.placed_record(record, placed))
     _sent(store, slug, found)

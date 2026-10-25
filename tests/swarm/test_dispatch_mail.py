@@ -234,7 +234,8 @@ def test_a_failed_consumer_launch_retries_without_losing_accepted_mail(mailbox, 
 
 @pytest.mark.parametrize("disposition", ["missing", "done", "cancel"])
 @pytest.mark.parametrize("remaining", ["none", "mail", "priority"])
-def test_launch_rechecks_mail_after_capacity_checks(mailbox, monkeypatch, capsys, disposition, remaining):
+@pytest.mark.parametrize("boundary", ["capacity", "prepare"])
+def test_launch_rechecks_mail_after_capacity_checks(mailbox, monkeypatch, capsys, disposition, remaining, boundary):
     store, inbox = mailbox
     runtime = FakeRuntime()
     assert cli.main(["send", f"dispatcher@{SLUG}", "Consider obsolete evidence"]) == 0
@@ -252,7 +253,19 @@ def test_launch_rechecks_mail_after_capacity_checks(mailbox, monkeypatch, capsys
             inbox.close(stale, "former", disposition, "Evidence considered; ranking unchanged")
         return ""
 
-    monkeypatch.setattr(dispatch_seat.seat_spawn, "host_hold", settle_mail)
+    if boundary == "capacity":
+        monkeypatch.setattr(dispatch_seat.seat_spawn, "host_hold", settle_mail)
+    else:
+        from scripts.swarm import tick
+
+        primed = tick.primed
+
+        def settle_during_prepare(*args):
+            task = primed(*args)
+            settle_mail()
+            return task
+
+        monkeypatch.setattr(tick, "primed", settle_during_prepare)
     ledger = doc() if remaining != "priority" else doc(priority("p1"))
     if remaining == "priority":
         expected = ["p1"]
