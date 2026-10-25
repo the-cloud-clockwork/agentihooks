@@ -23,6 +23,11 @@ ACL_CATEGORIES = ("+@all", "-@admin", "-@dangerous")
 WORKER_KEYS = (
     "swarm:*:agents",
     "swarm:*:executions",
+    "swarm:*:execution-publishing",
+    "swarm:*:codex-transport",
+    "swarm:*:codex-endpoints",
+    "swarm:*:codex-openings",
+    "swarm:*:codex-viewers",
     "swarm:*:identity-conflicts",
     "swarm:*:desired-routes",
     "swarm:*:state-since",

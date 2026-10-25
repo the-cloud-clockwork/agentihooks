@@ -13,6 +13,7 @@ from pathlib import Path
 from scripts import codex_router, profile_telemetry, select_profile
 from scripts.codex_session import supervisor
 from scripts.codex_session.binding import BindingError
+from scripts.profiles import binding
 from scripts.routing import codex_api, envs
 from scripts.swarm.store import AgentRecord, SwarmError, connect
 
@@ -98,6 +99,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--exclude", default="")
     parser.add_argument("--report", default="")
     parser.add_argument("--previous-execution", default="")
+    parser.add_argument("--execution", default="")
     parser.add_argument("--resume", default="")
     parser.add_argument("--prompt-file", default="")
     parser.add_argument("--startup-timeout", type=float, default=supervisor.STARTUP_TIMEOUT_S)
@@ -138,6 +140,7 @@ def prepare(args: argparse.Namespace, agent_args: list[str], environ: dict[str, 
         environ=child,
         server_args=(*provider_args(account), *server_args),
         previous_execution_id=args.previous_execution,
+        execution_id=args.execution,
         resume_thread=args.resume,
         opening=_opening(args.prompt_file),
         account_type=account_type(account, route),
@@ -167,6 +170,8 @@ def main(
         started = supervisor.launch(store, spec, deps or supervisor.Deps())
     except (supervisor.LaunchFailure, SwarmError, BindingError) as exc:
         print(f"agentihooks codex-session: launch refused: {exc}", file=sys.stderr)
+        if spec.environ.get(binding.REPORT):
+            binding.refuse(Path(spec.environ[binding.REPORT]), f"codex-session launch refused: {exc}")
         return 3
     record = started.record
     print(

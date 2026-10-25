@@ -239,3 +239,10 @@ def test_take_passes_its_timeout_to_the_queue():
 
     assert readiness.take(Queue(), snapshot(doc([])), 250) is None
     assert seen == [250]
+
+
+def test_take_with_no_snapshot_returns_the_first_offer_for_the_hub_to_check(bus):
+    readiness.publish(bus, snapshot(doc([task("a"), task("b")])), NOW)
+    queue = bus.queue(readiness.queue_name(SLUG, "eng"), QueuePolicy())
+    delivery = readiness.take(queue, lambda: None, 0)
+    assert delivery.event.key == "a"

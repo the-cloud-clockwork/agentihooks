@@ -646,12 +646,13 @@ def cmd_prober(store, args):
 def cmd_spoke(store, args):
     from scripts.events import factory
     from scripts.events.config import BusConfig
-    from scripts.hive import workstation
+    from scripts.hive import lanes, workstation
     from scripts.swarm import commands
     from scripts.swarm_v2.runtime.local import LocalHerdrRuntime
 
     if workstation.runs_engine(os.environ):
         raise SwarmError(workstation.ENGINE_RUNS)
+    lanes.serve(os.environ)
     bus = factory.open_bus(replace(BusConfig.from_environ(os.environ), provision=False))
     try:
         workstation.run(store, bus, LocalHerdrRuntime(HerdrRuntime()), commands.hive_id())
@@ -1674,6 +1675,7 @@ def cmd_merge(store, args):
                 args.url,
                 admit=lambda head: _queue_intent(store, args, agent, head) or queue_exit.require_fresh(args.url, head),
                 journal=queue_record.Journal(args.url),
+                attempts=merge_queue.ATTEMPTS,
             )
         else:
             result = merge_queue.operate(args.action, args.url, journal=queue_record.Journal(args.url))
