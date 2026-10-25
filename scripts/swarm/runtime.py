@@ -6,9 +6,11 @@ import os
 import shutil
 import subprocess
 import sys
+import threading
 import time
 import uuid
 from collections.abc import Callable
+from contextlib import contextmanager
 from dataclasses import replace
 from pathlib import Path
 
@@ -323,6 +325,14 @@ class HerdrRuntime:
         self.end, self.reap = reaper.retire, reaper.reap
         self._quota_previous = {}
         self._host_spent = capacity.no_spawns
+        self._reserving = threading.Lock()
+
+    def launch_room(self, config):
+        if not hasattr(self, "_quota_accounts"):
+            return 1
+        from scripts.swarm.capacity import free_seats
+
+        return sum(free_seats(row) for row in self._quota_open(""))
 
     def has_capacity(self, config):
         environ = dict(os.environ)
@@ -612,12 +622,27 @@ class HerdrRuntime:
             row = next(row for row in eligible if row.name == seat.account)
         return row
 
-    def _reserve_account(self, account, lane, agent):
+    def _claim_account(self, agent, preferred, lane):
+        with self._reserving:
+            account = self._quota_account(agent, preferred, None, lane)
+            self._reserve_account(account, lane, agent)
+        return account
+
+    @contextmanager
+    def _seat_returned_on_failure(self, account, lane, agent):
+        try:
+            yield
+        except BaseException:
+            with self._reserving:
+                self._reserve_account(account, lane, agent, -1)
+            raise
+
+    def _reserve_account(self, account, lane, agent, seats=1):
         if account is not None:
             if lane in getattr(self, "_quota_allocations", {}):
-                self._quota_allocations[lane][agent] -= 1
+                self._quota_allocations[lane][agent] -= seats
             self._quota_accounts = [
-                replace(row, sessions=row.sessions + 1)
+                replace(row, sessions=row.sessions + seats)
                 if (row.harness, row.name) == (account.harness, account.name)
                 else row
                 for row in self._quota_accounts
@@ -752,31 +777,29 @@ class HerdrRuntime:
         rc = remote_control.decision(lane, agent, route_kind, config.slug, login) if front else {}
         account = None
         if hasattr(self, "_quota_accounts") and route_kind != "interactive":
-            account = self._quota_account(
-                agent, saved.get("account") or self.planned_account(task["id"], agent), None, lane
-            )
+            account = self._claim_account(agent, saved.get("account") or self.planned_account(task["id"], agent), lane)
             route = ["--route", account.name]
-        placed = self._account_launch(
-            config,
-            lane,
-            task,
-            name,
-            [
-                *argv,
-                "--",
-                *route,
-                *remote_control.arguments(rc),
-                *_model_args(
-                    agent,
-                    picked.__dict__,
-                    environ,
-                    effort_range.bounds(config, lane),
-                    preserve=preserves_effort(bool(saved), lane),
-                ),
-                *mode,
-            ],
-        )
-        self._reserve_account(account, lane, agent)
+        with self._seat_returned_on_failure(account, lane, agent):
+            placed = self._account_launch(
+                config,
+                lane,
+                task,
+                name,
+                [
+                    *argv,
+                    "--",
+                    *route,
+                    *remote_control.arguments(rc),
+                    *_model_args(
+                        agent,
+                        picked.__dict__,
+                        environ,
+                        effort_range.bounds(config, lane),
+                        preserve=preserves_effort(bool(saved), lane),
+                    ),
+                    *mode,
+                ],
+            )
         placed = codex.complete(config, name, placed, self._terminate)
         placed_kind = "api" if placed.account == "api" else route_kind
         return replace(

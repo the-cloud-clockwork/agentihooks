@@ -11,9 +11,6 @@ QUERY = """query($owner: String!, $name: String!, $branch: String!) {
     }
   }
 }"""
-HEAD = """query($url: URI!) { resource(url: $url) { ... on PullRequest {
-  state headRefName isCrossRepository repository { nameWithOwner }
-} } }"""
 
 
 def github(remote: str) -> tuple[str, str] | None:
@@ -22,18 +19,6 @@ def github(remote: str) -> tuple[str, str] | None:
         return None
     owner, name = parsed.path.strip("/").removesuffix(".git").split("/")
     return owner, name
-
-
-def open_head(remote: str, url: str) -> str:
-    repository = github(remote)
-    if repository is None or not url:
-        return ""
-    pull = merge_queue.graphql(HEAD, {"url": url})["resource"] or {}
-    if pull.get("state") != "OPEN" or pull["isCrossRepository"]:
-        return ""
-    if pull["repository"]["nameWithOwner"].lower() != "/".join(repository).lower():
-        return ""
-    return pull["headRefName"]
 
 
 def require_unqueued(remote: str, branch: str) -> None:
