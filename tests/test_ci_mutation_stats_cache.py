@@ -1070,3 +1070,66 @@ def test_measured_stats_trace_every_covered_source_in_one_walk(tmp_path, monkeyp
     (root / "scripts/shared_helper.py").write_text("value = 2\n")
     stats_cache.collect_cached_stats(root, cache, {}, files, [], collect)
     assert calls == [files, files]
+
+
+def test_statistics_cache_reuses_shared_coverage_walks_and_preserves_every_record(tmp_path, monkeypatch, capsys):
+    import json
+    from time import perf_counter
+
+    from scripts.ci_mutation import stats_cache
+    from scripts.ci_mutation.stats_dependencies import StoredStats
+
+    root = tmp_path / "repo"
+    sources = [f"scripts/source_{index}.py" for index in range(100)]
+    files = [f"tests/test_source_{index}.py" for index in range(20)]
+    imports = "".join(f"import scripts.source_{index}\n" for index in range(100))
+    _repository(root, {**dict.fromkeys(sources, imports), **dict.fromkeys(files, "def test_value():\n    pass\n")})
+    nodes = [path + "::test_value" for path in files]
+    fresh = [
+        {
+            "status": 0,
+            "tests": {"sample.x_value": nodes},
+            "durations": dict.fromkeys(nodes, 1),
+            "cpu": 20,
+            "dependencies": dict.fromkeys(nodes, sources),
+        }
+    ]
+    timings = {}
+    walks = []
+
+    def timed(name, function):
+        def call(*args, **kwargs):
+            start = perf_counter()
+            try:
+                return function(*args, **kwargs)
+            finally:
+                timings[name] = timings.get(name, 0) + perf_counter() - start
+
+        return call
+
+    trace = stats_cache.test_inputs
+
+    def trace_inputs(root, paths, *args):
+        if isinstance(paths, list):
+            walks.append(paths)
+        return trace(root, paths, *args)
+
+    monkeypatch.setattr(stats_cache, "per_test_stats", timed("slicing", stats_cache.per_test_stats))
+    monkeypatch.setattr(stats_cache, "test_inputs", timed("inputs", trace_inputs))
+    monkeypatch.setattr(StoredStats, "save", timed("persistence", StoredStats.save))
+    cache = tmp_path / "cache"
+    start = perf_counter()
+    stats_cache.collect_cached_stats(root, cache, {}, files, [], lambda chosen: fresh)
+    timings["total"] = perf_counter() - start
+    print("Statistics processing seconds:", json.dumps(timings, sort_keys=True))
+    records = [json.loads(path.read_text()) for path in cache.glob("*.json")]
+    assert len(records) == len(files)
+    by_node = {next(iter(record["durations"])): record for record in records}
+    for path, node in zip(files, nodes):
+        record = by_node[node]
+        assert record["durations"] == {node: 1}
+        assert record["tests"] == {"sample.x_value": [node]}
+        assert record["cpu"] == 1
+        assert set(record["inputs"]) == {path, *sources}
+        assert record["dependencies"] == {node: sources}
+    assert len(walks) == 1, capsys.readouterr().out
