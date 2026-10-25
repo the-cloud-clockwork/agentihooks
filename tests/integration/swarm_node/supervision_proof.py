@@ -21,18 +21,18 @@ def docker(*args, timeout=30):
     return subprocess.check_output(["docker", *args], text=True, timeout=timeout, stderr=subprocess.STDOUT).strip()
 
 
-def state(container, timeout=30):
-    return json.loads(docker("inspect", "--format", "{{json .State}}", container, timeout=timeout))
+def state(container):
+    return json.loads(docker("inspect", "--format", "{{json .State}}", container))
 
 
 def exit_code(container, timeout):
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        observed = state(container, timeout=max(deadline - time.monotonic(), 0.1))
-        if not observed["Running"]:
-            return observed["ExitCode"]
-        time.sleep(0.2)
-    raise subprocess.TimeoutExpired(["docker", "wait", container], timeout)
+    try:
+        return int(docker("wait", container, timeout=timeout))
+    except subprocess.TimeoutExpired:
+        observed = state(container)
+        if observed["Running"]:
+            raise
+        return observed["ExitCode"]
 
 
 def snapshot(container):
