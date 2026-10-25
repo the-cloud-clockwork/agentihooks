@@ -415,8 +415,10 @@ def _timed_spawn(tmp_path, monkeypatch, lane, defer):
     seen = {"canary_s": 0}
 
     def run_init(argv, **kwargs):
-        seen["argv"] = argv
         started = "status=started\nroute_status=routed\naccount=acct\n"
+        if "init-agent" not in argv:
+            return SimpleNamespace(returncode=0, stdout=started, stderr="")
+        seen["argv"] = argv
         if "--defer-canary" in _launcher_flags(argv):
             pending = f"profile_validation=pending\nprofile_report={tmp_path / 'report.json'}\n"
             return SimpleNamespace(returncode=0, stdout=started + pending, stderr="")
