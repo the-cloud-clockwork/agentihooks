@@ -519,6 +519,20 @@ def test_a_failed_poll_is_logged_with_its_swarm_lane_and_error(monkeypatch, caps
     assert "hive spoke for swarm rig lane eng poll failed (RuntimeError: unavailable)" in capsys.readouterr().err
 
 
+def test_failed_work_and_a_failed_attempt_check_are_logged_before_the_nack(rig, capsys):
+    from unittest.mock import PropertyMock
+
+    rig.tasks.request.side_effect = [RuntimeError("unavailable"), rig.request]
+    assert rig.spoke.poll() == "retry"
+    assert "poll failed (RuntimeError: unavailable)" in capsys.readouterr().err
+
+    delivery = Mock()
+    type(delivery).attempt = PropertyMock(side_effect=[RuntimeError("attempt unreadable"), 1])
+    assert rig.spoke._retry(delivery) == "retry"
+    delivery.nak.assert_called_once()
+    assert "poll failed (RuntimeError: attempt unreadable)" in capsys.readouterr().err
+
+
 def test_claim_and_pending_ownership_are_visible_before_request_loading(rig):
     from scripts.hive.spoke import Spoke
 

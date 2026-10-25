@@ -93,6 +93,7 @@ class Spoke:
             heartbeat.check()
             return self._apply(delivery, heartbeat)
         except Exception:
+            self._failed()
             return self._retry(delivery)
 
     def _retry(self, delivery: Delivery) -> str:
@@ -100,7 +101,7 @@ class Spoke:
             if delivery.attempt >= self.config.policy.max_deliver:
                 return self._exhaust(delivery)
         except Exception:
-            pass
+            self._failed()
         steps = self.config.policy.backoff_ms or (self.config.policy.ack_wait_ms,)
         delivery.nak(steps[min(delivery.attempt - 1, len(steps) - 1)])
         return "retry"
