@@ -120,7 +120,7 @@ def test_repeated_remote_identities_are_unknown(cursors, repeat_page):
 
 @pytest.mark.parametrize(
     "pages,total",
-    [([41], 44), ([100, 100, 8], 209), ([100, 19], 123), ([100, 0], 104)],
+    [([41], 44), ([99], 100), ([100, 100, 8], 209), ([100, 19], 123), ([100, 0], 104)],
 )
 def test_final_short_page_completes_listing_when_langfuse_total_exceeds_rows(cursors, pages, total):
     from scripts.doctor import observation_reconciliation
