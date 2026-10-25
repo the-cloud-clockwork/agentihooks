@@ -287,6 +287,67 @@ def test_nested_suite_classes_keep_the_full_test_node_id(mapped_repo):
     assert feature_map.validate(root, path) == 1
 
 
+def test_live_check_default_selects_the_latest_completed_pull_request_run(tmp_path):
+    gh = tmp_path / "gh"
+    gh.write_text(
+        f"#!{sys.executable}\nimport json, sys\n"
+        'if "/workflows/test.yml/runs?" in sys.argv[2]:\n'
+        '    assert sys.argv[1:] == ["api", "repos/the-cloud-clockwork/agentihooks/actions/workflows/test.yml/runs?event=pull_request&status=completed&per_page=1", "--jq", \' .workflow_runs[0].id // error("No completed pull request Tests run")\'.strip()]\n'
+        '    print("123")\nelse:\n'
+        '    assert sys.argv[1:] == ["api", "repos/the-cloud-clockwork/agentihooks/actions/runs/123/jobs?per_page=100", "--paginate"]\n'
+        '    print(json.dumps({"jobs": [{"conclusion": "success", "steps": [{"name": "Operator feature regressions and passing fixtures", "conclusion": "success"}]}]}))\n'
+    )
+    gh.chmod(0o755)
+    script = Path(__file__).resolve().parents[1] / "scripts/feature_checks/semgrep-feature-tests.sh"
+    result = subprocess.run(
+        ["bash", str(script)],
+        env={**os.environ, "PATH": f"{tmp_path}:{os.environ['PATH']}"},
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "true"
+
+
+def test_support_modules_and_constants_do_not_hide_feature_tests(mapped_repo):
+    root, path, _ = mapped_repo
+    (root / "tests/aaa_support.py").write_text("VALUE = 1\n")
+    source = root / "tests/test_login.py"
+    source.write_text("VALUE = 1\n" + source.read_text())
+    assert feature_map.validate(root, path) == 1
+
+
+def test_a_suffix_named_suite_node_can_be_mapped(mapped_repo):
+    root, path, entry = mapped_repo
+    (root / "tests/test_login.py").rename(root / "tests/login_test.py")
+    entry["behaviour_test"] = "tests/login_test.py::test_shared"
+    path.write_text(json.dumps({"features": [entry]}))
+    assert feature_map.validate(root, path) == 1
+
+
+def test_a_class_with_new_is_not_a_suite_test(mapped_repo):
+    root, path, entry = mapped_repo
+    (root / "tests/test_login.py").write_text(
+        "import pytest\nclass TestLogin:\n    def __new__(cls):\n        pass\n"
+        '    @pytest.mark.feature("login")\n    def test_shared(self):\n        pass\n'
+    )
+    entry["behaviour_test"] = "tests/test_login.py::TestLogin::test_shared"
+    path.write_text(json.dumps({"features": [entry]}))
+    with pytest.raises(ValueError, match="missing behaviour test"):
+        feature_map.validate(root, path)
+
+
+@pytest.mark.parametrize("marker", ["None", "17", '""', '"  "'])
+def test_a_feature_marker_cannot_discard_its_ownership(mapped_repo, marker):
+    root, path, _ = mapped_repo
+    (root / "tests/test_orphan.py").write_text(
+        f"import pytest\n@pytest.mark.feature({marker})\ndef test_other():\n    pass\n"
+    )
+    with pytest.raises(ValueError, match="feature marker requires an id"):
+        feature_map.validate(root, path)
+
+
 @pytest.mark.parametrize(
     ("jobs", "success"),
     [
