@@ -40,6 +40,34 @@ def complete():
     ]
 
 
+@pytest.mark.parametrize("conclusion", ["success", "failure", "cancelled", "skipped"])
+def test_parallel_split_replaces_only_the_serial_split_grade(conclusion):
+    jobs = complete()
+    next(job for job in jobs if job["name"] == "split")["conclusion"] = "skipped"
+    jobs.append({"id": 1000, "name": "queue-split (3.12)", "status": "completed", "conclusion": conclusion})
+    if conclusion == "success":
+        assert ci_gate_queue.verify(jobs, [2, 7])
+    else:
+        with pytest.raises(ValueError, match="queue-split"):
+            ci_gate_queue.verify(jobs, [2, 7])
+
+
+@pytest.mark.parametrize("state", ["missing", "queued", "in_progress", "duplicate"])
+def test_parallel_split_cannot_pass_without_one_completed_producer(state):
+    jobs = complete()
+    next(job for job in jobs if job["name"] == "split")["conclusion"] = "skipped"
+    producer = {"id": 1000, "name": "queue-split (3.12)", "status": "completed", "conclusion": "success"}
+    if state != "missing":
+        jobs.append(dict(producer, status=state if state != "duplicate" else "completed"))
+    if state == "duplicate":
+        jobs.append(dict(producer, id=1001))
+    if state in {"missing", "duplicate"}:
+        with pytest.raises(ValueError):
+            ci_gate_queue.verify(jobs, [2, 7])
+    else:
+        assert ci_gate_queue.verify(jobs, [2, 7]) is False
+
+
 def test_complete_queue_waits_for_the_shard_judge_and_every_inventory_row():
     jobs = complete()
     assert ci_gate_queue.verify(jobs, [2, 7])
