@@ -211,7 +211,7 @@ def test_inventory_refuses_conflicting_ready_ownership(buses, command):
     assert str(error.value) == "legacy ready queue ownership differs from its stream name"
 
 
-@pytest.mark.parametrize("change", ["pending", "new_offer", "unreadable"])
+@pytest.mark.parametrize("change", ["pending", "new_offer", "new_consumed", "unreadable"])
 def test_incomplete_move_reports_failure_and_unknown_counts(buses, command, monkeypatch, capsys, change):
     from nats.js.client import JetStreamContext
     from nats.js.errors import APIError
@@ -231,8 +231,11 @@ def test_incomplete_move_reports_failure_and_unknown_counts(buses, command, monk
         if change == "pending":
             return
         migrate(bus, swarm, name, policy)
-        if change == "new_offer":
+        if change in ("new_offer", "new_consumed"):
             source.offer(Envelope("two", "task.ready", "doctor", "task", "two", 1, 0, "hub", {}))
+            if change == "new_consumed":
+                delivery = source.take(1000)
+                source._loop.run(delivery._msg.ack_sync())
         else:
             monkeypatch.setattr(JetStreamContext, "stream_info", unavailable)
             raise RuntimeError("original move interrupted")
@@ -243,6 +246,7 @@ def test_incomplete_move_reports_failure_and_unknown_counts(buses, command, monk
     expected = {
         "pending": (0, 1, "legacy ready queue changed during migration"),
         "new_offer": (None, 1, "legacy ready queue changed during migration"),
+        "new_consumed": (None, 0, "legacy ready queue changed during migration"),
         "unreadable": (None, None, "original move interrupted"),
     }
     kept, remaining, message = expected[change]
