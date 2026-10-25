@@ -159,9 +159,9 @@ def _reminder_text(environ):
 
 
 def reply_refusal(payload, environ=None):
-    """The refusal of a final reply over the word limit while the operator is away, once per stop."""
+    """The refusal of a final reply over the word limit while the operator is away, retries included."""
     session_id = payload.get("session_id")
-    if payload.get("stop_hook_active") or not _away(session_id, environ, None):
+    if not _away(session_id, environ, None):
         return ""
     count = len(MARKER.sub(" ", str(payload.get("last_assistant_message") or "")).split())
     words = _limit(environ)

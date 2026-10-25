@@ -676,7 +676,7 @@ def test_operator_on_lifts_the_limit_and_operator_off_restores_it():
     assert operator_mode.reply_refusal({"session_id": "s1", "last_assistant_message": LONG}, WORKSTATION) != ""
 
 
-def test_the_reply_limit_reads_the_environment_and_skips_markers_and_repeat_stops():
+def test_the_reply_limit_reads_the_environment_skips_markers_and_checks_retries():
     env = {**WORKSTATION, "AGENTIHOOKS_OPERATOR_OFF_MAX_WORDS": "3"}
     marker = "<!-- @lesson -->\none two three four\n<!-- @/lesson -->"
     assert operator_mode.reply_refusal({"session_id": "s1", "last_assistant_message": "one two three"}, env) == ""
@@ -684,7 +684,8 @@ def test_the_reply_limit_reads_the_environment_and_skips_markers_and_repeat_stop
     refused = operator_mode.reply_refusal({"session_id": "s1", "last_assistant_message": "a b c d"}, env)
     assert refused.startswith("Operator not present: this reply has 4 words, over the 3 word limit.")
     repeat = {"session_id": "s1", "last_assistant_message": "a b c d", "stop_hook_active": True}
-    assert operator_mode.reply_refusal(repeat, env) == ""
+    assert operator_mode.reply_refusal(repeat, env) == refused
+    assert operator_mode.reply_refusal({**repeat, "last_assistant_message": "a b c"}, env) == ""
     assert operator_mode.reply_refusal({"session_id": "", "last_assistant_message": "a b c d"}, env) == ""
     assert operator_mode.reply_refusal({"session_id": "s1"}, env) == ""
 
