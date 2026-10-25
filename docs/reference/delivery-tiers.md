@@ -893,8 +893,8 @@ The timeline endpoint confirms removal times; it need not expose the removal rea
 For a new suspected runner outage, also preserve the runner Pod's events while they remain available. Set the namespace to the runner's actual namespace and the Pod to the name returned by the jobs API:
 
 ```bash
-RUNNER_NAMESPACE=<runner namespace>
-RUNNER_POD=<runner pod name>
+RUNNER_NAMESPACE='<runner namespace>'
+RUNNER_POD='<runner pod name>'
 kubectl get pod "$RUNNER_POD" -n "$RUNNER_NAMESPACE" -o wide
 kubectl get events -n "$RUNNER_NAMESPACE" \
   --field-selector "involvedObject.kind=Pod,involvedObject.name=$RUNNER_POD" \
