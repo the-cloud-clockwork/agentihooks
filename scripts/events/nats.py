@@ -347,6 +347,7 @@ class NatsStateStore:
         self._loop = loop
         self._js = js
         self._bucket = bucket
+        self._swept = None
         self._kv = loop.run(
             js.create_key_value(bucket=bucket, history=KV_HISTORY) if provision else js.key_value(bucket)
         )
@@ -383,6 +384,15 @@ class NatsStateStore:
             await nats_payload.discard(self._js, f"KV_{self._bucket}", f"$KV.{self._bucket}.", value)
             raise StateConflict(conflict) from err
         await self._reclaim(key, revision)
+        if now := nats_payload.due(self._swept):
+            self._swept = now
+            await nats_payload.sweep(
+                self._js,
+                f"KV_{self._bucket}",
+                f"$KV.{self._bucket}.",
+                lambda name: self._history(f"$KV.{self._bucket}.{name}"),
+                now,
+            )
         return revision
 
     async def _reclaim(self, key: str, below: int) -> None:
