@@ -6,7 +6,6 @@ import re
 import subprocess
 import sys
 import tarfile
-import textwrap
 import tomllib
 from importlib.metadata import entry_points
 from pathlib import Path
@@ -22,7 +21,7 @@ from tests.refresh_durations import ci_run_ids, ci_samples, median_durations
 pytestmark = pytest.mark.unit
 
 _ROOT = Path(__file__).parent.parent
-_EQUIVALENCE = _ROOT / "scripts/ledger_equivalence.sh"
+_EQUIVALENCE = _ROOT / "tests/swarm_ledger/equivalence.sh"
 
 
 def _pytest_command() -> str:
@@ -638,7 +637,7 @@ def test_equivalence_runs_storage_then_page_replays_each_group_at_once():
 
 def test_equivalence_plants_each_fault_in_a_file_that_exists():
     script = _equivalence_group("plant").split("<<'PY'\n", 1)[1].rsplit("PY", 1)[0]
-    loop = next(node for node in ast.walk(ast.parse(textwrap.dedent(script))) if isinstance(node, ast.For))
+    loop = next(node for node in ast.walk(ast.parse(script)) if isinstance(node, ast.For))
     planted = [(ast.literal_eval(entry.elts[0].args[0]), ast.literal_eval(entry.elts[1])) for entry in loop.iter.elts]
     assert [path.split("/", 1)[0] for path, _ in planted] == ["fault-store", "fault-chat"]
     for path, needle in planted:
@@ -650,19 +649,21 @@ def test_equivalence_grades_with_the_base_copy():
     [base] = [step for step in steps if step.get("with", {}).get("path") == "base"]
     assert base["with"]["ref"] == "${{ github.event.pull_request.base.sha }}"
     [pick] = [step for step in steps if step.get("name") == "Pick the protected grader"]
-    assert pick["run"].startswith("if [[ -f base/scripts/ledger_equivalence.sh ]]; then\n")
+    assert pick["run"].startswith("if [[ -f base/tests/swarm_ledger/equivalence.sh ]]; then\n")
     assert pick["run"].index('"GRADER=$PWD/base"') < pick["run"].index("else") < pick["run"].index('"GRADER=$PWD/head"')
-    graded = [step for step in steps if "ledger_equivalence.sh" in step.get("run", "") and step is not pick]
+    assert pick["run"].index("else") < pick["run"].index("::warning::")
+    graded = [step for step in steps if "equivalence.sh" in step.get("run", "") and step is not pick]
     assert [step["run"] for step in graded] == [
-        f'bash "$GRADER/scripts/ledger_equivalence.sh" {group}' for group in ("plant", "store", "page")
+        f'bash "$GRADER/tests/swarm_ledger/equivalence.sh" {group}' for group in ("plant", "store", "page")
     ]
-    assert all(steps.index(pick) < steps.index(step) for step in graded)
+    assert all(steps.index(base) < steps.index(pick) < steps.index(step) for step in graded)
+    assert _browser_install(steps)["uses"] == "./base/.github/actions/browser-cache"
     for step in steps:
         run = step.get("run", "")
         assert "cmp " not in run and "_replay.py" not in run and "head/tests" not in run
+        assert step is pick or "GITHUB_ENV" not in run
     script = _EQUIVALENCE.read_text()
-    assert 'grader=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)' in script
-    assert "replays=$grader/tests/swarm_ledger" in script and "head/tests" not in script
+    assert 'replays=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)' in script and "head/tests" not in script
 
 
 def _equivalence_steps() -> list[dict]:
@@ -683,7 +684,7 @@ def test_equivalence_runs_on_every_ledger_pull_request_without_a_body_marker():
     [head] = [step for step in job["steps"] if step.get("with", {}).get("path") == "head"]
     assert "ref" not in head["with"]
     paths = workflow[True]["pull_request"]["paths"]
-    assert {"scripts/swarm_ledger/**", "tests/swarm_ledger/**", "scripts/ledger_equivalence.sh"} <= set(paths)
+    assert {"scripts/swarm_ledger/**", "tests/swarm_ledger/**"} <= set(paths)
 
 
 @pytest.mark.parametrize("doc", ["README.md", "index.md"])

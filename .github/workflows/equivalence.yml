@@ -6,7 +6,6 @@ on:
     paths:
       - scripts/swarm_ledger/**
       - tests/swarm_ledger/**
-      - scripts/ledger_equivalence.sh
       - .github/workflows/equivalence.yml
 
 permissions:
@@ -27,7 +26,7 @@ jobs:
           ref: ${{ github.event.pull_request.base.sha }}
       - name: Pick the protected grader
         run: |
-          if [[ -f base/scripts/ledger_equivalence.sh ]]; then
+          if [[ -f base/tests/swarm_ledger/equivalence.sh ]]; then
             echo "GRADER=$PWD/base" >> "$GITHUB_ENV"
           else
             echo "::warning::The base predates the protected equivalence grader; the head copy grades this run."
@@ -45,14 +44,14 @@ jobs:
           UV_CONSTRAINT: head/.github/test-constraints.txt
         run: uv pip install --system --excludes head/.github/test-excludes.txt -e './head[dev,all]'
       - name: Plant a dropped checkbox update and a dropped chat recipient in copies of head
-        run: bash "$GRADER/scripts/ledger_equivalence.sh" plant
+        run: bash "$GRADER/tests/swarm_ledger/equivalence.sh" plant
       - name: Replay and compare base, head and the planted checkbox fault
-        run: bash "$GRADER/scripts/ledger_equivalence.sh" store
+        run: bash "$GRADER/tests/swarm_ledger/equivalence.sh" store
       - name: Install the page replay browser
         timeout-minutes: 6
-        uses: ./head/.github/actions/browser-cache
+        uses: ./base/.github/actions/browser-cache
       - name: Replay and compare base, head and the planted chat fault pages
-        run: bash "$GRADER/scripts/ledger_equivalence.sh" page
+        run: bash "$GRADER/tests/swarm_ledger/equivalence.sh" page
       - uses: actions/upload-artifact@v4
         if: always()
         with:

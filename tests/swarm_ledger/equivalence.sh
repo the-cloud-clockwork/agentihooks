@@ -1,9 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Run from the workspace holding the base and head checkouts; the grading logic is this file's own checkout.
-grader=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
-replays=$grader/tests/swarm_ledger
+# Run from the workspace holding the base and head checkouts; the replays are this file's own checkout.
+replays=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 
 replay() {
   name=$1
