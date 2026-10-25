@@ -264,3 +264,40 @@ def test_the_fenced_runtime_passes_the_launch_room_through(store):
     held = object()
     assert controller.FencedRuntime(store, "sw", held, PooledRuntime(5), controller.LOCAL).launch_room(None) == 5
     assert controller.FencedRuntime(store, "sw", held, FakeRuntime(), controller.LOCAL).launch_room(None) == 1
+
+
+def test_a_failed_preparation_is_recorded_at_the_pass_time(store, monkeypatch):
+    ledger, pooled = _eight(store), PooledRuntime(8)
+    attach, not_launched, seen = tick_module.transfers.attach, tick_module._not_launched, []
+
+    def attaching(store_, slug, record):
+        if record.task == "t2":
+            raise RuntimeError("attach broke")
+        return attach(store_, slug, record)
+
+    def recording(*args):
+        seen.append(args[-1])
+        return not_launched(*args)
+
+    monkeypatch.setattr(tick_module.transfers, "attach", attaching)
+    monkeypatch.setattr(tick_module, "_not_launched", recording)
+    tick("sw", store, ledger, pooled, now_ms=1_000)
+    assert seen == [1_000]
+
+
+class ConfigRoom(PooledRuntime):
+    def launch_room(self, config):
+        return config.max_eng if config is not None else 1
+
+
+def test_the_pool_asks_the_runtime_room_for_this_pass_config(store):
+    store.update("sw", max_eng=3)
+    assert tick_module._launch_room(ConfigRoom(0), store.config("sw")) == 3
+
+
+def test_the_fenced_runtime_asks_the_room_with_the_config_it_was_given(store):
+    from scripts.swarm import controller
+
+    store.update("sw", max_eng=6)
+    fenced = controller.FencedRuntime(store, "sw", object(), ConfigRoom(0), controller.LOCAL)
+    assert fenced.launch_room(store.config("sw")) == 6
