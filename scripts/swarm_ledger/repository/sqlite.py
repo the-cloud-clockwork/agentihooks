@@ -524,7 +524,7 @@ class SQLiteLedgerRepository:
         self._adopt(slug)
         with self.connect() as connection, connection:
             connection.execute(BEGIN)
-            return self._entry(connection, slug).mutable()
+            return json.loads(self._entry(connection, slug).text)
 
     def current(self, slug: str) -> Entry:
         """The stored entry: its generation, text and a parsed copy that callers only read."""

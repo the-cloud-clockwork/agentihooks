@@ -142,7 +142,7 @@ def doctor_holds(slug):
         store = swarm_store()
         fix = ports.swarm().freeze.fix_phase(store.config(slug))
         peer = fix and store.peer(slug)
-        records = repository.current(peer).state.get("freezes") or [] if peer and repository.exists(peer) else []
+        records = repository.get_document(peer).get("freezes") or [] if peer and repository.exists(peer) else []
     except (SwarmError, RedisError, ValueError, OSError):
         return NO_DOCTOR
     return fix, any(r.get("verb") == "focus" for r in records)
