@@ -2,7 +2,6 @@
 or occupy a seat, and a remote hive makes no service ledger reads."""
 
 import json
-from collections.abc import Callable
 from types import SimpleNamespace
 
 from scripts.hub import lease
@@ -93,4 +92,4 @@ class Admission:
         return True
 
 
-OPERATIONS: dict[str, Callable[[Admission, str, dict], object]] = {"admit": Admission.admit, "reopen": Admission.reopen}
+OPERATIONS = ("admit", "reopen")

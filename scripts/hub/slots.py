@@ -25,8 +25,8 @@ def _answer(bus: Bus, subject: str, data: bytes, clock: Callable[[], int], admit
         raise ValueError(f"not a slot request subject: {subject!r}")
     request = json.loads(data)
     operation = OPERATIONS.get(request.get("op"))
-    admit = admission.OPERATIONS.get(request.get("op"))
-    if operation is None and admit is None:
+    admit = request.get("op") in admission.OPERATIONS
+    if operation is None and not admit:
         raise ValueError(f"unknown slot operation {request.get('op')!r}")
     if request["hive"] != parts[2]:
         refusal = (
@@ -34,8 +34,8 @@ def _answer(bus: Bus, subject: str, data: bytes, clock: Callable[[], int], admit
         )
         print(f"hub: refused a {request['op']} in swarm {parts[1]}: {refusal}", file=sys.stderr)
         raise PermissionError(refusal)
-    if admit is not None:
-        return admit(admitter, parts[1], request)
+    if admit:
+        return getattr(admitter, request["op"])(parts[1], request)
     return operation(account_slots.Slots(bus, request["hive"], lambda: request["report"], clock), request)
 
 
