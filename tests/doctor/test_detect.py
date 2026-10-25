@@ -302,7 +302,7 @@ def test_the_trace_detector_reads_the_swarm_tag_and_its_sessions(monkeypatch, tm
                 "traces",
                 {
                     "tags": ["swarm:s", "agent:s-master-1"],
-                    "fields": "core,io",
+                    "fields": "core",
                     "orderBy": "timestamp.desc",
                     "limit": registry.TRACES_LIMIT,
                     "page": 1,
