@@ -85,6 +85,7 @@ class SwarmConfig:
     hive_placement: bool = False
     local_max_agents: int = DEFAULT_LOCAL_MAX_AGENTS
     engine: str = "legacy"
+    watchdog_address: str = ""
 
     def __post_init__(self) -> None:
         if self.engine not in ("legacy", "events"):
@@ -232,6 +233,7 @@ class RedisStore:
             raw.get("hive_placement") == "True",
             int(raw.get("local_max_agents") or DEFAULT_LOCAL_MAX_AGENTS),
             raw.get("engine", "legacy"),
+            raw.get("watchdog_address", ""),
         )
 
     def update(self, slug, **changes):
