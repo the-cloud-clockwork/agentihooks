@@ -618,6 +618,50 @@ def test_stats_parts_split_files_by_duration_across_runners_even_inside_an_xdist
     assert loads == expected
     assert part_files(tmp_path, files[:1], (2, 3)) == []
 
+def test_statistics_parts_split_one_file_without_losing_new_parameter_cases(tmp_path, monkeypatch):
+    from scripts.ci_mutation.selection import load_or_collect_stats
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("PYTEST_DISABLE_PLUGIN_AUTOLOAD", "1")
+    (tmp_path / "tests").mkdir()
+    test = "tests/test_sample.py"
+    (tmp_path / test).write_text(
+        "import pytest\n"
+        "def test_slow(): pass\n"
+        "def test_middle(): pass\n"
+        "def test_short(): pass\n"
+        "@pytest.mark.parametrize('value', [1, 2])\n"
+        "def test_new(value): pass\n"
+    )
+    recorded = {f"{test}::test_{name}": seconds for name, seconds in [("slow", 90), ("middle", 60), ("short", 30)]}
+    (tmp_path / ".test_durations").write_text(json.dumps(recorded))
+    config = SimpleNamespace(source_paths=[Path("scripts")], pytest_add_cli_args_test_selection=[test])
+    runner = SimpleNamespace(
+        Config=SimpleNamespace(get=lambda: config),
+        SourceFileMutationData=lambda **kwargs: SimpleNamespace(load=lambda: None, exit_code_by_key={"m": None}),
+    )
+    parts = []
+
+    def collect(engine, test_runner, files, workers, work):
+        parts.append(files)
+        return [{"status": 0, "tests": {"sample": files}, "durations": {}, "cpu": 0}]
+
+    monkeypatch.setattr("scripts.ci_mutation.selection.collect_file_stats", collect)
+    for index in range(2):
+        output = tmp_path / f"part-{index}.json"
+        with pytest.raises(SystemExit) as done:
+            load_or_collect_stats(
+                runner, SimpleNamespace(_pytest_add_cli_args=[]), ["scripts/sample.py"],
+                "collect", (str(output), "key", str(index), "2"),
+            )
+        assert done.value.code == 0
+        assert json.loads(output.read_text())["results"][0]["tests"]["sample"] == parts[index]
+        assert config.source_paths == [Path("scripts")]
+    assert parts == [
+        [f"{test}::test_slow"],
+        [f"{test}::test_middle", f"{test}::test_new[1]", f"{test}::test_new[2]", f"{test}::test_short"],
+    ]
+
 
 def test_shard_stats_run_in_stats_mode_with_their_own_basetemp_and_record_everything(tmp_path, monkeypatch):
     from time import process_time
