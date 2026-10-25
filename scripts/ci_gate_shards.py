@@ -41,14 +41,16 @@ def watch(repository: str, run: str, attempt: str, shards: list[int], destinatio
 
 def fetch(repository: str, run: str, destination: Path, downloaded: dict) -> None:
     pages = api(f"repos/{repository}/actions/runs/{run}/artifacts?per_page=100")
-    pending = [
-        artifact
+    available = {
+        artifact["name"]: artifact
         for page in pages
         for artifact in page["artifacts"]
         if re.fullmatch(r"(?:durations|flakes)-3\.12-\d+", artifact["name"])
         and not artifact["expired"]
-        and downloaded.get(artifact["name"]) != artifact["id"]
-    ]
+    }
+    for name in downloaded.keys() - available.keys():
+        del downloaded[name]
+    pending = [artifact for name, artifact in available.items() if downloaded.get(name) != artifact["id"]]
 
     def download(artifact):
         payload = api(f"repos/{repository}/actions/artifacts/{artifact['id']}/zip", binary=True)
