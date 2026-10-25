@@ -143,6 +143,11 @@ def test_summary_shows_the_tighter_of_node_and_pod_memory_with_the_pod_limit(nod
     assert headroom.summary(record) == f"cpus=16\tload5=4.73\tavailable-mb={shown}\tpod-limit-mb=4200\tpending=0"
 
 
+def test_summary_shows_node_memory_when_the_pod_reading_is_incomplete():
+    record = {"cpus": 8, "load5": 1.0, "available_mb": 8000, "pod_total_mb": 4200, "pending": 0, "measured_at": 1}
+    assert headroom.summary(record) == "cpus=8\tload5=1.00\tavailable-mb=8000\tpending=0"
+
+
 def test_beat_publishes_headroom_at_the_beat_time_in_whole_milliseconds(redis, monkeypatch):
     calls = []
     monkeypatch.setattr(
