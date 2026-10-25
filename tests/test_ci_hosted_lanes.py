@@ -45,6 +45,9 @@ LANE_USERS = {
     *DIRECT,
 }
 LEGS = {"mutation-preflight.yml:stats": "stats", "mutation-preflight.yml:mutation-shard": "shard"}
+CALLED = {
+    "semgrep.yml:charts": "a job added to a called workflow needs the called lane form for the branch lane grader",
+}
 EXCLUDED = {
     "branch-lanes.yml": "every branch push runs one short grader that must refuse and cancel lane skipping workflows at once",
     "codex-cache.yml": "main push, six hourly and manual, one short job that seeds the Codex and nats server caches, no pull request trigger",
@@ -162,8 +165,19 @@ def test_every_non_required_trigger_is_on_a_lane_or_excluded_with_a_reason():
     assert not users & set(EXCLUDED)
     assert set(EXCLUDED) <= open_triggers
     assert open_triggers <= users | set(EXCLUDED)
-    assert {where for where, block in _blocks() if "hosted-lane" in str(block["group"])} == LANE_USERS
+    assert {where for where, block in _blocks() if "hosted-lane" in str(block["group"])} == LANE_USERS | set(CALLED)
     assert not [where for where, block in _blocks() if "mutation-lane" in str(block["group"])]
+
+
+@pytest.mark.parametrize("where", sorted(CALLED))
+def test_a_called_only_lane_block_never_resolves_to_a_lane(where):
+    assert set(_workflow(where.split(":")[0])[True]) == {"workflow_call"}
+    contexts = list(_contexts(where))
+    assert contexts
+    for github in contexts:
+        resolved = _resolve(_block(where), **github)
+        assert not _is_lane(resolved["group"]), (where, github)
+        assert resolved["queue"] == "single", (where, github)
 
 
 def test_every_lane_user_names_the_same_three_lanes():
