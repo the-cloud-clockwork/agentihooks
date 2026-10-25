@@ -167,14 +167,23 @@ def main():
         sys.exit(f"no ledger {args.slug} in {core.LEDGER_DIR}")
     beat = core.watch_path(args.slug, args.name) if args.name else None
     watch = Watch(args, f"ledger {args.slug}", seen.marks_for(args.slug) if args.name else None)
+    stopping = False
+
+    def stop(*_):
+        nonlocal stopping
+        stopping = True
+        sys.exit(0)
+
     if beat:
         atexit.register(beat.unlink, missing_ok=True)
-        signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
+        signal.signal(signal.SIGTERM, stop)
     headers, cursor, failure = None, None, None
-    while True:
+    while not stopping:
         alive(beat)
         try:
             headers = headers or credentials(args.slug)
+            if stopping:
+                continue
             for name, data, event_id in stream(args.slug, cursor, headers):
                 alive(beat)
                 watch.take(name, data)

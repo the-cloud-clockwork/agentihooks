@@ -472,6 +472,8 @@ def _launch_checks(slug, store, ledger, runtime, rows, doc, now_ms):
     agents = [a for a in store.agents(slug) if a.name in waiting]
     for name in set(waiting) - {a.name for a in agents}:
         launch_check.forget(store, slug, name)
+    confirmed = [launch_check.canary(store, slug, agent) for agent in agents]
+    agents, canaries = [agent for agent, _ in confirmed], {agent.name: miss for agent, miss in confirmed}
     facts = runtime.bindings(agents)
     for agent in agents:
         found = launch_check.misses(
@@ -483,7 +485,8 @@ def _launch_checks(slug, store, ledger, runtime, rows, doc, now_ms):
             launch_check.bundled(agent.profile),
             launch_check.expected(agent),
         )
-        if found and now_ms - launch_check.session_started_at(agent) < launch_check.DEADLINE_MS:
+        found.update(canaries[agent.name])
+        if found and not launch_check.due(agent, found, now_ms):
             continue
         if found:
             miss = launch_check.Miss(agent, found, waiting[agent.name]["relaunch"])
