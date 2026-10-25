@@ -312,6 +312,20 @@ def test_admit_keeps_the_claim_timestamp_the_tick_wrote_before_the_launch(setup)
     assert agents[name].started_at == claimed_at
 
 
+@pytest.mark.parametrize(
+    "harness,transport,recorded",
+    [("codex", "app_server", "app_server"), ("codex", "legacy", "legacy"), ("claude", "app_server", "")],
+)
+def test_admit_records_the_codex_transport_the_member_serves(setup, harness, transport, recorded):
+    request = request_for(setup)
+    request = replace(request, config=replace(request.config, codex_inbox_transport=transport))
+    selected = setup.launcher.select(setup.config, "eng", {"id": "task"})
+    selected = replace(selected, account=replace(selected.account, harness=harness))
+    admitted = setup.launcher.admit(request, selected)
+    assert admitted.transport == recorded
+    assert setup.store.execution("fixture", admitted.execution_id).transport == recorded
+
+
 def test_disabled_hive_never_falls_back_to_local_spawn(setup):
     from scripts.swarm.controller import FencedRuntime
     from scripts.swarm_v2.runtime.base import RuntimeRouter
@@ -569,6 +583,7 @@ def test_reservation_contention_ends_the_unlaunched_execution(setup):
         result = setup.launcher.spawn(request)
     assert result.status is Status.UNAVAILABLE
     assert result.detail == "account reservation is full"
+    assert result.value == {"harness": "claude"}
     assert result.operation == "spawn"
     assert result.backend == "hive"
     ended = setup.store.execution_registry.records("fixture")[0]

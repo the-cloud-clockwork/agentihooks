@@ -362,7 +362,12 @@ class Consumer:
         config = self.store.config(order.slug)
         chosen = {**config.lanes.get(order.lane, {}), "agent": order.harness, "role": order.profile}
         config = replace(config, repo=task.get(ORIGIN) or config.repo, lanes={**config.lanes, order.lane: chosen})
-        task = {**task, "route_kind": order.route_kind, "controller_epoch": order.epoch}
+        task = {
+            **task,
+            "route_kind": order.route_kind,
+            "controller_epoch": order.epoch,
+            "admitted_execution_id": agent.execution_id,
+        }
         task["launch_assignment"] = {
             "profile": order.profile,
             "harness": order.harness,

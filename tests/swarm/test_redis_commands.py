@@ -57,7 +57,7 @@ LEASE = """
 EXTEND = "return redis.call('PEXPIRE', KEYS[1], ARGV[1])"
 
 
-def acquire(redis):
+def acquire(redis: "Redis"):
     redis.incr("lease")
     redis.execute_command("XINFO", "STREAM", "lease")
     sub = redis.pubsub()
@@ -257,8 +257,10 @@ CYCLE = {
     "scripts/__init__.py": "",
     "scripts/a.py": "from scripts.b import f\n",
     "scripts/b.py": "from scripts.a import f\n",
-    "scripts/e.py": "def go(redis):\n    redis.llen('k')\n",
+    "scripts/e.py": "def go(redis: 'Redis'):\n    redis.llen('k')\n",
     "scripts/c.py": """
+from redis import Redis
+
 from scripts.a import f
 
 
@@ -268,7 +270,7 @@ def main():
     f()
     scripts.e.go()
     client().hgetall("k")
-    factory().thing.hkeys("k")
+    client().pipeline().hkeys("k")
     bound(None)
 
 
@@ -277,7 +279,7 @@ def bound(self):
 
 
 def client():
-    return None
+    return Redis()
 """,
 }
 
@@ -301,12 +303,297 @@ def test_a_lock_taken_on_a_client_issues_the_commands_the_lock_sends(tmp_path):
     (tmp_path / "scripts").mkdir()
     (tmp_path / "scripts/__init__.py").write_text("")
     (tmp_path / "scripts/guard.py").write_text(
-        "def hold(redis):\n    redis.incr('k')\n    with redis.lock('guard', timeout=1):\n        pass\n"
+        "def hold(redis: 'Redis'):\n    redis.incr('k')\n    with redis.lock('guard', timeout=1):\n        pass\n"
     )
     program = code_reach.Program(code_reach.parse(tmp_path))
     issued = program.commands(program.reach(("scripts.guard:hold",)))
     assert {"INCRBY", "SET", "EVALSHA", "SCRIPT LOAD", "GET", "DEL", "PEXPIRE"} <= set(issued)
     assert issued["EVALSHA"] == {"scripts.guard:hold"}
+
+
+SHELF = """
+from redis import Redis
+
+
+def fill():
+    items = []
+    items.append("k")
+    client = Redis.from_url("redis://")
+    client.zadd("k", {"m": 1})
+    client.pipeline().sadd("s", "m").lpush("l", "v").execute()
+
+
+def drain(items, sadd):
+    items.zrem("k", "m")
+    sadd.ltrim("l", 0, 1)
+"""
+
+
+def test_a_list_append_is_not_a_redis_command_while_a_constructed_client_call_still_is(tmp_path):
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / "scripts/__init__.py").write_text("")
+    (tmp_path / "scripts/shelf.py").write_text(SHELF)
+    program = code_reach.Program(code_reach.parse(tmp_path))
+    sender = {"scripts.shelf:fill"}
+    assert program.commands(program.reach(("scripts.shelf:fill",))) == dict.fromkeys(
+        ("ZADD", "SADD", "LPUSH", "MULTI", "EXEC"), sender
+    )
+    assert program.commands(program.reach(("scripts.shelf:drain",))) == {}
+
+
+KINDS = """
+import os
+
+from redis import Redis
+
+import scripts.made
+from scripts.made import connect
+
+
+def annotated(redis: "Redis | None", *rows, **opts):
+    redis.ping()
+    rows.append(1)
+
+
+def plain(items: list):
+    items.append(1)
+
+
+def other():
+    b = connect()
+    b.ping()
+    kk = connect()
+
+
+def builtin():
+    b = list()
+    b.append(1)
+
+
+def external():
+    b = os.getcwd()
+    b.append(1)
+
+
+def nested_external():
+    import os as oo
+
+    b = oo.getcwd()
+    b.append(1)
+
+
+def nested_factory():
+    from scripts.made import connect as mk
+
+    mk().expire("k", 1)
+
+
+def unresolved(holder):
+    get_redis = holder.redis
+    redis = get_redis()
+    redis.pttl("k")
+
+
+def parameter(b):
+    alias = b
+    alias.append(1)
+
+
+def unpacked(rows):
+    a, b = connect(), []
+    a.rpush("l", "v")
+    b.append("x")
+    (d, (b, e)) = (connect(), ([], 1))
+    d.lpop("l")
+    first, second = scripts.made.pair()
+
+
+def bound():
+    with connect() as w:
+        w.get("k")
+    n: Redis = connect()
+    n.lrange("l", 0, 1)
+    if m := connect():
+        m.llen("l")
+
+
+def boolop(flag, redis):
+    client = flag or connect()
+    client.hget("k", "f")
+    made = connect()
+    local = flag and made
+    local.hlen("k")
+    (flag or redis).hkeys("k")
+
+
+def ifexp(flag, redis):
+    made = connect()
+    (made if flag else None).sadd("s", "m")
+    (redis if flag else None).sismember("s", "m")
+    (connect() if flag else None).srem("s", "m")
+    (None if flag else made).zscore("z", "m")
+    (None if flag else redis).scard("s")
+    (None if flag else connect()).smembers("s")
+
+
+def piped():
+    made = connect()
+    batch = made.pipeline()
+    batch.incr("n")
+    made.pipeline().sadd("s", "m").lpush("l", "v").execute()
+
+
+def via_unique(holder):
+    holder.only_once().ttl("k")
+    holder.once_method().exists("k")
+
+
+def dotted():
+    scripts.made.build().strlen("k")
+
+
+def attributes(h):
+    h.conn_x.lindex("l", 0)
+    h.alias_x.lset("l", 0, "v")
+    h.rows_x.append(1)
+
+
+def keywords(kwclient, kwalias):
+    kwclient.hsetnx("h", "f", "v")
+    kwalias.hmget("h", "f")
+
+
+def rebinding():
+    c = connect()
+    c.zrem("z", "m")
+    c = None
+
+
+def looped(rows):
+    for kk, c in rows:
+        kk.lrem("l", 0, "v")
+
+
+def comprehended(rows):
+    return [kk for kk, c in rows if kk.get("type")] + [0 for {}[0] in rows]
+
+
+def carried():
+    prev = None
+    conn = None
+    for _ in range(2):
+        prev = conn
+        conn = connect()
+    prev.getdel("k")
+"""
+MADE = """
+import os
+
+import redis
+from redis import Redis
+
+
+def connect():
+    return Redis()
+
+
+def build():
+    return Redis()
+
+
+def only_once():
+    return Redis()
+
+
+def pair():
+    return Redis(), []
+
+
+def url():
+    r2 = redis.from_url("redis://")
+    r2.decrby("n", 1)
+
+
+def wire_up(thing):
+    made = connect()
+    thing(kwclient=connect(), kwalias=made)
+
+
+class Box:
+    def make(self):
+        return Redis()
+
+    def build(self):
+        return None
+
+    def once_method(self):
+        return Redis()
+
+    def use(self):
+        self.make().hincrby("h", "f", 1)
+
+    def listing(self):
+        b = os.getcwd()
+        b.append(1)
+
+
+class Holder:
+    def __init__(self):
+        made = connect()
+        self.conn_x = connect()
+        self.alias_x = made
+        self.rows_x = []
+"""
+TYPED = {
+    "scripts/__init__.py": "",
+    "scripts/aa.py": "from scripts.zz import late\n\n\ndef outer():\n    return late()\n\n\ndef chained():\n    outer().zcard('z')\n",
+    "scripts/kinds.py": KINDS,
+    "scripts/made.py": MADE,
+    "scripts/zz.py": "from redis import Redis\n\n\ndef late():\n    return Redis()\n\n\nclass Other:\n    def make(self):\n        return None\n",
+}
+
+
+@pytest.fixture
+def typed(tmp_path):
+    for name, text in TYPED.items():
+        (tmp_path / name).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / name).write_text(text)
+    return code_reach.Program(code_reach.parse(tmp_path))
+
+
+@pytest.mark.parametrize(
+    ("unit", "commands"),
+    [
+        ("scripts.kinds:annotated", {"PING"}),
+        ("scripts.kinds:plain", set()),
+        ("scripts.kinds:other", {"PING"}),
+        ("scripts.kinds:builtin", set()),
+        ("scripts.kinds:external", set()),
+        ("scripts.kinds:nested_external", set()),
+        ("scripts.kinds:nested_factory", {"EXPIRE"}),
+        ("scripts.kinds:unresolved", {"PTTL"}),
+        ("scripts.kinds:parameter", set()),
+        ("scripts.kinds:unpacked", {"RPUSH", "LPOP"}),
+        ("scripts.kinds:bound", {"GET", "LRANGE", "LLEN"}),
+        ("scripts.kinds:boolop", {"HGET", "HLEN", "HKEYS"}),
+        ("scripts.kinds:ifexp", {"SADD", "SISMEMBER", "SREM", "ZSCORE", "SCARD", "SMEMBERS"}),
+        ("scripts.kinds:piped", {"INCRBY", "SADD", "LPUSH", "MULTI", "EXEC"}),
+        ("scripts.kinds:via_unique", {"TTL", "EXISTS"}),
+        ("scripts.kinds:dotted", {"STRLEN"}),
+        ("scripts.kinds:attributes", {"LINDEX", "LSET"}),
+        ("scripts.kinds:keywords", {"HSETNX", "HMGET"}),
+        ("scripts.kinds:rebinding", {"ZREM"}),
+        ("scripts.kinds:looped", {"LREM"}),
+        ("scripts.kinds:comprehended", set()),
+        ("scripts.kinds:carried", {"GETDEL"}),
+        ("scripts.made:url", {"DECRBY"}),
+        ("scripts.made:Box.use", {"HINCRBY"}),
+        ("scripts.made:Box.listing", set()),
+        ("scripts.aa:chained", {"ZCARD"}),
+    ],
+)
+def test_a_receiver_is_a_client_only_when_its_type_traces_to_a_redis_constructor(typed, unit, commands):
+    assert set(typed.commands([unit])) == commands
 
 
 def test_an_entry_point_missing_from_the_code_is_refused(program):
@@ -344,8 +631,26 @@ def test_the_map_lists_each_consumer_role_commands_senders_and_keys(monkeypatch,
     }
 
 
-def test_every_consumer_reaches_redis(published):
-    assert all(consumer["commands"] for consumer in published.values())
+def test_every_consumer_but_the_worker_reaches_redis(published):
+    assert all(consumer["commands"] for name, consumer in published.items() if name != "worker")
+
+
+def test_known_real_senders_stay_in_the_published_map(published):
+    commands = published["controller"]["commands"]
+    assert "scripts.swarm.lease:acquire" in commands["GET"]
+    assert "scripts.swarm.execution:ExecutionRegistry.records" in commands["HVALS"]
+
+
+def test_the_published_map_drops_calls_on_receivers_that_hold_no_redis_client(published):
+    senders = {unit for consumer in published.values() for units in consumer["commands"].values() for unit in units}
+    excluded = (
+        "scripts.swarm_v2.checkpoints.native:",
+        "scripts.swarm_v2.herdr.endpoints:",
+        "scripts.claude_quota_balancer:",
+    )
+    assert not {unit for unit in senders if unit.startswith(excluded)}
+    assert published["worker"]["commands"] == {}
+    assert all("APPEND" not in consumer["commands"] for consumer in published.values())
 
 
 def test_the_tick_reads_the_swarm_index_before_ticking_each_swarm(published):
@@ -357,6 +662,7 @@ def test_the_map_names_each_consumer_with_its_redis_role(published):
     assert roles == {
         "controller": "controller",
         "tick": "controller",
+        "hub": "controller",
         "ledger server": "ledger",
         "worker": "worker",
         "hooks": "worker",
@@ -367,6 +673,12 @@ def test_the_controller_issues_the_lease_counter_and_the_scheduler_wait(publishe
     commands = published["controller"]["commands"]
     assert {"INCRBY", "BLPOP"} <= commands.keys()
     assert "scripts.scheduler.process_timer:Timer.wait" in commands["BLPOP"]
+
+
+def test_the_hub_reads_the_wake_outbox_with_a_command_the_controller_user_grants(published):
+    commands = published["hub"]["commands"]
+    assert "scripts.hub.inbox_wake:InboxWake.flush" in commands["SMEMBERS"]
+    assert "SRANDMEMBER" not in commands
 
 
 def test_the_controller_scheduler_keys_sit_in_the_swarm_namespace(published):
