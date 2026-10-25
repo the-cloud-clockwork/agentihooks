@@ -38,7 +38,8 @@ and merges groups of up to five, waits at most one minute for a group to fill, a
 check that has not reported within 45 minutes fails the entry. Build
 concurrency counts entries, not groups, and under `ALLGREEN` each entry
 merges only on its own passing run, so `max_entries_to_build` is five: at one,
-every group carried a single pull request.
+the hour to 00:15 UTC on 25 October merged 7 pull requests in 7 groups while
+37 waited.
 An entry ejected only because a unit shard lost its runner is requeued once by
 the Queue retry workflow; see
 [Lost runner requeue](../../docs/reference/delivery-tiers.md#lost-runner-requeue).
