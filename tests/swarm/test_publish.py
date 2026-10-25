@@ -1232,6 +1232,13 @@ def test_a_pull_request_on_another_host_is_never_looked_up(monkeypatch):
     assert publish_queue.open_head("git@github.com:example/repo.git", "") == ""
 
 
+def test_a_recorded_url_that_names_no_pull_request_keeps_the_current_branch(monkeypatch):
+    from scripts.swarm import merge_queue, publish_queue
+
+    monkeypatch.setattr(merge_queue, "graphql", lambda document, variables: {"resource": None})
+    assert publish_queue.open_head("git@github.com:example/repo.git", "https://github.com/example/repo/issues/7") == ""
+
+
 def test_prepare_records_the_worktree_branch_when_it_does_not_descend_from_the_pull_request(publication):
     from scripts.swarm import publish
 

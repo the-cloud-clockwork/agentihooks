@@ -259,6 +259,17 @@ def target_branch(root: Path, task: dict, branch: str, record: dict) -> str:
     return branch
 
 
+def delivery_branch(root: Path, task: dict, branch: str) -> str:
+    head = publish_queue.open_head(git(root, "remote", "get-url", "--push", "origin"), task.get("pr_url", ""))
+    if not head or head in continuation.PROTECTED:
+        return branch
+    git(root, "fetch", "origin", f"+refs/heads/{head}:refs/remotes/origin/{head}")
+    done = subprocess.run(
+        ["git", "merge-base", "--is-ancestor", f"refs/remotes/origin/{head}", "HEAD"], cwd=root, capture_output=True
+    )
+    return head if done.returncode == 0 else branch
+
+
 def gate_python(repo: Path) -> str:
     venv = repo.parent / ".venv" / "bin" / "python"
     for python in (venv, Path(sys.executable)):
@@ -301,10 +312,11 @@ def grade_and_push(root: Path, primary: Path, fields: dict, head: str) -> None:
 
 def publish(slug: str, agent: AgentRecord, repo: str, ledger: LedgerClient, message: str, files: list[str]) -> dict:
     task = task_row(slug, agent, ledger)
-    root, primary, _ = publishing_root(repo, task, agent)
+    root, primary, scoped = publishing_root(repo, task, agent)
     if root is None:
         raise SwarmError(f"task worktree missing; Next: agentihooks swarm {shlex.quote(slug)} prepare")
     fields = checkout_fields(root)
+    fields["branch"] = delivery_branch(root, scoped, fields["branch"])
     ledger.update_task(slug, agent.task, branch_record(fields, primary, task), by=agent.name)
     selected = selected_files(root, files)
     retry = shlex.join(["agentihooks", "swarm", slug, "publish", "--message", message, "--", *files])
