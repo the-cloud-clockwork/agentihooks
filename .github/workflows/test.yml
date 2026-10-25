@@ -2041,6 +2041,10 @@ jobs:
         if: ${{ !cancelled() }}
         run: python -m scripts.ci_wiring
 
+      - name: Validate operator feature map
+        if: ${{ !cancelled() }}
+        run: python -m scripts.feature_map
+
       - name: Require wall clock markers on elapsed bounds
         if: ${{ !cancelled() }}
         run: |

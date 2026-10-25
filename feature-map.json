@@ -1,0 +1,14 @@
+{
+  "features": [
+    {
+      "id": "semgrep-feature-tests",
+      "operator_words": "We need to put a fucking feature semgrep test. You know semgrep? We're going to start to establish testing for features. We're going to start establishing the use of semgrep for features and we're going to establish a system for semgrep. Semgrep is going to fucking put a feature test so that if it fails again we know that we had a regression.",
+      "ordered_at": "2026-10-25",
+      "ledger_item": "ledger:rig-grade-swarm-doctor/tasks/t854",
+      "behaviour": "Semgrep tests each operator feature rule against regression and passing fixtures and blocks a pull request when a feature regresses.",
+      "semgrep_rule": "feature-semgrep-feature-tests",
+      "behaviour_test": "tests/test_ci_semgrep.py::test_feature_fixture_command_runs_recursively",
+      "live_check": ["bash", "scripts/feature_checks/semgrep-feature-tests.sh"]
+    }
+  ]
+}

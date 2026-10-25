@@ -72,6 +72,15 @@ def test_no_semgrep_job_or_step_can_pass_on_a_skip_or_an_error():
     assert all("if" not in step and "continue-on-error" not in step for step in jobs["charts"]["steps"])
 
 
+@pytest.mark.feature("semgrep-feature-tests")
+def test_feature_fixture_command_runs_recursively():
+    job = _jobs()["feature-tests"]
+    commands = [step["run"] for step in job["steps"] if "run" in step]
+    assert "semgrep --metrics off --test .semgrep/features" in commands
+    assert "if" not in job and "continue-on-error" not in job
+    assert all("if" not in step and "continue-on-error" not in step for step in job["steps"])
+
+
 def test_wrapper_holds_only_read_permission():
     assert _semgrep()["permissions"] == {"contents": "read"}
 
