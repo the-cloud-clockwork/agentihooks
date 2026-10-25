@@ -1,5 +1,4 @@
 {
-  "package": "SV2-IDX-01",
   "cases": [
     "T-SV2-IDX-01-A",
     "T-SV2-IDX-01-B",
@@ -9,5 +8,8 @@
   "inputs": {
     "tests/fixtures/swarm_v2/session-archive.json": "337562c5125122cb55e6d813e92d7f62b40266371edf097663b67779a6849596"
   },
-  "red_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/40164113477"
+  "package": "SV2-IDX-01",
+  "red_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/40164113477",
+  "run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/40164529108",
+  "tested_commit": "4bb6c19d282d0d6c2487a795fead7914fc554e8a"
 }
