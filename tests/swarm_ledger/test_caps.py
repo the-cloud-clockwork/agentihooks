@@ -206,6 +206,37 @@ class Watch(unittest.TestCase):
         self.assertEqual(proc.returncode, 0)
         self.assertFalse(beat.exists())
 
+    def test_watcher_does_not_reconnect_after_sigterm_in_a_weakref_callback(self):
+        beat = core.watch_path(SLUG, "watcher")
+        beat.unlink(missing_ok=True)
+        env = {**os.environ, "LEDGER_DIR": str(core.LEDGER_DIR), "LEDGER_PORT": "9"}
+        code = (
+            "import os, signal, sys, weakref\n"
+            "sys.path.insert(0, sys.argv.pop(1))\n"
+            "import watch_ledger\n"
+            "def credentials(slug):\n"
+            "    class Target: pass\n"
+            "    target = Target()\n"
+            "    reference = weakref.ref(target, lambda _: os.kill(os.getpid(), signal.SIGTERM))\n"
+            "    del target\n"
+            "    return {}\n"
+            "def stream(*args):\n"
+            "    raise AssertionError('stream opened after SIGTERM')\n"
+            "watch_ledger.credentials = credentials\n"
+            "watch_ledger.stream = stream\n"
+            "watch_ledger.main()\n"
+        )
+        result = subprocess.run(
+            [sys.executable, "-X", "faulthandler", "-c", code, str(SCRIPTS), SLUG, "--as", "watcher"],
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("SystemExit: 0", result.stderr)
+        self.assertFalse(beat.exists())
+
 
 if __name__ == "__main__":
     unittest.main()
