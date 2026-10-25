@@ -124,8 +124,11 @@ def test_only_interactive_spawn_skips_subscription_quota(tmp_path, has_quota, ki
     assert _passed(seen[0])[:2] == ["--route", "interactive"]
 
 
+@pytest.mark.parametrize("handoff", [False, True])
 @pytest.mark.parametrize("week_left,route", [(3.0, "open"), (60.0, "interactive")])
-def test_a_master_successor_leaves_the_spent_reserved_account_for_an_open_one(tmp_path, monkeypatch, week_left, route):
+def test_a_master_successor_leaves_the_spent_reserved_account_for_an_open_one(
+    tmp_path, monkeypatch, week_left, route, handoff
+):
     from scripts.routing import master_account
     from scripts.swarm.capacity import Account
 
@@ -150,7 +153,14 @@ def test_a_master_successor_leaves_the_spent_reserved_account_for_an_open_one(tm
         lanes={"master": {"agent": "claude"}},
         autonomy="delegate",
     )
-    placed = runtime.spawn(config, "master", "agent", {"id": "master", "title": "proof"})
+    task = {"id": "master", "title": "proof"}
+    if handoff:
+        task["handoff"] = "Continue the master task after the quota handoff."
+        task["handoff_envelope"] = {
+            "reason": "quota",
+            "launch": {"profile": "master", "harness": "claude", "account": "main", "model": "opus", "effort": "high"},
+        }
+    placed = runtime.spawn(config, "master", "agent", task)
     passed = _passed(seen[0])
     assert passed[passed.index("--route") + 1] == route
     assert placed.route_kind == ("interactive" if route == "interactive" else "subscription")

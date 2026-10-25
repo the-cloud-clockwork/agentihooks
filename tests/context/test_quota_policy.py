@@ -863,6 +863,12 @@ def test_a_master_on_the_reserved_account_at_3_percent_hands_off_to_an_open_acco
     assert _master_at(monkeypatch, 94.9) is None
 
 
+def test_a_master_on_the_spent_reserved_account_is_never_handed_to_the_api(monkeypatch):
+    monkeypatch.setattr(qp, "reserved", lambda candidates, held: [c for c in candidates if c.account != "token"])
+    decision = _master_at(monkeypatch, 97.0)
+    assert (decision.action, decision.target) == ("stop", None)
+
+
 def test_a_master_hands_off_at_99_percent_of_the_five_hour_window_while_another_login_is_free(monkeypatch):
     assert qp.QUOTA_HANDOFF_5H_PCT == 99
     decision = _master_at(monkeypatch, 40.0, 99.0, logins=[("second", 20.0)])

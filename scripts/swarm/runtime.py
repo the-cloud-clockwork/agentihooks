@@ -595,7 +595,7 @@ class HerdrRuntime:
     def _master_account_spent(self):
         from redis.exceptions import RedisError
 
-        from scripts.routing import master_account
+        from scripts.routing import master_account, reservation
 
         if not hasattr(self, "_quota_accounts"):
             return False
@@ -603,14 +603,13 @@ class HerdrRuntime:
             declared = master_account.load(os.environ).get("claude")
         except (OSError, RedisError):
             return False
-        listed = {row.name for row in self._quota_accounts if row.harness == "claude"}
-        if declared is None or declared.slug not in listed:
+        own = next(
+            (row for row in self._quota_accounts if declared and (row.harness, row.name) == ("claude", declared.slug)),
+            None,
+        )
+        if own is None or own.week_left is None or 100 - own.week_left < reservation.MASTER_LEAVES:
             return False
-        unspent = {row.name for row in self._quota_open(MASTER) if row.harness == "claude"}
-        others = [
-            row for row in self._quota_eligible("claude", MASTER) if row.kind != "api" and row.name != declared.slug
-        ]
-        return declared.slug not in unspent and bool(others)
+        return any(row.kind != "api" and row.name != own.name for row in self._quota_eligible("claude", MASTER))
 
     def spawn(self, config, lane, name, task):
         chosen, environ = config.lanes.get(lane, {}), dict(os.environ)

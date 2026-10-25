@@ -256,8 +256,8 @@ def evaluate(session_id: str) -> Decision | None:
     harness = "codex" if os.environ.get("AGENTIHOOKS_TARGET") == "codex" else "claude"
     held = reservation.current(harness, os.environ)
     account = session_account(agent_pid())
-    seat = _master(os.environ)
-    ceiling = _own_ceiling(held, account, reservation.is_master_session(os.environ), seat)
+    master_seat = _master(os.environ)
+    ceiling = _own_ceiling(held, account, reservation.is_master_session(os.environ), master_seat)
     week_pct = QUOTA_HANDOFF_WEEK_PCT if ceiling is None else min(QUOTA_HANDOFF_WEEK_PCT, ceiling)
     if five_used < QUOTA_HANDOFF_5H_PCT and week_used < week_pct:
         return None
@@ -275,7 +275,7 @@ def evaluate(session_id: str) -> Decision | None:
         "push": push_active(session_id),
     }
     decision = decide_reserved(ceiling, others=master_targets(others, os.environ), **inputs)
-    if seat and ceiling is not None and decision and (decision.action, decision.trigger) == ("stop", "week"):
+    if master_seat and ceiling is not None and decision and (decision.action, decision.trigger) == ("stop", "week"):
         return decide_reserved(ceiling, others=[c for c in others if c.account != "api"], **inputs)
     return decision
 
@@ -313,12 +313,12 @@ def decide_reserved(ceiling: float | None, *, week_used: float, **inputs) -> Dec
     return decision and replace(decision, week_used=week_used, week_limit=ceiling)
 
 
-def _own_ceiling(held: "Reservation | None", account: str, master: bool, seat: bool = False) -> float | None:
+def _own_ceiling(held: "Reservation | None", account: str, master: bool, master_seat: bool = False) -> float | None:
     from scripts.routing import reservation
 
     if held is None or account != held.slug:
         return None
-    if seat:
+    if master_seat:
         return reservation.MASTER_LEAVES
     return None if master else held.ceiling
 
