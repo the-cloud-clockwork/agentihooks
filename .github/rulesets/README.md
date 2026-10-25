@@ -37,9 +37,9 @@ serves only merge queue runs. The queue builds up to five entries at a time
 and merges groups of up to five, waits at most one minute for a group to fill, and a
 check that has not reported within 45 minutes fails the entry. Build
 concurrency counts entries, not groups, and under `ALLGREEN` each entry
-merges only on its own passing run, so `max_entries_to_build` is five: at one,
-the hour to 00:15 UTC on 25 October merged 7 pull requests in 7 groups while
-37 waited.
+merges only on its own passing run, so `max_entries_to_build` is five. At one,
+from 23:15 UTC on 24 October to 00:15 UTC on 25 October the queue merged 7
+pull requests in 7 merge group runs while 37 waited.
 An entry ejected only because a unit shard lost its runner is requeued once by
 the Queue retry workflow; see
 [Lost runner requeue](../../docs/reference/delivery-tiers.md#lost-runner-requeue).
