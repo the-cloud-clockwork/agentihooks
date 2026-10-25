@@ -4,9 +4,8 @@ import os
 import signal
 import socket
 import sys
+import threading
 import traceback
-from collections.abc import Callable
-from time import monotonic
 from typing import TYPE_CHECKING
 
 from scripts.events.bus import Bus, Delivery, StateConflict, StateStore
@@ -126,17 +125,12 @@ class HubRunner:
         return "handled"
 
 
-def _no_renewal() -> None:
-    pass
-
-
-def _run(hub: HubRunner, once: bool, keep: Callable[[], None] = _no_renewal) -> int:
+def _run(hub: HubRunner, once: bool) -> int:
     while True:
         passes = hub.run_once()
         for name, outcomes in passes.items():
             for outcome in outcomes:
                 print(f"{name}: {outcome}")
-        keep()
         if once:
             return 0
         if all(outcomes == ["standby"] for outcomes in passes.values()):
@@ -150,17 +144,20 @@ def _issued_credential(holder: str) -> tuple["Redis", str] | None:
     return redis, auth.issue_service(redis, f"hub-{holder}")
 
 
-def _renewal(redis: "Redis", credential: str) -> Callable[[], None]:
-    kept = monotonic()
+def _renewal(redis: "Redis", credential: str, stopped: threading.Event | None = None) -> threading.Thread:
+    stopped = stopped or threading.Event()
 
-    def keep() -> None:
-        nonlocal kept
-        now = monotonic()
-        if now - kept >= KEEP_S:
-            auth.keep_service(redis, credential)
-            kept = now
+    def renew() -> None:
+        while not stopped.wait(KEEP_S):
+            try:
+                auth.keep_service(redis, credential)
+            except Exception:
+                print("hub: service credential renewal failed", file=sys.stderr)
+                traceback.print_exc()
 
-    return keep
+    thread = threading.Thread(target=renew, name="service-credential", daemon=True)
+    thread.start()
+    return thread
 
 
 def main(argv: list[str]) -> int:
@@ -170,17 +167,16 @@ def main(argv: list[str]) -> int:
     args = parser.parse_args(argv)
     holder = os.environ.get("HOSTNAME") or socket.gethostname()
     issued = _issued_credential(holder)
-    keep = _no_renewal
     if issued:
         os.environ[CREDENTIAL_ENV] = issued[1]
-        keep = _renewal(*issued)
+        _renewal(*issued)
     bus = open_bus(BusConfig.from_environ(os.environ))
     buckets.provision(bus)
     slots.serve(bus)
     hub = HubRunner(bus, registry.configured(bus), holder)
     previous = signal.signal(signal.SIGTERM, lambda *_: sys.exit(143))
     try:
-        return {"run": _run}[args.action](hub, args.once, keep)
+        return {"run": _run}[args.action](hub, args.once)
     finally:
         hub.stop()
         bus.close()
