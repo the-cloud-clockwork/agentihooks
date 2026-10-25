@@ -97,7 +97,7 @@ def test_incomplete_or_failed_shards_never_finish_verification(conclusion):
     assert not ci_gate_shards.ready(jobs, [1, 2])
     jobs.append({"name": "unit (3.12, 2)", "conclusion": conclusion})
     assert not ci_gate_shards.ready(jobs, [1, 2])
-    jobs.append({"name": "unit-rerun (3.12, 2)", "conclusion": "success"})
+    jobs.append({"name": "unit rerun (3.12, 2)", "conclusion": "success"})
     assert ci_gate_shards.ready(jobs, [1, 2])
 
 
@@ -176,7 +176,7 @@ def test_fetch_reads_every_page_and_ignores_foreign_and_expired_artifacts(tmp_pa
 def test_wait_accepts_complete_recovered_shards_and_refreshes_final_artifacts(tmp_path):
     jobs = [
         {"name": "unit (3.12, 1)", "conclusion": "failure"},
-        {"name": "unit-rerun (3.12, 1)", "conclusion": "success"},
+        {"name": "unit rerun (3.12, 1)", "conclusion": "success"},
         {"name": "unit (3.12, 2)", "conclusion": "success"},
     ]
 
