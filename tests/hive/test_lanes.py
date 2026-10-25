@@ -85,6 +85,7 @@ def test_dead_lane_work_asks_the_hub_to_reopen_its_task(hub):
 @pytest.mark.parametrize(
     ("excluded", "taken"),
     [
+        (None, ("eng", "ci", "plan")),
         ("", ("eng", "ci", "plan")),
         ("master", ("eng", "ci", "plan")),
         ("master,ci", ("eng", "plan")),
@@ -168,6 +169,14 @@ def test_the_lane_loop_waits_only_after_a_pass_with_nothing_started(monkeypatch)
     assert seen[0][6] is seen[2][6]
 
 
+def test_each_lane_pass_polls_every_spoke_with_the_given_timeout(monkeypatch):
+    polled = [Mock(**{"poll.return_value": "empty"}), Mock(**{"poll.return_value": "started"})]
+    monkeypatch.setattr(lanes, "spokes", lambda *args: polled)
+
+    assert lanes.run_once("store", "bus", "runtime", "hive", ("eng",), 17, {}) == ["empty", "started"]
+    assert [spoke.poll.call_args.args for spoke in polled] == [(17,), (17,)]
+
+
 def test_lane_spokes_start_only_in_the_distributed_deployment(monkeypatch):
     started = []
     monkeypatch.setattr(lanes, "_serve", lambda environ: started.append(environ))
@@ -184,8 +193,10 @@ def test_lane_spokes_start_only_in_the_distributed_deployment(monkeypatch):
 def test_a_failed_lane_loop_is_logged_and_started_again(monkeypatch, capsys):
     attempts = iter([RuntimeError("nats down"), None])
 
+    loops = []
+
     def fail(*args):
-        assert args == ({"HIVE_EXCLUDED": "master"},)
+        loops.append(args)
         error = next(attempts)
         if error:
             raise error
@@ -197,6 +208,7 @@ def test_a_failed_lane_loop_is_logged_and_started_again(monkeypatch, capsys):
         lanes._serve({"HIVE_EXCLUDED": "master"}, waits.append)
 
     assert waits == [lanes.RETRY_S]
+    assert loops == [({"HIVE_EXCLUDED": "master"},)] * 2
     assert "lane spokes stopped (RuntimeError: nats down); starting again" in capsys.readouterr().err
 
 

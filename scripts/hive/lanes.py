@@ -46,8 +46,9 @@ class LaneTasks:
         self._ask("reopen", event)
 
 
-def lanes(excluded: str) -> tuple[str, ...]:
-    return tuple(lane for lane in LANES if lane not in excluded.split(","))
+def lanes(excluded: str | None) -> tuple[str, ...]:
+    left_out = excluded.split(",") if excluded else ()
+    return tuple(lane for lane in LANES if lane not in left_out)
 
 
 def spokes(store, bus, runtime, hive: str, taken: Iterable[str], held: dict) -> list[Spoke]:
@@ -94,7 +95,7 @@ def _loop(environ: Mapping[str, str]) -> None:
     bus = factory.open_bus(replace(BusConfig.from_environ(environ), provision=False))
     try:
         runtime = LocalHerdrRuntime(HerdrRuntime())
-        run(connect(), bus, runtime, commands.hive_id(), lanes(environ.get(EXCLUDED_ENV, "")))
+        run(connect(), bus, runtime, commands.hive_id(), lanes(environ.get(EXCLUDED_ENV)))
     finally:
         bus.close()
 
