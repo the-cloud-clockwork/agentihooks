@@ -287,6 +287,29 @@ def test_nested_suite_classes_keep_the_full_test_node_id(mapped_repo):
     assert feature_map.validate(root, path) == 1
 
 
+def test_live_check_default_selects_the_latest_completed_pull_request_run(tmp_path):
+    gh = tmp_path / "gh"
+    gh.write_text(
+        f"#!{sys.executable}\nimport json, sys\n"
+        'if "/workflows/test.yml/runs?" in sys.argv[2]:\n'
+        '    assert sys.argv[1:] == ["api", "repos/the-cloud-clockwork/agentihooks/actions/workflows/test.yml/runs?event=pull_request&status=completed&per_page=1", "--jq", \' .workflow_runs[0].id // error("No completed pull request Tests run")\'.strip()]\n'
+        '    print("123")\nelse:\n'
+        '    assert sys.argv[1:] == ["api", "repos/the-cloud-clockwork/agentihooks/actions/runs/123/jobs?per_page=100", "--paginate"]\n'
+        '    print(json.dumps({"jobs": [{"conclusion": "success", "steps": [{"name": "Operator feature regressions and passing fixtures", "conclusion": "success"}]}]}))\n'
+    )
+    gh.chmod(0o755)
+    script = Path(__file__).resolve().parents[1] / "scripts/feature_checks/semgrep-feature-tests.sh"
+    result = subprocess.run(
+        ["bash", str(script)],
+        env={**os.environ, "PATH": f"{tmp_path}:{os.environ['PATH']}"},
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "true"
+
+
 @pytest.mark.parametrize(
     ("jobs", "success"),
     [
