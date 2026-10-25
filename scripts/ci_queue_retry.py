@@ -6,6 +6,8 @@ import subprocess
 import time
 from pathlib import Path
 
+from scripts.ci_budget.rate_limit import gh_api
+
 SHARD = "unit"
 RERUN = "unit rerun"
 WORKFLOW = Path(".github/workflows/test.yml")
@@ -96,7 +98,7 @@ def decide(run: dict, failed: list[dict], workflow: dict) -> tuple[bool, str]:
 
 
 def _api(*args: str) -> str:
-    return subprocess.run(["gh", "api", *args], stdout=subprocess.PIPE, text=True, check=True).stdout
+    return gh_api(list(args), timeout=120, text=True).stdout
 
 
 def log_errors(repo: str, job_id: int) -> list[str]:

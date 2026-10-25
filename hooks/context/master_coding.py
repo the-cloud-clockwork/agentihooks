@@ -13,6 +13,7 @@ from pathlib import Path
 OPEN = re.compile(r"(?<![\w-])allow-master-coding(?![\w-])")
 CLOSE = re.compile(r"(?<![\w-])(?:deny|disallow)-master-coding(?![\w-])")
 PERMISSION_TOOLS = ("AskUserQuestion", "ExitPlanMode")
+MASTER_TASK = re.compile(r"master(?:-\d+)?")
 PROTECTION = re.compile(r"\bgh\s+(?:ruleset\b|api\b[^\n;&|]*(?:/rulesets\b|/branches/[^\s/]+/protection\b))")
 NOTICES = {
     "open": "Master hotfix window open until deny-master-coding or a session restart: the master may create a worktree with wt.sh new, edit "
@@ -51,7 +52,7 @@ def record_seat(session_id: str, slug: str, name: str) -> None:
 
 
 def is_master(session_id: str | None = None) -> bool:
-    if os.environ.get("AGENTIHOOKS_SWARM") and os.environ.get("AGENTIHOOKS_SWARM_TASK") == "master":
+    if os.environ.get("AGENTIHOOKS_SWARM") and MASTER_TASK.fullmatch(str(os.environ.get("AGENTIHOOKS_SWARM_TASK"))):
         return True
     return bool(session_id) and seat_path(session_id).is_file()
 
