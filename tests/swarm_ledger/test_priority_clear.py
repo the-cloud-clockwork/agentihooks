@@ -190,7 +190,15 @@ def test_clear_all_with_nothing_listed_is_accepted_without_a_reason():
 def test_cli_clears_a_blocked_task_priority_once_then_names_why(monkeypatch, capsys):
     state = make_ledger()
     phase = state["phases"][0]["id"]
-    add_task = {"op": "task_add", "id": "ta", "task": "t1", "by": "boss", "phase": phase, "title": "x", "description": "y"}
+    add_task = {
+        "op": "task_add",
+        "id": "ta",
+        "task": "t1",
+        "by": "boss",
+        "phase": phase,
+        "title": "x",
+        "description": "y",
+    }
     block = {"op": "task_update", "id": "tu", "by": "boss", "item": "tasks/t1", "fields": {"state": "blocked"}}
     core.sync(SLUG, ops=[add_task])
     core.sync(SLUG, ops=[block])
