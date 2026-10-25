@@ -276,13 +276,13 @@ def test_a_failed_preparation_is_recorded_at_the_pass_time(store, monkeypatch):
         return attach(store_, slug, record)
 
     def recording(*args):
-        seen.append(args[-1])
+        seen.append((args[3], args[-1]))
         return not_launched(*args)
 
     monkeypatch.setattr(tick_module.transfers, "attach", attaching)
     monkeypatch.setattr(tick_module, "_not_launched", recording)
     tick("sw", store, ledger, pooled, now_ms=1_000)
-    assert seen == [1_000]
+    assert seen == [(pooled, 1_000)]
 
 
 class ConfigRoom(PooledRuntime):
