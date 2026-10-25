@@ -1,8 +1,10 @@
 """Which functions and methods under the packages an entry point reaches, and the Redis commands those send."""
 
 import ast
+import builtins
 import json
 import os
+import re
 import shutil
 import socket
 import sqlite3
@@ -22,6 +24,7 @@ from scripts.swarm.redis_wire import HELPERS, lua, methods, wire
 PACKAGES = ("scripts", "hooks")
 OWN = ("self", "cls")
 RAW = "execute_command"
+CLIENT_TYPES = frozenset({"Redis", "StrictRedis", "Pipeline"})
 
 
 @dataclass
@@ -107,6 +110,44 @@ def _assigned(node: ast.AST) -> tuple[str, ast.Call] | None:
     return (target.id, value) if isinstance(target, ast.Name) and isinstance(value, ast.Call) else None
 
 
+def _bindings(node: ast.AST) -> tuple[list, ast.expr | None]:
+    if isinstance(node, ast.Assign):
+        return node.targets, node.value
+    if isinstance(node, (ast.AnnAssign, ast.NamedExpr)) and node.value is not None:
+        return [node.target], node.value
+    if isinstance(node, ast.withitem) and node.optional_vars is not None:
+        return [node.optional_vars], node.context_expr
+    if isinstance(node, ast.comprehension):
+        return [n for n in ast.walk(node.target) if isinstance(n, ast.Name)], ast.Constant(None)
+    return [], None
+
+
+def _pairs(target: ast.expr, value: ast.expr) -> list[tuple[str, ast.expr]]:
+    """Each name a binding sets with the value it gets; a name unpacked from a value that is not a literal tuple
+    gets no pair, so its type stays unknown."""
+    if isinstance(target, ast.Name):
+        return [(target.id, value)]
+    if not isinstance(target, (ast.Tuple, ast.List)):
+        return []
+    if isinstance(value, (ast.Tuple, ast.List)) and len(value.elts) == len(target.elts):
+        return [pair for t, v in zip(target.elts, value.elts) for pair in _pairs(t, v)]
+    return []
+
+
+def _annotated(node: ast.AST) -> dict[str, bool]:
+    """Parameters whose type is known: true when annotated as a Redis client or pipeline, false for *args and
+    **kwargs."""
+    if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+        return {}
+    params = [*node.args.posonlyargs, *node.args.args, *node.args.kwonlyargs]
+    typed = {
+        p.arg: True
+        for p in params
+        if p.annotation and CLIENT_TYPES & set(re.findall(r"\w+", ast.unparse(p.annotation)))
+    }
+    return typed | {p.arg: False for p in (node.args.vararg, node.args.kwarg) if p}
+
+
 def _main_guard(node: ast.AST) -> bool:
     return isinstance(node, ast.If) and "__name__" in {n.id for n in ast.walk(node.test) if isinstance(n, ast.Name)}
 
@@ -123,11 +164,26 @@ class Program:
         self.units: dict[str, Unit] = {}
         self.scopes: dict[str, dict] = {}
         self.members: dict[str, dict[str, str]] = {}
-        self.defined: set[str] = set()
         self.resolving: set[tuple[str, str]] = set()
         for module, (tree, is_package) in modules.items():
             self._index(module, tree, is_package)
-        self.clients, self.subscribers = self._receivers()
+        named: dict[str, list[str]] = {}
+        for key in self.units:
+            named.setdefault(re.split(r"[:.]", key)[-1], []).append(key)
+        self.unique = {name: keys[0] for name, keys in named.items() if len(keys) == 1}
+        self.scoped: dict[int, dict] = {id(unit): self._nested(unit) for unit in self.units.values()}
+        self.called = {
+            id(node.func): self._callees(node.func, unit)
+            for unit in self.units.values()
+            for node in unit.nodes
+            if isinstance(node, ast.Call)
+        }
+        self.shapes = {id(unit): self._shape(unit) for unit in self.units.values()}
+        self.clients: set[str] = set()
+        self.factories: set[str] = set()
+        self._receivers()
+        self.typing = {id(unit): self._typed(unit) for unit in self.units.values()}
+        self.subscribers = self._subscribers()
 
     def _add(self, key: str, module: str, body: list, owner: str = "") -> None:
         unit = self.units[key] = Unit(module, owner, nodes=list(_walk(body)))
@@ -159,7 +215,6 @@ class Program:
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 self._add(f"{module}:{node.name}", module, [node])
                 scope[node.name] = [f"{module}:{node.name}"]
-                self.defined.add(node.name)
             elif isinstance(node, ast.ClassDef):
                 scope[node.name] = [self._class(module, node)]
             elif not _main_guard(node):
@@ -175,7 +230,6 @@ class Program:
         for item in defs:
             members[item.name] = f"{owner}.{item.name}"
             self._add(members[item.name], module, [item], owner)
-            self.defined.add(item.name)
         return owner
 
     def resolve(self, module: str, name: str, scope: dict) -> list[str]:
@@ -246,40 +300,140 @@ class Program:
 
     def _issued(self, unit: Unit) -> set[str]:
         sent: set[str] = set()
+        local = self.typing[id(unit)]
         for node in unit.nodes:
             if isinstance(node, ast.Constant) and isinstance(node.value, str):
                 sent |= lua(node.value)
             if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
-                sent |= self._call(node)
+                sent |= self._call(node, local)
         return sent
 
-    def _call(self, node: ast.Call) -> frozenset[str]:
-        receiver, name = _tail(node.func.value), node.func.attr
+    def _call(self, node: ast.Call, local: dict[str, bool]) -> frozenset[str]:
+        receiver, name = node.func.value, node.func.attr
         if name == RAW:
             first = node.args[0] if node.args else None
             return frozenset({str(first.value).upper()}) if isinstance(first, ast.Constant) else frozenset()
-        if receiver in self.clients and name in HELPERS:
+        client = self._receiver(receiver, local)
+        if client and name in HELPERS:
             return HELPERS[name]()
-        if receiver in self.clients and name in methods(redis.Redis):
+        if client and name in methods(redis.Redis):
             return wire(redis.Redis, name)
-        if receiver in self.subscribers and name in methods(PubSub):
+        if _tail(receiver) in self.subscribers and name in methods(PubSub):
             return wire(PubSub, name)
         return frozenset()
 
-    def _receivers(self) -> tuple[set[str], set[str]]:
-        """Names holding a Redis client, which call a command no function here or in the standard library defines,
-        and names bound to a pubsub handle."""
-        common = _stdlib() | self.defined | {RAW}
-        clients, subscribers = set(), set()
+    def _factory(self, func: ast.expr, local: dict[str, bool]) -> bool:
+        """Whether a call makes a Redis client or pipeline: a redis-py constructor, or a function here that returns
+        one."""
+        if isinstance(func, ast.Attribute) and func.attr == "pipeline":
+            return self._receiver(func.value, local)
+        if isinstance(func, ast.Attribute) and func.attr == "from_url":
+            return _tail(func.value) in CLIENT_TYPES | {"redis"}
+        if _tail(func) in CLIENT_TYPES:
+            return True
+        return any(key in self.factories for key in self.called[id(func)] or [])
+
+    def _callees(self, func: ast.expr, unit: Unit) -> list[str] | None:
+        """The functions here a call may run, found through the unit's names and imports, its own class, or a name
+        only one function defines; None when the callee cannot be found here."""
+        scope = self.scoped[id(unit)]
+        if isinstance(func, ast.Name):
+            bound = func.id in scope or func.id in self.scopes[unit.module] or hasattr(builtins, func.id)
+            return self.resolve(unit.module, func.id, scope) if bound else None
+        if not isinstance(func, ast.Attribute):
+            return None
+        if unit.owner and _tail(func.value) in OWN:
+            found = self.members[unit.owner].get(func.attr)
+            return [found] if found else None
+        head, _, rest = _dotted(func).partition(".")
+        targets = [t[1:] for t in scope.get(head) or self.scopes[unit.module].get(head, []) if t.startswith("@")]
+        if targets:
+            return [key for target in targets for key in self._import(f"{target}.{rest}")]
+        found = self.unique.get(func.attr)
+        return [found] if found else None
+
+    def _held(self, expr: ast.expr, local: dict[str, bool], loose: bool = False) -> bool:
+        """Whether an expression holds a Redis client or pipeline: a constructor or factory call, a name the unit
+        binds to one, or an attribute bound to one somewhere. Loose also takes a name the unit does not bind, such
+        as a parameter, when that name holds a client somewhere."""
+        if isinstance(expr, ast.BoolOp):
+            return any(self._held(value, local, loose) for value in expr.values)
+        if isinstance(expr, ast.IfExp):
+            return self._held(expr.body, local, loose) or self._held(expr.orelse, local, loose)
+        if isinstance(expr, ast.Call):
+            return self._factory(expr.func, local)
+        if isinstance(expr, ast.Name):
+            return local[expr.id] if expr.id in local else loose and expr.id in self.clients
+        return isinstance(expr, ast.Attribute) and expr.attr in self.clients
+
+    def _receiver(self, expr: ast.expr, local: dict[str, bool]) -> bool:
+        if self._held(expr, local, loose=True):
+            return True
+        chained = isinstance(expr, ast.Call) and isinstance(expr.func, ast.Attribute)
+        return chained and expr.func.attr in methods(redis.Redis) and self._receiver(expr.func.value, local)
+
+    def _shape(self, unit: Unit) -> tuple[dict, list, list, list, list]:
+        """What typing reads from a unit, taken once: annotated parameters, name bindings in source order with
+        whether their callee is unknown, attribute and keyword bindings, and returned values."""
+        annotated = {name: held for node in unit.nodes for name, held in _annotated(node).items()}
+        bindings = sorted(
+            (found for found in map(_bindings, unit.nodes) if found[0]),
+            key=lambda found: (found[0][0].lineno, found[0][0].col_offset),
+        )
+        pairs = [
+            (target, value, isinstance(value, ast.Call) and self.called[id(value.func)] is None)
+            for targets, value in bindings
+            for t in targets
+            for target, value in _pairs(t, value)
+        ]
+        attributes = [(t.attr, value) for targets, value in bindings for t in targets if isinstance(t, ast.Attribute)]
+        keywords = [(node.arg, node.value) for node in unit.nodes if isinstance(node, ast.keyword) and node.arg]
+        returns = [node.value for node in unit.nodes if isinstance(node, ast.Return) and node.value is not None]
+        return annotated, pairs, attributes, keywords, returns
+
+    def _typed(self, unit: Unit) -> dict[str, bool]:
+        """The names a unit binds, each true when a binding holds a Redis client or pipeline. Bindings are read in
+        source order once per binding, so a name bound later in a loop still reaches an alias read earlier. A name
+        bound only to a call whose callee cannot be found here, or only as a loop target, gets no entry, so it
+        falls back by name."""
+        annotated, pairs, _, _, _ = self.shapes[id(unit)]
+        local = dict(annotated)
+        for _ in pairs:
+            for target, value, unresolved in pairs:
+                if self._held(value, local):
+                    local[target] = True
+                elif not unresolved:
+                    local[target] = local.get(target) is True
+        return local
+
+    def _spread(self, key: str, unit: Unit) -> None:
+        local = self._typed(unit)
+        _, _, attributes, keywords, returns = self.shapes[id(unit)]
+        self.clients |= {name for name, held in local.items() if held}
+        self.clients |= {attr for attr, value in attributes if self._held(value, local)}
+        self.clients |= {arg for arg, value in keywords if self._held(value, local)}
+        if any(self._held(value, local) for value in returns):
+            self.factories.add(key)
+
+    def _receivers(self) -> None:
+        """Grow the names holding a Redis client and the functions returning one, typed from the client and
+        pipeline constructors and annotations, until neither changes. Passes are capped at one per unit so a run
+        always ends."""
+        for _ in self.units:
+            size = len(self.clients), len(self.factories)
+            for key, unit in self.units.items():
+                self._spread(key, unit)
+            if (len(self.clients), len(self.factories)) == size:
+                return
+
+    def _subscribers(self) -> set[str]:
+        """Names bound to a pubsub handle."""
+        subscribers = set()
         for unit in self.units.values():
             for node in unit.nodes:
-                if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
-                    name, receiver = node.func.attr, _tail(node.func.value)
-                    if receiver and name not in common and name in methods(redis.Redis) and wire(redis.Redis, name):
-                        clients.add(receiver)
-                elif (found := _assigned(node)) and _tail(found[1].func) == "pubsub":
+                if (found := _assigned(node)) and _tail(found[1].func) == "pubsub":
                     subscribers.add(found[0])
-        return clients, subscribers
+        return subscribers
 
 
 class _Reach:

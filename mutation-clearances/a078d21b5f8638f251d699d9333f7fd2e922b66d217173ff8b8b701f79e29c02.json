@@ -1,0 +1,6 @@
+{
+  "scripts/recall/store.py:scripts.recall.store.xǁSQLiteRecallStoreǁsources__mutmut_10:28d9d68b5835f4e8ba7c47b967e8b128ac1788a3ded2b3a95a3df8e3f797e4eb": {
+    "reader": "standards_reader",
+    "reason": "Lowercasing select source, at from indexed changes no result, and the \"indexed\" in tables guard is untouched."
+  }
+}

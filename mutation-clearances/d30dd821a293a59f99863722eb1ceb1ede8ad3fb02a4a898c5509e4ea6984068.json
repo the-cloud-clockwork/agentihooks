@@ -1,0 +1,6 @@
+{
+  "scripts/master_login_chain.py:scripts.master_login_chain.x_authorize__mutmut_52:0cb68aca6f380edf0a58f1049117ff621e20b95d420448f61c70af2fe1ee691a": {
+    "reader": "Standards",
+    "reason": "Every subprocess stream is DEVNULL or a file descriptor, never PIPE. No Popen text wrapper is observed; process lifecycle calls behave identically."
+  }
+}

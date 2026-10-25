@@ -1,0 +1,6 @@
+{
+  "scripts/doctor/ci_speed_read.py:scripts.doctor.ci_speed_read.x\u01c1_Api\u01c1request__mutmut_2:84182118ec305a5129cac733357c7f5964f592594ecf6a07d547b9ac5ceb71a6": {
+    "reader": "Standards",
+    "reason": "Independent Standards symbol ruling after CI run 40121088069: only attempt zero can continue. Attempt one returns decoded JSON or raises on every path, so range(3) adds an unreachable iteration and changes no output."
+  }
+}

@@ -1,3 +1,4 @@
+import json
 import os
 import shutil
 import socket
@@ -8,10 +9,13 @@ from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
+from nats.js.errors import APIError
 
 from scripts.events import nats
 
 REQUIRED_ENV = "NATS_SERVER_REQUIRED"
+UNMATCHED_MSG_ID = "never-a-last-msg-id"
+WRONG_LAST_MSG_ID = 10070
 
 
 def binary() -> str:
@@ -42,21 +46,53 @@ def wait_listening(port: int, process: subprocess.Popen, deadline_s: float = 10)
     raise RuntimeError(f"nats-server did not listen on {port}")
 
 
+def _wait_url(ports: Path, process: subprocess.Popen, deadline_s: float = 10) -> str:
+    stop = time.monotonic() + deadline_s
+    while time.monotonic() < stop:
+        if process.poll() is not None:
+            raise RuntimeError(f"nats-server exited with {process.returncode}")
+        try:
+            return json.loads(ports.read_text())["nats"][0]
+        except (FileNotFoundError, json.JSONDecodeError):
+            time.sleep(0.02)
+    raise RuntimeError("nats-server did not publish its listener")
+
+
 def durables(bus) -> list[str]:
     return sorted(info.name for info in bus._loop.run(bus._js.consumers_info(nats.EVENT_STREAM)))
 
 
+def remembers(bus, subject: str, stream: str, event_id: str) -> bool:
+    headers = {nats.MSG_ID: event_id, "Nats-Expected-Last-Msg-Id": UNMATCHED_MSG_ID}
+    try:
+        ack = bus._loop.run(bus._js.publish(subject, b"", stream=stream, headers=headers))
+    except APIError as error:
+        if error.err_code != WRONG_LAST_MSG_ID:
+            raise
+        return False
+    return ack.duplicate
+
+
+def wait_forgotten(bus, subject: str, stream: str, event_id: str, deadline_s: float = 10) -> None:
+    stop = time.monotonic() + deadline_s
+    while remembers(bus, subject, stream, event_id):
+        if time.monotonic() >= stop:
+            pytest.fail(f"{stream} still remembers message id {event_id!r} after {deadline_s}s")
+        time.sleep(0.01)
+
+
 @contextmanager
 def running(store: Path) -> Iterator[str]:
-    port = free_port()
+    executable = binary()
+    ports = store.parent / f"{store.name}-ports"
+    ports.mkdir(parents=True, exist_ok=True)
     process = subprocess.Popen(
-        [binary(), "-js", "-a", "127.0.0.1", "-p", str(port), "-sd", str(store)],
+        [executable, "-js", "-a", "127.0.0.1", "-p", "-1", "-sd", str(store), "--ports_file_dir", str(ports)],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
     )
     try:
-        wait_listening(port, process)
-        yield f"nats://127.0.0.1:{port}"
+        yield _wait_url(ports / f"{Path(executable).name}_{process.pid}.ports", process)
     finally:
         process.terminate()
         process.wait(10)

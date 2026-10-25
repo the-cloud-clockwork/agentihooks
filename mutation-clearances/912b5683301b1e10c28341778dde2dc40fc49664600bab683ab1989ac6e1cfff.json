@@ -1,0 +1,6 @@
+{
+  "scripts/ci_queue_fail_fast.py:scripts.ci_queue_fail_fast.x_logged_loss__mutmut_4:2f2ec193103c05041ed8b712b5baa6856bfeec4b26baee13c582085fe62b3745": {
+    "reader": "Standards reader /root/standards_reader, round three",
+    "reason": "Equivalent: job_text uses the log argument only in if log. False and None both skip log_errors and return identical annotation text; no runtime type check exists."
+  }
+}

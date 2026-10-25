@@ -1,0 +1,6 @@
+{
+  "scripts/master_login_chain.py:scripts.master_login_chain.x_notification__mutmut_26:df67345c7c5391aae458bcdacae99ee0b2a2bc8edd179ef39881de4b05789103": {
+    "reader": "Standards",
+    "reason": "json.dumps uses ensure_ascii=True before writing the record and an ASCII newline. Non-ASCII input is escaped. On supported ASCII-compatible locale encodings, default or None encoding writes identical bytes, with unchanged newline handling, file mode and append behavior."
+  }
+}

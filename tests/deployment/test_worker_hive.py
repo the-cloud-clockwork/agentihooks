@@ -44,6 +44,7 @@ def startup(tmp_path, *, credential="mounted", refuse="", ssh=False, sshd_dies=F
         'if [[ "$1" == init ]]; then\n'
         '  printf "hosted ledger CA\\n" > "$AGENTIHOOKS_HOME/ledger-ca.pem"\n'
         '  [[ "$*" != "init --bundle "* ]] || printf %s "$3" > "$AGENTIHOOKS_HOME/linked-bundle"\n'
+        '  [[ "$*" != "init --bundle "* ]] || git -C "$3" rev-parse HEAD > "$AGENTIHOOKS_HOME/bundle-head-at-init"\n'
         '  [[ "$REFUSE" != init ]] || exit 7\n'
         '  [[ "$REFUSE" != bundle-init || "$*" == init ]] || exit 7\nfi\n'
         'if [[ "$1 ${2:-}" == "hive join" ]]; then\n'
@@ -93,7 +94,7 @@ def startup(tmp_path, *, credential="mounted", refuse="", ssh=False, sshd_dies=F
         "GITHUB_PERSONAL_ACCESS_TOKEN": TOKEN,
         "GITHUB_TOKEN": TOKEN,
         "HIVE_BUNDLE_URL": str(repo) if bundle else bundle_url,
-        "HIVE_BUNDLE_REF": "dev",
+        "HIVE_BUNDLE_REF": os.environ.get("HIVE_BUNDLE_REF", "dev"),
         "AGENTIHOOKS_HOME": str(home),
         "SWARM_HIVE_ID": "worker-pod",
         "AGENTIHOOKS_HIVE_ID": "worker-member",
@@ -129,7 +130,7 @@ RUN = [
     "bundle unlink",
     "init",
     "deps ensure",
-    "hive set --keep worker-member ui=no ephemeral=yes draining=no excluded=master max-agents=20",
+    "hive set --keep worker-member ui=no ephemeral=yes draining=no excluded=master master-swarms= max-agents=20",
     "hive run",
 ]
 
@@ -339,6 +340,65 @@ def test_bundle_is_cloned_beside_the_repos_and_linked_by_init(tmp_path):
     assert commands.splitlines()[1:3] == [f"init --bundle {bundle}", "deps ensure"]
     assert (repo.parent.parent / "state/linked-bundle").read_text() == str(bundle)
     assert commands.endswith("hive run\n")
+
+
+def head(repo):
+    return subprocess.run(
+        ["git", "-C", str(repo), "rev-parse", "HEAD"], check=True, capture_output=True, text=True
+    ).stdout
+
+
+def commit(repo, message):
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(repo),
+            "-c",
+            "user.name=fixture",
+            "-c",
+            "user.email=fixture@example.test",
+            "commit",
+            "--allow-empty",
+            "-m",
+            message,
+        ],
+        check=True,
+        capture_output=True,
+    )
+    return head(repo)
+
+
+def kept_bundle(tmp_path, ref="dev"):
+    origin = tmp_path / "bundle-origin"
+    subprocess.run(["git", "init", f"--initial-branch={ref}", str(origin)], check=True, capture_output=True)
+    commit(origin, "old doctrine")
+    kept = tmp_path / "repos/agentihooks-bundle"
+    subprocess.run(["git", "clone", "--branch", ref, str(origin), str(kept)], check=True, capture_output=True)
+    return origin, kept
+
+
+def test_a_kept_bundle_clone_is_fast_forwarded_to_its_origin_ref_before_init(tmp_path, monkeypatch):
+    origin, kept = kept_bundle(tmp_path, ref="release")
+    new = commit(origin, "new doctrine")
+    monkeypatch.setenv("HIVE_BUNDLE_REF", "release")
+    result, commands, home, _ = startup(tmp_path, bundle_url=str(origin))
+    assert result.returncode == 0, result.stderr
+    assert (home / "bundle-head-at-init").read_text() == new
+    assert head(kept) == new
+    assert commands.splitlines()[1:3] == [f"init --bundle {kept}", "deps ensure"]
+
+
+def test_a_kept_bundle_clone_that_cannot_fast_forward_is_logged_and_kept(tmp_path):
+    origin, kept = kept_bundle(tmp_path)
+    commit(origin, "new doctrine")
+    local = commit(kept, "local only")
+    result, commands, home, _ = startup(tmp_path, bundle_url=str(origin))
+    assert result.returncode == 0, result.stderr
+    assert "worker-hive: bundle fast forward failed; init runs on the kept clone\n" in result.stderr
+    assert (home / "bundle-head-at-init").read_text() == local
+    assert head(kept) == local
+    assert commands.splitlines()[1:3] == [f"init --bundle {kept}", "deps ensure"]
 
 
 def test_linked_profiles_are_cloned_and_registered_before_init(tmp_path, monkeypatch):

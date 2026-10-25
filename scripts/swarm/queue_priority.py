@@ -35,7 +35,7 @@ class Displaced:
 
     def pulls(self) -> list[dict]:
         found = [json.loads(raw) for raw in self.redis.hgetall(self.key).values()]
-        return sorted(found, key=lambda pull: -pull["order"])
+        return sorted(found, key=lambda pull: pull["order"])
 
 
 class Busy(SwarmError):

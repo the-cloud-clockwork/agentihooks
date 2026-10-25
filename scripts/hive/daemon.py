@@ -21,6 +21,7 @@ from scripts.swarm.commands import hive_id
 if TYPE_CHECKING:
     from redis import Redis
 
+    from scripts.hive.orders import Consumer
     from scripts.swarm.runtime import HerdrRuntime
     from scripts.swarm_v2.runtime.local import LocalHerdrRuntime
 
@@ -63,6 +64,7 @@ def beat(redis: "Redis", local_id: str) -> None:
         registry.seed(pipe, local_id)
         fields = {name: json.dumps(report[name]) for name in ("slots", "interactive", "repos")}
         fields["master_login"] = json.dumps({"claude": master_claude_login.signed_in()})
+        fields["master_login_enabled"] = "no" if master_claude_login.unusable() else "yes"
         beat_ms = int(time.time() * 1000)
         fields["heartbeat_at"] = str(beat_ms)
         pipe.hset(key, mapping=fields)
@@ -75,7 +77,7 @@ def beat(redis: "Redis", local_id: str) -> None:
     if not member:
         _refresh_launch_slots(redis, executions)
     if not fenced:
-        consumer.poll()
+        poll_orders(consumer)
     consumer.poll_commands()
     consumer.sync_workspaces(TTL_SECONDS)
     join_report.heartbeat(redis, local_id, int(time.time() * 1000))
@@ -92,6 +94,31 @@ def beat(redis: "Redis", local_id: str) -> None:
         print(f"hive account slot heartbeat failed ({type(exc).__name__}: {exc}); retrying next beat", file=sys.stderr)
     publish_config(redis, local_id, report["repos"])
     close_dead_tabs(set(hosted["names"]))
+
+
+def poll_orders(consumer: "Consumer") -> None:
+    from scripts.swarm_ledger import authority_context
+
+    member = consumer.hive == os.environ.get("AGENTIHOOKS_HIVE_ID")
+    pending = not member and consumer.store.redis.xlen(consumer.orders.stream(consumer.hive))
+    secret = authority_context.hosted() if pending else None
+    if not secret:
+        consumer.poll()
+        return
+    kept = os.environ.get("SWARM_SECRET")
+    try:
+        with authority_context.bound(secret):
+            consumer.poll()
+    finally:
+        if kept is not None:
+            os.environ["SWARM_SECRET"] = kept
+
+
+def fill_operator_env() -> None:
+    from scripts import operator_env
+
+    if hive_id() != os.environ.get("AGENTIHOOKS_HIVE_ID"):
+        operator_env.fill(os.environ)
 
 
 def _index_hive(redis: "Redis", local_id: str) -> None:
@@ -191,6 +218,7 @@ def run(connect: Callable[[], tuple["Redis", "Redis"]]) -> None:
     from redis.exceptions import ConnectionError, TimeoutError
 
     lost = (ConnectionError, TimeoutError)
+    fill_operator_env()
     quota_refresh.refresh(os.environ)
     worker, attempted_at = None, time.time()
     renewed = time.time()
@@ -345,7 +373,14 @@ def _subscriptions(environ, counts: dict, now: float) -> tuple[list, dict]:
             if result
             else _reading(balancer.QuotaWindow(), balancer.QuotaWindow(), None)
         )
-    pool = codex_router.routed([account for account in codex_router.accounts(environ) if account.signed_in], environ)
+    pool = codex_router.routed(
+        [
+            account
+            for account in codex_router.accounts(environ)
+            if account.signed_in and not codex_router.refusal(account, environ)
+        ],
+        environ,
+    )
     readings = codex_router.quotas(pool, environ)
     for account in pool:
         reading = readings.get(account.name)

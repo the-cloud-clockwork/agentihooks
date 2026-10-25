@@ -1,4 +1,7 @@
 import copy
+import json
+
+import pytest
 
 from scripts.doctor import spawns
 from tests.doctor.recorded import load
@@ -15,6 +18,77 @@ def test_recorded_spawns_and_planted_failed_spawn():
     assert found.measure == 1
     assert "init-agent timed out" in found.evidence[0]
     assert record["actions"] == []
+
+
+def test_reservation_refusals_require_recorded_free_sessions():
+    record = load("spawns")
+    slug = record["slug"]
+    refusal = f"{slug}: spawn failed for dt2: account reservation is full"
+    accounts = [
+        {"harness": "claude", "state": "OPEN", "sessions": 6, "cap": 6},
+        {"harness": "codex", "state": "OPEN", "sessions": 0, "cap": 8},
+    ]
+    capacity = {"harness": "claude", "accounts": accounts}
+    record["actions"] = [f"{slug}: spawn capacity for dt2: {json.dumps(capacity)}", refusal]
+    assert spawns.failed(record) == []
+    accounts[0]["sessions"] = 5
+    record["actions"] = [f"{slug}: spawn capacity for dt2: {json.dumps(capacity)}", refusal]
+    [found] = spawns.failed(record)
+    assert found.id == "failed-spawn/dt2"
+    assert found.measure == 1
+    assert found.evidence == ("account reservation is full",)
+
+
+@pytest.mark.parametrize(
+    ("harness", "state", "sessions", "cap", "count"),
+    [
+        ("claude", "OPEN", 5, 6, 1),
+        ("claude", "OPEN", 6, 6, 0),
+        ("claude", "OPEN", 7, 6, 0),
+        ("codex", "OPEN", 0, 6, 0),
+        ("claude", "DRAIN", 0, 6, 0),
+        ("claude", "UNKNOWN", 0, 6, 0),
+        ("claude", "OPEN", 0, None, 0),
+        ("claude", "OPEN", 0, 0, 0),
+    ],
+)
+def test_only_eligible_accounts_for_the_refused_harness_count(harness, state, sessions, cap, count):
+    record = load("spawns")
+    slug = record["slug"]
+    snapshot = {
+        "harness": "claude",
+        "accounts": [{"harness": harness, "state": state, "sessions": sessions, "cap": cap}],
+    }
+    record["actions"] = [
+        f"{slug}: spawn capacity for dt2: {json.dumps(snapshot)}",
+        f"{slug}: spawn failed for dt2: account reservation is full",
+    ]
+    found = spawns.failed(record)
+    assert len(found) == count
+    if count:
+        assert found[0].measure == 1
+
+
+def test_capacity_evidence_is_consumed_by_one_failure_and_other_errors_remain():
+    record = load("spawns")
+    slug = record["slug"]
+    snapshot = {
+        "harness": "codex",
+        "accounts": [{"harness": "codex", "state": "OPEN", "sessions": 1, "cap": 2}],
+    }
+    record["actions"] = [
+        f"other: spawn capacity for dt2: {json.dumps(snapshot)}",
+        f"{slug}: spawn failed for dt2: account reservation is full",
+        f"{slug}: spawn capacity for dt2: {json.dumps(snapshot)}",
+        f"{slug}: spawn failed for dt2: account reservation is full",
+        f"{slug}: spawn failed for dt2: account reservation is full",
+        f"{slug}: spawn failed for dt2: init-agent timed out",
+        f"{slug}: master spawn failed: boom",
+    ]
+    found = {finding.subject: finding for finding in spawns.failed(record)}
+    assert found["dt2"].measure == 2
+    assert found["dt2"].evidence == ("account reservation is full", "init-agent timed out")
+    assert found["master"].evidence == ("boom",)
 
 
 def test_runtime_records_the_launcher_overflow_placement(tmp_path):

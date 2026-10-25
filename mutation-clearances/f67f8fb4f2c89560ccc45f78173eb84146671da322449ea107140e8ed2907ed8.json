@@ -1,0 +1,6 @@
+{
+  "scripts/doctor/inbox.py:scripts.doctor.inbox.x__task_mismatch__mutmut_12:5ecd39cdb02c20f234150c1c9c1e2774b40cf09638332ebdf024a424b29377a5": {
+    "reader": "Standards",
+    "reason": "Omitting dict.get default yields None; the task truth guard rejects it exactly like empty string before any output."
+  }
+}

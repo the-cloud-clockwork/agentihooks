@@ -6,6 +6,7 @@ import sys
 from pathlib import Path
 
 from scripts import gh_config
+from scripts.swarm import brain_binding
 
 # A name outside this shape cannot be a shell variable, and a mistyped line can
 # put a secret in the name, so such a line is reported by position only.
@@ -189,7 +190,7 @@ def _load_brain_env(*, override_file_owned: bool = False) -> None:
     .env already set is left alone, so this is a default, not an override.
     """
     env_file = _brain_env_file()
-    if not env_file.is_file():
+    if os.environ.get(brain_binding.VARIABLE) or not env_file.is_file():
         return
     try:
         lines = env_file.read_text(encoding="utf-8").splitlines()
@@ -293,8 +294,19 @@ def _env_files_fingerprint() -> tuple:
     return tuple(sorted(stamps))
 
 
+def _guard_swarm_brain() -> None:
+    if not os.environ.get(brain_binding.VARIABLE):
+        return
+    os.environ["BRAIN_SOURCE_TYPE"] = "none"
+    if not brain_binding.audience(os.environ):
+        for key in ("BRAIN_URL", "BRAIN_HTTP_TOKEN", "KB_ROUTER_TOKEN"):
+            os.environ.pop(key, None)
+        os.environ["BRAIN_ENABLED"] = os.environ["BRAIN_WRITER_ENABLED"] = "false"
+
+
 _load_user_env()
 _load_brain_env()
+_guard_swarm_brain()
 _ENV_FINGERPRINT = _env_files_fingerprint()
 # The scripts package pin ran before the env files above could set XDG_CONFIG_HOME.
 gh_config.pin(os.environ)
@@ -340,6 +352,7 @@ def reload_brain_env(force: bool = False) -> dict:
 
     _load_user_env(override_file_owned=True)
     _load_brain_env(override_file_owned=True)
+    _guard_swarm_brain()
 
     _feed_dir = Path(AGENTIHOOKS_HOME) / "brain-feed"
     _default = "true" if (_brain_http_configured() or (_feed_dir.is_dir() and any(_feed_dir.glob("*.md")))) else "false"

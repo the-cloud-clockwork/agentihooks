@@ -1,0 +1,6 @@
+{
+  "scripts/inbox/exits.py:scripts.inbox.exits.x__task_continues__mutmut_6:c2f0e80425ae3a8cea324483635f9055a87ddbdbbe6018d7a0494813fae41173": {
+    "reader": "Standards",
+    "reason": "An absent task match yields None instead of empty string; not task short circuits to True without exposing either sentinel."
+  }
+}

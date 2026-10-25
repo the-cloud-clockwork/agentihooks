@@ -504,10 +504,10 @@ def headless_front_door_order(setup, route=""):
     ("enabled", "reason"),
     [
         (False, "the master claude ai login is off on this hive: set AGENTIHOOKS_MASTER_CLAUDE_LOGIN=true"),
-        (True, "no master claude ai login: run agentihooks claude login --master"),
+        ("true", "the master claude ai login is off on this hive: set AGENTIHOOKS_MASTER_CLAUDE_LOGIN=true"),
     ],
 )
-def test_a_headless_hive_without_a_usable_master_login_refuses_the_front_door_launch(
+def test_a_headless_hive_with_master_login_disabled_refuses_the_front_door_launch(
     setup, monkeypatch, tmp_path, enabled, reason, route
 ):
     from hooks import config as hooks_config
@@ -534,6 +534,97 @@ def test_a_headless_hive_with_a_usable_master_login_takes_the_front_door_launch(
     ack = orders.Consumer(setup.store.redis, "remote", runtime).launch(order, admitted, task)
     assert ack.failure == "unavailable: spawned"
     runtime.spawn.assert_called_once()
+
+
+def test_empty_native_sessions_reach_front_door_recovery(setup, monkeypatch):
+    from scripts import master_claude_login
+    from scripts.hive import orders
+    from scripts.swarm_v2.runtime.base import Outcome, Status
+
+    monkeypatch.setattr(master_claude_login.hooks_config, "MASTER_CLAUDE_LOGIN", True)
+    monkeypatch.setattr(master_claude_login, "logins", lambda: {})
+    order, admitted, task = headless_front_door_order(setup)
+    runtime = Mock()
+    runtime.spawn.return_value = Outcome("spawn", Status.UNAVAILABLE, "local", detail="recovery reached")
+    ack = orders.Consumer(setup.store.redis, "remote", runtime).launch(order, admitted, task)
+    assert ack.failure == "unavailable: recovery reached"
+    runtime.spawn.assert_called_once()
+
+
+def test_empty_native_inventory_is_selected_as_private_recovery(setup):
+    task = {**master(setup), "seat": "master@fixture"}
+    master_login_hive(setup)
+    write_hive(setup, excluded=[], master_login={}, master_login_enabled="yes")
+    selected = setup.launcher.select(setup.config, "master", task)
+    assert selected.route_kind == "master-login"
+    assert selected.account.name == ""
+    assert selected.account.cap is None
+
+
+def test_native_master_fallback_account_is_recorded_canonically(setup):
+    from dataclasses import replace
+    from types import SimpleNamespace
+
+    from scripts.hive.orders import Ack, launch_target
+
+    order, admitted, task = headless_front_door_order(setup)
+    order = replace(order, hive="remote")
+    target = {"host_id": "remote", **launch_target(12, "fixture", {12: SimpleNamespace(start_time=34)})}
+    ack = Ack(
+        "live",
+        target,
+        execution={
+            "account": "token-account",
+            "placement": "fallback",
+            "profile_decision": {"validation": {"account": "token-account"}},
+        },
+    )
+    live = setup.launcher.record(admitted, order, ack)
+    assert live.account == "token-account"
+    assert setup.store.execution_registry.get(order.slug, admitted.execution_id).account == "token-account"
+
+
+def test_non_native_ack_cannot_replace_the_recorded_account(setup):
+    from dataclasses import replace
+
+    from scripts.hive.orders import Ack
+    from scripts.swarm.store import SwarmError
+
+    order, admitted, task = headless_front_door_order(setup)
+    order = replace(order, hive="remote", route_kind="subscription")
+    ack = Ack(
+        "live",
+        {"host_id": "remote"},
+        execution={
+            "account": "other",
+            "placement": "fallback",
+            "profile_decision": {"validation": {"account": "other"}},
+        },
+    )
+    with pytest.raises(SwarmError) as refused:
+        setup.launcher.record(admitted, order, ack)
+    assert str(refused.value) == (
+        "hive launch acknowledgement does not match the live execution: "
+        f"ack account expected {admitted.account!r}, got 'other'"
+    )
+    assert setup.store.execution_registry.get(order.slug, admitted.execution_id).account == admitted.account
+
+
+def test_master_browser_wait_fits_the_launch_order_lifetime(setup, monkeypatch):
+    from scripts import master_login_chain as chain
+    from scripts.swarm import lease
+    from scripts.swarm_v2.runtime.base import SpawnRequest
+
+    task = {**master(setup), "seat": "master@fixture", "controller_epoch": setup.held.epoch}
+    master_login_hive(setup)
+    request = SpawnRequest(setup.config, "master", setup.store.next_name(setup.config.slug, "master"), task)
+    selected = setup.launcher.select(setup.config, "master", task)
+    captured = []
+    monkeypatch.setattr(setup.launcher, "answer", lambda request, order: captured.append(order))
+    setup.launcher.send_order(request, selected, task)
+    order = captured[0]
+    assert order.expires_at - lease.now_ms(setup.store) >= chain.BUDGET.order_ttl_ms - 1000
+    assert setup.store.redis.pttl(order.prompt_ref) >= chain.BUDGET.order_ttl_ms - 1000
 
 
 @pytest.mark.parametrize(("route", "failure"), [("subscription", "unavailable: spawned"), ("", "refused")])

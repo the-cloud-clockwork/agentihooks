@@ -9,10 +9,10 @@ import pytest
 
 import scripts.swarm.store as swarm_store
 from scripts import openbao_kv
-from scripts.hive import auth, cli, create, create_github, create_render, invite, machine, registry
+from scripts.hive import auth, cli, create, create_github, create_render, invite, machine, nats_grant, registry
 from scripts.hive.bundle_origin import SETTINGS_PATH
 from tests.codex_fakes import http_error
-from tests.hive.test_create import NAME, NOW, PR, RECORD, REPO, TARGET, TEMPLATE, Run, Store
+from tests.hive.test_create import NAME, NOW, PR, RECORD, REPO, RESYNC, SIGNER, TARGET, TEMPLATE, Run, Store
 from tests.hive.test_invite import LIKE, SWARM, URL, Bao, _bao
 
 pytestmark = pytest.mark.unit
@@ -62,8 +62,14 @@ def world(tmp_path, monkeypatch):
     (tmp_path / ".ssh" / "a.pub").write_text("ssh-ed25519 FIRST a\n")
     (tmp_path / ".ssh" / "b.pub").write_text("ssh-ed25519 SECOND b\n")
     (tmp_path / ".ssh" / "known_hosts").write_text("[other]:22 ssh-ed25519 OTHER\n")
-    bao = Bao({LIKE: {"credential": f"AGENTIHOOKS_HIVE_URL={URL}\n", "swarm_url": SWARM}})
-    environ = {"HOME": str(tmp_path), "AGENTIHOOKS_HOME": str(tmp_path / "deep" / "agentihooks")}
+    bao = Bao(
+        {LIKE: {"credential": f"AGENTIHOOKS_HIVE_URL={URL}\n", "swarm_url": SWARM}, SIGNER: {"member_swarms": {}}}
+    )
+    environ = {
+        "HOME": str(tmp_path),
+        "AGENTIHOOKS_HOME": str(tmp_path / "deep" / "agentihooks"),
+        nats_grant.SIGNER_ENV: SIGNER,
+    }
     run, lines, published = Strict(), [], []
     monkeypatch.setattr(create.setup, "publish", lambda *args: published.append(args) or "settings written")
     monkeypatch.setattr(swarm_store, "RedisStore", OneStore)
@@ -103,6 +109,7 @@ def test_a_full_create_makes_exactly_these_calls(world):
     member = invite._env(world.bao.records[RECORD]["credential"])[invite.HIVE_ID]
     assert world.run.plain() == [
         ["kubectl", "get", "service", "-A", "-o", "json"],
+        RESYNC,
         ["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-C", NAME, "-f", "host_key"],
         ["gh", "api", "-H", create_github.RAW, f"repos/{REPO}/contents/{create_render.TEMPLATE_PATH}?ref=dev"],
         ["gh", "pr", "list", "-R", REPO, "--head", NAME, "--state", "all", "--json", "url,state", "--jq", PENDING],
@@ -131,10 +138,8 @@ def test_a_full_create_makes_exactly_these_calls(world):
         ["gh", "pr", "view", PR, "--json", "state", "--jq", ".state"],
         list(machine.LIST),
         ["herdr", "machine", "add", "--label", NAME, "--remote-session", "default", TARGET],
-        ["ssh", "-o", "BatchMode=yes", TARGET, machine.DELIVER],
-        ["ssh", "-o", "BatchMode=yes", TARGET, machine.DELIVER_CA],
     ]
-    timeouts = {"kubectl": 60, "ssh-keygen": 60, "gh": 120, "herdr": 300, "ssh": 60}
+    timeouts = {"kubectl": 60, "ssh-keygen": 60, "gh": 120, "herdr": 300}
     for name, kwargs in world.run.kwargs:
         assert {key: kwargs[key] for key in ("capture_output", "text", "timeout", "check")} == {
             **GH,
@@ -156,9 +161,6 @@ def test_a_full_create_makes_exactly_these_calls(world):
         (f"repos/{REPO}/git/commits", {"message": MESSAGE, "tree": "sha", "parents": ["sha"]}),
         (f"repos/{REPO}/git/refs", {"ref": f"refs/heads/{NAME}", "sha": "sha"}),
     ]
-    stdin = [kwargs["input"] for name, kwargs in world.run.kwargs if name == "ssh"]
-    assert stdin[1] == "LOCAL CA\n"
-    assert f"AGENTIHOOKS_HIVE_URL={URL}\n" in stdin[0]
     record = world.bao.records[RECORD]
     assert record["ca_pem"] == "LOCAL CA\n"
     assert invite._env(record["credential"])[invite.REDIS_URL].endswith("@127.0.0.1:6379/0")
@@ -173,14 +175,16 @@ def test_a_full_create_makes_exactly_these_calls(world):
     assert world.sleeps == []
     assert world.lines == [
         f"hive create {NAME}: invite: invited hive member {member} as {NAME}; "
-        f"OpenBao secret/{RECORD}: wrote ca_pem, credential, swarm_url (3 keys total)",
+        f"OpenBao secret/{RECORD}: wrote ca_pem, credential, swarm_url (3 keys total); "
+        f"listed {member} on the hub signer record {SIGNER} for demo "
+        "and asked the hub's agentihooks-swarm-nats-signer sync to refresh it now",
         f"hive create {NAME}: ssh keys: OpenBao secret/{RECORD}: wrote ssh_authorized_keys, ssh_host_key, "
         "ssh_host_public_key (6 keys total)",
         f"hive create {NAME}: manifests: opened pull request {PR}",
         f"hive create {NAME}: merge: merged {PR}",
         f"hive create {NAME}: settings: settings written",
         f"hive create {NAME}: live: hive {member} is live",
-        f"hive create {NAME}: herdr: added {TARGET} to herdr; its hive member is {json.loads(state.read_text())['added']}",
+        f"hive create {NAME}: herdr: added {TARGET} to herdr; its hive member is {member}",
         f"hive create {NAME}: engineer: engineer@{member} in demo works on the hive",
     ]
 
@@ -191,6 +195,9 @@ def test_the_dry_run_names_the_pull_request_files(world):
     assert f"hive create {NAME}: manifests: would open a pull request into {REPO} dev with {files}" in world.lines
     keys = f"hive create {NAME}: ssh keys: would write a new SSH host key and 2 authorized keys into OpenBao secret/{RECORD}"
     assert keys in world.lines
+    assert (
+        f"hive create {NAME}: herdr: would trust the hive host key and save {TARGET} in herdr as {NAME}" in world.lines
+    )
     assert world.published == [(world.tools.environ, SETTINGS_PATH, True)]
 
 
@@ -340,6 +347,14 @@ def test_an_openbao_failure_is_a_refusal_naming_it(world, sealed):
     world.tools.bao = openbao_kv.OpenBao(world.tools.bao.url, world.tools.bao.token, Sealed(world.bao.records, sealed))
     with pytest.raises(auth.HiveError) as refused:
         create.create(world.tools, create.Options())
+    assert str(refused.value) == "OpenBao HTTP 503: sealed"
+
+
+def test_a_hub_record_that_cannot_be_read_is_a_refusal_naming_it(world):
+    sealed = Sealed(world.bao.records, lambda request: SIGNER in request.full_url)
+    world.tools.bao = openbao_kv.OpenBao(world.tools.bao.url, world.tools.bao.token, sealed)
+    with pytest.raises(auth.HiveError) as refused:
+        create.create(world.tools, create.Options(dry_run=True))
     assert str(refused.value) == "OpenBao HTTP 503: sealed"
 
 

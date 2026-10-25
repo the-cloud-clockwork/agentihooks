@@ -24,7 +24,7 @@ def test_an_account_the_hives_already_fill_has_no_open_seat():
     rows[0] = replace(rows[0], sessions=6)
     rows[1] = replace(rows[1], sessions=5)
 
-    assert [row.name for row in launch._open_claude_rows(rows)] == ["room_left", "last_seat"]
+    assert [row.name for row in launch._open_rows(rows)] == ["room_left", "last_seat"]
 
 
 def test_an_outright_account_beats_an_earlier_fallback_and_the_first_fallback_is_kept():
@@ -76,7 +76,7 @@ def test_an_aggregated_router_counts_hive_sessions_once(monkeypatch):
     monkeypatch.setattr("scripts.routing.aggregate.enabled", lambda: True)
     monkeypatch.setattr("scripts.hive.registry.hives", lambda redis: (_ for _ in ()).throw(AssertionError))
 
-    assert [row.name for row in launch._open_claude_rows(_rows())] == ["full_on_hives", "room_left", "last_seat"]
+    assert [row.name for row in launch._open_rows(_rows())] == ["full_on_hives", "room_left", "last_seat"]
 
 
 def test_hive_sessions_count_launch_reservations_no_hive_reports_yet(monkeypatch):

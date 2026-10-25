@@ -1,0 +1,6 @@
+{
+  "scripts/inbox/exits.py:scripts.inbox.exits.x__settle_taken__mutmut_10:edd24a7818b29894bdc3da6b9026ad234a8ac8b1ff2a16a424c6353d2de6c1cc": {
+    "reader": "Standards",
+    "reason": "Local goes_on is tested only for truthiness after assignment; None and False select identical withdrawal behavior."
+  }
+}
