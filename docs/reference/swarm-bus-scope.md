@@ -186,7 +186,9 @@ nats --server "$AGENTIHOOKS_BUS_URL" --creds "$AGENTIHOOKS_BUS_CREDENTIALS" \
 
 `hive join` saves the credential as `hive.creds` beside `hive.env` and points `AGENTIHOOKS_BUS_CREDENTIALS` at it. The same refusal holds for `swarm.other.dead.<id>`,
 `swarm.other.state.<bucket>.<key>` and the JetStream API subjects of another swarm's streams, such as
-`$JS.API.STREAM.MSG.GET.AGENTIHOOKS_6f74686572_STATE_spoke-work`. The pull request suite proves this against the pinned
+`$JS.API.STREAM.MSG.GET.AGENTIHOOKS-6f74686572-h-bfdb74b91986464723022e957a6d5e52d6a5eb0070241ac54c0c979b13c398a6`
+and the legacy `$JS.API.STREAM.MSG.GET.AGENTIHOOKS_6f74686572_STATE_spoke-work`.
+The pull request suite proves this against the pinned
 NATS server in the scoped NATS tests, together with a member's own queue, dead letter and state round trip and a
 legacy bus working beside a scoped one.
 
