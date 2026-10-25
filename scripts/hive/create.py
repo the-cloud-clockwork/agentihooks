@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from scripts import openbao_kv
-from scripts.hive import auth, create_github, create_render, invite, machine, registry, setup
+from scripts.hive import auth, create_github, create_render, invite, machine, member_swarms, nats_grant, registry, setup
 from scripts.hive.bundle_origin import SETTINGS_PATH
 
 if TYPE_CHECKING:
@@ -23,6 +23,8 @@ HOST_KEY = "ssh_host_key"
 HOST_PUBLIC_KEY = "ssh_host_public_key"
 AUTHORIZED_KEYS = "ssh_authorized_keys"
 SSH_USER = "worker"
+SIGNER_NAMESPACE = "agentihooks-swarm"
+SIGNER_SYNC = "agentihooks-swarm-nats-signer"
 POLL_S = 15
 COMMAND_TIMEOUT_S = 60
 
@@ -54,6 +56,7 @@ class Tools:
 
 def create(tools: Tools, options: Options) -> str:
     _placing(tools)
+    _signer_path(tools.environ)
     tools.state = _start(tools, options)
     name = tools.state["name"]
     if not options.dry_run:
@@ -122,14 +125,59 @@ def _member(tools: Tools) -> dict[str, str]:
 
 
 def _invite(tools: Tools, options: Options) -> str:
+    listing = Listing(_signer_path(tools.environ), member_swarms.swarms(tools.redis, ()))
     member = _member(tools).get(invite.HIVE_ID)
-    if member:
-        return f"kept hive member {member} in OpenBao {openbao_kv.MOUNT}/{tools.state['record']}"
+    where = f"OpenBao {openbao_kv.MOUNT}/{tools.state['record']}"
+    if member and tools.redis.exists(f"{auth.PREFIX}:member:{member}"):
+        done = f"kept hive member {member} in {where}"
+    elif options.dry_run:
+        done, member = f"would mint a hive member into {where} like {options.like}", "the new member"
+    else:
+        name, record = tools.state["name"], tools.state["record"]
+        request = invite.Request(
+            name, record, options.like, ledger_ca=tools.ledger_ca, signer_path=listing.path, swarms=listing.swarms
+        )
+        done = invite.invite(tools.redis, tools.bao, request, tools.local_redis_url)
+        member = _member(tools)[invite.HIVE_ID]
+    return f"{done}; {_listed(tools, options, listing, member)}"
+
+
+@dataclass(frozen=True)
+class Listing:
+    path: str
+    swarms: tuple[str, ...]
+
+
+def _signer_path(environ: Mapping[str, str]) -> str:
+    path = member_swarms.signer_path(environ)
+    if path is None:
+        raise auth.HiveError(
+            "hive create lists the new hive member on the hub NATS signer record, "
+            f"so {nats_grant.SIGNER_ENV} must name an OpenBao record under {nats_grant.HUB_PATH}"
+        )
+    return path
+
+
+def _listed(tools: Tools, options: Options, listing: Listing, member: str) -> str:
+    try:
+        listed = openbao_kv.read(tools.bao, listing.path)[0].get(member_swarms.FIELD)
+    except openbao_kv.OpenBaoError as exc:
+        raise auth.HiveError(str(exc)) from None
+    if listed is None:
+        return f"the hub signer record {listing.path} lists no member swarms, so the hub scopes no member"
+    if member in listed and tools.state.get("resynced") == member:
+        return f"kept {member} on the hub signer record {listing.path}"
+    swarms = ", ".join(listing.swarms)
     if options.dry_run:
-        return f"would mint a hive member into OpenBao {openbao_kv.MOUNT}/{tools.state['record']} like {options.like}"
-    name, record = tools.state["name"], tools.state["record"]
-    request = invite.Request(name, record, options.like, ledger_ca=tools.ledger_ca)
-    return invite.invite(tools.redis, tools.bao, request, tools.local_redis_url)
+        return f"would list {member} on the hub signer record {listing.path} for {swarms} and refresh {SIGNER_SYNC}"
+    member_swarms.assign(tools.bao, listing.path, [member], listing.swarms)
+    resync = f"force-sync={int(tools.clock() * 1000)}"
+    _kubectl(tools, ["-n", SIGNER_NAMESPACE, "annotate", "externalsecret", SIGNER_SYNC, resync, "--overwrite"])
+    tools.state["resynced"] = member
+    return (
+        f"listed {member} on the hub signer record {listing.path} for {swarms} "
+        f"and asked the hub's {SIGNER_SYNC} sync to refresh it now"
+    )
 
 
 def _ssh_keys(tools: Tools, options: Options) -> str:
