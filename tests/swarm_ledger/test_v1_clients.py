@@ -152,7 +152,7 @@ class Recorder:
 def test_chat_command_sends_one_service_chat_operation(monkeypatch, capsys):
     recorder = Recorder({"applied": ["x"], "rejected": []})
     monkeypatch.setattr(cli_ledger, "request", recorder)
-    monkeypatch.setattr(sys, "argv", ["chat_ledger.py", SLUG, "--as", "api-reader", "  Spaced  "])
+    monkeypatch.setattr(sys, "argv", ["chat_ledger.py", SLUG, "--as", "api-reader", "--reply-to", "o-0", "  Spaced  "])
     chat_ledger.main()
     [(slug, [op], service)] = recorder.calls
     assert (slug, service) == (SLUG, True)
@@ -163,13 +163,14 @@ def test_chat_command_sends_one_service_chat_operation(monkeypatch, capsys):
         "text": "Spaced",
         "by": "api-reader",
         "to": "operator",
+        "reply_to": "o-0",
     }
     assert capsys.readouterr().out == json.dumps({"posted": op["id"]}) + "\n"
 
 
 def test_chat_command_exits_on_a_rejected_message(monkeypatch, capsys):
     monkeypatch.setattr(cli_ledger, "request", Recorder({"applied": [], "rejected": ["m-1"]}))
-    monkeypatch.setattr(sys, "argv", ["chat_ledger.py", SLUG, "--as", "api-reader", "No"])
+    monkeypatch.setattr(sys, "argv", ["chat_ledger.py", SLUG, "--as", "api-reader", "--reply-to", "o-0", "No"])
     with pytest.raises(SystemExit) as exit_:
         chat_ledger.main()
     assert str(exit_.value) == "message rejected: ['m-1']"
@@ -180,7 +181,7 @@ def test_chat_command_exits_with_the_server_refusal(monkeypatch):
     body = io.BytesIO(b'{"error": {"code": "forbidden"}}')
     refusal = urllib.error.HTTPError(cli_ledger.BASE, 403, "Forbidden", {}, body)
     monkeypatch.setattr(cli_ledger, "request", Recorder(error=refusal))
-    monkeypatch.setattr(sys, "argv", ["chat_ledger.py", SLUG, "--as", "api-reader", "No"])
+    monkeypatch.setattr(sys, "argv", ["chat_ledger.py", SLUG, "--as", "api-reader", "--reply-to", "o-0", "No"])
     with pytest.raises(SystemExit) as exit_:
         chat_ledger.main()
     assert str(exit_.value) == 'server refused: 403 {"error": {"code": "forbidden"}}'
