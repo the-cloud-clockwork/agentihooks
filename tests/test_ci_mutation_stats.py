@@ -71,3 +71,107 @@ def test_a_part_collected_for_another_commit_or_selection_is_stale(tmp_path):
         [],
         "mutation stats stale: parts [1, 2] were collected for another commit or selection",
     )
+
+
+def test_measured_dependencies_include_collection_phases_and_preloaded_modules(tmp_path, monkeypatch):
+    import sys
+    from types import SimpleNamespace
+
+    from coverage import CoverageData
+
+    from scripts.ci_mutation.stats_dependencies import measured_dependencies
+
+    root = tmp_path / "source"
+    work = tmp_path / "mutants"
+    paths = ["global.py", "setup.py", "run.py", "teardown.py", "loaded.py", "other.py"]
+    for path in paths + ["untracked.py"]:
+        for prefix in (root, work):
+            (prefix / path).parent.mkdir(parents=True, exist_ok=True)
+            (prefix / path).write_text("value = 1\n")
+    coverage_file = tmp_path / "coverage"
+    data = CoverageData(basename=str(coverage_file))
+    data.set_context("")
+    data.add_lines(
+        {
+            str(work / "global.py"): {1},
+            str(work / "00_missing.py"): {1},
+            str(work / "untracked.py"): {1},
+            str(tmp_path / "00_external.py"): {1},
+        }
+    )
+    first = "tests/test_a.py::test_a[one|two]"
+    second = "tests/test_b.py::test_b"
+    for phase in ("setup", "run", "teardown"):
+        data.set_context(first + "|" + phase)
+        data.add_lines({str(work / f"{phase}.py"): {1}})
+    data.set_context(second + "|run")
+    data.add_lines({str(work / "other.py"): {1}})
+    data.write()
+    monkeypatch.setitem(sys.modules, "stats_loaded_probe", SimpleNamespace(__file__=str(root / "loaded.py")))
+    monkeypatch.setitem(sys.modules, "stats_untracked_probe", SimpleNamespace(__file__=str(root / "untracked.py")))
+    tracked = set(paths) | {"00_missing.py"}
+    found = measured_dependencies(coverage_file, work, root, [first, second], tracked)
+    assert found == {
+        first: ["global.py", "loaded.py", "run.py", "setup.py", "teardown.py"],
+        second: ["global.py", "loaded.py", "other.py"],
+    }
+    assert measured_dependencies(coverage_file, work, root, ["tests/test_missing.py::test_missing"], tracked) == {}
+
+
+def test_statistics_collect_runtime_dependencies_with_plugin_discovery_disabled(tmp_path, monkeypatch):
+    import os
+    import subprocess
+    import sys
+    from types import SimpleNamespace
+
+    from scripts.ci_mutation.selection import collect_shard_stats
+
+    original = tmp_path / "original"
+    work = tmp_path / "work"
+    node = "tests/test_sample.py::test_value"
+    files = {
+        "scripts/sample.py": "def value():\n    return 1\n",
+        "tests/test_sample.py": "from scripts.sample import value\nfrom scripts import untracked\ndef test_value():\n    assert value() == 1\n",
+    }
+    for root in (original, work / "mutants"):
+        for name, text in files.items():
+            (root / name).parent.mkdir(parents=True, exist_ok=True)
+            (root / name).write_text(text)
+    for root in (original, work / "mutants"):
+        (root / "scripts/untracked.py").write_text("value = 2\n")
+    subprocess.run(["git", "init", "-q", str(original)], check=True)
+    subprocess.run(["git", "add", *files], cwd=original, check=True)
+    monkeypatch.chdir(work)
+    monkeypatch.setenv("PYTEST_DISABLE_PLUGIN_AUTOLOAD", "1")
+    monkeypatch.setenv("MUTATION_STATS_CACHE", str(tmp_path / "cache"))
+    monkeypatch.setenv("MUTATION_STATS_ROOT", str(original))
+    monkeypatch.setenv("COVERAGE_FILE", str(tmp_path / "before"))
+    engine = SimpleNamespace(
+        tests_by_mangled_function_name={"scripts.sample.x_value": {node}}, duration_by_test={node: 1}
+    )
+
+    class Runner:
+        _pytest_add_cli_args = []
+
+        def run_stats(self, *, tests):
+            done = subprocess.run(
+                [sys.executable, "-m", "pytest", "-q", *self._pytest_add_cli_args, *tests],
+                cwd=work / "mutants",
+                env=dict(os.environ),
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            assert done.returncode == 0, done.stdout + done.stderr
+            return done.returncode
+
+    output = tmp_path / "part.json"
+    collect_shard_stats(
+        SimpleNamespace(mutmut=engine), Runner(), ["tests/test_sample.py"], output, str(tmp_path / "base")
+    )
+    result = json.loads(output.read_text())
+    assert result["status"] == 0
+    assert result["durations"] == {node: 1}
+    assert "scripts/sample.py" in result["dependencies"][node]
+    assert "tests/test_sample.py" in result["dependencies"][node]
+    assert "scripts/untracked.py" not in result["dependencies"][node]
