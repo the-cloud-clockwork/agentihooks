@@ -202,10 +202,9 @@ def test_the_early_watcher_binds_the_plan_and_uses_protected_code_and_app_quota(
 
 
 def test_protected_grading_accepts_the_exact_early_pair_and_rejects_any_weakened_watcher():
+    import json
     from datetime import date
     from pathlib import Path
-
-    import json
 
     from scripts import ci_runner_trust, ci_wiring, gate_protected
 
