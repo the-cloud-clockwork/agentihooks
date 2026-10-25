@@ -2813,9 +2813,15 @@ Each metrics collector pass writes one `host_samples` row to the swarm metrics
 outbox (`~/.agentihooks/swarm/metrics-outbox.sqlite`, relayed to the ClickHouse
 `swarm` database): `available_mb`, `load_per_cpu`, `live_agents`,
 `swap_used_mb`, `swap_total_mb`, `agent_mb` (the measured mean, 0 when no tree
-was read), the held spawn count and its reason. Count minutes with swap above
-ninety percent while room was above zero from these rows; the `reason` column
+was read), the held spawn count and its reason. Each row covers the span to the
+next row; sum those spans for minutes with swap above ninety percent while room
+was above zero. The `reason` column
 and the tick's `holding spawns: host memory room N` line name the hold.
+
+The tick row is written every pass. The ledger and swarm collectors, host
+samples included, run at most once per `AGENTIHOOKS_METRICS_EVERY_MINUTES`
+(default 10) per swarm, and a held sample counts for up to twenty minutes or
+until the next sample.
 
 ### Troubleshooting
 

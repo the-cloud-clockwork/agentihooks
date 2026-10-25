@@ -113,7 +113,7 @@ def test_a_held_span_names_the_held_harness_and_none_for_an_older_sample():
     ]
 
 
-def test_a_held_sample_counts_until_the_next_collector_pass_of_a_ten_minute_interval():
+def test_a_held_sample_counts_until_a_next_sample_thirteen_minutes_later():
     late = 9 * H + 13 * 60_000
     assert bottleneck.held_spans([sample(9 * H, 1, "host"), sample(late, 1, "host")], NOW)[0] == (
         "host",

@@ -230,6 +230,25 @@ def test_ledger_rows_are_collected_before_a_failing_swarm_collector(spool, sent,
     assert order == ["ledger", "swarm"]
 
 
+def test_a_failing_collector_pass_leaves_the_interval_open_for_the_next_pass(spool, sent, monkeypatch):
+    import fakeredis
+
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    store.create(SwarmConfig("sw", "/repo", 0, 0))
+    runs = []
+
+    def collect(*args):
+        runs.append(len(runs))
+        if len(runs) == 1:
+            raise ValueError("bad swarm row")
+
+    monkeypatch.setattr(metrics, "_collect", collect)
+    swarm = metrics.metrics_swarm.TickInput(store, {"tasks": []}, [], lambda url: None, None)
+    assert metrics.record_pass("sw", NOW, 0, ON, swarm) == ["metrics outbox failed: bad swarm row"]
+    assert metrics.record_pass("sw", NOW + 60_000, 0, ON, swarm) == []
+    assert runs == [0, 1]
+
+
 def test_a_ledger_without_tasks_still_names_the_bottleneck(spool, sent, monkeypatch):
     import fakeredis
 
@@ -373,13 +392,14 @@ def _expiring(real_set, clock):
     return set_
 
 
-def test_a_non_positive_metrics_interval_is_reported_and_the_tick_row_still_ships(spool, sent):
+@pytest.mark.parametrize("minutes", ["0", "-1", "inf", "nan"])
+def test_a_metrics_interval_outside_positive_finite_minutes_is_reported(spool, sent, minutes):
     import fakeredis
 
     store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
     store.create(SwarmConfig("sw", "/repo", 0, 0))
     swarm = metrics.metrics_swarm.TickInput(store, {"tasks": []}, [], lambda url: None, None)
-    environ = {**ON, "AGENTIHOOKS_METRICS_EVERY_MINUTES": "0"}
+    environ = {**ON, "AGENTIHOOKS_METRICS_EVERY_MINUTES": minutes}
     assert metrics.record_pass("sw", NOW, 1, environ, swarm) == [
         "metrics outbox failed: metrics collectors need a positive interval in minutes"
     ]
