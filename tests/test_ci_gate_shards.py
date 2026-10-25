@@ -1,4 +1,5 @@
 import io
+import json
 import subprocess
 import threading
 import zipfile
@@ -146,12 +147,80 @@ def test_metadata_is_decoded_and_paginated_when_binary_is_omitted():
     assert run.call_args.args[0] == ["gh", "api", "repos/org/repo/actions", "--paginate", "--slurp"]
 
 
-def test_github_failure_is_never_replaced_with_empty_evidence():
+@pytest.mark.parametrize(
+    "error",
+    [subprocess.CalledProcessError(1, ["gh"]), subprocess.TimeoutExpired(["gh"], 60)],
+    ids=["failed", "timed out"],
+)
+def test_github_failure_is_never_replaced_with_empty_evidence(error):
     with (
-        patch.object(ci_gate_shards.subprocess, "run", side_effect=subprocess.CalledProcessError(1, ["gh"])),
-        pytest.raises(subprocess.CalledProcessError),
+        patch.object(ci_gate_shards.subprocess, "run", side_effect=error) as run,
+        patch.object(ci_gate_shards.time, "sleep") as sleep,
+        pytest.raises(type(error)),
     ):
         ci_gate_shards.api("repos/org/repo/actions")
+    assert run.call_count == 4
+    assert [call.args for call in sleep.call_args_list] == [(5,), (10,), (20,)]
+
+
+@pytest.mark.parametrize("binary", [False, True])
+def test_a_transient_github_failure_is_retried_with_backoff(binary):
+    payload = b"zip bytes" if binary else b'[{"artifacts": []}]'
+    results = [
+        subprocess.CalledProcessError(1, ["gh"]),
+        subprocess.TimeoutExpired(["gh"], 60),
+        subprocess.CompletedProcess([], 0, stdout=payload),
+    ]
+    with (
+        patch.object(ci_gate_shards.subprocess, "run", side_effect=results) as run,
+        patch.object(ci_gate_shards.time, "sleep") as sleep,
+    ):
+        value = ci_gate_shards.api("repos/org/repo/actions/runs/123/artifacts?per_page=100", binary=binary)
+    assert value == (payload if binary else [{"artifacts": []}])
+    assert run.call_count == 3
+    assert [call.args for call in sleep.call_args_list] == [(5,), (10,)]
+
+
+def _gh(listings, jobs):
+    def run(command, **kwargs):
+        endpoint = command[2]
+        if endpoint.endswith("/artifacts?per_page=100"):
+            listing = next(listings)
+            if listing is None:
+                raise subprocess.CalledProcessError(1, command)
+            return subprocess.CompletedProcess(command, 0, stdout=json.dumps([{"artifacts": listing}]).encode())
+        if "/jobs?" in endpoint:
+            return subprocess.CompletedProcess(command, 0, stdout=json.dumps([{"jobs": jobs}]).encode())
+        return subprocess.CompletedProcess(command, 0, stdout=_zip())
+
+    return run
+
+
+def test_a_transient_artifacts_listing_failure_keeps_the_queue_check_green(tmp_path):
+    reports = [
+        {"id": index, "name": f"{kind}-3.12-1", "expired": False} for index, kind in enumerate(["durations", "flakes"])
+    ]
+    jobs = [{"name": "unit (3.12, 1)", "status": "completed", "conclusion": "success"}]
+    listings = iter([None, reports, None, reports])
+    with (
+        patch.object(ci_gate_shards.subprocess, "run", side_effect=_gh(listings, jobs)),
+        patch.object(ci_gate_shards.time, "sleep") as sleep,
+    ):
+        assert ci_gate_shards.watch("org/repo", "123", "2", [1], tmp_path) is None
+    assert [call.args for call in sleep.call_args_list] == [(5,), (5,)]
+    assert (tmp_path / "flakes-3.12-1" / "durations.json").is_file()
+
+
+def test_a_report_really_missing_after_a_transient_listing_failure_stays_red(tmp_path):
+    reports = [{"id": 1, "name": "durations-3.12-1", "expired": False}]
+    jobs = [{"name": "unit (3.12, 1)", "status": "completed", "conclusion": "success"}]
+    listings = iter([None, reports, None, reports])
+    with (
+        patch.object(ci_gate_shards.subprocess, "run", side_effect=_gh(listings, jobs)),
+        patch.object(ci_gate_shards.time, "sleep"),
+        pytest.raises(RuntimeError, match=r"Missing shard reports: \['flakes-3.12-1'\]"),
+    ):
+        ci_gate_shards.watch("org/repo", "123", "2", [1], tmp_path)
 
 
 def test_fetch_reads_every_page_and_ignores_foreign_and_expired_artifacts(tmp_path):

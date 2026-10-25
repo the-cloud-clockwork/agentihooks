@@ -131,6 +131,35 @@ def test_equal_room_prefers_the_active_slot(monkeypatch, rendered, tmp_path):
     assert login.prepare(_environ(rendered), tmp_path)[0] == login.home(2)
 
 
+def test_the_operator_order_outranks_room(monkeypatch, rendered, tmp_path):
+    monkeypatch.setattr(openbao_kv, "from_env", lambda environ: None)
+    _stored(1, {"emailAddress": "one@example.com"})
+    _stored(2, TWO)
+    _room(monkeypatch, oneatexample_com=10.0, twoatexample_com=80.0)
+    monkeypatch.setenv(login.ORDER_ENV, " , one@example.com,twoatexample_com")
+    assert login.prepare(_environ(rendered), tmp_path)[0] == login.home(1)
+
+
+def test_no_operator_order_ranks_by_room_alone(monkeypatch, rendered, tmp_path):
+    monkeypatch.setattr(openbao_kv, "from_env", lambda environ: None)
+    monkeypatch.delenv(login.ORDER_ENV, raising=False)
+    _stored(1, {"emailAddress": "XXXX"})
+    _stored(2, TWO)
+    _room(monkeypatch, xxxx=10.0, twoatexample_com=80.0)
+    assert login.prepare(_environ(rendered), tmp_path)[0] == login.home(2)
+
+
+def test_a_held_first_choice_falls_to_the_next_in_the_operator_order(monkeypatch, rendered, tmp_path):
+    monkeypatch.setattr(openbao_kv, "from_env", lambda environ: None)
+    _stored(1, {"emailAddress": "one@example.com"})
+    _stored(2, TWO)
+    _stored(3, {"emailAddress": "three@example.com"})
+    _room(monkeypatch, oneatexample_com=10.0, twoatexample_com=20.0, threeatexample_com=90.0)
+    monkeypatch.setenv(login.ORDER_ENV, "oneatexample_com,two@example.com")
+    _held(1, "master@a-1")
+    assert login.prepare(_environ(rendered), tmp_path)[0] == login.home(2)
+
+
 def test_every_held_login_names_all_its_holders(monkeypatch, rendered, tmp_path):
     monkeypatch.setattr(openbao_kv, "from_env", lambda environ: None)
     _stored(1, {"emailAddress": "one@example.com"})

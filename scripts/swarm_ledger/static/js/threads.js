@@ -111,8 +111,8 @@ export function rememberComment(key, open) {
   store(COMMENTS_KEY, { opened: [...openComments], closed: [...closedComments] });
 }
 
-export function taskLink(id) {
-  return h("a", { class: "task-id", href: `#item-tasks-${id}`, text: id, on: { click: (ev) => jumpTo(ev, `tasks/${id}`) } });
+export function taskLink(id, focus) {
+  return h("a", { class: "task-id", href: `#item-tasks-${id}`, text: id, "data-focus": focus, on: { click: (ev) => jumpTo(ev, `tasks/${id}`) } });
 }
 
 function taskMentions(text, ids) {

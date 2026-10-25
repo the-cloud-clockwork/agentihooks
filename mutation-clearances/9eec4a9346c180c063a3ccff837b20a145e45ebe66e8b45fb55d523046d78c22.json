@@ -1,0 +1,6 @@
+{
+  "scripts/ci_mutation/stats_cache.py:scripts.ci_mutation.stats_cache.x_loaded_inputs__mutmut_7:6def760684215af5894e6d962d04f03e30eafd92df712d624f9b7d3c05e93d5e": {
+    "reader": "Standards reader",
+    "reason": "dynamic_imports is read only as a condition, and None and False are both falsy, so the walk is unchanged."
+  }
+}
