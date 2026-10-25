@@ -154,14 +154,18 @@ class FencedRuntime:
         return ""
 
     def _workstation_room(self, machine: str, task: dict) -> tuple["Room", int, int]:
-        from scripts.hive import admission, headroom
+        from scripts.hive import admission, headroom, registry
 
+        hive = registry.show(self.store.redis, machine)
         running = local_slots.running(self.store, self.slug, task["id"])
         held = local_slots.held(self.store, machine, self.slug, task["id"])
         pending = max(0, admission.pending(self.store.redis, machine) - (held - running))
         now = lease.now_ms(self.store)
         found = admission.room(
-            headroom.measure(0, now, previous=headroom.read(self.store.redis, machine, now)), running, pending
+            headroom.measure(0, now, previous=headroom.read(self.store.redis, machine, now)),
+            running,
+            pending,
+            hive["max_agents"] if hive is not None else None,
         )
         maximum = local_slots.maximum(self.store, self.slug, running + found.room)
         found = admission.capped(found, running, maximum)
