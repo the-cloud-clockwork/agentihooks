@@ -1,3 +1,4 @@
+import json
 from types import SimpleNamespace
 
 import pytest
@@ -5,6 +6,7 @@ import pytest
 from scripts import codex_router
 from scripts.codex_session import serve, supervisor
 from scripts.routing import codex_api
+from scripts.swarm.store import SwarmError
 
 pytestmark = pytest.mark.unit
 
@@ -97,6 +99,7 @@ def test_the_serve_parser_reads_every_option_and_its_defaults(capsys):
         "exclude": "",
         "report": "",
         "previous_execution": "",
+        "execution": "",
         "resume": "",
         "prompt_file": "",
         "startup_timeout": supervisor.STARTUP_TIMEOUT_S,
@@ -195,6 +198,8 @@ def test_prepare_routes_renders_and_builds_the_launch(tmp_path, monkeypatch):
         str(tmp_path / "route"),
         "--previous-execution",
         "exe-prev",
+        "--execution",
+        "exe-admitted",
         "--resume",
         "thread-kept",
         "--prompt-file",
@@ -226,6 +231,7 @@ def test_prepare_routes_renders_and_builds_the_launch(tmp_path, monkeypatch):
     assert spec.server_args == ("-c", 'model="gpt-6.1-sol"', "-c", 'model_reasoning_effort="high"', "-c", "x=1")
     assert (spec.codex_home, spec.cwd, spec.environ["AH_CX_TOKEN_t"]) == (str(home), str(tmp_path), "x")
     assert (spec.previous_execution_id, spec.resume_thread, spec.opening) == ("exe-prev", "thread-kept", "Begin.")
+    assert spec.execution_id == "exe-admitted"
     assert (spec.account_type, spec.allowed_tokens, spec.bundle_revision) == ("", frozenset({"AH_CX_TOKEN_t"}), "abc")
     assert spec.startup_timeout_s == 7.0
 
@@ -468,9 +474,31 @@ def test_main_reports_a_refused_launch(tmp_path, monkeypatch, capsys):
     def refused(store, spec, deps):
         raise supervisor.LaunchFailure("hooks_missing", "required hooks are missing")
 
-    monkeypatch.setattr(serve, "prepare", lambda args, agent_args, environ: SimpleNamespace(slug="sw"))
+    monkeypatch.setattr(serve, "prepare", lambda args, agent_args, environ: SimpleNamespace(slug="sw", environ={}))
     monkeypatch.setattr(serve, "connect", lambda environ: "store")
     monkeypatch.setattr(supervisor, "launch", refused)
     argv = ["serve", "--cwd", str(tmp_path), "--profile", "engineer", "--seat", "eng-1@sw"]
     assert serve.main(argv, dict(SWARM_ENV)) == 3
     assert "launch refused: required hooks are missing" in capsys.readouterr().err
+
+
+def test_a_refused_launch_fails_the_profile_report_so_init_agent_reports_it_at_once(tmp_path, monkeypatch, capsys):
+    from scripts.profiles import binding
+
+    report = tmp_path / "profile.json"
+    report.write_text(json.dumps({"state": "pending", "harness": "codex", "profile": "engineer"}))
+
+    def refused(store, spec, deps):
+        raise SwarmError("replacement does not match the current execution")
+
+    spec = SimpleNamespace(slug="sw", environ={binding.REPORT: str(report)})
+    monkeypatch.setattr(serve, "prepare", lambda args, agent_args, environ: spec)
+    monkeypatch.setattr(serve, "connect", lambda environ: "store")
+    monkeypatch.setattr(supervisor, "launch", refused)
+    argv = ["serve", "--cwd", str(tmp_path), "--profile", "engineer", "--seat", "eng-1@sw"]
+    assert serve.main(argv, dict(SWARM_ENV)) == 3
+    capsys.readouterr()
+    assert binding.refused(report)
+    with pytest.raises(ValueError) as failure:
+        binding.wait(report, 0.0)
+    assert str(failure.value) == "codex-session launch refused: replacement does not match the current execution"

@@ -114,7 +114,7 @@ def test_the_parser_takes_the_transport_seat_and_predecessor():
 
 def test_the_transport_flags_default_to_empty_and_take_legacy():
     args = init_agent._parser().parse_args([])
-    assert (args.codex_transport, args.seat, args.previous_execution) == ("", "", "")
+    assert (args.codex_transport, args.seat, args.previous_execution, args.execution) == ("", "", "", "")
     assert init_agent._parser().parse_args(["--codex-transport", "legacy"]).codex_transport == "legacy"
 
 
@@ -166,12 +166,25 @@ def test_main_hands_the_transport_seat_and_predecessor_to_the_launcher(tmp_path,
         "eng-1@sw",
         "--previous-execution",
         "exe-prev",
+        "--execution",
+        "exe-admitted",
         "--dry-run",
     ]
     assert init_agent.main(argv, {"HOME": str(tmp_path), "XDG_RUNTIME_DIR": str(tmp_path / "rt")}) == 2
     assert capsys.readouterr().err == "agentihooks init-agent: captured\n"
     [spec] = built
     assert (spec.transport, spec.seat, spec.previous_execution) == (init_agent.APP_SERVER, "eng-1@sw", "exe-prev")
+    assert spec.execution == "exe-admitted"
+
+
+def test_the_app_server_command_names_the_admitted_execution_only_when_given(tmp_path):
+    admitted = init_agent._app_server_command(
+        app_server_spec(execution="exe-admitted"), tmp_path / "route", [], {}, tmp_path, None
+    )
+    assert admitted[admitted.index("--execution") + 1] == "exe-admitted"
+    assert admitted.index("--execution") < admitted.index("--")
+    plain = init_agent._app_server_command(app_server_spec(), tmp_path / "route", [], {}, tmp_path, None)
+    assert "--execution" not in plain
 
 
 @pytest.mark.parametrize(("transport", "served"), [("app_server", True), ("legacy", False)])
