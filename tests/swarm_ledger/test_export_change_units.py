@@ -83,7 +83,7 @@ def refused(code):
 
 def reader(monkeypatch, *replies, base="http://a"):
     server = Server(*replies)
-    monkeypatch.setattr(api.ResourceClient, "request", server)
+    monkeypatch.setattr(api.ResourceClient, "request", lambda client, *args: server(client, *args))
     return api.ResourceClient(base, {}), server
 
 
