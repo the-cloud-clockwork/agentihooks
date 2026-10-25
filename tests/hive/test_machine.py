@@ -198,12 +198,11 @@ def test_cli_add_passes_its_settings_and_names_the_member(admin, monkeypatch, ca
     monkeypatch.delenv("AGENTIHOOKS_DEPLOYMENT", raising=False)
     monkeypatch.setenv("AGENTIHOOKS_SWARM_REDIS_URL", "redis://own:6379/0")
     monkeypatch.setattr(cli.ledger_ca, "served", lambda: "PEM")
-    monkeypatch.setattr(cli.time, "time", lambda: 1792604000.7)
 
     assert cli.main(["add", TARGET, "--url", URL]) == 0
     assert cli.main(["add", TARGET, "--url", URL, "--redis-url", PUBLIC]) == 0
 
-    named = "swarm-hive-1792604000"
+    named = "swarm-hive-001"
     assert calls == [
         ((admin, "root", TARGET, named, machine.Delivery(URL, "redis://own:6379/0", "PEM")), {}),
         ((admin, "root", TARGET, named, machine.Delivery(URL, PUBLIC, "PEM")), {}),
