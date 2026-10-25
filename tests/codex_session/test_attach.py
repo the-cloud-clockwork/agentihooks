@@ -237,7 +237,7 @@ def test_a_viewer_launched_outside_a_swarm_names_an_empty_slug(tmp_path):
     launcher, _ = init_agent._write_launcher(tmp_path, "a", "Open.", [], {"XDG_RUNTIME_DIR": str(tmp_path)}, spec)
     lines = launcher.read_text().splitlines()
     serve = next(index for index, line in enumerate(lines) if line.startswith("setsid -f "))
-    assert shlex.split(lines[serve + 1])[4:] == ["--slug", "", "--agent", "a"]
+    assert shlex.split(lines[serve + 1])[5:] == ["--slug", "", "--agent", "a"]
 
 
 def _agents():
