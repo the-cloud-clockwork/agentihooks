@@ -1487,6 +1487,16 @@ def test_a_weakened_forwarded_statistics_form_is_red(before, after):
     )
 
 
+def test_the_forwarded_statistics_line_without_the_selection_diagnostic_is_red():
+    base = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())
+    head = copy.deepcopy(base)
+    step = head["jobs"]["gate-required"]["steps"][0]
+    step["run"] = _FORWARDED_STATS + step["run"].removeprefix(_SELECTION_DIAGNOSTIC)
+    assert "The head's Gate — Required changes its steps; the protected branch grades with its own." in _grade(
+        {"test.yml": head}, base={"test.yml": base}
+    )
+
+
 def test_the_forwarded_statistics_transform_only_prepends_the_reviewed_line():
     from scripts import ci_reuse
 
@@ -1505,14 +1515,14 @@ def test_the_forwarded_statistics_transform_only_prepends_the_reviewed_line():
 def test_the_forwarded_statistics_form_passes_only_a_forwarded_skip(plan, forwarded, stats):
     from scripts import ci_reuse
 
-    [step] = ci_reuse.gate_steps(queue_tier=True, consolidated=True)
+    [step] = ci_reuse.selection_diagnostic(
+        ci_reuse.forwarded_stats(ci_reuse.gate_steps(queue_tier=True, consolidated=True))
+    )
     needs = {name: {"result": "success"} for name in ("test-count", "lint", "semgrep", "sonar", "mutation")}
     needs["select"] = {"result": "success", "outputs": {"scope": "none"}}
     needs["mutation-plan"] = {"result": plan, "outputs": {} if forwarded is None else {"forwarded": forwarded}}
     needs["mutation-stats"] = {"result": stats}
     env = dict(os.environ, NEEDS=json.dumps(needs), MUTATION="true", KIND="false", EVENT="pull_request", REUSED="false")
-    result = subprocess.run(
-        ["bash", "-e", "-c", _FORWARDED_STATS + step["run"]], env=env, capture_output=True, text=True
-    )
+    result = subprocess.run(["bash", "-e", "-c", step["run"]], env=env, capture_output=True, text=True)
     expected = plan == "success" and (stats == "success" or (stats == "skipped" and forwarded == "true"))
     assert (result.returncode == 0) == expected, result.stdout + result.stderr

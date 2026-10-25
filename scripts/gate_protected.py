@@ -110,8 +110,11 @@ def _aggregator_problems(
                         )
                     )
                 )
-                for diagnostic in (list, ci_reuse.selection_diagnostic)
-                for forward in (list, ci_reuse.forwarded_stats)
+                for diagnostic, forward in (
+                    (list, list),
+                    (ci_reuse.selection_diagnostic, list),
+                    (ci_reuse.selection_diagnostic, ci_reuse.forwarded_stats),
+                )
                 for form in (
                     {},
                     {"selected": True},
