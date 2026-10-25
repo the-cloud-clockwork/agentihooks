@@ -3,6 +3,8 @@ import os
 import time
 from pathlib import Path
 
+import pytest
+
 from scripts import init_agent
 from scripts.profiles import binding
 
@@ -36,15 +38,27 @@ def _slow_route(tmp_path, monkeypatch, detach, route_timeout):
     monkeypatch.setattr(init_agent, "_start_herdr", launch)
     monkeypatch.setattr(init_agent, "_detach", lambda: detach)
     argv = ["--host", "herdr", "--agent", "claude", "--profile", "master", "--dir", str(tmp_path), "--defer-canary"]
-    started = time.monotonic()
     result = init_agent.main([*argv, "--route-timeout", str(route_timeout)], {"XDG_RUNTIME_DIR": str(tmp_path / "rt")})
-    return result, time.monotonic() - started, renamed, requested
+    return result, renamed, requested
+
+
+@pytest.mark.wall_clock
+def test_a_deferred_launch_returns_within_seconds_of_a_slow_route(tmp_path, monkeypatch):
+    started = time.monotonic()
+    assert _slow_route(tmp_path, monkeypatch, detach=True, route_timeout=10)[0] == 0
+    assert time.monotonic() - started < 5
+
+
+@pytest.mark.wall_clock
+def test_the_detached_child_waits_its_whole_route_timeout(tmp_path, monkeypatch):
+    started = time.monotonic()
+    assert _slow_route(tmp_path, monkeypatch, detach=False, route_timeout=1)[0] == 3
+    assert time.monotonic() - started >= 1
 
 
 def test_a_deferred_launch_returns_before_a_slow_route(tmp_path, monkeypatch, capsys):
-    result, seconds, renamed, _ = _slow_route(tmp_path, monkeypatch, detach=True, route_timeout=10)
+    result, renamed, _ = _slow_route(tmp_path, monkeypatch, detach=True, route_timeout=10)
     assert result == 0
-    assert seconds < 5
     assert renamed == []
     lines = capsys.readouterr().out.splitlines()
     assert lines[0] == "host=herdr"
@@ -56,9 +70,8 @@ def test_a_deferred_launch_returns_before_a_slow_route(tmp_path, monkeypatch, ca
 
 
 def test_the_detached_child_of_a_deferred_launch_still_waits_on_the_route(tmp_path, monkeypatch, capsys):
-    result, seconds, renamed, requested = _slow_route(tmp_path, monkeypatch, detach=False, route_timeout=1)
+    result, renamed, requested = _slow_route(tmp_path, monkeypatch, detach=False, route_timeout=1)
     assert result == 3
-    assert seconds >= 1
     assert renamed == []
     captured = capsys.readouterr()
     assert captured.err == "agentihooks init-agent: the harness did not report its route within 1s\n"
