@@ -1013,12 +1013,7 @@ Replace the example run ID with the intended run. Repeat `--run-id` to select se
 
 ## Queue rebuild records
 
-GitHub rebuilds a merge group whenever an entry ahead of it changes: an enqueue or priority insertion ahead, a dequeue, a requeue, a removal ahead or a push to the base. The rebuilt group gets a new head commit, and the Tests run still building the old head is cancelled. On 16 October a priority insertion rebuilt three group chains and cancelled 195.550 runner minutes, and no record named the action that caused it ([issue 4282](https://github.com/the-cloud-clockwork/agentihooks/issues/4282)). Two records now keep that link:
-
-- the **queue journal**, written on the machine running the swarm tooling for every queue mutation that tooling performs, and
-- the **watcher record**, written in CI by the stale group watcher before it cancels a run whose group is no longer current.
-
-Neither record changes what the queue does. Both were delivered by [pull request 4355](https://github.com/the-cloud-clockwork/agentihooks/pull/4355); [pull request 5706](https://github.com/the-cloud-clockwork/agentihooks/pull/5706) added the removal ahead cause.
+GitHub rebuilds a merge group whenever an entry ahead of it changes: an enqueue or priority insertion ahead, a dequeue, a requeue, a removal ahead or a push to the base. The rebuilt group gets a new head commit, and the Tests run still building the old head is cancelled. On 16 October a priority insertion rebuilt three group chains and cancelled 195.550 runner minutes, and no record named the action that caused it ([issue 4282](https://github.com/the-cloud-clockwork/agentihooks/issues/4282)). The **queue journal**, written on the machine running the swarm tooling for every queue mutation that tooling performs, keeps that link. It does not change what the queue does. It was delivered by [pull request 4355](https://github.com/the-cloud-clockwork/agentihooks/pull/4355).
 
 ### The queue journal
 
@@ -1073,7 +1068,7 @@ jq -c 'select(.action == "priority") | {at, token_actor, agent, pull, steps, err
   ~/.agentihooks/merge-queue-events.jsonl | tail -1
 ```
 
-List every swarm mutation inside a cancelled run's window, taking `started` and `at` from its watcher record:
+List every swarm mutation inside a cancelled run's window, taking `<started>` and `<at>` from the run's start and completion times:
 
 ```bash
 jq -c --arg from "<started>" --arg to "<at>" \
@@ -1083,64 +1078,10 @@ jq -c --arg from "<started>" --arg to "<at>" \
 
 An empty result means no swarm tooling on this machine changed the queue while the run built.
 
-### The watcher record
-
-The `queue-fail-fast` job of every merge group Tests run polls its queue ref. When the ref no longer points at the run's commit, the group was rebuilt and the run can no longer merge. Before cancelling, the job runs `python3 -m scripts.ci_queue_rebuild <observed ref head>`, which reads, on the job's App token:
-
-1. the run's start time and the first parent of the run's commit (`old_parent`),
-2. every page of the `dev` merge queue,
-3. the last 20 merge queue add and removal events of this pull request, and
-4. the pull request whose merge group run built `old_parent`, and its last 20 queue events.
-
-The App token carries `permission-pull-requests: read` for these reads. Each read times out after 20 seconds.
-
-The record is printed on one log line beginning `queue-rebuild ` and appended to the job summary under the heading `Queue rebuild queue-rebuild-<run id>-<attempt>`. Its fields:
-
-| Field | Meaning |
-|---|---|
-| `id` | `queue-rebuild-<run id>-<run attempt>` |
-| `at`, `started` | The record time and the run's start time, which bound the event window |
-| `ref`, `pull` | The queue ref and the pull request it names |
-| `old_head`, `old_parent` | The cancelled run's commit and its first parent: the previous group head in a chain, not necessarily `dev` |
-| `observed_ref_head` | The ref head the watcher saw |
-| `new_head`, `new_base`, `expected_head` | This pull request's current group head and base, and its pull request head; `null` when it left the queue |
-| `cause` | The linked cause below |
-| `groups` | The whole queue, in the journal's group format |
-
-Only queue events inside the run window, deduplicated by event ID, name a cause. The first row that matches decides:
-
-| `cause.action` | When | Also carries |
-|---|---|---|
-| `dequeue` | The pull request left the queue and was removed during the run | `actor`, `reason`, `at`, `events` |
-| `unknown` | The pull request left the queue with no removal event | `gap` |
-| `requeue` | It was removed and added again during the run, the add last | `actor` of the add, `removed_reason`, `at`, `events` |
-| `unknown` | The pull request ahead could not be read | `gap` |
-| `removed_ahead` | The pull request whose group built `old_parent` was removed during the run | `pull`, `actor`, `reason`, `at`, `events` |
-| `unknown` | Entries ahead were enqueued during the run | `gap`, and `correlated`: each entry's `pull`, `enqueuer`, `enqueued_at` and `jump` |
-| `unknown` | None of the above | `gap` naming what queue entries cannot show: a removal ahead with no queue run at the old parent, a base push or a ruleset change |
-
-A correlated entry is evidence, not a cause: GitHub records no event linking an enqueue ahead to the rebuild it caused. Any failed read makes the cause `unknown` with the gap `queue unreadable: <error>`.
-
-The cancellation names the record. From run [39708426310](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39708426310):
-
-```text
-FAILED: queue group is no longer current (record queue-rebuild-39708426310-1: unknown cause: no entry ahead was enqueued and this pull request was not removed while the group ran; ...)
-```
-
-The other causes read `dequeue by <actor> (<reason>)`, `requeue by <actor>` and `removal of <url> ahead by <actor> (<reason>)`; a correlated unknown appends `; jump of <url> by <login> at <time>` or `; enqueue of <url> by <login> at <time>` for each entry. When the record cannot be produced at all the cancellation reads `queue group is no longer current (record unavailable)`, and the run is still cancelled.
-
-Read a record from its job log:
-
-```bash
-gh api repos/<owner>/<repo>/actions/jobs/<queue-fail-fast job id>/logs \
-  | grep -m1 'queue-rebuild {' | sed 's/.*queue-rebuild //' | jq '{id, started, at, old_head, cause}'
-```
-
 ### Limits
 
-- A native enqueue, jump or dequeue made outside the swarm tooling, from the GitHub interface or a plain `gh` call, is journaled by nothing; the watcher sees it only through queue events and entries when a rebuild cancels a run.
-- A removal ahead whose group never ran at `old_parent`, a base push and a ruleset change stay `unknown` with that gap.
-- The journal lives only on the machine that ran the tooling. The watcher record lives only in the run log and job summary.
+- A native enqueue, jump or dequeue made outside the swarm tooling, from the GitHub interface or a plain `gh` call, is journaled by nothing.
+- The journal lives only on the machine that ran the tooling.
 - Journal records are not deduplicated against GitHub events: each mutation call writes one record.
 - `merge priority` reorders with dequeue and requeue, never GitHub's native `jump`, so its insertions appear as `steps`, not as `jump: true` entries.
 
@@ -1160,8 +1101,6 @@ Every cancelled run falls into one of two kinds:
 - **Rebuild caused by another entry.** No job of the run failed; GitHub rebuilt the group because an entry ahead of it left the queue, and cancelled the run building the old head. The trigger is the removal event of the entry ahead whose time falls inside the run: `failed_checks`, a removal by hand or a priority move (`manual`), or `checks_timed_out`.
 
 A cancelled run with no failed job and no removal ahead inside its window stays unattributed: an enqueue ahead, a base push or a ruleset change leaves no queue event that names it. Wall minutes are the run's own duration; runner minutes are the sum of its jobs' durations.
-
-The [queue rebuild records](#queue-rebuild-records) now name the cause of each rebuild cancellation directly in the watcher record; the removal ahead cause arrived with pull request 5706 on 22 October, after this measurement, which attributed rebuilds by hand from the same queue events.
 
 ### Counts and costs
 

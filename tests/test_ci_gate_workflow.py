@@ -16,6 +16,7 @@ LINT_CONTROLS = [
     "Format check",
     "Check every pull request job is a need of Gate Required",
     "Hold the size and complexity limits",
+    "Hold swallowed exceptions in hooks and gates",
     "Fail on known vulnerabilities new against the base",
     "Run every Swarm Ledger dashboard query against this head's metrics tables",
 ]
