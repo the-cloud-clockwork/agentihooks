@@ -159,6 +159,17 @@ def test_a_capacity_wait_never_steers_the_retry(store, monkeypatch):
     assert not any("avoid_harness" in task for task in runtime.tasks)
 
 
+def test_a_failure_naming_no_harness_steers_nothing(store):
+    from tests.swarm.test_tick import FailingFor
+
+    ledger, runtime = tasks(("t1", "eng"), ("t2", "eng")), FailingFor("t1")
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    assert SpawnError("MCP_KEY_GATEWAY is unset").harness == ""
+    assert [task["id"] for task in runtime.tasks] == ["t2"]
+    assert "avoid_harness" not in runtime.tasks[0]
+    assert store.failed_harness("sw", "t1") == ""
+
+
 def test_a_task_avoiding_a_harness_launches_on_another_with_room(tmp_path, monkeypatch):
     from tests.swarm.test_capacity import _runtime_probe, account
 
