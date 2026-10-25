@@ -122,13 +122,24 @@ def test_block_without_a_refused_prerequisite_keeps_its_existing_behavior(waitin
     assert ledger.rows["t1"]["state"] == "blocked"
 
 
-def test_prerequisite_block_releases_a_claim_with_an_unfinished_task_dependency(waiting):
+@pytest.mark.parametrize("generation", [0, 7])
+def test_prerequisite_block_releases_a_claim_with_an_unfinished_task_dependency(waiting, generation):
     store, ledger, _ = waiting
-    ledger.rows["t1"]["depends_on"] = ["t2"]
+    ledger.rows["t1"].update(depends_on=["t2"], claim_generation=generation)
     assert run("sw", "--as", ME, "wait", "--on", "merge", URL) == 1
     assert run("sw", "--as", ME, "block", f"Stack published; next step restack after {URL}") == 0
     assert ledger.rows["t1"]["state"] == "blocked"
     assert store.agents("sw")[0].state == "finished"
+
+
+def test_an_offer_from_an_older_ledger_generation_keeps_unfinished_dependencies(waiting):
+    store, ledger, _ = waiting
+    ledger.rows["t1"]["depends_on"] = ["t2"]
+    assert run("sw", "--as", ME, "wait", "--on", "merge", URL) == 1
+    ledger.rows["t1"]["claim_generation"] = 2
+    assert run("sw", "--as", ME, "block", f"Stack published; next step restack after {URL}") == 0
+    assert ledger.rows["t1"]["state"] == "claimed"
+    assert idle.wait(store.redis, "sw", ME)["on"] == {"kind": "task", "target": "t2"}
 
 
 @pytest.mark.parametrize("note", ["Waiting for operator credentials", "Stack after https://github.com/o/r/pull/78"])
