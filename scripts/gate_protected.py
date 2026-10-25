@@ -165,12 +165,18 @@ def _duration_problems(base: dict, head: dict) -> list[str]:
     if producer.get("steps", [])[: len(prefix)] not in (prefix, bounded_prefix):
         problems.append("The head skips reuse without protected durations provenance.")
     mutable = {"steps", "if", "runs-on"}
-    trimmed = {key: value for key, value in (previous.get("outputs") or {}).items() if key not in UNUSED_SELECT_OUTPUTS}
+    outputs = previous.get("outputs") or {}
+    trimmed = {key: value for key, value in outputs.items() if key not in UNUSED_SELECT_OUTPUTS}
     problems += [
         f"The head changes the durations provenance context {field}."
         for field in sorted((set(previous) | set(producer)) - mutable)
         if previous.get(field) != producer.get(field)
-        and not (field == "outputs" and producer is head["jobs"].get("select") and producer.get(field) == trimmed)
+        and not (
+            field == "outputs"
+            and producer is head["jobs"].get("select")
+            and set(UNUSED_SELECT_OUTPUTS).issubset(outputs)
+            and producer.get(field) == trimmed
+        )
     ]
     problems += [
         f"The head changes the global provenance context {field}."

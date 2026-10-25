@@ -548,6 +548,7 @@ def test_protected_provenance_checkout_accepts_only_exact_git_bounds(bounded, ch
         ({"drop": ("legs",)}, True),
         ({"set": {"files_1": "${{ steps.other.outputs.files_1 }}"}}, True),
         ({"drop": ("files_1", "files_2", "files_3"), "set": {"extra": "1"}}, True),
+        ({"absent": ("files_3",), "drop": ("files_1", "files_2")}, True),
     ],
 )
 def test_protected_select_outputs_admit_only_dropping_the_unused_file_outputs(change, red):
@@ -562,6 +563,8 @@ def test_protected_select_outputs_admit_only_dropping_the_unused_file_outputs(ch
         },
         "steps": ci_reuse.duration_provenance_steps(),
     }
+    for key in change.get("absent", ()):
+        del base["jobs"]["select"]["outputs"][key]
     base["jobs"]["gate"]["needs"].append("select")
     head = copy.deepcopy(base)
     outputs = head["jobs"]["select"]["outputs"]
