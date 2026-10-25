@@ -232,7 +232,7 @@ def test_fleet_plugins_are_the_present_claude_plugins(env, tmp_path):
 
 def test_launch_runs_the_preflight_before_taking_the_route_lock():
     source = inspect.getsource(install.cmd_claude)
-    assert source.index("deps_ensure()") < source.index("route_lock_path =")
+    assert source.index("deps_ensure()") < source.index("route_lock = _token_lock(")
 
 
 def test_session_start_kick_spawns_only_when_stale(tmp_path, monkeypatch):
