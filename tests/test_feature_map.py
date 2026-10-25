@@ -348,6 +348,12 @@ def test_a_feature_marker_cannot_discard_its_ownership(mapped_repo, marker):
         feature_map.validate(root, path)
 
 
+def test_unmarked_suite_tests_do_not_need_feature_entries(mapped_repo):
+    root, path, _ = mapped_repo
+    (root / "tests/test_unrelated.py").write_text("def test_other():\n    pass\n")
+    assert feature_map.validate(root, path) == 1
+
+
 @pytest.mark.parametrize(
     ("jobs", "success"),
     [
