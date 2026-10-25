@@ -7,7 +7,7 @@
       "ledger_item": "ledger:rig-grade-swarm-doctor/tasks/t854",
       "behaviour": "Semgrep tests each operator feature rule against regression and passing fixtures and blocks a pull request when a feature regresses.",
       "semgrep_rule": "feature-semgrep-feature-tests",
-      "behaviour_test": "tests/test_ci_semgrep.py::test_feature_fixture_command_runs_recursively",
+      "behaviour_test": "tests/test_ci_semgrep.py::test_planted_missing_feature_test",
       "live_check": ["bash", "scripts/feature_checks/semgrep-feature-tests.sh"]
     }
   ]
