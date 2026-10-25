@@ -17,8 +17,6 @@ def hosted(environ=os.environ) -> str:
     url = address(environ)
     if not url or not any(environ.get(name) for name in HOSTED_CREDENTIALS):
         return ""
-    if environ.get("AGENTIHOOKS_HIVE_LEDGER_CREDENTIAL"):
-        return url
     if url not in _answers:
         _answers[url] = answered(url, environ)
     return url if _answers[url] else ""
