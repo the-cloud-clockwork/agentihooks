@@ -438,9 +438,9 @@ Across all 308 shards, test step time was median 243 seconds, p95 290 seconds an
 Use authenticated `gh` with read access to repository Actions. Select the Tests merge group runs after the relevant merge, fixing an upper cutoff so later runs do not change the sample. This example reconstructs the research window; for a new measurement replace both timestamps and record the cutoff with its run list:
 
 ```bash
-gh run list --repo the-cloud-clockwork/agentihooks --workflow test.yml \
-  --event merge_group --created '2026-10-20T16:52:04Z..2026-10-21T05:02:00Z' \
-  --limit 20 --json databaseId,attempt,createdAt,conclusion,url
+gh api --method GET repos/the-cloud-clockwork/agentihooks/actions/workflows/test.yml/runs \
+  -f event=merge_group -f created='2026-10-20T16:52:04Z..2026-10-21T05:02:00Z' \
+  -F per_page=20 --jq '.workflow_runs[] | {id, run_attempt, created_at, conclusion, html_url}'
 ```
 
 For each returned run, record its attempt and read every jobs page. The following prints the shard, test step seconds, job seconds and runner wait seconds:
@@ -457,7 +457,9 @@ gh api "repos/the-cloud-clockwork/agentihooks/actions/runs/$run/attempts/$attemp
      ((.completed_at | fromdateiso8601) - (.started_at | fromdateiso8601)),
      (($job.completed_at | fromdateiso8601) - ($job.started_at | fromdateiso8601)),
      (($job.started_at | fromdateiso8601) - ($job.created_at | fromdateiso8601))] | @tsv'
-gh run view "$run" --repo the-cloud-clockwork/agentihooks --attempt "$attempt" --log-job "<split job id>"
+split_job="<split job id>"
+gh api "repos/the-cloud-clockwork/agentihooks/actions/jobs/$split_job/logs" \
+  | rg 'Python 3\.12:'
 ```
 
 Take the split job ID from the same jobs response and read its `Python 3.12: N queue shards, predicted slowest Xs of 360s` line; later planners may print a different target. For each run retain the shard count, slowest shard, median step, prediction, maximum and median wait, and subtract the slowest step from the workflow's timeout at that run's commit. Use one recorded attempt consistently; a rerun is a separate observation. Report missing steps, incomplete runs or expired logs as evidence gaps rather than zero durations. If fewer than twenty runs exist after the merge, report that sample size. These commands list runs, jobs and logs; they dispatch and rerun nothing.
