@@ -126,7 +126,9 @@ def detach(store, slug: str, agent) -> None:
 
 
 def observe(store, slug: str, live: set[str]) -> None:
-    starting = {a.name for a in store.agents(slug) if a.lane == "master" and a.state == "starting"}
+    starting = {
+        a.name for a in store.agents(slug) if a.lane == "master" and a.state == "starting" and a.name not in live
+    }
     for row in list_transfers(store, slug):
         if not row["successor"] or row["binding"]["state"] == "live" or row["successor"] in starting:
             continue
