@@ -182,7 +182,7 @@ def _freshness(get, trace_id: str, mark: dict, page: int) -> dict:
     }
 
 
-def _read_binding(get, slug: str, binding: dict, marks: dict, kept: dict, page: int) -> dict:
+def _read_binding(get, slug: str, binding: dict, marks: dict, kept: dict, page: int, ended: Event) -> dict:
     params = {
         "tags": [f"swarm:{slug}", f"agent:{binding['agent']}"],
         "fields": "core",
@@ -200,7 +200,7 @@ def _read_binding(get, slug: str, binding: dict, marks: dict, kept: dict, page: 
     total = get("observations", {"traceId": current["id"], "limit": 1, "page": 1})["meta"].get("totalItems") or 0
     from scripts.doctor.observation_reconciliation import reconcile
 
-    reconciled = reconcile(get, own or current["session_id"], binding["harness"], current["id"])
+    reconciled = reconcile(get, own or current["session_id"], binding["harness"], current["id"], ended.is_set)
     remote = {"trace": current["id"], "fresh_ms": mark["fresh_ms"], "observations": int(total)}
     if reconciled is not None:
         remote["reconciliation"] = reconciled
@@ -222,7 +222,7 @@ def _attempts(get, slug: str, binding: dict, marks: dict, page: int, ended: Even
         tries += 1
         kept: dict = {}
         try:
-            remote = _read_binding(get, slug, binding, marks, kept, page)
+            remote = _read_binding(get, slug, binding, marks, kept, page, ended)
             slot.clear()
             return remote, kept
         except Exception as exc:  # noqa: BLE001

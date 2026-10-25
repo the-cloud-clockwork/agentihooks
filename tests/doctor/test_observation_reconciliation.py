@@ -133,3 +133,83 @@ def test_unavailable_accepted_source_boundary_is_unknown(cursors, end):
 
     with pytest.raises(ValueError, match="accepted"):
         observation_reconciliation.reconcile(get, "sid", "claude", "tr")
+
+
+def test_replaced_native_records_do_not_invent_accepted_tool_identities(cursors):
+    from scripts.doctor import observation_reconciliation
+
+    records = [
+        {"type": "user", "uuid": "prompt", "timestamp": "2026-10-07T08:00:00Z", "message": {"content": "run"}},
+        {
+            "type": "assistant",
+            "uuid": "reply",
+            "timestamp": "2026-10-07T08:00:01Z",
+            "message": {"id": "generation", "content": [{"type": "tool_use", "id": "old-tool", "name": "old"}]},
+        },
+        {
+            "type": "assistant",
+            "uuid": "reply",
+            "timestamp": "2026-10-07T08:00:02Z",
+            "message": {"id": "generation", "content": [{"type": "tool_use", "id": "new-tool", "name": "new"}]},
+        },
+    ]
+    transcript = _session(cursors, "sid", [], 0, paged={"spans": 4})
+    transcript.write_text("".join(json.dumps(record) + "\\n" for record in records))
+    cursor_path = agent_trace._cursor_path("sid")
+    cursor = json.loads(cursor_path.read_text())
+    cursor["source"]["accepted_bytes"] = transcript.stat().st_size
+    cursor_path.write_text(json.dumps(cursor))
+    accepted = agent_trace.session_spans([records[0], records[2]], agent_trace.Identity("sid"))
+    rows = [{"id": f"{span.span_id:016x}"} for span in accepted]
+
+    def get(path, params):
+        assert path == "observations"
+        assert params == {"traceId": "tr", "limit": 100, "page": 1}
+        return {"data": rows, "meta": {"totalItems": len(rows)}}
+
+    result = observation_reconciliation.reconcile(get, "sid", "claude", "tr")
+    assert result == {"accepted": 4, "missing": [], "drift": 0}
+
+
+@pytest.mark.parametrize("paged", [False, True])
+def test_active_read_cancellation_stops_identity_work(cursors, paged):
+    from scripts.doctor import observation_reconciliation
+
+    _session(cursors, "sid", ["2026-10-07T08:00:00Z"], 1, accepted={"one": "rev"}, paged={"spans": int(paged)})
+
+    def get(path, params):
+        raise AssertionError((path, params))
+
+    with pytest.raises(TimeoutError, match="cancelled"):
+        observation_reconciliation.reconcile(get, "sid", "claude", "tr", lambda: True)
+
+
+def test_unreadable_accepted_record_is_unknown(cursors):
+    from scripts.doctor import observation_reconciliation
+
+    transcript = _session(cursors, "sid", [], 0, paged={"spans": 9})
+    transcript.write_text("broken\\n")
+    path = agent_trace._cursor_path("sid")
+    cursor = json.loads(path.read_text())
+    cursor["source"]["accepted_bytes"] = transcript.stat().st_size
+    path.write_text(json.dumps(cursor))
+
+    def get(path, params):
+        raise AssertionError((path, params))
+
+    with pytest.raises(ValueError, match="unreadable record"):
+        observation_reconciliation.reconcile(get, "sid", "claude", "tr")
+
+
+def test_missing_paged_transcript_is_unknown(cursors, monkeypatch):
+    from hooks.observability import trace_flush
+    from scripts.doctor import observation_reconciliation
+
+    _session(cursors, "sid", ["2026-10-07T08:00:00Z"], 1, paged={"spans": 9})
+    monkeypatch.setattr(trace_flush, "_transcript", lambda session, request: None)
+
+    def get(path, params):
+        raise AssertionError((path, params))
+
+    with pytest.raises(ValueError, match="identities unavailable"):
+        observation_reconciliation.reconcile(get, "sid", "claude", "tr")
