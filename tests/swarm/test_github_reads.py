@@ -88,6 +88,13 @@ def test_a_missing_agentihooks_home_is_created_for_the_cache_and_the_counts(acti
     assert github_reads.counts(0, 2_000) == {"waits.checks": 1}
 
 
+def test_a_reader_that_charges_nothing_still_creates_the_missing_home(monkeypatch, tmp_path):
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path / "missing" / "home"))
+    running = {"status": "in_progress"}
+    assert github_reads.run("repos/org/repo/actions/runs/1", 1_000.0, lambda: running) == running
+    assert github_reads.run("repos/org/repo/actions/runs/1", 1_001.0, pytest.fail) == running
+
+
 def test_each_run_has_its_own_entry(actions, clock):  # noqa: F811
     other = RUN.replace("/123", "/456")
     assert mutation_wait.run_resolution(RUN) == ""
