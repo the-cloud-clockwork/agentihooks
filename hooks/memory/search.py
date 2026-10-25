@@ -18,7 +18,9 @@ SCOPED = (
     "JOIN session_record r ON r.access_domain = s.access_domain AND r.session_uid = s.session_uid "
     "WHERE s.access_domain = ? AND r.state = 'retained' AND NOT EXISTS (SELECT 1 FROM session_event e "
     "WHERE e.access_domain = s.access_domain AND e.session_uid = s.session_uid AND e.project_id IS NOT NULL "
-    "AND e.project_id NOT IN (SELECT value FROM json_each(?))) "
+    "AND e.project_id NOT IN (SELECT value FROM json_each(?))) AND EXISTS (SELECT 1 FROM session_event e "
+    "WHERE e.access_domain = s.access_domain AND e.session_uid = s.session_uid "
+    "AND e.project_id IN (SELECT value FROM json_each(?))) "
     "ORDER BY s.session_uid, s.source_generation, s.first_sequence, s.chunk_id"
 )
 VECTORS = (
@@ -165,7 +167,8 @@ class SessionSearch:
         return sorted(query.projects or grant.projects)
 
     def _scoped(self, domain: str, projects: list[str]) -> list[dict]:
-        rows = self.catalog.db.execute(SCOPED, (domain, json.dumps(projects))).fetchall()
+        allowed = json.dumps(projects)
+        rows = self.catalog.db.execute(SCOPED, (domain, allowed, allowed)).fetchall()
         return [json.loads(row[0]) for row in rows]
 
     def _query_vector(self, domain: str, text: str, embedder: Embedder | None) -> tuple[dict, list[float]]:
@@ -197,9 +200,10 @@ class SessionSearch:
         return ranked[: query.limit * CANDIDATE_FACTOR], label
 
     def search(self, grant: Grant, query: Query, embedder: Embedder | None = None) -> dict:
+        allowed = self._allowed(grant, query)
         if not (1 <= query.limit <= MAX_LIMIT and 0 <= query.context <= MAX_CONTEXT):
             raise ValueError(BAD_BOUNDS)
-        chunks = self._scoped(query.access_domain, self._allowed(grant, query))
+        chunks = self._scoped(query.access_domain, allowed)
         phrases, terms = parse(query.text)
         lexical_ranked = lexical(chunks, phrases, terms)[: query.limit * CANDIDATE_FACTOR]
         vector_ranked, label = self._vector(query, embedder, chunks)

@@ -206,6 +206,31 @@ def test_a_session_not_retained_is_not_searched(inputs, corpus):
     assert not any(label.startswith("kernel:") for label in sv2_idx04_cases.named(labels, wide))
 
 
+def test_a_session_with_no_event_in_the_allowed_projects_is_not_searched(inputs, corpus):
+    call = {"kind": "tool_call", "tool_name": "Bash", "tool_input": {"command": "ChunkIndex.build"}}
+    item = {
+        **inputs["sessions"][1],
+        "session_uid": "swarm-fixture:claude:worker-a:unattributed",
+        "turns": [[{**call, "tool_use_id": "toolu_unattributed"}]],
+    }
+    extra = open_session(inputs, item, corpus.root, len(inputs["sessions"]))
+    assert extra.append(item["turns"])["state"] == "committed"
+    extra.build()
+    extra.validate()
+    extra.activate("current", 0)
+    text = inputs["queries"]["symbol"]
+    for projects in ((inputs["project"],), ()):
+        answer = corpus.searcher.search(grant(inputs), query(inputs, text, projects=projects))
+        assert answer["results"]
+        assert item["session_uid"] not in {result["session_uid"] for result in answer["results"]}
+
+
+def test_scope_is_refused_before_bounds(inputs, corpus):
+    with pytest.raises(ScopeRefused):
+        corpus.searcher.search(grant(inputs), Query(inputs["foreign_corpus"], "x", limit=0))
+    assert corpus.searcher.scope_rejections_total(DOMAIN) == 1
+
+
 def test_a_session_without_an_active_chunk_generation_is_not_searched(inputs, corpus, tmp_path):
     item = {**inputs["sessions"][1], "session_uid": "swarm-fixture:claude:worker-a:unactivated"}
     extra = open_session(inputs, item, tmp_path, len(inputs["sessions"]))
