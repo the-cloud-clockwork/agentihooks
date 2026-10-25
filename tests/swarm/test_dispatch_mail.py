@@ -5,7 +5,7 @@ import pytest
 from scripts.inbox import cli
 from scripts.inbox.store import InboxStore
 from scripts.swarm import dispatch_seat
-from tests.swarm.test_dispatch_seat import NOW, SLUG, doc, run, seats, swarm
+from tests.swarm.test_dispatch_seat import NOW, SLUG, doc, priority, run, seats, swarm
 from tests.swarm.test_tick import FakeRuntime
 
 pytestmark = [pytest.mark.unit, pytest.mark.xdist_group(name="dispatch_mail")]
@@ -230,6 +230,41 @@ def test_a_failed_consumer_launch_retries_without_losing_accepted_mail(mailbox, 
     assert len(runtime.spawned) == 1
     [seat] = seats(store)
     assert inbox.deliver(sent["id"], seat.name).state == "delivered"
+
+
+@pytest.mark.parametrize("disposition", ["missing", "done", "cancel"])
+@pytest.mark.parametrize("remaining", ["none", "mail", "priority"])
+def test_launch_rechecks_mail_after_capacity_checks(mailbox, monkeypatch, capsys, disposition, remaining):
+    store, inbox = mailbox
+    runtime = FakeRuntime()
+    assert cli.main(["send", f"dispatcher@{SLUG}", "Consider obsolete evidence"]) == 0
+    stale = json.loads(capsys.readouterr().out)["id"]
+    expected = []
+    if remaining == "mail":
+        assert cli.main(["send", f"dispatcher@{SLUG}", "Consider current evidence"]) == 0
+        current = json.loads(capsys.readouterr().out)["id"]
+        expected = [f"inbox:{current}"]
+
+    def settle_mail(*args):
+        if disposition == "missing":
+            store.redis.delete(inbox.key("item", stale))
+        else:
+            inbox.close(stale, "former", disposition)
+        return ""
+
+    monkeypatch.setattr(dispatch_seat.seat_spawn, "host_hold", settle_mail)
+    ledger = doc() if remaining != "priority" else doc(priority("p1"))
+    if remaining == "priority":
+        expected = ["p1"]
+    actions = run(store, runtime, ledger)
+    if remaining == "none":
+        assert actions == []
+        assert runtime.spawned == []
+        assert seats(store) == []
+    else:
+        assert len(runtime.spawned) == 1, actions
+        assert [trigger["id"] for trigger in runtime.tasks[0]["triggers"]] == expected
+        assert store.redis.hkeys(store.key(SLUG, dispatch_seat.SENT)) == expected
 
 
 @pytest.mark.parametrize("lane,state", [("eng", "working"), ("dispatch", "finished")])
