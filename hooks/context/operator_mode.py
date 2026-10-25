@@ -163,7 +163,8 @@ def _away(session_id, environ, now):
 
 def _reminder_text(environ, session_id):
     env = os.environ if environ is None else environ
-    route = MASTER_ROUTE if _binding(env, session_id)[1].startswith("master@") else WORKER_ROUTE
+    _, name = _binding(env, session_id)
+    route = MASTER_ROUTE if name.startswith("master@") else WORKER_ROUTE
     return REMINDER.format(words=env.get("AGENTIHOOKS_OPERATOR_OFF_MAX_WORDS", QUIET_WORDS), route=route)
 
 
