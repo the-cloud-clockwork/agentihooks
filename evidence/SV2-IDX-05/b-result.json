@@ -6,8 +6,7 @@
   },
   "observed": {
     "alias_list_after_revocation": [
-      "kernel",
-      "readme"
+      "kernel"
     ],
     "alias_metadata": {
       "expires": "2027-01-31T00:00:00Z",
@@ -20,11 +19,16 @@
       "records": 2,
       "state": "answered"
     },
-    "evidence_reference_resolution_failures": 5,
+    "evidence_reference_resolution_failures": {
+      "access_domain": "swarm-fixture",
+      "principal": "tools-fixture",
+      "value": 8
+    },
     "hidden_names_absent_from_diagnostics": true,
+    "narrow_grant_search_results": 0,
     "protected_state_unchanged": true,
     "rejected": {
-      "alias_get_session": {
+      "alias_get_session_after_deletion": {
         "error": {
           "class": "evidence_unavailable",
           "detail": "the cited evidence is not available to this grant",
@@ -32,7 +36,7 @@
         },
         "state": "rejected"
       },
-      "alias_get_session_segment": {
+      "alias_get_session_segment_after_deletion": {
         "error": {
           "class": "evidence_unavailable",
           "detail": "the cited evidence is not available to this grant",
@@ -40,7 +44,7 @@
         },
         "state": "rejected"
       },
-      "records_after_revocation": {
+      "alias_get_session_segment_after_restriction": {
         "error": {
           "class": "evidence_unavailable",
           "detail": "the cited evidence is not available to this grant",
@@ -48,7 +52,31 @@
         },
         "state": "rejected"
       },
-      "session_get_after_revocation": {
+      "records_after_deletion": {
+        "error": {
+          "class": "evidence_unavailable",
+          "detail": "the cited evidence is not available to this grant",
+          "retry": "never"
+        },
+        "state": "rejected"
+      },
+      "records_after_restriction": {
+        "error": {
+          "class": "evidence_unavailable",
+          "detail": "the cited evidence is not available to this grant",
+          "retry": "never"
+        },
+        "state": "rejected"
+      },
+      "records_under_a_narrow_grant": {
+        "error": {
+          "class": "evidence_unavailable",
+          "detail": "the cited evidence is not available to this grant",
+          "retry": "never"
+        },
+        "state": "rejected"
+      },
+      "session_get_after_deletion": {
         "error": {
           "class": "evidence_unavailable",
           "detail": "the cited evidence is not available to this grant",
@@ -57,7 +85,10 @@
         "state": "rejected"
       }
     },
-    "revoked_revision": 2,
+    "revoked_revisions": {
+      "deleted": 2,
+      "restricted": 2
+    },
     "scope_and_cursor": {
       "cursor_from_another_grant": {
         "error": {
@@ -84,8 +115,37 @@
         "state": "rejected"
       }
     },
-    "session_alias_calls": 4,
-    "unrevoked_fixture_still_cites_the_hit": "lock"
+    "session_alias_calls": {
+      "access_domain": "swarm-fixture",
+      "principal": "tools-fixture",
+      "value": 5
+    },
+    "unsupported": {
+      "malformed_citation": {
+        "error": {
+          "class": "invalid_request",
+          "detail": "citation must carry exactly ['event_ids', 'first_sequence', 'last_sequence', 'session_uid', 'source_generation']",
+          "retry": "never"
+        },
+        "state": "rejected"
+      },
+      "old_schema_version": {
+        "error": {
+          "class": "invalid_request",
+          "detail": "unsupported schema_version",
+          "retry": "never"
+        },
+        "state": "rejected"
+      },
+      "unknown_field": {
+        "error": {
+          "class": "invalid_request",
+          "detail": "request carries unknown fields",
+          "retry": "never"
+        },
+        "state": "rejected"
+      }
+    }
   },
   "state": "passed"
 }
