@@ -365,7 +365,11 @@ def test_a_stop_request_survives_an_ignored_exit_exception(monkeypatch, swallowe
     def stream(*args):
         pytest.fail("stream connected after SIGTERM")
 
-    monkeypatch.setattr(watch_ledger.signal, "signal", lambda number, handler: handlers.append(handler))
+    def register(number, handler):
+        assert callable(handler)
+        handlers.append(handler)
+
+    monkeypatch.setattr(watch_ledger.signal, "signal", register)
     monkeypatch.setattr(watch_ledger.atexit, "register", lambda *args, **kwargs: None)
     monkeypatch.setattr(watch_ledger, "credentials", credentials)
     monkeypatch.setattr(watch_ledger, "stream", stream)
