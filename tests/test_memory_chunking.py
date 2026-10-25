@@ -89,6 +89,7 @@ def test_parts_pack_whole_events_up_to_the_bound_counting_separators():
     events = [event(n, "user_text", text="x") for n in (1, 2, 3)]
     assert [[item["sequence"] for item in part] for part in chunking._parts(events, 15)] == [[1, 2], [3]]
     assert [[item["sequence"] for item in part] for part in chunking._parts(events, 14)] == [[1], [2], [3]]
+    assert [[item["sequence"] for item in part] for part in chunking._parts(events, 22)] == [[1, 2], [3]]
     assert [[item["sequence"] for item in part] for part in chunking._parts(events, 23)] == [[1, 2, 3]]
     assert [[item["sequence"] for item in part] for part in chunking._parts(events, 2)] == [[1], [2], [3]]
 
@@ -203,6 +204,11 @@ def test_ids_change_with_version_generation_and_scope():
 def test_a_policy_without_a_version_or_bound_is_refused(policy):
     with pytest.raises(ValueError, match=chunking.BAD_POLICY):
         chunking.chunk_events(policy, SCOPE, "g1", [])
+
+
+def test_a_one_character_bound_is_a_valid_policy():
+    chunks = chunking.chunk_events(chunking.Policy("v1", 1), SCOPE, "g1", [event(1, "user_text", text="x")])
+    assert [chunk["preview"] for chunk in chunks] == ["u"]
 
 
 def test_chunk_records_match_the_schema():

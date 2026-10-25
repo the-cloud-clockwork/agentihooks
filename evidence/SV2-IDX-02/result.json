@@ -4,7 +4,7 @@
   "dependency_evidence": "evidence/SV2-IDX-01/result.json records the session catalog, archive manifest and grant checks this package reads; the catalog tables, ingest and archive functions are unchanged here",
   "integration_gate": "G4",
   "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/7073",
-  "pull_request": "pending",
+  "pull_request": "https://github.com/the-cloud-clockwork/agentihooks/pull/7080",
   "package_complete": false,
   "evidence_class": "mocked: an in-process caller, a SQLite catalog file and a local content addressed object folder stand in for the session service, the central database and the archive bucket; no embedding model, HTTP server or Pod runs",
   "interfaces": [
@@ -29,7 +29,7 @@
     "externally_verified": "Not yet: no deployed session service, embedding worker or database ran; a live check belongs to the G4 rollout gate."
   },
   "metrics": {
-    "chunks_rebuilt_without_content_change": "durable per access domain in ingest_counter: the number of chunks a build inserted under a new id with the same kind, preview hash and evidence as a chunk it removed"
+    "chunks_rebuilt_without_content_change": "durable per access domain in ingest_counter: the number of chunks a build inserted under a new id with the same kind, preview hash and evidence as a chunk it removed; it stays zero while a session only grows and is nonzero when a build replaces stored chunks over the same events, such as the same events registered under a new source generation"
   },
   "cases": {
     "a": "evidence/SV2-IDX-02/a-result.json",

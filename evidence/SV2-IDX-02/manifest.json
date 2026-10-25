@@ -9,7 +9,7 @@
     "tests/fixtures/swarm_v2/session-chunks.json": "9442886fae1a111dd590083f652183da056ac6a5e7e41339344d139b9b695242"
   },
   "package": "SV2-IDX-02",
-  "red_run": "pending",
+  "red_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/40175715280",
   "run": "pending",
   "tested_commit": "pending"
 }

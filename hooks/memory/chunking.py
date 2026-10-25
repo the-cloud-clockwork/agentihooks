@@ -14,6 +14,8 @@ TURN_START = "user_text"
 EVIDENCE_KEYS = ("event_id", "sequence", "byte_start", "byte_end")
 REBUILT = "chunks_rebuilt_without_content_change"
 BUILT, VALIDATED = "built", "validated"
+CANONICAL_JSON = {"sort_keys": True, "ensure_ascii": False}
+RECORD_JSON = {"ensure_ascii": False}
 CHUNK_SCHEMA = (
     """CREATE TABLE IF NOT EXISTS chunk_generation (
         access_domain TEXT NOT NULL, session_uid TEXT NOT NULL, chunker_version TEXT NOT NULL, policy TEXT NOT NULL,
@@ -75,11 +77,11 @@ class ChunkScope:
 
 
 def _digest(value: object) -> str:
-    return hashlib.sha256(json.dumps(value, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+    return hashlib.sha256(json.dumps(value, **CANONICAL_JSON).encode()).hexdigest()
 
 
 def _text(value: object) -> str:
-    return value if isinstance(value, str) else json.dumps(value, sort_keys=True, ensure_ascii=False)
+    return value if isinstance(value, str) else json.dumps(value, **CANONICAL_JSON)
 
 
 def _line(record: dict) -> str:
@@ -102,15 +104,15 @@ def _turns(events: list[dict]) -> list[list[dict]]:
 
 
 def _parts(events: list[dict], limit: int) -> list[list[dict]]:
-    parts, size = [], 0
+    parts, sizes = [], []
     for event in events:
         length = len(_line(event["record"]))
-        if parts and size + 1 + length <= limit:
+        if parts and sizes[-1] + 1 + length <= limit:
             parts[-1].append(event)
-            size += 1 + length
+            sizes[-1] += 1 + length
         else:
             parts.append([event])
-            size = length
+            sizes.append(length)
     return parts
 
 
@@ -227,7 +229,7 @@ class ChunkIndex:
             self.catalog.db.execute(DELETE_CHUNK, (*key, chunk_id))
         for chunk in inserted:
             first = chunk["evidence"][0]["sequence"]
-            row = (*key, chunk["chunk_id"], chunk["source_generation"], first, json.dumps(chunk, ensure_ascii=False))
+            row = (*key, chunk["chunk_id"], chunk["source_generation"], first, json.dumps(chunk, **RECORD_JSON))
             self.catalog.db.execute(INSERT_CHUNK, row)
         found = self._generation(key)
         state = found["state"] if found and not inserted and not superseded else BUILT
@@ -258,7 +260,9 @@ class ChunkIndex:
             found = self._generation(key)
             if found and found["policy"] != asdict(policy):
                 raise Conflict(POLICY_CONFLICT)
-            if found and any(through.get(name, -1) < sequence for name, sequence in found["built_through"].items()):
+            if found and any(
+                name not in through or through[name] < sequence for name, sequence in found["built_through"].items()
+            ):
                 raise Conflict(STALE_BUILD)
             result = self._write(key, chunks, through, policy)
         return {**result, "chunker_version": policy.version, "built_through": through}
