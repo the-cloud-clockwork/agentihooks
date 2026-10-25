@@ -143,7 +143,7 @@ def test_the_session_shares_a_held_master_slot_without_claiming_it(rendered, mon
     assert env["CLAUDE_CONFIG_DIR"] == str(target)
     assert env[claude_ai.STORE] == str(login.home(1))
     assert not (target / login.CREDENTIALS).exists()
-    assert json.loads((target / login.CONFIG).read_text())[login.ACCOUNT] == PREFERRED
+    assert json.loads((target / login.CONFIG).read_text()) == {"mcpServers": {}, login.ACCOUNT: PREFERRED}
     assert (target / "CLAUDE.md").read_text() == "engineer persona"
     assert "CLAUDE_CODE_OAUTH_TOKEN" not in env
     assert env["AH_ROUTE_INTERACTIVE_nestor_coltatgmail_com"] == "1"
@@ -169,6 +169,39 @@ def test_a_stored_copy_restores_into_a_free_slot_home(rendered, monkeypatch, che
     assert json.loads((login.home(3) / login.CREDENTIALS).read_text()) == {login.GRANT: GRANT}
     assert executed[0][2][claude_ai.STORE] == str(login.home(3))
     assert checked == [("nestor_coltatgmail_com", str(login.home(3)), executed[0][2]["CLAUDE_CONFIG_DIR"])]
+    assert login.home(3).stat().st_mode & 0o777 == login.PRIVATE_DIR
+
+
+def test_a_stored_copy_restores_into_an_empty_slot_folder(rendered, monkeypatch, checked, executed):
+    copy = {"grant": json.dumps(GRANT), "account": json.dumps(PREFERRED), "epoch": "2"}
+    login.home(1).mkdir(parents=True)
+    monkeypatch.setattr(openbao_kv, "from_env", lambda environ: "bao")
+    monkeypatch.setattr(login, "stored", lambda bao, number=None: copy if number == 1 else {})
+    monkeypatch.setattr(master_logins, "left", lambda account, now: 50.0)
+    claude_ai.launch_claude("/opt/claude", [], _environ(rendered), "")
+    assert json.loads((login.home(1) / login.CREDENTIALS).read_text()) == {login.GRANT: GRANT}
+
+
+def test_a_stored_copy_never_restores_into_a_slot_a_master_holds(rendered, monkeypatch, checked, executed):
+    copy = {"grant": json.dumps(GRANT), "account": json.dumps(PREFERRED), "epoch": "2"}
+    login.root(1).mkdir(parents=True)
+    _master_holds(1)
+    monkeypatch.setattr(openbao_kv, "from_env", lambda environ: "bao")
+    monkeypatch.setattr(login, "stored", lambda bao, number=None: copy if number == 1 else {})
+    monkeypatch.setattr(master_logins, "left", lambda account, now: 50.0)
+    claude_ai.launch_claude("/opt/claude", [], _environ(rendered), "")
+    assert not (login.home(1) / login.CREDENTIALS).exists()
+
+
+def test_unranked_logins_follow_the_ranked_ones_by_slot_number(rendered, monkeypatch, checked, executed):
+    _slot(1, {"emailAddress": "zed@example.com"})
+    _slot(2, {"emailAddress": "amy@example.com"})
+    _slot(3, SECOND)
+    monkeypatch.setattr(master_logins, "left", lambda account, now: 50.0)
+    claude_ai.launch_claude("/opt/claude", [], _environ(rendered), "")
+    monkeypatch.delenv(login.ORDER_ENV)
+    claude_ai.launch_claude("/opt/claude", [], _environ(rendered), "")
+    assert [account for account, _, _ in checked] == ["thecloudclockworkatgmail_com", "zedatexample_com"]
 
 
 def test_no_usable_login_refuses_with_every_reason_and_never_routes_a_token(rendered, monkeypatch, executed):
@@ -176,11 +209,19 @@ def test_no_usable_login_refuses_with_every_reason_and_never_routes_a_token(rend
 
     _slot(1, PREFERRED)
     _slot(2, SECOND)
-    monkeypatch.setattr(master_logins, "left", lambda account, now: 3.0)
+    monkeypatch.setattr(
+        master_logins, "left", _left({"nestor_coltatgmail_com": 3.0, "thecloudclockworkatgmail_com": 60.0})
+    )
+
+    def check(environ, account, run=None):
+        raise native_login.LoginError(native_login.EXPIRED)
+
+    monkeypatch.setattr(native_login, "check", check)
     with pytest.raises(RoutingError) as refused:
         claude_ai.launch_claude("/opt/claude", [], _environ(rendered, AH_CC_TOKEN_workeratexample_com="x"), "")
     assert str(refused.value) == (
-        "no usable claude ai login: nestor_coltatgmail_com has 3% left; thecloudclockworkatgmail_com has 3% left"
+        "no usable claude ai login: nestor_coltatgmail_com has 3% left; "
+        f"thecloudclockworkatgmail_com: {native_login.EXPIRED}"
     )
     assert executed == []
 
@@ -239,4 +280,26 @@ def test_the_claude_launcher_hands_the_route_over_without_holding_the_route_lock
 
     monkeypatch.setattr(claude_ai, "launch_claude", launch)
     install.cmd_claude(["--route", "claude-ai", "--agentihooks-fallback-bare", "--version"])
+    assert seen == [("/opt/claude", ["--version"], install.os.environ, "")]
+
+
+def test_the_interactive_route_still_launches_under_the_route_lock(tmp_path, monkeypatch):
+    import fcntl
+
+    from scripts import install
+    from scripts.routing import interactive
+
+    seen = []
+    monkeypatch.setattr(install, "_load_claude_runtime_env", lambda: None)
+    monkeypatch.setattr("scripts.deps_preflight.ensure", lambda: None)
+    monkeypatch.setattr("scripts.claude_quota_balancer._cache_path", lambda _: tmp_path / "quota.json")
+    monkeypatch.setattr(install.shutil, "which", lambda name: f"/opt/{name}")
+
+    def launch(*args):
+        with (tmp_path / "claude-route.lock").open("a+") as waiting, pytest.raises(BlockingIOError):
+            fcntl.flock(waiting, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        seen.append(args)
+
+    monkeypatch.setattr(interactive, "launch_claude", launch)
+    install.cmd_claude(["--route", "interactive", "--version"])
     assert seen == [("/opt/claude", ["--version"], install.os.environ, "")]

@@ -144,6 +144,38 @@ the latest grant native Claude saved is copied to that slot's record with its
 owner epoch, never replacing a newer copy; a launch whose home has no login
 restores it from there.
 
+## Standalone sessions on a claude ai login
+
+```bash
+agentihooks claude --route claude-ai
+agentihooks init-agent --dir ~/dev/project -- --route claude-ai
+```
+
+Route `claude-ai` launches a normal standalone session, outside any swarm seat,
+on one of the stored master claude ai logins instead of a quota token. It works
+whether or not `AGENTIHOOKS_MASTER_CLAUDE_LOGIN` is on.
+
+- **Choice.** Logins are tried in `AGENTIHOOKS_MASTER_LOGIN_ORDER` (a comma
+  list of emails, for example
+  `nestor.colt@gmail.com,thecloudclockwork@gmail.com`); logins it does not
+  name follow in slot order. A login with 10% or less left on its five hour or
+  week window (the shared drain floor) is skipped, and so is one whose
+  `claude auth status --text` check fails. A slot with only an OpenBao copy is
+  restored into its home first, unless a master holds that slot.
+- **Master slots stay free.** The session never writes the slot's claim, so a
+  master launch takes the same slot as if the session were not there. It runs
+  in its own home, `$AGENTIHOOKS_HOME/claude-ai/<agent name>/claude` (or
+  `pid-<pid>` with no agent name), built from its rendered profile and carrying
+  the slot's account. `CLAUDE_SECURESTORAGE_CONFIG_DIR` points at the slot
+  home, so the grant is never copied: native Claude refreshes the one
+  credential store every session on that login shares, and a rotated refresh
+  token never leaves a stale second copy.
+- **Refusal.** With no usable login the launch prints each login's reason and
+  exits 3. It never falls back to a quota token or bare Claude.
+
+The session gets `--settings {"forceLoginMethod":"claudeai"}` and the same
+credential scrubbing and settings refusals as the master route.
+
 ## Codex login
 
 ```bash
