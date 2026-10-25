@@ -3,9 +3,10 @@ import json
 
 import pytest
 
-from scripts.events import Envelope
 from scripts.events.config import CREDENTIALS_ENV, URL_ENV, QueuePolicy
+from scripts.events.envelope import Envelope
 from tests.events.test_nats_migration import buses as buses
+from tests.hive.test_nats_grant import signer as signer
 
 pytestmark = pytest.mark.unit
 
@@ -22,7 +23,7 @@ def test_command_inventories_then_keeps_every_ready_offer(buses, monkeypatch, ca
         ]
         for offer in offers[swarm, lane]:
             queue.offer(offer)
-    monkeypatch.setenv("AGENTIHOOKS_BUS_BACKEND", "nats")
+    monkeypatch.setenv("AGENTIHOOKS_BUS", "nats")
     monkeypatch.setenv(URL_ENV, scoped._config.url)
     monkeypatch.setenv(CREDENTIALS_ENV, scoped._config.credentials)
     monkeypatch.delenv("AGENTIHOOKS_BUS_BIND", raising=False)
