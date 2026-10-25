@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/prerequisite_wait.py:scripts.swarm.prerequisite_wait.x_admit__mutmut_9:598f2c356d9eaa73e357ae1455f4d08f15140c5836fd27325c9ba0803992be20": {
+    "reader": "Standards",
+    "reason": "Changing the absent-task generation fallback from 0 to 1 changes only an unread local value. With final set, an absent task raises before generation is used; otherwise the absent-task return precedes the sole use in the stored offer. Present-task paths are unchanged."
+  }
+}
