@@ -36,7 +36,7 @@ def judge(tmp_path, *, diff=0, read=0, fetch=0):
     log = tmp_path / "commands"
     pinned = tmp_path / "pinned"
     (tools / "python3").write_text(
-        '#!/usr/bin/env bash\nprintf "python3 %s\\n" "${*:2}" >> "$COMMAND_LOG"\n'
+        '#!/usr/bin/env bash\nprintf "python3 %s\\n" "${1##*/} ${*:2}" >> "$COMMAND_LOG"\n'
         f'[[ "$FAKE_READ" == 0 ]] || exit "$FAKE_READ"\necho "{PINNED} rev123"\n'
     )
     (tools / "docker").write_text('#!/usr/bin/env bash\nprintf "docker %s\\n" "$*" >> "$COMMAND_LOG"\n')
@@ -166,7 +166,7 @@ def test_base_inputs_cover_every_base_source_the_wheel_does_not_replace():
 def test_base_is_current_when_its_inputs_match_the_published_revision(tmp_path):
     status, commands, _, pinned = judge(tmp_path)
     assert status == 0
-    assert commands[0] == f"python3 {BASE}"
+    assert commands[0] == f"python3 base-revision.py {BASE}"
     assert not any(command.startswith("docker ") for command in commands)
     assert "git fetch -q --depth=1 origin rev123" in commands
     assert commands[-1] == f"git diff --quiet rev123 HEAD -- {INPUTS}"
@@ -197,35 +197,69 @@ def test_base_is_undetermined_with_a_visible_reason_when_the_comparison_fails(tm
     assert reason in output
 
 
-def registry(monkeypatch, labels):
+class Reply(io.BytesIO):
+    def __init__(self, body, digest):
+        super().__init__(json.dumps(body).encode())
+        self.headers = {"Docker-Content-Digest": digest} if digest else {}
+
+
+def registry(monkeypatch, labels, *, index=True):
+    image = "/v2/the-cloud-clockwork/agentihooks-worker"
+    platform = {"config": {"digest": "sha256:config"}}
     blobs = {
-        "/token?scope=repository:the-cloud-clockwork/agentihooks-worker:pull": {"token": "t"},
-        "/v2/the-cloud-clockwork/agentihooks-worker/manifests/dev": {
-            "manifests": [
-                {"digest": "sha256:attestation", "platform": {"architecture": "unknown", "os": "unknown"}},
-                {"digest": "sha256:amd64", "platform": {"architecture": "amd64", "os": "linux"}},
-            ]
-        },
-        "/v2/the-cloud-clockwork/agentihooks-worker/manifests/sha256:amd64": {"config": {"digest": "sha256:config"}},
-        "/v2/the-cloud-clockwork/agentihooks-worker/blobs/sha256:config": {"config": {"Labels": labels}},
+        "/token?scope=repository:the-cloud-clockwork/agentihooks-worker:pull": ({"token": "t"}, None),
+        f"{image}/manifests/dev": (
+            {
+                "manifests": [
+                    {"digest": "sha256:attestation", "platform": {"architecture": "unknown", "os": "unknown"}},
+                    {"digest": "sha256:amd64", "platform": {"architecture": "amd64", "os": "linux"}},
+                ]
+            }
+            if index
+            else platform,
+            "sha256:index" if index else "sha256:amd64",
+        ),
+        f"{image}/manifests/sha256:amd64": (platform, "sha256:amd64"),
+        f"{image}/blobs/sha256:config": ({"config": {"Labels": labels}}, None),
     }
     seen = []
 
     def urlopen(request, timeout):
         path = request.full_url.removeprefix("https://ghcr.io")
-        seen.append((path, request.headers.get("Authorization")))
-        return io.BytesIO(json.dumps(blobs[path]).encode())
+        seen.append((path, request.headers.get("Authorization"), request.unredirected_hdrs.get("Authorization")))
+        return Reply(*blobs[path])
 
     monkeypatch.setattr(urllib.request, "urlopen", urlopen)
     monkeypatch.setattr(sys, "argv", [str(REVISION), BASE])
     return seen
 
 
-def test_base_revision_reads_the_amd64_label_from_the_registry_without_pulling(monkeypatch, capsys):
-    seen = registry(monkeypatch, {"org.opencontainers.image.revision": "rev123"})
+@pytest.mark.parametrize("index", [True, False])
+def test_base_revision_reads_the_amd64_label_from_the_registry_without_pulling(monkeypatch, capsys, index):
+    seen = registry(monkeypatch, {"org.opencontainers.image.revision": "rev123"}, index=index)
     runpy.run_path(str(REVISION), run_name="__main__")
     assert capsys.readouterr().out == f"{PINNED} rev123\n"
-    assert [auth for _, auth in seen] == [None, "Bearer t", "Bearer t", "Bearer t"]
+    assert seen[0][1:] == (None, None)
+    assert {auth for _, auth, _ in seen} == {None}
+    assert {auth for _, _, auth in seen[1:]} == {"Bearer t"}
+    assert len(seen) == (4 if index else 3)
+
+
+def test_base_revision_refuses_an_index_without_an_amd64_image(monkeypatch):
+    registry(monkeypatch, {"org.opencontainers.image.revision": "rev123"})
+    original = urllib.request.urlopen
+
+    def without_amd64(request, timeout):
+        reply = original(request, timeout)
+        if request.full_url.endswith("/manifests/dev"):
+            body = json.loads(reply.read())
+            body["manifests"] = body["manifests"][:1]
+            return Reply(body, "sha256:index")
+        return reply
+
+    monkeypatch.setattr(urllib.request, "urlopen", without_amd64)
+    with pytest.raises(SystemExit, match="has no amd64 image$"):
+        runpy.run_path(str(REVISION), run_name="__main__")
 
 
 def test_base_revision_refuses_a_base_without_its_revision_label(monkeypatch):

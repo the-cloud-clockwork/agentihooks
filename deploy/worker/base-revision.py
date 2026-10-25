@@ -16,22 +16,24 @@ accept = ", ".join(
 
 
 def get(path, token=None):
-    headers = {"Accept": accept, **({"Authorization": f"Bearer {token}"} if token else {})}
-    with urllib.request.urlopen(
-        urllib.request.Request(f"https://{registry}{path}", headers=headers), timeout=30
-    ) as reply:
-        return json.load(reply)
+    request = urllib.request.Request(f"https://{registry}{path}", headers={"Accept": accept})
+    if token:
+        request.add_unredirected_header("Authorization", f"Bearer {token}")
+    with urllib.request.urlopen(request, timeout=30) as reply:
+        return json.load(reply), reply.headers.get("Docker-Content-Digest")
 
 
-token = get(f"/token?scope=repository:{repository}:pull")["token"]
-manifest = get(f"/v2/{repository}/manifests/{tag}", token)
-digest = next(
-    (m["digest"] for m in manifest.get("manifests", []) if m.get("platform", {}).get("architecture") == "amd64"),
-    None,
-)
-if digest:
-    manifest = get(f"/v2/{repository}/manifests/{digest}", token)
-config = get(f"/v2/{repository}/blobs/{manifest['config']['digest']}", token)
+token = get(f"/token?scope=repository:{repository}:pull")[0]["token"]
+manifest, digest = get(f"/v2/{repository}/manifests/{tag}", token)
+if "manifests" in manifest:
+    digest = next(
+        (m["digest"] for m in manifest["manifests"] if m.get("platform", {}).get("architecture") == "amd64"),
+        None,
+    )
+    if not digest:
+        sys.exit(f"{sys.argv[1]} has no amd64 image")
+    manifest = get(f"/v2/{repository}/manifests/{digest}", token)[0]
+config = get(f"/v2/{repository}/blobs/{manifest['config']['digest']}", token)[0]
 revision = (config["config"].get("Labels") or {}).get("org.opencontainers.image.revision")
 if not digest or not revision:
     sys.exit(f"{sys.argv[1]} has no amd64 image with a revision label")
