@@ -26,7 +26,7 @@ def hits(tree: Path) -> dict[str, list[str]]:
     tree = tree.resolve()
     scanner = vulture.Vulture()
     # Vulture drops test_ functions and Test classes from any path holding /test, which hooks/ and scripts/ never are.
-    with patch.object(vulture.core, "_is_test_file", return_value=False):
+    with patch.object(vulture.core, "_is_test_file", frozenset().__contains__):
         for path in _graded(tree):
             try:
                 code = read_file(path)
