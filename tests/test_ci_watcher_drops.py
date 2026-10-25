@@ -83,6 +83,10 @@ def test_the_early_required_context_and_late_summary_preserve_watcher_drop_class
     assert drops.classify(jobs[:1] + jobs[2:], lambda job_id: []) is None
     jobs[-1]["conclusion"] = "failure"
     assert drops.classify(jobs, lambda job_id: []) is None
+    jobs[-1]["conclusion"] = "success"
+    jobs[0]["conclusion"] = "success"
+    jobs[1]["conclusion"] = "failure"
+    assert drops.classify(jobs, lambda job_id: []) is None
 
 
 def test_count_reads_each_failed_merge_group_run_of_the_day_and_splits_drops_from_rebuilds():
