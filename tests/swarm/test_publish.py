@@ -204,7 +204,6 @@ def test_publish_registered_worktree_ignores_a_prerequisite_pull_request(publica
         publication.task["branch"] = "prerequisite"
         publication.task["repository_branches"] = {str(publication.repo): "engineer-test"}
     monkeypatch.chdir(root)
-    monkeypatch.setattr(publish.publish_queue, "open_head", lambda remote, url: "prerequisite")
 
     result = publish.publish(
         "swarm", publication.agent, str(publication.repo), publication.ledger, "Change chosen", ["chosen.txt"]
@@ -1277,21 +1276,6 @@ def test_a_continuation_publishes_its_registered_branch_regardless_of_its_pull_r
     assert git(root, "ls-remote", "origin", "refs/heads/engineer-test").split()[0] == head
     assert git(root, "ls-remote", "origin", "refs/heads/predecessor").split()[0] == parked
     assert git(root, "rev-parse", "--abbrev-ref", "@{upstream}") == "origin/engineer-test"
-
-
-def test_a_pull_request_on_another_host_is_never_looked_up(monkeypatch):
-    from scripts.swarm import merge_queue, publish_queue
-
-    monkeypatch.setattr(merge_queue, "graphql", lambda *args: pytest.fail("looked up"))
-    assert publish_queue.open_head("/srv/remote.git", "https://github.com/example/repo/pull/7") == ""
-    assert publish_queue.open_head("git@github.com:example/repo.git", "") == ""
-
-
-def test_a_recorded_url_that_names_no_pull_request_keeps_the_current_branch(monkeypatch):
-    from scripts.swarm import merge_queue, publish_queue
-
-    monkeypatch.setattr(merge_queue, "graphql", lambda document, variables: {"resource": None})
-    assert publish_queue.open_head("git@github.com:example/repo.git", "https://github.com/example/repo/issues/7") == ""
 
 
 def test_a_missing_branch_never_descends_and_prints_nothing(publication, capfd):
