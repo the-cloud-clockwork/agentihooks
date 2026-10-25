@@ -209,8 +209,11 @@ def test_a_rule_without_both_fixtures_is_red_and_untested(rules_dir, monkeypatch
 
 def test_only_rules_with_both_fixtures_are_tested_in_one_pass(rules_dir, monkeypatch):
     rule_files = [_rule(rules_dir, "a"), _rule(rules_dir, "b", clean=None), _rule(rules_dir, "c")]
-    errors, tested = _fixture_errors(monkeypatch, rule_files, {"a.red.py", "c.red.py"})
-    assert errors == ["b: needs both b.red.py and b.clean.py"]
+    errors, tested = _fixture_errors(monkeypatch, rule_files, {"a.red.py"})
+    assert errors == [
+        "b: needs both b.red.py and b.clean.py",
+        "c: the rule does not find exactly the marked lines of c.red.py",
+    ]
     assert tested == [[rule_files[0], rule_files[2]]]
 
 
