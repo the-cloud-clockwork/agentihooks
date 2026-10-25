@@ -204,7 +204,9 @@ def test_post_shard_graders_do_not_wait_on_each_other_and_the_gate_needs_each():
     graders = {"shard-check", "coverage-ratchet", "sonar"}
     for name in graders:
         needs = jobs[name]["needs"]
-        assert "unit" in needs
+        if "unit" not in needs:
+            assert name == "shard-check" and "split" in needs
+            assert any("python -m scripts.ci_gate_shards" in step.get("run", "") for step in jobs[name]["steps"])
         assert not graders & set(needs), f"{name} waits on another post shard grader"
     assert graders <= set(jobs["gate-required"]["needs"])
 
@@ -324,6 +326,36 @@ def test_dev_records_the_suite_count_and_the_count_floor_reads_it_only_through_t
     assert "from tests.count_floor import dev_record" in fetch["run"]
     assert floor["env"]["TEST_COUNT_BASE_RECORD"] == "${{ runner.temp }}/base-record.json"
     assert jobs["test-count"]["permissions"] == {"contents": "read"}
+
+
+@pytest.mark.parametrize("event_name", ["pull_request", "merge_group"])
+def test_pull_requests_and_merge_groups_read_the_dev_count_record(event_name):
+    from tests.test_ci_hosted_lanes import _evaluate
+
+    fetch = _step("test-count", "Fetch the base suite count recorded on dev")
+    condition = fetch["if"].replace("steps.app-token.outcome", "'success'")
+    assert _evaluate("${{ " + condition + " }}", event_name=event_name) is True
+
+
+def test_a_merge_group_records_its_head_count_for_the_next_group_after_its_early_collection():
+    from tests.test_ci_hosted_lanes import _evaluate
+
+    recorder = yaml.safe_load((_ROOT / ".github/workflows/count-record.yml").read_text())["jobs"]["count-record"]
+    recorded = next(step for step in recorder["steps"] if step.get("name") == "Upload the suite count record")
+    count = _workflow()["jobs"]["test-count"]["steps"]
+    names = [step.get("name") for step in count]
+    record = count[names.index("Record the head count for the next queue group")]
+    upload = count[names.index("Upload the head count for the next queue group")]
+    assert names.index("Upload the early collection") < names.index(record["name"]) < names.index(upload["name"])
+    for step in (record, upload):
+        assert _evaluate("${{ " + step["if"] + " }}", event_name="merge_group") is True
+        assert _evaluate("${{ " + step["if"] + " }}", event_name="pull_request") is False
+    assert record["continue-on-error"] is True
+    assert 'cmp -s "$RUNNER_TEMP/base/tests/count_floor.py" tests/count_floor.py' in record["run"]
+    assert '--collected "$RUNNER_TEMP/collected.json"' in record["run"]
+    assert upload["with"]["name"] == recorded["with"]["name"]
+    assert upload["with"]["if-no-files-found"] == "ignore"
+    assert upload["with"]["overwrite"] is True
 
 
 def test_every_dev_head_records_its_count_outside_the_promotion_queue():

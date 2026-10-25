@@ -1,0 +1,6 @@
+{
+  "scripts/recall/search.py:scripts.recall.search.x_get__mutmut_21:b3af313966a8aab6547daef8998cc1cde6746a4c0529e22a71100c9cc73989cd": {
+    "reader": "standards_reader",
+    "reason": "RECORDS.KEY is the same column reference as records.key because SQLite identifiers are case-insensitive."
+  }
+}

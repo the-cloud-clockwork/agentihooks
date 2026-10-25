@@ -1207,6 +1207,7 @@ def _swarm_ledger(payload: dict) -> None:
 
 def _swarm_after_tool(payload: dict) -> None:
     _swarm_outcome(payload)
+    _hive_join(payload, "tool")
     _swarm_ledger(payload)
 
 

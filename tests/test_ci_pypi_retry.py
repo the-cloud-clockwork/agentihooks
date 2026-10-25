@@ -226,8 +226,20 @@ def _install_steps():
 @pytest.mark.parametrize("job", ["unit", "unit-selected", "test-count", "split"])
 def test_every_unit_dependency_install_runs_uv_through_the_retry(job):
     run = _install_steps()[job]["run"]
-    install = next(line for line in run.splitlines() if "uv pip install" in line)
-    assert install.strip().startswith('bash .github/scripts/pypi-retry.sh "Install dependencies" -- uv pip install')
+    online = [line.strip() for line in run.splitlines() if "uv pip install" in line and "--offline" not in line]
+    assert online
+    for install in online:
+        assert install.startswith('bash .github/scripts/pypi-retry.sh "Install dependencies" -- uv pip install')
+
+
+@pytest.mark.parametrize("job", ["unit", "unit-selected", "test-count", "split"])
+def test_every_unit_install_tries_the_runner_wheelhouse_offline_before_pypi(job):
+    lines = [line.strip() for line in _install_steps()[job]["run"].splitlines()]
+    offline = next(i for i, line in enumerate(lines) if "--offline" in line)
+    retry = next(i for i, line in enumerate(lines) if line.startswith("bash .github/scripts/pypi-retry.sh"))
+    assert lines[offline].startswith("uv pip install --offline --no-index --find-links /opt/wheelhouse ")
+    assert "exit 0" in lines[offline]
+    assert offline < retry
 
 
 def _mutation_installs():

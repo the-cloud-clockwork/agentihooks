@@ -45,7 +45,8 @@ agentihooks swarm <id> restack           rebase parked task work onto dev after 
 agentihooks swarm <id> wait MINUTES [--reason TEXT]                 the tick counts no idle tick while it holds
 agentihooks swarm <id> trace-plan        trace plan.md in the task work folder to task, phase and project intent
 done carries the proof its task's kind needs: ops and tune --command C --output O; troubleshoot --root-cause R
---evidence E with --fix URL or --filed FOLLOWUP; research --finding URL
+--evidence E with --fix URL or --filed FOLLOWUP; research --finding URL; workflow reads workflow.json and
+verdict.json from the task workspace, and an exhausted workflow blocks the task with the last judge notes
 """
 
 import argparse
@@ -58,6 +59,7 @@ import sys
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
+from contextvars import copy_context
 from dataclasses import asdict, replace
 from datetime import datetime, timezone
 from pathlib import Path
@@ -89,6 +91,7 @@ from scripts.swarm import (
     dev_red,
     dispatch_seat,
     dispatcher,
+    doc_report,
     done_gate,
     failed_panes,
     idle,
@@ -156,6 +159,7 @@ from scripts.swarm.store import (
     DEFAULT_MASTERS_STEP,
     DELEGATE,
     DISPATCH,
+    FULL,
     MASTER,
     RedisStore,
     SwarmConfig,
@@ -164,7 +168,15 @@ from scripts.swarm.store import (
     connect,
 )
 from scripts.swarm.tick import agent_status, primed, ready_in_order, skip_refused, spawn_holds, tick
-from scripts.swarm_ledger import ledger_creator, ledger_kinds, ledger_link, ledger_route, ledger_workspace, plan_shape
+from scripts.swarm_ledger import (
+    ledger_creator,
+    ledger_kinds,
+    ledger_link,
+    ledger_route,
+    ledger_workspace,
+    plan_shape,
+    workflow_task,
+)
 from scripts.swarm_v2 import master_scale, masters
 from scripts.swarm_v2.runtime.routed import routed
 
@@ -278,6 +290,23 @@ def _stopped_tick(store, slug, ledger, runtime, held):
     return controls + timing.call(tick, slug, store, ledger, runtime, now_ms()), doc
 
 
+def _intent_pass(inbox, store, slug, doc, ledger, config):
+    view = timing.call(ledger_events.tick_view, inbox, store, slug, doc)
+    check = intent.Check(
+        slug,
+        intent.mode_of(config),
+        now_ms(),
+        ledger,
+        ledger_events.Mail(inbox, store, slug),
+        intent.pr_view,
+        intent.judged,
+        head=lambda url: getattr(view(url), "head", None),
+        named=intent.named_view,
+        text=intent.pr_text,
+    )
+    return view, skip_refused(check.run, doc)
+
+
 @timing.instrument_tick
 @outage.guard_tick
 @ledger_route.service
@@ -346,25 +375,14 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None, scheduled=F
             timing.call(urgent_hold.observe, store, slug, doc, now_ms())
             actions = _phase_steps(inbox, store, slug, doc, ledger)
             doc, config = timing.call(ledger.state, slug), store.config(slug)
-            view = timing.call(ledger_events.tick_view, inbox, store, slug, doc)
-            mail, mode = ledger_events.Mail(inbox, store, slug), intent.mode_of(config)
-            actions += skip_refused(
-                intent.Check(
-                    slug,
-                    mode,
-                    now_ms(),
-                    ledger,
-                    mail,
-                    intent.pr_view,
-                    intent.judged,
-                    head=lambda url: getattr(view(url), "head", None),
-                    named=intent.named_view,
-                    text=intent.pr_text,
-                ).run,
-                doc,
-            )
-            actions += skip_refused(reboot.boot_pass, slug, store, ledger, runtime, now_ms())
-            actions += timing.call(tick, slug, store, ledger, runtime or routed(herdr=HerdrRuntime()), now_ms())
+            with ThreadPoolExecutor(max_workers=1) as worker:
+                judged = worker.submit(copy_context().run, _intent_pass, inbox, store, slug, doc, ledger, config)
+                try:
+                    actions += skip_refused(reboot.boot_pass, slug, store, ledger, runtime, now_ms())
+                    actions += timing.call(tick, slug, store, ledger, runtime or routed(herdr=HerdrRuntime()), now_ms())
+                finally:
+                    view, checked = judged.result()
+            actions += checked
             if store.config(slug).template == "doctor":
                 from scripts.doctor import cli as doctor
 
@@ -374,7 +392,7 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None, scheduled=F
             agents = [a for a in timing.call(store.agents, slug) if a.state != "finished"]
             skip_refused(delivery.relay_to_page, inbox, slug, agents, ledger)
             doc, config = timing.call(ledger.state, slug), store.config(slug)
-            view = timing.call(ledger_events.tick_view, inbox, store, slug, doc)
+            view = timing.call(ledger_events.tick_view, inbox, store, slug, doc, view)
             actions += skip_refused(ledger_events.event_pass, inbox, store, slug, doc, ledger, now_ms(), view)
             actions += skip_refused(done_gate.recheck_pass, store, slug, doc, ledger, now_ms(), view)
             actions += skip_refused(progress.checks_pass, store.redis, slug, doc["tasks"], view, now_ms())
@@ -413,6 +431,7 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None, scheduled=F
                 doc,
             )
             actions += skip_refused(quiet.quiet_pass, store, slug, rows, now_ms())
+            actions += skip_refused(doc_report.report_pass, inbox, ledger, slug, doc["tasks"], now_ms())
             actions += skip_refused(dispatcher.priorities, store, slug, doc, ledger, view, now_ms())
             if scheduled:
                 from scripts.swarm import refresh_job
@@ -637,12 +656,13 @@ def cmd_prober(store, args):
 def cmd_spoke(store, args):
     from scripts.events import factory
     from scripts.events.config import BusConfig
-    from scripts.hive import workstation
+    from scripts.hive import lanes, workstation
     from scripts.swarm import commands
     from scripts.swarm_v2.runtime.local import LocalHerdrRuntime
 
     if workstation.runs_engine(os.environ):
         raise SwarmError(workstation.ENGINE_RUNS)
+    lanes.serve(os.environ)
     bus = factory.open_bus(replace(BusConfig.from_environ(os.environ), provision=False))
     try:
         workstation.run(store, bus, LocalHerdrRuntime(HerdrRuntime()), commands.hive_id())
@@ -1276,8 +1296,11 @@ def cmd_status(store, args):
 def cmd_freeze(store, args):
     writer = clearance.freezer(store, args.slug, Who.from_env())
     by = None if writer == clearance.OPERATOR else writer
-    if by and naming.lane_of(by) != DISPATCH and not args.quote:
-        raise SwarmError("the master writes freezes only with the operator's words: pass them with --quote")
+    full = store.config(args.slug).autonomy == FULL
+    if by and not args.quote and not full:
+        raise SwarmError(
+            "below full autonomy the master writes freezes only with the operator's words: pass them with --quote"
+        )
     LedgerClient().freeze(args.slug, args.command, args.target, by=by, reason=args.reason, quote=args.quote)
     print(json.dumps({args.command: args.target, "by": writer}))
 
@@ -1665,6 +1688,7 @@ def cmd_merge(store, args):
                 args.url,
                 admit=lambda head: _queue_intent(store, args, agent, head) or queue_exit.require_fresh(args.url, head),
                 journal=queue_record.Journal(args.url),
+                attempts=merge_queue.ATTEMPTS,
             )
         else:
             result = merge_queue.operate(args.action, args.url, journal=queue_record.Journal(args.url))
@@ -1679,16 +1703,14 @@ def cmd_done(store, args):
     ledger = LedgerClient()
     row = next((t for t in ledger.tasks(args.slug) if t.get("id") == agent.task), {})
     proof = {key: getattr(args, f"proof_{key}") for key in ledger_kinds.PROOF_KEYS if getattr(args, f"proof_{key}")}
+    if ledger_kinds.kind(row) == "workflow":
+        if (found := _workflow_proof(store, args.slug, agent, ledger, row)) is None:
+            return
+        proof.update(found)
     proven = {**row, "proof": {**(row.get("proof") or {}), **proof}}
     missing = ledger_kinds.unmet(proven)
     if missing:
-        if ledger_kinds.kind(row) == "research":
-            raise SwarmError(
-                "a research task is done only with its proof: "
-                "--finding must be a single link to the artifact; put prose in a task comment"
-            )
-        flags = ", ".join("--" + key.replace("_", "-").replace(" or ", " or --") for key in missing)
-        raise SwarmError(f"a {ledger_kinds.kind(row)} task is done only with its proof: give {flags}")
+        raise SwarmError(_unproven(ledger_kinds.kind(row), missing))
     url = args.pr or row.get("pr_url")
     pull = ledger_events.view(url) if done_gate.gated(proven) and url else None
     if pull is not None and pull.state == "OPEN" and pull.queued:
@@ -1707,14 +1729,40 @@ def cmd_done(store, args):
     if refused:
         raise SwarmError(refused)
     fields = {"state": "done", **({"pr_url": args.pr} if args.pr else {}), **({"proof": proof} if proof else {})}
-    ledger.update_task(args.slug, agent.task, fields, by=agent.name)
+    closed = ledger.update_task(args.slug, agent.task, fields, by=agent.name)
     _close_members(ledger, args.slug, agent, row, {**fields, "pr_url": args.pr or row.get("pr_url")})
     waits.settle_notices(InboxStore(store.redis), agent, "done")
     _retire(store, args.slug, agent, "finished its task and exited")
+    doc_report.report(InboxStore(store.redis), ledger, args.slug, closed, now_ms())
     fallback = {"pull_request": pull.fallback} if pull is not None and pull.fallback else {}
     print(
         json.dumps({"task": agent.task, "state": "done", **fallback, "next": "stop now; the swarm closes this session"})
     )
+
+
+def _unproven(kind, missing):
+    if kind == "research":
+        return (
+            "a research task is done only with its proof: "
+            "--finding must be a single link to the artifact; put prose in a task comment"
+        )
+    if kind == "workflow":
+        return (
+            f"a workflow task is done only when {workflow_task.STATE} in its workspace says passed "
+            f"and the judge verdict record {workflow_task.VERDICT} says pass"
+        )
+    flags = ", ".join("--" + key.replace("_", "-").replace(" or ", " or --") for key in missing)
+    return f"a {kind} task is done only with its proof: give {flags}"
+
+
+def _workflow_proof(store, slug, agent, ledger, row):
+    workspace = row.get("workspace")
+    notes = workflow_task.exhausted_notes(workspace)
+    if notes is None:
+        return workflow_task.proof(workspace)
+    block_agent(store, slug, agent, notes, ledger)
+    print(json.dumps({"task": agent.task, "state": "blocked", "next": "stop now; the swarm closes this session"}))
+    return None
 
 
 def _pull_reader(url, pull):

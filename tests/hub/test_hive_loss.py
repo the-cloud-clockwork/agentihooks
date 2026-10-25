@@ -176,7 +176,45 @@ def test_the_exit_is_the_one_exit_of_that_start_and_names_the_lost_hive(rig):
     assert exited.data["hive"] == "hive-a"
 
 
-def test_a_start_that_already_exited_is_dropped_without_an_exit(rig):
+def test_the_hub_logs_the_lost_hive_with_the_execution_it_exits(rig, capsys):
+    from scripts.hive import presence
+
+    assert rig.first.spoke.poll() == "started"
+    rig.hub.run_once()
+    advance(rig, T0 + presence.TTL_MS + 10_000)
+    assert capsys.readouterr().err.splitlines() == [
+        "hub: hive hive-a of swarm rig lost; exited execution execution-a of task task"
+    ]
+
+
+def test_the_hub_logs_every_execution_of_the_lost_hive_on_one_line(rig, capsys):
+    from scripts.events.envelope import Envelope
+    from scripts.hive import presence
+
+    assert rig.first.spoke.poll() == "started"
+    rig.hub.run_once()
+    rig.bus.state("spoke-work").create("claim-b", json.dumps({"state": "started", "claim_revision": 1}).encode())
+    data = {"claim_key": "claim-b", "claim_revision": 1, "hive": "hive-a", "task": "task-b"}
+    rig.loss.handle(
+        Envelope("started:b", "execution.started", "rig", "execution", "execution-b", 1, T0, "hive-a", data)
+    )
+    rig.loss._emit = Mock()
+    advance(rig, T0 + presence.TTL_MS)
+    assert capsys.readouterr().err.splitlines() == [
+        "hub: hive hive-a of swarm rig lost; exited execution execution-a of task task, execution execution-b of task task-b"
+    ]
+
+
+def test_a_beating_hive_logs_no_loss(rig, capsys):
+    from scripts.hive import presence
+
+    assert rig.first.spoke.poll() == "started"
+    rig.hub.run_once()
+    advance(rig, T0 + 4 * presence.TTL_MS, beating=["hive-a"])
+    assert capsys.readouterr().err == ""
+
+
+def test_a_start_that_already_exited_is_dropped_without_an_exit(rig, capsys):
     from scripts.hive import presence
     from scripts.hub import hive_loss
 
@@ -193,6 +231,7 @@ def test_a_start_that_already_exited_is_dropped_without_an_exit(rig):
     advance(rig, T0 + presence.TTL_MS)
     rig.loss._emit.assert_not_called()
     assert json.loads(rig.bus.state(hive_loss.BUCKET).get(hive_loss.INDEX).value) == {}
+    assert capsys.readouterr().err == ""
 
 
 def test_a_live_hive_prunes_ended_starts_on_the_prune_cadence(rig):

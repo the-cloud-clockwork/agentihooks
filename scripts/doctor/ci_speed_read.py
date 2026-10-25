@@ -1,9 +1,11 @@
 import json
+import re
 import subprocess
 import threading
 import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from urllib.parse import urlencode
 
@@ -17,28 +19,62 @@ SETTLE_READS = 4
 REREADS = 20
 
 
+@dataclass
+class Progress:
+    pending: list[int] | None
+    responses: dict[str, dict]
+
+
+class _BudgetExhausted(RuntimeError):
+    pass
+
+
 class _Api:
-    def __init__(self, run, max_calls, max_seconds):
+    def __init__(self, run, max_calls, max_seconds, responses=None):
         self.run = run
         self.max_calls = max_calls
         self.deadline = time.monotonic() + max_seconds
         self.calls = 0
         self.lock = threading.Lock()
+        self.responses = responses
 
     def get(self, endpoint: str) -> dict:
         with self.lock:
-            remaining = self.deadline - time.monotonic()
-            if self.calls >= self.max_calls or remaining <= 0:
-                raise RuntimeError("Actions API request or time budget exhausted")
-            self.calls += 1
-        response = self.run(
-            ["gh", "api", endpoint], capture_output=True, text=True, check=True, timeout=min(25, remaining)
-        )
-        return json.loads(response.stdout)
+            if self.responses is not None and endpoint in self.responses:
+                return self.responses[endpoint]
+        body = self.request(endpoint)
+        if self.responses is not None:
+            self.responses[endpoint] = body
+        return body
+
+    def request(self, endpoint: str) -> dict:
+        for attempt in range(2):
+            with self.lock:
+                remaining = self.deadline - time.monotonic()
+                if self.calls >= self.max_calls or remaining <= 0:
+                    raise _BudgetExhausted("Actions API request or time budget exhausted")
+                self.calls += 1
+            try:
+                response = self.run(
+                    ["gh", "api", endpoint], capture_output=True, text=True, check=True, timeout=min(25, remaining)
+                )
+            except subprocess.CalledProcessError as exc:
+                status = re.search(r"\bHTTP ([1-5][0-9]{2})\b", exc.stderr or "")
+                if not status:
+                    raise
+                code = status[1]
+                if attempt == 0 and code in ("502", "503", "504"):
+                    continue
+                raise RuntimeError(f"Actions API request failed: HTTP {code}; endpoint={endpoint}") from None
+            return json.loads(response.stdout)
 
     def pages(self, endpoint: str, field: str, settles: int) -> list[dict]:
         separator = "&" if "?" in endpoint else "?"
         for attempt in range(2 + settles):
+            if attempt and self.responses is not None:
+                for key in list(self.responses):
+                    if key.startswith(f"{endpoint}{separator}per_page="):
+                        del self.responses[key]
             rows, totals = {}, set()
             page = 1
             while True:
@@ -96,14 +132,16 @@ def _reread(api, pool, records, now_ms):
 def read(
     since_ms: int,
     now_ms: int,
-    pending: list[int] | None = None,
+    pending: list[int] | Progress | None = None,
     known: dict[str, dict] | None = None,
     *,
     run: Callable = subprocess.run,
     budget: tuple[int, int] = (60, 25),
     active: bool = True,
 ) -> dict:
-    api = _Api(run, *budget)
+    progress = pending if isinstance(pending, Progress) else None
+    api = _Api(run, *budget, responses=progress.responses if progress else None)
+    pending = progress.pending if progress else pending
     root = f"repos/{REPO}/actions/runs"
     discovered, records = {}, []
     try:
@@ -134,7 +172,8 @@ def read(
                 try:
                     records.append({**jobs[future], "jobs": future.result()})
                 except FAILURES as exc:
-                    failure = failure or exc
+                    if failure is None or isinstance(failure, _BudgetExhausted):
+                        failure = exc
             if failure:
                 raise failure
             unverified = _reread(api, pool, records, now_ms)
@@ -146,9 +185,11 @@ def read(
             "unverified": unverified,
         }
     except FAILURES as exc:
+        error_type = RuntimeError if isinstance(exc, _BudgetExhausted) else type(exc)
         return {
             "complete": False,
-            "error": f"Actions API read failed: {type(exc).__name__}: {exc}",
+            "error": f"Actions API read failed: {error_type.__name__}: {exc}",
+            **({"paused": True} if progress and isinstance(exc, _BudgetExhausted) else {}),
             "runs": records,
             "api_calls": api.calls,
             "discovered_runs": len(discovered),

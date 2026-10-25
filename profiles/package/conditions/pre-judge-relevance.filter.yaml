@@ -1,0 +1,7 @@
+fields:
+  - evidence
+mode: classifier
+action: strip
+intent_from: case.intent
+intent: Every evidence item bears on the case intent.
+question: Is this item irrelevant to the case intent?

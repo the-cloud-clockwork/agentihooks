@@ -51,6 +51,8 @@ UPDATABLE = (
     "after_release",
     "applied_at",
     "workstation",
+    "doc_items",
+    "watchdog",
     "recovery",
 )
 BOOL_FIELDS = ("artifact", "follow_up", "workstation")
@@ -58,13 +60,22 @@ DIFFICULTIES = ("S", "M", "L")
 DIFFICULTY_SOURCES = ("operator", "rule", "classifier", "default")
 DIFFICULTY_FIELDS = ("difficulty", "difficulty_source", "difficulty_confidence")
 NUMBER_FIELDS = ("difficulty_confidence",)
-LIST_FIELDS = ("depends_on", "territory", "parked_on", "parked_repos", "overlays", "split_pulls", "repositories")
+LIST_FIELDS = (
+    "depends_on",
+    "territory",
+    "parked_on",
+    "parked_repos",
+    "overlays",
+    "split_pulls",
+    "repositories",
+    "doc_items",
+)
 OVERLAY_CAP = 3
 BRANCH_RE = re.compile(r"^(?!-)\S*$")
 COMMIT_RE = re.compile(r"^([0-9a-f]{7,64})?$")
 RELEASE_RE = re.compile(r"^(v?\d+\.\d+\.\d+)?$")
 APPLIED_RE = re.compile(r"(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ)?")
-OBJECT_FIELDS = ("contract", "proof", "recovery", "repository_branches", "pull_scopes")
+OBJECT_FIELDS = ("contract", "proof", "recovery", "repository_branches", "pull_scopes", "watchdog")
 PULL_SCOPE_KINDS = ("stage", "prerequisite")
 PULL_URL_RE = re.compile(r"https://github\.com/[^/\s]+/[^/\s]+/pull/\d+")
 URL_FIELDS = ("issue_url", "pr_url", "plan_url")
@@ -76,9 +87,18 @@ SWARM = "swarm"
 RANK_AUTHORS = ("operator", SWARM, "dispatcher")
 RANK_LANES = ("master", "dispatch")
 QUOTED = "task_update takes quote, the operator's words, only with a rank"
-UNRELAYED = (
-    "a rank relay needs the ledger's orchestrator and at least three words the hooks recorded from the operator "
-    "that name the rank: set the rank without a quote or quote his exact words"
+UNRELAYED_TASK = "a rank relay refused: the task does not exist"
+UNRELAYED_ROLE = (
+    "a rank relay refused: {by} is not the ledger's orchestrator; only the master relays the operator's rank, "
+    "anyone else sets the rank without a quote"
+)
+UNRELAYED_WORDS = (
+    "a rank relay refused: the quote is not at least three of the operator's exact words the hooks recorded "
+    "in a master or planner session of this swarm: quote his exact words or set the rank without a quote"
+)
+UNRELAYED_RANK = (
+    "a rank relay refused: the operator's quoted words do not name the rank {rank}: quote words that say it "
+    "or set the rank without a quote"
 )
 PROPOSE = 'propose the work with agentihooks ledger followup add "<plain words>" and the master decides'
 PUBLISH = (
@@ -362,6 +382,7 @@ def _add(doc, op, ctx):
         "slice",
         "follow_up",
         "workstation",
+        *ledger_kinds.WORKFLOW_FIELDS,
     ):
         if key in op:
             task[key] = op[key]
@@ -630,8 +651,8 @@ def _relay_rank(doc, op, ctx):
 
     task = next((t for t in doc["tasks"] if t["id"] == op["item"].split("/")[1]), None)
     rank, words = ledger_rank.canonical(op["fields"]["rank"]), relayed(op, ctx.meta)
-    if task is None or not ledger_rank.quoted(rank, words):
-        ctx.refused.append(UNRELAYED)
+    if refusal := _relay_refusal(task, op, ctx.meta, rank, words):
+        ctx.refused.append(refusal)
         return False
     if refusal := ledger_rank.urgent_refusal({**task, "rank": rank}, doc):
         ctx.refused.append(refusal)
@@ -652,6 +673,18 @@ def _changed(task, fields, op, ctx):
     if fields.get("state") == "blocked" and _block_author(op["by"]):
         changed["state"] = "blocked"
     return changed
+
+
+def _relay_refusal(task, op, meta, rank, words):
+    if task is None:
+        return UNRELAYED_TASK
+    if meta["members"].get(op["by"], {}).get("role") != "orchestrator":
+        return UNRELAYED_ROLE.format(by=op["by"])
+    if not words:
+        return UNRELAYED_WORDS
+    if not ledger_rank.quoted(rank, words):
+        return UNRELAYED_RANK.format(rank=rank)
+    return ""
 
 
 def complete_outcome(doc: dict, op: dict, ctx: object, outcome: dict, actor: str) -> bool:

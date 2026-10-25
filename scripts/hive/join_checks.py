@@ -101,16 +101,18 @@ def cheap(redis: "Redis", report: dict) -> dict:
     }
 
 
-def startup(redis: "Redis", report: dict) -> dict:
+def ledger_checks(report: dict) -> dict:
     from scripts.swarm.ledger_client import LedgerClient, _op
 
     ledger = LedgerClient()
+    checks = report.get("checks", {})
     slug, name = report["slug"], report["agent"]
-    joined = checked(lambda: ledger.join(slug, name, "member") is None)
-    written = checked(lambda: ledger._call(slug, [_op("ack", name, rev=0)]))
     return {
-        **cheap(redis, report),
-        "ledger_join": joined,
-        "ledger_write": written,
-        "github": github_ready(),
+        "ledger_join": checks.get("ledger_join") is True or checked(lambda: ledger.join(slug, name, "member") is None),
+        "ledger_write": checks.get("ledger_write") is True
+        or checked(lambda: ledger._call(slug, [_op("ack", name, rev=0)])),
     }
+
+
+def startup(redis: "Redis", report: dict) -> dict:
+    return {**cheap(redis, report), **ledger_checks(report), "github": github_ready()}

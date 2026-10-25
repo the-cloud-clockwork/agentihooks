@@ -119,6 +119,8 @@ controller:
   serviceAccountName: ""
   # Swarms in this Redis that their own host ticks; the controller never ticks them or probes their lease.
   hostSwarms: []
+  # Proof swarms {swarm, agent, task, repo} the controller creates with their ledger beside the live swarm, and removes once dropped.
+  scratchSwarms: []
   # Worker registration and heartbeat API, served by the controller process for one swarm.
   api:
     enabled: false
@@ -267,6 +269,8 @@ workers:
   # A stopping hive takes no new agents and waits this long for its agents to finish before it exits.
   drainSeconds: 3600
   excluded: [master]
+  # Swarms whose masters this hive takes although it excludes master; every other swarm still sees masters excluded.
+  masterSwarms: []
   image:
     repository: ghcr.io/the-cloud-clockwork/agentihooks-hive-worker
     tag: dev

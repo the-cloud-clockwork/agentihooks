@@ -35,12 +35,11 @@ goes to a lane as a task.
 
 ## Dispatcher and operator
 
-- The dispatcher owns rank by leverage, grouping, the lane split and
-  Priorities triage. Its triage clears resolved priorities on every tick.
-  Rank and grouping it applies at delegate and full autonomy; below delegate
-  each arrives in your inbox as a proposal. The lane split it moves only at
-  delegate and full autonomy, one seat between the engineer and CI lanes
-  after three bottleneck reports running; a refused move is reported as held.
+- The dispatcher owns rank by leverage, grouping and Priorities triage. Its
+  triage clears resolved priorities on every tick. Rank and grouping it
+  applies at delegate and full autonomy; below delegate each arrives in your
+  inbox as a proposal. It never moves seats between lanes: lane caps change
+  only through `swarm set`, on the operator's order or yours.
 - Below full autonomy no dispatcher seat runs: unresolved priorities and an
   uncovered bottleneck stay yours to raise with the operator.
 - Apply a proposal's named command only on the operator's agreement; decline

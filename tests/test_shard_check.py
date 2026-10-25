@@ -128,7 +128,10 @@ def test_shard_check_grades_every_unit_shard_before_the_required_gate():
     steps = job["steps"]
     assert all("steps.lookup" not in step.get("if", "") for step in steps)
     download = next(step for step in steps if step.get("uses", "").startswith("actions/download-artifact"))
-    assert download["with"]["pattern"] == "durations-${{ matrix.python-version }}-*"
+    assert download["with"]["pattern"] in (
+        "durations-${{ matrix.python-version }}-*",
+        "{durations,flakes,collected,reused-tests}-${{ matrix.python-version }}{,-*}",
+    )
     check = next(step for step in steps if step.get("run", "").startswith("python -m tests.shard_check"))
     assert download["with"]["path"] in check["run"]
     assert steps.index(download) < steps.index(check)
@@ -185,3 +188,19 @@ def test_an_unreadable_plan_is_red(tmp_path):
     result = _check_reused(tmp_path, plan, ALL)
     assert result.returncode == 1
     assert "::error::Cannot read the test plan" in result.stdout
+
+
+def test_supplied_collection_is_verified_without_installed_dependencies(tmp_path):
+    collected = tmp_path / "collected.json"
+    collected.write_text(json.dumps(["suite::a", "suite::b"]))
+    durations = tmp_path / "durations.json"
+    durations.write_text(json.dumps({"suite::a": 0.1, "suite::b": 0.1}))
+    (tmp_path / "durations.sha256").write_text("a" * 64)
+    result = subprocess.run(
+        [sys.executable, "-S", "-m", "tests.shard_check", str(durations), "--collected", str(collected)],
+        cwd=_ROOT,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "2 collected tests, 0 ran zero times or more than once" in result.stdout

@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/runtime.py:scripts.swarm.runtime.xǁHerdrRuntimeǁretire_pane__mutmut_20:2a964d24e7e98a2c528eba8a0de3d203948abb31fcac2daf3e34eb7ff886b279": {
+    "reader": "standards_reader",
+    "reason": "retire_process never reads agent.pane_id in a way that distinguishes None from the empty string: its only read is the truth test before closing the owned pane, where both are falsy, so the pane close is skipped either way. live_binding.managed checks only runtime_backend and transport, and end receives agent.name, not the agent, so the mutant changes no observable result."
+  }
+}

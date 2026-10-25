@@ -5,7 +5,16 @@ import subprocess
 from collections.abc import Callable
 from pathlib import Path
 
-from scripts.ci_queue_retry import FAILED_RESULT, SHARD, STEP_EXITED, base_name, log_errors, runner_lost
+from scripts.ci_queue_retry import (
+    FAILED_RESULT,
+    RERUN,
+    SHARD,
+    STEP_EXITED,
+    base_name,
+    job_text,
+    log_errors,
+    runner_lost,
+)
 
 SELF = "queue-fail-fast"
 # Needs every graded job, so once it completes nothing graded can still fail.
@@ -28,7 +37,15 @@ def failed(jobs: list[dict], lost: Callable[[dict], bool] = lambda job: False) -
 
 
 def settled(jobs: list[dict]) -> bool:
-    return any(job["name"] == LAST and job["status"] == "completed" for job in jobs)
+    shards = [job["name"].removeprefix(SHARD) for job in jobs if base_name(job["name"]) == SHARD]
+    passed = {
+        job["name"].removeprefix(base_name(job["name"]))
+        for job in jobs
+        if base_name(job["name"]) in (SHARD, RERUN) and job.get("conclusion") == "success"
+    }
+    return (bool(shards) and all(shard in passed for shard in shards)) or any(
+        job["name"] == LAST and job["status"] == "completed" for job in jobs
+    )
 
 
 def logged_loss(repo: str, job: dict, seen: dict[str, bool]) -> bool:
@@ -38,7 +55,11 @@ def logged_loss(repo: str, job: dict, seen: dict[str, bool]) -> bool:
         try:
             errors = log_errors(repo, job["id"])
         except subprocess.CalledProcessError:
-            return True
+            try:
+                text = job_text(repo, job["id"], False)
+            except subprocess.CalledProcessError:
+                return True
+            return runner_lost(text) or not (FAILED_RESULT.search(text) or STEP_EXITED.search(text))
         text = "\n".join(errors)
         seen[key] = runner_lost(text) or not (FAILED_RESULT.search(text) or EXITED.search(text))
     return seen[key]

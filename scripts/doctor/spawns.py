@@ -1,3 +1,4 @@
+import json
 import re
 
 from scripts.swarm.health.findings import Finding
@@ -6,15 +7,35 @@ TICK_MS = 60_000
 FAILURE = re.compile(r"^(?:spawn failed for ([^\s,]+).*?|master spawn failed): (.+)$")
 
 
+def _reservation_room(snapshot: dict) -> bool:
+    return any(
+        row["harness"] == snapshot.get("harness")
+        and row["state"] == "OPEN"
+        and row.get("cap") is not None
+        and row["sessions"] < row["cap"]
+        for row in snapshot.get("accounts", [])
+    )
+
+
 def failed(record: dict) -> list[Finding]:
     failures = {}
+    capacity = {}
     prefix = f"{record['slug']}: "
     for action in record["actions"]:
         if not action.startswith(prefix):
             continue
-        match = FAILURE.fullmatch(action[len(prefix) :])
+        text = action[len(prefix) :]
+        if text.startswith("spawn capacity for "):
+            subject, raw = text.removeprefix("spawn capacity for ").split(": ", 1)
+            capacity[subject] = json.loads(raw)
+            continue
+        match = FAILURE.fullmatch(text)
         if match:
-            failures.setdefault(match[1] or "master", []).append(match[2])
+            subject = match[1] or "master"
+            snapshot = capacity.pop(subject, {})
+            if "account reservation is full" in match[2] and not _reservation_room(snapshot):
+                continue
+            failures.setdefault(subject, []).append(match[2])
     return [
         Finding(
             "failed spawn",
@@ -68,7 +89,9 @@ def _silent_local(agent: dict, hooked: dict, now_ms: int) -> list[Finding]:
         Finding(
             "no hook event",
             agent["name"],
-            "spawned agent has run no tool since it started",
+            "starting launch has no recorded harness or pane"
+            if agent.get("state") == "starting" and not (agent.get("harness") or agent.get("pane_id"))
+            else "spawned agent has run no tool since it started",
             (
                 f"started at {started}",
                 f"harness {agent.get('harness', '')}",

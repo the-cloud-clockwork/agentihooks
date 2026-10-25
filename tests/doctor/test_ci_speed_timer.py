@@ -55,7 +55,7 @@ def test_every_timer_tick_reads_speed_and_sends_each_crossing_to_both_masters_on
     calls = []
 
     def read(since, now, pending=None, known=None, active=True):
-        calls.append((since, now, pending))
+        calls.append((since, now, pending.pending))
         return snapshot([record([job(0, queued=True, created=-901)])])
 
     monkeypatch.setattr(ci_speed_read, "read", read)
@@ -79,7 +79,7 @@ def test_an_api_failure_reports_incomplete_counts_and_preserves_the_window_for_r
     outcomes = [snapshot(), snapshot(complete=False, error="API unavailable"), snapshot()]
 
     def read(since, now, pending=None, known=None, active=True):
-        calls.append((since, pending))
+        calls.append((since, pending.pending))
         return outcomes.pop(0)
 
     monkeypatch.setattr(ci_speed_read, "read", read)
@@ -191,7 +191,7 @@ def test_jobs_of_finished_runs_carry_over_so_a_window_beyond_the_call_budget_com
 
     monkeypatch.setattr(ci_speed_read, "read", functools.partial(ci_speed_read.read, run=api))
     first = cli.timer(store, DOCTOR, NOW, False)
-    assert any("incomplete" in action and "budget exhausted" in action for action in first)
+    assert any(action.startswith("doctor CI speed: catching up;") and "60 API calls" in action for action in first)
     assert saved()["known"][str(jobs[0])] == {
         "status": "completed",
         "run_attempt": 1,
@@ -203,7 +203,7 @@ def test_jobs_of_finished_runs_carry_over_so_a_window_beyond_the_call_budget_com
     down.clear()
     third = cli.timer(store, DOCTOR, NOW + 120000, False)
     assert (
-        "doctor CI speed: complete; 100 runs read of 100 discovered, 100 jobs, 0 crossings, 52 API calls, 0 retracted, 0 queued jobs not reread"
+        "doctor CI speed: catching up; 100 runs read of 100 discovered, 100 jobs, 0 crossings, 46 API calls, 0 retracted, 0 queued jobs not reread"
         in third
     )
     assert sorted(jobs) == list(range(100))

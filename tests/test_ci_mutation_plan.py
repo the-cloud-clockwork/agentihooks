@@ -727,6 +727,32 @@ def test_main_writes_one_matrix_entry_per_shard(tmp_path, monkeypatch, capsys):
     assert "Mutation shards: 4\nStats parts: 3\n" in text
 
 
+@pytest.mark.parametrize("changed", [{}, {"scripts/sample.py": {2}}])
+def test_main_reads_the_recorded_coverage_only_when_a_module_changed(tmp_path, monkeypatch, capsys, changed):
+    _project(tmp_path, {})
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("sys.argv", ["plan", "--base", "base", "--repository", "owner/repo"])
+    monkeypatch.setenv("GITHUB_OUTPUT", str(tmp_path / "github-output"))
+    calls = []
+
+    def discover(root, bases, head):
+        calls.append(("discover", root, bases, head))
+        return changed
+
+    def record(repository):
+        calls.append(("record", repository))
+        return None, ""
+
+    monkeypatch.setattr(plan, "read_record", record)
+    monkeypatch.setattr(plan, "own_bases", lambda *args: ["base"])
+    monkeypatch.setattr(plan, "discover_changes", discover)
+    assert plan.main() == 0
+    assert calls == [("discover", tmp_path, ["base"], "HEAD"), *[("record", "owner/repo")] * bool(changed)]
+    assert f"changed={len(changed)}\n" in (tmp_path / "github-output").read_text()
+    if not changed:
+        assert "No change remains to mutate, so the recorded dev coverage is not read.\n" in capsys.readouterr().out
+
+
 @pytest.mark.parametrize("source, matched", [("sample", False), ("sample", True), ("plain", False)])
 def test_planning_refuses_an_unmatched_module_before_publishing_statistics(tmp_path, monkeypatch, source, matched):
     _project(tmp_path, {})
@@ -805,13 +831,13 @@ def test_planning_follows_selected_test_package_imports(tmp_path, monkeypatch):
     ("seconds", "timed", "shards", "parts"),
     [
         (0, {}, "[0]", "[0]"),
-        (962, dict.fromkeys("abcde", 15.24), "[0, 1, 2]", "[0, 1]"),
+        (962, dict.fromkeys("abcde", 15.24), "[0, 1, 2]", "[0]"),
         (480, {"a": 1}, "[0]", "[0]"),
         (481, {"a": 1}, "[0, 1]", "[0]"),
         (10**6, {f"t{n}": 30 for n in range(40)}, json.dumps(list(range(10))), json.dumps(list(range(10)))),
     ],
 )
-def test_main_defaults_to_origin_dev_a_two_minute_target_a_half_minute_stats_bucket_and_ten_shards(
+def test_main_defaults_to_origin_dev_a_two_minute_target_a_one_minute_stats_bucket_and_ten_shards(
     tmp_path, monkeypatch, seconds, timed, shards, parts
 ):
     monkeypatch.chdir(tmp_path)

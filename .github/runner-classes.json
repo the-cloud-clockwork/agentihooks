@@ -13,6 +13,7 @@
   "equivalence.yml/ledger-equivalence": "standard",
   "gate-protected.yml/grade": "hosted",
   "github-access-audit.yml/read-back": "hosted",
+  "helm-kind-published.yml/kind": "standard",
   "helm-kind.yml/kind": "standard",
   "hierarchy-cpu.yml/grade": "light",
   "hierarchy-cpu.yml/hierarchy": "batch",

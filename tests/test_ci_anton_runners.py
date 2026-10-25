@@ -42,6 +42,7 @@ MOVED = {
     ("coverage-stability.yml", "compare"): BATCH,
     ("equivalence.yml", "ledger-equivalence"): STANDARD,
     ("helm-kind.yml", "kind"): QUEUED,
+    ("helm-kind-published.yml", "kind"): STANDARD,
     ("hierarchy-cpu.yml", "grade"): LIGHT,
     ("hierarchy-cpu.yml", "hierarchy"): BATCH,
     ("hierarchy-cpu.yml", "load"): BATCH,

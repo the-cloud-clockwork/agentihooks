@@ -266,8 +266,10 @@ def test_the_local_spawn_refusal_is_the_exact_overflow_text(setup, monkeypatch):
 def test_a_codex_worker_no_hive_can_launch_runs_locally_unless_its_role_needs_a_ui_host(
     setup, monkeypatch, profile, refused
 ):
+    from scripts.swarm.capacity import Account
     from scripts.swarm.profile_choice import ProfileDecision
 
+    setup.herdr._quota_accounts.append(Account("codex", "account", "room", 0, None, 80, 6))
     fenced = hybrid(setup, monkeypatch)
     setup.herdr._profile_decision.return_value = ProfileDecision(profile, "task", profile)
     task = {"id": "task", "launch_assignment": {"harness": "codex"}}
