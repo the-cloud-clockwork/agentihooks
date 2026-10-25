@@ -346,9 +346,12 @@ def test_remote_heads_lists_every_branch_head_in_one_call():
 
     def run(argv, **kwargs):
         calls.append((argv, kwargs))
-        return _done(f"{HEAD}\trefs/heads/feature-x\n{'a' * 40}\trefs/heads/dev\n{'b' * 40}\trefs/tags/v1\n")
+        return _done(
+            f"{HEAD}\trefs/heads/feature-x\n{'a' * 40}\trefs/heads/dev\n{'b' * 40}\trefs/tags/v1\n"
+            f"{'c' * 40}\trefs/heads/split\tafter\n"
+        )
 
-    assert remote_heads("/repo", run=run) == {"feature-x": HEAD, "dev": "a" * 40}
+    assert remote_heads("/repo", run=run) == {"feature-x": HEAD, "dev": "a" * 40, "split\tafter": "c" * 40}
     assert calls == [(["git", "-C", "/repo", "ls-remote", "--heads", "origin"], {**GIT, "timeout": 20})]
 
 
