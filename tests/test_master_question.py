@@ -98,6 +98,22 @@ def test_operator_on_with_no_typing_for_ten_minutes_still_moves_the_question(mas
     assert len(master.questions) == 1
 
 
+@pytest.mark.parametrize("task", ["master-2", "master-12"])
+def test_a_numbered_master_seat_moves_the_question_too(master, monkeypatch, task):
+    monkeypatch.setenv("AGENTIHOOKS_SWARM_TASK", task)
+    typed_at(NOW - master_question.WINDOW_SEC)
+    assert operator_mode._heard(SID)
+    assert master_question.move(ask(FOCUS), master, now=NOW)
+    assert len(master.questions) == 1
+
+
+@pytest.mark.parametrize("task", ["t12", "master-x", "masters", "remaster-2"])
+def test_a_task_that_only_resembles_a_master_seat_asks_freely(master, monkeypatch, task):
+    monkeypatch.setenv("AGENTIHOOKS_SWARM_TASK", task)
+    typed_at(NOW - master_question.WINDOW_SEC)
+    assert master_question.move(ask(FOCUS), master, now=NOW) == ""
+
+
 def test_a_question_without_options_is_moved_as_asked(master):
     master_question.move(ask({"question": "Ship it?"}), master, now=NOW)
     assert master.questions[0][1] == "Ship it?"

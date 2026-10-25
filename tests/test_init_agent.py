@@ -318,6 +318,60 @@ def test_a_codex_launch_that_never_reports_its_route_fails_without_the_binding_w
     assert waited == []
     assert (fields["status"], fields["route_status"], fields["profile_validation"]) == ("started", "pending", "failed")
     assert output.err == "agentihooks init-agent: the harness did not report its route within 0.1s\n"
+    retained = json.loads(Path(fields["profile_report"]).read_text())
+    assert retained["state"] == "failed"
+    assert retained["reason"] == output.err.removeprefix("agentihooks init-agent: ").strip()
+
+
+@pytest.mark.parametrize("failure", ["timeout", "capacity"])
+def test_failed_canary_report_is_published_before_startup_and_records_reason(tmp_path, monkeypatch, capsys, failure):
+    from scripts.swarm.runtime import parse_fields
+
+    binding, _ = _profile(monkeypatch, tmp_path, "codex")
+    monkeypatch.setattr(init_agent.agent_choice, "choose", lambda *a: ("codex", "explicit"))
+    published = []
+    reason = "Selected model is at capacity" if failure == "capacity" else "no canary within 90s"
+
+    def launch(launcher, directory, name, args, agent, environ):
+        fields = parse_fields(capsys.readouterr().out)
+        assert fields["profile_report"] == environ[binding.REPORT]
+        published.append(Path(fields["profile_report"]))
+        init_agent._started_marker(launcher).touch()
+        init_agent._route_report(launcher).write_text("status=routed\naccount=routed-account\n")
+        return []
+
+    def wait(report, timeout):
+        assert report == published[0]
+        if failure == "capacity":
+            binding.refuse(report, reason)
+        raise ValueError(reason)
+
+    monkeypatch.setattr(init_agent, "_start_herdr", launch)
+    monkeypatch.setattr(binding, "wait", wait)
+    argv = ["--host", "herdr", "--agent", "codex", "--profile", "engineer", "--dir", str(tmp_path)]
+    assert init_agent.main(argv, {"XDG_RUNTIME_DIR": str(tmp_path / "runtime")}) == 3
+    retained = json.loads(published[0].read_text())
+    assert retained["state"] == "failed"
+    assert retained["reason"] == reason
+    assert "profile_validation=failed" in capsys.readouterr().out
+
+
+def test_profile_report_is_flushed_before_native_startup(tmp_path, monkeypatch):
+    import io
+    from types import SimpleNamespace
+
+    binding, environ = _profile(monkeypatch, tmp_path, "codex")
+    environ["XDG_RUNTIME_DIR"] = str(tmp_path / "runtime")
+    delivered = []
+
+    class Output(io.StringIO):
+        def flush(self):
+            delivered.append(self.getvalue())
+
+    monkeypatch.setattr("sys.stdout", Output())
+    args = SimpleNamespace(profile="engineer", defer_canary=False)
+    init_agent._binding_request(args, "codex", "task", environ, [])
+    assert delivered == [f"profile_report={environ[binding.REPORT]}\n"]
 
 
 def test_terminal_that_never_starts_the_launcher_fails_and_discards_it(monkeypatch, tmp_path, capsys):
