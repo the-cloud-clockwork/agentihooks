@@ -128,7 +128,7 @@ def check_send(inbox, sender: str, address: str) -> None:
         log.append(slug, log.Row.of(NAME, "fail-open", Who(name=sender), "inbox", f"{type(exc).__name__}: {exc}"))
         return
     writer = seats.writer(sender)
-    if writer != owner:
+    if writer != owner and not (writer == seats.lead and seats.stuck(inbox, owner)):
         inbox.redis.hincrby(seats.table.key(slug), REFUSALS)
         raise InboxError(send_refusal(slug, task, owner, writer))
 
@@ -169,6 +169,16 @@ class Seats:
             return record["seat"], record["rev"]
         owners = functools.partial(self.table.owners, self.slug, self.doc)
         return masters.route(item, self.doc, owners, self.live, self.lead), 0
+
+    def stuck(self, inbox, seat: str) -> bool:
+        """The seat's master has left an item that needs work unread past the wake window."""
+        from scripts.inbox import wake
+        from scripts.inbox.store import now_ms
+
+        cutoff = now_ms() - wake.window_ms(os.environ)
+        names = [name for name, held in self.names.items() if held == seat]
+        items = [item for name in names for item in inbox.open_mail(name)]
+        return any(not item.fyi and item.state != "read" and item.created_at < cutoff for item in items)
 
     def _retired(self, record: dict) -> int:
         return self.table.retired_at(self.slug, record["seat"])
