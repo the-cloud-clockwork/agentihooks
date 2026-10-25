@@ -3,7 +3,8 @@ from unittest import mock
 
 import pytest
 
-from scripts.events import BusConfig, open_bus
+from scripts.events.config import BusConfig
+from scripts.events.factory import open_bus
 from scripts.hub import registry
 from tests.hub.test_runner import event, hub
 
