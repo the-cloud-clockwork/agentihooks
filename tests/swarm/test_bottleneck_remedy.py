@@ -9,7 +9,16 @@ from scripts.swarm import bottleneck, bottleneck_remedy, bottleneck_status, disp
 from scripts.swarm.health import standing
 from scripts.swarm.ledger_client import LedgerRefused
 from scripts.swarm.ledger_events import Mail
-from scripts.swarm.store import ASSIST, MANUAL_SCALING, AgentRecord, RedisStore, SwarmConfig, SwarmError
+from scripts.swarm.store import (
+    ASSIST,
+    DELEGATE,
+    FULL,
+    MANUAL_SCALING,
+    AgentRecord,
+    RedisStore,
+    SwarmConfig,
+    SwarmError,
+)
 
 SLUG = "sw"
 NOW = 1_800_000_000_000
@@ -136,7 +145,9 @@ def proposed(targeted, why):
     return bottleneck_remedy.PROPOSED.format(targeted=targeted, why=why)
 
 
-def test_seat_wait_moves_no_seat_and_proposes_to_the_master(store, home, shipped):
+@pytest.mark.parametrize("autonomy", [DELEGATE, FULL])
+def test_seat_wait_moves_no_seat_and_proposes_to_the_master(store, home, shipped, autonomy):
+    store.update(SLUG, autonomy=autonomy)
     fire(store, "seat_wait", value=7.5)
     text = proposed(CLAIM, bottleneck_remedy.UNMECHANICAL)
     assert run(store) == [text]
@@ -147,11 +158,12 @@ def test_seat_wait_moves_no_seat_and_proposes_to_the_master(store, home, shipped
     assert master_items(store) == [proposal("seat wait", CLAIM, bottleneck_remedy.UNMECHANICAL)]
 
 
-def test_seat_wait_under_auto_scaling_leaves_the_stored_lane_shift(store, home, shipped):
-    store.update(SLUG, scaling="auto", lane_shift=3)
+@pytest.mark.parametrize("shift", [3, 16, -16])
+def test_seat_wait_under_auto_scaling_leaves_the_stored_lane_shift(store, home, shipped, shift):
+    store.update(SLUG, scaling="auto", lane_shift=shift)
     fire(store, "seat_wait", value=7.5)
     assert run(store) == [proposed(CLAIM, bottleneck_remedy.UNMECHANICAL)]
-    assert store.config(SLUG).lane_shift == 3
+    assert store.config(SLUG).lane_shift == shift
     assert caps(store) == (2, 2)
 
 

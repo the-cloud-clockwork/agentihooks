@@ -639,7 +639,7 @@ def test_a_short_or_covered_bottleneck_is_no_trigger(named, ticks):
     assert dispatch_seat.uncovered(swarm(), SLUG, NOW) == []
 
 
-@pytest.mark.parametrize("named", ["ci", "engineering"])
+@pytest.mark.parametrize("named", ["ci", "engineering", "host"])
 def test_a_lane_bottleneck_is_a_trigger_since_no_pass_moves_seats(named):
     store = swarm()
     held(store, named, 3)
@@ -656,14 +656,15 @@ def streak_of(store):
     return json.loads(store.redis.get(store.key(SLUG, dispatch_seat.STREAK)) or "{}")
 
 
-def test_three_fresh_reports_naming_one_share_trigger_and_a_repeat_counts_once():
+@pytest.mark.parametrize("named", ["review", "ci", "engineering", "host"])
+def test_three_fresh_reports_naming_one_share_trigger_and_a_repeat_counts_once(named):
     store = swarm()
     for n in range(2):
-        report_at(store, "review", NOW - (3 - n) * MINUTE)
+        report_at(store, named, NOW - (3 - n) * MINUTE)
         assert dispatch_seat.uncovered(store, SLUG, NOW) == []
     assert dispatch_seat.uncovered(store, SLUG, NOW) == []
-    assert streak_of(store) == {"named": "review", "ticks": 2, "at": NOW - 2 * MINUTE}
-    report_at(store, "review", NOW - MINUTE)
+    assert streak_of(store) == {"named": named, "ticks": 2, "at": NOW - 2 * MINUTE}
+    report_at(store, named, NOW - MINUTE)
     assert [t["ticks"] for t in dispatch_seat.uncovered(store, SLUG, NOW)] == [3]
 
 
