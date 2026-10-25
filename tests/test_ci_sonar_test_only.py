@@ -55,6 +55,7 @@ def test_only_nonempty_test_only_pull_request_diffs_avoid_analysis(tmp_path, pat
             HEAD=git("rev-parse", "HEAD"),
             EVENT=event,
             GITHUB_OUTPUT=str(output),
+            GITHUB_ENV=str(tmp_path / "environment"),
             RUNNER_TEMP=str(tmp_path),
         ),
         capture_output=True,
@@ -62,6 +63,7 @@ def test_only_nonempty_test_only_pull_request_diffs_avoid_analysis(tmp_path, pat
     )
     assert result.returncode == 0, result.stdout + result.stderr
     assert f"test_only={str(expected).lower()}" in output.read_text().splitlines()
+    assert f"SONAR_TEST_ONLY={str(expected).lower()}" in (tmp_path / "environment").read_text().splitlines()
 
 
 def test_the_decision_uses_immutable_event_revisions_and_retains_source_renames():
@@ -108,6 +110,7 @@ def test_moves_and_deletions_keep_both_sides_of_the_source_boundary(tmp_path, be
             HEAD=git("rev-parse", "HEAD"),
             EVENT="pull_request",
             GITHUB_OUTPUT=str(output),
+            GITHUB_ENV=str(tmp_path / "environment"),
             RUNNER_TEMP=str(tmp_path),
         ),
         capture_output=True,
@@ -115,6 +118,7 @@ def test_moves_and_deletions_keep_both_sides_of_the_source_boundary(tmp_path, be
     )
     assert result.returncode == 0, result.stdout + result.stderr
     assert f"test_only={str(expected).lower()}" in output.read_text().splitlines()
+    assert f"SONAR_TEST_ONLY={str(expected).lower()}" in (tmp_path / "environment").read_text().splitlines()
 
 
 def test_a_failed_diff_cannot_publish_a_test_only_decision(tmp_path):
@@ -128,6 +132,7 @@ def test_a_failed_diff_cannot_publish_a_test_only_decision(tmp_path):
             HEAD="missing",
             EVENT="pull_request",
             GITHUB_OUTPUT=str(output),
+            GITHUB_ENV=str(tmp_path / "environment"),
             RUNNER_TEMP=str(tmp_path),
         ),
         capture_output=True,
@@ -141,18 +146,28 @@ def test_a_failed_diff_cannot_publish_a_test_only_decision(tmp_path):
     "name",
     [
         "Install coverage",
-        "Download shard coverage",
-        "Merge shard coverage",
         "Build the test dependency manifest",
         "Start Cloudflare Access proxy",
-        "SonarQube Scan",
-        "SonarQube Quality Gate",
         "Wait for the test dependency manifest",
         "Upload the test dependency manifest",
     ],
 )
 def test_test_only_changes_do_not_start_analysis_work(name):
     assert "steps.source.outputs.test_only != 'true'" in _step(name)["if"]
+
+
+@pytest.mark.parametrize("name", ["Merge shard coverage", "SonarQube Scan", "SonarQube Quality Gate"])
+def test_test_only_analysis_scripts_exit_without_tools_or_reports(tmp_path, name):
+    result = subprocess.run(
+        ["bash", "-e", "-c", _step(name)["run"]],
+        cwd=tmp_path,
+        env=dict(os.environ, SONAR_TEST_ONLY="true"),
+        capture_output=True,
+        text=True,
+        timeout=5,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert list(tmp_path.iterdir()) == []
 
 
 def test_test_only_coverage_wait_exits_without_a_merge(tmp_path):

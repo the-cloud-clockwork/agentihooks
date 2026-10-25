@@ -1674,6 +1674,7 @@ jobs:
             [[ "$count" -gt 0 ]] || test_only=false
           fi
           echo "test_only=$test_only" >> "$GITHUB_OUTPUT"
+          echo "SONAR_TEST_ONLY=$test_only" >> "$GITHUB_ENV"
           printf 'event=%s\nbase=%s\nhead=%s\ntest_only=%s\n' "$EVENT" "$BASE" "$HEAD" "$test_only" > sonar-scope.txt
           cat sonar-scope.txt
 
@@ -1687,7 +1688,7 @@ jobs:
         run: python -m pip install "coverage>=7.4" PyYAML==6.0.3
 
       - name: Download shard coverage
-        if: steps.source.outputs.test_only != 'true' && needs.select.outputs.scope != 'none'
+        if: needs.select.outputs.scope != 'none'
         uses: actions/download-artifact@v4
         with:
           pattern: coverage-3.12-*
@@ -1696,11 +1697,12 @@ jobs:
       # The merge runs while the proxy starts; the scan waits for it below.
       - name: Merge shard coverage
         id: merge
-        if: steps.source.outputs.test_only != 'true' && needs.select.outputs.scope != 'none'
+        if: needs.select.outputs.scope != 'none'
         env:
           SHARDS: ${{ needs.select.outputs.scope == 'selected' && needs.select.outputs.count || 20 }}
           SCOPE: ${{ needs.select.outputs.scope }}
         run: |
+          [[ "${SONAR_TEST_ONLY:-false}" != true ]] || exit 0
           (
             status=0
             bash .github/coverage/combine.sh --downloaded "$SHARDS" || status=$?
@@ -1804,13 +1806,13 @@ jobs:
 
       # Runs the CLI directly: sonarqube-scan-action never finds its tool cache entry, since a four part version is not semver.
       - name: SonarQube Scan
-        if: steps.source.outputs.test_only != 'true'
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
           SONAR_HOST_URL: http://127.0.0.1:9000
           ARGS: ${{ steps.queued.outputs.args || steps.dispatched.outputs.args }}
           SONAR_SCANNER_JAVA_OPTS: -Xmx3g -Xlog:gc:file=${{ runner.temp }}/sonar-gc.log
         run: |
+          [[ "${SONAR_TEST_ONLY:-false}" != true ]] || exit 0
           scanner="$RUNNER_TOOL_CACHE/sonar-scanner-cli/$SONAR_SCANNER_VERSION/linux-x64"
           if [[ ! -x "$scanner/bin/sonar-scanner" ]]; then
             archive="$RUNNER_TEMP/sonar-scanner.zip"
@@ -1872,11 +1874,11 @@ jobs:
       # Sonar refuses an analysis dated before the dev branch's latest one; that revision ends superseded, ungraded and never promoted.
       - name: SonarQube Quality Gate
         id: gate
-        if: steps.source.outputs.test_only != 'true'
         timeout-minutes: 5
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         run: |
+          [[ "${SONAR_TEST_ONLY:-false}" != true ]] || exit 0
           set -o pipefail
           api() { bash "$GITHUB_WORKSPACE/.github/coverage/sonar-retry.sh" "Sonar $1" -- curl --fail --silent --show-error --max-time 10 -H "Authorization: Bearer $SONAR_TOKEN" "http://127.0.0.1:9000/api/$1"; }
           task=$(sed -n 's/^ceTaskId=//p' .scannerwork/report-task.txt)
