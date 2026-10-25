@@ -657,7 +657,7 @@ def test_statistics_parts_balance_recorded_cases_within_one_file(tmp_path, targe
     assert (parts, wall) == (expected[0], pytest.approx(expected[1], abs=0.1))
 
 
-def test_statistics_parts_use_traced_timings_when_units_underestimate_collection(tmp_path):
+def test_statistics_parts_use_traced_timings_when_units_underestimate_collection(tmp_path, monkeypatch):
     (tmp_path / "tests").mkdir()
     test = "tests/test_sample.py"
     (tmp_path / test).write_text("def test_value(): pass\n")
@@ -665,6 +665,7 @@ def test_statistics_parts_use_traced_timings_when_units_underestimate_collection
     (tmp_path / ".test_durations").write_text(json.dumps(dict.fromkeys(nodes, 1)))
     cache = tmp_path / ".mutation-stats-cache"
     cache.mkdir()
+    monkeypatch.setenv("MUTATION_STATS_CACHE", str(cache))
     (cache / "successful.json").write_text(json.dumps({"status": 0, "durations": dict.fromkeys(nodes, 40)}))
     (cache / "failed.json").write_text(json.dumps({"status": 1, "durations": dict.fromkeys(nodes, 1000)}))
     assert plan.stats_part_count(tmp_path, [test], 41, 10) == (4, pytest.approx(40, abs=0.1))
