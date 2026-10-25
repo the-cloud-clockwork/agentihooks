@@ -96,29 +96,39 @@ def _assign_work(
 ) -> list[list[str]]:
     loads = [0.0] * shards
     serial_loads: list[dict[str, float]] = [{} for _ in range(shards)]
+    # Serial loads only grow, so each shard's largest one is kept instead of rescanned for every unit.
+    serial_peaks = [0.0] * shards
     collection_loads = [0.0] * shards
     collected: list[set[str]] = [set() for _ in range(shards)]
     groups: list[list[str]] = [[] for _ in range(shards)]
     for path in sorted(seconds, key=lambda f: (-max(seconds[f] / workers, serial[f]) - collection[f], f)):
         group = serial_groups[path] if serial_groups is not None else ""
         file = collection_groups[path] if collection_groups is not None else path
-        lightest = min(
-            range(shards),
-            key=lambda i: (
+        work = seconds[path]
+        alone = serial[path]
+        cost = collection[path]
+        lightest = 0
+        best = None
+        for i in range(shards):
+            rank = (
                 max(
-                    (loads[i] + seconds[path]) / workers,
-                    max(serial_loads[i].values(), default=0.0),
-                    serial_loads[i].get(group, 0.0) + serial[path],
+                    (loads[i] + work) / workers,
+                    serial_peaks[i],
+                    serial_loads[i].get(group, 0.0) + alone,
                 )
                 + collection_loads[i]
-                + (collection[path] if file not in collected[i] else 0.0),
+                + (cost if file not in collected[i] else 0.0),
                 loads[i],
-            ),
-        )
-        loads[lightest] += seconds[path]
-        serial_loads[lightest][group] = serial_loads[lightest].get(group, 0.0) + serial[path]
+            )
+            if best is None or rank < best:
+                best = rank
+                lightest = i
+        loads[lightest] += work
+        total = serial_loads[lightest].get(group, 0.0) + alone
+        serial_loads[lightest][group] = total
+        serial_peaks[lightest] = max(serial_peaks[lightest], total)
         if file not in collected[lightest]:
-            collection_loads[lightest] += collection[path]
+            collection_loads[lightest] += cost
             collected[lightest].add(file)
         groups[lightest].append(path)
     return groups

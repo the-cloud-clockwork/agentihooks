@@ -550,3 +550,13 @@ def test_workers_and_runs_without_workers_keep_xdists_node_setup(monkeypatch):
     assert NodeManager.setup_nodes is original
     _configured(monkeypatch, None)
     assert NodeManager.setup_nodes is original
+
+
+def test_a_shard_holding_a_serial_group_stays_heavy_for_later_parallel_tests():
+    from tests.shards import assign_nodes
+
+    durations = {"tests/test_a.py::test_a": 100.0, "tests/test_b.py::test_b": 200.0, "tests/test_c.py::test_c": 40.0}
+
+    parts = assign_nodes(durations, 2, {"tests/test_a.py": "a"}, 4)
+
+    assert parts == [["tests/test_a.py::test_a"], ["tests/test_b.py::test_b", "tests/test_c.py::test_c"]]
