@@ -36,3 +36,10 @@ def gh_api(args: list[str], *, timeout: float, text: bool = False) -> subprocess
 
 def report(name: str) -> None:
     print(f"{name} made {calls} GitHub API calls")
+
+
+if __name__ == "__main__":
+    try:
+        sys.stdout.write(gh_api(sys.argv[1:], timeout=120, text=True).stdout)
+    except subprocess.CalledProcessError as error:
+        sys.exit(error.stderr)
