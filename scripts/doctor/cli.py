@@ -318,8 +318,8 @@ def cmd_verdict(store, args):
 
 def cmd_task(store, args):
     slug, doctor = _pair_of(store, args.slug)
-    specs = loop.fix_tasks(slug, *loop.judged(store, doctor, args.finding), args.fix)
     ledger = swarm.LedgerClient()
+    specs = loop.fix_tasks(slug, *loop.judged(store, doctor, args.finding), args.fix, ledger.tasks(doctor))
     for spec in specs:
         ledger.add_task(doctor, spec, _name())
     print(json.dumps({"finding": args.finding, "tasks": [spec["task"] for spec in specs]}))
