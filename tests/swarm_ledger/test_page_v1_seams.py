@@ -151,8 +151,15 @@ def doctor_server(monkeypatch, peer_freezes):
     documents = {"doctor": ledger_state(doc)}
     if peer_freezes is not None:
         documents["doctor-watched"] = documents["plain-watched"] = {"freezes": peer_freezes}
+
+    def document(slug):
+        assert not slug.endswith("-watched"), "the doctor hold copied the whole watched ledger"
+        return documents[slug]
+
     repository = SimpleNamespace(
-        exists=lambda slug: slug in documents, current=lambda slug: SimpleNamespace(state=documents[slug])
+        exists=lambda slug: slug in documents,
+        current=lambda slug: SimpleNamespace(state=documents[slug]),
+        get_document=document,
     )
     monkeypatch.setattr(ledger_server, "swarm_store", lambda: store)
     monkeypatch.setattr(ledger_server, "repository", repository)
