@@ -1339,6 +1339,9 @@ def _collect_acks(slug, config, store, ledger, runtime, doc, now_ms):
 def _spawn_order(slug, config, store, agents, rows, doc, runtime):
     from scripts.swarm import capacity
 
+    if begin := getattr(runtime, "begin_placement_pass", None):
+        begin()
+
     decision = capacity.read(store, slug)
     caps = capacity.caps(decision, config)
     dispatched = preempt.yielding(store, slug, doc, dispatcher.claim_key(config, doc))

@@ -3,7 +3,7 @@ from unittest.mock import Mock
 import pytest
 
 from scripts.swarm import controller
-from scripts.swarm.tick import ACK_LATER, _room_wait, _spawn_order
+from scripts.swarm.tick import ACK_LATER, SpawnError, _room_wait, _spawn_order
 from scripts.swarm_v2.runtime.base import RuntimeRouter
 from scripts.swarm_v2.runtime.routed import RoutedRuntime
 from tests.hive.test_controller_launch import request_for, setup, write_hive  # noqa: F401
@@ -37,7 +37,8 @@ def test_ordering_and_spawn_reuse_one_placement_and_the_next_pass_refreshes(setu
         assert _room_wait(runtime, "eng", task) == ""
         request = request_for(setup)
         request.task[ACK_LATER] = True
-        runtime.spawn(setup.config, "eng", request.name, request.task)
+        with pytest.raises(SpawnError, match="hive launch ordered"):
+            runtime.spawn(setup.config, "eng", request.name, request.task)
         order = launch.orders_for(request.task["id"])
         assert order.hive == first.hive
         setup.store.drop_agent(setup.config.slug, request.name)
