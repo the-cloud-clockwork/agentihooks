@@ -425,6 +425,45 @@ def _fixture_subject(tree: Path, source: Path, module: ast.Module, call: ast.Cal
     return set()
 
 
+def _entrypoint_subjects(
+    tree: Path, call: ast.Call, names: dict[str, set[tuple[str, str]]], modules: dict[str, set[str]]
+) -> set[tuple[str, str]]:
+    if ("runpy", "run_module") not in _resolve(call.func, names, modules):
+        return set()
+    target = call.args[0] if len(call.args) == 1 else None
+    if not isinstance(target, ast.Constant) or not isinstance(target.value, str):
+        return set()
+    if not all(part.isidentifier() for part in target.value.split(".")):
+        return set()
+    if not any(
+        keyword.arg == "run_name" and isinstance(keyword.value, ast.Constant) and keyword.value.value == "__main__"
+        for keyword in call.keywords
+    ):
+        return set()
+    try:
+        module = ast.parse((tree / (target.value.replace(".", "/") + ".py")).read_bytes())
+    except (OSError, SyntaxError, ValueError):
+        return set()
+    return _guard_subjects(module, target.value)
+
+
+def _guard_subjects(module: ast.Module, module_name: str) -> set[tuple[str, str]]:
+    names, modules = _imports(module)
+    for node in module.body:
+        if isinstance(node, _DEFINITIONS):
+            names.setdefault(node.name, set()).add((module_name, node.name))
+    guard = ast.dump(ast.parse('__name__ == "__main__"', mode="eval").body)
+    return {
+        subject
+        for node in module.body
+        if isinstance(node, ast.If) and ast.dump(node.test) == guard
+        for statement in node.body
+        for child in ast.walk(statement)
+        if isinstance(child, ast.Call)
+        for subject in _resolve(child.func, names, modules)
+    }
+
+
 def referenced_subjects(tree: Path, nodeid: str) -> set[tuple[str, str]]:
     path, *scopes = nodeid.split("[", 1)[0].split("::")
     try:
@@ -445,6 +484,7 @@ def referenced_subjects(tree: Path, nodeid: str) -> set[tuple[str, str]]:
             subjects.update(_resolve(child, names, modules))
             if isinstance(child, ast.Call):
                 subjects.update(_fixture_subject(tree, tree / path, module, child))
+                subjects.update(_entrypoint_subjects(tree, child, names, modules))
                 if isinstance(child.func, ast.Name) and (helper := helpers.get(child.func.id)):
                     pending.append(helper)
                 subjects.update(
