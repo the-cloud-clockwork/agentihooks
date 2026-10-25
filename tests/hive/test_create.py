@@ -81,7 +81,7 @@ class Run:
         if argv[:2] == ["api", "-H"]:
             assert f"contents/{create_render.TEMPLATE_PATH}?" in argv[3]
             return TEMPLATE
-        if argv[0] == "api" and argv[1].endswith("/rules/branches/dev"):
+        if argv[:2] == ["api", "repos/the-cloud-clockwork/antoncore/rules/branches/dev"]:
             return json.dumps(getattr(self, "required", []))
         if argv[:2] == ["pr", "list"]:
             return self.prs[0] if self.prs else ""
