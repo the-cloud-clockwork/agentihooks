@@ -91,9 +91,16 @@ def deletes_path_filters(base: object, head: object) -> bool:
 
 
 def same_events(baseline: dict, workflow: dict) -> bool:
-    # Deleting a pull request path filter only runs the trusted workflow on more pull requests.
-    base, head = events(baseline), events(workflow)
-    return len(base) == len(head) and all(deletes_path_filters(old, new) for old, new in zip(base, head))
+    if events(baseline) == events(workflow):
+        return True
+    # Deleting a pull request path filter from an otherwise identical workflow only runs it on more pull requests.
+    return without_path_filters(baseline) == without_path_filters(workflow) and all(
+        deletes_path_filters(old, new) for old, new in zip(events(baseline), events(workflow))
+    )
+
+
+def without_path_filters(workflow: dict) -> dict:
+    return {key: unfiltered(value) if key in ("on", True) else value for key, value in workflow.items()}
 
 
 def per_run_mutation_group(name: str, block: object, job: dict, trusted: dict) -> bool:

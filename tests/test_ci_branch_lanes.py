@@ -603,12 +603,51 @@ FILTERED = {"pull_request": {"branches": ["dev"], "paths": ["scripts/**"], "path
 def test_deleting_pull_request_path_filters_keeps_the_base_trusted(tmp_path, monkeypatch, on):
     baseline = _workflow()
     baseline["on"] = FILTERED
-    updated = _workflow(replay={"runs-on": "x", "steps": [{"run": "echo changed"}]})
+    updated = _workflow()
     updated["on"] = on
     base, head, sha = _repo(tmp_path, {"replay.yml": updated})
     (base / lanes.WORKFLOWS / "replay.yml").write_text(yaml.safe_dump(baseline))
     monkeypatch.chdir(head)
     assert lanes.refused(sha, base) == {}
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"steps": [{"run": "echo changed"}]},
+        {"runs-on": "y"},
+        {"permissions": {"contents": "write"}},
+        {"env": {"MODE": "changed"}},
+    ],
+)
+def test_deleting_path_filters_with_any_other_change_loses_the_base_trust(tmp_path, monkeypatch, change):
+    baseline = _workflow()
+    baseline["on"] = FILTERED
+    updated = _workflow(replay={"runs-on": "x", **change})
+    updated["on"] = {"pull_request": {"branches": ["dev"]}}
+    base, head, sha = _repo(tmp_path, {"replay.yml": updated})
+    (base / lanes.WORKFLOWS / "replay.yml").write_text(yaml.safe_dump(baseline))
+    monkeypatch.chdir(head)
+    assert lanes.refused(sha, base) == {
+        f"{lanes.WORKFLOWS}/replay.yml": ["job replay has no shared hosted lane concurrency group"]
+    }
+
+
+@pytest.mark.parametrize("change", ["job", "permissions"])
+def test_deleting_path_filters_with_a_new_job_or_workflow_key_loses_the_base_trust(tmp_path, monkeypatch, change):
+    baseline = _workflow()
+    baseline["on"] = FILTERED
+    updated = _workflow()
+    updated["on"] = {"pull_request": {"branches": ["dev"]}}
+    if change == "job":
+        updated["jobs"]["extra"] = {"runs-on": "x"}
+    else:
+        updated["permissions"] = {"contents": "write"}
+    base, head, sha = _repo(tmp_path, {"replay.yml": updated})
+    (base / lanes.WORKFLOWS / "replay.yml").write_text(yaml.safe_dump(baseline))
+    monkeypatch.chdir(head)
+    refused = lanes.refused(sha, base)[f"{lanes.WORKFLOWS}/replay.yml"]
+    assert "job replay has no shared hosted lane concurrency group" in refused
 
 
 def test_deleting_the_only_pull_request_filter_keeps_the_base_trusted(tmp_path, monkeypatch):
