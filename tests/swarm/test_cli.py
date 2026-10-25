@@ -40,7 +40,7 @@ def env(monkeypatch, tmp_path):
     ledger.said = []
     ledger.comments = []
     ledger.say = lambda slug, text, by=None: ledger.said.append((text, by))
-    ledger.relay = lambda slug, text, by, op_id="": ledger.said.append((text, by))
+    ledger.relay = lambda slug, text, by, op_id="", reply_to="": ledger.said.append((text, by))
     ledger.comment = lambda slug, task, text, by: ledger.comments.append((task, text, by))
     rt = FakeRuntime()
     monkeypatch.setattr(cli, "connect", lambda: store)
@@ -1591,7 +1591,7 @@ def test_a_tick_with_a_refused_page_post_still_runs_every_other_pass(env, monkey
     run("sw", "create", "--repo", "/repo")
     run("sw", "start")
 
-    def refuse(slug, text, by=None, op_id=""):
+    def refuse(slug, text, by=None, op_id="", reply_to=""):
         raise SwarmError("ledger sw refused: chat refused: clock time '18:45'")
 
     ledger.relay = refuse
@@ -2128,7 +2128,6 @@ def test_master_prompt_runs_the_swarm_and_never_codes():
         f"{led} task add",
         f"{led} time-left",
         f"{led} followup add",
-        "agentihooks swarm sw --as master@a1b2c3-0002 say --to operator",
         "agentihooks msg reply",
         "--fyi",
         "agentihooks swarm sw --as master@a1b2c3-0002 send-message",
@@ -2145,7 +2144,7 @@ def test_master_prompt_runs_the_swarm_and_never_codes():
         "and the operator's environment with him through the agentihooks commands and tools. You never edit code "
         "or config files in a repository, commit, merge or claim a task: engineers do that.\n"
     ) in text
-    assert "wt.sh new" not in text and "done --pr" not in text
+    assert "wt.sh new" not in text and "done --pr" not in text and "say --to operator" not in text
 
 
 def test_the_tick_wakes_an_idle_pane_holding_a_pending_inbox_item(env):
