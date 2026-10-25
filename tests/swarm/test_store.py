@@ -33,11 +33,13 @@ def test_handoff_tasks_reads_presence_in_one_batch(store, monkeypatch):
     batch = Mock(wraps=store.redis.mget)
     monkeypatch.setattr(store.redis, "mget", batch)
     assert store.handoff_tasks("first", ["missing", "present", "empty"]) == {"present"}
-    batch.assert_called_once_with([
-        store.key("first", "handoff", "missing"),
-        store.key("first", "handoff", "present"),
-        store.key("first", "handoff", "empty"),
-    ])
+    batch.assert_called_once_with(
+        [
+            store.key("first", "handoff", "missing"),
+            store.key("first", "handoff", "present"),
+            store.key("first", "handoff", "empty"),
+        ]
+    )
     batch.reset_mock()
     assert store.handoff_tasks("first", []) == set()
     batch.assert_not_called()
