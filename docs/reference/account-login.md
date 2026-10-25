@@ -124,12 +124,15 @@ CAPTCHA, browser failure or a timeout ends the native login attempt and releases
 only the launching process's slot claim. The master then takes normal
 subscription token routing. This fallback has no Remote Control and no forced
 claude.ai login; Remote Control requires a native login. Held slots remain
-untouched. After a browser CAPTCHA or failure the token branch sends the
-operator one email through the operator email module, once per master agent
-name, so a repeated launch of the same master sends no second email. Browser
-outcomes are recorded in the slot's `login-notifications.jsonl` with transport
-`inbox`, and the email with transport `email` and the agent name, without
-credentials. The current session and browser success paths send no email.
+untouched. After a browser CAPTCHA or failure, or when no slot can take the
+browser login, the token branch sends the operator one email through the
+operator email module. One master agent name is one login attempt: a repeated
+launch of the same master sends no second email, even after a later failure,
+and a respawned master with a new name gets its own email. The current session
+and browser success paths send no email. Browser outcomes are recorded in the
+slot's `login-notifications.jsonl` with transport `inbox`; the email is
+recorded in the master token folder's `login-notifications.jsonl` with
+transport `email` and the agent name. Neither holds credentials.
 
 At 98% of the week or 99% of five hours the quota policy hands the master's seat
 off. The successor runs the same chain, returning to a valid native login when

@@ -481,10 +481,10 @@ def claimed_home(environ: Mapping[str, str]) -> Path | None:
     )
 
 
-def _alert(environ: Mapping[str, str], target: Path | None, outcome: str, cwd: Path) -> None:
+def _alert(environ: Mapping[str, str], outcome: str, cwd: Path) -> None:
     from scripts import master_login_chain as chain
 
-    alerted = target or _token_folder(environ) / "claude"
+    alerted = _token_folder(environ) / "claude"
     alerted.parent.mkdir(mode=PRIVATE_DIR, parents=True, exist_ok=True)
     refused = chain.alert(environ, alerted, outcome, str(cwd))
     if refused:
@@ -536,7 +536,7 @@ def prepare_launch(environ: Mapping[str, str], cwd: Path) -> tuple[Path, str] | 
         if target is not None:
             release(target, environ)
         if reported in ("captcha", "failure"):
-            _alert(environ, target, reported, cwd)
+            _alert(environ, reported, cwd)
         return None
 
     return chain.run(current, browser, token)

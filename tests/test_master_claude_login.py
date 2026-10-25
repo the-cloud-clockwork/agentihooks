@@ -853,7 +853,10 @@ def test_launch_preparation_checks_live_login_then_waits_for_browser(
                 str(tmp_path),
             )
         ]
-        assert records[-1] == {"step": "token", "outcome": outcome, "transport": "email", "agent": "master@a-1"}
+        token_records = (login._token_folder(_environ(rendered)) / "login-notifications.jsonl").read_text()
+        assert [json.loads(line) for line in token_records.splitlines()] == [
+            {"step": "token", "outcome": outcome, "transport": "email", "agent": "master@a-1"}
+        ]
 
 
 def test_launch_preparation_reports_a_refused_operator_email(ah, rendered, tmp_path, monkeypatch, capsys):
