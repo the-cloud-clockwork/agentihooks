@@ -1,6 +1,8 @@
 """Health finding verdicts: who judged a finding, how, and whether it shows again after its cooldown."""
 
 import json
+from math import inf
+from uuid import uuid4
 
 from scripts.swarm.store import SwarmError
 
@@ -10,8 +12,9 @@ VERDICTS = ("false-positive", "early-real", "established", "insufficient-evidenc
 class VerdictStore:
     HISTORY_MS = 7 * 86400000
 
-    def __init__(self, redis, key):
+    def __init__(self, redis, key, event_key=""):
         self.redis, self.key = redis, key
+        self.event_key = event_key
 
     def visible(self, found, now_ms, cooldown_ms, new_evidence=False):
         stored = self.redis.hgetall(self.key)
@@ -73,5 +76,26 @@ class VerdictStore:
             earlier = [*prior.get("earlier", []), {"at": prior["at"], "measure": prior["measure"]}]
             verdict["earlier"] = [entry for entry in earlier if entry["at"] >= now_ms - self.HISTORY_MS]
         record.update(verdict=verdict, returned=False)
-        self.redis.hset(self.key, finding_id, json.dumps(record))
+        self._save(finding_id, record, verdict)
         return verdict
+
+    def _save(self, finding_id, record, verdict):
+        if not self.event_key:
+            self.redis.hset(self.key, finding_id, json.dumps(record))
+            return
+        event = {key: verdict[key] for key in ("value", "note", "by", "at", "measure")}
+        event["finding"] = finding_id
+        member = json.dumps([uuid4().hex, event])
+        with self.redis.pipeline() as pipe:
+            pipe.hset(self.key, finding_id, json.dumps(record))
+            pipe.zadd(self.event_key, {member: verdict["at"]})
+            pipe.zremrangebyscore(self.event_key, -inf, f"({verdict['at'] - self.HISTORY_MS}")
+            pipe.pexpire(self.event_key, self.HISTORY_MS)
+            pipe.execute()
+
+    def events(self, since: int, until: int, now_ms: int) -> list[dict]:
+        if since < now_ms - self.HISTORY_MS:
+            raise SwarmError("verdict log window exceeds seven day retention")
+        if since >= until or until > now_ms:
+            raise SwarmError("verdict log needs --since before --until and --until no later than now")
+        return [json.loads(raw)[1] for raw in self.redis.zrangebyscore(self.event_key, since, f"({until}")]

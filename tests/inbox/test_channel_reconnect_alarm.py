@@ -4,11 +4,13 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 CASE = "tests/inbox/test_channel_reconnect.py::test_running_channel_rechecks_pending_items_after_redis_returns"
 SUBSCRIBER = "tests/inbox/test_channel_reconnect.py::test_channel_replaces_a_failed_subscriber_and_resets_its_backoff"
 
 PROBE = """
-import importlib.abc, json, os, signal, sys, time
+import builtins, importlib.abc, json, os, signal, sys, time
 
 import pytest
 
@@ -26,19 +28,15 @@ class PlantedDelay(importlib.abc.MetaPathFinder):
 if os.environ.get("PLANTED_DELAY"):
     sys.meta_path.insert(0, PlantedDelay())
 
-late = []
+stalled = []
+real_import = builtins.__import__
 
 
-class ArmedDelay(importlib.abc.MetaPathFinder):
-    def find_spec(self, name, path, target=None):
-        if signal.getitimer(signal.ITIMER_REAL)[0] > 0:
-            late.append(name)
-            if len(late) == 1:
-                time.sleep(float(os.environ["ARMED_DELAY"]))
-
-
-if os.environ.get("ARMED_DELAY"):
-    sys.meta_path.insert(0, ArmedDelay())
+def stall(name, *args, **kwargs):
+    if armed and not stalled:
+        stalled.append(name)
+        time.sleep(float(os.environ["IMPORT_STALL"]))
+    return real_import(name, *args, **kwargs)
 
 
 def arm(which, seconds):
@@ -58,10 +56,17 @@ class Recorder:
     @pytest.hookimpl(tryfirst=True)
     def pytest_runtest_setup(self, item):
         signal.setitimer = arm
+        if os.environ.get("IMPORT_STALL"):
+            builtins.__import__ = stall
+
+    @pytest.hookimpl(tryfirst=True)
+    def pytest_runtest_call(self, item):
+        if os.environ.get("CALL_STALL"):
+            time.sleep(float(os.environ["CALL_STALL"]))
 
 
 code = pytest.main([sys.argv[1], "-q", "-p", "no:cacheprovider"], plugins=[Recorder()])
-print(json.dumps({"code": int(code), "armed": armed, **({"late": late} if os.environ.get("ARMED_DELAY") else {})}))
+print(json.dumps({"code": int(code), "armed": armed, **({"stalled": stalled} if os.environ.get("IMPORT_STALL") else {})}))
 """
 
 
@@ -88,6 +93,12 @@ def test_a_slow_cold_fakeredis_import_is_not_charged_to_the_reconnect_alarm():
     assert report == {"code": 0, "armed": [{"stdio": True, "message": True, "fakeredis": True}]}, output
 
 
-def test_the_subscriber_case_imports_nothing_while_its_reconnect_alarm_is_armed():
-    report, output = _probe(SUBSCRIBER, ARMED_DELAY="6")
-    assert report == {"code": 0, "armed": [{"stdio": True, "message": True, "fakeredis": True}], "late": []}, output
+@pytest.mark.parametrize("case", [CASE, SUBSCRIBER])
+def test_an_import_that_stalls_inside_the_reconnect_alarm_window_is_not_charged_to_it(case):
+    report, output = _probe(case, IMPORT_STALL="6")
+    assert report["code"] == 0 and report["stalled"], output
+
+
+def test_the_reconnect_alarm_still_fires_on_a_stall_outside_imports():
+    report, output = _probe(CALL_STALL="6")
+    assert report["code"] == 1 and "recovery loop exceeded its deadline" in output, output
