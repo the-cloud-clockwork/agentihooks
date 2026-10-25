@@ -264,7 +264,7 @@ def test_protected_grading_accepts_the_exact_early_pair_and_rejects_any_weakened
     candidate = copy.deepcopy(workflows)
     jobs = candidate["test.yml"]["jobs"]
     jobs["gate-required"]["name"] = ci_gate_queue.SUMMARY_NAME
-    jobs["queue-fail-fast"] = ci_gate_queue.watcher(jobs["gate-required"]["runs-on"], parallel="queue-split" in jobs)
+    jobs["queue-fail-fast"] = ci_gate_queue.watcher(jobs["gate-required"]["runs-on"])
     today = date(2026, 10, 25)
     assert gate_protected.grade(workflows, config, candidate, config, today, policy) == []
     assert ci_wiring.check(candidate, config, today) == []
@@ -361,7 +361,7 @@ def test_the_early_gate_rejects_a_changed_graded_job_inventory():
     workflow = yaml.safe_load((Path(__file__).resolve().parents[1] / ".github/workflows/test.yml").read_text())
     jobs = workflow["jobs"]
     jobs["gate-required"]["name"] = ci_gate_queue.SUMMARY_NAME
-    jobs["queue-fail-fast"] = ci_gate_queue.watcher(jobs["gate-required"]["runs-on"], parallel="queue-split" in jobs)
+    jobs["queue-fail-fast"] = ci_gate_queue.watcher(jobs["gate-required"]["runs-on"])
     assert ci_gate_queue.normalize({"test.yml": workflow})
     jobs["gate-required"]["needs"].append("new-required-check")
     with pytest.raises(ValueError, match="inventory"):
@@ -376,8 +376,7 @@ def test_the_early_gate_accepts_parallel_split_only_with_its_reviewed_context_pa
     workflow = yaml.safe_load((Path(__file__).resolve().parents[1] / ".github/workflows/test.yml").read_text())
     jobs = workflow["jobs"]
     jobs["queue-split"] = {"needs": ["reuse", "admission"]}
-    if "queue-split" not in jobs["gate-required"]["needs"]:
-        jobs["gate-required"]["needs"].append("queue-split")
+    jobs["gate-required"]["needs"].append("queue-split")
     jobs["queue-fail-fast"] = ci_gate_queue.watcher(jobs["gate-required"]["runs-on"], parallel=True)
     normalized = ci_gate_queue.normalize({"test.yml": workflow})["test.yml"]["jobs"]
     assert normalized["gate-required"]["name"] == "Gate — Required"
@@ -535,7 +534,7 @@ def paired():
     workflow = yaml.safe_load((Path(__file__).resolve().parents[1] / ".github/workflows/test.yml").read_text())
     jobs = workflow["jobs"]
     jobs["gate-required"]["name"] = ci_gate_queue.SUMMARY_NAME
-    jobs["queue-fail-fast"] = ci_gate_queue.watcher(jobs["gate-required"]["runs-on"], parallel="queue-split" in jobs)
+    jobs["queue-fail-fast"] = ci_gate_queue.watcher(jobs["gate-required"]["runs-on"])
     return {"test.yml": workflow}
 
 
