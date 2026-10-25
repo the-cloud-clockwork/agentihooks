@@ -90,6 +90,28 @@ def test_a_stale_large_update_leaves_no_chunks_behind(bus, monkeypatch):
     assert store.get("deadlines").revision == current
 
 
+def test_future_revision_conflict_preserves_an_inflight_writer(bus, monkeypatch):
+    store, stream, pattern = open_store(bus, False, monkeypatch)
+    revision = store.create("deadlines", b"small")
+    value = large(bus, "inflight")
+    refused = large(bus, "future")
+
+    async def overlap():
+        limit = bus._nc.max_payload - nats_payload.KV_HEADER_BUDGET
+        staged = await nats_payload.encode(store._create_chunk, value, limit, nats_payload.scope("deadlines", revision))
+        before = await bus._js.stream_info(stream, subjects_filter=pattern)
+        with pytest.raises(StateConflict):
+            await store._write("deadlines", refused, revision + 100, "future revision")
+        after = await bus._js.stream_info(stream, subjects_filter=pattern)
+        assert after.state.bytes == before.state.bytes
+        assert await nats_payload.decode(store._read_chunk, staged) == value
+        return await store._kv.update("deadlines", staged, last=revision)
+
+    current = bus._loop.run(overlap())
+    assert store.get("deadlines").value == value
+    assert store.get("deadlines").revision == current
+
+
 def test_reclaim_purges_only_unreferenced_chunks_written_before_the_head():
     owner = nats_payload.scope("deadlines", 0).split(".")[0]
     pattern = f"pre._chunks.{owner}."
