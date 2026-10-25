@@ -149,7 +149,7 @@ def test_the_sweep_runs_on_the_app_token_minted_to_cancel():
         "QUEUE_REF": "${{ github.event.merge_group.head_ref }}",
         "RUN": "${{ github.run_id }}",
     }
-    assert job["permissions"] == {"contents": "read"}
+    assert job["permissions"] == {"contents": "read", "actions": "read"}
 
 
 def test_older_runs_of_the_same_pull_request_and_older_runs_of_gone_branches_are_cancelled(tmp_path):
