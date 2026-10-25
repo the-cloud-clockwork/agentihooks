@@ -21,6 +21,7 @@ LANE = (
 DIRECT = {
     "ci-templates.yml": ("CI templates", "ci-templates"),
     "helm-kind.yml": ("Helm chart in kind", "helm-kind"),
+    "helm-kind-published.yml": ("Published Helm chart in kind", "helm-kind-published"),
     "ledger-load.yml": ("Ledger server load", "ledger-load"),
     "hierarchy-cpu.yml": ("Hierarchy CPU proof", "hierarchy-cpu"),
     "swarm-smoke.yml": ("Swarm container smoke", "swarm-smoke"),

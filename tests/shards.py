@@ -96,6 +96,8 @@ def _assign_work(
 ) -> list[list[str]]:
     loads = [0.0] * shards
     serial_loads: list[dict[str, float]] = [{} for _ in range(shards)]
+    # Serial loads only grow, so each shard's largest one is kept instead of rescanned for every unit.
+    serial_peaks = [0.0] * shards
     collection_loads = [0.0] * shards
     collected: list[set[str]] = [set() for _ in range(shards)]
     groups: list[list[str]] = [[] for _ in range(shards)]
@@ -107,7 +109,7 @@ def _assign_work(
             key=lambda i: (
                 max(
                     (loads[i] + seconds[path]) / workers,
-                    max(serial_loads[i].values(), default=0.0),
+                    serial_peaks[i],
                     serial_loads[i].get(group, 0.0) + serial[path],
                 )
                 + collection_loads[i]
@@ -116,7 +118,9 @@ def _assign_work(
             ),
         )
         loads[lightest] += seconds[path]
-        serial_loads[lightest][group] = serial_loads[lightest].get(group, 0.0) + serial[path]
+        total = serial_loads[lightest].get(group, 0.0) + serial[path]
+        serial_loads[lightest][group] = total
+        serial_peaks[lightest] = max(serial_peaks[lightest], total)
         if file not in collected[lightest]:
             collection_loads[lightest] += collection[path]
             collected[lightest].add(file)

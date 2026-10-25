@@ -607,10 +607,12 @@ REPORT = {
 
 
 def held(store, named="review", ticks=3):
-    from scripts.swarm import bottleneck, lane_split
+    from scripts.swarm import bottleneck
 
     store.redis.set(store.key(SLUG, bottleneck.KEY), json.dumps({**REPORT, "bottleneck": named}))
-    store.redis.set(store.key(SLUG, lane_split.KEY), json.dumps({"named": named, "ticks": ticks, "at": REPORT["at"]}))
+    store.redis.set(
+        store.key(SLUG, dispatch_seat.STREAK), json.dumps({"named": named, "ticks": ticks, "at": REPORT["at"]})
+    )
 
 
 def test_a_bottleneck_no_lane_rule_covers_spawns_a_seat_naming_it():
@@ -629,12 +631,58 @@ def test_a_bottleneck_no_lane_rule_covers_spawns_a_seat_naming_it():
     assert report.startswith("bottleneck review and queue: 50 percent")
 
 
-@pytest.mark.parametrize(("named", "ticks"), [("review", 2), ("ci", 3), ("engineering", 4), ("", 3)])
+@pytest.mark.parametrize(("named", "ticks"), [("review", 2), ("", 3)])
 def test_a_short_or_covered_bottleneck_is_no_trigger(named, ticks):
     store = swarm()
     held(store, named, ticks)
     assert dispatch_seat.uncovered(store, SLUG, NOW) == []
     assert dispatch_seat.uncovered(swarm(), SLUG, NOW) == []
+
+
+@pytest.mark.parametrize("named", ["ci", "engineering", "host"])
+def test_a_lane_bottleneck_is_a_trigger_since_no_pass_moves_seats(named):
+    store = swarm()
+    held(store, named, 3)
+    assert [t["id"] for t in dispatch_seat.uncovered(store, SLUG, NOW)] == [f"bottleneck:{named}"]
+
+
+def report_at(store, named, at):
+    from scripts.swarm import bottleneck
+
+    store.redis.set(store.key(SLUG, bottleneck.KEY), json.dumps({**REPORT, "bottleneck": named, "at": at}))
+
+
+def streak_of(store):
+    return json.loads(store.redis.get(store.key(SLUG, dispatch_seat.STREAK)) or "{}")
+
+
+@pytest.mark.parametrize("named", ["review", "ci", "engineering", "host"])
+def test_three_fresh_reports_naming_one_share_trigger_and_a_repeat_counts_once(named):
+    store = swarm()
+    for n in range(2):
+        report_at(store, named, NOW - (3 - n) * MINUTE)
+        assert dispatch_seat.uncovered(store, SLUG, NOW) == []
+    assert dispatch_seat.uncovered(store, SLUG, NOW) == []
+    assert streak_of(store) == {"named": named, "ticks": 2, "at": NOW - 2 * MINUTE}
+    report_at(store, named, NOW - MINUTE)
+    assert [t["ticks"] for t in dispatch_seat.uncovered(store, SLUG, NOW)] == [3]
+
+
+def test_another_share_restarts_the_streak_and_a_read_only_call_writes_nothing():
+    store = swarm()
+    report_at(store, "review", NOW - 2 * MINUTE)
+    dispatch_seat.uncovered(store, SLUG, NOW)
+    report_at(store, "ci", NOW - MINUTE)
+    dispatch_seat.uncovered(store, SLUG, NOW, write=False)
+    assert streak_of(store) == {"named": "review", "ticks": 1, "at": NOW - 2 * MINUTE}
+    dispatch_seat.uncovered(store, SLUG, NOW)
+    assert streak_of(store) == {"named": "ci", "ticks": 1, "at": NOW - MINUTE}
+
+
+def test_no_report_leaves_the_streak_unwritten():
+    store = swarm()
+    assert dispatch_seat.uncovered(store, SLUG, NOW) == []
+    assert store.redis.get(store.key(SLUG, dispatch_seat.STREAK)) is None
 
 
 @pytest.mark.parametrize("ci_agent", ["auto", "claude"])

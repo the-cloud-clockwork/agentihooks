@@ -380,6 +380,17 @@ def test_outbox_keeps_an_invalid_swarm_address_for_a_later_repair(rig):
     assert rig.inbox.redis.smembers(rig.inbox.key("wake-outbox")) == {item.id}
 
 
+def test_an_item_that_fails_every_pass_does_not_hold_back_the_rest(rig):
+    bad = rig.inbox.send("sender", "eng-1@sw.part@elsewhere", "invalid swarm address")
+    for number in range(3):
+        rig.inbox.send("sender", "eng-1@sw", f"request {number}")
+    for now in range(2000, 2050):
+        rig.clock.now = now
+        with pytest.raises(ValueError, match="invalid event subject token"):
+            rig.reactor.flush()
+    assert rig.inbox.redis.smembers(rig.inbox.key("wake-outbox")) == {bad.id}
+
+
 @pytest.mark.parametrize("state", ["read", "confirmed", "done", "fyi"])
 def test_settled_or_information_items_cancel_their_timer(rig, state):
     item = rig.inbox.send("sender", "worker", "request", fyi=state == "fyi")

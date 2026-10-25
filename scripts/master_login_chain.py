@@ -54,12 +54,38 @@ def run(current: Callable[[], T | None], browser: Callable[[], str], token: Call
     return token()
 
 
-def notification(target: Path, step: str, outcome: str, transport: str = "none") -> None:
+def notification(target: Path, step: str, outcome: str, transport: str = "none", agent: str = "") -> None:
     path = target.parent / "login-notifications.jsonl"
     record = {"step": step, "outcome": outcome, "transport": transport}
+    if agent:
+        record["agent"] = agent
     descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
     with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
         stream.write(json.dumps(record) + "\n")
+
+
+def _emailed(target: Path, agent: str) -> bool:
+    path = target.parent / "login-notifications.jsonl"
+    if not path.exists():
+        return False
+    records = [json.loads(line) for line in path.read_text().splitlines()]
+    return any(record.get("transport") == "email" and record.get("agent") == agent for record in records)
+
+
+def alert(environ: Mapping[str, str], target: Path, outcome: str, repo: str) -> str:
+    from scripts.swarm import operator_email
+
+    agent = environ["AGENTIHOOKS_AGENT_NAME"]
+    if _emailed(target, agent):
+        return ""
+    text = (
+        f"{agent} runs on subscription token routing without Remote Control: "
+        f"the current claude.ai session failed and the browser authorization ended in {outcome}."
+    )
+    refused = operator_email.send("Master login fell back to token routing", text, environ, repo)
+    if not refused:
+        notification(target, "token", outcome, "email", agent)
+    return refused
 
 
 def _close(store, sender, item, kind):

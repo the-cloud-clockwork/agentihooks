@@ -13,6 +13,7 @@ a failure or answers a question, instead of shipping a change by pull request.
 | answers a question or makes a recommendation | `research` | a link to the written finding |
 | ships a change to code, config or docs | none: `code` | a merged pull request |
 | changes a workflow or pipeline, `ci` lane | `ci` | a merged pull request with the runs before and after |
+| runs profile seats through a named workflow loop on a case | `workflow` | a passed workflow state and a pass verdict, read from its workspace |
 
 These tasks run in the `eng` lane, sized like a code task: one agent life, one
 worktree. A change the work needs still reaches the system through code; the
@@ -62,6 +63,10 @@ agentihooks ledger --slug <slug> task add t5 "Compare the queue library with two
   --description "Question: keep or replace the gateway queue library. Done when a recommendation is written with its sources." \
   --kind research --must "A written recommendation weighs the current library against two others on throughput, operations and cost" \
   --check "The finding linked on the task names the sources behind each claim" --judge operator
+agentihooks ledger --slug <slug> task add t6 "Build and judge the queue replacement prototype" --lane eng --phase p3 \
+  --description "Loop: the simple workflow builds the prototype and its judge grades it. Done when the workflow passes with a pass verdict." \
+  --kind workflow --workflow simple-workflow --must "The prototype passes the simple workflow with a pass verdict from its judge" \
+  --check "The workflow state and verdict files in the task workspace" --judge master
 ```
 
 `t2` is a code task: no `--kind`, no contract, written exactly as in a plan

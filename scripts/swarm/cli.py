@@ -45,7 +45,8 @@ agentihooks swarm <id> restack           rebase parked task work onto dev after 
 agentihooks swarm <id> wait MINUTES [--reason TEXT]                 the tick counts no idle tick while it holds
 agentihooks swarm <id> trace-plan        trace plan.md in the task work folder to task, phase and project intent
 done carries the proof its task's kind needs: ops and tune --command C --output O; troubleshoot --root-cause R
---evidence E with --fix URL or --filed FOLLOWUP; research --finding URL
+--evidence E with --fix URL or --filed FOLLOWUP; research --finding URL; workflow reads workflow.json and
+verdict.json from the task workspace, and an exhausted workflow blocks the task with the last judge notes
 """
 
 import argparse
@@ -141,7 +142,7 @@ from scripts.swarm import (
 from scripts.swarm.health import activity
 from scripts.swarm.health import findings as health
 from scripts.swarm.ledger_client import LedgerClient, LedgerGone, LedgerRefused
-from scripts.swarm.runtime import REPO_VARIABLE, HerdrRuntime
+from scripts.swarm.runtime import REPO_VARIABLE, HerdrRuntime, deferring
 from scripts.swarm.status import (
     auto_snapshot,
     findings,
@@ -159,6 +160,7 @@ from scripts.swarm.store import (
     DEFAULT_MASTERS_STEP,
     DELEGATE,
     DISPATCH,
+    FULL,
     MASTER,
     RedisStore,
     SwarmConfig,
@@ -167,7 +169,15 @@ from scripts.swarm.store import (
     connect,
 )
 from scripts.swarm.tick import agent_status, primed, ready_in_order, skip_refused, spawn_holds, tick
-from scripts.swarm_ledger import ledger_creator, ledger_kinds, ledger_link, ledger_route, ledger_workspace, plan_shape
+from scripts.swarm_ledger import (
+    ledger_creator,
+    ledger_kinds,
+    ledger_link,
+    ledger_route,
+    ledger_workspace,
+    plan_shape,
+    workflow_task,
+)
 from scripts.swarm_v2 import master_scale, masters
 from scripts.swarm_v2.runtime.routed import routed
 
@@ -309,7 +319,7 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None, scheduled=F
     tick_stop.check()
     ledger = ledger or LedgerClient()
     outbox.flush(InboxStore(store.redis))
-    runtime = runtime or routed(herdr=HerdrRuntime())
+    runtime = runtime or routed(herdr=deferring(HerdrRuntime()))
     held = lease.acquire(store, slug, commands.hive_id())
     if held is None:
         return ["the swarm belongs to another hive"]
@@ -1287,8 +1297,11 @@ def cmd_status(store, args):
 def cmd_freeze(store, args):
     writer = clearance.freezer(store, args.slug, Who.from_env())
     by = None if writer == clearance.OPERATOR else writer
-    if by and naming.lane_of(by) != DISPATCH and not args.quote:
-        raise SwarmError("the master writes freezes only with the operator's words: pass them with --quote")
+    full = store.config(args.slug).autonomy == FULL
+    if by and not args.quote and not full:
+        raise SwarmError(
+            "below full autonomy the master writes freezes only with the operator's words: pass them with --quote"
+        )
     LedgerClient().freeze(args.slug, args.command, args.target, by=by, reason=args.reason, quote=args.quote)
     print(json.dumps({args.command: args.target, "by": writer}))
 
@@ -1676,6 +1689,7 @@ def cmd_merge(store, args):
                 args.url,
                 admit=lambda head: _queue_intent(store, args, agent, head) or queue_exit.require_fresh(args.url, head),
                 journal=queue_record.Journal(args.url),
+                attempts=merge_queue.ATTEMPTS,
             )
         else:
             result = merge_queue.operate(args.action, args.url, journal=queue_record.Journal(args.url))
@@ -1690,16 +1704,14 @@ def cmd_done(store, args):
     ledger = LedgerClient()
     row = next((t for t in ledger.tasks(args.slug) if t.get("id") == agent.task), {})
     proof = {key: getattr(args, f"proof_{key}") for key in ledger_kinds.PROOF_KEYS if getattr(args, f"proof_{key}")}
+    if ledger_kinds.kind(row) == "workflow":
+        if (found := _workflow_proof(store, args.slug, agent, ledger, row)) is None:
+            return
+        proof.update(found)
     proven = {**row, "proof": {**(row.get("proof") or {}), **proof}}
     missing = ledger_kinds.unmet(proven)
     if missing:
-        if ledger_kinds.kind(row) == "research":
-            raise SwarmError(
-                "a research task is done only with its proof: "
-                "--finding must be a single link to the artifact; put prose in a task comment"
-            )
-        flags = ", ".join("--" + key.replace("_", "-").replace(" or ", " or --") for key in missing)
-        raise SwarmError(f"a {ledger_kinds.kind(row)} task is done only with its proof: give {flags}")
+        raise SwarmError(_unproven(ledger_kinds.kind(row), missing))
     url = args.pr or row.get("pr_url")
     pull = ledger_events.view(url) if done_gate.gated(proven) and url else None
     if pull is not None and pull.state == "OPEN" and pull.queued:
@@ -1727,6 +1739,31 @@ def cmd_done(store, args):
     print(
         json.dumps({"task": agent.task, "state": "done", **fallback, "next": "stop now; the swarm closes this session"})
     )
+
+
+def _unproven(kind, missing):
+    if kind == "research":
+        return (
+            "a research task is done only with its proof: "
+            "--finding must be a single link to the artifact; put prose in a task comment"
+        )
+    if kind == "workflow":
+        return (
+            f"a workflow task is done only when {workflow_task.STATE} in its workspace says passed "
+            f"and the judge verdict record {workflow_task.VERDICT} says pass"
+        )
+    flags = ", ".join("--" + key.replace("_", "-").replace(" or ", " or --") for key in missing)
+    return f"a {kind} task is done only with its proof: give {flags}"
+
+
+def _workflow_proof(store, slug, agent, ledger, row):
+    workspace = row.get("workspace")
+    notes = workflow_task.exhausted_notes(workspace)
+    if notes is None:
+        return workflow_task.proof(workspace)
+    block_agent(store, slug, agent, notes, ledger)
+    print(json.dumps({"task": agent.task, "state": "blocked", "next": "stop now; the swarm closes this session"}))
+    return None
 
 
 def _pull_reader(url, pull):

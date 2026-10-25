@@ -4,13 +4,14 @@ import hashlib
 import json
 import subprocess
 import sys
+import tomllib
 from collections.abc import Callable
 from importlib import metadata
 from pathlib import Path
 
 from scripts.ci_mutation.scope import imported_names, module_name, selects, test_file
 
-SCHEMA = 3
+SCHEMA = 4
 CONTEXT_FIELDS = ("schema", "sources", "options", "runtime")
 KEY_FIELDS = ("path", "tests")
 DYNAMIC_IMPORTS = ("import_module", "__import__", "spec_from_file_location", "module_from_spec")
@@ -44,6 +45,7 @@ def test_inputs(
         if current not in records:
             content = (root / current).read_bytes()
             dependencies = set()
+            unresolved = []
             if Path(current).suffix == ".py":
                 text = content.decode()
                 nodes = list(ast.walk(ast.parse(text)))
@@ -57,8 +59,7 @@ def test_inputs(
                 }
                 dynamic = [node for node in nodes if isinstance(node, ast.Call) and loader_name(node.func) in loaders]
                 called = {id(node.func) for node in dynamic}
-                if any(id(node) not in called and loader_name(node) in loaders for node in nodes):
-                    dependencies.update(modules.values())
+                unresolved = [node for node in nodes if id(node) not in called and loader_name(node) in loaders]
                 for node in dynamic:
                     if (
                         node.args
@@ -69,7 +70,7 @@ def test_inputs(
                     ):
                         names.add(node.args[0].value)
                     else:
-                        dependencies.update(modules.values())
+                        unresolved.append(node)
                 for name in names:
                     parts = []
                     for part in name.split("."):
@@ -83,11 +84,59 @@ def test_inputs(
                     if isinstance(node, ast.Constant) and isinstance(node.value, str) and node.value
                 }
                 dependencies.update(resource for value in literals for resource in resources.get(value, ()))
-            records[current] = (hashlib.sha256(content).hexdigest(), dependencies)
-        digest, dependencies = records[current]
+            records[current] = (hashlib.sha256(content).hexdigest(), dependencies, unresolved)
+        digest, dependencies, _ = records[current]
         inputs[current] = digest
         pending.update(dependencies - inputs.keys())
     return inputs
+
+
+def current_input(root: Path, changes: dict, digests: dict[str, str | None], name: str) -> list:
+    if name not in digests:
+        file = root / name
+        digests[name] = hashlib.sha256(file.read_bytes()).hexdigest() if file.is_file() else None
+    return [digests[name], changes.get(name)]
+
+
+def distribution_versions(root: Path) -> dict[str, str]:
+    config = root / "pyproject.toml"
+    own = tomllib.loads(config.read_text()).get("project", {}).get("name") if config.is_file() else None
+    # The project's own dev and local version segments change with every commit; its files already key the stats.
+    return {
+        distribution.metadata["Name"]: distribution.version.partition("+")[0].partition(".dev")[0]
+        if distribution.metadata["Name"] == own
+        else distribution.version
+        for distribution in metadata.distributions()
+    }
+
+
+def reusable_entry(file: Path, opened: bool, check: Callable[[str], list]) -> dict | None:
+    entry = json.loads(file.read_text()) if file.is_file() else None
+    if entry is None or (
+        opened and ("loaded" not in entry or any(check(name) != value for name, value in entry["loaded"].items()))
+    ):
+        return None
+    return entry
+
+
+def loaded_inputs(
+    root: Path,
+    static: dict[str, str],
+    path: str,
+    fresh: list[dict],
+    graph: tuple[dict, dict, dict],
+    check: Callable[[str], list],
+) -> dict[str, list]:
+    modules, records, resources = graph
+    chosen = [result for result in fresh if path in result.get("files", ())] or fresh
+    names = set(modules.values())
+    if all("modules" in result for result in chosen):
+        collected = {test_file(item) for result in chosen for item in result.get("files", ())} - static.keys()
+        names &= {name for result in chosen for name in result["modules"]} - collected
+    closure = {}
+    for name in names:
+        closure.update(test_inputs(root, name, modules, records, resources))
+    return {name: check(name) for name in closure}
 
 
 def collect_cached_stats(
@@ -104,7 +153,7 @@ def collect_cached_stats(
         for path in tracked
         if path and (path in CONFIGURATION or path.startswith("scripts/ci_mutation/")) and (root / path).is_file()
     }
-    versions = {distribution.metadata["Name"]: distribution.version for distribution in metadata.distributions()}
+    versions = distribution_versions(root)
     context = dict(zip(CONTEXT_FIELDS, (SCHEMA, sources, options, [sys.version, sys.platform, versions])))
     modules = {module_name(Path(path)): path for path in tracked if Path(path).suffix == ".py"}
     records = {}
@@ -135,9 +184,17 @@ def collect_cached_stats(
         ).hexdigest()
         for path, dependencies in inputs.items()
     }
-    stored = {path: folder / f"{key}.json" for path, key in keys.items()}
-    reused = [json.loads(file.read_text()) for file in stored.values() if file.is_file()]
-    missing = [path for path, file in stored.items() if not file.is_file()]
+    # A dynamic import may load any module, so those files are checked against the modules the collection loaded.
+    opened = {path for path, dependencies in inputs.items() if any(records[name][2] for name in dependencies)}
+    check = functools.partial(current_input, root, changes, {})
+    graph = (modules, records, resources)
+    stored = {
+        path: entry
+        for path, key in keys.items()
+        if (entry := reusable_entry(folder / f"{key}.json", path in opened, check)) is not None
+    }
+    reused = [{field: value for field, value in entry.items() if field != "loaded"} for entry in stored.values()]
+    missing = [path for path in keys if path not in stored]
     report(f"Mutation stats cache: reused {len(reused)} test files; collect {len(missing)}")
     fresh = collect(missing) if missing else []
     if any(result["status"] != 0 for result in fresh):
@@ -152,14 +209,15 @@ def collect_cached_stats(
             )
             for function in {function for result in fresh for function in result["tests"]}
         }
-        (folder / f"{keys[path]}.json").write_text(
-            json.dumps(
-                {
-                    "status": 0,
-                    "tests": tests,
-                    "durations": durations,
-                    "cpu": sum(result["cpu"] for result in fresh) / len(missing),
-                }
-            )
-        )
-    return reused + fresh
+        entry = {
+            "status": 0,
+            "tests": tests,
+            "durations": durations,
+            "cpu": sum(result["cpu"] for result in fresh) / len(missing),
+        }
+        if path in opened:
+            entry["loaded"] = loaded_inputs(root, inputs[path], path, fresh, graph, check)
+        (folder / f"{keys[path]}.json").write_text(json.dumps(entry))
+    return reused + [
+        {field: value for field, value in result.items() if field not in ("files", "modules")} for result in fresh
+    ]
