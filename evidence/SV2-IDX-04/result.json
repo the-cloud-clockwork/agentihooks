@@ -1,0 +1,53 @@
+{
+  "package": "SV2-IDX-04",
+  "dependency": "SV2-IDX-03",
+  "dependency_evidence": "evidence/SV2-IDX-03/result.json records the index generations, active cutover and chunk vectors this search reads; the worker, chunk and catalog tables are unchanged here",
+  "integration_gate": "G4",
+  "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/7159",
+  "pull_request": "pending",
+  "package_complete": false,
+  "evidence_class": "mocked: an in-process caller, a SQLite catalog file, a local content addressed object folder and a deterministic concept embedder stand in for the session service, the central database, the archive bucket and the embedding provider; no model, HTTP server, vector database or Pod runs",
+  "interfaces": [
+    "hooks.memory.search.SessionSearch.search(grant, query, embedder) checks bounds, then scope: the query corpus must be the grant's corpus and caller projects may only narrow the grant's projects; a refusal raises ScopeRefused with one fixed detail and counts session_search_scope_rejections under the grant's corpus before any read or provider call",
+    "Retrieval reads only chunks of the active chunk generation of retained sessions in the corpus whose every event project lies inside the allowed projects, so another project's similar text never becomes a candidate",
+    "Lexical candidates must contain every quoted phrase and match unquoted terms as exact lowercase tokens with stopwords dropped, so an identifier such as ChunkIndex.build matches only that token; scores are inverse document frequency sums over the scoped chunks",
+    "Vector candidates come from the corpus's active index generation, embedding the query with the generation's model and skipping vectors whose content hash no longer matches the chunk; both candidate lists are capped at four times the limit and fused by reciprocal rank with k sixty",
+    "Every result explains its lexical rank, score and matched units, its vector rank and score, and its fused score, carries its chunk fields and stable evidence locators, and a context expansion of at most three neighbouring chunks of the same session on each side; session grouping is returned separately only when requested",
+    "With no active index, no embedder, a model mismatch, a provider outage or a malformed provider answer the search answers lexical_only with the named reason instead of an empty result",
+    "hooks.memory.api.search.search(searcher, grant, request, embedder) validates the request envelope and maps scope refusals to forbidden_scope, bad envelopes and bounds to invalid_request and catalog failures to dependency_unavailable, each with a stable operation id"
+  ],
+  "supported_versions": {
+    "python": "3.11 and later",
+    "request_schema": "2.x",
+    "chunker_versions": "any active chunk generation built by SV2-IDX-02; the fixture uses turn-v1",
+    "storage": "SQLite catalog from SV2-IDX-01 with the chunk and index tables of SV2-IDX-02 and SV2-IDX-03"
+  },
+  "states": {
+    "observed": "Cases A, B and C each ran twice from independent temporary folders with identical records.",
+    "accepted": "A search is accepted when its envelope and scope pass; it then answers in one call with state answered.",
+    "committed": "Search writes nothing but the scope rejection counter, which commits with each refusal.",
+    "externally_verified": "Not yet: no embedding provider, deployed session service or vector database ran; a live check belongs to the G4 rollout gate."
+  },
+  "metrics": {
+    "session_search_relevance": "recall and reciprocal rank of the fixture's expected chunks among the results, reported per query in the case records",
+    "session_search_scope_rejections": "count of searches refused for a corpus or project outside the grant, kept under the grant's own corpus"
+  },
+  "cases": {
+    "a": "evidence/SV2-IDX-04/a-result.json",
+    "b": "evidence/SV2-IDX-04/b-result.json",
+    "c": "evidence/SV2-IDX-04/c-result.json"
+  },
+  "rollback_rehearsal": {
+    "action": "Route search to the prior accepted index generation while capture continues: the earlier generation is activated again by compare and set on the cutover revision, and search reads its vectors.",
+    "authoritative_objects": "The session event, source, record and archive manifest rows and archived objects from SV2-IDX-01; chunk rows, index generations and vectors are derived projections, and search writes none of them.",
+    "proof": "Case C activates a second generation, is refused rolling back on a stale revision, rolls back on the current one, commits a captured turn during the rollback, and gets the same hits as the first generation's answer."
+  },
+  "remaining_limitations": [
+    "Lexical matching scans the scoped chunks in process; no full text index backs it, so cost grows with the corpus size inside the grant.",
+    "Vector similarity is computed in process over the generation's vectors; no vector database is wired.",
+    "A session touching any project outside the allowed set is excluded whole rather than chunk by chunk.",
+    "Session tools and citation ready range expansion belong to SV2-IDX-05."
+  ],
+  "compatibility": "Explicitly local compatibility path: the catalog, chunk and index tables and functions are unchanged; search only reads them and adds one counter name.",
+  "authority": "The caller's Grant decides corpus and projects; a display name or caller supplied project never widens it, and a refusal reveals no titles or counts."
+}
