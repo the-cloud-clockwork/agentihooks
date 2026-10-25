@@ -118,6 +118,11 @@ def test_the_transport_flags_default_to_empty_and_take_legacy():
     assert init_agent._parser().parse_args(["--codex-transport", "legacy"]).codex_transport == "legacy"
 
 
+def test_the_execution_flag_names_the_admitted_execution_in_its_help():
+    [action] = [action for action in init_agent._parser()._actions if action.dest == "execution"]
+    assert action.help == "Codex app-server: the admitted execution this launch serves"
+
+
 def test_the_transport_refusals_name_the_flag_exactly():
     with pytest.raises(ValueError) as refused:
         init_agent._transport(namespace(), "claude")
