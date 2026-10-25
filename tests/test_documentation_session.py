@@ -1,3 +1,4 @@
+import fcntl
 import json
 import os
 
@@ -312,3 +313,129 @@ def test_commits_pulled_from_dev_are_not_delivered_by_the_session(tmp_path, monk
     assert row["status"] == "complete"
     assert row["verdict"]["needs_documentation"] is False
     assert "notice" not in row
+
+
+class Clock:
+    def __init__(self, at=1000.0):
+        self.at = at
+
+    def time(self):
+        return self.at
+
+
+def failed_request(world, monkeypatch, decide):
+    _, payload, ledger, jobs = world
+    clock = Clock()
+    monkeypatch.setattr(documentation_session, "time", clock)
+    monkeypatch.setattr(documentation.runner, "decide", decide)
+    documentation_session.end(payload)
+    fn, args = jobs.pop()
+    fn(*args)
+    return args[0], ledger, clock
+
+
+def unavailable(*args, **kwargs):
+    raise ClassifierUnavailable("fixture unavailable")
+
+
+def test_a_failed_request_records_its_attempt_and_next_retry_time(world, monkeypatch):
+    path, _, clock = failed_request(world, monkeypatch, unavailable)
+    row = json.loads(path.read_text())
+    assert row["status"] == "pending"
+    assert row["attempts"] == 1
+    assert row["retry_at"] == clock.at + documentation_session.RETRY_DELAYS_S[0]
+
+
+def test_a_due_request_retries_on_the_timer_and_queues_exactly_one_task(world, monkeypatch):
+    path, ledger, clock = failed_request(world, monkeypatch, unavailable)
+    monkeypatch.setattr(documentation.runner, "decide", answer())
+    documentation_session.retry()
+    assert ledger.added == []
+    clock.at += documentation_session.RETRY_DELAYS_S[0]
+    documentation_session.retry()
+    documentation_session.retry()
+    assert len(ledger.added) == 1
+    row = json.loads(path.read_text())
+    assert (row["status"], row["attempts"]) == ("queued", 2)
+
+
+def test_a_request_past_its_attempt_bound_ends_abandoned_with_a_named_outcome(world, monkeypatch):
+    path, ledger, clock = failed_request(world, monkeypatch, answer(0.5))
+    calls = []
+
+    def undecided(*args, **kwargs):
+        calls.append(1)
+        return answer(0.5)(*args, **kwargs)
+
+    monkeypatch.setattr(documentation.runner, "decide", undecided)
+    for delay in documentation_session.RETRY_DELAYS_S:
+        clock.at += delay
+        documentation_session.retry()
+    row = json.loads(path.read_text())
+    assert row["status"] == "abandoned"
+    assert row["outcome"] == (
+        f"gave up after {len(documentation_session.RETRY_DELAYS_S)} attempts: classifier undecided"
+    )
+    assert len(calls) == len(documentation_session.RETRY_DELAYS_S) - 1
+    clock.at += documentation_session.RETRY_DELAYS_S[-1]
+    documentation_session.retry()
+    assert len(calls) == len(documentation_session.RETRY_DELAYS_S) - 1
+    assert ledger.added == []
+
+
+def test_an_abandoned_request_is_not_dispatched_again_at_session_end(world, monkeypatch):
+    path, _, clock = failed_request(world, monkeypatch, answer(0.5))
+    for delay in documentation_session.RETRY_DELAYS_S:
+        clock.at += delay
+        documentation_session.retry()
+    _, payload, _, jobs = world
+    documentation_session.end(payload)
+    assert jobs == []
+    assert "abandoned" in documentation_session.TERMINAL
+
+
+def test_a_failed_worker_records_the_error_as_the_retry_reason(world, monkeypatch):
+    def broken(*args, **kwargs):
+        raise RuntimeError("fixture")
+
+    monkeypatch.setattr(documentation_session.documentation_evidence, "collect", broken)
+    path, _, _ = failed_request(world, monkeypatch, answer())
+    row = json.loads(path.read_text())
+    assert (row["status"], row["attempts"], row["reason"]) == ("pending", 1, "RuntimeError")
+
+
+def test_a_session_end_leaves_its_own_worker_the_first_attempt(world, monkeypatch):
+    _, payload, ledger, jobs = world
+    clock = Clock()
+    monkeypatch.setattr(documentation_session, "time", clock)
+    monkeypatch.setattr(documentation.runner, "decide", answer())
+    documentation_session.end(payload)
+    documentation_session.retry()
+    assert ledger.added == []
+    clock.at += documentation_session.WORKER_OPTIONS["timeout_sec"]
+    documentation_session.retry()
+    assert len(ledger.added) == 1
+    assert jobs[0][0] is documentation_session.process_pending
+
+
+def test_a_retry_pass_is_skipped_while_another_holds_the_retry_lock(world, monkeypatch):
+    path, ledger, clock = failed_request(world, monkeypatch, unavailable)
+    monkeypatch.setattr(documentation.runner, "decide", answer())
+    clock.at += documentation_session.RETRY_DELAYS_S[0]
+    with (path.parent / documentation_session.RETRY_LOCK).open("w") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        documentation_session.retry()
+    assert ledger.added == []
+    documentation_session.retry()
+    assert len(ledger.added) == 1
+
+
+def test_the_retry_timer_dispatches_a_detached_worker_only_when_requests_exist(tmp_path, monkeypatch):
+    jobs = []
+    monkeypatch.setattr(documentation_session, "HOME", tmp_path)
+    monkeypatch.setattr(documentation_session, "fork_and_call", lambda fn, **kwargs: jobs.append((fn, kwargs)))
+    documentation_session.schedule_retry()
+    assert jobs == []
+    (tmp_path / "documentation").mkdir()
+    documentation_session.schedule_retry()
+    assert jobs == [(documentation_session.retry, documentation_session.RETRY_OPTIONS)]
