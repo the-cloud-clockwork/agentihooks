@@ -95,6 +95,8 @@ def test_the_route_wait_reads_a_report_written_while_it_sleeps(tmp_path, monkeyp
     slept = []
 
     def sleep(seconds):
+        if slept:
+            pytest.fail("the route wait slept on after its report arrived")
         slept.append(seconds)
         route.write_text("status=routed\naccount=acct\n")
 
