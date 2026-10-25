@@ -24,14 +24,25 @@ def ready(jobs: list[dict], shards: list[int]) -> bool:
     )
 
 
-def watch(repository: str, run: str, attempt: str, shards: list[int], destination: Path) -> None:
+def watch(
+    repository: str, run: str, attempt: str, shards: list[int], destination: Path, *, recover: bool = True
+) -> None:
     downloaded = {}
     expected = {f"{kind}-3.12-{shard}" for kind in ("durations", "flakes") for shard in shards}
+    units = {f"unit (3.12, {shard})" for shard in shards}
     deadline = time.monotonic() + 1200
     while time.monotonic() < deadline:
         fetch(repository, run, destination, downloaded)
         pages = api(f"repos/{repository}/actions/runs/{run}/attempts/{attempt}/jobs?per_page=100")
-        if ready([job for page in pages for job in page["jobs"]], shards):
+        jobs = [job for page in pages for job in page["jobs"]]
+        failures = [
+            job["name"]
+            for job in jobs
+            if job["name"] in units and job.get("status") == "completed" and job.get("conclusion") != "success"
+        ]
+        if not recover and failures:
+            raise RuntimeError(f"Original shards cannot recover on this event: {failures}")
+        if ready(jobs, shards):
             fetch(repository, run, destination, downloaded)
             if missing := expected - downloaded.keys():
                 raise RuntimeError(f"Missing shard reports: {sorted(missing)}")
@@ -75,6 +86,7 @@ def main() -> None:
         os.environ["GITHUB_RUN_ATTEMPT"],
         json.loads(os.environ["SHARDS"]),
         Path("shard-reports"),
+        recover=os.environ.get("GITHUB_EVENT_NAME") == "merge_group",
     )
 
 

@@ -283,6 +283,11 @@ def _passed(workflow, jobs):
         return False
     for name in required:
         label = definitions[name].get("name", name)
+        if (
+            name == "queue-fail-fast"
+            and label == "${{ github.event_name == 'merge_group' && 'Gate — Required' || 'queue-fail-fast' }}"
+        ):
+            label = "queue-fail-fast"
         results = [
             job["conclusion"]
             for job in jobs
