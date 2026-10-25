@@ -70,6 +70,7 @@ def test_a_reload_hands_over_without_a_failed_or_slow_request(tmp_path, ledger_p
             first.wait(timeout=30)
         except subprocess.TimeoutExpired:
             pytest.fail((tmp_path / "server.out").read_text())
+        until(lambda: pid_of(tmp_path) not in (None, first.pid))
         successor = pid_of(tmp_path)
         time.sleep(0.2)
         stop.set()
@@ -86,3 +87,26 @@ def test_a_reload_hands_over_without_a_failed_or_slow_request(tmp_path, ledger_p
             except ProcessLookupError:
                 pass
         first.wait(timeout=10)
+
+
+@pytest.mark.wall_clock
+def test_reload_waits_for_pid_publication_after_the_predecessor_exits(tmp_path, ledger_port, monkeypatch):
+    processes = []
+    spawn, read_pid = subprocess.Popen, pid_of
+    stale = []
+
+    def start(*args, **kwargs):
+        process = spawn(*args, **kwargs)
+        processes.append(process)
+        return process
+
+    def delayed_pid(folder):
+        if processes[0].returncode is not None and not stale:
+            stale.append(processes[0].pid)
+            return processes[0].pid
+        return read_pid(folder)
+
+    monkeypatch.setattr(subprocess, "Popen", start)
+    monkeypatch.setitem(globals(), "pid_of", delayed_pid)
+    test_a_reload_hands_over_without_a_failed_or_slow_request(tmp_path, ledger_port)
+    assert stale == [processes[0].pid]
