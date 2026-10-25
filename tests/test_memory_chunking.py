@@ -79,6 +79,11 @@ def test_lines_label_each_record_kind():
     assert chunking._line({"kind": "tool_result", "tool_result": ["x"], "is_error": True}) == 'result error: ["x"]'
 
 
+def test_digests_hash_sorted_keys_and_unescaped_text():
+    expected = hashlib.sha256('{"a": "é", "b": 1}'.encode()).hexdigest()
+    assert chunking._digest({"b": 1, "a": "é"}) == expected
+
+
 def test_turns_start_at_each_user_text_and_keep_a_leading_partial_turn():
     events = [event(1, "assistant_text"), event(2, "user_text"), event(3, "tool_call"), event(4, "user_text")]
     assert [[item["sequence"] for item in turn] for turn in chunking._turns(events)] == [[1], [2, 3], [4]]
@@ -297,6 +302,12 @@ def test_the_index_adds_its_tables_to_the_catalog_database(catalog, index):
     chunking.ChunkIndex(catalog)
     assert index.cutover("corpus-a", "s1") == {"chunker_version": None, "revision": 0}
     assert index.rebuilt_total("corpus-a") == 0
+
+
+def test_stored_chunk_records_keep_text_unescaped(writer, index):
+    writer.append({"kind": "user_text", "text": "café"})
+    index.build(GRANT, SCOPE, POLICY)
+    assert '"preview": "user: café"' in index.snapshot()["search_chunk"][0][6]
 
 
 def test_build_stores_a_generation_and_reports_what_changed(writer, index):
