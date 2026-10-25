@@ -28,7 +28,9 @@ def number(address: str) -> int:
 
 
 def live_masters(redis, slug: str) -> list[str]:
-    return [seat for seat in masters.held(redis, slug, RedisStore(redis).agents(slug)) if is_seat(seat)]
+    agents = RedisStore(redis).agents(slug)
+    waiting = {agent.name for agent in agents if agent.input_prompt}
+    return [seat for seat, name in masters.held(redis, slug, agents).items() if is_seat(seat) and name not in waiting]
 
 
 def turn(live: list[str], last: str, skip: str | None) -> str:
