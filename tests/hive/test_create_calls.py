@@ -252,6 +252,20 @@ def test_a_failed_check_stops_the_create_without_merging(world):
     assert ["gh", "pr", "merge", PR, "--squash"] not in world.run.calls
 
 
+def test_a_failed_check_the_base_does_not_require_still_merges(world):
+    world.run.merge_error = AUTO_REFUSED
+    world.run.required = ["Gate — Required"]
+    world.run.checks = [
+        [
+            {"__typename": "CheckRun", "name": "Gate — Required", "status": "COMPLETED", "conclusion": "SUCCESS"},
+            {"__typename": "CheckRun", "name": "Gate — Protected", "status": "COMPLETED", "conclusion": "FAILURE"},
+        ]
+    ]
+    create.create(world.tools, create.Options(timeout_s=60))
+    assert ["gh", "pr", "merge", PR, "--squash"] in world.run.calls
+    assert f"hive create {NAME}: merge: merged {PR}" in world.lines
+
+
 def test_checks_that_never_pass_time_out_naming_them(world):
     world.run.merge_error = AUTO_REFUSED
     world.run.checks = [[]]

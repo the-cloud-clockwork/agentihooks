@@ -17,6 +17,8 @@ UI_HIVE = "UI hive"
 LOCAL_MACHINE = "local machine"
 LOCAL_FULL = ", and the local machine runs "
 NEEDS_WORKSTATION = "the task needs the workstation, so no remote hive takes it"
+NEEDS_CAPABILITY = "the task needs a hive with {needs}, and no hive declares it"
+NEEDS_TOGETHER = "the task needs a hive with {needs}, and no single hive declares all of them"
 UNRANKED = math.inf
 
 
@@ -42,6 +44,19 @@ class Choice:
 
 def hosts(role: str, hive: dict, aliases: tuple[str, ...] = ()) -> bool:
     return hive.get("draining") != YES and not {role, *aliases} & set(hive["excluded"])
+
+
+def equipped(task: dict, hive: dict | None) -> bool:
+    return set(task.get("needs") or ()) <= set((hive or {}).get("capabilities") or ())
+
+
+def needs_refusal(task: dict, hives: list[dict]) -> str:
+    declared = {name for hive in hives for name in hive.get("capabilities") or ()}
+    needs = task.get("needs") or ()
+    missing = [name for name in needs if name not in declared]
+    return (
+        NEEDS_CAPABILITY.format(needs=", ".join(missing)) if missing else NEEDS_TOGETHER.format(needs=", ".join(needs))
+    )
 
 
 def for_swarm(hives: list[dict], slug: str) -> list[dict]:
