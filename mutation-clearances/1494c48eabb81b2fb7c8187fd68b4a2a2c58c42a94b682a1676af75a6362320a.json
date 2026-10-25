@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/tick.py:scripts.swarm.tick.x__spawn_order__mutmut_18:8e111e01024c04373da4ffe5f485a2bab71349c1aa87421ef2b63412f959435e": {
+    "reader": "standards_reader",
+    "reason": "Replaces rows with None in the ready_in_order call that also passes the claim view. _claimable reads rows only in its claim_view fallback, which never runs because a Claims instance is a frozen dataclass with no __bool__ and is always truthy; _launch_order takes no rows and timing.timed records only the function name, slug and step. Equivalent."
+  }
+}
