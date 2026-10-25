@@ -121,3 +121,147 @@ def test_only_the_reviewed_pair_of_event_names_and_canonical_watcher_normalizes(
     changed["test.yml"]["jobs"]["gate-required"]["name"] = "other"
     with pytest.raises(ValueError):
         ci_gate_queue.normalize(changed)
+
+
+def test_the_early_watcher_binds_the_plan_and_uses_protected_code_and_app_quota():
+    job = ci_gate_queue.watcher("runner")
+    assert job["name"] == "${{ github.event_name == 'merge_group' && 'Gate — Required' || 'queue-fail-fast' }}"
+    assert (
+        ci_gate_queue.SUMMARY_NAME
+        == "${{ github.event_name == 'merge_group' && 'Queue gate summary' || 'Gate — Required' }}"
+    )
+    assert job["needs"] == ["split", "select", "reuse", "admission"]
+    assert job["runs-on"] == "runner"
+    assert job["timeout-minutes"] == 60
+    assert job["outputs"] == {"failed": "${{ steps.watch.outputs.failed }}"}
+    assert (
+        job["if"]
+        == "${{ !cancelled() && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && (github.event_name != 'merge_group' || needs.reuse.outputs.reused != 'true') && github.event_name != 'pull_request' }}"
+    )
+    checkout, token, watch, cancel = job["steps"]
+    assert checkout == {
+        "uses": "actions/checkout@v4",
+        "if": "github.event_name == 'merge_group'",
+        "with": {"ref": "${{ github.event.merge_group.base_sha }}", "persist-credentials": False},
+    }
+    assert token["uses"] == "actions/create-github-app-token@v3.2.0"
+    assert token["id"] == "app-token"
+    assert token["if"] == "github.event_name == 'merge_group'"
+    assert token["with"] == {
+        "client-id": "${{ secrets.TCC_CI_CLIENT_ID }}",
+        "private-key": "${{ secrets.TCC_CI_APP_PRIVATE_KEY }}",
+        "repositories": "${{ github.event.repository.name }}",
+        "permission-actions": "write",
+        "permission-contents": "read",
+        "permission-pull-requests": "read",
+    }
+    assert watch["id"] == "watch"
+    assert watch["if"] == "github.event_name == 'merge_group'"
+    assert watch["env"] == {
+        "GH_TOKEN": "${{ steps.app-token.outputs.token }}",
+        "QUEUE_PLAN": "${{ format('[{0}]', needs.split.outputs.queue_312) }}",
+    }
+    assert (
+        watch["run"]
+        == 'python3 -m scripts.ci_gate_queue || { echo "failed=queue verification" >> "$GITHUB_OUTPUT"; exit 1; }'
+    )
+    assert cancel["if"] == "failure() && github.event_name == 'merge_group'"
+    assert cancel["env"] == {"GH_TOKEN": "${{ steps.app-token.outputs.token }}"}
+    assert cancel["run"] == 'gh run cancel "$GITHUB_RUN_ID" -R "$GITHUB_REPOSITORY"'
+
+
+def test_protected_grading_accepts_the_exact_early_pair_and_rejects_any_weakened_watcher():
+    from datetime import date
+    from pathlib import Path
+
+    from scripts import ci_wiring, gate_protected
+
+    workflows, config = gate_protected.load(Path(__file__).resolve().parents[1], "HEAD")
+    candidate = copy.deepcopy(workflows)
+    jobs = candidate["test.yml"]["jobs"]
+    jobs["gate-required"]["name"] = ci_gate_queue.SUMMARY_NAME
+    jobs["queue-fail-fast"] = ci_gate_queue.watcher(jobs["gate-required"]["runs-on"])
+    today = date(2026, 10, 25)
+    assert gate_protected.grade(workflows, config, candidate, config, today) == []
+    assert ci_wiring.check(candidate, config, today) == []
+    for field, value in [("needs", []), ("steps", []), ("if", "true")]:
+        changed = copy.deepcopy(candidate)
+        changed["test.yml"]["jobs"]["queue-fail-fast"][field] = value
+        assert gate_protected.grade(workflows, config, changed, config, today)
+        assert ci_wiring.check(changed, config, today)
+
+
+def test_api_waiting_shard_verification_remains_a_unit_dependent_for_lost_runner_recovery():
+    from scripts import ci_lost_runner, ci_queue_retry
+
+    workflow = {
+        "jobs": {
+            "unit": {},
+            "split": {},
+            "shard-check": {"needs": ["split"], "steps": [{"run": "python -m scripts.ci_gate_shards"}]},
+            "gate-required": {"name": "Gate — Required", "needs": ["shard-check"]},
+        }
+    }
+    assert {"shard-check", "Gate — Required"} <= ci_queue_retry.dependents(workflow)
+    lost = {"name": "unit (3.12, 2)", "status": "in_progress"}
+    waiting = {"name": "shard-check (3.12)", "status": "in_progress"}
+    assert ci_lost_runner.stalled([lost, waiting], [lost], workflow) == (True, "runner lost on unit (3.12, 2)")
+
+
+def test_reuse_recognizes_the_nonqueue_required_context_of_the_exact_name_pair():
+    from scripts import ci_reuse
+
+    workflow = {"jobs": {"gate-required": {"name": ci_gate_queue.SUMMARY_NAME, "needs": ["unit"]}, "unit": {}}}
+    assert ci_reuse._passed(
+        workflow, [{"name": "Gate — Required", "conclusion": "success"}, {"name": "unit", "conclusion": "success"}]
+    )
+
+
+def test_watch_waits_for_complete_attempt_jobs_and_rechecks_queue_identity(monkeypatch):
+    reads, queries, sleeps = [], [], []
+    first = [job for job in complete() if job["name"] != "shard-check (3.12)"]
+    snapshots = iter([first, complete()])
+    monkeypatch.setattr(
+        ci_gate_queue, "read_jobs", lambda endpoint: reads.append(endpoint) or next(snapshots), raising=False
+    )
+    monkeypatch.setattr(
+        ci_gate_queue,
+        "api",
+        lambda endpoint: (
+            queries.append(endpoint)
+            or [[{"ref": "refs/heads/gh-readonly-queue/dev/pr-1", "object": {"sha": "queue-head"}}]]
+        ),
+        raising=False,
+    )
+    monkeypatch.setattr(ci_gate_queue.time, "sleep", sleeps.append)
+    ci_gate_queue.watch("owner/repo", "123", "2", [2, 7], "refs/heads/gh-readonly-queue/dev/pr-1", "queue-head")
+    assert reads == ["repos/owner/repo/actions/runs/123/attempts/2/jobs"] * 2
+    assert queries == ["repos/owner/repo/git/matching-refs/heads/gh-readonly-queue/dev/pr-1"] * 3
+    assert sleeps == [5]
+
+
+@pytest.mark.parametrize(
+    "refs", [[], [[{"ref": "other", "object": {"sha": "head"}}]], [[{"ref": "refs/queue", "object": {"sha": "other"}}]]]
+)
+def test_a_deleted_or_superseded_queue_group_never_passes(monkeypatch, refs):
+    monkeypatch.setattr(ci_gate_queue, "api", lambda endpoint: refs, raising=False)
+    with pytest.raises(ValueError):
+        ci_gate_queue.watch("owner/repo", "123", "2", [2, 7], "refs/queue", "head")
+
+
+def test_missing_jobs_timeout_and_an_api_failure_never_claims_success(monkeypatch):
+    monkeypatch.setattr(
+        ci_gate_queue, "api", lambda endpoint: [[{"ref": "refs/queue", "object": {"sha": "head"}}]], raising=False
+    )
+    monkeypatch.setattr(ci_gate_queue, "read_jobs", lambda endpoint: [], raising=False)
+    clock = iter([0, 0, 1201])
+    monkeypatch.setattr(ci_gate_queue.time, "monotonic", lambda: next(clock))
+    monkeypatch.setattr(ci_gate_queue.time, "sleep", lambda seconds: None)
+    with pytest.raises(TimeoutError):
+        ci_gate_queue.watch("owner/repo", "123", "2", [2, 7], "refs/queue", "head")
+    monkeypatch.setattr(ci_gate_queue.time, "monotonic", lambda: 0)
+    monkeypatch.setattr(
+        ci_gate_queue, "api", lambda endpoint: (_ for _ in ()).throw(RuntimeError("API unavailable")), raising=False
+    )
+    with pytest.raises(RuntimeError, match="API unavailable"):
+        ci_gate_queue.watch("owner/repo", "123", "2", [2, 7], "refs/queue", "head")

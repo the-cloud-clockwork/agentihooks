@@ -248,6 +248,7 @@ def test_no_script_a_step_runs_calls_the_api():
         "tests/test_ci_runner_classes.py",
         "tests/test_ci_runner_trust.py",
     ]
+    expected += [name for name in ("scripts/ci_gate_shards.py", "scripts/ci_gate_queue.py") if ROOT / name in calls]
     assert sorted(str(path.relative_to(ROOT)) for path in calls) in (
         sorted(expected),
         sorted(expected + routing_contracts),
