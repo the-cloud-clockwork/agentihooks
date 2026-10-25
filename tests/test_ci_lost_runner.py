@@ -117,7 +117,7 @@ def test_a_job_in_progress_on_an_absent_runner_past_the_grace_is_lost():
         job("durations", "in_progress", None, "GitHub Actions 1000223300", group="GitHub Actions"),
         job("queue-fail-fast", "queued", None, "anton-oss-light-gone"),
         job("queue-fail-fast", "completed", "success", "anton-oss-light-gone"),
-        {**lost("unit (3.12, 2)"), "steps": [{"status": "completed"}, {"status": "completed"}]},
+        {**lost("unit (3.12, 2)", stamp(NOW - GRACE)), "steps": [{"status": "completed"}, {"status": "completed"}]},
     ],
 )
 def test_a_young_live_unassigned_hosted_or_finished_job_is_not_lost(candidate):
@@ -125,7 +125,10 @@ def test_a_young_live_unassigned_hosted_or_finished_job_is_not_lost(candidate):
 
 
 def test_a_job_with_an_unfinished_step_on_an_absent_runner_is_lost():
-    candidate = {**lost("unit (3.12, 2)"), "steps": [{"status": "completed"}, {"status": "in_progress"}]}
+    candidate = {
+        **lost("unit (3.12, 2)", stamp(NOW - GRACE)),
+        "steps": [{"status": "completed"}, {"status": "in_progress"}],
+    }
     assert ci_lost_runner.lost_jobs([candidate], RUNNERS, NOW, GRACE) == [candidate]
 
 
