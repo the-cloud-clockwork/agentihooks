@@ -41,11 +41,16 @@ def test_quiet_drains_a_real_observer_delivery_under_the_paused_clock(browser):
     try:
         page.clock.install(time=page_replay.START - datetime.timedelta(seconds=10))
         page.clock.pause_at(page_replay.START)
-        page.set_content(
-            '<main id="main-content"><a id="link">Operator notes</a></main><script>window.__inflight = 0;'
-            'new IntersectionObserver(() => { document.getElementById("link").className = "on"; })'
-            '.observe(document.getElementById("link"));</script>'
+        page.route(
+            "http://replay.test/",
+            lambda route: route.fulfill(
+                content_type="text/html",
+                body='<main id="main-content"><a id="link">Operator notes</a></main><script>window.__inflight = 0;'
+                'new IntersectionObserver(() => { document.getElementById("link").className = "on"; })'
+                '.observe(document.getElementById("link"));</script>',
+            ),
         )
+        page.goto("http://replay.test/")
         now = page_replay.quiet(page)
     finally:
         page.close()
