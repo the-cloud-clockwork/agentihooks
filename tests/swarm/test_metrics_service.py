@@ -20,7 +20,7 @@ def store():
 
 def _probe(store, **sample):
     row = {"read_s": 0.25, "write_s": 1.5, "read_failure": "", "write_failure": "", "wall_s": 1.75, "at": NOW}
-    store.redis.set(ledger_probe._key(store, "sw"), json.dumps({"samples": [{"at": NOW - 60_000}, {**row, **sample}]}))
+    store.redis.set(ledger_probe._key(store, "sw"), json.dumps({"samples": [{"at": NOW - 120_000}, {"at": NOW - 60_000}, {**row, **sample}]}))
 
 
 def test_the_last_probe_pass_becomes_one_ledger_probe_row(store):
@@ -73,6 +73,15 @@ def test_a_hive_that_never_beat_reads_age_minus_one(store):
     (row,) = metrics_service.hive_rows(store, "sw", NOW)
 
     assert (row["live"], row["heartbeat_age_s"]) == (0, -1.0)
+
+
+def test_a_hive_that_beat_at_the_first_millisecond_reads_its_real_age(store):
+    registry.update(store.redis, "h1", ["name=anton-1"])
+    store.redis.hset(registry.key("h1"), "heartbeat_at", json.dumps(1))
+
+    (row,) = metrics_service.hive_rows(store, "sw", NOW)
+
+    assert row["heartbeat_age_s"] == (NOW - 1) / 1000
 
 
 def test_record_appends_probe_and_hive_rows_to_the_outbox(store, tmp_path):
