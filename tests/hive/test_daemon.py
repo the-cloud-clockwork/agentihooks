@@ -75,6 +75,16 @@ def test_beat_exports_the_registered_capabilities_before_launching(redis, monkey
     assert profile_chain.hive_capabilities(daemon.os.environ) == {"headed", "gpu"}
 
 
+def test_an_unreadable_record_withdraws_the_exported_capabilities(redis, monkeypatch):
+    from hooks.context import profile_chain
+
+    monkeypatch.setenv(profile_chain.HIVE_CAPABILITIES, "headed")
+    monkeypatch.setattr(daemon.registry, "show", Mock(side_effect=registry.HiveError("unreadable")))
+    with pytest.raises(registry.HiveError):
+        daemon.adopt_capabilities(redis, "machine")
+    assert profile_chain.HIVE_CAPABILITIES not in daemon.os.environ
+
+
 def test_hive_heartbeat_renews_account_counters_from_its_own_quota_and_executions(redis, monkeypatch):
     from scripts.hive import account_slots
 
