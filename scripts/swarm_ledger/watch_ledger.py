@@ -169,7 +169,7 @@ def main():
     watch = Watch(args, f"ledger {args.slug}", seen.marks_for(args.slug) if args.name else None)
     if beat:
         atexit.register(beat.unlink, missing_ok=True)
-        signal.signal(signal.SIGTERM, signal.SIG_IGN)
+        signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
     headers, cursor, failure = None, None, None
     while True:
         alive(beat)
