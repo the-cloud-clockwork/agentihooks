@@ -188,6 +188,20 @@ def normalize(workflows: dict[str, dict]) -> dict[str, dict]:
             expected = expected | {"queue-split"}
         if set(summary.get("needs", [])) != expected:
             raise ValueError("The early queue gate must preserve the reviewed graded inventory")
+        if parallel:
+            for step in summary.get("steps", []):
+                if "run" in step:
+                    step["run"] = (
+                        step["run"]
+                        .replace(
+                            '["select", "queue-split", "shard-check", "test-count"]',
+                            '["select", "split", "shard-check", "test-count"]',
+                        )
+                        .replace(
+                            ' or (.key == "queue-split" and .value.result == "skipped" and $event != "merge_group")',
+                            "",
+                        )
+                    )
         summary["name"] = "Gate — Required"
         early["name"] = "queue-fail-fast"
     return normalized
