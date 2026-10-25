@@ -168,9 +168,10 @@ whether or not `AGENTIHOOKS_MASTER_CLAUDE_LOGIN` is on.
   the agent name as an account slug (`s-251025` becomes `s_251025`, and
   `pid_<pid>` with no agent name), built from its rendered profile and carrying
   the slot's account. `CLAUDE_SECURESTORAGE_CONFIG_DIR` points at the slot
-  home, so the grant is never copied: native Claude refreshes the one
-  credential store every session on that login shares, and a rotated refresh
-  token never leaves a stale second copy.
+  home, so the grant is never copied: every session on that login reads and
+  writes one credential store, and a rotated refresh token never leaves a stale
+  second copy behind. Whether native Claude serializes two refreshes that start
+  at the same moment from different config homes is not yet proven live.
 - **Refusal.** With no usable login the launch prints each login's reason and
   exits 3. It never falls back to a quota token or bare Claude.
 
