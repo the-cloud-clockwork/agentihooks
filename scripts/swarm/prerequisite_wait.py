@@ -1,7 +1,7 @@
 import json
 import subprocess
 
-from scripts.swarm import ledger_events, merge_queue
+from scripts.swarm import idle, ledger_events, merge_queue, waits
 from scripts.swarm.store import PREFIX, AgentRecord, RedisStore, SwarmError
 
 
@@ -9,7 +9,7 @@ def key(slug: str) -> str:
     return f"{PREFIX}:{slug}:prerequisite-waits"
 
 
-def admit(store: RedisStore, slug: str, agent: AgentRecord, held: dict, ledger) -> None:
+def admit(store: RedisStore, slug: str, agent: AgentRecord, held: dict, ledger, at: int) -> None:
     store.redis.hdel(key(slug), agent.task)
     if held["kind"] != "merge" or not agent.task:
         return
@@ -32,6 +32,7 @@ def admit(store: RedisStore, slug: str, agent: AgentRecord, held: dict, ledger) 
         agent.task,
         json.dumps({"agent": agent.name, "generation": store.claim_generation(slug, agent.task), "target": target}),
     )
+    idle.end_wait(store.redis, slug, agent.name, at)
     raise SwarmError(
         f"prerequisite {target} is at queue position {position}; stack the next change on the prerequisite branch "
         "and publish it, or block with this prerequisite URL, the stack and next step in the notes; "
@@ -48,12 +49,12 @@ def offered(store: RedisStore, slug: str, agent: AgentRecord) -> dict:
 
 def dependencies(store: RedisStore, slug: str, agent: AgentRecord, task: dict, note: str) -> list:
     record = offered(store, slug, agent)
-    return [] if record and record["target"] in note else task.get("depends_on", [])
+    return [] if record and record["target"] in waits.PULL_URL.findall(note) else task.get("depends_on", [])
 
 
 def hold(store: RedisStore, slug: str, agent: AgentRecord, ledger, note: str) -> None:
     record = offered(store, slug, agent)
-    if not record or record["target"] not in note:
+    if not record or record["target"] not in waits.PULL_URL.findall(note):
         return
     task = ledger.task(slug, agent.task)
     record.update(blocked=True, generation=task.get("claim_generation", 0))

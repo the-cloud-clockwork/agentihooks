@@ -109,10 +109,11 @@ def test_prerequisite_block_releases_a_claim_with_an_unfinished_task_dependency(
     assert store.agents("sw")[0].state == "finished"
 
 
-def test_an_unrelated_block_after_a_refusal_is_not_reopened(waiting, monkeypatch):
+@pytest.mark.parametrize("note", ["Waiting for operator credentials", "Stack after https://github.com/o/r/pull/78"])
+def test_an_unrelated_block_after_a_refusal_is_not_reopened(waiting, monkeypatch, note):
     store, ledger, _ = waiting
     assert run("sw", "--as", ME, "wait", "--on", "merge", URL) == 1
-    assert run("sw", "--as", ME, "block", "Waiting for operator credentials") == 0
+    assert run("sw", "--as", ME, "block", note) == 0
     monkeypatch.setattr(cli.ledger_events, "view", lambda url: pytest.fail("unrelated block must not read GitHub"))
     assert prerequisite_wait.reopen_pass("sw", store, ledger, ledger.rows) == []
     assert ledger.rows["t1"]["state"] == "blocked"
@@ -127,3 +128,74 @@ def test_an_admitted_wait_clears_the_previous_prerequisite_offer(waiting, monkey
     monkeypatch.setattr(cli.ledger_events, "view", lambda url: pytest.fail("cleared offer must not read GitHub"))
     assert prerequisite_wait.reopen_pass("sw", store, ledger, ledger.rows) == []
     assert ledger.rows["t1"]["state"] == "blocked"
+
+
+@pytest.mark.parametrize("position", [6, 39])
+def test_every_position_beyond_one_group_requires_continuation(waiting, position):
+    _, _, state = waiting
+    state["entry"]["position"] = position
+    assert run("sw", "--as", ME, "wait", "--on", "merge", URL) == 1
+
+
+@pytest.mark.parametrize("pull", [None, PullRequest("OPEN", None, 1, False), PullRequest("MERGED", 2, 1, False)])
+def test_unqueued_or_unreadable_prerequisites_preserve_wait_admission(waiting, monkeypatch, pull):
+    store, _, _ = waiting
+    monkeypatch.setattr(cli.ledger_events, "view", lambda url: pull)
+    monkeypatch.setattr(merge_queue, "operate", lambda *args: pytest.fail("unqueued pull needs no queue read"))
+    assert run("sw", "--as", ME, "wait", "--on", "merge", URL) == 0
+    assert idle.wait(store.redis, "sw", ME) is not None
+
+
+@pytest.mark.parametrize("change", [{"state": "MERGED"}, {"queued": False}, {"entry": None}])
+def test_a_fresh_queue_read_controls_admission(waiting, change):
+    store, _, state = waiting
+    state.update(change)
+    assert run("sw", "--as", ME, "wait", "--on", "merge", URL) == 0
+    assert idle.wait(store.redis, "sw", ME) is not None
+
+
+def test_a_failed_queue_read_preserves_wait_admission(waiting, monkeypatch):
+    store, _, _ = waiting
+
+    def failed(*args):
+        raise cli.SwarmError("GitHub unavailable")
+
+    monkeypatch.setattr(merge_queue, "operate", failed)
+    assert run("sw", "--as", ME, "wait", "--on", "merge", URL) == 0
+    assert idle.wait(store.redis, "sw", ME) is not None
+
+
+@pytest.mark.parametrize("change", ["agent", "generation"])
+def test_another_claimant_cannot_consume_an_old_prerequisite_offer(waiting, monkeypatch, change):
+    store, ledger, _ = waiting
+    assert run("sw", "--as", ME, "wait", "--on", "merge", URL) == 1
+    if change == "agent":
+        store.put_agent("sw", AgentRecord(name=ME, lane="eng", task="t2", seat="eng-1@sw"))
+        ledger.rows["t2"].update(state="claimed", claimed_by=ME)
+        task_id = "t2"
+    else:
+        store.redis.set(f"{store.key('sw', 'claim', 't1')}:generation", 1)
+        task_id = "t1"
+    assert run("sw", "--as", ME, "block", f"Stack published; next step restack after {URL}") == 0
+    monkeypatch.setattr(cli.ledger_events, "view", lambda url: pytest.fail("stale offer must not read GitHub"))
+    assert prerequisite_wait.reopen_pass("sw", store, ledger, ledger.rows) == []
+    assert ledger.rows[task_id]["state"] == "blocked"
+
+
+def test_an_unrelated_refusal_does_not_bypass_unfinished_dependencies(waiting):
+    store, ledger, _ = waiting
+    ledger.rows["t1"]["depends_on"] = ["t2"]
+    assert run("sw", "--as", ME, "wait", "--on", "merge", URL) == 1
+    assert run("sw", "--as", ME, "block", "Waiting for credentials") == 0
+    assert ledger.rows["t1"]["state"] == "claimed"
+    assert idle.wait(store.redis, "sw", ME)["on"] == {"kind": "task", "target": "t2"}
+
+
+def test_a_queue_that_grows_long_clears_the_previous_idle_wait(waiting):
+    store, _, state = waiting
+    state["entry"]["position"] = 1
+    assert run("sw", "--as", ME, "wait", "--on", "merge", URL) == 0
+    assert idle.wait(store.redis, "sw", ME) is not None
+    state["entry"]["position"] = 15
+    assert run("sw", "--as", ME, "wait", "--on", "merge", URL) == 1
+    assert idle.wait(store.redis, "sw", ME) is None
