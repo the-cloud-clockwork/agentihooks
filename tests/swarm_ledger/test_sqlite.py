@@ -264,6 +264,54 @@ def test_a_view_hands_its_freed_heap_back_once_per_generation(tmp_path, monkeypa
     assert released == [True, True]
 
 
+def building_view(calls, active, peak, started, release):
+    def view(state):
+        calls.append(state["_meta"]["rev"])
+        active[0] += 1
+        peak[0] = max(peak[0], active[0])
+        started.set()
+        release.wait(5)
+        active[0] -= 1
+        return json.dumps(state).encode()
+
+    return view
+
+
+def test_a_reader_waiting_on_a_view_build_reuses_it_instead_of_building_its_own(tmp_path):
+    repo = store(tmp_path)
+    repo.create("ledger", CONTENT)
+    calls, active, peak, started, release = [], [0], [0], threading.Event(), threading.Event()
+    view = building_view(calls, active, peak, started, release)
+    readers = [threading.Thread(target=repo.encoded_view, args=("ledger", view)) for _ in range(2)]
+    readers[0].start()
+    assert started.wait(5)
+    readers[1].start()
+    readers[1].join(0.2)
+    release.set()
+    for reader in readers:
+        reader.join(5)
+    assert len(calls) == 1 and peak == [1]
+
+
+def test_views_of_different_generations_never_build_at_once(tmp_path):
+    repo = store(tmp_path)
+    repo.create("ledger", CONTENT)
+    calls, active, peak, started, release = [], [0], [0], threading.Event(), threading.Event()
+    view = building_view(calls, active, peak, started, release)
+    first = threading.Thread(target=repo.encoded_view, args=("ledger", view))
+    first.start()
+    assert started.wait(5)
+    repo.apply_ops("ledger", ops=[chat(1)])
+    second = threading.Thread(target=repo.encoded_view, args=("ledger", view))
+    second.start()
+    second.join(0.2)
+    assert len(calls) == 1
+    release.set()
+    first.join(5)
+    second.join(5)
+    assert len(calls) == 2 and calls[0] != calls[1] and peak == [1]
+
+
 def test_a_reader_of_an_older_revision_keeps_the_newer_copy_for_the_next_writer(tmp_path, monkeypatch):
     repo = store(tmp_path)
     repo.create("ledger", CONTENT)
