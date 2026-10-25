@@ -1106,7 +1106,12 @@ def test_selected_test_ids_read_the_collected_stats_once_not_once_per_id(tmp_pat
     assert calls == [entries]
     assert sorted(warm, key=str) == sorted(
         [
-            {"status": 0, "tests": {"m.x_f": [f"{entry}[1]"], "m.x_g": []}, "durations": {f"{entry}[1]": 1}, "cpu": 0.04}
+            {
+                "status": 0,
+                "tests": {"m.x_f": [f"{entry}[1]"], "m.x_g": []},
+                "durations": {f"{entry}[1]": 1},
+                "cpu": 0.04,
+            }
             for entry in entries
         ],
         key=str,
