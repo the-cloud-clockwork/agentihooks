@@ -844,7 +844,7 @@ The verifier step failed, `Cancel a rejected queue run` succeeded, the early gat
 
 ### Cancelled watcher after the gate change: 19 October 2026
 
-[Issue 5456](https://github.com/the-cloud-clockwork/agentihooks/issues/5456) investigated [run 39342371515](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39342371515), created at 23:34:06 UTC after the watcher gate change in [pull request 4812](https://github.com/the-cloud-clockwork/agentihooks/pull/4812). The cancelled watcher had reported a stale queue group before cancelling its own run. The gate rejected that reported failure as designed.
+[Issue 5456](https://github.com/the-cloud-clockwork/agentihooks/issues/5456) investigated [run 39342371515](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39342371515), created at 23:34:06 UTC after the watcher gate change tracked in [issue 4812](https://github.com/the-cloud-clockwork/agentihooks/issues/4812). The cancelled watcher had reported a stale queue group before cancelling its own run. The gate rejected that reported failure as designed.
 
 The job names below are historical: `queue-fail-fast` was the watcher and `Gate — Required` was the later dependency gate. In the current workflow, the early verifier owns `Gate — Required` and the later job is `Queue gate summary`, as described above.
 
