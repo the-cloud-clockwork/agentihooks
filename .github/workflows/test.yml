@@ -222,6 +222,7 @@ jobs:
     runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && 'anton-oss-light' || 'ubuntu-latest' }}
     timeout-minutes: 5
     permissions:
+      actions: read
       contents: read
     outputs:
       key: ${{ steps.stored.outputs.cache-matched-key }}
@@ -312,7 +313,7 @@ jobs:
       # Queue refs and dispatched branches cannot read caches saved on dev, so they fetch dev's artifacts on the App's own API quota.
       - name: Mint the tcc main ci App token
         id: app-token
-        if: github.event_name == 'pull_request' || github.event_name == 'merge_group' || github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && hashFiles('scripts/ci_dev_reuse.py') != '')
+        if: (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]') || github.event_name == 'merge_group' || github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && hashFiles('scripts/ci_dev_reuse.py') != '')
         uses: actions/create-github-app-token@v3.2.0
         with:
           client-id: ${{ secrets.TCC_CI_CLIENT_ID }}
@@ -579,7 +580,7 @@ jobs:
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           EVENT: ${{ github.event_name }}
           CI_SELECT_REPOSITORY: ${{ github.repository }}
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token || github.token }}
         run: |
           if [[ "$EVENT" != pull_request || ! -f "$RUNNER_TEMP/grader/scripts/ci_select.py" ]]; then
             printf 'scope=full\nlegs=[]\ncount=0\n' >> "$GITHUB_OUTPUT"
@@ -592,7 +593,7 @@ jobs:
           cd "$RUNNER_TEMP/grader"
           set -o pipefail
           mkdir -p "$RUNNER_TEMP/selection"
-          python -m scripts.ci_select --root "$GITHUB_WORKSPACE" --base "$BASE" --head "$HEAD_SHA" --event "$EVENT" --legs 12 --durations "${durations[@]}" | tee "$RUNNER_TEMP/selection/selection.txt"
+          "$RUNNER_TEMP/provenance-python/bin/python" -m scripts.ci_select --root "$GITHUB_WORKSPACE" --base "$BASE" --head "$HEAD_SHA" --event "$EVENT" --legs 12 --durations "${durations[@]}" | tee "$RUNNER_TEMP/selection/selection.txt"
 
       # Job outputs are protected, so each leg reads its files from this artifact.
       - name: Upload the selected legs
