@@ -11,11 +11,11 @@ NAME = "node-caps"
 EDITS = frozenset({"Edit", "Write", "MultiEdit"})
 POOL_MAXIMUM = re.compile(r"--nodes=\d+:(\d+):(\S+)")
 NAMED_CAP = re.compile(
-    r"\b(maxRunners|max_nodes|maxSize|max_size|max-size|max_node_count)\b[\"']?\s*[:=]\s*(\d+)\s*$", re.M
+    r"\b(maxRunners|max_nodes|maxSize|max_size|max-size|max_node_count)\b[\"']?\s*[:=]\s*(\d+)\s*(?:,|#.*)?$", re.M
 )
 RESIZE = re.compile(
     r"instance-pool\s+update\b.*--size\b|\bnode-?(?:pool|group)s?\b.*(?:--max|--size|--nodes|scale\b|resize\b)"
-    r"|\bscale\s+node-?group\b|\b(?:patch|set)\b.*maxRunners"
+    r"|\bscale\s+node-?group\b|\b(?:patch|set)\b.*maxRunners|--scaling-config\b.*maxSize=|\bresize\b.*--node-pool\b"
 )
 RESIZE_COMMAND = "a node pool resize command"
 

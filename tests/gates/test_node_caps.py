@@ -1,9 +1,8 @@
 import io
 import json
 
-from scripts.gates.node_caps import NodeCaps, raises, refusal, resizes
-
 from scripts.gates import Call, Gate, Who, entry, modes
+from scripts.gates.node_caps import NodeCaps, raises, refusal, resizes
 
 ME = Who(name="engineer@1-1", swarm="demo", lane="eng", task="t1")
 AUTOSCALER = "            - --nodes=0:15:$(OCI_INSTANCE_POOL_ID)\n            - --nodes=2:8:$(OCI_SWARM_POOL_ID)\n"
@@ -37,13 +36,18 @@ def test_runner_and_pool_size_keys_are_compared_as_integers():
     assert raises("  max_nodes: 0\n", "  max_nodes: 4\n") == ["max_nodes 0 to 4"]
     assert raises("maxSize: 8Gi\n", "maxSize: 16Gi\n") == []
     assert raises("max_size = 3\n", "max_size = 5\n") == ["max_size 3 to 5"]
+    assert raises('{"maxRunners": 30,\n', '{"maxRunners": 40,\n') == ["maxRunners 30 to 40"]
+    assert raises("max_nodes: 2  # cap\n", "max_nodes: 9  # cap\n") == ["max_nodes 2 to 9"]
 
 
 def test_node_pool_resize_commands_are_recognised():
     assert resizes("oci compute-management instance-pool update --instance-pool-id x --size 20")
     assert resizes("eksctl scale nodegroup --cluster c --name n --nodes-max 9")
     assert resizes('kubectl patch autoscalingrunnerset anton-oss-batch --type merge -p \'{"spec":{"maxRunners":40}}\'')
+    assert resizes("aws eks update-nodegroup-config --cluster c --scaling-config minSize=1,maxSize=9")
+    assert resizes("gcloud container clusters resize c --node-pool p --num-nodes 9")
     assert not resizes("oci compute-management instance-pool get --instance-pool-id x")
+    assert not resizes("grep maxRunners values.yaml")
     assert not resizes("kubectl get nodes")
 
 
@@ -87,4 +91,17 @@ def test_a_resize_command_is_logged_and_let_through_in_log_only_mode(tmp_path, m
     assert entry.main(["node-caps"], io.StringIO(payload), environ, tmp_path) == 0
     assert [(r["gate"], r["kind"], r["reason"]) for r in rows(tmp_path)] == [
         ("node-caps", "observe", refusal(["a node pool resize command"]))
+    ]
+
+
+def test_an_edit_raise_is_logged_and_let_through_in_log_only_mode(tmp_path, monkeypatch):
+    monkeypatch.setattr(modes, "swarm_gates", lambda swarm, environ: {})
+    target = tmp_path / "values.yaml"
+    target.write_text("maxRunners: 24\n")
+    environ = {"AGENTIHOOKS_SWARM": "demo", "AGENTIHOOKS_AGENT_NAME": ME.name, "AGENTIHOOKS_SWARM_TASK": "t1"}
+    edit = {"file_path": str(target), "old_string": "24", "new_string": "40"}
+    payload = json.dumps({"tool_name": "Edit", "tool_input": edit})
+    assert entry.main(["node-caps"], io.StringIO(payload), environ, tmp_path) == 0
+    assert [(r["gate"], r["kind"], r["reason"]) for r in rows(tmp_path)] == [
+        ("node-caps", "observe", refusal(["maxRunners 24 to 40"]))
     ]

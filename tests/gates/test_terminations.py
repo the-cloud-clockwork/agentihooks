@@ -1,12 +1,13 @@
 import io
 import json
 
-from scripts.gates.terminations import REFUSAL, Terminations, terminates
+import pytest
 
 from scripts.gates import Call, Gate, Who, entry, modes
+from scripts.gates.terminations import REFUSAL, Terminations, terminates
 
-MASTER = Who(name="master@1-1", swarm="demo", lane="master")
-ENGINEER = Who(name="engineer@1-1", swarm="demo", lane="eng", task="t1")
+MASTER = Who(name="master@323133-0318", swarm="demo", lane="master")
+ENGINEER = Who(name="engineer@323133-3191", swarm="demo", lane="eng", task="t1")
 
 
 def rows(tmp_path):
@@ -50,9 +51,10 @@ def test_a_master_termination_is_a_would_be_deny_and_others_pass():
     assert gate.decide(bash("agentihooks terminate-agent --list"), MASTER, None).allowed
 
 
-def test_a_master_termination_is_logged_and_let_through_in_log_only_mode(tmp_path, monkeypatch):
+@pytest.mark.parametrize("command", ["pkill -f codex", "agentihooks terminate-agent engineer-a"])
+def test_a_master_termination_is_logged_and_let_through_in_log_only_mode(tmp_path, monkeypatch, command):
     monkeypatch.setattr(modes, "swarm_gates", lambda swarm, environ: {})
     environ = {"AGENTIHOOKS_SWARM": "demo", "AGENTIHOOKS_AGENT_NAME": MASTER.name}
-    payload = json.dumps({"tool_name": "Bash", "tool_input": {"command": "pkill -f codex"}})
+    payload = json.dumps({"tool_name": "Bash", "tool_input": {"command": command}})
     assert entry.main(["terminations"], io.StringIO(payload), environ, tmp_path) == 0
     assert [(r["gate"], r["kind"], r["reason"]) for r in rows(tmp_path)] == [("terminations", "observe", REFUSAL)]

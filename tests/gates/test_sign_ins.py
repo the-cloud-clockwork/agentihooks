@@ -1,9 +1,10 @@
 import io
 import json
 
-from scripts.gates.sign_ins import SignIns, refusal, sign_in
+import pytest
 
 from scripts.gates import Call, Gate, Who, entry, modes
+from scripts.gates.sign_ins import ELEMENT, SignIns, refusal, sign_in
 
 ME = Who(name="engineer@1-1", swarm="demo", lane="eng", task="t1")
 EXT = "mcp__playwright-ext-account__"
@@ -24,14 +25,15 @@ def test_it_is_a_gate_that_ships_log_only():
 
 def test_it_matches_playwright_tools_only():
     gate = SignIns()
-    assert [
-        gate.matches(Call(tool)) for tool in (EXT + "browser_click", CMD + "browser_navigate", "mcp__serena__x", "Bash")
-    ] == [
-        True,
-        True,
-        False,
-        False,
-    ]
+    tools = (
+        EXT + "browser_click",
+        CMD + "browser_navigate",
+        "mcp__plugin_playwright_playwright__browser_navigate",
+        "mcp__serena__playwright",
+        "playwright__browser_click",
+        "Bash",
+    )
+    assert [gate.matches(Call(tool)) for tool in tools] == [True, True, True, False, False, False]
 
 
 def test_sign_in_pages_are_named():
@@ -55,6 +57,8 @@ def test_password_sign_in_and_captcha_elements_are_named():
     }
     assert sign_in(EXT + "browser_fill_form", form) != ""
     assert sign_in(EXT + "browser_click", {"element": "Approve plan button", "ref": "e2"}) == ""
+    assert sign_in(EXT + "browser_click", {"element": "Design in progress tab", "ref": "e5"}) == ""
+    assert sign_in(EXT + "browser_click", {"element": "Catalog in sidebar", "ref": "e6"}) == ""
     assert sign_in(EXT + "browser_take_screenshot", {"element": "Sign in panel"}) == ""
 
 
@@ -64,11 +68,16 @@ def test_a_sign_in_is_a_would_be_deny():
     assert (decision.allowed, decision.reason) == (False, refusal("a password, sign in or CAPTCHA element"))
 
 
-def test_a_sign_in_is_logged_and_let_through_in_log_only_mode(tmp_path, monkeypatch):
+@pytest.mark.parametrize(
+    "tool,tool_input,what",
+    [
+        (CMD + "browser_navigate", {"url": "https://example.com/signin"}, "a sign in page"),
+        (EXT + "browser_type", {"element": "Password", "ref": "e2", "text": "x"}, ELEMENT),
+    ],
+)
+def test_a_sign_in_is_logged_and_let_through_in_log_only_mode(tmp_path, monkeypatch, tool, tool_input, what):
     monkeypatch.setattr(modes, "swarm_gates", lambda swarm, environ: {})
     environ = {"AGENTIHOOKS_SWARM": "demo", "AGENTIHOOKS_AGENT_NAME": ME.name, "AGENTIHOOKS_SWARM_TASK": "t1"}
-    payload = json.dumps({"tool_name": CMD + "browser_navigate", "tool_input": {"url": "https://example.com/signin"}})
+    payload = json.dumps({"tool_name": tool, "tool_input": tool_input})
     assert entry.main(["sign-ins"], io.StringIO(payload), environ, tmp_path) == 0
-    assert [(r["gate"], r["kind"], r["reason"]) for r in rows(tmp_path)] == [
-        ("sign-ins", "observe", refusal("a sign in page"))
-    ]
+    assert [(r["gate"], r["kind"], r["reason"]) for r in rows(tmp_path)] == [("sign-ins", "observe", refusal(what))]

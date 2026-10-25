@@ -5,14 +5,14 @@ import re
 from scripts.gates.base import Decision
 
 NAME = "sign-ins"
-PLAYWRIGHT = "mcp__playwright"
+PLAYWRIGHT = "playwright"
 PAGE = "a sign in page"
 ELEMENT = "a password, sign in or CAPTCHA element"
 SIGN_IN_URL = re.compile(
     r"accounts\.google\.com|login\.microsoftonline|/(?:log-?in|sign-?in|sign_in|oauth2?|authorize|sso)\b", re.I
 )
 SIGN_IN_ELEMENT = re.compile(
-    r"password|passcode|sign[ -]?in|log[ -]?in|captcha|not a robot|one[ -]time code|verification code", re.I
+    r"\b(?:password|passcode|sign[ -]?in|log[ -]?in|captcha|not a robot|one[ -]time code|verification code)\b", re.I
 )
 INTERACTIONS = frozenset(
     {"browser_type", "browser_click", "browser_fill_form", "browser_press_key", "browser_select_option"}
@@ -47,7 +47,8 @@ class SignIns:
     default_mode = "observe"
 
     def matches(self, call):
-        return call.tool.lower().startswith(PLAYWRIGHT)
+        server = call.tool.lower().partition("mcp__")[2].partition("__")[0]
+        return call.tool.lower().startswith("mcp__") and PLAYWRIGHT in server
 
     def decide(self, call, who, state):
         found = sign_in(call.tool, call.tool_input)
