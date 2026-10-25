@@ -74,6 +74,26 @@ def test_a_source_change_selects_the_tests_that_import_it(repo):
     assert decide(repo, ["hooks/sample.py"]) == ("selected", [["tests/test_sample.py"]])
 
 
+def test_a_source_change_selects_recorded_runtime_dependents(repo):
+    write(
+        repo,
+        {
+            "hooks/runtime.py": "from hooks.sample import VALUE\nDEADLINE = VALUE + 1\n",
+            "tests/test_runtime.py": "from hooks.runtime import DEADLINE\n",
+        },
+    )
+    manifest = {
+        "units": ["hooks/sample.py::<module>", "hooks/runtime.py::<module>"],
+        "tests": {
+            "tests/test_runtime.py::test_deadline": {"units": [0, 1]},
+            "tests/test_other.py::test_unrelated": {"units": [1]},
+        },
+    }
+    scope, legs = ci_select.decide(repo, ["hooks/sample.py"], {}, 3, manifest=manifest)
+    assert scope == "selected"
+    assert {path for leg in legs for path in leg} == {"tests/test_sample.py", "tests/test_runtime.py"}
+
+
 def test_a_changed_test_file_selects_itself(repo):
     assert decide(repo, ["tests/test_other.py"]) == ("selected", [["tests/test_other.py"]])
 
