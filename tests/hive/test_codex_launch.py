@@ -135,3 +135,15 @@ def test_auto_lane_keeps_the_codex_wait_when_claude_has_no_room_either(setup):
 
     assert isinstance(selected, Wait)
     assert selected.reason == "no hive for eng advertises the codex slot codex-account"
+
+
+def test_auto_lane_falls_back_to_claude_when_the_planned_codex_account_is_full(setup):
+    _unadvertised_codex(setup)
+    setup.herdr._quota_accounts[1] = replace(setup.herdr._quota_accounts[1], sessions=6)
+    write_hive(
+        setup, slots=[*setup.hive["slots"], {"harness": "codex", "account": "codex-account", "kind": "subscription"}]
+    )
+
+    selected = setup.launcher.select(setup.config, "eng", {"id": "task"})
+
+    assert (selected.account.harness, selected.account.name, selected.hive) == ("claude", "account", "remote")
