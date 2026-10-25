@@ -3,6 +3,7 @@ import hashlib
 import json
 import os
 import subprocess
+import time
 from pathlib import Path
 
 from hooks._async import fork_and_call
@@ -12,10 +13,14 @@ from hooks.context import documentation, documentation_evidence
 from scripts.swarm.ledger_client import LedgerClient
 from scripts.swarm_ledger import ledger_rank
 
-TERMINAL = {"queued", "complete"}
+TERMINAL = {"queued", "complete", "abandoned"}
 
 
 WORKER_OPTIONS = {"timeout_sec": 180, "task_name": "documentation-session-end"}
+RETRY_OPTIONS = {"timeout_sec": 180, "task_name": "documentation-retry"}
+RETRY_DELAYS_S = (300, 900, 1800, 3600, 7200)
+RETRY_LOCK = "retry.lock"
+UNDECIDED = "classifier undecided"
 NO_CHANGES = {"needs_documentation": False, "size": "none", "source": "no changes"}
 UNKNOWN_TASK = {"needs_documentation": False, "size": "none", "source": "no ledger task"}
 TASK_DEFAULTS = {
@@ -110,7 +115,7 @@ def end(payload: dict) -> None:
             if row["status"] in TERMINAL:
                 return
             if row["status"] == "active":
-                row["status"] = "pending"
+                row.update(status="pending", retry_at=time.time() + WORKER_OPTIONS["timeout_sec"])
                 _write(path, row)
         fork_and_call(process_pending, path, **WORKER_OPTIONS)
     except (OSError, ValueError) as exc:
@@ -171,6 +176,7 @@ def _finish(path: Path, row: dict) -> None:
     row.update(verdict=verdict)
     log("documentation verdict", {"session": row["session"], **verdict})
     if verdict["needs_documentation"] is None:
+        row["reason"] = UNDECIDED
         _write(path, row)
         return
     row["status"] = "complete"
@@ -182,32 +188,60 @@ def _finish(path: Path, row: dict) -> None:
     _write(path, row)
 
 
-def process(path: Path) -> None:
+def process(path: Path, now: float | None = None) -> None:
     path = Path(path)
     with path.with_suffix(LOCK_SUFFIX).open("w") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
         row = json.loads(path.read_text())
-        if row["status"] != "pending":
+        if row["status"] != "pending" or (now is not None and row.get("retry_at", 0) > now):
             return
-        path.touch()
+        attempts = row.get("attempts", 0) + 1
+        if attempts > len(RETRY_DELAYS_S):
+            outcome = f"gave up after {len(RETRY_DELAYS_S)} attempts: {row.get('reason', 'unknown')}"
+            row.update(status="abandoned", outcome=outcome)
+            _write(path, row)
+            log("documentation request abandoned", {"outcome": outcome, "session": row["session"]})
+            return
+        row.update(attempts=attempts, retry_at=time.time() + RETRY_DELAYS_S[attempts - 1])
+        _write(path, row)
         try:
             _finish(path, row)
         except Exception as exc:
-            row.update(status="pending", error=type(exc).__name__)
+            row.update(status="pending", error=type(exc).__name__, reason=type(exc).__name__)
             _write(path, row)
             log("documentation request retained", {"error": type(exc).__name__, "session": row["session"]})
 
 
 def process_pending(path: Path) -> None:
     process(path)
-    current = json.loads(path.read_text())
+    retry_pending(json.loads(path.read_text())["swarm"], path)
+
+
+def retry_pending(swarm: str | None = None, skip: Path | None = None) -> None:
+    now = time.time()
     retried = 0
-    for pending in sorted(path.parent.glob("*.json"), key=lambda item: (item.stat().st_mtime_ns, item.name)):
-        if pending == path:
+    for pending in sorted(
+        (HOME / "documentation").glob("*.json"), key=lambda item: (item.stat().st_mtime_ns, item.name)
+    ):
+        if pending == skip:
             continue
         row = json.loads(pending.read_text())
-        if row["swarm"] == current["swarm"] and row["status"] == "pending":
-            process(pending)
+        if row["status"] == "pending" and swarm in (None, row["swarm"]) and row.get("retry_at", 0) <= now:
+            process(pending, now)
             retried += 1
             if retried == RETRY_LIMIT:
                 break
+
+
+def retry() -> None:
+    with (HOME / "documentation" / RETRY_LOCK).open("w") as lock:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            return
+        retry_pending()
+
+
+def schedule_retry() -> None:
+    if (HOME / "documentation").is_dir():
+        fork_and_call(retry, **RETRY_OPTIONS)

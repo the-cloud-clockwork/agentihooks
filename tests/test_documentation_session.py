@@ -235,6 +235,8 @@ def test_an_unchanged_session_records_no_documentation_need(tmp_path, monkeypatc
 
 def test_pending_retries_rotate_past_three_retained_requests(world, monkeypatch):
     root, payload, ledger, jobs = world
+    clock = Clock()
+    monkeypatch.setattr(documentation_session, "time", clock)
     monkeypatch.setattr(documentation.runner, "decide", answer(0.05))
     documentation_session.end(payload)
     fn, args = jobs.pop()
@@ -252,6 +254,7 @@ def test_pending_retries_rotate_past_three_retained_requests(world, monkeypatch)
         return next(decisions, answer(0.5))(*args, **kwargs)
 
     monkeypatch.setattr(documentation.runner, "decide", decide)
+    clock.at += documentation_session.WORKER_OPTIONS["timeout_sec"]
     fn(*args)
     assert ledger.added == []
     fn(*args)
