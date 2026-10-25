@@ -2,9 +2,17 @@ import json
 
 import ledger
 import ledger_core as core
+import ledger_priorities
 import pytest
 
 from tests.swarm_ledger.test_priorities import SLUG, add, make_ledger
+
+
+def test_nothing_to_clear_is_a_noop_refusal_but_an_already_cleared_one_is_not():
+    assert ledger_priorities.is_noop_refusal("No priority waits on tasks/t1 to clear.")
+    assert not ledger_priorities.is_noop_refusal(
+        "The priority on tasks/t1 is already cleared and returns only when its ask changes."
+    )
 
 
 def test_clear_by_item_removes_only_its_priority():

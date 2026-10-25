@@ -36,7 +36,7 @@ def test_escalation_to_the_master_and_operator_waits_out_the_outage(inbox):
     outage.observe("sw", "redis", [], start + 5 * W)
     assert run(inbox, herdr, ledger, start + 5 * W) == []
     run(inbox, herdr, ledger, start + 5 * W + 1)
-    assert events(inbox, item.id) == ["escalated_master"] and ledger.followups == []
+    assert events(inbox, item.id) == ["escalated_master"] and ledger.alerts == []
 
 
 def test_an_outage_withdraws_no_message_whose_recipient_stops_resolving(inbox, monkeypatch):

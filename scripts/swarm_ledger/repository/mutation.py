@@ -31,6 +31,8 @@ def apply(slug, state, core, changes=None, ops=None, gate=None, created=False):
             rejected.append(op["id"])
         doc.setdefault("alerts", [])
         for text in ctx.refused[start:]:
+            if ledger_priorities.is_noop_refusal(text):
+                continue
             warning = (ledger_alerts.SYNC, text, ledger_alerts.writer(op, ctx), ledger_alerts.item(op))
             raised.append(warning)
             ledger_alerts.raise_warning(doc, ctx, warning, [])

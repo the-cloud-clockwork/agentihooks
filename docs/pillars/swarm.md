@@ -5898,16 +5898,16 @@ no record of earlier pushes.
 Unread work climbs the inbox wake ladder without sending an escalation back to
 its own sender. When the next rung is the master, the tick checks the sender's
 name and recorded master seat membership. A message from the current master or
-an earlier occupant of that master seat skips that rung and goes directly to an
-operator follow up on the ledger, flagged as needing the operator. A normal
-agent's unread message still escalates to its master.
+an earlier occupant of that master seat skips that rung and goes directly to a
+ledger alert any master or agent can claim. A normal agent's unread message
+still escalates to its master.
 
 | Sender and unread receiver | Next escalation |
 |---|---|
-| Current master to a session with no typed wake | Operator follow up; no escalation item to the master |
-| Earlier occupant of the current master's seat to a session with no typed wake | Operator follow up; no escalation item back to that seat |
-| Agent to a session with no typed wake | Master seat, or master name when it has no seat; operator follow up after another retry window if the original remains pending |
-| Work with no available master, or unread work already addressed to the master | Operator follow up when escalation is due |
+| Current master to a session with no typed wake | A claimable ledger alert; no escalation item to the master |
+| Earlier occupant of the current master's seat to a session with no typed wake | A claimable ledger alert; no escalation item back to that seat |
+| Agent to a session with no typed wake | Master seat, or master name when it has no seat; a claimable ledger alert after another retry window if the original remains pending |
+| Work with no available master, or unread work already addressed to the master | A claimable ledger alert when escalation is due |
 
 The sender is recorded automatically by `agentihooks msg send`; it is the
 session's `AGENTIHOOKS_AGENT_NAME`, falling back to its session identity. There
@@ -5923,9 +5923,9 @@ agentihooks msg send <receiver-name> "Review the open pull request and reply wit
 ```
 
 If this runs in a master session and the receiver has no typed wake, an unread
-request reaches the operator at the first due escalation instead of coming
-back as work for that master. The same request from an engineer still reaches
-the master first. Use `--fyi` only for information requiring no action: FYI items
+request raises a ledger alert any master or agent can claim at the first due
+escalation instead of coming back as work for that master. The same request
+from an engineer still reaches the master first. Use `--fyi` only for information requiring no action: FYI items
 do not enter this escalation ladder.
 
 | Setting | Default | Effect |
@@ -5964,10 +5964,11 @@ agentihooks msg read <message-id>
 The inbox listing is read only. `msg read` records receipt as read, so use it
 when taking responsibility for the item; receipt leaves the work open. Its
 history distinguishes `escalated_master` from `escalated_operator`. The master
-step names the raised item and its destination; the operator step records that
-it was shown on the ledger page. Check the ledger's operator follow ups for the
-request itself. An operator escalation records the step without closing the
-original work item. After handling it, reply or close it with an outcome:
+step names the raised item and its destination; the final step records that it
+was raised as a claimable alert on the ledger page. Check the ledger's open
+alerts for the request itself. That step records the escalation without
+closing the original work item. After handling it, reply or close it with an
+outcome:
 
 ```bash
 agentihooks msg reply <message-id> "Reviewed the pull request; the requested correction is complete."

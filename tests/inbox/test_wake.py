@@ -25,11 +25,10 @@ class FakeHerdr:
 
 class FakeLedger:
     def __init__(self):
-        self.followups, self.flagged = [], []
+        self.alerts = []
 
-    def followup(self, slug, text, needs_operator=False):
-        self.followups.append((slug, text))
-        self.flagged.append(needs_operator)
+    def raise_alert(self, slug, source, text):
+        self.alerts.append((slug, source, text))
 
 
 AGENTS = [
@@ -221,7 +220,7 @@ def test_a_pane_that_is_not_idle_is_never_typed_into_and_escalates_after_one_win
     assert herdr.prompts == []
     (raised,) = inbox.inbox(MASTER_NAME)
     assert item.id in raised.text and "review my diff" in raised.text
-    assert events(inbox, item.id) == ["escalated_master", "escalated_operator"] and len(ledger.followups) == 1
+    assert events(inbox, item.id) == ["escalated_master", "escalated_operator"] and len(ledger.alerts) == 1
 
 
 @pytest.mark.parametrize("sender", ["swarm", "sw-eng-2"])
@@ -239,7 +238,7 @@ def test_actionable_notices_escalate_without_typing_into_a_busy_pane(inbox, send
     run(inbox, herdr, ledger, sent_at(item) + 2 * W)
     assert events(inbox, item.id) == ["escalated_master", "escalated_operator"]
     assert events(inbox, raised.id) == []
-    assert len(ledger.followups) == 1
+    assert len(ledger.alerts) == 1
     assert herdr.prompts == []
 
 
@@ -279,7 +278,7 @@ def test_retries_stop_at_three_then_the_master_gets_an_item(inbox):
     (raised,) = inbox.inbox(MASTER_NAME)
     assert raised.state == "pending" and "sw-eng-1" in raised.text and "review my diff" in raised.text
     assert events(inbox, item.id) == ["woken", "woken", "woken", "escalated_master"]
-    assert ledger.followups == []
+    assert ledger.alerts == []
 
 
 def test_the_operator_notification_follows_the_next_window(inbox):
@@ -289,12 +288,12 @@ def test_the_operator_notification_follows_the_next_window(inbox):
     for n in range(4):
         run(inbox, herdr, ledger, t + n * W)
     run(inbox, herdr, ledger, t + 4 * W - 1)
-    assert ledger.followups == []
+    assert ledger.alerts == []
     run(inbox, herdr, ledger, t + 4 * W)
     run(inbox, herdr, ledger, t + 9 * W)
-    assert len(ledger.followups) == 1
-    slug, text = ledger.followups[0]
-    assert slug == "sw" and "sw-eng-1" in text and "review my diff" in text
+    assert len(ledger.alerts) == 1
+    slug, source, text = ledger.alerts[0]
+    assert slug == "sw" and source == "inbox" and "sw-eng-1" in text and "review my diff" in text
     assert events(inbox, item.id)[-2:] == ["escalated_master", "escalated_operator"]
 
 
@@ -307,7 +306,7 @@ def test_the_operator_notification_is_text_the_ledger_accepts_whatever_the_messa
     t = sent_at(item)
     for n in range(10):
         run(inbox, herdr, ledger, t + n * W)
-    [(_, text)] = ledger.followups
+    [(_, _, text)] = ledger.alerts
     assert ledger_comments.problems(text, "item") == [] and "sw-eng-1" in text
 
 
@@ -317,7 +316,7 @@ def test_an_unread_fyi_is_never_escalated(inbox, address):
     herdr, ledger = FakeHerdr({"p1": "idle", "pm": "idle"}), FakeLedger()
     for n in range(12):
         run(inbox, herdr, ledger, sent_at(item) + n * W)
-    assert ledger.followups == [] and [i.id for i in inbox.inbox(MASTER_NAME) if i.id != item.id] == []
+    assert ledger.alerts == [] and [i.id for i in inbox.inbox(MASTER_NAME) if i.id != item.id] == []
     assert "escalated_master" not in events(inbox, item.id)
 
 
@@ -326,7 +325,7 @@ def test_an_unread_fyi_for_a_stopped_swarm_master_never_becomes_a_followup(inbox
     herdr, ledger = FakeHerdr({}), FakeLedger()
     for n in range(12):
         run(inbox, herdr, ledger, sent_at(item) + n * W, agents=[])
-    assert ledger.followups == [] and events(inbox, item.id) == []
+    assert ledger.alerts == [] and events(inbox, item.id) == []
 
 
 def test_a_refused_operator_notification_closes_that_item_and_the_pass_goes_on(inbox, monkeypatch):
@@ -337,10 +336,10 @@ def test_a_refused_operator_notification_closes_that_item_and_the_pass_goes_on(i
     )
 
     class StrictLedger(FakeLedger):
-        def followup(self, slug, text, needs_operator=False):
+        def raise_alert(self, slug, source, text):
             if "first" in text:
                 raise SwarmError("ledger sw refused: item refused: date '2026-10-05'")
-            super().followup(slug, text, needs_operator)
+            super().raise_alert(slug, source, text)
 
     first = inbox.send("sw-eng-2", "sw-eng-1", "first message")
     second = inbox.send("sw-eng-2", "sw-eng-1", "second message")
@@ -348,7 +347,7 @@ def test_a_refused_operator_notification_closes_that_item_and_the_pass_goes_on(i
     t = sent_at(second)
     for n in range(10):
         run(inbox, herdr, ledger, t + n * W)
-    assert [text for _, text in ledger.followups if "second message" in text]
+    assert [text for _, _, text in ledger.alerts if "second message" in text]
     closed = inbox.get(first.id)
     assert closed.state == "cancelled" and "refused" in closed.reason and "date" in closed.reason
     assert any(first.id in i.text and "date" in i.text for i in inbox.pending_items("sw-eng-2"))
@@ -375,7 +374,7 @@ def test_a_confirmed_or_closed_item_is_never_woken(inbox):
     herdr, ledger = FakeHerdr({"p1": "idle"}), FakeLedger()
     for n in range(8):
         run(inbox, herdr, ledger, sent_at(delivered) + n * W)
-    assert herdr.prompts == [] and ledger.followups == [] and inbox.inbox(MASTER_NAME) == []
+    assert herdr.prompts == [] and ledger.alerts == [] and inbox.inbox(MASTER_NAME) == []
 
 
 def test_a_session_outside_herdr_gets_no_wake_and_goes_straight_to_escalation(inbox, monkeypatch):
@@ -389,7 +388,7 @@ def test_a_session_outside_herdr_gets_no_wake_and_goes_straight_to_escalation(in
     assert inbox.inbox(MASTER_NAME) == []
     run(inbox, herdr, ledger, t + W)
     run(inbox, herdr, ledger, t + 2 * W)
-    assert herdr.prompts == [] and len(inbox.inbox(MASTER_NAME)) == 1 and len(ledger.followups) == 1
+    assert herdr.prompts == [] and len(inbox.inbox(MASTER_NAME)) == 1 and len(ledger.alerts) == 1
 
 
 def test_an_item_for_the_master_skips_straight_to_the_operator(inbox):
@@ -398,17 +397,17 @@ def test_an_item_for_the_master_skips_straight_to_the_operator(inbox):
     t = sent_at(item)
     for n in range(4):
         run(inbox, herdr, ledger, t + n * W)
-    assert herdr.prompts == [] and len(inbox.inbox(MASTER_NAME)) == 1 and len(ledger.followups) == 1
+    assert herdr.prompts == [] and len(inbox.inbox(MASTER_NAME)) == 1 and len(ledger.alerts) == 1
     assert events(inbox, item.id) == ["escalated_operator"]
 
 
 @pytest.mark.parametrize("address", ["sw-eng-1", MASTER_NAME])
-def test_the_operator_follow_up_is_flagged_for_the_operator(inbox, address):
+def test_the_final_escalation_raises_a_claimable_inbox_alert(inbox, address):
     item = inbox.send("sw-eng-2", address, "check the plan")
     herdr, ledger = FakeHerdr({"p1": "working", "pm": "idle"}), FakeLedger()
     for n in range(6):
         run(inbox, herdr, ledger, sent_at(item) + n * W)
-    assert len(ledger.followups) == 1 and ledger.flagged == [True]
+    assert len(ledger.alerts) == 1 and ledger.alerts[0][1] == "inbox"
 
 
 @pytest.mark.parametrize("harness", ["", "claude", "codex"])
@@ -460,7 +459,7 @@ def test_items_outside_the_swarm_are_left_alone(inbox, monkeypatch):
     herdr, ledger = FakeHerdr({}), FakeLedger()
     for n in range(6):
         run(inbox, herdr, ledger, sent_at(item) + n * W)
-    assert events(inbox, item.id) == [] and ledger.followups == []
+    assert events(inbox, item.id) == [] and ledger.alerts == []
 
 
 def test_a_herdr_failure_records_no_wake(inbox):
@@ -493,7 +492,7 @@ def no_wake_session(monkeypatch):
 
 def assert_raised_to_the_operator_only(inbox, item, ledger):
     assert inbox.inbox("master@sw") == [] and inbox.inbox(MASTER_NAME) == []
-    assert events(inbox, item.id) == ["escalated_operator"] and len(ledger.followups) == 1
+    assert events(inbox, item.id) == ["escalated_operator"] and len(ledger.alerts) == 1
 
 
 @pytest.mark.parametrize("agents", [AGENTS, SEATED], ids=["unseated", "seat never occupied"])
@@ -524,7 +523,7 @@ def test_an_agent_message_nobody_reads_still_goes_to_its_master_seat(inbox, monk
     ledger = FakeLedger()
     run(inbox, FakeHerdr({}), ledger, sent_at(item) + W, SEATED)
     [raised] = inbox.inbox("master@sw")
-    assert item.id in raised.text and events(inbox, item.id) == ["escalated_master"] and ledger.followups == []
+    assert item.id in raised.text and events(inbox, item.id) == ["escalated_master"] and ledger.alerts == []
 
 
 def test_an_item_for_a_seat_wakes_the_pane_of_its_occupant(inbox):
@@ -571,7 +570,7 @@ def test_seat_mail_waits_for_the_successor_and_its_window_starts_at_binding(inbo
     herdr, ledger = FakeHerdr({}), FakeLedger()
     for n in range(1, 30):
         run(inbox, herdr, ledger, sent_at(item) + n * W, waiting)
-    assert events(inbox, item.id) == [] and inbox.inbox("master@sw") == [] and ledger.followups == []
+    assert events(inbox, item.id) == [] and inbox.inbox("master@sw") == [] and ledger.alerts == []
     bound = sent_at(item) + 30 * W
     inbox.seats.occupy("eng-1@sw", "sw-eng-1", at=bound)
     run(inbox, herdr, ledger, bound + W - 1, SEATED)
@@ -586,13 +585,13 @@ def test_master_seat_mail_waits_for_the_next_master(inbox):
     herdr, ledger = FakeHerdr({}), FakeLedger()
     for n in range(1, 10):
         run(inbox, herdr, ledger, sent_at(item) + n * W, SEATED[:2])
-    assert events(inbox, item.id) == [] and ledger.followups == []
+    assert events(inbox, item.id) == [] and ledger.alerts == []
     bound = sent_at(item) + 10 * W
     inbox.seats.occupy("master@sw", MASTER_NAME, at=bound)
     run(inbox, herdr, ledger, bound + W - 1, SEATED)
-    assert ledger.followups == []
+    assert ledger.alerts == []
     run(inbox, herdr, ledger, bound + W, SEATED)
-    assert events(inbox, item.id) == ["escalated_operator"] and len(ledger.followups) == 1
+    assert events(inbox, item.id) == ["escalated_operator"] and len(ledger.alerts) == 1
 
 
 def test_master_seat_mail_on_a_stopped_swarm_escalates_as_before(inbox):
@@ -605,7 +604,7 @@ def test_master_seat_mail_on_a_stopped_swarm_escalates_as_before(inbox):
     item = inbox.send("sw-eng-4", "master@sw", "check the plan")
     ledger = FakeLedger()
     run(inbox, FakeHerdr({}), ledger, sent_at(item) + W, SEATED[:2])
-    assert events(inbox, item.id) == ["escalated_operator"] and len(ledger.followups) == 1
+    assert events(inbox, item.id) == ["escalated_operator"] and len(ledger.alerts) == 1
 
 
 def test_seat_mail_to_a_live_occupant_escalates_after_one_window(inbox):
@@ -762,5 +761,5 @@ def test_fyi_seat_mail_waits_for_no_successor_and_gets_no_wake_after_binding(inb
     inbox.seats.occupy("eng-1@sw", "sw-eng-1", at=bound)
     for n in range(4):
         run(inbox, herdr, ledger, bound + n * W + 1, SEATED)
-    assert events(inbox, fyi.id) == [] and ledger.followups == []
+    assert events(inbox, fyi.id) == [] and ledger.alerts == []
     assert events(inbox, work.id)[0] == "woken"
