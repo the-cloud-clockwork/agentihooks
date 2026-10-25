@@ -651,12 +651,10 @@ def test_deleting_path_filters_with_a_new_job_or_workflow_key_loses_the_base_tru
 
 
 def test_deleting_the_only_pull_request_filter_keeps_the_base_trusted(tmp_path, monkeypatch):
-    baseline = _workflow()
-    baseline["on"] = {"pull_request": {"paths": ["scripts/**"]}}
-    updated = _workflow()
-    updated["on"] = {"pull_request": None}
-    base, head, sha = _repo(tmp_path, {"replay.yml": updated})
-    (base / lanes.WORKFLOWS / "replay.yml").write_text(yaml.safe_dump(baseline))
+    jobs = "jobs:\n  replay:\n    runs-on: x\n"
+    base, head, sha = _repo(tmp_path, {"replay.yml": f"name: Replay\non:\n  pull_request:\n{jobs}"})
+    baseline = f"name: Replay\non:\n  pull_request:\n    paths: [scripts/**]\n{jobs}"
+    (base / lanes.WORKFLOWS / "replay.yml").write_text(baseline)
     monkeypatch.chdir(head)
     assert lanes.refused(sha, base) == {}
 

@@ -82,8 +82,6 @@ def unfiltered(on: object) -> object:
 
 
 def deletes_path_filters(base: object, head: object) -> bool:
-    if unfiltered(base) != unfiltered(head):
-        return False
     old, new = (on.get("pull_request") if isinstance(on, dict) else None for on in (base, head))
     return not isinstance(new, dict) or all(
         key not in new or isinstance(old, dict) and old.get(key) == new[key] for key in PATH_FILTERS
