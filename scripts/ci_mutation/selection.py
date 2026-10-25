@@ -86,9 +86,24 @@ def keep_selected_tests(stats: dict[str, set[str]], tests_by_prefix: dict[str, s
     return kept
 
 
+def recorded_seconds(root: Path) -> dict[str, float]:
+    path = root / ".test_durations"
+    recorded = [json.loads(path.read_text())] if path.exists() else []
+    folder = Path(os.environ.get("MUTATION_STATS_CACHE", root / ".mutation-stats-cache"))
+    for path in folder.glob("*.json"):
+        record = json.loads(path.read_text())
+        if record["status"] == 0:
+            recorded.append(record["durations"])
+    durations = {}
+    for record in recorded:
+        for nodeid, seconds in record.items():
+            nodeid = re.sub(r"@[^\[\]]*$", "", nodeid)
+            durations[nodeid] = max(durations.get(nodeid, 0), seconds)
+    return durations
+
+
 def file_seconds(root: Path, files: list[str], *, split: bool = False) -> dict[str, float]:
-    durations = root / ".test_durations"
-    durations = json.loads(durations.read_text()) if durations.exists() else {}
+    durations = recorded_seconds(root)
     seconds = {} if split else dict.fromkeys(files, 0.01)
     by_file = {}
     for entry in files:

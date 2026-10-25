@@ -2776,6 +2776,16 @@ jobs:
         if: steps.reuse.outputs.reused != 'true'
         run: bash "$RUNNER_TEMP/workflow/.github/scripts/pypi-retry.sh" "Install dependencies" -- uv pip install --system "mutmut==3.6.0" "pytest>=8.0" "pyyaml>=6.0" "tomlkit>=0.12"
 
+      - name: Restore measured statistics timings
+        if: steps.reuse.outputs.reused != 'true'
+        uses: actions/cache/restore@v4
+        with:
+          path: .mutation-stats-cache
+          key: mutation-test-stats-v2-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            mutation-test-stats-v2-${{ runner.os }}-
+            mutation-test-stats-v1-${{ runner.os }}-
+
       - name: Size mutation shards from stored timings
         id: plan
         if: steps.reuse.outputs.reused != 'true'

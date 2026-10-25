@@ -239,7 +239,7 @@ def test_both_mutation_planners_restore_statistics_timings_before_sizing():
             "with": {
                 "path": ".mutation-stats-cache",
                 "key": "mutation-test-stats-v2-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}",
-                "restore-keys": "mutation-test-stats-v2-${{ runner.os }}-",
+                "restore-keys": "mutation-test-stats-v2-${{ runner.os }}-\nmutation-test-stats-v1-${{ runner.os }}-\n",
             },
         }
 
