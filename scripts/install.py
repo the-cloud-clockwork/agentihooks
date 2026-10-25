@@ -88,8 +88,11 @@ def _resolve_claude_home() -> Path:
 
 
 CLAUDE_HOME = _resolve_claude_home()
-ROUTE_LAUNCHERS = {"interactive": "scripts.routing.interactive", "master-login": "scripts.master_claude_login"}
-ROUTE_LAUNCHERS["claude-ai"] = "scripts.routing.claude_ai"
+ROUTE_LAUNCHERS = {
+    "interactive": "scripts.routing.interactive",
+    "master-login": "scripts.master_claude_login",
+    "claude-ai": "scripts.routing.claude_ai",
+}
 
 # Persistent state directory for user-level agentihooks configuration.
 # Overridable via AGENTIHOOKS_HOME for per-pod isolation on shared filesystems.
@@ -5444,12 +5447,9 @@ def _claude_command(claude_bin: str, extra_args: list[str]) -> list[str]:
 
 
 def cmd_claude(extra_args: list[str]) -> None:
-    import fcntl
-
     from hooks.context.account_sessions import sessions_by_account
     from scripts.claude_quota_balancer import (
         RoutingError,
-        _cache_path,
         forced,
         format_selection,
         launch_environment,
@@ -5458,6 +5458,7 @@ def cmd_claude(extra_args: list[str]) -> None:
         select_credential,
     )
     from scripts.hive.account_slots import execute
+    from scripts.master_claude_login import _token_lock
 
     fallback_flag = "--agentihooks-fallback-bare"
     fallback_bare = fallback_flag in extra_args
@@ -5480,13 +5481,11 @@ def cmd_claude(extra_args: list[str]) -> None:
         deps_ensure()
     except Exception as exc:  # noqa: BLE001 - a broken manifest must not stop a launch
         print(f"[agentihooks] deps: preflight skipped: {exc}", file=sys.stderr)
-    route_lock_path = _cache_path(os.environ).with_name("claude-route.lock")
-    route_lock_path.parent.mkdir(parents=True, exist_ok=True)
-    route_lock = route_lock_path.open("a+", encoding="utf-8")
-    fcntl.flock(route_lock, fcntl.LOCK_EX)
+    route_lock = _token_lock(os.environ)
     try:
         if route in ROUTE_LAUNCHERS:
-            route == "interactive" or route_lock.close()
+            if route != "interactive":
+                route_lock.close()
             return import_module(ROUTE_LAUNCHERS[route]).launch_claude(claude_bin, extra_args, os.environ, report)
         decision = (
             forced(os.environ, route)

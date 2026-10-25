@@ -164,8 +164,9 @@ whether or not `AGENTIHOOKS_MASTER_CLAUDE_LOGIN` is on.
   restored into its home first, unless a master holds that slot.
 - **Master slots stay free.** The session never writes the slot's claim, so a
   master launch takes the same slot as if the session were not there. It runs
-  in its own home, `$AGENTIHOOKS_HOME/claude-ai/<agent name>/claude` (or
-  `pid-<pid>` with no agent name), built from its rendered profile and carrying
+  in its own home, `$AGENTIHOOKS_HOME/claude-ai/<name>/claude`, where `<name>` is
+  the agent name as an account slug (`s-251025` becomes `s_251025`, and
+  `pid_<pid>` with no agent name), built from its rendered profile and carrying
   the slot's account. `CLAUDE_SECURESTORAGE_CONFIG_DIR` points at the slot
   home, so the grant is never copied: native Claude refreshes the one
   credential store every session on that login shares, and a rotated refresh

@@ -70,10 +70,10 @@ def _environ(rendered, **extra):
     return {"CLAUDE_CONFIG_DIR": str(rendered), "AGENTIHOOKS_AGENT_NAME": "s-251025", **extra}
 
 
-def _master_holds(number, pid=None):
+def _master_holds(number):
     folder = login.root(number)
     (folder / login.OWNER).write_text(
-        json.dumps({"holders": {"master@rig": pid or os.getpid()}, "epoch": 3, "alone": "master@rig"})
+        json.dumps({"holders": {"master@rig": os.getpid()}, "epoch": 3, "alone": "master@rig"})
     )
     return (folder / login.OWNER).read_bytes()
 
@@ -152,7 +152,7 @@ def test_the_session_shares_a_held_master_slot_without_claiming_it(rendered, mon
     assert report.read_text().splitlines() == ["status=routed", "account=nestor_coltatgmail_com", "placement=forced"]
 
 
-def test_a_master_launch_takes_the_slot_while_a_standalone_session_runs(rendered, monkeypatch, checked, executed):
+def test_a_master_claim_after_a_standalone_launch_takes_the_slot_alone(rendered, monkeypatch, checked, executed):
     _slot(1, PREFERRED)
     monkeypatch.setattr(master_logins, "left", lambda account, now: 50.0)
     claude_ai.launch_claude("/opt/claude", [], _environ(rendered), "")
@@ -229,7 +229,7 @@ def test_no_usable_login_refuses_with_every_reason_and_never_routes_a_token(rend
 def test_no_stored_login_refuses_naming_the_login_command(rendered, executed):
     from scripts.claude_quota_balancer import RoutingError
 
-    with pytest.raises(RoutingError, match=f"^{claude_ai.EMPTY}$"):
+    with pytest.raises(RoutingError, match="^no claude ai login is stored: run agentihooks claude login --master$"):
         claude_ai.launch_claude("/opt/claude", [], _environ(rendered), "")
     assert executed == []
 

@@ -1,4 +1,4 @@
-"""Standalone Claude sessions on the stored claude ai logins, sharing a slot's credential store without its master claim."""
+"""Standalone Claude sessions on the stored claude ai logins: a slot's credentials, never its claim."""
 
 import os
 import time
@@ -27,7 +27,7 @@ def _candidates(bao: openbao_kv.OpenBao | None) -> list[tuple[int, str, Mapping[
 
 def _restored(number: int, copy: Mapping[str, str]) -> None:
     with login._locked(login.root(number)) as folder:
-        if login._private(login.home(number)) or login.holders(folder):
+        if login.holders(folder):
             return
         login.home(number).mkdir(mode=login.PRIVATE_DIR, exist_ok=True)
         login.restore(copy, login.home(number))
