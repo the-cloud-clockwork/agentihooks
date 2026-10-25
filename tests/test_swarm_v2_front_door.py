@@ -261,6 +261,19 @@ def test_the_door_passes_admitted_writes_to_its_inner_gate(world):
     assert (seen, set(rejected)) == (["m-1"], {"m-2"})
 
 
+def test_an_authorless_write_passes_without_an_author_lookup():
+    class Ctx:
+        refused = []
+
+        def author(self, name):
+            raise AssertionError("the front door looked up an author for a write without one")
+
+    door = front_door.Door(SLUG, connect=lambda: None)
+    op = {"op": "add", "thread": "chat", "id": "m-1", "text": "hello"}
+
+    assert door.apply({}, op, Ctx(), lambda doc, op, ctx: "applied") == "applied"
+
+
 def test_the_server_write_gate_refuses_a_backend_master_chat_write_naming_the_front_door(world, monkeypatch):
     monkeypatch.setattr(front_door, "_connect", lambda: world.redis)
     operator_says(world)

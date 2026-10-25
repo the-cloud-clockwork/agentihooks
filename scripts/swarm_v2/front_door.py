@@ -76,7 +76,9 @@ class Door:
     def apply(self, doc: dict, op: dict, ctx, apply) -> bool:
         from scripts.swarm.naming import lane_of
 
-        by = ctx.author(op["by"]) if "by" in op else ""
+        if "by" not in op:
+            return self._inner(doc, op, ctx, apply)
+        by = ctx.author(op["by"])
         lane = lane_of(by)
         if not lane:
             return self._inner(doc, op, ctx, apply)
