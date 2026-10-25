@@ -41,8 +41,13 @@ JUMP = """() => {
   pick.dispatchEvent(new Event("change", { bubbles: true }));
 }"""
 FLUSH = """() => {
+  const token = {};
+  window.__probe = token;
   window.__flushed = false;
-  const probe = new IntersectionObserver(() => { probe.disconnect(); window.__flushed = true; });
+  const probe = new IntersectionObserver(() => {
+    probe.disconnect();
+    if (window.__probe === token) window.__flushed = true;
+  });
   probe.observe(document.documentElement);
 }"""
 FLUSHED = "() => window.__flushed"

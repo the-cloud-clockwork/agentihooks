@@ -6,13 +6,16 @@ from tests.swarm_ledger import page_replay
 class LateOutline:
     def __init__(self):
         self.delivered = False
+        self.polls = 0
 
     def evaluate(self, script):
         if script == page_replay.FLUSH:
-            self.delivered = True
+            self.polls = 0
             return None
         if script == page_replay.FLUSHED:
-            return self.delivered
+            self.polls += 1
+            self.delivered = self.delivered or self.polls == 2
+            return self.polls >= 2
         return [0, "outline marked" if self.delivered else "outline pending"]
 
 
