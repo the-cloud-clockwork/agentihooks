@@ -27,7 +27,7 @@ def test_codec_keeps_fitting_values_inline_and_rejects_an_unusable_budget():
 
 def test_page_geometry_remains_readable_across_budgets_without_empty_pages():
     pages = {}
-    value = random.Random(2).randbytes(1024)
+    value = random.Random(2).randbytes(1024) * 4
     compressed = nats_payload.COMPRESSED + zlib.compress(value)
     while len(compressed) % 2:
         value += b"x"
@@ -98,3 +98,20 @@ def test_scoped_page_write_refusal_and_missing_page_are_reported():
     ]
     with pytest.raises(ValueError, match="^state page '_chunks.missing.0' is missing$"):
         store.get("large")
+
+
+@pytest.mark.parametrize("reconnect", [False, True])
+def test_transport_configuration_is_checked_before_any_network_connection(monkeypatch, reconnect):
+    from scripts.events.config import BusConfig
+
+    async def connect(*args, **kwargs):
+        assert args == ("nats://configured.example:4222",)
+        expected = {"allow_reconnect": reconnect}
+        if reconnect:
+            expected["max_reconnect_attempts"] = -1
+        assert kwargs == expected
+        raise ValueError("configuration captured")
+
+    monkeypatch.setattr(nats.nats_client, "connect", connect)
+    with pytest.raises(ValueError, match="configuration captured"):
+        nats.open_bus(BusConfig(backend="nats", url="nats://configured.example:4222", reconnect=reconnect))

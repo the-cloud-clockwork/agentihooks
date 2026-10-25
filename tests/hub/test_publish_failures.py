@@ -76,3 +76,16 @@ def test_hub_command_enables_reconnect_on_its_nats_bus(monkeypatch):
     assert len(configs) == 1
     assert configs[0].reconnect is True
     assert configs[0].url == "nats://127.0.0.1:4222"
+
+
+@pytest.mark.parametrize("outcomes", [["handled"], []])
+def test_healthy_transport_passes_do_not_wait(monkeypatch, outcomes):
+    from scripts.hub import runner
+
+    hosted = mock.Mock()
+    hosted.run_once.side_effect = [{"healthy": outcomes}, KeyboardInterrupt]
+    wait = mock.Mock()
+    monkeypatch.setattr(runner, "scheduled_wait", wait)
+    with pytest.raises(KeyboardInterrupt):
+        runner._run(hosted, False)
+    wait.assert_not_called()
