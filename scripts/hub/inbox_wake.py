@@ -53,7 +53,7 @@ class InboxWake:
         self.store = self.store or connect()
         for inbox in InboxStore(self.store.redis).worlds():
             key = inbox.key("wake-outbox")
-            for item_id in inbox.redis.srandmember(key, number=32):
+            for item_id in list(inbox.redis.smembers(key))[:32]:
                 if not guard():
                     return
                 item = inbox.get(item_id)
