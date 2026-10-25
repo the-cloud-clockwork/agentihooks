@@ -2,7 +2,9 @@
 
 A running run is served from the shared cache for RUN_TTL_S, so a wait sees completion up to that late; a completed
 run is never cached, so every decision on a finished run is read fresh. Entries are keyed by a digest of the
-credential, so one token is never served a run another token read; only the source name reaches disk.
+credential, so one token is never served a run another token read; only that digest reaches disk, never the value.
+Without a token variable the credential is the gh config folder, so a gh auth switch inside RUN_TTL_S still serves
+the previous login's entry.
 """
 
 import hashlib

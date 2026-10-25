@@ -73,7 +73,7 @@ def test_the_credential_source_is_named_by_variable(clock, monkeypatch, environ,
     assert github_reads.source() == label
 
 
-def test_the_cache_lives_beside_the_backoff_state(actions, clock, monkeypatch, tmp_path):  # noqa: F811
+def test_the_cache_lives_in_the_agentihooks_home(actions, clock, monkeypatch, tmp_path):  # noqa: F811
     monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
     assert github_reads.home() == tmp_path / "github-reads"
     assert mutation_wait.run_resolution(RUN) == ""
@@ -132,7 +132,7 @@ def test_each_charged_request_counts_against_its_caller_without_token_values(act
 
 
 def test_counts_skip_unreadable_lines(actions, clock):  # noqa: F811
-    github_reads.home().mkdir(parents=True)
+    github_reads.home().mkdir(parents=True, exist_ok=True)
     with (github_reads.home() / "charged.jsonl").open("a") as log:
         log.write('not json\n[]\n{}\n{"at": 1000.0}\n')
     assert mutation_wait.run_resolution(RUN) == ""
