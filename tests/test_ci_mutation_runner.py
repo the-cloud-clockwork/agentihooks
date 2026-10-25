@@ -637,6 +637,7 @@ def test_workspace_preserves_data_dependent_repository_inputs_in_both_stages(tmp
             (mutants / name).parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(path, mutants / name)
     assert (mutants / "extra/nested/input.bin").read_bytes() == b"repository input"
+    assert "pyproject.toml/" not in config["also_copy"]
 
 
 def test_workspace_handles_a_selected_test_probing_an_invalid_null_path(tmp_path):
