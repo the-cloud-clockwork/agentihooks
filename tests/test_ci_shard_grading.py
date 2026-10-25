@@ -155,15 +155,14 @@ def test_shard_summary_step_passes_and_writes_a_normal_summary(tmp_path, interpr
 def test_grouped_download_preserves_shard_integrity_without_installed_dependencies(tmp_path, case):
     steps = _jobs()["shard-check"]["steps"]
     downloads = [step for step in steps if step.get("uses", "").startswith("actions/download-artifact@")]
-    assert len(downloads) == 1
-    assert downloads[0]["with"] == {
-        "pattern": "{collected,reused-tests}-${{ matrix.python-version }}",
-        "path": "shard-data",
-    }
+    assert [download["with"] for download in downloads] == [
+        {"pattern": "{collected,reused-tests}-${{ matrix.python-version }}", "path": "shard-data"},
+        {"pattern": "{durations,flakes}-${{ matrix.python-version }}-*", "path": "shard-reports"},
+    ]
     assert not any(step.get("name") == "Install grader dependencies" for step in steps)
     prefetch = next(step for step in steps if "python -m scripts.ci_gate_shards" in step.get("run", ""))
     layout = next(step for step in steps if step.get("name") == "Arrange shard verification data")
-    assert steps.index(layout) < steps.index(prefetch)
+    assert steps.index(layout) < steps.index(prefetch) < steps.index(downloads[1])
     root = tmp_path / "shard-data"
     reports = tmp_path / "shard-reports"
     for index, nodeids in enumerate(
