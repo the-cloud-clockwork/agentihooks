@@ -4,7 +4,7 @@
   "dependency_evidence": "evidence/SV2-IDX-04/result.json records the scoped search these tools call; its search core, request layer and the catalog, chunk and archive tables are unchanged here",
   "integration_gate": "G4",
   "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/7225",
-  "pull_request": "pending",
+  "pull_request": "https://github.com/the-cloud-clockwork/agentihooks/pull/7259",
   "package_complete": false,
   "evidence_class": "mocked: an in-process caller, a SQLite catalog file and a local content addressed object folder stand in for the session service, the central database and the archive bucket, and a recording stub stands in for the MCP server; no model, HTTP server, MCP transport or Pod runs",
   "interfaces": [
@@ -24,7 +24,7 @@
     "aliases": "until 2027-01-31T00:00:00Z"
   },
   "states": {
-    "observed": "Pending the green CI run named in manifest.json: each case runs twice from independent temporary folders and the test requires identical records.",
+    "observed": "Cases A, B and C each ran twice from independent temporary folders with identical records in https://github.com/the-cloud-clockwork/agentihooks/actions/runs/40208107174 at 99da74ac5cd23955ea6be0494c12a796a21beca4, with every changed line mutant killed.",
     "accepted": "A tool request is accepted when its envelope, scope and cursor pass; it answers in one call with state answered.",
     "committed": "The tools write only cursor rows and the resolution failure, alias call and scope rejection counters; every event, source, record, archive and chunk row stays as captured.",
     "externally_verified": "Not yet: no deployed session service, MCP transport or central database ran; a live check belongs to the G4 rollout gate."
