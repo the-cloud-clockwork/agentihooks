@@ -164,6 +164,15 @@ def test_a_missing_log_waits_and_is_read_again_next_poll(monkeypatch):
             False,
         ),
     ],
+    ids=[
+        "no-annotations",
+        "runner-shutdown",
+        "exit-one-then-shutdown",
+        "exit-one",
+        "test-failure",
+        "step-timeout",
+        "step-timeout-then-shutdown",
+    ],
 )
 def test_missing_logs_use_annotations_before_the_watcher_allows_recovery(monkeypatch, notes, lost):
     calls = []
