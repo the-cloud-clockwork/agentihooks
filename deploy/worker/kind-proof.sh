@@ -22,12 +22,12 @@ cluster_pid=$!
 build_started="$SECONDS"
 if bash deploy/worker/base-current.sh ghcr.io/the-cloud-clockwork/agentihooks-worker:dev; then
   worker_base=published
-  docker build -f deploy/worker/Dockerfile --build-arg AGENTIHOOKS_REF="${AGENTIHOOKS_REF:-dev}" -t "$image" .
+  docker tag ghcr.io/the-cloud-clockwork/agentihooks-worker:dev local/worker-base:dev
 else
   worker_base=rebuilt
   docker build -f docker/swarm-node/Dockerfile -t local/worker-base:dev .
-  docker build -f deploy/worker/Dockerfile --build-arg WORKER_IMAGE=local/worker-base:dev --build-arg AGENTIHOOKS_REF="${AGENTIHOOKS_REF:-dev}" -t "$image" .
 fi
+docker build -f deploy/worker/Dockerfile --build-arg WORKER_IMAGE=local/worker-base:dev --build-arg AGENTIHOOKS_REF="${AGENTIHOOKS_REF:-dev}" -t "$image" .
 printf 'worker_hive_image_build_seconds=%s\nworker_base=%s\n' "$((SECONDS - build_started))" "$worker_base" | tee "$out/build.txt"
 docker run --rm --tmpfs /home/worker:uid=10001,gid=10001 --entrypoint bash "$image" -c 'agentihooks init --profile engineer && grep -qx "<!-- profile: engineer -->" "$HOME/.claude/CLAUDE.md"' > "$out/init.txt"
 wait "$cluster_pid"
