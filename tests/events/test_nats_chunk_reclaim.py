@@ -1,6 +1,8 @@
 import asyncio
+import datetime
 import json
 import random
+import time
 from types import SimpleNamespace
 from unittest import mock
 
@@ -208,3 +210,33 @@ def test_paged_tokens_use_a_fixed_nonce_budget(monkeypatch):
     assert token == "owner.3.nonce"
     assert count == write.await_count
     assert [call.args[0] for call in write.await_args_list] == [f"_chunks.owner.3.nonce.{i}" for i in range(count)]
+
+
+def staged_bytes(bus, stream, prefix, value) -> int:
+    token = json.loads(value[len(nats_payload.PAGED) :])[0]
+    return chunk_bytes(bus, stream, f"{prefix}_chunks.{token}.>")
+
+
+@pytest.mark.parametrize("scoped", [False, True])
+def test_a_crashed_writer_on_an_idle_key_leaves_no_chunks_after_the_idle_time(bus, scoped, monkeypatch):
+    store, stream, pattern = open_store(bus, scoped, monkeypatch)
+    monkeypatch.setattr(nats_payload, "IDLE", datetime.timedelta(seconds=1), raising=False)
+    prefix = pattern.removesuffix("_chunks.>")
+    limit = bus._nc.max_payload - nats_payload.KV_HEADER_BUDGET
+    kept = large(bus, "kept")
+    store.create("kept", kept)
+    retained = chunk_bytes(bus, stream, pattern)
+    revision = store.create("idle", b"small")
+    scope = nats_payload.scope("idle", revision)
+    crashed = bus._loop.run(nats_payload.encode(store._create_chunk, large(bus, "crashed"), limit, scope))
+    assert staged_bytes(bus, stream, prefix, crashed) > 0
+    time.sleep(1.5)
+    live = large(bus, "live")
+    staged = bus._loop.run(nats_payload.encode(store._create_chunk, live, limit, nats_payload.scope("live", 0)))
+    store.create("other", b"small")
+    left = staged_bytes(bus, stream, prefix, crashed)
+    assert left == 0, f"orphan staged chunk bytes on an idle key after the idle time: {left}"
+    assert bus._loop.run(nats_payload.decode(store._read_chunk, staged)) == live
+    assert store.get("kept").value == kept
+    assert store.get("idle").value == b"small"
+    assert chunk_bytes(bus, stream, pattern) - staged_bytes(bus, stream, prefix, staged) == retained
