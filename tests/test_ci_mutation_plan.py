@@ -298,18 +298,16 @@ def test_a_change_with_fewer_mutants_than_the_limit_plans_no_more_shards_than_mu
 
     nodes = [f"tests/test_sample.py::t{i:02}" for i in range(13)]
     results = [{"tests": {"scripts.sample.x_f": nodes}, "durations": dict.fromkeys(nodes[:12], 130.0)}]
-    for count, shards in ((1, 1), (2, 2), (3, 3), (10, 10), (11, 10)):
+    single = measured_plan([(["scripts.sample.x_f__mutmut_1"], results)])
+    assert single["shards"] == 1 and single["assignments"] == {"scripts.sample.x_f__mutmut_1": 0}
+    assert not single["splits"]
+    for count, shards in ((2, 2), (3, 3), (10, 10), (11, 10)):
         names = [f"scripts.sample.x_f__mutmut_{i}" for i in range(1, count + 1)]
         plan = measured_plan([(names, results)])
         assert plan["shards"] == shards
-        for name in names:
-            units = plan["assignments"][name]
-            if count == 1:
-                assert isinstance(units, int) and not plan["splits"]
-                continue
-            assert sorted(units) == list(range(shards))
-            split = plan["splits"]["scripts.sample.x_f"]
-            assert sorted([*split["head"], *(node for chosen in split["slices"] for node in chosen)]) == nodes
+        assert all(sorted(plan["assignments"][name]) == list(range(shards)) for name in names)
+        split = plan["splits"]["scripts.sample.x_f"]
+        assert sorted([*split["head"], *(node for chosen in split["slices"] for node in chosen)]) == nodes
     assert measured_plan([])["shards"] == 1
 
 

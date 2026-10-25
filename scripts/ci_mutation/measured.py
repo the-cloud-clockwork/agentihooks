@@ -120,7 +120,6 @@ def plan_shards(costs: dict[str, float], target: float = 240, limit: int = 10, s
 def measured_plan(
     groups: list[tuple[list[str], list[dict]]], memory: KillMemory | None = None, limit: int = 10
 ) -> dict:
-    # Each unit of a split mutant holds its own batch runner, so a few mutants never split wider than their count.
     limit = min(limit, sum(len(names) for names, _ in groups))
     costs, splits = {}, {}
     for names, results in groups:
