@@ -11,7 +11,7 @@ rules:
           jobs:
             scan:
               with:
-                rules_dir: .semgrep-disabled
+                rules_dir: .semgrep
       - pattern-not: |
           jobs:
             feature-tests:
