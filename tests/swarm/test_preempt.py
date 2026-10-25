@@ -170,7 +170,10 @@ def test_yield_sort_reads_one_batch_and_refreshes_only_for_the_next_pass(store, 
     assert batch.call_count == 2
 
 
-def test_ordering_is_untouched_without_an_open_urgent_task_or_a_dispatcher_key(store):
+def test_ordering_is_untouched_without_an_open_urgent_task_or_a_dispatcher_key(store, monkeypatch):
+    from unittest.mock import Mock
+
+    monkeypatch.setattr(store.redis, "mget", Mock(side_effect=AssertionError("unneeded Redis batch")))
     store.put_handoff(SLUG, "g", "pushed")
     keyed = Keyed()
     claimed = [{"id": "g", "state": "open"}, {"id": "u", "rank": "urgent", "state": "claimed"}]
