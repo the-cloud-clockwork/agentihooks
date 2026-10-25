@@ -92,3 +92,24 @@ def test_master_seats_call_the_shared_generator(monkeypatch):
 
     monkeypatch.setattr(masters, "seat_label", lambda lane, index: (lane, index))
     assert masters.seat(2) == ("master", 2)
+
+
+@pytest.mark.parametrize("existing", [None, "repo.one_two", "repo-one-two"])
+def test_workspace_lookup_reuses_current_and_legacy_labels(monkeypatch, existing):
+    workspaces = {} if existing is None else {existing: "space"}
+    calls = []
+    monkeypatch.setattr(herdr_host, "find_workspace", lambda label, env: workspaces.get(label))
+    monkeypatch.setattr(herdr_host, "_placed", lambda value: value)
+
+    def cli(args, environ):
+        calls.append(args)
+        if args[:2] == ["workspace", "create"]:
+            workspaces[args[args.index("--label") + 1]] = "space"
+        return {"root_pane": "pane"}
+
+    monkeypatch.setattr(herdr_host, "_cli", cli)
+    for _ in range(2):
+        herdr_host.open_pane(Path("/missing"), "agent.one", {}, "tab", "repo.one_two", {})
+    assert sum(args[:2] == ["workspace", "create"] for args in calls) == (1 if existing is None else 0)
+    assert calls[-1][:2] == ["tab", "create"]
+    assert calls[-1][calls[-1].index("--workspace") + 1] == "space"

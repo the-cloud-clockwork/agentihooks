@@ -45,7 +45,7 @@ def test_stream_names_carry_an_unambiguous_swarm_identity():
     assert stream_name("rig", "EVENTS") == "AGENTIHOOKS-726967-EVENTS"
     assert (
         stream_name("other", "STATE_spoke-work")
-        == "AGENTIHOOKS-6f74686572-hbfdb74b91986464723022e957a6d5e52d6a5eb0070241ac54c0c979b13c398a6"
+        == "AGENTIHOOKS-6f74686572-h-bfdb74b91986464723022e957a6d5e52d6a5eb0070241ac54c0c979b13c398a6"
     )
     assert stream_name("a_b", "EVENTS") != stream_name("a", "b_EVENTS")
 

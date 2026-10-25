@@ -129,7 +129,11 @@ def target_workspace(workspace: str, directory: Path, environ: dict[str, str]) -
     """(existing workspace id or None, label) for a new tab: the named crew workspace,
     else the caller's herdr workspace, else the repository's."""
     if workspace:
-        return find_workspace(workspace, environ), workspace
+        label = pane_label(workspace)
+        existing = find_workspace(workspace, environ)
+        if existing is None and label != workspace:
+            existing = find_workspace(label, environ)
+        return existing, label
     if environ.get("HERDR_WORKSPACE_ID"):
         return environ["HERDR_WORKSPACE_ID"], ""
     label = repo_label(directory)

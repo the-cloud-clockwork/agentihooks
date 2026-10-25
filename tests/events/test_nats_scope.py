@@ -78,14 +78,17 @@ def test_reopening_scoped_queue_preserves_the_existing_stream_configuration(monk
     from scripts.events import nats
     from scripts.events.config import QueuePolicy
 
-    js = SimpleNamespace(stream_info=AsyncMock(return_value=SimpleNamespace()), add_stream=AsyncMock())
+    js = SimpleNamespace(
+        stream_info=AsyncMock(side_effect=[NotFoundError(), SimpleNamespace(), SimpleNamespace()]),
+        add_stream=AsyncMock(),
+    )
     pull = AsyncMock(return_value=SimpleNamespace())
     monkeypatch.setattr(nats, "_pull", pull)
     loop = SimpleNamespace(run=asyncio.run)
     policy = QueuePolicy(max_deliver=2)
     config = BusConfig(scoped=True)
     queue = nats.NatsWorkQueue(loop, js, "swarm.rig.ready.eng", policy, config, "rig")
-    assert js.stream_info.await_count == 2
+    assert js.stream_info.await_count == 3
     js.stream_info.assert_awaited_with(stream_name("rig", "QUEUE_eng"))
     js.add_stream.assert_not_awaited()
     assert queue._subject == "swarm.rig.queue.eng.work"

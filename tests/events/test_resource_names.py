@@ -12,17 +12,20 @@ def test_clean_consumer_names_stay_readable(value):
     assert names.queue_stream(value) == "AGENTIHOOKS-QUEUE-" + value
 
 
-@pytest.mark.parametrize("value", ["", "lane.eng", "lane_eng", "lane eng", "*", ">", "a--b", "-a", "a-", "ñ", "x" * 65])
+@pytest.mark.parametrize(
+    "value", ["", "lane.eng", "lane_eng", "lane eng", "*", ">", "a--b", "-a", "a-", "ñ", "x" * 256]
+)
 def test_unsafe_consumer_names_use_the_full_digest(value):
-    expected = "h" + hashlib.sha256(value.encode()).hexdigest()
+    digest = hashlib.sha256(value.encode()).hexdigest()
+    expected = "h-" + digest
     assert names.consumer_name(value) == expected
-    assert names.queue_stream(value) == "AGENTIHOOKS-QUEUE-" + expected
+    assert names.queue_stream(value) == "AGENTIHOOKS-QUEUE-h" + digest
     assert re.fullmatch(r"[A-Za-z0-9-]+", names.queue_stream(value))
 
 
 def test_a_digest_cannot_alias_a_readable_name():
     digest = names.consumer_name("lane.eng")
-    assert len(digest) == 65
+    assert len(digest) == 66
     assert names.consumer_name(digest) != digest
 
 

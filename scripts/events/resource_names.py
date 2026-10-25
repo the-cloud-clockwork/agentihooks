@@ -6,13 +6,14 @@ QUEUE_PREFIX = "AGENTIHOOKS-QUEUE-"
 
 
 def consumer_name(value: str) -> str:
-    if len(value) <= 64 and COMPONENT.fullmatch(value):
+    if len(value) <= 255 and COMPONENT.fullmatch(value) and not value.startswith("h-"):
         return value
-    return "h" + hashlib.sha256(value.encode()).hexdigest()
+    return "h-" + hashlib.sha256(value.encode()).hexdigest()
 
 
 def queue_stream(name: str) -> str:
-    return QUEUE_PREFIX + consumer_name(name)
+    suffix = name if len(name) <= 64 and COMPONENT.fullmatch(name) else "h" + hashlib.sha256(name.encode()).hexdigest()
+    return QUEUE_PREFIX + suffix
 
 
 def legacy_queue_stream(name: str) -> str:

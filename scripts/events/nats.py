@@ -17,11 +17,11 @@ from .config import BusConfig, QueuePolicy
 from .dead import DEAD_STREAM, DEAD_SUBJECT, dead_letter
 from .envelope import Envelope
 from .nats_legacy import legacy_filters, legacy_target, provision_events
-from .nats_names import existing_consumer, existing_stream
+from .nats_names import existing_consumer, existing_stream, root_stream
 from .resource_names import legacy_queue_stream, legacy_stream_name
 from .resource_names import queue_stream as resource_queue_stream
 from .scope import RoutedLog, queue_lane, require_owner
-from .subjects import PREFIX, inbox, stream_name
+from .subjects import PREFIX, consumer_name, inbox, stream_name
 from .subjects import subject as event_subject
 
 DEFAULT_URL = "nats://127.0.0.1:4222"
@@ -96,8 +96,10 @@ def _consumer_config(durable: str, subject: str, policy: QueuePolicy) -> api.Con
     )
 
 
-async def _pull(js, stream: str, durable: str, subject: str, policy: QueuePolicy, provision: bool):
-    durable = await existing_consumer(js, stream, durable)
+async def _pull(
+    js, stream: str, durable: str, subject: str, policy: QueuePolicy, provision: bool, legacy: str | None = None
+):
+    durable = await existing_consumer(js, stream, durable, durable if legacy is None else legacy)
     wanted = legacy_filters(subject) if stream in {EVENT_STREAM, "AGENTIHOOKS_EVENTS"} else [subject]
     try:
         info = await js.consumer_info(stream, durable)
@@ -234,7 +236,9 @@ class NatsEventLog:
             raise ValueError(f"durable consumer {durable!r} already has another policy")
         return NatsConsumer(
             self._loop,
-            self._loop.run(_pull(self._js, self._stream, durable, subject, policy, self._provision)),
+            self._loop.run(
+                _pull(self._js, self._stream, consumer_name(durable), subject, policy, self._provision, durable)
+            ),
             self._js,
             policy,
             f"events.{durable}",
@@ -296,15 +300,15 @@ class NatsWorkQueue:
         legacy = legacy_queue_stream(name) if swarm is None else legacy_stream_name(swarm, f"QUEUE_{names.durable}")
         selected = loop.run(existing_stream(js, names.stream, legacy))
         self._stream, self._subject, self._filter = selected, names.subject, names.filter
-        durable = legacy.removeprefix("AGENTIHOOKS_QUEUE_") if swarm is None and selected == legacy else names.durable
-        names = QueueNames(selected, names.subject, names.filter, durable)
+        legacy_durable = legacy.removeprefix("AGENTIHOOKS_QUEUE_") if swarm is None else names.durable
+        names = QueueNames(selected, names.subject, names.filter, names.durable)
         if config.provision:
             loop.run(provision_queue(js, names, config, swarm is not None))
         elif swarm is not None:
             require_migrated(loop.run(js.stream_info(self._stream)))
         self._consumer = NatsConsumer(
             loop,
-            loop.run(_pull(js, self._stream, names.durable, self._filter, policy, config.provision)),
+            loop.run(_pull(js, self._stream, names.durable, self._filter, policy, config.provision, legacy_durable)),
             js,
             policy,
             f"queue.{name}",
@@ -396,8 +400,12 @@ class NatsBus:
                 )
             )
             self._js = self._nc.jetstream()
-            event_stream = self._loop.run(existing_stream(self._js, EVENT_STREAM, "AGENTIHOOKS_EVENTS"))
-            dead_stream = self._loop.run(existing_stream(self._js, DEAD_STREAM, "AGENTIHOOKS_DEAD"))
+            event_stream, dead_stream = EVENT_STREAM, DEAD_STREAM
+            if config.provision or not config.scoped:
+                event_stream = self._loop.run(
+                    root_stream(self._js, EVENT_STREAM, "AGENTIHOOKS_EVENTS", config.credentials)
+                )
+                dead_stream = self._loop.run(root_stream(self._js, DEAD_STREAM, "AGENTIHOOKS_DEAD", config.credentials))
             if config.provision:
                 self._loop.run(provision_events(self._js, event_stream, _seconds(config.dedupe_window_ms)))
                 self._loop.run(

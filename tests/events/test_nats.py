@@ -7,7 +7,7 @@ from unittest import mock
 
 import pytest
 from nats.js import api
-from nats.js.errors import APIError, BucketNotFoundError
+from nats.js.errors import APIError, BucketNotFoundError, NotFoundError
 
 from scripts.events import factory, nats
 from scripts.events.bus import Bus, Consumer, Delivery, EventLog, StateConflict, StateStore, WorkQueue
@@ -357,6 +357,9 @@ def test_new_consumer_names_accept_dotted_logical_names(bus):
 
 
 def test_existing_scoped_queue_messages_survive_new_name_generation(bus):
+    from dataclasses import replace
+
+    bus._config = replace(bus._config, scoped=True)
     from scripts.events.resource_names import legacy_stream_name
 
     legacy = legacy_stream_name("rig", "QUEUE_eng")
@@ -392,6 +395,9 @@ def test_existing_legacy_queue_and_consumer_keep_their_bindings(bus):
 
 
 def test_new_scoped_streams_and_queues_use_hyphens(bus):
+    from dataclasses import replace
+
+    bus._config = replace(bus._config, scoped=True)
     from scripts.swarm.readiness import queue_name
 
     view = bus.for_swarm("rig")
@@ -415,7 +421,7 @@ def test_existing_event_and_dead_streams_survive_reopening(bus, url):
     bus._loop.run(nats.provision_events(bus._js, "AGENTIHOOKS_EVENTS", 120.0))
     bus._loop.run(bus._js.add_stream(name="AGENTIHOOKS_DEAD", subjects=["dead.>"]))
     assert bus._loop.run(
-        bus._js.publish("swarm.s.task.ready", event("retained-log").encode(), stream="AGENTIHOOKS_EVENTS")
+        bus._js.publish("legacy.swarm.s.task.ready", event("retained-log").encode(), stream="AGENTIHOOKS_EVENTS")
     )
     opened = nats.open_bus(BusConfig(backend="nats", url=url, queue=LOG_POLICY))
     try:
@@ -426,6 +432,32 @@ def test_existing_event_and_dead_streams_survive_reopening(bus, url):
         delivery.ack()
     finally:
         opened.close()
+
+
+def test_dead_letter_migration_reads_the_selected_legacy_stream(bus, url):
+    bus._loop.run(bus._js.delete_stream("AGENTIHOOKS-DEAD"))
+    bus._loop.run(bus._js.add_stream(name="AGENTIHOOKS_DEAD", subjects=["dead.>"]))
+    letter = Envelope(
+        id="old-letter",
+        type="dead_lettered",
+        swarm="rig",
+        entity="task",
+        key="one",
+        version=1,
+        time=0,
+        author="a",
+        data={},
+    )
+    bus._loop.run(bus._js.publish("dead.rig", letter.encode(), stream="AGENTIHOOKS_DEAD"))
+    hub = nats.open_bus(BusConfig(backend="nats", url=url, scoped=True))
+    try:
+        assert hub._legacy_dead._stream == "AGENTIHOOKS_DEAD"
+        hub.migrate_dead("rig")
+        [delivery] = hub.for_swarm("rig").dead.consumer("reader", "dead.>").fetch(1, 500)
+        assert delivery.event == letter
+        delivery.ack()
+    finally:
+        hub.close()
 
 
 def test_the_bus_connects_without_reconnecting(url, monkeypatch):
@@ -514,6 +546,7 @@ def test_a_dead_letter_is_published_before_the_original_is_terminated():
     subscription = SimpleNamespace(fetch=mock.AsyncMock(return_value=[message]))
     js = SimpleNamespace(
         _nc=SimpleNamespace(max_payload=1048576),
+        stream_info=mock.AsyncMock(side_effect=NotFoundError()),
         publish=mock.AsyncMock(side_effect=OSError("dead stream unavailable")),
     )
     loop = nats._Loop()
@@ -605,6 +638,7 @@ def test_a_dead_letter_publish_refusal_requires_the_same_retained_event(stored_i
     refusal = APIError(code=400, err_code=10071, description="subject sequence differs")
     js = SimpleNamespace(
         _nc=SimpleNamespace(max_payload=1048576),
+        stream_info=mock.AsyncMock(side_effect=NotFoundError()),
         publish=mock.AsyncMock(side_effect=refusal),
         get_last_msg=mock.AsyncMock(return_value=SimpleNamespace(data=stored.encode())),
     )
