@@ -64,7 +64,7 @@ class Admission:
         admitted = {
             "hive": request["hive"],
             "name": name,
-            "task": {**task, **identity, "claim_generation": live["claim_generation"]},
+            "task": {**task, **identity},
         }
         self.store.redis.set(self._key(slug, request), json.dumps(admitted), px=ADMITTED_MS)
         return admitted

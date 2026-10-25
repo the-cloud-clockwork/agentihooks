@@ -163,7 +163,8 @@ def test_the_lane_loop_waits_only_after_a_pass_with_nothing_started(monkeypatch)
     lanes.run("store", "bus", "runtime", "hive", ("eng",), waits.append, passes=range(3))
 
     assert waits == [lanes.IDLE_S, lanes.IDLE_S]
-    assert [args[5] for args in seen] == [lanes.TAKE_MS] * 3
+    assert [args[:6] for args in seen] == [("store", "bus", "runtime", "hive", ("eng",), lanes.TAKE_MS)] * 3
+    assert seen[0][6] == {}
     assert seen[0][6] is seen[2][6]
 
 
@@ -184,6 +185,7 @@ def test_a_failed_lane_loop_is_logged_and_started_again(monkeypatch, capsys):
     attempts = iter([RuntimeError("nats down"), None])
 
     def fail(*args):
+        assert args == ({"HIVE_EXCLUDED": "master"},)
         error = next(attempts)
         if error:
             raise error
@@ -196,6 +198,46 @@ def test_a_failed_lane_loop_is_logged_and_started_again(monkeypatch, capsys):
 
     assert waits == [lanes.RETRY_S]
     assert "lane spokes stopped (RuntimeError: nats down); starting again" in capsys.readouterr().err
+
+
+def test_the_lane_loop_binds_the_bus_from_its_environment_and_runs_as_this_hive(monkeypatch):
+    from scripts.events import factory
+    from scripts.swarm import commands, store
+    from scripts.swarm import runtime as herdr
+
+    bus = Mock()
+    configs, served = [], []
+    monkeypatch.setattr(factory, "open_bus", lambda config: configs.append(config) or bus)
+    monkeypatch.setattr(store, "connect", lambda: "swarm store")
+    monkeypatch.setattr(commands, "hive_id", lambda: "hive-a")
+    monkeypatch.setattr(herdr, "HerdrRuntime", lambda: "herdr")
+    monkeypatch.setattr(lanes, "run", lambda *args: served.append(args))
+    environ = {"AGENTIHOOKS_BUS": "nats", "AGENTIHOOKS_BUS_URL": "nats://bus:4222", "HIVE_EXCLUDED": "master,ci"}
+
+    lanes._loop(environ)
+
+    assert [(c.backend, c.url, c.provision) for c in configs] == [("nats", "nats://bus:4222", False)]
+    [(seen_store, seen_bus, runtime, hive, taken)] = served
+    assert (seen_store, seen_bus, hive, taken) == ("swarm store", bus, "hive-a", ("eng", "plan"))
+    assert (type(runtime).__name__, runtime.herdr) == ("LocalHerdrRuntime", "herdr")
+    bus.close.assert_called_once_with()
+
+
+def test_the_lane_loop_reads_no_excluded_lanes_as_every_lane(monkeypatch):
+    from scripts.events import factory
+    from scripts.swarm import commands, store
+    from scripts.swarm import runtime as herdr
+
+    served = []
+    monkeypatch.setattr(factory, "open_bus", lambda config: Mock())
+    monkeypatch.setattr(store, "connect", lambda: "swarm store")
+    monkeypatch.setattr(commands, "hive_id", lambda: "hive-a")
+    monkeypatch.setattr(herdr, "HerdrRuntime", lambda: "herdr")
+    monkeypatch.setattr(lanes, "run", lambda *args: served.append(args))
+
+    lanes._loop({})
+
+    assert served[0][4] == lanes.LANES
 
 
 def test_hive_run_starts_the_lane_spokes_before_the_telemetry_loop(monkeypatch):

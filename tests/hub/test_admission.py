@@ -54,6 +54,13 @@ def test_the_hub_admits_an_offer_by_claiming_starting_seating_and_marking_it_cla
     assert rig.store.claimant(SLUG, "t1") == name
     [agent] = rig.store.agents(SLUG)
     assert (agent.name, agent.lane, agent.task, agent.seat, agent.hive) == (name, "eng", "t1", "eng-1@sw", "hive-a")
+    assert (agent.state, agent.started_at) == ("starting", 7_000)
+    from scripts.swarm import tick
+
+    assert tick.LEASE_MS - 5_000 < rig.store.redis.pttl(rig.store.key(SLUG, "claim", "t1")) <= tick.LEASE_MS
+    held = rig.store.key(SLUG, "spoke-admission", "t1", "0")
+    assert admission.ADMITTED_MS - 5_000 < rig.store.redis.pttl(held) <= admission.ADMITTED_MS
+    assert json.loads(rig.store.redis.get(held)) == admitted
     assert rig.store.seats.seat_of(name) == "eng-1@sw"
     assert (rig.rows["t1"]["state"], rig.rows["t1"]["claimed_by"]) == ("claimed", name)
     assert rig.ledger.writes == [
@@ -75,6 +82,25 @@ def test_a_task_with_a_pull_request_is_admitted_back_into_pr(rig):
     admitted = rig.admitter.admit(SLUG, ask(task="t2", lane="ci"))
     assert rig.rows["t2"]["state"] == "pr"
     assert admitted["task"]["seat"] == "ci-1@sw"
+
+
+def test_a_task_returns_to_the_seat_its_handoff_names(rig):
+    rig.store.put_handoff(SLUG, "t1", "carry on", seat="eng-3@sw")
+    assert rig.admitter.admit(SLUG, ask())["task"]["seat"] == "eng-3@sw"
+
+
+def test_the_claim_is_guarded_on_the_claimant_the_offer_saw(rig):
+    rig.rows["t1"]["claimed_by"] = "earlier"
+    name = rig.admitter.admit(SLUG, ask())["name"]
+    assert rig.ledger.writes[0][4] == {"claimed_by": "earlier", "claim_generation": 0}
+    assert rig.rows["t1"]["claimed_by"] == name
+
+
+def test_a_default_admission_reads_through_the_service_ledger_and_the_given_store(rig):
+    admitter = admission.Admission(rig.store)
+    assert admitter.ledger.service is True
+    assert (admitter.source._store, admitter.source._ledger) == (rig.store, admitter.ledger)
+    assert admitter.store is rig.store
 
 
 def test_a_repeat_from_the_same_hive_returns_its_admission_and_another_hive_gets_none(rig):

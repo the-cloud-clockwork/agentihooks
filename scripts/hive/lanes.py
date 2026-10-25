@@ -59,7 +59,7 @@ def spokes(store, bus, runtime, hive: str, taken: Iterable[str], held: dict) -> 
                 tasks = LaneTasks(bus, hive, store.config)
                 held[slug, lane] = Spoke(SpokeConfig(config, lane, hive), bus, runtime, tasks, view=lambda: None)
                 queue = readiness.queue_name(slug, lane)
-                print(f"hive spoke for swarm {slug} lane {lane} takes {queue}", file=sys.stderr, flush=True)
+                print(f"hive spoke for swarm {slug} lane {lane} takes {queue}", file=sys.stderr)
             current.append(held[slug, lane])
     return current
 
@@ -109,7 +109,7 @@ def _serve(environ: Mapping[str, str], wait: Callable[[float], object] = schedul
 
 
 def _stopped(exc: BaseException | None) -> None:
-    print(f"hive lane spokes stopped ({type(exc).__name__}: {exc}); starting again", file=sys.stderr, flush=True)
+    print(f"hive lane spokes stopped ({type(exc).__name__}: {exc}); starting again", file=sys.stderr)
 
 
 def serve(environ: Mapping[str, str] = os.environ) -> threading.Thread | None:
