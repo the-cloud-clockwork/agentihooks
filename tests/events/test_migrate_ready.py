@@ -13,11 +13,20 @@ pytestmark = pytest.mark.unit
 
 @pytest.fixture
 def command(buses, monkeypatch):
+    import nats
+
     _, scoped = buses
     monkeypatch.setenv("AGENTIHOOKS_BUS", "nats")
     monkeypatch.setenv(URL_ENV, scoped._config.url)
     monkeypatch.setenv(CREDENTIALS_ENV, scoped._config.credentials)
     monkeypatch.delenv("AGENTIHOOKS_BUS_BIND", raising=False)
+    original = nats.connect
+
+    async def connect(url, *args, **kwargs):
+        assert url == scoped._config.url
+        return await original(url, *args, **kwargs)
+
+    monkeypatch.setattr(nats, "connect", connect)
     return importlib.import_module("scripts.events.migrate_ready")
 
 
@@ -167,8 +176,11 @@ def test_inventory_reads_every_page(buses, command, monkeypatch, capsys):
         queue.offer(Envelope(lane, "task.ready", "doctor", "task", lane, 1, 0, "hub", {}))
         names.add(queue._stream)
     original = JetStreamContext.streams_info_iterator
+    requested = []
 
     async def one_per_page(client, *, offset):
+        assert offset == len(requested)
+        requested.append(offset)
         page = await original(client, offset=0)
         streams = [stream for stream in page.streams if stream["config"]["name"] in names]
         page.total = len(streams)
@@ -190,8 +202,11 @@ def test_incomplete_inventory_is_refused(command, monkeypatch):
     from nats.js.client import JetStreamContext
 
     original = JetStreamContext.streams_info_iterator
+    requested = []
 
     async def empty_page(client, *, offset):
+        assert not requested
+        requested.append(offset)
         page = await original(client, offset=offset)
         page.total = 1
         page.streams = []
