@@ -1,4 +1,5 @@
 import os
+import re
 import subprocess
 from pathlib import Path
 
@@ -30,7 +31,7 @@ def test_shard_grader_never_restores_an_environment_written_by_head_tests():
     steps = _jobs()["shard-check"]["steps"]
     assert not any(step.get("uses", "").startswith("actions/cache") for step in steps)
     installs = [step for step in steps if step.get("name") == "Install grader dependencies"]
-    assert not installs or [step["run"] for step in installs] == ['python -m pip install "pytest>=8.0"']
+    assert not installs or [_as_python(step["run"]) for step in installs] == ['python -m pip install "pytest>=8.0"']
     assert not any(step.get("name") == "Use the test environment" for step in steps)
 
 
@@ -52,7 +53,7 @@ def test_head_collection_is_uploaded_once_per_interpreter_and_downloaded_as_data
     assert split.index(collect) < split.index(upload)
     steps = jobs["shard-check"]["steps"]
     download = next(step for step in steps if step.get("name") == "Download collected tests")
-    check = next(step for step in steps if step.get("run", "").startswith("python -m tests.shard_check"))
+    check = next(step for step in steps if _as_python(step.get("run", "")).startswith("python -m tests.shard_check"))
     if "name" in download["with"]:
         assert download["with"]["name"] == upload["with"]["name"]
         assert f"--collected {download['with']['path']}/collected.json" in check["run"]
@@ -70,7 +71,8 @@ def test_head_collection_is_uploaded_once_per_interpreter_and_downloaded_as_data
 
 def test_shard_grading_keeps_head_data_separate_from_base_modules():
     steps = _jobs()["shard-check"]["steps"]
-    commands = [step["run"] for step in steps if step.get("run", "").startswith("python -m tests.shard_")]
+    commands = [_as_python(step.get("run", "")) for step in steps]
+    commands = [command for command in commands if command.startswith("python -m tests.shard_")]
     assert commands == [
         "python -m tests.shard_check shard-durations/*/durations.json --collected collected-data/collected.json $REUSED",
         'python -m tests.shard_summary --version "$PYTHON_VERSION" --durations shard-durations/*/durations.json \\\n'
@@ -94,15 +96,20 @@ def test_shard_grading_has_no_legacy_grader_and_no_base_branch_conditions():
 _ACTIONS_SHELLS = {None: ["bash", "-e"], "bash": ["bash", "--noprofile", "--norc", "-eo", "pipefail"]}
 
 
-def _run_summary_step(tmp_path, python_body):
+def _as_python(command):
+    return re.sub(r"^python3 ", "python ", command)
+
+
+def _run_summary_step(tmp_path, python_body, interpreter="python"):
     step = next(s for s in _jobs()["shard-check"]["steps"] if s.get("name") == "Summarize reused, ran and flaky tests")
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     fake = bin_dir / "python"
     fake.write_text(f"#!/usr/bin/env bash\n{python_body}\n")
     fake.chmod(0o755)
+    (bin_dir / "python3").symlink_to(fake)
     script = tmp_path / "step.sh"
-    script.write_text(step["run"])
+    script.write_text(re.sub(r"^python3? ", f"{interpreter} ", step["run"], flags=re.M))
     summary = tmp_path / "summary.md"
     env = {
         "PATH": f"{bin_dir}:{os.environ['PATH']}",
@@ -121,14 +128,16 @@ def _run_summary_step(tmp_path, python_body):
     return result, summary.read_text() if summary.exists() else ""
 
 
-def test_shard_summary_step_goes_red_when_the_summary_command_crashes(tmp_path):
-    result, _ = _run_summary_step(tmp_path, "echo 'No module named tests.shard_summary' >&2\nexit 1")
+@pytest.mark.parametrize("interpreter", ["python", "python3"])
+def test_shard_summary_step_goes_red_when_the_summary_command_crashes(tmp_path, interpreter):
+    result, _ = _run_summary_step(tmp_path, "echo 'No module named tests.shard_summary' >&2\nexit 1", interpreter)
     assert result.returncode != 0
     assert "No module named tests.shard_summary" in result.stderr
 
 
-def test_shard_summary_step_passes_and_writes_a_normal_summary(tmp_path):
-    result, summary = _run_summary_step(tmp_path, "echo 'Ran 12 tests'")
+@pytest.mark.parametrize("interpreter", ["python", "python3"])
+def test_shard_summary_step_passes_and_writes_a_normal_summary(tmp_path, interpreter):
+    result, summary = _run_summary_step(tmp_path, "echo 'Ran 12 tests'", interpreter)
     assert result.returncode == 0
     assert "Ran 12 tests" in result.stdout
     assert "Ran 12 tests" in summary
