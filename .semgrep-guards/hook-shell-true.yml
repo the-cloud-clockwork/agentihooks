@@ -1,3 +1,4 @@
+# Out of reach: a shell path held in a variable, an env wrapper before the shell, os.exec* and os.spawn* with a shell, and shell passed through **kwargs.
 rules:
   - id: hook-shell-true
     languages: [python]

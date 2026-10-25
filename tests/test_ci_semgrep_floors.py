@@ -210,10 +210,43 @@ def test_changed_rules_are_rules_whose_text_differs_from_the_base(rules_dir, mon
     assert bases == ["FETCH_HEAD"] * 3
 
 
-def _floor_errors(monkeypatch, rule_files, found, head, base, changed=frozenset()):
+def test_marked_cases_compare_each_red_fixture_with_the_base(rules_dir, monkeypatch):
+    two = "# ruleid: {name}\nx()\n# ruleid: {name}\ny()\n"
+    rule_files = [
+        _rule(rules_dir, "kept", red=two),
+        _rule(rules_dir, "grew", red=two),
+        _rule(rules_dir, "shrank"),
+        _rule(rules_dir, "new"),
+        _rule(rules_dir, "gone", red=None),
+    ]
+    at = {
+        "kept": two.format(name="kept"),
+        "grew": "# ruleid: grew\n",
+        "shrank": two.format(name="shrank"),
+        "new": None,
+        "gone": "# ruleid: gone\n",
+    }
+    paths = []
+    monkeypatch.setattr(floors, "at_base", lambda base, path: paths.append((base, path.name)) or at[path.stem[:-4]])
+    errors, grown = floors.marked_cases("FETCH_HEAD", rule_files)
+    assert errors == [
+        "shrank: shrank.red.py marks 1 cases, 2 at the base; fixtures only grow",
+        "gone: gone.red.py marks 0 cases, 1 at the base; fixtures only grow",
+    ]
+    assert grown == {"grew", "new"}
+    assert paths == [("FETCH_HEAD", f"{rule.stem}.red.py") for rule in rule_files]
+
+
+def test_marks_count_only_the_rule_own_markers(rules_dir):
+    rule = _rule(rules_dir, "a")
+    assert floors._marks(rule, "# ruleid: a\n# ruleid: b\n# ok: a\n# ruleid: a\n") == 2
+    assert floors._marks(rule, None) == 0
+
+
+def _floor_errors(monkeypatch, rule_files, found, head, base, changed=frozenset(), grown=frozenset()):
     targets = []
     monkeypatch.setattr(floors, "findings", lambda files, target: targets.append((files, target)) or found)
-    errors = floors.floor_errors(head, base, rule_files, set(changed))
+    errors = floors.floor_errors(head, base, rule_files, set(changed), set(grown))
     assert targets == [(rule_files, "hooks")]
     return errors
 
@@ -246,12 +279,22 @@ def test_a_floor_lowered_with_an_unchanged_rule_is_accepted(rules_dir, monkeypat
 def test_a_floor_raised_against_the_base_is_red(rules_dir, monkeypatch):
     found = [_finding("a"), _finding("a")]
     errors = _floor_errors(monkeypatch, [_rule(rules_dir, "a")], found, {"a": 2}, {"a": 1})
-    assert errors == ["a: floor rose from 1 to 2; floors only shrink"]
+    assert errors == [RISE]
 
 
-def test_a_rule_change_may_raise_its_own_floor(rules_dir, monkeypatch):
+RISE = "a: floor rose from 1 to 2; a floor rises only with a rule change that adds red fixture cases"
+
+
+@pytest.mark.parametrize(("changed", "grown"), [({"a"}, set()), (set(), {"a"})], ids=["rule-only", "fixture-only"])
+def test_a_floor_rise_needs_both_a_rule_change_and_new_red_cases(rules_dir, monkeypatch, changed, grown):
     found = [_finding("a"), _finding("a")]
-    assert _floor_errors(monkeypatch, [_rule(rules_dir, "a")], found, {"a": 2}, {"a": 1}, {"a"}) == []
+    errors = _floor_errors(monkeypatch, [_rule(rules_dir, "a")], found, {"a": 2}, {"a": 1}, changed, grown)
+    assert errors == [RISE]
+
+
+def test_a_rule_change_with_new_red_cases_may_raise_its_own_floor(rules_dir, monkeypatch):
+    found = [_finding("a"), _finding("a")]
+    assert _floor_errors(monkeypatch, [_rule(rules_dir, "a")], found, {"a": 2}, {"a": 1}, {"a"}, {"a"}) == []
 
 
 def test_a_floor_dropped_with_a_rule_change_is_red(rules_dir, monkeypatch):
@@ -293,9 +336,12 @@ def test_check_without_rule_files_is_red(rules_dir, capfd):
     assert capfd.readouterr().out == "no rule files in .semgrep-guards\n"
 
 
-def _check_mocks(monkeypatch, fixture=lambda rule: [], errors=lambda head, base, files, changed: []):
+def _check_mocks(
+    monkeypatch, fixture=lambda rule: [], errors=lambda head, base, files, changed, grown: [], marked=([], {"b"})
+):
     seen = []
     monkeypatch.setattr(floors, "fixture_errors", fixture)
+    monkeypatch.setattr(floors, "marked_cases", lambda base, files: seen.append(("marked", base, len(files))) or marked)
     monkeypatch.setattr(floors, "base_floors", lambda base: seen.append(("floors", base)) or {"a": 4})
     monkeypatch.setattr(
         floors, "changed_rules", lambda base, files: seen.append(("changed", base, len(files))) or {"a"}
@@ -311,17 +357,20 @@ def test_check_prints_every_fixture_and_floor_error(rules_dir, monkeypatch, capf
     seen = _check_mocks(
         monkeypatch,
         fixture=lambda rule: [f"fixture {rule.stem}"],
-        errors=lambda head, base, files, changed: [f"floor {head} {base} {len(files)} {sorted(changed)}"],
+        errors=lambda head, base, files, changed, grown: [
+            f"floor {head} {base} {len(files)} {sorted(changed)} {sorted(grown)}"
+        ],
+        marked=(["shrunk"], {"b"}),
     )
     assert floors.check("FETCH_HEAD") == 1
-    assert seen == [("floors", "FETCH_HEAD"), ("changed", "FETCH_HEAD", 2)]
-    assert capfd.readouterr().out == "fixture a\nfixture b\nfloor {'a': 3} {'a': 4} 2 ['a']\n"
+    assert seen == [("marked", "FETCH_HEAD", 2), ("floors", "FETCH_HEAD"), ("changed", "FETCH_HEAD", 2)]
+    assert capfd.readouterr().out == "fixture a\nfixture b\nshrunk\nfloor {'a': 3} {'a': 4} 2 ['a'] ['b']\n"
 
 
 def test_check_without_a_floor_file_grades_against_no_floors(rules_dir, monkeypatch):
     heads = []
     _rule(rules_dir, "a")
-    _check_mocks(monkeypatch, errors=lambda head, base, files, changed: heads.append(head) or ["x"])
+    _check_mocks(monkeypatch, errors=lambda head, base, files, changed, grown: heads.append(head) or ["x"])
     assert floors.check("FETCH_HEAD") == 1
     assert heads == [{}]
 

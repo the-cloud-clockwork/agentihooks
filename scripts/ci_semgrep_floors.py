@@ -76,7 +76,26 @@ def changed_rules(base: str, rule_files: list[Path]) -> set[str]:
     return {rule.stem for rule in rule_files if at_base(base, rule) not in (None, rule.read_text())}
 
 
-def floor_errors(floors: dict[str, int], base: dict[str, int], rule_files: list[Path], changed: set[str]) -> list[str]:
+def _marks(rule: Path, text: str | None) -> int:
+    return 0 if text is None else text.count(f"ruleid: {rule.stem}")
+
+
+def marked_cases(base: str, rule_files: list[Path]) -> tuple[list[str], set[str]]:
+    errors, grown = [], set()
+    for rule in rule_files:
+        red = rule.with_suffix(".red.py")
+        before = _marks(rule, at_base(base, red))
+        now = _marks(rule, red.read_text() if red.is_file() else None)
+        if now < before:
+            errors.append(f"{rule.stem}: {red.name} marks {now} cases, {before} at the base; fixtures only grow")
+        elif now > before:
+            grown.add(rule.stem)
+    return errors, grown
+
+
+def floor_errors(
+    floors: dict[str, int], base: dict[str, int], rule_files: list[Path], changed: set[str], grown: set[str]
+) -> list[str]:
     names = {rule.stem for rule in rule_files}
     errors = [f"{name}: floor without a rule file" for name in sorted(set(floors) - names)]
     errors += [f"{name}: guard rule removed since the base; floors only shrink" for name in sorted(set(base) - names)]
@@ -86,8 +105,11 @@ def floor_errors(floors: dict[str, int], base: dict[str, int], rule_files: list[
             errors.append(f"{name}: no floor; run python -m scripts.ci_semgrep_floors record")
             continue
         was = base.get(name, floors[name])
-        if floors[name] > was and name not in changed:
-            errors.append(f"{name}: floor rose from {was} to {floors[name]}; floors only shrink")
+        if floors[name] > was and not (name in changed and name in grown):
+            errors.append(
+                f"{name}: floor rose from {was} to {floors[name]}; "
+                "a floor rises only with a rule change that adds red fixture cases"
+            )
         if floors[name] < was and name in changed:
             errors.append(
                 f"{name}: floor dropped from {was} to {floors[name]} with a rule change; "
@@ -111,7 +133,9 @@ def check(base: str) -> int:
         return 1
     floors = json.loads(FLOORS.read_text()) if FLOORS.is_file() else {}
     errors = [error for rule in rule_files for error in fixture_errors(rule)]
-    errors += floor_errors(floors, base_floors(base), rule_files, changed_rules(base, rule_files))
+    shrunk, grown = marked_cases(base, rule_files)
+    errors += shrunk
+    errors += floor_errors(floors, base_floors(base), rule_files, changed_rules(base, rule_files), grown)
     for error in errors:
         print(error)
     if not errors:
