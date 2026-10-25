@@ -4,9 +4,11 @@ import itertools
 import os
 import sys
 import threading
+import time
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import replace
 
+from scripts.events.config import BACKEND_ENV, DEFAULT_BACKEND, URL_ENV
 from scripts.events.envelope import Envelope
 from scripts.hive import account_slots, workstation
 from scripts.hive.spoke import Spoke, SpokeConfig
@@ -100,13 +102,24 @@ def _loop(environ: Mapping[str, str]) -> None:
         bus.close()
 
 
-def _serve(environ: Mapping[str, str], wait: Callable[[float], object] = scheduled_wait) -> None:
+def _serve(
+    environ: Mapping[str, str],
+    wait: Callable[[float], object] = scheduled_wait,
+    sleep: Callable[[float], object] = time.sleep,
+) -> None:
     while True:
         try:
             _loop(environ)
         except Exception:
             _stopped(sys.exception())
+        try:
             wait(RETRY_S)
+        except Exception:
+            exc = sys.exception()
+            print(
+                f"hive lane spokes retry wait failed ({type(exc).__name__}: {exc}); sleeping instead", file=sys.stderr
+            )
+            sleep(RETRY_S)
 
 
 def _stopped(exc: BaseException | None) -> None:
@@ -115,6 +128,13 @@ def _stopped(exc: BaseException | None) -> None:
 
 def serve(environ: Mapping[str, str] = os.environ) -> threading.Thread | None:
     if workstation.runs_engine(environ):
+        return None
+    if (environ.get(BACKEND_ENV) or DEFAULT_BACKEND) == "memory":
+        print(
+            "hive lane spokes refused: the memory bus never sees the hub's ready offers; "
+            f"a distributed hive needs {BACKEND_ENV}=nats and {URL_ENV}",
+            file=sys.stderr,
+        )
         return None
     thread = threading.Thread(target=_serve, args=(environ,), name="lane-spokes", daemon=True)
     thread.start()
