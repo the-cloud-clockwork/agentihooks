@@ -66,6 +66,7 @@ from scripts.swarm import (
     release_wait,
     resume,
     retire_watch,
+    run_window,
     seat_spawn,
     session_model,
     stack,
@@ -232,6 +233,7 @@ def tick(slug, store, ledger, runtime, now_ms):
     actions += skip_refused(dev_red.reopen_pass, slug, config, store, ledger, rows)
     actions += skip_refused(promotion_watch.refresh, slug, config, store, ledger, doc, now_ms)
     actions += skip_refused(release_wait.alert_pass, slug, config, ledger, doc)
+    actions += skip_refused(run_window.step, slug, config, store, ledger, doc, now_ms)
     actions += skip_refused(claim_hold.verification_notices, slug, store, doc, now_ms)
     actions += skip_refused(difficulty.size_pass, slug, ledger, doc)
     actions += skip_refused(grouping.release_pass, slug, store, ledger, doc)
@@ -1030,6 +1032,8 @@ def spawn_holds(store, slug):
 
 
 def _spawn_stop(slug, config, store, runtime, now_ms):
+    if stopped := run_window.claims_stopped(store, slug, config, now_ms):
+        return stopped
     if not runtime.has_capacity(config):
         return "every agent is at its session cap, waiting"
     if host := _host_full(slug, store, now_ms):

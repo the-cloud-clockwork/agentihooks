@@ -123,6 +123,7 @@ from scripts.swarm import (
     release_wait,
     remote_control,
     review_rounds,
+    run_window,
     snapshot,
     snapshot_job,
     stack,
@@ -946,6 +947,8 @@ def gate_mode(key, value):
 def setting(config, key):
     if key in GATE_KEYS:
         return modes.label(catalog.current(config.gates)[GATE_KEYS[key]])
+    if key in run_window.KEYS:
+        return run_window.reading(config.window, key)
     if key in LANE_KEYS:
         lane, field = LANE_KEYS[key]
         return config.lanes.get(lane, {}).get(field) or "unset"
@@ -965,7 +968,7 @@ def control_readings(store, args):
         return {
             key: setting(config, key)
             for key in keys
-            if key in (*SETTABLE, *LANE_KEYS, *EFFORT_KEYS, *CONFIG_KEYS, *GATE_KEYS, "autonomy")
+            if key in (*SETTABLE, *LANE_KEYS, *EFFORT_KEYS, *CONFIG_KEYS, *GATE_KEYS, *run_window.KEYS, "autonomy")
         }
     if args.command == "lift":
         agent = _lifted_agent(store, args)
@@ -1084,6 +1087,10 @@ def cmd_set(store, args):
         if key in GATE_KEYS:
             changes["gates"] = {**store.config(args.slug).gates, **gate_mode(key, value)}
             continue
+        if key in run_window.KEYS:
+            window = changes.get("window", store.config(args.slug).window)
+            changes["window"] = run_window.setting(window, key, value, now_ms())
+            continue
         if key.startswith(overlays.KEY):
             try:
                 changes["overlays"] = overlays.setting(
@@ -1134,6 +1141,7 @@ def cmd_set(store, args):
                 "api_url": config.api_url,
                 "codex_inbox_transport": config.codex_inbox_transport,
                 "engine": config.engine,
+                "window": run_window.report(config.window, now_ms()),
                 "master_affinity": {"desired": affinity.desired(config) or "auto", "order": master},
                 "masters": masters.MasterSeats(store.redis).count(args.slug),
                 "master_per": master_scale.rule(store.redis, args.slug) or master_scale.OFF,
