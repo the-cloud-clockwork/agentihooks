@@ -20,7 +20,10 @@ def store():
 
 def _probe(store, **sample):
     row = {"read_s": 0.25, "write_s": 1.5, "read_failure": "", "write_failure": "", "wall_s": 1.75, "at": NOW}
-    store.redis.set(ledger_probe._key(store, "sw"), json.dumps({"samples": [{"at": NOW - 120_000}, {"at": NOW - 60_000}, {**row, **sample}]}))
+    store.redis.set(
+        ledger_probe._key(store, "sw"),
+        json.dumps({"samples": [{"at": NOW - 120_000}, {"at": NOW - 60_000}, {**row, **sample}]}),
+    )
 
 
 def test_the_last_probe_pass_becomes_one_ledger_probe_row(store):
