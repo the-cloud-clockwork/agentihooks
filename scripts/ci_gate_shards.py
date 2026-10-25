@@ -1,9 +1,7 @@
 import json
 import os
 import subprocess
-import sys
 import time
-from pathlib import Path
 
 from scripts.ci_budget import rate_limit
 from scripts.ci_budget.rate_limit import gh_api
@@ -53,24 +51,13 @@ def watch(repository: str, run: str, attempt: str, shards: list[int], *, recover
     raise RuntimeError("Shard verification timed out before every expected shard succeeded")
 
 
-def reports(destination: Path, shards: list[int]) -> None:
-    expected = {f"{kind}-3.12-{shard}" for kind in ("durations", "flakes") for shard in shards}
-    present = {path.name for path in destination.iterdir() if path.is_dir()} if destination.is_dir() else set()
-    if missing := expected - present:
-        raise RuntimeError(f"Missing shard reports: {sorted(missing)}")
-
-
 def main() -> None:
-    shards = json.loads(os.environ["SHARDS"])
-    if sys.argv[1:] == ["reports"]:
-        reports(Path("shard-reports"), shards)
-        return
     try:
         watch(
             os.environ["GITHUB_REPOSITORY"],
             os.environ["GITHUB_RUN_ID"],
             os.environ["GITHUB_RUN_ATTEMPT"],
-            shards,
+            json.loads(os.environ["SHARDS"]),
             recover=os.environ.get("GITHUB_EVENT_NAME") == "merge_group",
         )
     finally:

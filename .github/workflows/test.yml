@@ -1636,7 +1636,19 @@ jobs:
           path: shard-reports
 
       - name: Require every planned shard report
-        run: python -m scripts.ci_gate_shards reports
+        shell: bash
+        run: |
+          IFS=, read -ra shards <<< "${SHARDS//[][ ]/}"
+          missing=()
+          for shard in "${shards[@]}"; do
+            for kind in durations flakes; do
+              [[ -d "shard-reports/$kind-3.12-$shard" ]] || missing+=("$kind-3.12-$shard")
+            done
+          done
+          if (( ${#missing[@]} )); then
+            echo "::error::Missing shard reports: ${missing[*]}"
+            exit 1
+          fi
 
       - name: Check every collected test ran in exactly one shard
         env:
