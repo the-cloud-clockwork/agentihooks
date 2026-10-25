@@ -30,7 +30,16 @@ def matrix(root: Path, versions: dict[str, dict[str, float]], counts: dict[str, 
     target = min(240, STEP_SECONDS / 2)
     for version, durations in versions.items():
         count = counts[version] if counts else 12
+        total = sum(seconds for node, seconds in durations.items() if node.split("::", 1)[0] in sizes)
         while True:
+            # Some shard carries at least an even share, so a share over the target by a second, past float rounding, fails.
+            if (
+                not counts
+                and count < MAX_SHARDS
+                and STARTUP_SECONDS + SLOWDOWN * total / (count * WORKERS) > target + 1
+            ):
+                count += 1
+                continue
             predicted = _predicted(durations, count, grouped, sizes)
             if counts or predicted < target or count == MAX_SHARDS:
                 break

@@ -189,6 +189,27 @@ def test_queue_sizing_uses_the_smallest_count_with_timeout_margin(tmp_path):
     assert len(matrix(tmp_path, {"3.12": measured})) == 13
 
 
+def test_queue_sizing_skips_counts_whose_even_share_misses_the_target(tmp_path, monkeypatch):
+    from tests import queue_shards
+
+    path = tmp_path / "tests/test_even.py"
+    path.parent.mkdir()
+    path.write_text("")
+    measured = {f"tests/test_even.py::test_{i}": 10.0 for i in range(1200)}
+    sized = []
+    predicted = queue_shards._predicted
+    monkeypatch.setattr(
+        queue_shards,
+        "_predicted",
+        lambda durations, count, *rest: sized.append(count) or predicted(durations, count, *rest),
+    )
+
+    plan = queue_shards.matrix(tmp_path, {"3.12": measured})
+
+    assert sized == [20]
+    assert len(plan) == 20
+
+
 def test_queue_sizing_uses_idle_runners_to_finish_serial_work_within_four_minutes(tmp_path, monkeypatch):
     from tests import queue_shards
 
