@@ -105,6 +105,17 @@ def test_lexical_weights_rare_terms_higher():
     assert search.lexical(chunks, [], []) == []
 
 
+def test_lexical_ranks_by_score_then_chunk_id():
+    chunks = [
+        fake(name, preview=text) for name, text in (("z", "alpha beta"), ("b", "beta"), ("a", "beta"), ("c", "x"))
+    ]
+    assert search.lexical(chunks, [], ["alpha", "beta"]) == [
+        ("z", 2.456736, ["alpha", "beta"]),
+        ("a", 0.847298, ["beta"]),
+        ("b", 0.847298, ["beta"]),
+    ]
+
+
 def test_cosine():
     assert search.cosine([1.0, 0.0], [1.0, 0.0]) == 1.0
     assert search.cosine([0.0, 0.0], [1.0, 1.0]) == 0.0
