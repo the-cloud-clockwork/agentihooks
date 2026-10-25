@@ -79,7 +79,9 @@ def baseline_cache():
 
 @pytest.fixture
 def baseline(baseline_cache, tmp_path_factory, monkeypatch):
-    if not baseline_cache:
+    # A rerun attempt rebuilds a pass that failed, which a load-bound overrun usually is.
+    if not baseline_cache or baseline_cache[0][4]:
+        baseline_cache.clear()
         line = next(
             number
             for number, text in enumerate((ROOT / SOURCE).read_text().splitlines(), 1)
