@@ -83,6 +83,25 @@ def test_only_the_first_failed_launch_of_a_pass_is_forgiven(store, monkeypatch):
     assert "spent this pass's 20 second launch budget, t3 waits a pass" in actions
 
 
+def test_a_forgiven_failure_never_dilutes_the_mean_launch_cost(store, monkeypatch):
+    store.update("sw", max_eng=3)
+    ledger, runtime = tasks(("t1", "eng"), ("t2", "eng"), ("t3", "eng")), FakeRuntime()
+    clock = _slow_launches(monkeypatch, runtime, 0)
+    spawn = runtime.spawn
+
+    def launch(config, lane, name, task):
+        if lane != MASTER and task["id"] == "t1":
+            raise _canary_failure("codex")
+        if lane != MASTER:
+            clock[0] += 12
+        return spawn(config, lane, name, task)
+
+    runtime.spawn = launch
+    actions = tick("sw", store, ledger, runtime, now_ms=1_000)
+    assert [task for _, _, task in runtime.spawned] == ["t2"]
+    assert "spent this pass's 20 second launch budget, t3 waits a pass" in actions
+
+
 def test_a_started_launch_clears_the_harness_its_task_avoided(store, monkeypatch):
     ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
     failing = {"t1"}
@@ -122,14 +141,22 @@ def test_launches_without_a_failure_carry_no_harness_to_avoid(store, monkeypatch
 
 
 def test_a_capacity_wait_never_steers_the_retry(store, monkeypatch):
-    ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
-    runtime.crash = SpawnError("no seat has room", "unavailable")
-    runtime.crash.harness = "codex"
+    ledger, runtime = tasks(("t1", "eng"), ("t2", "eng")), FakeRuntime()
+    waiting, spawn = {"t1"}, runtime.spawn
+
+    def launch(config, lane, name, task):
+        if lane != MASTER and task["id"] in waiting:
+            error = SpawnError("no seat has room", "unavailable")
+            error.harness = "codex"
+            raise error
+        return spawn(config, lane, name, task)
+
+    runtime.spawn = launch
     tick("sw", store, ledger, runtime, now_ms=1_000)
-    runtime.crash = None
+    waiting.clear()
     tick("sw", store, ledger, runtime, now_ms=2_000)
-    assert [task["id"] for task in runtime.tasks] == ["t1"]
-    assert "avoid_harness" not in runtime.tasks[0]
+    assert [task["id"] for task in runtime.tasks] == ["t2", "t1"]
+    assert not any("avoid_harness" in task for task in runtime.tasks)
 
 
 def test_a_task_avoiding_a_harness_launches_on_another_with_room(tmp_path, monkeypatch):
