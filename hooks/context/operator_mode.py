@@ -118,7 +118,9 @@ def present(session_id, environ=None, now=None):
 
 
 def _attached(env, session_id):
-    return bool(env.get("AGENTIHOOKS_SWARM") or _bound(env, session_id))
+    from hooks.context import master_coding
+
+    return bool(env.get("AGENTIHOOKS_SWARM") or _bound(env, session_id) or master_coding.seat(session_id))
 
 
 def _binding(env, session_id):
@@ -126,7 +128,9 @@ def _binding(env, session_id):
         ledgers = Path(env.get("LEDGER_DIR") or Path.home() / "development-ledger").expanduser()
         bound = json.loads((ledgers / ".sessions" / f"{session_id}.json").read_text())
     except (OSError, ValueError):
-        bound = {}
+        from hooks.context import master_coding
+
+        bound = master_coding.seat(session_id)
     slug = bound.get("slug") or env.get("AGENTIHOOKS_SWARM") or "<slug>"
     return slug, bound.get("name") or env.get("AGENTIHOOKS_AGENT_NAME") or "<name>"
 

@@ -669,6 +669,23 @@ def test_a_standalone_session_is_never_gated(ledgers):
     assert operator_mode.reply_refusal({"session_id": "s1", "last_assistant_message": LONG}, env) == ""
 
 
+def test_a_hand_seated_master_without_swarm_env_starts_off_until_operator_on(ledgers, tmp_path, monkeypatch):
+    from hooks.context import master_coding
+
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path / "home"))
+    env = {"LEDGER_DIR": str(ledgers)}
+    master_coding.record_seat("m1", "demo", "master@a1-1")
+    assert not operator_mode.present("m1", env, now=100)
+    operator_mode.observe("m1", "triage the priorities", True, now=100)
+    assert operator_mode.question_block("AskUserQuestion", "m1", env) == MASTER_ASK.format(
+        slug="demo", name="master@a1-1"
+    )
+    assert operator_mode.reply_refusal({"session_id": "m1", "last_assistant_message": LONG}, env) != ""
+    operator_mode.observe("m1", "operator on", True, now=101)
+    assert operator_mode.question_block("AskUserQuestion", "m1", env) == ""
+    assert operator_mode.present("m2", env, now=101)
+
+
 def test_operator_on_lifts_the_limit_and_operator_off_restores_it():
     operator_mode.observe("s1", "operator on", True, now=100)
     assert operator_mode.reply_refusal({"session_id": "s1", "last_assistant_message": LONG}, WORKSTATION) == ""
