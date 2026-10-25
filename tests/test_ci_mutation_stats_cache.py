@@ -413,6 +413,66 @@ def test_import_scoped_stats_only_recollect_affected_files(tmp_path, changed):
     }
 
 
+@pytest.mark.parametrize("change", ["add_source", "add_test", "add_document", "remove_source"])
+def test_unrelated_inventory_changes_keep_stats_and_function_mapping(tmp_path, change):
+    from scripts.ci_mutation.stats_cache import collect_cached_stats
+
+    root = tmp_path / "repo"
+    path = "tests/test_a.py"
+    _repository(root, {path: "import scripts.a\n", "scripts/a.py": "value = 1\n", "other.py": "value = 2\n"})
+    calls = []
+    result = {
+        "status": 0,
+        "tests": {"scripts.a.x_value": [f"{path}::test_value"]},
+        "durations": {f"{path}::test_value": 1},
+        "cpu": 1,
+    }
+
+    def collect(chosen):
+        calls.append(chosen)
+        return [result]
+
+    cache = tmp_path / "cache"
+    cold = collect_cached_stats(root, cache, {"scripts/a.py": [1]}, [path], [], collect)
+    if change == "remove_source":
+        subprocess.run(["git", "rm", "--", "other.py"], cwd=root, check=True)
+    else:
+        added = {"add_source": "unrelated.py", "add_test": "tests/test_other.py", "add_document": "NOTES.md"}[change]
+        (root / added).write_text("value = 3\n")
+        subprocess.run(["git", "add", "--", added], cwd=root, check=True)
+    warm = collect_cached_stats(root, cache, {"scripts/a.py": [1]}, [path], [], collect)
+    assert calls == [[path]]
+    assert warm == cold
+
+
+@pytest.mark.parametrize("added", ["tests/conftest.py", "scripts/missing.py", "assets/data.txt"])
+def test_new_applicable_discovery_inputs_recollect_stats(tmp_path, added):
+    from scripts.ci_mutation.stats_cache import collect_cached_stats
+
+    root = tmp_path / "repo"
+    path = "tests/test_a.py"
+    _repository(
+        root,
+        {
+            path: "import scripts.missing\nfrom pathlib import Path\nPath('assets/data.txt')\n",
+            "scripts/a.py": "value = 1\n",
+        },
+    )
+    calls = []
+
+    def collect(chosen):
+        calls.append(chosen)
+        return [{"status": 0, "tests": {}, "durations": {}, "cpu": 1}]
+
+    cache = tmp_path / "cache"
+    collect_cached_stats(root, cache, {}, [path], [], collect)
+    (root / added).parent.mkdir(parents=True, exist_ok=True)
+    (root / added).write_text("value = 2\n")
+    subprocess.run(["git", "add", "--", added], cwd=root, check=True)
+    collect_cached_stats(root, cache, {}, [path], [], collect)
+    assert calls == [[path], [path]]
+
+
 @pytest.mark.parametrize("changed", ["documentation", "unrelated_fixture", "comment", "initializer"])
 def test_stats_reuse_tracks_only_applicable_import_and_fixture_inputs(tmp_path, changed):
     from scripts.ci_mutation.stats_cache import collect_cached_stats
