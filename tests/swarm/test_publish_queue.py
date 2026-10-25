@@ -11,6 +11,10 @@ pytestmark = pytest.mark.unit
     [
         "git@github.com:example/repo.git",
         "ssh://git@github.com/example/repo.git",
+        "ssh://git@github.com:22/example/repo.git",
+        "ssh://git@ssh.github.com:443/example/repo.git",
+        "git://github.com/example/repo.git",
+        "https://GitHub.com/example/repo.git",
         "https://github.com/example/repo.git",
         "https://github.com/example/repo",
     ],
