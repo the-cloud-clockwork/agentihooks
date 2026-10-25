@@ -117,7 +117,10 @@ def test_preflight_runs_the_suite_speed_contracts_after_the_touched_tests_when_a
     steps, names = _steps(workflow["jobs"]["touched-tests"])
     run_at = names.index("Run the suite speed contracts")
     assert run_at == names.index("Run the tests the branch touches") + 1
-    assert steps[run_at]["if"] == "steps.touched.outputs.files != ''"
+    assert steps[run_at]["if"] in (
+        "steps.touched.outputs.files != ''",
+        "steps.open.outputs.open == 'false' && steps.touched.outputs.files != ''",
+    )
     assert steps[run_at]["run"] == "python -m pytest tests/test_suite_speed.py --tb=short -p no:cacheprovider"
     assert not any(step.get("continue-on-error") for step in steps)
 
@@ -445,8 +448,6 @@ def test_only_the_push_preflight_reports_the_check_that_proves_a_commit_graded()
 
 def test_touched_tests_job_selects_and_runs_the_tests_the_branch_touches():
     job = _workflow()["jobs"]["touched-tests"]
-    assert job["needs"] == "plan"
-    assert job["if"] == "${{ !cancelled() && needs.plan.outputs.open == 'false' }}"
     assert job["timeout-minutes"] == 15
     steps, names = _steps(job)
     select = steps[names.index("Select the tests the branch touches")]
@@ -454,14 +455,34 @@ def test_touched_tests_job_selects_and_runs_the_tests_the_branch_touches():
     assert 'changed_files(root, "origin/dev", "HEAD")' in select["run"]
     assert "if is_test(path) and (root / path).is_file()" in select["run"]
     browser = steps[names.index("Install the browser that page tests drive")]
-    assert browser["if"] == "steps.touched.outputs.browser == 'true'"
+    assert browser["if"] in (
+        "steps.touched.outputs.browser == 'true'",
+        "steps.open.outputs.open == 'false' && steps.touched.outputs.browser == 'true'",
+    )
     run = steps[names.index("Run the tests the branch touches")]
-    assert run["if"] == "steps.touched.outputs.files != ''"
+    assert run["if"] in (
+        "steps.touched.outputs.files != ''",
+        "steps.open.outputs.open == 'false' && steps.touched.outputs.files != ''",
+    )
     assert run["env"]["FILES"] == "${{ steps.touched.outputs.files }}"
     assert run["run"] == (
         'read -ra files <<< "$FILES"\npython -m pytest "${files[@]}" -n auto --dist loadgroup --tb=short -p no:cacheprovider\n'
     )
     assert not any(step.get("continue-on-error") for step in steps)
+
+
+def test_touched_tests_admission_preserves_both_supported_job_graphs():
+    jobs = _workflow()["jobs"]
+    job = jobs["touched-tests"]
+    if job.get("needs") == "plan":
+        assert job["if"] == "${{ !cancelled() && needs.plan.outputs.open == 'false' }}"
+        return
+    assert "needs" not in job
+    assert job["if"] == "${{ github.event_name == 'push' && !github.event.deleted }}"
+    assert job["steps"][0] == jobs["plan"]["steps"][0]
+    for step in job["steps"][1:]:
+        assert step["if"].startswith("steps.open.outputs.open == 'false'")
+    assert not any(step.get("continue-on-error") for step in job["steps"])
 
 
 def test_touched_test_selection_supplies_the_automatic_worker_limit():

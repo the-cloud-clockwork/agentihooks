@@ -3,10 +3,6 @@ name: Ledger equivalence
 on:
   pull_request:
     branches: [dev]
-    paths:
-      - scripts/swarm_ledger/**
-      - tests/swarm_ledger/**
-      - .github/workflows/equivalence.yml
 
 permissions:
   contents: read
