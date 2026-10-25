@@ -1,6 +1,8 @@
 import json
 from pathlib import Path
 
+import pytest
+
 from scripts.ci_mutation.stats import SharedStats, load_parts, stats_key, write_part
 
 SELECTED = {"hooks/a.py": ({3, 1}, ["tests/test_b.py", "tests/test_a.py"]), "hooks/b.py": (set(), [])}
@@ -177,6 +179,7 @@ def test_statistics_collect_runtime_dependencies_with_plugin_discovery_disabled(
     assert "scripts/untracked.py" not in result["dependencies"][node]
 
 
+@pytest.mark.wall_clock
 def test_a_stats_bucket_returns_while_a_test_left_a_thread_running(tmp_path, monkeypatch):
     import threading
     import time
@@ -205,12 +208,11 @@ def test_a_stats_bucket_returns_while_a_test_left_a_thread_running(tmp_path, mon
     assert results[0]["files"] == ["tests/test_sample.py"]
 
 
+@pytest.mark.wall_clock
 def test_a_failing_stats_bucket_reports_exit_one_and_its_error_while_a_thread_runs(tmp_path, monkeypatch, capfd):
     import threading
     import time
     from types import SimpleNamespace
-
-    import pytest
 
     from scripts.ci_mutation.selection import run_stats_buckets
 
@@ -236,8 +238,6 @@ def test_a_failing_stats_bucket_reports_exit_one_and_its_error_while_a_thread_ru
 
 
 def test_a_stats_bucket_passes_its_arguments_and_exits_zero_or_one_in_process(monkeypatch, capfd):
-    import pytest
-
     from scripts.ci_mutation import selection
 
     arguments = (object(), object(), ["tests/test_sample.py"], Path("stats-0.json"), "base")
