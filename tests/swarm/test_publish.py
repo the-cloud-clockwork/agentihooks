@@ -1361,7 +1361,7 @@ def test_parked_successor_restacks_and_publishes_with_predecessor_checkout_prese
     if prepared:
         result = publish.prepare("swarm", p.agent, str(repository), p.ledger)
         assert result["worktree"] == str(root)
-        assert p.task["branch"] == "predecessor"
+        assert p.task["branch"] == "engineer-test"
     predecessor = tmp_path / "predecessor"
     git(repository, "worktree", "add", "-b", "predecessor", str(predecessor), "origin/predecessor")
     monkeypatch.chdir(root)
