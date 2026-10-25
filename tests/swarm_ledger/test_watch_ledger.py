@@ -349,6 +349,35 @@ def test_a_patch_that_cannot_apply_reconnects_without_a_cursor(monkeypatch, caps
     assert calls == [None, None]
 
 
+@pytest.mark.parametrize("swallowed", [False, True])
+def test_a_stop_request_survives_an_ignored_exit_exception(monkeypatch, swallowed):
+    make_ledger()
+    handlers = []
+
+    def credentials(slug):
+        with pytest.raises(SystemExit) as stopped:
+            handlers[0]()
+        assert stopped.value.code == 0
+        if not swallowed:
+            raise stopped.value
+        return {}
+
+    def stream(*args):
+        pytest.fail("stream connected after SIGTERM")
+
+    monkeypatch.setattr(watch_ledger.signal, "signal", lambda number, handler: handlers.append(handler))
+    monkeypatch.setattr(watch_ledger.atexit, "register", lambda *args, **kwargs: None)
+    monkeypatch.setattr(watch_ledger, "credentials", credentials)
+    monkeypatch.setattr(watch_ledger, "stream", stream)
+    monkeypatch.setattr(sys, "argv", ["watch_ledger.py", SLUG, "--as", "watcher"])
+    if swallowed:
+        watch_ledger.main()
+    else:
+        with pytest.raises(SystemExit) as stopped:
+            watch_ledger.main()
+        assert stopped.value.code == 0
+
+
 def test_a_comment_on_a_hidden_done_task_still_reaches_its_claimant(capsys):
     members = {"engineer@demo-0001": {}, "master@demo-0001": {"role": "orchestrator"}}
     comment = {"rev": 2, "by": "operator", "kind": "comment added", "target": "tasks/t1", "id": "c1", "text": "look"}
