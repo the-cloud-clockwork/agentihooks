@@ -72,6 +72,7 @@ SAVE_VECTOR = (
     "vector = excluded.vector"
 )
 COUNT_PENDING = f"SELECT COUNT(*), MIN(queued_at) FROM embedding_work WHERE {INDEX_KEY}"
+COUNT_WORK = f"SELECT COUNT(*) FROM embedding_work WHERE {INDEX_KEY}"
 VECTORS = (
     f"SELECT chunk_id, content_hash, model, dimension, vector FROM chunk_vector WHERE {SESSION_KEY} ORDER BY chunk_id"
 )
@@ -232,8 +233,10 @@ class IndexWorker:
     def activate(self, domain: str, generation: str, revision: int) -> int:
         with self.catalog._transaction():
             self._generation(domain, generation)
-            pending = self.catalog.db.execute(COUNT_PENDING, (domain, generation)).fetchone()[0]
-            if pending or self.catalog.db.execute(UNCOVERED, (domain, generation, generation)).fetchone()[0]:
+            if (
+                self.catalog.db.execute(COUNT_WORK, (domain, generation)).fetchone()[0]
+                or self.catalog.db.execute(UNCOVERED, (domain, generation, generation)).fetchone()[0]
+            ):
                 raise Conflict(INCOMPLETE)
             if self.active(domain)["revision"] != revision:
                 raise Conflict(STALE_CUTOVER)

@@ -221,6 +221,9 @@ def test_a_batch_is_bounded_by_size_and_characters(inputs, tmp_path):
     assert [c["chunk_id"] for c in index.worker._batch(DOMAIN, GENERATION)] == [ordered[0]["chunk_id"]]
     index.worker.limits = Limits(3, 1, 1)
     assert [c["chunk_id"] for c in index.worker._batch(DOMAIN, GENERATION)] == [ordered[0]["chunk_id"]]
+    three = two + len(ordered[2]["preview"])
+    index.worker.limits = Limits(3, three - 1, 1)
+    assert [c["chunk_id"] for c in index.worker._batch(DOMAIN, GENERATION)] == [c["chunk_id"] for c in ordered[:2]]
 
 
 def test_a_batch_drops_work_whose_chunk_is_gone_or_changed(inputs, tmp_path):
@@ -244,6 +247,15 @@ def test_a_commit_skips_work_already_taken(inputs, tmp_path):
     assert taken == [chunk["chunk_id"] for chunk in batch]
     assert index.worker._commit((DOMAIN, GENERATION), MODEL, batch, [[1.0] * 4] * len(batch)) == []
     assert [json.loads(row[8]) for row in index.worker.snapshot()["chunk_vector"]] == [[0.0] * 4] * len(batch)
+
+
+def test_a_commit_writes_the_rest_of_a_batch_after_a_taken_chunk(inputs, tmp_path):
+    index = indexed(inputs, tmp_path)
+    index.enqueue(10.0)
+    batch = index.worker._batch(DOMAIN, GENERATION)
+    index.session.catalog.db.execute("DELETE FROM embedding_work WHERE chunk_id = ?", (batch[0]["chunk_id"],))
+    written = index.worker._commit((DOMAIN, GENERATION), MODEL, batch, [[0.0] * 4] * len(batch))
+    assert written == [chunk["chunk_id"] for chunk in batch[1:]] and len(batch) == 2
 
 
 def test_a_transient_failure_keeps_earlier_batches_and_stops(inputs, tmp_path):
