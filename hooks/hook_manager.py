@@ -2297,9 +2297,9 @@ def on_stop(payload: dict) -> None:
     """Handle Stop event."""
     _stop_block = None
     try:
-        from hooks.context import conditions
+        from hooks.context import conditions, operator_mode
 
-        _stop_block = conditions.stop_block(payload)
+        _stop_block = conditions.stop_block(payload) or operator_mode.reply_refusal(payload) or None
     except Exception as e:
         log("conditions stop failed", {"error": str(e)})
     if _stop_block is not None:
