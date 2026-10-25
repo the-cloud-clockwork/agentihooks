@@ -1125,7 +1125,10 @@ def test_selected_test_ids_keep_durations_recorded_with_an_at_suffix():
     fresh = [
         {
             "cpu": 1,
-            "tests": {"m.x_f": ["tests/test_a.py::test_x@1", "tests/test_a.py::test_y[1]@2"]},
+            "tests": {
+                "m.x_f": ["tests/test_a.py::test_x@1", "tests/test_a.py::test_y[1]@2", "tests/test_b.py::test_z"]
+            },
+            "dependencies": {"tests/test_a.py::test_x@1": ["m.py"], "tests/test_b.py::test_z": ["m.py"]},
             "durations": {
                 "tests/test_a.py::test_x@1": 1,
                 "tests/test_a.py::test_x@a@b": 3,
@@ -1140,3 +1143,4 @@ def test_selected_test_ids_keep_durations_recorded_with_an_at_suffix():
     }
     assert sliced["tests/test_a.py::test_y[1]"][0]["tests"] == {"m.x_f": ["tests/test_a.py::test_y[1]@2"]}
     assert sliced["tests/test_a.py"][0]["durations"] == fresh[0]["durations"]
+    assert sliced["tests/test_a.py"][0]["dependencies"] == {"tests/test_a.py::test_x@1": ["m.py"]}
