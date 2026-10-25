@@ -250,13 +250,13 @@ class HiveLaunch:
         from scripts.swarm.commands import hive_id
 
         if lane != placement.MASTER:
-            for hive in hives:
+            for index, hive in enumerate(hives):
                 if hive["id"] == hive_id():
                     bound = local_slots.maximum(self.store, self.slug, hive["max_agents"])
                     taken = local_slots.held(self.store, hive["id"], self.slug, task["id"])
                     limited = admission.capped(admission.Room(hive["room"], **ROOM_DETAILS), taken, bound)
                     if limited.room < hive["room"]:
-                        hive["room"], hive["refusal"] = limited.room, admission.refusal(limited)
+                        hives[index] = {**hive, "room": limited.room, "refusal": admission.refusal(limited)}
         placing = _Placing(config, task, saved, decision, role, rows, hives, now)
         found = self._account_selection(placing, harness)
         if auto and harness == "codex" and isinstance(found, placement.Wait):

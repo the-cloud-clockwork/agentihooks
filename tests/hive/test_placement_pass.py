@@ -142,3 +142,19 @@ def test_a_placement_pass_loads_the_hives_once_and_the_next_pass_reloads(setup, 
     launch.placement_cache = {}
     assert launch.hives() is not passed
     assert len(loads) == 4
+
+
+def test_a_local_slot_limit_leaves_the_pass_hives_unchanged_for_later_tasks(setup, monkeypatch):  # noqa: F811
+    import copy
+
+    from scripts.hive import admission
+    from scripts.hive.placement import Wait
+    from scripts.swarm import commands
+
+    monkeypatch.setattr(commands, "hive_id", lambda: "remote")
+    monkeypatch.setattr(admission, "capped", lambda found, agents, maximum: admission.Room(0, "max agents", "full"))
+    launch = setup.launcher
+    launch.placement_cache = {}
+    before = copy.deepcopy(launch.hives())
+    assert isinstance(launch.select(setup.config, "eng", {"id": "one"}), Wait)
+    assert launch.hives() == before
