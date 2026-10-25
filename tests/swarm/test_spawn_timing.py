@@ -83,3 +83,12 @@ def test_a_failed_launch_reports_its_failure_once_under_the_spawn_step(store, ca
     assert [entry for entry in reported if entry[1] == "herdr down"] == [("scripts.swarm.tick._spawn", "herdr down")]
     (launch,) = [row for row in finished(capsys) if row["step"] == timing.named(FakeRuntime.spawn)]
     assert (launch["outcome"], launch["error"]) == ("error", "scripts.swarm.tick.SpawnError")
+
+
+def test_the_spawn_order_follows_the_dispatched_key_over_the_ledger_rank(store, monkeypatch):
+    ledger = FakeLedger([{"id": "t1", "lane": "eng", "rank": "urgent"}, {"id": "t2", "lane": "eng", "rank": "low"}])
+    monkeypatch.setattr(preempt, "yielding", lambda *args: lambda task: (-int(task["id"][1:]),))
+    order, _ = tick_module._spawn_order(
+        "sw", store.config("sw"), store, [], ledger.rows, ledger.state("sw"), FakeRuntime()
+    )
+    assert [task["id"] for _, task in order] == ["t2", "t1"]
