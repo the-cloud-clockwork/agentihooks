@@ -18,6 +18,7 @@ from scripts.routing import master_account
 from scripts.routing.settings import SettingsStore, open_store
 
 ROUTE = "master-login"
+ORDER_ENV = "AGENTIHOOKS_MASTER_LOGIN_ORDER"
 LANE = "master"
 SETTINGS = ["--settings", '{"forceLoginMethod":"claudeai"}']
 LOGIN = ["auth", "login"]
@@ -433,6 +434,16 @@ def _offered(bao: openbao_kv.OpenBao | None) -> dict[int, dict[str, str]]:
     return {number: copy for number, copy in copies.items() if _private(home(number)) or copy.get("grant")}
 
 
+def _preferred() -> dict[str, int]:
+    ranks: dict[str, int] = {}
+    for name in os.environ.get(ORDER_ENV, "").split(","):
+        try:
+            ranks.setdefault(aicode_tokens.slug(name.strip()), len(ranks))
+        except aicode_tokens.SlugError:
+            continue
+    return ranks
+
+
 def _take(name: str, bao: openbao_kv.OpenBao | None) -> tuple[int, int, dict[str, str]]:
     from scripts import master_logins
 
@@ -448,7 +459,15 @@ def _take(name: str, bao: openbao_kv.OpenBao | None) -> tuple[int, int, dict[str
     now, held = time.time(), []
     order = list(offered)
     if len(offered) > 1:
-        order.sort(key=lambda number: (-master_logins.left(named[number], now), number != slot(), number))
+        ranks = _preferred()
+        order.sort(
+            key=lambda number: (
+                ranks.get(named[number], len(ranks)),
+                -master_logins.left(named[number], now),
+                number != slot(),
+                number,
+            )
+        )
     for number in order:
         with _locked(root(number)) as folder:
             try:
