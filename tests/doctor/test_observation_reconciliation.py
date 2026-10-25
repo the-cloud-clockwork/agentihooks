@@ -4,7 +4,7 @@ import pytest
 
 from hooks.observability import agent_trace
 from scripts.doctor import registry
-from tests.doctor.test_registry import AGENT, T0, Langfuse, _at, _session, _trace, cursors
+from tests.doctor.test_registry import AGENT, Langfuse, _session, _trace, cursors
 
 __all__ = ["cursors"]
 
@@ -14,15 +14,15 @@ def test_live_reader_reconciles_paged_identities_instead_of_the_inflated_aggrega
     transcript = _session(
         cursors,
         "sid",
-        [_at(T0), _at(T0 + 1000)],
+        ["2026-10-07T08:00:00Z", "2026-10-07T08:00:01Z"],
         1,
         paged={"spans": 9},
-        accepted_at=_at(T0 + 10_000),
+        accepted_at="2026-10-07T08:00:10Z",
     )
     records = [json.loads(line) for line in transcript.read_text().splitlines()]
     first = agent_trace.session_spans(records[:1], agent_trace.Identity("sid"))
     ids = {f"{span.span_id:016x}" for span in first}
-    rows = [{"id": key, "startTime": _at(T0), "endTime": _at(T0)} for key in sorted(ids)]
+    rows = [{"id": key, "startTime": "2026-10-07T08:00:00Z", "endTime": "2026-10-07T08:00:00Z"} for key in sorted(ids)]
     if missing:
         rows.pop()
     backend = Langfuse([_trace("tr", "sid")], rows, total=len(rows))
