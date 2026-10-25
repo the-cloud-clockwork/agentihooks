@@ -118,6 +118,27 @@ def test_a_focused_id_label_keeps_its_focus_ring_through_later_renders(tab):
     assert label.evaluate("el => getComputedStyle(el).outlineStyle") != "none"
 
 
+def test_an_id_label_focused_while_a_render_runs_keeps_its_focus_ring(tab):
+    tab.locator("#tasks-box > summary").click()
+    label = tab.locator("#item-tasks-rb3c .task-id")
+    label.wait_for(state="visible")
+    label.focus()
+    tab.keyboard.press("Tab")
+    tab.keyboard.press("Shift+Tab")
+    tab.evaluate(
+        """async () => {
+          const main = document.querySelector("script[type=module][src$='/js/main.js']").src;
+          const {render} = await import(new URL('render.js', main));
+          document.activeElement.blur();
+          const running = render(null, true);
+          document.querySelector("#item-tasks-rb3c .task-id").focus();
+          await running;
+        }"""
+    )
+    assert label.evaluate("el => el === document.activeElement && el.matches(':focus-visible')")
+    assert label.evaluate("el => getComputedStyle(el).outlineStyle") != "none"
+
+
 def test_a_priorities_link_opens_the_folded_tasks_and_scrolls_to_the_card(tab):
     assert not tab.locator("#item-tasks-rb3c").is_visible()
     tab.locator("#priorities .prio-link").click()
