@@ -21,18 +21,18 @@ def docker(*args, timeout=30):
     return subprocess.check_output(["docker", *args], text=True, timeout=timeout, stderr=subprocess.STDOUT).strip()
 
 
-def state(container):
-    return json.loads(docker("inspect", "--format", "{{json .State}}", container))
+def state(container, timeout=30):
+    return json.loads(docker("inspect", "--format", "{{json .State}}", container, timeout=timeout))
 
 
 def exit_code(container, timeout):
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
-        observed = state(container)
+        observed = state(container, timeout=max(deadline - time.monotonic(), 0.1))
         if not observed["Running"]:
             return observed["ExitCode"]
         time.sleep(0.2)
-    raise subprocess.TimeoutExpired(["docker", "inspect", container], timeout)
+    raise subprocess.TimeoutExpired(["docker", "wait", container], timeout)
 
 
 def snapshot(container):
@@ -371,7 +371,7 @@ def rollback_case(image, prior_image, output):
         if prior:
             docker("rm", "--force", prior)
         docker("kill", "--signal", "TERM", current)
-        docker("wait", current, timeout=12)
+        exit_code(current, 12)
         docker("rm", "--force", current)
 
 
