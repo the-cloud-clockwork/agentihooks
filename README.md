@@ -185,7 +185,7 @@ its own git worktree and herdr pane.
 |---|---|
 | Master | The one agent you talk to. Keeps the ledger, turns requests into tasks, troubleshoots read only. Never edits code. |
 | Planner | Slices a phase into pull request sized tasks with their seams, territory and proof contract. |
-| Dispatcher | Settles what the tick could not: ranking, grouping, the lane split and stale priorities. |
+| Dispatcher | Settles what the tick could not: ranking, grouping and stale priorities. |
 | Engineer | Works one code task end to end and closes it with one merged pull request. |
 | CI engineer | Owns red pipelines and CI speed, one change per task. |
 | QA | Reads proofs, gate, mutation and smoke results against their contracts. Never edits. |

@@ -240,12 +240,12 @@ def test_a_covered_stage_proposes_no_task_and_fires_again_once_the_cover_lapses(
     put(store, cover_name, item, "owned by the fix")
     fire(store, stage)
     run = bottleneck_remedy.remedy_pass
-    assert run(SLUG, store, FakeLedger(), ledger_doc(), lambda: None, NOW) == []
+    assert run(SLUG, store, FakeLedger(), ledger_doc(), NOW) == []
     assert master_items(store) == []
     assert store.redis.hgetall(store.key(SLUG, bottleneck_remedy.KEY)) == {}
 
     closed = ledger_doc("done", phase_done=True)
-    assert run(SLUG, store, FakeLedger(), closed, lambda: None, NOW)
+    assert run(SLUG, store, FakeLedger(), closed, NOW)
     [text] = master_items(store)
     assert text.startswith(f"The bottleneck hunter proposes a task for the {stage.replace('_', ' ')} stage")
 

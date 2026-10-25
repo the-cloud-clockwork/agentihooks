@@ -10,6 +10,7 @@ import os
 import sys
 import threading
 import time
+from contextlib import contextmanager
 from dataclasses import dataclass, field, replace
 from itertools import count
 from typing import Protocol
@@ -44,7 +45,6 @@ from scripts.swarm import (
     freeze,
     grouping,
     input_wait,
-    lane_split,
     launch_check,
     ledger_events,
     ledger_probe,
@@ -258,7 +258,6 @@ def tick(slug, store, ledger, runtime, now_ms):
             actions += skip_refused(master_scale.run, slug, config, store, runtime, doc, now_ms)
             actions += skip_refused(master_seat_alarm.run, slug, store, ledger, runtime, doc)
             actions += skip_refused(dispatcher.rank_pass, slug, config, store, ledger, doc, now_ms)
-            actions += skip_refused(lane_split.step, slug, config, store, doc, now_ms)
             actions += skip_refused(bottleneck_remedy.step, slug, store, ledger, doc, now_ms)
             if config.state == "running" and config.engine != EVENTS_ENGINE:
                 actions += skip_refused(_spawn, slug, config, store, ledger, runtime, rows, doc, now_ms)
@@ -1032,11 +1031,38 @@ def _spawn_stop(slug, config, store, runtime, now_ms):
     return ""
 
 
-def _budget_spent(task, begun, tried):
-    spent = time.monotonic() - begun
-    if tried and spent + spent / tried >= SPAWN_BUDGET_S:
-        return f"spent this pass's {SPAWN_BUDGET_S} second launch budget, {task['id']} waits a pass"
-    return None
+class _LaunchClock:
+    def __init__(self):
+        self.begun, self.tried, self.forgiven, self.free, self.failing = time.monotonic(), 0, 0, 0.0, ""
+
+    def spent(self, task):
+        spent, charged = time.monotonic() - self.begun - self.free, self.tried - self.forgiven
+        if charged and spent + spent / charged >= SPAWN_BUDGET_S:
+            return f"spent this pass's {SPAWN_BUDGET_S} second launch budget, {task['id']} waits a pass"
+        return None
+
+    @contextmanager
+    def launch(self):
+        at = time.monotonic()
+        self.tried += 1
+        try:
+            yield
+        except Exception as exc:
+            if not self.forgiven:
+                self.free, self.forgiven = time.monotonic() - at, 1
+            self.failing = _steered_off(exc) or self.failing
+            raise
+
+
+def _steer(slug, store, task, failing):
+    avoid = store.failed_harness(slug, task["id"]) or failing
+    return {"avoid_harness": avoid} if avoid else {}
+
+
+def _steered_off(error):
+    if isinstance(error, SpawnError) and error.status != "unavailable":
+        return error.harness
+    return ""
 
 
 def _record_spawn_failure(slug, store, record, error, now_ms):
@@ -1047,7 +1073,7 @@ def _record_spawn_failure(slug, store, record, error, now_ms):
         transfers.detach(store, slug, record)
     else:
         transfers.failed(store, slug, record)
-        store.note_launch_failure(slug, record.task, str(error))
+        store.note_launch_failure(slug, record.task, str(error), _steered_off(error))
     record = replace(record, pane_id=getattr(error, "pane_id", ""))
     store.record_launch(slug, record, "waiting" if waiting else "failed", str(error))
     if not waiting:
@@ -1068,12 +1094,12 @@ def _spawn(slug, config, store, ledger, runtime, rows, doc, now_ms):
     order, actions = _spawn_order(slug, config, store, agents, rows, doc, runtime)
     actions += _block_unresolved(slug, ledger, rows, order)
     order = [(lane, task) for lane, task in order if profile_first.UNRESOLVED not in task]
-    begun, tried = time.monotonic(), 0
+    clock = _LaunchClock()
     for lane, task in order:
         expected = {"claimed_by": task.get("claimed_by", ""), "claim_generation": task.get("claim_generation", 0)}
         if held:
             return actions + held
-        if stop := _spawn_stop(slug, config, store, runtime, now_ms) or _budget_spent(task, begun, tried):
+        if stop := _spawn_stop(slug, config, store, runtime, now_ms) or clock.spent(task):
             return actions + [stop]
         blocked = (
             _lives_spent(slug, store, ledger, rows, task)
@@ -1133,11 +1159,16 @@ def _spawn(slug, config, store, ledger, runtime, rows, doc, now_ms):
             store.record_launch(slug, record, "pending")
             store.seats.occupy(seat, name, now_ms)
             task["transfer"] = transfers.attach(store, slug, record)
-            tried += 1
-            placed = runtime.spawn(config, lane, name, {**primed(store, slug, seat, task), ACK_LATER: True})
+            primed_task = {
+                **primed(store, slug, seat, task),
+                ACK_LATER: True,
+                **_steer(slug, store, task, clock.failing),
+            }
             from scripts.swarm_v2.runtime import codex
 
-            launched = codex.admit_legacy(store, slug, placed_record(record, placed), runtime)
+            with clock.launch():
+                placed = runtime.spawn(config, lane, name, primed_task)
+                launched = codex.admit_legacy(store, slug, placed_record(record, placed), runtime)
         except Exception as exc:
             actions += _not_launched(slug, store, ledger, runtime, rows, Failed(record, task, exc), now_ms)
             continue
@@ -1164,6 +1195,7 @@ def _started(slug, config, store, ledger, doc, started, now_ms):
     store.count_spawn(slug, placed.harness)
     _spend_local(store, started.launched, now_ms)
     store.clear_handoff(slug, task["id"])
+    store.clear_failed_harness(slug, task["id"])
     store.redis.hdel(store.key(slug, "launch-assignments"), task["id"])
     profile_first.spawned(slug, store, task["id"])
     return [

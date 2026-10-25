@@ -1,4 +1,3 @@
-import json
 import sys
 import threading
 from typing import TYPE_CHECKING
@@ -66,7 +65,7 @@ class Publishing:
                 raise TimeoutError(f"stream publications still pending after {timeout} s")
 
     def get_document(self, slug: str) -> dict:
-        return json.loads(self.current(slug).text)
+        return self.current(slug).mutable()
 
     def apply_ops(
         self, slug: str, changes: list | None = None, ops: list | None = None, gate=None, *, copy_state: bool = True
