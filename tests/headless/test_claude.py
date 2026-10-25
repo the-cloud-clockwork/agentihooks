@@ -1,4 +1,6 @@
 import json
+import subprocess
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -54,7 +56,7 @@ def test_route_keeps_only_home_path_and_the_routed_token(monkeypatch):
 
     monkeypatch.setattr(claude_quota_balancer, "select_credential", select)
     monkeypatch.setattr(account_sessions, "sessions_by_account", lambda: {"b": 1})
-    monkeypatch.setattr(operator_env, "accounts", lambda environ: {"AH_CC_TOKEN_c": "token-c"})
+    monkeypatch.setattr(operator_env, "accounts", lambda environ: {"AH_CC_TOKEN_c": environ["OTHER"]})
     environ = {"HOME": "/h", "PATH": "/p", "AH_CC_TOKEN_a": "token-a", "OTHER": "x"}
     assert claude.route(environ) == {
         "HOME": "/h",
@@ -63,7 +65,7 @@ def test_route_keeps_only_home_path_and_the_routed_token(monkeypatch):
         "CLAUDE_CODE_OAUTH_TOKEN": "token-b",
     }
     assert seen == {
-        "pool": {**environ, "AH_CC_TOKEN_c": "token-c"},
+        "pool": {**environ, "AH_CC_TOKEN_c": "x"},
         "sessions": {"b": 1},
         "exclude": [account_sessions.API_ACCOUNT],
     }
@@ -87,9 +89,25 @@ def test_reply_prefers_the_structured_output_of_the_last_result_event():
             json.dumps(["list"]),
             json.dumps({"type": "result", "result": "{}", "structured_output": {"verdict": "pass"}}),
             json.dumps({"type": "system"}),
+            "trailing noise",
         ]
     )
     assert claude.reply(stdout) == {"verdict": "pass"}
+
+
+def test_invoke_runs_the_command_in_the_routed_environment(monkeypatch):
+    seen = []
+
+    def execute(command, env):
+        seen.append((command, env))
+        return subprocess.CompletedProcess(
+            command, 0, json.dumps({"type": "result", "structured_output": {"v": 1}}), ""
+        )
+
+    monkeypatch.setattr(claude, "execute", execute)
+    request = Request("sealed", "P", "I", SCHEMA, "sonnet", "low")
+    assert claude.invoke(request, {"PATH": "/p"}, Path("/w")) == {"v": 1}
+    assert seen == [(claude.command(request), {"PATH": "/p"})]
 
 
 def test_reply_falls_back_to_the_result_text():

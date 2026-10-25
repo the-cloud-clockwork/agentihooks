@@ -37,7 +37,7 @@ def run(
     adapter = ADAPTERS[name]
     routed = adapter.route(os.environ)
     for _ in range(ATTEMPTS):
-        with tempfile.TemporaryDirectory(prefix="headless-") as work:
+        with tempfile.TemporaryDirectory() as work:
             reply = adapter.invoke(request, routed, Path(work))
         try:
             return validated(reply, schema)
