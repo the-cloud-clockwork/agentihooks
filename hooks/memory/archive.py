@@ -115,8 +115,14 @@ def evidence(catalog: Catalog, store: ObjectStore, grant: Grant, domain: str, se
             ]
         return sources
 
-    complete = _counted(catalog, domain, read)
-    return {"complete": True, "access_domain": domain, "session_uid": session_uid, **found, "sources": complete}
+    verified_sources = _counted(catalog, domain, read)
+    return {
+        "complete": True,
+        "access_domain": domain,
+        "session_uid": session_uid,
+        **found,
+        "sources": verified_sources,
+    }
 
 
 def _slice(catalog, store, reference: dict) -> bytes:
