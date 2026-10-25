@@ -1,0 +1,24 @@
+# Out of reach: a shell path held in a variable, an env wrapper before the shell, os.exec* and os.spawn* with a shell, and shell passed through **kwargs.
+rules:
+  - id: hook-shell-true
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A hook runs a command through a shell, so quoting in a tool input can change what runs. Pass an argument list
+      to subprocess without shell=True.
+    pattern-either:
+      - patterns:
+          - pattern: subprocess.$CALL(..., shell=$SHELL, ...)
+          - pattern-not: subprocess.$CALL(..., shell=False, ...)
+      - patterns:
+          - pattern-either:
+              - pattern: subprocess.$CALL([$SH, "-c", ...], ...)
+              - pattern: subprocess.$CALL(($SH, "-c", ...), ...)
+          - metavariable-regex:
+              metavariable: $SH
+              regex: ^["'](/usr)?(/bin/)?(ba|z|da|k)?sh["']$
+      - pattern: subprocess.getoutput(...)
+      - pattern: subprocess.getstatusoutput(...)
+      - pattern: os.system(...)
+      - pattern: os.popen(...)
+      - pattern: asyncio.create_subprocess_shell(...)

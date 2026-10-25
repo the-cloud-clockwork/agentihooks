@@ -267,7 +267,8 @@ def tick(slug, store, ledger, runtime, now_ms):
             if config.state == "running" and config.engine != EVENTS_ENGINE:
                 seats = preempt.Seats(rows, _ended, _current_owner, ready_in_order)
                 actions += skip_refused(preempt.run, slug, config, store, doc, now_ms, seats)
-                actions += skip_refused(_spawn, slug, config, store, ledger, runtime, rows, doc, now_ms)
+                with _placement_pass(runtime):
+                    actions += skip_refused(_spawn, slug, config, store, ledger, runtime, rows, doc, now_ms)
         actions += skip_refused(dispatch_seat.run, slug, config, store, runtime, doc, now_ms, sleeping)
     actions += skip_refused(_night_watch, slug, store, ledger, runtime, doc, now_ms, sleeping)
     actions += timing.call(master_alarm.run, slug, store, runtime, tick_master.promoted(store, slug))
@@ -878,15 +879,37 @@ def _reopen(slug, ledger, rows, task_id, expected=None):
     return live["state"] == "open"
 
 
-def ready_in_order(slug, store, rows, doc, lane, dispatched=None):
-    return _launch_order(slug, store, _claimable(slug, store, rows, doc, lane, dispatched), dispatched)
+def ready_in_order(slug, store, rows, doc, lane, dispatched=None, claims=None):
+    return _launch_order(slug, store, _claimable(slug, store, rows, doc, lane, dispatched, claims), dispatched)
 
 
 def _owned_tasks(slug, store):
     return {agent.task for agent in store.agents(slug) if agent.state != "finished"}
 
 
-def _claimable(slug, store, rows, doc, lane, dispatched=None):
+def _claimable(slug, store, rows, doc, lane, dispatched=None, claims=None):
+    claims = claims or claim_view(slug, store, rows, doc, dispatched)
+    held = list(claims.held)
+    clear, overlapping = [], []
+    for t in claims.ordered:
+        if readiness.claimable(t, lane, claims.view):
+            mine = t.get("territory") or []
+            if any(_overlaps(mine, other) for other in held):
+                overlapping.append(t)
+                continue
+            clear.append(t)
+            held.append(mine)
+    return clear + overlapping
+
+
+@dataclass(frozen=True)
+class Claims:
+    view: readiness.Snapshot
+    held: list
+    ordered: list
+
+
+def claim_view(slug, store, rows, doc, dispatched=None):
     awaiting = _owned_tasks(slug, store)
     held = [t.get("territory") or [] for t in rows.values() if t.get("state") in ACTIVE]
     config = store.config(slug)
@@ -901,16 +924,7 @@ def _claimable(slug, store, rows, doc, lane, dispatched=None):
         lambda task_id: task_id in awaiting or store.claimant(slug, task_id) is not None,
         lambda task: released(task) and applied(task),
     )
-    clear, overlapping = [], []
-    for t in sorted(rows.values(), key=dispatched or claim_order.key(rows)):
-        if readiness.claimable(t, lane, view):
-            mine = t.get("territory") or []
-            if any(_overlaps(mine, other) for other in held):
-                overlapping.append(t)
-                continue
-            clear.append(t)
-            held.append(mine)
-    return clear + overlapping
+    return Claims(view, held, sorted(rows.values(), key=dispatched or claim_order.key(rows)))
 
 
 def _launch_order(slug, store, tasks, dispatched=None):
@@ -1097,6 +1111,15 @@ def _owner_hold(slug, store, runtime, task):
         return ""
     _release_admission(slug, runtime, task)
     return f"task {task['id']} retains its live owner"
+
+
+@contextmanager
+def _placement_pass(runtime):
+    try:
+        yield
+    finally:
+        if end := getattr(runtime, "end_placement_pass", None):
+            end()
 
 
 def _spawn(slug, config, store, ledger, runtime, rows, doc, now_ms):
@@ -1353,15 +1376,19 @@ def _collect_acks(slug, config, store, ledger, runtime, doc, now_ms):
 def _spawn_order(slug, config, store, agents, rows, doc, runtime):
     from scripts.swarm import capacity
 
+    if begin := getattr(runtime, "begin_placement_pass", None):
+        begin()
+
     decision = timing.timed(capacity.read, store, slug)
     caps = timing.timed(capacity.caps, decision, config)
     dispatched = timing.timed(preempt.yielding, store, slug, doc, timing.timed(dispatcher.claim_key, config, doc))
+    claims = timing.timed(claim_view, slug, store, rows, doc, dispatched)
     queue, waits = [], []
     for lane, cap in caps.items():
         busy = sum(
             1 for a in agents if a.lane == lane and not _ended(a, rows) and _current_owner(a, rows.get(a.task, {}))
         )
-        ready = timing.timed(ready_in_order, slug, store, rows, doc, lane, dispatched)
+        ready = timing.timed(ready_in_order, slug, store, rows, doc, lane, dispatched, claims)
         if "tasks" in decision:
             ready = [task for task in ready if task["id"] in decision["tasks"]]
         ready, refused = timing.timed(

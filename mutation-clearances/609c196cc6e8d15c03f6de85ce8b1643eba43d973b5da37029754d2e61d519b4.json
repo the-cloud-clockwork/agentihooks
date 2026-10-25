@@ -1,0 +1,6 @@
+{
+  "scripts/ci_stats_minutes.py:scripts.ci_stats_minutes.x_main__mutmut_64:06556b5a8f63447b0abec3cc15e05e1ccd8f835c8c3fcde74b62d04d5127376c": {
+    "reader": "standards-reader",
+    "reason": "Omitting indent uses its None default. JSON whitespace changes while every parsed measurement value and mapping remains identical; no formatting requirement applies."
+  }
+}
