@@ -197,7 +197,12 @@ def test_a_placement_pass_checks_the_workstation_herdr_once_and_the_next_pass_ch
 
     write_hive(setup, excluded=["engineer"])
     checks = []
-    monkeypatch.setattr(herdr_host, "server_running", lambda environ: checks.append(environ) is None)
+
+    def running(environ):
+        checks.append(environ)
+        return True
+
+    monkeypatch.setattr(herdr_host, "server_running", running)
     original = RoutedRuntime(setup.herdr, RuntimeRouter([]))
     runtime = controller.FencedRuntime(setup.store, setup.config.slug, setup.held, original, controller.HYBRID)
 
