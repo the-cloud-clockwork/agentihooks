@@ -180,7 +180,7 @@ def test_the_cutoff_logs_only_and_publishes_the_final_handoff(swarm):
     _step(store, ledger, ALERT_AT)
     assert _step(store, ledger, END) == [
         "run window: observe at the cutoff: The run window ended at 25 October 12:00 UTC: new claims stop and 1 "
-        "agents in flight hand off: engineer@abc-0001.",
+        "agent in flight hand off: engineer@abc-0001.",
         "run window: published the final state to the ledger and the watchdog",
     ]
     [row] = gate_log.recent(SLUG)
@@ -189,11 +189,11 @@ def test_the_cutoff_logs_only_and_publishes_the_final_handoff(swarm):
         "gate": "window",
         "kind": "observe",
         "agent": "swarm",
-        "reason": "The run window ended at 25 October 12:00 UTC: new claims stop and 1 agents in flight hand off: "
+        "reason": "The run window ended at 25 October 12:00 UTC: new claims stop and 1 agent in flight hand off: "
         "engineer@abc-0001.",
     }
     assert _items(store, OWNER) == []
-    assert run_window.claims_stopped(store.config(SLUG), END) == ""
+    assert run_window.claims_stopped(store, SLUG, store.config(SLUG), END) == ""
     assert ledger.notices == [ON_LEDGER]
     assert _items(store, "master-watchdog") == [FINAL_OBSERVE]
     assert _step(store, ledger, END + MINUTE) == []
@@ -206,7 +206,7 @@ def test_an_enforced_cutoff_stops_claims_and_asks_agents_to_hand_off(swarm):
     actions = _step(store, ledger, END, gates={"window": "enforce"})
     assert actions[0].startswith("run window: deny at the cutoff: ")
     assert actions[1:] == [
-        "run window: asked 1 agents in flight to hand off",
+        "run window: asked 1 agent in flight to hand off",
         "run window: published the final state to the ledger and the watchdog",
     ]
     assert [row["kind"] for row in gate_log.recent(SLUG)] == ["deny"]
@@ -220,11 +220,11 @@ def test_an_enforced_cutoff_stops_claims_and_asks_agents_to_hand_off(swarm):
         "engineer@abc-0001 on t1. Agents in flight hand off and claims stay stopped. Full handoff: master-watchdog."
     ]
     config = store.config(SLUG)
-    assert run_window.claims_stopped(config, END - 1) == ""
-    assert run_window.claims_stopped(config, END) == (
+    assert run_window.claims_stopped(store, SLUG, config, END - 1) == ""
+    assert run_window.claims_stopped(store, SLUG, config, END) == (
         "the run window ended at 25 October 12:00 UTC, no new claims until swarm set changes the window"
     )
-    assert run_window.claims_stopped(config, END + 600 * MINUTE) != ""
+    assert run_window.claims_stopped(store, SLUG, config, END + 600 * MINUTE) != ""
     assert _step(store, ledger, END + 600 * MINUTE) == []
     assert store.config(SLUG).window == WINDOW
 
@@ -240,17 +240,19 @@ def test_an_off_gate_skips_the_gate_and_still_publishes_the_final_handoff(swarm)
         "engineer@abc-0001 on t1. Claims continue. Full handoff: master-watchdog."
     ]
     assert _items(store, "master@sw") == []
-    assert run_window.claims_stopped(store.update(SLUG, gates={"window": "off"}), END) == ""
+    assert run_window.claims_stopped(store, SLUG, store.update(SLUG, gates={"window": "off"}), END) == ""
 
 
 def test_only_swarm_set_extends_the_window_and_a_new_window_starts_fresh(swarm):
     store, ledger = swarm
     _step(store, ledger, END, gates={"window": "enforce"})
     config = store.update(SLUG, window={"start_ms": START, "minutes": 780})
-    assert run_window.claims_stopped(config, END) == ""
+    assert run_window.claims_stopped(store, SLUG, config, END) == ""
     assert _step(store, ledger, END + MINUTE) == []
     assert store.redis.hget(store.key(SLUG, "run-window"), "cutoff") is None
     assert len(_step(store, ledger, END + 60 * MINUTE)) == 3
+    assert len(_items(store, OWNER)) == 2
+    assert len(_items(store, "master-watchdog")) == 2
 
 
 def test_the_tick_refuses_new_claims_after_an_enforced_cutoff(swarm):
@@ -317,8 +319,15 @@ def test_a_failed_publish_retries_without_repeating_the_gate_or_the_watchdog(swa
 
 def test_a_window_with_no_agent_in_flight_reads_none():
     text = run_window.final(SLUG, "observe", (START, END), {}, [])
-    assert "## Done\nTasks by state: none.\n\n## Stopped at\nIn flight at the cutoff: none.\n\n" in text
-    assert text.endswith("## Read first\nNone\n\n<!-- handoff complete -->")
+    assert text == (
+        "## Intent\nRun window on swarm sw, 25 October 00:00 UTC to 25 October 12:00 UTC, window gate log only.\n\n"
+        "## Done\nTasks by state: none.\n\n"
+        "## Stopped at\nIn flight at the cutoff: none.\n\n"
+        "## Decisions and promises\nOnly swarm set changes the window.\n\n"
+        "## Next\nthe gate only logged, so claims continue; set window-gate=deny to enforce the next cutoff.\n\n"
+        "## Read first\nNone\n\n"
+        "<!-- handoff complete -->"
+    )
 
 
 def test_hub_admission_refuses_a_claim_after_an_enforced_cutoff(swarm):
@@ -410,7 +419,7 @@ def test_the_ledger_notice_fits_the_notifications_window():
     assert len(run_window.notice("observe", (START, END), rows, fits)) == TEXT_KEPT
     over = [AgentRecord("e" * (TEXT_KEPT - len(blank) + 1), "eng", "t1")]
     assert run_window.notice("observe", (START, END), rows, over) == (
-        "Run window ended 25 October 12:00 UTC, gate log only. Tasks: 1 claimed. In flight: 1 agents. Claims "
+        "Run window ended 25 October 12:00 UTC, gate log only. Tasks: 1 claimed. In flight: 1 agent. Claims "
         "continue; window-gate=deny enforces the next cutoff. Full handoff: master-watchdog."
     )
 
@@ -422,3 +431,79 @@ def test_the_ledger_notice_names_every_agent_in_flight():
         "Run window ended 25 October 12:00 UTC, gate skip. Tasks: 1 claimed, 1 pr. In flight: engineer@abc-0001 on "
         "t1, engineer@abc-0002 on t4. Claims continue. Full handoff: master-watchdog."
     )
+
+
+def test_a_failed_alert_send_retries_and_a_resend_is_not_doubled(swarm, monkeypatch):
+    from scripts.inbox.store import InboxStore
+
+    store, ledger = swarm
+    real, calls = InboxStore.send, []
+
+    def send(self, *args, **kwargs):
+        calls.append(args[1])
+        if len(calls) == 1:
+            raise ConnectionError("redis gone")
+        return real(self, *args, **kwargs)
+
+    monkeypatch.setattr(InboxStore, "send", send)
+    with pytest.raises(ConnectionError):
+        _step(store, ledger, ALERT_AT)
+    assert "alerted" not in store.redis.hgetall(store.key(SLUG, "run-window"))
+    assert _step(store, ledger, ALERT_AT + MINUTE) == ["run window: told master@sw it ends at 25 October 12:00 UTC"]
+    store.redis.hdel(store.key(SLUG, "run-window"), "alerted")
+    _step(store, ledger, ALERT_AT + 2 * MINUTE)
+    assert calls == ["master@sw", "master@sw", "master@sw"]
+    assert len(_items(store, "master@sw")) == 1
+
+
+def test_an_alert_one_minute_out_reads_singular(swarm):
+    store, ledger = swarm
+    _step(store, ledger, END - MINUTE)
+    assert _items(store, "master@sw") == [
+        "The run window on swarm sw ends at 25 October 12:00 UTC, in 1 minute. At the cutoff the window gate, set "
+        "to log only, logs the claims it would stop and the hand offs it would ask, and the swarm publishes the final "
+        "state to the ledger and the watchdog. Only swarm set changes the window. Close this item once you have looked."
+    ]
+
+
+def test_the_cutoff_keeps_the_gate_mode_it_decided(swarm):
+    store, ledger = swarm
+    _step(store, ledger, END, gates={"window": "enforce"})
+    config = store.update(SLUG, gates={"window": "observe"})
+    assert run_window.claims_stopped(store, SLUG, config, END + MINUTE) == (
+        "the run window ended at 25 October 12:00 UTC, no new claims until swarm set changes the window"
+    )
+    store.update(SLUG, window={"start_ms": START, "minutes": 1})
+    _step(store, ledger, START + MINUTE)
+    config = store.update(SLUG, gates={"window": "enforce"})
+    assert run_window.claims_stopped(store, SLUG, config, START + 2 * MINUTE) == ""
+
+
+def test_a_failed_cutoff_save_retries_without_a_second_gate_row(swarm, monkeypatch):
+    store, ledger = swarm
+    real, failed = run_window._save, []
+
+    def save(store, key, marks, **stamp):
+        if "cutoff" in stamp and not failed:
+            failed.append(stamp)
+            raise ConnectionError("redis gone")
+        real(store, key, marks, **stamp)
+
+    monkeypatch.setattr(run_window, "_save", save)
+    with pytest.raises(ConnectionError):
+        _step(store, ledger, END)
+    _step(store, ledger, END + MINUTE)
+    assert [row["kind"] for row in gate_log.recent(SLUG)] == ["observe"]
+
+
+def test_a_cutoff_with_two_agents_in_flight_counts_them(swarm):
+    store, ledger = swarm
+    store.put_agent(SLUG, AgentRecord("engineer@abc-0002", "eng", "t4", seat="eng-2@sw", started_at=START))
+    doc = _doc()
+    doc["tasks"].append({"id": "t4", "title": "Ship it", "state": "pr", "claimed_by": "engineer@abc-0002"})
+    config = store.update(SLUG, gates={"window": "enforce"})
+    assert run_window.step(SLUG, config, store, ledger, doc, END)[:2] == [
+        "run window: deny at the cutoff: The run window ended at 25 October 12:00 UTC: new claims stop and 2 agents "
+        "in flight hand off: engineer@abc-0001, engineer@abc-0002.",
+        "run window: asked 2 agents in flight to hand off",
+    ]

@@ -38,7 +38,7 @@ class Admission:
         if held:
             admitted = json.loads(held)
             return admitted if admitted["hive"] == request["hive"] else None
-        if run_window.claims_stopped(self.store.config(slug), self.clock()):
+        if run_window.claims_stopped(self.store, slug, self.store.config(slug), self.clock()):
             return None
         task_id, lane, generation = request["task"], request["lane"], request["generation"]
         view = self.source.snapshot(slug)

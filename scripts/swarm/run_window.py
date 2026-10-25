@@ -37,11 +37,11 @@ NEXT = {
     "off": "the gate is off, so claims continue.",
 }
 ALERT = (
-    "The run window on swarm {slug} ends at {end}, in {minutes} minutes. At the cutoff the window gate, set to {mode}, "
+    "The run window on swarm {slug} ends at {end}, in {minutes}. At the cutoff the window gate, set to {mode}, "
     "{effect}, and the swarm publishes the final state to the ledger and the watchdog. Only swarm set changes the "
     "window. Close this item once you have looked."
 )
-CUTOFF = "The run window ended at {end}: new claims stop and {count} agents in flight hand off: {names}."
+CUTOFF = "The run window ended at {end}: new claims stop and {agents} in flight hand off: {names}."
 ASK = (
     "The run window on swarm {slug} ended at {end}. Finish the step you are on, push any commits with agentihooks "
     "swarm {slug} publish, write a Handoff v2 for task {task}, run agentihooks swarm {slug} handoff <doc> and stop. "
@@ -115,9 +115,13 @@ def report(window: dict, now_ms: int) -> dict:
     }
 
 
-def claims_stopped(config, now_ms: int) -> str:
+def claims_stopped(store, slug, config, now_ms: int) -> str:
     bounds = span(config.window)
-    if bounds is None or now_ms < bounds[1] or modes.configured(GATE, config.gates) != "enforce":
+    if bounds is None or now_ms < bounds[1]:
+        return ""
+    marks = store.redis.hgetall(store.key(slug, KEY))
+    decided = marks.get("mode") if marks.get("window") == json.dumps(bounds) else None
+    if (decided or modes.configured(GATE, config.gates)) != "enforce":
         return ""
     return STOPPED.format(end=_spoken(bounds[1]))
 
@@ -135,13 +139,14 @@ def step(slug, config, store, ledger, doc, now_ms) -> list[str]:
     _save(store, key, marks)
     rows, actions = {row["id"]: row for row in doc.get("tasks") or []}, []
     if now_ms < bounds[1] <= now_ms + ALERT_MINUTES * MINUTE_MS and "alerted" not in marks:
-        _save(store, key, marks, alerted=now_ms)
         actions.append(_alert(slug, config, store, bounds, progress["remaining_minutes"]))
+        _save(store, key, marks, alerted=now_ms)
     if now_ms >= bounds[1] and "cutoff" not in marks:
-        actions += _gate(slug, config, store, rows, bounds, now_ms)
-        _save(store, key, marks, cutoff=now_ms)
+        mode = modes.configured(GATE, config.gates)
+        actions += _gate(slug, mode, store, rows, bounds, now_ms)
+        _save(store, key, marks, cutoff=now_ms, mode=mode)
     if now_ms >= bounds[1] and "published" not in marks:
-        actions.append(_publish(slug, config, store, ledger, rows, bounds))
+        actions.append(_publish(slug, marks["mode"], store, ledger, rows, bounds))
         _save(store, key, marks, published=now_ms)
     return actions
 
@@ -181,7 +186,7 @@ def notice(mode, bounds, rows, flying) -> str:
     text = NOTICE.format(flying=", ".join(f"{a.name} on {a.task}" for a in flying) or "none", **fields)
     if len(text) <= ledger_notifications.TEXT_KEPT:
         return text
-    return NOTICE.format(flying=f"{len(flying)} agents", **fields)
+    return NOTICE.format(flying=_count(len(flying), "agent"), **fields)
 
 
 def _counts(rows) -> str:
@@ -196,32 +201,39 @@ def _spoken(at_ms: int) -> str:
 def _alert(slug, config, store, bounds, minutes):
     mode, master = modes.configured(GATE, config.gates), seat_address(slug, MASTER)
     end = _spoken(bounds[1])
-    text = ALERT.format(slug=slug, end=end, minutes=minutes, mode=modes.label(mode), effect=EFFECTS[mode])
-    InboxStore(store.redis).send(SENDER, master, text, ref=f"{slug}:{KEY}:alert:{bounds[0]}")
+    text = ALERT.format(
+        slug=slug, end=end, minutes=_count(minutes, "minute"), mode=modes.label(mode), effect=EFFECTS[mode]
+    )
+    _send_once(store, master, text, f"{slug}:{KEY}:alert:{_ref(bounds)}")
     return f"run window: told {master} it ends at {end}"
 
 
-def _gate(slug, config, store, rows, bounds, now_ms):
-    mode, end = modes.configured(GATE, config.gates), _spoken(bounds[1])
-    flying, actions = in_flight(store, slug, rows), []
+def _gate(slug, mode, store, rows, bounds, now_ms):
+    end, flying, actions = _spoken(bounds[1]), in_flight(store, slug, rows), []
     if mode == "enforce":
         for agent in flying:
-            text, ref = ASK.format(slug=slug, end=end, task=agent.task), f"{slug}:{KEY}:{bounds[0]}:{agent.task}"
+            text, ref = ASK.format(slug=slug, end=end, task=agent.task), f"{slug}:{KEY}:{_ref(bounds)}:{agent.task}"
             _send_once(store, agent.name, text, ref, agent.task)
     if mode != "off":
         kind = "deny" if mode == "enforce" else "observe"
         names = ", ".join(agent.name for agent in flying) or "none"
-        reason = CUTOFF.format(end=end, count=len(flying), names=names)
-        gate_log.append(slug, gate_log.Row.of(GATE.name, kind, Who(name=SENDER), reason=reason, now_ms=now_ms))
+        reason = CUTOFF.format(end=end, agents=_count(len(flying), "agent"), names=names)
+        logged = any(
+            row.get("gate") == GATE.name and row.get("reason") == reason for row in gate_log.since(slug, bounds[1])
+        )
+        if not logged:
+            gate_log.append(slug, gate_log.Row.of(GATE.name, kind, Who(name=SENDER), reason=reason, now_ms=now_ms))
         actions.append(f"run window: {kind} at the cutoff: {reason}")
     if mode == "enforce":
-        actions.append(f"run window: asked {len(flying)} agents in flight to hand off")
+        actions.append(f"run window: asked {_count(len(flying), 'agent')} in flight to hand off")
     return actions
 
 
-def _publish(slug, config, store, ledger, rows, bounds):
-    mode, flying = modes.configured(GATE, config.gates), in_flight(store, slug, rows)
-    _send_once(store, doc_report.address(), final(slug, mode, bounds, rows, flying), f"{slug}:{KEY}:final:{bounds[0]}")
+def _publish(slug, mode, store, ledger, rows, bounds):
+    flying = in_flight(store, slug, rows)
+    _send_once(
+        store, doc_report.address(), final(slug, mode, bounds, rows, flying), f"{slug}:{KEY}:final:{_ref(bounds)}"
+    )
     ledger.notify(slug, notice(mode, bounds, rows, flying))
     return "run window: published the final state to the ledger and the watchdog"
 
@@ -235,6 +247,14 @@ def _send_once(store, address, text, ref, task=""):
 
 def _item_id(ref: str) -> str:
     return hashlib.sha256(ref.encode()).hexdigest()[:12]
+
+
+def _ref(bounds) -> str:
+    return f"{bounds[0]}-{bounds[1]}"
+
+
+def _count(count: int, noun: str) -> str:
+    return f"{count} {noun}" if count == 1 else f"{count} {noun}s"
 
 
 def _save(store, key, marks, **stamp):

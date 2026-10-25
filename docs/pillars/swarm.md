@@ -951,9 +951,9 @@ For grouped CI stage counts, worst times, run links and report retention, see
 
 ### Run window
 
-An operator sets an autonomous run window with `agentihooks swarm <id> set window-start=now|<UTC time such as 2026-10-25T00:00:00Z> window-minutes=N`; `window-start=off` clears it. A window needs both values. The `set` output reports its `window` as start, end, elapsed and remaining minutes. Only `swarm set` writes the window: the tick never extends or clears it.
+An operator sets an autonomous run window with `agentihooks swarm <id> set window-start=now|<UTC time such as 2026-10-25T00:00:00Z> window-minutes=N`; `window-start=off` clears it. A window needs both values. The `set` output reports its `window` as start, end, elapsed and remaining minutes; it is the command that reads the window back. Only `swarm set` writes the window: the tick never extends or clears it.
 
-Each tick with an active window records elapsed and remaining minutes in the swarm's `run-window` record. When thirty minutes or less remain before the cutoff, the master seat gets one inbox item naming the cutoff and what the `window` gate does there; a first tick after the cutoff sends none. At the cutoff the tick acts once per window. The alert is recorded before it is sent; the hand off asks and the watchdog item carry one stable id per window, and the cutoff is recorded after its gate row, so a failed tick retries without repeating them:
+Each tick with an active window records elapsed and remaining minutes in the swarm's `run-window` record. When thirty minutes or less remain before the cutoff, the master seat gets one inbox item naming the cutoff and what the `window` gate does there; a first tick after the cutoff sends none. At the cutoff the tick acts once per window. The alert, the hand off asks and the watchdog item carry one stable id per window and are recorded after they are sent, and a gate row already logged for the cutoff is not written again, so a failed tick retries without losing or repeating them. The cutoff records the gate mode it acted on, and claims stay as that mode left them until `swarm set` changes the window; changing `window-gate` afterwards takes effect at the next window's cutoff:
 
 | `window-gate` | Gate log | Claims | Agents in flight |
 |---|---|---|---|

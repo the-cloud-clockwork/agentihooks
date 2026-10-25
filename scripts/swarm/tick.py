@@ -1027,7 +1027,7 @@ def spawn_holds(store, slug):
 
 
 def _spawn_stop(slug, config, store, runtime, now_ms):
-    if stopped := run_window.claims_stopped(config, now_ms):
+    if stopped := run_window.claims_stopped(store, slug, config, now_ms):
         return stopped
     if not runtime.has_capacity(config):
         return "every agent is at its session cap, waiting"
