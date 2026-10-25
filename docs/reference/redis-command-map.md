@@ -27,6 +27,7 @@ No hand-kept list of commands is involved.
 |----------|-----------|--------------|
 | `controller` | `controller` | `scripts.swarm.controller:main` |
 | `tick` | `controller` | `scripts.swarm.scheduled_tick:main`, `scripts.swarm.cli:cmd_tick` |
+| `hub` | `controller` | `scripts.hub.runner:main` |
 | `ledger server` | `ledger` | `scripts.swarm_ledger:run`, `scripts.swarm_ledger.ledger_server:main` |
 | `worker` | `worker` | `scripts.swarm_v2.worker.start:main` |
 | `hooks` | `worker` | `hooks.hook_manager:main` |

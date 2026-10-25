@@ -45,7 +45,6 @@ from scripts.swarm import (
     freeze,
     grouping,
     input_wait,
-    lane_split,
     launch_check,
     ledger_events,
     ledger_probe,
@@ -59,6 +58,7 @@ from scripts.swarm import (
     master_wake,
     outage,
     pane_evidence,
+    preempt,
     profile_first,
     promotion_watch,
     readiness,
@@ -259,9 +259,10 @@ def tick(slug, store, ledger, runtime, now_ms):
             actions += skip_refused(master_scale.run, slug, config, store, runtime, doc, now_ms)
             actions += skip_refused(master_seat_alarm.run, slug, store, ledger, runtime, doc)
             actions += skip_refused(dispatcher.rank_pass, slug, config, store, ledger, doc, now_ms)
-            actions += skip_refused(lane_split.step, slug, config, store, doc, now_ms)
             actions += skip_refused(bottleneck_remedy.step, slug, store, ledger, doc, now_ms)
             if config.state == "running" and config.engine != EVENTS_ENGINE:
+                seats = preempt.Seats(rows, _ended, _current_owner, ready_in_order)
+                actions += skip_refused(preempt.run, slug, config, store, doc, now_ms, seats)
                 actions += skip_refused(_spawn, slug, config, store, ledger, runtime, rows, doc, now_ms)
         actions += skip_refused(dispatch_seat.run, slug, config, store, runtime, doc, now_ms, sleeping)
     actions += skip_refused(_night_watch, slug, store, ledger, runtime, doc, now_ms, sleeping)
@@ -1331,7 +1332,7 @@ def _spawn_order(slug, config, store, agents, rows, doc, runtime):
 
     decision = capacity.read(store, slug)
     caps = capacity.caps(decision, config)
-    dispatched = dispatcher.claim_key(config, doc)
+    dispatched = preempt.yielding(store, slug, doc, dispatcher.claim_key(config, doc))
     queue, waits = [], []
     for lane, cap in caps.items():
         busy = sum(
