@@ -371,9 +371,7 @@ def execution_home(spec: Launch, directory: Path) -> Launch:
         source,
         home,
         ignore=lambda directory, names: (
-            tuple(name for name in names if name not in STARTUP_FILES)
-            if Path(directory) == source
-            else ()
+            tuple(name for name in names if name not in STARTUP_FILES) if Path(directory) == source else ()
         ),
         ignore_dangling_symlinks=True,
     )
