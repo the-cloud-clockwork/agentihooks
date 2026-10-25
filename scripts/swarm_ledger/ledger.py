@@ -125,7 +125,7 @@ import watch_ledger  # noqa: E402
 
 from scripts.gates.base import Who
 from scripts.inbox import outbox
-from scripts.swarm_ledger import ledger_phases, ledger_plans, ledger_task_duplicates, ports, storage
+from scripts.swarm_ledger import ledger_phases, ledger_plans, ledger_task_duplicates, ports, storage, workflow_task
 
 repository = storage.default()
 
@@ -854,6 +854,11 @@ def _task_add_fields(args):
         ("plan_slice", args.plan_slice),
     )
     lists.update((key, value) for key, value in options if value)
+    if args.kind == "workflow":
+        try:
+            lists.update(workflow_task.add_fields(args.workflow, args.case, args.lane, args.profile, Path.cwd()))
+        except ValueError as exc:
+            sys.exit(f"task {args.id} was not added: {exc}")
     return lists
 
 
@@ -1041,8 +1046,10 @@ def build_parser():
         "--gain", type=float, help="what the task is expected to win, as a number the health check compares"
     )
     task.add_argument(
-        "--kind", choices=ledger_kinds.KINDS, help="code (default), ci, ops, troubleshoot, tune, research"
+        "--kind", choices=ledger_kinds.KINDS, help="code (default), ci, ops, troubleshoot, tune, research, workflow"
     )
+    task.add_argument("--workflow", default="", help="workflow kind: the workflow name")
+    task.add_argument("--case", help="workflow kind: the case file")
     task.add_argument("--must", default="", help="contract: what must be true when the task is done")
     task.add_argument("--check", default="", help="contract: how it is checked")
     task.add_argument("--judge", default="", help="contract: who judges it")

@@ -1,6 +1,7 @@
 import argparse
 import hashlib
 import json
+import os
 import re
 import sys
 from pathlib import Path
@@ -45,11 +46,24 @@ def matrix(root: Path, versions: dict[str, dict[str, float]], counts: dict[str, 
                 break
             count += 1
         print(f"Python {version}: {count} queue shards, predicted slowest {predicted:.1f}s of {target:.0f}s")
+        if count == MAX_SHARDS and predicted >= target:
+            _warn_over_target(version, predicted, target)
         result.extend(
             {"python-version": version, "shard": shard, "total": count, "predicted_seconds": predicted}
             for shard in range(1, count + 1)
         )
     return result
+
+
+def _warn_over_target(version: str, predicted: float, target: float) -> None:
+    message = (
+        f"Python {version}: the shard cap of {MAX_SHARDS} predicts the slowest queue shard at {predicted:.1f}s,"
+        f" over the {target:.0f}s target"
+    )
+    print(f"::warning title=Queue shard pool cannot reach the target::{message}")
+    if summary := os.environ.get("GITHUB_STEP_SUMMARY"):
+        with Path(summary).open("a") as handle:
+            handle.write(f"{message}\n")
 
 
 def _predicted(durations: dict[str, float], count: int, grouped: dict[str, str], sizes: dict[str, int]) -> float:
