@@ -14,6 +14,7 @@ from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from contextvars import copy_context
 from dataclasses import dataclass, field, replace
+from functools import partial
 from itertools import count
 from typing import Protocol
 
@@ -23,7 +24,7 @@ from scripts.gates import Who, modes
 from scripts.gates import claims as claim_cap
 from scripts.gates import log as gate_log
 from scripts.handoff import transfers
-from scripts.handoff.envelope import reclaim
+from scripts.handoff.envelope import reclaim, remote_heads
 from scripts.hive import reports
 from scripts.inbox import exits, wake
 from scripts.inbox.seats import seat_address
@@ -1164,6 +1165,13 @@ class _Pass:
     rows: dict
     doc: dict
     now_ms: int
+    memo: dict = field(default_factory=dict)
+
+
+def _pass_reclaim(run):
+    if "heads" not in run.memo:
+        run.memo["heads"] = timing.call(remote_heads, run.config.repo)
+    return partial(reclaim, heads=run.memo["heads"])
 
 
 @dataclass(frozen=True)
@@ -1200,10 +1208,10 @@ def _prepare(run, lane, task, taken, failing, peers):
             rows,
             lives,
             store.handoff_envelope(slug, task["id"]) or {},
-            reclaim,
+            _pass_reclaim(run),
         )
     elif lives or task.get("branch"):
-        task["reclaim"] = timing.timed(continuation.resolve, config.repo, task, rows, lives, {}, reclaim)
+        task["reclaim"] = timing.timed(continuation.resolve, config.repo, task, rows, lives, {}, _pass_reclaim(run))
         store.put_reclaim(slug, name, task["reclaim"])
     task["stack_base"] = _stack_base(task, rows, config.repo)
     task["overlaps"] = timing.timed(_sharing, task, rows, timing.timed(_reported, slug, store, runtime, peers))
