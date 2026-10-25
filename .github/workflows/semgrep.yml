@@ -43,7 +43,7 @@ jobs:
         env:
           SEMGREP_VERSION: "1.177.0"
         run: |
-          if [[ "${ARC_SEMGREP_VERSION:-}" == "$SEMGREP_VERSION" ]]; then
+          if [[ "$(semgrep --version 2>/dev/null)" == "$SEMGREP_VERSION" ]]; then
             python -m pip install pyyaml==6.0.2
           else
             python -m pip install pyyaml==6.0.2 "semgrep==$SEMGREP_VERSION"
