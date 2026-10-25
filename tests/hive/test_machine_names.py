@@ -146,6 +146,15 @@ def test_a_target_without_a_host_is_refused():
     assert str(refused.value) == "the SSH target 'ssh://' names no host"
 
 
+def test_a_saved_machine_without_a_target_is_not_taken_for_the_added_host(admin):
+    run = Run([{"id": "a1", "label": "bare"}])
+
+    grant = _add(admin, run, target="ssh://worker@xxxx:22")
+
+    assert grant["name"] == "swarm-hive-001"
+    assert [argv[0] for argv in run.calls] == ["herdr", "ssh"]
+
+
 def test_a_second_hive_on_a_machine_that_has_one_is_refused(admin):
     run = Run([{"id": "a1", "label": "swarm-hive-1792604647", "target": "ssh://worker@203.0.113.9:2222"}])
 

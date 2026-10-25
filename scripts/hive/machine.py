@@ -1,6 +1,5 @@
 """agentihooks hive add: a UI hive saves a machine in herdr and delivers its member credential over SSH."""
 
-import itertools
 import json
 import subprocess
 from collections.abc import Callable
@@ -52,7 +51,7 @@ def name(redis: "Redis", machine: str, assign: bool = True) -> str:
                 taken = set(named.values())
                 found = next(
                     f"{NAME_PREFIX}{ordinal:03d}"
-                    for ordinal in itertools.count(1)
+                    for ordinal in range(1, len(taken) + 2)
                     if f"{NAME_PREFIX}{ordinal:03d}" not in taken
                 )
                 if assign:
