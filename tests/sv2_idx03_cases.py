@@ -71,7 +71,7 @@ class Index:
         return self.worker.vectors(grant(self.inputs), target(self.inputs, generation))
 
     def work(self):
-        return [row[2:] for row in self.worker.snapshot()["embedding_work"]]
+        return [list(row[2:]) for row in self.worker.snapshot()["embedding_work"]]
 
     def protected(self):
         return {**self.session.protected(), **self.worker.snapshot()}
@@ -161,13 +161,14 @@ def rejection(inputs, root):
     diagnostics = json.dumps(attempts, ensure_ascii=False)
     for hidden in ("rate limited", "personal-corpus", "worker-b", "café", "fixture-hash-embedder"):
         assert hidden not in diagnostics
+    pending = index.worker.pending(index.domain, index.generation, clock["outage"])
     corrected = index.drain(FixtureEmbedder(model(inputs)), clock["recovered"])
     assert corrected["state"] == "drained"
     return {
         "rejected": attempts,
         "provider_calls": {"other_model_family": other.calls, "dimension_mismatch": wrong_width.calls},
         "protected_state_unchanged": untouched,
-        "pending_after_rejections": index.worker.pending(index.domain, index.generation, clock["outage"]),
+        "pending_after_rejections": pending,
         "corrected": {key: corrected[key] for key in ("state", "pending", BACKLOG)},
         "corrected_embedded": len(corrected["embedded"]),
         "coverage": index.coverage(),

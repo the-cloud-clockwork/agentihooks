@@ -1,0 +1,115 @@
+{
+  "case": "T-SV2-IDX-03-C",
+  "evidence_class": "mocked: an in-process caller, a SQLite catalog file, a local content addressed object folder and a deterministic hash embedder stand in for the session service, the central database, the archive bucket and the embedding provider; no model, HTTP server or Pod runs",
+  "input_sha256": {
+    "session-embeddings.json": "f881f23ee6e596c67a9d934396ece582e6f2fced6823a1dfe292958f946dce21"
+  },
+  "observed": {
+    "backlog_before_recovery": {
+      "embedding_backlog_age_seconds": 40.0,
+      "pending": 4
+    },
+    "coverage_after_recovery": {
+      "chunks": 8,
+      "embedded": 8,
+      "state": "indexed"
+    },
+    "coverage_during_outage": {
+      "chunks": 6,
+      "embedded": 2,
+      "state": "incomplete"
+    },
+    "outage_drain": {
+      "embedding_backlog_age_seconds": 10.0,
+      "pending": 4,
+      "state": "deferred"
+    },
+    "outage_embedded": 2,
+    "outage_failed": 2,
+    "queued": 6,
+    "recovered_drain": {
+      "embedding_backlog_age_seconds": 0.0,
+      "pending": 0,
+      "state": "drained"
+    },
+    "recovered_provider_texts": 4,
+    "recovered_reembedded_earlier": [],
+    "replayed_drain": {
+      "embedded": [],
+      "pending": 0,
+      "state": "drained"
+    },
+    "replayed_enqueue": {
+      "dropped": [],
+      "embedded": 2,
+      "queued": []
+    },
+    "rollback_rehearsal": {
+      "activate_incomplete_new_generation": {
+        "detail": "only an index generation with no pending work can become active",
+        "error": "Conflict"
+      },
+      "active": {
+        "index_generation": "fixture-embed-v1",
+        "revision": 1
+      },
+      "new_generation_partial": {
+        "pending": 6,
+        "state": "deferred"
+      },
+      "paused_drain": {
+        "embedded": [],
+        "pending": 6,
+        "state": "paused"
+      },
+      "previous_generation_vectors_kept": true,
+      "source_events_unchanged": true
+    },
+    "stale_attempt": {
+      "late_attempt_written": [],
+      "rival_written": [
+        "chunk-b7ca93d4c2c36c01e18454fef542010fbf8c26fd",
+        "chunk-d3298d2bea9fef039b531a60ec8003c5f2845de9"
+      ]
+    },
+    "work_after_outage": [
+      [
+        "chunk-55563073d00a8cd5da7cfeb6c7e7cd39636e1b9b",
+        "swarm-fixture:claude:worker-b:session-embeddings",
+        "turn-v1",
+        "9eab9467b3d067945b289491008d9469811e6557bdc4ddc510dbccc32ddf596d",
+        1000.0,
+        1,
+        "TransientEmbeddingError"
+      ],
+      [
+        "chunk-6eb2f09da5d0a6428955bca30c9e7250fc071afd",
+        "swarm-fixture:claude:worker-b:session-embeddings",
+        "turn-v1",
+        "ee4c681e4bee9a01f49702680d6dbd1ec4d359245b03ac4fac83e0369561a02b",
+        1000.0,
+        1,
+        "TransientEmbeddingError"
+      ],
+      [
+        "chunk-9b713e6bac987f87524d4d2fbb6695a1b1484169",
+        "swarm-fixture:claude:worker-b:session-embeddings",
+        "turn-v1",
+        "1c13b6eb066f1c085879ba58f3a5cf8cf81aabd7ee0e201c17ba9f0e0a667eff",
+        1000.0,
+        0,
+        null
+      ],
+      [
+        "chunk-cd0623188cc1c83a86fdd91209b93f978de66bb8",
+        "swarm-fixture:claude:worker-b:session-embeddings",
+        "turn-v1",
+        "27465850c9b3960db5ff0075a1d4562ec2849562e7c05920fc0f947e35c704d7",
+        1000.0,
+        0,
+        null
+      ]
+    ]
+  },
+  "state": "passed"
+}

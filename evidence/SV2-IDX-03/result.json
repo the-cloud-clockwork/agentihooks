@@ -1,0 +1,52 @@
+{
+  "package": "SV2-IDX-03",
+  "dependency": "SV2-IDX-02",
+  "dependency_evidence": "evidence/SV2-IDX-02/result.json records the chunk generations, stable chunk ids and content hashes this worker reads; the chunk tables and ChunkIndex are unchanged here",
+  "integration_gate": "G4",
+  "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/7129",
+  "pull_request": "",
+  "package_complete": false,
+  "evidence_class": "mocked: an in-process caller, a SQLite catalog file, a local content addressed object folder and a deterministic hash embedder stand in for the session service, the central database, the archive bucket and the embedding provider; no model, HTTP server or Pod runs",
+  "interfaces": [
+    "hooks.memory.embeddings.EmbeddingModel names a model identity and dimension; hooks.memory.embeddings.Embedder is the provider contract, embed(texts) returning one vector per text, raising TransientEmbeddingError for a rate limit or outage",
+    "hooks.memory.embeddings.checked refuses a provider answer whose vector count or any vector dimension differs from the model before anything is written",
+    "hooks.memory.index_worker.IndexWorker.register(domain, generation, model) binds one model identity and dimension to an index generation; a later registration with another model or dimension is refused",
+    "IndexWorker.enqueue(grant, target, now) reads the session's chunk generation through the SV2-IDX-02 grant check and queues only chunks whose content hash has no vector in the index generation, keeping the first queue time of work already queued; chunks a grown open turn superseded lose their queued work and vectors",
+    "IndexWorker.drain(embedder, domain, generation, now) refuses an embedder whose model differs from the generation's, then embeds queued work oldest first in batches bounded by Limits batch_size, batch_chars and max_batches; each batch commits its vectors with model, dimension and generation in one transaction and removes its work only while the queued content hash still matches, so a late or rival attempt writes nothing; a transient failure records the attempt and error class on the failed batch's work and stops the drain",
+    "IndexWorker.pending reports the queued count and embedding_backlog_age_seconds from the oldest queued chunk; IndexWorker.coverage reports a session indexed only when every chunk of its generation has a vector for its current content hash",
+    "IndexWorker.activate(domain, generation, revision) is compare and set on the domain's active index generation and accepts only a generation with no pending work; IndexWorker.set_paused stops a generation's drains without touching its rows; IndexWorker.vectors reads a session's vectors under the same grant"
+  ],
+  "supported_versions": {
+    "python": "3.11 and later",
+    "chunker_versions": "any chunk generation built by SV2-IDX-02; the fixture uses turn-v1",
+    "storage": "SQLite catalog with WAL journal and synchronous FULL from SV2-IDX-01; vectors stored as JSON arrays beside their model and dimension"
+  },
+  "states": {
+    "observed": "Cases A, B and C each ran twice from independent temporary folders with identical records.",
+    "accepted": "A registration is accepted when it returns the generation binding; queued work when enqueue returns its chunk ids; a cutover when activate returns the next revision.",
+    "committed": "Each enqueue, each batch of vectors with its work removal, each deferral and each cutover commits in one SQLite transaction.",
+    "externally_verified": "Not yet: no embedding provider, deployed session service or vector database ran; a live check belongs to the G4 rollout gate."
+  },
+  "metrics": {
+    "embedding_backlog_age_seconds": "seconds between the caller's clock and the oldest queued chunk of an index generation, zero with no pending work; it keeps growing through a provider outage because deferred work keeps its first queue time"
+  },
+  "cases": {
+    "a": "evidence/SV2-IDX-03/a-result.json",
+    "b": "evidence/SV2-IDX-03/b-result.json",
+    "c": "evidence/SV2-IDX-03/c-result.json"
+  },
+  "rollback_rehearsal": {
+    "action": "Keep the preceding active index generation and pause the new worker: activate refuses the new generation while it has pending work, set_paused stops its drains, and the previous generation's vectors and the source events stay as they were.",
+    "authoritative_objects": "The session_event, session_source, archive_manifest rows and archived objects from SV2-IDX-01 and the chunk rows from SV2-IDX-02; embedding_work and chunk_vector rows are derived projections.",
+    "proof": "Case C activates the first generation, registers a second with another model and dimension, drains it into a rate limit, is refused when activating it, pauses it, and compares the first generation's vectors and the catalog events with those before."
+  },
+  "remaining_limitations": [
+    "No real embedding provider is wired; the worker takes any Embedder and the fixture uses a deterministic hash embedder.",
+    "Batches are bounded in chunk previews' characters, standing in for provider tokens; a tokenizer bound belongs with a concrete provider.",
+    "The worker is driven by its caller's schedule and clock; no daemon, Pod or retry backoff timer is part of this package.",
+    "Work queued for a session that is later deleted is still embedded; its vectors stay unreadable through IndexWorker.vectors and coverage, and their removal belongs to the retention sweep.",
+    "Search over vectors is SV2-IDX-04."
+  ],
+  "compatibility": "Explicitly local compatibility path: the SV2-IDX-01 catalog and SV2-IDX-02 chunk tables and functions are unchanged; the index tables are additive and a consumer that ignores them sees no change.",
+  "authority": "Enqueue, coverage and vector reads take the caller's Grant and pass the SV2-IDX-01 check through ChunkIndex.chunks: the domain must be the grant's corpus and the session must be retained. A display name never grants access."
+}

@@ -1,0 +1,64 @@
+{
+  "case": "T-SV2-IDX-03-B",
+  "evidence_class": "mocked: an in-process caller, a SQLite catalog file, a local content addressed object folder and a deterministic hash embedder stand in for the session service, the central database, the archive bucket and the embedding provider; no model, HTTP server or Pod runs",
+  "input_sha256": {
+    "session-embeddings.json": "f881f23ee6e596c67a9d934396ece582e6f2fced6823a1dfe292958f946dce21"
+  },
+  "observed": {
+    "corrected": {
+      "embedding_backlog_age_seconds": 0.0,
+      "pending": 0,
+      "state": "drained"
+    },
+    "corrected_embedded": 8,
+    "coverage": {
+      "chunks": 8,
+      "embedded": 8,
+      "state": "indexed"
+    },
+    "pending_after_rejections": {
+      "embedding_backlog_age_seconds": 10.0,
+      "pending": 8
+    },
+    "protected_state_unchanged": true,
+    "provider_calls": {
+      "dimension_mismatch": 1,
+      "other_model_family": 0
+    },
+    "rejected": {
+      "activate_incomplete": {
+        "detail": "only an index generation with no pending work can become active",
+        "error": "Conflict"
+      },
+      "dimension_mismatch": {
+        "detail": "the provider returned vectors whose count or dimension differs from the model; nothing was written",
+        "error": "Conflict"
+      },
+      "foreign_corpus_enqueue": {
+        "detail": "the session is not available to this grant",
+        "error": "EvidenceRefused"
+      },
+      "foreign_corpus_vectors": {
+        "detail": "the session is not available to this grant",
+        "error": "EvidenceRefused"
+      },
+      "other_model_family": {
+        "detail": "the embedder's model differs from the model bound to this index generation; nothing was written",
+        "error": "Conflict"
+      },
+      "rebind_generation_dimension": {
+        "detail": "this index generation is bound to another embedding model or dimension",
+        "error": "Conflict"
+      },
+      "unbounded_model": {
+        "detail": "an embedding model needs an identity and a positive dimension",
+        "error": "ValueError"
+      },
+      "unregistered_generation": {
+        "detail": "no index generation is registered under this name",
+        "error": "Conflict"
+      }
+    }
+  },
+  "state": "passed"
+}

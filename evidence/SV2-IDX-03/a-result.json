@@ -1,0 +1,63 @@
+{
+  "case": "T-SV2-IDX-03-A",
+  "evidence_class": "mocked: an in-process caller, a SQLite catalog file, a local content addressed object folder and a deterministic hash embedder stand in for the session service, the central database, the archive bucket and the embedding provider; no model, HTTP server or Pod runs",
+  "input_sha256": {
+    "session-embeddings.json": "f881f23ee6e596c67a9d934396ece582e6f2fced6823a1dfe292958f946dce21"
+  },
+  "observed": {
+    "active": {
+      "index_generation": "fixture-embed-v1",
+      "revision": 1,
+      "revision_returned": 1
+    },
+    "appended_build_inserted": [
+      "chunk-b7ca93d4c2c36c01e18454fef542010fbf8c26fd",
+      "chunk-d3298d2bea9fef039b531a60ec8003c5f2845de9"
+    ],
+    "appended_drain": {
+      "embedding_backlog_age_seconds": 0.0,
+      "pending": 0,
+      "state": "drained"
+    },
+    "appended_enqueue": {
+      "embedded": 6,
+      "queued": [
+        "chunk-b7ca93d4c2c36c01e18454fef542010fbf8c26fd",
+        "chunk-d3298d2bea9fef039b531a60ec8003c5f2845de9"
+      ]
+    },
+    "appended_provider_texts": 2,
+    "backlog_before_drain": {
+      "embedding_backlog_age_seconds": 10.0,
+      "pending": 6
+    },
+    "coverage": {
+      "chunks": 8,
+      "embedded": 8,
+      "state": "indexed"
+    },
+    "earlier_vectors_unchanged": true,
+    "first_drain": {
+      "embedding_backlog_age_seconds": 0.0,
+      "pending": 0,
+      "state": "drained"
+    },
+    "first_drain_embedded": 6,
+    "first_drain_provider_calls": 3,
+    "first_enqueue": {
+      "embedded": 0,
+      "queued": 6
+    },
+    "vector_ids": [
+      "chunk-07eebabf1340e3f20a2323b9a7c014f7aa207747",
+      "chunk-1068a5578c9997a13e6f055d1eadd676cc85a463",
+      "chunk-55563073d00a8cd5da7cfeb6c7e7cd39636e1b9b",
+      "chunk-6eb2f09da5d0a6428955bca30c9e7250fc071afd",
+      "chunk-9b713e6bac987f87524d4d2fbb6695a1b1484169",
+      "chunk-b7ca93d4c2c36c01e18454fef542010fbf8c26fd",
+      "chunk-cd0623188cc1c83a86fdd91209b93f978de66bb8",
+      "chunk-d3298d2bea9fef039b531a60ec8003c5f2845de9"
+    ]
+  },
+  "state": "passed"
+}
