@@ -105,7 +105,7 @@ def notice(payload, typed, now=None):
     session_id = payload.get("session_id")
     word = observe(session_id, payload.get("prompt"), typed, now)
     text = {"on": ON_NOTICE, "off": OFF_NOTICE}.get(word, "")
-    if _away(session_id, None, now):
+    if _away(session_id, None):
         return "\n".join(filter(None, (text, _reminder_text(None))))
     return text
 
@@ -146,8 +146,8 @@ def _heard(session_id, environ=None):
     return not _attached(env, session_id) or (bool(session_id) and bool(_load(session_id).get("on")))
 
 
-def _away(session_id, environ, now):
-    return bool(session_id) and not present(session_id, environ, now)
+def _away(session_id, environ):
+    return bool(session_id) and not present(session_id, environ)
 
 
 def _limit(environ):
@@ -164,7 +164,7 @@ def reply_refusal(payload, environ=None):
     from hooks.context import operator_expiry
 
     session_id = payload.get("session_id")
-    if not _away(session_id, environ, None):
+    if not _away(session_id, environ):
         return ""
     count = len(MARKER.sub(" ", str(payload.get("last_assistant_message") or "")).split())
     words = _limit(environ)
@@ -184,7 +184,7 @@ def reminder(session_id, environ=None, now=None):
     if not session_id:
         return ""
     with operator_expiry.state_lock(session_id):
-        if not _away(session_id, environ, now):
+        if not _away(session_id, environ):
             return ""
         state = _load(session_id)
         calls = state.get("calls", 0) + 1

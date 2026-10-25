@@ -694,6 +694,8 @@ def test_the_reply_limit_reads_the_environment_skips_markers_and_checks_retries(
     assert operator_mode._load("s1")["refusals"] == 4
     assert operator_mode.reply_refusal({**repeat, "stop_hook_active": False}, env) == refused
     assert operator_mode._load("s1")["refusals"] == 1
+    assert operator_mode.reply_refusal({**repeat, "session_id": "fresh"}, env) == refused
+    assert operator_mode._load("fresh")["refusals"] == 1
     assert operator_mode.reply_refusal({"session_id": "", "last_assistant_message": "a b c d"}, env) == ""
     assert operator_mode.reply_refusal({"session_id": "s1"}, env) == ""
 
