@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from scripts.swarm import runtime
+from scripts.swarm import launch_evidence, runtime
 from scripts.swarm.tick import SpawnError
 
 
@@ -54,3 +54,50 @@ def test_failed_codex_launch_retains_redacted_evidence_before_termination(tmp_pa
         )
     assert len(terminated) == 1
     assert list((tmp_path / "sw" / "launch-evidence").glob("*.json"))
+
+
+@pytest.mark.parametrize("report_state", ["missing", "unreadable", "malformed"])
+@pytest.mark.parametrize("pane", ["", "pane-failed"])
+def test_launch_evidence_keeps_errors_when_the_report_or_screen_is_unavailable(tmp_path, report_state, pane):
+    fields = {"pane_id": pane}
+    if report_state != "missing":
+        report = tmp_path / "report.json"
+        fields["profile_report"] = str(report)
+        if report_state == "malformed":
+            report.write_text("{")
+
+    def reader(pane_id, lines):
+        assert (pane_id, lines) == ("pane-failed", 80)
+        raise RuntimeError("pane disappeared")
+
+    attempt = launch_evidence.Attempt(tmp_path, "agent", "task", "codex", 12)
+    path = launch_evidence.retain(attempt, fields, "startup", "error", reader, "launch failed")
+    row = json.loads(path.read_text())
+    assert row["validation"]["state"] == ("missing" if report_state == "missing" else "unreadable")
+    assert row["validation"]["reason"]
+    assert row["screen"] == ""
+    assert row["screen_error"] == ("pane disappeared" if pane else "")
+    assert row["failure"] == "failed"
+    assert row["stdout"] == "startup"
+    assert row["stderr"] == "error"
+    assert row["error"] == "launch failed\nerror"
+    assert row["launched_at"] == 12
+    assert path.parent == tmp_path / "launch-evidence"
+    assert path.stat().st_mode & 0o777 == 0o600
+    assert path.parent.stat().st_mode & 0o777 == 0o700
+
+
+@pytest.mark.parametrize("reason", ["canary timeout", "init-agent timed out", "no canary within 90s"])
+def test_slow_validation_is_recorded_as_timeout_without_a_pane(tmp_path, reason):
+    attempt = launch_evidence.Attempt(tmp_path, "agent", "task", "codex", 12)
+    path = launch_evidence.retain(attempt, {}, "", "", lambda *_: pytest.fail("no pane"), reason)
+    assert json.loads(path.read_text())["failure"] == "timeout"
+
+
+def test_repeated_launch_failures_keep_separate_reports(tmp_path):
+    attempt = launch_evidence.Attempt(tmp_path, "agent", "task", "codex", 12)
+    first = launch_evidence.retain(attempt, {}, "", "", lambda *_: None, "first")
+    second = launch_evidence.retain(attempt, {}, "", "", lambda *_: None, "second")
+    assert first != second
+    assert json.loads(first.read_text())["error"] == "first"
+    assert json.loads(second.read_text())["error"] == "second"
