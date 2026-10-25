@@ -261,9 +261,7 @@ def tick(slug, store, ledger, runtime, now_ms):
             actions += skip_refused(lane_split.step, slug, config, store, doc, now_ms)
             actions += skip_refused(bottleneck_remedy.step, slug, store, ledger, doc, now_ms)
             if config.state == "running" and config.engine != EVENTS_ENGINE:
-                seats = preempt.Seats(
-                    rows, lambda a: not _ended(a, rows) and _current_owner(a, rows.get(a.task, {})), ready_in_order
-                )
+                seats = preempt.Seats(rows, _ended, _current_owner, ready_in_order)
                 actions += skip_refused(preempt.run, slug, config, store, doc, now_ms, seats)
                 actions += skip_refused(_spawn, slug, config, store, ledger, runtime, rows, doc, now_ms)
         actions += skip_refused(dispatch_seat.run, slug, config, store, runtime, doc, now_ms, sleeping)

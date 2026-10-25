@@ -2,11 +2,11 @@
 lowest ranked holder that is neither urgent nor focused, through its inbox, to push and hand off. Nothing is frozen;
 the freed seat goes to the waiting task because the spawn order puts urgent work first."""
 
-import hashlib
+import json
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from scripts.inbox.store import DuplicateItem, InboxStore
+from scripts.inbox.store import InboxStore
 from scripts.swarm import dispatcher, freeze
 from scripts.swarm_ledger import ledger_rank
 from scripts.swarm_ledger.repository import hierarchy
@@ -29,8 +29,12 @@ TEXT = (
 @dataclass(frozen=True)
 class Seats:
     rows: dict
-    holds: Callable
+    ended: Callable
+    owner: Callable
     ready: Callable
+
+    def holds(self, agent) -> bool:
+        return not self.ended(agent, self.rows) and self.owner(agent, self.rows.get(agent.task, {}))
 
 
 def run(slug: str, config, store, doc: dict, now_ms: int, seats: Seats) -> list[str]:
@@ -80,7 +84,7 @@ def step(slug: str, store, rows: dict, doc: dict, full: dict, now_ms: int) -> li
                 continue
             victim = _victim([a for a in holders if a.name not in asked], rows, doc, graph)
             if victim is not None:
-                asked[victim.name] = f"{task['id']}:{now_ms}"
+                asked[victim.name] = json.dumps([task["id"], now_ms])
                 actions += _ask(InboxStore(redis), slug, lane, victim, task["id"])
     redis.delete(store.key(slug, WAITING))
     if waiting:
@@ -90,10 +94,7 @@ def step(slug: str, store, rows: dict, doc: dict, full: dict, now_ms: int) -> li
 
 
 def _pending(asked: dict, task_id: str, now_ms: int) -> bool:
-    return any(
-        target == task_id and now_ms - int(at) < ANSWER_MS
-        for target, _, at in (entry.rpartition(":") for entry in asked.values())
-    )
+    return any(target == task_id and now_ms - at < ANSWER_MS for target, at in map(json.loads, asked.values()))
 
 
 def _victim(holders, rows, doc, graph):
@@ -102,12 +103,8 @@ def _victim(holders, rows, doc, graph):
 
 
 def _ask(inbox, slug, lane, victim, waiting):
-    item_id = hashlib.sha256(f"{REF}:{slug}:{victim.name}:{waiting}".encode()).hexdigest()[:12]
     text = TEXT.format(slug=slug, waiting=waiting, lane=lane, task=victim.task)
-    try:
-        item = inbox.send(SENDER, victim.name, text, ref=f"{REF}:{item_id}", task=victim.task, item_id=item_id)
-    except DuplicateItem:
-        return []
+    item = inbox.send(SENDER, victim.name, text, ref=f"{REF}:{waiting}", task=victim.task)
     return [f"asked {victim.name} to hand off task {victim.task} for urgent task {waiting} as message {item.id}"]
 
 

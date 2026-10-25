@@ -79,14 +79,17 @@ def test_an_ask_passes_on_only_after_the_answer_window(store):
     assert asks(store, "e1") == []
     preempt.step(SLUG, store, ROWS, doc(), full("t3"), 1 + preempt.ANSWER_MS)
     assert len(asks(store, "e1")) == 1 and len(asks(store, "e2")) == 1
-    assert store.redis.hgetall(store.key(SLUG, preempt.ASKED)) == {"e2": "t3:1", "e1": f"t3:{1 + preempt.ANSWER_MS}"}
+    assert store.redis.hgetall(store.key(SLUG, preempt.ASKED)) == {
+        "e2": '["t3", 1]',
+        "e1": f'["t3", {1 + preempt.ANSWER_MS}]',
+    }
 
 
 def test_an_ask_is_forgotten_once_its_holder_left(store):
     preempt.step(SLUG, store, ROWS, doc(), full("t3"), 0)
     preempt.step(SLUG, store, ROWS, doc(), full("t3"), 1)
     preempt.step(SLUG, store, ROWS, doc(), full("t3", holders=[HOLDERS[0]]), 2)
-    assert store.redis.hgetall(store.key(SLUG, preempt.ASKED)) == {"e1": "t3:2"}
+    assert store.redis.hgetall(store.key(SLUG, preempt.ASKED)) == {"e1": '["t3", 2]'}
 
 
 def test_urgent_focused_and_unknown_holders_are_never_asked(store):
@@ -148,22 +151,41 @@ def test_an_urgent_successor_and_a_fresh_guarded_task_keep_their_band(store):
     assert [key(t) for t in tasks] == [(-1, 0), (0, 1)]
 
 
-def test_run_looks_only_at_lanes_whose_every_seat_is_held(store):
-    store.update(SLUG, autonomy="assist")
+def test_run_looks_only_at_lanes_whose_every_seat_is_held(store, monkeypatch):
+    monkeypatch.setattr(preempt.dispatcher, "claim_key", lambda config, received: lambda task: (2, task["id"]))
     for name, task in (("e1", "t1"), ("e2", "t2"), ("x", "t9")):
         store.put_agent(SLUG, holder(name, task))
     calls = []
 
     def ready(slug, received, rows, received_doc, lane, dispatched):
-        calls.append((slug, received is store, rows is ROWS, lane))
+        calls.append((slug, received is store, rows is ROWS, received_doc["tasks"], lane, dispatched({"id": "t1"})))
         return [ROWS["t3"]]
 
-    seats = preempt.Seats(ROWS, lambda agent: agent.name != "x", ready)
+    seats = preempt.Seats(ROWS, lambda agent, rows: agent.name == "x", lambda agent, row: True, ready)
     config = store.config(SLUG)
     preempt.run(SLUG, config, store, doc(), 1, seats)
     actions = preempt.run(SLUG, config, store, doc(), 2, seats)
-    assert calls == [(SLUG, True, True, "eng")] * 2
+    assert calls == [(SLUG, True, True, doc()["tasks"], "eng", (2, "t1"))] * 2
     assert len(actions) == 1 and len(asks(store, "e2")) == 1
     store.update(SLUG, max_eng=0)
     assert preempt.run(SLUG, store.config(SLUG), store, doc(), 3, seats) == []
     assert len(calls) == 2
+
+
+def test_a_seat_is_held_by_a_live_agent_that_still_owns_its_task():
+    rows = {"t1": {"claimed_by": "e1"}, "t2": {"claimed_by": "someone"}}
+
+    def ended(agent, received):
+        return received is rows and agent.name == "x"
+
+    seats = preempt.Seats(rows, ended, lambda agent, row: row.get("claimed_by", agent.name) == agent.name, None)
+    agents = [holder("e1", "t1"), holder("x", "t1"), holder("e2", "t2"), holder("e3", "gone")]
+    assert [seats.holds(a) for a in agents] == [True, False, False, True]
+
+
+def test_a_lane_focus_covers_a_normal_task_in_that_lane(store):
+    lane_task = {"id": "t6", "lane": "eng", "state": "open"}
+    focused = {**doc({"verb": "focus", "target": "lane:eng"}), "tasks": [*ROWS.values(), lane_task]}
+    graph = preempt.hierarchy.project(focused)[0]
+    assert preempt.preferred(lane_task, focused, graph)
+    assert not preempt.preferred({**lane_task, "lane": "ci"}, focused, graph)
