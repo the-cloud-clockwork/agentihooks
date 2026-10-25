@@ -53,7 +53,7 @@ def test_the_tasks_final_deliverable_can_wait_at_any_queue_position(waiting):
 
 def test_block_retains_the_stack_and_tick_reopens_only_after_prerequisite_merge(waiting, env, monkeypatch):  # noqa: F811
     store, ledger, _ = waiting
-    note = "Stack published on continuation branch; next step restack after prerequisite merge"
+    note = f"Stack published on continuation branch; next step restack after prerequisite {URL} merges"
     ledger.rows["t1"].update(branch="continuation", pr_url="https://github.com/o/r/pull/8")
     assert run("sw", "--as", ME, "wait", "--on", "merge", URL) == 1
     assert run("sw", "--as", ME, "block", note) == 0
@@ -74,7 +74,7 @@ def test_block_retains_the_stack_and_tick_reopens_only_after_prerequisite_merge(
 def test_blocked_continuation_does_not_reopen_without_a_merged_prerequisite(waiting, monkeypatch, state):
     store, ledger, _ = waiting
     assert run("sw", "--as", ME, "wait", "--on", "merge", URL) == 1
-    assert run("sw", "--as", ME, "block", "Stack published; next step restack") == 0
+    assert run("sw", "--as", ME, "block", f"Stack published; next step restack after {URL}") == 0
     monkeypatch.setattr(cli.ledger_events, "view", lambda url: PullRequest(state, None, 1, False) if state else None)
     assert prerequisite_wait.reopen_pass("sw", store, ledger, ledger.rows) == []
     assert ledger.rows["t1"]["state"] == "blocked"
@@ -84,7 +84,7 @@ def test_blocked_continuation_does_not_reopen_without_a_merged_prerequisite(wait
 def test_prerequisite_merge_never_reopens_a_changed_task(waiting, monkeypatch, change):
     store, ledger, _ = waiting
     assert run("sw", "--as", ME, "wait", "--on", "merge", URL) == 1
-    assert run("sw", "--as", ME, "block", "Stack published; next step restack") == 0
+    assert run("sw", "--as", ME, "block", f"Stack published; next step restack after {URL}") == 0
     ledger.rows["t1"].update(change)
     expected = dict(ledger.rows["t1"])
     monkeypatch.setattr(cli.ledger_events, "view", lambda url: pytest.fail("changed task must not read GitHub"))
@@ -104,6 +104,26 @@ def test_prerequisite_block_releases_a_claim_with_an_unfinished_task_dependency(
     store, ledger, _ = waiting
     ledger.rows["t1"]["depends_on"] = ["t2"]
     assert run("sw", "--as", ME, "wait", "--on", "merge", URL) == 1
-    assert run("sw", "--as", ME, "block", "Stack published; next step restack") == 0
+    assert run("sw", "--as", ME, "block", f"Stack published; next step restack after {URL}") == 0
     assert ledger.rows["t1"]["state"] == "blocked"
     assert store.agents("sw")[0].state == "finished"
+
+
+def test_an_unrelated_block_after_a_refusal_is_not_reopened(waiting, monkeypatch):
+    store, ledger, _ = waiting
+    assert run("sw", "--as", ME, "wait", "--on", "merge", URL) == 1
+    assert run("sw", "--as", ME, "block", "Waiting for operator credentials") == 0
+    monkeypatch.setattr(cli.ledger_events, "view", lambda url: pytest.fail("unrelated block must not read GitHub"))
+    assert prerequisite_wait.reopen_pass("sw", store, ledger, ledger.rows) == []
+    assert ledger.rows["t1"]["state"] == "blocked"
+
+
+def test_an_admitted_wait_clears_the_previous_prerequisite_offer(waiting, monkeypatch):
+    store, ledger, state = waiting
+    assert run("sw", "--as", ME, "wait", "--on", "merge", URL) == 1
+    state["entry"]["position"] = 1
+    assert run("sw", "--as", ME, "wait", "--on", "merge", URL) == 0
+    assert run("sw", "--as", ME, "block", f"New blocker mentions old stack {URL}; next step credentials") == 0
+    monkeypatch.setattr(cli.ledger_events, "view", lambda url: pytest.fail("cleared offer must not read GitHub"))
+    assert prerequisite_wait.reopen_pass("sw", store, ledger, ledger.rows) == []
+    assert ledger.rows["t1"]["state"] == "blocked"

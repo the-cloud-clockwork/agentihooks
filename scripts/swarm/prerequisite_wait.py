@@ -10,6 +10,7 @@ def key(slug: str) -> str:
 
 
 def admit(store: RedisStore, slug: str, agent: AgentRecord, held: dict, ledger) -> None:
+    store.redis.hdel(key(slug), agent.task)
     if held["kind"] != "merge" or not agent.task:
         return
     task = ledger.task(slug, agent.task)
@@ -33,7 +34,8 @@ def admit(store: RedisStore, slug: str, agent: AgentRecord, held: dict, ledger) 
     )
     raise SwarmError(
         f"prerequisite {target} is at queue position {position}; stack the next change on the prerequisite branch "
-        "and publish it, or block with the stack and next step in the notes; the swarm will reopen after it merges"
+        "and publish it, or block with this prerequisite URL, the stack and next step in the notes; "
+        "the swarm will reopen after it merges"
     )
 
 
@@ -44,13 +46,14 @@ def offered(store: RedisStore, slug: str, agent: AgentRecord) -> dict:
     return {}
 
 
-def dependencies(store: RedisStore, slug: str, agent: AgentRecord, task: dict) -> list:
-    return [] if offered(store, slug, agent) else task.get("depends_on", [])
-
-
-def hold(store: RedisStore, slug: str, agent: AgentRecord, ledger) -> None:
+def dependencies(store: RedisStore, slug: str, agent: AgentRecord, task: dict, note: str) -> list:
     record = offered(store, slug, agent)
-    if not record:
+    return [] if record and record["target"] in note else task.get("depends_on", [])
+
+
+def hold(store: RedisStore, slug: str, agent: AgentRecord, ledger, note: str) -> None:
+    record = offered(store, slug, agent)
+    if not record or record["target"] not in note:
         return
     task = ledger.task(slug, agent.task)
     record.update(blocked=True, generation=task.get("claim_generation", 0))
