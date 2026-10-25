@@ -598,7 +598,7 @@ def _launcher_text(tmp_path, environ, agent="claude", name="swarm-buildout-eng-4
 
 def test_hive_launch_refreshes_github_credentials_by_reference(tmp_path):
     launcher = _launcher_text(tmp_path, {"HIVE_GITHUB_AUTH_MODE": "app", "GITHUB_APP_PRIVATE_KEY": "fixture"})
-    assert "scripts.github_app_cli exec" in launcher
+    assert "-P -m scripts.github_app_cli exec" in launcher
     assert "fixture" not in launcher
 
 

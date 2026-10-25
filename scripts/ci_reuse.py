@@ -82,6 +82,9 @@ INLINE_SKIP = (
 
 POSTGRES_REQUIRED = ('"semgrep", "sonar"]', '"semgrep", "sonar", "writer-lock"]')
 
+FORWARDED_STATS = """NEEDS=$(jq 'if ."mutation-plan".result == "success" and ."mutation-plan".outputs.forwarded == "true" and ."mutation-stats".result == "skipped" then ."mutation-stats".result = "success" else . end' <<< "$NEEDS")
+"""
+
 QUEUE_TIER = (
     """if [[ "${EVENT:-}" == merge_group || "${EVENT:-}" == pull_request ]]; then
   if ! jq -e --arg event "$EVENT" --arg mutation "$MUTATION" '
@@ -204,6 +207,11 @@ if [[ "$selection" == failure || "$selection" == cancelled ]]; then
 fi
 """
     return [{**aggregation, "run": prefix + aggregation["run"]}, *rest]
+
+
+def forwarded_stats(steps: list[dict]) -> list[dict]:
+    [aggregation, *rest] = steps
+    return [{**aggregation, "run": FORWARDED_STATS + aggregation["run"]}, *rest]
 
 
 def reuse_job() -> dict:
