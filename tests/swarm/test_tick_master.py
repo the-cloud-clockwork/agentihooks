@@ -1,3 +1,5 @@
+from dataclasses import replace
+
 import pytest
 
 from scripts.inbox.seats import seat_address
@@ -216,6 +218,28 @@ def test_a_forced_launch_with_no_hook_promotes_after_the_startup_deadline(store)
     assert f"promoted {ENGINEER} to restore the master: {tick_master.NO_HOOK}" in actions
 
 
+def test_a_deferred_forced_launch_is_promoted_only_after_its_launch_budget(store):  # noqa: F811
+    runtime, ledger = outage(store, startup=False)
+    runtime.broken, runtime.registered = False, set()
+    spawn, budget = runtime.spawn, {"state": "pending", "report": "/r.json", "deadline_ms": 660_000}
+
+    def deferred(config, lane, name, task):
+        placed = spawn(config, lane, name, task)
+        return replace(placed, profile_decision={"validation": budget}) if lane == MASTER else placed
+
+    runtime.spawn = deferred
+    tick("sw", store, ledger, runtime, 1 + DOWN)
+    assert len(runtime.masters) == 1
+    for at in (1 + DOWN + 120_000, 1 + 2 * DOWN, 1 + 3 * DOWN, DOWN + 660_000):
+        tick("sw", store, ledger, runtime, at)
+        assert tick_master.promoted(store, "sw") == ""
+    assert tick_master.read(store, "sw")["forced_at"] == 1 + 3 * DOWN
+    assert tick_master.read(store, "sw")["started_at"] == 1 + DOWN
+    assert len(runtime.masters) == 1
+    actions = tick("sw", store, ledger, runtime, 1 + DOWN + 660_000)
+    assert f"promoted {ENGINEER} to restore the master: {tick_master.NO_HOOK}" in actions
+
+
 def test_a_gone_promoted_engineer_is_replaced(store):  # noqa: F811
     runtime, ledger = outage(store)
     ledger.rows["t2"] = {"id": "t2", "lane": "eng", "state": "open", "claimed_by": "", "out_of_scope": False}
@@ -287,6 +311,30 @@ def test_a_master_starting_before_any_forced_launch_is_not_a_failure():
     actions = tick_master.run("sw", swarm.config("sw"), swarm, tasks(), runtime, DOWN, lambda: [])
     assert actions == []
     assert tick_master.read(swarm, "sw") == {"since": 1}
+
+
+def test_a_starting_master_without_a_kept_start_is_timed_from_the_forced_launch():
+    swarm, _ = direct(AgentRecord("master@a1b2c3-0002", MASTER, MASTER, state="starting", seat=MASTER_SEAT))
+    assert tick_master._hookless(swarm, "sw", {"forced_at": 1}, 120_000) is False
+    assert tick_master._hookless(swarm, "sw", {"forced_at": 1}, 120_001) is True
+    assert tick_master._hookless(swarm, "sw", {"forced_at": 1, "started_at": 60_000}, 120_001) is False
+    assert tick_master._hookless(swarm, "sw", {}, 120_001) is False
+
+
+def test_a_forced_tick_keeps_the_first_start_only_while_a_master_starts():
+    starting = AgentRecord("master@a1b2c3-0002", MASTER, MASTER, state="starting", seat=MASTER_SEAT)
+    swarm, _ = direct(starting)
+    kept = tick_master._forced(swarm, "sw", {"since": 1, "started_at": 5}, 10, ["refused"])
+    assert kept == {"since": 1, "started_at": 5, "forced_at": 10}
+    assert tick_master._forced(swarm, "sw", {"since": 1}, 10, []) == {"since": 1, "started_at": 10, "forced_at": 10}
+    empty, _ = direct()
+    dropped = tick_master._forced(empty, "sw", {"since": 1, "started_at": 5}, 10, ["refused"])
+    assert dropped == {"since": 1, "forced_at": 10, "failure": "refused"}
+    assert tick_master._forced(empty, "sw", {"since": 1}, 10, []) == {
+        "since": 1,
+        "forced_at": 10,
+        "failure": tick_master.NO_LAUNCH,
+    }
 
 
 def test_a_finished_master_record_counts_as_no_master():
