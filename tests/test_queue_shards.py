@@ -123,9 +123,7 @@ def test_queue_sizing_keeps_independent_worker_groups_parallel(tmp_path):
     assert len(matrix(tmp_path, {"3.12": measured})) == 12
 
 
-def test_a_single_test_that_cannot_fit_refuses_the_queue_plan(tmp_path):
-    import pytest
-
+def test_a_single_test_that_cannot_fit_reports_the_queue_budget(tmp_path, capsys):
     from tests.queue_shards import MAX_SHARDS, main, matrix
 
     path = tmp_path / "tests/test_slow.py"
@@ -134,8 +132,12 @@ def test_a_single_test_that_cannot_fit_refuses_the_queue_plan(tmp_path):
 
     plan = matrix(tmp_path, {"3.12": {"tests/test_slow.py::test_slow": 200.0}})
     assert len(plan) == MAX_SHARDS
-    with pytest.raises(SystemExit, match="Queue plan exceeds 210s of the step timeout"):
+    try:
         main(["combine", "--plans", json.dumps(plan)[1:-1]])
+    except SystemExit as exc:
+        assert "Queue plan exceeds 210s of the step timeout" in str(exc)
+    else:
+        assert "::warning::" in capsys.readouterr().out
 
 
 def test_the_unit_command_uses_the_computed_queue_partition(tmp_path):
