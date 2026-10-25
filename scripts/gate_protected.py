@@ -160,6 +160,13 @@ def _equivalence_problems(branched: dict[str, dict], tip: dict[str, dict], head:
         problems.append("The head changes when the ledger equivalence workflow starts.")
     if head_job.get("if") != base_job.get("if"):
         problems.append("The head changes the ledger equivalence job condition.")
+    if head_job.get("continue-on-error"):
+        problems.append("The head lets the ledger equivalence job continue on error.")
+    problems += [
+        f"The head lets the ledger equivalence step {step.get('name') or step.get('uses')} continue on error."
+        for step in head_job["steps"]
+        if step.get("continue-on-error")
+    ]
     if head_job["steps"][: head_index + 1] != base_job["steps"][: base_index + 1]:
         problems.append("The head changes the ledger equivalence steps up to its protected trigger.")
     problems += [

@@ -1206,7 +1206,8 @@ def _equivalence():
 
 def _equivalence_grade(head, branched=None):
     tip = {gate_protected.EQUIVALENCE: _equivalence()}
-    return gate_protected._equivalence_problems(branched or {}, tip, {gate_protected.EQUIVALENCE: head})
+    branched = tip if branched is None else branched
+    return gate_protected._equivalence_problems(branched, tip, {gate_protected.EQUIVALENCE: head})
 
 
 def test_an_unchanged_or_ordinary_equivalence_edit_passes_the_protected_grader():
@@ -1237,6 +1238,19 @@ def test_a_head_that_skips_its_equivalence_check_is_refused():
     gated = _equivalence()
     gated["jobs"]["ledger-equivalence"]["if"] = False
     assert _equivalence_grade(gated) == ["The head changes the ledger equivalence job condition."]
+
+    tolerated = _equivalence()
+    tolerated["jobs"]["ledger-equivalence"]["continue-on-error"] = True
+    [compare] = [
+        step
+        for step in tolerated["jobs"]["ledger-equivalence"]["steps"]
+        if step.get("run") == "cmp base.json head.json"
+    ]
+    compare["continue-on-error"] = True
+    assert _equivalence_grade(tolerated) == [
+        "The head lets the ledger equivalence job continue on error.",
+        f"The head lets the ledger equivalence step {compare['name']} continue on error.",
+    ]
 
     unconditioned = _equivalence()
     step = unconditioned["jobs"]["ledger-equivalence"]["steps"][-2]
