@@ -173,8 +173,9 @@ def test_publish_from_second_worktree_pushes_and_records_its_branch(
     first_head = git(first, "rev-parse", "HEAD")
     second = tmp_path / "second"
     git(first, "worktree", "add", "-b", "engineer-test-2", str(second))
+    publication.task["branch"] = "engineer-test-2"
     if record_repository_branch:
-        publication.task["repository_branches"] = {str(publication.repo): "engineer-test"}
+        publication.task["repository_branches"] = {str(publication.repo): "engineer-test-2"}
     (second / "chosen.txt").write_text("after")
     monkeypatch.chdir(second)
 
@@ -253,7 +254,7 @@ def test_stacked_publication_records_its_current_branch_before_pushing(publicati
     root = publication.root
     git(root, "push", "origin", "HEAD:prerequisite")
     original = git(root, "rev-parse", "HEAD")
-    publication.task.update(branch="prerequisite", pr_url="https://github.com/example/repo/pull/7")
+    publication.task.update(branch="engineer-test", pr_url="https://github.com/example/repo/pull/7")
     if binding == "tracked":
         git(root, "branch", "--set-upstream-to=origin/prerequisite")
     if binding == "continuation":
@@ -444,9 +445,9 @@ def test_prepare_stacks_on_the_recorded_branch_and_publish_pushes_its_current_br
     result = publish.prepare("swarm", agent, str(repository), ledger)
     assert result["worktree"] == str(worktree)
     assert git(worktree, "rev-parse", "HEAD") == git(repository, "rev-parse", "origin/predecessor")
-    assert task["branch"] == result["branch"] == "predecessor"
+    assert task["branch"] == result["branch"] == "engineer-test"
     assert task["branch_repo"] == str(repository.parent / "remote.git")
-    assert task["repository_branches"] == {str(repository): "predecessor"}
+    assert task["repository_branches"] == {str(repository): "engineer-test"}
     assert git(worktree, "rev-parse", "--abbrev-ref", "@{upstream}") == "origin/predecessor"
 
     (worktree / "chosen.txt").write_text("after")
@@ -550,7 +551,7 @@ def test_prepare_tracks_the_recorded_delivery_branch_from_an_existing_worktree(r
     result = publish.prepare("swarm", AgentRecord("engineer@test", "ci", "t1"), str(repository), ledger)
 
     assert result["worktree"] == str(worktree)
-    assert task["branch"] == result["branch"] == "predecessor"
+    assert task["branch"] == result["branch"] == "engineer-test"
     assert git(worktree, "rev-parse", "--abbrev-ref", "@{upstream}") == "origin/predecessor"
 
 
@@ -1166,7 +1167,7 @@ def test_continuation_publishes_its_current_branch(publication):
 
     root = publication.root
     git(root, "push", "origin", "HEAD:predecessor")
-    publication.task["branch"] = "predecessor"
+    publication.task["branch"] = "engineer-test"
     result = publish.publish(
         "swarm", publication.agent, str(publication.repo), publication.ledger, "Change chosen", ["chosen.txt"]
     )
@@ -1197,7 +1198,7 @@ def test_stacked_delivery_publishes_its_current_branch_with_one_push(publication
 
     monkeypatch.setattr(publish, "execute", counted)
     publish.prepare("swarm", publication.agent, str(publication.repo), publication.ledger)
-    assert publication.task["branch"] == "predecessor"
+    assert publication.task["branch"] == "engineer-test"
     for name in ("chosen.txt", "other.txt"):
         (root / name).write_text("after")
         pushes.clear()
@@ -1215,30 +1216,26 @@ def test_stacked_delivery_publishes_its_current_branch_with_one_push(publication
 
 
 @pytest.mark.parametrize(
-    "pull, reused",
+    "pull",
     [
-        ({}, True),
-        ({"state": "CLOSED"}, False),
-        ({"state": "MERGED"}, False),
-        ({"isCrossRepository": True}, False),
-        ({"repository": {"nameWithOwner": "example/other"}}, False),
-        ({"headRefName": "dev"}, False),
-        ({"behind": True}, False),
+        {},
+        {"state": "CLOSED"},
+        {"state": "MERGED"},
+        {"isCrossRepository": True},
+        {"repository": {"nameWithOwner": "example/other"}},
+        {"headRefName": "dev"},
+        {"behind": True},
     ],
 )
-def test_a_continuation_publishes_onto_its_open_pull_request_branch(publication, monkeypatch, pull, reused):
+def test_a_continuation_publishes_its_registered_branch_regardless_of_its_pull_request(publication, monkeypatch, pull):
     from scripts.swarm import merge_queue, publish
 
     root, repository = publication.root, publication.repo
     pr_url = "https://github.com/example/repo/pull/7"
-    behind = pull.get("behind", False)
-    pull = {key: value for key, value in pull.items() if key != "behind"}
-    if behind:
-        parked = git(repository, "commit-tree", "HEAD^{tree}", "-p", "HEAD", "-m", "Diverged predecessor work")
-        git(repository, "push", "origin", f"{parked}:refs/heads/predecessor")
-    else:
-        git(root, "push", "origin", "HEAD:predecessor")
-    publication.task.update(branch="predecessor", pr_url=pr_url, state="pr")
+    parked = git(root, "rev-parse", "HEAD")
+    git(root, "push", "origin", "HEAD:predecessor")
+    publication.task.update(pr_url=pr_url, state="pr")
+    monkeypatch.chdir(root)
     native = publish.git
     pushes, fetches = [], []
 
@@ -1253,17 +1250,8 @@ def test_a_continuation_publishes_onto_its_open_pull_request_branch(publication,
 
     def query(document, variables):
         if "resource" in document:
-            assert "headRefName" in document and "isCrossRepository" in document and "nameWithOwner" in document
-            assert variables == {"url": pr_url}
-            resource = {
-                "state": "OPEN",
-                "headRefName": "predecessor",
-                "isCrossRepository": False,
-                "repository": {"nameWithOwner": "example/repo"},
-                **pull,
-            }
-            return {"resource": resource}
-        assert variables["owner"] == "Example" and variables["name"] == "Repo"
+            return {"resource": {"state": "OPEN", "headRefName": "predecessor", **pull}}
+        assert variables == {"owner": "Example", "name": "Repo", "branch": "engineer-test"}
         return {"repository": {"pullRequests": {"nodes": [], "pageInfo": {"hasNextPage": False}}}}
 
     monkeypatch.setattr(publish, "git", git_call)
@@ -1273,16 +1261,14 @@ def test_a_continuation_publishes_onto_its_open_pull_request_branch(publication,
     )
 
     head = git(root, "rev-parse", "HEAD")
-    target, other = ("predecessor", "engineer-test") if reused else ("engineer-test", "predecessor")
     assert len(pushes) == 1
-    looked_up = ("fetch", "origin", "+refs/heads/predecessor:refs/remotes/origin/predecessor")
-    assert (looked_up in fetches) == (reused or behind)
-    assert result["branch"] == publication.task["branch"] == target
-    assert publication.task["repository_branches"] == {str(repository): target}
+    assert fetches == []
+    assert result["branch"] == publication.task["branch"] == "engineer-test"
+    assert publication.task["repository_branches"] == {str(repository): "engineer-test"}
     assert publication.task["pr_url"] == pr_url
-    assert git(root, "ls-remote", "origin", f"refs/heads/{target}").split()[0] == head
-    assert git(root, "ls-remote", "origin", f"refs/heads/{other}").split()[:1] != [head]
-    assert git(root, "rev-parse", "--abbrev-ref", "@{upstream}") == f"origin/{target}"
+    assert git(root, "ls-remote", "origin", "refs/heads/engineer-test").split()[0] == head
+    assert git(root, "ls-remote", "origin", "refs/heads/predecessor").split()[0] == parked
+    assert git(root, "rev-parse", "--abbrev-ref", "@{upstream}") == "origin/engineer-test"
 
 
 def test_a_pull_request_on_another_host_is_never_looked_up(monkeypatch):
@@ -1329,7 +1315,7 @@ def test_a_restacked_successor_publishes_its_prepared_branch_not_the_parked_one(
     root, repository = publication.root, publication.repo
     parked = git(repository, "commit-tree", "HEAD^{tree}", "-p", "HEAD", "-m", "Parked predecessor work")
     git(repository, "push", "origin", f"{parked}:refs/heads/predecessor")
-    publication.task["branch"] = "predecessor"
+    publication.task["branch"] = "engineer-test"
     result = publish.publish(
         "swarm", publication.agent, str(repository), publication.ledger, "Change chosen", ["chosen.txt"]
     )
