@@ -64,7 +64,7 @@ def wait_until(predicate):
         time.sleep(0.01)
 
 
-@pytest.mark.parametrize("disable_maintenance", [False, True])
+@pytest.mark.parametrize("disable_maintenance", [False, True, "environment"])
 def test_fetch_maintenance_removes_initializing_grader(tmp_path, disable_maintenance):
     def git(*args, **kwargs):
         return subprocess.run(
@@ -93,7 +93,9 @@ def test_fetch_maintenance_removes_initializing_grader(tmp_path, disable_mainten
     )
     git("config", "gc.auto", "0")
     git("remote", "add", "origin", str(repo))
-    if disable_maintenance:
+    if disable_maintenance == "environment":
+        environment.update(GIT_CONFIG_COUNT="1", GIT_CONFIG_KEY_0="maintenance.auto", GIT_CONFIG_VALUE_0="false")
+    elif disable_maintenance:
         git("config", "maintenance.auto", "false")
     print("config", git("config", "--get-regexp", "^(gc|maintenance)\\.").stdout, flush=True)
     source = tmp_path / "pause.c"
