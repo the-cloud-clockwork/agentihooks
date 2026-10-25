@@ -32,7 +32,8 @@ def notify(
 ) -> None:
     by = getattr(args, "name", "") or os.environ.get("AGENTIHOOKS_AGENT_NAME") or "operator"
     after = master(store, args.slug)
-    if any(a and by == a.name for a in (before, after)):
+    masters_now = [a for a in store.agents(args.slug) if a.lane == MASTER]
+    if any(a and by == a.name for a in (before, after, *masters_now)):
         return
     boss = after or before
     address = (boss.seat or boss.name) if boss else seat_address(args.slug, MASTER)
@@ -46,7 +47,7 @@ def notify(
     if action == "set":
         result += f" Engineer cap {config.max_eng}, CI cap {config.max_ci}, Planner cap {config.max_plan}."
     if action == "verdict":
-        result += f" The verdict is {args.verdict.replace('-', ' ')}."
+        result += f" The finding is {args.finding}. The verdict is {args.verdict.replace('-', ' ')}."
     text = f"{actor} {verb} from the {source}. {result}" + (f" {detail}" if detail else "")
     if after or action not in {"stop", "close"}:
         notice = outbox.Post(by, address, text, ref=f"{CONTROL_REF}{uuid.uuid4().hex}", fyi=True)
