@@ -428,6 +428,23 @@ def test_the_wake_window_setting_bounds_how_long_the_front_door_waits(world, mon
     assert world.refusals() == 0
 
 
+def test_outage_time_does_not_count_toward_a_backend_masters_wake_window(world, monkeypatch):
+    from scripts.swarm import outage
+
+    item = waiting_on_the_backend_master(world, 301)
+    seen = []
+
+    def paused(slug, since, now):
+        seen.append((slug, since))
+        return 2_000
+
+    monkeypatch.setattr(outage, "paused_ms", paused)
+
+    with pytest.raises(InboxError, match=f"so {LEAD} cannot message its claimant"):
+        master_fence.check_send(inbox(world), LEAD_NAME, OWN_CLAIMANT)
+    assert seen == [(SLUG, inbox(world).get(item.id).created_at)]
+
+
 def test_the_front_door_replies_to_a_stuck_backend_masters_claimant(world):
     waiting_on_the_backend_master(world, 301)
     asked = inbox(world).send(OWN_CLAIMANT, LEAD_NAME, "Who owns this now?")

@@ -181,14 +181,15 @@ class Seats:
         return masters.route(item, self.doc, owners, self.live, self.lead), 0
 
     def stuck(self, inbox, seat: str) -> bool:
-        """The seat's master has left an item that needs work unread past the wake window."""
+        """The seat's master has left an item that needs work unread past the wake window, outage time excluded."""
         from scripts.inbox import wake
         from scripts.inbox.store import now_ms
+        from scripts.swarm import outage
 
-        cutoff = now_ms() - wake.window_ms(os.environ)
+        now, window = now_ms(), wake.window_ms(os.environ)
         names = [name for name, held in self.names.items() if held == seat]
-        items = [item for name in names for item in inbox.open_mail(name)]
-        return any(not item.fyi and item.state != "read" and item.created_at < cutoff for item in items)
+        items = [item for name in names for item in inbox.open_mail(name) if not item.fyi and item.state != "read"]
+        return any(now - item.created_at - outage.paused_ms(self.slug, item.created_at, now) > window for item in items)
 
     def _retired(self, record: dict) -> int:
         return self.table.retired_at(self.slug, record["seat"])
