@@ -43,6 +43,11 @@ RESUMED = (
     "never {ledger}, then continue as master."
 )
 RECORD_FIELDS = {f.name for f in fields(AgentRecord)}
+LEAD_STARTING = ("starting", "suspect")
+STARTING = (
+    "the front door master {name} is still starting and the swarm has {count} master seat{s}, so no second master "
+    "starts; the tick binds or replaces it, or run master up --replace to retire it first"
+)
 
 
 @dataclass(frozen=True)
@@ -202,6 +207,10 @@ def _front_doors(store, slug, live):
     return [a for a in store.agents(slug) if master_seats.is_lead(slug, a) and a.name in live]
 
 
+def _starting_leads(store, slug):
+    return [a for a in store.agents(slug) if master_seats.is_lead(slug, a) and a.state in LEAD_STARTING]
+
+
 def _free_seat(store, slug, live):
     taken = master_fill.taken_seats(store, slug, live)
     return next(
@@ -229,7 +238,12 @@ def _beside(store, slug, runtime, at, live):
 
 def _fresh(store, slug, runtime, at, live, replace_live=False):
     front = _front_doors(store, slug, live)
-    if front and not replace_live:
+    starting = _starting_leads(store, slug)
+    if starting and not replace_live:
+        count = master_seats.MasterSeats(store.redis).count(slug)
+        if _free_seat(store, slug, live) > count:
+            raise SwarmError(STARTING.format(name=starting[0].name, count=count, s="" if count == 1 else "s"))
+    if (front or starting) and not replace_live:
         return _beside(store, slug, runtime, at, live)
     take_master.retired(store, slug, runtime, front)
     return _new(store, slug, runtime, at)
