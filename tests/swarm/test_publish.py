@@ -1340,6 +1340,26 @@ def test_prepare_and_publish_keep_the_open_pull_requests_delivery_branch(publica
     assert git(p.repo, "ls-remote", "origin", "refs/heads/engineer-test") == ""
 
 
+@pytest.mark.parametrize("open_branch,diverged", [("", False), ("another-task", False), ("predecessor", True)])
+def test_publish_refuses_unverified_or_diverged_retained_delivery(publication, monkeypatch, open_branch, diverged):
+    from scripts.swarm import publish
+
+    p = publication
+    commit = git(p.root, "rev-parse", "HEAD")
+    if diverged:
+        commit = git(p.root, "commit-tree", "HEAD^{tree}", "-p", "HEAD", "-m", "Unrelated retained work")
+    git(p.root, "push", "origin", f"{commit}:refs/heads/predecessor")
+    p.task.update(branch="predecessor", pr_url="https://github.com/example/repo/pull/7")
+    monkeypatch.setattr(publish.publish_queue, "open_head", lambda remote, url: open_branch)
+    monkeypatch.chdir(p.root)
+    before = git(p.root, "rev-parse", "HEAD")
+    with pytest.raises(publish.SwarmError, match="differs from registered branch predecessor"):
+        publish.publish("swarm", p.agent, str(p.repo), p.ledger, "Keep unrelated work", ["chosen.txt"])
+    assert git(p.root, "rev-parse", "HEAD") == before
+    assert git(p.root, "diff", "--cached", "--name-only") == ""
+    assert git(p.repo, "ls-remote", "origin", "refs/heads/predecessor").split()[0] == commit
+
+
 def test_a_restacked_successor_publishes_its_prepared_branch_not_the_parked_one(publication):
     from scripts.swarm import publish
 
