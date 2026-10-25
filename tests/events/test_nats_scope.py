@@ -3,6 +3,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
 import pytest
+from nats.js.errors import NotFoundError
 
 from scripts.events import nats_scope
 from scripts.events.config import SCOPED_STATE_BUCKETS, BusConfig, QueuePolicy
@@ -47,7 +48,9 @@ def test_scope_provisions_dedupe_and_buckets_then_reuses_owned_resources(monkeyp
     monkeypatch.setattr(nats_scope, "NatsWorkQueue", queues)
     config = BusConfig(scoped=True, dedupe_window_ms=12345)
     root = SimpleNamespace(
-        _config=config, _loop=SimpleNamespace(run=asyncio.run), _js=SimpleNamespace(add_stream=AsyncMock())
+        _config=config,
+        _loop=SimpleNamespace(run=asyncio.run),
+        _js=SimpleNamespace(add_stream=AsyncMock(), stream_info=AsyncMock(side_effect=NotFoundError())),
     )
     view = nats_scope.NatsScopedBus(root, "rig")
     assert view.events._log._swarm == "rig"
@@ -82,7 +85,8 @@ def test_reopening_scoped_queue_preserves_the_existing_stream_configuration(monk
     policy = QueuePolicy(max_deliver=2)
     config = BusConfig(scoped=True)
     queue = nats.NatsWorkQueue(loop, js, "swarm.rig.ready.eng", policy, config, "rig")
-    js.stream_info.assert_awaited_once_with(stream_name("rig", "QUEUE_eng"))
+    assert js.stream_info.await_count == 2
+    js.stream_info.assert_awaited_with(stream_name("rig", "QUEUE_eng"))
     js.add_stream.assert_not_awaited()
     assert queue._subject == "swarm.rig.queue.eng.work"
     assert queue._filter == "swarm.rig.queue.eng.>"

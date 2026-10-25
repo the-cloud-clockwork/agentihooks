@@ -1,7 +1,5 @@
 import asyncio
 import base64
-import hashlib
-import re
 import threading
 from collections.abc import Callable, Coroutine, Iterator
 from dataclasses import dataclass
@@ -19,12 +17,15 @@ from .config import BusConfig, QueuePolicy
 from .dead import DEAD_STREAM, DEAD_SUBJECT, dead_letter
 from .envelope import Envelope
 from .nats_legacy import legacy_filters, legacy_target, provision_events
+from .nats_names import existing_consumer, existing_stream
+from .resource_names import legacy_queue_stream, legacy_stream_name
+from .resource_names import queue_stream as resource_queue_stream
 from .scope import RoutedLog, queue_lane, require_owner
 from .subjects import PREFIX, inbox, stream_name
 from .subjects import subject as event_subject
 
 DEFAULT_URL = "nats://127.0.0.1:4222"
-EVENT_STREAM = "AGENTIHOOKS_EVENTS"
+EVENT_STREAM = "AGENTIHOOKS-EVENTS"
 QUEUE_SUBJECT = "agentihooks.queue"
 MSG_ID = "Nats-Msg-Id"
 KV_HISTORY = 64
@@ -36,8 +37,7 @@ ATTEMPT_BASE = "AgentiHooks-Delivery-Base"
 
 
 def queue_stream(name: str) -> str:
-    suffix = name if re.fullmatch("[A-Za-z0-9_-]{1,64}", name) else "h" + hashlib.sha256(name.encode()).hexdigest()
-    return f"AGENTIHOOKS_QUEUE_{suffix}"
+    return resource_queue_stream(name)
 
 
 def _seconds(ms: int) -> float:
@@ -97,7 +97,8 @@ def _consumer_config(durable: str, subject: str, policy: QueuePolicy) -> api.Con
 
 
 async def _pull(js, stream: str, durable: str, subject: str, policy: QueuePolicy, provision: bool):
-    wanted = legacy_filters(subject) if stream == EVENT_STREAM else [subject]
+    durable = await existing_consumer(js, stream, durable)
+    wanted = legacy_filters(subject) if stream in {EVENT_STREAM, "AGENTIHOOKS_EVENTS"} else [subject]
     try:
         info = await js.consumer_info(stream, durable)
     except NotFoundError:
@@ -105,13 +106,13 @@ async def _pull(js, stream: str, durable: str, subject: str, policy: QueuePolicy
             raise
     else:
         found = info.config.filter_subjects or [info.config.filter_subject]
-        if found != wanted and not (stream == EVENT_STREAM and found == [subject]):
+        if found != wanted and not (stream in {EVENT_STREAM, "AGENTIHOOKS_EVENTS"} and found == [subject]):
             raise ValueError(f"durable consumer {durable!r} filters {found[0]!r}, not {subject!r}")
     if provision:
         config = _consumer_config(durable, subject, policy)
         if len(wanted) > 1:
             config.filter_subject, config.filter_subjects = None, wanted
-        if stream.endswith("_DEAD"):
+        if stream.endswith(("-DEAD", "_DEAD")):
             config.max_deliver = policy.max_deliver
         await js.add_consumer(stream, config=config)
     return await js.pull_subscribe_bind(durable=durable, stream=stream)
@@ -183,7 +184,9 @@ async def _publish_dead(
     js: JetStreamContext, event: Envelope, identity: str, attempts: int, swarm: str | None = None
 ) -> None:
     letter = dead_letter(event, identity, attempts)
-    stream = stream_name(swarm, "DEAD") if swarm is not None else DEAD_STREAM
+    desired = stream_name(swarm, "DEAD") if swarm is not None else DEAD_STREAM
+    legacy = legacy_stream_name(swarm, "DEAD") if swarm is not None else "AGENTIHOOKS_DEAD"
+    stream = await existing_stream(js, desired, legacy)
     target = event_subject(swarm, "dead", letter.id) if swarm is not None else f"dead.{event.swarm}.{letter.id}"
     try:
         await nats_payload.publish(
@@ -218,7 +221,11 @@ class NatsEventLog:
         self._policies: dict[str, QueuePolicy] = {}
 
     def publish(self, subject: str, event: Envelope) -> bool:
-        target = legacy_target(subject, self._permissions) if self._stream == EVENT_STREAM else subject
+        target = (
+            legacy_target(subject, self._permissions)
+            if self._stream in {EVENT_STREAM, "AGENTIHOOKS_EVENTS"}
+            else subject
+        )
         return self._loop.run(_publish(self._js, target, self._stream, event))
 
     def consumer(self, durable: str, subject: str, policy: QueuePolicy | None = None) -> NatsConsumer:
@@ -247,7 +254,7 @@ def queue_names(name: str, swarm: str | None) -> QueueNames:
     if swarm is None:
         stream = queue_stream(name)
         base = f"{QUEUE_SUBJECT}.{name}"
-        return QueueNames(stream, base, base, stream.removeprefix("AGENTIHOOKS_QUEUE_"))
+        return QueueNames(stream, base, base, stream.removeprefix("AGENTIHOOKS-QUEUE-"))
     lane = queue_lane(swarm, name)
     base = event_subject(swarm, "queue", lane)
     return QueueNames(stream_name(swarm, f"QUEUE_{lane}"), f"{base}.work", f"{base}.>", lane)
@@ -286,7 +293,11 @@ class NatsWorkQueue:
     ):
         self.policy, self._loop, self._js, self._swarm = policy, loop, js, swarm
         names = queue_names(name, swarm)
-        self._stream, self._subject, self._filter = names.stream, names.subject, names.filter
+        legacy = legacy_queue_stream(name) if swarm is None else legacy_stream_name(swarm, f"QUEUE_{names.durable}")
+        selected = loop.run(existing_stream(js, names.stream, legacy))
+        self._stream, self._subject, self._filter = selected, names.subject, names.filter
+        durable = legacy.removeprefix("AGENTIHOOKS_QUEUE_") if swarm is None and selected == legacy else names.durable
+        names = QueueNames(selected, names.subject, names.filter, durable)
         if config.provision:
             loop.run(provision_queue(js, names, config, swarm is not None))
         elif swarm is not None:
@@ -385,20 +396,22 @@ class NatsBus:
                 )
             )
             self._js = self._nc.jetstream()
+            event_stream = self._loop.run(existing_stream(self._js, EVENT_STREAM, "AGENTIHOOKS_EVENTS"))
+            dead_stream = self._loop.run(existing_stream(self._js, DEAD_STREAM, "AGENTIHOOKS_DEAD"))
             if config.provision:
-                self._loop.run(provision_events(self._js, EVENT_STREAM, _seconds(config.dedupe_window_ms)))
+                self._loop.run(provision_events(self._js, event_stream, _seconds(config.dedupe_window_ms)))
                 self._loop.run(
                     self._js.add_stream(
-                        name=DEAD_STREAM, subjects=[DEAD_SUBJECT], duplicate_window=_seconds(config.dedupe_window_ms)
+                        name=dead_stream, subjects=[DEAD_SUBJECT], duplicate_window=_seconds(config.dedupe_window_ms)
                     )
                 )
         except BaseException:
             self._loop.close()
             raise
         self._legacy_events = NatsEventLog(
-            self._loop, self._js, config.queue, EVENT_STREAM, config.provision, credentials=config.credentials
+            self._loop, self._js, config.queue, event_stream, config.provision, credentials=config.credentials
         )
-        self._legacy_dead = NatsEventLog(self._loop, self._js, config.queue, DEAD_STREAM, config.provision)
+        self._legacy_dead = NatsEventLog(self._loop, self._js, config.queue, dead_stream, config.provision)
         self.events = (
             RoutedLog(lambda swarm: self.for_swarm(swarm).events, lambda: self._logs("events"), config.queue)
             if config.scoped

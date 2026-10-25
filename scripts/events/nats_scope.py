@@ -7,7 +7,9 @@ from nats.js import JetStreamContext
 from .bus import StateStore, WorkQueue
 from .config import SCOPED_STATE_BUCKETS, QueuePolicy
 from .nats import NatsEventLog, NatsWorkQueue, _seconds
+from .nats_names import existing_stream
 from .nats_state import ScopedStateStore
+from .resource_names import legacy_stream_name
 from .scope import ScopedLog, queue_lane
 from .subjects import PREFIX, in_swarm, stream_name, subject
 
@@ -21,7 +23,7 @@ async def discover_swarms(js: JetStreamContext) -> list[str]:
         page = await js.streams_info_iterator(offset=offset)
         for info in page:
             name = info.config.name
-            matched = re.fullmatch(r"AGENTIHOOKS_([0-9a-f]+)_EVENTS", name)
+            matched = re.fullmatch(r"AGENTIHOOKS[-_]([0-9a-f]+)[-_]EVENTS", name)
             if matched:
                 swarms.append(bytes.fromhex(matched[1]).decode())
         offset += len(page.streams)
@@ -37,11 +39,17 @@ class NatsScopedBus:
         self._queues: dict[str, NatsWorkQueue] = {}
         self._buckets: dict[str, ScopedStateStore] = {}
         self._lock = threading.Lock()
+        streams = {
+            resource: root._loop.run(
+                existing_stream(root._js, stream_name(swarm, resource), legacy_stream_name(swarm, resource))
+            )
+            for resource in ("EVENTS", "DEAD")
+        }
         if root._config.provision:
             for resource, family in [("EVENTS", "events"), ("DEAD", "dead")]:
                 root._loop.run(
                     root._js.add_stream(
-                        name=stream_name(swarm, resource),
+                        name=streams[resource],
                         subjects=[f"{subject(swarm, family)}.>"],
                         duplicate_window=_seconds(root._config.dedupe_window_ms),
                     )
@@ -49,16 +57,12 @@ class NatsScopedBus:
             for bucket in SCOPED_STATE_BUCKETS:
                 self.state(bucket)
         self.events = ScopedLog(
-            NatsEventLog(
-                root._loop, root._js, root._config.queue, stream_name(swarm, "EVENTS"), root._config.provision, swarm
-            ),
+            NatsEventLog(root._loop, root._js, root._config.queue, streams["EVENTS"], root._config.provision, swarm),
             swarm,
             "events",
         )
         self.dead = ScopedLog(
-            NatsEventLog(
-                root._loop, root._js, root._config.queue, stream_name(swarm, "DEAD"), root._config.provision, swarm
-            ),
+            NatsEventLog(root._loop, root._js, root._config.queue, streams["DEAD"], root._config.provision, swarm),
             swarm,
             "dead",
         )

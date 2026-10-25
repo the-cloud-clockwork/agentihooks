@@ -35,7 +35,9 @@ def test_generated_names_use_only_hyphen_separators(kind, generate):
 
 
 def test_repository_labels_normalize_dots_and_underscores(monkeypatch):
-    monkeypatch.setattr(herdr_host.subprocess, "run", lambda *a, **kw: type("Result", (), {"returncode": 1})())
+    monkeypatch.setattr(
+        herdr_host.subprocess, "run", lambda *a, **kw: type("Result", (), {"returncode": 1, "stdout": ""})()
+    )
     assert herdr_host.repo_label(Path("/missing/project.one_two")) == "project-one-two"
 
 
@@ -49,3 +51,44 @@ def test_resource_encoding_preserves_distinct_names():
 def test_routing_subjects_keep_protocol_token_separators():
     assert readiness.queue_name("rig", "eng") == "swarm.rig.ready.eng"
     assert subjects.subject("rig", "task", "ready") == "swarm.rig.task.ready"
+
+
+@pytest.mark.parametrize(
+    ("lane", "index", "expected"),
+    [("master", 1, "master"), ("master", 2, "master-2"), ("eng", 1, "eng-1"), ("ci", 2, "ci-2"), ("plan", 1, "plan-1")],
+)
+def test_seat_labels_use_the_shared_builder(lane, index, expected):
+    assert naming.seat_label(lane, index) == expected
+
+
+@pytest.mark.parametrize(("lane", "index"), [("eng.one", 1), ("eng", 0), ("eng", -1), ("eng", True), ("eng", "1")])
+def test_invalid_seats_are_refused(lane, index):
+    with pytest.raises(naming.NamingError):
+        naming.seat_label(lane, index)
+
+
+@pytest.mark.parametrize("ordinal", [0, -1, True, "1"])
+def test_invalid_hive_ordinals_are_refused(ordinal):
+    with pytest.raises(ValueError):
+        machine.hive_name(ordinal)
+
+
+@pytest.mark.parametrize("placement", ["tab", "workspace"])
+def test_created_herdr_labels_use_the_shared_generator(monkeypatch, placement):
+    seen = []
+    monkeypatch.setattr(
+        herdr_host, "target_workspace", lambda *args: (None if placement == "workspace" else "space", "repo.one_two")
+    )
+    monkeypatch.setattr(herdr_host, "_cli", lambda args, environ: seen.append(args) or {"root_pane": "pane"})
+    monkeypatch.setattr(herdr_host, "_placed", lambda value: value)
+    assert herdr_host.open_pane(Path("/missing"), "agent.one_two", {}, placement, "", {}) == "pane"
+    command = seen[0]
+    expected = "repo-one-two" if placement == "workspace" else "agent-one-two"
+    assert command[command.index("--label") + 1] == expected
+
+
+def test_master_seats_call_the_shared_generator(monkeypatch):
+    from scripts.swarm_v2 import masters
+
+    monkeypatch.setattr(masters, "seat_label", lambda lane, index: (lane, index))
+    assert masters.seat(2) == ("master", 2)
