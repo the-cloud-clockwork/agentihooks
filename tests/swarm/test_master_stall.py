@@ -258,6 +258,33 @@ def test_failed_tool_call_closes_its_open_call(tmp_path, monkeypatch):
     assert activity.open_calls("sw", "master@sw-1") == []
 
 
+@pytest.mark.parametrize("outcome", ["failed", "denied"])
+def test_master_stalled_after_a_failed_or_denied_call_is_recycled(store, monkeypatch, outcome):
+    from types import SimpleNamespace
+
+    from hooks import hook_manager
+
+    agent, runtime = master(store)
+    monkeypatch.setenv("AGENTIHOOKS_SWARM", "sw")
+    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", agent.name)
+    monkeypatch.setattr(activity, "time", SimpleNamespace(time=lambda: (START + MINUTE) / 1000))
+    payload = {"tool_name": "Bash", "tool_input": {}, "tool_use_id": f"toolu_{outcome}"}
+
+    def refused(payload):
+        activity.record("Bash", {}, call_id=payload["tool_use_id"])
+        raise hook_manager.BlockAction("denied")
+
+    monkeypatch.setattr(hook_manager, "on_pre_tool_use", refused)
+    if outcome == "failed":
+        activity.record("Bash", {}, call_id=payload["tool_use_id"])
+        hook_manager.EVENT_HANDLERS["PostToolUseFailure"](payload)
+    else:
+        with pytest.raises(hook_manager.BlockAction):
+            hook_manager.EVENT_HANDLERS["PreToolUse"](payload)
+    assert activity.open_calls("sw", agent.name) == []
+    assert run(store, runtime, START + 11 * MINUTE)[0].startswith(f"asked {agent.name}")
+
+
 def test_turn_end_drops_calls_a_denied_call_left_open(tmp_path, monkeypatch):
     import fakeredis
 
