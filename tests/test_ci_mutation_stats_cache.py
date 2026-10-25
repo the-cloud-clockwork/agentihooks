@@ -931,16 +931,13 @@ def test_stats_cache_recollects_a_record_that_does_not_match_its_current_inputs(
 def test_real_fixture_imports_do_not_invalidate_measured_unrelated_test_stats(tmp_path):
     from scripts.ci_mutation.stats_cache import collect_cached_stats
 
-    source = Path(subprocess.check_output(["git", "rev-parse", "--show-toplevel"], text=True).strip())
-    tracked = subprocess.check_output(["git", "ls-files", "-z"], cwd=source, text=True).split("\0")
-    content = {path: (source / path).read_text() for path in tracked if path.endswith(".py")}
-    content.update(
-        {
-            "scripts/cache_unrelated_probe.py": "value = 1\n",
-            "scripts/cache_covered_probe.py": "value = 1\n",
-            "tests/test_cache_measured_probe.py": "from scripts.cache_covered_probe import value\n",
-        }
-    )
+    content = {
+        "tests/conftest.py": "from tests import fixture_probe\n",
+        "tests/fixture_probe.py": 'directory = "scripts/"\n',
+        "scripts/cache_unrelated_probe.py": "value = 1\n",
+        "scripts/cache_covered_probe.py": "value = 1\n",
+        "tests/test_cache_measured_probe.py": "from scripts.cache_covered_probe import value\n",
+    }
     root = tmp_path / "repo"
     _repository(root, content)
     files = ["tests/test_cache_measured_probe.py"]
