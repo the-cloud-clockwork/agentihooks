@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from scripts.ci_cpu_quota import quota_cpus, worker_count
 from scripts.ci_mutation.runner import prepare_workspace
 
 
@@ -32,7 +33,18 @@ def test_full_selection_reads_the_same_repository_inputs(tmp_path, stage):
                     (baseline / name).parent.mkdir(parents=True, exist_ok=True)
                     shutil.copy2(source, baseline / name)
     result = subprocess.run(
-        [sys.executable, "-m", "pytest", "tests", "-q", "-n", "2", "--dist", "loadgroup", "--tb=short"],
+        [
+            sys.executable,
+            "-m",
+            "pytest",
+            "tests",
+            "-q",
+            "-n",
+            str(max(1, worker_count(os.cpu_count() or 1, quota_cpus()) // 3)),
+            "--dist",
+            "loadgroup",
+            "--tb=short",
+        ],
         cwd=baseline,
         capture_output=True,
         text=True,
