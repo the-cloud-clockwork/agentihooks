@@ -175,6 +175,12 @@ def test_unused_imports_and_attributes_are_counted(tmp_path):
     assert dead_code.measure(tree) == {"hooks/guard.py": 1}
 
 
+def test_test_names_in_a_test_named_path_are_still_counted(tmp_path):
+    dead = USED + "\n\ndef test_helper():\n    return 2\n\n\nclass TestBox:\n    pass\n"
+    tree = _tree(tmp_path / "tests" / "checkout", {"hooks/test_guard.py": dead})
+    assert dead_code.measure(tree) == {"hooks/test_guard.py": 2}
+
+
 def test_an_untracked_file_is_not_graded(tmp_path):
     tree = _tree(tmp_path, {"hooks/guard.py": USED})
     (tree / "hooks/stray.py").write_text(PLANTED)

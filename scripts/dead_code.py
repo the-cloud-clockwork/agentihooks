@@ -1,6 +1,7 @@
 import argparse
 import json
 from pathlib import Path
+from unittest.mock import patch
 
 import vulture
 from vulture.noqa import NOQA_REGEXP
@@ -24,15 +25,17 @@ def _graded(tree: Path) -> list[Path]:
 def hits(tree: Path) -> dict[str, list[str]]:
     tree = tree.resolve()
     scanner = vulture.Vulture()
-    for path in _graded(tree):
-        try:
-            code = read_file(path)
-        except VultureInputException as exc:
-            raise GradeError(f"vulture cannot read {path}: {exc}") from exc
-        # A noqa comment in the graded tree hides nothing. Per line, since the pattern's trailing \s takes newlines.
-        scanner.scan("\n".join(NOQA_REGEXP.sub("#", line) for line in code.split("\n")), filename=path)
-    # Loads vulture's whitelists for the modules the graded files import.
-    scanner.scavenge([])
+    # Vulture drops test_ functions and Test classes from any path holding /test, which hooks/ and scripts/ never are.
+    with patch.object(vulture.core, "_is_test_file", lambda filename: False):
+        for path in _graded(tree):
+            try:
+                code = read_file(path)
+            except VultureInputException as exc:
+                raise GradeError(f"vulture cannot read {path}: {exc}") from exc
+            # A noqa comment in the graded tree hides nothing. Per line, since the pattern's trailing \s takes newlines.
+            scanner.scan("\n".join(NOQA_REGEXP.sub("#", line) for line in code.split("\n")), filename=path)
+        # Loads vulture's whitelists for the modules the graded files import.
+        scanner.scavenge([])
     if scanner.exit_code == ExitCode.InvalidInput:
         raise GradeError(f"vulture cannot parse every graded file in {tree}; its error is above")
     found = {}
