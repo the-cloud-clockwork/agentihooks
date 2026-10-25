@@ -15,9 +15,15 @@ pytestmark = pytest.mark.unit
 def root(metadata=None, provision=False):
     info = SimpleNamespace(config=SimpleNamespace(metadata=metadata), state=SimpleNamespace(messages=0))
     client = SimpleNamespace(max_payload=1048576)
+
+    async def stream_info(name):
+        if name.startswith("AGENTIHOOKS_"):
+            raise NotFoundError()
+        return info
+
     js = SimpleNamespace(
         _nc=client,
-        stream_info=AsyncMock(return_value=info),
+        stream_info=AsyncMock(side_effect=stream_info),
         add_stream=AsyncMock(),
         publish=AsyncMock(return_value=SimpleNamespace(seq=8)),
         get_last_msg=AsyncMock(side_effect=NotFoundError()),
@@ -128,9 +134,9 @@ def test_members_cannot_bind_an_unfinished_state_import():
 def test_new_state_stream_records_history_and_import_barrier(importing):
     backend = root(provision=True)
     ready = SimpleNamespace(config=SimpleNamespace(metadata={}), state=SimpleNamespace(messages=0))
-    backend._js.stream_info.side_effect = [NotFoundError(), NotFoundError(), ready]
+    backend._js.stream_info.side_effect = [NotFoundError(), NotFoundError(), NotFoundError(), NotFoundError(), ready]
     ScopedStateStore(backend, "rig", "work", importing=importing)
-    assert backend._js.stream_info.await_args_list[1].args == ("KV_work",)
+    assert backend._js.stream_info.await_args_list[3].args == ("KV_work",)
     backend._js.add_stream.assert_awaited_once_with(
         name=stream_name("rig", "STATE_work"),
         subjects=["swarm.rig.state.work.>"],
@@ -141,7 +147,12 @@ def test_new_state_stream_records_history_and_import_barrier(importing):
 
 def test_retained_legacy_state_requires_authoritative_key_ownership():
     backend = root(provision=True)
-    backend._js.stream_info.side_effect = [NotFoundError(), SimpleNamespace(state=SimpleNamespace(messages=1))]
+    backend._js.stream_info.side_effect = [
+        NotFoundError(),
+        NotFoundError(),
+        NotFoundError(),
+        SimpleNamespace(state=SimpleNamespace(messages=1)),
+    ]
     with pytest.raises(RuntimeError) as caught:
         ScopedStateStore(backend, "rig", "work")
     assert str(caught.value) == "legacy state requires explicit key ownership"

@@ -1,0 +1,6 @@
+{
+  "scripts/events/nats_names.py:scripts.events.nats_names.x_root_stream__mutmut_17:bcf2749c4f7ad4505f3640f87ad1f2b213ed00004b08bd8066683ba308b1f195": {
+    "reader": "standards-reader",
+    "reason": "When allow exists dict.get returns the same object. When absent both empty list and None are false, so not allow short circuits iteration. allow has no later use; selected streams and requests are identical."
+  }
+}

@@ -5,6 +5,8 @@ from nats.js.errors import APIError, NotFoundError
 
 from . import nats_payload
 from .bus import StateConflict, StateEntry
+from .nats_names import existing_stream
+from .resource_names import legacy_stream_name
 from .subjects import stream_name, subject
 
 if TYPE_CHECKING:
@@ -19,7 +21,11 @@ LAST_SUBJECT_SEQUENCE = "Nats-Expected-Last-Subject-Sequence"
 class ScopedStateStore:
     def __init__(self, root: "NatsBus", swarm: str, bucket: str, *, importing: bool = False):
         self._root, self._swarm, self._bucket = root, swarm, bucket
-        self._stream = stream_name(swarm, f"STATE_{bucket}")
+        self._stream = root._loop.run(
+            existing_stream(
+                root._js, stream_name(swarm, f"STATE_{bucket}"), legacy_stream_name(swarm, f"STATE_{bucket}")
+            )
+        )
         if root._config.provision:
             root._loop.run(self._provision(importing))
         info = root._loop.run(root._js.stream_info(self._stream))
