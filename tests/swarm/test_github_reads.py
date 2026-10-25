@@ -40,15 +40,69 @@ def test_a_finished_run_is_read_fresh_for_every_decision(actions, clock):  # noq
     assert actions["asked"] == [READ, READ, ["gh", "api", JOBS]]
 
 
-def test_a_cached_run_is_served_only_to_the_credential_source_that_read_it(actions, clock, monkeypatch):  # noqa: F811
+def test_a_cached_run_is_served_only_to_the_credential_that_read_it(actions, clock, monkeypatch):  # noqa: F811
     assert mutation_wait.run_resolution(RUN) == ""
     monkeypatch.setenv("GH_TOKEN", TOKEN)
     assert mutation_wait.run_resolution(RUN) == ""
     assert mutation_wait.run_resolution(RUN) == ""
+    monkeypatch.setenv("GH_TOKEN", "another token")
+    assert mutation_wait.run_resolution(RUN) == ""
     monkeypatch.delenv("GH_TOKEN")
+    monkeypatch.setenv("GITHUB_TOKEN", TOKEN)
+    assert mutation_wait.run_resolution(RUN) == ""
+    monkeypatch.delenv("GITHUB_TOKEN")
     monkeypatch.setenv("GH_CONFIG_DIR", "/elsewhere")
     assert mutation_wait.run_resolution(RUN) == ""
-    assert actions["asked"] == [READ, READ, READ]
+    assert actions["asked"] == [READ] * 4
+    assert not any(TOKEN in path.name or TOKEN in path.read_text() for path in github_reads.home().iterdir())
+
+
+@pytest.mark.parametrize(
+    "environ, label",
+    [
+        ({}, "gh config default"),
+        ({"GH_CONFIG_DIR": "/elsewhere"}, "gh config /elsewhere"),
+        ({"GITHUB_TOKEN": TOKEN}, "GITHUB_TOKEN"),
+        ({"GH_TOKEN": TOKEN, "GITHUB_TOKEN": TOKEN}, "GH_TOKEN"),
+        ({"GH_TOKEN": "", "GITHUB_TOKEN": TOKEN}, "GITHUB_TOKEN"),
+    ],
+)
+def test_the_credential_source_is_named_by_variable(clock, monkeypatch, environ, label):
+    for name, value in environ.items():
+        monkeypatch.setenv(name, value)
+    assert github_reads.source() == label
+
+
+def test_the_cache_lives_beside_the_backoff_state(actions, clock, monkeypatch, tmp_path):  # noqa: F811
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
+    assert github_reads.home() == tmp_path / "github-reads"
+    assert mutation_wait.run_resolution(RUN) == ""
+    assert sorted(path.suffix for path in github_reads.home().iterdir()) == [".json", ".jsonl"]
+
+
+def test_a_corrupt_entry_is_read_again(actions, clock):  # noqa: F811
+    assert mutation_wait.run_resolution(RUN) == ""
+    for body in ("not json", "[]", "{}"):
+        (entry,) = github_reads.home().glob("*.json")
+        entry.write_text(body)
+        assert mutation_wait.run_resolution(RUN) == ""
+    assert actions["asked"] == [READ] * 4
+
+
+def test_an_unwritable_home_still_reads_every_run(actions, clock, monkeypatch, tmp_path):  # noqa: F811
+    blocked = tmp_path / "blocked"
+    blocked.write_text("")
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(blocked))
+    assert mutation_wait.run_resolution(RUN) == ""
+    actions["run"] = {"status": "completed", "conclusion": "success"}
+    assert mutation_wait.run_resolution(RUN) == f"checks on {RUN}, now green"
+    assert actions["asked"] == [READ, READ]
+    assert github_reads.counts(0, 2_000) == {}
+
+
+def test_reads_outside_the_waits_count_against_the_wait_reader(actions, clock):  # noqa: F811
+    mutation_wait._api(ENDPOINT)
+    assert github_reads.counts(0, 2_000) == {"mutation_wait": 1}
 
 
 def test_an_unread_run_is_not_cached(actions, clock):  # noqa: F811
@@ -78,9 +132,10 @@ def test_each_charged_request_counts_against_its_caller_without_token_values(act
 
 
 def test_counts_skip_unreadable_lines(actions, clock):  # noqa: F811
-    assert mutation_wait.run_resolution(RUN) == ""
+    github_reads.home().mkdir(parents=True)
     with (github_reads.home() / "charged.jsonl").open("a") as log:
-        log.write("not json\n[]\n")
+        log.write('not json\n[]\n{}\n{"at": 1000.0}\n')
+    assert mutation_wait.run_resolution(RUN) == ""
     assert github_reads.counts(0, 2_000) == {"waits.checks": 1}
 
 

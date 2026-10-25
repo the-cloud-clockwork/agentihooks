@@ -1,19 +1,22 @@
 """GitHub run reads shared by every process that polls them, and a per caller count of the requests GitHub charged.
 
-A running run is served from the shared cache for RUN_TTL_S; a completed run is never cached, so the read that ends
-a wait is always fresh. Entries are keyed by the credential source, named by variable, never by its value.
+A running run is served from the shared cache for RUN_TTL_S, so a wait sees completion up to that late; a completed
+run is never cached, so every decision on a finished run is read fresh. Entries are keyed by a digest of the
+credential, so one token is never served a run another token read; only the source name reaches disk.
 """
 
 import hashlib
 import json
 import os
 from collections import Counter
+from collections.abc import Callable
 from pathlib import Path
 
 from scripts.swarm.lost_runner import home as _agentihooks_home
 
 RUN_TTL_S = 60
 TERMINAL = "completed"
+TOKENS = ("GH_TOKEN", "GITHUB_TOKEN")
 
 
 def home() -> Path:
@@ -21,15 +24,20 @@ def home() -> Path:
 
 
 def source() -> str:
-    for name in ("GH_TOKEN", "GITHUB_TOKEN"):
+    for name in TOKENS:
         if os.environ.get(name):
             return name
     return f"gh config {os.environ.get('GH_CONFIG_DIR') or 'default'}"
 
 
-def run(endpoint, now, fetch):
-    key = hashlib.sha256(f"{source()} {endpoint}".encode()).hexdigest()
-    entry = home() / f"{key}.json"
+def _key(endpoint):
+    label = source()
+    credential = os.environ[label] if label in TOKENS else label
+    return hashlib.sha256(f"{credential} {endpoint}".encode()).hexdigest()
+
+
+def run(endpoint: str, now: float, fetch: Callable[[], dict]) -> dict:
+    entry = home() / f"{_key(endpoint)}.json"
     try:
         cached = json.loads(entry.read_text())
         if now - cached["at"] < RUN_TTL_S:
@@ -37,9 +45,7 @@ def run(endpoint, now, fetch):
     except (OSError, ValueError, KeyError, TypeError):
         pass
     found = fetch()
-    if found.get("status") == TERMINAL:
-        entry.unlink(missing_ok=True)
-    else:
+    if found.get("status") != TERMINAL:
         _write(entry, {"at": now, "run": found})
     return found
 
@@ -54,7 +60,7 @@ def _write(path, body):
         pass
 
 
-def charge(caller, endpoint, now):
+def charge(caller: str, endpoint: str, now: float) -> None:
     try:
         home().mkdir(parents=True, exist_ok=True)
         with (home() / "charged.jsonl").open("a") as log:
@@ -63,7 +69,7 @@ def charge(caller, endpoint, now):
         pass
 
 
-def counts(since, until) -> dict[str, int]:
+def counts(since: float, until: float) -> dict[str, int]:
     """Charged requests per caller with since <= at < until."""
     try:
         lines = (home() / "charged.jsonl").read_text().splitlines()
