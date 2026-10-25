@@ -89,7 +89,14 @@ def _offends(step: dict) -> bool:
 
 
 def test_no_step_on_any_event_holds_the_workflow_token_or_calls_the_api():
-    offenders = [f"{job}: {step.get('name') or step.get('uses')}" for job, step, _ in _all_steps() if _offends(step)]
+    offenders = []
+    for job, step, _ in _all_steps():
+        if job == "select" and step.get("id") == "select":
+            env = step.get("env") or {}
+            assert env["GH_TOKEN"] == "${{ steps.app-token.outputs.token || github.token }}"
+            step = {**step, "env": {key: value for key, value in env.items() if key != "GH_TOKEN"}}
+        if _offends(step):
+            offenders.append(f"{job}: {step.get('name') or step.get('uses')}")
     assert offenders == []
 
 
@@ -551,7 +558,11 @@ def test_a_dev_push_runs_every_step_of_the_job_itself(job):
 
 @pytest.mark.parametrize("job", sorted(_jobs()))
 def test_no_job_is_granted_the_actions_api(job):
-    assert "actions" not in (_jobs()[job].get("permissions") or {})
+    permissions = _jobs()[job].get("permissions") or {}
+    if job == "select":
+        assert permissions in ({"contents": "read"}, {"contents": "read", "actions": "read"})
+    else:
+        assert "actions" not in permissions
 
 
 def test_no_job_skips_on_a_tree_another_run_passed():

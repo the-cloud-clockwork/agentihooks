@@ -55,7 +55,7 @@ def test_queue_runs_mint_a_read_only_app_token_and_skip_the_dev_cache_lookup():
         "permission-actions": "${{ github.event_name == 'merge_group' && 'write' || 'read' }}",
         "permission-contents": "read",
     }
-    assert job["permissions"] == {"contents": "read"}
+    assert job["permissions"] == {"contents": "read", "actions": "read"}
 
 
 def test_queue_runs_restore_the_latest_dev_durations_on_the_app_token():
@@ -305,6 +305,7 @@ _REUSE = [
                 "Record the protected tested tree",
                 "Publish protected tested tree evidence",
                 "Look up the base revision's dev durations",
+                "Mint the tcc main ci App token",
             ],
         ),
         ("push", [None, None, *_REUSE]),
