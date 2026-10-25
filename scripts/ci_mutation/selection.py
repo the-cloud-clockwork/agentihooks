@@ -86,18 +86,56 @@ def keep_selected_tests(stats: dict[str, set[str]], tests_by_prefix: dict[str, s
     return kept
 
 
-def file_seconds(root: Path, files: list[str]) -> dict[str, float]:
+def file_seconds(root: Path, files: list[str], *, split: bool = False) -> dict[str, float]:
     durations = root / ".test_durations"
     durations = json.loads(durations.read_text()) if durations.exists() else {}
-    seconds = dict.fromkeys(files, 0.01)
+    seconds = {} if split else dict.fromkeys(files, 0.01)
     by_file = {}
     for entry in files:
         by_file.setdefault(test_file(entry), []).append(entry)
+    matched = set()
     for nodeid, duration in durations.items():
         for entry in by_file.get(test_file(nodeid), ()):
             if selects(entry, nodeid):
-                seconds[entry] += duration
+                key = re.sub(r"@[^\[\]]*$", "", nodeid) if split else entry
+                seconds[key] = seconds.get(key, 0.01) + duration
+                matched.add(entry)
+    for entry in files:
+        if entry not in matched:
+            seconds.setdefault(entry, 0.01)
     return seconds
+
+
+def collect_test_ids(test_runner, files: list[str], work: Path) -> list[str]:
+    output = work / "stats-test-ids.json"
+
+    def collect():
+        import pytest
+
+        class Collector:
+            def pytest_collection_finish(self, session):
+                output.write_text(json.dumps(sorted({item.nodeid for item in session.items})))
+
+        os.environ["MUTANT_UNDER_TEST"] = "stats"
+        try:
+            status = pytest.main(
+                [*test_runner._pytest_add_cli_args, "--collect-only", "-q", "-m", "not wall_clock", *files],
+                plugins=[Collector()],
+            )
+            code = int(status not in (0, 5))
+        except BaseException:
+            traceback.print_exc()
+            code = 1
+        sys.stdout.flush()
+        sys.stderr.flush()
+        os._exit(code)
+
+    process = multiprocessing.get_context("fork").Process(target=collect)
+    process.start()
+    process.join()
+    if process.exitcode != 0:
+        raise SystemExit(process.exitcode)
+    return json.loads(output.read_text())
 
 
 def part_files(root: Path, files: list[str], part: tuple[int, int]) -> list[str]:
@@ -310,7 +348,10 @@ def load_or_collect_stats(runner, test_runner, paths: list[str], mode: str, stat
     try:
         if mode == "collect":
             output, key, index, total = Path(stats[0]), stats[1], int(stats[2]), int(stats[3])
-            files = part_files(Path.cwd(), config.pytest_add_cli_args_test_selection, (index, total))
+            files = config.pytest_add_cli_args_test_selection
+            if total > 1:
+                files = collect_test_ids(test_runner, files, Path.cwd())
+            files = part_files(Path.cwd(), files, (index, total))
             write_part(output, key, (index, total), collect_file_stats(runner, test_runner, files, workers, Path.cwd()))
             raise SystemExit(0)
         shards = stats_shards(Path.cwd(), config.pytest_add_cli_args_test_selection, workers)

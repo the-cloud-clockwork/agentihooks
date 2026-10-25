@@ -427,6 +427,7 @@ def test_selection_collects_one_stats_part_or_reuses_the_shared_stats(tmp_path, 
         raise SystemExit(7)
 
     runner.cli = cli
+    monkeypatch.setattr("scripts.ci_mutation.selection.collect_test_ids", lambda value, files, work: files)
     monkeypatch.setattr("scripts.ci_mutation.selection.run_stats_buckets", buckets)
     monkeypatch.setattr("scripts.ci_mutation.selection.stats_shards", bucket_split)
     monkeypatch.setitem(sys.modules, "mutmut", SimpleNamespace(__main__=runner))

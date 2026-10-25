@@ -645,6 +645,18 @@ def test_stats_parts_read_the_stored_durations_once(tmp_path, monkeypatch):
     assert len(reads) == 1
 
 
+@pytest.mark.parametrize(("target", "limit", "expected"), [(81, 10, (2, 80)), (41, 10, (4, 40)), (5, 3, (2, 80))])
+def test_statistics_parts_balance_recorded_cases_within_one_file(tmp_path, target, limit, expected):
+    (tmp_path / "tests").mkdir()
+    test = "tests/test_sample.py"
+    (tmp_path / test).write_text("def test_value(): pass\n")
+    (tmp_path / ".test_durations").write_text(
+        json.dumps({f"{test}::test_value[{value}]@shared": 40 for value in range(4)})
+    )
+    parts, wall = plan.stats_part_count(tmp_path, [test], target, limit)
+    assert (parts, wall) == (expected[0], pytest.approx(expected[1], abs=0.1))
+
+
 def _project(tmp_path, durations):
     (tmp_path / "scripts").mkdir()
     (tmp_path / "tests").mkdir()
