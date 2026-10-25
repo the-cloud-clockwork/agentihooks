@@ -205,34 +205,32 @@ def per_test_stats(
 
 def fresh_by_path(paths: list[str], fresh: list[dict]) -> dict[str, list[dict]]:
     entries = set(paths)
-    owners: dict[str, list[str]] = {}
-
-    def owned(test: str) -> list[str]:
-        if test not in owners:
-            cuts = {test[:index] for index in range(len(test)) if test.startswith(("::", "["), index)} | {test}
-            owners[test] = [entry for entry in cuts if entry in entries and selects(entry, test)]
-        return owners[test]
-
+    owners = {test: selecting_entries(entries, test) for result in fresh for test, _ in result["durations"].items()}
     sliced: dict[str, list[dict]] = {path: [] for path in paths}
     for result in fresh:
-        kept = {key: result[key] for key in ("status", "cpu", "files", "modules") if key in result}
-        parts = {path: {**kept, "durations": {}, "tests": {}} for path in paths}
-        for test, seconds in result["durations"].items():
-            for path in owned(test):
-                parts[path]["durations"][test] = seconds
-        if "dependencies" in result:
-            for path in paths:
-                parts[path]["dependencies"] = {}
-            for test, dependencies in result["dependencies"].items():
-                for path in owned(test):
-                    parts[path]["dependencies"][test] = dependencies
-        for function, tests in result["tests"].items():
-            for test in tests:
-                for path in owned(test):
-                    parts[path]["tests"].setdefault(function, []).append(test)
-        for path in paths:
-            sliced[path].append(parts[path])
+        for path, part in result_by_path(result, paths, owners).items():
+            sliced[path].append(part)
     return sliced
+
+
+def selecting_entries(entries: set[str], test: str) -> list[str]:
+    cuts = {test[:index] for index in range(len(test)) if test.startswith(("::", "["), index)} | {test}
+    return [entry for entry in cuts if entry in entries and selects(entry, test)]
+
+
+def result_by_path(result: dict, paths: list[str], owners: dict[str, list[str]]) -> dict[str, dict]:
+    kept = {key: result[key] for key in ("status", "cpu", "files", "modules") if key in result}
+    names = [name for name in ("durations", "dependencies") if name in result]
+    parts = {path: {**kept, "tests": {}, **{name: {} for name in names}} for path in paths}
+    for name in names:
+        for test, value in result[name].items():
+            for path in owners.get(test, ()):
+                parts[path][name][test] = value
+    for function, tests in result["tests"].items():
+        for test in tests:
+            for path in owners.get(test, ()):
+                parts[path]["tests"].setdefault(function, []).append(test)
+    return parts
 
 
 def collect_cached_stats(
