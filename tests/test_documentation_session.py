@@ -441,4 +441,20 @@ def test_the_retry_timer_dispatches_a_detached_worker_only_when_requests_exist(t
     assert jobs == []
     (tmp_path / "documentation").mkdir()
     documentation_session.schedule_retry()
-    assert jobs == [(documentation_session.retry, documentation_session.RETRY_OPTIONS)]
+    assert jobs == [(documentation_session.retry, {"timeout_sec": 180, "task_name": "documentation-retry"})]
+
+
+def test_retries_are_spaced_from_five_minutes_to_two_hours_behind_a_named_lock():
+    assert documentation_session.RETRY_DELAYS_S == (300, 900, 1800, 3600, 7200)
+    assert documentation_session.RETRY_LOCK == "retry.lock"
+
+
+def test_an_exhausted_request_without_a_reason_is_abandoned_as_unknown_and_logged(tmp_path, monkeypatch):
+    logged = []
+    monkeypatch.setattr(documentation_session, "log", lambda event, data: logged.append((event, data)))
+    path = tmp_path / "request.json"
+    path.write_text(json.dumps({"session": "s", "swarm": "", "status": "pending", "attempts": 5}))
+    documentation_session.process(path, 0.0)
+    row = json.loads(path.read_text())
+    assert (row["status"], row["outcome"]) == ("abandoned", "gave up after 5 attempts: unknown")
+    assert logged == [("documentation request abandoned", {"outcome": row["outcome"], "session": "s"})]
