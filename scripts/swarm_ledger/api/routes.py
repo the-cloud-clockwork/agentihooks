@@ -234,8 +234,6 @@ def export_changes(state: dict, paths: set) -> str:
     changed item its item identities in order with every changed item."""
     view = {**state, "_meta": {key: item for key, item in state["_meta"].items() if key not in HIDDEN_META}}
     units = {unit for unit in map(change_unit, paths) if unit is not None} | {(encode("_meta"), encode("events"))}
-    if () in units:
-        units = {(encode(key),) for key in view}
     kept = [unit for unit in units if not any(unit[:depth] in units for depth in range(1, len(unit)))]
     changes = {"set": [], "drop": [], "lists": {}}
     for unit in sorted(kept):

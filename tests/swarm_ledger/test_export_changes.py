@@ -50,6 +50,16 @@ def test_an_unknown_generation_answers_the_full_export(live):
         assert reply == current
 
 
+def test_the_current_generation_answers_no_changes(live):
+    current = full(live)
+    status, reply = request(live, "POST", "export", {"since": current["generation"]})
+    assert status == 200
+    assert reply == {
+        "generation": current["generation"],
+        "changes": {"set": [[["_meta", "events"], current["data"]["_meta"]["events"]]], "drop": [], "lists": {}},
+    }
+
+
 def test_since_must_be_a_lone_positive_integer(live):
     for body in ({"since": "1"}, {"since": -1}, {"since": 1, "extra": True}):
         status, data, _ = send(
