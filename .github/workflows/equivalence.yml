@@ -3,10 +3,6 @@ name: Ledger equivalence
 on:
   pull_request:
     branches: [dev]
-    paths:
-      - scripts/swarm_ledger/**
-      - tests/swarm_ledger/**
-      - .github/workflows/equivalence.yml
 
 permissions:
   contents: read
@@ -20,6 +16,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           path: head
+          fetch-depth: 2
       - uses: actions/checkout@v4
         with:
           path: base
@@ -27,15 +24,27 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      # The base copy decides, so a pull request cannot skip its own check by editing the trigger.
+      - name: Decide from the base branch whether the change reaches the ledger
+        id: trigger
+        run: |
+          if [[ ! -f base/scripts/ci_equivalence_trigger.py ]]; then
+            echo run=true >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          python -I base/scripts/ci_equivalence_trigger.py --root head | tee -a "$GITHUB_OUTPUT"
       - uses: astral-sh/setup-uv@v10.2.0
+        if: steps.trigger.outputs.run == 'true'
         with:
           version: '0.12.23'
           enable-cache: false
       - name: Install dependencies
+        if: steps.trigger.outputs.run == 'true'
         env:
           UV_CONSTRAINT: head/.github/test-constraints.txt
         run: uv pip install --system --excludes head/.github/test-excludes.txt -e './head[dev,all]'
       - name: Plant a dropped checkbox update and a dropped chat recipient in copies of head
+        if: steps.trigger.outputs.run == 'true'
         run: |
           cp -a head fault-store
           cp -a head fault-chat
@@ -58,6 +67,7 @@ jobs:
               path.write_text(source.replace(needle, planted))
           PY
       - name: Replay base, head and the planted checkbox fault at once
+        if: steps.trigger.outputs.run == 'true'
         run: |
           replay() {
             name=$1
@@ -79,8 +89,10 @@ jobs:
           done
           exit "$failed"
       - name: Compare recorded requests and stored ledger state
+        if: steps.trigger.outputs.run == 'true'
         run: cmp base.json head.json
       - name: Reject the planted checkbox fault
+        if: steps.trigger.outputs.run == 'true'
         run: |
           if cmp -s base.json fault.json; then
             echo 'FAIL: planted checkbox fault escaped the equivalence check'
@@ -88,9 +100,11 @@ jobs:
           fi
           echo 'PASS: identical base and head; planted checkbox fault rejected'
       - name: Install the page replay browser
+        if: steps.trigger.outputs.run == 'true'
         timeout-minutes: 6
         uses: ./head/.github/actions/browser-cache
       - name: Replay base, head and the planted chat fault pages at once
+        if: steps.trigger.outputs.run == 'true'
         run: |
           replay() {
             name=$1
@@ -112,8 +126,10 @@ jobs:
           done
           exit "$failed"
       - name: Compare recorded page actions
+        if: steps.trigger.outputs.run == 'true'
         run: cmp base-page.json head-page.json
       - name: Reject the planted chat fault
+        if: steps.trigger.outputs.run == 'true'
         run: |
           if cmp -s base-page.json fault-page.json; then
             echo 'FAIL: planted chat fault escaped the page equivalence check'
@@ -121,7 +137,7 @@ jobs:
           fi
           echo 'PASS: identical base and head pages; planted chat fault rejected'
       - uses: actions/upload-artifact@v4
-        if: always()
+        if: always() && steps.trigger.outputs.run == 'true'
         with:
           name: ledger-equivalence
           path: |

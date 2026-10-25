@@ -15,6 +15,7 @@ import pytest
 import yaml
 from _pytest.config import default_plugins
 
+from scripts import ci_equivalence_trigger
 from tests import refresh_durations
 from tests.refresh_durations import ci_run_ids, ci_samples, median_durations
 
@@ -653,8 +654,22 @@ def test_equivalence_runs_on_every_ledger_pull_request_without_a_body_marker():
     assert all("pull_request.body" not in str(step.get("if", "")) for step in job["steps"])
     [head] = [step for step in job["steps"] if step.get("with", {}).get("path") == "head"]
     assert "ref" not in head["with"]
-    paths = workflow[True]["pull_request"]["paths"]
-    assert {"scripts/swarm_ledger/**", "tests/swarm_ledger/**"} <= set(paths)
+    assert head["with"]["fetch-depth"] == 2
+
+
+def test_equivalence_trigger_is_graded_from_the_base_branch():
+    workflow = yaml.safe_load((_ROOT / ".github/workflows/equivalence.yml").read_text())
+    assert set(workflow[True]["pull_request"]) == {"branches"}
+    steps = workflow["jobs"]["ledger-equivalence"]["steps"]
+    [base] = [step for step in steps if step.get("with", {}).get("path") == "base"]
+    assert base["with"]["ref"] == "${{ github.event.pull_request.base.sha }}"
+    [trigger] = [step for step in steps if step.get("id") == "trigger"]
+    assert "python -I base/scripts/ci_equivalence_trigger.py --root head" in trigger["run"]
+    assert "[[ ! -f base/scripts/ci_equivalence_trigger.py ]]" in trigger["run"]
+    assert steps.index(base) < steps.index(trigger)
+    for step in steps[steps.index(trigger) + 1 :]:
+        assert "steps.trigger.outputs.run == 'true'" in step["if"], step
+    assert ".github/workflows/equivalence.yml" in ci_equivalence_trigger.TRIGGERS
 
 
 @pytest.mark.parametrize("doc", ["README.md", "index.md"])
