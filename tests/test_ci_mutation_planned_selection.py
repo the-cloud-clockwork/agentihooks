@@ -462,8 +462,10 @@ def test_a_changed_nested_signature_adds_the_tests_reaching_the_nested_function(
     commit = _commit(tmp_path, "nested function")
     data = CoverageData(basename=str(tmp_path / ".coverage"))
     for test, lines in (
-        ("tests/test_core.py::test_inner", [2, 5, 7, 8]),
-        ("tests/test_core.py::test_outer", [2, 7, 9]),
+        ("tests/test_core.py::test_f", [2, 5, 7, 8]),
+        ("tests/test_core.py::test_g", [2, 7, 9]),
+        ("tests/test_core.py::test_other", [2, 7, 9]),
+        ("tests/test_core.py::TestSpawn::test_child", [2, 7, 9]),
     ):
         data.set_context(f"{test}|run")
         data.add_lines({str(tmp_path / "scripts/core.py"): lines})
@@ -474,7 +476,7 @@ def test_a_changed_nested_signature_adds_the_tests_reaching_the_nested_function(
     selection = {}
     plan.estimate(tmp_path, {"scripts/core.py": {3}}, selection, manifest)
     assert selection["scripts/core.py"] == [
-        "tests/test_core.py::test_inner",
+        "tests/test_core.py::test_f",
         "tests/test_edited.py",
         "tests/test_fresh.py",
     ]
