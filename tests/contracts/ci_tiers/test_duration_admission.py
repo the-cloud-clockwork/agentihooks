@@ -5,14 +5,14 @@ from pathlib import Path
 
 import pytest
 
-from scripts import ci_reuse, ci_wiring, gate_protected
+from scripts import ci_gate_queue, ci_reuse, ci_wiring, gate_protected
 
 pytestmark = pytest.mark.unit
 ROOT = Path(__file__).resolve().parents[3]
 
 
 def legacy(workflows):
-    base = copy.deepcopy(workflows)
+    base = ci_gate_queue.normalize(workflows)
     jobs = base["test.yml"]["jobs"]
     if "durations" in jobs:
         return base

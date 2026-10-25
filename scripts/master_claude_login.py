@@ -367,11 +367,37 @@ def publish(bao: openbao_kv.OpenBao, target: Path, epoch: int, number: int | Non
     return True
 
 
-def restore(stored: Mapping[str, str], target: Path) -> bool:
-    if (target / CREDENTIALS).exists() or not stored.get("grant"):
+def restore(stored: Mapping[str, str], target: Path, force: bool = False) -> bool:
+    if not stored.get("grant"):
         return False
-    _write(target / CREDENTIALS, {GRANT: json.loads(stored["grant"])})
+    grant = json.loads(stored["grant"])
+    local = _read(target / CREDENTIALS).get(GRANT) or {}
+    if grant == local:
+        return False
+    if local and not force and int(local.get("expiresAt", 0)) >= int(stored.get("generation", 0)):
+        return False
+    _write(target / CREDENTIALS, {GRANT: grant})
     _write(target / CONFIG, {**_read(target / CONFIG), ACCOUNT: json.loads(stored["account"])})
+    return True
+
+
+def recover(target: Path, environ: Mapping[str, str]) -> bool:
+    number = next((number for number in numbers() if home(number) == target), None)
+    return number is not None and restore(stored(openbao_kv.from_env(environ), number), target, force=True)
+
+
+def checked(target: Path, environ: Mapping[str, str], found: str) -> bool:
+    from scripts.routing import native_login
+
+    try:
+        native_login.check(child(environ, target), found)
+    except native_login.LoginError:
+        if not recover(target, environ):
+            return False
+        try:
+            native_login.check(child(environ, target), found)
+        except native_login.LoginError:
+            return False
     return True
 
 
@@ -512,7 +538,6 @@ def _alert(environ: Mapping[str, str], outcome: str, cwd: Path) -> None:
 
 def prepare_launch(environ: Mapping[str, str], cwd: Path) -> tuple[Path, str] | None:
     from scripts import master_login_chain as chain
-    from scripts.routing import native_login
 
     target, reported = None, None
 
@@ -533,9 +558,7 @@ def prepare_launch(environ: Mapping[str, str], cwd: Path) -> tuple[Path, str] | 
                 target = target or claimed_home(environ)
                 return None
             raise
-        try:
-            native_login.check(child(environ, target), found)
-        except native_login.LoginError:
+        if not checked(target, environ, found):
             return None
         chain.notification(target, "current", "success")
         return target, found
