@@ -411,6 +411,77 @@ def test_statistics_select_only_contexts_executing_the_edited_branch(tmp_path, m
     ]
 
 
+def test_a_changed_signature_adds_only_the_tests_reaching_its_function(tmp_path, monkeypatch):
+    from coverage import CoverageData
+
+    from tests.dep_manifest import build
+
+    _recorded_project(tmp_path, monkeypatch)
+    source = (
+        "def f(value):\n    return value + 1\n\n\n"
+        "def g(value):\n    if value:\n        return value + 1\n    return value - 1\n"
+    )
+    (tmp_path / "scripts/core.py").write_text(source)
+    commit = _commit(tmp_path, "two functions")
+    data = CoverageData(basename=str(tmp_path / ".coverage"))
+    for test, lines in (
+        ("tests/test_core.py::test_f", [2]),
+        ("tests/test_core.py::test_g", [6, 8]),
+        ("tests/test_core.py::test_other", [6, 7]),
+        ("tests/test_core.py::TestSpawn::test_child", [6, 7]),
+    ):
+        data.set_context(f"{test}|run")
+        data.add_lines({str(tmp_path / "scripts/core.py"): lines})
+    data.write()
+    manifest = build(tmp_path / ".coverage", [], tmp_path, commit, "test")
+    (tmp_path / "scripts/core.py").write_text(
+        source.replace("def f(value)", "def f(value=1)").replace("value - 1", "value - 2")
+    )
+    _commit(tmp_path, "edited signature")
+    selection = {}
+    plan.estimate(tmp_path, {"scripts/core.py": {8}}, selection, manifest)
+    assert selection["scripts/core.py"] == [
+        "tests/test_core.py::test_f",
+        "tests/test_core.py::test_g",
+        "tests/test_edited.py",
+        "tests/test_fresh.py",
+    ]
+
+
+def test_a_changed_nested_signature_adds_the_tests_reaching_the_nested_function(tmp_path, monkeypatch):
+    from coverage import CoverageData
+
+    from tests.dep_manifest import build
+
+    _recorded_project(tmp_path, monkeypatch)
+    source = (
+        "def outer(value):\n    def inner(\n        item,\n    ):\n        return item + 1\n\n"
+        "    if value:\n        return inner(value)\n    return value\n"
+    )
+    (tmp_path / "scripts/core.py").write_text(source)
+    commit = _commit(tmp_path, "nested function")
+    data = CoverageData(basename=str(tmp_path / ".coverage"))
+    for test, lines in (
+        ("tests/test_core.py::test_f", [2, 5, 7, 8]),
+        ("tests/test_core.py::test_g", [2, 7, 9]),
+        ("tests/test_core.py::test_other", [2, 7, 9]),
+        ("tests/test_core.py::TestSpawn::test_child", [2, 7, 9]),
+    ):
+        data.set_context(f"{test}|run")
+        data.add_lines({str(tmp_path / "scripts/core.py"): lines})
+    data.write()
+    manifest = build(tmp_path / ".coverage", [], tmp_path, commit, "test")
+    (tmp_path / "scripts/core.py").write_text(source.replace("        item,", "        item=1,"))
+    _commit(tmp_path, "edited nested signature")
+    selection = {}
+    plan.estimate(tmp_path, {"scripts/core.py": {3}}, selection, manifest)
+    assert selection["scripts/core.py"] == [
+        "tests/test_core.py::test_f",
+        "tests/test_edited.py",
+        "tests/test_fresh.py",
+    ]
+
+
 def test_plan_publishes_covering_test_ids_and_checks_their_files(tmp_path, monkeypatch):
     manifest = _recorded_project(tmp_path, monkeypatch)
     monkeypatch.setenv("GITHUB_OUTPUT", str(tmp_path / "output"))
