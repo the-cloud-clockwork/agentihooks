@@ -71,6 +71,38 @@ def test_gh_error_propagates_instead_of_reporting_healthy():
         ci_read.pull_request("the-cloud-clockwork/agentihooks", 487, run=unavailable)
 
 
+def test_doctor_run_and_check_reads_share_the_cache_and_charge_only_fetches(monkeypatch, tmp_path):
+    import time
+
+    from scripts.swarm import github_reads
+
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
+    clock = [1_000.0]
+    monkeypatch.setattr(time, "time", lambda: clock[0])
+    fixture = load("ci")
+    fixture["runs"][0]["run_attempt"] = 1
+    calls = []
+
+    def gh(argv, **kwargs):
+        endpoint = argv[2]
+        calls.append(endpoint)
+        if "/pulls/" in endpoint:
+            output = json.dumps(fixture["pr"])
+        else:
+            rows = fixture["checks"] if "/check-runs?" in endpoint else fixture["runs"]
+            output = "\n".join(json.dumps(row) for row in rows)
+        return subprocess.CompletedProcess(argv, 0, output, "")
+
+    first = ci_read.pull_request("o/r", 487, run=gh)
+    fixture["checks"][0]["conclusion"] = "failure"
+    assert ci_read.pull_request("o/r", 487, run=gh) == first
+    assert len(calls) == 4
+    clock[0] += github_reads.RUN_TTL_S
+    assert ci_read.pull_request("o/r", 487, run=gh)["checks"][0]["conclusion"] == "failure"
+    assert len(calls) == 7
+    assert github_reads.counts(0, clock[0] + 1) == {"doctor.ci": 7}
+
+
 @pytest.mark.parametrize("current_red", [False, True], ids=["fresh-head-without-checks", "red-current-head"])
 def test_red_checks_use_only_the_current_pull_request_head(current_red):
     fixture = load("ci")
