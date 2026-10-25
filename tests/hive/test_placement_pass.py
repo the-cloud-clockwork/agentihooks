@@ -219,3 +219,25 @@ def test_a_placement_pass_checks_the_workstation_herdr_once_and_the_next_pass_ch
     runtime.begin_placement_pass()
     runtime.placement_refusal("eng", {"id": "one"})
     assert len(checks) == 4
+
+
+def test_a_master_moved_to_the_workstation_shares_the_pass_herdr_check(monkeypatch):
+    from scripts import herdr_host
+
+    checks = []
+
+    def running(environ):
+        checks.append(environ)
+        return True
+
+    monkeypatch.setattr(herdr_host, "server_running", running)
+    refused = controller.WORKSTATION.format(lane="master")
+    memo = {}
+    assert controller._to_workstation("master", refused, memo) is True
+    assert controller._to_workstation("master", refused, memo) is True
+    assert len(checks) == 1
+    assert memo == {"workstation_herdr": True}
+    assert controller._to_workstation("master", refused) is True
+    assert len(checks) == 2
+    assert controller._to_workstation("eng", refused, memo) is False
+    assert len(checks) == 2

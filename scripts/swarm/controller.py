@@ -113,7 +113,11 @@ class FencedRuntime:
 
     def placement_refusal(self, lane: str, task: dict) -> str:
         refused = self._refusal(lane, task)
-        return "" if _to_workstation(lane, refused) else refused
+        return "" if _to_workstation(lane, refused, self._pass_memo()) else refused
+
+    def _pass_memo(self) -> dict | None:
+        launch = getattr(self.runtime, "hive_launch", None)
+        return launch.herdr.pass_memo if launch else None
 
     def _refusal(self, lane: str, task: dict, claim: str = "") -> str:
         task = _master_task(lane, task)
@@ -185,11 +189,7 @@ class FencedRuntime:
         return found, held, min(maximum, running + found.room)
 
     def _overflow(self, lane: str, task: dict, waited: "Wait", claim: str) -> str:
-        if (
-            self.deployment != HYBRID
-            or task.get("hive")
-            or not _workstation_herdr(self.runtime.hive_launch.herdr.pass_memo)
-        ):
+        if self.deployment != HYBRID or task.get("hive") or not _workstation_herdr(self._pass_memo()):
             return waited.reason
         from scripts.hive import admission, placement_waits, registry
         from scripts.hive.placement import LOCAL_FULL, Choice, equipped, hosts, overflow
@@ -248,7 +248,7 @@ class FencedRuntime:
 
     def _spawn(self, config, lane, name, task):
         refused = self._refusal(lane, task, name)
-        workstation = _to_workstation(lane, refused)
+        workstation = _to_workstation(lane, refused, self._pass_memo())
         from scripts.hive.placement import LOCAL_FULL
 
         if LOCAL_FULL in refused:
@@ -305,11 +305,11 @@ def _master_seats(store: RedisStore, slug: str) -> frozenset[str]:
     )
 
 
-def _to_workstation(lane: str, refused: str) -> bool:
+def _to_workstation(lane: str, refused: str, memo: dict | None = None) -> bool:
     if refused == OVERFLOW.format(lane=lane):
         return True
     fallback_refusal = refused.startswith(WORKSTATION.format(lane=lane)) or refused == DISABLED.format(backend="hive")
-    return lane == "master" and fallback_refusal and _workstation_herdr()
+    return lane == "master" and fallback_refusal and _workstation_herdr(memo)
 
 
 def _master_task(lane: str, task: dict) -> dict:
