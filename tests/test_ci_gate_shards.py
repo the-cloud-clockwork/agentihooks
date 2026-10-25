@@ -232,6 +232,8 @@ def test_wait_accepts_complete_recovered_shards_and_refreshes_final_artifacts(tm
     with (
         patch.object(ci_gate_shards, "api", return_value=[{"jobs": jobs[:1]}, {"jobs": jobs[1:]}]),
         patch.object(ci_gate_shards, "fetch", side_effect=fetch) as download,
+        patch.object(ci_gate_shards.time, "monotonic", side_effect=[0, 0, 1200]),
+        patch.object(ci_gate_shards.time, "sleep"),
     ):
         assert ci_gate_shards.watch("org/repo", "123", "2", [1, 2], tmp_path) is None
     assert download.call_count == 2
@@ -262,7 +264,11 @@ def test_wait_prefetches_into_a_new_destination_using_the_same_run_and_repositor
         return _zip()
 
     destination = tmp_path / "new" / "reports"
-    with patch.object(ci_gate_shards, "api", side_effect=api), patch.object(ci_gate_shards.time, "sleep"):
+    with (
+        patch.object(ci_gate_shards, "api", side_effect=api),
+        patch.object(ci_gate_shards.time, "sleep"),
+        patch.object(ci_gate_shards.time, "monotonic", side_effect=[0, 0, 0, 1200]),
+    ):
         ci_gate_shards.watch("org/repo", "123", "2", [1, 2], destination)
     assert (0, "repos/org/repo/actions/artifacts/durations-1/zip") in downloads
     assert len(downloads) == 4
