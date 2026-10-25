@@ -65,5 +65,5 @@ def test_remote_control_statistics_baseline_feeds_mutant_grading(baseline, tmp_p
         ROOT, grading, selected, time.monotonic() + DEADLINE, (0, 1), SharedStats(stats.folder, stats.head)
     )
     assert error == "", (grading / "run.log").read_text()
-    assert results[SOURCE]
+    assert len(results[SOURCE]) == 1, results
     assert any(row["status"] == "killed" for row in results[SOURCE]), results
