@@ -341,8 +341,8 @@ def test_launch_moves_dispatcher_mail_into_the_hive_its_new_occupant_runs_on(mai
         placed = spawn(config, lane, name, task)
         store.redis.hset(f"{auth.PREFIX}:member:m1", mapping={"name": "m1", "ledger": "digest"})
         store.redis.sadd(auth.INDEX, "m1")
-        record = store.execution_occupants(SLUG)[f"dispatcher@{SLUG}"]
-        return replace(placed, execution=replace(record, hive="m1"))
+        record = next(agent for agent in store.agents(SLUG) if agent.name == name)
+        return replace(placed, execution=store.start_execution(SLUG, replace(record, hive="m1")))
 
     runtime.spawn = on_hive
     actions = run(store, runtime, doc())
