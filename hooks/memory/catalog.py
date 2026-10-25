@@ -50,6 +50,9 @@ TABLES = (
 DUPLICATES = "ingest_duplicate_events_total"
 ARCHIVE_FAILURES = "archive_integrity_failures_total"
 SESSION_STATES = ("retained", "restricted", "deleted")
+RETENTIONS = ("retain-until-deleted", "retain-until-expiry")
+UNKNOWN_RETENTION = "the session retention must be retain-until-deleted or retain-until-expiry"
+OVERLAP_CONFLICT = "an archive object overlapping this range was recorded with different bounds"
 SESSION_CONFLICT = "the session was registered with another provider or retention"
 SOURCE_CONFLICT = "the source generation was registered with another origin"
 STALE_REVISION = "the session is unknown or its revision is stale; nothing changed"
@@ -66,6 +69,9 @@ SOURCES = f"SELECT source_generation, origin FROM session_source WHERE {SESSION_
 ENTRY = (
     "SELECT byte_end, object_digest FROM archive_manifest "
     f"WHERE {SESSION_KEY} AND source_generation = ? AND byte_start = ?"
+)
+OVERLAP = (
+    f"SELECT 1 FROM archive_manifest WHERE {SESSION_KEY} AND source_generation = ? AND byte_start < ? AND byte_end > ?"
 )
 INSERT_ENTRY = "INSERT INTO archive_manifest VALUES (?, ?, ?, ?, ?, ?)"
 MANIFEST = (
@@ -304,6 +310,8 @@ class Catalog:
         return dict(zip(("provider", "retention", "state", "revision"), row)) if row else None
 
     def register(self, source: SessionSource) -> dict:
+        if source.retention not in RETENTIONS:
+            raise ValueError(UNKNOWN_RETENTION)
         key = (source.access_domain, source.session_uid)
         with self._transaction():
             found = self.session(*key)
@@ -340,6 +348,8 @@ class Catalog:
                 if tuple(found) != (entry.byte_end, entry.object_digest):
                     raise Conflict(ARCHIVE_CONFLICT)
                 return False
+            if self.db.execute(OVERLAP, (*scope, entry.byte_end, entry.byte_start)).fetchone() is not None:
+                raise Conflict(OVERLAP_CONFLICT)
             self.db.execute(INSERT_ENTRY, (*scope, entry.byte_start, entry.byte_end, entry.object_digest))
             return True
 

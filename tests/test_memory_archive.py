@@ -134,7 +134,7 @@ def test_registering_again_keeps_one_row_and_a_new_generation_adds_a_source(cata
     "changed, message",
     [
         ({"provider": "codex"}, catalog_module.SESSION_CONFLICT),
-        ({"retention": "expire-after-30-days"}, catalog_module.SESSION_CONFLICT),
+        ({"retention": "retain-until-expiry"}, catalog_module.SESSION_CONFLICT),
         ({"origin": "worker-c:other.jsonl"}, catalog_module.SOURCE_CONFLICT),
     ],
 )
@@ -220,6 +220,63 @@ def test_an_archive_entry_for_an_unregistered_generation_conflicts(catalog):
     message = refused(Conflict, lambda: catalog.archive(entry(0, 50, "a" * 64, "gen-9")))
     assert message == "the source generation is not registered"
     assert catalog.snapshot()["archive_manifest"] == []
+
+
+def test_an_unknown_retention_is_refused_and_registers_nothing(catalog):
+    message = refused(ValueError, lambda: catalog.register(source(retention="forever-maybe")))
+    assert message == "the session retention must be retain-until-deleted or retain-until-expiry"
+    assert catalog_module.RETENTIONS == ("retain-until-deleted", "retain-until-expiry")
+    assert catalog.snapshot()["session_record"] == []
+    assert catalog.snapshot()["session_source"] == []
+
+
+def test_every_listed_retention_registers(catalog):
+    for uid, retention in enumerate(catalog_module.RETENTIONS):
+        catalog.register(source(session_uid=f"s{uid}", retention=retention))
+        assert catalog.session("corpus-a", f"s{uid}")["retention"] == retention
+
+
+@pytest.mark.parametrize("start, end", [(25, 75), (10, 40), (0, 60), (49, 50)])
+def test_an_archive_entry_overlapping_another_conflicts_and_changes_nothing(catalog, start, end):
+    catalog.register(source())
+    catalog.archive(entry(0, 50, "a" * 64))
+    before = catalog.snapshot()
+    message = refused(Conflict, lambda: catalog.archive(entry(start, end, "b" * 64)))
+    assert message == "an archive object overlapping this range was recorded with different bounds"
+    assert catalog.snapshot() == before
+
+
+def test_an_archive_entry_in_another_generation_does_not_overlap(catalog):
+    catalog.register(source())
+    catalog.register(source("gen-2"))
+    catalog.archive(entry(0, 50, "a" * 64))
+    assert catalog.archive(entry(25, 75, "b" * 64, "gen-2")) is True
+
+
+def test_acknowledging_a_written_object_records_it_once(catalog, store):
+    catalog.register(source())
+    digest = store.put(b"evidence")
+    assert archive.acknowledge(catalog, store, entry(0, 8, digest)) is True
+    assert archive.acknowledge(catalog, store, entry(0, 8, digest)) is False
+    assert catalog.manifest("corpus-a", "s1", "gen-1") == [{"byte_start": 0, "byte_end": 8, "object_digest": digest}]
+    assert catalog.integrity_failures_total("corpus-a") == 0
+
+
+@pytest.mark.parametrize(
+    "written, end, message",
+    [(None, 8, archive.MISSING), (b"evidence", 9, archive.ALTERED), (b"evidence", 7, archive.ALTERED)],
+)
+def test_acknowledging_an_unverified_object_records_nothing_and_is_counted(catalog, store, written, end, message):
+    catalog.register(source())
+    digest = store.put(written) if written else sha(b"evidence")
+    before = catalog.snapshot()["archive_manifest"]
+    assert (
+        refused(archive.EvidenceIntegrityError, lambda: archive.acknowledge(catalog, store, entry(0, end, digest)))
+        == message
+    )
+    assert catalog.snapshot()["archive_manifest"] == before == []
+    assert catalog.integrity_failures_total("corpus-a") == 1
+    assert catalog.integrity_failures_total("corpus-b") == 0
 
 
 def test_integrity_failures_are_counted_per_domain_beside_duplicates(catalog):
@@ -360,12 +417,14 @@ def test_events_beyond_the_archived_ranges_refuse_the_session_and_are_counted(ca
     assert catalog.integrity_failures_total("corpus-a") == 1
 
 
-def test_an_object_inside_an_earlier_object_still_covers_the_session(catalog, store):
-    data = archived_events(catalog, store, [(0, 68), (5, 10)])
+def test_an_object_inside_an_earlier_object_is_refused_and_the_session_stays_complete(catalog, store):
+    data = archived_events(catalog, store, [(0, 68)])
     assert len(data) == 68
+    inner = entry(5, 10, store.put(data[5:10]))
+    assert refused(Conflict, lambda: archive.acknowledge(catalog, store, inner)) == catalog_module.OVERLAP_CONFLICT
     found = archive.evidence(catalog, store, GRANT, "corpus-a", "s1")
     assert found["complete"] is True
-    assert [item["byte_end"] for item in found["sources"][0]["archive"]] == [68, 10]
+    assert [item["byte_end"] for item in found["sources"][0]["archive"]] == [68]
     assert catalog.integrity_failures_total("corpus-a") == 0
 
 

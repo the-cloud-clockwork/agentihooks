@@ -94,7 +94,7 @@ def capture(inputs, catalog, store, worker):
             entry = catalog_module.ArchiveEntry(
                 inputs["grant"]["corpus"], inputs["session_uid"], generation["source_generation"], start, end, digest
             )
-            catalog.archive(entry)
+            archive.acknowledge(catalog, store, entry)
         acknowledged.append(ingest(catalog, grant(inputs), request(inputs, generation)))
     return acknowledged
 

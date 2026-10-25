@@ -7,7 +7,7 @@ import tempfile
 from pathlib import Path
 
 from hooks.memory.api.ingest import Grant
-from hooks.memory.catalog import Catalog
+from hooks.memory.catalog import ArchiveEntry, Catalog
 
 LEGACY_PREVIEW_CHARS = 4000
 MISSING = "an archived object is missing; the evidence is incomplete and was not returned"
@@ -108,9 +108,15 @@ def _covered(entries: list[dict], events: list[dict]) -> None:
     for entry in entries:
         if entry["byte_start"] > cursor:
             raise EvidenceIntegrityError(UNCOVERED)
-        cursor = max(cursor, entry["byte_end"])
+        cursor = entry["byte_end"]
     if any(event["byte_end"] > cursor for event in events):
         raise EvidenceIntegrityError(UNCOVERED)
+
+
+def acknowledge(catalog: Catalog, store: ObjectStore, entry: ArchiveEntry) -> bool:
+    reference = {"byte_start": entry.byte_start, "byte_end": entry.byte_end, "object_digest": entry.object_digest}
+    _counted(catalog, entry.access_domain, lambda: _verified(store, reference))
+    return catalog.archive(entry)
 
 
 def evidence(catalog: Catalog, store: ObjectStore, grant: Grant, domain: str, session_uid: str) -> dict:
