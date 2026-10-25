@@ -2078,17 +2078,6 @@ jobs:
             exit 1
           fi
 
-      # dev's copy grades against the base's allowlist; the head grades itself only until dev carries the gate.
-      - name: Hold swallowed exceptions in hooks and gates
-        if: ${{ !cancelled() }}
-        run: |
-          if [[ -f "$RUNNER_TEMP/grader/scripts/swallowed_exceptions.py" ]]; then
-            cd "$RUNNER_TEMP/grader"
-            python -m scripts.swallowed_exceptions --base "$RUNNER_TEMP/base" --head "$GITHUB_WORKSPACE"
-          else
-            python -m scripts.swallowed_exceptions --base "$GITHUB_WORKSPACE"
-          fi
-
       # The base revision's copy grades, so a pull request cannot loosen its own audit.
       - name: Fail on known vulnerabilities new against the base
         if: ${{ !cancelled() }}

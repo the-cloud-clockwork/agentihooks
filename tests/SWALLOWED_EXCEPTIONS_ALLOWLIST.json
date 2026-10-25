@@ -9,7 +9,8 @@
   "BLE001": 1
  },
  "hooks/common.py": {
-  "BLE001": 8
+  "BLE001": 8,
+  "S110": 5
  },
  "hooks/context/account_sessions.py": {
   "BLE001": 1
@@ -18,13 +19,16 @@
   "BLE001": 2
  },
  "hooks/context/brain_adapter.py": {
-  "BLE001": 8
+  "BLE001": 8,
+  "S110": 5
  },
  "hooks/context/branch_guard.py": {
-  "BLE001": 20
+  "BLE001": 20,
+  "S110": 10
  },
  "hooks/context/broadcast.py": {
-  "BLE001": 2
+  "BLE001": 2,
+  "S110": 1
  },
  "hooks/context/ci_manifesto.py": {
   "BLE001": 3
@@ -33,13 +37,15 @@
   "BLE001": 1
  },
  "hooks/context/claude_md_sanity.py": {
-  "BLE001": 6
+  "BLE001": 6,
+  "S110": 4
  },
  "hooks/context/conditions.py": {
   "BLE001": 2
  },
  "hooks/context/controls_toggle.py": {
-  "BLE001": 6
+  "BLE001": 6,
+  "S110": 4
  },
  "hooks/context/credential_guard.py": {
   "BLE001": 1
@@ -63,16 +69,19 @@
   "BLE001": 2
  },
  "hooks/context/preprocessor.py": {
-  "BLE001": 3
+  "BLE001": 3,
+  "S110": 2
  },
  "hooks/context/prepush_guard.py": {
   "BLE001": 1
  },
  "hooks/context/prod_lockdown.py": {
-  "BLE001": 17
+  "BLE001": 17,
+  "S110": 9
  },
  "hooks/context/retry_breaker.py": {
-  "BLE001": 4
+  "BLE001": 4,
+  "S110": 1
  },
  "hooks/context/rules_refresh.py": {
   "BLE001": 1
@@ -81,7 +90,8 @@
   "BLE001": 1
  },
  "hooks/context/voice_output.py": {
-  "BLE001": 16
+  "BLE001": 16,
+  "S110": 10
  },
  "hooks/filters/check.py": {
   "BLE001": 1
@@ -90,7 +100,8 @@
   "BLE001": 1
  },
  "hooks/hook_manager.py": {
-  "BLE001": 116
+  "BLE001": 116,
+  "S110": 18
  },
  "hooks/integrations/aws.py": {
   "BLE001": 1
@@ -102,16 +113,19 @@
   "BLE001": 8
  },
  "hooks/integrations/lambda_invoke.py": {
-  "BLE001": 6
+  "BLE001": 6,
+  "S110": 1
  },
  "hooks/integrations/mailer.py": {
   "BLE001": 6
  },
  "hooks/integrations/postgres.py": {
-  "BLE001": 9
+  "BLE001": 9,
+  "S110": 3
  },
  "hooks/integrations/session_state.py": {
-  "BLE001": 5
+  "BLE001": 5,
+  "S110": 3
  },
  "hooks/integrations/storage.py": {
   "BLE001": 5
@@ -153,43 +167,54 @@
   "BLE001": 1
  },
  "hooks/observability/agent_log_stream.py": {
-  "BLE001": 4
+  "BLE001": 4,
+  "S110": 4
  },
  "hooks/observability/agent_trace.py": {
   "BLE001": 1
  },
  "hooks/observability/context_audit.py": {
-  "BLE001": 3
+  "BLE001": 3,
+  "S110": 3
  },
  "hooks/observability/correlation.py": {
   "BLE001": 1
  },
  "hooks/observability/event_relay.py": {
-  "BLE001": 12
+  "BLE001": 12,
+  "S110": 7,
+  "S112": 1
  },
  "hooks/observability/otel.py": {
-  "BLE001": 4
+  "BLE001": 4,
+  "S110": 3,
+  "S112": 1
  },
  "hooks/observability/token_monitor.py": {
   "BLE001": 4
  },
  "hooks/observability/transcript.py": {
-  "BLE001": 3
+  "BLE001": 3,
+  "S110": 3
  },
  "hooks/serena_router/pool.py": {
   "BLE001": 1
  },
  "hooks/statusline.py": {
-  "BLE001": 8
+  "BLE001": 8,
+  "S110": 5
  },
  "hooks/targets/notify_shim.py": {
-  "BLE001": 1
+  "BLE001": 1,
+  "S110": 1
  },
  "hooks/telemetry.py": {
-  "BLE001": 10
+  "BLE001": 10,
+  "S110": 6
  },
  "hooks/tool_memory.py": {
-  "BLE001": 6
+  "BLE001": 6,
+  "S110": 4
  },
  "scripts/gates/entry.py": {
   "BLE001": 1

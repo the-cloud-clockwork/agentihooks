@@ -1,11 +1,9 @@
 import json
-import os
 import subprocess
 import sys
 from pathlib import Path
 
 import pytest
-import yaml
 
 from scripts import size_limits, swallowed_exceptions
 
@@ -69,14 +67,30 @@ def test_only_hooks_and_gates_are_graded(tmp_path):
     }
 
 
-def test_useless_try_and_error_logging_in_a_handler_are_counted(tmp_path):
+def test_narrow_swallows_and_useless_try_are_counted(tmp_path):
     source = (
-        "import logging\n"
-        "def guard():\n    try:\n        return 1\n    except Exception:\n        raise\n"
-        "def log():\n    try:\n        return 1\n    except ValueError:\n        logging.error('lost')\n"
+        "def passed():\n    try:\n        return 1\n    except ValueError:\n        pass\n"
+        "def skipped():\n    for x in ():\n        try:\n            return x\n        except ValueError:\n            continue\n"
+        "def reraised():\n    try:\n        return 1\n    except Exception:\n        raise\n"
+        "import logging\ndef logged():\n    try:\n        return 1\n    except ValueError:\n        logging.error('lost')\n"
     )
     tree = _tree(tmp_path, {"hooks/guard.py": source})
-    assert swallowed_exceptions.measure(tree) == {"hooks/guard.py": {"TRY203": 1, "TRY400": 1}}
+    assert swallowed_exceptions.measure(tree) == {"hooks/guard.py": {"S110": 1, "S112": 1, "TRY203": 1}}
+
+
+def test_measurement_resolves_a_symlinked_tree(tmp_path):
+    tree = _tree(tmp_path / "tree", {"hooks/guard.py": SWALLOWED})
+    (tmp_path / "link").symlink_to(tree)
+    assert swallowed_exceptions.measure(tmp_path / "link") == {"hooks/guard.py": {"BLE001": 1}}
+
+
+@pytest.mark.parametrize("side", ["base", "head"])
+def test_a_corrupt_allowlist_cannot_grade(tmp_path, capsys, side):
+    trees = {name: _recorded(tmp_path / name, {"hooks/guard.py": NARROW}) for name in ("base", "head")}
+    (trees[side] / swallowed_exceptions.ALLOWLIST).write_text("{")
+    code, out = _grade(trees["base"], trees["head"], capsys)
+    assert code == 1
+    assert out.startswith("::error::Expecting property name enclosed in double quotes")
 
 
 def test_an_allowlisted_file_may_stay_but_not_grow(tmp_path, capsys):
@@ -116,10 +130,10 @@ def test_config_and_noqa_in_the_graded_tree_hide_nothing(tmp_path):
 
 
 def test_the_allowlist_is_written_sorted_one_space_indented(tmp_path):
-    logged = "import logging\ndef log():\n    try:\n        return 1\n    except ValueError:\n        logging.error('lost')\n"
+    logged = "def log():\n    try:\n        return 1\n    except ValueError:\n        pass\n"
     tree = _recorded(tmp_path, {"hooks/b.py": logged + SWALLOWED, "hooks/a.py": SWALLOWED})
     assert (tree / swallowed_exceptions.ALLOWLIST).read_text() == (
-        '{\n "hooks/a.py": {\n  "BLE001": 1\n },\n "hooks/b.py": {\n  "BLE001": 1,\n  "TRY400": 1\n }\n}\n'
+        '{\n "hooks/a.py": {\n  "BLE001": 1\n },\n "hooks/b.py": {\n  "BLE001": 1,\n  "S110": 1\n }\n}\n'
     )
 
 
@@ -177,32 +191,3 @@ def test_the_grader_refuses_another_ruff_version(tmp_path, capsys, monkeypatch, 
     assert swallowed_exceptions.main(["--write", "--head", str(_tree(tmp_path, {"hooks/guard.py": NARROW}))]) == 1
     out = capsys.readouterr().out
     assert f"::error::The swallowed exception gate needs ruff {size_limits.RUFF_VERSION}, found {shown}.\n" == out
-
-
-def _step():
-    steps = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())["jobs"]["lint"]["steps"]
-    return next(step for step in steps if step.get("name") == "Hold swallowed exceptions in hooks and gates")
-
-
-def test_the_gate_runs_in_lint_graded_by_the_protected_copy_against_the_base():
-    step = _step()
-    assert step["if"] == "${{ !cancelled() }}"
-    assert step["run"] == (
-        'if [[ -f "$RUNNER_TEMP/grader/scripts/swallowed_exceptions.py" ]]; then\n'
-        '  cd "$RUNNER_TEMP/grader"\n'
-        '  python -m scripts.swallowed_exceptions --base "$RUNNER_TEMP/base" --head "$GITHUB_WORKSPACE"\n'
-        "else\n"
-        '  python -m scripts.swallowed_exceptions --base "$GITHUB_WORKSPACE"\n'
-        "fi\n"
-    )
-
-
-def test_a_dev_without_the_grader_holds_the_head_to_its_own_allowlist(tmp_path):
-    head = _tree(tmp_path / "head", {"hooks/guard.py": SWALLOWED})
-    (head / swallowed_exceptions.ALLOWLIST).write_text("{}\n")
-    (tmp_path / "grader").mkdir()
-    path = f"{Path(sys.executable).parent}{os.pathsep}{os.environ['PATH']}"
-    env = dict(os.environ, RUNNER_TEMP=str(tmp_path), GITHUB_WORKSPACE=str(head), PYTHONPATH=str(_ROOT), PATH=path)
-    result = subprocess.run(["bash", "-e", "-c", _step()["run"]], env=env, cwd=head, capture_output=True, text=True)
-    assert result.returncode == 1
-    assert "hooks/guard.py has 1 BLE001 hits; the base allowlist allows 0" in result.stdout

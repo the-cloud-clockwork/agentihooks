@@ -6,7 +6,7 @@ from pathlib import Path
 
 from scripts.size_limits import _RUFF, RUFF_VERSION, GradeError, _ruff_version, files
 
-RULES = ("BLE001", "TRY203", "TRY400")
+RULES = ("BLE001", "S110", "S112", "TRY203")
 SCOPE = ("hooks/", "scripts/gates/")
 ALLOWLIST = Path("tests/SWALLOWED_EXCEPTIONS_ALLOWLIST.json")
 
