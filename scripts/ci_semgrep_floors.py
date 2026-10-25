@@ -66,7 +66,7 @@ def fixture_test(rule_files: list[Path]) -> tuple[set[str], set[str]]:
         done = _semgrep("--test", "--json", "--config", "rules", "rules", cwd=Path(folder))
     failed = f"semgrep could not test the guard rule fixtures (exit {done.returncode}):\n{done.stderr}"
     try:
-        report = json.loads(done.stdout or "{}")
+        report = json.loads(done.stdout)
     except json.JSONDecodeError:
         report = {}
     if "results" not in report or report.get("config_with_errors"):
