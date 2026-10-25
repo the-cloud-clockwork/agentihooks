@@ -198,7 +198,7 @@ class Watch(unittest.TestCase):
             proc = subprocess.Popen(command, env=env, stdout=subprocess.DEVNULL, stderr=stderr)
             try:
                 wait_for_beat(proc, beat, stderr)
-                stop_or_report_stack(proc, stderr, timeout=SAFETY_S)
+                stop_or_report_stack(proc, stderr, timeout=10)
             finally:
                 if proc.poll() is None:
                     proc.kill()
