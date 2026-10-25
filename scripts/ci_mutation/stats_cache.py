@@ -32,15 +32,20 @@ def loader_name(node: ast.AST) -> str | None:
 
 def test_inputs(
     root: Path,
-    path: str,
+    path: str | list[str],
     modules: dict[str, str],
     records: dict[str, tuple[str, set[str], list[ast.AST]]],
     resources: dict[str, set[str]],
     dynamic_imports: bool = True,
 ) -> dict[str, str]:
     dynamic_modules = modules.values() if dynamic_imports else ()
-    pending = {path} | {
-        str(parent / "conftest.py") for parent in Path(path).parents if str(parent / "conftest.py") in modules.values()
+    starts = [path] if isinstance(path, str) else path
+    known = set(modules.values())
+    pending = set(starts) | {
+        str(parent / "conftest.py")
+        for start in starts
+        for parent in Path(start).parents
+        if str(parent / "conftest.py") in known
     }
     inputs = {}
     while pending:
@@ -159,8 +164,8 @@ class StatsInputs:
                 self.root, inputs, path, fresh, (self.modules, self.records[measured], self.resources), check
             )
             inputs.update({name: value[0] for name, value in loaded.items()})
-        for source in covered or []:
-            inputs.update(test_inputs(self.root, source, self.modules, self.records[measured], self.resources, False))
+        if covered:
+            inputs.update(test_inputs(self.root, covered, self.modules, self.records[measured], self.resources, False))
         if not any(not name.startswith("tests/") for name in inputs):
             for source in self.changes.keys() & self.resources:
                 inputs.update(
