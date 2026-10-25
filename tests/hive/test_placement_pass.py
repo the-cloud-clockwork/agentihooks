@@ -19,8 +19,7 @@ def ordered(world, runtime, task):
 
 @pytest.mark.parametrize("refused", [False, True])
 def test_ordering_and_spawn_reuse_one_placement_and_the_next_pass_refreshes(setup, refused):  # noqa: F811
-    request = request_for(setup)
-    request.task[ACK_LATER] = True
+    task = {"id": "task", "title": "Launch on a hive"}
     if refused:
         write_hive(setup, excluded=["engineer"])
     original = RoutedRuntime(setup.herdr, RuntimeRouter([]))
@@ -29,20 +28,23 @@ def test_ordering_and_spawn_reuse_one_placement_and_the_next_pass_refreshes(setu
     launch.opening = setup.launcher.opening
     launch.hives = Mock(wraps=launch.hives)
 
-    queue, waits = ordered(setup, runtime, request.task)
+    queue, waits = ordered(setup, runtime, task)
     assert len(queue) == (0 if refused else 1)
     assert bool(waits) is refused
     assert launch.hives.call_count == 1
-    first = launch.select(setup.config, "eng", request.task)
+    first = launch.select(setup.config, "eng", task)
     if not refused:
-        assert _room_wait(runtime, "eng", request.task) == ""
+        assert _room_wait(runtime, "eng", task) == ""
+        request = request_for(setup)
+        request.task[ACK_LATER] = True
         runtime.spawn(setup.config, "eng", request.name, request.task)
         order = launch.orders_for(request.task["id"])
         assert order.hive == first.hive
+        setup.store.drop_agent(setup.config.slug, request.name)
     assert launch.hives.call_count == 1
 
     write_hive(setup, excluded=[] if refused else ["engineer"])
-    queue, waits = ordered(setup, runtime, request.task)
+    queue, waits = ordered(setup, runtime, task)
     assert len(queue) == (1 if refused else 0)
     assert bool(waits) is not refused
     assert launch.hives.call_count == 2
