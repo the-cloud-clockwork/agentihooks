@@ -82,7 +82,9 @@ def test_prepare_keeps_one_worktree_per_repository(repositories):
 
 
 @pytest.mark.parametrize("repository", ["swarm", "bundle"])
-def test_prepare_starts_from_dev_after_the_recorded_branch_merged_and_was_deleted(repositories, monkeypatch, repository):
+def test_prepare_starts_from_dev_after_the_recorded_branch_merged_and_was_deleted(
+    repositories, monkeypatch, repository
+):
     p = repositories
     root = getattr(p, repository)
     git(root, "push", "origin", "HEAD:predecessor")
