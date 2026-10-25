@@ -82,6 +82,20 @@ def test_several_primary_masters_hold_the_login_at_once_and_one_name_once(ah):
     assert login.claim("master@rig-1", 30, lambda pid: pid != 10) == 3
 
 
+@pytest.mark.parametrize("exclusive", ["", "master@rig-1"])
+def test_a_shared_claim_never_invents_an_exclusive_holder(ah, exclusive):
+    login.root().mkdir(parents=True)
+    held = {"holders": {"XXXX": 10, "master@rig-1": 20}, "epoch": 1}
+    if exclusive:
+        held["alone"] = exclusive
+    login._write(login.root() / login.OWNER, held)
+    assert login.claim("master@doctor-1", 30, lambda pid: True) == 2
+    assert json.loads((login.root() / login.OWNER).read_text()) == {
+        "holders": {"XXXX": 10, "master@rig-1": 20, "master@doctor-1": 30},
+        "epoch": 2,
+    }
+
+
 def test_a_front_door_joins_a_legacy_exclusive_live_master(ah, tmp_path, rendered):
     import os
 
@@ -168,6 +182,36 @@ def test_two_front_doors_launch_without_token_fallback_and_share_refreshed_crede
     assert json.loads(Path(second_child["CLAUDE_CONFIG_DIR"], login.CREDENTIALS).read_text()) == refreshed
     assert not any(key.startswith("AH_CC_TOKEN_") for key in second_child)
     assert login.holders(login.root()) == {"master@rig-1": os.getppid(), "master@doctor-1": os.getpid()}
+
+
+def test_a_failed_shared_login_check_cannot_overwrite_another_holders_refresh(ah, rendered, monkeypatch):
+    import os
+
+    from scripts.routing import native_login
+
+    _render(rendered, "Master.\n")
+    home = login.build(rendered)
+    old = {"refreshToken": "old", "expiresAt": 1}
+    refreshed = {"refreshToken": "refreshed", "expiresAt": 2}
+    (home / login.CREDENTIALS).write_text(json.dumps({login.GRANT: old}))
+    (home / login.CONFIG).write_text(json.dumps({login.ACCOUNT: MASTER_ACCOUNT}))
+    login.claim("master@rig-1", os.getppid())
+    login.claim("master@doctor-1", os.getpid())
+    monkeypatch.setattr(
+        login, "stored", lambda *_: {"grant": json.dumps(old), "account": json.dumps(MASTER_ACCOUNT), "generation": "1"}
+    )
+    checks = []
+
+    def check(environ, found):
+        checks.append(environ["CLAUDE_CONFIG_DIR"])
+        if len(checks) == 1:
+            (home / login.CREDENTIALS).write_text(json.dumps({login.GRANT: refreshed}))
+            raise native_login.LoginError(native_login.UNAVAILABLE)
+        assert json.loads((home / login.CREDENTIALS).read_text())[login.GRANT] == refreshed
+
+    monkeypatch.setattr(native_login, "check", check)
+    assert login.checked(home, _environ(rendered, "doctor"), "masteratexample_com")
+    assert checks == [str(home), str(home)]
 
 
 def _spawn(tmp_path, lane, seat, kind="interactive"):
