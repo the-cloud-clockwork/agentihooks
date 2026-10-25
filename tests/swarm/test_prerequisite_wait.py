@@ -367,3 +367,13 @@ def test_a_reclaimed_tasks_prerequisite_reopens_after_it_merges(waiting, monkeyp
     assert prerequisite_wait.reopen_pass("sw", store, ledger, ledger.rows) == [
         f"task t1 reopened after prerequisite {URL} merged"
     ]
+
+
+@pytest.mark.parametrize("record_agent,generation,accepted", [(ME, 5, True), (ME, 4, False), ("other", 5, False)])
+def test_prerequisite_offer_matches_the_ledger_claim_identity(waiting, record_agent, generation, accepted):
+    store, ledger, _ = waiting
+    ledger.rows["t1"]["claim_generation"] = 5
+    record = {"agent": record_agent, "generation": generation, "target": URL}
+    store.redis.hset(prerequisite_wait.key("sw"), "t1", json.dumps(record))
+    agent = store.get_agent("sw", ME)
+    assert prerequisite_wait.offered(store, "sw", agent, ledger.rows["t1"]) == (record if accepted else {})
