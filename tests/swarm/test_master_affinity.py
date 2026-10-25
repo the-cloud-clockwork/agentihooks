@@ -448,6 +448,7 @@ def test_a_tick_master_launch_returns_before_a_slow_canary(tmp_path, monkeypatch
         "profile": placed.profile,
         "harness": "claude",
         "account": "acct",
+        "deadline_ms": 300_000,
     }
 
 
@@ -469,14 +470,73 @@ def test_a_pending_validation_that_names_no_request_fails_the_launch():
     from scripts.swarm import runtime
 
     with pytest.raises(ValueError, match="^pending profile validation names no request$"):
-        runtime._validation({"profile_validation": "pending"}, "master", "claude")
-    assert runtime._validation({"profile_validation": "pending", "profile_report": "/r.json"}, "master", "codex") == {
+        runtime._validation({"profile_validation": "pending"}, "master", "claude", 300)
+    pending = {"profile_validation": "pending", "profile_report": "/r.json"}
+    assert runtime._validation(pending, "master", "codex", 660.5) == {
         "state": "pending",
         "report": "/r.json",
         "profile": "master",
         "harness": "codex",
         "account": "",
+        "deadline_ms": 660_500,
     }
+
+
+@pytest.mark.parametrize(
+    ("fields", "routed"),
+    [
+        ({"route_status": "routed"}, True),
+        ({"route_status": "bare"}, True),
+        ({"route_status": "direct"}, True),
+        ({"route_status": "pending", "profile_validation": "pending"}, True),
+        ({"route_status": "pending"}, False),
+        ({"route_status": "pending", "profile_validation": "validated"}, False),
+        ({"route_status": "failed", "profile_validation": "pending"}, False),
+        ({"profile_validation": "pending"}, False),
+    ],
+)
+def test_only_a_deferred_launch_may_return_before_its_route(fields, routed):
+    from scripts.swarm import runtime
+
+    assert runtime._routed(fields) is routed
+
+
+def _pending_route_spawn(tmp_path, monkeypatch, lane, defer):
+    def run_init(argv, **kwargs):
+        if "init-agent" not in argv:
+            return SimpleNamespace(returncode=0, stdout="status=started\nroute_status=routed\n", stderr="")
+        if "--defer-canary" in _launcher_flags(argv):
+            pending = f"profile_validation=pending\nprofile_report={tmp_path / 'report.json'}\n"
+            return SimpleNamespace(returncode=0, stdout="status=started\nroute_status=pending\n" + pending, stderr="")
+        return SimpleNamespace(returncode=0, stdout="status=started\nroute_status=pending\n", stderr="")
+
+    for key in ("MODEL", "EFFORT"):
+        for agent in ("CLAUDE", "CODEX"):
+            monkeypatch.delenv(f"AGENTIHOOKS_{agent}_{key}", raising=False)
+    runtime = HerdrRuntime(
+        home=tmp_path, run=run_init, choose=lambda requested, environ: ("claude", "open"), defer_master_canary=defer
+    )
+    monkeypatch.setattr(runtime, "conversations", lambda: {})
+    monkeypatch.setattr(runtime, "_terminate", lambda name: None)
+    config = SimpleNamespace(
+        slug="sw", repo=str(tmp_path), code="a1b2c3", compact_limit=0, lanes={}, autonomy="delegate"
+    )
+    name = "master@a1b2c3-0002" if lane == MASTER else "engineer@a1b2c3-0003"
+    task = {"id": MASTER, "peer": "", "handoff": ""} if lane == MASTER else {"id": "t1", "title": "x"}
+    return runtime.spawn(config, lane, name, task)
+
+
+def test_a_deferred_master_launch_is_placed_before_its_route(tmp_path, monkeypatch):
+    placed = _pending_route_spawn(tmp_path, monkeypatch, MASTER, defer=True)
+    assert placed.account == ""
+    assert placed.profile_decision["validation"]["state"] == "pending"
+    assert placed.profile_decision["validation"]["account"] == ""
+
+
+@pytest.mark.parametrize(("lane", "defer"), [("eng", True), (MASTER, False)])
+def test_a_launch_that_waits_on_its_canary_still_fails_on_a_pending_route(tmp_path, monkeypatch, lane, defer):
+    with pytest.raises(SpawnError):
+        _pending_route_spawn(tmp_path, monkeypatch, lane, defer)
 
 
 def test_the_scheduled_tick_builds_a_runtime_that_defers_the_master_canary(store, monkeypatch):
