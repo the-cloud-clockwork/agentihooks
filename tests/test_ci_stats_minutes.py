@@ -25,7 +25,7 @@ def test_measure_stats_counts_every_attempt_before_merge_and_excludes_other_jobs
     ]
     calls = []
 
-    def rows(endpoint, key=None):
+    def rows(endpoint, key):
         calls.append(endpoint)
         if "/pulls?" in endpoint:
             return pulls

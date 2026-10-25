@@ -1,6 +1,7 @@
 import argparse
 import json
 import statistics
+from datetime import UTC, datetime
 from pathlib import Path
 from urllib.parse import quote
 
@@ -9,7 +10,7 @@ from scripts.ci_storage import rows
 
 
 def measure(repo: str, count: int, until: str, since: str = "") -> dict:
-    pulls = rows(f"repos/{repo}/pulls?state=closed&base=dev&sort=updated&direction=desc&per_page=100")
+    pulls = rows(f"repos/{repo}/pulls?state=closed&base=dev&sort=updated&direction=desc&per_page=100", None)
     merged = sorted(
         (pr for pr in pulls if pr["merged_at"] and since < pr["merged_at"] <= until),
         key=lambda pr: pr["merged_at"],
@@ -68,7 +69,8 @@ def main() -> None:
     parser.add_argument("--since", default="")
     parser.add_argument("--out", type=Path, default=Path("ci-stats-minutes.json"))
     args = parser.parse_args()
-    result = measure(args.repo, args.count, args.until, args.since)
+    until = args.until or datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+    result = measure(args.repo, args.count, until, args.since)
     args.out.write_text(json.dumps(result, indent=2))
     for pr in result["pull_requests"]:
         print(f"{pr['pr']}\t{pr['merged_at']}\t{len(pr['jobs'])}\t{pr['minutes']:.1f}", flush=True)

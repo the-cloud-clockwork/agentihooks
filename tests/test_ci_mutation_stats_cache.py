@@ -473,6 +473,42 @@ def test_new_applicable_discovery_inputs_recollect_stats(tmp_path, added):
     assert calls == [[path], [path]]
 
 
+@pytest.mark.parametrize("discovery", ["glob", "iter_modules"])
+def test_measured_stats_recollect_new_dynamically_discovered_modules(tmp_path, discovery):
+    from scripts.ci_mutation.stats_cache import collect_cached_stats
+
+    root = tmp_path / "repo"
+    path = "tests/test_plugins.py"
+    sources = {
+        "glob": "import importlib\nfrom pathlib import Path\nfor path in Path('plugins').glob('*.py'):\n    importlib.import_module(f'plugins.{path.stem}')\n",
+        "iter_modules": "import importlib\nimport pkgutil\nimport plugins\nfor item in pkgutil.iter_modules(plugins.__path__):\n    importlib.import_module(f'plugins.{item.name}')\n",
+    }
+    _repository(root, {path: sources[discovery], "plugins/__init__.py": "", "plugins/a.py": "value = 1\n"})
+    calls = []
+    test = f"{path}::test_plugins"
+
+    def collect(chosen):
+        calls.append(chosen)
+        loaded = [str(source.relative_to(root)) for source in sorted((root / "plugins").glob("*.py"))]
+        return [
+            {
+                "status": 0,
+                "tests": {f"plugins.{Path(source).stem}.x_value": [test] for source in loaded},
+                "durations": {test: 1},
+                "dependencies": {test: [path, *loaded]},
+                "cpu": 1,
+            }
+        ]
+
+    cache = tmp_path / "cache"
+    collect_cached_stats(root, cache, {}, [path], [], collect)
+    (root / "plugins/b.py").write_text("value = 2\n")
+    subprocess.run(["git", "add", "--", "plugins/b.py"], cwd=root, check=True)
+    warm = collect_cached_stats(root, cache, {}, [path], [], collect)
+    assert calls == [[path], [path]]
+    assert "plugins.b.x_value" in warm[0]["tests"]
+
+
 @pytest.mark.parametrize("changed", ["documentation", "unrelated_fixture", "comment", "initializer"])
 def test_stats_reuse_tracks_only_applicable_import_and_fixture_inputs(tmp_path, changed):
     from scripts.ci_mutation.stats_cache import collect_cached_stats
