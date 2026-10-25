@@ -77,11 +77,23 @@ class HubRunner:
         }
 
     def run_once(self, batch: int = BATCH, timeout_ms: int = FETCH_TIMEOUT_MS) -> dict[str, list[str]]:
-        return {reactor.name: self._pass(reactor, batch, timeout_ms) for reactor in self._reactors}
+        passes = {}
+        for reactor in self._reactors:
+            try:
+                passes[reactor.name] = self._pass(reactor, batch, timeout_ms)
+            except Exception:
+                print(f"hub: reactor {reactor.name} transport failed", file=sys.stderr)
+                traceback.print_exc()
+                passes[reactor.name] = ["failed"]
+        return passes
 
     def stop(self) -> None:
-        for held in self._leases.values():
-            held.release()
+        for name, held in self._leases.items():
+            try:
+                held.release()
+            except Exception:
+                print(f"hub: reactor {name} lease release failed", file=sys.stderr)
+                traceback.print_exc()
 
     def _pass(self, reactor: Reactor, batch: int, timeout_ms: int) -> list[str]:
         held = self._leases.get(reactor.name)

@@ -1,3 +1,4 @@
+import random
 from dataclasses import replace
 from unittest import mock
 
@@ -24,7 +25,7 @@ def bus(tmp_path):
 
 def test_large_state_round_trips_with_atomic_revisions_and_history(bus):
     store = bus.state("hub-timers")
-    first = b"a" * (2 * 1024 * 1024)
+    first = random.Random(1).randbytes(2 * 1024 * 1024)
     second = first + b"changed"
     revision = store.create("deadlines", first)
     assert store.get("deadlines").value == first
@@ -42,7 +43,7 @@ def test_large_state_round_trips_with_atomic_revisions_and_history(bus):
 
 def test_event_headers_cannot_push_a_publish_over_the_server_limit(bus, monkeypatch):
     sample = event("large")
-    oversized = replace(sample, data={"padding": "x" * (bus._nc.max_payload - len(sample.encode()) - 10)})
+    oversized = replace(sample, data={"padding": "x" * (bus._nc.max_payload - len(sample.encode()) - 30)})
     assert len(oversized.encode()) < bus._nc.max_payload
     publish = mock.AsyncMock()
     monkeypatch.setattr(bus._js, "publish", publish)
