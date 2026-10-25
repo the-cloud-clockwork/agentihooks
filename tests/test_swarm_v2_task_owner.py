@@ -463,9 +463,12 @@ def test_a_stuck_backend_master_does_not_let_another_backend_master_message_its_
 
 
 def asked_to_retire(world, handoff):
-    key = masters.MasterSeats(world.redis).key(SLUG)
-    world.redis.hset(key, master_scale.RETIRING, json.dumps({SECOND: [1, "ask"]}))
+    second = next(a for a in world.store.agents(SLUG) if a.name == SECOND_NAME)
+    retiring = {}
+    master_scale._ask(SLUG, world.store, {SECOND: second}, retiring, [2], 1, 1_000)
+    world.redis.hset(masters.MasterSeats(world.redis).key(SLUG), master_scale.RETIRING, json.dumps(retiring))
     world.store.put_handoff(SLUG, "master-2", handoff, seat=SECOND)
+    return retiring
 
 
 def test_a_seat_asked_to_retire_keeps_its_claimants_until_its_handoff_is_in(world):
@@ -485,6 +488,19 @@ def test_a_retiring_seat_hands_its_claimants_to_the_front_door_with_its_handoff(
     assert world.refusals() == 0
     assert master_fence.Seats(SLUG, world.store, {}).live == [LEAD]
     assert master_fence.handed_off(world.store, SLUG, masters.MasterSeats(world.redis)) == {SECOND}
+
+
+def test_the_front_door_keeps_a_retired_seats_claimants_after_the_tick_retires_the_seat(world):
+    retiring = asked_to_retire(world, "# Handoff v2\nnotes of master two")
+    world.down(SECOND_NAME)
+
+    master_scale._retire(SLUG, world.store, SECOND, retiring[SECOND], 2_000)
+
+    master_fence.check_send(inbox(world), LEAD_NAME, OWN_CLAIMANT)
+    assert world.refusals() == 0
+    assert masters.MasterSeats(world.redis).retired(SLUG) == [SECOND]
+    assert masters.MasterSeats(world.redis).owners(SLUG, world.doc())["p2"] == LEAD
+    assert any(item.text.endswith("notes of master two") for item in inbox(world).inbox(LEAD))
 
 
 def test_a_message_check_keeps_the_owner_of_every_phase(world):
