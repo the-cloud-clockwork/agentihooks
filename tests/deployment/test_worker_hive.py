@@ -341,6 +341,45 @@ def test_bundle_is_cloned_beside_the_repos_and_linked_by_init(tmp_path):
     assert commands.endswith("hive run\n")
 
 
+def commit(repo, message):
+    subprocess.run(
+        ["git", "-C", str(repo), "-c", "user.name=fixture", "-c", "user.email=fixture@example.test"]
+        + ["commit", "--allow-empty", "-m", message],
+        check=True,
+        capture_output=True,
+    )
+    return subprocess.run(["git", "-C", str(repo), "rev-parse", "HEAD"], capture_output=True, text=True).stdout
+
+
+def kept_bundle(tmp_path):
+    origin = tmp_path / "bundle-origin"
+    subprocess.run(["git", "init", "--initial-branch=dev", str(origin)], check=True, capture_output=True)
+    commit(origin, "old doctrine")
+    kept = tmp_path / "repos/agentihooks-bundle"
+    subprocess.run(["git", "clone", "--branch", "dev", str(origin), str(kept)], check=True, capture_output=True)
+    return origin, kept
+
+
+def test_a_kept_bundle_clone_is_fast_forwarded_to_its_origin_before_init(tmp_path):
+    origin, kept = kept_bundle(tmp_path)
+    head = commit(origin, "new doctrine")
+    result, commands, _, _ = startup(tmp_path, bundle_url=str(origin))
+    assert result.returncode == 0, result.stderr
+    assert subprocess.run(["git", "-C", str(kept), "rev-parse", "HEAD"], capture_output=True, text=True).stdout == head
+    assert commands.splitlines()[1:3] == [f"init --bundle {kept}", "deps ensure"]
+
+
+def test_a_kept_bundle_clone_that_cannot_fast_forward_is_logged_and_kept(tmp_path):
+    origin, kept = kept_bundle(tmp_path)
+    commit(origin, "new doctrine")
+    head = commit(kept, "local only")
+    result, commands, _, _ = startup(tmp_path, bundle_url=str(origin))
+    assert result.returncode == 0, result.stderr
+    assert "worker-hive: bundle fast forward failed; init runs on the kept clone\n" in result.stderr
+    assert subprocess.run(["git", "-C", str(kept), "rev-parse", "HEAD"], capture_output=True, text=True).stdout == head
+    assert commands.splitlines()[1:3] == [f"init --bundle {kept}", "deps ensure"]
+
+
 def test_linked_profiles_are_cloned_and_registered_before_init(tmp_path, monkeypatch):
     origin = tmp_path / "linked-origin"
     origin.mkdir()
