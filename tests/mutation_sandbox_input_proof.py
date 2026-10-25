@@ -41,7 +41,7 @@ def test_full_selection_reads_the_same_repository_inputs(tmp_path, stage):
     assert result.returncode == 0, result.stdout + result.stderr
 
 
-def test_statistics_keep_declared_inputs_and_the_trusted_published_map(tmp_path):
+def test_statistics_keep_declared_inputs_and_the_trusted_published_map(tmp_path, monkeypatch):
     import ast
     import time
 
@@ -64,6 +64,8 @@ def test_statistics_keep_declared_inputs_and_the_trusted_published_map(tmp_path)
     ]
     work = tmp_path / "workspace"
     work.mkdir()
+    monkeypatch.setenv("PYTEST_DISABLE_PLUGIN_AUTOLOAD", "1")
+    monkeypatch.setenv("MUTATION_STATS_ROOT", str(root))
     stats = SharedStats(tmp_path / "stats", "sandbox-control", (0, 1))
     rows, reason = mutate_files(root, work, {path: ({line}, selected)}, time.monotonic() + 600, (0, 1), stats)
     assert not reason, reason + "\n" + (work / "run.log").read_text()
