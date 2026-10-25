@@ -19,7 +19,7 @@ def apply(slug, state, core, changes=None, ops=None, gate=None, created=False):
     meta.setdefault("members", {})
     meta["created_at"] = core.earliest(meta, ctx.at)
     rejected = core.apply_changes(doc, changes or [], ctx)
-    ordered_ops = sorted((ops or [])[1:], key=lambda op: op["op"] == "stats_sync")
+    ordered_ops = sorted(ops or [], key=lambda op: op["op"] == "stats_sync")
     unowned = len(ctx.refused)
     held = snapshot(doc, ctx) if ledger_plans.atomic(ordered_ops) else None
     kept, raised = len(rejected), []
