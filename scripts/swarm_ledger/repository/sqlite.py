@@ -47,6 +47,8 @@ BEGIN_IMMEDIATE = "BEGIN IMMEDIATE"
 STORED = "SELECT 1 FROM ledgers WHERE slug=?"
 GENERATION = "SELECT generation FROM ledgers WHERE slug=?"
 TOKEN = "SELECT token FROM ledgers WHERE slug=?"
+TASKS_PATH = encode(["tasks"])
+TASKS_PREFIX = TASKS_PATH[:-1] + ","
 SUMMARIES = "SELECT summary FROM ledgers ORDER BY touched_at DESC, slug"
 SLUGS = "SELECT slug FROM ledgers ORDER BY slug"
 ROOT = refresh.ROOT
@@ -561,6 +563,30 @@ class SQLiteLedgerRepository:
         with self.connect() as connection:
             row = connection.execute(TOKEN, (slug,)).fetchone()
         return None if row is None else row[0]
+
+    def task_rows(self, slug: str, since: tuple | None = None) -> tuple:
+        """(generation, `_meta` task revision fields, task rows) as stored now, reusing each row of since that no
+        write reached; since is a tuple this returned earlier."""
+        self._adopt(slug)
+        with self.connect() as connection, connection:
+            connection.execute(BEGIN)
+            row = connection.execute(GENERATION, (slug,)).fetchone()
+            if row is None:
+                raise Missing(slug)
+            if since is not None and since[0] == row[0]:
+                return since
+            meta = read_partial(connection, slug, (["_meta", "task_revision"], ["_meta", "rev"])).get("_meta", {})
+            paths = None
+            if since is not None and since[0] < row[0]:
+                paths = refresh.changed_paths(connection, slug, since[0], row[0], CHANGES_KEPT)
+            if paths is not None:
+                dirty = {path for path in paths if path == TASKS_PATH or path.startswith(TASKS_PREFIX)}
+                if not dirty:
+                    return row[0], meta, since[2]
+                with suppress(KeyError):
+                    built = refresh.build(connection, slug, TASKS_PATH, since[2], refresh.touched(dirty))
+                    return row[0], meta, [item for _, item in built]
+            return row[0], meta, read_partial(connection, slug, (["tasks"],)).get("tasks") or []
 
     def apply_ops(
         self, slug: str, changes: list | None = None, ops: list | None = None, gate=None, *, copy_state: bool = True
