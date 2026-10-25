@@ -130,7 +130,7 @@ def measured_plan(
 
 
 def refine_plan(root: Path, selected: dict, stats: SharedStats) -> dict:
-    groups, keys = [], []
+    measured, keys = [], []
     selected = {
         path: value
         for path, value in selected.items()
@@ -154,8 +154,8 @@ def refine_plan(root: Path, selected: dict, stats: SharedStats) -> dict:
         for path, (lines, _) in scope.items():
             generated = selected_mutant_names(path, (root / path).read_text(), lines)
             names.extend(get_mutant_name(Path(path), name) for name in generated)
-        groups.append((names, results))
-    return {**measured_plan(groups, KillMemory(stats.folder / "killers")), "keys": keys, "head": stats.head}
+        measured.append((names, results))
+    return {**measured_plan(measured, KillMemory(stats.folder / "killers")), "keys": keys, "head": stats.head}
 
 
 def main() -> int:
