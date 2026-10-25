@@ -596,6 +596,17 @@ def test_selection_permissions_reject_every_other_form(previous, permissions):
     ]
 
 
+@pytest.mark.parametrize("previous", [{}, {"contents": "write"}, {"contents": "read", "checks": "read"}])
+@pytest.mark.parametrize("permissions", [{"contents": "read"}, {"contents": "read", "actions": "read"}])
+def test_selection_permissions_do_not_rewrite_an_unreviewed_base_form(previous, permissions):
+    base = _provenance_workflow(permissions=previous)
+    head = copy.deepcopy(base)
+    head["jobs"]["select"]["permissions"] = permissions
+    assert gate_protected.grade({"test.yml": base}, {}, {"test.yml": head}, {}, _TODAY) == [
+        "The head changes the durations provenance context permissions."
+    ]
+
+
 @pytest.mark.parametrize("job", ["select", "durations"])
 @pytest.mark.parametrize("permissions", [{"contents": "read"}, {"contents": "read", "actions": "read"}])
 @pytest.mark.parametrize(

@@ -170,6 +170,13 @@ def _duration_problems(base: dict, head: dict) -> list[str]:
     if producer.get("steps", [])[: len(prefix)] not in (prefix, bounded_prefix):
         problems.append("The head skips reuse without protected durations provenance.")
     mutable = {"steps", "if", "runs-on"}
+    selection_permissions = ({"contents": "read"}, {"contents": "read", "actions": "read"})
+    if (
+        "durations" not in head["jobs"]
+        and previous.get("permissions") in selection_permissions
+        and producer.get("permissions") in selection_permissions
+    ):
+        mutable.add("permissions")
     problems += [
         f"The head changes the durations provenance context {field}."
         for field in sorted((set(previous) | set(producer)) - mutable)
