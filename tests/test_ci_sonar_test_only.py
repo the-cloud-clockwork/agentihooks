@@ -158,16 +158,18 @@ def test_test_only_changes_do_not_start_analysis_work(name):
 
 @pytest.mark.parametrize("name", ["Merge shard coverage", "SonarQube Scan", "SonarQube Quality Gate"])
 def test_test_only_analysis_scripts_exit_without_tools_or_reports(tmp_path, name):
+    work = tmp_path / "work"
+    work.mkdir()
     result = subprocess.run(
         ["bash", "-e", "-c", _step(name)["run"]],
-        cwd=tmp_path,
+        cwd=work,
         env=dict(os.environ, SONAR_TEST_ONLY="true"),
         capture_output=True,
         text=True,
         timeout=5,
     )
     assert result.returncode == 0, result.stdout + result.stderr
-    assert list(tmp_path.iterdir()) == []
+    assert list(work.iterdir()) == []
 
 
 def test_test_only_coverage_wait_exits_without_a_merge(tmp_path):
