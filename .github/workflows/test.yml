@@ -2902,6 +2902,8 @@ jobs:
       - name: Restore compatible test stats
         if: needs.mutation-plan.outputs.forwarded != 'true'
         uses: actions/cache/restore@v4
+        env:
+          SEGMENT_DOWNLOAD_TIMEOUT_MINS: "1"
         with:
           path: .mutation-stats-cache
           key: mutation-test-stats-v1-${{ runner.os }}-${{ matrix.part }}-${{ github.run_id }}-${{ github.run_attempt }}

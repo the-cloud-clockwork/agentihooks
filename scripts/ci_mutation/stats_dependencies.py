@@ -5,9 +5,6 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-from coverage import CoverageData
-
-
 def source_path(filename: str, work: Path, root: Path, tracked: set[str] | None = None) -> str | None:
     path = Path(filename).resolve()
     for prefix in (work.resolve(), root.resolve()):
@@ -21,6 +18,8 @@ def source_path(filename: str, work: Path, root: Path, tracked: set[str] | None 
 def measured_dependencies(
     coverage_file: Path, work: Path, root: Path, nodeids: list[str], tracked: set[str] | None = None
 ) -> dict[str, list[str]]:
+    from coverage import CoverageData
+
     data = CoverageData(basename=str(coverage_file))
     data.read()
     shared, found = set(), {}
