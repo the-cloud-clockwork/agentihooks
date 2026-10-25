@@ -23,12 +23,17 @@ def bus(tmp_path):
             opened.close()
 
 
-def test_large_state_round_trips_with_atomic_revisions_and_history(bus):
+@pytest.mark.parametrize("compressible", [False, True])
+def test_large_state_round_trips_with_atomic_revisions_and_history(bus, compressible):
     store = bus.state("hub-timers")
-    first = random.Random(1).randbytes(2 * 1024 * 1024)
+    first = b"a" * (2 * 1024 * 1024) if compressible else random.Random(1).randbytes(2 * 1024 * 1024)
     second = first + b"changed"
     revision = store.create("deadlines", first)
     assert store.get("deadlines").value == first
+    with pytest.raises(StateConflict):
+        store.create("deadlines", first)
+    rebound = nats.NatsStateStore(bus._loop, bus._js, "hub-timers", False)
+    assert rebound.get("deadlines").value == first
     updated = store.update("deadlines", second, revision)
     assert store.get("deadlines").revision == updated
     assert store.get("deadlines").value == second
@@ -51,3 +56,27 @@ def test_event_headers_cannot_push_a_publish_over_the_server_limit(bus, monkeypa
         bus.events.publish("swarm.s.task.claimed", oversized)
     publish.assert_not_awaited()
     assert not bus._nc.is_closed
+
+
+@pytest.mark.parametrize(
+    "value", [b"ordinary", b"\x00agentihooks-state-zlib:literal", b"\x00agentihooks-state-pages:literal"]
+)
+def test_state_preserves_legacy_values_and_reserved_prefixes(bus, value):
+    store = bus.state("legacy")
+    store.create("value", value)
+    assert store.get("value").value == value
+    assert [row.value for row in store.watch("value")] == [value]
+
+
+def test_exact_encoded_header_budget_is_allowed_and_one_extra_byte_is_refused():
+    from types import SimpleNamespace
+
+    from scripts.events import nats_payload
+
+    client = SimpleNamespace(max_payload=100)
+    nats_payload.validate(client, "subject", b"x" * 100)
+    with pytest.raises(ValueError, match="subject: payload 101 exceeds server limit 100"):
+        nats_payload.validate(client, "subject", b"x" * 101)
+    nats_payload.validate(client, "subject", b"x" * 81, {"x": "é"})
+    with pytest.raises(ValueError, match="subject: payload 101 exceeds server limit 100"):
+        nats_payload.validate(client, "subject", b"x" * 82, {"x": "é"})

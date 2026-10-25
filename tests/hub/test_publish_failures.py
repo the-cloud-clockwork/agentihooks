@@ -40,3 +40,15 @@ def test_stop_logs_a_refused_release_and_releases_the_other_leases(capsys):
     hosted.stop()
     healthy.release.assert_called_once_with()
     assert "release refused" in capsys.readouterr().err
+
+
+def test_failed_transport_passes_wait_before_retrying(monkeypatch):
+    from scripts.hub import runner
+
+    hosted = mock.Mock()
+    hosted.run_once.side_effect = [{"failed": ["failed"]}, KeyboardInterrupt]
+    wait = mock.Mock()
+    monkeypatch.setattr(runner, "scheduled_wait", wait)
+    with pytest.raises(KeyboardInterrupt):
+        runner._run(hosted, False)
+    wait.assert_called_once_with(runner.IDLE_S)

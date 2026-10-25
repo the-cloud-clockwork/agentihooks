@@ -145,7 +145,9 @@ def _run(hub: HubRunner, once: bool) -> int:
                 print(f"{name}: {outcome}")
         if once:
             return 0
-        if all(outcomes == ["standby"] for outcomes in passes.values()):
+        if all(outcomes == ["standby"] for outcomes in passes.values()) or any(
+            "failed" in outcomes for outcomes in passes.values()
+        ):
             scheduled_wait(IDLE_S)
 
 
