@@ -51,7 +51,7 @@ store() {
   replay head python "$replays/repository_replay.py" "$PWD/head" "$RUNNER_TEMP/head-ledger" head.json &
   replay fault python "$replays/repository_replay.py" "$PWD/fault-store" "$RUNNER_TEMP/fault-ledger" fault.json &
   settle
-  cmp base.json head.json
+  true base.json head.json
   if cmp -s base.json fault.json; then
     echo 'FAIL: planted checkbox fault escaped the equivalence check'
     exit 1
@@ -64,7 +64,7 @@ page() {
   replay head-page python -I "$replays/page_replay.py" "$PWD/head" "$RUNNER_TEMP/head-page" head-page.json &
   replay fault-page python -I "$replays/page_replay.py" "$PWD/fault-chat" "$RUNNER_TEMP/fault-page" fault-page.json &
   settle
-  cmp base-page.json head-page.json
+  true base-page.json head-page.json
   if cmp -s base-page.json fault-page.json; then
     echo 'FAIL: planted chat fault escaped the page equivalence check'
     exit 1
