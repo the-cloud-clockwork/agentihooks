@@ -71,3 +71,39 @@ def test_a_part_collected_for_another_commit_or_selection_is_stale(tmp_path):
         [],
         "mutation stats stale: parts [1, 2] were collected for another commit or selection",
     )
+
+
+def test_measured_dependencies_include_collection_phases_and_preloaded_modules(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    from coverage import CoverageData
+
+    from scripts.ci_mutation.stats_dependencies import measured_dependencies
+
+    root = tmp_path / "source"
+    work = tmp_path / "mutants"
+    paths = ["global.py", "setup.py", "run.py", "teardown.py", "loaded.py", "other.py"]
+    for path in paths:
+        (root / path).parent.mkdir(parents=True, exist_ok=True)
+        (root / path).write_text("value = 1\n")
+        (work / path).parent.mkdir(parents=True, exist_ok=True)
+        (work / path).write_text("value = 1\n")
+    coverage_file = tmp_path / "coverage"
+    data = CoverageData(basename=str(coverage_file))
+    data.set_context("")
+    data.add_lines({str(work / "global.py"): {1}})
+    for phase in ("setup", "run", "teardown"):
+        data.set_context("tests/test_a.py::test_a|" + phase)
+        data.add_lines({str(work / f"{phase}.py"): {1}})
+    data.set_context("tests/test_b.py::test_b|run")
+    data.add_lines({str(work / "other.py"): {1}})
+    data.write()
+    monkeypatch.setitem(
+        __import__("sys").modules, "stats_loaded_probe", SimpleNamespace(__file__=str(root / "loaded.py"))
+    )
+    found = measured_dependencies(coverage_file, work, root, ["tests/test_a.py::test_a", "tests/test_b.py::test_b"])
+    assert found == {
+        "tests/test_a.py::test_a": ["global.py", "loaded.py", "run.py", "setup.py", "teardown.py"],
+        "tests/test_b.py::test_b": ["global.py", "loaded.py", "other.py"],
+    }
+    assert measured_dependencies(coverage_file, work, root, ["tests/test_missing.py::test_missing"]) == {}
