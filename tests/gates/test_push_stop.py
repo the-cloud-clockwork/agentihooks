@@ -13,6 +13,7 @@ from scripts.gates.push_stop import (
     GATE_FAILED,
     GATE_LATE,
     GATE_SLOW,
+    PROGRESS,
     PUSH_LATE,
     RESERVE_S,
     TEMPLATE,
@@ -284,9 +285,55 @@ def test_a_live_agents_notice_stays_open_until_a_stop_passes(rig):
 def test_pushed_work_without_a_pull_request_or_a_line_since_the_push_is_refused(rig):
     rig.commit()
     decision = rig.stop()
-    assert (decision.allowed, decision.reason) == (False, TEMPLATE)
+    assert (decision.allowed, decision.reason) == (False, PROGRESS.format(swarm=SLUG))
     assert rig.remote_head()
-    assert rig.inbox() == [TEMPLATE]
+    assert rig.inbox() == [PROGRESS.format(swarm=SLUG)]
+
+
+@pytest.mark.parametrize("debt", ["progress", "git", "both"])
+def test_refusal_names_the_missing_step_and_progress_command(rig, debt):
+    if debt == "git":
+        refuse_the_push(rig)
+    else:
+        rig.commit()
+        rig.stop()
+        if debt == "both":
+            (rig.tree / "readme").write_text("changed\n")
+    wait_on(rig, {"kind": "checks", "target": "https://github.com/o/r/pull/7", "task": "t1"})
+    decision = rig.stop()
+    assert not decision.allowed
+    command = f'agentihooks swarm {SLUG} progress --doing "Describe current work" --ends-when "Describe completion"'
+    if debt in {"progress", "both"}:
+        assert "Pushed work has no recorded progress since the push." in decision.reason
+        assert command in decision.reason
+        assert "A checks wait does not waive recording progress." in decision.reason
+    if debt == "progress":
+        assert "uncommitted or unpushed" not in decision.reason
+    else:
+        assert "uncommitted or unpushed" in decision.reason
+    assert decision.reason in rig.inbox()
+
+
+@pytest.mark.parametrize("dirty", [False, True])
+def test_progress_notice_is_deduplicated_and_settled_after_recording(rig, dirty):
+    rig.commit()
+    git(rig.tree, "push", "-u", "origin", BRANCH)
+    Progress(rig.store.redis, SLUG).outcome(ME, "pushed", NOW - 10)
+    if dirty:
+        (rig.tree / "readme").write_text("changed\n")
+    reason = rig.stop().reason
+    assert rig.stop().reason == reason
+    assert rig.inbox() == [reason]
+    inbox = InboxStore(rig.store.redis)
+    [notice] = inbox.inbox(ME)
+    assert push_stop.is_notice(notice)
+    assert not push_stop.is_notice(SimpleNamespace(sender="other", text=reason))
+    assert not push_stop.is_notice(SimpleNamespace(sender="swarm", text="Other work"))
+    (rig.tree / "readme").write_text("seed\n")
+    rig.ledger.events.append({"by": ME, "at": NOW + 1, "kind": "comment added"})
+    assert rig.stop().allowed
+    settled = inbox.get(notice.id)
+    assert (settled.state, settled.reason) == ("done", f"done: {push_stop.SETTLED}")
 
 
 def test_a_ledger_line_by_the_agent_after_the_push_lets_the_stop_through(rig):
@@ -499,7 +546,7 @@ def test_a_refused_record_keeps_the_push(rig):
     refusing = Refusing(rig.ledger.task)
     rig.gate._ledger = lambda: refusing
     head = rig.commit()
-    assert rig.stop().reason == TEMPLATE
+    assert rig.stop().reason == PROGRESS.format(swarm=SLUG)
     assert rig.remote_head() == head
 
 
@@ -531,7 +578,7 @@ def test_a_ledger_with_no_events_counts_as_no_line_since_the_push(rig, meta):
     Progress(rig.store.redis, SLUG).outcome(ME, "pushed", NOW - 10)
     doc = {"tasks": [rig.ledger.task]} | ({} if meta is None else {"_meta": meta})
     rig.ledger.state = lambda slug: doc
-    assert rig.stop().reason == TEMPLATE
+    assert rig.stop().reason == PROGRESS.format(swarm=SLUG)
 
 
 def test_worktrees_sit_under_the_configured_root_or_the_home_default(monkeypatch, tmp_path):
@@ -1070,7 +1117,7 @@ def test_a_pull_request_in_another_repo_does_not_answer_for_pushed_work_in_this_
     rig.ledger.task["pr_url"] = "https://github.com/o/elsewhere/pull/3"
     rig.commit()
     decision = rig.stop()
-    assert (decision.allowed, decision.reason) == (False, TEMPLATE)
+    assert (decision.allowed, decision.reason) == (False, PROGRESS.format(swarm=SLUG))
     assert rig.remote_head()
     rig.ledger.task["pr_url"] = "https://github.com/O/R/pull/7"
     assert rig.stop().allowed
@@ -1079,4 +1126,4 @@ def test_a_pull_request_in_another_repo_does_not_answer_for_pushed_work_in_this_
 def test_pushed_work_with_an_origin_off_github_and_no_pull_request_is_still_refused(rig):
     git(rig.seed, "remote", "set-url", "origin", str(rig.origin))
     rig.commit()
-    assert (rig.stop().allowed, rig.stop().reason) == (False, TEMPLATE)
+    assert (rig.stop().allowed, rig.stop().reason) == (False, PROGRESS.format(swarm=SLUG))
