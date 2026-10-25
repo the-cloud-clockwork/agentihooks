@@ -433,7 +433,7 @@ def test_a_starting_front_door_in_a_one_seat_pool_gets_no_second_master(up, monk
     answers(monkeypatch)
     assert run("sw", "master", "up", "--new") == 1
     assert (
-        "the front door master master@a1b2c3-0005 is still starting and the swarm has 1 master seat"
+        "the front door master master@a1b2c3-0005 is starting and the swarm has 1 master seat"
         in capsys.readouterr().err
     )
     assert rt.masters == [] and [a.name for a in masters(store)] == [front.name]
