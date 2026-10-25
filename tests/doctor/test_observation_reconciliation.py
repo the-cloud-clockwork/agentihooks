@@ -85,7 +85,10 @@ def test_remote_identity_pages_are_all_read(cursors):
     assert calls == [1, 2]
 
 
-@pytest.mark.parametrize("total,rows", [(2, [{"id": "one"}]), (2, [{"id": "one"}, {"id": "one"}])])
+@pytest.mark.parametrize(
+    "total,rows",
+    [(101, [{"id": "one"}]), (201, [{"id": "one"}, {"id": "one"}]), (2, [{"id": "one"}, {"id": "one"}])],
+)
 def test_incomplete_remote_identity_listing_is_unknown(cursors, total, rows):
     from scripts.doctor import observation_reconciliation
 
@@ -100,6 +103,46 @@ def test_incomplete_remote_identity_listing_is_unknown(cursors, total, rows):
         observation_reconciliation.reconcile(get, "sid", "claude", "tr")
 
 
+@pytest.mark.parametrize("repeat_page", [1, 2])
+def test_repeated_remote_identities_are_unknown(cursors, repeat_page):
+    from scripts.doctor import observation_reconciliation
+
+    _session(cursors, "sid", [], 0, accepted={"one": "rev"})
+    pages = [[{"id": str(i)} for i in range(100)], [{"id": "100"}]]
+    pages[repeat_page - 1][-1] = {"id": "0"}
+
+    def get(path, params):
+        return {"data": pages[params["page"] - 1], "meta": {"totalItems": 101}}
+
+    with pytest.raises(ValueError, match="^observation identity listing is incomplete$"):
+        observation_reconciliation.reconcile(get, "sid", "claude", "tr")
+
+
+@pytest.mark.parametrize(
+    "pages,total",
+    [([41], 44), ([99], 100), ([100, 100, 8], 209), ([100, 19], 123), ([100, 0], 104)],
+)
+def test_final_short_page_completes_listing_when_langfuse_total_exceeds_rows(cursors, pages, total):
+    from scripts.doctor import observation_reconciliation
+
+    rows = [[{"id": f"{page}-{i}"} for i in range(size)] for page, size in enumerate(pages, 1)]
+    accepted = {row["id"]: "rev" for page in rows for row in page}
+    _session(cursors, "sid", [], 0, accepted={**accepted, "lost": "rev"})
+    calls = []
+
+    def get(path, params):
+        assert path == "observations" and params["traceId"] == "tr" and params["limit"] == 100
+        calls.append(params["page"])
+        return {"data": rows[params["page"] - 1], "meta": {"totalItems": total}}
+
+    assert observation_reconciliation.reconcile(get, "sid", "claude", "tr") == {
+        "accepted": len(accepted) + 1,
+        "missing": ["lost"],
+        "drift": 0,
+    }
+    assert calls == list(range(1, len(pages) + 1))
+
+
 def test_remote_identity_pagination_is_bounded(cursors, monkeypatch):
     from scripts.doctor import observation_reconciliation
 
@@ -111,7 +154,7 @@ def test_remote_identity_pagination_is_bounded(cursors, monkeypatch):
         assert path == "observations" and params["traceId"] == "tr" and params["limit"] == 100
         pages.append(params["page"])
         assert len(pages) <= 2
-        return {"data": [], "meta": {"totalItems": 1000}}
+        return {"data": [{"id": f"{params['page']}-{i}"} for i in range(100)], "meta": {"totalItems": 1000}}
 
     with pytest.raises(ValueError, match="^observation identity page budget exhausted$"):
         observation_reconciliation.reconcile(get, "sid", "claude", "tr")
