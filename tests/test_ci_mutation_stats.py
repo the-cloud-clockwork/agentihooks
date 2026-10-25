@@ -203,3 +203,33 @@ def test_a_stats_bucket_returns_while_a_test_left_a_thread_running(tmp_path, mon
     assert [result["status"] for result in results] == [0]
     assert results[0]["durations"] == {node: 1}
     assert results[0]["files"] == ["tests/test_sample.py"]
+
+
+def test_a_failing_stats_bucket_reports_exit_one_and_its_error_while_a_thread_runs(tmp_path, monkeypatch, capfd):
+    import threading
+    import time
+    from types import SimpleNamespace
+
+    import pytest
+
+    from scripts.ci_mutation.selection import run_stats_buckets
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("MUTATION_STATS_CACHE", raising=False)
+
+    class Runner:
+        _pytest_add_cli_args = []
+
+        def run_stats(self, *, tests):
+            threading.Thread(target=time.sleep, args=(60,)).start()
+            raise RuntimeError("stats broke")
+
+    engine = SimpleNamespace(tests_by_mangled_function_name={}, duration_by_test={})
+    started = time.monotonic()
+    with pytest.raises(SystemExit) as stopped:
+        run_stats_buckets(SimpleNamespace(mutmut=engine), Runner(), [["tests/test_sample.py"]], tmp_path)
+    assert time.monotonic() - started < 30
+    assert stopped.value.code == 1
+    output = capfd.readouterr()
+    assert "failed to collect stats. runner returned [1]" in output.out
+    assert "RuntimeError: stats broke" in output.err
