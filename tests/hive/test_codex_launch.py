@@ -147,3 +147,30 @@ def test_auto_lane_falls_back_to_claude_when_the_planned_codex_account_is_full(s
     selected = setup.launcher.select(setup.config, "eng", {"id": "task"})
 
     assert (selected.account.harness, selected.account.name, selected.hive) == ("claude", "account", "remote")
+
+
+@pytest.mark.parametrize(
+    ("task", "expected"),
+    [({"id": "task", "hive": "remote"}, "the task is pinned to remote"), ({"id": "task"}, "no UI hive live")],
+)
+def test_account_selection_names_the_placement_fallback(setup, monkeypatch, task, expected):
+    from scripts.hive import launch
+    from scripts.hive.placement import Choice
+
+    monkeypatch.setattr(launch.placement, "choose", lambda *args: Choice("remote", "no UI hive live"))
+
+    selected = setup.launcher.select(setup.config, "eng", task)
+
+    assert (selected.hive, selected.fallback) == ("remote", expected)
+
+
+def test_account_selection_tags_a_missing_hive_wait_with_its_role(setup, monkeypatch):
+    from scripts.hive import launch
+    from scripts.hive.placement import Choice, Wait
+
+    monkeypatch.setattr(launch.placement, "choose", lambda *args: Choice("gone"))
+
+    selected = setup.launcher.select(setup.config, "eng", {"id": "task"})
+
+    assert isinstance(selected, Wait)
+    assert (selected.reason.startswith("hive gone is not in the hive listing"), selected.role) == (True, "eng")
