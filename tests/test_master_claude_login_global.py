@@ -138,6 +138,7 @@ def test_two_front_doors_launch_without_token_fallback_and_share_refreshed_crede
 ):
     import os
     from pathlib import Path
+
     from scripts import master_login_chain as chain
 
     _render(rendered, "Master.\n")
