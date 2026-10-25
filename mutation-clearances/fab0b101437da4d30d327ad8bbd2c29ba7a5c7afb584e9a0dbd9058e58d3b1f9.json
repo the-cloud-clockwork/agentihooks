@@ -1,0 +1,6 @@
+{
+  "scripts/ci_mutation/selection.py:scripts.ci_mutation.selection.x_collect_test_ids__mutmut_4:34f4c0e5dcf80857b0de94703cbf8c3d0ee821fb8d7d40a4e5dbe75e361be9da": {
+    "reader": "standards_reader",
+    "reason": "Changes only the private collection output basename to uppercase. Both the child writer and parent reader use the same Path, and no external consumer references this basename. The replacement remains a valid local filename, so collected identities and failure behavior are unchanged. Independently ruled from the complete report for run 40212524839 and the collector symbol."
+  }
+}

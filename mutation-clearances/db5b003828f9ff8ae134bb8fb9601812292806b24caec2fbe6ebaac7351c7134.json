@@ -1,0 +1,6 @@
+{
+  "scripts/ci_mutation/selection.py:scripts.ci_mutation.selection.x_collect_test_ids__mutmut_3:95f6891e5969405d8b3027534467a3efb7940aff4b663679b9384864d9c8764f": {
+    "reader": "standards_reader",
+    "reason": "Renames only the private collection output basename. The child writer and parent reader close over the same Path, and no external consumer references this basename. The replacement remains a valid local filename, so collected identities and failure behavior are unchanged. Independently ruled from the complete report for run 40212524839 and the collector symbol."
+  }
+}
