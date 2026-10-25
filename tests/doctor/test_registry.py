@@ -1,6 +1,7 @@
 import json
 import os
 import threading
+import time
 
 import pytest
 
@@ -435,6 +436,7 @@ def test_at_most_readers_bindings_are_read_at_once(cursors):
             if flight["now"] == registry.READERS:
                 full.set()
         full.wait(5)
+        time.sleep(0.1)
         with lock:
             flight["now"] -= 1
         return langfuse(path, params)
