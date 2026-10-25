@@ -137,7 +137,7 @@ def test_github_reads_paginate_metadata_and_preserve_zip_bytes(binary):
     command = ["gh", "api", "repos/org/repo/actions"]
     if not binary:
         command += ["--paginate", "--slurp"]
-    run.assert_called_once_with(command, check=True, capture_output=True, timeout=60)
+    run.assert_called_once_with(command, check=True, capture_output=True, timeout=60, text=False)
 
 
 def test_metadata_is_decoded_and_paginated_when_binary_is_omitted():
@@ -353,7 +353,7 @@ def test_wait_times_out_red_when_a_planned_shard_never_finishes(tmp_path):
         pytest.raises(RuntimeError, match="timed out"),
     ):
         ci_gate_shards.watch("org/repo", "123", "2", [1], tmp_path)
-    sleep.assert_called_once_with(5)
+    sleep.assert_called_once_with(15)
 
 
 @pytest.mark.parametrize("conclusion", ["failure", "cancelled", "timed_out", "skipped"])
@@ -403,7 +403,7 @@ def test_nonqueue_prefetch_waits_for_pending_units_ignores_other_jobs_and_accept
         patch.object(ci_gate_shards.time, "sleep") as sleep,
     ):
         ci_gate_shards.watch("org/repo", "123", "2", [1], tmp_path, recover=False)
-    sleep.assert_called_once_with(5)
+    sleep.assert_called_once_with(15)
 
 
 def test_existing_watch_callers_keep_queue_recovery_without_a_new_argument(tmp_path):

@@ -617,3 +617,16 @@ def test_the_sweep_leaves_master_seat_mail_in_its_world(store, moved_seat):
     store.seats.occupy(seat, second, 2)
     exits.sweep(InboxStore(store.redis), "sw", store, lambda: {})
     assert [i.id for i in member.inbox(seat)] == [item.id]
+
+
+def test_the_sweep_moves_controller_dispatcher_seat_mail_to_its_hive_occupant(store):
+    seat = "dispatcher@sw"
+    item = InboxStore(store.redis).send("sender", seat, "rank this")
+    controller = InboxStore(store.redis, world="")
+    assert [i.id for i in controller.inbox(seat)] == [item.id]
+    name = store.next_name("sw", "dispatch")
+    store.start_execution("sw", AgentRecord(name, "dispatch", "dispatcher", seat=seat, hive="m1"))
+    store.seats.occupy(seat, name, 1)
+    exits.sweep(InboxStore(store.redis), "sw", store, lambda: {})
+    assert [i.id for i in InboxStore(store.redis, world="m1").pending_mail(name)] == [item.id]
+    assert controller.inbox(seat) == []

@@ -44,6 +44,8 @@ WORKER_KEYS = (
     "swarm:*:merge-stall-notice",
     "swarm:*:hive-placement-waits",
     "swarm:*:dev-red",
+    "swarm:*:prerequisite-waits",
+    "swarm:*:stage-covers",
     "seat:*:recaps",
     "seat:*:learned",
     "seat-of:*:exit",
