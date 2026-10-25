@@ -42,6 +42,7 @@
   },
   "remaining_limitations": [
     "Writers interleave in one process; there is no real thread or process concurrency against one SQLite file.",
+    "The case record tests replace os.fsync with a no op, because fsync on a shared CI runner disk pushed a case past the 60 second test timeout; the restart in case C reopens files in process, so fsync never changes a record. The measure command and the wall clock test keep real fsync.",
     "The uploader counts newlines in the execution's own transcript to number events, so a transcript deleted before its spool drains cannot be uploaded by this harness.",
     "One provider format with string content is replayed; tool calls, Codex and Copilot records are not in the workload.",
     "Search wall time is measured on the CI runner with in process lexical scans and in process vector scoring; Postgres, pgvector and the HTTP service are not measured.",
