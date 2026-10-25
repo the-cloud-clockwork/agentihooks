@@ -155,6 +155,18 @@ def pushed_branches(repo: str, task: dict, agent: AgentRecord) -> dict:
     return record
 
 
+def preparation_base(repository: Path, task: dict) -> dict:
+    branch = task.get("branch")
+    if not branch or remote_head(repository, branch) or not task.get("pr_url"):
+        return task
+    pull = json.loads(
+        execute(["gh", "pr", "view", task["pr_url"], "--json", "state,baseRefName,headRefName"], repository)
+    )
+    if pull["state"] == "MERGED" and pull["baseRefName"] == "dev" and pull["headRefName"] == branch:
+        return {**task, "branch": ""}
+    return task
+
+
 def prepare(slug: str, agent: AgentRecord, repo: str, ledger: LedgerClient) -> dict:
     task = task_row(slug, agent, ledger)
     fields = []
