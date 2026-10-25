@@ -24,6 +24,7 @@ SHALLOW_PREFLIGHT_FETCH = 'git fetch --no-tags --depth 1 origin "$GITHUB_SHA"'
 EQUIVALENCE = ("equivalence.yml", "ledger-equivalence")
 EQUIVALENCE_WORDS = ("GRADER", "GITHUB_ENV", "GITHUB_PATH", "equivalence.sh")
 EQUIVALENCE_TUNABLE = ("steps", "timeout-minutes")
+UNUSED_SELECT_OUTPUTS = ("files_1", "files_2", "files_3")
 
 
 def _gates(workflows: dict[str, dict]) -> list[tuple[str, str, dict]]:
@@ -168,6 +169,12 @@ def _duration_problems(base: dict, head: dict) -> list[str]:
         f"The head changes the durations provenance context {field}."
         for field in sorted((set(previous) | set(producer)) - mutable)
         if previous.get(field) != producer.get(field)
+        and not (
+            field == "outputs"
+            and set(UNUSED_SELECT_OUTPUTS) <= set(previous.get(field) or {})
+            and producer.get(field)
+            == {key: value for key, value in previous[field].items() if key not in UNUSED_SELECT_OUTPUTS}
+        )
     ]
     problems += [
         f"The head changes the global provenance context {field}."
