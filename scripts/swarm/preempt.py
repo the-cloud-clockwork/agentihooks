@@ -1,0 +1,70 @@
+"""Operator priority preemption: an urgent or focused task still claimable a tick after its lane filled asks the
+lowest ranked holder that is neither urgent nor focused, through its inbox, to push and hand off. Nothing is frozen;
+the freed seat goes to the waiting task because the spawn order puts urgent work first."""
+
+import hashlib
+
+from scripts.inbox.store import DuplicateItem, InboxStore
+from scripts.swarm import freeze
+from scripts.swarm_ledger import ledger_rank
+from scripts.swarm_ledger.repository import hierarchy
+
+SENDER = "swarm"
+REF = "preempt"
+WAITING = "preempt-waiting"
+ASKED = "preempt-asked"
+TEXT = (
+    "Operator priority on swarm {slug}: task {waiting} is urgent or focused and waits for a seat while every {lane} "
+    "seat is busy, and your task {task} ranks lower. Push your branch now, write a Handoff v2 with the handoff skill "
+    "naming where you stopped, run agentihooks swarm {slug} handoff <doc> --reason operator, and stop. Your task "
+    "reopens for a later seat and nothing is frozen. Close this message with agentihooks msg close and its id, done."
+)
+
+
+def preferred(task: dict, doc: dict, graph: dict) -> bool:
+    if not task.get("id") or task.get("rank") == "urgent":
+        return True
+    chain = freeze.ancestry(task, graph)
+    return any(r["verb"] == "focus" and freeze.covers(r["target"], task, chain) for r in doc.get("freezes") or [])
+
+
+def step(slug: str, store, rows: dict, doc: dict, full: dict, now_ms: int) -> list[str]:
+    """full maps each lane whose every seat is busy to its claimable tasks in claim order and its live holders."""
+    graph, redis = hierarchy.project(doc)[0], store.redis
+    seen, asked = redis.hgetall(store.key(slug, WAITING)), redis.hgetall(store.key(slug, ASKED))
+    holding = {a.name for _, holders in full.values() for a in holders}
+    asked = {name: task_id for name, task_id in asked.items() if name in holding}
+    waiting, actions = {}, []
+    for lane, (ready, holders) in full.items():
+        for task in (t for t in ready if preferred(t, doc, graph)):
+            waiting[task["id"]] = seen.get(task["id"], str(now_ms))
+            if task["id"] not in seen or task["id"] in asked.values():
+                continue
+            victim = _victim([a for a in holders if a.name not in asked], rows, doc, graph)
+            if victim is not None:
+                asked[victim.name] = task["id"]
+                actions += _ask(InboxStore(redis), slug, lane, victim, task["id"])
+    _replace(redis, store.key(slug, WAITING), waiting)
+    _replace(redis, store.key(slug, ASKED), asked)
+    return actions
+
+
+def _victim(holders, rows, doc, graph):
+    lower = [a for a in holders if not preferred(rows.get(a.task, {}), doc, graph)]
+    return max(lower, key=lambda a: (ledger_rank.order(rows[a.task]), a.started_at), default=None)
+
+
+def _ask(inbox, slug, lane, victim, waiting):
+    item_id = hashlib.sha256(f"{REF}:{slug}:{victim.name}:{waiting}".encode()).hexdigest()[:12]
+    text = TEXT.format(slug=slug, waiting=waiting, lane=lane, task=victim.task)
+    try:
+        item = inbox.send(SENDER, victim.name, text, ref=f"{REF}:{item_id}", task=victim.task, item_id=item_id)
+    except DuplicateItem:
+        return []
+    return [f"asked {victim.name} to hand off task {victim.task} for urgent task {waiting} as message {item.id}"]
+
+
+def _replace(redis, key, mapping):
+    redis.delete(key)
+    if mapping:
+        redis.hset(key, mapping=mapping)
