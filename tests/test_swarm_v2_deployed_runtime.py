@@ -194,6 +194,7 @@ def test_the_controller_start_hands_the_tick_the_kubernetes_runtime_and_the_dist
     assert (given, slugs) == (store, [SLUG])
     assert isinstance(runtime, RoutedRuntime)
     assert list(runtime.router.runtimes) == [LOCAL, BACKEND]
+    assert runtime.herdr_runtime.defer_master_canary is True
     kubernetes = runtime.router.runtimes[BACKEND]
     assert isinstance(kubernetes, KubernetesRuntime)
     assert kubernetes.execute == service.controller.execute

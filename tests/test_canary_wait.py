@@ -1,3 +1,6 @@
+import json
+from pathlib import Path
+
 import pytest
 
 from scripts import init_agent
@@ -67,3 +70,84 @@ def test_a_canary_timeout_names_the_harness_and_the_seconds_waited(tmp_path, mon
     )
     with pytest.raises(ValueError, match=expected):
         binding.wait(report, 90.0)
+
+
+@pytest.mark.parametrize("target", ["claude", "codex"])
+def test_a_deferred_canary_prints_the_pending_request_without_waiting(tmp_path, monkeypatch, capsys, target):
+    assert _launch(tmp_path, monkeypatch, target, ["--defer-canary"]) == []
+    lines = capsys.readouterr().out.splitlines()
+    assert "profile_validation=pending" in lines
+    (report,) = [line.removeprefix("profile_report=") for line in lines if line.startswith("profile_report=")]
+    assert json.loads(Path(report).read_text()) == {"profile": "engineer", "harness": target, "state": "pending"}
+
+
+def test_the_defer_canary_help_says_the_caller_confirms_later():
+    (action,) = [a for a in init_agent._parser()._actions if "--defer-canary" in a.option_strings]
+    assert action.help == (
+        "Return once the session is routed and print its pending profile validation request for the caller "
+        "to confirm later"
+    )
+    assert action.default is False
+
+
+def test_a_deferred_canary_without_a_profile_request_still_waits():
+    assert init_agent._binding_deferred({}) == []
+    assert init_agent._binding_deferred({binding.REPORT: "/run/r.json"}) == [
+        "profile_validation=pending",
+        "profile_report=/run/r.json",
+    ]
+
+
+VALIDATED = {
+    "state": "validated",
+    "profile": "master",
+    "harness": "claude",
+    "pid": 77,
+    "home": "/h",
+    "persona": "p",
+    "sources": "s",
+    "account": "acct",
+}
+
+
+def _report(tmp_path, **data):
+    report = tmp_path / "report.json"
+    report.write_text(json.dumps({"profile": "master", "harness": "claude", **data}))
+    return report
+
+
+def test_confirm_reads_a_pending_request_as_not_yet_validated(tmp_path):
+    assert binding.confirm(_report(tmp_path, state="pending"), "master", "claude", "acct") == {}
+
+
+def test_confirm_raises_the_refusal_of_a_failed_canary(tmp_path):
+    report = _report(tmp_path, state="failed", reason="mounted instruction canary mismatch")
+    with pytest.raises(ValueError, match="^mounted instruction canary mismatch$"):
+        binding.confirm(report, "master", "claude", "acct")
+
+
+def test_confirm_returns_the_validated_binding(tmp_path):
+    report = _report(tmp_path, state="validated", validation=VALIDATED)
+    assert binding.confirm(report, "master", "claude", "acct") == VALIDATED
+    assert binding.confirm(report, "master", "claude", "") == VALIDATED
+
+
+def test_confirm_refuses_another_account(tmp_path):
+    report = _report(tmp_path, state="validated", validation=VALIDATED)
+    with pytest.raises(ValueError, match="^live process account differs from requested route$"):
+        binding.confirm(report, "master", "claude", "other")
+
+
+@pytest.mark.parametrize(
+    ("changed", "message"),
+    [
+        ({"profile": "engineer"}, "validated live profile differs from requested choice"),
+        ({"harness": "codex"}, "validated live profile differs from requested choice"),
+        ({"pid": None}, "validated profile lacks process or rendered source evidence"),
+        ({"state": "failed"}, "mounted profile validation is missing or failed"),
+    ],
+)
+def test_confirm_refuses_a_binding_that_differs_from_the_launch(tmp_path, changed, message):
+    report = _report(tmp_path, state="validated", validation={**VALIDATED, **changed})
+    with pytest.raises(ValueError, match=f"^{message}$"):
+        binding.confirm(report, "master", "claude", "acct")

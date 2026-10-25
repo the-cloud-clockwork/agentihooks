@@ -1400,3 +1400,28 @@ echo '{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command"
 | `0` | Success |
 | `1` | Error (installation failed, missing config, etc.) |
 | `2` | Block (used by hook handlers to cancel tool execution) |
+
+## `agentihooks swarm wait` prerequisite merges
+
+A merge wait beyond the first five queue entries asks the claimant to stack the
+next change on the prerequisite branch and publish it, or block with the complete
+prerequisite URL, published stack and next step in the notes. A prerequisite can
+occupy the task's current pull request field; that field alone does not establish
+that the task is finished by its merge.
+
+Confirm a long wait on the task's final deliverable explicitly:
+
+```bash
+agentihooks swarm "<slug>" wait --on merge "<pull-request-url>" --final
+```
+
+`--final` applies only to a merge wait on the task's current pull request. Use it
+only when that pull request is the final deliverable. Short queues and unavailable
+queue metadata preserve the ordinary merge wait.
+
+For a prerequisite, publish the continuation and block with its complete URL in
+the notes. The block preserves the branch and notes and releases the seat. The
+tick reopens the matching blocked task after the prerequisite merges. An open,
+closed unmerged or unreadable prerequisite leaves it blocked. A subsequent
+checked wait invalidates the earlier continuation offer; unrelated block notes
+do not consume it.
