@@ -382,10 +382,40 @@ def test_the_early_gate_accepts_parallel_split_only_with_its_reviewed_context_pa
     assert normalized["gate-required"]["name"] == "Gate — Required"
     assert normalized["queue-fail-fast"]["name"] == "queue-fail-fast"
     assert "queue-split" in jobs["queue-fail-fast"]["needs"]
-    assert "needs.queue-split.outputs.queue_312" in jobs["queue-fail-fast"]["steps"][2]["env"]["QUEUE_PLAN"]
+    assert (
+        jobs["queue-fail-fast"]["steps"][2]["env"]["QUEUE_PLAN"]
+        == "${{ format('[{0}]', needs.queue-split.outputs.queue_312) }}"
+    )
     jobs["queue-fail-fast"] = ci_gate_queue.watcher(jobs["gate-required"]["runs-on"])
     with pytest.raises(ValueError, match="context pair"):
         ci_gate_queue.normalize({"test.yml": workflow})
+
+
+def test_parallel_split_with_missing_aggregation_steps_reaches_the_protected_rejection():
+    import copy
+    import json
+    from datetime import date
+    from pathlib import Path
+
+    from scripts import ci_wiring, gate_protected
+
+    root = Path(__file__).resolve().parents[1]
+    base = ci_wiring.load(root)
+    head = copy.deepcopy(base)
+    jobs = head["test.yml"]["jobs"]
+    jobs["queue-split"] = {"needs": ["reuse", "admission"]}
+    summary = jobs["gate-required"]
+    summary["needs"].append("queue-split")
+    del summary["steps"]
+    jobs["queue-fail-fast"] = ci_gate_queue.watcher(summary["runs-on"], parallel=True)
+    normalized = ci_gate_queue.normalize(head)
+    assert "steps" not in normalized["test.yml"]["jobs"]["gate-required"]
+    config = json.loads((root / ".github/gate-wiring.json").read_text())
+    policy = json.loads((root / ".github/workflows/trusted-actors.json").read_text())
+    assert any(
+        "changes its steps" in error
+        for error in gate_protected.grade(base, config, head, config, date(2026, 10, 25), policy)
+    )
 
 
 def test_parallel_split_adoption_passes_the_protected_grader_without_weakening_aggregation():
