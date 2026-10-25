@@ -85,6 +85,7 @@ class SwarmConfig:
     hive_placement: bool = False
     local_max_agents: int = DEFAULT_LOCAL_MAX_AGENTS
     engine: str = "legacy"
+    window: dict = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if self.engine not in ("legacy", "events"):
@@ -232,6 +233,7 @@ class RedisStore:
             raw.get("hive_placement") == "True",
             int(raw.get("local_max_agents") or DEFAULT_LOCAL_MAX_AGENTS),
             raw.get("engine", "legacy"),
+            json.loads(raw.get("window") or "{}"),
         )
 
     def update(self, slug, **changes):
@@ -724,7 +726,7 @@ def _hive_recovered(redis, environ, refused):
             except redis.AuthenticationError:
                 pass
             else:
-                environ["AGENTIHOOKS_HIVE_REDIS_URL"] = saved
+                environ.update(cli.saved_member(environ))
                 return client
         try:
             cli.refresh_env(environ)

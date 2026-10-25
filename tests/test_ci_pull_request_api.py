@@ -171,7 +171,6 @@ def test_no_script_a_step_runs_calls_the_api():
         "scripts/ci_queue_fail_fast.py",
         "scripts/ci_queue_rebuild.py",
         "scripts/ci_release.sh",
-        "scripts/ci_semgrep.py",
         "scripts/ci_unit_rerun.py",
         "scripts/ci_wiring.py",
         "scripts/hive/nats_grant.py",

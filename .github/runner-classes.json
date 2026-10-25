@@ -48,7 +48,7 @@
   "queue-retry.yml/retry": "hosted",
   "release.yml/release": "hosted",
   "runner-trust.yml/actors": "hosted",
-  "semgrep.yml/scan": "light",
+  "semgrep.yml/charts": "light",
   "startup-stages.yml/measure": "standard",
   "swarm-image.yml/publish": "standard",
   "swarm-node-base.yml/copy": "standard",

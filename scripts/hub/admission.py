@@ -5,7 +5,7 @@ import json
 from types import SimpleNamespace
 
 from scripts.hub import lease
-from scripts.swarm import readiness
+from scripts.swarm import readiness, run_window
 from scripts.swarm.ledger_client import LedgerClient
 from scripts.swarm.store import AgentRecord, RedisStore, connect
 
@@ -38,6 +38,8 @@ class Admission:
         if held:
             admitted = json.loads(held)
             return admitted if admitted["hive"] == request["hive"] else None
+        if run_window.claims_stopped(self.store, slug, self.store.config(slug), self.clock()):
+            return None
         task_id, lane, generation = request["task"], request["lane"], request["generation"]
         view = self.source.snapshot(slug)
         if readiness.withdrawal(SimpleNamespace(key=task_id, version=generation, data={"lane": lane}), view):
