@@ -348,7 +348,7 @@ def test_unreadable_workflow_declaration_is_unknown_and_is_not_cached():
 
     assert views([url], run, cache) == {url: None}
     assert views([url], run, cache) == {url: None}
-    assert len(calls) == 4
+    assert len(calls) == 3
     assert cache.dbsize() == 0
 
 

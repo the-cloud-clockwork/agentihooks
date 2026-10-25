@@ -8,6 +8,11 @@ from scripts.doctor import ci, ci_read
 from tests.doctor.recorded import load
 
 
+@pytest.fixture(autouse=True)
+def _cache_identity(monkeypatch):
+    monkeypatch.setenv("GH_TOKEN", "doctor-reader-test")
+
+
 def test_gh_reader_reads_all_pages_and_attempts_and_excludes_other_prs(monkeypatch):
     fixture = load("ci")
     run = copy.deepcopy(fixture["runs"][0])
@@ -266,23 +271,31 @@ def test_job_logs_survive_attempt_cache_loss_and_concurrent_collectors(monkeypat
     assert github_reads.counts(0, clock[0] + 1)["doctor.ci.job_log"] == 2
 
 
-def test_retained_logs_are_invalidated_when_gh_auth_config_changes(monkeypatch, tmp_path):
+def test_retained_logs_follow_the_gh_account_without_preference_invalidation(monkeypatch, tmp_path):
     from scripts.swarm import github_reads
 
     monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path / "state"))
     monkeypatch.setenv("GH_CONFIG_DIR", str(tmp_path / "gh"))
     monkeypatch.delenv("GH_TOKEN", raising=False)
     monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+    account = ["first-user"]
+
+    def identity(command, **kwargs):
+        assert command == ["gh", "config", "get", "user", "--host", "github.com"]
+        return subprocess.CompletedProcess(command, 0, account[0], "")
+
+    monkeypatch.setattr(github_reads.subprocess, "run", identity)
     config = tmp_path / "gh"
     config.mkdir()
-    hosts = config / "hosts.yml"
-    hosts.touch()
+    preferences = config / "config.yml"
+    preferences.touch()
     endpoint = "repos/o/r/actions/jobs/1/logs"
     logs = iter(["first", "second"])
     assert github_reads.job_log(endpoint, lambda: next(logs)) == "first"
+    preferences.unlink()
+    preferences.touch()
     assert github_reads.job_log(endpoint, lambda: next(logs)) == "first"
-    hosts.unlink()
-    hosts.touch()
+    account[0] = "second-user"
     assert github_reads.job_log(endpoint, lambda: next(logs)) == "second"
     assert github_reads.job_log(endpoint, lambda: next(logs)) == "second"
 
