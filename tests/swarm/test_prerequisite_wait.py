@@ -32,7 +32,12 @@ def test_a_long_prerequisite_wait_directs_stacking_or_blocking_without_idling(wa
     error = capsys.readouterr().err
     assert "stack" in error and "publish" in error and "block" in error
     assert URL in error and "15" in error
-    assert "next step" in error and "reopen" in error
+    assert error.strip() == (
+        f"swarm: prerequisite {URL} is at queue position 15; stack the next change on the prerequisite branch "
+        "and publish it, or block with this prerequisite URL, the stack and next step in the notes; "
+        "the swarm will reopen after it merges. For the task's final deliverable, "
+        f"confirm it with wait --on merge {URL} --final"
+    )
     assert idle.wait(store.redis, "sw", ME) is None
 
 
@@ -227,3 +232,80 @@ def test_merge_wait_help_names_final_confirmation_and_existing_target_labels(cap
     text = capsys.readouterr().out
     assert "--on KIND TARGET" in text
     assert "--final" in text
+
+
+def test_reopening_records_the_resume_instruction_and_clears_the_retained_prerequisite(waiting, monkeypatch):
+    store, ledger, _ = waiting
+    ledger.rows["t1"]["claim_generation"] = 7
+    store.redis.set(f"{store.key('sw', 'claim', 't1')}:generation", 7)
+    assert run("sw", "--as", ME, "wait", "--on", "merge", URL) == 1
+    assert run("sw", "--as", ME, "block", f"Stack published; next step restack after {URL}") == 0
+    notes = []
+    monkeypatch.setattr(ledger, "comment", lambda *args, **kwargs: notes.append((args, kwargs)))
+
+    def merged(url):
+        assert url == URL
+        return PullRequest("MERGED", 2, 1, False)
+
+    monkeypatch.setattr(cli.ledger_events, "view", merged)
+    assert prerequisite_wait.reopen_pass("sw", store, ledger, ledger.rows) == [
+        f"task t1 reopened after prerequisite {URL} merged"
+    ]
+    assert notes == [
+        (
+            (
+                "sw",
+                "t1",
+                "The queued prerequisite merged. Resume the published stack and next step from the block notes.",
+            ),
+            {"by": "swarm"},
+        )
+    ]
+    assert store.redis.hget(prerequisite_wait.key("sw"), "t1") is None
+    assert prerequisite_wait.reopen_pass("sw", store, ledger, ledger.rows) == []
+    assert len(notes) == 1
+
+
+@pytest.mark.parametrize("first", ["offered", "changed", "missing", "unmerged"])
+def test_one_unready_prerequisite_never_stops_another_ready_continuation(waiting, monkeypatch, first):
+    store, ledger, state = waiting
+    second_url = "https://github.com/o/r/pull/8"
+    second_agent = "engineer@a1b2c3-0002"
+    monkeypatch.setattr(merge_queue, "operate", lambda *args: state)
+    assert run("sw", "--as", ME, "wait", "--on", "merge", URL) == 1
+    if first != "offered":
+        assert run("sw", "--as", ME, "block", f"Stack published; next step restack after {URL}") == 0
+    if first == "changed":
+        ledger.rows["t1"]["state"] = "done"
+    if first == "missing":
+        del ledger.rows["t1"]
+    ledger.rows["t2"].update(state="claimed", claimed_by=second_agent)
+    store.put_agent("sw", AgentRecord(name=second_agent, lane="eng", task="t2", seat="eng-2@sw"))
+    assert run("sw", "--as", second_agent, "wait", "--on", "merge", second_url) == 1
+    assert run("sw", "--as", second_agent, "block", f"Stack published; next step restack after {second_url}") == 0
+    monkeypatch.setattr(
+        cli.ledger_events, "view", lambda url: PullRequest("MERGED" if url == second_url else "OPEN", 2, 1, False)
+    )
+    assert prerequisite_wait.reopen_pass("sw", store, ledger, ledger.rows) == [
+        f"task t2 reopened after prerequisite {second_url} merged"
+    ]
+    assert ledger.rows["t2"]["state"] == "open"
+    if first in {"changed", "missing"}:
+        assert store.redis.hget(prerequisite_wait.key("sw"), "t1") is None
+
+
+@pytest.mark.parametrize("change", [{"state": "claimed"}, {"claimed_by": "another-owner"}, {"claim_generation": 1}])
+def test_reopening_checks_the_claim_and_block_state_atomically(waiting, monkeypatch, change):
+    store, ledger, _ = waiting
+    assert run("sw", "--as", ME, "wait", "--on", "merge", URL) == 1
+    assert run("sw", "--as", ME, "block", f"Stack published; next step restack after {URL}") == 0
+    snapshot = {key: dict(value) for key, value in ledger.rows.items()}
+
+    def raced(url):
+        assert url == URL
+        ledger.rows["t1"].update(change)
+        return PullRequest("MERGED", 2, 1, False)
+
+    monkeypatch.setattr(cli.ledger_events, "view", raced)
+    assert prerequisite_wait.reopen_pass("sw", store, ledger, snapshot) == []
+    assert all(ledger.rows["t1"][field] == value for field, value in change.items())

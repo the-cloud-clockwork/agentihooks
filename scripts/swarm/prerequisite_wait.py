@@ -80,9 +80,7 @@ def reopen_pass(slug: str, store: RedisStore, ledger, rows: dict) -> list[str]:
             continue
         task = rows.get(task_id, {})
         expected = {"claimed_by": record["agent"], "claim_generation": record["generation"]}
-        if task.get("state") != "blocked" or any(
-            task.get(field, 0 if field == "claim_generation" else "") != value for field, value in expected.items()
-        ):
+        if task.get("state") != "blocked" or any(task.get(field, 0) != value for field, value in expected.items()):
             store.redis.hdel(key(slug), task_id)
             continue
         pull = ledger_events.view(record["target"])
