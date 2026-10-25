@@ -77,6 +77,17 @@ def record(tool_name, tool_input, environ=None, root=None, now_ms=None):
         f.write(json.dumps(entry) + "\n")
 
 
+def finish(environ=None, root=None, now_ms=None):
+    env = os.environ if environ is None else environ
+    slug, name = env.get("AGENTIHOOKS_SWARM", ""), env.get("AGENTIHOOKS_AGENT_NAME", "")
+    if not (NAME_RE.match(slug) and NAME_RE.match(name)):
+        return
+    folder = Path(root or default_root()) / slug
+    folder.mkdir(parents=True, exist_ok=True)
+    at = int(time.time() * 1000) if now_ms is None else now_ms
+    (folder / f"{name}.done").write_text(str(at), encoding="utf-8")
+
+
 def mark_revived(slug, name, root=None, now_ms=None):
     if not (NAME_RE.match(slug) and NAME_RE.match(name)):
         return
@@ -153,6 +164,17 @@ def last_events(slug: str, root=None) -> dict[str, int]:
     folder = Path(root or default_root()) / slug
     found = {}
     for path in sorted(folder.glob("*.last")) if folder.is_dir() else []:
+        try:
+            found[path.stem] = int(path.read_text(encoding="utf-8"))
+        except ValueError:
+            continue
+    return found
+
+
+def finished_events(slug: str, root=None) -> dict[str, int]:
+    folder = Path(root or default_root()) / slug
+    found = {}
+    for path in sorted(folder.glob("*.done")) if folder.is_dir() else []:
         try:
             found[path.stem] = int(path.read_text(encoding="utf-8"))
         except ValueError:

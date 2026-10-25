@@ -5,15 +5,14 @@ import re
 from dataclasses import replace
 
 from scripts.gates import quiet as quiet_gate
-from scripts.handoff import transfers
+from scripts.handoff import envelope, transfers
 from scripts.swarm import affinity, launch_check, master_retire, naming
 from scripts.swarm.health import activity
 from scripts.swarm.health import findings as health
 from scripts.swarm.store import MASTER
 
 STALLED = "stalled"
-# A foreground tool call ends within ten minutes, so a quieter master is not inside one.
-TOOL_CALL_MINUTES = 10
+RESUMED = "the master resumed work"
 REASON = "busy with no tool call for {minutes} minutes"
 RECOVERY = """## Intent
 Continue as the master of {slug}; {name} was busy with no tool call for {minutes} minutes and the swarm recycled it.
@@ -38,15 +37,19 @@ Re-read the ledger and the master inbox, then continue as master.
 
 
 def quiet_minutes(store, slug, master, now_ms):
-    """Minutes the master has been busy with no tool call, None while its pane is not working or it declared a wait."""
+    """Minutes the master has been busy with no tool call, None while its pane is not working, it is inside a tool
+    call, it declared a wait or it is still starting."""
+    from scripts.swarm.tick import STARTUP_GRACE_MS
+
     if store.redis.get(store.key(slug, "pane-state", master.name)) != "working":
         return None
     if quiet_gate.declared_wait(store.redis, slug, master.name, now_ms):
         return None
-    last = activity.last_events(slug).get(master.name)
-    if last is None:
+    last, done = activity.last_events(slug).get(master.name), activity.finished_events(slug).get(master.name)
+    started = launch_check.session_started_at(master)
+    if last is None or done is None or done < last or now_ms - started <= STARTUP_GRACE_MS:
         return None
-    return (now_ms - max(last, launch_check.session_started_at(master))) // health.MINUTE_MS
+    return (now_ms - max(done, started)) // health.MINUTE_MS
 
 
 def parent_blocked(slug, store, ledger):
@@ -65,12 +68,12 @@ def run(slug, config, store, ledger, runtime, now_ms):
     master = affinity.live_master(store, slug)
     if master is None or master.lane != MASTER or config.state in {"stopping", "stopped"}:
         return []
-    limit = max(health.limits().stalled_minutes, TOOL_CALL_MINUTES)
+    limit = health.limits().stalled_minutes
     minutes = quiet_minutes(store, slug, master, now_ms)
     held_for = master_retire.reason(store, slug, master.name)
     if minutes is None or minutes < limit:
         if held_for.startswith(REASON.split("{")[0]):
-            master_retire.forget(store, slug, master.name)
+            master_retire.forget(store, slug, master.name, RESUMED)
         return []
     if parent_blocked(slug, store, ledger):
         store.update(slug, state="stopping")
@@ -79,7 +82,8 @@ def run(slug, config, store, ledger, runtime, now_ms):
     if held := master_retire.hold(store, slug, master, held_for or REASON.format(minutes=minutes), live, now_ms):
         return [held]
     text = RECOVERY.format(slug=slug, name=master.name, minutes=minutes)
-    store.put_handoff(slug, MASTER, text, seat=master.seat)
+    found = envelope.build(store, slug, master, "recycle", ledger.state(slug)["tasks"], now_ms)
+    store.put_handoff(slug, MASTER, text, seat=master.seat, envelope=found)
     transfers.record(store, slug, master, STALLED, text, now_ms)
     store.put_agent(slug, replace(master, state="finished"))
     return [f"recycled master {master.name} in its seat after {minutes} minutes busy with no tool call"]

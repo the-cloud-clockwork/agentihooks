@@ -1207,6 +1207,12 @@ def _swarm_ledger(payload: dict) -> None:
 
 def _swarm_after_tool(payload: dict) -> None:
     _swarm_outcome(payload)
+    try:
+        from scripts.swarm.health.activity import finish
+
+        finish()
+    except Exception as e:
+        log("swarm activity finish failed", {"error": str(e)})
     _hive_join(payload, "tool")
     _swarm_ledger(payload)
 

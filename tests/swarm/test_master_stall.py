@@ -21,6 +21,13 @@ def activity_root(tmp_path, monkeypatch):
     monkeypatch.delenv("AGENTIHOOKS_HEALTH_STALLED_MINUTES", raising=False)
 
 
+def call(slug, name, at, done=True):
+    environ = {"AGENTIHOOKS_SWARM": slug, "AGENTIHOOKS_AGENT_NAME": name}
+    activity.record("Bash", {"command": "ls"}, environ, None, at)
+    if done:
+        activity.finish(environ, None, at)
+
+
 def master(store, slug="sw", pane="working", called=True):
     name = store.next_name(slug, MASTER)
     agent = AgentRecord(name, MASTER, MASTER, pane_id="w1:p1", started_at=START, seat=f"master@{slug}")
@@ -28,9 +35,7 @@ def master(store, slug="sw", pane="working", called=True):
     store.seats.occupy(agent.seat, agent.name, START)
     store.redis.set(store.key(slug, "pane-state", agent.name), pane)
     if called:
-        activity.record(
-            "Bash", {"command": "ls"}, {"AGENTIHOOKS_SWARM": slug, "AGENTIHOOKS_AGENT_NAME": name}, None, START
-        )
+        call(slug, name, START)
     runtime = FakeRuntime()
     runtime.live.add(name)
     runtime.statuses[name] = "working"
@@ -57,6 +62,13 @@ def test_stalled_master_is_asked_for_a_handoff_then_recycled_in_its_seat(store):
     handoff = store.handoff("sw", MASTER)
     assert "busy with no tool call for 15 minutes" in handoff and handoff.endswith("<!-- handoff complete -->\n")
     assert store.handoff_seat("sw", MASTER) == agent.seat
+    found = store.handoff_envelope("sw", MASTER)
+    assert (found["agent"], found["seat"], found["reason"], found["ledger"]) == (
+        agent.name,
+        agent.seat,
+        "recycle",
+        "sw",
+    )
     [row] = transfers.list_transfers(store, "sw")
     assert (row["reason"], row["predecessor"], row["seat"]) == (master_stall.STALLED, agent.name, agent.seat)
     assert runtime.killed == []
@@ -70,11 +82,27 @@ def test_master_under_the_threshold_stays(store, minutes):
     assert InboxStore(store.redis).pending_items(store.agents("sw")[0].name) == []
 
 
-def test_threshold_never_falls_under_a_foreground_tool_call(store, monkeypatch):
+def test_threshold_follows_a_shorter_stall_limit(store, monkeypatch):
+    monkeypatch.setenv("AGENTIHOOKS_HEALTH_STALLED_MINUTES", "8")
+    _, runtime = master(store)
+    assert run(store, runtime, START + 7 * MINUTE + MINUTE // 2) == []
+    assert run(store, runtime, START + 8 * MINUTE)[0].startswith("asked")
+
+
+def test_starting_master_stays_inside_the_startup_grace(store, monkeypatch):
     monkeypatch.setenv("AGENTIHOOKS_HEALTH_STALLED_MINUTES", "3")
     _, runtime = master(store)
-    assert run(store, runtime, START + 9 * MINUTE) == []
-    assert run(store, runtime, START + 10 * MINUTE) != []
+    assert run(store, runtime, START + 6 * MINUTE) == []
+    assert run(store, runtime, START + 6 * MINUTE + 1)[0].startswith("asked")
+
+
+def test_master_inside_a_tool_call_is_never_recycled(store):
+    agent, runtime = master(store)
+    call("sw", agent.name, START + MINUTE, done=False)
+    for minutes in (10, 15, 60, 600):
+        assert run(store, runtime, START + minutes * MINUTE) == []
+    assert store.agents("sw")[0].state != "finished"
+    assert InboxStore(store.redis).pending_items(agent.name) == []
 
 
 def test_threshold_follows_a_longer_stall_limit(store, monkeypatch):
@@ -102,19 +130,15 @@ def test_master_without_any_tool_call_record_stays(store):
     assert run(store, runtime, START + 60 * MINUTE) == []
 
 
-def test_tool_call_after_the_ask_withdraws_it(store):
+@pytest.mark.parametrize("done", [False, True])
+def test_tool_call_after_the_ask_withdraws_it(store, done):
     agent, runtime = master(store)
     run(store, runtime, START + 10 * MINUTE)
-    activity.record(
-        "Bash",
-        {"command": "ls"},
-        {"AGENTIHOOKS_SWARM": "sw", "AGENTIHOOKS_AGENT_NAME": agent.name},
-        None,
-        START + 12 * MINUTE,
-    )
+    [ask] = InboxStore(store.redis).pending_items(agent.name)
+    call("sw", agent.name, START + 12 * MINUTE, done=done)
     assert run(store, runtime, START + 16 * MINUTE) == []
     assert master_retire.reason(store, "sw", agent.name) == ""
-    assert InboxStore(store.redis).pending_items(agent.name) == []
+    assert InboxStore(store.redis).get(ask.id).reason == f"done: {master_stall.RESUMED}"
     assert store.agents("sw")[0].state != "finished"
 
 
@@ -175,3 +199,53 @@ def test_tick_recycles_a_stalled_master(store):
     assert [row["reason"] for row in transfers.list_transfers(store, "sw")] == [master_stall.STALLED]
     tick("sw", store, ledger, runtime, START + 16 * MINUTE)
     assert agent.name in runtime.killed
+
+
+def test_tool_end_is_recorded_after_every_tool_call(monkeypatch):
+    from hooks import hook_manager
+
+    ended = []
+    monkeypatch.setattr(hook_manager, "_swarm_outcome", lambda payload: None)
+    monkeypatch.setattr(hook_manager, "_hive_join", lambda payload, event: None)
+    monkeypatch.setattr(hook_manager, "_swarm_ledger", lambda payload: None)
+    monkeypatch.setattr(activity, "finish", lambda: ended.append(True))
+    hook_manager._swarm_after_tool({})
+    assert ended == [True]
+
+
+def test_tool_end_failure_is_logged_not_raised(monkeypatch):
+    from hooks import hook_manager
+
+    logged = []
+
+    def broken():
+        raise OSError("disk full")
+
+    monkeypatch.setattr(hook_manager, "_swarm_outcome", lambda payload: None)
+    monkeypatch.setattr(hook_manager, "_hive_join", lambda payload, event: None)
+    monkeypatch.setattr(hook_manager, "_swarm_ledger", lambda payload: None)
+    monkeypatch.setattr(hook_manager, "log", lambda text, data=None: logged.append((text, data)))
+    monkeypatch.setattr(activity, "finish", broken)
+    hook_manager._swarm_after_tool({})
+    assert logged == [("swarm activity finish failed", {"error": "disk full"})]
+
+
+def test_finish_stamps_the_bound_agent_only(tmp_path):
+    bound = {"AGENTIHOOKS_SWARM": "sw", "AGENTIHOOKS_AGENT_NAME": "master@sw-1"}
+    activity.finish(bound, tmp_path, 5)
+    activity.finish({"AGENTIHOOKS_SWARM": "sw", "AGENTIHOOKS_AGENT_NAME": "../x"}, tmp_path, 6)
+    activity.finish({"AGENTIHOOKS_SWARM": "", "AGENTIHOOKS_AGENT_NAME": "master@sw-2"}, tmp_path, 7)
+    activity.finish(bound, tmp_path, 9)
+    (tmp_path / "sw" / "broken.done").write_text("x")
+    assert activity.finished_events("sw", tmp_path) == {"master@sw-1": 9}
+    assert activity.finished_events("none", tmp_path) == {}
+
+
+def test_finish_reads_the_session_environment(tmp_path, monkeypatch):
+    import time
+
+    monkeypatch.setenv("AGENTIHOOKS_SWARM", "sw")
+    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "master@sw-1")
+    before = int(time.time() * 1000)
+    activity.finish(root=tmp_path)
+    assert before <= activity.finished_events("sw", tmp_path)["master@sw-1"] <= int(time.time() * 1000)
