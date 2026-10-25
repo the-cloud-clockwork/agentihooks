@@ -1,4 +1,5 @@
 import json
+import sys
 from collections import defaultdict
 from collections.abc import Callable
 from dataclasses import replace
@@ -72,7 +73,7 @@ class HiveLoss:
             self._edit(drop)
 
     def _settle(self, starts: list[tuple[str, Envelope]], lost: bool, now: int) -> list[str]:
-        done = []
+        done, ended = [], []
         for key, start in starts:
             claim = self._bus.for_swarm(start.swarm).state("spoke-work").get(key)
             value = json.loads(claim.value) if claim else {}
@@ -89,7 +90,11 @@ class HiveLoss:
                     data={**start.data, "reason": REASON},
                 )
                 self._emit(self._bus, exited)
+                ended.append(f"execution {start.key} of task {start.data.get('task', '')}")
             done.append(key)
+        if ended:
+            swarm, hive = starts[0][1].swarm, starts[0][1].data["hive"]
+            print(f"hub: hive {hive} of swarm {swarm} lost; exited {', '.join(ended)}", file=sys.stderr)
         return done
 
     def _edit(self, change: Callable[[dict], bool]) -> None:
