@@ -242,6 +242,9 @@ jobs:
           path: provenance-grader
           fetch-depth: 0
           persist-credentials: false
+        env:
+          GIT_HTTP_LOW_SPEED_LIMIT: "1000"
+          GIT_HTTP_LOW_SPEED_TIME: "60"
 
       - uses: actions/setup-python@v5
         if: github.event_name == 'merge_group' || github.event_name == 'pull_request'
@@ -449,7 +452,9 @@ jobs:
               jobs=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run/jobs?per_page=100" --paginate --jq '.jobs[]')
               if ! jq -s -e '
                 [.[] | select(.name | startswith("unit ("))] as $units |
-                ($units | length == 18 and all(.[]; .conclusion == "success")) and
+                ($units | length > 0 and all(.[]; .conclusion == "success") and
+                  (map(.name | capture("^unit \\((?<v>[^,]+), (?<s>[0-9]+)\\)$")? // {v: "", s: "0"} | .s |= tonumber) |
+                    group_by(.v) | all(.[]; map(.s) | sort == [range(1; length + 1)]))) and
                 any(.[];
                   .name == "coverage-baseline" and .conclusion == "success" and
                   any(.steps[]?; .name == "Compute the coverage baseline" and .conclusion == "success") and
@@ -664,6 +669,8 @@ jobs:
           PYTHON_PATH: ${{ steps.python.outputs.python-path }}
         run: |
           uv venv --python "$PYTHON_PATH" "$HOME/venv"
+          uv pip install --offline --no-index --find-links /opt/wheelhouse --python "$HOME/venv/bin/python" --excludes .github/test-excludes.txt -e ".[dev,all]" && { echo "::notice title=Wheelhouse hit::The runner wheelhouse served the install offline"; exit 0; }
+          echo "::notice title=Wheelhouse miss::The runner wheelhouse cannot serve the install; fetching from PyPI"
           bash .github/scripts/pypi-retry.sh "Install dependencies" -- uv pip install --python "$HOME/venv/bin/python" --excludes .github/test-excludes.txt -e ".[dev,all]"
 
       # Queue refs cannot read dev's entries, so saving there only fills the store with copies.
@@ -702,7 +709,7 @@ jobs:
           permission-actions: read
 
       - name: Fetch the base suite count recorded on dev
-        if: steps.app-token.outcome == 'success' && github.event_name == 'pull_request'
+        if: steps.app-token.outcome == 'success' && (github.event_name == 'pull_request' || github.event_name == 'merge_group')
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           RECORD: count-record-${{ matrix.python-version }}
@@ -825,6 +832,27 @@ jobs:
           retention-days: 7
           overwrite: true
 
+      # The next group's base is this head, and its dev record lands only after that group has started.
+      - name: Record the head count for the next queue group
+        if: github.event_name == 'merge_group'
+        continue-on-error: true
+        run: |
+          cmp -s "$RUNNER_TEMP/base/tests/count_floor.py" tests/count_floor.py || exit 0
+          git worktree add --detach "$RUNNER_TEMP/head" HEAD
+          mkdir -p "$RUNNER_TEMP/count-record"
+          cd "$RUNNER_TEMP/base"
+          python -m tests.count_floor --record "$RUNNER_TEMP/count-record/record.json" --head "$RUNNER_TEMP/head" --collected "$RUNNER_TEMP/collected.json"
+
+      - name: Upload the head count for the next queue group
+        if: github.event_name == 'merge_group'
+        uses: actions/upload-artifact@v4
+        with:
+          name: count-record-${{ matrix.python-version }}
+          path: ${{ runner.temp }}/count-record/record.json
+          if-no-files-found: ignore
+          retention-days: 7
+          overwrite: true
+
       - name: Save exact count collections
         if: steps.counts.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
@@ -837,7 +865,7 @@ jobs:
     if: ${{ !cancelled() && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && (github.event_name != 'pull_request' || needs.select.outputs.scope == 'full') }}
     needs: [select, reuse, admission]
     runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && (github.event_name == 'merge_group' && 'anton-oss-queue' || 'anton-oss') || 'ubuntu-latest' }}
-    timeout-minutes: 20
+    timeout-minutes: 25
     permissions:
       contents: read
     strategy:
@@ -885,6 +913,8 @@ jobs:
           PYTHON_PATH: ${{ steps.python.outputs.python-path }}
         run: |
           uv venv --python "$PYTHON_PATH" "$HOME/venv"
+          uv pip install --offline --no-index --find-links /opt/wheelhouse --python "$HOME/venv/bin/python" --excludes .github/test-excludes.txt -e ".[dev,all]" && { echo "::notice title=Wheelhouse hit::The runner wheelhouse served the install offline"; exit 0; }
+          echo "::notice title=Wheelhouse miss::The runner wheelhouse cannot serve the install; fetching from PyPI"
           bash .github/scripts/pypi-retry.sh "Install dependencies" -- uv pip install --python "$HOME/venv/bin/python" --excludes .github/test-excludes.txt -e ".[dev,all]"
 
       - &save-venv
@@ -911,15 +941,11 @@ jobs:
           permission-actions: read
 
       - name: Require successful early collection
-        if: github.event_name != 'push' && needs.select.outputs.source == ''
+        if: github.event_name != 'push' && needs.select.outputs.source == '' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           COLLECTION_JOB: test-count (${{ matrix.python-version }})
         run: |
-          if [[ -z "$GH_TOKEN" ]]; then
-            echo "A fork pull request mints no App token; Gate Required still holds the count."
-            exit 0
-          fi
           while :; do
             state="$(gh api --paginate "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/jobs?filter=latest&per_page=100" \
               --jq ".jobs[] | select(.name == \"$COLLECTION_JOB\") | \"\(.status) \(.conclusion)\"")" || state=""
@@ -931,12 +957,18 @@ jobs:
           done
 
       - name: Download the early collection
-        if: github.event_name != 'push' && needs.select.outputs.source == ''
+        if: github.event_name != 'push' && needs.select.outputs.source == '' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
         uses: ./.github/actions/retry-download
         with:
           name: early-collected-${{ matrix.python-version }}
           client-id: ${{ secrets.TCC_CI_CLIENT_ID }}
           private-key: ${{ secrets.TCC_CI_APP_PRIVATE_KEY }}
+
+      - name: Wait for the early collection on a fork
+        if: github.event_name != 'push' && needs.select.outputs.source == '' && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository
+        uses: ./.github/actions/await-download
+        with:
+          name: early-collected-${{ matrix.python-version }}
 
       - name: Download the queued run's dev durations
         if: needs.select.outputs.source == '' && needs.select.outputs.queued == 'true'
@@ -1575,7 +1607,7 @@ jobs:
         run: python -m tests.shard_budget $REPORT shard-durations/*/durations.json
 
   sonar:
-    if: ${{ !cancelled() && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && github.event_name != 'merge_group' }}
+    if: ${{ !cancelled() && needs.select.result == 'success' && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && github.event_name != 'merge_group' }}
     # Waits for the shards' coverage through needs; the API that could poll for it has an hourly quota every run shares.
     needs: [unit, unit-selected, select, reuse, admission]
     runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && (github.event_name == 'merge_group' && 'anton-oss-queue' || 'anton-oss') || 'ubuntu-latest' }}
@@ -2209,7 +2241,9 @@ jobs:
             jobs=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run/jobs?per_page=100" --paginate --jq '.jobs[]')
             if ! jq -s -e --arg event "$event" '
               [.[] | select(.name | startswith("unit ("))] as $units |
-              (($units | length == 18 and all(.[]; .conclusion == "success")) or
+              (($units | length > 0 and all(.[]; .conclusion == "success") and
+                (map(.name | capture("^unit \\((?<v>[^,]+), (?<s>[0-9]+)\\)$")? // {v: "", s: "0"} | .s |= tonumber) |
+                  group_by(.v) | all(.[]; map(.s) | sort == [range(1; length + 1)]))) or
                ($event == "merge_group" and
                 all(.[] | select(.name == "unit" or (.name | startswith("unit ("))); .conclusion == "skipped") and
                 any(.[]; .name == "reuse" and .conclusion == "success" and
@@ -2398,6 +2432,11 @@ jobs:
           REUSED: ${{ needs.reuse.outputs.reused }}
           INLINE: ${{ needs.mutation-plan.outputs.shards == '[0]' && needs.mutation-plan.outputs.stats_parts == '[0]' }}
         run: |
+          selection=$(jq -r '.select.result // ""' <<< "$NEEDS")
+          if [[ "$selection" == failure || "$selection" == cancelled ]]; then
+            echo "::error::Test selection $selection; fix selection before downstream test and coverage checks."
+            exit 1
+          fi
           if [[ "${EVENT:-}" == merge_group || "${EVENT:-}" == pull_request ]]; then
             if ! jq -e --arg event "$EVENT" --arg mutation "$MUTATION" --arg inline "${INLINE:-}" '
               (.select.outputs.scope // "") as $scope
@@ -2790,6 +2829,7 @@ jobs:
         part: ${{ fromJSON(needs.mutation-plan.outputs.stats_parts) }}
     env:
       PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.playwright
+      MUTATION_STATS_CACHE: ${{ github.workspace }}/.mutation-stats-cache
     steps:
       - uses: actions/checkout@v4
         if: needs.mutation-plan.outputs.forwarded != 'true'
@@ -2849,6 +2889,16 @@ jobs:
           echo "::error::Chromium setup failed or exceeded its six minute timeout; mutation tests cannot run."
           exit 1
 
+      - name: Restore compatible test stats
+        if: needs.mutation-plan.outputs.forwarded != 'true'
+        uses: actions/cache/restore@v4
+        env:
+          SEGMENT_DOWNLOAD_TIMEOUT_MINS: "1"
+        with:
+          path: .mutation-stats-cache
+          key: mutation-test-stats-v1-${{ runner.os }}-${{ matrix.part }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: mutation-test-stats-v1-${{ runner.os }}-${{ matrix.part }}-
+
       - name: Collect one stats part for every mutation shard
         if: needs.mutation-plan.outputs.forwarded != 'true'
         env:
@@ -2857,6 +2907,13 @@ jobs:
           PART: ${{ matrix.part }}
           PARTS: ${{ strategy.job-total }}
         run: mkdir -p .mutation-stats && touch ".mutation-stats/collected-$PART" && python -m scripts.ci_mutation --bases "$BASES" --budget 1080 --stats .mutation-stats --stats-part "$PART" --stats-parts "$PARTS"
+
+      - name: Store successful test stats
+        if: needs.mutation-plan.outputs.forwarded != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: .mutation-stats-cache
+          key: mutation-test-stats-v1-${{ runner.os }}-${{ matrix.part }}-${{ github.run_id }}-${{ github.run_attempt }}
 
       - name: Upload mutation stats part
         if: needs.mutation-plan.outputs.forwarded != 'true'

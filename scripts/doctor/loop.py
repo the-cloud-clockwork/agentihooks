@@ -28,7 +28,7 @@ IDLE = ("stopped", "stopping")
 
 
 def verdicts(store, doctor):
-    return VerdictStore(store.redis, store.key(doctor, "doctor-findings"))
+    return VerdictStore(store.redis, store.key(doctor, "doctor-findings"), store.key(doctor, "doctor-verdicts"))
 
 
 def _details_key(store, doctor):
@@ -127,7 +127,7 @@ def _incidents(state, now_ms):
     return incidents, [incident for incident in incidents.values() if current and incident["end"] is None]
 
 
-def _crossings(state, runs, span, incidents, held):
+def _crossings(state, runs, span, incidents, held, observed_ms):
     """This pass window's grouped CI speed findings, none while an incident holds them, and the superseded ids."""
     since, now_ms = span
     width = interval_minutes(os.environ) * MINUTE_MS
@@ -138,7 +138,7 @@ def _crossings(state, runs, span, incidents, held):
     cleared = ci_speed.cleared(runs)
     gone = [*ci_speed.prune(groups, cleared), *cleared]
     if not held:
-        ci_speed.group(groups, runs, since, now_ms, window, github_status.windows(incidents, now_ms))
+        ci_speed.group(groups, runs, since, observed_ms, window, github_status.windows(incidents, now_ms))
     state["groups"] = groups
     current = {identity: entry for identity, entry in groups.items() if entry["window"] == window}
     gone = [identity for identity in gone if identity not in current]
@@ -168,13 +168,15 @@ def _hold(mail, watched, doctor, held):
 def speed(store: RedisStore, doctor: str, watched: str, now_ms: int) -> list[str]:
     key = store.key(doctor, "ci-speed")
     state = json.loads(store.redis.get(key) or "{}")
-    since = state.get("last", now_ms - MINUTE_MS)
-    end = min(now_ms, since + SPEED_SLICE_MINUTES * MINUTE_MS)
-    snapshot = ci_speed_read.read(
-        since, end, pending=state.get("pending"), known=state.get("known"), active=end == now_ms
-    )
+    since = state.setdefault("last", now_ms - MINUTE_MS)
+    continuation = state.get("continuation", {})
+    end = continuation.get("end", min(now_ms, since + SPEED_SLICE_MINUTES * MINUTE_MS))
+    active = continuation.get("active", end == now_ms)
+    observed = continuation.get("observed", now_ms)
+    progress = ci_speed_read.Progress(state.get("pending"), continuation.get("responses", {}))
+    snapshot = ci_speed_read.read(since, end, pending=progress, known=state.get("known"), active=active)
     incidents, held = _incidents(state, now_ms)
-    found, gone = _crossings(state, snapshot["runs"], (since, now_ms), incidents, held)
+    found, gone = _crossings(state, snapshot["runs"], (since, now_ms), incidents, held, observed)
     report = {
         "complete": snapshot["complete"] and end == now_ms,
         "runs": len(snapshot["runs"]),
@@ -185,7 +187,7 @@ def speed(store: RedisStore, doctor: str, watched: str, now_ms: int) -> list[str
     }
     if not snapshot["complete"]:
         report["error"] = snapshot["error"]
-    if not snapshot["complete"] and not held:
+    if not snapshot["complete"] and not snapshot.get("paused") and not held:
         found.append(
             Finding(
                 "ci speed read",
@@ -230,6 +232,9 @@ def speed(store: RedisStore, doctor: str, watched: str, now_ms: int) -> list[str
             store.redis.hset(_timer_key(store, doctor), "last_new", now_ms)
     if snapshot["complete"]:
         state.update(last=end, pending=[run["id"] for run in snapshot["runs"] if run["status"] != "completed"])
+        state.pop("continuation", None)
+    else:
+        state["continuation"] = {"end": end, "active": active, "observed": observed, "responses": progress.responses}
     finished = {
         str(run["id"]): {
             "status": run["status"],
@@ -246,7 +251,7 @@ def speed(store: RedisStore, doctor: str, watched: str, now_ms: int) -> list[str
         "complete"
         if report["complete"]
         else "catching up"
-        if snapshot["complete"]
+        if snapshot["complete"] or snapshot.get("paused")
         else f"incomplete: {report['error']}"
     )
     paused = "".join(f"; findings held during GitHub incident {incident['name']}" for incident in held)
@@ -283,7 +288,20 @@ def run(store, doctor, now_ms, collect, close, environ=None, speed=None):
     return actions
 
 
-def fix_tasks(watched, finding, verdict, fix):
+def _free_stem(finding, base, tasks):
+    """The first pair stem the ledger does not hold, and the done pair before it; an open pair refuses."""
+    done, earlier = {task["id"]: task["done"] for task in tasks}, []
+    for n, _ in enumerate([base, *done], 1):
+        stem = base if n == 1 else f"{base}-{n}"
+        held = [task for task in (f"{stem}-{part}" for part in ("cause", *FIXES)) if task in done]
+        if not held:
+            return stem, earlier
+        if not all(done[task] for task in held):
+            raise SwarmError(f"finding {finding['id']} already has tasks {' and '.join(held)} still open")
+        earlier = held
+
+
+def fix_tasks(watched, finding, verdict, fix, tasks):
     """A troubleshoot task, then a code or tune task naming the number to move and the command that measures it."""
     if not verdict or verdict.get("value") not in JUDGED_REAL:
         value = verdict.get("value") if verdict else "no verdict"
@@ -291,6 +309,8 @@ def fix_tasks(watched, finding, verdict, fix):
     if fix not in FIXES:
         raise SwarmError("a fix task is code or tune")
     stem = "fx-" + hashlib.sha1(finding["id"].encode()).hexdigest()[:8]
+    stem, earlier = _free_stem(finding, stem, tasks)
+    before = f" Earlier pair {' and '.join(earlier)} is done; read its proof first." if earlier else ""
     kind, measure = finding["kind"], f"agentihooks doctor {watched} measure {finding['id']}"
     number = f"the {kind} measure on {finding['subject']}, {finding['measure']} when judged"
     cause = {
@@ -300,7 +320,8 @@ def fix_tasks(watched, finding, verdict, fix):
         "phase": FIX_PHASE,
         "kind": "troubleshoot",
         "description": f"Doctor finding {finding['id']}: {finding['summary']}. Threshold: {finding['threshold']}. "
-        f"Evidence: {'; '.join(finding['evidence'])}. Show the root cause with evidence, then fix it or file it.",
+        f"Evidence: {'; '.join(finding['evidence'])}. Show the root cause with evidence, then fix it or file it."
+        f"{before}",
         "contract": {
             "must": f"the root cause of {finding['summary']} is shown by evidence",
             "check": "the evidence in the task proof",

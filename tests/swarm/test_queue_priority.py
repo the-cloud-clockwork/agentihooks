@@ -625,7 +625,7 @@ def test_refresh_requeues_entries_an_interrupted_priority_left_out(priority, mon
     p.tasks += [{"pr_url": URL[:-1] + n, "claimed_by": f"eng@{n}"} for n in ("4", "5")]
     p.queue.entries = [e for e in p.queue.entries if e["pullRequest"]["id"] not in ("P2", "P4", "P5")]
     displaced = queue_priority.Displaced(p.store, "sw")
-    for number, head in ((2, "head2"), (3, "head3"), (4, "moved"), (5, "head5")):
+    for number, head in ((5, "head5"), (4, "moved"), (3, "head3"), (2, "head2")):
         displaced.add({"id": f"P{number}", "url": URL[:-1] + str(number), "headRefOid": head})
     assert queue_priority.refresh(p.store, "sw", p.tasks) == [
         f"left {URL[:-1]}5 out of the merge queue after an interrupted priority: it became a draft",
@@ -658,6 +658,29 @@ def test_refresh_requeues_entries_an_interrupted_priority_left_out(priority, mon
         )
         for n, reason in (("5", "it became a draft"), ("4", "its head moved"))
     ]
+
+
+def test_refresh_requeues_leftovers_by_pass_then_queue_position(priority, monkeypatch):
+    p = priority
+    run, refused = p.queue.run, [True]
+
+    def refusing(command, **kwargs):
+        if refused[0] and "enqueuePullRequest" in " ".join(command) and "id=P2" in command:
+            return subprocess.CompletedProcess(command, 1, "", "restore refused")
+        return run(command, **kwargs)
+
+    monkeypatch.setattr(p.queue, "run", refusing)
+    monkeypatch.setattr(merge_queue, "graphql", lambda query, variables, run: GRAPHQL(query, variables, p.queue.run))
+    displaced = queue_priority.Displaced(p.store, "sw")
+    displaced.add({"id": "P5", "url": URL[:-1] + "5", "headRefOid": "head5"})
+    result = merge_queue.prioritize(URL, journal=queue_record.Journal(URL), displaced=displaced)
+    assert result["errors"] == [f"could not restore {URL[:-1]}2: restore refused"]
+    assert [pull["url"] for pull in displaced.pulls()] == [URL[:-1] + n for n in ("5", "2", "3")]
+    refused[0] = False
+    assert queue_priority.refresh(p.store, "sw", p.tasks) == [
+        f"requeued {URL[:-1]}{n} left out of the merge queue by an interrupted priority" for n in (5, 2, 3)
+    ]
+    assert [e["pullRequest"]["id"] for e in p.queue.entries] == ["P1", "P9", "P5", "P2", "P3"]
 
 
 def test_displaced_records_stay_with_their_swarm(priority):

@@ -1,0 +1,6 @@
+{
+  "scripts/ci_mutation/selection.py:scripts.ci_mutation.selection.x_collect_shard_stats__mutmut_9:161cad61048af31cabab1aae08b020fcc6103703d436e9431da894cb2bdaa3db": {
+    "reader": "standards-reader",
+    "reason": "Equivalent: only the internal coverage filename changes case; its writer and reader use the same path."
+  }
+}

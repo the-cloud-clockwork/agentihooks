@@ -310,6 +310,15 @@ def test_grouped_files_reads_real_markers_and_ignores_fixture_strings(tmp_path):
     }
 
 
+def test_grouped_files_parses_only_files_that_name_xdist_group(tmp_path):
+    from tests.shards import grouped_files
+
+    (tmp_path / "grouped.py").write_text('import pytest\npytestmark = pytest.mark.xdist_group("redis")\n')
+    (tmp_path / "unparsable.py").write_text("def test_x(:\n")
+
+    assert grouped_files(tmp_path, ["grouped.py", "unparsable.py"]) == {"grouped.py": "'redis'"}
+
+
 def test_shards_weigh_source_size_since_every_worker_collects_the_whole_shard():
     durations = {"tests/test_a.py::t": 1.0, "tests/test_b.py::t": 1.0, "tests/test_c.py::t": 1.0}
     files = ["tests/test_a.py", "tests/test_b.py", "tests/test_c.py"]
@@ -541,3 +550,13 @@ def test_workers_and_runs_without_workers_keep_xdists_node_setup(monkeypatch):
     assert NodeManager.setup_nodes is original
     _configured(monkeypatch, None)
     assert NodeManager.setup_nodes is original
+
+
+def test_a_shard_holding_a_serial_group_stays_heavy_for_later_parallel_tests():
+    from tests.shards import assign_nodes
+
+    durations = {"tests/test_a.py::test_a": 100.0, "tests/test_b.py::test_b": 200.0, "tests/test_c.py::test_c": 40.0}
+
+    parts = assign_nodes(durations, 2, {"tests/test_a.py": "a"}, 4)
+
+    assert parts == [["tests/test_a.py::test_a"], ["tests/test_b.py::test_b", "tests/test_c.py::test_c"]]

@@ -21,6 +21,7 @@ from tests.refresh_durations import ci_run_ids, ci_samples, median_durations
 pytestmark = pytest.mark.unit
 
 _ROOT = Path(__file__).parent.parent
+_EQUIVALENCE = _ROOT / "tests/swarm_ledger/equivalence.sh"
 
 
 def _pytest_command() -> str:
@@ -253,6 +254,8 @@ def test_unit_installs_extras_with_uv_and_no_uv_cache():
     assert install["env"] == {"PYTHON_PATH": "${{ steps.python.outputs.python-path }}"}
     assert install["run"].strip().splitlines() == [
         'uv venv --python "$PYTHON_PATH" "$HOME/venv"',
+        'uv pip install --offline --no-index --find-links /opt/wheelhouse --python "$HOME/venv/bin/python" --excludes .github/test-excludes.txt -e ".[dev,all]" && { echo "::notice title=Wheelhouse hit::The runner wheelhouse served the install offline"; exit 0; }',
+        'echo "::notice title=Wheelhouse miss::The runner wheelhouse cannot serve the install; fetching from PyPI"',
         'bash .github/scripts/pypi-retry.sh "Install dependencies" -- uv pip install --python "$HOME/venv/bin/python" --excludes .github/test-excludes.txt -e ".[dev,all]"',
     ]
 
@@ -616,32 +619,71 @@ def test_lint_and_equivalence_browser_setup_uses_the_working_mirror():
 
 
 def test_equivalence_runs_storage_then_page_replays_each_group_at_once():
-    steps = yaml.safe_load((_ROOT / ".github/workflows/equivalence.yml").read_text())["jobs"]["ledger-equivalence"][
-        "steps"
-    ]
-    store, pages = [step for step in steps if "_replay.py" in step.get("run", "")]
-    assert store["run"].count("repository_replay.py") == 3 and "page_replay.py" not in store["run"]
-    assert pages["run"].count("page_replay.py") == 3 and "repository_replay.py" not in pages["run"]
-    for step in (store, pages):
-        run = step["run"]
+    steps = _equivalence_steps()
+    script = _EQUIVALENCE.read_text()
+    store, pages = _equivalence_group("store"), _equivalence_group("page")
+    assert store.count("repository_replay.py") == 3 and "page_replay.py" not in store
+    assert pages.count("page_replay.py") == 3 and "repository_replay.py" not in pages
+    for run in (store, pages):
         assert run.count(" &\n") == 3
-        assert "|| failed=1" in run and 'exit "$failed"' in run
-        assert 'cat "$RUNNER_TEMP/$name.log"' in run and "return 1" in run
-    assert steps.index(store) < steps.index(_browser_install(steps)) < steps.index(pages)
-    assert all("Path('head/" not in step.get("run", "") for step in steps)
+        assert run.index(" &\n") < run.index("settle") < run.index("cmp ")
+    assert "|| failed=1" in script and 'return "$failed"' in script
+    assert 'cat "$RUNNER_TEMP/$name.log"' in script and "return 1" in script
+    [store_step] = [step for step in steps if step.get("run", "").endswith(" store")]
+    [page_step] = [step for step in steps if step.get("run", "").endswith(" page")]
+    assert steps.index(store_step) < steps.index(_browser_install(steps)) < steps.index(page_step)
+    assert "Path('head/" not in script
 
 
 def test_equivalence_plants_each_fault_in_a_file_that_exists():
-    steps = yaml.safe_load((_ROOT / ".github/workflows/equivalence.yml").read_text())["jobs"]["ledger-equivalence"][
-        "steps"
-    ]
-    [plant] = [step for step in steps if step.get("name", "").startswith("Plant ")]
-    script = plant["run"].split("<<'PY'\n", 1)[1].rsplit("PY", 1)[0]
+    script = _equivalence_group("plant").split("<<'PY'\n", 1)[1].rsplit("PY", 1)[0]
     loop = next(node for node in ast.walk(ast.parse(script)) if isinstance(node, ast.For))
     planted = [(ast.literal_eval(entry.elts[0].args[0]), ast.literal_eval(entry.elts[1])) for entry in loop.iter.elts]
     assert [path.split("/", 1)[0] for path, _ in planted] == ["fault-store", "fault-chat"]
     for path, needle in planted:
         assert (_ROOT / path.split("/", 1)[1]).read_text().count(needle) == 1
+
+
+def test_equivalence_grades_with_the_base_copy():
+    steps = _equivalence_steps()
+    [base] = [step for step in steps if step.get("with", {}).get("path") == "base"]
+    assert base["with"]["ref"] == "${{ github.event.pull_request.base.sha }}"
+    [pick] = [step for step in steps if step.get("name") == "Pick the protected grader"]
+    assert pick["run"].startswith("if [[ -f base/tests/swarm_ledger/equivalence.sh ]]; then\n")
+    assert pick["run"].index('"GRADER=$PWD/base"') < pick["run"].index("else") < pick["run"].index('"GRADER=$PWD/head"')
+    assert pick["run"].index("else") < pick["run"].index("::warning::")
+    graded = [step for step in steps if "equivalence.sh" in step.get("run", "") and step is not pick]
+    assert [step["run"] for step in graded] == [
+        f'bash "$GRADER/tests/swarm_ledger/equivalence.sh" {group}' for group in ("plant", "store", "page")
+    ]
+    assert all(steps.index(base) < steps.index(pick) < steps.index(step) for step in graded)
+    assert _browser_install(steps)["uses"] == "./base/.github/actions/browser-cache"
+    for step in steps:
+        run = step.get("run", "")
+        assert "cmp " not in run and "_replay.py" not in run and "head/tests" not in run
+        assert step is pick or "GITHUB_ENV" not in run
+    script = _EQUIVALENCE.read_text()
+    assert 'replays=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)' in script and "head/tests" not in script
+
+
+def _equivalence_steps() -> list[dict]:
+    return yaml.safe_load((_ROOT / ".github/workflows/equivalence.yml").read_text())["jobs"]["ledger-equivalence"][
+        "steps"
+    ]
+
+
+def _equivalence_group(name: str) -> str:
+    return _EQUIVALENCE.read_text().split(f"\n{name}() {{\n", 1)[1].split("\n}\n", 1)[0]
+
+
+def test_equivalence_runs_on_every_ledger_pull_request_without_a_body_marker():
+    workflow = yaml.safe_load((_ROOT / ".github/workflows/equivalence.yml").read_text())
+    job = workflow["jobs"]["ledger-equivalence"]
+    assert "if" not in job
+    assert all("pull_request.body" not in str(step.get("if", "")) for step in job["steps"])
+    [head] = [step for step in job["steps"] if step.get("with", {}).get("path") == "head"]
+    assert "ref" not in head["with"]
+    assert "paths" not in workflow[True]["pull_request"]
 
 
 @pytest.mark.parametrize("doc", ["README.md", "index.md"])
@@ -730,6 +772,88 @@ def test_split_rejects_a_failed_collection_before_reading_any_artifact(tmp_path,
     )
     assert (outcome.returncode == 0) == (result == "success")
     assert (tmp_path / "calls").read_text() == "xx"
+
+
+def _await_steps():
+    return yaml.safe_load((_ROOT / ".github/actions/await-download/action.yml").read_text())["runs"]["steps"]
+
+
+def test_a_fork_split_waits_for_the_collection_instead_of_polling_without_a_token():
+    jobs = _workflow()["jobs"]
+    steps = jobs["split"]["steps"]
+    guard = next(step for step in steps if step.get("name") == "Require successful early collection")
+    download = next(step for step in steps if step.get("name") == "Download the early collection")
+    fork = next(step for step in steps if step.get("name") == "Wait for the early collection on a fork")
+    upload = next(step for step in jobs["test-count"]["steps"] if step.get("name") == "Upload the early collection")
+    mint = next(step for step in steps if step.get("id") == "app-token")
+    same = " && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)"
+    assert guard["if"] == mint["if"] and guard["if"].endswith(same)
+    assert fork["if"] == guard["if"].replace(
+        same,
+        " && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository",
+    )
+    assert fork["uses"] == "./.github/actions/await-download"
+    assert fork["with"] == {"name": upload["with"]["name"]}
+    assert (
+        steps.index(download)
+        < steps.index(fork)
+        < steps.index(next(step for step in steps if step.get("name") == "Adopt latest dev durations"))
+    )
+
+
+def test_the_collection_wait_outlasts_the_count_job_timeout(tmp_path):
+    attempts = [step for step in _await_steps() if step.get("uses")]
+    waits = [step for step in _await_steps() if step.get("name", "").startswith("Wait ")]
+    assert len(waits) == len(attempts) - 1
+    assert all(step["uses"] == "actions/download-artifact@v4" for step in attempts)
+    assert all(step["continue-on-error"] is True for step in attempts)
+    assert all(step["with"] == {"name": "${{ inputs.name }}", "path": "${{ github.workspace }}"} for step in attempts)
+    binary = tmp_path / "bin"
+    binary.mkdir()
+    (binary / "sleep").write_text('#!/usr/bin/env bash\necho "$1" >> "$SLEPT"\n')
+    (binary / "sleep").chmod(0o755)
+    for wait in waits:
+        subprocess.run(
+            ["bash", "-e", "-c", wait["run"]],
+            env=dict(os.environ, PATH=f"{binary}:{os.environ['PATH']}", SLEPT=str(tmp_path / "slept")),
+            check=True,
+        )
+    slept = sum(int(line) for line in (tmp_path / "slept").read_text().split())
+    jobs = _workflow()["jobs"]
+    assert jobs["test-count"]["timeout-minutes"] * 60 <= slept <= (jobs["split"]["timeout-minutes"] - 5) * 60
+
+
+@pytest.mark.parametrize("ready", [0, 25, 400, None])
+def test_the_collection_wait_downloads_once_the_artifact_lands_and_stays_red_when_it_never_does(tmp_path, ready):
+    outcomes, clock, tried = {}, 0, []
+    binary = tmp_path / "bin"
+    binary.mkdir()
+    (binary / "sleep").write_text('#!/usr/bin/env bash\necho "$1" > "$SLEPT"\n')
+    (binary / "sleep").chmod(0o755)
+    env = dict(os.environ, PATH=f"{binary}:{os.environ['PATH']}", SLEPT=str(tmp_path / "slept"), ARTIFACT="x")
+    final = None
+    for step in _await_steps():
+        match = re.fullmatch(r"steps\.(\w+)\.outcome == 'failure'", step.get("if", "steps.none.outcome == 'failure'"))
+        assert match, step["if"]
+        if "if" in step and outcomes.get(match.group(1)) != "failure":
+            continue
+        if step.get("uses"):
+            tried.append(clock)
+            outcomes[step["id"]] = "success" if ready is not None and clock >= ready else "failure"
+            continue
+        done = subprocess.run(["bash", "-e", "-c", step["run"]], env=env, capture_output=True, text=True)
+        if step.get("name", "").startswith("Wait "):
+            clock += int((tmp_path / "slept").read_text())
+        else:
+            final = done
+    if ready is None:
+        assert len(tried) == len([step for step in _await_steps() if step.get("uses")])
+        assert final.returncode == 1
+        assert "::error" in final.stdout
+    else:
+        assert final is None
+        assert tried[-1] >= ready
+        assert len(tried) == 1 or tried[-2] < ready
 
 
 @pytest.mark.parametrize("collection,floor", [(0, 0), (1, 0), (0, 1), (1, 1)])

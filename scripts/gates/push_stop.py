@@ -213,7 +213,7 @@ class PushStop:
             elif tree.unpushed and push(tree, branch := target(tree, task), self.left() + RESERVE_S - FLOOR_S):
                 self.record(store, ledger, who, tree, branch)
             owed = owed or tree.dirty or (tree.unpushed and not self.on_origin(tree))
-            owed = owed or (doc and tree.own and not own_pull(tree, task) and self.unrecorded(store, doc, who))
+            owed = owed or (doc and tree.own and not own_pull(tree, task) and self.unrecorded(store, doc, who, tree))
         if not owed:
             self.settle(store, who)
             return Decision()
@@ -246,12 +246,32 @@ class PushStop:
             return False
         return waits.dependency(on, task, {row.get("id"): row for row in doc["tasks"]}, None)
 
-    def unrecorded(self, store, doc, who):
+    def unrecorded(self, store, doc, who, tree):
         from scripts.gates.progress import Progress
 
         mark = Progress(store.redis, who.swarm).read(who.name)
-        return mark.outcome == PUSHED and not spoke_since(
-            doc.get("_meta", {}).get("events", []), who.name, mark.outcome_at
+        return (
+            mark.outcome == PUSHED
+            and not spoke_since(doc.get("_meta", {}).get("events", []), who.name, mark.outcome_at)
+            and not self._preflight(store, who, tree)
+        )
+
+    def _preflight(self, store, who, tree):
+        from scripts.swarm import idle, mutation_wait
+
+        held = idle.wait(store.redis, who.swarm, who.name)
+        if not held or held["until"] <= self.now():
+            return False
+        on = held.get("on") or {}
+        if on.get("kind") != "mutation" or on.get("task") != who.task:
+            return False
+        run = mutation_wait.RUN_URL.fullmatch(on["target"])
+        remote = GITHUB_RE.search(git(tree.path, "remote", "get-url", "origin").stdout.strip())
+        if not run or not remote:
+            return False
+        return (
+            run[1].lower() == f"{remote[1]}/{remote[2]}".lower()
+            and on.get("head") == git(tree.path, "rev-parse", "HEAD").stdout.strip()
         )
 
     def record(self, store, ledger, who, tree, branch):

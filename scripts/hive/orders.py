@@ -77,7 +77,7 @@ POD_SECONDS = 45
 
 def build_opening(request: SpawnRequest) -> str:
     """Built where the ledger is, naming the work folder below whichever home the hive runs it in."""
-    config, task = request.config, {**request.task, "harness": "claude"}
+    config, task = request.config, {"harness": "claude", **request.task}
     if task.get("workspace"):
         task["workspace"] = ledger_workspace.portable(config.slug, task["id"])
     role = config.lanes.get(request.lane, {}).get("role")
@@ -154,6 +154,19 @@ class Orders:
 
     def forget(self, hive: str, order_id: str) -> None:
         self.redis.delete(self.command_receipt(hive, order_id))
+
+
+def resolved_master_login(order: LaunchOrder, account: str, placement: str, decision: dict) -> bool:
+    validation = decision.get("validation", {})
+    return (
+        order.route_kind == "master-login"
+        and order.lane == MASTER
+        and order.harness == "claude"
+        and bool(account)
+        and placement in ("forced", "fallback")
+        and isinstance(validation, dict)
+        and validation.get("account") == account
+    )
 
 
 class Consumer:
@@ -349,7 +362,12 @@ class Consumer:
         config = self.store.config(order.slug)
         chosen = {**config.lanes.get(order.lane, {}), "agent": order.harness, "role": order.profile}
         config = replace(config, repo=task.get(ORIGIN) or config.repo, lanes={**config.lanes, order.lane: chosen})
-        task = {**task, "route_kind": order.route_kind, "controller_epoch": order.epoch}
+        task = {
+            **task,
+            "route_kind": order.route_kind,
+            "controller_epoch": order.epoch,
+            "admitted_execution_id": agent.execution_id,
+        }
         task["launch_assignment"] = {
             "profile": order.profile,
             "harness": order.harness,
@@ -374,13 +392,17 @@ class Consumer:
         live = replace(agent, runtime_target=target, pane_id=placed.pane_id)
         if order.expires_at <= lease.now_ms(self.store):
             return self._stop(live, "expired")
-        if (placed.harness, placed.profile, placed.account) != (order.harness, order.profile, order.slot):
+        resolved = resolved_master_login(order, placed.account, placed.placement, placed.profile_decision)
+        if (placed.harness, placed.profile) != (order.harness, order.profile) or (
+            placed.account != order.slot and not resolved
+        ):
             return self._stop(live, "identity")
         try:
             lease.require_epoch(self.store, order.slug, order.epoch)
         except SwarmError:
             return self._stop(live, "refused")
         execution = {
+            **({"account": placed.account, "placement": placed.placement} if resolved else {}),
             "pane_id": placed.pane_id,
             "model": placed.model,
             "effort": placed.effort,

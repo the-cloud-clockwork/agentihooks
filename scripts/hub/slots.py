@@ -3,10 +3,14 @@
 import json
 import sys
 from collections.abc import Callable
+from typing import TYPE_CHECKING
 
 from scripts.events.bus import Bus
 from scripts.events.subjects import SLOTS
 from scripts.hive import account_slots, presence
+
+if TYPE_CHECKING:
+    from scripts.hub.admission import Admission
 
 BUCKETS = ("account-slots", "hive-slot-accounts")
 QUEUE = "hub-slots"
@@ -17,13 +21,16 @@ OPERATIONS = {
 }
 
 
-def _answer(bus: Bus, subject: str, data: bytes, clock: Callable[[], int]):
+def _answer(bus: Bus, subject: str, data: bytes, clock: Callable[[], int], admitter: "Admission | None"):
+    from scripts.hub import admission
+
     parts = subject.split(".")
     if len(parts) != 3 or parts[0] != SLOTS:
         raise ValueError(f"not a slot request subject: {subject!r}")
     request = json.loads(data)
     operation = OPERATIONS.get(request.get("op"))
-    if operation is None:
+    admit = request.get("op") in admission.OPERATIONS
+    if operation is None and not admit:
         raise ValueError(f"unknown slot operation {request.get('op')!r}")
     if request["hive"] != parts[2]:
         refusal = (
@@ -31,12 +38,16 @@ def _answer(bus: Bus, subject: str, data: bytes, clock: Callable[[], int]):
         )
         print(f"hub: refused a {request['op']} in swarm {parts[1]}: {refusal}", file=sys.stderr)
         raise PermissionError(refusal)
+    if admit:
+        return getattr(admitter, request["op"])(parts[1], request)
     return operation(account_slots.Slots(bus, request["hive"], lambda: request["report"], clock), request)
 
 
-def handle(bus: Bus, subject: str, data: bytes, clock: Callable[[], int] = presence.now_ms) -> bytes:
+def handle(
+    bus: Bus, subject: str, data: bytes, clock: Callable[[], int] = presence.now_ms, admitter: "Admission | None" = None
+) -> bytes:
     try:
-        answer = {"ok": True, "result": _answer(bus, subject, data, clock)}
+        answer = {"ok": True, "result": _answer(bus, subject, data, clock, admitter)}
     except KeyError as exc:
         answer = {"ok": False, "error": f"slot request is missing {exc.args[0]!r}"}
     except Exception as exc:
@@ -44,7 +55,10 @@ def handle(bus: Bus, subject: str, data: bytes, clock: Callable[[], int] = prese
     return json.dumps(answer).encode()
 
 
-def serve(bus: Bus, clock: Callable[[], int] = presence.now_ms) -> None:
+def serve(bus: Bus, clock: Callable[[], int] = presence.now_ms, admitter: "Admission | None" = None) -> None:
+    from scripts.hub import admission
+
+    admitter = admitter or admission.Admission()
     for bucket in BUCKETS:
         bus.state(bucket)
-    bus.serve(f"{SLOTS}.*.*", QUEUE, lambda subject, data: handle(bus, subject, data, clock))
+    bus.serve(f"{SLOTS}.*.*", QUEUE, lambda subject, data: handle(bus, subject, data, clock, admitter))

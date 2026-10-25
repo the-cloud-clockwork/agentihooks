@@ -1,0 +1,6 @@
+{
+  "scripts/ci_mutation/stats_cache.py:scripts.ci_mutation.stats_cache.x_test_inputs__mutmut_1:9e7125a373aa6b7d03ab377575344730b1de4f882424f6840946030c92a9e5d4": {
+    "reader": "standards_reader",
+    "reason": "records[current][2] (the unresolved list) is read in exactly one place, any(records[name][2] for name in dependencies), which only tests truthiness. The None default stays only for a non-.py file, whose record is never appended to, and bool(None) equals bool([]), so the any() result is identical in every case. No code indexes, iterates or measures this field and records is never serialized."
+  }
+}

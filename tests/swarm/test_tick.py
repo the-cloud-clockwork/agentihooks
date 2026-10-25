@@ -1105,12 +1105,13 @@ def test_pass_work_after_a_launch_counts_toward_the_mean_launch_cost(store, monk
     assert "spent this pass's 20 second launch budget, t2 waits a pass" in actions
 
 
-def test_a_slow_failed_launch_spends_the_budget_too(store, monkeypatch):
-    ledger, runtime = tasks(("t1", "eng"), ("t2", "eng")), FailingFor("t1")
+def test_a_second_slow_failed_launch_spends_the_budget(store, monkeypatch):
+    store.update("sw", max_eng=3)
+    ledger, runtime = tasks(("t1", "eng"), ("t2", "eng"), ("t3", "eng")), FailingFor("t1", "t2")
     _slow_launches(monkeypatch, runtime, 30)
     actions = tick("sw", store, ledger, runtime, now_ms=1_000)
-    assert runtime.tried == ["t1"]
-    assert "spent this pass's 20 second launch budget, t2 waits a pass" in actions
+    assert runtime.tried == ["t1", "t2"]
+    assert "spent this pass's 20 second launch budget, t3 waits a pass" in actions
 
 
 def test_a_spawn_claims_its_task_for_one_lease_and_records_its_seat_at_launch_time(store):

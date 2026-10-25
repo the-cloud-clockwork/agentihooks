@@ -1,0 +1,6 @@
+{
+  "scripts/doctor/ci_speed_read.py:scripts.doctor.ci_speed_read.x\u01c1_Api\u01c1request__mutmut_47:d91e3f55f0b56eb63015aa76082166a5c5f0c0a3ddd2b4db64b8fd333cb853e9": {
+    "reader": "Standards",
+    "reason": "Independent Standards symbol ruling after CI run 40121088069: both empty string and XXXX fail the literal HTTP status regex. A falsey stderr therefore reaches the identical bare re-raise with unchanged error type, request count and output."
+  }
+}
