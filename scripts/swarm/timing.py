@@ -45,7 +45,7 @@ def tick(slug: str) -> Iterator[None]:
 
 
 @contextmanager
-def step(name: str) -> Iterator[None]:
+def step(name: str, report: bool = True) -> Iterator[None]:
     slug = SWARM.get()
     if slug is None:
         yield
@@ -71,7 +71,7 @@ def step(name: str) -> Iterator[None]:
     except BaseException as exc:
         outcome = "error"
         record.update(error=f"{type(exc).__module__}.{type(exc).__qualname__}", raised_at=raised_at(exc))
-        if record_failure := ON_FAILURE.get():
+        if report and (record_failure := ON_FAILURE.get()):
             record_failure(name, exc)
         raise
     finally:
@@ -94,9 +94,18 @@ def keep() -> None:
         before()
 
 
+def named(function: Callable) -> str:
+    return f"{function.__module__}.{function.__qualname__}"
+
+
 def call(function: Callable, *args, **kwargs) -> Any:
     keep()
-    with step(f"{function.__module__}.{function.__qualname__}"):
+    with step(named(function)):
+        return function(*args, **kwargs)
+
+
+def timed(function: Callable, *args, **kwargs) -> Any:
+    with step(named(function), report=False):
         return function(*args, **kwargs)
 
 
