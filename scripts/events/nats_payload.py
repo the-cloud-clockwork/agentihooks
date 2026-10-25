@@ -92,8 +92,7 @@ async def reclaim(
             await js.purge_stream(stream, subject=name)
 
 
-def due(last: datetime.datetime | None) -> datetime.datetime | None:
-    now = datetime.datetime.now(datetime.UTC)
+def due(last: datetime.datetime | None, now: datetime.datetime) -> datetime.datetime | None:
     return now if last is None or now - last >= IDLE else None
 
 
