@@ -328,7 +328,7 @@ def test_lock_rejects_a_companion_off_its_codex_release(locked, change):
     assert str(error.value) == "invalid artifact lock: codex-code-mode-host"
 
 
-def test_lock_rejects_an_extra_tool_without_a_companion(locked):
+def test_lock_rejects_an_extra_tool_with_its_companion_key_removed(locked):
     path, lock, payloads = locked
     del companion(lock, payloads)["companion"]
     path.write_text(json.dumps(lock))
