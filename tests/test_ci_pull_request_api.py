@@ -19,10 +19,14 @@ WORKSPACE = re.compile(r"\$\{?GITHUB_WORKSPACE\}?")
 # These API functions run only in local downloads or steps bound to the App token.
 LOCAL_ONLY = {
     ROOT / "scripts/ci_budget/jobs.py": {"read_page"},
+    ROOT / "scripts/ci_gate_shards.py": {"api"},
     ROOT / "scripts/ci_mutation/reuse.py": {"api"},
     ROOT / "tests/refresh_durations.py": {"_gh", "ci_run_ids", "ci_download"},
 }
-METADATA_ONLY = {ROOT / "scripts/ci_reuse.py": {"paged_reuse_job"}}
+METADATA_ONLY = {
+    ROOT / "scripts/ci_reuse.py": {"paged_reuse_job"},
+    ROOT / "scripts/ci_gate_queue.py": {"watcher"},
+}
 TOKEN = re.compile(
     r"github\s*(\.\s*token|\[\s*['\"]token['\"]\s*\])"
     r"|secrets\s*(\.|\[\s*['\"])\s*(github|gh)(_\w*|\w*(token|pat)(?![a-z]))"

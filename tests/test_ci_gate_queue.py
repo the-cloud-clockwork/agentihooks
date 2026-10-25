@@ -104,7 +104,38 @@ def test_only_the_reviewed_pair_of_event_names_and_canonical_watcher_normalizes(
     workflow = {
         "test.yml": {
             "jobs": {
-                "gate-required": {"name": ci_gate_queue.SUMMARY_NAME, "runs-on": "runner"},
+                "gate-required": {
+                    "name": ci_gate_queue.SUMMARY_NAME,
+                    "runs-on": "runner",
+                    "needs": [
+                        "select",
+                        "split",
+                        "unit",
+                        "unit-lost",
+                        "unit-rerun",
+                        "unit-selected",
+                        "shard-check",
+                        "test-count",
+                        "coverage-ratchet",
+                        "lint",
+                        "docs",
+                        "sonar",
+                        "mutation-plan",
+                        "mutation-stats",
+                        "mutation",
+                        "swarm-image",
+                        "worker-image",
+                        "brain-smoke",
+                        "writer-lock",
+                        "kind-due",
+                        "helm-kind",
+                        "semgrep",
+                        "ledger-load",
+                        "stage-budget",
+                        "reuse",
+                        "queue-fail-fast",
+                    ],
+                },
                 "queue-fail-fast": watcher,
             }
         }
@@ -264,4 +295,63 @@ def test_missing_jobs_timeout_and_an_api_failure_never_claims_success(monkeypatc
         ci_gate_queue, "api", lambda endpoint: (_ for _ in ()).throw(RuntimeError("API unavailable")), raising=False
     )
     with pytest.raises(RuntimeError, match="API unavailable"):
+        ci_gate_queue.watch("owner/repo", "123", "2", [2, 7], "refs/queue", "head")
+
+
+def test_the_early_gate_rejects_a_changed_graded_job_inventory():
+    from pathlib import Path
+
+    import yaml
+
+    workflow = yaml.safe_load((Path(__file__).resolve().parents[1] / ".github/workflows/test.yml").read_text())
+    jobs = workflow["jobs"]
+    jobs["gate-required"]["name"] = ci_gate_queue.SUMMARY_NAME
+    jobs["queue-fail-fast"] = ci_gate_queue.watcher(jobs["gate-required"]["runs-on"])
+    assert ci_gate_queue.normalize({"test.yml": workflow})
+    jobs["gate-required"]["needs"].append("new-required-check")
+    with pytest.raises(ValueError, match="inventory"):
+        ci_gate_queue.normalize({"test.yml": workflow})
+
+
+def test_pending_originals_wait_without_misclassifying_started_recovery():
+    jobs = complete()
+    next(job for job in jobs if job["name"] == "unit (3.12, 7)").update(status="in_progress", conclusion=None)
+    next(job for job in jobs if job["name"] == "unit-lost")["conclusion"] = "success"
+    assert not ci_gate_queue.verify(jobs, [2, 7])
+
+
+def test_a_pending_recovery_matrix_placeholder_waits_for_expansion():
+    jobs = complete()
+    next(job for job in jobs if job["name"] == "unit (3.12, 7)")["conclusion"] = "failure"
+    next(job for job in jobs if job["name"] == "unit-lost")["conclusion"] = "success"
+    next(job for job in jobs if job["name"].startswith("unit rerun")).update(status="queued", conclusion=None)
+    assert not ci_gate_queue.verify(jobs, [2, 7], lost=lambda job: True)
+
+
+def test_main_binds_the_current_queue_attempt_and_exact_split_plan(monkeypatch):
+    observed = []
+    values = {
+        "GITHUB_EVENT_NAME": "merge_group",
+        "GITHUB_REPOSITORY": "owner/repo",
+        "GITHUB_RUN_ID": "123",
+        "GITHUB_RUN_ATTEMPT": "4",
+        "GITHUB_REF": "refs/queue",
+        "GITHUB_SHA": "head",
+        "QUEUE_PLAN": '[{"shard": 2}, {"shard": 7}]',
+    }
+    for key, value in values.items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.setattr(ci_gate_queue, "watch", lambda *args: observed.append(args), raising=False)
+    ci_gate_queue.main()
+    assert observed == [("owner/repo", "123", "4", [2, 7], "refs/queue", "head")]
+    monkeypatch.setenv("GITHUB_EVENT_NAME", "pull_request")
+    with pytest.raises(ValueError, match="merge_group"):
+        ci_gate_queue.main()
+
+
+def test_watch_checks_queue_identity_again_after_every_gate_passed(monkeypatch):
+    snapshots = iter([[[{"ref": "refs/queue", "object": {"sha": "head"}}]], []])
+    monkeypatch.setattr(ci_gate_queue, "api", lambda endpoint: next(snapshots), raising=False)
+    monkeypatch.setattr(ci_gate_queue, "read_jobs", lambda endpoint: complete(), raising=False)
+    with pytest.raises(ValueError):
         ci_gate_queue.watch("owner/repo", "123", "2", [2, 7], "refs/queue", "head")

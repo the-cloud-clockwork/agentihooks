@@ -276,7 +276,10 @@ def _passed(workflow, jobs):
     definitions = workflow["jobs"]
     gate = definitions["gate-required"]
     required = gate["needs"]
-    if not any(job["name"] == gate["name"] and job["conclusion"] == "success" for job in jobs):
+    label = gate["name"]
+    if label == "${{ github.event_name == 'merge_group' && 'Queue gate summary' || 'Gate — Required' }}":
+        label = "Gate — Required"
+    if not any(job["name"] == label and job["conclusion"] == "success" for job in jobs):
         return False
     for name in required:
         label = definitions[name].get("name", name)

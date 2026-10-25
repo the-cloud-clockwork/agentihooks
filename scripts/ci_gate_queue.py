@@ -1,5 +1,12 @@
+import json
+import os
+import time
 from collections.abc import Callable
 from copy import deepcopy
+
+from scripts.ci_budget.jobs import read_jobs
+from scripts.ci_gate_shards import api
+from scripts.ci_queue_fail_fast import logged_loss
 
 GATE_NAME = "${{ github.event_name == 'merge_group' && 'Gate — Required' || 'queue-fail-fast' }}"
 SUMMARY_NAME = "${{ github.event_name == 'merge_group' && 'Queue gate summary' || 'Gate — Required' }}"
@@ -77,6 +84,8 @@ def recovery(groups: dict[str, dict], recovered: set[str]) -> bool:
         skipped = checked(groups.get("unit rerun"), "skipped")
         return classified and skipped
     if "unit rerun" in groups:
+        if groups["unit rerun"]["status"] != "completed":
+            return False
         raise ValueError("Recovery matrix was skipped despite a lost original")
     passed = [checked(groups[name], "success") for name in reruns]
     return classified and recovered == reruns and all(passed)
@@ -158,6 +167,47 @@ def normalize(workflows: dict[str, dict]) -> dict[str, dict]:
         summary, early = jobs.get("gate-required", {}), jobs.get("queue-fail-fast", {})
         if len(dynamic) != 2 or summary.get("name") != SUMMARY_NAME or early != watcher(summary.get("runs-on")):
             raise ValueError("The early queue gate must use the exact reviewed context pair and verifier")
+        expected = REQUIRED | SKIPPED | {"unit", "unit-lost", "unit-rerun", "queue-fail-fast"}
+        if set(summary.get("needs", [])) != expected:
+            raise ValueError("The early queue gate must preserve the reviewed graded inventory")
         summary["name"] = "Gate — Required"
         early["name"] = "queue-fail-fast"
     return normalized
+
+
+def current(repository: str, ref: str, head: str) -> None:
+    pages = api(f"repos/{repository}/git/matching-refs/{ref.removeprefix('refs/')}")
+    heads = [row["object"]["sha"] for page in pages for row in page if row["ref"] == ref]
+    if heads != [head]:
+        raise ValueError("The queue group is no longer current")
+
+
+def watch(repository: str, run: str, attempt: str, shards: list[int], ref: str, head: str) -> None:
+    verify([], shards)
+    seen = {}
+    deadline = time.monotonic() + 1200
+    while time.monotonic() < deadline:
+        current(repository, ref, head)
+        jobs = read_jobs(f"repos/{repository}/actions/runs/{run}/attempts/{attempt}/jobs")
+        if verify(jobs, shards, lost=lambda job: logged_loss(repository, job, seen)):
+            current(repository, ref, head)
+            return
+        time.sleep(5)
+    raise TimeoutError("Queue verification timed out before every expected job completed")
+
+
+def main() -> None:
+    if os.environ["GITHUB_EVENT_NAME"] != "merge_group":
+        raise ValueError("The early queue gate runs only on merge_group")
+    watch(
+        os.environ["GITHUB_REPOSITORY"],
+        os.environ["GITHUB_RUN_ID"],
+        os.environ["GITHUB_RUN_ATTEMPT"],
+        [row["shard"] for row in json.loads(os.environ["QUEUE_PLAN"])],
+        os.environ["GITHUB_REF"],
+        os.environ["GITHUB_SHA"],
+    )
+
+
+if __name__ == "__main__":
+    main()
