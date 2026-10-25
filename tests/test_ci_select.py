@@ -4,7 +4,9 @@ import re
 import shlex
 import subprocess
 import sys
+from datetime import UTC, datetime
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 import yaml
@@ -86,7 +88,7 @@ def test_a_source_change_selects_recorded_runtime_dependents(repo):
     manifest = {
         "units": ["hooks/sample.py::<module>", "hooks/runtime.py::<module>"],
         "tests": {
-            "tests/test_runtime.py::test_deadline": {"units": [0, 1]},
+            "tests/test_runtime.py::TestRuntime::test_deadline": {"units": [0, 1]},
             "tests/test_other.py::test_unrelated": {"units": [1]},
         },
     }
@@ -157,8 +159,11 @@ def test_recorded_dependents_still_use_parallel_selected_legs(repo):
 
 
 def test_main_reads_the_same_recorded_coverage_as_mutation(repo, monkeypatch, tmp_path, capsys):
-    write(repo, {"hooks/sample.py": "VALUE = 2\n", "tests/test_runtime.py": "import os\n"})
-    git(repo, "add", "hooks/sample.py", "tests/test_runtime.py")
+    write(repo, {"tests/test_runtime.py": "import os\n"})
+    git(repo, "add", "tests/test_runtime.py")
+    git(repo, "commit", "-m", "runtime baseline")
+    write(repo, {"hooks/sample.py": "VALUE = 2\n"})
+    git(repo, "add", "hooks/sample.py")
     git(repo, "commit", "-m", "change")
     monkeypatch.setenv("CI_SELECT_REPOSITORY", "owner/repo")
     manifest = {
@@ -167,9 +172,15 @@ def test_main_reads_the_same_recorded_coverage_as_mutation(repo, monkeypatch, tm
     }
     calls = []
 
+    def now(zone):
+        assert zone is UTC
+        return datetime(2026, 10, 25, 12, 0, tzinfo=UTC)
+
+    monkeypatch.setattr(ci_select, "datetime", SimpleNamespace(now=now))
+
     def record(repository, before):
         calls.append(repository)
-        assert before.endswith("Z")
+        assert before == "2026-10-25T12:00:00Z"
         return {"id": 123}, manifest
 
     monkeypatch.setattr(ci_select, "find_record", record)
@@ -189,6 +200,20 @@ def test_a_missing_record_preserves_import_selection(repo, monkeypatch, tmp_path
     output = run_main(repo, monkeypatch, tmp_path, "pull_request")
     assert "scope=selected" in output
     assert "files_1=tests/test_sample.py\n" in output
+
+
+@pytest.mark.parametrize("path", ["scripts/config.json", "docs/notes.md", "other.py"])
+def test_main_does_not_fetch_coverage_for_changes_outside_python_sources(repo, monkeypatch, tmp_path, path):
+    write(repo, {path: "{}"})
+    git(repo, "add", path)
+    git(repo, "commit", "-m", "change")
+    monkeypatch.setenv("CI_SELECT_REPOSITORY", "owner/repo")
+
+    def record(*_):
+        pytest.fail("Coverage lookup is unnecessary for a change outside Python sources")
+
+    monkeypatch.setattr(ci_select, "find_record", record)
+    run_main(repo, monkeypatch, tmp_path, "pull_request")
 
 
 def test_the_workflow_supplies_recorded_coverage_access():
