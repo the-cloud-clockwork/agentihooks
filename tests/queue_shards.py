@@ -32,7 +32,7 @@ def matrix(root: Path, versions: dict[str, dict[str, float]], counts: dict[str, 
         count = counts[version] if counts else 12
         total = sum(seconds for node, seconds in durations.items() if node.split("::", 1)[0] in sizes)
         while True:
-            # Some shard carries at least an even share of the work, so a count whose share alone misses the target fails.
+            # Some shard carries at least an even share, so a share over the target by a second, past float rounding, fails.
             if (
                 not counts
                 and count < MAX_SHARDS

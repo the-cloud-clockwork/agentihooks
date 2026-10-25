@@ -104,31 +104,25 @@ def _assign_work(
     for path in sorted(seconds, key=lambda f: (-max(seconds[f] / workers, serial[f]) - collection[f], f)):
         group = serial_groups[path] if serial_groups is not None else ""
         file = collection_groups[path] if collection_groups is not None else path
-        work = seconds[path]
-        alone = serial[path]
-        cost = collection[path]
-        lightest = 0
-        best = None
-        for i in range(shards):
-            rank = (
+        lightest = min(
+            range(shards),
+            key=lambda i: (
                 max(
-                    (loads[i] + work) / workers,
+                    (loads[i] + seconds[path]) / workers,
                     serial_peaks[i],
-                    serial_loads[i].get(group, 0.0) + alone,
+                    serial_loads[i].get(group, 0.0) + serial[path],
                 )
                 + collection_loads[i]
-                + (cost if file not in collected[i] else 0.0),
+                + (collection[path] if file not in collected[i] else 0.0),
                 loads[i],
-            )
-            if best is None or rank < best:
-                best = rank
-                lightest = i
-        loads[lightest] += work
-        total = serial_loads[lightest].get(group, 0.0) + alone
+            ),
+        )
+        loads[lightest] += seconds[path]
+        total = serial_loads[lightest].get(group, 0.0) + serial[path]
         serial_loads[lightest][group] = total
         serial_peaks[lightest] = max(serial_peaks[lightest], total)
         if file not in collected[lightest]:
-            collection_loads[lightest] += cost
+            collection_loads[lightest] += collection[path]
             collected[lightest].add(file)
         groups[lightest].append(path)
     return groups
