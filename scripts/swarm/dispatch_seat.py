@@ -234,13 +234,13 @@ def _spawn(slug, config, store, runtime, found, now_ms):
             return []
         return [f"dispatcher spawn failed: {failed.error}"]
     store.put_agent(slug, tick.placed_record(record, placed))
-    _follow(store, record)
+    _move_mail_home(store, record)
     _sent(store, slug, found)
     return [f"spawned dispatcher {record.name} for {_count(found)}"]
 
 
-def _follow(store, record):
-    """The seat's open mail moves into the world of the host its new occupant runs on before the occupant reads it."""
+def _move_mail_home(store, record):
+    """The runtime picks the host inside spawn, so this runs just after launch, not a tick pass later."""
     from scripts.inbox import exits
 
     inbox = InboxStore(store.redis)
