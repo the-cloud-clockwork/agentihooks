@@ -550,7 +550,9 @@ def _phased(monkeypatch, steps, end, outcome):
         trace = request.extensions["trace"]
         for name, at in steps:
             trace(f"{name}.started", {"request": request})
-            if at is None:
+            if at == "failed":
+                trace(f"{name}.failed", {"exception": "kept out"})
+            if at in (None, "failed"):
                 break
             now[0] = at
             trace(f"{name}.complete", {"return_value": "kept out"})
@@ -602,7 +604,11 @@ def test_a_failed_status_keeps_its_first_byte_and_no_key_header_or_body_value(mo
 
 @pytest.mark.parametrize(
     ("steps", "phase"),
-    [([], "failed before connect"), ([("connection.connect_tcp", None)], "failed in connect_tcp")],
+    [
+        ([], "failed before connect"),
+        ([("connection.connect_tcp", None)], "failed in connect_tcp"),
+        ([("connection.connect_tcp", "failed")], "failed in connect_tcp"),
+    ],
 )
 def test_a_read_failing_before_its_connection_names_where_it_stopped(monkeypatch, read_clock, steps, phase):
     def refused(request):

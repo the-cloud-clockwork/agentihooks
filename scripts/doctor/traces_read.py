@@ -34,6 +34,7 @@ OBSERVATION_PAGE = 50
 WORKED = {"claimed", "pr", "done"}
 STATE_FILE = "doctor-telemetry.json"
 CACHE_DIR = "doctor-traces"
+elapsed = time.perf_counter
 
 
 @dataclass(frozen=True)
@@ -56,20 +57,57 @@ def client(environ: Mapping[str, str], timeout: float = Budget.request_seconds) 
     def get(path: str, params: dict) -> dict:
         if not all(auth):
             raise RuntimeError("LANGFUSE_PUBLIC_KEY and LANGFUSE_SECRET_KEY are not set")
-        response = send(f"{host}/api/public/{path}", params=params, auth=auth, timeout=timeout)
-        response.raise_for_status()
-        return response.json()
+        timings = _Timings()
+        try:
+            response = send(
+                f"{host}/api/public/{path}", params=params, auth=auth, timeout=timeout, extensions={"trace": timings}
+            )
+            response.raise_for_status()
+            return response.json()
+        except Exception as exc:
+            exc.add_note(timings.summary(path))
+            raise
 
     return get
 
 
-def _through_ingress(url: str, **options) -> httpx.Response:
+class _Timings:
+    """An httpx trace hook keeping only each transport step's seconds since the request started; the values
+    httpcore passes it (headers, keys, bodies) are never kept."""
+
+    MARKS = (("connect", "connect_tcp"), ("TLS", "start_tls"), ("first byte", "receive_response_headers"))
+
+    def __init__(self):
+        self.started_at, self.start = registry.read_at(), elapsed()
+        self.marks: dict[str, float] = {}
+        self.phase = "before connect"
+
+    def __call__(self, name: str, info: dict) -> None:
+        step, edge = name.split(".")[-2:]
+        if edge == "started":
+            self.phase = f"in {step}"
+        elif edge == "complete":
+            self.marks[step] = elapsed() - self.start
+            self.phase = f"after {step}"
+
+    def summary(self, path: str) -> str:
+        reached = ", ".join(
+            f"{label} {self.marks[step]:.3f} s" if step in self.marks else f"{label} not reached"
+            for label, step in self.MARKS
+        )
+        return (
+            f"request {path} started at {self.started_at}, {reached}, "
+            f"total {elapsed() - self.start:.3f} s, failed {self.phase}"
+        )
+
+
+def _through_ingress(url: str, extensions: dict, **options) -> httpx.Response:
     public = httpx.URL(url)
     with httpx.Client() as session:
         return session.get(
             public.copy_with(host=INGRESS),
             headers={"Host": public.host},
-            extensions={"sni_hostname": public.host},
+            extensions={**extensions, "sni_hostname": public.host},
             **options,
         )
 
