@@ -1,4 +1,4 @@
 {
   "guard-except-returns-allow": 2,
-  "hook-shell-true": 0
+  "hook-shell-true": 1
 }

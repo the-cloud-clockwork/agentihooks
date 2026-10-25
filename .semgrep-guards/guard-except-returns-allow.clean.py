@@ -1,4 +1,4 @@
-from hooks.common import BlockAction
+from hooks.hook_manager import BlockAction
 
 
 def check(payload):
@@ -8,6 +8,14 @@ def check(payload):
         raise BlockAction("guard could not read its verdict") from exc
     if verdict:
         raise BlockAction(verdict)
+
+
+def check_early(payload):
+    try:
+        return payload["skip"]
+    except KeyError:
+        pass
+    raise BlockAction("no skip")
 
 
 def advisory(payload, log):

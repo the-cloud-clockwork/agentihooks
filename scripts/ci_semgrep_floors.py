@@ -5,7 +5,8 @@ import sys
 from collections import Counter
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
+# The workflow runs the base branch copy of this script from outside the checkout, so the tree is the working directory.
+ROOT = Path.cwd()
 RULES = ROOT / ".semgrep-guards"
 FLOORS = RULES / "floors.json"
 TARGET = "hooks"
@@ -13,6 +14,10 @@ TARGET = "hooks"
 
 def _semgrep(*args: str) -> subprocess.CompletedProcess:
     return subprocess.run(["semgrep", "scan", "--metrics", "off", *args], capture_output=True, text=True, cwd=ROOT)
+
+
+def _git(*args: str) -> subprocess.CompletedProcess:
+    return subprocess.run(["git", *args], capture_output=True, text=True, cwd=ROOT)
 
 
 def rules() -> list[Path]:
@@ -55,23 +60,39 @@ def fixture_errors(rule: Path) -> list[str]:
     return errors
 
 
+def at_base(base: str, path: Path) -> str | None:
+    if _git("rev-parse", "--verify", "--quiet", f"{base}^{{commit}}").returncode:
+        raise SystemExit(f"base {base} is not a commit")
+    shown = _git("show", f"{base}:{path.relative_to(ROOT).as_posix()}")
+    return shown.stdout if shown.returncode == 0 else None
+
+
 def base_floors(base: str) -> dict[str, int]:
-    shown = subprocess.run(
-        ["git", "show", f"{base}:{FLOORS.relative_to(ROOT)}"], capture_output=True, text=True, cwd=ROOT
-    )
-    return json.loads(shown.stdout) if shown.returncode == 0 else {}
+    text = at_base(base, FLOORS)
+    return {} if text is None else json.loads(text)
 
 
-def floor_errors(floors: dict[str, int], base: dict[str, int], rule_files: list[Path]) -> list[str]:
-    errors = [f"{name}: floor without a rule file" for name in sorted(set(floors) - {r.stem for r in rule_files})]
+def changed_rules(base: str, rule_files: list[Path]) -> set[str]:
+    return {rule.stem for rule in rule_files if at_base(base, rule) not in (None, rule.read_text())}
+
+
+def floor_errors(floors: dict[str, int], base: dict[str, int], rule_files: list[Path], changed: set[str]) -> list[str]:
+    names = {rule.stem for rule in rule_files}
+    errors = [f"{name}: floor without a rule file" for name in sorted(set(floors) - names)]
+    errors += [f"{name}: guard rule removed since the base; floors only shrink" for name in sorted(set(base) - names)]
     found = findings(rule_files, TARGET)
-    measured = tally(rule_files, found)
-    for name, count in measured.items():
+    for name, count in tally(rule_files, found).items():
         if name not in floors:
             errors.append(f"{name}: no floor; run python -m scripts.ci_semgrep_floors record")
             continue
-        if floors[name] > base.get(name, floors[name]):
-            errors.append(f"{name}: floor rose from {base[name]} to {floors[name]}; floors only shrink")
+        was = base.get(name, floors[name])
+        if floors[name] > was and name not in changed:
+            errors.append(f"{name}: floor rose from {was} to {floors[name]}; floors only shrink")
+        if floors[name] < was and name in changed:
+            errors.append(
+                f"{name}: floor dropped from {was} to {floors[name]} with a rule change; "
+                "change the rule and lower its floor in separate pull requests"
+            )
         if count > floors[name]:
             sites = [f"  {f['path']}:{f['start']['line']}" for f in found if _rule_id(f) == name]
             errors.append(f"{name}: {count} findings above the floor of {floors[name]}:\n" + "\n".join(sites))
@@ -90,7 +111,7 @@ def check(base: str) -> int:
         return 1
     floors = json.loads(FLOORS.read_text()) if FLOORS.is_file() else {}
     errors = [error for rule in rule_files for error in fixture_errors(rule)]
-    errors += floor_errors(floors, base_floors(base), rule_files)
+    errors += floor_errors(floors, base_floors(base), rule_files, changed_rules(base, rule_files))
     for error in errors:
         print(error)
     if not errors:

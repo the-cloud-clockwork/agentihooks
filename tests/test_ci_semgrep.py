@@ -76,7 +76,12 @@ def test_charts_grade_the_guard_rules_against_the_base_floors():
     assert guard["env"] == {"BASE": "${{ inputs.base }}"}
     assert guard["run"].splitlines() == [
         'git fetch --no-tags --depth=1 origin "${BASE#origin/}"',
-        "python -m scripts.ci_semgrep_floors check --base FETCH_HEAD",
+        "grader=scripts/ci_semgrep_floors.py",
+        "if git cat-file -e FETCH_HEAD:scripts/ci_semgrep_floors.py; then",
+        '  grader="$RUNNER_TEMP/ci_semgrep_floors.py"',
+        '  git show FETCH_HEAD:scripts/ci_semgrep_floors.py > "$grader"',
+        "fi",
+        'python "$grader" check --base FETCH_HEAD',
     ]
     assert steps.index(install) < steps.index(guard) < len(steps) - 1
 

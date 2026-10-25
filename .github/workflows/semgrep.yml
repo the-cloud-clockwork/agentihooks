@@ -50,7 +50,12 @@ jobs:
           BASE: ${{ inputs.base }}
         run: |
           git fetch --no-tags --depth=1 origin "${BASE#origin/}"
-          python -m scripts.ci_semgrep_floors check --base FETCH_HEAD
+          grader=scripts/ci_semgrep_floors.py
+          if git cat-file -e FETCH_HEAD:scripts/ci_semgrep_floors.py; then
+            grader="$RUNNER_TEMP/ci_semgrep_floors.py"
+            git show FETCH_HEAD:scripts/ci_semgrep_floors.py > "$grader"
+          fi
+          python "$grader" check --base FETCH_HEAD
 
       # The timer guard reads source only, so a CronJob a chart template renders is checked on the rendered manifests.
       - name: Charts render no CronJob outside the scheduler

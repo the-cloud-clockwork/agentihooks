@@ -6,7 +6,18 @@ rules:
       A hook runs a command through a shell, so quoting in a tool input can change what runs. Pass an argument list
       to subprocess without shell=True.
     pattern-either:
-      - pattern: subprocess.$CALL(..., shell=True, ...)
+      - patterns:
+          - pattern: subprocess.$CALL(..., shell=$SHELL, ...)
+          - pattern-not: subprocess.$CALL(..., shell=False, ...)
+      - patterns:
+          - pattern-either:
+              - pattern: subprocess.$CALL([$SH, "-c", ...], ...)
+              - pattern: subprocess.$CALL(($SH, "-c", ...), ...)
+          - metavariable-regex:
+              metavariable: $SH
+              regex: ^["'](/usr)?(/bin/)?(ba|z|da|k)?sh["']$
+      - pattern: subprocess.getoutput(...)
+      - pattern: subprocess.getstatusoutput(...)
       - pattern: os.system(...)
       - pattern: os.popen(...)
       - pattern: asyncio.create_subprocess_shell(...)

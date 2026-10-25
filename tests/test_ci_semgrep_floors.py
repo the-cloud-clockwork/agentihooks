@@ -51,7 +51,13 @@ def test_every_shipped_rule_has_a_red_fixture_a_clean_file_and_a_floor():
         assert "ruleid" not in rule.with_suffix(".clean.py").read_text()
 
 
-def test_semgrep_runs_the_scan_subcommand_without_metrics_in_the_repo(monkeypatch):
+def test_the_tree_is_the_working_directory_of_the_script():
+    assert floors.RULES == floors.ROOT / ".semgrep-guards"
+    assert floors.FLOORS == floors.RULES / "floors.json"
+    assert floors.TARGET == "hooks"
+
+
+def test_semgrep_runs_the_scan_subcommand_without_metrics_in_the_tree(monkeypatch):
     calls = []
     monkeypatch.setattr(subprocess, "run", lambda *a, **k: calls.append((a, k)) or _done())
     floors._semgrep("--json", "hooks")
@@ -61,6 +67,13 @@ def test_semgrep_runs_the_scan_subcommand_without_metrics_in_the_repo(monkeypatc
             {"capture_output": True, "text": True, "cwd": floors.ROOT},
         )
     ]
+
+
+def test_git_runs_in_the_tree(monkeypatch):
+    calls = []
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: calls.append((a, k)) or _done())
+    floors._git("show", "x")
+    assert calls == [((["git", "show", "x"],), {"capture_output": True, "text": True, "cwd": floors.ROOT})]
 
 
 def test_rules_lists_only_rule_files_in_name_order(rules_dir):
@@ -146,27 +159,61 @@ def test_a_rule_that_holds_on_both_fixtures_has_no_errors(rules_dir, monkeypatch
     assert floors.fixture_errors(_rule(rules_dir, "a")) == []
 
 
-def test_base_floors_read_the_floor_file_at_the_base(rules_dir, monkeypatch):
+def _git_at(monkeypatch, verified=0, shown=_done(stdout="text")):
     calls = []
-    monkeypatch.setattr(subprocess, "run", lambda *a, **k: calls.append((a, k)) or _done(stdout='{"a": 2}'))
-    assert floors.base_floors("FETCH_HEAD") == {"a": 2}
+    monkeypatch.setattr(
+        floors, "_git", lambda *a: calls.append(a) or (_done(verified) if a[0] == "rev-parse" else shown)
+    )
+    return calls
+
+
+def test_at_base_reads_the_file_at_a_verified_base_commit(rules_dir, monkeypatch):
+    calls = _git_at(monkeypatch)
+    assert floors.at_base("FETCH_HEAD", rules_dir / "floors.json") == "text"
     assert calls == [
-        (
-            (["git", "show", "FETCH_HEAD:.semgrep-guards/floors.json"],),
-            {"capture_output": True, "text": True, "cwd": rules_dir.parent},
-        )
+        ("rev-parse", "--verify", "--quiet", "FETCH_HEAD^{commit}"),
+        ("show", "FETCH_HEAD:.semgrep-guards/floors.json"),
     ]
 
 
+def test_at_base_is_none_when_the_base_lacks_the_file(rules_dir, monkeypatch):
+    _git_at(monkeypatch, shown=_done(128, "text"))
+    assert floors.at_base("FETCH_HEAD", rules_dir / "floors.json") is None
+
+
+def test_a_base_that_is_not_a_commit_is_red(rules_dir, monkeypatch):
+    calls = _git_at(monkeypatch, verified=1)
+    with pytest.raises(SystemExit) as raised:
+        floors.at_base("nope", rules_dir / "floors.json")
+    assert str(raised.value) == "base nope is not a commit"
+    assert len(calls) == 1
+
+
+def test_base_floors_parse_the_floor_file_at_the_base(rules_dir, monkeypatch):
+    paths = []
+    monkeypatch.setattr(floors, "at_base", lambda base, path: paths.append((base, path)) or '{"a": 2}')
+    assert floors.base_floors("FETCH_HEAD") == {"a": 2}
+    assert paths == [("FETCH_HEAD", rules_dir / "floors.json")]
+
+
 def test_base_floors_are_empty_when_the_base_has_no_floor_file(rules_dir, monkeypatch):
-    monkeypatch.setattr(subprocess, "run", lambda *a, **k: _done(128, '{"a": 2}'))
+    monkeypatch.setattr(floors, "at_base", lambda base, path: None)
     assert floors.base_floors("FETCH_HEAD") == {}
 
 
-def _floor_errors(monkeypatch, rule_files, found, head, base):
+def test_changed_rules_are_rules_whose_text_differs_from_the_base(rules_dir, monkeypatch):
+    rule_files = [_rule(rules_dir, "same"), _rule(rules_dir, "edited"), _rule(rules_dir, "new")]
+    at = {"same": "rules: []\n", "edited": "rules: [old]\n", "new": None}
+    bases = []
+    monkeypatch.setattr(floors, "at_base", lambda base, path: bases.append(base) or at[path.stem])
+    assert floors.changed_rules("FETCH_HEAD", rule_files) == {"edited"}
+    assert bases == ["FETCH_HEAD"] * 3
+
+
+def _floor_errors(monkeypatch, rule_files, found, head, base, changed=frozenset()):
     targets = []
     monkeypatch.setattr(floors, "findings", lambda files, target: targets.append((files, target)) or found)
-    errors = floors.floor_errors(head, base, rule_files)
+    errors = floors.floor_errors(head, base, rule_files, set(changed))
     assert targets == [(rule_files, "hooks")]
     return errors
 
@@ -192,10 +239,26 @@ def test_findings_under_the_floor_ask_for_a_new_record(rules_dir, monkeypatch):
     assert errors == ["a: 0 findings under the floor of 1; run python -m scripts.ci_semgrep_floors record"]
 
 
+def test_a_floor_lowered_with_an_unchanged_rule_is_accepted(rules_dir, monkeypatch):
+    assert _floor_errors(monkeypatch, [_rule(rules_dir, "a")], [_finding("a")], {"a": 1}, {"a": 2}) == []
+
+
 def test_a_floor_raised_against_the_base_is_red(rules_dir, monkeypatch):
     found = [_finding("a"), _finding("a")]
     errors = _floor_errors(monkeypatch, [_rule(rules_dir, "a")], found, {"a": 2}, {"a": 1})
     assert errors == ["a: floor rose from 1 to 2; floors only shrink"]
+
+
+def test_a_rule_change_may_raise_its_own_floor(rules_dir, monkeypatch):
+    found = [_finding("a"), _finding("a")]
+    assert _floor_errors(monkeypatch, [_rule(rules_dir, "a")], found, {"a": 2}, {"a": 1}, {"a"}) == []
+
+
+def test_a_floor_dropped_with_a_rule_change_is_red(rules_dir, monkeypatch):
+    errors = _floor_errors(monkeypatch, [_rule(rules_dir, "a")], [_finding("a")], {"a": 1}, {"a": 2}, {"a"})
+    assert errors == [
+        "a: floor dropped from 2 to 1 with a rule change; change the rule and lower its floor in separate pull requests"
+    ]
 
 
 def test_a_rule_without_a_floor_is_red(rules_dir, monkeypatch):
@@ -217,30 +280,48 @@ def test_a_floor_without_a_rule_file_is_red(rules_dir, monkeypatch):
     assert errors == ["gone: floor without a rule file", "old: floor without a rule file"]
 
 
+def test_a_rule_removed_since_the_base_is_red(rules_dir, monkeypatch):
+    errors = _floor_errors(monkeypatch, [_rule(rules_dir, "a")], [], {"a": 0}, {"a": 0, "gone": 0, "old": 1})
+    assert errors == [
+        "gone: guard rule removed since the base; floors only shrink",
+        "old: guard rule removed since the base; floors only shrink",
+    ]
+
+
 def test_check_without_rule_files_is_red(rules_dir, capfd):
     assert floors.check("FETCH_HEAD") == 1
     assert capfd.readouterr().out == "no rule files in .semgrep-guards\n"
+
+
+def _check_mocks(monkeypatch, fixture=lambda rule: [], errors=lambda head, base, files, changed: []):
+    seen = []
+    monkeypatch.setattr(floors, "fixture_errors", fixture)
+    monkeypatch.setattr(floors, "base_floors", lambda base: seen.append(("floors", base)) or {"a": 4})
+    monkeypatch.setattr(
+        floors, "changed_rules", lambda base, files: seen.append(("changed", base, len(files))) or {"a"}
+    )
+    monkeypatch.setattr(floors, "floor_errors", errors)
+    return seen
 
 
 def test_check_prints_every_fixture_and_floor_error(rules_dir, monkeypatch, capfd):
     _rule(rules_dir, "a")
     _rule(rules_dir, "b")
     rules_dir.joinpath("floors.json").write_text('{"a": 3}')
-    bases = []
-    monkeypatch.setattr(floors, "fixture_errors", lambda rule: [f"fixture {rule.stem}"])
-    monkeypatch.setattr(floors, "base_floors", lambda base: bases.append(base) or {"a": 4})
-    monkeypatch.setattr(floors, "floor_errors", lambda head, base, files: [f"floor {head} {base} {len(files)}"])
+    seen = _check_mocks(
+        monkeypatch,
+        fixture=lambda rule: [f"fixture {rule.stem}"],
+        errors=lambda head, base, files, changed: [f"floor {head} {base} {len(files)} {sorted(changed)}"],
+    )
     assert floors.check("FETCH_HEAD") == 1
-    assert bases == ["FETCH_HEAD"]
-    assert capfd.readouterr().out == "fixture a\nfixture b\nfloor {'a': 3} {'a': 4} 2\n"
+    assert seen == [("floors", "FETCH_HEAD"), ("changed", "FETCH_HEAD", 2)]
+    assert capfd.readouterr().out == "fixture a\nfixture b\nfloor {'a': 3} {'a': 4} 2 ['a']\n"
 
 
 def test_check_without_a_floor_file_grades_against_no_floors(rules_dir, monkeypatch):
     heads = []
     _rule(rules_dir, "a")
-    monkeypatch.setattr(floors, "fixture_errors", lambda rule: [])
-    monkeypatch.setattr(floors, "base_floors", lambda base: {})
-    monkeypatch.setattr(floors, "floor_errors", lambda head, base, files: heads.append(head) or ["x"])
+    _check_mocks(monkeypatch, errors=lambda head, base, files, changed: heads.append(head) or ["x"])
     assert floors.check("FETCH_HEAD") == 1
     assert heads == [{}]
 
@@ -248,9 +329,7 @@ def test_check_without_a_floor_file_grades_against_no_floors(rules_dir, monkeypa
 def test_check_reports_the_floors_when_every_rule_holds(rules_dir, monkeypatch, capfd):
     _rule(rules_dir, "a")
     rules_dir.joinpath("floors.json").write_text('{"a": 2}')
-    monkeypatch.setattr(floors, "fixture_errors", lambda rule: [])
-    monkeypatch.setattr(floors, "base_floors", lambda base: {"a": 2})
-    monkeypatch.setattr(floors, "floor_errors", lambda head, base, files: [])
+    _check_mocks(monkeypatch)
     assert floors.check("FETCH_HEAD") == 0
     assert capfd.readouterr().out == '1 guard rules hold on their fixtures and at their floors: {"a": 2}\n'
 
