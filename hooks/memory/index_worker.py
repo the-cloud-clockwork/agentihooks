@@ -44,13 +44,25 @@ QUEUE = (
 )
 DROP_WORK = f"DELETE FROM embedding_work WHERE {INDEX_KEY} AND chunk_id = ?"
 DROP_VECTOR = f"DELETE FROM chunk_vector WHERE {INDEX_KEY} AND chunk_id = ?"
-PENDING = (
-    "SELECT chunk_id, session_uid, chunker_version, content_hash FROM embedding_work "
-    f"WHERE {INDEX_KEY} ORDER BY queued_at, chunk_id LIMIT ?"
+MATCHING_CHUNK = (
+    "SELECT 1 FROM search_chunk s WHERE s.access_domain = embedding_work.access_domain "
+    "AND s.session_uid = embedding_work.session_uid AND s.chunker_version = embedding_work.chunker_version "
+    "AND s.chunk_id = embedding_work.chunk_id AND json_extract(s.record, '$.content_hash') = embedding_work.content_hash"
 )
-RECORD = (
-    "SELECT record FROM search_chunk WHERE access_domain = ? AND session_uid = ? AND chunker_version = ? "
-    "AND chunk_id = ?"
+PURGE = f"DELETE FROM embedding_work WHERE {INDEX_KEY} AND NOT EXISTS ({MATCHING_CHUNK})"
+PENDING = (
+    "SELECT s.record FROM embedding_work JOIN search_chunk s ON s.access_domain = embedding_work.access_domain "
+    "AND s.session_uid = embedding_work.session_uid AND s.chunker_version = embedding_work.chunker_version "
+    "AND s.chunk_id = embedding_work.chunk_id "
+    "WHERE embedding_work.access_domain = ? AND embedding_work.index_generation = ? "
+    "ORDER BY embedding_work.queued_at, embedding_work.chunk_id LIMIT ?"
+)
+UNCOVERED = (
+    "SELECT COUNT(*) FROM search_chunk s WHERE s.access_domain = ? AND EXISTS (SELECT 1 FROM chunk_vector v "
+    "WHERE v.access_domain = s.access_domain AND v.index_generation = ? AND v.session_uid = s.session_uid "
+    "AND v.chunker_version = s.chunker_version) AND NOT EXISTS (SELECT 1 FROM chunk_vector v "
+    "WHERE v.access_domain = s.access_domain AND v.index_generation = ? AND v.chunk_id = s.chunk_id "
+    "AND v.content_hash = json_extract(s.record, '$.content_hash'))"
 )
 DEFER = f"UPDATE embedding_work SET attempts = attempts + 1, last_error = ? WHERE {INDEX_KEY} AND chunk_id = ?"
 TAKE = f"DELETE FROM embedding_work WHERE {INDEX_KEY} AND chunk_id = ? AND content_hash = ?"
@@ -68,7 +80,7 @@ BAD_LIMITS = "embedding limits need a positive batch size, batch character bound
 GENERATION_CONFLICT = "this index generation is bound to another embedding model or dimension"
 UNKNOWN_INDEX = "no index generation is registered under this name"
 MODEL_MISMATCH = "the embedder's model differs from the model bound to this index generation; nothing was written"
-INCOMPLETE = "only an index generation with no pending work can become active"
+INCOMPLETE = "only an index generation with no pending work and every tracked session embedded can become active"
 STALE_CUTOVER = "the index cutover revision is stale; nothing changed"
 
 
@@ -110,9 +122,10 @@ class IndexWorker:
     def register(self, domain: str, generation: str, model: EmbeddingModel) -> dict:
         embeddings.require(model)
         with self.catalog._transaction():
-            if self.catalog.db.execute(GENERATION, (domain, generation)).fetchone() is None:
+            row = self.catalog.db.execute(GENERATION, (domain, generation)).fetchone()
+            if row is None:
                 self.catalog.db.execute(INSERT_GENERATION, (domain, generation, model.model, model.dimension))
-            elif self._generation(domain, generation)[0] != model:
+            elif EmbeddingModel(row[0], row[1]) != model:
                 raise Conflict(GENERATION_CONFLICT)
         return {"index_generation": generation, "model": model.model, "dimension": model.dimension}
 
@@ -124,10 +137,10 @@ class IndexWorker:
         return dict(self.catalog.db.execute(query, target.key()).fetchall())
 
     def enqueue(self, grant: Grant, target: Target, now: float) -> dict:
-        chunks = self.chunks.chunks(grant, target.access_domain, target.session_uid, target.chunker_version)
-        current = {chunk["chunk_id"]: chunk["content_hash"] for chunk in chunks}
         index = (target.access_domain, target.index_generation)
         with self.catalog._transaction():
+            chunks = self.chunks.chunks(grant, target.access_domain, target.session_uid, target.chunker_version)
+            current = {chunk["chunk_id"]: chunk["content_hash"] for chunk in chunks}
             self._generation(*index)
             done, queued = self._hashes(VECTOR_HASHES, target), self._hashes(WORK_HASHES, target)
             dropped = sorted((done.keys() | queued.keys()) - current.keys())
@@ -142,18 +155,15 @@ class IndexWorker:
         return {"queued": fresh, "embedded": embedded, "dropped": dropped}
 
     def _batch(self, domain: str, generation: str) -> list[dict]:
+        self.catalog.db.execute(PURGE, (domain, generation))
         rows = self.catalog.db.execute(PENDING, (domain, generation, self.limits.batch_size)).fetchall()
         batch, chars = [], 0
-        for chunk_id, session_uid, version, content_hash in rows:
-            found = self.catalog.db.execute(RECORD, (domain, session_uid, version, chunk_id)).fetchone()
-            record = json.loads(found[0]) if found else None
-            if record is None or record["content_hash"] != content_hash:
-                self.catalog.db.execute(DROP_WORK, (domain, generation, chunk_id))
-                continue
+        for (stored,) in rows:
+            record = json.loads(stored)
             if batch and chars + len(record["preview"]) > self.limits.batch_chars:
                 break
             chars += len(record["preview"])
-            batch.append({**record, "chunk_id": chunk_id})
+            batch.append(record)
         return batch
 
     def _commit(self, index: tuple[str, str], model: EmbeddingModel, batch: list[dict], vectors: list) -> list[str]:
@@ -222,7 +232,8 @@ class IndexWorker:
     def activate(self, domain: str, generation: str, revision: int) -> int:
         with self.catalog._transaction():
             self._generation(domain, generation)
-            if self.catalog.db.execute(COUNT_PENDING, (domain, generation)).fetchone()[0]:
+            pending = self.catalog.db.execute(COUNT_PENDING, (domain, generation)).fetchone()[0]
+            if pending or self.catalog.db.execute(UNCOVERED, (domain, generation, generation)).fetchone()[0]:
                 raise Conflict(INCOMPLETE)
             if self.active(domain)["revision"] != revision:
                 raise Conflict(STALE_CUTOVER)

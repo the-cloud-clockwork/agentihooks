@@ -27,6 +27,7 @@
       ]
     },
     "appended_provider_texts": 2,
+    "authoritative_state_unchanged_by_drain": true,
     "backlog_before_drain": {
       "embedding_backlog_age_seconds": 10.0,
       "pending": 6
@@ -57,7 +58,8 @@
       "chunk-b7ca93d4c2c36c01e18454fef542010fbf8c26fd",
       "chunk-cd0623188cc1c83a86fdd91209b93f978de66bb8",
       "chunk-d3298d2bea9fef039b531a60ec8003c5f2845de9"
-    ]
+    ],
+    "vectors_match_provider_output": true
   },
   "state": "passed"
 }

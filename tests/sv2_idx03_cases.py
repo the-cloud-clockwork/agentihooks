@@ -91,8 +91,13 @@ def positive(inputs, root):
     first = index.enqueue(clock["queued"])
     queued_age = index.worker.pending(index.domain, index.generation, clock["outage"])
     embedder = FixtureEmbedder(model(inputs))
+    authoritative = index.session.protected()
     drained = index.drain(embedder, clock["outage"])
+    untouched = index.session.protected() == authoritative
     before = index.vectors()
+    previews = {chunk["chunk_id"]: chunk["preview"] for chunk in index.session.chunks("current")}
+    exact = all(item["vector"] == vector(previews[item["chunk_id"]], item["dimension"]) for item in before)
+    assert untouched and exact
     first_calls = embedder.calls
     index.session.append(appended)
     grown = index.session.build()
@@ -116,6 +121,8 @@ def positive(inputs, root):
         "first_drain": {key: drained[key] for key in ("state", "pending", BACKLOG)},
         "first_drain_embedded": len(drained["embedded"]),
         "first_drain_provider_calls": first_calls,
+        "authoritative_state_unchanged_by_drain": untouched,
+        "vectors_match_provider_output": exact,
         "appended_build_inserted": sorted(grown["inserted"]),
         "appended_enqueue": {"queued": sorted(second["queued"]), "embedded": second["embedded"]},
         "appended_drain": {key: appended_drain[key] for key in ("state", "pending", BACKLOG)},

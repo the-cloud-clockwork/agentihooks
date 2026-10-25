@@ -8,13 +8,14 @@
   "package_complete": false,
   "evidence_class": "mocked: an in-process caller, a SQLite catalog file, a local content addressed object folder and a deterministic hash embedder stand in for the session service, the central database, the archive bucket and the embedding provider; no model, HTTP server or Pod runs",
   "interfaces": [
-    "hooks.memory.embeddings.EmbeddingModel names a model identity and dimension; hooks.memory.embeddings.Embedder is the provider contract, embed(texts) returning one vector per text, raising TransientEmbeddingError for a rate limit or outage",
+    "hooks.memory.embeddings.EmbeddingModel names a model identity and dimension; hooks.memory.embeddings.Embedder is the provider contract, embed(texts) returning one vector per text, raising TransientEmbeddingError for a rate limit or outage; an adapter maps provider timeouts and rate limit answers to TransientEmbeddingError, and any other exception leaves the batch queued without a recorded attempt",
     "hooks.memory.embeddings.checked refuses a provider answer whose vector count or any vector dimension differs from the model before anything is written",
     "hooks.memory.index_worker.IndexWorker.register(domain, generation, model) binds one model identity and dimension to an index generation; a later registration with another model or dimension is refused",
-    "IndexWorker.enqueue(grant, target, now) reads the session's chunk generation through the SV2-IDX-02 grant check and queues only chunks whose content hash has no vector in the index generation, keeping the first queue time of work already queued; chunks a grown open turn superseded lose their queued work and vectors",
-    "IndexWorker.drain(embedder, domain, generation, now) refuses an embedder whose model differs from the generation's, then embeds queued work oldest first in batches bounded by Limits batch_size, batch_chars and max_batches; each batch commits its vectors with model, dimension and generation in one transaction and removes its work only while the queued content hash still matches, so a late or rival attempt writes nothing; a transient failure records the attempt and error class on the failed batch's work and stops the drain",
+    "IndexWorker.enqueue(grant, target, now) reads the session's chunk generation through the SV2-IDX-02 grant check inside the same transaction that queues and drops work and queues only chunks whose content hash has no vector in the index generation, keeping the first queue time of work already queued; chunks a grown open turn superseded lose their queued work and vectors",
+    "IndexWorker.drain(embedder, domain, generation, now) refuses an embedder whose model differs from the generation's, then first removes work whose chunk is gone or changed, then embeds queued work oldest first in batches bounded by Limits batch_size, batch_chars and max_batches; each batch commits its vectors with model, dimension and generation in one transaction and removes its work only while the queued content hash still matches, so a late or rival attempt writes nothing; a transient failure records the attempt and error class on the failed batch's work and stops the drain",
     "IndexWorker.pending reports the queued count and embedding_backlog_age_seconds from the oldest queued chunk; IndexWorker.coverage reports a session indexed only when every chunk of its generation has a vector for its current content hash",
-    "IndexWorker.activate(domain, generation, revision) is compare and set on the domain's active index generation and accepts only a generation with no pending work; IndexWorker.set_paused stops a generation's drains without touching its rows; IndexWorker.vectors reads a session's vectors under the same grant"
+    "IndexWorker.activate(domain, generation, revision) is compare and set on the domain's active index generation and accepts only a generation with no pending work; IndexWorker.set_paused stops a generation's drains without touching its rows; IndexWorker.vectors reads a session's vectors under the same grant",
+    "IndexWorker.activate refuses a generation with pending work or with any chunk of a session it already holds vectors for that lacks a vector for its current content hash, so a session that grew after its last enqueue blocks the cutover"
   ],
   "supported_versions": {
     "python": "3.11 and later",
@@ -42,11 +43,15 @@
   },
   "remaining_limitations": [
     "No real embedding provider is wired; the worker takes any Embedder and the fixture uses a deterministic hash embedder.",
-    "Batches are bounded in chunk previews' characters, standing in for provider tokens; a tokenizer bound belongs with a concrete provider.",
-    "The worker is driven by its caller's schedule and clock; no daemon, Pod or retry backoff timer is part of this package.",
+    "The rate bound is per drain: at most max_batches provider calls of at most batch_size chunks each; the caller's drain schedule sets calls per second, and a deferred batch is retried on the next drain with no backoff timer.",
+    "Batches are bounded in chunk previews' characters, standing in for provider tokens; the first chunk of a batch is always taken, so batch_chars bounds memory only while it is at least the chunker policy's max_chars, which the defaults keep (64000 against 2000).",
+    "A failure is per batch: the Embedder contract returns all vectors or raises, so the fixture's failed middle chunk is the middle batch of three, and every chunk in that batch is deferred together.",
+    "A provider that returns the wrong count or dimension is refused on every drain until the provider or the generation binding is corrected, with no attempt recorded, because the refusal must leave protected state unchanged.",
+    "The worker is driven by its caller's schedule and clock; no daemon or Pod is part of this package.",
+    "A session never enqueued in a generation is not tracked by it, so activation cannot see it; enqueue is how a session joins a generation.",
     "Work queued for a session that is later deleted is still embedded; its vectors stay unreadable through IndexWorker.vectors and coverage, and their removal belongs to the retention sweep.",
-    "Search over vectors is SV2-IDX-04."
+    "Retrieval evaluation before cutover and search over vectors belong to SV2-IDX-04."
   ],
   "compatibility": "Explicitly local compatibility path: the SV2-IDX-01 catalog and SV2-IDX-02 chunk tables and functions are unchanged; the index tables are additive and a consumer that ignores them sees no change.",
-  "authority": "Enqueue, coverage and vector reads take the caller's Grant and pass the SV2-IDX-01 check through ChunkIndex.chunks: the domain must be the grant's corpus and the session must be retained. A display name never grants access."
+  "authority": "Enqueue, coverage and vector reads take the caller's Grant and pass the SV2-IDX-01 check through ChunkIndex.chunks: the domain must be the grant's corpus and the session must be retained. A display name never grants access. register, set_paused, drain, pending, active and activate are operator and worker calls inside the session service: they take an access domain, return no chunk text or vectors, and are reached only through the service's operator role, which this package does not expose over HTTP."
 }

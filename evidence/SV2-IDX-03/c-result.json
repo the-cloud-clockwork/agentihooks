@@ -46,7 +46,7 @@
     },
     "rollback_rehearsal": {
       "activate_incomplete_new_generation": {
-        "detail": "only an index generation with no pending work can become active",
+        "detail": "only an index generation with no pending work and every tracked session embedded can become active",
         "error": "Conflict"
       },
       "active": {

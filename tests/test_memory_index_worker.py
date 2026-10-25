@@ -230,9 +230,9 @@ def test_a_batch_drops_work_whose_chunk_is_gone_or_changed(inputs, tmp_path):
     db = index.session.catalog.db
     db.execute("UPDATE embedding_work SET content_hash = 'changed' WHERE chunk_id = ?", (ordered[0],))
     db.execute("UPDATE embedding_work SET chunk_id = 'gone' WHERE chunk_id = ?", (ordered[1],))
-    index.worker.limits = Limits(len(ordered), 4000, 1)
     batch = index.worker._batch(DOMAIN, GENERATION)
-    assert [chunk["chunk_id"] for chunk in batch] == ordered[2:]
+    assert [chunk["chunk_id"] for chunk in batch] == ordered[2:4]
+    assert [row[2] for row in work(index)] == ordered[2:]
     assert ordered[0] not in [row[2] for row in work(index)] and "gone" not in [row[2] for row in work(index)]
 
 
@@ -337,6 +337,31 @@ def test_activation_needs_a_complete_generation_and_the_current_revision(inputs,
     assert worker.activate(DOMAIN, "g2", 1) == 2
     assert worker.active(DOMAIN) == {"index_generation": "g2", "revision": 2}
     assert worker.snapshot()["index_cutover"] == [(DOMAIN, "g2", 2)]
+
+
+def test_activation_needs_every_chunk_of_a_tracked_session_embedded(inputs, tmp_path):
+    index = indexed(inputs, tmp_path)
+    index.enqueue(10.0)
+    index.drain(FixtureEmbedder(MODEL), 11.0)
+    index.session.append(inputs["turns"][-1:])
+    index.session.build()
+    with pytest.raises(Conflict, match=f"^{index_worker.INCOMPLETE}$"):
+        index.worker.activate(DOMAIN, GENERATION, 0)
+    index.enqueue(12.0)
+    index.drain(FixtureEmbedder(MODEL), 13.0)
+    first = chunk_ids(index)[0]
+    db = index.session.catalog.db
+    db.execute("UPDATE chunk_vector SET content_hash = 'old' WHERE chunk_id = ?", (first,))
+    with pytest.raises(Conflict, match=f"^{index_worker.INCOMPLETE}$"):
+        index.worker.activate(DOMAIN, GENERATION, 0)
+    db.execute(
+        "UPDATE chunk_vector SET content_hash = ? WHERE chunk_id = ?",
+        (index.session.chunks("current")[0]["content_hash"], first),
+    )
+    worker = index.worker
+    worker.register(DOMAIN, "g2", EmbeddingModel("m8", 8))
+    assert worker.activate(DOMAIN, "g2", 0) == 1
+    assert worker.activate(DOMAIN, GENERATION, 1) == 2
 
 
 def test_the_snapshot_covers_every_index_table(inputs, tmp_path):
