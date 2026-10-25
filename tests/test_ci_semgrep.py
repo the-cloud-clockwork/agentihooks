@@ -85,6 +85,9 @@ def test_wrapper_holds_only_read_permission():
     assert _semgrep()["permissions"] == {"contents": "read"}
 
 
-def test_charts_is_the_only_wrapper_job_on_a_runner_class():
+def test_feature_tests_and_charts_have_runner_classes():
     classes = json.loads((_ROOT / ".github/runner-classes.json").read_text())
-    assert {key for key in classes if key.startswith("semgrep.yml/")} == {"semgrep.yml/charts"}
+    assert {key for key in classes if key.startswith("semgrep.yml/")} == {
+        "semgrep.yml/charts",
+        "semgrep.yml/feature-tests",
+    }
