@@ -134,9 +134,7 @@ def loaded_inputs(
     if all("modules" in result for result in chosen):
         collected = {test_file(item) for result in chosen for item in result.get("files", ())} - static.keys()
         names &= {name for result in chosen for name in result["modules"]} - collected
-    closure = {}
-    for name in names:
-        closure.update(test_inputs(root, name, modules, records, resources, False))
+    closure = test_inputs(root, sorted(names), modules, records, resources, False)
     return {name: check(name) for name in closure}
 
 
@@ -167,10 +165,10 @@ class StatsInputs:
         if covered:
             inputs.update(test_inputs(self.root, covered, self.modules, self.records[measured], self.resources, False))
         if not any(not name.startswith("tests/") for name in inputs):
-            for source in self.changes.keys() & self.resources:
-                inputs.update(
-                    test_inputs(self.root, source, self.modules, self.records[measured], self.resources, not measured)
-                )
+            changed = sorted(self.changes.keys() & self.resources)
+            inputs.update(
+                test_inputs(self.root, changed, self.modules, self.records[measured], self.resources, not measured)
+            )
         return inputs
 
 

@@ -1039,11 +1039,12 @@ def test_measured_stats_trace_every_covered_source_in_one_walk(tmp_path, monkeyp
     from scripts.ci_mutation import stats_cache
 
     root = tmp_path / "repo"
-    sources = [f"scripts/covered_{index}.py" for index in range(3)]
+    sources = [f"scripts/covered_{index}/source.py" for index in range(3)]
     _repository(
         root,
         {
-            **{source: "from scripts.shared_helper import value\n" for source in sources},
+            **{source: "value = 1\n" for source in sources},
+            "scripts/covered_2/conftest.py": "from scripts.shared_helper import value\n",
             "scripts/shared_helper.py": "value = 1\n",
             "tests/test_measured.py": "def test_value():\n    pass\n",
         },
