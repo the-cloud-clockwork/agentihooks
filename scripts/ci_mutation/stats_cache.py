@@ -204,6 +204,7 @@ class StatsInputs:
     changes: dict
     records: dict = field(default_factory=lambda: {True: {}, False: {}})
     traced: dict = field(default_factory=dict)
+    covered: dict = field(default_factory=dict)
     discovered: dict = field(default_factory=dict)
 
     def for_test(self, path: str, covered: list[str] | None, fresh: list[dict] | None = None) -> dict:
@@ -222,7 +223,12 @@ class StatsInputs:
             )
             inputs.update({name: value[0] for name, value in loaded.items()})
         if covered:
-            inputs.update(test_inputs(self.root, covered, self.modules, self.records[measured], self.resources, False))
+            key = tuple(covered)
+            if key not in self.covered:
+                self.covered[key] = test_inputs(
+                    self.root, covered, self.modules, self.records[measured], self.resources, False
+                )
+            inputs.update(self.covered[key])
         if not any(not name.startswith("tests/") for name in inputs) and (
             changed := sorted(self.changes.keys() & self.resources)
         ):
