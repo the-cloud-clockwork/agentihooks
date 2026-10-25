@@ -45,7 +45,7 @@ RESUMED = (
 RECORD_FIELDS = {f.name for f in fields(AgentRecord)}
 LEAD_STARTING = ("starting", SUSPECT)
 STARTING = (
-    "the front door master {name} is {state} and every one of the swarm's {count} master seats is held, so no "
+    "the front door master {name} is {state} and every master seat is held (master seat count {count}), so no "
     "other master starts; "
     "the tick binds or replaces it, or run master up --replace to retire it first"
 )

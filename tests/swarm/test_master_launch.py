@@ -433,7 +433,7 @@ def test_a_starting_front_door_in_a_one_seat_pool_gets_no_second_master(up, monk
     answers(monkeypatch)
     assert run("sw", "master", "up", "--new") == 1
     assert (
-        "the front door master master@a1b2c3-0005 is starting and every one of the swarm's 1 master seats is held"
+        "the front door master master@a1b2c3-0005 is starting and every master seat is held (master seat count 1)"
         in capsys.readouterr().err
     )
     assert rt.masters == [] and [a.name for a in masters(store)] == [front.name]
@@ -465,7 +465,7 @@ def test_a_finished_master_still_running_holds_its_counted_seat_beside_a_startin
     answers(monkeypatch)
     assert run("sw", "master", "up", "--new") == 1
     assert (
-        "master@a1b2c3-0005 is suspect and every one of the swarm's 2 master seats is held" in capsys.readouterr().err
+        "master@a1b2c3-0005 is suspect and every master seat is held (master seat count 2)" in capsys.readouterr().err
     )
     assert rt.masters == []
 
