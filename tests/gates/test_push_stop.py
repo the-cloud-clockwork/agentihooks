@@ -314,6 +314,28 @@ def test_refusal_names_the_missing_step_and_progress_command(rig, debt):
     assert decision.reason in rig.inbox()
 
 
+@pytest.mark.parametrize("dirty", [False, True])
+def test_progress_notice_is_deduplicated_and_settled_after_recording(rig, dirty):
+    rig.commit()
+    git(rig.tree, "push", "-u", "origin", BRANCH)
+    Progress(rig.store.redis, SLUG).outcome(ME, "pushed", NOW - 10)
+    if dirty:
+        (rig.tree / "readme").write_text("changed\n")
+    reason = rig.stop().reason
+    assert rig.stop().reason == reason
+    assert rig.inbox() == [reason]
+    inbox = InboxStore(rig.store.redis)
+    [notice] = inbox.inbox(ME)
+    assert push_stop.is_notice(notice)
+    assert not push_stop.is_notice(SimpleNamespace(sender="other", text=reason))
+    assert not push_stop.is_notice(SimpleNamespace(sender="swarm", text="Other work"))
+    (rig.tree / "readme").write_text("seed\n")
+    rig.ledger.events.append({"by": ME, "at": NOW + 1, "kind": "comment added"})
+    assert rig.stop().allowed
+    settled = inbox.get(notice.id)
+    assert (settled.state, settled.reason) == ("done", f"done: {push_stop.SETTLED}")
+
+
 def test_a_ledger_line_by_the_agent_after_the_push_lets_the_stop_through(rig):
     rig.commit()
     rig.stop()
