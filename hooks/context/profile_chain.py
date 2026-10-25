@@ -102,7 +102,7 @@ def require_capabilities(profile_dirs: list[tuple[str, Path]], available: set[st
     for name, path in profile_dirs:
         manifest = path / "profile.yml"
         data = yaml.safe_load(manifest.read_text()) or {} if manifest.is_file() else {}
-        required = data.get("required_capabilities", [])
+        required = data.get("required_capabilities", []) if isinstance(data, dict) else None
         if not isinstance(required, list) or any(not isinstance(item, str) or not item.strip() for item in required):
             raise ValueError(f"profile {name} required_capabilities must be a list of nonempty strings")
         missing = sorted(set(required) - available)

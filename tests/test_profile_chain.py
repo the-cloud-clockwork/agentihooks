@@ -467,6 +467,9 @@ def test_require_capabilities_names_each_missing_one(tmp_path):
     profile_chain.require_capabilities(dirs, {"headed", "gpu"})
     with pytest.raises(ValueError, match=r"^overlay headed requires hive capabilities: gpu, headed$"):
         profile_chain.require_capabilities(dirs, set())
-    (overlay / "profile.yml").write_text("required_capabilities: [' ']\n")
-    with pytest.raises(ValueError, match=r"^profile headed required_capabilities must be a list of nonempty strings$"):
-        profile_chain.require_capabilities(dirs, {"headed"})
+    for manifest in ("required_capabilities: [' ']\n", "- headed\n"):
+        (overlay / "profile.yml").write_text(manifest)
+        with pytest.raises(
+            ValueError, match=r"^profile headed required_capabilities must be a list of nonempty strings$"
+        ):
+            profile_chain.require_capabilities(dirs, {"headed"})
