@@ -184,6 +184,51 @@ def test_completed_attempts_are_reused_while_new_attempts_are_read():
     assert len(calls) == 12
 
 
+def test_job_logs_survive_attempt_cache_loss_and_concurrent_collectors(monkeypatch, tmp_path):
+    import importlib
+    import time
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Barrier
+
+    import fakeredis
+
+    from scripts.swarm import github_reads
+
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
+    clock = [1_000.0]
+    monkeypatch.setattr(time, "time", lambda: clock[0])
+    workflow = {**load("ci")["runs"][0], "run_attempt": 2, "status": "completed"}
+    calls = []
+    starting = Barrier(2)
+
+    def gh(argv, **kwargs):
+        endpoint = argv[2]
+        calls.append(endpoint)
+        if "/attempts/" in endpoint:
+            number = int(endpoint.split("/attempts/")[1].split("/")[0])
+            output = json.dumps({"id": number, "name": "unit", "status": "completed", "conclusion": "success"})
+            if number == 1 and len([call for call in calls if "/attempts/1/" in call]) <= 2:
+                starting.wait(timeout=10)
+        else:
+            time.sleep(0.02)
+            output = "2026-10-05T00:00:00Z PASSED tests/test_x.py::test_x\n"
+        return subprocess.CompletedProcess(argv, 0, output, "")
+
+    def collect():
+        return ci_read._attempts("o/r", [workflow], gh, fakeredis.FakeRedis(decode_responses=True))
+
+    with ThreadPoolExecutor(max_workers=2) as collectors:
+        first, second = list(collectors.map(lambda _: collect(), range(2)))
+    assert first == second
+    assert len([call for call in calls if call.endswith("/logs")]) == 2
+    assert first[0]["tests"] == [{"job": "unit", "nodeid": "tests/test_x.py::test_x", "outcome": "PASSED"}]
+    clock[0] += 7_200
+    importlib.reload(github_reads)
+    assert collect() == first
+    assert len([call for call in calls if call.endswith("/logs")]) == 2
+    assert github_reads.counts(0, clock[0] + 1)["doctor.ci.job_log"] == 2
+
+
 def test_attempt_reader_downloads_only_completed_unskipped_jobs():
     workflow = {**load("ci")["runs"][0], "run_attempt": 2, "status": "in_progress"}
     calls = []
