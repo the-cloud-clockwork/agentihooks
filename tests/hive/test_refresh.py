@@ -606,6 +606,9 @@ def test_a_refreshed_credential_brings_the_id_of_the_member_it_was_made_for(
     assert urllib.parse.urlsplit(environ["AGENTIHOOKS_HIVE_REDIS_URL"]).username == f"hive-{grant['id']}"
 
 
+SCHEDULER_SUFFIXES = ("entries", "due", "pending", "retired", "dispatch-lock")
+
+
 def test_a_daemon_first_start_keys_every_scheduler_key_under_its_redis_member(
     admin, hive, redis_lib, tmp_path, monkeypatch
 ):
@@ -628,7 +631,7 @@ def test_a_daemon_first_start_keys_every_scheduler_key_under_its_redis_member(
     def beat(redis, local_id):
         scheduler = Scheduler(redis, machine="pod")
         user = redis.connection_pool.connection_kwargs["username"]
-        started.append((user, local_id, [scheduler.key(suffix) for suffix in ("entries", "due")]))
+        started.append((user, local_id, [scheduler.key(suffix) for suffix in SCHEDULER_SUFFIXES]))
         raise KeyboardInterrupt
 
     monkeypatch.setattr(daemon, "beat", beat)
@@ -637,4 +640,4 @@ def test_a_daemon_first_start_keys_every_scheduler_key_under_its_redis_member(
         daemon.run(lambda: daemon.clients(store.redis_client()))
 
     own = f"{ROOT}:hive:{grant['id']}:scheduler:pod"
-    assert started == [(f"hive-{grant['id']}", grant["id"], [f"{own}:entries", f"{own}:due"])]
+    assert started == [(f"hive-{grant['id']}", grant["id"], [f"{own}:{suffix}" for suffix in SCHEDULER_SUFFIXES])]
