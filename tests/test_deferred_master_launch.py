@@ -114,17 +114,19 @@ def test_only_a_deferred_launch_with_a_profile_request_detaches(monkeypatch):
 
 
 def test_detach_returns_in_the_caller_and_carries_on_in_a_new_session():
-    read, write = os.pipe()
-    if not init_agent._detach():
+    read, write, caller = *os.pipe(), os.getpid()
+    detached = init_agent._detach()
+    if os.getpid() != caller:
         try:
             streams = [os.readlink(f"/proc/self/fd/{number}") for number in (0, 1, 2)]
-            os.write(write, json.dumps([os.getsid(0) == os.getpid(), *streams]).encode())
+            os.write(write, json.dumps([detached, os.getsid(0) == os.getpid(), *streams]).encode())
         finally:
             os._exit(0)
+    assert detached is True
     os.close(write)
     seen = b""
     while chunk := os.read(read, 4096):
         seen += chunk
     os.close(read)
     os.wait()
-    assert json.loads(seen) == [True, os.devnull, os.devnull, os.devnull]
+    assert json.loads(seen) == [False, True, os.devnull, os.devnull, os.devnull]
