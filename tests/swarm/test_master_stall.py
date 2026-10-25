@@ -240,21 +240,23 @@ def test_tool_end_is_recorded_after_every_tool_call(monkeypatch):
     assert ended == ["toolu_x", ""]
 
 
-def test_tool_end_failure_is_logged_not_raised(monkeypatch):
+def test_failed_tool_call_closes_its_open_call(tmp_path, monkeypatch):
     from hooks import hook_manager
 
-    logged = []
+    monkeypatch.setattr(activity, "default_root", lambda: tmp_path)
+    monkeypatch.setenv("AGENTIHOOKS_SWARM", "sw")
+    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "master@sw-1")
+    activity.record("Bash", {"command": "false"}, None, None, 1, call_id="toolu_failed")
+    assert activity.open_calls("sw", "master@sw-1") == ["toolu_failed"]
+    hook_manager.EVENT_HANDLERS["PostToolUseFailure"]({"tool_use_id": "toolu_failed"})
+    assert activity.open_calls("sw", "master@sw-1") == []
 
-    def broken(call_id):
-        raise OSError("disk full")
 
-    monkeypatch.setattr(hook_manager, "_swarm_outcome", lambda payload: None)
-    monkeypatch.setattr(hook_manager, "_hive_join", lambda payload, event: None)
-    monkeypatch.setattr(hook_manager, "_swarm_ledger", lambda payload: None)
-    monkeypatch.setattr(hook_manager, "log", lambda text, data=None: logged.append((text, data)))
-    monkeypatch.setattr(activity, "finish", broken)
-    hook_manager._swarm_after_tool({})
-    assert logged == [("swarm activity finish failed", {"error": "disk full"})]
+def test_unwritable_activity_folder_never_breaks_the_hook(tmp_path):
+    blocker = tmp_path / "file"
+    blocker.write_text("x")
+    activity.finish({"AGENTIHOOKS_SWARM": "sw", "AGENTIHOOKS_AGENT_NAME": "master@sw-1"}, blocker, 1, "toolu_a")
+    assert activity.finished_events("sw", blocker) == {}
 
 
 def test_finish_stamps_the_bound_agent_only(tmp_path):

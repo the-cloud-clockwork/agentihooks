@@ -87,11 +87,14 @@ def finish(environ=None, root=None, now_ms=None, call_id=""):
     if not (NAME_RE.match(slug) and NAME_RE.match(name)):
         return
     folder = Path(root or default_root()) / slug
-    folder.mkdir(parents=True, exist_ok=True)
     at = int(time.time() * 1000) if now_ms is None else now_ms
-    (folder / f"{name}.done").write_text(str(at), encoding="utf-8")
-    if CALL_RE.match(call_id):
-        (folder / f"{name}.open" / call_id).unlink(missing_ok=True)
+    try:
+        folder.mkdir(parents=True, exist_ok=True)
+        (folder / f"{name}.done").write_text(str(at), encoding="utf-8")
+        if CALL_RE.match(call_id):
+            (folder / f"{name}.open" / call_id).unlink(missing_ok=True)
+    except OSError:
+        return
 
 
 def open_calls(slug, name, root=None) -> list[str]:
