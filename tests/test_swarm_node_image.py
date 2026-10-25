@@ -295,11 +295,18 @@ def test_companion_installs_beside_codex_and_checks_its_identity(locked, tmp_pat
     destination.mkdir()
     worker_image.install_tools(lock, destination)
     assert (destination / "codex-code-mode-host").stat().st_mode & 0o777 == 0o755
-    assert worker_image.tool_versions(lock, destination)["codex-code-mode-host"] == "codex-code-mode-host 1.2.3"
-    (destination / "codex-code-mode-host").write_text("#!/bin/sh\nprintf 'Usage: other [OPTIONS]\\n'\n")
+    host = destination / "codex-code-mode-host"
+    assert worker_image.tool_versions(lock, destination)["codex-code-mode-host"] == (
+        f"codex-code-mode-host 1.2.3 sha256:{lock['tools']['codex-code-mode-host']['sha256']}"
+    )
+    host.write_text(host.read_text() + "\n")
+    assert worker_image.tool_versions(lock, destination)["codex-code-mode-host"].endswith(
+        f"sha256:{worker_image.checksum(host)}"
+    )
+    host.write_text("#!/bin/sh\nprintf 'Usage: other [OPTIONS]\\n'\n")
     with pytest.raises(ValueError) as error:
         worker_image.tool_versions(lock, destination)
-    assert str(error.value) == "binary identity mismatch: codex-code-mode-host"
+    assert str(error.value) == "binary usage mismatch: codex-code-mode-host"
 
 
 @pytest.mark.parametrize(

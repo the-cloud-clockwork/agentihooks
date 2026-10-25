@@ -108,8 +108,8 @@ def tool_versions(lock: dict, destination: Path) -> dict:
         if "companion" in artifact:
             result = subprocess.run([str(destination / name), "--help"], check=True, capture_output=True, text=True)
             if not result.stdout.startswith(f"Usage: {name} "):
-                raise ValueError(f"binary identity mismatch: {name}")
-            versions[name] = f"{name} {artifact['version']}"
+                raise ValueError(f"binary usage mismatch: {name}")
+            versions[name] = f"{name} {artifact['version']} sha256:{checksum(destination / name)}"
             continue
         result = subprocess.run([str(destination / name), "--version"], check=True, capture_output=True, text=True)
         if result.stdout.strip() != artifact["version_output"]:

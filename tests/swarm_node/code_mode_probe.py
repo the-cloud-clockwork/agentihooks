@@ -6,8 +6,8 @@ import tempfile
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-MARKER = "code-mode-host-ok"
-PROGRAM = f'const r = await tools.exec_command({{cmd: "echo {MARKER}"}});\ntext(r);'
+MARKER = "code-mode-host-42"
+PROGRAM = 'const r = await tools.exec_command({cmd: "echo code-mode-host-$((6*7))"});\ntext(r);'
 USAGE = {
     "input_tokens": 1,
     "output_tokens": 1,
@@ -24,7 +24,7 @@ class Model(BaseHTTPRequestHandler):
         body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
         returned = [i for i in body.get("input", []) if i.get("type") == "custom_tool_call_output"]
         Model.outputs.extend(returned)
-        if returned or len(Model.outputs) > 3:
+        if returned:
             item = {
                 "type": "message",
                 "role": "assistant",
@@ -64,18 +64,21 @@ def code_mode_model(codex: str, env: dict) -> str:
     catalog = json.loads(
         subprocess.run([codex, "debug", "models"], check=True, capture_output=True, text=True, env=env).stdout
     )
-    return next(m["slug"] for m in catalog["models"] if m.get("tool_mode") == "code_mode_only")
+    model = next((m["slug"] for m in catalog["models"] if m.get("tool_mode") == "code_mode_only"), None)
+    if model is None:
+        sys.exit("Codex model catalog offers no code mode model")
+    return model
 
 
 def main() -> None:
     codex = sys.argv[1] if len(sys.argv) > 1 else "codex"
     server = ThreadingHTTPServer(("127.0.0.1", 0), Model)
     threading.Thread(target=server.serve_forever, daemon=True).start()
-    with tempfile.TemporaryDirectory() as home:
+    with server, tempfile.TemporaryDirectory() as home:
         env = {**os.environ, "CODEX_HOME": home, "CODEX_PROBE_KEY": "probe"}
         model = code_mode_model(codex, env)
         provider = {
-            "model_provider": "probe",
+            "model_provider": '"probe"',
             "model_providers.probe.name": '"probe"',
             "model_providers.probe.base_url": f'"http://127.0.0.1:{server.server_port}/v1"',
             "model_providers.probe.wire_api": '"responses"',
@@ -94,10 +97,17 @@ def main() -> None:
         ]
         for key, value in provider.items():
             command += ["-c", f"{key}={value}"]
-        result = subprocess.run(
-            [*command, "run the probe"], stdin=subprocess.DEVNULL, capture_output=True, text=True, env=env, timeout=90
-        )
-    server.shutdown()
+        try:
+            result = subprocess.run(
+                [*command, "run the probe"],
+                stdin=subprocess.DEVNULL,
+                capture_output=True,
+                text=True,
+                env=env,
+                timeout=90,
+            )
+        finally:
+            server.shutdown()
     events = [json.loads(line) for line in result.stdout.splitlines() if line.startswith("{")]
     errors = [
         e["item"]["message"]
