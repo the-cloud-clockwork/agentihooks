@@ -183,14 +183,16 @@ def positive(inputs, root):
     grown = session.build()
     after = session.active()["chunks"]
     by_id = {chunk["chunk_id"]: chunk for chunk in after}
-    assert all(by_id.get(chunk["chunk_id"]) == chunk for chunk in before)
+    unchanged = all(by_id.get(chunk["chunk_id"]) == chunk for chunk in before)
     assert grown["superseded"] == [] and grown[chunking.REBUILT] == 0
     assert sorted(grown["inserted"]) == sorted(chunk["chunk_id"] for chunk in after if chunk not in before)
     validator = schema_validator()
-    for chunk in after:
-        validator.validate(chunk)
-        assert chunk["parent_session_uid"] == inputs["parent_session_uid"]
-        assert session.full(chunk) == b"".join(line(record) for record in sequence_records(session, chunk))
+    schema_valid = all(validator.is_valid(chunk) for chunk in after)
+    exact = all(
+        session.full(chunk) == b"".join(line(record) for record in sequence_records(session, chunk)) for chunk in after
+    )
+    assert unchanged and schema_valid and exact
+    assert all(chunk["parent_session_uid"] == inputs["parent_session_uid"] for chunk in after)
     turn_one = [chunk for chunk in after if chunk["turn_id"] == after[0]["turn_id"]]
     tools = [chunk["tool"] for chunk in turn_one if chunk["kind"] == "tool"]
     assert [tool["tool_use_id"] for tool in tools] == ["toolu_ls", "toolu_read"]
@@ -200,10 +202,10 @@ def positive(inputs, root):
         "first_build_inserted": len(first["inserted"]),
         "appended_build": {key: grown[key] for key in ("state", "superseded", "unchanged", chunking.REBUILT)},
         "appended_build_inserted": len(grown["inserted"]),
-        "earlier_chunks_unchanged": True,
+        "earlier_chunks_unchanged": unchanged,
         "multi_tool_turn": tools,
-        "schema_valid": True,
-        "every_locator_exact": True,
+        "schema_valid": schema_valid,
+        "every_locator_exact": exact,
         "chunks": shape(after),
         "metrics": session.metrics(),
     }
@@ -223,7 +225,8 @@ def rejection(inputs, root):
     bound = inputs["policies"]["current"]["max_chars"]
     assert len(long["preview"]) == bound and long["omitted_chars"] > 0
     result = json.loads(session.full(long).splitlines()[-1])
-    assert result["tool_result"] == records(inputs["turns"])[result_index(inputs)]["tool_result"]
+    whole = result["tool_result"] == records(inputs["turns"])[result_index(inputs)]["tool_result"]
+    assert whole
     domain, uid = inputs["grant"]["corpus"], inputs["session_uid"]
     digest = session.catalog.manifest(domain, uid, session.generation)[0]["object_digest"]
     lost = session.store.root / digest[:2] / digest
@@ -244,8 +247,8 @@ def rejection(inputs, root):
     }
     lost.unlink()
     attempts["validate_missing_archive_object"] = refusal(session.validate)
-    assert session.protected() == before
-    assert all(item["error"] for item in attempts.values())
+    untouched = session.protected() == before
+    assert untouched and all(item["error"] for item in attempts.values())
     diagnostics = json.dumps(attempts, ensure_ascii=False)
     for hidden in ("build log", "personal-corpus", "worker-a", "café"):
         assert hidden not in diagnostics
@@ -253,9 +256,9 @@ def rejection(inputs, root):
     corrected = session.validate()
     return {
         "long_tool_chunk": shape([long])[0],
-        "long_result_retrievable_whole": True,
+        "long_result_retrievable_whole": whole,
         "rejected": attempts,
-        "protected_state_unchanged": True,
+        "protected_state_unchanged": untouched,
         "corrected_after_object_restored": corrected,
         "metrics": session.metrics(),
     }
@@ -298,7 +301,8 @@ def recovery(inputs, root):
     revision = session.activate("current", revision)
     rolled = session.active()
     events_after = session.catalog.events(inputs["grant"]["corpus"], inputs["session_uid"], session.generation)
-    assert rolled["chunks"] == current and events_before == events_after
+    restored, ids_kept = rolled["chunks"] == current, events_before == events_after
+    assert restored and ids_kept
     assert {chunk["chunk_id"] for chunk in cut["chunks"]}.isdisjoint(chunk["chunk_id"] for chunk in current)
     assert replayed["inserted"] == [] and replayed["superseded"] == []
     return {
@@ -317,8 +321,8 @@ def recovery(inputs, root):
         "rollback_rehearsal": {
             "restored": rolled["chunker_version"],
             "revision": revision,
-            "chunks_match_prior_generation": True,
-            "source_event_ids_unchanged": True,
+            "chunks_match_prior_generation": restored,
+            "source_event_ids_unchanged": ids_kept,
         },
         "metrics": session.metrics(),
     }

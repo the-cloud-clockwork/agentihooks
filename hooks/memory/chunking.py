@@ -35,7 +35,7 @@ SAVE_GENERATION = (
     "ON CONFLICT (access_domain, session_uid, chunker_version) "
     "DO UPDATE SET state = excluded.state, built_through = excluded.built_through"
 )
-SET_GENERATION_STATE = f"UPDATE chunk_generation SET state = ? WHERE {GENERATION_KEY}"
+SET_GENERATION_STATE = f"UPDATE chunk_generation SET state = ? WHERE {GENERATION_KEY} AND built_through = ?"
 CHUNKS = (
     f"SELECT chunk_id, record FROM search_chunk WHERE {GENERATION_KEY} "
     "ORDER BY source_generation, first_sequence, chunk_id"
@@ -55,6 +55,7 @@ UNKNOWN_GENERATION = "no chunk generation exists for this session and version"
 NOT_VALIDATED = "only a validated chunk generation can become active"
 STALE_CUTOVER = "the cutover revision is stale; nothing changed"
 UNSUPPORTED = "a chunk names a source range the catalog does not hold; the generation was not validated"
+REBUILT_DURING_VALIDATION = "the generation was rebuilt while it was validated; validate it again"
 
 
 @dataclass(frozen=True)
@@ -127,7 +128,7 @@ def _tool(events: list[dict]) -> dict:
     call, result = by_kind.get("tool_call"), by_kind.get("tool_result")
     record = events[0]["record"]
     return {
-        "tool_use_id": record.get("tool_use_id", ""),
+        "tool_use_id": record.get("tool_use_id") or "",
         "tool_name": call["record"].get("tool_name", "") if call else None,
         "is_error": bool(result["record"].get("is_error")) if result else None,
         "call_event_id": call["event_id"] if call else None,
@@ -269,18 +270,22 @@ class ChunkIndex:
         return list(self._stored((domain, session_uid, version)).values())
 
     def validate(self, store: archive.ObjectStore, grant: Grant, domain: str, session_uid: str, version: str) -> dict:
+        key = (domain, session_uid, version)
+        found = self._generation(key)
         chunks = self.chunks(grant, domain, session_uid, version)
-        found = archive.evidence(self.catalog, store, grant, domain, session_uid)
+        evidence = archive.evidence(self.catalog, store, grant, domain, session_uid)
         held = {
-            (source["source_generation"], *(event[key] for key in EVIDENCE_KEYS))
-            for source in found["sources"]
+            (source["source_generation"], *(event[name] for name in EVIDENCE_KEYS))
+            for source in evidence["sources"]
             for event in source["events"]
         }
         for chunk in chunks:
             for item in chunk["evidence"]:
-                if (chunk["source_generation"], *(item[key] for key in EVIDENCE_KEYS)) not in held:
+                if (chunk["source_generation"], *(item[name] for name in EVIDENCE_KEYS)) not in held:
                     raise archive.EvidenceIntegrityError(UNSUPPORTED)
-        self.catalog.db.execute(SET_GENERATION_STATE, (VALIDATED, domain, session_uid, version))
+        through = json.dumps(found["built_through"])
+        if self.catalog.db.execute(SET_GENERATION_STATE, (VALIDATED, *key, through)).rowcount != 1:
+            raise Conflict(REBUILT_DURING_VALIDATION)
         return {"chunker_version": version, "state": VALIDATED, "chunks": len(chunks)}
 
     def cutover(self, domain: str, session_uid: str) -> dict:

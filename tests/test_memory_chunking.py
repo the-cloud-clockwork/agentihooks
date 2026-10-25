@@ -499,6 +499,79 @@ def test_the_cutover_survives_a_restart(tmp_path, store):
     reopened.close()
 
 
+def test_a_build_interrupted_before_its_generation_row_commits_nothing(writer, index, monkeypatch):
+    writer.append(USER, CALL, RESULT)
+
+    def interrupted(_):
+        raise RuntimeError("interrupted")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(chunking, "asdict", interrupted)
+        with pytest.raises(RuntimeError):
+            index.build(GRANT, SCOPE, POLICY)
+    assert all(rows == [] for rows in index.snapshot().values())
+    assert index.rebuilt_total("corpus-a") == 0
+    assert len(index.build(GRANT, SCOPE, POLICY)["inserted"]) == 2
+
+
+def test_a_build_during_validation_leaves_the_generation_unvalidated(writer, index, store, monkeypatch):
+    writer.append(USER)
+    index.build(GRANT, SCOPE, POLICY)
+    original = archive.evidence
+
+    def racing(*args):
+        writer.append(REPLY)
+        index.build(GRANT, SCOPE, POLICY)
+        return original(*args)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(archive, "evidence", racing)
+        with pytest.raises(Conflict, match=chunking.REBUILT_DURING_VALIDATION):
+            index.validate(store, GRANT, "corpus-a", "s1", "v1")
+    assert index.snapshot()["chunk_generation"][0][4] == "built"
+    assert index.validate(store, GRANT, "corpus-a", "s1", "v1")["state"] == "validated"
+
+
+def test_a_deleted_session_disappears_from_chunk_reads(writer, index, store, catalog):
+    writer.append(USER)
+    index.build(GRANT, SCOPE, POLICY)
+    index.validate(store, GRANT, "corpus-a", "s1", "v1")
+    index.activate("corpus-a", "s1", "v1", 0)
+    catalog.set_state("corpus-a", "s1", "deleted", 1)
+    for read in (
+        lambda: index.active(GRANT, "corpus-a", "s1"),
+        lambda: index.chunks(GRANT, "corpus-a", "s1", "v1"),
+        lambda: index.build(GRANT, SCOPE, POLICY),
+    ):
+        with pytest.raises(archive.EvidenceRefused, match=archive.UNAVAILABLE):
+            read()
+
+
+def test_a_session_holding_a_project_outside_the_grant_is_refused(catalog, store, index):
+    Writer(catalog, store)
+    collector = Grant("collector", "corpus-a", frozenset({"project-a", "project-b"}))
+    data = line(USER)
+    catalog.archive(catalog_module.ArchiveEntry("corpus-a", "s1", "g1", 0, len(data), store.put(data)))
+    event = {"sequence": 1, "byte_start": 0, "byte_end": len(data), "project_id": "project-b", "record": USER}
+    body = {
+        "schema_version": SCHEMA_VERSION,
+        "batch_id": "b1",
+        "access_domain": "corpus-a",
+        "session_uid": "s1",
+        "source_generation": "g1",
+        "events": [event],
+    }
+    assert ingest(catalog, collector, body)["state"] == "committed"
+    with pytest.raises(archive.EvidenceRefused, match=archive.UNAVAILABLE):
+        index.build(GRANT, SCOPE, POLICY)
+    assert all(rows == [] for rows in index.snapshot().values())
+    assert len(index.build(collector, SCOPE, POLICY)["inserted"]) == 1
+
+
+def test_a_null_tool_use_id_becomes_an_empty_string():
+    assert chunking._tool([event(1, "tool_call", tool_use_id=None)])["tool_use_id"] == ""
+
+
 @pytest.mark.parametrize("case", ["a", "b", "c"])
 def test_package_cases_match_their_committed_evidence(case):
     first, second = sv2_idx02_cases.run_case(case), sv2_idx02_cases.run_case(case)
