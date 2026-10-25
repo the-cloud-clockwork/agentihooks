@@ -635,7 +635,7 @@ def test_statistics_parts_split_one_file_without_losing_new_parameter_cases(tmp_
         "@pytest.mark.parametrize('value', [1, 2])\n"
         "def test_new(value): pass\n"
     )
-    recorded = {f"{test}::test_{name}": seconds for name, seconds in [("slow", 90), ("middle", 60), ("short", 30)]}
+    recorded = {f"{test}::test_{name}": seconds for name, seconds in [("slow", 100), ("middle", 60), ("short", 30)]}
     (tmp_path / ".test_durations").write_text(json.dumps(recorded))
     config = SimpleNamespace(source_paths=[Path("scripts")], pytest_add_cli_args_test_selection=[test])
     runner = SimpleNamespace(
