@@ -26,10 +26,7 @@ SKIPPED = {
 }
 
 
-def verify(jobs: list[dict], shards: list[int], lost: Callable[[dict], bool] = lambda job: False) -> bool:
-    if not shards or any(type(shard) is not int or shard < 1 for shard in shards) or len(shards) != len(set(shards)):
-        raise ValueError("The queue needs a nonempty unique positive shard plan")
-    expected = {f"unit (3.12, {shard})" for shard in shards}
+def inventory(jobs: list[dict], expected: set[str]) -> dict[str, dict]:
     groups = {}
     for job in jobs:
         name = job["name"]
@@ -46,47 +43,54 @@ def verify(jobs: list[dict], shards: list[int], lost: Callable[[dict], bool] = l
             raise ValueError(f"Unplanned recovery shard: {name}")
         if base == "shard-check" and name != "shard-check (3.12)":
             raise ValueError(f"Unexpected shard checker: {name}")
-    waiting = False
-    for name in REQUIRED | SKIPPED:
-        job = groups.get(name)
-        if job is None or job["status"] != "completed":
-            waiting = True
-        elif job.get("conclusion") != ("success" if name in REQUIRED else "skipped"):
-            raise ValueError(f"Unexpected queue result: {job['name']}")
+    return groups
+
+
+def checked(job: dict | None, conclusion: str) -> bool:
+    if job is None or job["status"] != "completed":
+        return False
+    if job.get("conclusion") != conclusion:
+        raise ValueError(f"Unexpected queue result: {job['name']}")
+    return True
+
+
+def originals(groups: dict[str, dict], expected: set[str], lost: Callable[[dict], bool]) -> tuple[set[str], bool]:
     recovered = set()
+    finished = True
     for name in expected:
         job = groups.get(name)
         if job is None or job["status"] != "completed":
-            waiting = True
+            finished = False
         elif job.get("conclusion") != "success":
             if job.get("conclusion") not in {"failure", "cancelled"} or not lost(job):
                 raise ValueError(f"Original shard did not pass: {name}")
             recovered.add(name.replace("unit", "unit rerun", 1))
+    return recovered, finished
+
+
+def recovery(groups: dict[str, dict], recovered: set[str]) -> bool:
     reruns = {name for name in groups if name.startswith("unit rerun (")}
     if reruns - recovered:
         raise ValueError("A recovery shard did not replace a lost original")
-    recovery = groups.get("unit-lost")
-    if recovery is None or recovery["status"] != "completed":
-        waiting = True
-    elif recovery.get("conclusion") != ("success" if recovered else "skipped"):
-        raise ValueError("The lost runner classifier did not match the original shards")
-    if recovered:
-        waiting |= recovered != reruns
-        for name in reruns:
-            job = groups[name]
-            if job["status"] != "completed":
-                waiting = True
-            elif job.get("conclusion") != "success":
-                raise ValueError(f"Recovery shard did not pass: {name}")
-        if "unit rerun" in groups:
-            raise ValueError("Recovery matrix was skipped despite a lost original")
-    else:
-        skipped = groups.get("unit rerun")
-        if skipped is None or skipped["status"] != "completed":
-            waiting = True
-        elif skipped.get("conclusion") != "skipped":
-            raise ValueError("Recovery ran without a lost original")
-    return not waiting
+    classified = checked(groups.get("unit-lost"), "success" if recovered else "skipped")
+    if not recovered:
+        skipped = checked(groups.get("unit rerun"), "skipped")
+        return classified and skipped
+    if "unit rerun" in groups:
+        raise ValueError("Recovery matrix was skipped despite a lost original")
+    passed = [checked(groups[name], "success") for name in reruns]
+    return classified and recovered == reruns and all(passed)
+
+
+def verify(jobs: list[dict], shards: list[int], lost: Callable[[dict], bool] = lambda job: False) -> bool:
+    if not shards or any(type(shard) is not int or shard < 1 for shard in shards) or len(shards) != len(set(shards)):
+        raise ValueError("The queue needs a nonempty unique positive shard plan")
+    expected = {f"unit (3.12, {shard})" for shard in shards}
+    groups = inventory(jobs, expected)
+    finished = [checked(groups.get(name), "success" if name in REQUIRED else "skipped") for name in REQUIRED | SKIPPED]
+    recovered, originals_finished = originals(groups, expected, lost)
+    recovery_finished = recovery(groups, recovered) if originals_finished else False
+    return all(finished) and originals_finished and recovery_finished
 
 
 def watcher(runner: str) -> dict:
