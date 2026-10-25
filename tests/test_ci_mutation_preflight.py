@@ -321,7 +321,7 @@ def test_every_stats_part_restores_one_merged_cache_saved_once_after_all_parts_f
     }
     merged = refine_steps[refine_names.index("Save the merged test stats")]
     assert merged["uses"] == "actions/cache/save@v4"
-    assert merged["if"] == "hashFiles('.mutation-stats-cache/**') != ''"
+    assert merged["if"] == "success() && hashFiles('.mutation-stats-cache/**') != ''"
     assert merged["with"] == {"path": ".mutation-stats-cache", "key": key}
     assert refine_names.index(download["name"]) < refine_names.index(merged["name"])
     assert "matrix.part" not in str([restore, single, merged])

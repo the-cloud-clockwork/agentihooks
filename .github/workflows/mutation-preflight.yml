@@ -358,7 +358,7 @@ jobs:
           merge-multiple: true
 
       - name: Save the merged test stats
-        if: hashFiles('.mutation-stats-cache/**') != ''
+        if: success() && hashFiles('.mutation-stats-cache/**') != ''
         uses: actions/cache/save@v4
         with:
           path: .mutation-stats-cache
