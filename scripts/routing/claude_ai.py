@@ -40,7 +40,7 @@ def _home(environ: Mapping[str, str], number: int) -> Path:
         account = login._read(login.home(number) / login.CONFIG).get(login.ACCOUNT)
         login._write(target / login.CONFIG, {**login._read(target / login.CONFIG), login.ACCOUNT: account})
     if environ.get(binding.REPORT):
-        binding.rehome(Path(environ[binding.REPORT]), target, shared=False)
+        binding.rehome(Path(environ[binding.REPORT]), target)
     return target
 
 
