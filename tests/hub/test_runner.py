@@ -387,14 +387,16 @@ def test_a_hub_with_a_remote_ledger_writes_as_its_own_service_and_keeps_that_cre
     monkeypatch.setenv("AGENTIHOOKS_DEPLOYMENT", "distributed")
     monkeypatch.setenv("LEDGER_URL", "https://ledger.example")
     monkeypatch.setattr(runner, "monotonic", lambda: next(times))
-    monkeypatch.setattr(auth, "keep_service", lambda redis, credential: kept.append(keep_service(redis, credential)))
+    monkeypatch.setattr(
+        auth, "keep_service", lambda redis, credential: kept.append(credential) or keep_service(redis, credential)
+    )
     monkeypatch.setattr(runner.HubRunner, "run_once", stop_after(iter([{"page": ["handled"]}] * 2)))
     with pytest.raises(Stop):
         runner.main(["run"])
     credential = os.environ["AGENTIHOOKS_CONTROLLER_CREDENTIAL"]
     assert credential.startswith("hub-hub-0.")
     assert auth.controller(hive, credential)
-    assert kept == [None, None]
+    assert kept == [credential, credential]
     assert 0 < hive.ttl(f"{auth.PREFIX}:controller:hub-hub-0") <= auth.SERVICE_TTL_S
 
 

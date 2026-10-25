@@ -7,6 +7,7 @@ import sys
 import traceback
 from collections.abc import Callable
 from time import monotonic
+from typing import TYPE_CHECKING
 
 from scripts.events.bus import Bus, Delivery, StateConflict, StateStore
 from scripts.events.config import BusConfig
@@ -16,6 +17,11 @@ from scripts.hive import auth, buckets
 from scripts.hub import lease, registry, slots
 from scripts.hub.registry import Reactor, Registry
 from scripts.scheduler.process_timer import wait as scheduled_wait
+from scripts.swarm import store
+from scripts.swarm_ledger import ledger_link
+
+if TYPE_CHECKING:
+    from redis import Redis
 
 VERSIONS = "hub-versions"
 IDLE_S = 5.0
@@ -120,7 +126,11 @@ class HubRunner:
         return "handled"
 
 
-def _run(hub: HubRunner, once: bool, keep: Callable[[], None] = lambda: None) -> int:
+def _no_renewal() -> None:
+    pass
+
+
+def _run(hub: HubRunner, once: bool, keep: Callable[[], None] = _no_renewal) -> int:
     while True:
         passes = hub.run_once()
         for name, outcomes in passes.items():
@@ -133,22 +143,22 @@ def _run(hub: HubRunner, once: bool, keep: Callable[[], None] = lambda: None) ->
             scheduled_wait(IDLE_S)
 
 
-def _ledger_authority(holder: str) -> Callable[[], None]:
-    from scripts.swarm import store
-    from scripts.swarm_ledger import ledger_link
-
+def _issued_credential(holder: str) -> tuple["Redis", str] | None:
     if not ledger_link.remote():
-        return lambda: None
+        return None
     redis = store.redis_client()
-    credential = auth.issue_service(redis, f"hub-{holder}")
-    os.environ[CREDENTIAL_ENV] = credential
-    kept = [monotonic()]
+    return redis, auth.issue_service(redis, f"hub-{holder}")
+
+
+def _renewal(redis: "Redis", credential: str) -> Callable[[], None]:
+    kept = monotonic()
 
     def keep() -> None:
+        nonlocal kept
         now = monotonic()
-        if now - kept[0] >= KEEP_S:
+        if now - kept >= KEEP_S:
             auth.keep_service(redis, credential)
-            kept[0] = now
+            kept = now
 
     return keep
 
@@ -159,7 +169,11 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--once", action="store_true")
     args = parser.parse_args(argv)
     holder = os.environ.get("HOSTNAME") or socket.gethostname()
-    keep = _ledger_authority(holder)
+    issued = _issued_credential(holder)
+    keep = _no_renewal
+    if issued:
+        os.environ[CREDENTIAL_ENV] = issued[1]
+        keep = _renewal(*issued)
     bus = open_bus(BusConfig.from_environ(os.environ))
     buckets.provision(bus)
     slots.serve(bus)
