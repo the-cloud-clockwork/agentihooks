@@ -11,6 +11,7 @@ import sys
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
 from contextvars import copy_context
 from dataclasses import dataclass, field, replace
 from itertools import count
