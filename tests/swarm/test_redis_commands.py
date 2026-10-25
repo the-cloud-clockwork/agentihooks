@@ -357,6 +357,7 @@ def test_the_map_names_each_consumer_with_its_redis_role(published):
     assert roles == {
         "controller": "controller",
         "tick": "controller",
+        "hub": "controller",
         "ledger server": "ledger",
         "worker": "worker",
         "hooks": "worker",
@@ -367,6 +368,12 @@ def test_the_controller_issues_the_lease_counter_and_the_scheduler_wait(publishe
     commands = published["controller"]["commands"]
     assert {"INCRBY", "BLPOP"} <= commands.keys()
     assert "scripts.scheduler.process_timer:Timer.wait" in commands["BLPOP"]
+
+
+def test_the_hub_reads_the_wake_outbox_with_a_command_the_controller_user_grants(published):
+    commands = published["hub"]["commands"]
+    assert "scripts.hub.inbox_wake:InboxWake.flush" in commands["SMEMBERS"]
+    assert "SRANDMEMBER" not in commands
 
 
 def test_the_controller_scheduler_keys_sit_in_the_swarm_namespace(published):
