@@ -226,6 +226,59 @@ def test_stacked_publication_records_its_current_branch_before_pushing(publicati
     assert git(root, "ls-remote", "origin", "refs/heads/prerequisite").split()[0] == original
 
 
+@pytest.mark.parametrize("queued", [False, True])
+def test_publication_checks_the_exact_target_branch_before_pushing(publication, monkeypatch, queued):
+    from scripts.swarm import merge_queue, publish
+    from scripts.swarm.store import SwarmError
+
+    root = publication.root
+    native = publish.git
+    pushes = []
+    queries = []
+
+    def git_call(where, *args):
+        if args == ("remote", "get-url", "origin"):
+            return "git@github.com:example/repo.git"
+        if args[:1] == ("push",):
+            pushes.append(args)
+        return native(where, *args)
+
+    def query(document, variables):
+        assert "mergeQueueEntry" in document
+        assert "headRefName" in document
+        assert variables == {"owner": "example", "name": "repo", "branch": "engineer-test"}
+        queries.append(variables)
+        return {
+            "repository": {
+                "pullRequests": {
+                    "nodes": [
+                        {
+                            "url": "https://github.com/example/repo/pull/8",
+                            "mergeQueueEntry": {"id": "entry"} if queued else None,
+                        }
+                    ]
+                }
+            }
+        }
+
+    monkeypatch.setattr(publish, "git", git_call)
+    monkeypatch.setattr(merge_queue, "graphql", query)
+    if queued:
+        with pytest.raises(SwarmError, match="merge queue"):
+            publish.publish(
+                "swarm", publication.agent, str(publication.repo), publication.ledger, "Change chosen", ["chosen.txt"]
+            )
+        assert pushes == []
+        assert git(root, "ls-remote", "origin", "refs/heads/engineer-test") == ""
+    else:
+        result = publish.publish(
+            "swarm", publication.agent, str(publication.repo), publication.ledger, "Change chosen", ["chosen.txt"]
+        )
+        assert result["branch"] == "engineer-test"
+        assert len(pushes) == 1
+    assert len(queries) == 1
+
+
 def test_publish_from_a_prepared_continuation_pushes_only_the_retained_pull_request_branch(
     publication, tmp_path, monkeypatch
 ):
