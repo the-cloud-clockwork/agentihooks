@@ -539,6 +539,38 @@ def test_a_module_edit_that_only_binds_new_names_keeps_the_selection_narrow(
     assert selection["scripts/core.py"] == [*expected, "tests/test_edited.py", "tests/test_fresh.py"]
 
 
+@pytest.mark.parametrize(
+    ("old", "new", "expected"),
+    [
+        ("def f(:\n", "def f():\n    pass\n", False),
+        ("from os import path\n", "from os import path\nimport json\n", True),
+        ("X = 1\nfrom os import path\n", "from os import path, sep\nX = 1\n", True),
+        ("from sys import sep\n", "from os import path, sep\n", False),
+        ("", "from os import sep\n", True),
+        ("X = 1\n", "X = 1\nimport json\n", True),
+        ("X = 1\n", "X = 1\nprint(X)\n", False),
+        ("", "from os import *\n", False),
+        ("os = 1\n", "os = 1\nimport os.path\n", False),
+        ("y = x\n", "y = x\nx = 1\n", False),
+        ("def f():\n    pass\n", "def f():\n    pass\n\n\nf = 1\n", False),
+        ("def f():\n    return 1\n", "import json\n\n\ndef f():\n    return 2\n", True),
+        ("def f():\n    return 1\n", "@cache\ndef f():\n    return 1\n", False),
+        (
+            "class A:\n    def m(self):\n        return 1\n",
+            "import json\n\n\nclass A:\n    def m(self):\n        return 2\n",
+            True,
+        ),
+        ("class A:\n    pass\n", "class A(B):\n    pass\n", False),
+        ("class A:\n    pass\n", "class A(metaclass=M):\n    pass\n", False),
+        ("class A:\n    pass\n", "@dataclass\nclass A:\n    pass\n", False),
+        ("class A:\n    X = 1\n", "class A:\n    X = 2\n", False),
+        ("X = 1\n", "Y = 1\n", False),
+    ],
+)
+def test_only_statements_binding_unknown_names_count_as_new(old, new, expected):
+    assert plan.binds_only_new_names(old, new) is expected
+
+
 def test_plan_publishes_covering_test_ids_and_checks_their_files(tmp_path, monkeypatch):
     manifest = _recorded_project(tmp_path, monkeypatch)
     monkeypatch.setenv("GITHUB_OUTPUT", str(tmp_path / "output"))
