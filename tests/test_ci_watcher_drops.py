@@ -70,10 +70,11 @@ def test_a_job_with_no_conclusion_counts_as_red():
 
 
 @pytest.mark.parametrize("messages,expected", [([], "drop"), (["queue group is no longer current"], "rebuild")])
-def test_the_early_required_context_and_late_summary_preserve_watcher_drop_classification(messages, expected):
+@pytest.mark.parametrize("summary", ["success", "failure", "cancelled", "skipped"])
+def test_the_early_required_context_and_late_summary_preserve_watcher_drop_classification(messages, expected, summary):
     jobs = [
         job(11, "Gate — Required", "failure"),
-        job(12, "Queue gate summary", "cancelled"),
+        job(12, "Queue gate summary", summary),
         job(13, "unit (3.12, 1)", "success"),
     ]
     seen = []
