@@ -554,6 +554,26 @@ def test_a_lost_test_whose_subject_was_deleted_is_admitted(tmp_path):
     assert "head collects 1 tests, base floor 1" in result.stdout
 
 
+@pytest.mark.parametrize("deleted", [True, False], ids=["deleted", "retained"])
+@pytest.mark.parametrize(
+    "collision",
+    [SUBJECT, "class Runner:\n    def subject(self):\n        return 3\n", "subject = 3\n"],
+    ids=["function", "method", "constant"],
+)
+def test_a_preexisting_unrelated_name_does_not_hide_subject_deletion(tmp_path, deleted, collision):
+    result = _floor(
+        tmp_path,
+        {"test_mod.py": SUBJECT_TESTS},
+        {"test_mod.py": OTHER_TEST},
+        {
+            "base": _package(mod=SUBJECT + "\n\n" + KEPT, elsewhere=collision),
+            "head": _package(mod=("" if deleted else SUBJECT) + "\n\n" + KEPT, elsewhere=collision),
+        },
+    )
+    assert result.returncode == (0 if deleted else 1), result.stdout + result.stderr
+    assert ("test_subject is admitted" in result.stdout) == deleted
+
+
 @pytest.mark.parametrize(
     "survivor",
     [
