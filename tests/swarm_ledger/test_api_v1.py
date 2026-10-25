@@ -1680,10 +1680,10 @@ def test_mutations_enforce_the_ledger_talk_budget_on_phase_comments(live, monkey
     monkeypatch.setattr(talk.Budget, "_marks", _talk_marks)
     monkeypatch.setattr(talk.Budget, "__init__", budget)
     thread = "phases/p1/comments"
-    revision = request(live, "GET", "phases/p1")[1]["revision"]
+    revision = request(live, "GET", thread)[1]["revision"]
     payload = {
         "ops": [{"op": "add", "id": "budget-denied", "thread": thread, "text": "Beyond the budget", "by": worker}],
-        "guards": {"phases/p1": revision},
+        "guards": {thread: revision},
     }
     status, result = request(live, "POST", "operations", payload)
     assert status == 200
