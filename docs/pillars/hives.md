@@ -42,7 +42,10 @@ agentihooks hive install          # user service that runs agentihooks hive run
   already saved on the same host under another label refuses the add with
   `<host> already runs hive <label>; one machine runs one hive, so grow it with more max agents`. When a hive member
   already carries the label, the add keeps that member, saves the herdr entry again if it is gone, and mints and
-  delivers nothing; `hive remove` is the only way a machine's member is retired. Otherwise
+  delivers nothing: `--url` and `--redis-url` are ignored, and its `added <target> to herdr as <label>` line means
+  the herdr entry is saved, not that a credential was delivered. `hive remove` is the only way a machine's member is
+  retired, so changing the delivered URLs or repairing a lost `hive.env` is `hive remove <id>` (it drains first), then
+  `hive add`. Otherwise
   it runs `herdr machine add --label <name> --remote-session default <target>` (300 second timeout) unless
   `herdr machine list --json` already holds that target or label; it mints a hive member
   named after the label, and delivers it: `ssh -o BatchMode=yes <target>` (60 second timeout) writes the member's
