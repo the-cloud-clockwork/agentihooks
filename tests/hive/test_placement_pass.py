@@ -158,3 +158,9 @@ def test_a_local_slot_limit_leaves_the_pass_hives_unchanged_for_later_tasks(setu
     before = copy.deepcopy(launch.hives())
     assert isinstance(launch.select(setup.config, "eng", {"id": "one"}), Wait)
     assert launch.hives() == before
+
+
+def test_a_placement_pass_opens_the_master_seat_on_hives_named_for_its_swarm(setup):  # noqa: F811
+    write_hive(setup, excluded=["master", "engineer"], master_swarms=[setup.config.slug])
+    setup.launcher.placement_cache = {}
+    assert [hive["excluded"] for hive in setup.launcher.hives()] == [["engineer"]]
