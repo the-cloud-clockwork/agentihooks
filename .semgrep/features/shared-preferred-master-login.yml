@@ -1,0 +1,74 @@
+rules:
+  - id: feature-shared-preferred-master-login
+    languages: [python]
+    severity: ERROR
+    message: >-
+      Shared preferred master login, ordered 2026-10-25: every swarm front door
+      shares the first available stored Claude AI login in preference order.
+      Existing login claims must not be exclusive; try stored logins before
+      selecting a quota token. Only a new browser login and the login command
+      may claim a login exclusively.
+    pattern-either:
+      - patterns:
+          - pattern-either:
+              - pattern: _claim($FOLDER, $NAME, $PID, $ALIVE, $FLOOR, True)
+              - pattern: _claim(..., alone=False, ...)
+              - pattern: scripts.master_claude_login.claim($NAME, $PID, $ALIVE, $FLOOR, True)
+              - pattern: scripts.master_claude_login.claim(..., alone=True, ...)
+          - pattern-not-inside: |
+              def master(openbao, environ, deps, slot=...):
+                  ...
+          - pattern-not-inside: |
+              for $NUMBER in numbers():
+                  with _locked(root($NUMBER)) as $FOLDER:
+                      if _private(home($NUMBER)) or holders($FOLDER):
+                          continue
+                      ...
+                      _claim(...)
+                      ...
+      - patterns:
+          - pattern-inside: |
+              def $LAUNCH(...):
+                  ...
+          - metavariable-regex:
+              metavariable: $LAUNCH
+              regex: ^(launch_claude|prepare_launch|.*master.*|spawn|resume)$
+          - pattern-either:
+              - pattern: launch_token(...)
+              - pattern: scripts.master_claude_login.launch_token(...)
+              - pattern: scripts.claude_quota_balancer.select_credential(...)
+          - pattern-not-inside: |
+              def $LAUNCH(...):
+                  ...
+                  $PREPARED = prepare_launch(...)
+                  ...
+                  if $PREPARED is None:
+                      ...
+                      launch_token(...)
+                      ...
+                  ...
+          - pattern-not-inside: |
+              def $LAUNCH(...):
+                  ...
+                  $PREPARED = scripts.master_claude_login.prepare_launch(...)
+                  ...
+                  if $PREPARED is None:
+                      ...
+                      scripts.master_claude_login.launch_token(...)
+                      ...
+                  ...
+      - patterns:
+          - pattern: |
+              def _route_kind(...):
+                  ...
+          - pattern-not: |
+              def _route_kind(...):
+                  if scripts.master_claude_login.enabled(...):
+                      return "interactive"
+                  ...
+      - patterns:
+          - pattern-inside: |
+              def prepare_launch(...):
+                  ...
+          - pattern: scripts.master_login_chain.run($FIRST, $SECOND, $THIRD)
+          - pattern-not: scripts.master_login_chain.run(current, browser, token)
