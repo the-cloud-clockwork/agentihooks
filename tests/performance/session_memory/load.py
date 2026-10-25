@@ -65,6 +65,10 @@ def percentiles(values: list[float]) -> dict:
     return {"count": len(ordered), "p50": rank(0.5), "p95": rank(0.95), "max": round(ordered[-1], 6)}
 
 
+def found(answer: dict) -> bool:
+    return any(item["explain"]["lexical"] for item in answer.get("results", []))
+
+
 class HashEmbedder:
     def __init__(self, model: EmbeddingModel):
         self.model, self.texts = model, Counter()
@@ -408,7 +412,7 @@ class Run:
                 continue
             answer = self.ask(grant, f'"{marker}"')
             self.scoped(answer, set(grant.projects))
-            if answer.get("results"):
+            if found(answer):
                 self.visible[marker] = self.now - tick * self.spec["tick_seconds"]
 
     def settled(self) -> bool:
@@ -490,7 +494,7 @@ class Run:
         except archive.EvidenceIntegrityError as error:
             failures.append(f"{writer.name}: archive {error}")
         else:
-            if hashlib.sha256(archived).digest() != hashlib.sha256(complete).digest():
+            if archived != complete:
                 failures.append(f"{writer.name}: archived bytes differ from the transcript")
         status = execution.spool.status()
         if status.pending or status.lost or status.corrupt:

@@ -49,6 +49,7 @@ def healthy(run: Run, drained: dict, verdict: dict) -> None:
     assert verdict["authoritative_events"] == verdict["transcript_lines"]
     assert run.counts["out_of_scope_results"] == 0 and run.counts["restricted_searches_refused"] == searched
     assert run.invisible_markers() == 0 and run.counts["cursor_moved_on_refusal"] == 0
+    assert run.counts["needle_hits"] > 0
 
 
 def positive(spec: dict, root: Path) -> dict:

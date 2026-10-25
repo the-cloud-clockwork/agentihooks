@@ -22,6 +22,14 @@ def test_percentiles_rank_the_sorted_values_and_report_an_empty_sample():
     assert load.percentiles([]) == {"count": 0, "p50": None, "p95": None, "max": None}
 
 
+def test_a_marker_is_found_only_by_a_lexical_match_never_by_vector_similarity_alone():
+    vector_only = {"results": [{"explain": {"lexical": None, "vector": {"rank": 1, "score": 0.4}}}]}
+    lexical = {"results": [{"explain": {"lexical": {"rank": 1, "score": 1.2, "matched": ["m1x"]}, "vector": None}}]}
+    assert load.found(vector_only) is False
+    assert load.found(lexical) is True
+    assert load.found({"state": "rejected"}) is False
+
+
 def test_a_split_turn_leaves_half_of_its_last_line_until_the_writer_finishes(tmp_path):
     path = tmp_path / "transcript.jsonl"
     writer = load.Writer("writer-0", "session:abcdef0123456789", "project", path, random.Random(1))

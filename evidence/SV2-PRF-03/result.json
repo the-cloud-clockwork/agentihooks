@@ -21,7 +21,7 @@
     "storage": "SQLite catalog, chunk tables and index tables of SV2-IDX-01 to SV2-IDX-04"
   },
   "states": {
-    "observed": "Cases A, B and C each ran twice from independent temporary folders with identical records; case A also ran a second independent seed.",
+    "observed": "Cases A, B and C each ran in CI from fresh temporary folders and matched their committed records; case A ran two independent seeds with differing transcripts.",
     "accepted": "A batch is accepted when the central archive holds its bytes and ingest answers committed or replayed; only then does the spool settle it and the fake clock stamp its acknowledgement.",
     "committed": "Events, archive entries, chunks and vectors commit in the SQLite catalog; the transcript, cursor and spool files commit with fsync in each execution folder.",
     "externally_verified": "Not yet: no deployed session service, Postgres, archive bucket or embedding provider ran; the measured search wall time comes from the CI runner, and a live canary belongs to the G10 rollout gate."

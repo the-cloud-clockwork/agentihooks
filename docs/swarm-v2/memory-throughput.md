@@ -7,8 +7,9 @@ The case records are `evidence/SV2-PRF-03/a-result.json`, `b-result.json` and `c
 
 ## Workload
 
-- 9 writers append one Claude turn per tick to their own transcript for 16 ticks; every third turn leaves half of
-  its assistant line for the next tick. 27 background sessions hold one turn each, so search scopes span 36
+- 9 writers, interleaved in one process, append one Claude turn per tick to their own transcript for 16 ticks;
+  writer i leaves half of its assistant line for the next tick on each tick where tick plus i is a multiple of
+  three. 27 background sessions hold one turn each, so search scopes span 36
   sessions with 32 hex character session ids over three projects: one granted to the searcher, one granted only to
   the wide searcher grant, and one restricted.
 - Each execution polls into its own spool every tick and flushes every second tick.
@@ -41,7 +42,8 @@ Both seeds of case A give the same shape; seed 7:
 | Chunk texts embedded twice | 0 |
 
 `search_latency_seconds` is asserted by `test_search_stays_within_its_wall_clock_budget_under_the_load`: p95 below
-0.5 s on the CI runner over the 92 searches of one run. Print the measured values for a seed with
+0.5 s on the CI runner over the 92 searches of one run. The 0.5 s budget is an experiment threshold chosen for this
+fixture, not a service level from the spec. Print the measured values for a seed with
 `python -m tests.performance.session_memory.load --seed 7`.
 
 ## Rejection
@@ -69,5 +71,6 @@ batches are authoritative; chunks and vectors are derived.
 ## Limits
 
 - Writers interleave in one process; no real concurrent processes write one SQLite file.
+- Session cardinality is 36 sessions; higher cardinality is not measured.
 - Only Claude JSON lines with string content are replayed.
 - Postgres, pgvector, the archive bucket, the HTTP service and a real embedding provider are not measured.
