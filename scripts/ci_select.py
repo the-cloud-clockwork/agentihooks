@@ -82,7 +82,7 @@ def reshaped(root: Path, base: str, head: str) -> bool:
 def selected_tests(root: Path, changed: list[str], tree_reshaped: bool, manifest: dict | None = None) -> set[str]:
     tests = {path for path in changed if is_test(path)}
     if manifest is not None:
-        units = set()
+        units = {index for index, unit in enumerate(manifest["units"]) if unit.partition("::")[0] in changed}
         tests.update(
             test.partition("::")[0] for test, found in manifest["tests"].items() if units.intersection(found["units"])
         )
