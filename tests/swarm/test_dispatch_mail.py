@@ -249,7 +249,7 @@ def test_launch_rechecks_mail_after_capacity_checks(mailbox, monkeypatch, capsys
         if disposition == "missing":
             store.redis.delete(inbox.key("item", stale))
         else:
-            inbox.close(stale, "former", disposition)
+            inbox.close(stale, "former", disposition, "Evidence considered; ranking unchanged")
         return ""
 
     monkeypatch.setattr(dispatch_seat.seat_spawn, "host_hold", settle_mail)

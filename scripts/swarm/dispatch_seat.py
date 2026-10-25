@@ -12,7 +12,8 @@ again under its own name, is no trigger.
 import json
 from dataclasses import replace
 
-from scripts.inbox.store import InboxStore
+from scripts.inbox.store import CLOSED as INBOX_CLOSED
+from scripts.inbox.store import InboxError, InboxStore
 from scripts.swarm import (
     bottleneck,
     capacity,
@@ -187,7 +188,25 @@ def left(seat, doc: dict) -> bool:
     return seat.name not in members and launch_check.joined_at(seat, doc) is not None
 
 
+def _launch_triggers(store, found):
+    inbox = InboxStore(store.redis)
+    live = []
+    for trigger in found:
+        if trigger.get("kind") == "inbox":
+            try:
+                item = inbox.get(trigger["item"])
+            except InboxError:
+                continue
+            if item.state in INBOX_CLOSED:
+                continue
+        live.append(trigger)
+    return live
+
+
 def _spawn(slug, config, store, runtime, found, now_ms):
+    found = _launch_triggers(store, found)
+    if not found:
+        return []
     from scripts.swarm import tick
 
     def prepare(record):
