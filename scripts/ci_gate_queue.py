@@ -4,9 +4,12 @@ import time
 from collections.abc import Callable
 from copy import deepcopy
 
+from scripts.ci_budget import rate_limit
 from scripts.ci_budget.jobs import read_jobs
-from scripts.ci_gate_shards import api
+from scripts.ci_gate_shards import POLL_SECONDS, api
 from scripts.ci_queue_fail_fast import logged_loss
+
+JOB_PAGE = 100
 
 GATE_NAME = "${{ github.event_name == 'merge_group' && 'Gate — Required' || 'queue-fail-fast' }}"
 SUMMARY_NAME = "${{ github.event_name == 'merge_group' && 'Queue gate summary' || 'Gate — Required' }}"
@@ -194,25 +197,28 @@ def watch(repository: str, run: str, attempt: str, shards: list[int], ref: str, 
     deadline = time.monotonic() + 1200
     while time.monotonic() < deadline:
         current(repository, ref, head)
-        jobs = read_jobs(f"repos/{repository}/actions/runs/{run}/attempts/{attempt}/jobs")
+        jobs = read_jobs(f"repos/{repository}/actions/runs/{run}/attempts/{attempt}/jobs", JOB_PAGE)
         if verify(jobs, shards, lost=lambda job: logged_loss(repository, job, seen)):
             current(repository, ref, head)
             return
-        time.sleep(5)
+        time.sleep(POLL_SECONDS)
     raise TimeoutError("Queue verification timed out before every expected job completed")
 
 
 def main() -> None:
     if os.environ["GITHUB_EVENT_NAME"] != "merge_group":
         raise ValueError("The early queue gate runs only on merge_group")
-    watch(
-        os.environ["GITHUB_REPOSITORY"],
-        os.environ["GITHUB_RUN_ID"],
-        os.environ["GITHUB_RUN_ATTEMPT"],
-        [row["shard"] for row in json.loads(os.environ["QUEUE_PLAN"])],
-        os.environ["GITHUB_REF"],
-        os.environ["GITHUB_SHA"],
-    )
+    try:
+        watch(
+            os.environ["GITHUB_REPOSITORY"],
+            os.environ["GITHUB_RUN_ID"],
+            os.environ["GITHUB_RUN_ATTEMPT"],
+            [row["shard"] for row in json.loads(os.environ["QUEUE_PLAN"])],
+            os.environ["GITHUB_REF"],
+            os.environ["GITHUB_SHA"],
+        )
+    finally:
+        rate_limit.report("Queue verification")
 
 
 if __name__ == "__main__":

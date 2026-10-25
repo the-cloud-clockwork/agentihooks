@@ -953,7 +953,7 @@ jobs:
               "completed success") exit 0 ;;
               completed*) echo '::error::The early collection did not succeed.'; exit 1 ;;
             esac
-            sleep 3
+            sleep 15
           done
 
       - name: Download the early collection
