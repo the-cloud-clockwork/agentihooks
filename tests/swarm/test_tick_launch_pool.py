@@ -295,6 +295,18 @@ def test_the_pool_asks_the_runtime_room_for_this_pass_config(store):
     assert tick_module._launch_room(ConfigRoom(0), store.config("sw")) == 3
 
 
+def test_the_spawn_step_sizes_its_pool_with_this_pass_config(store, monkeypatch):
+    ledger, room, seen = _eight(store), tick_module._launch_room, []
+
+    def recording(runtime, config):
+        seen.append(config.max_eng)
+        return room(runtime, config)
+
+    monkeypatch.setattr(tick_module, "_launch_room", recording)
+    tick("sw", store, ledger, PooledRuntime(8), now_ms=1_000)
+    assert seen and set(seen) == {8}
+
+
 def test_the_fenced_runtime_asks_the_room_with_the_config_it_was_given(store):
     from scripts.swarm import controller
 
