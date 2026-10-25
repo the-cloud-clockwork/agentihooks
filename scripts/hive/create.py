@@ -240,7 +240,8 @@ def _merged(tools: Tools, options: Options) -> str:
     if found != "MERGED":
         if not create_github.merge(tools.run, url):
             checks = f"pull request {url} checks to pass"
-            _wait(tools, options, checks, lambda: create_github.checks_passed(tools.run, url))
+            required = create_github.required_checks(tools.run, options.repo, options.base)
+            _wait(tools, options, checks, lambda: create_github.checks_passed(tools.run, url, required))
             create_github.squash(tools.run, url)
         _wait(
             tools, options, f"pull request {url} to merge", lambda: create_github.pr_state(tools.run, url) == "MERGED"
