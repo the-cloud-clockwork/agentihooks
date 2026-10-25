@@ -49,9 +49,10 @@ def test_eight_launches_of_one_pass_run_at_once(store):
     assert sorted(task for _, _, task in pooled.spawned) == [f"t{n}" for n in range(1, 9)]
     assert pooled.peak == 8
     assert all(ledger.rows[f"t{n}"]["state"] == "claimed" for n in range(1, 9))
-    assert sum(action.startswith("spawned ") for action in actions) == 8
+    assert sum(action.startswith("spawned engineer@") for action in actions) == 8
 
 
+@pytest.mark.wall_clock
 def test_concurrent_launches_finish_in_the_time_of_the_slowest(store):
     ledger, pooled = _eight(store), PooledRuntime(8, hold=0.5)
     started = time.monotonic()
@@ -143,7 +144,8 @@ def test_a_started_pool_spends_the_spawn_budget_for_the_next_one(store, monkeypa
     spawn = pooled.spawn
 
     def launch(config, lane, name, task):
-        clock[0] = 25.0
+        if lane != "master":
+            clock[0] = 25.0
         return spawn(config, lane, name, task)
 
     pooled.spawn = launch
