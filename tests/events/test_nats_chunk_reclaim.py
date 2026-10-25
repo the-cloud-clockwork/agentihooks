@@ -252,7 +252,7 @@ def test_sweep_purges_only_idle_unreferenced_chunk_groups():
         purge_stream=mock.AsyncMock(),
     )
     referenced = nats_payload.PAGED + json.dumps([f"{owner}.1.kept", 1]).encode()
-    history = mock.AsyncMock(return_value=[b"plain", referenced])
+    history = mock.AsyncMock(return_value=[b"plain", referenced, referenced])
     asyncio.run(nats_payload.sweep(js, "s", "p.", history, now))
     js.stream_info.assert_awaited_once_with("s", subjects_filter="p.>")
     history.assert_awaited_once_with("held")
@@ -266,9 +266,44 @@ def test_sweep_purges_only_idle_unreferenced_chunk_groups():
     js.purge_stream.assert_not_awaited()
 
 
-def test_sweep_runs_once_per_idle_period():
-    now = datetime.datetime.now(datetime.UTC)
-    assert nats_payload.due(None) >= now
-    assert nats_payload.due(now) is None
-    assert nats_payload.due(now - nats_payload.IDLE) >= now
+def test_sweep_is_due_once_per_idle_period():
+    now = datetime.datetime(2026, 10, 25, tzinfo=datetime.UTC)
+    assert nats_payload.due(None, now) == now
+    assert nats_payload.due(now - nats_payload.IDLE + datetime.timedelta(microseconds=1), now) is None
+    assert nats_payload.due(now - nats_payload.IDLE, now) == now
     assert nats_payload.IDLE == datetime.timedelta(minutes=15)
+
+
+def sweeping_store(scoped):
+    js = SimpleNamespace(_nc=SimpleNamespace(max_payload=2048))
+    common = {"_create_chunk": mock.AsyncMock(), "_reclaim": mock.AsyncMock(), "_history": mock.AsyncMock()}
+    if scoped:
+        root = SimpleNamespace(_nc=js._nc, _js=js)
+        store = SimpleNamespace(
+            _root=root, _swarm="crew", _bucket="b", _stream="S", _revision_base=0, _swept=None, **common
+        )
+        store._write_raw = mock.AsyncMock(return_value=1)
+        return store, lambda: nats_state.ScopedStateStore._write(store, "k", b"small", 0), store._history
+    store = SimpleNamespace(_js=js, _bucket="b", _swept=None, _key_history=mock.AsyncMock(), **common)
+    store._kv = SimpleNamespace(create=mock.AsyncMock(return_value=1))
+    return store, lambda: nats.NatsStateStore._write(store, "k", b"small", 0, "conflict"), store._key_history
+
+
+@pytest.mark.parametrize("scoped", [False, True])
+def test_writes_sweep_the_store_once_per_idle_period(scoped, monkeypatch):
+    sweep = mock.AsyncMock()
+    monkeypatch.setattr(nats_payload, "sweep", sweep)
+    store, write, history = sweeping_store(scoped)
+    asyncio.run(write())
+    asyncio.run(write())
+    sweep.assert_awaited_once()
+    js, stream, prefix, called, now = sweep.await_args.args
+    assert (js, called, now) == (store._root._js if scoped else store._js, history, store._swept)
+    assert (stream, prefix) == (("S", f"{subject('crew', 'state', 'b')}.") if scoped else ("KV_b", "$KV.b."))
+    assert datetime.datetime.now(datetime.UTC) - now < datetime.timedelta(minutes=1)
+
+
+def test_kv_key_history_reads_the_key_subject():
+    store = SimpleNamespace(_bucket="b", _history=mock.AsyncMock(return_value=[b"v"]))
+    assert asyncio.run(nats.NatsStateStore._key_history(store, "k")) == [b"v"]
+    store._history.assert_awaited_once_with("$KV.b.k")

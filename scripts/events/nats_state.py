@@ -1,3 +1,4 @@
+import datetime
 from collections.abc import Iterator
 from typing import TYPE_CHECKING
 
@@ -85,7 +86,7 @@ class ScopedStateStore:
                 await nats_payload.discard(self._root._js, self._stream, prefix, value)
             raise
         await self._reclaim(key, revision - self._revision_base)
-        if now := nats_payload.due(self._swept):
+        if now := nats_payload.due(self._swept, datetime.datetime.now(datetime.UTC)):
             self._swept = now
             prefix = f"{subject(self._swarm, 'state', self._bucket)}."
             await nats_payload.sweep(self._root._js, self._stream, prefix, self._history, now)
