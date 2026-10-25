@@ -56,7 +56,9 @@ def container(monkeypatch):
 
     monkeypatch.setattr(proof, "docker", docker)
     monkeypatch.setattr(proof, "ready", lambda _: {"root": "/home/worker/attempts/fixture/run/supervision/incarnation"})
-    monkeypatch.setattr(proof, "state", lambda _: {"Running": observed.running, "Pid": observed.pid, "ExitCode": observed.code})
+    monkeypatch.setattr(
+        proof, "state", lambda _: {"Running": observed.running, "Pid": observed.pid, "ExitCode": observed.code}
+    )
     monkeypatch.setattr(proof.time, "sleep", lambda _: None)
 
     def monotonic():
