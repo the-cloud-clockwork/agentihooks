@@ -127,6 +127,28 @@ def test_cold_native_accounts_use_their_own_fresh_quota_before_the_first_launch(
         assert readings[f"claude:{account}"]["seven_day"]["resets_at"] == 900
 
 
+def test_codex_slots_drop_accounts_whose_credential_the_router_refuses(monkeypatch):
+    monkeypatch.setattr(daemon.balancer, "cached_observations", lambda **kwargs: [])
+    monkeypatch.setattr(daemon.balancer, "discover_credentials", lambda env: [])
+    monkeypatch.setattr(daemon, "_claude_snapshots", lambda observed: None)
+    monkeypatch.setattr(daemon, "_native_accounts", lambda environ, observed: set())
+    monkeypatch.setattr(daemon, "claude_signed_in", lambda: False)
+    accounts = [
+        daemon.codex_router.CodexAccount("default"),
+        daemon.codex_router.CodexAccount("keyed", "AH_CX_TOKEN_keyed"),
+        daemon.codex_router.CodexAccount("empty", "AH_CX_TOKEN_empty"),
+        daemon.codex_router.CodexAccount("good", "AH_CX_TOKEN_good"),
+    ]
+    monkeypatch.setattr(daemon.codex_router, "accounts", lambda env: accounts)
+    asked = Mock(return_value={})
+    monkeypatch.setattr(daemon.codex_router, "quotas", asked)
+    environ = {"AH_CX_TOKEN_keyed": "sk-placeholder", "AH_CX_TOKEN_good": "at-placeholder"}
+    slots, quota = daemon._subscriptions(environ, {"claude": {}, "codex": {}}, 100)
+    assert [slot["account"] for slot in slots if slot["harness"] == "codex"] == ["default", "good"]
+    assert sorted(quota) == ["codex:default", "codex:good"]
+    assert [account.name for account in asked.call_args.args[0]] == ["default", "good"]
+
+
 def test_native_snapshot_collection_continues_after_a_missing_account_reading(monkeypatch):
     from hooks.context import quota_usage
     from scripts.routing import master_account
