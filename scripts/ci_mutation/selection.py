@@ -162,9 +162,12 @@ def collect_shard_stats(runner, test_runner, tests: list[str], output: Path, bas
     measured = bool(os.environ.get("MUTATION_STATS_CACHE"))
     coverage_file = output.with_suffix(".coverage")
     if measured:
-        os.environ["COVERAGE_FILE"] = str(coverage_file.resolve())
+        # An exported COVERAGE_FILE reaches every subprocess a test starts, whose coverage runs then write here.
+        os.environ.pop("COVERAGE_FILE", None)
+        config = output.with_suffix(".coveragerc")
+        config.write_text(f"[run]\ndata_file = {coverage_file.resolve()}\n")
         test_runner._pytest_add_cli_args.extend(
-            ["-p", "pytest_cov.plugin", "--cov=.", "--cov-context=test", "--cov-report=", "--cov-config=/dev/null"]
+            ["-p", "pytest_cov.plugin", "--cov=.", "--cov-context=test", "--cov-report=", f"--cov-config={config}"]
         )
     work = Path.cwd().resolve()
     bases = [
