@@ -68,7 +68,7 @@ def record(tool_name, tool_input, environ=None, root=None, now_ms=None, call_id=
     (folder / f"{name}.last").write_text(str(at), encoding="utf-8")
     if CALL_RE.match(call_id):
         (folder / f"{name}.open").mkdir(exist_ok=True)
-        (folder / f"{name}.open" / call_id).write_text(str(at), encoding="utf-8")
+        (folder / f"{name}.open" / call_id).touch()
     kind = classify(tool_name, tool_input)
     if not kind:
         return
@@ -81,7 +81,7 @@ def record(tool_name, tool_input, environ=None, root=None, now_ms=None, call_id=
         f.write(json.dumps(entry) + "\n")
 
 
-def finish(environ=None, root=None, now_ms=None, call_id=""):
+def finish(environ=None, root=None, now_ms=None, *, call_id):
     env = os.environ if environ is None else environ
     slug, name = env.get("AGENTIHOOKS_SWARM", ""), env.get("AGENTIHOOKS_AGENT_NAME", "")
     if not (NAME_RE.match(slug) and NAME_RE.match(name)):
@@ -90,9 +90,9 @@ def finish(environ=None, root=None, now_ms=None, call_id=""):
     at = int(time.time() * 1000) if now_ms is None else now_ms
     try:
         folder.mkdir(parents=True, exist_ok=True)
-        (folder / f"{name}.done").write_text(str(at), encoding="utf-8")
+        (folder / f"{name}.done").write_text(str(at))
         if CALL_RE.match(call_id):
-            (folder / f"{name}.open" / call_id).unlink(missing_ok=True)
+            (folder / f"{name}.open" / call_id).unlink()
     except OSError:
         return
 
@@ -105,9 +105,7 @@ def open_calls(slug, name, root=None) -> list[str]:
 
 def end_turn(slug, name, root=None):
     """At turn end no call is in flight: drop the ones a denied call left open."""
-    folder = Path(root or default_root()) / slug / f"{name}.open"
-    for call_id in open_calls(slug, name, root):
-        (folder / call_id).unlink(missing_ok=True)
+    shutil.rmtree(Path(root or default_root()) / slug / f"{name}.open", ignore_errors=True)
 
 
 def mark_revived(slug, name, root=None, now_ms=None):

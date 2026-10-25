@@ -25,7 +25,7 @@ def call(slug, name, at, done=True):
     environ = {"AGENTIHOOKS_SWARM": slug, "AGENTIHOOKS_AGENT_NAME": name}
     activity.record("Bash", {"command": "ls"}, environ, None, at)
     if done:
-        activity.finish(environ, None, at)
+        activity.finish(environ, None, at, call_id="")
 
 
 def master(store, slug="sw", pane="working", called=True):
@@ -182,15 +182,21 @@ def test_stopping_swarm_is_left_to_its_stop(store, state):
     assert run(store, runtime, START + 60 * MINUTE) == []
 
 
-def proof(store, parent_state):
+class ParentLedger(FakeLedger):
+    def tasks(self, slug):
+        return super().tasks(slug) if slug == "sw" else []
+
+
+def proof(store, parent_state, task_id="t1199"):
     slug = "proof-01df01-t1199-1"
     store.create(SwarmConfig(slug, "/repo", max_eng=2, max_ci=1))
     store.redis.hset(store.key(slug, "proof-creator"), mapping={"parent": "sw", "owner": "engineer@01df01-0001"})
-    return slug, FakeLedger([{"id": "t1199", "state": parent_state}, {"id": "t1", "state": "blocked"}])
+    return slug, ParentLedger([{"id": task_id, "state": parent_state}, {"id": "t1", "state": "blocked"}])
 
 
-def test_proof_swarm_with_a_blocked_parent_task_stops_itself(store):
-    slug, ledger = proof(store, "blocked")
+@pytest.mark.parametrize("task_id", ["t1199", "T-1199"])
+def test_proof_swarm_with_a_blocked_parent_task_stops_itself(store, task_id):
+    slug, ledger = proof(store, "blocked", task_id)
     agent, runtime = master(store, slug)
     assert run(store, runtime, START + 10 * MINUTE, slug, ledger) == [
         f"stopped proof swarm {slug}: its parent task is blocked and its master {agent.name} stalled"
@@ -271,19 +277,41 @@ def test_turn_end_drops_calls_a_denied_call_left_open(tmp_path, monkeypatch):
 def test_unwritable_activity_folder_never_breaks_the_hook(tmp_path):
     blocker = tmp_path / "file"
     blocker.write_text("x")
-    activity.finish({"AGENTIHOOKS_SWARM": "sw", "AGENTIHOOKS_AGENT_NAME": "master@sw-1"}, blocker, 1, "toolu_a")
+    activity.finish({"AGENTIHOOKS_SWARM": "sw", "AGENTIHOOKS_AGENT_NAME": "master@sw-1"}, blocker, 1, call_id="toolu_a")
     assert activity.finished_events("sw", blocker) == {}
 
 
 def test_finish_stamps_the_bound_agent_only(tmp_path):
+    root = tmp_path / "new" / "root"
     bound = {"AGENTIHOOKS_SWARM": "sw", "AGENTIHOOKS_AGENT_NAME": "master@sw-1"}
-    activity.finish(bound, tmp_path, 5)
-    activity.finish({"AGENTIHOOKS_SWARM": "sw", "AGENTIHOOKS_AGENT_NAME": "../x"}, tmp_path, 6)
-    activity.finish({"AGENTIHOOKS_SWARM": "", "AGENTIHOOKS_AGENT_NAME": "master@sw-2"}, tmp_path, 7)
-    activity.finish(bound, tmp_path, 9)
-    (tmp_path / "sw" / "broken.done").write_text("x")
-    assert activity.finished_events("sw", tmp_path) == {"master@sw-1": 9}
-    assert activity.finished_events("none", tmp_path) == {}
+    activity.finish(bound, root, 5, call_id="")
+    activity.finish({"AGENTIHOOKS_SWARM": "sw", "AGENTIHOOKS_AGENT_NAME": "../x"}, root, 6, call_id="")
+    activity.finish({"AGENTIHOOKS_SWARM": "", "AGENTIHOOKS_AGENT_NAME": "master@sw-2"}, root, 7, call_id="")
+    activity.finish({"AGENTIHOOKS_SWARM": "sw"}, root, 8, call_id="")
+    activity.finish({"AGENTIHOOKS_AGENT_NAME": "master@sw-3"}, root, 8, call_id="")
+    activity.finish(bound, root, 9, call_id="")
+    assert [path.name for path in root.iterdir()] == ["sw"]
+    assert sorted(path.name for path in (root / "sw").iterdir()) == ["master@sw-1.done"]
+    assert (root / "sw" / "master@sw-1.done").read_text() == "9"
+    (root / "sw" / "broken.done").write_text("x")
+    assert activity.finished_events("sw", root) == {"master@sw-1": 9}
+    assert activity.finished_events("none", root) == {}
+
+
+def test_finish_of_an_unrecorded_call_still_stamps_the_end(tmp_path):
+    bound = {"AGENTIHOOKS_SWARM": "sw", "AGENTIHOOKS_AGENT_NAME": "master@sw-1"}
+    activity.finish(bound, tmp_path, 4, call_id="toolu_never")
+    assert activity.finished_events("sw", tmp_path) == {"master@sw-1": 4}
+
+
+def test_turn_end_without_open_calls_and_outside_the_root_leaves_them(tmp_path):
+    activity.end_turn("sw", "master@sw-1", tmp_path)
+    environ = {"AGENTIHOOKS_SWARM": "sw", "AGENTIHOOKS_AGENT_NAME": "master@sw-1"}
+    activity.record("Bash", {}, environ, tmp_path, 1, call_id="toolu_a")
+    activity.end_turn("sw", "master@sw-1", tmp_path / "other")
+    assert activity.open_calls("sw", "master@sw-1", tmp_path) == ["toolu_a"]
+    activity.end_turn("sw", "master@sw-1", tmp_path)
+    assert activity.open_calls("sw", "master@sw-1", tmp_path) == []
 
 
 def test_finish_reads_the_session_environment(tmp_path, monkeypatch):
@@ -292,5 +320,5 @@ def test_finish_reads_the_session_environment(tmp_path, monkeypatch):
     monkeypatch.setenv("AGENTIHOOKS_SWARM", "sw")
     monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "master@sw-1")
     before = int(time.time() * 1000)
-    activity.finish(root=tmp_path)
+    activity.finish(root=tmp_path, call_id="")
     assert before <= activity.finished_events("sw", tmp_path)["master@sw-1"] <= int(time.time() * 1000)
