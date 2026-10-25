@@ -51,8 +51,24 @@ def run(endpoint: str, now: float, fetch: Callable[[], dict]) -> dict:
     return found
 
 
+def _log_key(endpoint):
+    if source() in TOKENS:
+        return _key(endpoint)
+    config = Path(
+        os.environ.get("GH_CONFIG_DIR") or Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config") / "gh"
+    )
+    marks = []
+    for name in ("hosts.yml", "config.yml"):
+        try:
+            stat = (config / name).stat()
+            marks.append((stat.st_ino, stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns))
+        except FileNotFoundError:
+            marks.append(None)
+    return _key(f"{endpoint} {marks}")
+
+
 def job_log(endpoint: str, fetch: Callable[[], str]) -> str:
-    entry = home() / f"{_key(endpoint)}.log"
+    entry = home() / f"{_log_key(endpoint)}.log"
     entry.parent.mkdir(parents=True, exist_ok=True)
     with entry.with_suffix(".lock").open("a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
@@ -69,9 +85,16 @@ def job_log(endpoint: str, fetch: Callable[[], str]) -> str:
 
 def snapshot(endpoint: str, now: float, fetch: Callable[[], dict]) -> dict:
     entry = home() / f"{_key(f'snapshot {endpoint}')}.json"
-    entry.parent.mkdir(parents=True, exist_ok=True)
-    with entry.with_suffix(".lock").open("a") as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX)
+    try:
+        entry.parent.mkdir(parents=True, exist_ok=True)
+        lock = entry.with_suffix(".lock").open("a")
+    except OSError:
+        return fetch()
+    with lock:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+        except OSError:
+            return fetch()
         try:
             cached = json.loads(entry.read_text())
             if now - cached["at"] < RUN_TTL_S:
