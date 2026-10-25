@@ -10,6 +10,7 @@ from pathlib import Path
 from time import process_time
 from types import ModuleType
 
+import pytest
 from mutmut.utils.format_utils import get_mutant_name
 
 from scripts.ci_cpu_quota import quota_cpus
@@ -23,7 +24,6 @@ from scripts.ci_mutation.stats import write_part
 GROUP = re.compile(r"xdist_group\(\s*(?:name\s*=\s*)?[\"']([^\"']+)[\"']")
 # This group only loads fakeredis once per xdist worker; it guards no shared resource.
 IMPORT_GROUPS = {"fakeredis"}
-NO_TESTS_COLLECTED = 5
 
 
 def changed_mutations(filename: str, source: str, changed: set[int]) -> tuple[object, list]:
@@ -179,7 +179,7 @@ def collect_shard_stats(runner, test_runner, tests: list[str], output: Path, bas
     start = process_time()
     status = test_runner.run_stats(tests=tests)
     # A bucket of only wall clock tests deselects everything, and pytest reports that as no tests collected.
-    status = 0 if status == NO_TESTS_COLLECTED else status
+    status = 0 if status == pytest.ExitCode.NO_TESTS_COLLECTED else status
     dependencies = {}
     if measured:
         from subprocess import check_output
