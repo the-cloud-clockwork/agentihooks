@@ -42,6 +42,8 @@ GET_FIELDS = COMMON_FIELDS | {"projects", "session_uid"}
 RANGE_FIELDS = COMMON_FIELDS | {"citation", "before", "after", "limit", "cursor"}
 CITATION_FIELDS = frozenset({"session_uid", "source_generation", "first_sequence", "last_sequence", "event_ids"})
 MAX_LIST = 50
+LIST_DEFAULT = 20
+RECORDS_DEFAULT = 50
 MAX_RECORDS = 200
 MAX_WIDEN = 20
 CURSOR_SECONDS = 900.0
@@ -188,7 +190,7 @@ class SessionTools:
 
     def _issue(self, grant: Grant, request: dict, position: int, fingerprint: str, now: float) -> str:
         domain, holder, asked = grant.corpus, _grant_digest(grant), digest({**request, "cursor": None})
-        cursor_id = f"cursor-{digest([holder, asked, position, fingerprint])[:32]}"
+        cursor_id = f"cursor-{digest([holder, asked, position, fingerprint])}"
         self.catalog.db.execute(PRUNE, (domain, now))
         self.catalog.db.execute(ISSUE, (domain, cursor_id, holder, asked, position, fingerprint, now + CURSOR_SECONDS))
         return cursor_id
@@ -216,7 +218,7 @@ class SessionTools:
     def session_list(self, grant: Grant, request: dict, now: float) -> dict:
         _envelope(request, LIST_FIELDS)
         projects = self._allowed(grant, request)
-        limit = _bounded(request, "limit", 20, 1, MAX_LIST)
+        limit = _bounded(request, "limit", LIST_DEFAULT, 1, MAX_LIST)
         visible = self._visible(grant.corpus, projects)
         page, cursor = self._paged(grant, request, [list(item) for item in visible], limit, now)
         sessions = [self._summary(grant.corpus, uid, provider) for uid, provider in page]
@@ -238,7 +240,7 @@ class SessionTools:
             raise Unresolved(STALE_CITATION)
         return json.loads(row[0])
 
-    def session_search(self, grant: Grant, request: dict, now: float, embedder: Embedder | None = None) -> dict:
+    def session_search(self, grant: Grant, request: dict, embedder: Embedder | None = None) -> dict:
         answer = search_api.search(self.searcher, grant, request, embedder)
         if answer["state"] != "answered":
             raise Rejected(answer["error"]["class"], answer["error"]["detail"], answer["error"]["retry"])
@@ -252,7 +254,7 @@ class SessionTools:
             result["session"] = {
                 key: summary[key] for key in ("harness", "task_ids", "first_timestamp", "last_timestamp")
             }
-        return {key: value for key, value in answer.items() if key not in ("schema_version", "operation_id", "state")}
+        return answer
 
     def _cited(self, grant: Grant, cited: dict, before: int, after: int) -> list[dict]:
         self._resolve(grant, sorted(grant.projects), cited["session_uid"])
@@ -282,7 +284,7 @@ class SessionTools:
             "task_id": record.get("task_id"),
             "normalized_hash": event["normalized_hash"],
             "record": record,
-            "source_text": raw.decode("utf-8", errors="replace"),
+            "source_text": raw.decode(errors="replace"),
         }
 
     def session_records(self, grant: Grant, request: dict, now: float) -> dict:
@@ -292,7 +294,7 @@ class SessionTools:
             raise Rejected("forbidden_scope", core.SCOPE_REFUSED)
         cited = _citation(request.get("citation"))
         before, after = _bounded(request, "before", 0, 0, MAX_WIDEN), _bounded(request, "after", 0, 0, MAX_WIDEN)
-        limit = _bounded(request, "limit", 50, 1, MAX_RECORDS)
+        limit = _bounded(request, "limit", RECORDS_DEFAULT, 1, MAX_RECORDS)
         events = self._cited(grant, cited, before, after)
         items = [[event["event_id"], event["normalized_hash"]] for event in events]
         page, cursor = self._paged(grant, request, items, limit, now)
@@ -326,7 +328,7 @@ def _target(tools: SessionTools, grant: Grant, name: str, now: float) -> tuple[s
 def _answer(tools: SessionTools, grant: Grant, name: str, request: dict, now: float, embedder: Embedder | None):
     target, alias = _target(tools, grant, name, now)
     if target == "session_search":
-        answer = tools.session_search(grant, request, now, embedder)
+        answer = tools.session_search(grant, request, embedder)
     elif target in TOOLS:
         answer = TOOLS[target](tools, grant, request, now)
     else:
@@ -353,4 +355,4 @@ def call(
         return _refusal(operation, Rejected("evidence_integrity", str(error)))
     except sqlite3.OperationalError:
         return _refusal(operation, Rejected("dependency_unavailable", TOOL_FAILED, retry="same_request"))
-    return {"schema_version": SCHEMA_VERSION, "operation_id": operation, "state": "answered", **answer}
+    return {**answer, "schema_version": SCHEMA_VERSION, "operation_id": operation, "state": "answered"}

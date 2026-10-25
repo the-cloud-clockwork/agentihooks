@@ -32,6 +32,9 @@ def bank(inputs, tmp_path):
 
 
 def error(answer):
+    assert set(answer) == {"schema_version", "operation_id", "state", "error"}
+    assert answer["schema_version"] == SCHEMA_VERSION and answer["state"] == "rejected"
+    assert answer["operation_id"].split(":")[1]
     return answer["error"]
 
 
@@ -191,7 +194,11 @@ def test_scope_outside_the_grant_is_refused_and_counted(inputs, bank, fields):
 @pytest.mark.parametrize("projects", ["x", [""], [3]])
 def test_malformed_projects_are_refused(inputs, bank, projects):
     answer = bank.ask("session_list", body(inputs, projects=projects))
-    assert error(answer)["detail"] == "projects must be a list of non-empty strings"
+    assert error(answer) == {
+        "class": "invalid_request",
+        "retry": "never",
+        "detail": "projects must be a list of non-empty strings",
+    }
     assert bank.counter(core.SCOPE_REJECTIONS) == 0
 
 
@@ -352,7 +359,11 @@ def test_a_catalog_failure_is_retryable(inputs, bank, monkeypatch):
 
 def test_cursor_type_and_request_binding(inputs, bank):
     first = bank.ask("session_list", body(inputs, limit=1))
-    assert error(bank.ask("session_list", body(inputs, limit=1, cursor=3)))["detail"] == "cursor must be a string"
+    assert error(bank.ask("session_list", body(inputs, limit=1, cursor=3))) == {
+        "class": "invalid_request",
+        "retry": "never",
+        "detail": "cursor must be a string",
+    }
     other = bank.ask("session_list", body(inputs, limit=2, cursor=first["next_cursor"]))
     assert error(other) == {"class": "invalid_request", "retry": "never", "detail": records.CURSOR_OTHER_REQUEST}
     unknown = bank.ask("session_list", body(inputs, limit=1, cursor="cursor-unknown"))
@@ -436,6 +447,71 @@ def test_an_unknown_tool_is_refused(inputs, bank):
 
 def test_the_counter_reads_zero_before_any_write(bank):
     assert bank.tools.counter("swarm-fixture", records.RESOLUTION_FAILURES) == 0
+
+
+def test_listed_sessions_carry_the_same_summary_as_get(inputs, bank):
+    listed = bank.ask("session_list", body(inputs))["sessions"]
+    for session in listed:
+        got = bank.ask("session_get", body(inputs, session_uid=session["session_uid"]))["session"]
+        assert session == got and session["events"] > 0
+    assert {session["harness"] for session in listed} == {"claude", "codex"}
+
+
+def test_list_and_records_defaults_page_at_their_constants(inputs, bank, monkeypatch):
+    monkeypatch.setattr(records, "LIST_DEFAULT", 1)
+    monkeypatch.setattr(records, "RECORDS_DEFAULT", 1)
+    assert len(bank.ask("session_list", body(inputs))["sessions"]) == 1
+    assert len(bank.ask("session_records", body(inputs, citation=cited(bank)))["records"]) == 1
+
+
+def test_each_hit_carries_its_own_session_metadata(inputs, bank):
+    answer = bank.ask("session_search", body(inputs, query=inputs["queries"]["readme"]))
+    assert answer["results"] and {item["session_uid"] for item in answer["results"]} == {bank.uid("readme")}
+    assert answer["results"][0]["session"] == {
+        "harness": "codex",
+        "task_ids": ["fixture-readme"],
+        "first_timestamp": "2026-10-21T10:00:00Z",
+        "last_timestamp": "2026-10-21T10:00:20Z",
+    }
+    assert answer["operation_id"] == f"session_search:{digest(body(inputs, query=inputs['queries']['readme']))[:16]}"
+
+
+def test_search_passes_the_embedder_through(inputs, bank, monkeypatch):
+    seen = []
+
+    def searched(grant_arg, query, embedder):
+        seen.append(embedder)
+        return {"mode": "lexical_only", "vector": {}, "fusion": {}, "query": {}, "results": []}
+
+    monkeypatch.setattr(bank.tools.searcher, "search", searched)
+    provider = object()
+    answer = records.call(bank.tools, "search_sessions", grant(inputs), body(inputs, query="x"), 0.0, provider)
+    assert answer["state"] == "answered" and seen == [provider]
+
+
+def test_a_stale_citation_to_a_revoked_session_reads_as_unavailable(inputs, bank):
+    citation = {**cited(bank), "first_sequence": 3}
+    bank.revoke("lock")
+    answer = bank.ask("session_records", body(inputs, citation=citation))
+    assert error(answer)["detail"] == records.UNAVAILABLE
+
+
+def test_undecodable_archive_bytes_are_replaced(inputs, bank, monkeypatch):
+    citation = cited(bank)
+    monkeypatch.setattr(archive, "source_range", lambda *args: b"\xffok")
+    answer = bank.ask("session_records", body(inputs, citation=citation))
+    assert {item["source_text"] for item in answer["records"]} == {"�ok"}
+
+
+def test_mcp_grant_is_empty_without_operator_settings(monkeypatch):
+    for name in (mcp_sessions.PRINCIPAL_ENV, mcp_sessions.CORPUS_ENV, mcp_sessions.PROJECTS_ENV):
+        monkeypatch.delenv(name, raising=False)
+    assert mcp_sessions.grant() == Grant("", "", frozenset())
+
+
+def test_mcp_projects_split_on_commas_only():
+    assert mcp_sessions._projects(" a b , c ,") == {"projects": ["a b", "c"]}
+    assert mcp_sessions._projects(" , ") == {}
 
 
 def test_mcp_tools_are_hidden_without_a_catalog():

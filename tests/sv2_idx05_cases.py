@@ -20,6 +20,7 @@ EVIDENCE_CLASS = (
     "the session service, the central database and the archive bucket, and a recording stub stands in for the MCP "
     "server; no model, HTTP server, MCP transport or Pod runs"
 )
+MAX_PAGES = 10
 HIDDEN = ("database is locked", "busy_timeout", "tools-lock.jsonl", "personal-corpus")
 
 
@@ -74,11 +75,12 @@ def listed(bank, answer):
 
 def walk(bank, request, now=None):
     pages, answer = [], bank.ask("session_list", request, now)
-    while True:
+    for _ in range(MAX_PAGES):
         pages.append(listed(bank, answer))
         if answer["next_cursor"] is None:
             return pages
         answer = bank.ask("session_list", {**request, "cursor": answer["next_cursor"]}, now)
+    raise AssertionError("the listing never ended")
 
 
 def hit(bank):
@@ -304,11 +306,13 @@ def rollback(bank, root, before):
 
 def expand(bank, request, cursor, now):
     pages = []
-    while cursor is not None:
+    for _ in range(MAX_PAGES):
+        if cursor is None:
+            return pages
         answer = bank.ask("session_records", {**request, "cursor": cursor}, now)
         pages.append(answer["records"])
         cursor = answer["next_cursor"]
-    return pages
+    raise AssertionError("the expansion never ended")
 
 
 def cursor_rows(bank):
