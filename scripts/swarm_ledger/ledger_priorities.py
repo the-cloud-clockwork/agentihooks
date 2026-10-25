@@ -12,6 +12,8 @@ ITEM_RE = re.compile(r"^(phases|questions|followups|tasks)/[^/]+$")
 AUTHOR_RE = re.compile(r"^[A-Za-z][\w.@-]{0,63}$")
 OPS = ("priority", "priority_clear")
 DERIVED_WORDS = 16
+NOTHING = "No priority waits on {target} to clear."
+CLEARED = "The priority on {target} is already cleared and returns only when its ask changes."
 
 
 def check(op):
@@ -46,12 +48,16 @@ def _add(doc, op, ctx):
 
 
 def _clear(doc, op, ctx):
-    rows = doc.setdefault("priorities", [])
-    gone = rows if op["target"] == "all" else [p for p in rows if op["target"] in (p["id"], p["item"])]
-    if not gone:
-        return op["target"] == "all"
-    doc["priorities"] = [p for p in rows if p not in gone]
+    rows, target = doc.setdefault("priorities", []), op["target"]
+    gone = rows if target == "all" else [p for p in rows if target in (p["id"], p["item"])]
     found, dismissed = wanted(doc), ctx.meta.setdefault("priorities_dismissed", {})
+    if not gone and target in found and dismissed.get(target) != found[target]:
+        gone = [_derived_row(target, found[target], None, ctx)]
+    if not gone:
+        if target != "all":
+            ctx.refused.append((CLEARED if target in dismissed else NOTHING).format(target=target))
+        return target == "all"
+    doc["priorities"] = [p for p in rows if p not in gone]
     for row in gone:
         if row["item"] in found:
             dismissed[row["item"]] = found[row["item"]]

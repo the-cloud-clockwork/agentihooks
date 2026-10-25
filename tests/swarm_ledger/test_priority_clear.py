@@ -198,6 +198,7 @@ def test_cli_clears_a_blocked_task_priority_once_then_names_why(monkeypatch, cap
         "phase": phase,
         "title": "x",
         "description": "y",
+        "lane": "eng",
     }
     block = {"op": "task_update", "id": "tu", "by": "boss", "item": "tasks/t1", "fields": {"state": "blocked"}}
     core.sync(SLUG, ops=[add_task])
