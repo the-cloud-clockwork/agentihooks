@@ -14,12 +14,6 @@ def _jobs():
     return yaml.safe_load(path.read_text())["jobs"]
 
 
-def test_forwarded_mutation_statistics_never_requests_a_runner():
-    condition = _jobs()["mutation-stats"]["if"]
-    assert "needs.mutation-plan.result == 'success'" in condition
-    assert "&& needs.mutation-plan.outputs.forwarded != 'true'" in condition
-
-
 @pytest.mark.parametrize("event", ["pull_request", "workflow_dispatch"])
 @pytest.mark.parametrize("forwarded", ["true", "false", ""])
 @pytest.mark.parametrize("plan", ["success", "failure", "skipped", "cancelled"])
