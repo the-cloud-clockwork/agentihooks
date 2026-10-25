@@ -10,7 +10,8 @@ import os
 import sys
 import threading
 import time
-from contextlib import contextmanager
+from concurrent.futures import ThreadPoolExecutor
+from contextvars import copy_context
 from dataclasses import dataclass, field, replace
 from itertools import count
 from typing import Protocol
@@ -90,6 +91,7 @@ from scripts.swarm_v2 import masters as master_seats
 
 LEASE_MS = 10 * 60 * 1000
 SPAWN_BUDGET_S = 20
+SPAWN_POOL = 8
 STARTUP_GRACE_MS = 6 * 60 * 1000
 ACK_LATER = "hive_ack_later"
 ACKNOWLEDGING = "acknowledging"
@@ -989,13 +991,13 @@ def _held_for_master(slug, store, now_ms):
     return [f"holding spawns: swarm {s} waits on a session slot for its master" for s in others[:1]]
 
 
-def _host_full(slug, store, now_ms):
+def _host_full(slug, store, now_ms, in_flight=0):
     from scripts.swarm import capacity
 
     host = capacity.read(store, slug).get("host") or {}
     if host.get("room") is None:
         return ""
-    recent = host_spent(store, host["granted_at"], now_ms)
+    recent = host_spent(store, host["granted_at"], now_ms) + in_flight
     if recent < host["room"]:
         return ""
     return f"host {host['limit']} room {host['room']}, {recent} spawned since it was granted: {host['reason']}"
@@ -1033,12 +1035,12 @@ def spawn_holds(store, slug):
     return [held] if held else []
 
 
-def _spawn_stop(slug, config, store, runtime, now_ms):
+def _spawn_stop(slug, config, store, runtime, now_ms, in_flight=0):
     if stopped := run_window.claims_stopped(store, slug, config, now_ms):
         return stopped
     if not runtime.has_capacity(config):
         return "every agent is at its session cap, waiting"
-    if host := _host_full(slug, store, now_ms):
+    if host := _host_full(slug, store, now_ms, in_flight):
         return _hold(slug, store, f"holding spawns: {host}")
     return ""
 
@@ -1053,17 +1055,17 @@ class _LaunchClock:
             return f"spent this pass's {SPAWN_BUDGET_S} second launch budget, {task['id']} waits a pass"
         return None
 
-    @contextmanager
-    def launch(self):
-        at = time.monotonic()
+    def charge(self, at, errors, launches):
         self.tried += 1
-        try:
-            yield
-        except Exception as exc:
-            if not self.forgiven:
-                self.free, self.forgiven = time.monotonic() - at, 1
-            self.failing = _steered_off(exc) or self.failing
-            raise
+        if len(errors) == launches and not self.forgiven:
+            self.free, self.forgiven = time.monotonic() - at, 1
+        for error in errors:
+            self.failing = _steered_off(error) or self.failing
+
+
+def _launch_room(runtime, config):
+    room = getattr(runtime, "launch_room", None)
+    return max(1, min(SPAWN_POOL, room(config) if room else 1))
 
 
 def _steer(slug, store, task, failing):
@@ -1106,85 +1108,137 @@ def _spawn(slug, config, store, ledger, runtime, rows, doc, now_ms):
     order, actions = _spawn_order(slug, config, store, agents, rows, doc, runtime)
     actions += _block_unresolved(slug, ledger, rows, order)
     order = [(lane, task) for lane, task in order if profile_first.UNRESOLVED not in task]
-    clock = _LaunchClock()
+    run = _Pass(slug, config, store, ledger, runtime, rows, doc, now_ms)
+    clock, batch = _LaunchClock(), []
     for lane, task in order:
-        expected = {"claimed_by": task.get("claimed_by", ""), "claim_generation": task.get("claim_generation", 0)}
-        if held:
-            return actions + held
-        if stop := _spawn_stop(slug, config, store, runtime, now_ms) or clock.spent(task):
-            return actions + [stop]
-        blocked = (
-            _lives_spent(slug, store, ledger, rows, task)
-            or _room_wait(runtime, lane, task)
-            or _held_back(slug, ledger, rows, runtime, task, now_ms)
-            or _owner_hold(slug, store, runtime, task)
-        )
-        if blocked:
-            actions.append(blocked)
-            continue
-        name = store.next_name(slug, lane, now_ms)
-        if not store.claim(slug, task["id"], name, LEASE_MS):
-            _release_admission(slug, runtime, task)
-            continue
-        handoff = store.handoff(slug, task["id"])
-        lives = store.earlier_lives(slug, task["id"])
-        if handoff:
-            task["handoff"] = handoff
-            task["handoff_envelope"] = continuation.resolve(
-                config.repo, task, rows, lives, store.handoff_envelope(slug, task["id"]) or {}, reclaim
-            )
-        elif lives or task.get("branch"):
-            task["reclaim"] = continuation.resolve(config.repo, task, rows, lives, {}, reclaim)
-            store.put_reclaim(slug, name, task["reclaim"])
-        task["stack_base"] = _stack_base(task, rows, config.repo)
-        task["overlaps"] = _sharing(task, rows, [a for a in store.agents(slug) if runtime.reported(a)])
-        task["group"] = [
-            {key: rows[m][key] for key in ("id", "title", "description")}
-            for m in task.get("group_members") or []
-            if m in rows
+        stop = held or [
+            _spawn_stop(slug, config, store, runtime, now_ms, len(batch)) or (not batch and clock.spent(task))
         ]
-        saved = store.redis.hget(store.key(slug, "launch-assignments"), task["id"])
-        preferred = json.loads(saved)["seat"] if saved else store.handoff_seat(slug, task["id"])
-        seat = _free_seat(slug, lane, taken, preferred)
-        taken.add(seat)
-        record = AgentRecord(name, lane, task["id"], started_at=now_ms, state="starting", seat=seat)
-        store.put_agent(slug, record)
-        try:
-            state = "pr" if task.get("pr_url") else "claimed"
-            fields = {
-                "state": state,
-                "claimed_by": name,
-                "workspace": str(ledger_workspace.scaffold(slug, task, doc)),
-            }
-            kind = config.lanes.get(lane, {}).get("kind", "")
-            if kind not in ("", "auto") and not task.get("kind"):
-                fields["kind"] = kind
-            live = ledger.update_task(slug, task["id"], fields, if_state=("open",), if_match=expected)
-            task.update(live)
-            if live["claimed_by"] != name:
-                _release_admission(slug, runtime, task)
-                store.release(slug, task["id"], name)
-                store.drop_agent(slug, name)
-                actions.append(f"task {task['id']} is {live['state']} on the ledger, not claimed")
-                continue
-            task.update(fields)
-            store.record_launch(slug, record, "pending")
-            store.seats.occupy(seat, name, now_ms)
-            task["transfer"] = transfers.attach(store, slug, record)
-            primed_task = {
-                **primed(store, slug, seat, task),
-                ACK_LATER: True,
-                **_steer(slug, store, task, clock.failing),
-            }
-            from scripts.swarm_v2.runtime import codex
+        if any(stop):
+            return actions + _launch_all(run, clock, batch) + stop
+        launch, prepared = _prepare(run, lane, task, taken, clock.failing)
+        actions += prepared
+        batch += [launch] if launch else []
+        if batch and len(batch) >= _launch_room(runtime, config):
+            actions += _launch_all(run, clock, batch)
+            batch = []
+    return actions + _launch_all(run, clock, batch)
 
-            with clock.launch():
-                placed = runtime.spawn(config, lane, name, primed_task)
-                launched = codex.admit_legacy(store, slug, placed_record(record, placed), runtime)
-        except Exception as exc:
-            actions += _not_launched(slug, store, ledger, runtime, rows, Failed(record, task, exc), now_ms)
-            continue
-        actions += _started(slug, config, store, ledger, doc, Started(record, task, placed, launched), now_ms)
+
+@dataclass(frozen=True)
+class _Pass:
+    slug: str
+    config: SwarmConfig
+    store: object
+    ledger: object
+    runtime: object
+    rows: dict
+    doc: dict
+    now_ms: int
+
+
+@dataclass(frozen=True)
+class Launch:
+    record: AgentRecord
+    task: dict
+    primed: dict
+
+
+def _prepare(run, lane, task, taken, failing):
+    slug, config, store, ledger, runtime = run.slug, run.config, run.store, run.ledger, run.runtime
+    rows, doc, now_ms = run.rows, run.doc, run.now_ms
+    expected = {"claimed_by": task.get("claimed_by", ""), "claim_generation": task.get("claim_generation", 0)}
+    blocked = (
+        _lives_spent(slug, store, ledger, rows, task)
+        or _room_wait(runtime, lane, task)
+        or _held_back(slug, ledger, rows, runtime, task, now_ms)
+        or _owner_hold(slug, store, runtime, task)
+    )
+    if blocked:
+        return None, [blocked]
+    name = store.next_name(slug, lane, now_ms)
+    if not store.claim(slug, task["id"], name, LEASE_MS):
+        _release_admission(slug, runtime, task)
+        return None, []
+    handoff = store.handoff(slug, task["id"])
+    lives = store.earlier_lives(slug, task["id"])
+    if handoff:
+        task["handoff"] = handoff
+        task["handoff_envelope"] = continuation.resolve(
+            config.repo, task, rows, lives, store.handoff_envelope(slug, task["id"]) or {}, reclaim
+        )
+    elif lives or task.get("branch"):
+        task["reclaim"] = continuation.resolve(config.repo, task, rows, lives, {}, reclaim)
+        store.put_reclaim(slug, name, task["reclaim"])
+    task["stack_base"] = _stack_base(task, rows, config.repo)
+    task["overlaps"] = _sharing(task, rows, [a for a in store.agents(slug) if runtime.reported(a)])
+    task["group"] = [
+        {key: rows[m][key] for key in ("id", "title", "description")}
+        for m in task.get("group_members") or []
+        if m in rows
+    ]
+    saved = store.redis.hget(store.key(slug, "launch-assignments"), task["id"])
+    preferred = json.loads(saved)["seat"] if saved else store.handoff_seat(slug, task["id"])
+    seat = _free_seat(slug, lane, taken, preferred)
+    taken.add(seat)
+    record = AgentRecord(name, lane, task["id"], started_at=now_ms, state="starting", seat=seat)
+    store.put_agent(slug, record)
+    try:
+        state = "pr" if task.get("pr_url") else "claimed"
+        fields = {
+            "state": state,
+            "claimed_by": name,
+            "workspace": str(ledger_workspace.scaffold(slug, task, doc)),
+        }
+        kind = config.lanes.get(lane, {}).get("kind", "")
+        if kind not in ("", "auto") and not task.get("kind"):
+            fields["kind"] = kind
+        live = ledger.update_task(slug, task["id"], fields, if_state=("open",), if_match=expected)
+        task.update(live)
+        if live["claimed_by"] != name:
+            _release_admission(slug, runtime, task)
+            store.release(slug, task["id"], name)
+            store.drop_agent(slug, name)
+            return None, [f"task {task['id']} is {live['state']} on the ledger, not claimed"]
+        task.update(fields)
+        store.record_launch(slug, record, "pending")
+        store.seats.occupy(seat, name, now_ms)
+        task["transfer"] = transfers.attach(store, slug, record)
+        primed_task = {
+            **primed(store, slug, seat, task),
+            ACK_LATER: True,
+            **_steer(slug, store, task, failing),
+        }
+    except Exception as exc:
+        return None, _not_launched(slug, store, ledger, runtime, rows, Failed(record, task, exc), now_ms)
+    return Launch(record, task, primed_task), []
+
+
+def _launch(run, launch):
+    from scripts.swarm_v2.runtime import codex
+
+    try:
+        placed = run.runtime.spawn(run.config, launch.record.lane, launch.record.name, launch.primed)
+        return placed, codex.admit_legacy(run.store, run.slug, placed_record(launch.record, placed), run.runtime)
+    except Exception as exc:
+        return None, exc
+
+
+def _launch_all(run, clock, batch):
+    if not batch:
+        return []
+    at, contexts = time.monotonic(), [copy_context() for _ in batch]
+    with ThreadPoolExecutor(max_workers=len(batch)) as pool:
+        outcomes = list(pool.map(lambda context, launch: context.run(_launch, run, launch), contexts, batch))
+    clock.charge(at, [error for _, error in outcomes if isinstance(error, Exception)], len(batch))
+    actions = []
+    for launch, (placed, launched) in zip(batch, outcomes):
+        if isinstance(launched, Exception):
+            failed = Failed(launch.record, launch.task, launched)
+            actions += _not_launched(run.slug, run.store, run.ledger, run.runtime, run.rows, failed, run.now_ms)
+        else:
+            started = Started(launch.record, launch.task, placed, launched)
+            actions += _started(run.slug, run.config, run.store, run.ledger, run.doc, started, run.now_ms)
     return actions
 
 
