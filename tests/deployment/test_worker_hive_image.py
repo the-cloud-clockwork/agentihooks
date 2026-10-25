@@ -231,7 +231,7 @@ def registry(monkeypatch, labels, *, index=True):
             "application/vnd.docker.distribution.manifest.list.v2+json, "
             "application/vnd.docker.distribution.manifest.v2+json"
         )
-        path = request.full_url.removeprefix("https://ghcr.io")
+        path = re.sub(r"^https://[^/]+", "", request.full_url)
         seen.append((path, request.headers.get("Authorization"), request.unredirected_hdrs.get("Authorization")))
         return Reply(*blobs[path])
 
@@ -247,6 +247,21 @@ def test_base_revision_reads_the_amd64_label_from_the_registry_without_pulling(m
     assert {auth for _, auth, _ in seen} == {None}
     assert {auth for _, _, auth in seen[1:]} == {"Bearer t"}
     assert len(seen) == (4 if index else 3)
+
+
+def test_base_revision_keeps_a_registry_port(monkeypatch):
+    registry(monkeypatch, {"org.opencontainers.image.revision": "rev123"})
+    hosts = []
+    original = urllib.request.urlopen
+
+    def recording(request, timeout):
+        hosts.append(request.host)
+        return original(request, timeout)
+
+    monkeypatch.setattr(urllib.request, "urlopen", recording)
+    image = "registry.local:5000/the-cloud-clockwork/agentihooks-worker"
+    assert pinned_revision(f"{image}:dev") == (f"{image}@sha256:amd64", "rev123")
+    assert set(hosts) == {"registry.local:5000"}
 
 
 def test_base_revision_refuses_an_index_without_an_amd64_image(monkeypatch):
