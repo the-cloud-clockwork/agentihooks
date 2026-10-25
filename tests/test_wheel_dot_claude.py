@@ -27,6 +27,7 @@ def test_wheel_staging_skips_unrelated_trees_and_keeps_package_payload(tmp_path,
     source.mkdir()
     (source / "pyproject.toml").write_text('[project]\nname = "agentihooks"\nversion = "0.0.0"\n')
     (source / "README.md").write_text("wheel metadata")
+    (source / "LICENSE").write_text("license metadata")
     for name in ("hooks", "scripts", "profiles", "tests", "docs", "evidence"):
         (source / name).mkdir()
         (source / name / "payload").write_text(name)
@@ -52,6 +53,7 @@ def test_wheel_staging_skips_unrelated_trees_and_keeps_package_payload(tmp_path,
     for name in ("hooks", "scripts", "profiles"):
         assert (staged / name / "payload").read_text() == name
     assert (staged / "README.md").read_text() == "wheel metadata"
+    assert (staged / "LICENSE").read_text() == "license metadata"
     assert (staged / "pyproject.toml").is_file()
     assert (staged / "profiles/package/.claude/rules/packaging.md").read_text() == "hidden payload"
     assert (staged / "profiles/docs/package.md").read_text() == "nested payload"

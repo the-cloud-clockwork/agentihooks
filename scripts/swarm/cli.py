@@ -158,6 +158,7 @@ from scripts.swarm.store import (
     DEFAULT_MASTERS_STEP,
     DELEGATE,
     DISPATCH,
+    FULL,
     MASTER,
     RedisStore,
     SwarmConfig,
@@ -646,12 +647,13 @@ def cmd_prober(store, args):
 def cmd_spoke(store, args):
     from scripts.events import factory
     from scripts.events.config import BusConfig
-    from scripts.hive import workstation
+    from scripts.hive import lanes, workstation
     from scripts.swarm import commands
     from scripts.swarm_v2.runtime.local import LocalHerdrRuntime
 
     if workstation.runs_engine(os.environ):
         raise SwarmError(workstation.ENGINE_RUNS)
+    lanes.serve(os.environ)
     bus = factory.open_bus(replace(BusConfig.from_environ(os.environ), provision=False))
     try:
         workstation.run(store, bus, LocalHerdrRuntime(HerdrRuntime()), commands.hive_id())
@@ -1285,8 +1287,11 @@ def cmd_status(store, args):
 def cmd_freeze(store, args):
     writer = clearance.freezer(store, args.slug, Who.from_env())
     by = None if writer == clearance.OPERATOR else writer
-    if by and naming.lane_of(by) != DISPATCH and not args.quote:
-        raise SwarmError("the master writes freezes only with the operator's words: pass them with --quote")
+    full = store.config(args.slug).autonomy == FULL
+    if by and not args.quote and not full:
+        raise SwarmError(
+            "below full autonomy the master writes freezes only with the operator's words: pass them with --quote"
+        )
     LedgerClient().freeze(args.slug, args.command, args.target, by=by, reason=args.reason, quote=args.quote)
     print(json.dumps({args.command: args.target, "by": writer}))
 
@@ -1674,6 +1679,7 @@ def cmd_merge(store, args):
                 args.url,
                 admit=lambda head: _queue_intent(store, args, agent, head) or queue_exit.require_fresh(args.url, head),
                 journal=queue_record.Journal(args.url),
+                attempts=merge_queue.ATTEMPTS,
             )
         else:
             result = merge_queue.operate(args.action, args.url, journal=queue_record.Journal(args.url))

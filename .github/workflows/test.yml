@@ -449,7 +449,9 @@ jobs:
               jobs=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run/jobs?per_page=100" --paginate --jq '.jobs[]')
               if ! jq -s -e '
                 [.[] | select(.name | startswith("unit ("))] as $units |
-                ($units | length == 18 and all(.[]; .conclusion == "success")) and
+                ($units | length > 0 and all(.[]; .conclusion == "success") and
+                  (map(.name | capture("^unit \\((?<v>[^,]+), (?<s>[0-9]+)\\)$")? // {v: "", s: "0"} | .s |= tonumber) |
+                    group_by(.v) | all(.[]; map(.s) | sort == [range(1; length + 1)]))) and
                 any(.[];
                   .name == "coverage-baseline" and .conclusion == "success" and
                   any(.steps[]?; .name == "Compute the coverage baseline" and .conclusion == "success") and
@@ -824,6 +826,27 @@ jobs:
             ${{ runner.temp }}/reused.json
             ${{ runner.temp }}/plan-outputs.txt
           if-no-files-found: error
+          retention-days: 7
+          overwrite: true
+
+      # The next group's base is this head, and its dev record lands only after that group has started.
+      - name: Record the head count for the next queue group
+        if: github.event_name == 'merge_group'
+        continue-on-error: true
+        run: |
+          cmp -s "$RUNNER_TEMP/base/tests/count_floor.py" tests/count_floor.py || exit 0
+          git worktree add --detach "$RUNNER_TEMP/head" HEAD
+          mkdir -p "$RUNNER_TEMP/count-record"
+          cd "$RUNNER_TEMP/base"
+          python -m tests.count_floor --record "$RUNNER_TEMP/count-record/record.json" --head "$RUNNER_TEMP/head" --collected "$RUNNER_TEMP/collected.json"
+
+      - name: Upload the head count for the next queue group
+        if: github.event_name == 'merge_group'
+        uses: actions/upload-artifact@v4
+        with:
+          name: count-record-${{ matrix.python-version }}
+          path: ${{ runner.temp }}/count-record/record.json
+          if-no-files-found: ignore
           retention-days: 7
           overwrite: true
 
@@ -2226,7 +2249,9 @@ jobs:
             jobs=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run/jobs?per_page=100" --paginate --jq '.jobs[]')
             if ! jq -s -e --arg event "$event" '
               [.[] | select(.name | startswith("unit ("))] as $units |
-              (($units | length == 18 and all(.[]; .conclusion == "success")) or
+              (($units | length > 0 and all(.[]; .conclusion == "success") and
+                (map(.name | capture("^unit \\((?<v>[^,]+), (?<s>[0-9]+)\\)$")? // {v: "", s: "0"} | .s |= tonumber) |
+                  group_by(.v) | all(.[]; map(.s) | sort == [range(1; length + 1)]))) or
                ($event == "merge_group" and
                 all(.[] | select(.name == "unit" or (.name | startswith("unit ("))); .conclusion == "skipped") and
                 any(.[]; .name == "reuse" and .conclusion == "success" and

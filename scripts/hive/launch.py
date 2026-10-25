@@ -187,7 +187,7 @@ class HiveLaunch:
         self.opening = orders.build_opening
 
     def hives(self) -> list[dict]:
-        return loaded_hives(self.store)
+        return placement.for_swarm(loaded_hives(self.store), self.slug)
 
     def _record_wait(self, lane: str, task: dict, selected: Selection | placement.Wait) -> Selection | placement.Wait:
         reason = selected.reason if isinstance(selected, placement.Wait) else ""
@@ -366,7 +366,13 @@ class HiveLaunch:
             f"{selected.account.harness}:{selected.account.name}", admitted.execution_id, selected.account.cap, TTL_MS
         ):
             self.end(admitted, "account reservation is full")
-            return Outcome("spawn", Status.UNAVAILABLE, HIVE, detail="account reservation is full")
+            return Outcome(
+                "spawn",
+                Status.UNAVAILABLE,
+                HIVE,
+                {"harness": selected.account.harness},
+                detail="account reservation is full",
+            )
         prompt_ref = self.store.key(self.slug, f"launch-prompt:{admitted.execution_id}")
         order = LaunchOrder(
             self.slug,
@@ -457,6 +463,8 @@ class HiveLaunch:
         return f"no hive for {request.lane} has room: {selected.hive} {refused}"
 
     def admit(self, request: SpawnRequest, selected: Selection) -> AgentRecord:
+        from scripts.swarm_v2.runtime import codex
+
         raw = self.store.redis.hget(self.store.key(self.slug, "agents"), request.name)
         started_at = json.loads(raw)["started_at"] if raw else lease.now_ms(self.store)
         agent = AgentRecord(
@@ -477,6 +485,7 @@ class HiveLaunch:
                 **({"placement_fallback": selected.fallback} if selected.fallback else {}),
             },
             harness=selected.account.harness,
+            transport=codex.transport(request.config, selected.account.harness),
             account=selected.account.name,
             hive=selected.hive,
             runtime_target={"host_id": selected.hive},

@@ -6,6 +6,7 @@ import threading
 import pytest
 
 from scripts.swarm_ledger.repository import sqlite
+from scripts.swarm_ledger.repository.entry import Entry
 from scripts.swarm_ledger.repository.sqlite import (
     Missing,
     SQLiteLedgerRepository,
@@ -89,6 +90,18 @@ def test_import_exports_the_source_document_and_survives_a_restart(tmp_path):
     assert restarted.events_since("ledger", 1) == []
     with repo.connect() as connection:
         assert connection.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
+
+
+def test_a_working_copy_comes_from_the_cached_state_without_parsing_the_ledger_text(tmp_path, monkeypatch):
+    repo = store(tmp_path)
+    repo.import_document("ledger", document())
+    expected = repo.get_document("ledger")
+    monkeypatch.setattr(Entry, "text", property(lambda entry: pytest.fail("a read parsed the whole ledger text")))
+    working = repo.get_document("ledger")
+    assert working == expected
+    working["tasks"][1]["comments"].append({"id": "mine"})
+    working["_meta"]["rev"] = 99
+    assert repo.get_document("ledger") == expected
 
 
 def test_import_refuses_an_existing_ledger_unless_replacing(tmp_path):

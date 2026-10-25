@@ -53,16 +53,17 @@ def judge(tmp_path, *, diff=0, pull=0, run=0, fetch=0):
 
 
 def test_kind_proof_layers_only_the_hive_on_a_current_base():
-    assert len(builds()) == 3
-    published, rebuilt_base, rebuilt_hive = builds()
-    assert "--pull" not in published
-    assert "-f deploy/worker/Dockerfile" in published
-    assert "--build-arg WORKER_IMAGE" not in published
+    assert len(builds()) == 2
+    rebuilt_base, hive = builds()
+    assert f"base-current.sh {BASE}; then\n  worker_base=published\n  docker tag {BASE} local/worker-base:dev\n" in (
+        PROOF.read_text()
+    )
     assert f"ARG WORKER_IMAGE={BASE}\n" in (ROOT / "deploy/worker/Dockerfile").read_text()
     assert "-f docker/swarm-node/Dockerfile" in rebuilt_base
-    assert "--build-arg WORKER_IMAGE=local/worker-base:dev" in rebuilt_hive
-    for hive in (published, rebuilt_hive):
-        assert '--build-arg AGENTIHOOKS_REF="${AGENTIHOOKS_REF:-dev}"' in hive
+    assert "--pull" not in hive
+    assert "-f deploy/worker/Dockerfile" in hive
+    assert "--build-arg WORKER_IMAGE=local/worker-base:dev" in hive
+    assert '--build-arg AGENTIHOOKS_REF="${AGENTIHOOKS_REF:-dev}"' in hive
 
 
 def worker_stage(name):

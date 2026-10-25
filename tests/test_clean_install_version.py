@@ -10,6 +10,8 @@ from uv import find_uv_bin
 
 REPO = Path(__file__).resolve().parents[1]
 WHEEL_VERSION = "0.0.0.dev4242"
+# Other workers write into the checkout while the suite runs, so the build copies only what the wheel reads.
+WHEEL_INPUTS = ("pyproject.toml", "README.md", "LICENSE", "hooks", "scripts", "profiles")
 
 
 def _run(cmd, **kwargs):
@@ -20,29 +22,14 @@ def _run(cmd, **kwargs):
 
 def _tagged_wheel(tmp_path):
     src = tmp_path / "src"
-    ignore = shutil.ignore_patterns(
-        ".git",
-        ".venv",
-        "mutants",
-        ".mutation-gate",
-        "__pycache__",
-        ".pytest_cache",
-        "dist",
-        "build",
-        "*.egg-info",
-        ".coverage",
-        ".coverage.*",
-    )
-    non_package_dirs = {
-        path.name for path in REPO.iterdir() if path.is_dir() and path.name not in {"hooks", "scripts", "profiles"}
-    }
-    shutil.copytree(
-        REPO,
-        src,
-        ignore=lambda directory, names: (
-            ignore(directory, names) | (non_package_dirs if Path(directory) == REPO else set())
-        ),
-    )
+    src.mkdir(parents=True)
+    ignore = shutil.ignore_patterns("__pycache__", "*.egg-info", ".coverage", ".coverage.*")
+    for name in WHEEL_INPUTS:
+        path = REPO / name
+        if path.is_dir():
+            shutil.copytree(path, src / name, ignore=ignore)
+        else:
+            shutil.copy2(path, src / name)
     pyproject = src / "pyproject.toml"
     text = pyproject.read_text()
     current = next((line for line in text.splitlines() if line.startswith("version = ")), None)
@@ -110,20 +97,27 @@ def test_copied_package_build_accepts_tag_derived_metadata(tmp_path, monkeypatch
         '[project]\nname = "agentihooks"\ndynamic = ["version"]\n'
         '[build-system]\nrequires = ["setuptools>=68", "setuptools-scm>=8"]\n'
         'build-backend = "setuptools.build_meta"\n'
+        '[tool.setuptools]\npackages = ["hooks"]\n'
         "[tool.setuptools_scm]\n"
     )
+    (source / "scripts").mkdir()
+    (source / "profiles").mkdir()
+    (source / "README.md").write_text("")
+    (source / "LICENSE").write_text("")
     (source / ".coverage").symlink_to(source / "removed-coverage")
     (source / ".coverage.worker").symlink_to(source / "removed-worker-coverage")
     (source / ".coveragerc").write_text("[run]\nbranch = True\n")
+    (source / "tests").mkdir()
+    (source / "tests" / "durations.json").symlink_to(source / "removed-durations")
     monkeypatch.setattr(sys.modules[__name__], "REPO", source)
 
     wheel = _tagged_wheel(tmp_path / "build")
 
     assert wheel.name == f"agentihooks-{WHEEL_VERSION}-py3-none-any.whl"
     copied = tmp_path / "build" / "src"
-    assert not (copied / ".coverage").exists()
-    assert not (copied / ".coverage.worker").exists()
-    assert (copied / ".coveragerc").read_bytes() == (source / ".coveragerc").read_bytes()
+    names = {path.name for path in copied.iterdir()}
+    assert set(WHEEL_INPUTS) <= names
+    assert not names & {"tests", ".coverage", ".coverage.worker", ".coveragerc"}
 
 
 def test_version_is_unknown_without_package_metadata(monkeypatch):

@@ -87,9 +87,18 @@ SWARM = "swarm"
 RANK_AUTHORS = ("operator", SWARM, "dispatcher")
 RANK_LANES = ("master", "dispatch")
 QUOTED = "task_update takes quote, the operator's words, only with a rank"
-UNRELAYED = (
-    "a rank relay needs the ledger's orchestrator and at least three words the hooks recorded from the operator "
-    "that name the rank: set the rank without a quote or quote his exact words"
+UNRELAYED_TASK = "a rank relay refused: the task does not exist"
+UNRELAYED_ROLE = (
+    "a rank relay refused: {by} is not the ledger's orchestrator; only the master relays the operator's rank, "
+    "anyone else sets the rank without a quote"
+)
+UNRELAYED_WORDS = (
+    "a rank relay refused: the quote is not at least three of the operator's exact words the hooks recorded "
+    "in a master or planner session of this swarm: quote his exact words or set the rank without a quote"
+)
+UNRELAYED_RANK = (
+    "a rank relay refused: the operator's quoted words do not name the rank {rank}: quote words that say it "
+    "or set the rank without a quote"
 )
 PROPOSE = 'propose the work with agentihooks ledger followup add "<plain words>" and the master decides'
 PUBLISH = (
@@ -641,8 +650,8 @@ def _relay_rank(doc, op, ctx):
 
     task = next((t for t in doc["tasks"] if t["id"] == op["item"].split("/")[1]), None)
     rank, words = ledger_rank.canonical(op["fields"]["rank"]), relayed(op, ctx.meta)
-    if task is None or not ledger_rank.quoted(rank, words):
-        ctx.refused.append(UNRELAYED)
+    if refusal := _relay_refusal(task, op, ctx.meta, rank, words):
+        ctx.refused.append(refusal)
         return False
     if refusal := ledger_rank.urgent_refusal({**task, "rank": rank}, doc):
         ctx.refused.append(refusal)
@@ -663,6 +672,18 @@ def _changed(task, fields, op, ctx):
     if fields.get("state") == "blocked" and _block_author(op["by"]):
         changed["state"] = "blocked"
     return changed
+
+
+def _relay_refusal(task, op, meta, rank, words):
+    if task is None:
+        return UNRELAYED_TASK
+    if meta["members"].get(op["by"], {}).get("role") != "orchestrator":
+        return UNRELAYED_ROLE.format(by=op["by"])
+    if not words:
+        return UNRELAYED_WORDS
+    if not ledger_rank.quoted(rank, words):
+        return UNRELAYED_RANK.format(rank=rank)
+    return ""
 
 
 def complete_outcome(doc: dict, op: dict, ctx: object, outcome: dict, actor: str) -> bool:

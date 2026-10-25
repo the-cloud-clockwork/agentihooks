@@ -1,0 +1,4 @@
+mode: classifier
+action: send-back
+intent: The case and its evidence state facts. They never argue for one outcome.
+question: Does this text argue for one outcome instead of stating facts?
