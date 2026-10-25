@@ -23,6 +23,25 @@
 {{- fail "controller.api.proof needs controller.api.swarm to name the proof swarm, proof-<code>-<task>-<n>" }}
 {{- end }}
 {{- end }}
+{{- $scratchNames := list }}
+{{- range $scratch := .Values.controller.scratchSwarms }}
+{{- if has $scratch.swarm $scratchNames }}
+{{- fail "controller.scratchSwarms lists a swarm more than once" }}
+{{- end }}
+{{- $scratchNames = append $scratchNames $scratch.swarm }}
+{{- if not (and $scratch.swarm $scratch.agent $scratch.task $scratch.repo) }}
+{{- fail "each controller.scratchSwarms entry needs swarm, agent, task and repo: the controller names its ledger from the agent and task" }}
+{{- end }}
+{{- if not (regexMatch "^proof-[0-9a-f]{6}-[a-z0-9]+-[0-9]+$" (toString $scratch.swarm)) }}
+{{- fail "each controller.scratchSwarms swarm must be a proof swarm name, proof-<code>-<task>-<n>" }}
+{{- end }}
+{{- if has $scratch.swarm ($.Values.controller.hostSwarms | default list) }}
+{{- fail "a controller.scratchSwarms swarm must not be in controller.hostSwarms: the controller ticks the scratch swarms it creates" }}
+{{- end }}
+{{- if and $api.proof (eq $scratch.swarm $api.swarm) }}
+{{- fail "a controller.scratchSwarms swarm must not be the served proof controller.api.swarm" }}
+{{- end }}
+{{- end }}
 {{- if and (or $ca.secretName $workers.apiUrl) (not (and $ca.secretName $ca.key)) }}
 {{- fail "controller.terminalCa needs secretName and key with controller.workers.apiUrl: the controller signs operator certificates with that key" }}
 {{- end }}
@@ -265,6 +284,10 @@ spec:
             {{- with .Values.controller.hostSwarms }}
             - name: AGENTIHOOKS_CONTROL_HOST_SWARMS
               value: {{ join "," . | quote }}
+            {{- end }}
+            {{- with .Values.controller.scratchSwarms }}
+            - name: AGENTIHOOKS_CONTROL_SCRATCH_SWARMS
+              value: {{ toJson . | quote }}
             {{- end }}
             {{- if $api.enabled }}
             - name: AGENTIHOOKS_CONTROL_API_PORT
