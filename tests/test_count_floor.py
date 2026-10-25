@@ -647,6 +647,66 @@ def test_a_runpy_entrypoint_explains_only_deleted_executed_code(tmp_path, delete
 
 
 @pytest.mark.parametrize(
+    "helper,test",
+    [
+        ("def first():\n    return subject()\n", "def test_subject(first):\n    assert first()\n"),
+        (
+            "def first():\n    return subject()\n",
+            "def test_subject():\n    first = lambda: 1\n    assert first() == 1\n",
+        ),
+        (
+            "def first():\n    def unused():\n        return subject()\n    return 1\n",
+            "def test_subject():\n    assert first() == 1\n",
+        ),
+    ],
+    ids=["parameter", "local", "uncalled-nested"],
+)
+def test_an_unreached_helper_subject_never_explains_a_lost_test(tmp_path, helper, test):
+    result = _floor(
+        tmp_path,
+        {
+            "test_mod.py": "from pkg.mod import subject, other\n\n"
+            + helper
+            + "\n"
+            + test
+            + "\ndef test_other():\n    assert other() == 2\n"
+        },
+        {"test_mod.py": OTHER_TEST},
+        {"base": _package(mod=SUBJECT + "\n\n" + KEPT), "head": _package(mod=KEPT)},
+    )
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "test_subject is admitted" not in result.stdout
+
+
+def test_replacing_an_existing_binding_with_the_subject_is_still_a_move(tmp_path):
+    result = _floor(
+        tmp_path,
+        {"test_mod.py": SUBJECT_TESTS},
+        {"test_mod.py": OTHER_TEST},
+        {
+            "base": _package(mod=SUBJECT + "\n\n" + KEPT, elsewhere=SUBJECT.replace("return 1", "return 3")),
+            "head": _package(mod=KEPT, elsewhere=SUBJECT),
+        },
+    )
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "test_subject is admitted" not in result.stdout
+
+
+def test_moving_an_executable_fixture_keeps_its_lost_test_red(tmp_path):
+    fixture = json.dumps({"steps": [{"run": "printf retired"}]})
+    result = _floor(
+        tmp_path,
+        {
+            "test_mod.py": "from pathlib import Path\n\ndef test_fixture():\n    assert (Path(__file__).resolve().parent / 'fixtures/watch.json').read_text()\n\ndef test_kept():\n    assert True\n"
+        },
+        {"test_mod.py": "def test_kept():\n    assert True\n"},
+        {"base": {"tests/fixtures/watch.json": fixture}, "head": {"tests/fixtures/moved.json": fixture}},
+    )
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "test_fixture is admitted" not in result.stdout
+
+
+@pytest.mark.parametrize(
     "survivor",
     [
         "class Runner:\n    def subject(self):\n        return 1\n",
