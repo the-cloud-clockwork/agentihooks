@@ -24,9 +24,9 @@ Usage: ledger.py --slug SLUG --as NAME <command> [args]
                                       review; a taken phase id refuses them all
   phase ID done|open [--status T]     set a phase state, T becomes your status comment
   followup add TEXT | done|open ID    add a follow-up, close one, or reopen one
-  followup add TEXT --needs-operator  add a follow-up that waits on the operator's decision; it shows in Priorities
+  followup add TEXT --needs-operator  operator and swarm only: agents are refused, they never ask the operator first
   followup flag|unflag ID             mark a follow-up as waiting on the operator's decision, or no longer
-  question add TEXT                   ask a question on the ledger; the master answers it or raises it to the operator
+  question add TEXT                   operator and swarm only: agents send questions to master@<slug> by inbox
   scope ITEM in|out [--status T]      mark an item out of scope (or back in); T says why
   retext ITEM TEXT                    rewrite the text of a follow-up or question
   edit chat|ITEM ENTRY TEXT           rewrite an entry (yours; the orchestrator: any agent's)
@@ -38,7 +38,7 @@ Usage: ledger.py --slug SLUG --as NAME <command> [args]
                                       or priorities/<id> (no --as needed)
   tasks [--state S] [--lane L] [--text T]
                                       list open tasks, one line each, by state, lane or title text (no --as needed)
-  priority add ITEM TEXT              ask the operator: only what blocks on his answer, at most 20 words; ITEM may
+  priority add ITEM TEXT              operator and swarm only, at most 20 words; agents are refused; ITEM may
                                       be phases/<id>, questions/<id>, followups/<id> or tasks/<id>. Unanswered
                                       questions, blocked tasks, merge approvals and flagged follow-ups show on their own
   priority clear ID... | --all        clear priorities once answered
