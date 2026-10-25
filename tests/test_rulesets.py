@@ -4,6 +4,8 @@ from pathlib import Path
 import pytest
 import yaml
 
+from scripts import ci_gate_queue
+
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -59,7 +61,9 @@ def test_dev_merges_through_a_queue_that_runs_the_workflow_gate():
     assert params["do_not_enforce_on_create"] is False
     checks = params["required_status_checks"]
     assert len(checks) == 1
-    assert checks[0]["context"] == workflow["jobs"]["gate-required"]["name"] == "Gate — Required"
+    jobs = ci_gate_queue.normalize({"test.yml": workflow})["test.yml"]["jobs"]
+    assert checks[0]["context"] == jobs["gate-required"]["name"] == "Gate — Required"
+    assert workflow["jobs"]["queue-fail-fast"]["name"] == ci_gate_queue.GATE_NAME
     assert checks[0]["integration_id"] == 15368
     queue = rules["merge_queue"]["parameters"]
     assert queue == {

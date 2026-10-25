@@ -132,7 +132,10 @@ def test_shard_check_grades_every_unit_shard_before_the_required_gate():
     assert all("steps.lookup" not in step.get("if", "") for step in steps)
     download = next(step for step in steps if step.get("uses", "").startswith("actions/download-artifact"))
     if job["needs"][0] == "split":
-        assert download["with"] == {"name": "collected-${{ matrix.python-version }}", "path": "collected-data"}
+        assert download["with"] == {
+            "pattern": "{collected,reused-tests}-${{ matrix.python-version }}",
+            "path": "shard-data",
+        }
         prefetch = next(
             step for step in steps if step.get("name") == "Prefetch reports while every planned shard finishes"
         )
@@ -153,7 +156,7 @@ def test_shard_check_grades_every_unit_shard_before_the_required_gate():
         for step in steps
         if step.get("run", "").startswith(("python -m tests.shard_check", "python3 -m tests.shard_check"))
     )
-    assert download["with"]["path"] in check["run"]
+    assert "--collected collected-data/collected.json" in check["run"]
     assert steps.index(download) < steps.index(check)
 
 
