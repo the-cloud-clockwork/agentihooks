@@ -358,6 +358,26 @@ def test_the_early_gate_rejects_a_changed_graded_job_inventory():
         ci_gate_queue.normalize({"test.yml": workflow})
 
 
+def test_the_early_gate_accepts_parallel_split_only_with_its_reviewed_context_pair():
+    from pathlib import Path
+
+    import yaml
+
+    workflow = yaml.safe_load((Path(__file__).resolve().parents[1] / ".github/workflows/test.yml").read_text())
+    jobs = workflow["jobs"]
+    jobs["queue-split"] = {"needs": ["reuse", "admission"]}
+    jobs["gate-required"]["needs"].append("queue-split")
+    jobs["queue-fail-fast"] = ci_gate_queue.watcher(jobs["gate-required"]["runs-on"], parallel=True)
+    normalized = ci_gate_queue.normalize({"test.yml": workflow})["test.yml"]["jobs"]
+    assert normalized["gate-required"]["name"] == "Gate — Required"
+    assert normalized["queue-fail-fast"]["name"] == "queue-fail-fast"
+    assert "queue-split" in jobs["queue-fail-fast"]["needs"]
+    assert "needs.queue-split.outputs.queue_312" in jobs["queue-fail-fast"]["steps"][2]["env"]["QUEUE_PLAN"]
+    jobs["queue-fail-fast"] = ci_gate_queue.watcher(jobs["gate-required"]["runs-on"])
+    with pytest.raises(ValueError, match="context pair"):
+        ci_gate_queue.normalize({"test.yml": workflow})
+
+
 def test_pending_originals_wait_without_misclassifying_started_recovery():
     jobs = complete()
     next(job for job in jobs if job["name"] == "unit (3.12, 7)").update(status="in_progress", conclusion=None)
