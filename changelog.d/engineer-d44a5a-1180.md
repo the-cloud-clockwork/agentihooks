@@ -1,3 +1,3 @@
 ### Fixed
 
-- Restore hosted ledger probe checks before selecting a hive route after credential refusal.
+- Preserve the configured hosted ledger route in mounted Claude profiles and refresh cached homes when it changes.
