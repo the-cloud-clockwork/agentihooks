@@ -64,9 +64,9 @@ def request(live, method, resource, body=None, **headers):
 
 
 def stored(monkeypatch, document):
-    from tests.swarm_ledger.api_fakes import serve_document
+    from types import SimpleNamespace
 
-    serve_document(monkeypatch, server.repository, document)
+    monkeypatch.setattr(server.repository, "current", lambda slug: SimpleNamespace(state=document, views={}))
 
 
 def test_invalid_schema_leaves_resource_unchanged(live):

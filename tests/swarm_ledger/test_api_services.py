@@ -39,8 +39,6 @@ def fake_services(calls: list) -> Services:
         token=lambda slug: "tok",
         exists=lambda slug: slug == SLUG,
         current=lambda slug: SimpleNamespace(state=state, views={}),
-        read=lambda slug, *keys: state,
-        task_version=lambda slug: (state["_meta"]["rev"], 0),
     )
     return Services(
         repository=repository,
