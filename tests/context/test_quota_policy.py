@@ -800,7 +800,7 @@ def test_evaluate_leaves_a_master_on_its_account_at_the_ceiling(monkeypatch):
     assert _evaluate(monkeypatch, 10.0, 70.0, MASTER_HELD, agent="master@1")[1] == []
 
 
-def _master_at(monkeypatch, week_used, five_used=10.0, logins=(), held=MASTER_HELD):
+def _master_at(monkeypatch, week_used, five_used=10.0, logins=(), held=MASTER_HELD, push=False):
     from hooks.context import account_sessions
     from scripts.routing import reservation
     from scripts.swarm_v2 import quota
@@ -822,7 +822,7 @@ def _master_at(monkeypatch, week_used, five_used=10.0, logins=(), held=MASTER_HE
     ]
     monkeypatch.setattr(qp, "_other_accounts", lambda sessions, observed: others)
     monkeypatch.setattr(qp, "_api_accounts", lambda sessions: [qp.Candidate("api", None, None, 0, 0.0, 4)])
-    monkeypatch.setattr(qp, "push_active", lambda session_id: False)
+    monkeypatch.setattr(qp, "push_active", lambda session_id: push and session_id == "s")
     monkeypatch.setattr(reservation, "current", lambda harness, environ: held)
     return qp.evaluate("s")
 
@@ -867,6 +867,12 @@ def test_a_master_on_the_spent_reserved_account_is_never_handed_to_the_api(monke
     monkeypatch.setattr(qp, "reserved", lambda candidates, held: [c for c in candidates if c.account != "token"])
     decision = _master_at(monkeypatch, 97.0)
     assert (decision.action, decision.target) == ("stop", None)
+    assert _master_at(monkeypatch, 97.0, push=True).action == "push"
+
+
+def test_an_interactive_session_on_the_reserved_account_ignores_the_ceiling(monkeypatch):
+    monkeypatch.setenv("AH_ROUTE_INTERACTIVE_main", "1")
+    assert _evaluate(monkeypatch, 10.0, 70.0, MASTER_HELD)[1] == []
 
 
 def test_a_master_hands_off_at_99_percent_of_the_five_hour_window_while_another_login_is_free(monkeypatch):

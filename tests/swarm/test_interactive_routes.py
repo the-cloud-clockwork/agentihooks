@@ -164,3 +164,49 @@ def test_a_master_successor_leaves_the_spent_reserved_account_for_an_open_one(
     passed = _passed(seen[0])
     assert passed[passed.index("--route") + 1] == route
     assert placed.route_kind == ("interactive" if route == "interactive" else "subscription")
+
+
+@pytest.mark.parametrize(
+    "rows,spent",
+    [
+        ([("main", 5.0, 6, "", None, "subscription"), ("open", 60.0, 6, "", None, "subscription")], True),
+        ([("main", 5.5, 6, "", None, "subscription"), ("open", 60.0, 6, "", None, "subscription")], False),
+        ([("main", 3.0, 6, "", None, "subscription"), ("api", None, 4, "", None, "api")], False),
+        ([("main", 3.0, 6, "", None, "subscription"), ("open", 60.0, 0, "workers", 6, "subscription")], True),
+        ([("main", 3.0, 6, "", None, "subscription")], False),
+        ([("open", 60.0, 6, "", None, "subscription")], False),
+    ],
+)
+def test_the_declared_master_account_is_spent_only_at_the_week_floor_with_another_open_account(
+    tmp_path, monkeypatch, rows, spent
+):
+    from scripts.routing import master_account
+    from scripts.swarm.capacity import Account
+
+    monkeypatch.setattr(
+        master_account, "load", lambda environ: {"claude": master_account.MasterAccount("claude", "main")}
+    )
+    runtime = HerdrRuntime(home=tmp_path, run=lambda *a, **k: None, choose=lambda *_: ("claude", "requested"))
+    runtime._quota_accounts = [
+        Account("claude", name, "OPEN", 0, 90.0, week, cap, kind=kind, reserved=reserved, unreserved_cap=unreserved)
+        for name, week, cap, reserved, unreserved, kind in rows
+    ]
+    assert runtime._master_account_spent() is spent
+
+
+def test_an_unreadable_master_account_keeps_the_interactive_route(tmp_path, monkeypatch):
+    from redis.exceptions import RedisError
+
+    from scripts.routing import master_account
+    from scripts.swarm.capacity import Account
+
+    def load(environ):
+        raise RedisError("down")
+
+    monkeypatch.setattr(master_account, "load", load)
+    runtime = HerdrRuntime(home=tmp_path, run=lambda *a, **k: None, choose=lambda *_: ("claude", "requested"))
+    runtime._quota_accounts = [
+        Account("claude", "main", "OPEN", 0, 90.0, 3.0, 6),
+        Account("claude", "open", "OPEN", 0, 90.0, 60.0, 6),
+    ]
+    assert runtime._master_account_spent() is False
