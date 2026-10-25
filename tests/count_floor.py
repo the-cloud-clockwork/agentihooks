@@ -350,16 +350,24 @@ def referenced_subjects(tree: Path, nodeid: str) -> set[tuple[str, str]]:
     if (node := _test_function(module, scopes)) is None:
         return set()
     names, modules = _imports(module)
-    subjects = set()
-    for child in (descendant for statement in node.body for descendant in ast.walk(statement)):
-        subjects.update(_resolve(child, names, modules))
-        if isinstance(child, ast.Call):
-            subjects.update(
-                (callee, f"{function}({keyword.arg})")
-                for callee, function in _resolve(child.func, names, modules)
-                for keyword in child.keywords
-                if keyword.arg
-            )
+    helpers = {child.name: child for child in module.body if isinstance(child, _FUNCTIONS)}
+    subjects, visited, pending = set(), set(), [node]
+    while pending:
+        function = pending.pop()
+        if function in visited:
+            continue
+        visited.add(function)
+        for child in (descendant for statement in function.body for descendant in ast.walk(statement)):
+            subjects.update(_resolve(child, names, modules))
+            if isinstance(child, ast.Call):
+                if isinstance(child.func, ast.Name) and (helper := helpers.get(child.func.id)):
+                    pending.append(helper)
+                subjects.update(
+                    (callee, f"{function}({keyword.arg})")
+                    for callee, function in _resolve(child.func, names, modules)
+                    for keyword in child.keywords
+                    if keyword.arg
+                )
     return subjects
 
 
