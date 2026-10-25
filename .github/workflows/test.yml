@@ -231,9 +231,6 @@ jobs:
       scope: ${{ steps.select.outputs.scope }}
       legs: ${{ steps.select.outputs.legs }}
       count: ${{ steps.select.outputs.count }}
-      files_1: ${{ steps.select.outputs.files_1 }}
-      files_2: ${{ steps.select.outputs.files_2 }}
-      files_3: ${{ steps.select.outputs.files_3 }}
     steps:
       - uses: actions/checkout@v4
         if: github.event_name == 'merge_group' || github.event_name == 'pull_request'
