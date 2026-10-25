@@ -141,6 +141,8 @@ def skipped(run: dict) -> list[Finding]:
     for job in run["jobs"]:
         if job.get("conclusion") != "skipped" or not job.get("started_at") or not job.get("completed_at"):
             continue
+        if iso_ms(job["completed_at"]) < iso_ms(run["run_started_at"]):
+            continue
         lag = iso_ms(job["started_at"]) - iso_ms(job["completed_at"])
         if lag > SHORT_WAIT_MS:
             delayed.append((lag, job))

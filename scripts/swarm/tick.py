@@ -59,6 +59,7 @@ from scripts.swarm import (
     outage,
     pane_evidence,
     preempt,
+    prerequisite_wait,
     profile_first,
     promotion_watch,
     readiness,
@@ -66,6 +67,7 @@ from scripts.swarm import (
     release_wait,
     resume,
     retire_watch,
+    run_window,
     seat_spawn,
     session_model,
     stack,
@@ -230,8 +232,10 @@ def tick(slug, store, ledger, runtime, now_ms):
     if config.engine != EVENTS_ENGINE:
         actions += skip_refused(_orphans, slug, store, ledger, rows)
     actions += skip_refused(dev_red.reopen_pass, slug, config, store, ledger, rows)
+    actions += skip_refused(prerequisite_wait.reopen_pass, slug, store, ledger, rows)
     actions += skip_refused(promotion_watch.refresh, slug, config, store, ledger, doc, now_ms)
     actions += skip_refused(release_wait.alert_pass, slug, config, ledger, doc)
+    actions += skip_refused(run_window.step, slug, config, store, ledger, doc, now_ms)
     actions += skip_refused(claim_hold.verification_notices, slug, store, doc, now_ms)
     actions += skip_refused(difficulty.size_pass, slug, ledger, doc)
     actions += skip_refused(grouping.release_pass, slug, store, ledger, doc)
@@ -470,6 +474,8 @@ def _launch_checks(slug, store, ledger, runtime, rows, doc, now_ms):
     agents = [a for a in store.agents(slug) if a.name in waiting]
     for name in set(waiting) - {a.name for a in agents}:
         launch_check.forget(store, slug, name)
+    confirmed = [launch_check.canary(store, slug, agent) for agent in agents]
+    agents, canaries = [agent for agent, _ in confirmed], {agent.name: miss for agent, miss in confirmed}
     facts = runtime.bindings(agents)
     for agent in agents:
         found = launch_check.misses(
@@ -481,7 +487,8 @@ def _launch_checks(slug, store, ledger, runtime, rows, doc, now_ms):
             launch_check.bundled(agent.profile),
             launch_check.expected(agent),
         )
-        if found and now_ms - launch_check.session_started_at(agent) < launch_check.DEADLINE_MS:
+        found.update(canaries[agent.name])
+        if found and not launch_check.due(agent, found, now_ms):
             continue
         if found:
             miss = launch_check.Miss(agent, found, waiting[agent.name]["relaunch"])
@@ -1027,6 +1034,8 @@ def spawn_holds(store, slug):
 
 
 def _spawn_stop(slug, config, store, runtime, now_ms):
+    if stopped := run_window.claims_stopped(store, slug, config, now_ms):
+        return stopped
     if not runtime.has_capacity(config):
         return "every agent is at its session cap, waiting"
     if host := _host_full(slug, store, now_ms):

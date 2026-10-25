@@ -34,17 +34,45 @@ def runner_lost(text: str) -> bool:
     return bool(RUNNER_LOSS.search(text)) and not (FAILED_RESULT.search(text) or STEP_TIMED_OUT.search(text))
 
 
+def job_names(workflow: dict) -> dict[str, str]:
+    names = {job_id: spec.get("name", job_id) for job_id, spec in workflow["jobs"].items()}
+    if (
+        names.get("gate-required")
+        == "${{ github.event_name == 'merge_group' && 'Queue gate summary' || 'Gate — Required' }}"
+        and names.get("queue-fail-fast")
+        == "${{ github.event_name == 'merge_group' && 'Gate — Required' || 'queue-fail-fast' }}"
+    ):
+        names.update({"gate-required": "Queue gate summary", "queue-fail-fast": "Gate — Required"})
+    return names
+
+
+def polling_jobs(workflow: dict) -> set[str]:
+    names = job_names(workflow)
+    return {
+        names[job_id]
+        for job_id, spec in workflow["jobs"].items()
+        if any(
+            "python -m scripts.ci_gate_shards" in step.get("run", "")
+            or "python3 -m scripts.ci_gate_queue" in step.get("run", "")
+            for step in spec.get("steps", [])
+        )
+    }
+
+
 def dependents(workflow: dict, root: str = SHARD) -> set[str]:
     jobs = workflow["jobs"]
+    names = job_names(workflow)
+    polling = polling_jobs(workflow)
 
     def needs(job_id: str) -> set[str]:
         value = jobs[job_id].get("needs", [])
-        return {value} if isinstance(value, str) else set(value)
+        required = {value} if isinstance(value, str) else set(value)
+        return required | ({SHARD, "unit-rerun"} if names[job_id] in polling else set())
 
     found: set[str] = set()
     for _ in jobs:
         found.update({job_id for job_id in jobs if needs(job_id) & (found | {root})})
-    return {jobs[job_id].get("name", job_id) for job_id in found}
+    return {names[job_id] for job_id in found}
 
 
 def decide(run: dict, failed: list[dict], workflow: dict) -> tuple[bool, str]:

@@ -55,14 +55,20 @@ def seconds(stamp: str) -> float:
 
 
 def stage_of(name: str) -> str:
-    return "gate-required" if name == GATE else name.split(" / ")[0].split(" (")[0]
+    return {GATE: "gate-required", "Queue gate summary": "test-summary"}.get(name, name.split(" / ")[0].split(" (")[0])
 
 
 def stages(jobs: list[dict]) -> dict[str, float]:
     spans: dict[str, tuple[float, float]] = {}
+    queue_pair = any(job["name"] == "Queue gate summary" for job in jobs)
     for job in jobs:
         stage = stage_of(job["name"])
-        if stage == WATCHER or job.get("conclusion") == "skipped" or not job.get("completed_at"):
+        if (
+            stage == WATCHER
+            or (queue_pair and job["name"] == GATE)
+            or job.get("conclusion") == "skipped"
+            or not job.get("completed_at")
+        ):
             continue
         begin, end = seconds(job["created_at"]), seconds(job["completed_at"])
         first, last = spans.get(stage, (begin, end))

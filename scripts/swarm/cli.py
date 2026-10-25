@@ -112,6 +112,7 @@ from scripts.swarm import (
     phase_state,
     phases,
     plan_review,
+    prerequisite_wait,
     priming_trace,
     prompt,
     queue_exit,
@@ -123,6 +124,7 @@ from scripts.swarm import (
     release_wait,
     remote_control,
     review_rounds,
+    run_window,
     snapshot,
     snapshot_job,
     stack,
@@ -141,7 +143,7 @@ from scripts.swarm import (
 from scripts.swarm.health import activity
 from scripts.swarm.health import findings as health
 from scripts.swarm.ledger_client import LedgerClient, LedgerGone, LedgerRefused
-from scripts.swarm.runtime import REPO_VARIABLE, HerdrRuntime
+from scripts.swarm.runtime import REPO_VARIABLE, HerdrRuntime, deferring
 from scripts.swarm.status import (
     auto_snapshot,
     findings,
@@ -318,7 +320,7 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None, scheduled=F
     tick_stop.check()
     ledger = ledger or LedgerClient()
     outbox.flush(InboxStore(store.redis))
-    runtime = runtime or routed(herdr=HerdrRuntime())
+    runtime = runtime or routed(herdr=deferring(HerdrRuntime()))
     held = lease.acquire(store, slug, commands.hive_id())
     if held is None:
         return ["the swarm belongs to another hive"]
@@ -946,6 +948,8 @@ def gate_mode(key, value):
 def setting(config, key):
     if key in GATE_KEYS:
         return modes.label(catalog.current(config.gates)[GATE_KEYS[key]])
+    if key in run_window.KEYS:
+        return run_window.reading(config.window, key)
     if key in LANE_KEYS:
         lane, field = LANE_KEYS[key]
         return config.lanes.get(lane, {}).get(field) or "unset"
@@ -965,7 +969,7 @@ def control_readings(store, args):
         return {
             key: setting(config, key)
             for key in keys
-            if key in (*SETTABLE, *LANE_KEYS, *EFFORT_KEYS, *CONFIG_KEYS, *GATE_KEYS, "autonomy")
+            if key in (*SETTABLE, *LANE_KEYS, *EFFORT_KEYS, *CONFIG_KEYS, *GATE_KEYS, *run_window.KEYS, "autonomy")
         }
     if args.command == "lift":
         agent = _lifted_agent(store, args)
@@ -1084,6 +1088,10 @@ def cmd_set(store, args):
         if key in GATE_KEYS:
             changes["gates"] = {**store.config(args.slug).gates, **gate_mode(key, value)}
             continue
+        if key in run_window.KEYS:
+            window = changes.get("window", store.config(args.slug).window)
+            changes["window"] = run_window.setting(window, key, value, now_ms())
+            continue
         if key.startswith(overlays.KEY):
             try:
                 changes["overlays"] = overlays.setting(
@@ -1134,6 +1142,7 @@ def cmd_set(store, args):
                 "api_url": config.api_url,
                 "codex_inbox_transport": config.codex_inbox_transport,
                 "engine": config.engine,
+                "window": run_window.report(config.window, now_ms()),
                 "master_affinity": {"desired": affinity.desired(config) or "auto", "order": master},
                 "masters": masters.MasterSeats(store.redis).count(args.slug),
                 "master_per": master_scale.rule(store.redis, args.slug) or master_scale.OFF,
@@ -1788,7 +1797,7 @@ def cmd_block(store, args):
     agent = _worker(store, args)
     ledger = LedgerClient()
     rows = {task["id"]: task for task in ledger.tasks(args.slug)}
-    for dependency in rows[agent.task].get("depends_on", []):
+    for dependency in prerequisite_wait.dependencies(store, args.slug, agent, rows[agent.task], args.note):
         if rows[dependency]["state"] != "done":
             held = waits.on("task", dependency)
             at = now_ms()
@@ -1826,6 +1835,7 @@ def block_agent(store, slug, agent, note, ledger, red_run=None):
     dev_red.hold(store.redis, slug, agent.task, red_run)
     ledger.update_task(slug, agent.task, {"state": "blocked"}, by=agent.name)
     ledger.comment(slug, agent.task, note, by=agent.name)
+    prerequisite_wait.hold(store, slug, agent, note)
     waits.settle_notices(InboxStore(store.redis), agent, "a block")
     if red_run is not None:
         store.refund_held_claim(slug, agent.task, agent.name, store.claim_generation(slug, agent.task))
@@ -1870,6 +1880,8 @@ def cmd_wait_inbox(store, args, agent):
 
 def cmd_wait(store, args):
     agent = _me(store, args)
+    if args.final and (not args.on or args.on[0] != "merge"):
+        raise SwarmError("--final requires --on merge for the task final deliverable")
     if args.inbox:
         return cmd_wait_inbox(store, args, agent)
     held = waits.on(*args.on, task=agent.task) if args.on else None
@@ -1886,6 +1898,7 @@ def cmd_wait(store, args):
         get = InboxStore(store.redis).get
         if problem := waits.target_problem(held["kind"], held["target"], agent.task, rows, get):
             raise SwarmError(problem)
+        prerequisite_wait.admit(store, args.slug, agent, held, LedgerClient(), now_ms(), args.final)
         if held["kind"] == "checks" and waits.PULL_URL.fullmatch(held["target"]):
             head = ledger_events.head(held["target"])
             if head == "":
@@ -2294,7 +2307,7 @@ def build_parser():
             decision.set_defaults(override="")
     wait = sub.add_parser("wait")
     wait.add_argument("minutes", type=int, nargs="?")
-    wait.add_argument("--on", nargs=2, metavar=("KIND", "TARGET"))
+    prerequisite_wait.arguments(wait)
     wait.add_argument("--reason", default="")
     wait.add_argument("--inbox", action="store_true")
     reported = sub.add_parser("progress")
