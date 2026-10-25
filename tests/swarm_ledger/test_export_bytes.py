@@ -29,6 +29,20 @@ def test_export_bytes_are_the_utf8_export_body():
     assert type(routes.export_bytes(state)) is bytes
 
 
+def test_export_encoding_peak_is_bounded_by_response_size():
+    import tracemalloc
+
+    state = {"title": "🟣", "_meta": {"seeds": [1]}, "notes": ["x" * 4096] * 256}
+    tracemalloc.start()
+    try:
+        data = routes.export_bytes(state)
+        _, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+    assert data == routes.export_body(state).encode("utf-8")
+    assert peak < len(data) * 3
+
+
 def test_export_response_is_never_cached(live):
     conn = http.client.HTTPConnection("127.0.0.1", live["port"], timeout=5)
     try:
