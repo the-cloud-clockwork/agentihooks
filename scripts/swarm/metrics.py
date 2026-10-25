@@ -75,10 +75,10 @@ def _ledger(slug, now_ms, errors, box, swarm=None):
 
 
 def _interval_ms(environ):
-    minutes = float(environ.get("AGENTIHOOKS_METRICS_EVERY_MINUTES", "10"))
-    if not 0 < minutes < math.inf:
+    every_ms = float(environ.get("AGENTIHOOKS_METRICS_EVERY_MINUTES", "10")) * 60_000
+    if not 1 <= every_ms < math.inf:
         raise ValueError("metrics collectors need a positive interval in minutes")
-    return int(minutes * 60_000)
+    return int(every_ms)
 
 
 def _claim_interval(slug, store, now_ms, environ):

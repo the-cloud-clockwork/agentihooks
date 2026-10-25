@@ -392,7 +392,7 @@ def _expiring(real_set, clock):
     return set_
 
 
-@pytest.mark.parametrize("minutes", ["0", "-1", "inf", "nan"])
+@pytest.mark.parametrize("minutes", ["0", "-1", "0.00001", "inf", "nan"])
 def test_a_metrics_interval_outside_positive_finite_minutes_is_reported(spool, sent, minutes):
     import fakeredis
 
