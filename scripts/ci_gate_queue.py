@@ -107,12 +107,11 @@ def verify(jobs: list[dict], shards: list[int], lost: Callable[[dict], bool] = l
 
 
 def watcher(runner: str, parallel: bool = False) -> dict:
-    splitter = "queue-split" if parallel else "split"
     return {
         "name": GATE_NAME,
         "outputs": {"failed": "${{ steps.watch.outputs.failed }}"},
         "if": "${{ !cancelled() && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && (github.event_name != 'merge_group' || needs.reuse.outputs.reused != 'true') && github.event_name != 'pull_request' }}",
-        "needs": [splitter, "select", "reuse", "admission"],
+        "needs": ["queue-split" if parallel else "split", "select", "reuse", "admission"],
         "runs-on": runner,
         "timeout-minutes": 60,
         "steps": [
@@ -144,7 +143,9 @@ def watcher(runner: str, parallel: bool = False) -> dict:
                 "if": "github.event_name == 'merge_group'",
                 "env": {
                     "GH_TOKEN": "${{ steps.app-token.outputs.token }}",
-                    "QUEUE_PLAN": "${{ format('[{0}]', needs." + splitter + ".outputs.queue_312) }}",
+                    "QUEUE_PLAN": "${{ format('[{0}]', needs.queue-split.outputs.queue_312) }}"
+                    if parallel
+                    else "${{ format('[{0}]', needs.split.outputs.queue_312) }}",
                 },
                 "run": 'python3 -m scripts.ci_gate_queue || { echo "failed=queue verification" >> "$GITHUB_OUTPUT"; exit 1; }',
             },
@@ -187,6 +188,20 @@ def normalize(workflows: dict[str, dict]) -> dict[str, dict]:
             expected = expected | {"queue-split"}
         if set(summary.get("needs", [])) != expected:
             raise ValueError("The early queue gate must preserve the reviewed graded inventory")
+        if parallel:
+            for step in summary.get("steps", []):
+                if "run" in step:
+                    step["run"] = (
+                        step["run"]
+                        .replace(
+                            '["select", "queue-split", "shard-check", "test-count"]',
+                            '["select", "split", "shard-check", "test-count"]',
+                        )
+                        .replace(
+                            ' or (.key == "queue-split" and .value.result == "skipped" and $event != "merge_group")',
+                            "",
+                        )
+                    )
         summary["name"] = "Gate — Required"
         early["name"] = "queue-fail-fast"
     return normalized
