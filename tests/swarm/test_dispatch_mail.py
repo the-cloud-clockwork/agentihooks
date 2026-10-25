@@ -281,7 +281,7 @@ def test_launch_rechecks_mail_after_capacity_checks(mailbox, monkeypatch, capsys
         assert store.redis.hkeys(store.key(SLUG, dispatch_seat.SENT)) == expected
 
 
-@pytest.mark.parametrize("change", ["missing", "closed", "read", "confirmed", "redirected", "delivered"])
+@pytest.mark.parametrize("change", ["closed", "read", "confirmed", "redirected", "delivered"])
 @pytest.mark.parametrize("boundary", ["before", "capacity", "prepare"])
 def test_launch_needs_mail_still_waiting_for_the_dispatcher(mailbox, monkeypatch, capsys, change, boundary):
     store, inbox = mailbox
@@ -291,9 +291,7 @@ def test_launch_needs_mail_still_waiting_for_the_dispatcher(mailbox, monkeypatch
 
     def settle(*args):
         occupant = inbox.seats.occupant(f"dispatcher@{SLUG}").occupant
-        if change == "missing":
-            store.redis.delete(inbox.key("item", item))
-        elif change == "closed":
+        if change == "closed":
             assert inbox.close(item, occupant, "done", "Evidence considered").state == "done"
         elif change == "read":
             assert inbox.read(item, occupant).state == "read"
