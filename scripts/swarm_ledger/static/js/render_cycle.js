@@ -16,7 +16,7 @@ export function renderCycle(focusKey, cooperative, build) {
         await scheduler.postTask(() => {}, { priority: "background" });
         if (!current()) return rendered;
         const now = document.activeElement;
-        if (!focusKey && now && now.dataset && now.dataset.focus) key = now.dataset.focus;
+        if (!focusKey && now && now !== document.body) key = now.dataset ? now.dataset.focus : null;
       }
       try {
         const drawing = section();
