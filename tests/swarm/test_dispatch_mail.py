@@ -332,8 +332,6 @@ def test_launch_moves_dispatcher_mail_into_the_hive_its_new_occupant_runs_on(mai
     from scripts.hive import auth
 
     store, inbox = mailbox
-    store.redis.hset(f"{auth.PREFIX}:member:m1", mapping={"name": "m1", "ledger": "digest"})
-    store.redis.sadd(auth.INDEX, "m1")
     assert cli.main(["send", f"dispatcher@{SLUG}", "Please rank the checks fix up"]) == 0
     item = json.loads(capsys.readouterr().out)["id"]
     runtime = FakeRuntime()
@@ -341,11 +339,14 @@ def test_launch_moves_dispatcher_mail_into_the_hive_its_new_occupant_runs_on(mai
 
     def on_hive(config, lane, name, task):
         placed = spawn(config, lane, name, task)
+        store.redis.hset(f"{auth.PREFIX}:member:m1", mapping={"name": "m1", "ledger": "digest"})
+        store.redis.sadd(auth.INDEX, "m1")
         record = store.execution_occupants(SLUG)[f"dispatcher@{SLUG}"]
         return replace(placed, execution=replace(record, hive="m1"))
 
     runtime.spawn = on_hive
     actions = run(store, runtime, doc())
+    assert len(seats(store)) == 1, actions
     [seat] = seats(store)
     assert actions == [f"spawned dispatcher {seat.name} for 1 trigger"]
     member = InboxStore(store.redis, world="m1")
