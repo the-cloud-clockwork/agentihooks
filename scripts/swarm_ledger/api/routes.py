@@ -193,9 +193,9 @@ def ledger_operation(handler: object, services: Services, slug: str, path: str, 
 PAGE_WRITES = {"saves": "put_ledger", "swarm/controls": "put_swarm"}
 
 
-def export_body(state: dict) -> str:
+def export_body(state: dict) -> bytes:
     meta = {key: item for key, item in state["_meta"].items() if key not in ("seeds", "api_operations")}
-    return json.dumps({"data": {**state, "_meta": meta}}, ensure_ascii=False)
+    return json.dumps({"data": {**state, "_meta": meta}}, ensure_ascii=False).encode()
 
 
 def handle(handler: object, services: Services) -> None:
@@ -211,7 +211,7 @@ def handle(handler: object, services: Services) -> None:
     except (OSError, ValueError):
         logging.getLogger(__name__).exception("Ledger API storage failure")
         status, result = 500, APIError(500, "storage_error", "Resource could not be read or written").envelope()
-    encoded = result if isinstance(result, str) else json.dumps(result, ensure_ascii=False)
+    encoded = result if isinstance(result, (str, bytes)) else json.dumps(result, ensure_ascii=False)
     return handler.send(status, encoded, "application/json")
 
 

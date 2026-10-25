@@ -874,7 +874,7 @@ class Handler(BaseHTTPRequestHandler):
         if self.path.startswith("/api/v1/") and code >= 400 and ctype != "application/json":
             body = json.dumps({"error": {"code": "forbidden" if code == 403 else "request_refused", "message": body}})
             ctype = "application/json"
-        data = body.encode("utf-8")
+        data = body if isinstance(body, bytes) else body.encode("utf-8")
         self.send_response(code)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(data)))
