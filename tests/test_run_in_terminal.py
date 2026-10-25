@@ -54,6 +54,20 @@ def test_the_native_host_runs_the_terminal_script(monkeypatch, tmp_path, capsys)
     assert "host=native" in capsys.readouterr().out
 
 
+def test_native_default_titles_use_the_shared_name_policy(monkeypatch, tmp_path):
+    directory = tmp_path / "project.one_two"
+    directory.mkdir()
+    ran = []
+    monkeypatch.setattr(herdr_host, "binary", lambda: None)
+    monkeypatch.setattr(
+        run_in_terminal.subprocess,
+        "run",
+        lambda argv, **kwargs: ran.append(argv) or subprocess.CompletedProcess(argv, 0),
+    )
+    assert run_in_terminal.main(["--host", "native", "--dir", str(directory)], {"HOME": str(tmp_path)}) == 0
+    assert ran[0][2] == "project-one-two"
+
+
 def test_an_automatic_herdr_failure_falls_back_to_the_native_terminal(monkeypatch, tmp_path, capsys):
     ran = []
     monkeypatch.setattr(herdr_host, "binary", lambda: "/bin/herdr")
