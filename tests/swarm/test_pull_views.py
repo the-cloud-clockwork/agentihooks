@@ -174,6 +174,23 @@ def test_tick_rollups_share_reads_until_expiry_but_merge_reads_stay_fresh(monkey
     assert github_reads.counts(0, clock[0] + 1) == {"swarm.checks": 2, "swarm.checks.fresh": 1}
 
 
+def test_unavailable_shared_snapshot_storage_keeps_live_rollups_readable(monkeypatch, tmp_path):
+    import fakeredis
+
+    unavailable = tmp_path / "file"
+    unavailable.touch()
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(unavailable))
+    url = "https://github.com/o/r/pull/1"
+    cache = fakeredis.FakeRedis(decode_responses=True)
+    responses = iter([resource(), resource("h2", "MERGED")])
+
+    def run(*args, **kwargs):
+        return SimpleNamespace(returncode=0, stdout=json.dumps({"data": {"p0": next(responses)}}))
+
+    assert views([url], run, cache)[url].head == "h1"
+    assert views([url], run, cache)[url].head == "h2"
+
+
 def test_empty_batch_never_launches_a_command():
     assert views([], lambda *a, **k: pytest.fail("empty request")) == {}
 

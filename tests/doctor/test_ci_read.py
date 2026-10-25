@@ -266,6 +266,27 @@ def test_job_logs_survive_attempt_cache_loss_and_concurrent_collectors(monkeypat
     assert github_reads.counts(0, clock[0] + 1)["doctor.ci.job_log"] == 2
 
 
+def test_retained_logs_are_invalidated_when_gh_auth_config_changes(monkeypatch, tmp_path):
+    from scripts.swarm import github_reads
+
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path / "state"))
+    monkeypatch.setenv("GH_CONFIG_DIR", str(tmp_path / "gh"))
+    monkeypatch.delenv("GH_TOKEN", raising=False)
+    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+    config = tmp_path / "gh"
+    config.mkdir()
+    hosts = config / "hosts.yml"
+    hosts.touch()
+    endpoint = "repos/o/r/actions/jobs/1/logs"
+    logs = iter(["first", "second"])
+    assert github_reads.job_log(endpoint, lambda: next(logs)) == "first"
+    assert github_reads.job_log(endpoint, lambda: next(logs)) == "first"
+    hosts.unlink()
+    hosts.touch()
+    assert github_reads.job_log(endpoint, lambda: next(logs)) == "second"
+    assert github_reads.job_log(endpoint, lambda: next(logs)) == "second"
+
+
 def test_attempt_reader_downloads_only_completed_unskipped_jobs():
     workflow = {**load("ci")["runs"][0], "run_attempt": 2, "status": "in_progress"}
     calls = []
