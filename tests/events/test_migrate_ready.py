@@ -11,7 +11,17 @@ from tests.hive.test_nats_grant import signer as signer
 pytestmark = pytest.mark.unit
 
 
-def test_command_inventories_then_keeps_every_ready_offer(buses, monkeypatch, capsys):
+@pytest.fixture
+def command(buses, monkeypatch):
+    _, scoped = buses
+    monkeypatch.setenv("AGENTIHOOKS_BUS", "nats")
+    monkeypatch.setenv(URL_ENV, scoped._config.url)
+    monkeypatch.setenv(CREDENTIALS_ENV, scoped._config.credentials)
+    monkeypatch.delenv("AGENTIHOOKS_BUS_BIND", raising=False)
+    return importlib.import_module("scripts.events.migrate_ready")
+
+
+def test_command_inventories_then_keeps_every_ready_offer(buses, command, capsys):
     legacy, scoped = buses
     policy = QueuePolicy()
     offers = {}
@@ -23,11 +33,6 @@ def test_command_inventories_then_keeps_every_ready_offer(buses, monkeypatch, ca
         ]
         for offer in offers[swarm, lane]:
             queue.offer(offer)
-    monkeypatch.setenv("AGENTIHOOKS_BUS", "nats")
-    monkeypatch.setenv(URL_ENV, scoped._config.url)
-    monkeypatch.setenv(CREDENTIALS_ENV, scoped._config.credentials)
-    monkeypatch.delenv("AGENTIHOOKS_BUS_BIND", raising=False)
-    command = importlib.import_module("scripts.events.migrate_ready")
 
     assert command.main([]) == 0
     inventory = json.loads(capsys.readouterr().out)
@@ -58,15 +63,10 @@ def test_command_inventories_then_keeps_every_ready_offer(buses, monkeypatch, ca
         assert target.take(20) is None
 
 
-def test_command_reports_observed_counts_when_migration_fails_after_copy(buses, monkeypatch, capsys):
+def test_command_reports_observed_counts_when_migration_fails_after_copy(buses, command, monkeypatch, capsys):
     legacy, scoped = buses
     offer = Envelope("retained", "task.ready", "doctor", "task", "work", 1, 0, "hub", {"lane": "eng"})
     legacy.queue("swarm.doctor.ready.eng", QueuePolicy()).offer(offer)
-    monkeypatch.setenv("AGENTIHOOKS_BUS", "nats")
-    monkeypatch.setenv(URL_ENV, scoped._config.url)
-    monkeypatch.setenv(CREDENTIALS_ENV, scoped._config.credentials)
-    monkeypatch.delenv("AGENTIHOOKS_BUS_BIND", raising=False)
-    command = importlib.import_module("scripts.events.migrate_ready")
     migrate = command.NatsBus.migrate_queue
 
     def interrupted(bus, swarm, name, policy):
@@ -82,3 +82,189 @@ def test_command_reports_observed_counts_when_migration_fails_after_copy(buses, 
     assert report["queues"][0]["remaining"] == 0
     assert report["failures"] == [{"swarm": "doctor", "lane": "eng", "error": "interrupted after copy"}]
     assert scoped.for_swarm("doctor").queue("eng", QueuePolicy()).take(1000).event == offer
+
+
+@pytest.mark.parametrize("arguments", [["--apply"], ["--apply", "--quiescent"], ["--apply", "--swarm", "doctor"]])
+def test_apply_requires_named_quiet_scope(command, arguments, capsys):
+    with pytest.raises(SystemExit) as error:
+        command.main(arguments)
+    assert error.value.code == 2
+    assert (
+        capsys.readouterr()
+        .err.splitlines()[-1]
+        .endswith(": error: --apply requires explicit --swarm selection and --quiescent")
+    )
+
+
+@pytest.mark.parametrize(("backend", "bind"), [("memory", "0"), ("nats", "1")])
+def test_apply_requires_privileged_nats(command, monkeypatch, capsys, backend, bind):
+    monkeypatch.setenv("AGENTIHOOKS_BUS", backend)
+    monkeypatch.setenv("AGENTIHOOKS_BUS_BIND", bind)
+    with pytest.raises(SystemExit) as error:
+        command.main(["--apply", "--quiescent", "--swarm", "doctor"])
+    assert error.value.code == 2
+    assert (
+        capsys.readouterr()
+        .err.splitlines()[-1]
+        .endswith(": error: migration requires the NATS backend and privileged provisioning for --apply")
+    )
+
+
+def test_help_explains_selection_and_quiet_window(command, monkeypatch, capsys):
+    monkeypatch.setattr("sys.argv", ["migrate-ready"])
+    with pytest.raises(SystemExit) as error:
+        command.main(["--help"])
+    assert error.value.code == 0
+    assert " ".join(capsys.readouterr().out.split()) == (
+        "usage: migrate-ready [-h] [--swarm SWARM] [--apply] [--quiescent] "
+        "Inventory or migrate retained legacy ready offers to scoped queues options: "
+        "-h, --help show this help message and exit "
+        "--swarm SWARM Limit the move to this swarm; repeat for more "
+        "--apply Move retained offers; default is read only inventory "
+        "--quiescent Confirm legacy producers and consumers are quiet"
+    )
+
+
+def test_inventory_is_read_only_and_move_keeps_foreign_scope(buses, command, capsys):
+    legacy, scoped = buses
+    owned = Envelope("owned", "task.ready", "doctor", "task", "one", 1, 0, "hub", {})
+    foreign = Envelope("foreign", "task.ready", "other", "task", "two", 1, 0, "hub", {})
+    legacy.queue("swarm.doctor.ready.eng", QueuePolicy()).offer(owned)
+    outside = legacy.queue("swarm.other.ready.ci", QueuePolicy())
+    outside.offer(foreign)
+    before = [info.config.name for info in legacy._loop.run(legacy._js.streams_info())]
+    assert command.main([]) == 0
+    inventory = json.loads(capsys.readouterr().out)
+    assert inventory["retained"] == inventory["remaining"] == 2
+    assert inventory["failures"] == []
+    assert [info.config.name for info in legacy._loop.run(legacy._js.streams_info())] == before
+    assert command.main(["--apply", "--quiescent", "--swarm", "doctor"]) == 0
+    report = json.loads(capsys.readouterr().out)
+    assert report["applied"] is True
+    assert report["retained"] == report["kept"] == 1
+    assert report["remaining"] == 0
+    assert report["failures"] == []
+    assert [(row["swarm"], row["lane"]) for row in report["queues"]] == [("doctor", "eng")]
+    assert scoped.for_swarm("doctor").queue("eng", QueuePolicy()).take(1000).event == owned
+    assert outside.take(1000).event == foreign
+
+
+def test_inventory_reads_every_page(buses, command, monkeypatch, capsys):
+    from nats.js.client import JetStreamContext
+
+    legacy, _ = buses
+    names = set()
+    for lane in ("eng", "ci", "plan"):
+        queue = legacy.queue(f"swarm.doctor.ready.{lane}", QueuePolicy())
+        queue.offer(Envelope(lane, "task.ready", "doctor", "task", lane, 1, 0, "hub", {}))
+        names.add(queue._stream)
+    original = JetStreamContext.streams_info_iterator
+
+    async def one_per_page(client, *, offset):
+        page = await original(client, offset=0)
+        streams = [stream for stream in page.streams if stream["config"]["name"] in names]
+        page.total = len(streams)
+        page.streams = streams[offset : offset + 1]
+        return page
+
+    monkeypatch.setattr(JetStreamContext, "streams_info_iterator", one_per_page)
+    assert command.main([]) == 0
+    report = json.loads(capsys.readouterr().out)
+    assert report["retained"] == 3
+    assert [(row["swarm"], row["lane"]) for row in report["queues"]] == [
+        ("doctor", "ci"),
+        ("doctor", "eng"),
+        ("doctor", "plan"),
+    ]
+
+
+def test_incomplete_inventory_is_refused(command, monkeypatch):
+    from nats.js.client import JetStreamContext
+
+    original = JetStreamContext.streams_info_iterator
+
+    async def empty_page(client, *, offset):
+        page = await original(client, offset=offset)
+        page.total = 1
+        page.streams = []
+        return page
+
+    monkeypatch.setattr(JetStreamContext, "streams_info_iterator", empty_page)
+    with pytest.raises(RuntimeError) as error:
+        command.main([])
+    assert str(error.value) == "NATS stream inventory did not advance"
+
+
+def test_inventory_refuses_conflicting_ready_ownership(buses, command):
+    legacy, _ = buses
+    legacy._loop.run(legacy._js.add_stream(name="foreign", subjects=["agentihooks.queue.swarm.doctor.ready.eng"]))
+    with pytest.raises(ValueError) as error:
+        command.main([])
+    assert str(error.value) == "legacy ready queue ownership differs from its stream name"
+
+
+@pytest.mark.parametrize("change", ["pending", "new_offer", "unreadable"])
+def test_incomplete_move_reports_failure_and_unknown_counts(buses, command, monkeypatch, capsys, change):
+    from nats.js.client import JetStreamContext
+    from nats.js.errors import APIError
+
+    legacy, _ = buses
+    source = legacy.queue("swarm.doctor.ready.eng", QueuePolicy())
+    source.offer(Envelope("one", "task.ready", "doctor", "task", "one", 1, 0, "hub", {}))
+    migrate = command.NatsBus.migrate_queue
+    stream_info = JetStreamContext.stream_info
+
+    async def unavailable(client, name, **kwargs):
+        if name == source._stream:
+            raise APIError(description="source probe unavailable")
+        return await stream_info(client, name, **kwargs)
+
+    def incomplete(bus, swarm, name, policy):
+        if change == "pending":
+            return
+        migrate(bus, swarm, name, policy)
+        if change == "new_offer":
+            source.offer(Envelope("two", "task.ready", "doctor", "task", "two", 1, 0, "hub", {}))
+        else:
+            monkeypatch.setattr(JetStreamContext, "stream_info", unavailable)
+            raise RuntimeError("original move interrupted")
+
+    monkeypatch.setattr(command.NatsBus, "migrate_queue", incomplete)
+    assert command.main(["--apply", "--quiescent", "--swarm", "doctor"]) == 1
+    report = json.loads(capsys.readouterr().out)
+    expected = {
+        "pending": (0, 1, "legacy ready queue changed during migration"),
+        "new_offer": (None, 1, "legacy ready queue changed during migration"),
+        "unreadable": (None, None, "original move interrupted"),
+    }
+    kept, remaining, message = expected[change]
+    assert report["kept"] == kept
+    assert report["remaining"] == remaining
+    assert report["failures"] == [{"swarm": "doctor", "lane": "eng", "error": message}]
+
+
+def test_move_refuses_work_that_changed_after_inventory(buses, command, monkeypatch, capsys):
+    from nats.js.client import JetStreamContext
+
+    legacy, _ = buses
+    source = legacy.queue("swarm.doctor.ready.eng", QueuePolicy())
+    source.offer(Envelope("one", "task.ready", "doctor", "task", "one", 1, 0, "hub", {}))
+    original = JetStreamContext.stream_info
+    changed = False
+
+    async def changing(client, name, **kwargs):
+        nonlocal changed
+        if name == source._stream and not changed:
+            changed = True
+            source.offer(Envelope("two", "task.ready", "doctor", "task", "two", 1, 0, "hub", {}))
+        return await original(client, name, **kwargs)
+
+    monkeypatch.setattr(JetStreamContext, "stream_info", changing)
+    assert command.main(["--apply", "--quiescent", "--swarm", "doctor"]) == 1
+    report = json.loads(capsys.readouterr().out)
+    assert report["retained"] == 1
+    assert report["kept"] == 0
+    assert report["remaining"] == 2
+    assert report["failures"] == [
+        {"swarm": "doctor", "lane": "eng", "error": "legacy ready queue changed after inventory"}
+    ]

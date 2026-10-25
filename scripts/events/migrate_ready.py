@@ -3,6 +3,7 @@ import json
 import re
 from dataclasses import asdict, dataclass, replace
 
+from nats.errors import Error as NatsError
 from nats.js.errors import APIError
 
 from .config import BusConfig
@@ -16,11 +17,11 @@ class ReadyQueue:
     stream: str
     retained: int
     last_sequence: int
-    remaining: int
-    kept: int = 0
+    remaining: int | None
+    kept: int | None = 0
 
 
-async def _inventory(bus: NatsBus, swarms: list[str]) -> list[ReadyQueue]:
+async def _inventory(bus: NatsBus, swarms: list[str] | None) -> list[ReadyQueue]:
     offset, queues = 0, []
     pattern = re.compile(rf"{re.escape(QUEUE_SUBJECT)}\.swarm\.([^.]+)\.ready\.(eng|ci|plan)")
     while True:
@@ -44,21 +45,42 @@ async def _inventory(bus: NatsBus, swarms: list[str]) -> list[ReadyQueue]:
             raise RuntimeError("NATS stream inventory did not advance")
 
 
+def _observe(bus: NatsBus, queue: ReadyQueue) -> None:
+    queue.remaining = queue.kept = None
+    try:
+        after = bus._loop.run(bus._js.stream_info(queue.stream))
+    except (APIError, NatsError):
+        return
+    queue.remaining = after.state.messages
+    if after.state.last_seq == queue.last_sequence:
+        queue.kept = queue.retained - queue.remaining
+
+
+def _total(values: list[int | None]) -> int | None:
+    total = 0
+    for value in values:
+        if value is None:
+            return None
+        total += value
+    return total
+
+
 def _move(bus: NatsBus, queue: ReadyQueue) -> None:
     before = bus._loop.run(bus._js.stream_info(queue.stream))
+    queue.remaining = before.state.messages
     if (before.state.messages, before.state.last_seq) != (queue.retained, queue.last_sequence):
         raise RuntimeError("legacy ready queue changed after inventory")
-    bus.migrate_queue(queue.swarm, f"swarm.{queue.swarm}.ready.{queue.lane}", bus._config.queue)
-    after = bus._loop.run(bus._js.stream_info(queue.stream))
-    queue.remaining = after.state.messages
-    if after.state.messages or after.state.last_seq != queue.last_sequence:
+    try:
+        bus.migrate_queue(queue.swarm, f"swarm.{queue.swarm}.ready.{queue.lane}", bus._config.queue)
+    finally:
+        _observe(bus, queue)
+    if queue.remaining != 0 or queue.kept != queue.retained:
         raise RuntimeError("legacy ready queue changed during migration")
-    queue.kept = queue.retained
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Inventory or migrate retained legacy ready offers to scoped queues")
-    parser.add_argument("--swarm", action="append", default=[], help="Limit the move to this swarm; repeat for more")
+    parser.add_argument("--swarm", action="append", help="Limit the move to this swarm; repeat for more")
     parser.add_argument("--apply", action="store_true", help="Move retained offers; default is read only inventory")
     parser.add_argument("--quiescent", action="store_true", help="Confirm legacy producers and consumers are quiet")
     args = parser.parse_args(argv)
@@ -75,7 +97,7 @@ def main(argv: list[str] | None = None) -> int:
             for queue in queues:
                 try:
                     _move(bus, queue)
-                except (RuntimeError, ValueError, PermissionError, APIError) as error:
+                except (RuntimeError, ValueError, PermissionError, APIError, NatsError) as error:
                     failures.append({"swarm": queue.swarm, "lane": queue.lane, "error": str(error)})
                     break
         print(
@@ -83,12 +105,11 @@ def main(argv: list[str] | None = None) -> int:
                 {
                     "applied": args.apply,
                     "retained": sum(queue.retained for queue in queues),
-                    "kept": sum(queue.kept for queue in queues),
-                    "remaining": sum(queue.remaining for queue in queues),
+                    "kept": _total([queue.kept for queue in queues]),
+                    "remaining": _total([queue.remaining for queue in queues]),
                     "queues": [asdict(queue) for queue in queues],
                     "failures": failures,
                 },
-                sort_keys=True,
             )
         )
         return 1 if failures else 0
