@@ -328,3 +328,46 @@ def test_a_swarm_pass_measures_the_stages_of_the_ledger_tasks_and_reports_a_flee
     swarm = metrics.metrics_swarm.TickInput(store, doc, [], lambda url: None, None)
     assert metrics.record_pass("sw", NOW, 0, ON, swarm) == ["fleet metrics failed: registry down"]
     assert seen == [(tasks, [True, False, False], {"eng": 0, "ci": 0, "plan": 1})]
+
+
+@pytest.mark.parametrize("minutes,collected", [(None, [NOW, NOW + 600_000]), ("5", [NOW, NOW + 360_000])])
+def test_swarm_collectors_run_once_per_interval_while_every_pass_writes_its_tick_row(
+    spool, sent, monkeypatch, minutes, collected
+):
+    import fakeredis
+
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    store.create(SwarmConfig("sw", "/repo", 0, 0))
+    seen = []
+    monkeypatch.setattr(metrics, "_ledger", lambda slug, now_ms, errors, box, swarm=None: seen.append(now_ms))
+    monkeypatch.setattr(metrics, "_collect", lambda *args: None)
+    clock = [NOW]
+    monkeypatch.setattr(store.redis, "set", _expiring(store.redis.set, clock))
+    environ = ON if minutes is None else {**ON, "AGENTIHOOKS_METRICS_EVERY_MINUTES": minutes}
+    swarm = metrics.metrics_swarm.TickInput(store, {"tasks": []}, [], lambda url: None, None)
+    passes = [NOW, NOW + 180_000, NOW + 360_000, NOW + 600_000]
+    for at in passes:
+        clock[0] = at
+        assert metrics.record_pass("sw", at, 1, environ, swarm) == []
+
+    assert seen == collected
+    ticks = [
+        json.loads(line)["ts_ms"]
+        for _, query, body in sent
+        if query == "INSERT INTO swarm.ticks FORMAT JSONEachRow"
+        for line in body.splitlines()
+    ]
+    assert sorted(set(ticks)) == passes
+
+
+def _expiring(real_set, clock):
+    expiry = {}
+
+    def set_(name, value, nx=False, px=None, **kwargs):
+        if nx and name in expiry and clock[0] < expiry[name]:
+            return None
+        if px is not None:
+            expiry[name] = clock[0] + px
+        return real_set(name, value, **kwargs)
+
+    return set_

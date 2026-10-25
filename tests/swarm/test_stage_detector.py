@@ -413,10 +413,10 @@ def test_detector_refuses_cadence_or_windows_outside_retained_history(ticks, hou
 
 
 def test_detector_defaults_and_the_longest_equal_windows_are_supported():
-    assert stage_detector.settings({}) == stage_detector.Settings(5, 4 * H)
-    assert stage_detector.settings({"AGENTIHOOKS_STAGE_DETECTOR_TICKS": "1"}) == stage_detector.Settings(1, 4 * H)
+    assert stage_detector.settings({}) == stage_detector.Settings(1, 4 * H)
+    assert stage_detector.settings({"AGENTIHOOKS_STAGE_DETECTOR_TICKS": "5"}) == stage_detector.Settings(5, 4 * H)
     assert stage_detector.settings({"AGENTIHOOKS_STAGE_DETECTOR_WINDOW_HOURS": "12"}) == stage_detector.Settings(
-        5, 12 * H
+        1, 12 * H
     )
 
 
