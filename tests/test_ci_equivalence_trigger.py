@@ -5,6 +5,8 @@ import pytest
 
 from scripts import ci_equivalence_trigger
 
+pytestmark = pytest.mark.unit
+
 
 def _git(root: Path, *args: str) -> None:
     subprocess.run(["git", "-C", str(root), *args], check=True, capture_output=True)

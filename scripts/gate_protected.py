@@ -11,6 +11,13 @@ from scripts import ci_branch_lanes, ci_reuse, ci_runner_trust, ci_wiring
 
 GATE = ci_wiring.GATE
 WORKFLOWS = ".github/workflows"
+EQUIVALENCE = "equivalence.yml"
+EQUIVALENCE_JOB = "ledger-equivalence"
+EQUIVALENCE_CONDITIONS = (
+    None,
+    "steps.trigger.outputs.run == 'true'",
+    "always() && steps.trigger.outputs.run == 'true'",
+)
 SHALLOW_PREFLIGHT_CHECKOUT = {
     "fetch-depth": 1,
     "sparse-checkout": (
@@ -131,6 +138,36 @@ def _reuse_problems(base: dict, head: dict, policy: object = None) -> list[str]:
     if candidate != previous and candidate not in reuse_jobs(policy):
         return ["The head changes the protected reuse job; the protected branch grades with its own."]
     return []
+
+
+def _equivalence_steps(workflow: dict | None) -> tuple[dict | None, int | None]:
+    job = ((workflow or {}).get("jobs") or {}).get(EQUIVALENCE_JOB)
+    steps = (job or {}).get("steps") or []
+    index = next((index for index, step in enumerate(steps) if step.get("id") == "trigger"), None)
+    return job, index
+
+
+def _equivalence_problems(branched: dict[str, dict], tip: dict[str, dict], head: dict[str, dict]) -> list[str]:
+    reference, candidate = tip.get(EQUIVALENCE), head.get(EQUIVALENCE)
+    base_job, base_index = _equivalence_steps(reference)
+    if candidate == branched.get(EQUIVALENCE) or base_index is None:
+        return []
+    head_job, head_index = _equivalence_steps(candidate)
+    if head_index is None:
+        return ["The head removes the ledger equivalence trigger the protected branch decides with."]
+    problems = []
+    if ci_wiring.triggers(candidate) != ci_wiring.triggers(reference):
+        problems.append("The head changes when the ledger equivalence workflow starts.")
+    if head_job.get("if") != base_job.get("if"):
+        problems.append("The head changes the ledger equivalence job condition.")
+    if head_job["steps"][: head_index + 1] != base_job["steps"][: base_index + 1]:
+        problems.append("The head changes the ledger equivalence steps up to its protected trigger.")
+    problems += [
+        f"The head's ledger equivalence step {step.get('name') or step.get('uses')} ignores the protected trigger."
+        for step in head_job["steps"][head_index + 1 :]
+        if step.get("if") not in EQUIVALENCE_CONDITIONS
+    ]
+    return problems
 
 
 def _duration_problems(base: dict, head: dict) -> list[str]:
@@ -298,6 +335,7 @@ def main(argv: list[str] | None = None) -> int:
     preflight = _preflight_problems(tip_workflows, head_workflows)
     governed = {"branch-lanes.yml"} if "branch-lanes.yml" in tip_workflows and not preflight else set()
     problems += preflight
+    problems += _equivalence_problems(base_workflows, tip_workflows, head_workflows)
     problems += [
         f"{file}: {problem}"
         for file, workflow in head_workflows.items()

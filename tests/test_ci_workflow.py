@@ -657,7 +657,7 @@ def test_equivalence_runs_on_every_ledger_pull_request_without_a_body_marker():
     assert head["with"]["fetch-depth"] == 2
 
 
-def test_equivalence_trigger_is_graded_from_the_base_branch():
+def test_equivalence_replays_wait_on_the_base_copy_of_the_trigger():
     workflow = yaml.safe_load((_ROOT / ".github/workflows/equivalence.yml").read_text())
     assert set(workflow[True]["pull_request"]) == {"branches"}
     steps = workflow["jobs"]["ledger-equivalence"]["steps"]

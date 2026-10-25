@@ -1198,3 +1198,63 @@ def test_only_the_trusted_preflight_skips_lane_grading(repo, capsys, trusted):
         _commit(repo, {"test.yml": _workflow(), "branch-lanes.yml": preflight}, {}, "trust preflight")
     assert gate_protected.main(["--root", str(repo), "--head", added]) == (0 if trusted else 1)
     assert ("shared hosted lane concurrency group" in capsys.readouterr().out) is not trusted
+
+
+def _equivalence():
+    return yaml.safe_load((_ROOT / ".github/workflows/equivalence.yml").read_text())
+
+
+def _equivalence_grade(head, branched=None):
+    tip = {gate_protected.EQUIVALENCE: _equivalence()}
+    return gate_protected._equivalence_problems(branched or {}, tip, {gate_protected.EQUIVALENCE: head})
+
+
+def test_an_unchanged_or_ordinary_equivalence_edit_passes_the_protected_grader():
+    assert _equivalence_grade(_equivalence()) == []
+    head = _equivalence()
+    head["jobs"]["ledger-equivalence"]["steps"][-1]["with"]["retention-days"] = 3
+    assert _equivalence_grade(head) == []
+
+
+def test_a_head_that_skips_its_equivalence_check_is_refused():
+    removed = _equivalence()
+    steps = removed["jobs"]["ledger-equivalence"]["steps"]
+    steps[:] = [step for step in steps if step.get("id") != "trigger"]
+    assert _equivalence_grade(removed) == [
+        "The head removes the ledger equivalence trigger the protected branch decides with."
+    ]
+    assert _equivalence_grade(None) == _equivalence_grade(removed)
+
+    forced = _equivalence()
+    [trigger] = [step for step in forced["jobs"]["ledger-equivalence"]["steps"] if step.get("id") == "trigger"]
+    trigger["run"] = 'echo run=false >> "$GITHUB_OUTPUT"'
+    assert _equivalence_grade(forced) == [
+        "The head changes the ledger equivalence steps up to its protected trigger."
+    ]
+
+    filtered = _equivalence()
+    filtered[True]["pull_request"]["paths"] = ["docs/**"]
+    assert _equivalence_grade(filtered) == ["The head changes when the ledger equivalence workflow starts."]
+
+    gated = _equivalence()
+    gated["jobs"]["ledger-equivalence"]["if"] = False
+    assert _equivalence_grade(gated) == ["The head changes the ledger equivalence job condition."]
+
+    unconditioned = _equivalence()
+    step = unconditioned["jobs"]["ledger-equivalence"]["steps"][-2]
+    step["if"] = "false"
+    assert _equivalence_grade(unconditioned) == [
+        f"The head's ledger equivalence step {step['name']} ignores the protected trigger."
+    ]
+
+
+def test_the_equivalence_trigger_is_graded_only_once_the_protected_branch_carries_it():
+    head = _equivalence()
+    head[True]["pull_request"]["paths"] = ["docs/**"]
+    old = _equivalence()
+    old["jobs"]["ledger-equivalence"]["steps"] = [
+        step for step in old["jobs"]["ledger-equivalence"]["steps"] if step.get("id") != "trigger"
+    ]
+    tip = {gate_protected.EQUIVALENCE: old}
+    assert gate_protected._equivalence_problems({}, tip, {gate_protected.EQUIVALENCE: head}) == []
+    assert _equivalence_grade(head, branched={gate_protected.EQUIVALENCE: head}) == []
