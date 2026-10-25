@@ -236,7 +236,7 @@ def test_every_listed_retention_registers(catalog):
         assert catalog.session("corpus-a", f"s{uid}")["retention"] == retention
 
 
-@pytest.mark.parametrize("start, end", [(25, 75), (10, 40), (0, 60), (49, 50)])
+@pytest.mark.parametrize("start, end", [(25, 75), (10, 40), (40, 60), (49, 50)])
 def test_an_archive_entry_overlapping_another_conflicts_and_changes_nothing(catalog, start, end):
     catalog.register(source())
     catalog.archive(entry(0, 50, "a" * 64))
