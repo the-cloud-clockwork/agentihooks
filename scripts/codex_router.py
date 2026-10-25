@@ -173,7 +173,14 @@ def token_accounts(environ: Mapping[str, str]) -> list[CodexAccount]:
         and name.removeprefix(CODEX_TOKEN_PREFIX) not in ("", API_ACCOUNT)
         and environ[name]
     ]
-    return [CodexAccount(name.removeprefix(CODEX_TOKEN_PREFIX), name) for name in operator_env.distinct(environ, names)]
+
+    def account(name: str) -> CodexAccount:
+        return CodexAccount(name.removeprefix(CODEX_TOKEN_PREFIX), name)
+
+    def rank(name: str) -> tuple[bool, bool, str]:
+        return _routed_rank(account(name), environ)
+
+    return [account(name) for name in operator_env.distinct(environ, names, key=rank)]
 
 
 def _without_tokens(environ: Mapping[str, str]) -> dict[str, str]:
