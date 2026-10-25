@@ -37,7 +37,7 @@ def asks_operator(op: dict) -> bool:
         return True
     if kind == "add_item":
         return op.get("list") == "questions" or (op.get("list") == "followups" and bool(op.get("needs_operator")))
-    return kind == "set" and op.get("value") is True and bool(NEEDS_OPERATOR.match(str(op.get("path", ""))))
+    return kind == "set" and op.get("value") is True and bool(NEEDS_OPERATOR.match(str(op.get("path"))))
 
 
 def route(slug: str) -> str:

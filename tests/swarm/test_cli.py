@@ -13,6 +13,7 @@ from scripts.swarm.health import checks
 from scripts.swarm.ledger_events import PullRequest
 from scripts.swarm.resume import Outcome
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig, SwarmError
+from scripts.swarm_v2 import front_door
 from scripts.swarm_v2.runtime.routed import RoutedRuntime
 from tests.swarm.test_delivery import FakeHerdr
 from tests.swarm.test_tick import FakeLedger, FakeRuntime
@@ -514,7 +515,8 @@ def test_say_to_the_operator_is_refused_naming_the_front_door_inbox(env, capsys)
     ledger.said.clear()
     capsys.readouterr()
     assert run("sw", "--as", "engineer@a1b2c3-0001", "say", "phase one is done", "--to", "operator") == 1
-    assert 'agentihooks msg send master@sw "<text>"' in capsys.readouterr().err
+    err = capsys.readouterr().err
+    assert front_door.say_refusal("sw", "engineer@a1b2c3-0001") in err and 'msg send master@sw "<text>"' in err
     assert ledger.said == []
     assert InboxStore(store.redis).inbox("ci@a1b2c3-0001") == []
 

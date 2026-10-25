@@ -958,7 +958,7 @@ def build_parser():
     say = sub.add_parser("say")
     say.add_argument("text")
     say.add_argument("--long", action="store_true")
-    say.add_argument("--reply-to", default="", help="id of the operator chat line this answers")
+    say.add_argument("--reply-to")
     for name, first, second in (("comment", "item", "text"), ("retext", "item", "text")):
         parser_ = sub.add_parser(name)
         parser_.add_argument(first)

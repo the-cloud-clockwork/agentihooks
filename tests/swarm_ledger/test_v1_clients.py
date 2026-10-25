@@ -168,6 +168,17 @@ def test_chat_command_sends_one_service_chat_operation(monkeypatch, capsys):
     assert capsys.readouterr().out == json.dumps({"posted": op["id"]}) + "\n"
 
 
+def test_chat_command_requires_the_operator_line_it_answers(monkeypatch, capsys):
+    recorder = Recorder({"applied": ["x"], "rejected": []})
+    monkeypatch.setattr(cli_ledger, "request", recorder)
+    monkeypatch.setattr(sys, "argv", ["chat_ledger.py", SLUG, "--as", "api-reader", "Unasked"])
+    with pytest.raises(SystemExit) as exit_:
+        chat_ledger.main()
+    assert exit_.value.code == 2
+    assert "--reply-to" in capsys.readouterr().err
+    assert recorder.calls == []
+
+
 def test_chat_command_exits_on_a_rejected_message(monkeypatch, capsys):
     monkeypatch.setattr(cli_ledger, "request", Recorder({"applied": [], "rejected": ["m-1"]}))
     monkeypatch.setattr(sys, "argv", ["chat_ledger.py", SLUG, "--as", "api-reader", "--reply-to", "o-0", "No"])

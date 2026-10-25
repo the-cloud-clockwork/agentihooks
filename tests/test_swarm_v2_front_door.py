@@ -61,6 +61,13 @@ def test_the_refusal_names_the_inbox_route_to_the_front_door():
     )
 
 
+def test_the_say_refusal_names_the_inbox_route_to_the_front_door():
+    assert front_door.say_refusal("sw", "engineer@abc-1") == (
+        "no agent writes to the operator first, so engineer@abc-1 cannot say to him; the front door answers him only "
+        'when he writes; send it to the front door master by inbox with agentihooks msg send master@sw "<text>"'
+    )
+
+
 def test_the_ask_refusal_names_the_inbox_route_to_the_front_door():
     assert front_door.ask_refusal("sw", "engineer@abc-1") == (
         "no agent asks the operator first, so engineer@abc-1 cannot add a question, priority or needs operator "
@@ -193,6 +200,7 @@ def test_every_agent_ask_to_the_operator_is_refused(world, ask, by):
         {"op": "add_item", "list": "followups", "text": "x", "needs_operator": False},
         {"op": "set", "path": "followups/f1/needs_operator", "value": False},
         {"op": "set", "path": "followups/f1/done", "value": True},
+        {"op": "set", "value": True},
         {"op": "priority_clear", "target": "all"},
     ],
 )

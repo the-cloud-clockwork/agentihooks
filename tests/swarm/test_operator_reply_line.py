@@ -23,13 +23,13 @@ def item(ref, sender="master@abc-1"):
 
 
 ASKED = {
-    "asked-1": SimpleNamespace(sender="operator", ref="sw:41:m-7f3a"),
+    "asked-1": SimpleNamespace(sender="operator", ref="sw:41:m:7f3a"),
     "agent-1": SimpleNamespace(sender="engineer@abc-2", ref=""),
 }
 
 
 def test_an_answer_to_an_operator_chat_line_carries_its_id():
-    assert delivery.operator_line(Inbox(ASKED), "sw", item("asked-1")) == "m-7f3a"
+    assert delivery.operator_line(Inbox(ASKED), "sw", item("asked-1")) == "m:7f3a"
 
 
 @pytest.mark.parametrize(
