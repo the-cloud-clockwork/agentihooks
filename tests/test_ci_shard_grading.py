@@ -273,3 +273,23 @@ def test_downloaded_reports_check_needs_no_new_base_grader(tmp_path, missing):
     assert (result.returncode == 0) == (missing is None), result.stdout + result.stderr
     if missing:
         assert missing in result.stdout + result.stderr
+
+
+def test_a_downloaded_report_that_is_a_file_is_still_missing(tmp_path):
+    step = next(
+        step for step in _jobs()["shard-check"]["steps"] if step.get("name") == "Require every planned shard report"
+    )
+    reports = tmp_path / "shard-reports"
+    reports.mkdir()
+    (reports / "durations-3.12-4").mkdir()
+    (reports / "flakes-3.12-4").write_text("not a report folder")
+    result = subprocess.run(
+        ["/bin/bash", "-e", "-o", "pipefail", "-c", step["run"]],
+        cwd=tmp_path,
+        env={"PATH": os.defpath, "SHARDS": "[4]"},
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert result.returncode == 1
+    assert "Missing shard reports: flakes-3.12-4" in result.stdout
