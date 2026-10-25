@@ -632,6 +632,7 @@ def test_every_pre_tool_call_counts_toward_the_reminder(monkeypatch):
     assert injected.count(REMINDER) == 1
 
 
+@pytest.mark.parametrize("words", [20, 21, 100])
 def test_the_stop_hook_refuses_an_over_limit_reply_while_off(monkeypatch, words):
     for key, value in SWARM.items():
         monkeypatch.setenv(key, value)

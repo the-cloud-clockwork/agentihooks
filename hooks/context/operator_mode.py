@@ -20,7 +20,11 @@ REMINDER = "Operator not present: replies stay within {words} words."
 SWITCH = re.compile(r"(?<![\w-])operator (on|off)(?![\w-])")
 ON_NOTICE = "Operator on: the operator is present in this pane until he types operator off or the session restarts."
 OFF_NOTICE = "Operator off: the operator is not present in this pane."
-TURN_NOTICE = "Operator present for this turn: reply without a word limit."
+REPLY_REFUSAL = (
+    "Operator not present: this reply has {count} words, over the {words} word limit. "
+    "Reply again in at most {words} words, machine style: result only, no explanation."
+)
+MARKER = re.compile(r"<!--.*?-->", re.DOTALL)
 QUESTION_TOOL = "AskUserQuestion"
 ASK_REFUSAL = (
     "The operator is not present in this pane, so the question tool is off. Put the question on the ledger with "
@@ -105,8 +109,6 @@ def notice(payload, typed, now=None):
     session_id = payload.get("session_id")
     word = observe(session_id, payload.get("prompt"), typed, now)
     text = {"on": ON_NOTICE, "off": OFF_NOTICE}.get(word, "")
-    if session_id and typed and word != "off" and not present(session_id, now=now):
-        return TURN_NOTICE
     if _away(session_id, None, now):
         return "\n".join(filter(None, (text, _reminder_text(None))))
     return text
@@ -149,13 +151,26 @@ def _heard(session_id, environ=None):
 
 
 def _away(session_id, environ, now):
-    now = time.time() if now is None else now
-    return bool(session_id) and not (present(session_id, environ) or _turn(_load(session_id), now))
+    return bool(session_id) and not present(session_id, environ, now)
+
+
+def _limit(environ):
+    env = os.environ if environ is None else environ
+    return int(env.get("AGENTIHOOKS_OPERATOR_OFF_MAX_WORDS", QUIET_WORDS))
 
 
 def _reminder_text(environ):
-    env = os.environ if environ is None else environ
-    return REMINDER.format(words=env.get("AGENTIHOOKS_OPERATOR_OFF_MAX_WORDS", QUIET_WORDS))
+    return REMINDER.format(words=_limit(environ))
+
+
+def reply_refusal(payload, environ=None):
+    """The refusal of a final reply over the word limit while the operator is away, once per stop."""
+    session_id = payload.get("session_id")
+    if payload.get("stop_hook_active") or not _away(session_id, environ, None):
+        return ""
+    count = len(MARKER.sub(" ", str(payload.get("last_assistant_message") or "")).split())
+    words = _limit(environ)
+    return REPLY_REFUSAL.format(count=count, words=words) if count > words else ""
 
 
 def reminder(session_id, environ=None, now=None):
