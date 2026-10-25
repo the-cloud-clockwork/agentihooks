@@ -65,6 +65,24 @@ def test_the_forgiven_failure_leaves_the_mean_of_started_launches_alone(store, m
     assert not any("launch budget" in action for action in actions)
 
 
+def test_only_the_first_failed_launch_of_a_pass_is_forgiven(store, monkeypatch):
+    store.update("sw", max_eng=3)
+    ledger, runtime = tasks(("t1", "eng"), ("t2", "eng"), ("t3", "eng")), FakeRuntime()
+    clock = _slow_launches(monkeypatch, runtime, 0)
+    spawn, cost = runtime.spawn, {"t1": 1, "t2": 90}
+
+    def launch(config, lane, name, task):
+        if lane != MASTER and task["id"] in cost:
+            clock[0] += cost[task["id"]]
+            raise _canary_failure("codex")
+        return spawn(config, lane, name, task)
+
+    runtime.spawn = launch
+    actions = tick("sw", store, ledger, runtime, now_ms=1_000)
+    assert runtime.spawned == []
+    assert "spent this pass's 20 second launch budget, t3 waits a pass" in actions
+
+
 def test_a_started_launch_clears_the_harness_its_task_avoided(store, monkeypatch):
     ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
     failing = {"t1"}
