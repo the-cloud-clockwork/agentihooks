@@ -220,6 +220,10 @@ class FencedRuntime:
             return False
         return self.deployment != LOCAL or self.runtime.has_capacity(config)
 
+    def launch_room(self, config) -> int:
+        room = getattr(self.runtime, "launch_room", None)
+        return room(config) if room else 1
+
     def spawn(self, config, lane, name, task):
         lease.renew(self.store, self.slug, self.held)
         task = _master_task(lane, task)

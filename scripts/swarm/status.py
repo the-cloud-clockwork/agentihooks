@@ -72,6 +72,7 @@ def now_ms():
 
 
 def task_counts(tasks):
+    tasks = [t for t in tasks if not t.get("out_of_scope")]
     return {s: sum(1 for t in tasks if t.get("state") == s) for s in ("open", "claimed", "blocked", "pr", "done")}
 
 

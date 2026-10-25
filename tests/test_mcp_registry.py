@@ -42,7 +42,7 @@ class TestMCPRegistry:
         """Only the agentihooks-native categories are registered."""
         from hooks.mcp._registry import CATEGORY_MODULES
 
-        assert set(CATEGORY_MODULES) == {"channels", "enforcement", "conditions", "scheduler", "recall"}
+        assert set(CATEGORY_MODULES) == {"channels", "enforcement", "conditions", "scheduler", "recall", "sessions"}
 
     def test_the_server_serves_the_scheduler_tools(self, tools):
         assert {

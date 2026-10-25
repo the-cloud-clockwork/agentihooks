@@ -389,17 +389,19 @@ class HiveLaunch:
 
         ttl = BUDGET.order_ttl_ms if selected.route_kind == placement.MASTER_LOGIN else TTL_MS
         admitted = self.admit(request, selected)
-        if selected.route_kind != placement.MASTER_LOGIN and not self.slots.reserve(
-            f"{selected.account.harness}:{selected.account.name}", admitted.execution_id, selected.account.cap, TTL_MS
-        ):
-            self.end(admitted, "account reservation is full")
-            return Outcome(
-                "spawn",
-                Status.UNAVAILABLE,
-                HIVE,
-                {"harness": selected.account.harness},
-                detail="account reservation is full",
+        if selected.route_kind != placement.MASTER_LOGIN:
+            account = selected.account
+            reading = self.slots.reserve_reading(
+                f"{account.harness}:{account.name}", admitted.execution_id, account.cap, TTL_MS
             )
+            if not reading.accepted:
+                refused = (
+                    f"account reservation is full: account={account.harness}:{account.name} "
+                    f"sessions={reading.sessions} cap={account.cap} "
+                    f"five_left={account.five_left} week_left={account.week_left}"
+                )
+                self.end(admitted, refused)
+                return Outcome("spawn", Status.UNAVAILABLE, HIVE, {"harness": account.harness}, detail=refused)
         prompt_ref = self.store.key(self.slug, f"launch-prompt:{admitted.execution_id}")
         order = LaunchOrder(
             self.slug,

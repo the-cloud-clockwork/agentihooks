@@ -10,6 +10,7 @@ from scripts.swarm import (
     metrics_fleet,
     metrics_ledger,
     metrics_outbox,
+    metrics_service,
     metrics_swarm,
     stage_detector,
     stages,
@@ -43,6 +44,10 @@ def _collect(slug, now_ms, swarm, box, errors, environ):
         metrics_fleet.record(box, swarm.store, slug, now_ms, pools=deployed.worker_pools(environ, slug))
     except (OSError, SwarmError, ValueError, KeyError, RedisError) as exc:
         errors.append(f"fleet metrics failed: {exc}")
+    try:
+        metrics_service.record(box, swarm.store, slug, now_ms)
+    except (ValueError, KeyError, RedisError) as exc:
+        errors.append(f"service metrics failed: {exc}")
 
 
 def record(table, rows, now_ms, environ=os.environ, extra=None):
