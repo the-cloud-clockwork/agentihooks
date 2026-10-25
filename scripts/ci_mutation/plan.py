@@ -183,7 +183,7 @@ def recorded_lines(root: Path, manifest: dict, changes: dict[str, set[int]]) -> 
             if (unit := f"{path}::{name}") in index
             for line in range(first, body)
         }
-        fallback.update(headers[line] for line in affected if line not in by_line and line in headers)
+        fallback.update(headers[line] for line in affected if line in headers)
         if any(line not in by_line and line not in headers for line in affected) or "<module>" in changed_units(
             old, new
         ):
