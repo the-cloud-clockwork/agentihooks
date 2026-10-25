@@ -22,6 +22,7 @@ CODE_DIRS = (
             "scheduler",
             "events",
             "hub",
+            "workflows",
         )
     ),
     ROOT / "hooks",

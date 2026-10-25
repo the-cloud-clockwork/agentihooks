@@ -47,6 +47,7 @@ jobs:
         if: steps.open.outputs.open != 'true'
         with:
           fetch-depth: 0
+          filter: blob:none
           persist-credentials: false
 
       - name: Record the revisions the report grades
