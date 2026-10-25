@@ -11,6 +11,7 @@ WAITS = 4
 calls = 0
 # One budget per process, so nested retries and polling loops cannot outwait the queue check timeout.
 slept = 0.0
+deadline: float | None = None
 
 
 def reset_wait() -> float:
@@ -31,9 +32,10 @@ def gh_api(args: list[str], *, timeout: float, text: bool = False) -> subprocess
             return subprocess.run(["gh", "api", *args], capture_output=True, check=True, timeout=timeout, text=text)
         except subprocess.CalledProcessError as error:
             stderr = error.stderr if isinstance(error.stderr, str) else (error.stderr or b"").decode(errors="replace")
-            if waited == WAITS or slept >= MAX_WAIT or not LIMITED.search(stderr):
+            left = MAX_WAIT - slept if deadline is None else min(MAX_WAIT - slept, deadline - time.monotonic())
+            if waited == WAITS or left <= 0 or not LIMITED.search(stderr):
                 raise
-            wait = min(MAX_WAIT - slept, SECONDARY_WAIT if "secondary" in stderr.lower() else reset_wait())
+            wait = min(left, SECONDARY_WAIT if "secondary" in stderr.lower() else reset_wait())
             print(f"GitHub API rate limit reached; waiting {wait:.0f} seconds for the reset", file=sys.stderr)
             time.sleep(wait)
             slept += wait

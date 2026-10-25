@@ -194,7 +194,7 @@ def current(repository: str, ref: str, head: str) -> None:
 def watch(repository: str, run: str, attempt: str, shards: list[int], ref: str, head: str) -> None:
     verify([], shards)
     seen = {}
-    deadline = time.monotonic() + 1200
+    deadline = rate_limit.deadline = time.monotonic() + 1200
     while time.monotonic() < deadline:
         current(repository, ref, head)
         jobs = read_jobs(f"repos/{repository}/actions/runs/{run}/attempts/{attempt}/jobs", JOB_PAGE)

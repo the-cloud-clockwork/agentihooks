@@ -29,7 +29,23 @@ def clock(monkeypatch):
     monkeypatch.setattr(rate_limit.time, "sleep", sleeps.append)
     monkeypatch.setattr(rate_limit, "calls", 0)
     monkeypatch.setattr(rate_limit, "slept", 0.0)
+    monkeypatch.setattr(rate_limit, "deadline", None)
     return sleeps
+
+
+def test_a_wait_never_passes_the_caller_deadline(monkeypatch, clock):
+    monkeypatch.setattr(rate_limit, "deadline", rate_limit.time.monotonic() + 30)
+    monkeypatch.setattr(rate_limit.subprocess, "run", _gh(iter([LIMITED, b"{}"]), []))
+    rate_limit.gh_api(["repos/x"], timeout=60)
+    assert len(clock) == 1 and 0 < clock[0] <= 30
+
+
+def test_a_passed_deadline_raises_without_waiting(monkeypatch, clock):
+    monkeypatch.setattr(rate_limit, "deadline", rate_limit.time.monotonic() - 1)
+    monkeypatch.setattr(rate_limit.subprocess, "run", _gh(iter([LIMITED]), []))
+    with pytest.raises(subprocess.CalledProcessError):
+        rate_limit.gh_api(["repos/x"], timeout=60)
+    assert clock == []
 
 
 def test_a_rate_limited_call_waits_for_the_reset_and_retries(monkeypatch, clock):

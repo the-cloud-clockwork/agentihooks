@@ -43,7 +43,7 @@ def watch(
     downloaded = {}
     expected = {f"{kind}-3.12-{shard}" for kind in ("durations", "flakes") for shard in shards}
     units = {f"unit (3.12, {shard})" for shard in shards}
-    deadline = time.monotonic() + 1200
+    deadline = rate_limit.deadline = time.monotonic() + 1200
     while time.monotonic() < deadline:
         fetch(repository, run, destination, downloaded)
         pages = api(f"repos/{repository}/actions/runs/{run}/attempts/{attempt}/jobs?per_page=100")
