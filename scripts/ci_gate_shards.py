@@ -1,4 +1,5 @@
 import io
+import itertools
 import json
 import os
 import re
@@ -14,7 +15,7 @@ def api(endpoint: str, *, binary: bool = False, attempts: int = 3) -> list | byt
     command = ["gh", "api", endpoint]
     if not binary:
         command.extend(["--paginate", "--slurp"])
-    for attempt in range(1, attempts + 1):
+    for attempt in itertools.count(1):
         try:
             result = subprocess.run(command, check=True, capture_output=True, timeout=60)
         except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as error:

@@ -147,7 +147,7 @@ def test_metadata_is_decoded_and_paginated_when_binary_is_omitted():
 
 
 def test_github_failure_is_never_replaced_with_empty_evidence(capsys):
-    failure = subprocess.CalledProcessError(1, ["gh"], stderr=b"HTTP 502: Bad Gateway")
+    failure = subprocess.CalledProcessError(1, ["gh"], stderr=b"HTTP 502: Bad Gateway \xff")
     with (
         patch.object(ci_gate_shards.subprocess, "run", side_effect=failure) as run,
         patch.object(ci_gate_shards.time, "sleep") as sleep,
@@ -158,14 +158,17 @@ def test_github_failure_is_never_replaced_with_empty_evidence(capsys):
     assert [call.args[0] for call in sleep.call_args_list] == [5, 10]
     err = capsys.readouterr().err
     assert err.count("HTTP 502: Bad Gateway") == 3
-    assert "repos/org/repo/actions attempt 3 of 3 failed" in err
+    assert "repos/org/repo/actions attempt 3 of 3 failed: HTTP 502: Bad Gateway" in err
 
 
 @pytest.mark.parametrize(
-    "failure",
-    [subprocess.CalledProcessError(1, ["gh"], stderr=b"HTTP 502"), subprocess.TimeoutExpired(["gh"], 60)],
+    ("failure", "logged"),
+    [
+        (subprocess.CalledProcessError(1, ["gh"], stderr=b"HTTP 502"), "failed: HTTP 502"),
+        (subprocess.TimeoutExpired(["gh"], 60), "failed: Command '['gh']' timed out after 60 seconds"),
+    ],
 )
-def test_a_transient_github_failure_is_retried_by_api(failure, capsys):
+def test_a_transient_github_failure_is_retried_by_api(failure, logged, capsys):
     result = subprocess.CompletedProcess([], 0, stdout=b'[{"artifacts": []}]')
     with (
         patch.object(ci_gate_shards.subprocess, "run", side_effect=[failure, result]) as run,
@@ -174,7 +177,7 @@ def test_a_transient_github_failure_is_retried_by_api(failure, capsys):
         assert ci_gate_shards.api("repos/org/repo/actions") == [{"artifacts": []}]
     assert run.call_count == 2
     sleep.assert_called_once_with(5)
-    assert "repos/org/repo/actions attempt 1 of 3 failed" in capsys.readouterr().err
+    assert f"repos/org/repo/actions attempt 1 of 3 {logged}" in capsys.readouterr().err
 
 
 def test_fetch_reads_every_page_and_ignores_foreign_and_expired_artifacts(tmp_path):
