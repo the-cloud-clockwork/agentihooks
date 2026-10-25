@@ -202,7 +202,7 @@ def _swarm_exports(environ: dict[str, str]) -> str:
 
 
 def _access_export() -> str:
-    return f'eval "$({shlex.join([sys.executable, "-m", "scripts.access_env", "env"])})"\n'
+    return f'eval "$({shlex.join([sys.executable, "-P", "-m", "scripts.access_env", "env"])})"\n'
 
 
 def _launch_environ(environ: dict[str, str], name: str, handoff: bool) -> dict[str, str]:
