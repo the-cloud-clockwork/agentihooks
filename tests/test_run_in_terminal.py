@@ -37,7 +37,7 @@ def test_a_command_runs_in_a_new_herdr_tab(herdr, tmp_path, capsys):
 
 def test_without_a_command_the_tab_is_an_interactive_shell(herdr, tmp_path):
     assert run_in_terminal.main(["--dir", str(tmp_path)], {"HOME": str(tmp_path)}) == 0
-    assert herdr[0][2] == tmp_path.name
+    assert herdr[0][2] == tmp_path.name.replace("_", "-")
     assert not any(call[:2] == ("pane", "run") for call in herdr[1:])
 
 
@@ -50,7 +50,7 @@ def test_the_native_host_runs_the_terminal_script(monkeypatch, tmp_path, capsys)
     rc = run_in_terminal.main(["--dir", str(tmp_path), "--", "make"], {"HOME": str(tmp_path)})
     assert rc == 0
     assert ran[0][0].endswith("run-in-terminal/scripts/02_run_terminal.sh")
-    assert ran[0][1:] == [str(tmp_path), tmp_path.name, "sleep 3 && make"]
+    assert ran[0][1:] == [str(tmp_path), tmp_path.name.replace("_", "-"), "sleep 3 && make"]
     assert "host=native" in capsys.readouterr().out
 
 
