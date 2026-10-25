@@ -536,10 +536,12 @@ def test_prepare_selects_fresh_dev_after_the_recorded_pull_request_merged(
     result = publish.prepare("swarm", agent, str(repository), ledger)
 
     retired = state == "MERGED" and head == "predecessor"
-    expected_branch = "engineer-test" if retired else "predecessor"
     assert git(worktree, "rev-parse", "HEAD") == (fresh if retired else old_head)
-    assert result["branch"] == task["branch"] == expected_branch
-    assert task["repository_branches"] == {str(repository): expected_branch}
+    assert git(worktree, "rev-parse", "--abbrev-ref", "@{upstream}") == (
+        "origin/dev" if retired else "origin/predecessor"
+    )
+    assert result["branch"] == task["branch"] == "engineer-test"
+    assert task["repository_branches"] == {str(repository): "engineer-test"}
     assert task["pr_url"] == ("" if retired else pr_url)
     assert task["handoff_envelope"] == (
         {"source": "origin/predecessor"}
