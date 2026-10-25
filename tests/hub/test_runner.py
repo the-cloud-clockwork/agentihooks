@@ -394,7 +394,7 @@ def test_a_hub_with_a_remote_ledger_writes_as_its_own_service_and_keeps_that_cre
     credential = os.environ["AGENTIHOOKS_CONTROLLER_CREDENTIAL"]
     assert credential.startswith("hub-hub-0.")
     assert auth.controller(hive, credential)
-    assert kept == [None]
+    assert kept == [None, None]
     assert 0 < hive.ttl(f"{auth.PREFIX}:controller:hub-hub-0") <= auth.SERVICE_TTL_S
 
 
