@@ -136,6 +136,30 @@ def test_a_base_without_a_budget_is_red():
         ledger_load.budgets("WRITE_P95_S = 2.0\nCPU_CORES = 1.0\n")
 
 
+def table_source(table: dict) -> str:
+    values = "".join(f"{name} = {getattr(ledger_load, name)!r}\n" for name in ledger_load.BUDGETS)
+    picks = ", ".join(f"{name!r}: {pick.__name__}" for name, pick in table.items())
+    return values + f"BUDGETS = {{{picks}}}\n"
+
+
+def test_a_head_that_drops_a_budget_the_base_grades_is_red(monkeypatch):
+    table = dict(ledger_load.BUDGETS)
+    monkeypatch.setattr(ledger_load, "BUDGETS", {name: pick for name, pick in table.items() if name != "WRITE_P95_S"})
+    with pytest.raises(SystemExit, match="WRITE_P95_S"):
+        ledger_load.budgets(table_source(table))
+
+
+def test_a_head_that_flips_a_budget_pick_the_base_grades_is_red(monkeypatch):
+    table = dict(ledger_load.BUDGETS)
+    monkeypatch.setattr(ledger_load, "BUDGETS", {**table, "CPU_CORES": max})
+    with pytest.raises(SystemExit, match="CPU_CORES"):
+        ledger_load.budgets(table_source(table))
+
+
+def test_a_head_keeping_the_base_table_is_graded_by_its_values():
+    assert ledger_load.budgets(table_source(ledger_load.BUDGETS)) == head_budgets()
+
+
 def test_the_base_budgets_come_from_the_committed_gate_at_that_revision():
     assert ledger_load.base_budgets("HEAD") == ledger_load.budgets(Path(ledger_load.__file__).read_text())
 
