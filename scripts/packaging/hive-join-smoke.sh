@@ -127,6 +127,9 @@ assert daemon.hive_id() == member
 class NoOrders:
     runtime = SimpleNamespace(herdr=None)
 
+    def __init__(self, hive):
+        self.hive = hive
+
     def poll(self):
         return 0
 
@@ -137,7 +140,7 @@ class NoOrders:
         return None
 
 
-orders.Consumer.local = classmethod(lambda cls, redis, hive: NoOrders())
+orders.Consumer.local = classmethod(lambda cls, redis, hive: NoOrders(hive))
 daemon.execution_report = lambda redis, local_id, herdr: {"names": [], "panes": {}, "executions": {}}
 daemon.beat(client, member)
 assert registry.live(registry.show(client, member), int(time.time() * 1000))

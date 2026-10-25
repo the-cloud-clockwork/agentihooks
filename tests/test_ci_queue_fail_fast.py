@@ -29,7 +29,13 @@ def _job(name, conclusion=None, status=None):
 
 
 def _jobs():
-    return yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())["jobs"]
+    from scripts import ci_gate_queue
+
+    workflow = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())
+    jobs = ci_gate_queue.normalize({"test.yml": workflow})["test.yml"]["jobs"]
+    if workflow["jobs"]["queue-fail-fast"].get("name") == ci_gate_queue.GATE_NAME:
+        jobs["queue-fail-fast"] = json.loads((_ROOT / "tests/fixtures/ci_queue_legacy_watch.json").read_text())
+    return jobs
 
 
 def _gate_needs(jobs):
@@ -79,15 +85,23 @@ def test_a_rerun_classifier_or_judge_failure_is_named_even_when_lost(name):
 @pytest.mark.parametrize(
     ("log", "lost"),
     [
-        ("##[error]The runner has received a shutdown signal.", True),
-        ("##[error]Process completed with exit code 1.", False),
-        ("##[error]Process completed with exit code 128.\n##[error]The runner has received a shutdown signal.", True),
-        ("##[error]Process completed with exit code 1.\n##[error]The runner has received a shutdown signal.", True),
-        ("", True),
-        ("##[error]Process completed with exit code 127.", False),
-        ("##[error]Process completed with exit code 137.", True),
-        ("##[error]Process completed with exit code 143.", True),
-        ("E   AssertionError: Process completed with exit code 1", True),
+        pytest.param("##[error]The runner has received a shutdown signal.", True, id="runner-shutdown"),
+        pytest.param("##[error]Process completed with exit code 1.", False, id="exit-one"),
+        pytest.param(
+            "##[error]Process completed with exit code 128.\n##[error]The runner has received a shutdown signal.",
+            True,
+            id="exit-128-then-shutdown",
+        ),
+        pytest.param(
+            "##[error]Process completed with exit code 1.\n##[error]The runner has received a shutdown signal.",
+            True,
+            id="exit-one-then-shutdown",
+        ),
+        pytest.param("", True, id="empty-log"),
+        pytest.param("##[error]Process completed with exit code 127.", False, id="exit-127"),
+        pytest.param("##[error]Process completed with exit code 137.", True, id="exit-137"),
+        pytest.param("##[error]Process completed with exit code 143.", True, id="exit-143"),
+        pytest.param("E   AssertionError: Process completed with exit code 1", True, id="quoted-exit-one"),
         pytest.param(
             (_ROOT / "tests/fixtures/queue_retry/failure_quoting_a_loss.txt").read_text(),
             False,
@@ -149,6 +163,15 @@ def test_a_missing_log_waits_and_is_read_again_next_poll(monkeypatch):
             ["The action 'Run tests' has timed out after 12 minutes.", "The runner has received a shutdown signal."],
             False,
         ),
+    ],
+    ids=[
+        "no-annotations",
+        "runner-shutdown",
+        "exit-one-then-shutdown",
+        "exit-one",
+        "test-failure",
+        "step-timeout",
+        "step-timeout-then-shutdown",
     ],
 )
 def test_missing_logs_use_annotations_before_the_watcher_allows_recovery(monkeypatch, notes, lost):

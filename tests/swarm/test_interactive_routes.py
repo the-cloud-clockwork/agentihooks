@@ -122,3 +122,91 @@ def test_only_interactive_spawn_skips_subscription_quota(tmp_path, has_quota, ki
     placed = runtime.spawn(config, "master", "agent", task)
     assert placed.route_kind == "interactive"
     assert _passed(seen[0])[:2] == ["--route", "interactive"]
+
+
+@pytest.mark.parametrize("handoff", [False, True])
+@pytest.mark.parametrize("week_left,route", [(3.0, "open"), (60.0, "interactive")])
+def test_a_master_successor_leaves_the_spent_reserved_account_for_an_open_one(
+    tmp_path, monkeypatch, week_left, route, handoff
+):
+    from scripts.routing import master_account
+    from scripts.swarm.capacity import Account
+
+    seen = []
+
+    def run(argv, **kwargs):
+        seen.append(argv)
+        return SimpleNamespace(returncode=0, stdout=validated(argv, "status=started\nroute_status=routed\n"), stderr="")
+
+    declared = {"claude": master_account.MasterAccount("claude", "main")}
+    monkeypatch.setattr(master_account, "load", lambda environ: declared)
+    runtime = HerdrRuntime(home=tmp_path, run=run, choose=lambda *_: ("claude", "requested"))
+    runtime._quota_accounts = [
+        Account("claude", "main", "OPEN", 0, 90.0, week_left, 6),
+        Account("claude", "open", "OPEN", 0, 90.0, 60.0, 6),
+    ]
+    config = SimpleNamespace(
+        slug="proof",
+        repo=str(tmp_path),
+        code="a1b2c3",
+        compact_limit=0,
+        lanes={"master": {"agent": "claude"}},
+        autonomy="delegate",
+    )
+    task = {"id": "master", "title": "proof"}
+    if handoff:
+        task["handoff"] = "Continue the master task after the quota handoff."
+        task["handoff_envelope"] = {
+            "reason": "quota",
+            "launch": {"profile": "master", "harness": "claude", "account": "main", "model": "opus", "effort": "high"},
+        }
+    placed = runtime.spawn(config, "master", "agent", task)
+    passed = _passed(seen[0])
+    assert passed[passed.index("--route") + 1] == route
+    assert placed.route_kind == ("interactive" if route == "interactive" else "subscription")
+
+
+@pytest.mark.parametrize(
+    "rows,spent",
+    [
+        ([("main", 5.0, 6, "", None, "subscription"), ("open", 60.0, 6, "", None, "subscription")], True),
+        ([("main", 5.5, 6, "", None, "subscription"), ("open", 60.0, 6, "", None, "subscription")], False),
+        ([("main", 3.0, 6, "", None, "subscription"), ("api", None, 4, "", None, "api")], False),
+        ([("main", 3.0, 6, "", None, "subscription"), ("open", 60.0, 0, "workers", 6, "subscription")], True),
+        ([("main", 3.0, 6, "", None, "subscription")], False),
+        ([("open", 60.0, 6, "", None, "subscription")], False),
+    ],
+)
+def test_the_declared_master_account_is_spent_only_at_the_week_floor_with_another_open_account(
+    tmp_path, monkeypatch, rows, spent
+):
+    from scripts.routing import master_account
+    from scripts.swarm.capacity import Account
+
+    monkeypatch.setattr(
+        master_account, "load", lambda environ: {"claude": master_account.MasterAccount("claude", "main")}
+    )
+    runtime = HerdrRuntime(home=tmp_path, run=lambda *a, **k: None, choose=lambda *_: ("claude", "requested"))
+    runtime._quota_accounts = [
+        Account("claude", name, "OPEN", 0, 90.0, week, cap, kind=kind, reserved=reserved, unreserved_cap=unreserved)
+        for name, week, cap, reserved, unreserved, kind in rows
+    ]
+    assert runtime._master_account_spent() is spent
+
+
+def test_an_unreadable_master_account_keeps_the_interactive_route(tmp_path, monkeypatch):
+    from redis.exceptions import RedisError
+
+    from scripts.routing import master_account
+    from scripts.swarm.capacity import Account
+
+    def load(environ):
+        raise RedisError("down")
+
+    monkeypatch.setattr(master_account, "load", load)
+    runtime = HerdrRuntime(home=tmp_path, run=lambda *a, **k: None, choose=lambda *_: ("claude", "requested"))
+    runtime._quota_accounts = [
+        Account("claude", "main", "OPEN", 0, 90.0, 3.0, 6),
+        Account("claude", "open", "OPEN", 0, 90.0, 60.0, 6),
+    ]
+    assert runtime._master_account_spent() is False

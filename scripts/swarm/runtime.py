@@ -281,11 +281,39 @@ def _launch_timeouts(agent: str, passed: list[str], argv: list[str]) -> tuple[li
     return routed, BUDGET.spawn
 
 
+def _validation(fields: dict, profile: str, agent: str, timeout: float) -> dict:
+    if fields.get("profile_validation") != "pending":
+        return binding.fields(fields, profile, agent)
+    if not fields.get("profile_report"):
+        raise ValueError("pending profile validation names no request")
+    return {
+        "state": "pending",
+        "report": fields["profile_report"],
+        "profile": profile,
+        "harness": agent,
+        "account": fields.get("account", ""),
+        "deadline_ms": int(timeout * 1000),
+    }
+
+
+def _routed(fields: dict) -> bool:
+    """Only a deferred launch reports a pending profile validation, and it returns before its route."""
+    return fields.get("route_status") in STARTED_ROUTES or (
+        fields.get("route_status") == "pending" and fields.get("profile_validation") == "pending"
+    )
+
+
+def deferring(herdr: "HerdrRuntime") -> "HerdrRuntime":
+    herdr.defer_master_canary = True
+    return herdr
+
+
 class HerdrRuntime:
     quota_accounts: Callable[..., list] | None = None
 
-    def __init__(self, home=SWARM_HOME, run=subprocess.run, choose=None, herdr=herdr_call):
+    def __init__(self, home=SWARM_HOME, run=subprocess.run, choose=None, herdr=herdr_call, defer_master_canary=False):
         self.home, self.run, self.herdr = home, run, herdr
+        self.defer_master_canary = defer_master_canary
         self.choose = choose or agent_choice.choose
         self.sleep = time.sleep
         self._binding_pids = {}
@@ -610,7 +638,26 @@ class HerdrRuntime:
             native_login.check(os.environ, "native", self.run)
         except native_login.LoginError:
             return "subscription"
-        return "interactive"
+        return "subscription" if self._master_account_spent() else "interactive"
+
+    def _master_account_spent(self):
+        from redis.exceptions import RedisError
+
+        from scripts.routing import master_account, reservation
+
+        if not hasattr(self, "_quota_accounts"):
+            return False
+        try:
+            declared = master_account.load(os.environ).get("claude")
+        except (OSError, RedisError):
+            return False
+        own = next(
+            (row for row in self._quota_accounts if declared and (row.harness, row.name) == ("claude", declared.slug)),
+            None,
+        )
+        if own is None or own.week_left is None or 100 - own.week_left < reservation.MASTER_LEAVES:
+            return False
+        return any(row.kind != "api" and row.name != own.name for row in self._quota_eligible("claude", MASTER))
 
     def spawn(self, config, lane, name, task):
         chosen, environ = config.lanes.get(lane, {}), dict(os.environ)
@@ -668,6 +715,7 @@ class HerdrRuntime:
         timing.call(priming_trace.write, self.home, config.slug, name, task)
         argv = self._argv(config, name, agent, text, f"{name}.md", profile, decision.overlays)
         argv += ["--claim-fence", json.dumps(task["claim_fence"])] if task.get("claim_fence") else []
+        argv += ["--defer-canary"] if lane == MASTER and self.defer_master_canary else []
         argv += _titled(config.slug, lane, task.get("seat", ""))
         argv += codex.arguments(config, agent, task)
         argv += _pinned(decision.overlays, decision.bundle_revision)
@@ -937,13 +985,13 @@ class HerdrRuntime:
         for step in ("launcher_at", "harness_at"):
             if step in fields and fields[step].isdigit():
                 timings[step] = int(fields[step])
-        if proc.returncode or fields.get("status") != "started" or fields.get("route_status") not in STARTED_ROUTES:
+        if proc.returncode or fields.get("status") != "started" or not _routed(fields):
             self._terminate(name)
             tail = (proc.stderr or proc.stdout).strip().splitlines()
             message = tail[-1] if tail else f"init-agent exit {proc.returncode}"
             raise SpawnError(message, pane_id=fields.get("pane_id") or _opened_pane(name, launched_at), harness=agent)
         try:
-            validated = binding.fields(fields, argv[argv.index("--profile") + 1], agent)
+            validated = _validation(fields, argv[argv.index("--profile") + 1], agent, timeout)
         except ValueError as exc:
             self._terminate(name)
             raise SpawnError(str(exc), pane_id=fields.get("pane_id", ""), harness=agent) from exc

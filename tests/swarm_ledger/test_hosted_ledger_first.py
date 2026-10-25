@@ -93,7 +93,7 @@ def test_a_hive_agent_resolves_the_hosted_ledger_before_its_swarm_address(answer
     assert ledger_link.remote(environ)
 
 
-def test_a_hive_agent_keeps_its_hosted_address_when_the_health_probe_fails(silent):
+def test_a_hive_agent_falls_back_to_its_swarm_address_when_the_hosted_ledger_does_not_answer(silent):
     environ = {
         **HIVE,
         "AGENTIHOOKS_DEPLOYMENT": "distributed",
@@ -101,7 +101,7 @@ def test_a_hive_agent_keeps_its_hosted_address_when_the_health_probe_fails(silen
         hosted_probe.HOSTED_ENV: silent,
     }
 
-    assert ledger_link.base(environ) == silent
+    assert ledger_link.base(environ) == "https://workstation.example"
 
 
 def test_a_routed_swarm_address_still_wins_over_the_hosted_ledger(answering):
@@ -154,9 +154,9 @@ live = _authority_live
 hive = _hive
 
 
-def test_a_hive_launched_worker_joins_the_hosted_ledger_after_a_failed_probe(monkeypatch, live, hive, silent, capsys):
-    hosted = f"http://{live['host']}"
-    monkeypatch.setenv(hosted_probe.HOSTED_ENV, hosted)
+def test_a_hive_launched_worker_joins_the_fallback_ledger_after_a_failed_probe(monkeypatch, live, hive, silent, capsys):
+    fallback = f"http://{live['host']}"
+    monkeypatch.setenv(hosted_probe.HOSTED_ENV, silent)
     world = World(monkeypatch)
     world.launch(FIRST)
     [spawned] = world.runtime.requests
@@ -171,10 +171,10 @@ def test_a_hive_launched_worker_joins_the_hosted_ledger_after_a_failed_probe(mon
     monkeypatch.setenv("AGENTIHOOKS_SWARM", SLUG)
     monkeypatch.setenv("AGENTIHOOKS_DEPLOYMENT", "distributed")
     monkeypatch.setenv("AGENTIHOOKS_HIVE_LEDGER_CREDENTIAL", grant["ledger_credential"])
-    monkeypatch.setenv("SWARM_URL", silent)
     for key, value in spawned.task["endpoints"].items():
         monkeypatch.setenv(key, value)
-    monkeypatch.setattr(hosted_probe, "_answers", {hosted: False})
+    monkeypatch.setenv("SWARM_URL", fallback)
+    monkeypatch.setattr(hosted_probe, "_answers", {silent: False})
 
     ledger.cmd_join(SimpleNamespace(slug=SLUG, name=spawned.name, role="member"))
 

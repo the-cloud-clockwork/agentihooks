@@ -18,6 +18,7 @@ from scripts.routing import master_account
 from scripts.routing.settings import SettingsStore, open_store
 
 ROUTE = "master-login"
+ORDER_ENV = "AGENTIHOOKS_MASTER_LOGIN_ORDER"
 LANE = "master"
 SETTINGS = ["--settings", '{"forceLoginMethod":"claudeai"}']
 LOGIN = ["auth", "login"]
@@ -366,11 +367,37 @@ def publish(bao: openbao_kv.OpenBao, target: Path, epoch: int, number: int | Non
     return True
 
 
-def restore(stored: Mapping[str, str], target: Path) -> bool:
-    if (target / CREDENTIALS).exists() or not stored.get("grant"):
+def restore(stored: Mapping[str, str], target: Path, force: bool = False) -> bool:
+    if not stored.get("grant"):
         return False
-    _write(target / CREDENTIALS, {GRANT: json.loads(stored["grant"])})
+    grant = json.loads(stored["grant"])
+    local = _read(target / CREDENTIALS).get(GRANT) or {}
+    if grant == local:
+        return False
+    if local and not force and int(local.get("expiresAt", 0)) >= int(stored.get("generation", 0)):
+        return False
+    _write(target / CREDENTIALS, {GRANT: grant})
     _write(target / CONFIG, {**_read(target / CONFIG), ACCOUNT: json.loads(stored["account"])})
+    return True
+
+
+def recover(target: Path, environ: Mapping[str, str]) -> bool:
+    number = next((number for number in numbers() if home(number) == target), None)
+    return number is not None and restore(stored(openbao_kv.from_env(environ), number), target, force=True)
+
+
+def checked(target: Path, environ: Mapping[str, str], found: str) -> bool:
+    from scripts.routing import native_login
+
+    try:
+        native_login.check(child(environ, target), found)
+    except native_login.LoginError:
+        if not recover(target, environ):
+            return False
+        try:
+            native_login.check(child(environ, target), found)
+        except native_login.LoginError:
+            return False
     return True
 
 
@@ -407,6 +434,16 @@ def _offered(bao: openbao_kv.OpenBao | None) -> dict[int, dict[str, str]]:
     return {number: copy for number, copy in copies.items() if _private(home(number)) or copy.get("grant")}
 
 
+def _preferred() -> dict[str, int]:
+    ranks: dict[str, int] = {}
+    for name in os.environ.get(ORDER_ENV, "").split(","):
+        try:
+            ranks.setdefault(aicode_tokens.slug(name.strip()), len(ranks))
+        except aicode_tokens.SlugError:
+            continue
+    return ranks
+
+
 def _take(name: str, bao: openbao_kv.OpenBao | None) -> tuple[int, int, dict[str, str]]:
     from scripts import master_logins
 
@@ -422,7 +459,15 @@ def _take(name: str, bao: openbao_kv.OpenBao | None) -> tuple[int, int, dict[str
     now, held = time.time(), []
     order = list(offered)
     if len(offered) > 1:
-        order.sort(key=lambda number: (-master_logins.left(named[number], now), number != slot(), number))
+        ranks = _preferred()
+        order.sort(
+            key=lambda number: (
+                ranks.get(named[number], len(ranks)),
+                -master_logins.left(named[number], now),
+                number != slot(),
+                number,
+            )
+        )
     for number in order:
         with _locked(root(number)) as folder:
             try:
@@ -481,11 +526,20 @@ def claimed_home(environ: Mapping[str, str]) -> Path | None:
     )
 
 
+def _alert(environ: Mapping[str, str], outcome: str, cwd: Path) -> None:
+    from scripts import master_login_chain as chain
+
+    alerted = _token_folder(environ) / "claude"
+    alerted.parent.mkdir(mode=PRIVATE_DIR, parents=True, exist_ok=True)
+    refused = chain.alert(environ, alerted, outcome, str(cwd))
+    if refused:
+        print(f"[agenti] operator login email refused: {refused}", file=sys.stderr)
+
+
 def prepare_launch(environ: Mapping[str, str], cwd: Path) -> tuple[Path, str] | None:
     from scripts import master_login_chain as chain
-    from scripts.routing import native_login
 
-    target = None
+    target, reported = None, None
 
     def current():
         nonlocal target
@@ -504,33 +558,38 @@ def prepare_launch(environ: Mapping[str, str], cwd: Path) -> tuple[Path, str] | 
                 target = target or claimed_home(environ)
                 return None
             raise
-        try:
-            native_login.check(child(environ, target), found)
-        except native_login.LoginError:
+        if not checked(target, environ, found):
             return None
         chain.notification(target, "current", "success")
         return target, found
 
     def browser():
-        nonlocal target
+        nonlocal target, reported
         try:
             target = target or browser_home(environ)
         except LoginRefused:
-            return "failure"
+            reported = "failure"
+            return reported
         chain.notification(target, "current", "unavailable")
-        return chain.authorize(environ, target)
+        reported = chain.authorize(environ, target)
+        return reported
 
     def token():
         if target is not None:
             release(target, environ)
+        if reported in ("captcha", "failure"):
+            _alert(environ, reported, cwd)
         return None
 
     return chain.run(current, browser, token)
 
 
+def _token_folder(environ: Mapping[str, str]) -> Path:
+    return Path(hooks_config.AGENTIHOOKS_HOME) / "master-token" / aicode_tokens.slug(environ["AGENTIHOOKS_AGENT_NAME"])
+
+
 def token_home(environ: Mapping[str, str]) -> Path:
-    name = aicode_tokens.slug(environ["AGENTIHOOKS_AGENT_NAME"])
-    folder = Path(hooks_config.AGENTIHOOKS_HOME) / "master-token" / name
+    folder = _token_folder(environ)
     with _locked(folder):
         target = _rebuild(folder, Path(environ["CLAUDE_CONFIG_DIR"]))
         (target / CREDENTIALS).unlink(missing_ok=True)

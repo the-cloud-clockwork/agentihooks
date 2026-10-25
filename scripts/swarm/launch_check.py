@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from hooks.context import profile_chain
@@ -27,6 +27,7 @@ WORDS = {
     "base": "its role on the package base role",
     "overlay": "every overlay its profile declares",
     "name": "its name",
+    "canary": "its mounted profile canary",
 }
 REPORT_ONLY = frozenset({"late", *(f"hive_{name}" for name in join_report.OPTIONAL)})
 OUTCOMES = {
@@ -172,6 +173,38 @@ def misses(
     else:
         found.update({**_process(agent, facts), **_base(agent, facts, on_bundle), **_overlays(facts, declared)})
     return {**found, **_name(store, slug, agent)}
+
+
+def canary(store: RedisStore, slug: str, agent: AgentRecord) -> tuple[AgentRecord, dict]:
+    from scripts.profiles import binding
+
+    validation = agent.profile_decision.get("validation", {})
+    if validation.get("state") != "pending":
+        return agent, {}
+    try:
+        result = binding.confirm(Path(validation["report"]), agent.profile, agent.harness, validation["account"])
+    except (OSError, ValueError, KeyError) as exc:
+        return agent, {"canary": {"expected": "validated", "actual": str(exc)}}
+    if not result:
+        return agent, {"canary": {"expected": "validated", "actual": "pending"}}
+    confirmed = replace(
+        agent,
+        account=agent.account or result["account"],
+        launch_timings={"harness_at": int(result["validated_at"] * 1000), **agent.launch_timings},
+        profile_decision={**agent.profile_decision, "validation": result},
+    )
+    store.put_agent(slug, confirmed)
+    return confirmed, {}
+
+
+def due(agent: AgentRecord, found: dict, now_ms: int) -> bool:
+    from scripts.init_agent import CANARY_TIMEOUT_S
+
+    deadline = DEADLINE_MS
+    if found.get("canary", {}).get("actual") == "pending":
+        waited = agent.profile_decision.get("validation", {}).get("deadline_ms", DEADLINE_MS)
+        deadline = max(int(CANARY_TIMEOUT_S[agent.harness] * 1000), waited)
+    return now_ms - session_started_at(agent) >= deadline
 
 
 def record(

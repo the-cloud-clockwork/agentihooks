@@ -36,6 +36,20 @@ def _post(port, path, body):
     return int(head.split()[1]), json.loads(rest)
 
 
+@pytest.mark.parametrize("scoped", [False, True])
+def test_signed_refresh_delivers_the_bus_address(admin, scoped):
+    from dataclasses import replace
+
+    from tests.hive.test_nats_grant import _offline_signer, _refresh
+
+    member = auth.mint(admin, "worker", PUBLIC)
+    signer = replace(_offline_signer(), member_swarms={member["id"]: ("rig",)} if scoped else None)
+    grant = _refresh(admin, signer, member["ledger_credential"])
+    assert grant["bus_url"] == "nats://hub:4222"
+    assert grant["nats_credentials"]
+    assert grant["bus_scoped"] is scoped
+
+
 def _raises(error):
     def operation(*_, **__):
         raise error

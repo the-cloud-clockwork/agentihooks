@@ -901,3 +901,144 @@ def test_a_master_relaunch_without_a_session_slot_keeps_its_retry_window(store, 
     assert (pending["name"], pending["retry"], pending["at"]) == ("", True, LAUNCH + launch_check.DEADLINE_MS)
     tick("sw", store, ledger, runtime, LAUNCH + launch_check.DEADLINE_MS + 90_000)
     assert not any("either launch" in note for note in ledger.notes)
+
+
+CANARY_BINDING = {
+    "state": "validated",
+    "profile": "engineer",
+    "harness": "claude",
+    "pid": 4242,
+    "home": "/fixture/profile",
+    "persona": "a" * 64,
+    "sources": "b" * 64,
+    "account": "acct",
+    "validated_at": LAUNCH / 1000,
+}
+
+
+def _deferred_master(store, monkeypatch, tmp_path):
+    from scripts.profiles import binding
+
+    ledger, runtime = checked(store, monkeypatch)
+    store.update("sw", state="running", max_eng=0)
+    report = tmp_path / "canary.json"
+    binding.request(report, "engineer", "claude")
+    spawn = runtime.spawn
+
+    def deferred(config, lane, name, task):
+        placed = spawn(config, lane, name, task)
+        pending = {"state": "pending", "report": str(report), "profile": "engineer", "harness": "claude"}
+        return replace(placed, profile_decision={"validation": {**pending, "account": "acct"}})
+
+    runtime.spawn = deferred
+    tick("sw", store, ledger, runtime, LAUNCH)
+    first, _ = runtime.masters[0]
+    joined(ledger, runtime, LAUNCH + 1)
+    return ledger, runtime, report, first
+
+
+def _master_record(store, name):
+    return next(a for a in store.agents("sw") if a.name == name)
+
+
+def test_a_master_canary_pending_past_the_join_deadline_waits_for_the_canary_deadline(store, monkeypatch, tmp_path):
+    ledger, runtime, _, first = _deferred_master(store, monkeypatch, tmp_path)
+    actions = tick("sw", store, ledger, runtime, LAUNCH + launch_check.DEADLINE_MS)
+    assert not any("launch check" in action for action in actions)
+    assert first in launch_check.pending(store, "sw")
+    actions = tick("sw", store, ledger, runtime, LAUNCH + 120_000)
+    assert any(a.startswith(f"retired {first} after its launch check failed on canary") for a in actions)
+    assert launch_check.report(store, "sw", MASTER)["misses"] == {
+        "canary": {"expected": "validated", "actual": "pending"}
+    }
+    assert ledger.notes == [
+        "The master failed its launch check within a minute on its mounted profile canary. "
+        "It is being retired and relaunched once."
+    ]
+
+
+def test_a_validated_master_canary_passes_and_replaces_the_pending_request(store, monkeypatch, tmp_path):
+    ledger, runtime, report, first = _deferred_master(store, monkeypatch, tmp_path)
+    data = json.loads(report.read_text())
+    report.write_text(json.dumps({**data, "state": "validated", "validation": CANARY_BINDING}))
+    actions = tick("sw", store, ledger, runtime, LAUNCH + 30_000)
+    assert f"{first} passed its launch check in 0 seconds" in actions
+    assert _master_record(store, first).profile_decision["validation"] == CANARY_BINDING
+    assert first not in launch_check.pending(store, "sw")
+
+
+def test_a_failed_master_canary_is_a_failed_launch_at_the_join_deadline(store, monkeypatch, tmp_path):
+    ledger, runtime, report, first = _deferred_master(store, monkeypatch, tmp_path)
+    data = json.loads(report.read_text())
+    report.write_text(json.dumps({**data, "state": "failed", "reason": "mounted instruction canary mismatch"}))
+    assert not any("launch check" in a for a in tick("sw", store, ledger, runtime, LAUNCH + 30_000))
+    actions = tick("sw", store, ledger, runtime, LAUNCH + launch_check.DEADLINE_MS)
+    assert any(a.startswith(f"retired {first} after its launch check failed on canary") for a in actions)
+    assert launch_check.report(store, "sw", MASTER)["misses"] == {
+        "canary": {"expected": "validated", "actual": "mounted instruction canary mismatch"}
+    }
+
+
+def test_a_validated_canary_on_another_account_is_a_miss(store, monkeypatch, tmp_path):
+    _, _, report, first = _deferred_master(store, monkeypatch, tmp_path)
+    data = json.loads(report.read_text())
+    report.write_text(json.dumps({**data, "state": "validated", "validation": {**CANARY_BINDING, "account": "x"}}))
+    agent = _master_record(store, first)
+    assert launch_check.canary(store, "sw", agent) == (
+        agent,
+        {"canary": {"expected": "validated", "actual": "live process account differs from requested route"}},
+    )
+
+
+def test_a_missing_canary_request_is_a_miss(store, monkeypatch, tmp_path):
+    _, _, report, first = _deferred_master(store, monkeypatch, tmp_path)
+    report.unlink()
+    agent = _master_record(store, first)
+    found = launch_check.canary(store, "sw", agent)[1]
+    assert list(found) == ["canary"] and "canary.json" in found["canary"]["actual"]
+
+
+def test_an_already_validated_launch_has_no_canary_miss(store, launched):
+    agent = launched[0]
+    assert launch_check.canary(store, "sw", agent) == (agent, {})
+
+
+@pytest.mark.parametrize(("harness", "seconds"), [("claude", 120), ("codex", 90)])
+def test_a_pending_canary_is_due_at_the_harness_canary_deadline(harness, seconds):
+    agent = AgentRecord("master@a1b2c3-0001", MASTER, MASTER, harness=harness, started_at=LAUNCH)
+    pending = {"canary": {"expected": "validated", "actual": "pending"}}
+    assert not launch_check.due(agent, pending, LAUNCH + seconds * 1000 - 1)
+    assert launch_check.due(agent, pending, LAUNCH + seconds * 1000)
+    failed = {"canary": {"expected": "validated", "actual": "refused"}}
+    assert not launch_check.due(agent, failed, LAUNCH + launch_check.DEADLINE_MS - 1)
+    assert launch_check.due(agent, failed, LAUNCH + launch_check.DEADLINE_MS)
+    assert launch_check.due(agent, {"joined": {}}, LAUNCH + launch_check.DEADLINE_MS)
+
+
+def test_a_pending_canary_waits_for_the_launch_budget_it_carries():
+    budget = {"validation": {"state": "pending", "deadline_ms": 660_000}}
+    agent = AgentRecord("master@a1b2c3-0001", MASTER, MASTER, harness="claude", started_at=LAUNCH)
+    agent = replace(agent, profile_decision=budget)
+    pending = {"canary": {"expected": "validated", "actual": "pending"}}
+    assert not launch_check.due(agent, pending, LAUNCH + 659_999)
+    assert launch_check.due(agent, pending, LAUNCH + 660_000)
+    assert launch_check.due(agent, {"joined": {}}, LAUNCH + launch_check.DEADLINE_MS)
+    short = replace(agent, profile_decision={"validation": {"state": "pending", "deadline_ms": 1_000}})
+    assert not launch_check.due(short, pending, LAUNCH + 119_999)
+    assert launch_check.due(short, pending, LAUNCH + 120_000)
+
+
+def test_a_confirmed_canary_fills_the_route_account_and_harness_start(store, monkeypatch, tmp_path):
+    _, _, report, first = _deferred_master(store, monkeypatch, tmp_path)
+    data = json.loads(report.read_text())
+    report.write_text(json.dumps({**data, "state": "validated", "validation": CANARY_BINDING}))
+    agent = replace(_master_record(store, first), account="", launch_timings={"launched_at": LAUNCH})
+    confirmed, found = launch_check.canary(store, "sw", agent)
+    assert found == {}
+    assert confirmed.account == "acct"
+    assert confirmed.launch_timings == {"launched_at": LAUNCH, "harness_at": LAUNCH}
+    assert _master_record(store, first) == confirmed
+    kept = replace(agent, account="routed", launch_timings={"harness_at": LAUNCH + 5})
+    confirmed, _ = launch_check.canary(store, "sw", kept)
+    assert confirmed.account == "routed"
+    assert confirmed.launch_timings == {"harness_at": LAUNCH + 5}

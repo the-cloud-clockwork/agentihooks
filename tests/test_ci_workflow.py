@@ -15,12 +15,14 @@ import pytest
 import yaml
 from _pytest.config import default_plugins
 
+from scripts import ci_gate_queue
 from tests import refresh_durations
 from tests.refresh_durations import ci_run_ids, ci_samples, median_durations
 
 pytestmark = pytest.mark.unit
 
 _ROOT = Path(__file__).parent.parent
+_EQUIVALENCE = _ROOT / "tests/swarm_ledger/equivalence.sh"
 
 
 def _pytest_command() -> str:
@@ -618,32 +620,61 @@ def test_lint_and_equivalence_browser_setup_uses_the_working_mirror():
 
 
 def test_equivalence_runs_storage_then_page_replays_each_group_at_once():
-    steps = yaml.safe_load((_ROOT / ".github/workflows/equivalence.yml").read_text())["jobs"]["ledger-equivalence"][
-        "steps"
-    ]
-    store, pages = [step for step in steps if "_replay.py" in step.get("run", "")]
-    assert store["run"].count("repository_replay.py") == 3 and "page_replay.py" not in store["run"]
-    assert pages["run"].count("page_replay.py") == 3 and "repository_replay.py" not in pages["run"]
-    for step in (store, pages):
-        run = step["run"]
+    steps = _equivalence_steps()
+    script = _EQUIVALENCE.read_text()
+    store, pages = _equivalence_group("store"), _equivalence_group("page")
+    assert store.count("repository_replay.py") == 3 and "page_replay.py" not in store
+    assert pages.count("page_replay.py") == 3 and "repository_replay.py" not in pages
+    for run in (store, pages):
         assert run.count(" &\n") == 3
-        assert "|| failed=1" in run and 'exit "$failed"' in run
-        assert 'cat "$RUNNER_TEMP/$name.log"' in run and "return 1" in run
-    assert steps.index(store) < steps.index(_browser_install(steps)) < steps.index(pages)
-    assert all("Path('head/" not in step.get("run", "") for step in steps)
+        assert run.index(" &\n") < run.index("settle") < run.index("cmp ")
+    assert "|| failed=1" in script and 'return "$failed"' in script
+    assert 'cat "$RUNNER_TEMP/$name.log"' in script and "return 1" in script
+    [store_step] = [step for step in steps if step.get("run", "").endswith(" store")]
+    [page_step] = [step for step in steps if step.get("run", "").endswith(" page")]
+    assert steps.index(store_step) < steps.index(_browser_install(steps)) < steps.index(page_step)
+    assert "Path('head/" not in script
 
 
 def test_equivalence_plants_each_fault_in_a_file_that_exists():
-    steps = yaml.safe_load((_ROOT / ".github/workflows/equivalence.yml").read_text())["jobs"]["ledger-equivalence"][
-        "steps"
-    ]
-    [plant] = [step for step in steps if step.get("name", "").startswith("Plant ")]
-    script = plant["run"].split("<<'PY'\n", 1)[1].rsplit("PY", 1)[0]
+    script = _equivalence_group("plant").split("<<'PY'\n", 1)[1].rsplit("PY", 1)[0]
     loop = next(node for node in ast.walk(ast.parse(script)) if isinstance(node, ast.For))
     planted = [(ast.literal_eval(entry.elts[0].args[0]), ast.literal_eval(entry.elts[1])) for entry in loop.iter.elts]
     assert [path.split("/", 1)[0] for path, _ in planted] == ["fault-store", "fault-chat"]
     for path, needle in planted:
         assert (_ROOT / path.split("/", 1)[1]).read_text().count(needle) == 1
+
+
+def test_equivalence_grades_with_the_base_copy():
+    steps = _equivalence_steps()
+    [base] = [step for step in steps if step.get("with", {}).get("path") == "base"]
+    assert base["with"]["ref"] == "${{ github.event.pull_request.base.sha }}"
+    [pick] = [step for step in steps if step.get("name") == "Pick the protected grader"]
+    assert pick["run"].startswith("if [[ -f base/tests/swarm_ledger/equivalence.sh ]]; then\n")
+    assert pick["run"].index('"GRADER=$PWD/base"') < pick["run"].index("else") < pick["run"].index('"GRADER=$PWD/head"')
+    assert pick["run"].index("else") < pick["run"].index("::warning::")
+    graded = [step for step in steps if "equivalence.sh" in step.get("run", "") and step is not pick]
+    assert [step["run"] for step in graded] == [
+        f'bash "$GRADER/tests/swarm_ledger/equivalence.sh" {group}' for group in ("plant", "store", "page")
+    ]
+    assert all(steps.index(base) < steps.index(pick) < steps.index(step) for step in graded)
+    assert _browser_install(steps)["uses"] == "./base/.github/actions/browser-cache"
+    for step in steps:
+        run = step.get("run", "")
+        assert "cmp " not in run and "_replay.py" not in run and "head/tests" not in run
+        assert step is pick or "GITHUB_ENV" not in run
+    script = _EQUIVALENCE.read_text()
+    assert 'replays=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)' in script and "head/tests" not in script
+
+
+def _equivalence_steps() -> list[dict]:
+    return yaml.safe_load((_ROOT / ".github/workflows/equivalence.yml").read_text())["jobs"]["ledger-equivalence"][
+        "steps"
+    ]
+
+
+def _equivalence_group(name: str) -> str:
+    return _EQUIVALENCE.read_text().split(f"\n{name}() {{\n", 1)[1].split("\n}\n", 1)[0]
 
 
 def test_equivalence_runs_on_every_ledger_pull_request_without_a_body_marker():
@@ -653,8 +684,7 @@ def test_equivalence_runs_on_every_ledger_pull_request_without_a_body_marker():
     assert all("pull_request.body" not in str(step.get("if", "")) for step in job["steps"])
     [head] = [step for step in job["steps"] if step.get("with", {}).get("path") == "head"]
     assert "ref" not in head["with"]
-    paths = workflow[True]["pull_request"]["paths"]
-    assert {"scripts/swarm_ledger/**", "tests/swarm_ledger/**"} <= set(paths)
+    assert "paths" not in workflow[True]["pull_request"]
 
 
 @pytest.mark.parametrize("doc", ["README.md", "index.md"])
@@ -879,6 +909,47 @@ def test_promotion_shard_reports_use_the_pushed_grader_and_prs_keep_the_base():
     assert "github.event_name == 'push' && github.sha" in ref
     assert "github.event_name == 'pull_request' && github.base_ref" in ref
     assert ref.index("github.event_name == 'push' && github.sha") < ref.index("github.event.before")
+
+
+def test_shard_verification_starts_from_the_plan_and_prefetches_complete_reports():
+    jobs = _workflow()["jobs"]
+    job = jobs["shard-check"]
+    assert set(job["needs"]) == {"split", "select", "reuse", "admission"}
+    stream = next(step for step in job["steps"] if "python -m scripts.ci_gate_shards" in step.get("run", ""))
+    assert stream["env"]["GH_TOKEN"] == "${{ steps.app-token.outputs.token }}"
+    mint = next(step for step in job["steps"] if step.get("id") == "app-token")
+    assert "if" not in mint
+    assert mint["with"]["permission-actions"] == "read"
+    assert (
+        stream["env"]["QUEUE_PLAN"]
+        == "${{ github.event_name == 'merge_group' && format('[{0}]', needs.split.outputs.queue_312) || '' }}"
+    )
+    assert f"seq 1 {len(jobs['unit']['strategy']['matrix']['shard'])}" in stream["run"]
+    assert "jq -ce '[.[].shard]'" in stream["run"]
+    check = next(
+        step["run"]
+        for step in job["steps"]
+        if step.get("name") == "Check every collected test ran in exactly one shard"
+    )
+    assert (
+        "tests.shard_check shard-reports/durations-*/durations.json --collected collected-data/collected.json" in check
+    )
+    assert "REUSED" in check
+    assert job["timeout-minutes"] == 25
+    assert job["permissions"] == {"contents": "read"}
+
+
+def test_queue_gate_is_the_early_verifier_and_the_standard_gate_summarizes_queue_runs():
+    workflow = _workflow()
+    jobs = workflow["jobs"]
+    summary = jobs["gate-required"]
+    assert summary["name"] == ci_gate_queue.SUMMARY_NAME
+    assert jobs["queue-fail-fast"] == ci_gate_queue.watcher(summary["runs-on"])
+    normalized = ci_gate_queue.normalize({"test.yml": workflow})["test.yml"]["jobs"]
+    assert normalized["gate-required"]["name"] == "Gate — Required"
+    assert normalized["queue-fail-fast"]["name"] == "queue-fail-fast"
+    labels = [job.get("name", key) for key, job in jobs.items()]
+    assert sum("Gate — Required" in label for label in labels) == 2
 
 
 def test_unit_shards_check_out_full_history_without_old_file_contents():

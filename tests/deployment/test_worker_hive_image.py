@@ -207,6 +207,31 @@ def test_the_kind_job_publishes_the_proven_image_on_dev_pushes_after_the_chart_p
     assert [step.get("if") for step in kind["steps"] if "ghcr.io" in str(step)] == [dev_push, dev_push]
 
 
+@pytest.mark.parametrize(("installed", "downloads"), [(True, 0), (False, 2)])
+def test_the_kind_job_keeps_the_runner_kind_and_downloads_only_without_one(tmp_path, installed, downloads):
+    step = next(step for step in hive_jobs()["kind"]["steps"] if step.get("name") == "Install kind")
+    tools = tmp_path / "bin"
+    tools.mkdir()
+    log = tmp_path / "commands"
+    fakes = {
+        "kind": f'echo "kind $*" >> {log}; [ -e {tmp_path}/installed ]',
+        "curl": f'echo "curl $*" >> {log}; touch "$2"',
+        "sha256sum": f'echo "sha256sum $*" >> {log}',
+        "sudo": f'echo "sudo $*" >> {log}; touch {tmp_path}/installed',
+    }
+    for name, body in fakes.items():
+        (tools / name).write_text(f"#!/usr/bin/env bash\n{body}\n")
+        (tools / name).chmod(0o755)
+    if installed:
+        (tmp_path / "installed").touch()
+    env = {**os.environ, **step["env"], "PATH": f"{tools}:{os.environ['PATH']}"}
+    subprocess.run(["bash", "-e", "-c", step["run"]], cwd=tmp_path, env=env, check=True)
+    commands = log.read_text().splitlines()
+    assert sum(line.startswith("curl ") for line in commands) == downloads
+    assert any(line.startswith("sudo ") for line in commands) is not installed
+    assert commands[-1] == "kind version"
+
+
 def test_a_release_builds_the_hive_worker_on_its_released_worker_and_moves_release_only_when_newest():
     jobs = yaml.safe_load((ROOT / ".github/workflows/swarm-node-image.yml").read_text())["jobs"]
     hive = jobs["hive"]

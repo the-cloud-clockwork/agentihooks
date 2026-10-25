@@ -5,6 +5,7 @@ import os
 import re
 import sys
 import tempfile
+import traceback
 from pathlib import Path
 from time import process_time
 from types import ModuleType
@@ -158,6 +159,13 @@ def collect_shard_stats(runner, test_runner, tests: list[str], output: Path, bas
         "not wall_clock",
         f"--basetemp={basetemp}",
     ]
+    measured = bool(os.environ.get("MUTATION_STATS_CACHE"))
+    coverage_file = output.with_suffix(".coverage")
+    if measured:
+        os.environ["COVERAGE_FILE"] = str(coverage_file.resolve())
+        test_runner._pytest_add_cli_args.extend(
+            ["-p", "pytest_cov.plugin", "--cov=.", "--cov-context=test", "--cov-report=", "--cov-config=/dev/null"]
+        )
     work = Path.cwd().resolve()
     bases = [
         work / "mutants",
@@ -166,10 +174,22 @@ def collect_shard_stats(runner, test_runner, tests: list[str], output: Path, bas
     ]
     start = process_time()
     status = test_runner.run_stats(tests=tests)
+    dependencies = {}
+    if measured:
+        from subprocess import check_output
+
+        from scripts.ci_mutation.stats_dependencies import measured_dependencies
+
+        root = Path(os.environ["MUTATION_STATS_ROOT"])
+        tracked = set(check_output(["git", "ls-files", "-z"], cwd=root, text=True).split("\0"))
+        dependencies["dependencies"] = measured_dependencies(
+            coverage_file, Path.cwd() / "mutants", root, list(runner.mutmut.duration_by_test), tracked
+        )
     tests_by_function = {name: sorted(names) for name, names in runner.mutmut.tests_by_mangled_function_name.items()}
     output.write_text(
         json.dumps(
             {
+                **dependencies,
                 "status": status,
                 "cpu": process_time() - start,
                 "tests": tests_by_function,
@@ -181,13 +201,27 @@ def collect_shard_stats(runner, test_runner, tests: list[str], output: Path, bas
     )
 
 
+def collect_and_exit(runner, test_runner, tests: list[str], output: Path, basetemp: str) -> None:
+    try:
+        collect_shard_stats(runner, test_runner, tests, output, basetemp)
+    except BaseException:
+        traceback.print_exc()
+        code = 1
+    else:
+        code = 0
+    sys.stdout.flush()
+    sys.stderr.flush()
+    # A normal child exit joins every thread and child process a test left running, which can wait forever.
+    os._exit(code)
+
+
 def run_stats_buckets(runner, test_runner, shards: list[list[str]], work: Path) -> list[dict]:
     context = multiprocessing.get_context("fork")
     processes = []
     for index, tests in enumerate(shards):
         output = work / f"stats-{index}.json"
         basetemp = tempfile.mkdtemp(prefix="mutation-stats-")
-        process = context.Process(target=collect_shard_stats, args=(runner, test_runner, tests, output, basetemp))
+        process = context.Process(target=collect_and_exit, args=(runner, test_runner, tests, output, basetemp))
         process.start()
         processes.append((process, output))
     results = []
