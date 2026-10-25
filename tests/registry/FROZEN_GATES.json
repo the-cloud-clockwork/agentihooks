@@ -1,0 +1,20 @@
+{
+  "scripts/gate_protected.py": [
+    "359a28c56a0dc3b916a8f4d294ecee9e043b7cb0"
+  ],
+  ".github/workflows/gate-protected.yml": [
+    "d794eee5a317a353e437e19ff2c64498a86d6c5f"
+  ],
+  ".github/rulesets/dev-history.json": [
+    "028765d3118bc97ee1ea82a511cdee04caa074b0"
+  ],
+  ".github/rulesets/dev-no-delete.json": [
+    "6d49785b507ab1495a3608804a6f071b5fd99645"
+  ],
+  ".github/rulesets/main-prod-lockdown.json": [
+    "4f152605b994abd91961c4e6c1e55a9bbf5d3653"
+  ],
+  ".github/rulesets/version-tags.json": [
+    "6ac0742c47fad096a715b6f9f0cef687b7c589c3"
+  ]
+}

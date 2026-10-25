@@ -25,6 +25,7 @@ EQUIVALENCE = ("equivalence.yml", "ledger-equivalence")
 EQUIVALENCE_WORDS = ("GRADER", "GITHUB_ENV", "GITHUB_PATH", "equivalence.sh")
 EQUIVALENCE_TUNABLE = ("steps", "timeout-minutes")
 UNUSED_SELECT_OUTPUTS = ("files_1", "files_2", "files_3")
+FROZEN = "tests/registry/FROZEN_GATES.json"
 
 
 def _gates(workflows: dict[str, dict]) -> list[tuple[str, str, dict]]:
@@ -328,6 +329,34 @@ def _equivalence_problems(base_workflows: dict[str, dict], head_workflows: dict[
     return []
 
 
+def _blob(root: Path, rev: str, path: str) -> str | None:
+    listing = _git(root, "ls-tree", rev, "--", path).split()
+    return listing[2] if len(listing) >= 3 and listing[1] == "blob" else None
+
+
+def _frozen_problems(root: Path, merge_base: str, base: str, head: str) -> list[str]:
+    if _blob(root, base, FROZEN) is None:
+        return []
+    registry = json.loads(_git(root, "show", f"{base}:{FROZEN}"))
+
+    def changed(path: str) -> bool:
+        return _blob(root, head, path) not in {_blob(root, merge_base, path), _blob(root, base, path)}
+
+    if changed(FROZEN):
+        return [
+            f"The head changes {FROZEN} and the frozen gate file {path} together; "
+            "land the registry by its own pull request first."
+            for path in sorted(registry)
+            if changed(path)
+        ]
+    return [
+        f"The head changes the frozen gate file {path} to content {FROZEN} on the base does not accept; "
+        "announce its blob there by its own pull request first."
+        for path, accepted in sorted(registry.items())
+        if changed(path) and _blob(root, head, path) not in accepted
+    ]
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--root", default=".")
@@ -352,6 +381,7 @@ def main(argv: list[str] | None = None) -> int:
     governed = {"branch-lanes.yml"} if "branch-lanes.yml" in tip_workflows and not preflight else set()
     problems += preflight
     problems += _equivalence_problems(tip_workflows, head_workflows)
+    problems += _frozen_problems(root, merge_base, args.base, args.head)
     problems += [
         f"{file}: {problem}"
         for file, workflow in head_workflows.items()
