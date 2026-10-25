@@ -156,7 +156,9 @@ def test_github_failure_is_never_replaced_with_empty_evidence(capsys):
         ci_gate_shards.api("repos/org/repo/actions")
     assert run.call_count == 3
     assert [call.args[0] for call in sleep.call_args_list] == [5, 10]
-    assert capsys.readouterr().err.count("HTTP 502: Bad Gateway") == 3
+    err = capsys.readouterr().err
+    assert err.count("HTTP 502: Bad Gateway") == 3
+    assert "repos/org/repo/actions attempt 3 of 3 failed" in err
 
 
 @pytest.mark.parametrize(
