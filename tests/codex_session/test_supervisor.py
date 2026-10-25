@@ -1038,16 +1038,16 @@ def test_the_opening_watch_ends_at_its_deadline(store, server, clock, root, tmp_
     assert started.record.state == CONNECTED
 
 
-def hive_admitted(store, spec, transport=APP_SERVER_TRANSPORT, hive="m1"):
-    agent = replace(
-        spec.agent,
-        state="launching",
-        harness="codex",
-        transport=transport,
-        hive=hive,
-        runtime_target={"host_id": hive},
-    )
-    return store.start_execution(SLUG, agent, "")
+def hive_admitted(store, spec, **changes):
+    fields = {
+        "state": "launching",
+        "harness": "codex",
+        "transport": APP_SERVER_TRANSPORT,
+        "hive": "m1",
+        "runtime_target": {"host_id": "m1"},
+        **changes,
+    }
+    return store.start_execution(SLUG, replace(spec.agent, **fields), "")
 
 
 def test_a_hive_member_serves_the_execution_its_controller_admitted(store, server, clock, root, tmp_path, monkeypatch):
@@ -1070,7 +1070,7 @@ def test_a_hive_member_serves_the_execution_its_controller_admitted(store, serve
     assert len(server.commands) == 1
 
 
-@pytest.mark.parametrize("change", [{"transport": ""}, {"hive": "other-hive"}])
+@pytest.mark.parametrize("change", [{"transport": ""}, {"hive": "other-hive"}, {"harness": "claude"}])
 def test_a_hive_member_refuses_an_execution_it_was_not_admitted_to_serve(
     store, server, clock, root, tmp_path, monkeypatch, change
 ):
@@ -1105,4 +1105,27 @@ def test_a_hive_member_refuses_a_replaced_execution(store, server, clock, root, 
     first = hive_admitted(store, spec)
     store.start_execution(SLUG, replace(first, execution_id="", generation=0), first.execution_id)
     failed(store, server, clock, root, replace(spec, execution_id=first.execution_id), "execution")
+    assert server.commands == []
+
+
+def test_a_hive_member_refuses_an_archived_execution(store, server, clock, root, tmp_path, monkeypatch):
+    from dataclasses import asdict
+
+    from scripts.swarm import commands
+    from scripts.swarm.execution import ARCHIVE
+
+    monkeypatch.setattr(commands, "hive_id", lambda: "m1")
+    spec = launch_spec(store, server, tmp_path)
+    archived = replace(
+        spec.agent,
+        execution_id="exe-archived",
+        generation=1,
+        state="launching",
+        harness="codex",
+        transport=APP_SERVER_TRANSPORT,
+        hive="m1",
+        runtime_target={"host_id": "m1"},
+    )
+    store.redis.hset(store.key(SLUG, ARCHIVE), "exe-archived", json.dumps(asdict(archived)))
+    failed(store, server, clock, root, replace(spec, execution_id="exe-archived"), "execution")
     assert server.commands == []

@@ -317,8 +317,6 @@ def test_admit_keeps_the_claim_timestamp_the_tick_wrote_before_the_launch(setup)
     [("codex", "app_server", "app_server"), ("codex", "legacy", "legacy"), ("claude", "app_server", "")],
 )
 def test_admit_records_the_codex_transport_the_member_serves(setup, harness, transport, recorded):
-    from dataclasses import replace
-
     request = request_for(setup)
     request = replace(request, config=replace(request.config, codex_inbox_transport=transport))
     selected = setup.launcher.select(setup.config, "eng", {"id": "task"})
