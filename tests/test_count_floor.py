@@ -574,6 +574,30 @@ def test_a_preexisting_unrelated_name_does_not_hide_subject_deletion(tmp_path, d
     assert ("test_subject is admitted" in result.stdout) == deleted
 
 
+@pytest.mark.parametrize("deleted", [True, False], ids=["deleted", "retained"])
+@pytest.mark.parametrize("called", [True, False], ids=["called", "uncalled"])
+def test_only_a_called_local_helper_can_explain_a_deleted_subject(tmp_path, deleted, called):
+    tests = (
+        "from pkg.mod import subject, other\n\n"
+        "def first():\n    return second()\n\n"
+        "def second():\n    return subject()\n\n"
+        "def test_subject():\n    assert " + ("first() == 1" if called else "True") + "\n\n"
+        "def test_other():\n    assert other() == 2\n"
+    )
+    result = _floor(
+        tmp_path,
+        {"test_mod.py": tests},
+        {"test_mod.py": OTHER_TEST},
+        {
+            "base": _package(mod=SUBJECT + "\n\n" + KEPT),
+            "head": _package(mod=("" if deleted else SUBJECT) + "\n\n" + KEPT),
+        },
+    )
+    admitted = called and deleted
+    assert result.returncode == (0 if admitted else 1), result.stdout + result.stderr
+    assert ("test_subject is admitted" in result.stdout) == admitted
+
+
 @pytest.mark.parametrize(
     "survivor",
     [
