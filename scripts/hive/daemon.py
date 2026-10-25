@@ -77,7 +77,7 @@ def beat(redis: "Redis", local_id: str) -> None:
     if not member:
         _refresh_launch_slots(redis, executions)
     if not fenced:
-        poll_orders(consumer, member)
+        poll_orders(consumer)
     consumer.poll_commands()
     consumer.sync_workspaces(TTL_SECONDS)
     join_report.heartbeat(redis, local_id, int(time.time() * 1000))
@@ -96,9 +96,10 @@ def beat(redis: "Redis", local_id: str) -> None:
     close_dead_tabs(set(hosted["names"]))
 
 
-def poll_orders(consumer: "Consumer", member: bool) -> None:
+def poll_orders(consumer: "Consumer") -> None:
     from scripts.swarm_ledger import authority_context
 
+    member = consumer.hive == os.environ.get("AGENTIHOOKS_HIVE_ID")
     pending = not member and consumer.store.redis.xlen(consumer.orders.stream(consumer.hive))
     secret = authority_context.hosted() if pending else None
     if not secret:
@@ -113,10 +114,10 @@ def poll_orders(consumer: "Consumer", member: bool) -> None:
             os.environ["SWARM_SECRET"] = kept
 
 
-def fill_operator_env(local_id: str) -> None:
+def fill_operator_env() -> None:
     from scripts import operator_env
 
-    if local_id != os.environ.get("AGENTIHOOKS_HIVE_ID"):
+    if hive_id() != os.environ.get("AGENTIHOOKS_HIVE_ID"):
         operator_env.fill(os.environ)
 
 
@@ -218,7 +219,7 @@ def run(connect: Callable[[], tuple["Redis", "Redis"]]) -> None:
 
     lost = (ConnectionError, TimeoutError)
     local_id = hive_id()
-    fill_operator_env(local_id)
+    fill_operator_env()
     quota_refresh.refresh(os.environ)
     worker, attempted_at = None, time.time()
     renewed = time.time()

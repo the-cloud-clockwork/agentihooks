@@ -10,6 +10,7 @@ def consumer(monkeypatch):
     import fakeredis
 
     monkeypatch.delenv("SWARM_SECRET", raising=False)
+    monkeypatch.setenv("AGENTIHOOKS_HIVE_ID", "member-elsewhere")
     redis = fakeredis.FakeRedis(decode_responses=True)
     seen = []
 
@@ -42,7 +43,7 @@ def test_a_workstation_hive_applies_pending_orders_with_the_hosted_ledger_secret
     calls = hosted_calls(monkeypatch)
     consumer.store.redis.xadd("orders:host", {"order": "{}"})
 
-    daemon.poll_orders(consumer, member=False)
+    daemon.poll_orders(consumer)
 
     assert consumer.seen == ["hosted-secret"]
     assert calls == [1]
@@ -55,7 +56,8 @@ def test_a_member_hive_never_reads_the_hosted_ledger_secret(monkeypatch, consume
     calls = hosted_calls(monkeypatch)
     consumer.store.redis.xadd("orders:host", {"order": "{}"})
 
-    daemon.poll_orders(consumer, member=True)
+    monkeypatch.setenv("AGENTIHOOKS_HIVE_ID", "host")
+    daemon.poll_orders(consumer)
 
     assert consumer.seen == [None]
     assert calls == []
@@ -66,7 +68,7 @@ def test_an_empty_order_stream_reads_no_secret(monkeypatch, consumer):
 
     calls = hosted_calls(monkeypatch)
 
-    daemon.poll_orders(consumer, member=False)
+    daemon.poll_orders(consumer)
 
     assert consumer.seen == [None]
     assert calls == []
@@ -79,7 +81,7 @@ def test_a_set_server_secret_still_mints_without_a_hosted_ledger(monkeypatch, co
     monkeypatch.setenv("SWARM_SECRET", "local-secret")
     consumer.store.redis.xadd("orders:host", {"order": "{}"})
 
-    daemon.poll_orders(consumer, member=False)
+    daemon.poll_orders(consumer)
 
     assert consumer.seen == ["local-secret"]
 
@@ -105,7 +107,7 @@ def test_applying_orders_keeps_the_daemon_server_secret_setting(monkeypatch, con
     monkeypatch.setenv("SWARM_SECRET", "local-secret")
     consumer.store.redis.xadd("orders:host", {"order": "{}"})
 
-    daemon.poll_orders(consumer, member=False)
+    daemon.poll_orders(consumer)
 
     assert consumer.seen == ["hosted-secret"]
     assert os.environ["SWARM_SECRET"] == "local-secret"
@@ -121,7 +123,7 @@ def test_an_agent_launched_while_orders_apply_carries_its_ledger_agent_token(mon
     launched = []
     consumer.poll = lambda: launched.append(runtime._ledger_token("fixture", "engineer@1-1"))
 
-    daemon.poll_orders(consumer, member=False)
+    daemon.poll_orders(consumer)
 
     assert launched == [{"AGENTIHOOKS_LEDGER_AGENT_TOKEN": agent_token("hosted-secret", "fixture", "engineer@1-1")}]
     assert runtime._ledger_token("fixture", "engineer@1-1") == {}
@@ -143,8 +145,10 @@ def test_only_a_workstation_hive_loads_the_operator_env(monkeypatch):
     monkeypatch.setattr(operator_env, "fill", fill)
     monkeypatch.setenv("AGENTIHOOKS_HIVE_ID", "member")
 
-    daemon.fill_operator_env("member")
+    monkeypatch.setattr(daemon, "hive_id", lambda: "member")
+    daemon.fill_operator_env()
     assert filled == []
 
-    daemon.fill_operator_env("root")
+    monkeypatch.setattr(daemon, "hive_id", lambda: "root")
+    daemon.fill_operator_env()
     assert filled == [1]
