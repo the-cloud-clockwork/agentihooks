@@ -1,5 +1,7 @@
 import copy
+import json
 import re
+import subprocess
 
 import pytest
 
@@ -272,7 +274,7 @@ def test_watch_waits_for_complete_attempt_jobs_and_rechecks_queue_identity(monke
     monkeypatch.setattr(
         ci_gate_queue,
         "read_jobs",
-        lambda endpoint, size=None: reads.append((endpoint, size)) or next(snapshots),
+        lambda endpoint, size: reads.append((endpoint, size)) or next(snapshots),
         raising=False,
     )
     monkeypatch.setattr(
@@ -291,6 +293,20 @@ def test_watch_waits_for_complete_attempt_jobs_and_rechecks_queue_identity(monke
     assert sleeps == [15]
 
 
+def test_watch_requests_the_jobs_listing_as_one_100_job_page(monkeypatch):
+    commands = []
+
+    def run(command, **kwargs):
+        commands.append(command)
+        return subprocess.CompletedProcess(command, 0, stdout=json.dumps({"jobs": complete()}))
+
+    monkeypatch.setattr(subprocess, "run", run)
+    monkeypatch.setattr(ci_gate_queue, "api", lambda endpoint: [[{"ref": "refs/queue", "object": {"sha": "head"}}]])
+    monkeypatch.setattr(ci_gate_queue.time, "sleep", lambda seconds: None)
+    ci_gate_queue.watch("owner/repo", "123", "2", [2, 7], "refs/queue", "head")
+    assert commands == [["gh", "api", "repos/owner/repo/actions/runs/123/attempts/2/jobs?per_page=100&page=1"]]
+
+
 @pytest.mark.parametrize(
     "refs", [[], [[{"ref": "other", "object": {"sha": "head"}}]], [[{"ref": "refs/queue", "object": {"sha": "other"}}]]]
 )
@@ -304,7 +320,7 @@ def test_missing_jobs_timeout_and_an_api_failure_never_claims_success(monkeypatc
     monkeypatch.setattr(
         ci_gate_queue, "api", lambda endpoint: [[{"ref": "refs/queue", "object": {"sha": "head"}}]], raising=False
     )
-    monkeypatch.setattr(ci_gate_queue, "read_jobs", lambda endpoint, size=None: [], raising=False)
+    monkeypatch.setattr(ci_gate_queue, "read_jobs", lambda endpoint, size: [], raising=False)
     clock = iter([0, 0, 1200])
     monkeypatch.setattr(ci_gate_queue.time, "monotonic", lambda: next(clock))
     monkeypatch.setattr(ci_gate_queue.time, "sleep", lambda seconds: None)
@@ -372,7 +388,7 @@ def test_main_binds_the_current_queue_attempt_and_exact_split_plan(monkeypatch):
 def test_watch_checks_queue_identity_again_after_every_gate_passed(monkeypatch):
     snapshots = iter([[[{"ref": "refs/queue", "object": {"sha": "head"}}]], []])
     monkeypatch.setattr(ci_gate_queue, "api", lambda endpoint: next(snapshots), raising=False)
-    monkeypatch.setattr(ci_gate_queue, "read_jobs", lambda endpoint, size=None: complete(), raising=False)
+    monkeypatch.setattr(ci_gate_queue, "read_jobs", lambda endpoint, size: complete(), raising=False)
     with pytest.raises(ValueError, match=re.compile("queue group", re.I)):
         ci_gate_queue.watch("owner/repo", "123", "2", [2, 7], "refs/queue", "head")
 
@@ -466,7 +482,7 @@ def test_a_recovery_watch_uses_the_exact_job_repository_and_shared_loss_cache(mo
         caches.append(seen)
         return True
 
-    monkeypatch.setattr(ci_gate_queue, "read_jobs", lambda endpoint, size=None: next(snapshots))
+    monkeypatch.setattr(ci_gate_queue, "read_jobs", lambda endpoint, size: next(snapshots))
     monkeypatch.setattr(ci_gate_queue, "api", lambda endpoint: [[{"ref": "refs/queue", "object": {"sha": "head"}}]])
     monkeypatch.setattr(ci_gate_queue, "logged_loss", loss)
     monkeypatch.setattr(ci_gate_queue.time, "sleep", lambda seconds: None)
