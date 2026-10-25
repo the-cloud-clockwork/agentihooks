@@ -44,7 +44,9 @@ class Source:
 
     def slugs(self) -> list[str]:
         self._store = self._store or connect()
-        return [slug for slug in self._store.slugs() if _on_events(self._store, slug)]
+        found = [slug for slug in self._store.slugs() if _on_events(self._store, slug)]
+        self._exported = {slug: kept for slug, kept in self._exported.items() if slug in found}
+        return found
 
     def state(self, slug: str) -> dict:
         rev = self._ledger.metadata(slug)["_meta"]["rev"]

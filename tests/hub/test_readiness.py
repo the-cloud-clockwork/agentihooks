@@ -167,6 +167,26 @@ def test_readiness_passes_export_a_large_ledger_once_per_revision(monkeypatch):
         assert ledger.exports == 2
 
 
+def test_the_source_forgets_the_export_of_a_swarm_that_left_the_events_engine():
+    _, store, _ = source()
+    ledger = CountingLedger(doc([task("task-a")]))
+    engines = {"rig": "events", "kept": "events"}
+    store.slugs.return_value = ["rig", "kept"]
+    store.config.side_effect = lambda slug: SimpleNamespace(
+        slug=slug, state="running", repo="", template="", engine=engines[slug]
+    )
+    provider = readiness.Source(store, ledger)
+    assert provider.slugs() == ["rig", "kept"]
+    provider.state("rig")
+    provider.state("kept")
+    engines["rig"] = "legacy"
+    assert provider.slugs() == ["kept"]
+    provider.state("kept")
+    assert ledger.exports == 2
+    provider.state("rig")
+    assert ledger.exports == 3
+
+
 def test_hub_respects_its_lease_and_passes_clock_to_ready_offers(monkeypatch):
     from scripts.hub.readiness import Readiness
 
