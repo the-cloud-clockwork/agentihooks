@@ -122,3 +122,22 @@ def test_a_running_tick_ends_the_placement_pass_after_spawning():
     tick("sw", store, FakeLedger([{"id": "t1", "lane": "eng"}]), runtime, now_ms=1_000)
     assert runtime.spawned
     assert runtime.passes[-1] == ("end", len(runtime.spawned))
+
+
+def test_a_placement_pass_loads_the_hives_once_and_the_next_pass_reloads(setup, monkeypatch):  # noqa: F811
+    from scripts.hive import launch as launch_module
+
+    loads = []
+    loaded = launch_module.loaded_hives
+    monkeypatch.setattr(launch_module, "loaded_hives", lambda store: loads.append(store) or loaded(store))
+    launch = setup.launcher
+    launch.placement_cache = None
+    first = launch.hives()
+    assert (len(loads), launch.hives() == first) == (2, True)
+    launch.placement_cache = {}
+    passed = launch.hives()
+    assert launch.hives() is passed
+    assert len(loads) == 3
+    launch.placement_cache = {}
+    assert launch.hives() is not passed
+    assert len(loads) == 4
