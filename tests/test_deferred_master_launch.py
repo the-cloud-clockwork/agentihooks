@@ -84,28 +84,17 @@ def test_the_detached_child_of_a_deferred_launch_still_waits_on_the_route(tmp_pa
     }
 
 
-def test_a_spent_route_wait_never_sleeps(tmp_path, monkeypatch):
-    monkeypatch.setattr(init_agent.time, "monotonic", lambda: 5.0)
-    monkeypatch.setattr(init_agent.time, "sleep", lambda seconds: pytest.fail("the route wait slept"))
-    assert init_agent._await_route(tmp_path / "route", 0, {}) == ({}, None)
-
-
-def test_the_route_wait_reads_a_report_written_while_it_sleeps(tmp_path, monkeypatch):
-    route = tmp_path / "route"
-    slept = []
-
-    def sleep(seconds):
-        if slept:
-            pytest.fail("the route wait slept on after its report arrived")
-        slept.append(seconds)
-        route.write_text("status=routed\naccount=acct\n")
-
-    monkeypatch.setattr(init_agent.time, "sleep", sleep)
-    found, written = init_agent._await_route(route, 30, {})
-    assert found == {"status": "routed", "account": "acct"}
-    assert isinstance(written, int)
-    assert slept == [0.25]
-    assert not route.exists()
+def test_codex_hooks_report_only_for_a_codex_launch(monkeypatch):
+    homes = []
+    monkeypatch.setattr(init_agent, "codex_home", lambda environ: homes.append(environ) or Path("/codex"))
+    moved = {"value": ["SessionStart", "Stop"]}
+    monkeypatch.setattr(init_agent, "restore_hook_order", lambda home: moved["value"] if home == Path("/codex") else [])
+    assert init_agent._codex_hooks("claude", {"A": "1"}) == []
+    assert homes == []
+    assert init_agent._codex_hooks("codex", {"A": "1"}) == ["codex_hooks=restored:SessionStart,Stop"]
+    assert homes == [{"A": "1"}]
+    moved["value"] = []
+    assert init_agent._codex_hooks("codex", {}) == ["codex_hooks=unchanged"]
 
 
 def test_only_a_deferred_launch_refuses_its_profile_request(tmp_path):

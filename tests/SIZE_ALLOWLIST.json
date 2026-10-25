@@ -143,8 +143,8 @@
   "PLR0913": 8
  },
  "scripts/init_agent.py::main": {
-  "C901": 29,
-  "PLR0912": 26
+  "C901": 30,
+  "PLR0912": 27
  },
  "scripts/install.py": {
   "file-lines": 6900

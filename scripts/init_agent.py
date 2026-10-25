@@ -678,13 +678,11 @@ def _refuse_deferred(args, environ: dict[str, str], exc: Exception) -> None:
         binding.refuse(Path(environ[binding.REPORT]), str(exc))
 
 
-def _await_route(route_path: Path, timeout: float, active_env: dict[str, str]) -> tuple[dict[str, str], int | None]:
-    deadline = time.monotonic() + timeout
-    while not route_path.exists() and time.monotonic() < deadline:
-        if _selection_refused(active_env):
-            break
-        time.sleep(0.25)
-    return _take_route_report(route_path)
+def _codex_hooks(agent: str, environ: dict[str, str]) -> list[str]:
+    if agent != "codex":
+        return []
+    moved = restore_hook_order(codex_home(environ))
+    return [f"codex_hooks=restored:{','.join(moved)}" if moved else "codex_hooks=unchanged"]
 
 
 def _selection_refused(environ: dict[str, str]) -> bool:
@@ -1126,9 +1124,7 @@ def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -
                 f"agentihooks init-agent: Claude does not trust {directory} ({why}); {claude_trust.WAIT_NOTICE}",
                 file=sys.stderr,
             )
-    if agent == "codex":
-        moved = restore_hook_order(codex_home(active_env))
-        report.append(f"codex_hooks=restored:{','.join(moved)}" if moved else "codex_hooks=unchanged")
+    report += _codex_hooks(agent, active_env)
     marker = _started_marker(launcher)
     if host == "herdr":
         try:
@@ -1173,7 +1169,13 @@ def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -
         print("\n".join([*report, "route_status=pending", *_binding_deferred(active_env)]))
         return 0
 
-    route, harness_at = _await_route(_route_report(launcher), args.route_timeout, active_env)
+    route_path = _route_report(launcher)
+    deadline = time.monotonic() + args.route_timeout
+    while not route_path.exists() and time.monotonic() < deadline:
+        if _selection_refused(active_env):
+            break
+        time.sleep(0.25)
+    route, harness_at = _take_route_report(route_path)
     report.append(f"route_status={route.get('status', 'pending')}")
     report.append(f"harness_at={harness_at or ''}")
     if route.get("account"):
