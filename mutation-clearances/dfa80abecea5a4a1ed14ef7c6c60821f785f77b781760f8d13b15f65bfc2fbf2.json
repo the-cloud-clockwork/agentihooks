@@ -1,0 +1,6 @@
+{
+  "scripts/ci_stats_minutes.py:scripts.ci_stats_minutes.x_main__mutmut_69:d3fbfd2f318b559b77f879c159a6f3e7032535b40a27e526b1e5b73637cdd035": {
+    "reader": "standards-reader",
+    "reason": "Flush None changes buffering only. Measurement and artifact writing finish before row printing, and normal CLI exit flushes the same rows. The contract promises completed output, not intermediate delivery timing."
+  }
+}
