@@ -1,6 +1,6 @@
 {
   "scripts/gate_protected.py": [
-    "2d0949ec938fbccd13afb6a80f1afe4ecfddf9cb"
+    "33fe8700c86017c6b1331a067af75f48eaa3b62d"
   ],
   ".github/workflows/gate-protected.yml": [
     "d794eee5a317a353e437e19ff2c64498a86d6c5f"

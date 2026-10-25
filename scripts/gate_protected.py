@@ -330,8 +330,8 @@ def _equivalence_problems(base_workflows: dict[str, dict], head_workflows: dict[
 
 
 def _blob(root: Path, rev: str, path: str) -> str | None:
-    listing = _git(root, "ls-tree", rev, "--", path).split()
-    return listing[2] if len(listing) >= 3 and listing[1] == "blob" else None
+    listing = _git(root, "ls-tree", rev, path).split()
+    return listing[2] if listing[1:2] == ["blob"] else None
 
 
 def _frozen_problems(root: Path, merge_base: str, base: str, head: str) -> list[str]:

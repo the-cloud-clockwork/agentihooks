@@ -1710,7 +1710,10 @@ def test_a_planted_edit_to_a_frozen_gate_file_is_red(frozen, capsys):
     head = _put(frozen, {"scripts/gate.py": "planted\n"}, "plant")
     code, out = _frozen_grade(frozen, head, capsys)
     assert code == 1
-    assert f"::error::The head changes the frozen gate file scripts/gate.py to content {gate_protected.FROZEN}" in out
+    assert (
+        f"::error::The head changes the frozen gate file scripts/gate.py to content {gate_protected.FROZEN} "
+        "on the base does not accept; announce its blob there by its own pull request first.\n"
+    ) in out
 
 
 def test_deleting_a_frozen_gate_file_is_red(frozen, capsys):
@@ -1741,7 +1744,10 @@ def test_announcing_and_landing_in_one_pull_request_is_red(frozen, capsys):
     )
     code, out = _frozen_grade(frozen, head, capsys)
     assert code == 1
-    assert "and the frozen gate file scripts/gate.py together" in out
+    assert (
+        f"::error::The head changes {gate_protected.FROZEN} and the frozen gate file scripts/gate.py together; "
+        "land the registry by its own pull request first.\n"
+    ) in out
 
 
 @pytest.mark.parametrize("registry", ["{}", None])
