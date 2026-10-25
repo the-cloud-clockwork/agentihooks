@@ -632,6 +632,7 @@ def test_deleting_the_only_pull_request_filter_keeps_the_base_trusted(tmp_path, 
         ({"push": {"branches": ["dev"], "paths": ["scripts/**"]}}, {"push": {"branches": ["dev"]}}),
         ({"pull_request_target": {"paths": ["scripts/**"]}}, {"pull_request_target": None}),
         ({"pull_request": {"branches": ["dev"]}}, FILTERED),
+        ({"pull_request": None}, {"pull_request": {"paths": ["scripts/**"]}}),
     ],
 )
 def test_any_other_event_change_still_loses_the_base_trust(tmp_path, monkeypatch, base_on, head_on):
