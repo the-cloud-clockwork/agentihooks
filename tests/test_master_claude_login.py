@@ -509,6 +509,45 @@ def test_restore_replaces_a_stale_local_grant_with_a_newer_stored_copy(tmp_path)
     assert json.loads((target / login.CREDENTIALS).read_text())[login.GRANT]["accessToken"] == "older"
 
 
+def test_restore_skips_an_identical_copy_and_one_no_newer_than_the_local_grant(tmp_path):
+    target = _home(tmp_path)
+    same = {"grant": json.dumps(GRANT), "account": json.dumps(MASTER_ACCOUNT), "generation": "9999"}
+    assert login.restore(same, target, force=True) is False
+    equal = {"grant": json.dumps({**GRANT, "accessToken": "other"}), "account": "{}", "generation": "2000"}
+    assert login.restore(equal, target) is False
+    assert json.loads((target / login.CREDENTIALS).read_text()) == {login.GRANT: GRANT}
+
+
+def test_recover_restores_the_slot_that_owns_the_target(ah, monkeypatch):
+    target = login.home(2)
+    target.mkdir(parents=True)
+    (target / login.CONFIG).write_text("{}")
+    _login(target)
+    fresh = {**GRANT, "accessToken": "fresh"}
+    copy = {"grant": json.dumps(fresh), "account": json.dumps(MASTER_ACCOUNT), "generation": "1"}
+    monkeypatch.setattr(openbao_kv, "from_env", lambda environ: "bao")
+    monkeypatch.setattr(login, "stored", lambda bao, number=None: copy if (bao, number) == ("bao", 2) else {})
+    assert login.recover(target, {}) is True
+    assert json.loads((target / login.CREDENTIALS).read_text()) == {login.GRANT: fresh}
+
+
+def test_checked_retries_the_native_check_against_the_recovered_target(tmp_path, monkeypatch):
+    from scripts.routing import native_login
+
+    target = _home(tmp_path)
+    seen = []
+
+    def check(environ, account):
+        seen.append((environ["CLAUDE_CONFIG_DIR"], account))
+        if len(seen) == 1:
+            raise native_login.LoginError(native_login.EXPIRED)
+
+    monkeypatch.setattr(native_login, "check", check)
+    monkeypatch.setattr(login, "recover", lambda found, environ: True)
+    assert login.checked(target, {}, "masteratexample_com") is True
+    assert seen == [(str(target), "masteratexample_com")] * 2
+
+
 def test_stored_reads_the_swarm_copy_and_reports_an_outage(monkeypatch, capsys):
     FakeBao({"epoch": "3"}).install(monkeypatch)
     assert login.stored("bao") == {"epoch": "3"}
