@@ -162,12 +162,13 @@ def test_the_front_door_cannot_reply_to_its_own_or_a_missing_line(world):
 
 
 @pytest.mark.parametrize("by", [SECOND_NAME, ENGINEER])
-def test_a_non_front_door_reply_to_an_operator_line_is_refused(world, by):
+def test_a_non_front_door_reply_to_an_operator_line_is_refused(world, by, tmp_path):
     operator_says(world)
     held = SECOND if by == SECOND_NAME else by
 
-    assert write(world, chat(by)) == (False, [front_door.refusal(SLUG, held)])
+    assert write(world, chat(by), home=tmp_path) == (False, [front_door.refusal(SLUG, held)])
     assert chat_texts(world) == []
+    assert [(r["kind"], r["agent"]) for r in gate_rows(tmp_path)] == [("deny", by)]
 
 
 def test_the_swarm_receipt_still_replies_to_an_operator_line(world):
