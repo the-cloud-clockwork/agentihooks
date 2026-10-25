@@ -155,7 +155,7 @@ def _renewal(redis: "Redis", credential: str, stopped: threading.Event | None = 
                 print("hub: service credential renewal failed", file=sys.stderr)
                 traceback.print_exc()
 
-    thread = threading.Thread(target=renew, name="service-credential", daemon=True)
+    thread = threading.Thread(target=renew, daemon=True)
     thread.start()
     return thread
 

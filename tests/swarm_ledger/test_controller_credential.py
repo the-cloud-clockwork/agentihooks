@@ -153,6 +153,22 @@ def test_a_service_credential_checks_only_against_its_own_holder(hive):
     assert not auth.controller(hive, f".{token}")
 
 
+def test_a_dotted_holder_keeps_its_whole_name_in_the_key(hive):
+    credential = auth.issue_service(hive, "hub.pod-a")
+    hive.delete(f"{auth.PREFIX}:controller:hub.pod-a")
+    assert not auth.controller(hive, credential)
+    auth.keep_service(hive, credential)
+    assert hive.get(f"{auth.PREFIX}:controller:hub") is None
+    assert auth.controller(hive, credential)
+
+
+def test_a_missing_credential_is_refused_without_a_redis_read(hive):
+    auth.issue_controller(hive)
+    with patch.object(hive, "get", side_effect=AssertionError("read for a missing credential")):
+        assert not auth.controller(hive, None)
+        assert not auth.controller(hive, "")
+
+
 def test_reissuing_a_service_credential_retires_only_that_holders_old_one(hive):
     old = auth.issue_service(hive, "hub-a")
     other = auth.issue_service(hive, "hub-b")

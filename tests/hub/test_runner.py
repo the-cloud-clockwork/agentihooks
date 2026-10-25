@@ -431,7 +431,7 @@ def test_the_renewal_thread_renews_every_keep_interval_past_a_failed_renewal(mon
     assert calls == [credential, credential]
     assert auth.controller(hive, credential)
     assert 0 < hive.ttl(key) <= auth.SERVICE_TTL_S
-    assert "hub: service credential renewal failed" in capsys.readouterr().err
+    assert capsys.readouterr().err.startswith("hub: service credential renewal failed\nTraceback")
 
 
 def test_a_hub_with_a_local_ledger_issues_no_service_credential(monkeypatch, hive):

@@ -223,9 +223,11 @@ def keep_service(redis: "Redis", credential: str) -> None:
 
 
 def controller(redis: "Redis", credential: str) -> bool:
-    holder, dot, _ = (credential or "").rpartition(".")
+    if not credential:
+        return False
+    holder, dot, _ = credential.rpartition(".")
     expected = redis.get(f"{PREFIX}:controller:{holder}" if dot else f"{PREFIX}:controller")
-    return bool(credential and expected) and hmac.compare_digest(expected, _digest(credential))
+    return bool(expected) and hmac.compare_digest(expected, _digest(credential))
 
 
 def revoke(redis: "Redis", member_id: str) -> None:
