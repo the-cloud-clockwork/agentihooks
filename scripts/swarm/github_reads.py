@@ -5,6 +5,7 @@ run is never cached, so every decision on a finished run is read fresh. Entries 
 credential, so one token is never served a run another token read; only the source name reaches disk.
 """
 
+import fcntl
 import hashlib
 import json
 import os
@@ -48,6 +49,22 @@ def run(endpoint: str, now: float, fetch: Callable[[], dict]) -> dict:
     if found.get("status") != TERMINAL:
         _write(entry, {"at": now, "run": found})
     return found
+
+
+def job_log(endpoint: str, fetch: Callable[[], str]) -> str:
+    entry = home() / f"{_key(endpoint)}.log"
+    entry.parent.mkdir(parents=True, exist_ok=True)
+    with entry.with_suffix(".lock").open("a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        try:
+            return entry.read_text()
+        except FileNotFoundError:
+            pass
+        found = fetch()
+        staged = entry.with_name(f"{entry.name}.{os.getpid()}")
+        staged.write_text(found)
+        staged.replace(entry)
+        return found
 
 
 def _write(path, body):

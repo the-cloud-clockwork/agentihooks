@@ -181,7 +181,7 @@ def test_completed_attempts_are_reused_while_new_attempts_are_read():
     assert len(calls) == 6
     cache.flushall()
     assert ci_read._attempts("o/r", [workflow], gh, cache) == third
-    assert len(calls) == 12
+    assert len(calls) == 9
 
 
 def test_job_logs_survive_attempt_cache_loss_and_concurrent_collectors(monkeypatch, tmp_path):

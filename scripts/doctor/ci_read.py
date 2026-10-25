@@ -3,10 +3,12 @@ from __future__ import annotations
 import json
 import re
 import subprocess
+import time
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 from scripts.doctor import ci, ci_cache
+from scripts.swarm import github_reads
 from scripts.swarm.keyspace import ROOT
 
 if TYPE_CHECKING:
@@ -34,6 +36,9 @@ def test_results(log: str, job: str = "") -> list[dict]:
 
 
 def _gh(args, run):
+    endpoint = args[1]
+    caller = "doctor.ci.job_log" if endpoint.endswith("/logs") else "doctor.ci"
+    github_reads.charge(caller, endpoint, time.time())
     return run(["gh", *args], capture_output=True, text=True, check=True, timeout=60).stdout
 
 
@@ -62,8 +67,9 @@ def _attempts(repo, runs, run, cache=None):
 
 
 def _job_tests(repo, job, run):
+    endpoint = f"repos/{repo}/actions/jobs/{job['id']}/logs"
     try:
-        log = _gh(["api", f"repos/{repo}/actions/jobs/{job['id']}/logs"], run)
+        log = github_reads.job_log(endpoint, lambda: _gh(["api", endpoint], run))
     except subprocess.CalledProcessError as exc:
         if "HTTP 404" not in exc.stderr:
             raise
