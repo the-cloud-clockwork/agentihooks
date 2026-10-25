@@ -1,8 +1,10 @@
 import faulthandler
+import os
+import signal
 import subprocess
 import sys
 import time
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from pathlib import Path
 
 import pytest
@@ -30,7 +32,24 @@ def hung_test_dump_past_both_passes(request):
 
 @contextmanager
 def mutation_children(monkeypatch):
-    yield
+    children = []
+    popen = subprocess.Popen
+
+    def start(*args, **kwargs):
+        child = popen(*args, **kwargs)
+        if kwargs.get("start_new_session"):
+            children.append(child)
+        return child
+
+    with monkeypatch.context() as patch:
+        patch.setattr(subprocess, "Popen", start)
+        try:
+            yield
+        finally:
+            for child in reversed(children):
+                with suppress(ProcessLookupError):
+                    os.killpg(child.pid, signal.SIGKILL)
+                child.wait()
 
 
 @pytest.fixture(autouse=True)
