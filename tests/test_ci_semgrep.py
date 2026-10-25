@@ -51,7 +51,7 @@ def test_scan_excludes_only_the_mutable_action_tag_rule():
 def test_scan_reads_the_domain_rules_folder_that_holds_rule_files():
     rules_dir = _ROOT / _jobs()["scan"]["with"]["rules_dir"]
     assert rules_dir == _ROOT / ".semgrep"
-    assert any(rules_dir.glob("*.yml"))
+    assert any(_ROOT.glob(".semgrep/*.yml"))
 
 
 def test_scan_and_charts_run_on_the_select_runner_expression():
@@ -64,6 +64,26 @@ def test_charts_run_the_chart_timer_guard():
     steps = _jobs()["charts"]["steps"]
     assert steps[-1]["run"] == "python tests/ci_charts/chart_timers.py"
     assert (_ROOT / "tests/ci_charts/chart_timers.py").is_file()
+
+
+def test_charts_grade_the_guard_rules_against_the_base_floors():
+    steps = _jobs()["charts"]["steps"]
+    install = next(step for step in steps if step.get("name") == "Install PyYAML and Semgrep")
+    guard = next(
+        step for step in steps if step.get("name") == "Guard rules hold on their fixtures and at their computed floors"
+    )
+    assert install["run"] == "python -m pip install pyyaml==6.0.2 semgrep==1.177.0"
+    assert guard["env"] == {"BASE": "${{ inputs.base }}"}
+    assert guard["run"].splitlines() == [
+        'git fetch --no-tags --depth=1 origin "${BASE#origin/}"',
+        "grader=scripts/ci_semgrep_floors.py",
+        "if git cat-file -e FETCH_HEAD:scripts/ci_semgrep_floors.py; then",
+        '  grader="$RUNNER_TEMP/ci_semgrep_floors.py"',
+        '  git show FETCH_HEAD:scripts/ci_semgrep_floors.py > "$grader"',
+        "fi",
+        'python "$grader" check --base FETCH_HEAD',
+    ]
+    assert steps.index(install) < steps.index(guard) < len(steps) - 1
 
 
 def test_no_semgrep_job_or_step_can_pass_on_a_skip_or_an_error():

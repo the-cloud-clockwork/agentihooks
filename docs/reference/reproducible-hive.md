@@ -41,7 +41,7 @@ agentihooks hive create
 
 | Step | What it does | Skipped on a rerun when |
 |---|---|---|
-| name | `swarm-hive-<epoch seconds>`, the release, namespace, NFS home folder and herdr label; the LAN address is the one the `agentihooks-swarm` shared MetalLB services carry, and the SSH port is the first port from 2222 free on it | an unfinished create is saved in `hive-create.json` under the agentihooks home |
+| name | the node's stable name `swarm-hive-NNN`, the lowest free ordinal given to that node once and kept in the Redis hash `agentihooks-hive:machines`; it is the release, namespace, NFS home folder and herdr label. The LAN address is the one the `agentihooks-swarm` shared MetalLB services carry; the SSH port is the port of the existing `<name>-ssh-lan` service, else the first port from 2222 free on it | an unfinished create is saved in `hive-create.json` under the agentihooks home |
 | invite | `hive invite` into `k8s/agentihooks-hive-<name>`, like `k8s/agentihooks-swarm-workstation-hive` | the record holds a credential |
 | ssh keys | a new ed25519 host key and every `~/.ssh/*.pub` as `ssh_host_key`, `ssh_host_public_key` and `ssh_authorized_keys` in the same record | the record holds a host key |
 | manifests | renders antoncore `k8s/templates/agentihooks-hive.yaml` and opens one pull request into antoncore `dev`; the rendered manifests make the hive's NFS home folder, so the NFS server never restarts | the saved create holds the pull request |
@@ -55,7 +55,9 @@ It needs antoncore `k8s/templates/agentihooks-hive.yaml` on `dev` and at least o
 `hive-placement=on`, because the engineer comes from that swarm's placement; without one it refuses before naming a
 hive. Each wait
 is bounded by `--timeout` (1800 seconds). A refusal prints `hive create refused: <reason>` and exits 1; a
-rerun resumes the saved create from its first unfinished step. A finished create makes the next run start a new hive.
+rerun resumes the saved create from its first unfinished step. A hive is one machine: a create on a node that already has a hive redeploys that hive under the same name, keeping
+its record, port, pull request, home folder and herdr entry, and a create on another node names the next hive. Grow a
+hive with larger requests and more max agents in its values, never with a second hive on the same node.
 `--node`, `--repo`, `--base` and `--like` override the node, the GitOps repository, its branch and the record copied.
 
 ## The one command

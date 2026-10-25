@@ -1,8 +1,12 @@
+import json
+
 import pytest
 
+from scripts.hive import auth
+from scripts.inbox.store import InboxStore
 from scripts.swarm import cli, idle, merge_queue, prerequisite_wait
 from scripts.swarm.ledger_events import PullRequest
-from scripts.swarm.store import AgentRecord
+from scripts.swarm.store import AgentRecord, RedisStore
 from tests.swarm.test_cli import env, run  # noqa: F401
 
 ME = "engineer@a1b2c3-0001"
@@ -192,7 +196,7 @@ def test_another_claimant_cannot_consume_an_old_prerequisite_offer(waiting, monk
         ledger.rows["t2"].update(state="claimed", claimed_by=ME)
         task_id = "t2"
     else:
-        store.redis.set(f"{store.key('sw', 'claim', 't1')}:generation", 1)
+        ledger.rows["t1"]["claim_generation"] = 2
         task_id = "t1"
     assert run("sw", "--as", ME, "block", f"Stack published; next step restack after {URL}") == 0
     monkeypatch.setattr(cli.ledger_events, "view", lambda url: pytest.fail("stale offer must not read GitHub"))
@@ -334,14 +338,118 @@ def test_unbound_merge_waits_preserve_admission_without_final_confirmation(waiti
     assert run("sw", "--as", ME, "wait", "--on", "merge", URL, "--final") == 1
 
 
-@pytest.mark.parametrize("ledger_generation,store_generation", [(1, 0), (0, 1)])
-def test_a_changed_claim_is_rejected_before_recording_a_prerequisite(
-    waiting, capsys, ledger_generation, store_generation
-):
+def test_a_changed_claim_is_rejected_before_recording_a_prerequisite(waiting, capsys):
     store, ledger, _ = waiting
-    ledger.rows["t1"]["claim_generation"] = ledger_generation
-    store.redis.set(f"{store.key('sw', 'claim', 't1')}:generation", store_generation)
+    ledger.rows["t1"]["claimed_by"] = "engineer@a1b2c3-0009"
     assert run("sw", "--as", ME, "wait", "--on", "merge", URL) == 1
     assert capsys.readouterr().err.strip() == "swarm: task claim changed; refresh the task before waiting"
     assert idle.wait(store.redis, "sw", ME) is None
     assert store.redis.hget(prerequisite_wait.key("sw"), "t1") is None
+
+
+def reclaimed(store, ledger):
+    ledger.rows["t1"]["claim_generation"] = 5
+    store.redis.set(f"{store.key('sw', 'claim', 't1')}:generation", 3)
+
+
+def test_a_reclaimed_tasks_current_claimant_can_wait_on_its_merge(waiting):
+    store, ledger, state = waiting
+    reclaimed(store, ledger)
+    state["entry"]["position"] = 3
+    ledger.rows["t1"]["pr_url"] = URL
+    assert run("sw", "--as", ME, "wait", "--on", "merge", URL) == 0
+    assert idle.wait(store.redis, "sw", ME)["on"] == {"kind": "merge", "target": URL}
+    assert run("sw", "--as", ME, "wait", "--on", "merge", URL, "--final") == 0
+
+
+def test_a_reclaimed_tasks_prerequisite_reopens_after_it_merges(waiting, monkeypatch):
+    store, ledger, _ = waiting
+    reclaimed(store, ledger)
+    assert run("sw", "--as", ME, "wait", "--on", "merge", URL) == 1
+    assert run("sw", "--as", ME, "block", f"Stack published; next step restack after {URL}") == 0
+    monkeypatch.setattr(cli.ledger_events, "view", lambda url: PullRequest("MERGED", 2, 1, False))
+    assert prerequisite_wait.reopen_pass("sw", store, ledger, ledger.rows) == [
+        f"task t1 reopened after prerequisite {URL} merged"
+    ]
+
+
+MEMBER_READS = {
+    "GET",
+    "HGET",
+    "HGETALL",
+    "HEXISTS",
+    "EXISTS",
+    "SMEMBERS",
+    "SISMEMBER",
+    "MGET",
+    "HKEYS",
+    "HMGET",
+    "TTL",
+    "PTTL",
+    "ZRANGE",
+    "ZRANGEBYSCORE",
+    "ZSCORE",
+    "ZCARD",
+    "SCARD",
+    "HLEN",
+    "LRANGE",
+    "TYPE",
+    "SCAN",
+}
+
+
+@pytest.mark.parametrize("kind", ["checks", "merge", "reply"])
+def test_a_hive_member_credential_declares_checked_waits_under_claim_generation_drift(waiting, monkeypatch, kind):
+    import fakeredis
+
+    _, ledger, state = waiting
+    state["entry"]["position"] = 1
+    ledger.rows["t1"]["claim_generation"] = 7
+    server = fakeredis.FakeServer()
+    admin = fakeredis.FakeRedis(server=server, decode_responses=True)
+    monkeypatch.setattr(cli, "connect", lambda: RedisStore(admin))
+    assert run("sw", "create", "--repo", "/repo") == 0
+    RedisStore(admin).put_agent("sw", AgentRecord(name=ME, lane="eng", task="t1", seat="eng-1@sw"))
+    admin.acl_setuser(
+        "hive-m1",
+        enabled=True,
+        nopass=True,
+        categories=auth.ACL_CATEGORIES,
+        keys=auth._acl_keys("m1"),
+        channels=auth.ACL_PATTERNS,
+    )
+
+    # fakeredis drops %R~ read selectors, so direct reads go through the admin client; pipelines stay on the member.
+    class Member(fakeredis.FakeRedis):
+        def execute_command(self, *args, **options):
+            if str(args[0]).upper() in MEMBER_READS:
+                return admin.execute_command(*args, **options)
+            return super().execute_command(*args, **options)
+
+    member = Member(server=server, decode_responses=True, username="hive-m1")
+    member.auth("", username="hive-m1")
+    assert member.acl_whoami() == "hive-m1"
+    admin.hset(prerequisite_wait.key("sw"), "t1", "{}")
+    admin.set(f"{RedisStore(admin).key('sw', 'claim', 't1')}:generation", 3)
+    monkeypatch.setenv("AGENTIHOOKS_DEPLOYMENT", "distributed")
+    monkeypatch.setenv("AGENTIHOOKS_HIVE_ID", "m1")
+    monkeypatch.setenv("AGENTIHOOKS_HIVE_REDIS_URL", "redis://hive.example:6380/2")
+    runs = {"checks": "https://github.com/o/r/actions/runs/40200544185", "merge": URL}
+    target = runs[kind] if kind in runs else InboxStore(member).send(ME, "operator", "which branch?").id
+    monkeypatch.setattr(cli, "connect", lambda: RedisStore(member))
+    # The agent lookup runs a read-only script the fake server checks as a write; real Redis grants it by %R~.
+    agent = RedisStore(admin).agents("sw")[0]
+    monkeypatch.setattr(cli, "_me", lambda store, args: agent)
+    assert run("sw", "--as", ME, "wait", "--on", kind, target) == 0
+    assert idle.wait(member, "sw", ME)["on"] == {"kind": kind, "target": target}
+    assert not admin.hexists(prerequisite_wait.key("sw"), "t1")
+
+
+@pytest.mark.parametrize("record_agent,generation,accepted", [(ME, 5, True), (ME, 4, False), ("other", 5, False)])
+def test_prerequisite_offer_matches_the_ledger_claim_identity(waiting, record_agent, generation, accepted):
+    store, ledger, _ = waiting
+    ledger.rows["t1"]["claim_generation"] = 5
+    record = {"agent": record_agent, "generation": generation, "target": URL}
+    store.redis.hset(prerequisite_wait.key("sw"), "t1", json.dumps(record))
+    agent = AgentRecord(name=ME, lane="eng", task="t1", seat="eng-1@sw")
+    assert prerequisite_wait.offered(store, "sw", agent, ledger.rows["t1"]) == (record if accepted else {})

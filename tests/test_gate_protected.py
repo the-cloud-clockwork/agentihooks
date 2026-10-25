@@ -618,6 +618,15 @@ def test_selection_permissions_accept_the_current_or_compatible_grader(previous,
 
 
 @pytest.mark.parametrize("previous", [{"contents": "read"}, {"contents": "read", "actions": "read"}])
+@pytest.mark.parametrize("permissions", [{"contents": "read"}, {"contents": "read", "actions": "read"}])
+def test_selection_provenance_accepts_exactly_both_read_permission_forms(previous, permissions):
+    base = _provenance_workflow(permissions=previous)
+    head = copy.deepcopy(base)
+    head["jobs"]["select"]["permissions"] = permissions
+    assert gate_protected.grade({"test.yml": base}, {}, {"test.yml": head}, {}, _TODAY) == []
+
+
+@pytest.mark.parametrize("previous", [{"contents": "read"}, {"contents": "read", "actions": "read"}])
 @pytest.mark.parametrize(
     "permissions",
     [
@@ -633,6 +642,17 @@ def test_selection_permissions_accept_the_current_or_compatible_grader(previous,
     ],
 )
 def test_selection_permissions_reject_every_other_form(previous, permissions):
+    base = _provenance_workflow(permissions=previous)
+    head = copy.deepcopy(base)
+    head["jobs"]["select"]["permissions"] = permissions
+    assert gate_protected.grade({"test.yml": base}, {}, {"test.yml": head}, {}, _TODAY) == [
+        "The head changes the durations provenance context permissions."
+    ]
+
+
+@pytest.mark.parametrize("previous", [{}, {"contents": "write"}, {"contents": "read", "checks": "read"}])
+@pytest.mark.parametrize("permissions", [{"contents": "read"}, {"contents": "read", "actions": "read"}])
+def test_selection_permissions_do_not_rewrite_an_unreviewed_base_form(previous, permissions):
     base = _provenance_workflow(permissions=previous)
     head = copy.deepcopy(base)
     head["jobs"]["select"]["permissions"] = permissions
@@ -697,6 +717,28 @@ def test_the_protected_grader_admits_only_the_exact_paged_reuse_variant(weakened
         step["run"] = step["run"].replace("--page-size 5", "--page-size 100")
     problems = gate_protected.grade({"test.yml": base}, {}, {"test.yml": head}, {}, _TODAY, policy)
     assert bool(problems) == weakened, problems
+
+
+@pytest.mark.parametrize("uses", ["./.github/actions/retry-upload", "./.github/actions/other-upload"])
+@pytest.mark.parametrize("anton", [False, True])
+def test_the_protected_grader_admits_only_the_retried_evidence_upload(uses, anton):
+    from scripts import ci_reuse
+
+    base, head = _protected_pair()
+    head["jobs"]["reuse"] = ci_reuse.retried_reuse_job()
+    policy = _POLICY if anton else None
+    if anton:
+        head["jobs"]["reuse"]["runs-on"] = _anton()
+        [install] = [
+            step for step in head["jobs"]["reuse"]["steps"] if step.get("name") == "Install metadata dependencies"
+        ]
+        install["env"] = {"PYTHONNOUSERSITE": "1"}
+    [publish] = [
+        step for step in head["jobs"]["reuse"]["steps"] if step.get("name") == "Publish protected tested tree evidence"
+    ]
+    publish["uses"] = uses
+    problems = gate_protected.grade({"test.yml": base}, {}, {"test.yml": head}, {}, _TODAY, policy)
+    assert bool(problems) == (uses != "./.github/actions/retry-upload"), problems
 
 
 def test_a_head_cannot_replace_the_protected_reuse_decision():
