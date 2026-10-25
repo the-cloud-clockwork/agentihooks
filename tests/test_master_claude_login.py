@@ -1071,11 +1071,10 @@ def test_master_launch_uses_subscription_fallback_without_remote_control(
     assert environ["CLAUDE_SECURESTORAGE_CONFIG_DIR"] == str(target)
     assert json.loads((target / "settings.json").read_text()) == {"hooks": {"Stop": []}}
     assert not (target / login.CREDENTIALS).exists()
-    assert json.loads((target.parent / "login-notifications.jsonl").read_text()) == {
-        "step": "token",
-        "outcome": "routed",
-        "transport": "none",
-    }
+    assert [json.loads(line) for line in (target.parent / "login-notifications.jsonl").read_text().splitlines()] == [
+        {"step": "token", "outcome": outcome, "transport": "email", "agent": "master@a-1"},
+        {"step": "token", "outcome": "routed", "transport": "none"},
+    ]
     assert login.holders(login.root()) == {}
     assert dict(line.split("=", 1) for line in report.read_text().splitlines()) == {
         "status": "routed",
