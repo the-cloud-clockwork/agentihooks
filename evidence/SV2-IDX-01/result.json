@@ -1,0 +1,50 @@
+{
+  "package": "SV2-IDX-01",
+  "dependency": "SV2-SES-05",
+  "integration_gate": "G4",
+  "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/7028",
+  "package_complete": false,
+  "evidence_class": "mocked: an in-process caller, a SQLite catalog file and a local content addressed object folder stand in for the session service, the central database and the archive bucket; no HTTP server, Pod or worker runs",
+  "interfaces": [
+    "hooks.memory.catalog adds session_record, session_source and archive_manifest tables keyed by access domain, session uid, source generation and byte offset; they are additive and the SV2-SES-04 tables are unchanged",
+    "Catalog.register(SessionSource) records a session at state retained and revision 1 with its provider and retention, and each source generation with its origin; a repeat is idempotent and a changed provider, retention or origin raises Conflict and changes nothing",
+    "Catalog.set_state(domain, session_uid, state, revision) is compare and set on revision: it accepts retained, restricted or deleted, advances the revision by one and returns it; a stale revision or unknown session raises Conflict and changes nothing",
+    "Catalog.archive(ArchiveEntry) records an immutable object digest for a byte range of a registered generation once; the same entry again returns False and a different end or digest at the offset raises Conflict",
+    "hooks.memory.archive.ObjectStore stores objects under their sha256 digest with fsync of the file and its folder and an atomic rename; get verifies the digest and raises EvidenceIntegrityError when the object is missing or altered",
+    "hooks.memory.archive.evidence(catalog, store, grant, domain, session_uid) returns complete evidence for a retained session the grant covers: every catalog event, quarantine row and verified archive object of every generation; any missing, altered or wrongly sized object raises EvidenceIntegrityError and increments archive_integrity_failures_total for the domain, and nothing else changes",
+    "hooks.memory.archive.source_range(catalog, store, grant, reference) returns the exact archived bytes of a byte range under the same grant and state checks; a range not covered by archived objects raises EvidenceIntegrityError and is counted",
+    "hooks.memory.archive.preview(found, limit) returns at most limit characters of text, always labelled complete false with the omitted character count and the session reference; the default limit is the legacy 4000 character preview cap"
+  ],
+  "supported_versions": {
+    "python": "3.11 and later",
+    "schema_version": "ingest 2.x through SV2-SES-04",
+    "storage": "SQLite catalog with WAL journal and synchronous FULL; local folder object store"
+  },
+  "states": {
+    "observed": "Cases A, B and C each ran twice from independent temporary folders with identical records.",
+    "accepted": "A session is accepted when register returns its record; an archive entry when archive returns True or False for the same entry.",
+    "committed": "Events are committed by the SV2-SES-04 ingest transaction; sessions, sources, manifest entries and state changes each commit in their own catalog transaction before the call returns.",
+    "externally_verified": "None: no central database, object bucket or deployed service was read or written."
+  },
+  "metrics": {
+    "archive_integrity_failures_total": "durable per access domain in ingest_counter, incremented once per refused evidence or range read"
+  },
+  "cases": {
+    "a": "evidence/SV2-IDX-01/a-result.json",
+    "b": "evidence/SV2-IDX-01/b-result.json",
+    "c": "evidence/SV2-IDX-01/c-result.json"
+  },
+  "rollback_rehearsal": {
+    "action": "Consumers switch back to the earlier catalog event reads; the three new tables and the object folder stay in place and nothing is deleted.",
+    "authoritative_objects": "The archived objects and the session_record, session_source, archive_manifest and session_event rows; previews are derived and are never stored.",
+    "proof": "Case C closes and reopens the catalog file, reads every exact source range again and replays the whole capture with no duplicate event or manifest row."
+  },
+  "remaining_limitations": [
+    "The object store is a local folder; a bucket backed store with the same put and get contract is not part of this package.",
+    "No HTTP route serves evidence or source ranges yet; callers use the module functions in process.",
+    "Evidence completeness checks every archived object but does not prove that the manifest covers every event byte range; source_range refuses an uncovered range.",
+    "Redis is not touched by this package; it remains coordination and cache only."
+  ],
+  "compatibility": "Explicitly local compatibility path: ingest, its event identity and quarantine rules and the SV2-SES-04 tables are unchanged; the new tables are additive.",
+  "authority": "Corpus and projects come from the caller's Grant; a session is readable only when its domain is the grant's corpus and every event's project is in the grant or unattributed, and only while its state is retained."
+}

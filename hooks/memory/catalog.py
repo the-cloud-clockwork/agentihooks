@@ -26,9 +26,52 @@ SCHEMA = (
         PRIMARY KEY (access_domain, session_uid, source_generation))""",
     """CREATE TABLE IF NOT EXISTS ingest_counter (
         access_domain TEXT NOT NULL, name TEXT NOT NULL, value INTEGER NOT NULL, PRIMARY KEY (access_domain, name))""",
+    """CREATE TABLE IF NOT EXISTS session_record (
+        access_domain TEXT NOT NULL, session_uid TEXT NOT NULL, provider TEXT NOT NULL, retention TEXT NOT NULL,
+        state TEXT NOT NULL, revision INTEGER NOT NULL, PRIMARY KEY (access_domain, session_uid))""",
+    """CREATE TABLE IF NOT EXISTS session_source (
+        access_domain TEXT NOT NULL, session_uid TEXT NOT NULL, source_generation TEXT NOT NULL, origin TEXT NOT NULL,
+        PRIMARY KEY (access_domain, session_uid, source_generation))""",
+    """CREATE TABLE IF NOT EXISTS archive_manifest (
+        access_domain TEXT NOT NULL, session_uid TEXT NOT NULL, source_generation TEXT NOT NULL,
+        byte_start INTEGER NOT NULL, byte_end INTEGER NOT NULL, object_digest TEXT NOT NULL,
+        PRIMARY KEY (access_domain, session_uid, source_generation, byte_start))""",
 )
-TABLES = ("session_event", "session_quarantine", "session_ingest_batch", "session_watermark", "ingest_counter")
+TABLES = (
+    "session_event",
+    "session_quarantine",
+    "session_ingest_batch",
+    "session_watermark",
+    "ingest_counter",
+    "session_record",
+    "session_source",
+    "archive_manifest",
+)
 DUPLICATES = "ingest_duplicate_events_total"
+ARCHIVE_FAILURES = "archive_integrity_failures_total"
+SESSION_STATES = ("retained", "restricted", "deleted")
+SESSION_CONFLICT = "the session was registered with another provider or retention"
+SOURCE_CONFLICT = "the source generation was registered with another origin"
+STALE_REVISION = "the session is unknown or its revision is stale; nothing changed"
+UNKNOWN_STATE = "the session state must be retained, restricted or deleted"
+UNREGISTERED = "the source generation is not registered"
+ARCHIVE_CONFLICT = "an archive object at this offset was recorded with different content"
+SESSION_KEY = "access_domain = ? AND session_uid = ?"
+SESSION = f"SELECT provider, retention, state, revision FROM session_record WHERE {SESSION_KEY}"
+INSERT_SESSION = "INSERT INTO session_record VALUES (?, ?, ?, ?, ?, 1)"
+SET_STATE = f"UPDATE session_record SET state = ?, revision = revision + 1 WHERE {SESSION_KEY} AND revision = ?"
+SOURCE = f"SELECT origin FROM session_source WHERE {SESSION_KEY} AND source_generation = ?"
+INSERT_SOURCE = "INSERT INTO session_source VALUES (?, ?, ?, ?)"
+SOURCES = f"SELECT source_generation, origin FROM session_source WHERE {SESSION_KEY} ORDER BY source_generation"
+ENTRY = (
+    "SELECT byte_end, object_digest FROM archive_manifest "
+    f"WHERE {SESSION_KEY} AND source_generation = ? AND byte_start = ?"
+)
+INSERT_ENTRY = "INSERT INTO archive_manifest VALUES (?, ?, ?, ?, ?, ?)"
+MANIFEST = (
+    "SELECT byte_start, byte_end, object_digest FROM archive_manifest "
+    f"WHERE {SESSION_KEY} AND source_generation = ? ORDER BY byte_start"
+)
 PRAGMAS = ("PRAGMA journal_mode=WAL", "PRAGMA synchronous=FULL", "PRAGMA busy_timeout=5000")
 SCOPE = "access_domain = ? AND session_uid = ? AND source_generation = ?"
 COUNT = (
@@ -88,6 +131,26 @@ class BatchCommit:
     events: list[StoredEvent]
     rejected: list[dict]
     schema_version: str
+
+
+@dataclass(frozen=True)
+class SessionSource:
+    access_domain: str
+    session_uid: str
+    source_generation: str
+    provider: str
+    origin: str
+    retention: str
+
+
+@dataclass(frozen=True)
+class ArchiveEntry:
+    access_domain: str
+    session_uid: str
+    source_generation: str
+    byte_start: int
+    byte_end: int
+    object_digest: str
 
 
 class Catalog:
@@ -234,6 +297,61 @@ class Catalog:
 
     def duplicate_events_total(self, domain: str) -> int:
         row = self.db.execute(COUNTER, (domain, DUPLICATES)).fetchone()
+        return row[0] if row else 0
+
+    def session(self, domain: str, session_uid: str) -> dict | None:
+        row = self.db.execute(SESSION, (domain, session_uid)).fetchone()
+        return dict(zip(("provider", "retention", "state", "revision"), row)) if row else None
+
+    def register(self, source: SessionSource) -> dict:
+        key = (source.access_domain, source.session_uid)
+        with self._transaction():
+            found = self.session(*key)
+            if found is None:
+                self.db.execute(INSERT_SESSION, (*key, source.provider, source.retention, SESSION_STATES[0]))
+            elif (found["provider"], found["retention"]) != (source.provider, source.retention):
+                raise Conflict(SESSION_CONFLICT)
+            origin = self.db.execute(SOURCE, (*key, source.source_generation)).fetchone()
+            if origin is None:
+                self.db.execute(INSERT_SOURCE, (*key, source.source_generation, source.origin))
+            elif origin[0] != source.origin:
+                raise Conflict(SOURCE_CONFLICT)
+            return self.session(*key)
+
+    def sources(self, domain: str, session_uid: str) -> list[dict]:
+        rows = self.db.execute(SOURCES, (domain, session_uid)).fetchall()
+        return [{"source_generation": row[0], "origin": row[1]} for row in rows]
+
+    def set_state(self, domain: str, session_uid: str, state: str, revision: int) -> int:
+        if state not in SESSION_STATES:
+            raise ValueError(UNKNOWN_STATE)
+        with self._transaction():
+            if self.db.execute(SET_STATE, (state, domain, session_uid, revision)).rowcount != 1:
+                raise Conflict(STALE_REVISION)
+            return self.session(domain, session_uid)["revision"]
+
+    def archive(self, entry: ArchiveEntry) -> bool:
+        scope = (entry.access_domain, entry.session_uid, entry.source_generation)
+        with self._transaction():
+            if self.db.execute(SOURCE, scope).fetchone() is None:
+                raise Conflict(UNREGISTERED)
+            found = self.db.execute(ENTRY, (*scope, entry.byte_start)).fetchone()
+            if found is not None:
+                if tuple(found) != (entry.byte_end, entry.object_digest):
+                    raise Conflict(ARCHIVE_CONFLICT)
+                return False
+            self.db.execute(INSERT_ENTRY, (*scope, entry.byte_start, entry.byte_end, entry.object_digest))
+            return True
+
+    def manifest(self, domain: str, session_uid: str, source_generation: str) -> list[dict]:
+        rows = self.db.execute(MANIFEST, (domain, session_uid, source_generation)).fetchall()
+        return [{"byte_start": row[0], "byte_end": row[1], "object_digest": row[2]} for row in rows]
+
+    def integrity_failure(self, domain: str) -> None:
+        self.db.execute(COUNT, (domain, ARCHIVE_FAILURES, 1))
+
+    def integrity_failures_total(self, domain: str) -> int:
+        row = self.db.execute(COUNTER, (domain, ARCHIVE_FAILURES)).fetchone()
         return row[0] if row else 0
 
     def snapshot(self) -> dict[str, list]:
