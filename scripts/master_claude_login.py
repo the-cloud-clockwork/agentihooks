@@ -475,7 +475,7 @@ def _take(name: str, bao: openbao_kv.OpenBao | None) -> tuple[int, int, dict[str
     for number in order:
         with _locked(root(number)) as folder:
             try:
-                epoch = _claim(folder, name, os.getpid(), _alive, int(offered[number].get("epoch", 0)), alone=True)[0]
+                epoch = _claim(folder, name, os.getpid(), _alive, int(offered[number].get("epoch", 0)))[0]
             except LoginRefused:
                 held.append(f"{named[number] or number} by {', '.join(sorted(holders(folder)))}")
                 continue
