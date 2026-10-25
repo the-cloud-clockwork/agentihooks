@@ -57,12 +57,28 @@ class NatsScopedBus:
             for bucket in SCOPED_STATE_BUCKETS:
                 self.state(bucket)
         self.events = ScopedLog(
-            NatsEventLog(root._loop, root._js, root._config.queue, streams["EVENTS"], root._config.provision, swarm),
+            NatsEventLog(
+                root._loop,
+                root._js,
+                root._config.queue,
+                streams["EVENTS"],
+                root._config.provision,
+                swarm,
+                root._config.credentials,
+            ),
             swarm,
             "events",
         )
         self.dead = ScopedLog(
-            NatsEventLog(root._loop, root._js, root._config.queue, streams["DEAD"], root._config.provision, swarm),
+            NatsEventLog(
+                root._loop,
+                root._js,
+                root._config.queue,
+                streams["DEAD"],
+                root._config.provision,
+                swarm,
+                root._config.credentials,
+            ),
             swarm,
             "dead",
         )

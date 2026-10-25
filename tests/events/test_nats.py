@@ -374,7 +374,7 @@ def test_existing_scoped_queue_messages_survive_new_name_generation(bus):
     assert queue._stream == legacy
     delivery = queue.take(500)
     assert delivery.event == offered
-    delivery.ack()
+    bus._loop.run(delivery._msg.ack_sync())
     assert bus._loop.run(bus._js.stream_info(legacy)).state.messages == 0
 
 
@@ -558,6 +558,35 @@ def test_a_dead_letter_is_published_before_the_original_is_terminated():
         js.publish = publish
         assert consumer.fetch(1, 100) == []
         assert calls == ["publish", "term"]
+    finally:
+        loop.close()
+
+
+def test_old_restricted_credentials_dead_letter_without_metadata_discovery(monkeypatch):
+    monkeypatch.setattr(nats.nkey, "parse_creds", lambda value: ("jwt", "key") if value == "old-creds" else None)
+    monkeypatch.setattr(
+        nats.nkey,
+        "claims",
+        lambda value: {"nats": {"pub": {"allow": ["$JS.API.CONSUMER.INFO.>"]}}} if value == "jwt" else None,
+    )
+    message = SimpleNamespace(
+        data=event().encode(), metadata=SimpleNamespace(num_delivered=4), headers=None, term=mock.AsyncMock()
+    )
+    js = SimpleNamespace(
+        _nc=SimpleNamespace(max_payload=1048576),
+        stream_info=mock.AsyncMock(side_effect=AssertionError("metadata is forbidden")),
+        publish=mock.AsyncMock(return_value=SimpleNamespace(duplicate=False)),
+    )
+    subscription = SimpleNamespace(fetch=mock.AsyncMock(return_value=[message]))
+    loop = nats._Loop()
+    try:
+        consumer = nats.NatsConsumer(
+            loop, subscription, js, QueuePolicy(max_deliver=3), "queue.work", credentials="old-creds"
+        )
+        assert consumer.fetch(1, 100) == []
+        js.stream_info.assert_not_awaited()
+        assert js.publish.await_args.kwargs["stream"] == "AGENTIHOOKS_DEAD"
+        message.term.assert_awaited_once_with()
     finally:
         loop.close()
 

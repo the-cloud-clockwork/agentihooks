@@ -17,7 +17,7 @@ from .config import BusConfig, QueuePolicy
 from .dead import DEAD_STREAM, DEAD_SUBJECT, dead_letter
 from .envelope import Envelope
 from .nats_legacy import legacy_filters, legacy_target, provision_events
-from .nats_names import existing_consumer, existing_stream, root_stream
+from .nats_names import existing_consumer, existing_stream, queue_binding, root_stream
 from .resource_names import legacy_queue_stream, legacy_stream_name
 from .resource_names import queue_stream as resource_queue_stream
 from .scope import RoutedLog, queue_lane, require_owner
@@ -150,6 +150,7 @@ class NatsConsumer:
         policy: QueuePolicy,
         identity: str,
         swarm: str | None = None,
+        credentials: str | None = None,
     ):
         self._loop = loop
         self._subscription = subscription
@@ -157,6 +158,7 @@ class NatsConsumer:
         self._policy = policy
         self._identity = identity
         self._swarm = swarm
+        self._credentials = credentials
 
     def fetch(self, batch: int, timeout_ms: int) -> list[NatsDelivery]:
         return [NatsDelivery(self._loop, msg) for msg in self._loop.run(self._fetch(batch, timeout_ms))]
@@ -170,7 +172,9 @@ class NatsConsumer:
         for msg in messages:
             if _attempt(msg) > self._policy.max_deliver:
                 event = Envelope.decode(msg.data)
-                await _publish_dead(self._js, event, self._identity, self._policy.max_deliver, self._swarm)
+                await _publish_dead(
+                    self._js, event, self._identity, self._policy.max_deliver, self._swarm, self._credentials
+                )
                 await msg.term()
             else:
                 deliveries.append(msg)
@@ -183,12 +187,17 @@ async def _publish(js, subject: str, stream: str, event: Envelope) -> bool:
 
 
 async def _publish_dead(
-    js: JetStreamContext, event: Envelope, identity: str, attempts: int, swarm: str | None = None
+    js: JetStreamContext,
+    event: Envelope,
+    identity: str,
+    attempts: int,
+    swarm: str | None = None,
+    credentials: str | None = None,
 ) -> None:
     letter = dead_letter(event, identity, attempts)
     desired = stream_name(swarm, "DEAD") if swarm is not None else DEAD_STREAM
     legacy = legacy_stream_name(swarm, "DEAD") if swarm is not None else "AGENTIHOOKS_DEAD"
-    stream = await existing_stream(js, desired, legacy)
+    stream = await root_stream(js, desired, legacy, credentials)
     target = event_subject(swarm, "dead", letter.id) if swarm is not None else f"dead.{event.swarm}.{letter.id}"
     try:
         await nats_payload.publish(
@@ -216,6 +225,7 @@ class NatsEventLog:
         credentials: str | None = None,
     ):
         self._loop, self._js, self._policy = loop, js, policy
+        self._credentials = credentials
         self._stream, self._provision, self._swarm = stream, provision, swarm
         self._permissions = (
             nkey.claims(nkey.parse_creds(credentials)[0])["nats"].get("pub", {}) if credentials is not None else {}
@@ -243,6 +253,7 @@ class NatsEventLog:
             policy,
             f"events.{durable}",
             self._swarm,
+            self._credentials,
         )
 
 
@@ -298,7 +309,12 @@ class NatsWorkQueue:
         self.policy, self._loop, self._js, self._swarm = policy, loop, js, swarm
         names = queue_names(name, swarm)
         legacy = legacy_queue_stream(name) if swarm is None else legacy_stream_name(swarm, f"QUEUE_{names.durable}")
-        selected = loop.run(existing_stream(js, names.stream, legacy))
+        if not config.provision and swarm is None:
+            selected = loop.run(
+                queue_binding(js, names.stream, legacy, names.durable, legacy.removeprefix("AGENTIHOOKS_QUEUE_"))
+            )
+        else:
+            selected = loop.run(existing_stream(js, names.stream, legacy))
         self._stream, self._subject, self._filter = selected, names.subject, names.filter
         legacy_durable = legacy.removeprefix("AGENTIHOOKS_QUEUE_") if swarm is None else names.durable
         names = QueueNames(selected, names.subject, names.filter, names.durable)
@@ -313,6 +329,7 @@ class NatsWorkQueue:
             policy,
             f"queue.{name}",
             swarm,
+            config.credentials,
         )
 
     def offer(self, event: Envelope) -> bool:
@@ -419,7 +436,9 @@ class NatsBus:
         self._legacy_events = NatsEventLog(
             self._loop, self._js, config.queue, event_stream, config.provision, credentials=config.credentials
         )
-        self._legacy_dead = NatsEventLog(self._loop, self._js, config.queue, dead_stream, config.provision)
+        self._legacy_dead = NatsEventLog(
+            self._loop, self._js, config.queue, dead_stream, config.provision, credentials=config.credentials
+        )
         self.events = (
             RoutedLog(lambda swarm: self.for_swarm(swarm).events, lambda: self._logs("events"), config.queue)
             if config.scoped

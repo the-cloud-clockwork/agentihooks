@@ -89,3 +89,23 @@ def test_root_selection_without_credentials_discovers_existing_streams():
     js = SimpleNamespace(stream_info=AsyncMock())
     assert asyncio.run(nats_names.root_stream(js, "new", "old", None)) == "old"
     js.stream_info.assert_awaited_once_with("old")
+
+
+@pytest.mark.parametrize(
+    ("results", "expected"),
+    [([object()], "old"), ([NotFoundError(), object()], "new"), ([NotFoundError(), NotFoundError()], "new")],
+)
+def test_queue_binding_uses_permitted_consumer_reads(results, expected):
+    js = SimpleNamespace(consumer_info=AsyncMock(side_effect=results))
+    assert asyncio.run(nats_names.queue_binding(js, "new", "old", "new-reader", "old_reader")) == expected
+    assert js.consumer_info.await_args_list == [
+        call("old", "old_reader"),
+        *([call("new", "new-reader")] if len(results) == 2 else []),
+    ]
+
+
+def test_queue_binding_does_not_hide_permission_failures():
+    js = SimpleNamespace(consumer_info=AsyncMock(side_effect=PermissionError("denied")))
+    with pytest.raises(PermissionError, match="denied"):
+        asyncio.run(nats_names.queue_binding(js, "new", "old", "reader", "reader"))
+    js.consumer_info.assert_awaited_once_with("old", "reader")

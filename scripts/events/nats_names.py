@@ -39,3 +39,13 @@ async def existing_consumer(js, stream: str, desired: str, legacy: str) -> str:
             continue
         return name
     return desired
+
+
+async def queue_binding(js, desired: str, legacy: str, durable: str, legacy_durable: str) -> str:
+    for stream, consumer in ((legacy, legacy_durable), (desired, durable)):
+        try:
+            await js.consumer_info(stream, consumer)
+        except NotFoundError:
+            continue
+        return stream
+    return desired
