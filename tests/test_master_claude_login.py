@@ -1230,7 +1230,7 @@ def test_browser_renewal_keeps_the_slot_epoch_report_and_audit(ah, rendered, tmp
     monkeypatch.setattr(chain, "authorize", browser)
     assert login.prepare_launch(env, tmp_path) == (target, "masteratexample_com")
     assert checks == [(str(target), "masteratexample_com")] * 2
-    assert from_env.call_args_list == [call(env), call(env)]
+    assert from_env.call_args_list == [call(env)] * 3
     assert checked_account.call_args_list == [call(target, env, number=2)] * 2
     assert keep.call_args_list == [call(bao, target, 1, 2)] * 2
     assert rehome.call_args_list == [call(report, target, shared=False), call(report, target)]
