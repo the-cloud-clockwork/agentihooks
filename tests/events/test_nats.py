@@ -519,6 +519,7 @@ def test_a_dead_letter_publish_refusal_requires_the_same_retained_event(stored_i
     stored = letter if stored_id == "expected" else event("other")
     refusal = APIError(code=400, err_code=10071, description="subject sequence differs")
     js = SimpleNamespace(
+        _nc=SimpleNamespace(max_payload=1048576),
         publish=mock.AsyncMock(side_effect=refusal),
         get_last_msg=mock.AsyncMock(return_value=SimpleNamespace(data=stored.encode())),
     )
