@@ -11,6 +11,7 @@ import fcntl
 import hashlib
 import json
 import os
+import subprocess
 from collections import Counter
 from collections.abc import Callable
 from pathlib import Path
@@ -56,17 +57,17 @@ def run(endpoint: str, now: float, fetch: Callable[[], dict]) -> dict:
 def _log_key(endpoint):
     if source() in TOKENS:
         return _key(endpoint)
-    config = Path(
-        os.environ.get("GH_CONFIG_DIR") or Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config") / "gh"
-    )
-    marks = []
-    for name in ("hosts.yml", "config.yml"):
-        try:
-            stat = (config / name).stat()
-            marks.append((stat.st_ino, stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns))
-        except FileNotFoundError:
-            marks.append(None)
-    return _key(f"{endpoint} {marks}")
+    host = os.environ.get("GH_HOST") or "github.com"
+    account = subprocess.run(
+        ["gh", "config", "get", "user", "--host", host],
+        capture_output=True,
+        text=True,
+        check=True,
+        timeout=5,
+    ).stdout.strip()
+    if not account:
+        raise ValueError("GitHub account identity is unavailable")
+    return _key(f"{host} {account} {endpoint}")
 
 
 def job_log(endpoint: str, fetch: Callable[[], str]) -> str:
