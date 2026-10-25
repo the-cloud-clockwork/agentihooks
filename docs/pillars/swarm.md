@@ -2817,6 +2817,13 @@ was read), the held spawn count and its reason. Count minutes with swap above
 ninety percent while room was above zero from these rows; the `reason` column
 and the tick's `holding spawns: host memory room N` line name the hold.
 
+The same pass writes the ledger probe's latest pass to `ledger_probes`
+(`read_s`, `write_s`, `read_failure`, `write_failure`, `wall_s`; a failure
+reads `timed out`, `gave no answer` or `answered with a server error`) and one
+`hive_samples` row per registered hive (`hive`, `name`, `live`,
+`heartbeat_age_s`, -1 when the hive never beat). A hive recovery is a
+`hive_samples` row with `live` 1 after one with `live` 0 for the same hive.
+
 ### Troubleshooting
 
 | Symptom | Cause and action |

@@ -341,7 +341,10 @@ def _claim(
     held = _read(folder / OWNER)
     holders = {owner: found for owner, found in (held.get("holders") or {}).items() if alive(found)}
     others = sorted(owner for owner, found in holders.items() if found != pid)
-    blocker = next((owner for owner in (name, held.get("alone"), *(others if alone else ())) if owner in others), None)
+    exclusive = held.get("alone", "")
+    if not alone and exclusive.startswith("master@"):
+        exclusive = ""
+    blocker = next((owner for owner in (name, exclusive, *(others if alone else ())) if owner in others), None)
     if blocker:
         raise LoginRefused(HELD.format(owner=blocker))
     epoch = max(int(held.get("epoch", 0)), floor) + 1
@@ -392,8 +395,9 @@ def checked(target: Path, environ: Mapping[str, str], found: str) -> bool:
     try:
         native_login.check(child(environ, target), found)
     except native_login.LoginError:
-        if not recover(target, environ):
-            return False
+        with _locked(target.parent) as folder:
+            if len(holders(folder)) < 2 and not recover(target, environ):
+                return False
         try:
             native_login.check(child(environ, target), found)
         except native_login.LoginError:
@@ -471,7 +475,7 @@ def _take(name: str, bao: openbao_kv.OpenBao | None) -> tuple[int, int, dict[str
     for number in order:
         with _locked(root(number)) as folder:
             try:
-                epoch = _claim(folder, name, os.getpid(), _alive, int(offered[number].get("epoch", 0)), True)[0]
+                epoch = _claim(folder, name, os.getpid(), _alive, int(offered[number].get("epoch", 0)))[0]
             except LoginRefused:
                 held.append(f"{named[number] or number} by {', '.join(sorted(holders(folder)))}")
                 continue
@@ -485,12 +489,17 @@ def prepare(environ: Mapping[str, str], cwd: Path) -> tuple[Path, str]:
     if refused:
         raise LoginRefused(refused)
     bao = openbao_kv.from_env(environ)
-    number, epoch, copy = _take(environ["AGENTIHOOKS_AGENT_NAME"], bao)
+    name = environ["AGENTIHOOKS_AGENT_NAME"]
+    number, epoch, copy = _take(name, bao)
     with _locked(root(number)) as folder:
-        target = _rebuild(folder, rendered)
-    if environ.get(binding.REPORT):
-        binding.rehome(Path(environ[binding.REPORT]), target, shared=False)
-    restore(copy, target)
+        target = home(number)
+        shared = any(owner != name for owner in holders(folder)) and (target / binding.FILE).is_file()
+        if not shared:
+            target = _rebuild(folder, rendered)
+        if environ.get(binding.REPORT):
+            binding.rehome(Path(environ[binding.REPORT]), target, shared=shared)
+        if not shared:
+            restore(copy, target)
     found = account(target, environ, number=number)
     keep(bao, target, epoch, number)
     return target, found
