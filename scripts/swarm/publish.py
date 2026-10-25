@@ -184,6 +184,8 @@ def prepare(slug: str, agent: AgentRecord, repo: str, ledger: LedgerClient) -> d
         delivery = target_branch(root, scoped, checkout["branch"], task)
         if delivery != checkout["branch"]:
             git(root, "branch", f"--set-upstream-to=origin/{delivery}")
+            if publish_queue.open_head(checkout["branch_repo"], task.get("pr_url", "")) == delivery:
+                checkout["branch"] = delivery
         fields.append({**checkout, "repository": str(repository)})
     update = branch_record(fields[-1], Path(fields[-1]["repository"]), task)
     update["repository_branches"].update({entry["repository"]: entry["branch"] for entry in fields})
@@ -277,6 +279,9 @@ def descends(root: Path, branch: str) -> bool:
 def delivery_branch(root: Path, task: dict, branch: str) -> str:
     recorded = task.get("branch")
     if recorded and branch != recorded:
+        remote = git(root, "remote", "get-url", "origin")
+        if publish_queue.open_head(remote, task.get("pr_url", "")) == recorded and descends(root, recorded):
+            return recorded
         raise SwarmError(f"current worktree {root} branch {branch} differs from registered branch {recorded}")
     return branch
 

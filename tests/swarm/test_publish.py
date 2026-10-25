@@ -1327,14 +1327,7 @@ def test_prepare_and_publish_keep_the_open_pull_requests_delivery_branch(publica
         repository_branches={str(p.repo): "predecessor"},
         pr_url="https://github.com/example/repo/pull/7",
     )
-    original = publish.execute
-
-    def execute(command, root):
-        if command[0] == "gh":
-            return '{"state":"OPEN","baseRefName":"dev","headRefName":"predecessor"}'
-        return original(command, root)
-
-    monkeypatch.setattr(publish, "execute", execute)
+    monkeypatch.setattr(publish.publish_queue, "open_head", lambda remote, url: "predecessor")
     result = publish.prepare("swarm", p.agent, str(p.repo), p.ledger)
     assert result["worktree"] == str(p.root)
     assert git(p.root, "branch", "--show-current") == "engineer-test"
