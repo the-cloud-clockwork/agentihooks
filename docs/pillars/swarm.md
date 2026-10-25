@@ -2521,6 +2521,10 @@ agentihooks doctor rig-grade-swarm task red-dev-workflow/hive-worker.yml --fix c
 Use `false-positive` or `resolved` instead when the workflow already has an owning task, or when a later green run
 broke the streak.
 
+The task command derives the pair's ids from the finding. A finding that returns after its earlier pair is done
+gets the next free ids, for example `fx-daacd9d6-2-cause`, and the new troubleshoot task names the earlier pair.
+While any task of the earlier pair is open the command refuses with `already has tasks ... still open`.
+
 Read the same runs by hand from the watched repository's checkout:
 
 ```bash
