@@ -355,7 +355,7 @@ python -m tests.queue_shards combine --from-output queue-plan.txt --root . --inp
 
 | Setting | Value | Where it comes from |
 |---|---|---|
-| `MAX_SHARDS` | 40 | The 48 `maxRunners` of the antoncore `anton-oss-queue` scale set, less the seven other queue tier jobs of a merge group run, rounded down |
+| `MAX_SHARDS` | 40 | The 48 `maxRunners` of the antoncore `anton-oss-queue` scale set, less `split` and `test-count`, the other merge group jobs on that pool, with six runners spare for an overlapping group's planning jobs |
 | `STEP_SECONDS` | 720 | The `timeout-minutes` of the `unit` job's `Run tests` step, 12 minutes, read from `.github/workflows/test.yml` at import; see [Step timeout limits](#step-timeout-limits) |
 | `TARGET_SECONDS` | 195 | The slowest shard the planner sizes for: 15 s under the 210 s acceptance, because merge group runs [40119907157](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/40119907157) and [40119162144](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/40119162144) after pull request [6707](https://github.com/the-cloud-clockwork/agentihooks/pull/6707) predicted 240 s and 264 s against a slowest `Run tests` step of 239 s and 242 s |
 | Half step timeout | 360 s | The most a plan may predict before `combine` refuses it; also the sizing target when lower than `TARGET_SECONDS` |
@@ -448,7 +448,7 @@ That night's groups still ran Python 3.11 and 3.12 legs inside the same 30 shard
 
 A group's other shards in flight at its unit start is the number of other groups' unit shards whose `created_at` is before that group's first shard `created_at` and whose `completed_at` is after it. A group whose shards wait over a minute with that number over 10 is sharing the pool with another group; a wait with that number under 10 does not come from another merge group.
 
-The queue pool changed after the finding: antoncore pull request [1036](https://github.com/the-cloud-clockwork/antoncore/pull/1036), merged 21 October, sets `anton-oss-queue` to `minRunners` 12 and `maxRunners` 18 in `values-oss-queue.yaml`; the scale set has since moved to `maxRunners` 48 (antoncore pull request [1245](https://github.com/the-cloud-clockwork/antoncore/pull/1245)), and `MAX_SHARDS` 40 leaves room for the seven other queue tier jobs. Compare the two before reading a shard wait against the numbers above.
+The queue pool changed after the finding: antoncore pull request [1036](https://github.com/the-cloud-clockwork/antoncore/pull/1036), merged 21 October, sets `anton-oss-queue` to `minRunners` 12 and `maxRunners` 18 in `values-oss-queue.yaml`; the scale set has since moved to `maxRunners` 48 (antoncore pull request [1245](https://github.com/the-cloud-clockwork/antoncore/pull/1245)), and `MAX_SHARDS` 40 leaves room for `split` and `test-count`, the other merge group jobs on that pool. Compare the two before reading a shard wait against the numbers above.
 
 ### Troubleshooting queue shard sizing
 
