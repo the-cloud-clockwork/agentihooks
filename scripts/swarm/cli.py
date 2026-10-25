@@ -1595,7 +1595,7 @@ def publication_command(store: RedisStore, args: argparse.Namespace) -> dict:
     ledger = LedgerClient()
     task = {}
     try:
-        task = publish.task_row(args.slug, agent, ledger)
+        task = next((row for row in ledger.tasks(args.slug) if row.get("id") == agent.task), {})
         if args.command == "prepare":
             return publish.prepare(args.slug, agent, repo, ledger)
         return publish.publish(args.slug, agent, repo, ledger, args.message, args.files)

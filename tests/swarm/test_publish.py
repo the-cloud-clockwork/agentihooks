@@ -1162,7 +1162,8 @@ def test_cli_journals_each_publication_refusal_with_task_branch_and_reason(
     def refuse(*args):
         raise publish.SwarmError("recorded branch is missing")
 
-    monkeypatch.setattr(publish, command, refuse)
+    if recording != "missing":
+        monkeypatch.setattr(publish, command, refuse)
     args = SimpleNamespace(slug="swarm", command=command, message="Continue", files=["chosen.txt"])
     with pytest.raises(publish.SwarmError, match=reason):
         getattr(cli, f"cmd_{command}")(None, args)
