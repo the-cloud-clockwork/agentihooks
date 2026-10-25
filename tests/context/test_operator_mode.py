@@ -692,9 +692,10 @@ def test_the_reply_limit_reads_the_environment_and_skips_markers_and_repeat_stop
 def test_a_failing_reply_check_is_logged_and_never_raises_into_the_stop_hook(monkeypatch):
     logged = []
     monkeypatch.setattr(operator_mode, "reply_refusal", lambda *a: (_ for _ in ()).throw(OSError("disk full")))
-    monkeypatch.setattr(hook_manager, "log", lambda *a: logged.append(a))
-    assert hook_manager._operator_reply({"session_id": "s1"}) == ""
-    assert logged == [("operator reply check failed", {"error": "disk full"})]
+    monkeypatch.setattr(hook_manager, "log", lambda *a, **k: logged.append(a))
+    monkeypatch.setattr(hook_manager, "_swarm_heartbeat", lambda *a, **k: None)
+    hook_manager.on_stop({"session_id": "s1", "last_assistant_message": LONG, "hook_event_name": "Stop"})
+    assert ("conditions stop failed", {"error": "disk full"}) in logged
 
 
 def test_a_failing_reminder_is_logged_and_never_raises_into_the_hook(monkeypatch):

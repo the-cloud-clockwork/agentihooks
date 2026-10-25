@@ -1269,16 +1269,6 @@ def _operator_reminder(payload: dict) -> None:
         log("operator reminder failed", {"error": str(e)})
 
 
-def _operator_reply(payload: dict) -> str:
-    try:
-        from hooks.context import operator_mode
-
-        return operator_mode.reply_refusal(payload)
-    except Exception as e:
-        log("operator reply check failed", {"error": str(e)})
-        return ""
-
-
 def _arm_gate_lifts(payload: dict) -> None:
     try:
         from scripts.gates.base import Who
@@ -2307,16 +2297,13 @@ def on_stop(payload: dict) -> None:
     """Handle Stop event."""
     _stop_block = None
     try:
-        from hooks.context import conditions
+        from hooks.context import conditions, operator_mode
 
-        _stop_block = conditions.stop_block(payload)
+        _stop_block = conditions.stop_block(payload) or operator_mode.reply_refusal(payload) or None
     except Exception as e:
         log("conditions stop failed", {"error": str(e)})
     if _stop_block is not None:
         raise BlockAction(_stop_block)
-    _reply_block = _operator_reply(payload)
-    if _reply_block:
-        raise BlockAction(_reply_block)
 
     session_id = payload.get("session_id", "")
     transcript_path = payload.get("transcript_path", "")
