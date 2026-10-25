@@ -43,6 +43,48 @@ def test_launch_storage_does_not_grow_with_canonical_rollouts(store, server, roo
     assert (sessions / "rollout-new.jsonl").read_text() == "new transcript"
 
 
+@pytest.mark.parametrize("linked_auth", [False, True])
+def test_launch_stages_only_startup_files_and_auth_references(store, server, root, tmp_path, linked_auth):
+    profile = Path(server.codex_home)
+    for name in ("config.toml", "AGENTS.md", "AGENTS.override.md"):
+        (profile / name).write_text(name)
+    for name in ("rules", "skills"):
+        (profile / name).mkdir()
+        (profile / name / "nested").mkdir()
+        (profile / name / "nested" / "instructions.md").write_text(name)
+    auth = tmp_path / "login-reference"
+    auth.touch()
+    if linked_auth:
+        (profile / "auth.json").symlink_to(auth)
+    else:
+        (profile / "auth.json").touch()
+    unrelated = profile / "future-cache"
+    unrelated.mkdir()
+    (unrelated / "large").write_bytes(b"x" * 1024 * 1024)
+    (profile / "unknown-state").write_bytes(b"y" * 1024 * 1024)
+    (profile / "unknown-link").symlink_to(unrelated, target_is_directory=True)
+    started = supervisor.launch(store, launch_spec(store, server, tmp_path), deps(server, Clock(), root))
+    home = Path(server.spawns[0]["env"]["CODEX_HOME"])
+
+    assert not (home / "future-cache").exists()
+    assert not (home / "unknown-state").exists()
+    assert not (home / "unknown-link").exists()
+    for name in ("config.toml", "AGENTS.md", "AGENTS.override.md"):
+        assert (home / name).read_text() == name
+    for name in ("rules", "skills"):
+        assert (home / name / "nested" / "instructions.md").read_text() == name
+    assert (home / "auth.json").is_symlink()
+    assert (home / "auth.json").samefile(profile / "auth.json")
+    assert (home / "sessions").is_symlink()
+    assert sum(p.stat().st_size for p in home.rglob("*") if p.is_file()) < 4096
+    supervisor.stop(started.process)
+    supervisor.finish(store, SLUG, started, 5000)
+
+    assert not home.parent.exists()
+    assert (profile / "auth.json").exists()
+    assert (unrelated / "large").stat().st_size == 1024 * 1024
+
+
 def test_launch_ignores_a_full_user_runtime_disk(store, server, root, tmp_path, monkeypatch):
     full = root.parent / "full-runtime"
     home = root.parent / "user"
