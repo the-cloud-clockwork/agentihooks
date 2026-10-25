@@ -557,8 +557,9 @@ class SQLiteLedgerRepository:
                 if 0 < since <= entry.generation
                 else None
             )
-        if paths is not None:
-            return entry.generation, changes(entry.state, paths)
+        text = None if paths is None else changes(entry.state, paths)
+        if text is not None:
+            return entry.generation, text
         if view not in entry.views:
             entry.views[view] = view(entry.state)
             heap.release()

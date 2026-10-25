@@ -60,6 +60,24 @@ def test_the_current_generation_answers_no_changes(live):
     }
 
 
+def test_a_changed_root_answers_the_full_export(live, monkeypatch):
+    from scripts.swarm_ledger.repository import refresh
+
+    current = full(live)
+    monkeypatch.setattr(refresh, "changed_paths", lambda *args: {"[]"})
+    assert request(live, "POST", "export", {"since": current["generation"]}) == (200, current)
+
+
+def test_changes_adopt_only_the_ledger_they_read(live, monkeypatch):
+    from scripts.swarm_ledger.repository import legacy
+
+    adopted, adopt = [], legacy.adopt
+    monkeypatch.setattr(legacy, "adopt", lambda repository, slug=None: adopted.append(slug) or adopt(repository, slug))
+    assert request(live, "POST", "export", {"since": 1})[0] == 200
+    assert SLUG in adopted
+    assert None not in adopted
+
+
 def test_since_must_be_a_lone_positive_integer(live):
     for body in ({"since": "1"}, {"since": -1}, {"since": 1, "extra": True}):
         status, data, _ = send(

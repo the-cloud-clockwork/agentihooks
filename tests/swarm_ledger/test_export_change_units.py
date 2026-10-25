@@ -75,6 +75,10 @@ def test_a_changed_meta_hides_seeds_and_receipts():
     assert json.loads(export_changes(NEW, {'["_meta"]'}))["changes"]["set"] == [[["_meta"], VIEW["_meta"]]]
 
 
+def test_a_changed_root_has_no_item_changes():
+    assert export_changes(NEW, {"[]", '["overview"]'}) is None
+
+
 def test_changes_rebuild_the_new_export_from_the_old():
     old = json.loads(json.dumps(OLD))
     assert api.patched(old, json.loads(export_changes(NEW, PATHS))["changes"]) == VIEW
