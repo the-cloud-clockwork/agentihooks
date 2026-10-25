@@ -86,6 +86,11 @@ def test_inputs(
                     for node in nodes
                     if isinstance(node, ast.Constant) and isinstance(node.value, str) and node.value
                 }
+                if any(
+                    isinstance(node, ast.Call) and loader_name(node.func) in ("iter_modules", "walk_packages")
+                    for node in nodes
+                ):
+                    literals.update(name.replace(".", "/") for name in names)
                 dependencies.update(resource for value in literals for resource in resources.get(value, ()))
             if unresolved:
                 dependencies.update(dynamic_modules)
@@ -227,6 +232,9 @@ def collect_cached_stats(
             parts = Path(path).parts
             for index in range(len(parts)):
                 resources.setdefault("/".join(parts[index:]), set()).add(path)
+            for parent in Path(path).parents:
+                if str(parent) != ".":
+                    resources.setdefault(str(parent), set()).add(path)
     inputs = StatsInputs(root, modules, resources, changes)
     stored = StoredStats(root, folder, context, changes)
     compatible = {
