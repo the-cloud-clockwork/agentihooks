@@ -36,13 +36,13 @@ Both seeds of case A give the same shape; seed 7:
 | `ingest_ack_latency_seconds` lines written during overload | 4 / 6 / 6 (n 108) |
 | Peak spool backlog, peak archive lag | 65 batches, 8 s |
 | Peak embedding backlog, peak backlog age | 66 chunks, 5 s |
-| Marker visible to search after it was written, p95 | 1 s (n 48, none missed) |
+| Marker found by exact phrase after it was written, p50 / p95 / max | 1 / 7 / 7 s (n 48, none missed) |
 | Results outside the caller's projects | 0 of 1400 shared term hits |
 | Backlogs empty at tick | 22 |
 | Chunk texts embedded twice | 0 |
 
 `search_latency_seconds` is asserted by `test_search_stays_within_its_wall_clock_budget_under_the_load`: p95 below
-0.5 s on the CI runner over the 92 searches of one run. The 0.5 s budget is an experiment threshold chosen for this
+0.5 s on the CI runner over the 128 searches of one run. The 0.5 s budget is an experiment threshold chosen for this
 fixture, not a service level from the spec. Print the measured values for a seed with
 `python -m tests.performance.session_memory.load --seed 7`.
 

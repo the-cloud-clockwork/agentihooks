@@ -13,7 +13,7 @@
       "needle_hits": 1400,
       "out_of_scope_results": 0,
       "restricted_searches_refused": 11,
-      "searches_answered": 81,
+      "searches_answered": 117,
       "spool_full_refusals": 0
     },
     "drained_at_tick": 22,
@@ -35,9 +35,9 @@
     "marker_visibility_lag_seconds": {
       "clock": "fake",
       "count": 48,
-      "max": 1.0,
+      "max": 7.0,
       "p50": 1.0,
-      "p95": 1.0
+      "p95": 7.0
     },
     "markers_never_visible": 0,
     "peak": {
@@ -78,7 +78,7 @@
     },
     "search_latency_seconds": {
       "clock": "wall, asserted by the wall clock test and printed by the measure command, not recorded here",
-      "searches": 92
+      "searches": 128
     },
     "seed": 7,
     "series": [
