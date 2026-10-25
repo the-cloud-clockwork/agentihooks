@@ -233,3 +233,34 @@ def test_a_failing_stats_bucket_reports_exit_one_and_its_error_while_a_thread_ru
     output = capfd.readouterr()
     assert "failed to collect stats. runner returned [1]" in output.out
     assert "RuntimeError: stats broke" in output.err
+
+
+def test_a_stats_bucket_passes_its_arguments_and_exits_zero_or_one_in_process(monkeypatch, capfd):
+    import pytest
+
+    from scripts.ci_mutation import selection
+
+    arguments = (object(), object(), ["tests/test_sample.py"], Path("stats-0.json"), "base")
+    calls = []
+
+    class Exited(Exception):
+        pass
+
+    def exit_now(code):
+        raise Exited(code)
+
+    def collect(*given):
+        calls.append(given)
+        if len(calls) == 2:
+            raise RuntimeError("stats broke")
+
+    monkeypatch.setattr(selection, "collect_shard_stats", collect)
+    monkeypatch.setattr(selection.os, "_exit", exit_now)
+    codes = []
+    for _ in range(2):
+        with pytest.raises(Exited) as exited:
+            selection.collect_and_exit(*arguments)
+        codes.append(exited.value.args[0])
+    assert codes == [0, 1]
+    assert calls == [arguments, arguments]
+    assert "RuntimeError: stats broke" in capfd.readouterr().err
