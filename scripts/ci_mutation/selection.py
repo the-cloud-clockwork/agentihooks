@@ -146,12 +146,31 @@ def collect_shard_stats(runner, test_runner, tests: list[str], output: Path, bas
         "not wall_clock",
         f"--basetemp={basetemp}",
     ]
+    measured = bool(os.environ.get("MUTATION_STATS_CACHE"))
+    coverage_file = output.with_suffix(".coverage")
+    if measured:
+        os.environ["COVERAGE_FILE"] = str(coverage_file.resolve())
+        test_runner._pytest_add_cli_args.extend(
+            ["--cov=.", "--cov-context=test", "--cov-report=", "--cov-config=/dev/null"]
+        )
     start = process_time()
     status = test_runner.run_stats(tests=tests)
+    dependencies = {}
+    if measured:
+        from subprocess import check_output
+
+        from scripts.ci_mutation.stats_dependencies import measured_dependencies
+
+        root = Path(os.environ["MUTATION_STATS_ROOT"])
+        tracked = set(check_output(["git", "ls-files", "-z"], cwd=root, text=True).split("\0"))
+        dependencies["dependencies"] = measured_dependencies(
+            coverage_file, Path.cwd() / "mutants", root, list(runner.mutmut.duration_by_test), tracked
+        )
     tests_by_function = {name: sorted(names) for name, names in runner.mutmut.tests_by_mangled_function_name.items()}
     output.write_text(
         json.dumps(
             {
+                **dependencies,
                 "status": status,
                 "cpu": process_time() - start,
                 "tests": tests_by_function,

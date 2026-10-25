@@ -34,7 +34,7 @@ def seed(root: Path, folder: Path, base: str) -> int:
                         io.BytesIO(api(f"actions/artifacts/{artifact['id']}/zip", binary=True))
                     ) as zipped:
                         for name in zipped.namelist():
-                            if re.fullmatch(r"cache/[0-9a-f]{64}\.json", name):
+                            if re.fullmatch(r"cache/[0-9a-f]{64}\.(?:json|index)", name):
                                 (folder / Path(name).name).write_bytes(zipped.read(name))
                                 count += 1
                 if count:

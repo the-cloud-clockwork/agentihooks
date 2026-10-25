@@ -762,6 +762,33 @@ def test_real_fixture_imports_do_not_invalidate_measured_unrelated_test_stats(tm
     assert calls == [files, files]
 
 
+@pytest.mark.parametrize("changed", ["module", "scope", "deleted", "stale"])
+def test_stored_statistics_validate_record_inputs_and_mutation_scope(tmp_path, changed):
+    import hashlib
+
+    from scripts.ci_mutation.stats_dependencies import StoredStats
+
+    root = tmp_path / "repo"
+    folder = tmp_path / "cache"
+    folder.mkdir()
+    _repository(root, {"module.py": "value = 1\n"})
+    inputs = {"module.py": hashlib.sha256((root / "module.py").read_bytes()).hexdigest()}
+    context = {"inventory": ["module.py"]}
+    cache = StoredStats(root, folder, context, {"module.py": [1]})
+    result = {"status": 0, "tests": {}, "durations": {"test": 1}, "cpu": 1}
+    cache.save("tests/test_module.py", result, inputs, True)
+    assert cache.load("tests/test_module.py") == {**result, "reused": True}
+    if changed == "module":
+        (root / "module.py").write_text("value = 2\n")
+    elif changed == "scope":
+        cache.changes = {"module.py": [1, 2]}
+    elif changed == "deleted":
+        (root / "module.py").unlink()
+    else:
+        next(folder.glob("*.json")).write_text('{"key":"stale","status":0,"inputs":{},"scope":{},"measured":true}')
+    assert cache.load("tests/test_module.py") is None
+
+
 def test_file_stats_pass_sorted_changed_lines_and_runner_options_to_the_cache(tmp_path, monkeypatch):
     import json
     from types import SimpleNamespace
