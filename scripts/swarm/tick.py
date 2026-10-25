@@ -44,7 +44,6 @@ from scripts.swarm import (
     freeze,
     grouping,
     input_wait,
-    lane_split,
     launch_check,
     ledger_events,
     ledger_probe,
@@ -257,7 +256,6 @@ def tick(slug, store, ledger, runtime, now_ms):
             actions += skip_refused(master_scale.run, slug, config, store, runtime, doc, now_ms)
             actions += skip_refused(master_seat_alarm.run, slug, store, ledger, runtime, doc)
             actions += skip_refused(dispatcher.rank_pass, slug, config, store, ledger, doc, now_ms)
-            actions += skip_refused(lane_split.step, slug, config, store, doc, now_ms)
             actions += skip_refused(bottleneck_remedy.step, slug, store, ledger, doc, now_ms)
             if config.state == "running" and config.engine != EVENTS_ENGINE:
                 actions += skip_refused(_spawn, slug, config, store, ledger, runtime, rows, doc, now_ms)

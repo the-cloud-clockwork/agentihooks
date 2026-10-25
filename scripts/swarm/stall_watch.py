@@ -46,7 +46,7 @@ CASES = {
     "unclaimed": "ready and unclaimed while its lane is full",
 }
 REOPENED = "reopened the task for the next engineer with its handoff and branch"
-ALERTED = "alert only; the lane split owns the cause"
+ALERTED = "alert only; lane caps belong to the operator and the master"
 ALERT = (
     "Stall on swarm {slug}: task {task} ({title}) is {case} for {minutes} minutes. Pull request: {pr}. Owner: {owner}. "
     "Action: {action}. Answer by closing this item; still open in {wait} minutes, it goes to the operator."
