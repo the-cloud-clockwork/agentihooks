@@ -2883,6 +2883,22 @@ jobs:
           echo "::error::Chromium setup failed or exceeded its six minute timeout; mutation tests cannot run."
           exit 1
 
+      - name: Restore latest dev durations
+        if: needs.mutation-plan.outputs.forwarded != 'true'
+        uses: actions/cache/restore@v4
+        env:
+          SEGMENT_DOWNLOAD_TIMEOUT_MINS: "1"
+        with:
+          path: ~/dev-durations
+          key: durations-merged-${{ github.event.pull_request.base.sha || github.sha }}
+          restore-keys: durations-merged-
+
+      - name: Adopt latest dev durations
+        if: needs.mutation-plan.outputs.forwarded != 'true'
+        run: |
+          [[ -f ~/dev-durations/.test_durations ]] || { echo "Using committed durations"; exit 0; }
+          python -c 'import json, sys; from pathlib import Path; from tests.dev_durations import adopt; Path(".test_durations").write_text(json.dumps(adopt(Path(sys.argv[1]), "3.12"), indent=4, sort_keys=True) + "\n")' ~/dev-durations
+
       - name: Restore compatible test stats
         if: needs.mutation-plan.outputs.forwarded != 'true'
         uses: actions/cache/restore@v4
@@ -3016,6 +3032,22 @@ jobs:
         run: |
           echo "::error::Chromium setup failed or exceeded its six minute timeout; mutation tests cannot run."
           exit 1
+
+      - name: Restore latest dev durations
+        if: needs.mutation-plan.outputs.forwarded != 'true'
+        uses: actions/cache/restore@v4
+        env:
+          SEGMENT_DOWNLOAD_TIMEOUT_MINS: "1"
+        with:
+          path: ~/dev-durations
+          key: durations-merged-${{ github.event.pull_request.base.sha || github.sha }}
+          restore-keys: durations-merged-
+
+      - name: Adopt latest dev durations
+        if: needs.mutation-plan.outputs.forwarded != 'true'
+        run: |
+          [[ -f ~/dev-durations/.test_durations ]] || { echo "Using committed durations"; exit 0; }
+          python -c 'import json, sys; from pathlib import Path; from tests.dev_durations import adopt; Path(".test_durations").write_text(json.dumps(adopt(Path(sys.argv[1]), "3.12"), indent=4, sort_keys=True) + "\n")' ~/dev-durations
 
       - name: Download the shared mutation stats
         if: needs.mutation-plan.outputs.forwarded != 'true'
