@@ -234,6 +234,7 @@ def test_a_deferred_forced_launch_is_promoted_only_after_its_launch_budget(store
         tick("sw", store, ledger, runtime, at)
         assert tick_master.promoted(store, "sw") == ""
     assert tick_master.read(store, "sw")["forced_at"] == 1 + 3 * DOWN
+    assert tick_master.read(store, "sw")["started_at"] == 1 + DOWN
     assert len(runtime.masters) == 1
     actions = tick("sw", store, ledger, runtime, 1 + DOWN + 660_000)
     assert f"promoted {ENGINEER} to restore the master: {tick_master.NO_HOOK}" in actions

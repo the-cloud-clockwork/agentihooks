@@ -92,9 +92,7 @@ def run(slug, config, store, ledger, runtime, now_ms, launch) -> list[str]:
         _save(store, slug, {"since": now_ms})
         return actions
     if forcing:
-        state = {**state, "forced_at": now_ms}
-        if not _starting(store, slug):
-            state["failure"] = "; ".join(launched) or NO_LAUNCH
+        state = _forced(store, slug, state, now_ms, launched)
     elif _hookless(store, slug, state, now_ms):
         state["failure"] = NO_HOOK
     if state.get("failure"):
@@ -125,12 +123,19 @@ def _starting(store, slug):
 
 
 def _hookless(store, slug, state, now_ms):
-    """Timed from the launch's own start, because each forced launch moves forced_at while the master still starts."""
     leads = _masters(store, slug)
     if not leads:
         return False
-    started = master_start.read(store, slug).get("at", state.get("forced_at", now_ms))
+    started = state.get("started_at", state.get("forced_at", now_ms))
     return now_ms - started >= max(map(master_start.deadline_ms, leads))
+
+
+def _forced(store, slug, state, now_ms, launched):
+    """A forced launch still starting keeps its first start, because each later forced tick moves forced_at."""
+    if _starting(store, slug):
+        return {"started_at": now_ms, **state, "forced_at": now_ms}
+    state = {key: value for key, value in state.items() if key != "started_at"}
+    return {**state, "forced_at": now_ms, "failure": "; ".join(launched) or NO_LAUNCH}
 
 
 def _finish_dead(store, slug):
