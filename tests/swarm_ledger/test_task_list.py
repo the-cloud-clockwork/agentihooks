@@ -13,9 +13,9 @@ class Repository:
         return self.state["_meta"]["task_revision"]
 
     def read(self, slug: str, *keys: str) -> dict:
-        assert keys == ("tasks",)
+        assert keys == ("tasks", "_meta.task_revision", "_meta.rev")
         self.reads += 1
-        return {key: value for key, value in self.state.items() if key == "tasks"}
+        return {key: value for key, value in self.state.items() if key in ("tasks", "_meta")}
 
 
 def ledger(revision: int, *titles: str) -> dict:
@@ -88,6 +88,27 @@ def test_pages_kept_per_revision_are_capped(monkeypatch):
     assert list(task_list.HELD["capped"].pages) == [(None, 2)]
 
 
+def test_ledgers_held_are_capped_dropping_the_least_recent(monkeypatch):
+    from scripts.swarm_ledger.api import task_list
+
+    monkeypatch.setattr(task_list, "LEDGERS_KEPT", 2)
+    monkeypatch.setattr(task_list, "HELD", {})
+    repository = Repository(ledger(5, "Kept"))
+    for slug in ("first", "second", "first", "third"):
+        task_list.read(repository, slug, {"limit": 1})
+    assert list(task_list.HELD) == ["first", "third"]
+
+
+def test_rows_carry_the_revision_read_with_them_when_a_write_lands_between():
+    from scripts.swarm_ledger.api import task_list
+
+    repository = Repository(ledger(6, "Newer"))
+    repository.task_revision = lambda slug: 5
+    reply = task_list.read(repository, "raced", {"limit": 1})
+    assert reply["revision"] == f"{6:064x}"
+    assert reply["data"][0]["title"] == "Newer"
+
+
 def test_stored_task_revision_reads_its_own_row_and_falls_back_to_the_ledger_rev(tmp_path):
     from scripts.swarm_ledger.repository.sqlite import SQLiteLedgerRepository
 
@@ -95,5 +116,11 @@ def test_stored_task_revision_reads_its_own_row_and_falls_back_to_the_ledger_rev
     repository.import_document("rows", {"title": "Rows", "tasks": [], "_meta": {"rev": 3}})
     assert repository.task_revision("rows") == 3
     repository.import_document("rows", {"title": "Rows", "_meta": {"rev": 4, "task_revision": 9}}, replace=True)
+    assert repository.task_revision("rows") == 9
+    entry = repository.current("rows")
+    state = {**entry.mutable(), "title": "Renamed"}
+    state["_meta"]["rev"] = 5
+    with repository.connect() as connection, connection:
+        repository._write(connection, "rows", entry, state, [])
     assert repository.task_revision("rows") == 9
     assert repository.task_revision("absent") == 0

@@ -12,7 +12,6 @@ READERS = 100
 TASKS = 2000
 SLUG = "ledger"
 CURSOR = re.compile(r'"next_cursor": (?:"([^"]+)"|null)')
-PEAK_BOUND = 40 << 20
 
 
 def document() -> dict:
@@ -121,8 +120,13 @@ def test_full_task_list_walk_returns_every_task_in_order(stored):
 def test_hundred_concurrent_full_task_list_reads_stay_under_a_fixed_peak(stored):
     from scripts.swarm_ledger.repository.sqlite import SQLiteLedgerRepository
 
+    tracemalloc.start()
+    try:
+        SQLiteLedgerRepository(stored).current(SLUG)
+        _, whole = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
     server = services(SQLiteLedgerRepository(stored))
-    whole = stored.stat().st_size
     barrier, pages, failures = threading.Barrier(READERS), [], []
 
     def reader():
@@ -144,4 +148,4 @@ def test_hundred_concurrent_full_task_list_reads_stay_under_a_fixed_peak(stored)
         tracemalloc.stop()
     assert not failures, failures[0]
     assert len(pages) == READERS and len(set(pages)) == 1 and pages[0] > 1
-    assert peak < PEAK_BOUND, f"{READERS} task list walks peaked at {peak} bytes on a {whole} byte ledger"
+    assert peak < whole / 2, f"{READERS} task list walks peaked at {peak} bytes; one whole ledger load peaks at {whole}"

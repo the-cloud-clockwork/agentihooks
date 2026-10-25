@@ -7,11 +7,6 @@ import pytest
 pytestmark = pytest.mark.unit
 
 
-def stored_task_revision(state: dict) -> int:
-    meta = state.get("_meta", {})
-    return meta.get("task_revision", meta.get("rev", 0))
-
-
 def test_task_page_hash_tracks_only_returned_content():
     from scripts.swarm_ledger.api import resources
 
@@ -86,7 +81,7 @@ def test_task_route_reuses_entry_revision(monkeypatch):
     server = as_services(
         SimpleNamespace(
             repository=SimpleNamespace(
-                read=lambda slug, *keys: entry.state, task_revision=lambda slug: stored_task_revision(entry.state)
+                read=lambda slug, *keys: entry.state, task_revision=lambda slug: {1: 7, 2: 8}[entry.generation]
             )
         )
     )
@@ -125,7 +120,7 @@ def test_task_route_peak_allocation_is_bounded_by_page():
     server = as_services(
         SimpleNamespace(
             repository=SimpleNamespace(
-                read=lambda slug, *keys: entry.state, task_revision=lambda slug: stored_task_revision(entry.state)
+                read=lambda slug, *keys: entry.state, task_revision=lambda slug: {1: 7, 2: 8}[entry.generation]
             )
         )
     )

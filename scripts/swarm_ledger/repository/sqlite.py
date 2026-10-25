@@ -565,7 +565,6 @@ class SQLiteLedgerRepository:
         return None if row is None else row[0]
 
     def task_revision(self, slug: str) -> int:
-        """`_meta.task_revision` of the stored ledger, else its `_meta.rev`, read from those two rows alone."""
         self._adopt(slug)
         with self.connect() as connection:
             values = dict(connection.execute(TASK_REVISION, (slug, *TASK_REVISION_PATHS)))

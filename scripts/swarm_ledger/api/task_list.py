@@ -3,7 +3,8 @@ import threading
 
 from . import resources
 
-PAGES_KEPT = 512
+PAGES_KEPT = 64
+LEDGERS_KEPT = 8
 
 
 class Page(dict):
@@ -25,7 +26,10 @@ class Tasks:
         self.rows, self.revisions, self.pages = None, None, {}
 
     def load(self, slug: str) -> None:
-        self.rows = self.repository.read(slug, "tasks").get("tasks") or []
+        state = self.repository.read(slug, "tasks", "_meta.task_revision", "_meta.rev")
+        meta = state.get("_meta") or {}
+        self.revision = meta.get("task_revision", meta.get("rev", 0))
+        self.rows = state.get("tasks") or []
         self.revisions = resources.collection_revisions(self.rows)[1]
 
     def page(self, query: dict) -> Page:
@@ -47,7 +51,11 @@ def read(repository: object, slug: str, query: dict) -> Page:
     with GUARD:
         held = HELD.get(slug)
         if held is None or held.repository is not repository or held.revision != revision:
-            held = HELD[slug] = Tasks(repository, revision)
+            held = Tasks(repository, revision)
+        HELD.pop(slug, None)
+        HELD[slug] = held
+        while len(HELD) > LEDGERS_KEPT:
+            HELD.pop(next(iter(HELD)))
     with held.lock:
         if held.rows is None:
             held.load(slug)
