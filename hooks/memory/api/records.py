@@ -168,13 +168,19 @@ class SessionTools:
         ]
 
     def _summary(self, domain: str, session_uid: str, provider: str) -> dict:
-        sources, events = [], []
-        for source in self.catalog.sources(domain, session_uid):
-            generation = source["source_generation"]
-            found = self.catalog.events(domain, session_uid, generation)
-            events += found
-            through = self.catalog.watermark(domain, session_uid, generation)
-            sources.append({"source_generation": generation, "events": len(found), "durable_through": through})
+        found = {
+            source["source_generation"]: self.catalog.events(domain, session_uid, source["source_generation"])
+            for source in self.catalog.sources(domain, session_uid)
+        }
+        events = [event for rows in found.values() for event in rows]
+        sources = [
+            {
+                "source_generation": generation,
+                "events": len(rows),
+                "durable_through": self.catalog.watermark(domain, session_uid, generation),
+            }
+            for generation, rows in found.items()
+        ]
         records = [event["record"] for event in events]
         stamps = sorted(record["timestamp"] for record in records if isinstance(record.get("timestamp"), str))
         return {

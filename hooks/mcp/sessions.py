@@ -8,6 +8,7 @@ Search results are evidence, not resume commands.
 
 import json
 import os
+import sqlite3
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -71,7 +72,7 @@ def respond(name: str, build: Callable[[], dict]) -> str:
         caller = grant()
         request = {"schema_version": SCHEMA_VERSION, "access_domain": caller.corpus, **fields}
         return json.dumps(records.call(_session_tools(), name, caller, request, time.time()))
-    except Exception as e:
+    except (KeyError, OSError, sqlite3.Error) as e:
         log(f"MCP {name} failed", {"error": str(e)})
         return _failed(name, "dependency_unavailable", "same_request", TOOL_FAILED)
 

@@ -13,6 +13,8 @@ from hooks.memory import search as core
 from hooks.memory.api import records
 from hooks.memory.api.ingest import SCHEMA_VERSION, Grant, Rejected, digest
 from tests import sv2_idx05_cases
+from tests.sv2_idx02_cases import Session
+from tests.sv2_idx04_cases import session_inputs
 from tests.sv2_idx05_cases import Bank, body, grant
 
 pytestmark = pytest.mark.unit
@@ -151,6 +153,22 @@ def test_list_defaults_to_twenty_and_narrows_projects(inputs, bank):
     assert sv2_idx05_cases.listed(bank, narrowed) == ["lock", "readme"]
     assert bank.ask("session_list", body(inputs, limit=50))["state"] == "answered"
     assert error(bank.ask("session_list", body(inputs, limit=51)))["detail"] == "limit must be an integer from 1 to 50"
+
+
+def test_projects_equal_to_the_whole_grant_are_accepted(inputs, bank):
+    answer = bank.ask("session_list", body(inputs, projects=sorted(inputs["grant"]["projects"])))
+    assert answer["state"] == "answered" and answer["total"] == 3
+
+
+def test_a_session_with_two_sources_sums_both(inputs, bank):
+    domain, uid = inputs["grant"]["corpus"], bank.uid("kernel")
+    second = {**inputs["sessions"][2], "source_generation": "device-5:inode-54:anchor-0", "origin": "worker-c:again"}
+    session = Session(session_inputs(inputs, second), bank.corpus.root)
+    session.batches = 900
+    assert session.append(second["turns"])["state"] == "committed"
+    summary = bank.ask("session_get", body(inputs, session_uid=uid))["session"]
+    assert summary["events"] == 4 and [source["events"] for source in summary["sources"]] == [2, 2]
+    assert len(bank.tools.catalog.sources(domain, uid)) == 2
 
 
 def test_list_hides_sessions_that_are_not_retained(inputs, bank):
