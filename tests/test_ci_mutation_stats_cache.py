@@ -1033,3 +1033,39 @@ def test_dynamic_import_stats_check_only_the_modules_of_their_own_bucket(tmp_pat
     (root / "scripts/b_module.py").write_text("value = 2\n")
     collect_cached_stats(root, cache, {}, files, [], collect)
     assert calls == ([files, [files[1]]] if record_files else [files, files])
+
+
+def test_measured_stats_trace_every_covered_source_in_one_walk(tmp_path, monkeypatch):
+    from scripts.ci_mutation import stats_cache
+
+    root = tmp_path / "repo"
+    sources = [f"scripts/covered_{index}.py" for index in range(3)]
+    _repository(
+        root,
+        {
+            **{source: "from scripts.shared_helper import value\n" for source in sources},
+            "scripts/shared_helper.py": "value = 1\n",
+            "tests/test_measured.py": "def test_value():\n    pass\n",
+        },
+    )
+    files = ["tests/test_measured.py"]
+    node = files[0] + "::test_value"
+    traced = []
+    trace = stats_cache.test_inputs
+    monkeypatch.setattr(
+        stats_cache, "test_inputs", lambda root, path, *rest: traced.append(path) or trace(root, path, *rest)
+    )
+    calls = []
+
+    def collect(chosen):
+        calls.append(chosen)
+        return [{"status": 0, "tests": {}, "durations": {node: 1}, "cpu": 1, "dependencies": {node: sources}}]
+
+    cache = tmp_path / "cache"
+    stats_cache.collect_cached_stats(root, cache, {}, files, [], collect)
+    assert traced == ["tests/test_measured.py", sources]
+    stats_cache.collect_cached_stats(root, cache, {}, files, [], collect)
+    assert calls == [files]
+    (root / "scripts/shared_helper.py").write_text("value = 2\n")
+    stats_cache.collect_cached_stats(root, cache, {}, files, [], collect)
+    assert calls == [files, files]
