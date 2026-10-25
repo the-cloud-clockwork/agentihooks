@@ -51,7 +51,8 @@ def test_a_lane_bottleneck_held_across_ticks_leaves_the_caps_and_the_stored_shif
     store.create(SwarmConfig(SLUG, "/repo", autonomy=autonomy, **caps))
     for n in range(4):
         at = NOW + n * MINUTE
-        report = {"bottleneck": "ci", "window_hours": 4, "total": 60.0, "seconds": {"ci": 60.0}, "at": at}
+        seconds = {"engineering": 0.0, "ci": 60.0, "review": 0.0, "host": 0.0, "quota": 0.0}
+        report = {"bottleneck": "ci", "window_hours": 4, "total": 60.0, "seconds": seconds, "at": at}
         store.redis.set(store.key(SLUG, bottleneck.KEY), json.dumps(report))
         tick.tick(SLUG, store, FakeLedger([{"id": "a", "lane": "ci"}]), FakeRuntime(), now_ms=at + 1)
     saved = store.config(SLUG)
