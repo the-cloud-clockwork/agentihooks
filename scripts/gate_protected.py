@@ -156,6 +156,7 @@ def _duration_problems(base: dict, head: dict) -> list[str]:
     previous = base["jobs"].get("durations", base["jobs"].get("select", {}))
     producer = head["jobs"].get("durations", head["jobs"].get("select", {}))
     prefix = ci_reuse.duration_provenance_steps()
+    retried = ci_reuse.retried_duration_provenance_steps()
     problems = []
     if "durations" in base["jobs"] and "durations" not in head["jobs"]:
         selection = base["jobs"].get("select", {})
@@ -165,11 +166,9 @@ def _duration_problems(base: dict, head: dict) -> list[str]:
             "outputs": previous.get("outputs", {}) | selection.get("outputs", {}),
             "timeout-minutes": selection.get("timeout-minutes"),
         }
-    bounded_prefix = [
-        prefix[0] | {"env": {"GIT_HTTP_LOW_SPEED_LIMIT": "1000", "GIT_HTTP_LOW_SPEED_TIME": "60"}},
-        *prefix[1:],
-    ]
-    if producer.get("steps", [])[: len(prefix)] not in (prefix, bounded_prefix):
+    bounds = {"env": {"GIT_HTTP_LOW_SPEED_LIMIT": "1000", "GIT_HTTP_LOW_SPEED_TIME": "60"}}
+    admitted = [variant for steps in (prefix, retried) for variant in (steps, [steps[0] | bounds, *steps[1:]])]
+    if producer.get("steps", [])[: len(prefix)] not in admitted:
         problems.append("The head skips reuse without protected durations provenance.")
     mutable = {"steps", "if", "runs-on"}
     selection_permissions = ({"contents": "read"}, {"contents": "read", "actions": "read"})
