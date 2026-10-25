@@ -95,9 +95,7 @@ def run(slug, config, store, ledger, runtime, now_ms, launch) -> list[str]:
         state = {**state, "forced_at": now_ms}
         if not _starting(store, slug):
             state["failure"] = "; ".join(launched) or NO_LAUNCH
-    elif _starting(store, slug) and now_ms - state.get("forced_at", now_ms) >= max(
-        map(master_start.deadline_ms, _masters(store, slug)), default=master_start.DEADLINE_MS
-    ):
+    elif _hookless(store, slug, state, now_ms):
         state["failure"] = NO_HOOK
     if state.get("failure"):
         state, promoted_actions = _promote(slug, store, ledger, runtime, state, minutes, now_ms)
@@ -124,6 +122,15 @@ def _masters(store, slug):
 
 def _starting(store, slug):
     return bool(_masters(store, slug))
+
+
+def _hookless(store, slug, state, now_ms):
+    """Timed from the launch's own start, because each forced launch moves forced_at while the master still starts."""
+    leads = _masters(store, slug)
+    if not leads:
+        return False
+    started = master_start.read(store, slug).get("at", state.get("forced_at", now_ms))
+    return now_ms - started >= max(map(master_start.deadline_ms, leads))
 
 
 def _finish_dead(store, slug):

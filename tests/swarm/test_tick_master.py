@@ -221,7 +221,7 @@ def test_a_forced_launch_with_no_hook_promotes_after_the_startup_deadline(store)
 def test_a_deferred_forced_launch_is_promoted_only_after_its_launch_budget(store):  # noqa: F811
     runtime, ledger = outage(store, startup=False)
     runtime.broken, runtime.registered = False, set()
-    spawn, budget = runtime.spawn, {"state": "pending", "report": "/r.json", "deadline_ms": 200_000}
+    spawn, budget = runtime.spawn, {"state": "pending", "report": "/r.json", "deadline_ms": 660_000}
 
     def deferred(config, lane, name, task):
         placed = spawn(config, lane, name, task)
@@ -229,11 +229,13 @@ def test_a_deferred_forced_launch_is_promoted_only_after_its_launch_budget(store
 
     runtime.spawn = deferred
     tick("sw", store, ledger, runtime, 1 + DOWN)
-    tick("sw", store, ledger, runtime, 1 + DOWN + 120_000)
-    assert tick_master.promoted(store, "sw") == ""
-    tick("sw", store, ledger, runtime, DOWN + 200_000)
-    assert tick_master.promoted(store, "sw") == ""
-    actions = tick("sw", store, ledger, runtime, 1 + DOWN + 200_000)
+    assert len(runtime.masters) == 1
+    for at in (1 + DOWN + 120_000, 1 + 2 * DOWN, 1 + 3 * DOWN, DOWN + 660_000):
+        tick("sw", store, ledger, runtime, at)
+        assert tick_master.promoted(store, "sw") == ""
+    assert tick_master.read(store, "sw")["forced_at"] == 1 + 3 * DOWN
+    assert len(runtime.masters) == 1
+    actions = tick("sw", store, ledger, runtime, 1 + DOWN + 660_000)
     assert f"promoted {ENGINEER} to restore the master: {tick_master.NO_HOOK}" in actions
 
 
