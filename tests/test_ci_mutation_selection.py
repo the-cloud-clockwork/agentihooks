@@ -708,14 +708,15 @@ def test_statistics_collection_sets_the_mutmut_mode_and_preserves_runner_options
 
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("PYTEST_DISABLE_PLUGIN_AUTOLOAD", "1")
-    monkeypatch.setenv("MUTANT_UNDER_TEST", "parent")
+    parent = os.environ.get("MUTANT_UNDER_TEST", "parent")
+    monkeypatch.setenv("MUTANT_UNDER_TEST", parent)
     test = "test_mode.py"
     (tmp_path / test).write_text(
         "import os\nassert os.environ['MUTANT_UNDER_TEST'] == 'stats'\ndef test_keep(): pass\ndef test_omit(): pass\n"
     )
     runner = SimpleNamespace(_pytest_add_cli_args=["-k", "keep"])
     assert collect_test_ids(runner, [test], tmp_path) == [f"{test}::test_keep"]
-    assert os.environ["MUTANT_UNDER_TEST"] == "parent"
+    assert os.environ["MUTANT_UNDER_TEST"] == parent
 
 
 def test_statistics_collection_exceptions_exit_the_fork_child_with_failure(tmp_path, monkeypatch):
@@ -745,6 +746,7 @@ def test_statistics_collection_exceptions_exit_the_fork_child_with_failure(tmp_p
     def exit_child(code):
         raise SystemExit(code)
 
+    monkeypatch.setenv("MUTANT_UNDER_TEST", os.environ.get("MUTANT_UNDER_TEST", "parent"))
     monkeypatch.setattr("multiprocessing.get_context", context)
     monkeypatch.setattr(pytest, "main", fail)
     monkeypatch.setattr("os._exit", exit_child)
