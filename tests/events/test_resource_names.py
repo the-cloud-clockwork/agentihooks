@@ -44,3 +44,8 @@ def test_long_clean_consumer_names_keep_the_server_limit_boundary():
 
 def test_legacy_aliases_preserve_uppercase_identifiers():
     assert names.legacy_queue_stream("Work_9-A") == "AGENTIHOOKS_QUEUE_Work_9-A"
+
+
+def test_queue_identifiers_hash_immediately_above_the_readable_limit():
+    value = "x" * 65
+    assert names.queue_stream(value) == "AGENTIHOOKS-QUEUE-h" + hashlib.sha256(value.encode()).hexdigest()

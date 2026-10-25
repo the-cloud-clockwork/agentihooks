@@ -122,6 +122,7 @@ def test_workspace_lookup_reuses_current_and_legacy_labels(monkeypatch, existing
     monkeypatch.setattr(herdr_host, "_placed", lambda value: value)
 
     def cli(args, environ):
+        assert environ is launch_env
         calls.append(args)
         if args[:2] == ["workspace", "create"]:
             workspaces[args[args.index("--label") + 1]] = "space"

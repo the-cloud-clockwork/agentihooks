@@ -107,18 +107,24 @@ def test_root_binding_discovers_global_streams_only_for_unscoped_clients(monkeyp
     owned_loop = loop()
     js = object()
     client = SimpleNamespace(jetstream=Mock(return_value=js))
-    config = BusConfig(provision=False, scoped=scoped)
+    config = BusConfig(provision=False, scoped=scoped, credentials="member-creds")
     selector = AsyncMock(side_effect=["old-events", "old-dead"])
     monkeypatch.setattr(nats, "_Loop", lambda: owned_loop)
     monkeypatch.setattr(nats.nats_client, "connect", AsyncMock(return_value=client))
-    monkeypatch.setattr(nats, "NatsEventLog", Mock())
+    logs = Mock()
+    monkeypatch.setattr(nats, "NatsEventLog", logs)
+    monkeypatch.setattr(nats, "auth_options", Mock(return_value={}))
     monkeypatch.setattr(nats, "root_stream", selector)
     nats.NatsBus(config, "nats://example:4222")
+    assert [entry.kwargs for entry in logs.call_args_list] == [
+        {"credentials": "member-creds"},
+        {"credentials": "member-creds"},
+    ]
     assert selector.await_args_list == (
         []
         if scoped
         else [
-            call(js, nats.EVENT_STREAM, "AGENTIHOOKS_EVENTS", None),
-            call(js, nats.DEAD_STREAM, "AGENTIHOOKS_DEAD", None),
+            call(js, nats.EVENT_STREAM, "AGENTIHOOKS_EVENTS", "member-creds"),
+            call(js, nats.DEAD_STREAM, "AGENTIHOOKS_DEAD", "member-creds"),
         ]
     )
