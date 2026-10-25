@@ -94,6 +94,7 @@ def jobs_for(event, base_ref="dev", scope="full"):
                 outputs=SimpleNamespace(
                     due="true",
                     reused="false",
+                    forwarded="false",
                     scope=scope if runs else "",
                     analysis="A1" if runs else "",
                     shards="[0, 1]",

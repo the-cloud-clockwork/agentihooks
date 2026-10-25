@@ -268,7 +268,8 @@ def test_the_required_workflow_uses_the_protected_canonical_aggregation():
     )
     assert steps in [
         diagnostic(
-            finish(
+            forward(
+                finish(
                 rerun(
                     ci_reuse.inline_mutation(
                         ci_reuse.postgres_required(
@@ -276,9 +277,14 @@ def test_the_required_workflow_uses_the_protected_canonical_aggregation():
                         )
                     )
                 )
+                )
             )
         )
-        for diagnostic in (list, ci_reuse.selection_diagnostic)
+        for diagnostic, forward in (
+            (list, list),
+            (ci_reuse.selection_diagnostic, list),
+            (ci_reuse.selection_diagnostic, ci_reuse.forwarded_stats),
+        )
         for form in forms
         for summary in (False, True)
         for watcher_loss in (False, True)
