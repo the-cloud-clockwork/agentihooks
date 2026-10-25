@@ -112,7 +112,6 @@ IDLE_NUDGE_TICKS = 3
 IDLE_KILL_TICKS = 20
 IDLE_TICKS = "idle-ticks"
 LANES = ("eng", "ci", "plan")
-URGENT = "urgent"
 ACTIVE = ("claimed", "pr")
 NUDGE = (
     "Swarm check: you are idle and your task is still open. If you are waiting on checks or a deploy, declare it "
@@ -262,7 +261,10 @@ def tick(slug, store, ledger, runtime, now_ms):
             actions += skip_refused(lane_split.step, slug, config, store, doc, now_ms)
             actions += skip_refused(bottleneck_remedy.step, slug, store, ledger, doc, now_ms)
             if config.state == "running" and config.engine != EVENTS_ENGINE:
-                actions += skip_refused(_preempt, slug, config, store, rows, doc, now_ms)
+                seats = preempt.Seats(
+                    rows, lambda a: not _ended(a, rows) and _current_owner(a, rows.get(a.task, {})), ready_in_order
+                )
+                actions += skip_refused(preempt.run, slug, config, store, doc, now_ms, seats)
                 actions += skip_refused(_spawn, slug, config, store, ledger, runtime, rows, doc, now_ms)
         actions += skip_refused(dispatch_seat.run, slug, config, store, runtime, doc, now_ms, sleeping)
     actions += skip_refused(_night_watch, slug, store, ledger, runtime, doc, now_ms, sleeping)
@@ -907,23 +909,14 @@ def _claimable(slug, store, rows, doc, lane, dispatched=None):
 
 
 def _launch_order(slug, store, tasks, dispatched=None):
-    urgent = any(task.get("rank") == URGENT for task in tasks)
     return sorted(
         tasks,
         key=lambda task: (
-            _band(slug, store, task, dispatched, urgent),
-            task.get("rank") != URGENT,
+            dispatched(task)[0] if dispatched else ledger_rank.order(task),
             bool(store.launch_failure(slug, task["id"])),
             not claim_order.resumed(task),
         ),
     )
-
-
-def _band(slug, store, task, dispatched, urgent):
-    band = dispatched(task)[0] if dispatched else ledger_rank.order(task)
-    if urgent and task.get("rank") != URGENT and store.handoff(slug, task["id"]):
-        return max(band, ledger_rank.RANKS.index(URGENT))
-    return band
 
 
 def _parked(task, rows):
@@ -1296,7 +1289,7 @@ def _spawn_order(slug, config, store, agents, rows, doc, runtime):
 
     decision = capacity.read(store, slug)
     caps = capacity.caps(decision, config)
-    dispatched = dispatcher.claim_key(config, doc)
+    dispatched = preempt.yielding(store, slug, doc, dispatcher.claim_key(config, doc))
     queue, waits = [], []
     for lane, cap in caps.items():
         busy = sum(
@@ -1308,30 +1301,14 @@ def _spawn_order(slug, config, store, agents, rows, doc, runtime):
         ready, refused = profile_first.placeable(slug, config, store, runtime, lane, ready, max(cap - busy, 0))
         queue += [(busy + rank, lane, task) for rank, task in enumerate(ready)]
         waits += refused
-    urgent = any(task.get("rank") == URGENT for _, _, task in queue)
     queue.sort(
         key=lambda entry: (
-            _band(slug, store, entry[2], dispatched, urgent),
-            entry[2].get("rank") != URGENT,
+            dispatched(entry[2])[0] if dispatched else ledger_rank.order(entry[2]),
             bool(store.launch_failure(slug, entry[2]["id"])),
             entry[0],
         )
     )
     return [(lane, task) for _, lane, task in queue], waits
-
-
-def _preempt(slug, config, store, rows, doc, now_ms):
-    from scripts.swarm import capacity
-
-    caps = capacity.caps(capacity.read(store, slug), config)
-    dispatched, agents, full = dispatcher.claim_key(config, doc), store.agents(slug), {}
-    for lane, cap in caps.items():
-        holders = [
-            a for a in agents if a.lane == lane and not _ended(a, rows) and _current_owner(a, rows.get(a.task, {}))
-        ]
-        if cap and len(holders) >= cap:
-            full[lane] = (ready_in_order(slug, store, rows, doc, lane, dispatched), holders)
-    return preempt.step(slug, store, rows, doc, full, now_ms)
 
 
 def _room_wait(runtime, lane, task):

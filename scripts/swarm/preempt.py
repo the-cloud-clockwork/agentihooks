@@ -3,9 +3,11 @@ lowest ranked holder that is neither urgent nor focused, through its inbox, to p
 the freed seat goes to the waiting task because the spawn order puts urgent work first."""
 
 import hashlib
+from collections.abc import Callable
+from dataclasses import dataclass
 
 from scripts.inbox.store import DuplicateItem, InboxStore
-from scripts.swarm import freeze
+from scripts.swarm import dispatcher, freeze
 from scripts.swarm_ledger import ledger_rank
 from scripts.swarm_ledger.repository import hierarchy
 
@@ -14,6 +16,8 @@ REF = "preempt"
 WAITING = "preempt-waiting"
 ASKED = "preempt-asked"
 ANSWER_MS = 10 * 60_000
+URGENT = "urgent"
+YIELDED = 0.5
 TEXT = (
     "Operator priority on swarm {slug}: task {waiting} is urgent or focused and waits for a seat while every {lane} "
     "seat is busy, and your task {task} ranks lower. Push your branch now, write a Handoff v2 with the handoff skill "
@@ -22,8 +26,41 @@ TEXT = (
 )
 
 
+@dataclass(frozen=True)
+class Seats:
+    rows: dict
+    holds: Callable
+    ready: Callable
+
+
+def run(slug: str, config, store, doc: dict, now_ms: int, seats: Seats) -> list[str]:
+    from scripts.swarm import capacity
+
+    caps = capacity.caps(capacity.read(store, slug), config)
+    dispatched, agents, full = yielding(store, slug, doc, dispatcher.claim_key(config, doc)), store.agents(slug), {}
+    for lane, cap in caps.items():
+        holders = [a for a in agents if a.lane == lane and seats.holds(a)]
+        if cap and len(holders) >= cap:
+            full[lane] = (seats.ready(slug, store, seats.rows, doc, lane, dispatched), holders)
+    return step(slug, store, seats.rows, doc, full, now_ms)
+
+
+def yielding(store, slug: str, doc: dict, dispatched):
+    """A handoff successor of other work sorts just behind urgent work while an urgent task is open, whatever its band."""
+    if dispatched is None or not any(t.get("rank") == URGENT and t.get("state") == "open" for t in doc["tasks"]):
+        return dispatched
+
+    def key(task):
+        band, position = dispatched(task)
+        if task.get("rank") != URGENT and store.handoff(slug, task["id"]):
+            return max(band, YIELDED), position
+        return band, position
+
+    return key
+
+
 def preferred(task: dict, doc: dict, graph: dict) -> bool:
-    if not task.get("id") or task.get("rank") == "urgent":
+    if not task.get("id") or task.get("rank") == URGENT:
         return True
     chain = freeze.ancestry(task, graph)
     return any(r["verb"] == "focus" and freeze.covers(r["target"], task, chain) for r in doc.get("freezes") or [])
