@@ -12,6 +12,8 @@ See [Touched test worker sizing](mutation-gate.md#touched-test-worker-sizing) fo
 
 See [Focused proof CPU worker limits](../ci-timing.md#focused-proof-cpu-worker-limits) for focused test dispatch, automatic CPU quota and affinity caps, configuration and diagnostics.
 
+See [Cancelled watcher after the gate change](delivery-tiers.md#cancelled-watcher-after-the-gate-change-19-october-2026) for the dated stale group diagnosis, historical and current gate rules, read only evidence commands and configuration ownership.
+
 ## Pages in this section
 
 | Page | What it covers |

@@ -842,6 +842,78 @@ In the planted failure [run 40180532352](https://github.com/the-cloud-clockwork/
 
 The verifier step failed, `Cancel a rejected queue run` succeeded, the early gate ended `cancelled`, and `Queue gate summary` failed. Read a cancelled run's failed steps before treating it as a runner outage.
 
+### Cancelled watcher after the gate change: 19 October 2026
+
+[Issue 5456](https://github.com/the-cloud-clockwork/agentihooks/issues/5456) investigated [run 39342371515](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39342371515), created at 23:34:06 UTC after the watcher gate change in [pull request 4812](https://github.com/the-cloud-clockwork/agentihooks/pull/4812). The cancelled watcher had reported a stale queue group before cancelling its own run. The gate rejected that reported failure as designed.
+
+The job names below are historical: `queue-fail-fast` was the watcher and `Gate — Required` was the later dependency gate. In the current workflow, the early verifier owns `Gate — Required` and the later job is `Queue gate summary`, as described above.
+
+| Evidence | Observed result |
+|---|---|
+| Watcher job `118366748470`, runner `anton-oss-light-cpwxt-runner-8wszp` | Job concluded `cancelled`, but both `Watch for the first failed graded job` and `Cancel this queue run so the queue drops the entry` succeeded |
+| Watcher log at 23:47:55 UTC | Recorded `queue-rebuild-39342371515-1`, reported `queue group is no longer current`, and submitted cancellation at 23:47:56 UTC |
+| Watcher annotations | Named `@tcc-main-ci[bot]` as the cancelling actor; no lost communication annotation appeared |
+| Gate job `118371386861`, `Require every gate to succeed` | Its `NEEDS` contained `queue-fail-fast.result = cancelled` and a nonempty `queue-fail-fast.outputs.failed` containing the stale group report; the predicate returned `false` |
+| Entry ahead: [run 39342004261](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39342004261) for pull request 4917 | `unit (3.12, 3)` failed at 23:46:04 UTC; the pull request left the queue at 23:47:48 UTC. The investigation identifies its removal reason as `failed_checks` |
+| Replacement group for pull request 4960 | [Run 39343768001](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39343768001) succeeded; [pull request 4960](https://github.com/the-cloud-clockwork/agentihooks/pull/4960) merged at 00:04:41 UTC on 20 October |
+
+The investigated group's base was the head of the group ahead. Removing that failed entry required rebuilding the dependent group. The watcher's thirteen minute lifetime and `cancelled` conclusion did not establish runner loss. Its successful cancel step, explicit stale group report and the gate's nonempty failure output explain the red result.
+
+The historical gate accepted a watcher conclusion of `success`, `failure` or `cancelled` only when `outputs.failed` was empty and the graded dependencies passed. Allowing an interrupted watcher did not allow it to report a failure and still pass. The current later summary retains that empty output condition; it cannot replace today's early required verifier.
+
+#### Read the historical evidence
+
+These commands require authenticated GitHub CLI access to Actions logs and check annotations. They only read repository data. List all jobs first, because the watcher and gate names changed after this incident:
+
+```bash
+R=repos/the-cloud-clockwork/agentihooks
+RUN=39342371515
+gh api --paginate "$R/actions/runs/$RUN/jobs?per_page=100" \
+  --jq '.jobs[] | select(.name == "queue-fail-fast" or .name == "Gate — Required" or .name == "Queue gate summary") | [.id, .name, .conclusion, .runner_name] | @tsv'
+gh api "$R/check-runs/118366748470/annotations" --jq '.[].message'
+gh api "$R/actions/jobs/118366748470/logs" \
+  | grep -E 'queue-rebuild|no longer current|Request to cancel'
+gh api "$R/actions/jobs/118371386861/logs" \
+  | grep -A8 -B3 -E '"queue-fail-fast"|Every gate required'
+```
+
+Correlate a stale group report with the entry ahead and the replacement run:
+
+```bash
+gh api --paginate "$R/actions/runs/39342004261/jobs?per_page=100" \
+  --jq '.jobs[] | select(.name == "unit (3.12, 3)") | {name, conclusion, completed_at}'
+gh api --paginate "$R/issues/4917/timeline?per_page=100" \
+  --jq '.[] | select(.event == "removed_from_merge_queue") | {event, created_at}'
+gh api "$R/actions/runs/39343768001" --jq '{conclusion, created_at, updated_at}'
+gh api "$R/pulls/4960" --jq '{merged, merged_at}'
+```
+
+The timeline endpoint confirms removal times; it need not expose the removal reason. Use the dated investigation for that reason rather than deriving it from cancellation alone.
+
+For a new suspected runner outage, also preserve the runner Pod's events while they remain available. Set the namespace to the runner's actual namespace and the Pod to the name returned by the jobs API:
+
+```bash
+RUNNER_NAMESPACE=<runner namespace>
+RUNNER_POD=<runner pod name>
+kubectl get pod "$RUNNER_POD" -n "$RUNNER_NAMESPACE" -o wide
+kubectl get events -n "$RUNNER_NAMESPACE" \
+  --field-selector "involvedObject.kind=Pod,involvedObject.name=$RUNNER_POD" \
+  --sort-by=.metadata.creationTimestamp
+```
+
+No retained runner Pod events are included in the source investigation. Missing events after retention or Pod deletion cannot prove a healthy runner or a runner loss; this diagnosis rests on the job, gate and queue evidence.
+
+#### Configuration and remaining evidence gaps
+
+The watcher output and gate predicate are committed CI workflow behavior, with no operator environment switch to forgive a reported failure. Change them through a reviewed workflow change. To reproduce the historical configuration, read the workflow at the investigated run's commit:
+
+```bash
+gh api "$R/contents/.github/workflows/test.yml?ref=b9a1dba09ae702b67f0372a7f9a274342d728843" \
+  --jq '.content' | base64 --decode
+```
+
+Issue 5456 also records two diagnostic gaps: the rebuild cause reader reported `unknown` because it missed the removed entry ahead, and the watcher drop counter classified by job names without excluding reported rebuilds. These are the investigation's filed findings, not evidence of a gate fix delivered by that task. An `unknown` rebuild cause requires queue history correlation; a watcher-only drop count requires checking the failure output before classifying it as runner loss.
+
 ## Lost runner requeue
 
 A merge group whose unit shard loses its runner fails `Gate — Required`, and GitHub removes the pull request from the queue. The Queue retry workflow, `.github/workflows/queue-retry.yml`, puts it back once, so a lost runner costs neither a queue slot nor an agent round trip. A real test failure is never requeued.
