@@ -130,9 +130,7 @@ def publishing_root(repo: str, task: dict, agent: AgentRecord) -> tuple[Path | N
         own = re.fullmatch(rf"{re.escape(naming.plain(agent.name))}(?:-\d+)?", branch)
         if not (own or branch == scoped.get("branch")):
             raise SwarmError(f"current worktree {root} does not belong to this task")
-        if scoped.get("pr_url"):
-            return root, primary, scoped
-        return root, primary, {**scoped, "branch": branch}
+        return root, primary, scoped
     repositories = task.get("repositories") or [repo]
     if len(repositories) != 1:
         raise SwarmError("publish from the task worktree to select one of its repositories")
@@ -193,7 +191,7 @@ def prepare(slug: str, agent: AgentRecord, repo: str, ledger: LedgerClient) -> d
         delivery = target_branch(root, scoped, checkout["branch"], scoped if retired else task)
         if delivery != checkout["branch"]:
             git(root, "branch", f"--set-upstream-to=origin/{delivery}")
-        fields.append({**checkout, "branch": delivery, "repository": str(repository)})
+        fields.append({**checkout, "repository": str(repository)})
     update = branch_record(fields[-1], Path(fields[-1]["repository"]), task)
     update["repository_branches"].update({entry["repository"]: entry["branch"] for entry in fields})
     ledger.update_task(slug, agent.task, {**cleared, **update}, by=agent.name)
@@ -284,11 +282,10 @@ def descends(root: Path, branch: str) -> bool:
 
 
 def delivery_branch(root: Path, task: dict, branch: str) -> str:
-    head = publish_queue.open_head(git(root, "remote", "get-url", "--push", "origin"), task.get("pr_url"))
-    if not head or head in continuation.PROTECTED:
-        return branch
-    git(root, "fetch", "origin", f"+refs/heads/{head}:refs/remotes/origin/{head}")
-    return head if descends(root, head) else branch
+    recorded = task.get("branch")
+    if recorded and branch != recorded:
+        raise SwarmError(f"current worktree {root} branch {branch} differs from registered branch {recorded}")
+    return branch
 
 
 def gate_python(repo: Path) -> str:

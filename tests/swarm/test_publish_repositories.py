@@ -169,6 +169,7 @@ def test_publish_selects_the_current_repository_and_retains_both_branches(reposi
         Path(root, "chosen.txt").write_text("after")
     git(roots[1], "branch", "-m", "engineer-test-2")
     fields["worktrees"][1]["branch"] = "engineer-test-2"
+    p.task["repository_branches"][str(p.bundle)] = "engineer-test-2"
     monkeypatch.chdir(roots[1])
     first = publish.publish("swarm", p.agent, str(p.swarm), p.ledger, "Change bundle", ["chosen.txt"])
     assert first["worktree"] == roots[1]
