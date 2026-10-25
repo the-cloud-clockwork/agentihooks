@@ -368,6 +368,9 @@ def _frozen_problems(root: Path, merge_base: str, base: str, head: str) -> list[
     ]
 
 
+PLANTED_FROZEN_EDIT = True
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--root", default=".")
