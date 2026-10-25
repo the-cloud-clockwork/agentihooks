@@ -40,15 +40,23 @@ class Source:
     def __init__(self, store: RedisStore | None = None, ledger: LedgerClient | None = None):
         self._store = store
         self._ledger = ledger or LedgerClient(service=True)
+        self._exported: dict[str, tuple[int, dict]] = {}
 
     def slugs(self) -> list[str]:
         self._store = self._store or connect()
         return [slug for slug in self._store.slugs() if _on_events(self._store, slug)]
 
+    def state(self, slug: str) -> dict:
+        rev = self._ledger.metadata(slug)["_meta"]["rev"]
+        kept = self._exported.get(slug)
+        if kept is None or kept[0] != rev:
+            kept = self._exported[slug] = (rev, self._ledger.state(slug))
+        return kept[1]
+
     def snapshot(self, slug: str) -> Snapshot:
         self._store = self._store or connect()
         config = self._store.config(slug)
-        doc = self._ledger.state(slug)
+        doc = self.state(slug)
         rows = {task["id"]: task for task in doc["tasks"]}
         owned = {agent.task for agent in self._store.agents(slug) if agent.state != "finished"}
         released = release_wait.checker(config.repo)
