@@ -154,3 +154,69 @@ def test_a_malformed_pane_response_still_leaves_diagnostics(tmp_path, failure):
     assert row["screen_error"] == str(failure)
     assert row["error"] == "timed out"
     assert row["failure"] == "timeout"
+
+
+def test_invalid_startup_bytes_and_absent_output_are_preserved():
+    assert launch_evidence.text(b"startup:\xff") == "startup:\ufffd"
+    assert launch_evidence.text(None) == ""
+    assert launch_evidence.text("") == ""
+
+
+def test_missing_and_unreadable_validation_reports_keep_the_reason(tmp_path):
+    assert launch_evidence._validation({}) == {
+        "state": "missing",
+        "reason": "launcher did not publish a validation report",
+    }
+    report = tmp_path / "invalid.json"
+    report.write_text("{")
+    try:
+        json.loads("{")
+    except ValueError as exc:
+        reason = str(exc)
+    assert launch_evidence._validation({"profile_report": str(report)}) == {
+        "state": "unreadable",
+        "reason": reason,
+    }
+
+
+def test_evidence_removes_terminal_escapes_and_keeps_an_absent_pane(tmp_path):
+    attempt = launch_evidence.Attempt(tmp_path, "agent", "task", "codex", 12)
+    path = launch_evidence.retain(
+        attempt, {}, "", "", lambda *args: pytest.fail("no pane to read"), "\x1b[31mstartup failed\x1b[0m"
+    )
+    row = json.loads(path.read_text())
+    assert row["pane_id"] == ""
+    assert row["error"] == "startup failed"
+
+
+@pytest.mark.parametrize("validation_failure", [False, True])
+def test_launch_errors_keep_complete_stderr_and_validation_error(tmp_path, monkeypatch, validation_failure):
+    output = "pane_id=pane-test\nstatus=started\nroute_status=routed\n"
+    stderr = "startup diagnostic\nlast error"
+    monkeypatch.setattr(runtime, "_opened_pane", lambda *args: "pane-test")
+
+    def invalid(*args):
+        raise ValueError("validation rejected")
+
+    monkeypatch.setattr(runtime, "_validation", invalid)
+
+    def run(argv, **kwargs):
+        if "terminate-agent" in argv:
+            return SimpleNamespace(returncode=0)
+        return SimpleNamespace(returncode=0 if validation_failure else 3, stdout=output, stderr=stderr)
+
+    launcher = runtime.HerdrRuntime(home=tmp_path, run=run, herdr=lambda args: {"text": "startup"})
+    config = SimpleNamespace(slug="sw", autonomy="delegate", lanes={}, compact_limit=0)
+    with pytest.raises(SpawnError):
+        launcher._launch(
+            config,
+            "eng",
+            "t1",
+            "engineer-test",
+            ["init-agent", "--agent", "codex", "--dir", str(tmp_path), "--profile", "engineer"],
+        )
+    records = list((tmp_path / "sw" / "launch-evidence").glob("*.json"))
+    assert len(records) == 1
+    row = json.loads(records[0].read_text())
+    assert row["stderr"] == stderr
+    assert row["error"] == ("validation rejected" if validation_failure else "last error") + "\n" + stderr

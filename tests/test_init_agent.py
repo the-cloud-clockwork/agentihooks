@@ -356,6 +356,24 @@ def test_failed_canary_report_is_published_before_startup_and_records_reason(tmp
     assert "profile_validation=failed" in capsys.readouterr().out
 
 
+def test_profile_report_is_flushed_before_native_startup(tmp_path, monkeypatch):
+    import io
+    from types import SimpleNamespace
+
+    binding, environ = _profile(monkeypatch, tmp_path, "codex")
+    environ["XDG_RUNTIME_DIR"] = str(tmp_path / "runtime")
+    delivered = []
+
+    class Output(io.StringIO):
+        def flush(self):
+            delivered.append(self.getvalue())
+
+    monkeypatch.setattr("sys.stdout", Output())
+    args = SimpleNamespace(profile="engineer", defer_canary=False)
+    init_agent._binding_request(args, "codex", "task", environ, [])
+    assert delivered == [f"profile_report={environ[binding.REPORT]}\n"]
+
+
 def test_terminal_that_never_starts_the_launcher_fails_and_discards_it(monkeypatch, tmp_path, capsys):
     rc = _launch(monkeypatch, tmp_path, lambda command, **kwargs: None)
 
