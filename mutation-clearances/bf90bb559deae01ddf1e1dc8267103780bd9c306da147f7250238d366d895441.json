@@ -1,0 +1,6 @@
+{
+  "scripts/ci_stats_minutes.py:scripts.ci_stats_minutes.x_main__mutmut_62:a1993e5da2f042d546e7772acac3345e0749ef871b1c8d2bce5a0562dce4d74b": {
+    "reader": "standards-reader",
+    "reason": "Indent None emits compact JSON with identical decoded values. Report consumers and the contract use those values, not whitespace."
+  }
+}

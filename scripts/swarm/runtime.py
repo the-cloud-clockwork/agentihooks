@@ -947,7 +947,10 @@ class HerdrRuntime:
                 proof = native_login.check(os.environ, "native", self.run)
             except native_login.LoginError as exc:
                 raise SpawnError(str(exc), "unavailable") from exc
+        from scripts.swarm.launch_evidence import Attempt
+
         launched_at = int(time.time() * 1000)
+        attempt = Attempt(self.home / config.slug, name, task_id, agent, launched_at)
         load_at_launch = list(os.getloadavg())
         try:
             proc = self.run(
@@ -971,10 +974,8 @@ class HerdrRuntime:
                 },
             )
         except subprocess.TimeoutExpired as exc:
-            self._terminate(name)
-            raise SpawnError(
-                f"init-agent timed out for {name}", "ambiguous", _opened_pane(name, launched_at), harness=agent
-            ) from exc
+            pane = self._failed_launch(attempt, exc.stdout, exc.stderr, f"init-agent timed out for {name}")
+            raise SpawnError(f"init-agent timed out for {name}", "ambiguous", pane, harness=agent) from exc
         timings = {
             "launched_at": launched_at,
             "returned_at": int(time.time() * 1000),
@@ -986,15 +987,15 @@ class HerdrRuntime:
             if step in fields and fields[step].isdigit():
                 timings[step] = int(fields[step])
         if proc.returncode or fields.get("status") != "started" or not _routed(fields):
-            self._terminate(name)
             tail = (proc.stderr or proc.stdout).strip().splitlines()
             message = tail[-1] if tail else f"init-agent exit {proc.returncode}"
-            raise SpawnError(message, pane_id=fields.get("pane_id") or _opened_pane(name, launched_at), harness=agent)
+            pane = self._failed_launch(attempt, proc.stdout, proc.stderr, message)
+            raise SpawnError(message, pane_id=pane, harness=agent)
         try:
             validated = _validation(fields, argv[argv.index("--profile") + 1], agent, timeout)
         except ValueError as exc:
-            self._terminate(name)
-            raise SpawnError(str(exc), pane_id=fields.get("pane_id", ""), harness=agent) from exc
+            pane = self._failed_launch(attempt, proc.stdout, proc.stderr, str(exc))
+            raise SpawnError(str(exc), pane_id=pane, harness=agent) from exc
         if proof is not None:
             native_login.record(self.home, config.slug, proof)
         return Placed(
@@ -1010,6 +1011,16 @@ class HerdrRuntime:
             launch_timings=timings,
             conversation_id=(self.conversations() or {}).get(fields.get("pane_id"), ""),
         )
+
+    def _failed_launch(self, attempt, stdout, stderr, reason):
+        from scripts.swarm import launch_evidence
+
+        output, error = launch_evidence.text(stdout), launch_evidence.text(stderr)
+        fields = parse_fields(output)
+        fields["pane_id"] = fields.get("pane_id") or _opened_pane(attempt.name, attempt.launched_at)
+        launch_evidence.retain(attempt, fields, output, error, self.pane_tail, reason)
+        self._terminate(attempt.name)
+        return fields["pane_id"]
 
     def recover(self, name: str) -> Placed:
         found = self._get(herdr_target(name)) or {}
