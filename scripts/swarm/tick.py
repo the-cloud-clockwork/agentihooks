@@ -1043,10 +1043,6 @@ class _LaunchClock:
             return f"spent this pass's {SPAWN_BUDGET_S} second launch budget, {task['id']} waits a pass"
         return None
 
-    def steer(self, slug, store, task):
-        avoid = store.failed_harness(slug, task["id"]) or self.failing
-        return {"avoid_harness": avoid} if avoid else {}
-
     @contextmanager
     def launch(self):
         at = time.monotonic()
@@ -1058,6 +1054,11 @@ class _LaunchClock:
                 self.free, self.forgiven = time.monotonic() - at, 1
             self.failing = _steered_off(exc) or self.failing
             raise
+
+
+def _steer(slug, store, task, failing):
+    avoid = store.failed_harness(slug, task["id"]) or failing
+    return {"avoid_harness": avoid} if avoid else {}
 
 
 def _steered_off(error):
@@ -1160,7 +1161,11 @@ def _spawn(slug, config, store, ledger, runtime, rows, doc, now_ms):
             store.record_launch(slug, record, "pending")
             store.seats.occupy(seat, name, now_ms)
             task["transfer"] = transfers.attach(store, slug, record)
-            primed_task = {**primed(store, slug, seat, task), ACK_LATER: True, **clock.steer(slug, store, task)}
+            primed_task = {
+                **primed(store, slug, seat, task),
+                ACK_LATER: True,
+                **_steer(slug, store, task, clock.failing),
+            }
             from scripts.swarm_v2.runtime import codex
 
             with clock.launch():
@@ -1192,6 +1197,7 @@ def _started(slug, config, store, ledger, doc, started, now_ms):
     store.count_spawn(slug, placed.harness)
     _spend_local(store, started.launched, now_ms)
     store.clear_handoff(slug, task["id"])
+    store.clear_failed_harness(slug, task["id"])
     store.redis.hdel(store.key(slug, "launch-assignments"), task["id"])
     profile_first.spawned(slug, store, task["id"])
     return [

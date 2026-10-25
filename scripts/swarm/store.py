@@ -517,7 +517,7 @@ class RedisStore:
     def reset_claims(self, slug, task):
         self.redis.hset(self.key(slug, "started-lives"), task, 0)
         self.redis.hdel(self.key(slug, "launch-failures"), task)
-        self.redis.hdel(self.key(slug, "launch-failure-harness"), task)
+        self.clear_failed_harness(slug, task)
 
     def note_launch_failure(self, slug, task, reason, harness=""):
         self.redis.hset(self.key(slug, "launch-failures"), task, reason)
@@ -529,6 +529,9 @@ class RedisStore:
 
     def failed_harness(self, slug, task):
         return self.redis.hget(self.key(slug, "launch-failure-harness"), task) or ""
+
+    def clear_failed_harness(self, slug, task):
+        self.redis.hdel(self.key(slug, "launch-failure-harness"), task)
 
     def record_launch(
         self, slug: str, agent: AgentRecord, state: str, error: str = "", after: str = "", head: str | None = ""

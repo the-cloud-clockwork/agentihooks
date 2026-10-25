@@ -56,6 +56,34 @@ def test_started_launches_still_spend_the_budget_after_a_failed_one(store, monke
     assert "spent this pass's 20 second launch budget, t3 waits a pass" in actions
 
 
+def test_the_forgiven_failure_leaves_the_mean_of_started_launches_alone(store, monkeypatch):
+    store.update("sw", max_eng=3)
+    ledger, runtime = tasks(("t1", "eng"), ("t2", "eng"), ("t3", "eng")), FakeRuntime()
+    _failing(monkeypatch, runtime, {"t1"}, seconds=90)
+    actions = tick("sw", store, ledger, runtime, now_ms=1_000)
+    assert [task for _, _, task in runtime.spawned] == ["t2", "t3"]
+    assert not any("launch budget" in action for action in actions)
+
+
+def test_a_started_launch_clears_the_harness_its_task_avoided(store, monkeypatch):
+    ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
+    failing = {"t1"}
+    _failing(monkeypatch, runtime, failing)
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    assert store.failed_harness("sw", "t1") == "codex"
+    failing.clear()
+    tick("sw", store, ledger, runtime, now_ms=2_000)
+    assert store.failed_harness("sw", "t1") == ""
+
+
+def test_resetting_claims_forgets_the_failed_harness(store):
+    store.note_launch_failure("sw", "t1", "profile canary did not validate", "codex")
+    store.note_launch_failure("sw", "t2", "placement refused")
+    assert (store.failed_harness("sw", "t1"), store.failed_harness("sw", "t2")) == ("codex", "")
+    store.reset_claims("sw", "t1")
+    assert (store.failed_harness("sw", "t1"), store.launch_failure("sw", "t1")) == ("", "")
+
+
 def test_launches_after_a_failed_launch_steer_off_its_harness(store, monkeypatch):
     ledger, runtime = tasks(("t1", "eng"), ("t2", "eng")), FakeRuntime()
     failing = {"t1"}
@@ -113,3 +141,29 @@ def test_a_failed_init_agent_names_the_harness_it_launched(tmp_path, harness):
     with pytest.raises(SpawnError, match="^profile canary did not validate$") as error:
         runtime.spawn(config, "eng", "engineer@a1b2c3-0001", {"id": "t1", "title": "x"})
     assert error.value.harness == harness
+
+
+@pytest.mark.parametrize("failure", ["timeout", "binding"])
+def test_a_timed_out_or_unbound_init_agent_names_its_harness(tmp_path, failure):
+    import subprocess
+
+    def run(argv, **kwargs):
+        if "init-agent" not in argv:
+            return SimpleNamespace(returncode=0, stdout="", stderr="")
+        if failure == "timeout":
+            raise subprocess.TimeoutExpired(argv, 1)
+        return SimpleNamespace(returncode=0, stdout="status=started\nroute_status=routed\n", stderr="")
+
+    runtime = HerdrRuntime(home=tmp_path, run=run, choose=lambda requested, environ: (requested, "requested"))
+    config = SimpleNamespace(
+        slug="sw",
+        repo=str(tmp_path),
+        code="a1b2c3",
+        compact_limit=0,
+        lanes={"eng": {"agent": "codex"}},
+        autonomy="delegate",
+    )
+    with pytest.raises(SpawnError) as error:
+        runtime.spawn(config, "eng", "engineer@a1b2c3-0001", {"id": "t1", "title": "x"})
+    assert error.value.harness == "codex"
+    assert error.value.status == ("ambiguous" if failure == "timeout" else "refused")
