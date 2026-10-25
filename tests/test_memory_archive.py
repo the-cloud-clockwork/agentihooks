@@ -244,6 +244,18 @@ def test_an_object_is_stored_once_under_its_digest(store, monkeypatch):
     assert store.get(digest) == b"evidence"
 
 
+def test_an_object_is_written_through_a_temporary_file_beside_it(store, monkeypatch):
+    real, directories = archive.tempfile.mkstemp, []
+
+    def recording(dir):
+        directories.append(Path(dir))
+        return real(dir=dir)
+
+    monkeypatch.setattr(archive.tempfile, "mkstemp", recording)
+    digest = store.put(b"evidence")
+    assert directories == [object_path(store, digest).parent]
+
+
 def test_a_missing_object_is_an_integrity_error(store):
     message = refused(archive.EvidenceIntegrityError, lambda: store.get(sha(b"absent")))
     assert message == "an archived object is missing; the evidence is incomplete and was not returned"
@@ -364,6 +376,13 @@ def test_a_range_ending_at_an_object_boundary_does_not_read_the_next_object(cata
     data, cut = captured(catalog, store)
     object_path(store, sha(data[cut:])).unlink()
     assert archive.source_range(catalog, store, GRANT, reference(1, cut)) == data[1:cut]
+    assert catalog.integrity_failures_total("corpus-a") == 0
+
+
+def test_a_range_starting_at_an_object_boundary_does_not_read_the_previous_object(catalog, store):
+    data, cut = captured(catalog, store)
+    object_path(store, sha(data[:cut])).unlink()
+    assert archive.source_range(catalog, store, GRANT, reference(cut, len(data))) == data[cut:]
     assert catalog.integrity_failures_total("corpus-a") == 0
 
 
