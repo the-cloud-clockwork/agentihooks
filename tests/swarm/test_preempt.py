@@ -92,6 +92,21 @@ def test_an_ask_is_forgotten_once_its_holder_left(store):
     assert store.redis.hgetall(store.key(SLUG, preempt.ASKED)) == {"e1": '["t3", 2]'}
 
 
+def test_an_ask_is_recorded_before_its_message_so_a_failed_tick_never_resends_it(store, monkeypatch):
+    preempt.step(SLUG, store, ROWS, doc(), full("t3"), 1)
+
+    class Down(InboxStore):
+        def send(self, *args, **kwargs):
+            raise ConnectionError("redis went away")
+
+    monkeypatch.setattr(preempt, "InboxStore", Down)
+    with pytest.raises(ConnectionError):
+        preempt.step(SLUG, store, ROWS, doc(), full("t3"), 2)
+    assert store.redis.hgetall(store.key(SLUG, preempt.ASKED)) == {"e2": '["t3", 2]'}
+    monkeypatch.setattr(preempt, "InboxStore", InboxStore)
+    assert preempt.step(SLUG, store, ROWS, doc(), full("t3"), 3) == []
+
+
 def test_urgent_focused_and_unknown_holders_are_never_asked(store):
     rows = {**ROWS, "t5": {"id": "t5", "phase": "p1", "state": "claimed"}}
     holders = [holder("e3", "t4"), holder("e4", "t5"), holder("e5", "gone")]

@@ -50,7 +50,7 @@ def run(slug: str, config, store, doc: dict, now_ms: int, seats: Seats) -> list[
 
 
 def yielding(store, slug: str, doc: dict, dispatched):
-    """A handoff successor of other work sorts just behind urgent work while an urgent task is open, whatever its band."""
+    """A guarded handoff successor of other work sorts just behind urgent work while an urgent task is open."""
     if dispatched is None or not any(t.get("rank") == URGENT and t.get("state") == "open" for t in doc["tasks"]):
         return dispatched
 
@@ -85,6 +85,7 @@ def step(slug: str, store, rows: dict, doc: dict, full: dict, now_ms: int) -> li
             victim = _victim([a for a in holders if a.name not in asked], rows, doc, graph)
             if victim is not None:
                 asked[victim.name] = json.dumps([task["id"], now_ms])
+                redis.hset(store.key(slug, ASKED), victim.name, asked[victim.name])
                 actions += _ask(InboxStore(redis), slug, lane, victim, task["id"])
     redis.delete(store.key(slug, WAITING))
     if waiting:
