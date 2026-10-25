@@ -91,7 +91,7 @@ spec:
           lifecycle:
             preStop:
               exec:
-                command: ["agentihooks", "hive", "drain", "--wait", {{ $workers.drainSeconds | int | quote }}]
+                command: ["sh", "-c", {{ printf "agentihooks hive drain --wait %d 2>&1 | tee /proc/1/fd/1" (int $workers.drainSeconds) | quote }}]
           {{- include "swarm.containerSecurity" $root | nindent 10 }}
           env:
             {{- if $github.secretName }}
