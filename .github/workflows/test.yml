@@ -952,7 +952,7 @@ jobs:
           COLLECTION_JOB: test-count (${{ matrix.python-version }})
         run: |
           while :; do
-            state="$(gh api --paginate "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/jobs?filter=latest&per_page=100" \
+            state="$(python -m scripts.ci_budget.rate_limit --paginate "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/jobs?filter=latest&per_page=100" \
               --jq ".jobs[] | select(.name == \"$COLLECTION_JOB\") | \"\(.status) \(.conclusion)\"")" || state=""
             case "$state" in
               "completed success") exit 0 ;;

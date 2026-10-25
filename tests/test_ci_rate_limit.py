@@ -28,6 +28,7 @@ def clock(monkeypatch):
     monkeypatch.setattr(rate_limit.time, "time", lambda: 1000.0)
     monkeypatch.setattr(rate_limit.time, "sleep", sleeps.append)
     monkeypatch.setattr(rate_limit, "calls", 0)
+    monkeypatch.setattr(rate_limit, "slept", 0.0)
     return sleeps
 
 
@@ -47,6 +48,21 @@ def test_a_secondary_rate_limit_waits_a_minute(monkeypatch, clock):
     rate_limit.gh_api(["repos/x"], timeout=60)
     assert clock == [60]
     assert ["gh", "api", "rate_limit"] not in commands
+
+
+def test_an_unreadable_reset_waits_a_minute(monkeypatch, clock):
+    def run(command, **kwargs):
+        if command == ["gh", "api", "rate_limit"]:
+            raise subprocess.TimeoutExpired(command, 30)
+        return next(responses)(command)
+
+    def limited(command):
+        raise subprocess.CalledProcessError(1, command, stderr=LIMITED)
+
+    responses = iter([limited, lambda command: subprocess.CompletedProcess(command, 0, stdout=b"{}")])
+    monkeypatch.setattr(rate_limit.subprocess, "run", run)
+    assert rate_limit.gh_api(["repos/x"], timeout=60).stdout == b"{}"
+    assert clock == [rate_limit.SECONDARY_WAIT]
 
 
 def test_other_failures_raise_without_waiting(monkeypatch, clock):
@@ -69,6 +85,15 @@ def test_a_far_reset_waits_at_most_the_cap(monkeypatch, clock):
     monkeypatch.setattr(rate_limit.time, "time", lambda: 0.0)
     monkeypatch.setattr(rate_limit.subprocess, "run", _gh(iter([LIMITED, b"{}"]), []))
     rate_limit.gh_api(["repos/x"], timeout=60)
+    assert clock == [rate_limit.MAX_WAIT]
+
+
+def test_waits_share_one_budget_per_process(monkeypatch, clock):
+    monkeypatch.setattr(rate_limit.time, "time", lambda: 0.0)
+    monkeypatch.setattr(rate_limit.subprocess, "run", _gh(iter([LIMITED, b"{}", LIMITED]), []))
+    rate_limit.gh_api(["repos/x"], timeout=60)
+    with pytest.raises(subprocess.CalledProcessError):
+        rate_limit.gh_api(["repos/x"], timeout=60)
     assert clock == [rate_limit.MAX_WAIT]
 
 
