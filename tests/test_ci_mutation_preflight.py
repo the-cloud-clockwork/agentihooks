@@ -279,6 +279,54 @@ def test_a_single_stats_part_refines_inside_the_statistics_worker():
     assert "Download the shared mutation stats" not in names
 
 
+def test_every_stats_part_restores_one_merged_cache_saved_once_after_all_parts_finish():
+    jobs = _workflow()["jobs"]
+    key = "mutation-test-stats-v2-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}"
+    steps, names = _steps(jobs["stats"])
+    restore = steps[names.index("Restore the merged test stats")]
+    assert restore["uses"] == "actions/cache/restore@v4"
+    assert restore["with"] == {
+        "path": ".mutation-stats-cache",
+        "key": key,
+        "restore-keys": "mutation-test-stats-v2-${{ runner.os }}-",
+    }
+    assert "if" not in restore
+    single = steps[names.index("Save the merged test stats")]
+    assert single["uses"] == "actions/cache/save@v4"
+    assert single["if"] == "strategy.job-total == 1"
+    assert single["with"] == {"path": ".mutation-stats-cache", "key": key}
+    part = steps[names.index("Upload this part's test stats cache")]
+    assert part["if"] == "strategy.job-total != 1"
+    assert part["uses"] == "actions/upload-artifact@v4"
+    assert part["with"] == {
+        "name": "mutation-test-stats-cache-${{ matrix.part }}",
+        "path": ".mutation-stats-cache/",
+        "include-hidden-files": True,
+        "if-no-files-found": "ignore",
+        "retention-days": 1,
+        "overwrite": True,
+    }
+    collect = names.index("Collect one stats part for every mutation shard")
+    assert names.index(restore["name"]) < collect < names.index(single["name"])
+    assert collect < names.index(part["name"])
+    assert [step for step in steps if step.get("uses", "").startswith("actions/cache/save")] == [single]
+    assert not part["with"]["name"].startswith("mutation-stats-")
+    refine_steps, refine_names = _steps(jobs["refine"])
+    download = refine_steps[refine_names.index("Download every part's test stats cache")]
+    assert download["uses"] == "actions/download-artifact@v4"
+    assert download["with"] == {
+        "pattern": "mutation-test-stats-cache-*",
+        "path": ".mutation-stats-cache",
+        "merge-multiple": True,
+    }
+    merged = refine_steps[refine_names.index("Save the merged test stats")]
+    assert merged["uses"] == "actions/cache/save@v4"
+    assert merged["if"] == "hashFiles('.mutation-stats-cache/**') != ''"
+    assert merged["with"] == {"path": ".mutation-stats-cache", "key": key}
+    assert refine_names.index(download["name"]) < refine_names.index(merged["name"])
+    assert "matrix.part" not in str([restore, single, merged])
+
+
 def test_preflight_collects_one_stats_part_per_leg_with_the_pull_request_budget():
     job = _workflow()["jobs"]["stats"]
     assert job["timeout-minutes"] == 26
