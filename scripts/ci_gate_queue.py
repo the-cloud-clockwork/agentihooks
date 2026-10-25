@@ -11,7 +11,7 @@ from scripts.ci_queue_fail_fast import logged_loss
 GATE_NAME = "${{ github.event_name == 'merge_group' && 'Gate — Required' || 'queue-fail-fast' }}"
 SUMMARY_NAME = "${{ github.event_name == 'merge_group' && 'Queue gate summary' || 'Gate — Required' }}"
 REQUIRED = {"select", "split", "test-count", "shard-check"}
-# The watcher polls every 5 seconds on the App installation's shared hourly quota; one 100 job page per poll.
+# Polls spend the App installation's shared hourly quota: one jobs call while an attempt has at most 100 jobs.
 JOB_PAGE = 100
 SKIPPED = {
     "unit-selected",
