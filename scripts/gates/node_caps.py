@@ -47,19 +47,17 @@ def resizes(command):
 def _current(path):
     try:
         return Path(path).read_text()
-    except (OSError, ValueError):
+    except (OSError, TypeError, ValueError):
         return None
 
 
 def _edited(call):
     data = call.tool_input
-    current = _current(str(data.get("file_path") or ""))
+    current = _current(data.get("file_path"))
     if call.tool == "Write":
-        return current or "", str(data.get("content") or "")
-    edits = data.get("edits") if call.tool == "MultiEdit" else [data]
-    pairs = [
-        (str(e.get("old_string") or ""), str(e.get("new_string") or "")) for e in edits or [] if isinstance(e, dict)
-    ]
+        return (current, data["content"]) if current is not None else None
+    edits = data["edits"] if call.tool == "MultiEdit" else [data]
+    pairs = [(edit["old_string"], edit["new_string"]) for edit in edits if isinstance(edit, dict)]
     if current is None:
         return "\n".join(old for old, _ in pairs), "\n".join(new for _, new in pairs)
     after = current
@@ -78,5 +76,6 @@ class NodeCaps:
     def decide(self, call, who, state):
         if call.tool == "Bash":
             return Decision.deny(refusal([RESIZE_COMMAND])) if resizes(call.command) else Decision()
-        found = raises(*_edited(call))
+        edited = _edited(call)
+        found = raises(*edited) if edited else []
         return Decision.deny(refusal(found)) if found else Decision()

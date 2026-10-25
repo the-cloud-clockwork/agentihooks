@@ -27,16 +27,14 @@ def refusal(what):
 
 
 def _texts(tool_input):
-    yield str(tool_input.get("element") or "")
-    for field in tool_input.get("fields") or []:
-        if isinstance(field, dict):
-            yield f"{field.get('name') or ''} {field.get('type') or ''}"
+    fields = [field for field in tool_input.get("fields") or [] if isinstance(field, dict)]
+    return [str(tool_input.get("element")), *(f"{field.get('name')} {field.get('type')}" for field in fields)]
 
 
 def sign_in(tool, tool_input):
     action = tool.rpartition("__")[2]
     if action == "browser_navigate":
-        return PAGE if SIGN_IN_URL.search(str(tool_input.get("url") or "")) else ""
+        return PAGE if SIGN_IN_URL.search(str(tool_input.get("url"))) else ""
     if action in INTERACTIONS and any(SIGN_IN_ELEMENT.search(text) for text in _texts(tool_input)):
         return ELEMENT
     return ""
@@ -47,8 +45,8 @@ class SignIns:
     default_mode = "observe"
 
     def matches(self, call):
-        server = call.tool.lower().partition("mcp__")[2].partition("__")[0]
-        return call.tool.lower().startswith("mcp__") and PLAYWRIGHT in server
+        kind, _, rest = call.tool.partition("__")
+        return kind == "mcp" and PLAYWRIGHT in rest.partition("__")[0]
 
     def decide(self, call, who, state):
         found = sign_in(call.tool, call.tool_input)

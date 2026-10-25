@@ -30,10 +30,25 @@ def test_it_matches_playwright_tools_only():
         CMD + "browser_navigate",
         "mcp__plugin_playwright_playwright__browser_navigate",
         "mcp__serena__playwright",
+        "mcp__serena__playwright__browser_click",
         "playwright__browser_click",
         "Bash",
     )
-    assert [gate.matches(Call(tool)) for tool in tools] == [True, True, True, False, False, False]
+    assert [gate.matches(Call(tool)) for tool in tools] == [True, True, True, False, False, False, False]
+
+
+def test_the_refusal_names_what_it_saw_and_the_way_out():
+    assert refusal("a sign in page") == (
+        "sign in: this browser call opens or fills a sign in page. Agents never sign in, solve a CAPTCHA or grant "
+        "OAuth; use a page already signed in, or raise the step for the operator in Priorities."
+    )
+
+
+def test_form_fields_are_read_by_name_and_by_type_and_non_fields_are_skipped():
+    by_name = {"fields": ["x", {"name": "Password", "type": "textbox"}]}
+    by_type = {"fields": [{"name": "pw", "type": "password"}]}
+    plain = {"fields": [{"name": "Email", "type": "textbox"}]}
+    assert [sign_in(EXT + "browser_fill_form", form) for form in (by_name, by_type, plain)] == [ELEMENT, ELEMENT, ""]
 
 
 def test_sign_in_pages_are_named():

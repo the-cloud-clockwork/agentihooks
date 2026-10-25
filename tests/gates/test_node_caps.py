@@ -25,8 +25,36 @@ def test_a_raised_autoscaler_pool_maximum_is_named():
     assert raises(AUTOSCALER, after) == ["--nodes $(OCI_INSTANCE_POOL_ID) 15 to 20"]
 
 
+def test_the_refusal_names_the_raise_and_the_way_out():
+    assert refusal(["maxRunners 30 to 40"]) == (
+        "node cap: maxRunners 30 to 40 raises an infrastructure node cap, which only the operator authorizes. Raise "
+        "the ask in Priorities through the master and continue other work."
+    )
+
+
+def test_a_write_of_a_new_file_raises_nothing(tmp_path):
+    call = Call("Write", {"file_path": str(tmp_path / "new.yaml"), "content": "maxRunners: 99\n"})
+    assert NodeCaps().decide(call, ME, None).allowed
+
+
+def test_an_edit_replaces_only_the_first_match(tmp_path):
+    target = tmp_path / "deployment.yaml"
+    target.write_text("--nodes=0:15:a\n--nodes=0:15:b\n")
+    call = Call("Edit", {"file_path": str(target), "old_string": "0:15:", "new_string": "0:40:"})
+    assert NodeCaps().decide(call, ME, None).reason == refusal(["--nodes a 15 to 40"])
+
+
+def test_a_multi_edit_of_a_missing_file_reads_each_edit_on_its_own_line():
+    edits = [
+        {"old_string": "maxRunners: 2", "new_string": "maxRunners: 3"},
+        {"old_string": "max_nodes: 1", "new_string": "max_nodes: 1"},
+    ]
+    call = Call("MultiEdit", {"file_path": "/nowhere/values.yaml", "edits": edits})
+    assert NodeCaps().decide(call, ME, None).reason == refusal(["maxRunners 2 to 3"])
+
+
 def test_a_repeated_cap_is_read_as_its_largest_value():
-    text = "--nodes=0:4:pool\n--nodes=0:9:pool\nmaxRunners: 3\nmaxRunners: 7\n"
+    text = "--nodes=0:9:pool\n--nodes=0:4:pool\nmaxRunners: 7\nmaxRunners: 3\n"
     assert caps(text) == {"--nodes pool": 9, "maxRunners": 7}
 
 

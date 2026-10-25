@@ -39,6 +39,7 @@ def test_listing_dry_runs_and_other_processes_are_not_terminations():
     assert not terminates("pkill -f ledger_server")
     assert not terminates("echo terminate-agent")
     assert not terminates("kill -9 4242")
+    assert not terminates("AGENT=claude")
 
 
 def test_a_master_termination_is_a_would_be_deny_and_others_pass():
