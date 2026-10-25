@@ -1,6 +1,5 @@
 import hashlib
 import os
-import secrets
 from dataclasses import replace
 
 from scripts.events import deadlines
@@ -54,8 +53,9 @@ class InboxWake:
         self.store = self.store or connect()
         for inbox in InboxStore(self.store.redis).worlds():
             key = inbox.key("wake-outbox")
-            members = list(inbox.redis.smembers(key))
-            for item_id in secrets.SystemRandom().sample(members, min(32, len(members))):
+            now = self.clock()
+            members = sorted(inbox.redis.smembers(key), key=lambda item_id: self._key(str(now), item_id))
+            for item_id in members[:32]:
                 if not guard():
                     return
                 item = inbox.get(item_id)
