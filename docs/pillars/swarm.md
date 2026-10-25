@@ -949,6 +949,20 @@ For the startup log and exit reason a refused worker Pod leaves after removal, s
 For grouped CI stage counts, worst times, run links and report retention, see
 [Standing CI budget report](../ci-timing.md#standing-ci-budget-report).
 
+### Run window
+
+An operator sets an autonomous run window with `agentihooks swarm <id> set window-start=now|<UTC time such as 2026-10-25T00:00:00Z> window-minutes=N`; `window-start=off` clears it. A window needs both values. The `set` output reports its `window` as start, end, elapsed and remaining minutes. Only `swarm set` writes the window: the tick never extends or clears it.
+
+Each tick with an active window records elapsed and remaining minutes in the swarm's `run-window` record. When thirty minutes or less remain, the master seat gets one inbox item naming the cutoff and what the `window` gate does there. At the cutoff the tick acts once per window:
+
+| `window-gate` | Gate log | Claims | Agents in flight |
+|---|---|---|---|
+| `log only` (default) | one `observe` row naming the agents it would ask | continue | not asked |
+| `deny` | one `deny` row | the spawn loop starts no new claim until `swarm set` changes the window | each gets an inbox item to push, write a Handoff v2, run `swarm <id> handoff` and stop |
+| `skip` | none | continue | not asked |
+
+In every mode the cutoff publishes a final handoff: window bounds, task counts by state, each agent in flight with its task and the next step. It goes to the ledger as a notice and to the watchdog inbox address (`AGENTIHOOKS_WATCHDOG_ADDRESS`, default `master-watchdog`). A new start or length is a new window: its alert and cutoff run again.
+
 ### Templates
 
 A template is a JSON file: a `name`, a `compact_limit`, optional `links`, an optional `autonomy`

@@ -122,6 +122,7 @@ from scripts.swarm import (
     release_wait,
     remote_control,
     review_rounds,
+    run_window,
     snapshot,
     snapshot_job,
     stack,
@@ -936,6 +937,8 @@ def gate_mode(key, value):
 def setting(config, key):
     if key in GATE_KEYS:
         return modes.label(catalog.current(config.gates)[GATE_KEYS[key]])
+    if key in run_window.KEYS:
+        return run_window.reading(config.window, key)
     if key in LANE_KEYS:
         lane, field = LANE_KEYS[key]
         return config.lanes.get(lane, {}).get(field) or "unset"
@@ -955,7 +958,7 @@ def control_readings(store, args):
         return {
             key: setting(config, key)
             for key in keys
-            if key in (*SETTABLE, *LANE_KEYS, *EFFORT_KEYS, *CONFIG_KEYS, *GATE_KEYS, "autonomy")
+            if key in (*SETTABLE, *LANE_KEYS, *EFFORT_KEYS, *CONFIG_KEYS, *GATE_KEYS, *run_window.KEYS, "autonomy")
         }
     if args.command == "lift":
         agent = _lifted_agent(store, args)
@@ -1074,6 +1077,10 @@ def cmd_set(store, args):
         if key in GATE_KEYS:
             changes["gates"] = {**store.config(args.slug).gates, **gate_mode(key, value)}
             continue
+        if key in run_window.KEYS:
+            window = changes.get("window", store.config(args.slug).window)
+            changes["window"] = run_window.setting(window, key, value, now_ms())
+            continue
         if key.startswith(overlays.KEY):
             try:
                 changes["overlays"] = overlays.setting(
@@ -1087,7 +1094,8 @@ def cmd_set(store, args):
                 f"set takes {', '.join(SETTABLE)}=<whole number>, masters=N, master-per=N|hive|off, "
                 f"{masters.HIVE_KEY}<hive id>=<master seat>, autonomy={'|'.join(AUTONOMY)}, "
                 f"effort-min=E, effort-max=E, claude-model=M, codex-model=M, scaling=auto|manual, load-high=N, load-low=N, memory-per-agent=MB, swap-full-share=N, swap-floor=MB, api-url=URL, codex-inbox-transport=legacy|app_server "
-                f"or {', '.join(LANE_KEYS)}=<value>, engine=legacy|events"
+                f"or {', '.join(LANE_KEYS)}=<value>, engine=legacy|events, window-start=now|off|<UTC time>, "
+                f"window-minutes=N"
             )
         changes[SETTABLE[key]] = int(value)
     config = ledger_cutover.settings(store, args.slug, {**changes, **_pinned(changes)})
@@ -1124,6 +1132,7 @@ def cmd_set(store, args):
                 "api_url": config.api_url,
                 "codex_inbox_transport": config.codex_inbox_transport,
                 "engine": config.engine,
+                "window": run_window.report(config.window, now_ms()),
                 "master_affinity": {"desired": affinity.desired(config) or "auto", "order": master},
                 "masters": masters.MasterSeats(store.redis).count(args.slug),
                 "master_per": master_scale.rule(store.redis, args.slug) or master_scale.OFF,
