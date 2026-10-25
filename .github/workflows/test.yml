@@ -1547,10 +1547,12 @@ jobs:
 
   shard-check:
     if: ${{ !cancelled() && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && (github.event_name != 'pull_request' || needs.select.outputs.scope == 'full') }}
-    needs: [unit, unit-rerun, select, reuse, admission]
+    needs: [split, select, reuse, admission]
     runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && 'anton-oss-light' || 'ubuntu-latest' }}
+    timeout-minutes: 25
     permissions:
       contents: read
+      actions: read
     strategy:
       fail-fast: false
       matrix:
@@ -1566,12 +1568,6 @@ jobs:
       - name: Install grader dependencies
         run: python -m pip install "pytest>=8.0"
 
-      - name: Download shard durations
-        uses: actions/download-artifact@v4
-        with:
-          pattern: durations-${{ matrix.python-version }}-*
-          path: shard-durations
-
       - name: Download collected tests
         uses: actions/download-artifact@v4
         with:
@@ -1579,22 +1575,41 @@ jobs:
           path: collected-data
 
       - name: Download the test plan
-        if: needs.unit.outputs.reused != '' && needs.unit.outputs.reused != '0'
+        if: needs.split.outputs.reused != '' && needs.split.outputs.reused != '0'
         uses: actions/download-artifact@v4
         with:
           name: reused-tests-${{ matrix.python-version }}
           path: reused-plan
 
-      - name: Download shard flake reports
-        uses: actions/download-artifact@v4
+      - name: Mint the tcc main ci App token
+        id: app-token
+        if: github.event_name == 'merge_group'
+        uses: actions/create-github-app-token@v3.2.0
         with:
-          pattern: flakes-${{ matrix.python-version }}-*
-          path: shard-flakes
+          client-id: ${{ secrets.TCC_CI_CLIENT_ID }}
+          private-key: ${{ secrets.TCC_CI_APP_PRIVATE_KEY }}
+          repositories: ${{ github.event.repository.name }}
+          permission-actions: read
+          permission-contents: read
+
+      - name: Prefetch reports while every planned shard finishes
+        shell: bash
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token || github.token }}
+          QUEUE_PLAN: ${{ github.event_name == 'merge_group' && format('[{0}]', needs.split.outputs.queue_312) || '' }}
+        run: |
+          if [[ -n "$QUEUE_PLAN" ]]; then
+            SHARDS="$(jq -ce '[.[].shard]' <<< "$QUEUE_PLAN")"
+          else
+            SHARDS="$(seq 1 20 | jq -sc '.')"
+          fi
+          export SHARDS
+          python -m scripts.ci_gate_shards
 
       - name: Check every collected test ran in exactly one shard
         env:
           REUSED: ${{ hashFiles('reused-plan/reused-tests.json') != '' && '--reused reused-plan/reused-tests.json' || '' }}
-        run: python -m tests.shard_check shard-durations/*/durations.json --collected collected-data/collected.json $REUSED
+        run: python -m tests.shard_check shard-reports/durations-*/durations.json --collected collected-data/collected.json $REUSED
 
       - name: Summarize reused, ran and flaky tests
         if: ${{ !cancelled() }}
@@ -1603,14 +1618,14 @@ jobs:
           PYTHON_VERSION: ${{ matrix.python-version }}
           PLAN: reused-plan/reused-tests.json
         run: |
-          python -m tests.shard_summary --version "$PYTHON_VERSION" --durations shard-durations/*/durations.json \
-            --collected collected-data/collected.json --plan "$PLAN" --flakes shard-flakes/*/flakes.jsonl | tee -a "$GITHUB_STEP_SUMMARY"
+          python -m tests.shard_summary --version "$PYTHON_VERSION" --durations shard-reports/durations-*/durations.json \
+            --collected collected-data/collected.json --plan "$PLAN" --flakes shard-reports/flakes-*/flakes.jsonl | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: Check every shard's test time fits the Run tests deadline
         if: github.event_name != 'merge_group'
         env:
           REPORT: ${{ github.event_name == 'push' && '--report' || '' }}
-        run: python -m tests.shard_budget $REPORT shard-durations/*/durations.json
+        run: python -m tests.shard_budget $REPORT shard-reports/durations-*/durations.json
 
   sonar:
     if: ${{ !cancelled() && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && github.event_name != 'merge_group' }}
