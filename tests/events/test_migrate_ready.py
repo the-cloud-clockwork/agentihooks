@@ -125,7 +125,9 @@ def test_help_explains_selection_and_quiet_window(command, monkeypatch, capsys):
     )
 
 
-def test_inventory_is_read_only_and_move_keeps_foreign_scope(buses, command, capsys):
+def test_inventory_is_read_only_and_move_keeps_foreign_scope(buses, command, monkeypatch, capsys):
+    from nats.js.client import JetStreamContext
+
     legacy, scoped = buses
     owned = Envelope("owned", "task.ready", "doctor", "task", "one", 1, 0, "hub", {})
     foreign = Envelope("foreign", "task.ready", "other", "task", "two", 1, 0, "hub", {})
@@ -133,7 +135,13 @@ def test_inventory_is_read_only_and_move_keeps_foreign_scope(buses, command, cap
     outside = legacy.queue("swarm.other.ready.ci", QueuePolicy())
     outside.offer(foreign)
     before = [info.config.name for info in legacy._loop.run(legacy._js.streams_info())]
-    assert command.main([]) == 0
+
+    async def refuse_write(*args, **kwargs):
+        raise AssertionError("inventory attempted stream provisioning")
+
+    with monkeypatch.context() as read_only:
+        read_only.setattr(JetStreamContext, "add_stream", refuse_write)
+        assert command.main([]) == 0
     inventory = json.loads(capsys.readouterr().out)
     assert inventory["retained"] == inventory["remaining"] == 2
     assert inventory["failures"] == []
