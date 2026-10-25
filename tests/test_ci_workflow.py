@@ -84,7 +84,7 @@ def test_unit_shards_measure_no_coverage():
     include = _workflow()["jobs"]["unit"]["strategy"]["matrix"].get("include", [])
     assert include in (
         [],
-        "${{ fromJSON(github.event_name == 'merge_group' && format('[{0}]', needs.split.outputs.queue_312) || '[]') }}",
+        "${{ fromJSON(github.event_name == 'merge_group' && format('[{0}]', needs.queue-split.outputs.queue_312) || '[]') }}",
     )
     _, step = _unit_step_index(lambda s: s.get("name") == "Run tests")
     assert "COVERAGE_CORE" not in step.get("env", {})
@@ -406,7 +406,15 @@ def test_only_a_dev_push_saves_the_test_environment_after_installing_it():
         assert "count-record" not in jobs
         jobs["count-record"] = recorder
         callers["count-record"] = recorder["steps"]
-    assert sorted(callers) == ["count-record", "split", "test-count", "unit", "unit-rerun", "unit-selected"]
+    assert sorted(callers) == [
+        "count-record",
+        "queue-split",
+        "split",
+        "test-count",
+        "unit",
+        "unit-rerun",
+        "unit-selected",
+    ]
     for name, steps in callers.items():
         restore = next(step for step in steps if step.get("id") == "venv")
         assert restore["uses"] == "actions/cache/restore@v4"
@@ -928,7 +936,7 @@ def test_promotion_shard_reports_use_the_pushed_grader_and_prs_keep_the_base():
 def test_shard_verification_starts_from_the_plan_and_prefetches_complete_reports():
     jobs = _workflow()["jobs"]
     job = jobs["shard-check"]
-    assert set(job["needs"]) == {"split", "select", "reuse", "admission"}
+    assert set(job["needs"]) == {"split", "queue-split", "select", "reuse", "admission"}
     stream = next(step for step in job["steps"] if "python -m scripts.ci_gate_shards" in step.get("run", ""))
     assert stream["env"]["GH_TOKEN"] == "${{ steps.app-token.outputs.token }}"
     mint = next(step for step in job["steps"] if step.get("id") == "app-token")
@@ -936,7 +944,7 @@ def test_shard_verification_starts_from_the_plan_and_prefetches_complete_reports
     assert mint["with"]["permission-actions"] == "read"
     assert (
         stream["env"]["QUEUE_PLAN"]
-        == "${{ github.event_name == 'merge_group' && format('[{0}]', needs.split.outputs.queue_312) || '' }}"
+        == "${{ github.event_name == 'merge_group' && format('[{0}]', needs.queue-split.outputs.queue_312) || '' }}"
     )
     assert f"seq 1 {len(jobs['unit']['strategy']['matrix']['shard'])}" in stream["run"]
     assert "jq -ce '[.[].shard]'" in stream["run"]
@@ -958,7 +966,7 @@ def test_queue_gate_is_the_early_verifier_and_the_standard_gate_summarizes_queue
     jobs = workflow["jobs"]
     summary = jobs["gate-required"]
     assert summary["name"] == ci_gate_queue.SUMMARY_NAME
-    assert jobs["queue-fail-fast"] == ci_gate_queue.watcher(summary["runs-on"])
+    assert jobs["queue-fail-fast"] == ci_gate_queue.watcher(summary["runs-on"], parallel=True)
     normalized = ci_gate_queue.normalize({"test.yml": workflow})["test.yml"]["jobs"]
     assert normalized["gate-required"]["name"] == "Gate — Required"
     assert normalized["queue-fail-fast"]["name"] == "queue-fail-fast"

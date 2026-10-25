@@ -56,11 +56,15 @@ def test_stored_durations_share_selection_admission_before_both_shard_paths():
 
 @pytest.mark.parametrize("shard_path", ["split", "unit-selected"])
 def test_each_shard_path_restores_selected_durations_red_on_a_cache_miss(shard_path):
-    steps = _workflow()["jobs"][shard_path]["steps"]
+    jobs = _workflow()["jobs"]
+    steps = jobs[shard_path]["steps"]
     restore = next(step for step in steps if step.get("name") == "Restore latest dev durations")
-    assert restore["with"]["key"] == "${{ needs.select.outputs.key }}"
+    key = "env.DURATION_KEY" if shard_path == "split" else "needs.select.outputs.key"
+    assert restore["with"]["key"] == "${{ " + key + " }}"
     assert restore["with"]["fail-on-cache-miss"] is True
-    assert "needs.select.outputs.key != ''" in restore["if"]
+    assert f"{key} != ''" in restore["if"]
+    if shard_path == "split":
+        assert jobs[shard_path]["env"]["DURATION_KEY"] == "${{ needs.select.outputs.key }}"
     adopt = next(step for step in steps if step.get("name") == "Adopt latest dev durations")
     assert "tests.dev_durations" in adopt["run"]
 
@@ -130,7 +134,7 @@ def test_required_gate_runs_after_parallel_unit_and_lint():
         }
     )
     assert gate["if"] == "${{ always() }}"
-    assert jobs["unit"]["needs"] == ["split", "select", "reuse", "admission"]
+    assert jobs["unit"]["needs"] == ["split", "queue-split", "select", "reuse", "admission"]
     assert jobs["split"]["needs"] in (
         ["durations", "select", "reuse", "admission"],
         ["select", "reuse", "admission"],

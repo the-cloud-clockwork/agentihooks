@@ -16,6 +16,7 @@ BUDGETS = {
     "admission": 30,
     "reuse": 30,
     "split": 90,
+    "queue-split": 90,
     "select": 60,
     "unit": 300,
     # Merge queue only, after a lost runner; stage budgets grade push and dispatch runs.
