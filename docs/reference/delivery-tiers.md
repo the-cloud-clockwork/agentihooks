@@ -768,7 +768,7 @@ A merge group unit shard that loses its runner is rerun once inside the same Tes
 
 ## Lost fail fast watcher
 
-`queue-fail-fast` holds one `anton-oss-light` runner for the whole merge group Tests run. It polls the run's jobs every 15 seconds until a graded job fails or the run ends, so it is the longest job of the run and the one most exposed to a lost runner. `Gate — Required` grades what the watcher reports, not whether its runner survived: a merge group whose graded jobs all passed stays green when the watcher's runner is lost or the watcher is cancelled.
+`queue-fail-fast` holds one `anton-oss-light` runner from the start of the merge group Tests run. It polls the run's jobs every 15 seconds until a graded job fails, every unit shard or its rerun has passed, or the run ends, so it is the longest job of the run and the one most exposed to a lost runner. A failure after the unit shards settle, such as in `shard-check`, still fails `Gate — Required`; it is not cancelled early. `Gate — Required` grades what the watcher reports, not whether its runner survived: a merge group whose graded jobs all passed stays green when the watcher's runner is lost or the watcher is cancelled.
 
 ### What the watcher reports
 
