@@ -125,9 +125,10 @@ def _queue(ledger: LedgerClient, row: dict, source: dict, evidence: dict, verdic
     )
     if ledger.task(row["swarm"], task):
         return task
+    pull_request = source.get("pr_url") or (NO_PULL_REQUEST if source else "")
     description = (
         f"Document the delivered behavior of {source.get('title', evidence['summary'])}.\n"
-        f"Source task: {row['task']}. Delivered pull request: {source.get('pr_url') or (NO_PULL_REQUEST if source else '')}.\n"
+        f"Source task: {row['task']}. Delivered pull request: {pull_request}.\n"
         f"Change size: {verdict['size']}.\n"
         f"Source requirements: {source.get('description', '')}\n"
         f"Documentation sources: {json.dumps(evidence['doc_sources'])}\n"
