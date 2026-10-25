@@ -38,6 +38,24 @@ def hub_problems(deployment: dict) -> list[str]:
     return found
 
 
+def scope_problems(chart: str) -> list[str]:
+    found = []
+    for setting, expected in ((None, None), ("false", None), ("true", "1")):
+        options = [] if setting is None else ["--set", f"hub.bus.scoped={setting}"]
+        result = render(chart, *ENABLED, *options)
+        if result.returncode:
+            found.append(f"hub scope {setting} fails to render: {result.stderr.strip()}")
+            continue
+        deployment = hubs(result.stdout)[0]
+        container = deployment["spec"]["template"]["spec"]["containers"][0]
+        env = {row["name"]: row.get("value") for row in container["env"]}
+        if env.get("AGENTIHOOKS_BUS_SCOPED") != expected:
+            found.append(f"hub scope {setting} renders {env.get('AGENTIHOOKS_BUS_SCOPED')}, expected {expected}")
+        if "AGENTIHOOKS_BUS_BIND" in env:
+            found.append("the hub binds streams instead of provisioning scoped resources")
+    return found
+
+
 def receivers(text: str) -> list[dict]:
     documents = [d for d in yaml.safe_load_all(text) if d]
     return [d for d in documents if d["metadata"]["name"].endswith("-github-webhook")]
@@ -100,7 +118,7 @@ def problems(chart: str) -> list[str]:
         found.append("a NATS hub without hub.bus.url renders instead of failing on the missing address")
     if receivers(default.stdout):
         found.append("the default release renders the GitHub webhook receiver")
-    return found + secret_env_problems(chart) + receiver_release_problems(chart)
+    return found + scope_problems(chart) + secret_env_problems(chart) + receiver_release_problems(chart)
 
 
 def secret_env_problems(chart: str) -> list[str]:
