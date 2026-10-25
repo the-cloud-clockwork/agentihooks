@@ -40,9 +40,10 @@ class Selection:
 class _Placing:
     config: SwarmConfig
     task: dict
+    saved: dict
     decision: profile_choice.ProfileDecision
     role: str
-    rows: list
+    rows: list[capacity.Account]
     hives: list[dict]
     now: int
 
@@ -238,7 +239,7 @@ class HiveLaunch:
                     limited = admission.capped(admission.Room(hive["room"], **ROOM_DETAILS), taken, bound)
                     if limited.room < hive["room"]:
                         hive["room"], hive["refusal"] = limited.room, admission.refusal(limited)
-        placing = _Placing(config, task, decision, role, rows, hives, now)
+        placing = _Placing(config, task, saved, decision, role, rows, hives, now)
         found = self._account_selection(placing, harness)
         if auto and harness == "codex" and isinstance(found, placement.Wait):
             claude = self._account_selection(placing, "claude")
@@ -247,8 +248,7 @@ class HiveLaunch:
 
     def _account_selection(self, placing: _Placing, harness: str) -> Selection | placement.Wait:
         task, rows, role = placing.task, placing.rows, placing.role
-        saved = task.get("launch_assignment") or profile_choice.transfer(task)
-        account = saved.get("account") or self.herdr.planned_account(task["id"], harness)
+        account = placing.saved.get("account") or self.herdr.planned_account(task["id"], harness)
         open_rows = _open_rows(rows, harness)
         candidates = [row for row in open_rows if not account or row.name == account]
         if not candidates:
