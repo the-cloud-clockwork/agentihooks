@@ -1317,6 +1317,36 @@ def test_prepare_records_the_worktree_branch_when_it_does_not_descend_from_the_p
     assert publication.task["repository_branches"] == {str(repository): "engineer-test"}
 
 
+def test_prepare_and_publish_keep_the_open_pull_requests_delivery_branch(publication, monkeypatch):
+    from scripts.swarm import publish
+
+    p = publication
+    git(p.root, "push", "origin", "HEAD:predecessor")
+    p.task.update(
+        branch="predecessor",
+        repository_branches={str(p.repo): "predecessor"},
+        pr_url="https://github.com/example/repo/pull/7",
+    )
+    original = publish.execute
+
+    def execute(command, root):
+        if command[0] == "gh":
+            return '{"state":"OPEN","baseRefName":"dev","headRefName":"predecessor"}'
+        return original(command, root)
+
+    monkeypatch.setattr(publish, "execute", execute)
+    result = publish.prepare("swarm", p.agent, str(p.repo), p.ledger)
+    assert result["worktree"] == str(p.root)
+    assert git(p.root, "branch", "--show-current") == "engineer-test"
+    assert p.task["branch"] == "predecessor"
+    assert p.task["repository_branches"] == {str(p.repo): "predecessor"}
+    monkeypatch.chdir(p.root)
+    published = publish.publish("swarm", p.agent, str(p.repo), p.ledger, "Continue pull request", ["chosen.txt"])
+    assert published["branch"] == p.task["branch"] == "predecessor"
+    assert git(p.repo, "ls-remote", "origin", "refs/heads/predecessor").split()[0] == published["head"]
+    assert git(p.repo, "ls-remote", "origin", "refs/heads/engineer-test") == ""
+
+
 def test_a_restacked_successor_publishes_its_prepared_branch_not_the_parked_one(publication):
     from scripts.swarm import publish
 
