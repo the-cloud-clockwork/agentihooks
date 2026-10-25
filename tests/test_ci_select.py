@@ -94,6 +94,73 @@ def test_a_source_change_selects_recorded_runtime_dependents(repo):
     assert {path for leg in legs for path in leg} == {"tests/test_sample.py", "tests/test_runtime.py"}
 
 
+def test_recorded_dependents_still_use_parallel_selected_legs(repo):
+    write(repo, {"tests/test_runtime.py": "import os\n", "tests/test_deleted.py": "import os\n"})
+    (repo / "tests/test_deleted.py").unlink()
+    manifest = {
+        "units": ["hooks/sample.py::deadline"],
+        "tests": {
+            "tests/test_runtime.py::test_deadline[first]": {"units": [0]},
+            "tests/test_runtime.py::test_deadline[second]": {"units": [0]},
+            "tests/test_deleted.py::test_deadline": {"units": [0]},
+            "tests/test bad.py::test_deadline": {"units": [0]},
+        },
+    }
+    scope, legs = ci_select.decide(
+        repo,
+        ["hooks/sample.py"],
+        seconds(test_sample=ci_select.LEG_SECONDS, test_runtime=ci_select.LEG_SECONDS),
+        12,
+        manifest=manifest,
+    )
+    assert scope == "selected"
+    assert sorted(legs) == [["tests/test_runtime.py"], ["tests/test_sample.py"]]
+
+
+def test_main_reads_the_same_recorded_coverage_as_mutation(repo, monkeypatch, tmp_path, capsys):
+    write(repo, {"hooks/sample.py": "VALUE = 2\n", "tests/test_runtime.py": "import os\n"})
+    git(repo, "add", "hooks/sample.py", "tests/test_runtime.py")
+    git(repo, "commit", "-m", "change")
+    monkeypatch.setenv("CI_SELECT_REPOSITORY", "owner/repo")
+    manifest = {
+        "units": ["hooks/sample.py::<module>"],
+        "tests": {"tests/test_runtime.py::test_deadline": {"units": [0]}},
+    }
+    calls = []
+
+    def record(repository, before):
+        calls.append(repository)
+        assert before.endswith("Z")
+        return {"id": 123}, manifest
+
+    monkeypatch.setattr(ci_select, "find_record", record)
+    output = run_main(repo, monkeypatch, tmp_path, "pull_request")
+    assert calls == ["owner/repo"]
+    assert "scope=selected" in output
+    assert "tests/test_runtime.py" in output
+    assert "Recorded coverage from dev run 123" in capsys.readouterr().out
+
+
+def test_a_missing_record_preserves_import_selection(repo, monkeypatch, tmp_path):
+    write(repo, {"hooks/sample.py": "VALUE = 2\n"})
+    git(repo, "add", "hooks/sample.py")
+    git(repo, "commit", "-m", "change")
+    monkeypatch.setenv("CI_SELECT_REPOSITORY", "owner/repo")
+    monkeypatch.setattr(ci_select, "find_record", lambda *_: None)
+    output = run_main(repo, monkeypatch, tmp_path, "pull_request")
+    assert "scope=selected" in output
+    assert "files_1=tests/test_sample.py\n" in output
+
+
+def test_the_workflow_supplies_recorded_coverage_access():
+    job = yaml.safe_load(WORKFLOW.read_text())["jobs"]["select"]
+    select = next(step for step in job["steps"] if step.get("name") == "Select the tests the change reaches")
+    assert select["env"]["CI_SELECT_REPOSITORY"] == "${{ github.repository }}"
+    assert select["env"]["GH_TOKEN"] == "${{ steps.app-token.outputs.token }}"
+    token = next(step for step in job["steps"] if step.get("id") == "app-token")
+    assert "github.event_name == 'pull_request'" in token["if"]
+
+
 def test_a_changed_test_file_selects_itself(repo):
     assert decide(repo, ["tests/test_other.py"]) == ("selected", [["tests/test_other.py"]])
 
