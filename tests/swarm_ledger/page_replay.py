@@ -143,11 +143,10 @@ class FakeApi:
 
 def quiet(page):
     last, same = None, 0
+    deadline = time.monotonic() + 10
     page.evaluate(FLUSH)
-    for _ in range(200):
-        time.sleep(0.05)
-        if not page.evaluate(FLUSHED):
-            continue
+    while time.monotonic() < deadline:
+        page.wait_for_function(FLUSHED, polling=10, timeout=max(1, (deadline - time.monotonic()) * 1000))
         now = page.evaluate(f"() => [window.__inflight, JSON.stringify(({CAPTURE})())]")
         page.evaluate(FLUSH)
         same = same + 1 if now[0] == 0 and now == last else 0
