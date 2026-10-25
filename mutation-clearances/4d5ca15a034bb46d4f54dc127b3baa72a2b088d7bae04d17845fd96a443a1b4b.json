@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/timing.py:scripts.swarm.timing.x_timed__mutmut_2:26b5663901063a3271feecdb8207ad5f05cde7f387d31bfd5e3bf7d6ccc4b212": {
+    "reader": "standards_reader",
+    "reason": "Equivalent: step reads report only in `if report and (record_failure := ON_FAILURE.get()):`. None is falsy like False, so the short circuit takes the same branch, ON_FAILURE is never called, and nothing else in step reads report; output is identical."
+  }
+}
