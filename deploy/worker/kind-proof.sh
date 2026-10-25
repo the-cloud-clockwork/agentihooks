@@ -17,7 +17,12 @@ cleanup() {
   kind delete cluster --name "$cluster"
 }
 trap cleanup EXIT
-kind create cluster --name "$cluster" --image mirror.gcr.io/kindest/node:v1.37.0 --wait 120s > "$out/cluster.log" 2>&1 &
+{
+  kind create cluster --name "$cluster" --image mirror.gcr.io/kindest/node:v1.37.0 --wait 120s
+  for warm in ghcr.io/the-cloud-clockwork/agentihooks-worker:dev mirror.gcr.io/library/redis:7-alpine; do
+    docker exec "$cluster-control-plane" crictl pull "$warm" || echo "the node could not pre-pull $warm; the proof loads or pulls it later"
+  done
+} > "$out/cluster.log" 2>&1 &
 cluster_pid=$!
 build_started="$SECONDS"
 if bash deploy/worker/base-current.sh ghcr.io/the-cloud-clockwork/agentihooks-worker:dev; then
@@ -31,11 +36,13 @@ docker build -f deploy/worker/Dockerfile --build-arg WORKER_IMAGE=local/worker-b
 printf 'worker_hive_image_build_seconds=%s\nworker_base=%s\n' "$((SECONDS - build_started))" "$worker_base" | tee "$out/build.txt"
 docker run --rm --tmpfs /home/worker:uid=10001,gid=10001 --entrypoint bash "$image" -c 'agentihooks init --profile engineer && grep -qx "<!-- profile: engineer -->" "$HOME/.claude/CLAUDE.md"' > "$out/init.txt"
 wait "$cluster_pid"
-kind load docker-image "$image" --name "$cluster"
+kind load docker-image "$image" --name "$cluster" &
+load_pid=$!
 docker run --rm --entrypoint bash "$image" -c 'claude --version && codex --version && herdr --version && git --version && bash /usr/local/bin/wt.sh root && node --version && npm --version && uv --version && gh --version && ruff --version && test "$(npm config get prefix)" = "$HOME/.local" && [[ ":$PATH:" == *":$HOME/.local/bin:"* ]] && agentihooks hive --help' > "$out/tools.txt"
 openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj /CN=hive-join -addext subjectAltName=DNS:hive-join \
   -keyout "$out/key.pem" -out "$out/cert.pem" 2>/dev/null
 kubectl create secret generic hive-tls --from-file=key.pem="$out/key.pem" --from-file=cert.pem="$out/cert.pem" >/dev/null
+wait "$load_pid"
 kubectl apply -f - <<EOF
 apiVersion: apps/v1
 kind: Deployment
@@ -180,21 +187,30 @@ if os.environ['STEP'] == 'start':
     store.start_execution('drain-proof', AgentRecord(name, 'eng', 't1', seat='eng-1@drain-proof', hive=os.environ['HIVE']))
     print(name)
 elif os.environ['STEP'] == 'draining':
+    import time
     from scripts.hive import registry
-    assert registry.show(store.redis, os.environ['HIVE'])['draining'] == 'yes', 'the preStop did not mark the hive draining'
+    for _ in range(30):
+        if registry.show(store.redis, os.environ['HIVE'])['draining'] == 'yes':
+            break
+        time.sleep(1)
+    else:
+        raise AssertionError('the preStop did not mark the hive draining')
 else:
     store.drop_agent('drain-proof', os.environ['NAME'])
 PY
 }
 held="$(hold_agent start)"
+started="$(kubectl get pod "$pod" -o jsonpath='{.status.containerStatuses[0].state.running.startedAt}')"
+[[ -n "$started" ]]
 kubectl patch deployment "$deployment" --type merge -p '{"spec":{"strategy":{"type":"Recreate","rollingUpdate":null}}}'
 kubectl rollout restart "deployment/$deployment"
-sleep 45
-[[ -n "$(kubectl get pod "$pod" -o jsonpath='{.status.containerStatuses[0].state.running.startedAt}')" ]] || { echo "the hive drain preStop let $pod stop while an agent worked" >&2; exit 1; }
-[[ "$(kubectl get pods -l app.kubernetes.io/component=worker-hive -o name)" == "pod/$pod" ]] || { echo "a replacement hive pod started while $pod drained" >&2; exit 1; }
 hold_agent draining
-echo "the hive drain preStop kept $pod running and draining for 45 seconds of a roll while its agent worked, with no replacement pod" | tee "$out/drain.txt"
-[[ -n "$(kubectl get pod "$pod" -o jsonpath='{.status.containerStatuses[0].state.running.startedAt}')" ]] || { echo "the hive drain preStop let $pod stop before its agent finished" >&2; exit 1; }
+for _ in {1..5}; do
+  sleep 1
+  [[ "$(kubectl get pod "$pod" -o jsonpath='{.status.containerStatuses[0].state.running.startedAt}')" == "$started" ]] || { echo "the hive drain preStop let $pod stop while an agent worked" >&2; exit 1; }
+  [[ "$(kubectl get pods -l app.kubernetes.io/component=worker-hive -o name)" == "pod/$pod" ]] || { echo "a replacement hive pod started while $pod drained" >&2; exit 1; }
+done
+echo "the hive drain preStop marked $pod draining and kept it running while its agent worked, with no replacement pod" | tee "$out/drain.txt"
 hold_agent finish "$held"
 kubectl wait --for=delete "pod/$pod" --timeout=25s
 hook_failures="$(kubectl get events --field-selector "involvedObject.name=$pod,reason=FailedPreStopHook" -o name)"

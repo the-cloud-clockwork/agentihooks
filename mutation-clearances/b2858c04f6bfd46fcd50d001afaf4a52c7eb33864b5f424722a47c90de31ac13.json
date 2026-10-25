@@ -1,0 +1,6 @@
+{
+  "scripts/ci_gate_queue.py:scripts.ci_gate_queue.x_verify__mutmut_45:90c2739aa4784da2e7e95d3caaf750b9ea5d62d6f8d98ae9e9f6e841a80e93f2": {
+    "reader": "standards-reader",
+    "reason": "When originals_finished is false the final conjunction remains false and recovery remains unevaluated, regardless of the unused recovery_finished fallback. Independently approved from complete CI report 40165669788."
+  }
+}

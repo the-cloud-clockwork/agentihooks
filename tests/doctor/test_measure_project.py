@@ -61,7 +61,7 @@ def test_the_installed_secret_only_reaches_the_default_host(monkeypatch):
         return httpx.Response(200, json={"data": SWARM}, request=httpx.Request("GET", url))
 
     monkeypatch.setattr(traces_read, "_through_ingress", through_ingress)
-    monkeypatch.setattr(traces_read.httpx, "get", lambda *a, **kw: pytest.fail("the caller host was used"))
+    monkeypatch.setattr(traces_read, "_direct", lambda *a, **kw: pytest.fail("the caller host was used"))
     traces_read.measured_client(CALLER)
     assert sent == [(f"{traces_read.DEFAULT_HOST}/api/public/projects", INSTALLED_KEYS, {})]
 

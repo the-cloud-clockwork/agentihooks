@@ -62,6 +62,35 @@ def test_queue_migration_preserves_pending_work_and_attempt_number(buses):
     assert original.take(20) is None
 
 
+@pytest.mark.parametrize("swarm", ["rig", "doctor"])
+@pytest.mark.parametrize(("lane", "count"), [("eng", 3), ("ci", 7), ("plan", 2)])
+def test_queue_migration_keeps_every_retained_offer_when_repeated(buses, swarm, lane, count):
+    legacy, hub = buses
+    policy = QueuePolicy(max_deliver=3, ack_wait_ms=100)
+    name = f"swarm.{swarm}.ready.{lane}"
+    original = legacy.queue(name, policy)
+    offers = [
+        Envelope(f"retained-{index}", "task.ready", swarm, "task", str(index), 1, 0, "hub", {"lane": lane})
+        for index in range(count)
+    ]
+    for offer in offers:
+        original.offer(offer)
+
+    hub.migrate_queue(swarm, name, policy)
+    hub.migrate_queue(swarm, name, policy)
+
+    target = hub.for_swarm(swarm).queue(lane, policy)
+    received = []
+    for _ in offers:
+        delivery = target.take(1000)
+        assert delivery is not None
+        received.append(delivery.event)
+        delivery.ack()
+    assert received == offers
+    assert target.take(20) is None
+    assert original.take(20) is None
+
+
 def test_dead_letter_migration_keeps_retained_letters(buses):
     legacy, hub = buses
     letter = Envelope("letter", "dead_lettered", "rig", "task", "work", 1, 0, "hub", {})

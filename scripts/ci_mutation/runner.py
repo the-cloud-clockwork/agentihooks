@@ -50,6 +50,12 @@ def failing_tests(log: Path) -> list[str]:
     return list(named.values())
 
 
+def echo_cache_report(log: Path) -> None:
+    for line in log.read_text(errors="replace").splitlines() if log.is_file() else []:
+        if line.startswith("Mutation stats cache:"):
+            print(line)
+
+
 def path_parts(node: ast.AST, bindings: dict[str, ast.AST]) -> list[str]:
     if isinstance(node, ast.Constant) and isinstance(node.value, str):
         return [node.value]
@@ -287,6 +293,7 @@ def mutate_files(
             return {}, f"mutmut failed with exit {status}; failing tests: {'; '.join(failing)}; see {log}"
         return {}, f"mutmut failed with exit {status}; see {log}"
     if stats and stats.part:
+        echo_cache_report(log)
         return {path: [] for path in selected}, ""
     result_path = work / "results.json"
     status = run_process(

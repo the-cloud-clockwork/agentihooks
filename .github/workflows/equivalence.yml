@@ -3,10 +3,6 @@ name: Ledger equivalence
 on:
   pull_request:
     branches: [dev]
-    paths:
-      - scripts/swarm_ledger/**
-      - tests/swarm_ledger/**
-      - .github/workflows/equivalence.yml
 
 permissions:
   contents: read
@@ -24,6 +20,14 @@ jobs:
         with:
           path: base
           ref: ${{ github.event.pull_request.base.sha }}
+      - name: Pick the protected grader
+        run: |
+          if [[ -f base/tests/swarm_ledger/equivalence.sh ]]; then
+            echo "GRADER=$PWD/base" >> "$GITHUB_ENV"
+          else
+            echo "::warning::The base predates the protected equivalence grader; the head copy grades this run."
+            echo "GRADER=$PWD/head" >> "$GITHUB_ENV"
+          fi
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
@@ -36,90 +40,14 @@ jobs:
           UV_CONSTRAINT: head/.github/test-constraints.txt
         run: uv pip install --system --excludes head/.github/test-excludes.txt -e './head[dev,all]'
       - name: Plant a dropped checkbox update and a dropped chat recipient in copies of head
-        run: |
-          cp -a head fault-store
-          cp -a head fault-chat
-          python - <<'PY'
-          from pathlib import Path
-          for path, needle, planted in (
-              (
-                  Path('fault-store/scripts/swarm_ledger/repository/mutation.py'),
-                  'rejected = core.apply_changes(doc, changes or [], ctx)',
-                  'rejected = core.apply_changes(doc, [], ctx)',
-              ),
-              (
-                  Path('fault-chat/scripts/swarm_ledger/static/js/chat.js'),
-                  'return to && !text.startsWith("@") ? `@${to} ${text}` : text;',
-                  'return text;',
-              ),
-          ):
-              source = path.read_text()
-              assert source.count(needle) == 1
-              path.write_text(source.replace(needle, planted))
-          PY
-      - name: Replay base, head and the planted checkbox fault at once
-        run: |
-          replay() {
-            name=$1
-            shift
-            if ! "$@" > "$RUNNER_TEMP/$name.log" 2>&1; then
-              echo "::group::$name replay failed"
-              cat "$RUNNER_TEMP/$name.log"
-              echo "::endgroup::"
-              return 1
-            fi
-          }
-          scripts=head/tests/swarm_ledger
-          replay base python $scripts/repository_replay.py "$PWD/base" "$RUNNER_TEMP/base-ledger" base.json &
-          replay head python $scripts/repository_replay.py "$PWD/head" "$RUNNER_TEMP/head-ledger" head.json &
-          replay fault python $scripts/repository_replay.py "$PWD/fault-store" "$RUNNER_TEMP/fault-ledger" fault.json &
-          failed=0
-          for job in $(jobs -p); do
-            wait "$job" || failed=1
-          done
-          exit "$failed"
-      - name: Compare recorded requests and stored ledger state
-        run: cmp base.json head.json
-      - name: Reject the planted checkbox fault
-        run: |
-          if cmp -s base.json fault.json; then
-            echo 'FAIL: planted checkbox fault escaped the equivalence check'
-            exit 1
-          fi
-          echo 'PASS: identical base and head; planted checkbox fault rejected'
+        run: bash "$GRADER/tests/swarm_ledger/equivalence.sh" plant
+      - name: Replay and compare base, head and the planted checkbox fault
+        run: bash "$GRADER/tests/swarm_ledger/equivalence.sh" store
       - name: Install the page replay browser
         timeout-minutes: 6
-        uses: ./head/.github/actions/browser-cache
-      - name: Replay base, head and the planted chat fault pages at once
-        run: |
-          replay() {
-            name=$1
-            shift
-            if ! "$@" > "$RUNNER_TEMP/$name.log" 2>&1; then
-              echo "::group::$name replay failed"
-              cat "$RUNNER_TEMP/$name.log"
-              echo "::endgroup::"
-              return 1
-            fi
-          }
-          scripts=head/tests/swarm_ledger
-          replay base-page python -I $scripts/page_replay.py "$PWD/base" "$RUNNER_TEMP/base-page" base-page.json &
-          replay head-page python -I $scripts/page_replay.py "$PWD/head" "$RUNNER_TEMP/head-page" head-page.json &
-          replay fault-page python -I $scripts/page_replay.py "$PWD/fault-chat" "$RUNNER_TEMP/fault-page" fault-page.json &
-          failed=0
-          for job in $(jobs -p); do
-            wait "$job" || failed=1
-          done
-          exit "$failed"
-      - name: Compare recorded page actions
-        run: cmp base-page.json head-page.json
-      - name: Reject the planted chat fault
-        run: |
-          if cmp -s base-page.json fault-page.json; then
-            echo 'FAIL: planted chat fault escaped the page equivalence check'
-            exit 1
-          fi
-          echo 'PASS: identical base and head pages; planted chat fault rejected'
+        uses: ./base/.github/actions/browser-cache
+      - name: Replay and compare base, head and the planted chat fault pages
+        run: bash "$GRADER/tests/swarm_ledger/equivalence.sh" page
       - uses: actions/upload-artifact@v4
         if: always()
         with:

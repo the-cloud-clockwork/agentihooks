@@ -110,6 +110,12 @@ def _declaration_problems(declared: dict[str, dict], today: date) -> list[str]:
 
 
 def check(workflows: dict[str, dict], config: dict, today: date) -> list[str]:
+    from scripts import ci_gate_queue
+
+    try:
+        workflows = ci_gate_queue.normalize(workflows)
+    except ValueError as error:
+        return [str(error)]
     not_gates, outside = config.get("not_gates", {}), config.get("outside_gate", {})
     problems = _declaration_problems({**not_gates, **outside}, today)
     gates = [

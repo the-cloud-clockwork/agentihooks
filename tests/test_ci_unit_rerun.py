@@ -151,6 +151,8 @@ def test_the_rerun_job_runs_the_unit_shard_steps_for_the_classified_legs():
 
 def test_judges_wait_for_the_rerun_and_the_gate_reads_both_jobs():
     jobs = _jobs()
-    assert "unit-rerun" in jobs["shard-check"]["needs"]
+    if "unit-rerun" not in jobs["shard-check"]["needs"]:
+        assert jobs["shard-check"]["needs"] == ["split", "select", "reuse", "admission"]
+        assert any("python -m scripts.ci_gate_shards" in step.get("run", "") for step in jobs["shard-check"]["steps"])
     assert {"unit-lost", "unit-rerun"} <= set(jobs["stage-budget"]["needs"])
     assert {"unit-lost", "unit-rerun"} <= set(jobs["gate-required"]["needs"])

@@ -45,7 +45,21 @@ def source():
     store.agents.return_value = []
     store.claimant.return_value = None
     ledger.state.return_value = document
+    ledger.metadata.side_effect = lambda _: {"_meta": {"rev": id(ledger.state.return_value)}}
     return row, store, ledger
+
+
+class CountingLedger:
+    def __init__(self, document):
+        self.document, self.rev, self.exports, self.read = document, 1, 0, set()
+
+    def state(self, slug):
+        self.exports += 1
+        return self.document
+
+    def metadata(self, slug):
+        self.read.add(slug)
+        return {"_meta": {"rev": self.rev}}
 
 
 def spoke(bus, provider, hive):
@@ -127,6 +141,52 @@ def test_snapshot_uses_live_owners_and_release_and_apply_admission(monkeypatch):
     assert readiness.claimable(row, "eng", provider.snapshot("rig"))
     store.config.return_value = SimpleNamespace(**{**vars(store.config.return_value), "state": "paused"})
     assert not readiness.claimable(row, "eng", provider.snapshot("rig"))
+
+
+def test_readiness_passes_export_a_large_ledger_once_per_revision(monkeypatch):
+    from scripts.hub.readiness import Readiness
+
+    monkeypatch.setattr("scripts.swarm.release_wait.checker", lambda _: lambda task: True)
+    monkeypatch.setattr("scripts.swarm.apply_wait.checker", lambda *_: lambda task: True)
+    rows = [task(f"done-{n}", state="done") for n in range(950)] + [task("task-a")]
+    ledger = CountingLedger(doc(rows))
+    _, store, _ = source()
+    provider = readiness.Source(store, ledger)
+    with backend("memory", None) as bus:
+        hub = Readiness(bus, provider)
+        for _ in range(21):
+            hub.poll()
+        unchanged = ledger.exports
+        ledger.document, ledger.rev = doc([*rows, task("task-b")]), 2
+        for _ in range(21):
+            hub.poll()
+        changed = ledger.exports - unchanged
+        assert (unchanged, changed) == (1, 1), (
+            f"exports over 21 passes: {unchanged} unchanged, {changed} after one revision"
+        )
+        assert "task-b" in provider.snapshot("rig").rows
+        assert ledger.exports == 2
+        assert ledger.read == {"rig"}
+
+
+def test_the_source_forgets_the_export_of_a_swarm_that_left_the_events_engine():
+    _, store, _ = source()
+    ledger = CountingLedger(doc([task("task-a")]))
+    engines = {"rig": "events", "kept": "events"}
+    store.slugs.return_value = ["rig", "kept"]
+    store.config.side_effect = lambda slug: SimpleNamespace(
+        slug=slug, state="running", repo="", template="", engine=engines[slug]
+    )
+    provider = readiness.Source(store, ledger)
+    assert provider.slugs() == ["rig", "kept"]
+    provider.state("rig")
+    provider.state("kept")
+    engines["rig"] = "legacy"
+    assert provider.slugs() == ["kept"]
+    provider.state("kept")
+    assert ledger.exports == 2
+    provider.state("rig")
+    assert ledger.exports == 3
 
 
 def test_hub_respects_its_lease_and_passes_clock_to_ready_offers(monkeypatch):

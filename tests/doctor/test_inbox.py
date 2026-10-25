@@ -184,3 +184,12 @@ def test_an_empty_seat_item_does_not_hide_a_later_live_occupant_item():
         live["address"]: inbox.Receiver(live=True, occupant="demo-eng-2", quiet_ms=WINDOW),
     }
     assert [f.subject for f in inbox.past_window([empty, live], 20 * MIN, WINDOW, receivers)] == ["live"]
+
+
+def test_a_seat_item_waits_one_window_from_its_live_occupant_binding_before_it_is_raised():
+    row = {**_delivered(), "id": "carried", "state": "pending", "fyi": False}
+    bound = row["created_at"] + 42 * MIN
+    fresh = {row["address"]: inbox.Receiver(live=True, occupant="demo-eng-2", bound_at=bound)}
+    assert inbox.past_window([row], bound + WINDOW - 1, WINDOW, fresh) == []
+    [found] = inbox.past_window([row], bound + WINDOW + MIN, WINDOW, fresh)
+    assert found.summary == "unread delivery; sent 48 minutes ago"

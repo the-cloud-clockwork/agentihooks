@@ -2268,6 +2268,7 @@ def test_stamp_names_bundle_commit_and_chain(world):
         "enabled_plugins": {},
         "mcp_urls": {},
         "mcp_bearer_env": {},
+        "hosted_ledger": "",
         "swarm_brain": None,
         "corrections": "",
     }
@@ -2280,6 +2281,7 @@ def test_stamp_names_bundle_commit_and_chain(world):
         "enabled_plugins": {},
         "mcp_urls": {},
         "mcp_bearer_env": {},
+        "hosted_ledger": "",
         "swarm_brain": None,
         "corrections": "",
     }

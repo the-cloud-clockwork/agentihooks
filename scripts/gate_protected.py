@@ -21,6 +21,9 @@ SHALLOW_PREFLIGHT_CHECKOUT = {
 FULL_PREFLIGHT_CHECKOUT = {"fetch-depth": 0}
 PREFLIGHT_FETCH = 'git fetch --no-tags origin "$GITHUB_SHA"'
 SHALLOW_PREFLIGHT_FETCH = 'git fetch --no-tags --depth 1 origin "$GITHUB_SHA"'
+EQUIVALENCE = ("equivalence.yml", "ledger-equivalence")
+EQUIVALENCE_WORDS = ("GRADER", "GITHUB_ENV", "GITHUB_PATH", "equivalence.sh")
+EQUIVALENCE_TUNABLE = ("steps", "timeout-minutes")
 
 
 def _gates(workflows: dict[str, dict]) -> list[tuple[str, str, dict]]:
@@ -89,20 +92,23 @@ def _aggregator_problems(
             and base_id == "gate-required"
             and head_job.get("steps")
             in [
-                finish(
-                    rerun(
-                        shape(
-                            required(
-                                ci_reuse.gate_steps(
-                                    **form,
-                                    summary=summary,
-                                    docs="docs" in ci_wiring.needs_of(head_job),
-                                    watcher_loss=watcher_loss,
+                diagnostic(
+                    finish(
+                        rerun(
+                            shape(
+                                required(
+                                    ci_reuse.gate_steps(
+                                        **form,
+                                        summary=summary,
+                                        docs="docs" in ci_wiring.needs_of(head_job),
+                                        watcher_loss=watcher_loss,
+                                    )
                                 )
                             )
                         )
                     )
                 )
+                for diagnostic in (list, ci_reuse.selection_diagnostic)
                 for form in (
                     {},
                     {"selected": True},
@@ -151,7 +157,11 @@ def _duration_problems(base: dict, head: dict) -> list[str]:
             "outputs": previous.get("outputs", {}) | selection.get("outputs", {}),
             "timeout-minutes": selection.get("timeout-minutes"),
         }
-    if producer.get("steps", [])[: len(prefix)] != prefix:
+    bounded_prefix = [
+        prefix[0] | {"env": {"GIT_HTTP_LOW_SPEED_LIMIT": "1000", "GIT_HTTP_LOW_SPEED_TIME": "60"}},
+        *prefix[1:],
+    ]
+    if producer.get("steps", [])[: len(prefix)] not in (prefix, bounded_prefix):
         problems.append("The head skips reuse without protected durations provenance.")
     mutable = {"steps", "if", "runs-on"}
     problems += [
@@ -175,6 +185,13 @@ def grade(
     today: date,
     policy: object = None,
 ) -> list[str]:
+    from scripts import ci_gate_queue
+
+    try:
+        base_workflows = ci_gate_queue.normalize(base_workflows)
+        head_workflows = ci_gate_queue.normalize(head_workflows)
+    except ValueError as error:
+        return [str(error)]
     base_gates, head_gates = _gates(base_workflows), _gates(head_workflows)
     if len(base_gates) != 1:
         return [f"The base holds {len(base_gates)} jobs named {GATE}; nothing protected can grade."]
@@ -275,6 +292,27 @@ def _checkout_forms(preflight: dict) -> list[dict]:
     return forms
 
 
+def _equivalence_problems(base_workflows: dict[str, dict], head_workflows: dict[str, dict]) -> list[str]:
+    file, job_id = EQUIVALENCE
+    base, head = base_workflows.get(file) or {}, head_workflows.get(file) or {}
+    base_job, head_job = ((workflow.get("jobs") or {}).get(job_id) or {} for workflow in (base, head))
+    base_steps, head_steps = base_job.get("steps") or [], head_job.get("steps") or []
+    graded = [index for index, step in enumerate(base_steps) if "$GRADER" in str(step.get("run"))]
+    if not graded:
+        return []
+    end = graded[-1] + 1
+    if (
+        head_steps[:end] != base_steps[:end]
+        or any(word in json.dumps(step) for step in head_steps[end:] for word in EQUIVALENCE_WORDS)
+        or {key: value for key, value in head.items() if key != "jobs"}
+        != {key: value for key, value in base.items() if key != "jobs"}
+        or {key: value for key, value in head_job.items() if key not in EQUIVALENCE_TUNABLE}
+        != {key: value for key, value in base_job.items() if key not in EQUIVALENCE_TUNABLE}
+    ):
+        return ["The head changes the ledger equivalence grading; the protected branch grades with its own."]
+    return []
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--root", default=".")
@@ -298,6 +336,7 @@ def main(argv: list[str] | None = None) -> int:
     preflight = _preflight_problems(tip_workflows, head_workflows)
     governed = {"branch-lanes.yml"} if "branch-lanes.yml" in tip_workflows and not preflight else set()
     problems += preflight
+    problems += _equivalence_problems(tip_workflows, head_workflows)
     problems += [
         f"{file}: {problem}"
         for file, workflow in head_workflows.items()

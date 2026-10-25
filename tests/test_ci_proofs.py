@@ -28,6 +28,9 @@ def test_proofs_dispatch_cannot_satisfy_required_tests():
     assert all(job.get("name", key) != "Gate — Required" for key, job in workflow["jobs"].items())
     required = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())
     assert {"pull_request", "push", "merge_group", "workflow_dispatch"} <= set(required[True])
+    from scripts import ci_gate_queue
+
+    required = ci_gate_queue.normalize({"test.yml": required})["test.yml"]
     assert required["jobs"]["gate-required"]["name"] == "Gate — Required"
     assert "proof" not in required[True]["workflow_dispatch"]["inputs"]
 

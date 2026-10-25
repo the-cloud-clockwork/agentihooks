@@ -18,6 +18,7 @@ def _a_420_second_step(monkeypatch):
 
     monkeypatch.setattr(queue_shards, "STEP_SECONDS", 420)
     monkeypatch.setattr(queue_shards, "SLOWDOWN", 1.15)
+    monkeypatch.delenv("GITHUB_STEP_SUMMARY", raising=False)
 
 
 def test_the_planner_step_timeout_is_the_unit_run_tests_step_timeout():
@@ -90,6 +91,24 @@ def test_queue_sizing_splits_a_serial_group_until_it_has_half_timeout_margin(tmp
     assert len(legs) == 16
     assert [leg["shard"] for leg in legs] == list(range(1, 17))
     assert {leg["total"] for leg in legs} == {16}
+
+
+@pytest.mark.parametrize(("step", "tests", "shards", "target"), [(720, 1920, 21, 195), (300, 1200, 18, 150)])
+def test_queue_sizing_targets_195_seconds_or_half_a_shorter_step_timeout(
+    tmp_path, monkeypatch, step, tests, shards, target
+):
+    from tests import queue_shards
+
+    monkeypatch.setattr(queue_shards, "STEP_SECONDS", step)
+    path = tmp_path / "tests/test_parallel.py"
+    path.parent.mkdir()
+    path.write_text("")
+    measured = {f"tests/test_parallel.py::test_{i}": 6.0 for i in range(tests)}
+
+    plan = queue_shards.matrix(tmp_path, {"3.12": measured})
+
+    assert len(plan) == shards
+    assert max(leg["predicted_seconds"] for leg in plan) < target
 
 
 def test_queue_sizing_keeps_independent_worker_groups_parallel(tmp_path):
@@ -196,6 +215,7 @@ def test_queue_sizing_skips_counts_whose_even_share_misses_the_target(tmp_path, 
     path.parent.mkdir()
     path.write_text("")
     measured = {f"tests/test_even.py::test_{i}": 10.0 for i in range(1200)}
+    monkeypatch.setattr(queue_shards, "TARGET_SECONDS", 240)
     sized = []
     predicted = queue_shards._predicted
     monkeypatch.setattr(
@@ -217,13 +237,40 @@ def test_queue_sizing_uses_idle_runners_to_finish_serial_work_within_four_minute
     path = tmp_path / "tests/test_serial.py"
     path.parent.mkdir()
     path.write_text("import pytest\npytestmark = pytest.mark.xdist_group('serial')\n")
-    measured = {f"tests/test_serial.py::test_{i}": 90.0 for i in range(48)}
+    measured = {f"tests/test_serial.py::test_{i}": 60.0 for i in range(48)}
 
     plan = queue_shards.matrix(tmp_path, {"3.12": measured})
 
     assert len(plan) == 24
     assert {leg["total"] for leg in plan} == {24}
-    assert all(leg["predicted_seconds"] == pytest.approx(237.0, abs=0.001) for leg in plan)
+    assert all(leg["predicted_seconds"] == pytest.approx(168.0, abs=0.001) for leg in plan)
+
+
+@pytest.mark.parametrize(("seconds", "warned"), [(70.0, False), (100.0, True)])
+def test_a_capped_plan_over_the_queue_target_warns_in_the_annotations_and_the_job_summary(
+    tmp_path, monkeypatch, capsys, seconds, warned
+):
+    from tests import queue_shards
+
+    monkeypatch.setattr(queue_shards, "STEP_SECONDS", 720)
+    summary = tmp_path / "summary.md"
+    monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary))
+    path = tmp_path / "tests/test_serial.py"
+    path.parent.mkdir()
+    path.write_text("import pytest\npytestmark = pytest.mark.xdist_group('serial')\n")
+    measured = {f"tests/test_serial.py::test_{i}": seconds for i in range(48)}
+
+    plan = queue_shards.matrix(tmp_path, {"3.12": measured})
+
+    assert {leg["total"] for leg in plan} == {24}
+    message = "Python 3.12: the shard cap of 24 predicts the slowest queue shard at 260.0s, over the 195s target"
+    out = capsys.readouterr().out
+    if warned:
+        assert f"::warning title=Queue shard pool cannot reach the target::{message}\n" in out
+        assert summary.read_text() == f"{message}\n"
+    else:
+        assert "::warning" not in out
+        assert not summary.exists()
 
 
 def test_unknown_cases_use_module_maxima_and_the_global_tail_for_new_modules(tmp_path):
@@ -321,9 +368,11 @@ def test_a_forty_job_queue_plan_is_capped_to_the_twenty_four_runner_queue_pool(t
     assert "40 queue jobs exceed the pool of 24; capped at 24 shards" in capsys.readouterr().out
 
 
-def test_a_capped_queue_plan_over_the_step_timeout_warns_and_still_plans_the_pool(tmp_path, capsys):
+def test_a_capped_queue_plan_over_the_step_timeout_warns_and_still_plans_the_pool(tmp_path, capsys, monkeypatch):
     from tests.queue_shards import main
 
+    summary = tmp_path / "summary.md"
+    monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary))
     root, output = _overflowing_plan(tmp_path, 400.0)
 
     main(["combine", "--from-output", str(output), "--root", str(root), "--inputs", str(tmp_path / "queue-input")])
@@ -332,6 +381,9 @@ def test_a_capped_queue_plan_over_the_step_timeout_warns_and_still_plans_the_poo
     assert len(plan) == 24
     out = capsys.readouterr().out
     assert "::warning::The capped queue plan predicts 490.0s, over 420s of the step timeout\n" in out
+    message = "Python 3.12: the shard cap of 24 predicts the slowest queue shard at 490.0s, over the 195s target"
+    assert f"::warning title=Queue shard pool cannot reach the target::{message}\n" in out
+    assert summary.read_text() == f"{message}\n"
     assert "24 queue jobs fit one wave of 24 runners; predicted slowest test step 490.0s" in out
 
 

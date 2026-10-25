@@ -366,11 +366,37 @@ def publish(bao: openbao_kv.OpenBao, target: Path, epoch: int, number: int | Non
     return True
 
 
-def restore(stored: Mapping[str, str], target: Path) -> bool:
-    if (target / CREDENTIALS).exists() or not stored.get("grant"):
+def restore(stored: Mapping[str, str], target: Path, force: bool = False) -> bool:
+    if not stored.get("grant"):
         return False
-    _write(target / CREDENTIALS, {GRANT: json.loads(stored["grant"])})
+    grant = json.loads(stored["grant"])
+    local = _read(target / CREDENTIALS).get(GRANT) or {}
+    if grant == local:
+        return False
+    if local and not force and int(local.get("expiresAt", 0)) >= int(stored.get("generation", 0)):
+        return False
+    _write(target / CREDENTIALS, {GRANT: grant})
     _write(target / CONFIG, {**_read(target / CONFIG), ACCOUNT: json.loads(stored["account"])})
+    return True
+
+
+def recover(target: Path, environ: Mapping[str, str]) -> bool:
+    number = next((number for number in numbers() if home(number) == target), None)
+    return number is not None and restore(stored(openbao_kv.from_env(environ), number), target, force=True)
+
+
+def checked(target: Path, environ: Mapping[str, str], found: str) -> bool:
+    from scripts.routing import native_login
+
+    try:
+        native_login.check(child(environ, target), found)
+    except native_login.LoginError:
+        if not recover(target, environ):
+            return False
+        try:
+            native_login.check(child(environ, target), found)
+        except native_login.LoginError:
+            return False
     return True
 
 
@@ -481,11 +507,20 @@ def claimed_home(environ: Mapping[str, str]) -> Path | None:
     )
 
 
+def _alert(environ: Mapping[str, str], outcome: str, cwd: Path) -> None:
+    from scripts import master_login_chain as chain
+
+    alerted = _token_folder(environ) / "claude"
+    alerted.parent.mkdir(mode=PRIVATE_DIR, parents=True, exist_ok=True)
+    refused = chain.alert(environ, alerted, outcome, str(cwd))
+    if refused:
+        print(f"[agenti] operator login email refused: {refused}", file=sys.stderr)
+
+
 def prepare_launch(environ: Mapping[str, str], cwd: Path) -> tuple[Path, str] | None:
     from scripts import master_login_chain as chain
-    from scripts.routing import native_login
 
-    target = None
+    target, reported = None, None
 
     def current():
         nonlocal target
@@ -504,33 +539,38 @@ def prepare_launch(environ: Mapping[str, str], cwd: Path) -> tuple[Path, str] | 
                 target = target or claimed_home(environ)
                 return None
             raise
-        try:
-            native_login.check(child(environ, target), found)
-        except native_login.LoginError:
+        if not checked(target, environ, found):
             return None
         chain.notification(target, "current", "success")
         return target, found
 
     def browser():
-        nonlocal target
+        nonlocal target, reported
         try:
             target = target or browser_home(environ)
         except LoginRefused:
-            return "failure"
+            reported = "failure"
+            return reported
         chain.notification(target, "current", "unavailable")
-        return chain.authorize(environ, target)
+        reported = chain.authorize(environ, target)
+        return reported
 
     def token():
         if target is not None:
             release(target, environ)
+        if reported in ("captcha", "failure"):
+            _alert(environ, reported, cwd)
         return None
 
     return chain.run(current, browser, token)
 
 
+def _token_folder(environ: Mapping[str, str]) -> Path:
+    return Path(hooks_config.AGENTIHOOKS_HOME) / "master-token" / aicode_tokens.slug(environ["AGENTIHOOKS_AGENT_NAME"])
+
+
 def token_home(environ: Mapping[str, str]) -> Path:
-    name = aicode_tokens.slug(environ["AGENTIHOOKS_AGENT_NAME"])
-    folder = Path(hooks_config.AGENTIHOOKS_HOME) / "master-token" / name
+    folder = _token_folder(environ)
     with _locked(folder):
         target = _rebuild(folder, Path(environ["CLAUDE_CONFIG_DIR"]))
         (target / CREDENTIALS).unlink(missing_ok=True)

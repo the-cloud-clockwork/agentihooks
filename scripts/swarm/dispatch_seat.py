@@ -4,7 +4,7 @@ At full autonomy a trigger wakes the live seat through its inbox or, unless the 
 seat spawn helper; below full, once every trigger closes, or once the seat left the ledger, the seat is marked finished
 and the reap pass retires it. Triggers that a departed seat had received spawn no new seat; a new trigger spawns one
 primed with every open trigger. A trigger is a priority the sweep left unresolved for fifteen minutes, a bottleneck no
-lane rule covers held for the lane split's ticks, or a red dev holding blocked tasks, where a freeze or focus may be
+lane rule covers named by three reports running, or a red dev holding blocked tasks, where a freeze or focus may be
 worth proposing. A priority that waits on an operator decision, or that a dispatcher seat handed to him by raising it
 again under its own name, is no trigger.
 """
@@ -12,12 +12,12 @@ again under its own name, is no trigger.
 import json
 from dataclasses import replace
 
-from scripts.inbox.store import InboxStore
+from scripts.inbox.store import CLOSED as INBOX_CLOSED
+from scripts.inbox.store import InboxError, InboxStore
 from scripts.swarm import (
     bottleneck,
     capacity,
     dev_red,
-    lane_split,
     launch_check,
     lifetime,
     priority_sweep,
@@ -31,6 +31,8 @@ LANE = DISPATCH
 SEAT = "dispatcher"
 SENDER = "swarm"
 STALE_MS = 15 * 60 * 1000
+STREAK = "bottleneck-streak"
+TICKS = 3
 SENT = "dispatch-sent"
 LEFT = "dispatch-left"
 CLOSED = "its triggers closed"
@@ -79,17 +81,30 @@ def _routing_applied(store, slug: str, write: bool) -> bool:
 
 
 def uncovered(store, slug: str, now_ms: int, write: bool = True) -> list[dict]:
-    held = json.loads(store.redis.get(store.key(slug, lane_split.KEY)) or "{}")
+    key = store.key(slug, STREAK)
+    previous = json.loads(store.redis.get(key) or "{}")
+    found = bottleneck.read(store, slug)
+    held = streak(previous, found)
+    if write and held is not previous:
+        store.redis.set(key, json.dumps(held))
     named = held.get("named")
-    if not named or named in lane_split.MOVES or held["ticks"] < lane_split.TICKS or now_ms - held["at"] > STALE_MS:
+    if not named or held["ticks"] < TICKS or now_ms - held["at"] > STALE_MS:
         _forget_quota_lanes(store, slug, write)
         return []
     if named != "quota":
         _forget_quota_lanes(store, slug, write)
     elif _routing_applied(store, slug, write):
         return []
-    text = bottleneck.line(bottleneck.read(store, slug), now_ms)
+    text = bottleneck.line(found, now_ms)
     return [{"id": f"{BOTTLENECK}{named}", "kind": "bottleneck", "ticks": held["ticks"], "text": text}]
+
+
+def streak(previous: dict, found: dict) -> dict:
+    if not found or found.get("at") == previous.get("at"):
+        return previous
+    named = found["bottleneck"]
+    ticks = previous["ticks"] + 1 if named == previous.get("named") else 1
+    return {"named": named, "ticks": ticks, "at": found["at"]}
 
 
 def _forget_quota_lanes(store, slug: str, write: bool) -> None:
@@ -173,16 +188,46 @@ def left(seat, doc: dict) -> bool:
     return seat.name not in members and launch_check.joined_at(seat, doc) is not None
 
 
+class _NoTriggers(Exception):
+    pass
+
+
+def _launch_triggers(store, found):
+    inbox = InboxStore(store.redis)
+    live = []
+    for trigger in found:
+        if trigger.get("kind") == "inbox":
+            try:
+                item = inbox.get(trigger["item"])
+            except InboxError:
+                continue
+            if item.state in INBOX_CLOSED:
+                continue
+        live.append(trigger)
+    return live
+
+
 def _spawn(slug, config, store, runtime, found, now_ms):
+    found = _launch_triggers(store, found)
+    if not found:
+        return []
     from scripts.swarm import tick
 
     def prepare(record):
-        return tick.primed(store, slug, record.seat, {"id": SEAT, "title": "Dispatch", "triggers": found})
+        nonlocal found
+        task = tick.primed(store, slug, record.seat, {"id": SEAT, "title": "Dispatch"})
+        found = _launch_triggers(store, found)
+        if not found:
+            raise _NoTriggers
+        task["triggers"] = found
+        return task
 
     try:
         record, placed = seat_spawn.place(slug, config, store, runtime, LANE, now_ms, prepare)
     except seat_spawn.SeatFailed as failed:
         store.drop_agent(slug, failed.record.name)
+        if isinstance(failed.error, _NoTriggers):
+            return []
         return [f"dispatcher spawn failed: {failed.error}"]
     store.put_agent(slug, tick.placed_record(record, placed))
     _sent(store, slug, found)

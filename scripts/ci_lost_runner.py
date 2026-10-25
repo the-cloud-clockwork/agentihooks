@@ -10,7 +10,7 @@ from typing import IO
 
 import yaml
 
-from scripts.ci_queue_retry import _api, base_name, dependents
+from scripts.ci_queue_retry import _api, base_name, dependents, job_names, polling_jobs
 
 WORKFLOWS = Path(".github/workflows")
 OPEN = ("in_progress", "queued", "pending", "waiting", "requested")
@@ -87,7 +87,7 @@ def lost_jobs(jobs: list[dict], runners: set[str], now: datetime, grace: timedel
 
 
 def job_ids(workflow: dict) -> dict[str, str]:
-    return {base_name(spec.get("name", job_id)): job_id for job_id, spec in workflow["jobs"].items()}
+    return {base_name(name): job_id for job_id, name in job_names(workflow).items()}
 
 
 def stalled(jobs: list[dict], lost: list[dict], workflow: dict) -> tuple[bool, str]:
@@ -100,7 +100,7 @@ def stalled(jobs: list[dict], lost: list[dict], workflow: dict) -> tuple[bool, s
     for job in jobs:
         if job in lost or job["status"] == "completed":
             continue
-        if job["status"] == "in_progress":
+        if job["status"] == "in_progress" and base_name(job["name"]) not in polling_jobs(workflow):
             return False, f"{job['name']} still runs on a live runner"
         if base_name(job["name"]) not in blocked:
             return False, f"{job['name']} still waits for a runner"
