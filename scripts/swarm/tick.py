@@ -269,7 +269,8 @@ def tick(slug, store, ledger, runtime, now_ms):
             if config.state == "running" and config.engine != EVENTS_ENGINE:
                 seats = preempt.Seats(rows, _ended, _current_owner, ready_in_order)
                 actions += skip_refused(preempt.run, slug, config, store, doc, now_ms, seats)
-                actions += skip_refused(_spawn, slug, config, store, ledger, runtime, rows, doc, now_ms)
+                with _placement_pass(runtime):
+                    actions += skip_refused(_spawn, slug, config, store, ledger, runtime, rows, doc, now_ms)
         actions += skip_refused(dispatch_seat.run, slug, config, store, runtime, doc, now_ms, sleeping)
     actions += skip_refused(_night_watch, slug, store, ledger, runtime, doc, now_ms, sleeping)
     actions += timing.call(master_alarm.run, slug, store, runtime, tick_master.promoted(store, slug))
@@ -1101,6 +1102,15 @@ def _owner_hold(slug, store, runtime, task):
     return f"task {task['id']} retains its live owner"
 
 
+@contextmanager
+def _placement_pass(runtime):
+    try:
+        yield
+    finally:
+        if end := getattr(runtime, "end_placement_pass", None):
+            end()
+
+
 def _spawn(slug, config, store, ledger, runtime, rows, doc, now_ms):
     agents = store.agents(slug)
     taken = {a.seat for a in agents}
@@ -1408,6 +1418,9 @@ def _collect_acks(slug, config, store, ledger, runtime, doc, now_ms):
 
 def _spawn_order(slug, config, store, agents, rows, doc, runtime):
     from scripts.swarm import capacity
+
+    if begin := getattr(runtime, "begin_placement_pass", None):
+        begin()
 
     decision = timing.timed(capacity.read, store, slug)
     caps = timing.timed(capacity.caps, decision, config)

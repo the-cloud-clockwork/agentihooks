@@ -129,7 +129,7 @@ def test_the_launcher_reads_the_access_token_at_start_and_holds_no_value(tmp_pat
 
     text = _launcher(tmp_path, {PART_NAME: "held-one", PART_FIELD: "held-two"})
 
-    command = shlex.join([sys.executable, "-m", "scripts.access_env", "env"])
+    command = shlex.join([sys.executable, "-P", "-m", "scripts.access_env", "env"])
     line = f'eval "$({command})"\n'
     assert init_agent._access_export() == line
     assert line in text.splitlines(keepends=True)

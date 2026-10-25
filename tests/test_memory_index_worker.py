@@ -79,6 +79,9 @@ def test_a_generation_binds_one_model_and_dimension(inputs, tmp_path):
     worker = index.worker
     expected = {"index_generation": GENERATION, "model": MODEL.model, "dimension": 4}
     assert worker.register(DOMAIN, GENERATION, MODEL) == expected
+    assert worker.model(DOMAIN, GENERATION) == MODEL
+    with pytest.raises(Conflict, match=f"^{index_worker.UNKNOWN_INDEX}$"):
+        worker.model(DOMAIN, "missing")
     assert worker.snapshot()["index_generation"] == [(DOMAIN, GENERATION, MODEL.model, 4, 0)]
     for other in (EmbeddingModel(MODEL.model, 5), EmbeddingModel("other", 4)):
         with pytest.raises(Conflict, match=f"^{index_worker.GENERATION_CONFLICT}$"):

@@ -415,7 +415,12 @@ def test_a_mode_file_that_is_not_an_object_holds_the_question_tool_off(tmp_path,
     )
 
 
-REMINDER = "Operator not present: replies stay within 20 words."
+AWAY = (
+    "Operator not present: he never reads this pane. End the turn with no report, summary or ask addressed to him "
+    "and skip the response template; any pane text stays within {words} words. "
+    "Put anything he must decide only in Priorities with agentihooks ledger priority add."
+)
+REMINDER = AWAY.format(words=20)
 
 
 def test_while_off_a_one_line_reminder_comes_every_second_tool_call():
@@ -427,21 +432,18 @@ def test_while_off_a_one_line_reminder_comes_every_second_tool_call():
 def test_the_away_word_limit_defaults_to_twenty_and_reads_the_environment(monkeypatch):
     monkeypatch.delenv("AGENTIHOOKS_OPERATOR_OFF_MAX_WORDS", raising=False)
     assert operator_mode.reminder("default", SWARM, now=100) == ""
-    assert operator_mode.reminder("default", SWARM, now=100) == "Operator not present: replies stay within 20 words."
+    assert operator_mode.reminder("default", SWARM, now=100) == REMINDER
     monkeypatch.setenv("AGENTIHOOKS_OPERATOR_OFF_MAX_WORDS", "35")
     assert operator_mode.reminder("default", now=100, environ=SWARM) == ""
-    assert (
-        operator_mode.reminder("default", now=100, environ=SWARM)
-        == "Operator not present: replies stay within 20 words."
-    )
+    assert operator_mode.reminder("default", now=100, environ=SWARM) == REMINDER
     for key, value in SWARM.items():
         monkeypatch.setenv(key, value)
     assert operator_mode.reminder("custom", now=100) == ""
-    assert operator_mode.reminder("custom", now=100) == "Operator not present: replies stay within 35 words."
+    assert operator_mode.reminder("custom", now=100) == AWAY.format(words=35)
 
 
 def test_every_away_prompt_injects_the_reminder_without_consuming_tool_calls(monkeypatch, capsys):
-    expected = "Operator not present: replies stay within 20 words."
+    expected = REMINDER
     first = run_prompt(monkeypatch, capsys, "s1", delivery.marked("continue"))
     second = run_prompt(monkeypatch, capsys, "s1", delivery.marked("continue"))
     assert first.count(expected) == 1
@@ -458,14 +460,14 @@ def test_prompt_reminders_use_the_configured_limit_uncompressed_and_unlogged(mon
     hook_manager._operator_mode({"session_id": "s1", "prompt": delivery.marked("continue")}, False)
     assert injected == [
         (
-            ("Operator not present: replies stay within 35 words.",),
+            (AWAY.format(words=35),),
             {"also_log": False, "skip_compression": True, "kind": "alert"},
         )
     ]
 
 
 def test_a_typed_prompt_uncaps_only_its_reply_turn(monkeypatch, capsys):
-    expected = "Operator not present: replies stay within 20 words."
+    expected = REMINDER
     typed_notice = "Operator present for this turn: reply without a word limit."
     run_prompt(monkeypatch, capsys, "s1", "You are master@a1-1, the master of swarm demo")
     run_prompt(monkeypatch, capsys, "s1", delivery.marked("continue"))
@@ -485,6 +487,36 @@ def test_a_typed_prompt_uncaps_only_its_reply_turn(monkeypatch, capsys):
     assert operator_mode.question_block("AskUserQuestion", "s1", SWARM) == MASTER_ASK.format(
         slug="demo", name="master@a1-1"
     )
+
+
+def test_away_turns_end_without_a_report_to_him_and_a_typed_turn_keeps_normal_replies(monkeypatch, capsys):
+    run_prompt(monkeypatch, capsys, "s1", "You are master@a1-1, the master of swarm demo")
+    away = run_prompt(monkeypatch, capsys, "s1", delivery.marked("continue"))
+    assert "End the turn with no report, summary or ask addressed to him" in away
+    assert "Put anything he must decide only in Priorities" in away
+    present = run_prompt(monkeypatch, capsys, "s1", "Explain the result")
+    assert operator_mode.TURN_NOTICE in present
+    assert "addressed to him" not in present
+    assert "only in Priorities" not in present
+
+
+def test_an_away_worker_routes_his_decisions_to_a_ledger_question_never_priorities(ledgers):
+    env = {"AGENTIHOOKS_SWARM": "demo", "AGENTIHOOKS_AGENT_NAME": "engineer@a1-2", "LEDGER_DIR": str(ledgers)}
+    text = [operator_mode.reminder("w1", env, now=100) for _ in range(2)][1]
+    assert "End the turn with no report, summary or ask addressed to him" in text
+    assert "agentihooks ledger question add" in text
+    assert "Priorities" not in text
+
+
+def test_the_session_binding_picks_the_route_over_the_environment_name(ledgers, monkeypatch, capsys):
+    (ledgers / ".sessions" / "w1.json").write_text(json.dumps({"slug": "demo", "name": "engineer@a1-2"}))
+    (ledgers / ".sessions" / "m1.json").write_text(json.dumps({"slug": "demo", "name": "master@a1-1"}))
+    out = run_prompt(monkeypatch, capsys, "w1", delivery.marked("continue"))
+    assert operator_mode.WORKER_ROUTE in out
+    assert operator_mode.MASTER_ROUTE not in out
+    env = {"AGENTIHOOKS_SWARM": "demo", "AGENTIHOOKS_AGENT_NAME": "engineer@a1-2", "LEDGER_DIR": str(ledgers)}
+    text = [operator_mode.reminder("m1", env, now=100) for _ in range(2)][1]
+    assert text.endswith(operator_mode.MASTER_ROUTE)
 
 
 def test_only_typed_operator_on_opens_the_question_tool_and_no_other_prompt_does(monkeypatch, capsys):

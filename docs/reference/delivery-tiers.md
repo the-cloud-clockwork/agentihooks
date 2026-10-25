@@ -355,7 +355,7 @@ python -m tests.queue_shards combine --from-output queue-plan.txt --root . --inp
 
 | Setting | Value | Where it comes from |
 |---|---|---|
-| `MAX_SHARDS` | 24 | The `maxRunners` of the antoncore `anton-oss-queue` scale set, less the queue tier jobs that run during the unit stage (none today) |
+| `MAX_SHARDS` | 40 | The 48 `maxRunners` of the antoncore `anton-oss-queue` scale set, less `split` and `test-count`, the other merge group jobs on that pool, with six runners spare for an overlapping group's planning jobs |
 | `STEP_SECONDS` | 720 | The `timeout-minutes` of the `unit` job's `Run tests` step, 12 minutes, read from `.github/workflows/test.yml` at import; see [Step timeout limits](#step-timeout-limits) |
 | `TARGET_SECONDS` | 195 | The slowest shard the planner sizes for: 15 s under the 210 s acceptance, because merge group runs [40119907157](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/40119907157) and [40119162144](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/40119162144) after pull request [6707](https://github.com/the-cloud-clockwork/agentihooks/pull/6707) predicted 240 s and 264 s against a slowest `Run tests` step of 239 s and 242 s |
 | Half step timeout | 360 s | The most a plan may predict before `combine` refuses it; also the sizing target when lower than `TARGET_SECONDS` |
@@ -364,21 +364,21 @@ python -m tests.queue_shards combine --from-output queue-plan.txt --root . --inp
 
 ### What combine decides
 
-Every plan that is not refused ends with the line `<n> queue jobs fit one wave of 24 runners; predicted slowest test step <s>s`; a capped plan prints its warnings before it.
+Every plan that is not refused ends with the line `<n> queue jobs fit one wave of 40 runners; predicted slowest test step <s>s`; a capped plan prints its warnings before it.
 
 | Plan | Outcome | Log line |
 |---|---|---|
-| At most 24 jobs, slowest under 360 s | Runs as one wave | `<n> queue jobs fit one wave of 24 runners; predicted slowest test step <s>s` |
-| At most 24 jobs, slowest at or over 360 s | The step fails and the merge group goes red | `Queue plan exceeds 360s of the step timeout: <s>s` |
-| More than 24 jobs, from `--from-output` with `--root` and `--inputs` | Replanned at 24 shards for every version and written back to `queue-plan.txt` | `::warning::<n> queue jobs exceed the pool of 24; capped at 24 shards` |
-| Capped plan whose slowest shard reaches 720 s | Still runs at 24 shards, with a warning | `::warning::The capped queue plan predicts <s>s, over 720s of the step timeout` |
-| More than 24 jobs from `--plans` | Refused | `<n> queue jobs exceed the pool of 24` |
+| At most 40 jobs, slowest under 360 s | Runs as one wave | `<n> queue jobs fit one wave of 40 runners; predicted slowest test step <s>s` |
+| At most 40 jobs, slowest at or over 360 s | The step fails and the merge group goes red | `Queue plan exceeds 360s of the step timeout: <s>s` |
+| More than 40 jobs, from `--from-output` with `--root` and `--inputs` | Replanned at 40 shards for every version and written back to `queue-plan.txt` | `::warning::<n> queue jobs exceed the pool of 40; capped at 40 shards` |
+| Capped plan whose slowest shard reaches 720 s | Still runs at 40 shards, with a warning | `::warning::The capped queue plan predicts <s>s, over 720s of the step timeout` |
+| More than 40 jobs from `--plans` | Refused | `<n> queue jobs exceed the pool of 40` |
 
-The capped path caps the total across Python versions, not each version, so two versions share the 24 runners. With 3.12 alone the first command already stops at 24, so a plan that cannot reach 360 s at 24 shards is refused rather than capped. A single test too slow to fit any shard produces that refusal.
+The capped path caps the total across Python versions, not each version, so two versions share the 40 runners. With 3.12 alone the first command already stops at 40, so a plan that cannot reach 360 s at 40 shards is refused rather than capped. A single test too slow to fit any shard produces that refusal.
 
 ### Changing the pool
 
-`MAX_SHARDS` must equal the queue pool `maxRunners` less any queue pool job that runs at the same time as the unit stage. When the antoncore scale set changes, change `MAX_SHARDS` in `tests/queue_shards.py` by pull request in the same window. Raising the pool is an antoncore change and stays with the operator. `tests/test_queue_shards.py` pins the cap: `test_a_forty_job_queue_plan_is_capped_to_the_twenty_four_runner_queue_pool` plants a 40 job plan and expects `40 queue jobs exceed the pool of 24; capped at 24 shards`.
+`MAX_SHARDS` must equal the queue pool `maxRunners` less any queue pool job that runs at the same time as the unit stage. When the antoncore scale set changes, change `MAX_SHARDS` in `tests/queue_shards.py` by pull request in the same window. Raising the pool is an antoncore change and stays with the operator. `tests/test_queue_shards.py` pins the cap: `test_a_fifty_job_queue_plan_is_capped_to_the_forty_shard_queue_pool` plants a 50 job plan and expects `50 queue jobs exceed the pool of 40; capped at 40 shards`.
 
 ### Checking a queue shard run
 
@@ -390,7 +390,7 @@ gh api "repos/the-cloud-clockwork/agentihooks/actions/runs/$run/attempts/1/jobs"
   --jq '.jobs[] | select(.name | startswith("unit (")) | [.name, .created_at, .started_at, .completed_at] | @tsv'
 ```
 
-A shard's runner wait is `started_at` minus `created_at`. Count the shards: more than 24, or start times that fall into two groups minutes apart, means a second wave. The Doctor measure prints the run attempt's queue tier wall time in seconds:
+A shard's runner wait is `started_at` minus `created_at`. Count the shards: more than 40, or start times that fall into two groups minutes apart, means a second wave. The Doctor measure prints the run attempt's queue tier wall time in seconds:
 
 ```bash
 agentihooks doctor rig-grade-swarm measure "ci-tier-wall-time/<run id>-<attempt>"
@@ -448,15 +448,15 @@ That night's groups still ran Python 3.11 and 3.12 legs inside the same 30 shard
 
 A group's other shards in flight at its unit start is the number of other groups' unit shards whose `created_at` is before that group's first shard `created_at` and whose `completed_at` is after it. A group whose shards wait over a minute with that number over 10 is sharing the pool with another group; a wait with that number under 10 does not come from another merge group.
 
-The queue pool changed after the finding: antoncore pull request [1036](https://github.com/the-cloud-clockwork/antoncore/pull/1036), merged 21 October, sets `anton-oss-queue` to `minRunners` 12 and `maxRunners` 18 in `values-oss-queue.yaml`; the scale set has since moved to `maxRunners` 24, which `MAX_SHARDS` matches. Compare the two before reading a shard wait against the numbers above.
+The queue pool changed after the finding: antoncore pull request [1036](https://github.com/the-cloud-clockwork/antoncore/pull/1036), merged 21 October, sets `anton-oss-queue` to `minRunners` 12 and `maxRunners` 18 in `values-oss-queue.yaml`; the scale set has since moved to `maxRunners` 48 (antoncore pull request [1245](https://github.com/the-cloud-clockwork/antoncore/pull/1245)), and `MAX_SHARDS` 40 leaves room for `split` and `test-count`, the other merge group jobs on that pool. Compare the two before reading a shard wait against the numbers above.
 
 ### Troubleshooting queue shard sizing
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| `Queue plan exceeds 360s of the step timeout` | 24 shards cannot bring the slowest shard under half the step timeout, often one slow test or a slow serial group | Split or speed up the slow test file; the planner log names the predicted seconds |
-| Shards wait minutes for a runner while each group plans 24 or fewer | Several merge groups build at once and share the 24 runners; the queue builds up to five entries at a time | Read the runner waits of every group running in the same minutes before changing the plan; see [Concurrent merge groups on one pool](#concurrent-merge-groups-on-one-pool) |
-| More than 24 `unit` jobs in one run | `MAX_SHARDS` no longer matches the pool, or a second Python version was added without the capped path | Compare `MAX_SHARDS` with the antoncore scale set `maxRunners` |
+| `Queue plan exceeds 360s of the step timeout` | 40 shards cannot bring the slowest shard under half the step timeout, often one slow test or a slow serial group | Split or speed up the slow test file; the planner log names the predicted seconds |
+| Shards wait minutes for a runner while each group plans 40 or fewer | Several merge groups build at once and share the 48 runners; the queue builds up to five entries at a time | Read the runner waits of every group running in the same minutes before changing the plan; see [Concurrent merge groups on one pool](#concurrent-merge-groups-on-one-pool) |
+| More than 40 `unit` jobs in one run | `MAX_SHARDS` no longer matches the pool, or a second Python version was added without the capped path | Compare `MAX_SHARDS` with the antoncore scale set `maxRunners` |
 
 ### Delivery evidence
 
@@ -1013,12 +1013,7 @@ Replace the example run ID with the intended run. Repeat `--run-id` to select se
 
 ## Queue rebuild records
 
-GitHub rebuilds a merge group whenever an entry ahead of it changes: an enqueue or priority insertion ahead, a dequeue, a requeue, a removal ahead or a push to the base. The rebuilt group gets a new head commit, and the Tests run still building the old head is cancelled. On 16 October a priority insertion rebuilt three group chains and cancelled 195.550 runner minutes, and no record named the action that caused it ([issue 4282](https://github.com/the-cloud-clockwork/agentihooks/issues/4282)). Two records now keep that link:
-
-- the **queue journal**, written on the machine running the swarm tooling for every queue mutation that tooling performs, and
-- the **watcher record**, written in CI by the stale group watcher before it cancels a run whose group is no longer current.
-
-Neither record changes what the queue does. Both were delivered by [pull request 4355](https://github.com/the-cloud-clockwork/agentihooks/pull/4355); [pull request 5706](https://github.com/the-cloud-clockwork/agentihooks/pull/5706) added the removal ahead cause.
+GitHub rebuilds a merge group whenever an entry ahead of it changes: an enqueue or priority insertion ahead, a dequeue, a requeue, a removal ahead or a push to the base. The rebuilt group gets a new head commit, and the Tests run still building the old head is cancelled. On 16 October a priority insertion rebuilt three group chains and cancelled 195.550 runner minutes, and no record named the action that caused it ([issue 4282](https://github.com/the-cloud-clockwork/agentihooks/issues/4282)). The **queue journal**, written on the machine running the swarm tooling for every queue mutation that tooling performs, keeps that link. It does not change what the queue does. It was delivered by [pull request 4355](https://github.com/the-cloud-clockwork/agentihooks/pull/4355).
 
 ### The queue journal
 
@@ -1073,7 +1068,7 @@ jq -c 'select(.action == "priority") | {at, token_actor, agent, pull, steps, err
   ~/.agentihooks/merge-queue-events.jsonl | tail -1
 ```
 
-List every swarm mutation inside a cancelled run's window, taking `started` and `at` from its watcher record:
+List every swarm mutation inside a cancelled run's window, taking `<started>` and `<at>` from the run's start and completion times:
 
 ```bash
 jq -c --arg from "<started>" --arg to "<at>" \
@@ -1083,64 +1078,10 @@ jq -c --arg from "<started>" --arg to "<at>" \
 
 An empty result means no swarm tooling on this machine changed the queue while the run built.
 
-### The watcher record
-
-The `queue-fail-fast` job of every merge group Tests run polls its queue ref. When the ref no longer points at the run's commit, the group was rebuilt and the run can no longer merge. Before cancelling, the job runs `python3 -m scripts.ci_queue_rebuild <observed ref head>`, which reads, on the job's App token:
-
-1. the run's start time and the first parent of the run's commit (`old_parent`),
-2. every page of the `dev` merge queue,
-3. the last 20 merge queue add and removal events of this pull request, and
-4. the pull request whose merge group run built `old_parent`, and its last 20 queue events.
-
-The App token carries `permission-pull-requests: read` for these reads. Each read times out after 20 seconds.
-
-The record is printed on one log line beginning `queue-rebuild ` and appended to the job summary under the heading `Queue rebuild queue-rebuild-<run id>-<attempt>`. Its fields:
-
-| Field | Meaning |
-|---|---|
-| `id` | `queue-rebuild-<run id>-<run attempt>` |
-| `at`, `started` | The record time and the run's start time, which bound the event window |
-| `ref`, `pull` | The queue ref and the pull request it names |
-| `old_head`, `old_parent` | The cancelled run's commit and its first parent: the previous group head in a chain, not necessarily `dev` |
-| `observed_ref_head` | The ref head the watcher saw |
-| `new_head`, `new_base`, `expected_head` | This pull request's current group head and base, and its pull request head; `null` when it left the queue |
-| `cause` | The linked cause below |
-| `groups` | The whole queue, in the journal's group format |
-
-Only queue events inside the run window, deduplicated by event ID, name a cause. The first row that matches decides:
-
-| `cause.action` | When | Also carries |
-|---|---|---|
-| `dequeue` | The pull request left the queue and was removed during the run | `actor`, `reason`, `at`, `events` |
-| `unknown` | The pull request left the queue with no removal event | `gap` |
-| `requeue` | It was removed and added again during the run, the add last | `actor` of the add, `removed_reason`, `at`, `events` |
-| `unknown` | The pull request ahead could not be read | `gap` |
-| `removed_ahead` | The pull request whose group built `old_parent` was removed during the run | `pull`, `actor`, `reason`, `at`, `events` |
-| `unknown` | Entries ahead were enqueued during the run | `gap`, and `correlated`: each entry's `pull`, `enqueuer`, `enqueued_at` and `jump` |
-| `unknown` | None of the above | `gap` naming what queue entries cannot show: a removal ahead with no queue run at the old parent, a base push or a ruleset change |
-
-A correlated entry is evidence, not a cause: GitHub records no event linking an enqueue ahead to the rebuild it caused. Any failed read makes the cause `unknown` with the gap `queue unreadable: <error>`.
-
-The cancellation names the record. From run [39708426310](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39708426310):
-
-```text
-FAILED: queue group is no longer current (record queue-rebuild-39708426310-1: unknown cause: no entry ahead was enqueued and this pull request was not removed while the group ran; ...)
-```
-
-The other causes read `dequeue by <actor> (<reason>)`, `requeue by <actor>` and `removal of <url> ahead by <actor> (<reason>)`; a correlated unknown appends `; jump of <url> by <login> at <time>` or `; enqueue of <url> by <login> at <time>` for each entry. When the record cannot be produced at all the cancellation reads `queue group is no longer current (record unavailable)`, and the run is still cancelled.
-
-Read a record from its job log:
-
-```bash
-gh api repos/<owner>/<repo>/actions/jobs/<queue-fail-fast job id>/logs \
-  | grep -m1 'queue-rebuild {' | sed 's/.*queue-rebuild //' | jq '{id, started, at, old_head, cause}'
-```
-
 ### Limits
 
-- A native enqueue, jump or dequeue made outside the swarm tooling, from the GitHub interface or a plain `gh` call, is journaled by nothing; the watcher sees it only through queue events and entries when a rebuild cancels a run.
-- A removal ahead whose group never ran at `old_parent`, a base push and a ruleset change stay `unknown` with that gap.
-- The journal lives only on the machine that ran the tooling. The watcher record lives only in the run log and job summary.
+- A native enqueue, jump or dequeue made outside the swarm tooling, from the GitHub interface or a plain `gh` call, is journaled by nothing.
+- The journal lives only on the machine that ran the tooling.
 - Journal records are not deduplicated against GitHub events: each mutation call writes one record.
 - `merge priority` reorders with dequeue and requeue, never GitHub's native `jump`, so its insertions appear as `steps`, not as `jump: true` entries.
 
@@ -1160,8 +1101,6 @@ Every cancelled run falls into one of two kinds:
 - **Rebuild caused by another entry.** No job of the run failed; GitHub rebuilt the group because an entry ahead of it left the queue, and cancelled the run building the old head. The trigger is the removal event of the entry ahead whose time falls inside the run: `failed_checks`, a removal by hand or a priority move (`manual`), or `checks_timed_out`.
 
 A cancelled run with no failed job and no removal ahead inside its window stays unattributed: an enqueue ahead, a base push or a ruleset change leaves no queue event that names it. Wall minutes are the run's own duration; runner minutes are the sum of its jobs' durations.
-
-The [queue rebuild records](#queue-rebuild-records) now name the cause of each rebuild cancellation directly in the watcher record; the removal ahead cause arrived with pull request 5706 on 22 October, after this measurement, which attributed rebuilds by hand from the same queue events.
 
 ### Counts and costs
 
