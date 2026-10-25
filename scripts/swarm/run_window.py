@@ -2,6 +2,7 @@
 cutoff logs or enforces the window gate and publishes the final state to the ledger and the watchdog. Only swarm set
 writes the window, so the tick never extends it."""
 
+import hashlib
 import json
 from collections import Counter
 from dataclasses import dataclass
@@ -10,7 +11,7 @@ from datetime import UTC, datetime
 from scripts.gates import Who, modes
 from scripts.gates import log as gate_log
 from scripts.inbox.seats import seat_address
-from scripts.inbox.store import InboxStore
+from scripts.inbox.store import DuplicateItem, InboxStore
 from scripts.swarm import capacity, doc_report
 from scripts.swarm.store import MASTER, SwarmError
 
@@ -47,8 +48,13 @@ ASK = (
 )
 STOPPED = "the run window ended at {end}, no new claims until swarm set changes the window"
 FINAL = (
-    "Final handoff for the run window on swarm {slug}, {start} to {end}, window gate {mode}. Tasks by state: "
-    "{counts}. In flight at the cutoff: {flying}. Next: {next}"
+    "## Intent\nRun window on swarm {slug}, {start} to {end}, window gate {mode}.\n\n"
+    "## Done\nTasks by state: {counts}.\n\n"
+    "## Stopped at\nIn flight at the cutoff: {flying}.\n\n"
+    "## Decisions and promises\nOnly swarm set changes the window.\n\n"
+    "## Next\n{next}\n\n"
+    "## Read first\n{read}\n\n"
+    "<!-- handoff complete -->"
 )
 
 
@@ -119,17 +125,17 @@ def step(slug, config, store, ledger, doc, now_ms) -> list[str]:
         marks = {"window": window}
     progress = report(config.window, now_ms)
     marks.update(elapsed_minutes=progress["elapsed_minutes"], remaining_minutes=progress["remaining_minutes"])
-    actions = []
-    if bounds[1] - now_ms <= ALERT_MINUTES * MINUTE_MS and "alerted" not in marks:
-        marks["alerted"] = now_ms
+    _save(store, key, marks)
+    rows, actions = {row["id"]: row for row in doc.get("tasks") or []}, []
+    if now_ms < bounds[1] <= now_ms + ALERT_MINUTES * MINUTE_MS and "alerted" not in marks:
+        _save(store, key, marks, alerted=now_ms)
         actions.append(_alert(slug, config, store, bounds, progress["remaining_minutes"]))
     if now_ms >= bounds[1] and "cutoff" not in marks:
-        marks["cutoff"] = now_ms
-        actions += _cutoff(slug, config, store, ledger, doc, bounds, now_ms)
-    pipe = store.redis.pipeline()
-    pipe.delete(key)
-    pipe.hset(key, mapping=marks)
-    pipe.execute()
+        _save(store, key, marks, cutoff=now_ms)
+        actions += _gate(slug, config, store, rows, bounds, now_ms)
+    if now_ms >= bounds[1] and "published" not in marks:
+        actions.append(_publish(slug, config, store, ledger, rows, bounds))
+        _save(store, key, marks, published=now_ms)
     return actions
 
 
@@ -154,6 +160,7 @@ def final(slug, mode, bounds, rows, flying) -> str:
         counts=", ".join(f"{count} {state}" for state, count in sorted(counts.items())) or "none",
         flying="; ".join(f"{a.name} on {a.task} {rows[a.task].get('title', '')}".strip() for a in flying) or "none",
         next=NEXT[mode],
+        read="\n".join(f"- ledger:{slug}/tasks/{a.task}" for a in flying) or "None",
     )
 
 
@@ -169,10 +176,9 @@ def _alert(slug, config, store, bounds, minutes):
     return f"run window: told {master} it ends at {end}"
 
 
-def _cutoff(slug, config, store, ledger, doc, bounds, now_ms):
+def _gate(slug, config, store, rows, bounds, now_ms):
     mode, end = modes.configured(GATE, config.gates), _spoken(bounds[1])
-    rows = {row["id"]: row for row in doc.get("tasks") or []}
-    flying, inbox, actions = in_flight(store, slug, rows), InboxStore(store.redis), []
+    flying, actions = in_flight(store, slug, rows), []
     if mode != "off":
         kind = "deny" if mode == "enforce" else "observe"
         names = ", ".join(agent.name for agent in flying) or "none"
@@ -180,12 +186,32 @@ def _cutoff(slug, config, store, ledger, doc, bounds, now_ms):
         gate_log.append(slug, gate_log.Row.of(GATE.name, kind, Who(name=SENDER), reason=reason, now_ms=now_ms))
         actions.append(f"run window: {kind} at the cutoff: {reason}")
     if mode == "enforce":
+        inbox = InboxStore(store.redis)
         for agent in flying:
             text = ASK.format(slug=slug, end=end, task=agent.task)
             inbox.send(SENDER, agent.name, text, ref=f"{slug}:{KEY}:{agent.task}", task=agent.task)
         actions.append(f"run window: asked {len(flying)} agents in flight to hand off")
-    text = final(slug, mode, bounds, rows, flying)
-    ledger.notify(slug, text.replace("-", " ").replace("@", " "))
-    inbox.send(SENDER, doc_report.address(), text, ref=f"{slug}:{KEY}:final:{bounds[0]}")
-    actions.append("run window: published the final state to the ledger and the watchdog")
     return actions
+
+
+def _publish(slug, config, store, ledger, rows, bounds):
+    text = final(slug, modes.configured(GATE, config.gates), bounds, rows, in_flight(store, slug, rows))
+    ref = f"{slug}:{KEY}:final:{bounds[0]}"
+    try:
+        InboxStore(store.redis).send(SENDER, doc_report.address(), text, ref=ref, item_id=_item_id(ref))
+    except DuplicateItem:
+        pass
+    ledger.notify(slug, text)
+    return "run window: published the final state to the ledger and the watchdog"
+
+
+def _item_id(ref: str) -> str:
+    return hashlib.sha256(ref.encode()).hexdigest()[:12]
+
+
+def _save(store, key, marks, **stamp):
+    marks.update(stamp)
+    pipe = store.redis.pipeline()
+    pipe.delete(key)
+    pipe.hset(key, mapping=marks)
+    pipe.execute()

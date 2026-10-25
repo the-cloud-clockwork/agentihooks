@@ -160,9 +160,13 @@ def test_the_master_hears_once_before_the_cutoff(swarm):
 
 
 FINAL_OBSERVE = (
-    "Final handoff for the run window on swarm sw, 25 October 00:00 UTC to 25 October 12:00 UTC, window gate log "
-    "only. Tasks by state: 1 claimed, 1 done, 1 open. In flight at the cutoff: engineer@abc-0001 on t1 Fix the claim. "
-    "Next: the gate only logged, so claims continue; set window-gate=deny to enforce the next cutoff."
+    "## Intent\nRun window on swarm sw, 25 October 00:00 UTC to 25 October 12:00 UTC, window gate log only.\n\n"
+    "## Done\nTasks by state: 1 claimed, 1 done, 1 open.\n\n"
+    "## Stopped at\nIn flight at the cutoff: engineer@abc-0001 on t1 Fix the claim.\n\n"
+    "## Decisions and promises\nOnly swarm set changes the window.\n\n"
+    "## Next\nthe gate only logged, so claims continue; set window-gate=deny to enforce the next cutoff.\n\n"
+    "## Read first\n- ledger:sw/tasks/t1\n\n"
+    "<!-- handoff complete -->"
 )
 
 
@@ -185,7 +189,7 @@ def test_the_cutoff_logs_only_and_publishes_the_final_handoff(swarm):
     }
     assert _items(store, OWNER) == []
     assert run_window.claims_stopped(store.config(SLUG), END) == ""
-    assert ledger.notices == [FINAL_OBSERVE.replace("-", " ").replace("@", " ")]
+    assert ledger.notices == [FINAL_OBSERVE]
     assert _items(store, "master-watchdog") == [FINAL_OBSERVE]
     assert _step(store, ledger, END + MINUTE) == []
     assert len(gate_log.recent(SLUG)) == 1 and len(ledger.notices) == 1
@@ -195,9 +199,8 @@ def test_the_cutoff_logs_only_and_publishes_the_final_handoff(swarm):
 def test_an_enforced_cutoff_stops_claims_and_asks_agents_to_hand_off(swarm):
     store, ledger = swarm
     actions = _step(store, ledger, END, gates={"window": "enforce"})
-    assert actions[0] == "run window: told master@sw it ends at 25 October 12:00 UTC"
-    assert actions[1].startswith("run window: deny at the cutoff: ")
-    assert actions[2:] == [
+    assert actions[0].startswith("run window: deny at the cutoff: ")
+    assert actions[1:] == [
         "run window: asked 1 agents in flight to hand off",
         "run window: published the final state to the ledger and the watchdog",
     ]
@@ -207,8 +210,9 @@ def test_an_enforced_cutoff_stops_claims_and_asks_agents_to_hand_off(swarm):
         "agentihooks swarm sw publish, write a Handoff v2 for task t1, run agentihooks swarm sw handoff <doc> and "
         "stop. No new task starts until swarm set changes the window."
     ]
-    assert ledger.notices[0].endswith(
-        "Next: the agents in flight hand off and no new task starts until swarm set changes the window."
+    assert (
+        "## Next\nthe agents in flight hand off and no new task starts until swarm set changes the window.\n\n"
+        in ledger.notices[0]
     )
     config = store.config(SLUG)
     assert run_window.claims_stopped(config, END - 1) == ""
@@ -223,11 +227,13 @@ def test_an_enforced_cutoff_stops_claims_and_asks_agents_to_hand_off(swarm):
 def test_an_off_gate_skips_the_gate_and_still_publishes_the_final_handoff(swarm):
     store, ledger = swarm
     assert _step(store, ledger, END, gates={"window": "off"}) == [
-        "run window: told master@sw it ends at 25 October 12:00 UTC",
         "run window: published the final state to the ledger and the watchdog",
     ]
     assert gate_log.recent(SLUG) == [] and _items(store, OWNER) == []
-    assert ledger.notices[0].endswith("Next: the gate is off, so claims continue.")
+    assert (
+        "## Next\nthe gate is off, so claims continue.\n\n## Read first\n- ledger:sw/tasks/t1\n\n" in ledger.notices[0]
+    )
+    assert _items(store, "master@sw") == []
     assert run_window.claims_stopped(store.update(SLUG, gates={"window": "off"}), END) == ""
 
 
@@ -238,7 +244,7 @@ def test_only_swarm_set_extends_the_window_and_a_new_window_starts_fresh(swarm):
     assert run_window.claims_stopped(config, END) == ""
     assert _step(store, ledger, END + MINUTE) == []
     assert store.redis.hget(store.key(SLUG, "run-window"), "cutoff") is None
-    assert len(_step(store, ledger, END + 60 * MINUTE)) == 4
+    assert len(_step(store, ledger, END + 60 * MINUTE)) == 3
 
 
 def test_the_tick_refuses_new_claims_after_an_enforced_cutoff(swarm):
@@ -272,3 +278,53 @@ def test_a_bad_setting_raises_a_swarm_error():
     with pytest.raises(SwarmError) as caught:
         run_window.setting({}, "window-minutes", "-1", START)
     assert str(caught.value) == "window-minutes takes a whole number of minutes above 0"
+
+
+class RefusingLedger(Ledger):
+    def __init__(self):
+        super().__init__()
+        self.refuse = True
+
+    def notify(self, slug, text):
+        if self.refuse:
+            self.refuse = False
+            raise RuntimeError("ledger refused")
+        super().notify(slug, text)
+
+
+def test_a_failed_publish_retries_without_repeating_the_gate_or_the_watchdog(swarm):
+    store, _ = swarm
+    ledger = RefusingLedger()
+    _step(store, ledger, ALERT_AT)
+    with pytest.raises(RuntimeError):
+        _step(store, ledger, END)
+    marks = store.redis.hgetall(store.key(SLUG, "run-window"))
+    assert ("cutoff" in marks, "published" in marks) == (True, False)
+    assert _step(store, ledger, END + MINUTE) == [
+        "run window: published the final state to the ledger and the watchdog"
+    ]
+    assert len(gate_log.recent(SLUG)) == 1
+    assert _items(store, "master-watchdog") == [FINAL_OBSERVE]
+    assert ledger.notices == [FINAL_OBSERVE]
+    assert _step(store, ledger, END + 2 * MINUTE) == []
+
+
+def test_a_window_with_no_agent_in_flight_reads_none():
+    text = run_window.final(SLUG, "observe", (START, END), {}, [])
+    assert "## Done\nTasks by state: none.\n\n## Stopped at\nIn flight at the cutoff: none.\n\n" in text
+    assert text.endswith("## Read first\nNone\n\n<!-- handoff complete -->")
+
+
+def test_hub_admission_refuses_a_claim_after_an_enforced_cutoff(swarm):
+    from scripts.hub.admission import Admission
+
+    store, _ = swarm
+    store.update(SLUG, gates={"window": "enforce"})
+
+    class Source:
+        def snapshot(self, slug):
+            raise AssertionError("no snapshot after the cutoff")
+
+    admission = Admission(store=store, ledger=object(), source=Source(), clock=lambda: END)
+    assert admission.admit(SLUG, {"task": "t3", "lane": "eng", "generation": 0, "hive": "h1"}) is None
+    assert store.claimant(SLUG, "t3") is None
