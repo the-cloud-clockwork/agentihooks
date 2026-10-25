@@ -766,6 +766,28 @@ def test_rebound_names_do_not_restore_an_unreached_subject(tmp_path, helper, adm
     assert ("test_subject is admitted" in result.stdout) == admitted
 
 
+def test_an_import_replacing_a_helper_never_reaches_its_old_subject(tmp_path):
+    tests = (
+        "from pkg.mod import subject, other\n\n"
+        "def first():\n    return subject()\n\n"
+        "from pkg.elsewhere import first\n\n"
+        "def test_subject():\n    assert first() == 1\n\n"
+        "def test_other():\n    assert other() == 2\n"
+    )
+    replacement = "def first():\n    return 1\n"
+    result = _floor(
+        tmp_path,
+        {"test_mod.py": tests},
+        {"test_mod.py": OTHER_TEST},
+        {
+            "base": _package(mod=SUBJECT + "\n\n" + KEPT, elsewhere=replacement),
+            "head": _package(mod=KEPT, elsewhere=replacement),
+        },
+    )
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "test_subject is admitted" not in result.stdout
+
+
 @pytest.mark.parametrize(
     "survivor",
     [
