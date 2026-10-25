@@ -31,7 +31,7 @@ def hits(tree: Path) -> dict[str, list[str]]:
             raise GradeError(f"vulture cannot read {path}: {exc}") from exc
         # A noqa comment in the graded tree hides nothing. Per line, since the pattern's trailing \s takes newlines.
         scanner.scan("\n".join(NOQA_REGEXP.sub("#", line) for line in code.split("\n")), filename=path)
-    # No paths left to scan, so this adds only vulture's whitelists for the imported modules.
+    # Loads vulture's whitelists for the modules the graded files import.
     scanner.scavenge([])
     if scanner.exit_code == ExitCode.InvalidInput:
         raise GradeError(f"vulture cannot parse every graded file in {tree}; its error is above")
