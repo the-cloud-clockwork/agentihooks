@@ -78,6 +78,16 @@ def master_route(environ):
     return select_credential(environ)
 
 
+def master_before_login(binary, args, environ, report):
+    # ruleid: feature-shared-preferred-master-login
+    login.launch_token(binary, args, environ, report)
+    prepared = login.prepare_launch(environ, cwd)
+    if prepared is None:
+        # ok: feature-shared-preferred-master-login
+        return login.launch_token(binary, args, environ, report)
+    return prepared
+
+
 def master_after_login(binary, args, environ, report):
     prepared = login.prepare_launch(environ, cwd)
     if prepared is None:
