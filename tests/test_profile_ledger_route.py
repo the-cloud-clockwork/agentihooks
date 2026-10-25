@@ -68,7 +68,7 @@ def test_rendered_hive_worker_joins_and_writes_through_its_configured_route(worl
     monkeypatch.setattr(hosted_probe, "_answers", {})
 
     ledger.cmd_join(SimpleNamespace(slug=SLUG, name=WORKER, role="member"))
-    ledger.cmd_ack(SimpleNamespace(slug=SLUG, name=WORKER))
+    ledger.cmd_ack(SimpleNamespace(slug=SLUG, name=WORKER, rev=None))
 
     assert ledger.call(SLUG)["_meta"]["members"][WORKER]["role"] == "member"
     assert "joined" in capsys.readouterr().out
