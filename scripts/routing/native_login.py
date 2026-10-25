@@ -1,4 +1,5 @@
 import json
+import re
 import shutil
 import subprocess
 from collections.abc import Callable, Mapping
@@ -8,6 +9,7 @@ from scripts.routing import envs
 
 COMMAND = ["auth", "status", "--text"]
 STATUS = "Login method: Claude account"
+STATUS_LINE = re.compile(r"Login method: Claude(?: \w+)? account")
 PROOF = {"command": "claude auth status --text", "status": STATUS}
 EXPIRED = "native Claude login is expired or missing; renew the native Claude login"
 UNAVAILABLE = "native Claude login could not be checked"
@@ -29,7 +31,7 @@ def check(environ: Mapping[str, str], account: str, run: Callable = subprocess.r
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
         raise LoginError(UNAVAILABLE) from exc
-    if status.returncode or STATUS not in status.stdout.splitlines():
+    if status.returncode or not any(STATUS_LINE.fullmatch(line.strip()) for line in status.stdout.splitlines()):
         raise LoginError(EXPIRED)
     return dict(PROOF)
 
