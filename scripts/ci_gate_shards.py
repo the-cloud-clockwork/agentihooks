@@ -20,7 +20,7 @@ def api(endpoint: str, *, binary: bool = False) -> list | bytes:
 def ready(jobs: list[dict], shards: list[int]) -> bool:
     passed = {job["name"] for job in jobs if job.get("conclusion") == "success"}
     return bool(shards) and all(
-        f"unit (3.12, {shard})" in passed or f"unit-rerun (3.12, {shard})" in passed for shard in shards
+        f"unit (3.12, {shard})" in passed or f"unit rerun (3.12, {shard})" in passed for shard in shards
     )
 
 

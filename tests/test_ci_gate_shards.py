@@ -173,6 +173,25 @@ def test_fetch_reads_every_page_and_ignores_foreign_and_expired_artifacts(tmp_pa
     }
 
 
+def test_download_keeps_all_report_members_and_ignores_other_archive_paths(tmp_path):
+    data = io.BytesIO()
+    members = {
+        "durations.json": b'{"test_one": 1}',
+        "durations.sha256": b"hash",
+        "elapsed.json": b'{"seconds": 1}',
+        "flakes.jsonl": b"flake",
+    }
+    with zipfile.ZipFile(data, "w") as archive:
+        for name, contents in {**members, "../escape": b"bad", "unrelated.py": b"bad"}.items():
+            archive.writestr(name, contents)
+    artifact = {"id": 1, "name": "durations-3.12-1", "expired": False}
+    with patch.object(ci_gate_shards, "api", side_effect=[[{"artifacts": [artifact]}], data.getvalue()]):
+        ci_gate_shards.fetch("org/repo", "123", tmp_path, {})
+    folder = tmp_path / "durations-3.12-1"
+    assert {path.name: path.read_bytes() for path in folder.iterdir()} == members
+    assert not (tmp_path / "escape").exists()
+
+
 def test_wait_accepts_complete_recovered_shards_and_refreshes_final_artifacts(tmp_path):
     jobs = [
         {"name": "unit (3.12, 1)", "conclusion": "failure"},
