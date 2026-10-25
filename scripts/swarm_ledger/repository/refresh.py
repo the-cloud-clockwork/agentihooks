@@ -74,3 +74,31 @@ def refreshed(connection: Connection, slug: str, state: dict, paths: set) -> dic
         return dict(build(connection, slug, ROOT, state, touched(paths)))
     except KeyError:
         return None
+
+
+def stored_row(connection: Connection, slug: str, path: str) -> tuple | None:
+    for table in TABLES:
+        row = connection.execute(f"SELECT position, kind, value FROM {table} WHERE slug=? AND path=?", (slug, path))
+        found = row.fetchone()
+        if found is not None:
+            return found
+    return None
+
+
+def rebuilt(connection: Connection, slug: str, path: str, old: list, paths: set) -> list | None:
+    """The array at path as stored now, rebuilding only the children paths reached; None when the array itself
+    changed or a child was added, removed or moved."""
+    if path in paths:
+        return None
+    parts, dirty, items = json.loads(path), touched(paths), list(old)
+    known = {encode(child_parts): index for index, (_, child_parts, *_) in enumerate(children(old, parts, None))}
+    for child in {encode(json.loads(changed)[: len(parts) + 1]) for changed in paths}:
+        index, row = known.get(child), stored_row(connection, slug, child)
+        if index is None or row is None or row[0] != index:
+            return None
+        if row[1] == "value":
+            items[index] = json.loads(row[2])
+        else:
+            pairs = build(connection, slug, child, old[index], dirty)
+            items[index] = [item for _, item in pairs] if row[1] == "array" else dict(pairs)
+    return items

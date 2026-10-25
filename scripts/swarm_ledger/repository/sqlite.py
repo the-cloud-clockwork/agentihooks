@@ -584,8 +584,11 @@ class SQLiteLedgerRepository:
                 if not dirty:
                     return row[0], meta, since[2]
                 with suppress(KeyError):
-                    built = refresh.build(connection, slug, TASKS_PATH, since[2], refresh.touched(dirty))
-                    return row[0], meta, [item for _, item in built]
+                    rows = refresh.rebuilt(connection, slug, TASKS_PATH, since[2], dirty)
+                    if rows is None:
+                        built = refresh.build(connection, slug, TASKS_PATH, since[2], refresh.touched(dirty))
+                        rows = [item for _, item in built]
+                    return row[0], meta, rows
             return row[0], meta, read_partial(connection, slug, (["tasks"],)).get("tasks") or []
 
     def apply_ops(
