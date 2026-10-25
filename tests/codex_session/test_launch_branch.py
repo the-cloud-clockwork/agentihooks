@@ -192,6 +192,28 @@ def test_the_app_server_command_names_the_admitted_execution_only_when_given(tmp
     assert "--execution" not in plain
 
 
+def imported_scripts(interpreter, directory):
+    shadow = directory / "scripts"
+    shadow.mkdir(parents=True)
+    (shadow / "__init__.py").write_text("")
+    probe = [*interpreter[: interpreter.index("-m")], "-c", "import scripts; print(scripts.__file__)"]
+    return subprocess.run(probe, cwd=directory, capture_output=True, text=True, check=True).stdout.strip()
+
+
+def test_the_app_server_imports_the_launching_package_never_the_agent_directory(tmp_path):
+    import scripts
+
+    _, _, argv = launched(tmp_path, app_server_spec())
+    assert imported_scripts(argv, tmp_path / "agent") == scripts.__file__
+
+
+def test_the_viewer_imports_the_launching_package_never_the_agent_directory(tmp_path):
+    import scripts
+
+    line = init_agent._viewer_lines("serve", tmp_path / "x.sh", "engineer@abc-0001", {"AGENTIHOOKS_SWARM": "sw"}, [])
+    assert imported_scripts(shlex.split(line.splitlines()[1]), tmp_path / "agent") == scripts.__file__
+
+
 @pytest.mark.parametrize(("transport", "served"), [("app_server", True), ("legacy", False)])
 def test_main_names_the_pane_as_served_only_on_the_app_server_transport(
     tmp_path, monkeypatch, capsys, transport, served
