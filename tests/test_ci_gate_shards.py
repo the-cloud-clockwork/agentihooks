@@ -212,3 +212,13 @@ def test_the_reports_command_checks_the_downloaded_folder_without_polling(tmp_pa
         pytest.raises(RuntimeError, match=r"\['durations-3.12-3', 'flakes-3.12-3'\]"),
     ):
         ci_gate_shards.main()
+
+
+def test_the_reports_command_passes_on_the_downloaded_reports_folder(tmp_path, monkeypatch):
+    for kind in ["durations", "flakes"]:
+        (tmp_path / "shard-reports" / f"{kind}-3.12-3").mkdir(parents=True)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(ci_gate_shards.sys, "argv", ["ci_gate_shards", "reports"])
+    monkeypatch.setenv("SHARDS", "[3]")
+    with patch.object(ci_gate_shards, "watch", side_effect=AssertionError("must not poll")):
+        assert ci_gate_shards.main() is None
