@@ -16,6 +16,7 @@ UNCOVERED = "the requested range is not covered by archived objects; the evidenc
 FORBIDDEN = "the grant does not cover this session"
 UNAVAILABLE = "the session is not retained"
 BAD_NAME = "an object name must be a sha256 hex digest"
+BAD_RANGE = "a byte range must start at zero or later and end at or after its start"
 DIGEST = re.compile(r"[0-9a-f]{64}")
 
 
@@ -54,9 +55,9 @@ class ObjectStore:
                 handle.write(data)
                 handle.flush()
                 os.fsync(handle.fileno())
-            os.replace(temporary, path)
+            Path(temporary).replace(path)
         except BaseException:
-            os.unlink(temporary)
+            Path(temporary).unlink()
             raise
         _sync(path.parent)
         return digest
@@ -138,6 +139,8 @@ def evidence(catalog: Catalog, store: ObjectStore, grant: Grant, domain: str, se
 
 def _slice(catalog, store, reference: dict) -> bytes:
     start, end = reference["byte_start"], reference["byte_end"]
+    if not 0 <= start <= end:
+        raise ValueError(BAD_RANGE)
     scope = (reference["access_domain"], reference["session_uid"], reference["source_generation"])
     parts, cursor = [], start
     for entry in catalog.manifest(*scope):

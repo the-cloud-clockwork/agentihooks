@@ -415,6 +415,15 @@ def test_a_source_range_reads_exact_bytes_within_and_across_objects(catalog, sto
     assert archive.source_range(catalog, store, GRANT, reference(4, 4)) == b""
 
 
+def test_an_inverted_or_negative_range_is_refused_and_not_counted(catalog, store):
+    captured(catalog, store)
+    for start, end in ((5, 3), (-1, 3)):
+        message = refused(ValueError, lambda: archive.source_range(catalog, store, GRANT, reference(start, end)))
+        assert message == archive.BAD_RANGE
+    assert archive.source_range(catalog, store, GRANT, reference(0, 0)) == b""
+    assert catalog.integrity_failures_total("corpus-a") == 0
+
+
 def test_a_range_ending_at_an_object_boundary_does_not_read_the_next_object(catalog, store):
     data, cut = captured(catalog, store)
     object_path(store, sha(data[cut:])).unlink()
