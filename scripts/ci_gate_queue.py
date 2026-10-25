@@ -11,6 +11,7 @@ from scripts.ci_queue_fail_fast import logged_loss
 GATE_NAME = "${{ github.event_name == 'merge_group' && 'Gate — Required' || 'queue-fail-fast' }}"
 SUMMARY_NAME = "${{ github.event_name == 'merge_group' && 'Queue gate summary' || 'Gate — Required' }}"
 REQUIRED = {"select", "split", "test-count", "shard-check"}
+JOB_PAGE = 100
 SKIPPED = {
     "unit-selected",
     "coverage-ratchet",
@@ -194,7 +195,7 @@ def watch(repository: str, run: str, attempt: str, shards: list[int], ref: str, 
     deadline = time.monotonic() + 1200
     while time.monotonic() < deadline:
         current(repository, ref, head)
-        jobs = read_jobs(f"repos/{repository}/actions/runs/{run}/attempts/{attempt}/jobs")
+        jobs = read_jobs(f"repos/{repository}/actions/runs/{run}/attempts/{attempt}/jobs", JOB_PAGE)
         if verify(jobs, shards, lost=lambda job: logged_loss(repository, job, seen)):
             current(repository, ref, head)
             return
