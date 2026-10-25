@@ -126,6 +126,9 @@ class IndexWorker:
             raise Conflict(UNKNOWN_INDEX)
         return EmbeddingModel(row[0], row[1]), bool(row[2])
 
+    def model(self, domain: str, generation: str) -> EmbeddingModel:
+        return self._generation(domain, generation)[0]
+
     def register(self, domain: str, generation: str, model: EmbeddingModel) -> dict:
         embeddings.require(model)
         with self.catalog._transaction():

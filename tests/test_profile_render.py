@@ -2211,7 +2211,7 @@ def test_running_profile_validates_its_launched_persona_after_other_profile_rend
     home = render.render(target, "rb-role")
     launched = binding.inspect(home, "rb-role", target)
     env = {"AGENTIHOOKS_PROFILE": "rb-role", binding.HOMES[target]: str(home), "XDG_RUNTIME_DIR": str(world["home"])}
-    init_agent._binding_request(SimpleNamespace(profile="rb-role"), target, "", env, [])
+    init_agent._binding_request(SimpleNamespace(profile="rb-role", defer_canary=False), target, "", env, [])
     report = Path(env[binding.REPORT])
     monkeypatch.setattr(binding, "process", lambda: (123, target, env, "default"))
     if validated:

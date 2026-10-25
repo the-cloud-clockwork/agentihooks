@@ -409,12 +409,13 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
-          run=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/test.yml/runs?branch=dev&event=push&status=success&per_page=1" --jq '.workflow_runs[0].id // empty')
+          read_api() { if [[ -f scripts/ci_budget/rate_limit.py ]]; then python -m scripts.ci_budget.rate_limit "$@"; else gh api "$@"; fi; }
+          run=$(read_api "repos/$GITHUB_REPOSITORY/actions/workflows/test.yml/runs?branch=dev&event=push&status=success&per_page=1" --jq '.workflow_runs[0].id // empty')
           if [[ -z "$run" ]]; then
             echo "::error::No dev push Tests run passed, so the queue run has no dev durations."
             exit 1
           fi
-          kept=" $(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run/artifacts?per_page=100" --jq '[.artifacts[] | select(.expired | not) | .name] | join(" ")') "
+          kept=" $(read_api "repos/$GITHUB_REPOSITORY/actions/runs/$run/artifacts?per_page=100" --jq '[.artifacts[] | select(.expired | not) | .name] | join(" ")') "
           if [[ "$kept" != *" durations-merged "* ]]; then
             echo "::error::Dev push run $run kept no live durations-merged artifact."
             exit 1
@@ -745,8 +746,12 @@ jobs:
               return 0
             fi
             bash .github/scripts/pypi-retry.sh "Install the test planner dependencies" -- "$HOME/venv/bin/uv" pip install --python "$PYTHON_PATH" --quiet PyYAML==6.0.3
-            before=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" --jq .created_at)
             cd "$RUNNER_TEMP/planner"
+            if [[ -f scripts/ci_budget/rate_limit.py ]]; then
+              before=$("$PYTHON_PATH" -m scripts.ci_budget.rate_limit "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" --jq .created_at)
+            else
+              before=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" --jq .created_at)
+            fi
             "$PYTHON_PATH" -m scripts.ci_test_plan --repository "$GITHUB_REPOSITORY" --head "$GITHUB_SHA" \
               --repo "$GITHUB_WORKSPACE" --before "$before" --out "$GITHUB_WORKSPACE/reused-tests.json"
           }
@@ -944,13 +949,13 @@ jobs:
           COLLECTION_JOB: test-count (${{ matrix.python-version }})
         run: |
           while :; do
-            state="$(gh api --paginate "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/jobs?filter=latest&per_page=100" \
+            state="$(python -m scripts.ci_budget.rate_limit --paginate "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/jobs?filter=latest&per_page=100" \
               --jq ".jobs[] | select(.name == \"$COLLECTION_JOB\") | \"\(.status) \(.conclusion)\"")" || state=""
             case "$state" in
               "completed success") exit 0 ;;
               completed*) echo '::error::The early collection did not succeed.'; exit 1 ;;
             esac
-            sleep 3
+            sleep 15
           done
 
       - name: Download the early collection
@@ -2075,6 +2080,18 @@ jobs:
             exit 1
           fi
 
+      # dev's copy grades against the base's allowlist, so a pull request cannot allowlist its own swallowed exception.
+      - name: Hold swallowed exceptions in hooks and gates
+        if: ${{ !cancelled() }}
+        run: |
+          if [[ -f "$RUNNER_TEMP/grader/scripts/swallowed_exceptions.py" ]]; then
+            cd "$RUNNER_TEMP/grader"
+            python -m scripts.swallowed_exceptions --base "$RUNNER_TEMP/base" --head "$GITHUB_WORKSPACE"
+          else
+            echo "::error::dev carries no scripts/swallowed_exceptions.py, so nothing trusted can grade."
+            exit 1
+          fi
+
       # The base revision's copy grades, so a pull request cannot loosen its own audit.
       - name: Fail on known vulnerabilities new against the base
         if: ${{ !cancelled() }}
@@ -2423,6 +2440,7 @@ jobs:
             echo "::error::Test selection $selection; fix selection before downstream test and coverage checks."
             exit 1
           fi
+          NEEDS=$(jq 'if ."mutation-plan".result == "success" and ."mutation-plan".outputs.forwarded == "true" and ."mutation-stats".result == "skipped" then ."mutation-stats".result = "success" else . end' <<< "$NEEDS")
           if [[ "${EVENT:-}" == merge_group || "${EVENT:-}" == pull_request ]]; then
             if ! jq -e --arg event "$EVENT" --arg mutation "$MUTATION" --arg inline "${INLINE:-}" '
               (.select.outputs.scope // "") as $scope
@@ -2806,7 +2824,7 @@ jobs:
 
   mutation-stats:
     needs: [mutation-plan, admission]
-    if: ${{ !cancelled() && needs.mutation-plan.result == 'success' && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && ((github.event_name == 'pull_request' && github.base_ref == 'dev') || github.event_name == 'workflow_dispatch') }}
+    if: ${{ !cancelled() && needs.mutation-plan.result == 'success' && needs.mutation-plan.outputs.forwarded != 'true' && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && ((github.event_name == 'pull_request' && github.base_ref == 'dev') || github.event_name == 'workflow_dispatch') }}
     runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && 'anton-oss-batch' || 'ubuntu-latest' }}
     timeout-minutes: 26
     strategy:

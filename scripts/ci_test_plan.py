@@ -11,7 +11,9 @@ from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
+from scripts.ci_budget import rate_limit
 from scripts.ci_budget.jobs import read_jobs
+from scripts.ci_budget.rate_limit import gh_api
 from tests import dep_manifest
 
 UNIT_JOBS = frozenset(f"unit (3.12, {shard})" for shard in range(1, 21))
@@ -29,7 +31,7 @@ class UnusableRecord(ValueError):
 
 def _api(endpoint: str) -> bytes:
     try:
-        return subprocess.run(["gh", "api", endpoint], capture_output=True, check=True, timeout=60).stdout
+        return gh_api([endpoint], timeout=60).stdout
     except subprocess.CalledProcessError as error:
         print(error.stderr.decode(), file=sys.stderr)
         raise
@@ -185,6 +187,7 @@ def main(argv: list[str] | None = None) -> int:
     if destination := os.environ.get("GITHUB_OUTPUT"):
         with Path(destination).open("a") as output:
             output.write(f"reused={reused}\nrun={run_id}\ncommit={commit}\n")
+    rate_limit.report("The test planner")
     return 0
 
 
