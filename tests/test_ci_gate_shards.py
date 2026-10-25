@@ -146,12 +146,33 @@ def test_metadata_is_decoded_and_paginated_when_binary_is_omitted():
     assert run.call_args.args[0] == ["gh", "api", "repos/org/repo/actions", "--paginate", "--slurp"]
 
 
-def test_github_failure_is_never_replaced_with_empty_evidence():
+def test_github_failure_is_never_replaced_with_empty_evidence(capsys):
+    failure = subprocess.CalledProcessError(1, ["gh"], stderr=b"HTTP 502: Bad Gateway")
     with (
-        patch.object(ci_gate_shards.subprocess, "run", side_effect=subprocess.CalledProcessError(1, ["gh"])),
+        patch.object(ci_gate_shards.subprocess, "run", side_effect=failure) as run,
+        patch.object(ci_gate_shards.time, "sleep") as sleep,
         pytest.raises(subprocess.CalledProcessError),
     ):
         ci_gate_shards.api("repos/org/repo/actions")
+    assert run.call_count == 3
+    assert [call.args[0] for call in sleep.call_args_list] == [5, 10]
+    assert capsys.readouterr().err.count("HTTP 502: Bad Gateway") == 3
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [subprocess.CalledProcessError(1, ["gh"], stderr=b"HTTP 502"), subprocess.TimeoutExpired(["gh"], 60)],
+)
+def test_a_transient_github_failure_is_retried_before_the_wait_gives_up(failure, capsys):
+    result = subprocess.CompletedProcess([], 0, stdout=b'[{"artifacts": []}]')
+    with (
+        patch.object(ci_gate_shards.subprocess, "run", side_effect=[failure, result]) as run,
+        patch.object(ci_gate_shards.time, "sleep") as sleep,
+    ):
+        assert ci_gate_shards.api("repos/org/repo/actions") == [{"artifacts": []}]
+    assert run.call_count == 2
+    sleep.assert_called_once_with(5)
+    assert "repos/org/repo/actions attempt 1 of 3 failed" in capsys.readouterr().err
 
 
 def test_fetch_reads_every_page_and_ignores_foreign_and_expired_artifacts(tmp_path):

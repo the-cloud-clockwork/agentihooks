@@ -3,18 +3,28 @@ import json
 import os
 import re
 import subprocess
+import sys
 import time
 import zipfile
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 
-def api(endpoint: str, *, binary: bool = False) -> list | bytes:
+def api(endpoint: str, *, binary: bool = False, attempts: int = 3) -> list | bytes:
     command = ["gh", "api", endpoint]
     if not binary:
         command.extend(["--paginate", "--slurp"])
-    result = subprocess.run(command, check=True, capture_output=True, timeout=60)
-    return result.stdout if binary else json.loads(result.stdout)
+    for attempt in range(1, attempts + 1):
+        try:
+            result = subprocess.run(command, check=True, capture_output=True, timeout=60)
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as error:
+            stderr = (error.stderr or b"").decode(errors="replace").strip()
+            print(f"gh api {endpoint} attempt {attempt} of {attempts} failed: {stderr or error}", file=sys.stderr)
+            if attempt == attempts:
+                raise
+            time.sleep(5 * attempt)
+        else:
+            return result.stdout if binary else json.loads(result.stdout)
 
 
 def ready(jobs: list[dict], shards: list[int]) -> bool:
