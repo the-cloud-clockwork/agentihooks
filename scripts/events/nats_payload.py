@@ -60,6 +60,12 @@ async def decode(read: Callable[[str], Awaitable[bytes]], value: bytes) -> bytes
     return value
 
 
+async def discard(js: JetStreamContext, stream: str, prefix: str, value: bytes) -> None:
+    if value.startswith(PAGED):
+        token, _ = json.loads(value[len(PAGED) :])
+        await js.purge_stream(stream, subject=f"{prefix}_chunks.{token}.>")
+
+
 async def reclaim(
     js: JetStreamContext,
     stream: str,

@@ -348,7 +348,7 @@ class NatsStateStore:
         try:
             revision = await (self._kv.update(key, value, last=last) if last else self._kv.create(key, value))
         except KeyWrongLastSequenceError as err:
-            await self._reclaim(key, last + 1)
+            await nats_payload.discard(self._js, f"KV_{self._bucket}", f"$KV.{self._bucket}.", value)
             raise StateConflict(conflict) from err
         await self._reclaim(key, revision)
         return revision

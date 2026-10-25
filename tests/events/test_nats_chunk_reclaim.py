@@ -149,3 +149,17 @@ def test_chunk_scopes_separate_keys_and_bases():
     assert nats_payload.scope("a", 1) == f"{nats_payload.scope('a', 0).split('.')[0]}.1"
     assert nats_payload.scope("a", 0) != nats_payload.scope("b", 0)
     assert len(nats_payload.scope("a", 0).split(".")[0]) == 32
+
+
+@pytest.mark.parametrize("value", [b"plain", nats_payload.COMPRESSED + b"compressed"])
+def test_discard_keeps_nonpaged_values(value):
+    js = SimpleNamespace(purge_stream=mock.AsyncMock())
+    asyncio.run(nats_payload.discard(js, "stream", "pre.", value))
+    js.purge_stream.assert_not_awaited()
+
+
+def test_discard_removes_only_the_failed_write_token():
+    js = SimpleNamespace(purge_stream=mock.AsyncMock())
+    value = nats_payload.PAGED + json.dumps(["owner.42.failed", 3]).encode()
+    asyncio.run(nats_payload.discard(js, "stream", "pre.", value))
+    js.purge_stream.assert_awaited_once_with("stream", subject="pre._chunks.owner.42.failed.>")

@@ -80,7 +80,8 @@ class ScopedStateStore:
             revision = await self._write_raw(key, value, last)
         except APIError as exc:
             if exc.err_code == 10071:
-                await self._reclaim(key, last + 1)
+                prefix = f"{subject(self._swarm, 'state', self._bucket)}."
+                await nats_payload.discard(self._root._js, self._stream, prefix, value)
             raise
         await self._reclaim(key, revision - self._revision_base)
         return revision
