@@ -159,7 +159,7 @@ def test_two_front_doors_launch_without_token_fallback_and_share_refreshed_crede
         "account": json.dumps(MASTER_ACCOUNT),
         "epoch": "0",
     }
-    monkeypatch.setattr(login, "stored", lambda *_: stale)
+    monkeypatch.setattr(login, "stored", lambda bao, number: stale if number == 1 else {})
     second_env = _environ(rendered, "doctor")
     second, second_account = login.prepare_launch(second_env, tmp_path)
     second_child = login.child(second_env, second, second_account)
