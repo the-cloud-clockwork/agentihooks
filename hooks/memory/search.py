@@ -172,7 +172,7 @@ class SessionSearch:
         generation = self.worker.active(domain)["index_generation"]
         if generation is None:
             raise _Unavailable("no_active_index")
-        model, _ = self.worker._generation(domain, generation)
+        model = self.worker.model(domain, generation)
         if embedder is None or embedder.model != model:
             raise _Unavailable("no_embedder" if embedder is None else "model_mismatch")
         try:
