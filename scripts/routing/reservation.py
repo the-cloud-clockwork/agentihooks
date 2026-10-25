@@ -164,26 +164,26 @@ for _, hive in ipairs(redis.call('SMEMBERS', KEYS[3])) do
     end
 end
 if mode == 'release' then
-    if not held or held.state == 'exited' then return 0 end
+    if not held or held.state == 'exited' then return {0, used} end
     held.state = 'exited'
     redis.call('SET', KEYS[2], cjson.encode(held), 'PX', 45000)
-    return 1
+    return {1, used}
 end
 if mode == 'ack' then
-    if held and held.state == 'exited' then return 0 end
-    if held and held.state == 'live' then return 1 end
+    if held and held.state == 'exited' then return {0, used} end
+    if held and held.state == 'live' then return {1, used} end
     if not held then
-        if slot == '' then return 0 end
+        if slot == '' then return {0, used} end
         held = {slot=slot}
         redis.call('SADD', KEYS[1], execution)
     end
     held.state = 'live'
     redis.call('SET', KEYS[2], cjson.encode(held), 'PX', ARGV[5])
-    return 1
+    return {1, used}
 end
 if held then
-    if held.slot ~= slot or held.state == 'exited' then return 0 end
-    return 1
+    if held.slot ~= slot or held.state == 'exited' then return {0, used} end
+    return {1, used}
 end
 for _, id in ipairs(redis.call('SMEMBERS', KEYS[1])) do
     local other = redis.call('GET', ARGV[6] .. ':launch-slot:' .. id)
@@ -200,53 +200,61 @@ for _, id in ipairs(redis.call('SMEMBERS', KEYS[1])) do
         end
     end
 end
-if used >= tonumber(ARGV[4]) then return 0 end
+if used >= tonumber(ARGV[4]) then return {0, used} end
 if previous then
     redis.call('DEL', ARGV[6] .. ':launch-slot:' .. previous)
     redis.call('SREM', KEYS[1], previous)
 end
 redis.call('SET', KEYS[2], cjson.encode({slot=slot, state='reserved'}), 'PX', ARGV[5])
 redis.call('SADD', KEYS[1], execution)
-return 1
+return {1, used}
 """
+
+
+@dataclass(frozen=True)
+class SlotReading:
+    accepted: bool
+    sessions: int
 
 
 @dataclass(frozen=True)
 class LaunchSlots:
     redis: object
 
-    def _call(self, mode: str, slot: str, execution: str, cap: int, ttl_ms: int, previous: str = "") -> bool:
+    def _call(self, mode: str, slot: str, execution: str, cap: int, ttl_ms: int, previous: str = "") -> SlotReading:
         from scripts.hive import registry
         from scripts.swarm.keyspace import ROOT
 
-        return bool(
-            self.redis.eval(
-                _LAUNCH,
-                3,
-                f"{ROOT}:launch-slots",
-                f"{ROOT}:launch-slot:{execution}",
-                registry.INDEX,
-                mode,
-                slot,
-                execution,
-                cap,
-                ttl_ms,
-                ROOT,
-                previous,
-            )
+        accepted, used = self.redis.eval(
+            _LAUNCH,
+            3,
+            f"{ROOT}:launch-slots",
+            f"{ROOT}:launch-slot:{execution}",
+            registry.INDEX,
+            mode,
+            slot,
+            execution,
+            cap,
+            ttl_ms,
+            ROOT,
+            previous,
         )
+        return SlotReading(bool(accepted), used)
 
     def reserve(self, slot: str, execution: str, cap: int, ttl_ms: int, previous: str = "") -> bool:
+        return self.reserve_reading(slot, execution, cap, ttl_ms, previous).accepted
+
+    def reserve_reading(self, slot: str, execution: str, cap: int, ttl_ms: int, previous: str = "") -> SlotReading:
         if type(cap) is not int or cap < 0 or type(ttl_ms) is not int or not 0 < ttl_ms <= 300000:
             raise ValueError("invalid launch slot cap or lifetime")
         return self._call("reserve", slot, execution, cap, ttl_ms, previous)
 
     def acknowledge(self, execution: str, slot: str = "") -> bool:
         """A named slot records a row that expired before its acknowledgement was read as live again."""
-        return self._call("ack", slot, execution, 0, 45000)
+        return self._call("ack", slot, execution, 0, 45000).accepted
 
     def release(self, execution: str) -> bool:
-        return self._call("release", "", execution, 0, 0)
+        return self._call("release", "", execution, 0, 0).accepted
 
     def counts(self, seen: set[str] | None = None) -> dict[str, int]:
         import json
