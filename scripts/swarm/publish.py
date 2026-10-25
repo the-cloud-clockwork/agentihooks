@@ -157,8 +157,10 @@ def pushed_branches(repo: str, task: dict, agent: AgentRecord) -> dict:
     return record
 
 
-def merged_record(repo: str, task: dict) -> bool:
+def merged_record(repo: Path, task: dict) -> bool:
     if not task.get("branch") or not task.get("pr_url"):
+        return False
+    if stack.repo_key(task["pr_url"].split("/pull/")[0]) != stack.repo_key(git(repo, "remote", "get-url", "origin")):
         return False
     pull = json.loads(execute(["gh", "pr", "view", task["pr_url"], "--json", "state,headRefName"], Path(repo)))
     return pull["state"] == "MERGED" and pull["headRefName"] == task["branch"]
@@ -166,17 +168,20 @@ def merged_record(repo: str, task: dict) -> bool:
 
 def prepare(slug: str, agent: AgentRecord, repo: str, ledger: LedgerClient) -> dict:
     task = task_row(slug, agent, ledger)
-    retired = merged_record(repo, task)
-    cleared = {}
-    if retired:
-        cleared = {"branch": "", "repository_branches": {}, "pr_url": ""}
-        for key in ("handoff_envelope", "reclaim"):
-            cleared[key] = {name: value for name, value in (task.get(key) or {}).items() if name != "continue_from"}
-        task = {**task, **cleared}
-    fields = []
+    fields, cleared = [], {}
     repositories = dict.fromkeys(local_repository(value, repo) for value in task.get("repositories") or [repo])
     for repository in repositories:
         scoped = repository_task(repository, task)
+        retired = merged_record(repository, scoped)
+        if retired:
+            cleared = {"pr_url": ""}
+            for key in ("handoff_envelope", "reclaim"):
+                cleared[key] = {
+                    name: value
+                    for name, value in (task.get(key) or {}).items()
+                    if name != "continue_from" or value != f"origin/{scoped['branch']}"
+                }
+            scoped = {**scoped, **cleared, "branch": "", "repository_branches": {}}
         root = None if retired else existing(repository, scoped, agent)
         if root is None:
             command = ["bash", str(stack.WT_SCRIPT), "new", "--repo", str(repository)]
@@ -185,7 +190,7 @@ def prepare(slug: str, agent: AgentRecord, repo: str, ledger: LedgerClient) -> d
             output = execute(command, repository)
             root = Path(output.splitlines()[-1])
         checkout = checkout_fields(root)
-        delivery = target_branch(root, scoped, checkout["branch"], task)
+        delivery = target_branch(root, scoped, checkout["branch"], scoped if retired else task)
         if delivery != checkout["branch"]:
             git(root, "branch", f"--set-upstream-to=origin/{delivery}")
         fields.append({**checkout, "branch": delivery, "repository": str(repository)})

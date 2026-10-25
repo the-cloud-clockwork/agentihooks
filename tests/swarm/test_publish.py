@@ -413,9 +413,17 @@ def test_prepare_stacks_on_the_recorded_branch_and_publish_pushes_its_current_br
     assert git(repository, "ls-remote", "origin", "refs/heads/predecessor").split()[0] != head
 
 
-@pytest.mark.parametrize("state, deleted", [("MERGED", True), ("MERGED", False), ("OPEN", False)])
+@pytest.mark.parametrize(
+    "state, deleted, head",
+    [
+        ("MERGED", True, "predecessor"),
+        ("MERGED", False, "predecessor"),
+        ("OPEN", False, "predecessor"),
+        ("MERGED", False, "another-branch"),
+    ],
+)
 def test_prepare_selects_fresh_dev_after_the_recorded_pull_request_merged(
-    repository, tmp_path, monkeypatch, state, deleted
+    repository, tmp_path, monkeypatch, state, deleted, head
 ):
     from scripts.swarm import publish, stack
 
@@ -448,11 +456,19 @@ def test_prepare_selects_fresh_dev_after_the_recorded_pull_request_merged(
         "handoff_envelope": {"continue_from": "origin/predecessor"},
     }
     native = publish.execute
+    native_git = publish.git
+
+    def git_call(root, *args):
+        if args == ("remote", "get-url", "origin"):
+            return "git@github.com:example/repo.git"
+        return native_git(root, *args)
+
+    monkeypatch.setattr(publish, "git", git_call)
 
     def execute(command, root):
         if command[:3] == ["gh", "pr", "view"]:
-            assert command[3] == pr_url
-            return json.dumps({"state": state, "baseRefName": "dev", "headRefName": "predecessor"})
+            assert command == ["gh", "pr", "view", pr_url, "--json", "state,headRefName"]
+            return json.dumps({"state": state, "headRefName": head})
         return native(command, root)
 
     monkeypatch.setattr(publish, "execute", execute)
@@ -463,11 +479,12 @@ def test_prepare_selects_fresh_dev_after_the_recorded_pull_request_merged(
 
     result = publish.prepare("swarm", agent, str(repository), ledger)
 
-    expected_branch = "engineer-test" if state == "MERGED" else "predecessor"
-    assert git(worktree, "rev-parse", "HEAD") == (fresh if state == "MERGED" else old_head)
+    retired = state == "MERGED" and head == "predecessor"
+    expected_branch = "engineer-test" if retired else "predecessor"
+    assert git(worktree, "rev-parse", "HEAD") == (fresh if retired else old_head)
     assert result["branch"] == task["branch"] == expected_branch
     assert task["repository_branches"] == {str(repository): expected_branch}
-    assert task["pr_url"] == ("" if state == "MERGED" else pr_url)
+    assert task["pr_url"] == ("" if retired else pr_url)
     assert publish.prepare("swarm", agent, str(repository), ledger) == result
 
 
@@ -1311,7 +1328,7 @@ def test_a_missing_branch_never_descends_and_prints_nothing(publication, capfd):
     assert capfd.readouterr() == ("", "")
 
 
-def test_prepare_records_the_worktree_branch_when_it_does_not_descend_from_the_pull_request(publication, monkeypatch):
+def test_prepare_records_the_worktree_branch_when_it_does_not_descend_from_the_pull_request(publication):
     from scripts.swarm import publish
 
     repository = publication.repo
@@ -1319,14 +1336,6 @@ def test_prepare_records_the_worktree_branch_when_it_does_not_descend_from_the_p
     git(repository, "push", "origin", f"{parked}:refs/heads/predecessor")
     git(repository, "fetch", "origin")
     publication.task.update(branch="predecessor", pr_url="https://github.com/example/repo/pull/7", state="pr")
-    native = publish.execute
-
-    def execute(command, root):
-        if command[:3] == ["gh", "pr", "view"]:
-            return json.dumps({"state": "OPEN", "headRefName": "predecessor"})
-        return native(command, root)
-
-    monkeypatch.setattr(publish, "execute", execute)
 
     result = publish.prepare("swarm", publication.agent, str(repository), publication.ledger)
 
