@@ -333,7 +333,13 @@ def _stale(binding, record, limits, lag):
 
 def _unconfirmed(binding, record, limits):
     local, remote, now = binding["local"], binding["remote"], record["now_ms"]
-    if not (binding["read"] and local and remote) or local["accepted"] <= remote["observations"]:
+    if not (binding["read"] and local and remote):
+        return None
+    reconciliation = remote.get("reconciliation")
+    if "reconciliation" in remote:
+        if reconciliation is None or not reconciliation["missing"]:
+            return None
+    elif local["accepted"] <= remote["observations"]:
         return None
     waited = _ago(now, local["accepted_at"])
     if waited <= limits.active_stale_seconds:
@@ -345,11 +351,36 @@ def _unconfirmed(binding, record, limits):
         (
             *_who(binding),
             f"exporter recorded {local['accepted']} accepted observations, Langfuse holds {remote['observations']}",
+            *(
+                (f"{len(reconciliation['missing'])} accepted observation identities missing from Langfuse",)
+                if reconciliation is not None
+                else ()
+            ),
             f"last acceptance {waited} seconds ago",
             _remote_fresh(binding, now),
         ),
         f"accepted observations absent from Langfuse past {limits.active_stale_seconds} seconds, {_cadence(limits)}",
         waited,
+    )
+
+
+def _count_drift(binding):
+    remote = binding["remote"]
+    reconciled = (remote or {}).get("reconciliation")
+    if not binding["read"] or not reconciled or not reconciled["drift"]:
+        return None
+    return Finding(
+        "telemetry count drift",
+        binding["life"],
+        "exporter aggregate differs from accepted observation identities",
+        (
+            *_who(binding),
+            f"exporter recorded {binding['local']['accepted']} accepted observations",
+            f"reconstructed {reconciled['accepted']} accepted observation identities",
+            f"{len(reconciled['missing'])} accepted observation identities missing from Langfuse",
+        ),
+        "exporter accepted aggregate agrees with its observation identities",
+        abs(reconciled["drift"]),
     )
 
 
@@ -424,7 +455,7 @@ def _active_binding(binding, record, limits):
     if record["now_ms"] - binding["started_at"] <= limits.active_grace_seconds * SECOND_MS:
         return []
     wrong = _misattributed(binding)
-    found = [wrong] if wrong else []
+    found = [f for f in (wrong, _count_drift(binding)) if f]
     lag = unaccepted_seconds(binding, record["now_ms"])
     if lag > limits.active_stale_seconds:
         found.append(_stale(binding, record, limits, lag))
