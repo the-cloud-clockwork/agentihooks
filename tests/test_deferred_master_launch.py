@@ -97,16 +97,12 @@ def test_codex_hooks_report_only_for_a_codex_launch(monkeypatch):
     assert init_agent._codex_hooks("codex", {}) == ["codex_hooks=unchanged"]
 
 
-def test_only_a_deferred_launch_refuses_its_profile_request(tmp_path):
+def test_a_failed_launch_refuses_its_profile_request(tmp_path):
     report = tmp_path / "report.json"
     binding.request(report, "master", "claude")
-    plain = init_agent._parser().parse_args([])
-    init_agent._refuse_deferred(plain, {binding.REPORT: str(report)}, ValueError("route lost"))
+    init_agent._refuse_binding({}, ValueError("route lost"))
     assert json.loads(report.read_text())["state"] == "pending"
-    deferred = init_agent._parser().parse_args(["--defer-canary"])
-    init_agent._refuse_deferred(deferred, {}, ValueError("route lost"))
-    assert json.loads(report.read_text())["state"] == "pending"
-    init_agent._refuse_deferred(deferred, {binding.REPORT: str(report)}, ValueError("route lost"))
+    init_agent._refuse_binding({binding.REPORT: str(report)}, ValueError("route lost"))
     assert json.loads(report.read_text()) == {
         "profile": "master",
         "harness": "claude",

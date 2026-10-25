@@ -444,7 +444,7 @@ def test_gh_api_runs_checked_with_text_output(monkeypatch):
     monkeypatch.setattr(ci_queue_retry.subprocess, "run", run)
     assert ci_queue_retry._api("repos/o/r", "-f", "x=1") == "answer"
     assert calls == [
-        (["gh", "api", "repos/o/r", "-f", "x=1"], {"stdout": subprocess.PIPE, "text": True, "check": True})
+        (["gh", "api", "repos/o/r", "-f", "x=1"], {"capture_output": True, "check": True, "timeout": 120, "text": True})
     ]
 
 

@@ -270,27 +270,36 @@ def deleted_branches(base: Path, head: Path, tests: str) -> set[tuple[str, str]]
     return deleted
 
 
-def bound_names(tree: Path) -> tuple[set[str], list[Path]]:
+def bound_names(tree: Path) -> tuple[set[tuple[str, str, str]], list[Path]]:
     names, opaque = set(), []
     for path in _sources(tree, set()):
+        relative = path.relative_to(tree)
+        module_name = _module_name(relative)
         try:
             module = ast.parse(path.read_bytes())
         except (OSError, SyntaxError, ValueError):
-            opaque.append(path.relative_to(tree))
+            opaque.append(relative)
             continue
+        parents = {child: parent for parent in ast.walk(module) for child in ast.iter_child_nodes(parent)}
         for node in ast.walk(module):
+            name = None
             if isinstance(node, ast.alias) and node.name == "*":
-                opaque.append(path.relative_to(tree))
+                opaque.append(relative)
             elif isinstance(node, _DEFINITIONS):
-                names.add(node.name)
+                name = node.name
             elif isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
-                names.add(node.id)
+                name = node.id
             elif isinstance(node, ast.alias):
-                names.add(node.asname or node.name.split(".")[0])
+                name = node.asname or node.name.split(".")[0]
             elif isinstance(node, (ast.ExceptHandler, ast.MatchAs, ast.MatchStar)) and node.name:
-                names.add(node.name)
+                name = node.name
             elif isinstance(node, ast.MatchMapping) and node.rest:
-                names.add(node.rest)
+                name = node.rest
+            if name:
+                owner = node
+                while not isinstance(owner, ast.stmt) and owner in parents:
+                    owner = parents[owner]
+                names.add((module_name, name, ast.dump(owner)))
     return names, opaque
 
 
@@ -302,10 +311,12 @@ def _dotted(node: ast.expr) -> str | None:
     return None
 
 
-def _imports(module: ast.Module) -> tuple[dict[str, set[tuple[str, str]]], dict[str, set[str]]]:
+def _imports(
+    module: ast.Module | ast.FunctionDef | ast.AsyncFunctionDef,
+) -> tuple[dict[str, set[tuple[str, str]]], dict[str, set[str]]]:
     names: dict[str, set[tuple[str, str]]] = {}
     modules: dict[str, set[str]] = {}
-    for statement in ast.walk(module):
+    for statement in _body_nodes(module):
         if isinstance(statement, ast.Import):
             for alias in statement.names:
                 bound = alias.asname or alias.name.split(".")[0]
@@ -315,7 +326,11 @@ def _imports(module: ast.Module) -> tuple[dict[str, set[tuple[str, str]]], dict[
                 bound = alias.asname or alias.name
                 names.setdefault(bound, set()).add((statement.module, alias.name))
                 modules.setdefault(bound, set()).add(f"{statement.module}.{alias.name}")
-    return names, modules
+    shadowed = _local_bindings(module)
+    return (
+        {name: subjects for name, subjects in names.items() if name not in shadowed},
+        {name: targets for name, targets in modules.items() if name not in shadowed},
+    )
 
 
 def _test_function(module: ast.Module, scopes: list[str]) -> ast.FunctionDef | ast.AsyncFunctionDef | None:
@@ -339,6 +354,180 @@ def _resolve(
     return set()
 
 
+def _resource_parent(
+    node: ast.expr, bindings: dict[str, ast.expr], source: Path, constructors: set[str], seen: frozenset[str]
+) -> Path | None:
+    if isinstance(node, ast.Attribute) and node.attr == "parent":
+        value = _resource_path(node.value, bindings, source, constructors, seen)
+        if isinstance(value, Path):
+            return value.parent
+    if isinstance(node, ast.Subscript) and isinstance(node.value, ast.Attribute) and node.value.attr == "parents":
+        value = _resource_path(node.value.value, bindings, source, constructors, seen)
+        if isinstance(value, Path) and isinstance(node.slice, ast.Constant):
+            index = node.slice.value
+            if isinstance(index, int) and 0 <= index < len(value.parents):
+                return value.parents[index]
+    return None
+
+
+def _resource_call(
+    node: ast.Call, bindings: dict[str, ast.expr], source: Path, constructors: set[str], seen: frozenset[str]
+) -> Path | None:
+    if node.keywords:
+        return None
+    if isinstance(node.func, ast.Name) and node.func.id in constructors and len(node.args) == 1:
+        value = _resource_path(node.args[0], bindings, source, constructors, seen)
+        if isinstance(value, (str, Path)):
+            return Path(value)
+    if isinstance(node.func, ast.Attribute) and node.func.attr == "resolve" and not node.args:
+        value = _resource_path(node.func.value, bindings, source, constructors, seen)
+        if isinstance(value, Path):
+            return value.resolve()
+    return None
+
+
+def _resource_path(
+    node: ast.expr,
+    bindings: dict[str, ast.expr],
+    source: Path,
+    constructors: set[str],
+    seen: frozenset[str] = frozenset(),
+) -> Path | str | None:
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return node.value
+    if isinstance(node, ast.Name):
+        if node.id == "__file__":
+            return source
+        if node.id in bindings and node.id not in seen:
+            return _resource_path(bindings[node.id], bindings, source, constructors, seen | {node.id})
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div):
+        left = _resource_path(node.left, bindings, source, constructors, seen)
+        right = _resource_path(node.right, bindings, source, constructors, seen)
+        if isinstance(left, Path) and isinstance(right, str):
+            return left / right
+    if isinstance(node, ast.Call):
+        return _resource_call(node, bindings, source, constructors, seen)
+    return _resource_parent(node, bindings, source, constructors, seen)
+
+
+def _fixture_code(path: Path) -> set[str]:
+    try:
+        fixture = json.loads(path.read_bytes())
+    except (OSError, ValueError):
+        return set()
+    if not isinstance(fixture, dict) or not isinstance(fixture.get("steps"), list):
+        return set()
+    return {
+        step["run"].strip()
+        for step in fixture["steps"]
+        if isinstance(step, dict) and isinstance(step.get("run"), str) and step["run"].strip()
+    }
+
+
+def _deleted_fixtures(base: Path, head: Path, referenced: set[tuple[str, str]]) -> set[tuple[str, str]]:
+    candidates = {subject for subject in referenced if subject[0] == "@fixture" and not (head / subject[1]).exists()}
+    if not candidates:
+        return set()
+    surviving = set()
+    for path in head.rglob("*.json"):
+        if path.resolve().is_relative_to(head.resolve()):
+            surviving.update(_fixture_code(path))
+    return {subject for subject in candidates if not _fixture_code(base / subject[1]) & surviving}
+
+
+def _fixture_subject(
+    tree: Path, source: Path, module: ast.Module, call: ast.Call, shadowed: set[str]
+) -> set[tuple[str, str]]:
+    if not isinstance(call.func, ast.Attribute) or call.func.attr not in {"read_text", "read_bytes"}:
+        return set()
+    if any(isinstance(node, ast.Name) and node.id in shadowed for node in ast.walk(call.func.value)):
+        return set()
+    names, _ = _imports(module)
+    constructors = {name for name, subjects in names.items() if ("pathlib", "Path") in subjects}
+    bindings = {
+        statement.targets[0].id: statement.value
+        for statement in module.body
+        if isinstance(statement, ast.Assign)
+        and len(statement.targets) == 1
+        and isinstance(statement.targets[0], ast.Name)
+    }
+    path = _resource_path(call.func.value, bindings, source, constructors)
+    if not isinstance(path, Path):
+        return set()
+    path, root = path.resolve(), tree.resolve()
+    if path.is_relative_to(root) and path.suffix == ".json" and _fixture_code(path):
+        return {("@fixture", path.relative_to(root).as_posix())}
+    return set()
+
+
+def _entrypoint_subjects(
+    tree: Path, call: ast.Call, names: dict[str, set[tuple[str, str]]], modules: dict[str, set[str]]
+) -> set[tuple[str, str]]:
+    if ("runpy", "run_module") not in _resolve(call.func, names, modules):
+        return set()
+    target = call.args[0] if len(call.args) == 1 else None
+    if not isinstance(target, ast.Constant) or not isinstance(target.value, str):
+        return set()
+    if not all(part.isidentifier() for part in target.value.split(".")):
+        return set()
+    if not any(
+        keyword.arg == "run_name" and isinstance(keyword.value, ast.Constant) and keyword.value.value == "__main__"
+        for keyword in call.keywords
+    ):
+        return set()
+    try:
+        module = ast.parse((tree / (target.value.replace(".", "/") + ".py")).read_bytes())
+    except (OSError, SyntaxError, ValueError):
+        return set()
+    return _guard_subjects(module, target.value)
+
+
+def _guard_subjects(module: ast.Module, module_name: str) -> set[tuple[str, str]]:
+    names, modules = _imports(module)
+    for node in module.body:
+        if isinstance(node, _DEFINITIONS):
+            names.setdefault(node.name, set()).add((module_name, node.name))
+    guard = ast.dump(ast.parse('__name__ == "__main__"', mode="eval").body)
+    return {
+        subject
+        for node in module.body
+        if isinstance(node, ast.If) and ast.dump(node.test) == guard
+        for statement in node.body
+        for child in ast.walk(statement)
+        if isinstance(child, ast.Call)
+        for subject in _resolve(child.func, names, modules)
+    }
+
+
+def _body_nodes(function: ast.Module | ast.FunctionDef | ast.AsyncFunctionDef) -> Iterator[ast.AST]:
+    pending = list(function.body)
+    while pending:
+        node = pending.pop()
+        yield node
+        if not isinstance(node, (*_DEFINITIONS, ast.Lambda)):
+            pending.extend(ast.iter_child_nodes(node))
+
+
+def _local_bindings(
+    function: ast.Module | ast.FunctionDef | ast.AsyncFunctionDef, include_definitions: bool = True
+) -> set[str]:
+    names = (
+        {node.arg for node in ast.walk(function.args) if isinstance(node, ast.arg)}
+        if isinstance(function, _FUNCTIONS)
+        else set()
+    )
+    for node in _body_nodes(function):
+        if isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del)):
+            names.add(node.id)
+        elif isinstance(node, (ast.ExceptHandler, ast.MatchAs, ast.MatchStar)) and node.name:
+            names.add(node.name)
+        elif isinstance(node, ast.MatchMapping) and node.rest:
+            names.add(node.rest)
+        elif isinstance(node, _DEFINITIONS) and include_definitions:
+            names.add(node.name)
+    return names
+
+
 def referenced_subjects(tree: Path, nodeid: str) -> set[tuple[str, str]]:
     path, *scopes = nodeid.split("[", 1)[0].split("::")
     try:
@@ -348,16 +537,49 @@ def referenced_subjects(tree: Path, nodeid: str) -> set[tuple[str, str]]:
     if (node := _test_function(module, scopes)) is None:
         return set()
     names, modules = _imports(module)
-    subjects = set()
-    for child in (descendant for statement in node.body for descendant in ast.walk(statement)):
-        subjects.update(_resolve(child, names, modules))
-        if isinstance(child, ast.Call):
-            subjects.update(
-                (callee, f"{function}({keyword.arg})")
-                for callee, function in _resolve(child.func, names, modules)
-                for keyword in child.keywords
-                if keyword.arg
-            )
+    rebound = _local_bindings(module, include_definitions=False) | names.keys() | modules.keys()
+    rebound.update(
+        alias.asname or alias.name.split(".")[0]
+        for statement in _body_nodes(module)
+        if isinstance(statement, (ast.Import, ast.ImportFrom))
+        for alias in statement.names
+    )
+    rebound.update(
+        child.name for child in _body_nodes(module) if isinstance(child, _DEFINITIONS) and child not in module.body
+    )
+    helpers = {
+        child.name: child for child in module.body if isinstance(child, _FUNCTIONS) and child.name not in rebound
+    }
+    subjects, visited, pending = set(), set(), [node]
+    while pending:
+        function = pending.pop()
+        if function in visited:
+            continue
+        visited.add(function)
+        shadowed = _local_bindings(function)
+        local_names = {name: subjects for name, subjects in names.items() if name not in shadowed}
+        local_modules = {name: targets for name, targets in modules.items() if name not in shadowed}
+        imported_names, imported_modules = _imports(function)
+        shadowed |= imported_names.keys() | imported_modules.keys()
+        local_names.update(imported_names)
+        local_modules.update(imported_modules)
+        for child in _body_nodes(function):
+            subjects.update(_resolve(child, local_names, local_modules))
+            if isinstance(child, ast.Call):
+                subjects.update(_fixture_subject(tree, tree / path, module, child, shadowed))
+                subjects.update(_entrypoint_subjects(tree, child, local_names, local_modules))
+                if (
+                    isinstance(child.func, ast.Name)
+                    and child.func.id not in shadowed
+                    and (helper := helpers.get(child.func.id))
+                ):
+                    pending.append(helper)
+                subjects.update(
+                    (callee, f"{function}({keyword.arg})")
+                    for callee, function in _resolve(child.func, local_names, local_modules)
+                    for keyword in child.keywords
+                    if keyword.arg
+                )
     return subjects
 
 
@@ -388,10 +610,17 @@ def main(argv: list[str] | None = None) -> int:
         for path in opaque:
             print(f"{path} hides its names in the head (unparseable or a star import), so no lost test is admitted")
         definitions = set() if opaque else top_level_definitions(args.base, args.tests)
-        deleted = {definition for definition in definitions if definition[1] not in surviving}
+        previous, _ = bound_names(args.base)
+        introduced = {name for _, name, _ in surviving - previous}
+        identities = {(module, name) for module, name, _ in surviving}
+        deleted = {
+            definition for definition in definitions if definition not in identities and definition[1] not in introduced
+        }
         deleted |= set() if opaque else deleted_branches(args.base, args.head, args.tests)
         for nodeid in lost:
-            if subjects := sorted(".".join(subject) for subject in referenced_subjects(args.base, nodeid) & deleted):
+            referenced = referenced_subjects(args.base, nodeid)
+            removed_fixtures = set() if opaque else _deleted_fixtures(args.base, args.head, referenced)
+            if subjects := sorted(".".join(subject) for subject in referenced & (deleted | removed_fixtures)):
                 admitted[nodeid] = subjects
                 print(f"{nodeid} is admitted: the head deletes {', '.join(subjects)}, which it referenced")
     floor = len(base) - len(admitted)
