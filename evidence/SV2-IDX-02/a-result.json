@@ -1,0 +1,172 @@
+{
+  "case": "T-SV2-IDX-02-A",
+  "evidence_class": "mocked: an in-process caller, a SQLite catalog file and a local content addressed object folder stand in for the session service, the central database and the archive bucket; no embedding model, HTTP server or Pod runs",
+  "input_sha256": {
+    "session-chunks.json": "9442886fae1a111dd590083f652183da056ac6a5e7e41339344d139b9b695242"
+  },
+  "observed": {
+    "appended_build": {
+      "chunks_rebuilt_without_content_change": 0,
+      "state": "committed",
+      "superseded": [],
+      "unchanged": 5
+    },
+    "appended_build_inserted": 2,
+    "chunks": [
+      {
+        "chunk_id": "chunk-5bb9e0b17bc9d368291564a1c34b76874e7a27d0",
+        "content_hash": "c435c9ba359256ab5fd1ea1ae8b3af75b1134033b887cb4dcac7aeab27b4ba47",
+        "kind": "turn",
+        "omitted_chars": 0,
+        "preview_chars": 201,
+        "sequences": [
+          1,
+          2,
+          8
+        ],
+        "tool": null,
+        "truncated": false,
+        "turn_id": "turn-9074c81b1360645f628e6c26aa4095e3135e153d"
+      },
+      {
+        "chunk_id": "chunk-266e702fb5d9688f1fc045dad2f9fb35b3327bd1",
+        "content_hash": "88280ab3fa3c1a9284ba2335f093597c252218e2702f5b6bb2b83b88fec27c82",
+        "kind": "tool",
+        "omitted_chars": 0,
+        "preview_chars": 82,
+        "sequences": [
+          3,
+          5
+        ],
+        "tool": {
+          "call_event_id": "416875836b088957e3401bf24e3f3c732c84b6220a1b063605f60aebaad28f66",
+          "is_error": false,
+          "result_event_id": "e61dc3608c8da3a1a151a6b5bb8f99e034d2a92477daaf91e8ffc45203ee21fd",
+          "tool_name": "Bash",
+          "tool_use_id": "toolu_ls"
+        },
+        "truncated": false,
+        "turn_id": "turn-9074c81b1360645f628e6c26aa4095e3135e153d"
+      },
+      {
+        "chunk_id": "chunk-5771d745301e23e8337e4d6782a359541e7a90ef",
+        "content_hash": "ee4c681e4bee9a01f49702680d6dbd1ec4d359245b03ac4fac83e0369561a02b",
+        "kind": "tool",
+        "omitted_chars": 0,
+        "preview_chars": 105,
+        "sequences": [
+          4,
+          6
+        ],
+        "tool": {
+          "call_event_id": "8b9c75a4fa111f779537d686d96ab2ceff6a929162a0e0f62baa86e809480cf6",
+          "is_error": false,
+          "result_event_id": "f01f5d3448e34a1c0f6019070fc4cb8def94206f61ca8dea5c679ba91785b565",
+          "tool_name": "Read",
+          "tool_use_id": "toolu_read"
+        },
+        "truncated": false,
+        "turn_id": "turn-9074c81b1360645f628e6c26aa4095e3135e153d"
+      },
+      {
+        "chunk_id": "chunk-113e0abeb7a2317a8202c444f4526e3f6994db20",
+        "content_hash": "1aa35b71b292fc31358f00a36d10906d8058aab8e2713ea987e49c63203e794f",
+        "kind": "turn",
+        "omitted_chars": 0,
+        "preview_chars": 118,
+        "sequences": [
+          9,
+          12
+        ],
+        "tool": null,
+        "truncated": false,
+        "turn_id": "turn-b5c224856ba89d49c08228706ae77c57856a3051"
+      },
+      {
+        "chunk_id": "chunk-1a12dbfdb1e6c24ec4ae59ae208b86a5109274b9",
+        "content_hash": "a1842cc78eed0545f57cf2bc8f2e6b558f724cc26a1022524989c02de2e1e80a",
+        "kind": "tool",
+        "omitted_chars": 5970,
+        "preview_chars": 2000,
+        "sequences": [
+          10,
+          11
+        ],
+        "tool": {
+          "call_event_id": "9b4ce8ac2d878ff1e1ea45e823ba152488be8e4eea6c6f72c98481157ec485fa",
+          "is_error": true,
+          "result_event_id": "c1720d60c0491a05a28669a3884de96b9c221d15b1af7ba3edfcac491c853911",
+          "tool_name": "Bash",
+          "tool_use_id": "toolu_build"
+        },
+        "truncated": true,
+        "turn_id": "turn-b5c224856ba89d49c08228706ae77c57856a3051"
+      },
+      {
+        "chunk_id": "chunk-a608f31ccb9ed864224c62eb926947af35108fc4",
+        "content_hash": "3c0ce9d8fcd45d414cefc7cef91f9e148757add80138fac0b0b1fd2c9c93d4c1",
+        "kind": "turn",
+        "omitted_chars": 0,
+        "preview_chars": 74,
+        "sequences": [
+          13,
+          16
+        ],
+        "tool": null,
+        "truncated": false,
+        "turn_id": "turn-f0af4196425f5c01d1a5a552ad245a4c7984cdcb"
+      },
+      {
+        "chunk_id": "chunk-9c77e68df36192238b0bf3190ca72fe13f83c26f",
+        "content_hash": "1b56d93d2ec8aeffb3564f26ccd59364bcd5c80c0c3fd890872eda32a8c67aae",
+        "kind": "tool",
+        "omitted_chars": 0,
+        "preview_chars": 79,
+        "sequences": [
+          14,
+          15
+        ],
+        "tool": {
+          "call_event_id": "0f31a5c14abd92486716311268d1cea726fb7188e61321bf5d3106802d5fe867",
+          "is_error": false,
+          "result_event_id": "43b42976b5923c37e6a44e753db7dd66f280313fef14bc7b4b0c005a5c2fb0e5",
+          "tool_name": "Bash",
+          "tool_use_id": "toolu_status"
+        },
+        "truncated": false,
+        "turn_id": "turn-f0af4196425f5c01d1a5a552ad245a4c7984cdcb"
+      }
+    ],
+    "earlier_chunks_unchanged": true,
+    "every_locator_exact": true,
+    "first_build": {
+      "chunks_rebuilt_without_content_change": 0,
+      "generation_state": "built",
+      "state": "committed",
+      "unchanged": 0
+    },
+    "first_build_inserted": 5,
+    "metrics": {
+      "access_domain": "swarm-fixture",
+      "chunks_rebuilt_without_content_change": 0
+    },
+    "multi_tool_turn": [
+      {
+        "call_event_id": "416875836b088957e3401bf24e3f3c732c84b6220a1b063605f60aebaad28f66",
+        "is_error": false,
+        "result_event_id": "e61dc3608c8da3a1a151a6b5bb8f99e034d2a92477daaf91e8ffc45203ee21fd",
+        "tool_name": "Bash",
+        "tool_use_id": "toolu_ls"
+      },
+      {
+        "call_event_id": "8b9c75a4fa111f779537d686d96ab2ceff6a929162a0e0f62baa86e809480cf6",
+        "is_error": false,
+        "result_event_id": "f01f5d3448e34a1c0f6019070fc4cb8def94206f61ca8dea5c679ba91785b565",
+        "tool_name": "Read",
+        "tool_use_id": "toolu_read"
+      }
+    ],
+    "schema_valid": true
+  },
+  "state": "passed"
+}
