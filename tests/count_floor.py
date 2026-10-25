@@ -539,6 +539,12 @@ def referenced_subjects(tree: Path, nodeid: str) -> set[tuple[str, str]]:
     names, modules = _imports(module)
     rebound = _local_bindings(module, include_definitions=False) | names.keys() | modules.keys()
     rebound.update(
+        alias.asname or alias.name.split(".")[0]
+        for statement in _body_nodes(module)
+        if isinstance(statement, (ast.Import, ast.ImportFrom))
+        for alias in statement.names
+    )
+    rebound.update(
         child.name for child in _body_nodes(module) if isinstance(child, _DEFINITIONS) and child not in module.body
     )
     helpers = {
