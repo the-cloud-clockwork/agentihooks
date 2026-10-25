@@ -11,7 +11,7 @@ from scripts.hive.orders import Ack, CommandOrder, LaunchOrder, Orders
 from scripts.routing.reservation import LaunchSlots
 from scripts.swarm import capacity, lease, profile_choice
 from scripts.swarm.store import ROUND_ROBIN, AgentRecord, RedisStore, SwarmConfig, SwarmError
-from scripts.swarm.tick import ACK_LATER, Placed
+from scripts.swarm.tick import Placed
 from scripts.swarm_v2 import front_door
 from scripts.swarm_v2.runtime.base import Capability, Outcome, SpawnRequest, Status
 
@@ -427,7 +427,7 @@ class HiveLaunch:
             elif previous.name != request.name or previous.seat != request.task["seat"]:
                 return Outcome("spawn", Status.REFUSED, HIVE, detail="another claimant owns the hive launch order")
             else:
-                return self.answer(request, order)
+                return self.wait(order)
         selected = self._admitted_selection(request)
         if isinstance(selected, placement.Wait):
             return Outcome("spawn", Status.UNAVAILABLE, HIVE, detail=selected.reason)
@@ -503,7 +503,7 @@ class HiveLaunch:
             self._record_wait(request.lane, request.task, placement.Wait(refused))
             self.end(admitted, refused)
             return Outcome("spawn", Status.UNAVAILABLE, HIVE, detail=refused)
-        return self.answer(request, order)
+        return self.wait(order)
 
     def publish(self, request: SpawnRequest, selected: Selection, task: dict, order: LaunchOrder, ttl: int) -> str:
         from redis.exceptions import WatchError
@@ -523,51 +523,6 @@ class HiveLaunch:
                     return refused
                 except WatchError:
                     continue
-
-    def collect(self, request: SpawnRequest) -> Outcome:
-        order = self.orders_for(request.task["id"])
-        previous = order and self.store.execution_registry.get(self.slug, order.execution_id)
-        if previous and previous.state == "finished":
-            return self.finished(request, order, previous)
-        if not previous or previous.state in ("ended", "finished"):
-            return Outcome("spawn", Status.REFUSED, HIVE, detail=GONE)
-        if self.unacknowledged(order):
-            self.retire(order, previous)
-            return Outcome("spawn", Status.AMBIGUOUS, HIVE, detail=EXPIRED)
-        return self.spawn(request)
-
-    def finished(self, request: SpawnRequest, order: LaunchOrder, agent: AgentRecord) -> Outcome:
-        lease.require_epoch(self.store, self.slug, request.task["controller_epoch"])
-        lease.require_epoch(self.store, self.slug, order.epoch)
-        _match("claimant", agent.name, request.name)
-        _match("seat", agent.seat, request.task["seat"])
-        _match("generation", order.generation, agent.generation)
-        ack = self.orders.ack(order)
-        if not ack:
-            return Outcome("spawn", Status.REFUSED, HIVE, detail=GONE)
-        if ack.status != "live":
-            return Outcome("spawn", Status.REFUSED, HIVE, detail=f"hive launch failed: {ack.failure}")
-        _match("ack host", order.hive, ack.target.get("host_id"))
-        admission.joined(self.store.redis, order.hive, f"{self.slug}/{agent.name}")
-        if agent.runtime_target != ack.target:
-            bound = replace(
-                agent,
-                runtime_target=ack.target,
-                pane_id=ack.execution["pane_id"],
-                launched_at=ack.execution["launched_at"],
-                launch_timings=ack.execution["launch_timings"],
-            )
-            self.store.execution_registry.update(self.slug, bound)
-        return Outcome("spawn", Status.OK, HIVE)
-
-    def expire(self, request: SpawnRequest) -> bool | None:
-        """False when the hive acknowledged the order, which leaves its launch running for a later collect."""
-        order = self.orders_for(request.task["id"])
-        previous = order and self.store.execution_registry.get(self.slug, order.execution_id)
-        if previous and previous.name == request.name and previous.state not in ("ended", "finished"):
-            if self.orders.ack(order) is not None:
-                return False
-            self.retire(order, previous)
 
     def reserve_room(self, request: SpawnRequest, selected: Selection) -> str:
         if selected.master_placement is not None:
@@ -630,9 +585,6 @@ class HiveLaunch:
         )
         with lease.fencing(self.held.epoch):
             return self.store.start_execution(self.slug, agent, previous.execution_id if ended else "")
-
-    def answer(self, request: SpawnRequest, order: LaunchOrder) -> Outcome:
-        return self.poll(order) if request.task.get(ACK_LATER) else self.wait(order)
 
     def wait(self, order: LaunchOrder) -> Outcome:
         while (outcome := self.poll(order)).status is Status.PENDING:

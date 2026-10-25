@@ -280,25 +280,6 @@ class FencedRuntime:
                 runtime = runtime.original_runtime
             return runtime.spawn(config, lane, name, {**task, "controller_epoch": self.held.epoch})
 
-    def collect(self, config, lane, name, task):
-        from scripts.swarm.tick import SpawnError
-        from scripts.swarm_v2.runtime.base import SpawnRequest
-
-        lease.renew(self.store, self.slug, self.held)
-        request = SpawnRequest(config, lane, name, {**task, "controller_epoch": self.held.epoch})
-        with lease.kept(self.store, self.slug, self.held):
-            outcome = self.runtime.hive_launch.collect(request)
-        if not outcome.ok:
-            raise SpawnError(outcome.detail, outcome.status)
-        return outcome.value
-
-    def expire(self, config, lane, name, task):
-        from scripts.swarm_v2.runtime.base import SpawnRequest
-
-        request = SpawnRequest(config, lane, name, {**task, "controller_epoch": self.held.epoch})
-        with lease.kept(self.store, self.slug, self.held):
-            return self.runtime.hive_launch.expire(request)
-
 
 def _hive_lane(lane: str, task: dict, kubernetes_proof: bool) -> bool:
     if kubernetes_proof and lane == "eng":

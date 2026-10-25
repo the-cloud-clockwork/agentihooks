@@ -5,7 +5,6 @@ from unittest.mock import Mock
 import pytest
 
 from scripts.hive import admission, headroom
-from scripts.swarm.tick import ACK_LATER
 from scripts.swarm_v2.runtime.base import Status
 from tests.hive.test_controller_launch import request_for, setup, write_hive  # noqa: F401
 
@@ -30,7 +29,7 @@ def test_resource_refusal_spills_to_the_next_ranked_hive(setup, monkeypatch, in_
     launcher = setup.launcher
     launcher.placement_cache = {} if in_pass else None
     request = request_for(setup)
-    request.task[ACK_LATER] = True
+    monkeypatch.setattr(launcher, "wait", launcher.poll)
     assert launcher.select(setup.config, "eng", request.task).hive == "remote"
     reserve = launcher.reserve_room
     attempted = []
@@ -85,7 +84,7 @@ def test_spill_does_not_bypass_hive_role_constraints(setup, monkeypatch):  # noq
 
 
 @pytest.mark.parametrize("in_pass", [False, True])
-def test_a_full_launch_queue_spills_without_reserving_the_refused_hive(setup, in_pass):  # noqa: F811
+def test_a_full_launch_queue_spills_without_reserving_the_refused_hive(setup, monkeypatch, in_pass):  # noqa: F811
     write_hive(setup, prefer={"engineer": 0})
     write_hive(setup, id="spare", prefer={"engineer": 1})
     launcher = setup.launcher
@@ -94,7 +93,7 @@ def test_a_full_launch_queue_spills_without_reserving_the_refused_hive(setup, in
     for _ in range(4):
         setup.store.redis.xadd(stream, {"order": "{}"})
     request = request_for(setup)
-    request.task[ACK_LATER] = True
+    monkeypatch.setattr(launcher, "wait", launcher.poll)
     result = launcher.spawn(request)
     assert result.status is Status.PENDING
     assert launcher.orders_for(request.task["id"]).hive == "spare"

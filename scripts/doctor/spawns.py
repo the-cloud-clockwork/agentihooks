@@ -78,13 +78,11 @@ def fresh_restores(record: dict) -> list[Finding]:
     ]
 
 
-def silent_starts(
-    agents: list[dict], hooked: dict, now_ms: int, beats: dict | None = None, pending: frozenset = frozenset()
-) -> list[Finding]:
+def silent_starts(agents: list[dict], hooked: dict, now_ms: int, beats: dict | None = None) -> list[Finding]:
     beats = beats or {}
     found = []
     for agent in agents:
-        if agent.get("state") == "finished" or agent["name"] in pending:
+        if agent.get("state") == "finished":
             continue
         found += _silent_hive(agent, beats, now_ms) if agent.get("hive") else _silent_local(agent, hooked, now_ms)
     return found

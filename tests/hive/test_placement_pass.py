@@ -5,7 +5,7 @@ import pytest
 
 from scripts.hive.launch import Selection
 from scripts.swarm import controller
-from scripts.swarm.tick import ACK_LATER, SpawnError, _room_wait, _spawn_order
+from scripts.swarm.tick import SpawnError, _room_wait, _spawn_order
 from scripts.swarm_v2.runtime.base import RuntimeRouter
 from scripts.swarm_v2.runtime.routed import RoutedRuntime
 from tests.hive.test_controller_launch import request_for, setup, write_hive  # noqa: F401
@@ -44,7 +44,7 @@ def ordered(world, runtime, task):
 
 
 @pytest.mark.parametrize("refused", [False, True])
-def test_ordering_and_spawn_reuse_one_placement_and_the_next_pass_refreshes(setup, refused):  # noqa: F811
+def test_ordering_and_spawn_reuse_one_placement_and_the_next_pass_refreshes(setup, monkeypatch, refused):  # noqa: F811
     task = {"id": "task", "title": "Launch on a hive"}
     if refused:
         write_hive(setup, excluded=["engineer"])
@@ -62,7 +62,7 @@ def test_ordering_and_spawn_reuse_one_placement_and_the_next_pass_refreshes(setu
     if not refused:
         assert _room_wait(runtime, "eng", task) == ""
         request = request_for(setup)
-        request.task[ACK_LATER] = True
+        monkeypatch.setattr(launch, "wait", launch.poll)
         with pytest.raises(SpawnError, match="hive launch ordered"):
             runtime.spawn(setup.config, "eng", request.name, request.task)
         order = launch.orders_for(request.task["id"])
