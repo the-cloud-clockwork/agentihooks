@@ -618,6 +618,7 @@ def test_stats_parts_split_files_by_duration_across_runners_even_inside_an_xdist
     assert loads == expected
     assert part_files(tmp_path, files[:1], (2, 3)) == []
 
+
 def test_statistics_parts_split_one_file_without_losing_new_parameter_cases(tmp_path, monkeypatch):
     from scripts.ci_mutation.selection import load_or_collect_stats
 
@@ -651,8 +652,11 @@ def test_statistics_parts_split_one_file_without_losing_new_parameter_cases(tmp_
         output = tmp_path / f"part-{index}.json"
         with pytest.raises(SystemExit) as done:
             load_or_collect_stats(
-                runner, SimpleNamespace(_pytest_add_cli_args=[]), ["scripts/sample.py"],
-                "collect", (str(output), "key", str(index), "2"),
+                runner,
+                SimpleNamespace(_pytest_add_cli_args=[]),
+                ["scripts/sample.py"],
+                "collect",
+                (str(output), "key", str(index), "2"),
             )
         assert done.value.code == 0
         assert json.loads(output.read_text())["results"][0]["tests"]["sample"] == parts[index]
