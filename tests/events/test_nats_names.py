@@ -1,6 +1,6 @@
 import asyncio
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, call
+from unittest.mock import AsyncMock, Mock, call
 
 import pytest
 from nats.js.errors import NotFoundError
@@ -73,7 +73,6 @@ def test_dotted_logical_consumers_never_query_an_invalid_legacy_name():
 )
 def test_root_selection_respects_credential_discovery_permissions(monkeypatch, permissions, expected, queried):
     js = SimpleNamespace(stream_info=AsyncMock(side_effect=NotFoundError()))
-    from unittest.mock import Mock
 
     parse = Mock(return_value=("jwt", "key"))
     claims = Mock(return_value={"nats": {"pub": permissions}})
@@ -89,6 +88,14 @@ def test_root_selection_without_credentials_discovers_existing_streams():
     js = SimpleNamespace(stream_info=AsyncMock())
     assert asyncio.run(nats_names.root_stream(js, "new", "old", None)) == "old"
     js.stream_info.assert_awaited_once_with("old")
+
+
+def test_root_credentials_without_a_publish_restriction_keep_default_access(monkeypatch):
+    js = SimpleNamespace(stream_info=AsyncMock(side_effect=NotFoundError()))
+    monkeypatch.setattr(nats_names.nkey, "parse_creds", Mock(return_value=("jwt", "key")))
+    monkeypatch.setattr(nats_names.nkey, "claims", Mock(return_value={"nats": {}}))
+    assert asyncio.run(nats_names.root_stream(js, "new", "old", "creds")) == "new"
+    assert js.stream_info.await_args_list == [call("old"), call("new")]
 
 
 @pytest.mark.parametrize(

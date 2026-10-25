@@ -14,7 +14,6 @@ from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from contextvars import copy_context
 from dataclasses import dataclass, field, replace
-from itertools import count
 from typing import Protocol
 
 from hooks.context import context_recycle
@@ -1583,7 +1582,9 @@ def primed(store, slug, seat, task):
 def _free_seat(slug, lane, taken, preferred):
     if preferred and preferred not in taken:
         return preferred
-    return next(seat for k in count(1) if (seat := seat_address(slug, seat_label(lane, k))) not in taken)
+    return next(
+        seat for k in range(1, len(taken) + 2) if (seat := seat_address(slug, seat_label(lane, k))) not in taken
+    )
 
 
 def placed_record(record, placed):

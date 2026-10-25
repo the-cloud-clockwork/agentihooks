@@ -36,3 +36,11 @@ def test_legacy_aliases_match_stored_names():
         == "AGENTIHOOKS_QUEUE_h" + hashlib.sha256(b"swarm.rig.ready.eng").hexdigest()
     )
     assert names.legacy_stream_name("rig", "STATE_spoke-work") == "AGENTIHOOKS_726967_STATE_spoke-work"
+
+
+def test_long_clean_consumer_names_keep_the_server_limit_boundary():
+    assert names.consumer_name("x" * 255) == "x" * 255
+
+
+def test_legacy_aliases_preserve_uppercase_identifiers():
+    assert names.legacy_queue_stream("Work_9-A") == "AGENTIHOOKS_QUEUE_Work_9-A"

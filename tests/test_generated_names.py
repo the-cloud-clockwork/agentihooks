@@ -63,13 +63,13 @@ def test_seat_labels_use_the_shared_builder(lane, index, expected):
 
 @pytest.mark.parametrize(("lane", "index"), [("eng.one", 1), ("eng", 0), ("eng", -1), ("eng", True), ("eng", "1")])
 def test_invalid_seats_are_refused(lane, index):
-    with pytest.raises(naming.NamingError):
+    with pytest.raises(naming.NamingError, match="^a seat needs a known lane and a positive integer$"):
         naming.seat_label(lane, index)
 
 
 @pytest.mark.parametrize("ordinal", [0, -1, True, "1"])
 def test_invalid_hive_ordinals_are_refused(ordinal):
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="^a hive needs a positive integer$"):
         machine.hive_name(ordinal)
 
 
@@ -94,11 +94,31 @@ def test_master_seats_call_the_shared_generator(monkeypatch):
     assert masters.seat(2) == ("master", 2)
 
 
+@pytest.mark.parametrize("title", ["", "...", "___"])
+def test_empty_pane_labels_have_a_stable_fallback(title):
+    assert naming.pane_label(title) == "pane"
+
+
+def test_dispatch_seats_use_the_same_label_rules():
+    assert naming.seat_label("dispatch", 1) == "dispatch"
+    assert naming.seat_label("dispatch", 2) == "dispatch-2"
+
+
+def test_herdr_agent_names_trim_generated_separators():
+    assert herdr_host.agent_name("__Name--") == "name"
+
+
 @pytest.mark.parametrize("existing", [None, "repo.one_two", "repo-one-two"])
 def test_workspace_lookup_reuses_current_and_legacy_labels(monkeypatch, existing):
     workspaces = {} if existing is None else {existing: "space"}
     calls = []
-    monkeypatch.setattr(herdr_host, "find_workspace", lambda label, env: workspaces.get(label))
+    launch_env = {"HERDR_SOCKET": "named-socket"}
+
+    def find_workspace(label, environ):
+        assert environ is launch_env
+        return workspaces.get(label)
+
+    monkeypatch.setattr(herdr_host, "find_workspace", find_workspace)
     monkeypatch.setattr(herdr_host, "_placed", lambda value: value)
 
     def cli(args, environ):
@@ -109,7 +129,7 @@ def test_workspace_lookup_reuses_current_and_legacy_labels(monkeypatch, existing
 
     monkeypatch.setattr(herdr_host, "_cli", cli)
     for _ in range(2):
-        herdr_host.open_pane(Path("/missing"), "agent.one", {}, "tab", "repo.one_two", {})
+        herdr_host.open_pane(Path("/missing"), "agent.one", {}, "tab", "repo.one_two", launch_env)
     assert sum(args[:2] == ["workspace", "create"] for args in calls) == (1 if existing is None else 0)
     assert calls[-1][:2] == ["tab", "create"]
     assert calls[-1][calls[-1].index("--workspace") + 1] == "space"
