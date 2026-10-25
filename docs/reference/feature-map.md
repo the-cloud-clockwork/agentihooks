@@ -29,7 +29,7 @@ Mark the behaviour test function with `@pytest.mark.feature("FEATURE_ID")`.
 Class methods use `tests/test_login.py::TestLogin::test_shared`. The map gate
 parses the source without importing it or running the suite. Each feature rule
 and each marked test must belong to an entry. Missing rule ids, test nodes,
-markers, source fields and live command targets fail the pull request lint job.
+markers, source fields and live command targets fail the required Semgrep feature job.
 
 Live commands use a repository script with `bash`, a Python script or module
 with `python` or `python3`, or an executable repository path. The validator
@@ -42,6 +42,6 @@ the feature fixture job in the latest completed pull request Tests run. Pass a
 run id as its optional first argument to inspect a specific run. Both the job
 and its fixture step must have succeeded; a missing job fails.
 
-CI runs `python -m scripts.feature_map` in the pull request tier. When changing
+The Semgrep feature job runs `python -m scripts.feature_map` in the pull request tier. When changing
 the gate, plant a missing test node in an entry and record a red CI run, restore
 the exact reference and record green. Tests run in CI only.

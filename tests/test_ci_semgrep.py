@@ -81,6 +81,11 @@ def test_feature_fixture_command_runs_recursively():
     assert all("if" not in step and "continue-on-error" not in step for step in job["steps"])
 
 
+def test_feature_map_links_are_required_alongside_feature_rule_fixtures():
+    steps = _jobs()["feature-tests"]["steps"]
+    assert any(step.get("run") == "python -m scripts.feature_map" for step in steps)
+
+
 def test_wrapper_holds_only_read_permission():
     assert _semgrep()["permissions"] == {"contents": "read"}
 
