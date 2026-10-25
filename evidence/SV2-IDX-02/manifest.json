@@ -1,0 +1,15 @@
+{
+  "cases": [
+    "T-SV2-IDX-02-A",
+    "T-SV2-IDX-02-B",
+    "T-SV2-IDX-02-C"
+  ],
+  "evidence_class": "mocked: an in-process caller, a SQLite catalog file and a local content addressed object folder stand in for the session service, the central database and the archive bucket; no embedding model, HTTP server or Pod runs",
+  "inputs": {
+    "tests/fixtures/swarm_v2/session-chunks.json": "9442886fae1a111dd590083f652183da056ac6a5e7e41339344d139b9b695242"
+  },
+  "package": "SV2-IDX-02",
+  "red_run": "pending",
+  "run": "pending",
+  "tested_commit": "pending"
+}
