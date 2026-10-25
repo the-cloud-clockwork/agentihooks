@@ -62,6 +62,14 @@ def test_quiet_waits_for_pending_outline_deliveries_before_capture():
     assert page_replay.quiet(LateOutline()) == [0, "outline marked"]
 
 
+def test_quiet_uses_readiness_instead_of_fixed_sleeps(monkeypatch):
+    def fixed_sleep(seconds):
+        pytest.fail("page readiness must not depend on a fixed sleep")
+
+    monkeypatch.setattr(page_replay.time, "sleep", fixed_sleep)
+    assert page_replay.quiet(LateOutline()) == [0, "outline marked"]
+
+
 def test_quiet_times_out_instead_of_capturing_while_a_delivery_stays_pending(monkeypatch):
     monkeypatch.setattr(page_replay.time, "sleep", lambda seconds: None)
     page = StalledOutline()
