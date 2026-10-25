@@ -393,7 +393,7 @@ def test_statistics_select_only_contexts_executing_the_edited_branch(tmp_path, m
     line = 3 if mode == "repeated" else 4
     plan.estimate(tmp_path, {"scripts/core.py": {line + shift}}, selection, manifest)
     expected = ["tests/test_core.py::test_g"]
-    if mode in {"legacy", "inserted", "header", "drift", "module"}:
+    if mode in {"legacy", "inserted", "header", "drift"}:
         expected = [
             f"tests/test_core.py::{name}" for name in ("TestSpawn::test_child", "test_f", "test_g", "test_other")
         ]

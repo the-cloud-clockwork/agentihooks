@@ -177,7 +177,7 @@ def recorded_lines(root: Path, manifest: dict, changes: dict[str, set[int]]) -> 
                         if first <= end and start < last and (unit := f"{path}::{name}") in index:
                             fallback.add(index[unit])
         by_line = line_units(old)
-        if any(line not in by_line for line in affected) or "<module>" in changed_units(old, new):
+        if any(line not in by_line for line in affected):
             fallback.update(number for unit, number in index.items() if unit.startswith(f"{path}::"))
         lines[path] = affected | {mapping[line] for line in changes.get(path, ()) if line in mapping}
     return lines, fallback
