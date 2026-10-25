@@ -681,6 +681,7 @@ def test_the_reply_limit_reads_the_environment_skips_markers_and_checks_retries(
     marker = "<!-- @lesson -->\none two three four\n<!-- @/lesson -->"
     assert operator_mode.reply_refusal({"session_id": "s1", "last_assistant_message": "one two three"}, env) == ""
     assert operator_mode.reply_refusal({"session_id": "s1", "last_assistant_message": "ok " + marker}, env) == ""
+    assert operator_mode.reply_refusal({"session_id": "s1", "last_assistant_message": "a b <!-- c d e -->"}, env) == ""
     refused = operator_mode.reply_refusal({"session_id": "s1", "last_assistant_message": "a b c d"}, env)
     assert refused.startswith("Operator not present: this reply has 4 words, over the 3 word limit.")
     repeat = {"session_id": "s1", "last_assistant_message": "a b c d", "stop_hook_active": True}

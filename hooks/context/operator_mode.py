@@ -24,7 +24,7 @@ REPLY_REFUSAL = (
     "Reply again in at most {words} words, machine style: result only, no explanation."
 )
 REPLY_RETRIES = 3
-MARKER = re.compile(r"<!--.*?-->", re.DOTALL)
+MARKER = re.compile(r"<!--\s*@(\w+).*?<!--\s*@/\1\s*-->|<!--.*?-->", re.DOTALL)
 QUESTION_TOOL = "AskUserQuestion"
 ASK_REFUSAL = (
     "The operator is not present in this pane, so the question tool is off. Put the question on the ledger with "
