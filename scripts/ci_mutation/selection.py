@@ -151,7 +151,7 @@ def collect_shard_stats(runner, test_runner, tests: list[str], output: Path, bas
     if measured:
         os.environ["COVERAGE_FILE"] = str(coverage_file.resolve())
         test_runner._pytest_add_cli_args.extend(
-            ["--cov=.", "--cov-context=test", "--cov-report=", "--cov-config=/dev/null"]
+            ["-p", "pytest_cov.plugin", "--cov=.", "--cov-context=test", "--cov-report=", "--cov-config=/dev/null"]
         )
     start = process_time()
     status = test_runner.run_stats(tests=tests)
