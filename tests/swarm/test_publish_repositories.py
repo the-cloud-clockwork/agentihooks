@@ -167,7 +167,8 @@ def test_prepare_does_not_use_another_repositorys_merged_pull_request(repositori
 
 
 @pytest.mark.parametrize("command", ["prepare", "publish"])
-def test_cli_refusal_names_the_secondary_repositorys_branch(repositories, monkeypatch, command):
+@pytest.mark.parametrize("recorded_branch", ["deleted-secondary", "dev"])
+def test_cli_refusal_names_the_secondary_repositorys_branch(repositories, monkeypatch, command, recorded_branch):
     import json
     import syslog
 
@@ -177,7 +178,7 @@ def test_cli_refusal_names_the_secondary_repositorys_branch(repositories, monkey
     p.task.update(
         repositories=[str(p.bundle)],
         branch="primary-branch",
-        repository_branches={str(p.swarm): "primary-branch", str(p.bundle): "deleted-secondary"},
+        repository_branches={str(p.swarm): "primary-branch", str(p.bundle): recorded_branch},
     )
     if command == "publish":
         root = p.bundle.parent / "bundle-worktree"
@@ -194,7 +195,7 @@ def test_cli_refusal_names_the_secondary_repositorys_branch(repositories, monkey
         getattr(cli, f"cmd_{command}")(None, args)
     assert len(logged) == 1
     assert logged[0]["task"] == "t1"
-    assert logged[0]["branch"] == "deleted-secondary"
+    assert logged[0]["branch"] == recorded_branch
 
 
 def test_prepare_names_the_default_repository_without_inferring_prose(repositories):

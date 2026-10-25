@@ -126,24 +126,30 @@ def repository_task(repo: Path, task: dict) -> dict:
 
 def publishing_root(repo: str, task: dict, agent: AgentRecord) -> tuple[Path | None, Path, dict]:
     current = subprocess.run(["git", "rev-parse", "--show-toplevel"], capture_output=True, text=True)
+    root = None
     if current.returncode == 0 and (Path(current.stdout.strip()) / ".git").is_file():
         root = Path(current.stdout.strip())
         primary = repository_root(root)
+    else:
+        repositories = task.get("repositories") or [repo]
+        if len(repositories) != 1:
+            raise SwarmError("publish from the task worktree to select one of its repositories")
+        primary = local_repository(repositories[0], repo)
+    try:
         declared = task.get("repositories")
-        if declared and repository_name(str(primary)) not in {repository_name(value) for value in declared}:
+        if root and declared and repository_name(str(primary)) not in {repository_name(value) for value in declared}:
             raise SwarmError(f"current worktree repository {primary} is not in the task repositories")
         scoped = repository_task(primary, task)
+        if root is None:
+            return existing(primary, scoped, agent), primary, scoped
         branch = require_branch(git(root, "branch", "--show-current"))
         own = re.fullmatch(rf"{re.escape(naming.plain(agent.name))}(?:-\d+)?", branch)
         if not (own or branch == scoped.get("branch")):
             raise SwarmError(f"current worktree {root} does not belong to this task")
         return root, primary, scoped
-    repositories = task.get("repositories") or [repo]
-    if len(repositories) != 1:
-        raise SwarmError("publish from the task worktree to select one of its repositories")
-    primary = local_repository(repositories[0], repo)
-    scoped = repository_task(primary, task)
-    return existing(primary, scoped, agent), primary, scoped
+    except SwarmError as exc:
+        branch = task.get("repository_branches", {}).get(str(primary), task.get("branch", ""))
+        raise PublicationRefusal(primary, branch, str(exc)) from exc
 
 
 def pushed_branches(repo: str, task: dict, agent: AgentRecord) -> dict:
@@ -370,5 +376,7 @@ def publish(slug: str, agent: AgentRecord, repo: str, ledger: LedgerClient, mess
         detail = str(exc)
         if fields.get("gate") == "AgentiHooks touched Python fallback":
             detail = f"AgentiHooks touched Python fallback for {root}: {detail}"
-        raise PublicationRefusal(primary, scoped.get("branch", ""), f"{detail}; Next: {retry}") from exc
+        branch = exc.branch if isinstance(exc, PublicationRefusal) else scoped.get("branch", "")
+        repository = Path(exc.repository) if isinstance(exc, PublicationRefusal) else primary
+        raise PublicationRefusal(repository, branch, f"{detail}; Next: {retry}") from exc
     return {**fields, "head": head}
