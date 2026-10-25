@@ -1650,39 +1650,15 @@ jobs:
           ref: ${{ github.sha }}
           fetch-depth: 0
 
-      - name: Decide whether Sonar has changed source
-        id: source
-        env:
-          BASE: ${{ github.event.pull_request.base.sha }}
-          HEAD: ${{ github.sha }}
-          EVENT: ${{ github.event_name }}
-        run: |
-          test_only=false
-          if [[ "$EVENT" == pull_request ]]; then
-            git diff --no-ext-diff --no-renames --name-only -z "$BASE" "$HEAD" > "$RUNNER_TEMP/sonar-paths"
-            test_only=true
-            count=0
-            while IFS= read -r -d '' path; do
-              count=$((count + 1))
-              [[ "$path" == tests/* ]] || test_only=false
-            done < "$RUNNER_TEMP/sonar-paths"
-            [[ "$count" -gt 0 ]] || test_only=false
-          fi
-          echo "test_only=$test_only" >> "$GITHUB_OUTPUT"
-          printf 'event=%s\nbase=%s\nhead=%s\ntest_only=%s\n' "$EVENT" "$BASE" "$HEAD" "$test_only" > sonar-scope.txt
-          cat sonar-scope.txt
-
       - uses: actions/setup-python@v5
-        if: steps.source.outputs.test_only != 'true'
         with:
           python-version: "3.12"
 
       - name: Install coverage
-        if: steps.source.outputs.test_only != 'true'
         run: python -m pip install "coverage>=7.4" PyYAML==6.0.3
 
       - name: Download shard coverage
-        if: steps.source.outputs.test_only != 'true' && needs.select.outputs.scope != 'none'
+        if: needs.select.outputs.scope != 'none'
         uses: actions/download-artifact@v4
         with:
           pattern: coverage-3.12-*
@@ -1691,7 +1667,7 @@ jobs:
       # The merge runs while the proxy starts; the scan waits for it below.
       - name: Merge shard coverage
         id: merge
-        if: steps.source.outputs.test_only != 'true' && needs.select.outputs.scope != 'none'
+        if: needs.select.outputs.scope != 'none'
         env:
           SHARDS: ${{ needs.select.outputs.scope == 'selected' && needs.select.outputs.count || 20 }}
           SCOPE: ${{ needs.select.outputs.scope }}
@@ -1707,7 +1683,7 @@ jobs:
       # Builds beside the scan, outside the scanned tree; the wait after the scan holds its result.
       - name: Build the test dependency manifest
         id: manifest
-        if: steps.source.outputs.test_only != 'true' && needs.select.outputs.scope == 'full'
+        if: needs.select.outputs.scope == 'full'
         env:
           ENVIRONMENT: py3.12-${{ hashFiles('pyproject.toml') }}
         run: |
@@ -1726,7 +1702,6 @@ jobs:
 
       - name: Start Cloudflare Access proxy
         id: proxy
-        if: steps.source.outputs.test_only != 'true'
         env:
           SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
           CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
@@ -1783,9 +1758,7 @@ jobs:
         timeout-minutes: 5
         env:
           MERGE_PID: ${{ steps.merge.outputs.pid }}
-          TEST_ONLY: ${{ steps.source.outputs.test_only }}
         run: |
-          [[ "${TEST_ONLY:-false}" != true ]] || exit 0
           until [[ -s "$RUNNER_TEMP/combine.status" ]]; do
             if ! kill -0 "$MERGE_PID" 2> /dev/null && [[ ! -s "$RUNNER_TEMP/combine.status" ]]; then
               echo "::error::The coverage merge ended without a status."
@@ -1799,7 +1772,6 @@ jobs:
 
       # Runs the CLI directly: sonarqube-scan-action never finds its tool cache entry, since a four part version is not semver.
       - name: SonarQube Scan
-        if: steps.source.outputs.test_only != 'true'
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
           SONAR_HOST_URL: http://127.0.0.1:9000
@@ -1823,7 +1795,7 @@ jobs:
           [[ ! -s "$RUNNER_TEMP/sonar-gc.log" ]] || awk '/Pause/ { n++; sub(/ms$/, "", $NF); t += $NF } END { printf "GC pauses %d, %.0f ms\n", n, t }' "$RUNNER_TEMP/sonar-gc.log"
 
       - name: Wait for the test dependency manifest
-        if: steps.source.outputs.test_only != 'true' && needs.select.outputs.scope == 'full'
+        if: needs.select.outputs.scope == 'full'
         timeout-minutes: 5
         env:
           MANIFEST_PID: ${{ steps.manifest.outputs.pid }}
@@ -1840,7 +1812,7 @@ jobs:
           exit "$(< "$RUNNER_TEMP/manifest.status")"
 
       - name: Upload the test dependency manifest
-        if: steps.source.outputs.test_only != 'true' && needs.select.outputs.scope == 'full'
+        if: needs.select.outputs.scope == 'full'
         uses: actions/upload-artifact@v4
         with:
           name: dep-manifest
@@ -1855,7 +1827,6 @@ jobs:
         with:
           name: sonar-report
           path: |
-            sonar-scope.txt
             coverage.xml
             lcov.info
             .scannerwork/report-task.txt
@@ -1867,7 +1838,6 @@ jobs:
       # Sonar refuses an analysis dated before the dev branch's latest one; that revision ends superseded, ungraded and never promoted.
       - name: SonarQube Quality Gate
         id: gate
-        if: steps.source.outputs.test_only != 'true'
         timeout-minutes: 5
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
