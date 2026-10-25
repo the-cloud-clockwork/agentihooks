@@ -202,7 +202,7 @@ def _swarm_exports(environ: dict[str, str]) -> str:
 
 
 def _access_export() -> str:
-    return f'eval "$({shlex.join([sys.executable, "-m", "scripts.access_env", "env"])})"\n'
+    return f'eval "$({shlex.join([sys.executable, "-P", "-m", "scripts.access_env", "env"])})"\n'
 
 
 def _launch_environ(environ: dict[str, str], name: str, handoff: bool) -> dict[str, str]:
@@ -372,6 +372,7 @@ def _app_server_command(
 ) -> list[str]:
     return [
         sys.executable,
+        "-P",
         "-m",
         "scripts.codex_session",
         "serve",
@@ -404,6 +405,7 @@ def _viewer_lines(serve: str, launcher: Path, name: str, environ: dict[str, str]
     log = launcher.with_name(f"{launcher.stem}.serve.log")
     viewer = [
         sys.executable,
+        "-P",
         "-m",
         "scripts.codex_session",
         "attach",
@@ -445,7 +447,7 @@ def _agent_command(
         ]
         command = _profile_command(command, spec)
         if environ.get("AGENTIHOOKS_SWARM"):
-            command = [sys.executable, "-m", "scripts.codex_input", "--", *command]
+            command = [sys.executable, "-P", "-m", "scripts.codex_input", "--", *command]
         return command, ""
     command = [
         agentihooks_bin,
@@ -503,11 +505,11 @@ def _write_launcher(
     from scripts import session_exit
 
     exit_record = session_exit.path_for(launcher, environ)
-    exit_command = shlex.join([sys.executable, "-m", "scripts.session_exit", str(exit_record)])
+    exit_command = shlex.join([sys.executable, "-P", "-m", "scripts.session_exit", str(exit_record)])
     exit_identity = shlex.join([spec.agent, identity])
     command_text = shlex.join(command)
     if environ.get("HIVE_GITHUB_AUTH_MODE"):
-        command_text = f"{shlex.join([sys.executable, '-m', 'scripts.github_app_cli', 'exec'])} {command_text}"
+        command_text = f"{shlex.join([sys.executable, '-P', '-m', 'scripts.github_app_cli', 'exec'])} {command_text}"
     inputs = [*([str(prompt_file)] if prompt_file is not None else []), str(_route_report(launcher))]
     if app_server:
         command_text = _viewer_lines(command_text, launcher, name, environ, inputs)
@@ -622,6 +624,8 @@ def _binding_request(args, agent: str, prompt: str, environ: dict[str, str], fla
     report = _runtime_dir(environ) / f"profile-{os.getpid()}-{time.time_ns()}.json"
     binding.request(report, args.profile, agent, home)
     environ[binding.REPORT] = str(report)
+    if not args.defer_canary:
+        print(f"profile_report={report}", flush=True)
     environ["AGENTIHOOKS_RUN_MODEL"], environ["AGENTIHOOKS_RUN_EFFORT"] = model_effort(agent, flags, environ)
     return f"{binding.PROMPT}\n\n{prompt}"
 
@@ -671,10 +675,10 @@ def _detached(args, environ: dict[str, str]) -> bool:
     return bool(args.defer_canary and _binding_deferred(environ)) and _detach()
 
 
-def _refuse_deferred(args, environ: dict[str, str], exc: Exception) -> None:
+def _refuse_binding(environ: dict[str, str], exc: Exception) -> None:
     from scripts.profiles import binding
 
-    if args.defer_canary and environ.get(binding.REPORT):
+    if environ.get(binding.REPORT):
         binding.refuse(Path(environ[binding.REPORT]), str(exc))
 
 
@@ -1208,7 +1212,7 @@ def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -
         _route_reported(active_env, args.route_timeout, route)
         report += _profile_canary(args, agent, active_env, launch, route)
     except (OSError, ValueError) as exc:
-        _refuse_deferred(args, active_env, exc)
+        _refuse_binding(active_env, exc)
         print("\n".join([*report, "profile_validation=failed"]))
         print(f"agentihooks init-agent: {exc}", file=sys.stderr)
         return 3
