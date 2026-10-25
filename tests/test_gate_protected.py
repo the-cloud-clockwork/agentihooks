@@ -1264,3 +1264,150 @@ def test_only_the_trusted_preflight_skips_lane_grading(repo, capsys, trusted):
         _commit(repo, {"test.yml": _workflow(), "branch-lanes.yml": preflight}, {}, "trust preflight")
     assert gate_protected.main(["--root", str(repo), "--head", added]) == (0 if trusted else 1)
     assert ("shared hosted lane concurrency group" in capsys.readouterr().out) is not trusted
+
+
+def _equivalence():
+    return yaml.safe_load((_ROOT / ".github/workflows/equivalence.yml").read_text())
+
+
+def _equivalence_steps(workflow):
+    return workflow["jobs"]["ledger-equivalence"]["steps"]
+
+
+def _graded(steps, group):
+    return next(step for step in steps if step.get("run", "").endswith(f'equivalence.sh" {group}'))
+
+
+def _skip_store(workflow):
+    steps = _equivalence_steps(workflow)
+    steps.remove(_graded(steps, "store"))
+
+
+def _pass_store(workflow):
+    _graded(_equivalence_steps(workflow), "store")["run"] = "true"
+
+
+def _pass_page(workflow):
+    _graded(_equivalence_steps(workflow), "page")["run"] = "true"
+
+
+def _grade_from_head(workflow):
+    [pick] = [step for step in _equivalence_steps(workflow) if step.get("name") == "Pick the protected grader"]
+    pick["run"] = 'echo "GRADER=$PWD/head" >> "$GITHUB_ENV"'
+
+
+def _swap_grader(workflow):
+    steps = _equivalence_steps(workflow)
+    steps.insert(
+        steps.index(_graded(steps, "plant")),
+        {"run": "cp head/tests/swarm_ledger/equivalence.sh base/tests/swarm_ledger/equivalence.sh"},
+    )
+
+
+def _copy_into_base(workflow):
+    [install] = [step for step in _equivalence_steps(workflow) if step.get("name") == "Install dependencies"]
+    install["run"] += " && cp -r head/tests/swarm_ledger/. base/tests/swarm_ledger/"
+
+
+def _head_browser(workflow):
+    [browser] = [step for step in _equivalence_steps(workflow) if "browser-cache" in step.get("uses", "")]
+    browser["uses"] = "./head/.github/actions/browser-cache"
+
+
+def _tolerate_failure(workflow):
+    workflow["jobs"]["ledger-equivalence"]["continue-on-error"] = True
+
+
+def _hook_shell(workflow):
+    workflow["jobs"]["ledger-equivalence"]["env"]["BASH_ENV"] = "head/hook.sh"
+
+
+def _container(workflow):
+    workflow["jobs"]["ledger-equivalence"]["container"] = "ghcr.io/head/grader:latest"
+
+
+def _stop_triggering(workflow):
+    workflow[True]["pull_request"]["paths"] = ["docs/**"]
+
+
+def _rename_job(workflow):
+    workflow["jobs"]["renamed"] = workflow["jobs"].pop("ledger-equivalence")
+
+
+def _after_page(text):
+    def plant(workflow):
+        _equivalence_steps(workflow).append({"run": text})
+
+    plant.__name__ = f"after_page_{text.split()[-1]}"
+    return plant
+
+
+def _commit_equivalence(repo, workflow, message):
+    workflows = {"test.yml": _workflow()}
+    if workflow is not None:
+        workflows["equivalence.yml"] = workflow
+    return _commit(repo, workflows, {"outside_gate": {"equivalence.yml/ledger-equivalence": _entry()}}, message)
+
+
+@pytest.mark.parametrize(
+    "fault",
+    [
+        _skip_store,
+        _pass_store,
+        _pass_page,
+        _grade_from_head,
+        _swap_grader,
+        _copy_into_base,
+        _head_browser,
+        _tolerate_failure,
+        _hook_shell,
+        _container,
+        _stop_triggering,
+        _rename_job,
+        _after_page("echo GRADER"),
+        _after_page('echo x >> "$GITHUB_ENV"'),
+        _after_page('echo x >> "$GITHUB_PATH"'),
+        _after_page("bash head/tests/swarm_ledger/equivalence.sh"),
+        pytest.param(None, id="drop_workflow"),
+    ],
+)
+def test_the_required_grader_refuses_a_head_that_rewrites_the_equivalence_grading(repo, capsys, fault):
+    _commit_equivalence(repo, _equivalence(), "base grader")
+    _git(repo, "checkout", "-q", "-b", "pr")
+    head = _equivalence()
+    if fault is not None:
+        fault(head)
+    planted = _commit_equivalence(repo, head if fault is not None else None, "rewrite the grading")
+    _git(repo, "checkout", "-q", "dev")
+    assert gate_protected.main(["--root", str(repo), "--head", planted]) == 1
+    assert (
+        "::error::The head changes the ledger equivalence grading; the protected branch grades with its own."
+        in capsys.readouterr().out.splitlines()
+    )
+
+
+def test_the_required_grader_passes_equivalence_edits_outside_the_grading(repo, capsys):
+    _commit_equivalence(repo, _equivalence(), "base grader")
+    _git(repo, "checkout", "-q", "-b", "pr")
+    head = _equivalence()
+    head["jobs"]["ledger-equivalence"]["timeout-minutes"] = 20
+    steps = _equivalence_steps(head)
+    steps[steps.index(_graded(steps, "page")) + 1]["with"]["retention-days"] = 1
+    steps.append({"run": "ls -la"})
+    changed = _commit_equivalence(repo, head, "tune the job")
+    _git(repo, "checkout", "-q", "dev")
+    assert gate_protected.main(["--root", str(repo), "--head", changed]) == 0
+    assert "ledger equivalence" not in capsys.readouterr().out
+
+
+def test_the_required_grader_leaves_equivalence_alone_before_its_base_grades(repo, capsys):
+    base = _equivalence()
+    steps = _equivalence_steps(base)
+    for step in [step for step in steps if "GRADER" in step.get("run", "")]:
+        steps.remove(step)
+    _commit_equivalence(repo, base, "inline grading")
+    _git(repo, "checkout", "-q", "-b", "pr")
+    added = _commit_equivalence(repo, _equivalence(), "add the base grader")
+    _git(repo, "checkout", "-q", "dev")
+    assert gate_protected.main(["--root", str(repo), "--head", added]) == 0
+    assert "ledger equivalence" not in capsys.readouterr().out
