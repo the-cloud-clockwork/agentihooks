@@ -136,8 +136,14 @@ def collect_cached_stats(
         for path, dependencies in inputs.items()
     }
     stored = {path: folder / f"{key}.json" for path, key in keys.items()}
-    reused = [json.loads(file.read_text()) for file in stored.values() if file.is_file()]
-    missing = [path for path, file in stored.items() if not file.is_file()]
+    records = {path: json.loads(file.read_text()) for path, file in stored.items() if file.is_file()}
+    compatible = {
+        path: record
+        for path, record in records.items()
+        if record.get("key") == keys[path] and record.get("status") == 0
+    }
+    reused = [{name: value for name, value in record.items() if name != "key"} for record in compatible.values()]
+    missing = [path for path in files if path not in compatible]
     report(f"Mutation stats cache: reused {len(reused)} test files; collect {len(missing)}")
     fresh = collect(missing) if missing else []
     if any(result["status"] != 0 for result in fresh):
@@ -155,6 +161,7 @@ def collect_cached_stats(
         (folder / f"{keys[path]}.json").write_text(
             json.dumps(
                 {
+                    "key": keys[path],
                     "status": 0,
                     "tests": tests,
                     "durations": durations,
