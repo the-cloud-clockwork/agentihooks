@@ -170,6 +170,23 @@ def test_the_run_check_reads_imports_inside_functions():
     assert not loads_sdk_when_run("def f():\n    from hooks.mcp import resolve_transport\n")
 
 
+def test_function_imports_read_each_module_once(tmp_path, monkeypatch):
+    path = tmp_path / "functions.py"
+    path.write_text("def first():\n    import mcp\n\nasync def second():\n    import os\n")
+    reads = []
+    read_text = Path.read_text
+
+    def read(module):
+        reads.append(module)
+        return read_text(module)
+
+    monkeypatch.setattr(Path, "read_text", read)
+    assert _function_imports(path, "first") == {"mcp"}
+    assert _function_imports(path, "second") == {"os"}
+    assert _function_imports(path, "missing") == set()
+    assert reads == [path]
+
+
 def test_test_modules_that_load_the_mcp_sdk_when_run_share_one_worker():
     sources = {f: (_ROOT / f).read_text() for f in discover_test_files(_ROOT)}
     offenders = [f for f, source in sources.items() if loads_sdk_when_run(source) and SDK_GROUP not in source]
