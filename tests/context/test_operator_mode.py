@@ -500,6 +500,14 @@ def test_away_turns_end_without_a_report_to_him_and_a_typed_turn_keeps_normal_re
     assert "only in Priorities" not in present
 
 
+def test_an_away_worker_routes_his_decisions_to_a_ledger_question_never_priorities(ledgers):
+    env = {"AGENTIHOOKS_SWARM": "demo", "AGENTIHOOKS_AGENT_NAME": "engineer@a1-2", "LEDGER_DIR": str(ledgers)}
+    text = [operator_mode.reminder("w1", env, now=100) for _ in range(2)][1]
+    assert "End the turn with no report, summary or ask addressed to him" in text
+    assert "agentihooks ledger question add" in text
+    assert "Priorities" not in text
+
+
 def test_only_typed_operator_on_opens_the_question_tool_and_no_other_prompt_does(monkeypatch, capsys):
     payload = {"session_id": "s1", "tool_name": "AskUserQuestion", "tool_input": {"questions": []}}
     run_prompt(monkeypatch, capsys, "s1", "You are master@a1-1, the master of swarm demo")
