@@ -485,7 +485,7 @@ def prepare_launch(environ: Mapping[str, str], cwd: Path) -> tuple[Path, str] | 
     from scripts import master_login_chain as chain
     from scripts.routing import native_login
 
-    target = None
+    target, reported = None, None
 
     def current():
         nonlocal target
@@ -512,17 +512,20 @@ def prepare_launch(environ: Mapping[str, str], cwd: Path) -> tuple[Path, str] | 
         return target, found
 
     def browser():
-        nonlocal target
+        nonlocal target, reported
         try:
             target = target or browser_home(environ)
         except LoginRefused:
             return "failure"
         chain.notification(target, "current", "unavailable")
-        return chain.authorize(environ, target)
+        reported = chain.authorize(environ, target)
+        return reported
 
     def token():
         if target is not None:
             release(target, environ)
+        if reported in ("captcha", "failure"):
+            chain.alert(environ, target, reported, str(cwd))
         return None
 
     return chain.run(current, browser, token)
