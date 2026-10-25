@@ -196,9 +196,7 @@ function taskRow(item, tasks) {
     item.phase ? h("span", { text: item.phase }) : null,
     item.claimed_by ? h("span", { class: "claimed", text: `claimed by ${item.claimed_by}` }) : null,
     link(item.plan_url, "plan"), link(item.issue_url, "issue"), link(item.pr_url, "pull request"));
-  const label = taskLink(item.id);
-  label.dataset.focus = `task-id:${key}`;
-  const body = h("div", {}, h("div", { class: "item-title" }, label, h("span", { text: item.title })),
+  const body = h("div", {}, h("div", { class: "item-title" }, taskLink(item.id, `task-id:${key}`), h("span", { text: item.title })),
     item.description ? h("p", { class: "desc", text: item.description }) : null, meta,
     waits ? h("p", { class: "desc", text: waits }) : null);
   const row = h("div", { class: "row" }, body, itemActions(key, item));
