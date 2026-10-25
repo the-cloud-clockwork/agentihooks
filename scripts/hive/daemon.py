@@ -21,6 +21,7 @@ from scripts.swarm.commands import hive_id
 if TYPE_CHECKING:
     from redis import Redis
 
+    from scripts.hive.orders import Consumer
     from scripts.swarm.runtime import HerdrRuntime
     from scripts.swarm_v2.runtime.local import LocalHerdrRuntime
 
@@ -41,7 +42,6 @@ REMOTE = re.compile(r"(?:[a-z+]+://)?(?:[^@/]+@)?([^/:]+)[:/](.+?)(?:\.git)?/?")
 def beat(redis: "Redis", local_id: str) -> None:
     from scripts.hive import reports
     from scripts.hive.orders import Consumer, alive
-    from scripts.routing.reservation import LaunchSlots
 
     alive(redis, local_id)
     consumer = Consumer.local(redis, local_id)
@@ -53,18 +53,21 @@ def beat(redis: "Redis", local_id: str) -> None:
     if executions:
         report["sessions"]["_executions"] = executions
     key = registry.key(local_id)
-    # The member Redis user cannot write the hive index or launch slots; join, revoke and the controller maintain them.
+    # The member Redis user cannot write the hive index or launch slots; join, revoke and the controller maintain
+    # them. A member misdetected as the controller gets ACL's NoPermissionError on that write; it is never fatal,
+    # since the hub already indexes the member at join, refresh and revoke.
     member = local_id == os.environ.get("AGENTIHOOKS_HIVE_ID")
     registry.migrate(redis, local_id)
+    if not member:
+        _index_hive(redis, local_id)
     with redis.pipeline() as pipe:
         registry.seed(pipe, local_id)
         fields = {name: json.dumps(report[name]) for name in ("slots", "interactive", "repos")}
         fields["master_login"] = json.dumps({"claude": master_claude_login.signed_in()})
+        fields["master_login_enabled"] = "no" if master_claude_login.unusable() else "yes"
         beat_ms = int(time.time() * 1000)
         fields["heartbeat_at"] = str(beat_ms)
         pipe.hset(key, mapping=fields)
-        if not member:
-            pipe.sadd(registry.INDEX, local_id)
         for field in ("sessions", "quota"):
             pipe.set(f"{key}:{field}", json.dumps(report[field]), ex=TTL_SECONDS)
         pipe.execute()
@@ -72,9 +75,9 @@ def beat(redis: "Redis", local_id: str) -> None:
 
     headroom.publish(redis, local_id, beat_ms)
     if not member:
-        LaunchSlots(redis).refresh([execution for ids in executions.values() for execution in ids])
+        _refresh_launch_slots(redis, executions)
     if not fenced:
-        consumer.poll()
+        poll_orders(consumer)
     consumer.poll_commands()
     consumer.sync_workspaces(TTL_SECONDS)
     join_report.heartbeat(redis, local_id, int(time.time() * 1000))
@@ -91,6 +94,51 @@ def beat(redis: "Redis", local_id: str) -> None:
         print(f"hive account slot heartbeat failed ({type(exc).__name__}: {exc}); retrying next beat", file=sys.stderr)
     publish_config(redis, local_id, report["repos"])
     close_dead_tabs(set(hosted["names"]))
+
+
+def poll_orders(consumer: "Consumer") -> None:
+    from scripts.swarm_ledger import authority_context
+
+    member = consumer.hive == os.environ.get("AGENTIHOOKS_HIVE_ID")
+    pending = not member and consumer.store.redis.xlen(consumer.orders.stream(consumer.hive))
+    secret = authority_context.hosted() if pending else None
+    if not secret:
+        consumer.poll()
+        return
+    kept = os.environ.get("SWARM_SECRET")
+    try:
+        with authority_context.bound(secret):
+            consumer.poll()
+    finally:
+        if kept is not None:
+            os.environ["SWARM_SECRET"] = kept
+
+
+def fill_operator_env() -> None:
+    from scripts import operator_env
+
+    if hive_id() != os.environ.get("AGENTIHOOKS_HIVE_ID"):
+        operator_env.fill(os.environ)
+
+
+def _index_hive(redis: "Redis", local_id: str) -> None:
+    from redis.exceptions import NoPermissionError
+
+    try:
+        redis.sadd(registry.INDEX, local_id)
+    except NoPermissionError:
+        pass
+
+
+def _refresh_launch_slots(redis: "Redis", executions: dict) -> None:
+    from redis.exceptions import NoPermissionError
+
+    from scripts.routing.reservation import LaunchSlots
+
+    try:
+        LaunchSlots(redis).refresh([execution for ids in executions.values() for execution in ids])
+    except NoPermissionError:
+        pass
 
 
 def _slot_errors() -> tuple[type[Exception], ...]:
@@ -170,7 +218,7 @@ def run(connect: Callable[[], tuple["Redis", "Redis"]]) -> None:
     from redis.exceptions import ConnectionError, TimeoutError
 
     lost = (ConnectionError, TimeoutError)
-    local_id = hive_id()
+    fill_operator_env()
     quota_refresh.refresh(os.environ)
     worker, attempted_at = None, time.time()
     renewed = time.time()
@@ -179,6 +227,7 @@ def run(connect: Callable[[], tuple["Redis", "Redis"]]) -> None:
         stop = threading.Event()
         try:
             redis, waiter = connect()
+            local_id = hive_id()
             threading.Thread(target=publish_headroom, args=(redis, waiter, local_id, stop), daemon=True).start()
             while True:
                 started = time.monotonic()
@@ -324,7 +373,14 @@ def _subscriptions(environ, counts: dict, now: float) -> tuple[list, dict]:
             if result
             else _reading(balancer.QuotaWindow(), balancer.QuotaWindow(), None)
         )
-    pool = codex_router.routed([account for account in codex_router.accounts(environ) if account.signed_in], environ)
+    pool = codex_router.routed(
+        [
+            account
+            for account in codex_router.accounts(environ)
+            if account.signed_in and not codex_router.refusal(account, environ)
+        ],
+        environ,
+    )
     readings = codex_router.quotas(pool, environ)
     for account in pool:
         reading = readings.get(account.name)

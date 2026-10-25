@@ -11,6 +11,7 @@ import yaml
 from scripts import init_agent
 from scripts.profiles import binding, plugins
 from scripts.profiles import render as profiles
+from scripts.swarm import launches
 
 OVERLAYS = "AGENTIHOOKS_OVERLAYS"
 BUNDLE_REVISION = "AGENTIHOOKS_BUNDLE_REVISION"
@@ -142,6 +143,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.dry_run:
         print("\n".join([*(f"{key}={value}" for key, value in env.items()), f"argv={shlex.join(command)}"]))
         return 0
+    launches.record(dict(os.environ))
     return subprocess.run(command, env={**os.environ, **env}).returncode
 
 

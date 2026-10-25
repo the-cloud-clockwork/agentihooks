@@ -908,7 +908,7 @@ def test_a_second_push_is_cut_off_by_the_budget_the_first_push_left(monkeypatch,
 
     def charged_push(tree, branch, seconds):
         began = time.monotonic()
-        pushed = real_push(tree, branch, seconds)
+        pushed = real_push(tree, branch, seconds if branch == BRANCH else push_stop.GIT_TIMEOUT_S)
         pushes.append((seconds, pushed, time.monotonic() - began))
         clock[0] += spent
         return pushed

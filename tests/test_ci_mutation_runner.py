@@ -890,6 +890,18 @@ def test_a_stats_part_collects_once_and_skips_the_report(tmp_path, monkeypatch):
     ]
 
 
+def test_a_stats_part_echoes_only_the_cache_report_from_its_log(tmp_path, capfd):
+    from scripts.ci_mutation.runner import echo_cache_report
+
+    log = tmp_path / "run.log"
+    echo_cache_report(log)
+    log.write_bytes(
+        b"collecting \xff\nMutation stats cache: reused 3 test files; collect 1\n  Mutation stats cache: indented\n"
+    )
+    echo_cache_report(log)
+    assert capfd.readouterr().out == "Mutation stats cache: reused 3 test files; collect 1\n"
+
+
 def test_a_shard_mutates_with_every_matching_stats_part(tmp_path, monkeypatch):
     import json
 

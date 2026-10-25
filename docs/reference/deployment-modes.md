@@ -59,6 +59,8 @@ Each swarm picks its engine with its `engine` setting, `legacy` or `events`; see
 `hub-<name>`. Singleton reactors hold a lease in `hub-leases`, so with two replicas only one replica runs each of
 them. Every reactor takes up to 50 deliveries of an event, waiting 1, 5, 15, 60 and then 300 seconds between attempts.
 
+With a remote ledger, `agentihooks hub run` first issues the replica its own service credential, `hub-<hostname>.<token>`, and exports it as `AGENTIHOOKS_CONTROLLER_CREDENTIAL`. The readiness, admission, lifecycle and inbox wake reactors make their ledger service writes with it. The ledger accepts it while the digest key `agentihooks-hive:controller:hub-<hostname>` lives. The key expires after five minutes, and a renewal thread renews it every hundred seconds, so a replaced pod's credential lapses on its own. Issuing it never retires the controller's credential or the other replica's. The hub's Redis user needs GET and SET on `~agentihooks-hive:controller:*` beside `~agentihooks-hive:controller`, and every ledger server's Redis user needs GET on it.
+
 | Reactor | Reacts to | Does |
 |---|---|---|
 | `timers` | `swarm.*.deadline.*` | Keeps scheduled deadlines and publishes `deadline.expired` when one is due. |
@@ -217,6 +219,14 @@ controller:
 - `controller.hostSwarms` becomes `AGENTIHOOKS_CONTROL_HOST_SWARMS`: swarms in the shared Redis that their own host
   ticks. The controller never ticks them and its liveness probe does not require their lease, so a sleeping
   workstation never hands its swarm to the controller. The chart refuses a `controller.api.swarm` on that list.
+- `controller.scratchSwarms` becomes `AGENTIHOOKS_CONTROL_SCRATCH_SWARMS`: a list of `{swarm, agent, task, repo}`
+  proof swarms the controller serves beside the live swarm. Each pass it creates a missing one as a scratch swarm with
+  one engineer task, and its ledger through the proof ledger route, which names it from the agent and task
+  (`proof-<code>-<task>-<n>`, the first free number). `swarm` must be that name: a ledger created under another name
+  is removed and the entry logged as not created, while the other entries are still served. A proof swarm that leaves
+  the list loses its ledger, is set stopping while agents remain, and is removed once they end. The controller and
+  the chart refuse a duplicate, an entry missing a field, a name that is not a proof swarm name, one on
+  `controller.hostSwarms` or the served `controller.api.swarm` proof.
 - When the ledger is remote (`SWARM_URL`, an `AGENTIHOOKS_DEPLOYMENT` other than `local`, or `LEDGER_URL` with no
   mode set; see [Client mode resolution](#client-mode-resolution)), the controller needs
   `AGENTIHOOKS_CONTROLLER_CREDENTIAL` and refuses to start without it.
@@ -409,6 +419,8 @@ python -c 'from scripts.swarm_ledger import ledger_link; print(ledger_link.remot
 | `a remote ledger client needs a pinned agent identity; the operator credential stays on its host` | A hub address reached a shell with no swarm or no agent name, so the client is remote and will not use the page token | Run as a swarm agent, or set `AGENTIHOOKS_DEPLOYMENT=local` on a workstation that owns the ledger |
 | `a remote ledger client needs AGENTIHOOKS_LEDGER_AGENT_TOKEN or the hive credential ...` | A pinned agent with no agent token, no `SWARM_SECRET` and no hive credential | Launch the agent through the swarm, which exports its token, or run `agentihooks hive add` on the UI hive to deliver the worker's credential |
 | `a remote ledger client cannot make service writes; the operator credential stays on its host` | A service write from a remote client outside the tick and without a controller credential | Run it on the hub host, or through the tick |
+| `forbidden` (403) on every hub ledger write after `hub: service credential renewal failed` | The renewal thread could not renew `agentihooks-hive:controller:hub-<hostname>` and the key expired | Fix the logged Redis error; the next renewal writes the key again |
+| `agentihooks hub run` exits at startup with a Redis `NoPermissionError` (no permissions to access a key) | The hub's Redis user cannot set `agentihooks-hive:controller:*` | Grant GET and SET on it to the hub's Redis user |
 | A workstation stops starting its local ledger server after `LEDGER_URL` was added to its env | Rule 3: a hub address with no mode is remote | Set `AGENTIHOOKS_DEPLOYMENT=local`, or remove `LEDGER_URL` |
 | A process with `AGENTIHOOKS_DEPLOYMENT=local` still talks to the hosted ledger | `SWARM_URL` is set for this swarm and wins over the mode | Unset `SWARM_URL` in that process |
 

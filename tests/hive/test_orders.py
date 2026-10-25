@@ -107,6 +107,7 @@ def test_order_ack_and_live_execution(setup):
     assert request.task["description"] == "launch this task"
     assert request.task["controller_epoch"] == setup.held.epoch
     assert request.task["route_kind"] == "subscription"
+    assert request.task["admitted_execution_id"] == setup.agent.execution_id
     assert request.config.lanes["eng"]["agent"] == "codex"
     assert request.config.lanes["eng"]["role"] == "engineer"
     config = setup.store.config("fixture")
@@ -368,6 +369,68 @@ def test_runtime_substitution_is_refused_and_terminated(setup, field, value):
     assert stopped.runtime_target == setup.orders.ack(setup.order).target
     assert setup.orders.ack(setup.order).status == "failed"
     setup.runtime.terminate.assert_called_once()
+
+
+@pytest.mark.parametrize(
+    "changed",
+    [
+        {},
+        {"account": ""},
+        {"harness": "codex"},
+        {"profile": "qa"},
+        {"placement": "open"},
+        {"profile_decision": {"validation": {"pid": 12, "account": "other"}}},
+    ],
+)
+def test_only_an_authorized_native_master_may_acknowledge_a_token_account(setup, monkeypatch, changed):
+    from scripts import master_claude_login
+    from scripts.swarm_v2.runtime.base import Outcome, Status
+
+    monkeypatch.setattr(master_claude_login, "unusable", lambda: "")
+    agent = replace(setup.agent, lane="master", profile="master", harness="claude", seat="master@fixture")
+    order = replace(setup.order, lane="master", profile="master", harness="claude", route_kind="master-login")
+    placed = replace(
+        setup.runtime.spawn.return_value.value,
+        **{
+            "harness": "claude",
+            "profile": "master",
+            "account": "token-account",
+            "placement": "fallback",
+            "profile_decision": {"validation": {"pid": 12, "account": "token-account"}},
+            **changed,
+        },
+    )
+    setup.runtime.spawn.return_value = Outcome("spawn", Status.OK, "local", placed)
+    ack = setup.consumer.launch(order, agent, {"id": order.task})
+    if changed:
+        assert ack.failure == "identity"
+        setup.runtime.terminate.assert_called_once()
+    else:
+        assert ack.status == "live"
+        assert ack.execution["account"] == "token-account"
+        assert ack.execution["placement"] == "fallback"
+
+
+def test_a_private_master_may_resolve_an_initially_unknown_native_account(setup, monkeypatch):
+    from scripts import master_claude_login
+    from scripts.swarm_v2.runtime.base import Outcome, Status
+
+    monkeypatch.setattr(master_claude_login, "unusable", lambda: "")
+    agent = replace(setup.agent, lane="master", profile="master", harness="claude", account="", seat="master@fixture")
+    order = replace(setup.order, lane="master", profile="master", harness="claude", slot="", route_kind="master-login")
+    placed = replace(
+        setup.runtime.spawn.return_value.value,
+        harness="claude",
+        profile="master",
+        account="native-account",
+        placement="forced",
+        profile_decision={"validation": {"pid": 12, "account": "native-account"}},
+    )
+    setup.runtime.spawn.return_value = Outcome("spawn", Status.OK, "local", placed)
+    ack = setup.consumer.launch(order, agent, {"id": order.task})
+    assert ack.status == "live"
+    assert ack.execution["account"] == "native-account"
+    assert ack.execution["placement"] == "forced"
 
 
 def test_launch_that_crosses_expiry_is_terminated(setup, monkeypatch):

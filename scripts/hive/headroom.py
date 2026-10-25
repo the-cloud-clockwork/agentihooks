@@ -101,7 +101,11 @@ def read(redis: "Redis", hive: str, now_ms: int) -> dict | None:
 def summary(measured: dict | None) -> str:
     if measured is None:
         return MISSING
+    available, pod = measured["available_mb"], ""
+    if "pod_available_mb" in measured and "pod_total_mb" in measured:
+        available = min(available, measured["pod_available_mb"])
+        pod = f"\tpod-limit-mb={measured['pod_total_mb']}"
     return (
         f"cpus={measured['cpus']}\tload5={measured['load5']:.2f}\t"
-        f"available-mb={measured['available_mb']}\tpending={measured['pending']}"
+        f"available-mb={available}{pod}\tpending={measured['pending']}"
     )

@@ -56,7 +56,7 @@ def dispatch(handler: object, services: Services) -> dict | str | None:
 
 def ledger_get(handler: object, services: Services, slug: str, path: str) -> dict | None:
     query = pagination(handler.path)
-    if ("state" in query or "offset" in query) and path not in ledger_closed.COLLECTIONS:
+    if ("state" in query or "offset" in query or "q" in query) and path not in ledger_closed.COLLECTIONS:
         raise APIError(400, "schema_invalid", resources.DONE_ONLY)
     if path == "events" and handler.headers.get("Accept") == "text/event-stream":
         return events(handler, services, slug)
@@ -131,6 +131,10 @@ def global_resource(handler: object, services: Services, parts: list) -> dict:
         from . import hives
 
         return hives.route(handler, services, parts, body)
+    if parts == ["tips"] and handler.command == "GET":
+        from scripts.swarm_ledger import page_tips
+
+        return {"data": page_tips.values()}
     if parts == ["layout"]:
         return admin.layout(handler, services, None if handler.command == "GET" else body(handler, services))
     if handler.command == "GET" and parts[0] in ("ledgers", "bin"):

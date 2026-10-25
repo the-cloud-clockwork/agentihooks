@@ -127,6 +127,28 @@ def test_cold_native_accounts_use_their_own_fresh_quota_before_the_first_launch(
         assert readings[f"claude:{account}"]["seven_day"]["resets_at"] == 900
 
 
+def test_codex_slots_drop_accounts_whose_credential_the_router_refuses(monkeypatch):
+    monkeypatch.setattr(daemon.balancer, "cached_observations", lambda **kwargs: [])
+    monkeypatch.setattr(daemon.balancer, "discover_credentials", lambda env: [])
+    monkeypatch.setattr(daemon, "_claude_snapshots", lambda observed: None)
+    monkeypatch.setattr(daemon, "_native_accounts", lambda environ, observed: set())
+    monkeypatch.setattr(daemon, "claude_signed_in", lambda: False)
+    accounts = [
+        daemon.codex_router.CodexAccount("default"),
+        daemon.codex_router.CodexAccount("keyed", "AH_CX_TOKEN_keyed"),
+        daemon.codex_router.CodexAccount("empty", "AH_CX_TOKEN_empty"),
+        daemon.codex_router.CodexAccount("good", "AH_CX_TOKEN_good"),
+    ]
+    monkeypatch.setattr(daemon.codex_router, "accounts", lambda env: accounts)
+    asked = Mock(return_value={})
+    monkeypatch.setattr(daemon.codex_router, "quotas", asked)
+    environ = {"AH_CX_TOKEN_keyed": "sk-placeholder", "AH_CX_TOKEN_good": "at-placeholder"}
+    slots, quota = daemon._subscriptions(environ, {"claude": {}, "codex": {}}, 100)
+    assert [slot["account"] for slot in slots if slot["harness"] == "codex"] == ["default", "good"]
+    assert sorted(quota) == ["codex:default", "codex:good"]
+    assert [account.name for account in asked.call_args.args[0]] == ["default", "good"]
+
+
 def test_native_snapshot_collection_continues_after_a_missing_account_reading(monkeypatch):
     from hooks.context import quota_usage
     from scripts.routing import master_account
@@ -194,13 +216,16 @@ def test_three_missed_beats_expire_both_keys(redis, monkeypatch):
 
 
 @pytest.mark.parametrize("account", ["login", ""])
-def test_beat_publishes_the_master_login_account(redis, monkeypatch, account):
+@pytest.mark.parametrize("enabled", [True, False])
+def test_beat_publishes_the_master_login_account(redis, monkeypatch, account, enabled):
     monkeypatch.setattr(
         daemon, "observe", lambda **kwargs: {"slots": [], "interactive": {}, "repos": [], "sessions": {}, "quota": {}}
     )
     monkeypatch.setattr(daemon.master_claude_login, "signed_in", lambda: account)
+    monkeypatch.setattr(daemon.master_claude_login, "unusable", lambda: "" if enabled else "off")
     daemon.beat(redis, "machine")
     assert registry.show(redis, "machine")["master_login"] == {"claude": account}
+    assert registry.show(redis, "machine")["master_login_enabled"] == ("yes" if enabled else "no")
 
 
 @pytest.mark.parametrize(("member", "indexed", "ttl"), [("machine", set(), 10), ("other", {"machine"}, 45)])
@@ -226,6 +251,24 @@ def test_a_member_beat_leaves_the_index_and_launch_slots_to_the_controller(redis
 
     assert redis.smembers(registry.INDEX) == indexed
     assert ttl - 5 < redis.pttl(f"{ROOT}:launch-slot:first") / 1000 <= ttl
+
+
+def test_a_beat_refused_the_index_write_still_reports_the_heartbeat(redis, monkeypatch):
+    from redis.exceptions import NoPermissionError
+
+    monkeypatch.setenv("AGENTIHOOKS_HIVE_ID", "other")
+    monkeypatch.setattr(
+        daemon, "observe", lambda **kwargs: {"slots": [], "interactive": {}, "repos": [], "sessions": {}, "quota": {}}
+    )
+
+    def refuse(key, *members):
+        raise NoPermissionError("No permissions to access a key")
+
+    monkeypatch.setattr(redis, "sadd", refuse)
+
+    daemon.beat(redis, "machine")
+
+    assert registry.show(redis, "machine")["heartbeat_at"] > 0
 
 
 def _once(connection):
@@ -670,6 +713,7 @@ def test_initial_beat_creates_a_complete_registry_record(redis, monkeypatch):
         "slots": [],
         "interactive": {"claude": "", "codex": ""},
         "master_login": {"claude": ""},
+        "master_login_enabled": "no",
         "repos": [],
         "heartbeat_at": registry.show(redis, "machine")["heartbeat_at"],
         "version": "",
@@ -1046,7 +1090,12 @@ def test_subscription_records_include_caps_unknown_readings_and_login(observatio
     reading = CodexQuota(121, "", balancer.QuotaWindow(30, 1000), balancer.QuotaWindow(40, 2000))
     daemon.codex_router.quotas.return_value = {"two": reading}
     monkeypatch.setattr(daemon, "claude_signed_in", lambda: True)
-    environ = {"AH_CC_TOKEN_one": "sentinel", "AH_CC_TOKEN_empty": "", "unrelated": "sentinel"}
+    environ = {
+        "AH_CC_TOKEN_one": "sentinel",
+        "AH_CC_TOKEN_empty": "",
+        "AH_CX_TOKEN_two": "sentinel",
+        "unrelated": "sentinel",
+    }
     slots, quota = daemon._subscriptions(environ, {"claude": {"unobserved": 1, "api": 1}, "codex": {}}, 122)
     assert slots == [
         {"harness": "claude", "account": name, "kind": kind, "cap": cap}
@@ -1077,7 +1126,7 @@ def test_a_signed_out_codex_reading_publishes_no_quota_and_no_cap(observations):
     daemon.codex_router.accounts.return_value = [account]
     reading = CodexQuota(121, "", balancer.QuotaWindow(30, 1000), balancer.QuotaWindow(40, 2000), expired=True)
     daemon.codex_router.quotas.return_value = {"two": reading}
-    slots, quota = daemon._subscriptions({}, {"claude": {}, "codex": {}}, 122)
+    slots, quota = daemon._subscriptions({"AH_CX_TOKEN_two": "sentinel"}, {"claude": {}, "codex": {}}, 122)
     assert slots == [{"harness": "codex", "account": "two", "kind": "subscription", "cap": 0}]
     assert quota["codex:two"] == {
         "five_hour": {"used": None, "resets_at": None},

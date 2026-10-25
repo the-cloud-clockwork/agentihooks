@@ -504,6 +504,40 @@ def test_only_the_canonical_reuse_protocol_is_an_allowed_transition(weakened):
     assert bool(problems) == weakened, problems
 
 
+@pytest.mark.parametrize("bounded", [False, True])
+@pytest.mark.parametrize(
+    "change",
+    [
+        {},
+        {"with": {"ref": "untrusted"}},
+        {"with": {"fetch-depth": 1}},
+        {"with": {"filter": "blob:none"}},
+        {"with": {"repository": "untrusted/repository"}},
+        {"env": {"EXTRA": "1"}},
+        {"env": {"GIT_HTTP_LOW_SPEED_LIMIT": "999"}},
+        {"env": {"GIT_HTTP_LOW_SPEED_TIME": "61"}},
+    ],
+)
+def test_protected_provenance_checkout_accepts_only_exact_git_bounds(bounded, change):
+    from scripts import ci_reuse
+
+    base = _workflow()
+    base["jobs"]["reuse"] = {"if": "github.event_name != 'merge_group' && github.event_name != 'pull_request'"}
+    base["jobs"]["select"] = {"steps": ci_reuse.duration_provenance_steps()}
+    base["jobs"]["gate"]["needs"].append("select")
+    head = copy.deepcopy(base)
+    checkout = head["jobs"]["select"]["steps"][0]
+    if bounded:
+        checkout["env"] = {
+            "GIT_HTTP_LOW_SPEED_LIMIT": "1000",
+            "GIT_HTTP_LOW_SPEED_TIME": "60",
+        }
+    for field, values in change.items():
+        checkout[field] = checkout.get(field, {}) | values
+    problems = gate_protected.grade({"test.yml": base}, {}, {"test.yml": head}, {}, _TODAY)
+    assert problems == (["The head skips reuse without protected durations provenance."] if change else [])
+
+
 @pytest.mark.parametrize("weakened", [False, True])
 @pytest.mark.parametrize("anton", [False, True])
 def test_the_protected_grader_admits_only_the_exact_paged_reuse_variant(weakened, anton):
@@ -933,6 +967,72 @@ def test_a_head_running_the_summary_under_pipefail_bash_is_green(form, shell, pr
     assert "shell" not in ci_reuse.gate_steps(**form, summary=True)[-1]
 
 
+_SELECTION_DIAGNOSTIC = """selection=$(jq -r '.select.result // ""' <<< "$NEEDS")
+if [[ "$selection" == failure || "$selection" == cancelled ]]; then
+  echo "::error::Test selection $selection; fix selection before downstream test and coverage checks."
+  exit 1
+fi
+"""
+
+
+@pytest.mark.parametrize("diagnostic", [False, True])
+def test_selection_diagnostic_preserves_the_current_required_gate(diagnostic):
+    base = ci_wiring.load(_ROOT)
+    head = copy.deepcopy(base)
+    if diagnostic:
+        step = head["test.yml"]["jobs"]["gate-required"]["steps"][0]
+        step["run"] = _SELECTION_DIAGNOSTIC + step["run"]
+    config = json.loads((_ROOT / ci_wiring.CONFIG).read_text())
+    actors = json.loads((_ROOT / ".github/workflows/trusted-actors.json").read_text())
+    assert gate_protected.grade(base, config, head, config, _TODAY, actors) == []
+
+
+@pytest.mark.parametrize("diagnostic", [False, True])
+@pytest.mark.parametrize(
+    ("before", "after"),
+    [
+        ('then .value.result == "success"', 'then .value.result != "failure"'),
+        ('"semgrep", "sonar"', '"semgrep"'),
+        ("exit 1", "exit 0"),
+    ],
+)
+def test_selection_diagnostic_cannot_weaken_required_success(diagnostic, before, after):
+    base = yaml.safe_load((Path(__file__).resolve().parents[1] / ".github/workflows/test.yml").read_text())
+    head = copy.deepcopy(base)
+    step = head["jobs"]["gate-required"]["steps"][0]
+    assert before in step["run"]
+    step["run"] = step["run"].replace(before, after)
+    if diagnostic:
+        step["run"] = _SELECTION_DIAGNOSTIC + step["run"]
+    assert "The head's Gate — Required changes its steps; the protected branch grades with its own." in _grade(
+        {"test.yml": head}, base={"test.yml": base}
+    )
+
+
+def test_selection_diagnostic_transform_only_prepends_the_reviewed_script():
+    from scripts import ci_reuse
+
+    steps = ci_reuse.gate_steps(queue_tier=True, promotion=True, consolidated=True, summary=True)
+    original = copy.deepcopy(steps)
+    transformed = ci_reuse.selection_diagnostic(steps)
+    assert transformed == [{**original[0], "run": _SELECTION_DIAGNOSTIC + original[0]["run"]}, *original[1:]]
+    assert steps == original
+
+
+@pytest.mark.parametrize("diagnostic", [False, True])
+@pytest.mark.parametrize("form", _FORMS)
+def test_selection_diagnostic_accepts_legacy_canonical_forms(diagnostic, form):
+    from scripts import ci_reuse
+
+    base, head = _aggregators()
+    base["jobs"]["gate-required"]["steps"] = ci_reuse.gate_steps(**form)
+    steps = ci_reuse.gate_steps(**form)
+    if diagnostic:
+        steps[0]["run"] = _SELECTION_DIAGNOSTIC + steps[0]["run"]
+    head["jobs"]["gate-required"]["steps"] = steps
+    assert _grade({"test.yml": head}, base={"test.yml": base}) == []
+
+
 @pytest.mark.parametrize("weaken", ["trusted output", "no skip guard"])
 def test_a_head_weakening_the_inline_mutation_form_is_red(weaken):
     from scripts import ci_reuse
@@ -1198,3 +1298,150 @@ def test_only_the_trusted_preflight_skips_lane_grading(repo, capsys, trusted):
         _commit(repo, {"test.yml": _workflow(), "branch-lanes.yml": preflight}, {}, "trust preflight")
     assert gate_protected.main(["--root", str(repo), "--head", added]) == (0 if trusted else 1)
     assert ("shared hosted lane concurrency group" in capsys.readouterr().out) is not trusted
+
+
+def _equivalence():
+    return yaml.safe_load((_ROOT / ".github/workflows/equivalence.yml").read_text())
+
+
+def _equivalence_steps(workflow):
+    return workflow["jobs"]["ledger-equivalence"]["steps"]
+
+
+def _graded(steps, group):
+    return next(step for step in steps if step.get("run", "").endswith(f'equivalence.sh" {group}'))
+
+
+def _skip_store(workflow):
+    steps = _equivalence_steps(workflow)
+    steps.remove(_graded(steps, "store"))
+
+
+def _pass_store(workflow):
+    _graded(_equivalence_steps(workflow), "store")["run"] = "true"
+
+
+def _pass_page(workflow):
+    _graded(_equivalence_steps(workflow), "page")["run"] = "true"
+
+
+def _grade_from_head(workflow):
+    [pick] = [step for step in _equivalence_steps(workflow) if step.get("name") == "Pick the protected grader"]
+    pick["run"] = 'echo "GRADER=$PWD/head" >> "$GITHUB_ENV"'
+
+
+def _swap_grader(workflow):
+    steps = _equivalence_steps(workflow)
+    steps.insert(
+        steps.index(_graded(steps, "plant")),
+        {"run": "cp head/tests/swarm_ledger/equivalence.sh base/tests/swarm_ledger/equivalence.sh"},
+    )
+
+
+def _copy_into_base(workflow):
+    [install] = [step for step in _equivalence_steps(workflow) if step.get("name") == "Install dependencies"]
+    install["run"] += " && cp -r head/tests/swarm_ledger/. base/tests/swarm_ledger/"
+
+
+def _head_browser(workflow):
+    [browser] = [step for step in _equivalence_steps(workflow) if "browser-cache" in step.get("uses", "")]
+    browser["uses"] = "./head/.github/actions/browser-cache"
+
+
+def _tolerate_failure(workflow):
+    workflow["jobs"]["ledger-equivalence"]["continue-on-error"] = True
+
+
+def _hook_shell(workflow):
+    workflow["jobs"]["ledger-equivalence"]["env"]["BASH_ENV"] = "head/hook.sh"
+
+
+def _container(workflow):
+    workflow["jobs"]["ledger-equivalence"]["container"] = "ghcr.io/head/grader:latest"
+
+
+def _stop_triggering(workflow):
+    workflow[True]["pull_request"]["paths"] = ["docs/**"]
+
+
+def _rename_job(workflow):
+    workflow["jobs"]["renamed"] = workflow["jobs"].pop("ledger-equivalence")
+
+
+def _after_page(text):
+    def plant(workflow):
+        _equivalence_steps(workflow).append({"run": text})
+
+    plant.__name__ = f"after_page_{text.split()[-1]}"
+    return plant
+
+
+def _commit_equivalence(repo, workflow, message):
+    workflows = {"test.yml": _workflow()}
+    if workflow is not None:
+        workflows["equivalence.yml"] = workflow
+    return _commit(repo, workflows, {"outside_gate": {"equivalence.yml/ledger-equivalence": _entry()}}, message)
+
+
+@pytest.mark.parametrize(
+    "fault",
+    [
+        _skip_store,
+        _pass_store,
+        _pass_page,
+        _grade_from_head,
+        _swap_grader,
+        _copy_into_base,
+        _head_browser,
+        _tolerate_failure,
+        _hook_shell,
+        _container,
+        _stop_triggering,
+        _rename_job,
+        _after_page("echo GRADER"),
+        _after_page('echo x >> "$GITHUB_ENV"'),
+        _after_page('echo x >> "$GITHUB_PATH"'),
+        _after_page("bash head/tests/swarm_ledger/equivalence.sh"),
+        pytest.param(None, id="drop_workflow"),
+    ],
+)
+def test_the_required_grader_refuses_a_head_that_rewrites_the_equivalence_grading(repo, capsys, fault):
+    _commit_equivalence(repo, _equivalence(), "base grader")
+    _git(repo, "checkout", "-q", "-b", "pr")
+    head = _equivalence()
+    if fault is not None:
+        fault(head)
+    planted = _commit_equivalence(repo, head if fault is not None else None, "rewrite the grading")
+    _git(repo, "checkout", "-q", "dev")
+    assert gate_protected.main(["--root", str(repo), "--head", planted]) == 1
+    assert (
+        "::error::The head changes the ledger equivalence grading; the protected branch grades with its own."
+        in capsys.readouterr().out.splitlines()
+    )
+
+
+def test_the_required_grader_passes_equivalence_edits_outside_the_grading(repo, capsys):
+    _commit_equivalence(repo, _equivalence(), "base grader")
+    _git(repo, "checkout", "-q", "-b", "pr")
+    head = _equivalence()
+    head["jobs"]["ledger-equivalence"]["timeout-minutes"] = 20
+    steps = _equivalence_steps(head)
+    steps[steps.index(_graded(steps, "page")) + 1]["with"]["retention-days"] = 1
+    steps.append({"run": "ls -la"})
+    changed = _commit_equivalence(repo, head, "tune the job")
+    _git(repo, "checkout", "-q", "dev")
+    assert gate_protected.main(["--root", str(repo), "--head", changed]) == 0
+    assert "ledger equivalence" not in capsys.readouterr().out
+
+
+def test_the_required_grader_leaves_equivalence_alone_before_its_base_grades(repo, capsys):
+    base = _equivalence()
+    steps = _equivalence_steps(base)
+    for step in [step for step in steps if "GRADER" in step.get("run", "")]:
+        steps.remove(step)
+    _commit_equivalence(repo, base, "inline grading")
+    _git(repo, "checkout", "-q", "-b", "pr")
+    added = _commit_equivalence(repo, _equivalence(), "add the base grader")
+    _git(repo, "checkout", "-q", "dev")
+    assert gate_protected.main(["--root", str(repo), "--head", added]) == 0
+    assert "ledger equivalence" not in capsys.readouterr().out

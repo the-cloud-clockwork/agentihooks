@@ -173,7 +173,7 @@ One blue accent family over a near-black canvas, with red as a structural signal
 
 ## Layout
 
-The ledger page is a three-column desktop layout at 1920 width: a fixed outline on the left (280px), the main column of folding sections (max 1802px overall), and a sidebar of Stats and the swarm panel that scrolls on its own. Floating action buttons (sync, top, bell, home, chat) sit in the corners at 16px from the edge. Breakpoints at 1599, 1279, 1023 and 600px drop the sidebar and outline into the flow. HOME is a full-width hairline table on a fixed column grid: ledger, kind, overview, open, done, swarm, activity, actions. Spacing steps are 4, 8, 12, 16 and 32px; panels pad 16–18px, rows 6–12px.
+The ledger page is a three-column desktop layout at 1920 width: a fixed outline on the left (280px), the main column of folding sections (max 1802px overall), and a sidebar of Stats and the swarm panel that scrolls on its own. Floating action buttons (sync, top, bell, home, chat) sit in the corners at 16px from the edge. Below 1280px the outline gives way to a Jump to menu. Below 1024px the icon rail becomes a bottom bar of seven equal slots with the chat bubble last, side panels open above it, and Stats becomes a drawer from the right: an inward arrow in the icon colour or a left swipe opens it, a right swipe, a tap outside or Escape closes it. Below 768px body and label text step up to 14px and 12px and row actions wrap under their text; HOME keeps its compact list up to 1100px. Touch screens get 44px controls, tabs, steppers and fold heads, 32px small controls and 16px text in inputs so the browser never zooms on focus, and every scrollbar is thin over a transparent track. HOME is a full-width hairline table on a fixed column grid: ledger, kind, overview, open, done, swarm, activity, actions. Spacing steps are 4, 8, 12, 16 and 32px; panels pad 16–18px, rows 6–12px.
 
 **Scroll gutter (operator decision 2026-10-12).** Content never touches a scrollbar. The main column keeps `max(.5%, 12px)` and the Stats column `max(.5%, 8px)` of padding between its content and its scrollbar, on the Ledger and Swarm tabs alike.
 
@@ -217,7 +217,7 @@ Small, quiet radii: 4px for inline controls, checkboxes and code, 6px for panels
 ### Inputs / Fields
 - **Inset:** `--surface-2` well, 6px radius, no border. Focus draws an accent inset underline.
 - **Line:** transparent with an edge underline that turns accent on focus.
-- **Checkbox:** 16px, 4px radius, surface-2; checked fills positive green with an ink tick.
+- **Checkbox:** 16px (24px on touch screens), 4px radius, surface-2; checked fills positive green with an ink tick.
 
 ### Panels / Sections
 - **Corner Style:** 6px.
@@ -227,7 +227,7 @@ Small, quiet radii: 4px for inline controls, checkboxes and code, 6px for panels
 
 ### Folding (operator rule 2026-10-12)
 - Only four things fold, each remembering its choice per viewer: the Ledger tab's sections below Overview, the Swarm tab panels below Capacity, the outline categories (with Expand all / Collapse all) and comment dropdowns (with Show all / Hide all comments).
-- Nothing else folds: Overview, Stats, the chat, artifacts, alerts and notifications windows, the Swarm control bar and Capacity, HOME and BIN. A fold anywhere else fails its test.
+- Nothing else folds: Overview, Stats, the chat, artifacts, alerts and notifications windows, the Swarm control bar and Capacity, HOME and BIN, and inside a section the plan groups, phase rows, done groups and task contract and proof blocks. A fold anywhere else fails its test.
 - A button inside a fold header (quota refresh, overlays apply) acts without folding its panel.
 
 ### Overview
@@ -245,7 +245,7 @@ Small, quiet radii: 4px for inline controls, checkboxes and code, 6px for panels
 - Apply sits in the panel header after the count and appears only when an overlay change is pending.
 
 ### Freeze marks
-- A snowflake marks a frozen or held item. On a plan row it sits inside the header between the fold arrow and the title; it never floats outside its panel.
+- A snowflake marks a frozen or held item. On a plan row it sits inside the header before the title; it never floats outside its panel.
 
 ### Outline marks
 - An outline entry with a pending notification carries a `+` placed against its own link, section headers included.
@@ -258,6 +258,9 @@ Small, quiet radii: 4px for inline controls, checkboxes and code, 6px for panels
 
 ### Navigation
 - **Outline:** a fixed left list of section links, muted at rest, white on hover with the hover lift, accent when current. Items lead with a red or green bullet for open or done.
+- **Outline filter:** a line input and a state select above the list filter it by title, id and state; done items not yet loaded are searched on the server. Swarm tasks sit under muted uppercase phase labels that never fold.
+- **Fresh defaults:** an outline category or Ledger section whose every item is done or answered starts closed for a viewer with no saved choice.
+- **Keyboard:** ArrowUp and ArrowDown, or j and k outside form controls, move focus through the visible outline links or task ids; Enter reveals the target.
 
 ## Do's and Don'ts
 

@@ -108,7 +108,13 @@ def _inbox_receiver(address, agent, seat, departed, configs):
     from scripts.inbox import exits
 
     if agent and (not is_seat(address) or departed[agent.name].get("generation") != seat.generation):
-        return Receiver(live=True, quiet_ms=agent.idle_ticks * MINUTE_MS, occupant=agent.name, harness=agent.harness)
+        return Receiver(
+            live=True,
+            quiet_ms=agent.idle_ticks * MINUTE_MS,
+            occupant=agent.name,
+            harness=agent.harness,
+            task=agent.task,
+        )
     if not is_seat(address):
         return Receiver()
     raw = configs[address.split("@", 1)[1]]

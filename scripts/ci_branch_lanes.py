@@ -14,6 +14,7 @@ LANE = (
     "((endsWith(github.run_id, '3') || endsWith(github.run_id, '4') || endsWith(github.run_id, '5')) && 'b') || 'c')"
 )
 GROUP = "${{ " + LANE + " }}"
+PATH_FILTERS = ("paths", "paths-ignore")
 
 
 def git(*args: str) -> str:
@@ -73,6 +74,33 @@ def events(workflow: dict) -> list:
     return [workflow[key] for key in ("on", True) if key in workflow]
 
 
+def unfiltered(on: object) -> object:
+    if not isinstance(on, dict) or not isinstance(on.get("pull_request"), dict):
+        return on
+    kept = {key: value for key, value in on["pull_request"].items() if key not in PATH_FILTERS}
+    return {**on, "pull_request": kept or None}
+
+
+def deletes_path_filters(base: object, head: object) -> bool:
+    old, new = (on.get("pull_request") if isinstance(on, dict) else None for on in (base, head))
+    return not isinstance(new, dict) or all(
+        key not in new or isinstance(old, dict) and old.get(key) == new[key] for key in PATH_FILTERS
+    )
+
+
+def same_events(baseline: dict, workflow: dict) -> bool:
+    if events(baseline) == events(workflow):
+        return True
+    # Deleting a pull request path filter from an otherwise identical workflow only runs it on more pull requests.
+    return without_path_filters(baseline) == without_path_filters(workflow) and all(
+        deletes_path_filters(old, new) for old, new in zip(events(baseline), events(workflow))
+    )
+
+
+def without_path_filters(workflow: dict) -> dict:
+    return {key: unfiltered(value) if key in ("on", True) else value for key, value in workflow.items()}
+
+
 def per_run_mutation_group(name: str, block: object, job: dict, trusted: dict) -> bool:
     stages = {"stats": ("stats", "part"), "mutation-shard": ("shard", "shard")}
     baseline = (trusted.get("jobs") or {}).get(name)
@@ -101,7 +129,7 @@ def problems(workflow: object, baseline: object = None) -> list[str]:
         baseline
         if isinstance(baseline, dict)
         and baseline.get("name") == workflow.get("name")
-        and events(baseline) == events(workflow)
+        and same_events(baseline, workflow)
         else {}
     )
     found = []

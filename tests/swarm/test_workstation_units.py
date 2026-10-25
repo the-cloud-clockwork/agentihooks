@@ -196,8 +196,10 @@ def test_the_spoke_command_is_refused_where_the_workstation_runs_the_engine(monk
 
 
 def test_the_spoke_command_serves_master_work_as_this_hive_and_closes_the_bus(monkeypatch, distributed):
+    import os
+
     from scripts.events import factory
-    from scripts.hive import workstation
+    from scripts.hive import lanes, workstation
     from scripts.swarm import commands
 
     bus, served = type("Bus", (), {"closed": False, "close": lambda self: setattr(self, "closed", True)})(), []
@@ -207,10 +209,13 @@ def test_the_spoke_command_serves_master_work_as_this_hive_and_closes_the_bus(mo
     monkeypatch.setattr(factory, "open_bus", lambda config: configs.append(config) or bus)
     monkeypatch.setattr(commands, "hive_id", lambda: "workstation-1")
     monkeypatch.setattr(workstation, "run", lambda *args: served.append(args))
+    lane_spokes = []
+    monkeypatch.setattr(lanes, "serve", lambda environ: lane_spokes.append(environ is os.environ))
     store = object()
 
     cli.cmd_spoke(store, Namespace())
 
+    assert lane_spokes == [True]
     [(seen_store, seen_bus, runtime, hive)] = served
     assert (seen_store, seen_bus, hive, type(runtime).__name__) == (store, bus, "workstation-1", "LocalHerdrRuntime")
     assert isinstance(runtime.herdr, cli.HerdrRuntime)

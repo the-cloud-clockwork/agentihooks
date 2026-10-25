@@ -48,7 +48,7 @@ agentihooks hive create
 | merge | `gh pr merge --squash --auto`; where the repository refuses auto merge, waits for the pull request checks to pass and runs `gh pr merge --squash`; then waits for the merge. A failed check stops the create naming it | the pull request merged |
 | settings | `hive setup` into the hive settings record | never; it rewrites the same keys |
 | live | waits for the member's heartbeat | never; a live hive passes at once |
-| herdr | trusts the host key in `~/.ssh/known_hosts`, then `hive add ssh://worker@<LAN address>:<port> --label <name>` | the saved create holds the added member |
+| herdr | trusts the host key in `~/.ssh/known_hosts`, then saves `ssh://worker@<LAN address>:<port>` in herdr with `herdr machine add --label <name>`; the pod keeps the member the invite wrote, so the step mints no second member and delivers no credential | the saved create holds the added member |
 | engineer | waits for a non master agent working on the hive | never |
 
 It needs antoncore `k8s/templates/agentihooks-hive.yaml` on `dev` and at least one running swarm with

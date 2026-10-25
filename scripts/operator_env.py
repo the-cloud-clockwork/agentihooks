@@ -3,7 +3,7 @@
 import json
 import shlex
 import subprocess
-from collections.abc import Iterable, Mapping, MutableMapping
+from collections.abc import Callable, Iterable, Mapping, MutableMapping
 from pathlib import Path
 
 from scripts import aicode_tokens
@@ -56,10 +56,10 @@ def block_tokens() -> dict[str, str]:
     return aicode_tokens.token_exports(text)
 
 
-def distinct(environ: Mapping[str, str], names: Iterable[str]) -> list[str]:
+def distinct(environ: Mapping[str, str], names: Iterable[str], key: Callable[[str], object] | None = None) -> list[str]:
     block = block_tokens()
     chosen: dict[str, str] = {}
-    for name in sorted(names):
+    for name in sorted(names, key=key):
         value = environ[name]
         held = chosen.get(value)
         if held is None or (block.get(name) == value and block.get(held) != value):
