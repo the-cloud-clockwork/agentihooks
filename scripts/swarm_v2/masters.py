@@ -272,10 +272,7 @@ class MasterSeats:
                     counted = seats(slug, int(pipe.hget(key, "count") or DEFAULT_COUNT))
                     current = [address for address in counted if address not in retired]
                     hives = hive_targets(pipe.hget(key, HIVES), current)
-                    handed = [
-                        field.removeprefix(RETIRED_AT) for field in pipe.hkeys(key) if field.startswith(RETIRED_AT)
-                    ]
-                    owners = assign(phases, current, saved, [*known, *handed])
+                    owners = assign(phases, current, saved, known)
                     if (owners, current) != (saved, known):
                         pipe.multi()
                         pipe.hset(

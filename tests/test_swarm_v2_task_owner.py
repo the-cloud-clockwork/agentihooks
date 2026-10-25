@@ -8,7 +8,7 @@ from scripts.inbox.store import InboxError, InboxStore, now_ms
 from scripts.swarm import delivery, master_retire
 from scripts.swarm.store import AgentRecord, SwarmConfig
 from scripts.swarm_ledger import ledger_core as core
-from scripts.swarm_v2 import master_fence, masters
+from scripts.swarm_v2 import master_fence, master_scale, masters
 from tests import sv2_mst04_cases as cases
 from tests.sv2_mst04_cases import ENGINEER, LEAD, LEAD_NAME, SECOND, SECOND_NAME, SLUG
 
@@ -445,19 +445,29 @@ def test_a_stuck_backend_master_does_not_let_another_backend_master_message_its_
         master_fence.check_send(inbox(world), "master@abcdef-0009", OWN_CLAIMANT)
 
 
-def test_a_refilled_seat_does_not_take_back_the_phases_its_retired_master_handed_to_the_front_door(world):
-    table = masters.MasterSeats(world.redis)
-    [phase] = [p for p, owner in table.owners(SLUG, world.doc()).items() if owner == SECOND]
-    world.down(SECOND_NAME)
-    table.retire(SLUG, SECOND, 1)
-    assert table.owners(SLUG, world.doc())[phase] == LEAD
+def asked_to_retire(world, handoff):
+    key = masters.MasterSeats(world.redis).key(SLUG)
+    world.redis.hset(key, master_scale.RETIRING, json.dumps({SECOND: [1, "ask"]}))
+    world.store.put_handoff(SLUG, "master-2", handoff, seat=SECOND)
 
-    table.keep_retired(SLUG, 2, 2)
-    world.seat("master@abcdef-0009", SECOND)
 
-    assert table.owners(SLUG, world.doc())[phase] == LEAD
+def test_a_seat_asked_to_retire_keeps_its_claimants_until_its_handoff_is_in(world):
+    asked_to_retire(world, "")
+
+    with pytest.raises(InboxError, match=f"tasks/t2 belongs to {SECOND}, so {LEAD} cannot message its claimant"):
+        master_fence.check_send(inbox(world), LEAD_NAME, OWN_CLAIMANT)
+
+    assert master_fence.Seats(SLUG, world.store, {}).live == [LEAD, SECOND]
+
+
+def test_a_retiring_seat_hands_its_claimants_to_the_front_door_with_its_handoff(world):
+    asked_to_retire(world, "# Handoff v2\nnotes of master two")
+
     master_fence.check_send(inbox(world), LEAD_NAME, OWN_CLAIMANT)
+
     assert world.refusals() == 0
+    assert master_fence.Seats(SLUG, world.store, {}).live == [LEAD]
+    assert master_fence.handed_off(world.store, SLUG, masters.MasterSeats(world.redis)) == {SECOND}
 
 
 def test_a_message_check_keeps_the_owner_of_every_phase(world):
