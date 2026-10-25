@@ -5,6 +5,8 @@ import subprocess
 import sys
 import time
 
+from scripts.ci_budget.rate_limit import gh_api
+
 PAGE_SIZE = 10
 ATTEMPTS = 4
 TIMEOUT = 10
@@ -18,13 +20,7 @@ def read_page(endpoint: str, offset: int, size: int) -> tuple[list[dict], int]:
     for attempt in range(ATTEMPTS):
         page = offset // size + 1
         try:
-            result = subprocess.run(
-                ["gh", "api", f"{endpoint}?per_page={size}&page={page}"],
-                capture_output=True,
-                text=True,
-                check=True,
-                timeout=TIMEOUT,
-            )
+            result = gh_api([f"{endpoint}?per_page={size}&page={page}"], timeout=TIMEOUT, text=True)
         except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as error:
             if isinstance(error, subprocess.CalledProcessError):
                 status = HTTP_STATUS.search(error.stderr)

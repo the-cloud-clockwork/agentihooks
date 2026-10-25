@@ -87,7 +87,9 @@ def test_the_api_reads_through_gh_and_fails_on_an_error(monkeypatch):
 
     monkeypatch.setattr(ci_test_plan.subprocess, "run", run)
     assert ci_test_plan._api("repos/x") == b"{}"
-    assert calls == [((["gh", "api", "repos/x"],), {"capture_output": True, "check": True, "timeout": 60})]
+    assert calls == [
+        ((["gh", "api", "repos/x"],), {"capture_output": True, "check": True, "timeout": 60, "text": False})
+    ]
 
 
 @pytest.mark.parametrize(
