@@ -164,3 +164,53 @@ def test_a_placement_pass_opens_the_master_seat_on_hives_named_for_its_swarm(set
     write_hive(setup, excluded=["master", "engineer"], master_swarms=[setup.config.slug])
     setup.launcher.placement_cache = {}
     assert [hive["excluded"] for hive in setup.launcher.hives()] == [["engineer"]]
+
+
+def test_a_placement_pass_reads_the_bundle_revision_once_and_the_next_pass_reads_again(monkeypatch, tmp_path):
+    from scripts.swarm import overlays, profile_choice
+    from scripts.swarm import runtime as runtime_module
+    from scripts.swarm.profile_choice import ProfileDecision
+    from scripts.swarm.store import SwarmConfig
+
+    reads = iter(("first", "second", "third", "fourth"))
+    monkeypatch.setattr(overlays, "revision", lambda: next(reads))
+    monkeypatch.setattr(profile_choice, "choose", lambda *args: ProfileDecision("engineer", "task", "engineer"))
+    herdr = runtime_module.HerdrRuntime(home=tmp_path)
+    config = SwarmConfig("fixture", "agentihooks", 1, 1)
+
+    def revision(task_id):
+        return herdr._profile_decision(config, "eng", {}, {"id": task_id}, {}, {}, {}).bundle_revision
+
+    assert herdr.pass_memo is None
+    assert [revision("one"), revision("two")] == ["first", "second"]
+    herdr.pass_memo = {}
+    assert [revision("one"), revision("two")] == ["third", "third"]
+    herdr.pass_memo = {}
+    assert revision("one") == "fourth"
+
+
+def test_a_placement_pass_checks_the_workstation_herdr_once_and_the_next_pass_checks_again(
+    setup,  # noqa: F811
+    monkeypatch,
+):
+    from scripts import herdr_host
+
+    write_hive(setup, excluded=["engineer"])
+    checks = []
+    monkeypatch.setattr(herdr_host, "server_running", lambda environ: checks.append(environ) is None)
+    original = RoutedRuntime(setup.herdr, RuntimeRouter([]))
+    runtime = controller.FencedRuntime(setup.store, setup.config.slug, setup.held, original, controller.HYBRID)
+
+    runtime.placement_refusal("eng", {"id": "one"})
+    runtime.placement_refusal("eng", {"id": "two"})
+    assert len(checks) == 2
+    runtime.begin_placement_pass()
+    assert runtime.runtime.hive_launch.herdr.pass_memo == {}
+    runtime.placement_refusal("eng", {"id": "one"})
+    runtime.placement_refusal("eng", {"id": "two"})
+    assert len(checks) == 3
+    runtime.end_placement_pass()
+    assert runtime.runtime.hive_launch.herdr.pass_memo is None
+    runtime.begin_placement_pass()
+    runtime.placement_refusal("eng", {"id": "one"})
+    assert len(checks) == 4
