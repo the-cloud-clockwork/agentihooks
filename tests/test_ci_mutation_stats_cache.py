@@ -1070,3 +1070,44 @@ def test_measured_stats_trace_every_covered_source_in_one_walk(tmp_path, monkeyp
     (root / "scripts/shared_helper.py").write_text("value = 2\n")
     stats_cache.collect_cached_stats(root, cache, {}, files, [], collect)
     assert calls == [files, files]
+
+
+def test_selected_test_ids_read_the_collected_stats_once_not_once_per_id(tmp_path):
+    from scripts.ci_mutation.stats_cache import collect_cached_stats
+
+    reads = []
+
+    class Durations(dict):
+        def items(self):
+            reads.append("durations")
+            return super().items()
+
+    class Tests(list):
+        def __iter__(self):
+            reads.append("tests")
+            return super().__iter__()
+
+    root = tmp_path / "repo"
+    count = 50
+    _repository(root, {"tests/test_a.py": "".join(f"def test_{index}():\n    pass\n" for index in range(count))})
+    entries = [f"tests/test_a.py::test_{index}" for index in range(count)]
+    calls = []
+
+    def collect(chosen):
+        calls.append(chosen)
+        tests = {"m.x_f": Tests(f"{entry}[1]" for entry in chosen), "m.x_g": Tests()}
+        return [{"status": 0, "tests": tests, "durations": Durations({f"{entry}[1]": 1 for entry in chosen}), "cpu": 2}]
+
+    cache = tmp_path / "cache"
+    collect_cached_stats(root, cache, {}, entries, [], collect)
+    assert reads.count("durations") <= 2
+    assert reads.count("tests") <= 4
+    warm = collect_cached_stats(root, cache, {}, entries, [], collect)
+    assert calls == [entries]
+    assert sorted(warm, key=str) == sorted(
+        [
+            {"status": 0, "tests": {"m.x_f": [f"{entry}[1]"], "m.x_g": []}, "durations": {f"{entry}[1]": 1}, "cpu": 0.04}
+            for entry in entries
+        ],
+        key=str,
+    )
