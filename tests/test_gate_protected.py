@@ -1260,6 +1260,32 @@ def test_a_head_that_skips_its_equivalence_check_is_refused():
     ]
 
 
+def test_unnamed_equivalence_steps_are_named_by_their_action():
+    head = _equivalence()
+    steps = head["jobs"]["ledger-equivalence"]["steps"]
+    [trigger] = [index for index, step in enumerate(steps) if step.get("id") == "trigger"]
+    uv, upload = steps[trigger + 1], steps[-1]
+    assert "name" not in uv and "name" not in upload
+    uv["if"] = "false"
+    upload["continue-on-error"] = True
+    assert _equivalence_grade(head) == [
+        f"The head lets the ledger equivalence step {upload['uses']} continue on error.",
+        f"The head's ledger equivalence step {uv['uses']} ignores the protected trigger.",
+    ]
+
+
+def test_conditions_the_protected_copy_already_carries_pass():
+    tip = _equivalence()
+    job = tip["jobs"]["ledger-equivalence"]
+    job["if"] = "github.event_name == 'pull_request'"
+    [trigger] = [index for index, step in enumerate(job["steps"]) if step.get("id") == "trigger"]
+    job["steps"][trigger - 1]["if"] = "github.event_name == 'pull_request'"
+    head = copy.deepcopy(tip)
+    head["jobs"]["ledger-equivalence"]["steps"][-1]["with"]["retention-days"] = 3
+    protected = {gate_protected.EQUIVALENCE: tip}
+    assert gate_protected._equivalence_problems(protected, protected, {gate_protected.EQUIVALENCE: head}) == []
+
+
 def test_the_equivalence_trigger_is_graded_only_once_the_protected_branch_carries_it():
     head = _equivalence()
     head[True]["pull_request"]["paths"] = ["docs/**"]
