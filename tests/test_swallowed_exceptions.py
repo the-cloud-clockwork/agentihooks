@@ -1,9 +1,11 @@
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
 
 import pytest
+import yaml
 
 from scripts import size_limits, swallowed_exceptions
 
@@ -191,3 +193,30 @@ def test_the_grader_refuses_another_ruff_version(tmp_path, capsys, monkeypatch, 
     assert swallowed_exceptions.main(["--write", "--head", str(_tree(tmp_path, {"hooks/guard.py": NARROW}))]) == 1
     out = capsys.readouterr().out
     assert f"::error::The swallowed exception gate needs ruff {size_limits.RUFF_VERSION}, found {shown}.\n" == out
+
+
+def _step():
+    steps = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())["jobs"]["lint"]["steps"]
+    return next(step for step in steps if step.get("name") == "Hold swallowed exceptions in hooks and gates")
+
+
+def test_the_gate_runs_in_lint_graded_by_dev_against_the_base():
+    step = _step()
+    assert step["if"] == "${{ !cancelled() }}"
+    assert step["run"] == (
+        'if [[ -f "$RUNNER_TEMP/grader/scripts/swallowed_exceptions.py" ]]; then\n'
+        '  cd "$RUNNER_TEMP/grader"\n'
+        '  python -m scripts.swallowed_exceptions --base "$RUNNER_TEMP/base" --head "$GITHUB_WORKSPACE"\n'
+        "else\n"
+        '  echo "::error::dev carries no scripts/swallowed_exceptions.py, so nothing trusted can grade."\n'
+        "  exit 1\n"
+        "fi\n"
+    )
+
+
+def test_the_gate_refuses_a_dev_without_its_grader(tmp_path):
+    (tmp_path / "grader").mkdir()
+    env = dict(os.environ, RUNNER_TEMP=str(tmp_path), GITHUB_WORKSPACE=str(tmp_path))
+    result = subprocess.run(["bash", "-e", "-c", _step()["run"]], env=env, capture_output=True, text=True)
+    assert result.returncode == 1
+    assert "dev carries no scripts/swallowed_exceptions.py, so nothing trusted can grade." in result.stdout

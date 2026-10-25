@@ -21,6 +21,7 @@ def admit(store: RedisStore, slug: str, agent: AgentRecord, held: dict, ledger, 
         return
     task = ledger.task(slug, agent.task) if agent.task else None
     target = held["target"]
+    generation = task.get("claim_generation", 0) if task else 0
     if task and task.get("claimed_by") != agent.name:
         raise SwarmError("task claim changed; refresh the task before waiting")
     if final:
@@ -42,7 +43,7 @@ def admit(store: RedisStore, slug: str, agent: AgentRecord, held: dict, ledger, 
     store.redis.hset(
         key(slug),
         agent.task,
-        json.dumps({"agent": agent.name, "generation": task.get("claim_generation", 0), "target": target}),
+        json.dumps({"agent": agent.name, "generation": generation, "target": target}),
     )
     idle.end_wait(store.redis, slug, agent.name, at)
     raise SwarmError(
@@ -53,9 +54,9 @@ def admit(store: RedisStore, slug: str, agent: AgentRecord, held: dict, ledger, 
     )
 
 
-def offered(store: RedisStore, slug: str, agent: AgentRecord, task: dict | None) -> dict:
+def offered(store: RedisStore, slug: str, agent: AgentRecord, task: dict) -> dict:
     record = json.loads(store.redis.hget(key(slug), agent.task) or "{}")
-    if record.get("agent") == agent.name and record.get("generation") == (task or {}).get("claim_generation", 0):
+    if record.get("agent") == agent.name and record.get("generation") == task.get("claim_generation", 0):
         return record
     return {}
 
@@ -65,11 +66,9 @@ def dependencies(store: RedisStore, slug: str, agent: AgentRecord, task: dict, n
     return [] if record and record["target"] in waits.PULL_URL.findall(note) else task.get("depends_on", [])
 
 
-def hold(store: RedisStore, slug: str, agent: AgentRecord, ledger, note: str) -> None:
-    if json.loads(store.redis.hget(key(slug), agent.task) or "{}").get("target") not in waits.PULL_URL.findall(note):
-        return
-    record = offered(store, slug, agent, ledger.task(slug, agent.task))
-    if not record:
+def hold(store: RedisStore, slug: str, agent: AgentRecord, note: str) -> None:
+    record = json.loads(store.redis.hget(key(slug), agent.task) or "{}")
+    if record.get("agent") != agent.name or record["target"] not in waits.PULL_URL.findall(note):
         return
     record["blocked"] = True
     store.redis.hset(key(slug), agent.task, json.dumps(record))

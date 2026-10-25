@@ -1835,7 +1835,7 @@ def block_agent(store, slug, agent, note, ledger, red_run=None):
     dev_red.hold(store.redis, slug, agent.task, red_run)
     ledger.update_task(slug, agent.task, {"state": "blocked"}, by=agent.name)
     ledger.comment(slug, agent.task, note, by=agent.name)
-    prerequisite_wait.hold(store, slug, agent, ledger, note)
+    prerequisite_wait.hold(store, slug, agent, note)
     waits.settle_notices(InboxStore(store.redis), agent, "a block")
     if red_run is not None:
         store.refund_held_claim(slug, agent.task, agent.name, store.claim_generation(slug, agent.task))
