@@ -87,3 +87,51 @@ def test_codex_selection_keeps_harness_and_host_pins(setup, pin):
     assert isinstance(unavailable, Wait)
     assert "room" in unavailable.reason
     assert setup.store.execution_registry.records("fixture") == []
+
+
+def _unadvertised_codex(setup):
+    from scripts.swarm.capacity import Account
+
+    setup.herdr._quota_tasks = {"task": "codex"}
+    setup.herdr._quota_accounts.append(Account("codex", "codex-account", "room", 0, None, 80, 6))
+    setup.herdr.planned_account.side_effect = lambda task, harness: "codex-account" if harness == "codex" else None
+
+
+@pytest.mark.parametrize("agent", [None, "auto"])
+def test_auto_lane_falls_back_to_claude_when_no_hive_advertises_the_codex_slot(setup, agent):
+    _unadvertised_codex(setup)
+    lanes = {"eng": {"agent": agent}} if agent else {}
+    config = replace(setup.config, lanes=lanes)
+
+    selected = setup.launcher.select(config, "eng", {"id": "task"})
+
+    assert (selected.account.harness, selected.account.name, selected.hive) == ("claude", "account", "remote")
+
+
+@pytest.mark.parametrize("pin", ["lane", "saved"])
+def test_codex_pinned_task_keeps_waiting_for_an_advertised_codex_slot(setup, pin):
+    from scripts.hive.placement import Wait
+
+    _unadvertised_codex(setup)
+    task, config = {"id": "task"}, setup.config
+    if pin == "lane":
+        config = replace(config, lanes={"eng": {"agent": "codex"}})
+    else:
+        task["launch_assignment"] = {"harness": "codex", "account": "codex-account"}
+
+    selected = setup.launcher.select(config, "eng", task)
+
+    assert isinstance(selected, Wait)
+    assert selected.reason == "no hive for eng advertises the codex slot codex-account"
+
+
+def test_auto_lane_keeps_the_codex_wait_when_claude_has_no_room_either(setup):
+    from scripts.hive.placement import Wait
+
+    _unadvertised_codex(setup)
+    setup.herdr._quota_accounts[0] = replace(setup.herdr._quota_accounts[0], sessions=6)
+
+    selected = setup.launcher.select(setup.config, "eng", {"id": "task"})
+
+    assert isinstance(selected, Wait)
+    assert selected.reason == "no hive for eng advertises the codex slot codex-account"
