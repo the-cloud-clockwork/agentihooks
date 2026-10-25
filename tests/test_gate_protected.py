@@ -537,6 +537,7 @@ def test_protected_provenance_checkout_accepts_only_exact_git_bounds(bounded, ch
     problems = gate_protected.grade({"test.yml": base}, {}, {"test.yml": head}, {}, _TODAY)
     assert problems == (["The head skips reuse without protected durations provenance."] if change else [])
 
+
 def _provenance_workflow(job="select", permissions=None):
     from scripts import ci_reuse
 
