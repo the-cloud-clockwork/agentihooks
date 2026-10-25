@@ -34,7 +34,7 @@ def test_command_inventories_then_keeps_every_ready_offer(buses, monkeypatch, ca
     assert inventory["retained"] == 12
     assert inventory["kept"] == 0
     assert inventory["applied"] is False
-    assert command.main(["--apply", "--quiescent"]) == 0
+    assert command.main(["--apply", "--quiescent", "--swarm", "doctor", "--swarm", "rig"]) == 0
     moved = json.loads(capsys.readouterr().out)
     assert moved["retained"] == moved["kept"] == 12
     assert moved["remaining"] == 0
@@ -43,7 +43,7 @@ def test_command_inventories_then_keeps_every_ready_offer(buses, monkeypatch, ca
         ("doctor", "eng", 3),
         ("rig", "plan", 2),
     }
-    assert command.main(["--apply", "--quiescent"]) == 0
+    assert command.main(["--apply", "--quiescent", "--swarm", "doctor", "--swarm", "rig"]) == 0
     repeated = json.loads(capsys.readouterr().out)
     assert repeated["retained"] == repeated["kept"] == repeated["remaining"] == 0
     for (swarm, lane), expected in offers.items():
