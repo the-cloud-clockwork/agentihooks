@@ -164,6 +164,40 @@ def test_masters_gone_or_draining_are_passed_over(swarm, inbox):
     assert [fence.writer(f"sw-master-{n}") for n in (2, 3, 4)] == ["sw-master-2", "master-3@sw", "master-4@sw"]
 
 
+@pytest.mark.parametrize("waiting_seat", [FRONT, SECOND])
+def test_a_master_waiting_on_input_is_skipped_and_rejoins(swarm, inbox, waiting_seat):
+    _masters(swarm, 2)
+    name = "sw-master-1" if waiting_seat == FRONT else "sw-master-2"
+    other = SECOND if waiting_seat == FRONT else FRONT
+    swarm.put_agent(SLUG, AgentRecord(name, "master", "master", seat=waiting_seat, input_prompt="Continue?"))
+    items = [inbox.send("swarm", FRONT, f"work {n}") for n in range(2)]
+    assert [inbox.get(item.id).address for item in items] == [other, other]
+    operator = inbox.send("operator", FRONT, "operator work")
+    assert inbox.get(operator.id).address == FRONT
+    swarm.put_agent(SLUG, AgentRecord(name, "master", "master", seat=waiting_seat))
+    resumed = [inbox.send("swarm", FRONT, f"resumed {n}") for n in range(2)]
+    assert [inbox.get(item.id).address for item in resumed] == [waiting_seat, other]
+
+
+@pytest.mark.parametrize("state", ["pending", "delivered", "confirmed", "read"])
+def test_unsettled_pool_mail_leaves_a_master_waiting_on_input(swarm, inbox, state):
+    _masters(swarm, 2)
+    item = inbox.send("swarm", FRONT, "work")
+    if state != "pending":
+        inbox.deliver(item.id, "sw-master-1")
+    if state == "confirmed":
+        inbox.confirm(item.id, "sw-master-1")
+    elif state == "read":
+        inbox.read(item.id, "sw-master-1")
+    operator = inbox.send("operator", FRONT, "operator work")
+    swarm.put_agent(SLUG, AgentRecord("sw-master-1", "master", "master", seat=FRONT, input_prompt="Continue?"))
+    inbox.pool.distribute_all()
+    moved = inbox.get(item.id)
+    assert (moved.id, moved.address, moved.state, moved.delivery_session) == (item.id, SECOND, "pending", "")
+    assert inbox.get(operator.id).address == FRONT
+    assert inbox.history(item.id)[-1]["reason"] == claimed(SECOND)
+
+
 def test_live_seats_read_lead_first_then_by_seat_number(swarm):
     _masters(swarm, 12)
     seats = [FRONT, *(f"master-{n}@{SLUG}" for n in range(2, 13))]
