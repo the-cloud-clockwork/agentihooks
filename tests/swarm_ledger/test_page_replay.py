@@ -3,7 +3,9 @@ import datetime
 import pytest
 
 from tests.swarm_ledger import page_replay
-from tests.swarm_ledger.test_caps_columns import browser  # noqa: F401
+from tests.swarm_ledger.test_caps_columns import browser as chromium_browser
+
+browser = chromium_browser
 
 
 class LateOutline:
