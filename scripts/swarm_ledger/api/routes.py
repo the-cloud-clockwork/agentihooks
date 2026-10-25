@@ -189,7 +189,7 @@ PAGE_WRITES = {"saves": "put_ledger", "swarm/controls": "put_swarm"}
 
 
 def export(services: Services, slug: str, path: str, payload: dict) -> dict | str:
-    if path == "export" and "since" in payload:
+    if path == "export" and isinstance(payload, dict) and "since" in payload:
         schemas.validate(SINCE_SCHEMA, payload)
         generation, text = services.repository.export_since(slug, payload["since"], export_body, export_changes)
         return '{"generation":' + str(generation) + "," + text[1:]
