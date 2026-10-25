@@ -129,7 +129,7 @@ def test_prepare_does_not_discard_missing_work_without_a_matching_dev_merge(repo
         return original(command, cwd)
 
     monkeypatch.setattr(publish, "execute", execute)
-    with pytest.raises(SwarmError, match="origin/predecessor"):
+    with pytest.raises(publish.SwarmError, match="origin/predecessor"):
         publish.prepare("swarm", p.agent, str(p.swarm), p.ledger)
     assert p.updates == []
 
