@@ -191,6 +191,28 @@ def link_or_copy(source: str, target: str) -> None:
         shutil.copy2(source, target)
 
 
+def prepare_git_inputs(root: Path, work: Path) -> list[str]:
+    if not (root / ".git").exists():
+        return []
+    metadata, common = (
+        Path(path)
+        for path in subprocess.check_output(
+            ["git", "rev-parse", "--path-format=absolute", "--git-dir", "--git-common-dir"],
+            cwd=root,
+            text=True,
+        ).splitlines()
+    )
+    subprocess.run(["git", "init", "--quiet", "--template=", str(work)], check=True)
+    target = work / ".git"
+    (target / "objects/info/alternates").write_text(f"{common / 'objects'}\n")
+    shutil.copy2(metadata / "HEAD", target / "HEAD")
+    for source in (metadata / "index", common / "packed-refs"):
+        if source.is_file():
+            shutil.copy2(source, target / source.name)
+    shutil.copytree(common / "refs", target / "refs", dirs_exist_ok=True)
+    return [".git/"]
+
+
 def prepare_workspace(root: Path, work: Path, paths: list[str], tests: list[str]) -> None:
     for name in (
         "hooks",
@@ -227,6 +249,7 @@ def prepare_workspace(root: Path, work: Path, paths: list[str], tests: list[str]
     for name in extra_files:
         (work / name).parent.mkdir(parents=True, exist_ok=True)
         shutil.copy(root / name, work / name)
+    git_files = prepare_git_inputs(root, work)
     pytest_args = ["-q", "-x", "-o", "addopts=", "-p", "pytest_asyncio.plugin"]
     # pytest would load the plugin from its own mutated copy, whose hooks raise in mutmut's forced fail run.
     if IDENTITY not in paths:
@@ -245,6 +268,7 @@ def prepare_workspace(root: Path, work: Path, paths: list[str], tests: list[str]
             ".agentihooks/conditions/",
             "deploy/helm/agentihooks-swarm/ci/",
             *root_files,
+            *git_files,
             *(f"{name}/" for name in sorted({Path(path).parts[0] for path in extra_files})),
         ],
         "pytest_add_cli_args_test_selection": tests,

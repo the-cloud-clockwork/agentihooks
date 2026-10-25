@@ -301,8 +301,10 @@ def test_workspace_carries_the_repository_root_files_into_the_mutants_copy(tmp_p
     assert [name for name in also_copy if not name.endswith("/")] == sorted(copied)
     for name in copied:
         assert (work / name).read_text() == name
-    for name in (".env", ".env.example", ".git", "linked.md"):
+    for name in (".env", ".env.example", "linked.md"):
         assert not (work / name).exists()
+    assert (work / ".git").is_dir()
+    assert also_copy.count(".git/") == 1
 
 
 @pytest.mark.parametrize(
@@ -668,6 +670,48 @@ def test_workspace_discovers_tracked_inputs_without_copying_generated_statistics
     assert not (work / ".mutation-stats").exists()
     config = tomllib.loads((work / "pyproject.toml").read_text())["tool"]["mutmut"]
     assert ".mutation-stats/" not in config["also_copy"]
+
+
+def test_workspace_preserves_git_reads_without_copying_repository_configuration(tmp_path):
+    import shutil
+    import subprocess
+    import tomllib
+
+    from scripts.ci_mutation.runner import prepare_workspace
+
+    root = tmp_path / "repo"
+    root.mkdir()
+    (root / "pyproject.toml").write_text("[tool.pytest.ini_options]\n")
+    (root / "input.txt").write_text("trusted revision")
+    subprocess.run(["git", "init", "-q", str(root)], check=True)
+    subprocess.run(["git", "add", "input.txt"], cwd=root, check=True)
+    subprocess.run(
+        ["git", "-c", "user.name=fixture", "-c", "user.email=fixture@example.invalid", "commit", "-qm", "fixture"],
+        cwd=root,
+        check=True,
+    )
+    subprocess.run(["git", "pack-refs", "--all"], cwd=root, check=True)
+    subprocess.run(["git", "config", "fixture.source", "original"], cwd=root, check=True)
+    work = tmp_path / "work"
+    work.mkdir()
+    prepare_workspace(root, work, ["hooks/sample.py"], [])
+    config = tomllib.loads((work / "pyproject.toml").read_text())["tool"]["mutmut"]
+    mutants = work / "mutants"
+    mutants.mkdir()
+    for name in config["also_copy"]:
+        path = work / name
+        if path.is_dir():
+            shutil.copytree(path, mutants / name, dirs_exist_ok=True)
+        elif path.is_file():
+            shutil.copy2(path, mutants / name)
+    for stage in (work, mutants):
+        assert subprocess.check_output(["git", "show", "HEAD:input.txt"], cwd=stage, text=True) == "trusted revision"
+        assert subprocess.check_output(["git", "ls-files"], cwd=stage, text=True).splitlines() == ["input.txt"]
+        assert subprocess.check_output(["git", "rev-parse", "--show-toplevel"], cwd=stage, text=True).strip() == str(
+            stage
+        )
+        original = subprocess.run(["git", "config", "--get", "fixture.source"], cwd=stage, capture_output=True)
+        assert original.returncode == 1
 
 
 def test_workspace_handles_a_selected_test_probing_an_invalid_null_path(tmp_path):
