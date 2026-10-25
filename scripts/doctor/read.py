@@ -2,7 +2,7 @@
 
 import json
 import re
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -82,11 +82,17 @@ def inbox_receivers(store, inbox, slug, items):
     with inbox.redis.pipeline() as pipe:
         for address in seats:
             pipe.hgetall(inbox.seats.key(address))
+        for address in seats:
+            pipe.lrange(f"{inbox.seats.key(address)}:history", 0, -1)
         for s in seat_slugs:
             pipe.hgetall(store.key(s, "config"))
         rows = pipe.execute()
     occupancies = dict(zip(seats, map(_occupancy, rows[: len(seats)])))
-    configs = dict(zip(seat_slugs, rows[len(seats) :]))
+    bound = {
+        address: _bound_at(occupancies[address].generation, history)
+        for address, history in zip(seats, rows[len(seats) : 2 * len(seats)])
+    }
+    configs = dict(zip(seat_slugs, rows[2 * len(seats) :]))
     held = {address: occupancies[address].occupant if address in occupancies else address for address in addresses}
     resolved = names.resolve_many(sorted(set(held.values()) | {reader(item) for item in items}))
     departed = inbox.seats.exits(list(agents))
@@ -100,7 +106,14 @@ def inbox_receivers(store, inbox, slug, items):
             if key and key not in found:
                 agent = agents.get(resolved[name])
                 found[key] = _inbox_receiver(key, agent, occupancies.get(key), departed, configs)
+                if found[key].live and key in bound:
+                    found[key] = replace(found[key], bound_at=bound[key])
     return found
+
+
+def _bound_at(generation, history):
+    entries = (json.loads(raw) for raw in history)
+    return max((e["at"] for e in entries if e["generation"] == generation and "event" not in e), default=0)
 
 
 def _inbox_receiver(address, agent, seat, departed, configs):

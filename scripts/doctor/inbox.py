@@ -23,6 +23,7 @@ class Receiver:
     harness: str = ""
     seat_wait: bool = False
     task: str = ""
+    bound_at: int = 0
 
 
 def findings(items, now_ms, window_ms, receivers=None):
@@ -80,7 +81,8 @@ def past_window(items, now_ms, window_ms, receivers=None):
     found, receivers = [], receivers or {}
     for item in items:
         waited = now_ms - item["created_at"]
-        if item.get("fyi") or item["state"] in CLOSED or waited < window_ms:
+        bound_at = receivers.get(item["address"], Receiver()).bound_at
+        if item.get("fyi") or item["state"] in CLOSED or now_ms - max(item["created_at"], bound_at) < window_ms:
             continue
         receiver = receivers.get(reader(item)) or receivers.get(item["address"], Receiver())
         if not _waiting(item, receiver, window_ms):
