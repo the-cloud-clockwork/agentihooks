@@ -508,6 +508,17 @@ def test_an_away_worker_routes_his_decisions_to_a_ledger_question_never_prioriti
     assert "Priorities" not in text
 
 
+def test_the_session_binding_picks_the_route_over_the_environment_name(ledgers, monkeypatch, capsys):
+    (ledgers / ".sessions" / "w1.json").write_text(json.dumps({"slug": "demo", "name": "engineer@a1-2"}))
+    (ledgers / ".sessions" / "m1.json").write_text(json.dumps({"slug": "demo", "name": "master@a1-1"}))
+    out = run_prompt(monkeypatch, capsys, "w1", delivery.marked("continue"))
+    assert operator_mode.WORKER_ROUTE in out
+    assert operator_mode.MASTER_ROUTE not in out
+    env = {"AGENTIHOOKS_SWARM": "demo", "AGENTIHOOKS_AGENT_NAME": "engineer@a1-2", "LEDGER_DIR": str(ledgers)}
+    text = [operator_mode.reminder("m1", env, now=100) for _ in range(2)][1]
+    assert text.endswith(operator_mode.MASTER_ROUTE)
+
+
 def test_only_typed_operator_on_opens_the_question_tool_and_no_other_prompt_does(monkeypatch, capsys):
     payload = {"session_id": "s1", "tool_name": "AskUserQuestion", "tool_input": {"questions": []}}
     run_prompt(monkeypatch, capsys, "s1", "You are master@a1-1, the master of swarm demo")
