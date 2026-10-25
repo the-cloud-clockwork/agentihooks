@@ -433,11 +433,6 @@ MEMORY_AUTO_SAVE = _env_bool("MEMORY_AUTO_SAVE", "true")
 # The front door master of every swarm launches on the one claude ai master login
 MASTER_CLAUDE_LOGIN = _env_bool("AGENTIHOOKS_MASTER_CLAUDE_LOGIN", "false")
 
-# Stored master logins named here, by email or account slug, are taken first in this order
-MASTER_LOGIN_ORDER: tuple[str, ...] = tuple(
-    name.strip() for name in os.getenv("AGENTIHOOKS_MASTER_LOGIN_ORDER", "").split(",") if name.strip()
-)
-
 # =============================================================================
 # SECRETS SCANNING MODE
 # =============================================================================

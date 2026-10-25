@@ -132,25 +132,21 @@ def test_equal_room_prefers_the_active_slot(monkeypatch, rendered, tmp_path):
 
 
 def test_the_operator_order_outranks_room(monkeypatch, rendered, tmp_path):
-    from hooks import config as hooks_config
-
     monkeypatch.setattr(openbao_kv, "from_env", lambda environ: None)
     _stored(1, {"emailAddress": "one@example.com"})
     _stored(2, TWO)
     _room(monkeypatch, oneatexample_com=10.0, twoatexample_com=80.0)
-    monkeypatch.setattr(hooks_config, "MASTER_LOGIN_ORDER", ("not a slug!", "one@example.com", "twoatexample_com"))
+    monkeypatch.setenv(login.ORDER_ENV, "not a slug!, one@example.com,twoatexample_com")
     assert login.prepare(_environ(rendered), tmp_path)[0] == login.home(1)
 
 
 def test_a_held_first_choice_falls_to_the_next_in_the_operator_order(monkeypatch, rendered, tmp_path):
-    from hooks import config as hooks_config
-
     monkeypatch.setattr(openbao_kv, "from_env", lambda environ: None)
     _stored(1, {"emailAddress": "one@example.com"})
     _stored(2, TWO)
     _stored(3, {"emailAddress": "three@example.com"})
     _room(monkeypatch, oneatexample_com=10.0, twoatexample_com=20.0, threeatexample_com=90.0)
-    monkeypatch.setattr(hooks_config, "MASTER_LOGIN_ORDER", ("oneatexample_com", "two@example.com"))
+    monkeypatch.setenv(login.ORDER_ENV, "oneatexample_com,two@example.com")
     _held(1, "master@a-1")
     assert login.prepare(_environ(rendered), tmp_path)[0] == login.home(2)
 

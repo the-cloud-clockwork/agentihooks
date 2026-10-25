@@ -18,6 +18,7 @@ from scripts.routing import master_account
 from scripts.routing.settings import SettingsStore, open_store
 
 ROUTE = "master-login"
+ORDER_ENV = "AGENTIHOOKS_MASTER_LOGIN_ORDER"
 LANE = "master"
 SETTINGS = ["--settings", '{"forceLoginMethod":"claudeai"}']
 LOGIN = ["auth", "login"]
@@ -409,9 +410,9 @@ def _offered(bao: openbao_kv.OpenBao | None) -> dict[int, dict[str, str]]:
 
 def _preferred() -> dict[str, int]:
     ranks: dict[str, int] = {}
-    for name in hooks_config.MASTER_LOGIN_ORDER:
+    for name in os.environ.get(ORDER_ENV, "").split(","):
         try:
-            ranks.setdefault(aicode_tokens.slug(name), len(ranks))
+            ranks.setdefault(aicode_tokens.slug(name.strip()), len(ranks))
         except aicode_tokens.SlugError:
             continue
     return ranks
