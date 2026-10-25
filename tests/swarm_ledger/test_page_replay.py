@@ -1,6 +1,9 @@
+import datetime
+
 import pytest
 
 from tests.swarm_ledger import page_replay
+from tests.swarm_ledger.test_caps_columns import browser  # noqa: F401
 
 
 class LateOutline:
@@ -29,6 +32,22 @@ class StalledOutline:
         if script != page_replay.FLUSH:
             self.captures += 1
         return None
+
+
+def test_quiet_drains_a_real_observer_delivery_under_the_paused_clock(browser):
+    page = browser.new_page()
+    try:
+        page.clock.install(time=page_replay.START - datetime.timedelta(seconds=10))
+        page.clock.pause_at(page_replay.START)
+        page.set_content(
+            '<main id="main-content"><a id="link">Operator notes</a></main><script>window.__inflight = 0;'
+            'new IntersectionObserver(() => { document.getElementById("link").className = "on"; })'
+            '.observe(document.getElementById("link"));</script>'
+        )
+        now = page_replay.quiet(page)
+    finally:
+        page.close()
+    assert '<a id="link" class="on">' in now[1]
 
 
 def test_quiet_waits_for_pending_outline_deliveries_before_capture():
