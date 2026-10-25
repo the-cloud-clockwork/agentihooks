@@ -686,6 +686,13 @@ def test_the_reply_limit_reads_the_environment_skips_markers_and_checks_retries(
     repeat = {"session_id": "s1", "last_assistant_message": "a b c d", "stop_hook_active": True}
     assert operator_mode.reply_refusal(repeat, env) == refused
     assert operator_mode.reply_refusal({**repeat, "last_assistant_message": "a b c"}, env) == ""
+    assert operator_mode.REPLY_RETRIES == 3
+    assert operator_mode.reply_refusal(repeat, env) == refused
+    assert operator_mode._load("s1")["refusals"] == 3
+    assert operator_mode.reply_refusal(repeat, env) == ""
+    assert operator_mode._load("s1")["refusals"] == 4
+    assert operator_mode.reply_refusal({**repeat, "stop_hook_active": False}, env) == refused
+    assert operator_mode._load("s1")["refusals"] == 1
     assert operator_mode.reply_refusal({"session_id": "", "last_assistant_message": "a b c d"}, env) == ""
     assert operator_mode.reply_refusal({"session_id": "s1"}, env) == ""
 

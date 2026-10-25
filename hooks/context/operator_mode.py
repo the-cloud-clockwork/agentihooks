@@ -23,6 +23,7 @@ REPLY_REFUSAL = (
     "Operator not present: this reply has {count} words, over the {words} word limit. "
     "Reply again in at most {words} words, machine style: result only, no explanation."
 )
+REPLY_RETRIES = 3
 MARKER = re.compile(r"<!--.*?-->", re.DOTALL)
 QUESTION_TOOL = "AskUserQuestion"
 ASK_REFUSAL = (
@@ -159,13 +160,21 @@ def _reminder_text(environ):
 
 
 def reply_refusal(payload, environ=None):
-    """The refusal of a final reply over the word limit while the operator is away, retries included."""
+    """The refusal of a final reply over the word limit while the operator is away, at most REPLY_RETRIES per stop."""
+    from hooks.context import operator_expiry
+
     session_id = payload.get("session_id")
     if not _away(session_id, environ, None):
         return ""
     count = len(MARKER.sub(" ", str(payload.get("last_assistant_message") or "")).split())
     words = _limit(environ)
-    return REPLY_REFUSAL.format(count=count, words=words) if count > words else ""
+    if count <= words:
+        return ""
+    with operator_expiry.state_lock(session_id):
+        state = _load(session_id)
+        refused = state.get("refusals", 0) + 1 if payload.get("stop_hook_active") else 1
+        _save(session_id, {**state, "refusals": refused})
+    return REPLY_REFUSAL.format(count=count, words=words) if refused <= REPLY_RETRIES else ""
 
 
 def reminder(session_id, environ=None, now=None):
