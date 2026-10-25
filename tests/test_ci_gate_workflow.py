@@ -204,7 +204,9 @@ def test_post_shard_graders_do_not_wait_on_each_other_and_the_gate_needs_each():
     graders = {"shard-check", "coverage-ratchet", "sonar"}
     for name in graders:
         needs = jobs[name]["needs"]
-        assert "unit" in needs
+        if "unit" not in needs:
+            assert name == "shard-check" and "split" in needs
+            assert any("python -m scripts.ci_gate_shards" in step.get("run", "") for step in jobs[name]["steps"])
         assert not graders & set(needs), f"{name} waits on another post shard grader"
     assert graders <= set(jobs["gate-required"]["needs"])
 
