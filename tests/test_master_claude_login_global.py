@@ -170,6 +170,36 @@ def test_two_front_doors_launch_without_token_fallback_and_share_refreshed_crede
     assert login.holders(login.root()) == {"master@rig-1": os.getppid(), "master@doctor-1": os.getpid()}
 
 
+def test_a_failed_shared_login_check_cannot_overwrite_another_holders_refresh(ah, rendered, monkeypatch):
+    import os
+
+    from scripts.routing import native_login
+
+    _render(rendered, "Master.\n")
+    home = login.build(rendered)
+    old = {"refreshToken": "old", "expiresAt": 1}
+    refreshed = {"refreshToken": "refreshed", "expiresAt": 2}
+    (home / login.CREDENTIALS).write_text(json.dumps({login.GRANT: old}))
+    (home / login.CONFIG).write_text(json.dumps({login.ACCOUNT: MASTER_ACCOUNT}))
+    login.claim("master@rig-1", os.getppid())
+    login.claim("master@doctor-1", os.getpid())
+    monkeypatch.setattr(
+        login, "stored", lambda *_: {"grant": json.dumps(old), "account": json.dumps(MASTER_ACCOUNT), "generation": "1"}
+    )
+    checks = []
+
+    def check(environ, found):
+        checks.append(environ["CLAUDE_CONFIG_DIR"])
+        if len(checks) == 1:
+            (home / login.CREDENTIALS).write_text(json.dumps({login.GRANT: refreshed}))
+            raise native_login.LoginError(native_login.UNAVAILABLE)
+        assert json.loads((home / login.CREDENTIALS).read_text())[login.GRANT] == refreshed
+
+    monkeypatch.setattr(native_login, "check", check)
+    assert login.checked(home, _environ(rendered, "doctor"), "masteratexample_com")
+    assert checks == [str(home), str(home)]
+
+
 def _spawn(tmp_path, lane, seat, kind="interactive"):
     seen = []
 
