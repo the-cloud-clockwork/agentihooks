@@ -152,30 +152,6 @@ def test_the_inbox_reader_holds_delivered_mail_to_its_receiver_and_leaves_out_ou
     assert [f.id for f in found] == [f"inbox-past-window/{left.id}"]
 
 
-def test_the_startup_reader_judges_hive_agents_from_their_heartbeat_after_the_acknowledgement():
-    import fakeredis
-
-    from scripts.doctor import spawns
-    from scripts.swarm import idle
-    from scripts.swarm.store import AgentRecord, RedisStore
-    from scripts.swarm.tick import ACKNOWLEDGING
-
-    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
-    acked, timings = 50_000, {"returned_at": 50_000}
-    hive = {"started_at": 1_000, "hive": "h1", "launch_timings": timings}
-    running = AgentRecord("sw-eng-1", "eng", "t1", **hive)
-    silent = AgentRecord("sw-eng-2", "eng", "t2", **hive)
-    waiting = AgentRecord("sw-eng-3", "eng", "t3", started_at=1_000, state="starting")
-    local = AgentRecord("sw-eng-4", "eng", "t4", started_at=1_000)
-    store.agents = lambda slug: [running, silent, waiting, local] if slug == "sw" else []
-    store.record_launch("sw", waiting, ACKNOWLEDGING)
-    store.record_launch("sw", running, "started")
-    idle.beat(store.redis, "sw", running.name, idle.WORKING, acked + 1)
-    idle.beat(store.redis, "sw", local.name, idle.WORKING, 2_000)
-    found = detect.readers(store, None, "sw", acked + 2 * spawns.TICK_MS, environ={})["startup"]()
-    assert sorted(f.subject for f in found) == ["sw-eng-2", "sw-eng-4"]
-
-
 def test_ci_reads_only_the_pull_requests_of_tasks_waiting_in_review():
     tasks = [
         {"state": "pr", "pr_url": "https://github.com/o/r/pull/9"},

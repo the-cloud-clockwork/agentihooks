@@ -89,9 +89,6 @@ from scripts.swarm_v2 import masters as master_seats
 LEASE_MS = 10 * 60 * 1000
 SPAWN_BUDGET_S = 20
 STARTUP_GRACE_MS = 6 * 60 * 1000
-ACK_LATER = "hive_ack_later"
-ACKNOWLEDGING = "acknowledging"
-ACK_EXPIRED = "no hive acknowledged the launch within the claim lease"
 EXITED_BEFORE_LIFE = "its agent process exited before its launch check passed"
 SUSPECT = "suspect"
 MASTER_WAITING = f"{PREFIX}:master-waiting"
@@ -242,7 +239,6 @@ def tick(slug, store, ledger, runtime, now_ms):
         actions += skip_refused(quota_notice.refresh, slug, config, store, ledger, runtime, now_ms)
         actions += skip_refused(lost_runner.sweep, slug, config, store, now_ms)
         actions += skip_refused(time_left.refresh, slug, store, ledger, runtime, config, doc)
-        actions += skip_refused(_collect_acks, slug, config, store, ledger, runtime, doc, now_ms)
         if not sleeping:
             actions += skip_refused(_codex_hook_order)
             actions += skip_refused(_master_down, slug, config, store, ledger, runtime, now_ms)
@@ -389,11 +385,7 @@ def _verify(slug, store, ledger, runtime, rows, now_ms):
     agents, actions = [a for a in legacy_agents(store, slug) if a.name not in judged], []
     facts, live_names = runtime.bindings(agents), runtime.live_names()
     for agent in agents:
-        if (
-            agent.state == "awaiting-decision"
-            or (agent.lane == MASTER and agent.state == "starting")
-            or _acknowledging(slug, store, agent)
-        ):
+        if agent.state == "awaiting-decision" or (agent.lane == MASTER and agent.state == "starting"):
             continue
         task = rows.get(agent.task, {})
         if _ended(agent, rows):
@@ -630,11 +622,7 @@ def _reap(slug, store, ledger, runtime, rows, now_ms):
 
     live, actions = runtime.live_names(), []
     for agent in legacy_agents(store, slug):
-        if (
-            agent.state == "awaiting-decision"
-            or (agent.lane == MASTER and agent.state == "starting")
-            or _acknowledging(slug, store, agent)
-        ):
+        if agent.state == "awaiting-decision" or (agent.lane == MASTER and agent.state == "starting"):
             continue
         if reason := _remote_gone_reason(slug, store, runtime, agent, now_ms):
             actions.append(_drop_remote(slug, store, ledger, rows, agent, reason))
@@ -1167,7 +1155,6 @@ def _spawn(slug, config, store, ledger, runtime, rows, doc, now_ms):
             task["transfer"] = transfers.attach(store, slug, record)
             primed_task = {
                 **primed(store, slug, seat, task),
-                ACK_LATER: True,
                 **_steer(slug, store, task, clock.failing),
             }
             from scripts.swarm_v2.runtime import codex
@@ -1242,9 +1229,6 @@ def _spawn_failed(slug, store, ledger, runtime, rows, failed, now_ms):
 
 def _not_launched(slug, store, ledger, runtime, rows, failed, now_ms):
     record, task = failed.record, failed.task
-    if _acknowledging_error(failed.error):
-        store.record_launch(slug, record, ACKNOWLEDGING)
-        return [f"{record.name} waits for the hive acknowledgement of {task['id']}"]
     if refused := _failed_room_wait(runtime, record.lane, task):
         return [_room_refused(slug, store, ledger, runtime, rows, failed, refused)]
     return _spawn_failed(slug, store, ledger, runtime, rows, failed, now_ms)
@@ -1265,69 +1249,6 @@ def _room_refused(slug, store, ledger, runtime, rows, failed, refused):
     store.record_launch(slug, record, "waiting", str(failed.error))
     _drop(slug, store, ledger, rows, record)
     return refused
-
-
-def _acknowledging_error(exc):
-    from scripts.swarm_v2.runtime.base import Status
-
-    return isinstance(exc, SpawnError) and exc.status == Status.PENDING
-
-
-def _acknowledging(slug, store, agent):
-    if agent.lane == MASTER:
-        return False
-    raw = store.redis.hget(store.key(slug, "launches"), agent.name)
-    return bool(raw) and json.loads(raw).get("state") == ACKNOWLEDGING
-
-
-def _expire_launch(config, runtime, agent, error):
-    try:
-        kept = runtime.expire(config, agent.lane, agent.name, {"id": agent.task, "seat": agent.seat, ACK_LATER: True})
-    except Exception as exc:
-        return RuntimeError(f"expiring the launch raised {exc!r}")
-    return error if kept is False else SpawnError(ACK_EXPIRED)
-
-
-def _finished_launch(slug, store, doc, agent):
-    _release_hive_launch(slug, store, agent)
-    store.count_claim(slug, agent.task)
-    store.count_spawn(slug, agent.harness)
-    store.record_launch(
-        slug, agent, "started", after=store.take_restart(slug, agent.task) or _master_set(doc, agent.task)
-    )
-    store.redis.hdel(store.key(slug, "launch-assignments"), agent.task)
-    return f"{agent.name} finished {agent.task} before the tick collected its hive acknowledgement"
-
-
-def _collect_acks(slug, config, store, ledger, runtime, doc, now_ms):
-    if config.engine == EVENTS_ENGINE:
-        return []
-    from scripts.swarm_v2.runtime import codex
-
-    rows, actions = {t["id"]: t for t in doc["tasks"]}, []
-    for agent in [a for a in store.agents(slug) if _acknowledging(slug, store, a)]:
-        task = rows.get(agent.task) or {"id": agent.task}
-        try:
-            placed = runtime.collect(config, agent.lane, agent.name, {**task, "seat": agent.seat, ACK_LATER: True})
-            if agent.state == "finished":
-                actions.append(_finished_launch(slug, store, doc, agent))
-                continue
-            launched = codex.admit_legacy(store, slug, placed_record(agent, placed), runtime)
-        except Exception as exc:
-            error = exc
-            transient = _acknowledging_error(exc) or not isinstance(exc, SpawnError | SwarmError)
-            if transient and now_ms - agent.started_at >= LEASE_MS:
-                error = _expire_launch(config, runtime, agent, error)
-            if _acknowledging_error(error):
-                store.refresh(slug, agent.task, agent.name, LEASE_MS)
-            elif isinstance(error, SpawnError | SwarmError):
-                actions += _spawn_failed(slug, store, ledger, runtime, rows, Failed(agent, task, error), now_ms)
-            else:
-                print(f"{agent.name} collect for {task['id']} raised {error!r}, waiting for the hive", file=sys.stderr)
-                store.refresh(slug, agent.task, agent.name, LEASE_MS)
-            continue
-        actions += _started(slug, config, store, ledger, doc, Started(agent, task, placed, launched), now_ms)
-    return actions
 
 
 def _spawn_order(slug, config, store, agents, rows, doc, runtime):

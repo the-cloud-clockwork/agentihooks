@@ -93,15 +93,11 @@ def _master_prompts(store, slug, now_ms):
 
 
 def _starts(store, slug, now_ms):
-    from scripts.swarm.tick import ACKNOWLEDGING
-
     agents = [asdict(a) for a in store.agents(slug)]
-    launches = store.redis.hgetall(store.key(slug, "launches"))
-    pending = frozenset(name for name, raw in launches.items() if json.loads(raw)["state"] == ACKNOWLEDGING)
     beats = {
         a["name"]: beat["at"] for a in agents if a["hive"] and (beat := idle.heartbeat(store.redis, slug, a["name"]))
     }
-    return spawns.silent_starts(agents, activity.first_events(slug), now_ms, beats, pending)
+    return spawns.silent_starts(agents, activity.first_events(slug), now_ms, beats)
 
 
 def _once(load):

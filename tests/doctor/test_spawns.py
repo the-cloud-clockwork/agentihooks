@@ -237,13 +237,6 @@ def test_a_hive_agent_that_never_starts_is_raised_one_tick_after_its_acknowledge
     assert found.evidence == (f"acknowledged at {ACKED - 5_000}", "hive h1", "harness ", "pane ")
 
 
-def test_a_launch_still_waiting_for_its_hive_acknowledgement_is_not_raised():
-    starting = {"name": "engineer@a-3", "state": "starting", "started_at": 1_000}
-    later = 1_000 + 5 * spawns.TICK_MS
-    assert spawns.silent_starts([starting], {}, later, pending={"engineer@a-3"}) == []
-    assert [f.subject for f in spawns.silent_starts([starting], {}, later, pending={"other"})] == ["engineer@a-3"]
-
-
 def test_a_local_agent_keeps_the_first_event_rule():
     agent = {
         "name": "engineer@a-4",

@@ -1,11 +1,10 @@
 import json
-from dataclasses import replace
 
 import pytest
 
 from scripts.swarm import capacity, cli, host_budget, tick
 from scripts.swarm.store import MASTER, RedisStore, SwarmConfig
-from tests.swarm.test_tick import FakeLedger, FakeRuntime, HiveAcks
+from tests.swarm.test_tick import FakeLedger, FakeRuntime
 
 CAPS = {"eng": 2, "ci": 1, "plan": 0}
 MEMORY = "2100 MB available memory fits 3 at 700 MB each"
@@ -116,22 +115,6 @@ def test_the_master_seat_waits_for_host_room(store):
     actions = tick.tick("sw", store, FakeLedger([]), runtime, now_ms=61_000)
     assert "spawned master master@a1b2c3-0001" in actions
     assert store.redis.zrange(tick.HOST_SPENDS, 0, -1, withscores=True) == [("master@a1b2c3-0001", 61_000.0)]
-
-
-def test_hive_launches_never_spend_the_workstation_host_room(store):
-    _decide(store, 2)
-    ledger, runtime = _ledger(), HiveAcks()
-    tick.tick("sw", store, ledger, runtime, now_ms=1_000)
-    ordered = list(runtime.ordered)
-    assert len(ordered) == 3
-    for agent in [a for a in store.agents("sw") if a.name in ordered]:
-        hive = replace(agent, hive="remote", runtime_target={"host_id": "remote"}, state="launching")
-        store.start_execution("sw", hive, "")
-    runtime.acked.update(ordered)
-    actions = tick.tick("sw", store, ledger, runtime, now_ms=2_000)
-    assert sum(action.startswith("spawned ") for action in actions) == 3
-    assert store.redis.zrange(tick.HOST_SPENDS, 0, -1) == ["master@a1b2c3-0001"]
-    assert tick._host_full("sw", store, 2_000) == ""
 
 
 @pytest.mark.parametrize(("hive", "spent"), [("", 1), ("workstation-root", 1), ("remote", 0)])
