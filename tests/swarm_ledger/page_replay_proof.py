@@ -25,7 +25,7 @@ def test_page_replay_driver_rejects_the_chat_fault(tmp_path):
         timeout=120,
     )
     for name in ("base", "head"):
-        (tmp_path / name).symlink_to(root if name == "base" else tmp_path / "fault-chat", target_is_directory=True)
+        (tmp_path / name).symlink_to(root, target_is_directory=True)
     fault = tmp_path / "fault-chat"
     shutil.copytree(root / "scripts", fault / "scripts", ignore=shutil.ignore_patterns("__pycache__", ".coverage*"))
     chat = fault / "scripts/swarm_ledger/static/js/chat.js"
