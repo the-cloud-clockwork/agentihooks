@@ -154,7 +154,7 @@ def test_replaced_native_records_do_not_invent_accepted_tool_identities(cursors)
         },
     ]
     transcript = _session(cursors, "sid", [], 0, paged={"spans": 4})
-    transcript.write_text("".join(json.dumps(record) + "\\n" for record in records))
+    transcript.write_text("".join(json.dumps(record) + "\n" for record in records))
     cursor_path = agent_trace._cursor_path("sid")
     cursor = json.loads(cursor_path.read_text())
     cursor["source"]["accepted_bytes"] = transcript.stat().st_size
@@ -188,7 +188,7 @@ def test_unreadable_accepted_record_is_unknown(cursors):
     from scripts.doctor import observation_reconciliation
 
     transcript = _session(cursors, "sid", [], 0, paged={"spans": 9})
-    transcript.write_text("broken\\n")
+    transcript.write_text("broken\n")
     path = agent_trace._cursor_path("sid")
     cursor = json.loads(path.read_text())
     cursor["source"]["accepted_bytes"] = transcript.stat().st_size
