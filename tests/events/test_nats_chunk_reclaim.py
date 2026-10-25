@@ -184,6 +184,7 @@ def test_scoped_reclaim_compares_local_sequences_after_migration():
         _write_raw=write,
         _revision_base=100,
         _reclaim=reclaim,
+        _swept=datetime.datetime.now(datetime.UTC),
     )
     assert asyncio.run(nats_state.ScopedStateStore._write(store, "key", b"small", 3)) == 109
     write.assert_awaited_once_with("key", b"small", 3)
@@ -231,3 +232,43 @@ def test_a_crashed_writer_on_an_idle_key_leaves_no_chunks_after_the_idle_time(bu
     assert store.get("kept").value == kept
     assert store.get("idle").value == b"small"
     assert chunk_bytes(bus, stream, pattern) - staged_bytes(bus, stream, prefix, staged) == retained
+
+
+def test_sweep_purges_only_idle_unreferenced_chunk_groups():
+    now = datetime.datetime(2026, 10, 25, tzinfo=datetime.UTC)
+    owner, gone = nats_payload.scope("held", 0).split(".")[0], nats_payload.scope("gone", 0).split(".")[0]
+    names = ["held", f"_chunks.{owner}.1.kept.0", f"_chunks.{owner}.1.old.0", f"_chunks.{owner}.1.old.10"]
+    names += [f"_chunks.{owner}.1.old.9", f"_chunks.{owner}.2.young.0", f"_chunks.{gone}.0.lost.0"]
+    ages = {"kept.0": 60, "old.10": 16, "young.0": 14, "lost.0": 15}
+    js = SimpleNamespace(
+        stream_info=mock.AsyncMock(
+            return_value=SimpleNamespace(state=SimpleNamespace(subjects={f"p.{name}": 1 for name in names}))
+        ),
+        get_last_msg=mock.AsyncMock(
+            side_effect=lambda stream, name: SimpleNamespace(
+                time=now - datetime.timedelta(minutes=ages[".".join(name.split(".")[-2:])])
+            )
+        ),
+        purge_stream=mock.AsyncMock(),
+    )
+    referenced = nats_payload.PAGED + json.dumps([f"{owner}.1.kept", 1]).encode()
+    history = mock.AsyncMock(return_value=[b"plain", referenced])
+    asyncio.run(nats_payload.sweep(js, "s", "p.", history, now))
+    js.stream_info.assert_awaited_once_with("s", subjects_filter="p.>")
+    history.assert_awaited_once_with("held")
+    assert sorted(call.kwargs["subject"] for call in js.purge_stream.await_args_list) == sorted(
+        f"p.{name}" for name in names[2:5] + names[6:]
+    )
+    assert all(call.args == ("s",) for call in js.purge_stream.await_args_list)
+    js.stream_info.return_value.state.subjects = None
+    js.purge_stream.reset_mock()
+    asyncio.run(nats_payload.sweep(js, "s", "p.", history, now))
+    js.purge_stream.assert_not_awaited()
+
+
+def test_sweep_runs_once_per_idle_period():
+    now = datetime.datetime.now(datetime.UTC)
+    assert nats_payload.due(None) >= now
+    assert nats_payload.due(now) is None
+    assert nats_payload.due(now - nats_payload.IDLE) >= now
+    assert nats_payload.IDLE == datetime.timedelta(minutes=15)

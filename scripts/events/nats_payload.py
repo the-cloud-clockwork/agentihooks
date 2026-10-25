@@ -1,3 +1,4 @@
+import datetime
 import hashlib
 import json
 import secrets
@@ -11,6 +12,7 @@ from nats.js.api import PubAck
 COMPRESSED = b"\x00agentihooks-state-zlib:"
 PAGED = b"\x00agentihooks-state-pages:"
 KV_HEADER_BUDGET = 1024
+IDLE = datetime.timedelta(minutes=15)
 
 
 def validate(client: Client, subject: str, data: bytes, headers: dict[str, str] | None = None) -> None:
@@ -83,6 +85,41 @@ async def reclaim(
             stale.setdefault(f"{_owner(key)}.{base}.{nonce}", []).append(name)
     if stale:
         for value in await history():
+            if value.startswith(PAGED):
+                stale.pop(json.loads(value[len(PAGED) :])[0], None)
+    for names in stale.values():
+        for name in names:
+            await js.purge_stream(stream, subject=name)
+
+
+def due(last: datetime.datetime | None) -> datetime.datetime | None:
+    now = datetime.datetime.now(datetime.UTC)
+    return now if last is None or now - last >= IDLE else None
+
+
+async def sweep(
+    js: JetStreamContext,
+    stream: str,
+    prefix: str,
+    history: Callable[[str], Awaitable[list[bytes]]],
+    now: datetime.datetime,
+) -> None:
+    info = await js.stream_info(stream, subjects_filter=f"{prefix}>")
+    groups: dict[str, list[str]] = {}
+    keys: dict[str, str] = {}
+    for name in info.state.subjects or {}:
+        rest = name[len(prefix) :]
+        if rest.startswith("_chunks."):
+            groups.setdefault(rest[len("_chunks.") :].rsplit(".", 1)[0], []).append(name)
+        else:
+            keys[_owner(rest)] = rest
+    stale: dict[str, list[str]] = {}
+    for token, names in groups.items():
+        newest = max(names, key=lambda name: int(name.rsplit(".", 1)[1]))
+        if now - (await js.get_last_msg(stream, newest)).time >= IDLE:
+            stale[token] = names
+    for owner in {token.split(".")[0] for token in stale} & keys.keys():
+        for value in await history(keys[owner]):
             if value.startswith(PAGED):
                 stale.pop(json.loads(value[len(PAGED) :])[0], None)
     for names in stale.values():

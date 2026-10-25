@@ -20,6 +20,7 @@ HISTORY = 64
 class ScopedStateStore:
     def __init__(self, root: "NatsBus", swarm: str, bucket: str, *, importing: bool = False):
         self._root, self._swarm, self._bucket = root, swarm, bucket
+        self._swept = None
         self._stream = stream_name(swarm, f"STATE_{bucket}")
         if root._config.provision:
             root._loop.run(self._provision(importing))
@@ -84,6 +85,10 @@ class ScopedStateStore:
                 await nats_payload.discard(self._root._js, self._stream, prefix, value)
             raise
         await self._reclaim(key, revision - self._revision_base)
+        if now := nats_payload.due(self._swept):
+            self._swept = now
+            prefix = f"{subject(self._swarm, 'state', self._bucket)}."
+            await nats_payload.sweep(self._root._js, self._stream, prefix, self._history, now)
         return revision
 
     async def _reclaim(self, key: str, below: int) -> None:
