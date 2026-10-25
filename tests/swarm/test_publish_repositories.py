@@ -109,6 +109,31 @@ def test_prepare_starts_from_dev_after_the_recorded_branch_merged_and_was_delete
     assert p.task["repository_branches"] == {str(root): "engineer-test"}
 
 
+@pytest.mark.parametrize(
+    "pull",
+    [
+        '{"state":"OPEN","baseRefName":"dev","headRefName":"predecessor"}',
+        '{"state":"CLOSED","baseRefName":"dev","headRefName":"predecessor"}',
+        '{"state":"MERGED","baseRefName":"main","headRefName":"predecessor"}',
+        '{"state":"MERGED","baseRefName":"dev","headRefName":"another-task"}',
+    ],
+)
+def test_prepare_does_not_discard_missing_work_without_a_matching_dev_merge(repositories, monkeypatch, pull):
+    p = repositories
+    p.task.update(branch="predecessor", pr_url="https://github.com/example/repo/pull/7")
+    original = publish.execute
+
+    def execute(command, cwd):
+        if command[0] == "gh":
+            return pull
+        return original(command, cwd)
+
+    monkeypatch.setattr(publish, "execute", execute)
+    with pytest.raises(SwarmError, match="origin/predecessor"):
+        publish.prepare("swarm", p.agent, str(p.swarm), p.ledger)
+    assert p.updates == []
+
+
 def test_prepare_names_the_default_repository_without_inferring_prose(repositories):
     p = repositories
     p.task["description"] = f"Work in {p.bundle}"
