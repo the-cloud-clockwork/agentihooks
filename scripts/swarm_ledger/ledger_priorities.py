@@ -55,7 +55,7 @@ def _clear(doc, op, ctx):
         gone = [_derived_row(target, found[target], None, ctx)]
     if not gone:
         if target != "all":
-            ctx.refused.append((CLEARED if target in dismissed else NOTHING).format(target=target))
+            ctx.refused.append((CLEARED if target in found else NOTHING).format(target=target))
         return target == "all"
     doc["priorities"] = [p for p in rows if p not in gone]
     for row in gone:

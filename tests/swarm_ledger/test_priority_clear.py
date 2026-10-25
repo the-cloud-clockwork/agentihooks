@@ -166,6 +166,7 @@ def test_clear_by_task_item_clears_the_block_priority_before_it_is_listed():
             "The priority on tasks/t1 is already cleared and returns only when its ask changes.",
         ),
         ("tasks/t9", None, "No priority waits on tasks/t9 to clear."),
+        ("tasks/t9", {"tasks/t9": "Blocked: Old ask."}, "No priority waits on tasks/t9 to clear."),
         ("pr-9", None, "No priority waits on pr-9 to clear."),
     ],
 )
