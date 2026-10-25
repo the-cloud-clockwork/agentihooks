@@ -33,8 +33,25 @@ def _pytest_command() -> str:
 
 
 def _slowest_committed_test() -> float:
+    rearmed = {
+        path.relative_to(_ROOT).as_posix()
+        for path in (_ROOT / "tests").rglob("test_*.py")
+        if any(
+            isinstance(node, ast.Attribute)
+            and node.attr == "dump_traceback_later"
+            and isinstance(node.value, ast.Name)
+            and node.value.id == "faulthandler"
+            for node in ast.walk(ast.parse(path.read_text()))
+        )
+    }
     return max(
-        max(json.loads(subprocess.check_output(["git", "show", f"HEAD:{name}"], cwd=_ROOT, text=True)).values())
+        max(
+            seconds
+            for nodeid, seconds in json.loads(
+                subprocess.check_output(["git", "show", f"HEAD:{name}"], cwd=_ROOT, text=True)
+            ).items()
+            if nodeid.split("::", 1)[0] not in rearmed
+        )
         for name in (".test_durations", ".test_durations-3.12")
     )
 
@@ -487,6 +504,24 @@ def test_the_hung_test_bound_reads_the_committed_durations_not_the_downloaded_co
         (tmp_path / name).write_text(json.dumps({"tests/test_a.py::test_a": 90.0}))
     monkeypatch.setattr(sys.modules[__name__], "_ROOT", tmp_path)
     assert _slowest_committed_test() == 1.0
+
+
+def test_the_hung_test_bound_skips_a_file_that_rearms_its_own_dump(tmp_path, monkeypatch):
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests/test_a.py").write_text("def test_a():\n    pass\n")
+    (tmp_path / "tests/test_slow.py").write_text("faulthandler.dump_traceback_later(250)\n")
+    durations = {"tests/test_a.py::test_a": 1.0, "tests/test_slow.py::test_slow": 90.0}
+    for name in (".test_durations", ".test_durations-3.12"):
+        (tmp_path / name).write_text(json.dumps(durations))
+    subprocess.run(["git", "-C", str(tmp_path), "add", "."], check=True)
+    subprocess.run(
+        ["git", "-C", str(tmp_path), "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "d"], check=True
+    )
+    monkeypatch.setattr(sys.modules[__name__], "_ROOT", tmp_path)
+    assert _slowest_committed_test() == 1.0
+    (tmp_path / "tests/test_slow.py").write_text("def test_slow():\n    pass\n")
+    assert _slowest_committed_test() == 90.0
 
 
 def test_tests_keep_dev_pull_request_and_integration_triggers():

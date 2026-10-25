@@ -2895,9 +2895,11 @@ jobs:
 
       - name: Adopt latest dev durations
         if: needs.mutation-plan.outputs.forwarded != 'true'
+        env:
+          PYTHON_VERSION: "3.12"
         run: |
           [[ -f ~/dev-durations/.test_durations ]] || { echo "Using committed durations"; exit 0; }
-          python -c 'import json, sys; from pathlib import Path; from tests.dev_durations import adopt; Path(".test_durations").write_text(json.dumps(adopt(Path(sys.argv[1]), "3.12"), indent=4, sort_keys=True) + "\n")' ~/dev-durations
+          python -c 'import json, sys; from pathlib import Path; from tests.dev_durations import adopt; Path(".test_durations").write_text(json.dumps(adopt(Path(sys.argv[1]), sys.argv[2]), indent=4, sort_keys=True) + "\n")' ~/dev-durations "$PYTHON_VERSION"
 
       - name: Restore compatible test stats
         if: needs.mutation-plan.outputs.forwarded != 'true'
@@ -3045,9 +3047,11 @@ jobs:
 
       - name: Adopt latest dev durations
         if: needs.mutation-plan.outputs.forwarded != 'true'
+        env:
+          PYTHON_VERSION: "3.12"
         run: |
           [[ -f ~/dev-durations/.test_durations ]] || { echo "Using committed durations"; exit 0; }
-          python -c 'import json, sys; from pathlib import Path; from tests.dev_durations import adopt; Path(".test_durations").write_text(json.dumps(adopt(Path(sys.argv[1]), "3.12"), indent=4, sort_keys=True) + "\n")' ~/dev-durations
+          python -c 'import json, sys; from pathlib import Path; from tests.dev_durations import adopt; Path(".test_durations").write_text(json.dumps(adopt(Path(sys.argv[1]), sys.argv[2]), indent=4, sort_keys=True) + "\n")' ~/dev-durations "$PYTHON_VERSION"
 
       - name: Download the shared mutation stats
         if: needs.mutation-plan.outputs.forwarded != 'true'
