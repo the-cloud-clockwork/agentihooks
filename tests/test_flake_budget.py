@@ -21,6 +21,19 @@ def test_a_flaky_report_joins_the_history_once_per_run():
     assert flake_budget.gather(history, [_report()], NOW + 60) == history
 
 
+def test_retry_evidence_survives_history_deduplication_and_expiry():
+    first = {**_report(f"{TEST}[first]"), "tracebacks": ["first frame\nRuntimeError: first"]}
+    second = {**_report(f"{TEST}[second]"), "tracebacks": ["second frame\nRuntimeError: second"]}
+    third = {**_report(run="8"), "tracebacks": ["third frame\nRuntimeError: third"]}
+    history = flake_budget.gather([], [first, second, first], NOW)
+    history = flake_budget.gather(history, [first, third], NOW + 60)
+    assert flake_budget.budget(history)["retried"] == [
+        {"test": TEST, "count": 2, "runs": ["7", "8"], "reports": [first, second, third]}
+    ]
+    history = flake_budget.gather(history, [], NOW + flake_budget.WINDOW_S)
+    assert flake_budget.budget(history)["retried"] == [{"test": TEST, "count": 1, "runs": ["8"], "reports": [third]}]
+
+
 def test_a_failed_report_is_not_a_flake():
     assert flake_budget.gather([], [_report(outcome="failed")], NOW) == []
 

@@ -81,6 +81,8 @@ spec:
             {{- end }}
             - name: SWARM_RELOAD
               value: "0"
+            - name: MALLOC_ARENA_MAX
+              value: "2"
             - name: SWARM_PUBLIC_URL
               value: {{ .Values.ledger.publicUrl | default (ternary (printf "https://%s" .Values.ingress.host) (include "swarm.ledgerUrl" .) .Values.ingress.enabled) | quote }}
             - name: SWARM_ALLOWED_HOSTS

@@ -92,14 +92,51 @@ its account, the live master holding it and its five hour and week usage; `--rem
 and clears its record. A login command refuses while a master or another login
 command holds that slot. Native Claude is the only refresher of the login.
 
-One live master holds one login: two masters never share a slot. A master
-launch takes the free stored login with the most room left (five hour and week
-windows from the router cache and its own sessions' quota snapshots), and
-refuses naming every holder when all stored logins are held. It never falls back
-to an `AH_CC_TOKEN_<slug>` token, because Remote Control refuses long lived
-tokens. At 98% of the week or 99% of five hours the quota policy hands the
-master's seat off, and the successor launches on the free stored login with the
-most room; with no free login the master gets `QUOTA STOP`, never a token.
+One live master holds one login: two masters never share a slot. Launch
+preparation takes the free stored login with the most room left (five hour and
+week windows from the router cache and its own sessions' quota snapshots), then
+checks it with `claude auth status --text`. A valid login ends the chain.
+
+Hive heartbeats advertise `master_login_enabled` separately from the stored
+`master_login` account. An enabled hive can accept private recovery with an
+empty inventory; the account remains unknown until the verified native or
+subscription launch reports it.
+
+When no valid session is available, preparation reserves an unused slot or
+renews the slot it already holds. Native `claude auth login` runs in that
+isolated home. The master seat receives an inbox directive with its authorization
+link and uses the operator browser connector's already signed in claude.ai
+session. It must never sign in, sign out or switch accounts. It replies to that
+request with exactly `success`, `captcha` or `failure`. Set
+`AGENTIHOOKS_MASTER_LOGIN_AUTHORIZER` to the exact browser owner's inbox address
+when authorization must stay with that master rather than the master pool.
+The reply must come from that same authorizer. Preparation waits for
+the matching reply; success also requires the native login process to finish
+and the renewed session to pass the live check. If the browser displays a manual
+authorization code, the master clicks that page's Copy button immediately before
+replying `success`. Only that matching reply permits private Windows clipboard
+capture and immediate clearing. The code must match the native request state
+before it reaches native stdin, once. Native output is drained in memory; only
+the authorization URL is retained. Codes never enter snapshots, messages or logs.
+A missing clipboard command or invalid callback ends the browser attempt.
+
+CAPTCHA, browser failure or a timeout ends the native login attempt and releases
+only the launching process's slot claim. The master then takes normal
+subscription token routing. This fallback has no Remote Control and no forced
+claude.ai login; Remote Control requires a native login. Held slots remain
+untouched. After a browser CAPTCHA or failure, or when no slot can take the
+browser login, the token branch sends the operator one email through the
+operator email module. One master agent name is one login attempt: a repeated
+launch of the same master sends no second email, even after a later failure,
+and a respawned master with a new name gets its own email. The current session
+and browser success paths send no email. Browser outcomes are recorded in the
+slot's `login-notifications.jsonl` with transport `inbox`; the email is
+recorded in the master token folder's `login-notifications.jsonl` with
+transport `email` and the agent name. Neither holds credentials.
+
+At 98% of the week or 99% of five hours the quota policy hands the master's seat
+off. The successor runs the same chain, returning to a valid native login when
+one is available.
 
 Each claim takes an epoch above the one stored in OpenBao. With `--openbao`, and
 at each master launch and Stop where `OPENBAO_URL` and `OPENBAO_TOKEN` are set,

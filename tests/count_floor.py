@@ -82,7 +82,7 @@ def dev_record(listing: dict, base: str) -> int | None:
         run = artifact.get("workflow_run") or {}
         if (
             not artifact.get("expired")
-            and run.get("head_branch") == "dev"
+            and (run.get("head_branch") == "dev" or (run.get("head_branch") or "").startswith("gh-readonly-queue/dev/"))
             and run.get("head_sha") == base
             and run.get("repository_id") is not None
             and run.get("repository_id") == run.get("head_repository_id")
@@ -91,9 +91,17 @@ def dev_record(listing: dict, base: str) -> int | None:
     return None
 
 
-def write_record(head: Path, tests: str, out: Path) -> int:
+def write_record(head: Path, tests: str, out: Path, collected: Path | None = None) -> int:
     identity = collection_identity(head, tests, "")
-    nodeids = collect_all({"head": head}, tests)["head"]
+    if collected is None:
+        nodeids = collect_all({"head": head}, tests)["head"]
+    else:
+        try:
+            nodeids = json.loads(collected.read_text())
+        except (OSError, ValueError):
+            nodeids = None
+        if not isinstance(nodeids, list) or not all(isinstance(nodeid, str) for nodeid in nodeids):
+            nodeids = None
     if not nodeids or identity is None or identity != collection_identity(head, tests, ""):
         print("::error::The tree did not collect cleanly, so no record is written.")
         return 1
@@ -360,9 +368,10 @@ def main(argv: list[str] | None = None) -> int:
     side.add_argument("--record", type=Path, help="write the head's collection as a record a later base can reuse")
     parser.add_argument("--head", type=Path, default=Path.cwd(), help="checkout of the head revision")
     parser.add_argument("--tests", default="tests/")
+    parser.add_argument("--collected", type=Path, help="with --record, the head collection the floor already exported")
     args = parser.parse_args(argv)
     if args.record:
-        return write_record(args.head, args.tests, args.record)
+        return write_record(args.head, args.tests, args.record, args.collected)
     collected = collect_sides(args.base, args.head, args.tests)
     failed = [side for side, nodeids in collected.items() if not nodeids]
     for side in failed:

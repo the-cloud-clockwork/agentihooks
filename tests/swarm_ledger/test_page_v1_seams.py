@@ -151,7 +151,16 @@ def doctor_server(monkeypatch, peer_freezes):
     documents = {"doctor": ledger_state(doc)}
     if peer_freezes is not None:
         documents["doctor-watched"] = documents["plain-watched"] = {"freezes": peer_freezes}
-    repository = SimpleNamespace(exists=lambda slug: slug in documents, get_document=lambda slug: documents[slug])
+
+    def document(slug):
+        assert not slug.endswith("-watched"), "the doctor hold copied the whole watched ledger"
+        return documents[slug]
+
+    repository = SimpleNamespace(
+        exists=lambda slug: slug in documents,
+        current=lambda slug: SimpleNamespace(state=documents[slug]),
+        get_document=document,
+    )
     monkeypatch.setattr(ledger_server, "swarm_store", lambda: store)
     monkeypatch.setattr(ledger_server, "repository", repository)
     monkeypatch.setattr(ledger_server, "swarm_status", lambda slug, ledger: None)
@@ -299,8 +308,8 @@ def test_every_page_route_goes_through_version_one():
     constants = dict(re.findall(r"^export const (\w+) = (.*);$", source("config"), re.M))
     for call in re.findall(r"fetch\(([^,)]+)", source("api")):
         names = re.findall(r"\b[A-Z][A-Z0-9_]*\b", call)
-        versioned = any(re.search(r"API_V1|/api/v1/", constants.get(name, "")) for name in names)
-        assert "V1" in call or versioned or call == "artifactUrl(id", call
+        versioned = any(re.search(r"API_V1|/api/v1\b", constants.get(name, "")) for name in names)
+        assert "V1" in call or versioned or call in ("artifactUrl(id", "`/${encodeURIComponent(slug"), call
 
 
 def test_the_page_copies_no_server_rule_or_limit():

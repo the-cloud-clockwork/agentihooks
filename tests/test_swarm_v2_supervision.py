@@ -368,7 +368,7 @@ def test_quiescence_checks_current_processes_after_its_deadline(tmp_path, monkey
 def test_sigterm_during_tool_reports_observed_checkpoint(worker, ack, expected):
     start, attempt, spec = worker
     exporter = [*spec["exporter"][:-1], ack]
-    child = start(exporter=exporter, checkpoint_seconds=0.4 if ack == "missing" else 5)
+    child = start(exporter=exporter, checkpoint_seconds=0.4 if ack == "missing" else 5, quiesce_seconds=5)
     root = runtime_directory(attempt, child)
     wait_for(root / "running.json", child)
     wait_for(root / "fixture-grandchild-two.json", child)

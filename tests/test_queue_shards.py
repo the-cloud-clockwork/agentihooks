@@ -7,6 +7,7 @@ import pytest
 import yaml
 
 from tests import refresh_durations
+from tests.queue_shards import SLOWDOWN, STARTUP_SECONDS
 
 _ROOT = Path(__file__).resolve().parents[1]
 
@@ -16,6 +17,8 @@ def _a_420_second_step(monkeypatch):
     from tests import queue_shards
 
     monkeypatch.setattr(queue_shards, "STEP_SECONDS", 420)
+    monkeypatch.setattr(queue_shards, "SLOWDOWN", 1.15)
+    monkeypatch.delenv("GITHUB_STEP_SUMMARY", raising=False)
 
 
 def test_the_planner_step_timeout_is_the_unit_run_tests_step_timeout():
@@ -32,42 +35,27 @@ def test_the_planner_step_timeout_is_the_unit_run_tests_step_timeout():
 
 
 _RECORDED_QUEUE_RUNS = [
-    (347.0, 264),
-    (346.9, 268),
-    (346.7, 271),
-    (346.7, 278),
-    (347.0, 288),
-    (346.7, 282),
-    (346.9, 281),
-    (346.8, 315),
-    (346.7, 261),
-    (346.5, 262),
-    (346.7, 274),
-    (346.4, 257),
-    (346.4, 267),
-    (346.5, 280),
-    (342.6, 269),
-    (342.6, 265),
-    (342.7, 264),
-    (342.6, 270),
-    (342.6, 286),
-    (342.6, 346),
+    (166.5, 323),
+    (166.5, 361),
+    (166.5, 331),
+    (164.6, 299),
+    (164.7, 343),
+    (164.6, 319),
+    (164.6, 302),
+    (164.6, 326),
+    (162.9, 327),
+    (162.9, 378),
 ]
-_RECORDED_SLOWDOWN = 1.5
 
 
-def test_the_planned_slowest_queue_shard_is_within_ten_percent_of_the_recorded_real_slowest_shard():
-    from tests.queue_shards import SLOWDOWN, STARTUP_SECONDS
+def test_the_planned_slowest_queue_shard_is_within_fifteen_percent_of_every_recorded_real_slowest_shard():
+    ratios = sorted((STARTUP_SECONDS + SLOWDOWN * peak) / real for peak, real in _RECORDED_QUEUE_RUNS)
 
-    ratios = sorted(
-        (STARTUP_SECONDS + SLOWDOWN * (planned - STARTUP_SECONDS) / _RECORDED_SLOWDOWN) / real
-        for planned, real in _RECORDED_QUEUE_RUNS
-    )
-
-    assert 0.9 <= ratios[len(ratios) // 2] <= 1.1
+    assert 0.85 <= ratios[0] and ratios[-1] <= 1.15
+    assert 0.95 <= ratios[len(ratios) // 2] <= 1.05
 
 
-def test_queue_durations_keep_the_slowest_recent_measurement_and_expire_old_runs(tmp_path, monkeypatch):
+def test_queue_durations_keep_the_median_recent_measurement_and_expire_old_runs(tmp_path, monkeypatch):
     samples = tmp_path / "samples"
     for run, seconds in [("10", 99), ("11", 1), ("12", 9), ("13", 2)]:
         folder = samples / run / "durations-3.12-1"
@@ -78,9 +66,16 @@ def test_queue_durations_keep_the_slowest_recent_measurement_and_expire_old_runs
 
     refresh_durations.main(["--samples", str(samples), "--ci-run", "13", "--ci", "3"])
 
-    assert json.loads((tmp_path / ".test_durations-slowest-3.12").read_text()) == {"tests/t.py::test_a": 9}
-    assert json.loads((tmp_path / ".test_durations-slowest").read_text()) == {"tests/t.py::test_a": 9}
     assert json.loads((tmp_path / ".test_durations-3.12").read_text()) == {"tests/t.py::test_a": 2}
+    assert not list(tmp_path.glob(".test_durations-slowest*"))
+
+
+def test_queue_sizing_reads_the_median_durations_only():
+    jobs = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())["jobs"]
+    step = next(
+        step for step in jobs["split"]["steps"] if step.get("name") == "Size queue shards from median durations"
+    )
+    assert "slowest" not in step["run"]
 
 
 def test_queue_sizing_splits_a_serial_group_until_it_has_half_timeout_margin(tmp_path):
@@ -195,6 +190,70 @@ def test_queue_sizing_uses_the_smallest_count_with_timeout_margin(tmp_path):
     assert len(matrix(tmp_path, {"3.12": measured})) == 13
 
 
+def test_queue_sizing_skips_counts_whose_even_share_misses_the_target(tmp_path, monkeypatch):
+    from tests import queue_shards
+
+    path = tmp_path / "tests/test_even.py"
+    path.parent.mkdir()
+    path.write_text("")
+    measured = {f"tests/test_even.py::test_{i}": 10.0 for i in range(1200)}
+    sized = []
+    predicted = queue_shards._predicted
+    monkeypatch.setattr(
+        queue_shards,
+        "_predicted",
+        lambda durations, count, *rest: sized.append(count) or predicted(durations, count, *rest),
+    )
+
+    plan = queue_shards.matrix(tmp_path, {"3.12": measured})
+
+    assert sized == [20]
+    assert len(plan) == 20
+
+
+def test_queue_sizing_uses_idle_runners_to_finish_serial_work_within_four_minutes(tmp_path, monkeypatch):
+    from tests import queue_shards
+
+    monkeypatch.setattr(queue_shards, "STEP_SECONDS", 720)
+    path = tmp_path / "tests/test_serial.py"
+    path.parent.mkdir()
+    path.write_text("import pytest\npytestmark = pytest.mark.xdist_group('serial')\n")
+    measured = {f"tests/test_serial.py::test_{i}": 90.0 for i in range(48)}
+
+    plan = queue_shards.matrix(tmp_path, {"3.12": measured})
+
+    assert len(plan) == 24
+    assert {leg["total"] for leg in plan} == {24}
+    assert all(leg["predicted_seconds"] == pytest.approx(237.0, abs=0.001) for leg in plan)
+
+
+@pytest.mark.parametrize(("seconds", "warned"), [(90.0, False), (100.0, True)])
+def test_a_capped_plan_over_the_queue_target_warns_in_the_annotations_and_the_job_summary(
+    tmp_path, monkeypatch, capsys, seconds, warned
+):
+    from tests import queue_shards
+
+    monkeypatch.setattr(queue_shards, "STEP_SECONDS", 720)
+    summary = tmp_path / "summary.md"
+    monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary))
+    path = tmp_path / "tests/test_serial.py"
+    path.parent.mkdir()
+    path.write_text("import pytest\npytestmark = pytest.mark.xdist_group('serial')\n")
+    measured = {f"tests/test_serial.py::test_{i}": seconds for i in range(48)}
+
+    plan = queue_shards.matrix(tmp_path, {"3.12": measured})
+
+    assert {leg["total"] for leg in plan} == {24}
+    message = "Python 3.12: the shard cap of 24 predicts the slowest queue shard at 260.0s, over the 240s target"
+    out = capsys.readouterr().out
+    if warned:
+        assert f"::warning title=Queue shard pool cannot reach the target::{message}\n" in out
+        assert summary.read_text() == f"{message}\n"
+    else:
+        assert "::warning" not in out
+        assert not summary.exists()
+
+
 def test_unknown_cases_use_module_maxima_and_the_global_tail_for_new_modules(tmp_path):
     from tests.queue_shards import main
 
@@ -233,13 +292,13 @@ def test_combined_queue_plan_refuses_more_jobs_than_the_runner_pool(capsys):
     from tests.queue_shards import main
 
     plan = [
-        {"python-version": "3.12", "shard": shard, "total": 30, "predicted_seconds": 150.0} for shard in range(1, 31)
+        {"python-version": "3.12", "shard": shard, "total": 24, "predicted_seconds": 150.0} for shard in range(1, 25)
     ]
-    main(["combine", "--plans", json.dumps(plan[:15])[1:-1], json.dumps(plan[15:])[1:-1]])
-    assert "30 queue jobs fit one wave of 30 runners" in capsys.readouterr().out
+    main(["combine", "--plans", json.dumps(plan[:12])[1:-1], json.dumps(plan[12:])[1:-1]])
+    assert "24 queue jobs fit one wave of 24 runners" in capsys.readouterr().out
 
-    extra = {"python-version": "3.12", "shard": 31, "total": 31, "predicted_seconds": 150.0}
-    with pytest.raises(SystemExit, match="31 queue jobs exceed the pool of 30"):
+    extra = {"python-version": "3.12", "shard": 25, "total": 25, "predicted_seconds": 150.0}
+    with pytest.raises(SystemExit, match="25 queue jobs exceed the pool of 24"):
         main(["combine", "--plans", json.dumps(plan)[1:-1], json.dumps([extra])[1:-1]])
 
 
@@ -269,15 +328,15 @@ def test_an_overflowing_queue_plan_is_capped_at_the_runner_pool(tmp_path, capsys
     outputs = dict(line.split("=", 1) for line in output.read_text().splitlines())
     assert set(outputs) == {"queue_312"}
     plan = json.loads("[" + outputs["queue_312"] + "]")
-    assert [leg["shard"] for leg in plan] == list(range(1, 31))
-    assert {leg["total"] for leg in plan} == {30}
+    assert [leg["shard"] for leg in plan] == list(range(1, 25))
+    assert {leg["total"] for leg in plan} == {24}
     assert all(leg["predicted_seconds"] < STEP_SECONDS for leg in plan)
     out = capsys.readouterr().out
-    assert "35 queue jobs exceed the pool of 30; capped at 30 shards" in out
-    assert "30 queue jobs fit one wave of 30 runners" in out
+    assert "35 queue jobs exceed the pool of 24; capped at 24 shards" in out
+    assert "24 queue jobs fit one wave of 24 runners" in out
 
 
-def test_a_forty_job_queue_plan_is_capped_to_the_thirty_runner_queue_pool(tmp_path, capsys):
+def test_a_forty_job_queue_plan_is_capped_to_the_twenty_four_runner_queue_pool(tmp_path, capsys):
     from tests.queue_shards import main
 
     root, output = _overflowing_plan(tmp_path, 1.0, total=40)
@@ -286,22 +345,27 @@ def test_a_forty_job_queue_plan_is_capped_to_the_thirty_runner_queue_pool(tmp_pa
 
     outputs = dict(line.split("=", 1) for line in output.read_text().splitlines())
     totals = {leg["total"] for leg in json.loads("[" + outputs["queue_312"] + "]")}
-    assert totals == {30}
-    assert "40 queue jobs exceed the pool of 30; capped at 30 shards" in capsys.readouterr().out
+    assert totals == {24}
+    assert "40 queue jobs exceed the pool of 24; capped at 24 shards" in capsys.readouterr().out
 
 
-def test_a_capped_queue_plan_over_the_step_timeout_warns_and_still_plans_the_pool(tmp_path, capsys):
+def test_a_capped_queue_plan_over_the_step_timeout_warns_and_still_plans_the_pool(tmp_path, capsys, monkeypatch):
     from tests.queue_shards import main
 
+    summary = tmp_path / "summary.md"
+    monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary))
     root, output = _overflowing_plan(tmp_path, 400.0)
 
     main(["combine", "--from-output", str(output), "--root", str(root), "--inputs", str(tmp_path / "queue-input")])
 
     plan = json.loads("[" + output.read_text().strip().split("=", 1)[1] + "]")
-    assert len(plan) == 30
+    assert len(plan) == 24
     out = capsys.readouterr().out
     assert "::warning::The capped queue plan predicts 490.0s, over 420s of the step timeout\n" in out
-    assert "30 queue jobs fit one wave of 30 runners; predicted slowest test step 490.0s" in out
+    message = "Python 3.12: the shard cap of 24 predicts the slowest queue shard at 490.0s, over the 210s target"
+    assert f"::warning title=Queue shard pool cannot reach the target::{message}\n" in out
+    assert summary.read_text() == f"{message}\n"
+    assert "24 queue jobs fit one wave of 24 runners; predicted slowest test step 490.0s" in out
 
 
 def test_a_capped_plan_at_the_step_timeout_warns(tmp_path, capsys, monkeypatch):
@@ -369,7 +433,7 @@ def test_queue_capacity_admission_precedes_the_unit_matrix():
     jobs = yaml.safe_load((Path(__file__).resolve().parents[1] / ".github/workflows/test.yml").read_text())["jobs"]
     split = jobs["split"]
     assert split["strategy"]["matrix"]["python-version"] == ["3.12"]
-    step = next(step for step in split["steps"] if step.get("name") == "Size queue shards from conservative durations")
+    step = next(step for step in split["steps"] if step.get("name") == "Size queue shards from median durations")
     assert step["run"].index("combine --from-output") < step["run"].index('cat queue-plan.txt >> "$GITHUB_OUTPUT"')
     assert "queue-plan" not in jobs
     assert jobs["unit"]["needs"] == ["split", "select", "reuse", "admission"]
@@ -388,7 +452,7 @@ def test_queue_sizing_writes_the_queue_input_durations_and_hash_for_the_single_v
     root = Path(__file__).resolve().parents[1]
     jobs = yaml.safe_load((root / ".github/workflows/test.yml").read_text())["jobs"]
     step = next(
-        step for step in jobs["split"]["steps"] if step.get("name") == "Size queue shards from conservative durations"
+        step for step in jobs["split"]["steps"] if step.get("name") == "Size queue shards from median durations"
     )
     case = {"tests/test_one.py::test_one": 1.0}
     tests = tmp_path / "tests"
@@ -547,8 +611,8 @@ def test_queue_sizing_consumes_reuse_after_deselection():
         "split"
     ]["steps"]
     names = [step.get("name") for step in steps]
-    assert names.index("Download the early collection") < names.index("Size queue shards from conservative durations")
-    assert names.index("Adopt the test plan") < names.index("Size queue shards from conservative durations")
+    assert names.index("Download the early collection") < names.index("Size queue shards from median durations")
+    assert names.index("Adopt the test plan") < names.index("Size queue shards from median durations")
     count = [
         step.get("name")
         for step in yaml.safe_load((Path(__file__).resolve().parents[1] / ".github/workflows/test.yml").read_text())[
@@ -556,5 +620,5 @@ def test_queue_sizing_consumes_reuse_after_deselection():
         ]["test-count"]["steps"]
     ]
     assert count.index("Deselect the reused tests") < count.index("Upload the early collection")
-    sizing = next(step for step in steps if step.get("name") == "Size queue shards from conservative durations")
+    sizing = next(step for step in steps if step.get("name") == "Size queue shards from median durations")
     assert "--reused" in sizing["run"]

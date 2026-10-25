@@ -87,6 +87,56 @@ def test_dry_run_preserves_claude_flags_and_keeps_prompt_out_of_launcher(monkeyp
     assert "host=linux" in capsys.readouterr().out
 
 
+def test_private_master_login_gets_its_coordinated_launch_deadline(monkeypatch, tmp_path):
+    from scripts import master_login_chain as chain
+
+    _, profile_env = _profile(monkeypatch, tmp_path)
+    original, seen = init_agent.LaunchDeadline, []
+
+    def deadline(seconds):
+        seen.append(seconds)
+        return original(seconds)
+
+    monkeypatch.setattr(init_agent, "LaunchDeadline", deadline)
+    monkeypatch.setattr(init_agent, "_launch_command", lambda *args: ("linux", ["terminal"]))
+    argv = [
+        "--dir",
+        str(tmp_path),
+        "--name",
+        "master-proof",
+        "--agent",
+        "claude",
+        "--dry-run",
+        "--",
+        "--route",
+        "master-login",
+    ]
+    assert (
+        init_agent.main(argv, {"HOME": str(tmp_path), "XDG_RUNTIME_DIR": str(tmp_path / "runtime"), **profile_env}) == 0
+    )
+    assert seen[0] >= chain.BUDGET.launch
+
+
+@pytest.mark.parametrize(
+    "agent,route",
+    [
+        ("", "master-login"),
+        ("claude", "master-login"),
+        ("codex", "master-login"),
+        ("claude", "worker"),
+    ],
+)
+def test_launch_budget_changes_only_for_a_native_claude_master(agent, route):
+    from types import SimpleNamespace
+
+    from scripts import master_login_chain as chain
+
+    args = SimpleNamespace(agent=agent, claude_args=["--route", route], route_timeout=10)
+    native = agent in ("", "claude") and route == "master-login"
+    assert init_agent._launch_seconds(args) == (chain.BUDGET.launch if native else init_agent.LAUNCH_DEADLINE_S)
+    assert args.route_timeout == (chain.BUDGET.route if native else 10)
+
+
 def test_wsl_command_hands_windows_terminal_a_windows_resolvable_program(monkeypatch, tmp_path):
     monkeypatch.setattr(init_agent.platform, "system", lambda: "Linux")
     monkeypatch.setattr(
@@ -121,7 +171,18 @@ def test_wsl_command_hands_windows_terminal_a_windows_resolvable_program(monkeyp
     assert not any(argument.startswith("/mnt/") for argument in command[1:])
 
 
+def _ordinary_launch_budget(monkeypatch):
+    original = init_agent.LaunchDeadline
+
+    def deadline(seconds):
+        assert seconds == init_agent.LAUNCH_DEADLINE_S
+        return original(seconds)
+
+    monkeypatch.setattr(init_agent, "LaunchDeadline", deadline)
+
+
 def _launch(monkeypatch, tmp_path, popen):
+    _ordinary_launch_budget(monkeypatch)
     monkeypatch.setattr(init_agent.agent_choice, "choose", lambda requested, environ: ("claude", "rotation"))
     monkeypatch.setattr(init_agent.shutil, "which", lambda name: None)
     monkeypatch.setattr(
@@ -907,6 +968,7 @@ def test_report_names_the_model_and_effort(monkeypatch, tmp_path, capsys):
 
 
 def _trust_launch(monkeypatch, tmp_path, project, env_extra=None):
+    _ordinary_launch_budget(monkeypatch)
     seen = {}
 
     def popen(command, **kwargs):

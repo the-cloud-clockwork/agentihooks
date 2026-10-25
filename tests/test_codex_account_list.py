@@ -32,7 +32,7 @@ def _environ(tmp_path):
 
 
 def test_the_hives_table_and_the_quota_table_list_the_same_deduplicated_codex_accounts(tmp_path, monkeypatch):
-    environ = _environ(tmp_path)
+    environ = {**_environ(tmp_path), "AH_CX_TOKEN_keyed": "sk-placeholder"}
     weekly = CodexQuota(100, "pro", seven_day=balancer.QuotaWindow(used=10, resets_at=10**10))
     monkeypatch.setattr(codex_router, "quotas", lambda pool, environ: {a.name: weekly for a in pool})
     monkeypatch.setattr(codex_router, "probe", lambda *a, **kw: None)

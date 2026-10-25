@@ -441,6 +441,18 @@ def test_a_dead_letter_is_published_before_the_original_is_terminated():
         loop.close()
 
 
+@pytest.mark.parametrize("error", [asyncio.TimeoutError, nats.FetchTimeout])
+def test_a_fetch_that_times_out_returns_no_deliveries(error):
+    subscription = SimpleNamespace(fetch=mock.AsyncMock(side_effect=error()))
+    loop = nats._Loop()
+    try:
+        consumer = nats.NatsConsumer(loop, subscription, SimpleNamespace(), POLICY, "queue.work")
+        assert consumer.fetch(1, 100) == []
+    finally:
+        loop.close()
+    subscription.fetch.assert_awaited_once_with(1, timeout=0.1)
+
+
 def test_a_dead_consumer_keeps_a_server_side_attempt_cap(bus):
     bus.dead.consumer("dead-reader", "dead.>")
     config = _consumer_config(bus, "AGENTIHOOKS_DEAD", "dead-reader")

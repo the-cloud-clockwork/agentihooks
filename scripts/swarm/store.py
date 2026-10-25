@@ -85,6 +85,7 @@ class SwarmConfig:
     hive_placement: bool = False
     local_max_agents: int = DEFAULT_LOCAL_MAX_AGENTS
     engine: str = "legacy"
+    window: dict = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if self.engine not in ("legacy", "events"):
@@ -232,6 +233,7 @@ class RedisStore:
             raw.get("hive_placement") == "True",
             int(raw.get("local_max_agents") or DEFAULT_LOCAL_MAX_AGENTS),
             raw.get("engine", "legacy"),
+            json.loads(raw.get("window") or "{}"),
         )
 
     def update(self, slug, **changes):
@@ -517,12 +519,21 @@ class RedisStore:
     def reset_claims(self, slug, task):
         self.redis.hset(self.key(slug, "started-lives"), task, 0)
         self.redis.hdel(self.key(slug, "launch-failures"), task)
+        self.clear_failed_harness(slug, task)
 
-    def note_launch_failure(self, slug, task, reason):
+    def note_launch_failure(self, slug, task, reason, harness=""):
         self.redis.hset(self.key(slug, "launch-failures"), task, reason)
+        if harness:
+            self.redis.hset(self.key(slug, "launch-failure-harness"), task, harness)
 
     def launch_failure(self, slug, task):
         return self.redis.hget(self.key(slug, "launch-failures"), task) or ""
+
+    def failed_harness(self, slug, task):
+        return self.redis.hget(self.key(slug, "launch-failure-harness"), task) or ""
+
+    def clear_failed_harness(self, slug, task):
+        self.redis.hdel(self.key(slug, "launch-failure-harness"), task)
 
     def record_launch(
         self, slug: str, agent: AgentRecord, state: str, error: str = "", after: str = "", head: str | None = ""
@@ -715,7 +726,7 @@ def _hive_recovered(redis, environ, refused):
             except redis.AuthenticationError:
                 pass
             else:
-                environ["AGENTIHOOKS_HIVE_REDIS_URL"] = saved
+                environ.update(cli.saved_member(environ))
                 return client
         try:
             cli.refresh_env(environ)

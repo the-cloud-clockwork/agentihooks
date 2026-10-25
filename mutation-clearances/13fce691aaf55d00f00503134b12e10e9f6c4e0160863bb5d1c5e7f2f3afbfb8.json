@@ -1,0 +1,6 @@
+{
+  "scripts/recall/store.py:scripts.recall.store.xǁSQLiteRecallStoreǁsources__mutmut_18:41e5fa74e6c3beb560dffa988f746b016ca0c260188b8a6aeb315e605ca3df9c": {
+    "reader": "standards_reader",
+    "reason": "Lowercasing the first half of the aggregate query changes no rows, and for source, *rest unpacks by column position, so column names are irrelevant."
+  }
+}

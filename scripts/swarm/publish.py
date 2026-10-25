@@ -9,7 +9,7 @@ from pathlib import Path
 
 from scripts import ci_prepush
 from scripts.gates import entry as gate_entry
-from scripts.swarm import continuation, naming, stack
+from scripts.swarm import continuation, naming, publish_queue, stack
 from scripts.swarm.ledger_client import LedgerClient
 from scripts.swarm.store import AgentRecord, SwarmError
 
@@ -283,7 +283,7 @@ def remote_head(root: Path, branch: str) -> str:
     return listed.split()[0] if listed else ""
 
 
-def grade_and_push(root: Path, primary: Path, fields: dict, own: str, head: str) -> None:
+def grade_and_push(root: Path, primary: Path, fields: dict, head: str) -> None:
     python = gate_python(primary)
     source = root / "scripts" / "ci_prepush"
     if (source / "__main__.py").is_file() or source.with_suffix(".py").is_file():
@@ -295,18 +295,17 @@ def grade_and_push(root: Path, primary: Path, fields: dict, own: str, head: str)
     if not ci_prepush.passed(root) or git(root, "rev-parse", "HEAD") != head:
         raise SwarmError("the committed HEAD has no passing prepush evidence")
     ref = f"refs/heads/{fields['branch']}"
-    lease = [] if fields["branch"] == own else [f"--force-with-lease={ref}"]
-    git(root, "push", *lease, "-u", "origin", f"HEAD:{ref}")
+    publish_queue.require_unqueued(git(root, "remote", "get-url", "--push", "origin"), fields["branch"])
+    git(root, "push", "-u", "origin", f"HEAD:{ref}")
 
 
 def publish(slug: str, agent: AgentRecord, repo: str, ledger: LedgerClient, message: str, files: list[str]) -> dict:
     task = task_row(slug, agent, ledger)
-    root, primary, scoped = publishing_root(repo, task, agent)
+    root, primary, _ = publishing_root(repo, task, agent)
     if root is None:
         raise SwarmError(f"task worktree missing; Next: agentihooks swarm {shlex.quote(slug)} prepare")
     fields = checkout_fields(root)
-    own = fields["branch"]
-    fields["branch"] = target_branch(root, scoped, own, task)
+    ledger.update_task(slug, agent.task, branch_record(fields, primary, task), by=agent.name)
     selected = selected_files(root, files)
     retry = shlex.join(["agentihooks", "swarm", slug, "publish", "--message", message, "--", *files])
     try:
@@ -317,7 +316,7 @@ def publish(slug: str, agent: AgentRecord, repo: str, ledger: LedgerClient, mess
             git(root, "commit", "-m", message)
         head = git(root, "rev-parse", "HEAD")
         if changed or remote_head(root, fields["branch"]) != head:
-            grade_and_push(root, primary, fields, own, head)
+            grade_and_push(root, primary, fields, head)
         else:
             fields["unchanged"] = (
                 "no changes in the listed files and the remote branch already points at this head; nothing pushed"
@@ -327,6 +326,4 @@ def publish(slug: str, agent: AgentRecord, repo: str, ledger: LedgerClient, mess
         if fields.get("gate") == "AgentiHooks touched Python fallback":
             detail = f"AgentiHooks touched Python fallback for {root}: {detail}"
         raise SwarmError(f"{detail}; Next: {retry}") from exc
-    update = branch_record(fields, primary, task)
-    ledger.update_task(slug, agent.task, update, by=agent.name)
     return {**fields, "head": head}

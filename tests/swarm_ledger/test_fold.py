@@ -169,7 +169,7 @@ const FOLD_KEY = "plan-ledger:demo:fold";
 function fakeBox(id, open) {{
   const on = {{}};
   const summary = {{ on: {{}}, addEventListener(ev, fn) {{ this.on[ev] = fn; }} }};
-  return {{ id, open, on, summary, querySelector: (sel) => (sel === ":scope > summary" ? summary : null),
+  return {{ id, open, on, summary, dataset: {{}}, querySelector: (sel) => (sel === ":scope > summary" ? summary : null),
     addEventListener(ev, fn) {{ on[ev] = fn; }} }};
 }}
 function click(box, inButton) {{
@@ -263,7 +263,7 @@ return [phases.fold.open, phases.boxes.map((b) => b.open), follow.boxes[0].open,
 class FakeDom:
     SCRIPT = """
 class El {
-  constructor(tag) { this.tag = tag; this.attrs = {}; this.kids = []; this.on = {}; this.textContent = ""; this.open = false; }
+  constructor(tag) { this.tag = tag; this.attrs = {}; this.kids = []; this.on = {}; this.textContent = ""; this.open = false; this.dataset = {}; }
   setAttribute(k, v) { this.attrs[k] = String(v); if (k === "open") this.open = true; }
   addEventListener(ev, fn) { this.on[ev] = fn; }
   append(...kids) { this.kids.push(...kids); }
@@ -306,14 +306,19 @@ class OutlineFolds(unittest.TestCase):
             + "const PAGE_SIZE = 50;"
             + "const FULL_PAGE"
             + page().split("  const FULL_PAGE", 1)[1].split("\n", 1)[0]
-            + "const shown = {}; const wanted = { id: null };"
+            + "const shown = {}; const wanted = { id: null }; const filter = { text: '', state: '' }; const remote = {}; const remoteTotal = {};"
             + "".join(
                 function_source(n) + "\n"
                 for n in (
                     "h",
                     "itemState",
+                    "outlineEntry",
                     "outlineOf",
                     "outlineLink",
+                    "outlineRow",
+                    "phaseRows",
+                    "remoteMore",
+                    "filtering",
                     "outlineAgain",
                     "limit",
                     "include",
@@ -357,7 +362,7 @@ class OutlineFolds(unittest.TestCase):
         self.assertEqual(out["wired"], [f"ol-{h['id']}" for h in self.HEADS])
 
     def test_outline_has_one_fold_all_control_and_entries_still_jump(self):
-        self.assertIn('id: "outline-all", on: { click: foldAll }', function_source("renderOutline"))
+        self.assertIn('id: "outline-all", on: { click: foldAll }', function_source("outlineTools"))
         self.assertIn('$("outline").querySelectorAll("details.fold")', function_source("outlineBoxes"))
         self.assertIn("ev.preventDefault();", page().split('$("outline").addEventListener("click"', 1)[1])
 

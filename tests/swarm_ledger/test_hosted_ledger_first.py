@@ -4,12 +4,17 @@ import json
 import socket
 import threading
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
-from scripts.swarm import runtime
-from scripts.swarm_ledger import authority_context, hosted_probe, ledger_authority, ledger_link
+from scripts.swarm import naming, runtime
+from scripts.swarm.store import AgentRecord
+from scripts.swarm_ledger import authority_context, hosted_probe, ledger, ledger_authority, ledger_link
 from scripts.swarm_ledger.storage_migration import hosted as hosted_migration
+from tests.swarm_ledger.test_hive_agent_tokens import hive as _hive
+from tests.swarm_ledger.test_ledger_authority import SLUG
+from tests.swarm_ledger.test_ledger_authority import live as _authority_live
 from tests.test_swarm_v2_launch import FIRST, World
 
 pytestmark = pytest.mark.unit
@@ -143,6 +148,38 @@ def test_a_hive_launch_hands_the_hosted_ledger_address_to_the_worker_home(monkey
     [spawned] = world.runtime.requests
 
     assert spawned.task["endpoints"][hosted_probe.HOSTED_ENV] == "https://hosted.example"
+
+
+live = _authority_live
+hive = _hive
+
+
+def test_a_hive_launched_worker_joins_the_fallback_ledger_after_a_failed_probe(monkeypatch, live, hive, silent, capsys):
+    fallback = f"http://{live['host']}"
+    monkeypatch.setenv(hosted_probe.HOSTED_ENV, silent)
+    world = World(monkeypatch)
+    world.launch(FIRST)
+    [spawned] = world.runtime.requests
+    store, grant = hive
+    code = naming.parse(spawned.name).code
+    store.names.adopt(SLUG, code, "", "")
+    store.redis.hset(store.names.key("name", spawned.name), mapping={"swarm": SLUG, "code": code})
+    store.start_execution(SLUG, AgentRecord(spawned.name, "eng", "proof", seat=f"eng-1@{SLUG}", hive=grant["id"]))
+    monkeypatch.setattr(ledger, "BASE", "")
+    monkeypatch.delenv("AGENTIHOOKS_LEDGER_AGENT_TOKEN", raising=False)
+    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", spawned.name)
+    monkeypatch.setenv("AGENTIHOOKS_SWARM", SLUG)
+    monkeypatch.setenv("AGENTIHOOKS_DEPLOYMENT", "distributed")
+    monkeypatch.setenv("AGENTIHOOKS_HIVE_LEDGER_CREDENTIAL", grant["ledger_credential"])
+    for key, value in spawned.task["endpoints"].items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.setenv("SWARM_URL", fallback)
+    monkeypatch.setattr(hosted_probe, "_answers", {silent: False})
+
+    ledger.cmd_join(SimpleNamespace(slug=SLUG, name=spawned.name, role="member"))
+
+    assert json.loads(capsys.readouterr().out) == {"joined": spawned.name, "slug": SLUG, "role": "member"}
+    assert ledger.call(SLUG)["_meta"]["members"][spawned.name]["role"] == "member"
 
 
 def test_a_hive_launch_without_a_hosted_ledger_hands_only_the_swarm_api(monkeypatch):

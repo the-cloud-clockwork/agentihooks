@@ -33,6 +33,28 @@ def test_spawn_hands_init_agent_the_swarm_lane_and_task(tmp_path, monkeypatch):
     assert seen["env"]["AGENTIHOOKS_SWARM_TASK"] == "t4"
 
 
+def test_native_master_browser_budget_is_carried_to_the_real_launcher(tmp_path, monkeypatch):
+    from scripts import master_login_chain as chain
+
+    seen = {}
+
+    def run(argv, **kwargs):
+        seen.update(argv=argv, timeout=kwargs["timeout"])
+        return SimpleNamespace(returncode=0, stdout=validated(argv, "status=started\nroute_status=routed\n"), stderr="")
+
+    runtime = HerdrRuntime(home=tmp_path, run=run)
+    monkeypatch.setattr(runtime, "conversations", lambda: {})
+    config = SimpleNamespace(
+        slug="fixture", repo=str(tmp_path), code="a1b2c3", compact_limit=0, lanes={}, autonomy="delegate"
+    )
+    argv = runtime._argv(config, "master@fixture", "claude", "opening", "master", "master")
+    runtime._launch(
+        config, "master", "master", "master@fixture", [*argv, "--", "--route", "master-login", "--model", "opus"]
+    )
+    assert float(seen["argv"][seen["argv"].index("--route-timeout") + 1]) >= chain.BUDGET.route
+    assert seen["timeout"] >= chain.BUDGET.spawn
+
+
 def test_spawn_stamps_the_launch_start_before_init_agent_runs(tmp_path, monkeypatch):
     clock = iter([5_000.0, 9_000.0])
     monkeypatch.setattr("scripts.swarm.runtime.time", SimpleNamespace(time=lambda: next(clock), sleep=lambda _: None))

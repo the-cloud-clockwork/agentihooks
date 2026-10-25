@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/watch_ledger.py:scripts.swarm_ledger.watch_ledger.x_main__mutmut_12:5705c71064e6963b2ee47910ac1983583a9404b3ad569cc0bc4b9555969c2308": {
+    "reader": "Independent Standards /root/standards_reader",
+    "reason": "Equivalent: stopping cannot reset; continue rechecks the false loop condition and break exits directly, without stream or sleep in either case."
+  }
+}

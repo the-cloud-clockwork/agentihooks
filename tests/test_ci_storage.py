@@ -214,6 +214,45 @@ def test_delete_counts_an_already_gone_artifact_as_deleted(monkeypatch):
     )
 
 
+class Clock:
+    def __init__(self, overrun=0):
+        self.now, self.overrun, self.slept = 0.0, overrun, []
+
+    def sleep(self, wait):
+        self.slept.append(wait)
+        self.now += wait + self.overrun
+
+
+def test_deletions_are_paced_and_an_overrun_sleep_starts_a_fresh_slot(monkeypatch):
+    clock = Clock(overrun=5)
+    monkeypatch.setattr(ci_storage.time, "monotonic", lambda: clock.now)
+    monkeypatch.setattr(ci_storage.time, "sleep", clock.sleep)
+    monkeypatch.setattr(ci_storage, "WORKERS", 1)
+    gh = Gh({}, failing={3})
+    monkeypatch.setattr(subprocess, "run", gh)
+    work = [("o/r", {"id": n}) for n in (1, 2, 3, 4)]
+    assert ci_storage.delete_all(work, per_minute=60) == {("o/r", 1), ("o/r", 2), ("o/r", 4)}
+    assert clock.slept == [1.0, 1.0]
+
+
+def test_deletions_use_eight_workers_paced_half_a_second_apart(monkeypatch, waits):
+    widths, real = [], ci_storage.ThreadPoolExecutor
+    monkeypatch.setattr(ci_storage.time, "monotonic", lambda: 0.0)
+    monkeypatch.setattr(ci_storage, "ThreadPoolExecutor", lambda width: widths.append(width) or real(width))
+    monkeypatch.setattr(subprocess, "run", Gh({}))
+    assert len(ci_storage.delete_all([("o/r", {"id": n}) for n in range(16)])) == 16
+    assert (widths, sorted(waits)) == ([8], [0.5 * n for n in range(1, 16)])
+
+
+def test_the_survey_reads_repositories_on_eight_workers(monkeypatch):
+    widths = []
+    real = ci_storage.ThreadPoolExecutor
+    monkeypatch.setattr(ci_storage, "ThreadPoolExecutor", lambda width: widths.append(width) or real(width))
+    monkeypatch.setattr(subprocess, "run", Gh(_org([], [], unread="o/a")))
+    plans, unread = ci_storage._survey(_args(), NOW)
+    assert (widths, list(plans), unread) == ([8], ["o/b"], ["o/a"])
+
+
 def _org(found_a, found_b, unread=None):
     return {
         "orgs/o/repos?per_page=100": [

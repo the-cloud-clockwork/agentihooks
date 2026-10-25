@@ -70,7 +70,8 @@ def wait_history(redis, slug: str, name: str) -> list[dict]:
     name, prefix = _resolved(redis, slug, name)
     entries = {}
     for candidate in [*names.aliases(name), name]:
-        entries.update(redis.hgetall(key(slug, "wait-history", candidate, prefix)))
+        for source in dict.fromkeys((PREFIX, prefix)):
+            entries.update(redis.hgetall(key(slug, "wait-history", candidate, source)))
     return sorted((json.loads(raw) for raw in entries.values()), key=lambda held: held["at"])
 
 

@@ -1,0 +1,6 @@
+{
+  "scripts/master_login_native.py:scripts.master_login_native.x\u01c1NativeAttempt\u01c1complete__mutmut_27:35d997f16cc2a818240da066f0679af4bebe3796e1ca27ab86b248f48c530130": {
+    "reader": "Standards",
+    "reason": "PowerShell member and type lookup ignore casing; the lowercased command has identical bounded clipboard output and clearing behavior."
+  }
+}

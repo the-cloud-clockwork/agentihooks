@@ -69,7 +69,8 @@ def quiet_for(store, config, master, now_ms) -> int:
 def target(store, config, master, now_ms, to=""):
     from scripts.hive.launch import _by_origin, loaded_hives
 
-    hives = _by_origin([hive for hive in loaded_hives(store) if to in ("", hive["id"])], config.repo)
+    hives = placement.for_swarm(loaded_hives(store), config.slug)
+    hives = _by_origin([hive for hive in hives if to in ("", hive["id"])], config.repo)
     return placement.place(MASTER, master.harness, master.account, master.route_kind, config.repo, hives, now_ms)
 
 

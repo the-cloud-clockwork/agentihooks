@@ -2,6 +2,7 @@ import { DAY } from "./config.js";
 import { $, h, newId, when } from "./dom.js";
 import { artifactUrl, readArtifact } from "./api.js";
 import { doc, meta, queue } from "./sync.js";
+import { pendingOf, tips } from "./state.js";
 import { jsonTree, markdown } from "./markdown.js";
 import { anchorPanel } from "./notices.js";
 import { firstPage, moreButton } from "./pages.js";
@@ -52,15 +53,16 @@ export function renderArtifacts() {
   $("art-list").replaceChildren(...firstPage("art-list", list, (a) => `artifact-${a.id}`).map((a) => h("li", { class: "notif-row art-row", id: `artifact-${a.id}` },
     h("div", { class: "notif-meta", text: artifactMeta(a) }),
     h("button", { class: "art-title", type: "button", text: a.title, on: { click: () => openArtifact(a) } }),
-    h("button", { class: "link danger", type: "button", text: "Delete", "aria-label": `Delete ${a.title}`,
+    h("button", { class: "link danger", type: "button", text: pendingOf(doc, `artifacts/${a.id}`) ? "sending" : "Delete", "aria-label": `Delete ${a.title}`, disabled: pendingOf(doc, `artifacts/${a.id}`) ? "" : false,
       on: { click: () => queue({ op: "artifact_delete", id: newId("artdel"), target: a.id }) } }))),
     moreButton("art-list", list.length, "more artifacts", renderArtifacts) || "");
   if (!list.length) $("art-list").append(h("li", { class: "empty", text: "No artifacts yet." }));
   const trash = [...doc.artifact_trash].sort((a, b) => (b.deleted_at || 0) - (a.deleted_at || 0));
   $("art-trash-head").hidden = !trash.length;
+  $("art-trash-head").textContent = tips.trash_days ? `Trash, each kept ${tips.trash_days} days` : "Trash";
   $("art-trash").replaceChildren(...firstPage("art-trash", trash, (a) => `artifact-${a.id}`).map((a) => h("li", { class: "notif-row art-row", id: `artifact-${a.id}` },
     h("div", { class: "notif-meta", text: meta.limits ? `${a.title} · ${daysLeft(a.deleted_at)} days left` : a.title }),
-    h("button", { class: "link", type: "button", text: "Restore", "aria-label": `Restore ${a.title}`,
+    h("button", { class: "link", type: "button", text: pendingOf(doc, `artifacts/${a.id}`) ? "sending" : "Restore", "aria-label": `Restore ${a.title}`, disabled: pendingOf(doc, `artifacts/${a.id}`) ? "" : false,
       on: { click: () => queue({ op: "artifact_restore", id: newId("artback"), target: a.id }) } }))),
     moreButton("art-trash", trash.length, "more trashed artifacts", renderArtifacts) || "");
 }

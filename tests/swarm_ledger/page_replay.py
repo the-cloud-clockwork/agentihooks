@@ -60,15 +60,17 @@ CAPTURE = """() => {
 
 
 class FakeApi:
-    def __init__(self, limits):
+    def __init__(self, limits, phase_status):
         self.requests = []
         self.dialogs = []
         self.rev = INPUTS["doc"]["_meta"]["rev"]
         self.limits = limits
+        self.phase_status = phase_status({"tasks": [], **INPUTS["doc"]})
 
     def state(self):
         doc = json.loads(json.dumps(INPUTS["doc"]))
         doc["_meta"].update(rev=self.rev, limits=self.limits)
+        doc["phase_status"] = self.phase_status
         return doc
 
     def note(self, request):
@@ -280,7 +282,7 @@ def record(root: Path, folder: Path) -> list:
         context = browser.new_context(viewport=VIEWPORT, locale="en-US", timezone_id="UTC")
         import ledger_server
 
-        api = FakeApi(ledger_server.PAGE_LIMITS)
+        api = FakeApi(ledger_server.PAGE_LIMITS, ledger_server.ports.swarm().phase_state.status)
         context.add_init_script(DETERMINISTIC)
         context.route("**/media/**", api.media)
         context.route("**/artifacts/**", api.artifact)

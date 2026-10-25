@@ -283,12 +283,32 @@ def test_splits_cover_untimed_tests_cap_at_ten_slices_and_reach_the_refined_plan
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr("mutmut.configuration._config", None)
     _project(tmp_path, {})
+    (tmp_path / "scripts/sample.py").write_text("def f(a, b):\n    return a - b + 1 - 2 + 3 - 4 + 5 - 6\n")
     selected = {"scripts/sample.py": ({2}, ["tests/test_sample.py"])}
     stats = SharedStats(tmp_path / "stats", "head")
     write_part(stats.group(0).folder / "part-0.json", stats_key("head", selected), (0, 1), results)
     refined = measured.refine_plan(tmp_path, selected, stats)
     assert list(refined["splits"]) == ["scripts.sample.x_f"]
-    assert refined["assignments"] and all(len(shards) == 10 for shards in refined["assignments"].values())
+    assert len(refined["assignments"]) >= 10 and refined["shards"] == 10
+    assert all(len(shards) == 10 for shards in refined["assignments"].values())
+
+
+def test_a_change_with_fewer_mutants_than_the_limit_plans_no_more_shards_than_mutants_and_covers_every_test():
+    from scripts.ci_mutation.measured import measured_plan
+
+    nodes = [f"tests/test_sample.py::t{i:02}" for i in range(13)]
+    results = [{"tests": {"scripts.sample.x_f": nodes}, "durations": dict.fromkeys(nodes[:12], 130.0)}]
+    single = measured_plan([(["scripts.sample.x_f__mutmut_1"], results)])
+    assert single["shards"] == 1 and single["assignments"] == {"scripts.sample.x_f__mutmut_1": 0}
+    assert not single["splits"]
+    for count, shards in ((2, 2), (3, 3), (10, 10), (11, 10)):
+        names = [f"scripts.sample.x_f__mutmut_{i}" for i in range(1, count + 1)]
+        plan = measured_plan([(names, results)])
+        assert plan["shards"] == shards
+        assert all(sorted(plan["assignments"][name]) == list(range(shards)) for name in names)
+        split = plan["splits"]["scripts.sample.x_f"]
+        assert sorted([*split["head"], *(node for chosen in split["slices"] for node in chosen)]) == nodes
+    assert measured_plan([])["shards"] == 1
 
 
 def test_each_unit_runs_the_head_and_its_own_slice_and_only_on_its_shard(tmp_path, monkeypatch):
@@ -727,6 +747,32 @@ def test_main_writes_one_matrix_entry_per_shard(tmp_path, monkeypatch, capsys):
     assert "Mutation shards: 4\nStats parts: 3\n" in text
 
 
+@pytest.mark.parametrize("changed", [{}, {"scripts/sample.py": {2}}])
+def test_main_reads_the_recorded_coverage_only_when_a_module_changed(tmp_path, monkeypatch, capsys, changed):
+    _project(tmp_path, {})
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("sys.argv", ["plan", "--base", "base", "--repository", "owner/repo"])
+    monkeypatch.setenv("GITHUB_OUTPUT", str(tmp_path / "github-output"))
+    calls = []
+
+    def discover(root, bases, head):
+        calls.append(("discover", root, bases, head))
+        return changed
+
+    def record(repository):
+        calls.append(("record", repository))
+        return None, ""
+
+    monkeypatch.setattr(plan, "read_record", record)
+    monkeypatch.setattr(plan, "own_bases", lambda *args: ["base"])
+    monkeypatch.setattr(plan, "discover_changes", discover)
+    assert plan.main() == 0
+    assert calls == [("discover", tmp_path, ["base"], "HEAD"), *[("record", "owner/repo")] * bool(changed)]
+    assert f"changed={len(changed)}\n" in (tmp_path / "github-output").read_text()
+    if not changed:
+        assert "No change remains to mutate, so the recorded dev coverage is not read.\n" in capsys.readouterr().out
+
+
 @pytest.mark.parametrize("source, matched", [("sample", False), ("sample", True), ("plain", False)])
 def test_planning_refuses_an_unmatched_module_before_publishing_statistics(tmp_path, monkeypatch, source, matched):
     _project(tmp_path, {})
@@ -805,13 +851,13 @@ def test_planning_follows_selected_test_package_imports(tmp_path, monkeypatch):
     ("seconds", "timed", "shards", "parts"),
     [
         (0, {}, "[0]", "[0]"),
-        (962, dict.fromkeys("abcde", 15.24), "[0, 1, 2]", "[0, 1]"),
+        (962, dict.fromkeys("abcde", 15.24), "[0, 1, 2]", "[0]"),
         (480, {"a": 1}, "[0]", "[0]"),
         (481, {"a": 1}, "[0, 1]", "[0]"),
         (10**6, {f"t{n}": 30 for n in range(40)}, json.dumps(list(range(10))), json.dumps(list(range(10)))),
     ],
 )
-def test_main_defaults_to_origin_dev_a_two_minute_target_a_half_minute_stats_bucket_and_ten_shards(
+def test_main_defaults_to_origin_dev_a_two_minute_target_a_one_minute_stats_bucket_and_ten_shards(
     tmp_path, monkeypatch, seconds, timed, shards, parts
 ):
     monkeypatch.chdir(tmp_path)

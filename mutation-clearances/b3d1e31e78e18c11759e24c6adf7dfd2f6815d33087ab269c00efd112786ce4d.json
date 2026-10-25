@@ -1,0 +1,6 @@
+{
+  "scripts/master_claude_login.py:scripts.master_claude_login.x__token_lock__mutmut_16:73747d8799614733bdc3238817325606cf9e0a47574e04aad7ade4e186b10400": {
+    "reader": "Standards",
+    "reason": "The lock file is opened, flocked and closed without any text reads or writes, so its stream encoding is unobserved."
+  }
+}

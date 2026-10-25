@@ -195,6 +195,17 @@ def pipefail_summary(steps: list[dict]) -> list[dict]:
     return [{**step, "shell": "bash"} if step.get("name") == "Summarize this run's tests" else step for step in steps]
 
 
+def selection_diagnostic(steps: list[dict]) -> list[dict]:
+    [aggregation, *rest] = steps
+    prefix = """selection=$(jq -r '.select.result // ""' <<< "$NEEDS")
+if [[ "$selection" == failure || "$selection" == cancelled ]]; then
+  echo "::error::Test selection $selection; fix selection before downstream test and coverage checks."
+  exit 1
+fi
+"""
+    return [{**aggregation, "run": prefix + aggregation["run"]}, *rest]
+
+
 def reuse_job() -> dict:
     return yaml.safe_load(Path(__file__).with_name("ci_reuse_job.yml").read_text())
 

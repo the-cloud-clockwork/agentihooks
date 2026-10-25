@@ -10,6 +10,9 @@ from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from scripts.events import nkey
+from scripts.events.config import BACKEND_ENV, BusConfig
+from scripts.events.factory import open_bus
 from scripts.scheduler.process_timer import wait as scheduled_wait
 from scripts.swarm import holder_pod, lease, local_slots, tick_stop
 from scripts.swarm.controller_probes import HOST_SWARMS_ENV, ticked
@@ -19,6 +22,7 @@ from scripts.swarm_v2.runtime.base import HIVE_LANES
 from scripts.swarm_v2.runtime.base import LOCAL as WORKSTATION_BACKEND
 
 if TYPE_CHECKING:
+    from scripts.hive.admission import Room
     from scripts.hive.placement import Wait
     from scripts.swarm_v2.control_service import ControlService
 
@@ -140,30 +144,18 @@ class FencedRuntime:
         from scripts.swarm.commands import hive_id
 
         machine = hive_id()
-        maximum = local_slots.maximum(self.store, self.slug, self.store.config(self.slug).local_max_agents)
-        taken = (
-            local_slots.claim(self.store, machine, self.slug, task["id"], name, maximum)
-            if name
-            else local_slots.held(self.store, machine, self.slug, task["id"])
-        )
+        found, held, maximum = self._workstation_room(machine, task)
+        taken = local_slots.claim(self.store, machine, self.slug, task["id"], name, maximum) if name else held
         if taken >= maximum:
             self._local_full(machine, taken, maximum)
-            return f"{LOCAL_FULL}{taken} of its {maximum} agents"
+            return f"{LOCAL_FULL}{taken} of its {maximum} agents: {found.reason}: {found.detail}"
         if name:
             admission.record(self.store.redis, machine, f"{self.slug}/{name}")
         return ""
 
-    def _overflow(self, lane: str, task: dict, waited: "Wait", claim: str) -> str:
-        if self.deployment != HYBRID or task.get("hive") or not _workstation_herdr():
-            return waited.reason
-        from scripts.hive import admission, headroom, placement_waits, registry
-        from scripts.hive.placement import LOCAL_FULL, Choice, hosts, overflow
-        from scripts.swarm.commands import hive_id
+    def _workstation_room(self, machine: str, task: dict) -> tuple["Room", int, int]:
+        from scripts.hive import admission, headroom
 
-        machine = hive_id()
-        local = registry.show(self.store.redis, machine)
-        if local is not None and not hosts(waited.role, local, (lane,)):
-            return waited.reason
         running = local_slots.running(self.store, self.slug, task["id"])
         held = local_slots.held(self.store, machine, self.slug, task["id"])
         pending = max(0, admission.pending(self.store.redis, machine) - (held - running))
@@ -173,7 +165,20 @@ class FencedRuntime:
         )
         maximum = local_slots.maximum(self.store, self.slug, running + found.room)
         found = admission.capped(found, running, maximum)
-        local_max = min(maximum, running + found.room)
+        return found, held, min(maximum, running + found.room)
+
+    def _overflow(self, lane: str, task: dict, waited: "Wait", claim: str) -> str:
+        if self.deployment != HYBRID or task.get("hive") or not _workstation_herdr():
+            return waited.reason
+        from scripts.hive import admission, placement_waits, registry
+        from scripts.hive.placement import LOCAL_FULL, Choice, hosts, overflow
+        from scripts.swarm.commands import hive_id
+
+        machine = hive_id()
+        local = registry.show(self.store.redis, machine)
+        if local is not None and not hosts(waited.role, local, (lane,)):
+            return waited.reason
+        found, held, local_max = self._workstation_room(machine, task)
         refused = f": {found.reason}: {found.detail}"
         chosen = overflow(waited.role, waited, held, local_max)
         if not isinstance(chosen, Choice):
@@ -227,6 +232,11 @@ class FencedRuntime:
             raise SpawnError(refused, "unavailable")
         if refused and not workstation:
             raise SwarmError(refused)
+        if workstation or self.deployment == LOCAL:
+            from scripts.hive import admission
+            from scripts.swarm.commands import hive_id
+
+            admission.record(self.store.redis, hive_id(), f"{self.slug}/{name}")
         with lease.kept(self.store, self.slug, self.held):
             runtime = self.runtime
             if workstation:
@@ -428,6 +438,24 @@ def tick_once(store: RedisStore, service: "ControlService | None") -> dict:
     return run_once(store, runtimes={service.controller.slug: service.runtime})
 
 
+def bus_user(credentials: str | None) -> str:
+    return nkey.claims(nkey.parse_creds(credentials)[0])["name"] if credentials else "anonymous"
+
+
+def open_controller_bus(environ: Mapping[str, str], opener=open_bus):
+    if environ.get(BACKEND_ENV) != "nats":
+        return None
+    try:
+        config = BusConfig.from_environ(environ)
+        user = bus_user(config.credentials)
+        bus = opener(replace(config, provision=False))
+    except Exception as exc:
+        print(f"controller: bus nats refused: {exc}", file=sys.stderr, flush=True)
+        return None
+    print(f"controller: bus nats at {config.url} as {user}", flush=True)
+    return bus
+
+
 def _stopped(*_) -> None:
     # The pod grace period can end before the tick's finally reaches its release.
     tick_stop.STOP.set()
@@ -457,6 +485,7 @@ def main(argv: list[str]) -> int:
     operator_env.classifier(os.environ)
     store = connect()
     service = None
+    bus = open_controller_bus(os.environ)
     previous = signal.signal(signal.SIGTERM, _stopped)
     try:
         proof_swarm.run(os.environ, store)
@@ -477,4 +506,6 @@ def main(argv: list[str]) -> int:
     finally:
         if service is not None:
             service.stop()
+        if bus is not None:
+            bus.close()
         signal.signal(signal.SIGTERM, previous)

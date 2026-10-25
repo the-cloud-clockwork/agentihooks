@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 
 from scripts import openbao_kv
 from scripts.hive import auth, machine, nats_grant, registry
+from scripts.swarm.keyspace import ROOT
 
 if TYPE_CHECKING:
     from redis import Redis
@@ -22,6 +23,12 @@ ORDER = (
     "The operator is removing hive {hive}, which runs you. Finish the step you are on, then hand off with the "
     "handoff skill: run agentihooks swarm {slug} handoff <doc> --reason operator and stop. The runtime starts your "
     "successor on another hive."
+)
+ROLL = (
+    "Hive {hive}, which runs you, is stopping for a release and takes no new agents. Finish the step you are on, then "
+    "hand off with the handoff skill even while you wait on checks, a merge or a reply, naming that wait under Next: "
+    "run agentihooks swarm {slug} handoff <doc> --reason operator and stop. The runtime starts your successor on "
+    "another hive."
 )
 MANIFESTS = (
     "k8s/argocd/apps/agentihooks-hive-{label}.yaml",
@@ -75,10 +82,7 @@ def drain(store: "RedisStore", plan: Plan, host: Host) -> list[str]:
     inbox, ordered = InboxStore(store.redis), set()
     deadline = host.clock() + plan.wait_s
     while remaining := hosted(store, plan.hive):
-        for slug, agent in remaining:
-            if (slug, agent.name) not in ordered:
-                inbox.send(SENDER, agent.seat or agent.name, ORDER.format(hive=plan.hive, slug=slug))
-                ordered.add((slug, agent.name))
+        _order(inbox, ordered, remaining, ORDER, plan.hive)
         if host.clock() >= deadline:
             names = ", ".join(agent.name for _, agent in remaining)
             raise auth.HiveError(
@@ -89,17 +93,28 @@ def drain(store: "RedisStore", plan: Plan, host: Host) -> list[str]:
     return [f"drained {plan.hive}: {len(ordered)} agents handed off"]
 
 
+def _order(inbox, ordered: set, remaining: list[tuple[str, "AgentRecord"]], text: str, hive: str) -> None:
+    for slug, agent in remaining:
+        if (slug, agent.name) not in ordered:
+            inbox.send(SENDER, agent.seat or agent.name, text.format(hive=hive, slug=slug))
+            ordered.add((slug, agent.name))
+
+
 def settle(store: "RedisStore", hive: str, wait_s: int, host: Host) -> str:
+    from scripts.inbox.store import InboxStore
+
     if registry.show(store.redis, hive) is None:
         raise auth.HiveError(f"hive {hive} has no record to drain")
     registry.update(store.redis, hive, ["draining=yes"])
+    inbox, ordered = InboxStore(store.redis), set()
     deadline = host.clock() + wait_s
     while remaining := hosted(store, hive):
+        _order(inbox, ordered, remaining, ROLL, hive)
         if host.clock() >= deadline:
             names = ", ".join(agent.name for _, agent in remaining)
             return f"hive {hive} stops after {wait_s} seconds with {names} still running"
         host.sleep(POLL_S)
-    return f"hive {hive} drained: no agents running"
+    return f"hive {hive} drained: no agents running, {len(ordered)} ordered to hand off"
 
 
 def revoke(redis: "Redis", hive: str, signer: "nats_grant.Signer | None" = None) -> list[str]:
@@ -112,10 +127,18 @@ def revoke(redis: "Redis", hive: str, signer: "nats_grant.Signer | None" = None)
 
 def forget(redis: "Redis", hive: str) -> list[str]:
     keys = [registry.key(hive), *redis.scan_iter(match=f"{registry.key(hive)}:*")]
+    prefix = f"{registry.key(hive)}:swarm:"
+    histories = {
+        f"{ROOT}:swarm:{source.removeprefix(prefix)}": redis.hgetall(source)
+        for source in keys
+        if source.startswith(prefix) and ":wait-history:" in source
+    }
     with redis.pipeline() as pipe:
+        for target, history in histories.items():
+            pipe.hset(target, mapping=history)
         pipe.delete(*keys)
         pipe.srem(registry.INDEX, hive)
-        deleted, _ = pipe.execute()
+        deleted, _ = pipe.execute()[-2:]
     return [f"deleted {deleted} registry records of {hive}"]
 
 

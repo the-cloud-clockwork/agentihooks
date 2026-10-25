@@ -262,6 +262,25 @@ def test_an_unreadable_log_beside_a_step_exit_is_not_a_runner_loss(monkeypatch):
     assert not ci_queue_retry.decide(RUN, failed, WORKFLOW)[0]
 
 
+@pytest.mark.parametrize("unreadable", [False, True])
+@pytest.mark.parametrize("loss", ["", "The runner has received a shutdown signal."])
+def test_a_step_timeout_is_not_retried_even_with_a_loss_signature(monkeypatch, unreadable, loss):
+    timeout = "The action 'Run tests' has timed out after 12 minutes."
+    api = unreadable_log_api("failure", [timeout, loss])
+
+    def read(path, *flags):
+        if not unreadable and path.endswith("/logs"):
+            return f"##[error]{timeout}\n##[error]{loss}"
+        return api(path, *flags)
+
+    monkeypatch.setattr(ci_queue_retry, "_api", read)
+    failed = ci_queue_retry.failed_jobs("o/r", 9)
+    assert ci_queue_retry.decide(RUN, failed, WORKFLOW) == (
+        False,
+        "failed without a runner loss signature: unit (3.12, 13)",
+    )
+
+
 def cancelled_run_pages(lost_log):
     jobs = {
         "total_count": 4,

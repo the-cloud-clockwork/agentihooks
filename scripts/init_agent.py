@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any, NamedTuple
 
 from scripts import agent_choice, claude_trust, gh_config, herdr_host, herdr_panes, operator_env
-from scripts.swarm import effort_range
+from scripts.swarm import brain_binding, effort_range
 from scripts.targets.codex_target import codex_home, restore_hook_order
 
 
@@ -94,6 +94,7 @@ class AgentSpec:
     transport: str = ""
     seat: str = ""
     previous_execution: str = ""
+    execution: str = ""
     title: str = ""
     home: str = ""
 
@@ -148,6 +149,7 @@ SWARM_IDENTITY = (
     "AGENTIHOOKS_SWARM_AUTONOMY",
     "AGENTIHOOKS_SWARM_LAUNCHER",
     "AGENTIHOOKS_CLAIM_FENCE",
+    brain_binding.VARIABLE,
     effort_range.VARIABLE,
 )
 
@@ -212,6 +214,17 @@ def _launch_environ(environ: dict[str, str], name: str, handoff: bool) -> dict[s
         if gateway:
             launch_env["MCP_KEY_GATEWAY"] = gateway
     return launch_env
+
+
+def _bind_brain(environ: dict[str, str]) -> None:
+    # The profile renderer reads the binding from the process environment.
+    if not environ.get("AGENTIHOOKS_SWARM"):
+        os.environ.pop(brain_binding.VARIABLE, None)
+        environ.pop(brain_binding.VARIABLE, None)
+        return
+    # A herdr pane gets credentials only from the env files its launcher sources.
+    decided = brain_binding.decide(environ, operator_env.values(environ))
+    environ[brain_binding.VARIABLE] = os.environ[brain_binding.VARIABLE] = json.dumps(decided, sort_keys=True)
 
 
 def _with_predecessor(environ: dict[str, str], handoff: bool) -> dict[str, str]:
@@ -374,6 +387,7 @@ def _app_server_command(
         "--report",
         str(report),
         *(["--previous-execution", spec.previous_execution] if spec.previous_execution else []),
+        *(["--execution", spec.execution] if spec.execution else []),
         *(["--resume", spec.resume] if spec.resume else []),
         *(["--prompt-file", str(opening)] if opening else []),
         "--",
@@ -524,6 +538,7 @@ def _write_launcher(
         f"{_swarm_exports(environ)}"
         f"{langfuse_export}"
         f"{_binding_export(environ)}"
+        f"{brain_binding.exports(environ)}"
         f"sleep {LAUNCH_GRACE_S}\n"
         f"{before}{command_text}\n"
         "native_status=$?\n"
@@ -624,6 +639,21 @@ def _binding_result(environ: dict[str, str], timeout: float, route: dict) -> lis
         f"profile_binding={json.dumps(result, separators=(',', ':'))}",
         *(f"{key}={result[key]}" for key in ("model", "effort") if result.get(key)),
     ]
+
+
+def _binding_deferred(environ: dict[str, str]) -> list[str]:
+    from scripts.profiles import binding
+
+    if not environ.get(binding.REPORT):
+        return []
+    return ["profile_validation=pending", f"profile_report={environ[binding.REPORT]}"]
+
+
+def _profile_canary(args, agent: str, environ: dict[str, str], launch, route: dict) -> list[str]:
+    if args.defer_canary and (deferred := _binding_deferred(environ)):
+        return deferred
+    canary = CANARY_TIMEOUT_S[agent] if args.canary_timeout is None else args.canary_timeout
+    return launch.run("profile canary", canary, lambda seconds: _binding_result(environ, seconds, route))
 
 
 def _selection_refused(environ: dict[str, str]) -> bool:
@@ -762,6 +792,12 @@ def _parser() -> argparse.ArgumentParser:
         help="Seconds to wait for the new session to run its profile canary; default 120 for Claude, 90 for Codex",
     )
     parser.add_argument(
+        "--defer-canary",
+        action="store_true",
+        help="Return once the session is routed and print its pending profile validation request for the caller "
+        "to confirm later",
+    )
+    parser.add_argument(
         "--handoff",
         action="store_true",
         help="Quota handoff: route to an account other than this session's, never fall back to bare "
@@ -802,6 +838,7 @@ def _parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--seat", default="", help="Codex app-server: the swarm seat this execution occupies")
     parser.add_argument("--previous-execution", default="", help="Codex app-server: the execution this launch replaces")
+    parser.add_argument("--execution", default="", help="Codex app-server: the admitted execution this launch serves")
     parser.add_argument(
         "--inbox-channel",
         action="store_true",
@@ -951,9 +988,18 @@ def _codex_named(environ: dict[str, str], name: str, since: float) -> Callable[[
     return named
 
 
+def _launch_seconds(args) -> float:
+    from scripts.master_login_chain import BUDGET
+
+    if args.agent in ("", "claude") and _flag_value(args.claude_args, ("--route",)) == "master-login":
+        args.route_timeout = max(args.route_timeout, BUDGET.route)
+        return BUDGET.launch
+    return LAUNCH_DEADLINE_S
+
+
 def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -> int:
     args = _parser().parse_args(argv)
-    launch = LaunchDeadline(LAUNCH_DEADLINE_S)
+    launch = LaunchDeadline(_launch_seconds(args))
     active_env = dict(os.environ if environ is None else environ)
     active_env.pop("AGENTIHOOKS_PROFILE_REPORT", None)
     operator_env.fill(active_env)
@@ -975,6 +1021,7 @@ def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -
             exclude = _handoff_exclude(agent, active_env)
             if not prompt:
                 raise ValueError("--handoff needs the handoff document as --prompt-file")
+        _bind_brain(active_env)
         claude_args = _prepare_profile(args, agent, claude_args, active_env)
         claude_args = effort_range.launch_args(agent, claude_args, active_env)
         if not args.dry_run:
@@ -1004,6 +1051,7 @@ def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -
                 transport=_transport(args, agent),
                 seat=args.seat,
                 previous_execution=args.previous_execution,
+                execution=args.execution,
                 title=args.title,
                 home=_recorded_home(agent, active_env),
             ),
@@ -1026,6 +1074,7 @@ def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -
         f"claude_args={shlex.join(claude_args)}",
         f"launcher={launcher}",
         f"prompt_file={prompt_file or 'none'}",
+        *brain_binding.report(active_env),
         *(f"{k}={v}" for k, v in zip(("model", "effort"), model_effort(agent, claude_args, active_env))),
     ]
     if args.dry_run:
@@ -1127,8 +1176,7 @@ def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -
         return 3
     try:
         _route_reported(active_env, args.route_timeout, route)
-        canary = CANARY_TIMEOUT_S[agent] if args.canary_timeout is None else args.canary_timeout
-        report += launch.run("profile canary", canary, lambda seconds: _binding_result(active_env, seconds, route))
+        report += _profile_canary(args, agent, active_env, launch, route)
     except (OSError, ValueError) as exc:
         print("\n".join([*report, "profile_validation=failed"]))
         print(f"agentihooks init-agent: {exc}", file=sys.stderr)

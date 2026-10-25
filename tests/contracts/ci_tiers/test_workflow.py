@@ -23,7 +23,7 @@ UNIT = {DURATION_JOB, "split", "unit", "shard-check", "test-count", "gate-requir
 QUEUE = UNIT | {"queue-fail-fast"}
 PULL_REQUEST = (
     UNIT
-    | {"select", "lint", "semgrep", "sonar", "mutation-plan", "mutation-stats", "mutation"}
+    | {"select", "lint", "semgrep", "sonar", "mutation-plan", "mutation-stats", "mutation", "writer-lock"}
     | ({"docs"} if "docs" in yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())["jobs"] else set())
 )
 SELECTED = PULL_REQUEST - {"split", "unit", "shard-check"} | {"unit-selected"}
@@ -136,7 +136,11 @@ def test_the_retired_queue_baseline_leaves_the_workflow_and_the_gate_takes_the_p
         finish(
             rerun(
                 ci_reuse.inline_mutation(
-                    ci_reuse.gate_steps(queue_tier=True, promotion=True, **options, summary=summary, watcher_loss=True)
+                    ci_reuse.postgres_required(
+                        ci_reuse.gate_steps(
+                            queue_tier=True, promotion=True, **options, summary=summary, watcher_loss=True
+                        )
+                    )
                 )
             )
         )
