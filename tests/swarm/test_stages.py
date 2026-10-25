@@ -441,7 +441,8 @@ def test_adjacent_host_and_quota_holds_stay_apart_and_empty_samples_hold_nothing
     assert seconds_of(found) == {("host_hold", ""): 300.0, ("quota_hold", ""): 300.0, ("seat_wait", ""): 3000.0}
 
 
-def test_holds_separated_by_a_sample_gap_do_not_cover_the_gap():
+def test_holds_separated_by_a_sample_gap_do_not_cover_the_gap(monkeypatch):
+    monkeypatch.setattr(stages.bottleneck, "SAMPLE_GAP_MS", 5 * 60_000)
     found = stages.report(
         rows(
             ledger_events=[ledger("task done", at(7), "tasks/t0")],
