@@ -1,3 +1,4 @@
+import hashlib
 import json
 from dataclasses import replace
 
@@ -579,6 +580,13 @@ def test_the_window_counts_from_its_first_millisecond(swarm):
     assert (marks["elapsed_minutes"], marks["remaining_minutes"]) == ("0", "720")
 
 
+def test_the_report_clamps_before_the_start_and_after_the_end():
+    before = run_window.report(WINDOW, START - 90 * MINUTE)
+    after = run_window.report(WINDOW, END + 90 * MINUTE)
+    assert (before["elapsed_minutes"], before["remaining_minutes"]) == (0, 720)
+    assert (after["elapsed_minutes"], after["remaining_minutes"]) == (810, 0)
+
+
 def test_a_finished_agent_is_not_in_flight(swarm):
     store, _ = swarm
     store.put_agent(SLUG, AgentRecord(OWNER, "eng", "t1", seat="eng-1@sw", started_at=START, state="finished"))
@@ -592,7 +600,8 @@ def test_the_watchdog_item_carries_the_window_ref(swarm):
     store, ledger = swarm
     _step(store, ledger, END)
     [item] = InboxStore(store.redis).inbox("master-watchdog")
-    assert item.ref == f"sw:run-window:final:{START}-{END}"
+    ref = f"sw:run-window:final:{START}-{END}"
+    assert (item.ref, item.task, item.id) == (ref, "", hashlib.sha256(ref.encode()).hexdigest()[:12])
 
 
 def test_an_untitled_task_and_an_empty_cutoff_read_plainly(swarm):

@@ -110,8 +110,8 @@ def report(window: dict, now_ms: int) -> dict:
     return {
         "start": doc_report.utc(start),
         "end": doc_report.utc(end),
-        "elapsed_minutes": max(0, now_ms - start) // MINUTE_MS,
-        "remaining_minutes": max(0, end - max(now_ms, start)) // MINUTE_MS,
+        "elapsed_minutes": max(0, (now_ms - start) // MINUTE_MS),
+        "remaining_minutes": max(0, (end - max(now_ms, start)) // MINUTE_MS),
     }
 
 
