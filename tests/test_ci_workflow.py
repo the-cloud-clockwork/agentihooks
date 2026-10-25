@@ -653,8 +653,12 @@ def test_equivalence_runs_on_every_ledger_pull_request_without_a_body_marker():
     assert all("pull_request.body" not in str(step.get("if", "")) for step in job["steps"])
     [head] = [step for step in job["steps"] if step.get("with", {}).get("path") == "head"]
     assert "ref" not in head["with"]
-    paths = workflow[True]["pull_request"]["paths"]
-    assert {"scripts/swarm_ledger/**", "tests/swarm_ledger/**"} <= set(paths)
+    assert "paths" not in workflow[True]["pull_request"]
+    reach = next(step for step in job["steps"] if step.get("id") == "reach")
+    assert reach["run"] == 'python -m scripts.ci_equivalence_trigger "$BASE" HEAD'
+    assert job["steps"].index(head) < job["steps"].index(reach)
+    later = job["steps"][job["steps"].index(reach) + 1 :]
+    assert all("steps.reach.outputs.run == 'true'" in step.get("if", "") for step in later)
 
 
 @pytest.mark.parametrize("doc", ["README.md", "index.md"])
