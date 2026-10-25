@@ -94,6 +94,7 @@ def test_doctor_run_and_check_reads_share_the_cache_and_charge_only_fetches(monk
     calls = []
 
     def gh(argv, **kwargs):
+        assert kwargs == {"capture_output": True, "text": True, "check": True, "timeout": 60}
         endpoint = argv[2]
         calls.append(endpoint)
         if "/pulls/" in endpoint:
@@ -111,6 +112,8 @@ def test_doctor_run_and_check_reads_share_the_cache_and_charge_only_fetches(monk
     assert ci_read.pull_request("o/r", 487, run=gh)["checks"][0]["conclusion"] == "failure"
     assert len(calls) == 7
     assert github_reads.counts(0, clock[0] + 1) == {"doctor.ci": 7}
+    rows = [json.loads(line) for line in (github_reads.home() / "charged.jsonl").read_text().splitlines()]
+    assert [row["endpoint"] for row in rows] == calls
 
 
 @pytest.mark.parametrize("current_red", [False, True], ids=["fresh-head-without-checks", "red-current-head"])
@@ -244,6 +247,7 @@ def test_job_logs_survive_attempt_cache_loss_and_concurrent_collectors(monkeypat
     starting = Barrier(2)
 
     def gh(argv, **kwargs):
+        assert kwargs == {"capture_output": True, "text": True, "check": True, "timeout": 60}
         endpoint = argv[2]
         calls.append(endpoint)
         if "/attempts/" in endpoint:
@@ -279,9 +283,12 @@ def test_retained_logs_follow_the_gh_account_without_preference_invalidation(mon
     monkeypatch.delenv("GH_TOKEN", raising=False)
     monkeypatch.delenv("GITHUB_TOKEN", raising=False)
     account = ["first-user"]
+    host = ["github.com"]
+    monkeypatch.delenv("GH_HOST", raising=False)
 
     def identity(command, **kwargs):
-        assert command == ["gh", "config", "get", "user", "--host", "github.com"]
+        assert command == ["gh", "config", "get", "user", "--host", host[0]]
+        assert kwargs == {"capture_output": True, "text": True, "check": True, "timeout": 5}
         return subprocess.CompletedProcess(command, 0, account[0], "")
 
     monkeypatch.setattr(github_reads.subprocess, "run", identity)
@@ -290,7 +297,7 @@ def test_retained_logs_follow_the_gh_account_without_preference_invalidation(mon
     preferences = config / "config.yml"
     preferences.touch()
     endpoint = "repos/o/r/actions/jobs/1/logs"
-    logs = iter(["first", "second"])
+    logs = iter(["first", "second", "enterprise"])
     assert github_reads.job_log(endpoint, lambda: next(logs)) == "first"
     preferences.unlink()
     preferences.touch()
@@ -298,6 +305,13 @@ def test_retained_logs_follow_the_gh_account_without_preference_invalidation(mon
     account[0] = "second-user"
     assert github_reads.job_log(endpoint, lambda: next(logs)) == "second"
     assert github_reads.job_log(endpoint, lambda: next(logs)) == "second"
+
+    host[0] = "github.example"
+    monkeypatch.setenv("GH_HOST", host[0])
+    assert github_reads.job_log(endpoint, lambda: next(logs)) == "enterprise"
+    account[0] = ""
+    with pytest.raises(ValueError, match="^GitHub account identity is unavailable$"):
+        github_reads.job_log(endpoint, lambda: next(logs))
 
 
 def test_attempt_reader_downloads_only_completed_unskipped_jobs():

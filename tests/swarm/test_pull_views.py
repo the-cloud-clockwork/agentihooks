@@ -173,6 +173,9 @@ def test_tick_rollups_share_reads_until_expiry_but_merge_reads_stay_fresh(monkey
     assert len(calls) == 3
     assert github_reads.counts(0, clock[0] + 1) == {"swarm.checks": 2, "swarm.checks.fresh": 1}
 
+    rows = [json.loads(line) for line in (github_reads.home() / "charged.jsonl").read_text().splitlines()]
+    assert [row["endpoint"] for row in rows] == ["graphql"] * 3
+
 
 def test_unavailable_shared_snapshot_storage_keeps_live_rollups_readable(monkeypatch, tmp_path):
     import fakeredis

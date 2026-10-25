@@ -163,3 +163,37 @@ def test_counts_skip_unreadable_lines(actions, clock):  # noqa: F811
 
 def test_counts_are_empty_before_any_charged_request():
     assert github_reads.counts(0, 2_000) == {}
+
+
+def test_nested_cache_home_retains_runs_snapshots_and_caller_counts(monkeypatch, tmp_path):
+    for reader in ("run", "snapshot", "charge"):
+        monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path / reader / "nested" / "state"))
+        if reader == "charge":
+            github_reads.charge("doctor.ci", "jobs", 1_000)
+            assert github_reads.counts(0, 1_001) == {"doctor.ci": 1}
+        else:
+            calls = []
+            payload = {"status": "in_progress", "head": "first"}
+
+            def fetch():
+                calls.append(1)
+                return payload
+
+            read = getattr(github_reads, reader)
+            assert read("first", 1_000, fetch) == payload
+            assert read("first", 1_001, fetch) == payload
+            assert len(calls) == 1
+
+
+def test_snapshots_keep_distinct_resources_and_retry_partial_results(monkeypatch, tmp_path):
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
+    responses = iter([{"pull": "first"}, {"pull": "second"}, {"pull": None}, {"pull": "recovered"}])
+
+    def fetch():
+        return next(responses)
+
+    assert github_reads.snapshot("first", 1_000, fetch) == {"pull": "first"}
+    assert github_reads.snapshot("second", 1_000, fetch) == {"pull": "second"}
+    assert github_reads.snapshot("first", 1_001, fetch) == {"pull": "first"}
+    assert github_reads.snapshot("partial", 1_000, fetch) == {"pull": None}
+    assert github_reads.snapshot("partial", 1_001, fetch) == {"pull": "recovered"}
