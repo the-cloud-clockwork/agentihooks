@@ -213,7 +213,7 @@ def test_receiver_reads_keep_delivery_seats_and_exited_occupants(redis, state, c
         {"address": name, "history": []},
     ]
     assert read.inbox_receivers(store, box, SLUG, items) == {
-        seat: Receiver(seat_wait=waiting),
+        seat: Receiver(seat_wait=waiting, bound_at=10),
         taker: Receiver(seat_wait=waiting),
         name: Receiver(live=True, occupant=name, harness="codex", task="t1"),
     }

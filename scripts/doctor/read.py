@@ -106,7 +106,7 @@ def inbox_receivers(store, inbox, slug, items):
             if key and key not in found:
                 agent = agents.get(resolved[name])
                 found[key] = _inbox_receiver(key, agent, occupancies.get(key), departed, configs)
-                if found[key].live and key in bound:
+                if key in bound:
                     found[key] = replace(found[key], bound_at=bound[key])
     return found
 
