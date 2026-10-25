@@ -1,0 +1,6 @@
+{
+  "scripts/doctor/loop.py:scripts.doctor.loop.x__crossings__mutmut_3:2d93909412ad779061db737a6fc6da3a0d7cbed7e9e86d233d3636265d6467c4": {
+    "reader": "Standards",
+    "reason": "Independent Standards symbol ruling after CI run 40121088069: group forwards since_ms only to _wait, whose body never reads that argument. Replacing it with None changes no evaluated operation, finding, grouping or output."
+  }
+}
