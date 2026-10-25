@@ -1,6 +1,6 @@
 import json
+from dataclasses import replace
 
-import fakeredis
 import pytest
 
 from scripts.doctor import ci_speed, loop
@@ -41,6 +41,8 @@ def grouped(kind, values, offset=0):
     ],
 )
 def test_established_ci_classes_return_only_for_numeric_growth(kind, values, returns):
+    import fakeredis
+
     store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
     first = grouped(kind, [900, 900, 1000])
     loop.record(store, "doctor", [first], NOW, MINUTE_MS)
@@ -53,6 +55,8 @@ def test_established_ci_classes_return_only_for_numeric_growth(kind, values, ret
 
 @pytest.mark.parametrize("kind", ["ci runner wait", "ci tier wall time"])
 def test_existing_ci_verdicts_use_their_recorded_numeric_baseline(kind):
+    import fakeredis
+
     store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
     first = grouped(kind, [900, 900, 1000])
     loop.record(store, "doctor", [first], NOW, MINUTE_MS)
@@ -64,3 +68,39 @@ def test_existing_ci_verdicts_use_their_recorded_numeric_baseline(kind):
     store.redis.hset(judgments.key, first.id, json.dumps(record))
     assert loop.record(store, "doctor", [grouped(kind, [800, 800, 1054], 10)], NOW + MINUTE_MS, MINUTE_MS) == []
     assert loop.record(store, "doctor", [grouped(kind, [901, 901, 1000], 20)], NOW + 2 * MINUTE_MS, MINUTE_MS)
+
+
+@pytest.mark.parametrize("kind", ["ci runner wait", "ci tier wall time"])
+def test_numeric_ci_baselines_survive_display_changes(kind):
+    import fakeredis
+
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    first = replace(grouped(kind, [900, 900, 1000]), evidence=("CI class timing",))
+    loop.record(store, "doctor", [first], NOW, MINUTE_MS)
+    verdict = loop.verdicts(store, "doctor").judge(first.id, "established", "known", "master", NOW)
+    assert verdict["metrics"] == [1000, 900]
+    changed = replace(grouped(kind, [901, 901, 1000], 10), evidence=("New display",))
+    assert loop.record(store, "doctor", [changed], NOW + MINUTE_MS, MINUTE_MS)
+
+
+@pytest.mark.parametrize("kind", ["ci runner wait", "ci tier wall time"])
+def test_non_established_ci_classes_keep_existing_return_behavior(kind):
+    import fakeredis
+
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    first = grouped(kind, [900, 900, 1000])
+    loop.record(store, "doctor", [first], NOW, MINUTE_MS)
+    loop.verdicts(store, "doctor").judge(first.id, "early-real", "watch", "master", NOW)
+    assert loop.record(store, "doctor", [grouped(kind, [800, 800, 1054], 10)], NOW + MINUTE_MS, MINUTE_MS)
+
+
+@pytest.mark.parametrize("kind", ["ci runner wait", "ci tier wall time"])
+def test_legacy_ci_verdict_without_a_median_can_return_for_worst_growth(kind):
+    import fakeredis
+
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    first = replace(grouped(kind, [900, 900, 1000]), metrics=(), evidence=("Legacy timing",))
+    loop.record(store, "doctor", [first], NOW, MINUTE_MS)
+    loop.verdicts(store, "doctor").judge(first.id, "established", "known", "master", NOW)
+    assert loop.record(store, "doctor", [grouped(kind, [800, 800, 1054], 10)], NOW + MINUTE_MS, MINUTE_MS) == []
+    assert loop.record(store, "doctor", [grouped(kind, [800, 800, 1201], 20)], NOW + 2 * MINUTE_MS, MINUTE_MS)
