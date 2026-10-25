@@ -1,4 +1,3 @@
-import itertools
 import json
 import re
 import subprocess
@@ -25,21 +24,27 @@ def reset_wait() -> float:
     return min(MAX_WAIT, max(1.0, reset - time.time() + 1))
 
 
+def _run(args: list[str], timeout: float, text: bool) -> subprocess.CompletedProcess:
+    global calls
+    calls += 1
+    return subprocess.run(["gh", "api", *args], capture_output=True, check=True, timeout=timeout, text=text)
+
+
 def gh_api(args: list[str], *, timeout: float, text: bool = False) -> subprocess.CompletedProcess:
-    global calls, slept
-    for waited in itertools.count():
-        calls += 1
+    global slept
+    for _ in range(WAITS):
         try:
-            return subprocess.run(["gh", "api", *args], capture_output=True, check=True, timeout=timeout, text=text)
+            return _run(args, timeout, text)
         except subprocess.CalledProcessError as error:
             stderr = str(error.stderr)
             left = MAX_WAIT - slept if deadline is None else min(MAX_WAIT - slept, deadline - time.monotonic())
-            if waited == WAITS or left <= 0 or not LIMITED.search(stderr):
+            if left <= 0 or not LIMITED.search(stderr):
                 raise
             wait = min(left, SECONDARY_WAIT if "secondary" in stderr.lower() else reset_wait())
             print(f"GitHub API rate limit reached; waiting {wait:.0f} seconds for the reset", file=sys.stderr)
             time.sleep(wait)
             slept += wait
+    return _run(args, timeout, text)
 
 
 def report(name: str) -> None:
