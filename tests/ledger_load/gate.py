@@ -469,14 +469,18 @@ def measured(folder: Path) -> list[str]:
 
 
 def budgets(source: str) -> dict:
-    found = {
-        node.targets[0].id: ast.literal_eval(node.value)
+    assigned = {
+        node.targets[0].id: node.value
         for node in ast.parse(source).body
-        if isinstance(node, ast.Assign)
-        and len(node.targets) == 1
-        and isinstance(node.targets[0], ast.Name)
-        and node.targets[0].id in BUDGETS
+        if isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name)
     }
+    if isinstance(table := assigned.get("BUDGETS"), ast.Dict):
+        picks = {ast.literal_eval(key): pick.id for key, pick in zip(table.keys, table.values)}
+        if loosened := sorted(
+            name for name, pick in picks.items() if name not in BUDGETS or BUDGETS[name].__name__ != pick
+        ):
+            sys.exit(f"the head drops or flips the base budget pick of {', '.join(loosened)}")
+    found = {name: ast.literal_eval(value) for name, value in assigned.items() if name in BUDGETS}
     legacy = {"RESOURCE_WARMUP_S": 20, "RESOURCE_WINDOW_S": 60, "THREAD_GROWTH": 8, "RSS_GROWTH_KIB": 65_536}
     if not set(legacy).intersection(found):
         found.update(legacy)
