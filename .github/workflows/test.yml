@@ -1588,7 +1588,7 @@ jobs:
       - name: Check every collected test ran in exactly one shard
         env:
           REUSED: ${{ hashFiles('reused-plan/reused-tests.json') != '' && '--reused reused-plan/reused-tests.json' || '' }}
-        run: python -m tests.shard_check shard-durations/*/durations.json --collected collected-data/collected.json $REUSED
+        run: python3 -m tests.shard_check shard-durations/*/durations.json --collected collected-data/collected.json $REUSED
 
       - name: Summarize reused, ran and flaky tests
         if: ${{ !cancelled() }}
@@ -1597,14 +1597,14 @@ jobs:
           PYTHON_VERSION: ${{ matrix.python-version }}
           PLAN: reused-plan/reused-tests.json
         run: |
-          python -m tests.shard_summary --version "$PYTHON_VERSION" --durations shard-durations/*/durations.json \
+          python3 -m tests.shard_summary --version "$PYTHON_VERSION" --durations shard-durations/*/durations.json \
             --collected collected-data/collected.json --plan "$PLAN" --flakes shard-flakes/*/flakes.jsonl | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: Check every shard's test time fits the Run tests deadline
         if: github.event_name != 'merge_group'
         env:
           REPORT: ${{ github.event_name == 'push' && '--report' || '' }}
-        run: python -m tests.shard_budget $REPORT shard-durations/*/durations.json
+        run: python3 -m tests.shard_budget $REPORT shard-durations/*/durations.json
 
   sonar:
     if: ${{ !cancelled() && needs.select.result == 'success' && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && github.event_name != 'merge_group' }}
