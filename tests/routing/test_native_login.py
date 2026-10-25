@@ -8,11 +8,19 @@ import pytest
 from scripts.routing import envs, native_login
 
 
-@pytest.mark.parametrize("payload", ["Login: Expired — log in again", "API key: managed key", ""])
+@pytest.mark.parametrize(
+    "payload", ["Login: Expired — log in again", "API key: managed key", "", "Login method: Console account"]
+)
 def test_invalid_native_login_is_refused(payload):
     run = Mock(return_value=SimpleNamespace(returncode=0, stdout=payload))
     with pytest.raises(native_login.LoginError, match="native Claude login is expired or missing"):
         native_login.check({}, "master", run)
+
+
+@pytest.mark.parametrize("method", ["Claude account", "Claude Max account", "Claude Pro account"])
+def test_claude_subscription_login_methods_pass(method):
+    run = Mock(return_value=SimpleNamespace(returncode=0, stdout=f"Login method: {method}\nEmail: private"))
+    assert native_login.check({}, "master", run) == native_login.PROOF
 
 
 @pytest.mark.parametrize("failure", [OSError("missing"), subprocess.TimeoutExpired("claude", 30)])

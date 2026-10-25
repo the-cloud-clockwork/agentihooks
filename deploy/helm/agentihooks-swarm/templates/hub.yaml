@@ -42,6 +42,10 @@ spec:
             {{- include "swarm.env" (dict "root" . "role" "controller") | nindent 12 }}
             - name: AGENTIHOOKS_BUS
               value: {{ $hub.bus.backend | quote }}
+            {{- if $hub.bus.scoped }}
+            - name: AGENTIHOOKS_BUS_SCOPED
+              value: "1"
+            {{- end }}
             {{- with $busUrl }}
             - name: AGENTIHOOKS_BUS_URL
               value: {{ . | quote }}
