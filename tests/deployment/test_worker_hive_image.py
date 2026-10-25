@@ -18,7 +18,7 @@ pytestmark = pytest.mark.unit
 ROOT = Path(__file__).resolve().parents[2]
 PROOF = ROOT / "deploy/worker/kind-proof.sh"
 CURRENT = ROOT / "deploy/worker/base-current.sh"
-REVISION = ROOT / "deploy/worker/base-revision.py"
+REVISION = ROOT / "scripts/swarm_v2/worker_base_revision.py"
 BASE = "ghcr.io/the-cloud-clockwork/agentihooks-worker:dev"
 PINNED = "ghcr.io/the-cloud-clockwork/agentihooks-worker@sha256:amd64"
 INPUTS = "docker/swarm-node scripts/swarm_v2/worker_image.py profiles docs/swarm-v2/schemas"
@@ -166,7 +166,7 @@ def test_base_inputs_cover_every_base_source_the_wheel_does_not_replace():
 def test_base_is_current_when_its_inputs_match_the_published_revision(tmp_path):
     status, commands, _, pinned = judge(tmp_path)
     assert status == 0
-    assert commands[0] == f"python3 base-revision.py {BASE}"
+    assert commands[0] == f"python3 worker_base_revision.py {BASE}"
     assert not any(command.startswith("docker ") for command in commands)
     assert "git fetch -q --depth=1 origin rev123" in commands
     assert commands[-1] == f"git diff --quiet rev123 HEAD -- {INPUTS}"

@@ -7,7 +7,7 @@ undetermined() {
   echo "::warning title=Worker hive base::$1; rebuilding the worker base"
   exit 2
 }
-found="$(python3 "$(dirname "$0")/base-revision.py" "$base")" \
+found="$(python3 scripts/swarm_v2/worker_base_revision.py "$base")" \
   || undetermined "the published worker base revision cannot be read"
 read -r image revision <<< "$found"
 git fetch -q --depth=1 origin "$revision" \

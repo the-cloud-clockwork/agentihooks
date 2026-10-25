@@ -2211,7 +2211,7 @@ The hive layer builds its wheel from the GitHub ref named by `AGENTIHOOKS_REF`. 
 
 Before building, the script runs `deploy/worker/base-current.sh ghcr.io/the-cloud-clockwork/agentihooks-worker:dev "$out/worker-base.ref"`, which:
 
-1. runs `deploy/worker/base-revision.py`, which reads the published base's `linux/amd64` manifest and image config from the registry, without pulling its layers, and returns the manifest digest and the `org.opencontainers.image.revision` label, the commit the base was built from (`docker/swarm-node/Dockerfile` sets it from `SOURCE_REVISION`);
+1. runs `scripts/swarm_v2/worker_base_revision.py`, which reads the published base's `linux/amd64` manifest and image config from the registry, without pulling its layers, and returns the manifest digest and the `org.opencontainers.image.revision` label, the commit the base was built from (`docker/swarm-node/Dockerfile` sets it from `SOURCE_REVISION`);
 2. fetches that commit from `origin` at depth one;
 3. compares it with `HEAD` over the base inputs: `docker/swarm-node`, `scripts/swarm_v2/worker_image.py`, `profiles` and `docs/swarm-v2/schemas`.
 
