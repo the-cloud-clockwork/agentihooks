@@ -14,14 +14,18 @@ pytestmark = pytest.mark.unit
 
 def root(metadata=None, provision=False):
     info = SimpleNamespace(config=SimpleNamespace(metadata=metadata), state=SimpleNamespace(messages=0))
+    client = SimpleNamespace(max_payload=1048576)
     js = SimpleNamespace(
+        _nc=client,
         stream_info=AsyncMock(return_value=info),
         add_stream=AsyncMock(),
         publish=AsyncMock(return_value=SimpleNamespace(seq=8)),
         get_last_msg=AsyncMock(side_effect=NotFoundError()),
         get_msg=AsyncMock(side_effect=NotFoundError()),
     )
-    return SimpleNamespace(_config=SimpleNamespace(provision=provision), _loop=SimpleNamespace(run=asyncio.run), _js=js)
+    return SimpleNamespace(
+        _config=SimpleNamespace(provision=provision), _loop=SimpleNamespace(run=asyncio.run), _js=js, _nc=client
+    )
 
 
 def test_state_reads_imported_revisions_and_preserves_empty_values():

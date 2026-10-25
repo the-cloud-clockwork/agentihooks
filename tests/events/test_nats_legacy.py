@@ -123,7 +123,10 @@ def test_unrestricted_signed_event_log_accepts_an_absent_publish_claim(monkeypat
 
     monkeypatch.setattr(nats.nkey, "parse_creds", lambda _: ("synthetic", "synthetic"))
     monkeypatch.setattr(nats.nkey, "claims", lambda _: {"nats": {}})
-    js = SimpleNamespace(publish=AsyncMock(return_value=SimpleNamespace(duplicate=False)))
+    js = SimpleNamespace(
+        _nc=SimpleNamespace(max_payload=1048576),
+        publish=AsyncMock(return_value=SimpleNamespace(duplicate=False)),
+    )
     log = nats.NatsEventLog(
         SimpleNamespace(run=asyncio.run), js, QueuePolicy(), nats.EVENT_STREAM, True, credentials="synthetic"
     )
