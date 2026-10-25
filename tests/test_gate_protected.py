@@ -978,6 +978,8 @@ fi
 @pytest.mark.parametrize("diagnostic", [False, True])
 def test_selection_diagnostic_preserves_the_current_required_gate(diagnostic):
     base = ci_wiring.load(_ROOT)
+    legacy = base["test.yml"]["jobs"]["gate-required"]["steps"][0]
+    legacy["run"] = legacy["run"].removeprefix(_SELECTION_DIAGNOSTIC)
     head = copy.deepcopy(base)
     if diagnostic:
         step = head["test.yml"]["jobs"]["gate-required"]["steps"][0]
