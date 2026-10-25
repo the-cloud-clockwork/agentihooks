@@ -14,7 +14,9 @@ def _packaged_dot_claude_files():
 def test_built_wheel_ships_every_packaged_dot_claude_file(tmp_path):
     expected = _packaged_dot_claude_files()
     with zipfile.ZipFile(_tagged_wheel(tmp_path)) as wheel:
-        shipped = {name for name in wheel.namelist() if "/.claude/" in name}
+        names = wheel.namelist()
+        shipped = {name for name in names if "/.claude/" in name}
 
     assert expected
     assert sorted(expected - shipped) == []
+    assert not [name for name in names if name.startswith(("hooks/", "scripts/"))]
