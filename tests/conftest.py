@@ -245,8 +245,6 @@ def _isolate_real_user_paths(tmp_path, monkeypatch, request):
     # Mutation stats collection runs this suite with its cache set; nested gate runs must not share it.
     monkeypatch.delenv("MUTATION_STATS_CACHE", raising=False)
     monkeypatch.delenv("MUTATION_STATS_ROOT", raising=False)
-    monkeypatch.delenv("MUTATION_STATS_SEED_BASE", raising=False)
-    monkeypatch.delenv("MUTATION_STATS_EXPORT", raising=False)
     # AGENTIBRAIN_HOME — and its Path.home()-derived default — is where the brain
     # keeps its own .env. hooks.config adopts BRAIN_URL / KB_ROUTER_TOKEN from that
     # file, and it does so at IMPORT, which happens at collection before any fixture

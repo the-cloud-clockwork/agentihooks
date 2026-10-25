@@ -207,9 +207,6 @@ jobs:
     env:
       PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.playwright
       MUTATION_STATS_CACHE: ${{ github.workspace }}/.mutation-stats-cache
-      MUTATION_STATS_SEED_BASE: origin/dev
-      MUTATION_STATS_EXPORT: ${{ github.workspace }}/.mutation-stats/cache
-      GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v4
         with:

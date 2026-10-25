@@ -2,8 +2,6 @@ import ast
 import functools
 import hashlib
 import json
-import os
-import shutil
 import subprocess
 import sys
 import tomllib
@@ -218,10 +216,6 @@ def collect_cached_stats(
 ) -> list[dict]:
     from scripts.ci_mutation.stats_dependencies import StoredStats
 
-    if base := os.environ.get("MUTATION_STATS_SEED_BASE"):
-        from scripts.ci_mutation.stats_seed import seed_once
-
-        seed_once(root, folder, base)
     tracked = subprocess.check_output(TRACKED, cwd=root, text=True).split("\0")
     sources = {
         path: hashlib.sha256((root / path).read_bytes()).hexdigest()
@@ -252,8 +246,6 @@ def collect_cached_stats(
         result, covered = per_test_stats(path, fresh, len(missing))
         if result is not None:
             stored.save(path, result, inputs.for_test(path, covered, fresh), covered is not None)
-    if exported := os.environ.get("MUTATION_STATS_EXPORT"):
-        shutil.copytree(folder, exported, dirs_exist_ok=True)
     return reused + [
         {name: value for name, value in result.items() if name not in ("files", "modules")} for result in fresh
     ]
