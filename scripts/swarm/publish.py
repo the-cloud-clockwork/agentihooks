@@ -351,13 +351,14 @@ def grade_and_push(root: Path, primary: Path, fields: dict, head: str) -> None:
 def publish(slug: str, agent: AgentRecord, repo: str, ledger: LedgerClient, message: str, files: list[str]) -> dict:
     task = task_row(slug, agent, ledger)
     primary, scoped, fields = Path(repo), task, {}
-    retry = shlex.join(["agentihooks", "swarm", slug, "publish", "--message", message, "--", *files])
+    retry = ""
     try:
         root, primary, scoped = publishing_root(repo, task, agent)
         if root is None:
             raise SwarmError(f"task worktree missing; Next: agentihooks swarm {shlex.quote(slug)} prepare")
         fields = checkout_fields(root)
         selected = selected_files(root, files)
+        retry = shlex.join(["agentihooks", "swarm", slug, "publish", "--message", message, "--", *files])
         fields["branch"] = delivery_branch(root, scoped, fields["branch"])
         ledger.update_task(slug, agent.task, branch_record(fields, primary, task), by=agent.name)
         stage_files(root, selected)
@@ -378,5 +379,5 @@ def publish(slug: str, agent: AgentRecord, repo: str, ledger: LedgerClient, mess
             detail = f"AgentiHooks touched Python fallback for {root}: {detail}"
         branch = exc.branch if isinstance(exc, PublicationRefusal) else scoped.get("branch", "")
         repository = Path(exc.repository) if isinstance(exc, PublicationRefusal) else primary
-        raise PublicationRefusal(repository, branch, f"{detail}; Next: {retry}") from exc
+        raise PublicationRefusal(repository, branch, f"{detail}; Next: {retry}" if retry else detail) from exc
     return {**fields, "head": head}
