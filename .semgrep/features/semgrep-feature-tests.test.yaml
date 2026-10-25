@@ -1,0 +1,23 @@
+# ruleid: feature-semgrep-feature-tests
+jobs:
+  scan:
+    uses: fleet/semgrep.yml@main
+    with:
+      rules_dir: .semgrep
+  feature-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - run: "true"
+---
+# ok: feature-semgrep-feature-tests
+jobs:
+  scan:
+    uses: fleet/semgrep.yml@main
+    with:
+      rules_dir: .semgrep
+  feature-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Operator feature regressions and passing fixtures
+        run: semgrep --metrics off --test .semgrep/features
