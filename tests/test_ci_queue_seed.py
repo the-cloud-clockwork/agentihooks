@@ -244,7 +244,7 @@ def test_the_lookup_is_red_when_no_dev_push_run_passed(lookup):
 
 
 def _runs_on(step, event):
-    condition = str(step.get("if", "true")).removeprefix("${{").removesuffix("}}")
+    condition = str(step.get("if", "'true'")).removeprefix("${{").removesuffix("}}")
     condition = condition.replace("steps.provenance.outputs.recorded", "'true'")
     condition = re.sub(
         r"hashFiles\('([^']+)'\)", lambda found: "'x'" if (_ROOT / found.group(1)).exists() else "''", condition
@@ -258,6 +258,7 @@ def test_dispatch_runs_restore_durations_and_the_base_baseline_on_the_app_token(
     names = [s.get("name") for s in restored]
     assert "Look up the base revision's dev durations" not in names
     assert names == [
+        "Turn off automatic git maintenance",
         "Mint the tcc main ci App token",
         "Find the dev push run of the dispatched base",
         "Download the dev durations",
@@ -304,10 +305,11 @@ _REUSE = [
                 "Install provenance dependencies",
                 "Record the protected tested tree",
                 "Publish protected tested tree evidence",
+                "Turn off automatic git maintenance",
                 "Look up the base revision's dev durations",
             ],
         ),
-        ("push", [None, None, *_REUSE]),
+        ("push", ["Turn off automatic git maintenance", None, None, *_REUSE]),
     ],
 )
 def test_pull_request_and_push_runs_keep_the_dev_cache_lookup(event, expected):
