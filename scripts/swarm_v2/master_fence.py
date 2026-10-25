@@ -150,8 +150,8 @@ def handed_off(store, slug: str) -> set[str]:
     door's from then on, before the tick retires the seat."""
     from scripts.swarm_v2 import master_scale
 
-    key = masters.MasterSeats(store.redis).key(slug)
-    retiring = json.loads(store.redis.hget(key, master_scale.RETIRING) or "{}")
+    table = masters.MasterSeats(store.redis)
+    retiring = json.loads(table.redis.hget(table.key(slug), master_scale.RETIRING) or "{}")
     return {address for address in retiring if store.handoff(slug, address.removesuffix(f"@{slug}"))}
 
 
