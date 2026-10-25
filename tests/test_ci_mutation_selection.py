@@ -668,6 +668,20 @@ def test_statistics_parts_split_one_file_without_losing_new_parameter_cases(tmp_
     ]
 
 
+def test_statistics_collection_filters_wall_clock_and_rejects_collection_errors(tmp_path, monkeypatch):
+    from scripts.ci_mutation.selection import collect_test_ids
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("PYTEST_DISABLE_PLUGIN_AUTOLOAD", "1")
+    test = "test_sample.py"
+    (tmp_path / test).write_text("import pytest\n@pytest.mark.wall_clock\ndef test_bounded(): pass\n")
+    runner = SimpleNamespace(_pytest_add_cli_args=[])
+    assert collect_test_ids(runner, [test], tmp_path) == []
+    with pytest.raises(SystemExit) as failed:
+        collect_test_ids(runner, [f"{test}::test_missing"], tmp_path)
+    assert failed.value.code == 1
+
+
 def test_shard_stats_run_in_stats_mode_with_their_own_basetemp_and_record_everything(tmp_path, monkeypatch):
     from time import process_time
 
