@@ -112,11 +112,15 @@ def _serve(
             _loop(environ)
         except Exception:
             _stopped(sys.exception())
-        try:
-            wait(RETRY_S)
-        except Exception:
-            _wait_failed(sys.exception())
-            sleep(RETRY_S)
+            _retry_wait(wait, sleep)
+
+
+def _retry_wait(wait: Callable[[float], object], sleep: Callable[[float], object]) -> None:
+    try:
+        wait(RETRY_S)
+    except Exception:
+        _wait_failed(sys.exception())
+        sleep(RETRY_S)
 
 
 def _stopped(exc: BaseException | None) -> None:

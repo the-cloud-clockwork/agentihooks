@@ -199,9 +199,10 @@ def test_a_distributed_hive_refuses_lane_spokes_on_the_memory_bus_and_says_why(m
     assert lanes.serve({"AGENTIHOOKS_DEPLOYMENT": "distributed", **bus}) is None
 
     assert started == []
-    logged = capsys.readouterr().err
-    assert "hive lane spokes refused: the memory bus never sees the hub's ready offers" in logged
-    assert "AGENTIHOOKS_BUS=nats and AGENTIHOOKS_BUS_URL" in logged
+    assert capsys.readouterr().err == (
+        "hive lane spokes refused: the memory bus never sees the hub's ready offers; "
+        "a distributed hive needs AGENTIHOOKS_BUS=nats and AGENTIHOOKS_BUS_URL\n"
+    )
 
 
 def test_a_failing_retry_wait_is_logged_and_the_loop_sleeps_and_starts_again(monkeypatch, capsys):
