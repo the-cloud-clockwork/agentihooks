@@ -282,7 +282,7 @@ def test_launch_rechecks_mail_after_capacity_checks(mailbox, monkeypatch, capsys
 
 
 @pytest.mark.parametrize("change", ["read", "confirmed", "redirected", "delivered"])
-@pytest.mark.parametrize("boundary", ["before", "capacity"])
+@pytest.mark.parametrize("boundary", ["before", "capacity", "prepare"])
 def test_launch_needs_mail_still_waiting_for_the_dispatcher(mailbox, monkeypatch, capsys, change, boundary):
     store, inbox = mailbox
     runtime = FakeRuntime()
@@ -303,8 +303,19 @@ def test_launch_needs_mail_still_waiting_for_the_dispatcher(mailbox, monkeypatch
 
     if boundary == "before":
         settle()
-    else:
+    elif boundary == "capacity":
         monkeypatch.setattr(dispatch_seat.seat_spawn, "host_hold", settle)
+    else:
+        from scripts.swarm import tick
+
+        primed = tick.primed
+
+        def settle_during_prepare(*args):
+            task = primed(*args)
+            settle()
+            return task
+
+        monkeypatch.setattr(tick, "primed", settle_during_prepare)
     launches = change == "delivered"
     assert bool(run(store, runtime, doc())) == launches
     assert len(runtime.spawned) == int(launches)
