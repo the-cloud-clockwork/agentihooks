@@ -4,7 +4,7 @@
   "dependency_evidence": "evidence/SV2-IDX-03/result.json records the index generations, active cutover and chunk vectors this search reads; the worker, chunk and catalog tables are unchanged here",
   "integration_gate": "G4",
   "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/7159",
-  "pull_request": "pending",
+  "pull_request": "https://github.com/the-cloud-clockwork/agentihooks/pull/7202",
   "package_complete": false,
   "evidence_class": "mocked: an in-process caller, a SQLite catalog file, a local content addressed object folder and a deterministic concept embedder stand in for the session service, the central database, the archive bucket and the embedding provider; no model, HTTP server, vector database or Pod runs",
   "interfaces": [

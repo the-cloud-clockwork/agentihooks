@@ -9,7 +9,7 @@
     "tests/fixtures/swarm_v2/session-search.json": "a8d3c56f8710490765686d36fb367d571edf1f1d9280a0d2168992908ee650b8"
   },
   "package": "SV2-IDX-04",
-  "red_run": "pending",
-  "run": "pending",
-  "tested_commit": "pending"
+  "red_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/40191878831",
+  "run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/40195391976",
+  "tested_commit": "6e39d006a89a97ffbb9e6256dc252c5c3ec6e3e5"
 }
