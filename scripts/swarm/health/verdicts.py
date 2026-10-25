@@ -22,9 +22,7 @@ class VerdictStore:
         for finding in found:
             before = json.loads(stored[finding.id]) if finding.id in stored else None
             record = {**(before or {"seen_at": now_ms, "verdict": None, "returned": False})}
-            record.update(evidence=list(finding.evidence), measure=finding.measure)
-            if finding.metrics:
-                record["metrics"] = list(finding.metrics)
+            record.update(evidence=list(finding.evidence), measure=finding.measure, metrics=list(finding.metrics))
             if finding.basis:
                 record["basis"] = finding.basis
             verdict = record["verdict"]
