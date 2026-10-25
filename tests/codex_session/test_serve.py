@@ -1,4 +1,3 @@
-import json
 from types import SimpleNamespace
 
 import pytest
@@ -483,10 +482,11 @@ def test_main_reports_a_refused_launch(tmp_path, monkeypatch, capsys):
 
 
 def test_a_refused_launch_fails_the_profile_report_so_init_agent_reports_it_at_once(tmp_path, monkeypatch, capsys):
+    from scripts import init_agent
     from scripts.profiles import binding
 
     report = tmp_path / "profile.json"
-    report.write_text(json.dumps({"state": "pending", "harness": "codex", "profile": "engineer"}))
+    binding.request(report, "engineer", "codex")
 
     def refused(store, spec, deps):
         raise SwarmError("replacement does not match the current execution")
@@ -498,7 +498,10 @@ def test_a_refused_launch_fails_the_profile_report_so_init_agent_reports_it_at_o
     argv = ["serve", "--cwd", str(tmp_path), "--profile", "engineer", "--seat", "eng-1@sw"]
     assert serve.main(argv, dict(SWARM_ENV)) == 3
     capsys.readouterr()
-    assert binding.refused(report)
+    monkeypatch.setattr(binding.time, "sleep", lambda seconds: pytest.fail("init-agent waited on a refused launch"))
+    env = {binding.REPORT: str(report)}
+    assert init_agent._selection_refused(env)
+    assert init_agent._route_reported(env, 30.0, {}) is None
     with pytest.raises(ValueError) as failure:
-        binding.wait(report, 0.0)
+        init_agent._binding_result(env, 90.0, {})
     assert str(failure.value) == "codex-session launch refused: replacement does not match the current execution"
