@@ -26,8 +26,8 @@ def test_a_raised_autoscaler_pool_maximum_is_named():
 
 
 def test_the_refusal_names_the_raise_and_the_way_out():
-    assert refusal(["maxRunners 30 to 40"]) == (
-        "node cap: maxRunners 30 to 40 raises an infrastructure node cap, which only the operator authorizes. Raise "
+    assert refusal(["maxRunners 30 to 40", "max_nodes 1 to 2"]) == (
+        "node cap: maxRunners 30 to 40, max_nodes 1 to 2 raises an infrastructure node cap, which only the operator authorizes. Raise "
         "the ask in Priorities through the master and continue other work."
     )
 
