@@ -610,7 +610,7 @@ class HerdrRuntime:
             if saved and quota_transfer and route_kind != "interactive"
             else saved
         )
-        avoid = (task.get("transfer") or {}).get("avoid_harness")
+        avoid = (task.get("transfer") or {}).get("avoid_harness") or task.get("avoid_harness")
         if saved and not quota_transfer and (saved["harness"] != want if want else saved["harness"] == avoid):
             saved = {}
         if route_kind == "interactive" and lane == MASTER:
@@ -904,7 +904,9 @@ class HerdrRuntime:
             )
         except subprocess.TimeoutExpired as exc:
             self._terminate(name)
-            raise SpawnError(f"init-agent timed out for {name}", "ambiguous", _opened_pane(name, launched_at)) from exc
+            raise SpawnError(
+                f"init-agent timed out for {name}", "ambiguous", _opened_pane(name, launched_at), agent
+            ) from exc
         timings = {
             "launched_at": launched_at,
             "returned_at": int(time.time() * 1000),
@@ -919,12 +921,12 @@ class HerdrRuntime:
             self._terminate(name)
             tail = (proc.stderr or proc.stdout).strip().splitlines()
             message = tail[-1] if tail else f"init-agent exit {proc.returncode}"
-            raise SpawnError(message, pane_id=fields.get("pane_id") or _opened_pane(name, launched_at))
+            raise SpawnError(message, pane_id=fields.get("pane_id") or _opened_pane(name, launched_at), harness=agent)
         try:
             validated = binding.fields(fields, argv[argv.index("--profile") + 1], agent)
         except ValueError as exc:
             self._terminate(name)
-            raise SpawnError(str(exc), pane_id=fields.get("pane_id", "")) from exc
+            raise SpawnError(str(exc), pane_id=fields.get("pane_id", ""), harness=agent) from exc
         if proof is not None:
             native_login.record(self.home, config.slug, proof)
         return Placed(
