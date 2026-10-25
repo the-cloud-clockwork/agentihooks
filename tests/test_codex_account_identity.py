@@ -337,6 +337,26 @@ def test_a_duplicate_routes_under_the_slug_of_its_email_not_the_first_name_in_so
     ]
 
 
+def test_two_names_holding_one_token_route_under_the_email_style_name(tmp_path):
+    token = _jwt_with_email("acct-1", "Nestor.Colt@gmail.com")
+    environ = {
+        "HOME": str(tmp_path),
+        "AH_CX_TOKEN_alpha": token,
+        "AH_CX_TOKEN_nestor_coltatgmail_com": token,
+        "AH_CX_TOKEN_gamma": _jwt("acct-2"),
+    }
+    tokens = codex_router.token_accounts(environ)
+    assert [account.name for account in tokens] == ["gamma", "nestor_coltatgmail_com"]
+    pool = codex_router.CodexAccountSource(lambda *a, **k: None).pool(environ)
+    assert [account.name for account in pool] == ["gamma", "nestor_coltatgmail_com"]
+
+
+def test_two_names_holding_one_token_without_an_email_claim_keep_the_email_shaped_name(tmp_path):
+    token = _jwt("acct-1")
+    environ = {"HOME": str(tmp_path), "AH_CX_TOKEN_aaa": token, "AH_CX_TOKEN_devatexample_com": token}
+    assert [account.name for account in codex_router.token_accounts(environ)] == ["devatexample_com"]
+
+
 def test_without_an_email_claim_an_email_shaped_slug_is_kept_over_an_earlier_name(tmp_path):
     environ = {
         "HOME": str(tmp_path),
