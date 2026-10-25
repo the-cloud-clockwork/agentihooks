@@ -2098,17 +2098,15 @@ jobs:
             exit 1
           fi
 
-      # dev's copy grades against the base's allowlist, so a pull request cannot allowlist its own dead code.
-      # Until dev carries the grader, the head grades itself against its own recorded allowlist.
+      # dev's copy measures the base and the head, so a pull request cannot grade or allowlist its own dead code.
+      # Until dev carries the grader, the head's copy measures them.
       - name: Hold dead code in hooks and scripts
         if: ${{ !cancelled() }}
         run: |
           if [[ -f "$RUNNER_TEMP/grader/scripts/dead_code.py" ]]; then
             cd "$RUNNER_TEMP/grader"
-            python -m scripts.dead_code --base "$RUNNER_TEMP/base" --head "$GITHUB_WORKSPACE"
-          else
-            python -m scripts.dead_code --base "$GITHUB_WORKSPACE" --head "$GITHUB_WORKSPACE"
           fi
+          python -m scripts.dead_code --base "$RUNNER_TEMP/base" --head "$GITHUB_WORKSPACE"
 
       # The base revision's copy grades, so a pull request cannot loosen its own audit.
       - name: Fail on known vulnerabilities new against the base

@@ -44,13 +44,10 @@ def test_a_planted_unused_function_in_a_hook_is_red(tmp_path, capsys):
     (head / dead_code.ALLOWLIST).write_text((base / dead_code.ALLOWLIST).read_text())
     code, out = _grade(base, head, capsys)
     assert code == 1
-    assert "1 files hold dead code, 0 on the base allowlist, 3 errors" in out
-    assert "::error::hooks/guard.py has 1 unused names; the base allows 0\n" in out
+    assert "1 files hold dead code, 0 on the base, 2 errors" in out
+    assert "::error::hooks/guard.py has 1 unused names; the base holds 0\n" in out
     assert "::error::hooks/guard.py:8: unused function 'planted' (60% confidence)\n" in out
-    assert (
-        "::error::tests/DEAD_CODE_ALLOWLIST.json records 0 for hooks/guard.py, below the head's 1;"
-        " run python -m scripts.dead_code --write\n"
-    ) in out
+    assert "::notice::tests/DEAD_CODE_ALLOWLIST.json differs from the head's measurement;" in out
 
 
 def test_a_pull_request_cannot_allowlist_its_own_dead_code(tmp_path, capsys):
@@ -59,8 +56,8 @@ def test_a_pull_request_cannot_allowlist_its_own_dead_code(tmp_path, capsys):
     assert dead_code.load(head) == {"scripts/tool.py": 1}
     code, out = _grade(base, head, capsys)
     assert code == 1
-    assert "scripts/tool.py has 1 unused names; the base allows 0" in out
-    assert "tests/DEAD_CODE_ALLOWLIST.json records 1 for scripts/tool.py, above the base allowlist's 0" in out
+    assert "scripts/tool.py has 1 unused names; the base holds 0" in out
+    assert "tests/DEAD_CODE_ALLOWLIST.json records 1 for scripts/tool.py, above the base's 0" in out
 
 
 def test_only_hooks_and_scripts_are_graded(tmp_path):
@@ -83,10 +80,10 @@ def test_an_allowlisted_file_may_stay_but_not_grow(tmp_path, capsys):
     head = _recorded(tmp_path / "head", {"hooks/guard.py": PLANTED + "\n\ndef other():\n    return 3\n"})
     code, out = _grade(base, base, capsys)
     assert code == 0, out
-    assert "1 files hold dead code, 1 on the base allowlist, 0 errors" in out
+    assert "1 files hold dead code, 1 on the base, 0 errors" in out
     code, out = _grade(base, head, capsys)
     assert code == 1
-    assert "hooks/guard.py has 2 unused names; the base allows 1" in out
+    assert "hooks/guard.py has 2 unused names; the base holds 1" in out
 
 
 def test_a_shrunk_file_may_keep_its_recorded_count_until_written(tmp_path, capsys):
@@ -95,8 +92,8 @@ def test_a_shrunk_file_may_keep_its_recorded_count_until_written(tmp_path, capsy
     (head / dead_code.ALLOWLIST).write_text((base / dead_code.ALLOWLIST).read_text())
     code, out = _grade(base, head, capsys)
     assert code == 0, out
-    assert "0 files hold dead code, 1 on the base allowlist, 0 errors" in out
-    assert "::notice::tests/DEAD_CODE_ALLOWLIST.json allows 1 more than the head holds;" in out
+    assert "0 files hold dead code, 1 on the base, 0 errors" in out
+    assert "::notice::tests/DEAD_CODE_ALLOWLIST.json differs from the head's measurement;" in out
     dead_code.main(["--write", "--head", str(head)])
     code, out = _grade(base, head, capsys)
     assert code == 0
@@ -132,7 +129,7 @@ def test_a_file_cannot_grow_back_into_slack_the_base_still_records(tmp_path, cap
     head = _recorded(tmp_path / "head", {"hooks/guard.py": PLANTED})
     code, out = _grade(base, head, capsys)
     assert code == 1
-    assert "::error::hooks/guard.py has 1 unused names; the base allows 0\n" in out
+    assert "::error::hooks/guard.py has 1 unused names; the base holds 0\n" in out
     assert "records 1 for hooks/guard.py, above" not in out
 
 
@@ -146,13 +143,18 @@ def test_an_allowlist_without_integer_counts_cannot_grade(tmp_path, capsys, text
     assert out == f"::error::{base / dead_code.ALLOWLIST} holds no object of per file counts\n"
 
 
-def test_a_file_the_base_measures_but_never_recorded_has_no_allowance(tmp_path, capsys):
+def test_dead_code_dev_holds_but_never_recorded_turns_no_later_head_red(tmp_path, capsys):
     base = _tree(tmp_path / "base", {"hooks/guard.py": PLANTED})
     (base / dead_code.ALLOWLIST).write_text("{}")
     head = _recorded(tmp_path / "head", {"hooks/guard.py": PLANTED})
     code, out = _grade(base, head, capsys)
-    assert code == 1
-    assert "::error::hooks/guard.py has 1 unused names; the base allows 0\n" in out
+    assert code == 0, out
+    assert "1 files hold dead code, 1 on the base, 0 errors" in out
+    assert "::notice::" not in out
+    (head / dead_code.ALLOWLIST).write_text("{}")
+    code, out = _grade(base, head, capsys)
+    assert code == 0, out
+    assert "::notice::tests/DEAD_CODE_ALLOWLIST.json differs from the head's measurement;" in out
 
 
 def test_the_slack_notice_counts_what_the_head_still_holds(tmp_path, capsys):
@@ -161,7 +163,7 @@ def test_the_slack_notice_counts_what_the_head_still_holds(tmp_path, capsys):
     (head / dead_code.ALLOWLIST).write_text((base / dead_code.ALLOWLIST).read_text())
     code, out = _grade(base, head, capsys)
     assert code == 0, out
-    assert "::notice::tests/DEAD_CODE_ALLOWLIST.json allows 1 more than the head holds;" in out
+    assert "::notice::tests/DEAD_CODE_ALLOWLIST.json differs from the head's measurement;" in out
 
 
 def test_an_unreadable_file_cannot_be_graded(tmp_path):
@@ -213,12 +215,16 @@ def test_a_corrupt_allowlist_cannot_grade(tmp_path, capsys, side):
     assert out.startswith("::error::Expecting property name enclosed in double quotes")
 
 
-def test_a_base_without_an_allowlist_is_red(tmp_path, capsys):
+def test_a_base_without_an_allowlist_grades_by_its_measurement(tmp_path, capsys):
     base = _tree(tmp_path / "base", {"hooks/guard.py": USED})
     head = _recorded(tmp_path / "head", {"hooks/guard.py": USED})
     code, out = _grade(base, head, capsys)
+    assert code == 0, out
+    planted = _recorded(tmp_path / "planted", {"hooks/guard.py": PLANTED})
+    code, out = _grade(base, planted, capsys)
     assert code == 1
-    assert "::error::the base has no tests/DEAD_CODE_ALLOWLIST.json, so the head cannot be graded" in out
+    assert "::error::hooks/guard.py has 1 unused names; the base holds 0\n" in out
+    assert "::error::tests/DEAD_CODE_ALLOWLIST.json records 1 for hooks/guard.py, above the base's 0\n" in out
 
 
 def test_a_tree_without_hooks_or_scripts_cannot_be_graded(tmp_path, capsys):
@@ -272,15 +278,14 @@ def test_the_gate_runs_in_lint_graded_by_dev_against_the_base():
     assert step["run"] == (
         'if [[ -f "$RUNNER_TEMP/grader/scripts/dead_code.py" ]]; then\n'
         '  cd "$RUNNER_TEMP/grader"\n'
-        '  python -m scripts.dead_code --base "$RUNNER_TEMP/base" --head "$GITHUB_WORKSPACE"\n'
-        "else\n"
-        '  python -m scripts.dead_code --base "$GITHUB_WORKSPACE" --head "$GITHUB_WORKSPACE"\n'
         "fi\n"
+        'python -m scripts.dead_code --base "$RUNNER_TEMP/base" --head "$GITHUB_WORKSPACE"\n'
     )
 
 
 def _run_step(tmp_path, workspace):
     (tmp_path / "grader").mkdir()
+    _tree(tmp_path / "base", {"hooks/guard.py": USED})
     env = dict(
         os.environ,
         RUNNER_TEMP=str(tmp_path),
@@ -291,15 +296,15 @@ def _run_step(tmp_path, workspace):
 
 
 def test_before_dev_carries_the_grader_a_planted_unused_function_is_red(tmp_path):
-    head = _recorded(tmp_path / "head", {"hooks/guard.py": USED})
-    (head / "hooks/guard.py").write_text(PLANTED)
-    result = _run_step(tmp_path, head)
-    assert result.returncode == 1
-    assert "::error::hooks/guard.py has 1 unused names; the base allows 0\n" in result.stdout
-
-
-def test_before_dev_carries_the_grader_a_recorded_head_is_green(tmp_path):
     head = _recorded(tmp_path / "head", {"hooks/guard.py": PLANTED})
     result = _run_step(tmp_path, head)
+    assert result.returncode == 1
+    assert "1 files hold dead code, 0 on the base, 3 errors" in result.stdout
+    assert "::error::hooks/guard.py has 1 unused names; the base holds 0\n" in result.stdout
+
+
+def test_before_dev_carries_the_grader_an_unchanged_head_is_green(tmp_path):
+    head = _recorded(tmp_path / "head", {"hooks/guard.py": USED})
+    result = _run_step(tmp_path, head)
     assert result.returncode == 0, result.stdout + result.stderr
-    assert "1 files hold dead code, 1 on the base allowlist, 0 errors" in result.stdout
+    assert "0 files hold dead code, 0 on the base, 0 errors" in result.stdout

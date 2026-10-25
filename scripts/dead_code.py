@@ -66,22 +66,17 @@ def write(tree: Path) -> None:
 
 
 def grade(base: dict, measured: dict[str, int], head: dict[str, list[str]], recorded: dict) -> list[str]:
+    # The base's measurement grades, not its record: lint skips the merge queue, so dev's record can go stale.
     errors = []
     for unit, found in sorted(head.items()):
-        # A count the base recorded but no longer holds is slack, never room to grow back into.
-        allowed = min(base.get(unit, 0), measured.get(unit, 0))
+        allowed = measured.get(unit, 0)
         if len(found) > allowed:
-            errors.append(f"{unit} has {len(found)} unused names; the base allows {allowed}")
+            errors.append(f"{unit} has {len(found)} unused names; the base holds {allowed}")
             errors.extend(found)
-    for unit in sorted(set(head) | set(recorded)):
-        count, written, allowed = len(head.get(unit, ())), recorded.get(unit, 0), base.get(unit, 0)
+    for unit, written in sorted(recorded.items()):
+        allowed = max(base.get(unit, 0), measured.get(unit, 0))
         if written > allowed:
-            errors.append(f"{ALLOWLIST} records {written} for {unit}, above the base allowlist's {allowed}")
-        elif written < count:
-            errors.append(
-                f"{ALLOWLIST} records {written} for {unit}, below the head's {count};"
-                " run python -m scripts.dead_code --write"
-            )
+            errors.append(f"{ALLOWLIST} records {written} for {unit}, above the base's {allowed}")
     return errors
 
 
@@ -102,19 +97,17 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         head = hits(args.head)
         recorded = load(args.head) or {}
-        base = load(Path(args.base))
-        if base is None:
-            raise GradeError(f"the base has no {ALLOWLIST}, so the head cannot be graded")
+        base = load(Path(args.base)) or {}
         measured = measure(Path(args.base))
     except (GradeError, ValueError, OSError) as exc:
         print(f"::error::{exc}")
         return 1
     errors = grade(base, measured, head, recorded)
-    print(f"{len(head)} files hold dead code, {len(base)} on the base allowlist, {len(errors)} errors")
+    print(f"{len(head)} files hold dead code, {len(measured)} on the base, {len(errors)} errors")
     for error in errors:
         print(f"::error::{error}")
-    if not errors and (slack := sum(recorded.values()) - sum(map(len, head.values()))):
-        print(f"::notice::{ALLOWLIST} allows {slack} more than the head holds; run python -m scripts.dead_code --write")
+    if recorded != {unit: len(found) for unit, found in head.items()}:
+        print(f"::notice::{ALLOWLIST} differs from the head's measurement; run python -m scripts.dead_code --write")
     return 1 if errors else 0
 
 
