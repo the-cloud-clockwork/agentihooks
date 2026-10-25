@@ -444,6 +444,9 @@ def test_a_hive_member_credential_declares_checked_waits_through_the_cli(waiting
     monkeypatch.setenv("AGENTIHOOKS_HIVE_ID", "m1")
     monkeypatch.setenv("AGENTIHOOKS_HIVE_REDIS_URL", "redis://hive.example:6380/2")
     monkeypatch.setattr(cli, "connect", lambda: RedisStore(member))
+    # The agent lookup runs a read-only script the fake server checks as a write; real Redis grants it by %R~.
+    agent = RedisStore(admin).agents("sw")[0]
+    monkeypatch.setattr(cli, "_me", lambda store, args: agent)
     assert run("sw", "--as", ME, "wait", "--on", kind, target) == 0
     assert idle.wait(member, "sw", ME)["on"] == {"kind": kind, "target": target}
     assert not admin.hexists(prerequisite_wait.key("sw"), "t1")
