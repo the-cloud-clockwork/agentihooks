@@ -40,9 +40,11 @@ def _rule(folder, name, red="# ruleid: {name}\nx()\n", clean="y()\n"):
 
 
 def test_every_shipped_rule_has_a_red_fixture_a_clean_file_and_a_floor():
-    rules = sorted((ROOT / ".semgrep-guards").glob("*.yml"))
+    rules = sorted(ROOT.glob(".semgrep-guards/*.yml"))
+    fixtures = sorted(path.name for path in ROOT.glob(".semgrep-guards/*.py"))
     recorded = json.loads((ROOT / ".semgrep-guards/floors.json").read_text())
     assert [rule.stem for rule in rules] == ["guard-except-returns-allow", "hook-shell-true"]
+    assert fixtures == sorted(f"{rule.stem}.{kind}.py" for rule in rules for kind in ("red", "clean"))
     assert sorted(recorded) == [rule.stem for rule in rules]
     for rule in rules:
         assert f"ruleid: {rule.stem}" in rule.with_suffix(".red.py").read_text()

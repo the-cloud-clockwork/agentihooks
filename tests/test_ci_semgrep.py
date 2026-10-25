@@ -51,7 +51,7 @@ def test_scan_excludes_only_the_mutable_action_tag_rule():
 def test_scan_reads_the_domain_rules_folder_that_holds_rule_files():
     rules_dir = _ROOT / _jobs()["scan"]["with"]["rules_dir"]
     assert rules_dir == _ROOT / ".semgrep"
-    assert any(rules_dir.glob("*.yml"))
+    assert any(_ROOT.glob(".semgrep/*.yml"))
 
 
 def test_scan_and_charts_run_on_the_select_runner_expression():
