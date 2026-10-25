@@ -8,7 +8,7 @@ from scripts.doctor import ci, ci_read
 from tests.doctor.recorded import load
 
 
-def test_gh_reader_reads_all_pages_and_attempts_and_excludes_other_prs():
+def test_gh_reader_reads_all_pages_and_attempts_and_excludes_other_prs(monkeypatch):
     fixture = load("ci")
     run = copy.deepcopy(fixture["runs"][0])
     run["run_attempt"] = 2
@@ -44,7 +44,12 @@ def test_gh_reader_reads_all_pages_and_attempts_and_excludes_other_prs():
     import fakeredis
 
     cache = fakeredis.FakeRedis(decode_responses=True)
+    import time
+
+    clock = [1_000.0]
+    monkeypatch.setattr(time, "time", lambda: clock[0])
     record = ci_read.pull_request("the-cloud-clockwork/agentihooks", 487, run=gh, cache=cache)
+    clock[0] += ci_read.github_reads.RUN_TTL_S
     first_calls = len(calls)
     fixture["checks"][0]["conclusion"] = "failure"
     refreshed = ci_read.pull_request("the-cloud-clockwork/agentihooks", 487, run=gh, cache=cache)

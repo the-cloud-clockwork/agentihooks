@@ -67,6 +67,23 @@ def job_log(endpoint: str, fetch: Callable[[], str]) -> str:
         return found
 
 
+def snapshot(endpoint: str, now: float, fetch: Callable[[], dict]) -> dict:
+    entry = home() / f"{_key(f'snapshot {endpoint}')}.json"
+    entry.parent.mkdir(parents=True, exist_ok=True)
+    with entry.with_suffix(".lock").open("a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        try:
+            cached = json.loads(entry.read_text())
+            if now - cached["at"] < RUN_TTL_S:
+                return cached["snapshot"]
+        except (OSError, ValueError, KeyError, TypeError):
+            pass
+        found = fetch()
+        if found and all(value is not None for value in found.values()):
+            _write(entry, {"at": now, "snapshot": found})
+        return found
+
+
 def _write(path, body):
     try:
         path.parent.mkdir(parents=True, exist_ok=True)

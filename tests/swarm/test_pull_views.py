@@ -178,7 +178,7 @@ def test_empty_batch_never_launches_a_command():
     assert views([], lambda *a, **k: pytest.fail("empty request")) == {}
 
 
-def test_workflow_declarations_cache_by_immutable_tree_while_heads_and_checks_refresh():
+def test_workflow_declarations_cache_by_immutable_tree_while_heads_and_checks_refresh(monkeypatch):
     import fakeredis
 
     cache = fakeredis.FakeRedis(decode_responses=True)
@@ -217,9 +217,16 @@ def test_workflow_declarations_cache_by_immutable_tree_while_heads_and_checks_re
         commit["statusCheckRollup"] = {"contexts": {"nodes": [{"name": GATE, "conclusion": "SUCCESS"}], "pageInfo": {}}}
         return SimpleNamespace(returncode=0, stdout=json.dumps({"data": {"p0": pr}}))
 
+    import time
+
+    clock = [1_000.0]
+    monkeypatch.setattr(time, "time", lambda: clock[0])
     first = views([url], run, cache)[url]
+    clock[0] += 60
     second = views([url], run, cache)[url]
+    clock[0] += 60
     third = views([url], run, cache)[url]
+    clock[0] += 60
     fourth = views([url], run, cache)[url]
     assert len(calls) == 6
     assert fourth.gate_passed is False
