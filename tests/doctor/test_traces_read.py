@@ -456,7 +456,12 @@ def test_the_client_names_the_missing_keys_and_calls_langfuse_with_auth_params_a
         def json(self):
             return {"data": []}
 
-    monkeypatch.setattr(traces_read.httpx, "get", lambda url, **kw: calls.append((url, kw)) or Response())
+    def get(url, extensions, **kw):
+        assert list(extensions) == ["trace"]
+        calls.append((url, kw))
+        return Response()
+
+    monkeypatch.setattr(traces_read.httpx, "get", get)
     env = {"LANGFUSE_HOST": "https://lf/", "LANGFUSE_PUBLIC_KEY": "pk", "LANGFUSE_SECRET_KEY": "sk"}
     assert traces_read.client(env, timeout=3)("traces", {"page": 1}) == {"data": []}
     assert calls == [
@@ -535,6 +540,81 @@ def test_a_real_backend_failure_on_the_internal_path_still_raises_the_reader_fin
     assert [f.kind for f in traces.findings(data, traces.Limits())] == ["trace reader unavailable"]
     raised = {"backend 503": "HTTPStatusError", "internal timeout": "ReadTimeout"}[failure]
     assert data["reader"]["failures"][0].startswith(f"trace listing failed at {read_clock}: {raised}")
+
+
+def _phased(monkeypatch, steps, end, outcome):
+    now = [0.0]
+    monkeypatch.setattr(traces_read, "elapsed", lambda: now[0])
+
+    def internal(request):
+        trace = request.extensions["trace"]
+        for name, at in steps:
+            trace(f"{name}.started", {"request": request})
+            if at is None:
+                break
+            now[0] = at
+            trace(f"{name}.complete", {"return_value": "kept out"})
+        now[0] = end
+        return outcome(request)
+
+    return _routes(monkeypatch, internal)
+
+
+TLS_DONE = [("connection.connect_tcp", 0.012), ("connection.start_tls", 0.05), ("http11.send_request_headers", 0.051)]
+KEYS = {"LANGFUSE_PUBLIC_KEY": "pk-lf-visible-key", "LANGFUSE_SECRET_KEY": "sk-lf-hidden-key"}
+
+
+def _timed_out(request):
+    raise httpx.ReadTimeout("timed out", request=request)
+
+
+def test_a_timed_out_read_keeps_its_start_phase_timings_and_the_finding_shows_them(monkeypatch, tmp_path, read_clock):
+    _phased(monkeypatch, [*TLS_DONE, ("http11.receive_response_headers", None)], 7.004, _timed_out)
+    data = traces_read.record("s", [], [], 1000, traces_read.client(KEYS), home=tmp_path)
+    timings = (
+        f"request traces started at {read_clock}, connect 0.012 s, TLS 0.050 s, first byte not reached, "
+        "total 7.004 s, failed in receive_response_headers"
+    )
+    [failure] = data["reader"]["failures"]
+    assert failure.startswith(f"trace listing failed at {read_clock}: ReadTimeout: timed out at ")
+    assert failure.endswith(f"; {timings}")
+    [finding] = traces.findings(data, traces.Limits())
+    assert failure in finding.evidence
+
+
+def test_a_failed_status_keeps_its_first_byte_and_no_key_header_or_body_value(monkeypatch, read_clock):
+    _phased(
+        monkeypatch,
+        [*TLS_DONE, ("http11.receive_response_headers", 0.4)],
+        0.41,
+        lambda request: httpx.Response(503, text="langfuse body text"),
+    )
+    with pytest.raises(httpx.HTTPStatusError) as failed:
+        traces_read.client(KEYS)("observations", {"page": 1})
+    failure = traces_read.registry.failure(failed.value)
+    assert failure.endswith(
+        f"; request observations started at {read_clock}, connect 0.012 s, TLS 0.050 s, first byte 0.400 s, "
+        "total 0.410 s, failed after receive_response_headers"
+    )
+    for value in ("pk-lf-visible-key", "sk-lf-hidden-key", "Basic", "langfuse body text", "kept out"):
+        assert value not in failure
+
+
+@pytest.mark.parametrize(
+    ("steps", "phase"),
+    [([], "failed before connect"), ([("connection.connect_tcp", None)], "failed in connect_tcp")],
+)
+def test_a_read_failing_before_its_connection_names_where_it_stopped(monkeypatch, read_clock, steps, phase):
+    def refused(request):
+        raise httpx.ConnectError("refused", request=request)
+
+    _phased(monkeypatch, steps, 0.25, refused)
+    with pytest.raises(httpx.ConnectError) as failed:
+        traces_read.client(KEYS)("traces", {})
+    assert failed.value.__notes__ == [
+        f"request traces started at {read_clock}, connect not reached, TLS not reached, first byte not reached, "
+        f"total 0.250 s, {phase}"
+    ]
 
 
 def test_the_listing_keeps_every_page_and_stops_when_the_budget_is_spent(tmp_path):
