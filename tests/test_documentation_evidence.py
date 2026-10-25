@@ -131,12 +131,15 @@ def test_an_unknown_revision_is_not_an_ancestor_and_prints_nothing(tmp_path, cap
 
 
 PULL_REQUEST = "https://example.test/pull/7"
-PULL_REQUEST_DIFF = (
+POLICY_SECTION = (
     "diff --git a/policy.py b/policy.py\n--- a/policy.py\n+++ b/policy.py\n@@ -1 +1,2 @@\n"
     "-enabled = False\n+class WidgetPolicy:\n+    retries = 3\n"
-    "diff --git a/.env b/.env\n--- a/.env\n+++ b/.env\n@@ -0,0 +1 @@\n+CREDENTIAL_SENTINEL\n"
+)
+CREDENTIAL_SECTION = "diff --git a/.env b/.env\n--- a/.env\n+++ b/.env\n@@ -0,0 +1 @@\n+CREDENTIAL_SENTINEL\n"
+GUIDE_SECTION = (
     "diff --git a/user guide.md b/user guide.md\n--- a/user guide.md\n+++ b/user guide.md\n@@ -0,0 +1 @@\n+Retries\n"
 )
+PULL_REQUEST_DIFF = POLICY_SECTION + CREDENTIAL_SECTION + GUIDE_SECTION
 
 
 def unrelated(root):
@@ -153,7 +156,7 @@ def test_a_source_task_takes_its_changes_from_its_own_pull_request(tmp_path, mon
     result = documentation_evidence.collect(tmp_path, base, {"id": "t1", "pr_url": PULL_REQUEST})
     assert asked == [PULL_REQUEST]
     assert result["files"] == ["policy.py", "user guide.md"]
-    assert "+class WidgetPolicy:" in result["changes"]
+    assert result["changes"] == POLICY_SECTION + GUIDE_SECTION
     assert "LoginRecovery" not in result["changes"]
     assert "CREDENTIAL_SENTINEL" not in result["changes"]
     assert result["docs"] == [{"path": "handbook/policy.md", "line": 2, "text": "WidgetPolicy controls retries."}]
@@ -167,12 +170,17 @@ def test_a_source_task_without_a_pull_request_gets_no_diff(tmp_path, monkeypatch
         raise AssertionError("no pull request to read")
 
     monkeypatch.setattr(documentation_evidence, "pull_request_diff", forbidden)
-    result = documentation_evidence.collect(tmp_path, base, {"id": "t1", "pr_url": ""})
+    result = documentation_evidence.collect(tmp_path, base, {"id": "t1"})
     assert (result["files"], result["changes"]) == ([], "")
 
 
 def test_the_pull_request_diff_is_read_from_the_named_pull_request(monkeypatch):
     calls = []
-    monkeypatch.setattr(subprocess, "check_output", lambda args, **kwargs: calls.append(args) or "")
+    monkeypatch.setattr(subprocess, "check_output", lambda args, **kwargs: calls.append((args, kwargs)) or "")
     assert documentation_evidence.pull_request_diff(PULL_REQUEST) == ""
-    assert calls == [["gh", "pr", "diff", PULL_REQUEST, "--color", "never"]]
+    assert calls == [
+        (
+            ["gh", "pr", "diff", PULL_REQUEST, "--color", "never"],
+            {"text": True, "stderr": subprocess.DEVNULL, "timeout": 60},
+        )
+    ]

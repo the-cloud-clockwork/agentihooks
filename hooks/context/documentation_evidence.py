@@ -90,7 +90,7 @@ def pull_request_diff(url: str) -> str:
     return subprocess.check_output(["gh", "pr", "diff", url, "--color", "never"], **GH_OPTIONS)
 
 
-def _pull_request_changes(url: str) -> tuple[list[str], str]:
+def _pull_request_changes(url: str | None) -> tuple[list[str], str]:
     if not url:
         return [], ""
     sections = [section for section in DIFF_SECTION.split(pull_request_diff(url)) if section]
@@ -107,7 +107,7 @@ def collect(root: Path, base: str, context: dict | None = None) -> dict:
     except subprocess.CalledProcessError:
         head = git(root, *HEAD_REVISION)
     if context.get("id"):
-        files, changes = _pull_request_changes(context.get("pr_url", ""))
+        files, changes = _pull_request_changes(context.get("pr_url"))
     else:
         files, changes = _local_changes(root, base, head)
     tracked = git(root, *TRACKED_FILES).split("\0")
