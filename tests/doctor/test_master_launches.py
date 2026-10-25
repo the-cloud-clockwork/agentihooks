@@ -431,6 +431,26 @@ def test_confirmed_master_launch_failure_is_still_detected(evidence):
     assert finding.measure == 1
 
 
+@pytest.mark.parametrize(
+    "line_at,path",
+    [
+        (999, "fresh"),
+        (1000, "recycle handoff"),
+        (1001, "recycle handoff"),
+        (1000 + master_launches.MATCH_MS, "recycle handoff"),
+        (1001 + master_launches.MATCH_MS, "fresh"),
+    ],
+)
+def test_unconfirmed_absence_uses_only_a_correlated_failure_journal_entry(line_at, path):
+    row = absent()
+    row["binding"] = {"state": "absent", "at": 1005}
+
+    [attempt] = master_launches.attempts(bare([row], journal=[spawn_line(line_at)]))
+
+    assert attempt.path == path
+    assert attempt.at == (1000 if path == "recycle handoff" else line_at)
+
+
 def spawn_line(at, error="boom"):
     return {"at": at, "pid": "9", "message": f"sw: master spawn failed: {error}"}
 

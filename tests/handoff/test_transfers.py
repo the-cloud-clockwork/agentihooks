@@ -104,6 +104,38 @@ def test_observation_preserves_explicit_launch_failure(setup):
     assert transfers.get(store, "sw", transfer["id"])["binding"] == failed["binding"]
 
 
+def test_observation_retains_a_live_binding_after_the_successor_exits(setup):
+    store, old = setup
+    transfer = transfers.record(store, "sw", old, "recycle", DOC, 30)
+    new = replace(old, name="sw-eng-2")
+    store.seats.occupy(new.seat, new.name, 2)
+    transfers.attach(store, "sw", new)
+    transfers.observe(store, "sw", {new.name})
+    bound = transfers.get(store, "sw", transfer["id"])["binding"]
+
+    transfers.observe(store, "sw", set())
+
+    assert transfers.get(store, "sw", transfer["id"])["binding"] == bound
+
+
+def test_observation_continues_after_an_unchanged_failed_binding(setup):
+    store, old = setup
+    transfers.record(store, "sw", old, "recycle", DOC, 30)
+    failed = replace(old, name="sw-eng-2")
+    store.seats.occupy(failed.seat, failed.name, 2)
+    transfers.attach(store, "sw", failed)
+    transfers.failed(store, "sw", failed)
+    other = replace(old, name="sw-eng-3", task="t2", seat="eng-2@sw")
+    transfer = transfers.record(store, "sw", other, "recycle", DOC, 40)
+    new = replace(other, name="sw-eng-4")
+    store.seats.occupy(new.seat, new.name, 1)
+    transfers.attach(store, "sw", new)
+
+    transfers.observe(store, "sw", {new.name})
+
+    assert transfers.get(store, "sw", transfer["id"])["binding"]["state"] == "live"
+
+
 def test_detach_frees_only_the_waiting_spawns_unbound_transfers(setup):
     store, old = setup
     other = transfers.record(store, "sw", old, "recycle", DOC, 10)
