@@ -111,6 +111,39 @@ def test_the_workstation_swarm_share_never_goes_negative():
     assert admission.room(reading(cpus=16), swarm_agents=40).room == 0
 
 
+def test_the_swarm_share_never_binds_below_the_hive_max_agents_on_a_quiet_host():
+    found = admission.room(reading(cpus=16, load5=4.32), swarm_agents=12, max_agents=20)
+    assert found == admission.Room(
+        16,
+        admission.CPU,
+        "five minute load 4.32 on 16 CPUs, 0.5 CPU per agent, fits 16 more under the 80 percent line",
+    )
+
+
+def test_the_swarm_share_still_binds_at_or_above_the_hive_max_agents():
+    found = admission.room(reading(cpus=16), swarm_agents=10, max_agents=12)
+    assert found == admission.Room(
+        2,
+        admission.CPU,
+        "10 swarm agents at 0.5 CPU each on 16 CPUs, fits 2 more under the 40 percent swarm share",
+    )
+
+
+def test_the_host_cpu_line_still_binds_under_the_hive_max_agents():
+    found = admission.room(reading(cpus=16, load5=12.0), swarm_agents=12, max_agents=20)
+    assert (found.room, found.reason) == (1, admission.CPU)
+    assert found.detail == "five minute load 12.00 on 16 CPUs, 0.5 CPU per agent, fits 1 more under the 80 percent line"
+
+
+def test_the_host_ram_line_still_binds_under_the_hive_max_agents():
+    found = admission.room(reading(cpus=64, available_mb=13 * GB, total_mb=64 * GB), swarm_agents=12, max_agents=20)
+    assert found == admission.Room(
+        0,
+        admission.RAM,
+        "13312 of 65536 MB available, 700 MB per agent, fits 0 more under the 80 percent line",
+    )
+
+
 def test_pending_reservations_use_up_the_room():
     found = admission.room(reading(cpus=8, load5=5.6))
     assert found.room == 1
