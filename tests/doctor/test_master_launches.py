@@ -224,7 +224,7 @@ def test_a_failed_row_without_a_retry_is_timed_from_its_attach_not_its_moving_bi
         "successor": "master@x-2",
         "at": 100,
         "attached_at": 200,
-        "binding": {"state": "absent", "at": 900, "session": "master@x-2"},
+        "binding": {"state": "absent", "at": 900, "session": "master@x-2", "reason": "Launch failed"},
     }
     record = {"slug": "sw", "transfers": [row], "restored": [], "agents": [], "journal": [], "journal_error": ""}
     restamped = {**record, "transfers": [{**row, "binding": {**row["binding"], "at": 1900}}]}
@@ -392,8 +392,45 @@ def bare(transfers=(), restored=(), agents=(), journal=()):
 
 
 def absent(row_id="a1", at=1000, reason="recycle"):
-    binding = {"state": "absent", "at": at + 5}
+    binding = {"state": "absent", "at": at + 5, "reason": "Launch failed"}
     return {"id": row_id, "reason": reason, "task": "master", "successor": f"m@{row_id}", "at": at, "binding": binding}
+
+
+@pytest.mark.parametrize("state", ["pending", "absent"])
+def test_unfinished_master_startup_is_not_a_failed_launch(state):
+    row = absent()
+    row["binding"] = {"state": state, "at": 1005}
+    record = bare([row])
+
+    assert master_launches.attempts(record) == []
+    assert master_launches.findings(record) == []
+
+    row["binding"] = {"state": "live", "at": 2000}
+    assert master_launches.findings(bare([row])) == []
+
+
+@pytest.mark.parametrize("evidence", ["binding", "retry", "restore", "journal"])
+def test_confirmed_master_launch_failure_is_still_detected(evidence):
+    row = absent()
+    row["binding"] = {"state": "absent", "at": 1005}
+    record = bare([row])
+    if evidence == "binding":
+        row["binding"]["reason"] = "Launch failed"
+    elif evidence == "retry":
+        record["transfers"].append(
+            {**absent("retry", at=1000), "retry_of": row["id"], "binding": {"state": "pending"}}
+        )
+    elif evidence == "restore":
+        record["restored"].append(
+            {"transfer": row["id"], "outcome": "awaiting-decision", "reason": "resume failed", "at": 1000}
+        )
+    else:
+        record["journal"].append(spawn_line(1000))
+
+    [attempt] = master_launches.attempts(record)
+    assert attempt.at == 1000
+    [finding] = master_launches.findings(record)
+    assert finding.measure == 1
 
 
 def spawn_line(at, error="boom"):
