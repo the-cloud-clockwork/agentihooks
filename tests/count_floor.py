@@ -270,7 +270,7 @@ def deleted_branches(base: Path, head: Path, tests: str) -> set[tuple[str, str]]
     return deleted
 
 
-def bound_names(tree: Path) -> tuple[set[tuple[str, str]], list[Path]]:
+def bound_names(tree: Path) -> tuple[set[tuple[str, str, str]], list[Path]]:
     names, opaque = set(), []
     for path in _sources(tree, set()):
         relative = path.relative_to(tree)
@@ -280,19 +280,26 @@ def bound_names(tree: Path) -> tuple[set[tuple[str, str]], list[Path]]:
         except (OSError, SyntaxError, ValueError):
             opaque.append(relative)
             continue
+        parents = {child: parent for parent in ast.walk(module) for child in ast.iter_child_nodes(parent)}
         for node in ast.walk(module):
+            name = None
             if isinstance(node, ast.alias) and node.name == "*":
                 opaque.append(relative)
             elif isinstance(node, _DEFINITIONS):
-                names.add((module_name, node.name))
+                name = node.name
             elif isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
-                names.add((module_name, node.id))
+                name = node.id
             elif isinstance(node, ast.alias):
-                names.add((module_name, node.asname or node.name.split(".")[0]))
+                name = node.asname or node.name.split(".")[0]
             elif isinstance(node, (ast.ExceptHandler, ast.MatchAs, ast.MatchStar)) and node.name:
-                names.add((module_name, node.name))
+                name = node.name
             elif isinstance(node, ast.MatchMapping) and node.rest:
-                names.add((module_name, node.rest))
+                name = node.rest
+            if name:
+                owner = node
+                while not isinstance(owner, ast.stmt) and owner in parents:
+                    owner = parents[owner]
+                names.add((module_name, name, ast.dump(owner)))
     return names, opaque
 
 
@@ -304,10 +311,12 @@ def _dotted(node: ast.expr) -> str | None:
     return None
 
 
-def _imports(module: ast.Module) -> tuple[dict[str, set[tuple[str, str]]], dict[str, set[str]]]:
+def _imports(
+    module: ast.Module | ast.FunctionDef | ast.AsyncFunctionDef,
+) -> tuple[dict[str, set[tuple[str, str]]], dict[str, set[str]]]:
     names: dict[str, set[tuple[str, str]]] = {}
     modules: dict[str, set[str]] = {}
-    for statement in ast.walk(module):
+    for statement in _body_nodes(module):
         if isinstance(statement, ast.Import):
             for alias in statement.names:
                 bound = alias.asname or alias.name.split(".")[0]
@@ -397,8 +406,37 @@ def _resource_path(
     return _resource_parent(node, bindings, source, constructors, seen)
 
 
-def _fixture_subject(tree: Path, source: Path, module: ast.Module, call: ast.Call) -> set[tuple[str, str]]:
+def _fixture_code(path: Path) -> set[str]:
+    try:
+        fixture = json.loads(path.read_bytes())
+    except (OSError, ValueError):
+        return set()
+    if not isinstance(fixture, dict) or not isinstance(fixture.get("steps"), list):
+        return set()
+    return {
+        step["run"].strip()
+        for step in fixture["steps"]
+        if isinstance(step, dict) and isinstance(step.get("run"), str) and step["run"].strip()
+    }
+
+
+def _deleted_fixtures(base: Path, head: Path, referenced: set[tuple[str, str]]) -> set[tuple[str, str]]:
+    candidates = {subject for subject in referenced if subject[0] == "@fixture" and not (head / subject[1]).exists()}
+    if not candidates:
+        return set()
+    surviving = set()
+    for path in head.rglob("*.json"):
+        if path.resolve().is_relative_to(head.resolve()):
+            surviving.update(_fixture_code(path))
+    return {subject for subject in candidates if not _fixture_code(base / subject[1]) & surviving}
+
+
+def _fixture_subject(
+    tree: Path, source: Path, module: ast.Module, call: ast.Call, shadowed: set[str]
+) -> set[tuple[str, str]]:
     if not isinstance(call.func, ast.Attribute) or call.func.attr not in {"read_text", "read_bytes"}:
+        return set()
+    if any(isinstance(node, ast.Name) and node.id in shadowed for node in ast.walk(call.func.value)):
         return set()
     names, _ = _imports(module)
     constructors = {name for name, subjects in names.items() if ("pathlib", "Path") in subjects}
@@ -410,18 +448,11 @@ def _fixture_subject(tree: Path, source: Path, module: ast.Module, call: ast.Cal
         and isinstance(statement.targets[0], ast.Name)
     }
     path = _resource_path(call.func.value, bindings, source, constructors)
-    if not isinstance(path, Path) or not path.is_relative_to(tree) or path.suffix != ".json":
+    if not isinstance(path, Path):
         return set()
-    try:
-        fixture = json.loads(path.read_bytes())
-    except (OSError, ValueError):
-        return set()
-    if isinstance(fixture, dict) and isinstance(fixture.get("steps"), list):
-        if any(
-            isinstance(step, dict) and isinstance(step.get("run"), str) and step["run"].strip()
-            for step in fixture["steps"]
-        ):
-            return {("@fixture", path.relative_to(tree).as_posix())}
+    path, root = path.resolve(), tree.resolve()
+    if path.is_relative_to(root) and path.suffix == ".json" and _fixture_code(path):
+        return {("@fixture", path.relative_to(root).as_posix())}
     return set()
 
 
@@ -464,6 +495,31 @@ def _guard_subjects(module: ast.Module, module_name: str) -> set[tuple[str, str]
     }
 
 
+def _body_nodes(function: ast.Module | ast.FunctionDef | ast.AsyncFunctionDef) -> Iterator[ast.AST]:
+    pending = list(function.body)
+    while pending:
+        node = pending.pop()
+        yield node
+        if not isinstance(node, (*_DEFINITIONS, ast.Lambda)):
+            pending.extend(ast.iter_child_nodes(node))
+
+
+def _local_bindings(function: ast.FunctionDef | ast.AsyncFunctionDef) -> set[str]:
+    names = {node.arg for node in ast.walk(function.args) if isinstance(node, ast.arg)}
+    for node in _body_nodes(function):
+        if isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del)):
+            names.add(node.id)
+        elif isinstance(node, (ast.ExceptHandler, ast.MatchAs, ast.MatchStar)) and node.name:
+            names.add(node.name)
+        elif isinstance(node, ast.MatchMapping) and node.rest:
+            names.add(node.rest)
+        elif isinstance(node, _DEFINITIONS):
+            names.add(node.name)
+        elif isinstance(node, (ast.Import, ast.ImportFrom)):
+            names.update(alias.asname or alias.name.split(".")[0] for alias in node.names)
+    return names
+
+
 def referenced_subjects(tree: Path, nodeid: str) -> set[tuple[str, str]]:
     path, *scopes = nodeid.split("[", 1)[0].split("::")
     try:
@@ -480,16 +536,26 @@ def referenced_subjects(tree: Path, nodeid: str) -> set[tuple[str, str]]:
         if function in visited:
             continue
         visited.add(function)
-        for child in (descendant for statement in function.body for descendant in ast.walk(statement)):
-            subjects.update(_resolve(child, names, modules))
+        shadowed = _local_bindings(function)
+        local_names = {name: subjects for name, subjects in names.items() if name not in shadowed}
+        local_modules = {name: targets for name, targets in modules.items() if name not in shadowed}
+        imported_names, imported_modules = _imports(function)
+        local_names.update(imported_names)
+        local_modules.update(imported_modules)
+        for child in _body_nodes(function):
+            subjects.update(_resolve(child, local_names, local_modules))
             if isinstance(child, ast.Call):
-                subjects.update(_fixture_subject(tree, tree / path, module, child))
-                subjects.update(_entrypoint_subjects(tree, child, names, modules))
-                if isinstance(child.func, ast.Name) and (helper := helpers.get(child.func.id)):
+                subjects.update(_fixture_subject(tree, tree / path, module, child, shadowed))
+                subjects.update(_entrypoint_subjects(tree, child, local_names, local_modules))
+                if (
+                    isinstance(child.func, ast.Name)
+                    and child.func.id not in shadowed
+                    and (helper := helpers.get(child.func.id))
+                ):
                     pending.append(helper)
                 subjects.update(
                     (callee, f"{function}({keyword.arg})")
-                    for callee, function in _resolve(child.func, names, modules)
+                    for callee, function in _resolve(child.func, local_names, local_modules)
                     for keyword in child.keywords
                     if keyword.arg
                 )
@@ -524,22 +590,15 @@ def main(argv: list[str] | None = None) -> int:
             print(f"{path} hides its names in the head (unparseable or a star import), so no lost test is admitted")
         definitions = set() if opaque else top_level_definitions(args.base, args.tests)
         previous, _ = bound_names(args.base)
-        introduced = {name for _, name in surviving - previous}
+        introduced = {name for _, name, _ in surviving - previous}
+        identities = {(module, name) for module, name, _ in surviving}
         deleted = {
-            definition for definition in definitions if definition not in surviving and definition[1] not in introduced
+            definition for definition in definitions if definition not in identities and definition[1] not in introduced
         }
         deleted |= set() if opaque else deleted_branches(args.base, args.head, args.tests)
         for nodeid in lost:
             referenced = referenced_subjects(args.base, nodeid)
-            removed_fixtures = (
-                set()
-                if opaque
-                else {
-                    subject
-                    for subject in referenced
-                    if subject[0] == "@fixture" and not (args.head / subject[1]).exists()
-                }
-            )
+            removed_fixtures = set() if opaque else _deleted_fixtures(args.base, args.head, referenced)
             if subjects := sorted(".".join(subject) for subject in referenced & (deleted | removed_fixtures)):
                 admitted[nodeid] = subjects
                 print(f"{nodeid} is admitted: the head deletes {', '.join(subjects)}, which it referenced")

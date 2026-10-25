@@ -706,6 +706,42 @@ def test_moving_an_executable_fixture_keeps_its_lost_test_red(tmp_path):
     assert "test_fixture is admitted" not in result.stdout
 
 
+@pytest.mark.parametrize("escape", ["parent", "symlink"])
+def test_fixture_admission_never_reads_outside_the_base(tmp_path, monkeypatch, escape):
+    from tests import count_floor
+
+    outside = tmp_path / "outside.json"
+    outside.write_text(json.dumps({"steps": [{"run": "printf outside"}]}))
+    resource = "../outside.json" if escape == "parent" else "tests/fixtures/watch.json"
+    source = (
+        "from pathlib import Path\n_ROOT = Path(__file__).resolve().parents[1]\n\n"
+        "def test_fixture():\n    assert (_ROOT / " + repr(resource) + ").read_text()\n\n"
+        "def test_kept():\n    assert True\n"
+    )
+    base = _tree(tmp_path / "base", {"test_mod.py": source})
+    head = _tree(tmp_path / "head", {"test_mod.py": "def test_kept():\n    assert True\n"})
+    if escape == "symlink":
+        link = base / resource
+        link.parent.mkdir(parents=True)
+        link.symlink_to(outside)
+    read_bytes = Path.read_bytes
+
+    def guarded(path):
+        assert path.resolve() != outside, "the gate read a resource outside its base"
+        return read_bytes(path)
+
+    monkeypatch.setattr(Path, "read_bytes", guarded)
+    monkeypatch.setattr(
+        count_floor,
+        "collect_sides",
+        lambda *args: {
+            "base": ["tests/test_mod.py::test_fixture", "tests/test_mod.py::test_kept"],
+            "head": ["tests/test_mod.py::test_kept"],
+        },
+    )
+    assert count_floor.main(["--base", str(base), "--head", str(head)]) == 1
+
+
 @pytest.mark.parametrize(
     "survivor",
     [
