@@ -124,7 +124,9 @@ def _combine(argv: list[str]) -> None:
     if capped and peak >= STEP_SECONDS:
         print(f"::warning::The capped queue plan predicts {peak:.1f}s, over {STEP_SECONDS}s of the step timeout")
     elif len(plan) == MAX_SHARDS and peak >= STEP_SECONDS / 2:
-        print(f"::warning::The capped queue plan predicts {peak:.1f}s, over {STEP_SECONDS / 2:.0f}s of the planning budget")
+        print(
+            f"::warning::The capped queue plan predicts {peak:.1f}s, over {STEP_SECONDS / 2:.0f}s of the planning budget"
+        )
     elif not capped and peak >= STEP_SECONDS / 2:
         raise SystemExit(f"Queue plan exceeds {STEP_SECONDS / 2:.0f}s of the step timeout: {peak:.1f}s")
     print(f"{len(plan)} queue jobs fit one wave of {MAX_SHARDS} runners; predicted slowest test step {peak:.1f}s")
