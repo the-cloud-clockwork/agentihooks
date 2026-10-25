@@ -187,7 +187,12 @@ def canary(store: RedisStore, slug: str, agent: AgentRecord) -> tuple[AgentRecor
         return agent, {"canary": {"expected": "validated", "actual": str(exc)}}
     if not result:
         return agent, {"canary": {"expected": "validated", "actual": "pending"}}
-    confirmed = replace(agent, profile_decision={**agent.profile_decision, "validation": result})
+    confirmed = replace(
+        agent,
+        account=agent.account or result["account"],
+        launch_timings={"harness_at": int(result["validated_at"] * 1000), **agent.launch_timings},
+        profile_decision={**agent.profile_decision, "validation": result},
+    )
     store.put_agent(slug, confirmed)
     return confirmed, {}
 
@@ -197,7 +202,8 @@ def due(agent: AgentRecord, found: dict, now_ms: int) -> bool:
 
     deadline = DEADLINE_MS
     if found.get("canary", {}).get("actual") == "pending":
-        deadline = max(DEADLINE_MS, int(CANARY_TIMEOUT_S[agent.harness] * 1000))
+        waited = agent.profile_decision.get("validation", {}).get("deadline_ms", DEADLINE_MS)
+        deadline = max(int(CANARY_TIMEOUT_S[agent.harness] * 1000), waited)
     return now_ms - session_started_at(agent) >= deadline
 
 

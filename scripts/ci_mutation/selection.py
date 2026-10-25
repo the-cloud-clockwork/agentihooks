@@ -5,6 +5,7 @@ import os
 import re
 import sys
 import tempfile
+import traceback
 from pathlib import Path
 from time import process_time
 from types import ModuleType
@@ -200,13 +201,27 @@ def collect_shard_stats(runner, test_runner, tests: list[str], output: Path, bas
     )
 
 
+def collect_and_exit(runner, test_runner, tests: list[str], output: Path, basetemp: str) -> None:
+    try:
+        collect_shard_stats(runner, test_runner, tests, output, basetemp)
+    except BaseException:
+        traceback.print_exc()
+        code = 1
+    else:
+        code = 0
+    sys.stdout.flush()
+    sys.stderr.flush()
+    # A normal child exit joins every thread and child process a test left running, which can wait forever.
+    os._exit(code)
+
+
 def run_stats_buckets(runner, test_runner, shards: list[list[str]], work: Path) -> list[dict]:
     context = multiprocessing.get_context("fork")
     processes = []
     for index, tests in enumerate(shards):
         output = work / f"stats-{index}.json"
         basetemp = tempfile.mkdtemp(prefix="mutation-stats-")
-        process = context.Process(target=collect_shard_stats, args=(runner, test_runner, tests, output, basetemp))
+        process = context.Process(target=collect_and_exit, args=(runner, test_runner, tests, output, basetemp))
         process.start()
         processes.append((process, output))
     results = []
