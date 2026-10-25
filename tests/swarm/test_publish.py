@@ -1176,7 +1176,9 @@ def test_a_continuation_publishes_onto_its_open_pull_request_branch(publication,
 
     root, repository = publication.root, publication.repo
     pr_url = "https://github.com/example/repo/pull/7"
-    if pull.pop("behind", False):
+    behind = pull.get("behind", False)
+    pull = {key: value for key, value in pull.items() if key != "behind"}
+    if behind:
         parked = git(repository, "commit-tree", "HEAD^{tree}", "-p", "HEAD", "-m", "Diverged predecessor work")
         git(repository, "push", "origin", f"{parked}:refs/heads/predecessor")
     else:
