@@ -202,6 +202,7 @@ class HiveLaunch:
         self.orders, self.slots = Orders(store.redis), LaunchSlots(store.redis)
         self.sleep = time.sleep
         self.opening = orders.build_opening
+        self.placement_cache: dict[tuple[str, str], Selection | placement.Wait] | None = None
         self._quota_accounts = None
 
     def hives(self) -> list[dict]:
@@ -213,6 +214,14 @@ class HiveLaunch:
         return selected
 
     def select(self, config: SwarmConfig, lane: str, task: dict) -> Selection | placement.Wait:
+        if self.placement_cache is None:
+            return self._select(config, lane, task)
+        key = (lane, task["id"])
+        if key not in self.placement_cache:
+            self.placement_cache[key] = self._select(config, lane, task)
+        return self.placement_cache[key]
+
+    def _select(self, config: SwarmConfig, lane: str, task: dict) -> Selection | placement.Wait:
         chosen = config.lanes.get(lane, {})
         saved = task.get("launch_assignment") or profile_choice.transfer(task)
         decision = self.herdr._profile_decision(config, lane, chosen, task, saved, saved, dict(os.environ))

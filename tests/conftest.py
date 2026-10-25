@@ -462,6 +462,13 @@ def _swarm_tick_leaves_user_units_alone(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _switch_interval_restored():
+    before = sys.getswitchinterval()
+    yield
+    sys.setswitchinterval(before)
+
+
+@pytest.fixture(autouse=True)
 def _swarm_tick_reaps_no_real_process(tmp_path, monkeypatch):
     from scripts.swarm import tick_reaper
 

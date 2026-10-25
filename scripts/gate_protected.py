@@ -24,6 +24,7 @@ SHALLOW_PREFLIGHT_FETCH = 'git fetch --no-tags --depth 1 origin "$GITHUB_SHA"'
 EQUIVALENCE = ("equivalence.yml", "ledger-equivalence")
 EQUIVALENCE_WORDS = ("GRADER", "GITHUB_ENV", "GITHUB_PATH", "equivalence.sh")
 EQUIVALENCE_TUNABLE = ("steps", "timeout-minutes")
+UNUSED_SELECT_OUTPUTS = ("files_1", "files_2", "files_3")
 
 
 def _gates(workflows: dict[str, dict]) -> list[tuple[str, str, dict]]:
@@ -93,22 +94,28 @@ def _aggregator_problems(
             and head_job.get("steps")
             in [
                 diagnostic(
-                    finish(
-                        rerun(
-                            shape(
-                                required(
-                                    ci_reuse.gate_steps(
-                                        **form,
-                                        summary=summary,
-                                        docs="docs" in ci_wiring.needs_of(head_job),
-                                        watcher_loss=watcher_loss,
+                    forward(
+                        finish(
+                            rerun(
+                                shape(
+                                    required(
+                                        ci_reuse.gate_steps(
+                                            **form,
+                                            summary=summary,
+                                            docs="docs" in ci_wiring.needs_of(head_job),
+                                            watcher_loss=watcher_loss,
+                                        )
                                     )
                                 )
                             )
                         )
                     )
                 )
-                for diagnostic in (list, ci_reuse.selection_diagnostic)
+                for diagnostic, forward in (
+                    (list, list),
+                    (ci_reuse.selection_diagnostic, list),
+                    (ci_reuse.selection_diagnostic, ci_reuse.forwarded_stats),
+                )
                 for form in (
                     {},
                     {"selected": True},
@@ -164,10 +171,25 @@ def _duration_problems(base: dict, head: dict) -> list[str]:
     if producer.get("steps", [])[: len(prefix)] not in (prefix, bounded_prefix):
         problems.append("The head skips reuse without protected durations provenance.")
     mutable = {"steps", "if", "runs-on"}
+    selection_permissions = ({"contents": "read"}, {"contents": "read", "actions": "read"})
+    if (
+        "durations" not in head["jobs"]
+        and previous.get("permissions") in selection_permissions
+        and producer.get("permissions") in selection_permissions
+    ):
+        mutable.add("permissions")
+    outputs = previous.get("outputs") or {}
+    trimmed = {key: value for key, value in outputs.items() if key not in UNUSED_SELECT_OUTPUTS}
     problems += [
         f"The head changes the durations provenance context {field}."
         for field in sorted((set(previous) | set(producer)) - mutable)
         if previous.get(field) != producer.get(field)
+        and not (
+            field == "outputs"
+            and producer is head["jobs"].get("select")
+            and set(UNUSED_SELECT_OUTPUTS).issubset(outputs)
+            and producer.get(field) == trimmed
+        )
     ]
     problems += [
         f"The head changes the global provenance context {field}."

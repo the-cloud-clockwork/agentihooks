@@ -20,7 +20,7 @@ def test_swarm_codex_launch_guards_the_routed_command(tmp_path, resume):
     guarded, guarded_before = init_agent._agent_command(
         spec, tmp_path / "route", "probe", [], {"AGENTIHOOKS_SWARM": "proof"}, tmp_path
     )
-    assert guarded == [sys.executable, "-m", "scripts.codex_input", "--", *plain]
+    assert guarded == [sys.executable, "-P", "-m", "scripts.codex_input", "--", *plain]
     assert guarded_before == before == ""
 
 
