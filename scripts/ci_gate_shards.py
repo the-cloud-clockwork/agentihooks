@@ -8,12 +8,25 @@ import zipfile
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
+from scripts.ci_budget import rate_limit
+from scripts.ci_budget.rate_limit import gh_api
+
+RETRY_DELAYS = (5, 10, 20, None)
+POLL_SECONDS = 15
+
 
 def api(endpoint: str, *, binary: bool = False) -> list | bytes:
-    command = ["gh", "api", endpoint]
+    command = [endpoint]
     if not binary:
         command.extend(["--paginate", "--slurp"])
-    result = subprocess.run(command, check=True, capture_output=True, timeout=60)
+    for delay in RETRY_DELAYS:
+        try:
+            result = gh_api(command, timeout=60)
+            break
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
+            if delay is None:
+                raise
+            time.sleep(delay)
     return result.stdout if binary else json.loads(result.stdout)
 
 
@@ -30,7 +43,7 @@ def watch(
     downloaded = {}
     expected = {f"{kind}-3.12-{shard}" for kind in ("durations", "flakes") for shard in shards}
     units = {f"unit (3.12, {shard})" for shard in shards}
-    deadline = time.monotonic() + 1200
+    deadline = rate_limit.deadline = time.monotonic() + 1200
     while time.monotonic() < deadline:
         fetch(repository, run, destination, downloaded)
         pages = api(f"repos/{repository}/actions/runs/{run}/attempts/{attempt}/jobs?per_page=100")
@@ -47,7 +60,7 @@ def watch(
             if missing := expected - downloaded.keys():
                 raise RuntimeError(f"Missing shard reports: {sorted(missing)}")
             return
-        time.sleep(5)
+        time.sleep(POLL_SECONDS)
     raise RuntimeError("Shard verification timed out before every expected shard succeeded")
 
 
@@ -80,14 +93,17 @@ def fetch(repository: str, run: str, destination: Path, downloaded: dict) -> Non
 
 
 def main() -> None:
-    watch(
-        os.environ["GITHUB_REPOSITORY"],
-        os.environ["GITHUB_RUN_ID"],
-        os.environ["GITHUB_RUN_ATTEMPT"],
-        json.loads(os.environ["SHARDS"]),
-        Path("shard-reports"),
-        recover=os.environ.get("GITHUB_EVENT_NAME") == "merge_group",
-    )
+    try:
+        watch(
+            os.environ["GITHUB_REPOSITORY"],
+            os.environ["GITHUB_RUN_ID"],
+            os.environ["GITHUB_RUN_ATTEMPT"],
+            json.loads(os.environ["SHARDS"]),
+            Path("shard-reports"),
+            recover=os.environ.get("GITHUB_EVENT_NAME") == "merge_group",
+        )
+    finally:
+        rate_limit.report("Shard verification")
 
 
 if __name__ == "__main__":

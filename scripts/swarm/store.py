@@ -374,6 +374,12 @@ class RedisStore:
     def handoff(self, slug, task):
         return self.redis.get(self.key(slug, "handoff", task)) or ""
 
+    def handoff_tasks(self, slug: str, tasks: list[str]) -> set[str]:
+        if not tasks:
+            return set()
+        values = self.redis.mget([self.key(slug, "handoff", task) for task in tasks])
+        return {task for task, value in zip(tasks, values, strict=True) if value}
+
     def handoff_seat(self, slug, task):
         return self.redis.get(self.key(slug, "handoff-seat", task)) or ""
 
