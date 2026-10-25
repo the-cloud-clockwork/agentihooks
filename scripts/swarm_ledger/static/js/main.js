@@ -5,8 +5,8 @@ import { showArtifacts } from "./artifacts.js";
 import { render, renderStats } from "./render.js";
 import { editOverview, editTitle, saveOverview, saveTitle } from "./edits.js";
 import { clearNotification, clearPriority, showAlerts, showNotifications } from "./notices.js";
-import { foldSections, markOutline, outlineBoxes, reveal, sectionBoxes, showOutline, wireOutline } from "./outline.js";
-import { collapsible, commentBoxes, groupOpen, markToggles, rememberGroup, rememberUnanimous, setAllComments } from "./folds.js";
+import { completeList, foldSections, markOutline, outlineBoxes, reveal, sectionBoxes, showOutline, wireOutline } from "./outline.js";
+import { closeComplete, collapsible, commentBoxes, groupOpen, markToggles, rememberGroup, rememberUnanimous, setAllComments } from "./folds.js";
 import { openHash, startLayout, wireRail, wireStatsDrawer, wireTabs } from "./layout.js";
 import { showChat, wireChat, wireChatInput } from "./chat.js";
 import { refreshQuota, wireSwarm } from "./controls.js";
@@ -93,7 +93,10 @@ function start() {
   loadMetadata();
   loadTips().then((values) => { if (values) { Object.assign(tips, values); render(); } });
   connectEvents();
-  loaded.then(() => { if (location.hash.length > 1) openHash(); });
+  loaded.then(() => {
+    closeComplete(sectionBoxes(), (box) => completeList(box.closest("section").dataset.outline));
+    if (location.hash.length > 1) openHash();
+  });
   setInterval(refreshQuota, QUOTA_REFRESH_MS);
   setInterval(renderStats, 30000);
   setInterval(renderSync, 1000);

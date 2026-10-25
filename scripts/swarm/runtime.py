@@ -905,7 +905,7 @@ class HerdrRuntime:
         except subprocess.TimeoutExpired as exc:
             self._terminate(name)
             raise SpawnError(
-                f"init-agent timed out for {name}", "ambiguous", _opened_pane(name, launched_at), agent
+                f"init-agent timed out for {name}", "ambiguous", _opened_pane(name, launched_at), harness=agent
             ) from exc
         timings = {
             "launched_at": launched_at,

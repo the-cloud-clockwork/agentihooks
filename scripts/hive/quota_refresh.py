@@ -4,7 +4,7 @@ import time
 from collections.abc import Mapping
 
 from scripts import claude_quota_balancer as balancer
-from scripts import session_bands
+from scripts import codex_router, quota_freshness, session_bands
 
 MARGIN_SECONDS = 5 * 60
 RETRY_SECONDS = MARGIN_SECONDS
@@ -21,23 +21,36 @@ def stale(environ: Mapping[str, str], now: float) -> list[balancer.Credential]:
     return [c for c in credentials if c.account not in newest or newest[c.account] < deadline]
 
 
+def stale_codex(environ: Mapping[str, str], now: float) -> list[codex_router.CodexAccount]:
+    pool = codex_router.routed([account for account in codex_router.accounts(environ) if account.signed_in], environ)
+    readings = codex_router.quotas(pool, environ)
+    return [
+        account
+        for account in pool
+        if (reading := readings.get(account.name)) is None
+        or quota_freshness.stale(reading.observed_at, (reading.five_hour.resets_at, reading.seven_day.resets_at), now)
+    ]
+
+
 def due(environ: Mapping[str, str], now: float) -> bool:
-    return bool(stale(environ, now))
+    return bool(stale(environ, now) or stale_codex(environ, now))
 
 
 def refresh(environ: Mapping[str, str], now: float | None = None) -> bool:
     now = time.time() if now is None else now
     credentials = stale(environ, now)
-    if not credentials:
-        return False
-    balancer.collect_results(
-        credentials,
-        refresh=True,
-        environ=environ,
-        claude_bin=shutil.which("claude") or "claude",
-        now=now,
-    )
-    return True
+    codex = stale_codex(environ, now)
+    if credentials:
+        balancer.collect_results(
+            credentials,
+            refresh=True,
+            environ=environ,
+            claude_bin=shutil.which("claude") or "claude",
+            now=now,
+        )
+    if codex:
+        codex_router.fresh_quotas(codex, environ, now)
+    return bool(credentials or codex)
 
 
 def start(
