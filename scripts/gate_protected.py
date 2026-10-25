@@ -54,7 +54,7 @@ def runners(policy: object = None) -> list[str]:
 
 def reuse_jobs(policy: object = None) -> list[dict]:
     jobs = []
-    for factory in (ci_reuse.reuse_job, ci_reuse.paged_reuse_job):
+    for factory in (ci_reuse.reuse_job, ci_reuse.paged_reuse_job, ci_reuse.retried_reuse_job):
         for runner in runners(policy):
             job = factory()
             if runner != job["runs-on"]:

@@ -699,6 +699,20 @@ def test_the_protected_grader_admits_only_the_exact_paged_reuse_variant(weakened
     assert bool(problems) == weakened, problems
 
 
+@pytest.mark.parametrize("uses", ["./.github/actions/retry-upload", "./.github/actions/other-upload"])
+def test_the_protected_grader_admits_only_the_retried_evidence_upload(uses):
+    from scripts import ci_reuse
+
+    base, head = _protected_pair()
+    head["jobs"]["reuse"] = ci_reuse.retried_reuse_job()
+    [publish] = [
+        step for step in head["jobs"]["reuse"]["steps"] if step.get("name") == "Publish protected tested tree evidence"
+    ]
+    publish["uses"] = uses
+    problems = gate_protected.grade({"test.yml": base}, {}, {"test.yml": head}, {}, _TODAY)
+    assert bool(problems) == (uses != "./.github/actions/retry-upload"), problems
+
+
 def test_a_head_cannot_replace_the_protected_reuse_decision():
     from scripts import ci_reuse
 
