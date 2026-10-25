@@ -125,6 +125,29 @@ def test_summary_names_each_number_or_missing_telemetry():
     assert headroom.summary(None) == "headroom=missing"
 
 
+@pytest.mark.parametrize(
+    ("node", "pod", "shown"),
+    [(10356, 2576, 2576), (1900, 2576, 1900)],
+)
+def test_summary_shows_the_tighter_of_node_and_pod_memory_with_the_pod_limit(node, pod, shown):
+    record = {
+        "cpus": 16,
+        "load5": 4.73,
+        "available_mb": node,
+        "total_mb": 29857,
+        "pod_total_mb": 4200,
+        "pod_available_mb": pod,
+        "pending": 0,
+        "measured_at": 1,
+    }
+    assert headroom.summary(record) == f"cpus=16\tload5=4.73\tavailable-mb={shown}\tpod-limit-mb=4200\tpending=0"
+
+
+def test_summary_shows_node_memory_when_the_pod_reading_is_incomplete():
+    record = {"cpus": 8, "load5": 1.0, "available_mb": 8000, "pod_total_mb": 4200, "pending": 0, "measured_at": 1}
+    assert headroom.summary(record) == "cpus=8\tload5=1.00\tavailable-mb=8000\tpending=0"
+
+
 def test_beat_publishes_headroom_at_the_beat_time_in_whole_milliseconds(redis, monkeypatch):
     calls = []
     monkeypatch.setattr(
@@ -180,6 +203,24 @@ POD_LIMITS = {
 def limit(cgroup, files):
     for name, text in files.items():
         (cgroup / name).write_text(text)
+
+
+def test_hive_list_shows_a_pod_hive_within_its_pod_memory_limit(redis, proc, cgroup, monkeypatch, capsys):
+    limit(
+        cgroup,
+        {
+            "memory.max": "4404019200\n",
+            "memory.current": "2300563456\n",
+            "memory.stat": "inactive_file 629370880\n",
+        },
+    )
+    monkeypatch.setattr(headroom.os, "cpu_count", lambda: 16)
+    monkeypatch.setattr(cli, "redis_client", lambda: redis)
+    monkeypatch.setattr(cli, "now_ms", lambda: 5_000)
+    registry.update(redis, "anton-2", ["ui=no"])
+    headroom.publish(redis, "anton-2", 5_000, proc)
+    assert cli.main(["list"]) == 0
+    assert "\tcpus=16\tload5=3.46\tavailable-mb=2606\tpod-limit-mb=4200\tpending=0\n" in capsys.readouterr().out
 
 
 def test_measure_adds_the_pod_memory_and_cpu_limits_beside_the_node_reading(proc, cgroup, monkeypatch):
