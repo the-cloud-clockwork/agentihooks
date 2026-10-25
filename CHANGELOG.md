@@ -26,6 +26,9 @@ release assembles them into its release notes. See `changelog.d/README.md`.
 
 ### Changed
 
+- A hive heartbeat newer than the metrics sample time now reads age zero in
+  `swarm.hive_samples` instead of a negative age, so the Hive heartbeat age
+  panel shows data.
 - New swarm enforcements default to log only. The stall watchdog logs would-be
   stops and reopens while retaining alerts; set `stall-gate=deny` after
   checking those actions against reality to enforce them.
