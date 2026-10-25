@@ -262,3 +262,12 @@ def test_an_over_budget_local_master_still_starts_and_counts_against_the_worksta
     assert fenced.placement_refusal("eng", {"id": "task"}).endswith(
         "0.5 CPU per agent with 1 pending launches, fits 0 more under the 80 percent line"
     )
+
+
+def test_a_hybrid_master_falling_back_to_the_workstation_counts_against_it(setup, monkeypatch):
+    from scripts.hive import admission
+
+    fenced = hybrid(setup, monkeypatch)
+    monkeypatch.setattr(commands, "hive_id", lambda: "workstation")
+    assert fenced.spawn(setup.config, "master", "master-new", {"id": "master"}) == "placed on the workstation"
+    assert admission.pending(setup.store.redis, "workstation") == 1
