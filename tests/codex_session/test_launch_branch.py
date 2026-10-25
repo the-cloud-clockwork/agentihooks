@@ -197,7 +197,10 @@ def imported_scripts(interpreter, directory):
     shadow.mkdir(parents=True)
     (shadow / "__init__.py").write_text("")
     probe = [*interpreter[: interpreter.index("-m")], "-c", "import scripts; print(scripts.__file__)"]
-    return subprocess.run(probe, cwd=directory, capture_output=True, text=True, check=True).stdout.strip()
+    import scripts
+
+    environ = {**os.environ, "PYTHONPATH": os.path.dirname(os.path.dirname(scripts.__file__))}
+    return subprocess.run(probe, cwd=directory, env=environ, capture_output=True, text=True, check=True).stdout.strip()
 
 
 def test_the_app_server_imports_the_launching_package_never_the_agent_directory(tmp_path):
