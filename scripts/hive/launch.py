@@ -463,6 +463,8 @@ class HiveLaunch:
         return f"no hive for {request.lane} has room: {selected.hive} {refused}"
 
     def admit(self, request: SpawnRequest, selected: Selection) -> AgentRecord:
+        from scripts.swarm_v2.runtime import codex
+
         raw = self.store.redis.hget(self.store.key(self.slug, "agents"), request.name)
         started_at = json.loads(raw)["started_at"] if raw else lease.now_ms(self.store)
         agent = AgentRecord(
@@ -483,6 +485,7 @@ class HiveLaunch:
                 **({"placement_fallback": selected.fallback} if selected.fallback else {}),
             },
             harness=selected.account.harness,
+            transport=codex.transport(request.config, selected.account.harness),
             account=selected.account.name,
             hive=selected.hive,
             runtime_target={"host_id": selected.hive},
