@@ -84,6 +84,59 @@ def test_task_branch_setting_updates_the_swarm_repository_map(monkeypatch):
     ]
 
 
+def test_clearing_task_branch_removes_only_the_swarm_repository_entry(monkeypatch):
+    from types import SimpleNamespace
+
+    sent = []
+    store = SimpleNamespace(config=lambda slug: SimpleNamespace(repo="/workspace/agentihooks"))
+    monkeypatch.setattr(ledger.ports, "swarm", lambda: SimpleNamespace(store=SimpleNamespace(connect=lambda: store)))
+    monkeypatch.setattr(
+        ledger,
+        "resource",
+        lambda slug, path: {
+            "repository_branches": {"/workspace/agentihooks": "deleted", "/workspace/bundle": "bundle-work"}
+        },
+    )
+    monkeypatch.setattr(ledger, "send", lambda args, kind, **fields: sent.append(fields))
+    args = ledger.build_parser().parse_args(
+        [
+            "--slug",
+            SLUG,
+            "--as",
+            "swarm",
+            "task",
+            "set",
+            "t1",
+            "branch=",
+            "repository_branches./workspace/extra=extra-work",
+        ]
+    )
+    ledger.cmd_task(args)
+    assert sent[0]["fields"] == {
+        "branch": "",
+        "repository_branches": {"/workspace/bundle": "bundle-work", "/workspace/extra": "extra-work"},
+    }
+
+
+def test_branch_setting_on_a_ledger_without_a_swarm_keeps_its_original_fields(monkeypatch):
+    from types import SimpleNamespace
+
+    def missing(slug):
+        raise ValueError("no swarm")
+
+    store = SimpleNamespace(config=missing)
+    monkeypatch.setattr(
+        ledger.ports,
+        "swarm",
+        lambda: SimpleNamespace(store=SimpleNamespace(connect=lambda: store, SwarmError=ValueError)),
+    )
+    sent = []
+    monkeypatch.setattr(ledger, "send", lambda args, kind, **fields: sent.append(fields))
+    args = ledger.build_parser().parse_args(["--slug", SLUG, "--as", "swarm", "task", "set", "t1", "branch=work"])
+    ledger.cmd_task(args)
+    assert sent == [{"item": "tasks/t1", "fields": {"branch": "work"}}]
+
+
 @pytest.mark.parametrize("value", ("bundle", [""], [3], ["relative/repository"]))
 def test_task_repositories_require_absolute_local_paths(value):
     with pytest.raises(ValueError) as error:
