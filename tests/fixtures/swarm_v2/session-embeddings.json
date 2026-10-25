@@ -1,0 +1,48 @@
+{
+  "grant": {"principal": "embedding-fixture", "corpus": "swarm-fixture", "projects": ["github.com/the-cloud-clockwork/agentihooks"]},
+  "foreign_corpus": "personal-corpus",
+  "session_uid": "swarm-fixture:claude:worker-b:session-embeddings",
+  "parent_session_uid": null,
+  "provider": "claude",
+  "retention": "retain-until-deleted",
+  "source_generation": "device-2:inode-34:anchor-0",
+  "origin": "worker-b:projects/agentihooks/session-embeddings.jsonl",
+  "policies": {"current": {"version": "turn-v1", "max_chars": 2000}},
+  "index_generation": "fixture-embed-v1",
+  "next_index_generation": "fixture-embed-v2",
+  "model": {"model": "fixture-hash-embedder-4", "dimension": 4},
+  "next_model": {"model": "fixture-hash-embedder-8", "dimension": 8},
+  "other_family": {"model": "fixture-other-family-4", "dimension": 4},
+  "mismatched_width": 3,
+  "limits": {"batch_size": 2, "batch_chars": 4000, "max_batches": 8},
+  "rate_limited_call": 2,
+  "clock": {"queued": 1000.0, "outage": 1010.0, "restart": 1020.0, "recovered": 1040.0, "appended": 1100.0},
+  "turns": [
+    [
+      {"kind": "user_text", "text": "café: index the session catalog for search"},
+      {"kind": "assistant_text", "text": "日本 I will read the chunk index and the catalog."},
+      {"kind": "tool_call", "tool_name": "Read", "tool_input": {"file_path": "hooks/memory/chunking.py"}, "tool_use_id": "toolu_chunks"},
+      {"kind": "tool_call", "tool_name": "Read", "tool_input": {"file_path": "hooks/memory/catalog.py"}, "tool_use_id": "toolu_catalog"},
+      {"kind": "tool_result", "tool_result": "class ChunkIndex", "tool_use_id": "toolu_chunks", "is_error": false},
+      {"kind": "tool_result", "tool_result": [{"type": "text", "text": "class Catalog ✓"}], "tool_use_id": "toolu_catalog", "is_error": false},
+      {"kind": "assistant_text", "text": "Chunks carry a content hash the worker can compare."}
+    ],
+    [
+      {"kind": "user_text", "text": "call the embedding provider for the queued chunks"},
+      {"kind": "tool_call", "tool_name": "Bash", "tool_input": {"command": "embed --queued"}, "tool_use_id": "toolu_embed"},
+      {"kind": "tool_result", "tool_result": "429 rate limited, retry later", "tool_use_id": "toolu_embed", "is_error": true},
+      {"kind": "assistant_text", "text": "The provider is rate limited; the queue keeps the failed chunks."}
+    ],
+    [
+      {"kind": "user_text", "text": "check the backlog age"},
+      {"kind": "assistant_text", "text": "The backlog age comes from the oldest queued chunk."}
+    ],
+    [
+      {"kind": "user_text", "text": "appended turn: show the vector count"},
+      {"kind": "tool_call", "tool_name": "Bash", "tool_input": {"command": "count vectors"}, "tool_use_id": "toolu_count"},
+      {"kind": "tool_result", "tool_result": "8 vectors", "tool_use_id": "toolu_count", "is_error": false},
+      {"kind": "assistant_text", "text": "Only the new chunks were embedded."}
+    ]
+  ],
+  "appended_turns": 1
+}
