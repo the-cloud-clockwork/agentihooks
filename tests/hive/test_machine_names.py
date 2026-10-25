@@ -49,6 +49,35 @@ def test_each_machine_keeps_the_lowest_free_ordinal_it_was_given(admin):
     assert admin.hgetall(machine.MACHINES) == {"worker-001": "swarm-hive-001", "worker-002": "swarm-hive-002"}
 
 
+def test_a_name_taken_while_it_was_chosen_is_chosen_again(admin, monkeypatch):
+    real = admin.pipeline
+
+    def racing(*args, **kwargs):
+        pipe = real(*args, **kwargs)
+        execute = pipe.execute
+
+        def raced(*inner, **options):
+            if not admin.hexists(machine.MACHINES, "worker-009"):
+                admin.hset(machine.MACHINES, "worker-009", "swarm-hive-001")
+            return execute(*inner, **options)
+
+        pipe.execute = raced
+        return pipe
+
+    monkeypatch.setattr(admin, "pipeline", racing)
+
+    assert machine.name(admin, "worker-001") == "swarm-hive-002"
+    assert admin.hgetall(machine.MACHINES) == {"worker-009": "swarm-hive-001", "worker-001": "swarm-hive-002"}
+
+
+def test_a_target_saved_under_another_label_is_not_added_to_herdr_again(admin):
+    run = Run([{"id": "a1", "label": "anton-2", "target": CLOUD}])
+
+    machine.save(admin, "root", CLOUD, "swarm-hive-001", run)
+
+    assert run.calls == []
+
+
 def test_a_name_only_looked_up_writes_nothing(admin):
     assert machine.name(admin, "worker-001", assign=False) == "swarm-hive-001"
     assert admin.hgetall(machine.MACHINES) == {}

@@ -72,7 +72,7 @@ class Run:
             path.with_suffix(".pub").write_text("ssh-ed25519 HOSTPUBLIC swarm\n")
             return ""
         if argv[:3] == ["herdr", "machine", "list"]:
-            return "[]"
+            return json.dumps(getattr(self, "machines", []))
         if argv[0] != "gh":
             return ""
         return self._gh(argv[1:], stdin)
@@ -234,6 +234,30 @@ def test_a_finished_create_redeploys_the_same_hive_on_the_next_run(world):
     assert not [argv for argv in later if argv[0] in ("ssh-keygen", "ssh")]
     assert _state(world)["name"] == NAME and _state(world)["finished"] is True
     assert f"hive create {NAME}: redeploying the hive of node worker-001" in world.lines
+    assert len(world.tools.redis.keys(f"{auth.PREFIX}:member:*")) == 1
+
+
+def test_a_redeploy_that_stops_early_is_saved_unfinished(world):
+    create.create(world.tools, create.Options(timeout_s=60))
+    Store.working = False
+
+    with pytest.raises(auth.HiveError, match="waiting for an engineer working on the hive"):
+        create.create(world.tools, create.Options(timeout_s=0))
+    assert _state(world)["finished"] is False
+    assert "FINISHED" not in _state(world)
+
+
+def test_a_create_without_its_saved_state_reuses_the_record_pull_request_and_herdr_entry(world):
+    create.create(world.tools, create.Options(timeout_s=60))
+    (world.home / "agentihooks" / create.STATE_FILE).unlink()
+    world.run.machines = [{"id": "a1", "label": NAME, "target": TARGET}]
+    calls = len(world.run.calls)
+
+    assert create.create(world.tools, create.Options(timeout_s=60)) == f"hive {NAME} is live in herdr as {TARGET}"
+    later = world.run.calls[calls:]
+    assert not [argv for argv in later if argv[:3] in (["gh", "pr", "create"], ["herdr", "machine", "add"])]
+    assert not [argv for argv in later if argv[0] == "ssh-keygen"]
+    assert f"hive create {NAME}: manifests: opened pull request {PR}" in world.lines[len(create.STEPS) :]
     assert len(world.tools.redis.keys(f"{auth.PREFIX}:member:*")) == 1
 
 
