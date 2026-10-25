@@ -5,6 +5,7 @@ import pytest
 
 from scripts.doctor import ci_speed, loop
 from scripts.swarm.health.findings import MINUTE_MS
+from scripts.swarm.health.verdicts import VerdictStore
 from scripts.swarm.store import RedisStore
 
 pytestmark = pytest.mark.unit
@@ -76,8 +77,9 @@ def test_numeric_ci_baselines_survive_display_changes(kind):
 
     store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
     first = replace(grouped(kind, [900, 900, 1000]), evidence=("CI class timing",))
-    loop.record(store, "doctor", [first], NOW, MINUTE_MS)
-    verdict = loop.verdicts(store, "doctor").judge(first.id, "established", "known", "master", NOW)
+    judgments = VerdictStore(store.redis, loop.verdicts(store, "doctor").key)
+    judgments.visible([first], NOW, MINUTE_MS)
+    verdict = judgments.judge(first.id, "established", "known", "master", NOW)
     assert verdict["metrics"] == [1000, 900]
     changed = replace(grouped(kind, [901, 901, 1000], 10), evidence=("New display",))
     assert loop.record(store, "doctor", [changed], NOW + MINUTE_MS, MINUTE_MS)
