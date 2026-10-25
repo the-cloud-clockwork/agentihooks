@@ -47,6 +47,7 @@ def test_mapping_updates_done_tasks_preserves_links_and_is_idempotent():
     ledger.tasks.return_value = rows
 
     def update(slug, tid, fields):
+        assert slug == "sw"
         next(row for row in rows if row["id"] == tid).update(fields)
 
     ledger.update_task.side_effect = update
@@ -64,8 +65,8 @@ def test_unknown_tag_refuses_before_any_task_changes():
 
     ledger = Mock()
     ledger.tasks.return_value = [{"id": "t1"}]
-    with pytest.raises(ValueError, match="t-missing"):
-        sync(ledger, "sw", {"t1": ["1 Known"], "t-missing": ["2 Missing"]})
+    with pytest.raises(ValueError, match="^Unknown ledger tasks: t-absent, t-missing$"):
+        sync(ledger, "sw", {"t1": ["1 Known"], "t-missing": ["2 Missing"], "t-absent": ["3 Absent"]})
     ledger.update_task.assert_not_called()
 
 
@@ -86,6 +87,8 @@ def test_command_reads_the_document_and_prints_every_mapping(tmp_path, monkeypat
     ledger.tasks.return_value = [{"id": "t1"}]
     monkeypatch.setattr(doc_items, "LedgerClient", lambda: ledger)
     assert doc_items.main(["--slug", "sw", "--document", str(document)]) == 0
+    ledger.tasks.assert_called_once_with("sw")
+    ledger.update_task.assert_called_once_with("sw", "t1", {"doc_items": ["1 First item", "2 Second item"]})
     assert json.loads(capsys.readouterr().out) == {
         "slug": "sw",
         "tasks": 1,

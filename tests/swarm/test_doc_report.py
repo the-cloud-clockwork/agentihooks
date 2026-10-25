@@ -34,6 +34,13 @@ def test_configured_watchdog_receives_tick_and_done_reports(env, monkeypatch):  
     assert not inbox.inbox("wrong-address")
 
 
+def test_report_without_a_recipient_uses_the_legacy_watchdog(world):
+    inbox, ledger = world
+    assert doc_report.report(inbox, ledger, SLUG, task("t1"), AT)
+    [item] = inbox.inbox(WATCHDOG)
+    assert item.task == "t1"
+
+
 def test_report_pass_sends_directly_to_the_configured_watchdog(world, monkeypatch):
     inbox, ledger = world
     monkeypatch.setenv(doc_report.ADDRESS_ENV, "wrong-address")
