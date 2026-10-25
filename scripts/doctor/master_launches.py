@@ -60,6 +60,16 @@ def _failed_at(row, retried):
     return retried.get(row["id"]) or row.get("attached_at") or row["at"]
 
 
+def _confirmed(row, retried, resumes, lines):
+    at = _failed_at(row, retried)
+    return (
+        row["binding"].get("reason") == "Launch failed"
+        or row["id"] in retried
+        or row["id"] in resumes
+        or any(at <= line[0] <= at + MATCH_MS for line in lines)
+    )
+
+
 def _take(lines, at, record):
     if record["journal"] is None:
         return f"unavailable: {record['journal_error']}"
@@ -75,7 +85,11 @@ def attempts(record: dict) -> list[Attempt]:
     The record holds only master rows, outcomes and agents, as spawn_read.master_records reads them."""
     lines, retried = sorted(_lines(record)), _retried(record["transfers"])
     resumes = {o["transfer"]: o for o in record["restored"] if o["outcome"] == AWAITING}
-    failed = [row for row in record["transfers"] if row["binding"]["state"] == "absent"]
+    failed = [
+        row
+        for row in record["transfers"]
+        if row["binding"]["state"] == "absent" and _confirmed(row, retried, resumes, lines)
+    ]
     found = []
     for row in sorted(failed, key=lambda row: _failed_at(row, retried)):
         at, outcome = _failed_at(row, retried), resumes.pop(row["id"], None)

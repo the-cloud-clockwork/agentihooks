@@ -224,7 +224,7 @@ def test_a_failed_row_without_a_retry_is_timed_from_its_attach_not_its_moving_bi
         "successor": "master@x-2",
         "at": 100,
         "attached_at": 200,
-        "binding": {"state": "absent", "at": 900, "session": "master@x-2"},
+        "binding": {"state": "absent", "at": 900, "session": "master@x-2", "reason": "Launch failed"},
     }
     record = {"slug": "sw", "transfers": [row], "restored": [], "agents": [], "journal": [], "journal_error": ""}
     restamped = {**record, "transfers": [{**row, "binding": {**row["binding"], "at": 1900}}]}
@@ -392,8 +392,63 @@ def bare(transfers=(), restored=(), agents=(), journal=()):
 
 
 def absent(row_id="a1", at=1000, reason="recycle"):
-    binding = {"state": "absent", "at": at + 5}
+    binding = {"state": "absent", "at": at + 5, "reason": "Launch failed"}
     return {"id": row_id, "reason": reason, "task": "master", "successor": f"m@{row_id}", "at": at, "binding": binding}
+
+
+@pytest.mark.parametrize("state", ["pending", "absent"])
+def test_unfinished_master_startup_is_not_a_failed_launch(state):
+    row = absent()
+    row["binding"] = {"state": state, "at": 1005}
+    record = bare([row])
+
+    assert master_launches.attempts(record) == []
+    assert master_launches.findings(record) == []
+
+    row["binding"] = {"state": "live", "at": 2000}
+    assert master_launches.findings(bare([row])) == []
+
+
+@pytest.mark.parametrize("evidence", ["binding", "retry", "restore", "journal"])
+def test_confirmed_master_launch_failure_is_still_detected(evidence):
+    row = absent()
+    row["binding"] = {"state": "absent", "at": 1005}
+    record = bare([row])
+    if evidence == "binding":
+        row["binding"]["reason"] = "Launch failed"
+    elif evidence == "retry":
+        record["transfers"].append({**absent("retry", at=1000), "retry_of": row["id"], "binding": {"state": "pending"}})
+    elif evidence == "restore":
+        record["restored"].append(
+            {"transfer": row["id"], "outcome": "awaiting-decision", "reason": "resume failed", "at": 1000}
+        )
+    else:
+        record["journal"].append(spawn_line(1000))
+
+    [attempt] = master_launches.attempts(record)
+    assert attempt.at == 1000
+    [finding] = master_launches.findings(record)
+    assert finding.measure == 1
+
+
+@pytest.mark.parametrize(
+    "line_at,path",
+    [
+        (999, "fresh"),
+        (1000, "recycle handoff"),
+        (1001, "recycle handoff"),
+        (1000 + master_launches.MATCH_MS, "recycle handoff"),
+        (1001 + master_launches.MATCH_MS, "fresh"),
+    ],
+)
+def test_unconfirmed_absence_uses_only_a_correlated_failure_journal_entry(line_at, path):
+    row = absent()
+    row["binding"] = {"state": "absent", "at": 1005}
+
+    [attempt] = master_launches.attempts(bare([row], journal=[spawn_line(line_at)]))
+
+    assert attempt.path == path
+    assert attempt.at == (1000 if path == "recycle handoff" else line_at)
 
 
 def spawn_line(at, error="boom"):
