@@ -99,7 +99,22 @@ def test_fetch_maintenance_removes_initializing_grader(tmp_path, disable_mainten
     source = tmp_path / "pause.c"
     library = tmp_path / "pause.so"
     source.write_text(INTERPOSER)
-    subprocess.run(["cc", "-shared", "-fPIC", "-o", str(library), str(source), "-ldl"], check=True)
+    compiled = subprocess.run(
+        [
+            "docker",
+            "run",
+            "--rm",
+            "-i",
+            "gcc:14",
+            "sh",
+            "-c",
+            "gcc -shared -fPIC -x c - -o /tmp/probe.so -ldl && cat /tmp/probe.so",
+        ],
+        input=source.read_bytes(),
+        capture_output=True,
+        check=True,
+    )
+    library.write_bytes(compiled.stdout)
     created = tmp_path / "created"
     release = tmp_path / "release"
     maintenance = tmp_path / "maintenance"
