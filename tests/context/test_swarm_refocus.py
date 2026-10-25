@@ -4,6 +4,7 @@ import pytest
 
 import hooks.context.swarm_refocus as refocus
 from hooks import hook_manager
+from hooks.context import master_coding
 from hooks.targets.emitter import flush
 from scripts.swarm_ledger import plan_read
 from scripts.swarm_ledger.repository.sqlite import DATABASE
@@ -209,7 +210,7 @@ def test_codex_compact_start_restores_intent_once(bound, monkeypatch, capsys, co
     assert "PostCompact" not in hook_manager.EVENT_HANDLERS
     out = _session_start(compact_events[2], capsys)
     assert "SWARM REFOCUS" in out
-    if task_id.startswith("master"):
+    if master_coding.MASTER_TASK.fullmatch(task_id):
         assert "Master obligations:" in out
         assert "Your task master" not in out
     else:

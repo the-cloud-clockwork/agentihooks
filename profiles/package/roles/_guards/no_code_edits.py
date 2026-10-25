@@ -21,14 +21,14 @@ SERENA_WRITES = {
 
 
 def _allowed_roots(role: str, home: Path) -> list[Path]:
+    from hooks.context import master_coding
+
     roots = [(home / "scratchpad").resolve()]
     if role in PLANNERS:
         config = Path(os.environ.get("CLAUDE_CONFIG_DIR") or home / ".claude")
         roots.append((config / "plans").resolve())
     swarm = os.environ.get("AGENTIHOOKS_SWARM", "")
     task = os.environ.get("AGENTIHOOKS_SWARM_TASK", "")
-    from hooks.context import master_coding
-
     if not master_coding.MASTER_TASK.fullmatch(task) and all(
         re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]*", value) for value in (swarm, task)
     ):
@@ -55,7 +55,7 @@ def hotfix_open(payload: dict, role: str) -> bool:
     return master_coding.is_open(str(payload.get("session_id") or ""))
 
 
-def _delegated(payload: dict, role: str, home: Path) -> bool:
+def _delegated(payload: dict, role: str) -> bool:
     from hooks.context import master_coding
 
     return (
@@ -74,7 +74,7 @@ def deny_reason(payload: dict, role: str, home: Path) -> str:
     paths.extend(inputs.get("file_paths", []))
     cwd = Path(payload.get("cwd") or os.getcwd())
     roots = _allowed_roots(role, home)
-    if _delegated(payload, role, home) or hotfix_open(payload, role):
+    if _delegated(payload, role) or hotfix_open(payload, role):
         from hooks.context.master_coding import closed_in_window
 
         if any(closed_in_window(value, cwd) for value in paths):
