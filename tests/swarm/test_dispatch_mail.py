@@ -250,7 +250,8 @@ def test_launch_rechecks_mail_after_capacity_checks(mailbox, monkeypatch, capsys
         if disposition == "missing":
             store.redis.delete(inbox.key("item", stale))
         else:
-            inbox.close(stale, "former", disposition, "Evidence considered; ranking unchanged")
+            closer = inbox.seats.occupant(f"dispatcher@{SLUG}").occupant
+            inbox.close(stale, closer, disposition, "Evidence considered; ranking unchanged")
         return ""
 
     if boundary == "capacity":
