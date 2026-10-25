@@ -6,7 +6,11 @@
   },
   "observed": {
     "authoritative_state_unchanged": true,
-    "evidence_reference_resolution_failures": 0,
+    "evidence_reference_resolution_failures": {
+      "access_domain": "swarm-fixture",
+      "principal": "tools-fixture",
+      "value": 0
+    },
     "expansion": {
       "complete": true,
       "records": [

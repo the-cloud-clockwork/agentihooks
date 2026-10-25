@@ -189,6 +189,7 @@ def rejection(inputs, root):
         ),
         "records_under_a_narrow_grant": bank.ask("session_records", body(inputs, citation=cited), None, narrow),
     }
+    first = bank.ask("session_list", body(inputs, limit=1))
     revision = bank.revoke("lock")
     restricted = bank.revoke("readme", "restricted")
     before = bank.protected()
@@ -204,7 +205,6 @@ def rejection(inputs, root):
     }
     searched = bank.ask("search_sessions", body(inputs, query=inputs["queries"]["hit"]))
     listing = bank.ask("list_sessions", body(inputs))
-    first = bank.ask("session_list", body(inputs, limit=1))
     scoped = {
         "foreign_corpus": bank.ask("session_list", {**body(inputs), "access_domain": inputs["foreign_corpus"]}),
         "cursor_from_another_grant": bank.ask(

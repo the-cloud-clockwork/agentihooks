@@ -18,7 +18,49 @@
       "kernel"
     ],
     "cursor_replay_identical": true,
-    "evidence_reference_resolution_failures": 0,
+    "cursor_rows": {
+      "after_replay": 3,
+      "after_tail": 3,
+      "before_restart": 3
+    },
+    "durability": {
+      "archive_objects_unchanged": {
+        "after": 3,
+        "before": 3
+      },
+      "authoritative_rows_changed": [
+        "kernel"
+      ],
+      "authoritative_rows_survived_restart": {
+        "archive_manifest": 3,
+        "chunk_cutover": 3,
+        "chunk_generation": 3,
+        "chunk_vector": 0,
+        "embedding_work": 0,
+        "index_cutover": 0,
+        "index_generation": 0,
+        "search_chunk": 5,
+        "session_event": 10,
+        "session_ingest_batch": 3,
+        "session_quarantine": 0,
+        "session_record": 3,
+        "session_source": 3,
+        "session_watermark": 3
+      },
+      "cursor_rows_survived_restart": {
+        "after": 3,
+        "before": 3
+      },
+      "expired": {
+        "lifetime": "cursor_expired",
+        "listing_changed": "cursor_expired"
+      }
+    },
+    "evidence_reference_resolution_failures": {
+      "access_domain": "swarm-fixture",
+      "principal": "tools-fixture",
+      "value": 0
+    },
     "expansion_across_restart": {
       "head": [
         {
@@ -45,6 +87,7 @@
       ],
       "tail_pages": 1
     },
+    "expansion_replay_identical": true,
     "expired_cursor": {
       "error": {
         "class": "cursor_expired",
@@ -54,10 +97,27 @@
       "state": "rejected"
     },
     "listing_restarted_without_cursor": [
-      "lock"
+      [
+        "lock"
+      ],
+      [
+        "readme"
+      ]
     ],
     "rollback_rehearsal": {
-      "archive_unchanged": true,
+      "accepted_search_after_hiding": {
+        "results": 2,
+        "state": "answered"
+      },
+      "archive_evidence_after_hiding": {
+        "complete": true,
+        "sources": 1
+      },
+      "authoritative_state_matches_case_start": true,
+      "rows_the_tools_write": [
+        "session_cursor rows",
+        "evidence_reference_resolution_failures, session_alias_calls and session_search_scope_rejections counters"
+      ],
       "tools_hidden": [],
       "tools_with_aliases": [
         "get_session",
@@ -76,6 +136,14 @@
         "session_records",
         "session_search"
       ]
+    },
+    "stale_cursor_after_newer_listing": {
+      "error": {
+        "class": "cursor_expired",
+        "detail": "the listing changed since the cursor was issued; start the listing again without a cursor",
+        "retry": "never"
+      },
+      "state": "rejected"
     }
   },
   "state": "passed"
