@@ -1,4 +1,5 @@
 import json
+from dataclasses import replace
 
 import pytest
 
@@ -113,7 +114,7 @@ def test_inbox_receivers_name_who_is_live_how_long_quiet_and_who_sits_outside_th
     addresses = [seat, named, f"{SLUG}-eng-2", f"{SLUG}-eng-5", "engineer-100001-0001-tmp-1", "operator", doctor]
     items = [{"address": address, "history": []} for address in addresses]
     assert read.inbox_receivers(store, box, SLUG, items) == {
-        seat: Receiver(live=True, quiet_ms=2 * 60_000, occupant=f"{SLUG}-eng-1", task="t1"),
+        seat: Receiver(live=True, quiet_ms=2 * 60_000, occupant=f"{SLUG}-eng-1", task="t1", bound_at=10),
         named: Receiver(live=True, occupant=named, task="t6"),
         f"{SLUG}-eng-2": Receiver(),
         f"{SLUG}-eng-5": Receiver(),
@@ -135,9 +136,25 @@ def test_inbox_receivers_name_the_agent_that_took_delivery_apart_from_the_seat_o
     took = [{"state": "pending", "by": "swarm"}, {"state": "delivered", "by": f"{SLUG}-eng-1"}]
     items = [{"address": seat, "history": took}, {"address": seat, "history": took[:1]}]
     assert read.inbox_receivers(store, box, SLUG, items) == {
-        seat: Receiver(live=True, occupant=f"{SLUG}-eng-2", task="t2"),
+        seat: Receiver(live=True, occupant=f"{SLUG}-eng-2", task="t2", bound_at=10),
         f"{SLUG}-eng-1": Receiver(),
     }
+
+
+def test_inbox_receivers_carry_when_the_live_occupant_bound_its_seat(redis):
+    from scripts.swarm.store import AgentRecord
+
+    store, box = RedisStore(redis), InboxStore(redis)
+    seat, legacy = f"eng-1@{SLUG}", f"eng-2@{SLUG}"
+    for n, at in enumerate((10, 20, 40), 1):
+        store.seats.occupy(seat, f"{SLUG}-eng-{n}", at)
+    store.seats.note(seat, "handoff", "noted", 70)
+    redis.hset(store.seats.key(legacy), mapping={"occupant": f"{SLUG}-eng-4", "generation": 1})
+    for n in (3, 4):
+        store.put_agent(SLUG, AgentRecord(name=f"{SLUG}-eng-{n}", lane="eng", task=f"t{n}"))
+    items = [{"address": seat, "history": []}, {"address": legacy, "history": []}]
+    receivers = read.inbox_receivers(store, box, SLUG, items)
+    assert (receivers[seat].bound_at, receivers[legacy].bound_at) == (40, 0)
 
 
 @pytest.mark.parametrize("count", [10, 200])
@@ -166,7 +183,8 @@ def test_receiver_reads_have_constant_round_trips_and_preserve_results(redis, mo
                 {"address": seat, "history": []},
             ]
         )
-        expected[alias] = expected[seat] = Receiver(live=True, quiet_ms=n * 60_000, occupant=name, task="t1")
+        expected[alias] = Receiver(live=True, quiet_ms=n * 60_000, occupant=name, task="t1")
+        expected[seat] = replace(expected[alias], bound_at=10)
         expected[taker] = Receiver(seat_wait=bool(n % 2))
     items.extend([{"address": "operator", "history": []}, {"address": "stranger", "history": []}])
     expected.update(operator=Receiver(), stranger=Receiver(scoped=False))
@@ -195,7 +213,7 @@ def test_receiver_reads_keep_delivery_seats_and_exited_occupants(redis, state, c
         {"address": name, "history": []},
     ]
     assert read.inbox_receivers(store, box, SLUG, items) == {
-        seat: Receiver(seat_wait=waiting),
+        seat: Receiver(seat_wait=waiting, bound_at=10),
         taker: Receiver(seat_wait=waiting),
         name: Receiver(live=True, occupant=name, harness="codex", task="t1"),
     }
