@@ -481,6 +481,16 @@ def claimed_home(environ: Mapping[str, str]) -> Path | None:
     )
 
 
+def _alert(environ: Mapping[str, str], target: Path | None, outcome: str, cwd: Path) -> None:
+    from scripts import master_login_chain as chain
+
+    alerted = target or _token_folder(environ) / "claude"
+    alerted.parent.mkdir(mode=PRIVATE_DIR, parents=True, exist_ok=True)
+    refused = chain.alert(environ, alerted, outcome, str(cwd))
+    if refused:
+        print(f"[agenti] operator login email refused: {refused}", file=sys.stderr)
+
+
 def prepare_launch(environ: Mapping[str, str], cwd: Path) -> tuple[Path, str] | None:
     from scripts import master_login_chain as chain
     from scripts.routing import native_login
@@ -525,13 +535,8 @@ def prepare_launch(environ: Mapping[str, str], cwd: Path) -> tuple[Path, str] | 
     def token():
         if target is not None:
             release(target, environ)
-        if reported not in ("captcha", "failure"):
-            return None
-        alerted = target or _token_folder(environ) / "claude"
-        alerted.parent.mkdir(mode=PRIVATE_DIR, parents=True, exist_ok=True)
-        refused = chain.alert(environ, alerted, reported, str(cwd))
-        if refused:
-            print(f"[agenti] operator login email refused: {refused}", file=sys.stderr)
+        if reported in ("captcha", "failure"):
+            _alert(environ, target, reported, cwd)
         return None
 
     return chain.run(current, browser, token)
