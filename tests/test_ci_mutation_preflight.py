@@ -117,7 +117,10 @@ def test_preflight_runs_the_suite_speed_contracts_after_the_touched_tests_when_a
     steps, names = _steps(workflow["jobs"]["touched-tests"])
     run_at = names.index("Run the suite speed contracts")
     assert run_at == names.index("Run the tests the branch touches") + 1
-    assert steps[run_at]["if"] == "steps.touched.outputs.files != ''"
+    assert steps[run_at]["if"] in (
+        "steps.touched.outputs.files != ''",
+        "steps.open.outputs.open == 'false' && steps.touched.outputs.files != ''",
+    )
     assert steps[run_at]["run"] == "python -m pytest tests/test_suite_speed.py --tb=short -p no:cacheprovider"
     assert not any(step.get("continue-on-error") for step in steps)
 
@@ -279,6 +282,54 @@ def test_a_single_stats_part_refines_inside_the_statistics_worker():
     assert "Download the shared mutation stats" not in names
 
 
+def test_every_stats_part_restores_one_merged_cache_saved_once_after_all_parts_finish():
+    jobs = _workflow()["jobs"]
+    key = "mutation-test-stats-v2-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}"
+    steps, names = _steps(jobs["stats"])
+    restore = steps[names.index("Restore the merged test stats")]
+    assert restore["uses"] == "actions/cache/restore@v4"
+    assert restore["with"] == {
+        "path": ".mutation-stats-cache",
+        "key": key,
+        "restore-keys": "mutation-test-stats-v2-${{ runner.os }}-",
+    }
+    assert "if" not in restore
+    single = steps[names.index("Save the merged test stats")]
+    assert single["uses"] == "actions/cache/save@v4"
+    assert single["if"] == "success() && strategy.job-total == 1"
+    assert single["with"] == {"path": ".mutation-stats-cache", "key": key}
+    part = steps[names.index("Upload this part's test stats cache")]
+    assert part["if"] == "success() && strategy.job-total != 1"
+    assert part["uses"] == "actions/upload-artifact@v4"
+    assert part["with"] == {
+        "name": "mutation-test-stats-cache-${{ matrix.part }}",
+        "path": ".mutation-stats-cache/",
+        "include-hidden-files": True,
+        "if-no-files-found": "ignore",
+        "retention-days": 1,
+        "overwrite": True,
+    }
+    collect = names.index("Collect one stats part for every mutation shard")
+    assert names.index(restore["name"]) < collect < names.index(single["name"])
+    assert collect < names.index(part["name"])
+    assert [step for step in steps if step.get("uses", "").startswith("actions/cache/save")] == [single]
+    assert not part["with"]["name"].startswith("mutation-stats-")
+    refine_steps, refine_names = _steps(jobs["refine"])
+    download = refine_steps[refine_names.index("Download every part's test stats cache")]
+    assert download["uses"] == "actions/download-artifact@v4"
+    assert download["with"] == {
+        "pattern": "mutation-test-stats-cache-*",
+        "path": ".mutation-stats-cache",
+        "merge-multiple": True,
+    }
+    merged = refine_steps[refine_names.index("Save the merged test stats")]
+    assert merged["uses"] == "actions/cache/save@v4"
+    assert merged["if"] == "success() && hashFiles('.mutation-stats-cache/**') != ''"
+    assert merged["with"] == {"path": ".mutation-stats-cache", "key": key}
+    assert refine_names.index(download["name"]) < refine_names.index(merged["name"])
+    assert "matrix.part" not in str([restore, single, merged])
+
+
 def test_preflight_collects_one_stats_part_per_leg_with_the_pull_request_budget():
     job = _workflow()["jobs"]["stats"]
     assert job["timeout-minutes"] == 26
@@ -397,8 +448,6 @@ def test_only_the_push_preflight_reports_the_check_that_proves_a_commit_graded()
 
 def test_touched_tests_job_selects_and_runs_the_tests_the_branch_touches():
     job = _workflow()["jobs"]["touched-tests"]
-    assert job["needs"] == "plan"
-    assert job["if"] == "${{ !cancelled() && needs.plan.outputs.open == 'false' }}"
     assert job["timeout-minutes"] == 15
     steps, names = _steps(job)
     select = steps[names.index("Select the tests the branch touches")]
@@ -406,14 +455,34 @@ def test_touched_tests_job_selects_and_runs_the_tests_the_branch_touches():
     assert 'changed_files(root, "origin/dev", "HEAD")' in select["run"]
     assert "if is_test(path) and (root / path).is_file()" in select["run"]
     browser = steps[names.index("Install the browser that page tests drive")]
-    assert browser["if"] == "steps.touched.outputs.browser == 'true'"
+    assert browser["if"] in (
+        "steps.touched.outputs.browser == 'true'",
+        "steps.open.outputs.open == 'false' && steps.touched.outputs.browser == 'true'",
+    )
     run = steps[names.index("Run the tests the branch touches")]
-    assert run["if"] == "steps.touched.outputs.files != ''"
+    assert run["if"] in (
+        "steps.touched.outputs.files != ''",
+        "steps.open.outputs.open == 'false' && steps.touched.outputs.files != ''",
+    )
     assert run["env"]["FILES"] == "${{ steps.touched.outputs.files }}"
     assert run["run"] == (
         'read -ra files <<< "$FILES"\npython -m pytest "${files[@]}" -n auto --dist loadgroup --tb=short -p no:cacheprovider\n'
     )
     assert not any(step.get("continue-on-error") for step in steps)
+
+
+def test_touched_tests_admission_preserves_both_supported_job_graphs():
+    jobs = _workflow()["jobs"]
+    job = jobs["touched-tests"]
+    if job.get("needs") == "plan":
+        assert job["if"] == "${{ !cancelled() && needs.plan.outputs.open == 'false' }}"
+        return
+    assert "needs" not in job
+    assert job["if"] == "${{ github.event_name == 'push' && !github.event.deleted }}"
+    assert job["steps"][0] == jobs["plan"]["steps"][0]
+    for step in job["steps"][1:]:
+        assert step["if"].startswith("steps.open.outputs.open == 'false'")
+    assert not any(step.get("continue-on-error") for step in job["steps"])
 
 
 def test_touched_test_selection_supplies_the_automatic_worker_limit():

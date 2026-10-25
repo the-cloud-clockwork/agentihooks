@@ -4,22 +4,31 @@ import os
 import signal
 import socket
 import sys
+import threading
 import traceback
+from typing import TYPE_CHECKING
 
 from scripts.events.bus import Bus, Delivery, StateConflict, StateStore
 from scripts.events.config import BusConfig
 from scripts.events.envelope import Envelope
 from scripts.events.factory import open_bus
-from scripts.hive import buckets
+from scripts.hive import auth, buckets
 from scripts.hub import lease, registry, slots
 from scripts.hub.registry import Reactor, Registry
 from scripts.scheduler.process_timer import wait as scheduled_wait
+from scripts.swarm import store
+from scripts.swarm_ledger import ledger_link
+
+if TYPE_CHECKING:
+    from redis import Redis
 
 VERSIONS = "hub-versions"
 IDLE_S = 5.0
 BATCH = 32
 FETCH_TIMEOUT_MS = 500
 LEASE_TTL_MS = 15_000
+CREDENTIAL_ENV = "AGENTIHOOKS_CONTROLLER_CREDENTIAL"
+KEEP_S = auth.SERVICE_TTL_S / 3
 
 
 def handled_key(reactor: Reactor, event: Envelope) -> str:
@@ -128,15 +137,43 @@ def _run(hub: HubRunner, once: bool) -> int:
             scheduled_wait(IDLE_S)
 
 
+def _issued_credential(holder: str) -> tuple["Redis", str] | None:
+    if not ledger_link.remote():
+        return None
+    redis = store.redis_client()
+    return redis, auth.issue_service(redis, f"hub-{holder}")
+
+
+def _renew_forever(redis: "Redis", credential: str) -> None:
+    while True:
+        scheduled_wait(KEEP_S)
+        try:
+            auth.keep_service(redis, credential)
+        except Exception:
+            print("hub: service credential renewal failed", file=sys.stderr)
+            traceback.print_exc()
+
+
+def _renewal(redis: "Redis", credential: str) -> threading.Thread:
+    thread = threading.Thread(target=_renew_forever, args=(redis, credential), daemon=True)
+    thread.start()
+    return thread
+
+
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(prog="agentihooks hub")
     parser.add_argument("action", choices=("run",))
     parser.add_argument("--once", action="store_true")
     args = parser.parse_args(argv)
+    holder = os.environ.get("HOSTNAME") or socket.gethostname()
+    issued = _issued_credential(holder)
+    if issued:
+        os.environ[CREDENTIAL_ENV] = issued[1]
+        _renewal(*issued)
     bus = open_bus(BusConfig.from_environ(os.environ))
     buckets.provision(bus)
     slots.serve(bus)
-    hub = HubRunner(bus, registry.configured(bus), os.environ.get("HOSTNAME") or socket.gethostname())
+    hub = HubRunner(bus, registry.configured(bus), holder)
     previous = signal.signal(signal.SIGTERM, lambda *_: sys.exit(143))
     try:
         return {"run": _run}[args.action](hub, args.once)

@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING
 
 from hooks.context import account_sessions
 from hooks.context.account_sessions import INTERACTIVE_PREFIX
+from scripts import session_bands
 from scripts.routing import master_account
 from scripts.routing.slots import API
 
@@ -13,6 +14,7 @@ if TYPE_CHECKING:
 
 CEILINGS = ((3, 50.0), (2, 60.0), (1, 70.0))
 LOWEST = min(limit for _, limit in CEILINGS)
+MASTER_LEAVES = 100.0 - session_bands.WEEK_FLOOR
 MASTER_NAME = "master@"
 AGENT_NAME = "AGENTIHOOKS_AGENT_NAME"
 

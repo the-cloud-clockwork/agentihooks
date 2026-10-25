@@ -9,10 +9,13 @@ from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
+from nats.js.errors import APIError
 
 from scripts.events import nats
 
 REQUIRED_ENV = "NATS_SERVER_REQUIRED"
+UNMATCHED_MSG_ID = "never-a-last-msg-id"
+WRONG_LAST_MSG_ID = 10070
 
 
 def binary() -> str:
@@ -57,6 +60,25 @@ def _wait_url(ports: Path, process: subprocess.Popen, deadline_s: float = 10) ->
 
 def durables(bus) -> list[str]:
     return sorted(info.name for info in bus._loop.run(bus._js.consumers_info(nats.EVENT_STREAM)))
+
+
+def remembers(bus, subject: str, stream: str, event_id: str) -> bool:
+    headers = {nats.MSG_ID: event_id, "Nats-Expected-Last-Msg-Id": UNMATCHED_MSG_ID}
+    try:
+        ack = bus._loop.run(bus._js.publish(subject, b"", stream=stream, headers=headers))
+    except APIError as error:
+        if error.err_code != WRONG_LAST_MSG_ID:
+            raise
+        return False
+    return ack.duplicate
+
+
+def wait_forgotten(bus, subject: str, stream: str, event_id: str, deadline_s: float = 10) -> None:
+    stop = time.monotonic() + deadline_s
+    while remembers(bus, subject, stream, event_id):
+        if time.monotonic() >= stop:
+            pytest.fail(f"{stream} still remembers message id {event_id!r} after {deadline_s}s")
+        time.sleep(0.01)
 
 
 @contextmanager
