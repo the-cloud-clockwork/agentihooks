@@ -176,7 +176,7 @@ def test_a_master_waiting_on_input_is_skipped_and_rejoins(swarm, inbox, waiting_
     assert inbox.get(operator.id).address == FRONT
     swarm.put_agent(SLUG, AgentRecord(name, "master", "master", seat=waiting_seat))
     resumed = [inbox.send("swarm", FRONT, f"resumed {n}") for n in range(2)]
-    assert [inbox.get(item.id).address for item in resumed] == [waiting_seat, other]
+    assert [inbox.get(item.id).address for item in resumed] == [FRONT, SECOND]
 
 
 @pytest.mark.parametrize("state", ["pending", "delivered", "confirmed", "read"])
