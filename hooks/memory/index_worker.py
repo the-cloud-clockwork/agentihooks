@@ -58,9 +58,13 @@ PENDING = (
     "ORDER BY embedding_work.queued_at, embedding_work.chunk_id LIMIT ?"
 )
 UNCOVERED = (
-    "SELECT COUNT(*) FROM search_chunk s WHERE s.access_domain = ? AND EXISTS (SELECT 1 FROM chunk_vector v "
+    "SELECT COUNT(*) FROM search_chunk s WHERE s.access_domain = ? AND EXISTS (SELECT 1 FROM session_record r "
+    "WHERE r.access_domain = s.access_domain AND r.session_uid = s.session_uid AND r.state = 'retained') "
+    "AND (EXISTS (SELECT 1 FROM chunk_cutover c WHERE c.access_domain = s.access_domain "
+    "AND c.session_uid = s.session_uid AND c.chunker_version = s.chunker_version) "
+    "OR EXISTS (SELECT 1 FROM chunk_vector v "
     "WHERE v.access_domain = s.access_domain AND v.index_generation = ? AND v.session_uid = s.session_uid "
-    "AND v.chunker_version = s.chunker_version) AND NOT EXISTS (SELECT 1 FROM chunk_vector v "
+    "AND v.chunker_version = s.chunker_version)) AND NOT EXISTS (SELECT 1 FROM chunk_vector v "
     "WHERE v.access_domain = s.access_domain AND v.index_generation = ? AND v.chunk_id = s.chunk_id "
     "AND v.content_hash = json_extract(s.record, '$.content_hash'))"
 )
@@ -81,7 +85,9 @@ BAD_LIMITS = "embedding limits need a positive batch size, batch character bound
 GENERATION_CONFLICT = "this index generation is bound to another embedding model or dimension"
 UNKNOWN_INDEX = "no index generation is registered under this name"
 MODEL_MISMATCH = "the embedder's model differs from the model bound to this index generation; nothing was written"
-INCOMPLETE = "only an index generation with no pending work and every tracked session embedded can become active"
+INCOMPLETE = (
+    "only an index generation with no pending work and every searchable or tracked session embedded can become active"
+)
 STALE_CUTOVER = "the index cutover revision is stale; nothing changed"
 
 

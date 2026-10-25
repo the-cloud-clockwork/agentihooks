@@ -27,7 +27,7 @@
     },
     "rejected": {
       "activate_incomplete": {
-        "detail": "only an index generation with no pending work and every tracked session embedded can become active",
+        "detail": "only an index generation with no pending work and every searchable or tracked session embedded can become active",
         "error": "Conflict"
       },
       "dimension_mismatch": {

@@ -15,7 +15,7 @@
     "IndexWorker.drain(embedder, domain, generation, now) refuses an embedder whose model differs from the generation's, then first removes work whose chunk is gone or changed, then embeds queued work oldest first in batches bounded by Limits batch_size, batch_chars and max_batches; each batch commits its vectors with model, dimension and generation in one transaction and removes its work only while the queued content hash still matches, so a late or rival attempt writes nothing; a transient failure records the attempt and error class on the failed batch's work and stops the drain",
     "IndexWorker.pending reports the queued count and embedding_backlog_age_seconds from the oldest queued chunk; IndexWorker.coverage reports a session indexed only when every chunk of its generation has a vector for its current content hash",
     "IndexWorker.activate(domain, generation, revision) is compare and set on the domain's active index generation and accepts only a generation with no pending work; IndexWorker.set_paused stops a generation's drains without touching its rows; IndexWorker.vectors reads a session's vectors under the same grant",
-    "IndexWorker.activate refuses a generation with pending work or with any chunk of a session it already holds vectors for that lacks a vector for its current content hash, so a session that grew after its last enqueue blocks the cutover"
+    "IndexWorker.activate refuses a generation with pending work, or with any chunk lacking a vector for its current content hash in a retained session that either has an active chunk generation of that chunker version or already holds vectors in the index generation, so a searchable session never enqueued, or one that grew after its last enqueue, blocks the cutover"
   ],
   "supported_versions": {
     "python": "3.11 and later",
@@ -48,7 +48,6 @@
     "A failure is per batch: the Embedder contract returns all vectors or raises, so the fixture's failed middle chunk is the middle batch of three, and every chunk in that batch is deferred together.",
     "A provider that returns the wrong count or dimension is refused on every drain until the provider or the generation binding is corrected, with no attempt recorded, because the refusal must leave protected state unchanged.",
     "The worker is driven by its caller's schedule and clock; no daemon or Pod is part of this package.",
-    "A session never enqueued in a generation is not tracked by it, so activation cannot see it; enqueue is how a session joins a generation.",
     "Work queued for a session that is later deleted is still embedded; its vectors stay unreadable through IndexWorker.vectors and coverage, and their removal belongs to the retention sweep.",
     "Retrieval evaluation before cutover and search over vectors belong to SV2-IDX-04."
   ],

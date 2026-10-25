@@ -376,6 +376,25 @@ def test_activation_needs_every_chunk_of_a_tracked_session_embedded(inputs, tmp_
     assert worker.activate(DOMAIN, GENERATION, 1) == 2
 
 
+def test_activation_needs_every_retained_session_with_an_active_chunk_generation(inputs, tmp_path):
+    index = indexed(inputs, tmp_path)
+    worker = index.worker
+    index.session.validate()
+    index.session.activate("current", 0)
+    with pytest.raises(Conflict, match=f"^{index_worker.INCOMPLETE}$"):
+        worker.activate(DOMAIN, GENERATION, 0)
+    revision = index.session.catalog.session(DOMAIN, inputs["session_uid"])["revision"]
+    index.session.catalog.set_state(DOMAIN, inputs["session_uid"], "deleted", revision)
+    assert worker.activate(DOMAIN, GENERATION, 0) == 1
+    index.session.catalog.set_state(DOMAIN, inputs["session_uid"], "retained", revision + 1)
+    worker.register(DOMAIN, "g2", MODEL)
+    with pytest.raises(Conflict, match=f"^{index_worker.INCOMPLETE}$"):
+        worker.activate(DOMAIN, "g2", 1)
+    index.enqueue(10.0, "index_generation")
+    index.drain(FixtureEmbedder(MODEL), 11.0)
+    assert worker.activate(DOMAIN, GENERATION, 1) == 2
+
+
 def test_the_snapshot_covers_every_index_table(inputs, tmp_path):
     assert set(indexed(inputs, tmp_path).worker.snapshot()) == set(index_worker.INDEX_TABLES)
 
