@@ -47,11 +47,14 @@ jobs:
         env:
           KIND_VERSION: v0.33.0
         run: |
-          curl -fsSLo kind "https://kind.sigs.k8s.io/dl/$KIND_VERSION/kind-linux-amd64"
-          curl -fsSLo kind.sha256sum "https://kind.sigs.k8s.io/dl/$KIND_VERSION/kind-linux-amd64.sha256sum"
-          mv kind kind-linux-amd64
-          sha256sum -c kind.sha256sum
-          sudo install -m 0755 kind-linux-amd64 /usr/local/bin/kind
+          if ! kind version; then
+            curl -fsSLo kind "https://kind.sigs.k8s.io/dl/$KIND_VERSION/kind-linux-amd64"
+            curl -fsSLo kind.sha256sum "https://kind.sigs.k8s.io/dl/$KIND_VERSION/kind-linux-amd64.sha256sum"
+            mv kind kind-linux-amd64
+            sha256sum -c kind.sha256sum
+            sudo install -m 0755 kind-linux-amd64 /usr/local/bin/kind
+          fi
+          kind version
       - name: Build the worker image while kind starts, then prove registration and order acknowledgement
         env:
           AGENTIHOOKS_REF: ${{ github.sha }}
