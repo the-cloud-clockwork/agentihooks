@@ -281,6 +281,30 @@ def test_launch_rechecks_mail_after_capacity_checks(mailbox, monkeypatch, capsys
         assert store.redis.hkeys(store.key(SLUG, dispatch_seat.SENT)) == expected
 
 
+@pytest.mark.parametrize("change", ["read", "redirected"])
+@pytest.mark.parametrize("boundary", ["before", "capacity"])
+def test_launch_needs_mail_still_waiting_for_the_dispatcher(mailbox, monkeypatch, capsys, change, boundary):
+    store, inbox = mailbox
+    runtime = FakeRuntime()
+    assert cli.main(["send", f"dispatcher@{SLUG}", "Consider evidence already taken up"]) == 0
+    item = json.loads(capsys.readouterr().out)["id"]
+
+    def settle(*args):
+        if change == "read":
+            assert inbox.read(item, inbox.seats.occupant(f"dispatcher@{SLUG}").occupant).state == "read"
+        else:
+            assert inbox.redirect(item, "swarm", "alice", "taken up by alice").address == "alice"
+        return ""
+
+    if boundary == "before":
+        settle()
+    else:
+        monkeypatch.setattr(dispatch_seat.seat_spawn, "host_hold", settle)
+    assert run(store, runtime, doc()) == []
+    assert runtime.spawned == []
+    assert seats(store) == []
+
+
 @pytest.mark.parametrize("lane,state", [("eng", "working"), ("dispatch", "finished")])
 def test_other_or_finished_consumers_do_not_own_dispatcher_work(mailbox, capsys, lane, state):
     from scripts.swarm.store import AgentRecord
