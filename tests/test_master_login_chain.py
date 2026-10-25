@@ -399,9 +399,10 @@ def test_token_fallback_alert_ignores_other_records_of_the_same_agent(tmp_path, 
     sent = []
     monkeypatch.setattr(operator_email, "send", lambda *args: sent.append(args) or "")
     chain.notification(target, "browser", "captcha", "inbox")
-    (tmp_path / "login-notifications.jsonl").open("a").write(
-        json.dumps({"step": "token", "outcome": "captcha", "transport": "none", "agent": "master@proof-1"}) + "\n"
-    )
+    with (tmp_path / "login-notifications.jsonl").open("a") as stream:
+        stream.write(
+            json.dumps({"step": "token", "outcome": "captcha", "transport": "none", "agent": "master@proof-1"}) + "\n"
+        )
     assert chain.alert({"AGENTIHOOKS_AGENT_NAME": "master@proof-1"}, target, "captcha", "/repo") == ""
     assert len(sent) == 1
 

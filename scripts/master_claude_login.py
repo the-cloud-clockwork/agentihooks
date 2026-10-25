@@ -524,8 +524,9 @@ def prepare_launch(environ: Mapping[str, str], cwd: Path) -> tuple[Path, str] | 
     def token():
         if target is not None:
             release(target, environ)
-        if reported in ("captcha", "failure"):
-            chain.alert(environ, target, reported, str(cwd))
+        refused = chain.alert(environ, target, reported, str(cwd)) if reported in ("captcha", "failure") else ""
+        if refused:
+            print(f"[agenti] operator login email refused: {refused}", file=sys.stderr)
         return None
 
     return chain.run(current, browser, token)

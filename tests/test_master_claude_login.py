@@ -856,6 +856,24 @@ def test_launch_preparation_checks_live_login_then_waits_for_browser(
         assert records[-1] == {"step": "token", "outcome": outcome, "transport": "email", "agent": "master@a-1"}
 
 
+def test_launch_preparation_reports_a_refused_operator_email(ah, rendered, tmp_path, monkeypatch, capsys):
+    from scripts import master_login_chain as chain
+    from scripts.routing import native_login
+    from scripts.swarm import operator_email
+
+    _seed(rendered)
+    monkeypatch.setattr(openbao_kv, "from_env", lambda environ: None)
+
+    def check(environ, account):
+        raise native_login.LoginError(native_login.EXPIRED)
+
+    monkeypatch.setattr(native_login, "check", check)
+    monkeypatch.setattr(chain, "authorize", lambda *_: "captcha", raising=False)
+    monkeypatch.setattr(operator_email, "send", lambda *_: "email failed: down")
+    assert login.prepare_launch(_environ(rendered), tmp_path) is None
+    assert capsys.readouterr().err == "[agenti] operator login email refused: email failed: down\n"
+
+
 def test_browser_preparation_skips_a_slot_held_by_another_process(ah, rendered, tmp_path, monkeypatch):
     from scripts import master_login_chain as chain
     from scripts.routing import native_login
