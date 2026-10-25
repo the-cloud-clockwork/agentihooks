@@ -252,6 +252,22 @@ def test_failed_tool_call_closes_its_open_call(tmp_path, monkeypatch):
     assert activity.open_calls("sw", "master@sw-1") == []
 
 
+def test_turn_end_drops_calls_a_denied_call_left_open(tmp_path, monkeypatch):
+    import fakeredis
+
+    from hooks.context import swarm_heartbeat
+
+    monkeypatch.setattr(activity, "default_root", lambda: tmp_path)
+    environ = {"AGENTIHOOKS_SWARM": "sw", "AGENTIHOOKS_AGENT_NAME": "master@sw-1"}
+    activity.record("Bash", {}, environ, None, 1, call_id="toolu_denied")
+    activity.record("Bash", {}, environ, None, 2, call_id="toolu_other")
+    redis = fakeredis.FakeRedis(decode_responses=True)
+    swarm_heartbeat.beat("working", environ, redis, 3)
+    assert activity.open_calls("sw", "master@sw-1") == ["toolu_denied", "toolu_other"]
+    swarm_heartbeat.beat("idle", environ, redis, 4)
+    assert activity.open_calls("sw", "master@sw-1") == []
+
+
 def test_unwritable_activity_folder_never_breaks_the_hook(tmp_path):
     blocker = tmp_path / "file"
     blocker.write_text("x")

@@ -103,6 +103,13 @@ def open_calls(slug, name, root=None) -> list[str]:
     return sorted(path.name for path in folder.iterdir()) if folder.is_dir() else []
 
 
+def end_turn(slug, name, root=None):
+    """At turn end no call is in flight: drop the ones a denied call left open."""
+    folder = Path(root or default_root()) / slug / f"{name}.open"
+    for call_id in open_calls(slug, name, root):
+        (folder / call_id).unlink(missing_ok=True)
+
+
 def mark_revived(slug, name, root=None, now_ms=None):
     if not (NAME_RE.match(slug) and NAME_RE.match(name)):
         return
