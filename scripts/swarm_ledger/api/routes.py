@@ -174,18 +174,8 @@ def ledger_operation(handler: object, services: Services, slug: str, path: str, 
         return admin.lifecycle(services, principal, slug, payload)
     if path == "swarm/actions":
         return admin.control(services, slug, principal, payload)
-    if path == "export" and "since" in payload:
-        schemas.validate(SINCE_SCHEMA, payload)
-        generation, text = services.repository.export_since(slug, payload["since"], export_body, export_changes)
-        return '{"generation":' + str(generation) + "," + text[1:]
     if path in ("export", "swarm/export"):
-        schemas.validate({"type": "object", "maxProperties": 0}, payload)
-        if path == "swarm/export":
-            status = services.swarm.status(slug)
-            if status is None:
-                raise APIError(404, "swarm_missing", "No swarm for this ledger")
-            return {"data": status}
-        return services.repository.encoded_view(slug, export_body)
+        return export(services, slug, path, payload)
     if path == "operations":
         return mutations.apply(services, slug, principal, payload)
     if path == "architecture/actions":
@@ -196,6 +186,20 @@ def ledger_operation(handler: object, services: Services, slug: str, path: str, 
 
 
 PAGE_WRITES = {"saves": "put_ledger", "swarm/controls": "put_swarm"}
+
+
+def export(services: Services, slug: str, path: str, payload: dict) -> dict | str:
+    if path == "export" and "since" in payload:
+        schemas.validate(SINCE_SCHEMA, payload)
+        generation, text = services.repository.export_since(slug, payload["since"], export_body, export_changes)
+        return '{"generation":' + str(generation) + "," + text[1:]
+    schemas.validate({"type": "object", "maxProperties": 0}, payload)
+    if path == "swarm/export":
+        status = services.swarm.status(slug)
+        if status is None:
+            raise APIError(404, "swarm_missing", "No swarm for this ledger")
+        return {"data": status}
+    return services.repository.encoded_view(slug, export_body)
 
 
 def export_body(state: dict) -> str:
