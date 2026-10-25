@@ -47,7 +47,7 @@ def large(bus, seed):
     return random.Random(seed).randbytes(bus._nc.max_payload - nats_payload.KV_HEADER_BUDGET + 1)
 
 
-@pytest.mark.timeout(5, method="thread")
+@pytest.mark.timeout(5, method="thread", func_only=True)
 @pytest.mark.parametrize("scoped", [False, True])
 def test_repeated_large_updates_keep_only_chunks_of_retained_revisions(bus, scoped, monkeypatch):
     store, stream, pattern = open_store(bus, scoped, monkeypatch)
