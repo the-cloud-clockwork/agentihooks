@@ -104,9 +104,29 @@ def _parse_transcript_for_markers(transcript_path: str, max_markers: int) -> lis
 # ── Outbox write ─────────────────────────────────────────────────────
 
 
+def _destination() -> dict | None:
+    from hooks._brain_http import brain_http_enabled
+    from hooks.context.brain_adapter import brain_id
+    from scripts.swarm import brain_binding
+
+    binding = brain_binding.current(os.environ)
+    if binding is None:
+        return (
+            {"brain": brain_id(), "audience": "personal", "reference": "BRAIN_HTTP_TOKEN"}
+            if brain_http_enabled()
+            else None
+        )
+    return {"brain": brain_id(), "audience": "swarm", "reference": binding.get("api_env", "")}
+
+
+def _scoped_outbox(outbox: Path, destination: dict | None) -> Path:
+    return outbox if destination is None else outbox / f"{destination['audience']}-{destination['brain']}"
+
+
 def _write_to_outbox(markers: list[dict], session_id: str, outbox_dir: str) -> int:
     """Write markers as individual JSON files to the outbox directory."""
-    outbox = Path(outbox_dir)
+    destination = _destination()
+    outbox = _scoped_outbox(Path(outbox_dir), destination)
     outbox.mkdir(parents=True, exist_ok=True)
 
     now = datetime.now(timezone.utc)
@@ -126,6 +146,8 @@ def _write_to_outbox(markers: list[dict], session_id: str, outbox_dir: str) -> i
             "project": os.getenv("CLAUDE_PROJECT_DIR", ""),
             "ts": now.isoformat(),
         }
+        if destination is not None:
+            payload["destination"] = destination
         # Atomic write: a killed hook process mid-write leaves a truncated
         # JSON that the outbox drain must quarantine. temp + rename makes the
         # file appear fully-formed or not at all.
@@ -232,10 +254,14 @@ def _drain_outbox(outbox_dir: str) -> int:
     if not brain_http_enabled():
         return 0
     outbox = Path(outbox_dir)
-    backlog = outbox.with_name(outbox.name + "-backlog")
-    # Backlog first: months older than the live outbox, and append-only vault
-    # targets keep arrival order — oldest-first stays chronological.
-    files = [f for d in (backlog, outbox) if d.is_dir() for f in sorted(d.glob("*.json"))]
+    destination = _destination()
+    folders = [_scoped_outbox(outbox, destination)]
+    if destination["audience"] == "personal":
+        # Unbound legacy markers belong to the personal path only; a swarm brain never adopts them.
+        # Backlog first: months older than the live outbox, and append-only vault
+        # targets keep arrival order — oldest-first stays chronological.
+        folders = [outbox.with_name(outbox.name + "-backlog"), outbox, *folders]
+    files = [f for d in folders if d.is_dir() for f in sorted(d.glob("*.json"))]
 
     drained = 0
     for f in files:
@@ -256,6 +282,8 @@ def _drain_outbox(outbox_dir: str) -> int:
                 log("brain_writer: quarantined unparseable outbox file", {"file": f.name})
             except OSError:
                 pass  # vanished mid-quarantine — a concurrent drain got it
+            continue
+        if payload.get("destination", destination) != destination:
             continue
 
         body, idem = _marker_request(

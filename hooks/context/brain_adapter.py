@@ -111,14 +111,19 @@ def _normalize_severity_for_empty(title: str, body: str, severity: str) -> str:
     return severity
 
 
+def _hash_cache_file() -> Path:
+    return _HASH_CACHE_FILE.with_name(f"{_HASH_CACHE_FILE.name}.{brain_id()}")
+
+
 def _load_persisted_hash() -> str:
     """Read last-published content hash from disk. Empty on miss or another brain's hash."""
     try:
         from hooks.context.project_cache import namespace
         from scripts.swarm_v2.keyspace import admits
 
-        if _HASH_CACHE_FILE.exists():
-            document = json.loads(_HASH_CACHE_FILE.read_text())
+        path = _hash_cache_file()
+        if path.exists():
+            document = json.loads(path.read_text())
             return document["hash"] if admits(document, namespace(), "publish-hash") else ""
     except Exception:
         pass
@@ -131,8 +136,9 @@ def _save_persisted_hash(hash_val: str) -> None:
         from hooks.context.project_cache import namespace
         from scripts.swarm_v2.keyspace import stamp
 
-        _HASH_CACHE_FILE.parent.mkdir(parents=True, exist_ok=True)
-        _HASH_CACHE_FILE.write_text(json.dumps(stamp(namespace(), "publish-hash", {"hash": hash_val})))
+        path = _hash_cache_file()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(stamp(namespace(), "publish-hash", {"hash": hash_val})))
     except Exception:
         pass
 
@@ -322,6 +328,12 @@ def brain_id() -> str:
     return brain_identity(path=BRAIN_SOURCE_PATH) if BRAIN_SOURCE_TYPE == "file" else "none"
 
 
+def feed_channel() -> str:
+    from hooks.config import BRAIN_CHANNEL
+
+    return f"{BRAIN_CHANNEL}@{brain_id()}"
+
+
 # ---------------------------------------------------------------------------
 # Publish to channel
 # ---------------------------------------------------------------------------
@@ -376,12 +388,12 @@ def _publish_entries(entries: list[BrainEntry]) -> dict:
     """Publish brain entries to the broadcast channel."""
     try:
         from hooks.config import (
-            BRAIN_CHANNEL,
             BRAIN_HOT_ARCS_TOP_N,
             BRAIN_PAYLOAD_MAX_BYTES,
         )
     except ImportError:
         return {"changed": False, "created": 0, "created_ids": [], "removed": 0, "active": 0}
+    channel = feed_channel()
 
     from hooks.context.broadcast import _msg_hash, reconcile_channel_broadcasts
     from hooks.telemetry import span_ctx
@@ -391,7 +403,7 @@ def _publish_entries(entries: list[BrainEntry]) -> dict:
     with span_ctx(
         "brain.inject",
         {
-            "channel": BRAIN_CHANNEL,
+            "channel": channel,
             "entry_count": len(entries),
             "total_bytes": total_bytes,
         },
@@ -407,14 +419,14 @@ def _publish_entries(entries: list[BrainEntry]) -> dict:
             entry.content = _wrap_with_framing(entry.title, entry.content)
             entry.severity = _normalize_severity_for_empty(entry.title, entry.content, entry.severity)
             probe = {
-                "channel": BRAIN_CHANNEL,
+                "channel": channel,
                 "severity": entry.severity,
                 "message": f"[{entry.title}]\n{entry.content}".strip(),
             }
             new_hashes[_msg_hash(probe)] = entry
 
         result = reconcile_channel_broadcasts(
-            BRAIN_CHANNEL,
+            channel,
             [
                 {
                     "message": f"[{entry.title}]\n{entry.content}",
@@ -440,12 +452,12 @@ def _publish_entries(entries: list[BrainEntry]) -> dict:
 def _compute_hash(entries: list[BrainEntry]) -> str:
     """Compute a hash of entries to detect changes."""
     try:
-        from hooks.config import BRAIN_CHANNEL, BRAIN_HOT_ARCS_TOP_N, BRAIN_PAYLOAD_MAX_BYTES
+        from hooks.config import BRAIN_HOT_ARCS_TOP_N, BRAIN_PAYLOAD_MAX_BYTES
     except ImportError:
-        BRAIN_CHANNEL, BRAIN_HOT_ARCS_TOP_N, BRAIN_PAYLOAD_MAX_BYTES = "brain", 10, 1536
+        BRAIN_HOT_ARCS_TOP_N, BRAIN_PAYLOAD_MAX_BYTES = 10, 1536
     raw = json.dumps(
         {
-            "channel": BRAIN_CHANNEL,
+            "channel": feed_channel(),
             "hot_arcs_top_n": BRAIN_HOT_ARCS_TOP_N,
             "payload_max_bytes": BRAIN_PAYLOAD_MAX_BYTES,
             "entries": [
@@ -594,7 +606,6 @@ def get_status() -> dict:
 
     try:
         from hooks.config import (
-            BRAIN_CHANNEL,
             BRAIN_ENABLED,
             BRAIN_HTTP_TOKEN,
             BRAIN_REFRESH_TOOL_CALLS,
@@ -634,6 +645,7 @@ def get_status() -> dict:
     if source_error:
         warnings.append(f"brain source unavailable — {source_error}")
 
+    channel = feed_channel()
     active_broadcasts = 0
     try:
         from hooks.context.broadcast import _load_broadcasts
@@ -641,7 +653,7 @@ def get_status() -> dict:
         active_broadcasts = sum(
             1
             for message in _load_broadcasts(cleanup=True)
-            if message.get("channel") == BRAIN_CHANNEL and message.get("source") == "brain-adapter"
+            if message.get("channel") == channel and message.get("source") == "brain-adapter"
         )
     except Exception:
         pass
@@ -654,7 +666,7 @@ def get_status() -> dict:
         "brain_url": BRAIN_URL,
         "source_type": BRAIN_SOURCE_TYPE,
         "source_path": str(BRAIN_SOURCE_PATH),
-        "channel": BRAIN_CHANNEL,
+        "channel": channel,
         "refresh_tool_calls": BRAIN_REFRESH_TOOL_CALLS,
         "entry_count": entry_count,
         "active_broadcasts": active_broadcasts,

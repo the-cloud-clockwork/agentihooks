@@ -339,7 +339,13 @@ def _get_session_channels(session_id: str) -> list[str]:
     `env` block: profile default → repo override → repo-local override →
     container launch env.
     """
-    return list(BASE_CHANNELS)
+    from hooks.config import BRAIN_CHANNEL
+    from hooks.context.brain_adapter import feed_channel
+
+    channels = list(BASE_CHANNELS)
+    if BRAIN_CHANNEL in channels or "*" in channels:
+        channels.append(feed_channel())
+    return channels
 
 
 def _message_matches_channel(msg: dict, session_channels: list[str]) -> bool:
@@ -355,6 +361,10 @@ def _message_matches_channel(msg: dict, session_channels: list[str]) -> bool:
     # Global messages (no channel) → always deliver
     if not msg_channel:
         return True
+    from hooks.config import BRAIN_CHANNEL
+
+    if msg_channel.startswith(f"{BRAIN_CHANNEL}@"):
+        return msg_channel in session_channels
     # Wildcard subscription → deliver everything
     if "*" in session_channels:
         return True

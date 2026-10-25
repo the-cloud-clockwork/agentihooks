@@ -37,7 +37,7 @@ def http_ok(monkeypatch):
 def test_drain_posts_and_deletes(tmp_path, http_ok):
     _write_to_outbox([MARKER], "sess-1", str(tmp_path))
     assert _drain_outbox(str(tmp_path)) == 1
-    assert not list(tmp_path.glob("*.json"))
+    assert not list(tmp_path.rglob("*.json"))
 
 
 def test_drain_key_matches_live_post_key(tmp_path, http_ok):
@@ -67,21 +67,21 @@ def test_drain_survives_file_vanishing_after_post(tmp_path, monkeypatch):
     _write_to_outbox([MARKER], "sess-1", str(tmp_path))
 
     def post_and_steal(path, body=None, idempotency_key=None, **kw):
-        for f in tmp_path.glob("*.json"):
+        for f in tmp_path.rglob("*.json"):
             f.unlink()
         return {"ok": True}
 
     monkeypatch.setattr(brain_http, "brain_http_enabled", lambda: True)
     monkeypatch.setattr(brain_http, "post", post_and_steal)
     assert _drain_outbox(str(tmp_path)) == 1
-    assert not list(tmp_path.glob("*.json"))
+    assert not list(tmp_path.rglob("*.json"))
 
 
 def test_drain_quarantines_unparseable(tmp_path, http_ok):
     (tmp_path / "aa-broken.json").write_text("{not json")
     assert _drain_outbox(str(tmp_path)) == 0
     assert (tmp_path / "aa-broken.json.bad").exists()
-    assert not list(tmp_path.glob("*.json"))
+    assert not list(tmp_path.rglob("*.json"))
 
 
 def test_drain_keeps_files_on_refusal(tmp_path, monkeypatch):
@@ -89,19 +89,19 @@ def test_drain_keeps_files_on_refusal(tmp_path, monkeypatch):
     monkeypatch.setattr(brain_http, "post", lambda *a, **k: None)
     _write_to_outbox([MARKER], "sess-1", str(tmp_path))
     assert _drain_outbox(str(tmp_path)) == 0
-    assert len(list(tmp_path.glob("*.json"))) == 1
+    assert len(list(tmp_path.rglob("*.json"))) == 1
 
 
 def test_drain_noop_when_http_disabled(tmp_path, monkeypatch):
     monkeypatch.setattr(brain_http, "brain_http_enabled", lambda: False)
     _write_to_outbox([MARKER], "sess-1", str(tmp_path))
     assert _drain_outbox(str(tmp_path)) == 0
-    assert len(list(tmp_path.glob("*.json"))) == 1
+    assert len(list(tmp_path.rglob("*.json"))) == 1
 
 
 def test_outbox_payload_preserves_original_content(tmp_path, http_ok):
     _write_to_outbox([MARKER], "sess-1", str(tmp_path))
-    payload = json.loads(next(iter(tmp_path.glob("*.json"))).read_text())
+    payload = json.loads(next(iter(tmp_path.rglob("*.json"))).read_text())
     assert payload["type"] == MARKER["type"]
     assert payload["content"] == MARKER["content"]
     assert payload["session_id"] == "sess-1"
@@ -169,13 +169,13 @@ def test_drain_quarantines_poison_pill_and_continues(tmp_path, monkeypatch):
 
     monkeypatch.setattr(brain_http, "post", post)
     _write_to_outbox([{"type": "lesson", "content": "AAA poison", "attrs": {}}], "s", str(tmp_path))
-    files = sorted(tmp_path.glob("*.json"))
-    files[0].rename(tmp_path / "00000000T000000-lesson-aaaaaaaa.json")  # sorts first
+    files = sorted(tmp_path.rglob("*.json"))
+    files[0].rename(files[0].with_name("00000000T000000-lesson-aaaaaaaa.json"))  # sorts first
     _write_to_outbox([{"type": "lesson", "content": "good marker", "attrs": {}}], "s", str(tmp_path))
 
     assert _drain_outbox(str(tmp_path)) == 1
-    assert not list(tmp_path.glob("*.json"))
-    assert len(list(tmp_path.glob("*.bad"))) == 1
+    assert not list(tmp_path.rglob("*.json"))
+    assert len(list(tmp_path.rglob("*.bad"))) == 1
 
 
 def test_drain_stops_without_quarantine_on_credential_error(tmp_path, monkeypatch):
@@ -186,8 +186,8 @@ def test_drain_stops_without_quarantine_on_credential_error(tmp_path, monkeypatc
     )
     _write_to_outbox([MARKER, MARKER], "s", str(tmp_path))
     assert _drain_outbox(str(tmp_path)) == 0
-    assert len(list(tmp_path.glob("*.json"))) == 2
-    assert not list(tmp_path.glob("*.bad"))
+    assert len(list(tmp_path.rglob("*.json"))) == 2
+    assert not list(tmp_path.rglob("*.bad"))
 
 
 def test_idem_key_truncates_before_hashing():
