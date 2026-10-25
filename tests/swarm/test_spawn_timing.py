@@ -44,6 +44,7 @@ def test_a_spawn_pass_times_each_part_inside_the_spawn_step(store, capsys):
         timing.named(tick_module._held_back),
         timing.named(tick_module._owner_hold),
         timing.named(RedisStore.claim),
+        timing.named(tick_module._reported),
         timing.named(tick_module._sharing),
         timing.named(ledger_workspace.scaffold),
         timing.named(FakeLedger.update_task),

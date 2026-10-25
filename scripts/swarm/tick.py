@@ -1143,7 +1143,7 @@ def _spawn(slug, config, store, ledger, runtime, rows, doc, now_ms):
             task["reclaim"] = timing.timed(continuation.resolve, config.repo, task, rows, lives, {}, reclaim)
             store.put_reclaim(slug, name, task["reclaim"])
         task["stack_base"] = _stack_base(task, rows, config.repo)
-        task["overlaps"] = timing.timed(_sharing, task, rows, [a for a in store.agents(slug) if runtime.reported(a)])
+        task["overlaps"] = timing.timed(_sharing, task, rows, timing.timed(_reported, slug, store, runtime))
         task["group"] = [
             {key: rows[m][key] for key in ("id", "title", "description")}
             for m in task.get("group_members") or []
@@ -1196,6 +1196,10 @@ def _spawn(slug, config, store, ledger, runtime, rows, doc, now_ms):
             _started, slug, config, store, ledger, doc, Started(record, task, placed, launched), now_ms
         )
     return actions
+
+
+def _reported(slug, store, runtime):
+    return [a for a in store.agents(slug) if runtime.reported(a)]
 
 
 @dataclass(frozen=True)
