@@ -38,6 +38,16 @@ def test_reports_download_during_execution_and_recovery_replaces_stale_evidence(
     assert downloaded == {"durations-3.12-1": 12}
 
 
+def test_recovery_replacement_cannot_keep_a_hash_absent_from_the_new_report(tmp_path):
+    folder = tmp_path / "durations-3.12-1"
+    folder.mkdir()
+    (folder / "durations.sha256").write_text("old hash")
+    artifact = {"id": 12, "name": folder.name, "expired": False}
+    with patch.object(ci_gate_shards, "api", side_effect=[[{"artifacts": [artifact]}], _zip()]):
+        ci_gate_shards.fetch("org/repo", "123", tmp_path, {folder.name: 11})
+    assert not (folder / "durations.sha256").exists()
+
+
 def test_wait_downloads_reports_before_the_last_shard_and_rejects_a_missing_report(tmp_path):
     calls = []
     polls = iter(
