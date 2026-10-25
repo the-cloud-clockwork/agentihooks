@@ -280,9 +280,7 @@ def test_publication_checks_the_exact_target_branch_before_pushing(publication, 
     assert len(queries) == 1
 
 
-def test_prepared_continuation_publishes_its_current_branch(
-    publication, tmp_path, monkeypatch
-):
+def test_prepared_continuation_publishes_its_current_branch(publication, tmp_path, monkeypatch):
     from scripts.swarm import publish
 
     first = publication.root
