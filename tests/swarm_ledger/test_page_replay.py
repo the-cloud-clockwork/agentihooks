@@ -1,4 +1,5 @@
 import datetime
+import json
 
 import pytest
 
@@ -54,7 +55,7 @@ def test_quiet_drains_a_real_observer_delivery_under_the_paused_clock(browser):
         now = page_replay.quiet(page)
     finally:
         page.close()
-    assert '<a id="link" class="on">' in now[1]
+    assert '<a id="link" class="on">' in json.loads(now[1])["html"]
 
 
 def test_quiet_waits_for_pending_outline_deliveries_before_capture():
