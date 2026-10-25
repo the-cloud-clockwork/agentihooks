@@ -133,7 +133,8 @@ def test_a_placement_pass_loads_the_hives_once_and_the_next_pass_reloads(setup, 
     launch = setup.launcher
     launch.placement_cache = None
     first = launch.hives()
-    assert (len(loads), launch.hives() == first) == (2, True)
+    assert launch.hives() == first
+    assert len(loads) == 2
     launch.placement_cache = {}
     passed = launch.hives()
     assert launch.hives() is passed
