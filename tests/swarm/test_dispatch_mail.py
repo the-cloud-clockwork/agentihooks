@@ -281,7 +281,7 @@ def test_launch_rechecks_mail_after_capacity_checks(mailbox, monkeypatch, capsys
         assert store.redis.hkeys(store.key(SLUG, dispatch_seat.SENT)) == expected
 
 
-@pytest.mark.parametrize("change", ["closed", "read", "confirmed", "redirected", "delivered"])
+@pytest.mark.parametrize("change", ["closed", "withdrawn", "read", "confirmed", "redirected", "delivered"])
 @pytest.mark.parametrize("boundary", ["before", "capacity", "prepare"])
 def test_launch_needs_mail_still_waiting_for_the_dispatcher(mailbox, monkeypatch, capsys, change, boundary):
     store, inbox = mailbox
@@ -293,6 +293,8 @@ def test_launch_needs_mail_still_waiting_for_the_dispatcher(mailbox, monkeypatch
         occupant = inbox.seats.occupant(f"dispatcher@{SLUG}").occupant
         if change == "closed":
             assert inbox.close(item, occupant, "done", "Evidence considered").state == "done"
+        elif change == "withdrawn":
+            assert inbox.withdraw(item, "swarm", "its sending master retired").state == "cancelled"
         elif change == "read":
             assert inbox.read(item, occupant).state == "read"
         elif change == "redirected":
@@ -322,6 +324,40 @@ def test_launch_needs_mail_still_waiting_for_the_dispatcher(mailbox, monkeypatch
     assert bool(run(store, runtime, doc())) == launches
     assert len(runtime.spawned) == int(launches)
     assert len(seats(store)) == int(launches)
+
+
+def test_launch_moves_dispatcher_mail_into_the_hive_its_new_occupant_runs_on(mailbox, capsys):
+    from dataclasses import replace
+
+    from scripts.hive import auth
+
+    store, inbox = mailbox
+    assert cli.main(["send", f"dispatcher@{SLUG}", "Please rank the checks fix up"]) == 0
+    item = json.loads(capsys.readouterr().out)["id"]
+    runtime = FakeRuntime()
+    spawn = runtime.spawn
+
+    def on_hive(config, lane, name, task):
+        placed = spawn(config, lane, name, task)
+        store.redis.hset(f"{auth.PREFIX}:member:m1", mapping={"name": "m1", "ledger": "digest"})
+        store.redis.sadd(auth.INDEX, "m1")
+        record = next(agent for agent in store.agents(SLUG) if agent.name == name)
+        return replace(placed, execution=store.start_execution(SLUG, replace(record, hive="m1")))
+
+    runtime.spawn = on_hive
+    actions = run(store, runtime, doc())
+    assert len(seats(store)) == 1, actions
+    [seat] = seats(store)
+    assert actions == [f"spawned dispatcher {seat.name} for 1 trigger"]
+    member = InboxStore(store.redis, world="m1")
+    assert [i.id for i in member.open_mail(seat.name)] == [item]
+    assert InboxStore(store.redis, world="").inbox(f"dispatcher@{SLUG}") == []
+    moved = member.history(item)[-1]
+    assert (moved["state"], moved["by"], moved["reason"]) == (
+        "pending",
+        "swarm",
+        f"moved to hive m1, where {seat.name} runs dispatcher@{SLUG}",
+    )
 
 
 @pytest.mark.parametrize("lane,state", [("eng", "working"), ("dispatch", "finished")])

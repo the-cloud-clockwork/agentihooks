@@ -581,6 +581,7 @@ def test_a_busy_seat_leaves_three_claims_from_the_top_of_the_queue(store):
 def test_a_task_whose_launch_failed_falls_behind_its_band_in_the_dispatcher_queue(store, monkeypatch):
     config, ledger, found = queue_ledger(store, "delegate")
     monkeypatch.setattr(store, "launch_failure", lambda slug, task_id: "boom" if task_id in ("h1", "l4") else None)
+    monkeypatch.setattr(store, "launch_failures", lambda slug: {"h1": "boom", "l4": "boom"})
     assert spawned(store, config, ledger, found) == [("eng", t) for t in ("l4", "s", "l1", "l2")]
 
 

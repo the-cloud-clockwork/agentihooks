@@ -2809,13 +2809,26 @@ process tree. Lower `swap-floor` only on a host with little memory, where a
 
 ### Host samples
 
-Each tick's metrics pass writes one `host_samples` row to the swarm metrics
+Each metrics collector pass writes one `host_samples` row to the swarm metrics
 outbox (`~/.agentihooks/swarm/metrics-outbox.sqlite`, relayed to the ClickHouse
 `swarm` database): `available_mb`, `load_per_cpu`, `live_agents`,
 `swap_used_mb`, `swap_total_mb`, `agent_mb` (the measured mean, 0 when no tree
-was read), the held spawn count and its reason. Count minutes with swap above
-ninety percent while room was above zero from these rows; the `reason` column
-and the tick's `holding spawns: host memory room N` line name the hold.
+was read), the held spawn count and its reason. Each row covers the span to the
+next row, up to twenty minutes; sum those spans for minutes with swap above
+ninety percent while room was above zero. The `reason` column and the tick's
+`holding spawns: host memory room N` line name the hold.
+
+The tick row is written every pass. The ledger and swarm collectors, host
+samples included, run at most once per `AGENTIHOOKS_METRICS_EVERY_MINUTES`
+(default 10) per swarm, and a held sample counts for up to twenty minutes or
+until the next sample.
+
+The same pass writes the ledger probe's latest pass to `ledger_probes`
+(`read_s`, `write_s`, `read_failure`, `write_failure`, `wall_s`; a failure
+reads `timed out`, `gave no answer` or `answered with a server error`) and one
+`hive_samples` row per registered hive (`hive`, `name`, `live`,
+`heartbeat_age_s`, -1 when the hive never beat). A hive recovery is a
+`hive_samples` row with `live` 1 after one with `live` 0 for the same hive.
 
 ### Troubleshooting
 

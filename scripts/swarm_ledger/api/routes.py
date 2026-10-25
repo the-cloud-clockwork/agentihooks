@@ -1,3 +1,4 @@
+import io
 import json
 import logging
 import os
@@ -180,7 +181,7 @@ def ledger_operation(handler: object, services: Services, slug: str, path: str, 
             if status is None:
                 raise APIError(404, "swarm_missing", "No swarm for this ledger")
             return {"data": status}
-        return services.repository.encoded_view(slug, export_body)
+        return handler.send_export(services.repository.encoded_view(slug, export_bytes))
     if path == "operations":
         return mutations.apply(services, slug, principal, payload)
     if path == "architecture/actions":
@@ -193,9 +194,12 @@ def ledger_operation(handler: object, services: Services, slug: str, path: str, 
 PAGE_WRITES = {"saves": "put_ledger", "swarm/controls": "put_swarm"}
 
 
-def export_body(state: dict) -> str:
+def export_bytes(state: dict) -> bytes:
     meta = {key: item for key, item in state["_meta"].items() if key not in ("seeds", "api_operations")}
-    return json.dumps({"data": {**state, "_meta": meta}}, ensure_ascii=False)
+    with io.BytesIO() as stream:
+        for chunk in json.JSONEncoder(ensure_ascii=False).iterencode({"data": {**state, "_meta": meta}}):
+            stream.write(chunk.encode())
+        return stream.getvalue()
 
 
 def handle(handler: object, services: Services) -> None:

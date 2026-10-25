@@ -13,7 +13,7 @@ from nats.errors import TimeoutError as FetchTimeout
 from nats.js import JetStreamContext, api
 from nats.js.errors import APIError, KeyNotFoundError, KeyWrongLastSequenceError, NotFoundError
 
-from . import nkey
+from . import nats_payload, nkey
 from .bus import Bus, EventLog, StateConflict, StateEntry, WorkQueue
 from .config import BusConfig, QueuePolicy
 from .dead import DEAD_STREAM, DEAD_SUBJECT, dead_letter
@@ -175,7 +175,7 @@ class NatsConsumer:
 
 
 async def _publish(js, subject: str, stream: str, event: Envelope) -> bool:
-    ack = await js.publish(subject, event.encode(), stream=stream, headers={MSG_ID: event.id})
+    ack = await nats_payload.publish(js, subject, event.encode(), stream=stream, headers={MSG_ID: event.id})
     return not ack.duplicate
 
 
@@ -186,7 +186,8 @@ async def _publish_dead(
     stream = stream_name(swarm, "DEAD") if swarm is not None else DEAD_STREAM
     target = event_subject(swarm, "dead", letter.id) if swarm is not None else f"dead.{event.swarm}.{letter.id}"
     try:
-        await js.publish(
+        await nats_payload.publish(
+            js,
             target,
             letter.encode(),
             stream=stream,
@@ -318,20 +319,34 @@ class NatsStateStore:
             js.create_key_value(bucket=bucket, history=KV_HISTORY) if provision else js.key_value(bucket)
         )
 
+    async def _create_chunk(self, key: str, value: bytes) -> None:
+        try:
+            await self._kv.create(key, value)
+        except KeyWrongLastSequenceError:
+            return
+
+    async def _read_chunk(self, key: str) -> bytes:
+        return (await self._kv.get(key)).value
+
     def get(self, key: str) -> StateEntry | None:
         try:
             entry = self._loop.run(self._kv.get(key))
         except KeyNotFoundError:
             return None
-        return StateEntry(key=key, value=entry.value, revision=entry.revision)
+        value = self._loop.run(nats_payload.decode(self._read_chunk, entry.value))
+        return StateEntry(key=key, value=value, revision=entry.revision)
 
     def create(self, key: str, value: bytes) -> int:
+        limit = self._js._nc.max_payload - nats_payload.KV_HEADER_BUDGET
+        value = self._loop.run(nats_payload.encode(self._create_chunk, value, limit))
         try:
             return self._loop.run(self._kv.create(key, value))
         except KeyWrongLastSequenceError as err:
             raise StateConflict(f"state key {key!r} exists") from err
 
     def update(self, key: str, value: bytes, revision: int) -> int:
+        limit = self._js._nc.max_payload - nats_payload.KV_HEADER_BUDGET
+        value = self._loop.run(nats_payload.encode(self._create_chunk, value, limit))
         try:
             return self._loop.run(self._kv.update(key, value, last=revision))
         except KeyWrongLastSequenceError as err:
@@ -342,7 +357,8 @@ class NatsStateStore:
         sequence = max(from_revision, 1)
         while (msg := self._loop.run(self._next(subject, sequence))) is not None:
             sequence = msg.seq + 1
-            yield StateEntry(key=key, value=msg.data or b"", revision=msg.seq)
+            value = self._loop.run(nats_payload.decode(self._read_chunk, msg.data or b""))
+            yield StateEntry(key=key, value=value, revision=msg.seq)
 
     async def _next(self, subject: str, sequence: int):
         try:
@@ -361,7 +377,12 @@ class NatsBus:
         self._views: dict[str, Bus] = {}
         try:
             self._nc = self._loop.run(
-                nats_client.connect(url, allow_reconnect=False, **auth_options(config.credentials))
+                nats_client.connect(
+                    url,
+                    allow_reconnect=config.reconnect,
+                    **({"max_reconnect_attempts": -1} if config.reconnect else {}),
+                    **auth_options(config.credentials),
+                )
             )
             self._js = self._nc.jetstream()
             if config.provision:
@@ -439,11 +460,13 @@ class NatsBus:
     def serve(self, subject: str, queue: str, handler: Callable[[str, bytes], bytes]) -> None:
         async def respond(msg: Msg) -> None:
             answer = await asyncio.get_running_loop().run_in_executor(None, handler, msg.subject, msg.data)
+            nats_payload.validate(self._nc, msg.reply, answer)
             await msg.respond(answer)
 
         self._loop.run(self._nc.subscribe(subject, queue=queue, cb=respond))
 
     def request(self, subject: str, data: bytes, timeout_ms: int) -> bytes:
+        nats_payload.validate(self._nc, subject, data)
         try:
             return self._loop.run(self._nc.request(subject, data, timeout=_seconds(timeout_ms))).data
         except (FetchTimeout, NoRespondersError):
