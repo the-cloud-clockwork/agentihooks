@@ -155,12 +155,12 @@ def covering_tests(manifest: dict, units: set[int], paths: set[str]) -> set[str]
     }
 
 
-def _statement(node: ast.stmt) -> str:
+def _statement(node: ast.stmt) -> str | tuple:
     if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-        return "\0".join(["def", node.name, *map(ast.dump, node.decorator_list)])
+        return (node.name, *map(ast.dump, node.decorator_list))
     if isinstance(node, ast.ClassDef):
-        heads = [*map(ast.dump, node.bases), *map(ast.dump, node.keywords), *map(ast.dump, node.decorator_list)]
-        return "\0".join(["class", node.name, *heads, *map(_statement, node.body)])
+        heads = [*node.bases, *node.keywords, *node.decorator_list]
+        return (node.name, *map(ast.dump, heads), *map(_statement, node.body))
     return ast.dump(node)
 
 
@@ -242,7 +242,6 @@ def recorded_lines(root: Path, manifest: dict, changes: dict[str, set[int]]) -> 
                     for first, _, last, name in _spans(ast.parse(source)):
                         if first <= end and start < last and (unit := f"{path}::{name}") in index:
                             fallback.add(index[unit])
-        by_line = line_units(old)
         headers = {
             line: index[unit]
             for first, body, _, name in _spans(ast.parse(old))
@@ -250,10 +249,7 @@ def recorded_lines(root: Path, manifest: dict, changes: dict[str, set[int]]) -> 
             for line in range(first, body)
         }
         fallback.update(headers[line] for line in affected if line in headers)
-        module = any(line not in by_line and line not in headers for line in affected) or "<module>" in changed_units(
-            old, new
-        )
-        if module and not binds_only_new_names(old, new):
+        if not binds_only_new_names(old, new):
             fallback.update(number for unit, number in index.items() if unit.startswith(f"{path}::"))
         lines[path] = affected | {mapping[line] for line in changes.get(path, ()) if line in mapping}
     return lines, fallback
