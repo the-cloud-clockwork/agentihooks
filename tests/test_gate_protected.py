@@ -537,6 +537,86 @@ def test_protected_provenance_checkout_accepts_only_exact_git_bounds(bounded, ch
     problems = gate_protected.grade({"test.yml": base}, {}, {"test.yml": head}, {}, _TODAY)
     assert problems == (["The head skips reuse without protected durations provenance."] if change else [])
 
+def _provenance_workflow(job="select", permissions=None):
+    from scripts import ci_reuse
+
+    workflow = _workflow()
+    workflow["jobs"]["reuse"] = {"if": "github.event_name != 'merge_group' && github.event_name != 'pull_request'"}
+    workflow["jobs"][job] = {
+        "permissions": {"contents": "read"} if permissions is None else permissions,
+        "timeout-minutes": 5,
+        "steps": ci_reuse.duration_provenance_steps(),
+    }
+    workflow["jobs"]["gate"]["needs"].append(job)
+    return workflow
+
+
+@pytest.mark.parametrize("previous", [{"contents": "read"}, {"contents": "read", "actions": "read"}])
+@pytest.mark.parametrize("permissions", [{"contents": "read"}, {"contents": "read", "actions": "read"}])
+def test_selection_permissions_accept_the_current_or_compatible_grader(previous, permissions):
+    base = _provenance_workflow(permissions=previous)
+    head = copy.deepcopy(base)
+    head["jobs"]["select"]["permissions"] = permissions
+    problems = gate_protected.grade({"test.yml": base}, {}, {"test.yml": head}, {}, _TODAY)
+    legacy = ["The head changes the durations provenance context permissions."]
+    assert problems in ([[]] if previous == permissions else [[], legacy])
+
+
+@pytest.mark.parametrize("previous", [{"contents": "read"}, {"contents": "read", "actions": "read"}])
+@pytest.mark.parametrize(
+    "permissions",
+    [
+        {},
+        {"actions": "read"},
+        {"contents": "write"},
+        {"contents": "read", "actions": "write"},
+        {"contents": "write", "actions": "read"},
+        {"contents": "read", "checks": "read"},
+        {"contents": "read", "actions": "read", "checks": "read"},
+        "read-all",
+        "write-all",
+    ],
+)
+def test_selection_permissions_reject_every_other_form(previous, permissions):
+    base = _provenance_workflow(permissions=previous)
+    head = copy.deepcopy(base)
+    head["jobs"]["select"]["permissions"] = permissions
+    assert gate_protected.grade({"test.yml": base}, {}, {"test.yml": head}, {}, _TODAY) == [
+        "The head changes the durations provenance context permissions."
+    ]
+
+
+@pytest.mark.parametrize("job", ["select", "durations"])
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("env", {"UNTRUSTED": "1"}),
+        ("defaults", {"run": {"shell": "sh"}}),
+        ("needs", ["unit"]),
+        ("timeout-minutes", 6),
+        ("outputs", {"untrusted": "value"}),
+        ("environment", "untrusted"),
+        ("container", "untrusted"),
+        ("concurrency", "untrusted"),
+    ],
+)
+def test_selection_permission_compatibility_preserves_other_provenance_context(job, field, value):
+    base = _provenance_workflow(job)
+    head = copy.deepcopy(base)
+    head["jobs"][job][field] = value
+    assert gate_protected.grade({"test.yml": base}, {}, {"test.yml": head}, {}, _TODAY) == [
+        f"The head changes the durations provenance context {field}."
+    ]
+
+
+def test_selection_permission_compatibility_does_not_expand_the_durations_job():
+    base = _provenance_workflow("durations")
+    head = copy.deepcopy(base)
+    head["jobs"]["durations"]["permissions"] = {"contents": "read", "actions": "read"}
+    assert gate_protected.grade({"test.yml": base}, {}, {"test.yml": head}, {}, _TODAY) == [
+        "The head changes the durations provenance context permissions."
+    ]
+
 
 @pytest.mark.parametrize("weakened", [False, True])
 @pytest.mark.parametrize("anton", [False, True])
