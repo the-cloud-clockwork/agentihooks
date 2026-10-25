@@ -141,7 +141,9 @@ def test_inputs(
                     for node in nodes
                     if isinstance(node, ast.Constant) and isinstance(node.value, str) and node.value
                 }
-                dependencies.update(resource for value in literals for resource in resources.get(value, ()))
+                dependencies.update(
+                    resource for value in literals if not value.endswith("/") for resource in resources.get(value, ())
+                )
 
             if unresolved:
                 dependencies.update(dynamic_modules)
