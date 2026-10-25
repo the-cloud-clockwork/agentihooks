@@ -402,13 +402,19 @@ MEMBER_READS = {
 
 @pytest.mark.parametrize("kind", ["checks", "merge", "reply"])
 def test_a_hive_member_credential_declares_checked_waits_through_the_cli(waiting, monkeypatch, kind):
+    import fakeredis
+
     from scripts.hive import auth
     from scripts.inbox.store import InboxStore
     from scripts.swarm.store import RedisStore
 
-    store, _, state = waiting
+    _, _, state = waiting
     state["entry"]["position"] = 1
-    admin = store.redis
+    server = fakeredis.FakeServer()
+    admin = fakeredis.FakeRedis(server=server, decode_responses=True)
+    monkeypatch.setattr(cli, "connect", lambda: RedisStore(admin))
+    assert run("sw", "create", "--repo", "/repo") == 0
+    RedisStore(admin).put_agent("sw", AgentRecord(name=ME, lane="eng", task="t1", seat="eng-1@sw"))
     admin.acl_setuser(
         "hive-m1",
         enabled=True,
@@ -418,14 +424,14 @@ def test_a_hive_member_credential_declares_checked_waits_through_the_cli(waiting
         channels=auth.ACL_PATTERNS,
     )
 
-    # The fake server drops %R~ read selectors, so reads the member's %R~ grant allows go through the admin client.
-    class Member(type(admin)):
+    # fakeredis drops %R~ read selectors, so reads the member's %R~ grant allows go through the admin client.
+    class Member(fakeredis.FakeRedis):
         def execute_command(self, *args, **options):
             if str(args[0]).upper() in MEMBER_READS:
                 return admin.execute_command(*args, **options)
             return super().execute_command(*args, **options)
 
-    member = Member(server=admin.connection_pool.connection_kwargs["server"], decode_responses=True, username="hive-m1")
+    member = Member(server=server, decode_responses=True, username="hive-m1")
     member.auth("", username="hive-m1")
     assert member.acl_whoami() == "hive-m1"
     target = {
