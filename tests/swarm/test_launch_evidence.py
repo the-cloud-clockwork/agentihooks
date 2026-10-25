@@ -101,3 +101,53 @@ def test_repeated_launch_failures_keep_separate_reports(tmp_path):
     assert first != second
     assert json.loads(first.read_text())["error"] == "first"
     assert json.loads(second.read_text())["error"] == "second"
+
+
+@pytest.mark.parametrize("source", ["stdout", "stderr", "report", "screen"])
+def test_capacity_refusal_is_distinct_even_when_the_launch_times_out(tmp_path, source):
+    reason = "Selected model is at capacity"
+    fields = {"pane_id": "pane"}
+    report = tmp_path / "validation.json"
+    report.write_text(json.dumps({"state": "failed", "reason": reason if source == "report" else ""}))
+    fields["profile_report"] = str(report)
+    attempt = launch_evidence.Attempt(tmp_path, "agent", "task", "codex", 12)
+    path = launch_evidence.retain(
+        attempt,
+        fields,
+        reason if source == "stdout" else "",
+        reason if source == "stderr" else "",
+        lambda *_: reason if source == "screen" else "",
+        "init-agent timed out",
+    )
+    assert json.loads(path.read_text())["failure"] == "capacity"
+
+
+def test_nested_validation_strings_are_redacted_before_json_escaping(tmp_path):
+    credential = "example-" + "A" * 24
+    value = "Bearer\n" + credential[:10] + "\x1b[31m" + credential[10:]
+    report = tmp_path / "validation.json"
+    report.write_text(json.dumps({"state": "failed", "reason": value, "evidence": [{value: [value, 7]}]}))
+    attempt = launch_evidence.Attempt(tmp_path, "agent", "task", "codex", 12)
+    path = launch_evidence.retain(attempt, {"profile_report": str(report)}, value, value, lambda *_: None, value)
+    contents = path.read_text()
+    assert credential not in contents
+    assert credential[:10] not in contents
+    row = json.loads(contents)
+    assert row["validation"]["reason"] == "[REDACTED:bearer_value]"
+    assert row["validation"]["evidence"] == [{"[REDACTED:bearer_value]": ["[REDACTED:bearer_value]", 7]}]
+    assert row["stdout"] == row["stderr"] == "[REDACTED:bearer_value]"
+    assert row["error"] == "[REDACTED:bearer_value]\n[REDACTED:bearer_value]"
+
+
+def test_a_malformed_pane_response_still_leaves_diagnostics(tmp_path):
+    attempt = launch_evidence.Attempt(tmp_path, "agent", "task", "codex", 12)
+
+    def read(pane, lines):
+        assert (pane, lines) == ("pane", 80)
+        return {}["text"]
+
+    path = launch_evidence.retain(attempt, {"pane_id": "pane"}, "", "", read, "timed out")
+    row = json.loads(path.read_text())
+    assert row["screen_error"] == "'text'"
+    assert row["error"] == "timed out"
+    assert row["failure"] == "timeout"

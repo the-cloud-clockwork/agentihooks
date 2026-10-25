@@ -39,6 +39,16 @@ def _failure(reason: str) -> str:
     return "failed"
 
 
+def _safe(value):
+    if isinstance(value, str):
+        return redact(ESCAPE.sub("", value), mode="strict")
+    if isinstance(value, dict):
+        return {_safe(key): _safe(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_safe(item) for item in value]
+    return value
+
+
 def retain(
     attempt: Attempt, fields: dict, stdout: str, stderr: str, reader: Callable[[str, int], str], reason: str
 ) -> Path:
@@ -46,8 +56,8 @@ def retain(
     pane = fields.get("pane_id", "")
     if pane:
         try:
-            screen = reader(pane, 80)
-        except (OSError, RuntimeError, ValueError) as exc:
+            screen = text(reader(pane, 80))
+        except (KeyError, OSError, RuntimeError, ValueError) as exc:
             screen_error = str(exc)
     validation = _validation(fields)
     row = {
@@ -56,7 +66,7 @@ def retain(
         "harness": attempt.harness,
         "launched_at": attempt.launched_at,
         "pane_id": pane,
-        "failure": _failure("\n".join((reason, stderr, str(validation.get("reason", "")), screen))),
+        "failure": _failure("\n".join((reason, stdout, stderr, str(validation.get("reason", "")), screen))),
         "validation": validation,
         "error": "\n".join((reason, stderr)).strip(),
         "stdout": stdout,
@@ -67,10 +77,6 @@ def retain(
     directory = attempt.home / "launch-evidence"
     directory.mkdir(parents=True, exist_ok=True, mode=0o700)
     path = directory / f"{attempt.launched_at}-{uuid4().hex}.json"
-    safe = {
-        key: redact(ESCAPE.sub("", value), mode="strict") if isinstance(value, str) else value
-        for key, value in row.items()
-    }
-    _atomic_write(path, redact(json.dumps(safe), mode="strict") + "\n")
+    _atomic_write(path, json.dumps(_safe(row)) + "\n")
     path.chmod(0o600)
     return path
