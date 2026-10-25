@@ -255,17 +255,37 @@ def test_an_ended_agent_on_the_hive_does_not_hold_the_drain(store):
     assert remove.hosted(store, member) == []
 
 
-def test_a_stopping_hive_takes_no_new_agents_and_waits_for_its_agents_to_finish(store, tmp_path):
+def _orders(store, seat):
+    return [item for inbox in InboxStore(store.redis).worlds() for item in inbox.inbox(seat)]
+
+
+def test_a_stopping_hive_orders_its_agents_to_hand_off_once_and_ends_when_they_are_gone(store, tmp_path):
     member = _member(store)
     _agent(store, member)
     clock = Clock(store, member, 2)
 
     settled = remove.settle(store, member, 3600, _host(clock, Run(), tmp_path))
 
-    assert settled == f"hive {member} drained: no agents running"
+    assert settled == f"hive {member} drained: no agents running, 1 handed off"
     assert (clock.now, clock.slept) == (2 * remove.POLL_S, 2)
     assert registry.show(store.redis, member)["draining"] == "yes"
-    assert [item for inbox in InboxStore(store.redis).worlds() for item in inbox.inbox(SEAT)] == []
+    orders = _orders(store, SEAT)
+    assert [(item.sender, item.text) for item in orders] == [
+        (remove.SENDER, remove.ROLL.format(hive=member, slug=SLUG))
+    ]
+    assert f"agentihooks swarm {SLUG} handoff" in orders[0].text
+    assert "another hive" in orders[0].text
+
+
+def test_a_stopping_hive_with_no_agents_orders_nothing(store, tmp_path):
+    member = _member(store)
+    clock = Clock(store, member, 99)
+
+    settled = remove.settle(store, member, 3600, _host(clock, Run(), tmp_path))
+
+    assert settled == f"hive {member} drained: no agents running, 0 handed off"
+    assert clock.slept == 0
+    assert _orders(store, SEAT) == []
 
 
 def test_a_stopping_hive_gives_up_on_its_agents_at_the_deadline(store, tmp_path):
@@ -278,6 +298,7 @@ def test_a_stopping_hive_gives_up_on_its_agents_at_the_deadline(store, tmp_path)
 
     assert settled == f"hive {member} stops after 30 seconds with engineer@1, engineer@2 still running"
     assert (clock.now, clock.slept) == (30, 2)
+    assert [len(_orders(store, seat)) for seat in (SEAT, f"eng-2@{SLUG}")] == [1, 1]
 
 
 def test_a_stopping_hive_with_no_record_is_refused_and_never_recorded(store, tmp_path):

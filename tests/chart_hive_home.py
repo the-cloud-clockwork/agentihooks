@@ -68,7 +68,8 @@ def problems(deployment: dict, workers: dict | None) -> list[str]:
     if strategy != "Recreate":
         found.append(f"a hive with a host home rolls out by {strategy}, expected Recreate")
     drain = spec["containers"][0].get("lifecycle", {}).get("preStop", {}).get("exec", {}).get("command")
-    if drain != ["agentihooks", "hive", "drain", "--wait", str(workers["drainSeconds"])]:
+    logged = f"agentihooks hive drain --wait {workers['drainSeconds']} 2>&1 | tee /proc/1/fd/1"
+    if drain != ["sh", "-c", logged]:
         found.append(f"a Recreate hive stops with preStop {drain}, expected a drain of its agents")
     if spec.get("terminationGracePeriodSeconds") != workers["drainSeconds"] + 30:
         found.append(f"the hive grace period {spec.get('terminationGracePeriodSeconds')} does not cover its drain")
