@@ -275,6 +275,11 @@ def _validation(fields: dict, profile: str, agent: str) -> dict:
     }
 
 
+def deferring(herdr: "HerdrRuntime") -> "HerdrRuntime":
+    herdr.defer_master_canary = True
+    return herdr
+
+
 class HerdrRuntime:
     quota_accounts: Callable[..., list] | None = None
 

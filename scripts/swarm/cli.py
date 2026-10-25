@@ -140,7 +140,7 @@ from scripts.swarm import (
 from scripts.swarm.health import activity
 from scripts.swarm.health import findings as health
 from scripts.swarm.ledger_client import LedgerClient, LedgerGone, LedgerRefused
-from scripts.swarm.runtime import REPO_VARIABLE, HerdrRuntime
+from scripts.swarm.runtime import REPO_VARIABLE, HerdrRuntime, deferring
 from scripts.swarm.status import (
     auto_snapshot,
     findings,
@@ -309,7 +309,7 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None, scheduled=F
     tick_stop.check()
     ledger = ledger or LedgerClient()
     outbox.flush(InboxStore(store.redis))
-    runtime = runtime or routed(herdr=HerdrRuntime(defer_master_canary=True))
+    runtime = runtime or routed(herdr=deferring(HerdrRuntime()))
     held = lease.acquire(store, slug, commands.hive_id())
     if held is None:
         return ["the swarm belongs to another hive"]
