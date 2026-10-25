@@ -174,6 +174,72 @@ def test_suffix_named_feature_tests_cannot_escape_ownership(mapped_repo):
         feature_map.validate(root, path)
 
 
+@pytest.mark.parametrize("explicit_root", [False, True])
+def test_cli_reports_the_complete_validated_feature_count(mapped_repo, monkeypatch, capsys, explicit_root):
+    root, _, _ = mapped_repo
+    monkeypatch.chdir(root)
+    monkeypatch.setattr(sys, "argv", ["feature-map", *(["--root", str(root)] if explicit_root else [])])
+    feature_map.main()
+    assert capsys.readouterr().out == "Feature map: 1 features, all rule, behaviour and live check links exist\n"
+
+
+def test_duplicate_rule_ids_cannot_hide_a_rule(mapped_repo):
+    root, path, _ = mapped_repo
+    (root / ".semgrep/features/copy.yml").write_text("rules:\n  - id: feature-login\n")
+    with pytest.raises(ValueError, match="duplicate feature rule"):
+        feature_map.validate(root, path)
+
+
+@pytest.mark.parametrize("entries", [[], "features"])
+def test_feature_map_requires_an_entry_list(mapped_repo, entries):
+    root, path, _ = mapped_repo
+    path.write_text(json.dumps({"features": entries}))
+    with pytest.raises(ValueError, match="features must be a nonempty list"):
+        feature_map.validate(root, path)
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        ["bash"],
+        ["python"],
+        ["python", "-m"],
+        ["python", "-m", "../foreign"],
+        ["python", "-m", "scripts.missing"],
+        [None],
+        ["bash", ""],
+    ],
+)
+def test_live_check_must_identify_a_repository_command(mapped_repo, command):
+    root, path, entry = mapped_repo
+    entry["live_check"] = command
+    path.write_text(json.dumps({"features": [entry]}))
+    with pytest.raises(ValueError, match="live.check"):
+        feature_map.validate(root, path)
+
+
+def test_executable_repo_script_can_be_a_live_check(mapped_repo):
+    root, path, entry = mapped_repo
+    script = root / "scripts/live.sh"
+    script.chmod(0o755)
+    entry["live_check"] = ["./scripts/live.sh"]
+    path.write_text(json.dumps({"features": [entry]}))
+    assert feature_map.validate(root, path) == 1
+    script.chmod(0o644)
+    with pytest.raises(ValueError, match="missing live check"):
+        feature_map.validate(root, path)
+
+
+def test_python_package_entry_point_can_be_a_live_check(mapped_repo):
+    root, path, entry = mapped_repo
+    package = root / "scripts/live"
+    package.mkdir()
+    (package / "__main__.py").write_text("print('ok')\n")
+    entry["live_check"] = ["python3", "-m", "scripts.live"]
+    path.write_text(json.dumps({"features": [entry]}))
+    assert feature_map.validate(root, path) == 1
+
+
 @pytest.mark.parametrize(
     ("jobs", "success"),
     [
