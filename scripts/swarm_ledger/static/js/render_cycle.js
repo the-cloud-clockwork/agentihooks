@@ -7,7 +7,7 @@ export function renderCycle(focusKey, cooperative, build) {
   const version = ++renderVersion;
   const active = document.activeElement;
   let key = focusKey || (active && active.dataset ? active.dataset.focus : null);
-  const selection = !focusKey && active && active.tagName === "TEXTAREA" ? active : null;
+  let selection = !focusKey && active && active.tagName === "TEXTAREA" ? active : null;
   const current = () => version === renderVersion;
   const sections = build(current);
   const paint = async () => {
@@ -16,7 +16,10 @@ export function renderCycle(focusKey, cooperative, build) {
         await scheduler.postTask(() => {}, { priority: "background" });
         if (!current()) return rendered;
         const now = document.activeElement;
-        if (!focusKey && now && now !== document.body) key = now.dataset ? now.dataset.focus : null;
+        if (!focusKey && now && now !== document.body) {
+          key = now.dataset ? now.dataset.focus : null;
+          selection = now.tagName === "TEXTAREA" ? now : null;
+        }
       }
       try {
         const drawing = section();
