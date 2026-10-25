@@ -152,10 +152,13 @@ def test_statistics_collect_runtime_dependencies_with_plugin_discovery_disabled(
         tests_by_mangled_function_name={"scripts.sample.x_value": {node}}, duration_by_test={node: 1}
     )
 
+    exported = []
+
     class Runner:
         _pytest_add_cli_args = []
 
         def run_stats(self, *, tests):
+            exported.append(os.environ.get("COVERAGE_FILE"))
             done = subprocess.run(
                 [sys.executable, "-m", "pytest", "-q", *self._pytest_add_cli_args, *tests],
                 cwd=work / "mutants",
@@ -172,6 +175,7 @@ def test_statistics_collect_runtime_dependencies_with_plugin_discovery_disabled(
         SimpleNamespace(mutmut=engine), Runner(), ["tests/test_sample.py"], output, str(tmp_path / "base")
     )
     result = json.loads(output.read_text())
+    assert exported == [None]
     assert result["status"] == 0
     assert result["durations"] == {node: 1}
     assert "scripts/sample.py" in result["dependencies"][node]
