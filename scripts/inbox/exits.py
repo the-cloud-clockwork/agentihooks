@@ -188,8 +188,8 @@ def sweep(inbox: "InboxStore", slug: str, store: "RedisStore", live_rows: "Calla
 
 
 def _move_seat_mail(inbox: "InboxStore", worlds: "_WorldPass", live: list) -> None:
-    """A lane or dispatcher seat's open mail follows its live occupant into the world of the host it runs on; a master seat's
-    mail stays with the master pool of its world."""
+    """A lane or dispatcher seat's open mail follows its live occupant into the world of the host it runs on; a master
+    seat's mail stays with the master pool of its world."""
     by_world = {world.world: world for world in worlds.up}
     moves = [
         (agent, by_world[home])
