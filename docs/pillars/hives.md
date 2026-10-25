@@ -442,7 +442,8 @@ agentihooks hive list
 ```
 
 A hive in a pod with a cgroup memory limit shows `available-mb` as the tighter of the node and pod figures, and
-`pod-limit-mb` names the pod limit; admission counts the same tighter figure.
+`pod-limit-mb` names the pod limit; admission counts the pod memory room as one more limit and launches by the
+tightest of them.
 
 Hive workers load code at start. A hive still on code from before the 10 second publisher writes headroom only
 after the beat's launch poll, so its reading lapses during a long launch; restart its `agentihooks-hive` service,
