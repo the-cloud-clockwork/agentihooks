@@ -54,7 +54,7 @@ def _nats(tmp_path) -> Iterator[Harness]:
 
     policy = QueuePolicy(max_deliver=3, ack_wait_ms=600)
     with nats_server.running(tmp_path / "jetstream") as url:
-        bus = nats.open_bus(BusConfig(backend="nats", url=url, dedupe_window_ms=1_500, queue=policy))
+        bus = nats.open_bus(BusConfig(backend="nats", url=url, dedupe_window_ms=1_600, queue=policy))
         try:
             yield Harness(bus, policy, 1_500, 300, lambda ms: time.sleep(ms / 1000), 50)
         finally:
