@@ -122,3 +122,45 @@ def test_a_running_tick_ends_the_placement_pass_after_spawning():
     tick("sw", store, FakeLedger([{"id": "t1", "lane": "eng"}]), runtime, now_ms=1_000)
     assert runtime.spawned
     assert runtime.passes[-1] == ("end", len(runtime.spawned))
+
+
+def test_a_placement_pass_loads_the_hives_once_and_the_next_pass_reloads(setup, monkeypatch):  # noqa: F811
+    from scripts.hive import launch as launch_module
+
+    loads = []
+    loaded = launch_module.loaded_hives
+    monkeypatch.setattr(launch_module, "loaded_hives", lambda store: loads.append(store) or loaded(store))
+    launch = setup.launcher
+    launch.placement_cache = None
+    first = launch.hives()
+    assert launch.hives() == first
+    assert len(loads) == 2
+    launch.placement_cache = {}
+    passed = launch.hives()
+    assert launch.hives() is passed
+    assert len(loads) == 3
+    launch.placement_cache = {}
+    assert launch.hives() is not passed
+    assert len(loads) == 4
+
+
+def test_a_local_slot_limit_leaves_the_pass_hives_unchanged_for_later_tasks(setup, monkeypatch):  # noqa: F811
+    import copy
+
+    from scripts.hive import admission
+    from scripts.hive.placement import Wait
+    from scripts.swarm import commands
+
+    monkeypatch.setattr(commands, "hive_id", lambda: "remote")
+    monkeypatch.setattr(admission, "capped", lambda found, agents, maximum: admission.Room(0, "max agents", "full"))
+    launch = setup.launcher
+    launch.placement_cache = {}
+    before = copy.deepcopy(launch.hives())
+    assert isinstance(launch.select(setup.config, "eng", {"id": "one"}), Wait)
+    assert launch.hives() == before
+
+
+def test_a_placement_pass_opens_the_master_seat_on_hives_named_for_its_swarm(setup):  # noqa: F811
+    write_hive(setup, excluded=["master", "engineer"], master_swarms=[setup.config.slug])
+    setup.launcher.placement_cache = {}
+    assert [hive["excluded"] for hive in setup.launcher.hives()] == [["engineer"]]

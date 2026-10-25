@@ -914,6 +914,7 @@ class Claims:
 
 def claim_view(slug, store, rows, doc, dispatched=None):
     awaiting = _owned_tasks(slug, store)
+    claimed = store.claimed(slug, [task_id for task_id, t in rows.items() if t.get("state") == "open"])
     held = [t.get("territory") or [] for t in rows.values() if t.get("state") in ACTIVE]
     config = store.config(slug)
     graph, fix = hierarchy.project(doc)[0], freeze.fix_phase(config)
@@ -924,18 +925,19 @@ def claim_view(slug, store, rows, doc, dispatched=None):
         doc,
         graph,
         fix,
-        lambda task_id: task_id in awaiting or store.claimant(slug, task_id) is not None,
+        lambda task_id: task_id in awaiting or task_id in claimed,
         lambda task: released(task) and applied(task),
     )
     return Claims(view, held, sorted(rows.values(), key=dispatched or claim_order.key(rows)))
 
 
 def _launch_order(slug, store, tasks, dispatched=None):
+    failed = store.launch_failures(slug)
     return sorted(
         tasks,
         key=lambda task: (
             dispatched(task)[0] if dispatched else ledger_rank.order(task),
-            bool(store.launch_failure(slug, task["id"])),
+            bool(failed.get(task["id"])),
             not claim_order.resumed(task),
         ),
     )
