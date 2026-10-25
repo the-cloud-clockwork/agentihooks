@@ -38,14 +38,14 @@ def arguments(request: Request, work: Path) -> list[str]:
         args += ["--disable", feature]
     if sealed:
         args += ["-c", 'web_search="disabled"', "-c", "project_doc_max_bytes=0"]
-        args += ["-c", f"model_catalog_json={json.dumps(str(work / 'catalog-sealed.json'))}"]
-    args += ["-c", f"model_reasoning_effort={json.dumps(request.effort)}"]
-    args += ["-c", f"developer_instructions={json.dumps(request.profile_prompt)}"]
+        args += ["-c", f"model_catalog_json={json.dumps(str(work / 'catalog-sealed.json'), ensure_ascii=False)}"]
+    args += ["-c", f"model_reasoning_effort={json.dumps(request.effort, ensure_ascii=False)}"]
+    args += ["-c", f"developer_instructions={json.dumps(request.profile_prompt, ensure_ascii=False)}"]
     return [*args, "-m", request.model, "--", request.user_input]
 
 
 def sealed_catalog(listing: str) -> dict:
-    catalog = json.loads(listing[listing.index("{") :])
+    catalog = json.JSONDecoder().raw_decode(listing, listing.index("{"))[0]
     for entry in catalog["models"]:
         for key in CATALOG_DROPPED:
             entry.pop(key, None)
@@ -55,7 +55,7 @@ def sealed_catalog(listing: str) -> dict:
 
 
 def route(environ: Mapping[str, str]) -> tuple[codex_router.CodexAccount, dict[str, str]]:
-    account, _, _, _ = codex_router._route(environ, "", subprocess.run, "")
+    account, _, _, _ = codex_router._route(environ, route="", run=subprocess.run, exclude="")
     account = codex_router.credential(account, environ)
     seed = {name: environ[name] for name in (*KEPT, account.env_name, account.key_env) if name in environ}
     return account, codex_router.child_environment(account, seed)

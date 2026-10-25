@@ -1,4 +1,6 @@
 import json
+import subprocess
+import tomllib
 from pathlib import Path
 
 import pytest
@@ -93,7 +95,7 @@ def test_route_keeps_only_home_path_and_the_routed_token(monkeypatch):
 def test_route_resolves_the_credential_kind(monkeypatch):
     account = codex_router.CodexAccount("b", env_name="AH_CX_TOKEN_b")
     bearer = codex_router.CodexAccount("b", env_name="AH_CX_TOKEN_b", bearer=True)
-    monkeypatch.setattr(codex_router, "_route", lambda *_: (account, "placed", 0, "3"))
+    monkeypatch.setattr(codex_router, "_route", lambda *_, **__: (account, "placed", 0, "3"))
     monkeypatch.setattr(codex_router, "credential", lambda found, environ: bearer if environ["MARK"] else found)
     monkeypatch.setattr(codex_router, "_chatgpt_account_id", lambda claims: "acct-id")
     monkeypatch.setattr(codex_router, "_claims", lambda token: {})
@@ -114,8 +116,37 @@ def test_route_seeds_an_api_key(monkeypatch):
         seen["seed"] = seed
         return dict(seed)
 
-    monkeypatch.setattr(codex_router, "_route", lambda *_: (account, "forced", 0, "?"))
+    monkeypatch.setattr(codex_router, "_route", lambda *_, **__: (account, "forced", 0, "?"))
     monkeypatch.setattr(codex_router, "credential", lambda found, environ: found)
     monkeypatch.setattr(codex_router, "child_environment", child_environment)
     codex.route({"OPENAI_API_KEY": "key", "PATH": "/p", "OTHER": "x"})
     assert seen["seed"] == {"PATH": "/p", "OPENAI_API_KEY": "key"}
+
+
+def test_config_values_keep_characters_outside_the_basic_plane_valid_toml():
+    request = Request("sealed", "PRO \U0001f600", "INPUT", SCHEMA, "m", "l\u00f6w")
+    args = codex.arguments(request, Path("/w\u00e9"))
+    values = [args[at + 1] for at, arg in enumerate(args) if arg == "-c"]
+    assert values[2:] == [
+        'model_catalog_json="/w\u00e9/catalog-sealed.json"',
+        'model_reasoning_effort="l\u00f6w"',
+        'developer_instructions="PRO \U0001f600"',
+    ]
+    assert [tomllib.loads(value) for value in values[2:]] == [
+        {"model_catalog_json": "/w\u00e9/catalog-sealed.json"},
+        {"model_reasoning_effort": "l\u00f6w"},
+        {"developer_instructions": "PRO \U0001f600"},
+    ]
+
+
+def test_the_sealed_catalog_ignores_text_after_the_listing():
+    assert codex.sealed_catalog('{"models": []}\ndone') == {"models": []}
+
+
+def test_a_run_that_writes_no_result_file_replies_empty(monkeypatch, tmp_path):
+    account = codex_router.CodexAccount("b", env_name="AH_CX_TOKEN_b")
+    monkeypatch.setattr(
+        codex, "execute", lambda command, env: subprocess.CompletedProcess(command, 0, '{"models": []}', "")
+    )
+    request = Request("sealed", "P", "I", SCHEMA, "m", "low")
+    assert codex.invoke(request, (account, {}), tmp_path) == ""

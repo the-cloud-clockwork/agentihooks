@@ -33,3 +33,14 @@ def test_execute_raises_with_the_exit_code_and_never_the_stderr():
     with pytest.raises(request.HeadlessError) as caught:
         request.execute([sys.executable, "-c", script], {})
     assert str(caught.value) == f"{sys.executable} exited 3"
+
+
+def test_execute_turns_a_timeout_into_a_headless_error(monkeypatch):
+    def fake_run(command, **kwargs):
+        raise subprocess.TimeoutExpired(command, kwargs["timeout"])
+
+    monkeypatch.setattr(request.subprocess, "run", fake_run)
+    with pytest.raises(request.HeadlessError) as caught:
+        request.execute(["tool"], {})
+    assert str(caught.value) == "tool ran past 900 seconds"
+    assert isinstance(caught.value.__cause__, subprocess.TimeoutExpired)

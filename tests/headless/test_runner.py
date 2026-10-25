@@ -123,19 +123,20 @@ def test_codex_gets_its_own_empty_home_the_schema_and_the_sealed_catalog(fake_cl
     fake_cli("codex", ['{"verdict": "pass"}'], listing=LISTING)
     seen = []
 
+    real_execute = codex.execute
+
     def execute(command, env):
-        work = env["CODEX_HOME"].removesuffix("/codex-home")
+        work = Path(env["CODEX_HOME"]).parent
         seen.append(
             {
                 "env": sorted(env),
-                "home": sorted(p.name for p in Path(work).iterdir()) if command[-1] == "INPUT" else None,
-                "schema": json.loads(open(f"{work}/schema.json").read()),
-                "catalog": json.loads(open(f"{work}/catalog-sealed.json").read()) if command[-1] == "INPUT" else None,
+                "home": sorted(p.name for p in work.iterdir()) if command[-1] == "INPUT" else None,
+                "schema": json.loads((work / "schema.json").read_text()),
+                "catalog": json.loads((work / "catalog-sealed.json").read_text()) if command[-1] == "INPUT" else None,
             }
         )
         return real_execute(command, env)
 
-    real_execute = codex.execute
     monkeypatch.setattr(codex, "execute", execute)
     runner.run("PROFILE", "INPUT", SCHEMA, "sealed", "high", "low", harness="codex")
     assert seen[1] == {
