@@ -1133,7 +1133,13 @@ def test_cli_prepares_and_publishes_from_the_primary_checkout(publication, monke
 @pytest.mark.parametrize("command", ["prepare", "publish"])
 @pytest.mark.parametrize(
     "recording,branch",
-    [("map", "recorded-delivery"), ("legacy", "engineer-test"), ("unrecorded", ""), ("missing", "")],
+    [
+        ("map", "recorded-delivery"),
+        ("legacy", "engineer-test"),
+        ("unrecorded", ""),
+        ("missing", ""),
+        ("lookup-refused", ""),
+    ],
 )
 def test_cli_journals_each_publication_refusal_with_task_branch_and_reason(
     publication, monkeypatch, command, recording, branch
@@ -1162,7 +1168,9 @@ def test_cli_journals_each_publication_refusal_with_task_branch_and_reason(
     def refuse(*args):
         raise publish.SwarmError("recorded branch is missing")
 
-    if recording != "missing":
+    if recording == "lookup-refused":
+        monkeypatch.setattr(p.ledger, "tasks", refuse)
+    elif recording != "missing":
         monkeypatch.setattr(publish, command, refuse)
     args = SimpleNamespace(slug="swarm", command=command, message="Continue", files=["chosen.txt"])
     with pytest.raises(publish.SwarmError, match=reason):

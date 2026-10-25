@@ -189,9 +189,10 @@ def test_prepare_continues_a_pushed_branch_without_rechecking_its_pull_request(
 
 @pytest.mark.parametrize("command", ["prepare", "publish"])
 @pytest.mark.parametrize("recorded_branch", ["deleted-secondary", "dev"])
-@pytest.mark.parametrize("mapped", [False, True])
+@pytest.mark.parametrize("mapped", [False, True, "foreign"])
+@pytest.mark.parametrize("checkout_branch", ["engineer-test", "engineer-other"])
 def test_cli_refusal_names_the_secondary_repositorys_branch(
-    repositories, monkeypatch, command, recorded_branch, mapped
+    repositories, monkeypatch, command, recorded_branch, mapped, checkout_branch
 ):
     import json
     import syslog
@@ -204,12 +205,14 @@ def test_cli_refusal_names_the_secondary_repositorys_branch(
         branch="primary-branch",
         repository_branches={str(p.swarm): "primary-branch", str(p.bundle): recorded_branch},
     )
+    if mapped == "foreign":
+        p.task["repository_branches"] = {"/srv/workstation/dev/agentihooks-bundle": recorded_branch}
     if not mapped:
         p.task.pop("repository_branches")
         p.task["branch"] = recorded_branch
     if command == "publish":
         root = p.bundle.parent / "bundle-worktree"
-        git(p.bundle, "worktree", "add", "-b", "engineer-test", str(root))
+        git(p.bundle, "worktree", "add", "-b", checkout_branch, str(root))
         monkeypatch.chdir(root)
     monkeypatch.setattr(cli, "_worker", lambda store, args: p.agent)
     monkeypatch.setattr(cli, "_local_repo", lambda store, slug: str(p.swarm))
@@ -258,6 +261,25 @@ def test_cli_refusal_keeps_an_unrecorded_secondary_branch_empty(repositories, mo
     assert len(logged) == 1
     assert logged[0]["branch"] == ""
     assert logged[0]["reason"]
+
+
+@pytest.mark.parametrize("command", ["prepare", "publish"])
+def test_early_repository_refusal_keeps_an_unrecorded_branch_empty(repositories, monkeypatch, command):
+    p = repositories
+    if command == "prepare":
+        p.task.update(repositories=[str(p.bundle)], branch_repo=str(p.bundle))
+        git(p.bundle, "remote", "remove", "origin")
+    else:
+        p.task["repositories"] = [str(p.swarm), str(p.bundle)]
+        monkeypatch.chdir(p.swarm)
+    with pytest.raises(publish.PublicationRefusal) as refused:
+        if command == "prepare":
+            publish.prepare("swarm", p.agent, str(p.swarm), p.ledger)
+        else:
+            publish.publish("swarm", p.agent, str(p.swarm), p.ledger, "Continue", ["chosen.txt"])
+    assert refused.value.branch == ""
+    assert refused.value.repository == str(p.bundle if command == "prepare" else p.swarm)
+    assert str(refused.value)
 
 
 def test_prepare_names_the_default_repository_without_inferring_prose(repositories):
