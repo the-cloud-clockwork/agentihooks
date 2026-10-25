@@ -289,6 +289,34 @@ def test_a_stopping_hive_with_no_agents_orders_nothing(store, tmp_path):
     assert _orders(store, SEAT) == []
 
 
+class Successor:
+    def __init__(self, store):
+        self.store, self.now, self.slept = store, 0.0, 0
+
+    def sleep(self, seconds):
+        self.slept += 1
+        self.now += seconds
+        for agent in self.store.agents(SLUG):
+            if _orders(self.store, agent.seat):
+                self.store.put_agent(SLUG, replace(agent, state="finished"))
+
+    def __call__(self):
+        return self.now
+
+
+def test_a_release_roll_ends_its_drain_one_poll_after_its_agents_obey_the_order_not_at_the_grace(store, tmp_path):
+    member = _member(store)
+    _agent(store, member)
+    store.put_agent(SLUG, AgentRecord("ci@1", "ci", "t2", seat=f"ci-1@{SLUG}", hive=member, state="working"))
+    clock = Successor(store)
+
+    settled = remove.settle(store, member, 3600, _host(clock, Run(), tmp_path))
+
+    assert settled == f"hive {member} drained: no agents running, 2 ordered to hand off"
+    assert (clock.now, clock.slept) == (remove.POLL_S, 1)
+    assert remove.hosted(store, member) == []
+
+
 def test_a_stopping_hive_gives_up_on_its_agents_at_the_deadline(store, tmp_path):
     member = _member(store)
     _agent(store, member)
