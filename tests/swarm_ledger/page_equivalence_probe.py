@@ -1,6 +1,7 @@
 import os
 import shutil
 import subprocess
+import sys
 import tarfile
 from pathlib import Path
 
@@ -17,7 +18,8 @@ def test_candidate_page_replay_rejects_a_dropped_chat_recipient(tmp_path):
         source.extractall(tmp_path / "base", filter="data")
     shutil.copytree(tmp_path / "base", tmp_path / "head")
     replay = tmp_path / "head" / "tests" / "swarm_ledger" / "equivalence.sh"
-    env = {**os.environ, "RUNNER_TEMP": str(tmp_path)}
+    env = {**os.environ, "RUNNER_TEMP": str(tmp_path), "PLAYWRIGHT_BROWSERS_PATH": str(tmp_path / "browsers")}
+    subprocess.run([sys.executable, "-m", "playwright", "install", "chromium"], env=env, check=True)
     subprocess.run(["bash", str(replay), "plant"], cwd=tmp_path, env=env, check=True)
     subprocess.run(["bash", str(replay), "page"], cwd=tmp_path, env=env, check=True)
     fault = subprocess.run(
