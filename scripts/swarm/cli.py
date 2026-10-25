@@ -1675,6 +1675,7 @@ def cmd_merge(store, args):
                 args.url,
                 admit=lambda head: _queue_intent(store, args, agent, head) or queue_exit.require_fresh(args.url, head),
                 journal=queue_record.Journal(args.url),
+                attempts=merge_queue.ATTEMPTS,
             )
         else:
             result = merge_queue.operate(args.action, args.url, journal=queue_record.Journal(args.url))
