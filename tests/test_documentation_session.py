@@ -12,6 +12,7 @@ from tests.test_documentation_evidence import git, pull, repository
 class Ledger:
     def __init__(self):
         self.source = {"id": "t1", "title": "Add retry policy", "phase": "p1", "profile": "engineer", "state": "done"}
+        self.source["pr_url"] = "https://example.test/pull/7"
         self.added = []
 
     def task(self, slug, task_id):
@@ -25,8 +26,13 @@ class Ledger:
 def world(tmp_path, monkeypatch):
     root = tmp_path / "repo"
     root.mkdir()
-    repository(root)
+    baseline = repository(root)
     ledger, jobs = Ledger(), []
+    monkeypatch.setattr(
+        documentation_session.documentation_evidence,
+        "pull_request_diff",
+        lambda url: git(root, "diff", baseline, "HEAD"),
+    )
     monkeypatch.setattr(documentation_session, "HOME", tmp_path / "state")
     monkeypatch.setattr(documentation_session, "LedgerClient", lambda **kwargs: ledger)
     monkeypatch.setattr(documentation_session, "fork_and_call", lambda fn, *args, **kwargs: jobs.append((fn, args)))
@@ -74,6 +80,22 @@ def test_session_end_queues_one_documentation_task_with_source_and_docs_evidence
     assert "handbook/policy.md" in task["description"]
     assert "small" in task["description"]
     assert "WidgetPolicy" in task["description"]
+
+
+def test_a_source_task_without_a_pull_request_queues_documentation_with_no_diff_and_says_so(world, monkeypatch):
+    root, payload, ledger, jobs = world
+    del ledger.source["pr_url"]
+    monkeypatch.setattr(documentation.runner, "decide", answer())
+    (root / "login.py").write_text("class LoginRecovery:\n    attempts = 2\n")
+    git(root, "add", "login.py")
+    git(root, "commit", "-qm", "Recover the master login")
+    documentation_session.end(payload)
+    fn, args = jobs.pop()
+    fn(*args)
+    description = ledger.added[0]["description"]
+    assert "Delivered pull request: none recorded on the source task, so no delivered diff is attached." in description
+    assert "LoginRecovery" not in description
+    assert "+class WidgetPolicy:" not in description
 
 
 @pytest.mark.parametrize("task", ["master", "t9"])
