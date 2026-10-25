@@ -425,7 +425,7 @@ def test_a_hive_member_credential_declares_checked_waits_through_the_cli(waiting
                 return admin.execute_command(*args, **options)
             return super().execute_command(*args, **options)
 
-    member = Member(server=admin.connection_pool.connection_kwargs["server"], decode_responses=True)
+    member = Member(server=admin.connection_pool.connection_kwargs["server"], decode_responses=True, username="hive-m1")
     member.auth("", username="hive-m1")
     assert member.acl_whoami() == "hive-m1"
     target = {
