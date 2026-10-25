@@ -341,6 +341,38 @@ def _resolve(
     return set()
 
 
+def _resource_parent(
+    node: ast.expr, bindings: dict[str, ast.expr], source: Path, constructors: set[str], seen: frozenset[str]
+) -> Path | None:
+    if isinstance(node, ast.Attribute) and node.attr == "parent":
+        value = _resource_path(node.value, bindings, source, constructors, seen)
+        if isinstance(value, Path):
+            return value.parent
+    if isinstance(node, ast.Subscript) and isinstance(node.value, ast.Attribute) and node.value.attr == "parents":
+        value = _resource_path(node.value.value, bindings, source, constructors, seen)
+        if isinstance(value, Path) and isinstance(node.slice, ast.Constant):
+            index = node.slice.value
+            if isinstance(index, int) and 0 <= index < len(value.parents):
+                return value.parents[index]
+    return None
+
+
+def _resource_call(
+    node: ast.Call, bindings: dict[str, ast.expr], source: Path, constructors: set[str], seen: frozenset[str]
+) -> Path | None:
+    if node.keywords:
+        return None
+    if isinstance(node.func, ast.Name) and node.func.id in constructors and len(node.args) == 1:
+        value = _resource_path(node.args[0], bindings, source, constructors, seen)
+        if isinstance(value, (str, Path)):
+            return Path(value)
+    if isinstance(node.func, ast.Attribute) and node.func.attr == "resolve" and not node.args:
+        value = _resource_path(node.func.value, bindings, source, constructors, seen)
+        if isinstance(value, Path):
+            return value.resolve()
+    return None
+
+
 def _resource_path(
     node: ast.expr,
     bindings: dict[str, ast.expr],
@@ -360,26 +392,9 @@ def _resource_path(
         right = _resource_path(node.right, bindings, source, constructors, seen)
         if isinstance(left, Path) and isinstance(right, str):
             return left / right
-    if isinstance(node, ast.Attribute) and node.attr == "parent":
-        value = _resource_path(node.value, bindings, source, constructors, seen)
-        if isinstance(value, Path):
-            return value.parent
-    if isinstance(node, ast.Subscript) and isinstance(node.value, ast.Attribute) and node.value.attr == "parents":
-        value = _resource_path(node.value.value, bindings, source, constructors, seen)
-        if isinstance(value, Path) and isinstance(node.slice, ast.Constant):
-            index = node.slice.value
-            if isinstance(index, int) and 0 <= index < len(value.parents):
-                return value.parents[index]
-    if isinstance(node, ast.Call) and not node.keywords:
-        if isinstance(node.func, ast.Name) and node.func.id in constructors and len(node.args) == 1:
-            value = _resource_path(node.args[0], bindings, source, constructors, seen)
-            if isinstance(value, (str, Path)):
-                return Path(value)
-        if isinstance(node.func, ast.Attribute) and node.func.attr == "resolve" and not node.args:
-            value = _resource_path(node.func.value, bindings, source, constructors, seen)
-            if isinstance(value, Path):
-                return value.resolve()
-    return None
+    if isinstance(node, ast.Call):
+        return _resource_call(node, bindings, source, constructors, seen)
+    return _resource_parent(node, bindings, source, constructors, seen)
 
 
 def _fixture_subject(tree: Path, source: Path, module: ast.Module, call: ast.Call) -> set[tuple[str, str]]:
