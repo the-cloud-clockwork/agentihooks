@@ -395,8 +395,9 @@ def checked(target: Path, environ: Mapping[str, str], found: str) -> bool:
     try:
         native_login.check(child(environ, target), found)
     except native_login.LoginError:
-        if not recover(target, environ):
-            return False
+        with _locked(target.parent) as folder:
+            if len(holders(folder)) < 2 and not recover(target, environ):
+                return False
         try:
             native_login.check(child(environ, target), found)
         except native_login.LoginError:
