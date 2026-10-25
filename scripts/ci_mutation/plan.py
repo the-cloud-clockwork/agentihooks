@@ -176,8 +176,13 @@ def recorded_lines(root: Path, manifest: dict, changes: dict[str, set[int]]) -> 
                     for first, _, last, name in _spans(ast.parse(source)):
                         if first <= end and start < last and (unit := f"{path}::{name}") in index:
                             fallback.add(index[unit])
-        by_line, spans = line_units(old), _spans(ast.parse(old))
-        if any(line not in by_line and any(span[0] <= line <= span[2] for span in spans) for line in affected):
+        by_line = line_units(old)
+        functions = [
+            (min(node.lineno, *(item.lineno for item in node.decorator_list)), node.end_lineno)
+            for node in ast.walk(ast.parse(old))
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        ]
+        if any(line not in by_line and any(first <= line <= last for first, last in functions) for line in affected):
             fallback.update(number for unit, number in index.items() if unit.startswith(f"{path}::"))
         lines[path] = affected | {mapping[line] for line in changes.get(path, ()) if line in mapping}
     return lines, fallback

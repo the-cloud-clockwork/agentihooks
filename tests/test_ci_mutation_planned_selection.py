@@ -300,8 +300,10 @@ def _line_project(tmp_path, monkeypatch, mode):
     source = "def f(value):\n    if value:\n        return value + 1\n    return value - 1\n"
     if mode == "repeated":
         source = "def f(value):\n    if value:\n        value += 1\n" + "    pass\n" * 300
-    elif mode == "constant":
+    elif mode in {"constant", "dropped"}:
         source += "\nSETTING = 1\n"
+    elif mode == "decorator":
+        source += "\n\n@staticmethod\ndef h():\n    pass\n"
     (tmp_path / "scripts/core.py").write_text(source)
     (tmp_path / "scripts/helper.py").write_text("from scripts.core import f\n")
     (tmp_path / "scripts/aaa.py").write_text("def other():\n    return 1\n")
@@ -352,6 +354,15 @@ def _line_contexts(tmp_path, manifest, mode):
         (tmp_path / "scripts/aaa.py").write_text("def other():\n    return 2\n")
 
 
+LINE_EDITS = {
+    "constant": ("SETTING = 1", "SETTING = 2"),
+    "decorator": ("@staticmethod", "@classmethod"),
+    "dropped": ("\nSETTING = 1\n", ""),
+    "header": ("def f(value)", "def f(value=1)"),
+    "inserted": ("    return value - 2", "    value += 1\n    return value - 2"),
+}
+
+
 @pytest.mark.parametrize("shift", [0, 2])
 @pytest.mark.parametrize(
     "mode",
@@ -367,6 +378,8 @@ def _line_contexts(tmp_path, manifest, mode):
         "data",
         "module",
         "constant",
+        "dropped",
+        "decorator",
         "new",
         "deleted",
         "trailing",
@@ -382,23 +395,19 @@ def test_statistics_select_only_contexts_executing_the_edited_branch(tmp_path, m
         new = source.replace("value + 1", "value + 2")
     elif mode == "module":
         new = source + "\nSETTING = 1\n"
-    elif mode == "constant":
-        new = new.replace("SETTING = 1", "SETTING = 2")
     elif mode == "trailing":
         new = source + "\n"
     elif mode == "repeated":
         new = source.replace("value += 1", "value += 2")
-    if mode == "header":
-        new = new.replace("def f(value)", "def f(value=1)")
-    if mode == "inserted":
-        new = new.replace("    return value - 2", "    value += 1\n    return value - 2")
+    if mode in LINE_EDITS:
+        new = new.replace(*LINE_EDITS[mode])
     (tmp_path / "scripts/core.py").write_text("\n" * shift + new)
     _commit(tmp_path, "edited branch")
     selection = {}
     line = 3 if mode == "repeated" else 4
     plan.estimate(tmp_path, {"scripts/core.py": {line + shift}}, selection, manifest)
     expected = ["tests/test_core.py::test_g"]
-    if mode in {"legacy", "inserted", "header", "drift"}:
+    if mode in {"legacy", "inserted", "header", "decorator", "drift"}:
         expected = [
             f"tests/test_core.py::{name}" for name in ("TestSpawn::test_child", "test_f", "test_g", "test_other")
         ]
