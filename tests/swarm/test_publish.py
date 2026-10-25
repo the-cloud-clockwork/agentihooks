@@ -191,6 +191,61 @@ def test_publish_from_second_worktree_pushes_and_records_its_branch(
     assert git(second, "rev-parse", "--abbrev-ref", "@{upstream}") == "origin/engineer-test-2"
 
 
+@pytest.mark.parametrize("repository_branch", [False, True])
+def test_publish_registered_worktree_ignores_a_prerequisite_pull_request(publication, monkeypatch, repository_branch):
+    from scripts.swarm import publish
+
+    root = publication.root
+    git(root, "push", "origin", "HEAD:prerequisite")
+    original = git(root, "rev-parse", "HEAD")
+    publication.task["pr_url"] = "https://github.com/example/repo/pull/7"
+    if repository_branch:
+        publication.task["branch"] = "prerequisite"
+        publication.task["repository_branches"] = {str(publication.repo): "engineer-test"}
+    monkeypatch.chdir(root)
+    monkeypatch.setattr(publish.publish_queue, "open_head", lambda remote, url: "prerequisite")
+
+    result = publish.publish(
+        "swarm", publication.agent, str(publication.repo), publication.ledger, "Change chosen", ["chosen.txt"]
+    )
+
+    head = git(root, "rev-parse", "HEAD")
+    assert result["worktree"] == str(root)
+    assert result["branch"] == "engineer-test"
+    assert git(root, "ls-remote", "origin", "refs/heads/engineer-test").split()[0] == head
+    assert git(root, "ls-remote", "origin", "refs/heads/prerequisite").split()[0] == original
+
+
+@pytest.mark.parametrize("repository_branch", [False, True])
+@pytest.mark.parametrize("cwd", ["worktree", "primary"])
+def test_publish_refuses_a_registered_branch_mismatch_before_any_mutation(
+    publication, monkeypatch, repository_branch, cwd
+):
+    from scripts.swarm import publish
+    from scripts.swarm.store import SwarmError
+
+    root = publication.root
+    git(root, "push", "origin", "HEAD:prerequisite")
+    original = git(root, "rev-parse", "HEAD")
+    publication.task["branch"] = "prerequisite"
+    if repository_branch:
+        publication.task["branch"] = "engineer-test"
+        publication.task["repository_branches"] = {str(publication.repo): "prerequisite"}
+    monkeypatch.chdir(root if cwd == "worktree" else publication.repo)
+
+    with pytest.raises(SwarmError, match="engineer-test.*registered.*prerequisite"):
+        publish.publish(
+            "swarm", publication.agent, str(publication.repo), publication.ledger, "Change chosen", ["chosen.txt"]
+        )
+
+    assert git(root, "rev-parse", "HEAD") == original
+    assert git(root, "diff", "--cached") == ""
+    assert (root / "chosen.txt").read_text() == "after"
+    assert publication.updates == []
+    assert git(root, "ls-remote", "origin", "refs/heads/prerequisite").split()[0] == original
+    assert git(root, "ls-remote", "origin", "refs/heads/engineer-test") == ""
+
+
 @pytest.mark.parametrize("binding", ["recorded", "tracked", "continuation"])
 def test_stacked_publication_records_its_current_branch_before_pushing(publication, monkeypatch, binding):
     from scripts.swarm import publish
