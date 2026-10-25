@@ -71,7 +71,7 @@ def path_parts(node: ast.AST, bindings: dict[str, ast.AST]) -> list[str]:
         return [
             str(Path(left) / right)
             for left in path_parts(node.left, bindings)
-            for right in path_parts(node.right, bindings)
+            for right in (path_parts(node.right, bindings) or ["**/*"])
         ]
     if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in {"Path", "str"} and node.args:
         return path_parts(node.args[0], bindings)
@@ -92,7 +92,7 @@ def read_paths(call: ast.Call, bindings: dict[str, ast.AST]) -> list[str]:
     operation = call.func.attr
     if operation in {"run", "Popen", "call", "check_call", "check_output"}:
         return path_parts(call.args[0], bindings) if call.args else []
-    if operation not in {"read_text", "read_bytes", "open", "glob", "rglob", "iterdir", "is_file", "exists"}:
+    if operation not in {"read_text", "read_bytes", "open", "glob", "rglob", "iterdir", "is_file", "is_dir", "exists"}:
         return []
     paths = path_parts(call.func.value, bindings)
     if operation in {"glob", "rglob", "iterdir"}:
@@ -134,10 +134,12 @@ def fixture_candidates(root: Path, work: Path, literal: str) -> list[Path]:
         return []
     if any(len(part) > 255 for part in relative.parts) or relative == Path("pyproject.toml"):
         return []
-    if (work / relative).exists():
-        return []
     target = root / relative
     if any(part.is_symlink() for part in (target, *target.parents) if part != root):
+        return []
+    if target.is_dir():
+        return list(target.rglob("*"))
+    if (work / relative).is_file():
         return []
     return list(root.glob(literal))
 
@@ -147,13 +149,18 @@ def fixture_files(root: Path, work: Path, tests: list[str]) -> list[str]:
     for source in tuple(sources):
         sources.update(parent / "conftest.py" for parent in source.parents if parent.is_relative_to(root))
     files = set()
+    candidates = {}
     for source in sorted(sources):
         if not source.is_file():
             continue
         for literal in fixture_literals(ast.parse(source.read_text())):
-            for candidate in fixture_candidates(root, work, literal):
+            if literal not in candidates:
+                candidates[literal] = fixture_candidates(root, work, literal)
+            for candidate in candidates[literal]:
                 name = candidate.relative_to(root)
-                if any(part in {".git", "__pycache__", work.name} for part in name.parts):
+                if name == Path("pyproject.toml") or any(
+                    part in {".git", "__pycache__", work.name} for part in name.parts
+                ):
                     continue
                 if candidate.name.startswith(".env") and candidate.suffix not in {
                     ".example",
