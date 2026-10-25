@@ -77,6 +77,7 @@ def test_measured_dependencies_include_collection_phases_and_preloaded_modules(t
     from types import SimpleNamespace
 
     from coverage import CoverageData
+
     from scripts.ci_mutation.stats_dependencies import measured_dependencies
 
     root = tmp_path / "source"
@@ -106,3 +107,59 @@ def test_measured_dependencies_include_collection_phases_and_preloaded_modules(t
         "tests/test_b.py::test_b": ["global.py", "loaded.py", "other.py"],
     }
     assert measured_dependencies(coverage_file, work, root, ["tests/test_missing.py::test_missing"]) == {}
+
+
+def test_statistics_collect_runtime_dependencies_with_plugin_discovery_disabled(tmp_path, monkeypatch):
+    import os
+    import subprocess
+    import sys
+    from types import SimpleNamespace
+
+    from scripts.ci_mutation.selection import collect_shard_stats
+
+    original = tmp_path / "original"
+    work = tmp_path / "work"
+    node = "tests/test_sample.py::test_value"
+    files = {
+        "scripts/sample.py": "def value():\n    return 1\n",
+        "tests/test_sample.py": "from scripts.sample import value\ndef test_value():\n    assert value() == 1\n",
+    }
+    for root in (original, work / "mutants"):
+        for name, text in files.items():
+            (root / name).parent.mkdir(parents=True, exist_ok=True)
+            (root / name).write_text(text)
+    subprocess.run(["git", "init", "-q", str(original)], check=True)
+    subprocess.run(["git", "add", *files], cwd=original, check=True)
+    monkeypatch.chdir(work)
+    monkeypatch.setenv("PYTEST_DISABLE_PLUGIN_AUTOLOAD", "1")
+    monkeypatch.setenv("MUTATION_STATS_CACHE", str(tmp_path / "cache"))
+    monkeypatch.setenv("MUTATION_STATS_ROOT", str(original))
+    monkeypatch.setenv("COVERAGE_FILE", str(tmp_path / "before"))
+    engine = SimpleNamespace(
+        tests_by_mangled_function_name={"scripts.sample.x_value": {node}}, duration_by_test={node: 1}
+    )
+
+    class Runner:
+        _pytest_add_cli_args = []
+
+        def run_stats(self, *, tests):
+            done = subprocess.run(
+                [sys.executable, "-m", "pytest", "-q", *self._pytest_add_cli_args, *tests],
+                cwd=work / "mutants",
+                env=dict(os.environ),
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            assert done.returncode == 0, done.stdout + done.stderr
+            return done.returncode
+
+    output = tmp_path / "part.json"
+    collect_shard_stats(
+        SimpleNamespace(mutmut=engine), Runner(), ["tests/test_sample.py"], output, str(tmp_path / "base")
+    )
+    result = json.loads(output.read_text())
+    assert result["status"] == 0
+    assert result["durations"] == {node: 1}
+    assert "scripts/sample.py" in result["dependencies"][node]
+    assert "tests/test_sample.py" in result["dependencies"][node]
