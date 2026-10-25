@@ -437,6 +437,10 @@ def test_touched_tests_admission_preserves_both_supported_job_graphs():
     assert not any(step.get("continue-on-error") for step in job["steps"])
 
 
+def test_touched_tests_parallel_admission_failure_plant():
+    assert False, "t765 planted touched test failure"
+
+
 def test_touched_test_selection_supplies_the_automatic_worker_limit():
     steps, names = _steps(_workflow()["jobs"]["touched-tests"])
     select = steps[names.index("Select the tests the branch touches")]
