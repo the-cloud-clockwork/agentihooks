@@ -212,3 +212,39 @@ def test_grouped_download_preserves_shard_integrity_without_installed_dependenci
         assert "suite::a ran 2 times" in result.stdout
     else:
         assert "0 ran zero times or more than once" in result.stdout
+
+
+@pytest.mark.parametrize("module", ["shard_check", "shard_summary", "shard_budget"])
+def test_shard_verifier_commands_run_with_only_system_python3(tmp_path, module):
+    step = next(step for step in _jobs()["shard-check"]["steps"] if f"-m tests.{module} " in step.get("run", ""))
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    (bin_dir / "python3").symlink_to(sys.executable)
+    (bin_dir / "tee").symlink_to("/usr/bin/tee")
+    durations = tmp_path / "shard-durations/one"
+    durations.mkdir(parents=True)
+    (durations / "durations.json").write_text(json.dumps({"suite::a": 0.1}))
+    (durations / "durations.sha256").write_text("a" * 64)
+    collection = tmp_path / "collected-data"
+    collection.mkdir()
+    (collection / "collected.json").write_text(json.dumps(["suite::a"]))
+    flakes = tmp_path / "shard-flakes/one"
+    flakes.mkdir(parents=True)
+    (flakes / "flakes.jsonl").write_text("")
+    result = subprocess.run(
+        ["/bin/bash", "-e", "-o", "pipefail", "-c", step["run"]],
+        cwd=tmp_path,
+        env={
+            "PATH": str(bin_dir),
+            "PYTHONPATH": str(Path(__file__).resolve().parents[1]),
+            "PYTHON_VERSION": "3.12",
+            "REUSED": "",
+            "PLAN": "reused-plan/reused-tests.json",
+            "REPORT": "",
+            "GITHUB_STEP_SUMMARY": str(tmp_path / "summary.md"),
+        },
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
