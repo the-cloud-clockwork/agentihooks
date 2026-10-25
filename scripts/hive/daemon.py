@@ -21,6 +21,7 @@ from scripts.swarm.commands import hive_id
 if TYPE_CHECKING:
     from redis import Redis
 
+    from scripts.hive.orders import Consumer
     from scripts.swarm.runtime import HerdrRuntime
     from scripts.swarm_v2.runtime.local import LocalHerdrRuntime
 
@@ -76,7 +77,7 @@ def beat(redis: "Redis", local_id: str) -> None:
     if not member:
         _refresh_launch_slots(redis, executions)
     if not fenced:
-        consumer.poll()
+        poll_orders(consumer, member)
     consumer.poll_commands()
     consumer.sync_workspaces(TTL_SECONDS)
     join_report.heartbeat(redis, local_id, int(time.time() * 1000))
@@ -93,6 +94,16 @@ def beat(redis: "Redis", local_id: str) -> None:
         print(f"hive account slot heartbeat failed ({type(exc).__name__}: {exc}); retrying next beat", file=sys.stderr)
     publish_config(redis, local_id, report["repos"])
     close_dead_tabs(set(hosted["names"]))
+
+
+def poll_orders(consumer: "Consumer", member: bool) -> None:
+    from scripts.swarm_ledger import authority_context
+
+    if member or not consumer.store.redis.xlen(consumer.orders.stream(consumer.hive)):
+        consumer.poll()
+        return
+    with authority_context.bound(authority_context.hosted() or authority_context.secret()):
+        consumer.poll()
 
 
 def _index_hive(redis: "Redis", local_id: str) -> None:
@@ -192,7 +203,10 @@ def run(connect: Callable[[], tuple["Redis", "Redis"]]) -> None:
     from redis.exceptions import ConnectionError, TimeoutError
 
     lost = (ConnectionError, TimeoutError)
+    from scripts import operator_env
+
     local_id = hive_id()
+    operator_env.fill(os.environ)
     quota_refresh.refresh(os.environ)
     worker, attempted_at = None, time.time()
     renewed = time.time()
