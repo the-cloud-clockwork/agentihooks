@@ -26,8 +26,9 @@ ORDER = (
 )
 ROLL = (
     "Hive {hive}, which runs you, is stopping for a release and takes no new agents. Finish the step you are on, then "
-    "hand off with the handoff skill: run agentihooks swarm {slug} handoff <doc> --reason operator and stop. The "
-    "runtime starts your successor on another hive."
+    "hand off with the handoff skill even while you wait on checks, a merge or a reply, naming that wait under Next: "
+    "run agentihooks swarm {slug} handoff <doc> --reason operator and stop. The runtime starts your successor on "
+    "another hive."
 )
 MANIFESTS = (
     "k8s/argocd/apps/agentihooks-hive-{label}.yaml",
@@ -113,7 +114,7 @@ def settle(store: "RedisStore", hive: str, wait_s: int, host: Host) -> str:
             names = ", ".join(agent.name for _, agent in remaining)
             return f"hive {hive} stops after {wait_s} seconds with {names} still running"
         host.sleep(POLL_S)
-    return f"hive {hive} drained: no agents running, {len(ordered)} handed off"
+    return f"hive {hive} drained: no agents running, {len(ordered)} ordered to hand off"
 
 
 def revoke(redis: "Redis", hive: str, signer: "nats_grant.Signer | None" = None) -> list[str]:

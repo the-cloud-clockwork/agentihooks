@@ -266,7 +266,7 @@ def test_a_stopping_hive_orders_its_agents_to_hand_off_once_and_ends_when_they_a
 
     settled = remove.settle(store, member, 3600, _host(clock, Run(), tmp_path))
 
-    assert settled == f"hive {member} drained: no agents running, 1 handed off"
+    assert settled == f"hive {member} drained: no agents running, 1 ordered to hand off"
     assert (clock.now, clock.slept) == (2 * remove.POLL_S, 2)
     assert registry.show(store.redis, member)["draining"] == "yes"
     orders = _orders(store, SEAT)
@@ -275,6 +275,7 @@ def test_a_stopping_hive_orders_its_agents_to_hand_off_once_and_ends_when_they_a
     ]
     assert f"agentihooks swarm {SLUG} handoff" in orders[0].text
     assert "another hive" in orders[0].text
+    assert "even while you wait on checks, a merge or a reply" in orders[0].text
 
 
 def test_a_stopping_hive_with_no_agents_orders_nothing(store, tmp_path):
@@ -283,7 +284,7 @@ def test_a_stopping_hive_with_no_agents_orders_nothing(store, tmp_path):
 
     settled = remove.settle(store, member, 3600, _host(clock, Run(), tmp_path))
 
-    assert settled == f"hive {member} drained: no agents running, 0 handed off"
+    assert settled == f"hive {member} drained: no agents running, 0 ordered to hand off"
     assert clock.slept == 0
     assert _orders(store, SEAT) == []
 
