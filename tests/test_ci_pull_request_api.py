@@ -172,8 +172,6 @@ def test_no_script_a_step_runs_calls_the_api():
         "scripts/ci_mutation/__main__.py",
         "scripts/ci_mutation/plan.py",
         "scripts/ci_mutation/reuse.py",
-        "scripts/ci_queue_fail_fast.py",
-        "scripts/ci_queue_rebuild.py",
         "scripts/ci_release.sh",
         "scripts/ci_unit_rerun.py",
         "scripts/ci_wiring.py",
