@@ -649,6 +649,13 @@ def _binding_deferred(environ: dict[str, str]) -> list[str]:
     return ["profile_validation=pending", f"profile_report={environ[binding.REPORT]}"]
 
 
+def _profile_canary(args, agent: str, environ: dict[str, str], launch, route: dict) -> list[str]:
+    if deferred := args.defer_canary and _binding_deferred(environ):
+        return deferred
+    canary = CANARY_TIMEOUT_S[agent] if args.canary_timeout is None else args.canary_timeout
+    return launch.run("profile canary", canary, lambda seconds: _binding_result(environ, seconds, route))
+
+
 def _selection_refused(environ: dict[str, str]) -> bool:
     from scripts.profiles import binding
 
@@ -1169,11 +1176,7 @@ def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -
         return 3
     try:
         _route_reported(active_env, args.route_timeout, route)
-        if deferred := args.defer_canary and _binding_deferred(active_env):
-            report += deferred
-        else:
-            canary = CANARY_TIMEOUT_S[agent] if args.canary_timeout is None else args.canary_timeout
-            report += launch.run("profile canary", canary, lambda seconds: _binding_result(active_env, seconds, route))
+        report += _profile_canary(args, agent, active_env, launch, route)
     except (OSError, ValueError) as exc:
         print("\n".join([*report, "profile_validation=failed"]))
         print(f"agentihooks init-agent: {exc}", file=sys.stderr)
