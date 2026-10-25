@@ -1,0 +1,25 @@
+{
+  "schema_version": "2.0",
+  "package": "SV2-IDN-05",
+  "note": "two installations that share every display label: home path, session ID, project, repo, worktree, working folder, swarm, task and marker text; only the installation record and the brain differ",
+  "home": "home/.agentihooks",
+  "session_id": "6f1c2a9e-0000-4000-8000-000000000005",
+  "identity": {
+    "project": "agentihooks",
+    "repo": "agentihooks",
+    "worktree": "engineer-1",
+    "cwd": "/work/agentihooks/engineer-1",
+    "remote": "the-cloud-clockwork/agentihooks",
+    "project_id": "github.com/the-cloud-clockwork/agentihooks"
+  },
+  "swarm": "fixture",
+  "task": "task",
+  "marker": {"type": "lesson", "content": "Equal labels never share a cache entry."},
+  "installed_at": "2026-10-08T12:00:00+00:00",
+  "marker_at": "2026-10-08T12:30:00+00:00",
+  "legacy_marker_at": "2026-10-08T11:00:00+00:00",
+  "installations": {
+    "personal": {"brain_url": "https://operator:fixture-secret@brain.personal.example/api/?token=fixture-token#feed"},
+    "swarm": {"brain_url": "https://brain.swarm.example/api"}
+  }
+}

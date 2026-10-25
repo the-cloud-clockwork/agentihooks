@@ -1,0 +1,70 @@
+{
+  "package": "SV2-IDN-04",
+  "dependency": "SV2-IDN-03",
+  "integration_gate": "G1",
+  "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/1591",
+  "pull_request": "https://github.com/the-cloud-clockwork/agentihooks/pull/1598",
+  "tested_commit": "f71cb5cbbcea4d2e1870bbdf6947963fa8d522f1",
+  "ci_head": "c8ec423671adf0eb04f1f66c1520ece49ee47fe7",
+  "evidence_class": "local isolated fixture on an in-memory Redis with a fake clock, plus CI; no live rollout claim",
+  "supported_versions": {
+    "launch_grant": "2.0",
+    "token": "v2.<claims>.<HMAC-SHA256>",
+    "execution_identity": "SV2-IDN-02 2.0, unchanged",
+    "session_scope": "SV2-IDN-03 2.0, unchanged; Registration.session_grant supplies its SessionGrant"
+  },
+  "interfaces": [
+    "auth_context.LaunchAuthority.issue",
+    "auth_context.LaunchAuthority.register",
+    "auth_context.LaunchAuthority.registration",
+    "auth_context.LaunchAuthority.disable",
+    "auth_context.LaunchAuthority.enable",
+    "auth_context.LaunchKey",
+    "auth_context.Registration and Registration.session_grant",
+    "auth_context.GrantRefused and GrantRefused.detail",
+    "auth_context.launch_grant_rejections",
+    "auth_context.launch_grant_rejections_total",
+    "urn:swarm-v2:launch-grant"
+  ],
+  "states": {
+    "observed": "Focused tests passed locally: 92 in the launch grant file and 746 across the Swarm v2 test files; ruff check and format clean.",
+    "accepted": "Cases A, B and C passed on the fixture with a valid grant, an expired grant, a wrong audience, a mismatched generation and an altered project body; case A repeated on a second independent in-memory store.",
+    "committed": "f71cb5cbbcea4d2e1870bbdf6947963fa8d522f1 carries the code; the case results in this folder were generated on it.",
+    "externally_verified": "CI Tests run 37763705100 at c8ec4236: Gate Required, lint, sonar, smoke and sixteen unit shards passed; the mutation gate killed all 833 changed-line mutants in auth_context with no survivors."
+  },
+  "measurements": {
+    "launch_grant_rejections_total": {
+      "a": [
+        0,
+        0
+      ],
+      "b": "1 per rejection case, eight cases",
+      "c": "0 before the stale retry; the stale and revoked refusals each count once"
+    }
+  },
+  "cases": {
+    "a": "evidence/SV2-IDN-04/a-result.json",
+    "b": "evidence/SV2-IDN-04/b-result.json",
+    "c": "evidence/SV2-IDN-04/c-result.json",
+    "manifest": "evidence/SV2-IDN-04/manifest.json",
+    "generator": "evidence/SV2-IDN-04/generate_case_results.py"
+  },
+  "reviews": {
+    "standards": "Three rounds; fixed: byte-safe signature compare, claim type validation, input validation before sorting, strict body type match, one transaction for issue with the disable switch and execution history, identifier grammar for task and seat, private verify, single pipeline test wrapper, operation ID echo rule shared with the contracts module, counted dependency refusals.",
+    "spec": "Three rounds; fixed: disable switch with revocation in one transaction, error detail with operation ID and retry class, interrupted registration recovery tests, set of fixture cases read by tests and generator, evidence regenerated only on committed inputs."
+  },
+  "rollback_rehearsal": {
+    "action": "LaunchAuthority.disable",
+    "tests": [
+      "test_disabling_revokes_outstanding_grants_and_keeps_history_readable",
+      "test_a_grant_issued_while_disabling_is_refused"
+    ],
+    "result": "outstanding grants revoked in the same transaction as the switch; issue and new registrations refused; existing registrations and execution history unchanged and readable; enable restores issuing"
+  },
+  "rollback": "Call disable for the swarm, or revert the code; registrations, audit rows and execution records are authoritative history and are never deleted.",
+  "limitations": [
+    "No live launch path issues or registers grants yet; the registration endpoint and token delivery to workers belong to the runtime packages, so live hooks still pass no grant to SV2-IDN-03 attribution.",
+    "Signing key provisioning and rotation are not part of this package; a verifier knows one key ID.",
+    "Registrations and audit rows have no retention sweep."
+  ]
+}

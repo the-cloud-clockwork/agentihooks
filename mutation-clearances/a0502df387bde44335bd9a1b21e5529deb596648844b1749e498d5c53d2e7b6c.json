@@ -1,0 +1,6 @@
+{
+  "scripts/ci_mutation/selection.py:scripts.ci_mutation.selection.x_run_selected__mutmut_6:ac87d1bd5af2a0c42f9e86dda6d9b72e13abab395e6437b580c2cfb8ed5efce0": {
+    "reader": "Standards",
+    "reason": "mutmut's forced fail control only checks whether the run returned zero, so returning 2 instead of 1 from the collection failure branch gives every caller the same outcome."
+  }
+}

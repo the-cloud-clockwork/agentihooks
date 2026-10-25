@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/launch_evidence.py:scripts.swarm.launch_evidence.x_retain__mutmut_46:ac4d96945cc6c60b071f0cdbe6b82f36c6ad7f038c27fb7b501d07b32f213d05": {
+    "reader": "standards_reader",
+    "reason": "Equivalent: missing validation reason becomes XXXX instead of empty text. Neither contains a classification trigger. Existing reasons and all retained fields are unchanged."
+  }
+}

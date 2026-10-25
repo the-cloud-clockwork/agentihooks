@@ -22,3 +22,8 @@ def _isolate_controls_state(tmp_path, monkeypatch):
         patch("hooks.context.prod_lockdown.get_redis", return_value=None),
     ):
         yield
+
+
+@pytest.fixture
+def outside_a_guarded_repository(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)

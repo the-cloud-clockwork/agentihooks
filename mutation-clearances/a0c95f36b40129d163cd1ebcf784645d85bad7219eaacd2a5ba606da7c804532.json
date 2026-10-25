@@ -1,0 +1,6 @@
+{
+  "scripts/gates/intent.py:scripts.gates.intent.x__tests_first_questions__mutmut_74:af252297cb5d497e77a67b10a92cf996969e54e50455d8f6778a2c73f7459cb5": {
+    "reader": "standards_reader",
+    "reason": "Changes only nonsemantic XX padding in this natural-language classifier criterion: 'The diff changes gate behaviour.'. The same preparatory scope, condition and answer polarity remain stated; no JSON state key, YesNo schema, confidence threshold or control flow changes. Equivalent to the documented intent contract, without claiming identical stochastic model probabilities."
+  }
+}

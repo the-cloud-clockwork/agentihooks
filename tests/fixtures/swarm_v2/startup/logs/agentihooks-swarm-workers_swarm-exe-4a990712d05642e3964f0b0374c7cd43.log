@@ -1,0 +1,4 @@
+2026-10-12T10:04:10.603104698Z {"event": "restore_verified", "execution_id": "exe-4a990712d05642e3964f0b0374c7cd43", "recovery": "fresh", "checkpoint_id": "", "watermark": 0}
+2026-10-12T10:04:10.603630080Z {"worker_start": "prepared", "attempt": "exe-4a990712d05642e3964f0b0374c7cd43", "uid": 10001, "chains": {"claude": ["anton-base", "package:engineer", "engineer", "brain"]}, "checkout": {"project": "github.com/the-cloud-clockwork/agentihooks", "branch": "engineer-51d783-0001", "base": "dev", "base_commit": "48411b017f9d3cfb9024196598d6c31d0e7ed269"}}
+2026-10-12T10:04:11.688520777Z {"supervisor": "prompt_delivered", "incarnation": "398ae5698ed64435867fa6c9c76088d9", "bytes": 6451, "sha256": "feb6fbd69f9b1e4609c41130fb9ab1f069ab4fd70915ca89d979959c997c0108"}
+2026-10-12T10:07:00.157873423Z terminal endpoint off: no terminal material in /var/run/swarm/terminal after 180s

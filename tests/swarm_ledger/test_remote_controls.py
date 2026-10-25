@@ -4,8 +4,6 @@ from scripts.swarm import commands
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
 from scripts.swarm_ledger import ledger_server as server
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 
 @pytest.fixture
 def store(monkeypatch):
@@ -31,6 +29,30 @@ def test_server_controls_only_queue_work_on_a_tool_free_path(store):
     assert commands.rows(store, "sw")[-1]["command"] == "doctor"
 
 
+def test_quota_refresh_wakes_the_hive_prober_the_moment_it_is_queued(store):
+    from scripts.swarm import quota_refresh
+
+    pubsub = store.redis.pubsub()
+    pubsub.subscribe(quota_refresh.WAKE)
+    assert pubsub.get_message(timeout=1)["type"] == "subscribe"
+    status, error = server.refresh_quota("sw")
+    assert error == ""
+    assert [(row["command"], row["state"]) for row in status["commands"]] == [("quota", "pending")]
+    assert pubsub.get_message(timeout=1)["data"] == "sw"
+
+
+def test_a_refresh_click_shows_the_new_probe_in_the_next_status_after_one_prober_round(store, monkeypatch):
+    from scripts import agents_quota
+    from scripts.swarm import quota_refresh
+
+    probed = {"probed_at": 50, "rows": ["probed"]}
+    monkeypatch.setattr(agents_quota, "page_quota", lambda: probed)
+    commands.publish(store, "sw", {"agents": [], "tasks": {}, "quota": {"probed_at": 10, "rows": ["tick"]}}, {})
+    assert server.refresh_quota("sw")[0]["quota"]["rows"] == ["tick"]
+    assert quota_refresh.answer_all(store, lambda slug, row: "") == ["sw: control quota acknowledged"]
+    assert server.swarm_status("sw")["quota"] == probed
+
+
 def test_terminate_checks_membership_then_queues_an_exact_name(store):
     assert server.terminate_control("sw", "outside") == (None, "agent is not in this swarm")
     store.put_agent("sw", AgentRecord("a", "eng", "t", 1))
@@ -42,10 +64,8 @@ def test_terminate_checks_membership_then_queues_an_exact_name(store):
 def test_server_reads_published_workspaces_and_quota_without_home_files(store, monkeypatch):
     commands.publish(store, "sw", {"quota": {"rows": ["remote"]}}, {"t": {"latest_progress": "remote step"}})
     monkeypatch.setattr("scripts.swarm_ledger.ledger_workspace.tails", lambda *a: pytest.fail("server read hive files"))
-    state = {"tasks": [{"id": "t", "workspace": "/worker/task"}]}
     assert server.swarm_status("sw")["quota"]["rows"] == ["remote"]
-    assert server.workspace_tails("sw", state) == {"t": {"latest_progress": "remote step"}}
-    assert server.with_workspaces("sw", state)["tasks"][0]["workspace_tail"]["latest_progress"] == "remote step"
+    assert server.workspace_tails("sw", "t") == {"latest_progress": "remote step"}
 
 
 def test_operator_doctor_stop_phrase_queues_to_the_owner(store):
@@ -62,20 +82,16 @@ def test_chat_events_without_text_do_not_stop_the_doctor(store):
     assert commands.rows(store, "sw") == []
 
 
-def test_missing_work_tail_is_an_empty_map_and_empty_ledger_keeps_its_shape(store):
-    state = {"tasks": [{"id": "t", "workspace": "/hive/t"}]}
-    assert server.with_workspaces("sw", state)["tasks"][0]["workspace_tail"] == {}
-    assert server.with_workspaces("sw", {"_meta": {"rev": 1}}) == {"_meta": {"rev": 1}, "tasks": []}
+def test_missing_work_tail_is_an_empty_map(store):
+    assert server.workspace_tails("sw", "t") == {}
 
 
 def test_published_work_tail_ids_can_have_uppercase_letters(store):
     commands.publish(store, "sw", {}, {"UPPER": {"latest_progress": "step"}})
-    assert server.workspace_tails("sw", {"tasks": [{"id": "UPPER", "workspace": "/hive/UPPER"}]}) == {
-        "UPPER": {"latest_progress": "step"}
-    }
+    assert server.workspace_tails("sw", "UPPER") == {"latest_progress": "step"}
 
 
-def test_unsafe_workspace_id_keeps_an_empty_tail_without_a_hive_read(store):
-    state = {"tasks": [{"id": "../bad", "workspace": "/legacy/task"}]}
-    assert server.workspace_tails("sw", state) == {}
-    assert server.with_workspaces("sw", state)["tasks"][0]["workspace_tail"] == {}
+def test_unsafe_workspace_id_is_refused_without_a_hive_read(store, monkeypatch):
+    monkeypatch.setattr(commands, "workspaces", lambda *a: pytest.fail("read the hive"))
+    with pytest.raises(ValueError):
+        server.workspace_tails("sw", "../bad")

@@ -1,19 +1,21 @@
+from dataclasses import replace
+
 import pytest
 
 from scripts.inbox.seats import seat_address
 from scripts.inbox.store import InboxStore
-from scripts.swarm import tick_master
+from scripts.swarm import master_alarm, tick_master
 from scripts.swarm.status import status_report
 from scripts.swarm.store import MASTER, AgentRecord, RedisStore, SwarmConfig
 from scripts.swarm.tick import SpawnError, tick
 from tests.swarm.test_tick import FakeRuntime, masters, store, tasks, workers  # noqa: F401
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
 DOWN = 5 * 60 * 1000
 ENGINEER = "engineer@a1b2c3-0001"
 DOC = {"tasks": [], "_meta": {"events": []}}
 BROKEN = "master spawn failed: MCP_KEY_GATEWAY is unset"
 MASTER_SEAT = seat_address("sw", MASTER)
+NOTICE = master_alarm.NOTICE.format(slug="sw", error=BROKEN, name=ENGINEER)
 
 
 class BrokenMaster(FakeRuntime):
@@ -23,22 +25,24 @@ class BrokenMaster(FakeRuntime):
         self.registered = None
         self.master_spawns = 0
 
-    def spawn(self, config, lane, name, task, spawns=None):
+    def spawn(self, config, lane, name, task):
         if lane == MASTER:
             self.master_spawns += 1
             if self.broken:
                 raise SpawnError("MCP_KEY_GATEWAY is unset")
-        return super().spawn(config, lane, name, task, spawns)
+        return super().spawn(config, lane, name, task)
 
     def reported(self, agent):
         return agent.name in (self.live if self.registered is None else self.registered)
 
 
-def outage(store):  # noqa: F811
+def outage(store, startup=True):  # noqa: F811
     runtime, ledger = BrokenMaster(), tasks(("t1", "eng"))
     tick("sw", store, ledger, runtime, 1)
     for at in (2, 3, 130_000):
         tick("sw", store, ledger, runtime, at)
+    if not startup:
+        store.redis.delete(store.key("sw", "master-start"))
     return runtime, ledger
 
 
@@ -71,7 +75,7 @@ def test_the_startup_retry_stays_bounded_inside_the_down_window(store):  # noqa:
 
 
 def test_a_master_down_five_minutes_is_launched_first_and_no_engineer_is_promoted(store):  # noqa: F811
-    runtime, ledger = outage(store)
+    runtime, ledger = outage(store, startup=False)
     runtime.broken = False
     actions = tick("sw", store, ledger, runtime, 1 + DOWN)
     assert from_forced(actions, 2) == [
@@ -80,11 +84,11 @@ def test_a_master_down_five_minutes_is_launched_first_and_no_engineer_is_promote
     ]
     assert [m.state for m in masters(store)] == ["working"]
     assert tick_master.read(store, "sw") == {}
-    assert mail(store, ENGINEER) == []
+    assert mail(store, ENGINEER) == [("swarm", NOTICE), ("swarm", master_alarm.BACK.format(slug="sw"))]
 
 
 def test_a_failed_forced_launch_promotes_one_live_engineer(store):  # noqa: F811
-    runtime, ledger = outage(store)
+    runtime, ledger = outage(store, startup=False)
     actions = tick("sw", store, ledger, runtime, 1 + DOWN)
     assert from_forced(actions, 4) == [
         "master down 5 minutes, forced a master launch",
@@ -93,17 +97,58 @@ def test_a_failed_forced_launch_promotes_one_live_engineer(store):  # noqa: F811
         f"sent {ENGINEER} the promoted prompt",
     ]
     assert tick_master.read(store, "sw") == {"since": 1, "forced_at": 1 + DOWN, "failure": BROKEN, "promoted": ENGINEER}
-    assert mail(store, ENGINEER) == [("swarm", tick_master.prompt("sw", workers(store)[0], BROKEN, 5))]
+    assert mail(store, ENGINEER) == [
+        ("swarm", NOTICE),
+        ("swarm", tick_master.prompt("sw", workers(store)[0], BROKEN, 5, BROKEN)),
+    ]
     assert ledger.notes[-1] == tick_master.PROMOTED_NOTICE.format(minutes=5)
     seat = workers(store)[0].seat
     assert events(store, seat) == [("promoted", BROKEN, 1 + DOWN), ("message", "the promoted prompt", 1 + DOWN)]
     assert events(store, MASTER_SEAT) == [("promoted", f"{ENGINEER}: {BROKEN}", 1 + DOWN)]
     tick("sw", store, ledger, runtime, 2 + DOWN)
-    assert len(mail(store, ENGINEER)) == 1
+    assert len(mail(store, ENGINEER)) == 2
+
+
+def test_the_promotion_is_saved_before_its_notice(store):  # noqa: F811
+    import contextlib
+
+    from scripts.swarm.store import SwarmError
+
+    runtime, ledger = outage(store)
+
+    def notify(slug, text):
+        raise SwarmError("ledger sw: connection reset")
+
+    ledger.notify = notify
+    with contextlib.suppress(SwarmError):
+        tick("sw", store, ledger, runtime, 1 + DOWN)
+    assert tick_master.read(store, "sw")["promoted"] == ENGINEER
+    with contextlib.suppress(SwarmError):
+        tick("sw", store, ledger, runtime, 2 + DOWN)
+    assert len(mail(store, ENGINEER)) == 2
+
+
+def test_nobody_told_is_saved_before_its_notice(store):  # noqa: F811
+    import contextlib
+
+    from scripts.swarm.store import SwarmError
+
+    runtime, ledger = outage(store)
+    runtime.live.discard(ENGINEER)
+    store.drop_agent("sw", ENGINEER)
+    ledger.rows["t1"]["state"] = "done"
+
+    def notify(slug, text):
+        raise SwarmError("ledger sw: connection reset")
+
+    ledger.notify = notify
+    with contextlib.suppress(SwarmError):
+        tick("sw", store, ledger, runtime, 1 + DOWN)
+    assert tick_master.read(store, "sw")["nobody_told"] is True
 
 
 def test_a_finished_master_record_does_not_hold_off_the_promotion(store):  # noqa: F811
-    runtime, ledger = outage(store)
+    runtime, ledger = outage(store, startup=False)
     store.put_agent("sw", AgentRecord("master@a1b2c3-0099", MASTER, MASTER, state="finished", seat=MASTER_SEAT))
     actions = tick("sw", store, ledger, runtime, 1 + DOWN)
     assert f"promoted {ENGINEER} to restore the master: {BROKEN}" in actions
@@ -112,7 +157,7 @@ def test_a_finished_master_record_does_not_hold_off_the_promotion(store):  # noq
 def test_swarm_status_marks_the_promoted_engineer(store):  # noqa: F811
     runtime, ledger = outage(store)
     tick("sw", store, ledger, runtime, 1 + DOWN)
-    report = status_report(store, "sw", DOC)
+    report = status_report(store, "sw", DOC, runtime)
     assert report["promotion"]["promoted"] == ENGINEER
     assert [(a["name"], a["promoted"]) for a in report["agents"]] == [(ENGINEER, True)]
 
@@ -120,14 +165,17 @@ def test_swarm_status_marks_the_promoted_engineer(store):  # noqa: F811
 def test_the_promoted_prompt_states_the_purpose_in_order(store):  # noqa: F811
     runtime, ledger = outage(store)
     agent = workers(store)[0]
-    assert tick_master.prompt("sw", agent, "master spawn failed: boom", 5) == (
+    assert tick_master.prompt("sw", agent, "master spawn failed: boom", 5, "master spawn failed: boom") == (
         "PROMOTED: swarm sw has had no live master for 5 minutes and the forced master launch failed: "
-        "master spawn failed: boom. You stay engineer@a1b2c3-0001 on task t1, but until a master binds your only "
-        "purpose is, in this order: "
+        "master spawn failed: boom. The exact launch error: master spawn failed: boom. This replaces any master down "
+        "notice you were sent. You stay engineer@a1b2c3-0001 on task t1, but until a master binds your only purpose "
+        "is, in this order: "
         "1. Bring the master back as soon as possible. The tick forces a new master launch every 5 minutes; read why "
-        "it fails with agentihooks swarm sw status and journalctl --user -u agentihooks-swarm.service. "
-        "2. Fix the causes of the outage right away in code, each through your own pull request into dev, never as "
-        "follow ups. "
+        "it fails with agentihooks swarm sw status and journalctl --user "
+        "_SYSTEMD_USER_UNIT=agentihooks-swarm.service + SYSLOG_IDENTIFIER=agentihooks-swarm. "
+        "2. Fix the causes of the outage right away in code: find where that error is raised and fix it through your "
+        "own pull request into dev, never as follow ups. Once it merges and wt.sh done syncs local dev, the next "
+        "forced launch runs the fixed code, or start one at once with agentihooks swarm sw master up --new. "
         "3. Throughout, tell the swarm and the operator what failed and what you are doing, with agentihooks swarm "
         'sw say "<text>" and agentihooks swarm sw say --to eng "<text>". '
         "You do not act as master: never answer chat as master, write tasks or steer the swarm. "
@@ -156,17 +204,39 @@ def test_a_master_that_binds_ends_the_promotion_and_hands_back(store):  # noqa: 
         ("message", "the hand back", 1 + 2 * DOWN),
     ]
     assert events(store, MASTER_SEAT)[-1] == ("handed back", f"{ENGINEER}: {master}", 1 + 2 * DOWN)
-    assert [a["promoted"] for a in status_report(store, "sw", DOC)["agents"]] == [False, False]
+    assert [a["promoted"] for a in status_report(store, "sw", DOC, runtime)["agents"]] == [False, False]
 
 
 def test_a_forced_launch_with_no_hook_promotes_after_the_startup_deadline(store):  # noqa: F811
-    runtime, ledger = outage(store)
+    runtime, ledger = outage(store, startup=False)
     runtime.broken, runtime.registered = False, set()
     tick("sw", store, ledger, runtime, 1 + DOWN)
     assert tick_master.promoted(store, "sw") == ""
     tick("sw", store, ledger, runtime, DOWN + 120_000)
     assert tick_master.promoted(store, "sw") == ""
     actions = tick("sw", store, ledger, runtime, 1 + DOWN + 120_000)
+    assert f"promoted {ENGINEER} to restore the master: {tick_master.NO_HOOK}" in actions
+
+
+def test_a_deferred_forced_launch_is_promoted_only_after_its_launch_budget(store):  # noqa: F811
+    runtime, ledger = outage(store, startup=False)
+    runtime.broken, runtime.registered = False, set()
+    spawn, budget = runtime.spawn, {"state": "pending", "report": "/r.json", "deadline_ms": 660_000}
+
+    def deferred(config, lane, name, task):
+        placed = spawn(config, lane, name, task)
+        return replace(placed, profile_decision={"validation": budget}) if lane == MASTER else placed
+
+    runtime.spawn = deferred
+    tick("sw", store, ledger, runtime, 1 + DOWN)
+    assert len(runtime.masters) == 1
+    for at in (1 + DOWN + 120_000, 1 + 2 * DOWN, 1 + 3 * DOWN, DOWN + 660_000):
+        tick("sw", store, ledger, runtime, at)
+        assert tick_master.promoted(store, "sw") == ""
+    assert tick_master.read(store, "sw")["forced_at"] == 1 + 3 * DOWN
+    assert tick_master.read(store, "sw")["started_at"] == 1 + DOWN
+    assert len(runtime.masters) == 1
+    actions = tick("sw", store, ledger, runtime, 1 + DOWN + 660_000)
     assert f"promoted {ENGINEER} to restore the master: {tick_master.NO_HOOK}" in actions
 
 
@@ -186,7 +256,7 @@ def test_a_gone_promoted_engineer_is_replaced(store):  # noqa: F811
 
 
 def test_a_promoted_engineer_whose_record_is_gone_leaves_nobody_promoted(store):  # noqa: F811
-    runtime, ledger = outage(store)
+    runtime, ledger = outage(store, startup=False)
     tick("sw", store, ledger, runtime, 1 + DOWN)
     seat = workers(store)[0].seat
     runtime.live.discard(ENGINEER)
@@ -243,6 +313,30 @@ def test_a_master_starting_before_any_forced_launch_is_not_a_failure():
     assert tick_master.read(swarm, "sw") == {"since": 1}
 
 
+def test_a_starting_master_without_a_kept_start_is_timed_from_the_forced_launch():
+    swarm, _ = direct(AgentRecord("master@a1b2c3-0002", MASTER, MASTER, state="starting", seat=MASTER_SEAT))
+    assert tick_master._hookless(swarm, "sw", {"forced_at": 1}, 120_000) is False
+    assert tick_master._hookless(swarm, "sw", {"forced_at": 1}, 120_001) is True
+    assert tick_master._hookless(swarm, "sw", {"forced_at": 1, "started_at": 60_000}, 120_001) is False
+    assert tick_master._hookless(swarm, "sw", {}, 120_001) is False
+
+
+def test_a_forced_tick_keeps_the_first_start_only_while_a_master_starts():
+    starting = AgentRecord("master@a1b2c3-0002", MASTER, MASTER, state="starting", seat=MASTER_SEAT)
+    swarm, _ = direct(starting)
+    kept = tick_master._forced(swarm, "sw", {"since": 1, "started_at": 5}, 10, ["refused"])
+    assert kept == {"since": 1, "started_at": 5, "forced_at": 10}
+    assert tick_master._forced(swarm, "sw", {"since": 1}, 10, []) == {"since": 1, "started_at": 10, "forced_at": 10}
+    empty, _ = direct()
+    dropped = tick_master._forced(empty, "sw", {"since": 1, "started_at": 5}, 10, ["refused"])
+    assert dropped == {"since": 1, "forced_at": 10, "failure": "refused"}
+    assert tick_master._forced(empty, "sw", {"since": 1}, 10, []) == {
+        "since": 1,
+        "forced_at": 10,
+        "failure": tick_master.NO_LAUNCH,
+    }
+
+
 def test_a_finished_master_record_counts_as_no_master():
     engineer = AgentRecord(ENGINEER, "eng", "t1", state="working", seat="eng-1@sw")
     finished = AgentRecord("master@a1b2c3-0002", MASTER, MASTER, state="finished", seat=MASTER_SEAT)
@@ -291,3 +385,19 @@ def test_the_status_line_names_the_promoted_engineer():
     state = {"since": 1, "failure": "master spawn failed: boom", "promoted": ENGINEER}
     assert tick_master.status_line(state) == f"promoted  {ENGINEER}  restoring the master: master spawn failed: boom"
     assert tick_master.status_line({"since": 1}) == ""
+
+
+@pytest.mark.parametrize("profile", ["", "custom-master"])
+def test_a_recycled_master_fills_its_empty_profile_and_keeps_saved_choices(store, profile):  # noqa: F811
+    launch = {"profile": profile, "harness": "claude", "model": "claude-opus-5-5", "effort": "high", "account": ""}
+    store.put_handoff("sw", MASTER, "continue", MASTER_SEAT, {"reason": "recycle", "launch": launch})
+    runtime = FakeRuntime()
+    assert "spawned master master@a1b2c3-0001" in tick("sw", store, tasks(), runtime, 1)
+    ((_, task),) = runtime.masters
+    saved = task["handoff_envelope"]["launch"]
+    assert saved["profile"] == (profile or "master")
+    assert {key: saved[key] for key in ("harness", "model", "effort")} == {
+        "harness": "claude",
+        "model": "claude-opus-5-5",
+        "effort": "high",
+    }

@@ -3,24 +3,29 @@ when that launch fails, promote one live engineer whose only purpose is restorin
 
 import json
 import os
+from dataclasses import replace
 
 from scripts.inbox.seats import seat_address
 from scripts.inbox.store import InboxStore
-from scripts.swarm import master_start
+from scripts.swarm import master_alarm, master_start
 from scripts.swarm.store import MASTER
+from scripts.swarm_v2 import masters
 
 KEY = "master-outage"
 SENDER = "swarm"
 FORCED = "master down {minutes} minutes, forced a master launch"
 NO_HOOK = "the forced master launch reported no hook within two minutes"
 NO_LAUNCH = "no master launched"
+SUSPECT = "suspect"
 PROMPT = (
     "PROMOTED: swarm {slug} has had no live master for {minutes} minutes and the forced master launch failed: "
-    "{reason}. You stay {name} on task {task}, but until a master binds your only purpose is, in this order: "
+    "{reason}. The exact launch error: {error}. This replaces any master down notice you were sent. You stay {name} "
+    "on task {task}, but until a master binds your only purpose is, in this order: "
     "1. Bring the master back as soon as possible. The tick forces a new master launch every {minutes} minutes; read "
-    "why it fails with agentihooks swarm {slug} status and journalctl --user -u agentihooks-swarm.service. "
-    "2. Fix the causes of the outage right away in code, each through your own pull request into dev, never as "
-    "follow ups. "
+    "why it fails with agentihooks swarm {slug} status and journalctl --user _SYSTEMD_USER_UNIT=agentihooks-swarm.service + SYSLOG_IDENTIFIER=agentihooks-swarm. "
+    "2. Fix the causes of the outage right away in code: find where that error is raised and fix it through your own "
+    "pull request into dev, never as follow ups. Once it merges and wt.sh done syncs local dev, the next forced "
+    "launch runs the fixed code, or start one at once with agentihooks swarm {slug} master up --new. "
     "3. Throughout, tell the swarm and the operator what failed and what you are doing, with agentihooks swarm "
     '{slug} say "<text>" and agentihooks swarm {slug} say --to eng "<text>". '
     "You do not act as master: never answer chat as master, write tasks or steer the swarm. "
@@ -54,8 +59,10 @@ def promoted(store, slug) -> str:
     return read(store, slug).get("promoted", "")
 
 
-def prompt(slug, agent, reason, minutes) -> str:
-    return PROMPT.format(slug=slug, minutes=_shown(minutes), reason=reason, name=agent.name, task=agent.task)
+def prompt(slug, agent, reason, minutes, error) -> str:
+    return PROMPT.format(
+        slug=slug, minutes=_shown(minutes), reason=reason, error=error, name=agent.name, task=agent.task
+    )
 
 
 def status_line(state) -> str:
@@ -68,22 +75,25 @@ def run(slug, config, store, ledger, runtime, now_ms, launch) -> list[str]:
     """launch runs the tick's own master launch and returns its actions."""
     state, minutes = read(store, slug), down_minutes(os.environ)
     forcing = bool(state) and config.state != "stopping" and _due(state, now_ms, minutes)
+    finished = _finish_dead(store, slug) if forcing else []
     if forcing and not _starting(store, slug):
-        store.redis.delete(store.key(slug, "master-start"))
+        master_start.clear_unalerted(store, slug)
     launched = launch()
-    actions = [FORCED.format(minutes=_shown(minutes)), *launched] if forcing else launched
+    if forcing and not launched:
+        launched = [_launch_refusal(store, slug)]
+    actions = [FORCED.format(minutes=_shown(minutes)), *finished, *launched] if forcing else launched
     if config.state == "stopping":
+        master_alarm.drop(store, slug)
         return actions + _stop(slug, store, ledger, state, now_ms)
     if master := _bound(store, slug, runtime):
-        return actions + _hand_back(slug, store, ledger, state, master.name, now_ms)
+        back = master_alarm.clear(store, slug)
+        return actions + _hand_back(slug, store, ledger, state, master.name, now_ms) + back
     if not state:
         _save(store, slug, {"since": now_ms})
         return actions
     if forcing:
-        state = {**state, "forced_at": now_ms}
-        if not _starting(store, slug):
-            state["failure"] = "; ".join(launched) or NO_LAUNCH
-    elif _starting(store, slug) and now_ms - state.get("forced_at", now_ms) >= master_start.DEADLINE_MS:
+        state = _forced(store, slug, state, now_ms, launched)
+    elif _hookless(store, slug, state, now_ms):
         state["failure"] = NO_HOOK
     if state.get("failure"):
         state, promoted_actions = _promote(slug, store, ledger, runtime, state, minutes, now_ms)
@@ -105,16 +115,55 @@ def _save(store, slug, state):
 
 
 def _masters(store, slug):
-    return [a for a in store.agents(slug) if a.lane == MASTER and a.state != "finished"]
+    return [a for a in store.agents(slug) if masters.is_lead(slug, a) and a.state != "finished"]
 
 
 def _starting(store, slug):
     return bool(_masters(store, slug))
 
 
+def _hookless(store, slug, state, now_ms):
+    leads = _masters(store, slug)
+    if not leads:
+        return False
+    started = state.get("started_at", state.get("forced_at", now_ms))
+    return now_ms - started >= max(map(master_start.deadline_ms, leads))
+
+
+def _forced(store, slug, state, now_ms, launched):
+    """A forced launch still starting keeps its first start, because each later forced tick moves forced_at."""
+    if _starting(store, slug):
+        return {"started_at": now_ms, **state, "forced_at": now_ms}
+    state = {key: value for key, value in state.items() if key != "started_at"}
+    return {**state, "forced_at": now_ms, "failure": "; ".join(launched) or NO_LAUNCH}
+
+
+def _finish_dead(store, slug):
+    """A suspect lead has not answered through the whole down window, so the forced launch may replace it."""
+    actions = []
+    for lead in _masters(store, slug):
+        if lead.state == SUSPECT:
+            store.put_agent(slug, replace(lead, state="finished"))
+            actions.append(f"finished dead lead {lead.name} ({SUSPECT})")
+    return actions
+
+
+def _launch_refusal(store, slug):
+    if leads := _masters(store, slug):
+        names = ", ".join(f"{a.name} ({a.state})" for a in leads)
+        return f"master launch refused: unfinished lead {names}"
+    pending = master_start.read(store, slug)
+    if name := pending.get("name"):
+        return f"master launch refused: startup pending for {name}"
+    if pending.get("alerted"):
+        return "master launch refused: startup retry backoff pending"
+    return NO_LAUNCH
+
+
 def _bound(store, slug, runtime):
+    """Any live working master seat ends an outage: with the lead down, operator chat reaches the lowest live seat."""
     live = runtime.live_names()
-    return next((a for a in _masters(store, slug) if a.state == "working" and a.name in live), None)
+    return next((a for a in store.agents(slug) if a.lane == MASTER and a.state == "working" and a.name in live), None)
 
 
 def _engineer(store, slug, name):
@@ -142,16 +191,20 @@ def _promote(slug, store, ledger, runtime, state, minutes, now_ms):
     )
     if not engineers:
         if not state.get("nobody_told"):
-            ledger.notify(slug, NOBODY_NOTICE.format(minutes=_shown(minutes)))
             state = {**state, "nobody_told": True}
+            _save(store, slug, state)
+            ledger.notify(slug, NOBODY_NOTICE.format(minutes=_shown(minutes)))
         return state, actions + ["no live engineer to promote"]
     agent, reason = engineers[0], state["failure"]
-    InboxStore(store.redis).send(SENDER, agent.name, prompt(slug, agent, reason, minutes))
+    error = master_alarm.error(store, slug, state["forced_at"]) or reason
+    InboxStore(store.redis).send(SENDER, agent.name, prompt(slug, agent, reason, minutes, error))
     store.seats.note(agent.seat, "promoted", reason, now_ms)
     store.seats.note(agent.seat, "message", "the promoted prompt", now_ms)
     store.seats.note(seat_address(slug, MASTER), "promoted", f"{agent.name}: {reason}", now_ms)
+    state = {**state, "promoted": agent.name}
+    _save(store, slug, state)
     ledger.notify(slug, PROMOTED_NOTICE.format(minutes=_shown(minutes)))
-    return {**state, "promoted": agent.name}, actions + [
+    return state, actions + [
         f"promoted {agent.name} to restore the master: {reason}",
         f"sent {agent.name} the promoted prompt",
     ]

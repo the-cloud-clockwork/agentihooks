@@ -1,0 +1,69 @@
+{
+  "package": "SV2-RUN-02",
+  "dependency": "SV2-RUN-01",
+  "integration_gate": "G1",
+  "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/1801",
+  "pull_request": "https://github.com/the-cloud-clockwork/agentihooks/pull/1802",
+  "tested_commit": "2ddf3613965d4132eef6552a401ce3b0194b34ca",
+  "ci_head": "b526c334d959cf26e65fccb20a8a9466e4103ae5",
+  "evidence_class": "local isolated fixture on temporary homes; mocked: the herdr CLI and the process reaper behind HerdrRuntime, the local process table and PID namespace are fixture values, and the remote backend is an in-memory fake; not live rollout proof",
+  "supported_versions": {
+    "process_identity": "a local runtime target names its process by process_namespace (boot id plus PID namespace link), pid and pid_start (the start time in clock ticks from /proc stat); the reaper signals the launch PID only while its start time still matches",
+    "runtime_protocol": "SV2-RUN-01 protocol; terminate gains the refused value Unqualified (no execution identity, runtime target names no process, local process namespace is unreadable, process belongs to another PID namespace)"
+  },
+  "interfaces": [
+    "scripts.swarm_v2.runtime.process: local_namespace, resolve (verified PID, None for a gone or reused PID, or an Unqualified reason)",
+    "scripts.swarm_v2.runtime.base: Unqualified, legacy, RuntimeRouter.terminate refuses a record without execution identity unless it is legacy local, RuntimeRouter.rejected and unqualified_process_actions_rejected_total",
+    "scripts.swarm_v2.runtime.local.LocalHerdrRuntime.terminate: legacy records keep HerdrRuntime.retire, qualified records resolve through the namespace check and pass only the verified PID to HerdrRuntime.retire_process",
+    "scripts.swarm_v2.runtime.routed.RoutedRuntime.retire and refusal: a router refusal reaches the retire watch with its reason",
+    "scripts.swarm.runtime.HerdrRuntime.retire_process (explicit PID, same reaper name check and caller and process-group safety) and HerdrRuntime.bindings judging local agents only",
+    "scripts.swarm.tick._watch_remote: a remote agent is observed through its runtime; an unanswered observation marks it suspect, kept, never retired or dropped",
+    "scripts.swarm.execution: a local runtime target may carry pid_start as a positive integer"
+  ],
+  "states": {
+    "observed": "Local on 2ddf3613: pytest -n 2 over the process, runtime protocol, tick, execution identity, lifetime, live binding, master retire, reaper, retire watch, swarm runtime and swarm cli suites -> 807 passed on bfecd6f7; process and execution identity suites 117 passed on this commit after the mutation kill tests; ruff check and ruff format clean; size_limits against the dev checkout -> 0 errors. On the merged head b526c334, the touched suites ran 746 passed.",
+    "accepted": "Cases A, B and C passed: A and C on two independent fixtures each, B with a snapshot of the refused record before and after.",
+    "committed": "The tested commit carries the code; the case results and manifest in this folder were generated on it.",
+    "externally_verified": "CI Tests run 37837076127 on b526c334: every unit shard, mutation (all survivors on changed lines killed), sonar quality gate and Gate Required passed"
+  },
+  "measurements": {
+    "unqualified_process_actions_rejected_total": {
+      "a": [
+        1,
+        1
+      ],
+      "b": {
+        "kubernetes/no execution identity": 1,
+        "local/no execution identity": 1
+      },
+      "c": 0
+    }
+  },
+  "authority": "Not applicable at this layer, as accepted for SV2-RUN-01: process actions carry no operator grant. The router acts only on the runtime_backend and execution_id recorded on the attempt, never on a display label or an agent name.",
+  "cases": {
+    "a": "evidence/SV2-RUN-02/a-result.json",
+    "b": "evidence/SV2-RUN-02/b-result.json",
+    "c": "evidence/SV2-RUN-02/c-result.json",
+    "manifest": "evidence/SV2-RUN-02/manifest.json",
+    "generator": "evidence/SV2-RUN-02/generate_case_results.py",
+    "builders": "tests/sv2_run02_cases.py (run as test_each_acceptance_case_passes)",
+    "writer": "scripts/swarm_v2/case_results.py"
+  },
+  "rollback_rehearsal": {
+    "action": "Revert the SV2-RUN-02 commit: legacy local records already take the unchanged HerdrRuntime.retire path, so local process discovery stays intact behind the adapter; qualified records lose their namespace check only by that revert, and no stored record is rewritten",
+    "tests": [
+      "test_a_legacy_local_record_keeps_the_recorded_launch_pid_path",
+      "test_the_router_passes_a_legacy_local_terminate_to_the_local_adapter",
+      "test_the_local_swarm_spawns_observes_and_retires_through_the_protocol"
+    ],
+    "case": "b: a refused unqualified record was left unchanged, and the corrected request with execution identity was accepted as a new request"
+  },
+  "remaining_limitations": [
+    "The tick does not yet allocate execution identity (start_execution is not called at spawn), so live local agents are legacy records and keep the pre-existing launch PID path; the namespace check applies once records carry execution_id and a local runtime target. The package that allocates execution identity must write process_namespace, pid and pid_start into a local runtime target at start, or refuse start_execution for a local record without them: a record with an execution_id and no local process identity is refused as runtime target names no process and can never be retired. The end to end test seeds that target by hand, so the spawn path is not covered.",
+    "HerdrRuntime.live_names, reported, conversations and reap_name still read this host's process table by agent name (through terminate_agent.sessions). The tick reap pass and the launch check no longer judge remote agents with them, but master recovery, take master, resume, lifetime, the stray sweep and the swarm CLI still call them; those callers handle local agents only today. The stray sweep reaps only local processes carrying a name this swarm issued and retired.",
+    "hooks.context.account_sessions counts live sessions per Claude account from this host's process table for quota placement; it is local by design and unchanged. scripts.terminate_agent stays the operator's local CLI, with its caller and process-group checks unchanged.",
+    "A remote agent with no answer stays suspect and keeps its claim lease indefinitely; nothing escalates it to the operator yet, and fencing a returning attempt against a replacement belongs to the generation fencing work (INV-R07). A remote backend without the observe capability reads as unknown, so its agents stay suspect rather than being judged lost.",
+    "unqualified_process_actions_rejected_total counts terminate refusals for missing or unqualified process identity only; unavailable backends and foreign backend refusals are counted elsewhere or not at all. It is an in-process counter on RuntimeRouter with no exporter.",
+    "No remote backend exists yet; the remote runtime is a fixture. No live rollout proof."
+  ]
+}

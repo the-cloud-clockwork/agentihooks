@@ -1,0 +1,6 @@
+{
+  "scripts/inbox/addresses.py:scripts.inbox.addresses.x_settle_unresolved__mutmut_16:260f69de5c9a7e375f6eb322edbe6d4bff23b9fe6bbdfa168d273b6d6fbe82cf": {
+    "reader": "Standards",
+    "reason": "Omitting dict.get's default produces None for an absent name instead of an empty string. Both are removed by if n; present values and session identifiers are identical. Missing, empty, None, and present-name cases were compared with identical live sets."
+  }
+}

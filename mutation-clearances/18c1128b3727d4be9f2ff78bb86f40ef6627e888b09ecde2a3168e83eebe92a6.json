@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/operator_mail.py:scripts.swarm.operator_mail.x_mentioned__mutmut_18:8eee70f81fc6ec5cf28c1352fc3cda34180200fa57f32aebe46e6369cddefc9e": {
+    "reader": "Standards",
+    "reason": "With no mention, empty and XXXX both differ from swarm and match no agent name or lane, so the write goes to the master either way."
+  }
+}

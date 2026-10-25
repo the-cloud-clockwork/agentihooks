@@ -182,11 +182,41 @@ def refresh_rules(rules_dir: Path, claude_md: Path, local_md: Path, dry_run: boo
     return collect_profile_rules(rules_dir, claude_md, local_md)
 
 
+def refresh_every_home(caller: str) -> None:
+    from scripts.profiles import render
+    from scripts.targets import SUPPORTED_TARGETS
+
+    for target in SUPPORTED_TARGETS:
+        keys = render.rerender(target, skip=[caller] if target == "claude" else [])
+        if target == "claude":
+            _mark_homes(render.rendered_root(), keys)
+
+
+def _mark_homes(root: Path, keys: list[str]) -> None:
+    from hooks.context.rules_refresh import home_rules, profile_home, write_refresh_marker
+    from scripts.profiles import homes
+
+    _i = _install_module()
+    for key in keys:
+        home = root / homes.HOMES / key / homes.CURRENT / "claude"
+        pending = write_refresh_marker(key, home_rules(home), home=profile_home(home))["pending_count"]
+        print(f"{_i._GREEN}[OK]{_i._RESET} Refresh marker written for profile '{key}' ({pending} sessions).")
+
+
 class ClaudeAdapter:
     name = "claude"
 
     def home(self) -> Path:
         return _install_module().CLAUDE_HOME
+
+    def summary_counts(self) -> dict[str, int]:
+        from scripts.init_reporter import installed_counts
+
+        installer = _install_module()
+        settings_path = self.home() / "settings.json"
+        settings = installer.load_json(settings_path) if settings_path.exists() else {}
+        mcp = installer.load_json(installer._CLAUDE_JSON) if installer._CLAUDE_JSON.exists() else {}
+        return installed_counts(mcp.get("mcpServers", {}), self.home() / "skills", settings.get("enabledPlugins", {}))
 
     def write_settings(self, rendered: dict) -> Path:
         _i = _install_module()

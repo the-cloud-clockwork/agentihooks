@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/controller.py:scripts.swarm.controller.x_take_tick_lock__mutmut_6:22d06a33e076ff5c658fb03d24269642ed3ffa0820911d9dc92c7b7d5814cfae": {
+    "reader": "Independent equivalence reader, sub agent of ci@d44a5a-0025",
+    "reason": "The lock value is compared only by whole string equality, and readers key into it only for epoch, host, pid and start. No code or test reads the token field by name; it exists to make each serialized value unique through a fresh uuid, which holds under any key name."
+  }
+}

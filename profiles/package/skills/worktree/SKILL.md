@@ -7,7 +7,7 @@ description: >
   edit. Use when a session starts work in a repo, when the operator says
   "worktree", "new worktree", "wt new", "list worktrees", "clean up the worktree",
   or when overlapping sub-agent work needs its own isolated checkout.
-argument-hint: "new [--from REF] | tmp [--from REF] | ls [--all] | done <name> [--force]"
+argument-hint: "new [--from REF] | tmp [--from REF] | ls [--all] | done <name> [--force | --pushed]"
 ---
 
 # Worktree — one per development cycle, always off the base branch
@@ -31,7 +31,7 @@ DEST="$("$WT" new --repo <repo-dir>)"
 
 Completion criterion: `$DEST` exists, `git -C "$DEST" rev-parse --abbrev-ref HEAD` prints `<name>`.
 
-`new` refuses when free space (the smaller of the worktree filesystem and, on WSL, `/mnt/c`) is below `WT_MIN_FREE_GB` (50) or the repo already has `WT_MAX_PER_REPO` (60) worktrees. Answer a refusal by finishing worktrees (`done`) and running `agentihooks gc`, never by raising the limit. `new` records the calling session as owner (`agentihooks lease`), so the hourly lifecycle sweep never removes a worktree whose session is alive.
+When free space (the smaller of the worktree filesystem and, on WSL, `/mnt/c`) is below `WT_MIN_FREE_GB` (50) or the repo already has `WT_MAX_PER_REPO` (60) worktrees, `new` first evicts the oldest safe worktrees (`agentihooks gc --make-room`): clean pushed ones are removed, unique work is pushed to `wip/` first, and anything a live owner, a process or a protected branch holds stays. It refuses only when nothing safe is left; answer that by finishing worktrees (`done`), never by raising the limit. `new` records the calling agent session as owner (`agentihooks lease`) when one is found among its parent processes, so the hourly lifecycle sweep never removes a worktree whose session is alive. Once every session recorded as its owner has ended, a clean worktree whose head is on a remote is removed by the next hourly sweep, without the 2 h idle wait; unpushed or uncommitted work is never removed that way. A worktree untouched `WT_STALE_DAYS` days (7) is removed whatever holds it, pushed to `wip/` first when it has unique work, unless its owner is alive or it is on a protected branch.
 
 ## Throwaway checkouts
 
@@ -45,7 +45,7 @@ Every scratch checkout — plant runs, proof runs, base trees, merge probes — 
 
 ## Ship
 
-Commit only the files this cycle touched, push `<name>`, open the PR with `--base` set to the base branch, wait for green checks, squash-merge without `--delete-branch` (older `gh` then switches the worktree off its branch and `done` refuses), `git push origin --delete <name>`, then `done`. A repo that ships its own ceremony (`scripts/ship.sh`) uses it from inside `$DEST`.
+Commit only the files this cycle touched, push `<name>`, open the PR with `--base` set to the base branch, wait for green checks. On a base branch with a merge queue, a merge only queues the PR with a gh that knows merge queues; the installed gh predates them and merges past the queue, which the prod lockdown guard refuses. Queue it with `agentihooks swarm <slug> merge queue <pr url>` in a swarm, which uses the GitHub API and works with any `gh`, or the GraphQL `enqueuePullRequest` mutation outside one. On a base without a queue, submit the squash merge without `--delete-branch` (older `gh` then switches the worktree off its branch and `done` refuses). Confirm `gh pr view <pr> --json state --jq .state` reads `MERGED` before deleting the remote branch or running `done`. While queued or open, keep the branch and worktree. GitHub refuses a push to a branch whose PR sits in the queue. To fix a queued PR, dequeue it first (in a swarm, `agentihooks swarm <slug> merge dequeue <pr url>`), then push the fix, and once its checks pass queue it again the same way. A PR that leaves the queue without merging is fixed and queued the same way. After confirmed `MERGED`, run `done`, which deletes the remote branch itself. A repo that ships its own ceremony (`scripts/ship.sh`) uses it from inside `$DEST`.
 
 ## Inspect
 
@@ -60,7 +60,7 @@ Commit only the files this cycle touched, push `<name>`, open the PR with `--bas
 "$WT" done <name> --repo <repo-dir>
 ```
 
-Whoever merges the PR runs `done` for its worktree in the same turn as the merge. Refuses a dirty worktree. Then pulls the base branch into the primary checkout (`--ff-only`) when it is on a clean base branch, and names the blocker otherwise. Deletes the local branch when it is on the remote base branch or its PR into it merged; otherwise keeps it and says so. `--force` overrides both.
+Whoever submits the merge owns it until the PR state reads `MERGED`, or reads closed and is dropped with `done --force`, then runs `done` for its worktree in that turn. Refuses a dirty worktree. Queued, open or unreadable PRs retain the remote branch and worktree, even with `--force`. A PR closed without merge is refused unless `--force`, which drops the worktree and local branch and keeps the remote branch. A confirmed merged PR permits remote branch deletion before teardown. Then fetches the base branch and fast-forwards the primary checkout to `origin/<base>` when it is on a clean base branch, and names the blocker otherwise. Deletes the local branch when it is on the remote base branch or its PR into it merged; otherwise keeps it and says so. `--force` overrides the dirty, closed without merge and local branch checks only. `--pushed` is for parked work: it skips the pull request checks, removes a clean worktree and its local branch once origin holds the worktree head, and keeps the remote branch; any other head is refused, and it does not combine with `--force`.
 
 ## Base-direct
 

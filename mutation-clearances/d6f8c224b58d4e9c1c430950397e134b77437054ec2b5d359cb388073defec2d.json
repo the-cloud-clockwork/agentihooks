@@ -1,0 +1,6 @@
+{
+  "scripts/init_agent.py:scripts.init_agent.x_main__mutmut_7:9278452f74c086ae83e213fd3a422b61e1b96f750ca792ec23358bc7608879d5": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "Fallback case is erased by capitalize: claude and CLAUDE both become Claude. Truthy inputs bypass the fallback identically; every falsy input yields the same source label and refusal behavior."
+  }
+}

@@ -5,8 +5,6 @@ import pytest
 from scripts.swarm import commands
 from scripts.swarm.store import RedisStore, SwarmConfig
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 
 @pytest.fixture
 def store():
@@ -197,6 +195,17 @@ def test_status_and_workspaces_before_the_first_hive_publication(store):
 
 
 def test_status_keeps_published_config_labels_with_current_control_state(store):
-    commands.publish(store, "sw", {"config": {"name": "swarm name", "state": "running", "codex_share": 25}}, {})
+    commands.publish(store, "sw", {"config": {"name": "swarm name", "state": "running", "snapshot_minutes": 25}}, {})
     view = commands.view(store, "sw")
-    assert view["config"] == {"name": "swarm name", "state": "paused", "codex_share": 25}
+    assert view["config"] == {"name": "swarm name", "state": "paused", "snapshot_minutes": 25, "autonomy": "delegate"}
+
+
+@pytest.mark.parametrize("mode", ["manual", "assist", "delegate", "full"])
+def test_status_shows_current_autonomy_before_the_next_publication(store, mode):
+    commands.publish(store, "sw", {"config": {"autonomy": "delegate", "name": "swarm name"}}, {})
+    store.update("sw", autonomy=mode)
+    assert commands.view(store, "sw")["config"] == {
+        "autonomy": mode,
+        "name": "swarm name",
+        "state": "paused",
+    }

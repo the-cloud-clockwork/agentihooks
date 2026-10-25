@@ -1,0 +1,6 @@
+{
+  "scripts/profiles/manifestos.py:scripts.profiles.manifestos.x_enabled__mutmut_3:638f1691da094e2b960ca6da4a37435a64fbbfbfcc55592e49a90995971a17e2": {
+    "reader": "Standards reader, pull request 1751",
+    "reason": "The initial true or TRUE only flows into the get default when no root sets the enabled key, then into value.lower() in the accepted set. Both spellings lower to true, so the boolean is identical for every input."
+  }
+}

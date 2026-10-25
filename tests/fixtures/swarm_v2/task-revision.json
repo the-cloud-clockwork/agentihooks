@@ -1,0 +1,13 @@
+{
+  "schema_version": "2.0",
+  "package": "SV2-LDG-03",
+  "fixture": "Edited task specification while an agent is still working from the preceding revision",
+  "credential": "Signed fixture launch grant bound by its registration; never a deployed credential",
+  "spec": {"title": "Revision fixture", "lane": "eng", "kind": "code", "phase": "p1", "description": "Build the first specification"},
+  "edited_description": "Build the second specification",
+  "worker_fields": {"state": "pr", "pr_url": "https://github.com/the-cloud-clockwork/agentihooks/pull/1"},
+  "operator_fields": [{"rank": "high"}, {"state": "done"}, {"claimed_by": "eng-2@fixture"}, {"depends_on": ["other"]}],
+  "control": {"max_eng_agents": 99, "gates": {"talk": "off"}},
+  "progress": ["Building the first slice", "Building the second slice"],
+  "cases": ["a", "b", "c"]
+}

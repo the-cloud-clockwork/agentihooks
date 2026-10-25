@@ -60,6 +60,79 @@ def test_a_publish_appends_a_patch_that_rebuilds_the_new_value():
     assert hub.resource(SLUG, "ledger") == ledger(2, tasks=[{"id": "t1"}])
 
 
+@pytest.mark.wall_clock
+def test_a_wait_with_no_new_event_returns_empty_once_its_timeout_passes():
+    hub = Hub()
+    seq, _ = opened(hub)
+    assert bounded(hub.wait, SLUG, seq, 0.01)[0] == []
+
+
+def test_immutable_snapshot_publication_keeps_names_revisions_and_replay():
+    hub = Hub()
+    old = ledger(1, tasks=[{"id": "t1", "title": "first"}])
+    hub.open(SLUG, lambda: {"ledger": old})
+    new = ledger(2, tasks=[{"id": "t1", "title": "second"}])
+    assert hub.publish_snapshot(SLUG, "ledger", new)
+    assert hub.resource(SLUG, "ledger") is new
+    frames = hub.wait(SLUG, 0, 0)
+    assert len(frames) == 1
+    assert frames[0][2] == "ledger"
+    assert frames[0][3]["rev"] == 2
+    assert apply(old, frames[0][3]["patch"]) == new
+    assert not hub.publish_snapshot(SLUG, "ledger", old)
+    assert not hub.publish_snapshot(SLUG, "ledger", new)
+    assert hub.channels[SLUG].seq == 1
+
+
+def test_immutable_snapshot_baseline_and_unwatched_resources():
+    hub = Hub()
+    state = ledger(1)
+    assert not hub.publish_snapshot(SLUG, "ledger", state)
+    assert not hub.has(SLUG)
+    hub.open(SLUG, lambda: {"ledger": state})
+    other = {"config": {"state": "running"}}
+    assert not hub.publish_snapshot(SLUG, "swarm", other)
+    assert hub.resource(SLUG, "swarm") is other
+    assert hub.channels[SLUG].seq == 0
+
+
+@pytest.mark.wall_clock
+@pytest.mark.parametrize("change", ["metadata", "equivalent", "copy", "append", "reorder", "no_ids"])
+def test_snapshot_comparison_work_is_bounded_by_changed_structure(change, monkeypatch):
+    shared = [{"id": str(index), "values": list(range(64))} for index in range(32)]
+    if change == "no_ids":
+        shared = [list(range(64)) for _ in range(32)]
+    tasks = shared
+    if change == "copy":
+        tasks = list(shared)
+    elif change in {"append", "no_ids"}:
+        tasks = [*shared, {"id": "added", "values": []}]
+    elif change == "reorder":
+        tasks = list(reversed(shared))
+    old, new = ledger(1, tasks=shared), ledger(1 if change == "equivalent" else 2, tasks=tasks)
+    hub = Hub()
+    hub.open(SLUG, lambda: {"ledger": ledger(0)})
+    hub.publish_snapshot(SLUG, "ledger", old)
+    calls = 0
+    original = events_hub.patch.same
+
+    def counted(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(events_hub.patch, "same", counted)
+    assert hub.publish_snapshot(SLUG, "ledger", new) is (change != "equivalent")
+    budget = (
+        20 if change in {"metadata", "equivalent"} else len(shared) * (3 if change in {"append", "reorder"} else 1) + 20
+    )
+    assert calls <= budget
+    frames, _ = bounded(hub.wait, SLUG, 1, 0)
+    assert len(frames) == (0 if change == "equivalent" else 1)
+    if frames:
+        assert apply(old, frames[0][3]["patch"]) == new
+
+
 def test_publishing_an_unchanged_value_or_an_unwatched_ledger_adds_nothing():
     hub = Hub()
     assert not hub.publish(SLUG, "ledger", ledger(1))
@@ -133,11 +206,11 @@ def test_a_publish_builds_its_patch_while_holding_the_channel_lock(monkeypatch):
         if got:
             hub.changed.release()
 
-    def diff(old, new):
+    def diff(old, new, **options):
         other = threading.Thread(target=try_lock)
         other.start()
         other.join()
-        return real_diff(old, new)
+        return real_diff(old, new, **options)
 
     monkeypatch.setattr(events_hub.patch, "diff", diff)
     hub.publish(SLUG, "ledger", ledger(2))
@@ -221,6 +294,7 @@ def test_a_cursor_older_than_retention_is_expired_and_the_oldest_kept_one_replay
     assert hub.open(SLUG, None, Hub.cursor(channel, 11)) == (11, [channel.log[-1]])
 
 
+@pytest.mark.wall_clock
 def test_wait_returns_nothing_after_its_timeout():
     hub = Hub()
     opened(hub)
@@ -228,23 +302,41 @@ def test_wait_returns_nothing_after_its_timeout():
     assert events == [] and took >= 0.05
 
 
-def test_wait_wakes_at_once_on_a_publish():
+def woken_by_a_publish():
     hub = Hub()
     opened(hub)
     timer = threading.Timer(0.05, hub.publish, args=(SLUG, "ledger", ledger(2)))
     timer.start()
     events, took = bounded(hub.wait, SLUG, 0, 1.5)
     timer.join()
-    assert [at for at, *_ in events] == [1] and took < 1
+    return [at for at, *_ in events], took
 
 
-def test_wait_answers_at_once_when_events_are_already_kept():
+def answered_from_kept_events():
     hub = Hub()
     opened(hub)
     for rev in (2, 3, 4):
         hub.publish(SLUG, "ledger", ledger(rev))
     events, took = bounded(hub.wait, SLUG, 2, 1.5)
-    assert [at for at, *_ in events] == [3] and took < 1
+    return [at for at, *_ in events], took
+
+
+def test_wait_wakes_on_a_publish():
+    assert woken_by_a_publish()[0] == [1]
+
+
+@pytest.mark.wall_clock
+def test_wait_wakes_at_once_on_a_publish():
+    assert woken_by_a_publish()[1] < 1
+
+
+def test_wait_answers_when_events_are_already_kept():
+    assert answered_from_kept_events()[0] == [3]
+
+
+@pytest.mark.wall_clock
+def test_wait_answers_at_once_when_events_are_already_kept():
+    assert answered_from_kept_events()[1] < 1
 
 
 def test_wait_raises_expired_when_a_slow_reader_fell_out_of_retention():
@@ -258,38 +350,58 @@ def test_wait_raises_expired_when_a_slow_reader_fell_out_of_retention():
     assert [at for at, *_ in hub.wait(SLUG, 3, 0.01)] == [4]
 
 
-def test_closing_the_last_stream_stops_sampling_and_eviction_waits_for_the_grace_period():
-    hub = Hub()
+@pytest.mark.parametrize("closed_at", [250.3 + offset for offset in range(20)])
+def test_closing_the_last_stream_stops_sampling_and_eviction_waits_for_the_grace_period(closed_at):
+    now = [closed_at - 10]
+    hub = Hub(clock=lambda: now[0])
     opened(hub)
     opened(hub)
     hub.close(SLUG)
     assert hub.watched() == [SLUG]
+    now[0] = closed_at
     hub.close(SLUG)
     assert hub.watched() == []
-    closed = hub.channels[SLUG].idle_since
-    hub.evict(now=closed + events_hub.IDLE_EVICT_S - 1)
+    deadline = closed_at + events_hub.IDLE_EVICT_S
+    now[0] = deadline - 1
+    hub.evict()
     assert hub.has(SLUG)
-    hub.evict(now=closed + events_hub.IDLE_EVICT_S)
+    now[0] = deadline
+    hub.evict()
     assert not hub.has(SLUG)
     assert hub.resource(SLUG, "ledger") is None
 
 
-def test_eviction_defaults_to_now_and_the_grace_period():
+def test_eviction_defaults_to_now_and_the_grace_period(monkeypatch):
+    now = [250.3]
+    monkeypatch.setattr(events_hub.time, "monotonic", lambda: now[0])
     hub = Hub()
     opened(hub)
     hub.close(SLUG)
     hub.evict()
     assert hub.has(SLUG)
-    hub.channels[SLUG].idle_since -= events_hub.IDLE_EVICT_S
+    now[0] += events_hub.IDLE_EVICT_S
     hub.evict()
     assert not hub.has(SLUG)
 
 
-def test_a_watched_ledger_is_never_evicted():
-    hub = Hub()
+@pytest.mark.parametrize("reconnect", [False, True])
+def test_a_watched_ledger_is_never_evicted(reconnect):
+    now = [250.3]
+    hub = Hub(clock=lambda: now[0])
     opened(hub)
-    hub.evict(now=time.monotonic() + 10 * events_hub.IDLE_EVICT_S)
+    if reconnect:
+        hub.close(SLUG)
+        now[0] += events_hub.IDLE_EVICT_S - 1
+        opened(hub)
+    now[0] += 10 * events_hub.IDLE_EVICT_S
+    hub.evict()
     assert hub.has(SLUG)
+    hub.close(SLUG)
+    hub.evict()
+    assert hub.has(SLUG)
+    now[0] += events_hub.IDLE_EVICT_S
+    hub.evict()
+    assert not hub.has(SLUG)
 
 
 def test_a_failed_load_unsubscribes_and_raises():
@@ -318,3 +430,45 @@ def test_the_default_retention_is_bounded():
     hub = Hub()
     opened(hub)
     assert hub.channels[SLUG].log.maxlen == events_hub.RETAINED
+
+
+def test_a_new_hub_is_not_closing():
+    assert Hub().closing is False
+
+
+def test_draining_wakes_every_waiting_reader_with_closed():
+    hub = Hub()
+    seq, _ = opened(hub)
+    caught = []
+
+    def wait():
+        try:
+            hub.wait(SLUG, seq, 30)
+        except events_hub.Closed as exc:
+            caught.append(exc)
+
+    timer = threading.Timer(0.05, hub.drain)
+    timer.start()
+    bounded(wait, limit=10)
+    timer.join()
+    assert len(caught) == 1
+
+
+def test_a_drained_hub_answers_closed_at_once():
+    hub = Hub()
+    seq, _ = opened(hub)
+    hub.drain()
+    caught = []
+
+    def wait():
+        try:
+            hub.wait(SLUG, seq, 30)
+        except events_hub.Closed as exc:
+            caught.append(exc)
+
+    bounded(wait, limit=10)
+    assert len(caught) == 1
+
+
+def test_closed_is_not_expired():
+    assert not issubclass(events_hub.Closed, Expired)

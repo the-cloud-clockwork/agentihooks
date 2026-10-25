@@ -1,0 +1,26 @@
+{
+  "tested_commit": "c0a74a1de7172251a866b23b484ea94307d767eb",
+  "evidence_class": "local isolated fixture on temporary homes; mocked: the herdr CLI, the init-agent launch and the process reaper behind HerdrRuntime, and the remote backend is an in-memory fake; not live rollout proof",
+  "then": "an adapter upgrade can be disabled without rewriting existing task records",
+  "result": {
+    "new_spawn_backend_while_disabled": "local",
+    "disabled_backend_operation": [
+      "unavailable",
+      "runtime kubernetes is disabled"
+    ],
+    "attempt_record_unchanged": true,
+    "remote_object_kept": true,
+    "observe_after_reenable": [
+      "ok",
+      true
+    ],
+    "replay_returns_first_object": true,
+    "replay_requests_reaching_remote": 2,
+    "remote_objects": 1,
+    "local_spawns": [
+      "engineer@a1b2c3-0002"
+    ],
+    "runtime_capability_failures_total": 0
+  },
+  "passed": true
+}

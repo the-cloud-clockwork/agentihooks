@@ -1,0 +1,6 @@
+{
+  "scripts/master_login_native.py:scripts.master_login_native.x\u01c1NativeAttempt\u01c1complete__mutmut_28:dad28fc0d93e981f1fb99a28581146ac29f981dd5b52363a57d62464009efac4": {
+    "reader": "Standards",
+    "reason": "PowerShell keywords, variables, operators, member and type lookup ignore casing; the uppercased command has identical bounded clipboard output and clearing behavior."
+  }
+}

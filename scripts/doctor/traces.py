@@ -5,11 +5,13 @@ from collections import Counter
 from dataclasses import dataclass, fields
 from statistics import median
 
+from scripts.doctor.words import plural
 from scripts.swarm.health.findings import Finding
 
 MINUTE_MS = 60_000
 SECOND_MS = 1000
 BOUND_FIELDS = ("life", "seat", "task", "harness", "profile")
+FAILURE_DETAIL = 50
 
 
 @dataclass(frozen=True)
@@ -22,6 +24,7 @@ class Limits:
     active_stale_seconds: int = 60
     active_grace_seconds: int = 60
     interval_minutes: int = 10
+    first_turn_minutes: int = 60
 
     @classmethod
     def from_env(cls, environ):
@@ -55,6 +58,10 @@ def _gaps(trace):
     return [(a["turn"], b["turn"], (b["start"] - a["end"]) // MINUTE_MS) for a, b in zip(turns, turns[1:])]
 
 
+def _partial(trace):
+    return () if trace.get("complete", True) else ("observations read only up to where the read stopped",)
+
+
 def tool_errors(record: dict, limits: Limits) -> list[Finding]:
     found = []
     for trace in record["traces"]:
@@ -73,6 +80,7 @@ def tool_errors(record: dict, limits: Limits) -> list[Finding]:
                     f"{errors}/{len(tools)} tool calls failed",
                     "failed tools: " + ", ".join(f"{name} {n}" for name, n in failed.most_common()),
                     f"trace {trace['id']}",
+                    *_partial(trace),
                 ),
                 f"over {limits.tool_error_pct}% of at least {limits.tool_error_min_calls} tool calls",
                 round(errors * 100 / len(tools)),
@@ -85,6 +93,8 @@ def _task_costs(record):
     costs = []
     for task in record["merged"]:
         traced = [t for t in record["traces"] if f"task:{task}" in t["tags"]]
+        if any(not t.get("complete", True) or not _turns(t) for t in traced):
+            continue
         costs.append(
             {
                 "task": task,
@@ -96,11 +106,32 @@ def _task_costs(record):
     return costs
 
 
+def _finished(record, task):
+    traced = [t for t in record["traces"] if f"task:{task}" in t["tags"]]
+    return max(o.get("end", 0) for t in traced for o in _turns(t))
+
+
+def task_cost_candidates(record: dict) -> set[str]:
+    reader = record.get("reader", {})
+    historical = reader.get("historical", {})
+    if (
+        not historical.get("listed", False)
+        or not historical.get("complete", False)
+        or historical.get("capped")
+        or reader.get("failures")
+    ):
+        return set()
+    return {cost["task"] for cost in _task_costs(record) if cost["sessions"]}
+
+
 def task_cost(record: dict, limits: Limits) -> list[Finding]:
     costs = [c for c in _task_costs(record) if c["tokens"]]
+    finished = {c["task"]: _finished(record, c["task"]) for c in costs}
     found = []
     for cost in costs:
-        others = [c["tokens"] for c in costs if c is not cost]
+        if cost["task"] not in record.get("task_cost_candidates", record["merged"]):
+            continue
+        others = [c["tokens"] for c in costs if c is not cost and finished[c["task"]] <= finished[cost["task"]]]
         if not others or cost["tokens"] <= limits.task_cost_ratio * median(others):
             continue
         found.append(
@@ -113,6 +144,11 @@ def task_cost(record: dict, limits: Limits) -> list[Finding]:
                     f"traced sessions {cost['sessions']}",
                     f"uncached tokens {cost['tokens']}, median of the other merged tasks {round(median(others))}",
                     "uncached tokens are input, cache writes and output; cache reads are left out",
+                    *(
+                        ("comparison set truncated: trace listing incomplete",)
+                        if not record.get("reader", {}).get("historical", {}).get("listed", True)
+                        else ()
+                    ),
                 ),
                 f"over {limits.task_cost_ratio} times the median uncached tokens of the other merged tasks",
                 cost["tokens"],
@@ -121,23 +157,93 @@ def task_cost(record: dict, limits: Limits) -> list[Finding]:
     return found
 
 
+def _uncovered_ms(waits, start, end):
+    cursor, uncovered = start, 0
+    for held in sorted(waits, key=lambda held: held["at"]):
+        left, right = max(cursor, held["at"]), min(end, held["until"])
+        if right > left:
+            uncovered += left - cursor
+            cursor = right
+    return uncovered + end - cursor
+
+
+def _long_gaps(trace, limit):
+    turns = _turns(trace)
+    return [(a, b) for a, b in zip(turns, turns[1:]) if (b["start"] - a["end"]) // MINUTE_MS > limit]
+
+
+def _uncovered_gaps(trace, waits, limit):
+    found = []
+    for a, b in _long_gaps(trace, limit):
+        minutes = _uncovered_ms(waits, a["end"], b["start"]) // MINUTE_MS
+        if minutes > limit:
+            found.append((a["turn"], b["turn"], minutes, a["end"], b["start"]))
+    return found
+
+
 def turn_gaps(record: dict, limits: Limits) -> list[Finding]:
     found = []
+    unread = set(record.get("waits_unread", []))
     for trace in record["traces"]:
-        long = [g for g in _gaps(trace) if g[2] > limits.turn_gap_minutes]
+        if _agent(trace) in unread:
+            continue
+        waits = record.get("waits", {}).get(_agent(trace), [])
+        long = _uncovered_gaps(trace, waits, limits.turn_gap_minutes)
         if not long:
             continue
         found.append(
             Finding(
                 "turn gap",
                 _subject(trace),
-                f"{len(long)} gaps between turns over {limits.turn_gap_minutes} minutes",
-                (f"agent {_agent(trace)}", *(f"turn {a} to turn {b}: {m} minutes" for a, b, m in long)),
-                f"over {limits.turn_gap_minutes} minutes between turns",
-                max(m for _, _, m in long),
+                f"{len(long)} gaps between turns with over {limits.turn_gap_minutes} minutes outside declared waits",
+                (
+                    f"agent {_agent(trace)}",
+                    *(
+                        f"turn {a} to turn {b}: {m} minutes outside declared waits; gap {start} to {end}"
+                        for a, b, m, start, end in long
+                    ),
+                    *_partial(trace),
+                ),
+                f"over {limits.turn_gap_minutes} minutes between turns outside declared waits",
+                max(gap[2] for gap in long),
             )
         )
     return found
+
+
+def _live(record):
+    return {binding["agent"] for binding in record.get("active", [])}
+
+
+def gap_agents(record: dict, limits: Limits) -> list[str]:
+    newest = {}
+    for trace in record["traces"]:
+        for _, b in _long_gaps(trace, limits.turn_gap_minutes):
+            newest[_agent(trace)] = max(newest.get(_agent(trace), b["start"]), b["start"])
+    live = _live(record)
+    return sorted(newest, key=lambda name: (name not in live, -newest[name], name))
+
+
+def wait_coverage(record: dict, limits: Limits) -> list[Finding]:
+    unread = record.get("waits_unread")
+    if not unread:
+        return []
+    return [
+        Finding(
+            "wait history partial",
+            record["slug"],
+            f"wait history of {plural(len(unread), 'agent')} with turn gaps over {limits.turn_gap_minutes} minutes "
+            "not read in budget",
+            (
+                "unread: " + ", ".join(unread[:5]),
+                f"live agents unread: {len(_live(record) & set(unread))}",
+                "turn gap findings skip agents whose wait history was not read",
+                "each Doctor scan reads the wait history again within its budget",
+            ),
+            "every agent with a turn gap over the limit has its wait history read",
+            len(unread),
+        )
+    ]
 
 
 def untraced(record: dict, limits: Limits) -> list[Finding]:
@@ -194,7 +300,7 @@ def _remote_fresh(binding, now_ms):
     return f"Langfuse last accepted event {_ago(now_ms, remote['fresh_ms'])} seconds ago"
 
 
-def _lag(binding, now_ms):
+def unaccepted_seconds(binding, now_ms):
     local = binding["local"]
     if not local or local["generated_bytes"] <= local["accepted_bytes"]:
         return 0
@@ -227,7 +333,10 @@ def _stale(binding, record, limits, lag):
 
 def _unconfirmed(binding, record, limits):
     local, remote, now = binding["local"], binding["remote"], record["now_ms"]
-    if not (binding["read"] and local and remote) or local["accepted"] <= remote["observations"]:
+    if not (binding["read"] and local and remote):
+        return None
+    reconciliation = remote.get("reconciliation")
+    if reconciliation is None or not reconciliation["missing"]:
         return None
     waited = _ago(now, local["accepted_at"])
     if waited <= limits.active_stale_seconds:
@@ -239,6 +348,7 @@ def _unconfirmed(binding, record, limits):
         (
             *_who(binding),
             f"exporter recorded {local['accepted']} accepted observations, Langfuse holds {remote['observations']}",
+            f"{len(reconciliation['missing'])} accepted observation identities missing from Langfuse",
             f"last acceptance {waited} seconds ago",
             _remote_fresh(binding, now),
         ),
@@ -247,16 +357,50 @@ def _unconfirmed(binding, record, limits):
     )
 
 
+def _count_drift(binding):
+    remote = binding["remote"]
+    reconciled = (remote or {}).get("reconciliation")
+    if not binding["read"] or not reconciled or not reconciled["drift"]:
+        return None
+    return Finding(
+        "telemetry count drift",
+        binding["life"],
+        "exporter aggregate differs from accepted observation identities",
+        (
+            *_who(binding),
+            f"exporter recorded {binding['local']['accepted']} accepted observations",
+            f"reconstructed {reconciled['accepted']} accepted observation identities",
+            f"{len(reconciled['missing'])} accepted observation identities missing from Langfuse",
+        ),
+        "exporter accepted aggregate agrees with its observation identities",
+        abs(reconciled["drift"]),
+    )
+
+
+def _turn_completed(binding):
+    return bool((binding["local"] or {}).get("stopped"))
+
+
 def _never_exported(binding, record, limits):
     age = _ago(record["now_ms"], binding["started_at"])
+    turn = (
+        "a turn completed"
+        if _turn_completed(binding)
+        else f"no completed turn recorded, working past the {limits.first_turn_minutes} minute first turn bound"
+    )
     return Finding(
         "telemetry never exported",
         f"{binding['agent']}.{binding['started_at']}",
         f"working agent with no Langfuse trace after {age} seconds",
-        (*_who(binding), f"no trace tagged swarm:{record['slug']} and agent:{binding['agent']}"),
-        f"no trace after a {limits.active_grace_seconds} second grace, {_cadence(limits)}",
+        (*_who(binding), f"no trace tagged swarm:{record['slug']} and agent:{binding['agent']}", turn),
+        f"no trace after a completed turn or past a {limits.first_turn_minutes} minute first turn, {_cadence(limits)}",
         age,
     )
+
+
+def _fault_due(binding, record, limits):
+    first_turn = record["now_ms"] - binding["started_at"] <= limits.first_turn_minutes * MINUTE_MS
+    return _turn_completed(binding) or not first_turn
 
 
 def _misattributed(binding):
@@ -287,16 +431,30 @@ def _misattributed(binding):
     )
 
 
+def _start_unknown(binding):
+    return Finding(
+        "telemetry start unknown",
+        binding["agent"],
+        "working agent start is unknown",
+        (*_who(binding), "no positive spawn or launch timestamp; launch grace cannot be established"),
+        "an observed start is required to judge active telemetry",
+        1,
+    )
+
+
 def _active_binding(binding, record, limits):
+    if (binding.get("started_at") or 0) <= 0:
+        return [_start_unknown(binding)]
     if record["now_ms"] - binding["started_at"] <= limits.active_grace_seconds * SECOND_MS:
         return []
     wrong = _misattributed(binding)
-    found = [wrong] if wrong else []
-    lag = _lag(binding, record["now_ms"])
+    found = [f for f in (wrong, _count_drift(binding)) if f]
+    lag = unaccepted_seconds(binding, record["now_ms"])
     if lag > limits.active_stale_seconds:
         found.append(_stale(binding, record, limits, lag))
     elif binding["read"] and not binding["remote"] and not wrong:
-        found.append(_never_exported(binding, record, limits))
+        if _fault_due(binding, record, limits):
+            found.append(_never_exported(binding, record, limits))
     else:
         found += [f for f in (_unconfirmed(binding, record, limits),) if f]
     return found
@@ -304,6 +462,24 @@ def _active_binding(binding, record, limits):
 
 def active(record: dict, limits: Limits) -> list[Finding]:
     return [f for binding in record.get("active", []) for f in _active_binding(binding, record, limits)]
+
+
+def _caps(historical: dict) -> tuple:
+    return (
+        *(() if historical.get("listed", True) else ("trace listing stopped at its page cap",)),
+        *(
+            (f"{historical['unlisted']} traces past where the listing stopped not counted",)
+            if historical.get("unlisted")
+            else ()
+        ),
+        *((f"{historical['capped']} traces read up to the observation page cap",) if historical.get("capped") else ()),
+    )
+
+
+def _failure_detail(failures: list) -> tuple:
+    dropped = len(failures) - FAILURE_DETAIL
+    overflow = (f"{dropped} more failed reads past the bound of {FAILURE_DETAIL} per pass",) if dropped > 0 else ()
+    return (*failures[:FAILURE_DETAIL], *overflow)
 
 
 def reader(record: dict, limits: Limits) -> list[Finding]:
@@ -322,13 +498,17 @@ def reader(record: dict, limits: Limits) -> list[Finding]:
                 "trace reader unavailable",
                 f"{record['slug']}.{state['down_since']}",
                 f"{len(state['failures'])} Langfuse reads failed or ran out of time",
-                (*state["failures"][:5], *coverage, "unread bindings are not judged on Langfuse evidence"),
+                (
+                    *_failure_detail([*state["failures"], *historical.get("unreadable", [])]),
+                    *coverage,
+                    "unread bindings are not judged on Langfuse evidence",
+                ),
                 f"any failed or unfinished Langfuse read, {_cadence(limits)}",
                 len(state["failures"]),
             )
         )
     if not historical["complete"] and not state["failures"]:
-        missing = historical["traces"] - historical["covered"]
+        missing = historical["traces"] - historical["covered"] - historical.get("capped", 0)
         found.append(
             Finding(
                 "trace coverage partial",
@@ -336,8 +516,8 @@ def reader(record: dict, limits: Limits) -> list[Finding]:
                 f"observations of {missing} traces not read yet",
                 (
                     coverage[1],
-                    *(() if historical.get("listed", True) else ("trace listing stopped at its page cap",)),
-                    *historical.get("unreadable", [])[:3],
+                    *_caps(historical),
+                    *_failure_detail(historical.get("unreadable", [])),
                     "tool error, task cost and turn gap findings cover only the read traces",
                     "each Doctor scan reads more within its read budget",
                 ),
@@ -372,7 +552,7 @@ def measures(record: dict) -> dict:
                 "task": b["task"],
                 "session": b["session_id"],
                 "read": b["read"],
-                "unaccepted_seconds": _lag(b, now),
+                "unaccepted_seconds": unaccepted_seconds(b, now),
                 "langfuse_fresh_seconds": _ago(now, b["remote"]["fresh_ms"])
                 if b["remote"] and b["remote"]["fresh_ms"]
                 else None,
@@ -388,6 +568,7 @@ def findings(record: dict, limits: Limits) -> list[Finding]:
         *tool_errors(record, limits),
         *task_cost(record, limits),
         *turn_gaps(record, limits),
+        *wait_coverage(record, limits),
         *untraced(record, limits),
         *active(record, limits),
         *reader(record, limits),

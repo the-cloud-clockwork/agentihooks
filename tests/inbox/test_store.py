@@ -1,8 +1,7 @@
 import pytest
 
-from scripts.inbox.store import InboxError, InboxStore
-
-pytestmark = pytest.mark.xdist_group("fakeredis")
+from scripts.inbox.store import NOTIFY, Contended, InboxError, InboxStore
+from scripts.swarm.keyspace import ROOT as KEY_ROOT
 
 
 @pytest.fixture
@@ -136,7 +135,7 @@ def test_items_survive_a_fresh_store_connection(server, store):
 
 def test_items_carry_no_expiry(store):
     item = store.send("alice", "bob", "hi")
-    assert all(store.redis.ttl(key) == -1 for key in store.redis.keys("agentihooks:inbox:*"))
+    assert all(store.redis.ttl(key) == -1 for key in store.redis.keys(f"{KEY_ROOT}:inbox:*"))
     assert store.get(item.id)
 
 
@@ -199,8 +198,552 @@ def test_reply_goes_to_the_sender_and_closes_the_original_done(store):
     assert closed.state == "done" and answer.id in closed.reason
 
 
+def refused_answer(store):
+    item = store.send("operator", "master", "how far along are we")
+    answer = store.reply(item.id, "master", "two tasks left")
+    store.close(answer.id, "operator", "cancel", "refused by the ledger page")
+    return item, store.get(answer.id)
+
+
+def test_reopen_returns_an_answered_item_to_its_open_mail_with_a_fresh_reply_slot(store, monkeypatch):
+    item, answer = refused_answer(store)
+    monkeypatch.setattr("scripts.inbox.store.now_ms", lambda: 9_000_000_000_000)
+    listener = store.redis.pubsub()
+    listener.subscribe(NOTIFY)
+    listener.get_message(timeout=1)
+    size = store.redis.get(store.key("open-size", "master"))
+    reopened = store.reopen(answer, "swarm", "reopened: refused")
+    assert store.redis.get(store.key("open-size", "master")) == size
+    assert (reopened.state, reopened.reason, reopened.updated_at) == ("read", "reopened: refused", 9_000_000_000_000)
+    assert store.get(item.id) == reopened
+    assert store.redis.zscore(store.key("open", "master"), item.id) == item.created_at
+    assert not store.redis.hexists(store.key("item", item.id), "reply:master")
+    assert store.history(item.id)[-1] == {
+        "state": "read",
+        "by": "swarm",
+        "reason": "reopened: refused",
+        "at": reopened.updated_at,
+    }
+    assert listener.get_message(timeout=1)["data"] == "master"
+    second = store.reply(item.id, "master", "one task left")
+    assert second.id != answer.id and store.get(item.id).state == "done"
+
+
+def test_a_replayed_reply_bound_to_a_refused_answer_is_refused_and_keeps_the_item_open(store):
+    item, answer = refused_answer(store)
+    store.reopen(answer, "swarm", "reopened: refused")
+    with pytest.raises(InboxError) as refused:
+        store.reply(item.id, "master", "two tasks left", answer_id=answer.id)
+    assert str(refused.value) == f"answer {answer.id} to message {item.id} was refused"
+    assert store.get(item.id).state == "read"
+
+
+def test_a_reply_without_an_operation_id_keeps_returning_its_refused_answer(store):
+    item, answer = refused_answer(store)
+    assert store.reply(item.id, "master", "two tasks left").id == answer.id
+    assert store.get(item.id).state == "done"
+
+
+def test_a_new_reply_operation_on_a_refused_answer_slot_is_not_taken_for_a_replay(store):
+    item, answer = refused_answer(store)
+    assert store.reply(item.id, "master", "two tasks left", answer_id="op-new").id == answer.id
+    assert store.get(item.id).state == "done"
+
+
+@pytest.mark.parametrize("moved", ["cancel", "handoff", "open", "other answer"])
+def test_reopen_leaves_an_item_this_answer_did_not_close_as_it_is(store, moved):
+    item, answer = refused_answer(store)
+    store.reopen(answer, "swarm", "reopened")
+    if moved == "cancel":
+        store.close(item.id, "master", "cancel", "not needed")
+    elif moved == "handoff":
+        store.close(item.id, "master", "handoff", "eng-1")
+    elif moved == "other answer":
+        store.reply(item.id, "master", "one task left")
+    before, history = store.get(item.id), store.history(item.id)
+    assert store.reopen(answer, "swarm", "reopened again") is None
+    assert (store.get(item.id), store.history(item.id)) == (before, history)
+
+
+def test_reopen_skips_a_ref_that_names_no_inbox_message(store):
+    item = store.send("master", "operator", "a ledger event", ref="ledger-write-1")
+    assert store.reopen(item, "swarm", "reopened") is None
+    assert not store.redis.exists(store.key("item", "ledger-write-1"))
+
+
+@pytest.mark.parametrize("conflicts", [1, 3])
+def test_reopen_retries_a_concurrent_change_then_gives_up(store, monkeypatch, conflicts):
+    from redis.exceptions import WatchError
+
+    item, answer = refused_answer(store)
+    attempt = store._try_reopen
+    calls = []
+
+    def racing(*args):
+        calls.append(args)
+        if len(calls) <= conflicts:
+            raise WatchError()
+        return attempt(*args)
+
+    monkeypatch.setattr(store, "_try_reopen", racing)
+    if conflicts < 3:
+        assert store.reopen(answer, "swarm", "reopened").state == "read"
+    else:
+        with pytest.raises(Contended) as refused:
+            store.reopen(answer, "swarm", "reopened")
+        assert str(refused.value) == f"message {item.id} changed meanwhile; run the command again"
+    assert calls == [(answer, "swarm", "reopened")] * min(conflicts + 1, 3)
+
+
+def test_reply_retry_returns_the_same_outgoing_item(store):
+    original = store.send("alice", "bob", "question")
+    answer = store.reply(original.id, "bob", "answer")
+    replay = store.reply(original.id, "bob", "answer")
+    assert replay.id == answer.id
+    assert [item.id for item in store.inbox("alice")] == [answer.id]
+    assert len(store.history(original.id)) == 2
+
+
+def test_reply_retry_keeps_the_resolved_sender_alias(store):
+    store.names.mint_code("sw", "sw", "/repo")
+    renamed = store.names.next("sw", "eng")
+    original = store.send("alice", "bob", "question")
+    store.names.alias("alice", renamed)
+    answer = store.reply(original.id, "bob", "answer")
+    assert answer.address == renamed
+    assert store.reply(original.id, "bob", "answer").id == answer.id
+    assert [item.id for item in store.inbox(renamed)] == [answer.id]
+
+
+def test_reply_retry_refuses_different_text(store):
+    original = store.send("alice", "bob", "question")
+    answer = store.reply(original.id, "bob", "answer", answer_id="reply-one")
+    with pytest.raises(InboxError) as refused:
+        store.reply(original.id, "bob", "changed", answer_id="reply-one")
+    assert str(refused.value) == "a reply retry must keep its sender, recipient, text and informational flag"
+    assert store.get(answer.id).text == "answer"
+
+
+@pytest.mark.parametrize("text", ["answer", "changed"])
+@pytest.mark.parametrize("alias", ["", "alice", "bob"])
+def test_reply_replay_reconciles_an_answer_saved_before_reservations(store, text, alias):
+    from scripts.inbox.store import DuplicateItem
+
+    original = store.send("alice", "bob", "question")
+    store.send("bob", "alice", "answer", item_id="legacy-answer")
+    store.close(original.id, "bob", "done", "replied with message legacy-answer")
+    if alias:
+        store.names.mint_code("sw", "sw", "/repo")
+        store.names.alias(alias, store.names.next("sw", "eng"))
+    error = DuplicateItem if text == "answer" else InboxError
+    with pytest.raises(error) as refused:
+        store.reply(original.id, "bob", text, answer_id="legacy-answer")
+    assert str(refused.value) == (
+        f"message {original.id} was already answered with message legacy-answer"
+        if text == "answer"
+        else "a reply retry must keep its sender, recipient, text and informational flag"
+    )
+    assert [item.id for item in store.inbox("alice")] == ["legacy-answer"]
+
+
+@pytest.mark.parametrize("address", ["alice", "carol"])
+def test_reply_reconciles_a_legacy_send_whose_original_close_never_landed(store, address):
+    original = store.send("alice", "bob", "question")
+    store.send("bob", address, "answer", item_id="legacy-pending")
+    if address == "alice":
+        answer = store.reply(original.id, "bob", "answer", answer_id="legacy-pending")
+        assert answer.id == "legacy-pending"
+        assert store.get(original.id).reason == "done: replied with message legacy-pending"
+    else:
+        with pytest.raises(InboxError) as refused:
+            store.reply(original.id, "bob", "answer", answer_id="legacy-pending")
+        assert str(refused.value) == "a reply retry must keep its sender, recipient, text and informational flag"
+        assert store.get(original.id).state == "pending"
+    assert [item.id for item in store.inbox(address)] == ["legacy-pending"]
+
+
+def test_a_non_reply_close_refuses_new_reply_operations_before_sending(store):
+    original = store.send("alice", "bob", "question")
+    store.close(original.id, "bob", "cancel", "request withdrawn")
+    with pytest.raises(InboxError) as refused:
+        store.reply(original.id, "bob", "answer", answer_id="new-reply")
+    assert str(refused.value) == f"message {original.id} is closed: cancelled: request withdrawn"
+    assert store.inbox("alice") == []
+
+
+@pytest.mark.parametrize("kind", ["done", "cancel"])
+def test_a_racing_original_close_is_reconciled_only_when_its_reply_outcome_matches(server, monkeypatch, kind):
+    first, second = fresh(server), fresh(server)
+    original = first.send("alice", "bob", "question")
+    close = first.close
+
+    def racing_close(item_id, by, reason, detail):
+        second.close(item_id, by, kind, detail if kind == "done" else "withdrawn")
+        return close(item_id, by, reason, detail)
+
+    monkeypatch.setattr(first, "close", racing_close)
+    if kind == "done":
+        answer = first.reply(original.id, "bob", "answer")
+        assert first.get(original.id).reason == f"done: replied with message {answer.id}"
+    else:
+        with pytest.raises(InboxError) as refused:
+            first.reply(original.id, "bob", "answer")
+        assert str(refused.value) == f"message {original.id} is closed: cancelled: withdrawn"
+        assert first.get(original.id).state == "cancelled"
+    assert len(first.inbox("alice")) == 1
+    assert len(first.history(original.id)) == 2
+
+
+def test_reply_retry_after_a_lost_close_keeps_one_outgoing_item(store, monkeypatch):
+    original = store.send("alice", "bob", "question")
+    close = store.close
+    monkeypatch.setattr(store, "close", lambda *args: (_ for _ in ()).throw(ConnectionError("lost close")))
+    with pytest.raises(ConnectionError):
+        store.reply(original.id, "bob", "answer")
+    monkeypatch.setattr(store, "close", close)
+    answer = store.reply(original.id, "bob", "answer")
+    assert [item.id for item in store.inbox("alice")] == [answer.id]
+    assert store.get(original.id).reason == f"done: replied with message {answer.id}"
+
+
+def test_reply_retry_after_recipient_handoff_keeps_the_same_outgoing_item(store, monkeypatch):
+    original = store.send("alice", "bob", "question")
+    close = store.close
+    monkeypatch.setattr(store, "close", lambda *args: (_ for _ in ()).throw(ConnectionError("lost close")))
+    with pytest.raises(ConnectionError):
+        store.reply(original.id, "bob", "answer")
+    monkeypatch.setattr(store, "close", close)
+    [answer] = store.inbox("alice")
+    store.redirect(answer.id, "swarm", "eng-1@sw", "the task continues in its seat")
+    replay = store.reply(original.id, "bob", "answer")
+    assert replay.id == answer.id
+    assert [item.id for item in store.inbox("eng-1@sw")] == [answer.id]
+    assert store.get(original.id).reason == f"done: replied with message {answer.id}"
+
+
+def test_reply_operation_cannot_reuse_another_originals_outgoing_item(store):
+    first = store.send("alice", "bob", "first question")
+    answer = store.reply(first.id, "bob", "answer")
+    second = store.send("alice", "bob", "second question")
+    with pytest.raises(InboxError) as refused:
+        store.reply(second.id, "bob", "answer", answer_id=answer.id)
+    assert str(refused.value) == "a reply retry must keep its sender, recipient, text and informational flag"
+    assert store.get(second.id).state == "pending"
+    assert [item.id for item in store.inbox("alice")] == [answer.id]
+
+
+def test_racing_reply_retries_return_one_outgoing_answer(server, monkeypatch):
+    first, second = fresh(server), fresh(server)
+    original = first.send("alice", "bob", "question")
+    pipeline = first.redis.pipeline
+    raced = []
+
+    def racing_pipeline(*args, **kwargs):
+        pipe = pipeline(*args, **kwargs)
+        exists = pipe.exists
+
+        def racing_exists(key):
+            found = exists(key)
+            reply_id = first.redis.hget(first.key("item", original.id), "reply:bob")
+            if key == first.key("item", reply_id) and not raced:
+                raced.append(second.reply(original.id, "bob", "answer"))
+            return found
+
+        pipe.exists = racing_exists
+        return pipe
+
+    monkeypatch.setattr(first.redis, "pipeline", racing_pipeline)
+    answer = first.reply(original.id, "bob", "answer")
+    assert answer.id == raced[0].id
+    assert [item.id for item in first.inbox("alice")] == [answer.id]
+    assert [event["state"] for event in first.history(original.id)] == ["pending", "done"]
+
+
 def test_only_the_addressee_can_reply(store):
     item = store.send("alice", "bob", "hi")
     with pytest.raises(InboxError):
         store.reply(item.id, "mallory", "me too")
     assert store.inbox("alice") == []
+
+
+def test_open_index_keeps_delivered_and_read_until_closed(store, monkeypatch):
+    first = store.send("sender", "receiver", "first")
+    second = store.send("sender", "receiver", "second")
+    third = store.send("sender", "receiver", "third")
+    store.deliver(second.id, "receiver")
+    store.read(third.id, "receiver")
+    assert [i.id for i in store.open_items("receiver")] == [first.id, second.id, third.id]
+    store.close(first.id, "receiver", "done", "finished")
+    seen = []
+    original = store.get
+
+    def get(item_id):
+        seen.append(item_id)
+        return original(item_id)
+
+    monkeypatch.setattr(store, "get", get)
+    index = store._index_open
+
+    def rebuild(address):
+        assert address != "receiver", "unchanged mailbox was rebuilt"
+        return index(address)
+
+    monkeypatch.setattr(store, "_index_open", rebuild)
+    assert [i.id for i in store.open_items("receiver")] == [second.id, third.id]
+    assert sorted(seen) == sorted([second.id, third.id])
+    store.redirect(second.id, "swarm", "seat", "receiver exited", "receiver")
+    assert [i.id for i in store.open_items("receiver")] == [third.id]
+    assert [i.id for i in store.open_items("seat")] == [second.id]
+    store.close(third.id, "receiver", "blocked", "missing decision")
+    store.close(second.id, "seat", "cancel", "obsolete")
+    assert store.open_items("receiver") == []
+    assert store.open_items("seat") == []
+
+
+def test_open_index_backfills_old_mail_and_preserves_closed_history(store):
+    first = store.send("sender", "receiver", "pending")
+    second = store.send("sender", "receiver", "delivered")
+    third = store.send("sender", "receiver", "read")
+    fourth = store.send("sender", "receiver", "closed")
+    store.deliver(second.id, "receiver")
+    store.read(third.id, "receiver")
+    store.close(fourth.id, "receiver", "done", "finished")
+    store.redis.zadd(store.key("open", "receiver"), {fourth.id: fourth.created_at})
+    store.redis.srem(store.key("open-indexed"), "receiver")
+    assert [i.id for i in store.open_items("receiver")] == [first.id, second.id, third.id]
+    assert len(store.inbox("receiver")) == 4
+    assert store.redis.sismember(store.key("open-indexed"), "receiver")
+
+
+@pytest.mark.parametrize("conflicts", [1, 3])
+def test_open_index_retries_concurrent_mail_changes(store, monkeypatch, conflicts):
+    from redis.exceptions import WatchError
+
+    item = store.send("sender", "receiver", "open work")
+    closed = store.send("sender", "receiver", "closed work")
+    store.close(closed.id, "receiver", "done", "finished")
+    index = store._index_open
+    calls = []
+
+    def racing(address):
+        calls.append(address)
+        if len(calls) <= conflicts:
+            raise WatchError()
+        return index(address)
+
+    monkeypatch.setattr(store, "_index_open", racing)
+    assert [i.id for i in store.open_items("receiver")] == [item.id]
+    assert calls == ["receiver"] * min(conflicts + 1, 3)
+    assert bool(store.redis.sismember(store.key("open-indexed"), "receiver")) == (conflicts < 3)
+
+
+def test_open_index_cleanup_lists_all_owned_keys(store):
+    first = store.send("sender", "receiver", "work")
+    store.send("sender", "other", "another swarm request")
+    store.open_items("receiver")
+    store.pending_items("receiver")
+    keys, memberships = store.keys_for(lambda address: address == "receiver")
+    assert set(keys) == {
+        store.key("address", "receiver"),
+        store.key("pending", "receiver"),
+        store.key("open", "receiver"),
+        store.key("open-size", "receiver"),
+        store.key("sequence", "receiver"),
+        store.key("item", first.id),
+        store.key("history", first.id),
+    }
+    assert memberships == {
+        store.key("waiting"): ["receiver"],
+        store.key("indexed"): ["receiver"],
+        store.key("open-indexed"): ["receiver"],
+        store.key("wake-outbox"): [first.id],
+    }
+
+
+def test_open_index_cleanup_keeps_empty_addresses_and_redirected_mail(store):
+    assert store.open_items("empty") == []
+    keys, memberships = store.keys_for(lambda address: address == "empty")
+    assert set(keys) == {store.key(kind, "empty") for kind in ("address", "pending", "open", "open-size", "sequence")}
+    assert memberships == {store.key("open-indexed"): ["empty"]}
+    item = store.send("sender", "old", "work")
+    store.open_items("old")
+    store.redirect(item.id, "swarm", "new", "moved", "old")
+    keys, memberships = store.keys_for(lambda address: address == "old")
+    assert set(keys) == {store.key(kind, "old") for kind in ("address", "pending", "open", "open-size", "sequence")}
+    assert memberships == {store.key("open-indexed"): ["old"]}
+
+
+@pytest.mark.parametrize("change", ["send", "close"])
+def test_open_index_rebuild_observes_concurrent_mail_changes(store, monkeypatch, change):
+    first = store.send("sender", "receiver", "first")
+    pipeline_type = type(store.redis.pipeline())
+    hgetall = pipeline_type.hgetall
+    changed = []
+    calls = []
+    index = store._index_open
+
+    def rebuild(address):
+        calls.append(address)
+        return index(address)
+
+    def read_then_change(pipe, key):
+        data = hgetall(pipe, key)
+        if key == store.key("item", first.id) and not changed:
+            changed.append(True)
+            if change == "send":
+                store.send("sender", "receiver", "second")
+            else:
+                store.close(first.id, "receiver", "done", "finished")
+        return data
+
+    monkeypatch.setattr(store, "_index_open", rebuild)
+    monkeypatch.setattr(pipeline_type, "hgetall", read_then_change)
+    opened = store.open_items("receiver")
+    assert calls == ["receiver", "receiver"]
+    assert [item.text for item in opened] == (["first", "second"] if change == "send" else [])
+    assert all(item.state not in ("done", "blocked", "handed_off", "cancelled") for item in opened)
+
+
+def test_open_index_observes_writes_from_a_channel_using_the_previous_protocol(store):
+    first = store.send("sender", "receiver", "first")
+    assert [item.id for item in store.open_items("receiver")] == [first.id]
+    second = store.send("sender", "receiver", "second")
+    store.redis.zrem(store.key("open", "receiver"), second.id)
+    store.redis.decr(store.key("open-size", "receiver"))
+    assert [item.id for item in store.open_items("receiver")] == [first.id, second.id]
+    store.close(first.id, "receiver", "done", "finished")
+    store.redis.zadd(store.key("open", "receiver"), {first.id: first.created_at})
+    assert [item.id for item in store.open_items("receiver")] == [second.id]
+    assert store.redis.zscore(store.key("open", "receiver"), first.id) is None
+
+
+def test_open_index_cleanup_finds_a_redirected_address_before_first_read(store):
+    item = store.send("sender", "old", "work")
+    store.redirect(item.id, "swarm", "new", "moved", "old")
+    keys, memberships = store.keys_for(lambda address: address == "old")
+    assert set(keys) == {store.key(kind, "old") for kind in ("address", "pending", "open", "open-size", "sequence")}
+    assert memberships == {}
+
+
+@pytest.mark.parametrize("change", ["send", "redirect", "same_address"])
+def test_new_writers_keep_warm_mailbox_indexes_current(store, monkeypatch, change):
+    first = store.send("sender", "a", "first")
+    assert [item.id for item in store.open_items("a")] == [first.id]
+    assert store.open_items("b") == []
+
+    def rebuild(address):
+        pytest.fail(f"new writer invalidated warm index at {address}")
+
+    monkeypatch.setattr(store, "_index_open", rebuild)
+    if change == "send":
+        second = store.send("sender", "a", "second")
+        expected = ([first.id, second.id], [])
+    else:
+        destination = "b" if change == "redirect" else "a"
+        store.redirect(first.id, "swarm", destination, "moved", "a")
+        expected = ([], [first.id]) if destination == "b" else ([first.id], [])
+    assert [item.id for item in store.open_items("a")] == expected[0]
+    assert [item.id for item in store.open_items("b")] == expected[1]
+    for address in ("a", "b"):
+        assert int(store.redis.get(store.key("open-size", address))) == store.redis.zcard(store.key("address", address))
+
+
+@pytest.mark.parametrize("count", [1, 5])
+def test_warm_index_reads_all_open_mail_and_rebuilds_when_its_size_stamp_is_missing(store, count):
+    items = [store.send("sender", "receiver", str(index)) for index in range(count)]
+    expected = [item.id for item in items]
+    assert [item.id for item in store.open_items("receiver")] == expected
+    assert [item.id for item in store.open_items("receiver")] == expected
+    store.redis.delete(store.key("open-size", "receiver"))
+    store.redis.delete(store.key("open", "receiver"))
+    assert [item.id for item in store.open_items("receiver")] == expected
+
+
+def test_legacy_redirect_rebuild_removes_stale_open_pointers(store):
+    item = store.send("sender", "old", "work")
+    store.open_items("old")
+    store.redirect(item.id, "swarm", "new", "moved", "old")
+    store.redis.zadd(store.key("open", "old"), {item.id: item.created_at})
+    store.redis.incr(store.key("open-size", "old"))
+    assert store.open_items("old") == []
+    assert store.redis.zcard(store.key("open", "old")) == 0
+    assert [entry.id for entry in store.open_items("new")] == [item.id]
+
+
+def test_cleanup_reads_legacy_addresses_and_index_members_without_size_stamps(store):
+    item = store.send("sender", "legacy", "work")
+    store.redis.delete(store.key("open", "legacy"), store.key("open-size", "legacy"))
+    store.open_items("empty")
+    store.redis.delete(store.key("open-size", "empty"))
+    keys, memberships = store.keys_for(lambda address: True)
+    expected = {
+        store.key(kind, address)
+        for address in ("empty", "legacy")
+        for kind in ("address", "pending", "open", "open-size", "sequence")
+    }
+    expected.update({store.key("item", item.id), store.key("history", item.id)})
+    assert set(keys) == expected
+    assert memberships == {
+        store.key("waiting"): ["legacy"],
+        store.key("open-indexed"): ["empty"],
+        store.key("wake-outbox"): [item.id],
+    }
+
+
+def test_new_withdrawal_does_not_read_closed_mail_on_the_next_sweep(store, monkeypatch):
+    item = store.send("sender", "receiver", "work")
+    store.open_items("receiver")
+    assert store.withdraw(item.id, "swarm", "receiver exited", "receiver").state == "cancelled"
+    seen = []
+    get = store.get
+
+    def read(item_id):
+        seen.append(item_id)
+        return get(item_id)
+
+    monkeypatch.setattr(store, "get", read)
+    assert store.open_items("receiver") == []
+    assert seen == []
+
+
+def test_open_index_names_a_missing_item(store):
+    item = store.send("sender", "receiver", "work")
+    store.redis.delete(store.key("item", item.id))
+    with pytest.raises(InboxError) as error:
+        store.open_items("receiver")
+    assert str(error.value) == f"no message {item.id}"
+
+
+def test_quiet_names_only_indexed_addresses_without_open_mail(store):
+    done = store.send("alice", "gone", "finished")
+    store.close(done.id, "gone", "done", "finished")
+    store.open_items("gone")
+    store.open_items("empty")
+    store.send("alice", "late", "contract")
+    store.open_items("late")
+    store.send("alice", "never-indexed", "contract")
+    unflagged = store.send("alice", "unflagged", "finished")
+    store.close(unflagged.id, "unflagged", "done", "finished")
+    store.open_items("sizeless")
+    store.redis.delete(store.key("open-size", "sizeless"))
+    addresses = ["gone", "empty", "late", "never-indexed", "unknown", "unflagged", "sizeless"]
+    assert store.quiet(addresses) == {"gone", "empty", "unknown", "sizeless"}
+    store.send("alice", "empty", "arrived after the index")
+    assert store.quiet(["empty"]) == set()
+    assert store.quiet([]) == set()
+
+
+def test_an_address_with_no_items_and_no_index_is_quiet(store):
+    assert store.quiet(["never-touched"]) == {"never-touched"}
+
+
+def test_a_never_indexed_address_holding_an_open_item_is_not_quiet(store):
+    store.send("alice", "never-indexed", "contract")
+    assert store.quiet(["never-indexed"]) == set()
+
+
+def test_quiet_reads_in_one_pipeline_without_a_transaction(store, monkeypatch):
+    opened, pipeline = [], store.redis.pipeline
+    monkeypatch.setattr(store.redis, "pipeline", lambda **kw: opened.append(kw) or pipeline(**kw))
+    store.quiet(["a", "b"])
+    assert opened == [{"transaction": False}]

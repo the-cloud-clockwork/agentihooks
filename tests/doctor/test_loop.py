@@ -8,7 +8,6 @@ from scripts.swarm.health.findings import MINUTE_MS, Finding
 from scripts.swarm.store import RedisStore, SwarmConfig, SwarmError
 from scripts.swarm_ledger import ledger_comments, ledger_kinds
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
 WATCHED, DOCTOR = "watch", "watch-doctor"
 T0 = 1_000 * MINUTE_MS
 TASK_ID = re.compile(r"^[A-Za-z0-9][\w.-]{0,63}$")
@@ -36,7 +35,7 @@ def judged(value):
 @pytest.mark.parametrize("value", ["established", "early-real"])
 @pytest.mark.parametrize("fix", ["code", "tune"])
 def test_a_judged_real_finding_becomes_a_troubleshoot_task_then_a_fix_naming_its_number_and_measure(value, fix):
-    cause, fixed = loop.fix_tasks(WATCHED, *judged(value), fix)
+    cause, fixed = loop.fix_tasks(WATCHED, *judged(value), fix, ())
     measure = f"agentihooks doctor {WATCHED} measure {STALE.id}"
     assert (cause["kind"], fixed["kind"]) == ("troubleshoot", fix)
     assert fixed["depends_on"] == [cause["task"]]
@@ -55,18 +54,79 @@ def test_a_judged_real_finding_becomes_a_troubleshoot_task_then_a_fix_naming_its
 def test_a_finding_not_judged_real_never_becomes_a_task(verdict):
     finding, judgment = judged(verdict or "established")
     with pytest.raises(SwarmError, match="established or early-real"):
-        loop.fix_tasks(WATCHED, finding, judgment if verdict else None, "code")
+        loop.fix_tasks(WATCHED, finding, judgment if verdict else None, "code", ())
 
 
 def test_a_fix_task_is_code_or_tune():
     with pytest.raises(SwarmError, match="code or tune"):
-        loop.fix_tasks(WATCHED, *judged("established"), "ops")
+        loop.fix_tasks(WATCHED, *judged("established"), "ops", ())
 
 
 def test_the_same_finding_always_gives_the_same_task_ids():
-    first = [t["task"] for t in loop.fix_tasks(WATCHED, *judged("established"), "code")]
-    again = [t["task"] for t in loop.fix_tasks(WATCHED, *judged("early-real"), "code")]
+    first = [t["task"] for t in loop.fix_tasks(WATCHED, *judged("established"), "code", ())]
+    again = [t["task"] for t in loop.fix_tasks(WATCHED, *judged("early-real"), "code", ())]
     assert first == again
+
+
+def pair(fix="code", done=True):
+    return [{"id": t["task"], "done": done} for t in loop.fix_tasks(WATCHED, *judged("established"), fix, ())]
+
+
+@pytest.mark.parametrize("earlier", ["code", "tune"])
+def test_a_returned_finding_whose_earlier_pair_is_done_gets_the_next_free_pair_linking_the_earlier(earlier):
+    done = pair(earlier)
+    cause, fixed = loop.fix_tasks(WATCHED, *judged("established"), "code", done)
+    stem = done[0]["id"].removesuffix("-cause")
+    assert (cause["task"], fixed["task"]) == (f"{stem}-2-cause", f"{stem}-2-code")
+    assert fixed["depends_on"] == [cause["task"]]
+    assert all(t["id"] in cause["description"] for t in done)
+    for task in (cause, fixed):
+        assert TASK_ID.match(task["task"])
+        ledger_kinds.check(task)
+
+
+def test_each_done_pair_moves_the_new_pair_to_the_next_free_ids():
+    first = pair()
+    second = [{"id": t["task"], "done": True} for t in loop.fix_tasks(WATCHED, *judged("established"), "code", first)]
+    cause, fixed = loop.fix_tasks(WATCHED, *judged("established"), "tune", first + second)
+    stem = first[0]["id"].removesuffix("-cause")
+    assert (cause["task"], fixed["task"]) == (f"{stem}-3-cause", f"{stem}-3-tune")
+    assert all(t["id"] in cause["description"] for t in second)
+    assert not any(t["id"] in cause["description"] for t in first)
+
+
+def test_a_finding_with_no_earlier_pair_names_none_in_its_description():
+    cause, _ = loop.fix_tasks(WATCHED, *judged("established"), "code", [{"id": "t1", "done": True}])
+    assert cause["task"] == pair()[0]["id"]
+    assert "earlier" not in cause["description"].lower()
+
+
+@pytest.mark.parametrize("earlier", ["code", "tune"])
+@pytest.mark.parametrize("open_part", [0, 1])
+def test_a_finding_whose_pair_is_still_open_is_refused(open_part, earlier):
+    tasks = pair(earlier)
+    tasks[open_part]["done"] = False
+    with pytest.raises(SwarmError, match="still open"):
+        loop.fix_tasks(WATCHED, *judged("established"), "code", tasks)
+
+
+def test_the_pair_texts_name_the_finding_stem_evidence_and_earlier_pair_exactly():
+    finding, judgment = judged("established")
+    finding = {**finding, "evidence": ["task t1", "task t2"]}
+    stem = "fx-44b64fbe"
+    cause, _ = loop.fix_tasks(WATCHED, finding, judgment, "code", ())
+    text = (
+        f"Doctor finding {STALE.id}: {STALE.summary}. Threshold: {STALE.threshold}. "
+        "Evidence: task t1; task t2. Show the root cause with evidence, then fix it or file it."
+    )
+    assert (cause["task"], cause["description"]) == (f"{stem}-cause", text)
+    done = [{"id": f"{stem}-cause", "done": True}, {"id": f"{stem}-code", "done": True}]
+    cause, _ = loop.fix_tasks(WATCHED, finding, judgment, "tune", done)
+    assert cause["description"] == f"{text} Earlier pair {stem}-cause and {stem}-code is done; read its proof first."
+    opened = [{**task, "done": False} for task in done]
+    with pytest.raises(SwarmError) as refused:
+        loop.fix_tasks(WATCHED, finding, judgment, "tune", opened)
+    assert str(refused.value) == f"finding {STALE.id} already has tasks {stem}-cause and {stem}-code still open"
 
 
 def step(store, at, found=(), closed=None, environ=None):
@@ -214,3 +274,82 @@ def test_a_judged_finding_whose_only_growth_is_age_stays_judged_until_its_eviden
     step(store, T0 + 100 * MINUTE_MS, [aged(110, "from a to b", "1 wake")], closed=[])
     [_, again] = master_items(store)
     assert f"{aged(0).id}: pending for 110 minutes. It came back after a false-positive verdict." in again.text
+
+
+@pytest.mark.parametrize("value", ["false-positive", "established"])
+@pytest.mark.parametrize("minutes", [10, 100])
+def test_detector_wording_changes_do_not_return_judged_findings(store, value, minutes):
+    before = [
+        Finding("inbox past window", f"item-{i}", "pending", ("0 wakes",), "window", 10, evidence_identity=(0, 0))
+        for i in range(19)
+    ]
+    assert len(loop.record(store, DOCTOR, before, T0, MINUTE_MS)) == 19
+    for finding in before:
+        loop.verdicts(store, DOCTOR).judge(finding.id, value, "known", "master", T0)
+    after = [
+        Finding(
+            "inbox past window",
+            f"item-{i}",
+            "unread delivery",
+            ("recipient has no live occupant", "no wakes"),
+            "window",
+            minutes,
+            evidence_identity=(0, 0),
+        )
+        for i in range(19)
+    ]
+    assert loop.record(store, DOCTOR, after, T0 + 90 * MINUTE_MS, MINUTE_MS) == []
+
+
+def test_new_evidence_identity_returns_a_judged_finding_even_with_unchanged_display(store):
+    from scripts.swarm.health.verdicts import VerdictStore
+
+    judgments = VerdictStore(store.redis, loop.verdicts(store, DOCTOR).key)
+    first = Finding("inbox past window", "item", "pending", ("same display",), "window", 10, evidence_identity=(0,))
+    loop.record(store, DOCTOR, [first], T0, MINUTE_MS)
+    judgments.judge(first.id, "established", "known", "master", T0)
+    changed = Finding("inbox past window", "item", "pending", ("same display",), "window", 11, evidence_identity=(1,))
+    assert loop.record(store, DOCTOR, [changed], T0, MINUTE_MS) == []
+    [returned] = loop.record(store, DOCTOR, [changed], T0 + MINUTE_MS, MINUTE_MS)
+    assert returned["id"] == first.id
+    assert returned["verdict"]["value"] == "established"
+    assert loop.record(store, DOCTOR, [changed], T0 + 2 * MINUTE_MS, MINUTE_MS) == []
+
+
+def test_a_legacy_verdict_adopts_evidence_identity_without_returning_on_new_wording(store):
+    first = Finding("inbox past window", "item", "pending", ("old wording",), "window", 10)
+    loop.record(store, DOCTOR, [first], T0, MINUTE_MS)
+    loop.verdicts(store, DOCTOR).judge(first.id, "false-positive", "known", "master", T0)
+    changed = Finding("inbox past window", "item", "pending", ("new wording",), "window", 100, evidence_identity=(0,))
+    assert loop.record(store, DOCTOR, [changed], T0 + MINUTE_MS, MINUTE_MS) == []
+    _, verdict = loop.judged(store, DOCTOR, first.id)
+    assert verdict["evidence_identity"] == [0]
+    assert verdict["measure"] == 10
+    assert verdict["at"] == T0
+    changed = Finding("inbox past window", "item", "pending", ("new wording",), "window", 101, evidence_identity=(1,))
+    assert len(loop.record(store, DOCTOR, [changed], T0 + 2 * MINUTE_MS, MINUTE_MS)) == 1
+
+
+def test_inbox_wording_does_not_return_a_finding_but_a_new_wake_does(store, monkeypatch):
+    from scripts.doctor import inbox
+
+    item = {
+        "id": "item",
+        "sender": "master",
+        "address": "operator",
+        "text": "work",
+        "state": "pending",
+        "created_at": T0 - 10 * MINUTE_MS,
+        "history": [],
+    }
+    monkeypatch.setattr(inbox, "_recipient", lambda *args: "old recipient wording")
+    first = inbox.past_window([item], T0, MINUTE_MS)
+    assert len(loop.record(store, DOCTOR, first, T0, MINUTE_MS)) == 1
+    loop.verdicts(store, DOCTOR).judge(first[0].id, "false-positive", "known", "master", T0)
+    monkeypatch.setattr(inbox, "_recipient", lambda *args: "recipient has no live occupant")
+    after = inbox.past_window([item], T0 + 90 * MINUTE_MS, MINUTE_MS)
+    assert after[0].evidence != first[0].evidence
+    assert loop.record(store, DOCTOR, after, T0 + 90 * MINUTE_MS, MINUTE_MS) == []
+    item["history"].append({"event": "woken", "at": T0 + 90 * MINUTE_MS})
+    wake = inbox.past_window([item], T0 + 91 * MINUTE_MS, MINUTE_MS)
+    assert len(loop.record(store, DOCTOR, wake, T0 + 91 * MINUTE_MS, MINUTE_MS)) == 1

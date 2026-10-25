@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/ledger_workspace.py:scripts.swarm_ledger.ledger_workspace.x_rewrite__mutmut_13:db2e21ac01eac5f7c1c3a9bdc01f8a785380137bda0f2745414e11f993bd5644": {
+    "reader": "Standards",
+    "reason": "Equivalent encoding alias: utf-8 and UTF-8 resolve to the identical Python CodecInfo and produce identical steering bytes, verified independently by codec identity and non-ASCII byte equality. CI run 37711290169."
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/api/mutations.py:scripts.swarm_ledger.api.mutations.x\u01c1GuardedOperations\u01c1__init____mutmut_4:a5857935580f13a7f8614c7f472409a727bc2cdb5dc9022cad3d092a856b32b1": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "Source evidence: the complete GuardedOperations class from parent Serena export shows checked is initialized once, read only by if not self.checked in apply, and set True at the end of check. Both False and None take that same initial branch; all later reads see identical True. No response, receipt, state, guard or domain argument includes checked. The changed internal initialization preserves every reachable transport result."
+  }
+}

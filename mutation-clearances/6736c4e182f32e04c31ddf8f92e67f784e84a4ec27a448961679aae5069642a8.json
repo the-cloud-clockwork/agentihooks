@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/api/resources.py:scripts.swarm_ledger.api.resources.x_revision__mutmut_5:1c143cfd64f6fc6fc1eeb1ef9edaab180de51d0fce6e5599b8b4ef525d5abf38": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "Source evidence: revision differs only in json.dumps ensure_ascii=False versus None. Both flags select the JSON encoders false branch, retaining the exact unescaped Unicode encoder. sort_keys, separators, input, UTF-8 encoding and sha256 are unchanged. Therefore canonical bytes and digest remain identical for every JSON-serializable input; failed serializations also retain their errors."
+  }
+}

@@ -1,0 +1,153 @@
+{
+  "base": "bc0fe91d54224ea70e81fa20956c21da506ea940",
+  "outputs": {
+    "architecture": [
+      {
+        "result": {
+          "operation": "fixture-inventory-1",
+          "revision": 1,
+          "accepted": [
+            "embedding-backlog"
+          ],
+          "rejected": [
+            {
+              "id": "duplicate-dispatcher",
+              "name": "Kubernetes task dispatcher",
+              "reason": "inserts another coding-task queue beside Swarm reconciliation controller (AD-05)"
+            }
+          ],
+          "unresolved": [],
+          "unowned": [],
+          "measurements": {
+            "architecture_unowned_components": 0
+          }
+        },
+        "bytes": "bebe718660b34e62be1a9928ac369c06be93bd7d13a90cc30da20d33a2b6eff4",
+        "files": [
+          "record.json"
+        ]
+      },
+      {
+        "result": {
+          "operation": "fixture-inventory-1",
+          "revision": 1,
+          "accepted": [
+            "embedding-backlog"
+          ],
+          "rejected": [
+            {
+              "id": "duplicate-dispatcher",
+              "name": "Kubernetes task dispatcher",
+              "reason": "inserts another coding-task queue beside Swarm reconciliation controller (AD-05)"
+            }
+          ],
+          "unresolved": [],
+          "unowned": [],
+          "measurements": {
+            "architecture_unowned_components": 0
+          }
+        },
+        "bytes": "bebe718660b34e62be1a9928ac369c06be93bd7d13a90cc30da20d33a2b6eff4",
+        "files": [
+          "record.json"
+        ]
+      },
+      {
+        "result": {
+          "error": "ArchitectureError",
+          "message": "operation fixture-inventory-1 was already recorded with different content"
+        },
+        "bytes": "bebe718660b34e62be1a9928ac369c06be93bd7d13a90cc30da20d33a2b6eff4",
+        "files": [
+          "record.json"
+        ]
+      },
+      {
+        "result": {
+          "operation": "rollback",
+          "revision": 2,
+          "rolled_back": [
+            "Brain arc embedding backlog"
+          ],
+          "restored": []
+        },
+        "bytes": "a1b51bcad556baf65297d294ccdc113263857d3b69c53b56a0deba8f94b753e2",
+        "files": [
+          "record.json"
+        ]
+      },
+      {
+        "result": {
+          "operation": "rollback",
+          "revision": 2,
+          "rolled_back": [
+            "Brain arc embedding backlog"
+          ],
+          "restored": []
+        },
+        "bytes": "a1b51bcad556baf65297d294ccdc113263857d3b69c53b56a0deba8f94b753e2",
+        "files": [
+          "record.json"
+        ]
+      }
+    ],
+    "evidence-index": [
+      {
+        "result": {
+          "operation": "replay",
+          "revision": 2,
+          "package": "SV2-FND-04",
+          "claim": "open",
+          "added": []
+        },
+        "bytes": "fc88c9f5473e285d29f8be9cbd4e19fde878c3552e1f780d25ae768d0e98fc9c",
+        "files": [
+          "record.json"
+        ]
+      },
+      {
+        "result": {
+          "operation": "replay",
+          "revision": 2,
+          "package": "SV2-FND-04",
+          "claim": "open",
+          "added": []
+        },
+        "bytes": "fc88c9f5473e285d29f8be9cbd4e19fde878c3552e1f780d25ae768d0e98fc9c",
+        "files": [
+          "record.json"
+        ]
+      },
+      {
+        "result": {
+          "error": "EvidenceError",
+          "message": "operation replay was already recorded with different content"
+        },
+        "bytes": "fc88c9f5473e285d29f8be9cbd4e19fde878c3552e1f780d25ae768d0e98fc9c",
+        "files": [
+          "record.json"
+        ]
+      },
+      {
+        "result": {
+          "error": "EvidenceError",
+          "message": "backup at revision 1 is older than the registry at revision 2"
+        },
+        "bytes": "fc88c9f5473e285d29f8be9cbd4e19fde878c3552e1f780d25ae768d0e98fc9c",
+        "files": [
+          "record.json"
+        ]
+      },
+      {
+        "result": {
+          "error": "EvidenceError",
+          "message": "SV2-FND-04 is not claimed complete"
+        },
+        "bytes": "fc88c9f5473e285d29f8be9cbd4e19fde878c3552e1f780d25ae768d0e98fc9c",
+        "files": [
+          "record.json"
+        ]
+      }
+    ]
+  }
+}

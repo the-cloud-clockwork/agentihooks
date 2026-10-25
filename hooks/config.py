@@ -5,6 +5,9 @@ import re
 import sys
 from pathlib import Path
 
+from scripts import gh_config
+from scripts.swarm import brain_binding
+
 # A name outside this shape cannot be a shell variable, and a mistyped line can
 # put a secret in the name, so such a line is reported by position only.
 _VALID_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
@@ -187,7 +190,7 @@ def _load_brain_env(*, override_file_owned: bool = False) -> None:
     .env already set is left alone, so this is a default, not an override.
     """
     env_file = _brain_env_file()
-    if not env_file.is_file():
+    if os.environ.get(brain_binding.VARIABLE) or not env_file.is_file():
         return
     try:
         lines = env_file.read_text(encoding="utf-8").splitlines()
@@ -232,7 +235,7 @@ def _load_user_env(*, override_file_owned: bool = False) -> None:
     _pass_keys: set[str] = set()
 
     # 1. Main .env first
-    blocked = set(_BRAIN_KEYS_FROM_KERNEL)
+    blocked = set(_BRAIN_KEYS_FROM_KERNEL) | {"SWARM_SECRET"}
     multiline = _parse_env_file(
         _home / ".env",
         override_file_owned=override_file_owned,
@@ -291,9 +294,23 @@ def _env_files_fingerprint() -> tuple:
     return tuple(sorted(stamps))
 
 
+def _guard_swarm_brain() -> None:
+    if not os.environ.get(brain_binding.VARIABLE):
+        return
+    os.environ["BRAIN_SOURCE_TYPE"] = "none"
+    if not brain_binding.audience(os.environ):
+        for key in ("BRAIN_URL", "BRAIN_HTTP_TOKEN", "KB_ROUTER_TOKEN"):
+            os.environ.pop(key, None)
+        os.environ["BRAIN_ENABLED"] = os.environ["BRAIN_WRITER_ENABLED"] = "false"
+
+
 _load_user_env()
 _load_brain_env()
+_guard_swarm_brain()
 _ENV_FINGERPRINT = _env_files_fingerprint()
+# The scripts package pin ran before the env files above could set XDG_CONFIG_HOME.
+gh_config.pin(os.environ)
+gh_config.persist(os.environ)
 
 
 def reload_brain_env(force: bool = False) -> dict:
@@ -335,6 +352,7 @@ def reload_brain_env(force: bool = False) -> dict:
 
     _load_user_env(override_file_owned=True)
     _load_brain_env(override_file_owned=True)
+    _guard_swarm_brain()
 
     _feed_dir = Path(AGENTIHOOKS_HOME) / "brain-feed"
     _default = "true" if (_brain_http_configured() or (_feed_dir.is_dir() and any(_feed_dir.glob("*.md")))) else "false"
@@ -412,6 +430,9 @@ LOG_USE_COLORS = _env_bool("LOG_USE_COLORS", "true")
 # Captures session digest and stores it via MemoryStore
 MEMORY_AUTO_SAVE = _env_bool("MEMORY_AUTO_SAVE", "true")
 
+# The front door master of every swarm launches on the one claude ai master login
+MASTER_CLAUDE_LOGIN = _env_bool("AGENTIHOOKS_MASTER_CLAUDE_LOGIN", "false")
+
 # =============================================================================
 # SECRETS SCANNING MODE
 # =============================================================================
@@ -483,7 +504,10 @@ RETRY_BREAKER_TTL = int(os.getenv("RETRY_BREAKER_TTL", "3600"))
 KUBECTL_MUTATION_GUARD_ENABLED = _env_bool("KUBECTL_MUTATION_GUARD_ENABLED", "true")
 
 # Python in a linked worktree is edited through Serena (Development Manifesto §7).
-SERENA_EDIT_GUARD_ENABLED = _env_bool("SERENA_EDIT_GUARD_ENABLED", "true")
+# AGENTIHOOKS_SERENA=false is the one off switch for every session or machine: the
+# guard lets every edit through and injects no Serena directive. Unset or any other
+# value keeps it on.
+SERENA_EDIT_GUARD_ENABLED = os.getenv("AGENTIHOOKS_SERENA", "true") != "false"
 
 # =============================================================================
 # BRAIN ADAPTER
@@ -550,10 +574,11 @@ QUOTA_USAGE_STALE_SEC: int = int(os.getenv("QUOTA_USAGE_STALE_SEC", "300"))
 # Quota policy — what a session does when its own quota runs out (hooks/context/quota_policy.py).
 # Handoff when 7d used >= WEEK_PCT or 5h used >= 5H_PCT; a target account needs MIN_LEFT% routing
 # left; a spent 5h window with >= WAIT_MIN_WEEK_LEFT% of the week left waits for the reset.
-# AGENTIHOOKS_MAX_SESSIONS_PER_ACCOUNT (default 3) is read by hooks/context/account_sessions.py.
 QUOTA_POLICY_ENABLED = _env_bool("QUOTA_POLICY_ENABLED", "true")
 QUOTA_HANDOFF_WEEK_PCT: float = float(os.getenv("AGENTIHOOKS_HANDOFF_WEEK_PCT", "98"))
 QUOTA_HANDOFF_5H_PCT: float = float(os.getenv("AGENTIHOOKS_HANDOFF_5H_PCT", "99"))
+QUOTA_WARN_WEEK_PCT: float = float(os.getenv("AGENTIHOOKS_HANDOFF_WARN_WEEK_PCT", "90"))
+QUOTA_WARN_5H_PCT: float = float(os.getenv("AGENTIHOOKS_HANDOFF_WARN_5H_PCT", "95"))
 QUOTA_HANDOFF_MIN_LEFT: float = float(os.getenv("AGENTIHOOKS_HANDOFF_MIN_LEFT", "20"))
 QUOTA_WAIT_MIN_WEEK_LEFT: float = float(os.getenv("AGENTIHOOKS_WAIT_MIN_WEEK_LEFT", "10"))
 QUOTA_RESERVE_ACCOUNTS: frozenset[str] = frozenset(
@@ -658,6 +683,8 @@ BROADCAST_MAX_PER_PROMPT: int = int(os.getenv("BROADCAST_MAX_PER_PROMPT", "8"))
 # envelope headroom.
 BROADCAST_MAX_BYTES_PRETOOL: int = int(os.getenv("BROADCAST_MAX_BYTES_PRETOOL", "0"))
 BROADCAST_MAX_BYTES_PROMPT: int = int(os.getenv("BROADCAST_MAX_BYTES_PROMPT", "0"))
+# Characters one Claude hook event may inject in total; 0 turns the budget off.
+HOOK_INJECTION_MAX_CHARS: int = int(os.getenv("HOOK_INJECTION_MAX_CHARS", "9000"))
 BROADCAST_PERSISTENT_THROTTLE = _env_bool("BROADCAST_PERSISTENT_THROTTLE", "true")
 BROADCAST_DELIVERY_STATE_FILE: str = os.getenv(
     "BROADCAST_DELIVERY_STATE_FILE",
@@ -713,14 +740,57 @@ CONTROLS_BYPASS_ENABLED: bool = _env_bool("CONTROLS_BYPASS_ENABLED", "true")
 CI_MANIFESTO_ENABLED = _env_bool("CI_MANIFESTO_ENABLED", "true")
 
 
+def manifesto_name(name: str) -> str:
+    return Path(name.strip()).stem.casefold()
+
+
 # Manifesto resolution loads every Markdown manifesto in deterministic filename
 # order. CI_MANIFESTO_PATH remains a single-file compatibility override.
 def _manifesto_skip_names() -> set[str]:
     raw = os.getenv("AGENTIHOOKS_SKIP_MANIFESTO", "")
-    return {Path(name.strip()).stem.casefold() for name in raw.split(",") if name.strip()}
+    return {manifesto_name(name) for name in raw.split(",") if name.strip()}
 
 
-def _resolve_manifesto_paths(bundle_root: str | Path | None = None) -> list[str]:
+_FRONT_MATTER = re.compile(r"\A---[ \t]*\n(.*?)^---[ \t]*(?:\n|\Z)", re.S | re.M)
+
+
+def _manifesto_front(text: str) -> tuple[dict, str]:
+    import yaml
+
+    match = _FRONT_MATTER.match(text)
+    if not match:
+        return {}, text
+    try:
+        data = yaml.safe_load(match.group(1))
+    except yaml.YAMLError:
+        return {}, text
+    return (data, text[match.end() :].lstrip("\n")) if isinstance(data, dict) else ({}, text)
+
+
+def manifesto_body(path: str | Path) -> str:
+    return _manifesto_front(Path(path).read_text(encoding="utf-8"))[1]
+
+
+def manifesto_roles(path: str | Path) -> list[str] | None:
+    roles = _manifesto_front(Path(path).read_text(encoding="utf-8"))[0].get("roles")
+    if roles is None:
+        return None
+    return [str(role).casefold() for role in (roles if isinstance(roles, list) else [roles])]
+
+
+def _receives(path: Path, role: str | None, choice: dict[str, bool]) -> bool:
+    picked = choice.get(manifesto_name(path.name))
+    if picked is not None:
+        return picked
+    if role is None:
+        return True
+    roles = manifesto_roles(path)
+    return roles is None or role.casefold() in roles
+
+
+def _resolve_manifesto_paths(
+    bundle_root: str | Path | None = None, role: str | None = None, choice: dict[str, bool] | None = None
+) -> list[str]:
     explicit = os.getenv("CI_MANIFESTO_PATH")
     if explicit:
         path = Path(explicit).expanduser()
@@ -739,7 +809,9 @@ def _resolve_manifesto_paths(bundle_root: str | Path | None = None) -> list[str]
         return [
             str(path)
             for path in sorted(directory.glob("*.md"), key=lambda item: item.name.casefold())
-            if path.name.casefold() != "readme.md" and path.stem.casefold() not in skip
+            if path.name.casefold() != "readme.md"
+            and path.stem.casefold() not in skip
+            and _receives(path, role, choice or {})
         ]
     legacy = Path.home() / "dev" / "tcc-ecosystem" / "documents" / "anton" / "ANTON-CORE-CI-MANIFESTO.md"
     return [str(legacy)] if legacy.is_file() and legacy.stem.casefold() not in skip else []
@@ -767,7 +839,7 @@ CI_MANIFESTO_RUNTIME_INJECT: bool = _env_bool("CI_MANIFESTO_RUNTIME_INJECT", "fa
 CI_MANIFESTO_REFRESH_EVERY: int = int(os.getenv("CI_MANIFESTO_REFRESH_EVERY", "8"))
 
 # Auto dev-switch — at SessionStart, if cwd is on main/master, switch to dev.
-AUTO_DEV_SWITCH_ENABLED = _env_bool("AUTO_DEV_SWITCH_ENABLED", "true")
+AGENTIHOOKS_FORCE_DEV_BRANCH = _env_bool("AGENTIHOOKS_FORCE_DEV_BRANCH", "false")
 
 # =============================================================================
 # OTEL — Custom hook telemetry (Layer 2)

@@ -1,0 +1,6 @@
+{
+  "hooks/observability/agent_trace.py:hooks.observability.agent_trace.x__batch_accepted__mutmut_48:a62189ccfa77b0caa74f97d33473bb09510b70755310d76aa4447d09da3fff62": {
+    "reader": "Standards reader",
+    "reason": "Both absent-header defaults exclude the protobuf substring and select the same JSON acknowledgement branch."
+  }
+}

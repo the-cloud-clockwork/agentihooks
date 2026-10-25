@@ -1,0 +1,6 @@
+{
+  "hooks/observability/agent_trace.py:hooks.observability.agent_trace.x__batch_accepted__mutmut_26:c5af9b4c0b57e22d330bf31c5c125997950c723a1bfb613090e48269adeaa235": {
+    "reader": "Standards reader",
+    "reason": "Deployed Langfuse v3.163.0 traces route lowercases Content-Type before protobuf matching; APPLICATION/X-PROTOBUF and application/x-protobuf select identical decoding. Primary tagged route source and deployed version proof are recorded in final-mutation-symbols.md."
+  }
+}

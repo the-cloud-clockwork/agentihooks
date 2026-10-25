@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/ledger_workspace.py:scripts.swarm_ledger.ledger_workspace.x_scaffold__mutmut_31:43500b49967aa73a3494cc3f3ccb1eb29f575a696a113e8dc682f7707d944bc7": {
+    "reader": "Standards",
+    "reason": "UTF-8 and utf-8 resolve to the same codec and produce identical bytes."
+  }
+}

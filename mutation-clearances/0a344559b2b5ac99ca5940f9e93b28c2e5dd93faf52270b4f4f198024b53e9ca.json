@@ -1,0 +1,6 @@
+{
+  "scripts/recall/ledger.py:scripts.recall.ledger.x_extract_ledger__mutmut_23:f6f64d1cef7b75d3e28876878f3be8e5fcf8e290cd857162be474fac375ffb94": {
+    "reader": "standards_reader",
+    "reason": "Equivalent: the default changes only a missing root overview. _body excludes both None and the empty string through item.get(field); overview is never used elsewhere in constructing the root record, so all emitted records are identical."
+  }
+}

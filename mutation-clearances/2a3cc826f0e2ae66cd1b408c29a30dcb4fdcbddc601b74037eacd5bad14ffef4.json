@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_v2/accounts.py:scripts.swarm_v2.accounts.x_stored_accounts__mutmut_10:868cafd9d7793807d1027c707b9e4313806f82f8ac3c2314bc42120c44615559": {
+    "reader": "Standards",
+    "reason": "COUNT 1001 preserves exhaustive discovery, findings, and comparable batching; exact COUNT 1000 is not contractual."
+  }
+}

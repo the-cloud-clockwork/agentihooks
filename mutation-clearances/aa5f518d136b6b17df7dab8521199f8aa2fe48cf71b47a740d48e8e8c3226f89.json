@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_v2/runtime/commands.py:scripts.swarm_v2.runtime.commands.x\u01c1Commands\u01c1execute__mutmut_6:12fc140321511a796eb15d31e5e9f9d912c91f23cf3730915a095ceeb993ff51": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "The initial agent variable is never read on refused or invalid branches and is overwritten by next(..., None) on the only branch that uses it."
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "d40a89f77f6f7968bbe7e787f101c1b8f8419d6973cc4262c486571fc58677ba": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "Only the fallback in the internal synthetic validation dictionary changes from empty to XXXX. If the header exists the fallback is unused. If absent both fallback strings satisfy the unchanged string/maxLength200 rule. Neither fallback is forwarded to the upload handler, which receives exactly the same handler, slug and path and reads the original headers. Thus status, delegation and response are unchanged for every HTTP request."
+  }
+}

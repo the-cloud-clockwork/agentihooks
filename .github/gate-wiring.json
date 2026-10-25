@@ -1,0 +1,21 @@
+{
+  "not_gates": {
+    "test.yml/test-summary": {
+      "reason": "Reports current run test counts after the test producers settle without grading required results.",
+      "owner": "ci-1@rig-grade-swarm-doctor",
+      "expires": "2027-04-20"
+    }
+  },
+  "outside_gate": {
+    "equivalence.yml/ledger-equivalence": {
+      "reason": "Replays ledger storage and pages on every pull request that touches the ledger package, its tests or this workflow; the equivalence gate task wires it into the gate.",
+      "owner": "ci-1@rig-grade-swarm",
+      "expires": "2026-11-08"
+    },
+    "gate-protected.yml/grade": {
+      "reason": "Grades the head's Gate Required wiring from the base branch on pull_request_target and reports its verdict as the Gate Required status, so the aggregator it guards cannot need it.",
+      "owner": "ci-2@rig-grade-swarm",
+      "expires": "2027-04-09"
+    }
+  }
+}

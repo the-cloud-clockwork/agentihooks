@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/plan_ranges.py:scripts.swarm_ledger.plan_ranges.x__owner__mutmut_15:0ede8167d1e762ddf6ecd3deb6cf6185325d3b50f5d1e7c48eda06e7ee5585f8": {
+    "reader": "Standards reader of pull request 1750",
+    "reason": "Equivalent. _heading caps depth at 6, and slice_lines uses the level only in 0 < depth <= level, so 6 and 7 accept the same headings."
+  }
+}

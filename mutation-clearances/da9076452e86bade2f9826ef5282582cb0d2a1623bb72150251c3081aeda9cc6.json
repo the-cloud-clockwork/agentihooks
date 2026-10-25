@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_v2/runtime/commands.py:scripts.swarm_v2.runtime.commands.x\u01c1Commands\u01c1_audit__mutmut_34:a2600f183f2689e0c18e3d173f9f5df56afcb83914fa912afc9ed61488b14eb1": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "Redis HashCommands.hincrby amount defaults to 1; dropping explicit 1 sends the identical HINCRBY command and count. Standards verified the installed signature."
+  }
+}

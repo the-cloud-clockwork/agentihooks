@@ -1,7 +1,15 @@
 import ast
 from pathlib import Path
 
+import pytest
+
 from scripts.ci_mutation.__main__ import main
+
+
+@pytest.fixture(autouse=True)
+def plugin_autoload_restored(monkeypatch):
+    monkeypatch.setenv("PYTEST_DISABLE_PLUGIN_AUTOLOAD", "")
+    monkeypatch.delenv("PYTEST_DISABLE_PLUGIN_AUTOLOAD")
 
 
 def test_cli_uses_requested_revisions_budget_output_and_exit_code(tmp_path, monkeypatch, capsys):
@@ -12,8 +20,8 @@ def test_cli_uses_requested_revisions_budget_output_and_exit_code(tmp_path, monk
         calls.append((root, base, head))
         return {"hooks/sample.py": {2}}
 
-    def gate(root, changes, output, budget):
-        calls.append((root, changes, output, budget))
+    def gate(root, changes, output, budget, shard, stats):
+        calls.append((root, changes, output, budget, shard, stats))
         return {"failed": True}
 
     (tmp_path / "hooks").mkdir()
@@ -22,11 +30,31 @@ def test_cli_uses_requested_revisions_budget_output_and_exit_code(tmp_path, monk
     monkeypatch.setattr("scripts.ci_mutation.__main__.discover_changes", discover)
     monkeypatch.setattr("scripts.ci_mutation.__main__.run_gate", gate)
     monkeypatch.setattr(
-        "sys.argv", ["gate", "--base", "base", "--head", "head", "--budget", "13", "--output", "evidence"]
+        "sys.argv",
+        [
+            "gate",
+            "--base",
+            "base",
+            "--head",
+            "head",
+            "--budget",
+            "13",
+            "--output",
+            "evidence",
+            "--shard",
+            "2",
+            "--shards",
+            "5",
+        ],
     )
     assert main() == 1
-    assert calls == [(tmp_path, "base", "head"), (tmp_path, {"hooks/sample.py": {2}}, tmp_path / "evidence", 13)]
-    assert "Changed Python files: 1" in capsys.readouterr().out
+    assert calls == [
+        (tmp_path, "base", "head"),
+        (tmp_path, {"hooks/sample.py": {2}}, tmp_path / "evidence", 13, (2, 5), None),
+    ]
+    out = capsys.readouterr().out
+    assert "Changed Python files: 1" in out
+    assert "Mutation shard: 3 of 5" in out
     assert __import__("os").environ["PYTEST_DISABLE_PLUGIN_AUTOLOAD"] == "1"
 
 
@@ -40,13 +68,159 @@ def test_cli_defaults_and_success(tmp_path, monkeypatch):
         assert (root, base, head) == (tmp_path, "origin/dev", "HEAD")
         return {}
 
-    def gate(root, changes, output, budget):
-        assert (root, changes, output, budget) == (tmp_path, {}, tmp_path / ".mutation-gate", 1080)
+    def gate(root, changes, output, budget, shard, stats):
+        assert (root, changes, output, budget, shard, stats) == (
+            tmp_path,
+            {},
+            tmp_path / ".mutation-gate",
+            1080,
+            (0, 1),
+            None,
+        )
         return {"failed": False}
 
     monkeypatch.setattr("scripts.ci_mutation.__main__.discover_changes", discover)
     monkeypatch.setattr("scripts.ci_mutation.__main__.run_gate", gate)
     assert main() == 0
+
+
+def test_cli_names_every_failing_clean_baseline_test_in_the_job_summary(tmp_path, monkeypatch):
+    summary = tmp_path / "summary.md"
+    summary.write_text("earlier\n")
+    (tmp_path / "hooks").mkdir()
+    (tmp_path / "scripts").mkdir()
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary))
+    monkeypatch.setattr("sys.argv", ["gate"])
+    monkeypatch.setattr("scripts.ci_mutation.__main__.discover_changes", lambda root, base, head: {})
+    failing = ["tests/test_a.py::test_one - AssertionError: no", "tests/test_b.py::test_two"]
+    monkeypatch.setattr(
+        "scripts.ci_mutation.__main__.run_gate", lambda *args: {"failed": True, "failing_tests": failing}
+    )
+    assert main() == 1
+    assert summary.read_text() == (
+        "earlier\n"
+        "### Mutation clean baseline failed\n\n"
+        "- `tests/test_a.py::test_one - AssertionError: no`\n"
+        "- `tests/test_b.py::test_two`\n"
+    )
+
+
+def test_cli_leaves_the_job_summary_alone_without_failing_tests(tmp_path, monkeypatch):
+    summary = tmp_path / "summary.md"
+    (tmp_path / "hooks").mkdir()
+    (tmp_path / "scripts").mkdir()
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary))
+    monkeypatch.setattr("sys.argv", ["gate"])
+    monkeypatch.setattr("scripts.ci_mutation.__main__.discover_changes", lambda root, base, head: {})
+    monkeypatch.setattr("scripts.ci_mutation.__main__.run_gate", lambda *args: {"failed": True})
+    assert main() == 1
+    assert not summary.exists()
+
+
+def test_cli_passes_the_original_checkout_to_cached_collectors(tmp_path, monkeypatch):
+    import os
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("sys.argv", ["gate"])
+    monkeypatch.setattr("scripts.ci_mutation.__main__.discover_changes", lambda *args: {})
+    for folder in ("", str(tmp_path / "cache")):
+        monkeypatch.setenv("MUTATION_STATS_CACHE", folder)
+        monkeypatch.setenv("MUTATION_STATS_ROOT", "previous")
+        expected = str(tmp_path) if folder else "previous"
+
+        def gate(*args):
+            assert os.environ["MUTATION_STATS_ROOT"] == expected
+            return {"failed": False}
+
+        monkeypatch.setattr("scripts.ci_mutation.__main__.run_gate", gate)
+        assert main() == 0
+
+
+@pytest.mark.parametrize(
+    ("extra", "part", "line"),
+    [
+        ([], None, "Mutation stats from shared"),
+        (["--stats-part", "1", "--stats-parts", "3"], (1, 3), "Mutation stats part: 2 of 3"),
+    ],
+)
+def test_cli_passes_shared_stats_keyed_to_the_resolved_head(tmp_path, monkeypatch, capsys, extra, part, line):
+    from scripts.ci_mutation.stats import SharedStats
+
+    (tmp_path / "hooks").mkdir()
+    (tmp_path / "scripts").mkdir()
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("sys.argv", ["gate", "--head", "topic", "--stats", "shared", *extra])
+    runs = []
+
+    def run(command, **kwargs):
+        runs.append((command, kwargs))
+        return __import__("subprocess").CompletedProcess(command, 0, "abc123\n", "")
+
+    def gate(root, changes, output, budget, shard, stats):
+        assert stats == SharedStats(tmp_path / "shared", "abc123", part)
+        return {"failed": False}
+
+    monkeypatch.setattr("scripts.ci_mutation.__main__.subprocess.run", run)
+    monkeypatch.setattr("scripts.ci_mutation.__main__.discover_changes", lambda root, base, head: {})
+    monkeypatch.setattr("scripts.ci_mutation.__main__.run_gate", gate)
+    assert main() == 0
+    assert runs == [
+        (["git", "rev-parse", "topic"], {"cwd": tmp_path, "capture_output": True, "text": True, "check": True})
+    ]
+    assert line in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    ("args", "message"),
+    [
+        (["--stats-part", "0"], "--stats-part 0 needs --stats and is outside 0 to 0"),
+        (
+            ["--stats", "s", "--stats-part", "2", "--stats-parts", "2"],
+            "--stats-part 2 needs --stats and is outside 0 to 1",
+        ),
+        (["--stats", "s", "--stats-part", "-1"], "--stats-part -1 needs --stats and is outside 0 to 0"),
+    ],
+)
+def test_cli_refuses_a_stats_part_outside_its_matrix_or_without_a_folder(tmp_path, monkeypatch, capsys, args, message):
+    monkeypatch.setattr("sys.argv", ["gate", *args])
+    monkeypatch.setattr("scripts.ci_mutation.__main__.run_gate", lambda *args: pytest.fail("ran without a valid part"))
+    with pytest.raises(SystemExit) as error:
+        main()
+    assert error.value.code == 2
+    assert capsys.readouterr().err.rstrip().endswith(f"error: {message}")
+
+
+def test_cli_accepts_the_first_stats_part_of_a_single_part_matrix(tmp_path, monkeypatch):
+    from scripts.ci_mutation.stats import SharedStats
+
+    (tmp_path / "hooks").mkdir()
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("sys.argv", ["gate", "--stats", "s", "--stats-part", "0"])
+    monkeypatch.setattr(
+        "scripts.ci_mutation.__main__.subprocess.run",
+        lambda command, **kwargs: __import__("subprocess").CompletedProcess(command, 0, "abc\n", ""),
+    )
+    monkeypatch.setattr("scripts.ci_mutation.__main__.discover_changes", lambda root, base, head: {})
+    calls = []
+    monkeypatch.setattr(
+        "scripts.ci_mutation.__main__.run_gate",
+        lambda root, changes, output, budget, shard, stats: calls.append(stats) or {"failed": False},
+    )
+    assert main() == 0
+    assert calls == [SharedStats(tmp_path / "s", "abc", (0, 1))]
+
+
+@pytest.mark.parametrize(("shard", "shards"), [("3", "3"), ("-1", "2"), ("0", "0")])
+def test_cli_refuses_a_shard_outside_its_matrix(tmp_path, monkeypatch, capsys, shard, shards):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("sys.argv", ["gate", "--shard", shard, "--shards", shards])
+    monkeypatch.setattr("scripts.ci_mutation.__main__.discover_changes", lambda *args: pytest.fail("graded"))
+    with pytest.raises(SystemExit) as error:
+        main()
+    assert error.value.code == 2
+    assert capsys.readouterr().err.endswith(f"error: --shard {shard} is outside 0 to {int(shards) - 1}\n")
 
 
 def test_browser_preflight_skips_test_only_changes(tmp_path, monkeypatch, capsys):
@@ -65,6 +239,30 @@ def test_browser_preflight_skips_test_only_changes(tmp_path, monkeypatch, capsys
     assert browser.main() == 0
     assert output.read_text() == "browser=false\n"
     assert "Selected mutation tests: 0" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(("given", "bases"), [("earlier,merged", ["earlier", "merged"]), ("", [""])])
+@pytest.mark.parametrize("entry", ["gate", "browser"])
+def test_resolved_bases_from_the_plan_are_graded_as_given(tmp_path, monkeypatch, entry, given, bases):
+    from scripts.ci_mutation import __main__ as gate
+    from scripts.ci_mutation import browser
+
+    module = gate if entry == "gate" else browser
+    (tmp_path / "hooks").mkdir()
+    (tmp_path / "scripts").mkdir()
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("GITHUB_OUTPUT", raising=False)
+    calls = []
+
+    def discover(root, base, head):
+        calls.append((root, base, head))
+        return {}
+
+    monkeypatch.setattr(module, "discover_changes", discover)
+    monkeypatch.setattr(gate, "run_gate", lambda *args: {"failed": False})
+    monkeypatch.setattr("sys.argv", [entry, "--bases", given])
+    assert module.main() == 0
+    assert calls == [(tmp_path, bases, "HEAD")]
 
 
 def test_browser_preflight_uses_mutation_test_selection(tmp_path, monkeypatch, capsys):

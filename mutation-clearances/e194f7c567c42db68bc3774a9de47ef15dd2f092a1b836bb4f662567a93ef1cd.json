@@ -1,0 +1,6 @@
+{
+  "scripts/init_agent.py:scripts.init_agent.x__parser__mutmut_42:4aeea9e42b65ef732f6e1e8bbc02edeecc3a17f9b4f3eea59babbb5b4b4bef21": {
+    "reader": "Standards reader for cxc2",
+    "reason": "Only the --seat help text gains XX wrapping, shown only by --help and read by no program or test."
+  }
+}

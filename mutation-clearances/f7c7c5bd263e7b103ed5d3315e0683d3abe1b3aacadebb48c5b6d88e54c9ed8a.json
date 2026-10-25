@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.x_index_page__mutmut_3:27ea0c4ceebdf02082cc8d9f1216648744f9179bf5c9da88f3b7025a20993eff": {
+    "reader": "Standards",
+    "reason": "Codec lookup and Unicode decoding are identical for utf-8 and UTF-8; the encoding case mutation changes no output."
+  }
+}

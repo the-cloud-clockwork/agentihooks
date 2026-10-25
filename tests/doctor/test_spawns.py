@@ -1,13 +1,10 @@
 import copy
+import json
 
 import pytest
 
 from scripts.doctor import spawns
 from tests.doctor.recorded import load
-
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
-
 from tests.swarm.profile_fixture import validated
 
 
@@ -23,120 +20,79 @@ def test_recorded_spawns_and_planted_failed_spawn():
     assert record["actions"] == []
 
 
-def _picks(prefix, harnesses, at, choice="share"):
-    return [{"name": f"{prefix}{i}", "harness": h, "started_at": at, "choice": choice} for i, h in enumerate(harnesses)]
-
-
-def _windowed(agents, history=()):
-    return {
-        "slug": "sw",
-        "target": 20,
-        "target_changed_at": 1,
-        "now": 2 * spawns.WINDOW_MS,
-        "spawns": {"codex": 77, "claude": 250},
-        "agents": list(agents),
-        "history": list(history),
-    }
-
-
-def test_recorded_share_and_planted_drift():
+def test_reservation_refusals_require_recorded_free_sessions():
     record = load("spawns")
-    record.update(now=max(a["started_at"] for a in record["agents"]), history=[])
-    assert spawns.share_drift(record) == []
-    now = 2 * spawns.WINDOW_MS
-    planted = _windowed(_picks("a", ["claude"] * 10, now - 1))
-    [found] = spawns.share_drift(planted)
-    assert found.id == "codex-share-drift/sw"
-    assert found.measure == 20
-    assert "codex 0/10 share picks in the last 6 hours, 0.0%, target 20%" in found.evidence
-
-
-def test_overflow_forced_and_old_spawns_do_not_count_toward_drift():
-    now = 2 * spawns.WINDOW_MS
-    on_target = _picks("a", ["claude"] * 8 + ["codex"] * 2, now - 1)
-    overflow = _picks("o", ["codex"] * 6, now - 1, choice="overflow")
-    forced = _picks("f", ["claude"] * 6, now - 1, choice="forced")
-    old = _picks("h", ["codex"] * 6, now - spawns.WINDOW_MS - 1)
-    unrecorded = [{"name": "u", "harness": "codex", "started_at": now - 1}]
-    assert spawns.share_drift(_windowed([*on_target, *forced, *unrecorded], [*overflow, *old])) == []
-    [found] = spawns.share_drift(_windowed(on_target, _picks("h", ["codex"] * 6, now - 1)))
-    assert found.evidence == ("codex 8/16 share picks in the last 6 hours, 50.0%, target 20%",)
-
-
-def test_the_window_starts_inclusive_and_a_pick_without_a_start_is_outside_it():
-    now = spawns.WINDOW_MS + 2
-    edge = _picks("e", ["claude"] * 10, 2)
-    undated = [{"name": "u", "harness": "codex", "choice": "share"}]
-    [found] = spawns.share_drift(_windowed(edge, undated) | {"now": now})
-    assert found.evidence == ("codex 0/10 share picks in the last 6 hours, 0.0%, target 20%",)
-    assert found.threshold == "more than one share pick from target"
-    assert found.summary == "Codex share 0.0% against target 20%"
-
-
-def test_discrete_share_and_empty_counts_do_not_raise():
-    now = 2 * spawns.WINDOW_MS
-    for harnesses in ([], ["claude"], ["codex"] + ["claude"] * 6):
-        assert spawns.share_drift(_windowed(_picks("a", harnesses, now - 1))) == []
+    slug = record["slug"]
+    refusal = f"{slug}: spawn failed for dt2: account reservation is full"
+    accounts = [
+        {"harness": "claude", "state": "OPEN", "sessions": 6, "cap": 6},
+        {"harness": "codex", "state": "OPEN", "sessions": 0, "cap": 8},
+    ]
+    capacity = {"harness": "claude", "accounts": accounts}
+    record["actions"] = [f"{slug}: spawn capacity for dt2: {json.dumps(capacity)}", refusal]
+    assert spawns.failed(record) == []
+    accounts[0]["sessions"] = 5
+    record["actions"] = [f"{slug}: spawn capacity for dt2: {json.dumps(capacity)}", refusal]
+    [found] = spawns.failed(record)
+    assert found.id == "failed-spawn/dt2"
+    assert found.measure == 1
+    assert found.evidence == ("account reservation is full",)
 
 
 @pytest.mark.parametrize(
-    ("codex", "total", "target", "drift"),
+    ("harness", "state", "sessions", "cap", "count"),
     [
-        (1, 10, 20, False),
-        (3, 10, 20, False),
-        (0, 10, 20, True),
-        (4, 10, 20, True),
-        (1, 11, 20, True),
-        (1, 12, 20, True),
-        (0, 101, 1, True),
+        ("claude", "OPEN", 5, 6, 1),
+        ("claude", "OPEN", 6, 6, 0),
+        ("claude", "OPEN", 7, 6, 0),
+        ("codex", "OPEN", 0, 6, 0),
+        ("claude", "DRAIN", 0, 6, 0),
+        ("claude", "UNKNOWN", 0, 6, 0),
+        ("claude", "OPEN", 0, None, 0),
+        ("claude", "OPEN", 0, 0, 0),
     ],
 )
-def test_share_drift_allows_at_most_one_pick_from_a_steady_target(codex, total, target, drift):
-    now = 2 * spawns.WINDOW_MS
-    record = _windowed(_picks("a", ["codex"] * codex + ["claude"] * (total - codex), now - 1)) | {"target": target}
-    assert bool(spawns.share_drift(record)) is drift
-
-
-def test_share_drift_excludes_picks_at_or_before_the_target_change():
-    now = 2 * spawns.WINDOW_MS
-    old = _picks("old", ["codex"] * 4 + ["claude"] * 13, now - 100)
-    edge = _picks("edge", ["codex"] * 4, now - 50)
-    recent = _picks("new", ["claude"] * 10, now - 1)
-    record = _windowed(recent, [*old, *edge]) | {"target": 0, "target_changed_at": now - 50}
-    assert spawns.share_drift(record) == []
-    record["agents"] = _picks("new", ["codex"] * 2 + ["claude"] * 8, now - 1)
-    [found] = spawns.share_drift(record)
-    assert found.measure == 20
-    assert "codex 2/10" in found.evidence[0]
-
-
-def test_share_drift_waits_for_ten_picks_under_a_known_target():
-    now = 2 * spawns.WINDOW_MS
-    record = _windowed(_picks("old", ["codex"] * 17, now - 100))
-    record.update(target=0, target_changed_at=now - 50)
-    record["agents"] += _picks("new", ["codex"] * 9, now - 1)
-    assert spawns.share_drift(record) == []
-    record["agents"] += _picks("tenth", ["codex"], now - 1)
-    [found] = spawns.share_drift(record)
-    assert found.evidence[0].startswith("codex 10/10")
-    record["target_changed_at"] = 0
-    assert spawns.share_drift(record) == []
-    del record["target_changed_at"]
-    assert spawns.share_drift(record) == []
-
-
-def test_recorded_placements_and_planted_overflow():
+def test_only_eligible_accounts_for_the_refused_harness_count(harness, state, sessions, cap, count):
     record = load("spawns")
-    assert spawns.overflow(record) == []
-    planted = copy.deepcopy(record)
-    planted["agents"][0]["placement"] = "overflow"
-    [found] = spawns.overflow(planted)
-    assert found.id == f"account-overflow/{record['agents'][0]['name']}"
-    assert found.measure == 1
-    assert f"account {record['agents'][0]['account']}" in found.evidence
+    slug = record["slug"]
+    snapshot = {
+        "harness": "claude",
+        "accounts": [{"harness": harness, "state": state, "sessions": sessions, "cap": cap}],
+    }
+    record["actions"] = [
+        f"{slug}: spawn capacity for dt2: {json.dumps(snapshot)}",
+        f"{slug}: spawn failed for dt2: account reservation is full",
+    ]
+    found = spawns.failed(record)
+    assert len(found) == count
+    if count:
+        assert found[0].measure == 1
+
+
+def test_capacity_evidence_is_consumed_by_one_failure_and_other_errors_remain():
+    record = load("spawns")
+    slug = record["slug"]
+    snapshot = {
+        "harness": "codex",
+        "accounts": [{"harness": "codex", "state": "OPEN", "sessions": 1, "cap": 2}],
+    }
+    record["actions"] = [
+        f"other: spawn capacity for dt2: {json.dumps(snapshot)}",
+        f"{slug}: spawn failed for dt2: account reservation is full",
+        f"{slug}: spawn capacity for dt2: {json.dumps(snapshot)}",
+        f"{slug}: spawn failed for dt2: account reservation is full",
+        f"{slug}: spawn failed for dt2: account reservation is full",
+        f"{slug}: spawn failed for dt2: init-agent timed out",
+        f"{slug}: master spawn failed: boom",
+    ]
+    found = {finding.subject: finding for finding in spawns.failed(record)}
+    assert found["dt2"].measure == 2
+    assert found["dt2"].evidence == ("account reservation is full", "init-agent timed out")
+    assert found["master"].evidence == ("boom",)
 
 
 def test_runtime_records_the_launcher_overflow_placement(tmp_path):
+    import os
     import subprocess
 
     import fakeredis
@@ -146,7 +102,7 @@ def test_runtime_records_the_launcher_overflow_placement(tmp_path):
     from scripts.swarm.tick import tick
 
     store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
-    config = SwarmConfig("sw", str(tmp_path), max_eng=1, max_ci=0, state="running", codex_share=0)
+    config = SwarmConfig("sw", str(tmp_path), max_eng=1, max_ci=0, state="running")
     store.create(config)
     launched = []
 
@@ -158,7 +114,7 @@ def test_runtime_records_the_launcher_overflow_placement(tmp_path):
             validated(
                 argv,
                 "status=started\nroute_status=routed\nagent=codex\naccount=default\nplacement=overflow\npane_id=1\n",
-            ),
+            ).replace('"pid": 123', f'"pid": {os.getpid()}'),
             "",
         )
 
@@ -168,6 +124,7 @@ def test_runtime_records_the_launcher_overflow_placement(tmp_path):
     runtime.live_names = lambda: set()
     runtime.conversations = lambda: {}
     runtime.has_capacity = lambda config: True
+    runtime.quota_capacity = None
 
     class Ledger:
         def state(self, slug):
@@ -191,6 +148,9 @@ def test_runtime_records_the_launcher_overflow_placement(tmp_path):
             return {"state": "open", "claimed_by": "", **fields}
 
         def notify(self, *args):
+            pass
+
+        def comment(self, *args):
             pass
 
     actions = tick("sw", store, Ledger(), runtime, 1000)
@@ -235,3 +195,68 @@ def test_recorded_agents_with_no_hook_event_one_tick_after_spawn_are_flagged():
     ]
     finished = [{**a, "state": "finished"} for a in agents]
     assert spawns.silent_starts(finished, {}, last + spawns.TICK_MS) == []
+
+
+ACKED = 50_000
+
+
+def _hive(name, **fields):
+    return {
+        "name": name,
+        "state": "working",
+        "started_at": 1_000,
+        "harness": "claude",
+        "pane_id": "w4:p1",
+        "hive": "h1",
+        "launched_at": ACKED - 5_000,
+        "launch_timings": {"returned_at": ACKED},
+        **fields,
+    }
+
+
+def test_a_running_hive_agent_is_judged_from_its_heartbeat():
+    agent = _hive("engineer@a-1")
+    later = ACKED + 10 * spawns.TICK_MS
+    assert spawns.silent_starts([agent], {}, later, beats={agent["name"]: ACKED + 1}) == []
+    assert spawns.silent_starts([agent], {}, later, beats={agent["name"]: 1_000}) == []
+    [stale] = spawns.silent_starts([agent], {}, later, beats={agent["name"]: 999})
+    assert stale.measure == 10
+
+
+def test_a_hive_agent_that_never_starts_is_raised_one_tick_after_its_acknowledgement():
+    agent = _hive("engineer@a-2")
+    assert spawns.silent_starts([agent], {}, ACKED + spawns.TICK_MS - 1) == []
+    [found] = spawns.silent_starts([agent], {}, ACKED + 2 * spawns.TICK_MS + 1, beats={"engineer@a-1": ACKED})
+    assert found.id == "no-hook-event/engineer@a-2"
+    assert found.measure == 2
+    assert found.evidence == (f"acknowledged at {ACKED}", "hive h1", "harness claude", "pane w4:p1")
+    assert found.threshold == "no heartbeat one tick after the hive acknowledgement"
+    assert found.summary == "hive agent has sent no heartbeat since its hive acknowledged the launch"
+    unreturned = {k: v for k, v in _hive("engineer@a-2", launch_timings={}).items() if k not in ("harness", "pane_id")}
+    [found] = spawns.silent_starts([unreturned], {}, ACKED - 5_000 + spawns.TICK_MS)
+    assert found.evidence == (f"acknowledged at {ACKED - 5_000}", "hive h1", "harness ", "pane ")
+
+
+def test_a_launch_still_waiting_for_its_hive_acknowledgement_is_not_raised():
+    starting = {"name": "engineer@a-3", "state": "starting", "started_at": 1_000}
+    later = 1_000 + 5 * spawns.TICK_MS
+    assert spawns.silent_starts([starting], {}, later, pending={"engineer@a-3"}) == []
+    assert [f.subject for f in spawns.silent_starts([starting], {}, later, pending={"other"})] == ["engineer@a-3"]
+
+
+def test_a_local_agent_keeps_the_first_event_rule():
+    agent = {
+        "name": "engineer@a-4",
+        "state": "working",
+        "started_at": 1_000,
+        "launched_at": 3_000,
+        "launch_timings": {"returned_at": 4_000},
+    }
+    [found] = spawns.silent_starts([agent], {}, 1_000 + spawns.TICK_MS, beats={agent["name"]: 2_000})
+    assert found.measure == 1
+    assert found.evidence == ("started at 1000", "harness ", "pane ")
+    assert found.threshold == "no hook event one tick after spawn"
+    assert spawns.silent_starts([agent], {agent["name"]: 2_000}, 1_000 + spawns.TICK_MS, beats={}) == []
+    late = {**agent, "started_at": 1_000_000}
+    [found] = spawns.silent_starts([late], {}, 1_000_000 + 2 * spawns.TICK_MS)
+    assert found.measure == 2

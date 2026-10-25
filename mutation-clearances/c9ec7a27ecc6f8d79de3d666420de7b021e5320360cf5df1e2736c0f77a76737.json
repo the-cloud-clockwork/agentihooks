@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/repository/file.py:scripts.swarm_ledger.repository.file.x_sync__mutmut_16:ea13b015d37249b9de50f793455880274946fb7c0eba8cd364714ac8058a69cd": {
+    "reader": "Standards",
+    "reason": "The default core has identical pure loads/normalize behavior. For missing JSON, earliest ignores initial updated_at and fresh sync overwrites it with caller Context.at; existing JSON does not use the loader clock."
+  }
+}

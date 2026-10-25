@@ -5,51 +5,46 @@ Usage: new_ledger.py --content <content.json> [--plan <plan-file> | --proof] [--
                      [--size small|swarm] [--as NAME] [--operator-asked WORDS]
 
 --size: small (default) is one session's work without a swarm; its creator, --as NAME (default
-$AGENTIHOOKS_AGENT_NAME), joins it as its worker. swarm is a plan a swarm works.
+$AGENTIHOOKS_AGENT_NAME), joins it as its worker. swarm is a plan a swarm works, and only proof and demo ledgers
+take it here: agentihooks swarm init NAME creates every other swarm with its ledger.
 
 content.json: {"title", "overview", "sources": [paths], "phases": [{"title", "description"}],
                "questions": [{"text"}], "followups": [{"text"}]}
-Writes <LEDGER_DIR>/<slug>.html and <slug>.json. The slug is built by scripts.swarm.naming, never typed:
+Stores the ledger record in <LEDGER_DIR>/ledgers.sqlite3. The slug is built by scripts.swarm.naming, never typed:
 <plan-file-stem>-<date> for --plan, proof-<swarm code>-<task>-<n> for --proof (a swarm task session),
 small-<session> for a small ledger. --slug accepts only one of those built forms.
-Idempotent: an existing ledger is left untouched and its paths are printed.
+Idempotent: an existing ledger is left untouched and its page link is printed.
 In the shared ledger folder only a master seat or the operator creates a ledger, and a small one needs three phases
 unless --operator-asked quotes the operator asking for it.
-
-Usage: new_ledger.py --upgrade <slug>
-Re-renders an existing ledger's page from the current template, keeping its token and
-its document (the JSON's, folded through a sync first).
 """
 
 import argparse
 import datetime
-import html
 import json
 import os
-import re
 import secrets
 import sys
 from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import ledger_core as core  # noqa: E402
 import ledger_link  # noqa: E402
 import ledger_size  # noqa: E402
 
-from scripts.swarm_ledger.repository import repository
+from scripts.swarm_ledger import ports, storage
 
-TEMPLATE = core.TEMPLATE
 LIMITS = {"overview": 200, "phase description": 100}
 
 
 def built_slug(args):
-    from scripts.swarm import naming
+    naming = ports.swarm().naming
 
     try:
         if args.plan:
             return naming.plan_slug(args.plan, args.date)
         if args.proof:
-            return naming.proof_slug(os.environ, {path.stem for path in core.LEDGER_DIR.glob("proof-*")})
+            return naming.proof_slug(
+                os.environ, {s["slug"] for s in storage.default().list_summaries() if s["slug"].startswith("proof-")}
+            )
         if args.slug is None and args.size == "small":
             return naming.small_slug(os.environ)
     except naming.NamingError as error:
@@ -78,7 +73,7 @@ def check_types(content):
         ("phases", ("title", "description")),
         ("questions", ("text",)),
         ("followups", ("text",)),
-        ("tasks", ("title", "description", "phase", "lane")),
+        ("tasks", ("title", "description", "phase", "lane", "profile")),
     ):
         items = content.get(key, [])
         if not isinstance(items, list) or not all(isinstance(i, dict) for i in items):
@@ -123,6 +118,11 @@ def check(content):
     errors += [f"source not found: {s}" for s in missing]
     if not content.get("phases"):
         errors.append("no phases")
+    errors += [
+        f"tasks[{n}].rank is not allowed in seed content; set the rank after creation"
+        for n, task in enumerate(content.get("tasks", []), 1)
+        if "rank" in task
+    ]
     return errors
 
 
@@ -160,69 +160,24 @@ def build_doc(content, size="small"):
         "chat": [],
         "followups": items("followups", "f", ("text",)),
         "tasks": [
-            {**task, "lane": task["lane"] or "eng", "state": "open", "claimed_by": "", "issue_url": "", "pr_url": ""}
-            for task in items("tasks", "t", ("title", "description", "phase", "lane"))
+            {
+                **{key: value for key, value in task.items() if value or key != "profile"},
+                "lane": task["lane"] or "eng",
+                "state": "open",
+                "claimed_by": "",
+                "issue_url": "",
+                "pr_url": "",
+            }
+            for task in items("tasks", "t", ("title", "description", "phase", "lane", "profile"))
         ],
     }
 
 
-def render(doc, slug, port):
-    values = {
-        "TITLE": html.escape(doc["title"]),
-        "SLUG": slug,
-        "PORT": str(int(port)),
-        "TOKEN": secrets.token_urlsafe(24),
-        "DATA": core.seed_text(doc, 0),
-        "PAGE": core.page_version(),
-        "PALETTE": core.PALETTE.read_text(encoding="utf-8"),
-        "TOOLTIPS": core.TOOLTIPS.read_text(encoding="utf-8"),
-    }
-    page = TEMPLATE.read_text(encoding="utf-8")
-    return re.sub(
-        r"/\*__LEDGER_(TOOLTIPS)__\*/|__LEDGER_(TITLE|SLUG|PORT|TOKEN|DATA|PAGE|PALETTE)__",
-        lambda m: values[m.group(1) or m.group(2)],
-        page,
-    )
-
-
-def upgrade_page(slug):
-    html_path, _ = core.paths(slug)
-    token = core.read_token(repository.read_page(slug))
-    if not token:
-        sys.exit(f"{html_path} has no ledger token")
-    state = repository.get_document(slug)
-    doc = {k: v for k, v in state.items() if k != "_meta"}
-    values = {
-        "TITLE": html.escape(doc["title"]),
-        "SLUG": slug,
-        "TOKEN": token,
-        "PORT": str(int(ledger_link.address()[1])),
-        "DATA": core.seed_text(doc, state["_meta"]["rev"]),
-        "PAGE": core.page_version(),
-        "PALETTE": core.PALETTE.read_text(encoding="utf-8"),
-        "TOOLTIPS": core.TOOLTIPS.read_text(encoding="utf-8"),
-    }
-    page = re.sub(
-        r"/\*__LEDGER_(TOOLTIPS)__\*/|__LEDGER_(TITLE|SLUG|PORT|TOKEN|DATA|PAGE|PALETTE)__",
-        lambda m: values[m.group(1) or m.group(2)],
-        TEMPLATE.read_text(encoding="utf-8"),
-    )
-    repository.write_page(slug, page)
-    return state
-
-
-def upgrade(slug):
-    state = upgrade_page(slug)
-    print(json.dumps({"slug": slug, "html": str(core.paths(slug)[0]), "upgraded": True, "rev": state["_meta"]["rev"]}))
-
-
 def create(slug, content, size="small"):
-    return repository.create(slug, content, size)
+    return storage.default().create(slug, content, size)
 
 
 def main():
-    if sys.argv[1:2] == ["--upgrade"] and len(sys.argv) == 3:
-        return upgrade(sys.argv[2])
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--content", required=True)
     source = parser.add_mutually_exclusive_group()
@@ -236,9 +191,11 @@ def main():
     args = parser.parse_args()
 
     slug = built_slug(args)
-    html_path, json_path = core.paths(slug)
-    if repository.exists(slug):
-        print(json.dumps({"slug": slug, "html": str(html_path), "json": str(json_path), "created": False}))
+    naming = ports.swarm().naming
+    if args.size == "swarm" and not naming.is_code_named_swarm(slug):
+        sys.exit(f"a swarm ledger is created with its swarm by one command: {naming.SWARM_INIT}")
+    if storage.default().exists(slug):
+        print(json.dumps({"slug": slug, "created": False}))
         print(ledger_link.page_line(slug))
         return
     small = args.size == "small"
@@ -254,9 +211,9 @@ def main():
     if refused:
         sys.exit(refused)
     create(slug, content, args.size)
-    out = {"slug": slug, "html": str(html_path), "json": str(json_path), "created": True, "size": args.size}
+    out = {"slug": slug, "created": True, "size": args.size}
     if small:
-        repository.apply_ops(
+        storage.default().apply_ops(
             slug, ops=[{"op": "join", "id": f"join-{secrets.token_hex(5)}", "by": args.name, "role": "member"}]
         )
         out["joined"] = args.name
@@ -265,4 +222,7 @@ def main():
 
 
 if __name__ == "__main__":
+    from scripts.swarm_ledger import composition
+
+    composition.wire()
     main()

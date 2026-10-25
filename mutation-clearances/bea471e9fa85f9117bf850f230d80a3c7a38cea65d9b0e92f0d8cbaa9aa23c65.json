@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/ledger_tasks.py:scripts.swarm_ledger.ledger_tasks.x_apply__mutmut_32:6d00e4c43c13a7cac3af32cfd83a87e69fda3332af33b993b65c4aeb6728be3d": {
+    "reader": "Standards",
+    "reason": "Accepted ledger documents contain tasks after repository normalization or creation before guarded application. The default is unreachable, and every present task list is returned unchanged. Independently verified for CI run 37863168098 at head 76a8a347."
+  }
+}

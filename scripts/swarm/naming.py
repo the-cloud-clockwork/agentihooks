@@ -13,20 +13,25 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
-PREFIX = "agentihooks:names"
-TYPES = {"master": "master", "eng": "engineer", "ci": "ci", "plan": "planner"}
+from scripts.swarm.keyspace import ROOT
+
+PREFIX = f"{ROOT}:names"
+TYPES = {"master": "master", "eng": "engineer", "ci": "ci", "plan": "planner", "dispatch": "dispatcher"}
 LANES = {kind: lane for lane, kind in TYPES.items()}
-NAME_RE = re.compile(r"(master|engineer|ci|planner)@([0-9a-f]{6})-(\d{4})")
+OPERATOR = "operator"
+_KINDS = "|".join(TYPES.values())
+NAME_RE = re.compile(rf"({_KINDS})@([0-9a-f]{{6}})-(\d{{4}})")
 LEGACY_RE = re.compile(r"(.+)-(eng|ci|master)-\d+")
 CODE_RE = re.compile(r"[0-9a-f]{6}")
 SWARM_RE = re.compile(r"swarm@([0-9a-f]{6})")
 MINT_ATTEMPTS = 20
-_BASE = r"(?:(?:master|engineer|ci|planner)-[0-9a-f]{6}-\d{4}|session-[0-9a-f]{8})"
+NAMES_PAGE = 500
+_BASE = rf"(?:(?:{_KINDS})-[0-9a-f]{{6}}-\d{{4}}|session-[0-9a-f]{{8}})"
 _REPO = r"[a-z0-9][a-z0-9._-]*"
 PROOF_RE = re.compile(r"proof-[0-9a-f]{6}-[a-z0-9]+-\d+")
 PATTERNS = {
     "agent": NAME_RE,
-    "pane": re.compile(r"(?:master|engineer|ci|planner)-[0-9a-f]{6}-\d{4}"),
+    "pane": re.compile(rf"(?:{_KINDS})-[0-9a-f]{{6}}-\d{{4}}"),
     "space": re.compile(rf"{_REPO}-[0-9a-f]{{6}}|{PROOF_RE.pattern}"),
     "worktree": re.compile(rf"{_BASE}(?:-\d+)?"),
     "tmp": re.compile(rf"{_BASE}-tmp-\d+"),
@@ -37,6 +42,17 @@ PATTERNS = {
     "demo_slug": re.compile(r"doctor-demo-\d{20}"),
 }
 SLUG_KINDS = ("plan_slug", "small_slug", "proof_slug", "demo_slug")
+CODE_SWARM_KINDS = ("proof_slug", "demo_slug")
+SWARM_NAME_RE = re.compile(r"[a-z]+(-[a-z]+)?-swarm")
+SWARM_NAME_RULE = (
+    "a swarm name is one or two lowercase words joined by a dash and ending in swarm, such as rig-grade-swarm or "
+    "dating-swarm"
+)
+SUGGESTION_SKIP = frozenset(
+    {"a", "an", "and", "by", "for", "from", "in", "into", "of", "on", "or", "plan", "swarm", "the", "to", "with"}
+)
+SUGGESTION_FALLBACK = ("new", "next", "work", "build")
+SWARM_INIT = "agentihooks swarm init <name> --plan <file> --repo <dir>"
 
 
 class NamingError(RuntimeError):
@@ -104,7 +120,17 @@ def plain(name):
 
 
 def _clean(text):
-    return re.sub(r"[^a-z0-9._-]+", "-", text.lower()).strip("-.")
+    return re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")
+
+
+def pane_label(title: str) -> str:
+    return _clean(title) or "pane"
+
+
+def seat_label(lane: str, index: int) -> str:
+    if lane not in TYPES or type(index) is not int or index < 1:
+        raise NamingError("a seat needs a known lane and a positive integer")
+    return lane if lane in {"master", "dispatch"} and index == 1 else f"{lane}-{index}"
 
 
 def repo_name(path):
@@ -161,12 +187,12 @@ def scratch(environ, cwd):
 
 
 def scratch_folder(swarm, task):
-    return f"{swarm}-{_clean(task)}"
+    return f"{_clean(swarm)}-{_clean(task)}"
 
 
 def plan_slug(plan, date):
-    stem = re.sub(r"[^a-z0-9]+", "-", Path(plan).stem.lower()).strip("-") or "plan"
-    return f"{stem}-{date}"
+    stem = _clean(Path(plan).stem) or "plan"
+    return f"{stem}-{_clean(date)}"
 
 
 def small_slug(environ):
@@ -187,6 +213,31 @@ def is_built_slug(slug):
     return any(PATTERNS[kind].fullmatch(slug or "") for kind in SLUG_KINDS)
 
 
+def is_code_named_swarm(slug):
+    return any(PATTERNS[kind].fullmatch(slug) for kind in CODE_SWARM_KINDS)
+
+
+def swarm_name_problem(name, taken=()):
+    """Why NAME cannot name a new swarm; an empty string when it can."""
+    if not name:
+        return "a swarm needs a name"
+    if not SWARM_NAME_RE.fullmatch(name):
+        return f"{name} breaks the swarm name rule"
+    return f"{name} is taken" if name in taken else ""
+
+
+def swarm_name_suggestions(title, taken=(), count=2):
+    """COUNT free swarm names built from the words of a plan title."""
+    words = [word for word in re.findall(r"[a-z]+", str(title).lower()) if word not in SUGGESTION_SKIP]
+    pairs = [f"{first}-{second}" for first, second in zip(words, words[1:])]
+    stems = [*pairs[:1], *words, *pairs[1:], *SUGGESTION_FALLBACK]
+    found = []
+    for name in (f"{stem}-swarm" for stem in stems):
+        if name not in found and not swarm_name_problem(name, taken):
+            found.append(name)
+    return found[:count]
+
+
 def _mint():
     return secrets.token_hex(3)
 
@@ -200,6 +251,13 @@ def resolve_name(name):
 
     redis = get_redis()
     return NameRegistry(redis).resolve(name) if redis is not None else name
+
+
+def resolve_names(names):
+    from hooks._redis import get_redis
+
+    redis = get_redis()
+    return NameRegistry(redis).resolve_many(names) if redis is not None else {name: name for name in names}
 
 
 def addresses(name):
@@ -231,6 +289,26 @@ class NameRegistry:
         except RedisError as exc:
             logging.getLogger(__name__).warning("alias lookup failed for %s: %s", name, exc)
             return name
+
+    def resolve_many(self, names):
+        from redis.exceptions import RedisError
+
+        if not names:
+            return {}
+        try:
+            found = self.redis.mget([self.key("alias", name) for name in names])
+        except RedisError as exc:
+            logging.getLogger(__name__).warning("alias lookup failed for %d names: %s", len(names), exc)
+            return {name: name for name in names}
+        return {name: alias or name for name, alias in zip(names, found)}
+
+    def slugs_of(self, names):
+        resolved = self.resolve_many(names)
+        parsed = {name: parse(current) for name, current in resolved.items()}
+        codes = sorted({found.code for found in parsed.values() if found})
+        rows = self.redis.hmget(self.key("codes"), codes) if codes else []
+        swarms = {code: json.loads(row or "{}").get("swarm", "") for code, row in zip(codes, rows)}
+        return {name: swarms[found.code] if found else legacy_slug(resolved[name]) for name, found in parsed.items()}
 
     def alias(self, old, new):
         from redis.exceptions import WatchError
@@ -350,7 +428,21 @@ class NameRegistry:
 
     def names(self, slug):
         code = self.code_of(slug)
-        return [self.entry(name) for name in self.redis.lrange(self.key("names", code), 0, -1)] if code else []
+        names = self.redis.lrange(self.key("names", code), 0, -1) if code else []
+        if not names:
+            return []
+        resolved = self.resolve_many(names)
+        rows = []
+        for start in range(0, len(names), NAMES_PAGE):
+            with self.redis.pipeline(transaction=False) as pipe:
+                for name in names[start : start + NAMES_PAGE]:
+                    pipe.hgetall(self.key("name", resolved[name]))
+                rows += pipe.execute()
+        whole = ("number", "spawned_at", "retired_at")
+        return [
+            {"name": resolved[name], **{k: int(v) if k in whole else v for k, v in raw.items()}} if raw else {}
+            for name, raw in zip(names, rows)
+        ]
 
     def slug_of(self, name):
         """The swarm an agent name belongs to, '' for anything else."""

@@ -1,0 +1,7 @@
+# kind proof, Proofs run 38076980770, agentihooks 30afd472be87e5659206b5d122d31457f42873b0
+controller lease: {"owner": "agentihooks-swarm", "epoch": 1, "expires_at": 1791657942944}
+controller lease renewed: {"owner": "agentihooks-swarm", "epoch": 1, "expires_at": 1791657945169}
+a worker registered and heartbeated against the deployed controller API: {"heartbeat": 200, "observed": "working", "register": 200, "renewal_sequence": 1}
+controller held Pending on reclaimable capacity: agentihooks-swarm-controller-67c8f5585-kdrbc 0/1 nodes are available: 1 node(s) didn't match Pod's node affinity/selector. preemption: 0/1 nodes are available: 1 Preemption is not helpful for scheduling.
+swarm_control_restart_recovery_seconds=4.4 measured from durable capacity returning to the control API ready (kind)
+Helm chart kind proof passed

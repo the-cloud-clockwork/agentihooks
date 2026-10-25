@@ -1,0 +1,6 @@
+{
+  "scripts/ci_gate_queue.py:scripts.ci_gate_queue.x_inventory__mutmut_53:287eea14e997bf895f5e98970993ca4ed9c1c672a39c8a5ee34d5391b4a5ad42": {
+    "reader": "standards-reader",
+    "reason": "A valid expected recovery name contains unit rerun once; multiple occurrences cannot become an expected numeric original under either replacement count, preserving rejection and the named diagnostic. Independently approved from complete CI report 40165669788."
+  }
+}

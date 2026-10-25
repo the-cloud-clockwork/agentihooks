@@ -1,15 +1,19 @@
 (() => {
   const DELAY = 1000;
-  const CONTROLS = 'button, [role="tab"], [role="button"], [role="switch"], a.sync, a.fab, [data-gate-name]';
+  const CONTROLS = 'button, [role="tab"], [role="button"], [role="switch"], a.sync, a.fab, [data-gate-name], [data-tip]:not([data-tip=""])';
   const TIPS = [
     ["#title-edit", "Rename this ledger. The new title shows here and on HOME."],
     ['#title-form [type="submit"]', "Save the new ledger title."],
     ["#title-cancel", "Keep the current title and close the rename box."],
+    ["#overview-edit", "Edit the overview of this ledger in place."],
+    ['#overview-form [type="submit"]', "Save the new overview."],
+    ["#overview-cancel", "Keep the current overview and close the edit box."],
     ['[data-swarm="reopen"]', "Reopen this closed ledger so a fresh master picks it up and the swarm can run again."],
     ["#tab-ledger", "Show the ledger: priorities, notes, questions, phases, tasks and follow ups."],
     ["#tab-swarm", "Show the swarm: controls, caps, agents, quota, Doctor, health findings and seat handoffs."],
     ["#sections-all", "Open or fold every section of the ledger at once."],
     ["#comments-all", "Show or hide the comments under every item on the page."],
+    ["#frozen-view", "Hide or show frozen plans, phases, slices, tasks and follow ups on the page."],
     ["[data-comments]", "Show or hide the comments under every item in this section."],
     ["#outline-all", "Open or fold every group in the outline."],
     ["#prio-clear-all", "Clear every priority from the list. The items they point at stay as they are."],
@@ -24,7 +28,7 @@
     ['[data-swarm="close"]', "Close this ledger. Its summary goes in the overview, every agent is removed, and the swarm is kept for later."],
     ['[data-autonomy="manual"]', "Manual autonomy. You approve every phase plan; the master only comments on it."],
     ['[data-autonomy="assist"]', "Assist autonomy. You approve every phase plan, and the master posts its recommendation first."],
-    ['[data-autonomy="delegate"]', "Delegate autonomy. The master approves or sends back phase plans; you decide after three send backs."],
+    ['[data-autonomy="delegate"]', "Delegate autonomy. The master approves or sends back phase plans; you decide after {send_backs} send backs."],
     ['[data-autonomy="full"]', "Full autonomy. The master approves phase plans and turns agents' follow ups into tasks without asking you."],
     ["#layout-reset", "Restore the default panel sizes on every ledger."],
     ['[data-gate-name="identity"]', "Checks the session identity on commands against the pinned agent identity."],
@@ -32,13 +36,18 @@
     ['[data-gate-name="intent"]', "Checks changes against task, phase and project intent, including failed or pending tick verdicts."],
     ['[data-gate-name="claim-stop"]', "Checks unfinished work, checked waits, failing checks and merges due when an agent stops."],
     ['[data-gate-name="push-stop"]', "Pushes the task branch when an agent stops, and checks for uncommitted work or pushed work with no pull request or ledger line."],
-    ['[data-gate-name="claims"]', "Counts agent lives claiming each task against the three claim limit."],
+    ['[data-gate-name="claims"]', "Counts agent lives claiming each task against the limit of {claims} claims."],
     ['[data-gate-name="talk"]', "Counts engineer and CI ledger talk writes since their last outcome against the talk budget."],
     ['[data-gate-name="watch"]', "Counts watch calls since the last action against the count and watch to action ratio limits."],
-    ['[data-gate-name="reruns"]', "Counts CI reruns per pull request head against the two rerun limit; jobs cancelled before reaching a runner are exempt."],
+    ['[data-gate-name="reruns"]', "Counts CI reruns per pull request head against the limit of {reruns} reruns; jobs cancelled before reaching a runner are exempt."],
     ['[data-gate-name="build"]', "Checks edits and commits against the traced plan, its validity and task territory."],
-    ['[data-gate-name="quiet"]', "Checks claimed tasks for thirty minutes without progress; ledger commands remain available."],
+    ['[data-gate-name="one-push"]', "Checks both reviews closed and work is on origin before a pull request opens, and no push lands while checks run unless one is red."],
+    ['[data-gate-name="quiet"]', "Checks claimed tasks for {quiet_minutes} minutes without progress; ledger commands remain available."],
     ['[data-gate-name="trace-plan"]', "Checks plan pieces against task, phase and project intent and the size of one pull request."],
+    ['[data-gate-name="stall"]', "Stalled pull requests."],
+    ['[data-gate-name="window"]', "Checks the run window at its cutoff: new claims stop and agents in flight hand off."],
+    ['[data-gate-name="lane-split"]', "Seat moves between the eng and ci lanes."],
+    ['[data-gate-name="nightwatch"]', "Watches the front door master seat, ready work without a launch and dev merges every tick."],
     ["#quota-refresh", "Probe every Claude and Codex account now and redraw the quota table."],
     ['[data-gate-mode="enforce"]', "When the check fails, refuse the call and log the denial."],
     ['[data-gate-mode="observe"]', "When the check fails, let the call through and log a would be denial."],
@@ -49,8 +58,8 @@
     ['[data-swarm="ci_up"]', "Raise the most CI agents that may run at once."],
     ['[data-swarm="plan_down"]', "Lower the most planner agents that may run at once."],
     ['[data-swarm="plan_up"]', "Raise the most planner agents that may run at once."],
-    ['[data-swarm="codex_down"]', "Send a smaller share of new agents to Codex."],
-    ['[data-swarm="codex_up"]', "Send a larger share of new agents to Codex."],
+    ['[data-swarm="masters_down"]', "Lower the running agents each extra master serves; at its floor the master count is kept by hand."],
+    ['[data-swarm="masters_up"]', "Raise the running agents each extra master serves."],
     ['[data-swarm="compact_down"]', "Lower the context size at which an agent writes its handoff."],
     ['[data-swarm="compact_up"]', "Raise the context size at which an agent writes its handoff."],
     ['[data-swarm="effort_min_down"]', "Lower the least effort a new agent may start with."],
@@ -58,6 +67,8 @@
     ['[data-swarm="effort_max_down"]', "Lower the most effort a new agent may start with."],
     ['[data-swarm="effort_max_up"]', "Raise the most effort a new agent may start with."],
     ['[data-swarm="apply"]', "Send every changed capacity value to the swarm in one change."],
+    ["#overlays-apply", "Send the changed overlay choices for each role to the swarm in one change."],
+    ["[data-overlay]", "Add or remove this overlay for the role; a role wears at most {overlays}."],
     ['[data-swarm="doctor_start"]', "Start a Doctor that watches this swarm and rates each coordination failure."],
     ['[data-swarm="doctor_stop"]', "Stop the Doctor watching this swarm."],
     ["[data-message]", "Open the chat addressed to this agent."],
@@ -73,6 +84,8 @@
     ["#outline-toggle", "Show or hide the outline of every section and item."],
     ["#bell", "Open your notifications: comments, replies and answers from agents."],
     ["#chat-fab", "Open the chat with the master or any agent of this swarm."],
+    ["#stats-toggle", "Show or hide the Stats panel. A left swipe from the right side opens it, a right swipe closes it."],
+    ["#chat-send", "Send this message to the chosen recipient."],
     ["#art-fab", "Open the artifacts agents published for you to review."],
     ["#art-close", "Close the artifacts panel."],
     ["#chat-clear", "Clear the chat history on this page."],
@@ -101,23 +114,20 @@
     [".entry-actions .link.danger", "Delete this entry."],
     [".entry-actions .link", "Edit this entry."],
     [".add", "Write a new entry here. Enter sends it, Esc cancels."],
+    ['.freeze[aria-pressed="true"]', "Lift this freeze. Items under it keep their own freezes."],
+    [".freeze", "Freeze this item and everything under it. Claimed work finishes; nothing new is claimed."],
+    ["#swarm-freezes button", "End this freeze or focus so the work it held can be claimed again."],
     ['.scope[aria-pressed="true"]', "Bring this item back in scope."],
     [".scope", "Mark this item out of scope. It stays on the ledger but no longer counts as open work."],
-    [".act.del", "Move this ledger to the bin. Its swarm stops; the bin keeps it thirty days."],
+    [".act.del", "Move this ledger to the bin. Its swarm stops; the bin keeps it {bin_days} days."],
     [".act.reopen", "Reopen this closed ledger so a fresh master picks it up."],
     [".act.restore", "Restore this ledger from the bin to HOME."],
-    ["button.fold", "Show this ledger's full title and overview, or fold it back to one line."],
     ["#fold-all", "Open or fold every ledger row at once."],
     ["button.sort", "Sort the ledgers by this column. Click again to reverse the order."],
-    ["#bin-fab", "Open the bin: deleted ledgers, kept thirty days."],
+    ["#bin-fab", "Open the bin: deleted ledgers, kept {bin_days} days."],
     ["#home-fab", "Back to HOME, the list of every ledger."],
   ];
 
-  const css = document.createElement("style");
-  css.textContent = ".ledger-tip{position:fixed;inset:auto;margin:0;max-width:280px;padding:6px 10px;border:0;"
-    + "border-radius:8px;background:var(--overlay);color:var(--text-2);font-size:12px;line-height:1.45;"
-    + "pointer-events:none;overflow:visible}";
-  document.head.append(css);
   const box = document.createElement("div");
   box.className = "ledger-tip";
   box.popover = "manual";
@@ -125,6 +135,7 @@
   let timer = 0;
   let current = null;
   let muted = null;
+  let values = null;
 
   function control(el) {
     return el && el.closest ? el.closest(CONTROLS) : null;
@@ -133,8 +144,15 @@
   function tip(el) {
     const target = control(el);
     if (!target) return null;
+    if (target.dataset.tip) return target.dataset.tip;
     const found = TIPS.find(([selector]) => target.matches(selector));
-    return found ? found[1] : null;
+    return found ? fill(found[1]) : null;
+  }
+
+  function fill(text) {
+    const keys = [...text.matchAll(/\{(\w+)\}/g)].map((m) => m[1]);
+    if (keys.some((key) => !values || !(key in values))) return null;
+    return text.replace(/\{(\w+)\}/g, (_, key) => String(values[key]));
   }
 
   function hide() {
@@ -185,4 +203,5 @@
   document.addEventListener("click", dismiss, true);
   window.addEventListener("scroll", dismiss, true);
   window.ledgerTip = tip;
+  window.ledgerTipValues = (next) => { values = next; };
 })();

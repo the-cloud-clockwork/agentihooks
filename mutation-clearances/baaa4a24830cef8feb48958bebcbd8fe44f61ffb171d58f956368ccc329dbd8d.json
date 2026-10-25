@@ -1,0 +1,6 @@
+{
+  "hooks/classifier/decision_log.py:hooks.classifier.decision_log.x_failure_record__mutmut_11:371cac31d5d97e321ff71eb59af36561c58be823976040dd2dde9c1be2eedaf0": {
+    "reader": "Standards reviewer /root/standards",
+    "reason": "An absent key resolves to a false empty string or None; both preserve every failure field. Present keys are unchanged."
+  }
+}

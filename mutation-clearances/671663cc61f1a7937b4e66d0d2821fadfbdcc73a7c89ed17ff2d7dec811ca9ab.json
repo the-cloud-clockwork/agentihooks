@@ -1,0 +1,6 @@
+{
+  "hooks/context/prod_lockdown.py:hooks.context.prod_lockdown.x__production_operands__mutmut_46:ff3f8c6951c9f5a3af3816335b2ee24249e03ee2a07d8a4d7b8c4580a83fe010": {
+    "reader": "Standards",
+    "reason": "Unlimited splitting preserves the first segment used to identify the option."
+  }
+}

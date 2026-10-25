@@ -10,7 +10,7 @@ Skipped when:
   - Working tree is dirty (don't risk operator's in-progress work)
 
 Config:
-    AUTO_DEV_SWITCH_ENABLED (bool, default True)
+    AGENTIHOOKS_FORCE_DEV_BRANCH (bool, default False)
 
 See CI Manifesto §13 for doctrine.
 """
@@ -43,13 +43,10 @@ def _git(args: list[str], cwd: str, timeout: int = 10) -> tuple[int, str, str]:
 
 def ensure_on_dev(cwd: str) -> str:
     """Perform the switch. Return a status message (empty if no action taken)."""
-    try:
-        from hooks.config import AUTO_DEV_SWITCH_ENABLED
+    from hooks.config import AGENTIHOOKS_FORCE_DEV_BRANCH
 
-        if not AUTO_DEV_SWITCH_ENABLED:
-            return ""
-    except Exception:
-        pass
+    if not AGENTIHOOKS_FORCE_DEV_BRANCH:
+        return ""
 
     if not cwd or not Path(cwd).is_dir():
         return ""
@@ -102,13 +99,11 @@ def inject_on_session_start(cwd: str) -> None:
             return
         content = f"[auto-dev-switch] {msg}"
 
-        from hooks.targets import buffers_single_envelope
+        from hooks.targets import buffers_single_envelope, emitter
 
-        if buffers_single_envelope():
+        if buffers_single_envelope() or emitter.forced():
             # Codex and Copilot parse hook stdout as ONE JSON object — queue
             # for the single end-of-process flush instead of printing our own.
-            from hooks.targets import emitter
-
             emitter.buffer_context(content)
             return
 

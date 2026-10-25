@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/pane.py:scripts.swarm.pane.x_selection_prompt__mutmut_9:621e1e54433d2b39917cb539813e8bf1440aa9e6142ff41ec747585be6765b94": {
+    "reader": "Standards /root/standards",
+    "reason": "Hex escape digit case denotes the same escape byte."
+  }
+}

@@ -10,14 +10,21 @@ from unittest.mock import patch
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts" / "swarm_ledger"))
-import new_ledger  # noqa: E402
 
 from scripts.swarm_ledger import ledger_core as core  # noqa: E402
 from scripts.swarm_ledger import ledger_server as server  # noqa: E402
+from scripts.swarm_ledger import page_assets  # noqa: E402
 from tests.swarm_ledger.ledger_page import ORDER, page_source  # noqa: E402
 
-MODULES = core.TEMPLATE.parent / "static" / "js"
-CONTENT = {"title": "Modules", "overview": "o", "sources": [], "phases": [], "questions": [], "followups": []}
+MODULES = core.MODULES
+CONTENT = {
+    "title": "Modules",
+    "overview": "o",
+    "sources": [],
+    "phases": [{"title": "p", "description": "d"}],
+    "questions": [],
+    "followups": [],
+}
 
 
 @pytest.fixture
@@ -42,15 +49,19 @@ def get(url):
 
 
 def imports(name):
-    return re.findall(r'^import \{[^}]*\} from "\./([\w]+\.js)";$', (MODULES / name).read_text(), re.M)
+    from tests.swarm_ledger.ledger_page import worker_modules
+
+    modules = re.findall(r'^import \{[^}]*\} from "\./([\w]+\.js)";$', (MODULES / name).read_text(), re.M)
+    return modules + worker_modules(name)
 
 
 def test_the_page_loads_its_script_as_a_module_under_the_page_version():
-    page = new_ledger.render(new_ledger.build_doc(CONTENT), "modules", 8765)
+    server.repository.create("modules", CONTENT)
+    page = server.page_for("modules")
     version = core.page_version()
     assert f'<script type="module" src="/static/{version}/js/main.js"></script>' in page
-    assert page.count("<script>") == 1
-    assert f"<script>{core.TOOLTIPS.read_text()}</script>" in page
+    assert f'<script src="/static/{version}/tooltips.js"></script>' in page
+    assert page.count("<script") == 2
 
 
 def test_every_module_the_page_imports_exists_and_no_module_holds_the_whole_script():
@@ -65,8 +76,22 @@ def test_every_module_the_page_imports_exists_and_no_module_holds_the_whole_scri
     assert max(len((MODULES / n).read_text().splitlines()) for n in seen) < 400
 
 
+def test_worker_dependency_inventory_refuses_a_missing_script(tmp_path, monkeypatch):
+    from tests.swarm_ledger import ledger_page
+
+    (tmp_path / "main.js").write_text('const worker = new Worker(new URL("missing.js", main));')
+    monkeypatch.setattr(ledger_page, "MODULES", tmp_path)
+    monkeypatch.setitem(globals(), "MODULES", tmp_path)
+    assert imports("main.js") == ["missing.js"]
+    with pytest.raises(FileNotFoundError, match="missing.js"):
+        test_every_module_the_page_imports_exists_and_no_module_holds_the_whole_script()
+
+
 def test_the_source_view_for_text_checks_covers_every_module():
-    assert set(ORDER) == {p.stem for p in MODULES.glob("*.js")}
+    from tests.swarm_ledger.ledger_page import worker_modules
+
+    workers = {Path(worker).stem for name in ORDER for worker in worker_modules(f"{name}.js")}
+    assert set(ORDER) | workers == {p.stem for p in MODULES.glob("*.js")}
     assert page_source().count("<script>") == 2
 
 
@@ -87,7 +112,7 @@ def test_the_server_serves_each_module_at_the_current_version(base):
     ],
 )
 def test_the_server_refuses_a_stale_version_or_an_unknown_file(base, route):
-    assert get(base + route.format(v=core.page_version())) == (404, "text/plain", "no such module")
+    assert get(base + route.format(v=core.page_version())) == (404, "text/plain", "no such asset")
 
 
 def test_a_module_edit_changes_the_page_version(tmp_path):
@@ -95,5 +120,40 @@ def test_a_module_edit_changes_the_page_version(tmp_path):
     for path in MODULES.glob("*.js"):
         (tmp_path / path.name).write_text(path.read_text())
     (tmp_path / "chat.js").write_text((tmp_path / "chat.js").read_text() + ";")
-    with patch.object(core, "MODULES", tmp_path):
+    with patch.object(page_assets, "MODULES", tmp_path):
         assert core.page_version() != before
+
+
+def test_the_asset_list_serves_the_palette_and_the_home_script_by_their_paths():
+    assets = core.static_assets()
+    assert assets["palette.css"] == core.PALETTE
+    assert assets["home/home.js"] == core.MODULES.parent / "home" / "home.js"
+
+
+def test_the_page_version_hashes_the_pages_then_each_name_a_nul_and_its_bytes():
+    import hashlib
+
+    pages = core.SHELL.read_bytes() + core.HOME.read_bytes()
+    expected = hashlib.sha256(pages + b"a\0b").hexdigest()[:12]
+    assert core.page_version({"a": b"b"}) == expected
+
+
+def test_the_old_per_ledger_template_and_page_path_helper_are_gone():
+    assert not (core.SHELL.parent / "template.html").exists()
+    assert not hasattr(core, "TEMPLATE")
+    assert not hasattr(core, "paths")
+
+
+def test_a_version_url_serves_the_bytes_its_version_was_computed_from(base, tmp_path):
+    server.served_page.cache_clear()
+    version = server.served_version()
+    original = (MODULES / "chat.js").read_text(encoding="utf-8")
+    for path in MODULES.glob("*.js"):
+        (tmp_path / path.name).write_text(path.read_text())
+    (tmp_path / "chat.js").write_text(original + ";")
+    try:
+        with patch.object(page_assets, "MODULES", tmp_path):
+            served = get(f"{base}/static/{version}/js/chat.js")
+    finally:
+        server.served_page.cache_clear()
+    assert served == (200, "text/javascript; charset=utf-8", original)

@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/repository/file.py:scripts.swarm_ledger.repository.file.x\u01c1FileLedgerRepository\u01c1events_since__mutmut_6:a4b51e8d9e868bfc09267f83c4b792fd822fe5b2eeded8ef384aae0a32019f92": {
+    "reader": "Standards",
+    "reason": "These calls always load existing JSON with seed None. The default and supplied canonical core expose identical pure loads/normalize code and constants; locks and paths remain bound to self.domain."
+  }
+}

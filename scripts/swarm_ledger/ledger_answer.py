@@ -1,12 +1,14 @@
 """Answer: the swarm master answers an agent's question as itself, so it leaves the operator's Priorities.
 
-Only the ledger's orchestrator answers; the command allows it at delegate and full autonomy, where the master
-decides for the operator.
+Only the ledger's orchestrator or a master seat answers; the command allows it at delegate and full autonomy, where the
+master decides for the operator.
 """
 
 import re
 
 import ledger_comments
+
+from scripts.swarm_ledger import ports
 
 ITEM_RE = re.compile(r"^questions/[^/]+$")
 AUTHOR_RE = re.compile(r"^[A-Za-z][\w.@-]{0,63}$")
@@ -36,12 +38,23 @@ def check(op):
 
 
 def apply(doc, op, ctx):
+    lane_of = ports.swarm().naming.lane_of
+
     question = next((q for q in doc["questions"] if q["id"] == op["item"].split("/")[1]), None)
     if question is None:
+        ctx.refused.append(f"answer on {op['item']} refused: no such question")
         return False
     if any(e["id"] == op["id"] for e in question["answers"]):
         return True
-    if ctx.meta["members"].get(op["by"], {}).get("role") != "orchestrator":
+    member = ctx.meta["members"].get(op["by"])
+    if member is None:
+        ctx.refused.append(f"answer on {op['item']} refused: {op['by']} has not joined this ledger")
+        return False
+    if member.get("role") != "orchestrator" and lane_of(op["by"]) != "master":
+        ctx.refused.append(
+            f"answer on {op['item']} refused: only the swarm master answers questions, "
+            f"and {op['by']} joined as {member['role']}"
+        )
         return False
     text = op["text"].strip()
     question["answers"].append({"id": op["id"], "by": op["by"], "at": ctx.at, "text": text})

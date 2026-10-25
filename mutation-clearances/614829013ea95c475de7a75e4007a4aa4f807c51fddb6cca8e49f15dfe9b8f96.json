@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.x_page_for__mutmut_37:1a189e76956aa505c6c8f60bd305c771f03d533048c842db2e9d310d0fb02d72": {
+    "reader": "Standards",
+    "reason": "Same locale fallback argument applied to core.SHELL. shell.html carries its middle dot and ellipsis as HTML entities so the file is pure ASCII at the byte level, and test_page_shells_are_plain_ascii_so_any_ascii_locale_reads_them_alike locks core.SHELL to that. The locale derived decode, always an ASCII compatible POSIX charmap, and the explicit utf-8 decode yield the same str for every byte, so page_for renders the same shell for any slug. Evidence: CI run 37704627823. Adversarial Standards ruling."
+  }
+}

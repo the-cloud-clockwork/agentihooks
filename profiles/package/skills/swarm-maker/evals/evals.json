@@ -1,0 +1,47 @@
+[
+  {
+    "query": "Build a purpose built backtest swarm. I have no bundle. Engineers need a backtest tuner persona and qa must audit the results. Help me choose the tools and proof.",
+    "files": [],
+    "expected_behavior": [
+      "Interviews for the outcome, existing swarm or accepted plan, role capabilities, tools and checkable proof before writing domain instructions",
+      "Checks bundle list and runs bundle new in an agreed empty directory only when none is linked",
+      "Keeps engineer and qa as base roles and creates bundle overlays with overlay new and matching wears",
+      "Runs overlay check, fixes every reported fault and repeats until each overlay passes",
+      "Commits and makes the bundle revision accessible to remote hives before selection",
+      "Explains shared per role selection and a launch record carrying names and bundle revision without starting an unaccepted swarm"
+    ]
+  },
+  {
+    "query": "I have a linked bundle and a running swarm. Reuse its trader overlay for engineers, but give one research task only the risk auditor overlay. Do not restart anyone.",
+    "files": [],
+    "expected_behavior": [
+      "Reuses the linked bundle and existing overlay instead of creating another bundle or overwriting it",
+      "Checks that trader and risk auditor are kind overlay profiles whose wears include engineer",
+      "Uses swarm set overlays-engineer=trader for the role default and ledger task set overlays=risk-auditor for the named task",
+      "States the task list replaces the role default rather than adding to it",
+      "Validates the saved selection through status and the task record",
+      "States changes apply at the next fresh launch and existing agents, relaunches and handoffs retain recorded overlays"
+    ]
+  },
+  {
+    "query": "Make a new trader base role with four overlays in this repo's local profiles folder. Our remote hive should read my uncommitted laptop files.",
+    "files": [],
+    "expected_behavior": [
+      "Preserves one of master, engineer, planner, qa or cicd and proposes domain capabilities as overlays",
+      "Keeps overlays in the linked versioned bundle and never creates repo local profiles",
+      "Reduces the requested selection to at most three with the user before saving it",
+      "Requires a committed bundle revision reachable by the remote hive",
+      "Keeps the selection in shared swarm or task data and names plus bundle revision in the launch record"
+    ]
+  },
+  {
+    "query": "Overlay check says my tuner has extends and wears pilot. The scaffold directory already exists. Just ignore the errors and select it.",
+    "files": [],
+    "expected_behavior": [
+      "Preserves the existing overlay directory and edits the intended overlay instead of rerunning overlay new over it",
+      "Removes extends and maps wears to the agreed base role",
+      "Repeats overlay check and proceeds only after a pass",
+      "Reports a failed validation as incomplete and never saves an invalid selection"
+    ]
+  }
+]

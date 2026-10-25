@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/effort_range.py:scripts.swarm.effort_range.x__without_effort__mutmut_9:5a3550bfb58a11243f8958a6c6146203aa011e63500d3d948161a4695c2f7d3e": {
+    "reader": "Standards",
+    "reason": "The reset skip value is only read by a truthiness test, where False and None are both falsy."
+  }
+}

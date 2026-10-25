@@ -1,0 +1,78 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:swarm-v2:launch-grant",
+  "title": "Launch grant registration",
+  "description": "A registration admitted by a signed launch grant. The grant claims are signed by the controller; the signing key and the token are never stored.",
+  "$defs": {
+    "bound": {
+      "type": "object",
+      "required": ["swarm_id", "execution_id", "generation", "seat_id", "task_id", "account", "brain_id", "project_ids"],
+      "properties": {
+        "swarm_id": {"$ref": "urn:swarm-v2:common#/$defs/identifier"},
+        "execution_id": {"$ref": "urn:swarm-v2:common#/$defs/identifier"},
+        "generation": {"$ref": "urn:swarm-v2:common#/$defs/generation"},
+        "seat_id": {"$ref": "urn:swarm-v2:common#/$defs/identifier"},
+        "task_id": {"$ref": "urn:swarm-v2:common#/$defs/identifier"},
+        "account": {"$ref": "urn:swarm-v2:common#/$defs/identifier"},
+        "brain_id": {"$ref": "urn:swarm-v2:common#/$defs/identifier"},
+        "project_ids": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "allOf": [
+              {"$ref": "urn:swarm-v2:common#/$defs/project_id"},
+              {"not": {"const": "unknown"}}
+            ]
+          }
+        },
+        "grant_id": {"type": "string", "pattern": "^lgr-[0-9a-f]{32}$"},
+        "issuer": {"$ref": "urn:swarm-v2:common#/$defs/identifier"},
+        "audience": {"$ref": "urn:swarm-v2:common#/$defs/identifier"},
+        "key_id": {"$ref": "urn:swarm-v2:common#/$defs/identifier"}
+      }
+    },
+    "claims": {
+      "allOf": [{"$ref": "#/$defs/bound"}],
+      "type": "object",
+      "required": ["schema_version", "grant_id", "issuer", "audience", "key_id", "issued_at", "expires_at"],
+      "properties": {
+        "schema_version": {"const": "2.0"},
+        "swarm_id": true,
+        "execution_id": true,
+        "generation": true,
+        "seat_id": true,
+        "task_id": true,
+        "account": true,
+        "brain_id": true,
+        "project_ids": true,
+        "grant_id": true,
+        "issuer": true,
+        "audience": true,
+        "key_id": true,
+        "issued_at": {"$ref": "urn:swarm-v2:common#/$defs/timestamp"},
+        "expires_at": {"$ref": "urn:swarm-v2:common#/$defs/timestamp"}
+      },
+      "additionalProperties": false
+    }
+  },
+  "allOf": [{"$ref": "#/$defs/bound"}],
+  "type": "object",
+  "required": ["grant_id", "issuer", "audience", "key_id", "registered_at"],
+  "properties": {
+    "swarm_id": true,
+    "execution_id": true,
+    "generation": true,
+    "seat_id": true,
+    "task_id": true,
+    "account": true,
+    "brain_id": true,
+    "project_ids": true,
+    "grant_id": true,
+    "issuer": true,
+    "audience": true,
+    "key_id": true,
+    "registered_at": {"$ref": "urn:swarm-v2:common#/$defs/timestamp"}
+  },
+  "additionalProperties": false
+}

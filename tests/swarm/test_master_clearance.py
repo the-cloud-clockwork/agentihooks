@@ -4,13 +4,13 @@ from pathlib import Path
 
 import pytest
 
-from scripts.gates import catalog, entry, lift, modes
+from scripts.gates import catalog, entry, intent, lift, modes
 from scripts.swarm import clearance, cli
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
 from scripts.swarm_ledger import ledger_server
 from tests.swarm.test_tick import FakeLedger, FakeRuntime
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 
 MASTER, ENGINEER, PLANNER, STRANGER = (
     "master@a1b2c3-0001",
@@ -18,7 +18,7 @@ MASTER, ENGINEER, PLANNER, STRANGER = (
     "planner@a1b2c3-0003",
     "master@d4e5f6-0001",
 )
-TEMPLATE = Path(ledger_server.__file__).with_name("template.html")
+SHELL = Path(ledger_server.__file__).with_name("shell.html")
 
 
 @pytest.fixture
@@ -37,6 +37,8 @@ def swarm(monkeypatch, tmp_path):
     ledger = FakeLedger([])
     ledger.said = []
     ledger.say = lambda slug, text, by=None: ledger.said.append((text, by) if slug == "demo" else (slug, text, by))
+    ledger.notes = []
+    ledger.notify = lambda slug, text: ledger.notes.append(text if slug == "demo" else (slug, text))
     ledger.summarize = ledger.mark_closed = ledger.reopen = lambda *args: None
     monkeypatch.setattr(cli, "connect", lambda: store)
     monkeypatch.setattr(cli, "LedgerClient", lambda: ledger)
@@ -56,7 +58,7 @@ FAMILIES = {
     "lifecycle": (["pause"], "master a1b2c3 0001 changed the swarm state with pause from running to paused."),
     "capacity": (
         ["set", "max-eng-agents=5", "effort-max=max", "master-agent=codex"],
-        "master a1b2c3 0001 changed max eng agents from 2 to 5, effort max from high to max, "
+        "master a1b2c3 0001 changed max eng agents from 2 to 5, effort max from xhigh to max, "
         "master agent from claude to codex.",
     ),
     "autonomy": (["set", "autonomy=full"], "master a1b2c3 0001 changed autonomy from delegate to full."),
@@ -80,7 +82,21 @@ def test_the_master_of_the_swarm_uses_each_control_and_the_ledger_records_it(swa
     store.update("demo", lanes={"master": {"agent": "claude"}})
     acting(monkeypatch, MASTER, "demo")
     assert cli.main(["demo", *argv]) == 0
-    assert ledger.said == [(record, "swarm")]
+    assert ledger.notes == [record]
+
+
+def test_the_master_lift_reads_the_task_lift_against_its_pull_request_head(swarm, monkeypatch):
+    store, ledger = swarm
+    ledger.rows["t1"] = {"id": "t1", "pr_url": "https://github.com/o/r/pull/7"}
+    head = ["a1"]
+    monkeypatch.setattr(intent, "pr_head", lambda url: head[0])
+    acting(monkeypatch, MASTER, "demo")
+    assert cli.main(["demo", "lift", ENGINEER, "watch"]) == 0
+    head[0] = "b2"
+    assert cli.main(["demo", "lift", ENGINEER, "watch"]) == 0
+    assert cli.main(["demo", "lift", ENGINEER, "talk"]) == 0
+    record = "master a1b2c3 0001 changed {} gate lift for engineer a1b2c3 0002 from not lifted to lifted."
+    assert ledger.notes == [record.format("watch"), record.format("watch"), record.format("talk")]
 
 
 @pytest.mark.parametrize(
@@ -94,7 +110,7 @@ def test_an_agent_or_another_swarms_master_is_refused(swarm, monkeypatch, capsys
     assert cli.main(["demo", *FAMILIES[family][0]]) == 1
     assert capsys.readouterr().err == refused(name)
     assert changed(store) == before
-    assert ledger.said == []
+    assert ledger.notes == []
 
 
 @pytest.mark.parametrize("family", FAMILIES)
@@ -104,7 +120,7 @@ def test_the_operator_keeps_every_control_without_a_master_record(swarm, monkeyp
     monkeypatch.delenv("AGENTIHOOKS_AGENT_NAME", raising=False)
     assert cli.main(["demo", *FAMILIES[family][0]]) == 0
     assert changed(store) != before
-    assert [text for text, _ in ledger.said if text.startswith("master a1b2c3 0001")] == []
+    assert [text for text in ledger.notes if text.startswith("master a1b2c3 0001")] == []
 
 
 def test_a_hand_taken_master_without_a_swarm_pin_keeps_its_clearance(swarm, monkeypatch):
@@ -112,7 +128,7 @@ def test_a_hand_taken_master_without_a_swarm_pin_keeps_its_clearance(swarm, monk
     acting(monkeypatch, MASTER, "")
     assert cli.main(["demo", "pause"]) == 0
     assert store.config("demo").state == "paused"
-    assert ledger.said == [("master a1b2c3 0001 changed the swarm state with pause from running to paused.", "swarm")]
+    assert ledger.notes == ["master a1b2c3 0001 changed the swarm state with pause from running to paused."]
 
 
 def test_a_master_use_that_changes_nothing_is_still_recorded(swarm, monkeypatch):
@@ -120,7 +136,7 @@ def test_a_master_use_that_changes_nothing_is_still_recorded(swarm, monkeypatch)
     store.update("demo", state="paused")
     acting(monkeypatch, MASTER, "demo")
     assert cli.main(["demo", "pause"]) == 0
-    assert ledger.said == [("master a1b2c3 0001 changed the swarm state with pause from paused to paused.", "swarm")]
+    assert ledger.notes == ["master a1b2c3 0001 changed the swarm state with pause from paused to paused."]
 
 
 def test_a_lane_field_records_unset_and_keeps_an_equals_sign_in_its_value(swarm, monkeypatch):
@@ -128,7 +144,7 @@ def test_a_lane_field_records_unset_and_keeps_an_equals_sign_in_its_value(swarm,
     acting(monkeypatch, MASTER, "demo")
     assert cli.main(["demo", "set", "eng-role=fix=now"]) == 0
     assert store.config("demo").lanes["eng"]["role"] == "fix=now"
-    assert ledger.said == [("master a1b2c3 0001 changed eng role from unset to fix=now.", "swarm")]
+    assert ledger.notes == ["master a1b2c3 0001 changed eng role from unset to fix=now."]
 
 
 def refused(name):
@@ -143,6 +159,13 @@ def test_a_finished_master_holds_no_clearance(swarm, monkeypatch, capsys):
     assert capsys.readouterr().err == refused(MASTER)
 
 
+def test_the_holder_judges_the_operator_by_the_environment_it_is_given(swarm, monkeypatch):
+    from scripts.gates import Who
+
+    acting(monkeypatch, "engineer@unregistered-0009", "")
+    assert clearance.holder(swarm[0], "demo", Who(), {}) == clearance.OPERATOR
+
+
 @pytest.mark.parametrize("argv", [["pause"], ["--as", MASTER, "pause"], ["set", "intent-gate=coach"]])
 def test_an_agent_that_drops_its_swarm_pin_is_still_refused_by_its_session_name(swarm, monkeypatch, capsys, argv):
     store, ledger = swarm
@@ -152,7 +175,7 @@ def test_an_agent_that_drops_its_swarm_pin_is_still_refused_by_its_session_name(
     assert cli.main(["demo", *argv]) == 1
     assert capsys.readouterr().err == refused(ENGINEER)
     assert changed(store) == before
-    assert ledger.said == []
+    assert ledger.notes == []
 
 
 def test_the_master_stop_now_is_recorded_before_it_retires_the_master(swarm, monkeypatch):
@@ -161,9 +184,7 @@ def test_the_master_stop_now_is_recorded_before_it_retires_the_master(swarm, mon
     acting(monkeypatch, MASTER, "demo")
     with pytest.raises(SystemExit):
         cli.main(["demo", "stop", "--now"])
-    assert ledger.said == [
-        ("master a1b2c3 0001 changed the swarm state with stop now from running to stopping.", "swarm")
-    ]
+    assert ledger.notes == ["master a1b2c3 0001 changed the swarm state with stop now from running to stopping."]
 
 
 @pytest.mark.parametrize("argv,control", [(["stop", "--now"], "stop now"), (["close", "--now"], "close ledger")])
@@ -172,18 +193,25 @@ def test_a_master_stop_that_outlives_its_retirement_records_the_settled_state(sw
     acting(monkeypatch, MASTER, "demo")
     assert cli.main(["demo", *argv]) == 0
     assert store.config("demo").state == "stopped"
-    assert ledger.said[:2] == [
-        (f"master a1b2c3 0001 changed the swarm state with {control} from running to stopping.", "swarm"),
-        (f"master a1b2c3 0001 changed the swarm state with {control} from stopping to stopped.", "swarm"),
+    assert ledger.notes[:2] == [
+        f"master a1b2c3 0001 changed the swarm state with {control} from running to stopping.",
+        f"master a1b2c3 0001 changed the swarm state with {control} from stopping to stopped.",
     ]
 
 
-SAMPLES = {"compact_limit": 200, "effort_min": "low", "effort_max": "max", "master_agent": "codex"}
+SAMPLES = {
+    "compact_limit": 200,
+    "effort_min": "low",
+    "effort_max": "max",
+    "master_agent": "codex",
+    "claude_model": "opus",
+    "codex_model": "gpt-6.1-sol",
+}
 NOT_SWARM = {"apply", "doctor_start", "doctor_stop"}
 
 
 def panel_bodies():
-    page = TEMPLATE.read_text()
+    page = SHELL.read_text()
     swarm_buttons = set(re.findall(r'data-swarm="([a-z_]+)"', page))
     for action in sorted(swarm_buttons - NOT_SWARM):
         if not re.search(r"_(?:up|down)$", action):
@@ -203,14 +231,23 @@ def test_the_walk_finds_every_panel_control_family():
     bodies = list(panel_bodies())
     found = {b["action"] for b in bodies} | {key for b in bodies for key in b if key != "action"}
     assert {"start", "pause", "stop", "stop_now", "close", "reopen", "set", "lift"} <= found
-    assert {"autonomy", "max_eng", "max_ci", "max_plan", "codex_share", "compact_limit"} <= found
+    assert {"autonomy", "max_eng", "max_ci", "max_plan", "compact_limit"} <= found
     assert {"effort_min", "effort_max", "master_agent", "gates", "agent"} <= found
 
 
 @pytest.mark.parametrize("body", list(panel_bodies()), ids=str)
 def test_every_panel_control_is_a_cleared_command_the_command_line_takes(swarm, monkeypatch, body):
+    from unittest.mock import patch
+
+    from scripts.swarm import model_catalog
+
     store, _ = swarm
-    argv = ledger_server.control_argv(body)
-    assert argv[0] in clearance.COMMANDS
-    acting(monkeypatch, MASTER, "demo")
-    assert cli.main(["demo", *argv]) == 0
+    models = {"claude": [{"model": "opus"}], "codex": [{"model": "gpt-6.1-sol"}]}
+    with (
+        patch.object(model_catalog, "catalog", return_value=models),
+        patch.object(ledger_server, "swarm_models", return_value=models),
+    ):
+        argv = ledger_server.control_argv(body)
+        assert argv[0] in clearance.COMMANDS
+        acting(monkeypatch, MASTER, "demo")
+        assert cli.main(["demo", *argv]) == 0

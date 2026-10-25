@@ -11,18 +11,23 @@ from scripts.swarm.tick import tick
 from tests.swarm.test_cli import env, run  # noqa: F401
 from tests.swarm.test_close import closing  # noqa: F401
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
 DOC = "# Handoff v2\n## Next\nRead the saved proof.\n## Read first\nNone\n"
 
 
 @pytest.fixture
 def taker(env, monkeypatch, tmp_path):  # noqa: F811
     store, ledger, rt = env
+    from hooks.proc import Process
+
     named = []
+    monkeypatch.setattr(take_master.process, "local_namespace", lambda: "boot/pidns")
+    monkeypatch.setattr(
+        take_master, "processes", lambda: {4242: Process(4242, 1, 4242, 4242, 100, "S", "codex", ("codex",))}
+    )
     monkeypatch.setattr(take_master, "PROC", tmp_path / "no-proc")
     ledger.calls, ledger.is_closed = [], False
     ledger.closed = lambda slug: ledger.is_closed
-    ledger.reopen = lambda slug, by: ledger.calls.append(("reopened", by))
+    ledger.reopen = lambda slug, by: ledger.calls.append(("reopened", slug, by))
     monkeypatch.delenv("AGENTIHOOKS_AGENT_NAME", raising=False)
     monkeypatch.setattr(take_master, "agent_pid", lambda: 4242)
     monkeypatch.setattr(take_master, "harness_of", lambda pid: "codex")
@@ -44,6 +49,16 @@ def test_take_master_seats_this_session_and_names_it(taker, capsys):
     assert rt.masters == []
 
 
+def test_take_master_writes_a_durable_seat_record_for_each_live_session(taker):
+    from hooks.context import broadcast, master_coding
+
+    broadcast.register_session("session-a", 4242, "/repo", "codex")
+    assert run("sw", "take-master") == 0
+    seat = json.loads(master_coding.seat_path("session-a").read_text())
+    assert seat == {"slug": "sw", "name": "master@a1b2c3-0001"}
+    assert master_coding.is_master("session-a")
+
+
 def test_take_master_records_the_model_and_effort_the_session_launched_with(taker, monkeypatch):
     store, _, _, _ = taker
     argv = ("codex", "-m", "gpt-6.1-sol", "-c", 'model_reasoning_effort="high"')
@@ -53,6 +68,25 @@ def test_take_master_records_the_model_and_effort_the_session_launched_with(take
     [master] = [a for a in store.agents("sw") if a.lane == "master"]
     assert (master.harness, master.model, master.effort) == ("codex", "gpt-6.1-sol", "high")
     assert master.started_at > 0
+
+
+def test_take_master_reads_the_harness_from_the_binding_when_the_process_names_none(taker, monkeypatch):
+    store, _, _, _ = taker
+    monkeypatch.setattr(take_master, "harness_of", lambda pid: "")
+    monkeypatch.setattr(take_master, "launch_of", lambda pid: ("cx", {"harness": "codex"}))
+    assert run("sw", "take-master") == 0
+    [master] = [a for a in store.agents("sw") if a.lane == "master"]
+    assert (master.harness, master.account) == ("codex", "cx")
+
+
+def test_take_master_reads_no_model_when_neither_process_nor_binding_names_a_harness(taker, monkeypatch):
+    store, _, _, _ = taker
+    monkeypatch.setattr(take_master, "harness_of", lambda pid: "")
+    monkeypatch.setattr(take_master, "launch_of", lambda pid: ("", {}))
+    monkeypatch.setattr(take_master.launch_model, "configured", lambda harness: {"model": "opus", "effort": "max"})
+    assert run("sw", "take-master") == 0
+    [master] = [a for a in store.agents("sw") if a.lane == "master"]
+    assert (master.harness, master.model, master.effort) == ("", "", "")
 
 
 def test_take_master_records_the_mounted_profile(taker, monkeypatch):
@@ -281,7 +315,7 @@ def test_take_master_reopens_a_closed_ledger_and_runs_a_stopped_swarm(taker):
     store.update("sw", state="stopped")
     ledger.is_closed = True
     assert run("sw", "take-master") == 0
-    assert ledger.calls == [("reopened", "master@a1b2c3-0001")]
+    assert ledger.calls == [("reopened", "sw", "master@a1b2c3-0001")]
     assert store.config("sw").state == "running"
 
 
@@ -336,7 +370,14 @@ def test_the_tick_sees_the_taken_master_and_spawns_no_second_one(taker):
 
 
 def test_close_retires_the_taken_master(closing, monkeypatch):  # noqa: F811
+    from hooks.proc import Process
+
     store, ledger, rt, _ = closing
+    monkeypatch.setattr(cli, "routed", lambda **kwargs: rt)
+    monkeypatch.setattr(take_master.process, "local_namespace", lambda: "boot/pidns")
+    monkeypatch.setattr(
+        take_master, "processes", lambda: {4242: Process(4242, 1, 4242, 4242, 100, "S", "claude", ("claude",))}
+    )
     ledger.closed = lambda slug: False
     monkeypatch.setattr(take_master, "agent_pid", lambda: 4242)
     monkeypatch.setattr(take_master, "harness_of", lambda pid: "claude")
@@ -381,3 +422,22 @@ def test_the_open_master_transfer_moves_to_the_new_occupant(taker, monkeypatch, 
 def test_cli_parses_take_master():
     args = cli.build_parser().parse_args(["sw", "take-master", "--replace"])
     assert (args.command, args.replace) == ("take-master", True)
+
+
+def test_taken_local_master_has_runtime_authority_and_can_pause(taker, monkeypatch):
+    from scripts.swarm_v2.runtime.commands import Commands, Principal, Role
+
+    store, _, _, _ = taker
+    monkeypatch.setenv("AGENTIHOOKS_DEPLOYMENT", "local")
+    assert run("sw", "take-master") == 0
+    master = next(a for a in store.agents("sw") if a.lane == "master")
+    registered = store.execution_registry.occupants("sw").get(master.seat)
+    assert registered is not None
+    assert registered == master
+    assert master.execution_id and master.generation == 1
+    principal = Principal(master.name, Role.MASTER, master.execution_id, master.generation)
+    commands = Commands(store, [], lambda slug, credential: principal)
+    assert commands.controls("sw", master.seat, "") is not None
+    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", master.name)
+    assert run("sw", "pause") == 0
+    assert store.config("sw").state == "paused"

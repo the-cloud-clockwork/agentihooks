@@ -9,8 +9,6 @@ from scripts.swarm.store import MASTER, AgentRecord, RedisStore, SwarmConfig
 from scripts.swarm.tick import tick
 from tests.swarm.test_tick import FakeLedger, FakeRuntime
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 LAUNCH = 1_000_000
 LAUNCH_CHECKED = True
 
@@ -75,10 +73,26 @@ def test_not_joined_is_named(store, launched):
     assert list(misses(store, agent, facts, {"_meta": {"members": {}}})) == ["joined"]
 
 
-def test_joined_after_the_deadline_is_named(store, launched):
+def test_a_seated_join_after_the_deadline_is_named_late(store, launched):
     agent, facts, doc = launched
     doc["_meta"]["members"][agent.name]["joined_at"] = LAUNCH + launch_check.DEADLINE_MS + 1
-    assert list(misses(store, agent, facts, doc)) == ["joined"]
+    assert list(misses(store, agent, facts, doc)) == ["late"]
+    assert "late" in launch_check.REPORT_ONLY
+
+
+def test_the_join_deadline_starts_at_the_harness_start(store, launched):
+    agent, facts, doc = launched
+    agent = replace(agent, launched_at=LAUNCH, launch_timings={"harness_at": LAUNCH + 30_000})
+    doc["_meta"]["members"][agent.name]["joined_at"] = LAUNCH + 89_000
+    assert misses(store, agent, facts, doc) == {}
+    doc["_meta"]["members"][agent.name]["joined_at"] = LAUNCH + 91_000
+    assert misses(store, agent, facts, doc)["late"]["actual"]["joined_after_ms"] == 61_000
+
+
+def test_a_harness_start_before_the_launch_is_ignored(store, launched):
+    agent, facts, doc = launched
+    agent = replace(agent, launched_at=LAUNCH, launch_timings={"harness_at": LAUNCH - 30_000})
+    assert launch_check.session_started_at(agent) == LAUNCH
 
 
 def test_seat_held_by_another_is_named(store, launched):
@@ -101,15 +115,15 @@ def test_missing_hooks_or_wrong_model_or_effort_is_named_settings(store, launche
     assert found["settings"]["actual"][field] == value
 
 
-def test_no_live_process_misses_profile_and_settings(store, launched):
+@pytest.mark.parametrize("facts", [{}, {"process": False}, {"process": None}])
+def test_unavailable_process_reports_an_observation_without_configuration_mismatches(store, launched, facts):
     agent, _, doc = launched
-    assert list(misses(store, agent, {"process": False}, doc)) == ["profile", "settings", "base"]
-    assert list(misses(store, agent, {"process": False}, doc, declared=["brain"])) == [
-        "profile",
-        "settings",
-        "base",
-        "overlay",
-    ]
+    found = misses(store, agent, facts, doc, declared=["brain"])
+    assert found == {"observation": {"expected": "available process observation", "actual": "unavailable"}}
+    launch_check.record(store, "sw", agent, found, LAUNCH_CHECKED, launch_check.DEADLINE_MS)
+    findings = launch_check.findings(store, "sw")
+    assert [finding.id for finding in findings] == [f"launch-check/{agent.name}/observation"]
+    assert findings[0].evidence == ("expected available process observation; observed unavailable",)
 
 
 @pytest.mark.parametrize(
@@ -220,13 +234,13 @@ def checked(store, monkeypatch, profile="engineer", task_profile="engineer"):
     from hooks.context import profile_chain
 
     monkeypatch.setattr(profile_chain, "read_state", lambda: {})
-    monkeypatch.setattr(launch_check, "declared", lambda profile: [])
+    monkeypatch.setattr(launch_check, "declared", lambda profile, worn=(): [])
     monkeypatch.setenv("AGENTIHOOKS_MASTER_RETIRE_HANDOFF_MINUTES", "0")
     ledger, runtime = JoiningLedger([{"id": "t1", "profile": task_profile}]), CheckedRuntime()
     original = runtime.spawn
 
-    def spawn(config, lane, name, task, spawns=None):
-        placed = original(config, lane, name, task, spawns)
+    def spawn(config, lane, name, task):
+        placed = original(config, lane, name, task)
         return replace(placed, profile=profile)
 
     runtime.spawn = spawn
@@ -250,12 +264,38 @@ def test_tick_passes_a_launch_that_joined(store, monkeypatch):
     assert launch_check.report(store, "sw", "t1")["state"] == "passed"
 
 
+@pytest.mark.parametrize("check_delay", [199_437, 286_137, 86_400_000])
+def test_delayed_tick_passes_a_joined_agent_after_leave(store, monkeypatch, check_delay):
+    ledger, runtime = checked(store, monkeypatch)
+    tick("sw", store, ledger, runtime, LAUNCH)
+    (name,) = [n for _, n, _ in runtime.spawned]
+    joined(ledger, runtime, LAUNCH + 15_000)
+    ledger.members.pop(name)
+    original = ledger.state
+
+    def state(slug):
+        doc = original(slug)
+        doc["_meta"]["events"] = [
+            {"kind": "joined", "by": name, "at": LAUNCH + 15_000},
+            {"kind": "left", "by": name, "at": LAUNCH + 100_000},
+        ]
+        return doc
+
+    ledger.state = state
+    actions = tick("sw", store, ledger, runtime, LAUNCH + check_delay)
+    assert f"{name} passed its launch check in 15 seconds" in actions
+    report = launch_check.report(store, "sw", "t1")
+    assert report["state"] == "passed"
+    assert report["elapsed_ms"] == 15_000
+    assert launch_check.pending(store, "sw") == {}
+
+
 def test_the_join_clock_starts_at_the_launch_not_at_the_tick(store, monkeypatch):
     ledger, runtime = checked(store, monkeypatch)
     spawn = runtime.spawn
 
-    def late(config, lane, name, task, spawns=None):
-        return replace(spawn(config, lane, name, task, spawns), launched_at=LAUNCH + 50_000)
+    def late(config, lane, name, task):
+        return replace(spawn(config, lane, name, task), launched_at=LAUNCH + 50_000)
 
     runtime.spawn = late
     tick("sw", store, ledger, runtime, LAUNCH)
@@ -265,14 +305,60 @@ def test_the_join_clock_starts_at_the_launch_not_at_the_tick(store, monkeypatch)
     assert f"{name} passed its launch check in 50 seconds" in actions
 
 
+def test_the_tick_times_the_join_from_the_harness_start(store, monkeypatch):
+    ledger, runtime = checked(store, monkeypatch)
+    spawn = runtime.spawn
+
+    def slow_launcher(config, lane, name, task):
+        placed = replace(spawn(config, lane, name, task), launched_at=LAUNCH)
+        return replace(placed, launch_timings={"launched_at": LAUNCH, "harness_at": LAUNCH + 30_000})
+
+    runtime.spawn = slow_launcher
+    tick("sw", store, ledger, runtime, LAUNCH)
+    (name,) = [n for _, n, _ in runtime.spawned]
+    waiting = tick("sw", store, ledger, runtime, LAUNCH + 70_000)
+    assert not any(name in a and "launch check" in a for a in waiting)
+    joined(ledger, runtime, LAUNCH + 80_000)
+    actions = tick("sw", store, ledger, runtime, LAUNCH + 85_000)
+    assert f"{name} passed its launch check in 50 seconds" in actions
+    assert name not in runtime.killed
+
+
+def test_a_late_join_that_holds_its_seat_is_reported_and_kept(store, monkeypatch):
+    ledger, runtime = checked(store, monkeypatch)
+    tick("sw", store, ledger, runtime, LAUNCH)
+    (name,) = [n for _, n, _ in runtime.spawned]
+    joined(ledger, runtime, LAUNCH + 71_000)
+    actions = tick("sw", store, ledger, runtime, LAUNCH + 120_000)
+    assert f"{name} failed its launch check on late; reported only" in actions
+    assert name not in runtime.killed
+    assert len(runtime.spawned) == 1
+    report = launch_check.report(store, "sw", "t1")
+    assert report["state"] == "reported"
+    assert report["misses"]["late"]["actual"] == {"joined_after_ms": 71_000, "seat": "eng-1@sw"}
+    assert launch_check.findings(store, "sw") == []
+    assert name not in launch_check.pending(store, "sw")
+
+
+def test_an_agent_that_never_joins_is_still_retired_and_relaunched(store, monkeypatch, scratch):
+    scratch("t1")
+    ledger, runtime = checked(store, monkeypatch)
+    tick("sw", store, ledger, runtime, LAUNCH)
+    (name,) = [n for _, n, _ in runtime.spawned]
+    actions = tick("sw", store, ledger, runtime, LAUNCH + launch_check.DEADLINE_MS)
+    assert any(a.startswith(f"retired {name} after its launch check failed on joined") for a in actions)
+    assert name in runtime.killed
+    assert len(runtime.spawned) == 2
+
+
 def test_a_failed_launch_names_every_miss_and_times_from_the_launch(store, monkeypatch, scratch):
     scratch("t1")
     ledger, runtime = checked(store, monkeypatch)
     runtime.profile = "anton"
     spawn = runtime.spawn
 
-    def late(config, lane, name, task, spawns=None):
-        return replace(spawn(config, lane, name, task, spawns), launched_at=LAUNCH + 50_000)
+    def late(config, lane, name, task):
+        return replace(spawn(config, lane, name, task), launched_at=LAUNCH + 50_000)
 
     runtime.spawn = late
     tick("sw", store, ledger, runtime, LAUNCH)
@@ -339,6 +425,22 @@ def test_master_failure_is_posted_to_the_operator_chat_and_relaunched(store, mon
     assert len(runtime.masters) == 2
 
 
+@pytest.mark.parametrize("facts", [{}, {"process": False}, {"process": None}])
+def test_master_launch_reports_unavailable_observation_and_join_failure(store, monkeypatch, facts):
+    ledger, runtime = checked(store, monkeypatch)
+    store.update("sw", state="running", max_eng=0)
+    tick("sw", store, ledger, runtime, LAUNCH)
+    first, _ = runtime.masters[0]
+    monkeypatch.setattr(runtime, "bindings", lambda agents: {agent.name: facts for agent in agents})
+    actions = tick("sw", store, ledger, runtime, LAUNCH + launch_check.DEADLINE_MS)
+    assert any(f"{first} after its launch check failed on joined, observation" in action for action in actions)
+    assert ledger.notes == [
+        "The master failed its launch check within a minute on joining the ledger and holding its seat, "
+        "an available process observation. It is being retired and relaunched once."
+    ]
+    assert list(launch_check.report(store, "sw", "master")["misses"]) == ["joined", "observation"]
+
+
 def test_master_notification_names_every_miss(store, monkeypatch, tmp_path):
     from hooks.context import profile_chain
 
@@ -385,7 +487,7 @@ def test_a_wrong_base_retires_and_relaunches_the_launch(store, monkeypatch, tmp_
 def test_tick_retires_and_relaunches_a_launch_missing_a_declared_overlay(store, monkeypatch, scratch):
     scratch("t1")
     ledger, runtime = checked(store, monkeypatch)
-    monkeypatch.setattr(launch_check, "declared", lambda profile: ["brain"])
+    monkeypatch.setattr(launch_check, "declared", lambda profile, worn=(): ["brain"])
     tick("sw", store, ledger, runtime, LAUNCH)
     first = runtime.spawned[0][1]
     joined(ledger, runtime, LAUNCH + 1)
@@ -393,6 +495,46 @@ def test_tick_retires_and_relaunches_a_launch_missing_a_declared_overlay(store, 
     assert any(a.startswith(f"retired {first} after its launch check failed on overlay") for a in actions)
     assert first in runtime.killed
     assert launch_check.report(store, "sw", "t1")["misses"]["overlay"] == {"expected": ["brain"], "actual": []}
+
+
+def test_tick_expects_the_overlays_the_agent_was_launched_wearing(store, monkeypatch, scratch):
+    scratch("t1")
+    ledger, runtime = checked(store, monkeypatch)
+    monkeypatch.setattr(launch_check, "declared", lambda profile, worn=(): list(worn))
+    original = runtime.spawn
+    runtime.spawn = lambda *args, **kwargs: replace(original(*args, **kwargs), overlays=["tuner"])
+    tick("sw", store, ledger, runtime, LAUNCH)
+    joined(ledger, runtime, LAUNCH + 1)
+    tick("sw", store, ledger, runtime, LAUNCH + launch_check.DEADLINE_MS)
+    assert launch_check.report(store, "sw", "t1")["misses"]["overlay"] == {"expected": ["tuner"], "actual": []}
+
+
+def test_expected_reads_the_overlays_the_host_rendered(monkeypatch):
+    monkeypatch.setattr(launch_check, "declared", lambda profile, worn=(): [f"{profile}-overlay", *worn])
+    agent = AgentRecord("a", "eng", "t", profile="engineer", overlays=["tuner"])
+    assert launch_check.expected(agent) == ["engineer-overlay", "tuner"]
+    assert launch_check.expected(replace(agent, profile_decision={launch_check.HOST_OVERLAYS: ["tuner"]})) == ["tuner"]
+    assert launch_check.expected(replace(agent, profile_decision={launch_check.HOST_OVERLAYS: []})) == []
+
+
+def test_tick_passes_a_hive_launch_without_an_overlay_its_host_cannot_render(store, monkeypatch, scratch):
+    scratch("t1")
+    ledger, runtime = checked(store, monkeypatch)
+    monkeypatch.setattr(launch_check, "declared", lambda profile, worn=(): ["brain"])
+    original = runtime.spawn
+
+    def hive(*args, **kwargs):
+        placed = original(*args, **kwargs)
+        return replace(placed, profile_decision={**placed.profile_decision, launch_check.HOST_OVERLAYS: []})
+
+    runtime.spawn = hive
+    tick("sw", store, ledger, runtime, LAUNCH)
+    (name,) = [n for _, n, _ in runtime.spawned]
+    joined(ledger, runtime, LAUNCH + 1)
+    actions = tick("sw", store, ledger, runtime, LAUNCH + launch_check.DEADLINE_MS)
+    assert f"{name} passed its launch check in 0 seconds" in actions
+    assert name not in runtime.killed
+    assert launch_check.report(store, "sw", "t1")["state"] == "passed"
 
 
 def test_a_take_master_launch_that_fails_is_reported_and_kept(store, monkeypatch):
@@ -411,8 +553,12 @@ def test_a_take_master_launch_that_fails_is_reported_and_kept(store, monkeypatch
 
 
 def test_take_master_begins_a_check_that_never_relaunches(store, monkeypatch, tmp_path):
+    from hooks.proc import Process
     from scripts.swarm import take_master
 
+    monkeypatch.setattr(
+        take_master, "processes", lambda: {4242: Process(4242, 1, 4242, 4242, 100, "S", "claude", ("claude",))}
+    )
     monkeypatch.setattr(take_master, "PROC", tmp_path / "no-proc")
     monkeypatch.setattr(take_master, "agent_pid", lambda: 4242)
     monkeypatch.setattr(take_master, "harness_of", lambda pid: "claude")
@@ -429,6 +575,51 @@ def test_joined_at_reads_through_missing_levels(launched):
     assert launch_check.joined_at(agent, {"_meta": {"members": {}}}) is None
     assert launch_check.joined_at(agent, {"_meta": {"members": {agent.name: {}}}}) is None
     assert launch_check.joined_at(agent, doc) == LAUNCH + 20_000
+
+
+@pytest.mark.parametrize("delay", [23_106, 19_737])
+def test_a_retained_join_passes_after_leaving(store, launched, delay):
+    agent, facts, doc = launched
+    doc["_meta"]["members"] = {}
+    doc["_meta"]["events"] = [
+        {"kind": "joined", "by": agent.name, "at": LAUNCH + delay},
+        {"kind": "left", "by": agent.name, "at": LAUNCH + 160_000},
+    ]
+    assert misses(store, agent, facts, doc) == {}
+    assert launch_check.joined_at(agent, doc) == LAUNCH + delay
+
+
+@pytest.mark.parametrize("source", ["members", "events", "join_history"])
+def test_a_join_from_an_earlier_launch_does_not_pass(store, launched, source):
+    agent, facts, doc = launched
+    old = LAUNCH - 1
+    doc["_meta"] = {
+        "members": {agent.name: {"joined_at": old}} if source == "members" else {},
+        "events": [{"kind": "joined", "by": agent.name, "at": old}] if source == "events" else [],
+        "join_history": {agent.name: [old]} if source == "join_history" else {},
+    }
+    assert "joined" in misses(store, agent, facts, doc)
+
+
+@pytest.mark.parametrize("source", ["events", "join_history"])
+@pytest.mark.parametrize("delay", [0, 60_000, 60_001])
+def test_retained_join_deadline_and_identity(store, launched, source, delay):
+    agent, facts, doc = launched
+    doc["_meta"] = {"members": {}}
+    evidence = (
+        [{"kind": "joined", "by": agent.name, "at": LAUNCH + delay}]
+        if source == "events"
+        else {agent.name: [LAUNCH - 1, LAUNCH + delay, LAUNCH + 70_000]}
+    )
+    doc["_meta"][source] = evidence
+    assert list(misses(store, agent, facts, doc)) == (["late"] if delay > 60_000 else [])
+    assert launch_check.joined_at(agent, doc) == LAUNCH + delay
+    store.seats.occupy(agent.seat, "someone-else", LAUNCH + 1)
+    assert "joined" in misses(store, agent, facts, doc)
+    store.seats.occupy(agent.seat, agent.name, LAUNCH + 2)
+    agent = replace(agent, name=agent.name + "-other")
+    assert launch_check.joined_at(agent, doc) is None
+    assert "joined" in misses(store, agent, facts, doc)
 
 
 def test_joined_miss_names_the_delay_and_the_seat(store, launched):
@@ -461,11 +652,71 @@ def test_settings_miss_names_the_assigned_values(store, launched):
     }
 
 
-def test_missing_facts_miss_profile_and_settings_with_nothing_observed(store, launched):
-    agent, _, doc = launched
-    found = misses(store, agent, {}, doc)
-    assert found["profile"] == {"expected": "engineer", "actual": None}
-    assert found["settings"]["actual"] == {"hooks": None, "model": None, "effort": None}
+def test_unavailable_process_still_reports_a_real_join_failure(store, launched):
+    agent, _, _ = launched
+    found = misses(store, agent, {}, {}, declared=["brain"])
+    assert list(found) == ["joined", "observation"]
+    assert found["joined"]["actual"]["joined_after_ms"] is None
+    assert found["observation"]["actual"] == "unavailable"
+
+
+@pytest.mark.parametrize("process", [False, None])
+def test_unavailable_process_does_not_grade_stale_configuration(store, launched, process):
+    agent, facts, doc = launched
+    facts.update(process=process, profile="wrong", model="wrong", hooks=False, chain=[], overlays=[])
+    assert misses(store, agent, facts, doc, declared=["brain"]) == {
+        "observation": {"expected": "available process observation", "actual": "unavailable"}
+    }
+
+
+def test_observed_configuration_mismatches_still_report(store, launched):
+    agent, facts, doc = launched
+    facts.update(profile="wrong", model="wrong", hooks=False, chain=[], overlays=[])
+    found = misses(store, agent, facts, doc, declared=["brain"])
+    assert list(found) == ["profile", "settings", "base", "overlay"]
+    assert found["profile"]["actual"] == "wrong"
+    assert found["settings"]["actual"] == {"hooks": False, "model": "wrong", "effort": "high"}
+    assert found["base"]["actual"] == []
+    assert found["overlay"]["actual"] == []
+
+
+@pytest.mark.parametrize("facts", [{}, {"process": False}, {"process": None}])
+def test_captured_missing_process_cases_have_no_unsupported_configuration_findings(store, facts):
+    from pathlib import Path
+
+    captured = json.loads((Path(__file__).parents[1] / "fixtures/swarm/missing_process_launches.json").read_text())
+    configuration = {"profile", "settings", "base", "overlay"}
+    before = sum(len(configuration.intersection(case["misses"])) for case in captured["reports"])
+    assert before == 12
+    store.update("sw", code="323133")
+    for case in captured["reports"]:
+        expected = case["misses"]
+        lane = {"master": MASTER, "engineer": "eng", "ci": "ci"}[case["agent"].split("@")[0]]
+        seat = expected.get("joined", {}).get("expected", {}).get("seat", "eng-1@sw")
+        agent = AgentRecord(
+            case["agent"],
+            lane,
+            case["task"],
+            profile=expected["profile"]["expected"],
+            model=expected["settings"]["expected"]["model"],
+            effort=expected["settings"]["expected"]["effort"],
+            seat=seat,
+            started_at=LAUNCH,
+        )
+        store.seats.occupy(seat, agent.name, LAUNCH)
+        doc = {} if "joined" in expected else {"_meta": {"members": {agent.name: {"joined_at": LAUNCH}}}}
+        found = misses(store, agent, facts, doc, declared=expected["overlay"]["expected"])
+        launch_check.record(store, "sw", agent, found, case["at"], case["elapsed_ms"])
+    findings = launch_check.findings(store, "sw")
+    after = sum(finding.id.rsplit("/", 1)[-1] in configuration for finding in findings)
+    observations = sum(finding.id.endswith("/observation") for finding in findings)
+    joins = sum(finding.id.endswith("/joined") for finding in findings)
+    print(
+        f"captured cases=3 unsupported configuration before={before} after={after} unavailable={observations} joined={joins}"
+    )
+    assert after == 0
+    assert observations == 3
+    assert joins == 2
 
 
 def test_base_miss_names_the_expected_chain(store, launched):
@@ -650,3 +901,144 @@ def test_a_master_relaunch_without_a_session_slot_keeps_its_retry_window(store, 
     assert (pending["name"], pending["retry"], pending["at"]) == ("", True, LAUNCH + launch_check.DEADLINE_MS)
     tick("sw", store, ledger, runtime, LAUNCH + launch_check.DEADLINE_MS + 90_000)
     assert not any("either launch" in note for note in ledger.notes)
+
+
+CANARY_BINDING = {
+    "state": "validated",
+    "profile": "engineer",
+    "harness": "claude",
+    "pid": 4242,
+    "home": "/fixture/profile",
+    "persona": "a" * 64,
+    "sources": "b" * 64,
+    "account": "acct",
+    "validated_at": LAUNCH / 1000,
+}
+
+
+def _deferred_master(store, monkeypatch, tmp_path):
+    from scripts.profiles import binding
+
+    ledger, runtime = checked(store, monkeypatch)
+    store.update("sw", state="running", max_eng=0)
+    report = tmp_path / "canary.json"
+    binding.request(report, "engineer", "claude")
+    spawn = runtime.spawn
+
+    def deferred(config, lane, name, task):
+        placed = spawn(config, lane, name, task)
+        pending = {"state": "pending", "report": str(report), "profile": "engineer", "harness": "claude"}
+        return replace(placed, profile_decision={"validation": {**pending, "account": "acct"}})
+
+    runtime.spawn = deferred
+    tick("sw", store, ledger, runtime, LAUNCH)
+    first, _ = runtime.masters[0]
+    joined(ledger, runtime, LAUNCH + 1)
+    return ledger, runtime, report, first
+
+
+def _master_record(store, name):
+    return next(a for a in store.agents("sw") if a.name == name)
+
+
+def test_a_master_canary_pending_past_the_join_deadline_waits_for_the_canary_deadline(store, monkeypatch, tmp_path):
+    ledger, runtime, _, first = _deferred_master(store, monkeypatch, tmp_path)
+    actions = tick("sw", store, ledger, runtime, LAUNCH + launch_check.DEADLINE_MS)
+    assert not any("launch check" in action for action in actions)
+    assert first in launch_check.pending(store, "sw")
+    actions = tick("sw", store, ledger, runtime, LAUNCH + 120_000)
+    assert any(a.startswith(f"retired {first} after its launch check failed on canary") for a in actions)
+    assert launch_check.report(store, "sw", MASTER)["misses"] == {
+        "canary": {"expected": "validated", "actual": "pending"}
+    }
+    assert ledger.notes == [
+        "The master failed its launch check within a minute on its mounted profile canary. "
+        "It is being retired and relaunched once."
+    ]
+
+
+def test_a_validated_master_canary_passes_and_replaces_the_pending_request(store, monkeypatch, tmp_path):
+    ledger, runtime, report, first = _deferred_master(store, monkeypatch, tmp_path)
+    data = json.loads(report.read_text())
+    report.write_text(json.dumps({**data, "state": "validated", "validation": CANARY_BINDING}))
+    actions = tick("sw", store, ledger, runtime, LAUNCH + 30_000)
+    assert f"{first} passed its launch check in 0 seconds" in actions
+    assert _master_record(store, first).profile_decision["validation"] == CANARY_BINDING
+    assert first not in launch_check.pending(store, "sw")
+
+
+def test_a_failed_master_canary_is_a_failed_launch_at_the_join_deadline(store, monkeypatch, tmp_path):
+    ledger, runtime, report, first = _deferred_master(store, monkeypatch, tmp_path)
+    data = json.loads(report.read_text())
+    report.write_text(json.dumps({**data, "state": "failed", "reason": "mounted instruction canary mismatch"}))
+    assert not any("launch check" in a for a in tick("sw", store, ledger, runtime, LAUNCH + 30_000))
+    actions = tick("sw", store, ledger, runtime, LAUNCH + launch_check.DEADLINE_MS)
+    assert any(a.startswith(f"retired {first} after its launch check failed on canary") for a in actions)
+    assert launch_check.report(store, "sw", MASTER)["misses"] == {
+        "canary": {"expected": "validated", "actual": "mounted instruction canary mismatch"}
+    }
+
+
+def test_a_validated_canary_on_another_account_is_a_miss(store, monkeypatch, tmp_path):
+    _, _, report, first = _deferred_master(store, monkeypatch, tmp_path)
+    data = json.loads(report.read_text())
+    report.write_text(json.dumps({**data, "state": "validated", "validation": {**CANARY_BINDING, "account": "x"}}))
+    agent = _master_record(store, first)
+    assert launch_check.canary(store, "sw", agent) == (
+        agent,
+        {"canary": {"expected": "validated", "actual": "live process account differs from requested route"}},
+    )
+
+
+def test_a_missing_canary_request_is_a_miss(store, monkeypatch, tmp_path):
+    _, _, report, first = _deferred_master(store, monkeypatch, tmp_path)
+    report.unlink()
+    agent = _master_record(store, first)
+    found = launch_check.canary(store, "sw", agent)[1]
+    assert list(found) == ["canary"] and "canary.json" in found["canary"]["actual"]
+
+
+def test_an_already_validated_launch_has_no_canary_miss(store, launched):
+    agent = launched[0]
+    assert launch_check.canary(store, "sw", agent) == (agent, {})
+
+
+@pytest.mark.parametrize(("harness", "seconds"), [("claude", 120), ("codex", 90)])
+def test_a_pending_canary_is_due_at_the_harness_canary_deadline(harness, seconds):
+    agent = AgentRecord("master@a1b2c3-0001", MASTER, MASTER, harness=harness, started_at=LAUNCH)
+    pending = {"canary": {"expected": "validated", "actual": "pending"}}
+    assert not launch_check.due(agent, pending, LAUNCH + seconds * 1000 - 1)
+    assert launch_check.due(agent, pending, LAUNCH + seconds * 1000)
+    failed = {"canary": {"expected": "validated", "actual": "refused"}}
+    assert not launch_check.due(agent, failed, LAUNCH + launch_check.DEADLINE_MS - 1)
+    assert launch_check.due(agent, failed, LAUNCH + launch_check.DEADLINE_MS)
+    assert launch_check.due(agent, {"joined": {}}, LAUNCH + launch_check.DEADLINE_MS)
+
+
+def test_a_pending_canary_waits_for_the_launch_budget_it_carries():
+    budget = {"validation": {"state": "pending", "deadline_ms": 660_000}}
+    agent = AgentRecord("master@a1b2c3-0001", MASTER, MASTER, harness="claude", started_at=LAUNCH)
+    agent = replace(agent, profile_decision=budget)
+    pending = {"canary": {"expected": "validated", "actual": "pending"}}
+    assert not launch_check.due(agent, pending, LAUNCH + 659_999)
+    assert launch_check.due(agent, pending, LAUNCH + 660_000)
+    assert launch_check.due(agent, {"joined": {}}, LAUNCH + launch_check.DEADLINE_MS)
+    short = replace(agent, profile_decision={"validation": {"state": "pending", "deadline_ms": 1_000}})
+    assert not launch_check.due(short, pending, LAUNCH + 119_999)
+    assert launch_check.due(short, pending, LAUNCH + 120_000)
+
+
+def test_a_confirmed_canary_fills_the_route_account_and_harness_start(store, monkeypatch, tmp_path):
+    _, _, report, first = _deferred_master(store, monkeypatch, tmp_path)
+    data = json.loads(report.read_text())
+    report.write_text(json.dumps({**data, "state": "validated", "validation": CANARY_BINDING}))
+    agent = replace(_master_record(store, first), account="", launch_timings={"launched_at": LAUNCH})
+    confirmed, found = launch_check.canary(store, "sw", agent)
+    assert found == {}
+    assert confirmed.account == "acct"
+    assert confirmed.launch_timings == {"launched_at": LAUNCH, "harness_at": LAUNCH}
+    assert _master_record(store, first) == confirmed
+    kept = replace(agent, account="routed", launch_timings={"harness_at": LAUNCH + 5})
+    confirmed, _ = launch_check.canary(store, "sw", kept)
+    assert confirmed.account == "routed"
+    assert confirmed.launch_timings == {"harness_at": LAUNCH + 5}

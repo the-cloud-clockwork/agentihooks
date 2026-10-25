@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/repository/sqlite.py:scripts.swarm_ledger.repository.sqlite.x\u01c1SQLiteLedgerRepository\u01c1apply_lifecycle__mutmut_59:8749921dbe8ece6890127daf239358fa11e51185022cbef58b4858daf80b1fb1": {
+    "reader": "Standards",
+    "reason": "For supported file-authoritative callers every removed slug has neither authoritative path. Its SQLite rows are already deleted before known is read; revisiting a registry candidate finds no source path and emits no writes. Changing the candidate subtraction therefore changes neither persisted rows nor returned output."
+  }
+}

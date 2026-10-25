@@ -12,6 +12,7 @@ from scripts.gates.build import BuildGate, refusal, task_territory
 from scripts.gates.verdicts import Verdicts
 from scripts.swarm import trace_plan
 from scripts.swarm_ledger import ledger_workspace
+from tests.swarm_ledger import legacy_page
 
 ME, SLUG, TASK = "engineer@100001-0001", "sw", "t1"
 DOGHOUSE = (
@@ -44,7 +45,7 @@ def world(tmp_path):
 
     def territory(*areas):
         doc = {"tasks": [{"id": TASK, "territory": list(areas)}, {"id": "t2", "territory": ["elsewhere"]}]}
-        (ledgers / f"{SLUG}.json").write_text(json.dumps(doc))
+        legacy_page.store(ledgers, SLUG, doc)
 
     def decide(tool="Edit", name=ME, cwd=None, task=TASK, swarm=SLUG, **tool_input):
         call = Call(tool=tool, tool_input=tool_input, cwd=str(cwd or repo))
@@ -166,6 +167,9 @@ class TestAreas:
     def test_the_shared_clearance_file_is_always_allowed_and_nothing_beside_it(self, world):
         world.plan()
         assert edit(world, "mutation-cleared.txt").allowed
+        assert edit(world, "mutation-clearances/ruling.json").allowed
+        assert not edit(world, "mutation-clearances.bak/ruling.json").allowed
+        assert not edit(world, "scripts/mutation-clearances/ruling.json").allowed
         assert not edit(world, "mutation-cleared.txt.bak").allowed
         assert not edit(world, "scripts/mutation-cleared.txt").allowed
         assert not edit(world, "power/generator/diesel.py").allowed
@@ -319,8 +323,8 @@ class TestMore:
         folder = ledger_workspace.folder(SLUG, task)
         folder.mkdir(parents=True)
         (folder / "plan.md").write_text(DOGHOUSE)
-        (world.repo.parent / "ledgers" / f"{SLUG}.json").write_text("{}")
-        assert "commit hash" in world.decide(file_path=str(world.repo / "a.py"), task=task).reason
+        legacy_page.store(world.repo.parent / "ledgers", SLUG, {})
+        assert "no verdict for its current text" in world.decide(file_path=str(world.repo / "a.py"), task=task).reason
 
     def test_registered_doctor_task_plan_allows_editing_kept_area(self, world):
         task = "fx-8be892c4-code"
@@ -330,7 +334,7 @@ class TestMore:
         (folder / trace_plan.PLAN).write_text(DOGHOUSE)
         (folder / trace_plan.VERDICT).write_text((world.folder / trace_plan.VERDICT).read_text())
         ledgers = world.repo.parent / "ledgers"
-        (ledgers / f"{SLUG}.json").write_text(json.dumps({"tasks": [{"id": task}]}))
+        legacy_page.store(ledgers, SLUG, {"tasks": [{"id": task}]})
         result = world.decide(file_path=str(world.repo / "doghouse/frame/a.py"), task=task)
         assert result.allowed, result.reason
 
@@ -354,7 +358,7 @@ class TestMore:
         world.plan()
         ledgers = Path.home() / "development-ledger"
         ledgers.mkdir()
-        (ledgers / f"{SLUG}.json").write_text(json.dumps({"tasks": [{"id": TASK, "territory": ["power"]}]}))
+        legacy_page.store(ledgers, SLUG, {"tasks": [{"id": TASK, "territory": ["power"]}]})
         call = Call(tool="Edit", tool_input={"file_path": str(world.repo / "power/x.py")}, cwd=str(world.repo))
         decision = BuildGate(environ={}).decide(call, Who(name=ME, swarm=SLUG, task=TASK), None)
         assert decision.allowed

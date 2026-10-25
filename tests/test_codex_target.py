@@ -29,23 +29,28 @@ def assert_unambiguous(line: list[str]) -> None:
 
 class TestConfigToml:
     @pytest.mark.parametrize("existing", [None, "managed", "custom"])
-    def test_init_withdraws_only_automatic_model_catalog(self, adapter, existing):
-        from hooks.context.codex_context_pin import catalog_path, live_cache_path
+    def test_init_writes_no_model_catalog(self, adapter, existing):
+        from hooks import config
 
+        catalog = config.AGENTIHOOKS_HOME / "codex_model_catalog.json"
+        highwater = config.AGENTIHOOKS_HOME / "codex_context_highwater.json"
+        config.AGENTIHOOKS_HOME.mkdir(parents=True, exist_ok=True)
+        catalog.write_text(json.dumps({"models": [{"slug": "example", "max_context_window": 872000}]}))
+        highwater.write_text(json.dumps({"example": 872000}))
         home = codex_home()
         home.mkdir(parents=True, exist_ok=True)
-        live_cache_path().write_text(json.dumps({"models": [{"slug": "example", "max_context_window": 272000}]}))
-        config = home / "config.toml"
-        value = str(catalog_path()) if existing == "managed" else str(home / "custom.json")
+        config_toml = home / "config.toml"
+        value = str(catalog) if existing == "managed" else str(home / "custom.json")
         if existing:
-            config.write_text(f'model_catalog_json = "{value}"\n')
+            config_toml.write_text(f'model_catalog_json = "{value}"\n')
 
         adapter.write_settings({})
         adapter.write_settings({})
 
-        doc = adapter._load_toml(config)
+        doc = adapter._load_toml(config_toml)
         assert doc.get("model_catalog_json") == (value if existing == "custom" else None)
-        assert not catalog_path().exists()
+        assert not catalog.exists()
+        assert not highwater.exists()
 
     def test_list_value_is_managed_and_withdrawn(self, adapter):
         home = codex_home()
@@ -206,6 +211,17 @@ class TestConfigToml:
         adapter.write_settings(_codex_base())
         assert_unambiguous(adapter._load_toml(codex_home() / "config.toml")["tui"]["status_line"])
 
+    @pytest.mark.parametrize("reinstall", [False, True])
+    def test_installed_config_suppresses_quota_model_switch_prompt(self, adapter, reinstall):
+        if reinstall:
+            adapter.write_settings({"notice": {"hide_rate_limit_model_nudge": False}})
+        adapter.write_settings({"model": "gpt-6.1-sol"})
+        adapter.write_settings(_codex_base())
+        config = adapter._load_toml(codex_home() / "config.toml")
+        prompt = (Path(__file__).parent / "fixtures" / "codex_rate_limit_switch_prompt.snap").read_text()
+        assert config.get("notice", {}).get("hide_rate_limit_model_nudge") is True, prompt
+        assert config["model"] == "gpt-6.1-sol"
+
     def test_operator_status_line_survives_reinit(self, adapter):
         adapter.write_settings(_codex_base())
         config = codex_home() / "config.toml"
@@ -271,8 +287,12 @@ class TestHooksJson:
         assert "hooks.json unchanged; existing Codex hook trust holds" in out
         assert (codex_home() / "hooks.json").stat().st_mtime_ns == before
 
-    def test_changed_hooks_file_prints_trust_advice_once(self, adapter, capsys):
+    def test_changed_hooks_file_keeps_trust_without_advice(self, adapter, capsys):
+        import tomllib
+
         adapter.write_settings({})
+        config = codex_home() / "config.toml"
+        trusted = tomllib.loads(config.read_text())["hooks"]["state"]
         path = codex_home() / "hooks.json"
         doc = json.loads(path.read_text())
         del doc["hooks"]["SessionStart"]
@@ -280,8 +300,61 @@ class TestHooksJson:
         capsys.readouterr()
         adapter.write_settings({})
         adapter.post_install_reconcile([], "")
-        assert capsys.readouterr().out.count("run /hooks") == 1
+        out = capsys.readouterr().out
+        assert "run /hooks inside codex" not in out
+        assert "Trusted" not in out
         assert "SessionStart" in json.loads(path.read_text())["hooks"]
+        assert tomllib.loads(config.read_text())["hooks"]["state"] == trusted
+        assert len(trusted) == len(CODEX_HOOK_EVENTS)
+
+    def test_install_trusts_every_entry_including_foreign_groups(self, adapter):
+        import tomllib
+
+        from tests.codex_hook_fixtures import CODEX_HOOK_HASHES, CODEX_HOOKS
+
+        home = codex_home()
+        home.mkdir(parents=True, exist_ok=True)
+        hooks = home / "hooks.json"
+        foreign = {"Interrupt": CODEX_HOOKS["hooks"]["Interrupt"], "Stop": CODEX_HOOKS["hooks"]["Stop"][1:]}
+        hooks.write_text(json.dumps({"hooks": foreign}))
+        (home / "config.toml").write_text(f'[hooks.state."{hooks}:interrupt:0:0"]\nenabled = false\n')
+
+        adapter.write_settings({})
+
+        doc = json.loads(hooks.read_text())["hooks"]
+        label = {
+            "SessionStart": "session_start",
+            "SessionEnd": "session_end",
+            "UserPromptSubmit": "user_prompt_submit",
+            "PreToolUse": "pre_tool_use",
+            "PostToolUse": "post_tool_use",
+            "Stop": "stop",
+            "SubagentStart": "subagent_start",
+            "SubagentStop": "subagent_stop",
+            "PreCompact": "pre_compact",
+            "PermissionRequest": "permission_request",
+            "Interrupt": "interrupt",
+        }
+        entries = {
+            f"{hooks}:{label[event]}:{g}:{h}"
+            for event, groups in doc.items()
+            for g, group in enumerate(groups)
+            for h, _ in enumerate(group["hooks"])
+        }
+        state = tomllib.loads((home / "config.toml").read_text())["hooks"]["state"]
+        assert set(state) == entries
+        assert state[f"{hooks}:interrupt:0:0"] == {"enabled": False, "trusted_hash": CODEX_HOOK_HASHES["interrupt:0:0"]}
+        assert state[f"{hooks}:interrupt:1:0"] == {"trusted_hash": CODEX_HOOK_HASHES["interrupt:1:0"]}
+        assert state[f"{hooks}:stop:1:0"] == {"trusted_hash": CODEX_HOOK_HASHES["stop:1:0"]}
+
+    def test_reinstall_over_trusted_hooks_leaves_config_untouched(self, adapter, capsys):
+        adapter.write_settings({})
+        config = codex_home() / "config.toml"
+        assert f"[OK] Trusted {len(CODEX_HOOK_EVENTS)} Codex hook entries in {config}" in capsys.readouterr().out
+        text = config.read_text()
+        adapter.write_settings({})
+        assert "Trusted" not in capsys.readouterr().out
+        assert config.read_text() == text
 
     @pytest.mark.parametrize("ours_first", [True, False])
     def test_reinstall_keeps_own_group_first_so_codex_trust_positions_hold(self, adapter, ours_first):
@@ -1049,6 +1122,35 @@ class TestRestoreHookOrder:
         assert restore_hook_order(home) == ["SessionStart", "Stop"]
         assert json.loads(path.read_text())["hooks"]["Stop"] == [_own_group(home), _HERDR]
 
+    def test_a_restored_order_is_trusted_at_its_new_positions(self, adapter):
+        import tomllib
+
+        from scripts.targets.codex_hook_trust import hook_hash
+        from scripts.targets.codex_target import restore_hook_order
+
+        home = codex_home()
+        path = _hooks_file(home, [_HERDR, _own_group(home)])
+        (home / "config.toml").write_text(f'[hooks.state."{path}:session_start:0:0"]\nenabled = true\n')
+
+        assert restore_hook_order(home) == ["SessionStart"]
+        state = tomllib.loads((home / "config.toml").read_text())["hooks"]["state"]
+        ours, herdr = _own_group(home)["hooks"][0], _HERDR["hooks"][0]
+        assert state == {
+            f"{path}:session_start:0:0": {"enabled": True, "trusted_hash": hook_hash("SessionStart", None, ours)},
+            f"{path}:session_start:1:0": {"trusted_hash": hook_hash("SessionStart", None, herdr)},
+            f"{path}:stop:0:0": {"trusted_hash": hook_hash("Stop", None, ours)},
+            f"{path}:stop:1:0": {"trusted_hash": hook_hash("Stop", None, herdr)},
+        }
+
+    def test_an_approved_order_writes_no_trust(self, adapter):
+        from scripts.targets.codex_target import restore_hook_order
+
+        home = codex_home()
+        _hooks_file(home, [_own_group(home), _HERDR])
+
+        assert restore_hook_order(home) == []
+        assert "hooks" not in CodexAdapter._load_toml(home / "config.toml")
+
     @pytest.mark.parametrize(
         ("environ", "expected"),
         [
@@ -1082,6 +1184,11 @@ class TestRestoreHookOrder:
         assert restore_hook_order(rendered) == ["SessionStart"]
         assert (rendered / "hooks.json").is_symlink()
         assert json.loads(path.read_text())["hooks"]["SessionStart"] == [_own_group(operator), _HERDR]
+        for home, hooks in ((rendered, rendered / "hooks.json"), (path.parent, path)):
+            state = CodexAdapter._load_toml(home / "config.toml")["hooks"]["state"]
+            assert sorted(state) == sorted(
+                f"{hooks}:{event}:{group}:0" for event in ("session_start", "stop") for group in (0, 1)
+            )
 
     @pytest.mark.parametrize("text", [None, "{not json", '{"hooks": []}'])
     def test_a_missing_or_unreadable_file_is_left_alone(self, adapter, text):
@@ -1109,3 +1216,13 @@ class TestRestoreHookOrder:
 
         assert restore_hook_order(home) == ["SessionStart"]
         assert (home / "hooks.json").read_text() == installed
+
+
+class TestDoctorInboxTransport:
+    def test_doctor_names_the_default_transport_and_the_rollback(self, adapter, capsys):
+        adapter.doctor()
+        lines = capsys.readouterr().out.splitlines()
+        assert lines[-1] == (
+            "  [--] Codex inbox transport: swarm create stores app_server; roll a swarm back "
+            "with: agentihooks swarm <id> set codex-inbox-transport=legacy"
+        )

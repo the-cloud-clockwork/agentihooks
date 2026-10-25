@@ -1,0 +1,217 @@
+{
+  "case": "B",
+  "fixture_manifest": {
+    "images": {
+      "fixture": "agentihooks-health-fixture:4124c5a2340b4d1b8bac0c8adcc04735",
+      "missing_binary": "agentihooks-health-missing-binary:4124c5a2340b4d1b8bac0c8adcc04735"
+    },
+    "inputs": {
+      "docker/swarm-node/Dockerfile": "f36e23bd81a2c2f85942cd79de53bee3010e6e3fe9c381fd8a43a5ca33a8c448",
+      "docker/swarm-node/health.py": "d6c31ed7515d9cfa38f39eb618792daa165ce96b017a386fdbbeebdbe9b7f759",
+      "scripts/swarm_v2/worker_health.py": "f18c59f964c7086af1a689c5b936340ee57260d5adad505ef7af236a80888091",
+      "tests/integration/swarm_node/Dockerfile": "bcadc5c1200814d143813c1476a30bf8997d49e9db7637d6f47428c2306a4630",
+      "tests/integration/swarm_node/health_proof.py": "165086842a3f58db41ecc34123c4acab6d5a69c7607fa8adda443fdf2817fc79",
+      "tests/integration/swarm_node/run_health_proof.sh": "ff02a6e6d6a38ba1ded0ed4ea68b80412ce3a090fb354764063788d0e532ee29"
+    },
+    "tested_commit": "3dccc3b41307ed827e1c0beefa374010c81e8c7b"
+  },
+  "mocked": false,
+  "network": "none; fixture brain on container loopback",
+  "package": "SV2-IMG-04",
+  "runs": [
+    {
+      "container": "f940d0a087effea8b4892220912c2b2d5d19cfc3bb6f40b39767228dd8ddb0dd",
+      "probes": {
+        "diagnose": {
+          "exit_code": 0,
+          "report": {
+            "attempt": "/home/worker/attempts/exe-a9ffe34a40e6431a926aa175a90e08fa",
+            "checks": {
+              "agent": null,
+              "binaries": "missing_binary:codex",
+              "herdr": null,
+              "home": null,
+              "hook": null,
+              "runtime_paths": null,
+              "supervisor": null
+            },
+            "dependencies": {
+              "brain": "brain_unreachable"
+            },
+            "environment": [
+              "BRAIN_URL",
+              "DISABLE_AUTOUPDATER",
+              "FIXTURE_PRIVATE",
+              "GPG_KEY",
+              "HOME",
+              "HOSTNAME",
+              "LANG",
+              "PATH",
+              "PYTHONDONTWRITEBYTECODE",
+              "PYTHONUNBUFFERED",
+              "PYTHON_SHA256",
+              "PYTHON_VERSION"
+            ],
+            "harness": "codex",
+            "incarnation": "55190ebd52a94f85a16953aa4041ccab",
+            "mode": "diagnose",
+            "status": "not_ready",
+            "worker_startup_failure_reason": "missing_binary:codex"
+          },
+          "stderr": ""
+        },
+        "readiness": {
+          "exit_code": 1,
+          "report": {
+            "attempt": "/home/worker/attempts/exe-a9ffe34a40e6431a926aa175a90e08fa",
+            "checks": {
+              "agent": null,
+              "binaries": "missing_binary:codex",
+              "herdr": null,
+              "home": null,
+              "hook": null,
+              "runtime_paths": null,
+              "supervisor": null
+            },
+            "dependencies": {
+              "brain": "brain_unreachable"
+            },
+            "harness": "codex",
+            "incarnation": "55190ebd52a94f85a16953aa4041ccab",
+            "mode": "readiness",
+            "status": "not_ready",
+            "worker_startup_failure_reason": "missing_binary:codex"
+          },
+          "stderr": ""
+        },
+        "startup": {
+          "exit_code": 1,
+          "report": {
+            "attempt": "/home/worker/attempts/exe-a9ffe34a40e6431a926aa175a90e08fa",
+            "checks": {
+              "binaries": "missing_binary:codex",
+              "herdr": null,
+              "home": null,
+              "hook": null,
+              "runtime_paths": null,
+              "supervisor": null
+            },
+            "dependencies": {
+              "brain": "brain_unreachable"
+            },
+            "harness": "codex",
+            "incarnation": "55190ebd52a94f85a16953aa4041ccab",
+            "mode": "startup",
+            "status": "not_ready",
+            "worker_startup_failure_reason": "missing_binary:codex"
+          },
+          "stderr": ""
+        }
+      }
+    },
+    {
+      "container": "a1adb4ebd8d8643a6cc449920dbcc88db0bb01df8273c345acc256fd6cab0cf3",
+      "corrected": {
+        "exit_code": 0,
+        "report": {
+          "attempt": "/home/worker/attempts/exe-98dca41c40ba4fddb76fe5c1663c124b",
+          "checks": {
+            "agent": null,
+            "binaries": null,
+            "herdr": null,
+            "home": null,
+            "hook": null,
+            "runtime_paths": null,
+            "supervisor": null
+          },
+          "dependencies": {
+            "brain": "brain_unreachable"
+          },
+          "harness": "codex",
+          "incarnation": "7a991771010144e58ff403694ce15c90",
+          "mode": "readiness",
+          "status": "degraded",
+          "worker_startup_failure_reason": null
+        },
+        "stderr": ""
+      },
+      "probes": {
+        "0000": {
+          "exit_code": 1,
+          "report": {
+            "attempt": "/home/worker/attempts/exe-98dca41c40ba4fddb76fe5c1663c124b",
+            "checks": {
+              "agent": null,
+              "binaries": null,
+              "herdr": "herdr_unavailable",
+              "home": "home_unreadable",
+              "hook": "hook_missing",
+              "runtime_paths": null,
+              "supervisor": null
+            },
+            "dependencies": {
+              "brain": "brain_unreachable"
+            },
+            "harness": "codex",
+            "incarnation": "7a991771010144e58ff403694ce15c90",
+            "mode": "readiness",
+            "status": "not_ready",
+            "worker_startup_failure_reason": "home_unreadable"
+          },
+          "stderr": ""
+        },
+        "0555": {
+          "exit_code": 1,
+          "report": {
+            "attempt": "/home/worker/attempts/exe-98dca41c40ba4fddb76fe5c1663c124b",
+            "checks": {
+              "agent": null,
+              "binaries": null,
+              "herdr": null,
+              "home": "home_unwritable",
+              "hook": null,
+              "runtime_paths": null,
+              "supervisor": null
+            },
+            "dependencies": {
+              "brain": "brain_unreachable"
+            },
+            "harness": "codex",
+            "incarnation": "7a991771010144e58ff403694ce15c90",
+            "mode": "readiness",
+            "status": "not_ready",
+            "worker_startup_failure_reason": "home_unwritable"
+          },
+          "stderr": ""
+        }
+      },
+      "protected": {
+        "files": {
+          "/home/worker/attempts/exe-98dca41c40ba4fddb76fe5c1663c124b/execution.json": "75c8d49fe1c4b606919061e4dd6fdd3aeb8c20e1793a3e46d26ae034af3a7292",
+          "/home/worker/attempts/exe-98dca41c40ba4fddb76fe5c1663c124b/launch.json": "295e77a2836853deebe8e1e07be95ee0dfc7470acfc6a819959c0f3c4ddaaef3",
+          "/home/worker/attempts/exe-98dca41c40ba4fddb76fe5c1663c124b/registration.json": "a4142b2833d15125ffa0743ff34e4ecc3caabba0948b45655441caacb555aa33",
+          "/home/worker/attempts/exe-98dca41c40ba4fddb76fe5c1663c124b/run/supervision/7a991771010144e58ff403694ce15c90/context.json": "8c594c11f86c94ec339d5563b9482cd9e2b249274ddd1cbb2783d4ef7f462253",
+          "/home/worker/attempts/exe-98dca41c40ba4fddb76fe5c1663c124b/run/supervision/7a991771010144e58ff403694ce15c90/running.json": "ef08d787f634ea6d509014750ba3928537f41d29e386a32040978880dbd8acd2"
+        },
+        "home": [
+          ".agentihooks/state.json",
+          ".agentihooks/state.json.bak",
+          ".codex/.agentihooks-managed.json",
+          ".codex/AGENTS.md",
+          ".codex/agentihooks-hook.sh",
+          ".codex/config.toml",
+          ".codex/hooks.json"
+        ]
+      }
+    }
+  ],
+  "status": "passed",
+  "worker_startup_failure_reason": [
+    "missing_binary:codex",
+    "missing_binary:codex",
+    "missing_binary:codex",
+    "home_unwritable",
+    "home_unreadable",
+    null
+  ]
+}

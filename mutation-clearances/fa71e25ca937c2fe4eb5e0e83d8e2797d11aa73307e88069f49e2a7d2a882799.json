@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.x_index_page__mutmut_1:22c036ec25caa9297fe7ec7adc4e062a2b37bf413c1d29cce86032f8ee4907a6": {
+    "reader": "Standards",
+    "reason": "tooltips.js is pure ASCII, so reading it with the default encoding instead of utf-8 gives the same text."
+  }
+}

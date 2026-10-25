@@ -3,6 +3,7 @@ from types import SimpleNamespace
 import pytest
 
 from hooks.classifier import Answer, DecisionResult
+from scripts.doctor import priming
 from scripts.inbox.store import InboxStore
 from scripts.swarm import cli as swarm_cli
 from scripts.swarm import ledger_client, phase_planning, phase_state, slice_screen
@@ -10,8 +11,8 @@ from scripts.swarm.store import RedisStore
 from tests.doctor.test_doctor_cli import FileLedger, core, new_ledger, state
 from tests.swarm.test_delivery import FakeHerdr
 from tests.swarm.test_tick import FakeRuntime
+from tests.swarm_ledger.plan_slices import anchored
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
 SLUG = "planned"
 MASTER_SEAT = f"master@{SLUG}"
 DONE_WHEN = (
@@ -63,11 +64,14 @@ def items(store, address):
     return InboxStore(store.redis).inbox(address)
 
 
-def slice_done(ledger, *build):
+def slice_done(ledger, *build, anchor=True):
+    if anchor:
+        anchored(SLUG, *[tid for tid, _ in build], core=core)
     ledger.update_task(SLUG, "plan-p1", {"state": "claimed", "claimed_by": "planner@a1b2c3-0001"})
     for tid, description in build:
         fields = {"task": tid, "title": f"Task {tid}", "lane": "eng", "phase": "p1", "territory": ["scripts/swarm"]}
         fields["plan_url"] = "https://github.com/acme/app/issues/1"
+        fields["plan_slice"] = tid
         ledger.add_task(SLUG, {**fields, "description": description}, "planner@a1b2c3-0001")
     ids = ",".join(tid for tid, _ in build)
     ledger.update_task(SLUG, "plan-p1", {"state": "done", "proof": {"slice": ids}})
@@ -114,6 +118,106 @@ def test_manual_waiting_and_out_of_scope_phases_get_no_plan_task(env):
     core.sync(SLUG, ops=[{"op": "set", "id": "oos", "by": "engineer", "path": "phases/p1/out_of_scope", "value": True}])
     run(store, ledger)
     assert tasks("p1") == []
+
+
+@pytest.mark.parametrize("close_plan", [False, True])
+def test_manual_phase_admits_build_tasks_without_requeuing_its_old_plan(env, close_plan):
+    store, ledger = env
+    set_phase("p1", planning="auto")
+    run(store, ledger)
+    if close_plan:
+        build_task(ledger, "build", done=False)
+        op = {"op": "set", "id": "close-plan", "by": "engineer", "path": "tasks/plan-p1/out_of_scope", "value": True}
+        assert core.sync(SLUG, ops=[op])[1] == []
+    else:
+        slice_done(ledger, ("build", DONE_WHEN))
+    set_phase("p1", planning="manual")
+    for _ in range(2):
+        run(store, ledger)
+        current = state(SLUG)
+        manual = next(p for p in current["phases"] if p["id"] == "p1")
+        build = next(t for t in current["tasks"] if t["id"] == "build")
+        assert phase_state.lifecycle(manual, current) == "building"
+        assert phase_state.admits(build, current)
+        assert [t["id"] for t in tasks("p1") if t.get("kind") == "plan"] == ["plan-p1"]
+        assert next(t for t in tasks("p1") if t["id"] == "plan-p1").get("out_of_scope", False) is close_plan
+
+
+def test_new_manual_phase_never_queues_a_plan_while_its_build_task_waits(env):
+    store, ledger = env
+    set_phase("p1", planning="manual")
+    build_task(ledger, "build", done=False)
+    for _ in range(2):
+        run(store, ledger)
+        current = state(SLUG)
+        build = next(t for t in current["tasks"] if t["id"] == "build")
+        assert phase_state.admits(build, current)
+        assert [t["id"] for t in tasks("p1")] == ["build"]
+
+
+def unplanned(store):
+    return [i for i in items(store, MASTER_SEAT) if i.sender == "swarm" and "has no tasks" in i.text]
+
+
+def test_a_manual_phase_without_tasks_raises_one_master_notice(env):
+    store, ledger = env
+    set_phase("p2", planning="auto", depends_on=["p1"])
+    run(store, ledger)
+    run(store, ledger)
+    [notice] = unplanned(store)
+    assert notice.text == (
+        "Phase p1 Build has no tasks and is planned manually, so nothing builds it: "
+        "add its tasks, or set its planning to auto so a planner slices it."
+    )
+    assert notice.fyi is False
+
+
+def test_a_manual_phase_with_a_task_and_an_auto_phase_raise_no_notice(env):
+    store, ledger = env
+    ledger.add_task(SLUG, {"task": "t1", "title": "Task one", "lane": "eng", "phase": "p1"}, "master")
+    set_phase("p2", planning="auto")
+    actions = phase_planning.planning_pass(
+        InboxStore(store.redis), store, SLUG, state(SLUG), ledger, store.config(SLUG)
+    )
+    assert actions == ["queued plan-p2 for phase p2"]
+    assert unplanned(store) == []
+
+
+def test_a_manual_phase_whose_only_task_is_out_of_scope_raises_the_notice(env):
+    store, ledger = env
+    ledger.add_task(SLUG, {"task": "t1", "title": "Task one", "lane": "eng", "phase": "p1"}, "master")
+    core.sync(SLUG, ops=[{"op": "set", "id": "oos", "by": "engineer", "path": "tasks/t1/out_of_scope", "value": True}])
+    set_phase("p2", planning="auto", depends_on=["p1"])
+    actions = phase_planning.planning_pass(
+        InboxStore(store.redis), store, SLUG, state(SLUG), ledger, store.config(SLUG)
+    )
+    assert actions == [f"told {MASTER_SEAT}: plan-unplanned:p1"]
+
+
+def test_a_doctor_swarm_raises_no_notice_for_its_standing_phases(env):
+    store, ledger = env
+    store.update(SLUG, template=priming.TEMPLATE)
+    actions = phase_planning.planning_pass(
+        InboxStore(store.redis), store, SLUG, state(SLUG), ledger, store.config(SLUG)
+    )
+    assert actions == []
+
+
+def test_an_approved_auto_phase_whose_slice_left_scope_raises_no_notice(env):
+    store, ledger = env
+    set_phase("p1", planning="auto")
+    set_phase("p2", planning="auto", depends_on=["p1"])
+    run(store, ledger)
+    slice_done(ledger, ("t1", DONE_WHEN))
+    for tid in ("plan-p1", "t1"):
+        out = {"op": "set", "id": f"oos-{tid}", "by": "engineer", "path": f"tasks/{tid}/out_of_scope", "value": True}
+        core.sync(SLUG, ops=[out])
+    ledger.review_phase(SLUG, "p1", "approved", by="operator")
+    assert phase_state.lifecycle(phase("p1"), state(SLUG)) == "building"
+    actions = phase_planning.planning_pass(
+        InboxStore(store.redis), store, SLUG, state(SLUG), ledger, store.config(SLUG)
+    )
+    assert actions == []
 
 
 def test_the_tick_that_adds_a_plan_task_does_not_tick_its_phase_done(env):
@@ -389,6 +493,7 @@ def test_an_escalated_review_is_not_reopened(env):
 def test_the_pass_returns_what_it_did(env):
     store, ledger = env
     set_phase("p1", planning="auto")
+    set_phase("p2", planning="auto", depends_on=["p1"])
     config = store.config(SLUG)
     actions = phase_planning.planning_pass(InboxStore(store.redis), store, SLUG, state(SLUG), ledger, config)
     assert actions == ["queued plan-p1 for phase p1"]
@@ -408,6 +513,8 @@ def test_two_phases_are_queued_and_reviewed_in_the_same_pass(env):
     slice_done(ledger, ("t1", DONE_WHEN))
     fields = {"task": "t2", "title": "Task t2", "lane": "eng", "phase": "p2", "territory": ["scripts/swarm"]}
     fields["plan_url"] = "https://github.com/acme/app/issues/2"
+    fields["plan_slice"] = "t2"
+    anchored(SLUG, "t2", phase="p2", core=core)
     ledger.update_task(SLUG, "plan-p2", {"state": "claimed", "claimed_by": "planner@a1b2c3-0002"})
     ledger.add_task(SLUG, {**fields, "description": DONE_WHEN}, "planner@a1b2c3-0002")
     ledger.update_task(SLUG, "plan-p2", {"state": "done", "proof": {"slice": "t2"}})
@@ -421,9 +528,11 @@ def test_a_task_id_the_ledger_would_refuse_in_a_comment_is_left_to_the_review_it
     run(store, ledger)
     fields = {"task": "fix_parser", "title": "Fix the parser", "lane": "eng", "phase": "p1", "territory": ["scripts"]}
     fields["plan_url"] = "https://github.com/acme/app/issues/1"
+    fields["plan_slice"] = "fix_parser"
+    anchored(SLUG, "fix_parser", "t2", core=core)
     ledger.update_task(SLUG, "plan-p1", {"state": "claimed", "claimed_by": "planner@a1b2c3-0001"})
     ledger.add_task(SLUG, {**fields, "description": "Short."}, "planner@a1b2c3-0001")
-    slice_done(ledger, ("t2", "Short."))
+    slice_done(ledger, ("t2", "Short."), anchor=False)
     ledger.update_task(SLUG, "plan-p1", {"proof": {"slice": "fix_parser,t2"}})
     run(store, ledger)
     [comment] = [c for c in phase("p1")["comments"] if c["by"] == "swarm"]

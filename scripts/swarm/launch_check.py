@@ -5,30 +5,36 @@ from __future__ import annotations
 
 import json
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from hooks.context import profile_chain
+from scripts.hive import join_report
 from scripts.swarm import live_binding, naming
 from scripts.swarm.health.findings import Finding
 from scripts.swarm.store import AgentRecord, RedisStore
 
 DEADLINE_MS = 60 * 1000
 STAMP = ".agentihooks-render.json"
+HOST_OVERLAYS = "host_overlays"
 SETTINGS = ("hooks", "model", "effort")
 WORDS = {
     "joined": "joining the ledger and holding its seat",
+    "late": "joining the ledger within a minute of its session start",
+    "observation": "an available process observation",
     "profile": "its profile",
     "settings": "its hooks, model and effort",
     "base": "its role on the package base role",
     "overlay": "every overlay its profile declares",
     "name": "its name",
+    "canary": "its mounted profile canary",
 }
-REPORT_ONLY = frozenset()
+REPORT_ONLY = frozenset({"late", *(f"hive_{name}" for name in join_report.OPTIONAL)})
 OUTCOMES = {
     "relaunch": "It is being retired and relaunched once.",
     "spent": "Its one automatic relaunch is spent; operator action is required.",
     "report": "This is reported only; the master keeps running.",
+    "retired": "The failed hive agent was retired.",
 }
 
 
@@ -72,12 +78,27 @@ def declared(profile: str, overlays: Sequence[str] = ()) -> list[str]:
     return list(dict.fromkeys([*render.declared(profile), *overlays]))
 
 
+def expected(agent: AgentRecord) -> list[str]:
+    host = agent.profile_decision.get(HOST_OVERLAYS)
+    return declared(agent.profile, agent.overlays) if host is None else list(host)
+
+
 def joined_at(agent: AgentRecord, doc: dict) -> int | None:
-    return doc.get("_meta", {}).get("members", {}).get(agent.name, {}).get("joined_at")
+    meta = doc.get("_meta", {})
+    current = meta.get("members", {}).get(agent.name, {}).get("joined_at")
+    recorded = [e["at"] for e in meta.get("events", []) if e.get("kind") == "joined" and e.get("by") == agent.name]
+    recorded.extend(meta.get("join_history", {}).get(agent.name, []))
+    if current is not None:
+        recorded.append(current)
+    return min((at for at in recorded if at >= launched_at(agent)), default=None)
 
 
 def launched_at(agent: AgentRecord) -> int:
     return agent.launched_at or agent.started_at
+
+
+def session_started_at(agent: AgentRecord) -> int:
+    return max(launched_at(agent), agent.launch_timings.get("harness_at", launched_at(agent)))
 
 
 def _joined(store, agent, doc, started_at):
@@ -89,15 +110,16 @@ def _joined(store, agent, doc, started_at):
         "joined_after_ms": None if joined is None else joined - started_at,
         "seat": store.seats.seat_of(agent.name),
     }
-    return {"joined": {"expected": {"joined_within_ms": DEADLINE_MS, "seat": agent.seat}, "actual": actual}}
+    field = "late" if joined is not None and seated else "joined"
+    return {field: {"expected": {"joined_within_ms": DEADLINE_MS, "seat": agent.seat}, "actual": actual}}
 
 
 def _process(agent, facts):
     differences = live_binding.compare(agent, facts)
     found = {}
-    if "process" in differences or "profile" in differences:
+    if "profile" in differences:
         found["profile"] = {"expected": agent.profile, "actual": facts.get("profile")}
-    if "process" in differences or any(key in differences for key in SETTINGS):
+    if any(key in differences for key in SETTINGS):
         expected = {**live_binding.assignment(agent), "hooks": True}
         found["settings"] = {
             "expected": {key: expected[key] for key in SETTINGS},
@@ -134,13 +156,55 @@ def _name(store, slug, agent):
 def misses(
     store: RedisStore, slug: str, agent: AgentRecord, facts: dict, doc: dict, on_bundle: bool, declared: list[str]
 ) -> dict:
-    return {
-        **_joined(store, agent, doc, launched_at(agent)),
-        **_process(agent, facts),
-        **_base(agent, facts, on_bundle),
-        **_overlays(facts, declared),
-        **_name(store, slug, agent),
-    }
+    from scripts.hive import reports
+    from scripts.swarm.commands import hive_id
+
+    if agent.hive and agent.hive != hive_id() or reports.host(agent):
+        report = join_report.read(store.redis, agent)
+        if not report:
+            return {"hive_join": {"expected": "session join report", "actual": "missing"}}
+        return {
+            f"hive_{name}": {"expected": "available", "actual": "missing"}
+            for name in join_report.graded(report)["misses"]
+        }
+    found = _joined(store, agent, doc, session_started_at(agent))
+    if not facts or facts.get("process", True) is not True:
+        found["observation"] = {"expected": "available process observation", "actual": "unavailable"}
+    else:
+        found.update({**_process(agent, facts), **_base(agent, facts, on_bundle), **_overlays(facts, declared)})
+    return {**found, **_name(store, slug, agent)}
+
+
+def canary(store: RedisStore, slug: str, agent: AgentRecord) -> tuple[AgentRecord, dict]:
+    from scripts.profiles import binding
+
+    validation = agent.profile_decision.get("validation", {})
+    if validation.get("state") != "pending":
+        return agent, {}
+    try:
+        result = binding.confirm(Path(validation["report"]), agent.profile, agent.harness, validation["account"])
+    except (OSError, ValueError, KeyError) as exc:
+        return agent, {"canary": {"expected": "validated", "actual": str(exc)}}
+    if not result:
+        return agent, {"canary": {"expected": "validated", "actual": "pending"}}
+    confirmed = replace(
+        agent,
+        account=agent.account or result["account"],
+        launch_timings={"harness_at": int(result["validated_at"] * 1000), **agent.launch_timings},
+        profile_decision={**agent.profile_decision, "validation": result},
+    )
+    store.put_agent(slug, confirmed)
+    return confirmed, {}
+
+
+def due(agent: AgentRecord, found: dict, now_ms: int) -> bool:
+    from scripts.init_agent import CANARY_TIMEOUT_S
+
+    deadline = DEADLINE_MS
+    if found.get("canary", {}).get("actual") == "pending":
+        waited = agent.profile_decision.get("validation", {}).get("deadline_ms", DEADLINE_MS)
+        deadline = max(int(CANARY_TIMEOUT_S[agent.harness] * 1000), waited)
+    return now_ms - session_started_at(agent) >= deadline
 
 
 def record(
@@ -151,7 +215,7 @@ def record(
         "task": agent.task,
         "at": at,
         "elapsed_ms": elapsed_ms,
-        "state": "failed" if found else "passed",
+        "state": "passed" if not found else "reported" if set(found) <= REPORT_ONLY else "failed",
         "misses": found,
         "held": held,
     }
@@ -186,7 +250,7 @@ def clear_relaunched(store: RedisStore, slug: str, task: str) -> None:
 
 
 def told(found: dict, outcome: str) -> str:
-    fields = ", ".join(WORDS[field] for field in found)
+    fields = ", ".join(WORDS.get(field, field.removeprefix("hive_").replace("_", " ")) for field in found)
     return f"The master failed its launch check within a minute on {fields}. {OUTCOMES[outcome]}"
 
 

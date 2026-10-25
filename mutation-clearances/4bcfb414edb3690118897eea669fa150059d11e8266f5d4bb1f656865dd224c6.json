@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/api/routes.py:scripts.swarm_ledger.api.routes.x_dispatch__mutmut_3:77d800181aaf3c90617daf87e15fbc84c2d56924276d859e21fe2c0020c09709": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "The HTTPMessage Host lookup changes only key case. The same value reaches the unchanged allowlist predicate and produces the same status and envelope."
+  }
+}

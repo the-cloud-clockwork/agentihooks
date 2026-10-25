@@ -1,0 +1,6 @@
+{
+  "scripts/gc_cli.py:scripts.gc_cli.x__parser__mutmut_17:cf3be2cb8612a1a919938521ec5d0324dc23a3bc8c293f8162a3daa785883d9c": {
+    "reader": "Standards",
+    "reason": "Only argparse help text changes, which no command output or exit code reads."
+  }
+}

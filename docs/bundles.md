@@ -7,6 +7,9 @@ nav_order: 9
 
 A bundle is a single external directory containing all your personal agentihooks customizations — custom profiles, MCP configs, skills, agents, commands, and rules. Agentihooks is the engine; the bundle is your data.
 
+For purpose built swarms, use [Swarm Overlays](overlays.md) or the packaged
+`swarm-maker` skill to add capabilities to the package base roles, including [documentation](documentation-agents.md).
+
 > **Public example**: [`agentihooks-bundle-example`](https://github.com/The-Cloud-Clockwork/agentihooks-bundle-example) — a minimal, working bundle you can clone, inspect, and fork as the starting point for your own.
 
 ## Quick Start
@@ -126,6 +129,34 @@ in filename order; `README.md` is excluded. Set
 `AGENTIHOOKS_SKIP_MANIFESTO=uno,dos,tres` to omit named manifestos. Names may
 include or omit `.md`. `CI_MANIFESTO_PATH` remains a single-file compatibility
 override, and `MANIFESTOS_DIR` can replace the bundle directory.
+
+A manifesto may open with front matter naming the package roles that receive it:
+
+```markdown
+---
+roles: [engineer, planner, qa, master]
+---
+# Development Manifesto
+```
+
+A rendered profile home receives a manifesto when the chain's package role
+(`package:<role>`) is in its `roles`, or when the manifesto has no `roles` key, so
+manifestos without front matter reach every role. A chain with no package role
+receives every manifesto. Valid front matter never reaches rendered text; a block
+that is not a YAML mapping is left in place and its manifesto reaches every role.
+A bundle profile overrides the roles by name in `profile.yml`; profiles apply in
+chain order and a later one wins:
+
+```yaml
+manifestos:
+  include: [CI-GUARDRAILS-MANIFESTO]
+  exclude: [DEVELOPMENT-MANIFESTO]
+```
+
+`CI_MANIFESTO_ENABLED: "false"` in a chain profile's settings `env` renders no
+manifestos for that chain. `agentihooks init` applies the same filter to the
+installed profile chain. `agentihooks manifestos list [--bundle PATH]` prints the
+roles each manifesto declares, before profile overrides.
 
 ## Profile Resolution Order
 

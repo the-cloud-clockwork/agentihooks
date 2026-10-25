@@ -5,8 +5,6 @@ from scripts.inbox.store import InboxStore
 from scripts.swarm import idle
 from scripts.swarm.store import MASTER, AgentRecord
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 W = 300_000
 MASTER_NAME = "sw-master-1"
 
@@ -27,10 +25,11 @@ class FakeHerdr:
 
 class FakeLedger:
     def __init__(self):
-        self.followups = []
+        self.followups, self.flagged = [], []
 
-    def followup(self, slug, text):
+    def followup(self, slug, text, needs_operator=False):
         self.followups.append((slug, text))
+        self.flagged.append(needs_operator)
 
 
 AGENTS = [
@@ -79,6 +78,138 @@ def test_an_idle_pane_with_a_pending_item_gets_exactly_one_prompt(inbox):
     assert events(inbox, item.id) == ["woken"] and events(inbox, second.id) == ["woken"]
 
 
+@pytest.mark.parametrize("age", [1, W + 1])
+@pytest.mark.parametrize("seated", [False, True])
+def test_many_pending_items_share_batched_wake_reads_without_changing_seen_or_fyi_behavior(
+    inbox, monkeypatch, age, seated
+):
+    from dataclasses import replace
+
+    from scripts.inbox import seen
+    from scripts.inbox.store import CLOSED
+
+    inbox.names.mint_code("sw", "sw", "/repo")
+    canonical = inbox.names.next("sw", "eng")
+    address = "eng-1@sw" if seated else "earlier-agent"
+    if seated:
+        inbox.seats.occupy(address, canonical, at=1)
+    agents = [replace(agent, name=canonical) if agent.name == "sw-eng-1" else agent for agent in AGENTS]
+    items = [inbox.send(MASTER_NAME, address, f"notice {n}", ref=f"written:{n}", fyi=True) for n in range(40)]
+    if not seated:
+        inbox.names.alias(address, canonical)
+    assert seen.SeenMarks(inbox.redis).mark(canonical, items[0].ref)
+    inbox.pending()
+    reads = []
+    execute = inbox.redis.execute_command
+
+    def traced_execute(*args, **kwargs):
+        if str(args[0]).upper() in {"GET", "HGETALL", "LRANGE", "SISMEMBER", "SMEMBERS"}:
+            reads.append(args[0])
+        return execute(*args, **kwargs)
+
+    monkeypatch.setattr(inbox.redis, "execute_command", traced_execute)
+    herdr = FakeHerdr({"p1": "idle"})
+    run(inbox, herdr, FakeLedger(), sent_at(items[-1]) + age, agents)
+    assert len(reads) <= 30
+    assert inbox.get(items[0].id).state in CLOSED
+    assert all(inbox.get(item.id).state == "pending" for item in items[1:])
+    assert herdr.prompts == []
+
+
+def test_bulk_seen_marks_keep_alias_pairs_and_empty_results(inbox, monkeypatch):
+    from unittest.mock import Mock
+
+    from scripts.inbox import seen
+
+    inbox.names.mint_code("sw", "sw", "/repo")
+    canonical = inbox.names.next("sw", "eng")
+    inbox.names.alias("earlier-agent", canonical)
+    marks = seen.SeenMarks(inbox.redis)
+    assert marks.mark(canonical, "written")
+    pipeline = Mock(wraps=inbox.redis.pipeline)
+    monkeypatch.setattr(inbox.redis, "pipeline", pipeline)
+    assert marks.seen_many([("earlier-agent", "written"), (canonical, "written"), (canonical, "other")]) == {
+        ("earlier-agent", "written"),
+        (canonical, "written"),
+    }
+    pipeline.assert_called_once_with(transaction=False)
+    assert marks.seen_many([]) == set()
+    pipeline.assert_called_once_with(transaction=False)
+
+
+def test_bulk_message_histories_preserve_entries_and_empty_results(inbox, monkeypatch):
+    from unittest.mock import Mock
+
+    first = inbox.send(MASTER_NAME, "sw-eng-1", "first")
+    second = inbox.send(MASTER_NAME, "sw-eng-1", "second")
+    pipeline = Mock(wraps=inbox.redis.pipeline)
+    monkeypatch.setattr(inbox.redis, "pipeline", pipeline)
+    assert inbox.histories([first.id, second.id]) == {
+        first.id: inbox.history(first.id),
+        second.id: inbox.history(second.id),
+    }
+    pipeline.assert_called_once_with(transaction=False)
+    assert inbox.histories([]) == {}
+    pipeline.assert_called_once_with(transaction=False)
+
+
+def test_batched_wake_resolves_an_old_address_to_the_current_pane(inbox):
+    from dataclasses import replace
+
+    inbox.names.mint_code("sw", "sw", "/repo")
+    canonical = inbox.names.next("sw", "eng")
+    agents = [replace(agent, name=canonical) if agent.name == "sw-eng-1" else agent for agent in AGENTS]
+    item = inbox.send(MASTER_NAME, "earlier-agent", "work")
+    inbox.names.alias("earlier-agent", canonical)
+    herdr = FakeHerdr({"p1": "idle"})
+    run(inbox, herdr, FakeLedger(), sent_at(item) + 1, agents)
+    assert herdr.prompts == [("p1", wake.WAKE_TEXT)]
+    assert events(inbox, item.id) == ["woken"]
+
+
+def test_wake_inputs_resolve_senders_and_skip_seen_reads_without_a_ref_or_receiver(inbox):
+    from unittest.mock import Mock
+
+    inbox.names.mint_code("sw", "sw", "/repo")
+    canonical = inbox.names.next("sw", "eng")
+    first = inbox.send("earlier-agent", "outside", "from an old sender", ref="written")
+    second = inbox.send("unknown", "sw-eng-1", "without a reference")
+    third = inbox.send("unknown", "eng-2@sw", "waiting for an occupant", ref="waiting")
+    fourth = inbox.send("unknown", "outside", "another swarm")
+    inbox.names.alias("earlier-agent", canonical)
+    marks = Mock()
+    marks.seen_many.return_value = set()
+
+    reads = wake._wake_inputs(inbox, "sw", [first, second, third, fourth], {canonical, "sw-eng-1"}, None, marks)
+
+    assert [item.id for item in reads.items] == [first.id, second.id, third.id]
+    assert reads.items[0].sender == canonical
+    assert reads.receivers[third.address][0] == ""
+    assert reads.seen == set()
+    marks.seen_many.assert_called_once_with([("outside", "written")])
+
+
+def test_unresolved_sweep_keeps_processing_after_repeated_live_addresses(inbox, monkeypatch):
+    from unittest.mock import Mock
+
+    from scripts.inbox import addresses
+
+    first = inbox.send(MASTER_NAME, "sw-eng-1", "live recipient")
+    second = inbox.send(MASTER_NAME, "sw-eng-1", "same live recipient")
+    third = inbox.send(MASTER_NAME, "missing", "unresolved recipient")
+    monkeypatch.setattr(addresses, "get_active_sessions", lambda **kwargs: {})
+    resolves = Mock(wraps=addresses.resolves)
+    monkeypatch.setattr(addresses, "resolves", resolves)
+
+    actions = addresses.settle_unresolved(inbox, {"sw-eng-1"}, [first, second, third], sent_at(third) + W + 1, W)
+
+    assert actions == [f"closed message {third.id}: recipient no longer resolves"]
+    assert inbox.get(first.id).state == "pending"
+    assert inbox.get(second.id).state == "pending"
+    assert inbox.get(third.id).state == "cancelled"
+    assert [call.args[1] for call in resolves.call_args_list] == ["sw-eng-1", "missing"]
+
+
 @pytest.mark.parametrize("state", ["blocked", "working", "unknown"])
 def test_a_pane_that_is_not_idle_is_never_typed_into_and_escalates_after_one_window(inbox, state):
     item = inbox.send("sw-eng-2", "sw-eng-1", "review my diff")
@@ -91,6 +222,25 @@ def test_a_pane_that_is_not_idle_is_never_typed_into_and_escalates_after_one_win
     (raised,) = inbox.inbox(MASTER_NAME)
     assert item.id in raised.text and "review my diff" in raised.text
     assert events(inbox, item.id) == ["escalated_master", "escalated_operator"] and len(ledger.followups) == 1
+
+
+@pytest.mark.parametrize("sender", ["swarm", "sw-eng-2"])
+def test_actionable_notices_escalate_without_typing_into_a_busy_pane(inbox, sender):
+    item = inbox.send(sender, "sw-eng-1", "finish the task")
+    herdr, ledger = FakeHerdr({"p1": "working"}), FakeLedger()
+    run(inbox, herdr, ledger, sent_at(item) + W - 1)
+    assert events(inbox, item.id) == []
+    run(inbox, herdr, ledger, sent_at(item) + W)
+    assert events(inbox, item.id) == ["escalated_master"]
+    (raised,) = inbox.inbox(MASTER_NAME)
+    assert raised.fyi is False
+    [note] = [e for e in inbox.history(item.id) if e.get("event") == "escalated_master"]
+    assert (note["by"], note["reason"]) == ("swarm", f"raised to {raised.address} as message {raised.id}")
+    run(inbox, herdr, ledger, sent_at(item) + 2 * W)
+    assert events(inbox, item.id) == ["escalated_master", "escalated_operator"]
+    assert events(inbox, raised.id) == []
+    assert len(ledger.followups) == 1
+    assert herdr.prompts == []
 
 
 ORIGINAL_SENT = 1791220997780
@@ -111,9 +261,9 @@ ORIGINAL_AGE = 540_000
 def test_the_original_overdue_item_replayed_at_nine_minutes(pane, step):
     from types import SimpleNamespace
 
-    item = SimpleNamespace(state="pending", sender="sw-eng-2", fyi=False)
+    item = SimpleNamespace(state="pending", sender="sw-eng-2", fyi=False, ref="")
     history = [{"state": "pending", "by": "sw-eng-2", "reason": "", "at": ORIGINAL_SENT}]
-    assert wake.decide(item, pane, history, ORIGINAL_SENT + ORIGINAL_AGE, W) == step
+    assert wake.decide(item, pane, history, ORIGINAL_SENT + ORIGINAL_AGE, W, "sw") == step
 
 
 def test_retries_stop_at_three_then_the_master_gets_an_item(inbox):
@@ -187,10 +337,10 @@ def test_a_refused_operator_notification_closes_that_item_and_the_pass_goes_on(i
     )
 
     class StrictLedger(FakeLedger):
-        def followup(self, slug, text):
+        def followup(self, slug, text, needs_operator=False):
             if "first" in text:
                 raise SwarmError("ledger sw refused: item refused: date '2026-10-05'")
-            super().followup(slug, text)
+            super().followup(slug, text, needs_operator)
 
     first = inbox.send("sw-eng-2", "sw-eng-1", "first message")
     second = inbox.send("sw-eng-2", "sw-eng-1", "second message")
@@ -216,10 +366,11 @@ def test_counts_survive_a_fresh_store_connection(server, inbox):
     assert events(fresh(server), item.id)[-1] == "escalated_master"
 
 
-def test_a_delivered_or_closed_item_is_never_woken(inbox):
+def test_a_confirmed_or_closed_item_is_never_woken(inbox):
     delivered = inbox.send(MASTER_NAME, "sw-eng-1", "one")
     closed = inbox.send(MASTER_NAME, "sw-eng-1", "two")
     inbox.deliver(delivered.id, "sw-eng-1")
+    inbox.confirm(delivered.id, "sw-eng-1")
     inbox.close(closed.id, "sw-eng-1", "done", "handled the request")
     herdr, ledger = FakeHerdr({"p1": "idle"}), FakeLedger()
     for n in range(8):
@@ -251,6 +402,15 @@ def test_an_item_for_the_master_skips_straight_to_the_operator(inbox):
     assert events(inbox, item.id) == ["escalated_operator"]
 
 
+@pytest.mark.parametrize("address", ["sw-eng-1", MASTER_NAME])
+def test_the_operator_follow_up_is_flagged_for_the_operator(inbox, address):
+    item = inbox.send("sw-eng-2", address, "check the plan")
+    herdr, ledger = FakeHerdr({"p1": "working", "pm": "idle"}), FakeLedger()
+    for n in range(6):
+        run(inbox, herdr, ledger, sent_at(item) + n * W)
+    assert len(ledger.followups) == 1 and ledger.flagged == [True]
+
+
 @pytest.mark.parametrize("harness", ["", "claude", "codex"])
 def test_a_tick_with_pending_items_never_types_into_the_master_pane(inbox, harness):
     master = AgentRecord(MASTER_NAME, MASTER, MASTER, pane_id="pm", seat="master@sw", harness=harness)
@@ -267,8 +427,8 @@ def test_a_tick_with_pending_items_never_types_into_the_master_pane(inbox, harne
 def test_a_claude_pane_takes_its_items_through_the_inbox_channel_never_a_typed_wake(inbox):
     claude = AgentRecord("sw-eng-1", "eng", "t1", pane_id="p1", harness="claude")
     codex = AgentRecord("sw-eng-2", "eng", "t2", pane_id="p2", harness="codex")
-    item = inbox.send(MASTER_NAME, "sw-eng-1", "review my diff")
-    other = inbox.send(MASTER_NAME, "sw-eng-2", "review mine")
+    item = inbox.send("sw-eng-4", "sw-eng-1", "review my diff")
+    other = inbox.send("sw-eng-4", "sw-eng-2", "review mine")
     herdr = FakeHerdr({"p1": "idle", "p2": "idle"})
     run(inbox, herdr, FakeLedger(), sent_at(item) + 1, [claude, codex, AGENTS[1]])
     assert herdr.prompts == [("p2", wake.WAKE_TEXT)]
@@ -325,6 +485,48 @@ SEATED = [
 ]
 
 
+def no_wake_session(monkeypatch):
+    monkeypatch.setattr(
+        "scripts.inbox.addresses.get_active_sessions", lambda **kwargs: {"desk": {"name": "operator-desk"}}
+    )
+
+
+def assert_raised_to_the_operator_only(inbox, item, ledger):
+    assert inbox.inbox("master@sw") == [] and inbox.inbox(MASTER_NAME) == []
+    assert events(inbox, item.id) == ["escalated_operator"] and len(ledger.followups) == 1
+
+
+@pytest.mark.parametrize("agents", [AGENTS, SEATED], ids=["unseated", "seat never occupied"])
+def test_the_masters_own_message_nobody_reads_goes_to_the_operator_never_back_to_the_master(inbox, monkeypatch, agents):
+    no_wake_session(monkeypatch)
+    item = inbox.send(MASTER_NAME, "operator-desk", "need a decision")
+    ledger = FakeLedger()
+    run(inbox, FakeHerdr({}), ledger, sent_at(item) + W, agents)
+    assert_raised_to_the_operator_only(inbox, item, ledger)
+
+
+@pytest.mark.parametrize("sender", [MASTER_NAME, "sw-master-0"])
+def test_a_master_seat_message_nobody_reads_goes_to_the_operator_never_back_to_its_seat(inbox, monkeypatch, sender):
+    no_wake_session(monkeypatch)
+    inbox.seats.occupy("master@sw", "sw-master-0", at=1)
+    inbox.seats.occupy("master@sw", MASTER_NAME, at=2)
+    earlier = AgentRecord("sw-master-0", "eng", "t9", seat="eng-3@sw")
+    item = inbox.send(sender, "operator-desk", "need a decision")
+    ledger = FakeLedger()
+    run(inbox, FakeHerdr({}), ledger, sent_at(item) + W, [*SEATED, earlier])
+    assert_raised_to_the_operator_only(inbox, item, ledger)
+
+
+def test_an_agent_message_nobody_reads_still_goes_to_its_master_seat(inbox, monkeypatch):
+    no_wake_session(monkeypatch)
+    inbox.seats.occupy("master@sw", MASTER_NAME, at=1)
+    item = inbox.send("sw-eng-1", "operator-desk", "need a decision")
+    ledger = FakeLedger()
+    run(inbox, FakeHerdr({}), ledger, sent_at(item) + W, SEATED)
+    [raised] = inbox.inbox("master@sw")
+    assert item.id in raised.text and events(inbox, item.id) == ["escalated_master"] and ledger.followups == []
+
+
 def test_an_item_for_a_seat_wakes_the_pane_of_its_occupant(inbox):
     inbox.seats.occupy("eng-1@sw", "sw-eng-1", at=1)
     item = inbox.send(MASTER_NAME, "eng-1@sw", "rebase please")
@@ -356,6 +558,120 @@ def test_escalation_goes_to_the_master_seat(inbox):
     run(inbox, FakeHerdr({}), FakeLedger(), sent_at(item) + W, [outside, SEATED[2]])
     [raised] = inbox.inbox("master@sw")
     assert item.id in raised.text
+
+
+@pytest.mark.parametrize("gone", ["absent", "exited"])
+def test_seat_mail_waits_for_the_successor_and_its_window_starts_at_binding(inbox, gone):
+    inbox.seats.occupy("eng-1@sw", "sw-eng-gone", at=1)
+    waiting = SEATED[1:]
+    if gone == "exited":
+        inbox.seats.record_exit("sw-eng-gone", "eng-1@sw", "handed off its seat")
+        waiting = [AgentRecord("sw-eng-gone", "eng", "t1", pane_id="pg", seat="eng-1@sw"), *waiting]
+    item = inbox.send("sw-eng-4", "eng-1@sw", "rebase please")
+    herdr, ledger = FakeHerdr({}), FakeLedger()
+    for n in range(1, 30):
+        run(inbox, herdr, ledger, sent_at(item) + n * W, waiting)
+    assert events(inbox, item.id) == [] and inbox.inbox("master@sw") == [] and ledger.followups == []
+    bound = sent_at(item) + 30 * W
+    inbox.seats.occupy("eng-1@sw", "sw-eng-1", at=bound)
+    run(inbox, herdr, ledger, bound + W - 1, SEATED)
+    assert events(inbox, item.id) == []
+    run(inbox, herdr, ledger, bound + W, SEATED)
+    assert events(inbox, item.id) == ["escalated_master"]
+
+
+def test_master_seat_mail_waits_for_the_next_master(inbox):
+    inbox.seats.occupy("master@sw", "sw-master-0", at=1)
+    item = inbox.send("sw-eng-4", "master@sw", "check the plan")
+    herdr, ledger = FakeHerdr({}), FakeLedger()
+    for n in range(1, 10):
+        run(inbox, herdr, ledger, sent_at(item) + n * W, SEATED[:2])
+    assert events(inbox, item.id) == [] and ledger.followups == []
+    bound = sent_at(item) + 10 * W
+    inbox.seats.occupy("master@sw", MASTER_NAME, at=bound)
+    run(inbox, herdr, ledger, bound + W - 1, SEATED)
+    assert ledger.followups == []
+    run(inbox, herdr, ledger, bound + W, SEATED)
+    assert events(inbox, item.id) == ["escalated_operator"] and len(ledger.followups) == 1
+
+
+def test_master_seat_mail_on_a_stopped_swarm_escalates_as_before(inbox):
+    from scripts.swarm.store import RedisStore, SwarmConfig
+
+    store = RedisStore(inbox.redis)
+    store.create(SwarmConfig("sw", "/repo", max_eng=1, max_ci=1))
+    store.update("sw", state="stopped")
+    inbox.seats.occupy("master@sw", "sw-master-0", at=1)
+    item = inbox.send("sw-eng-4", "master@sw", "check the plan")
+    ledger = FakeLedger()
+    run(inbox, FakeHerdr({}), ledger, sent_at(item) + W, SEATED[:2])
+    assert events(inbox, item.id) == ["escalated_operator"] and len(ledger.followups) == 1
+
+
+def test_seat_mail_to_a_live_occupant_escalates_after_one_window(inbox):
+    inbox.seats.occupy("eng-1@sw", "sw-eng-1", at=1)
+    item = inbox.send("sw-eng-4", "eng-1@sw", "rebase please")
+    herdr, ledger = FakeHerdr({"p1": "working"}), FakeLedger()
+    run(inbox, herdr, ledger, sent_at(item) + W - 1, SEATED)
+    assert events(inbox, item.id) == []
+    run(inbox, herdr, ledger, sent_at(item) + W, SEATED)
+    assert events(inbox, item.id) == ["escalated_master"]
+
+
+def test_a_codex_successor_is_woken_one_window_after_it_binds(inbox):
+    inbox.seats.occupy("eng-1@sw", "sw-eng-gone", at=1)
+    item = inbox.send("sw-eng-4", "eng-1@sw", "rebase please")
+    inbox.note(item.id, wake.WOKEN, wake.BY, "prompted sw-eng-gone to read its inbox", sent_at(item) + 1)
+    bound = sent_at(item) + 10 * W
+    codex = AgentRecord("sw-eng-2", "eng", "t1", pane_id="p2", harness="codex", seat="eng-1@sw")
+    inbox.seats.occupy("eng-1@sw", codex.name, at=bound)
+    herdr = FakeHerdr({"p2": "idle"})
+    wake.wake_now(inbox, "sw", [codex], herdr, bound + W - 1, W)
+    assert herdr.prompts == []
+    wake.wake_now(inbox, "sw", [codex], herdr, bound + W, W)
+    assert herdr.prompts == [("p2", wake.WAKE_TEXT)]
+
+
+def swarm_config(inbox, state="running"):
+    from scripts.swarm.store import RedisStore, SwarmConfig
+
+    store = RedisStore(inbox.redis)
+    store.create(SwarmConfig("sw", "/repo", max_eng=1, max_ci=1))
+    store.update("sw", state=state)
+
+
+def test_the_window_counts_from_the_items_first_step_at_clock_zero(inbox, monkeypatch):
+    monkeypatch.setattr("scripts.inbox.store.now_ms", lambda: 0)
+    item = inbox.send("sw-eng-2", "sw-eng-1", "review my diff")
+    assert wake.decide(item, None, inbox.history(item.id), W, W, "sw") == wake.TO_MASTER
+    run(inbox, FakeHerdr({"p1": "working"}), FakeLedger(), W)
+    assert events(inbox, item.id) == ["escalated_master"]
+
+
+def test_a_seat_note_after_binding_leaves_the_window_at_the_bind(inbox):
+    inbox.seats.occupy("eng-1@sw", "sw-eng-1", at=1)
+    item = inbox.send("sw-eng-4", "eng-1@sw", "rebase please")
+    bound = sent_at(item) + W
+    inbox.seats.occupy("eng-1@sw", "sw-eng-1", at=bound)
+    inbox.seats.note("eng-1@sw", "promoted", "a later seat note", bound + W)
+    run(inbox, FakeHerdr({"p1": "working"}), FakeLedger(), bound + W, SEATED)
+    assert events(inbox, item.id) == ["escalated_master"]
+
+
+def test_mail_on_a_never_seated_lane_of_a_stopped_swarm_waits_out_its_first_window(inbox):
+    swarm_config(inbox, "stopped")
+    item = inbox.send("sw-eng-4", "eng-1@sw", "rebase please")
+    assert run(inbox, FakeHerdr({}), FakeLedger(), sent_at(item) + 1, SEATED[1:]) == []
+    assert events(inbox, item.id) == []
+
+
+@pytest.mark.parametrize(("seat", "held"), [("eng-1@sw", True), ("eng-2@sw", False)])
+def test_a_running_swarm_holds_only_seats_inside_the_lane_cap(inbox, seat, held):
+    swarm_config(inbox)
+    inbox.seats.occupy(seat, "sw-eng-gone", at=1)
+    item = inbox.send("sw-eng-4", seat, "rebase please")
+    run(inbox, FakeHerdr({}), FakeLedger(), sent_at(item) + W, [SEATED[2]])
+    assert events(inbox, item.id) == ([] if held else ["escalated_master"])
 
 
 def test_a_handover_before_the_prompt_leaves_the_old_pane_alone(inbox):
@@ -404,3 +720,47 @@ def test_a_pane_the_operator_prompted_inside_the_quiet_window_is_left_alone(inbo
 def test_the_quiet_window_comes_from_the_environment():
     assert wake.quiet_ms({}) == wake.DEFAULT_QUIET_S * 1000
     assert wake.quiet_ms({wake.QUIET_ENV: "30"}) == 30_000
+
+
+def test_the_raised_master_item_reads_back_from_its_escalation_note():
+    note = wake.raised_note("master@sw", "abc123def456")
+    assert note == "raised to master@sw as message abc123def456"
+    assert wake.raised_id({"event": wake.TO_MASTER, "reason": note}) == "abc123def456"
+    assert wake.raised_id({"event": wake.WOKEN, "reason": note}) == ""
+    assert wake.raised_id({"state": "pending", "reason": note}) == ""
+
+
+def test_an_unread_fyi_is_never_typed_as_a_wake_while_a_work_item_still_is(inbox):
+    fyi = inbox.send(MASTER_NAME, "sw-eng-1", "noted, nothing to do", fyi=True)
+    herdr = FakeHerdr({"p1": "idle"})
+    for n in range(6):
+        run(inbox, herdr, FakeLedger(), sent_at(fyi) + n * W + 1)
+    assert herdr.prompts == [] and events(inbox, fyi.id) == []
+    work = inbox.send(MASTER_NAME, "sw-eng-1", "review my diff")
+    run(inbox, herdr, FakeLedger(), sent_at(work) + 1)
+    assert herdr.prompts == [("p1", wake.WAKE_TEXT)]
+    assert events(inbox, work.id) == ["woken"] and events(inbox, fyi.id) == []
+
+
+def test_a_codex_pane_holding_only_fyi_mail_gets_no_wake(inbox):
+    codex = AgentRecord("sw-eng-2", "eng", "t1", pane_id="p2", harness="codex")
+    fyi = inbox.send(MASTER_NAME, codex.name, "noted, nothing to do", fyi=True)
+    herdr = FakeHerdr({"p2": "idle"})
+    wake.wake_now(inbox, "sw", [codex], herdr, sent_at(fyi) + 1, W)
+    assert herdr.prompts == [] and events(inbox, fyi.id) == []
+
+
+def test_fyi_seat_mail_waits_for_no_successor_and_gets_no_wake_after_binding(inbox):
+    inbox.seats.occupy("eng-1@sw", "sw-eng-gone", at=1)
+    fyi = inbox.send("sw-eng-4", "eng-1@sw", "your pull request merged", fyi=True)
+    work = inbox.send("sw-eng-4", "eng-1@sw", "rebase please")
+    herdr, ledger = FakeHerdr({"p1": "idle"}), FakeLedger()
+    for n in range(1, 6):
+        run(inbox, herdr, ledger, sent_at(fyi) + n * W, SEATED[1:])
+    assert events(inbox, fyi.id) == events(inbox, work.id) == []
+    bound = sent_at(fyi) + 10 * W
+    inbox.seats.occupy("eng-1@sw", "sw-eng-1", at=bound)
+    for n in range(4):
+        run(inbox, herdr, ledger, bound + n * W + 1, SEATED)
+    assert events(inbox, fyi.id) == [] and ledger.followups == []
+    assert events(inbox, work.id)[0] == "woken"

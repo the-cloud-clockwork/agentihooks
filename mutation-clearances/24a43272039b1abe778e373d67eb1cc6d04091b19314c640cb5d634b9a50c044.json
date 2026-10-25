@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/ledger_cutover.py:scripts.swarm.ledger_cutover.x__activate__mutmut_97:f8fb0b9f1ddfa6d8628d70c1bbb8747efb357dea9a263f759b7a250bcaa4cadb": {
+    "reader": "standards_reader",
+    "reason": "lease.transfer reads store only after its if _address(slug): return Lease(**_remote(...)) branch, and _activate calls it inside ledger_route.scoped(slug, address) with an address its callers require to be a non-empty validated URL, so passing None never reaches a store read."
+  }
+}

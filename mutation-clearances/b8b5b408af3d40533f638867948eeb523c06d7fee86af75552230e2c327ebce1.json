@@ -1,0 +1,6 @@
+{
+  "scripts/recall/search.py:scripts.recall.search.x__text__mutmut_8:14798805283100292d1d22a812c430a61985adac1cb2b666e0a354f02fdf8e93": {
+    "reader": "standards_reader",
+    "reason": "Uppercasing keywords and the column and table names TEXT, RECORDS, SOURCE, REF, CHUNK_INDEX is a no-op because SQLite identifiers are case-insensitive, and the ? parameter binding is unchanged."
+  }
+}

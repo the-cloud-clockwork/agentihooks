@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/ledger_stats.py:scripts.swarm_ledger.ledger_stats.x_refresh__mutmut_26:ff7d5dc88ba11da2c1bfa6f5bc2ff2add34c463730098f93f86faf30f9ca4c9b": {
+    "reader": "Standards",
+    "reason": "The mutant omits the precomputed review argument; the same pure calculator receives identical document, events and time before mutation and yields identical persisted stats and review."
+  }
+}

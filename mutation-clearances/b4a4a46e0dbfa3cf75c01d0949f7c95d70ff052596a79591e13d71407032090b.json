@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/api/routes.py:scripts.swarm_ledger.api.routes.x_dispatch__mutmut_21:a2ea0afde3a3050f0fe907fcbf48de136c0221371f78c11879087f5f778cda9e": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "The HTTPMessage Origin lookup changes only key case. Supplied and missing origins are identical before the unchanged origin guard."
+  }
+}

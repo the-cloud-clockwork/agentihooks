@@ -1,13 +1,12 @@
 import json
 import subprocess
+from dataclasses import replace
 
 import pytest
 
 from scripts.handoff.envelope import REASONS, build, reclaim
 from scripts.inbox.store import InboxStore
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
-
-pytestmark = pytest.mark.xdist_group("fakeredis")
 
 WORKTREE = "/wt/repo/engineer-a1b2c3-0001"
 PR = "https://github.com/o/r/pull/9"
@@ -120,8 +119,40 @@ def test_the_envelope_carries_every_fact_the_runtime_holds(store):
             "model_source": "",
             "model_confidence": None,
             "profile_decision": {},
+            "overlays": [],
         },
     }
+
+
+@pytest.mark.parametrize(("harness", "saved", "recorded"), [("claude", "max", "xhigh"), ("codex", "xhigh", "xhigh")])
+def test_a_master_envelope_records_its_launch_effort_inside_the_swarm_range(store, harness, saved, recorded):
+    master = AgentRecord("master@a1b2c3-0001", "master", "master", harness=harness, effort=saved)
+    envelope = build(store, "sw", master, "recycle", [], 0, run=lambda argv, **_: _done(code=1))
+    assert envelope["launch"]["effort"] == recorded
+    assert envelope["launch"]["harness"] == harness
+
+
+@pytest.mark.parametrize(
+    ("bounds", "saved"), [(("low", "medium"), "max"), (("low", "medium"), "low"), (("medium", "xhigh"), "medium")]
+)
+def test_a_master_envelope_never_records_a_launch_effort_below_high(store, bounds, saved):
+    store.update("sw", effort_min=bounds[0], effort_max=bounds[1])
+    master = AgentRecord("master@a1b2c3-0001", "master", "master", harness="claude", effort=saved)
+    envelope = build(store, "sw", master, "recycle", [], 0, run=lambda argv, **_: _done(code=1))
+    assert envelope["launch"]["effort"] == "high"
+
+
+@pytest.mark.parametrize(("harness", "effort"), [("copilot", "max"), ("claude", "")])
+def test_a_master_envelope_keeps_an_effort_it_cannot_rank(store, harness, effort):
+    master = AgentRecord("master@a1b2c3-0001", "master", "master", harness=harness, effort=effort)
+    envelope = build(store, "sw", master, "recycle", [], 0, run=lambda argv, **_: _done(code=1))
+    assert envelope["launch"]["effort"] == effort
+
+
+def test_a_lane_envelope_records_its_exact_launch_effort(store):
+    agent = replace(_agent(), harness="claude", effort="max")
+    envelope = build(store, "sw", agent, "recycle", [], 0, run=_run([]))
+    assert envelope["launch"]["effort"] == "max"
 
 
 def test_facts_the_runtime_cannot_find_are_named_unknown(store):
@@ -228,9 +259,9 @@ def test_a_reclaim_skips_a_life_that_never_pushed_for_an_older_one_that_did():
     assert (verdict["continue_from"], verdict["remote_head"]) == ("origin/engineer-a1b2c3-0001", HEAD)
 
 
-def test_a_reclaim_follows_the_upstream_a_continuing_life_pushed_to():
+def test_a_reclaim_never_infers_task_ownership_from_a_worktree_upstream():
     run = _remote({"engineer-a1b2c3-0000": HEAD}, upstreams={WORKTREE: "origin/engineer-a1b2c3-0000"})
-    assert reclaim("/repo", [OLDER], "", run=run)["continue_from"] == "origin/engineer-a1b2c3-0000"
+    assert reclaim("/repo", [OLDER], "", run=run)["continue_from"] == "fresh"
 
 
 def test_a_reclaim_falls_back_to_the_branch_the_ledger_recorded():
@@ -243,8 +274,7 @@ def test_a_reclaim_with_no_pushed_branch_starts_fresh_and_names_what_it_checked(
         "remote_branch": "none",
         "remote_head": "none",
         "continue_from": "fresh",
-        "fresh_reason": "no earlier life pushed a branch: checked engineer-a1b2c3-0002, engineer-a1b2c3-0001 and "
-        "feature-x on the remote",
+        "fresh_reason": "no earlier life pushed a branch: checked feature-x on the remote",
     }
 
 

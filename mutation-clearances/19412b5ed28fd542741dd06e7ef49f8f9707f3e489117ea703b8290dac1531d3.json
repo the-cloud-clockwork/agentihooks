@@ -1,0 +1,6 @@
+{
+  "scripts/scheduler/core.py:scripts.scheduler.core.x\u01c1Scheduler\u01c1_deliver__mutmut_18:5953e5c0fe52e0e93e55677f337cb5d69393d8640eca090937ec5e99fb455ff6": {
+    "reader": "standards_reader",
+    "reason": "Changes only the return value of the change callback passed to Scheduler.update for a stale pending entry, from None to 0. Scheduler.update calls change(entry) and discards its return value, then writes the entry and syncs the due and pending indexes from the entry alone, so stored state, index membership and lease checks are identical."
+  }
+}

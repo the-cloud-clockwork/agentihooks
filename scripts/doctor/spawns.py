@@ -1,23 +1,41 @@
+import json
 import re
 
-from scripts.agent_choice import SHARE_WINDOW_MS, share_picks
 from scripts.swarm.health.findings import Finding
 
 TICK_MS = 60_000
-WINDOW_MS = SHARE_WINDOW_MS
-MIN_PICKS = 10
 FAILURE = re.compile(r"^(?:spawn failed for ([^\s,]+).*?|master spawn failed): (.+)$")
+
+
+def _reservation_room(snapshot: dict) -> bool:
+    return any(
+        row["harness"] == snapshot.get("harness")
+        and row["state"] == "OPEN"
+        and row.get("cap") is not None
+        and row["sessions"] < row["cap"]
+        for row in snapshot.get("accounts", [])
+    )
 
 
 def failed(record: dict) -> list[Finding]:
     failures = {}
+    capacity = {}
     prefix = f"{record['slug']}: "
     for action in record["actions"]:
         if not action.startswith(prefix):
             continue
-        match = FAILURE.fullmatch(action[len(prefix) :])
+        text = action[len(prefix) :]
+        if text.startswith("spawn capacity for "):
+            subject, raw = text.removeprefix("spawn capacity for ").split(": ", 1)
+            capacity[subject] = json.loads(raw)
+            continue
+        match = FAILURE.fullmatch(text)
         if match:
-            failures.setdefault(match[1] or "master", []).append(match[2])
+            subject = match[1] or "master"
+            snapshot = capacity.pop(subject, {})
+            if "account reservation is full" in match[2] and not _reservation_room(snapshot):
+                continue
+            failures.setdefault(subject, []).append(match[2])
     return [
         Finding(
             "failed spawn",
@@ -28,45 +46,6 @@ def failed(record: dict) -> list[Finding]:
             len(reasons),
         )
         for subject, reasons in sorted(failures.items())
-    ]
-
-
-def share_drift(record: dict) -> list[Finding]:
-    if not record.get("target_changed_at"):
-        return []
-    since = max(record["now"] - WINDOW_MS, record["target_changed_at"] + 1)
-    target = record["target"]
-    picks = share_picks([*record["history"], *record["agents"]], since)
-    total, codex = sum(picks.values()), picks.get("codex", 0)
-    if total < MIN_PICKS or abs(codex * 100 - total * target) <= 100:
-        return []
-    actual = codex * 100 / total
-    return [
-        Finding(
-            "codex share drift",
-            record["slug"],
-            f"Codex share {actual:.1f}% against target {target}%",
-            (
-                f"codex {codex}/{total} share picks in the last {WINDOW_MS // 3_600_000} hours, {actual:.1f}%, target {target}%",
-            ),
-            "more than one share pick from target",
-            round(abs(actual - target)),
-        )
-    ]
-
-
-def overflow(record: dict) -> list[Finding]:
-    return [
-        Finding(
-            "account overflow",
-            agent["name"],
-            "session placed on an account at its cap",
-            (f"account {agent['account']}", f"harness {agent['harness']}", "placement overflow"),
-            "launcher reported overflow",
-            1,
-        )
-        for agent in record["agents"]
-        if agent.get("placement") == "overflow"
     ]
 
 
@@ -90,27 +69,61 @@ def fresh_restores(record: dict) -> list[Finding]:
     ]
 
 
-def silent_starts(agents: list[dict], hooked: dict, now_ms: int) -> list[Finding]:
+def silent_starts(
+    agents: list[dict], hooked: dict, now_ms: int, beats: dict | None = None, pending: frozenset = frozenset()
+) -> list[Finding]:
+    beats = beats or {}
+    found = []
+    for agent in agents:
+        if agent.get("state") == "finished" or agent["name"] in pending:
+            continue
+        found += _silent_hive(agent, beats, now_ms) if agent.get("hive") else _silent_local(agent, hooked, now_ms)
+    return found
+
+
+def _silent_local(agent: dict, hooked: dict, now_ms: int) -> list[Finding]:
+    started = agent.get("started_at")
+    if not started or agent["name"] in hooked or now_ms - started < TICK_MS:
+        return []
     return [
         Finding(
             "no hook event",
             agent["name"],
-            "spawned agent has run no tool since it started",
+            "starting launch has no recorded harness or pane"
+            if agent.get("state") == "starting" and not (agent.get("harness") or agent.get("pane_id"))
+            else "spawned agent has run no tool since it started",
             (
-                f"started at {agent['started_at']}",
+                f"started at {started}",
                 f"harness {agent.get('harness', '')}",
                 f"pane {agent.get('pane_id', '')}",
             ),
             "no hook event one tick after spawn",
-            (now_ms - agent["started_at"]) // TICK_MS,
+            (now_ms - started) // TICK_MS,
         )
-        for agent in agents
-        if agent.get("state") != "finished"
-        and agent.get("started_at")
-        and agent["name"] not in hooked
-        and now_ms - agent["started_at"] >= TICK_MS
+    ]
+
+
+def _silent_hive(agent: dict, beats: dict, now_ms: int) -> list[Finding]:
+    acked = (agent.get("launch_timings") or {}).get("returned_at") or agent.get("launched_at")
+    beat = beats.get(agent["name"])
+    if not acked or (beat and beat >= agent["started_at"]) or now_ms - acked < TICK_MS:
+        return []
+    return [
+        Finding(
+            "no hook event",
+            agent["name"],
+            "hive agent has sent no heartbeat since its hive acknowledged the launch",
+            (
+                f"acknowledged at {acked}",
+                f"hive {agent['hive']}",
+                f"harness {agent.get('harness', '')}",
+                f"pane {agent.get('pane_id', '')}",
+            ),
+            "no heartbeat one tick after the hive acknowledgement",
+            (now_ms - acked) // TICK_MS,
+        )
     ]
 
 
 def findings(record: dict) -> list[Finding]:
-    return [*failed(record), *share_drift(record), *overflow(record), *fresh_restores(record)]
+    return [*failed(record), *fresh_restores(record)]

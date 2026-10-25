@@ -1,0 +1,6 @@
+{
+  "scripts/ci_mutation/report.py:scripts.ci_mutation.report.x_mutation_lines__mutmut_6:73518390e47e0dc254e1f244bd729b7d61bfe9279039c4890e43747b6a54cfc7": {
+    "reader": "Standards",
+    "reason": "SequenceMatcher treats False and None identically for autojunk; repeated line opcodes are unchanged."
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "scripts/profiles/measure.py:scripts.profiles.measure.x_measure__mutmut_13:c8099a38eb6035b20a2650133bd54d65e9c7330a8d55a76cbca66c32146f094b": {
+    "reader": "Standards",
+    "reason": "prepare treats an empty and a None effort the same: select_profile.prepare falls back with `effort or native_effort or default_effort`, so the profile default applies either way."
+  }
+}

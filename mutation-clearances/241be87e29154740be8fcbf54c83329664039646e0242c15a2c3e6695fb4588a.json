@@ -1,0 +1,6 @@
+{
+  "scripts/ci_mutation/selection.py:scripts.ci_mutation.selection.x_collect_parallel_stats__mutmut_2:84251915ce8da7a4654f079de5031bf2a1d55444faee52450b56a12dd31fb2f0": {
+    "reader": "Standards",
+    "reason": "The default multiprocessing start method under Python 3.12 on the Linux runner is fork, so the context is identical."
+  }
+}

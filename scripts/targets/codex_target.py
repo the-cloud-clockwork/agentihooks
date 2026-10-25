@@ -50,6 +50,7 @@ from scripts.targets._common import (
     strip_persona,
     write_persona,
 )
+from scripts.targets.codex_hook_trust import trusted_state
 
 _MANAGED_HEADER = "<!-- managed-by: agentihooks — regenerate with: agentihooks init --target codex -->"
 _MANAGED_FOOTER = "<!-- agentihooks:managed-end -->"
@@ -101,6 +102,67 @@ def codex_home(environ: Mapping[str, str] | None = None) -> Path:
     return Path(raw).expanduser() if raw else Path(env.get("HOME") or Path.home()) / ".codex"
 
 
+def _stale_catalog_files() -> tuple[Path, Path]:
+    from hooks.config import AGENTIHOOKS_HOME
+
+    return AGENTIHOOKS_HOME / "codex_model_catalog.json", AGENTIHOOKS_HOME / "codex_context_highwater.json"
+
+
+def wrapper_text(profile_env: dict[str, str], python_bin: str) -> str:
+    return (
+        "#!/usr/bin/env bash\n"
+        "# managed-by: agentihooks — regenerate with: agentihooks init --target codex\n"
+        "set -euo pipefail\n"
+        f"cd {shlex.quote(str(_install_module().AGENTIHOOKS_ROOT))}\n"
+        + "".join(f'export {key}="${{{key}:={shlex.quote(value)}}}"\n' for key, value in profile_env.items())
+        + f"AGENTIHOOKS_TARGET=codex exec {shlex.quote(python_bin)} -m hooks\n"
+    )
+
+
+def _silent(_line: str) -> None:
+    pass
+
+
+def _wrapper_python(text: str) -> str | None:
+    lines = text.splitlines()
+    words = shlex.split(lines[-1]) if lines else []
+    return words[2] if words[:2] == ["AGENTIHOOKS_TARGET=codex", "exec"] and len(words) == 5 else None
+
+
+def refresh_wrapper() -> bool:
+    from scripts.native_settings import native_settings
+    from scripts.profiles.render import operator_codex_home
+
+    _i = _install_module()
+    record = _i._global_record(_i._load_state(), "codex")
+    wrapper = operator_codex_home() / "agentihooks-hook.sh"
+    if not record.get("profile") or not wrapper.is_file():
+        return False
+    if _i.AGENTIHOOKS_ROOT.resolve() != _i.install_root().resolve():
+        return False
+    name = record.get("settings_profile")
+    overlay = _i._resolve_profile_dir(name) if name else None
+    chain = _i._resolve_profile_chain(record["profile"])
+    if not chain or (name and overlay is None):
+        return False
+    native = native_settings("codex", chain, (name, overlay) if overlay else None, say=_silent)
+    current = wrapper.read_text()
+    python_bin = _wrapper_python(current)
+    if python_bin is None:
+        return False
+    text = wrapper_text(native["_agentihooks"]["env"], python_bin)
+    if current == text:
+        return False
+    staged = wrapper.with_name(f".{wrapper.name}.tmp-{os.getpid()}")
+    try:
+        staged.write_text(text)
+        staged.chmod(0o755)
+        os.replace(staged, wrapper)
+    finally:
+        staged.unlink(missing_ok=True)
+    return True
+
+
 def _is_ours(group: object, wrapper: Path) -> bool:
     hooks = group.get("hooks") if isinstance(group, dict) else None
     return isinstance(hooks, list) and any(
@@ -111,7 +173,7 @@ def _is_ours(group: object, wrapper: Path) -> bool:
 def restore_hook_order(home: Path) -> list[str]:
     """Events whose agentihooks group drifted behind a foreign one; the hooks file is rewritten only when one did.
 
-    Codex keys hook trust by group position, so this restores the order `init` writes and never touches trust.
+    Codex keys hook trust by group position, so this restores the order `init` writes and trusts the new positions.
     """
     path = (home / "hooks.json").resolve()
     try:
@@ -132,7 +194,30 @@ def restore_hook_order(home: Path) -> list[str]:
             moved.append(event)
     if moved:
         _atomic_write(path, json.dumps(doc, indent=2))
+        trust_hooks(home)
+        if path.parent != home.resolve():
+            trust_hooks(path.parent)
     return moved
+
+
+def trust_hooks(home: Path) -> int:
+    import tomlkit
+
+    path = home / "config.toml"
+    doc = CodexAdapter._load_toml(path)
+    if "hooks" not in doc:
+        doc["hooks"] = tomlkit.table()
+    if "state" not in doc["hooks"]:
+        doc["hooks"]["state"] = tomlkit.table()
+    state = doc["hooks"]["state"]
+    changed = 0
+    for key, value in trusted_state(home / "hooks.json", home / "hooks.json").items():
+        if state.get(key, {}).get("trusted_hash") != value["trusted_hash"]:
+            state[key] = {**state.get(key, {}), **value}
+            changed += 1
+    if changed:
+        CodexAdapter._dump_toml(path, doc)
+    return changed
 
 
 _TOOL_FILTERS = ("enabled_tools", "disabled_tools")
@@ -239,6 +324,12 @@ class CodexAdapter:
     # settings: config.toml managed keys + hooks.json + wrapper
     # ------------------------------------------------------------------
 
+    def summary_counts(self) -> dict[str, int]:
+        from scripts.init_reporter import installed_counts
+
+        config = self._load_toml(self.home() / "config.toml")
+        return installed_counts(config.get("mcp_servers", {}), agents_skills_home(), {})
+
     @staticmethod
     def _apply_managed(target: dict, recorded: dict, key: str, value, label: str) -> None:
         """Write *value* unless the operator hand-edited that key since our last write."""
@@ -277,9 +368,9 @@ class CodexAdapter:
 
         config_path = home / "config.toml"
         doc = self._load_toml(config_path)
-        from hooks.context.codex_context_pin import catalog_path
-
-        if doc.get("model_catalog_json") == str(catalog_path()):
+        # A pinned catalog limits codex to the models it lists.
+        stale = _stale_catalog_files()
+        if doc.get("model_catalog_json") == str(stale[0]):
             del doc["model_catalog_json"]
 
         # Native settings arrive already merged (base + bundle + profile chain).
@@ -315,26 +406,20 @@ class CodexAdapter:
         doc.setdefault("notify", [python_bin, "-m", "hooks.targets.notify_shim"])
 
         self._dump_toml(config_path, doc)
+        for path in stale:
+            path.unlink(missing_ok=True)
         _atomic_write(self._managed_sidecar(home), json.dumps(managed, indent=2) + "\n")
         _i._cprint(f"[OK] Wrote managed keys into {config_path}")
 
         self._write_hooks_json(home, native.get("_agentihooks", {}).get("env", {}))
+        if trusted := trust_hooks(home):
+            _i._cprint(f"[OK] Trusted {trusted} Codex hook entries in {config_path}")
         return config_path
 
     def _write_hooks_json(self, home: Path, profile_env: dict[str, str] | None = None) -> None:
         _i = _install_module()
         wrapper = home / "agentihooks-hook.sh"
-        python_bin = str(_i._detect_venv() or sys.executable)
-        wrapper.write_text(
-            "#!/usr/bin/env bash\n"
-            "# managed-by: agentihooks — regenerate with: agentihooks init --target codex\n"
-            "set -euo pipefail\n"
-            f"cd {shlex.quote(str(_i.AGENTIHOOKS_ROOT))}\n"
-            + "".join(
-                f'export {key}="${{{key}:={shlex.quote(value)}}}"\n' for key, value in (profile_env or {}).items()
-            )
-            + f"AGENTIHOOKS_TARGET=codex exec {shlex.quote(python_bin)} -m hooks\n"
-        )
+        wrapper.write_text(wrapper_text(profile_env or {}, str(_i._detect_venv() or sys.executable)))
         wrapper.chmod(0o755)
 
         hooks_path = home / "hooks.json"
@@ -390,11 +475,6 @@ class CodexAdapter:
             return
         _atomic_write(hooks_path, text)
         _i._cprint(f"[OK] Wrote {hooks_path} ({len(CODEX_HOOK_EVENTS)} events)")
-        _i._cprint(
-            "  [!!] Codex trusts hooks by content hash: run /hooks inside codex once to "
-            "trust these (or launch automation with --dangerously-bypass-hook-trust). "
-            "Until trusted, codex SILENTLY skips them."
-        )
 
     # ------------------------------------------------------------------
     # features: skills / agents / commands / rules
@@ -715,6 +795,12 @@ class CodexAdapter:
         print(
             "  [--] Hook trust cannot be verified from outside codex — run /hooks in a "
             "codex session to confirm; untrusted hooks are SILENTLY skipped."
+        )
+        from scripts.swarm.store import APP_SERVER_TRANSPORT, LEGACY_TRANSPORT
+
+        print(
+            f"  [--] Codex inbox transport: swarm create stores {APP_SERVER_TRANSPORT}; roll a swarm back "
+            f"with: agentihooks swarm <id> set codex-inbox-transport={LEGACY_TRANSPORT}"
         )
         return failed
 

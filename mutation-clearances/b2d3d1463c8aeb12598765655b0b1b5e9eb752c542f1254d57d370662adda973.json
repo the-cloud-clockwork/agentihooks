@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/repository/seeds.py:scripts.swarm_ledger.repository.seeds.x_write_seeds__mutmut_73:d68d73c152d52d76474b61802d7b194f3252cb8afc2f341d0548ecd683ad3dd8": {
+    "reader": "Standards",
+    "reason": "Only SQLite keyword or identifier capitalization changes. These identifiers are case insensitive; bindings, result rows, transactions and stored values are unchanged."
+  }
+}

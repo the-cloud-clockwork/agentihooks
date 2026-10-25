@@ -1,5 +1,7 @@
 import sys
 
+from scripts.swarm_ledger import ledger_phases
+
 
 def operation(args) -> tuple[str, dict]:
     if args.id == "add":
@@ -53,7 +55,7 @@ def phase_entry(position: int, entry: dict, ids: list[str]) -> dict:
         "title": entry.get("title", ""),
         "description": entry.get("description", ""),
         "depends_on": depends_on,
-        "planning": "manual",
+        "planning": entry.get("planning", ledger_phases.PLANNING_DEFAULT),
     }
     if "release" in entry:
         phase["release"] = entry["release"]

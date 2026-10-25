@@ -1,0 +1,6 @@
+{
+  "hooks/observability/agent_trace.py:hooks.observability.agent_trace.x__json_acknowledged__mutmut_30:7c53e8b89f449e80bb7b8de6b94c8cc57ba2e19629bf6878f522c5c6dbe44d41": {
+    "reader": "Standards reader",
+    "reason": "The enclosing presence branch guarantees at least one partial-success key exists; the changed inner default is never selected for the resulting partial value."
+  }
+}

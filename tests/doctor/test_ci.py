@@ -177,3 +177,74 @@ def test_matrix_jobs_and_skipped_tests_cannot_prove_a_flake():
     second["tests"][0]["job"] = first["tests"][0]["job"]
     second["tests"][0]["outcome"] = "SKIPPED"
     assert ci.flaky_tests(record) == []
+
+
+HIVE = ".github/workflows/hive-worker.yml"
+
+
+def _push(run_id, conclusion, path=HIVE, name="Worker hive pod"):
+    return {
+        "id": run_id,
+        "name": name,
+        "path": path,
+        "conclusion": conclusion,
+        "created_at": f"2026-10-18T05:{run_id:02d}:00Z",
+        "html_url": f"https://github.com/o/r/actions/runs/{run_id}",
+    }
+
+
+def _dev(runs, green=None, jobs=None):
+    return {"runs": runs, "green": green or {}, "jobs": jobs or {}}
+
+
+def test_five_consecutive_failed_dev_pushes_of_a_workflow_raise_one_finding():
+    runs = [_push(n, "failure") for n in range(10, 15)] + [_push(9, "success")]
+    green = {HIVE: _push(9, "success")}
+    [found] = ci.red_dev_workflows(_dev(runs, green, {14: ["contracts", "pod"]}))
+    assert found.id == "red-dev-workflow/hive-worker.yml"
+    assert found.summary == "Worker hive pod failed its last 5 dev push runs"
+    assert found.evidence == (
+        "last green 2026-10-18T05:09:00Z https://github.com/o/r/actions/runs/9",
+        "failing jobs in run 14: contracts, pod",
+        *(f"https://github.com/o/r/actions/runs/{n}" for n in range(14, 9, -1)),
+    )
+    assert found.threshold == "5 consecutive failed dev push runs outside the promotion gate"
+    assert found.measure == 5
+
+
+def test_the_streak_counts_every_consecutive_failure_and_names_a_missing_green():
+    runs = [_push(n, ("failure", "timed_out", "startup_failure")[n % 3]) for n in range(10, 17)]
+    [found] = ci.red_dev_workflows(_dev(runs))
+    assert found.measure == 7
+    assert found.summary == "Worker hive pod failed its last 7 dev push runs"
+    assert found.evidence[:2] == ("no green dev push run found", "failing jobs in run 16: none read")
+    assert len(found.evidence) == 9
+
+
+@pytest.mark.parametrize(
+    "runs",
+    [
+        [_push(15, "success")] + [_push(n, "failure") for n in range(10, 15)],
+        [_push(n, "failure") for n in range(10, 14)] + [_push(9, "success")],
+        [_push(n, "failure") for n in range(11, 15)],
+        [_push(n, "failure", path=".github/workflows/test.yml", name="Tests") for n in range(10, 15)],
+    ],
+    ids=["latest passed", "four failed", "only four runs", "promotion gate"],
+)
+def test_no_finding_without_five_consecutive_failures_outside_the_promotion_gate(runs):
+    assert ci.red_dev_workflows(_dev(runs)) == []
+
+
+def test_cancelled_and_skipped_runs_neither_break_nor_extend_a_streak():
+    failed = [_push(n, "failure") for n in range(10, 15)]
+    runs = [_push(30, "cancelled"), *failed[:3], _push(13, "skipped"), *failed[3:]]
+    assert ci.red_streaks(runs) == {HIVE: failed[::-1]}
+
+
+def test_workflows_are_judged_apart_and_ordered_by_newest_run():
+    other = ".github/workflows/swarm-smoke.yml"
+    runs = [_push(n, "failure") for n in range(10, 15)]
+    runs += [_push(n, "failure", path=other, name="Swarm smoke") for n in range(20, 25)]
+    runs += [_push(n, "success", path=".github/workflows/pages.yml", name="Pages") for n in range(30, 36)]
+    found = ci.red_dev_workflows(_dev(runs))
+    assert [f.subject for f in found] == ["swarm-smoke.yml", "hive-worker.yml"]

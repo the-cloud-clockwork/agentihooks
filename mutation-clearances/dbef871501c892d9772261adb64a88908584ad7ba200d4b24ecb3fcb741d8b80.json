@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/api/errors.py:scripts.swarm_ledger.api.errors.x\u01c1APIError\u01c1envelope__mutmut_36:39527dff6e087777e1ef09b33c3d34f2c3de02278d8108cc3d40bf0e1efd7fb5": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "The ERROR replacement is only inside the byte-size probe. error and ERROR are both five ASCII bytes, so the complete serialized envelope has the same size for every error body. The actual returned key remains error. Probe: resources.reply_size original and mutant wrappers identical for simple, large Unicode/escaped, and nested list bodies."
+  }
+}

@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:swarm-v2:execution-metadata",
+  "title": "Execution metadata, version 2.0, without launch authority",
+  "type": "object",
+  "required": ["name", "lane", "task", "seat", "execution_id", "generation", "runtime_backend", "runtime_target"],
+  "properties": {
+    "name": {"type": "string", "minLength": 1},
+    "lane": {"type": "string", "minLength": 1},
+    "task": {"type": "string", "minLength": 1},
+    "seat": {"type": "string", "minLength": 1},
+    "execution_id": {"type": "string", "pattern": "^exe-[0-9a-f]{32}$"},
+    "generation": {"type": "integer", "minimum": 1},
+    "runtime_backend": {"enum": ["local", "kubernetes"]},
+    "runtime_target": {"type": "object"}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"runtime_backend": {"const": "kubernetes"}}},
+      "then": {"properties": {"runtime_target": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["pod_namespace", "pod_name"],
+        "properties": {
+          "pod_namespace": {"type": "string", "minLength": 1},
+          "pod_name": {"type": "string", "minLength": 1},
+          "pod_uid": {"type": "string"}
+        }
+      }}},
+      "else": {"properties": {"runtime_target": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "server_id": {"type": "string"},
+          "process_namespace": {"type": "string"},
+          "pid": {"type": "integer", "minimum": 1}
+        }
+      }}}
+    }
+  ]
+}

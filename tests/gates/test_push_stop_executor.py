@@ -5,7 +5,6 @@ worktree with its pull request stops freely.
 
 import json
 import os
-import socket
 import subprocess
 import sys
 import threading
@@ -13,30 +12,39 @@ from pathlib import Path
 
 import pytest
 
+from scripts.swarm.keyspace import ROOT as KEY_ROOT
+
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPTS = ROOT / "scripts" / "swarm_ledger"
 sys.path.insert(0, str(SCRIPTS))
 import ledger_core as core  # noqa: E402
 import new_ledger  # noqa: E402
 
+from tests.swarm_ledger import legacy_page  # noqa: E402
+
 SLUG, ME, SID = "pushexec-2026-01-01", "engineer@abcdef-0001", "sid-push"
 BRANCH = "engineer-abcdef-0001"
 URL = "https://github.com/o/r/pull/7"
 PACKAGE = ".".join(("scripts", "gates"))
-SHIM = f"import runpy\nimport sys\n\nsys.argv = ['gate', 'push-stop']\nrunpy.run_module({PACKAGE!r}, run_name='__main__')\n"
+SHIM = f"""import os
+import runpy
+import sys
+import time
+
+started = time.monotonic()
+sys.argv = ['gate', 'push-stop']
+try:
+    runpy.run_module({PACKAGE!r}, run_name='__main__')
+finally:
+    if os.environ.get('CONDITION_CLOCK'):
+        with open(os.environ['CONDITION_CLOCK'], 'w') as clock:
+            clock.write(f'{{started}} {{time.monotonic()}}')
+"""
 TEMPLATE = (
     "You cannot leave uncommitted or unpushed changes. Commit them now. If the task is done, open the pull request. "
     "If not, update the issue and the pull request and record progress on the ledger."
 )
 IDENTITY = ("-c", "user.name=t", "-c", "user.email=t@example.com")
-
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
-
-def spare_port():
-    with socket.socket() as probe:
-        probe.bind(("127.0.0.1", 0))
-        return probe.getsockname()[1]
 
 
 def git(path, *args):
@@ -45,9 +53,11 @@ def git(path, *args):
 
 
 @pytest.fixture
-def rig(tmp_path, monkeypatch):
+def rig(tmp_path, monkeypatch, ledger_port):
     import redis
     from fakeredis import TcpFakeServer
+
+    from tests.scheduler.process_service import start_scheduler, stop_scheduler
 
     server = TcpFakeServer(("127.0.0.1", 0), server_type="redis")
     threading.Thread(target=server.serve_forever, daemon=True).start()
@@ -65,8 +75,8 @@ def rig(tmp_path, monkeypatch):
     }
     doc = new_ledger.build_doc(content)
     doc["tasks"][0].update(state="claimed", claimed_by=ME)
-    html_path, _ = core.paths(SLUG)
-    html_path.write_text(new_ledger.render(doc, SLUG, 8765), encoding="utf-8")
+    html_path, _ = legacy_page.paths(SLUG, core)
+    html_path.write_text(legacy_page.render(doc, SLUG, 8765), encoding="utf-8")
     core.sync(SLUG)
     task = doc["tasks"][0]["id"]
     home, bundle = tmp_path / "ahome", tmp_path / "bundle"
@@ -98,7 +108,8 @@ def rig(tmp_path, monkeypatch):
         "REDIS_URL": url,
         "AGENTIHOOKS_SWARM_REDIS_URL": url,
         "LEDGER_DIR": str(ledgers),
-        "LEDGER_PORT": str(spare_port()),
+        "LEDGER_PORT": str(ledger_port),
+        "LEDGER_AUTOSTART": "1",
         "WORKTREE_ROOT": str(trees),
         "AGENTIHOOKS_SWARM": SLUG,
         "AGENTIHOOKS_AGENT_NAME": ME,
@@ -106,7 +117,7 @@ def rig(tmp_path, monkeypatch):
         "AGENTIHOOKS_SWARM_TASK": task,
     }
     client.hset(
-        f"agentihooks:swarm:{SLUG}:config",
+        f"{KEY_ROOT}:swarm:{SLUG}:config",
         mapping={"slug": SLUG, "repo": "/repo", "max_eng": 1, "max_ci": 0, "state": "running", "gates": "{}"},
     )
 
@@ -123,7 +134,11 @@ def rig(tmp_path, monkeypatch):
         )
 
     def ledger_task():
-        return next(t for t in json.loads((ledgers / f"{SLUG}.json").read_text())["tasks"] if t["id"] == task)
+        from scripts.swarm_ledger.storage import default as default_repository
+
+        repository = default_repository()
+
+        return next(t for t in repository.get_document(SLUG)["tasks"] if t["id"] == task)
 
     def cli(*argv):
         done = subprocess.run(
@@ -133,7 +148,9 @@ def rig(tmp_path, monkeypatch):
             env=env,
             timeout=60,
         )
-        assert done.returncode == 0, done.stderr
+        if done.returncode:
+            log = ledgers / ".server.log"
+            pytest.fail(f"{done.stderr}\nLedger server output:\n{log.read_text() if log.exists() else 'no server log'}")
 
     def commit(name="work"):
         (tree / name).write_text(name)
@@ -148,14 +165,16 @@ def rig(tmp_path, monkeypatch):
         path = tmp_path / ".agentihooks" / "swarm" / SLUG / "gates" / "log.jsonl"
         return [json.loads(line) for line in path.read_text().splitlines()] if path.exists() else []
 
+    scheduler = start_scheduler(env)
     rig = type("Rig", (), {})()
     rig.stop, rig.redis, rig.task, rig.ledger_task, rig.cli, rig.rows = stop, client, task, ledger_task, cli, rows
-    rig.commit, rig.remote_head, rig.tree = commit, remote_head, tree
+    rig.commit, rig.remote_head, rig.tree, rig.env = commit, remote_head, tree, env
     try:
         cli("join")
         yield rig
     finally:
         subprocess.run([sys.executable, str(SCRIPTS / "ledger_server.py"), "--stop"], env=env, timeout=30)
+        stop_scheduler(scheduler, client)
         server.shutdown()
         server.server_close()
 
@@ -164,14 +183,19 @@ def test_unpushed_commits_reach_origin_and_the_task_until_the_agent_records_prog
     head = rig.commit()
     first = rig.stop()
     assert first.returncode == 2, (first.stderr, rig.rows())
-    assert TEMPLATE in first.stderr
+    progress = (
+        "Pushed work has no recorded progress since the push. "
+        f'Run agentihooks swarm {SLUG} progress --doing "Describe current work" --ends-when "Describe completion". '
+        "A checks wait does not waive recording progress."
+    )
+    assert progress in first.stderr
     assert rig.remote_head() == head
     comments = rig.ledger_task()["comments"]
     assert [(c["by"], c["text"]) for c in comments] == [
         ("swarm", f"The stop hook pushed the task branch {BRANCH} to origin")
     ]
-    inbox = rig.redis.zrange(f"agentihooks:inbox:address:{ME}", 0, -1)
-    assert [rig.redis.hget(f"agentihooks:inbox:item:{item}", "text") for item in inbox] == [TEMPLATE]
+    inbox = rig.redis.zrange(f"{KEY_ROOT}:inbox:address:{ME}", 0, -1)
+    assert [rig.redis.hget(f"{KEY_ROOT}:inbox:item:{item}", "text") for item in inbox] == [progress]
     rig.cli("comment", f"tasks/{rig.task}", "Pushed the first slice of the work.")
     second = rig.stop()
     assert second.returncode == 0, (second.stderr, rig.rows())
@@ -188,3 +212,38 @@ def test_dirty_work_is_refused_and_a_clean_pushed_worktree_with_its_pull_request
     (rig.tree / "draft").unlink()
     clean = rig.stop()
     assert clean.returncode == 0, clean.stderr
+
+
+def overrun(rig, seconds):
+    rig.cli("task", "set", rig.task, f"pr_url={URL}")
+    gate = rig.tree / "scripts" / "ci_prepush"
+    gate.mkdir(parents=True)
+    (rig.tree / "scripts" / "__init__.py").write_text("")
+    (gate / "__init__.py").write_text("")
+    (gate / "__main__.py").write_text("import time\ntime.sleep(60)\n")
+    git(rig.tree, "add", "scripts")
+    git(rig.tree, "commit", "-m", "gate")
+    rig.env["CONDITIONS_TIMEOUT_SEC"] = str(seconds)
+    clock = rig.tree.parent / "condition-clock"
+    rig.env["CONDITION_CLOCK"] = str(clock)
+    return rig.stop(), clock
+
+
+@pytest.mark.wall_clock
+def test_a_pre_push_gate_that_overruns_is_stopped_by_the_gate_inside_the_stop_condition(rig):
+    seconds = 8
+    done, clock = overrun(rig, seconds)
+    assert done.returncode == 2, (done.stderr, rig.rows())
+    assert "The pre push gate did not finish in " in done.stderr
+    assert f" s in {rig.tree}, so the stop hook did not push it." in done.stderr
+    assert rig.remote_head() == ""
+    started, finished = map(float, clock.read_text().split())
+    assert finished - started < seconds, "the stop condition process ran past its timeout"
+
+
+def test_a_pre_push_gate_that_overruns_is_stopped_inside_the_stop_condition(rig):
+    done, _ = overrun(rig, 20)
+    assert done.returncode == 2, (done.stderr, rig.rows())
+    assert "The pre push gate did not finish in " in done.stderr
+    assert f" s in {rig.tree}, so the stop hook did not push it." in done.stderr
+    assert rig.remote_head() == ""

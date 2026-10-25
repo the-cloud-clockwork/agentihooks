@@ -6,23 +6,21 @@ on:
   # GitHub fires a schedule only from the default branch, main; the job tests dev.
   schedule:
     - cron: "23 */6 * * *"
+  # A change to the sweep is proven by dispatching it on its branch; a pull request
+  # run would spend an hour outside Gate Required.
   workflow_dispatch:
-  pull_request:
-    branches: [dev]
-    paths:
-      - .github/workflows/test-leaks.yml
-      - tests/leaks.py
 
 concurrency:
-  group: test-leaks-${{ github.ref }}
-  cancel-in-progress: true
+  group: ${{ github.event_name == 'workflow_dispatch' && format('hosted-lane-{0}', ((endsWith(github.run_id, '0') || endsWith(github.run_id, '1') || endsWith(github.run_id, '2')) && 'a') || ((endsWith(github.run_id, '3') || endsWith(github.run_id, '4') || endsWith(github.run_id, '5')) && 'b') || 'c') || format('test-leaks-{0}', github.ref) }}
+  queue: ${{ github.event_name == 'workflow_dispatch' && 'max' || 'single' }}
+  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
 
 permissions:
   contents: read
 
 jobs:
   one-process:
-    runs-on: ubuntu-latest
+    runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && 'anton-oss-batch' || 'ubuntu-latest' }}
     timeout-minutes: 60
     permissions:
       contents: read
@@ -57,7 +55,9 @@ jobs:
       - name: Name each leaking pair
         id: pairs
         if: failure() && steps.suite.outcome == 'failure'
-        run: python -m tests.leaks pairs run.jsonl leaks-${{ matrix.order }}.json | tee -a "$GITHUB_STEP_SUMMARY"
+        env:
+          ORDER: ${{ matrix.order }}
+        run: python -m tests.leaks pairs run.jsonl "leaks-$ORDER.json" | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: Keep the findings for the follow up job
         id: keep
@@ -71,8 +71,8 @@ jobs:
   # One job opens every follow up, so a pair both orders find gets one issue.
   followup:
     needs: one-process
-    if: ${{ failure() && github.event_name != 'pull_request' }}
-    runs-on: ubuntu-latest
+    if: ${{ failure() && (github.event_name == 'schedule' || github.ref == 'refs/heads/dev') }}
+    runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && 'anton-oss-light' || 'ubuntu-latest' }}
     permissions:
       contents: read
       issues: write

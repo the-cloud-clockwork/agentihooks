@@ -1,0 +1,6 @@
+{
+  "hooks/context/conditions.py:hooks.context.conditions.x__read_only_shell__mutmut_6:34f007662439ddc94e96969768aeb55d806d4123526217d22f8a7d36ba4a2f3d": {
+    "reader": "Standards",
+    "reason": "The stripped text is used only for the redirect count and targets; the replacement holds no redirect sign and is never a target, and heads come from the raw command."
+  }
+}

@@ -7,8 +7,6 @@ from scripts.swarm.store import AUTONOMY, MASTER, SwarmConfig, SwarmError
 from tests.swarm.test_cli import env, home, run  # noqa: F401
 from tests.swarm.test_runtime import _spawn_env
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 TASK = {"id": "t1", "title": "x", "phase": "p1"}
 
 
@@ -79,7 +77,9 @@ def test_spawn_hands_agents_the_level(tmp_path, monkeypatch):
 def test_delegate_is_todays_prompt_for_every_lane():
     for lane in ("eng", "ci", MASTER):
         assert build("delegate", lane) == build(lane=lane)
-    assert "Merge on green checks, then wt.sh done." in build("delegate")
+    text = build("delegate")
+    assert "release your seat: agentihooks swarm sw ready <handoff doc>." in text
+    assert "merge queue" not in text and "done --pr" not in text
 
 
 def test_manual_opens_a_draft_and_stops_for_the_operator():
@@ -93,7 +93,9 @@ def test_manual_opens_a_draft_and_stops_for_the_operator():
 def test_assist_waits_for_an_operator_approval_line_before_merging():
     text = build("assist")
     assert "open the pull request into dev" in text and "draft" not in text.split("5. ", 1)[1].split("\n", 1)[0]
-    assert "Merge only after an OPERATOR line on the ledger approves it" in text
+    assert (
+        "Queue with agentihooks swarm sw merge queue <pr url> only after an OPERATOR line on the ledger approves it"
+    ) in text
     assert 'agentihooks ledger --slug sw --as sw-eng-1 comment tasks/t1 "<plain words: what the pull request' in text
     assert "agentihooks swarm sw done --pr <pr url>" in text
     assert "Merge on green checks" not in text
@@ -106,7 +108,11 @@ def test_full_engineers_merge_on_green_like_delegate():
 
 def test_the_level_shapes_only_code_and_ci_tasks():
     for kind in ("ops", "tune", "troubleshoot", "research"):
-        assert build("manual", kind=kind) == build("delegate", kind=kind)
+        manual, delegate = build("manual", kind=kind).splitlines(), build("delegate", kind=kind).splitlines()
+        changed = [(m, d) for m, d in zip(manual, delegate, strict=True) if m != d]
+        assert len(changed) == 1
+        assert "leaves the merge to the operator" in changed[0][0]
+        assert "ready <handoff doc> instead of done" in changed[0][1]
     assert "open a draft pull request into dev" in build("manual", "ci", kind="ci")
 
 

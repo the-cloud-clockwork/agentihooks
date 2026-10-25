@@ -1,17 +1,30 @@
+import re
 import subprocess
+import time
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 from scripts.gates import Call, Gate, Who, push_stop
 from scripts.gates.progress import Progress
-from scripts.gates.push_stop import TEMPLATE, PushStop, count, record_text
+from scripts.gates.push_stop import (
+    FLOOR_S,
+    GATE_FAILED,
+    GATE_LATE,
+    GATE_SLOW,
+    PROGRESS,
+    PUSH_LATE,
+    RESERVE_S,
+    TEMPLATE,
+    PushStop,
+    count,
+    record_text,
+)
 from scripts.gates.verdicts import Verdicts
 from scripts.inbox.store import InboxStore
 from scripts.swarm.naming import plain
 from scripts.swarm.store import RedisStore, SwarmError
-
-pytestmark = pytest.mark.xdist_group("fakeredis")
 
 SLUG, ME = "demo", "engineer@100001-0001"
 BRANCH = "engineer-100001-0001"
@@ -28,12 +41,13 @@ def git(path, *args):
 
 class FakeLedger:
     def __init__(self, task):
-        self.task, self.events, self.comments = task, [], []
+        self.task, self.events, self.comments, self.delay = task, [], [], 0
 
     def state(self, slug):
         return {"tasks": [self.task] if slug == SLUG else [], "_meta": {"events": self.events}}
 
     def comment(self, slug, task_id, text, by):
+        time.sleep(self.delay)
         self.comments.append((slug, task_id, text, by))
 
 
@@ -55,9 +69,17 @@ def rig(tmp_path):
     git(seed, "remote", "set-url", "origin", "https://github.com/o/r.git")
     store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
     ledger = FakeLedger({"id": "t1", "state": "claimed", "claimed_by": ME, "pr_url": "", "kind": "code"})
-    gate = PushStop(connect=lambda: store, ledger=lambda: ledger, root=root, now=lambda: NOW)
+    ticks = []
+    gate = PushStop(
+        connect=lambda: store,
+        ledger=lambda: ledger,
+        root=root,
+        now=lambda: NOW,
+        clock=lambda: ticks.pop(0) if ticks else time.monotonic(),
+    )
 
-    def stop(who=WHO):
+    def stop(who=WHO, started=None):
+        gate.started = time.monotonic() if started is None else started
         return gate.decide(STOP, who, Verdicts(SLUG, gate.name, tmp_path))
 
     def commit(name="work"):
@@ -75,6 +97,7 @@ def rig(tmp_path):
     rig = type("Rig", (), {})()
     rig.store, rig.ledger, rig.gate, rig.tree, rig.origin, rig.root = store, ledger, gate, tree, origin, root
     rig.stop, rig.commit, rig.remote_head, rig.inbox, rig.seed = stop, commit, remote_head, inbox, seed
+    rig.ticks = ticks
     return rig
 
 
@@ -170,12 +193,147 @@ def test_a_later_stop_that_passes_closes_the_open_template_item_with_its_outcome
     assert rig.stop().allowed
 
 
+SEAT = "eng-1@demo"
+
+
+def refused_once(rig):
+    rig.ledger.task["pr_url"] = "https://github.com/o/r/pull/7"
+    (rig.tree / "new").write_text("new\n")
+    assert not rig.stop().allowed
+    [item] = InboxStore(rig.store.redis).inbox(ME)
+    return item
+
+
+@pytest.mark.parametrize("seat", [SEAT, ""])
+def test_an_agent_leaving_with_unpushed_work_closes_its_notice_naming_the_branch_not_pushed(monkeypatch, rig, seat):
+    from scripts.inbox import exits
+
+    monkeypatch.setenv("WORKTREE_ROOT", str(rig.root))
+    item = refused_once(rig)
+    inbox = InboxStore(rig.store.redis)
+    exits.settle(inbox, ME, seat, "handed off its seat")
+    closed = inbox.get(item.id)
+    assert (closed.address, closed.state) == (ME, "done")
+    assert closed.reason == f"done: {ME} handed off its seat; its branch {BRANCH} was not pushed"
+    assert inbox.inbox(SEAT) == []
+    assert inbox.pending_items("swarm") == []
+
+
+def test_an_agent_leaving_after_its_work_reached_origin_closes_its_notice_naming_the_branch_pushed(monkeypatch, rig):
+    from scripts.inbox import exits
+
+    monkeypatch.setenv("WORKTREE_ROOT", str(rig.root))
+    item = refused_once(rig)
+    git(rig.tree, "add", "new")
+    git(rig.tree, "commit", "-m", "new")
+    git(rig.tree, "push", "origin", f"HEAD:refs/heads/{BRANCH}")
+    inbox = InboxStore(rig.store.redis)
+    exits.settle(inbox, ME, SEAT, "retired after the swarm idle limit")
+    closed = inbox.get(item.id)
+    assert closed.state == "done"
+    assert closed.reason == f"done: {ME} retired after the swarm idle limit; its branch {BRANCH} was pushed"
+    assert inbox.mailbox(SEAT) == []
+
+
+def test_an_agent_leaving_with_no_branch_of_its_own_closes_its_notice_saying_so(monkeypatch, rig, tmp_path):
+    from scripts.inbox import exits
+
+    item = refused_once(rig)
+    monkeypatch.setenv("WORKTREE_ROOT", str(tmp_path / "empty"))
+    inbox = InboxStore(rig.store.redis)
+    exits.settle(inbox, ME, SEAT, "exited")
+    assert (
+        inbox.get(item.id).reason
+        == f"done: {ME} exited; its worktree was not found, so whether its branch was pushed is unknown"
+    )
+
+
+def test_an_agent_leaving_names_every_branch_it_left_off_origin(monkeypatch, rig):
+    from scripts.inbox import exits
+
+    monkeypatch.setenv("WORKTREE_ROOT", str(rig.root))
+    item = refused_once(rig)
+    second = rig.root / "repo" / f"{BRANCH}-2"
+    git(rig.seed, "worktree", "add", "-b", f"{BRANCH}-2", str(second), "origin/dev")
+    (second / "more").write_text("more\n")
+    inbox = InboxStore(rig.store.redis)
+    exits.settle(inbox, ME, SEAT, "exited")
+    assert inbox.get(item.id).reason == f"done: {ME} exited; its branch {BRANCH}, {BRANCH}-2 was not pushed"
+
+
+def test_other_mail_of_a_leaving_agent_still_moves_to_its_seat(monkeypatch, rig):
+    from scripts.inbox import exits
+
+    monkeypatch.setenv("WORKTREE_ROOT", str(rig.root))
+    refused_once(rig)
+    inbox = InboxStore(rig.store.redis)
+    other = inbox.send("swarm", ME, "Your pull request checks failed.")
+    exits.settle(inbox, ME, SEAT, "handed off its seat")
+    assert [(item.id, item.state) for item in inbox.inbox(SEAT)] == [(other.id, "pending")]
+
+
+def test_a_live_agents_notice_stays_open_until_a_stop_passes(rig):
+    item = refused_once(rig)
+    assert InboxStore(rig.store.redis).get(item.id).state not in ("done", "cancelled")
+    assert not rig.stop().allowed
+    git(rig.tree, "add", "new")
+    git(rig.tree, "commit", "-m", "new")
+    assert rig.stop().allowed
+    assert InboxStore(rig.store.redis).get(item.id).reason == f"done: {push_stop.SETTLED}"
+
+
 def test_pushed_work_without_a_pull_request_or_a_line_since_the_push_is_refused(rig):
     rig.commit()
     decision = rig.stop()
-    assert (decision.allowed, decision.reason) == (False, TEMPLATE)
+    assert (decision.allowed, decision.reason) == (False, PROGRESS.format(swarm=SLUG))
     assert rig.remote_head()
-    assert rig.inbox() == [TEMPLATE]
+    assert rig.inbox() == [PROGRESS.format(swarm=SLUG)]
+
+
+@pytest.mark.parametrize("debt", ["progress", "git", "both"])
+def test_refusal_names_the_missing_step_and_progress_command(rig, debt):
+    if debt == "git":
+        refuse_the_push(rig)
+    else:
+        rig.commit()
+        rig.stop()
+        if debt == "both":
+            (rig.tree / "readme").write_text("changed\n")
+    wait_on(rig, {"kind": "checks", "target": "https://github.com/o/r/pull/7", "task": "t1"})
+    decision = rig.stop()
+    assert not decision.allowed
+    command = f'agentihooks swarm {SLUG} progress --doing "Describe current work" --ends-when "Describe completion"'
+    if debt in {"progress", "both"}:
+        assert "Pushed work has no recorded progress since the push." in decision.reason
+        assert command in decision.reason
+        assert "A checks wait does not waive recording progress." in decision.reason
+    if debt == "progress":
+        assert "uncommitted or unpushed" not in decision.reason
+    else:
+        assert "uncommitted or unpushed" in decision.reason
+    assert decision.reason in rig.inbox()
+
+
+@pytest.mark.parametrize("dirty", [False, True])
+def test_progress_notice_is_deduplicated_and_settled_after_recording(rig, dirty):
+    rig.commit()
+    git(rig.tree, "push", "-u", "origin", BRANCH)
+    Progress(rig.store.redis, SLUG).outcome(ME, "pushed", NOW - 10)
+    if dirty:
+        (rig.tree / "readme").write_text("changed\n")
+    reason = rig.stop().reason
+    assert rig.stop().reason == reason
+    assert rig.inbox() == [reason]
+    inbox = InboxStore(rig.store.redis)
+    [notice] = inbox.inbox(ME)
+    assert push_stop.is_notice(notice)
+    assert not push_stop.is_notice(SimpleNamespace(sender="other", text=reason))
+    assert not push_stop.is_notice(SimpleNamespace(sender="swarm", text="Other work"))
+    (rig.tree / "readme").write_text("seed\n")
+    rig.ledger.events.append({"by": ME, "at": NOW + 1, "kind": "comment added"})
+    assert rig.stop().allowed
+    settled = inbox.get(notice.id)
+    assert (settled.state, settled.reason) == ("done", f"done: {push_stop.SETTLED}")
 
 
 def test_a_ledger_line_by_the_agent_after_the_push_lets_the_stop_through(rig):
@@ -229,6 +387,77 @@ def test_a_numbered_second_worktree_in_another_repo_is_pushed_too(rig):
     git(second, "commit", "-m", "more")
     assert rig.stop().allowed
     assert git(rig.seed, "ls-remote", str(rig.origin), f"refs/heads/{BRANCH}-2")
+
+
+PREDECESSOR = "engineer-100001-0009"
+
+
+def continuing(rig, ref=f"origin/{PREDECESSOR}"):
+    rig.ledger.task.update(
+        branch=BRANCH, handoff_envelope={"continue_from": ref}, pr_url="https://github.com/o/r/pull/7"
+    )
+
+
+def remote(rig, branch):
+    return git(rig.seed, "ls-remote", str(rig.origin), f"refs/heads/{branch}").split("\t")[0]
+
+
+def test_a_continuation_pushes_its_head_to_the_retained_pull_request_branch_not_its_own_name(rig):
+    rig.commit("before")
+    git(rig.tree, "push", "origin", f"HEAD:refs/heads/{PREDECESSOR}")
+    continuing(rig)
+    head = rig.commit()
+    assert rig.stop().allowed
+    assert remote(rig, PREDECESSOR) == head
+    assert rig.remote_head() == ""
+    assert git(rig.tree, "rev-parse", "--abbrev-ref", "@{upstream}") == f"origin/{PREDECESSOR}"
+    assert rig.ledger.comments == [
+        ("demo", "t1", record_text("https://github.com/o/r.git", PREDECESSOR, head), "swarm")
+    ]
+
+
+def test_a_retained_branch_head_does_not_descend_from_is_left_alone_and_its_own_branch_is_pushed(rig):
+    (rig.seed / "elsewhere").write_text("elsewhere")
+    git(rig.seed, "add", "elsewhere")
+    git(rig.seed, "commit", "-m", "elsewhere")
+    git(rig.seed, "push", "origin", f"HEAD:refs/heads/{PREDECESSOR}")
+    unrelated = git(rig.seed, "rev-parse", "HEAD")
+    continuing(rig)
+    head = rig.commit()
+    assert rig.stop().allowed
+    assert rig.remote_head() == head
+    assert remote(rig, PREDECESSOR) == unrelated
+
+
+def test_the_push_gets_the_time_left_plus_the_reserve_less_the_floor(monkeypatch, rig):
+    budgets = []
+    monkeypatch.setattr(push_stop, "push", lambda tree, branch, seconds: budgets.append(seconds) or True)
+    monkeypatch.setattr(rig.gate, "left", lambda: 10.0)
+    rig.ledger.task["pr_url"] = "https://github.com/o/r/pull/7"
+    rig.commit()
+    rig.stop()
+    assert budgets == [10.0 + RESERVE_S - FLOOR_S]
+
+
+def test_a_retained_branch_deleted_from_origin_is_not_recreated(rig):
+    rig.commit("before")
+    git(rig.tree, "push", "origin", f"HEAD:refs/heads/{PREDECESSOR}")
+    git(rig.seed, "push", str(rig.origin), "--delete", PREDECESSOR)
+    continuing(rig)
+    rig.commit()
+    assert rig.stop().reason == TEMPLATE
+    assert remote(rig, PREDECESSOR) == ""
+    assert rig.remote_head() == ""
+
+
+@pytest.mark.parametrize("ref", ["origin/dev", "fresh", ""])
+def test_a_protected_or_fresh_continuation_pushes_its_own_branch(rig, ref):
+    dev = remote(rig, "dev")
+    continuing(rig, ref)
+    head = rig.commit()
+    assert rig.stop().allowed
+    assert rig.remote_head() == head
+    assert remote(rig, "dev") == dev
 
 
 def test_a_worktree_on_dev_or_main_is_never_pushed(rig):
@@ -317,7 +546,7 @@ def test_a_refused_record_keeps_the_push(rig):
     refusing = Refusing(rig.ledger.task)
     rig.gate._ledger = lambda: refusing
     head = rig.commit()
-    assert rig.stop().reason == TEMPLATE
+    assert rig.stop().reason == PROGRESS.format(swarm=SLUG)
     assert rig.remote_head() == head
 
 
@@ -349,7 +578,7 @@ def test_a_ledger_with_no_events_counts_as_no_line_since_the_push(rig, meta):
     Progress(rig.store.redis, SLUG).outcome(ME, "pushed", NOW - 10)
     doc = {"tasks": [rig.ledger.task]} | ({} if meta is None else {"_meta": meta})
     rig.ledger.state = lambda slug: doc
-    assert rig.stop().reason == TEMPLATE
+    assert rig.stop().reason == PROGRESS.format(swarm=SLUG)
 
 
 def test_worktrees_sit_under_the_configured_root_or_the_home_default(monkeypatch, tmp_path):
@@ -375,3 +604,526 @@ def test_git_runs_in_the_worktree_with_a_timeout(monkeypatch):
 
 def test_a_count_git_cannot_answer_is_zero(tmp_path):
     assert count(tmp_path, "HEAD") == 0
+
+
+def install_gate(rig, code, before=""):
+    log = rig.root / "gate.log"
+    gate = rig.tree / "scripts" / "ci_prepush"
+    gate.mkdir(parents=True)
+    (rig.tree / "scripts" / "__init__.py").write_text("")
+    (gate / "__init__.py").write_text("")
+    (gate / "__main__.py").write_text(
+        "import os\n"
+        f"with open({str(log)!r}, 'a') as log:\n"
+        "    log.write(os.getcwd() + ' ' + os.environ.get('AGENTIHOOKS_ALLOW_LOCAL_TEST_RUN', '') + '\\n')\n"
+        "print('gate output')\n"
+        "print('gate errors', file=__import__('sys').stderr)\n"
+        f"{before}raise SystemExit({code})\n"
+    )
+    git(rig.tree, "add", "scripts")
+    git(rig.tree, "commit", "-m", "gate")
+    return log
+
+
+def test_a_failing_pre_push_gate_keeps_the_branch_off_origin_and_names_the_worktree(monkeypatch, rig):
+    monkeypatch.delenv("AGENTIHOOKS_ALLOW_LOCAL_TEST_RUN", raising=False)
+    rig.ledger.task["pr_url"] = "https://github.com/o/r/pull/7"
+    log = install_gate(rig, 1)
+    decision = rig.stop()
+    assert (decision.allowed, decision.reason) == (False, f"{TEMPLATE} {GATE_FAILED.format(path=rig.tree)}")
+    assert rig.remote_head() == ""
+    assert rig.ledger.comments == []
+    assert log.read_text() == f"{rig.tree} \n"
+
+
+def test_a_passing_pre_push_gate_runs_in_the_worktree_with_the_local_test_setting_then_pushes(capfd, monkeypatch, rig):
+    monkeypatch.setenv("AGENTIHOOKS_ALLOW_LOCAL_TEST_RUN", "true")
+    rig.ledger.task["pr_url"] = "https://github.com/o/r/pull/7"
+    log = install_gate(rig, 0)
+    capfd.readouterr()
+    assert rig.stop().allowed
+    assert rig.remote_head() == git(rig.tree, "rev-parse", "HEAD")
+    assert log.read_text() == f"{rig.tree} true\n"
+    assert capfd.readouterr() == ("", "")
+
+
+def test_a_head_the_gate_already_passed_is_pushed_without_running_it_again(rig):
+    from scripts.ci_prepush import stamp_path
+
+    rig.ledger.task["pr_url"] = "https://github.com/o/r/pull/7"
+    log = install_gate(rig, 1)
+    head = git(rig.tree, "rev-parse", "HEAD")
+    stamp_path(rig.tree).write_text(head)
+    assert rig.stop().allowed
+    assert rig.remote_head() == head
+    assert not log.exists()
+
+
+def test_the_failure_text_is_exact():
+    assert GATE_FAILED.format(path="/w") == (
+        "The pre push gate failed in /w, so the stop hook did not push it. "
+        "Run python -m scripts.ci_prepush there, fix what fails and commit."
+    )
+    assert GATE_SLOW.format(path="/w", seconds=8.0) == (
+        "The pre push gate did not finish in 8 s in /w, so the stop hook did not push it. "
+        "Run python -m scripts.ci_prepush there and commit."
+    )
+
+
+def gone(pid):
+    status = Path(f"/proc/{pid}/status")
+    for _ in range(40):
+        if not status.exists() or "State:\tZ" in status.read_text():
+            return True
+        time.sleep(0.05)
+    return False
+
+
+def test_a_pre_push_gate_past_its_timeout_is_killed_with_its_children_and_keeps_the_branch_off_origin(monkeypatch, rig):
+    rig.ledger.task["pr_url"] = "https://github.com/o/r/pull/7"
+    pid = rig.root / "child.pid"
+    slow = (
+        "import subprocess, time\n"
+        "import sys\n"
+        "stubborn = 'import signal, time; signal.signal(signal.SIGTERM, signal.SIG_IGN); time.sleep(300)'\n"
+        "child = subprocess.Popen([sys.executable, '-c', stubborn])\n"
+        f"open({str(pid)!r}, 'w').write(str(child.pid))\n"
+        "time.sleep(30)\n"
+    )
+    install_gate(rig, 0, before=slow)
+    monkeypatch.setattr(push_stop, "CONDITIONS_TIMEOUT_SEC", RESERVE_S + 2.26)
+    rig.ticks[:] = [0.0]
+    decision = rig.stop(started=0.0)
+    assert (decision.allowed, decision.reason) == (False, f"{TEMPLATE} {GATE_SLOW.format(path=rig.tree, seconds=2.3)}")
+    assert rig.remote_head() == ""
+    assert gone(int(pid.read_text()))
+
+
+def test_the_reserve_holds_the_measured_push_and_ledger_write_and_the_floor_is_one_second():
+    assert (RESERVE_S, FLOOR_S) == (3.5, 1.0)
+
+
+def test_the_late_text_is_exact():
+    assert GATE_LATE.format(path="/w") == (
+        "The stop hook had too little time left to run the pre push gate in /w, so it did not push it. "
+        "Run python -m scripts.ci_prepush there and commit."
+    )
+
+
+def second_tree_with_work(rig):
+    second = rig.root / "other-repo" / f"{BRANCH}-2"
+    git(rig.seed, "worktree", "add", "-b", f"{BRANCH}-2", str(second), "origin/dev")
+    (second / "more").write_text("more")
+    git(second, "add", "more")
+    git(second, "commit", "-m", "more")
+    return second
+
+
+def slow_origin(rig, seconds):
+    hook = rig.origin / "hooks" / "pre-receive"
+    hook.write_text(f"#!/bin/sh\nsleep {seconds}\n")
+    hook.chmod(0o755)
+
+
+@pytest.mark.wall_clock
+def test_under_a_slow_push_a_later_gate_is_killed_with_the_reserve_left_inside_the_stop_condition(monkeypatch, rig):
+    rig.ledger.task["pr_url"] = "https://github.com/o/r/pull/7"
+    second_tree_with_work(rig)
+    log = install_gate(rig, 0, before="import time\ntime.sleep(30)\n")
+    slow_origin(rig, 2)
+    timeout = RESERVE_S + FLOOR_S + 4
+    monkeypatch.setattr(push_stop, "CONDITIONS_TIMEOUT_SEC", timeout)
+    started = time.monotonic()
+    decision = rig.stop()
+    took = time.monotonic() - started
+    assert git(rig.seed, "ls-remote", str(rig.origin), f"refs/heads/{BRANCH}-2")
+    assert rig.remote_head() == ""
+    assert log.read_text() == f"{rig.tree} \n"
+    slow = re.fullmatch(
+        re.escape(f"{TEMPLATE} The pre push gate did not finish in ")
+        + r"(\d+(?:\.\d)?)"
+        + re.escape(
+            f" s in {rig.tree}, so the stop hook did not push it. Run python -m scripts.ci_prepush there and commit."
+        ),
+        decision.reason,
+    )
+    assert slow
+    assert FLOOR_S <= float(slow.group(1)) <= timeout - RESERVE_S - 2
+    assert 2 <= took <= timeout - RESERVE_S + 0.5
+
+
+@pytest.mark.wall_clock
+def test_under_a_slow_push_a_later_gate_with_less_than_the_floor_left_never_starts(monkeypatch, rig):
+    rig.ledger.task["pr_url"] = "https://github.com/o/r/pull/7"
+    second_tree_with_work(rig)
+    log = install_gate(rig, 0)
+    slow_origin(rig, 1)
+    timeout = RESERVE_S + FLOOR_S + 0.5
+    monkeypatch.setattr(push_stop, "CONDITIONS_TIMEOUT_SEC", timeout)
+    started = time.monotonic()
+    decision = rig.stop()
+    took = time.monotonic() - started
+    assert git(rig.seed, "ls-remote", str(rig.origin), f"refs/heads/{BRANCH}-2")
+    assert (decision.allowed, decision.reason) == (False, f"{TEMPLATE} {GATE_LATE.format(path=rig.tree)}")
+    assert rig.remote_head() == ""
+    assert not log.exists()
+    assert 1 <= took <= timeout
+
+
+def test_a_gate_left_exactly_the_floor_is_started_with_that_budget(monkeypatch, rig):
+    install_gate(rig, 0)
+    waits = []
+
+    class Gate:
+        def wait(self, seconds):
+            waits.append(seconds)
+            return 0
+
+    monkeypatch.setattr(
+        push_stop,
+        "subprocess",
+        SimpleNamespace(Popen=lambda *a, **kw: Gate(), DEVNULL=subprocess.DEVNULL, TimeoutExpired=TimeoutError),
+    )
+    tree = push_stop.Tree(rig.tree, BRANCH, False, 1, 1)
+    assert push_stop.gate_refusal(tree, lambda: FLOOR_S) is None
+    assert waits == [FLOOR_S]
+    assert push_stop.gate_refusal(tree, lambda: FLOOR_S - 0.01) == GATE_LATE.format(path=rig.tree)
+    assert waits == [FLOOR_S]
+
+
+def test_a_gate_left_just_under_the_floor_never_starts(monkeypatch, rig):
+    rig.ledger.task["pr_url"] = "https://github.com/o/r/pull/7"
+    log = install_gate(rig, 0)
+    monkeypatch.setattr(push_stop, "CONDITIONS_TIMEOUT_SEC", RESERVE_S + FLOOR_S - 0.01)
+    rig.ticks[:] = [0.0]
+    decision = rig.stop(started=0.0)
+    assert (decision.allowed, decision.reason) == (False, f"{TEMPLATE} {GATE_LATE.format(path=rig.tree)}")
+    assert rig.remote_head() == ""
+    assert not log.exists()
+
+
+def test_the_gate_budget_counts_from_when_the_hook_started_not_from_when_the_gate_starts(monkeypatch, rig):
+    rig.ledger.task["pr_url"] = "https://github.com/o/r/pull/7"
+    log = install_gate(rig, 0)
+    monkeypatch.setattr(push_stop, "CONDITIONS_TIMEOUT_SEC", RESERVE_S + FLOOR_S + 4)
+    rig.ticks[:] = [4.5, 4.5]
+    decision = rig.stop(started=0.0)
+    assert (decision.allowed, decision.reason) == (False, f"{TEMPLATE} {GATE_LATE.format(path=rig.tree)}")
+    assert not log.exists()
+
+
+def test_the_hook_clock_is_the_injected_clock_or_the_monotonic_clock():
+    assert PushStop(clock=lambda: 42.5).clock() == 42.5
+    assert abs(PushStop().clock() - time.monotonic()) < 1
+
+
+def test_the_hook_start_is_read_when_the_gate_is_built():
+    assert PushStop(clock=lambda: 7.0).started == 7.0
+
+
+def test_the_pull_request_reader_is_the_injected_reader_or_the_ledger_events_view():
+    from scripts.swarm.ledger_events import view
+
+    def reader(url):
+        return None
+
+    assert PushStop(github=reader).github() is reader
+    assert PushStop().github() is view
+
+
+@pytest.mark.wall_clock
+def test_a_passing_gate_followed_by_a_slow_push_and_ledger_write_ends_inside_the_stop_condition(monkeypatch, rig):
+    rig.ledger.task["pr_url"] = "https://github.com/o/r/pull/7"
+    log = install_gate(rig, 0, before="import time\ntime.sleep(1.5)\n")
+    slow_origin(rig, 2.3)
+    rig.ledger.delay = 0.52
+    timeout = RESERVE_S + 3
+    monkeypatch.setattr(push_stop, "CONDITIONS_TIMEOUT_SEC", timeout)
+    started = time.monotonic()
+    assert rig.stop(started=started).allowed
+    took = time.monotonic() - started
+    assert log.exists()
+    assert rig.remote_head() == git(rig.tree, "rev-parse", "HEAD")
+    assert len(rig.ledger.comments) == 1
+    assert 1.5 + 2.3 + 0.52 <= took <= timeout
+
+
+def test_the_push_late_text_is_exact():
+    assert PUSH_LATE.format(path="/w") == (
+        "The stop hook had too little time left to push /w, so it did not push it. Push it yourself."
+    )
+
+
+def test_a_worktree_without_a_gate_is_pushed_with_exactly_the_reserve_left(monkeypatch, rig):
+    rig.ledger.task["pr_url"] = "https://github.com/o/r/pull/7"
+    rig.commit()
+    monkeypatch.setattr(push_stop, "CONDITIONS_TIMEOUT_SEC", RESERVE_S)
+    rig.ticks[:] = [0.0, 0.0]
+    assert rig.stop(started=0.0).allowed
+    assert rig.remote_head() == git(rig.tree, "rev-parse", "HEAD")
+
+
+def test_a_worktree_without_a_gate_is_not_pushed_with_less_than_the_reserve_left(monkeypatch, rig):
+    rig.ledger.task["pr_url"] = "https://github.com/o/r/pull/7"
+    rig.commit()
+    monkeypatch.setattr(push_stop, "CONDITIONS_TIMEOUT_SEC", RESERVE_S - 0.01)
+    rig.ticks[:] = [0.0]
+    decision = rig.stop(started=0.0)
+    assert (decision.allowed, decision.reason) == (False, f"{TEMPLATE} {PUSH_LATE.format(path=rig.tree)}")
+    assert rig.remote_head() == ""
+    assert rig.ledger.comments == []
+
+
+def test_a_passing_gate_is_followed_by_the_push_time_check(monkeypatch, rig):
+    rig.ledger.task["pr_url"] = "https://github.com/o/r/pull/7"
+    install_gate(rig, 0)
+    monkeypatch.setattr(push_stop, "CONDITIONS_TIMEOUT_SEC", RESERVE_S + FLOOR_S + 4)
+    rig.ticks[:] = [0.0, 5.5]
+    decision = rig.stop(started=0.0)
+    assert (decision.allowed, decision.reason) == (False, f"{TEMPLATE} {PUSH_LATE.format(path=rig.tree)}")
+    assert rig.remote_head() == ""
+
+
+@pytest.mark.wall_clock
+def test_under_a_slow_push_a_later_worktree_without_a_gate_is_not_pushed_past_the_stop_condition(monkeypatch, rig):
+    rig.ledger.task["pr_url"] = "https://github.com/o/r/pull/7"
+    second_tree_with_work(rig)
+    rig.commit()
+    slow_origin(rig, 3)
+    timeout = RESERVE_S + 2
+    monkeypatch.setattr(push_stop, "CONDITIONS_TIMEOUT_SEC", timeout)
+    started = time.monotonic()
+    decision = rig.stop(started=started)
+    took = time.monotonic() - started
+    assert git(rig.seed, "ls-remote", str(rig.origin), f"refs/heads/{BRANCH}-2")
+    assert (decision.allowed, decision.reason) == (False, f"{TEMPLATE} {PUSH_LATE.format(path=rig.tree)}")
+    assert rig.remote_head() == ""
+    assert 3 <= took <= timeout
+
+
+def test_a_pre_push_gate_killed_by_a_signal_keeps_the_branch_off_origin(rig):
+    rig.ledger.task["pr_url"] = "https://github.com/o/r/pull/7"
+    install_gate(rig, "os.kill(os.getpid(), 9)")
+    decision = rig.stop()
+    assert (decision.allowed, decision.reason) == (False, f"{TEMPLATE} {GATE_FAILED.format(path=rig.tree)}")
+    assert rig.remote_head() == ""
+
+
+def test_a_pushed_head_with_dirty_files_never_runs_the_gate(rig):
+    rig.ledger.task["pr_url"] = "https://github.com/o/r/pull/7"
+    log = install_gate(rig, 1)
+    git(rig.tree, "push", "origin", f"HEAD:refs/heads/{BRANCH}")
+    (rig.tree / "readme").write_text("changed\n")
+    decision = rig.stop()
+    assert (decision.allowed, decision.reason) == (False, TEMPLATE)
+    assert not log.exists()
+
+
+@pytest.mark.parametrize("with_gate", [False, True])
+@pytest.mark.wall_clock
+def test_a_push_slower_than_the_budget_is_cut_off_inside_the_stop_condition(monkeypatch, rig, with_gate):
+    rig.ledger.task["pr_url"] = "https://github.com/o/r/pull/7"
+    if with_gate:
+        install_gate(rig, 0)
+    else:
+        rig.commit()
+    slow_origin(rig, 8)
+    timeout = RESERVE_S + 2
+    monkeypatch.setattr(push_stop, "CONDITIONS_TIMEOUT_SEC", timeout)
+    started = time.monotonic()
+    decision = rig.stop(started=started)
+    took = time.monotonic() - started
+    assert not decision.allowed
+    assert took < timeout
+    assert rig.remote_head() == ""
+    assert rig.ledger.comments == []
+
+
+@pytest.mark.parametrize(("spent", "late"), [(1.0, False), (2.5, True)])
+@pytest.mark.wall_clock
+def test_a_second_push_is_cut_off_by_the_budget_the_first_push_left(monkeypatch, rig, spent, late):
+    rig.ledger.task["pr_url"] = "https://github.com/o/r/pull/7"
+    second_tree_with_work(rig)
+    rig.commit()
+    slow = 8
+    hook = rig.origin / "hooks" / "pre-receive"
+    hook.write_text(f'#!/bin/sh\nread old new ref\nif [ "$ref" != "refs/heads/{BRANCH}-2" ]; then sleep {slow}; fi\n')
+    hook.chmod(0o755)
+    timeout = RESERVE_S + 2
+    monkeypatch.setattr(push_stop, "CONDITIONS_TIMEOUT_SEC", timeout)
+    clock, real_push, pushes = [0.0], push_stop.push, []
+
+    def charged_push(tree, branch, seconds):
+        began = time.monotonic()
+        pushed = real_push(tree, branch, seconds if branch == BRANCH else push_stop.GIT_TIMEOUT_S)
+        pushes.append((seconds, pushed, time.monotonic() - began))
+        clock[0] += spent
+        return pushed
+
+    monkeypatch.setattr(rig.gate, "_clock", lambda: clock[0])
+    monkeypatch.setattr(push_stop, "push", charged_push)
+    decision = rig.stop(started=0.0)
+    assert not decision.allowed
+    assert rig.remote_head() == ""
+    assert git(rig.seed, "ls-remote", str(rig.origin), f"refs/heads/{BRANCH}-2")
+    assert len(rig.ledger.comments) == 1
+    assert pushes[0][:2] == (pytest.approx(timeout - FLOOR_S), True)
+    assert (PUSH_LATE.format(path=rig.tree) in decision.reason) is late
+    assert len(pushes) == (1 if late else 2)
+    if not late:
+        seconds, pushed, took = pushes[1]
+        assert seconds == pytest.approx(timeout - spent - FLOOR_S)
+        assert not pushed
+        assert took < slow
+
+
+@pytest.mark.parametrize(("seconds", "expected"), [(75, 60), (2, 2)])
+def test_push_keeps_the_normal_cap_and_uses_a_shorter_remaining_budget(monkeypatch, seconds, expected):
+    waits = []
+    process = SimpleNamespace(wait=lambda timeout: waits.append(timeout) or 0)
+    monkeypatch.setattr(push_stop.subprocess, "Popen", lambda *args, **kwargs: process)
+    tree = push_stop.Tree(Path("/worktree"), BRANCH, False, 1, 1)
+    assert push_stop.push(tree, BRANCH, seconds)
+    assert waits == [expected]
+
+
+def refuse_the_push(rig):
+    rig.ledger.task["pr_url"] = "https://github.com/o/r/pull/7"
+    other = rig.root / "other"
+    git(rig.seed, "worktree", "add", "-b", "elsewhere", str(other), "origin/dev")
+    (other / "theirs").write_text("theirs")
+    git(other, "add", "theirs")
+    git(other, "commit", "-m", "theirs")
+    git(other, "push", "origin", f"HEAD:refs/heads/{BRANCH}")
+    rig.commit()
+    return git(other, "rev-parse", "HEAD")
+
+
+def wait_on(rig, on, at=NOW, until=NOW + 60_000):
+    from scripts.swarm import idle
+
+    idle.declare_wait(rig.store.redis, SLUG, ME, until, "waiting", at, on=on)
+
+
+def with_task(rig, state):
+    rig.ledger.state = lambda slug: {
+        "tasks": [rig.ledger.task, {"id": "t2", "state": state}],
+        "_meta": {"events": rig.ledger.events},
+    }
+
+
+@pytest.mark.parametrize("state", ["open", "claimed", "pr"])
+def test_a_checked_wait_on_an_open_task_lets_a_refused_push_stop(rig, state):
+    theirs = refuse_the_push(rig)
+    with_task(rig, state)
+    wait_on(rig, {"kind": "task", "target": "t2"})
+    assert rig.stop().allowed
+    assert rig.remote_head() == theirs
+    assert rig.inbox() == []
+
+
+def test_a_checked_wait_on_an_open_task_lets_an_unpushed_commit_stop(rig, monkeypatch):
+    monkeypatch.setattr(push_stop, "push", lambda tree, branch, seconds: False)
+    rig.ledger.task["pr_url"] = "https://github.com/o/r/pull/7"
+    rig.commit()
+    with_task(rig, "claimed")
+    wait_on(rig, {"kind": "task", "target": "t2"})
+    assert rig.stop().allowed
+    assert rig.remote_head() == ""
+
+
+def test_an_unpushed_commit_with_no_wait_is_refused(rig):
+    refuse_the_push(rig)
+    with_task(rig, "claimed")
+    assert rig.stop().reason == TEMPLATE
+
+
+@pytest.mark.parametrize("state", ["done", "blocked"])
+def test_a_wait_on_a_finished_task_still_refuses_the_stop(rig, state):
+    refuse_the_push(rig)
+    with_task(rig, state)
+    wait_on(rig, {"kind": "task", "target": "t2"})
+    assert rig.stop().reason == TEMPLATE
+    assert rig.inbox() == [TEMPLATE]
+
+
+@pytest.mark.parametrize(
+    "on",
+    [
+        None,
+        {"kind": "checks", "target": "https://github.com/o/r/pull/7"},
+        {"kind": "task", "target": "t9"},
+        {"kind": "task", "target": "t1"},
+    ],
+)
+def test_a_bare_wait_another_kind_or_a_missing_or_own_task_still_refuses_the_stop(rig, on):
+    refuse_the_push(rig)
+    with_task(rig, "claimed")
+    wait_on(rig, on)
+    assert rig.stop().reason == TEMPLATE
+
+
+def test_a_wait_that_has_ended_still_refuses_the_stop(rig):
+    refuse_the_push(rig)
+    with_task(rig, "claimed")
+    wait_on(rig, {"kind": "task", "target": "t2"}, at=NOW - 120_000, until=NOW)
+    assert rig.stop().reason == TEMPLATE
+
+
+def test_a_wait_during_a_ledger_outage_still_refuses_the_stop(rig):
+    rig.gate._ledger = lambda: DownLedger({})
+    (rig.tree / "new").write_text("new\n")
+    wait_on(rig, {"kind": "task", "target": "t2"})
+    assert rig.stop().reason == TEMPLATE
+
+
+@pytest.mark.parametrize("target", ["https://github.com/o/r/pull/7", "https://github.com/o/r/pull/8"])
+def test_a_live_merge_wait_on_an_open_pull_request_lets_a_refused_push_stop(rig, target):
+    from scripts.swarm.ledger_events import PullRequest
+
+    rig.ledger.task["pr_url"] = "https://github.com/o/r/pull/7"
+    theirs = refuse_the_push(rig)
+    with_task(rig, "claimed")
+    seen = []
+    rig.gate._github = lambda url: seen.append(url) or PullRequest("OPEN", None, 1, False, True, queued=True)
+    wait_on(rig, {"kind": "merge", "target": target})
+    assert rig.stop().allowed
+    assert seen == [target]
+    assert rig.remote_head() == theirs
+
+
+@pytest.mark.parametrize("state", ["MERGED", "CLOSED", None])
+def test_a_merge_wait_on_a_pull_request_no_longer_open_still_refuses_the_stop(rig, state):
+    from scripts.swarm.ledger_events import PullRequest
+
+    refuse_the_push(rig)
+    with_task(rig, "claimed")
+    rig.gate._github = lambda url: PullRequest(state, None, 1, False, True) if state else None
+    wait_on(rig, {"kind": "merge", "target": "https://github.com/o/r/pull/8"})
+    assert rig.stop().reason == TEMPLATE
+
+
+def test_a_merge_wait_never_holds_uncommitted_changes(rig):
+    from scripts.swarm.ledger_events import PullRequest
+
+    with_task(rig, "claimed")
+    (rig.tree / "new").write_text("new\n")
+    rig.gate._github = lambda url: PullRequest("OPEN", None, 1, False, True, queued=True)
+    wait_on(rig, {"kind": "merge", "target": "https://github.com/o/r/pull/8"})
+    assert rig.stop().reason == TEMPLATE
+
+
+def test_a_pull_request_in_another_repo_does_not_answer_for_pushed_work_in_this_one(rig):
+    rig.ledger.task["pr_url"] = "https://github.com/o/elsewhere/pull/3"
+    rig.commit()
+    decision = rig.stop()
+    assert (decision.allowed, decision.reason) == (False, PROGRESS.format(swarm=SLUG))
+    assert rig.remote_head()
+    rig.ledger.task["pr_url"] = "https://github.com/O/R/pull/7"
+    assert rig.stop().allowed
+
+
+def test_pushed_work_with_an_origin_off_github_and_no_pull_request_is_still_refused(rig):
+    git(rig.seed, "remote", "set-url", "origin", str(rig.origin))
+    rig.commit()
+    assert (rig.stop().allowed, rig.stop().reason) == (False, PROGRESS.format(swarm=SLUG))

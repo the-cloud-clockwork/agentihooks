@@ -1,9 +1,7 @@
 import pytest
 
-from scripts.swarm import prompt
+from scripts.swarm import cli, prompt
 from tests.swarm.test_cli import env, run  # noqa: F401
-
-pytestmark = pytest.mark.xdist_group("fakeredis")
 
 KINDS = ("code", "ci", "ops", "troubleshoot", "tune", "research")
 
@@ -14,13 +12,13 @@ def build(**task):
 
 def test_a_task_without_a_kind_gets_the_code_prompt():
     assert build() == build(kind="code")
-    assert "agentihooks swarm sw done --pr <pr url>" in build()
+    assert "agentihooks swarm sw ready <handoff doc>" in build()
 
 
 def test_each_kind_gets_its_own_prompt():
     texts = {kind: build(kind=kind) for kind in KINDS}
     assert len(set(texts.values())) == len(KINDS)
-    assert "done --pr <pr url>" in texts["ci"]
+    assert "ready <handoff doc>" in texts["ci"]
     for kind in ("ops", "tune"):
         assert '--command "<command>" --output "<its output>"' in texts[kind]
         assert "done --pr" not in texts[kind]
@@ -30,16 +28,22 @@ def test_each_kind_gets_its_own_prompt():
     )
     assert "task add" not in texts["troubleshoot"]
     assert "--finding <link>" in texts["research"]
-    for text in texts.values():
-        assert text.index("agentihooks ledger --slug sw --as engineer@a1b2c3-0001 leave") < text.index(
-            "agentihooks swarm sw done"
-        )
+    for kind, text in texts.items():
+        close = "agentihooks swarm sw ready" if kind in ("code", "ci") else "agentihooks swarm sw done"
+        assert text.index("agentihooks ledger --slug sw --as engineer@a1b2c3-0001 leave") < text.index(close)
 
 
 def test_the_prompt_carries_the_proof_contract():
     text = build(kind="tune", contract={"must": "p99 under 200 ms", "check": "the latency panel", "judge": "master"})
     assert "Proof contract" in text
     assert all(part in text for part in ("p99 under 200 ms", "the latency panel", "master"))
+
+
+def test_the_prompt_names_post_merge_command_proof():
+    assert prompt.contract_lines({"after": "yes"}) == [
+        "Proof contract. After merge, record --command and --output before swarm done."
+    ]
+    assert "After merge, record" not in build(contract={"after": "no"})
 
 
 def _start(env, kind):  # noqa: F811
@@ -61,6 +65,39 @@ def test_an_ops_task_cannot_be_marked_done_without_command_evidence(env, monkeyp
     assert run("sw", "done", "--command", "kubectl get pods", "--output", "cache-0 Running") == 0
     assert ledger.rows["t1"]["state"] == "done"
     assert ledger.rows["t1"]["proof"] == {"command": "kubectl get pods", "output": "cache-0 Running"}
+
+
+def test_code_after_merge_done_requires_recorded_proof(env, monkeypatch, capsys):  # noqa: F811
+    store, ledger = _start(env, "code")
+    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "engineer@a1b2c3-0001")
+    ledger.rows["t1"].update(contract={"after": "yes"}, pr_url="https://github.com/o/r/pull/9")
+    assert run("sw", "done") == 1
+    assert "--command" in capsys.readouterr().err
+    assert run("sw", "done", "--command", "probe") == 1
+    assert "--output" in capsys.readouterr().err
+    assert ledger.rows["t1"]["state"] != "done"
+    assert run("sw", "done", "--command", "probe", "--output", "ok") == 0
+    assert ledger.rows["t1"]["state"] == "done"
+    assert ledger.rows["t1"]["proof"] == {"command": "probe", "output": "ok"}
+
+
+@pytest.mark.parametrize(
+    "finding",
+    ["my notes", "See https://example.com/artifact", "https://example.com/artifact explains the result", ""],
+)
+def test_research_done_refusal_explains_the_single_artifact_link(env, monkeypatch, capsys, finding):  # noqa: F811
+    store, ledger = _start(env, "research")
+    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "engineer@a1b2c3-0001")
+    capsys.readouterr()
+
+    assert cli.main(["sw", "done", "--finding", finding]) == 1
+
+    assert capsys.readouterr().err == (
+        "swarm: a research task is done only with its proof: "
+        "--finding must be a single link to the artifact; put prose in a task comment\n"
+    )
+    assert ledger.rows["t1"]["state"] == "claimed"
+    assert next(a for a in store.agents("sw") if a.name == "engineer@a1b2c3-0001").state != "finished"
 
 
 def test_troubleshoot_and_research_close_with_their_own_proof(env, monkeypatch):  # noqa: F811

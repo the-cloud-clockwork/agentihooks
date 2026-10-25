@@ -151,6 +151,14 @@ class TestDecide:
         made(gate, name=name, watch=40)
         assert decide(gate, name=name).allowed
 
+    def test_an_operator_launched_engineer_passes(self, gate):
+        made(gate, watch=40)
+        operator = Who(name=ENG, swarm=SLUG, lane="operator")
+        assert gate.decide(Call(tool="Bash", tool_input=CHECKS), operator, None).allowed
+        assert not gate.decide(
+            Call(tool="Bash", tool_input=CHECKS), Who(name=ENG, swarm=SLUG, lane="eng"), None
+        ).allowed
+
     def test_an_unsafe_name_passes(self, gate):
         assert decide(gate, name="../sw-eng-1").allowed
 

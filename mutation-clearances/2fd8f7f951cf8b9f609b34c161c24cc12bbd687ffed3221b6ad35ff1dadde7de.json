@@ -1,0 +1,6 @@
+{
+  "hooks/context/project_identity.py:hooks.context.project_identity.x__swarm_identity__mutmut_3:60aa168a9212b953e6b9010b5f9d1bfac5b57fd631012259bfd9e3d1de423eb2": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "Missing swarm binding changes only from empty string to None. The immediate not swarm guard returns None for both values before any config or filesystem access. Present binding values bypass either default identically."
+  }
+}

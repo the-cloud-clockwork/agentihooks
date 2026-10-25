@@ -1,0 +1,6 @@
+{
+  "scripts/ci_gate_queue.py:scripts.ci_gate_queue.x_normalize__mutmut_39:0c15c41807795368602a0bbf7db9fbab2725447b92b516a15dcd0f98d1cc2fbb": {
+    "reader": "standards-reader",
+    "reason": "Absent early job None or empty dict both differ from the nonempty canonical watcher and raise the same exact ValueError. Independently approved from complete CI report 40169108156."
+  }
+}

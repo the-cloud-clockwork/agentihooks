@@ -4,12 +4,12 @@ from pathlib import Path
 
 import pytest
 
-from tests.swarm_ledger.ledger_page import show
+from tests.swarm_ledger.ledger_page import ledger_state, shell_html, show
 from tests.swarm_ledger.test_artifacts import JSON_DOC, MARKDOWN, SVG
 from tests.swarm_ledger.test_bin import DAY_MS
 from tests.swarm_ledger.test_caps_columns import browser as chromium_browser
 
-TEMPLATE = Path(__file__).resolve().parents[2] / "scripts/swarm_ledger/template.html"
+PAGES = Path(__file__).resolve().parents[2] / "scripts/swarm_ledger"
 browser = chromium_browser
 FILES = {
     "a" * 64 + ".md": (MARKDOWN, "text/markdown"),
@@ -56,10 +56,10 @@ def page(browser, request):
     tab.set_default_timeout(1500)
     tab.route("**/artifacts/**", serve)
     doc = {"title": "Artifacts proof", "tasks": [{"id": "av1", "title": "Artifacts"}], "artifacts": ROWS}
-    html = TEMPLATE.read_text().replace("__LEDGER_DATA__", json.dumps(doc))
-    html = html.replace("__LEDGER_PALETTE__", (TEMPLATE.parent / "palette.css").read_text())
+    html = shell_html()
+    html = html.replace("__LEDGER_PALETTE__", (PAGES / "palette.css").read_text())
     html = html.replace("__LEDGER_PORT__", "8765").replace("__LEDGER_SLUG__", "arts")
-    show(tab, html)
+    show(tab, html, ledger=ledger_state(doc))
     yield tab
     tab.close()
 
@@ -116,17 +116,17 @@ def test_inline_code_and_links_nested_in_bold_and_italic_are_formatted(page):
     assert "`" not in body.inner_text()
 
 
-def test_json_is_pretty_printed_and_foldable(page):
+def test_json_is_pretty_printed_as_plain_nested_blocks_that_never_fold(page):
     viewer = open_artifact(page, "Proposal shape")
     body = viewer.locator(".art-body")
-    folds = body.locator("details")
-    folds.nth(2).wait_for()
-    assert folds.count() == 3
+    nodes = body.locator(".json-node")
+    nodes.nth(2).wait_for()
+    assert nodes.count() == 3
+    assert body.locator("details, summary").count() == 0
     assert "Stopped at" in body.inner_text()
-    assert body.locator("summary").nth(1).inner_text() == '"proposal": {'
-    folds.nth(1).locator("summary").first.click()
-    assert not folds.nth(1).evaluate("el => el.open")
-    assert not body.get_by_text('"Stopped at"').is_visible()
+    assert body.locator(".json-open").nth(1).inner_text() == '"proposal": {'
+    body.locator(".json-open").nth(1).click()
+    assert body.get_by_text('"Stopped at"').is_visible()
     viewer.get_by_role("button", name="Close artifact").click()
     assert not viewer.is_visible()
 
@@ -157,22 +157,22 @@ def trash_page(browser):
     tab.route("**/api/**", api)
     old = {**ROWS[0], "id": "art-old", "title": "Old logo draft", "deleted_at": int(time.time() * 1000) - 2 * DAY_MS}
     doc = {"title": "Trash proof", "tasks": [], "artifacts": ROWS[1:], "artifact_trash": [old]}
-    html = TEMPLATE.read_text().replace("__LEDGER_DATA__", json.dumps(doc))
-    html = html.replace("__LEDGER_PALETTE__", (TEMPLATE.parent / "palette.css").read_text())
+    html = shell_html()
+    html = html.replace("__LEDGER_PALETTE__", (PAGES / "palette.css").read_text())
     html = html.replace("__LEDGER_PORT__", "8765").replace("__LEDGER_SLUG__", "arts")
-    show(tab, html)
+    show(tab, html, ledger=ledger_state(doc))
     tab.get_by_role("button", name="Artifacts").click()
     yield tab, sent
     tab.close()
 
 
-def test_delete_moves_an_artifact_to_the_trash_and_drops_the_badge(trash_page):
+def test_delete_marks_the_artifact_pending_until_the_server_moves_it(trash_page):
     tab, sent = trash_page
     assert tab.locator("#art-badge").inner_text() == "2"
     tab.get_by_role("button", name="Delete Proposal shape").click()
-    assert tab.locator("#art-list .art-row").count() == 1
-    assert tab.locator("#art-badge").inner_text() == "1"
-    assert "Proposal shape" in tab.locator("#art-trash").inner_text()
+    assert tab.get_by_role("button", name="Delete Proposal shape").inner_text().lower() == "sending"
+    assert tab.locator("#art-list .art-row").count() == 2
+    assert "Proposal shape" not in tab.locator("#art-trash").inner_text()
     tab.wait_for_function("() => document.getElementById('status').textContent !== ''")
     tab.wait_for_timeout(200)
     assert {"op": "artifact_delete", "target": "art-json"}.items() <= sent[0].items()
@@ -183,6 +183,6 @@ def test_the_trash_lists_days_left_and_restore_brings_an_artifact_back(trash_pag
     row = tab.locator("#art-trash .art-row", has_text="Old logo draft")
     assert "28 days left" in row.inner_text()
     row.get_by_role("button", name="Restore Old logo draft").click()
-    assert tab.locator("#art-badge").inner_text() == "3"
-    assert tab.locator("#art-list").get_by_role("button", name="Old logo draft", exact=True).is_visible()
-    assert tab.locator("#art-trash .art-row").count() == 0
+    assert row.get_by_role("button", name="Restore Old logo draft").inner_text().lower() == "sending"
+    assert tab.locator("#art-badge").inner_text() == "2"
+    assert tab.locator("#art-trash .art-row").count() == 1

@@ -1,0 +1,6 @@
+{
+  "hooks/classifier/fallbacks.py:hooks.classifier.fallbacks.x__run__mutmut_12:2cabb7671681cb3294fcf66d519f4c6cb9b5bb3aa2f155994707b5e6d9558920": {
+    "reader": "Standards reviewer /root/standards",
+    "reason": "Missing route defaults None and empty string are false; no token lookup or OAuth assignment occurs. Present routes and exported environment are unchanged."
+  }
+}

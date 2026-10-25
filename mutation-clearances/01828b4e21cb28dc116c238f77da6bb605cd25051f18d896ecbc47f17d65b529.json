@@ -1,0 +1,6 @@
+{
+  "hooks/context/project_identity.py:hooks.context.project_identity.x__swarm_identity__mutmut_23:aadd7a110850759e45830328416c9e2a07059fca214ab2e9a2178c7442d1d180": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "Omitting the dict get default changes only a missing repo from empty string to None. Both select identity None without any path operation, yielding the same fallback and output."
+  }
+}

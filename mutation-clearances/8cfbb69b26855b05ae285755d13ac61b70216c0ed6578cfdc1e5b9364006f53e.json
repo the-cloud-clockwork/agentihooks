@@ -1,0 +1,6 @@
+{
+  "hooks/observability/agent_trace.py:hooks.observability.agent_trace.x_export_session__mutmut_22:6940fb1023e2b2ed9584779514a61053cba95624a5d1dfbb9072d6d89015af56": {
+    "reader": "Standards reader",
+    "reason": "Both wrappers retain the same O_RDWR descriptor; the lock stream has no reads or writes and flock and close are unchanged."
+  }
+}

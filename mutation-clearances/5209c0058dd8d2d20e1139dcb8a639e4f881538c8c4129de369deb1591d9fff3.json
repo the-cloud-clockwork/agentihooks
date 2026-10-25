@@ -1,0 +1,6 @@
+{
+  "scripts/inbox/receipts.py:scripts.inbox.receipts.x\u01c1Receipts\u01c1_try_commit__mutmut_64:0c33dc3c2344c41a3893afe1043fe93df5016e8ad846e0cb8d82b62159b0872f": {
+    "reader": "Standards reader of pull request 1841",
+    "reason": "Receipts._try_commit always passes a moved item whose state is delivered, and InboxStore.stage_move reads indexed only in the boolean test `moved.state == \"delivered\" and indexed`; None and False both take the zrem branch, so no input changes the output."
+  }
+}

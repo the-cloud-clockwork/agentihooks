@@ -3,7 +3,26 @@ description: Reuse Chromium only after its runtime dependencies pass a launch ch
 runs:
   using: composite
   steps:
+    - name: Use Chromium and OS dependencies from the runner image
+      id: image
+      shell: bash
+      env:
+        PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.playwright
+      run: |
+        if [[ -n "${ARC_PLAYWRIGHT_BROWSERS_PATH:-}" && -d "$ARC_PLAYWRIGHT_BROWSERS_PATH" ]] \
+            && [[ ! -e "$PLAYWRIGHT_BROWSERS_PATH" && ! -L "$PLAYWRIGHT_BROWSERS_PATH" ]]; then
+          ln -s "$ARC_PLAYWRIGHT_BROWSERS_PATH" "$PLAYWRIGHT_BROWSERS_PATH"
+          if timeout 10s bash "$GITHUB_ACTION_PATH/verify.sh"; then
+            echo "linked=true" >> "$GITHUB_OUTPUT"
+          else
+            rm "$PLAYWRIGHT_BROWSERS_PATH"
+            echo "linked=false" >> "$GITHUB_OUTPUT"
+          fi
+        else
+          echo "linked=false" >> "$GITHUB_OUTPUT"
+        fi
     - name: Read the installed Playwright version
+      if: steps.image.outputs.linked != 'true'
       id: version
       shell: bash
       run: |
@@ -14,8 +33,11 @@ runs:
             output.write(f'version={version("playwright")}\n')
         PY
     - name: Restore Chromium
+      if: steps.image.outputs.linked != 'true'
       id: cache
-      uses: actions/cache@v4
+      uses: actions/cache/restore@v4
+      env:
+        SEGMENT_DOWNLOAD_TIMEOUT_MINS: "1"
       with:
         path: ${{ github.workspace }}/.playwright
         key: chromium-${{ runner.os }}-${{ runner.arch }}-${{ steps.version.outputs.version }}
@@ -23,27 +45,41 @@ runs:
       id: launch
       shell: bash
       env:
+        IMAGE_LINKED: ${{ steps.image.outputs.linked }}
         CACHE_HIT: ${{ steps.cache.outputs.cache-hit }}
         PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.playwright
       run: |
-        if [[ "$CACHE_HIT" == true ]] && timeout 10s bash "$GITHUB_ACTION_PATH/verify.sh"; then
+        if [[ "${IMAGE_LINKED:-false}" == true ]] || \
+            { [[ "$CACHE_HIT" == true ]] && timeout 10s bash "$GITHUB_ACTION_PATH/verify.sh"; }; then
+          [[ "${IMAGE_LINKED:-false}" != true ]] || echo "Using baked Chromium and OS dependencies without a download"
           echo "ready=true" >> "$GITHUB_OUTPUT"
         else
           echo "ready=false" >> "$GITHUB_OUTPUT"
         fi
     - name: Use the Ubuntu archive for browser dependencies
-      if: steps.launch.outputs.ready != 'true'
+      if: steps.launch.outputs.ready != 'true' && runner.environment == 'github-hosted'
       shell: bash
       run: timeout 60s sudo sed -i '/azure\.archive\.ubuntu\.com/d' /etc/apt/apt-mirrors.txt
     - name: Install Chromium and missing OS dependencies
       if: steps.launch.outputs.ready != 'true'
       shell: bash
       env:
+        ATTEMPT_SECONDS: "120"
         PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.playwright
-      run: timeout 120s python -m playwright install --with-deps chromium
-    - name: Verify the installed browser
-      if: steps.launch.outputs.ready != 'true'
-      shell: bash
-      env:
-        PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.playwright
-      run: timeout 10s bash "$GITHUB_ACTION_PATH/verify.sh"
+      run: |
+        install_and_verify() {
+          python -m playwright install --with-deps chromium &&
+            timeout 30s bash "$GITHUB_ACTION_PATH/verify.sh"
+        }
+        export -f install_and_verify
+        for attempt in 1 2; do
+          timeout --kill-after=10s "${ATTEMPT_SECONDS}s" bash -c install_and_verify && exit 0
+          [[ "$attempt" == 2 ]] || echo "::warning title=Retried browser install::Chromium install attempt $attempt failed or exceeded ${ATTEMPT_SECONDS}s; retrying once."
+        done
+        exit 1
+    - name: Save Chromium from dev
+      if: steps.launch.outputs.ready != 'true' && steps.cache.outputs.cache-hit != 'true' && github.event_name == 'push' && github.ref == 'refs/heads/dev'
+      uses: actions/cache/save@v4
+      with:
+        path: ${{ github.workspace }}/.playwright
+        key: ${{ steps.cache.outputs.cache-primary-key }}

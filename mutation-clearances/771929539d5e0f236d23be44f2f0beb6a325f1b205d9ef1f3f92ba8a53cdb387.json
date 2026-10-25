@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.x\u01c1Handler\u01c1do_PUT__mutmut_13:eda446540d9ed0c4b259edff4160e8726c85cf8d1828349d86401b102412ae2f": {
+    "reader": "Standards",
+    "reason": "core.sync returns normalized state with the tasks key present; changing this unused dictionary default changes no output. Independent empty and populated task list comparisons agree."
+  }
+}

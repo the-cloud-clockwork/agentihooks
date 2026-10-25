@@ -1,0 +1,6 @@
+{
+  "hooks/context/project_identity.py:hooks.context.project_identity.x__swarm_identity__mutmut_13:101dc562aeb263d9acf918ddd1ef07936cbc0cd47bd996d6f066585d4649c7da": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "Missing repo is used only as a truth operand before _registered_project. Empty string and None both select identity None, so the same outer fallback and output result."
+  }
+}

@@ -1,7 +1,17 @@
 import re
 
+REARM = r"\b[Rr]e[- ]?arm (?:your |a |an |the )?`?Monitors?`?(?: on (?:the )?ledger)?"
+MONITOR = r"`?\bMonitors?\b`?"
 
-def waiting(slug: str) -> str:
+
+def waiting(slug: str, push: bool = False) -> str:
+    if push:
+        return (
+            "Read agentihooks msg inbox and handle every open item. When no work remains, end your turn: new inbox "
+            f"items arrive in this thread on their own, so never run agentihooks swarm {slug} wait --inbox, even where "
+            "your profile instructions describe that loop. "
+            "Use swarm wait --on checks, reply or task for a specific dependency."
+        )
     return (
         "Read agentihooks msg inbox and handle every open item. "
         f"When no work remains, run agentihooks swarm {slug} wait --inbox in a foreground tool call. "
@@ -11,21 +21,21 @@ def waiting(slug: str) -> str:
     )
 
 
-def next_action(text: str, slug: str) -> str:
-    text = re.sub(
-        r"\b[Rr]e[- ]?arm (?:your |a |an |the )?`?Monitors?`?(?: on (?:the )?ledger)?",
-        f"Read agentihooks msg inbox and run agentihooks swarm {slug} wait --inbox",
-        text,
-    )
-    return re.sub(r"`?\bMonitors?\b`?", f"`agentihooks swarm {slug} wait --inbox`", text)
+def next_action(text: str, slug: str, push: bool = False) -> str:
+    if push:
+        return re.sub(REARM, "Read agentihooks msg inbox", text)
+    text = re.sub(REARM, f"Read agentihooks msg inbox and run agentihooks swarm {slug} wait --inbox", text)
+    return re.sub(MONITOR, f"`agentihooks swarm {slug} wait --inbox`", text)
 
 
-def persona(text: str) -> str:
-    text = text.replace("Monitor its checks", "Watch its checks")
-    return next_action(text, "<slug>") + "\n" + waiting("<slug>") + "\n"
+def persona(text: str, push: bool = False) -> str:
+    text = next_action(text.replace("Monitor its checks", "Watch its checks"), "<slug>", push)
+    if push:
+        text = re.sub(MONITOR, "`agentihooks swarm <slug> wait --on checks|reply|task`", text)
+    return text + "\n" + waiting("<slug>", push) + "\n"
 
 
-def handoff(task: dict, slug: str) -> dict:
+def handoff(task: dict, slug: str, push: bool = False) -> dict:
     result = dict(task)
     if "handoff" in task:
         lines, active, fenced = [], False, False
@@ -35,9 +45,9 @@ def handoff(task: dict, slug: str) -> dict:
             if not fenced and line.startswith("## "):
                 active = line[3:].strip() == "Next"
             elif active:
-                line = next_action(line, slug)
+                line = next_action(line, slug, push)
             lines.append(line)
         result["handoff"] = "".join(lines)
     if transfer := task.get("transfer"):
-        result["transfer"] = {**transfer, "next": next_action(transfer["next"], slug)}
+        result["transfer"] = {**transfer, "next": next_action(transfer["next"], slug, push)}
     return result

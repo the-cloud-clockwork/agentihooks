@@ -1,0 +1,6 @@
+{
+  "scripts/codex_input.py:scripts.codex_input.x\u01c1InputFramer\u01c1expire_escape__mutmut_6:c003fb83ec2f97c6001cc736c6cfb7ced91a3b04218959535142b9c5dee9fda2": {
+    "reader": "standards-reader round three",
+    "reason": "approved; comparison literals have identical bytes."
+  }
+}

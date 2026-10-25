@@ -16,6 +16,7 @@ from scripts.inbox.store import InboxStore
 from scripts.swarm import cli
 from scripts.swarm.health.findings import Finding
 from tests.swarm.test_control_notifications import controls as controls
+from tests.swarm_ledger import legacy_page  # noqa: E402
 
 pytestmark = pytest.mark.unit
 
@@ -31,7 +32,7 @@ def page(controls, monkeypatch):
             "phases": [{"title": "Control proof", "description": "Observe notifications"}],
         },
     )
-    token = core.read_token(core.paths("demo")[0].read_text())
+    token = legacy_page.stored_token(legacy_page.paths("demo", core)[0])
     from scripts.swarm import command_runner
 
     monkeypatch.setattr(server, "swarm_store", lambda: store)
@@ -89,10 +90,10 @@ def page(controls, monkeypatch):
         ({"action": "stop_now"}, "stopped the swarm immediately", "stopped"),
         ({"action": "close"}, "requested closing the ledger", "stopped"),
         ({"action": "reopen"}, "reopened the ledger", "running"),
-        ({"action": "set", "max_eng": 2, "max_ci": 1, "codex_share": 45}, "changed the swarm settings", "running"),
+        ({"action": "set", "max_eng": 2, "max_ci": 1}, "changed the swarm settings", "running"),
         (
             {"action": "verdict", "id": "idle/worker", "verdict": "resolved", "note": "Finished"},
-            "gave a health finding a verdict",
+            "gave the health finding idle/worker a verdict",
             "running",
         ),
     ],
@@ -102,17 +103,17 @@ def test_each_successful_page_control_notifies_once(page, body, verb, state):
     assert put(body) == 200
     items = InboxStore(store.redis).mailbox(master.name)
     if body["action"] == "stop_now":
-        assert items == []
-        assert ledger.said[0][0].startswith(f"The operator {verb} from the page. The swarm is {state}.")
+        assert items == [] and ledger.said == []
+        assert ledger.notes[0][1].startswith(f"The operator {verb} from the page. The swarm is {state}.")
         return
     assert len(items) == 1
     assert items[0].fyi
     assert items[0].text.startswith(f"The operator {verb} from the page. The swarm is {state}.")
     if body["action"] == "set":
-        assert "Engineer cap 2, CI cap 1, Planner cap 1, Codex share 45 percent." in items[0].text
+        assert "Engineer cap 2, CI cap 1, Planner cap 1." in items[0].text
     if body["action"] == "verdict":
         assert "The verdict is resolved." in items[0].text
-    assert ledger.said == [(items[0].text, "swarm")]
+    assert ledger.said == []
 
 
 @pytest.mark.parametrize("action", ["pause", "doctor_start"])
@@ -152,7 +153,7 @@ def test_page_doctor_control_notifies_once(page, action):
     assert "Doctor from the page" in items[0].text
     state = "running" if action == "doctor_start" else "stopped"
     assert items[0].text.endswith(f"The Doctor is {state}.")
-    assert ledger.said == [(items[0].text, "swarm")]
+    assert ledger.said == []
 
 
 def test_page_pause_is_attributed_to_the_operator_even_if_the_server_inherited_the_master(page, monkeypatch):
@@ -164,4 +165,4 @@ def test_page_pause_is_attributed_to_the_operator_even_if_the_server_inherited_t
     assert items[0].sender == "operator"
     assert items[0].fyi
     assert items[0].text == "The operator paused the swarm from the page. The swarm is paused."
-    assert ledger.said == [(items[0].text, "swarm")]
+    assert ledger.said == []

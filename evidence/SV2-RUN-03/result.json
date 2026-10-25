@@ -1,0 +1,63 @@
+{
+  "package": "SV2-RUN-03",
+  "dependency": "SV2-RUN-02",
+  "integration_gate": "G1",
+  "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/1838",
+  "pull_request": "https://github.com/the-cloud-clockwork/agentihooks/pull/1843",
+  "tested_commit": "05f3c81b8c3e9488408994d490cdc145e7796878",
+  "plan_revision": "3bd4f4a6b01057b447cad15fa48c85802d3f78ee",
+  "status": "implemented-fixture-qualified-not-live",
+  "evidence_class": "mocked transport and isolated fakeredis; no live runtime or rollout proof",
+  "interfaces": [
+    "OperationRequest, Operation, Observation and OperationTransport",
+    "OperationJournal via RedisStore.operation_journal",
+    "Operations.execute, recover, unresolved and runtime_ambiguous_operations"
+  ],
+  "supported_versions": {
+    "runtime_protocol": "SV2-RUN-01 and SV2-RUN-02 unchanged; journal operation protocol introduced by SV2-RUN-03",
+    "journal": "Redis hash of immutable operation identity, execution generation, backend, target and payload digest; accepted, unknown, applied and refused phases"
+  },
+  "authority": "Controller-side service operates on previously admitted immutable execution identity and canonical seat generation. No display label grants authority. Worker-facing launch grant verification remains at the authenticated registration boundary; this service is not a public unauthenticated endpoint.",
+  "states": {
+    "observed": "217 focused tests passed. Final observation qualifier tests: 50 passed; operations coverage 171 statements, zero missed, 100 percent. Four malformed state/generation cases were seen red, then fixed: only Phase enum values and actual integer generations can acknowledge applied effects. Ruff check and format clean.",
+    "accepted": "Acceptance A, B and C pass twice independently; original Standards and Spec readers approved the final observation boundary fix 05f3c81b and have no open findings.",
+    "committed": "Implementation and fixture inputs committed on tested_commit; generated case manifests identify exact input hashes.",
+    "externally_verified": "CI run 37850066948 on 9416c36e passed the full unit suite, all aggregate and integration jobs, sonar, lint, size and mutation. The implementation inputs equal tested_commit; this completion record update changes metadata only."
+  },
+  "cases": {
+    "a": "evidence/SV2-RUN-03/a-result.json",
+    "b": "evidence/SV2-RUN-03/b-result.json",
+    "c": "evidence/SV2-RUN-03/c-result.json"
+  },
+  "migrations": [],
+  "rollback_rehearsal": {
+    "action": "Set dispatch_enabled false on Operations, retain the runtime-operations journal and execution history, and run recover before enabling dispatch. Recovery only observes. Retain preceding RuntimeRouter local compatibility path.",
+    "evidence": "Case C snapshots and restores unresolved journal, recovers applied object, replays without creation, rejects stale attempt and accepts an absent command without dispatch."
+  },
+  "remaining_limitations": [
+    "The new journal service requires an OperationTransport implementing authoritative absence, atomic operation and execution deduplication, and backend generation fencing. No real remote backend exists at G1. The preceding local RuntimeRouter path is unchanged and the new service is exercised by mocked transport fixtures; worker adapter integration is supplied by later runtime packages.",
+    "The journal is Redis coordination state, retained by existing swarm snapshots; it is not a durable transcript archive. Dispatch_enabled is an explicit service construction option and must remain false while unresolved operations are reconciled during rollback.",
+    "The service stores payload digests rather than prompts. Recovery classifies unresolved operations by observation; an absent operation requires the original request payload for explicit dispatch. Stale conflicts are returned as refused without changing old persisted entries; other entries continue recovery.",
+    "When a later package integrates journal dispatch into the ledger server, its runtime folder must join the reload watcher. The trace-plan classifier excluded that integration from this package; proposed on the ledger. Legacy store construction does not load the new journal service."
+  ],
+  "next_action": "Use the qualified operation interface when implementing backend adapters in dependent packages.",
+  "mutation_resolution": "Canonical codec options and fixed diagnostic messages are module data. Redundant journal key sorting, duplicate nonfinite validation and recovery result clearing were removed. Added digest key order and literal hash, recorded action, nonfinite payload, single connection pool and empty stale result assertions. No mutation clearances used. Malformed observation state and generation types are refused before journal settlement; a string applied state cannot bypass ownership checks.",
+  "ci_head": "9416c36ee7ac7dc505c1241ac42192281c8ff99d",
+  "ci_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/37850066948",
+  "mutation": [
+    {
+      "path": "scripts/swarm/store.py",
+      "counts": {},
+      "failures": [],
+      "cleared": []
+    },
+    {
+      "path": "scripts/swarm_v2/runtime/operations.py",
+      "counts": {
+        "killed": 348
+      },
+      "failures": [],
+      "cleared": []
+    }
+  ]
+}

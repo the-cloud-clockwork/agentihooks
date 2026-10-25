@@ -1,5 +1,15 @@
 """A phase's lifecycle, derived from stored facts only, so the tick, the CLI and the page cannot drift apart."""
 
+LABELS = {
+    "out_of_scope": "Out of scope",
+    "done": "Done",
+    "to_plan": "Needs a plan",
+    "planning": "Planning",
+    "in_review": "Plan in review",
+    "building": "Building",
+}
+WAITS = "Waits for phase "
+
 
 def lifecycle(phase, doc):
     if phase.get("out_of_scope"):
@@ -19,6 +29,19 @@ def lifecycle(phase, doc):
     if (phase.get("review") or {}).get("state") != "approved":
         return "in_review"
     return "building"
+
+
+def label(phase, doc):
+    state = lifecycle(phase, doc)
+    if state != "waiting":
+        return LABELS[state]
+    by_id = {p["id"]: p for p in doc.get("phases", [])}
+    waits = [dep for dep in phase["depends_on"] if not by_id.get(dep, {}).get("done")]
+    return WAITS + ", ".join(by_id.get(dep, {}).get("title") or dep for dep in waits)
+
+
+def status(doc):
+    return {p["id"]: {"state": lifecycle(p, doc), "label": label(p, doc)} for p in doc.get("phases", [])}
 
 
 def admits(task, doc):

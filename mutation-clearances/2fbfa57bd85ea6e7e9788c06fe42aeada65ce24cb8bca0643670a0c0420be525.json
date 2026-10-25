@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/metrics_outbox.py:scripts.swarm.metrics_outbox.x\u01c1Outbox\u01c1flush__mutmut_8:643998b335056a3773f14dab2bc150add21a3b6ce46edbd366abb4c9c494a323": {
+    "reader": "Standards",
+    "reason": "Equivalent SELECT: SQLite treats the unquoted TBL, FLUSH_CURSOR and ID identifiers case insensitively. It returns the same persisted cursor row."
+  }
+}

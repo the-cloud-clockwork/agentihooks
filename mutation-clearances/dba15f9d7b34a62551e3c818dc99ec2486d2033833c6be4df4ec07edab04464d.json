@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/plan_ranges.py:scripts.swarm_ledger.plan_ranges.x__owner__mutmut_12:3a695aeaf7f25236d9d2812dbec5c5376a47761acc135785a62747ffb7c450ae": {
+    "reader": "Standards reader of pull request 1750",
+    "reason": "Equivalent. The entry at n == anchor is the anchor line, which _heading never returns (it requires a leading #), so it has depth 0 and the and depth filter drops it either way."
+  }
+}

@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from tests.swarm_ledger.ledger_page import page_source
+from tests.swarm_ledger.ledger_page import browser_home, page_source
 
 SCRIPTS = Path(__file__).resolve().parents[2] / "scripts" / "swarm_ledger"
 sys.path.insert(0, str(SCRIPTS))
@@ -13,6 +13,8 @@ import ledger_close  # noqa: E402
 import ledger_core as core  # noqa: E402
 import ledger_server as server  # noqa: E402
 import new_ledger  # noqa: E402
+
+from tests.swarm_ledger import legacy_page  # noqa: E402
 
 SLUG = "close-2026-01-01"
 OPEN_SLUG = "still-open-2026-01-01"
@@ -48,9 +50,9 @@ def ledger_doc():
 def make_ledger(slug=SLUG):
     content = {"title": "Demo", "overview": "Ship the thing.", "sources": [], "phases": [], "questions": []}
     content["followups"] = []
-    html_path, json_path = core.paths(slug)
+    html_path, json_path = legacy_page.paths(slug, core)
     core.LEDGER_DIR.mkdir(parents=True, exist_ok=True)
-    html_path.write_text(new_ledger.render(new_ledger.build_doc(content), slug, 8765), encoding="utf-8")
+    html_path.write_text(legacy_page.render(new_ledger.build_doc(content), slug, 8765), encoding="utf-8")
     json_path.unlink(missing_ok=True)
     core.sync(slug)
 
@@ -160,7 +162,7 @@ class Home(unittest.TestCase):
         self.assertIsInstance(found[SLUG]["closed_at"], int)
         self.assertIsNone(found[OPEN_SLUG]["closed_at"])
         with patch.object(server, "swarm_state", return_value="stopped"):
-            page = server.index_page()
+            page = browser_home(server)
         self.assertNotIn("<h1>CLOSED</h1>", page)
         rows = {
             slug: row

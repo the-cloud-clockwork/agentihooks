@@ -1,0 +1,71 @@
+{
+  "tested_commit": "6c93f545a41e49eea00cc96d384e49822d26612b",
+  "evidence_class": "mocked signals and isolated fakeredis; no live Kubernetes, SSH or rollout proof",
+  "passed": true,
+  "independent_fixtures": [
+    {
+      "passed": true,
+      "before_relist": "observation_unavailable",
+      "after_relist": {
+        "state": "working",
+        "confidence": "confirmed"
+      },
+      "execution_attempts_and_spawns": {
+        "before_relist": [
+          1,
+          0
+        ],
+        "after_relist": [
+          1,
+          0
+        ]
+      },
+      "stale_replay_overwrote": false,
+      "conservative_rollback": [
+        {
+          "state": "suspect",
+          "needs_operator": true
+        },
+        {
+          "state": "suspect",
+          "needs_operator": true
+        }
+      ],
+      "execution_observation_age_seconds": {
+        "exe-a9d3b4f6d0874c2caeadba20507c1c2b": 3620.0
+      }
+    },
+    {
+      "passed": true,
+      "before_relist": "observation_unavailable",
+      "after_relist": {
+        "state": "working",
+        "confidence": "confirmed"
+      },
+      "execution_attempts_and_spawns": {
+        "before_relist": [
+          1,
+          0
+        ],
+        "after_relist": [
+          1,
+          0
+        ]
+      },
+      "stale_replay_overwrote": false,
+      "conservative_rollback": [
+        {
+          "state": "suspect",
+          "needs_operator": true
+        },
+        {
+          "state": "suspect",
+          "needs_operator": true
+        }
+      ],
+      "execution_observation_age_seconds": {
+        "exe-d1a564a6ba0e4edc90075aff903717b5": 3620.0
+      }
+    }
+  ]
+}

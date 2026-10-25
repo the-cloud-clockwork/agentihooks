@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/repository/seeds.py:scripts.swarm_ledger.repository.seeds.x_read_seeds__mutmut_29:d68144cdf46719d59b025bcb089ce754a9b335d6eb271167179222060f0abfef": {
+    "reader": "Standards",
+    "reason": "A deletion seed delta is emitted only for a path present in the preceding flattened revision. Replay starts with that baseline and applies ordered deltas, so rows.pop always finds this path. Removing the unused absent-key default changes no supported replay output."
+  }
+}

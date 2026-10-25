@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/plan_read.py:scripts.swarm_ledger.plan_read.x_read__mutmut_24:37a283473a6cd9b3f81d1c46a48dc379a31e91d20c6892595c99de08d6a8713f": {
+    "reader": "Standards",
+    "reason": "Both empty string and XXXX absent-slice defaults fail package matching and select the same artifact source. Standards exercised both linked checks. Verified against CI run 37861955536 at head 680e7e3c."
+  }
+}

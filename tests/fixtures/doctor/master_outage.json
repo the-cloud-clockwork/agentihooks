@@ -1,0 +1,343 @@
+{
+ "slug": "rig-grade-swarm",
+ "doctor": "rig-grade-swarm-doctor",
+ "window": {
+  "since": "2026-10-09T19:50:00Z",
+  "until": "2026-10-09T20:35:00Z"
+ },
+ "transfers": [
+  {
+   "id": "f94cc7b1337149fcb69ae6be33e8915f",
+   "reason": "operator",
+   "seat": "master@rig-grade-swarm",
+   "task": "master",
+   "predecessor": "master@323133-0079",
+   "successor": "master@323133-0080",
+   "at": 1791567134268,
+   "binding": {
+    "state": "live",
+    "at": 1791567171506,
+    "session": "master@323133-0080"
+   }
+  },
+  {
+   "id": "32d5dc41333e419fbed4076e952cc13a",
+   "reason": "recycle",
+   "seat": "master@rig-grade-swarm",
+   "task": "master",
+   "predecessor": "master@323133-0080",
+   "successor": "master@323133-0081",
+   "at": 1791575808774,
+   "binding": {
+    "state": "absent",
+    "at": 1791575842676,
+    "session": "master@323133-0081"
+   }
+  },
+  {
+   "id": "ee4f2075d7f24538b115c52c1d933a98",
+   "reason": "recycle",
+   "seat": "master@rig-grade-swarm",
+   "task": "master",
+   "predecessor": "master@323133-0080",
+   "successor": "master@323133-0082",
+   "at": 1791575842404,
+   "binding": {
+    "state": "absent",
+    "at": 1791576100728,
+    "session": "master@323133-0082"
+   },
+   "retry_of": "32d5dc41333e419fbed4076e952cc13a"
+  },
+  {
+   "id": "46516cc4ab5b4a6cb56e34e24495428b",
+   "reason": "recycle",
+   "seat": "master@rig-grade-swarm",
+   "task": "master",
+   "predecessor": "master@323133-0080",
+   "successor": "master@323133-0083",
+   "at": 1791575849603,
+   "binding": {
+    "state": "absent",
+    "at": 1791576162659,
+    "session": "master@323133-0083"
+   },
+   "retry_of": "ee4f2075d7f24538b115c52c1d933a98"
+  },
+  {
+   "id": "3bb04b0cd54642a580a1d8b4b847d07a",
+   "reason": "recycle",
+   "seat": "master@rig-grade-swarm",
+   "task": "master",
+   "predecessor": "master@323133-0080",
+   "successor": "master@323133-0084",
+   "at": 1791576161945,
+   "binding": {
+    "state": "absent",
+    "at": 1791576423598,
+    "session": "master@323133-0084"
+   },
+   "retry_of": "46516cc4ab5b4a6cb56e34e24495428b"
+  },
+  {
+   "id": "f155787427444fa5b499459732fbd17c",
+   "reason": "recycle",
+   "seat": "master@rig-grade-swarm",
+   "task": "master",
+   "predecessor": "master@323133-0080",
+   "successor": "master@323133-0085",
+   "at": 1791576226908,
+   "binding": {
+    "state": "absent",
+    "at": 1791576511725,
+    "session": "master@323133-0085"
+   },
+   "retry_of": "3bb04b0cd54642a580a1d8b4b847d07a"
+  },
+  {
+   "id": "ef16b444f4404a479cee1a7012161b21",
+   "reason": "recycle",
+   "seat": "master@rig-grade-swarm",
+   "task": "master",
+   "predecessor": "master@323133-0080",
+   "successor": "master@323133-0086",
+   "at": 1791576489791,
+   "binding": {
+    "state": "absent",
+    "at": 1791576748418,
+    "session": "master@323133-0086"
+   },
+   "retry_of": "f155787427444fa5b499459732fbd17c"
+  },
+  {
+   "id": "2e88c479af144c66934d33b9dbe8ccd1",
+   "reason": "recycle",
+   "seat": "master@rig-grade-swarm",
+   "task": "master",
+   "predecessor": "master@323133-0080",
+   "successor": "master@323133-0087",
+   "at": 1791576553418,
+   "binding": {
+    "state": "absent",
+    "at": 1791576811930,
+    "session": "master@323133-0087"
+   },
+   "retry_of": "ef16b444f4404a479cee1a7012161b21"
+  },
+  {
+   "id": "3d21416c179346f08ade1c4d26291b8c",
+   "reason": "recycle",
+   "seat": "master@rig-grade-swarm",
+   "task": "master",
+   "predecessor": "master@323133-0080",
+   "successor": "master@323133-0088",
+   "at": 1791576811599,
+   "binding": {
+    "state": "absent",
+    "at": 1791577067454,
+    "session": "master@323133-0088"
+   },
+   "retry_of": "2e88c479af144c66934d33b9dbe8ccd1"
+  },
+  {
+   "id": "94b6c46681a2448dbc3b4877d64bc004",
+   "reason": "recycle",
+   "seat": "master@rig-grade-swarm",
+   "task": "master",
+   "predecessor": "master@323133-0080",
+   "successor": "master@323133-0089",
+   "at": 1791576876901,
+   "binding": {
+    "state": "absent",
+    "at": 1791577132308,
+    "session": "master@323133-0089"
+   },
+   "retry_of": "3d21416c179346f08ade1c4d26291b8c"
+  },
+  {
+   "id": "b7c848c52ccc49e9a36f56d9467902ab",
+   "reason": "recycle",
+   "seat": "master@rig-grade-swarm",
+   "task": "master",
+   "predecessor": "master@323133-0080",
+   "successor": "master@323133-0090",
+   "at": 1791577131959,
+   "binding": {
+    "state": "absent",
+    "at": 1791577392672,
+    "session": "master@323133-0090"
+   },
+   "retry_of": "94b6c46681a2448dbc3b4877d64bc004"
+  },
+  {
+   "id": "339497e110e64916ad71ec827746a77e",
+   "reason": "recycle",
+   "seat": "master@rig-grade-swarm",
+   "task": "master",
+   "predecessor": "master@323133-0080",
+   "successor": "master@323133-0091",
+   "at": 1791577197208,
+   "binding": {
+    "state": "absent",
+    "at": 1791577457352,
+    "session": "master@323133-0091"
+   },
+   "retry_of": "b7c848c52ccc49e9a36f56d9467902ab"
+  },
+  {
+   "id": "ac248650eba744098a0de8da11ada7cd",
+   "reason": "recycle",
+   "seat": "master@rig-grade-swarm",
+   "task": "master",
+   "predecessor": "master@323133-0080",
+   "successor": "master@323133-0092",
+   "at": 1791577456913,
+   "binding": {
+    "state": "absent",
+    "at": 1791577718374,
+    "session": "master@323133-0092"
+   },
+   "retry_of": "339497e110e64916ad71ec827746a77e"
+  },
+  {
+   "id": "928839cc52864c00b8575981319b6016",
+   "reason": "recycle",
+   "seat": "master@rig-grade-swarm",
+   "task": "master",
+   "predecessor": "master@323133-0080",
+   "successor": "master@323133-0093",
+   "at": 1791577521629,
+   "binding": {
+    "state": "live",
+    "at": 1791577782513,
+    "session": "master@323133-0093"
+   },
+   "retry_of": "ac248650eba744098a0de8da11ada7cd"
+  }
+ ],
+ "restored": [],
+ "agents": [],
+ "journal": [
+  {
+   "at": 1791575844734,
+   "pid": "2529526",
+   "message": "rig-grade-swarm: master spawn failed: unsupported transfer: saved effort is outside the current swarm range"
+  },
+  {
+   "at": 1791575851790,
+   "pid": "2535420",
+   "message": "rig-grade-swarm: master spawn failed: unsupported transfer: saved effort is outside the current swarm range"
+  },
+  {
+   "at": 1791576166665,
+   "pid": "2557462",
+   "message": "rig-grade-swarm: master spawn failed: unsupported transfer: saved effort is outside the current swarm range"
+  },
+  {
+   "at": 1791576166665,
+   "pid": "2557462",
+   "message": "rig-grade-swarm: promoted engineer@323133-0833 to restore the master: master spawn failed: unsupported transfer: saved effort is outside the current swarm range"
+  },
+  {
+   "at": 1791576248045,
+   "pid": "2560350",
+   "message": "rig-grade-swarm: master spawn failed: unsupported transfer: saved effort is outside the current swarm range"
+  },
+  {
+   "at": 1791576514719,
+   "pid": "2576089",
+   "message": "rig-grade-swarm: master spawn failed: unsupported transfer: saved effort is outside the current swarm range"
+  },
+  {
+   "at": 1791576557109,
+   "pid": "2582022",
+   "message": "rig-grade-swarm: master spawn failed: unsupported transfer: saved effort is outside the current swarm range"
+  },
+  {
+   "at": 1791576815355,
+   "pid": "2602812",
+   "message": "rig-grade-swarm: master spawn failed: unsupported transfer: saved effort is outside the current swarm range"
+  },
+  {
+   "at": 1791576880807,
+   "pid": "2605348",
+   "message": "rig-grade-swarm: master spawn failed: unsupported transfer: saved effort is outside the current swarm range"
+  },
+  {
+   "at": 1791577151980,
+   "pid": "2618614",
+   "message": "rig-grade-swarm: master spawn failed: unsupported transfer: saved effort is outside the current swarm range"
+  },
+  {
+   "at": 1791577199703,
+   "pid": "2622596",
+   "message": "rig-grade-swarm: master spawn failed: unsupported transfer: saved effort is outside the current swarm range"
+  },
+  {
+   "at": 1791577461114,
+   "pid": "2633081",
+   "message": "rig-grade-swarm: master spawn failed: unsupported transfer: saved effort is outside the current swarm range"
+  },
+  {
+   "at": 1791577526040,
+   "pid": "2635487",
+   "message": "rig-grade-swarm: master spawn failed: unsupported transfer: saved effort is outside the current swarm range"
+  }
+ ],
+ "verdicts": {
+  "failed-spawn/master": {
+   "seen_at": 1791365734355,
+   "verdict": {
+    "value": "established",
+    "note": "Every spawn failed because the tick lacked the gateway key. The fix that loads the operator environment at every launch merged and was pulled at twelve twenty eight; this Doctor master then spawned. Watched master spawn still to confirm.",
+    "by": "master@d44a5a-0043",
+    "at": 1791369218092,
+    "measure": 22,
+    "evidence": [
+     "agentihooks init-agent: MCP 'langfuse' cannot mount: environment variable MCP_KEY_GATEWAY is unset",
+     "agentihooks init-agent: MCP 'langfuse' cannot mount: environment variable MCP_KEY_GATEWAY is unset",
+     "agentihooks init-agent: MCP 'langfuse' cannot mount: environment variable MCP_KEY_GATEWAY is unset",
+     "agentihooks init-agent: MCP 'langfuse' cannot mount: environment variable MCP_KEY_GATEWAY is unset",
+     "agentihooks init-agent: MCP 'langfuse' cannot mount: environment variable MCP_KEY_GATEWAY is unset",
+     "agentihooks init-agent: MCP 'langfuse' cannot mount: environment variable MCP_KEY_GATEWAY is unset",
+     "agentihooks init-agent: MCP 'langfuse' cannot mount: environment variable MCP_KEY_GATEWAY is unset",
+     "agentihooks init-agent: MCP 'langfuse' cannot mount: environment variable MCP_KEY_GATEWAY is unset",
+     "agentihooks init-agent: MCP 'langfuse' cannot mount: environment variable MCP_KEY_GATEWAY is unset",
+     "agentihooks init-agent: MCP 'langfuse' cannot mount: environment variable MCP_KEY_GATEWAY is unset",
+     "agentihooks init-agent: MCP 'langfuse' cannot mount: environment variable MCP_KEY_GATEWAY is unset",
+     "agentihooks init-agent: MCP 'langfuse' cannot mount: environment variable MCP_KEY_GATEWAY is unset",
+     "agentihooks init-agent: MCP 'langfuse' cannot mount: environment variable MCP_KEY_GATEWAY is unset",
+     "agentihooks init-agent: MCP 'langfuse' cannot mount: environment variable MCP_KEY_GATEWAY is unset",
+     "agentihooks init-agent: MCP 'langfuse' cannot mount: environment variable MCP_KEY_GATEWAY is unset",
+     "agentihooks init-agent: MCP 'langfuse' cannot mount: environment variable MCP_KEY_GATEWAY is unset",
+     "agentihooks init-agent: MCP 'langfuse' cannot mount: environment variable MCP_KEY_GATEWAY is unset",
+     "agentihooks init-agent: MCP 'langfuse' cannot mount: environment variable MCP_KEY_GATEWAY is unset",
+     "agentihooks init-agent: MCP 'langfuse' cannot mount: environment variable MCP_KEY_GATEWAY is unset",
+     "agentihooks init-agent: MCP 'langfuse' cannot mount: environment variable MCP_KEY_GATEWAY is unset",
+     "agentihooks init-agent: MCP 'langfuse' cannot mount: environment variable MCP_KEY_GATEWAY is unset",
+     "agentihooks init-agent: MCP 'langfuse' cannot mount: environment variable MCP_KEY_GATEWAY is unset"
+    ]
+   },
+   "returned": false,
+   "evidence": [
+    "unsupported transfer: saved effort is outside the current swarm range",
+    "unsupported transfer: saved effort is outside the current swarm range",
+    "unsupported transfer: saved effort is outside the current swarm range",
+    "unsupported transfer: saved effort is outside the current swarm range",
+    "unsupported transfer: saved effort is outside the current swarm range",
+    "unsupported transfer: saved effort is outside the current swarm range",
+    "unsupported transfer: saved effort is outside the current swarm range",
+    "unsupported transfer: saved effort is outside the current swarm range",
+    "unsupported transfer: saved effort is outside the current swarm range",
+    "unsupported transfer: saved effort is outside the current swarm range"
+   ],
+   "measure": 10
+  }
+ },
+ "passes": [
+  1791576408109,
+  1791576986983,
+  1791577569266,
+  1791578216608
+ ]
+}

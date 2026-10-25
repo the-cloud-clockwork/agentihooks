@@ -1,0 +1,1145 @@
+import copy
+import json
+from pathlib import Path
+
+import pytest
+
+from scripts.swarm_v2.kubernetes import spec
+from scripts.swarm_v2.kubernetes.spec import PodSpecRefused, PodTemplate, canonical_digest, load_policy
+from scripts.swarm_v2.kubernetes.watch import EXECUTION_LABEL, OWNER_LABEL
+from tests import sv2_kub01_cases as cases
+
+pytestmark = pytest.mark.unit
+
+FIXTURES = Path(__file__).parent / "fixtures" / "swarm_v2"
+POLICY = FIXTURES / "pod-policy.json"
+LAUNCH = FIXTURES / "pod-launch.json"
+EVIDENCE = Path(__file__).parents[1] / "evidence" / "SV2-KUB-01"
+EXECUTION = "exe-0f1e2d3c4b5a69788796a5b4c3d2e1f0"
+ATTEMPT = f"/home/worker/attempts/{EXECUTION}"
+TOKEN_ENV = {
+    "name": "AH_CC_TOKEN_claude_fixtureatexample_com",
+    "valueFrom": {"secretKeyRef": {"name": "swarm-claude-creds", "key": "claude-fixtureatexample-com"}},
+}
+
+
+def policy_doc() -> dict:
+    return json.loads(POLICY.read_text())
+
+
+def launch_doc() -> dict:
+    return json.loads(LAUNCH.read_text())
+
+
+def write(tmp_path, doc, name="policy.json") -> Path:
+    path = tmp_path / name
+    path.write_text(json.dumps(doc))
+    return path
+
+
+def render(launch: dict | None = None, policy: dict | None = None):
+    template = PodTemplate(policy or load_policy(POLICY), "agentihooks-swarm-fixture")
+    return template, template.render(launch or launch_doc())
+
+
+def health(mode: str, herdr: str = "2", brain: str = "2") -> list:
+    return [
+        "python",
+        "/opt/swarm-node/health.py",
+        mode,
+        "--attempt",
+        ATTEMPT,
+        "--harness",
+        "claude",
+        "--herdr-timeout",
+        herdr,
+        "--brain-timeout",
+        brain,
+    ]
+
+
+def test_the_fixture_renders_a_pod_bound_to_its_launch_identity():
+    _, rendered = render()
+    meta = rendered.pod["metadata"]
+    assert rendered.pod["apiVersion"] == "v1"
+    assert rendered.pod["kind"] == "Pod"
+    assert meta["name"] == f"swarm-{EXECUTION}"
+    assert meta["namespace"] == "swarm-pod-proof"
+    assert meta["labels"] == {
+        "app.kubernetes.io/managed-by": "agentihooks",
+        "app.kubernetes.io/component": "swarm-execution",
+        OWNER_LABEL: "agentihooks-swarm-fixture",
+        EXECUTION_LABEL: EXECUTION,
+        "swarm.agentihooks.io/generation": "3",
+        "swarm.agentihooks.io/swarm": "rig-grade-swarm",
+        "swarm.agentihooks.io/task": "vkub1",
+        "swarm.agentihooks.io/template-version": "kub01-v2",
+        "swarm.agentihooks.io/provider-account": "claude-fixtureatexample-com",
+    }
+    assert meta["annotations"] == {
+        "swarm.agentihooks.io/seat": "eng-3@rig-grade-swarm",
+        "swarm.agentihooks.io/grant-ref": "lgr-00112233445566778899aabbccddeeff",
+        "swarm.agentihooks.io/controller-epoch": "7",
+        "swarm.agentihooks.io/project": "github.com/the-cloud-clockwork/agentihooks",
+        "swarm.agentihooks.io/harness": "claude",
+        "swarm.agentihooks.io/profile": "general",
+        "swarm.agentihooks.io/image-digest": "sha256:" + "4b" * 32,
+        "swarm.agentihooks.io/template-version": "kub01-v2",
+        "swarm.agentihooks.io/task-payload-digest": canonical_digest(launch_doc()["task_payload"]),
+    }
+
+
+def test_the_single_agent_container_runs_the_supervisor_from_the_admitted_image():
+    _, rendered = render()
+    (container,) = rendered.pod["spec"]["containers"]
+    assert container["name"] == "agent"
+    assert container["image"] == "ghcr.io/the-cloud-clockwork/agentihooks-worker@sha256:" + "4b" * 32
+    assert container["imagePullPolicy"] == "IfNotPresent"
+    assert "command" not in container
+    assert container["args"] == [
+        "python",
+        "/opt/swarm-node/supervisor.py",
+        ATTEMPT,
+        "/var/run/swarm/launch/launch.json",
+    ]
+    assert container["env"] == [TOKEN_ENV, {"name": "BRAIN_URL", "value": "http://brain-api.swarm-brain.svc:8080"}]
+    assert "initContainers" not in rendered.pod["spec"]
+    assert "ephemeralContainers" not in rendered.pod["spec"]
+
+
+def test_a_policy_without_a_brain_sets_only_the_account_token():
+    policy = load_policy(POLICY)
+    del policy["brain_url"]
+    _, rendered = render(policy=policy)
+    assert rendered.pod["spec"]["containers"][0]["env"] == [TOKEN_ENV]
+
+
+def test_worker_git_app_credentials_are_only_secret_key_references():
+    policy = load_policy(POLICY)
+    policy["git_app_secret_name"] = "swarm-git-app"
+    _, rendered = render(policy=policy)
+    environ = rendered.pod["spec"]["containers"][0]["env"]
+    app = [entry for entry in environ if entry["name"].startswith("GITHUB_APP_")]
+    assert app == [
+        {"name": key, "valueFrom": {"secretKeyRef": {"name": "swarm-git-app", "key": key}}}
+        for key in ("GITHUB_APP_ID", "GITHUB_APP_INSTALLATION_ID", "GITHUB_APP_PRIVATE_KEY")
+    ]
+    assert rendered.pod["spec"]["volumes"] == render()[1].pod["spec"]["volumes"]
+
+
+def test_worker_redis_url_reads_only_the_policy_worker_secret(tmp_path):
+    doc = policy_doc()
+    doc["redis_secret_name"] = "agentihooks-swarm-redis-worker"
+    _, rendered = render(policy=load_policy(write(tmp_path, doc)))
+    environ = rendered.pod["spec"]["containers"][0]["env"]
+    redis = [entry for entry in environ if "REDIS" in entry["name"]]
+    assert redis == [
+        {
+            "name": "AGENTIHOOKS_SWARM_REDIS_URL",
+            "valueFrom": {"secretKeyRef": {"name": "agentihooks-swarm-redis-worker", "key": "url"}},
+        }
+    ]
+    assert not [entry for entry in render()[1].pod["spec"]["containers"][0]["env"] if "REDIS" in entry["name"]]
+
+
+def test_requests_come_from_the_admitted_launch_and_limits_from_the_profile():
+    _, rendered = render()
+    assert rendered.pod["spec"]["containers"][0]["resources"] == {
+        "requests": {"cpu": "1500m", "memory": "3072Mi", "ephemeral-storage": "10240Mi"},
+        "limits": {"cpu": "2000m", "memory": "4096Mi", "ephemeral-storage": "10240Mi"},
+    }
+
+
+def test_node_constraints_come_from_the_profile_and_exclude_its_pools():
+    _, rendered = render()
+    body = rendered.pod["spec"]
+    assert body["nodeSelector"] == {"anton.io/pool": "general"}
+    assert body["tolerations"] == [{"key": "anton.io/spot", "operator": "Exists", "effect": "NoSchedule"}]
+    assert body["affinity"] == {
+        "nodeAffinity": {
+            "requiredDuringSchedulingIgnoredDuringExecution": {
+                "nodeSelectorTerms": [
+                    {"matchExpressions": [{"key": "anton.io/pool", "operator": "NotIn", "values": ["research"]}]}
+                ]
+            }
+        }
+    }
+
+
+def test_a_profile_without_excluded_nodes_sets_no_affinity():
+    policy = load_policy(POLICY)
+    policy["profiles"]["general"]["excluded_nodes"] = {}
+    _, rendered = render(policy=policy)
+    assert "affinity" not in rendered.pod["spec"]
+
+
+def test_the_worker_is_hardened_and_never_mounts_a_service_account_token():
+    _, rendered = render()
+    body = rendered.pod["spec"]
+    assert body["restartPolicy"] == "Never"
+    assert body["automountServiceAccountToken"] is False
+    assert body["serviceAccountName"] == "swarm-worker"
+    assert body["enableServiceLinks"] is False
+    assert body["hostNetwork"] is False
+    assert body["hostPID"] is False
+    assert body["hostIPC"] is False
+    assert body["terminationGracePeriodSeconds"] == 60
+    assert body["securityContext"] == {
+        "runAsNonRoot": True,
+        "runAsUser": 10001,
+        "runAsGroup": 10001,
+        "fsGroup": 10001,
+        "seccompProfile": {"type": "RuntimeDefault"},
+    }
+    assert body["containers"][0]["securityContext"] == {
+        "allowPrivilegeEscalation": False,
+        "privileged": False,
+        "readOnlyRootFilesystem": False,
+        "capabilities": {"drop": ["ALL"]},
+    }
+
+
+def test_a_policy_without_a_runtime_class_is_refused_before_any_pod_renders(tmp_path):
+    doc = policy_doc()
+    doc.pop("runtime_class_name", None)
+    with pytest.raises(PodSpecRefused) as refused:
+        load_policy(write(tmp_path, doc))
+    assert (
+        str(refused.value) == "pod policy is invalid at the document root: 'runtime_class_name' is a required property"
+    )
+    assert refused.value.reason == "policy"
+
+
+def test_the_policy_runtime_class_reaches_the_pod():
+    assert render()[1].pod["spec"]["runtimeClassName"] == "kata-fc"
+    policy = load_policy(POLICY)
+    policy["runtime_class_name"] = "kata-qemu"
+    _, rendered = render(policy=policy)
+    assert rendered.pod["spec"]["runtimeClassName"] == "kata-qemu"
+
+
+@pytest.mark.parametrize("runtime", ["kata-fc", "runc"])
+def test_worker_scratch_uses_the_root_disk_only_for_firecracker(runtime):
+    policy = policy_doc()
+    policy["runtime_class_name"] = runtime
+    template, rendered = render(policy=policy)
+    body = rendered.pod["spec"]
+    agent = body["containers"][0]
+    expected = [] if runtime == "kata-fc" else ["home", "tmp"]
+    assert [v["name"] for v in body["volumes"] if "emptyDir" in v] == expected
+    assert [m["name"] for m in agent["volumeMounts"] if m["mountPath"] in ("/home/worker", "/tmp")] == expected
+    assert agent["securityContext"]["readOnlyRootFilesystem"] is (runtime != "kata-fc")
+    assert agent["securityContext"]["allowPrivilegeEscalation"] is False
+    assert agent["securityContext"]["privileged"] is False
+    assert agent["securityContext"]["capabilities"] == {"drop": ["ALL"]}
+    assert body["securityContext"]["runAsUser"] == 10001
+    assert body["automountServiceAccountToken"] is False
+    assert template.shared_runtime_mount_rejections_total() == {}
+
+
+def test_volumes_are_private_scratch_and_the_launch_record_with_no_credential_mount():
+    policy = policy_doc()
+    policy["runtime_class_name"] = "runc"
+    _, rendered = render(policy=policy)
+    body = rendered.pod["spec"]
+    assert body["volumes"] == [
+        {"name": "home", "emptyDir": {"sizeLimit": "9216Mi"}},
+        {"name": "tmp", "emptyDir": {"sizeLimit": "1024Mi"}},
+        {"name": "launch", "configMap": {"name": f"swarm-{EXECUTION}-launch", "defaultMode": 0o444}},
+    ]
+    assert body["containers"][0]["volumeMounts"] == [
+        {"name": "home", "mountPath": "/home/worker"},
+        {"name": "tmp", "mountPath": "/tmp"},
+        {"name": "launch", "mountPath": "/var/run/swarm/launch", "readOnly": True},
+    ]
+
+
+def test_probes_call_the_image_health_contract_with_the_policy_thresholds():
+    _, rendered = render()
+    container = rendered.pod["spec"]["containers"][0]
+    assert container["startupProbe"] == {
+        "exec": {"command": health("startup")},
+        "initialDelaySeconds": 0,
+        "periodSeconds": 5,
+        "timeoutSeconds": 6,
+        "failureThreshold": 24,
+    }
+    assert container["readinessProbe"] == {
+        "exec": {"command": health("readiness")},
+        "initialDelaySeconds": 0,
+        "periodSeconds": 10,
+        "timeoutSeconds": 6,
+        "failureThreshold": 3,
+    }
+    assert container["livenessProbe"] == {
+        "exec": {"command": health("liveness")},
+        "initialDelaySeconds": 0,
+        "periodSeconds": 15,
+        "timeoutSeconds": 6,
+        "failureThreshold": 4,
+    }
+
+
+def test_fractional_probe_timeouts_render_exactly():
+    policy = load_policy(POLICY)
+    policy["probes"]["herdr_timeout_seconds"] = 1.5
+    policy["probes"]["brain_timeout_seconds"] = 0.25
+    _, rendered = render(policy=policy)
+    probe = rendered.pod["spec"]["containers"][0]["livenessProbe"]["exec"]["command"]
+    assert probe == health("liveness", "1.5", "0.25")
+
+
+def test_the_task_payload_reaches_the_pod_only_as_its_digest():
+    benign = launch_doc()
+    benign["task_payload"] = {"prompt": "Fix the flaky test."}
+    _, hostile = render()
+    _, plain = render(benign)
+    text = json.dumps(hostile.pod)
+    for fragment in ("hostPath", "cluster-admin-token", 'hostNetwork": true', 'privileged": true', "envFrom"):
+        assert fragment not in text
+    assert "Fix the flaky test" not in text
+    assert "exe-ffffffffffffffffffffffffffffffff" not in text
+    hostile_meta = copy.deepcopy(hostile.pod)
+    plain_meta = copy.deepcopy(plain.pod)
+    key = "swarm.agentihooks.io/task-payload-digest"
+    hostile_digest = hostile_meta["metadata"]["annotations"].pop(key)
+    plain_digest = plain_meta["metadata"]["annotations"].pop(key)
+    assert hostile_digest != plain_digest
+    assert hostile_meta == plain_meta
+
+
+def test_the_payload_digest_is_canonical_json_sha256():
+    assert canonical_digest({"b": 1, "a": "x"}) == canonical_digest({"a": "x", "b": 1})
+    assert canonical_digest({"a": 1}) == "sha256:015abd7f5cc57a2dd94b7590f04ad8084273905ee33ec5cebeae62276a97f862"
+
+
+REFUSALS = [
+    ("extra field", lambda d: d.update(privileged=True), "launch has unknown fields: privileged", "fields"),
+    (
+        "two extra fields",
+        lambda d: d.update(host_mounts=["/"], secrets=["cluster-admin-token"]),
+        "launch has unknown fields: host_mounts, secrets",
+        "fields",
+    ),
+    ("missing field", lambda d: d.pop("provider_account"), "launch is missing fields: provider_account", "fields"),
+    (
+        "yaml in task id",
+        lambda d: d.update(task_id="vkub1\nspec:\n  hostNetwork: true"),
+        "launch task_id is not a valid value",
+        "identity",
+    ),
+    (
+        "bad execution id",
+        lambda d: d.update(execution_id="exe-XYZ"),
+        "launch execution_id is not a valid value",
+        "identity",
+    ),
+    ("long swarm id", lambda d: d.update(swarm_id="s" * 64), "launch swarm_id is not a valid value", "identity"),
+    ("bad seat", lambda d: d.update(seat_id="eng 3"), "launch seat_id is not a valid value", "identity"),
+    ("bad grant", lambda d: d.update(grant_ref="-grant"), "launch grant_ref is not a valid value", "identity"),
+    ("bad project", lambda d: d.update(project_id="../etc"), "launch project_id is not a valid value", "identity"),
+    ("zero generation", lambda d: d.update(generation=0), "launch generation is not a valid value", "identity"),
+    ("bool generation", lambda d: d.update(generation=True), "launch generation is not a valid value", "identity"),
+    (
+        "text epoch",
+        lambda d: d.update(controller_epoch="7"),
+        "launch controller_epoch is not a valid value",
+        "identity",
+    ),
+    ("unknown harness", lambda d: d.update(harness="copilot"), "launch harness must be claude or codex", "harness"),
+    ("image tag", lambda d: d.update(image_digest="latest"), "launch image_digest must be a sha256 digest", "image"),
+    (
+        "unknown profile",
+        lambda d: d.update(profile="research"),
+        "launch profile is not an approved resource profile",
+        "profile",
+    ),
+    (
+        "memory over limit",
+        lambda d: d.update(memory_mib=4097),
+        "launch resources exceed the general profile limits",
+        "resources",
+    ),
+    (
+        "cpu over limit",
+        lambda d: d.update(cpu_millis=2001),
+        "launch resources exceed the general profile limits",
+        "resources",
+    ),
+    ("zero memory", lambda d: d.update(memory_mib=0), "launch resources must be positive integers", "resources"),
+    ("text cpu", lambda d: d.update(cpu_millis="1500"), "launch resources must be positive integers", "resources"),
+    ("bool cpu", lambda d: d.update(cpu_millis=True), "launch resources must be positive integers", "resources"),
+    (
+        "unapproved provider account",
+        lambda d: d.update(provider_account="cluster-admin@token.io"),
+        "launch provider_account is not an approved provider account",
+        "account",
+    ),
+    (
+        "provider account that is neither an email nor a secret key",
+        lambda d: d.update(provider_account="claude_fixture"),
+        "launch provider_account is not a valid value",
+        "identity",
+    ),
+    (
+        "provider account ending in a dash",
+        lambda d: d.update(provider_account="claude-fixture@example.com-"),
+        "launch provider_account is not a valid value",
+        "identity",
+    ),
+    (
+        "provider account with a line break",
+        lambda d: d.update(provider_account="claude-fixture@example.com\n"),
+        "launch provider_account is not a valid value",
+        "identity",
+    ),
+    (
+        "provider account past the label bound",
+        lambda d: d.update(provider_account="a" * 58 + "@x.io"),
+        "launch provider_account is not a valid value",
+        "identity",
+    ),
+    ("list payload", lambda d: d.update(task_payload=["x"]), "launch task_payload must be a JSON object", "payload"),
+    (
+        "unserializable payload",
+        lambda d: d.update(task_payload={1: "a", "b": 2}),
+        "launch task_payload must be a JSON object",
+        "payload",
+    ),
+    (
+        "not a number payload",
+        lambda d: d.update(task_payload={"x": float("nan")}),
+        "launch task_payload must be a JSON object",
+        "payload",
+    ),
+    ("numeric image", lambda d: d.update(image_digest=5), "launch image_digest must be a sha256 digest", "image"),
+    (
+        "numeric execution id",
+        lambda d: d.update(execution_id=5),
+        "launch execution_id is not a valid value",
+        "identity",
+    ),
+    (
+        "listed profile",
+        lambda d: d.update(profile=["general"]),
+        "launch profile is not an approved resource profile",
+        "profile",
+    ),
+    ("long task id", lambda d: d.update(task_id="t" * 64), "launch task_id is not a valid value", "identity"),
+]
+
+
+@pytest.mark.parametrize(("change", "message", "reason"), [r[1:] for r in REFUSALS], ids=[r[0] for r in REFUSALS])
+def test_hostile_launches_are_refused_without_output_and_counted(change, message, reason):
+    template = PodTemplate(load_policy(POLICY), "agentihooks-swarm-fixture")
+    doc = launch_doc()
+    change(doc)
+    before = copy.deepcopy(template.policy)
+    with pytest.raises(PodSpecRefused) as refused:
+        template.render(doc)
+    assert str(refused.value) == message
+    assert refused.value.reason == reason
+    assert template.pod_spec_validation_failures_total() == {reason: 1}
+    assert template.policy == before
+    assert "cluster-admin-token" not in message
+
+
+def test_a_record_that_is_not_an_object_is_refused():
+    template = PodTemplate(load_policy(POLICY), "agentihooks-swarm-fixture")
+    with pytest.raises(PodSpecRefused) as refused:
+        template.render(["not", "a", "record"])
+    assert str(refused.value) == "launch must be a JSON object"
+    assert template.pod_spec_validation_failures_total() == {"fields": 1}
+
+
+def test_failures_accumulate_per_reason_and_success_counts_nothing():
+    template = PodTemplate(load_policy(POLICY), "agentihooks-swarm-fixture")
+    template.render(launch_doc())
+    assert template.pod_spec_validation_failures_total() == {}
+    for profile in ("research", "memory"):
+        doc = launch_doc()
+        doc["profile"] = profile
+        with pytest.raises(PodSpecRefused):
+            template.render(doc)
+    doc = launch_doc()
+    doc["harness"] = "copilot"
+    with pytest.raises(PodSpecRefused):
+        template.render(doc)
+    assert template.pod_spec_validation_failures_total() == {"profile": 2, "harness": 1}
+
+
+def test_rendering_the_same_admitted_launch_twice_gives_the_same_digest():
+    _, first = render()
+    _, second = render()
+    assert first.digest == second.digest
+    assert first.pod == second.pod
+    assert first.digest == canonical_digest(first.pod)
+    assert first.digest.startswith("sha256:")
+    assert len(first.digest) == 71
+
+
+def test_policy_key_order_does_not_change_the_digest(tmp_path):
+    reordered = dict(reversed(list(policy_doc().items())))
+    _, first = render()
+    _, second = render(policy=load_policy(write(tmp_path, reordered)))
+    assert first.digest == second.digest
+
+
+def test_a_new_generation_or_payload_changes_the_digest():
+    _, first = render()
+    doc = launch_doc()
+    doc["generation"] = 4
+    _, newer = render(doc)
+    doc = launch_doc()
+    doc["task_payload"] = {"prompt": "other"}
+    _, other = render(doc)
+    assert len({first.digest, newer.digest, other.digest}) == 3
+
+
+def test_the_canonical_digest_ignores_key_order_only():
+    assert canonical_digest({"a": 1, "b": [1, 2]}) == canonical_digest({"b": [1, 2], "a": 1})
+    assert canonical_digest({"a": 1, "b": [1, 2]}) != canonical_digest({"a": 1, "b": [2, 1]})
+    assert canonical_digest({"a": 1}) == "sha256:015abd7f5cc57a2dd94b7590f04ad8084273905ee33ec5cebeae62276a97f862"
+
+
+def test_render_does_not_mutate_the_launch_or_policy():
+    policy = load_policy(POLICY)
+    snapshot = copy.deepcopy(policy)
+    launch = launch_doc()
+    before = copy.deepcopy(launch)
+    rendered = PodTemplate(policy, "agentihooks-swarm-fixture").render(launch)
+    rendered.pod["spec"]["nodeSelector"]["x"] = "y"
+    rendered.pod["spec"]["tolerations"][0]["key"] = "changed"
+    rendered.pod["spec"]["affinity"]["nodeAffinity"]["requiredDuringSchedulingIgnoredDuringExecution"][
+        "nodeSelectorTerms"
+    ][0]["matchExpressions"][0]["values"].append("general")
+    assert policy == snapshot
+    assert launch == before
+
+
+def test_a_payload_that_refers_to_itself_is_refused():
+    template = PodTemplate(load_policy(POLICY), "agentihooks-swarm-fixture")
+    doc = launch_doc()
+    loop = {}
+    loop["self"] = loop
+    doc["task_payload"] = loop
+    with pytest.raises(PodSpecRefused) as refused:
+        template.render(doc)
+    assert str(refused.value) == "launch task_payload must be a JSON object"
+
+
+def test_resources_at_the_profile_limits_are_accepted():
+    doc = launch_doc()
+    doc.update(memory_mib=4096, cpu_millis=2000)
+    _, rendered = render(doc)
+    assert rendered.pod["spec"]["containers"][0]["resources"]["requests"] == {
+        "cpu": "2000m",
+        "memory": "4096Mi",
+        "ephemeral-storage": "10240Mi",
+    }
+
+
+def test_identity_values_at_their_bounds_are_accepted():
+    doc = launch_doc()
+    doc.update(task_id="t" * 63, swarm_id="s" * 63, project_id="local:scratch")
+    _, rendered = render(doc)
+    assert rendered.pod["metadata"]["labels"]["swarm.agentihooks.io/task"] == "t" * 63
+    doc["project_id"] = "unknown"
+    _, rendered = render(doc)
+    assert rendered.pod["metadata"]["annotations"]["swarm.agentihooks.io/project"] == "unknown"
+
+
+@pytest.mark.parametrize(("email", "key"), [("a@b", "aatb"), ("ops.a+b_c@x-y.io", "ops-a-b-catx-y-io")])
+def test_short_and_symbol_rich_account_emails_are_accepted(email, key):
+    policy = load_policy(POLICY)
+    policy["provider_accounts"] = [email]
+    doc = launch_doc()
+    doc["provider_account"] = email
+    _, rendered = render(doc, policy)
+    assert rendered.pod["metadata"]["labels"]["swarm.agentihooks.io/provider-account"] == key
+
+
+def test_an_account_sharing_an_approved_secret_key_is_not_approved():
+    doc = launch_doc()
+    doc["provider_account"] = "claude.fixture@example.com"
+    with pytest.raises(PodSpecRefused) as refused:
+        render(doc)
+    assert str(refused.value) == "launch provider_account is not an approved provider account"
+
+
+def token_env(pod: dict) -> list:
+    return [entry for entry in pod["spec"]["containers"][0]["env"] if "valueFrom" in entry]
+
+
+def test_a_provider_account_at_its_bound_labels_and_reads_its_own_secret_key():
+    email = "a" * 57 + "@x.io"
+    policy = load_policy(POLICY)
+    policy["provider_accounts"] = [email]
+    doc = launch_doc()
+    doc["provider_account"] = email
+    _, rendered = render(doc, policy)
+    key = "a" * 57 + "atx-io"
+    assert len(key) == 63
+    assert rendered.pod["metadata"]["labels"]["swarm.agentihooks.io/provider-account"] == key
+    assert token_env(rendered.pod) == [
+        {
+            "name": "AH_CC_TOKEN_" + "a" * 57 + "atx_io",
+            "valueFrom": {"secretKeyRef": {"name": "swarm-claude-creds", "key": key}},
+        }
+    ]
+
+
+def test_an_upper_case_account_renders_the_same_pod_as_its_lower_case_form():
+    doc = launch_doc()
+    doc["provider_account"] = "CLAUDE-FIXTURE@EXAMPLE.COM"
+    assert render(doc)[1].pod == render()[1].pod
+    policy = load_policy(POLICY)
+    policy["provider_accounts"] = ["Claude-Fixture@Example.com"]
+    assert render(policy=policy)[1].pod == render()[1].pod
+
+
+def test_a_codex_launch_names_codex_in_its_probes_and_binds_its_own_provider_account():
+    doc = launch_doc()
+    doc.update(harness="codex", provider_account="codex-fixture@example.com")
+    _, rendered = render(doc)
+    container = rendered.pod["spec"]["containers"][0]
+    assert container["readinessProbe"]["exec"]["command"][5:7] == ["--harness", "codex"]
+    assert rendered.pod["metadata"]["annotations"]["swarm.agentihooks.io/harness"] == "codex"
+    assert rendered.pod["metadata"]["labels"]["swarm.agentihooks.io/provider-account"] == "codex-fixtureatexample-com"
+    assert token_env(rendered.pod) == [
+        {
+            "name": "AH_CX_TOKEN_codex_fixtureatexample_com",
+            "valueFrom": {
+                "secretKeyRef": {"name": "swarm-codex-creds", "key": "AH_CX_TOKEN_codex_fixtureatexample_com"}
+            },
+        }
+    ]
+
+
+@pytest.mark.parametrize(
+    ("harness", "account", "expected"),
+    [
+        (
+            "codex",
+            "alpha-personal",
+            {
+                "name": "AH_CX_TOKEN_alpha_personal",
+                "valueFrom": {"secretKeyRef": {"name": "swarm-codex-creds", "key": "AH_CX_TOKEN_alpha_personal"}},
+            },
+        ),
+        (
+            "claude",
+            "claude-account",
+            {
+                "name": "AH_CC_TOKEN_claude_account",
+                "valueFrom": {"secretKeyRef": {"name": "swarm-claude-creds", "key": "claude-account"}},
+            },
+        ),
+    ],
+)
+def test_each_harness_uses_only_its_own_approval_reader_and_credential(harness, account, expected):
+    policy = load_policy(POLICY)
+    policy["provider_accounts"] = []
+    called = []
+    template = PodTemplate(
+        policy,
+        "agentihooks-swarm-fixture",
+        lambda: called.append("claude") or {"claude-account"},
+        codex_accounts=lambda: called.append("codex") or {"alpha-personal"},
+    )
+    doc = launch_doc()
+    doc.update(harness=harness, provider_account=account)
+    rendered = template.render(doc)
+    assert called == [harness]
+    assert token_env(rendered.pod) == [expected]
+
+
+def test_claude_approval_never_authorizes_a_codex_worker():
+    policy = load_policy(POLICY)
+    policy["provider_accounts"] = []
+    template = PodTemplate(
+        policy,
+        "agentihooks-swarm-fixture",
+        lambda: {"alpha-personal"},
+        codex_accounts=lambda: frozenset(),
+    )
+    doc = launch_doc()
+    doc.update(harness="codex", provider_account="alpha-personal")
+    with pytest.raises(PodSpecRefused, match="not an approved provider account"):
+        template.render(doc)
+
+
+KEY = "claude-fixtureatexample-com"
+
+
+def keyed(*keys: str) -> PodTemplate:
+    policy = load_policy(POLICY)
+    policy["provider_accounts"] = []
+    return PodTemplate(policy, "agentihooks-swarm-fixture", lambda: frozenset(keys))
+
+
+def test_a_launch_whose_account_key_the_shared_secret_holds_is_admitted():
+    doc = launch_doc()
+    doc["provider_account"] = KEY
+    rendered = keyed(KEY, "codex-fixtureatexample-com").render(doc)
+    assert rendered.pod["metadata"]["labels"]["swarm.agentihooks.io/provider-account"] == KEY
+    assert token_env(rendered.pod) == [TOKEN_ENV]
+
+
+def test_a_launch_whose_account_key_the_shared_secret_lacks_is_refused():
+    template = keyed("codex-fixtureatexample-com")
+    doc = launch_doc()
+    doc["provider_account"] = KEY
+    with pytest.raises(PodSpecRefused) as refused:
+        template.render(doc)
+    assert str(refused.value) == "launch provider_account is not an approved provider account"
+    assert refused.value.reason == "account"
+    assert template.pod_spec_validation_failures_total() == {"account": 1}
+
+
+def test_against_the_shared_secret_keys_an_account_email_is_never_approved():
+    with pytest.raises(PodSpecRefused) as refused:
+        keyed(KEY).render(launch_doc())
+    assert refused.value.reason == "account"
+
+
+def test_the_shared_secret_keys_are_read_again_at_each_render():
+    keys = {KEY}
+    policy = load_policy(POLICY)
+    template = PodTemplate(policy, "agentihooks-swarm-fixture", lambda: frozenset(keys))
+    doc = launch_doc()
+    doc["provider_account"] = KEY
+    template.render(doc)
+    keys.clear()
+    with pytest.raises(PodSpecRefused) as refused:
+        template.render(doc)
+    assert refused.value.reason == "account"
+
+
+@pytest.mark.parametrize("account", ["Claude-fixtureatexample-com", "-claudeatexample-com", "a" * 64, "claude_at_x"])
+def test_an_account_that_is_neither_an_email_nor_a_secret_key_is_refused(account):
+    doc = launch_doc()
+    doc["provider_account"] = account
+    with pytest.raises(PodSpecRefused) as refused:
+        keyed(account).render(doc)
+    assert (str(refused.value), refused.value.reason) == ("launch provider_account is not a valid value", "identity")
+
+
+def test_a_probe_initial_delay_comes_from_the_policy():
+    policy = load_policy(POLICY)
+    policy["probes"]["startup"]["initial_delay_seconds"] = 3
+    _, rendered = render(policy=policy)
+    assert rendered.pod["spec"]["containers"][0]["startupProbe"]["initialDelaySeconds"] == 3
+
+
+def test_the_fixture_policy_loads():
+    assert load_policy(POLICY) == policy_doc()
+
+
+POLICY_REFUSALS = [
+    (
+        "unknown top field",
+        lambda d: d.update(host_network=True),
+        "pod policy is invalid at the document root: Additional properties are not allowed ('host_network' was unexpected)",
+    ),
+    (
+        "privileged in profile",
+        lambda d: d["profiles"]["general"].update(privileged=True),
+        "pod policy is invalid at profiles/general: Additional properties are not allowed ('privileged' was unexpected)",
+    ),
+    (
+        "image with tag",
+        lambda d: d.update(image_repository="ghcr.io/x/worker:dev"),
+        "pod policy is invalid at image_repository: 'ghcr.io/x/worker:dev' does not match "
+        "'^[a-z0-9]([a-z0-9.-]*[a-z0-9])?(:[0-9]{1,5})?(/[a-z0-9]+([._-][a-z0-9]+)*)+$'",
+    ),
+    (
+        "account name past the label bound",
+        lambda d: d.update(provider_accounts=["a" * 58 + "@x.io"]),
+        "pod policy is invalid at provider_accounts/0: '" + "a" * 58 + "@x.io' is too long",
+    ),
+    (
+        "account name without an at sign",
+        lambda d: d.update(provider_accounts=["claude-fixture"]),
+        "pod policy is invalid at provider_accounts/0: 'claude-fixture' does not match "
+        "'^[A-Za-z0-9]([A-Za-z0-9._+-]*[A-Za-z0-9])?@[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?$'",
+    ),
+    (
+        "account name with a line break",
+        lambda d: d.update(provider_accounts=["claude-fixture@example.com", "codex-fixture@example.com\n"]),
+        "pod policy provider_accounts must each be one account email",
+    ),
+    (
+        "accounts sharing a secret key",
+        lambda d: d.update(provider_accounts=["ops.team@x.io", "ops-team@x.io"]),
+        "pod policy provider_accounts must name distinct secret keys",
+    ),
+    (
+        "accounts differing only in case",
+        lambda d: d.update(provider_accounts=["ops@x.io", "OPS@x.io"]),
+        "pod policy provider_accounts must name distinct secret keys",
+    ),
+    (
+        "unbounded grace",
+        lambda d: d.update(termination_grace_seconds=901),
+        "pod policy is invalid at termination_grace_seconds: 901 is greater than the maximum of 900",
+    ),
+    (
+        "disk below the tmp allotment",
+        lambda d: d["profiles"]["general"]["limits"].update(ephemeral_mib=2047),
+        "pod policy is invalid at profiles/general/limits/ephemeral_mib: 2047 is less than the minimum of 2048",
+    ),
+    (
+        "short readiness timeout",
+        lambda d: d["probes"]["readiness"].update(timeout_seconds=4),
+        "readiness probe timeout_seconds must exceed the herdr and brain timeouts together",
+    ),
+    (
+        "short startup timeout",
+        lambda d: d["probes"]["startup"].update(timeout_seconds=3),
+        "startup probe timeout_seconds must exceed the herdr and brain timeouts together",
+    ),
+    (
+        "short liveness timeout",
+        lambda d: d["probes"]["liveness"].update(timeout_seconds=4),
+        "liveness probe timeout_seconds must exceed the herdr and brain timeouts together",
+    ),
+    (
+        "worker pool without pods",
+        lambda d: d.update(worker_pool={"pods": 0, "cpu_millis": 18000, "memory_mib": 34816}),
+        "pod policy is invalid at worker_pool/pods: 0 is less than the minimum of 1",
+    ),
+    (
+        "worker pool with an unknown resource",
+        lambda d: d.update(worker_pool={"pods": 8, "cpu_millis": 18000, "memory_mib": 34816, "gpus": 1}),
+        "pod policy is invalid at worker_pool: Additional properties are not allowed ('gpus' was unexpected)",
+    ),
+    (
+        "worker pool without memory",
+        lambda d: d.update(worker_pool={"pods": 8, "cpu_millis": 18000}),
+        "pod policy is invalid at worker_pool: 'memory_mib' is a required property",
+    ),
+    (
+        "worker pool cpu as text",
+        lambda d: d.update(worker_pool={"pods": 8, "cpu_millis": "18", "memory_mib": 34816}),
+        "pod policy is invalid at worker_pool/cpu_millis: '18' is not of type 'integer'",
+    ),
+    (
+        "cpu request above the cpu limit",
+        lambda d: d["profiles"]["general"].update(requests={"cpu_millis": 2001}),
+        "pod policy profile general requests 2001m CPU, more than its 2000m limit",
+    ),
+    (
+        "memory request",
+        lambda d: d["profiles"]["general"].update(requests={"cpu_millis": 1000, "memory_mib": 1024}),
+        "pod policy is invalid at profiles/general/requests: Additional properties are not allowed "
+        "('memory_mib' was unexpected)",
+    ),
+    (
+        "cpu request below the minimum",
+        lambda d: d["profiles"]["general"].update(requests={"cpu_millis": 99}),
+        "pod policy is invalid at profiles/general/requests/cpu_millis: 99 is less than the minimum of 100",
+    ),
+    (
+        "empty requests",
+        lambda d: d["profiles"]["general"].update(requests={}),
+        "pod policy is invalid at profiles/general/requests: 'cpu_millis' is a required property",
+    ),
+]
+
+
+def test_a_policy_declaring_its_worker_pool_loads(tmp_path):
+    pool = {"pods": 8, "cpu_millis": 18000, "memory_mib": 34816}
+    assert load_policy(write(tmp_path, {**policy_doc(), "worker_pool": pool}))["worker_pool"] == pool
+
+
+def test_a_profile_cpu_request_at_or_below_its_limit_loads(tmp_path):
+    for cpu in (100, 2000):
+        doc = policy_doc()
+        doc["profiles"]["general"]["requests"] = {"cpu_millis": cpu}
+        assert load_policy(write(tmp_path, doc))["profiles"]["general"]["requests"] == {"cpu_millis": cpu}
+
+
+def test_a_profile_cpu_request_reaches_the_pod_requests_and_the_limit_stays():
+    policy = load_policy(POLICY)
+    policy["profiles"]["general"]["requests"] = {"cpu_millis": 1000}
+    doc = launch_doc()
+    doc.update(cpu_millis=1000, memory_mib=4096)
+    _, rendered = render(doc, policy)
+    resources = rendered.pod["spec"]["containers"][0]["resources"]
+    assert resources["requests"]["cpu"] == "1000m"
+    assert resources["limits"]["cpu"] == "2000m"
+    assert resources["requests"]["memory"] == resources["limits"]["memory"] == "4096Mi"
+
+
+@pytest.mark.parametrize(("change", "message"), [r[1:] for r in POLICY_REFUSALS], ids=[r[0] for r in POLICY_REFUSALS])
+def test_an_invalid_policy_is_refused(tmp_path, change, message):
+    doc = policy_doc()
+    change(doc)
+    with pytest.raises(PodSpecRefused) as refused:
+        load_policy(write(tmp_path, doc))
+    assert str(refused.value) == message
+    assert refused.value.reason == "policy"
+
+
+def test_a_probe_timeout_just_above_both_timeouts_is_accepted(tmp_path):
+    doc = policy_doc()
+    doc["probes"]["herdr_timeout_seconds"] = 2.5
+    doc["probes"]["brain_timeout_seconds"] = 2.5
+    for name in ("startup", "readiness", "liveness"):
+        doc["probes"][name]["timeout_seconds"] = 6
+    assert load_policy(write(tmp_path, doc))["probes"]["herdr_timeout_seconds"] == 2.5
+    doc["probes"]["liveness"]["timeout_seconds"] = 5
+    with pytest.raises(PodSpecRefused):
+        load_policy(write(tmp_path, doc))
+
+
+def test_restoring_the_previous_template_version_keeps_existing_pod_annotations():
+    current = load_policy(POLICY)
+    previous = copy.deepcopy(current)
+    previous["template_version"] = "kub01-v1"
+    previous["termination_grace_seconds"] = 30
+    _, existing = render(policy=current)
+    _, restored = render(policy=previous)
+    assert existing.pod["metadata"]["annotations"]["swarm.agentihooks.io/template-version"] == "kub01-v2"
+    assert restored.pod["metadata"]["labels"]["swarm.agentihooks.io/template-version"] == "kub01-v1"
+    assert restored.pod["metadata"]["annotations"]["swarm.agentihooks.io/template-version"] == "kub01-v1"
+    assert restored.pod["spec"]["terminationGracePeriodSeconds"] == 30
+    assert restored.digest != existing.digest
+
+
+def test_a_wrong_probe_threshold_reverts_alone_while_the_image_stays():
+    _, broken = render(policy=cases.wrong_probes())
+    _, reverted = render()
+    assert cases.probe_only_difference(broken.pod, reverted.pod) == [
+        "spec.containers[0].livenessProbe",
+        "spec.containers[0].readinessProbe",
+        "spec.containers[0].startupProbe",
+    ]
+    assert broken.pod["spec"]["containers"][0]["image"] == reverted.pod["spec"]["containers"][0]["image"]
+
+
+def test_a_difference_outside_the_probes_is_reported():
+    _, first = render()
+    doc = launch_doc()
+    doc["image_digest"] = "sha256:" + "5c" * 32
+    _, second = render(doc)
+    assert cases.probe_only_difference(first.pod, second.pod) is None
+    assert cases.probe_only_difference(first.pod, first.pod) == []
+    assert cases.differences({"a": [1, 2]}, {"a": [1]}) == ["a"]
+    assert cases.differences({"a": 1}, {"b": 1}) == ["a", "b"]
+
+
+def test_the_command_line_renders_the_pod_as_sorted_json(capsys):
+    assert spec.main(["render", "--policy", str(POLICY), "--launch", str(LAUNCH), "--swarm", "fixture"]) == 0
+    assert capsys.readouterr().out == json.dumps(render()[1].pod, sort_keys=True) + "\n"
+
+
+def test_the_command_line_refuses_a_hostile_launch_without_output(tmp_path, capsys):
+    doc = launch_doc()
+    doc["provider_account"] = "cluster-admin@token.io"
+    assert (
+        spec.main(
+            ["render", "--policy", str(POLICY), "--launch", str(write(tmp_path, doc, "l.json")), "--swarm", "fixture"]
+        )
+        == 1
+    )
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == "launch provider_account is not an approved provider account\n"
+
+
+def test_the_command_line_refuses_unreadable_inputs(tmp_path, capsys):
+    missing = tmp_path / "missing.json"
+    broken = tmp_path / "broken.json"
+    broken.write_text("{not json")
+    assert spec.main(["render", "--policy", str(missing), "--launch", str(LAUNCH), "--swarm", "fixture"]) == 1
+    assert capsys.readouterr().err == f"{missing} is not a readable JSON file\n"
+    assert spec.main(["render", "--policy", str(POLICY), "--launch", str(broken), "--swarm", "fixture"]) == 1
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == f"{broken} is not a readable JSON file\n"
+
+
+def test_an_unreadable_policy_is_refused_as_input(tmp_path):
+    missing = tmp_path / "missing.json"
+    with pytest.raises(PodSpecRefused) as refused:
+        load_policy(missing)
+    assert str(refused.value) == f"{missing} is not a readable JSON file"
+    assert refused.value.reason == "input"
+    assert refused.value.__cause__ is None
+    assert refused.value.__suppress_context__ is True
+
+
+def test_the_command_line_digest_action_prints_the_spec_digest(capsys):
+    assert spec.main(["digest", "--policy", str(POLICY), "--launch", str(LAUNCH), "--swarm", "fixture"]) == 0
+    assert capsys.readouterr().out == render()[1].digest + "\n"
+
+
+def test_the_command_line_refuses_an_unknown_action(capsys):
+    assert spec.main(["apply", "--policy", str(POLICY), "--launch", str(LAUNCH), "--swarm", "fixture"]) == 64
+    assert " ".join(capsys.readouterr().err.split()).startswith(
+        "usage: python -m scripts.swarm_v2.kubernetes.spec [-h] --policy POLICY --launch LAUNCH --swarm SWARM {render,digest}"
+    )
+
+
+def test_the_command_line_labels_the_pod_with_the_named_swarms_owner(capsys):
+    assert spec.main(["render", "--policy", str(POLICY), "--launch", str(LAUNCH), "--swarm", "other"]) == 0
+    labels = json.loads(capsys.readouterr().out)["metadata"]["labels"]
+    assert labels["swarm.agentihooks.io/controller-owner"] == "agentihooks-swarm-other"
+
+
+@pytest.mark.parametrize("missing", ["--policy", "--launch", "--swarm"])
+def test_the_command_line_requires_every_input(missing):
+    argv = ["render", "--policy", str(POLICY), "--launch", str(LAUNCH), "--swarm", "fixture"]
+    index = argv.index(missing)
+    del argv[index : index + 2]
+    assert spec.main(argv) == 64
+
+
+def test_the_command_line_help_exits_cleanly(capsys):
+    assert spec.main(["--help"]) == 0
+    assert "--policy" in capsys.readouterr().out
+
+
+def test_the_golden_pods_are_the_current_render():
+    assert json.loads((FIXTURES / "pod-rendered.json").read_text()) == render()[1].pod
+    wrong = json.loads((FIXTURES / "pod-rendered-wrong-probes.json").read_text())
+    assert wrong == render(policy=cases.wrong_probes())[1].pod
+
+
+def test_a_toleration_with_exists_and_a_value_is_refused(tmp_path):
+    doc = policy_doc()
+    doc["profiles"]["general"]["tolerations"][0]["value"] = "yes"
+    with pytest.raises(PodSpecRefused) as refused:
+        load_policy(write(tmp_path, doc))
+    assert str(refused.value) == (
+        "pod policy is invalid at profiles/general/tolerations/0: "
+        "{'key': 'anton.io/spot', 'operator': 'Exists', 'effect': 'NoSchedule', 'value': 'yes'} "
+        "should not be valid under {'required': ['value']}"
+    )
+
+
+def test_the_pod_and_its_launch_material_are_named_after_the_execution():
+    _, rendered = render()
+    assert spec.pod_name(EXECUTION) == rendered.pod["metadata"]["name"] == f"swarm-{EXECUTION}"
+    assert spec.launch_name(EXECUTION) == f"swarm-{EXECUTION}-launch"
+    assert spec.launch_volume(EXECUTION) in rendered.pod["spec"]["volumes"]
+    assert spec.launch_volume(EXECUTION) == {
+        "name": "launch",
+        "configMap": {"name": f"swarm-{EXECUTION}-launch", "defaultMode": 0o444},
+    }
+
+
+BUNDLE = {
+    "image_repository": "ghcr.io/fixture/agentihooks-bundle",
+    "tag": "dev",
+    "pull_access": "swarm-bundle-pull",
+}
+
+
+def bundled_pod(tmp_path) -> dict:
+    policy = load_policy(write(tmp_path, {**policy_doc(), "bundle": BUNDLE}))
+    return render(policy=policy)[1].pod
+
+
+def test_a_policy_bundle_is_copied_by_an_init_container_into_a_private_folder(tmp_path):
+    pod = bundled_pod(tmp_path)
+
+    [init] = pod["spec"]["initContainers"]
+    assert init["name"] == "bundle"
+    assert init["image"] == "ghcr.io/fixture/agentihooks-bundle:dev"
+    assert init["imagePullPolicy"] == "Always"
+    assert init["command"] == ["cp", "-R", "/bundle", "/linked", "/revision.json", spec.BUNDLE_DIR + "/"]
+    assert init["volumeMounts"] == [{"name": "bundle", "mountPath": spec.BUNDLE_DIR}]
+    assert init["securityContext"] == {
+        **pod["spec"]["containers"][0]["securityContext"],
+        "readOnlyRootFilesystem": True,
+    }
+    assert "env" not in init and "envFrom" not in init
+    assert {"name": "bundle", "emptyDir": {"sizeLimit": f"{spec.BUNDLE_MIB}Mi"}} in pod["spec"]["volumes"]
+
+
+def test_the_agent_reads_the_bundle_read_only_and_the_kubelet_pulls_it_with_the_policy_access(tmp_path):
+    pod = bundled_pod(tmp_path)
+
+    [agent] = pod["spec"]["containers"]
+    assert {"name": "bundle", "mountPath": spec.BUNDLE_DIR, "readOnly": True} in agent["volumeMounts"]
+    assert pod["spec"]["imagePullSecrets"] == [{"name": "swarm-bundle-pull"}]
+    assert spec.BUNDLE_DIR == "/var/run/swarm/bundle"
+
+
+def test_each_container_owns_its_hardened_security_context(tmp_path):
+    pod = bundled_pod(tmp_path)
+
+    for container in (*pod["spec"]["initContainers"], *pod["spec"]["containers"]):
+        container["securityContext"]["capabilities"]["drop"].append("NONE")
+
+    assert spec.HARDENED["capabilities"] == {"drop": ["ALL"]}
+
+
+def test_a_bundle_only_adds_its_init_container_folder_mount_and_pull_access(tmp_path):
+    bundled, plain = bundled_pod(tmp_path)["spec"], render()[1].pod["spec"]
+
+    def without(body: dict, *keys: str) -> dict:
+        return {key: value for key, value in body.items() if key not in keys}
+
+    def unbundled(items: list) -> list:
+        return [item for item in items if item["name"] != "bundle"]
+
+    assert without(bundled, "initContainers", "imagePullSecrets", "volumes", "containers") == without(
+        plain, "volumes", "containers"
+    )
+    assert unbundled(bundled["volumes"]) == plain["volumes"]
+    [agent], [base] = bundled["containers"], plain["containers"]
+    assert without(agent, "volumeMounts") == without(base, "volumeMounts")
+    assert unbundled(agent["volumeMounts"]) == base["volumeMounts"]
+
+
+def test_a_policy_without_a_bundle_renders_no_init_container_and_no_pull_access():
+    pod = render()[1].pod
+
+    assert "initContainers" not in pod["spec"] and "imagePullSecrets" not in pod["spec"]
+    assert all(volume["name"] != "bundle" for volume in pod["spec"]["volumes"])
+
+
+@pytest.mark.parametrize(
+    ("change", "where"),
+    [
+        ({"pull_access": "swarm-account-ncsmgma"}, "bundle/pull_access"),
+        ({"tag": "dev@sha256:" + "a" * 64}, "bundle/tag"),
+        ({"image_repository": "ghcr.io/fixture/bundle:dev"}, "bundle/image_repository"),
+        ({"extra": True}, "bundle"),
+    ],
+)
+def test_a_malformed_policy_bundle_is_refused(tmp_path, change, where):
+    with pytest.raises(PodSpecRefused) as refused:
+        load_policy(write(tmp_path, {**policy_doc(), "bundle": {**BUNDLE, **change}}))
+
+    assert str(refused.value).startswith(f"pod policy is invalid at {where}")
+
+
+@pytest.mark.parametrize("missing", sorted(BUNDLE))
+def test_a_policy_bundle_missing_a_field_is_refused(tmp_path, missing):
+    bundle = {key: value for key, value in BUNDLE.items() if key != missing}
+
+    with pytest.raises(PodSpecRefused, match="pod policy is invalid at bundle"):
+        load_policy(write(tmp_path, {**policy_doc(), "bundle": bundle}))
+
+
+def test_the_golden_bundled_pod_is_the_current_render():
+    policy = load_policy(FIXTURES / "pod-policy-bundle.json")
+
+    assert json.loads((FIXTURES / "pod-rendered-bundle.json").read_text()) == render(policy=policy)[1].pod
+    assert policy["bundle"] == BUNDLE
+
+
+@pytest.mark.parametrize("case", ["a", "b", "c"])
+def test_package_cases_match_their_committed_evidence(case):
+    from tests.sv2_kub01_cases import run_case
+
+    first, second = run_case(case), run_case(case)
+    assert first == second
+    committed = json.loads((EVIDENCE / f"{case}-result.json").read_text())
+    assert first["state"] == "passed"
+    assert committed == first, json.dumps(first, indent=2, sort_keys=True)

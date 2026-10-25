@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/effort_range.py:scripts.swarm.effort_range.x__without_effort__mutmut_8:5504daec29b77ca155b65a24cb546dfb3958aba296ea0ec3b87f7fcaf77d5178": {
+    "reader": "Standards",
+    "reason": "The trailing sentinel is only tested with startswith model_reasoning_effort=, which both empty and XXXX fail."
+  }
+}

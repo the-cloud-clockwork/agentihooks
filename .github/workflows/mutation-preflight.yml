@@ -1,0 +1,583 @@
+name: Mutation preflight
+
+on:
+  workflow_call:
+    inputs:
+      base:
+        type: string
+        required: true
+  push:
+    branches-ignore: [dev, main, "gh-readonly-queue/**", "wip/**", "diffcheck/**", "promotion/**"]
+
+concurrency:
+  group: mutation-preflight-${{ github.event_name == 'push' && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'push' }}
+
+permissions:
+  contents: read
+  pull-requests: read
+  actions: read
+
+jobs:
+  plan:
+    if: ${{ github.event_name != 'push' || !github.event.deleted }}
+    runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && 'anton-oss-light' || 'ubuntu-latest' }}
+    timeout-minutes: 10
+    env:
+      BASE: ${{ inputs.base || 'origin/dev' }}
+    outputs:
+      shards: ${{ steps.plan.outputs.shards }}
+      stats_parts: ${{ steps.plan.outputs.stats_parts }}
+      bases: ${{ steps.plan.outputs.bases }}
+      browser: ${{ steps.plan.outputs.browser }}
+      changed: ${{ steps.plan.outputs.changed }}
+      graded: ${{ steps.plan.conclusion == 'success' }}
+      open: ${{ steps.open.outputs.open }}
+    steps:
+      - name: Skip when the branch already has an open pull request into dev
+        id: open
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          count=$(gh api -X GET "repos/$GITHUB_REPOSITORY/pulls" -f state=open -f "head=$GITHUB_REPOSITORY_OWNER:$GITHUB_REF_NAME" --jq '[.[] | select(.base.ref == "dev")] | length')
+          if [[ $count == 0 ]]; then echo open=false; else echo open=true; fi >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v4
+        if: steps.open.outputs.open != 'true'
+        with:
+          fetch-depth: 0
+          filter: blob:none
+          persist-credentials: false
+
+      - name: Record the revisions the report grades
+        if: steps.open.outputs.open == 'false'
+        run: |
+          mkdir -p .mutation-gate
+          printf '{"base": "%s", "head": "%s"}\n' "$(git merge-base origin/dev HEAD)" "$(git rev-parse HEAD)" > .mutation-gate/scope.json
+
+      - name: Reuse a green report when this head only adds tests to it
+        id: reuse
+        if: steps.open.outputs.open == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 -m scripts.ci_mutation.reuse "$GITHUB_REF_NAME" "$GITHUB_RUN_ID"
+
+      - name: Upload the reused mutation evidence
+        if: steps.reuse.outputs.reused == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: mutation-preflight-report
+          path: .mutation-gate/
+          include-hidden-files: true
+          retention-days: 7
+
+      - uses: actions/setup-python@v5
+        if: steps.open.outputs.open != 'true' && steps.reuse.outputs.reused != 'true'
+        with:
+          python-version: "3.12"
+
+      - uses: astral-sh/setup-uv@v10.2.0
+        if: steps.open.outputs.open != 'true' && steps.reuse.outputs.reused != 'true'
+        with:
+          version: "0.12.23"
+          checksum: "9167d72b3319674b6303c4cbe071854bba13ebdf3d76b1a7cbdc175471fb66d6"
+          enable-cache: false
+
+      - name: Install dependencies
+        if: steps.open.outputs.open != 'true' && steps.reuse.outputs.reused != 'true'
+        run: bash .github/scripts/pypi-retry.sh "Install dependencies" -- uv pip install --system --excludes .github/test-excludes.txt -e ".[dev,all]"
+
+      - name: Size mutation shards from stored timings
+        id: plan
+        if: steps.open.outputs.open != 'true' && steps.reuse.outputs.reused != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MUTATION_SHARD_CPU_QUOTA: "3"
+        run: python -m scripts.ci_mutation.plan --base "$BASE" --repository "$GITHUB_REPOSITORY"
+
+      - name: Upload planned mutation test selection
+        if: steps.open.outputs.open != 'true' && steps.reuse.outputs.reused != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: mutation-selection
+          path: .mutation-selection.json
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 1
+
+  # A branch that adds only failing tests has no mutants and may reuse a green report, so its touched tests run here.
+  touched-tests:
+    if: ${{ github.event_name == 'push' && !github.event.deleted }}
+    runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && 'anton-oss' || 'ubuntu-latest' }}
+    timeout-minutes: 15
+    env:
+      PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.playwright
+    steps:
+      - name: Skip when the branch already has an open pull request into dev
+        id: open
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          count=$(gh api -X GET "repos/$GITHUB_REPOSITORY/pulls" -f state=open -f "head=$GITHUB_REPOSITORY_OWNER:$GITHUB_REF_NAME" --jq '[.[] | select(.base.ref == "dev")] | length')
+          if [[ $count == 0 ]]; then echo open=false; else echo open=true; fi >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v4
+        if: steps.open.outputs.open == 'false'
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        if: steps.open.outputs.open == 'false'
+        with:
+          python-version: "3.12"
+
+      - uses: astral-sh/setup-uv@v10.2.0
+        if: steps.open.outputs.open == 'false'
+        with:
+          version: "0.12.23"
+          checksum: "9167d72b3319674b6303c4cbe071854bba13ebdf3d76b1a7cbdc175471fb66d6"
+          enable-cache: false
+
+      - name: Install dependencies
+        if: steps.open.outputs.open == 'false'
+        run: bash .github/scripts/pypi-retry.sh "Install dependencies" -- uv pip install --system --excludes .github/test-excludes.txt -e ".[dev,all]"
+
+      - name: Select the tests the branch touches
+        if: steps.open.outputs.open == 'false'
+        id: touched
+        run: |
+          python - <<'PY'
+          import os
+          from pathlib import Path
+
+          from scripts.ci_mutation.browser import needs_browser
+          from scripts.ci_select import changed_files, is_test
+          from scripts.ci_touched_tests import worker_count
+
+          root = Path.cwd()
+          tests = [path for path in changed_files(root, "origin/dev", "HEAD") if is_test(path) and (root / path).is_file()]
+          browser = str(bool(tests) and needs_browser(root, tests)).lower()
+          workers = worker_count(tests) if tests else 1
+          print("Touched tests:", *tests or ["none"], sep="\n")
+          with Path(os.environ["GITHUB_OUTPUT"]).open("a") as stream:
+              stream.write(f"files={' '.join(tests)}\nbrowser={browser}\nworkers={workers}\n")
+          PY
+
+      - name: Install the pinned nats server for the bus backend tests
+        if: steps.open.outputs.open == 'false'
+        timeout-minutes: 3
+        uses: ./.github/actions/nats-server
+
+      - name: Install the browser that page tests drive
+        if: steps.open.outputs.open == 'false' && steps.touched.outputs.browser == 'true'
+        timeout-minutes: 6
+        uses: ./.github/actions/browser-cache
+
+      - name: Run the tests the branch touches
+        if: steps.open.outputs.open == 'false' && steps.touched.outputs.files != ''
+        env:
+          FILES: ${{ steps.touched.outputs.files }}
+          PYTEST_XDIST_AUTO_NUM_WORKERS: ${{ steps.touched.outputs.workers }}
+          PYTHONUNBUFFERED: "1"
+        run: |
+          read -ra files <<< "$FILES"
+          python -m pytest "${files[@]}" -n auto --dist loadgroup --tb=short -p no:cacheprovider
+
+      # A branch could pass mutation and then fail the suite speed contracts in its pull request shards.
+      - name: Run the suite speed contracts
+        if: steps.open.outputs.open == 'false' && steps.touched.outputs.files != ''
+        run: python -m pytest tests/test_suite_speed.py --tb=short -p no:cacheprovider
+
+  # Each leg holds a group of its own run, so a ready leg waits only on the batch runner set's ceiling, never on another branch.
+  stats:
+    needs: plan
+    if: ${{ !cancelled() && needs.plan.outputs.graded == 'true' && needs.plan.outputs.changed != '0' }}
+    runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && 'anton-oss-batch' || 'ubuntu-latest' }}
+    timeout-minutes: 26
+    concurrency:
+      group: ${{ format('mutation-preflight-job-{0}-stats-{1}', github.run_id, matrix.part) }}
+    outputs:
+      shards: ${{ steps.refine.outputs.shards }}
+    strategy:
+      fail-fast: false
+      matrix:
+        part: ${{ fromJSON(needs.plan.outputs.stats_parts) }}
+    env:
+      PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.playwright
+      MUTATION_STATS_CACHE: ${{ github.workspace }}/.mutation-stats-cache
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: astral-sh/setup-uv@v10.2.0
+        with:
+          version: "0.12.23"
+          checksum: "9167d72b3319674b6303c4cbe071854bba13ebdf3d76b1a7cbdc175471fb66d6"
+          enable-cache: false
+
+      - name: Install dependencies
+        run: bash .github/scripts/pypi-retry.sh "Install dependencies" -- uv pip install --system --excludes .github/test-excludes.txt -e ".[dev,all]"
+
+      - name: Download planned mutation test selection
+        uses: actions/download-artifact@v4
+        with:
+          name: mutation-selection
+
+      - name: Install the pinned nats server for the bus backend tests
+        timeout-minutes: 3
+        uses: ./.github/actions/nats-server
+
+      - name: Install the browser that page tests drive
+        id: browser
+        if: needs.plan.outputs.browser == 'true'
+        timeout-minutes: 6
+        uses: ./.github/actions/browser-cache
+
+      - name: Report browser setup failure
+        if: failure() && steps.browser.outcome == 'failure'
+        run: |
+          echo "::error::Chromium setup failed or exceeded its six minute timeout; mutation tests cannot run."
+          exit 1
+
+      - name: Restore the merged test stats
+        uses: actions/cache/restore@v4
+        with:
+          path: .mutation-stats-cache
+          key: mutation-test-stats-v2-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: mutation-test-stats-v2-${{ runner.os }}-
+
+      - name: Collect one stats part for every mutation shard
+        env:
+          BASES: ${{ needs.plan.outputs.bases }}
+          PYTHONUNBUFFERED: "1"
+          PART: ${{ matrix.part }}
+          PARTS: ${{ strategy.job-total }}
+        run: mkdir -p .mutation-stats && touch ".mutation-stats/collected-$PART" && python -m scripts.ci_mutation --bases "$BASES" --budget 1080 --stats .mutation-stats --stats-part "$PART" --stats-parts "$PARTS"
+
+      - name: Save the merged test stats
+        if: success() && strategy.job-total == 1
+        uses: actions/cache/save@v4
+        with:
+          path: .mutation-stats-cache
+          key: mutation-test-stats-v2-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}
+
+      - name: Upload this part's test stats cache
+        if: success() && strategy.job-total != 1
+        uses: actions/upload-artifact@v4
+        with:
+          name: mutation-test-stats-cache-${{ matrix.part }}
+          path: .mutation-stats-cache/
+          include-hidden-files: true
+          if-no-files-found: ignore
+          retention-days: 1
+          overwrite: true
+
+      - name: Upload mutation stats part
+        uses: actions/upload-artifact@v4
+        with:
+          name: mutation-stats-${{ matrix.part }}
+          path: .mutation-stats/
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 1
+          overwrite: true
+
+      - name: Restore the tests that killed this branch's earlier mutants
+        if: strategy.job-total == 1
+        uses: actions/cache/restore@v4
+        with:
+          path: .mutation-stats/killers
+          key: mutation-killers-v1-${{ runner.os }}-${{ github.ref_name }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: mutation-killers-v1-${{ runner.os }}-${{ github.ref_name }}-
+
+      - name: Refine mutation shards from measured statistics
+        id: refine
+        if: strategy.job-total == 1
+        env:
+          BASES: ${{ needs.plan.outputs.bases }}
+          MUTATION_SHARD_CPU_QUOTA: "3"
+        run: python -m scripts.ci_mutation.measured --bases "$BASES" --stats .mutation-stats
+
+      - name: Upload the measured mutation plan
+        if: strategy.job-total == 1
+        uses: actions/upload-artifact@v4
+        with:
+          name: mutation-plan
+          path: .mutation-stats/plan.json
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Upload stats evidence
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mutation-evidence-stats-${{ matrix.part }}
+          path: .mutation-gate/
+          include-hidden-files: true
+          retention-days: 7
+          overwrite: true
+
+  refine:
+    needs: [plan, stats]
+    if: ${{ !cancelled() && needs.plan.outputs.graded == 'true' && needs.plan.outputs.changed != '0' && needs.stats.result == 'success' && needs.plan.outputs.stats_parts != '[0]' }}
+    runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && 'anton-oss-light' || 'ubuntu-latest' }}
+    timeout-minutes: 5
+    outputs:
+      shards: ${{ steps.refine.outputs.shards }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: astral-sh/setup-uv@v10.2.0
+        with:
+          version: "0.12.23"
+          checksum: "9167d72b3319674b6303c4cbe071854bba13ebdf3d76b1a7cbdc175471fb66d6"
+          enable-cache: false
+
+      - name: Install dependencies
+        run: bash .github/scripts/pypi-retry.sh "Install dependencies" -- uv pip install --system --excludes .github/test-excludes.txt -e ".[dev,all]"
+
+      - name: Restore the tests that killed this branch's earlier mutants
+        uses: actions/cache/restore@v4
+        with:
+          path: .mutation-stats/killers
+          key: mutation-killers-v1-${{ runner.os }}-${{ github.ref_name }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: mutation-killers-v1-${{ runner.os }}-${{ github.ref_name }}-
+
+      - name: Download the shared mutation stats
+        uses: actions/download-artifact@v4
+        with:
+          pattern: mutation-stats-*
+          path: .mutation-stats
+          merge-multiple: true
+
+      - name: Download every part's test stats cache
+        uses: actions/download-artifact@v4
+        with:
+          pattern: mutation-test-stats-cache-*
+          path: .mutation-stats-cache
+          merge-multiple: true
+
+      - name: Save the merged test stats
+        if: success() && hashFiles('.mutation-stats-cache/**') != ''
+        uses: actions/cache/save@v4
+        with:
+          path: .mutation-stats-cache
+          key: mutation-test-stats-v2-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}
+
+      - name: Download planned mutation test selection
+        uses: actions/download-artifact@v4
+        with:
+          name: mutation-selection
+
+      - name: Refine mutation shards from measured statistics
+        id: refine
+        env:
+          BASES: ${{ needs.plan.outputs.bases }}
+          MUTATION_SHARD_CPU_QUOTA: "3"
+        run: python -m scripts.ci_mutation.measured --bases "$BASES" --stats .mutation-stats
+
+      - name: Upload the measured mutation plan
+        uses: actions/upload-artifact@v4
+        with:
+          name: mutation-plan
+          path: .mutation-stats/plan.json
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
+  mutation-shard:
+    needs: [plan, stats, refine]
+    if: ${{ !cancelled() && needs.plan.outputs.graded == 'true' && needs.plan.outputs.changed != '0' && needs.stats.result == 'success' && (needs.refine.result == 'success' || needs.refine.result == 'skipped' && needs.plan.outputs.stats_parts == '[0]') }}
+    runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && 'anton-oss-batch' || 'ubuntu-latest' }}
+    timeout-minutes: 26
+    concurrency:
+      group: ${{ format('mutation-preflight-job-{0}-shard-{1}', github.run_id, matrix.shard) }}
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: ${{ fromJSON(needs.refine.outputs.shards || needs.stats.outputs.shards) }}
+    env:
+      PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.playwright
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: astral-sh/setup-uv@v10.2.0
+        with:
+          version: "0.12.23"
+          checksum: "9167d72b3319674b6303c4cbe071854bba13ebdf3d76b1a7cbdc175471fb66d6"
+          enable-cache: false
+
+      - name: Install dependencies
+        run: bash .github/scripts/pypi-retry.sh "Install dependencies" -- uv pip install --system --excludes .github/test-excludes.txt -e ".[dev,all]"
+
+      - name: Download planned mutation test selection
+        uses: actions/download-artifact@v4
+        with:
+          name: mutation-selection
+
+      - name: Install the pinned nats server for the bus backend tests
+        timeout-minutes: 3
+        uses: ./.github/actions/nats-server
+
+      - name: Install the browser that page tests drive
+        id: browser
+        if: needs.plan.outputs.browser == 'true'
+        timeout-minutes: 6
+        uses: ./.github/actions/browser-cache
+
+      - name: Report browser setup failure
+        if: failure() && steps.browser.outcome == 'failure'
+        run: |
+          echo "::error::Chromium setup failed or exceeded its six minute timeout; mutation tests cannot run."
+          exit 1
+
+      - name: Download the shared mutation stats
+        uses: actions/download-artifact@v4
+        with:
+          pattern: mutation-stats-*
+          path: .mutation-stats
+          merge-multiple: true
+
+      - name: Restore the tests that killed this branch's earlier mutants
+        uses: actions/cache/restore@v4
+        with:
+          path: .mutation-stats/killers
+          key: mutation-killers-v1-${{ runner.os }}-${{ github.ref_name }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: mutation-killers-v1-${{ runner.os }}-${{ github.ref_name }}-
+
+      - name: Download the measured mutation plan
+        uses: actions/download-artifact@v4
+        with:
+          name: mutation-plan
+          path: .mutation-stats
+
+      - name: Mutate changed Python files
+        env:
+          BASES: ${{ needs.plan.outputs.bases }}
+          PYTHONUNBUFFERED: "1"
+          SHARD: ${{ matrix.shard }}
+          SHARDS: ${{ strategy.job-total }}
+        run: python -m scripts.ci_mutation --bases "$BASES" --budget 1080 --shard "$SHARD" --shards "$SHARDS" --stats .mutation-stats
+
+      - name: Collect the tests that killed mutants
+        if: always()
+        run: |
+          mkdir -p .mutation-killers
+          [[ ! -d .mutation-gate ]] || find .mutation-gate -path '*/killers/*' -type f -exec cp -t .mutation-killers {} +
+          echo "Functions with a recorded killing test: $(find .mutation-killers -type f | wc -l)"
+
+      - name: Upload the tests that killed mutants
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mutation-killers-${{ matrix.shard }}
+          path: .mutation-killers/
+          include-hidden-files: true
+          if-no-files-found: ignore
+          retention-days: 1
+          overwrite: true
+
+      - name: Upload shard mutation evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mutation-preflight-shard-${{ matrix.shard }}
+          path: ${{ job.status == 'success' && '.mutation-gate/report.json' || '.mutation-gate/' }}
+          include-hidden-files: true
+          retention-days: 7
+          overwrite: true
+
+  # Readers take one report and the check named mutation, so every shard ends here.
+  mutation:
+    needs: [plan, stats, refine, mutation-shard]
+    if: ${{ !cancelled() && needs.plan.outputs.graded == 'true' }}
+    runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && 'anton-oss-light' || 'ubuntu-latest' }}
+    timeout-minutes: 5
+    env:
+      BASE: ${{ inputs.base || 'origin/dev' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Download every mutation shard report
+        if: needs.plan.outputs.changed != '0'
+        uses: actions/download-artifact@v4
+        with:
+          pattern: mutation-preflight-shard-*
+          path: .mutation-shards
+
+      - name: Restore the tests that killed this branch's earlier mutants
+        if: needs.plan.outputs.changed != '0'
+        uses: actions/cache/restore@v4
+        with:
+          path: .mutation-stats/killers
+          key: mutation-killers-v1-${{ runner.os }}-${{ github.ref_name }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: mutation-killers-v1-${{ runner.os }}-${{ github.ref_name }}-
+
+      - name: Download the tests that killed mutants
+        if: needs.plan.outputs.changed != '0'
+        uses: actions/download-artifact@v4
+        with:
+          pattern: mutation-killers-*
+          path: .mutation-stats/killers
+          merge-multiple: true
+
+      - name: Keep the tests that killed mutants for this branch's next plan
+        if: needs.plan.outputs.changed != '0' && hashFiles('.mutation-stats/killers/*') != ''
+        uses: actions/cache/save@v4
+        with:
+          path: .mutation-stats/killers
+          key: mutation-killers-v1-${{ runner.os }}-${{ github.ref_name }}-${{ github.run_id }}-${{ github.run_attempt }}
+
+      - name: Record the revisions the report grades
+        run: |
+          mkdir -p .mutation-gate
+          printf '{"base": "%s", "head": "%s"}\n' "$(git merge-base "$BASE" HEAD)" "$(git rev-parse HEAD)" > .mutation-gate/scope.json
+
+      - name: Merge the shard reports
+        env:
+          SHARDS: ${{ needs.plan.outputs.changed != '0' && (needs.refine.outputs.shards || needs.stats.outputs.shards) || '[]' }}
+        run: python -m scripts.ci_mutation.merge .mutation-shards --shards "$(jq length <<< "$SHARDS")" --output .mutation-gate
+
+      - name: Upload complete mutation evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mutation-preflight-report
+          path: .mutation-gate/
+          include-hidden-files: true
+          retention-days: 7
+          overwrite: true
+
+      - name: Fail when a shard did not finish
+        if: needs.plan.outputs.changed != '0' && needs.mutation-shard.result != 'success'
+        env:
+          RESULT: ${{ needs.mutation-shard.result }}
+        run: |
+          echo "::error::A mutation shard ended $RESULT; the merged report is incomplete."
+          exit 1

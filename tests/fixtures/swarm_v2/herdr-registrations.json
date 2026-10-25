@@ -1,0 +1,23 @@
+{
+  "source": "SV2-HDR-03 fixture: two managed worker endpoints and one unrelated manually named machine on the Anton herdr client",
+  "namespace": "swarm-workers",
+  "swarm": "fixture-swarm",
+  "managed": [
+    {
+      "execution_id": "exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "generation": 2
+    },
+    {
+      "execution_id": "exe-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "generation": 1
+    }
+  ],
+  "manual": {
+    "id": "0d4e1b5c9a7f42e8b3c6d2a1f0e9b8c7",
+    "label": "devbox",
+    "target": "ssh://operator@devbox.lan",
+    "session": "default",
+    "enabled": true,
+    "selected": false
+  }
+}

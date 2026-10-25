@@ -1,0 +1,9 @@
+{
+  "package": "SV2-RUN-05",
+  "schema_version": "2.0",
+  "authority": "fixture-scoped authenticated operator; grant values are synthetic",
+  "stale_browser": {"execution": "first attempt", "generation": 1},
+  "replaced_pod": {"label": "same-label", "previous_uid": "first-pod", "current_uid": "new-pod"},
+  "disconnected_terminal": {"saved_profile": true, "transport": "unreachable"},
+  "clock": {"initial_ms": 0, "recovery_ms": 1, "authority_expires_ms": 100, "lease_scope": "No command-service lease; scoped authenticator supplies current authority"}
+}

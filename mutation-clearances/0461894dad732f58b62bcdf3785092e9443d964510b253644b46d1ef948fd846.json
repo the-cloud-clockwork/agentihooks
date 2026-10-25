@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/ledger_media.py:scripts.swarm_ledger.ledger_media.x_write_file__mutmut_11:44d30690dd4e92b7bcd0f54564a562c73fc8f8c256cc24f9200d74d974f52a30": {
+    "reader": "Standards reader",
+    "reason": "The temporary suffix is consumed by atomic rename; completed storage retains identical final path, bytes and metadata."
+  }
+}

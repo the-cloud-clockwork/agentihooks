@@ -1,0 +1,360 @@
+deployment: distributed
+
+# Render only the worker hive, so one release per hive installs into its own namespace beside a swarm elsewhere.
+hiveOnly: false
+
+image:
+  repository: ghcr.io/the-cloud-clockwork/agentihooks-swarm
+  tag: dev
+  pullPolicy: Always
+
+hive:
+  id: ""
+  join:
+    enabled: false
+    port: 8770
+    memberRedisUrl: ""
+    tlsSecretName: ""
+    # Hand this release's ledger CA to refreshing members; off for hives that trust another ledger.
+    serveLedgerCa: true
+    redisSecret:
+      name: ""
+      key: ""
+    # Secret with one key per field of the hub NATS signer record, and the operator public key NATS trusts:
+    # with both set the endpoint mints each refreshing member its own signed NATS credential.
+    natsSigner:
+      secretName: ""
+      trustedOperator: ""
+    affinity: {}
+    tolerations: []
+    ingressFrom: []
+    resources:
+      requests:
+        cpu: 10m
+        memory: 64Mi
+        ephemeral-storage: 16Mi
+      limits:
+        memory: 256Mi
+        ephemeral-storage: 64Mi
+
+secretEnv: []
+envFromSecrets: []
+externalSecrets: []
+
+ledger:
+  replicas: 1
+  affinity:
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+          - matchExpressions:
+              - key: anton.io/capacity-type
+                operator: DoesNotExist
+  tolerations: []
+  port: 8765
+  publicUrl: ""
+  # Secret with tls.crt, tls.key and ca.crt; clients refuse to send ledger credentials over plain http off loopback.
+  # The certificate must name <fullname>-ledger, the service and ingress backend name, as a SAN.
+  tls:
+    secretName: ""
+  persistence:
+    size: 1Gi
+    storageClassName: ""
+  env: {}
+  # Secret env only the ledger container reads, such as the shared database URL workers must never hold.
+  secretEnv: []
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+      ephemeral-storage: 64Mi
+    limits:
+      memory: 512Mi
+      ephemeral-storage: 256Mi
+
+redis:
+  enabled: true
+  url: ""
+  existingSecret:
+    name: ""
+    key: ""
+  # Set all three or none; once set, existingSecret (the administrator credential) reaches no container.
+  roles:
+    ledger:
+      name: ""
+      key: ""
+    controller:
+      name: ""
+      key: ""
+    worker:
+      name: ""
+      key: ""
+  image:
+    repository: redis
+    tag: 7-alpine
+    pullPolicy: IfNotPresent
+  persistence:
+    size: 1Gi
+    storageClassName: ""
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+      ephemeral-storage: 64Mi
+    limits:
+      memory: 512Mi
+      ephemeral-storage: 256Mi
+
+controller:
+  # Durable capacity only: EC2 nodes carry anton.io/capacity-type and the autoscaler may remove them.
+  affinity:
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+          - matchExpressions:
+              - key: anton.io/capacity-type
+                operator: DoesNotExist
+  tolerations: []
+  # Required with workers: the Kubernetes runtime creates worker Pods with this account's token.
+  serviceAccountName: ""
+  # Swarms in this Redis that their own host ticks; the controller never ticks them or probes their lease.
+  hostSwarms: []
+  # Proof swarms {swarm, agent, task, repo} the controller creates with their ledger beside the live swarm, and removes once dropped.
+  scratchSwarms: []
+  # Worker registration and heartbeat API, served by the controller process for one swarm.
+  api:
+    enabled: false
+    port: 8780
+    swarm: ""
+    signingKey:
+      keyId: ""
+      secretName: ""
+      secretKey: signing-key
+    # Peers beside the controller's own Pods, such as worker Pods; networkPolicy.ingressFrom never reaches the API.
+    ingressFrom: []
+    # {agent, task} of the swarm task proving a launch: the controller creates that proof swarm, and removes it once cleared.
+    proof: {}
+  # Kubernetes runtime settings, rendered once apiUrl is set and read while the API is on. The worker
+  # image stays on a floating tag; the controller resolves its digest at each launch. No launch account
+  # lives here: approved accounts come from the shared account secret.
+  workers:
+    apiUrl: ""
+    imageTag: dev
+    profile: ""
+    cap: 1
+    projects: []
+    brain: ""
+    # The Pod policy, docs/swarm-v2/schemas/pod-policy.json, shared by every swarm; the controller labels its Pods agentihooks-swarm-<api.swarm>.
+    podPolicy: {}
+    # Or the name of a ConfigMap in the release namespace holding pod-policy.json, such as one GitOps manages.
+    podPolicyConfigMap: ""
+  livenessProbe:
+    initialDelaySeconds: 60
+    periodSeconds: 10
+    timeoutSeconds: 8
+    failureThreshold: 3
+  startupProbe:
+    periodSeconds: 5
+    timeoutSeconds: 8
+    failureThreshold: 60
+  readinessProbe:
+    periodSeconds: 10
+    timeoutSeconds: 8
+    failureThreshold: 3
+  terminationGracePeriodSeconds: 30
+  env:
+    LANGFUSE_MCP_URL: ""
+  # Secret env only the controller container reads, unlike secretEnv; optional: true lets it start before the Secret exists.
+  secretEnv: []
+  # The terminal user CA private key: only that key of the Secret, a read only file on the controller container.
+  # Required with workers.apiUrl; never list it in secretEnv, which every swarm container reads.
+  terminalCa:
+    secretName: ""
+    key: ""
+  # SSH jump from the operator's machine to worker terminals: an sshd sidecar in the controller Pod, whose
+  # Pods the worker terminal policy already admits. address is the host:port the operator machine dials,
+  # recorded in Redis with the jump host key; publish that port with a LoadBalancer outside this chart.
+  jump:
+    enabled: false
+    address: ""
+    image:
+      repository: ghcr.io/the-cloud-clockwork/agentihooks-worker
+      tag: dev
+      pullPolicy: Always
+    # Peers admitted to the jump port, such as the operator LAN.
+    ingressFrom: []
+    resources:
+      requests:
+        cpu: 10m
+        memory: 32Mi
+        ephemeral-storage: 16Mi
+      limits:
+        memory: 128Mi
+        ephemeral-storage: 64Mi
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+      ephemeral-storage: 64Mi
+    limits:
+      memory: 512Mi
+      ephemeral-storage: 256Mi
+
+# Event hub: reactors on the swarm event bus. Two replicas share each reactor's durable consumer; a singleton
+# reactor runs on whichever replica holds its lease.
+hub:
+  enabled: false
+  replicas: 2
+  bus:
+    backend: nats
+    url: ""
+    scoped: false
+  affinity:
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+          - matchExpressions:
+              - key: anton.io/capacity-type
+                operator: DoesNotExist
+  tolerations: []
+  terminationGracePeriodSeconds: 30
+  env: {}
+  # Secret keys as hub env, such as AGENTIHOOKS_BUS_CREDENTIALS for a NATS that signs its users:
+  # [{name, secretName, key, optional}].
+  secretEnv: []
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+      ephemeral-storage: 64Mi
+    limits:
+      memory: 512Mi
+      ephemeral-storage: 256Mi
+
+# secretName must hold AGENTIHOOKS_GITHUB_WEBHOOK_SECRET and the receiver's own AGENTIHOOKS_BUS_URL.
+githubWebhook:
+  enabled: false
+  replicas: 1
+  port: 8790
+  secretName: ""
+  affinity:
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+          - matchExpressions:
+              - key: anton.io/capacity-type
+                operator: DoesNotExist
+  tolerations: []
+  env: {}
+  resources:
+    requests:
+      cpu: 20m
+      memory: 96Mi
+      ephemeral-storage: 32Mi
+    limits:
+      memory: 512Mi
+      ephemeral-storage: 128Mi
+
+# Set enabled false and hub.bus.url to use an external NATS.
+nats:
+  enabled: true
+  config:
+    jetstream:
+      enabled: true
+  natsBox:
+    enabled: false
+
+workers:
+  replicas: 0
+  maxAgents: 20
+  # A stopping hive takes no new agents and waits this long for its agents to finish before it exits.
+  drainSeconds: 3600
+  excluded: [master]
+  # Swarms whose masters this hive takes although it excludes master; every other swarm still sees masters excluded.
+  masterSwarms: []
+  image:
+    repository: ghcr.io/the-cloud-clockwork/agentihooks-hive-worker
+    tag: dev
+    pullPolicy: Always
+  repositories: []
+  credentialSecret:
+    name: ""
+    key: ""
+  # Join endpoint hive refresh posts to; replaces the URL in the mounted member credential.
+  hiveUrl: ""
+  caSecret:
+    name: ""
+    key: ""
+  envFromSecrets: []
+  githubAuth:
+    mode: token
+    secretName: ""
+    tokenKey: GITHUB_TOKEN
+    appIdKey: GITHUB_APP_ID
+    installationIdKey: GITHUB_APP_INSTALLATION_ID
+    privateKeyKey: GITHUB_APP_PRIVATE_KEY
+  # Operator keys and the stable host key come from credentialSecret; publish the port outside this chart.
+  ssh:
+    enabled: false
+    port: 2222
+  # Memory in MiB per agent, multiplied by maxAgents into the pod's memory request and limit.
+  memoryPerAgentMi:
+    request: 700
+    limit: 2048
+  resources:
+    requests:
+      cpu: 100m
+      ephemeral-storage: 1Gi
+    limits:
+      ephemeral-storage: 10Gi
+  # Volume source of /home/worker, which holds the repo clones, worktrees and scratchpad; any kind other
+  # than emptyDir (a hostPath or persistentVolumeClaim) rolls out by Recreate so two hives never share it.
+  homeVolume:
+    emptyDir: {}
+  # Worktree limits, passed to agents through the worktrees ConfigMap. wt.sh new evicts the oldest safe
+  # worktrees to keep WT_MIN_FREE_GB free on the home volume and at most WT_MAX_PER_REPO worktrees per repo;
+  # agentihooks gc removes a worktree untouched for WT_STALE_DAYS days unless its owner lives.
+  worktreeMinFreeGb: 50
+  worktreeMaxPerRepo: 60
+  worktreeStaleDays: 7
+  nodeSelector: {}
+  affinity: {}
+  tolerations: []
+  # More hives in this release, one pod each, so an entry never sets replicas. Every entry needs a name and its own credentialSecret; its other
+  # top level keys replace the workers keys above whole, so a hive with a homeVolume sets the complete source.
+  hives: []
+
+worker:
+  enabled: false
+  replicas: 0
+  command: []
+  env: {}
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+      ephemeral-storage: 64Mi
+    limits:
+      memory: 512Mi
+      ephemeral-storage: 256Mi
+
+probe:
+  resources:
+    requests:
+      cpu: 10m
+      memory: 64Mi
+      ephemeral-storage: 16Mi
+    limits:
+      memory: 128Mi
+      ephemeral-storage: 64Mi
+
+networkPolicy:
+  enabled: true
+  ingressFrom: []
+
+ingress:
+  enabled: false
+  className: ""
+  host: ""
+  annotations: {}
+  tls: []

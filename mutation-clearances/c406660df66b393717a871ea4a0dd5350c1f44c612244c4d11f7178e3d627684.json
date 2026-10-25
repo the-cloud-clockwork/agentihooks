@@ -1,0 +1,6 @@
+{
+  "hooks/classifier/core.py:hooks.classifier.core.x_decide__mutmut_7:9cfe374bb198931057ba4d1b4368fdfc1c62d2eea613c32d386779220d784fba": {
+    "reader": "Standards reviewer /root/standards",
+    "reason": "False initializer is overwritten on normal calls; request failures log identical null result fields and preserve the exception."
+  }
+}

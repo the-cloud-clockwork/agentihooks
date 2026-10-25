@@ -1,0 +1,64 @@
+{
+  "case": "T-SV2-IDN-03-C",
+  "tested_commit": "f8b432655d9be6348e1e0528827aa79b658a9484",
+  "evidence_class": "local isolated fixture in a temporary agentihooks home; not live rollout proof",
+  "then": "replaying metadata transitions reconstructs the same attribution without duplicate session entries",
+  "replay_results": [
+    null,
+    null,
+    null,
+    null
+  ],
+  "scope_log_unchanged_after_replay": true,
+  "attribution": [
+    {
+      "attribution": "unknown"
+    },
+    {
+      "attribution": "scoped",
+      "project_id": "github.com/fixture/alpha",
+      "worktree": "one",
+      "task": "first",
+      "task_revision": "1",
+      "lane": "eng"
+    },
+    {
+      "attribution": "scoped",
+      "project_id": "github.com/fixture/alpha",
+      "worktree": "two",
+      "task": "first",
+      "task_revision": "1",
+      "lane": "eng"
+    },
+    {
+      "attribution": "scoped",
+      "project_id": "github.com/fixture/alpha",
+      "worktree": "two",
+      "task": "second",
+      "task_revision": "3",
+      "lane": "eng"
+    },
+    {
+      "attribution": "fleet"
+    },
+    {
+      "attribution": "scoped",
+      "project_id": "github.com/fixture/beta",
+      "worktree": "beta",
+      "task": "third",
+      "task_revision": "2",
+      "lane": "ci"
+    }
+  ],
+  "unattributed_session_events_total": 1,
+  "interrupted_write": {
+    "accepted_after_partial_line": true,
+    "readable_transitions": [
+      "one",
+      "two"
+    ],
+    "survived": "accepted transitions before the partial line",
+    "not_survived": "the partial line, which is skipped and never replaced by a success label"
+  },
+  "passed": true
+}

@@ -1,0 +1,6 @@
+{
+  "hooks/context/operator_words.py:hooks.context.operator_words.x__migrate__mutmut_62:b23e243fc8d286704d85d672110269d45eaf8a1857fda5579af607490d11c12a": {
+    "reader": "Standards",
+    "reason": "Only ASCII LEGACY table identifier casing changes; SQLite inserts or ignores the same unchanged empty-string completion marker."
+  }
+}

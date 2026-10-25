@@ -39,19 +39,19 @@ class WorkspaceField(unittest.TestCase):
 
 class WorkspaceOnThePage(unittest.TestCase):
     def test_the_reply_carries_the_latest_lines_of_tasks_with_a_work_folder(self):
-        from unittest.mock import patch
+        from scripts.swarm import commands
 
         tail = {"latest_progress": "red test seen\ngreen now"}
-        state = {"tasks": [{"id": "t1", "workspace": "/remote/task"}, {"id": "t2"}]}
-        with patch.object(server, "workspace_tails", return_value={"t1": tail}):
-            tasks = server.with_workspaces("pg", state)["tasks"]
-        self.assertEqual(tasks[0]["workspace_tail"], tail)
-        self.assertNotIn("workspace_tail", tasks[1])
-        self.assertNotIn("workspace_tail", state["tasks"][0])
+        with (
+            unittest.mock.patch.object(server, "swarm_store", return_value="store"),
+            unittest.mock.patch.object(commands, "workspaces", return_value={"t1": tail}),
+        ):
+            self.assertEqual(server.workspace_tails("pg", "t1"), tail)
+            self.assertEqual(server.workspace_tails("pg", "t2"), {})
 
     def test_the_proof_fold_renders_progress_and_proof(self):
         tail = {"latest_progress": "green now", "latest_proof": "run 7 passed"}
-        shown = texts(render({**PLAIN, "workspace": "/w/t1", "workspace_tail": tail})["tree"])
+        shown = texts(render({**PLAIN, "workspace": "/w/t1"}, tail)["tree"])
         for text in ("Contract and proof", "Latest progress", "green now", "Latest proof", "run 7 passed"):
             self.assertIn(text, shown)
 

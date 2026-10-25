@@ -1,0 +1,6 @@
+{
+  "hooks/context/prod_lockdown.py:hooks.context.prod_lockdown.x__production_command_lines__mutmut_19:7d64b3a202fcf6345d1a170a665cdccf67fe8481bf0355197440c3d48720374e": {
+    "reader": "Standards",
+    "reason": "Changes only the excluded synthetic command name and inert argument prefix. Both prefixes preserve argument parsing; their literal text produces no checked command."
+  }
+}

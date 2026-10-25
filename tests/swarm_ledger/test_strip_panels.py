@@ -1,9 +1,8 @@
-import json
 from pathlib import Path
 
 import pytest
 
-from tests.swarm_ledger.ledger_page import serve_modules
+from tests.swarm_ledger.ledger_page import ledger_state, loaded, serve_modules, shell_html
 from tests.swarm_ledger.test_caps_columns import browser as chromium_browser
 
 browser = chromium_browser
@@ -45,8 +44,7 @@ DOC = {
 def tab(browser, request):
     width, height = request.param
     context = browser.new_context(viewport={"width": width, "height": height})
-    html = (ROOT / "scripts/swarm_ledger/template.html").read_text().replace("__LEDGER_DATA__", json.dumps(DOC))
-    html = html.replace("__LEDGER_PALETTE__", (ROOT / "scripts/swarm_ledger/palette.css").read_text())
+    html = shell_html()
     context.route(
         "**/*",
         lambda route: (
@@ -57,9 +55,10 @@ def tab(browser, request):
             else route.fulfill(body=html, content_type="text/html")
         ),
     )
-    serve_modules(context)
+    serve_modules(context, ledger_state(DOC))
     page = context.new_page()
     page.goto(URL)
+    loaded(page)
     page.set_default_timeout(1500)
     yield page
     context.close()
@@ -73,10 +72,16 @@ def test_a_strip_panel_opens_beside_its_icon_and_scrolls_inside(tab, icon, panel
     strip = tab.locator("#icon-strip").bounding_box()
     box = tab.locator(f"#{panel}").bounding_box()
     view = tab.viewport_size
-    assert box["y"] == pytest.approx(mark["y"], abs=0.5)
-    assert box["x"] >= strip["x"] + strip["width"]
+    if view["width"] < 1024:
+        assert strip["y"] + strip["height"] == pytest.approx(view["height"], abs=0.5)
+        assert strip["y"] <= mark["y"]
+        assert box["x"] >= 0 and box["y"] >= 0
+        assert box["y"] + box["height"] <= strip["y"]
+    else:
+        assert box["y"] == pytest.approx(mark["y"], abs=0.5)
+        assert box["x"] >= strip["x"] + strip["width"]
+        assert box["y"] + box["height"] <= view["height"]
     assert box["x"] + box["width"] <= view["width"]
-    assert box["y"] + box["height"] <= view["height"]
     listing = tab.locator(f"#{rows}")
     assert listing.evaluate("el => el.scrollHeight > el.clientHeight")
     listing.evaluate("el => { el.scrollTop = 120; }")
@@ -90,12 +95,21 @@ def test_an_open_panel_follows_its_icon_when_the_page_resizes_or_the_strip_scrol
       const icon = document.getElementById("bell").getBoundingClientRect();
       return Math.abs(panel.top - icon.top) < 0.5 && panel.left >= document.getElementById("icon-strip").getBoundingClientRect().right;
     }"""
+    above = """() => {
+      const panel = document.getElementById("notif").getBoundingClientRect();
+      const bar = document.getElementById("icon-strip").getBoundingClientRect();
+      return panel.top >= 0 && panel.left >= 0 && panel.right <= innerWidth && panel.bottom <= bar.top;
+    }"""
     bell, strip = tab.locator("#bell"), tab.locator("#icon-strip")
     bell.click()
+    if tab.viewport_size["width"] < 1024:
+        tab.set_viewport_size({"width": 360, "height": 640})
+        tab.wait_for_function(above)
+        return
     start = bell.bounding_box()["y"]
-    tab.set_viewport_size({"width": {1440: 390, 390: 1440}[tab.viewport_size["width"]], "height": 320})
+    tab.set_viewport_size({"width": 1280, "height": 320})
     moved = bell.bounding_box()["y"]
-    assert moved != start
+    assert moved == pytest.approx(start, abs=0.5)
     tab.wait_for_function(beside)
     assert strip.evaluate("el => el.scrollHeight > el.clientHeight")
     strip.evaluate("el => { el.scrollTop = 40; }")

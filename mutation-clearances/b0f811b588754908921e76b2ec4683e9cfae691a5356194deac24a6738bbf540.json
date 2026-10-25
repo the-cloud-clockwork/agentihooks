@@ -1,0 +1,6 @@
+{
+  "scripts/claude_login.py:scripts.claude_login.x__capture__mutmut_24:9e56b99cccbc6869326ef8d9541a2d78df057342e343c8f6052e545c43856398": {
+    "reader": "standards_reader",
+    "reason": "When claude cannot start, _capture returns (1, \"\") and the mutant returns (1, \"XXXX\"); main returns the non-zero code at once and never reads the token, so nothing is written or printed differently. Equivalent; awaiting the Standards reader on PR 2592 round 2."
+  }
+}

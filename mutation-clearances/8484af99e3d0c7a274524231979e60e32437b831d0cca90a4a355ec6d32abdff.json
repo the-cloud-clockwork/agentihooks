@@ -1,0 +1,6 @@
+{
+  "1d9e588a87e83d2cead02d078930b6408fec0a5d431853a06931bfb4697f2d0c": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "HTTPMessage.get compares header names case insensitively. Origin lower/upper lookup gives identical present and absent values to the unchanged allowlist and mutation path. Independent runtime HTTPMessage probe confirmed equal values."
+  }
+}

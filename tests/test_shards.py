@@ -1,5 +1,7 @@
 import json
 import os
+import re
+import subprocess
 import sys
 import threading
 from pathlib import Path
@@ -8,8 +10,10 @@ from types import SimpleNamespace
 import pytest
 from xdist.workermanage import NodeManager
 
+from hooks.secrets import scan
 from tests import conftest
 from tests.shards import (
+    FIRST_SHARD_FILES,
     assign_files,
     discover_test_files,
     setup_nodes_in_parallel,
@@ -21,6 +25,7 @@ from tests.shards import (
 pytestmark = pytest.mark.unit
 
 _ROOT = Path(__file__).parent.parent
+_URL_CREDENTIAL = re.compile(r"://[^/\s@:]+:[^/\s@]+@")
 
 
 def test_every_test_file_lands_in_exactly_one_shard():
@@ -47,6 +52,271 @@ def test_shards_balance_the_stored_durations_per_file():
         ["tests/test_a.py", "tests/test_d.py"],
         ["tests/test_b.py", "tests/test_c.py", "tests/test_e.py"],
     ]
+
+
+def _committed(*args: str) -> str:
+    root = subprocess.run(
+        ["git", "rev-parse", "--show-toplevel"], cwd=_ROOT, check=True, capture_output=True, text=True
+    ).stdout.strip()
+    return subprocess.run(["git", *args], cwd=root, check=True, capture_output=True, text=True).stdout
+
+
+def test_committed_reads_from_repository_root_in_nested_copy(monkeypatch):
+    monkeypatch.setattr(__name__ + "._ROOT", _ROOT / "tests")
+    assert _committed("ls-files", ".test_durations").split() == [".test_durations"]
+
+
+def _credential_shaped(nodeids):
+    return [nodeid for nodeid in nodeids if scan(nodeid, mode="strict") or _URL_CREDENTIAL.search(nodeid)]
+
+
+def test_the_credential_check_flags_token_and_url_password_names():
+    planted = [
+        "t.py::t[" + "ghp_" + "a1B2c3D4e5F6g7H8i9J0k1L2m3N4o5P6q7R8]",
+        "t.py::t[https://user:fixture-" + "password@github.com/o/r.git]",
+    ]
+    assert _credential_shaped([*planted, "t.py::t[github]", "t.py::t[https-userinfo]"]) == planted
+
+
+def test_committed_durations_name_no_credential_shaped_case():
+    stored = _committed("ls-files", ".test_durations*").split()
+    assert stored
+    flagged = [
+        f"{path}: {nodeid}"
+        for path in stored
+        for nodeid in _credential_shaped(json.loads(_committed("show", f"HEAD:{path}")))
+    ]
+    assert flagged == []
+
+
+def test_serial_group_costs_are_not_divided_across_workers():
+    durations = {f"tests/test_{name}.py::t": seconds for name, seconds in zip("abcd", (5, 9, 5, 8))}
+    files = [f"tests/test_{name}.py" for name in "abcd"]
+    grouped = {files[0], files[2]}
+    assert assign_files(durations, files, 2, {}, grouped, 4) == [[files[0], files[1]], [files[2], files[3]]]
+    assert assign_files(durations, files, 2, {}, grouped, 1) == assign_files(durations, files, 2, {})
+
+
+def test_shards_balance_serial_and_parallel_worker_loads():
+    files = [f"tests/test_{name}.py" for name in "abcde"]
+    durations = {f"{path}::test_x": seconds for path, seconds in zip(files, (40, 30, 60, 60, 60))}
+    grouped = {files[0], files[1]}
+    assert assign_files(durations, files, 2, {}, grouped, 4) == [
+        [files[0], files[4]],
+        [files[1], files[2], files[3]],
+    ]
+
+
+def test_measured_cases_from_one_module_balance_across_shards():
+    from tests.shards import assign_nodes
+
+    nodes = [f"tests/test_hot.py::test_{n}" for n in range(8)]
+    durations = dict(zip(nodes, range(8, 0, -1)))
+    parts = assign_nodes(durations, 4, {"tests/test_hot.py"}, 4)
+    assert [sum(durations[node] for node in part) for part in parts] == [9, 9, 9, 9]
+    assert sorted(node for part in parts for node in part) == nodes
+
+
+def test_independent_worker_groups_balance_without_serializing_each_other():
+    from tests.shards import assign_nodes
+
+    nodes = [f"tests/test_{n}.py::test_x" for n in range(4)]
+    durations = dict(zip(nodes, (30, 30, 20, 20)))
+    grouped = {f"tests/test_{n}.py": "redis" if n % 2 == 0 else "sdk" for n in range(4)}
+    parts = assign_nodes(durations, 2, grouped, 4)
+    loads = [
+        max(
+            sum(durations[node] for node in part if grouped[node.split("::")[0]] == group) for group in ("redis", "sdk")
+        )
+        for part in parts
+    ]
+    assert loads == [30, 30]
+    assert sorted(node for part in parts for node in part) == nodes
+
+
+def test_one_files_xdist_group_stays_on_one_shard_with_its_summed_time():
+    from tests.shards import assign_nodes
+
+    durations = {
+        "tests/test_g.py::test_builds": 5.0,
+        "tests/test_g.py::test_reuses": 30.0,
+        "tests/test_a.py::test_x": 20.0,
+        "tests/test_b.py::test_y": 20.0,
+    }
+    parts = assign_nodes(durations, 2, {"tests/test_g.py": "g"}, 4)
+    assert parts == [
+        ["tests/test_g.py::test_builds", "tests/test_g.py::test_reuses"],
+        ["tests/test_a.py::test_x", "tests/test_b.py::test_y"],
+    ]
+
+
+def test_a_grouped_file_longer_than_an_even_shard_share_still_splits():
+    from tests.shards import assign_nodes
+
+    durations = {f"tests/test_g.py::test_{n}": 30.0 for n in range(4)}
+    parts = assign_nodes(durations, 2, {"tests/test_g.py": "g"}, 4)
+    assert [len(part) for part in parts] == [2, 2]
+
+
+def test_worker_shards_charge_collection_once_per_file():
+    from tests.shards import assign_nodes
+
+    nodes = [f"tests/test_{name}.py::test_{case}" for name in "abc" for case in range(4)]
+    durations = dict.fromkeys(nodes, 0.0)
+    sizes = {f"tests/test_{name}.py": size for name, size in zip("abc", (1_000_000, 1000, 1000))}
+    parts = assign_nodes(durations, 2, {}, 4, sizes=sizes)
+    assert sorted(sorted({node.split("::")[0] for node in part}) for part in parts) == [
+        ["tests/test_a.py"],
+        ["tests/test_b.py", "tests/test_c.py"],
+    ]
+    assert sorted(node for part in parts for node in part) == nodes
+
+
+def test_worker_shards_select_each_measured_and_unknown_case_once(tmp_path):
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests/test_hot.py").write_text('import pytest\npytestmark = pytest.mark.xdist_group("redis")\n')
+    nodes = [f"tests/test_hot.py::test_{n}" for n in range(8)]
+    durations = dict(zip(nodes, range(8, 0, -1)))
+    (tmp_path / ".test_durations").write_text(json.dumps(durations))
+    all_nodes = nodes + ["tests/test_hot.py::test_new[a@b]"]
+    selections = []
+    for shard in (1, 2):
+        config = SimpleNamespace(
+            getoption=lambda name, shard=shard: f"{shard}/2",
+            stash=pytest.Stash(),
+            rootpath=tmp_path,
+            option=SimpleNamespace(numprocesses=None),
+            workerinput={"workercount": 4},
+        )
+        assert conftest.pytest_ignore_collect(tmp_path / "tests/test_hot.py", config) is None
+        items = [SimpleNamespace(nodeid=node + "@redis") for node in all_nodes]
+        conftest.pytest_collection_modifyitems(config, items)
+        selections.append({item.nodeid.removesuffix("@redis") for item in items})
+    assert selections[0].isdisjoint(selections[1])
+    assert selections[0] | selections[1] == set(all_nodes)
+    assert all(selections)
+
+
+@pytest.mark.parametrize("workers", [1, 4, 16, "auto", None])
+@pytest.mark.parametrize("worker", [False, True])
+def test_shard_partition_is_independent_of_worker_capacity(tmp_path, monkeypatch, workers, worker):
+    (tmp_path / "tests").mkdir()
+    durations = {}
+    for number in range(6):
+        path = f"tests/test_{number}.py"
+        mark = 'pytestmark = pytest.mark.xdist_group("redis")\n' if number % 2 else ""
+        (tmp_path / path).write_text("import pytest\n" + mark)
+        durations.update({f"{path}::test_{case}": float((number + 1) * (case + 1)) for case in range(8)})
+    (tmp_path / ".test_durations").write_text(json.dumps(durations))
+    nodes = [*durations, "tests/test_0.py::test_new", "tests/test_1.py::test_new[a@b]"]
+    monkeypatch.setattr(conftest.os, "cpu_count", lambda: 32)
+    selections = []
+    for shard in range(1, 5):
+        counts = (4, workers, 4 if worker else None)
+        partitions = []
+        for count in counts:
+            config = SimpleNamespace(
+                getoption=lambda name, shard=shard: f"{shard}/4",
+                stash=pytest.Stash(),
+                rootpath=tmp_path,
+                option=SimpleNamespace(numprocesses=count),
+                **({"workerinput": {"workercount": count}} if worker and count else {}),
+            )
+            files = conftest._shard_files(config)
+            items = [SimpleNamespace(nodeid=node) for node in nodes if node.split("::", 1)[0] in files]
+            conftest.pytest_collection_modifyitems(config, items)
+            partitions.append({item.nodeid for item in items})
+        assert partitions[0] == partitions[1] == partitions[2]
+        selections.append(partitions[1])
+    assert set.union(*selections) == set(nodes)
+    assert sum(map(len, selections)) == len(nodes)
+
+
+def test_new_case_in_a_sparsely_measured_module_stays_on_a_collecting_shard(tmp_path):
+    import zlib
+
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests/test_sparse.py").write_text("pass\n")
+    known = "tests/test_sparse.py::test_known"
+    unknown = next(
+        f"tests/test_sparse.py::test_new_{n}"
+        for n in range(100)
+        if zlib.crc32(f"tests/test_sparse.py::test_new_{n}".encode()) % 2 == 1
+    )
+    (tmp_path / ".test_durations").write_text(json.dumps({known: 1.0}))
+    selections = []
+    for shard in (1, 2):
+        config = SimpleNamespace(
+            getoption=lambda name, shard=shard: f"{shard}/2",
+            stash=pytest.Stash(),
+            rootpath=tmp_path,
+            option=SimpleNamespace(numprocesses=None),
+            workerinput={"workercount": 2},
+        )
+        items = (
+            []
+            if conftest.pytest_ignore_collect(tmp_path / "tests/test_sparse.py", config)
+            else [SimpleNamespace(nodeid=node) for node in (known, unknown)]
+        )
+        conftest.pytest_collection_modifyitems(config, items)
+        selections.append({item.nodeid for item in items})
+    assert selections == [{known, unknown}, set()]
+
+
+@pytest.mark.parametrize("workers", [None, 4])
+def test_the_codex_file_runs_whole_in_the_first_shard_that_installs_the_codex_cli(tmp_path, workers):
+    (tmp_path / "tests/routing").mkdir(parents=True)
+    pinned = "tests/routing/test_codex_api.py"
+    for path in (pinned, "tests/test_a.py", "tests/test_b.py"):
+        (tmp_path / path).write_text("pass\n")
+    codex = [f"{pinned}::test_{n}" for n in range(4)]
+    durations = {**dict.fromkeys(codex, 2.0), "tests/test_a.py::t": 50.0, "tests/test_b.py::t": 1.0}
+    (tmp_path / ".test_durations").write_text(json.dumps(durations))
+    selections = []
+    for shard in (1, 2, 3):
+        config = SimpleNamespace(
+            getoption=lambda name, shard=shard: f"{shard}/3",
+            stash=pytest.Stash(),
+            rootpath=tmp_path,
+            option=SimpleNamespace(numprocesses=None),
+            **({"workerinput": {"workercount": workers}} if workers else {}),
+        )
+        collected = not conftest.pytest_ignore_collect(tmp_path / pinned, config)
+        items = [SimpleNamespace(nodeid=node) for node in codex] if collected else []
+        conftest.pytest_collection_modifyitems(config, items)
+        selections.append({item.nodeid for item in items})
+    assert selections == [set(codex), set(), set()]
+
+
+def test_every_file_pinned_to_the_first_shard_exists():
+    assert FIRST_SHARD_FILES
+    assert FIRST_SHARD_FILES <= set(discover_test_files(_ROOT))
+
+
+def test_grouped_files_reads_real_markers_and_ignores_fixture_strings(tmp_path):
+    from tests.shards import grouped_files
+
+    sources = {
+        "module": 'import pytest\npytestmark = pytest.mark.xdist_group("redis")\n',
+        "function": 'import pytest\n@pytest.mark.xdist_group(name="sdk")\ndef test_x(): pass\n',
+        "fixture": "source = 'pytest.mark.xdist_group(\"fake\")'\n",
+        "plain": "def test_x(): pass\n",
+    }
+    for name, source in sources.items():
+        (tmp_path / f"{name}.py").write_text(source)
+    assert grouped_files(tmp_path, [f"{name}.py" for name in sources]) == {
+        "module.py": "'redis'",
+        "function.py": "'sdk'",
+    }
+
+
+def test_grouped_files_parses_only_files_that_name_xdist_group(tmp_path):
+    from tests.shards import grouped_files
+
+    (tmp_path / "grouped.py").write_text('import pytest\npytestmark = pytest.mark.xdist_group("redis")\n')
+    (tmp_path / "unparsable.py").write_text("def test_x(:\n")
+
+    assert grouped_files(tmp_path, ["grouped.py", "unparsable.py"]) == {"grouped.py": "'redis'"}
 
 
 def test_shards_weigh_source_size_since_every_worker_collects_the_whole_shard():
@@ -77,10 +347,33 @@ def test_shard_option_weighs_source_size(tmp_path):
     assert ignored == {"b", "c"}
 
 
+@pytest.mark.parametrize("worker", [False, True])
+def test_shard_option_accounts_for_serial_worker_groups(tmp_path, worker):
+    (tmp_path / "tests").mkdir()
+    for name in "abcd":
+        mark = 'pytestmark = pytest.mark.xdist_group("redis")\n' if name in "ac" else ""
+        (tmp_path / "tests" / f"test_{name}.py").write_text("import pytest\n" + mark)
+    durations = {f"tests/test_{name}.py::t": seconds for name, seconds in zip("abcd", (5, 9, 5, 8))}
+    (tmp_path / ".test_durations").write_text(json.dumps(durations))
+    config = SimpleNamespace(
+        getoption=lambda name: "1/2",
+        stash=pytest.Stash(),
+        rootpath=tmp_path,
+        option=SimpleNamespace(numprocesses=None if worker else 4),
+        **({"workerinput": {"workercount": 4}} if worker else {}),
+    )
+    assert conftest._shard_files(config) == frozenset({"tests/test_a.py", "tests/test_b.py"})
+
+
 def test_shard_option_collects_only_that_shards_files(pytestconfig):
-    files = discover_test_files(_ROOT)
+    files = [path for path in discover_test_files(_ROOT) if path not in FIRST_SHARD_FILES]
     shard = 2
-    expected = set(assign_files(_stored_durations(), files, 4, source_sizes(_ROOT, files))[shard - 1])
+    durations = {node: seconds for node, seconds in _stored_durations().items() if node.split("::", 1)[0] in files}
+    part = conftest.assign_nodes(durations, 4, conftest.grouped_files(_ROOT, files), 4, source_sizes(_ROOT, files))[
+        shard - 1
+    ]
+    known = {node.split("::", 1)[0] for node in durations}
+    expected = {node.split("::", 1)[0] for node in part} | (set(files) - known)
     assert "shard" in vars(pytestconfig.option)
     config = SimpleNamespace(getoption=lambda name: f"{shard}/4", stash=pytest.Stash(), rootpath=_ROOT)
     kept = {path for path in files if not conftest.pytest_ignore_collect(_ROOT / path, config)}
@@ -95,10 +388,18 @@ def test_slow_tests_run_first_and_the_rest_keep_their_order():
     assert slowest_first(nodeids, durations, 0.1) == ["t::d[x]@probe", "t::b", "t::e", "t::a", "t::c", "t::new"]
 
 
+def test_an_xdist_group_keeps_collection_order_at_its_slowest_tests_place():
+    durations = {"t::builds": 1.0, "t::reuses": 2.0, "t::other": 1.5, "t::fast": 0.01}
+    nodeids = ["t::fast", "t::builds@g", "t::reuses@g", "t::other"]
+    assert slowest_first(nodeids, durations, 0.1) == ["t::builds@g", "t::reuses@g", "t::other", "t::fast"]
+
+
 def _modified_order(tmp_path, nodeids, **config):
     (tmp_path / ".test_durations").write_text(json.dumps({"t::fast": 0.001, "t::slow": 2.0}))
     items = [SimpleNamespace(nodeid=nodeid) for nodeid in nodeids]
-    conftest.pytest_collection_modifyitems(SimpleNamespace(stash=pytest.Stash(), rootpath=tmp_path, **config), items)
+    conftest.pytest_collection_modifyitems(
+        SimpleNamespace(getoption=lambda name: None, stash=pytest.Stash(), rootpath=tmp_path, **config), items
+    )
     return [item.nodeid for item in items]
 
 
@@ -121,6 +422,7 @@ def _warm_package(tmp_path, monkeypatch, files):
     for name, body in files.items():
         (package / f"{name}.py").write_text(body)
     monkeypatch.syspath_prepend(str(tmp_path))
+    monkeypatch.setattr(sys, "dont_write_bytecode", False)
     return package
 
 
@@ -138,6 +440,23 @@ def test_a_module_that_fails_to_import_leaves_the_rest_of_its_stride_warmed(tmp_
     statuses = [os.waitpid(pid, 0)[1] for pid in warm_imports(["warmpkg.test_bad", "warmpkg.test_ok"], 1)]
     assert statuses == [0]
     assert list((package / "__pycache__").glob("test_ok.*-pytest-*.pyc"))
+
+
+def test_warm_imports_run_without_the_controllers_tracer(tmp_path, monkeypatch):
+    seen = tmp_path / "seen"
+    _warm_package(
+        tmp_path, monkeypatch, {"test_trace": f"import sys\nopen({str(seen)!r}, 'w').write(repr(sys.gettrace()))\n"}
+    )
+    prior = sys.gettrace()
+    if prior is None:
+        sys.settrace(lambda *args: None)
+    try:
+        statuses = [os.waitpid(pid, 0)[1] for pid in warm_imports(["warmpkg.test_trace"], 1)]
+    finally:
+        if prior is None:
+            sys.settrace(None)
+    assert statuses == [0]
+    assert seen.read_text() == "None"
 
 
 def _configured(monkeypatch, numprocesses, **extra):
@@ -158,8 +477,12 @@ def _configured(monkeypatch, numprocesses, **extra):
 
 def test_the_controller_warms_its_shards_test_modules_once_per_worker(monkeypatch):
     calls, config = _configured(monkeypatch, 4)
-    files = discover_test_files(_ROOT)
-    shard = sorted(assign_files(_stored_durations(), files, 4, source_sizes(_ROOT, files))[1])
+    files = [path for path in discover_test_files(_ROOT) if path not in FIRST_SHARD_FILES]
+    durations = {node: seconds for node, seconds in _stored_durations().items() if node.split("::", 1)[0] in files}
+    sizes = conftest.source_sizes(_ROOT, files)
+    part = conftest.assign_nodes(durations, 4, conftest.grouped_files(_ROOT, files), 4, sizes=sizes)[1]
+    known = {node.split("::", 1)[0] for node in durations}
+    shard = sorted({node.split("::", 1)[0] for node in part} | (set(files) - known))
     assert calls == [([path.removesuffix(".py").replace("/", ".") for path in shard], 4)]
     reaped = []
     monkeypatch.setattr(conftest.os, "waitpid", lambda pid, flags: reaped.append(pid))
@@ -199,6 +522,23 @@ def test_the_workers_of_a_shard_are_set_up_side_by_side():
     assert manager.events == [("setupnodes", ["gw0", "gw1", "gw2", "gw3"])]
 
 
+def test_the_base_temp_exists_once_before_any_worker_starts(tmp_path):
+    root = tmp_path / "basetemp"
+
+    class Factory:
+        def getbasetemp(self):
+            root.mkdir()
+            return root
+
+    manager = _Manager(["gw0", "gw1", "gw2", "gw3"])
+    manager.config._tmp_path_factory = Factory()
+    seen = []
+    setup = manager.setup_node
+    manager.setup_node = lambda spec, putevent: seen.append(root.is_dir()) or setup(spec, putevent)
+    setup_nodes_in_parallel(manager, object())
+    assert seen == [True, True, True, True]
+
+
 def test_the_controller_of_a_sharded_run_sets_up_its_workers_side_by_side(monkeypatch):
     _configured(monkeypatch, 4)
     assert NodeManager.setup_nodes is setup_nodes_in_parallel
@@ -210,3 +550,13 @@ def test_workers_and_runs_without_workers_keep_xdists_node_setup(monkeypatch):
     assert NodeManager.setup_nodes is original
     _configured(monkeypatch, None)
     assert NodeManager.setup_nodes is original
+
+
+def test_a_shard_holding_a_serial_group_stays_heavy_for_later_parallel_tests():
+    from tests.shards import assign_nodes
+
+    durations = {"tests/test_a.py::test_a": 100.0, "tests/test_b.py::test_b": 200.0, "tests/test_c.py::test_c": 40.0}
+
+    parts = assign_nodes(durations, 2, {"tests/test_a.py": "a"}, 4)
+
+    assert parts == [["tests/test_a.py::test_a"], ["tests/test_b.py::test_b", "tests/test_c.py::test_c"]]

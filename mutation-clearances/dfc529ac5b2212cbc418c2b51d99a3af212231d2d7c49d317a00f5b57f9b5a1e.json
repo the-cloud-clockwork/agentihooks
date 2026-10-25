@@ -1,0 +1,6 @@
+{
+  "scripts/herdr_host.py:scripts.herdr_host.x_open_command__mutmut_15:b23c93365a9a1df3e00ab40817963c4a7d3a4bbb8e14c03f182b7cbbb8a6dafc": {
+    "reader": "standards_reader",
+    "reason": "open_pane compares placement only against \"split\" and \"workspace\", so any other value, including None, \"XXtabXX\" or \"TAB\", takes the same fallthrough as \"tab\" for every workspace value, so these mutants change no output."
+  }
+}

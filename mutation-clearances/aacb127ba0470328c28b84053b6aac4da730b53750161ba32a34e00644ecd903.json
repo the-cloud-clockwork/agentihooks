@@ -1,0 +1,6 @@
+{
+  "hooks/classifier/api.py:hooks.classifier.api.x\u01c1DecisionsApiBackend\u01c1decide__mutmut_19:9a9b3078151e607f31adc9418fc92c7c46cbdd3c9777b582e778ddd37c36c192": {
+    "reader": "Standards",
+    "reason": "urllib.request.Request stores every header under key.capitalize(), so the header name case variants send identical bytes and no test can observe them."
+  }
+}

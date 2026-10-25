@@ -32,6 +32,9 @@ LOOP = {
         "agentihooks swarm <slug> verdict",
         "--must",
         "agentihooks swarm <slug> restore-decision",
+        "<!-- slice: <id> -->",
+        "agentihooks ledger --slug <slug> --as <name> publish-plan",
+        "--plan-slice <id>",
     ),
     "engineer": (*WORKER, "agentihooks swarm <slug> issue <url>", "agentihooks swarm <slug> pr <url>", "--pr <url>"),
     "cicd": (*WORKER, "agentihooks swarm <slug> pr <url>", "--pr <url>", "--command", "--output"),
@@ -43,6 +46,44 @@ PARSERS["ledger"] = lambda argv: ledger_parser().parse_args(argv)
 
 def _skill(role: str) -> Path:
     return ROLES / role / ".claude" / "skills" / ROLE_SKILLS[role] / "SKILL.md"
+
+
+def test_planner_guidance_nests_task_headings_with_slice_anchors():
+    text = " ".join(_skill("planner").read_text().split())
+
+    assert (
+        "Put each phase under a heading with its exact title, each task section "
+        "under a heading one level deeper, and one unique `<!-- slice: <id> -->` "
+        "anchor immediately before each task heading."
+    ) in text
+
+
+@pytest.mark.parametrize(
+    "guidance",
+    [
+        ROLES / "master" / "CLAUDE.md",
+        ROLES / "planner" / "CLAUDE.md",
+        _skill("master"),
+        _skill("planner"),
+        ROLES.parent / "skills" / "init-swarm" / "SKILL.md",
+        ROLES.parent / "skills" / "take-master" / "SKILL.md",
+    ],
+)
+def test_plan_publishers_distinguish_full_plans_from_standalone_tasks(guidance):
+    text = " ".join(guidance.read_text().split())
+    rules = (
+        "A full plan is a plan file a master or planner writes and publishes "
+        "to the artifacts; every task built from it carries its slice.",
+        "Follow ups, open questions, operator notes and orders the operator "
+        "types or gives are standalone tasks with no plan and no slice.",
+        "A standalone task that a master or planner expands because it grew "
+        "wide becomes a plan: write and publish the plan with slice markers, "
+        "then add its tasks with their slices.",
+        "Small self explanatory changes, such as a style tweak or a loose "
+        "layout change, stay standalone and never get a plan.",
+    )
+
+    assert [rule for rule in rules if rule not in text] == []
 
 
 def _commands(text: str) -> list[str]:
@@ -113,3 +154,169 @@ def test_role_home_lists_its_own_role_skill_only(world, role):
     assert listed & set(ROLE_SKILLS.values()) == {ROLE_SKILLS[role]}
     assert (out / "skills" / ROLE_SKILLS[role]).resolve() == _skill(role).parent
     assert f"{ROLE_SKILLS[role]} skill" in (ROLES / role / "CLAUDE.md").read_text()
+
+
+@pytest.mark.parametrize(
+    "skill",
+    [
+        _skill("engineer"),
+        ROLES / "engineer" / ".claude" / "rules" / "engineer-role.md",
+        ROLES.parent / "skills" / "worktree" / "SKILL.md",
+    ],
+)
+def test_engineer_guidance_dequeues_a_queued_pull_request_before_pushing_a_fix(skill):
+    text = " ".join(skill.read_text().split())
+    steps = (
+        "only queues",
+        "agentihooks swarm <slug> merge queue",
+        "refuses a push",
+        "dequeue it first",
+        "agentihooks swarm <slug> merge dequeue",
+        "then push",
+        "checks pass",
+        "queue it again",
+    )
+
+    assert [step for step in steps if step not in text] == []
+    assert [text.index(step) for step in steps] == sorted(text.index(step) for step in steps)
+
+
+@pytest.mark.parametrize(
+    "skill",
+    [
+        _skill("engineer"),
+        ROLES / "engineer" / ".claude" / "rules" / "engineer-role.md",
+        ROLES / "cicd" / ".claude" / "skills" / "swarm-ci" / "SKILL.md",
+        ROLES / "master" / "CLAUDE.md",
+        ROLES / "master" / ".claude" / "rules" / "master-role.md",
+    ],
+)
+def test_swarm_engineer_guidance_names_no_raw_gh_merge_or_dequeue_mutation(skill):
+    text = skill.read_text()
+
+    assert [raw for raw in ("dequeuePullRequest", "gh pr merge") if raw in text] == []
+
+
+@pytest.mark.parametrize(
+    "guidance",
+    [
+        ROLES / "cicd" / ".claude" / "skills" / "swarm-ci" / "SKILL.md",
+        ROLES / "master" / "CLAUDE.md",
+        ROLES / "master" / ".claude" / "rules" / "master-role.md",
+    ],
+)
+def test_ci_and_master_guidance_queues_instead_of_merging(guidance):
+    text = " ".join(guidance.read_text().split())
+
+    assert "agentihooks swarm <slug> merge queue <url>" in text
+    assert "merge on green" not in text.lower()
+
+
+def test_rendered_qa_persona_reads_tests_from_ci_only(world):
+    from scripts.profiles import render
+
+    world["install"]._save_state({})
+    persona = " ".join((render.render_claude("qa") / "CLAUDE.md").read_text().split())
+
+    assert "run the gates, mutation and smoke runs" not in persona
+    assert "runs the gates" not in (ROLES / "qa" / "profile.yml").read_text()
+    steps = ("results from their CI runs", "never on this machine", "AGENTIHOOKS_ALLOW_LOCAL_TEST_RUN")
+    assert [step for step in steps if step not in persona] == []
+
+
+def test_rendered_swarm_engineer_skill_reads_red_and_green_in_ci(world):
+    from scripts.profiles import render
+
+    world["install"]._save_state({})
+    out = render.render_claude("engineer")
+    text = " ".join((out / "skills" / "swarm-engineer" / "SKILL.md").read_text().split())
+
+    assert "lint and tests green" not in text
+    steps = (
+        "branch mutation preflight",
+        "read it red on that branch push's preflight run",
+        "wait until it is green on the current head",
+        "then open the first draft",
+        "read it red in CI on a draft pull request",
+        "read it green in CI",
+        "AGENTIHOOKS_ALLOW_LOCAL_TEST_RUN",
+    )
+    assert [step for step in steps if step not in text] == []
+    assert [text.index(step) for step in steps] == sorted(text.index(step) for step in steps)
+
+
+MASTER_POOL = (
+    "masters-step",
+    "`master@<slug>`",
+    "`master-2@<slug>`",
+    "first in first out",
+    "exactly one",
+    "skipping a master that is gone or being retired by the tick",
+    "with the same id",
+    "Items from the operator bypass the pool and go to the front door",
+    "behaves exactly as a single master swarm",
+    "agentihooks swarm <slug> masters-channel say",
+    "agentihooks swarm <slug> masters-channel read",
+    "ten minutes",
+    "MASTER_INBOX_CLASSIFIER_WITH_FALLBACKS",
+    "Claude and Codex",
+)
+
+
+def _section(text: str, heading: str, until: str = "\n## ") -> str:
+    start = text.index(heading)
+    end = text.find(until, start + len(heading))
+    return text[start : end if end != -1 else len(text)]
+
+
+def test_rendered_claude_and_codex_masters_carry_the_same_master_pool(world):
+    from scripts.profiles import render
+
+    out = render.render_codex("package:master")
+    claude = out.parent / "claude"
+    pools = {
+        home: _section(persona.read_text(), "## Master pool")
+        for home, persona in (("claude", claude / "CLAUDE.md"), ("codex", out / "AGENTS.md"))
+    }
+    skills = {
+        home: root / "skills" / "swarm-master" / "SKILL.md" for home, root in (("claude", claude), ("codex", out))
+    }
+
+    assert pools["claude"] == pools["codex"]
+    assert [phrase for phrase in MASTER_POOL if phrase not in " ".join(pools["claude"].split())] == []
+    assert skills["claude"].resolve() == skills["codex"].resolve() == _skill("master")
+    skill = " ".join(_section(skills["codex"].read_text(), "## Master pool").split())
+    assert [phrase for phrase in MASTER_POOL if phrase not in skill] == []
+
+
+MASTER_SCALING = (
+    "keeps automatic scaling on",
+    "agentihooks balance",
+    "agentihooks swarm <slug> autoscale",
+    "before stating capacity",
+    "nothing past host room",
+)
+
+
+def test_rendered_claude_and_codex_masters_carry_the_scaling_rule(world):
+    from scripts.profiles import render
+
+    out = render.render_codex("package:master")
+    claude = out.parent / "claude"
+    rules = {
+        home: " ".join(_section(persona.read_text(), "## Scaling").split())
+        for home, persona in (("claude", claude / "CLAUDE.md"), ("codex", out / "AGENTS.md"))
+    }
+    skill = " ".join(_section((claude / "skills" / "swarm-master" / "SKILL.md").read_text(), "## Scaling").split())
+
+    assert rules["claude"] == rules["codex"]
+    assert [phrase for phrase in MASTER_SCALING if phrase not in rules["claude"]] == []
+    assert [phrase for phrase in MASTER_SCALING if phrase not in skill] == []
+
+
+def test_swarm_docs_describe_the_master_pool_for_claude_and_codex():
+    docs = ROLES.parents[2] / "docs" / "pillars" / "swarm.md"
+    text = " ".join(_section(docs.read_text(), "### Master pool", "\n### ").split())
+    phrases = [phrase.replace("<slug>", "<id>") for phrase in MASTER_POOL]
+
+    assert [phrase for phrase in phrases if phrase not in text] == []

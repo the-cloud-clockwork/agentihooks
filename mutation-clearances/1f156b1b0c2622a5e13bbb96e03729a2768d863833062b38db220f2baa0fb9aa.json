@@ -1,0 +1,6 @@
+{
+  "hooks/context/scheduled_broadcasts.py:hooks.context.scheduled_broadcasts.x_save__mutmut_9:f1d5fa87819dd64bc42127f97abc5fe1f255e61b884fca77845c919fc05e5198": {
+    "reader": "Standards",
+    "reason": "Only SQL keyword capitalization changes. SQLite parses the identical projection and non-null predicate, yielding identical rows for subsequent updates."
+  }
+}

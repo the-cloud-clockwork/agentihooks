@@ -1,0 +1,6 @@
+{
+  "hooks/classifier/fallbacks.py:hooks.classifier.fallbacks.x__run__mutmut_14:23c23e84c9fbc6c0dd6944e5491646e1e29120c256529890a662a8d5e939475a": {
+    "reader": "Standards reviewer /root/standards",
+    "reason": "Omitted route default is None; no token lookup or OAuth assignment occurs for an absent route. Present routes are unchanged."
+  }
+}

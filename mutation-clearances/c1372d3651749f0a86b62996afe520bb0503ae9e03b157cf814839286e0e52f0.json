@@ -1,0 +1,6 @@
+{
+  "scripts/gate_protected.py:scripts.gate_protected.x__duration_problems__mutmut_58:f20a228a7841c8c6f521b75a0201e3c0d3599dc25a068ef7582cb5ee81427be5": {
+    "reader": "Standards",
+    "reason": "Capitalization preserves operands and rejection behavior."
+  }
+}

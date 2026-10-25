@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/plan_packages.py:scripts.swarm_ledger.plan_packages.x_text__mutmut_3:2bfa03347ee6d9f56d4b188da2ff4b0ec84911d2031d75c1e2bd5154f3db20fb": {
+    "reader": "Standards",
+    "reason": "UTF-8 and utf-8 resolve to the identical Python CodecInfo object. Standards verified codec identity; decoding and errors are unchanged. Verified against CI run 37861955536 at head 680e7e3c."
+  }
+}

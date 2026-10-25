@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/execution.py:scripts.swarm.execution.x__check_binding__mutmut_11:e224778538e01262d2960bcedcd930a1325f2b8e3e8e922b73065726bd8e16b2": {
+    "reader": "Standards",
+    "reason": "Admission and update validate Kubernetes targets as pod_name, pod_namespace and pod_uid only; backend is immutable. Sorted union puts pod_uid last, so its unbound UID branch executes after every other legal field was checked. Continue and break end that final iteration with identical diagnostics and accepted state. Local targets prohibit pod_uid, so neither branch executes. Independent adversarial ruling for SV2-IDN-02; CI run 37712904872."
+  }
+}

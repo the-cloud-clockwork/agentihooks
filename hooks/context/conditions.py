@@ -9,12 +9,14 @@ Reference: docs/hooks/conditions.md.
 
 from __future__ import annotations
 
+import difflib
 import json
 import os
 import re
 import signal
 import subprocess
 import sys
+import threading
 import time
 import zlib
 from dataclasses import dataclass, field
@@ -23,9 +25,14 @@ from typing import Any
 
 from hooks.context import injection_trace, profile_chain, quarantine, tool_matcher
 
-STEPS = {"pre": "PreToolUse", "post": "PostToolUse", "stop": "Stop"}
+STEPS = {"pre": "PreToolUse", "post": "PostToolUse", "stop": "Stop", "start": "SessionStart"}
+_NO_MATCHER_STEPS = frozenset({"stop", "start"})
+TOOL_STEPS = ("pre", "post")
 _RUNNERS = {".sh": ["bash"], ".bash": ["bash"], ".py": [sys.executable]}
-_INDEX_VERSION = 1
+FILTER_SUFFIX = ".filter.yaml"
+JUDGE, LEDGER_WRITE, INBOX_SEND = "judge", "ledger_write", "inbox_send"
+SYNTHETIC_TOOLS = (JUDGE, LEDGER_WRITE, INBOX_SEND)
+_INDEX_VERSION = 2
 _FRESH_NS = 2_000_000_000
 _CODE_ROOT = Path(__file__).resolve().parents[2]
 _UNSET = object()
@@ -49,9 +56,10 @@ def parse_filename(filename: str) -> dict:
     if is_async:
         stem = stem[: -len(".async")]
     parts = stem.split("-")
-    if parts[0].lower() == "stop":
+    if parts[0].lower() in _NO_MATCHER_STEPS:
         if len(parts) != 2:
-            raise ValueError("expected stop-<name>.<ext>: Stop has no tool to match")
+            event = STEPS[parts[0].lower()]
+            raise ValueError(f"expected {parts[0].lower()}-<name>.<ext>: {event} has no tool to match")
         parts.insert(1, "any")
     if len(parts) < 3:
         raise ValueError("expected <step>-<matcher>-<name>.<ext>")
@@ -107,7 +115,7 @@ def layer_dirs(state: dict, cwd: str | Path | None = None) -> tuple[list[tuple[s
     bundle = profile_chain.bundle_path(state)
     profile_csv = profile_chain.active_profile(state)
     linked = profile_chain.linked_profiles(state)
-    layers: list[tuple[str, Path]] = []
+    layers: list[tuple[str, Path]] = [("package", profile_chain.BUILT_IN_PROFILES / "package" / "conditions")]
     if bundle is not None:
         layers.append(("bundle", bundle / ".claude" / "conditions"))
     for name, profile_dir in profile_chain.profile_dirs(bundle, profile_csv, linked):
@@ -335,8 +343,31 @@ def _kill_group(proc: subprocess.Popen) -> None:
         pass
 
 
+def _is_filter(entry: dict) -> bool:
+    return entry["file"].lower().endswith(FILTER_SUFFIX)
+
+
+def _run_filter(entry: dict, step: str, payload: dict, timeout: float) -> dict:
+    from hooks.filters import runner
+
+    box: dict = {}
+
+    def work() -> None:
+        try:
+            box["run"] = runner.run(entry, step, payload)
+        except Exception as error:
+            box["run"] = {"error": f"filter crashed: {error}"}
+
+    thread = threading.Thread(target=work, daemon=True)
+    thread.start()
+    thread.join(timeout)
+    return box.get("run") or {"error": f"timed out after {timeout:g}s"}
+
+
 def execute(entry: dict, step: str, payload: dict, timeout: float) -> dict:
     """Run one condition; never raises."""
+    if _is_filter(entry):
+        return _run_filter(entry, step, payload, timeout)
     cmd = _command(entry)
     if cmd is None:
         return {"error": "no runner for the extension and the file is not executable"}
@@ -383,6 +414,31 @@ def _run_all(entries: list[dict], step: str, payload: dict) -> list[dict]:
 
     with ThreadPoolExecutor(max_workers=min(CONDITIONS_MAX_PARALLEL, len(entries))) as pool:
         return list(pool.map(lambda entry: execute(entry, step, payload, CONDITIONS_TIMEOUT_SEC), entries))
+
+
+def _run_chained(entries: list[dict], step: str, payload: dict) -> list[dict]:
+    from hooks.config import CONDITIONS_TIMEOUT_SEC
+
+    runs, patch = [], {}
+    for entry in entries:
+        current = {**payload, "tool_input": {**payload["tool_input"], **patch}} if patch else payload
+        run = execute(entry, step, current, CONDITIONS_TIMEOUT_SEC)
+        rewritten = _parse_stdout(run["stdout"]).get("tool_input") if run.get("returncode") == 0 else None
+        if isinstance(rewritten, dict):
+            patch.update(rewritten)
+        runs.append(run)
+    return runs
+
+
+def _run_synchronous(entries: list[dict], step: str, payload: dict) -> list[dict]:
+    chained = [entry for entry in entries if step == "pre" and _is_filter(entry)]
+    if len(chained) < 2:
+        return _run_all(entries, step, payload)
+    rest = [entry for entry in entries if not _is_filter(entry)]
+    runs = dict(zip(map(id, chained), _run_chained(chained, step, payload)))
+    if rest:
+        runs.update(zip(map(id, rest), _run_all(rest, step, payload)))
+    return [runs[id(entry)] for entry in entries]
 
 
 # ---------------------------------------------------------------------------
@@ -509,7 +565,7 @@ def run_step(step: str, payload: dict) -> StepResult | None:
     synchronous = [entry for entry in entries if not entry["async"]]
     if not synchronous:
         return None
-    return merge(step, payload, list(zip(synchronous, _run_all(synchronous, step, payload))))
+    return merge(step, payload, list(zip(synchronous, _run_synchronous(synchronous, step, payload))))
 
 
 # ---------------------------------------------------------------------------
@@ -599,6 +655,19 @@ def stop_block(payload: dict) -> str | None:
     return "\n".join(result.reasons) or "blocked by a condition"
 
 
+@dataclass
+class StartEffect:
+    contexts: list[str]
+
+
+def start_effect(payload: dict) -> StartEffect | None:
+    """Context a start condition adds at SessionStart; it can never deny or rewrite."""
+    result = run_step("start", payload)
+    if result is None:
+        return None
+    return StartEffect(contexts=list(result.contexts))
+
+
 # ---------------------------------------------------------------------------
 # Operator gate — conditions are created or removed only when the operator
 # asks: his prompt this turn, his ledger comment or the master's relay of it
@@ -609,12 +678,14 @@ _DETERMINER = rf"(?:{_ARTICLE}|new|another|one)"
 _NOT_A_NAME = (
     r"(?:about|after|and|are|at|before|by|for|from|how|if|in|into|is|of|on|or|to|what|when|where|which|who|why|with)"
 )
+_NAMED = rf"\s+(?:up\s+)?(?:{_DETERMINER}\s+)*(?:(?!(?:{_ARTICLE}|{_NOT_A_NAME})\b)[\w'\"`./-]+\s+){{0,4}}"
 _SIGNAL = re.compile(
-    r"\b(?:set|add|create|make|write|put|install|remove|clear|delete|drop|update|change|edit|replace|fix)"
-    rf"\s+(?:up\s+)?(?:{_DETERMINER}\s+)*"
-    rf"(?:(?!(?:{_ARTICLE}|{_NOT_A_NAME})\b)[\w'\"`./-]+\s+){{0,4}}conditions?\b",
+    r"\b(?:(?:set|add|create|make|write|put|install|remove|clear|delete|drop|update|change|edit|replace|fix)"
+    rf"{_NAMED}conditions?|(?:set|add|create|update|remove){_NAMED}(?:filters?|classifiers?))\b",
     re.IGNORECASE,
 )
+_CODE_NOUN = re.compile(r"\b(?:endpoints?|quer(?:y|ies)|tables?|lists?|columns?)\b", re.IGNORECASE)
+_BESIDE_WORDS = 4
 _CONDITION_TOOL = re.compile(r"(?:agentihooks|hooks[-_]utils).*condition_(?:set|clear)$", re.IGNORECASE)
 _EDIT_TOOLS = frozenset({"Write", "Edit", "MultiEdit", "NotebookEdit"})
 _NEAR_CONDITIONS = re.compile(
@@ -709,6 +780,9 @@ def contains_condition_signal(prompt: str) -> bool:
 
     for match in _SIGNAL.finditer(prompt or ""):
         prefix = prompt[max(0, match.start() - 20) : match.start()].lower().strip()
+        after = " ".join(prompt[match.end() :].split()[:_BESIDE_WORDS])
+        if _CODE_NOUN.search(match.group(0)) or _CODE_NOUN.search(after):
+            continue
         if not any(prefix.endswith(neg.strip()) for neg in _NEGATION_PREFIXES):
             return True
     return False
@@ -904,8 +978,56 @@ def write_guard(tool_name: str, tool_input: dict | None, session_id: str, cwd: s
 # Inventory, creation and removal (MCP tools and the CLI)
 # ---------------------------------------------------------------------------
 
-_LANGUAGES = {"bash": (".sh", "#!/usr/bin/env bash\n"), "python": (".py", "#!/usr/bin/env python3\n")}
+_LANGUAGES = {
+    "bash": (".sh", "#!/usr/bin/env bash\n", 0o755),
+    "python": (".py", "#!/usr/bin/env python3\n", 0o755),
+    "filter": (FILTER_SUFFIX, "", 0o644),
+}
 _SCOPES = ("global", "profile", "directory")
+
+
+def _check_filter(script: str, run_async: bool) -> None:
+    import yaml
+
+    from hooks.filters import schema
+
+    if run_async:
+        raise ConditionError("a filter runs in process and cannot be async")
+    try:
+        schema.parse(yaml.safe_load(script))
+    except yaml.YAMLError:
+        raise ConditionError("invalid filter: the body is not YAML") from None
+    except schema.FilterSchemaError as error:
+        raise ConditionError(f"invalid filter: {error}") from None
+
+
+def _with_filter_settings(entries: list[dict]) -> tuple[list[dict], list[dict]]:
+    """Each filter entry with its mode, action and max_rounds; filters whose body fails the schema go to invalid."""
+    from hooks.filters import schema
+
+    kept: list[dict] = []
+    invalid: list[dict] = []
+    for entry in entries:
+        if entry["file"].lower().endswith(FILTER_SUFFIX):
+            try:
+                spec = schema.load(entry["path"])
+            except ValueError as error:
+                invalid.append({"path": entry["path"], "source": entry["source"], "error": str(error)})
+                continue
+            entry = {**entry, "filter": {"mode": spec.mode, "action": spec.action, "max_rounds": spec.max_rounds}}
+        kept.append(entry)
+    return kept, invalid
+
+
+def misspelled(entry: dict) -> dict | None:
+    for alt in tool_matcher.parse(entry["matcher"]).alternatives:
+        if alt.kind != "tool" or alt.value in SYNTHETIC_TOOLS:
+            continue
+        close = difflib.get_close_matches(alt.value, SYNTHETIC_TOOLS, cutoff=0.8)
+        if close:
+            error = f"unknown tool {alt.value!r}: did you mean the synthetic tool {close[0]!r}?"
+            return {"path": entry["path"], "source": entry["source"], "error": error}
+    return None
 
 
 def inventory(cwd: str | Path | None = None) -> dict:
@@ -913,6 +1035,8 @@ def inventory(cwd: str | Path | None = None) -> dict:
     layers, _probed = layer_dirs(state, cwd)
     _kept, untrusted = _trusted_layers(layers, state)
     entries, invalid = scan_layers([(s, d) for s, d in layers if str(d) not in untrusted])
+    entries, broken = _with_filter_settings(entries)
+    invalid += broken + [found for found in map(misspelled, entries) if found]
     described = []
     for source, directory in layers:
         described.append(
@@ -924,7 +1048,7 @@ def inventory(cwd: str | Path | None = None) -> dict:
                 "untrusted_owner": untrusted.get(str(directory)),
             }
         )
-    return {"layers": described, "conditions": entries, "invalid": invalid}
+    return {"layers": described, "conditions": entries, "invalid": invalid, "synthetic_tools": list(SYNTHETIC_TOOLS)}
 
 
 def target_dir(scope: str, profile: str = "", cwd: str | Path | None = None) -> tuple[str, Path]:
@@ -972,8 +1096,10 @@ def create_condition(
         raise ConditionError("name may use letters, digits and '_' only")
     if not (script or "").strip():
         raise ConditionError("script is empty")
-    ext, shebang = _LANGUAGES[language]
-    head = step if step == "stop" and matcher in ("", "any") else f"{step}-{matcher}"
+    if language == "filter":
+        _check_filter(script, run_async)
+    ext, shebang, mode = _LANGUAGES[language]
+    head = step if step in _NO_MATCHER_STEPS and matcher in ("", "any") else f"{step}-{matcher}"
     filename = f"{head}-{name}{'.async' if run_async else ''}{ext}"
     try:
         meta = parse_filename(filename)
@@ -987,7 +1113,7 @@ def create_condition(
     body = script if script.startswith("#!") else shebang + script
     tmp = path.with_name(f".{filename}.{os.getpid()}.tmp")
     tmp.write_text(body if body.endswith("\n") else body + "\n")
-    tmp.chmod(0o755)
+    tmp.chmod(mode)
     os.replace(tmp, path)
     return {"path": str(path), "layer": layer, "file": filename, "step": meta["step"], "matcher": meta["matcher"]}
 

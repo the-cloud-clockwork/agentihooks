@@ -10,7 +10,7 @@ permalink: /docs/pillars/fleet-command/
 
 **Talk to your entire fleet — instantly.**
 
-No other tool lets you send a message to every active Claude Code session at once. One command. Every agent. Right now.
+Broadcast to Claude Code and Codex sessions sharing the broadcast store. Delivery follows each harness's hook events; Codex receives tool context after the call.
 
 ## Table of contents
 {: .no_toc .text-delta }
@@ -26,7 +26,7 @@ Imagine a foreman on a construction site with a megaphone. One voice. Hundreds o
 
 AgentiHooks gives you that megaphone for your AI agent fleet.
 
-When production goes down, you do not hunt through terminal tabs to find which agents are mid-deploy. You do not hope that the one responsible agent happens to check a Slack channel. You type one command, and every Claude Code session in your fleet — on your laptop, on your teammates' machines, inside Kubernetes pods — sees your message before its next action.
+Send one command during an incident: Claude Code and Codex sessions sharing the broadcast store receive the message through their hooks.
 
 ```bash
 agentihooks broadcast -s critical "Production incident — do NOT deploy."
@@ -196,7 +196,7 @@ agentihooks broadcast emit "deploy freeze tonight, no pushes until morning"
 
 ## Session Registry
 
-Fleet Command works because it knows who is in the fleet. AgentiHooks maintains a live registry of every active Claude Code session.
+Fleet Command works because it knows who is in the fleet. AgentiHooks maintains a live registry of active Claude Code and Codex sessions sharing its store.
 
 **Location:** `~/.agentihooks/active-sessions.json`
 
@@ -422,3 +422,7 @@ Haiku handles the rest.
 - [Pillar 1: Identity](identity.md)
 - [Pillar 2: Guardrails](guardrails.md)
 - [Pillar 3: Context Intelligence](context.md)
+
+## GitHub App credentials
+
+`agentihooks github-app token` prints an installation token for scripts. `agentihooks github-app exec COMMAND ...` supplies current gh and git credentials to a process tree. `agentihooks github-app credential get|store|erase` is the GitHub HTTPS credential helper; it never stores tokens. See the [worker chart authentication choices](../../deploy/helm/agentihooks-swarm/README.md) for App and token Secret references.

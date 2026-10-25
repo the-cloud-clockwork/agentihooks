@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/ledger_tasks.py:scripts.swarm_ledger.ledger_tasks.x_check_lane__mutmut_9:155c10d7db7cd9a90cb659faf65c8296c91cf88ec51f969b765288d4217f974d": {
+    "reader": "Standards",
+    "reason": "Omitting the fallback produces None; validation decisions remain identical."
+  }
+}

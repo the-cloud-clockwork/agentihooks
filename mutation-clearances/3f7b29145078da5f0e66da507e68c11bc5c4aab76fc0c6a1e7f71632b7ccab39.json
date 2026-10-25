@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/plan_evidence.py:scripts.swarm_ledger.plan_evidence.x_evidence__mutmut_88:ad63b86a19f7b8761207798ae88acf1a8d39c2124904d8f5fcfc0925a466292d": {
+    "reader": "Standards",
+    "reason": "ensure_ascii None and False select the same JSON encoding branch."
+  }
+}

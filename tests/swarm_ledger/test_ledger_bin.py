@@ -8,13 +8,17 @@ import ledger_bin  # noqa: E402
 import ledger_core as core  # noqa: E402
 
 from scripts.swarm_ledger.repository import bin_storage
+from scripts.swarm_ledger.storage import default as default_repository
+
+repository = default_repository()
 
 
 @pytest.fixture(autouse=True)
 def empty_bin():
-    core.LEDGER_DIR.mkdir(parents=True, exist_ok=True)
-    ledger_bin.bin_path().unlink(missing_ok=True)
-    ledger_bin.restored_path().unlink(missing_ok=True)
+    with repository.connect() as connection, connection:
+        connection.execute("BEGIN IMMEDIATE")
+        repository.save_registry(connection, "bin", {})
+        repository.save_registry(connection, "restored", {})
 
 
 def test_a_closed_ledger_goes_to_the_bin_at_the_given_time():

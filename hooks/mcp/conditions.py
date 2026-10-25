@@ -41,15 +41,17 @@ def register(mcp):
         reason. Exit 2 denies the call (pre) with stderr as the reason.
 
         Args:
-            step: "pre" (before the tool runs), "post" (after it succeeds) or
-                "stop" (when the agent stops; exit 2 or decision deny keeps it working).
-            matcher: "" or any for stop; otherwise any, a tool name (bash, edit, write, read, webfetch), mcp,
+            step: "pre" (before the tool runs), "post" (after it succeeds),
+                "stop" (when the agent stops; exit 2 or decision deny keeps it working) or
+                "start" (at SessionStart; context only, it can never deny or rewrite).
+            matcher: "" or any for stop and start; otherwise any, a tool name (bash, edit, write, read, webfetch), mcp,
                 mcp__<server>, mcp__<server>__<tool>, bash.<cli> (e.g. bash.kubectl);
                 join alternatives with "+".
             name: letters, digits and "_" only.
             script: the script body.
             session_id: your session id (from the SessionStart banner).
-            language: "bash" or "python".
+            language: "bash", "python" or "filter" (script is the filter YAML, checked against the
+                filter schema; written as <step>-<matcher>-<name>.filter.yaml).
             scope: "global" (bundle-wide; ~/.agentihooks when no bundle is linked),
                 "profile" (one profile of the chain), or "directory"
                 (<git-root>/.agentihooks/conditions of the current repository).
@@ -98,7 +100,11 @@ def register(mcp):
 
             result = inventory(cwd or os.getcwd())
             conditions = [
-                {k: e[k] for k in ("file", "step", "matcher", "name", "async", "source", "path", "order")}
+                {
+                    k: e[k]
+                    for k in ("file", "step", "matcher", "name", "async", "source", "path", "order", "filter")
+                    if k in e
+                }
                 for e in result["conditions"]
             ]
             return json.dumps({"success": True, **result, "conditions": conditions})

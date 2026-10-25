@@ -1,0 +1,129 @@
+{
+  "package": "SV2-ACC-05",
+  "case": "T-SV2-ACC-05-B",
+  "title": "rejection and containment: a terminal or SSH failure alone frees no account slot and admits no duplicate worker",
+  "tested_commit": "5b2c70a3bd120abda0676c302fe122ca77a5a88b",
+  "evidence_class": "mocked",
+  "ci_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38064120800",
+  "fixture": "tests/fixtures/swarm_v2/account-reconciliation.json: account fixture with cap 4; seat eng-1 mid handoff (generation 1 occupied, generation 2 reserved), seat eng-2 orphan reservation of a replaced execution, seat eng-3 working with a confirmed terminal loss, and stored runtime observations for supervisor exit, Pod Failed, Pod not found, Pod unreachable and Pod Running",
+  "fixture_clock": "build() from tests/sv2_ctl02_cases.py patches time.time to the fixture clock and issues launch grants; FleetRegistry, AccountCapacity and AccountReconciler read the same list",
+  "tests": [
+    {
+      "test": "tests/test_swarm_v2_account_reconciliation.py::test_a_row_that_changed_after_judgement_is_kept",
+      "job": 114248338031,
+      "output": "PASSED at 2026-10-10T15:38:31.7624165Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_account_reconciliation.py::test_a_superseded_predecessor_cannot_release_its_retiring_row_or_the_newer_slot",
+      "job": 114248338031,
+      "output": "PASSED at 2026-10-10T15:38:31.8995332Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_account_reconciliation.py::test_an_exit_releases_only_on_its_stored_observation[pod_failed-kubernetes-7-False]",
+      "job": 114248338046,
+      "output": "PASSED at 2026-10-10T15:36:45.7846758Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_account_reconciliation.py::test_an_exit_releases_only_on_its_stored_observation[pod_failed-kubernetes-None-True]",
+      "job": 114248338055,
+      "output": "PASSED at 2026-10-10T15:37:33.8382748Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_account_reconciliation.py::test_an_exit_releases_only_on_its_stored_observation[pod_failed-supervisor-None-False]",
+      "job": 114248338082,
+      "output": "PASSED at 2026-10-10T15:36:33.1317113Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_account_reconciliation.py::test_an_exit_releases_only_on_its_stored_observation[pod_gone-kubernetes-None-False]",
+      "job": 114248338082,
+      "output": "PASSED at 2026-10-10T15:36:33.0397270Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_account_reconciliation.py::test_an_exit_releases_only_on_its_stored_observation[pod_running-kubernetes-None-False]",
+      "job": 114248338034,
+      "output": "PASSED at 2026-10-10T15:38:35.6387727Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_account_reconciliation.py::test_an_exit_releases_only_on_its_stored_observation[pod_unreachable-kubernetes-None-False]",
+      "job": 114248338081,
+      "output": "PASSED at 2026-10-10T15:37:39.8780893Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_account_reconciliation.py::test_an_exit_releases_only_on_its_stored_observation[supervisor_exit-kubernetes-None-False]",
+      "job": 114248338034,
+      "output": "PASSED at 2026-10-10T15:38:35.6597888Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_account_reconciliation.py::test_an_exit_releases_only_on_its_stored_observation[supervisor_exit-supervisor-None-True]",
+      "job": 114248338082,
+      "output": "PASSED at 2026-10-10T15:36:33.0677237Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_account_reconciliation.py::test_an_occupancy_is_released_only_on_a_lost_classification_of_its_generation[None-None-found4]",
+      "job": 114248338081,
+      "output": "PASSED at 2026-10-10T15:37:39.8267437Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_account_reconciliation.py::test_an_occupancy_is_released_only_on_a_lost_classification_of_its_generation[lost_terminal-None-found1]",
+      "job": 114248338081,
+      "output": "PASSED at 2026-10-10T15:37:39.8126331Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_account_reconciliation.py::test_an_occupancy_is_released_only_on_a_lost_classification_of_its_generation[lost_worker-7-found3]",
+      "job": 114248338082,
+      "output": "PASSED at 2026-10-10T15:36:32.9726988Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_account_reconciliation.py::test_an_occupancy_is_released_only_on_a_lost_classification_of_its_generation[lost_worker-None-found2]",
+      "job": 114248338034,
+      "output": "PASSED at 2026-10-10T15:38:35.3258084Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_account_reconciliation.py::test_an_occupancy_is_released_only_on_a_lost_classification_of_its_generation[suspect_worker-None-found0]",
+      "job": 114248338081,
+      "output": "PASSED at 2026-10-10T15:37:39.8265041Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_account_reconciliation.py::test_an_unobserved_replaced_occupancy_is_kept_and_named_unobserved",
+      "job": 114248338031,
+      "output": "PASSED at 2026-10-10T15:38:31.7538331Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_account_reconciliation.py::test_another_seat_cannot_take_a_slot_a_handoff_still_holds",
+      "job": 114248338034,
+      "output": "PASSED at 2026-10-10T15:38:35.4607823Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_account_reconciliation.py::test_b_a_terminal_failure_alone_frees_no_slot_and_admits_no_duplicate",
+      "job": 114248338082,
+      "output": "PASSED at 2026-10-10T15:36:32.9458393Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_account_reconciliation.py::test_other_swarms_rows_are_never_judged",
+      "job": 114248338046,
+      "output": "PASSED at 2026-10-10T15:36:45.8535505Z"
+    }
+  ],
+  "rejections": {
+    "exit_from_terminal_heartbeat_provider_ssh_or_unnamed_source": "insufficient_evidence",
+    "exit_without_a_stored_exit_observation_of_that_generation": "insufficient_evidence",
+    "duplicate_worker_for_the_lost_terminal_seat": "account_full",
+    "other_seat_while_a_handoff_holds_two_slots": "account_full",
+    "superseded_predecessor_release": "SwarmError from LaunchAuthority, no write",
+    "suspect_or_terminal_loss_classification": "kept and reported, never released",
+    "row_changed_between_judgement_and_drop": "kept"
+  },
+  "state_assertion": "account hash rows are byte-equal before and after every refused request",
+  "disclosure_assertion": "refusals carry only the error class; findings carry holder, execution id, generation and the classification label, never a grant or token",
+  "recovery_isolation": "freeing the slot needs a lost classification or a stored exit of that exact generation, then a new grant for the replacement",
+  "account_occupancy_discrepancies": {
+    "after_replacement": {
+      "handoff_unconfirmed": 1,
+      "orphan_occupancy": 1,
+      "orphan_reservation": 1
+    },
+    "dimension": "swarm fixture, account fixture, after the duplicate launch is refused"
+  },
+  "cleanup": "fakeredis per test; no live resource mutations",
+  "passed": true
+}

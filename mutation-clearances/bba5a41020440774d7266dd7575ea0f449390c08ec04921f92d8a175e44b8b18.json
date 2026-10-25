@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/naming.py:scripts.swarm.naming.x_repo_name__mutmut_25:5384ddd7792fa78525c37eac7fc7a3a1b626494561441f35d0602d0c47e6e622": {
+    "reader": "Standards",
+    "reason": "A placeholder path that is not a git dir falls back to the folder name exactly like the empty path."
+  }
+}

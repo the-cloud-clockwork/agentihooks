@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.swarm_ledger.ledger_page import show
+from tests.swarm_ledger.ledger_page import ledger_state, shell_html, show
 
 SCRIPTS = Path(__file__).resolve().parents[2] / "scripts" / "swarm_ledger"
 sys.path.insert(0, str(SCRIPTS))
@@ -26,7 +26,7 @@ def browser():
         chromium.close()
 
 
-def page_html():
+def author_doc():
     doc = new_ledger.build_doc(
         {
             "title": "Author lines",
@@ -40,13 +40,16 @@ def page_html():
     for key in SECTIONS:
         doc[key][0]["comments"] = THREAD
     doc["chat"] = THREAD
-    return new_ledger.render(doc, "author-lines", 8765)
+    return doc
 
 
 def lines(browser):
     tab = browser.new_page(viewport={"width": 1600, "height": 900})
     try:
-        show(tab, page_html())
+        show(tab, shell_html(), ledger=ledger_state(author_doc()))
+        for key in SECTIONS:
+            tab.locator(f"#sec-{key} button[data-comments]").click()
+        tab.locator("#chat-fab").click()
         return tab.evaluate(
             """(sections) => {
               const probe = document.createElement("div");

@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.x\u01c1Handler\u01c1refused__mutmut_18:a8475961407734a792c2605a007486f4f4d9bbefd15882f2223d02abaa6f7d54": {
+    "reader": "Standards",
+    "reason": "http.server header lookup is case insensitive, so the changed name casing reads the same header."
+  }
+}

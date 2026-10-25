@@ -1,0 +1,6 @@
+{
+  "hooks/config.py:hooks.config.x_manifesto_roles__mutmut_7:14f9325ffc5188b52964234a19c45c4d0dc4c24e5e888dadee0c33105e12f9ed": {
+    "reader": "Standards reader, pull request 1751",
+    "reason": "codecs.lookup normalises UTF-8 and utf-8 to the same codec, so decoded text, BOM handling and decode errors are identical; only the file object's encoding attribute differs, and read_text never returns it. Checked on temp files with valid and invalid UTF-8."
+  }
+}

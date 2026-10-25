@@ -1,0 +1,12 @@
+{
+  "tested_commit": "f13f73dc0c3f011859a791a77b3ec10fe2471805",
+  "evidence_class": "Isolated fake Redis; two independent controller processes over TCP for case A; fake server time and mocked Kubernetes transport for cases B and C; no live rollout proof.",
+  "inputs": {
+    "scripts/swarm/lease.py": "9fe591dab4a34906764e82c2a480b159b2f3a6052d306c61bd168376708134ec",
+    "scripts/swarm/execution.py": "bb0d577e1a02534d54f36c9b00d47451de61f53838c984c12d8d0d32b1ad1af7",
+    "scripts/swarm_v2/controller.py": "08ce25b35f782fe52b44ad05d1c1ab261e0d0874c50557a2e4b0b4898f06847f",
+    "scripts/swarm_v2/runtime/operations.py": "2076cb491c6c0cedc9812af6987abfb204b662a51108aa49c306f6f396791f79",
+    "tests/test_swarm_v2_controller.py": "dfaa71b3bfe279d7684a9d9b9c06852368892d75476e52fccf1dbcead4f27030",
+    "tests/sv2_ctl01_cases.py": "d51b2c9625594b7647f8dbad2ae39aa66550516b39a283c35f350df2f9cce4ca"
+  }
+}

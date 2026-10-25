@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/api/routes.py:scripts.swarm_ledger.api.routes.x_handle__mutmut_37:82a72b4914de5035f38345486e2d13ae9a07c0657b2c4535e9fa9c583b12cfac": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "The only changed expression is json.dumps ensure_ascii=False to ensure_ascii=None on the final wire serialization. Both select the same false branch of the JSON encoder and produce identical unescaped Unicode text for every serializable result. All other serialization options, status, content type and handler.send arguments remain unchanged; exceptions retain the same behavior."
+  }
+}

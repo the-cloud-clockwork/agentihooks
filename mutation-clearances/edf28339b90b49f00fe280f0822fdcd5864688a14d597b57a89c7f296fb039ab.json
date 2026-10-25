@@ -1,0 +1,6 @@
+{
+  "scripts/ci_mutation/selection.py:scripts.ci_mutation.selection.x_collect_parallel_stats__mutmut_35:626a905a8e9fb251b9bffc4935c091324bfc7b18c9f384fb4421577b7b7f5920": {
+    "reader": "Standards",
+    "reason": "Flush variants emit the same stdout for the unbuffered continuous integration consumer."
+  }
+}

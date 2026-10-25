@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/ledger_tasks.py:scripts.swarm_ledger.ledger_tasks.x__set_slice__mutmut_19:7d12c2aa29f42c4a74a28e8f0c2a063c363223bdea617b2d4de7ec705fa4a2e6": {
+    "reader": "Standards",
+    "reason": "Accepted ledger documents contain tasks: existing records are normalized before guarded operations and new ledger documents seed the field. The changed missing-key default is unreachable. Verified against CI run 37861955536 at head 680e7e3c."
+  }
+}

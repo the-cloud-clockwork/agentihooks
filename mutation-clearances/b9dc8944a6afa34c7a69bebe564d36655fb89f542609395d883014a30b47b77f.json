@@ -1,0 +1,6 @@
+{
+  "scripts/init_agent.py:scripts.init_agent.x__handoff_agent__mutmut_29:49d9bcdcbd352b39d070242d94faeb97ca5e47bc78be9d2811660eaa3eb2935d": {
+    "reader": "Standards",
+    "reason": "Equivalent: both defaults capitalize to Claude; requested values and all other behavior remain unchanged."
+  }
+}

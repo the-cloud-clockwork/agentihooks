@@ -1,0 +1,6 @@
+{
+  "hooks/observability/agent_trace.py:hooks.observability.agent_trace.x__batch_accepted__mutmut_46:68e8c965e6cdee1afeb29f4011e5ce1f48470d29b209d18f73abeca568ed595c": {
+    "reader": "Standards reader",
+    "reason": "requests Response.headers is CaseInsensitiveDict, giving identical lookups for header name casing."
+  }
+}

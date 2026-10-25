@@ -1,9 +1,8 @@
-import json
 from pathlib import Path
 
 import pytest
 
-from tests.swarm_ledger.ledger_page import serve_modules
+from tests.swarm_ledger.ledger_page import ledger_state, loaded, serve_modules, shell_html
 from tests.swarm_ledger.test_caps_columns import browser
 
 __all__ = ["browser"]
@@ -26,8 +25,7 @@ DOC = {
 @pytest.fixture
 def page(browser):
     context = browser.new_context(viewport={"width": 1440, "height": 900})
-    html = (ROOT / "scripts/swarm_ledger/template.html").read_text().replace("__LEDGER_DATA__", json.dumps(DOC))
-    html = html.replace("__LEDGER_PALETTE__", (ROOT / "scripts/swarm_ledger/palette.css").read_text())
+    html = shell_html()
     context.route(
         "**/*",
         lambda route: (
@@ -36,9 +34,10 @@ def page(browser):
             else route.fulfill(body=html, content_type="text/html")
         ),
     )
-    serve_modules(context)
+    serve_modules(context, ledger_state(DOC))
     tab = context.new_page()
     tab.goto(URL)
+    loaded(tab)
     tab.set_default_timeout(1500)
     yield tab
     context.close()
@@ -110,8 +109,7 @@ def test_chat_bubble_floats_bottom_right_and_opens_chat_with_its_unread_count(br
     doc = {**DOC, "chat": [{"id": f"m{i}", "by": "boss", "at": 10 + i, "text": f"note {i}"} for i in range(3)]}
     context = browser.new_context(viewport={"width": width, "height": 844})
     context.add_init_script('localStorage.setItem("plan-ledger:__LEDGER_SLUG__:chat-seen", "10")')
-    html = (ROOT / "scripts/swarm_ledger/template.html").read_text().replace("__LEDGER_DATA__", json.dumps(doc))
-    html = html.replace("__LEDGER_PALETTE__", (ROOT / "scripts/swarm_ledger/palette.css").read_text())
+    html = shell_html()
     context.route(
         "**/*",
         lambda route: (
@@ -120,9 +118,10 @@ def test_chat_bubble_floats_bottom_right_and_opens_chat_with_its_unread_count(br
             else route.fulfill(body=html, content_type="text/html")
         ),
     )
-    serve_modules(context)
+    serve_modules(context, ledger_state(doc))
     tab = context.new_page()
     tab.goto(URL)
+    loaded(tab)
     tab.set_default_timeout(1500)
     bubble = tab.locator("#chat-fab")
     assert tab.locator("#icon-strip #chat-fab").count() == 0

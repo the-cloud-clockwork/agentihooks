@@ -2,7 +2,8 @@ import io
 
 import pytest
 
-from scripts.swarm_ledger.events import Expired, Hub, stream
+from scripts.swarm_ledger.events import stream
+from scripts.swarm_ledger.events.hub import Expired, Hub
 from tests.swarm_ledger.bounded import bounded
 
 SLUG = "frames-2026-01-01"
@@ -133,15 +134,54 @@ def test_serve_raises_expired_before_sending_anything():
     assert hub.channels[SLUG].subscribers == 1
 
 
-def test_serve_stops_when_a_slow_reader_falls_out_of_retention(monkeypatch):
+def test_serve_sends_one_recovery_snapshot_then_heartbeats_when_the_writer_stops(monkeypatch):
     monkeypatch.setattr(stream, "HEARTBEAT_S", 0.01)
     hub = Hub(retained=1)
 
     def flood(flush):
-        for rev in (2, 3, 4):
-            hub.publish(SLUG, "ledger", ledger(rev))
+        if flush == 1:
+            for rev in (2, 3, 4):
+                hub.publish(SLUG, "ledger", ledger(rev))
 
     handler = Handler(Sink(5, flood))
     assert bounded(stream.serve, handler, hub, SLUG, lambda: {"ledger": ledger(1)})[0] is None
-    assert len(handler.wfile.marks) == 1
+    events = list(stream.parse(handler.wfile.getvalue().decode().splitlines()))
+    assert [name for name, _, _ in events] == ["snapshot", "snapshot", "heartbeat", "heartbeat", "heartbeat"]
+    assert events[1][1] == {"ledger": ledger(4)}
+    assert hub.watched() == []
+
+
+def test_serve_resets_a_lagging_reader_once_and_resumes_patches(monkeypatch):
+    monkeypatch.setattr(stream, "HEARTBEAT_S", 0.01)
+    hub = Hub(retained=1)
+
+    def publish(flush):
+        if flush == 1:
+            for rev in (2, 3, 4):
+                hub.publish(SLUG, "ledger", ledger(rev))
+        elif flush == 2:
+            hub.publish(SLUG, "ledger", ledger(5))
+
+    handler = Handler(Sink(3, publish))
+    assert bounded(stream.serve, handler, hub, SLUG, lambda: {"ledger": ledger(1)})[0] is None
+    events = list(stream.parse(handler.wfile.getvalue().decode().splitlines()))
+    assert [name for name, _, _ in events] == ["snapshot", "snapshot", "ledger"]
+    assert events[1][1] == {"ledger": ledger(4)}
+    assert events[2][1]["rev"] == 5
+    assert len(handler.wfile.marks) == 3
+    assert hub.watched() == []
+
+
+def test_serve_ends_the_response_cleanly_when_the_hub_drains(monkeypatch):
+    monkeypatch.setattr(stream, "HEARTBEAT_S", 30)
+    hub = Hub()
+
+    def drain(flush):
+        if flush == 1:
+            hub.drain()
+
+    handler = Handler(Sink(5, drain))
+    assert bounded(stream.serve, handler, hub, SLUG, lambda: {"ledger": ledger(1)}, limit=10)[0] is None
+    events = list(stream.parse(handler.wfile.getvalue().decode().splitlines()))
+    assert [name for name, _, _ in events] == ["snapshot"]
     assert hub.watched() == []

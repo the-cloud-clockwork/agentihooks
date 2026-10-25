@@ -72,7 +72,7 @@
     }
   },
   "swarm": {
-    "config": {"state": "running", "name": "swarm-replay", "slug": "replay", "autonomy": "delegate", "max_eng": 3, "max_ci": 1, "max_plan": 1, "codex_share": 30, "effort_min": "medium", "effort_max": "high"},
+    "config": {"state": "running", "name": "swarm-replay", "slug": "replay", "autonomy": "delegate", "max_eng": 3, "max_ci": 1, "max_plan": 1, "effort_min": "medium", "effort_max": "high"},
     "compact_limit": 600,
     "master_affinity": {"desired": "claude", "live": "claude"},
     "last_tick": 1791299900000,

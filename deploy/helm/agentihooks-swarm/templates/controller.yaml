@@ -1,0 +1,386 @@
+{{- if not .Values.hiveOnly }}
+{{- $api := .Values.controller.api }}
+{{- $workers := .Values.controller.workers }}
+{{- $ca := .Values.controller.terminalCa | default dict }}
+{{- $jump := .Values.controller.jump | default dict }}
+{{- if and $jump.enabled (not (and $ca.secretName $ca.key $jump.address)) }}
+{{- fail "controller.jump needs controller.terminalCa and an address: the jump trusts the user CA and records the address the operator dials" }}
+{{- end }}
+{{- if and $jump.enabled (not $jump.ingressFrom) }}
+{{- fail "controller.jump needs ingressFrom: an empty peer list would admit every source to the jump port" }}
+{{- end }}
+{{- with $api.proof }}
+{{- if not $api.enabled }}
+{{- fail "controller.api.proof needs controller.api.enabled: the setting reaches the controller only with its API" }}
+{{- end }}
+{{- if not (and .agent .task) }}
+{{- fail "controller.api.proof needs agent and task: the controller names the proof swarm from them" }}
+{{- end }}
+{{- if not $workers.apiUrl }}
+{{- fail "controller.api.proof needs controller.workers.apiUrl: the proof swarm launches on the Kubernetes runtime" }}
+{{- end }}
+{{- if not (regexMatch "^proof-[0-9a-f]{6}-[a-z0-9]+-[0-9]+$" (toString $api.swarm)) }}
+{{- fail "controller.api.proof needs controller.api.swarm to name the proof swarm, proof-<code>-<task>-<n>" }}
+{{- end }}
+{{- end }}
+{{- $scratchNames := list }}
+{{- range $scratch := .Values.controller.scratchSwarms }}
+{{- if has $scratch.swarm $scratchNames }}
+{{- fail "controller.scratchSwarms lists a swarm more than once" }}
+{{- end }}
+{{- $scratchNames = append $scratchNames $scratch.swarm }}
+{{- if not (and $scratch.swarm $scratch.agent $scratch.task $scratch.repo) }}
+{{- fail "each controller.scratchSwarms entry needs swarm, agent, task and repo: the controller names its ledger from the agent and task" }}
+{{- end }}
+{{- if not (regexMatch "^proof-[0-9a-f]{6}-[a-z0-9]+-[0-9]+$" (toString $scratch.swarm)) }}
+{{- fail "each controller.scratchSwarms swarm must be a proof swarm name, proof-<code>-<task>-<n>" }}
+{{- end }}
+{{- if has $scratch.swarm ($.Values.controller.hostSwarms | default list) }}
+{{- fail "a controller.scratchSwarms swarm must not be in controller.hostSwarms: the controller ticks the scratch swarms it creates" }}
+{{- end }}
+{{- if and $api.proof (eq $scratch.swarm $api.swarm) }}
+{{- fail "a controller.scratchSwarms swarm must not be the served proof controller.api.swarm" }}
+{{- end }}
+{{- end }}
+{{- if and (or $ca.secretName $workers.apiUrl) (not (and $ca.secretName $ca.key)) }}
+{{- fail "controller.terminalCa needs secretName and key with controller.workers.apiUrl: the controller signs operator certificates with that key" }}
+{{- end }}
+{{- if $workers.apiUrl }}
+{{- $tag := toString $workers.imageTag }}
+{{- if or (eq $tag "") (contains "@" $tag) (contains "sha256" $tag) (regexMatch "^[0-9a-f]{40}$" $tag) }}
+{{- fail "controller.workers.imageTag must be a floating tag such as dev, never a digest or commit hash; the controller resolves its digest at each launch" }}
+{{- end }}
+{{- range $setting := list "profile" "brain" }}
+{{- if not (index $workers $setting) }}
+{{- fail (printf "controller.workers.%s is required for the Kubernetes runtime" $setting) }}
+{{- end }}
+{{- end }}
+{{- if lt (int $workers.cap) 1 }}
+{{- fail "controller.workers.cap must be a whole number above zero" }}
+{{- end }}
+{{- if not $workers.projects }}
+{{- fail "controller.workers.projects names no project" }}
+{{- end }}
+{{- if and $workers.podPolicy $workers.podPolicyConfigMap }}
+{{- fail "set controller.workers.podPolicy or podPolicyConfigMap, not both" }}
+{{- end }}
+{{- if not (or $workers.podPolicy $workers.podPolicyConfigMap) }}
+{{- fail "controller.workers.podPolicy or podPolicyConfigMap is required for the Kubernetes runtime" }}
+{{- end }}
+{{- if not .Values.controller.serviceAccountName }}
+{{- fail "controller.serviceAccountName is required: the Kubernetes runtime creates worker Pods with its token" }}
+{{- end }}
+{{- if $workers.podPolicy }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "swarm.fullname" . }}-pod-policy
+  labels:
+    {{- include "swarm.labels" . | nindent 4 }}
+    app.kubernetes.io/component: controller
+data:
+  pod-policy.json: {{ toJson $workers.podPolicy | quote }}
+---
+{{- end }}
+{{- end }}
+{{- if $api.enabled }}
+{{- if not $api.swarm }}
+{{- fail "controller.api.swarm must name the swarm the control API serves" }}
+{{- end }}
+{{- if has $api.swarm (.Values.controller.hostSwarms | default list) }}
+{{- fail "controller.api.swarm must not be in controller.hostSwarms: the control API holds the tick lease of the swarm it serves" }}
+{{- end }}
+{{- if not (and $api.signingKey.keyId $api.signingKey.secretName) }}
+{{- fail "controller.api.signingKey needs keyId and secretName: workers verify launch grants with that key" }}
+{{- end }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "swarm.fullname" . }}-controller
+  labels:
+    {{- include "swarm.labels" . | nindent 4 }}
+    app.kubernetes.io/component: controller
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "swarm.selector" (dict "root" . "component" "controller") | nindent 4 }}
+  ports:
+    - name: api
+      port: {{ $api.port }}
+      targetPort: api
+---
+{{- end }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "swarm.fullname" . }}-controller
+  {{- if and $workers.apiUrl $workers.podPolicyConfigMap }}
+  annotations:
+    configmap.reloader.stakater.com/reload: {{ $workers.podPolicyConfigMap | quote }}
+  {{- end }}
+  labels:
+    {{- include "swarm.labels" . | nindent 4 }}
+    app.kubernetes.io/component: controller
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "swarm.selector" (dict "root" . "component" "controller") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "swarm.labels" . | nindent 8 }}
+        app.kubernetes.io/component: controller
+      {{- if and $workers.apiUrl $workers.podPolicy }}
+      annotations:
+        checksum/pod-policy: {{ toJson $workers.podPolicy | sha256sum }}
+      {{- end }}
+    spec:
+      {{- with .Values.controller.serviceAccountName }}
+      serviceAccountName: {{ . }}
+      {{- end }}
+      automountServiceAccountToken: {{ not (empty $workers.apiUrl) }}
+      {{- include "swarm.podSecurityContext" . | nindent 6 }}
+      terminationGracePeriodSeconds: {{ .Values.controller.terminationGracePeriodSeconds | default 30 }}
+      {{- with .Values.controller.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.controller.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      initContainers:
+        - name: wait
+          image: {{ include "swarm.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          {{- include "swarm.containerSecurity" . | nindent 10 }}
+          command:
+            - python
+            - -c
+            - |
+              import os, ssl, time, urllib.request
+              from scripts.swarm.store import redis_client
+              for _ in range(120):
+                  try:
+                      redis_client()
+                      context = ssl.create_default_context(cadata=os.environ.get("LEDGER_CA_PEM") or None)
+                      urllib.request.urlopen(os.environ["LEDGER_URL"] + "/healthz", timeout=2, context=context).read()
+                      break
+                  except Exception as exc:
+                      print(f"waiting for Redis and the ledger: {exc}", flush=True)
+                      time.sleep(2)
+              else:
+                  raise SystemExit("Redis or the ledger never came up")
+          env:
+            {{- include "swarm.env" (dict "root" . "role" "controller") | nindent 12 }}
+          {{- include "swarm.envFrom" . | nindent 10 }}
+          resources:
+            {{- toYaml .Values.probe.resources | nindent 12 }}
+        {{- if $jump.enabled }}
+        - name: jump-prepare
+          image: {{ include "swarm.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          {{- include "swarm.containerSecurity" . | nindent 10 }}
+          command: [agentihooks, swarm-jump, prepare, --state, /run/jump/state]
+          env:
+            {{- include "swarm.env" (dict "root" . "role" "controller") | nindent 12 }}
+            - name: AGENTIHOOKS_TERMINAL_CA_KEY
+              value: /run/secrets/terminal-ca/{{ $ca.key }}
+            - name: AGENTIHOOKS_TERMINAL_JUMP
+              value: {{ $jump.address | quote }}
+          {{- include "swarm.envFrom" . | nindent 10 }}
+          resources:
+            {{- toYaml .Values.probe.resources | nindent 12 }}
+          volumeMounts:
+            - name: jump
+              mountPath: /run/jump
+            - name: terminal-ca
+              mountPath: /run/secrets/terminal-ca
+              readOnly: true
+        {{- end }}
+      containers:
+        {{- if $jump.enabled }}
+        - name: jump
+          image: "{{ $jump.image.repository }}:{{ $jump.image.tag }}"
+          imagePullPolicy: {{ $jump.image.pullPolicy }}
+          {{- include "swarm.containerSecurity" . | nindent 10 }}
+          command: [/usr/sbin/sshd, -D, -e, -f, /run/jump/state/sshd_config]
+          ports:
+            - name: jump
+              containerPort: 2222
+          readinessProbe:
+            tcpSocket:
+              port: jump
+            periodSeconds: 10
+          resources:
+            {{- toYaml $jump.resources | nindent 12 }}
+          volumeMounts:
+            - name: jump
+              mountPath: /run/jump
+              readOnly: true
+        {{- end }}
+        - name: controller
+          image: {{ include "swarm.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          {{- include "swarm.containerSecurity" . | nindent 10 }}
+          command:
+            - sh
+            - -c
+            - >-
+              agentihooks hive controller >/dev/null
+              && . "$AGENTIHOOKS_HOME/controller/credential.env"
+              && export AGENTIHOOKS_CONTROLLER_CREDENTIAL
+              && exec agentihooks controller run
+          {{- if $api.enabled }}
+          ports:
+            - name: api
+              containerPort: {{ $api.port }}
+          startupProbe:
+            exec:
+              command: [agentihooks, controller, live]
+            {{- toYaml .Values.controller.startupProbe | nindent 12 }}
+          readinessProbe:
+            exec:
+              command: [agentihooks, controller, ready]
+            {{- toYaml .Values.controller.readinessProbe | nindent 12 }}
+          {{- end }}
+          livenessProbe:
+            exec:
+              {{- if $api.enabled }}
+              command: [agentihooks, controller, live]
+              {{- else }}
+              command:
+                - python
+                - -c
+                - >-
+                  import os; from scripts.swarm import lease; from scripts.swarm.store import connect;
+                  from scripts.swarm.controller_probes import HOST_SWARMS_ENV, ticked; store = connect();
+                  held = ticked(store.slugs(), os.environ.get(HOST_SWARMS_ENV, ""));
+                  stale = [slug for slug in held if not lease.current(store, slug)];
+                  assert not stale, f"no live controller lease for {stale}"
+              {{- end }}
+            {{- toYaml .Values.controller.livenessProbe | nindent 12 }}
+          env:
+            {{- include "swarm.env" (dict "root" . "role" "controller") | nindent 12 }}
+            - name: AGENTIHOOKS_HOME
+              value: /run/agentihooks
+            - name: AGENTIHOOKS_POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: AGENTIHOOKS_POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: AGENTIHOOKS_POD_UID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.uid
+            - name: AGENTIHOOKS_POD_CONTAINER
+              value: controller
+            {{- with .Values.controller.hostSwarms }}
+            - name: AGENTIHOOKS_CONTROL_HOST_SWARMS
+              value: {{ join "," . | quote }}
+            {{- end }}
+            {{- with .Values.controller.scratchSwarms }}
+            - name: AGENTIHOOKS_CONTROL_SCRATCH_SWARMS
+              value: {{ toJson . | quote }}
+            {{- end }}
+            {{- if $api.enabled }}
+            - name: AGENTIHOOKS_CONTROL_API_PORT
+              value: {{ $api.port | quote }}
+            - name: AGENTIHOOKS_CONTROL_SWARM
+              value: {{ $api.swarm | quote }}
+            - name: AGENTIHOOKS_LAUNCH_SIGNING_KEY_ID
+              value: {{ $api.signingKey.keyId | quote }}
+            - name: AGENTIHOOKS_LAUNCH_SIGNING_KEY_FILE
+              value: /run/secrets/launch-signing/{{ $api.signingKey.secretKey }}
+            {{- with $api.proof }}
+            - name: AGENTIHOOKS_CONTROL_PROOF
+              value: {{ toJson . | quote }}
+            {{- end }}
+            {{- end }}
+            {{- if $workers.apiUrl }}
+            - name: AGENTIHOOKS_CONTROL_API_URL
+              value: {{ $workers.apiUrl | quote }}
+            - name: AGENTIHOOKS_POD_POLICY_FILE
+              value: /etc/agentihooks/pod-policy/pod-policy.json
+            - name: AGENTIHOOKS_WORKER_IMAGE_TAG
+              value: {{ toString $workers.imageTag | quote }}
+            - name: AGENTIHOOKS_WORKER_PROFILE
+              value: {{ $workers.profile | quote }}
+            - name: AGENTIHOOKS_LAUNCH_CAP
+              value: {{ int $workers.cap | toString | quote }}
+            - name: AGENTIHOOKS_LAUNCH_PROJECTS
+              value: {{ join "," $workers.projects | quote }}
+            - name: AGENTIHOOKS_LAUNCH_BRAIN
+              value: {{ $workers.brain | quote }}
+            {{- end }}
+            {{- if $ca.secretName }}
+            - name: AGENTIHOOKS_TERMINAL_CA_KEY
+              value: /run/secrets/terminal-ca/{{ $ca.key }}
+            {{- end }}
+            {{- if $jump.enabled }}
+            - name: AGENTIHOOKS_TERMINAL_JUMP_STATE
+              value: /run/jump/state
+            {{- end }}
+            {{- include "swarm.secretKeyEnv" .Values.controller.secretEnv | nindent 12 }}
+            {{- include "swarm.extraEnv" .Values.controller.env | nindent 12 }}
+          {{- include "swarm.envFrom" . | nindent 10 }}
+          resources:
+            {{- toYaml .Values.controller.resources | nindent 12 }}
+          volumeMounts:
+            - name: home
+              mountPath: /run/agentihooks
+            {{- if $api.enabled }}
+            - name: launch-signing
+              mountPath: /run/secrets/launch-signing
+              readOnly: true
+            {{- end }}
+            {{- if $workers.apiUrl }}
+            - name: pod-policy
+              mountPath: /etc/agentihooks/pod-policy
+              readOnly: true
+            {{- end }}
+            {{- if $ca.secretName }}
+            - name: terminal-ca
+              mountPath: /run/secrets/terminal-ca
+              readOnly: true
+            {{- end }}
+            {{- if $jump.enabled }}
+            - name: jump
+              mountPath: /run/jump
+            {{- end }}
+      volumes:
+        - name: home
+          emptyDir:
+            medium: Memory
+        {{- if $jump.enabled }}
+        - name: jump
+          emptyDir:
+            medium: Memory
+        {{- end }}
+        {{- if $api.enabled }}
+        - name: launch-signing
+          secret:
+            secretName: {{ $api.signingKey.secretName }}
+            defaultMode: 0400
+        {{- end }}
+        {{- if $workers.apiUrl }}
+        - name: pod-policy
+          configMap:
+            name: {{ $workers.podPolicyConfigMap | default (printf "%s-pod-policy" (include "swarm.fullname" .)) | quote }}
+        {{- end }}
+        {{- if $ca.secretName }}
+        - name: terminal-ca
+          secret:
+            secretName: {{ $ca.secretName }}
+            defaultMode: 0400
+            items:
+              - key: {{ $ca.key }}
+                path: {{ $ca.key }}
+        {{- end }}
+{{- end }}

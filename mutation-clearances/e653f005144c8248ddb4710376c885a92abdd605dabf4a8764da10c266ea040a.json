@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/watch_ledger.py:scripts.swarm_ledger.watch_ledger.x_request__mutmut_15:4c51434e1cf1ea236155bb856c0224f31fab4c18b599023e82ad9d2edd2cb4be": {
+    "reader": "Standards reader",
+    "reason": "urllib.parse.quote never escapes ASCII letters, digits or underscore dot dash tilde, so adding X to the safe set changes no output; quote with safe empty and safe XXXX agree on every byte value 0 to 255 and sampled non ASCII input. Exact CI artifact mutant from run 37679023255."
+  }
+}

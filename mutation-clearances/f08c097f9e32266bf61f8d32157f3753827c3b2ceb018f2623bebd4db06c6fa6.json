@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/metrics_swarm.py:scripts.swarm.metrics_swarm.x__log_batch__mutmut_23:92ec2e44d1d5bfb02fa465cfd1cdd5976c5557d82ba397502772281daae2a7cd": {
+    "reader": "standards_reader",
+    "reason": "Only unquoted SQL identifier letter case changes. SQLite resolves the same table and source/position columns; the SELECT predicate and result remain identical."
+  }
+}

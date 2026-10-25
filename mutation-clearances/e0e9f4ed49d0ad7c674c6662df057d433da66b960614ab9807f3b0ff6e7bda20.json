@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/api/resources.py:scripts.swarm_ledger.api.resources.x_page__mutmut_50:58a2cd9fa812ad1cd0ea75c8f3a3d59dfe16b7da8261be66aaf18c8dba42fc93": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "Source evidence: this data key is changed only in the local candidate dictionary used solely by reply_size before page append/break. Its uppercase form is the same number of unescaped ASCII bytes; all dictionary values and separator counts are unchanged, making the measured byte size identical for every row. The actual return dictionary is built independently with the original keys. Selection, exceptions, revisions, cursor and output bytes are identical."
+  }
+}

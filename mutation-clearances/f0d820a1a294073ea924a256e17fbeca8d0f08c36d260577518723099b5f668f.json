@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/stack_clients.py:scripts.swarm.stack_clients.x_prepare__mutmut_72:2f06e072b966ab7b5720ac9e2335ba0027cd400800712b984966338dd82ee355": {
+    "reader": "standards_reader",
+    "reason": "urllib.parse.quote always preserves ASCII letters; adding XXXX to safe changes no output for any input."
+  }
+}

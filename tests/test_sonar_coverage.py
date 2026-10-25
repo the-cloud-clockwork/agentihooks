@@ -1,9 +1,11 @@
 import importlib.util
 import os
 import shlex
+import shutil
 import subprocess
 import sys
 import threading
+import time
 import xml.etree.ElementTree as ET
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -12,6 +14,7 @@ from urllib.request import Request, urlopen
 
 import pytest
 import yaml
+from coverage import CoverageData
 
 pytestmark = pytest.mark.unit
 ROOT = Path(__file__).resolve().parents[1]
@@ -21,13 +24,22 @@ def test_sonar_uses_all_shards_without_running_tests_again():
     workflow = yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())
     jobs = workflow["jobs"]
     scan = jobs["sonar"]
-    assert scan["needs"] == ["unit"]
+    assert scan["needs"] == ["unit", "unit-selected", "select", "reuse", "admission"]
     merge = next(step for step in scan["steps"] if step.get("name") == "Merge shard coverage")
     assert "pytest" not in merge["run"]
     assert "combine.sh" in merge["run"]
-    assert merge["env"]["GH_TOKEN"] == "${{ github.token }}"
+    assert set(merge["env"]) == {"SHARDS", "SCOPE"}
     assert "sonar" in jobs["gate-required"]["needs"]
     assert not (ROOT / ".github/workflows/sonar-scan.yml").exists()
+
+
+def test_sonar_sets_up_before_merging_coverage():
+    steps = yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())["jobs"]["sonar"]["steps"]
+    names = [step.get("name") or step.get("uses") for step in steps]
+    merge = names.index("Merge shard coverage")
+    for setup in ("actions/checkout@v4", "actions/setup-python@v5", "Install coverage"):
+        assert names.index(setup) < merge
+    assert merge < names.index("Wait for the coverage merge") < names.index("SonarQube Scan")
 
 
 def test_coverage_options_measure_hooks_and_scripts_on_one_interpreter():
@@ -62,6 +74,19 @@ def test_missing_shard_coverage_is_red(tmp_path):
     assert "Missing coverage for shard 4" in result.stdout
 
 
+@pytest.mark.parametrize("args", [["42", "8"], []], ids=["run-id", "no-arguments"])
+def test_combine_refuses_anything_but_downloaded_coverage(tmp_path, args):
+    result = subprocess.run(
+        ["bash", str(ROOT / ".github/coverage/combine.sh"), *args],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 2
+    assert "::error::Usage: combine.sh --downloaded <shards>" in result.stdout
+    assert not (tmp_path / "coverage.xml").exists()
+
+
 def test_combined_coverage_keeps_hits_from_every_shard_and_both_packages(tmp_path):
     for package in ("hooks", "scripts"):
         (tmp_path / package).mkdir()
@@ -81,6 +106,11 @@ for shard in range(1, 5):
         runpy.run_path(f'{package}/part_{shard}.py')
     cov.stop()
     cov.save()
+(folder / 'js-coverage').mkdir()
+(folder / 'js-coverage' / 'sources').mkdir(parents=True)
+(folder / 'js-coverage' / 'sources' / 's.js').write_text('void 0;\\n')
+for kind in ('node', 'browser'):
+    (folder / 'js-coverage' / f'capture-{kind}-1.json').write_text('{"result": [{"source": "s", "functions": [{"ranges": [{"startOffset": 0, "endOffset": 7, "count": 1}]}]}]}')
 """
     subprocess.run(
         [sys.executable, "-c", generator, str(ROOT / ".github/coverage/coverage.ini")],
@@ -95,18 +125,169 @@ for shard in range(1, 5):
         text=True,
     )
     assert result.returncode == 0, result.stdout + result.stderr
+    assert "TOTAL" in result.stdout
     report = ET.parse(tmp_path / "coverage.xml")
     classes = report.findall(".//class")
     assert {node.attrib["filename"] for node in classes} == {
         f"{package}/part_{shard}.py" for package in ("hooks", "scripts") for shard in range(1, 5)
     }
     assert all(int(line.attrib["hits"]) > 0 for line in report.findall(".//line"))
+    assert (tmp_path / "lcov.info").exists()
+
+
+def test_the_merge_drops_per_test_contexts_and_reports_every_arc_they_held(tmp_path):
+    (tmp_path / "hooks").mkdir()
+    (tmp_path / "hooks/branchy.py").write_text("def pick(flag):\n    if flag:\n        return 1\n    return 2\n")
+    (tmp_path / "hooks/never.py").write_text("value = 1\n")
+    (tmp_path / "hooks/__init__.py").write_text("")
+    generator = """
+import sys
+from coverage import Coverage
+from pathlib import Path
+sys.path.insert(0, '.')
+for shard, flags in ((1, (True,)), (2, (False, True))):
+    folder = Path('.coverage-shards') / f'coverage-3.12-{shard}'
+    folder.mkdir(parents=True)
+    cov = Coverage(data_file=str(folder / '.coverage'), config_file=sys.argv[1])
+    cov.start()
+    import hooks.branchy
+    for number, flag in enumerate(flags):
+        cov.switch_context(f'tests/test_{shard}.py::test_{number}|run')
+        hooks.branchy.pick(flag)
+    cov.stop()
+    cov.save()
+    del sys.modules['hooks.branchy']
+(folder / 'js-coverage' / 'sources').mkdir(parents=True)
+(folder / 'js-coverage' / 'sources' / 's.js').write_text('void 0;\\n')
+for kind in ('node', 'browser'):
+    (folder / 'js-coverage' / f'capture-{kind}-1.json').write_text('{"result": [{"source": "s", "functions": [{"ranges": [{"startOffset": 0, "endOffset": 7, "count": 1}]}]}]}')
+"""
+    config = str(ROOT / ".github/coverage/coverage.ini")
+    subprocess.run([sys.executable, "-c", generator, config], cwd=tmp_path, check=True, capture_output=True)
+    shards = [f".coverage-shards/coverage-3.12-{shard}/.coverage" for shard in (1, 2)]
+    expected = [sys.executable, "-m", "coverage"]
+    subprocess.run(
+        [*expected, "combine", f"--rcfile={config}", "--keep", "--data-file=expected", *shards],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        [*expected, "xml", f"--rcfile={config}", "--data-file=expected", "-o", "expected.xml"],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+    )
+    result = subprocess.run(
+        ["bash", str(ROOT / ".github/coverage/combine.sh"), "--downloaded", "2"],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+
+    def lines(path):
+        return {
+            (node.attrib["filename"], line.attrib["number"], line.attrib["hits"], line.attrib.get("condition-coverage"))
+            for node in ET.parse(tmp_path / path).findall(".//class")
+            for line in node.findall(".//line")
+        }
+
+    assert lines("coverage.xml") == lines("expected.xml")
+    assert ("hooks/branchy.py", "2", "1", "100% (2/2)") in lines("coverage.xml")
+    assert ("hooks/never.py", "1", "0", None) in lines("coverage.xml")
+    merged = CoverageData(basename=str(tmp_path / ".coverage"))
+    merged.read()
+    assert merged.measured_contexts() == {""}
+    for shard in shards:
+        kept = CoverageData(basename=str(tmp_path / shard))
+        kept.read()
+        assert len(kept.measured_contexts()) > 1
+
+
+_RENDEZVOUS = """
+import sys
+import time
+from pathlib import Path
+
+def meet(mine, theirs, failure):
+    Path(mine).touch()
+    deadline = time.monotonic() + 5
+    while not Path(theirs).exists():
+        if time.monotonic() > deadline:
+            sys.exit(failure)
+        time.sleep(0.05)
+"""
+
+
+def _stubbed_combine_tree(tmp_path, lcov_exit=0, xml_exit=0, lcov_late=0):
+    shutil.copytree(ROOT / ".github/coverage", tmp_path / ".github/coverage")
+    (tmp_path / ".github/coverage/flatten.py").write_text(
+        "import shutil, sys\nshutil.copyfile(sys.argv[1], sys.argv[2])\n"
+    )
+    for shard in range(1, 3):
+        report = tmp_path / ".coverage-shards" / f"coverage-3.12-{shard}" / ".coverage"
+        report.parent.mkdir(parents=True)
+        report.write_text("data")
+    (tmp_path / "coverage").mkdir()
+    (tmp_path / "coverage/__init__.py").write_text("")
+    (tmp_path / "coverage/__main__.py").write_text(
+        _RENDEZVOUS
+        + f"""
+if sys.argv[1] == "xml":
+    meet("xml.started", "lcov.started", "the JS conversion never ran beside the XML")
+    if {xml_exit}:
+        sys.exit({xml_exit})
+    Path("coverage.xml").write_text("<coverage/>")
+elif sys.argv[1] == "report":
+    print("TOTAL")
+"""
+    )
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests/js_lcov.py").write_text(
+        _RENDEZVOUS
+        + f"""
+meet("lcov.started", "xml.started", "the XML never ran beside the JS conversion")
+time.sleep({lcov_late})
+Path("lcov.info").write_text("")
+sys.exit({lcov_exit})
+"""
+    )
+    return subprocess.run(
+        ["bash", str(tmp_path / ".github/coverage/combine.sh"), "--downloaded", "2"],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+
+
+def test_the_js_conversion_runs_beside_the_python_coverage_xml(tmp_path):
+    result = _stubbed_combine_tree(tmp_path)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert (tmp_path / "coverage.xml").exists()
+    assert (tmp_path / "lcov.info").exists()
+    assert "TOTAL" in result.stdout
+
+
+def test_a_failed_js_conversion_fails_the_merge(tmp_path):
+    result = _stubbed_combine_tree(tmp_path, lcov_exit=3)
+    assert result.returncode == 3, result.stdout + result.stderr
+    assert (tmp_path / "coverage.xml").exists()
+
+
+def test_a_failed_python_xml_fails_the_merge_and_stops_the_js_conversion(tmp_path):
+    result = _stubbed_combine_tree(tmp_path, xml_exit=4, lcov_late=2)
+    assert result.returncode == 4, result.stdout + result.stderr
+    assert not (tmp_path / "coverage.xml").exists()
+    time.sleep(3)
+    assert not (tmp_path / "lcov.info").exists()
 
 
 def test_coverage_options_do_not_reach_nested_test_runners(tmp_path):
     workflow = yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())
     step = next(step for step in workflow["jobs"]["unit"]["steps"] if step.get("name") == "Run tests")
-    invocation = shlex.split(step["run"].split(" tests/", 1)[0])
+    invocation = shlex.split(step["run"].partition("ci_cpu_quota) && ")[2].split(" tests/", 1)[0])
     invocation[0] = sys.executable
     fixture = tmp_path / "test_environment.py"
     fixture.write_text("import os\ndef test_nested_runner_environment():\n    assert not os.getenv('PYTEST_ADDOPTS')\n")

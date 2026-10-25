@@ -1,18 +1,23 @@
 import { QUOTA_REFRESH_MS } from "./config.js";
 import { $ } from "./dom.js";
-import { flush, loadSeed, renderSync, sendSync } from "./sync.js";
+import { flush, loadMetadata, loadSaved, loaded, renderSync, sendSync } from "./sync.js";
 import { showArtifacts } from "./artifacts.js";
-import { editTitle, render, renderStats, saveTitle } from "./render.js";
+import { render, renderStats } from "./render.js";
+import { editOverview, editTitle, saveOverview, saveTitle } from "./edits.js";
 import { clearNotification, clearPriority, showAlerts, showNotifications } from "./notices.js";
-import { foldSections, markOutline, outlineBoxes, reveal, sectionBoxes, showOutline, wireOutline } from "./outline.js";
-import { collapsible, commentBoxes, groupOpen, markToggles, rememberGroup, rememberUnanimous, setAllComments } from "./folds.js";
-import { startLayout, wireRail, wireTabs } from "./layout.js";
+import { completeList, foldSections, markOutline, outlineBoxes, reveal, sectionBoxes, showOutline, wireOutline } from "./outline.js";
+import { closeComplete, collapsible, commentBoxes, groupOpen, markToggles, rememberGroup, rememberUnanimous, setAllComments } from "./folds.js";
+import { openHash, startLayout, wireRail, wireStatsDrawer, wireTabs } from "./layout.js";
 import { showChat, wireChat, wireChatInput } from "./chat.js";
 import { refreshQuota, wireSwarm } from "./controls.js";
 import { connectEvents } from "./events.js";
+import { loadArchitecture } from "./architecture.js";
+import { loadTips } from "./api.js";
+import { tips } from "./state.js";
+import { toggleFrozenView } from "./frozen_view.js";
 
 function start() {
-  loadSeed();
+  loadSaved();
   startLayout();
   $("sync").addEventListener("click", () => sendSync("sync", "sync"));
   $("stats-sync").addEventListener("click", () => sendSync("stats_sync", "stats-sync"));
@@ -24,6 +29,13 @@ function start() {
     else if (ev.key === "Escape") { ev.preventDefault(); editTitle(false); }
   });
   $("title-input").addEventListener("input", () => { $("title-error").textContent = ""; });
+  $("overview-edit").addEventListener("click", () => editOverview(true));
+  $("overview-cancel").addEventListener("click", () => editOverview(false));
+  $("overview-form").addEventListener("submit", (ev) => { ev.preventDefault(); saveOverview(); });
+  $("overview-input").addEventListener("keydown", (ev) => {
+    if (ev.key === "Enter" && (ev.ctrlKey || ev.metaKey)) { ev.preventDefault(); saveOverview(); }
+    else if (ev.key === "Escape") { ev.preventDefault(); editOverview(false); }
+  });
   $("prio-clear-all").addEventListener("click", () => { if (confirm("Clear every priority?")) clearPriority("all"); });
   $("to-top").addEventListener("click", () => $("main-content").scrollTo({ top: 0, behavior: "smooth" }));
   $("bell").addEventListener("click", () => showNotifications($("notif").hidden));
@@ -53,6 +65,7 @@ function start() {
     }, true);
   }
   $("sections-all").addEventListener("click", foldSections);
+  $("frozen-view").addEventListener("click", () => { toggleFrozenView(); render(); });
   $("comments-all").addEventListener("click", () => {
     const open = !groupOpen("all-comments");
     for (const section of document.querySelectorAll(".col > section")) setAllComments(section, open);
@@ -64,7 +77,10 @@ function start() {
     if (target) { reveal(target); target.scrollIntoView({ block: "start" }); }
   });
   document.querySelector(".col").addEventListener("toggle", (ev) => {
-    if (sectionBoxes().includes(ev.target)) { rememberUnanimous("sections", sectionBoxes()); markToggles(); }
+    if (!sectionBoxes().includes(ev.target)) return;
+    rememberUnanimous("sections", sectionBoxes());
+    if (ev.target.open) render(null, true);
+    else markToggles();
   }, true);
   $("outline").addEventListener("toggle", (ev) => {
     if (ev.target.matches("details.fold")) { rememberUnanimous("outline", outlineBoxes()); markToggles(); }
@@ -72,14 +88,22 @@ function start() {
   render();
   wireTabs();
   wireRail();
+  wireStatsDrawer();
   $("main-content").addEventListener("scroll", markOutline, { passive: true });
+  loadMetadata();
+  loadTips().then((values) => { if (values) { Object.assign(tips, values); render(); } });
   connectEvents();
+  loaded.then(() => {
+    closeComplete(sectionBoxes(), (box) => completeList(box.closest("section").dataset.outline));
+    if (location.hash.length > 1) openHash();
+  });
   setInterval(refreshQuota, QUOTA_REFRESH_MS);
   setInterval(renderStats, 30000);
   setInterval(renderSync, 1000);
 }
 
 wireSwarm();
+loadArchitecture();
 window.addEventListener("pagehide", () => flush(true));
 document.addEventListener("visibilitychange", () => { if (document.hidden) flush(true); });
 start();

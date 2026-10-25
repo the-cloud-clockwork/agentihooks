@@ -1,0 +1,6 @@
+{
+  "scripts/profiles/render.py:scripts.profiles.render.x_render_claude__mutmut_61:741607c5da72527617c61861300147033b70a9a1edcbe32ab56a84a37d9a4585": {
+    "reader": "Standards",
+    "reason": "build_persona reads pending_rules only through a truthiness check, so an empty list and None render the same persona."
+  }
+}

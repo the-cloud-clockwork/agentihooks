@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/health/activity.py:scripts.swarm.health.activity.x__rows__mutmut_2:423fbca59abf4c06741e3f0559c5ced30eb8a0a01742e757a875ef7ad400629a": {
+    "reader": "Standards",
+    "reason": "The recorder writes json.dumps rows, which are ASCII, so every ASCII compatible locale codec decodes them to the same text."
+  }
+}

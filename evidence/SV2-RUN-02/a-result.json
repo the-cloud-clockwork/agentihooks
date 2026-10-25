@@ -1,0 +1,63 @@
+{
+  "tested_commit": "2ddf3613965d4132eef6552a401ce3b0194b34ca",
+  "evidence_class": "local isolated fixture on temporary homes; mocked: the herdr CLI and the process reaper behind HerdrRuntime, the local process table and PID namespace are fixture values, and the remote backend is an in-memory fake; not live rollout proof",
+  "then": "an AWS worker and Anton may both have PID 4321 without either being mistaken for the other's agent",
+  "fixture": {
+    "pid": 4321,
+    "anton_namespace": "boot-anton/pid:[4026531836]",
+    "worker_namespace": "boot-aws-worker/pid:[4026532001]"
+  },
+  "runs": [
+    {
+      "worker_terminate": [
+        "ok",
+        "kubernetes"
+      ],
+      "anton_terminate": [
+        "ok",
+        "local"
+      ],
+      "local_signalled": [
+        [
+          "engineer@a1b2c3-0001",
+          4321,
+          777
+        ]
+      ],
+      "remote_terminated": [
+        "engineer@a1b2c3-0002"
+      ],
+      "foreign_namespace_local_record": [
+        "refused",
+        "process belongs to another PID namespace"
+      ],
+      "unqualified_process_actions_rejected_total": 1
+    },
+    {
+      "worker_terminate": [
+        "ok",
+        "kubernetes"
+      ],
+      "anton_terminate": [
+        "ok",
+        "local"
+      ],
+      "local_signalled": [
+        [
+          "engineer@a1b2c3-0001",
+          4321,
+          777
+        ]
+      ],
+      "remote_terminated": [
+        "engineer@a1b2c3-0002"
+      ],
+      "foreign_namespace_local_record": [
+        "refused",
+        "process belongs to another PID namespace"
+      ],
+      "unqualified_process_actions_rejected_total": 1
+    }
+  ],
+  "passed": true
+}

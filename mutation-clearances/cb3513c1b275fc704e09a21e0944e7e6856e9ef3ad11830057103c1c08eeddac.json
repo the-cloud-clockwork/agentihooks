@@ -1,0 +1,6 @@
+{
+  "hooks/context/prod_lockdown.py:hooks.context.prod_lockdown.x__production_operands__mutmut_39:f4dbfcc6bfe6005080e7d21501efb923cfab37e5310ea952aaa9870a5ad37696": {
+    "reader": "Standards",
+    "reason": "None and False are tested only for truthiness; neither reaches output."
+  }
+}

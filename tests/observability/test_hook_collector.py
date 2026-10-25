@@ -57,6 +57,22 @@ def test_brain_span_fallback_reaches_the_unprefixed_collector(hook_env, posted):
     assert posted == [f"{COLLECTOR}/v1/traces"]
 
 
+@pytest.mark.parametrize(
+    ("endpoint", "expected"),
+    [
+        ("http://collector:4317", "http://collector:4318/v1/traces"),
+        ("http://collector:4317/", "http://collector:4318/v1/traces"),
+        ("http://127.0.0.1:43175", "http://127.0.0.1:43175/v1/traces"),
+        ("http://127.0.0.1:43170/", "http://127.0.0.1:43170/v1/traces"),
+        ("http://[fe80::4317:1]:4317", "http://[fe80::4317:1]:4318/v1/traces"),
+    ],
+)
+def test_brain_span_fallback_swaps_only_the_grpc_port(hook_env, posted, endpoint, expected):
+    hook_env.setenv("AGENTIHOOKS_OTLP_ENDPOINT", endpoint)
+    telemetry._http_fallback("brain.inject", {}, 1.0)
+    assert posted == [expected]
+
+
 def test_hook_events_init_with_only_the_unprefixed_collector(hook_env):
     assert otel._can_init()
 

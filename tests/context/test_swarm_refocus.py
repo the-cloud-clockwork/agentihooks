@@ -4,7 +4,11 @@ import pytest
 
 import hooks.context.swarm_refocus as refocus
 from hooks import hook_manager
+from hooks.context import master_coding
 from hooks.targets.emitter import flush
+from scripts.swarm_ledger import plan_read
+from scripts.swarm_ledger.repository.sqlite import DATABASE
+from tests.swarm_ledger import legacy_page
 
 OBLIGATIONS = (
     "Master obligations: Troubleshoot with read only diagnostics, plan with the operator, "
@@ -31,7 +35,7 @@ LEDGER = {
 def ledger_dir(tmp_path, monkeypatch):
     folder = tmp_path / "ledgers"
     folder.mkdir()
-    (folder / "rig.json").write_text(json.dumps(LEDGER), encoding="utf-8")
+    legacy_page.store(folder, "rig", LEDGER)
     monkeypatch.setenv("LEDGER_DIR", str(folder))
     monkeypatch.setattr(refocus, "STATE_DIR", tmp_path / "refocus-state")
     monkeypatch.delenv("AGENTIHOOKS_TARGET", raising=False)
@@ -101,6 +105,18 @@ def test_an_unknown_task_builds_nothing():
     assert refocus.build_block(LEDGER, "zz", 1500) == ""
 
 
+def test_the_block_names_the_plan_read_command_for_a_sliced_task_within_the_cap():
+    task = {"id": "s1", "phase": "p1", "title": "Slice", "plan_lines": "4-9", "description": "x" * 3000}
+    block = refocus.build_block({**LEDGER, "tasks": [task]}, "s1", 1500)
+    assert plan_read.pointer(task) in block.splitlines()
+    assert len(block) <= 1500
+
+
+def test_the_block_of_a_task_without_plan_lines_says_nothing_about_plan_read():
+    lines = refocus.build_block(LEDGER, "i1", 1500).splitlines()
+    assert lines[-2:] == ["Your task i1: Refocus agents", "Inject a refocus block."]
+
+
 def test_the_block_stays_under_the_cap_with_a_long_description():
     ledger = json.loads(json.dumps(LEDGER))
     ledger["tasks"][1]["description"] = "word " * 2000
@@ -122,6 +138,19 @@ def test_a_bound_session_gets_the_block_again_after_compaction(bound, capsys):
     assert "Inject a refocus block." not in _pre(capsys)
 
 
+def test_each_tool_call_records_its_call_id_for_the_stall_clock(bound, monkeypatch, capsys):
+    from scripts.swarm.health import activity
+
+    seen = []
+    monkeypatch.setattr(activity, "record", lambda name, tool_input, call_id: seen.append((name, call_id)))
+    for call_id in ("toolu_x", None):
+        payload = {"session_id": "s1", "tool_name": "Bash", "tool_input": {}, "cwd": "/", "tool_use_id": call_id}
+        hook_manager.on_pre_tool_use(payload)
+    flush("PreToolUse")
+    capsys.readouterr()
+    assert seen == [("Bash", "toolu_x"), ("Bash", "")]
+
+
 def test_an_unbound_session_gets_nothing(unbound, capsys):
     assert "Inject a refocus block." not in _prompt(capsys)
     _compact()
@@ -136,7 +165,7 @@ def test_an_unchanged_block_waits_for_the_window_and_a_changed_one_does_not(boun
     assert "Inject a refocus block." in _pre(capsys)
     ledger = json.loads(json.dumps(LEDGER))
     ledger["tasks"][1]["description"] = "A sharper description."
-    (bound / "rig.json").write_text(json.dumps(ledger), encoding="utf-8")
+    legacy_page.store(bound, "rig", ledger)
     assert "A sharper description." in _pre(capsys)
     assert "A sharper description." not in _pre(capsys)
 
@@ -150,7 +179,7 @@ def test_codex_receives_the_block_through_post_tool_use(bound, monkeypatch, caps
 
 
 def test_a_missing_ledger_lets_the_tool_call_through_silently(bound, capsys):
-    (bound / "rig.json").unlink()
+    (bound / DATABASE).unlink()
     assert "Inject a refocus block." not in _prompt(capsys)
     assert "Inject a refocus block." not in _pre(capsys)
 
@@ -184,7 +213,7 @@ def _session_start(payload, capsys):
     return capsys.readouterr().out
 
 
-@pytest.mark.parametrize("task_id", ["master", "i1"])
+@pytest.mark.parametrize("task_id", ["master", "master-2", "i1"])
 def test_codex_compact_start_restores_intent_once(bound, monkeypatch, capsys, compact_events, task_id):
     monkeypatch.setenv("AGENTIHOOKS_TARGET", "codex")
     monkeypatch.setenv("AGENTIHOOKS_SWARM_TASK", task_id)
@@ -194,7 +223,7 @@ def test_codex_compact_start_restores_intent_once(bound, monkeypatch, capsys, co
     assert "PostCompact" not in hook_manager.EVENT_HANDLERS
     out = _session_start(compact_events[2], capsys)
     assert "SWARM REFOCUS" in out
-    if task_id == "master":
+    if master_coding.MASTER_TASK.fullmatch(task_id):
         assert "Master obligations:" in out
         assert "Your task master" not in out
     else:
@@ -262,3 +291,10 @@ def test_master_sparse_ledger_keeps_obligations_without_invented_intent(ledger):
     assert refocus.build_block(ledger, "master", 1500) == (
         "=== SWARM REFOCUS:  ===\n" + OBLIGATIONS + f"Plan: \nPriorities: \nActive phases: {phases}"
     )
+
+
+def test_the_ledger_read_names_intent_and_the_focus_of_the_seat(tmp_path):
+    legacy_page.store(tmp_path, "rig", dict(LEDGER, priorities=[{"id": "x", "item": "tasks/i1"}]))
+    intent = {"title": LEDGER["title"], "overview": LEDGER["overview"], "phases": LEDGER["phases"]}
+    assert refocus._read_ledger(tmp_path, "rig", "i1") == dict(intent, tasks=[LEDGER["tasks"][1]])
+    assert refocus._read_ledger(tmp_path, "rig", "master") == dict(intent, priorities=[{"id": "x", "item": "tasks/i1"}])

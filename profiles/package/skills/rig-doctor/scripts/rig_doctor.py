@@ -31,18 +31,18 @@ def save_state(state: dict) -> None:
     (HOME / "rig-doctor.json").write_text(json.dumps(state, indent=2) + "\n")
 
 
-def start(ledger: str) -> None:
-    run("agentihooks", "doctor", ledger, "start")
+def start(ledger: str, order: tuple[str, ...] = ()) -> None:
+    run("agentihooks", "doctor", ledger, "start", *order)
     state = read_state()
     state["active"] = ledger
     save_state(state)
     run("agentihooks", "doctor", ledger, "status")
 
 
-def stop(ledger: str) -> None:
+def stop(ledger: str, order: tuple[str, ...] = ()) -> None:
     if not ledger:
         raise ValueError("No active Doctor saved. Run rig-doctor LEDGER first, or rig-doctor LEDGER stop.")
-    run("agentihooks", "doctor", ledger, "stop")
+    run("agentihooks", "doctor", ledger, "stop", *order)
     state = read_state()
     if state.get("active") == ledger:
         state["active"] = ""
@@ -210,14 +210,24 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Start a Doctor on a ledger or the repeatable demo workload.")
     parser.add_argument("ledger", nargs="?", default="")
     parser.add_argument("action", nargs="?", choices=["stop"])
+    parser.add_argument("--quote", default="")
+    parser.add_argument("--max-eng-agents", type=int)
+    parser.add_argument("--max-ci-agents", type=int)
     args = parser.parse_args(argv)
+    quote = ("--quote", args.quote) if args.quote else ()
+    caps = tuple(
+        part
+        for flag, value in (("--max-eng-agents", args.max_eng_agents), ("--max-ci-agents", args.max_ci_agents))
+        if value is not None
+        for part in (flag, str(value))
+    )
     try:
         if args.ledger == "stop" or args.action == "stop":
-            stop(read_state().get("active", "") if args.ledger == "stop" else args.ledger)
+            stop(read_state().get("active", "") if args.ledger == "stop" else args.ledger, quote)
         else:
             if linked_bundle() is None:
                 raise ValueError("rig-doctor needs a linked bundle. Run agentihooks init --bundle DIR.")
-            start(args.ledger or demo())
+            start(args.ledger or demo(), caps + quote)
     except (ValueError, OSError, subprocess.CalledProcessError) as error:
         print(f"rig-doctor: {error}", file=sys.stderr)
         if isinstance(error, subprocess.CalledProcessError):

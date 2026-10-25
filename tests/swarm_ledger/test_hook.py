@@ -11,12 +11,12 @@ from pathlib import Path
 
 import pytest
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 SCRIPTS = Path(__file__).resolve().parents[2] / "scripts" / "swarm_ledger"
 sys.path.insert(0, str(SCRIPTS))
 import ledger_core as core  # noqa: E402
 import new_ledger  # noqa: E402
+
+from tests.swarm_ledger import legacy_page  # noqa: E402
 
 SLUG = "hook-2026-01-01"
 SID = "sess-1"
@@ -54,9 +54,9 @@ def make_ledger(done=False):
         "questions": [],
         "followups": [],
     }
-    html_path, json_path = core.paths(SLUG)
+    html_path, json_path = legacy_page.paths(SLUG, core)
     core.LEDGER_DIR.mkdir(parents=True, exist_ok=True)
-    html_path.write_text(new_ledger.render(new_ledger.build_doc(content), SLUG, 8765), encoding="utf-8")
+    html_path.write_text(legacy_page.render(new_ledger.build_doc(content), SLUG, 8765), encoding="utf-8")
     json_path.unlink(missing_ok=True)
     state, _ = core.sync(SLUG)
     if done:
@@ -137,10 +137,12 @@ class Gate(unittest.TestCase):
         self.assertEqual((session["slug"], session["name"], session["role"]), (SLUG, "boss", "orchestrator"))
 
     def test_session_start_brings_the_server_up(self):
-        with socket.socket() as probe:
-            probe.bind(("127.0.0.1", 0))
-            port = probe.getsockname()[1]
-        env = {**os.environ, "LEDGER_DIR": str(core.LEDGER_DIR), "LEDGER_PORT": str(port)}
+        from tests import ledger_guard
+
+        hold = ledger_guard.reserve_port()
+        self.addCleanup(hold.close)
+        port = hold.getsockname()[1]
+        env = {**os.environ, "LEDGER_DIR": str(core.LEDGER_DIR), "LEDGER_PORT": str(port), "LEDGER_AUTOSTART": "1"}
         payload = json.dumps({"session_id": "fresh", "hook_event_name": "SessionStart"})
         subprocess.run(
             [sys.executable, str(SCRIPTS / "ledger_hook.py")],
@@ -219,9 +221,15 @@ class Gate(unittest.TestCase):
 
     def test_block_budget_then_allow(self):
         ask("still there", 3)
-        start = time.monotonic()
         results = [hook("Stop") for _ in range(4)]
         self.assertEqual([bool(r) for r in results], [True, True, True, False])
+
+    @pytest.mark.wall_clock
+    def test_four_stops_answer_within_two_seconds(self):
+        ask("still there", 3)
+        start = time.monotonic()
+        for _ in range(4):
+            hook("Stop")
         self.assertLess(time.monotonic() - start, 2)
 
     def test_work_without_recording_blocks_stop(self):
@@ -256,9 +264,16 @@ class Gate(unittest.TestCase):
         self.assertIsNone(hook("Stop"))
 
     def test_unreadable_ledger_fails_open(self):
+        from scripts.swarm_ledger.repository.sqlite import DATABASE
+
         ask("pending", 5)
-        core.paths(SLUG)[1].write_text("{not json", encoding="utf-8")
-        self.assertIsNone(hook("Stop"))
+        db = core.LEDGER_DIR / DATABASE
+        original = db.read_bytes()
+        db.write_bytes(b"not a database")
+        try:
+            self.assertIsNone(hook("Stop"))
+        finally:
+            db.write_bytes(original)
 
 
 if __name__ == "__main__":

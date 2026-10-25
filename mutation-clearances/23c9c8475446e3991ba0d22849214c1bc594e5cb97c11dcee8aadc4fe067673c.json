@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.x\u01c1Handler\u01c1log_message__mutmut_11:0dbea00798dd14757ba6912e4459816025b0932a92bc0136818e24c66a87143d": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "Only the first result of str.split is observed. Removing maxsplit or raising it from one to two cannot change the substring preceding the first question mark for any path. Exhaustive probe of 127 strings over a and question mark agreed; separator order and output are unchanged."
+  }
+}

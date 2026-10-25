@@ -1,0 +1,6 @@
+{
+  "hooks/observability/transcript.py:hooks.observability.transcript.x_mask_member__mutmut_36:3f9cd2499f322646cf1a043bca8729e57e2abb3dc348fbecf4178311ce06bee4": {
+    "reader": "Standards reader",
+    "reason": "JSON ensure_ascii False and None produce the same contextual string before strict redaction."
+  }
+}

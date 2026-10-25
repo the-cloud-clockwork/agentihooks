@@ -1,0 +1,6 @@
+{
+  "scripts/gc_cli.py:scripts.gc_cli.x__scratch_new__mutmut_6:7835e08b538729f87d3555b9739426427b6911716bea99d510b3591bcf5e16e1": {
+    "reader": "Standards",
+    "reason": "The built name only feeds truth tests and an or fallback, where None and the empty string act the same."
+  }
+}

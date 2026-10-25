@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/repository/rows.py:scripts.swarm_ledger.repository.rows.x_encode__mutmut_4:bb3b43c39e04260e61d96320214b476c4a6a7ab00bdd53ee9a7f3ac302525501": {
+    "reader": "Standards",
+    "reason": "allow_nan=None is falsy exactly as allow_nan=False; JSONEncoder rejects the same nonfinite values and emits identical finite values."
+  }
+}

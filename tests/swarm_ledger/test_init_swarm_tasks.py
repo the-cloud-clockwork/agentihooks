@@ -13,6 +13,8 @@ import ledger_core as core  # noqa: E402
 import ledger_kinds  # noqa: E402
 import new_ledger  # noqa: E402
 
+from tests.swarm_ledger import legacy_page  # noqa: E402
+
 pytestmark = pytest.mark.unit
 
 GUIDE = ROOT / "profiles/package/skills/init-swarm/work-beyond-code.md"
@@ -39,9 +41,9 @@ def task_op(argv):
 def sample_ledger():
     phases = [{"title": "find the cause"}, {"title": "fix and tune"}, {"title": "decide"}]
     content = {"title": "Sample", "overview": "o", "sources": [str(GUIDE)], "phases": phases}
-    html_path, json_path = core.paths(SLUG)
+    html_path, json_path = legacy_page.paths(SLUG, core)
     core.LEDGER_DIR.mkdir(parents=True, exist_ok=True)
-    html_path.write_text(new_ledger.render(new_ledger.build_doc(content), SLUG, 8765), encoding="utf-8")
+    html_path.write_text(legacy_page.render(new_ledger.build_doc(content), SLUG, 8765), encoding="utf-8")
     json_path.unlink(missing_ok=True)
     core.sync(SLUG)
     ops = [task_op(argv) for argv in sample_commands()]

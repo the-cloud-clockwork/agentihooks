@@ -70,6 +70,9 @@ class FakeStore:
     def pending_mail(self, me):
         return [i for i in self.inbox(me) if i.state == "pending"]
 
+    def redeliver(self, now, window):
+        return []
+
     def deliver(self, item_id, me):
         if self.items[item_id].state != "pending":
             return None
@@ -116,7 +119,7 @@ def _message(**fields):
 INITIALIZE = {"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "t", "version": "1"}}
 
 
-def session(store, scenario):
+def session(store, scenario, active=None, feed=None):
     """Run the channel server for bob over memory streams; scenario(send, receive) drives it as Claude would."""
     import anyio
 
@@ -129,7 +132,10 @@ def session(store, scenario):
             return got.message.root.model_dump(exclude_none=True)
 
         async with anyio.create_task_group() as group:
-            group.start_soon(channel.run, store, "bob", server_in, server_out)
+            options = () if active is None else (active,)
+            if feed is not None:
+                options = (True if active is None else active, feed)
+            group.start_soon(channel.run, store, "bob", server_in, server_out, *options)
             await to_server.send(_message(id=1, method="initialize", params=INITIALIZE))
             opened = await receive()
             await to_server.send(_message(method="notifications/initialized"))
@@ -155,34 +161,60 @@ def test_the_server_declares_the_channel_its_instructions_and_the_reply_tool(sto
     assert listed["result"] == {"tools": [TOOL]}
 
 
-def test_an_item_is_pushed_at_its_notify_and_answered_through_the_reply_tool(store, monkeypatch):
+def _push_notified_item(store, monkeypatch, delay=0, notify=True):
     import anyio
 
+    entered, notified = threading.Event(), threading.Event()
+    real_get_message = FakePubSub.get_message
+
+    def get_message(pubsub, timeout):
+        if not pubsub.notes.empty():
+            return real_get_message(pubsub, timeout)
+        assert timeout == 3600
+        entered.set()
+        note = real_get_message(pubsub, 60)
+        if note is not None and note["type"] == "message":
+            notified.set()
+        return note
+
     monkeypatch.setattr(channel, "SETTLE_S", 0)
-    monkeypatch.setattr(channel, "RECHECK_S", 3.0)
+    monkeypatch.setattr(channel, "RECHECK_S", 3600)
+    monkeypatch.setattr(FakePubSub, "get_message", get_message)
 
     async def scenario(send, receive):
-        await anyio.sleep(0.3)
-        start = time.monotonic()
-        item = store.send("alice", "bob", "hello")
-        pushed = await receive()
-        took = time.monotonic() - start
-        await send(
-            _message(
-                id=3, method="tools/call", params={"name": "reply", "arguments": {"item_id": item.id, "text": "hi"}}
+        assert await anyio.to_thread.run_sync(lambda: entered.wait(30)), "session never entered the recheck wait"
+        item = store.send("alice", "bob", "hello", notify=notify)
+        with anyio.fail_after(10):
+            pushed = await receive()
+            assert notified.is_set(), "item arrived without interrupting the recheck wait"
+            await send(
+                _message(
+                    id=3, method="tools/call", params={"name": "reply", "arguments": {"item_id": item.id, "text": "hi"}}
+                )
             )
-        )
-        return item, pushed, took, await receive()
+            return item, pushed, await receive()
 
-    start = time.monotonic()
-    _, _, (item, pushed, took, replied) = session(store, scenario)
-    assert time.monotonic() - start < 2.5 and took < 1.0
+    if delay:
+        time.sleep(delay)
+    _, _, (item, pushed, replied) = session(store, scenario)
     assert pushed == {"jsonrpc": "2.0", **channel.event(store.get(item.id))}
     [answer] = store.inbox("alice")
     assert replied["result"]["content"] == [
         {"type": "text", "text": f"sent to alice as message {answer.id}; message {item.id} is closed"}
     ]
     assert store.get(item.id).state == "done" and answer.text == "hi"
+
+
+@pytest.mark.parametrize("delay", [0, 3])
+def test_an_item_is_pushed_at_its_notify_and_answered_through_the_reply_tool(store, monkeypatch, delay):
+    _push_notified_item(store, monkeypatch, delay=delay)
+
+
+def test_notification_proof_rejects_a_missing_notify(store, monkeypatch):
+    with pytest.raises(ExceptionGroup) as caught:
+        _push_notified_item(store, monkeypatch, notify=False)
+    assert len(caught.value.exceptions) == 1
+    assert isinstance(caught.value.exceptions[0], TimeoutError)
 
 
 def test_an_item_whose_notify_was_missed_arrives_at_the_next_recheck(store, monkeypatch):
@@ -301,7 +333,7 @@ def test_serve_runs_the_session_over_stdio(store, monkeypatch):
     import anyio
 
     anyio.run(channel.serve, store, "bob")
-    assert seen == [(store, "bob", "read", "write")]
+    assert seen == [(store, "bob", "read", "write", True)]
 
 
 def test_main_serves_this_sessions_identity(store, monkeypatch):
@@ -315,13 +347,110 @@ def test_main_serves_this_sessions_identity(store, monkeypatch):
     assert ran == [(channel.serve, store, "bob")]
 
 
-def test_main_without_redis_exits_with_the_reason(monkeypatch, capsys):
-    def down():
-        raise InboxError("Redis is unreachable")
+def test_main_without_identity_exits_with_the_reason(monkeypatch, capsys):
+    def missing():
+        raise InboxError("no session identity")
 
-    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "bob")
-    monkeypatch.setattr(channel, "connect", down)
+    monkeypatch.setattr(channel, "identity", missing)
     with pytest.raises(SystemExit) as stopped:
         channel.main()
     assert stopped.value.code == 1
-    assert capsys.readouterr().err == "agentihooks inbox channel: Redis is unreachable\n"
+    assert capsys.readouterr().err == "agentihooks inbox channel: no session identity\n"
+
+
+def test_registered_server_without_channel_activation_never_claims_messages(monkeypatch):
+    import anyio
+
+    calls = []
+    monkeypatch.setattr(channel, "identity", lambda: pytest.fail("dormant registration must not require an identity"))
+    monkeypatch.setattr(channel, "connect", lambda: pytest.fail("an inactive channel must not connect to the inbox"))
+    monkeypatch.setattr(anyio, "run", lambda serve, store, me, active: calls.append((serve, store, me, active)))
+    channel.main(active=False)
+    assert calls == [(channel.serve, None, "", False)]
+
+
+@pytest.mark.parametrize("connected", [False, True])
+def test_dormant_protocol_session_never_starts_delivery(store, monkeypatch, connected):
+    import anyio
+
+    monkeypatch.setattr(channel, "connect", lambda: pytest.fail("dormant registration must not reconnect"))
+
+    async def pushed(*args):
+        pytest.fail("dormant registration must not claim or push messages")
+
+    async def idle(send, receive):
+        with anyio.move_on_after(0.1) as timeout:
+            await receive()
+        return timeout.cancel_called
+
+    monkeypatch.setattr(channel, "_push", pushed)
+    opened, listed, idle_timeout = session(store if connected else None, idle, active=False)
+    assert opened["result"]["serverInfo"]["name"] == "inbox"
+    assert listed["result"]["tools"][0]["name"] == "reply"
+    assert idle_timeout is True
+
+
+def test_saved_registration_is_dormant_and_preserves_the_native_config(tmp_path, monkeypatch):
+    import json
+
+    from scripts import claude_trust
+
+    environ = {"CLAUDE_CONFIG_DIR": str(tmp_path / "master")}
+    channel.register(environ)
+    config = tmp_path / "master" / ".claude.json"
+    saved = json.loads(config.read_text())
+    calls = []
+    monkeypatch.setattr(channel, "main", lambda active=True: calls.append(active))
+    exec(saved["mcpServers"]["inbox"]["args"][-1])
+    assert calls == [False]
+    saved["mcpServers"]["existing"] = {"command": "existing"}
+    saved["hasCompletedOnboarding"] = True
+    config.write_text(json.dumps(saved))
+    config.chmod(0o600)
+    monkeypatch.setattr(claude_trust, "_write", lambda *args: pytest.fail("current registration must not be rewritten"))
+    channel.register(environ)
+    assert json.loads(config.read_text()) == saved
+    assert config.stat().st_mode & 0o777 == 0o600
+
+
+@pytest.mark.parametrize("servers", [None, []])
+def test_invalid_saved_registration_is_left_untouched_and_unlocks(tmp_path, servers):
+    import json
+
+    config = tmp_path / ".claude.json"
+    text = json.dumps({"mcpServers": servers})
+    config.write_text(text)
+    with pytest.raises(ValueError, match="mcpServers is not a JSON object"):
+        channel.register({"CLAUDE_CONFIG_DIR": str(tmp_path)})
+    assert config.read_text() == text
+    assert not (tmp_path / ".claude.json.lock").exists()
+
+
+def test_registration_waits_for_the_native_config_writer(tmp_path, monkeypatch):
+    lock = tmp_path / ".claude.json.lock"
+    lock.mkdir()
+    waits = []
+
+    def unlock(delay):
+        waits.append(delay)
+        lock.rmdir()
+
+    monkeypatch.setattr(channel.time, "sleep", unlock)
+    channel.register({"CLAUDE_CONFIG_DIR": str(tmp_path)})
+    assert waits == [0.1]
+    assert (tmp_path / ".claude.json").is_file()
+    assert not lock.exists()
+
+
+def test_registration_times_out_without_changing_a_locked_native_config(tmp_path, monkeypatch):
+    lock = tmp_path / ".claude.json.lock"
+    lock.mkdir()
+    clock = iter([0, 2, 3])
+    waits = []
+    monkeypatch.setattr(channel.time, "monotonic", lambda: next(clock))
+    monkeypatch.setattr(channel.time, "sleep", waits.append)
+    with pytest.raises(OSError, match="is held"):
+        channel.register({"CLAUDE_CONFIG_DIR": str(tmp_path)})
+    assert waits == [0.1]
+    assert lock.is_dir()
+    assert not (tmp_path / ".claude.json").exists()

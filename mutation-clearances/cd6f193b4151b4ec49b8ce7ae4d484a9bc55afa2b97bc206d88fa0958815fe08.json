@@ -1,0 +1,6 @@
+{
+  "scripts/inbox/store.py:scripts.inbox.store.x\u01c1InboxStore\u01c1_try_requeue__mutmut_40:d386681a7cc2aba033bf9435b74ae0f711e3a31572fb93198b827797bf072fb4": {
+    "reader": "Standards reader, pull request 1795",
+    "reason": "Equivalent: _item uses item_id only in the empty raw error message, and _try_requeue returns before that call when raw is empty or not delivered."
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/repository/sqlite.py:scripts.swarm_ledger.repository.sqlite.x\u01c1SQLiteLedgerRepository\u01c1get_seed__mutmut_2:65f455d34e261e479370870f2af00334543765d6c39d4a8a34a16e8afd104411": {
+    "reader": "Standards",
+    "reason": "reconcile=None is falsy exactly as reconcile=False; get_document follows the same no-file-reconciliation branch."
+  }
+}

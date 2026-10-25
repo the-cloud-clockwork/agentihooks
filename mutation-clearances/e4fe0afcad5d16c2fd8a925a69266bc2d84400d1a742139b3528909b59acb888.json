@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/execution.py:scripts.swarm.execution.x\u01c1ExecutionRegistry\u01c1check_uid__mutmut_14:4c9c852f00ea5e17eeda8aadfdc5d1a8990673ec2e41f7c45f7ee3d36e096d9f": {
+    "reader": "Standards",
+    "reason": "Every production caller uses this same Redis database and key after WATCH and before MULTI. Reading through the pooled client instead of the pipeline leaves watched key validation intact, so concurrent changes abort and retry before any accepted write. No admission or update result changes. Independent adversarial ruling for SV2-IDN-02; evidence CI run 37710855941."
+  }
+}

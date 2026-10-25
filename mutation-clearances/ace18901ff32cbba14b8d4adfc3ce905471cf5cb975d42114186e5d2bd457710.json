@@ -1,0 +1,6 @@
+{
+  "hooks/classifier/fallbacks.py:hooks.classifier.fallbacks.x\u01c1CodexCliBackend\u01c1decide__mutmut_9:62d7203e4d963da0d0f9a78b5c02985ebb7657773b0788f9159c806d4ef8e201": {
+    "reader": "Standards reviewer /root/standards",
+    "reason": "Valid transient basename is used consistently for write, CLI argument and read. Schema contents, result and directory cleanup are unchanged."
+  }
+}

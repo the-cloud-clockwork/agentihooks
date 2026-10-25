@@ -11,6 +11,19 @@ SLUG = "demo-2026-01-01"
 FAKE = r"""#!/usr/bin/env python3
 import json, os, sys
 args = sys.argv[1:]
+if args[3] == "get":
+    path = os.path.join(os.environ["LEDGER_DIR"], args[2] + ".json")
+    if not os.path.exists(path):
+        sys.exit(f"ledger {args[2]} does not exist")
+    doc = json.load(open(path))
+    name, _, item_id = args[4].partition("/")
+    data = doc.get(name, [])
+    if item_id:
+        data = next((row for row in data if row["id"] == item_id), None)
+        if data is None:
+            sys.exit(44)
+    print(os.environ.get("FAKE_SHOW") or json.dumps(data))
+    sys.exit(0)
 with open(os.environ["FAKE_LOG"], "a") as log:
     log.write(json.dumps(args) + "\n")
 command = args[5] if len(args) > 5 else ""
@@ -127,8 +140,25 @@ def env(tmp_path):
 
 
 def run(env, script, *args):
+    wrapper = """
+import json, runpy, subprocess, sys
+from urllib.error import HTTPError
+from scripts.swarm_ledger import ledger
+def resource(slug, path, collection=False):
+    assert collection == (path == "priorities")
+    done = subprocess.run(["agentihooks", "ledger", "--slug", slug, "get", path], capture_output=True, text=True)
+    if done.returncode == 44:
+        raise HTTPError("url", 404, "missing", {}, None)
+    if done.returncode:
+        raise ValueError((done.stderr or done.stdout).strip())
+    return json.loads(done.stdout)
+ledger.resource = resource
+sys.path.insert(0, str(__import__("pathlib").Path(sys.argv[1]).parent))
+sys.argv = sys.argv[1:]
+runpy.run_path(sys.argv[0], run_name="__main__")
+"""
     return subprocess.run(
-        [sys.executable, str(SCRIPTS / script), *args],
+        [sys.executable, "-c", wrapper, str(SCRIPTS / script), *args],
         env=env,
         capture_output=True,
         text=True,
@@ -200,10 +230,25 @@ def test_list_clears_resolved_priorities_when_asked(env):
     ]
 
 
-def test_list_reports_a_missing_ledger_with_the_folder_it_read(env):
+def test_list_reports_a_missing_ledger_with_what_the_ledger_command_said(env):
     result = run(env, "list_priorities.py", "nope")
     assert result.returncode == 2
-    assert env["LEDGER_DIR"] in result.stderr
+    assert "ledger nope does not exist" in result.stderr
+    assert "agentihooks ledger list" in result.stderr
+
+
+def test_list_refuses_a_ledger_read_that_is_not_json(env):
+    result = run({**env, "FAKE_SHOW": "server busy"}, "list_priorities.py", SLUG)
+    assert result.returncode == 2
+    assert result.stderr.startswith(f"cannot read ledger {SLUG}: ")
+    assert "Traceback" not in result.stderr
+
+
+def test_list_reports_a_missing_agentihooks_command_without_a_traceback(env):
+    result = run({**env, "PATH": ""}, "list_priorities.py", SLUG)
+    assert result.returncode == 2
+    assert result.stderr.startswith(f"cannot read ledger {SLUG}: ")
+    assert "Traceback" not in result.stderr
 
 
 def write_plan(tmp_path, entries):
@@ -409,3 +454,16 @@ def test_apply_reports_a_clear_that_left_the_priority_listed(env, tmp_path):
             "error": "applied, but clearing its priority failed: server refused",
         }
     ]
+
+
+REFUSED_ROUND = (
+    "   Never write the prompts as chat text. When `AskUserQuestion` is refused because the operator is not present, "
+    "say only one short line, type operator on to answer the questions here, or leave them in Priorities; "
+    "keep every priority and end the run. Done when that one line is sent and every priority is still listed."
+)
+
+
+def test_a_refused_round_sends_one_operator_on_line_and_keeps_every_priority():
+    body = (SCRIPTS.parent / "SKILL.md").read_text()
+
+    assert [line for line in body.splitlines() if "type operator on" in line] == [REFUSED_ROUND]

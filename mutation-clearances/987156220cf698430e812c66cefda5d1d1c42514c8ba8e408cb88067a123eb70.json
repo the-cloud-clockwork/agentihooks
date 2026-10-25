@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/repository/shadow.py:scripts.swarm_ledger.repository.shadow.x_persist_lifecycle__mutmut_6:41e1d692d5c1d7875e0d24e86824344c342dbfe75dbfa81ac0c1f1819eda4639": {
+    "reader": "Standards",
+    "reason": "The supported caller supplying removed is purge_expired, which first unlinks both authoritative paths. apply_lifecycle derives those same removals from existing minus present. Defaulting removed therefore changes no transaction output for the file-authoritative lifecycle contract."
+  }
+}

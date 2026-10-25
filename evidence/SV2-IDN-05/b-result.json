@@ -1,0 +1,14 @@
+{
+  "tested_commit": "85327de7502f46bd9a88668ed64aeeb902ca9a0d",
+  "evidence_class": "local isolated fixture on temporary homes with a fixed installation time; mocked: the brain vault fetch, the background refresh fork and the brain HTTP post; not live rollout proof",
+  "then": "a cache entry from a different brain cannot satisfy a targeted context request",
+  "result": {
+    "other_brain_lesson_served": false,
+    "other_brain_pending_served": false,
+    "refresh_started_from_forged_feed": false,
+    "protected_cache_unchanged": true,
+    "cache_scope_mismatch_total": 2,
+    "log_discloses_brain_url": false
+  },
+  "passed": true
+}

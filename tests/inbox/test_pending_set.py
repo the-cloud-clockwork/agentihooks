@@ -71,18 +71,19 @@ def test_delivery_reads_only_the_pending_set_with_a_thousand_closed_items(redis,
     counting = CountingRedis(redis)
     store = InboxStore(counting)
     store.pending_items("bob")
+    store.redeliver(0, 0)
     monkeypatch.setattr(delivery, "connect", lambda environ=None: store)
     counting.calls.clear()
 
     out = delivery.pending_context("s1", {"AGENTIHOOKS_AGENT_NAME": "bob"})
 
     assert item.id in out and "new work" in out
-    assert len(counting.calls) <= 5, counting.calls
+    assert len(counting.calls) <= 7, counting.calls
     assert seed.get(item.id).state == "delivered"
     assert len(store.inbox("bob")) == 1001
 
 
-def test_the_wake_pass_listing_reads_only_pending_sets(redis):
+def test_the_wake_pass_listing_reads_only_pending_sets(redis, monkeypatch):
     seed = InboxStore(redis)
     for n in range(1000):
         seed.close(seed.send("alice", "bob", f"old {n}").id, "bob", "done", "handled the request")
@@ -91,7 +92,20 @@ def test_the_wake_pass_listing_reads_only_pending_sets(redis):
     store = InboxStore(counting)
     store.pending()
     counting.calls.clear()
+    pipeline = redis.pipeline
 
+    def traced_pipeline(*args, **kwargs):
+        pipe = pipeline(*args, **kwargs)
+        execute = pipe.execute
+
+        def traced_execute(*args, **kwargs):
+            counting.calls.extend(str(command[0][0]).lower() for command in pipe.command_stack)
+            return execute(*args, **kwargs)
+
+        monkeypatch.setattr(pipe, "execute", traced_execute)
+        return pipe
+
+    monkeypatch.setattr(redis, "pipeline", traced_pipeline)
     assert [i.id for i in store.pending()] == [item.id]
     assert counting.calls.count("hgetall") == 1, counting.calls
 
@@ -109,6 +123,33 @@ def test_back_fill_rebuilds_the_pending_set_from_existing_items(store, monkeypat
     assert [i.id for i in store.pending_items("bob")] == [first.id, second.id]
     assert sorted(pending_ids(store, "bob")) == sorted([first.id, second.id])
     assert store.redis.sismember(store.key("indexed"), "bob")
+
+
+@pytest.mark.parametrize(("conflicts", "attempts", "indexed"), [(1, 2, True), (3, 3, False)])
+def test_back_fill_returns_pending_mail_after_watch_conflicts(store, monkeypatch, conflicts, attempts, indexed):
+    from redis.exceptions import WatchError
+
+    pending = store.send("alice", "bob", "waiting")
+    closed = store.send("alice", "bob", "finished")
+    store.close(closed.id, "bob", "done", "handled the request")
+    store.redis.delete(store.key("pending", "bob"), store.key("indexed"))
+    pipeline = type(store.redis.pipeline())
+    watch = pipeline.watch
+    calls = []
+
+    def racing(pipe, *keys):
+        calls.append(keys)
+        if len(calls) <= conflicts:
+            raise WatchError()
+        return watch(pipe, *keys)
+
+    monkeypatch.setattr(pipeline, "watch", racing)
+
+    assert [item.id for item in store.pending_items("bob")] == [pending.id]
+    assert calls[:attempts] == [(store.key("address", "bob"),)] * attempts
+    assert pending_ids(store, "bob") == ([pending.id] if indexed else [])
+    assert bool(store.redis.sismember(store.key("indexed"), "bob")) is indexed
+    assert store.redis.sismember(store.key("waiting"), "bob")
 
 
 def test_back_fill_runs_once_and_keeps_items_sent_before_it(store, monkeypatch):
@@ -251,7 +292,58 @@ def test_the_wake_pass_reads_only_the_waiting_set_with_many_idle_addresses(redis
 
     assert [i.id for i in store.pending()] == [item.id]
     assert "scan_iter" not in counting.calls and "scan" not in counting.calls, counting.calls
-    assert len(counting.calls) <= 5, counting.calls
+    assert len(counting.calls) <= 7, counting.calls
+
+
+@pytest.mark.parametrize("read", ["pending", "pending_items"])
+def test_pending_reads_batch_item_hashes_and_address_indexes(store, monkeypatch, read):
+    from unittest.mock import Mock
+
+    times = iter(range(100, 104))
+    monkeypatch.setattr("scripts.inbox.store.now_ms", lambda: next(times))
+    first = store.send("alice", "bob", "first")
+    second = store.send("alice", "bob", "second")
+    third = store.send("alice", "carol", "third")
+    fourth = store.send("alice", "bob", "fourth")
+    store.pending()
+    hashes = Mock(wraps=store.redis.hgetall)
+    indexed = Mock(wraps=store.redis.sismember)
+    pipeline = Mock(wraps=store.redis.pipeline)
+    monkeypatch.setattr(store.redis, "hgetall", hashes)
+    monkeypatch.setattr(store.redis, "sismember", indexed)
+    monkeypatch.setattr(store.redis, "pipeline", pipeline)
+
+    if read == "pending":
+        assert store.pending() == [first, second, third, fourth]
+        indexed.assert_not_called()
+        assert pipeline.call_count == 2
+    else:
+        assert store.pending_items("bob") == [first, second, fourth]
+        assert pipeline.call_count == 1
+    hashes.assert_not_called()
+    assert all(call.kwargs == {"transaction": False} for call in pipeline.call_args_list)
+
+
+def test_pending_batch_keeps_duplicate_pointers_and_legacy_rebuild_behavior(store, monkeypatch):
+    times = iter(range(100, 102))
+    monkeypatch.setattr("scripts.inbox.store.now_ms", lambda: next(times))
+    first = store.send("alice", "bob", "first")
+    second = store.send("alice", "carol", "second")
+    store.redis.zadd(store.key("pending", "carol"), {first.id: first.sequence})
+    assert store.pending() == [first, second]
+    store.redis.srem(store.key("indexed"), "bob")
+    store.redis.delete(store.key("pending", "bob"))
+    assert store.pending() == [first, second]
+
+
+def test_pending_batch_names_a_missing_item(store):
+    from scripts.inbox.store import InboxError
+
+    item = store.send("alice", "bob", "work")
+    store.pending()
+    store.redis.delete(store.key("item", item.id))
+    with pytest.raises(InboxError, match=f"^no message {item.id}$"):
+        store.pending()
 
 
 def test_back_fill_rebuilds_the_waiting_set_once(store):
@@ -265,3 +357,23 @@ def test_back_fill_rebuilds_the_waiting_set_once(store):
     assert waiting(store) == {"bob", "dave"}
     store.redis.srem(store.key("waiting"), "dave")
     assert [i.id for i in store.pending()] == [first.id]
+
+
+def test_waiting_set_rebuild_survives_exhausted_watch_retries(store, monkeypatch):
+    from redis.exceptions import WatchError
+
+    pending = store.send("alice", "bob", "waiting")
+    store.pending_items("bob")
+    store.redis.delete(store.key("waiting"), store.key("waiting", "built"))
+    calls = []
+
+    def conflicting_watch(_pipe, *keys):
+        calls.append(keys)
+        raise WatchError()
+
+    monkeypatch.setattr(type(store.redis.pipeline()), "watch", conflicting_watch)
+
+    assert [item.id for item in store.pending()] == [pending.id]
+    assert calls == [(store.key("pending", "bob"),)] * 3
+    assert waiting(store) == {"bob"}
+    assert store.redis.exists(store.key("waiting", "built"))

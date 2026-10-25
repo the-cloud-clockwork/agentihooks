@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/naming.py:scripts.swarm.naming.x_space__mutmut_1:681eaca2f4e66cd0a3553171332fd6b1655f9d80e82d11b95502037ef032a2a2": {
+    "reader": "Standards",
+    "reason": "A changed default slug is still not a proof slug, so the label stays repo and code."
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "scripts/gates/intent_history.py:scripts.gates.intent_history.x_masked__mutmut_33:3c891f388ad74b96a60f5693ec94dad8db1aeb7c41fa5883cbf135b7e9fae29b": {
+    "reader": "Standards",
+    "reason": "Lowercasing Bearer in the regex under re.I changes no matches or replacement outputs. Standards independently verified all Unicode code points and case variants."
+  }
+}

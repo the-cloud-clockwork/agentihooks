@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import sys
 import time
 import weakref
 from dataclasses import dataclass, field
@@ -63,7 +64,7 @@ class Backend:
 
     async def _run(self) -> None:
         try:
-            async with stdio_client(self.config.params(self.root)) as (read, write):
+            async with stdio_client(self.config.params(self.root), errlog=sys.__stderr__) as (read, write):
                 async with ClientSession(read, write) as session:
                     await session.initialize()
                     self.session = session
@@ -101,6 +102,7 @@ class Pool:
     def __init__(self, config: BackendConfig) -> None:
         self.config = config
         self.bindings: weakref.WeakSet[Binding] = weakref.WeakSet()
+        self.parents: weakref.WeakValueDictionary[str, Binding] = weakref.WeakValueDictionary()
         self._backends: dict[Path, Backend] = {}
         self._start_lock = asyncio.Lock()
 

@@ -2,11 +2,8 @@ import json
 import re
 import subprocess
 import unittest
-from pathlib import Path
 
 from tests.swarm_ledger.ledger_page import page_source
-
-TEMPLATE = Path(__file__).resolve().parents[2] / "scripts" / "swarm_ledger" / "template.html"
 
 
 def page():
@@ -18,7 +15,11 @@ def function_source(name):
 
 
 def run_js(names, expr):
-    script = "".join(function_source(n) + "\n" for n in names) + f"process.stdout.write(JSON.stringify({expr}));"
+    script = (
+        "function closedLeft() { return 0; }\n"
+        + "".join(function_source(n) + "\n" for n in names)
+        + f"process.stdout.write(JSON.stringify({expr}));"
+    )
     return json.loads(subprocess.run(["node", "-e", script], check=True, capture_output=True, text=True).stdout)
 
 
@@ -56,7 +57,7 @@ class CollapsedByDefault(unittest.TestCase):
 })()"""
         self.assertTrue(run_js(["reveal"], expr))
         click = page().split('$("outline").addEventListener("click"', 1)[1].split("});", 1)[0]
-        self.assertLess(click.index("reveal(el)"), click.index("scrollIntoView"))
+        self.assertLess(click.index("revealTarget("), click.index("scrollIntoView"))
 
     def test_hidden_outline_targets_never_count_as_the_section_in_view(self):
         self.assertIn("getClientRects().length", function_source("markOutline"))

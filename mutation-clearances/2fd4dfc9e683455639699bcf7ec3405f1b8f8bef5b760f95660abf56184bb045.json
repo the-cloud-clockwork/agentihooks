@@ -1,0 +1,6 @@
+{
+  "scripts/hive/daemon.py:scripts.hive.daemon.x__claude_snapshots__mutmut_47:eb45341c15705f1244dfe8766c35c570d2cf721a5db630a6b922fb1be267e921": {
+    "reader": "standards_reader",
+    "reason": "The result state field is unused by quota publication and cap calculation."
+  }
+}

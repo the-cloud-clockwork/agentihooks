@@ -9,21 +9,33 @@ import subprocess
 import sys
 import tempfile
 import time
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass, field
+from dataclasses import KW_ONLY, dataclass, field
 from datetime import datetime, timezone
 from functools import partial
 from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
+from hooks.context.account_sessions import API_ACCOUNT
+from scripts import operator_env, session_bands
 from scripts.claude_config import claude_home
-from scripts.session_caps import SessionCaps
+from scripts.routing import claude_api, envs, place
+from scripts.routing.envs import subscription_child
+from scripts.routing.slots import API, API_UNBOUNDED, INTERACTIVE, SUBSCRIPTION, Slot
+
+if TYPE_CHECKING:
+    from scripts.routing.master_account import MasterAccount
+    from scripts.routing.reservation import Reservation
 
 TOKEN_PREFIX = "AH_CC_TOKEN_"
+HARNESS = "claude"
 OAUTH_ENV = "CLAUDE_CODE_OAUTH_TOKEN"
 MAX_PROBE_WORKERS = 3
 CACHE_TTL_SECONDS = 60
-MIN_ROUTING_LEFT = 5.0
+OPEN = "OPEN"
+NOT_APPLICABLE = "n/a"
+MASTERS_ONLY = "MASTERS"
 
 
 @dataclass(frozen=True)
@@ -76,12 +88,24 @@ class SessionAccount:
 
 @dataclass(frozen=True)
 class RouteDecision:
-    credential: Credential
-    result: ProbeResult
+    credential: Credential | None
+    result: ProbeResult | None
     source: str
     sessions: int | None = None
     max_sessions: int | None = None
-    placement: str = "open"
+    _: KW_ONLY
+    kind: str = SUBSCRIPTION
+
+    @property
+    def account(self) -> str:
+        return API_ACCOUNT if self.kind == API else self.credential.account
+
+
+@dataclass(frozen=True)
+class RowMarks:
+    current: str = ""
+    master: "MasterAccount | None" = None
+    reserved: str = ""
 
 
 class RoutingError(RuntimeError):
@@ -91,11 +115,12 @@ class RoutingError(RuntimeError):
 
 
 def discover_credentials(environ: Mapping[str, str]) -> list[Credential]:
-    return [
-        Credential(name, environ[name])
-        for name in sorted(environ)
-        if name.startswith(TOKEN_PREFIX) and name != TOKEN_PREFIX and environ[name]
+    names = [
+        name
+        for name in environ
+        if name.startswith(TOKEN_PREFIX) and name.removeprefix(TOKEN_PREFIX) not in ("", API_ACCOUNT) and environ[name]
     ]
+    return [Credential(name, environ[name]) for name in operator_env.distinct(environ, names)]
 
 
 def credential_for_slug(credentials: list[Credential], slug: str) -> Credential:
@@ -283,8 +308,7 @@ def _probe_command(model: str, claude_bin: str = "claude", include_partial: bool
 
 
 def _child_environment(credential: Credential, environ: Mapping[str, str]) -> dict[str, str]:
-    child = {name: value for name, value in environ.items() if not name.startswith(TOKEN_PREFIX)}
-    child.pop("ANTHROPIC_API_KEY", None)
+    child = {name: value for name, value in subscription_child(environ).items() if not name.startswith(TOKEN_PREFIX)}
     child["CLAUDE_CODE_OAUTH_TOKEN"] = credential.token
     return child
 
@@ -392,6 +416,15 @@ def probe_credential(
     include_fable: bool = False,
     claude_bin: str = "claude",
 ) -> ProbeResult:
+    if not include_fable:
+        from scripts import claude_usage  # claude_usage imports this module
+
+        try:
+            return claude_usage.probe(
+                credential.account, credential.token, model, timeout=min(timeout, claude_usage.TIMEOUT_S)
+            )
+        except claude_usage.Unreachable:
+            pass
     started = time.monotonic()
     try:
         completed = subprocess.run(
@@ -540,6 +573,22 @@ def _entry_is_fresh(entry: object, now: float, include_fable: bool) -> bool:
     return all(window.resets_at is None or window.resets_at > now for window in windows)
 
 
+def _current_tokens(environ: Mapping[str, str]) -> set[str]:
+    filled = dict(environ)
+    if not operator_env.files(filled):
+        return set()
+    operator_env.fill(filled)
+    return {credential.env_name for credential in discover_credentials(filled)}
+
+
+def _drop_tokenless(modes: dict, probed: set[str], current: set[str]) -> None:
+    if not current:
+        return
+    for data in modes.values():
+        if isinstance(data, dict) and isinstance(data.get("accounts"), dict):
+            data["accounts"] = {name: entry for name, entry in data["accounts"].items() if name in probed | current}
+
+
 def collect_results(
     credentials: list[Credential],
     *,
@@ -596,6 +645,7 @@ def collect_results(
                 )
                 new_entries[credential.env_name] = {"observed_at": observed_at, "result": _result_data(result)}
         modes[mode] = {"accounts": new_entries}
+        _drop_tokenless(modes, probed, _current_tokens(active_env))
         with contextlib.suppress(OSError):
             _write_cache(path, cache)
 
@@ -620,8 +670,27 @@ def _metric(value: float | None) -> float:
     return -1.0 if value is None else value
 
 
-def is_routable(result: ProbeResult) -> bool:
-    return result.margin is not None and result.margin >= MIN_ROUTING_LEFT
+def account_cap(
+    result: ProbeResult, now: float | None = None, include_fable: bool = False, ceiling: int | None = None
+) -> int | None:
+    """Live sessions the account may hold under the session bands; None without a full reading."""
+    if result.provider_status == "rejected":
+        return 0
+    timestamp = time.time() if now is None else now
+    weeks = [result.seven_day, *([result.fable] if include_fable else [])]
+    left = [session_bands.left(window.used, window.resets_at, timestamp) for window in weeks]
+    five = session_bands.left(result.five_hour.used, result.five_hour.resets_at, timestamp)
+    week = None if None in left else min(left)
+    return session_bands.cap(five, week) if ceiling is None else session_bands.scaled_cap(five, week, ceiling)
+
+
+def is_routable(result: ProbeResult, now: float | None = None, include_fable: bool = False) -> bool:
+    return bool(account_cap(result, now, include_fable))
+
+
+def _spend_by(result: ProbeResult, now: float) -> float | None:
+    five = session_bands.left(result.five_hour.used, result.five_hour.resets_at, now)
+    return session_bands.spend_by(five, session_bands.upcoming(result.seven_day.resets_at, now))
 
 
 def rank_results(results: list[ProbeResult], include_fable: bool = False) -> list[ProbeResult]:
@@ -638,6 +707,40 @@ def rank_results(results: list[ProbeResult], include_fable: bool = False) -> lis
     )
 
 
+@dataclass(frozen=True)
+class ClaudeTokenSource:
+    options: Mapping[str, Any] = field(default_factory=dict)
+    sessions: Mapping[str, int] = field(default_factory=dict)
+    exclude: frozenset[str] = frozenset()
+    held: "Reservation | None" = None
+
+    def results(self, environ: Mapping[str, str], now: float | None = None) -> tuple[list[ProbeResult], str]:
+        credentials = discover_credentials(environ)
+        if not credentials:
+            return [], "cached"
+        timing = {} if now is None else {"now": now}
+        return collect_results(credentials, **self.options, environ=environ, **timing)
+
+    def cap(self, result: ProbeResult, now: float) -> int | None:
+        if self.held is not None and self.held.closes(result.account, result.seven_day.used):
+            return 0
+        return account_cap(result, now, bool(self.options.get("include_fable")))
+
+    def offer(self, results: list[ProbeResult], now: float) -> list[Slot]:
+        return [
+            Slot(HARNESS, result.account, cap, self.sessions.get(result.account, 0), _spend_by(result, now))
+            for result in results
+            if result.account not in self.exclude and (cap := self.cap(result, now)) is not None
+        ]
+
+    def slots(self, environ: Mapping[str, str], now: float) -> list[Slot]:
+        results, _ = self.results(environ, now)
+        return self.offer(results, now)
+
+    def child_env(self, slot: Slot, environ: Mapping[str, str]) -> dict[str, str]:
+        return _child_environment(credential_for_slug(discover_credentials(environ), slot.account), environ)
+
+
 def select_credential(
     environ: Mapping[str, str] | None = None,
     *,
@@ -647,55 +750,79 @@ def select_credential(
     cache_file: Path | None = None,
     claude_bin: str = "claude",
     sessions: Mapping[str, int] | None = None,
-    caps: SessionCaps = SessionCaps(3),
     exclude: Iterable[str] = (),
+    now: float | None = None,
 ) -> RouteDecision:
-    """Pick the account with the most routing left among those below the per-account session cap.
-
-    When every routable account is at the cap, the least-loaded one wins (placement=overflow).
-    """
+    """Split launches between the api and the token pool by weight, then take the free seat with the fewest sessions."""
     active_env = os.environ if environ is None else environ
     credentials = discover_credentials(active_env)
-    if not credentials:
-        raise RoutingError(f"no non-empty {TOKEN_PREFIX}* variables found")
-    results, source = collect_results(
-        credentials,
-        include_fable=include_fable,
-        refresh=refresh,
-        timeout=timeout,
-        environ=active_env,
-        cache_file=cache_file,
-        claude_bin=claude_bin,
-    )
     excluded = set(exclude)
-    eligible = [result for result in results if is_routable(result) and result.account not in excluded]
-    if not eligible:
+    live = sessions or {}
+    timestamp = time.time() if now is None else now
+    api, weight = _api_side(active_env, live, excluded, timestamp)
+    if not credentials and not api:
+        raise RoutingError(f"no non-empty {TOKEN_PREFIX}* variables found")
+    options = {
+        "include_fable": include_fable,
+        "refresh": refresh,
+        "timeout": timeout,
+        "cache_file": cache_file,
+        "claude_bin": claude_bin,
+    }
+    from scripts.routing import reservation
+
+    tokens = ClaudeTokenSource(options, live, frozenset(excluded), reservation.for_worker(HARNESS, active_env))
+    results, source = tokens.results(active_env)
+    seats = tokens.offer(results, timestamp)
+    reserve = {
+        slug.strip() for slug in active_env.get("AGENTIHOOKS_RESERVE_ACCOUNTS", str()).split(",") if slug.strip()
+    }
+    pool_live = sum(live.get(credential.account, 0) for credential in credentials)
+    seat = place.place(api, seats, weight, pool_live)
+    if seat is not None and seat.kind != API and seat.account in reserve:
+        seat = session_bands.pick(other for other in seats if other.account not in reserve) or seat
+    if seat is None:
         outside = f" outside {', '.join(sorted(excluded))}" if excluded else ""
-        raise RoutingError(f"no Claude account has verified routing capacity{outside}", results)
-    reserve = {slug.strip() for slug in active_env.get("AGENTIHOOKS_RESERVE_ACCOUNTS", "").split(",") if slug.strip()}
-    counts = sessions or {}
-    below_cap = [
-        result for result in eligible if sessions is None or counts.get(result.account, 0) < caps.of(result.account)
-    ]
-    pool = below_cap or eligible
-    pool = [result for result in pool if result.account not in reserve] or pool
-    if below_cap:
-        winner, placement = rank_results(pool, include_fable)[0], "open"
-    else:
-        winner = min(rank_results(pool, include_fable), key=lambda result: counts.get(result.account, 0))
-        placement = "overflow"
+        raise RoutingError(f"no Claude account has a free session under its quota band{outside}", results)
+    if seat.kind == API:
+        return RouteDecision(None, None, source, seat.sessions, seat.cap, kind=API)
     by_account = {credential.account: credential for credential in credentials}
+    by_result = {result.account: result for result in results}
     return RouteDecision(
-        by_account[winner.account],
-        winner,
-        source,
-        sessions=None if sessions is None else counts.get(winner.account, 0),
-        max_sessions=None if sessions is None else caps.of(winner.account),
-        placement=placement,
+        by_account[seat.account], by_result[seat.account], source, sessions=seat.sessions, max_sessions=seat.cap
     )
+
+
+def _api_side(
+    environ: Mapping[str, str], sessions: Mapping[str, int], excluded: set[str], now: float
+) -> tuple[list[Slot], int]:
+    if API_ACCOUNT in excluded:
+        return [], 0
+    return place.api_side(claude_api.ClaudeApiSource(sessions), HARNESS, environ, now)
+
+
+def forced(environ: Mapping[str, str], route: str) -> RouteDecision:
+    if route != API_ACCOUNT:
+        return RouteDecision(credential_for_slug(discover_credentials(environ), route), None, "forced")
+    if not claude_api.provider(environ):
+        raise RoutingError(f"account '{API_ACCOUNT}' needs an api endpoint; none is configured")
+    return RouteDecision(None, None, "forced", kind=API)
+
+
+def launch_environment(decision: RouteDecision, environ: Mapping[str, str]) -> dict[str, str]:
+    if decision.kind == API:
+        child = envs.api_child(environ)
+    else:
+        child = _child_environment(decision.credential, environ)
+        child[decision.credential.env_name] = decision.credential.token
+    child["AGENTIHOOKS_ROUTE_ACCOUNT"] = decision.account
+    return child
 
 
 def format_selection(decision: RouteDecision, include_fable: bool = False) -> str:
+    if decision.kind == API:
+        sessions = f"sessions={decision.sessions}/{decision.max_sessions}"
+        return f"[agenti] account={API_ACCOUNT} kind={API} {sessions} source={decision.source}"
     result = decision.result
     parts = [
         f"account={result.account}",
@@ -707,8 +834,6 @@ def format_selection(decision: RouteDecision, include_fable: bool = False) -> st
         parts.append(f"fable_left={_percent(result.fable.remaining)}")
     if decision.sessions is not None:
         parts.append(f"sessions={decision.sessions}/{decision.max_sessions}")
-    if decision.placement != "open":
-        parts.append(f"placement={decision.placement}")
     parts.append(f"source={decision.source}")
     return "[agenti] " + " ".join(parts)
 
@@ -753,21 +878,70 @@ def _span(remaining: int) -> str:
     return f"{days}d{hours:02d}h"
 
 
+def _cap_text(cap: int | None) -> str:
+    if cap is None:
+        return "?"
+    return "none" if cap >= API_UNBOUNDED else str(cap)
+
+
+def _weight_text(weight: float | None) -> str:
+    return "-" if weight is None else f"{weight}%"
+
+
+def _api_line(slot: Slot, include_fable: bool, sessions: Mapping[str, int] | None, observed: bool) -> list[str]:
+    return [
+        "-",
+        f"{slot.account} ({slot.provider})",
+        API,
+        OPEN,
+        *([f"{slot.sessions}/{_cap_text(slot.cap)}"] if sessions is not None else []),
+        _weight_text(slot.weight),
+        _cap_text(slot.cap),
+        *[NOT_APPLICABLE] * (7 if include_fable else 5),
+        *(["-"] if observed else []),
+    ]
+
+
+def _account_text(account: str, marks: RowMarks) -> str:
+    text = f"{account} (current)" if marks.current and account == marks.current else account
+    return f"{text} {marks.master.marker}" if marks.master and marks.master.slug == account else text
+
+
+def _interactive_line(
+    master: "MasterAccount", include_fable: bool, sessions: Mapping[str, int] | None, observed: bool
+) -> list[str]:
+    return [
+        "-",
+        f"{master.slug} {master.marker}",
+        INTERACTIVE,
+        MASTERS_ONLY,
+        *([f"{sessions.get(master.slug, 0)}/?"] if sessions is not None else []),
+        _weight_text(None),
+        "?",
+        *[NOT_APPLICABLE] * (7 if include_fable else 5),
+        *(["-"] if observed else []),
+    ]
+
+
 def render_table(
     results: list[ProbeResult],
     now: int | None = None,
     include_fable: bool = False,
-    current: str = "",
     observed: Mapping[str, float] | None = None,
     sessions: Mapping[str, int] | None = None,
-    caps: SessionCaps | None = None,
+    api: Sequence[Slot] = (),
+    marks: RowMarks = RowMarks(),
 ) -> str:
+    master = marks.master
     timestamp = int(time.time()) if now is None else now
     headers = [
         "#",
         "ACCOUNT",
+        "KIND",
         "STATE",
         *(["SESSIONS"] if sessions is not None else []),
+        "WEIGHT",
+        "CAP",
         "ROUTING LEFT",
         "5H LEFT",
         "5H RESET",
@@ -780,15 +954,15 @@ def render_table(
         headers.append("AGE")
     rows = []
     for rank, result in enumerate(rank_results(results, include_fable), 1):
+        cap = _cap_text(account_cap(result, timestamp, include_fable))
         row = [
             str(rank),
-            f"{result.account} (current)" if current and result.account == current else result.account,
+            _account_text(result.account, marks),
+            SUBSCRIPTION,
             result.state,
-            *(
-                [f"{sessions.get(result.account, 0)}/{caps.of(result.account) if caps else '?'}"]
-                if sessions is not None
-                else []
-            ),
+            *([f"{sessions.get(result.account, 0)}/{cap}"] if sessions is not None else []),
+            _weight_text(None),
+            cap,
             _percent(result.margin),
             _percent(result.five_hour.remaining),
             _duration(result.five_hour.resets_at, timestamp),
@@ -801,6 +975,11 @@ def render_table(
             seen = observed.get(result.account)
             row.append("?" if seen is None else _span(max(0, timestamp - int(seen))))
         rows.append(row)
+    rows.extend(_api_line(slot, include_fable, sessions, observed is not None) for slot in api)
+    listed = {result.account for result in results}
+    interactive = master if master and master.kind == INTERACTIVE and master.slug not in listed else None
+    if interactive:
+        rows.append(_interactive_line(interactive, include_fable, sessions, observed is not None))
     widths = [max(len(headers[index]), *(len(row[index]) for row in rows)) for index in range(len(headers))]
     lines = ["  ".join(value.ljust(widths[index]) for index, value in enumerate(headers))]
     lines.append("  ".join("-" * width for width in widths))
@@ -808,7 +987,10 @@ def render_table(
     errors = [f"{result.account}: {result.error}" for result in rank_results(results, include_fable) if result.error]
     if errors:
         lines.extend(["", *errors])
-    known = {result.account for result in results}
+    if master and marks.reserved:
+        lines.extend(["", f"{master.slug}: {marks.reserved}"])
+    known = {result.account for result in results} | {slot.account for slot in api}
+    known |= {interactive.slug} if interactive else set()
     unlisted = {account: count for account, count in (sessions or {}).items() if account not in known}
     if unlisted:
         lines.extend(["", *(f"{account}: {count} session(s)" for account, count in sorted(unlisted.items()))])

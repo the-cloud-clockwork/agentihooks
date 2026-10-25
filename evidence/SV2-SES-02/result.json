@@ -1,0 +1,47 @@
+{
+  "package": "SV2-SES-02",
+  "dependency": "SV2-SES-01",
+  "integration_gate": "G4",
+  "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/6645",
+  "tested_commit": "4573c9cb7",
+  "package_complete": false,
+  "evidence_class": "mocked: local files in a temporary folder stand in for a provider transcript; no provider process, spool or network runs",
+  "interfaces": [
+    "hooks.memory.collector.read_batch(path, cursor) decodes only newline-terminated records after the committed offset and proposes the next cursor without writing it",
+    "hooks.memory.collector.Batch carries records, the proposed cursor, start, the speculative read end, pending trailing bytes, replayed and an identity naming generation and byte range",
+    "hooks.memory.collector.Collector.poll(path, accept) normalizes a batch once with the SES-01 decoders and commits the cursor only after accept returns",
+    "hooks.memory.cursors.CursorStore.load, commit and replays_total; commit is a compare-and-set on revision under a store lock with an atomic fsynced write",
+    "hooks.memory.cursors.Cursor holds source, device, inode, accepted offset, anchor, format, turn state, revision and replays"
+  ],
+  "supported_versions": {
+    "python": "3.11 and later",
+    "transcripts": "Claude, Codex and Copilot JSONL through the SES-01 decoders; the bare JSON array variant stays on the whole-file reader",
+    "platform": "POSIX flock and directory fsync"
+  },
+  "states": {
+    "observed": "Cases A, B and C each ran twice from independent temporary folders with identical records.",
+    "accepted": "A complete appended line is ingested once; partial UTF-8 and JSON records and a refused acceptance leave the committed cursor bytes unchanged.",
+    "committed": "Cursor files under the store root are the authoritative accepted offsets; the code and fixture are at tested_commit.",
+    "externally_verified": "None: no provider session, spool or hive collector was exercised."
+  },
+  "metrics": {
+    "transcript_cursor_replays_total": "CursorStore.replays_total; case A counts one replay each for rotation, truncation and regrowth"
+  },
+  "cases": {
+    "a": "evidence/SV2-SES-02/a-result.json",
+    "b": "evidence/SV2-SES-02/b-result.json",
+    "c": "evidence/SV2-SES-02/c-result.json"
+  },
+  "rollback_rehearsal": {
+    "action": "Stop the collector and retain cursor files with their generation, offset and revision so a controlled replay can rebuild projections.",
+    "authoritative_objects": "Source transcript files and the cursor files; cursors are never deleted as caches.",
+    "proof": "Case C keeps one cursor file after restart, the unchanged whole-file reader iter_transcript_records returns exactly the accepted records, and a collector on a fresh cursor folder replays the source into the same records."
+  },
+  "remaining_limitations": [
+    "Records a rotated file had not yet delivered before rotation are not read; the collector restarts on the new file.",
+    "A rewrite that keeps the same inode, a size at or above the offset and identical bytes in the anchor window is read as an append.",
+    "A complete final record without a trailing newline waits until a newline is written.",
+    "Two pollers on one source can both call accept for the same Batch.identity before one commit is refused as stale_cursor; the collector proves only the shared identity, and no duplicate authoritative effect depends on an idempotent accept, which the durable spool of SV2-SES-03 must provide.",
+    "The durable spool and supervisor wiring belong to SV2-SES-03."
+  ]
+}

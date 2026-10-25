@@ -1,3 +1,4 @@
+import json
 import sys
 from pathlib import Path
 
@@ -63,3 +64,45 @@ def test_an_ack_from_someone_who_never_joined_changes_nothing():
     step(state, "sync", id="s1")
     done, ctx = step(state, "ghost", rev=1)
     assert (done, ctx.dirty, answers(state)) == (False, False, [])
+
+
+def test_join_then_leave_keeps_launch_evidence_after_events_expire():
+    from scripts.swarm import launch_check
+    from scripts.swarm.store import AgentRecord
+
+    state = meta()
+    agent = AgentRecord("worker", "eng", "t1", launched_at=100)
+    for action, at in [("join", 120), ("join", 130), ("leave", 140)]:
+        ctx = ledger_core.Context(state, at)
+        assert ledger_agent_ops.apply({}, {"op": action, "by": agent.name}, ctx)
+    state["events"] = []
+    state = json.loads(json.dumps(state))
+    assert agent.name not in state["members"]
+    assert launch_check.joined_at(agent, {"_meta": state}) == 120
+
+
+def test_rejoining_retains_each_membership_start_once():
+    from scripts.swarm import launch_check
+    from scripts.swarm.store import AgentRecord
+
+    state = meta()
+    for action, at in [("join", 120), ("join", 130), ("leave", 140), ("join", 170), ("leave", 180)]:
+        ctx = ledger_core.Context(state, at)
+        assert ledger_agent_ops.apply({}, {"op": action, "by": "worker"}, ctx)
+    assert state["join_history"] == {"worker": [120, 170]}
+    first = AgentRecord("worker", "eng", "t1", launched_at=100)
+    second = AgentRecord("worker", "eng", "t2", launched_at=150)
+    assert launch_check.joined_at(first, {"_meta": state}) == 120
+    assert launch_check.joined_at(second, {"_meta": state}) == 170
+
+
+def test_a_leave_from_outside_the_crew_names_its_reason():
+    state = meta()
+    ctx = ledger_core.Context(state, 10)
+    assert ledger_agent_ops.apply({}, {"op": "leave", "by": "stranger"}, ctx) is False
+    assert ctx.refused == ["leave refused: stranger has not joined this ledger"]
+    assert ctx.events == []
+    ctx = ledger_core.Context(state, 20)
+    assert ledger_agent_ops.apply({}, {"op": "leave", "by": "eng"}, ctx) is True
+    assert ctx.refused == []
+    assert "eng" not in state["members"]

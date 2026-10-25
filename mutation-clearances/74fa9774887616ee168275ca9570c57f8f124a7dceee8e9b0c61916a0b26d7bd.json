@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/phase_planning.py:scripts.swarm.phase_planning.x__open_review__mutmut_3:013146ed3e90e52f4d04638c2bef67bbddf2feeb4dbd9da39e3cb2730acdc3c3": {
+    "reader": "Standards",
+    "reason": "The first review key stays distinct from every later round key whether its round reads zero or None, so no reviewer item is dropped or sent twice."
+  }
+}

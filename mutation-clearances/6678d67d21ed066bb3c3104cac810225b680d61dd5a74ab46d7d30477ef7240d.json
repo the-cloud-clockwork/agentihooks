@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/capacity.py:scripts.swarm.capacity.x_accounts__mutmut_119:73968c7f056b2e72c45e28c7bb6ee58f7b682fc801cf8e24f52992796bba6be5": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "The state classifier only distinguishes exact rejected. None, XXallowedXX and ALLOWED remain non rejected and produce identical states for every quota window. The Standards reader reconfirmed this identity against CI run 37710037693."
+  }
+}

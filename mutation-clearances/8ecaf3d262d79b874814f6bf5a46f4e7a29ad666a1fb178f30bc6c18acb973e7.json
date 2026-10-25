@@ -1,0 +1,6 @@
+{
+  "scripts/recall/search.py:scripts.recall.search.x__exact__mutmut_34:ac51e3333cc629e7e1125307cee5cdadf6979f47909504a860b78134226b255a": {
+    "reader": "standards_reader",
+    "reason": "Only the case of the ORDER BY keywords and the records.time and records.key identifiers changes, which SQLite treats as case-insensitive."
+  }
+}

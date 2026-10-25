@@ -1,10 +1,16 @@
+import base64
+import json
 import subprocess
+import time
+from dataclasses import replace
 
 import pytest
 
 from scripts import codex_router as router
 from scripts.claude_quota_balancer import QuotaWindow
 from scripts.codex_quota import CodexQuota
+from scripts.routing import codex_api, place
+from scripts.routing.slots import API_UNBOUNDED
 
 ENV = {
     "HOME": "/home/u",
@@ -15,13 +21,11 @@ ENV = {
 }
 
 
-@pytest.fixture(autouse=True)
-def _no_stored_caps(monkeypatch):
-    monkeypatch.setattr("scripts.session_caps.stored", lambda harness="claude": {})
+NOW = 1_800_000_000
 
 
-def _quota(used):
-    return CodexQuota(observed_at=0, plan_type="team", seven_day=QuotaWindow(used=used))
+def _quota(used, observed_at=NOW):
+    return CodexQuota(observed_at=observed_at, plan_type="team", seven_day=QuotaWindow(used=used))
 
 
 def _status(returncode):
@@ -42,9 +46,25 @@ def _accounts(signed_in=True):
     ]
 
 
-def test_accounts_are_the_default_login_and_every_token_variable():
-    assert router.accounts(ENV, run=_status(0)) == _accounts()
-    assert router.accounts(ENV, run=_status(1))[0] == router.CodexAccount("default", signed_in=False)
+def test_accounts_are_the_token_accounts_alone_once_any_token_variable_exists():
+    def no_status(argv, **kwargs):
+        raise AssertionError("no login status check with tokens")
+
+    assert router.accounts(ENV, run=no_status) == _accounts()[1:]
+    assert router.routing_pool(ENV, run=no_status) == _accounts()[1:]
+
+
+def test_without_token_variables_accounts_are_the_default_login_and_the_pool_is_unchecked():
+    environ = {"HOME": "/home/u", "AH_CC_TOKEN_ncgma": "cc-value"}
+    assert router.accounts(environ, run=_status(0)) == [router.CodexAccount("default")]
+    assert router.accounts(environ, run=_status(1)) == [router.CodexAccount("default", signed_in=False)]
+    assert router.routing_pool(environ, run=_status(1)) == [router.CodexAccount("default")]
+
+
+def test_live_accounts_are_the_token_accounts_live_sessions_run_on_that_the_pool_lacks():
+    pool = [router.CodexAccount("alpha", "AH_CX_TOKEN_alpha")]
+    sessions = {"alpha": 1, "beta": 2, "default": 1, "api": 1}
+    assert router.live_accounts(pool, sessions) == [router.CodexAccount("beta", "AH_CX_TOKEN_beta")]
 
 
 def test_login_status_and_quota_read_the_profile_codex_home(tmp_path):
@@ -71,30 +91,255 @@ def test_login_status_and_quota_read_the_profile_codex_home(tmp_path):
     assert quota.five_hour.used == 40.0
 
 
-def test_the_most_routing_left_below_the_cap_wins():
+def test_the_account_with_the_fewest_sessions_under_its_week_band_wins():
     quotas = {"default": _quota(80.0), "alpha": _quota(30.0), "beta": _quota(10.0)}
-    assert router.select(_accounts(), quotas, {"beta": 3}, cap=3) == (_accounts()[1], "open")
-    assert router.select(_accounts(), quotas, {}, cap=3) == (_accounts()[2], "open")
+    assert router.select(_accounts(), quotas, {}, NOW)[:2] == (_accounts()[1], "open")
+    account, placement, seat = router.select(_accounts(), quotas, {"alpha": 1, "beta": 1}, NOW)
+    assert (account, placement) == (_accounts()[0], "open")
+    assert (seat.cap, seat.sessions) == (6, 0)
 
 
-def test_every_account_at_the_cap_overflows_to_the_least_loaded():
-    quotas = {"default": _quota(10.0), "alpha": _quota(20.0), "beta": _quota(30.0)}
-    sessions = {"default": 5, "alpha": 3, "beta": 4}
-    assert router.select(_accounts(), quotas, sessions, cap=3) == (_accounts()[1], "overflow")
+def test_equal_sessions_go_to_the_codex_account_whose_week_resets_soonest():
+    soon = CodexQuota(NOW, "team", seven_day=QuotaWindow(used=50, resets_at=NOW + 600))
+    late = CodexQuota(NOW, "team", seven_day=QuotaWindow(used=10, resets_at=NOW + 90000))
+    spent = CodexQuota(NOW, "team", seven_day=QuotaWindow(used=98, resets_at=NOW + 60))
+    quotas = {"default": late, "alpha": spent, "beta": soon}
+    assert router.select(_accounts(), quotas, {}, NOW)[0] == _accounts()[2]
+    tired = CodexQuota(NOW, "team", QuotaWindow(used=95), QuotaWindow(used=50, resets_at=NOW + 600))
+    passed = CodexQuota(NOW, "team", seven_day=QuotaWindow(used=50, resets_at=NOW - 1))
+    for other in (tired, passed):
+        assert router.select(_accounts(), {**quotas, "beta": other}, {}, NOW)[0] == _accounts()[0]
+    rested = CodexQuota(NOW, "team", QuotaWindow(used=97, resets_at=NOW - 1), soon.seven_day)
+    assert router.select(_accounts(), {**quotas, "beta": rested}, {}, NOW)[0] == _accounts()[2]
+    assert router.select(_accounts(), quotas, {"beta": 1}, NOW)[0] == _accounts()[0]
+    assert [seat.spend_before for seat in router.seats(_accounts(), quotas, {}, NOW)] == [
+        NOW + 90000,
+        NOW + 60,
+        NOW + 600,
+    ]
 
 
-def test_a_signed_out_default_or_a_spent_account_is_never_picked():
-    quotas = {"default": None, "alpha": _quota(99.0), "beta": None}
-    assert router.select(_accounts(signed_in=False), quotas, {}, cap=3) == (_accounts()[2], "open")
+def test_a_week_under_five_percent_or_a_full_band_takes_no_session():
+    quotas = {"default": _quota(96.0), "alpha": _quota(20.0), "beta": _quota(30.0)}
+    assert router.select(_accounts(), quotas, {"alpha": 6}, NOW)[0] == _accounts()[2]
+    with pytest.raises(router.RoutingError, match="free session under its quota band"):
+        router.select(_accounts(), quotas, {"alpha": 6, "beta": 6}, NOW)
+
+
+def test_a_signed_out_missing_or_stale_reading_is_never_picked():
+    quotas = {"default": _quota(10.0), "alpha": _quota(10.0, observed_at=NOW - 6 * 3600 - 1), "beta": None}
     with pytest.raises(router.RoutingError):
-        router.select(_accounts(signed_in=False)[:2], quotas, {}, cap=3)
+        router.select(_accounts(signed_in=False), quotas, {}, NOW)
+    quotas["alpha"] = _quota(10.0, observed_at=NOW - 6 * 3600)
+    assert router.select(_accounts(signed_in=False), quotas, {}, NOW)[0] == _accounts()[1]
+
+
+def test_the_cap_comes_from_the_week_alone_and_a_passed_reset_reads_full():
+    spent = CodexQuota(NOW, "team", QuotaWindow(used=99), QuotaWindow(used=97, resets_at=NOW + 600))
+    assert router.account_cap(spent, NOW) == 0
+    assert router.account_cap(spent, NOW + 600) == 6
+    assert router.account_cap(_quota(95.0), NOW) == 6
+    assert router.account_cap(None, NOW) is None
+
+
+def _aged(seconds, resets_at=NOW + 86_400):
+    return CodexQuota(NOW - seconds, "team", seven_day=QuotaWindow(used=10.0, resets_at=resets_at))
+
+
+def test_a_reading_keeps_its_cap_until_the_max_age_and_a_passed_week_reads_full(monkeypatch):
+    monkeypatch.delenv("AGENTIHOOKS_CODEX_READING_MAX_AGE_H", raising=False)
+    assert router.account_cap(_aged(3600), NOW) == 6
+    assert router.account_cap(_aged(6 * 3600), NOW) == 6
+    assert router.account_cap(_aged(6 * 3600 + 1), NOW) is None
+    spent = CodexQuota(NOW - 3600, "team", seven_day=QuotaWindow(used=99.0, resets_at=NOW + 600))
+    assert router.account_cap(spent, NOW) == 0
+    assert router.account_cap(replace(spent, seven_day=QuotaWindow(used=99.0, resets_at=NOW)), NOW) == 6
+    assert router.account_cap(_aged(3600, resets_at=None), NOW) == 6
+    monkeypatch.setenv("AGENTIHOOKS_CODEX_READING_MAX_AGE_H", "0.5")
+    assert router.account_cap(_aged(3600), NOW) is None
+    assert router.account_cap(_aged(1800), NOW) == 6
+    assert router.account_cap(_aged(600), NOW, {"AGENTIHOOKS_CODEX_READING_MAX_AGE_H": "0.1"}) == 6
+    assert router.account_cap(_aged(1800), NOW, {}) == 6
+    assert router.account_cap(_aged(1800), NOW, {"AGENTIHOOKS_CODEX_READING_MAX_AGE_H": "0.25"}) is None
+    monkeypatch.setenv("AGENTIHOOKS_CODEX_READING_MAX_AGE_H", "soon")
+    assert router.account_cap(_aged(6 * 3600), NOW) == 6
+    assert router.account_cap(_aged(6 * 3600 + 1), NOW) is None
+
+
+def test_a_usable_hour_old_reading_is_still_probed_once_per_freshness_window(monkeypatch):
+    probed = []
+    monkeypatch.setattr(router, "quotas", lambda pool, environ: {"default": _aged(3600)})
+    monkeypatch.setattr(router, "probe", lambda account, environ, run: probed.append(account.name))
+    pool = [router.CodexAccount("default")]
+    router.fresh_quotas(pool, ENV, NOW)
+    router.fresh_quotas(pool, ENV, NOW + 900)
+    assert probed == ["default"]
 
 
 def test_a_forced_route_ignores_quota_and_cap():
     quotas = {"default": _quota(1.0), "alpha": _quota(99.0), "beta": _quota(1.0)}
-    assert router.select(_accounts(), quotas, {"alpha": 9}, cap=3, route="alpha") == (_accounts()[1], "forced")
+    assert router.select(_accounts(), quotas, {"alpha": 9}, NOW, route="alpha") == (_accounts()[1], "forced", None)
     with pytest.raises(router.RoutingError, match="available: default, alpha, beta"):
-        router.select(_accounts(), quotas, {}, cap=3, route="gamma")
+        router.select(_accounts(), quotas, {}, NOW, route="gamma")
+
+
+def test_no_seat_names_why_and_seats_are_codex():
+    with pytest.raises(
+        router.RoutingError,
+        match=r"^no signed in Codex account has a fresh reading and a free session under its quota band$",
+    ):
+        router.select(_accounts(), {}, {}, NOW)
+    assert {seat.harness for seat in router.seats(_accounts(), {"default": _quota(1.0)}, {}, NOW)} == {"codex"}
+
+
+def test_route_reads_quotas_for_a_forced_account_and_refreshes_them_otherwise(monkeypatch):
+    calls = []
+    pool = _accounts()
+    runner = object()
+    monkeypatch.setattr(router, "codex_sessions_by_account", lambda: {})
+    monkeypatch.setattr(router, "accounts", lambda environ, run: pool)
+    monkeypatch.setattr(router, "quotas", lambda p, environ: calls.append(("quotas", p, environ)) or {})
+    monkeypatch.setattr(
+        router,
+        "fresh_quotas",
+        lambda p, environ, now, run: calls.append(("fresh", p, environ, run)) or {"default": _quota(1.0, time.time())},
+    )
+    assert router._route(ENV, "alpha", runner, "") == (pool[1], "forced", 0, "?")
+    assert router._route(ENV, "", runner, "") == (pool[0], "open", 0, "6")
+    assert calls == [("quotas", pool, ENV), ("fresh", pool, ENV, runner)]
+
+
+def test_a_stale_reading_is_refreshed_by_a_probe_before_placing(monkeypatch):
+    probed = []
+    fresh = _quota(40.0)
+    monkeypatch.setattr(router, "quotas", lambda pool, environ: {"default": _quota(10.0, observed_at=NOW - 901)})
+    monkeypatch.setattr(router, "probe", lambda account, environ, run: probed.append(account.name) or fresh)
+    pool = [router.CodexAccount("default"), router.CodexAccount("alpha", "AH_CX_TOKEN_alpha", signed_in=False)]
+    assert router.fresh_quotas(pool, ENV, NOW) == {"default": fresh}
+    assert probed == ["default"]
+    monkeypatch.setattr(router, "probe", lambda account, environ, run: None)
+    assert router.fresh_quotas(pool, ENV, NOW)["default"].observed_at == NOW - 901
+
+
+def test_a_failed_probe_waits_a_freshness_window_before_the_next(monkeypatch):
+    probed = []
+    monkeypatch.setattr(router, "quotas", lambda pool, environ: {"default": None})
+    monkeypatch.setattr(router, "probe", lambda account, environ, run: probed.append(account.name))
+    pool = [router.CodexAccount("default")]
+    router.fresh_quotas(pool, ENV, NOW)
+    router.fresh_quotas(pool, ENV, NOW + 900)
+    assert probed == ["default"]
+    router.fresh_quotas(pool, ENV, NOW + 901)
+    assert probed == ["default", "default"]
+
+
+def test_fresh_quotas_hands_its_pool_environment_and_runner_on_and_skips_fresh_readings(monkeypatch):
+    calls = []
+    fresh, stale = _quota(10.0), _quota(10.0, observed_at=NOW - 901)
+    monkeypatch.setattr(
+        router, "quotas", lambda pool, environ: calls.append((pool, environ)) or {"default": fresh, "alpha": stale}
+    )
+    monkeypatch.setattr(router, "probe", lambda account, environ, run: calls.append((account.name, environ, run)))
+    pool = _accounts()[:2]
+    runner = object()
+    assert router.fresh_quotas(pool, ENV, NOW, runner) == {"default": fresh, "alpha": stale}
+    assert calls == [(pool, ENV), ("alpha", ENV, runner)]
+
+
+@pytest.mark.parametrize(
+    "five,week",
+    [(QuotaWindow(10.0, NOW), QuotaWindow(95.0, NOW + 3_600)), (QuotaWindow(), QuotaWindow(95.0, NOW - 1))],
+)
+def test_a_minute_old_reading_taken_before_a_passed_reset_is_probed_again(monkeypatch, five, week):
+    probed = []
+    before = CodexQuota(NOW - 60, "pro", five, week)
+    live = _quota(2.0)
+    monkeypatch.setattr(router, "quotas", lambda pool, environ: {"default": before})
+    monkeypatch.setattr(router, "probe", lambda account, environ, run: probed.append(account.name) or live)
+    assert router.fresh_quotas([router.CodexAccount("default")], ENV, NOW) == {"default": live}
+    assert probed == ["default"]
+
+
+def test_a_forced_refresh_probes_every_signed_in_account_however_fresh_or_recently_tried(monkeypatch):
+    probed = []
+    fresh, live = _quota(10.0), _quota(3.0)
+    monkeypatch.setattr(router, "quotas", lambda pool, environ: {"default": fresh, "alpha": fresh})
+    monkeypatch.setattr(router, "probe", lambda account, environ, run: probed.append(account.name) or live)
+    pool = [router.CodexAccount("default"), router.CodexAccount("alpha", "AH_CX_TOKEN_alpha", signed_in=False)]
+    assert router.fresh_quotas(pool, ENV, NOW, force=True) == {"default": live, "alpha": fresh}
+    router.fresh_quotas(pool, ENV, NOW, force=True)
+    assert probed == ["default", "default"]
+    assert router.fresh_quotas(pool, ENV, NOW) == {"default": fresh, "alpha": fresh}
+    assert probed == ["default", "default"]
+
+
+def test_probe_attempts_live_in_one_file_and_survive_bad_contents(monkeypatch):
+    from pathlib import Path
+
+    path = Path.home() / ".agentihooks" / "codex-probe-attempts.json"
+    assert router._attempts_path() == path
+    path.write_text("not json")
+    assert router._probe_attempts() == {}
+    path.unlink()
+    path.mkdir()
+    monkeypatch.setattr(router, "quotas", lambda pool, environ: {"default": None})
+    monkeypatch.setattr(router, "probe", lambda account, environ, run: None)
+    assert router.fresh_quotas([router.CodexAccount("default")], ENV, NOW) == {"default": None}
+
+
+def test_the_probe_runs_one_tiny_exec_on_the_account_and_reads_its_rollout(monkeypatch):
+    seen = {}
+
+    def run(argv, **kwargs):
+        seen.update(argv=argv, kwargs=kwargs)
+        out = 'not json\n[1]\n{"type": "turn.started", "thread_id": "t-0"}\n'
+        out += '{"type": "thread.started", "thread_id": "t-1"}\n{"type": "turn.completed"}\n'
+        return subprocess.CompletedProcess(argv, 0, out, "")
+
+    def session_quota(environ, thread):
+        seen.update(environ=environ)
+        return thread
+
+    monkeypatch.setattr(router.shutil, "which", lambda name: {"codex": "/usr/bin/codex"}.get(name))
+    monkeypatch.setattr(router.codex_quota, "session_quota", session_quota)
+    assert router.probe(_accounts()[1], ENV, run) == "t-1"
+    assert seen["argv"] == ["/usr/bin/codex", "--no-daemon", *router.PROBE_ARGS]
+    assert seen["kwargs"] == {
+        "env": {**router.child_environment(_accounts()[1], ENV), router.INTERNAL_RUN: "1"},
+        "capture_output": True,
+        "text": True,
+        "stdin": subprocess.DEVNULL,
+        "timeout": router.PROBE_TIMEOUT_S,
+    }
+    assert seen["environ"] == ENV
+    monkeypatch.setattr(router.shutil, "which", lambda name: None)
+    no_start = '{"type": "turn.completed"}\n'
+    assert (
+        router.probe(_accounts()[1], ENV, lambda argv, **kw: subprocess.CompletedProcess(argv, 0, no_start, "")) is None
+    )
+    no_thread = '{"type": "thread.started"}\n'
+    assert (
+        router.probe(_accounts()[1], ENV, lambda argv, **kw: subprocess.CompletedProcess(argv, 0, no_thread, ""))
+        is None
+    )
+    assert router.probe(_accounts()[1], ENV, lambda argv, **kw: subprocess.CompletedProcess(argv, 0, None, "")) is None
+    assert router.probe(_accounts()[1], ENV, lambda argv, **kw: subprocess.CompletedProcess(argv, 1, "", "")) is None
+
+    def stuck(argv, **kwargs):
+        raise subprocess.TimeoutExpired(argv, 1)
+
+    assert router.probe(_accounts()[1], ENV, stuck) is None
+
+
+def test_a_session_quota_is_read_from_the_rollout_named_by_its_session(tmp_path):
+    day = tmp_path / "sessions" / "2026" / "10" / "08"
+    day.mkdir(parents=True)
+    event = '{"timestamp": "2026-10-08T10:00:00Z", "payload": {"rate_limits": {"secondary": {"used_percent": 74, '
+    event += '"window_minutes": 10080}}}}\n'
+    (day / "rollout-2026-10-08T10-00-00-t-1.jsonl").write_text(event)
+    env = {"CODEX_HOME": str(tmp_path)}
+    assert router.codex_quota.session_quota(env, "t-1").seven_day.used == 74.0
+    assert router.codex_quota.session_quota(env, "t-2") is None
 
 
 def test_a_token_child_keeps_only_its_token_and_runs_without_the_shared_daemon():
@@ -121,7 +366,9 @@ def _launch(monkeypatch, tmp_path, environ, argv, quotas=None, sessions=None):
     seen = {}
     monkeypatch.setattr(router, "codex_sessions_by_account", lambda: sessions or {})
     monkeypatch.setattr(router, "quotas", lambda accounts, environ: quotas or {})
+    monkeypatch.setattr(router, "probe", lambda account, environ, run: None)
     monkeypatch.setattr(router.shutil, "which", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr(router.time, "time", lambda: NOW)
 
     def execvpe(path, cmd, env):
         seen.update(path=path, cmd=cmd, env=env)
@@ -144,8 +391,23 @@ def test_a_routed_launch_reports_the_account_and_never_prints_a_token(monkeypatc
     assert seen["env"]["CODEX_ACCESS_TOKEN"] == "cx-value-a"
     assert report.read_text() == "status=routed\naccount=alpha\nplacement=open\n"
     out = capsys.readouterr()
-    assert "account=alpha" in out.out
+    assert "account=alpha sessions=0/6 placement=open" in out.out
     assert "cx-value" not in out.out + out.err
+
+
+def test_a_session_name_reaches_codex_as_its_thread_id(monkeypatch, tmp_path):
+    asked = []
+
+    def resolve(args, environ):
+        asked.append((list(args), environ.get("CODEX_HOME"), sorted(k for k in environ if "TOKEN" in k)))
+        return ["archive", "01a12c55-38bc-70c1-be9b-6c5d7fbcdc22"]
+
+    monkeypatch.setattr(router.codex_sessions, "resolve", resolve)
+    environ = {**ENV, "CODEX_HOME": "/profile/codex"}
+    rc, seen, _ = _launch(monkeypatch, tmp_path, environ, ["archive", "engineer@abc-0001"], {"alpha": _quota(10.0)})
+    assert rc == 0
+    assert seen["cmd"][-2:] == ["archive", "01a12c55-38bc-70c1-be9b-6c5d7fbcdc22"]
+    assert asked == [(["archive", "engineer@abc-0001"], "/profile/codex", [])]
 
 
 def test_route_forces_an_account(monkeypatch, tmp_path):
@@ -163,21 +425,578 @@ def test_no_routable_account_fails_the_launch_and_reports_it(monkeypatch, tmp_pa
     assert "cx-value" not in capsys.readouterr().err
 
 
-def test_without_token_variables_codex_launches_as_today(monkeypatch, tmp_path):
-    def no_status(argv, **kwargs):
-        raise AssertionError("no login status check without tokens")
-
-    monkeypatch.setattr(router, "codex_sessions_by_account", lambda: {"default": 9})
-    monkeypatch.setattr(router.shutil, "which", lambda name: f"/usr/bin/{name}")
-    seen = {}
-    report = tmp_path / "launch.route"
-    rc = router.main(
-        ["--agentihooks-report", str(report), "-m", "o3", "do it"],
-        environ={"HOME": str(tmp_path), "AH_CC_TOKEN_ncgma": "cc-value"},
-        execvpe=lambda path, cmd, env: seen.update(cmd=cmd, env=env),
-        run=no_status,
-    )
+def test_without_token_variables_the_default_login_is_judged_by_its_week(monkeypatch, tmp_path):
+    environ = {"AH_CC_TOKEN_ncgma": "cc-value"}
+    rc, seen, report = _launch(monkeypatch, tmp_path, environ, ["-m", "o3", "do it"], {"default": _quota(50.0)})
     assert rc == 0
     assert seen["cmd"] == ["/usr/bin/codex", "-m", "o3", "do it"]
     assert "CODEX_ACCESS_TOKEN" not in seen["env"]
     assert report.read_text() == "status=routed\naccount=default\nplacement=open\n"
+    rc, seen, report = _launch(monkeypatch, tmp_path, environ, [], {"default": _quota(50.0)}, {"default": 6})
+    assert rc == 3 and not seen
+    monkeypatch.setattr(router, "codex_sessions_by_account", lambda: {"default": 5})
+    assert router._route(environ, "", _status(0), "") == (router.CodexAccount("default"), "open", 5, "6")
+    with pytest.raises(router.RoutingError, match="no signed in Codex account"):
+        router._route(environ, "", _status(1), "")
+
+
+def test_the_api_route_is_forced_with_its_own_live_count_and_no_cap(monkeypatch):
+    def no_status(argv, **kwargs):
+        raise AssertionError("no login status check on the api route")
+
+    environ = dict.fromkeys(["CODEX_API_KEY"], "1")
+    monkeypatch.setattr(router, "codex_sessions_by_account", lambda: {"api": 2, "default": 5})
+    expected = router.CodexAccount("api", key_env="CODEX_API_KEY")
+    assert router._route(environ, "api", no_status, "") == (expected, "forced", 2, "?")
+    monkeypatch.setattr(router, "codex_sessions_by_account", lambda: {"default": 5})
+    assert router._route(environ, "api", no_status, "") == (expected, "forced", 0, "?")
+
+
+def _weighted(monkeypatch, weight, cap=API_UNBOUNDED):
+    def policy(harness, environ):
+        assert harness == "codex"
+        return place.ApiPolicy(weight, cap)
+
+    monkeypatch.setattr(place, "policy", policy)
+
+
+def test_the_codex_api_share_counts_live_sessions_on_accounts_without_a_seat(monkeypatch):
+    _weighted(monkeypatch, 25)
+    quotas = {"default": _quota(10.0), "alpha": _quota(10.0)}
+    assert router.select(_accounts(), quotas, {"beta": 4, "api": 1}, NOW, environ=API_ENV)[0] == API
+    assert router.select(_accounts(), quotas, {"beta": 2, "api": 1}, NOW, environ=API_ENV)[0].name == "alpha"
+
+
+def test_the_codex_launch_time_reaches_the_api_side(monkeypatch):
+    seen = []
+
+    def api_side(source, harness, environ, now):
+        seen.append(now)
+        return [], 0
+
+    monkeypatch.setattr(place, "api_side", api_side)
+    router.select(_accounts(), {"alpha": _quota(10.0)}, {}, NOW, environ=API_ENV)
+    assert seen == [NOW]
+
+
+def test_an_unreadable_codex_routing_setting_closes_only_the_api_side(monkeypatch, capsys):
+    def unreadable(harness, environ):
+        raise place.SettingsError("routing settings are unreadable: KeyError")
+
+    monkeypatch.setattr(place, "policy", unreadable)
+    assert router.select(_accounts(), {"alpha": _quota(10.0)}, {}, NOW, environ=API_ENV)[0].name == "alpha"
+    assert capsys.readouterr().err == "[codex] api side closed: routing settings are unreadable: KeyError\n"
+    with pytest.raises(router.RoutingError):
+        router.select(_accounts(), {}, {}, NOW, environ=API_ENV)
+
+
+API_ENV = {**ENV, "CODEX_API_KEY": "key"}
+API = router.CodexAccount("api", key_env="CODEX_API_KEY")
+
+
+def test_three_accounts_and_an_api_at_weight_25_give_api_one_of_every_four_sessions(monkeypatch):
+    _weighted(monkeypatch, 25)
+    quotas = {"default": _quota(10.0), "alpha": _quota(10.0), "beta": _quota(10.0)}
+    sessions, chosen = {}, []
+    for _ in range(8):
+        account, placement, seat = router.select(_accounts(), quotas, dict(sessions), NOW, environ=API_ENV)
+        chosen.append(account.name)
+        assert (placement, seat.account) == ("open", account.name)
+        sessions[account.name] = sessions.get(account.name, 0) + 1
+    assert chosen == ["api", "alpha", "beta", "default"] * 2
+
+
+def test_with_every_codex_week_below_five_percent_every_session_goes_to_api(monkeypatch):
+    _weighted(monkeypatch, 0)
+    quotas = {"default": _quota(97.0), "alpha": _quota(97.0), "beta": _quota(99.0)}
+    for live in range(3):
+        account, placement, seat = router.select(_accounts(), quotas, {"api": live}, NOW, environ=API_ENV)
+        assert (account, placement, seat.cap, seat.sessions, seat.kind) == (API, "open", API_UNBOUNDED, live, "api")
+
+
+def test_codex_routing_fails_only_when_the_pool_and_the_api_are_both_closed(monkeypatch):
+    _weighted(monkeypatch, 0, cap=1)
+    quotas = {"default": _quota(97.0), "alpha": _quota(97.0), "beta": _quota(99.0)}
+    assert router.select(_accounts(), quotas, {}, NOW, environ=API_ENV)[0] == API
+    with pytest.raises(router.RoutingError) as raised:
+        router.select(_accounts(), quotas, {"api": 1}, NOW, environ=API_ENV)
+    assert str(raised.value) == (
+        "no signed in Codex account has a fresh reading and a free session under its quota band"
+    )
+
+
+def test_without_api_variables_no_routing_setting_is_read(monkeypatch):
+    monkeypatch.setattr(place, "policy", lambda harness, environ: pytest.fail("policy read without an api slot"))
+    quotas = {"default": _quota(90.0), "alpha": _quota(10.0), "beta": _quota(50.0)}
+    assert router.select(_accounts(), quotas, {}, NOW, environ=ENV)[0].name == "alpha"
+    assert router.select(_accounts(), quotas, {}, NOW)[0].name == "alpha"
+
+
+def test_an_open_route_to_the_api_launches_with_the_api_scrubber(monkeypatch, tmp_path, capsys):
+    _weighted(monkeypatch, 100)
+    quotas = {"default": _quota(10.0), "alpha": _quota(10.0), "beta": _quota(10.0)}
+    rc, seen, report = _launch(monkeypatch, tmp_path, API_ENV, ["-m", "o3"], quotas)
+    assert rc == 0
+    assert seen["cmd"] == ["/usr/bin/codex", "--no-daemon", *codex_api.overrides("CODEX_API_KEY", ""), "-m", "o3"]
+    assert seen["env"]["AH_ROUTE_API"] == "1"
+    assert seen["env"]["CODEX_API_KEY"] == "key"
+    assert not [name for name in seen["env"] if name.startswith("AH_CX_TOKEN_") or name == "CODEX_ACCESS_TOKEN"]
+    assert report.read_text() == "status=routed\naccount=api\nplacement=open\n"
+    assert "account=api sessions=0/1000000 placement=open" in capsys.readouterr().out
+
+
+def _jwt(claims, payload=None):
+    def part(data):
+        return base64.urlsafe_b64encode(data).rstrip(b"=").decode()
+
+    body = payload if payload is not None else json.dumps(claims).encode()
+    return ".".join([part(b'{"alg":"RS256"}'), part(body), "c2ln"])
+
+
+OAUTH = _jwt({"iss": "https://auth.openai.com", "https://api.openai.com/auth": {"chatgpt_account_id": "acct-1"}})
+OAUTH_TWO = _jwt({"https://api.openai.com/auth": {"chatgpt_account_id": "acct-2", "chatgpt_plan_type": "pro"}})
+AGENT = _jwt({"iss": "https://chatgpt.com/codex-backend/agent-identity", "agent_runtime_id": "rt-1", "account_id": "a"})
+DASHED = _jwt({"https://api.openai.com/auth": {"chatgpt_account_id": "acct-1"}, "n": ">>>"})
+UNDERSCORED = _jwt({"https://api.openai.com/auth": {"chatgpt_account_id": "acct-1"}, "n": "???"})
+AGENT_WITH_AUTH = _jwt({"agent_runtime_id": "rt-2", "https://api.openai.com/auth": {"chatgpt_account_id": "acct-3"}})
+OAUTH_ENV = {
+    "HOME": "/home/u",
+    "AH_CX_TOKEN_alpha": OAUTH,
+    "AH_CX_TOKEN_beta": OAUTH_TWO,
+    "AH_CX_TOKEN_gamma": AGENT,
+    "AH_CX_TOKEN_delta": "at-personal",
+    "AH_CX_TOKEN_keyed": "sk-proj-value",
+    "AH_CX_TOKEN_bare": _jwt({"https://api.openai.com/auth": {"chatgpt_plan_type": "pro"}}),
+    "AGENTIHOOKS_CHATGPT_ACCOUNT_ID": "inherited",
+    "CODEX_ACCESS_TOKEN": "stale",
+}
+
+
+def _token(name):
+    return router.CodexAccount(name, f"AH_CX_TOKEN_{name}")
+
+
+@pytest.mark.parametrize(
+    ("value", "kind"),
+    [
+        (OAUTH, "chatgpt-oauth"),
+        (OAUTH_TWO, "chatgpt-oauth"),
+        (DASHED, "chatgpt-oauth"),
+        (UNDERSCORED, "chatgpt-oauth"),
+        ("at-" + OAUTH, "codex-access-token"),
+        ("skill-token", "codex-access-token"),
+        (_jwt(None, b"5"), "codex-access-token"),
+        (AGENT, "codex-access-token"),
+        (AGENT_WITH_AUTH, "codex-access-token"),
+        ("at-personal", "codex-access-token"),
+        ("cx-value-a", "codex-access-token"),
+        ("a.b.c", "codex-access-token"),
+        (_jwt(None, b"[1, 2]"), "codex-access-token"),
+        (_jwt(None, b"\xff\xfe"), "codex-access-token"),
+        (_jwt({"sub": "user"}), "codex-access-token"),
+        (_jwt({"https://api.openai.com/auth": "acct-1"}) + ".extra", "codex-access-token"),
+    ],
+)
+def test_the_selected_token_alone_is_classified_by_its_claims(value, kind):
+    assert router.credential_kind(_token("alpha"), {"AH_CX_TOKEN_alpha": value}) == kind
+
+
+def test_the_claims_are_read_with_the_url_safe_alphabet():
+    assert "-" in DASHED.split(".")[1]
+    assert "_" in UNDERSCORED.split(".")[1]
+
+
+def test_the_default_login_and_the_api_account_need_no_token_to_classify():
+    assert router.credential_kind(router.CodexAccount("default"), {}) == "default"
+    api = router.CodexAccount("api", key_env="CODEX_API_KEY")
+    assert router.credential_kind(api, {"AH_CX_TOKEN_api": OAUTH}) == "api"
+    assert router.credential(api, {}) == api
+    assert router.credential(router.CodexAccount("default"), OAUTH_ENV) == router.CodexAccount("default")
+
+
+@pytest.mark.parametrize(
+    ("name", "environ", "error"),
+    [
+        ("ghost", OAUTH_ENV, "Codex account 'ghost' has no token in AH_CX_TOKEN_ghost"),
+        ("alpha", {"AH_CX_TOKEN_alpha": ""}, "Codex account 'alpha' has no token in AH_CX_TOKEN_alpha"),
+        (
+            "keyed",
+            OAUTH_ENV,
+            "AH_CX_TOKEN_keyed holds an api key; put it in CODEX_API_KEY and route api instead",
+        ),
+        ("bare", OAUTH_ENV, "AH_CX_TOKEN_bare holds a ChatGPT token with no chatgpt_account_id claim"),
+        (
+            "alpha",
+            {"AH_CX_TOKEN_alpha": "sk-abc"},
+            "AH_CX_TOKEN_alpha holds an api key; put it in CODEX_API_KEY and route api instead",
+        ),
+        (
+            "alpha",
+            {"AH_CX_TOKEN_alpha": _jwt({"https://api.openai.com/auth": "acct-1"})},
+            "AH_CX_TOKEN_alpha holds a ChatGPT token with no chatgpt_account_id claim",
+        ),
+        (
+            "alpha",
+            {"AH_CX_TOKEN_alpha": _jwt({"https://api.openai.com/auth": {"chatgpt_account_id": 7}})},
+            "AH_CX_TOKEN_alpha holds a ChatGPT token with no chatgpt_account_id claim",
+        ),
+        (
+            "alpha",
+            {"AH_CX_TOKEN_alpha": _jwt({"https://api.openai.com/auth": {"chatgpt_account_id": ""}})},
+            "AH_CX_TOKEN_alpha holds a ChatGPT token with no chatgpt_account_id claim",
+        ),
+    ],
+)
+def test_a_missing_or_unsupported_credential_is_refused_by_name_only(name, environ, error):
+    with pytest.raises(router.RoutingError) as raised:
+        router.credential(_token(name), environ)
+    assert str(raised.value) == error
+
+
+def test_only_an_ordinary_chatgpt_token_takes_the_bearer_provider():
+    assert router.credential(_token("alpha"), OAUTH_ENV) == router.CodexAccount(
+        "alpha", "AH_CX_TOKEN_alpha", bearer=True
+    )
+    assert router.credential(_token("gamma"), OAUTH_ENV) == _token("gamma")
+    assert router.credential(_token("delta"), OAUTH_ENV) == _token("delta")
+
+
+def test_the_bearer_overrides_name_the_chatgpt_backend_and_only_variable_names():
+    provider = "model_providers.agentihooks-chatgpt"
+    assert router.bearer_overrides() == [
+        "-c",
+        'model_provider="agentihooks-chatgpt"',
+        "-c",
+        f'{provider}.name="ChatGPT"',
+        "-c",
+        f'{provider}.base_url="https://chatgpt.com/backend-api/codex"',
+        "-c",
+        f'{provider}.env_key="CODEX_ACCESS_TOKEN"',
+        "-c",
+        f'{provider}.wire_api="responses"',
+        "-c",
+        f"{provider}.requires_openai_auth=false",
+        "-c",
+        f"{provider}.supports_websockets=false",
+        "-c",
+        f'{provider}.env_http_headers.chatgpt-account-id="AGENTIHOOKS_CHATGPT_ACCOUNT_ID"',
+    ]
+
+
+def test_a_bearer_child_carries_its_token_and_account_id_and_runs_the_bearer_provider():
+    account = router.credential(_token("alpha"), OAUTH_ENV)
+    child = router.child_environment(account, OAUTH_ENV)
+    assert child["CODEX_ACCESS_TOKEN"] == OAUTH
+    assert child["AH_CX_TOKEN_alpha"] == OAUTH
+    assert child["AGENTIHOOKS_CHATGPT_ACCOUNT_ID"] == "acct-1"
+    assert not [name for name in child if name.startswith("AH_CX_TOKEN_") and name != "AH_CX_TOKEN_alpha"]
+    assert router.command(account, "/usr/bin/codex", ["exec", "hi"]) == [
+        "/usr/bin/codex",
+        "--no-daemon",
+        "exec",
+        *router.bearer_overrides(),
+        "hi",
+    ]
+    second = router.child_environment(router.credential(_token("beta"), OAUTH_ENV), OAUTH_ENV)
+    assert (second["CODEX_ACCESS_TOKEN"], second["AGENTIHOOKS_CHATGPT_ACCOUNT_ID"]) == (OAUTH_TWO, "acct-2")
+
+
+@pytest.mark.parametrize("kind", ["bearer", "api"])
+@pytest.mark.parametrize(
+    ("args", "at"),
+    [
+        (["exec", "-c", 'model_reasoning_effort="low"', "probe"], 0),
+        (["e", "-c", 'model_reasoning_effort="low"', "probe"], 0),
+        (["--model", "chosen-model", "exec", "-c", 'model_reasoning_effort="low"'], 2),
+        (["--model", "e", "exec", "--", "-"], 2),
+        (["--no-alt-screen", "e", "--", "probe"], 1),
+        (["--no-alt-screen", "--search", "exec", "probe"], 2),
+        (["exec", "--", "-"], 0),
+        (["--model=chosen-model", "exec", "probe"], 1),
+        (["--model", "exec", "probe"], None),
+        (["--", "exec"], None),
+        (["--model", "chosen-model", "-c", 'model_reasoning_effort="low"', "probe"], None),
+        ([], None),
+        (["--model"], None),
+        (["--image", "first.png", "second.png", "--model", "chosen-model", "exec", "probe"], 5),
+        (["-ifirst.png", "second.png", "-m", "chosen-model", "e", "--", "-"], 4),
+        (["--image=first.png", "--model", "chosen-model", "exec", "probe"], 3),
+        (["--image=first.png", "second.png", "--model", "chosen-model", "exec", "probe"], 4),
+        (["-i", "first.png", "exec"], None),
+        (["--image"], None),
+    ],
+)
+def test_routed_auth_overrides_share_the_exec_config_scope_and_preserve_interactive_order(kind, args, at):
+    if kind == "bearer":
+        account = router.credential(_token("alpha"), OAUTH_ENV)
+        overrides = router.bearer_overrides()
+    else:
+        account = router.CodexAccount("api", key_env="CODEX_API_KEY", base_url="https://api.invalid")
+        overrides = codex_api.overrides("CODEX_API_KEY", "https://api.invalid")
+    expected = ["/usr/bin/codex", "--no-daemon"]
+    expected += [*overrides, *args] if at is None else [*args[: at + 1], *overrides, *args[at + 1 :]]
+    assert router.command(account, "/usr/bin/codex", args) == expected
+
+
+@pytest.mark.parametrize("flag", ["--local-provider", "--remote", "--remote-auth-token-env", "--add-dir"])
+def test_exec_auth_scope_skips_the_other_native_root_option_values(flag):
+    account = router.credential(_token("alpha"), OAUTH_ENV)
+    args = [flag, "exec", "e", "-c", 'model_reasoning_effort="low"', "probe"]
+    expected = ["/usr/bin/codex", "--no-daemon", flag, "exec", "e", *router.bearer_overrides(), *args[3:]]
+    assert router.command(account, "/usr/bin/codex", args) == expected
+
+
+def test_default_api_and_access_token_children_never_inherit_an_account_id():
+    for account in (router.CodexAccount("default"), _token("gamma"), _token("delta")):
+        child = router.child_environment(router.credential(account, OAUTH_ENV), OAUTH_ENV)
+        assert "AGENTIHOOKS_CHATGPT_ACCOUNT_ID" not in child
+    api_env = {**OAUTH_ENV, "CODEX_API_KEY": "key"}
+    assert "AGENTIHOOKS_CHATGPT_ACCOUNT_ID" not in router.child_environment(router.api_account(api_env), api_env)
+    gamma = router.child_environment(_token("gamma"), OAUTH_ENV)
+    assert gamma["CODEX_ACCESS_TOKEN"] == AGENT
+    assert router.command(_token("gamma"), "/usr/bin/codex", ["-m", "o3"]) == [
+        "/usr/bin/codex",
+        "--no-daemon",
+        "-m",
+        "o3",
+    ]
+
+
+def test_the_slot_child_of_a_chatgpt_account_carries_its_account_id():
+    source = router.CodexAccountSource()
+    child = source.child_env(router.Slot("codex", "alpha", 6, 0, kind="subscription"), OAUTH_ENV)
+    assert (child["CODEX_ACCESS_TOKEN"], child["AGENTIHOOKS_CHATGPT_ACCOUNT_ID"]) == (OAUTH, "acct-1")
+    with pytest.raises(router.RoutingError) as raised:
+        source.child_env(router.Slot("codex", "keyed", 6, 0, kind="subscription"), OAUTH_ENV)
+    assert str(raised.value) == "AH_CX_TOKEN_keyed holds an api key; put it in CODEX_API_KEY and route api instead"
+
+
+def test_the_probe_of_a_chatgpt_account_runs_the_bearer_provider_and_skips_an_unsupported_one(monkeypatch):
+    seen = []
+
+    def run(argv, **kwargs):
+        seen.append((argv, kwargs["env"]))
+        return subprocess.CompletedProcess(argv, 0, '{"type": "thread.started", "thread_id": "t-9"}\n', "")
+
+    monkeypatch.setattr(router.shutil, "which", lambda name: "/usr/bin/codex")
+    monkeypatch.setattr(router.codex_quota, "session_quota", lambda environ, thread: thread)
+    monkeypatch.setattr(router.codex_usage, "read", lambda *a, **k: None)
+    assert router.probe(_token("alpha"), OAUTH_ENV, run) == "t-9"
+    argv, env = seen[0]
+    assert argv == ["/usr/bin/codex", "--no-daemon", "exec", *router.bearer_overrides(), *router.PROBE_ARGS[1:]]
+    assert env["AGENTIHOOKS_CHATGPT_ACCOUNT_ID"] == "acct-1"
+    assert router.probe(_token("keyed"), OAUTH_ENV, run) is None
+    assert router.probe(_token("ghost"), OAUTH_ENV, run) is None
+    assert len(seen) == 1
+
+
+def test_a_forced_chatgpt_launch_runs_the_bearer_provider_and_never_prints_the_token(monkeypatch, tmp_path, capsys):
+    rc, seen, report = _launch(monkeypatch, tmp_path, OAUTH_ENV, ["--route", "beta", "exec", "hi"])
+    assert rc == 0
+    assert seen["cmd"] == ["/usr/bin/codex", "--no-daemon", "exec", *router.bearer_overrides(), "hi"]
+    assert (seen["env"]["CODEX_ACCESS_TOKEN"], seen["env"]["AGENTIHOOKS_CHATGPT_ACCOUNT_ID"]) == (OAUTH_TWO, "acct-2")
+    assert report.read_text() == "status=routed\naccount=beta\nplacement=forced\n"
+    out = capsys.readouterr()
+    assert OAUTH_TWO not in out.out + out.err and "acct-2" not in out.out + out.err
+
+
+def test_an_agent_identity_launch_is_unchanged(monkeypatch, tmp_path):
+    rc, seen, report = _launch(monkeypatch, tmp_path, OAUTH_ENV, ["--route", "gamma", "-m", "o3"])
+    assert rc == 0
+    assert seen["cmd"] == ["/usr/bin/codex", "--no-daemon", "-m", "o3"]
+    assert seen["env"]["CODEX_ACCESS_TOKEN"] == AGENT
+    assert "AGENTIHOOKS_CHATGPT_ACCOUNT_ID" not in seen["env"]
+
+
+def test_an_open_route_to_a_chatgpt_account_runs_the_bearer_provider(monkeypatch, tmp_path):
+    environ = {"HOME": "/home/u", "AH_CX_TOKEN_alpha": OAUTH, "AH_CX_TOKEN_gamma": AGENT}
+    quotas = {"default": _quota(90.0), "alpha": _quota(10.0), "gamma": _quota(50.0)}
+    rc, seen, report = _launch(monkeypatch, tmp_path, environ, ["-m", "o3"], quotas)
+    assert rc == 0 and report.read_text() == "status=routed\naccount=alpha\nplacement=open\n"
+    assert seen["cmd"] == ["/usr/bin/codex", "--no-daemon", *router.bearer_overrides(), "-m", "o3"]
+    assert seen["env"]["AGENTIHOOKS_CHATGPT_ACCOUNT_ID"] == "acct-1"
+
+
+def test_an_open_route_never_places_an_account_whose_credential_is_refused(monkeypatch, tmp_path):
+    environ = {"HOME": "/home/u", "AH_CX_TOKEN_alpha": OAUTH, "AH_CX_TOKEN_keyed": "sk-proj-value"}
+    quotas = {"default": _quota(97.0), "alpha": _quota(50.0), "keyed": _quota(1.0)}
+    rc, seen, report = _launch(monkeypatch, tmp_path, environ, ["-m", "o3"], quotas)
+    assert rc == 0 and report.read_text() == "status=routed\naccount=alpha\nplacement=open\n"
+    pool = router.CodexAccountSource(_status(0)).pool(environ)
+    assert [account.name for account in pool] == ["alpha"]
+    assert [router.refusal(account, OAUTH_ENV) for account in map(_token, ("alpha", "gamma", "keyed", "ghost"))] == [
+        "",
+        "",
+        "AH_CX_TOKEN_keyed holds an api key; put it in CODEX_API_KEY and route api instead",
+        "Codex account 'ghost' has no token in AH_CX_TOKEN_ghost",
+    ]
+
+
+@pytest.mark.parametrize(
+    ("tokens", "signed_in", "offered"),
+    [
+        ({"AH_CX_TOKEN_alpha": OAUTH, "AH_CX_TOKEN_keyed": "sk-proj-value"}, None, ["alpha"]),
+        ({"AH_CX_TOKEN_alpha": OAUTH, "AH_CX_TOKEN_beta": OAUTH_TWO}, None, ["alpha", "beta"]),
+        ({}, True, ["default"]),
+        ({}, False, []),
+    ],
+)
+def test_the_tick_offers_codex_seats_only_on_accounts_the_launcher_routes(
+    monkeypatch, tmp_path, capsys, tokens, signed_in, offered
+):
+    from scripts.swarm import capacity
+
+    environ = {**tokens, "HOME": str(tmp_path)}
+    readings = {name: _quota(10.0) for name in ("default", "alpha", "beta", "keyed")}
+    statuses = []
+
+    def status(argv, **kwargs):
+        return subprocess.CompletedProcess(argv, 0 if signed_in else 1, "", "")
+
+    monkeypatch.setattr(router, "default_signed_in", lambda env, run=None: statuses.append(env) or signed_in)
+    monkeypatch.setattr(router, "quotas", lambda pool, env: {account.name: readings[account.name] for account in pool})
+    monkeypatch.setattr(router, "codex_sessions_by_account", lambda: {})
+    monkeypatch.setattr(capacity.account_sessions, "codex_sessions_by_account", lambda: {})
+    rows = capacity._codex(environ, NOW, refresh=False)
+    seats = [row.name for row in rows if row.state == "OPEN"]
+    assert seats == offered
+    assert statuses == ([] if tokens else [environ])
+    for name in seats:
+        launched = {}
+        rc = router.main(
+            ["--route", name],
+            environ=environ,
+            execvpe=lambda path, cmd, env: launched.update(cmd=cmd, env=env),
+            run=status,
+        )
+        assert rc == 0 and f"account={name} " in capsys.readouterr().out
+        assert launched["env"].get("CODEX_ACCESS_TOKEN") == environ.get(f"AH_CX_TOKEN_{name}")
+    if not tokens:
+        launched = {}
+        rc = router.main(
+            ["--route", "default"], environ=environ, execvpe=lambda *args: launched.update(go=1), run=status
+        )
+        assert (rc, bool(launched)) == ((0, True) if signed_in else (3, False))
+
+
+def test_a_forced_route_to_a_signed_out_default_is_refused_by_name(monkeypatch):
+    monkeypatch.setattr(router, "codex_sessions_by_account", lambda: {})
+    monkeypatch.setattr(router, "quotas", lambda pool, environ: {})
+    with pytest.raises(router.RoutingError, match="'default' is not signed in"):
+        router._route({"HOME": "/home/u"}, "default", _status(1), "")
+    pool = [router.CodexAccount("default", signed_in=False)]
+    with pytest.raises(router.RoutingError) as refused:
+        router.select(pool, {"default": _quota(10.0)}, {}, NOW, route="default")
+    assert str(refused.value) == "Codex account 'default' is not signed in; run codex login"
+    assert router.select(_accounts(), {}, {}, NOW, route="default") == (_accounts()[0], "forced", None)
+
+
+def test_an_open_route_with_no_seat_names_each_refused_credential(monkeypatch, tmp_path, capsys):
+    environ = {"HOME": "/home/u", "AH_CX_TOKEN_keyed": "sk-proj-value", "AH_CX_TOKEN_gamma": AGENT}
+    quotas = {"default": _quota(97.0), "gamma": _quota(97.0), "keyed": _quota(1.0)}
+    rc, seen, report = _launch(monkeypatch, tmp_path, environ, ["-m", "o3"], quotas)
+    error = (
+        "no signed in Codex account has a fresh reading and a free session under its quota band; "
+        "AH_CX_TOKEN_keyed holds an api key; put it in CODEX_API_KEY and route api instead"
+    )
+    assert (rc, seen) == (3, {})
+    assert report.read_text() == f"status=failed\nerror={error}\n"
+    assert capsys.readouterr().err == f"agentihooks codex: {error}\n"
+    quotas = {"default": _quota(97.0), "alpha": _quota(97.0), "beta": _quota(97.0)}
+    rc, seen, report = _launch(monkeypatch, tmp_path, ENV, [], quotas)
+    assert report.read_text() == (
+        "status=failed\nerror=no signed in Codex account has a fresh reading and a free session under its quota band\n"
+    )
+
+
+def test_a_forced_route_to_an_unknown_account_never_lists_refused_credentials(monkeypatch, tmp_path):
+    environ = {"HOME": "/home/u", "AH_CX_TOKEN_keyed": "sk-proj-value"}
+    rc, seen, report = _launch(monkeypatch, tmp_path, environ, ["--route", "ghost"])
+    assert (rc, seen) == (3, {})
+    assert report.read_text() == "status=failed\nerror=Codex account 'ghost' not found; available: keyed\n"
+
+
+def test_a_refused_token_keeps_its_sessions_out_of_the_default_reading(monkeypatch):
+    monkeypatch.setattr(router, "_registry", lambda: {"s-keyed": {"account": "keyed"}, "s-own": {}})
+    monkeypatch.setattr(
+        router.codex_quota, "latest_codex_quota", lambda environ, keep: [s for s in ("s-keyed", "s-own") if keep(s)]
+    )
+    environ = {"AH_CX_TOKEN_keyed": "sk-proj-value"}
+    assert router.quotas([router.CodexAccount("default")], environ) == {"default": ["s-own"]}
+
+
+def test_a_chatgpt_account_stays_a_subscription_seat():
+    pool = [_token("alpha")]
+    seats = router.CodexAccountSource().offer(pool, {"alpha": _quota(10.0)}, NOW)
+    assert [(seat.account, seat.kind) for seat in seats] == [("alpha", "subscription")]
+
+
+def test_an_unsupported_credential_refuses_the_launch_and_reports_it(monkeypatch, tmp_path, capsys):
+    rc, seen, report = _launch(monkeypatch, tmp_path, OAUTH_ENV, ["--route", "keyed", "-m", "o3"])
+    error = "AH_CX_TOKEN_keyed holds an api key; put it in CODEX_API_KEY and route api instead"
+    assert (rc, seen) == (3, {})
+    assert report.read_text() == f"status=failed\nerror={error}\n"
+    out = capsys.readouterr()
+    assert out.err == f"agentihooks codex: {error}\n"
+    assert "sk-proj-value" not in out.out + out.err
+    rc, seen, report = _launch(monkeypatch, tmp_path, OAUTH_ENV, ["--route", "bare"])
+    assert (rc, seen) == (3, {})
+    assert report.read_text() == (
+        "status=failed\nerror=AH_CX_TOKEN_bare holds a ChatGPT token with no chatgpt_account_id claim\n"
+    )
+
+
+def test_a_handoff_launch_never_routes_back_to_the_account_it_leaves(monkeypatch, tmp_path):
+    quotas = {"default": _quota(90.0), "alpha": _quota(10.0), "beta": _quota(50.0)}
+    argv = ["--agentihooks-exclude", "alpha", "resume", "thread-1", "-m", "o3", "handoff"]
+    rc, seen, report = _launch(monkeypatch, tmp_path, ENV, argv, quotas)
+    assert rc == 0 and report.read_text() == "status=routed\naccount=beta\nplacement=open\n"
+    assert seen["cmd"] == ["/usr/bin/codex", "--no-daemon", "resume", "thread-1", "-m", "o3", "handoff"]
+    assert seen["env"]["CODEX_ACCESS_TOKEN"] == "cx-value-b"
+    quotas = {"default": _quota(99.0), "alpha": _quota(10.0), "beta": _quota(99.0)}
+    rc, seen, report = _launch(monkeypatch, tmp_path, ENV, ["--agentihooks-exclude=alpha"], quotas)
+    assert (rc, seen) == (3, {}) and report.read_text().startswith("status=failed\n")
+
+
+def test_login_with_a_slug_and_refresh_are_agentihooks_commands(monkeypatch):
+    from scripts import codex_login, codex_refresh
+
+    seen = []
+    monkeypatch.setattr(codex_login, "main", lambda args, environ: seen.append(("login", args, environ)) or 0)
+    monkeypatch.setattr(codex_refresh, "main", lambda args, environ: seen.append(("refresh", args, environ)) or 5)
+
+    def execvpe(*args):
+        raise AssertionError("codex must not start")
+
+    assert router.main(["login", "team-a", "--openbao"], environ=ENV, execvpe=execvpe) == 0
+    assert router.main(["login", "team"], environ=ENV, execvpe=execvpe) == 0
+    assert router.main(["refresh", "--force", "alpha"], environ=ENV, execvpe=execvpe) == 5
+    assert router.main(["refresh"], environ=ENV, execvpe=execvpe) == 5
+    assert seen == [
+        ("login", ["team-a", "--openbao"], ENV),
+        ("login", ["team"], ENV),
+        ("refresh", ["--force", "alpha"], ENV),
+        ("refresh", [], ENV),
+    ]
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["login"],
+        ["login", "status"],
+        ["login", "STATUS"],
+        ["login", "help"],
+        ["login", "--device-auth"],
+        ["refresh", "the", "README"],
+    ],
+)
+def test_login_without_a_slug_and_a_prompt_starting_with_refresh_still_go_to_codex(monkeypatch, tmp_path, argv):
+    from scripts import codex_login, codex_refresh
+
+    monkeypatch.setattr(codex_login, "main", lambda args, environ: pytest.fail("not an agentihooks login"))
+    monkeypatch.setattr(codex_refresh, "main", lambda args, environ: pytest.fail("not an agentihooks refresh"))
+    assert router._own_command(argv, ENV) is None
+    rc, seen, _ = _launch(monkeypatch, tmp_path, ENV, argv, {"alpha": _quota(10.0), "beta": _quota(50.0)})
+    assert rc == 0
+    assert seen["cmd"][-len(argv) :] == argv

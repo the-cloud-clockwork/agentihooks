@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/operator_mail.py:scripts.swarm.operator_mail.x_mentioned__mutmut_15:6bf83b38fe33dfb04dc9d384ab9883b6a914e8f3d8f76560d94c1de0b8cb8d81": {
+    "reader": "Standards",
+    "reason": "An event with neither note text nor text matches no mention for both empty and XXXX defaults, because MENTION_RE needs a leading at sign."
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/repository/file.py:scripts.swarm_ledger.repository.file.x\u01c1FileLedgerRepository\u01c1read_page__mutmut_5:74518b453d780af5cd921081ceb0b72eb7683386c0ae327941c00863fdf4bc1d": {
+    "reader": "Standards",
+    "reason": "Python codec lookup returns the identical codec for utf-8 and UTF-8; decoding and exceptions are unchanged."
+  }
+}

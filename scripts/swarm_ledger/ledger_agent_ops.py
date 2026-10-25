@@ -7,6 +7,8 @@ import re
 
 import ledger_comments
 
+from scripts.swarm_ledger import ports
+
 AUTHOR_RE = re.compile(r"^[A-Za-z][\w.@-]{0,63}$")
 ROLES = ("orchestrator", "member")
 ITEM_PATH_RE = re.compile(r"^(phases|questions|followups)/[^/]+$")
@@ -16,14 +18,11 @@ STATE_PATH_RE = re.compile(
 FLAG_EVENTS = ("needs the operator", "no longer needs the operator")
 TEXT_ITEM_RE = re.compile(r"^(questions|followups)/[^/]+$")
 GATE_RE = re.compile(r"^[a-z][a-z0-9-]{0,39}$")
+ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}")
 MAX_TEXT = 20000
 
 
-def check(op, task_ids=()):
-    by = op.get("by")
-    if not isinstance(by, str) or not AUTHOR_RE.match(by) or by == "operator":
-        raise ValueError("agent ops need `by`, an agent name other than operator")
-    kind = op["op"]
+def _check_state(op, kind):
     if kind == "join" and op.get("role", "member") not in ROLES:
         raise ValueError(f"role must be one of {ROLES}")
     if kind == "ack" and not isinstance(op.get("rev"), int):
@@ -36,6 +35,13 @@ def check(op, task_ids=()):
                 raise ValueError("time left needs nonnegative whole minutes")
         elif not STATE_PATH_RE.match(str(op.get("path"))) or not isinstance(op.get("value"), bool):
             raise ValueError("set needs path <list>/<id>/done or <list>/<id>/out_of_scope and a boolean value")
+    if kind == "gate_bypass" and not isinstance(op.get("unhandled"), int):
+        raise ValueError("gate_bypass needs an integer unhandled")
+    if kind == "gate_lift" and not GATE_RE.match(str(op.get("gate"))):
+        raise ValueError("gate_lift needs the gate's name")
+
+
+def _check_text(op, kind, task_ids):
     if kind == "add_item" and (
         op.get("list") not in ("followups", "questions") or not _text(op.get("text")) or "/" in op["id"]
     ):
@@ -49,15 +55,47 @@ def check(op, task_ids=()):
     if kind == "retext" and (not TEXT_ITEM_RE.match(str(op.get("item"))) or not _text(op.get("text"))):
         raise ValueError("retext needs item questions/<id> or followups/<id> and text")
     if kind in ("add_item", "retext"):
+        op["text"] = _screened(op["text"])
         ledger_comments.check(op["text"], "item", task_ids=task_ids)
-    if kind == "gate_bypass" and not isinstance(op.get("unhandled"), int):
-        raise ValueError("gate_bypass needs an integer unhandled")
-    if kind == "gate_lift" and not GATE_RE.match(str(op.get("gate"))):
-        raise ValueError("gate_lift needs the gate's name")
+
+
+def check(op, task_ids=()):
+    by = op.get("by")
+    if not isinstance(by, str) or not AUTHOR_RE.match(by) or by == "operator":
+        raise ValueError("agent ops need `by`, an agent name other than operator")
+    kind = op["op"]
+    check_hive(op)
+    check_task(op)
+    _check_state(op, kind)
+    _check_text(op, kind, task_ids)
     if "status" in op:
         if not _text(op["status"]):
             raise ValueError(f"status must be text up to {MAX_TEXT} characters")
+        op["status"] = _screened(op["status"])
         ledger_comments.check(op["status"], "comment", task_ids=task_ids)
+
+
+def check_hive(op):
+    if op["op"] != "add_item" or "hive" not in op:
+        return
+    hive = op["hive"]
+    if not isinstance(hive, str) or not ID_RE.fullmatch(hive):
+        raise ValueError("hive needs an identifier of up to 128 letters, digits, dots, underscores or hyphens")
+
+
+def check_task(op):
+    if op["op"] != "add_item" or "task" not in op:
+        return
+    task = op["task"]
+    if op.get("list") != "followups" or not isinstance(task, str) or not ID_RE.fullmatch(task):
+        raise ValueError("task needs a task id of up to 128 letters, digits, dots, underscores or hyphens")
+
+
+def _screened(text):
+    LEDGER_WRITE = ports.hooks().conditions.LEDGER_WRITE
+    filters = ports.hooks().filters
+
+    return filters.screen(LEDGER_WRITE, text)
 
 
 def _text(value):
@@ -81,12 +119,18 @@ def _join(doc, op, ctx):
         "claims": known["claims"] if known else [],
         "handled_rev": known["handled_rev"] if known else ctx.rev - 1,
     }
+    # Join evidence survives membership and event expiry for the ledger lifetime.
+    starts = ctx.meta.setdefault("join_history", {}).setdefault(op["by"], [])
+    joined = members[op["by"]]["joined_at"]
+    if joined not in starts:
+        starts.append(joined)
     ctx.record(op["by"], "joined", "", role=role)
     return True
 
 
 def _leave(doc, op, ctx):
     if ctx.meta["members"].pop(op["by"], None) is None:
+        ctx.refused.append(f"leave refused: {op['by']} has not joined this ledger")
         return False
     ctx.record(op["by"], "left", "")
     return True
@@ -160,6 +204,9 @@ def _add_item(doc, op, ctx):
         return True
     item = {"id": op["id"], "text": op["text"], "comments": []}
     item.update({"done": False} if op["list"] == "followups" else {"answers": []})
+    for field in ("hive", "task"):
+        if field in op:
+            item[field] = op[field]
     if op.get("needs_operator"):
         item["needs_operator"] = True
     items.append(item)

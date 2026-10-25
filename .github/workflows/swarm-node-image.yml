@@ -1,0 +1,231 @@
+name: Swarm worker image
+
+on:
+  push:
+    branches: [dev]
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: Push the qualified image under its commit tag
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.event_name != 'workflow_dispatch' && format('swarm-node-image-{0}', github.ref) || format('hosted-lane-{0}', ((endsWith(github.run_id, '0') || endsWith(github.run_id, '1') || endsWith(github.run_id, '2')) && 'a') || ((endsWith(github.run_id, '3') || endsWith(github.run_id, '4') || endsWith(github.run_id, '5')) && 'b') || 'c') }}
+  queue: ${{ github.event_name == 'workflow_dispatch' && 'max' || 'single' }}
+  cancel-in-progress: false
+
+jobs:
+  image:
+    runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && 'anton-oss' || 'ubuntu-latest' }}
+    timeout-minutes: 60
+    outputs:
+      latest: ${{ steps.main.outputs.latest }}
+    permissions:
+      contents: read
+      packages: write
+    env:
+      CANDIDATE: agentihooks-worker-candidate:${{ github.sha }}
+      INCOMPATIBLE: agentihooks-worker-incompatible-herdr:${{ github.sha }}
+      PLANTED: agentihooks-worker-planted-credential:${{ github.sha }}
+      REPOSITORY: >-
+        ${{ startsWith(github.ref, 'refs/heads/diffcheck/')
+        && 'ghcr.io/the-cloud-clockwork/agentihooks-worker-proof'
+        || 'ghcr.io/the-cloud-clockwork/agentihooks-worker' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: ${{ github.event_name == 'release' && '0' || '1' }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Pull the locked worker base with bounded rate limit retries
+        run: bash docker/swarm-node/pull-base.sh
+      - name: Restore the candidate layers
+        id: layers
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ runner.temp }}/worker-layers
+          key: worker-layers-${{ hashFiles('docker/swarm-node/**', 'scripts/swarm_v2/worker_image.py') }}
+          restore-keys: worker-layers-
+      - name: Build the candidate
+        env:
+          LAYERS_FROM: ${{ steps.layers.outputs.cache-matched-key && format('type=local,src={0}/worker-layers', runner.temp) || '' }}
+          LAYERS_TO: ${{ steps.layers.outputs.cache-hit != 'true' && format('type=local,dest={0}/worker-layers-next,mode=max', runner.temp) || '' }}
+        run: >-
+          docker build --platform linux/amd64 ${WORKER_BASE_CONTEXT:+--build-context "$WORKER_BASE_CONTEXT"} --build-arg SOURCE_REVISION="$GITHUB_SHA"
+          ${LAYERS_FROM:+--cache-from "$LAYERS_FROM"} ${LAYERS_TO:+--cache-to "$LAYERS_TO"}
+          --file docker/swarm-node/Dockerfile --tag "$CANDIDATE" .
+      - name: Build the incompatible herdr fixture
+        run: >-
+          docker build --build-arg WORKER_IMAGE="$CANDIDATE" --tag "$INCOMPATIBLE"
+          tests/contracts/image_manifest/incompatible-herdr
+      - name: Build the planted credential fixture
+        run: >-
+          docker build --build-arg WORKER_IMAGE="$CANDIDATE" --tag "$PLANTED"
+          tests/contracts/image_manifest/planted-credential
+      - name: Run every qualification and credential scan at once
+        shell: bash
+        run: |
+          out="$RUNNER_TEMP/worker-image-attestation"
+          mkdir -p "$out/proofs"
+          refuse_incompatible_herdr() {
+            if bash docker/swarm-node/qualify.sh "$INCOMPATIBLE" "$out/incompatible" "$GITHUB_SHA"; then
+              echo "incompatible herdr fixture qualified" >&2
+              return 1
+            fi
+            jq -e '.promotable == false and .report.worker_image_qualified_targets == 2
+              and .report.targets.herdr.qualified == false' "$out/incompatible/attestation.json"
+          }
+          qualify_candidate() {
+            bash docker/swarm-node/qualify.sh "$CANDIDATE" "$out/candidate" "$GITHUB_SHA"
+          }
+          requalify_candidate() {
+            bash docker/swarm-node/qualify.sh "$CANDIDATE" "$out/repeat" "$GITHUB_SHA"
+          }
+          refuse_planted_credential() {
+            local status=0
+            bash docker/swarm-node/scan.sh "$PLANTED" "$out/planted-scan" || status=$?
+            if [[ "$status" != 1 ]]; then
+              echo "planted credential fixture was not refused (exit $status)" >&2
+              return 1
+            fi
+            grep -qE '^github-app-token (.*/)?opt/agentihooks/\.build-token$' "$out/planted-scan/findings.txt"
+          }
+          scan_candidate() {
+            bash docker/swarm-node/scan.sh "$CANDIDATE" "$out/candidate-scan"
+          }
+          proofs=(refuse_incompatible_herdr qualify_candidate requalify_candidate refuse_planted_credential scan_candidate)
+          declare -A pids
+          for proof in "${proofs[@]}"; do
+            (set -euo pipefail; "$proof") > "$out/proofs/$proof.log" 2>&1 &
+            pids[$proof]=$!
+          done
+          failed=()
+          for proof in "${proofs[@]}"; do
+            status=0
+            wait "${pids[$proof]}" || status=$?
+            echo "::group::$proof exit $status"
+            cat "$out/proofs/$proof.log"
+            echo "::endgroup::"
+            if (( status != 0 )); then
+              echo "::error title=$proof::$proof failed with exit $status"
+              failed+=("$proof")
+            fi
+          done
+          if (( ${#failed[@]} > 0 )); then
+            echo "failed proofs: ${failed[*]}" >&2
+            exit 1
+          fi
+      - name: Require the independent requalification to match
+        run: |
+          out="$RUNNER_TEMP/worker-image-attestation"
+          jq -S .report "$out/candidate/attestation.json" > "$out/candidate-report.json"
+          jq -S .report "$out/repeat/attestation.json" > "$out/repeat-report.json"
+          diff "$out/candidate-report.json" "$out/repeat-report.json"
+      - name: Require a release tag on main
+        id: main
+        if: github.event_name == 'release'
+        run: |
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/main
+          newest="$(git tag --list 'v[0-9]*.[0-9]*.[0-9]*' --sort=-version:refname | head -n 1)"
+          if [[ "$newest" == "$GITHUB_REF_NAME" ]]; then latest=true; else latest=false; fi
+          echo "latest=$latest" >> "$GITHUB_OUTPUT"
+      - name: Log in to the registry
+        if: >-
+          github.event_name == 'release'
+          || (github.event_name == 'push' || inputs.publish)
+          && (github.ref == 'refs/heads/dev' || startsWith(github.ref, 'refs/heads/diffcheck/'))
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Publish the qualified candidate
+        if: >-
+          github.event_name == 'release'
+          || (github.event_name == 'push' || inputs.publish)
+          && (github.ref == 'refs/heads/dev' || startsWith(github.ref, 'refs/heads/diffcheck/'))
+        run: |
+          out="$RUNNER_TEMP/worker-image-attestation/candidate"
+          bash docker/swarm-node/publish.sh "$CANDIDATE" "$REPOSITORY" "$GITHUB_SHA" "$out"
+          jq -r '"digest: \(.digest)  promoted: \(.promoted)  replayed: \(.replayed)"' "$out/promoted.json" >> "$GITHUB_STEP_SUMMARY"
+      - name: Move the floating dev tag to the published digest
+        if: (github.event_name == 'push' || inputs.publish) && github.ref == 'refs/heads/dev'
+        run: |
+          digest="$(jq -r .digest "$RUNNER_TEMP/worker-image-attestation/candidate/promoted.json")"
+          docker buildx imagetools create --tag "$REPOSITORY:dev" "$REPOSITORY@$digest"
+      - name: Tag the release version and move the release tag when it is the newest
+        if: github.event_name == 'release'
+        env:
+          RELEASE: ${{ github.event.release.tag_name }}
+          LATEST: ${{ steps.main.outputs.latest }}
+        run: |
+          digest="$(jq -r .digest "$RUNNER_TEMP/worker-image-attestation/candidate/promoted.json")"
+          tags=(--tag "$REPOSITORY:${RELEASE#v}")
+          if [[ "$LATEST" == true ]]; then tags+=(--tag "$REPOSITORY:release"); fi
+          docker buildx imagetools create "${tags[@]}" "$REPOSITORY@$digest"
+      - name: Keep the qualified candidate layers
+        if: steps.layers.outputs.cache-hit != 'true'
+        run: |
+          rm -rf "$RUNNER_TEMP/worker-layers"
+          mv "$RUNNER_TEMP/worker-layers-next" "$RUNNER_TEMP/worker-layers"
+      - name: Save the qualified candidate layers
+        if: steps.layers.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.temp }}/worker-layers
+          key: ${{ steps.layers.outputs.cache-primary-key }}
+      - name: Upload the attestation
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: swarm-worker-image-attestation
+          path: ${{ runner.temp }}/worker-image-attestation
+          retention-days: 7
+
+  hive:
+    if: github.event_name == 'release'
+    needs: image
+    runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && 'anton-oss' || 'ubuntu-latest' }}
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    env:
+      IMAGE: ghcr.io/the-cloud-clockwork/agentihooks-hive-worker
+      RELEASE: ${{ github.event.release.tag_name }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Build the hive worker on the released worker image
+        run: >-
+          docker build -f deploy/worker/Dockerfile
+          --build-arg WORKER_IMAGE="ghcr.io/the-cloud-clockwork/agentihooks-worker:${RELEASE#v}"
+          --build-arg AGENTIHOOKS_REF="$GITHUB_SHA"
+          --tag "$IMAGE:${RELEASE#v}" .
+      - name: Prove the hive worker installs its profile
+        run: >-
+          docker run --rm --tmpfs /home/worker:uid=10001,gid=10001 --entrypoint bash "$IMAGE:${RELEASE#v}"
+          -c 'agentihooks init --profile engineer && grep -qx "<!-- profile: engineer -->" "$HOME/.claude/CLAUDE.md"'
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Publish the release version and move the release tag when it is the newest
+        env:
+          LATEST: ${{ needs.image.outputs.latest }}
+        run: |
+          docker push "$IMAGE:${RELEASE#v}"
+          if [[ "$LATEST" == true ]]; then
+            docker tag "$IMAGE:${RELEASE#v}" "$IMAGE:release"
+            docker push "$IMAGE:release"
+          fi

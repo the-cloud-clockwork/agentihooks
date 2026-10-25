@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/pane.py:scripts.swarm.pane.x_selection_prompt__mutmut_21:6579613443d4e3d56e7997967a445eb4a9eb66234972d92237cc5913a1136686": {
+    "reader": "Standards /root/standards",
+    "reason": "Literal word case preserves all regex matches under re.I."
+  }
+}

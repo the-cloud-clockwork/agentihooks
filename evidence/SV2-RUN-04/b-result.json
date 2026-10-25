@@ -1,0 +1,63 @@
+{
+  "tested_commit": "6c93f545a41e49eea00cc96d384e49822d26612b",
+  "evidence_class": "mocked signals and isolated fakeredis; no live Kubernetes, SSH or rollout proof",
+  "passed": true,
+  "independent_fixtures": [
+    {
+      "passed": true,
+      "classified": [
+        {
+          "state": "suspect",
+          "failure": "observation_denied"
+        },
+        {
+          "state": "suspect",
+          "failure": "observation_denied"
+        },
+        {
+          "state": "suspect",
+          "failure": "observation_denied"
+        },
+        {
+          "state": "suspect",
+          "failure": "observation_denied"
+        }
+      ],
+      "deleted_pod_claimed": false,
+      "protected_state_unchanged": true,
+      "protected_scope": "every swarm key except the observations record the classification writes",
+      "corrected_by_new_read": "working",
+      "execution_observation_age_seconds": {
+        "exe-b61401b45f354df9a26b318338bbb2d5": 0.0
+      }
+    },
+    {
+      "passed": true,
+      "classified": [
+        {
+          "state": "suspect",
+          "failure": "observation_denied"
+        },
+        {
+          "state": "suspect",
+          "failure": "observation_denied"
+        },
+        {
+          "state": "suspect",
+          "failure": "observation_denied"
+        },
+        {
+          "state": "suspect",
+          "failure": "observation_denied"
+        }
+      ],
+      "deleted_pod_claimed": false,
+      "protected_state_unchanged": true,
+      "protected_scope": "every swarm key except the observations record the classification writes",
+      "corrected_by_new_read": "working",
+      "execution_observation_age_seconds": {
+        "exe-92765ad2e6c54ce7a6998301356b86aa": 0.0
+      }
+    }
+  ]
+}

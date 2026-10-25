@@ -1,0 +1,12 @@
+{
+  "tested_commit": "6c93f545a41e49eea00cc96d384e49822d26612b",
+  "evidence_class": "mocked signals and isolated fakeredis; no live Kubernetes, SSH or rollout proof",
+  "inputs": {
+    "scripts/swarm_v2/runtime/observe.py": "f540b0cd4785240fd75ec1a5393ae5f0a4e8aaff36d4aa0eb070041b28321903",
+    "scripts/swarm/status.py": "56dbd364444d372c85c4882b101d0e1ec71f2c3d3d9835617741f2aab04c3e86",
+    "tests/test_swarm_v2_observe.py": "4346bec9f89dcaaaf782820ffd3d4c5b6c3e811c6d66f40680b2d3514603c75a",
+    "tests/sv2_run04_cases.py": "38fc42921e67df90bf55b58c52e72d4ad65a69542dea2bfca4b11fc1420e3465",
+    "evidence/SV2-RUN-04/generate_case_results.py": "5eaa8de208b7b0c20cb2e6e9532042678d3f2490dd1e12995979b9da72b3389e",
+    "Swarm-v2.md": "901950210888681b37156ed3f990b4c9b6050cee78468293993b656999bd26d9"
+  }
+}

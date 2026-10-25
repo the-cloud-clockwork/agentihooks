@@ -253,7 +253,16 @@ def test_overlay_check_refuses_a_name_outside_the_profiles_folder(tmp_path, caps
 
 
 def test_base_roles_are_the_package_roles():
-    assert scaffold.base_roles() == ["cicd", "engineer", "master", "planner", "qa"]
+    assert scaffold.base_roles() == ["cicd", "dispatcher", "documentation", "engineer", "master", "planner", "qa"]
+
+
+def test_base_roles_read_the_package_roles_folder_patched_after_import(tmp_path, monkeypatch):
+    for role in ("solo", "_hidden"):
+        (tmp_path / role).mkdir()
+    (tmp_path / "file").write_text("")
+    monkeypatch.setattr(profile_chain, "PACKAGE_ROLES", tmp_path)
+
+    assert scaffold.base_roles() == ["solo"]
 
 
 def test_install_routes_the_scaffold_commands(monkeypatch):
@@ -356,8 +365,4 @@ def test_install_refuses_an_unknown_bundle_action(monkeypatch, capsys):
         install.main()
 
     assert stop.value.code == 2
-    last = " ".join(capsys.readouterr().err.strip().splitlines()[-1].split()).replace("'", "")
-    assert last == (
-        "agentihooks bundle: error: argument action: invalid choice: frobnicate"
-        " (choose from new, link, unlink, list, pull)"
-    )
+    assert capsys.readouterr().err == "unknown command frobnicate, run agentihooks -h and try again\n"

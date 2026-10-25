@@ -1,0 +1,6 @@
+{
+  "scripts/gates/intent_history.py:scripts.gates.intent_history.x_masked__mutmut_16:dc9dc80483d6edda2efaec6e7d00b47741dc689d950cc6f898380fe94c36d224": {
+    "reader": "Standards",
+    "reason": "Uppercasing the ASCII sensitive field regex under re.I changes no matches or outputs. Standards verified identical matches including Unicode case variants across all Unicode code points."
+  }
+}

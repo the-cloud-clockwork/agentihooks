@@ -1,0 +1,6 @@
+{
+  "scripts/ci_stats_minutes.py:scripts.ci_stats_minutes.x_main__mutmut_65:e3ebf02708ebe6f0af36d06eef8b838a689baeed0988668dc8a14818e6d52a07": {
+    "reader": "standards-reader",
+    "reason": "Indent three changes JSON whitespace only. Parsed report values, timing aggregates, and function mappings are unchanged; the contract specifies no indentation."
+  }
+}

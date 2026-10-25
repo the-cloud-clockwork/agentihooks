@@ -3,6 +3,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from scripts.handoff.envelope import REASONS
 from scripts.swarm import runtime
 from scripts.swarm.tick import SpawnError
 from tests.swarm.profile_fixture import validated
@@ -29,27 +30,41 @@ def launching(tmp_path):
     return engine, config, task, saved, calls
 
 
-@pytest.mark.parametrize("key", ["profile", "harness", "model", "effort", "launch"])
+@pytest.mark.parametrize("key", ["profile", "harness", "launch"])
 def test_handoff_missing_original_choices_cannot_spawn(launching, key):
     engine, config, task, saved, calls = launching
     if key == "launch":
         task["handoff_envelope"].pop("launch")
     else:
         saved.pop(key)
-    with pytest.raises(SpawnError, match="^unsupported handoff: original profile and run options are missing$"):
+    with pytest.raises(
+        SpawnError, match="^unsupported handoff: original profile and run options are missing$"
+    ) as error:
         engine.spawn(config, "eng", "worker", task)
+    assert error.value.status == "unsupported"
     assert not calls
+
+
+@pytest.mark.parametrize("key", ["model", "effort"])
+def test_handoff_missing_run_options_uses_defaults(launching, key):
+    engine, config, task, saved, calls = launching
+    saved.pop(key)
+    engine.spawn(config, "eng", "worker", task)
+    assert len(calls) == 1
+    assert calls[0][calls[0].index("--profile") + 1] == "qa"
 
 
 def test_handoff_rejects_unsupported_harness_and_router_substitution(launching):
     engine, config, task, saved, calls = launching
     saved["harness"] = "copilot"
-    with pytest.raises(SpawnError, match="^unsupported handoff harness: copilot$"):
+    with pytest.raises(SpawnError, match="^unsupported handoff harness: copilot$") as error:
         engine.spawn(config, "eng", "worker", task)
+    assert error.value.status == "unsupported"
     saved["harness"] = "codex"
     engine.choose = lambda *a: ("claude", "fallback")
-    with pytest.raises(SpawnError, match="^unsupported handoff: router substituted the original harness$"):
+    with pytest.raises(SpawnError, match="^unsupported handoff: router substituted the original harness$") as error:
         engine.spawn(config, "eng", "worker", task)
+    assert error.value.status == "unsupported"
     assert not calls
 
 
@@ -58,8 +73,9 @@ def test_handoff_cannot_move_a_claude_only_profile_to_codex(launching, monkeypat
     monkeypatch.setattr(runtime.plugins, "claude_only", lambda *a: True)
     with pytest.raises(
         SpawnError, match="^unsupported handoff: required profile cannot mount on the original harness$"
-    ):
+    ) as error:
         engine.spawn(config, "eng", "worker", task)
+    assert error.value.status == "unsupported"
     assert not calls
     saved["harness"] = "claude"
     result = engine.spawn(config, "eng", "worker", task)
@@ -105,9 +121,105 @@ def test_an_explicit_task_profile_prevails_over_the_saved_seat_profile(launching
 def test_handoff_refuses_to_clamp_saved_effort(launching):
     engine, config, task, saved, calls = launching
     config.effort_min = config.effort_max = "high"
+    with pytest.raises(
+        SpawnError, match="^unsupported transfer: saved effort is outside the current swarm range$"
+    ) as error:
+        engine.spawn(config, "eng", "worker", task)
+    assert error.value.status == "unsupported"
+    assert not calls
+
+
+def test_a_master_recycle_starts_inside_the_swarm_effort_range(launching):
+    engine, config, task, saved, calls = launching
+    saved.update(profile="master", harness="claude", effort="max")
+    task["handoff_envelope"]["reason"] = "recycle"
+    config.effort_min, config.effort_max = "medium", "high"
+    engine.spawn(config, "master", "master", task)
+    assert calls[-1][calls[-1].index("--effort") + 1] == "high"
+
+
+def _quota_ready(engine, reason):
+    from scripts.swarm import capacity
+
+    if reason == "quota":
+        engine._quota_accounts = [capacity.Account("claude", "fresh", "OPEN", 0, 90, 90, 3)]
+
+
+def _launched_effort(calls):
+    return calls[-1][calls[-1].index("--effort") + 1]
+
+
+@pytest.mark.parametrize("reason", REASONS)
+def test_a_master_envelope_saved_at_max_starts_at_high_for_every_reason(launching, reason):
+    engine, config, task, saved, calls = launching
+    saved.update(profile="master", harness="claude", effort="max")
+    task["handoff_envelope"]["reason"] = reason
+    _quota_ready(engine, reason)
+    config.effort_min, config.effort_max = "medium", "high"
+    engine.spawn(config, "master", "master", task)
+    assert _launched_effort(calls) == "high"
+
+
+@pytest.mark.parametrize("reason", REASONS)
+def test_a_same_harness_lane_handoff_keeps_its_exact_saved_effort_for_every_reason(launching, reason):
+    engine, config, task, saved, calls = launching
+    saved.update(harness="claude", effort="max")
+    task["handoff_envelope"]["reason"] = reason
+    _quota_ready(engine, reason)
+    config.effort_min, config.effort_max = "medium", "max"
+    engine.spawn(config, "eng", "worker", task)
+    assert _launched_effort(calls) == "max"
+    config.effort_max = "high"
     with pytest.raises(SpawnError, match="^unsupported transfer: saved effort is outside the current swarm range$"):
         engine.spawn(config, "eng", "worker", task)
-    assert not calls
+
+
+def test_a_master_relaunch_after_an_outage_starts_inside_the_swarm_effort_range(launching):
+    engine, config, task, saved, calls = launching
+    assignment = {"profile": "master", "harness": "claude", "model": "opus", "effort": "max", "account": "original"}
+    master = {"id": "master", "title": "Master", "launch_assignment": assignment}
+    config.effort_min, config.effort_max = "medium", "high"
+    engine.spawn(config, "master", "master", master)
+    assert _launched_effort(calls) == "high"
+
+
+@pytest.mark.parametrize(("harness", "recorded"), [("claude", "max"), ("codex", "xhigh")])
+def test_a_master_resumed_into_its_own_conversation_starts_inside_the_swarm_effort_range(tmp_path, harness, recorded):
+    engine, config, agent, seen = _resuming(tmp_path, "c0ffee", harness)
+    config.effort_min, config.effort_max = "medium", "high"
+    engine.resume(config, replace(agent, lane="master", task="master", effort=recorded), "you were restored")
+    launched = seen["runs"][0]
+    assert launched[-2:] == (["--effort", "high"] if harness == "claude" else ["-c", 'model_reasoning_effort="high"'])
+
+
+@pytest.mark.parametrize("lane", ["master", "eng"])
+def test_a_resume_on_an_unknown_harness_is_refused_cleanly(tmp_path, lane):
+    engine, config, agent, seen = _resuming(tmp_path, "c0ffee", "copilot")
+    with pytest.raises(SpawnError) as error:
+        engine.resume(config, replace(agent, lane=lane, effort="max"), "you were restored")
+    assert (str(error.value), error.value.status) == ("unsupported resume harness: copilot", "unsupported")
+    assert not seen["runs"]
+
+
+def test_a_lane_resume_keeps_its_exact_recorded_effort(tmp_path):
+    engine, config, agent, seen = _resuming(tmp_path, "c0ffee")
+    config.effort_min, config.effort_max = "medium", "max"
+    engine.resume(config, replace(agent, effort="max"), "you were restored")
+    assert seen["runs"][0][-2:] == ["--effort", "max"]
+
+
+@pytest.mark.parametrize(
+    ("recorded", "lane", "expected"),
+    [
+        (True, "master", False),
+        (True, "eng", True),
+        (True, "ci", True),
+        (False, "eng", False),
+        (False, "master", False),
+    ],
+)
+def test_only_a_lane_keeps_its_recorded_effort(recorded, lane, expected):
+    assert runtime.preserves_effort(recorded, lane) is expected
 
 
 def test_resume_keeps_decision_and_replaces_the_old_binding_evidence(tmp_path):
@@ -131,7 +243,13 @@ def test_missing_live_validation_retires_the_named_process(tmp_path):
     engine = runtime.HerdrRuntime(home=tmp_path, run=run)
     config = SimpleNamespace(slug="proof", repo=str(tmp_path), autonomy="delegate", compact_limit=0)
     with pytest.raises(SpawnError, match="validation is missing"):
-        engine._launch(config, "eng", "task", "worker", ["init-agent", "--agent", "codex", "--profile", "engineer"])
+        engine._launch(
+            config,
+            "eng",
+            "task",
+            "worker",
+            ["init-agent", "--dir", "/repo", "--agent", "codex", "--profile", "engineer"],
+        )
     assert calls[-1][1:] == ["terminate-agent", "worker", "--force-shared"]
 
 

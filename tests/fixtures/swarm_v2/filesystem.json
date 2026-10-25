@@ -1,0 +1,84 @@
+{
+  "package": "SV2-FSY-01",
+  "attempt": "fsy-1",
+  "bases": [
+    "a",
+    "b"
+  ],
+  "profile": "fixture-seed",
+  "socket": "herdr.sock",
+  "path_escapes": [
+    "../outside",
+    "../../outside/state.json",
+    "homes/../../outside"
+  ],
+  "archive_escapes": {
+    "parent member": {
+      "refused": "../escape.txt",
+      "members": [
+        {
+          "name": "../escape.txt",
+          "type": "file"
+        }
+      ]
+    },
+    "absolute member": {
+      "refused": "/escape.txt",
+      "members": [
+        {
+          "name": "/escape.txt",
+          "type": "file"
+        }
+      ]
+    },
+    "parent link": {
+      "refused": "out",
+      "members": [
+        {
+          "name": "out",
+          "type": "symlink",
+          "link": "../outside"
+        }
+      ]
+    },
+    "absolute link": {
+      "refused": "out",
+      "members": [
+        {
+          "name": "out",
+          "type": "symlink",
+          "link": "/etc"
+        }
+      ]
+    },
+    "hard link": {
+      "refused": "b.txt",
+      "members": [
+        {
+          "name": "b.txt",
+          "type": "hardlink",
+          "link": "../outside/state.json"
+        }
+      ]
+    },
+    "chained link": {
+      "refused": "s/c/c2",
+      "members": [
+        {
+          "name": "s",
+          "type": "dir"
+        },
+        {
+          "name": "s/c",
+          "type": "symlink",
+          "link": ".."
+        },
+        {
+          "name": "s/c/c2",
+          "type": "symlink",
+          "link": ".."
+        }
+      ]
+    }
+  }
+}

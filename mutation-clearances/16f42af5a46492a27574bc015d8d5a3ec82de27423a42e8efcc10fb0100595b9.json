@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/runtime.py:scripts.swarm.runtime.x\u01c1HerdrRuntime\u01c1quota_requirements__mutmut_67:073f50ffe1cf25b2262630f9b5693c54cec2d87aad3726f6589b82dd053dd227": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "Exact claude and codex lane tokens leave through the requested branch. The fallback therefore sees only auto or absent tokens; template parsing rejects None lane keys. Replacing the lane argument by None yields the same effective share harness tuple for every supported configuration. Standards approved against CI run 37710037693."
+  }
+}

@@ -5,6 +5,7 @@ Only a running or drained swarm plans. Every write is keyed to facts in the ledg
 
 import os
 
+from scripts.doctor import priming
 from scripts.swarm import phase_state, slice_check, slice_screen
 from scripts.swarm.ledger_events import SENDER, Mail
 from scripts.swarm_ledger import ledger_comments
@@ -17,6 +18,10 @@ TAIL_WORDS = 7
 OPERATOR_REVIEWS = ("manual", "assist")
 ASSIST_ASK = "post your recommendation as a comment on the phase, the operator approves"
 MASTER_ASK = "approve it or send it back with a note"
+UNPLANNED = (
+    "Phase {id} {title} has no tasks and is planned manually, so nothing builds it: "
+    "add its tasks, or set its planning to auto so a planner slices it."
+)
 RELEASE_CONTRACT = {
     "must": "The phase summary is a comment on the phase, and a changelog entry is merged into dev in every repo it touched.",
     "check": "Read the phase comments, and the changelog on dev in each repo the phase touched.",
@@ -36,7 +41,15 @@ def planning_pass(inbox, store, slug, doc, ledger, config):
             actions += _open_review(mail, slug, phase, doc, ledger, config)
         elif stage == "building" and _release_due(phase, doc):
             actions += _add_release(slug, phase, ledger)
+        elif stage == "building" and _unplanned(phase, doc, config):
+            actions += mail.send(f"plan-unplanned:{phase['id']}", mail.master, UNPLANNED.format(**phase))
     return actions
+
+
+def _unplanned(phase, doc, config):
+    if phase.get("planning") == "auto" or config.template == priming.TEMPLATE:
+        return False
+    return not any(t.get("phase") == phase["id"] and not t.get("out_of_scope") for t in doc["tasks"])
 
 
 def _unreviewed(phase):
@@ -99,7 +112,7 @@ def _approve(mail, slug, phase, ledger, size):
 def _release_due(phase, doc):
     if not phase.get("release"):
         return False
-    rid = f"release-{phase['id']}"
+    rid = slice_check.RELEASE.format(phase["id"])
     mine = [t for t in doc["tasks"] if t.get("phase") == phase["id"] and not t.get("out_of_scope")]
     return bool(mine) and all(t["id"] != rid and t.get("state") == "done" for t in mine)
 
@@ -108,7 +121,7 @@ def _add_release(slug, phase, ledger):
     pid, title = phase["id"], phase["title"]
     named = f"Release phase {title}"
     task = {
-        "task": f"release-{pid}",
+        "task": slice_check.RELEASE.format(pid),
         "title": "Release this phase" if ledger_comments.problems(named, "item") else named,
         "lane": "eng",
         "kind": "ops",

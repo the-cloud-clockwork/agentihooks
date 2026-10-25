@@ -1,0 +1,71 @@
+name: Semgrep
+
+on:
+  workflow_call:
+    inputs:
+      base:
+        description: Revision whose findings are already known
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    uses: The-Cloud-Clockwork/.github/.github/workflows/semgrep-reusable.yml@main
+    with:
+      base: ${{ inputs.base }}
+      configs: p/ci p/secrets p/python
+      # Actions are pinned to release tags by fleet policy, so the mutable tag rule only repeats it.
+      exclude_rules: yaml.github-actions.security.github-actions-mutable-action-tag.github-actions-mutable-action-tag
+      rules_dir: .semgrep
+      runs_on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && 'anton-oss-light' || 'ubuntu-latest' }}
+
+  charts:
+    concurrency:
+      group: ${{ github.workflow == 'Semgrep' && format('hosted-lane-{0}', ((endsWith(github.run_id, '0') || endsWith(github.run_id, '1') || endsWith(github.run_id, '2')) && 'a') || ((endsWith(github.run_id, '3') || endsWith(github.run_id, '4') || endsWith(github.run_id, '5')) && 'b') || 'c') || format('semgrep-charts-{0}', github.run_id) }}
+      queue: ${{ github.workflow == 'Semgrep' && 'max' || 'single' }}
+    runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && 'anton-oss-light' || 'ubuntu-latest' }}
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # The light runner image ships Semgrep; hosted runners install it.
+      - name: Install PyYAML and Semgrep
+        env:
+          SEMGREP_VERSION: "1.177.0"
+        run: |
+          if [[ "$(semgrep --version 2>/dev/null)" == "$SEMGREP_VERSION" ]]; then
+            python -m pip install pyyaml==6.0.2
+          else
+            python -m pip install pyyaml==6.0.2 "semgrep==$SEMGREP_VERSION"
+          fi
+          test "$(semgrep --version)" = "$SEMGREP_VERSION"
+
+      - uses: azure/setup-helm@v4
+        with:
+          version: v3.18.6
+
+      - name: Guard rules hold on their fixtures and at their computed floors
+        env:
+          BASE: ${{ inputs.base }}
+        run: |
+          git fetch --no-tags --depth=1 origin "${BASE#origin/}"
+          grader=scripts/ci_semgrep_floors.py
+          if git cat-file -e FETCH_HEAD:scripts/ci_semgrep_floors.py; then
+            grader="$RUNNER_TEMP/ci_semgrep_floors.py"
+            git show FETCH_HEAD:scripts/ci_semgrep_floors.py > "$grader"
+          fi
+          python "$grader" check --base FETCH_HEAD
+
+      # The timer guard reads source only, so a CronJob a chart template renders is checked on the rendered manifests.
+      - name: Charts render no CronJob outside the scheduler
+        run: python tests/ci_charts/chart_timers.py

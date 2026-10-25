@@ -1,0 +1,6 @@
+{
+  "scripts/recall/chunker.py:scripts.recall.chunker.x__windows__mutmut_2:096d036523fce92a2e5e37c1769ee9de88e0a9b907f920bad6d0d3d5cf98ff17": {
+    "reader": "standards_reader",
+    "reason": "Equivalent: initial current is observed only through truthiness until a nonempty piece replaces it. Every piece has length at most the positive window, so the first piece cannot enter the append-current branch. With no pieces neither empty string nor None is emitted."
+  }
+}

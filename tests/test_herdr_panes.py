@@ -28,8 +28,37 @@ def test_the_swarm_store_is_kept_only_without_a_password_and_marked_when_withhel
     plain = {**env, herdr_panes.STORE_ENV: "redis://localhost:6379/7"}
     secret = {**env, herdr_panes.STORE_ENV: "redis://user:pw@localhost:6379/7"}
     assert herdr_panes.record(PLACED, "init-agent", "a", plain, 1).swarm_store == "redis://localhost:6379/7"
-    assert herdr_panes.record(PLACED, "init-agent", "a", secret, 1).swarm_store == herdr_panes.WITHHELD
+    withheld = herdr_panes.record(PLACED, "init-agent", "a", secret, 1).swarm_store
+    assert withheld.startswith(f"{herdr_panes.WITHHELD}:") and "pw" not in withheld
+    assert len(withheld) == len(herdr_panes.WITHHELD) + 17
     assert herdr_panes.record(PLACED, "init-agent", "a", env, 1).swarm_store == ""
+
+
+def keyed(password, host="localhost", db="7"):
+    return "redis://user" + ":" + password + "@" + host + ":6379/" + db
+
+
+def test_a_withheld_store_names_its_url_without_the_password():
+    first = herdr_panes.store_ref(keyed("pw"))
+    assert first == herdr_panes.store_ref(keyed("other"))
+    assert first == herdr_panes.store_ref(keyed("p@w"))
+    assert first != herdr_panes.store_ref(keyed("pw", db="8"))
+    assert first != herdr_panes.store_ref(keyed("pw", host="remote"))
+    assert herdr_panes.store_ref("redis://localhost:6379/7") == "redis://localhost:6379/7"
+    assert herdr_panes.store_ref("") == ""
+
+
+def test_a_recorded_store_resolves_to_its_url_or_only_the_environments_matching_url():
+    own = keyed("pw")
+    env = {herdr_panes.STORE_ENV: own}
+    assert herdr_panes.store_url("redis://localhost:6379/3", env) == "redis://localhost:6379/3"
+    assert herdr_panes.store_url("", env) == ""
+    assert herdr_panes.store_url(herdr_panes.store_ref(own), env) == own
+    assert herdr_panes.store_url(herdr_panes.store_ref(keyed("pw", db="8")), env) is None
+    assert herdr_panes.store_url(herdr_panes.store_ref(own), {}) is None
+    assert herdr_panes.store_url(herdr_panes.WITHHELD, env) == own
+    assert herdr_panes.store_url(herdr_panes.WITHHELD, {herdr_panes.STORE_ENV: "redis://localhost:6379/7"}) is None
+    assert herdr_panes.store_url(herdr_panes.WITHHELD, {}) is None
 
 
 def test_update_and_forget_rewrite_the_one_record(tmp_path):
@@ -104,7 +133,15 @@ def test_a_created_pane_carries_its_terminal_id(tmp_path, monkeypatch):
     assert placed == Placement("w9", "w9:t2", "w9:p4", "term_9")
 
 
+def _terminal_popen(command, **kwargs):
+    """subprocess.Popen is patched for the whole process, so only the terminal launch starts its launcher."""
+    if command[0] != "/usr/bin/terminal":
+        raise OSError(f"unexpected process {command[0]}")
+    Path(command[-1]).with_suffix(".started").touch()
+
+
 def _launch(monkeypatch, tmp_path, *extra, **env_extra):
+    monkeypatch.setattr(init_agent.agent_choice, "choose", lambda requested, environ: ("claude", "rotation"))
     monkeypatch.setattr(herdr_host, "open_pane", lambda *a: Placement("w1", "w1:t3", "w1:p7", "term_7"))
     monkeypatch.setattr(herdr_host, "run", lambda pane, launcher, environ: launcher.with_suffix(".started").touch())
     monkeypatch.setattr(herdr_host, "binary", lambda: "/bin/herdr")
@@ -115,9 +152,7 @@ def _launch(monkeypatch, tmp_path, *extra, **env_extra):
         "_launch_command",
         lambda launcher, directory, title, environ: ("linux", ["/usr/bin/terminal", str(launcher)]),
     )
-    monkeypatch.setattr(
-        init_agent.subprocess, "Popen", lambda command, **k: Path(command[-1]).with_suffix(".started").touch()
-    )
+    monkeypatch.setattr(init_agent.subprocess, "Popen", _terminal_popen)
     env = {
         "HOME": str(tmp_path),
         "XDG_RUNTIME_DIR": str(tmp_path / "rt"),
@@ -227,6 +262,8 @@ def test_a_routed_launch_records_its_route_and_launch_time(monkeypatch, tmp_path
 
     before = time.time() * 1000
     monkeypatch.setattr(herdr_host, "rename_agent", lambda pane, name, environ: True)
+    monkeypatch.setattr(herdr_host, "wait_ready", lambda pane, environ, timeout: True)
+    monkeypatch.setattr(herdr_host, "name_session", lambda pane, name, environ, confirmed: "named")
     monkeypatch.setattr(herdr_host, "run", started)
     monkeypatch.setattr(herdr_host, "open_pane", lambda *a: Placement("w1", "w1:t3", "w1:p7", "term_7"))
     monkeypatch.setattr(herdr_host, "binary", lambda: "/bin/herdr")

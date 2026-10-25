@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/cli.py:scripts.swarm.cli.x_build_parser__mutmut_5:891742e8bf6e71683d0ecb3a4dc1c4e53dcb02ddc9d744600d4d41f95bb9ce13": {
+    "reader": "Standards",
+    "reason": "Removing explicit default None preserves argparse default None. Independent reader observed identical namespaces for absent, zero and three planner caps; both retain integer conversion."
+  }
+}

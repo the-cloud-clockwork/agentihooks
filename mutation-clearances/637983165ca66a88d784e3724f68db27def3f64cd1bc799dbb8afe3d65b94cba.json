@@ -1,0 +1,6 @@
+{
+  "scripts/ci_mutation/__main__.py:scripts.ci_mutation.__main__.x_main__mutmut_52:01622f33bcc9fe0c5032b2b0b2ab5be8e6195e4407cac994d0799c1ee82d0e02": {
+    "reader": "Standards",
+    "reason": "Flush variants emit the same stdout for the unbuffered continuous integration consumer."
+  }
+}

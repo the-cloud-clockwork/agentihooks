@@ -1,0 +1,6 @@
+{
+  "hooks/observability/token_monitor.py:hooks.observability.token_monitor.x_record_lifecycle_context__mutmut_19:fe0762cc957e9fc2f73761b6a7da98c91cf6a137168340346b05bcef2033d002": {
+    "reader": "Standards",
+    "reason": "Omitting the dictionary default returns None only for an absent session. Native absent-session controls emit and persist no metrics in the original and mutant; the status return is discarded."
+  }
+}

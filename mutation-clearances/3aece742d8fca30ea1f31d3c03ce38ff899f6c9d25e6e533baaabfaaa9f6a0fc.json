@@ -1,0 +1,6 @@
+{
+  "scripts/hive/auth.py:scripts.hive.auth.x_agent_member__mutmut_3:6ed9c800b4fec56b28caa928ee12f12b419c5790de7abb1d7725e03f819b930d": {
+    "reader": "Standards",
+    "reason": "Equivalent under exchange/issue_agent: identifiers and nonces contain no dots; malformed tokens lack recorded digests, so both parsers reject them."
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "hooks/lifecycle/refresh.py:hooks.lifecycle.refresh.x_due__mutmut_20:ca267952a141eafe03382e7ad9747b06af7b552e48c2a5ac8ca1b6c1e25f4f57": {
+    "reader": "Standards /root/standards_reader round two",
+    "reason": "Both empty and XXXX missing-name fallbacks fail startswith master@; a present name bypasses the fallback, so restart eligibility is identical."
+  }
+}

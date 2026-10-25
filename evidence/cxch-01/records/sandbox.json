@@ -1,0 +1,85 @@
+{
+  "readOnly": {
+    "error": null,
+    "exit": 0,
+    "stdout": [
+      "write=no",
+      "ledger_http=000",
+      "ledger_http=fail",
+      "",
+      "external_https=000",
+      "external_https=fail"
+    ],
+    "repo_file_written": false
+  },
+  "readOnly+network": {
+    "error": null,
+    "exit": 0,
+    "stdout": [
+      "write=no",
+      "ledger_http=200",
+      "redis=+PONG",
+      "external_https=200"
+    ],
+    "repo_file_written": false
+  },
+  "workspaceWrite(repo)": {
+    "error": null,
+    "exit": 0,
+    "stdout": [
+      "write=no",
+      "ledger_http=000",
+      "ledger_http=fail",
+      "",
+      "external_https=000",
+      "external_https=fail"
+    ],
+    "repo_file_written": false
+  },
+  "workspaceWrite(repo)+network": {
+    "error": null,
+    "exit": 0,
+    "stdout": [
+      "write=no",
+      "ledger_http=200",
+      "redis=+PONG",
+      "external_https=200"
+    ],
+    "repo_file_written": false
+  },
+  "workspaceWrite(writableRoots=[])+network": {
+    "error": null,
+    "exit": 0,
+    "stdout": [
+      "write=no",
+      "ledger_http=200",
+      "redis=+PONG",
+      "external_https=200"
+    ],
+    "repo_file_written": false
+  },
+  "workspaceWrite(writableRoots=repo)": {
+    "error": null,
+    "exit": 0,
+    "stdout": [
+      "write=yes",
+      "ledger_http=000",
+      "ledger_http=fail",
+      "",
+      "external_https=000",
+      "external_https=fail"
+    ],
+    "repo_file_written": true
+  },
+  "dangerFullAccess": {
+    "error": null,
+    "exit": 0,
+    "stdout": [
+      "write=yes",
+      "ledger_http=200",
+      "redis=+PONG",
+      "external_https=200"
+    ],
+    "repo_file_written": true
+  }
+}

@@ -2,10 +2,12 @@ import os
 import uuid
 from argparse import Namespace
 
+from scripts.inbox import outbox
 from scripts.inbox.seats import seat_address
 from scripts.inbox.store import InboxStore
 from scripts.swarm.ledger_client import LedgerClient
-from scripts.swarm.store import MASTER, AgentRecord, RedisStore, codex_split
+from scripts.swarm.store import MASTER, AgentRecord, RedisStore
+from scripts.swarm_v2 import masters
 
 CONTROL_REF = "swarm-control:"
 CONTROLS = {
@@ -22,15 +24,17 @@ CONTROLS = {
 
 
 def master(store: RedisStore, slug: str) -> AgentRecord | None:
-    return next((a for a in store.agents(slug) if a.lane == MASTER and a.state != "finished"), None)
+    return next((a for a in store.agents(slug) if masters.is_lead(slug, a) and a.state != "finished"), None)
 
 
 def notify(
     store: RedisStore, args: Namespace, ledger: LedgerClient, before: AgentRecord | None, action: str, detail: str = ""
 ) -> None:
-    by = getattr(args, "name", "") or os.environ.get("AGENTIHOOKS_AGENT_NAME") or "operator"
+    by = vars(args).get("by") or vars(args).get("name") or os.environ.get("AGENTIHOOKS_AGENT_NAME") or "operator"
     after = master(store, args.slug)
     if any(a and by == a.name for a in (before, after)):
+        return
+    if action == "verdict" and any(a.name == by for a in store.agents(args.slug)):
         return
     boss = after or before
     address = (boss.seat or boss.name) if boss else seat_address(args.slug, MASTER)
@@ -39,13 +43,17 @@ def notify(
     verb = CONTROLS[action]
     if action == "stop" and args.now:
         verb = "stopped the swarm immediately"
+    if action == "verdict":
+        verb = f"gave the health finding {args.finding} a verdict"
     config = store.config(args.slug)
     result = f"The swarm is {config.state}."
     if action == "set":
-        result += f" Engineer cap {config.max_eng}, CI cap {config.max_ci}, Planner cap {config.max_plan}, Codex share {codex_split(config, os.environ)[0]} percent."
+        result += f" Engineer cap {config.max_eng}, CI cap {config.max_ci}, Planner cap {config.max_plan}."
     if action == "verdict":
         result += f" The verdict is {args.verdict.replace('-', ' ')}."
     text = f"{actor} {verb} from the {source}. {result}" + (f" {detail}" if detail else "")
-    ledger.say(args.slug, text, by="swarm")
     if after or action not in {"stop", "close"}:
-        InboxStore(store.redis).send(by, address, text, ref=f"{CONTROL_REF}{uuid.uuid4().hex}", fyi=True)
+        notice = outbox.Post(by, address, text, ref=f"{CONTROL_REF}{uuid.uuid4().hex}", fyi=True)
+        outbox.post(InboxStore(store.redis), notice)
+    else:
+        ledger.notify(args.slug, text)

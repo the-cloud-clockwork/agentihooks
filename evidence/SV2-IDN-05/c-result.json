@@ -1,0 +1,19 @@
+{
+  "tested_commit": "85327de7502f46bd9a88668ed64aeeb902ca9a0d",
+  "evidence_class": "local isolated fixture on temporary homes with a fixed installation time; mocked: the brain vault fetch, the background refresh fork and the brain HTTP post; not live rollout proof",
+  "then": "old and new cache namespaces coexist during rollout without reading stale data as current authority",
+  "result": {
+    "legacy_entries_coexist": true,
+    "legacy_read_as_current": false,
+    "new_namespace_serves_current": true,
+    "legacy_entries_swept_after_refresh": true,
+    "pre_cutover_marker_keeps_legacy_key": true,
+    "post_cutover_marker_key_is_namespaced": true,
+    "marker_key_stable_across_stops": true,
+    "outbox_replay_keeps_first_key_after_brain_change": true,
+    "rollback_dropped_new_caches": 2,
+    "rollback_kept_durable_records": true,
+    "cache_scope_mismatch_total": 0
+  },
+  "passed": true
+}

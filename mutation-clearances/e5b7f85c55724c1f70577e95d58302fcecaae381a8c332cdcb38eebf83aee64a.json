@@ -1,0 +1,6 @@
+{
+  "e57f10f6c8d23d1a71e8304ad10dbe36e68fb4c5774af42ea5bc2437fd52a03c": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "The entire admin.upload source symbol was read through the parent Serena export. Its server parameter is never referenced by its body: header conversion and schemas.validate use handler and the imported schemas module; final delegate uses only handler, slug and path. Replacing that unused actual argument with None changes no branch, value, exception, mutation or reply. Both callers preserve the other arguments."
+  }
+}

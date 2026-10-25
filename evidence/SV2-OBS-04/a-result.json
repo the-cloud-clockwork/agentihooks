@@ -1,0 +1,179 @@
+{
+  "case": "T-SV2-OBS-04-A",
+  "evidence_class": "mocked: fakeredis execution registry, task claims and heartbeats behind a server that can be disconnected, a fake wall and Redis clock, signed fixture launch grants, a fixture operator page credential and an in process brain health server that answers 401 or 200; no Kubernetes API server, worker Pod, transcript exporter process or deployed brain was used",
+  "input_sha256": {
+    "health-diagnostics.json": "c9ee91f0cb3f4abf4bcd56ca2f7d534943bd0513fd03d529acbfa76fe2684139"
+  },
+  "observed": {
+    "first": {
+      "brain_bearer_sent": true,
+      "brain_reason": "brain_http_401",
+      "dependencies": {
+        "brain": "auth_failed",
+        "redis": "ok"
+      },
+      "diagnose": [
+        200,
+        "deep",
+        "degraded",
+        "swarm"
+      ],
+      "healthy": {
+        "activity": "working",
+        "advanced_at_ms": 1250000,
+        "execution_id": "<healthy>",
+        "heartbeat_at_ms": 1250000,
+        "observed_at_ms": 1250000,
+        "process": "live",
+        "seat": "eng-2@fixture",
+        "state": "ok",
+        "watermark": 3072
+      },
+      "leaked": [],
+      "live": [
+        200,
+        "shallow",
+        "live"
+      ],
+      "pipeline_stage_health": {
+        "archive": {
+          "ok": 1,
+          "stalled": 1
+        },
+        "transition_export": {
+          "disabled": 1
+        }
+      },
+      "process": {
+        "controller_lease": "held",
+        "started_at_ms": 1000000,
+        "status": "live"
+      },
+      "redis_last_ok": 250000,
+      "remediation": [
+        {
+          "automatic": false,
+          "class": "credential_rejected",
+          "component": "brain",
+          "condition": "auth_failed",
+          "hint": "The brain refused the controller credential; reissue the brain token for this swarm through its secret. Nothing retries with another credential."
+        },
+        {
+          "automatic": false,
+          "class": "pipeline_stalled",
+          "component": "archive",
+          "condition": "stalled",
+          "execution_id": "<stuck>",
+          "hint": "The execution heartbeats but its archive watermark has not advanced while it works; inspect its transcript exporter. The last durable watermark is kept."
+        }
+      ],
+      "shallow_touched_brain": false,
+      "shallow_without_redis": 200,
+      "stuck": {
+        "activity": "working",
+        "advanced_at_ms": 1000000,
+        "execution_id": "<stuck>",
+        "heartbeat_at_ms": 1250000,
+        "observed_at_ms": 1250000,
+        "process": "live",
+        "seat": "eng-1@fixture",
+        "state": "stalled",
+        "watermark": 4096
+      },
+      "worker": [
+        200,
+        "execution",
+        [
+          "<healthy>"
+        ]
+      ],
+      "worker_has_transition_export": false
+    },
+    "independent_runs_match": true,
+    "second": {
+      "brain_bearer_sent": true,
+      "brain_reason": "brain_http_401",
+      "dependencies": {
+        "brain": "auth_failed",
+        "redis": "ok"
+      },
+      "diagnose": [
+        200,
+        "deep",
+        "degraded",
+        "swarm"
+      ],
+      "healthy": {
+        "activity": "working",
+        "advanced_at_ms": 1250000,
+        "execution_id": "<healthy>",
+        "heartbeat_at_ms": 1250000,
+        "observed_at_ms": 1250000,
+        "process": "live",
+        "seat": "eng-2@fixture",
+        "state": "ok",
+        "watermark": 3072
+      },
+      "leaked": [],
+      "live": [
+        200,
+        "shallow",
+        "live"
+      ],
+      "pipeline_stage_health": {
+        "archive": {
+          "ok": 1,
+          "stalled": 1
+        },
+        "transition_export": {
+          "disabled": 1
+        }
+      },
+      "process": {
+        "controller_lease": "held",
+        "started_at_ms": 1000000,
+        "status": "live"
+      },
+      "redis_last_ok": 250000,
+      "remediation": [
+        {
+          "automatic": false,
+          "class": "credential_rejected",
+          "component": "brain",
+          "condition": "auth_failed",
+          "hint": "The brain refused the controller credential; reissue the brain token for this swarm through its secret. Nothing retries with another credential."
+        },
+        {
+          "automatic": false,
+          "class": "pipeline_stalled",
+          "component": "archive",
+          "condition": "stalled",
+          "execution_id": "<stuck>",
+          "hint": "The execution heartbeats but its archive watermark has not advanced while it works; inspect its transcript exporter. The last durable watermark is kept."
+        }
+      ],
+      "shallow_touched_brain": false,
+      "shallow_without_redis": 200,
+      "stuck": {
+        "activity": "working",
+        "advanced_at_ms": 1000000,
+        "execution_id": "<stuck>",
+        "heartbeat_at_ms": 1250000,
+        "observed_at_ms": 1250000,
+        "process": "live",
+        "seat": "eng-1@fixture",
+        "state": "stalled",
+        "watermark": 4096
+      },
+      "worker": [
+        200,
+        "execution",
+        [
+          "<healthy>"
+        ]
+      ],
+      "worker_has_transition_export": false
+    }
+  },
+  "state": "passed"
+}

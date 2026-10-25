@@ -1,10 +1,17 @@
+import datetime
+import importlib
 import json
 from pathlib import Path
 
 import pytest
 
+from scripts.swarm import naming
 from scripts.swarm.store import DEFAULT_URL
 from scripts.swarm_ledger import ledger_creator, new_ledger
+from scripts.swarm_ledger.storage import default as default_repository
+
+repository = default_repository()
+
 
 pytestmark = pytest.mark.unit
 
@@ -34,7 +41,8 @@ def content_file(tmp_path, phases):
 
 def new(monkeypatch, tmp_path, folder, content, *extra, size="small"):
     monkeypatch.setenv("LEDGER_DIR", str(folder))
-    monkeypatch.setattr(new_ledger.core, "LEDGER_DIR", folder)
+    monkeypatch.setattr(importlib.import_module("ledger_core"), "LEDGER_DIR", folder)
+    monkeypatch.setattr(new_ledger.ledger_link, "serving", lambda **kw: str(folder))
     plan = tmp_path / "creator-plan.md"
     plan.write_text("plan")
     if isinstance(content, int):
@@ -42,7 +50,8 @@ def new(monkeypatch, tmp_path, folder, content, *extra, size="small"):
     argv = ["new", "--content", str(content), "--plan", str(plan), "--size", size, "--as", "tester", *extra]
     monkeypatch.setattr("sys.argv", argv)
     new_ledger.main()
-    return json.loads(next(folder.glob("creator-plan-*.json")).read_text())
+    slug = naming.plan_slug(plan, datetime.date.today().isoformat())
+    return repository.get_document(slug)
 
 
 def created(capsys):
@@ -55,7 +64,8 @@ def test_a_swarm_engineer_cannot_create_a_ledger_in_the_shared_folder(monkeypatc
     with pytest.raises(SystemExit) as refused:
         new(monkeypatch, tmp_path, shared(), 3)
     assert str(refused.value) == ledger_creator.CALLER
-    assert not shared().exists() or list(shared().iterdir()) == []
+    slug = naming.plan_slug(tmp_path / "creator-plan.md", datetime.date.today().isoformat())
+    assert not repository.exists(slug)
 
 
 @pytest.mark.parametrize("lane", ["master", "operator"])
@@ -82,10 +92,13 @@ def test_content_that_is_not_an_object_counts_as_no_tasks(monkeypatch, tmp_path)
     assert str(refused.value) == ledger_creator.FLOOR.format(need=3, have=0)
 
 
-def test_a_swarm_ledger_leaves_the_floor_to_swarm_create_where_its_tasks_exist(monkeypatch, tmp_path, capsys):
+def test_a_swarm_ledger_is_left_to_swarm_init_even_for_a_master(monkeypatch, tmp_path):
     as_lane(monkeypatch, "master")
-    assert new(monkeypatch, tmp_path, shared(), 2, size="swarm")["size"] == "swarm"
-    assert created(capsys)
+    with pytest.raises(SystemExit) as refused:
+        new(monkeypatch, tmp_path, shared(), 2, size="swarm")
+    assert str(refused.value).startswith(
+        "a swarm ledger is created with its swarm by one command: agentihooks swarm init"
+    )
 
 
 @pytest.mark.parametrize("quote", ["make a two task ledger", "two task ledger"])
@@ -154,7 +167,8 @@ def test_the_home_folder_on_another_port_keeps_the_shared_folder_rule(monkeypatc
     with pytest.raises(SystemExit) as refused:
         new(monkeypatch, tmp_path, shared(), 3)
     assert str(refused.value) == ledger_creator.CALLER
-    assert not shared().exists() or list(shared().iterdir()) == []
+    slug = naming.plan_slug(tmp_path / "creator-plan.md", datetime.date.today().isoformat())
+    assert not repository.exists(slug)
 
 
 def test_the_master_in_the_home_folder_on_another_port_gets_the_pinned_port(monkeypatch, tmp_path, capsys):

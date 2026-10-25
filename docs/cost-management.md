@@ -7,7 +7,7 @@ nav_order: 9
 # Cost Management
 {: .no_toc }
 
-**Stop burning through your Claude Code quota.** AgentiHooks ships a full cost management layer that watches every token entering and leaving your context window -- and actively intervenes to keep spending under control.
+AgentiHooks provides context controls and quota routing for **Claude Code and Codex**. The custom statusline examples below are Claude Code features; Codex uses native status items. See the [Codex reference](reference/CODEX-COMPAT.md) and [account routing](pillars/load-balancing.md) for differences.
 
 {: .highlight }
 > Users report noticeably slower quota consumption after enabling AgentiHooks. Every feature below is **on by default** and works without configuration.

@@ -1,0 +1,6 @@
+{
+  "3cd989ad5a7342c5649b1ea2dd72ab218691cc2afb684eef094e0ec98fea1825": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "check_operations selects kind by operation.get(op) and passes that exact kind to operation_schema before validation. The op const equals the value used to choose the schema for every reachable operation, so removing it admits no additional request. Unknown kinds are rejected earlier. Independent generated validation probe agreed across 205 object cases."
+  }
+}

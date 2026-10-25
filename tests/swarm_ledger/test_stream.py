@@ -16,6 +16,7 @@ import new_ledger  # noqa: E402
 from scripts.swarm_ledger import ledger_server as server  # noqa: E402
 from scripts.swarm_ledger.events import Hub, stream  # noqa: E402
 from scripts.swarm_ledger.events.patch import apply  # noqa: E402
+from tests.swarm_ledger import legacy_page  # noqa: E402
 
 SLUG = "stream-2026-01-01"
 
@@ -23,8 +24,8 @@ SLUG = "stream-2026-01-01"
 @pytest.fixture
 def live(monkeypatch):
     content = {"title": "Demo", "overview": "o", "sources": [], "phases": [], "questions": [], "followups": []}
-    html_path, json_path = core.paths(SLUG)
-    html_path.write_text(new_ledger.render(new_ledger.build_doc(content), SLUG, 8765), encoding="utf-8")
+    html_path, json_path = legacy_page.paths(SLUG, core)
+    html_path.write_text(legacy_page.render(new_ledger.build_doc(content), SLUG, 8765), encoding="utf-8")
     json_path.unlink(missing_ok=True)
     core.sync(SLUG)
     monkeypatch.setattr(server, "HUB", Hub())
@@ -32,7 +33,7 @@ def live(monkeypatch):
     monkeypatch.setattr(stream, "HEARTBEAT_S", 0.2)
     httpd = ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
     threading.Thread(target=httpd.serve_forever, args=(0.01,), daemon=True).start()
-    yield httpd.server_address[1], core.read_token(html_path.read_text(encoding="utf-8"))
+    yield httpd.server_address[1], legacy_page.stored_token(html_path)
     httpd.shutdown()
     httpd.server_close()
 
@@ -53,11 +54,25 @@ def frames(response):
     return stream.parse(lines)
 
 
-def next_of(reader, names):
+def next_of(reader, names, timeout=5):
+    deadline = time.monotonic() + timeout
     for name, data, cursor in reader:
+        if time.monotonic() >= deadline:
+            raise AssertionError(f"stream timed out waiting for {names}")
         if name in names:
             return name, data, cursor
     raise AssertionError(f"stream ended before {names}")
+
+
+def test_heartbeats_do_not_extend_the_next_event_deadline(monkeypatch):
+    from types import SimpleNamespace
+
+    ticks = iter([0, 0.25, 1])
+    monkeypatch.setattr(sys.modules[__name__], "time", SimpleNamespace(monotonic=lambda: next(ticks)))
+    reader = iter([("heartbeat", {}, None), ("heartbeat", {}, None), ("ledger", {}, "late")])
+    with pytest.raises(AssertionError, match="timed out.*ledger"):
+        next_of(reader, {"ledger"}, timeout=1)
+    assert next(reader) == ("ledger", {}, "late")
 
 
 def comment(n):
@@ -74,7 +89,7 @@ def test_a_stream_starts_with_a_snapshot_then_sends_only_patches(live):
     _, snapshot, cursor = next_of(reader, {"snapshot"})
     assert cursor
     assert snapshot["swarm"] == {"config": {"state": "running"}}
-    assert snapshot["workspaces"] == {}
+    assert set(snapshot) == {"ledger", "swarm"}
     ledger = snapshot["ledger"]
     assert "seeds" not in ledger["_meta"] and "api_operations" not in ledger["_meta"]
     assert ledger["_meta"]["page_version"] == core.page_version()
@@ -87,7 +102,7 @@ def test_a_stream_starts_with_a_snapshot_then_sends_only_patches(live):
     assert ledger["notes"][-1]["text"] == "note 1"
     assert ledger == server.HUB.resource(SLUG, "ledger")
     assert cursor2 != cursor
-    reread = server.ledger_view(server.repository.get_document(SLUG, reconcile=False))
+    reread = server.ledger_view(server.repository.get_document(SLUG))
     if reread != ledger:
         _, same, _ = next_of(reader, {"ledger"})
         assert same["rev"] == change["rev"]
@@ -102,7 +117,9 @@ def test_a_reconnect_replays_the_changes_it_missed_and_nothing_else(live):
     _, snapshot, cursor = next_of(frames(response), {"snapshot"})
     conn.close()
     server.repository.apply_ops(SLUG, ops=[comment(2)])
+    server.repository.drain(5)
     server.repository.apply_ops(SLUG, ops=[comment(3)])
+    server.repository.drain(5)
     conn, response = connect(port, token, cursor)
     assert response.status == 200
     reader = frames(response)

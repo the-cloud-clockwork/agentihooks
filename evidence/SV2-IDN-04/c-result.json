@@ -1,0 +1,18 @@
+{
+  "tested_commit": "f71cb5cbbcea4d2e1870bbdf6947963fa8d522f1",
+  "evidence_class": "local isolated fixture on an in-memory Redis with a fake clock; not live rollout proof",
+  "then": "a retried registration with the same valid grant returns the original identity without creating another worker",
+  "result": {
+    "retry_returns_original_identity": true,
+    "retry_wrote_nothing": true,
+    "attempts_for_seat": 2,
+    "stale_attempt_refused": "stale_generation",
+    "newer_registration_kept": true,
+    "older_registration_readable": true,
+    "rollback_revoked": 1,
+    "revoked_grant_refused": "launch grant was revoked",
+    "execution_history_unchanged_by_rollback": true,
+    "registrations_kept": 2
+  },
+  "passed": true
+}

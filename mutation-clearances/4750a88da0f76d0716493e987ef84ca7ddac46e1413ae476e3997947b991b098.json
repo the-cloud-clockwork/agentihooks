@@ -1,0 +1,6 @@
+{
+  "scripts/profiles/measure.py:scripts.profiles.measure.x_measure__mutmut_12:71a459019722821de6458cdce66ec4927a6f9afb1a46b4fa5daa459ab745fb36": {
+    "reader": "Standards",
+    "reason": "prepare treats an empty and a None model the same: select_profile.prepare falls back with `model or native_model or default_model`, so the profile default applies either way."
+  }
+}

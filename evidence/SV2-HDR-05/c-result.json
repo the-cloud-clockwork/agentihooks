@@ -1,0 +1,128 @@
+{
+  "case": "T-SV2-HDR-05-C",
+  "evidence_class": "mocked: a recording stand in for the Anton herdr client serves two worker herdr servers whose agents keep working on every fixture tick, answers agent get, pane read and agent prompt with the 0.9.1 reply shapes of SV2-HDR-04, times out every command to a machine whose SSH path is cut while that worker's control heartbeat continues, and advances a fake clock by a fixed time per remote command; the operator TUI is a Viewer that is closed by detach; no herdr process, SSH connection or cluster runs in these cases",
+  "input_sha256": {
+    "herdr-capabilities.json": "c15bb685e5bb4e2f53aa9a51a8ee80701aebe75a222093d120787b4839c45940",
+    "herdr-pane-routing.json": "36a84ba856cd6c2cdc3f57e7ca84227a9908e2de7046ea57056ca2329a8c730d",
+    "herdr-registrations.json": "eb069f75d17862be563e36f558ee14db60cd24d7982bb042f2232db5bb81a57c",
+    "herdr-terminal-reconnect.json": "32abd57e558c817dac8ed2be158b56f845d0a6b6f2c59b604f390d65c2b136dc"
+  },
+  "observed": {
+    "checks": {
+      "a_replaced_conversation_is_refused": true,
+      "an_older_attempt_cannot_act_for_a_newer_generation": true,
+      "an_unreachable_reconnect_is_refused_not_replaced": true,
+      "durable_journal_records_the_delivery_once": true,
+      "independent_repeat_identical": true,
+      "latency_measured_on_the_fixture_clock": true,
+      "nothing_launched_stopped_or_closed": true,
+      "reconnect_attaches_the_original_pane_and_conversation": true,
+      "reconnect_only_reads": true,
+      "replay_sends_nothing": true,
+      "restart_keeps_the_saved_machines": true,
+      "the_original_process_still_runs": true
+    },
+    "first": {
+      "accepted": {
+        "exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa": {
+          "conversation_id": "11111111-1111-4111-8111-111111111111",
+          "pid": 4101,
+          "work": 0
+        },
+        "exe-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb": {
+          "conversation_id": "22222222-2222-4222-8222-222222222222",
+          "pid": 4202,
+          "work": 0
+        }
+      },
+      "after_reconnect": {
+        "exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa": {
+          "conversation_id": "11111111-1111-4111-8111-111111111111",
+          "pid": 4101,
+          "work": 1
+        },
+        "exe-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb": {
+          "conversation_id": "22222222-2222-4222-8222-222222222222",
+          "pid": 4202,
+          "work": 1
+        }
+      },
+      "interrupted": {
+        "message": "w1:p1 did not answer agent_get",
+        "reason": "unreachable"
+      },
+      "journal": {
+        "deliveries": {
+          "op-1": {
+            "state": "sent",
+            "target": "exe-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb/1/w1:p1"
+          }
+        },
+        "version": 1
+      },
+      "launches": [],
+      "reattached": {
+        "conversation_id": "22222222-2222-4222-8222-222222222222",
+        "incarnation": "exe-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb/1",
+        "pane_id": "w1:p1",
+        "profile_id": "eefed520946b717557bfbc5ef89d91ee",
+        "session": "default"
+      },
+      "received": {
+        "exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa": [],
+        "exe-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb": [
+          "first prompt"
+        ],
+        "local": []
+      },
+      "reconnect_commands": [
+        [
+          "agent",
+          "get"
+        ],
+        [
+          "pane",
+          "read"
+        ]
+      ],
+      "reconnect_mutations": 0,
+      "registered": {
+        "exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa": "eda75d4e8494f54c8a6fe05759524de3",
+        "exe-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb": "eefed520946b717557bfbc5ef89d91ee"
+      },
+      "replaced": {
+        "message": "w1:p1 holds another conversation",
+        "reason": "conversation_mismatch"
+      },
+      "replaced_view": {
+        "agent": "engineer@a1b2c3-0002",
+        "checked_at": 1790000011050,
+        "fresh_ms": 30000,
+        "live_at": 1790000010850,
+        "machine": "swarm-exe-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-terminal",
+        "pane_id": "w1:p1",
+        "reason": "conversation_mismatch",
+        "state": "cached"
+      },
+      "replayed": null,
+      "restored": {
+        "exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa": "eda75d4e8494f54c8a6fe05759524de3",
+        "exe-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb": "eefed520946b717557bfbc5ef89d91ee"
+      },
+      "stale": {
+        "message": "exe-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb/1 was replaced",
+        "reason": "stale_incarnation"
+      },
+      "stale_send": {
+        "message": "exe-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb/1 was replaced",
+        "reason": "stale_incarnation"
+      },
+      "terminal_reconnect_latency_seconds": [
+        0.2,
+        0.2
+      ]
+    },
+    "second_identical": true
+  },
+  "state": "passed"
+}

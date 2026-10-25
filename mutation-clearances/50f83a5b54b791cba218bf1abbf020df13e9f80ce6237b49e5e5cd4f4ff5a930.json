@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/api/client.py:scripts.swarm_ledger.api.client.x\u01c1ResourceClient\u01c1request__mutmut_5:5d3b3f0dbb96f364e928786c53708b3307c0efa8846b6f426a862971044cac5f": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "Request.get_method infers GET exactly when data is None and POST otherwise. This function supplies None for missing payload and non-None encoded JSON for every present payload; method=None yields the same HTTP verb and returned JSON."
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.x\u01c1Handler\u01c1put_layout__mutmut_24:f94586b4a412c8e74058ef8cfc47294fd564d615a7a73a34bfdcdd5dbe353bb0": {
+    "reader": "Standards",
+    "reason": "A missing Content-Type falls back to a string that still fails the JSON prefix check, so the reply stays 415."
+  }
+}

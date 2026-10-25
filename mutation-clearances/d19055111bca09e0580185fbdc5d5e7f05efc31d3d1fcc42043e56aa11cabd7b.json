@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/api/client.py:scripts.swarm_ledger.api.client.x\u01c1ResourceClient\u01c1request__mutmut_18:a40580fb0eb5e9ca6e8ced66dbe94b997f73b6c8e3a916675bf45fb18dbf54c7": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "urllib.request.Request normalizes Content-Type, content-type and CONTENT-TYPE to the identical Content-type header key. Values, credentials, serialized HTTP header and response JSON remain identical."
+  }
+}

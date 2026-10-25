@@ -1,0 +1,6 @@
+{
+  "scripts/hive/server.py:scripts.hive.server.x__handler__mutmut_54:89fe59232db7f134cd2dc1517432c5f70d31cef6950ab863c34f447bb321fb06": {
+    "reader": "Standards reader of the dep4 hive review",
+    "reason": "equivalent: email.message.Message.get lowercases the lookup name and every stored header name, and HTTPMessage does not override it, so \"CONTENT-LENGTH\" selects the same first header as \"Content-Length\" for every request."
+  }
+}

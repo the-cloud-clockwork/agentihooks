@@ -1,0 +1,6 @@
+{
+  "hooks/context/project_identity.py:hooks.context.project_identity.x__swarm_identity__mutmut_5:34b087b51bdef0f23c81013baeef05b44a4745fed9317f3006b435c0aa8b5ece": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "Omitting dict get default changes only missing swarm binding from empty string to None. The immediate not swarm guard returns None in either case with identical absence of config access."
+  }
+}

@@ -3,18 +3,26 @@
 import errno
 import json
 import os
+import re
 import socket
 import sys
 import time
+import zlib
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
-from tests import installer_isolation, ledger_guard, swarm_v2_isolation
+for _redis_name in list(os.environ):
+    if "REDIS" in _redis_name.upper():
+        os.environ.pop(_redis_name)
+
+from tests import installer_isolation, ledger_guard, mutation_trace, redis_key_guard, swarm_v2_isolation
 from tests.shards import (
-    assign_files,
+    FIRST_SHARD_FILES,
+    assign_nodes,
     discover_test_files,
+    grouped_files,
     setup_nodes_in_parallel,
     slowest_first,
     source_sizes,
@@ -44,10 +52,48 @@ def _refuse_redis_connect_ex(sock, address):
 
 COLLECTED_NODEIDS = pytest.StashKey[list[str]]()
 SHARD_FILES = pytest.StashKey[frozenset[str]]()
+NODE_SHARDS = pytest.StashKey[dict[str, int]]()
+FILE_SHARDS = pytest.StashKey[dict[str, list[int]]]()
 WARM_PIDS = pytest.StashKey[list[int]]()
+REUSED = pytest.StashKey[tuple[frozenset[str], frozenset[str]]]()
+REUSED_SOURCE = pytest.StashKey[str]()
+
+
+def _reused(config) -> tuple[frozenset[str], frozenset[str]]:
+    if REUSED not in config.stash:
+        # Nested pytest runs that tests start must collect their own targets, so the plan never stays in the environment.
+        source = getattr(config, "workerinput", {}).get("ci_reused") or os.environ.pop("CI_REUSED", "")
+        config.stash[REUSED_SOURCE] = source
+        path = Path(source or os.devnull)
+        plan = json.loads(path.read_text()) if path.is_file() else {}
+        config.stash[REUSED] = (frozenset(plan.get("tests", ())), frozenset(plan.get("files", ())))
+    return config.stash[REUSED]
+
+
+@pytest.hookimpl(optionalhook=True)
+def pytest_configure_node(node):
+    node.workerinput["ci_reused"] = node.config.stash[REUSED_SOURCE]
 
 
 def pytest_collection_modifyitems(config, items):
+    reused = _reused(config)[0]
+    if reused:
+        kept = [item for item in items if re.sub(r"@[^\[\]]*$", "", item.nodeid) not in reused]
+        if len(kept) != len(items):
+            ids = {id(item) for item in kept}
+            config.hook.pytest_deselected(items=[item for item in items if id(item) not in ids])
+            items[:] = kept
+    if config.getoption("shard") and NODE_SHARDS in config.stash:
+        index, shards = (int(part) for part in config.getoption("shard").split("/"))
+        selected = []
+        for item in items:
+            node = re.sub(r"@[^\[\]]*$", "", item.nodeid)
+            owners = config.stash[FILE_SHARDS].get(node.split("::", 1)[0], range(shards))
+            fallback = owners[zlib.crc32(node.encode()) % len(owners)]
+            shard = config.stash[NODE_SHARDS].get(node, fallback)
+            if shard == index - 1:
+                selected.append(item)
+        items[:] = selected
     if hasattr(config, "workerinput"):
         durations = json.loads((config.rootpath / ".test_durations").read_text())
         order = {nodeid: i for i, nodeid in enumerate(slowest_first([item.nodeid for item in items], durations, 0.1))}
@@ -63,13 +109,31 @@ def _shard_files(config) -> frozenset[str]:
     if SHARD_FILES not in config.stash:
         index, shards = (int(part) for part in config.getoption("shard").split("/"))
         durations = json.loads((config.rootpath / ".test_durations").read_text())
-        files = discover_test_files(config.rootpath)
-        files = assign_files(durations, files, shards, source_sizes(config.rootpath, files))[index - 1]
-        config.stash[SHARD_FILES] = frozenset(files)
+        reused, skipped = _reused(config)
+        discovered = [path for path in discover_test_files(config.rootpath) if path not in skipped]
+        pinned = FIRST_SHARD_FILES.intersection(discovered)
+        files = [path for path in discovered if path not in pinned]
+        measured = {
+            node: seconds
+            for node, seconds in durations.items()
+            if node.split("::", 1)[0] in files and re.sub(r"@[^\[\]]*$", "", node) not in reused
+        }
+        sizes = source_sizes(config.rootpath, files)
+        parts = assign_nodes(measured, shards, grouped_files(config.rootpath, files), 4, sizes=sizes)
+        config.stash[NODE_SHARDS] = {node: shard for shard, part in enumerate(parts) for node in part}
+        owners = {}
+        for node, shard in config.stash[NODE_SHARDS].items():
+            owners.setdefault(node.split("::", 1)[0], set()).add(shard)
+        config.stash[FILE_SHARDS] = {path: sorted(shards) for path, shards in owners.items()}
+        config.stash[FILE_SHARDS].update({path: [0] for path in pinned})
+        known = {node.split("::", 1)[0] for node in measured}
+        files = {node.split("::", 1)[0] for node in parts[index - 1]} | (set(files) - known)
+        config.stash[SHARD_FILES] = frozenset(files) | (pinned if index == 1 else frozenset())
     return config.stash[SHARD_FILES]
 
 
 def pytest_configure(config):
+    _reused(config)
     config.args.sort(key=lambda arg: (Path(arg.split("::", 1)[0]).parent.parts, arg))
     workers = getattr(config.option, "numprocesses", None)
     if not config.getoption("shard") or not workers or hasattr(config, "workerinput") or not hasattr(os, "fork"):
@@ -81,9 +145,25 @@ def pytest_configure(config):
     config.stash[WARM_PIDS] = warm_imports(modules, workers)
 
 
+# Importing Playwright here would put it in every test's import closure, so the browser check would turn on greenlet
+# tracing for the whole coverage run. Deadlines are traced after each fixture once Playwright is loaded, so a fixture
+# that imports it lazily is covered before the next fixture opens a page; a fixture or test that imports it and sets a
+# deadline in its own body sets that deadline unscaled.
+@pytest.hookimpl(hookwrapper=True)
+def pytest_fixture_setup(fixturedef, request):
+    yield
+    if "playwright.sync_api" in sys.modules:
+        mutation_trace.trace_browser_deadlines(sys.modules["playwright.sync_api"])
+
+
 def pytest_unconfigure(config):
     for pid in config.stash.get(WARM_PIDS, []):
         os.waitpid(pid, 0)
+
+
+def pytest_sessionfinish(session, exitstatus):
+    if exitstatus == pytest.ExitCode.NO_TESTS_COLLECTED and _reused(session.config)[0]:
+        session.exitstatus = pytest.ExitCode.OK
 
 
 def pytest_ignore_collect(collection_path, config):
@@ -124,6 +204,7 @@ def _isolate_real_user_paths(tmp_path, monkeypatch, request):
 
     monkeypatch.setenv("HOME", str(fake_home))
     monkeypatch.setenv("LIFECYCLE_GC_ENABLED", "false")
+    monkeypatch.setenv("MASTER_INBOX_CLASSIFIER_WITH_FALLBACKS", "false")
     # Every swarm tick sweeps the launch run folder and the herdr server.
     monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path / "_run"))
     monkeypatch.setenv("HERDR_SOCKET_PATH", str(tmp_path / "_run" / "herdr.sock"))
@@ -161,6 +242,9 @@ def _isolate_real_user_paths(tmp_path, monkeypatch, request):
     # A suite run from a swarm agent's shell inherits its swarm, seat, task and routed account.
     for _inherited in [name for name in os.environ if name.startswith("AGENTIHOOKS_")]:
         monkeypatch.delenv(_inherited)
+    # Mutation stats collection runs this suite with its cache set; nested gate runs must not share it.
+    monkeypatch.delenv("MUTATION_STATS_CACHE", raising=False)
+    monkeypatch.delenv("MUTATION_STATS_ROOT", raising=False)
     # AGENTIBRAIN_HOME — and its Path.home()-derived default — is where the brain
     # keeps its own .env. hooks.config adopts BRAIN_URL / KB_ROUTER_TOKEN from that
     # file, and it does so at IMPORT, which happens at collection before any fixture
@@ -181,6 +265,7 @@ def _isolate_real_user_paths(tmp_path, monkeypatch, request):
     monkeypatch.delenv("REDIS_URL", raising=False)
     monkeypatch.setattr("hooks._redis._redis_client", None)
     monkeypatch.setattr("hooks._redis._redis_checked", False)
+    monkeypatch.setattr("hooks.context.operator_words._SHARED", [])
     monkeypatch.setenv("REDIS_KEY_PREFIX", swarm_v2_isolation.RUN_PREFIX)
     for _prefixed in (
         "hooks._redis._KEY_PREFIX",
@@ -224,6 +309,8 @@ def _isolate_real_user_paths(tmp_path, monkeypatch, request):
     (fake_state_dir / "deps.stamp").write_text(json.dumps({"ok_at": time.time()}))
     monkeypatch.setattr("hooks.config.LOG_FILE", str(fake_state_dir / "logs" / "hooks.log"))
     monkeypatch.setattr("hooks.common.LOG_FILE", str(fake_state_dir / "logs" / "hooks.log"))
+    monkeypatch.setattr("hooks._async._LOG_FILE", fake_state_dir / "logs" / "async-hooks.log")
+    monkeypatch.setattr("hooks.context.documentation_session.HOME", fake_state_dir)
     monkeypatch.setattr("hooks.config.BROADCAST_FILE", str(fake_state_dir / "broadcast.json"))
     monkeypatch.setattr("hooks.context.broadcast.BROADCAST_FILE", str(fake_state_dir / "broadcast.json"))
     monkeypatch.setattr(
@@ -232,7 +319,12 @@ def _isolate_real_user_paths(tmp_path, monkeypatch, request):
     monkeypatch.setattr(
         "hooks.context.broadcast.BROADCAST_DELIVERY_STATE_FILE", str(fake_state_dir / "broadcast_delivery_state.json")
     )
+    monkeypatch.setattr("hooks.context.context_recycle.AGENTIHOOKS_HOME", fake_state_dir)
     monkeypatch.setattr("hooks.context.quota_policy.AGENTIHOOKS_HOME", fake_state_dir)
+    monkeypatch.setattr("hooks.context.branch_guard.AGENTIHOOKS_HOME", fake_state_dir)
+    monkeypatch.setattr("hooks.context.prod_lockdown.AGENTIHOOKS_HOME", fake_state_dir)
+    monkeypatch.setattr("hooks.context.controls_toggle._FLAG_DIR", fake_state_dir / "controls_flags")
+    monkeypatch.setattr("hooks.context.controls_toggle._GLOBAL_FLAG", fake_state_dir / "controls_flags" / "active.flag")
     monkeypatch.setattr("hooks.observability.agent_trace.CURSOR_DIR", fake_state_dir / "agent_trace")
     monkeypatch.setattr("hooks.context.brain_adapter._HASH_CACHE_FILE", fake_state_dir / "brain_feed_hash")
     monkeypatch.setattr("hooks.context.profile_chain.state_path", lambda: fake_state_dir / "state.json")
@@ -249,6 +341,7 @@ def _isolate_real_user_paths(tmp_path, monkeypatch, request):
     from hooks.targets import emitter
 
     monkeypatch.setattr(emitter, "_forced", False)
+    monkeypatch.setattr(emitter, "_plain", False)
     monkeypatch.setattr(emitter, "_buffer", [])
     monkeypatch.setattr(emitter, "_hook_fields", {})
     monkeypatch.setattr(emitter, "_top_fields", {})
@@ -288,15 +381,17 @@ def _isolate_real_user_paths(tmp_path, monkeypatch, request):
     from targets.codex_target import codex_home
     from targets.copilot_target import CopilotAdapter, copilot_home
 
+    from hooks import config as hooks_config
     from hooks.config import _agentibrain_home
-    from hooks.context.codex_context_pin import catalog_path
+    from hooks.context import context_recycle
     from scripts.claude_config import claude_home, claude_json
     from scripts.herdr_setup import config_path as herdr_config_path
 
     for label, value in (
         ("claude_home", claude_home()),
         ("claude_json", claude_json()),
-        ("codex model catalog", catalog_path()),
+        ("agentihooks home", hooks_config.AGENTIHOOKS_HOME),
+        ("context recycling home", context_recycle.AGENTIHOOKS_HOME),
         ("codex_home", codex_home()),
         ("copilot_home", copilot_home()),
         ("agents_skills_home", agents_skills_home()),
@@ -324,6 +419,28 @@ def _real_ledger_folder_guard():
 
 
 @pytest.fixture(autouse=True)
+def _no_runner_git_config(monkeypatch):
+    # CI jobs export maintenance.auto through these; tests that build git config environments start from none.
+    for name in ("GIT_CONFIG_COUNT", "GIT_CONFIG_KEY_0", "GIT_CONFIG_VALUE_0"):
+        monkeypatch.delenv(name, raising=False)
+
+
+@pytest.fixture(autouse=True)
+def _production_redis_key_guard(monkeypatch):
+    # The isolation fixture above drops every AGENTIHOOKS_ variable; subprocesses need the prefix back.
+    monkeypatch.setenv(redis_key_guard.keyspace.ENV, redis_key_guard.keyspace.ROOT)
+    before = len(redis_key_guard.written)
+    yield
+    assert redis_key_guard.written[before:] == [], "this test wrote a production swarm Redis key"
+
+
+@pytest.fixture
+def ledger_port():
+    with ledger_guard.reserve_port() as hold:
+        yield hold.getsockname()[1]
+
+
+@pytest.fixture(autouse=True)
 def _swarm_codes_in_order(monkeypatch):
     """Each test's swarms get codes a1b2c3, a1b2c4, ... in creation order, so agent names are known in advance."""
     from itertools import count
@@ -339,6 +456,150 @@ def _swarm_runs_as_installed(monkeypatch):
     from scripts.swarm import timer
 
     monkeypatch.setattr(timer, "_roots", lambda: (Path("/installed"), Path("/installed")))
+
+
+@pytest.fixture(autouse=True)
+def _swarm_tick_leaves_user_units_alone(monkeypatch):
+    from scripts.swarm import timer
+
+    monkeypatch.setattr(timer, "reconcile", lambda binary: True)
+    monkeypatch.setattr(timer, "schedule", lambda: True)
+    monkeypatch.setattr(timer, "undelivered", lambda: "")
+    monkeypatch.setattr(timer, "guard", lambda binary: True)
+
+
+@pytest.fixture(autouse=True)
+def _switch_interval_restored():
+    before = sys.getswitchinterval()
+    yield
+    sys.setswitchinterval(before)
+
+
+@pytest.fixture(autouse=True)
+def _swarm_tick_reaps_no_real_process(tmp_path, monkeypatch):
+    from scripts.swarm import tick_reaper
+
+    monkeypatch.setattr(tick_reaper, "PROC", tmp_path / "no-proc")
+
+
+@pytest.fixture(autouse=True)
+def _workstation_headroom_is_roomy(monkeypatch):
+    """Workstation admission reads a roomy fixed machine instead of the test runner's own load."""
+    from scripts.hive import headroom
+
+    measure = headroom.measure
+
+    def roomy(pending, now_ms, proc=None, previous=None):
+        if proc is not None:
+            return measure(pending, now_ms, proc, previous)
+        return {
+            "cpus": 1000,
+            "load5": 0.0,
+            "available_mb": 10**7,
+            "total_mb": 10**7,
+            "pending": pending,
+            "measured_at": now_ms,
+        }
+
+    monkeypatch.setattr(headroom, "measure", roomy)
+
+
+@pytest.fixture(autouse=True)
+def _codex_resumes_find_their_rollout(request, monkeypatch):
+    """A fake Codex resume finds its rollout unless the test is marked codex_rollouts."""
+    if request.node.get_closest_marker("codex_rollouts"):
+        return
+    from scripts.profiles import render
+
+    monkeypatch.setattr(render, "has_codex_rollout", lambda name, overlays, conversation_id: True)
+
+
+@pytest.fixture(autouse=True)
+def _tool_deps_never_read_the_real_checkout(tmp_path, monkeypatch):
+    from scripts import tool_deps
+
+    monkeypatch.setattr(tool_deps, "SOURCE", tmp_path / "tool-source")
+
+
+@pytest.fixture(autouse=True)
+def _swarm_snapshot_job_runs_inline(request, monkeypatch):
+    from scripts.swarm import snapshot_job
+
+    if not getattr(request.module, "SNAPSHOT_SPAWN", False):
+        run = snapshot_job.run
+        monkeypatch.setattr(
+            snapshot_job, "start", lambda store, slug, now, environ: bool(run(store, slug, now, environ))
+        )
+
+
+@pytest.fixture(autouse=True)
+def _swarm_refresh_job_never_spawns(request, monkeypatch):
+    from scripts.swarm import refresh_job
+
+    if not getattr(request.module, "REFRESH_SPAWN", False):
+        monkeypatch.setattr(refresh_job, "spawn", lambda slug: None)
+
+
+@pytest.fixture(autouse=True)
+def _ci_speed_offline(request, monkeypatch):
+    from scripts.swarm import ci_speed
+
+    if not getattr(request.module, "CI_SPEED_READ", False):
+        monkeypatch.setattr(ci_speed, "read_runs", lambda *args, **kwargs: [])
+
+
+@pytest.fixture(autouse=True)
+def _github_status_offline(request, monkeypatch):
+    from scripts.doctor import github_status
+
+    if not getattr(request.module, "GITHUB_STATUS_READ", False):
+        monkeypatch.setattr(github_status, "_fetch", lambda url: b'{"incidents": []}')
+
+
+@pytest.fixture(autouse=True)
+def _task_sizing_offline(monkeypatch):
+    from hooks.classifier import ClassifierUnavailable
+    from scripts.swarm import difficulty
+
+    def unavailable(*args, **kwargs):
+        raise ClassifierUnavailable("classifier disabled in unit tests")
+
+    monkeypatch.setattr(difficulty, "decide", unavailable)
+
+
+@pytest.fixture(autouse=True)
+def _task_grouping_offline(monkeypatch):
+    from hooks.classifier import ClassifierUnavailable
+    from scripts.swarm import grouping
+
+    def unavailable(*args, **kwargs):
+        raise ClassifierUnavailable("classifier disabled in unit tests")
+
+    monkeypatch.setattr(grouping, "decide", unavailable)
+
+
+@pytest.fixture(autouse=True)
+def _profile_pick_offline(monkeypatch):
+    from hooks.classifier import Answer, DecisionResult
+    from scripts.swarm import profile_choice
+
+    def engineer(*args, **kwargs):
+        return DecisionResult({"responsibility": Answer("choice", choice="engineer", confidence=1.0)}, "unit-test")
+
+    monkeypatch.setattr(profile_choice, "decide", engineer)
+
+
+@pytest.fixture(autouse=True)
+def _ledger_duplicates_offline(monkeypatch):
+    from hooks.classifier import ClassifierUnavailable
+    from scripts.swarm_ledger import ledger_duplicates, ledger_task_duplicates
+
+    def unavailable(*args, **kwargs):
+        raise ClassifierUnavailable("classifier disabled in unit tests")
+
+    monkeypatch.setattr(ledger_duplicates, "decide", unavailable)
+    child = (sys.executable, "-m", "tests.swarm_ledger.duplicate_child", '[[], "unavailable", 0]')
+    monkeypatch.setattr(ledger_task_duplicates, "CHILD", child)
 
 
 @pytest.fixture
@@ -377,3 +638,18 @@ def sample_tool_use_event():
         "tool_name": "Write",
         "tool_input": {"file_path": "/tmp/test.txt", "content": "hello"},
     }
+
+
+@pytest.fixture(autouse=True)
+def _package_conditions_offline(tmp_path, monkeypatch):
+    from hooks.context import conditions
+
+    real_layers = conditions.layer_dirs
+
+    def isolated_layers(state, cwd=None):
+        layers, probed = real_layers(state, cwd)
+        return [
+            (source, tmp_path / "package-conditions" if source == "package" else path) for source, path in layers
+        ], probed
+
+    monkeypatch.setattr(conditions, "layer_dirs", isolated_layers)

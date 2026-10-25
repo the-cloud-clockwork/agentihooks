@@ -1,0 +1,20 @@
+version: 1
+purpose: model-pick
+fallbacks: cli
+questions:
+  - name: option
+    type: choice
+    instructions: >-
+      A coding agent will work this task. Its size is {difficulty} (S small, M medium, L large) and its rank is
+      {rank}. Which run option lets the agent finish the task well while spending the least? Choose the option whose
+      description fits the work the task asks for.
+    options:
+      lower: "{lower}"
+      higher: "{higher}"
+thresholds:
+  confidence: 0.6
+environment:
+  confidence: AGENTIHOOKS_MODEL_PICK_MIN_CONFIDENCE
+rule:
+  type: choice
+  threshold: confidence

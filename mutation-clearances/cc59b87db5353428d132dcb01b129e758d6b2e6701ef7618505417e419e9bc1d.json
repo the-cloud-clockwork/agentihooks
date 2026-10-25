@@ -1,0 +1,6 @@
+{
+  "hooks/classifier/fallbacks.py:hooks.classifier.fallbacks.x_cli_backends__mutmut_10:68f16ef1177b1b5bd5339441b6514a603bd025584a810cf33bdaca434c0d66e1": {
+    "reader": "Standards reviewer /root/standards",
+    "reason": "All mutated absent-target defaults differ from codex, preserving Haiku then Luna; explicit harness and target values are unchanged."
+  }
+}

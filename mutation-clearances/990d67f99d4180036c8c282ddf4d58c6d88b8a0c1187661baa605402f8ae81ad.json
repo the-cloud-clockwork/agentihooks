@@ -1,0 +1,6 @@
+{
+  "scripts/doctor/registry.py:scripts.doctor.registry.x_progress__mutmut_25:c051142c11bbf905616adb05a8ddd23c3cff3b878457ae929b0cfd970ec9e98d": {
+    "reader": "Standards reader for task t48",
+    "reason": "None and empty string are both falsy; every later use of stat in progress and _fallback is a truthiness test, so no input distinguishes them."
+  }
+}

@@ -1,8 +1,8 @@
 import re
 import unittest
-from pathlib import Path
 
-TEMPLATE = Path(__file__).resolve().parents[2] / "scripts" / "swarm_ledger" / "template.html"
+from tests.swarm_ledger.ledger_page import page_source
+
 STATES = re.compile(
     r":hover|:active|:focus|:disabled|:checked|::|\.armed|\.sending|\[aria-(?:pressed|selected|expanded)=\"true\"\]"
 )
@@ -10,7 +10,7 @@ CLEAR = re.compile(r"^(?:none|transparent|0|inherit)$|\btransparent\b")
 
 
 def page():
-    return TEMPLATE.read_text(encoding="utf-8")
+    return page_source()
 
 
 def css_rules(css):

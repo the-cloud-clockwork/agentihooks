@@ -15,6 +15,8 @@ argument-hint: "[command] [--dir <directory>] [--title <tab-title>]"
 
 # Run In Terminal — Run Any Command in Any Directory
 
+Run it when the operator asks for it; no typed phrase and no guard gate it.
+
 Opens a new terminal tab/window targeting any directory and runs an
 arbitrary command there. On WSL2, opens a Windows Terminal tab via the
 `wt.exe → powershell.exe → wsl.exe → bash` chain (same pattern as agentihooks

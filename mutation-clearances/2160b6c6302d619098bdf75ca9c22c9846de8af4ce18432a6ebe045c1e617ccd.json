@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/lifecycle.py:scripts.swarm.lifecycle.x__admit__mutmut_95:99f89af0f0c2a7b70431feb0aac050820c17e98f57b9eac893a3bb693da18c1b": {
+    "reader": "standards_reader",
+    "reason": "disabled reads its pending argument only by truthiness in its last return; None and \"\" are both falsy, and no earlier return depends on it."
+  }
+}

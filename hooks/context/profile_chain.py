@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import os
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from pathlib import Path
 
 import yaml
@@ -12,8 +12,10 @@ import yaml
 BUILT_IN_PROFILES = Path(__file__).resolve().parents[2] / "profiles"
 PACKAGE_ROLES = BUILT_IN_PROFILES / "package" / "roles"
 PACKAGE_PREFIX = "package:"
+BUNDLE_PROFILES = "profiles"
 RENDER_STAMP = ".agentihooks-render.json"
 OVERLAY_CAP = 3
+HIVE_CAPABILITIES = "AGENTIHOOKS_HIVE_CAPABILITIES"
 
 
 def state_path() -> Path:
@@ -65,6 +67,16 @@ def parents(path: Path) -> list[str]:
     return data.get("extends", [])
 
 
+def _manifest(path: Path) -> dict:
+    manifest = path / "profile.yml"
+    return yaml.safe_load(manifest.read_text()) or {} if manifest.is_file() else {}
+
+
+def manifestos(path: Path) -> dict:
+    picks = _manifest(path).get("manifestos") or {}
+    return picks if isinstance(picks, dict) else {}
+
+
 def overlays(path: Path) -> list[str]:
     manifest = path / "profile.yml"
     data = yaml.safe_load(manifest.read_text()) or {} if manifest.is_file() else {}
@@ -80,6 +92,10 @@ def wears(path: Path) -> list[str]:
     if not isinstance(roles, list):
         raise ValueError(f"overlay {path.name} wears must be a list of roles")
     return [str(role) for role in roles]
+
+
+def hive_capabilities(environ: Mapping[str, str]) -> set[str]:
+    return {value.strip() for value in environ.get(HIVE_CAPABILITIES, "").split(",") if value.strip()}
 
 
 def require_capabilities(profile_dirs: list[tuple[str, Path]], available: set[str]) -> None:
@@ -162,7 +178,7 @@ def profile_candidates(
             return [PACKAGE_ROLES / name.removeprefix(PACKAGE_PREFIX)]
         paths = [BUILT_IN_PROFILES / name]
         if bundle is not None:
-            paths.append(bundle / "profiles" / name)
+            paths.append(bundle / BUNDLE_PROFILES / name)
         if name in linked:
             paths.append(linked[name])
         paths.append(PACKAGE_ROLES / name)

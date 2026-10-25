@@ -1,9 +1,12 @@
 import { $, h, headCount, newId, noticeTime } from "./dom.js";
 import { doc, queue } from "./sync.js";
+import { hiddenDone, pendingOf } from "./state.js";
 import { verdictButton } from "./render.js";
 import { jumpTo } from "./outline.js";
 import { foldSaved } from "./folds.js";
 import { showChat } from "./chat.js";
+import { firstPage, moreButton, wanted } from "./pages.js";
+import { viewCount, viewVisible } from "./frozen_view.js";
 
 export function anchorPanel(panel, icon) {
   panel.style.setProperty("--anchor-top", `${icon.getBoundingClientRect().top}px`);
@@ -21,26 +24,29 @@ function prioritySubject(item) {
   const [field, noun] = PRIORITY_KINDS[list];
   const found = doc[list].find((i) => i.id === id && !i.deleted);
   const label = field === "title" ? id : noun;
-  return found ? { label, title: found[field] } : { label, title: `This ${noun} was removed`, gone: true };
+  if (found) return { label, title: found[field] };
+  return hiddenDone(doc, list).has(id) ? { label, title: `This ${noun} is done` } : { label, title: `This ${noun} was removed`, gone: true };
 }
 
 export function renderPriorities() {
-  const list = doc.priorities;
-  $("prio-count").textContent = headCount([[list.length]]);
+  const list = doc.priorities.filter((p) => viewVisible(p.item));
+  $("prio-count").textContent = headCount([[list.length]]) + viewCount("priorities", doc.priorities);
   $("tab-ledger").textContent = list.length ? `Ledger · ${list.length}` : "Ledger";
   if (list.length && typeof foldSaved()["prio-box"] !== "boolean") $("prio-box").open = true;
   document.querySelector(".prio-head").hidden = !list.length;
-  $("priorities").replaceChildren(...list.map((p) => {
+  if (!$("prio-box").open) return $("priorities").replaceChildren();
+  $("priorities").replaceChildren(...firstPage("priorities", list, (p) => `item-priorities-${p.id}`).map((p) => {
     const { label, title, gone } = prioritySubject(p.item);
+    const clearing = pendingOf(doc, `priorities/${p.id}`) || pendingOf(doc, "priorities/all");
     const link = (cls, text) => h("a", { class: cls, href: `#item-${p.item.replace("/", "-")}`, text, on: { click: (ev) => jumpTo(ev, p.item) } });
-    return h("li", { class: "prio", id: `item-priorities-${p.id}` },
+    return h("li", { class: "prio" + (clearing ? " pending" : ""), id: `item-priorities-${p.id}` },
       h("div", { class: "prio-body" },
         h("div", { class: "prio-head-line" }, link("prio-link", label), link(gone ? "prio-title gone" : "prio-title", title)),
         h("div", { class: "prio-text", text: p.text })),
       verdictButton(p.item, "approved", "approve", "Approve"),
-      h("button", { class: "link danger", type: "button", text: "Clear", on: { click: () => clearPriority(p.id) } }));
-  }));
-  if (!list.length) $("priorities").append(h("li", { class: "empty", text: "Nothing waits on you." }));
+      h("button", { class: "link danger", type: "button", text: clearing ? "clearing" : "Clear", disabled: !!clearing, on: { click: () => clearPriority(p.id) } }));
+  }), moreButton("priorities", list.length, "more priorities", renderPriorities) || "");
+  if (!list.length) $("priorities").append(h("li", { class: "empty", text: doc.priorities.length ? "All priorities are hidden." : "Nothing waits on you." }));
 }
 
 function jumpToNotice(ev, item) {
@@ -62,15 +68,17 @@ export function renderNotifications() {
   $("bell-badge").hidden = !list.length;
   $("bell-badge").textContent = String(list.length);
   $("notif-clear-all").hidden = !list.length;
-  $("notifs").replaceChildren(...list.map((n) => h("li", { class: "notif-row" },
+  if ($("notif").hidden) return $("notifs").replaceChildren();
+  $("notifs").replaceChildren(...firstPage("notifs", list, (n) => `notice-${n.id}`).map((n) => h("li", { class: "notif-row", id: `notice-${n.id}` },
     h("div", { class: "notif-meta" },
       h("span", { text: noticeTime(n.at) }),
-      h("a", { class: "prio-link", href: `#${noticeTarget(n.item)}`,
-        text: n.item === "chat" ? "#chat" : `#${n.item.split("/")[1]}`, on: { click: (ev) => jumpToNotice(ev, n.item) } }),
+      n.item ? h("a", { class: "prio-link", href: `#${noticeTarget(n.item)}`,
+        text: n.item === "chat" ? "#chat" : `#${n.item.split("/")[1]}`, on: { click: (ev) => jumpToNotice(ev, n.item) } }) : "",
       h("span", { text: n.label === "Reply" ? `Reply from ${n.by}` : n.label }),
       h("button", { class: "link danger", type: "button", text: "Clear", on: { click: () => clearNotification(n.id) } })),
-    h("div", { class: "notif-text", text: n.text, title: "Go to it",
-      on: { click: (ev) => { if (!getSelection().toString()) jumpToNotice(ev, n.item); } } }))));
+    h("div", { class: "notif-text", text: n.text, title: n.item ? "Go to it" : "",
+      on: { click: (ev) => { if (n.item && !getSelection().toString()) jumpToNotice(ev, n.item); } } }))),
+    moreButton("notifs", list.length, "more notifications", renderNotifications) || "");
   if (!list.length) $("notifs").append(h("li", { class: "empty", text: "No notifications." }));
 }
 
@@ -89,14 +97,15 @@ function alertRow(a) {
     } } },
     outcome, h("button", { class: "link", type: "submit", text: "Save" }));
   const openForm = () => { Object.assign(alertDraft, { id: a.id, text: "" }); form.hidden = false; outcome.value = ""; outcome.focus(); };
-  return h("li", { class: "notif-row", id: `alert-${a.id}` },
+  const sending = pendingOf(doc, `alerts/${a.id}`);
+  return h("li", { class: "notif-row" + (sending ? " pending" : ""), id: `alert-${a.id}` },
     h("div", { class: "notif-meta" },
       h("span", { text: noticeTime(a.at) }),
       h("span", { text: ALERT_SOURCES[a.source] || a.source }),
       h("span", { text: `For the ${a.target}` }),
-      h("span", { class: "alert-state", text: a.state === "claimed" ? `Claimed by ${a.claimed_by}` : "Open" }),
+      h("span", { class: "alert-state", text: sending ? "sending" : a.state === "claimed" ? `Claimed by ${a.claimed_by}` : "Open" }),
       h("span", { class: "alert-acts" },
-        a.state === "open" && h("button", { class: "link alert-claim", type: "button", text: "Claim", on: { click: () => queue({ op: "alert_claim", id: newId("alert"), target: a.id }) } }),
+        a.state === "open" && h("button", { class: "link alert-claim", type: "button", text: "Claim", disabled: sending ? "" : false, on: { click: () => queue({ op: "alert_claim", id: newId("alert"), target: a.id }) } }),
         h("button", { class: "link alert-done", type: "button", text: "Mark done", on: { click: openForm } }))),
     h("div", { class: "notif-text", text: a.text }), form);
 }
@@ -105,19 +114,45 @@ export function renderAlerts() {
   const list = doc.alerts.filter((a) => a.state !== "done").reverse();
   $("alert-badge").hidden = !list.length;
   $("alert-badge").textContent = String(list.length);
-  if (document.activeElement.matches("#alerts input")) return;
-  $("alerts").replaceChildren(...list.map(alertRow));
+  if ($("alert-panel").hidden) return $("alerts").replaceChildren();
+  if (!wanted.id && document.activeElement.matches("#alerts input")) return;
+  $("alerts").replaceChildren(...firstPage("alerts", list, (a) => `alert-${a.id}`).map(alertRow), moreButton("alerts", list.length, "more alerts", renderAlerts) || "");
   if (!list.length) $("alerts").append(h("li", { class: "empty", text: "No open alerts." }));
 }
 
 export function showAlerts(open) {
   $("alert-panel").hidden = !open;
   $("alert-fab").setAttribute("aria-expanded", String(open));
+  renderAlerts();
   if (open) anchorPanel($("alert-panel"), $("alert-fab"));
 }
 
 export function showNotifications(open) {
   $("notif").hidden = !open;
   $("bell").setAttribute("aria-expanded", String(open));
+  renderNotifications();
   if (open) anchorPanel($("notif"), $("bell"));
 }
+export function statKey(label) {
+  return label.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+}
+
+export function statGrip(label) {
+  return h("button", { type: "button", class: "stat-grip", "aria-label": `Move ${label}`,
+    "data-tip": "Drag to reorder Stats, or use the up and down arrow keys. Every browser keeps the order." });
+}
+
+function measuredAge(top) {
+  const minutes = /^(\d+) minutes? ago$/.exec(top.measured || "");
+  return minutes ? `${minutes[1]}m ago` : "never";
+}
+
+export function bottleneckStat(top) {
+  return h("div", { class: "stat top-bottleneck", "data-stat": statKey("Top bottleneck") },
+    h("dt", {}, statGrip("Top bottleneck"), top ? `Top bottleneck · ${measuredAge(top)}` : "Top bottleneck"),
+    h("dd", {}, h("ul", { class: "bottleneck-list" }, h("li", { class: "bottleneck-stage", text: top ? top.label || "none" : "unavailable" }),
+      h("li", { text: `Trend ${top && top.trend || "unknown"}` }),
+      h("li", { text: `Last action ${top && top.last_action || "none recorded"}` }),
+      ...((top && top.waits) || []).map((text) => h("li", { class: "bottleneck-wait", text })))));
+}
+

@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_v2/restore_decisions.py:scripts.swarm_v2.restore_decisions.x_decide__mutmut_50:ea7b18541c9a4ef55a6fb3382d2253b79a7691606ce3c64bb8e2e276ceb5bc76": {
+    "reader": "standards-reader",
+    "reason": "urllib.request.Request.add_header applies key.capitalize(), so CONTENT-TYPE and Content-Type yield identical stored headers and transmitted bytes."
+  }
+}

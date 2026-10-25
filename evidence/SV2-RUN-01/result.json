@@ -1,0 +1,64 @@
+{
+  "package": "SV2-RUN-01",
+  "dependency": "SV2-IDN-05",
+  "integration_gate": "G1",
+  "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/1718",
+  "pull_request": "https://github.com/the-cloud-clockwork/agentihooks/pull/1733",
+  "tested_commit": "c0a74a1de7172251a866b23b484ea94307d767eb",
+  "ci_head": "8c4f653bca4d89a8fd011e2cdb911e6a79eb6d0f",
+  "evidence_class": "local isolated fixture on temporary homes; mocked: the herdr CLI, the init-agent launch and the process reaper behind HerdrRuntime, and the remote backend is an in-memory fake; not live rollout proof",
+  "supported_versions": {
+    "runtime_protocol": "operations spawn, observe, command, drain, terminate, recover; statuses ok, ambiguous, unavailable, unsupported, refused; recovery modes reattach, resume",
+    "backends": "local (LocalHerdrRuntime over HerdrRuntime); remote backends are fixtures only"
+  },
+  "interfaces": [
+    "scripts.swarm_v2.runtime.base: Capability, Status, Recovery, SpawnRequest, Outcome, Runtime, foreign, RuntimeRouter (spawn, observe, command, drain, terminate, recover, spawn_backend, capability_failures_total, from_environ)",
+    "scripts.swarm_v2.runtime.local.LocalHerdrRuntime: compatibility adapter over scripts.swarm.runtime.HerdrRuntime spawn, observe, nudge, retire, refusal, recover and resume",
+    "scripts.swarm_v2.runtime.routed.RoutedRuntime and routed: the swarm tick and swarm stop call spawn, observe, nudge, retire and resume through RuntimeRouter; every other tick call stays on HerdrRuntime",
+    "scripts.swarm.tick.SpawnError carries a typed status (unsupported, unavailable, refused) set at each raise site",
+    "AGENTIHOOKS_RUNTIME_BACKEND selects the spawn backend, an unregistered one is unavailable and never falls back to local; AGENTIHOOKS_RUNTIME_DISABLED lists backends to disable"
+  ],
+  "states": {
+    "observed": "Local on c0a74a1d: pytest -n 2 over the runtime protocol, swarm runtime, cli, capacity, profile binding, profile binding transfers, master launch, master recovery, tick, resume and restore decisions suites -> 669 passed; ruff check and ruff format clean. CI mutation on cbb549dd left 64 survivors on the changed lines; this commit asserts the typed status at each non-default raise site and the routed recover arguments, and drops unused defaults.",
+    "accepted": "Cases A, B and C passed on a local and a remote fake with different capabilities; case A ran the tick's routed runtime over a herdr fixture on two independent temporary homes.",
+    "committed": "The tested commit carries the code; the case results in this folder were generated on it.",
+    "externally_verified": "CI Tests run 37818048670 on 8c4f653b: every unit shard, mutation, sonar and Gate Required passed"
+  },
+  "measurements": {
+    "runtime_capability_failures_total": {
+      "a": [
+        0,
+        0
+      ],
+      "b": {
+        "kubernetes/recover": 1
+      },
+      "c": 0
+    }
+  },
+  "authority": "Not applicable at this layer, accepted by the master on the swarm ledger: runtime operations carry no operator grant. Dispatch keys on the runtime_backend the router itself records at spawn, never on a display label; the claims and fencing packages own grants.",
+  "cases": {
+    "a": "evidence/SV2-RUN-01/a-result.json",
+    "b": "evidence/SV2-RUN-01/b-result.json",
+    "c": "evidence/SV2-RUN-01/c-result.json",
+    "manifest": "evidence/SV2-RUN-01/manifest.json",
+    "generator": "evidence/SV2-RUN-01/generate_case_results.py"
+  },
+  "rollback_rehearsal": {
+    "action": "AGENTIHOOKS_RUNTIME_DISABLED=<backend> in the swarm tick environment routes new spawns to the local adapter; existing attempt records keep their runtime_backend and their operations return unavailable",
+    "tests": [
+      "test_disabling_the_remote_adapter_routes_new_spawns_local_and_keeps_its_records",
+      "test_disabling_local_stops_tick_spawns_without_touching_herdr",
+      "test_routed_reads_the_process_environment_and_builds_a_herdr_runtime"
+    ],
+    "case": "c: a disabled remote left its attempt record and runtime object unchanged, a new spawn went local, and after re-enabling a replayed spawn reached only the owning remote, which returned the first object without a duplicate"
+  },
+  "remaining_limitations": [
+    "Replay deduplication is the owning backend's: the router forwards a replayed spawn to its owner and adds no second backend; reconciliation by immutable execution ID (INV-R06) and generation fencing (INV-R07) are not implemented here.",
+    "The T-SV2-RUN-01-C ownership assertion (a stale attempt cannot overwrite a newer accepted result) is not tested here: there are no generations at this layer yet; it is deferred with INV-R07.",
+    "Every lifecycle call from the tick and the swarm CLI (spawn, observe, command, retire, reattach, resume, snapshot restore) goes through RuntimeRouter. HerdrRuntime still answers directly for live names, bindings, refusals, status and conversations, and for the local pane and process actions reap_name, name_pane and close_space, which key on names rather than runtime objects; moving those under the owner check belongs with SV2-RUN-02.",
+    "No remote backend exists yet; the remote runtime is a fixture.",
+    "runtime_capability_failures_total is an in-process counter on RuntimeRouter with no exporter.",
+    "No live rollout proof; the evidence is a local isolated fixture plus CI."
+  ]
+}

@@ -1,0 +1,6 @@
+{
+  "hooks/context/project_identity.py:hooks.context.project_identity.x__registered_project__mutmut_6:46937210a842340791e7c2d30c0351c635031647d4079897eb2e4528d449c8ed": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "Missing registration changes only from empty string to None. _folder_identity consumes registered only as a truth operand, before regex validation or replacement; both skip registration and return the same observed Git, scratch or absent identity."
+  }
+}

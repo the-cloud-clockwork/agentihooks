@@ -10,14 +10,16 @@ import re
 from dataclasses import dataclass
 
 from scripts.swarm import naming
+from scripts.swarm.keyspace import ROOT
 
-PREFIX = "agentihooks:seat"
+PREFIX = f"{ROOT}:seat"
 OCCUPY_ATTEMPTS = 5
+SCAN_PAGE = 1000
 MEMORY_KINDS = ("history", "recaps", "learned")
 MATURITIES = ("data", "note", "insight", "canon")
 DEFAULT_MATURITY = "note"
 CANON = "canon"
-CULTURE_PREFIX = "agentihooks:culture"
+CULTURE_PREFIX = f"{ROOT}:culture"
 
 
 class SeatError(RuntimeError):
@@ -100,20 +102,40 @@ class SeatRegistry:
 
     def agent_names(self, slug: str) -> list[str]:
         """Every agent the swarm seated: its registered names, and names from before the registry."""
-        prefix = f"{PREFIX}-of:"
-        legacy = self.redis.scan_iter(match=f"{prefix}{slug}-*")
-        old = [name for key in legacy if naming.legacy_slug(name := key[len(prefix) :]) == slug]
-        named = [row["name"] for row in naming.NameRegistry(self.redis).names(slug)]
-        return old + [name for name in named if self.known_seat(name)]
+        return [name for name, _ in self.agent_seats(slug)]
 
     def agent_seats(self, slug: str) -> list[tuple[str, str]]:
-        return [(name, self.known_seat(name)) for name in self.agent_names(slug)]
+        prefix = f"{PREFIX}-of:"
+        legacy = self.redis.scan_iter(match=f"{prefix}{slug}-*", count=SCAN_PAGE)
+        old = [name for key in legacy if naming.legacy_slug(name := key[len(prefix) :]) == slug]
+        named = [row["name"] for row in naming.NameRegistry(self.redis).names(slug)]
+        seats = self._known_seats(old + named)
+        legacy = list(zip(old, seats[: len(old)]))
+        seated = [(name, seat) for name, seat in zip(named, seats[len(old) :]) if seat]
+        return legacy + seated
+
+    def _known_seats(self, names):
+        return [seat or "" for seat in self.redis.mget([f"{PREFIX}-of:{name}" for name in names])] if names else []
+
+    def exits(self, names: list[str]) -> dict[str, dict[str, str]]:
+        raw = self.redis.mget([f"{PREFIX}-of:{name}:exit" for name in names]) if names else []
+        return {name: json.loads(value or "{}") for name, value in zip(names, raw)}
 
     def record_exit(self, name: str, seat: str, reason: str) -> None:
-        self.redis.set(f"{PREFIX}-of:{name}:exit", json.dumps({"seat": seat, "reason": reason}), nx=True)
+        """The first exit of each occupancy stands; a life seated again records its next exit."""
+        held = self.known_seat(name)
+        generation = self.occupant(held).generation if held else 0
+        record = {"seat": seat, "reason": reason, "generation": generation}
+        earlier = self.exit_of(name)
+        replace = bool(earlier) and earlier.get("generation") != generation
+        self.redis.set(f"{PREFIX}-of:{name}:exit", json.dumps(record), nx=not replace)
 
     def exit_of(self, name: str) -> dict[str, str]:
         return json.loads(self.redis.get(f"{PREFIX}-of:{name}:exit") or "{}")
+
+    def left(self, name: str, seat: str) -> bool:
+        """name exited while holding seat's current occupancy, so it takes no more of its mail."""
+        return self.exit_of(name).get("generation") == self.occupant(seat).generation
 
     def history(self, address):
         return [json.loads(entry) for entry in self.redis.lrange(f"{self.key(address)}:history", 0, -1)]

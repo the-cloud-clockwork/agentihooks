@@ -1,0 +1,6 @@
+{
+  "scripts/inbox/exits.py:scripts.inbox.exits.x__settle_seat_notices__mutmut_6:a7c2855b2d2ea0f67b200d9e7b016f81b6ccf2c9fa4c6c17e722e891446e0054": {
+    "reader": "Standards",
+    "reason": "The changed dummy name or exit text formats only a discarded nonempty life notice reason used as a truth predicate. Push stop notices short circuit before this call; quota and overrun stay nonempty and other items return empty."
+  }
+}

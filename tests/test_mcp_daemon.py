@@ -142,10 +142,30 @@ class TestLiveness:
         monkeypatch.setattr(mcp_daemon, "_read_cmdline", lambda _pid: b"/venv/bin/python\x00-m\x00hooks.mcp\x00")
         assert mcp_daemon.pid_alive(4242) is True
 
+    def test_process_exiting_during_cmdline_read_is_not_running(self, monkeypatch):
+        reads = []
+
+        def read_cmdline(path):
+            reads.append(path)
+            raise FileNotFoundError
+
+        monkeypatch.setattr(mcp_daemon.os, "kill", lambda *_a: None)
+        monkeypatch.setattr(mcp_daemon, "_proc_fs_available", lambda: True)
+        monkeypatch.setattr(Path, "read_bytes", read_cmdline)
+        assert mcp_daemon.pid_alive(4242) is False
+        assert reads == [Path("/proc/4242/cmdline")]
+
     def test_without_procfs_the_signal_check_stands_alone(self, monkeypatch):
         monkeypatch.setattr(mcp_daemon.os, "kill", lambda *_a: None)
         monkeypatch.setattr(mcp_daemon, "_proc_fs_available", lambda: False)
         assert mcp_daemon.pid_alive(4242) is True
+
+    def test_an_unreadable_cmdline_reads_as_empty(self, monkeypatch):
+        def vanished(self):
+            raise FileNotFoundError(str(self))
+
+        monkeypatch.setattr(Path, "read_bytes", vanished)
+        assert mcp_daemon._read_cmdline(4242) == b""
 
 
 class TestPidfile:

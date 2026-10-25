@@ -6,7 +6,6 @@ from pathlib import Path
 
 from tests.swarm_ledger.ledger_page import page_source
 
-TEMPLATE = Path(__file__).resolve().parents[2] / "scripts" / "swarm_ledger" / "template.html"
 VOID = {"meta", "input", "br", "img", "hr", "link", "path"}
 SECTIONS = {
     "Original sources": False,
@@ -16,11 +15,6 @@ SECTIONS = {
     "Open questions": True,
     "Operator notes": True,
     "Follow-ups or blockers": True,
-    "Chat": True,
-    "Notifications": True,
-    "Alerts": True,
-    "Artifacts": True,
-    "Stats": True,
 }
 
 
@@ -66,18 +60,46 @@ def walk(node, tag):
         yield from walk(kid, tag)
 
 
-def sections():
+def body():
     tree = Tree()
     tree.feed(page().split("<body>", 1)[1].split("<script", 1)[0])
-    return list(walk(tree.root, "section"))
+    return tree.root
 
 
-class EverySectionFolds(unittest.TestCase):
-    def test_every_section_the_page_renders_has_a_fold_header(self):
+def sections():
+    return list(walk(body(), "section"))
+
+
+SWARM_PANELS = {
+    "quota-fold",
+    "hives-fold",
+    "overlays-fold",
+    "agents-fold",
+    "handoff-fold",
+    "recovery-fold",
+    "freeze-fold",
+    "architecture-fold",
+}
+DESIGN = Path(__file__).resolve().parents[2] / "DESIGN.md"
+
+
+def in_ledger_section(node):
+    while node.parent is not None:
+        if node.tag == "section" and node.parent.attrs.get("class") == "col":
+            return True
+        if node.tag == "details" and node.attrs.get("id") in SWARM_PANELS:
+            return True
+        node = node.parent
+    return False
+
+
+class OnlyLedgerSectionsFold(unittest.TestCase):
+    def test_every_ledger_tab_section_has_a_fold_header(self):
         found = {}
         for section in sections():
-            label = section.attrs.get("id") or section.attrs.get("aria-label") or "a section"
-            self.assertTrue(section.kids, label)
+            if section.parent.attrs.get("class") != "col":
+                continue
+            label = section.attrs.get("id") or "a section"
             box = section.kids[0]
             self.assertEqual(box.tag, "details", f"{label} has a fixed header")
             self.assertIn("fold", box.attrs.get("class", "").split(), label)
@@ -86,6 +108,33 @@ class EverySectionFolds(unittest.TestCase):
             summary = box.kids[0]
             found[summary.text.strip() or summary.kids[0].text.strip()] = "open" in box.attrs
         self.assertEqual(found, SECTIONS)
+
+    def test_every_swarm_panel_below_capacity_folds_open_by_default(self):
+        folds = {node.attrs.get("id"): node for node in walk(body(), "details") if node.attrs.get("id") in SWARM_PANELS}
+        self.assertEqual(set(folds), SWARM_PANELS)
+        for name, box in folds.items():
+            self.assertIn("fold", box.attrs.get("class", "").split(), name)
+            self.assertIn("open", box.attrs, name)
+            self.assertEqual(box.kids[0].tag, "summary", name)
+
+    def test_swarm_panels_follow_the_order_the_design_record_names(self):
+        line = next(row for row in DESIGN.read_text().splitlines() if row.startswith("- **Panels.**"))
+        names = line.split("in this order: ", 1)[1].split(".", 1)[0].split(", ")
+        heads = [
+            next(walk(node.kids[0], "h3")).text
+            for node in walk(body(), "details")
+            if node.attrs.get("id") in SWARM_PANELS
+        ]
+        self.assertEqual(heads, names)
+
+    def test_nothing_outside_the_ledger_sections_and_swarm_panels_folds(self):
+        stray = [
+            node.attrs.get("id") or node.parent.attrs.get("id") or node.tag
+            for tag in ("details", "summary")
+            for node in walk(body(), tag)
+            if not in_ledger_section(node)
+        ]
+        self.assertEqual(stray, [])
 
     def test_a_closed_dropdown_inside_an_open_section_shows_the_closed_arrow(self):
         self.assertIn("details[open] > summary::before { transform: rotate(90deg); }", page())
@@ -120,7 +169,7 @@ const FOLD_KEY = "plan-ledger:demo:fold";
 function fakeBox(id, open) {{
   const on = {{}};
   const summary = {{ on: {{}}, addEventListener(ev, fn) {{ this.on[ev] = fn; }} }};
-  return {{ id, open, on, summary, querySelector: (sel) => (sel === ":scope > summary" ? summary : null),
+  return {{ id, open, on, summary, dataset: {{}}, querySelector: (sel) => (sel === ":scope > summary" ? summary : null),
     addEventListener(ev, fn) {{ on[ev] = fn; }} }};
 }}
 function click(box, inButton) {{
@@ -214,14 +263,18 @@ return [phases.fold.open, phases.boxes.map((b) => b.open), follow.boxes[0].open,
 class FakeDom:
     SCRIPT = """
 class El {
-  constructor(tag) { this.tag = tag; this.attrs = {}; this.kids = []; this.on = {}; this.textContent = ""; }
-  setAttribute(k, v) { this.attrs[k] = String(v); }
+  constructor(tag) { this.tag = tag; this.attrs = {}; this.kids = []; this.on = {}; this.textContent = ""; this.open = false; this.dataset = {}; }
+  setAttribute(k, v) { this.attrs[k] = String(v); if (k === "open") this.open = true; }
   addEventListener(ev, fn) { this.on[ev] = fn; }
   append(...kids) { this.kids.push(...kids); }
 }
 const document = { createElement: (tag) => new El(tag) };
 const wired = [];
 function collapsible(box) { wired.push(box.attrs.id); }
+function closedLeft() { return 0; }
+function closedMore() { return null; }
+function viewItems(list, all) { return all; }
+function viewCount() { return ""; }
 function shape(el) { return { tag: el.tag, attrs: el.attrs, text: el.textContent, kids: el.kids.map(shape) }; }
 """
 
@@ -250,7 +303,32 @@ class OutlineFolds(unittest.TestCase):
     def build(self):
         script = (
             FakeDom.SCRIPT
-            + "".join(function_source(n) + "\n" for n in ("h", "itemState", "outlineOf", "outlineGroup"))
+            + "const PAGE_SIZE = 50;"
+            + "const FULL_PAGE"
+            + page().split("  const FULL_PAGE", 1)[1].split("\n", 1)[0]
+            + "const shown = {}; const wanted = { id: null }; const filter = { text: '', state: '' }; const remote = {}; const remoteTotal = {};"
+            + "".join(
+                function_source(n) + "\n"
+                for n in (
+                    "h",
+                    "itemState",
+                    "outlineEntry",
+                    "outlineOf",
+                    "outlineLink",
+                    "outlineRow",
+                    "phaseRows",
+                    "remoteMore",
+                    "filtering",
+                    "outlineAgain",
+                    "limit",
+                    "include",
+                    "wantedIn",
+                    "firstPage",
+                    "moreButton",
+                    "lazy",
+                    "outlineGroup",
+                )
+            )
             + f"const tree = outlineOf({json.dumps(self.DOC)}, {json.dumps(self.HEADS)});"
             + "process.stdout.write(JSON.stringify({ groups: tree.map((s) => shape(outlineGroup(s))), wired, tree }));"
         )
@@ -284,12 +362,12 @@ class OutlineFolds(unittest.TestCase):
         self.assertEqual(out["wired"], [f"ol-{h['id']}" for h in self.HEADS])
 
     def test_outline_has_one_fold_all_control_and_entries_still_jump(self):
-        self.assertIn('id: "outline-all", on: { click: foldAll }', function_source("renderOutline"))
+        self.assertIn('id: "outline-all", on: { click: foldAll }', function_source("outlineTools"))
         self.assertIn('$("outline").querySelectorAll("details.fold")', function_source("outlineBoxes"))
         self.assertIn("ev.preventDefault();", page().split('$("outline").addEventListener("click"', 1)[1])
 
     def test_every_listed_item_has_a_jump_target_on_the_page(self):
-        self.assertIn("id: `item-sources-${n}`", function_source("render"))
+        self.assertIn("id: `item-sources-${s.id}`", function_source("render"))
         self.assertIn("id: `item-priorities-${p.id}`", function_source("renderPriorities"))
         self.assertIn('id: path === "notes" ? `item-notes-${entry.id}` : false', function_source("entryView"))
         self.assertIn("id: `item-${list}-${item.id}`", function_source("checkRow"))

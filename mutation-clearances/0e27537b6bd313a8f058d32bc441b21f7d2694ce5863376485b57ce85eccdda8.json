@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/ledger_tasks.py:scripts.swarm_ledger.ledger_tasks.x__set_slice__mutmut_82:5ff71f673fd0b83499172cca12f65e295b1bf000c8e4d2066b915cf701166708": {
+    "reader": "Standards",
+    "reason": "Empty string and None missing-task-source defaults are both falsy. With no explicit field source, task_slice selects the same phase artifact, phase URL or missing-source refusal. Present sources are unchanged. Independently verified for CI run 37863168098 at head 76a8a347."
+  }
+}

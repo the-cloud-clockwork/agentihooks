@@ -1,8 +1,7 @@
 import pytest
 
 from scripts.gates import progress
-
-pytestmark = pytest.mark.xdist_group("fakeredis")
+from scripts.swarm.keyspace import ROOT as KEY_ROOT
 
 SLUG, ME = "demo", "engineer@abcdef-0001"
 
@@ -35,7 +34,7 @@ def test_agents_and_swarms_keep_separate_marks(store):
     store.talk(ME)
     assert store.read("engineer@abcdef-0002").talk == 0
     assert progress.Progress(store.redis, "elsewhere").read(ME).talk == 0
-    assert store.key(ME) == f"agentihooks:swarm:{SLUG}:progress:{ME}"
+    assert store.key(ME) == f"{KEY_ROOT}:swarm:{SLUG}:progress:{ME}"
 
 
 def test_outcome_once_stamps_a_resolution_only_the_first_time(store):
@@ -55,6 +54,8 @@ def test_outcome_once_stamps_a_resolution_only_the_first_time(store):
         "cd /w && git push origin HEAD",
         "gh pr create --base dev --title x --body-file b.md",
         "git -C /w push",
+        "cd /w\ngit push -u origin HEAD",
+        "cd /w\ngh pr create --base dev --fill",
     ],
 )
 def test_pushes_and_opened_pull_requests_are_outcomes(command):

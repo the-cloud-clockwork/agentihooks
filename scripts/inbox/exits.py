@@ -1,6 +1,8 @@
 """Mail left pending for a swarm agent that exits: moved to its seat when the work goes on, else withdrawn and its
 sender told."""
 
+import re
+import sys
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -10,23 +12,39 @@ if TYPE_CHECKING:
     from scripts.swarm.store import RedisStore
 
 BY = "swarm"
+UNKNOWN_OWNER = "the agent it was sent to is unknown, so no branch was checked"
+LANE_SEAT = re.compile(r"(eng|ci|plan)-(\d+)@.+")
+MOVING_SEAT = re.compile(r"((eng|ci|plan)-\d+|dispatcher)@.+")
 
 
-def settle(inbox, name, seat, exit_text):
+def settle(inbox, name, seat, exit_text, worlds=None):
     """seat is where the work goes on, '' when nobody takes it up. A master's mail passes to its successor, or waits
-    for one while none is spawned yet."""
+    for one while none is spawned yet. worlds is the sweep's pass, which skips a world whose Redis stops answering."""
+    inbox.seats.record_exit(name, seat, exit_text)
+    if worlds is None:
+        for world in inbox.worlds():
+            _settle_world(world, name, seat, exit_text)
+        return
+    for world in list(worlds.up):
+        worlds.run(world, lambda w: _settle_world(w, name, seat, exit_text))
+
+
+def _settle_world(inbox, name, seat, exit_text):
     from scripts.inbox.store import CLOSED
     from scripts.swarm.naming import NameRegistry
 
-    inbox.seats.record_exit(name, seat, exit_text)
     names = NameRegistry(inbox.redis)
     successor = names.successor(name) if names.entry(name).get("type") == "master" else ""
-    for item in inbox.inbox(name):
+    if names.entry(name).get("type") == "master":
+        _return_pool_mail(inbox, name)
+    for item in inbox.open_items(name):
         if item.state in CLOSED:
             continue
-        if successor:
+        if ended := _life_notice_end(item, name, exit_text):
+            inbox.close(item.id, BY, "done", ended)
+        elif successor:
             inbox.redirect(item.id, BY, successor, f"{name} {exit_text}; passed to {successor}, its successor", name)
-        elif seat:
+        elif seat and _task_continues(inbox, item, seat):
             inbox.redirect(item.id, BY, seat, f"{name} {exit_text}; moved to {seat} for its next occupant", name)
         elif names.entry(name).get("type") == "master":
             continue
@@ -34,9 +52,83 @@ def settle(inbox, name, seat, exit_text):
             inbox.withdraw(item.id, BY, f"cancelled: {name} {exit_text} before closing it", name) and item.sender != BY
         ):
             inbox.send(BY, notice_address(inbox, item.sender), _told(item, name, exit_text), fyi=True)
+    if names.entry(name).get("type") != "master":
+        _settle_taken_seat_mail(inbox, name, exit_text, bool(seat))
+
+
+def _return_pool_mail(inbox: "InboxStore", name: str) -> None:
+    held = inbox.seats.known_seat(name)
+    if held:
+        for item in inbox.open_items(held):
+            inbox.return_to_pool(item.id, held, name)
+
+
+def _settle_taken_seat_mail(inbox: "InboxStore", name: str, exit_text: str, goes_on: bool) -> None:
+    held = inbox.seats.known_seat(name)
+    if not held:
+        return
+    for item in inbox.open_items(held):
+        if item.state != "pending" and _taker(inbox, item) == name:
+            _settle_taken(inbox, item, held, name, exit_text, goes_on)
+
+
+def _settle_taken(inbox: "InboxStore", item, held: str, name: str, exit_text: str, goes_on: bool) -> None:
+    """Seat mail a gone life took: back to pending for the seat's next occupant when the work goes on, else closed."""
+    if goes_on and not _task_continues(inbox, item, held):
+        exit_text = f"left its seat and task {item.task}"
+        goes_on = False
+    if ended := _life_notice_end(item, name, exit_text):
+        inbox.close(item.id, BY, "done", ended)
+    elif goes_on:
+        inbox.redirect(item.id, BY, held, f"{name} {exit_text}; back to {held} for its next occupant", held, name)
+    elif (
+        inbox.withdraw(item.id, BY, f"cancelled: {name} {exit_text} before closing it", held, name)
+        and item.sender != BY
+    ):
+        inbox.send(BY, notice_address(inbox, item.sender), _told(item, name, exit_text), fyi=True)
+
+
+def _task_continues(inbox: "InboxStore", item, seat: str) -> bool:
+    from scripts.swarm.store import RedisStore
+
+    occupant = inbox.names.resolve(inbox.seats.occupant(seat).occupant)
+    task = next(
+        (
+            agent.task
+            for agent in RedisStore(inbox.redis).agents(seat.split("@", 1)[1])
+            if agent.name == occupant and agent.seat == seat and agent.state != "finished"
+        ),
+        "",
+    )
+    return item.fyi or not item.task or not task or item.task == task
+
+
+def _life_notice_end(item, name: str, exit_text: str) -> str:
+    """The close reason of a notice meant only for the life that left; '' for any other item."""
+    from scripts.gates import push_stop
+    from scripts.swarm import quota_notice
+
+    if push_stop.is_notice(item):
+        return push_stop.left(name, exit_text)
+    if quota_notice.is_notice(item):
+        return f"{name} {exit_text}; its quota notice ended with it"
+    if item.sender == BY and ":overrun:" in item.ref:
+        return f"{name} {exit_text}; its overrun request ended with it"
+    return ""
+
+
+def _taker(inbox, item):
+    return next(
+        (entry["by"] for entry in reversed(inbox.history(item.id)) if entry["state"] in ("delivered", "read")), ""
+    )
 
 
 def close_swarm(inbox: "InboxStore", slug: str) -> None:
+    for world in inbox.worlds():
+        _close_world(world, slug)
+
+
+def _close_world(inbox: "InboxStore", slug: str) -> None:
     from scripts.inbox.seats import of_swarm
     from scripts.inbox.store import CLOSED
 
@@ -45,7 +137,7 @@ def close_swarm(inbox: "InboxStore", slug: str) -> None:
         address = key[len(prefix) :]
         if not of_swarm(address, slug, inbox.names):
             continue
-        for item in inbox.inbox(address):
+        for item in inbox.open_items(address):
             if item.state not in CLOSED:
                 inbox.withdraw(item.id, BY, f"cancelled: swarm closed; {address} has no further work", address)
 
@@ -67,22 +159,217 @@ def notice_address(inbox: "InboxStore", sender: str) -> str:
     return master
 
 
-def sweep(inbox: "InboxStore", slug: str, store: "RedisStore", live_rows: "Callable[[], dict]") -> None:
-    """live_rows reads the ledger's tasks at sweep time: a task closed after the tick's own read settles as closed."""
-    active = {agent.name for agent in store.agents(slug) if agent.state != "finished"}
+def sweep(inbox: "InboxStore", slug: str, store: "RedisStore", live_rows: "Callable[[], dict]") -> list[str]:
+    """live_rows reads the ledger's tasks at sweep time: a task closed after the tick's own read settles as closed.
+    Returns a line for each world skipped this pass because its Redis timed out or dropped."""
+    seats = store.seats.agent_seats(slug)
+    live = [agent for agent in store.agents(slug) if agent.state != "finished"]
+    active = {agent.name for agent in live}
     tasks = {row.get("claimed_by"): row for row in live_rows().values()}
-    for name, seat in store.seats.agent_seats(slug):
-        if name in active:
+    gone = [(name, seat) for name, seat in seats if name not in active]
+    outcomes = store.seats.exits([name for name, _ in gone])
+    worlds = _WorldPass(inbox.worlds())
+    pending = gone
+    for _ in range(len(gone)):
+        names = [name for name, _ in pending]
+        quiets = [q for world in list(worlds.up) if (q := worlds.run(world, lambda w: w.quiet(names))) is not None]
+        quiet = set.intersection(*quiets) if quiets else set()
+        due = [(name, seat) for name, seat in pending if not (outcomes[name] and name in quiet)]
+        if not due:
+            break
+        pending = [entry for entry in pending if entry not in due]
+        for name, seat in due:
+            goes_to, exit_text = _gone_exit(seat, tasks.get(name, {}).get("state"), outcomes[name])
+            settle(inbox, name, goes_to, exit_text, worlds)
+    _move_seat_mail(inbox, worlds, live)
+    for world in list(worlds.up):
+        worlds.run(world, lambda w: _settle_world_seats(w, slug, store, seats, live, active))
+    return worlds.skipped
+
+
+def _move_seat_mail(inbox: "InboxStore", worlds: "_WorldPass", live: list) -> None:
+    """A lane or dispatcher seat's open mail follows its live occupant into the world of the host it runs on; a master
+    seat's mail stays with the master pool of its world."""
+    by_world = {world.world: world for world in worlds.up}
+    moves = [
+        (agent, by_world[home])
+        for agent in live
+        if MOVING_SEAT.fullmatch(agent.seat)
+        and inbox.seats.occupant(agent.seat).occupant == agent.name
+        and (home := inbox.home(agent.seat)) in by_world
+    ]
+    for world in list(worlds.up):
+        candidates = [(agent, home) for agent, home in moves if world is not home and home in worlds.up]
+        if candidates:
+            worlds.run(world, lambda w: _move_world_mail(w, candidates))
+
+
+def _move_world_mail(world: "InboxStore", candidates: list) -> None:
+    quiet = world.quiet([agent.seat for agent, _ in candidates])
+    for agent, home in candidates:
+        if agent.seat in quiet:
             continue
-        state = tasks.get(name, {}).get("state")
-        outcome = store.seats.exit_of(name)
-        if state in ("done", "blocked"):
-            exit_text = "finished its task and exited" if state == "done" else "blocked its task and exited"
-            settle(inbox, name, "", exit_text)
-        elif outcome:
-            settle(inbox, name, outcome["seat"], outcome["reason"])
-        else:
-            settle(inbox, name, seat, "exited")
+        where = f"hive {home.world}" if home.world else "the controller"
+        for item in world.open_items(agent.seat):
+            world.move_world(item.id, home, BY, f"moved to {where}, where {agent.name} runs {agent.seat}")
+
+
+def _gone_exit(seat: str, state: str | None, outcome: dict) -> tuple[str, str]:
+    """Where a gone agent's mail goes on and the exit text its senders read."""
+    if state in ("done", "blocked"):
+        return "", "finished its task and exited" if state == "done" else "blocked its task and exited"
+    if outcome:
+        return outcome["seat"], outcome["reason"]
+    return seat, "exited"
+
+
+class _WorldPass:
+    """The inbox worlds a sweep pass still reaches; a world whose Redis times out or drops leaves the pass."""
+
+    def __init__(self, worlds: list["InboxStore"]):
+        self.up = list(worlds)
+        self.skipped: list[str] = []
+
+    def run(self, world: "InboxStore", function):
+        from redis.exceptions import ConnectionError as RedisConnectionError
+        from redis.exceptions import TimeoutError as RedisTimeoutError
+
+        try:
+            return function(world)
+        except (RedisConnectionError, RedisTimeoutError) as exc:
+            self.up.remove(world)
+            where = f"hive {world.world}" if world.world else "the controller"
+            self.skipped.append(f"skipped the inbox of {where} this pass: its Redis timed out or dropped: {exc}")
+            print(self.skipped[-1], file=sys.stderr)
+            return None
+
+
+def _settle_world_seats(
+    inbox: "InboxStore", slug: str, store: "RedisStore", seats: list, live: list, active: set
+) -> None:
+    _settle_seat_notices(inbox, {seat for _, seat in seats if seat}, active)
+    _settle_peer_mail(inbox, slug, store, active)
+    if slug in store.slugs():
+        empty = {seat for _, seat in seats} - {agent.seat for agent in live}
+        _settle_unfillable(inbox, store.config(slug), empty)
+
+
+def _settle_seat_notices(inbox: "InboxStore", seats: set, active: set) -> None:
+    """Push stop and wait ended notices left on a seat: closed once the agent that got them has gone. Other mail a
+    gone life took is settled by its exit record."""
+    from scripts.gates import push_stop
+    from scripts.inbox.store import CLOSED
+    from scripts.swarm.waits import notice_task
+
+    quiet = inbox.quiet(sorted(seats)) if seats else set()
+    for seat in sorted(seats - quiet):
+        for item in inbox.open_items(seat):
+            if item.state in CLOSED:
+                continue
+            task = notice_task(item)
+            if not (task or push_stop.is_notice(item) or _life_notice_end(item, "", "")):
+                if item.state != "pending":
+                    _settle_left_behind(inbox, item, seat, active)
+                continue
+            owner = _owner(inbox, item, seat)
+            if owner in active:
+                continue
+            if not owner:
+                reason = UNKNOWN_OWNER
+            elif task:
+                reason = f"{owner} left its seat before picking task {task} back up"
+            else:
+                outcome = inbox.seats.exit_of(owner)
+                reason = (
+                    push_stop.left(owner, "left its seat")
+                    if push_stop.is_notice(item)
+                    else _life_notice_end(item, owner, outcome.get("reason", "left its seat"))
+                )
+            inbox.close(item.id, BY, "done", reason)
+
+
+def _settle_left_behind(inbox: "InboxStore", item, seat: str, active: set) -> None:
+    taker = _taker(inbox, item)
+    if not taker or taker in active or inbox.names.entry(taker).get("type") == "master":
+        return
+    outcome = inbox.seats.exit_of(taker)
+    if outcome:
+        _settle_taken(inbox, item, seat, taker, outcome["reason"], bool(outcome["seat"]))
+
+
+def _settle_peer_mail(inbox: "InboxStore", slug: str, store: "RedisStore", active: set) -> None:
+    from scripts.inbox.store import CLOSED
+
+    candidates = [agent for agent in store.agents(slug) if agent.name in active and agent.seat]
+    quiet = inbox.quiet([agent.seat for agent in candidates]) if candidates else set()
+    for agent in candidates:
+        if agent.seat in quiet:
+            continue
+        for item in inbox.open_items(agent.seat):
+            if item.state in CLOSED or item.fyi or not item.task or item.task == agent.task:
+                continue
+            owner = _taker(inbox, item)
+            if owner in active:
+                continue
+            exit_text = f"left its seat and task {item.task}"
+            if inbox.withdraw(
+                item.id,
+                BY,
+                f"cancelled: {owner or agent.seat} {exit_text} before closing it",
+                agent.seat,
+                owner or None,
+            ):
+                inbox.send(BY, notice_address(inbox, item.sender), _told(item, owner, exit_text), fyi=True)
+
+
+def _settle_unfillable(inbox: "InboxStore", config, seats: set) -> None:
+    quiet = inbox.quiet(sorted(seats)) if seats else set()
+    for seat in sorted(seats - quiet):
+        why = no_successor(seat, config)
+        if not why:
+            continue
+        for item in inbox.open_items(seat):
+            reason = f"cancelled: {seat} can get no successor: {why}"
+            if not inbox.withdraw(item.id, BY, reason, seat):
+                continue
+            _withdraw_escalations(inbox, item.id, seat)
+            if item.sender != BY:
+                text = (
+                    f"{seat} can get no successor: {why}, so your message {item.id}: "
+                    f"{item.text.splitlines()[0][:200]} is closed. "
+                    "Send it to whoever carries that work on if it still matters."
+                )
+                inbox.send(BY, notice_address(inbox, item.sender), text, fyi=True)
+
+
+def _withdraw_escalations(inbox: "InboxStore", item_id: str, seat: str) -> None:
+    from scripts.hive import scope
+    from scripts.inbox.store import InboxStore
+    from scripts.inbox.wake import raised_id
+
+    worlds = [inbox] if scope.member() else InboxStore(inbox.redis).worlds()
+    for entry in inbox.history(item_id):
+        if raised := raised_id(entry):
+            for world in worlds:
+                if world.redis.exists(world.key("item", raised)):
+                    world.withdraw(raised, BY, f"cancelled: message {item_id} is closed, {seat} can get no successor")
+
+
+def no_successor(seat: str, config) -> str:
+    found = LANE_SEAT.fullmatch(seat)
+    if not found:
+        return ""
+    if config.state == "stopped":
+        return "the swarm stopped"
+    lane = found.group(1)
+    cap = {"eng": config.max_eng, "ci": config.max_ci, "plan": config.max_plan}[lane]
+    return f"the {lane} lane cap is {cap}" if int(found.group(2)) > cap else ""
+
+
+def _owner(inbox, item, seat):
+    """The agent the notice was sent to: the seat's occupant when it was sent."""
+    held = [entry["occupant"] for entry in inbox.seats.history(seat) if entry["at"] <= item.created_at]
+    return (held[-1:] or [""])[0]
 
 
 def _told(item, name, exit_text):

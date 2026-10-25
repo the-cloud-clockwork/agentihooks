@@ -1,0 +1,6 @@
+{
+  "814c2e6ff51e1107a2dc3d9deb83a365cb582aec9117ea5efe03a38d142ae96a": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "Only length zero differs. Original rejects before reading; mutant reads zero bytes and core.loads empty bytes raises ValueError, leading to the identical stable envelope. All positive and negative lengths take identical branches. Independent extracted-function probe confirmed zero-length equality."
+  }
+}

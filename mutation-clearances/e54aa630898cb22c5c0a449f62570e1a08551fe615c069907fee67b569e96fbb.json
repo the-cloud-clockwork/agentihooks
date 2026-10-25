@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/repository/file.py:scripts.swarm_ledger.repository.file.x_create__mutmut_1:e2236597935bad491db76399b7b4a415229dc5de390929d5db58b97366ef2bcb": {
+    "reader": "Standards",
+    "reason": "The only production caller of the extracted helper is FileLedgerRepository.create, which passes size explicitly; changing the helper default affects no supported call."
+  }
+}

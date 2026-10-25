@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_v2/authority.py:scripts.swarm_v2.authority.x\u01c1TaskAuthority\u01c1_commit__mutmut_1:e6ae290945204757f3f1b7ae497346a32b1eec2d3d5eebcf33a0b91c8f18735e": {
+    "reader": "standards-reader",
+    "reason": "Equivalent: only controller-authorized replay omits the worker deadline and Lua exempts replay from worker deadline comparison. All worker mutations pass an explicit authenticated audit deadline. Standards ruled this exact mutant after CI run 37893903406."
+  }
+}

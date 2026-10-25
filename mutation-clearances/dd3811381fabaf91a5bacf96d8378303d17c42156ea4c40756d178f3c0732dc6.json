@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/health/merge_stall.py:scripts.swarm.health.merge_stall.x_request__mutmut_2:3a6469961931bda17b13e815acd8f53ac25f3aff1945c0cfbfbcc6b87e508b38": {
+    "reader": "Standards",
+    "reason": "Equivalent: with no DEADLINE the fallback becomes21 but the unchanged min(20, remaining) still passes20 to subprocess.run. With active DEADLINE the changed fallback is not evaluated. Both fallback values pass the same positive-budget check."
+  }
+}

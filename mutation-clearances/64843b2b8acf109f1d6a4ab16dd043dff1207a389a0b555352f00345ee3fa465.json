@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/repository/events.py:scripts.swarm_ledger.repository.events.x_write_events__mutmut_10:40d057e7aae8c8b0fb069ac01a00b6031e72baaf147f620ac7330e128d62b434": {
+    "reader": "Standards",
+    "reason": "UTF-8 and utf-8 resolve to the same Python codec. Encoding, decoding, values and errors are unchanged."
+  }
+}

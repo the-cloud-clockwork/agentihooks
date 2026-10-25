@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/new_ledger.py:scripts.swarm_ledger.new_ledger.x_main__mutmut_10:141e8079219216f05e310be8020efb48c38cdbfc5c7db7568cad3dcdf789adc2": {
+    "reader": "Standards",
+    "reason": "Creator dispatch and _join never read or persist the join operation id; changing its key or generated token length changes no response, document, metadata or event."
+  }
+}

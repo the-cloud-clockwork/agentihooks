@@ -1,0 +1,6 @@
+{
+  "hooks/context/project_identity.py:hooks.context.project_identity.x__folder_identity__mutmut_48:55ec008b803b50bf6aa404d43feae35ea5b651abc02cb9d295d614c8e6857cc3": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "The private helper has no consumers outside this module (repository name-reference scan). Its two callers consume the result through truth tests or registration fallback; an unregistered non-Git folder yields public resolve_project None for either initial None or empty string. Git and scratch identities overwrite that initial value; explicit registration uses the same fallback identity. Six controlled public resolutions preserved every output or exact rejection."
+  }
+}

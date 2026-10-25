@@ -1,0 +1,19 @@
+{
+  "thread": "01a11ccc-f626-7cd1-b797-ea8a455b75f8",
+  "viewer_resume_before_first_turn": {
+    "code": -32600,
+    "message": "no rollout found for thread id 01a11ccc-f626-7cd1-b797-ea8a455b75f8"
+  },
+  "viewer_resume": "ok",
+  "request_method": "item/commandExecution/requestApproval",
+  "delivered_to_a": true,
+  "delivered_to_b": true,
+  "same_request_id": true,
+  "answered_by": "probe-owner-a",
+  "resolved_seen_by_other": true,
+  "turn_status": "completed",
+  "file_created": false,
+  "agent_text": [
+    "FOXTROT\n\nAutomatic approval review rejected `touch approval-probe.txt`, reporting \u201crejected by user.\u201d The command did not run."
+  ]
+}

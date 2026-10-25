@@ -8,9 +8,6 @@ RELAY = server.relay_to_inbox
 
 import pytest
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
-
 from tests.swarm_ledger.test_ledger_authority import live as _authority_live
 
 authority_live = _authority_live
@@ -22,13 +19,15 @@ _talk_init = server.talk.Budget.__init__
 
 @pytest.fixture
 def live(authority_live):
+    from tests.swarm_ledger import legacy_page
     from tests.swarm_ledger.test_ledger_authority import core, new_ledger
 
     content = {"title": "Authority", "phases": [{"title": "Proof", "description": "word " * 101}]}
-    page = new_ledger.render(new_ledger.build_doc(content), SLUG, authority_live["port"])
-    html, document = core.paths(SLUG)
+    page = legacy_page.render(new_ledger.build_doc(content), SLUG, authority_live["port"])
+    html, document = legacy_page.paths(SLUG, core)
     html.write_text(page)
     document.unlink(missing_ok=True)
+    server.ledger_bin.restore(SLUG)
     core.sync(
         SLUG,
         ops=[
@@ -37,7 +36,8 @@ def live(authority_live):
             {"op": "add", "id": "seed-chat-two", "thread": "chat", "text": "Second message"},
         ],
     )
-    return {**authority_live, "admin": core.read_token(page)}
+    yield {**authority_live, "admin": core.read_token(page)}
+    server.ledger_bin.restore(SLUG)
 
 
 from scripts.swarm_ledger import api as api
@@ -46,6 +46,7 @@ from scripts.swarm_ledger import ledger_server as ledger_server
 from scripts.swarm_ledger.api import admin as admin
 from scripts.swarm_ledger.api import errors as errors
 from scripts.swarm_ledger.api import mutations as mutations
+from scripts.swarm_ledger.api import receipts as receipts_store
 from scripts.swarm_ledger.api import routes as routes
 
 
@@ -60,6 +61,12 @@ def request(live, method, resource, body=None, **headers):
         **{"X-Ledger-Token": live["admin"], "Content-Type": "application/json", **headers},
     )
     return status, json.loads(data)
+
+
+def stored(monkeypatch, document):
+    from tests.swarm_ledger.api_fakes import serve_document
+
+    serve_document(monkeypatch, server.repository, document)
 
 
 def test_invalid_schema_leaves_resource_unchanged(live):
@@ -185,6 +192,24 @@ def test_operation_contract_covers_existing_domain_dispatch():
     }
     assert set(schemas.FIELDS) == kinds
     assert schemas.FIELDS["title_set"] == "text"
+
+
+def test_task_update_schema_accepts_the_ownership_guard():
+    from scripts.swarm_ledger.api import schemas
+
+    schema = schemas.operation_schema("task_update")
+    guarded = {
+        "op": "task_update",
+        "id": "op-1",
+        "by": "swarm",
+        "item": "t1",
+        "fields": {"claimed_by": "engineer-two"},
+        "if_state": ["claimed"],
+        "if_match": {"claimed_by": "engineer-one", "claim_generation": 1},
+    }
+
+    assert schemas.mismatched_field(schema, guarded) is None
+    assert schemas.mismatched_field(schema, {**guarded, "if_match": "engineer-one"}) == "if_match"
 
 
 def test_export_is_explicit_and_summary_is_paginated(live):
@@ -425,6 +450,8 @@ def test_a_schema_mismatch_names_the_first_unknown_key_and_the_top_field(live):
     cases = [
         ({"op": "sync", "id": "two-unknown", "zz": 1, "aa": 1}, "sync", "aa"),
         ({"op": "task_add", "id": "nested", "depends_on": [1]}, "task_add", "depends_on"),
+        ({"op": "plan_add", "id": "flag", "artifact": True}, "plan_add", "artifact"),
+        ({"op": "plan_add", "id": "long", "artifact": "x" * 100001}, "plan_add", "artifact"),
     ]
     for operation, kind, field in cases:
         message = f"Operation {kind} does not match its schema at field {field}"
@@ -486,6 +513,124 @@ def test_guarded_task_update_returns_only_the_requested_row(live):
     assert row["id"] == "t1"
     assert row["state"] == "claimed"
     assert "comments" not in row
+
+
+def test_a_kind_change_succeeds_when_the_work_folder_lives_on_another_host(live, tmp_path):
+    from scripts.swarm.ledger_client import LedgerClient
+    from tests.swarm_ledger.test_ledger_authority import ledger
+
+    ledger.request(SLUG, [{"op": "join", "id": "kind-join", "by": "boss", "role": "orchestrator"}], service=True)
+    ledger.request(
+        SLUG,
+        [
+            {
+                "op": "task_add",
+                "id": "kind-create",
+                "by": "boss",
+                "task": "t1",
+                "title": "Kind proof",
+                "lane": "eng",
+                "phase": "p1",
+                "workspace": str(tmp_path / "elsewhere" / "t1"),
+            }
+        ],
+        service=True,
+    )
+    row = LedgerClient(service=True).update_task(SLUG, "t1", {"kind": "ops"}, by="boss")
+    assert row["kind"] == "ops"
+    assert not (tmp_path / "elsewhere").exists()
+
+
+def test_an_owned_task_changes_kind_over_http_and_an_invalid_kind_changes_nothing(live, tmp_path):
+    from scripts.swarm_ledger.api import schemas
+
+    contract = {"must": "The number moved", "check": "Before and after", "judge": "Standards reader"}
+
+    def post(operation):
+        operation = {"id": uuid.uuid4().hex, "by": "swarm", **operation}
+        target = schemas.target(operation)
+        guards = {} if operation["op"] in schemas.UNGUARDED else {target: request(live, "GET", target)[1]["revision"]}
+        return request(live, "POST", "operations", {"ops": [operation], "guards": guards})
+
+    created = post(
+        {
+            "op": "task_add",
+            "task": "t1",
+            "title": "Owned repair",
+            "lane": "eng",
+            "phase": "p1",
+            "workspace": str(tmp_path / "elsewhere" / "t1"),
+            "contract": contract,
+        }
+    )
+    assert created[0] == 200
+    claim = {"state": "claimed", "claimed_by": "eng-owner"}
+    assert post({"op": "task_update", "item": "tasks/t1", "fields": claim})[0] == 200
+    assert post({"op": "add", "by": "eng-owner", "thread": "tasks/t1/comments", "text": "Work"})[0] == 200
+    comments = request(live, "GET", "tasks/t1/comments")[1]["data"]
+
+    assert post({"op": "task_update", "item": "tasks/t1", "fields": {"kind": "tune"}})[0] == 200
+    before = request(live, "GET", "tasks/t1")[1]
+    task = before["data"]
+    assert (task["id"], task["kind"], task["state"], task["claimed_by"]) == ("t1", "tune", "claimed", "eng-owner")
+    assert task["contract"] == contract
+    assert comments != []
+    assert request(live, "GET", "tasks/t1/comments")[1]["data"] == comments
+    assert not (tmp_path / "elsewhere").exists()
+    status, error = post({"op": "task_update", "item": "tasks/t1", "fields": {"kind": "bogus"}})
+    assert status == 400
+    assert error["error"]["code"] == "schema_invalid"
+    assert "kind must be one of" in error["error"]["message"]
+    assert request(live, "GET", "tasks/t1")[1] == before
+
+
+def test_task_collection_token_survives_chat_and_reload_without_hashing(live, monkeypatch):
+    from scripts.swarm.ledger_client import LedgerClient
+    from tests.swarm_ledger.test_ledger_authority import ledger
+
+    ledger.request(SLUG, [{"op": "join", "id": "token-planner", "by": "boss", "role": "orchestrator"}], service=True)
+    ledger.request(
+        SLUG,
+        [
+            {
+                "op": "task_add",
+                "id": f"token-create-{index}",
+                "by": "boss",
+                "task": f"t{index}",
+                "title": f"Token task {index}",
+                "lane": "eng",
+                "phase": "p1",
+            }
+            for index in (1, 2)
+        ],
+        service=True,
+    )
+    status, first = request(live, "GET", "tasks?limit=1")
+    assert status == 200
+    assert first["next_cursor"] is not None
+    original = json.dumps
+
+    def bounded_dumps(value, *args, **kwargs):
+        if isinstance(value, list) and {row.get("id") for row in value if isinstance(row, dict)} >= {"t1", "t2"}:
+            raise AssertionError("Whole task collection serialized for revision")
+        return original(value, *args, **kwargs)
+
+    monkeypatch.setattr(json, "dumps", bounded_dumps)
+    ledger.request(
+        SLUG,
+        [{"op": "add", "id": "token-chat", "by": "boss", "thread": "chat", "text": "Unrelated collection update"}],
+        service=True,
+    )
+    assert request(live, "GET", "tasks?limit=1") == (200, first)
+    assert request(live, "GET", f"tasks?limit=1&cursor={first['next_cursor']}")[0] == 200
+    LedgerClient(service=True).update_task(SLUG, "t2", {"description": "Changed outside page"})
+    status, changed = request(live, "GET", "tasks?limit=1")
+    assert status == 200
+    assert changed["revision"] != first["revision"]
+    assert changed["page_hash"] == first["page_hash"]
+    assert request(live, "GET", f"tasks?limit=1&cursor={first['next_cursor']}")[0] == 409
+    server.repository.inner._cache.clear()
+    assert request(live, "GET", "tasks?limit=1") == (200, changed)
 
 
 def test_repeated_edit_and_delete_keep_entry_identity(live):
@@ -588,7 +733,7 @@ def test_page_budget_counts_the_envelope(live, monkeypatch):
 
     row = {"id": "large", "description": "x" * (MAX_REPLY // 2 - 150)}
     document = {"tasks": [row, row], "_meta": {"rev": 1}}
-    monkeypatch.setattr(server.repository, "get_document", lambda slug, **kwargs: document)
+    stored(monkeypatch, document)
     status, reply = request(live, "GET", "tasks?limit=100")
     assert status == 200
     assert len(json.dumps(reply, ensure_ascii=False).encode()) <= MAX_REPLY
@@ -615,7 +760,7 @@ def test_control_actions_validate_before_domain_execution(live):
 
 def test_item_revision_uses_canonical_utf8_content(live, monkeypatch):
     document = {"tasks": [{"title": "Café", "id": "t1"}], "_meta": {"rev": 1}}
-    monkeypatch.setattr(server.repository, "get_document", lambda slug, **kwargs: document)
+    stored(monkeypatch, document)
     assert request(live, "GET", "tasks/t1") == (
         200,
         {
@@ -638,7 +783,7 @@ def test_metadata_resource_reports_its_named_fields(live, monkeypatch):
         "summary": "Summary",
         "_meta": {"rev": 7, "updated_at": 200, "created_at": 10, "size": "swarm", "seed_error": None},
     }
-    monkeypatch.setattr(server.repository, "get_document", lambda slug, **kwargs: document)
+    stored(monkeypatch, document)
     status, reply = request(live, "GET", "metadata")
     assert status == 200
     assert reply["data"] == document
@@ -646,11 +791,13 @@ def test_metadata_resource_reports_its_named_fields(live, monkeypatch):
 
 
 def test_forbidden_error_envelope_keeps_its_status_and_bounds(live, monkeypatch):
+    from types import SimpleNamespace
+
     from scripts.swarm_ledger.api.resources import MAX_REPLY
     from tests.swarm_ledger.test_ledger_authority import authority
 
     document = {"tasks": [], "_meta": {"warnings": ["x" * 3000] * 100}}
-    monkeypatch.setattr(server.repository, "get_document", lambda slug, **kwargs: document)
+    monkeypatch.setattr(server.repository, "current", lambda slug, **kwargs: SimpleNamespace(state=document))
     headers = {
         "X-Ledger-Agent": "api-reader",
         "X-Ledger-Token": authority.agent_token(live["admin"], SLUG, "api-reader"),
@@ -760,13 +907,16 @@ def test_put_operations_and_options_keep_the_versioned_transport(live):
         response = conn.getresponse()
         assert response.status == 204
         assert response.getheader("Access-Control-Allow-Origin") == "null"
-        assert response.getheader("Access-Control-Allow-Methods") == "GET, PUT, POST"
-        assert response.getheader("Access-Control-Allow-Headers") == "Content-Type, X-Ledger-Token, X-Ledger-Agent"
+        assert response.getheader("Access-Control-Allow-Methods") == "GET, PUT, POST, PATCH"
+        assert (
+            response.getheader("Access-Control-Allow-Headers")
+            == "Content-Type, X-Ledger-Token, X-Ledger-Agent, X-Ledger-Slug"
+        )
         assert response.getheader("Access-Control-Allow-Private-Network") == "true"
         assert [row for row in response.getheaders() if row[0].lower().startswith("access-control")] == [
             ("Access-Control-Allow-Origin", "null"),
-            ("Access-Control-Allow-Methods", "GET, PUT, POST"),
-            ("Access-Control-Allow-Headers", "Content-Type, X-Ledger-Token, X-Ledger-Agent"),
+            ("Access-Control-Allow-Methods", "GET, PUT, POST, PATCH"),
+            ("Access-Control-Allow-Headers", "Content-Type, X-Ledger-Token, X-Ledger-Agent, X-Ledger-Slug"),
             ("Access-Control-Allow-Private-Network", "true"),
         ]
         assert response.read() == b""
@@ -842,6 +992,105 @@ def test_domain_operation_families_use_their_named_guards(live):
         assert "rejected" in reply
 
 
+def test_publish_plan_writes_land_through_the_plans_and_slices_resources(live, tmp_path, monkeypatch, capsys):
+    from scripts.swarm_ledger import ledger_artifacts
+    from scripts.swarm_ledger.api import resources
+    from tests.swarm_ledger.test_ledger_authority import ledger
+
+    plan = tmp_path / "plan.md"
+    plan.write_text("# Plan\n<!-- slice: one -->\n## One\n", encoding="utf-8")
+    file = ledger_artifacts.store(SLUG, "plan.md", plan.read_bytes())
+    monkeypatch.setattr(ledger, "upload_artifact", lambda *a: file)
+    monkeypatch.setattr(
+        ledger.ledger_publish,
+        "publish",
+        lambda path, title, repo, artifact, issue_title: (artifact(path, title), "artifact"),
+    )
+    for name in ("AGENTIHOOKS_AGENT_NAME", "AGENTIHOOKS_SWARM", "AGENTIHOOKS_SWARM_TASK"):
+        monkeypatch.delenv(name, raising=False)
+    args = ledger.build_parser().parse_args(
+        ["--slug", SLUG, "--as", "api-reader", "publish-plan", str(plan), "--phase", "p1"]
+    )
+    ledger.cmd_publish_plan(args)
+    url = f"{ledger.base()}/artifacts/{SLUG}/{file['id']}"
+    assert json.loads(capsys.readouterr().out) == {"plan_url": url, "published_to": "artifact", "phases": ["p1"]}
+    plan_id = "plan-71468be2ad68"
+    status, reply = request(live, "GET", f"plans/{plan_id}")
+    assert (status, reply["data"]["artifact"]) == (200, url)
+    assert reply["revision"] == resources.revision(reply["data"])
+    phase = request(live, "GET", "phases/p1")[1]["data"]
+    assert (phase["plan"], phase["plan_ref"], phase["comments_count"]) == (
+        f"plans/{plan_id}",
+        {"artifact": url, "lines": "1-3"},
+        1,
+    )
+    status, reply = request(live, "GET", f"slices/{plan_id}.one")
+    assert (status, reply["data"]["anchor"], reply["data"]["lines"]) == (200, "one", "2-3")
+    assert reply["revision"] == resources.revision(reply["data"])
+
+
+def test_a_planner_publishes_a_plan_and_plan_read_prints_its_sliced_task(live, tmp_path, monkeypatch, capsys):
+    from scripts.swarm_ledger import ledger_artifacts, ledger_core, ledger_plans, plan_read
+    from scripts.swarm_ledger.api.client import ResourceClient
+    from tests.swarm_ledger.test_ledger_authority import core, ledger
+
+    planner = "planner@323133-0258"
+    client = ResourceClient(ledger.BASE, ledger.credentials(SLUG, service=True))
+    plan_task = {"task": "tp", "title": "Slice the proof phase", "lane": "plan", "kind": "plan", "phase": "p1"}
+    seed = [
+        {"op": "join", "id": "planner-master-join", "by": "boss", "role": "orchestrator"},
+        {"op": "join", "id": "planner-join", "by": planner},
+        {"op": "task_add", "id": "planner-task-seed", "by": "boss", **plan_task},
+        {
+            "op": "task_update",
+            "id": "planner-claim-seed",
+            "by": "swarm",
+            "item": "tasks/tp",
+            "fields": {"claimed_by": planner, "state": "claimed"},
+        },
+    ]
+    assert [client.mutate(SLUG, [op]).get("rejected") for op in seed] == [[], [], [], []]
+    monkeypatch.setattr(ledger_core, "LEDGER_DIR", core.LEDGER_DIR)
+    one = "".join(f"One detail {n}\n" for n in range(12))
+    three = "".join(f"Three detail {n}\n" for n in range(12))
+    text = f"# Plan\n<!-- slice: one -->\n## One\n{one}<!-- slice: two -->\n## Two\nSecond step\n"
+    plan = tmp_path / "plan.md"
+    plan.write_text(f"{text}<!-- slice: three -->\n## Three\n{three}", encoding="utf-8")
+    file = ledger_artifacts.store(SLUG, "plan.md", plan.read_bytes())
+    monkeypatch.setattr(ledger, "upload_artifact", lambda *a: file)
+    monkeypatch.setattr(
+        ledger.ledger_publish,
+        "publish",
+        lambda path, title, repo, artifact, issue_title: (artifact(path, title), "artifact"),
+    )
+    monkeypatch.setenv("AGENTIHOOKS_SWARM", "rig-grade-swarm")
+    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", planner)
+    monkeypatch.delenv("AGENTIHOOKS_SWARM_TASK", raising=False)
+    publish = ["--slug", SLUG, "--as", planner, "publish-plan", str(plan), "--phase", "p1"]
+    ledger.cmd_publish_plan(ledger.build_parser().parse_args(publish))
+    url = f"{ledger.base()}/artifacts/{SLUG}/{file['id']}"
+    assert json.loads(capsys.readouterr().out) == {"plan_url": url, "published_to": "artifact", "phases": ["p1"]}
+    add = ["--slug", SLUG, "--as", planner, "task", "add", "t2", "Two", "--lane", "eng", "--phase", "p1"]
+    ledger.cmd_task(ledger.build_parser().parse_args([*add, "--plan-slice", "two"]))
+    assert json.loads(capsys.readouterr().out) == {"task": "t2", "added": "Two"}
+    plan_id = ledger_plans.plan_id(file["id"])
+    status, stored = request(live, "GET", f"plans/{plan_id}")
+    assert (status, stored["data"]["artifact"]) == (200, url)
+    status, stored = request(live, "GET", f"slices/{plan_id}.two")
+    assert (status, stored["data"]["lines"]) == (200, "16-18")
+    status, task = request(live, "GET", "tasks/t2")
+    assert status == 200
+    assert {key: task["data"][key] for key in ("plan_slice", "plan_lines", "slice", "plan_url")} == {
+        "plan_slice": "two",
+        "plan_lines": "16-18",
+        "slice": f"slices/{plan_id}.two",
+        "plan_url": url,
+    }
+    assert plan_read.main(["read", "--slug", SLUG, "--task", "t2"], environ={}) == 0
+    rows = plan.read_text(encoding="utf-8").splitlines()
+    assert capsys.readouterr().out == "".join(f"{row}\n" for row in rows[5:28])
+
+
 def test_resource_reads_preserve_pinned_identity(live):
     from unittest.mock import patch
 
@@ -874,7 +1123,6 @@ def test_swarm_control_families_keep_domain_arguments(live):
                 "max_eng": 2,
                 "max_ci": 3,
                 "max_plan": 1,
-                "codex_share": 20,
                 "compact_limit": 600,
                 "effort_min": "medium",
                 "effort_max": "high",
@@ -885,7 +1133,6 @@ def test_swarm_control_families_keep_domain_arguments(live):
                 "max-eng-agents=2",
                 "max-ci-agents=3",
                 "max-plan-agents=1",
-                "codex-share=20",
                 "compact-limit=600",
                 "effort-min=medium",
                 "effort-max=high",
@@ -1156,17 +1403,23 @@ def test_upload_refusals_remain_json_and_do_not_mutate(live):
     assert request(live, "GET", "metadata") == before
 
 
-def test_storage_errors_have_a_stable_bounded_envelope(live, monkeypatch):
+@pytest.mark.parametrize("error", [OSError("Backend failure"), ValueError("Invalid stored task")])
+def test_storage_errors_have_a_stable_bounded_envelope(live, monkeypatch, caplog, error):
     def unreadable(slug, **kwargs):
-        raise OSError("Backend failure")
+        raise error
 
-    monkeypatch.setattr(server.repository, "get_document", unreadable)
+    monkeypatch.setattr(server.repository, "current", unreadable)
     assert request(live, "GET", "metadata") == (
         500,
         {
             "error": {"code": "storage_error", "message": "Resource could not be read or written"},
         },
     )
+    record = caplog.records[-1]
+    assert record.name == "scripts.swarm_ledger.api.routes"
+    assert record.levelname == "ERROR"
+    assert record.getMessage() == "Ledger API storage failure"
+    assert record.exc_info[1] is error
 
 
 def test_worker_checkbox_refusal_preserves_the_resource(live):
@@ -1206,7 +1459,11 @@ def test_sdk_preserves_explicit_stale_revision(live):
         client.mutate(SLUG, [operation])
     assert error.value.code == 409
     assert json.loads(error.value.read()) == {
-        "error": {"code": "revision_conflict", "message": "Resource changed since the expected revision"}
+        "error": {
+            "code": "revision_conflict",
+            "message": "Resource changed since the expected revision",
+            "details": {"path": "chat"},
+        }
     }
     assert operation["expected_revision"] == stale
     assert not any(row["id"] == "stale-explicit" for row in client.collection(SLUG, "chat"))
@@ -1225,7 +1482,7 @@ def test_composite_status_preserves_member_events_and_crew(live, capsys):
     state = ledger.request(SLUG, service=True)
     member = state["_meta"]["members"]["api-reader"]
     assert member["role"] == "member"
-    assert member["handled_rev"] == 0
+    assert member["handled_rev"] == 1
     assert member["claims"] == []
     assert "id" not in member
     assert "revision" not in member
@@ -1237,7 +1494,7 @@ def test_composite_status_preserves_member_events_and_crew(live, capsys):
     [crew] = state["_meta"]["crew"]
     assert crew["name"] == "api-reader"
     assert crew["role"] == "member"
-    assert crew["handled_rev"] == 0
+    assert crew["handled_rev"] == 1
     ledger.cmd_status(SimpleNamespace(slug=SLUG, name="api-reader"))
     status = json.loads(capsys.readouterr().out)
     assert status["crew"] == state["_meta"]["crew"]
@@ -1250,7 +1507,7 @@ def test_composite_status_preserves_member_events_and_crew(live, capsys):
 def test_default_collection_limit_and_cursor_edges(live, monkeypatch):
     rows = [{"id": f"t{index}", "title": f"Task {index}"} for index in range(51)]
     document = {"tasks": rows, "_meta": {"rev": 1}}
-    monkeypatch.setattr(server.repository, "get_document", lambda slug, **kwargs: document)
+    stored(monkeypatch, document)
     status, first = request(live, "GET", "tasks")
     assert status == 200
     assert len(first["data"]) == 50
@@ -1413,6 +1670,7 @@ def test_mutations_enforce_the_ledger_talk_budget(live, monkeypatch):
     store.update(SLUG, gates={"talk": "enforce"})
     worker = "engineer@323133-0440"
     marks = progress.Progress(redis, SLUG)
+    marks.outcome(worker, "pushed", 1)
     for _ in range(talk.BUDGET):
         marks.talk(worker)
 
@@ -1496,7 +1754,13 @@ def test_metadata_guard_changes_only_with_its_content(live):
     }
     assert request(live, "POST", "operations", payload) == (
         409,
-        {"error": {"code": "revision_conflict", "message": "Resource changed since the expected revision"}},
+        {
+            "error": {
+                "code": "revision_conflict",
+                "message": "Resource changed since the expected revision",
+                "details": {"path": "metadata"},
+            }
+        },
     )
     assert request(live, "GET", "metadata")[1]["data"]["title"] == "Changed"
 
@@ -1589,7 +1853,7 @@ def test_layout_schema_and_bin_refusals_preserve_state(live, monkeypatch):
             400,
             {"error": {"code": "schema_invalid", "message": "Request does not match the resource schema"}},
         )
-    monkeypatch.setattr(server.ledger_bin, "restore", lambda slug: False)
+    monkeypatch.setattr(server.repository, "restore", lambda slug: False)
     for payload, code, message in (
         ({"action": "delete", "slug": "absent"}, "ledger_missing", "No such ledger"),
         ({"action": "restore", "slug": SLUG}, "resource_missing", "Ledger is not in the bin"),
@@ -1646,12 +1910,11 @@ def test_item_ids_and_absent_threads(live):
         404,
         {"error": {"code": "resource_missing", "message": "No such resource"}},
     )
-    revision = request(live, "GET", "tasks")[1]["revision"]
     payload = {
         "ops": [
             {"op": "task_add", "id": "empty-comments", "by": "swarm", "task": "t1", "title": "Empty", "lane": "eng"}
         ],
-        "guards": {"tasks": revision},
+        "guards": {},
     }
     assert request(live, "POST", "operations", payload)[0] == 200
     status, result = request(live, "GET", "tasks/t1/comments")
@@ -1820,6 +2083,61 @@ def test_export_validates_its_body_and_hides_receipts(live, monkeypatch):
     read.assert_called_once_with(SLUG)
 
 
+def test_export_encodes_once_per_ledger_generation(live, monkeypatch):
+    loads, dumps, iterencode = json.loads, json.dumps, json.JSONEncoder.iterencode
+    counts = {"decode": 0, "encode": 0}
+
+    def ledger(value):
+        return isinstance(value, dict) and "_meta" in value
+
+    def decode(*args, **kwargs):
+        value = loads(*args, **kwargs)
+        counts["decode"] += ledger(value)
+        return value
+
+    def encode(self, value, *args, **kwargs):
+        counts["encode"] += ledger(value) or (isinstance(value, dict) and ledger(value.get("data")))
+        return iterencode(self, value, *args, **kwargs)
+
+    def export():
+        headers = {"X-Ledger-Token": live["admin"], "Content-Type": "application/json"}
+        status, body, _ = send(live, "POST", f"/api/v1/ledgers/{SLUG}/export", b"{}", **headers)
+        assert status == 200
+        return body
+
+    def stored():
+        state = server.repository.inner.get_document(SLUG)
+        hidden = ("seeds", "api_operations")
+        state["_meta"] = {key: item for key, item in state["_meta"].items() if key not in hidden}
+        return {"data": state}
+
+    first = export()
+    assert json.loads(first) == stored()
+    monkeypatch.setattr(json, "loads", decode)
+    monkeypatch.setattr(json.JSONEncoder, "iterencode", encode)
+    json.loads(server.repository.inner.current(SLUG).text)
+    server.repository.inner.get_document(SLUG)
+    assert counts == {"decode": 1, "encode": 0}
+    counts.update(decode=0)
+    assert [export() for _ in range(3)] == [first] * 3
+    assert counts == {"decode": 0, "encode": 0}
+    ops = [{"op": "add", "id": "export-generation", "thread": "chat", "text": "Written after the first export, café"}]
+    headers = {"X-Ledger-Token": live["admin"], "Content-Type": "application/json"}
+    assert send(live, "PUT", f"/api/{SLUG}", dumps({"ops": ops}).encode(), **headers)[0] == 200
+    counts.update(decode=0, encode=0)
+    after = [export() for _ in range(3)]
+    assert counts == {"decode": 0, "encode": 1}
+    monkeypatch.undo()
+    assert after == [after[0]] * 3 and after[0] != first
+    assert after[0] == json.dumps(stored(), ensure_ascii=False).encode()
+    assert "Written after the first export, café" in after[0].decode()
+
+
+def test_export_body_hides_seeds_and_receipts_and_keeps_text_unescaped():
+    state = {"title": "café", "_meta": {"seeds": [1], "api_operations": {"a": 1}, "members": ["m"]}}
+    assert routes.export_bytes(state).decode("utf-8") == '{"data": {"title": "café", "_meta": {"members": ["m"]}}}'
+
+
 def test_raw_upload_headers_reject_invalid_lengths_and_names(live):
     import http.client
 
@@ -1924,11 +2242,11 @@ def test_latest_thousand_operation_receipts_remain_retry_safe(live):
     guard = request(live, "GET", "metadata")[1]["revision"]
     payload = {"operation_id": "latest", "ops": [operation("latest")], "guards": {"metadata": guard}}
     assert request(live, "POST", "operations", payload)[0] == 200
-    saved = server.repository.get_document(SLUG, reconcile=False)["_meta"]["api_operations"]
-    assert len(saved) == 1000
-    assert "0" not in saved
-    assert "1" in saved
-    assert "latest" in saved
+    saved = server.repository.get_document(SLUG)["_meta"]
+    assert len(saved["api_operations"]) == 1000
+    assert receipts_store.find(saved, "0") == (None, None)
+    assert receipts_store.find(saved, "1")[1]["results"] == {"receipt-1": True}
+    assert receipts_store.find(saved, "latest")[1]["operation_id"] == "latest"
     for index, status in ((1, 200), (0, 409)):
         retry = {"operation_id": str(index), "ops": [operation(index)], "guards": {"metadata": "0" * 64}}
         assert request(live, "POST", "operations", retry)[0] == status
@@ -2066,6 +2384,7 @@ def test_known_hash_shaped_task_ids_keep_the_comment_exemption(live):
                 "id": "known-task-comment",
                 "thread": "chat",
                 "by": "api-reader",
+                "to": "operator",
                 "text": "The deadb33f task is covered",
             }
         ],
@@ -2205,15 +2524,24 @@ def test_cli_collection_consumers_read_all_pages(live, tmp_path, capsys, monkeyp
         values=["Next"],
         depends_on="",
         territory="",
+        overlays="",
+        repositories="",
         gain=None,
         must="",
         check="",
         judge="",
+        push="",
         kind="",
         artifact=False,
+        follow_up=False,
+        workstation=False,
+        needs="",
         profile="",
         rank="",
+        difficulty=None,
         plan="",
+        plan_slice="",
+        not_duplicate="",
         scaffold=False,
         description="",
         phase="",
@@ -2413,25 +2741,30 @@ def test_repository_optional_collections_have_empty_http_resources(live, monkeyp
     from scripts.swarm_ledger.api.resources import revision
 
     document = {"_meta": {}, "questions": [{"id": "q1"}]}
-    monkeypatch.setattr(server.repository, "get_document", lambda slug, reconcile=True: document)
+    stored(monkeypatch, document)
     assert request(live, "GET", path) == (
         200,
-        {"data": [], "revision": revision([]), "next_cursor": None},
+        {
+            "data": [],
+            "revision": f"{0:064x}" if path == "tasks" else revision([]),
+            "next_cursor": None,
+            **({"page_hash": revision([])} if path == "tasks" else {}),
+        },
     )
 
 
 def test_optional_repository_fields_preserve_forbidden_details(live, monkeypatch):
+    from types import SimpleNamespace
+
     from tests.swarm_ledger.test_ledger_authority import authority
 
     document = {"_meta": {}}
-    reads = []
 
-    def read(slug, reconcile=True):
+    def read(slug):
         assert slug == SLUG
-        reads.append(reconcile)
-        return document
+        return SimpleNamespace(state=document)
 
-    monkeypatch.setattr(server.repository, "get_document", read)
+    monkeypatch.setattr(server.repository, "current", read)
     headers = {
         "X-Ledger-Agent": "api-reader",
         "X-Ledger-Token": authority.agent_token(live["admin"], SLUG, "api-reader"),
@@ -2450,14 +2783,13 @@ def test_optional_repository_fields_preserve_forbidden_details(live, monkeypatch
             }
         },
     )
-    assert reads == [False]
     assert document == {"_meta": {}}
 
 
 def test_optional_repository_fields_preserve_success_acknowledgment(live, monkeypatch):
     from unittest.mock import Mock
 
-    monkeypatch.setattr(server.repository, "get_document", lambda slug, reconcile=True: {"_meta": {}})
+    monkeypatch.setattr(server.repository, "get_document", lambda slug: {"_meta": {}})
     apply = Mock(return_value=({"_meta": {"rev": 3}}, []))
     monkeypatch.setattr(server.repository, "apply_ops", apply)
     monkeypatch.setattr(server, "relay_to_inbox", Mock())
@@ -2662,6 +2994,6 @@ def test_ack_succeeds_while_members_change_between_every_read_and_write(live, ca
     ):
         ledger.cmd_ack(SimpleNamespace(slug=SLUG, name="api-reader", rev=None))
     acked = json.loads(capsys.readouterr().out)["acked"]
-    members = server.repository.get_document(SLUG, reconcile=False)["_meta"]["members"]
+    members = server.repository.get_document(SLUG)["_meta"]["members"]
     assert members["api-reader"]["handled_rev"] == acked
     assert "busy-0" in members

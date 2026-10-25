@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/repository/bin_storage.py:scripts.swarm_ledger.repository.bin_storage.x_registries__mutmut_11:ce5aa3da083d203f550c2a88573bee049b45960e85f87cfc021a79599f0e88fe": {
+    "reader": "Standards",
+    "reason": "The exception branch still returns an empty dictionary: both None and {} fail the following isinstance(value, dict) decision or yield {}."
+  }
+}

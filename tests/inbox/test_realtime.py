@@ -7,8 +7,6 @@ from scripts.inbox.seen import SeenMarks
 from scripts.inbox.store import NOTIFY, InboxStore
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 W = 300_000
 
 
@@ -86,6 +84,13 @@ def test_an_item_becomes_a_channel_event_tagged_with_its_id_and_sender(inbox):
             "meta": {"item_id": item.id, "sender": "alice", "sent_at_ms": str(item.created_at)},
         },
     }
+
+
+def test_claim_delivers_an_item_a_newer_writer_stored_with_a_field_this_code_lacks(inbox):
+    item = inbox.send("operator", "bob", "a comment on your task")
+    inbox.redis.hset(inbox.key("item", item.id), "added_later", "x")
+    assert [channel.event(pushed) for pushed in channel.claim(inbox, "bob")] == [channel.event(inbox.get(item.id))]
+    assert inbox.get(item.id).state == "delivered"
 
 
 def test_the_reply_tool_answers_the_sender_and_closes_the_item(inbox):
@@ -221,8 +226,11 @@ class FakePubSub:
             raise KeyboardInterrupt
         return self.messages.pop(0)
 
+    def close(self):
+        pass
 
-def test_the_waker_runs_a_wake_pass_on_each_notify_only(redis, inbox, monkeypatch, capsys):
+
+def test_the_waker_runs_a_wake_pass_on_each_notify_only(redis, inbox, monkeypatch, capsys, recovery_deadline):
     store = RedisStore(redis)
     pubsub = FakePubSub([None, {"data": "sw-eng-1"}, None])
     monkeypatch.setattr(redis, "pubsub", lambda: pubsub)
@@ -239,8 +247,8 @@ def test_the_waker_runs_a_wake_pass_on_each_notify_only(redis, inbox, monkeypatc
     with pytest.raises(KeyboardInterrupt):
         waker.run(store, herdr, lambda: 42, env)
     assert pubsub.subscribed == [NOTIFY] and pubsub.timeouts == [waker.RECHECK_S] * 4
-    assert passes == [(herdr, (42, 60_000, 7_000), {})]
-    assert capsys.readouterr().out == "sw: woke sw-eng-1 for message m1\n"
+    assert passes == [(herdr, (42, 60_000, 7_000), {})] * 2
+    assert capsys.readouterr().out == "sw: woke sw-eng-1 for message m1\n" * 2
 
 
 def test_wake_now_moves_past_agents_it_cannot_or_need_not_wake(inbox):

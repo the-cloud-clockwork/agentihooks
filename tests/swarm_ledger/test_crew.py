@@ -8,6 +8,8 @@ import ledger_core as core  # noqa: E402
 import ledger_gate as gate  # noqa: E402
 import new_ledger  # noqa: E402
 
+from tests.swarm_ledger import legacy_page  # noqa: E402
+
 SLUG = "crew-2026-01-01"
 
 
@@ -20,9 +22,9 @@ def make_ledger():
         "questions": [],
         "followups": [],
     }
-    html_path, json_path = core.paths(SLUG)
+    html_path, json_path = legacy_page.paths(SLUG, core)
     core.LEDGER_DIR.mkdir(parents=True, exist_ok=True)
-    html_path.write_text(new_ledger.render(new_ledger.build_doc(content), SLUG, 8765), encoding="utf-8")
+    html_path.write_text(legacy_page.render(new_ledger.build_doc(content), SLUG, 8765), encoding="utf-8")
     json_path.unlink(missing_ok=True)
     core.sync(SLUG)
 

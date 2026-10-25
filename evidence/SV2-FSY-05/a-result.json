@@ -1,0 +1,35 @@
+{
+  "tested_commit": "92907cf4a5cbf45ec902c8e4a89febd0b9968d8e",
+  "evidence_class": "mocked: rendered Pod manifests checked without a cluster, a cache store whose read only mount is simulated by the store's mount probe, and a local artifact directory replaced by a file to model lost shared storage; no NFS, no Pod and no live rollout proof",
+  "then": "a deployment with shared artifact storage and private runtime homes passes while a shared writable Codex home fails policy validation",
+  "passed": true,
+  "dimensions": {
+    "fixture": "sv2-fsy-05"
+  },
+  "independent_fixtures": [
+    {
+      "safe_deployment_passes": true,
+      "seed_read_only": true,
+      "artifact_scoped_to_execution": true,
+      "node_cache_read_only": true,
+      "runtime_homes_private": true,
+      "shared_writable_codex_home_refused": true,
+      "passed": true,
+      "shared_runtime_mount_rejections_total": {
+        "shared_runtime": 1
+      }
+    },
+    {
+      "safe_deployment_passes": true,
+      "seed_read_only": true,
+      "artifact_scoped_to_execution": true,
+      "node_cache_read_only": true,
+      "runtime_homes_private": true,
+      "shared_writable_codex_home_refused": true,
+      "passed": true,
+      "shared_runtime_mount_rejections_total": {
+        "shared_runtime": 1
+      }
+    }
+  ]
+}

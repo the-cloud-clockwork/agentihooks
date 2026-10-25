@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/capacity.py:scripts.swarm.capacity.x_calculate__mutmut_9:de00a8135f745f635b9a46d410b8743bba5fc715e27370258901009d09e3dbc0": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "LANES and the constructed configuration cap tuple always contain three entries, so zip strict False changes no result."
+  }
+}

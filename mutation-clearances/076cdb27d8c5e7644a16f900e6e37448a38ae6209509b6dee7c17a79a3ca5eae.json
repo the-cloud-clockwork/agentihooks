@@ -1,0 +1,6 @@
+{
+  "scripts/ci_mutation/browser.py:scripts.ci_mutation.browser.x_needs_browser__mutmut_35:69166c705fd68d3214ac9c9da8663da51230d5b15fec66cd1a600c0f71f8c6c1": {
+    "reader": "Standards reader",
+    "reason": "Nonempty import modules are unchanged. None or empty modules substitute either an empty string or XXXX, and neither root equals playwright; all remaining traversal is unchanged. Standards confirmed exact CI artifact mutant from run 37668310093."
+  }
+}

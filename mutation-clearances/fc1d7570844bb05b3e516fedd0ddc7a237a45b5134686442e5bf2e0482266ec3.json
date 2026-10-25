@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/storage_migration/__init__.py:scripts.swarm_ledger.storage_migration.x_import_directory__mutmut_26:4a49e6d0cee30b417454a4e0f6d6570e54f5baec84ebf4d064ec8d4a33e84fc0": {
+    "reader": "Standards",
+    "reason": "UTF-8 and utf-8 resolve to the same Python codec. Encoding, decoding, values and errors are unchanged."
+  }
+}

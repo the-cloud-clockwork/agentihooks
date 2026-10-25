@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.swarm_ledger.ledger_page import serve_modules
+from tests.swarm_ledger.ledger_page import ledger_state, loaded, serve_modules, shell_html
 from tests.swarm_ledger.test_caps_columns import browser as chromium_browser
 
 browser = chromium_browser
@@ -31,7 +31,7 @@ SERVER = {**DOC, "_meta": {"rev": 5, "warnings": [WARNING], "events": []}}
 @pytest.fixture
 def tab(browser):
     context = browser.new_context(viewport={"width": 1920, "height": 1080})
-    html = (ROOT / "scripts/swarm_ledger/template.html").read_text().replace("__LEDGER_DATA__", json.dumps(DOC))
+    html = shell_html()
     html = html.replace("__LEDGER_SLUG__", "alerts-page").replace(
         "__LEDGER_PALETTE__", (ROOT / "scripts/swarm_ledger/palette.css").read_text()
     )
@@ -40,9 +40,9 @@ def tab(browser):
     def answer(route):
         if "/api/" not in route.request.url:
             return route.fulfill(body=html, content_type="text/html")
-        if "/api/swarm/" in route.request.url:
+        if "/swarm/" in route.request.url:
             return route.fulfill(body="null", content_type="application/json")
-        if not route.request.url.endswith("/api/alerts-page"):
+        if not route.request.url.endswith("/api/v1/ledgers/alerts-page/saves"):
             return route.fulfill(json={})
         if route.request.method == "PUT":
             for op in json.loads(route.request.post_data)["ops"]:
@@ -56,11 +56,11 @@ def tab(browser):
         return route.fulfill(json={**server, "rejected": []})
 
     context.route("**/*", answer)
-    serve_modules(context)
+    serve_modules(context, ledger_state(DOC))
     page = context.new_page()
     page.goto(URL)
-    page.set_default_timeout(2000)
-    page.wait_for_function("document.getElementById('status').textContent !== 'loading'")
+    page.set_default_timeout(5000)
+    loaded(page)
     page.sent = sent
     yield page
     context.close()
@@ -92,20 +92,22 @@ def test_claim_and_close_from_the_panel_send_their_ops(tab):
     tab.locator("#alert-fab").click()
     row = tab.locator("#alert-al-3-0")
     row.get_by_role("button", name="Claim").click()
-    assert "Claimed by operator" in row.inner_text()
+    assert row.locator(".alert-state").inner_text().lower() == "sending"
     row.get_by_role("button", name="Mark done").click()
     row.get_by_label("Outcome").fill("Trimmed the phase")
     row.get_by_role("button", name="Save").click()
-    tab.wait_for_function("document.querySelectorAll('#alerts > li').length === 1")
-    tab.wait_for_timeout(300)
+    for _ in range(40):
+        if any(op["op"] == "alert_close" for op in tab.sent):
+            break
+        tab.wait_for_timeout(50)
+    assert tab.locator("#alerts > li").count() == 2
     kinds = [(op["op"], op["target"], op.get("outcome")) for op in tab.sent if op["op"].startswith("alert_")]
     assert kinds == [("alert_claim", "al-3-0", None), ("alert_close", "al-3-0", "Trimmed the phase")]
 
 
-def test_the_panel_fold_is_remembered_after_a_reload(tab):
+def test_the_panel_header_does_not_fold_it(tab):
     tab.locator("#alert-fab").click()
-    tab.locator("#alert-fold > summary").click()
-    assert tab.locator("#alert-fold").evaluate("el => el.open") is False
-    tab.reload()
-    tab.locator("#alert-fab").click()
-    assert tab.locator("#alert-fold").evaluate("el => el.open") is False
+    assert tab.locator("#alert-fold").evaluate("el => el.querySelector('summary')") is None
+    tab.locator("#alert-fold .notif-head").click(position={"x": 5, "y": 5})
+    assert tab.locator("#alerts").is_visible()
+    assert tab.evaluate("() => Object.values(localStorage).some((v) => v.includes('alert-fold'))") is False

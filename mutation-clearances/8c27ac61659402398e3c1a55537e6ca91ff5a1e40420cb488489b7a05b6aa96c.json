@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/api/client.py:scripts.swarm_ledger.api.client.x\u01c1ResourceClient\u01c1snapshot__mutmut_19:097638cdbc0530c0ab5a504fa965f9056b259fc2e18d4da5488940f301164119": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "Snapshot assigns every COLLECTIONS key from collection before entering the items comprehension. Actual resource constants show all five THREADS keys are in COLLECTIONS. Thus each state.get has an existing key, so its missing-key fallback is unreachable; collection failures stop before the comprehension. No snapshot, request or error changes."
+  }
+}

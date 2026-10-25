@@ -11,7 +11,7 @@ from types import SimpleNamespace
 
 import pytest
 
-SHARED = {"projects", "sessions", "todos", "plugins", ".credentials.json"}
+SHARED = {"projects", "sessions", "todos", "plugins", ".credentials.json", "keybindings.json"}
 
 
 def _write(path: Path, text: str) -> Path:
@@ -124,9 +124,20 @@ def test_claude_render_tree(world, capsys):
     assert render.binding.inspect(out, "rb-role", "claude")["profile"] == "rb-role"
 
 
-@pytest.mark.parametrize("role", ["engineer", "cicd", "planner", "master", "qa", "frontend"])
-@pytest.mark.parametrize("target", ["claude", "codex"])
-def test_swarm_roles_render_only_the_task_browser(world, role, target):
+@pytest.mark.parametrize(
+    ("role", "browser"),
+    [
+        ("engineer", False),
+        ("cicd", False),
+        ("planner", False),
+        ("master", True),
+        ("qa", True),
+        ("frontend", True),
+        ("documentation", True),
+    ],
+)
+@pytest.mark.parametrize("target", ["claude", "codex", "copilot"])
+def test_swarm_roles_render_only_the_task_browser(world, role, browser, target):
     from scripts.profiles import render
 
     root = world["bundle"] / "profiles" / role
@@ -146,15 +157,41 @@ def test_swarm_roles_render_only_the_task_browser(world, role, target):
     out = render.render(target, role)
     if target == "claude":
         servers = json.loads((out / ".claude.json").read_text())["mcpServers"]
+    elif target == "codex":
+        servers = tomllib.loads((out / "config.toml").read_text()).get("mcp_servers", {})
     else:
-        servers = tomllib.loads((out / "config.toml").read_text())["mcp_servers"]
+        servers = json.loads((out / "mcp-config.json").read_text())["mcpServers"]
     browsers = {k: v for k, v in servers.items() if "playwright" in k}
-    assert list(browsers) == ["playwright-cmd"]
-    assert browsers["playwright-cmd"]["command"] == str(world["python"])
-    assert browsers["playwright-cmd"]["args"] == ["-I", "-m", "scripts.profiles.browser"]
-    assert render.stamp(role)["browser"] == browsers["playwright-cmd"]
+    if browser:
+        assert list(browsers) == ["playwright-cmd"]
+        assert browsers["playwright-cmd"]["command"] == str(world["python"])
+        assert browsers["playwright-cmd"]["args"] == ["-I", "-m", "scripts.profiles.browser"]
+        assert render.stamp(role)["browser"] == {
+            "command": str(world["python"]),
+            "args": ["-I", "-m", "scripts.profiles.browser"],
+        }
+    else:
+        assert browsers == {}
+        assert "browser" not in render.stamp(role)
     settings = json.loads((render.rendered_root() / role / "claude" / "settings.json").read_text())
     assert not settings["enabledPlugins"].get("playwright@claude-plugins-official", False)
+
+
+def test_codex_engineer_home_lists_the_serena_opt_in_tools(world):
+    from scripts.profiles import render
+
+    root = world["bundle"] / "profiles" / "engineer"
+    router = "http://127.0.0.1:8643/mcp"
+    _write(root / "profile.yml", "name: engineer\nextends: [package:engineer]\n")
+    _write(root / ".claude" / ".mcp.json", json.dumps({"mcpServers": {"serena": {"type": "http", "url": router}}}))
+    _write(
+        root / ".codex" / "mcp.overrides.toml",
+        f'[mcpServers.serena]\ntype = "http"\nurl = "{router}?tools=read_file,search_for_pattern"\n',
+    )
+    claude = json.loads((render.render("claude", "engineer") / ".claude.json").read_text())["mcpServers"]
+    codex = tomllib.loads((render.render("codex", "engineer") / "config.toml").read_text())["mcp_servers"]
+    assert codex["serena"]["url"] == f"{router}?tools=read_file,search_for_pattern"
+    assert claude["serena"]["url"] == router
 
 
 @pytest.mark.parametrize("target", ["claude", "codex"])
@@ -184,7 +221,7 @@ def test_a_role_overlay_keeps_the_logged_in_extension_browser(world, target):
     master = browsers("master")
     assert sorted(master) == ["playwright-cmd", "playwright-ext-nestorcolt-gmail"]
     assert "--extension" in master["playwright-ext-nestorcolt-gmail"]["args"]
-    assert list(browsers("engineer")) == ["playwright-cmd"]
+    assert browsers("engineer") == {}
 
 
 def test_operator_profile_keeps_its_browser(world):
@@ -264,6 +301,57 @@ def test_refresh_rules_updates_the_rendered_claude_md(world, monkeypatch):
     assert "ROLE LOCAL OVERRIDE" in payload
 
 
+def test_refresh_rules_rerenders_every_home_from_a_new_bundle_commit(world, monkeypatch, tmp_path, capsys):
+    from argparse import Namespace
+
+    from hooks.context import rules_refresh
+    from scripts.profiles import render
+
+    monkeypatch.delenv("CI_MANIFESTO_PATH", raising=False)
+    monkeypatch.delenv("MANIFESTOS_DIR", raising=False)
+    monkeypatch.setattr(rules_refresh, "_refresh_dir", lambda: tmp_path / "force_refresh")
+    monkeypatch.setattr(rules_refresh, "_collect_pending_sessions", lambda: ["s-master"])
+    bundle = world["bundle"]
+    _write(bundle / "profiles" / "master" / "profile.yml", "name: master\nextends: [package:master]\n")
+    manifesto = _write(bundle / "manifestos" / "FLEET-MANIFESTO.md", "OLD FLEET DOCTRINE\n")
+    _commit(bundle, "two")
+    master = render.render_claude("master")
+    render.render_claude("rb-role")
+    caller = render.render_claude("rb-other")
+    assert "OLD FLEET DOCTRINE" in (master / "CLAUDE.md").read_text()
+    manifesto.write_text("MERGED FLEET DOCTRINE\n")
+    _commit(bundle, "three")
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(caller))
+
+    world["install"]._cmd_refresh_rules(Namespace(profile=None, clear=False, dry_run=False))
+
+    rerendered = render.profile_dir("master") / "claude"
+    assert rerendered != master
+    assert "MERGED FLEET DOCTRINE" in (rerendered / "CLAUDE.md").read_text()
+    for key in ("master", "rb-role", "rb-other"):
+        marker = rules_refresh._load_marker(key)
+        assert (marker["home"], marker["pending"]) == (key, ["s-master"])
+        assert "MERGED FLEET DOCTRINE" in marker["payload"]
+    install = world["install"]
+    out = capsys.readouterr().out
+    assert f"{install._GREEN}[OK]{install._RESET} Refresh marker written for profile 'master' (1 sessions).\n" in out
+    assert f"{install._GREEN}[OK]{install._RESET} Re-rendered the rb-role profile home\n" in out
+    assert "Re-rendered the rb-other profile home" not in out
+    caller_homes = [p for p in (render.rendered_root() / ".homes" / "rb-other").iterdir() if not p.is_symlink()]
+    assert len(caller_homes) == 2
+    assert "MERGED FLEET DOCTRINE" in (render.profile_dir("rb-other") / "claude" / "CLAUDE.md").read_text()
+    received = []
+    monkeypatch.setattr(rules_refresh, "inject_context", received.append)
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(master))
+
+    rules_refresh.maybe_inject("s-master")
+
+    assert len(received) == 1
+    assert "MERGED FLEET DOCTRINE" in received[0]
+    assert "OLD FLEET DOCTRINE" not in received[0]
+    assert rules_refresh._load_marker("master") is None
+
+
 def test_claude_md_sanity_still_caps_the_rendered_claude_md(world, monkeypatch):
     from hooks.context import claude_md_sanity
     from hooks.hook_manager import BlockAction
@@ -276,6 +364,28 @@ def test_claude_md_sanity_still_caps_the_rendered_claude_md(world, monkeypatch):
 
     with pytest.raises(BlockAction, match="CLAUDE.md cap of 3 lines"):
         claude_md_sanity.check_claude_md_write(payload)
+
+
+@pytest.mark.parametrize("characters", [149_999, 150_000, 150_001])
+def test_render_enforces_the_compiled_instruction_character_limit(world, characters):
+    from scripts.profiles import render
+
+    out = render.render_claude("rb-role")
+    original = out / "CLAUDE.md"
+    before = original.read_text()
+    source = world["role"] / "CLAUDE.md"
+    source.write_text(source.read_text().strip() + "é" * (characters - len(before)))
+
+    if characters > 150_000:
+        with pytest.raises(ValueError, match=r"rb-role.*150001 characters.*150000"):
+            render.render_claude("rb-role", force=True)
+        assert render.profile_dir("rb-role") == out.parent
+        assert original.read_text() == before
+    else:
+        rebuilt = render.render_claude("rb-role", force=True)
+        text = (rebuilt / "CLAUDE.md").read_text()
+        assert len(text) == characters
+        assert "é" * (characters - len(before)) in text
 
 
 def test_claude_render_settings(world):
@@ -294,11 +404,11 @@ def test_claude_render_settings(world):
     assert {"type": "command", "command": f"bash {resolved}"} in settings["hooks"]["Stop"][-1]["hooks"]
 
 
-def test_claude_render_enables_only_the_chain_plugins(world):
+def test_an_operator_home_carries_the_operator_user_scope_plugins(world):
     from scripts.profiles import render
 
     home, bundle = world["home"], world["bundle"]
-    operator = {"model": "opus", "enabledPlugins": {"mine@m": True, "kit@m": False}}
+    operator = {"model": "opus", "enabledPlugins": {"mine@m": True, "kit@m": False, "muted@m": True, "off@m": False}}
     _write(home / ".claude" / "settings.json", json.dumps(operator))
     plugin = {"kind": "claude-plugin", "check": ["true"], "install": ["true"]}
     _write(bundle / "deps.json", json.dumps({"deps": [{**plugin, "id": "fleet@m"}]}))
@@ -307,7 +417,7 @@ def test_claude_render_enables_only_the_chain_plugins(world):
 
     out = render.render_claude("rb-role")
 
-    assert json.loads((out / "settings.json").read_text())["enabledPlugins"] == {"kit@m": True}
+    assert json.loads((out / "settings.json").read_text())["enabledPlugins"] == {"mine@m": True, "kit@m": True}
     assert json.loads((home / ".claude" / "settings.json").read_text()) == operator
 
 
@@ -327,6 +437,17 @@ def test_claude_render_enables_the_role_defaults(world, role, plugins):
     out = render.render_claude(role)
 
     assert json.loads((out / "settings.json").read_text())["enabledPlugins"] == dict.fromkeys(plugins, True)
+
+
+def test_role_home_reads_the_package_roles_folder_patched_after_import(tmp_path, monkeypatch):
+    from hooks.context import profile_chain
+    from scripts.profiles import plugins
+
+    (tmp_path / "solo").mkdir()
+    monkeypatch.setattr(profile_chain, "PACKAGE_ROLES", tmp_path)
+
+    assert plugins.role_home(["package:solo"]) is True
+    assert plugins.role_home(["engineer"]) is False
 
 
 @pytest.mark.parametrize(
@@ -365,6 +486,128 @@ def test_a_profile_extending_a_role_keeps_its_defaults(world):
     }
 
 
+def _install_in_home(out: Path, plugin: str) -> None:
+    settings = json.loads((out / "settings.json").read_text())
+    settings["enabledPlugins"] = {**settings["enabledPlugins"], plugin: True}
+    (out / "settings.json").write_text(json.dumps(settings))
+
+
+@pytest.mark.parametrize(("name", "rendered"), [("rb-role", {"mine@m": True}), ("engineer", {MATTPOCOCK: True})])
+def test_a_plugin_installed_inside_a_home_survives_the_next_render(world, name, rendered):
+    from scripts.profiles import render
+
+    _write(world["bundle"] / "profiles" / "engineer" / "profile.yml", "name: engineer\nextends: [rb-base]\n")
+    _write(world["home"] / ".claude" / "settings.json", json.dumps({"enabledPlugins": {"mine@m": True}}))
+    _install_in_home(render.render_claude(name), "local@m")
+
+    out = render.render_claude(name, force=True)
+
+    assert json.loads((out / "settings.json").read_text())["enabledPlugins"] == {**rendered, "local@m": True}
+
+
+def test_init_carries_a_user_scope_install_into_the_rendered_home(world):
+    from scripts.profiles import render
+
+    render.render_claude("rb-role")
+    _write(world["home"] / ".claude" / "settings.json", json.dumps({"enabledPlugins": {"new@m": True}}))
+
+    world["install"]._rerender_profile_homes("claude")
+
+    out = render.profile_dir("rb-role") / "claude"
+    assert json.loads((out / "settings.json").read_text())["enabledPlugins"] == {"new@m": True}
+
+
+def test_a_home_without_a_plugin_record_keeps_what_is_enabled_inside_it(world):
+    from scripts.profiles import render
+
+    out = render.render_claude("rb-role")
+    _install_in_home(out, "local@m")
+    (out / render.PLUGINS).unlink()
+
+    out = render.render_claude("rb-role", force=True)
+
+    assert json.loads((out / "settings.json").read_text())["enabledPlugins"] == {"local@m": True}
+
+
+def test_a_home_without_a_stamp_still_drops_a_plugin_its_source_dropped(world):
+    from scripts.profiles import render
+
+    kit = world["bundle"] / "profiles" / "rb-kit" / ".claude" / "settings.overrides.json"
+    _write(kit, json.dumps({"enabledPlugins": {"kit@m": True}}))
+    out = render.render_claude("rb-role")
+    _install_in_home(out, "local@m")
+    (out / render.STAMP).unlink()
+    _write(kit, json.dumps({}))
+
+    out = render.render_claude("rb-role")
+
+    assert json.loads((out / "settings.json").read_text())["enabledPlugins"] == {"local@m": True}
+
+
+def test_a_home_built_on_a_package_role_leaves_out_the_operator_plugins(world):
+    from scripts.profiles import render
+
+    _write(world["bundle"] / "profiles" / "rb-front" / "profile.yml", "name: rb-front\nextends: [package:engineer]\n")
+    _write(world["home"] / ".claude" / "settings.json", json.dumps({"enabledPlugins": {"mine@m": True}}))
+
+    out = render.render_claude("rb-front")
+
+    assert json.loads((out / "settings.json").read_text())["enabledPlugins"] == {MATTPOCOCK: True}
+
+
+def test_a_plugin_the_bundle_layer_drops_leaves_the_home(world):
+    from scripts.profiles import render
+
+    layer = world["bundle"] / ".claude" / "settings.overrides.json"
+    _write(layer, json.dumps({"enabledPlugins": {"bundle@m": True}}))
+    render.render_claude("rb-role")
+    _write(layer, json.dumps({}))
+
+    out = render.render_claude("rb-role", force=True)
+
+    assert json.loads((out / "settings.json").read_text())["enabledPlugins"] == {}
+
+
+def test_a_render_inside_a_profile_home_reads_the_operator_plugins(world, monkeypatch):
+    from scripts.profiles import render
+
+    inside = _write(world["home"] / "inside" / "settings.json", json.dumps({"enabledPlugins": {"inner@m": True}}))
+    _write(world["home"] / ".claude" / "settings.json", json.dumps({"enabledPlugins": {"mine@m": True}}))
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(inside.parent))
+
+    out = render.render_claude("rb-role")
+
+    assert json.loads((out / "settings.json").read_text())["enabledPlugins"] == {"mine@m": True}
+
+
+def test_a_profile_disable_beats_a_plugin_installed_inside_the_home(world):
+    from scripts.profiles import render
+
+    _install_in_home(render.render_claude("rb-role"), "local@m")
+    off = {"enabledPlugins": {"local@m": False}}
+    _write(world["bundle"] / "profiles" / "rb-kit" / ".claude" / "settings.overrides.json", json.dumps(off))
+
+    out = render.render_claude("rb-role")
+
+    assert json.loads((out / "settings.json").read_text())["enabledPlugins"] == {}
+
+
+def test_a_plugin_the_render_wrote_leaves_when_its_source_drops_it(world):
+    from scripts.profiles import render
+
+    kit = world["bundle"] / "profiles" / "rb-kit" / ".claude" / "settings.overrides.json"
+    settings = world["home"] / ".claude" / "settings.json"
+    _write(settings, json.dumps({"enabledPlugins": {"mine@m": True}}))
+    _write(kit, json.dumps({"enabledPlugins": {"kit@m": True}}))
+    render.render_claude("rb-role")
+
+    _write(settings, json.dumps({"enabledPlugins": {}}))
+    _write(kit, json.dumps({}))
+    out = render.render_claude("rb-role")
+
+    assert json.loads((out / "settings.json").read_text())["enabledPlugins"] == {}
+
+
 def test_a_profile_whose_own_layers_enable_plugins_is_claude_only(world):
     from scripts.profiles import plugins
 
@@ -386,6 +629,228 @@ def test_a_profile_whose_own_layers_enable_plugins_is_claude_only(world):
     assert plugins.claude_only("rb-role") is False
 
 
+def _mattpocock(home: Path, tmp_path: Path) -> Path:
+    plugin = tmp_path / "plugin-cache" / "mattpocock-skills" / "1.2.3"
+    for skill in ("engineering/tdd", "productivity/bundle-skill", "misc/unlisted"):
+        _write(plugin / "skills" / skill / "SKILL.md", f"---\nname: {Path(skill).name}\n---\n")
+    manifest = {"skills": ["./skills/engineering/tdd", "./skills/productivity/bundle-skill", "./skills/gone"]}
+    _write(plugin / ".claude-plugin" / "plugin.json", json.dumps(manifest))
+    installs = [
+        {"scope": "project", "installPath": str(tmp_path / "elsewhere")},
+        {"scope": "user", "installPath": str(plugin)},
+    ]
+    _write(home / ".claude" / "plugins" / "installed_plugins.json", json.dumps({"plugins": {MATTPOCOCK: installs}}))
+    return plugin
+
+
+def _frontend(world) -> Path:
+    front = world["bundle"] / "profiles" / "frontend"
+    _write(world["bundle"] / "profiles" / "engineer" / "profile.yml", "name: engineer\nextends: [rb-base]\n")
+    _write(front / "profile.yml", "name: frontend\nextends: [engineer]\n")
+    enabled = {"enabledPlugins": {"impeccable@impeccable": True, "frontend-design@claude-plugins-official": True}}
+    _write(front / ".claude" / "settings.overrides.json", json.dumps(enabled))
+    _write(front / ".codex" / "skills" / "frontend-design" / "SKILL.md", "---\nname: frontend-design\n---\n")
+    return front
+
+
+def _impeccable(home: Path) -> Path:
+    return _write(home / ".agentihooks" / "codex-skills" / "impeccable" / "SKILL.md", "---\nname: impeccable\n---\n")
+
+
+def test_a_frontend_chain_with_a_codex_replacement_for_each_plugin_mounts_on_codex(world, tmp_path):
+    from scripts.profiles import plugins
+
+    front = _frontend(world)
+    assert plugins.claude_only("frontend") is True
+    _impeccable(world["home"])
+    assert plugins.claude_only("frontend") is False
+    own = {"enabledPlugins": {"impeccable@impeccable": True, "own@m": True}}
+    _write(front / ".claude" / "settings.overrides.json", json.dumps(own))
+    assert plugins.claude_only("frontend") is True
+
+
+@pytest.mark.parametrize(("installed", "claude_only"), [(False, True), (True, False)])
+def test_a_layer_enabling_mattpocock_needs_the_installed_plugin_skills_for_codex(
+    world, tmp_path, installed, claude_only
+):
+    from scripts.profiles import plugins
+
+    kit = {"enabledPlugins": {MATTPOCOCK: True}}
+    _write(world["bundle"] / "profiles" / "rb-kit" / ".claude" / "settings.overrides.json", json.dumps(kit))
+    if installed:
+        _mattpocock(world["home"], tmp_path)
+    assert plugins.claude_only("rb-role") is claude_only
+
+
+@pytest.mark.parametrize(("role", "browser"), [("master", True), ("qa", True), ("rb-base", False)])
+def test_playwright_is_replaced_on_codex_only_where_the_swarm_browser_mounts(world, role, browser):
+    from scripts.profiles import plugins
+
+    profile = world["bundle"] / "profiles" / f"pw-{role}"
+    _write(profile / "profile.yml", f"name: pw-{role}\nextends: [{'package:' + role if role != 'rb-base' else role}]\n")
+    _write(profile / ".claude" / "settings.overrides.json", json.dumps({"enabledPlugins": {PLAYWRIGHT: True}}))
+    assert plugins.claude_only(f"pw-{role}") is not browser
+
+
+def _codex_skills(out: Path) -> dict[str, str]:
+    return {p.name: os.readlink(p) for p in (out / "skills").iterdir() if p.is_symlink()}
+
+
+def test_codex_render_of_frontend_links_each_plugin_replacement(world, tmp_path):
+    from scripts.profiles import render
+
+    front, impeccable = _frontend(world), _impeccable(world["home"]).parent
+    plugin = _mattpocock(world["home"], tmp_path)
+
+    out = render.render_codex("frontend")
+
+    linked = _codex_skills(out)
+    assert linked["frontend-design"] == str(front / ".codex" / "skills" / "frontend-design")
+    assert linked["impeccable"] == str(impeccable)
+    assert linked["tdd"] == str(plugin / "skills" / "engineering" / "tdd")
+    assert linked["bundle-skill"] == str(out.parent / "claude" / "skills" / "bundle-skill")
+    assert "unlisted" not in linked and "gone" not in linked
+
+
+@pytest.mark.parametrize("role", ["engineer", "cicd", "planner", "master", "qa"])
+def test_codex_render_of_each_role_carries_its_replacements(world, tmp_path, role):
+    from scripts.profiles import render
+
+    base = "package:qa" if role == "qa" else "rb-base"
+    _write(world["bundle"] / "profiles" / role / "profile.yml", f"name: {role}\nextends: [{base}]\n")
+    plugin = _mattpocock(world["home"], tmp_path)
+    _impeccable(world["home"])
+
+    out = render.render_codex(role)
+
+    linked = _codex_skills(out)
+    if role in ("master", "qa"):
+        assert "tdd" not in linked
+        assert "playwright-cmd" in tomllib.loads((out / "config.toml").read_text())["mcp_servers"]
+    else:
+        assert linked["tdd"] == str(plugin / "skills" / "engineering" / "tdd")
+    assert "impeccable" not in linked
+
+
+def test_a_profile_skill_keeps_its_name_over_the_fetched_codex_skill(world):
+    from scripts.profiles import render
+
+    front = _frontend(world)
+    _impeccable(world["home"])
+    _write(front / ".claude" / "skills" / "impeccable" / "SKILL.md", "---\nname: impeccable\n---\n")
+
+    out = render.render_codex("frontend")
+
+    assert _codex_skills(out)["impeccable"] == str(out.parent / "claude" / "skills" / "impeccable")
+
+
+def test_a_bundle_codex_skill_replaces_a_plugin_for_the_gate(world):
+    from scripts.profiles import plugins
+
+    _frontend(world)
+    _write(world["bundle"] / ".codex" / "skills" / "impeccable" / "SKILL.md", "---\nname: impeccable\n---\n")
+
+    assert plugins.claude_only("frontend") is False
+
+
+def _plugin(root: Path, manifest: dict | None, skills: list[str]) -> Path:
+    for skill in skills:
+        _write(root / skill / "SKILL.md", f"---\nname: {Path(skill).name}\n---\n")
+    if manifest is not None:
+        _write(root / ".claude-plugin" / "plugin.json", json.dumps(manifest))
+    return root
+
+
+def _installs(home: Path, *installs: dict) -> Path:
+    plugins_dir = home / ".claude" / "plugins"
+    _write(plugins_dir / "installed_plugins.json", json.dumps({"plugins": {MATTPOCOCK: list(installs)}}))
+    return plugins_dir
+
+
+def test_installed_plugin_skills_prefer_the_user_scope_install(world, tmp_path):
+    from scripts.profiles import plugins
+
+    project = _plugin(tmp_path / "project", {"skills": ["./skills/a/tdd"]}, ["skills/a/tdd"])
+    user = _plugin(tmp_path / "user", {"skills": ["./skills/b/grill"]}, ["skills/b/grill"])
+    found = _installs(
+        world["home"], {"scope": "project", "installPath": str(project)}, {"scope": "user", "installPath": str(user)}
+    )
+
+    assert plugins.plugin_skills([MATTPOCOCK], found) == {"grill": user / "skills" / "b" / "grill"}
+
+
+def test_installed_plugin_skills_skip_an_install_without_a_path_or_a_manifest(world, tmp_path):
+    from scripts.profiles import plugins
+
+    broken = _plugin(tmp_path / "broken", None, ["skills/x/tdd"])
+    good = _plugin(tmp_path / "good", {"skills": ["./skills/x/tdd"]}, ["skills/x/tdd"])
+    found = _installs(
+        world["home"],
+        {"scope": "user"},
+        {"scope": "user", "installPath": str(broken)},
+        {"scope": "project", "installPath": str(good)},
+    )
+
+    assert plugins.plugin_skills([MATTPOCOCK], found) == {"tdd": good / "skills" / "x" / "tdd"}
+
+
+@pytest.mark.parametrize(("manifest", "folder"), [({"skills": "./kit/"}, "kit"), ({}, "skills")])
+def test_installed_plugin_skills_read_a_whole_skills_folder(world, tmp_path, manifest, folder):
+    from scripts.profiles import plugins
+
+    root = _plugin(tmp_path / "p", manifest, [f"{folder}/impeccable", "decoy/skills/other"])
+    found = _installs(world["home"], {"scope": "user", "installPath": str(root)})
+
+    assert plugins.plugin_skills([MATTPOCOCK], found) == {"impeccable": root / folder / "impeccable"}
+
+
+def test_the_gate_reads_the_operator_plugins_from_inside_a_profile_home(world, tmp_path, monkeypatch):
+    from scripts.profiles import plugins
+
+    kit = {"enabledPlugins": {MATTPOCOCK: True}}
+    _write(world["bundle"] / "profiles" / "rb-kit" / ".claude" / "settings.overrides.json", json.dumps(kit))
+    _mattpocock(world["home"], tmp_path)
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "inside"))
+
+    assert plugins.claude_only("rb-role") is False
+
+
+def test_codex_render_inside_a_profile_home_links_the_operator_plugin_skills(world, tmp_path, monkeypatch):
+    from scripts.profiles import render
+
+    _write(world["bundle"] / "profiles" / "engineer" / "profile.yml", "name: engineer\nextends: [rb-base]\n")
+    plugin = _mattpocock(world["home"], tmp_path)
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "inside"))
+
+    out = render.render_codex("engineer")
+
+    assert _codex_skills(out)["tdd"] == str(plugin / "skills" / "engineering" / "tdd")
+
+
+def test_codex_render_links_the_bundle_codex_skills(world):
+    from scripts.profiles import render
+
+    skill = _write(world["bundle"] / ".codex" / "skills" / "bundle-codex" / "SKILL.md", "---\nname: b\n---\n")
+
+    assert _codex_skills(render.render_codex("rb-role"))["bundle-codex"] == str(skill.parent)
+
+
+def test_codex_render_redoes_the_home_when_a_replacement_arrives(world):
+    from scripts.profiles import render
+
+    _frontend(world)
+    out = render.render_codex("frontend")
+    assert "impeccable" not in _codex_skills(out)
+    assert render.render_codex("frontend") is None
+    _impeccable(world["home"])
+
+    out = render.render_codex("frontend")
+
+    assert out is not None and "impeccable" in _codex_skills(out)
+    impeccable = world["home"] / ".agentihooks" / "codex-skills" / "impeccable"
+    assert json.loads((out / render.STAMP).read_text())["skills"]["impeccable"] == str(impeccable)
+
+
 def test_the_package_prefix_names_the_same_role(world, tmp_path, monkeypatch):
     from hooks.context import profile_chain
     from scripts.profiles import render
@@ -398,6 +863,10 @@ def test_the_package_prefix_names_the_same_role(world, tmp_path, monkeypatch):
     out = render.render_claude("package:master")
 
     assert json.loads((out / "settings.json").read_text())["enabledPlugins"] == {}
+    assert json.loads((out / ".claude.json").read_text())["mcpServers"]["playwright-cmd"] == {
+        "command": str(world["python"]),
+        "args": ["-I", "-m", "scripts.profiles.browser"],
+    }
 
 
 def test_claude_render_keeps_a_home_without_brain_off_the_brain_channel(world):
@@ -486,6 +955,48 @@ def test_claude_render_mcp_and_shared_data(world, capsys):
     assert links == SHARED
     for name in SHARED:
         assert os.readlink(out / name) == str(home / ".claude" / name)
+
+
+def test_claude_render_creates_the_shared_folders_a_fresh_home_lacks(world):
+    from scripts.profiles import render
+
+    shared = world["home"] / ".claude"
+    shutil.rmtree(shared, ignore_errors=True)
+    out = render.render_claude("rb-role")
+    for name in ("projects", "sessions", "todos"):
+        assert (shared / name).is_dir()
+        assert (out / name).resolve() == (shared / name).resolve()
+
+
+@pytest.mark.parametrize("present", [True, False])
+def test_claude_render_links_operator_keybindings(world, present):
+    from scripts.profiles import render
+
+    source = world["home"] / ".claude" / "keybindings.json"
+    if present:
+        _write(source, '{"bindings": []}\n')
+    out = render.render_claude("rb-role")
+    link = out / "keybindings.json"
+    assert link.is_symlink()
+    assert link.readlink() == source
+    assert link.exists() is present
+    assert render.render_claude("rb-role") is None
+
+
+@pytest.mark.parametrize("missing", sorted(SHARED))
+def test_claude_render_redoes_a_home_missing_a_shared_link(world, missing):
+    from scripts.profiles import render
+
+    out = render.render_claude("rb-role")
+    link = out / missing
+    if link.is_symlink():
+        link.unlink()
+    assert render.render_claude("rb-role") is not None
+    fresh = render.profile_dir("rb-role") / "claude"
+    assert fresh != out
+    assert (fresh / missing).is_symlink()
+    assert (fresh / missing).readlink() == world["home"] / ".claude" / missing
+    assert render.render_claude("rb-role") is None
 
 
 def test_claude_render_seeds_only_startup_state_from_the_default_home(world):
@@ -666,6 +1177,154 @@ def test_codex_render_links_into_the_claude_profile(world):
     )
     sources = render.sources.path(out.parent.name, "codex", out.parent.parent)
     assert os.readlink(sources) == str(render.sources.path(out.parent.name, "claude", out.parent.parent))
+
+
+ROLE_TOOLSET = "http://gw.example/toolset/rb-role/mcp"
+WHOLE_CATALOGUE = "http://gw.example/mcp/"
+
+
+@pytest.fixture
+def copilot_gateway(world, monkeypatch):
+    monkeypatch.setenv("GW_KEY", "k-test")
+    whole = {"mcpServers": {"gateway-tools": {"type": "http", "url": WHOLE_CATALOGUE}}}
+    _write(world["home"] / ".copilot" / "mcp-config.json", json.dumps(whole))
+    toolset = {"type": "http", "url": ROLE_TOOLSET, "headers": {"Authorization": "Bearer ${GW_KEY}"}}
+    _declare(world, **{"gateway-tools": {**toolset, "default_tools_approval_mode": "approve"}})
+
+
+def test_copilot_render_names_the_role_toolset_not_the_whole_catalogue(world, copilot_gateway):
+    from scripts.profiles import render
+
+    out = render.render_copilot("rb-role")
+
+    assert out == (render.rendered_root() / "rb-role" / "copilot").resolve()
+    text = (out / "mcp-config.json").read_text()
+    assert json.loads(text)["mcpServers"]["gateway-tools"] == {
+        "type": "http",
+        "url": ROLE_TOOLSET,
+        "headers": {"Authorization": "Bearer k-test"},
+        "auth": False,
+        "oidc": False,
+    }
+    assert WHOLE_CATALOGUE not in text
+    operator = json.loads((world["home"] / ".copilot" / "mcp-config.json").read_text())
+    assert operator["mcpServers"]["gateway-tools"]["url"] == WHOLE_CATALOGUE
+
+
+def test_copilot_render_links_the_role_persona_and_operator_state(world, copilot_gateway):
+    from scripts.profiles import render
+
+    out = render.render_copilot("rb-role")
+
+    assert os.readlink(out / "copilot-instructions.md") == str(out.parent / "claude" / "CLAUDE.md")
+    for item in render.COPILOT_STATE:
+        assert os.readlink(out / item) == str(world["home"] / ".copilot" / item)
+    assert render.render_copilot("rb-role") is None
+    assert render.rendered_profiles("copilot") == ["rb-role"]
+    forced = render.render_copilot("rb-role", force=True)
+    assert forced != out and ROLE_TOOLSET in (forced / "mcp-config.json").read_text()
+    assert os.readlink(forced / "copilot-instructions.md") == str(forced.parent / "claude" / "CLAUDE.md")
+
+
+def test_copilot_render_follows_a_rotated_gateway_key_into_a_private_file(world, copilot_gateway, monkeypatch):
+    from scripts.profiles import render
+
+    first = render.render_copilot("rb-role")
+    monkeypatch.setenv("GW_KEY", "k-rotated")
+
+    out = render.render_copilot("rb-role")
+
+    assert out != first and out == render.profile_dir("rb-role") / "copilot"
+    headers = json.loads((out / "mcp-config.json").read_text())["mcpServers"]["gateway-tools"]["headers"]
+    assert headers == {"Authorization": "Bearer k-rotated"}
+    assert (out / "mcp-config.json").stat().st_mode & 0o777 == 0o600
+
+
+def test_copilot_render_keeps_a_declared_tool_allowlist(world, copilot_gateway):
+    from scripts.profiles import render
+
+    _declare(
+        world, lf={"type": "http", "url": "http://lf.example/mcp", "enabled_tools": READS, "disabled_tools": ["x"]}
+    )
+
+    entry = json.loads((render.render_copilot("rb-role") / "mcp-config.json").read_text())["mcpServers"]["lf"]
+
+    assert entry["tools"] == READS
+    assert entry["excludeTools"] == ["x"]
+
+
+def test_copilot_render_keeps_an_empty_tool_allowlist_closed(world, copilot_gateway):
+    from scripts.profiles import render
+
+    _declare(world, lf={"type": "http", "url": "http://lf.example/mcp", "enabled_tools": []})
+
+    entry = json.loads((render.render_copilot("rb-role") / "mcp-config.json").read_text())["mcpServers"]["lf"]
+
+    assert entry["tools"] == []
+
+
+def test_copilot_render_writes_the_stamped_bundle_servers_as_indented_json(world, copilot_gateway):
+    from scripts.profiles import render
+
+    out = render.render_copilot("rb-role")
+
+    text = (out / "mcp-config.json").read_text()
+    assert text == json.dumps(json.loads(text), indent=2) + "\n"
+    assert "bundle-srv" in json.loads(text)["mcpServers"]
+    assert json.loads((out / render.STAMP).read_text()) == render.stamp("rb-role")
+
+
+def test_forced_copilot_render_starts_a_new_home_beside_a_fresh_claude_one(world, copilot_gateway):
+    from scripts.profiles import render
+
+    claude = render.render_claude("rb-role")
+
+    out = render.render_copilot("rb-role", force=True)
+
+    assert out.parent != claude.parent
+    assert out == render.profile_dir("rb-role") / "copilot"
+
+
+def test_copilot_renders_an_overlay_set_into_its_own_home(world, overlays, copilot_gateway, monkeypatch):
+    from scripts.profiles import render
+
+    gateway = {"type": "http", "url": ROLE_TOOLSET, "headers": {"Authorization": "Bearer ${GW_KEY}"}}
+    _write(overlays / "rb-eng" / ".claude" / ".mcp.json", json.dumps({"mcpServers": {"gw": gateway}}))
+    out = render.render_copilot("rb-eng", overlays=["ov-a"])
+
+    assert out.parent == render.profile_dir("rb-eng", ["ov-a"])
+    assert json.loads((out / render.STAMP).read_text())["overlays"] == ["ov-a"]
+    assert "OV-A RULE MARKER" in (out / "copilot-instructions.md").read_text()
+    assert render.render_copilot("rb-eng", overlays=["ov-a"]) is None
+    forced = render.render_copilot("rb-eng", force=True, overlays=["ov-a"])
+    assert forced == render.profile_dir("rb-eng", ["ov-a"]) / "copilot"
+    assert "OV-A RULE MARKER" in (forced / "copilot-instructions.md").read_text()
+    monkeypatch.setenv("GW_KEY", "k-rotated")
+    stale = render.render_copilot("rb-eng", overlays=["ov-a"])
+    assert stale != forced and stale == render.profile_dir("rb-eng", ["ov-a"]) / "copilot"
+    assert "OV-A RULE MARKER" in (stale / "copilot-instructions.md").read_text()
+
+
+def test_init_re_renders_each_copilot_role_home(world, copilot_gateway, monkeypatch):
+    from scripts.profiles import render
+
+    first = render.render_copilot("rb-role")
+    monkeypatch.setenv("GW_KEY", "k-init")
+
+    world["install"]._rerender_profile_homes("copilot")
+
+    out = render.rendered_root() / "rb-role" / "copilot"
+    assert out.resolve() != first
+    assert "Bearer k-init" in (out / "mcp-config.json").read_text()
+
+
+def test_profile_render_cli_renders_a_copilot_home(world, copilot_gateway, capsys):
+    from scripts.profiles import render
+
+    assert render.main(["render", "rb-role", "--target", "copilot"]) == 0
+
+    assert ROLE_TOOLSET in (render.rendered_root() / "rb-role" / "copilot" / "mcp-config.json").read_text()
+    assert "Rendered rb-role (copilot)" in capsys.readouterr().out
 
 
 def test_codex_master_replaces_monitor_instructions_without_changing_claude(world):
@@ -1077,6 +1736,7 @@ def test_codex_render_links_state_back_to_the_operator_home(world):
 
     home = world["home"]
     _operator_codex(home)
+    _write(home / ".codex" / "auth.json", "{}")
 
     out = render.render_codex("rb-role")
 
@@ -1087,6 +1747,192 @@ def test_codex_render_links_state_back_to_the_operator_home(world):
     assert doc["hooks"]["state"] == {f"{out / 'hooks.json'}:pre_tool_use:0:0": {"trusted_hash": "sha256:aa"}}
     assert doc["projects"] == {"/w": {"trust_level": "trusted"}}
     assert (doc["model"], doc["service_tier"], doc["notify"]) == ("gpt-op", "fast", ["py", "-m", "shim"])
+
+
+def test_isolated_codex_render_keeps_session_state_private(world):
+    from scripts.profiles import render
+
+    home = world["home"]
+    _operator_codex(home)
+    _write(home / ".codex" / "auth.json", "{}")
+    for item in ("history.jsonl", "session_index.jsonl"):
+        _write(home / ".codex" / item, "operator state\n")
+    (home / ".codex" / "sessions").mkdir()
+
+    out = render.render_codex("rb-role", isolate=True)
+
+    for item in ("history.jsonl", "session_index.jsonl"):
+        assert not (out / item).exists()
+        assert not (out / item).is_symlink()
+    for item in ("sessions", "archived_sessions"):
+        assert os.readlink(out / item) == str(render.rendered_root() / ".rollouts" / "rb-role" / "codex" / item)
+    for item in ("auth.json", "hooks.json"):
+        assert os.readlink(out / item) == str(home / ".codex" / item)
+    doc = tomllib.loads((out / "config.toml").read_text())
+    assert doc["sqlite_home"] == str(out)
+    assert render.render_codex("rb-role", isolate=True) is None
+
+
+def test_codex_render_refreshes_when_session_isolation_changes(world):
+    from scripts.profiles import render
+
+    shared = render.render_codex("rb-role")
+    isolated = render.render_codex("rb-role", isolate=True)
+
+    assert isolated is not None
+    assert isolated != shared
+    assert (shared / "sessions").is_symlink()
+    assert os.readlink(isolated / "sessions") != os.readlink(shared / "sessions")
+
+    restored = render.render_codex("rb-role")
+
+    assert restored is not None
+    assert restored != isolated
+    assert os.readlink(restored / "sessions") == str(world["home"] / ".codex" / "sessions")
+
+
+def test_swarm_codex_preparation_renders_isolated_storage(world):
+    from scripts import select_profile
+
+    env, _ = select_profile.prepare("rb-role", "codex", "", "", [], {"AGENTIHOOKS_SWARM": "crew"})
+    out = Path(env["CODEX_HOME"])
+
+    for item in ("history.jsonl", "session_index.jsonl"):
+        assert not (out / item).is_symlink()
+    assert Path(os.readlink(out / "sessions")).parts[-4:] == (".rollouts", "rb-role", "codex", "sessions")
+    assert (out / "hooks.json").is_symlink()
+    assert tomllib.loads((out / "config.toml").read_text())["sqlite_home"] == str(out)
+
+
+def _hooks_entries(hooks: Path) -> list[str]:
+    doc = json.loads(hooks.read_text())["hooks"]
+    labels = {
+        "PreToolUse": "pre_tool_use",
+        "PermissionRequest": "permission_request",
+        "PostToolUse": "post_tool_use",
+        "PreCompact": "pre_compact",
+        "PostCompact": "post_compact",
+        "SessionStart": "session_start",
+        "SessionEnd": "session_end",
+        "UserPromptSubmit": "user_prompt_submit",
+        "SubagentStart": "subagent_start",
+        "SubagentStop": "subagent_stop",
+        "Stop": "stop",
+        "Interrupt": "interrupt",
+    }
+    return [
+        f"{labels[event]}:{g}:{h}"
+        for event, groups in doc.items()
+        for g, group in enumerate(groups)
+        for h, hook in enumerate(group["hooks"])
+        if hook["command"].strip()
+    ]
+
+
+def test_codex_render_trusts_every_hooks_json_entry(world):
+    from scripts.profiles import render
+    from tests.codex_hook_fixtures import CODEX_HOOK_HASHES, CODEX_HOOKS
+
+    home = world["home"]
+    _operator_codex(home)
+    _write(home / ".codex" / "hooks.json", json.dumps(CODEX_HOOKS))
+
+    out = render.render_codex("rb-role")
+
+    state = tomllib.loads((out / "config.toml").read_text())["hooks"]["state"]
+    entries = _hooks_entries(out / "hooks.json")
+    assert sorted(entries) == sorted(CODEX_HOOK_HASHES)
+    assert {k: v["trusted_hash"] for k, v in state.items()} == {
+        f"{out / 'hooks.json'}:{entry}": CODEX_HOOK_HASHES[entry] for entry in entries
+    }
+
+
+def test_codex_render_keeps_operator_hook_flags_beside_computed_trust(world):
+    from scripts.profiles import render
+    from tests.codex_hook_fixtures import CODEX_HOOK_HASHES, CODEX_HOOKS
+
+    home = world["home"]
+    hooks = home / ".codex" / "hooks.json"
+    _write(hooks, json.dumps(CODEX_HOOKS))
+    text = (home / ".codex" / "config.toml").read_text()
+    _write(home / ".codex" / "config.toml", text + f'\n[hooks.state."{hooks}:stop:1:0"]\nenabled = false\n')
+
+    out = render.render_codex("rb-role")
+
+    state = tomllib.loads((out / "config.toml").read_text())["hooks"]["state"]
+    assert state[f"{out / 'hooks.json'}:stop:1:0"] == {"enabled": False, "trusted_hash": CODEX_HOOK_HASHES["stop:1:0"]}
+
+
+def test_codex_render_rerenders_when_the_operator_hooks_change(world):
+    import hashlib
+
+    from scripts.profiles import render
+    from tests.codex_hook_fixtures import CODEX_HOOK_HASHES, CODEX_HOOKS
+
+    home = world["home"]
+    hooks = home / ".codex" / "hooks.json"
+    first = render.render_codex("rb-role")
+    assert json.loads((first / render.STAMP).read_text())["hooks"] == ""
+    assert render.render_codex("rb-role") is None
+
+    text = json.dumps({"hooks": {"Stop": CODEX_HOOKS["hooks"]["Stop"]}})
+    _write(hooks, text)
+    out = render.render_codex("rb-role")
+
+    assert out is not None and out != first
+    assert json.loads((out / render.STAMP).read_text())["hooks"] == hashlib.sha256(text.encode()).hexdigest()
+    state = tomllib.loads((out / "config.toml").read_text())["hooks"]["state"]
+    assert {k: v["trusted_hash"] for k, v in state.items()} == {
+        f"{out / 'hooks.json'}:stop:0:0": CODEX_HOOK_HASHES["stop:0:0"],
+        f"{out / 'hooks.json'}:stop:1:0": CODEX_HOOK_HASHES["stop:1:0"],
+    }
+
+
+@pytest.mark.parametrize("token_kind", ["chatgpt", "agent"])
+def test_codex_token_account_role_home_has_no_dangling_login(world, monkeypatch, token_kind):
+    from scripts import codex_router
+    from scripts.profiles import render
+    from tests.codex_fakes import jwt
+
+    claims = (
+        {"https://api.openai.com/auth": {"chatgpt_account_id": "workspace"}}
+        if token_kind == "chatgpt"
+        else {"https://api.openai.com/agent_identity": {}}
+    )
+    token = jwt(claims)
+    monkeypatch.setenv("AH_CX_TOKEN_alpha", token)
+    out = render.render_codex("rb-role")
+    login = out / "auth.json"
+
+    assert not login.is_symlink()
+    assert not login.exists()
+    active = {"CODEX_HOME": str(out), "AH_CX_TOKEN_alpha": token}
+    account = codex_router.credential(codex_router.CodexAccount("alpha", "AH_CX_TOKEN_alpha"), active)
+    child = codex_router.child_environment(account, active)
+    assert child["CODEX_HOME"] == str(out)
+    assert child["CODEX_ACCESS_TOKEN"] == token
+    assert codex_router.command(account, "codex", [])[1] == "--no-daemon"
+
+
+def test_codex_render_refreshes_when_the_operator_login_appears_or_disappears(world):
+    from scripts.profiles import render
+
+    absent = render.render_codex("rb-role")
+    assert render.render_codex("rb-role") is None
+    login = _write(world["home"] / ".codex" / "auth.json", "{}")
+
+    present = render.render_codex("rb-role")
+    assert present not in (None, absent)
+    assert (present / "auth.json").is_file()
+    assert (present / "auth.json").resolve() == login
+    assert render.render_codex("rb-role") is None
+
+    login.unlink()
+    removed = render.render_codex("rb-role")
+    assert removed not in (None, present)
+    assert not (removed / "auth.json").is_symlink()
+    assert not (removed / "auth.json").exists()
+    assert render.render_codex("rb-role") is None
 
 
 def test_codex_render_follows_operator_changes(world):
@@ -1105,6 +1951,7 @@ def test_codex_render_from_inside_a_profile_codex_home(world, monkeypatch):
     from scripts.profiles import render
 
     home = world["home"]
+    _write(home / ".codex" / "auth.json", "{}")
     monkeypatch.setenv("CODEX_HOME", str(render.rendered_root() / "rb-other" / "codex"))
 
     out = render.render_codex("rb-role")
@@ -1159,16 +2006,28 @@ def test_codex_render_leaves_an_old_plain_sources_file_of_an_earlier_layout(worl
     assert old.read_text() == '{"old": true}\n'
 
 
-@pytest.mark.parametrize("target", ["claude", "codex"])
-def test_render_leaves_global_install_untouched(world, target):
+@pytest.mark.parametrize("target", ["claude", "codex", "copilot"])
+def test_render_leaves_global_install_untouched(world, copilot_gateway, monkeypatch, target):
     from scripts.profiles import render
 
+    install = world["install"]
+    state = install._load_state()
+    state["targets"] = {
+        "global": {
+            t: {"profile": "operator", "settings_profile": "operator-settings"} for t in ("claude", "codex", "copilot")
+        }
+    }
+    install._save_state(state)
+    record = install.STATE_JSON.read_bytes()
+    monkeypatch.setenv("AGENTIHOOKS_SWARM", "proof-swarm")
+    monkeypatch.setenv("AGENTIHOOKS_PROFILE", "rb-role")
     home = world["home"]
     skip = home / ".agentihooks" / "profiles"
     before = _tree_hashes(home, skip)
 
     render.render(target, "rb-role")
 
+    assert install.STATE_JSON.read_bytes() == record
     assert _tree_hashes(home, skip) == before
 
 
@@ -1190,15 +2049,21 @@ def test_stamp_skips_fresh_render_and_redoes_stale(world, target):
 
 
 @pytest.mark.parametrize("target", ["claude", "codex"])
-def test_stamp_ignores_operator_plugins(world, target):
+def test_operator_plugins_redo_only_operator_homes(world, target):
     from scripts.profiles import render
 
+    _write(world["bundle"] / "profiles" / "engineer" / "profile.yml", "name: engineer\nextends: [rb-base]\n")
     settings = world["home"] / ".claude" / "settings.json"
     _write(settings, json.dumps({"enabledPlugins": {"mine@m": True}}))
     assert render.render(target, "rb-role") is not None
+    assert render.render(target, "engineer") is not None
 
     _write(settings, json.dumps({"enabledPlugins": {"mine@m": True, "later@m": True}}))
+    assert render.render(target, "engineer") is None
+    assert render.render(target, "rb-role") is not None
     assert render.render(target, "rb-role") is None
+    enabled = json.loads((render.profile_dir("rb-role") / "claude" / "settings.json").read_text())["enabledPlugins"]
+    assert enabled == {"mine@m": True, "later@m": True}
 
 
 @pytest.mark.parametrize("target", ["claude", "codex"])
@@ -1289,12 +2154,12 @@ def test_stamp_names_the_chain_role_defaults(world, monkeypatch):
     from scripts.profiles import plugins, render
 
     _write(world["bundle"] / "profiles" / "master" / "profile.yml", "name: master\nextends: [rb-role]\n")
-    assert render.stamp("rb-role")["plugins"] == {}
-    assert render.stamp("master")["plugins"] == {PLAYWRIGHT: True}
+    assert render.stamp("rb-role")["enabled_plugins"] == {}
+    assert render.stamp("master")["enabled_plugins"] == {PLAYWRIGHT: True}
     assert render.render("claude", "master") is not None
 
     monkeypatch.setitem(plugins.ROLE_PLUGINS, "master", ("other@m",))
-    assert render.stamp("master")["plugins"] == {"other@m": True}
+    assert render.stamp("master")["enabled_plugins"] == {"other@m": True}
     assert render.render("claude", "master") is not None
 
 
@@ -1346,7 +2211,7 @@ def test_running_profile_validates_its_launched_persona_after_other_profile_rend
     home = render.render(target, "rb-role")
     launched = binding.inspect(home, "rb-role", target)
     env = {"AGENTIHOOKS_PROFILE": "rb-role", binding.HOMES[target]: str(home), "XDG_RUNTIME_DIR": str(world["home"])}
-    init_agent._binding_request(SimpleNamespace(profile="rb-role"), target, "", env, [])
+    init_agent._binding_request(SimpleNamespace(profile="rb-role", defer_canary=False), target, "", env, [])
     report = Path(env[binding.REPORT])
     monkeypatch.setattr(binding, "process", lambda: (123, target, env, "default"))
     if validated:
@@ -1400,7 +2265,11 @@ def test_stamp_names_bundle_commit_and_chain(world):
         "profiles": profiles,
         "chain": chain,
         "overlays": [],
-        "plugins": {},
+        "enabled_plugins": {},
+        "mcp_urls": {},
+        "mcp_bearer_env": {},
+        "hosted_ledger": "",
+        "swarm_brain": None,
         "corrections": "",
     }
     assert render._stamp(None, []) == {
@@ -1409,7 +2278,11 @@ def test_stamp_names_bundle_commit_and_chain(world):
         "profiles": render._profiles_digest([]),
         "chain": [],
         "overlays": [],
-        "plugins": {},
+        "enabled_plugins": {},
+        "mcp_urls": {},
+        "mcp_bearer_env": {},
+        "hosted_ledger": "",
+        "swarm_brain": None,
         "corrections": "",
     }
     assert render._roots(None, [("rb-role", world["role"])]) == [world["role"]]
@@ -1418,8 +2291,8 @@ def test_stamp_names_bundle_commit_and_chain(world):
 def test_render_refuses_other_targets(world):
     from scripts.profiles import render
 
-    with pytest.raises(ValueError, match="^copilot per-run profiles are not supported$"):
-        render.render("copilot", "rb-role")
+    with pytest.raises(ValueError, match="^gemini per-run profiles are not supported$"):
+        render.render("gemini", "rb-role")
 
 
 def test_cli_renders_and_refuses(world, capsys):
@@ -1432,8 +2305,6 @@ def test_cli_renders_and_refuses(world, capsys):
     assert capsys.readouterr().out == "rb-role (claude) is up to date\n"
     assert render.main(["render", "rb-role", "--force"]) == 0
     assert capsys.readouterr().out.endswith(f"\nRendered rb-role (claude) → {out.resolve()}\n")
-    assert render.main(["render", "rb-role", "--target", "copilot"]) == 2
-    assert capsys.readouterr().err == "copilot per-run profiles are not supported\n"
     assert render.main(["render", "rb-missing", "--target", "codex"]) == 1
     assert capsys.readouterr().err == "ERROR: Profile 'rb-missing' not found\n"
 
@@ -1456,14 +2327,15 @@ def test_cli_usage(world, capsys):
     )
 
 
-def test_agentihooks_profile_dispatches_to_render(monkeypatch, capsys):
+def test_agentihooks_profile_dispatches_to_render(world, copilot_gateway, monkeypatch, capsys):
     from scripts import install
+    from scripts.profiles import render
 
     monkeypatch.setattr("sys.argv", ["agentihooks", "profile", "render", "rb-role", "--target", "copilot"])
     with pytest.raises(SystemExit) as exc:
         install.main()
-    assert exc.value.code == 2
-    assert capsys.readouterr().err == "copilot per-run profiles are not supported\n"
+    assert exc.value.code == 0
+    assert ROLE_TOOLSET in (render.rendered_root() / "rb-role" / "copilot" / "mcp-config.json").read_text()
 
 
 def test_agentihooks_help_lists_profile(monkeypatch, capsys):
@@ -1472,7 +2344,7 @@ def test_agentihooks_help_lists_profile(monkeypatch, capsys):
     monkeypatch.setattr("sys.argv", ["agentihooks", "--help"])
     with pytest.raises(SystemExit):
         install.main()
-    line = r"(?<!\S)profile Render a profile into its own home: render NAME --target claude\|codex \[--force\] \[--out DIR \[--bundle DIR\]\](?!\S)"
+    line = r"(?<!\S)profile Render a profile into its own home: render NAME --target claude\|codex\|copilot \[--force\] \[--out DIR \[--bundle DIR\]\](?!\S)"
     assert re.search(line, _flat(capsys.readouterr().out))
 
 
@@ -1953,6 +2825,13 @@ def overlays(world, tmp_path, monkeypatch):
     return profiles
 
 
+@pytest.fixture
+def recorded_assets(world, overlays, tmp_path, monkeypatch):
+    features = tmp_path / "package-features"
+    features.mkdir()
+    monkeypatch.setattr(world["install"], "PACKAGE_FEATURES_DIR", features)
+
+
 def test_overlays_follow_the_role_chain_and_the_always_on_overlays(world, overlays, named_brain):
     from scripts.profiles import render
 
@@ -2161,7 +3040,7 @@ def test_capability_overlay_refuses_invalid_requirement(world, overlays, monkeyp
 
 @pytest.mark.parametrize("target", ["claude", "codex"])
 def test_headed_overlay_keeps_the_vm_browser(world, overlays, monkeypatch, target):
-    from scripts.profiles import browser, render
+    from scripts.profiles import render
 
     _write(
         overlays / "headed" / "profile.yml",
@@ -2178,7 +3057,6 @@ def test_headed_overlay_keeps_the_vm_browser(world, overlays, monkeypatch, targe
     dirs = render._chain("rb-eng", ["headed"])
     servers = render._mcp_servers(target, world["bundle"], dirs)
     assert servers["playwright-headed"] == headed
-    assert servers["playwright-cmd"] == browser.spec()
     assert "playwright-ext-operator" not in servers
     normal = render._mcp_servers(target, world["bundle"], render._chain("rb-eng"))
     assert "playwright-headed" not in normal

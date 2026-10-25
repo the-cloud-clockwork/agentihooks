@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/api/client.py:scripts.swarm_ledger.api.client.x\u01c1ResourceClient\u01c1request__mutmut_9:6cbd362a2e80218b762227cb5787ef39c82ab983c095d993ccbf9bcae4096c5c": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "Omitting method uses Request.get_method inference: GET for None data, POST for encoded JSON. These are exactly the two branches of the removed explicit argument, preserving HTTP verb and returned JSON."
+  }
+}

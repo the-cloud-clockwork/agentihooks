@@ -1,0 +1,6 @@
+{
+  "hooks/observability/transcript.py:hooks.observability.transcript.x_mask_member__mutmut_8:b2767610ba1fd15af0ebdf8f402f7a23c29e41b6cfb90e8793a6e75ad8e11c90": {
+    "reader": "Standards",
+    "reason": "json.dumps checks ensure_ascii for truth only, so False and None produce identical output with non-ASCII characters preserved."
+  }
+}

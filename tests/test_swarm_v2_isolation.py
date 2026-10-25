@@ -27,7 +27,6 @@ from tests.swarm_v2_isolation import (
     sweep,
 )
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
 Failed = pytest.fail.Exception
 
 
@@ -181,7 +180,7 @@ def test_a_herdr_is_absent_by_default_and_the_swarm_session_does_not_leak_in():
         herdr_host._cli(["workspace", "list"], dict(os.environ))
     assert herdr_host.server_running(dict(os.environ)) is False
     inherited = sorted(n for n in os.environ if n.startswith("AGENTIHOOKS_"))
-    assert inherited == ["AGENTIHOOKS_SWARM_REDIS_URL"]
+    assert inherited == ["AGENTIHOOKS_SWARM_KEY_PREFIX", "AGENTIHOOKS_SWARM_REDIS_URL"]
 
 
 # T-SV2-FND-05-B
@@ -378,7 +377,7 @@ def test_c_an_interrupted_run_leaves_its_lock_and_the_next_run_takes_its_own(tmp
 
     server = fakeredis.FakeServer()
     redis = fakeredis.FakeRedis(server=server, decode_responses=True)
-    redis.set("agentihooks:swarm:demo:claim:t1", "live-agent")
+    redis.set("live:swarm:demo:claim:t1", "live-agent")
     first = build(tmp_path / "one", "run1")
     assert acquire(redis, first, "claim", "worker-1", 60_000)
     assert not acquire(redis, first, "claim", "worker-1-retry", 60_000)
@@ -389,9 +388,9 @@ def test_c_an_interrupted_run_leaves_its_lock_and_the_next_run_takes_its_own(tmp
     assert sorted(redis.keys()) == [
         "agentihooks-test-run1:lock:claim",
         "agentihooks-test-run1:owner",
-        "agentihooks:swarm:demo:claim:t1",
+        "live:swarm:demo:claim:t1",
     ]
-    assert redis.get("agentihooks:swarm:demo:claim:t1") == "live-agent"
+    assert redis.get("live:swarm:demo:claim:t1") == "live-agent"
     assert rejections() == {}
 
 

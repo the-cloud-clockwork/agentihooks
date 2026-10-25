@@ -13,11 +13,11 @@ The ledger front end (ledger pages, HOME and BIN) is set up for [Impeccable](htt
 | `PRODUCT.md` | Who uses the pages and why, product constraints |
 | `DESIGN.md` | The visual system: tokens, components, rules |
 | `.impeccable/design.json` | Sidecar for the Impeccable live panel |
-| `.impeccable/live/config.json` | Live mode targets `scripts/swarm_ledger/template.html` and `home.html` |
+| `.impeccable/live/config.json` | Live mode targets the page shells `scripts/swarm_ledger/shell.html` and `home.html` |
 
 ## Rules
 
-- **Never run live mode in the primary checkout.** The shared ledger server on port 8765 runs from `~/dev/tcc-ecosystem/agentihooks`. Live mode writes a script tag into `template.html` and `home.html`, so every open ledger would reload with it. Work in a worktree with a scratch server.
+- **Never run live mode in the primary checkout.** The shared ledger server on port 8765 runs from `~/dev/tcc-ecosystem/agentihooks`. Live mode writes a script tag into `shell.html` and `home.html`, so every open ledger would reload with it. Work in a worktree with a scratch server.
 - The scratch server reads copies of ledgers, never `~/development-ledger` itself, so a click on the page cannot steer a live swarm.
 - Colours change only in `palette.css`. `DESIGN.md` lists the other rules.
 
@@ -29,13 +29,14 @@ In a terminal, one command per line:
 cd ~/dev/worktrees/agentihooks/<your-worktree>
 export LEDGER_DIR=$HOME/scratchpad/agentihooks/ledger-design
 export LEDGER_PORT=8790
+export LEDGER_IMPECCABLE_LIVE=1
 mkdir -p "$LEDGER_DIR"
-cp ~/development-ledger/<slug>.json "$LEDGER_DIR/design-copy.json"
-cp ~/development-ledger/<slug>.html "$LEDGER_DIR/design-copy.html"
+LEDGER_DIR=$HOME/development-ledger agentihooks ledger storage export <slug> --out "$LEDGER_DIR/design-copy.json"
+agentihooks ledger storage import "$LEDGER_DIR/design-copy.json"
 ~/dev/tcc-ecosystem/.venv/bin/python scripts/swarm_ledger/ledger_server.py --serve
 ```
 
-`LEDGER_PORT` takes effect only because `LEDGER_DIR` is not `~/development-ledger`. The server reloads itself when a `.py` or `.html` file under `scripts/swarm_ledger` changes.
+`LEDGER_PORT` takes effect only because `LEDGER_DIR` is not `~/development-ledger`. `LEDGER_IMPECCABLE_LIVE=1` adds `http://localhost:8400`, the Impeccable live server, to the page policy's `script-src` and `connect-src`; without it the policy blocks the injected script. Impeccable takes the next free port when 8400 is busy, and the policy blocks that port, so free 8400 before starting live mode. The server ignores the setting when `LEDGER_DIR` is `~/development-ledger` or the port is 8765. The server reloads itself when a `.py` or `.html` file under `scripts/swarm_ledger` changes.
 
 In a second terminal, start Claude Code in the same worktree and type:
 
@@ -49,8 +50,8 @@ Then open the page the agent names, for example:
 - HOME: `http://127.0.0.1:8790/`
 - BIN: `http://127.0.0.1:8790/?view=bin`
 
-The Impeccable bar appears at the bottom of the page. Select an element, pick an action, and accept a variant. The agent writes the accepted variant into `template.html` or `home.html` and moves its colours into `palette.css`.
+The Impeccable bar appears at the bottom of the page. Select an element, pick an action, and accept a variant. The agent writes the accepted variant into `shell.html`, `home.html` or the stylesheets under `static/css/`, and moves its colours into `palette.css`.
 
 ## End a live session
 
-Close the tab or say "exit live" to the agent. It runs `impeccable live-server stop`, which removes the injected script. Before you commit, `git status` must not show the live script in `template.html` or `home.html`. Stop the scratch server with Ctrl+C.
+Close the tab or say "exit live" to the agent. It runs `impeccable live-server stop`, which removes the injected script. Before you commit, `git status` must not show the live script in `shell.html` or `home.html`. Stop the scratch server with Ctrl+C.

@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/naming.py:scripts.swarm.naming.x_session_base__mutmut_25:ed4b344397b1099febd47535f333babb792d1a11ce0427de3ecff5bad9ad6416": {
+    "reader": "Standards",
+    "reason": "The placeholder has no hex characters after lowering and stripping, so it acts as a missing id."
+  }
+}

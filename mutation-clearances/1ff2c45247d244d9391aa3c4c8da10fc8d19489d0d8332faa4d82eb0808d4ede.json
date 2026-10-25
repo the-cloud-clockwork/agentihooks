@@ -1,0 +1,6 @@
+{
+  "scripts/gc_cli.py:scripts.gc_cli.x__parser__mutmut_51:0fb2ebf5fd7039d92d540422513bcfed350be43c733fee9070b4ae07254f5666": {
+    "reader": "Standards",
+    "reason": "The check default only feeds truth tests, where None and the empty string act the same."
+  }
+}

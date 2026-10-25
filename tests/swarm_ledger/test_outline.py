@@ -11,7 +11,6 @@ SCRIPTS = Path(__file__).resolve().parents[2] / "scripts" / "swarm_ledger"
 sys.path.insert(0, str(SCRIPTS))
 import new_ledger  # noqa: E402
 
-TEMPLATE = SCRIPTS / "template.html"
 CONTENT = {
     "title": "Demo",
     "overview": "o",
@@ -39,7 +38,12 @@ class Outline(unittest.TestCase):
     def test_outline_lists_each_section_and_its_item_titles(self):
         doc = new_ledger.build_doc(CONTENT)
         script = (
-            function_source("itemState")
+            "function closedLeft() { return 0; }\n"
+            "function viewItems(list, all) { return all; }\n"
+            "function viewCount() { return ''; }\n"
+            + function_source("itemState")
+            + "\n"
+            + function_source("outlineEntry")
             + "\n"
             + function_source("outlineOf")
             + f"\nprocess.stdout.write(JSON.stringify(outlineOf({json.dumps(doc)}, {json.dumps(HEADS)})));"
@@ -60,7 +64,15 @@ class Outline(unittest.TestCase):
                 {
                     "id": "sec-tasks",
                     "title": "Swarm tasks · 1 open",
-                    "items": [{"id": "item-tasks-t1", "title": "t1 Write the test", "state": "open"}],
+                    "items": [
+                        {
+                            "id": "item-tasks-t1",
+                            "title": "t1 Write the test",
+                            "state": "open",
+                            "status": "open",
+                            "phase": "p1",
+                        }
+                    ],
                 },
                 {
                     "id": "sec-questions",
@@ -124,10 +136,15 @@ class Outline(unittest.TestCase):
             f"const SECS = {json.dumps(sections)};\n"
             "const document = { querySelectorAll: () => SECS.map((s) => ({ id: s.id, hidden: false,"
             " dataset: { outline: s.list }, querySelector: () => ({ firstChild: { textContent: s.title } }) })) };\n"
+            "function closedLeft() { return 0; }\n"
+            "function viewItems(list, all) { return all; }\n"
+            "function viewCount() { return ''; }\n"
         )
         script = (
             shim
             + function_source("itemState")
+            + "\n"
+            + function_source("outlineEntry")
             + "\n"
             + function_source("outlineOf")
             + "\n"

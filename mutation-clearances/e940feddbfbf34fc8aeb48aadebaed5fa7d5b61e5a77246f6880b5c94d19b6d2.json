@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/ledger_artifacts.py:scripts.swarm_ledger.ledger_artifacts.x_refusal__mutmut_3:161ada840a807cf082b579ab477244156fed6a74f0c19b2283831dddc27a502f": {
+    "reader": "Standards reader",
+    "reason": "Absent membership returns before member is used; present membership ignores the get default, so changing that default preserves output."
+  }
+}

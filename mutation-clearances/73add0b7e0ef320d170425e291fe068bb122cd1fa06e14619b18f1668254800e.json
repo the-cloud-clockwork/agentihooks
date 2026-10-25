@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/storage_migration/__init__.py:scripts.swarm_ledger.storage_migration.x_import_directory__mutmut_50:1769306d531c2d7c69d3249c1ab079e886e0c7016f0f374507f85964f7e19bf2": {
+    "reader": "Standards",
+    "reason": "import_directory imports core and load_state from the same repository.file module. Runtime identity check confirms its explicit core argument is exactly load_state default core; mutating module attributes affects that same object in both versions. Omitting the duplicate argument changes no loader behavior."
+  }
+}

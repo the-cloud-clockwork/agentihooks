@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_v2/api/tasks.py:scripts.swarm_v2.api.tasks.x\u01c1WorkerGate\u01c1apply__mutmut_4:e3ea51cfcc4fb13057f7d5740f02811bc13f85547d03b34d275a304c2abbd42b": {
+    "reader": "Standards reader",
+    "reason": "False and None have identical truthiness in this sole conditional use."
+  }
+}

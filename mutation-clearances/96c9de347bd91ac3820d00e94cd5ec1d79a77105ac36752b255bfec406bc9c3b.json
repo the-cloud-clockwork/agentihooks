@@ -1,0 +1,6 @@
+{
+  "hooks/context/operator_words.py:hooks.context.operator_words.x_matching__mutmut_23:db561bff26d5521c89a1a73b6b44badd7a9e7d2474480efd02b7e919c1c61f03": {
+    "reader": "Standards",
+    "reason": "Only ASCII WORDS, ENTRIES, NAME, NORM and INSTR casing changes; SQLite resolves the same columns and case-insensitive built-in instr function with unchanged bound quote values."
+  }
+}

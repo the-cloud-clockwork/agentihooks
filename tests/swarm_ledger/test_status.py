@@ -1,4 +1,3 @@
-import json
 import sys
 import unittest
 from pathlib import Path
@@ -10,6 +9,8 @@ import ledger_core as core  # noqa: E402
 import ledger_gate as gate  # noqa: E402
 import ledger_link  # noqa: E402
 import new_ledger  # noqa: E402
+
+from tests.swarm_ledger import legacy_page  # noqa: E402
 
 SLUG = "status-2026-01-01"
 
@@ -23,9 +24,9 @@ def make_ledger():
         "questions": [{"text": "which broker?"}],
         "followups": [{"text": "check disk"}],
     }
-    html_path, json_path = core.paths(SLUG)
+    html_path, json_path = legacy_page.paths(SLUG, core)
     core.LEDGER_DIR.mkdir(parents=True, exist_ok=True)
-    html_path.write_text(new_ledger.render(new_ledger.build_doc(content), SLUG, 8765), encoding="utf-8")
+    html_path.write_text(legacy_page.render(new_ledger.build_doc(content), SLUG, 8765), encoding="utf-8")
     json_path.unlink(missing_ok=True)
     state, _ = core.sync(SLUG)
     core.sync(
@@ -96,7 +97,7 @@ class Style(unittest.TestCase):
     def test_chat_and_comment_writes_accept_issue_links(self):
         make_ledger()
         text = "The issue is https://github.com/the-cloud-clockwork/agentihooks/issues/613"
-        ops = [post("eng", text, 1, "chat"), post("eng", text, 2, "phases/p1/comments")]
+        ops = [post("eng", text, 1, "chat", to="operator"), post("eng", text, 2, "phases/p1/comments")]
         core.check_body({"ops": ops})
         state, _ = core.sync(SLUG, ops=ops)
         self.assertEqual([entry["text"] for entry in state["chat"]], [text])
@@ -137,6 +138,40 @@ class Comments(unittest.TestCase):
         core.sync(SLUG, ops=[post("eng", "Started the fix.", 1, self.thread)])
         core.sync(SLUG, ops=[agent("set", "eng", 1, path=f"{self.item}/done", value=True, status="Fixed and merged.")])
         self.assertEqual([e["text"] for e in self.entries()], ["Fixed and merged."])
+
+    def test_queue_notices_append_and_are_never_amended(self):
+        removed, requeued, merged = "The swarm took it out of the queue.", "The swarm queued it again.", "Merged."
+        core.sync(SLUG, ops=[post("swarm", removed, 1, self.thread, notice=True)])
+        core.sync(SLUG, ops=[post("swarm", requeued, 2, self.thread, notice=True)])
+        core.sync(SLUG, ops=[post("swarm", merged, 3, self.thread)])
+        entries = self.entries()
+        self.assertEqual([e["text"] for e in entries], [removed, requeued, merged])
+        self.assertEqual([e.get("notice") for e in entries], [True, True, None])
+        self.assertFalse(any("edited_at" in e for e in entries))
+
+    def test_a_repeated_notice_id_appends_once(self):
+        core.sync(SLUG, ops=[post("swarm", "Queued again.", 1, self.thread, notice=True)])
+        core.sync(SLUG, ops=[post("swarm", "Queued again.", 1, self.thread, notice=True)])
+        self.assertEqual(len(self.entries()), 1)
+
+    def test_notice_rides_only_on_an_agent_comment_add(self):
+        core.check_body({"ops": [post("swarm", "Queued again.", 1, self.thread, notice=True)]})
+        refusal = "^notice rides only on an agent add to a comment thread, as true, without outcome or to$"
+        for op in (
+            post("boss", "Queued again.", 2, "chat", notice=True),
+            {"op": "add", "thread": self.thread, "id": "op-1", "text": "why?", "notice": True},
+            post("swarm", "Queued again.", 3, self.thread, notice="yes"),
+            post("swarm", "Queued again.", 4, self.thread, notice=True, to="operator"),
+            post("swarm", "Queued again.", 5, self.thread, notice=True, outcome="done"),
+        ):
+            with self.assertRaisesRegex(ValueError, refusal):
+                core.check_body({"ops": [op]})
+
+    def test_the_api_takes_a_notice_comment(self):
+        from scripts.swarm_ledger.api import schemas
+
+        ops = [post("swarm", "Queued again.", 1, self.thread, notice=True)]
+        self.assertEqual(schemas.check_operations({"operation_id": "o1", "ops": ops, "guards": {}}, core, ()), ops)
 
     def test_noisy_phase_status_is_refused(self):
         with self.assertRaises(ValueError):
@@ -226,31 +261,6 @@ class Scope(unittest.TestCase):
         doc = {"phases": [{"done": True}, {"out_of_scope": True}], "followups": [{"out_of_scope": True}]}
         self.assertTrue(gate.closed(doc))
         self.assertFalse(gate.closed({"phases": [{"done": False}], "followups": []}))
-
-
-class Seed(unittest.TestCase):
-    def setUp(self):
-        make_ledger()
-
-    def seed_comment(self, entry):
-        html_path = core.paths(SLUG)[0]
-        html = html_path.read_text(encoding="utf-8")
-        seed = core.loads(core.SEED_RE.search(html).group(2))
-        rev = seed.pop("_rev")
-        seed["phases"][0]["comments"].append(entry)
-        html_path.write_text(
-            core.SEED_RE.sub(lambda m: m.group(1) + core.seed_text(seed, rev) + m.group(3), html, count=1),
-            encoding="utf-8",
-        )
-        return core.sync(SLUG)[0]
-
-    def test_seed_comments_amend_and_noise_becomes_a_warning(self):
-        self.seed_comment({"id": "eng-1", "by": "eng", "text": "Started."})
-        state = self.seed_comment({"id": "eng-2", "by": "eng", "text": "Fixed."})
-        self.assertEqual([e["text"] for e in live(state["phases"][0]["comments"])], ["Fixed."])
-        state = self.seed_comment({"id": "eng-3", "by": "eng", "text": "Head 4a5414f78 green."})
-        self.assertEqual([e["text"] for e in live(state["phases"][0]["comments"])], ["Fixed."])
-        self.assertTrue(any("refused" in w for w in state["_meta"]["warnings"]), json.dumps(state["_meta"]["warnings"]))
 
 
 class OperatorScope(unittest.TestCase):

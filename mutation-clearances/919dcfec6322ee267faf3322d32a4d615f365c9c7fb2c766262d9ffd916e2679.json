@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/api/routes.py:scripts.swarm_ledger.api.routes.x_body__mutmut_24:8992015cecb6d3f6d21b744b2c95b15be085e1e6bee32f8ee6a68e36de847f21": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "HTTPMessage.get compares Content-Length field names case insensitively, so the same length, integer conversion, byte read and response follow."
+  }
+}

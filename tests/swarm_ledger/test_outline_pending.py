@@ -1,19 +1,14 @@
 import json
 import re
-import sys
 from pathlib import Path
 
 import pytest
 
-from tests.swarm_ledger.ledger_page import fulfill_events, is_events, serve_modules
+from tests.swarm_ledger.ledger_page import fulfill_events, is_events, loaded, page_source, serve_modules, shell_html
 
 SCRIPTS = Path(__file__).resolve().parents[2] / "scripts" / "swarm_ledger"
-sys.path.insert(0, str(SCRIPTS))
-import new_ledger  # noqa: E402
-
-TEMPLATE = SCRIPTS / "template.html"
 URL = "http://ledger.test/swarm-buildout"
-API = "http://ledger.test/api/swarm-buildout"
+API = "http://ledger.test/api/v1/ledgers/__LEDGER_SLUG__/saves"
 
 
 def notice(nid, item, text):
@@ -57,7 +52,7 @@ def server():
 @pytest.fixture
 def tab(browser, server):
     context = browser.new_context(viewport={"width": 1600, "height": 900})
-    html = new_ledger.render(DOC, "swarm-buildout", 8765)
+    html = shell_html()
 
     def handle(route):
         request = route.request
@@ -82,6 +77,8 @@ def tab(browser, server):
     page = context.new_page()
     page.on("dialog", lambda dialog: dialog.accept())
     page.goto(URL)
+    loaded(page)
+    page.click("#bell")
     yield page
     context.close()
 
@@ -105,6 +102,14 @@ def clear(tab, text):
     tab.wait_for_timeout(50)
 
 
+def settled(tab, expected):
+    for _ in range(60):
+        if sorted(marked(tab)) == expected:
+            break
+        tab.wait_for_timeout(100)
+    return sorted(marked(tab))
+
+
 def test_a_pending_notification_puts_the_plus_on_its_item_only(tab):
     assert sorted(marked(tab)) == ["item-phases-p2", "sec-followups"]
 
@@ -113,14 +118,21 @@ def test_an_item_keeps_the_plus_until_its_last_notification_is_cleared(tab):
     clear(tab, "first on the follow up")
     assert sorted(marked(tab)) == ["item-phases-p2", "sec-followups"]
     clear(tab, "second on the follow up")
-    assert marked(tab) == ["item-phases-p2"]
+    assert settled(tab, ["item-phases-p2"]) == ["item-phases-p2"]
 
 
 def test_clear_all_removes_every_plus(tab):
     assert marked(tab)
     tab.evaluate("""() => document.getElementById("notif-clear-all").click()""")
+    assert settled(tab, []) == []
+
+
+def test_a_cleared_notification_stays_cleared_when_the_save_is_acknowledged(tab):
+    with tab.expect_response(lambda response: response.request.method == "PUT"):
+        tab.evaluate("""() => document.getElementById("notif-clear-all").click()""")
     tab.wait_for_timeout(50)
     assert marked(tab) == []
+    assert tab.evaluate("""() => document.getElementById("bell-badge").hidden""") is True
 
 
 def test_a_notification_from_a_page_update_adds_the_plus_live(tab, server):
@@ -140,7 +152,7 @@ def test_the_plus_takes_a_palette_colour_and_keeps_the_state_dot(tab):
           return { plus: getComputedStyle(a, "::after").color, dot: getComputedStyle(a, "::before").color };
         }"""
     )
-    page = TEMPLATE.read_text(encoding="utf-8")
+    page = page_source()
     rule = re.search(r"\.outline a\.pending::after\s*\{([^}]*)\}", page)
     assert rule and "color: var(--pending)" in rule.group(1)
     assert re.search(r"--pending:\s*var\(--[\w-]+\);", (SCRIPTS / "palette.css").read_text(encoding="utf-8"))

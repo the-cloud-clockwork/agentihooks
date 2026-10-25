@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/api/admin.py:scripts.swarm_ledger.api.admin.x_layout__mutmut_7:9200b3e2329c7398574af4e7f13eb7460cc4f358adaf11aad567ad6131d51de3": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "HTTPMessage compares header field names case insensitively. Only the Origin lookup spelling changes; absent and present values, allowlist decision, layout schema validation, write delegation and response remain identical."
+  }
+}

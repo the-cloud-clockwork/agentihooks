@@ -1,0 +1,6 @@
+{
+  "scripts/init_agent.py:scripts.init_agent.x__parser__mutmut_38:dd74377a12a95f22c8640864fd50400c5360ab0147419527182ddc371f246b9a": {
+    "reader": "Standards reader for cxc2",
+    "reason": "Dropping the --seat help kwarg removes only its --help description; the option's type, default and dest are unchanged."
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/repository/file.py:scripts.swarm_ledger.repository.file.x_sync__mutmut_173:e0658b5ed95f240af894036168399f1069af8f3f0311bfb3bb634dea40092275": {
+    "reader": "Standards",
+    "reason": "Python JSONEncoder selects escaping by ensure_ascii truthiness; False and None produce the same Unicode storage bytes."
+  }
+}

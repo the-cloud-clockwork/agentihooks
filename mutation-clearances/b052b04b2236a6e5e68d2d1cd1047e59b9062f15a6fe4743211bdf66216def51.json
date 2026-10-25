@@ -1,0 +1,6 @@
+{
+  "scripts/ci_mutation/measured.py:scripts.ci_mutation.measured.x_measured_costs__mutmut_47:6aafe8ff378f009deedc526b2f99ab4015f26e71c4c2f2d492c3267279b9b6cd": {
+    "reader": "standards_reader",
+    "reason": "Standards reader independently verified: the empty-function default changes from zero to one, but the outer max always includes sixty, so every supported input returns the same fallback cost. Nonempty values ignore the default."
+  }
+}
