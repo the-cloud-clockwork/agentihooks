@@ -1012,6 +1012,7 @@ def test_master_launch_uses_subscription_fallback_without_remote_control(
     from scripts import master_login_chain as chain
     from scripts.hive import account_slots
     from scripts.routing import native_login
+    from scripts.swarm import operator_email
 
     _seed(rendered)
     (rendered / "settings.json").write_text('{"forceLoginMethod":"claudeai","hooks":{"Stop":[]}}')
@@ -1035,6 +1036,8 @@ def test_master_launch_uses_subscription_fallback_without_remote_control(
 
     monkeypatch.setattr(native_login, "check", invalid)
     monkeypatch.setattr(chain, "authorize", lambda *_: outcome)
+    sent = []
+    monkeypatch.setattr(operator_email, "send", lambda *args: sent.append(args) or "")
     monkeypatch.setattr(router, "select_credential", select)
     monkeypatch.setattr(account_sessions, "sessions_by_account", lambda: {})
 
@@ -1049,6 +1052,7 @@ def test_master_launch_uses_subscription_fallback_without_remote_control(
         ["--remote-control", "master proof", "--remote-control-session-name-prefix", "proof", "--model", "opus"]
     )
     login.launch_claude("/opt/claude", args, env, str(report))
+    assert [subject for subject, *_ in sent] == ["Master login fell back to token routing"]
     assert capsys.readouterr().out == "[agenti] account=workeratexample_com route=token-fallback remote-control=off\n"
     printed.assert_called_once_with(
         "[agenti] account=workeratexample_com route=token-fallback remote-control=off", flush=True
