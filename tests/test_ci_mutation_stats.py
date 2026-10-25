@@ -180,7 +180,9 @@ def test_statistics_collect_runtime_dependencies_with_plugin_discovery_disabled(
     )
     result = json.loads(output.read_text())
     assert exported == [None]
-    assert (tmp_path / "part.coveragerc").read_text() == f"[run]\ndata_file = {(tmp_path / 'part.coverage').resolve()}\n"
+    assert (
+        tmp_path / "part.coveragerc"
+    ).read_text() == f"[run]\ndata_file = {(tmp_path / 'part.coverage').resolve()}\n"
     assert result["status"] == 0
     assert result["durations"] == {node: 1}
     assert "scripts/sample.py" in result["dependencies"][node]
