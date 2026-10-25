@@ -11,8 +11,15 @@ from scripts.ci_cpu_quota import quota_cpus, worker_count
 from scripts.ci_mutation.runner import prepare_workspace
 
 
-@pytest.mark.parametrize("stage", ["source", "workspace", "mutants"])
-def test_full_selection_reads_the_same_repository_inputs(tmp_path, stage):
+@pytest.mark.parametrize(
+    "stage, group",
+    [
+        pytest.param(stage, group, id=f"{stage}-{group}")
+        for stage in ("source", "workspace", "mutants")
+        for group in range(1, 5)
+    ],
+)
+def test_full_selection_reads_the_same_repository_inputs(tmp_path, stage, group):
     root = Path(__file__).resolve().parents[1]
     tests = sorted(path.relative_to(root).as_posix() for path in (root / "tests").rglob("test_*.py"))
     baseline = root
@@ -40,7 +47,11 @@ def test_full_selection_reads_the_same_repository_inputs(tmp_path, stage):
             "tests",
             "-q",
             "-n",
-            str(max(1, worker_count(os.cpu_count() or 1, quota_cpus()) // 3)),
+            str(worker_count(os.cpu_count() or 1, quota_cpus())),
+            "--splits",
+            "4",
+            "--group",
+            str(group),
             "--dist",
             "loadgroup",
             "--tb=short",
