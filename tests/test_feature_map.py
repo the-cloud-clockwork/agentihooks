@@ -186,7 +186,7 @@ def test_cli_reports_the_complete_validated_feature_count(mapped_repo, monkeypat
 def test_duplicate_rule_ids_cannot_hide_a_rule(mapped_repo):
     root, path, _ = mapped_repo
     (root / ".semgrep/features/copy.yml").write_text("rules:\n  - id: feature-login\n")
-    with pytest.raises(ValueError, match="duplicate feature rule"):
+    with pytest.raises(ValueError, match="^duplicate feature rule id$"):
         feature_map.validate(root, path)
 
 
@@ -194,7 +194,7 @@ def test_duplicate_rule_ids_cannot_hide_a_rule(mapped_repo):
 def test_feature_map_requires_an_entry_list(mapped_repo, entries):
     root, path, _ = mapped_repo
     path.write_text(json.dumps({"features": entries}))
-    with pytest.raises(ValueError, match="features must be a nonempty list"):
+    with pytest.raises(ValueError, match="^features must be a nonempty list$"):
         feature_map.validate(root, path)
 
 
@@ -238,6 +238,42 @@ def test_python_package_entry_point_can_be_a_live_check(mapped_repo):
     entry["live_check"] = ["python3", "-m", "scripts.live"]
     path.write_text(json.dumps({"features": [entry]}))
     assert feature_map.validate(root, path) == 1
+
+
+def test_only_rule_documents_are_discovered_alongside_nested_fixtures(mapped_repo):
+    root, path, _ = mapped_repo
+    rules = root / ".semgrep/features"
+    nested = rules / "nested"
+    nested.mkdir()
+    (rules / "README.md").write_text("Feature rules and fixtures")
+    (nested / "login.test.yaml").write_text("example: regression\n---\nexample: passing\n")
+    (nested / "login.test.yml").write_text("example: regression\n---\nexample: passing\n")
+    assert feature_map.validate(root, path) == 1
+
+
+def test_other_pytest_decorators_are_not_feature_metadata(mapped_repo):
+    root, path, _ = mapped_repo
+    (root / "tests/test_login.py").write_text(
+        'import pytest\n@pytest.mark.feature("login")\n@pytest.mark.parametrize("value", [1])\n'
+        "@pytest.mark.unit\ndef test_shared(value):\n    assert value\n"
+    )
+    assert feature_map.validate(root, path) == 1
+
+
+def test_uppercase_python_module_names_are_valid_live_targets(mapped_repo):
+    root, path, entry = mapped_repo
+    (root / "scripts/Live.py").write_text("print('ok')\n")
+    entry["live_check"] = ["python", "-m", "scripts.Live"]
+    path.write_text(json.dumps({"features": [entry]}))
+    assert feature_map.validate(root, path) == 1
+
+
+def test_non_string_live_arguments_cannot_enter_the_doctor_command(mapped_repo):
+    root, path, entry = mapped_repo
+    entry["live_check"] = ["bash", 42]
+    path.write_text(json.dumps({"features": [entry]}))
+    with pytest.raises(ValueError, match="live_check"):
+        feature_map.validate(root, path)
 
 
 @pytest.mark.parametrize(
