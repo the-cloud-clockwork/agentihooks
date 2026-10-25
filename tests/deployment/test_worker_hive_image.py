@@ -2,9 +2,7 @@ import io
 import json
 import os
 import re
-import runpy
 import subprocess
-import sys
 import tomllib
 import urllib.request
 from pathlib import Path
@@ -14,11 +12,12 @@ import yaml
 from packaging.requirements import Requirement
 from packaging.utils import canonicalize_name
 
+from scripts.swarm_v2.worker_base_revision import pinned_revision
+
 pytestmark = pytest.mark.unit
 ROOT = Path(__file__).resolve().parents[2]
 PROOF = ROOT / "deploy/worker/kind-proof.sh"
 CURRENT = ROOT / "deploy/worker/base-current.sh"
-REVISION = ROOT / "scripts/swarm_v2/worker_base_revision.py"
 BASE = "ghcr.io/the-cloud-clockwork/agentihooks-worker:dev"
 PINNED = "ghcr.io/the-cloud-clockwork/agentihooks-worker@sha256:amd64"
 INPUTS = "docker/swarm-node scripts/swarm_v2/worker_image.py profiles docs/swarm-v2/schemas"
@@ -211,6 +210,7 @@ def registry(monkeypatch, labels, *, index=True):
         f"{image}/manifests/dev": (
             {
                 "manifests": [
+                    {"digest": "sha256:unplatformed"},
                     {"digest": "sha256:attestation", "platform": {"architecture": "unknown", "os": "unknown"}},
                     {"digest": "sha256:amd64", "platform": {"architecture": "amd64", "os": "linux"}},
                 ]
@@ -225,20 +225,24 @@ def registry(monkeypatch, labels, *, index=True):
     seen = []
 
     def urlopen(request, timeout):
+        assert timeout == 30
+        assert request.headers["Accept"] == (
+            "application/vnd.oci.image.index.v1+json, application/vnd.oci.image.manifest.v1+json, "
+            "application/vnd.docker.distribution.manifest.list.v2+json, "
+            "application/vnd.docker.distribution.manifest.v2+json"
+        )
         path = request.full_url.removeprefix("https://ghcr.io")
         seen.append((path, request.headers.get("Authorization"), request.unredirected_hdrs.get("Authorization")))
         return Reply(*blobs[path])
 
     monkeypatch.setattr(urllib.request, "urlopen", urlopen)
-    monkeypatch.setattr(sys, "argv", [str(REVISION), BASE])
     return seen
 
 
 @pytest.mark.parametrize("index", [True, False])
-def test_base_revision_reads_the_amd64_label_from_the_registry_without_pulling(monkeypatch, capsys, index):
+def test_base_revision_reads_the_amd64_label_from_the_registry_without_pulling(monkeypatch, index):
     seen = registry(monkeypatch, {"org.opencontainers.image.revision": "rev123"}, index=index)
-    runpy.run_path(str(REVISION), run_name="__main__")
-    assert capsys.readouterr().out == f"{PINNED} rev123\n"
+    assert pinned_revision(BASE) == (PINNED, "rev123")
     assert seen[0][1:] == (None, None)
     assert {auth for _, auth, _ in seen} == {None}
     assert {auth for _, _, auth in seen[1:]} == {"Bearer t"}
@@ -259,13 +263,13 @@ def test_base_revision_refuses_an_index_without_an_amd64_image(monkeypatch):
 
     monkeypatch.setattr(urllib.request, "urlopen", without_amd64)
     with pytest.raises(SystemExit, match="has no amd64 image$"):
-        runpy.run_path(str(REVISION), run_name="__main__")
+        pinned_revision(BASE)
 
 
 def test_base_revision_refuses_a_base_without_its_revision_label(monkeypatch):
     registry(monkeypatch, None)
     with pytest.raises(SystemExit, match="no amd64 image with a revision label"):
-        runpy.run_path(str(REVISION), run_name="__main__")
+        pinned_revision(BASE)
 
 
 def test_the_worker_base_labels_its_source_revision():
