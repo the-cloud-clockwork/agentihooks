@@ -464,24 +464,13 @@ def test_prompt_reminders_use_the_configured_limit_uncompressed_and_unlogged(mon
     ]
 
 
-def test_a_typed_prompt_uncaps_only_its_reply_turn(monkeypatch, capsys):
-    expected = "Operator not present: replies stay within 20 words."
-    typed_notice = "Operator present for this turn: reply without a word limit."
+def test_a_typed_prompt_other_than_operator_on_keeps_the_limit(monkeypatch, capsys):
     run_prompt(monkeypatch, capsys, "s1", "You are master@a1-1, the master of swarm demo")
-    run_prompt(monkeypatch, capsys, "s1", delivery.marked("continue"))
     out = run_prompt(monkeypatch, capsys, "s1", "Explain the result")
-    assert typed_notice in out
-    assert expected not in out
-    assert [operator_mode.reminder("s1", SWARM) for _ in range(4)] == [""] * 4
+    assert "Operator present for this turn" not in out
+    assert REMINDER in out
+    assert [operator_mode.reminder("s1", SWARM) for _ in range(2)] == ["", REMINDER]
     assert not operator_mode.present("s1", SWARM)
-    assert operator_mode.question_block("AskUserQuestion", "s1", SWARM) == MASTER_ASK.format(
-        slug="demo", name="master@a1-1"
-    )
-    assert [operator_mode.reminder("s2", SWARM) for _ in range(2)] == ["", expected]
-    next_turn = run_prompt(monkeypatch, capsys, "s1", delivery.marked("continue"))
-    assert expected in next_turn
-    assert typed_notice not in next_turn
-    assert [operator_mode.reminder("s1", SWARM) for _ in range(2)] == ["", expected]
     assert operator_mode.question_block("AskUserQuestion", "s1", SWARM) == MASTER_ASK.format(
         slug="demo", name="master@a1-1"
     )
@@ -512,11 +501,10 @@ def test_the_typed_turn_window_never_opens_the_question_tool(monkeypatch):
     )
 
 
-def test_the_typed_turn_notice_is_exact_and_operator_off_gives_only_the_away_notice(monkeypatch):
+def test_a_typed_prompt_gets_the_away_notice_and_operator_off_the_off_notice(monkeypatch):
     for key, value in SWARM.items():
         monkeypatch.setenv(key, value)
-    expected = "Operator present for this turn: reply without a word limit."
-    assert operator_mode.notice({"session_id": "s1", "prompt": "Explain"}, True, now=100) == expected
+    assert operator_mode.notice({"session_id": "s1", "prompt": "Explain"}, True, now=100) == REMINDER
     assert operator_mode.notice({"session_id": "s1", "prompt": "operator off"}, True, now=101) == (
         "Operator off: the operator is not present in this pane.\n" + REMINDER
     )
@@ -554,13 +542,12 @@ def test_a_typed_turn_does_not_expire_explicit_operator_presence(monkeypatch):
     assert [operator_mode.reminder("s1", SWARM, now=1100 + WINDOW) for _ in range(2)] == ["", ""]
 
 
-def test_a_typed_turn_while_away_lifts_the_limit_only_inside_the_window(monkeypatch):
+def test_a_typed_turn_while_away_never_lifts_the_limit(monkeypatch):
     for key, value in SWARM.items():
         monkeypatch.setenv(key, value)
-    typed_notice = "Operator present for this turn: reply without a word limit."
-    assert operator_mode.notice({"session_id": "s1", "prompt": "Explain"}, True, now=100) == typed_notice
-    assert [operator_mode.reminder("s1", SWARM, now=100 + WINDOW - 1) for _ in range(2)] == ["", ""]
-    assert [operator_mode.reminder("s1", SWARM, now=100 + WINDOW) for _ in range(2)] == ["", REMINDER]
+    assert operator_mode.notice({"session_id": "s1", "prompt": "Explain"}, True, now=100) == REMINDER
+    assert [operator_mode.reminder("s1", SWARM, now=101) for _ in range(2)] == ["", REMINDER]
+    assert operator_mode.reply_refusal({"session_id": "s1", "last_assistant_message": "word " * 21}, SWARM) != ""
 
 
 CHANNEL = '<channel source="inbox" item_id="ITEM" sender="SENDER" sent_at_ms="MILLIS">Automated notice</channel>'
@@ -620,9 +607,9 @@ def test_the_reminder_stays_silent_while_on_unbound_or_without_a_session(ledgers
 def test_the_reminder_count_survives_a_typed_turn():
     assert operator_mode.reminder("s1", SWARM, now=100) == ""
     operator_mode.observe("s1", "Explain the result", True, now=101)
-    assert operator_mode.reminder("s1", SWARM, now=102) == ""
+    assert operator_mode.reminder("s1", SWARM, now=102) == REMINDER
     operator_mode.observe("s1", delivery.marked("continue"), False, now=103)
-    assert operator_mode.reminder("s1", SWARM, now=104) == REMINDER
+    assert operator_mode.reminder("s1", SWARM, now=104) == ""
 
 
 def test_the_pre_tool_hook_injects_the_reminder_uncompressed_and_unlogged(monkeypatch):
@@ -645,11 +632,68 @@ def test_every_pre_tool_call_counts_toward_the_reminder(monkeypatch):
     assert injected.count(REMINDER) == 1
 
 
-@pytest.mark.parametrize("words", [20, 21, 100])
-def test_the_stop_hook_never_refuses_a_long_final_message(monkeypatch, words):
+def test_the_stop_hook_refuses_an_over_limit_reply_while_off(monkeypatch, words):
     for key, value in SWARM.items():
         monkeypatch.setenv(key, value)
-    hook_manager.on_stop({"session_id": "s1", "last_assistant_message": "word " * words, "hook_event_name": "Stop"})
+    monkeypatch.setattr(hook_manager, "_swarm_heartbeat", lambda *a, **k: None)
+    payload = {"session_id": "s1", "last_assistant_message": "word " * words, "hook_event_name": "Stop"}
+    if words <= 20:
+        hook_manager.on_stop(payload)
+        return
+    with pytest.raises(hook_manager.BlockAction) as blocked:
+        hook_manager.on_stop(payload)
+    assert str(blocked.value) == (
+        f"Operator not present: this reply has {words} words, over the 20 word limit. "
+        "Reply again in at most 20 words, machine style: result only, no explanation."
+    )
+
+
+HIVE = {**SWARM, "AGENTIHOOKS_AGENT_NAME": "eng-1@demo", "AGENTIHOOKS_HIVE_ID": "hive-001"}
+WORKSTATION = {**SWARM, "AGENTIHOOKS_AGENT_NAME": "eng-1@demo"}
+LONG = "word " * 21
+
+
+@pytest.mark.parametrize("env", [HIVE, WORKSTATION, SWARM], ids=["hive", "workstation", "master"])
+def test_every_swarm_agent_starts_off_and_its_long_reply_is_refused(env):
+    assert not operator_mode.present("s1", env, now=100)
+    assert operator_mode.reply_refusal({"session_id": "s1", "last_assistant_message": LONG}, env) == (
+        "Operator not present: this reply has 21 words, over the 20 word limit. "
+        "Reply again in at most 20 words, machine style: result only, no explanation."
+    )
+
+
+def test_a_standalone_session_is_never_gated(ledgers):
+    env = {"LEDGER_DIR": str(ledgers)}
+    assert operator_mode.present("s1", env, now=100)
+    assert operator_mode.reply_refusal({"session_id": "s1", "last_assistant_message": LONG}, env) == ""
+
+
+def test_operator_on_lifts_the_limit_and_operator_off_restores_it():
+    operator_mode.observe("s1", "operator on", True, now=100)
+    assert operator_mode.reply_refusal({"session_id": "s1", "last_assistant_message": LONG}, WORKSTATION) == ""
+    operator_mode.observe("s1", "operator off", True, now=101)
+    assert operator_mode.reply_refusal({"session_id": "s1", "last_assistant_message": LONG}, WORKSTATION) != ""
+
+
+def test_the_reply_limit_reads_the_environment_and_skips_markers_and_repeat_stops():
+    env = {**WORKSTATION, "AGENTIHOOKS_OPERATOR_OFF_MAX_WORDS": "3"}
+    marker = "<!-- @lesson -->\none two three four\n<!-- @/lesson -->"
+    assert operator_mode.reply_refusal({"session_id": "s1", "last_assistant_message": "one two three"}, env) == ""
+    assert operator_mode.reply_refusal({"session_id": "s1", "last_assistant_message": "ok " + marker}, env) == ""
+    refused = operator_mode.reply_refusal({"session_id": "s1", "last_assistant_message": "a b c d"}, env)
+    assert refused.startswith("Operator not present: this reply has 4 words, over the 3 word limit.")
+    repeat = {"session_id": "s1", "last_assistant_message": "a b c d", "stop_hook_active": True}
+    assert operator_mode.reply_refusal(repeat, env) == ""
+    assert operator_mode.reply_refusal({"session_id": "", "last_assistant_message": "a b c d"}, env) == ""
+    assert operator_mode.reply_refusal({"session_id": "s1"}, env) == ""
+
+
+def test_a_failing_reply_check_is_logged_and_never_raises_into_the_stop_hook(monkeypatch):
+    logged = []
+    monkeypatch.setattr(operator_mode, "reply_refusal", lambda *a: (_ for _ in ()).throw(OSError("disk full")))
+    monkeypatch.setattr(hook_manager, "log", lambda *a: logged.append(a))
+    assert hook_manager._operator_reply({"session_id": "s1"}) == ""
+    assert logged == [("operator reply check failed", {"error": "disk full"})]
 
 
 def test_a_failing_reminder_is_logged_and_never_raises_into_the_hook(monkeypatch):
