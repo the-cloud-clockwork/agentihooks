@@ -131,8 +131,8 @@ def step(slug, config, store, ledger, doc, now_ms) -> list[str]:
         _save(store, key, marks, alerted=now_ms)
         actions.append(_alert(slug, config, store, bounds, progress["remaining_minutes"]))
     if now_ms >= bounds[1] and "cutoff" not in marks:
-        _save(store, key, marks, cutoff=now_ms)
         actions += _gate(slug, config, store, rows, bounds, now_ms)
+        _save(store, key, marks, cutoff=now_ms)
     if now_ms >= bounds[1] and "published" not in marks:
         actions.append(_publish(slug, config, store, ledger, rows, bounds))
         _save(store, key, marks, published=now_ms)
@@ -179,6 +179,10 @@ def _alert(slug, config, store, bounds, minutes):
 def _gate(slug, config, store, rows, bounds, now_ms):
     mode, end = modes.configured(GATE, config.gates), _spoken(bounds[1])
     flying, actions = in_flight(store, slug, rows), []
+    if mode == "enforce":
+        for agent in flying:
+            text, ref = ASK.format(slug=slug, end=end, task=agent.task), f"{slug}:{KEY}:{bounds[0]}:{agent.task}"
+            _send_once(store, agent.name, text, ref, agent.task)
     if mode != "off":
         kind = "deny" if mode == "enforce" else "observe"
         names = ", ".join(agent.name for agent in flying) or "none"
@@ -186,23 +190,23 @@ def _gate(slug, config, store, rows, bounds, now_ms):
         gate_log.append(slug, gate_log.Row.of(GATE.name, kind, Who(name=SENDER), reason=reason, now_ms=now_ms))
         actions.append(f"run window: {kind} at the cutoff: {reason}")
     if mode == "enforce":
-        inbox = InboxStore(store.redis)
-        for agent in flying:
-            text = ASK.format(slug=slug, end=end, task=agent.task)
-            inbox.send(SENDER, agent.name, text, ref=f"{slug}:{KEY}:{agent.task}", task=agent.task)
         actions.append(f"run window: asked {len(flying)} agents in flight to hand off")
     return actions
 
 
 def _publish(slug, config, store, ledger, rows, bounds):
     text = final(slug, modes.configured(GATE, config.gates), bounds, rows, in_flight(store, slug, rows))
-    ref = f"{slug}:{KEY}:final:{bounds[0]}"
+    _send_once(store, doc_report.address(), text, f"{slug}:{KEY}:final:{bounds[0]}")
+    # The ledger notifications window does not keep line breaks, so the notice carries the body on one line.
+    ledger.notify(slug, " ".join(text.split()))
+    return "run window: published the final state to the ledger and the watchdog"
+
+
+def _send_once(store, address, text, ref, task=""):
     try:
-        InboxStore(store.redis).send(SENDER, doc_report.address(), text, ref=ref, item_id=_item_id(ref))
+        InboxStore(store.redis).send(SENDER, address, text, ref=ref, task=task, item_id=_item_id(ref))
     except DuplicateItem:
         pass
-    ledger.notify(slug, text)
-    return "run window: published the final state to the ledger and the watchdog"
 
 
 def _item_id(ref: str) -> str:

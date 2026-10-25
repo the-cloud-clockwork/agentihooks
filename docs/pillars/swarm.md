@@ -953,7 +953,7 @@ For grouped CI stage counts, worst times, run links and report retention, see
 
 An operator sets an autonomous run window with `agentihooks swarm <id> set window-start=now|<UTC time such as 2026-10-25T00:00:00Z> window-minutes=N`; `window-start=off` clears it. A window needs both values. The `set` output reports its `window` as start, end, elapsed and remaining minutes. Only `swarm set` writes the window: the tick never extends or clears it.
 
-Each tick with an active window records elapsed and remaining minutes in the swarm's `run-window` record. When thirty minutes or less remain before the cutoff, the master seat gets one inbox item naming the cutoff and what the `window` gate does there; a first tick after the cutoff sends none. At the cutoff the tick acts once per window; the alert, the gate row and the hand off asks are recorded before they are sent, so a failed tick never repeats them:
+Each tick with an active window records elapsed and remaining minutes in the swarm's `run-window` record. When thirty minutes or less remain before the cutoff, the master seat gets one inbox item naming the cutoff and what the `window` gate does there; a first tick after the cutoff sends none. At the cutoff the tick acts once per window. The alert is recorded before it is sent; the hand off asks and the watchdog item carry one stable id per window, and the cutoff is recorded after its gate row, so a failed tick retries without repeating them:
 
 | `window-gate` | Gate log | Claims | Agents in flight |
 |---|---|---|---|
@@ -961,7 +961,7 @@ Each tick with an active window records elapsed and remaining minutes in the swa
 | `deny` | one `deny` row | the legacy spawn loop and the hub admission of the event engine start no new claim until `swarm set` changes the window | each gets an inbox item to push, write a Handoff v2, run `swarm <id> handoff` and stop |
 | `skip` | none | continue | not asked |
 
-In every mode the cutoff publishes a final handoff as a Handoff v2 body: window bounds and gate mode under Intent, task counts by state under Done, each agent in flight with its task under Stopped at, the next step, and each in flight task under Read first. The same text goes to the watchdog inbox address (`AGENTIHOOKS_WATCHDOG_ADDRESS`, default `master-watchdog`) and to the ledger as a notice; a failed publish is retried on the next tick, and the watchdog item keeps one stable id per window. A new start or length is a new window: its alert and cutoff run again.
+In every mode the cutoff publishes a final handoff as a Handoff v2 body: window bounds and gate mode under Intent, task counts by state under Done, each agent in flight with its task under Stopped at, the next step, and each in flight task under Read first. It goes to the watchdog inbox address (`AGENTIHOOKS_WATCHDOG_ADDRESS`, default `master-watchdog`) as written and to the ledger as a notice on one line, because the notifications window does not keep line breaks; a failed publish is retried on the next tick. A new start or length is a new window: its alert and cutoff run again.
 
 ### Templates
 

@@ -168,6 +168,7 @@ FINAL_OBSERVE = (
     "## Read first\n- ledger:sw/tasks/t1\n\n"
     "<!-- handoff complete -->"
 )
+ON_LEDGER = " ".join(FINAL_OBSERVE.split())
 
 
 def test_the_cutoff_logs_only_and_publishes_the_final_handoff(swarm):
@@ -189,7 +190,7 @@ def test_the_cutoff_logs_only_and_publishes_the_final_handoff(swarm):
     }
     assert _items(store, OWNER) == []
     assert run_window.claims_stopped(store.config(SLUG), END) == ""
-    assert ledger.notices == [FINAL_OBSERVE]
+    assert ledger.notices == [ON_LEDGER]
     assert _items(store, "master-watchdog") == [FINAL_OBSERVE]
     assert _step(store, ledger, END + MINUTE) == []
     assert len(gate_log.recent(SLUG)) == 1 and len(ledger.notices) == 1
@@ -211,7 +212,7 @@ def test_an_enforced_cutoff_stops_claims_and_asks_agents_to_hand_off(swarm):
         "stop. No new task starts until swarm set changes the window."
     ]
     assert (
-        "## Next\nthe agents in flight hand off and no new task starts until swarm set changes the window.\n\n"
+        " ## Next the agents in flight hand off and no new task starts until swarm set changes the window. ## Read"
         in ledger.notices[0]
     )
     config = store.config(SLUG)
@@ -230,9 +231,7 @@ def test_an_off_gate_skips_the_gate_and_still_publishes_the_final_handoff(swarm)
         "run window: published the final state to the ledger and the watchdog",
     ]
     assert gate_log.recent(SLUG) == [] and _items(store, OWNER) == []
-    assert (
-        "## Next\nthe gate is off, so claims continue.\n\n## Read first\n- ledger:sw/tasks/t1\n\n" in ledger.notices[0]
-    )
+    assert " ## Next the gate is off, so claims continue. ## Read first - ledger:sw/tasks/t1 <!--" in ledger.notices[0]
     assert _items(store, "master@sw") == []
     assert run_window.claims_stopped(store.update(SLUG, gates={"window": "off"}), END) == ""
 
@@ -305,7 +304,7 @@ def test_a_failed_publish_retries_without_repeating_the_gate_or_the_watchdog(swa
     ]
     assert len(gate_log.recent(SLUG)) == 1
     assert _items(store, "master-watchdog") == [FINAL_OBSERVE]
-    assert ledger.notices == [FINAL_OBSERVE]
+    assert ledger.notices == [ON_LEDGER]
     assert _step(store, ledger, END + 2 * MINUTE) == []
 
 
@@ -328,3 +327,24 @@ def test_hub_admission_refuses_a_claim_after_an_enforced_cutoff(swarm):
     admission = Admission(store=store, ledger=object(), source=Source(), clock=lambda: END)
     assert admission.admit(SLUG, {"task": "t3", "lane": "eng", "generation": 0, "hive": "h1"}) is None
     assert store.claimant(SLUG, "t3") is None
+
+
+def test_a_failed_gate_row_retries_without_asking_an_agent_twice(swarm, monkeypatch):
+    store, ledger = swarm
+    store.update(SLUG, gates={"window": "enforce"})
+    real, calls = gate_log.append, []
+
+    def append(slug, row, home=None):
+        calls.append(row.kind)
+        if len(calls) == 1:
+            raise OSError("disk full")
+        real(slug, row, home)
+
+    monkeypatch.setattr(run_window.gate_log, "append", append)
+    with pytest.raises(OSError):
+        _step(store, ledger, END)
+    assert store.redis.hget(store.key(SLUG, "run-window"), "cutoff") is None
+    assert _step(store, ledger, END + MINUTE)[0].startswith("run window: deny at the cutoff: ")
+    assert calls == ["deny", "deny"]
+    assert [row["kind"] for row in gate_log.recent(SLUG)] == ["deny"]
+    assert len(_items(store, OWNER)) == 1
