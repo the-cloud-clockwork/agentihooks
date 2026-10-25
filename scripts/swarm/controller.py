@@ -232,7 +232,7 @@ class FencedRuntime:
             raise SpawnError(refused, "unavailable")
         if refused and not workstation:
             raise SwarmError(refused)
-        if lane == "master" and (workstation or self.deployment == LOCAL):
+        if workstation or self.deployment == LOCAL:
             from scripts.hive import admission
             from scripts.swarm.commands import hive_id
 
