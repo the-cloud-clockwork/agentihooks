@@ -16,13 +16,15 @@ class VerdictStore:
         self.redis, self.key = redis, key
         self.event_key = event_key
 
-    def visible(self, found, now_ms, cooldown_ms, new_evidence=False):
+    def visible(self, found, now_ms, cooldown_ms, new_evidence=False, growth=None):
         stored = self.redis.hgetall(self.key)
         shown = []
         for finding in found:
             before = json.loads(stored[finding.id]) if finding.id in stored else None
             record = {**(before or {"seen_at": now_ms, "verdict": None, "returned": False})}
             record.update(evidence=list(finding.evidence), measure=finding.measure)
+            if finding.metrics:
+                record["metrics"] = list(finding.metrics)
             if finding.basis:
                 record["basis"] = finding.basis
             verdict = record["verdict"]
@@ -43,6 +45,8 @@ class VerdictStore:
                 grew = record[key] != verdict.get(key, before.get(key))
             elif verdict and finding.evidence_identity is not None and not new_evidence:
                 grew = record["evidence_identity"] != verdict["evidence_identity"]
+            if verdict and growth:
+                grew = growth(finding, verdict, grew)
             if grew and not show and now_ms >= verdict["at"] + cooldown_ms:
                 record["returned"] = show = True
             if record != before:
@@ -69,6 +73,8 @@ class VerdictStore:
         }
         if "evidence_identity" in record:
             verdict["evidence_identity"] = record["evidence_identity"]
+        if record.get("metrics"):
+            verdict["metrics"] = record["metrics"]
         if record.get("basis"):
             verdict["basis"] = record["basis"]
         prior = record.get("verdict")
