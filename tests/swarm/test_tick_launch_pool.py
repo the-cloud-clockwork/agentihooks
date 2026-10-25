@@ -13,10 +13,10 @@ from tests.test_profile_binding_transfers import launching as launching
 
 
 class PooledRuntime(FakeRuntime):
-    def __init__(self, room, hold=0.0, barrier=None):
+    def __init__(self, room, hold=0.0, barrier=None, reach=0):
         super().__init__()
-        self.room, self.hold, self.barrier = room, hold, barrier
-        self.lock, self.running, self.peak = threading.Lock(), 0, 0
+        self.room, self.hold, self.barrier, self.reach = room, hold, barrier, reach
+        self.lock, self.running, self.peak = threading.Condition(), 0, 0
 
     def launch_room(self, config):
         return self.room
@@ -27,6 +27,8 @@ class PooledRuntime(FakeRuntime):
         with self.lock:
             self.running += 1
             self.peak = max(self.peak, self.running)
+            self.lock.notify_all()
+            self.lock.wait_for(lambda: self.peak >= self.reach, timeout=2)
         try:
             if self.barrier is not None:
                 self.barrier.wait()
@@ -70,7 +72,7 @@ def test_the_pool_never_runs_more_launches_than_the_runtime_room_or_the_pool(sto
     assert SPAWN_POOL == 8
     store.update("sw", max_eng=10)
     ledger = tasks(*((f"t{n}", "eng") for n in range(1, 11)))
-    pooled = PooledRuntime(room, hold=0.05)
+    pooled = PooledRuntime(room, reach=peak)
     tick("sw", store, ledger, pooled, now_ms=1_000)
     assert pooled.peak == peak
     assert len(pooled.spawned) == 10
