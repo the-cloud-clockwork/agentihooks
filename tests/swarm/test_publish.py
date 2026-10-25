@@ -237,7 +237,9 @@ def test_publication_checks_the_exact_target_branch_before_pushing(publication, 
     queries = []
 
     def git_call(where, *args):
-        if args in (("remote", "get-url", "origin"), ("remote", "get-url", "--push", "origin")):
+        if args == ("remote", "get-url", "origin"):
+            return "https://github.com/example/fetch-repo.git"
+        if args == ("remote", "get-url", "--push", "origin"):
             return "git@github.com:example/repo.git"
         if args[:1] == ("push",):
             pushes.append(args)

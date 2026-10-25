@@ -14,7 +14,7 @@ QUERY = """query($owner: String!, $name: String!, $branch: String!) {
 
 
 def require_unqueued(remote: str, branch: str) -> None:
-    parsed = urlsplit(remote if "://" in remote else f"ssh://{remote.replace(':', '/', 1)}")
+    parsed = urlsplit(remote if "://" in remote else f"ssh://{remote.replace(':', '/')}")
     if parsed.hostname not in {"github.com", "ssh.github.com"}:
         return
     owner, name = parsed.path.strip("/").removesuffix(".git").split("/")

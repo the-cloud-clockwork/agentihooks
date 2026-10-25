@@ -79,8 +79,9 @@ def test_queue_admission_requires_a_complete_pull_request_census(monkeypatch, mo
         lambda *args: {"repository": {"pullRequests": {"nodes": [], "pageInfo": {"hasNextPage": more}}}},
     )
     if more:
-        with pytest.raises(SwarmError, match="cannot verify every pull request"):
+        with pytest.raises(SwarmError) as refused:
             publish_queue.require_unqueued("https://github.com/example/repo", "stacked")
+        assert str(refused.value) == "cannot verify every pull request for the publication branch; nothing pushed"
     else:
         publish_queue.require_unqueued("https://github.com/example/repo", "stacked")
 
@@ -92,3 +93,16 @@ def test_queue_read_failure_refuses_publication(monkeypatch):
     monkeypatch.setattr(merge_queue, "graphql", unavailable)
     with pytest.raises(SwarmError, match="GitHub API unavailable"):
         publish_queue.require_unqueued("https://github.com/example/repo", "stacked")
+
+
+def test_queue_query_preserves_repository_name_characters(monkeypatch):
+    calls = []
+
+    def query(document, variables):
+        assert variables == {"owner": "Xowner", "name": "repoX", "branch": "stacked"}
+        calls.append(variables)
+        return {"repository": {"pullRequests": {"nodes": [], "pageInfo": {"hasNextPage": False}}}}
+
+    monkeypatch.setattr(merge_queue, "graphql", query)
+    publish_queue.require_unqueued("git@github.com:Xowner/repoX.git", "stacked")
+    assert len(calls) == 1
