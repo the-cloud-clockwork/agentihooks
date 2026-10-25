@@ -1,0 +1,6 @@
+{
+  "scripts/events/nats_payload.py:scripts.events.nats_payload.x_publish__mutmut_10:35b9d88a0ad1e71cdc6f3e92fa35207b051d24219aae1552e21f94a17fcffdf4": {
+    "reader": "standards_reader",
+    "reason": "Changes only ASCII case of a validation-only expected-stream header. Its encoded byte count is identical and original headers are transmitted unchanged. Existing callers pass only message-id and subject-sequence headers, so key collisions cannot arise. Evidence: Standards disposition of complete CI report 40201644623."
+  }
+}

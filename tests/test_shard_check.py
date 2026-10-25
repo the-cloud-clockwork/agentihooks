@@ -28,6 +28,7 @@ ALL = ["test_suite.py::test_a", "test_suite.py::test_b", "test_suite.py::test_c[
 def _check(tmp_path, *shards, suite=SUITE, hashes=None):
     tests = tmp_path / "suite"
     tests.mkdir(exist_ok=True)
+    (tests / "pytest.ini").write_text("[pytest]\n")
     (tests / "test_suite.py").write_text(suite)
     paths = []
     for index, nodeids in enumerate(shards, 1):
