@@ -401,6 +401,7 @@ def _app_server_command(
     if environ.get("AGENTIHOOKS_SLOT_HIVE") and spec.execution:
         command = [
             sys.executable,
+            "-P",
             "-m",
             "scripts.hive.launch_logs",
             "--slug",

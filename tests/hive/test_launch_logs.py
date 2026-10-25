@@ -19,8 +19,9 @@ def test_hive_codex_server_launch_captures_its_receipt(tmp_path):
         tmp_path,
         None,
     )
-    assert command[:10] == [
+    assert command[:12] == [
         sys.executable,
+        "-P",
         "-m",
         "scripts.hive.launch_logs",
         "--slug",
@@ -29,9 +30,10 @@ def test_hive_codex_server_launch_captures_its_receipt(tmp_path):
         "execution-one",
         "--",
         sys.executable,
+        "-P",
         "-m",
     ]
-    assert command[10:12] == ["scripts.codex_session", "serve"]
+    assert command[12:14] == ["scripts.codex_session", "serve"]
 
 
 def test_failed_server_log_survives_pod_files_and_keeps_receipt_generation(tmp_path, monkeypatch):
