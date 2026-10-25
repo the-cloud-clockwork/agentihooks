@@ -101,6 +101,89 @@ def test_unattributed_suggestions_are_denied_without_ledger_writes(master, monke
     assert master.questions == []
 
 
+@pytest.mark.parametrize("missing", ["tool_use_id", "transcript_path"])
+def test_missing_question_provenance_never_writes(master, missing):
+    payload = ask(FOCUS)
+    payload.pop(missing)
+    assert master_question.move(payload, master, now=NOW) == ""
+    assert master.questions == []
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("type", "user"),
+        ("sessionId", "other-session"),
+        ("isSidechain", True),
+        ("isSidechain", None),
+        ("message", {"role": "user"}),
+    ],
+)
+def test_only_main_session_assistant_records_authorize_question_writes(master, field, value):
+    payload = ask(FOCUS)
+    path = Path(payload["transcript_path"])
+    record = json.loads(path.read_text())
+    record[field] = value
+    path.write_text(json.dumps(record) + "\n")
+    assert master_question.move(payload, master, now=NOW) == ""
+    assert master.questions == []
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("type", "text"),
+        ("id", "other-call"),
+        ("name", "Bash"),
+        ("input", {"questions": [FREEZE]}),
+    ],
+)
+def test_only_the_exact_recorded_question_call_authorizes_writes(master, field, value):
+    payload = ask(FOCUS)
+    path = Path(payload["transcript_path"])
+    record = json.loads(path.read_text())
+    record["message"]["content"][0][field] = value
+    path.write_text(json.dumps(record) + "\n")
+    assert master_question.move(payload, master, now=NOW) == ""
+    assert master.questions == []
+
+
+@pytest.mark.parametrize("content", ["", "not json\n", "null\n", "{}\n", "[]\n"])
+def test_unusable_transcript_records_never_authorize_writes(master, content):
+    payload = ask(FOCUS)
+    Path(payload["transcript_path"]).write_text(content)
+    assert master_question.move(payload, master, now=NOW) == ""
+    assert master.questions == []
+
+
+def test_unreadable_transcript_never_authorizes_writes(master):
+    payload = ask(FOCUS)
+    Path(payload["transcript_path"]).unlink()
+    assert master_question.move(payload, master, now=NOW) == ""
+    assert master.questions == []
+
+
+def test_unrelated_records_do_not_hide_a_deliberate_question_call(master):
+    payload = ask(FOCUS)
+    path = Path(payload["transcript_path"])
+    path.write_text("null\n{}\n" + path.read_text())
+    assert master_question.move(payload, master, now=NOW) == master_question.MOVED.format(asked=FOCUS["question"])
+    assert len(master.questions) == 1
+
+
+def test_explicit_priority_commands_pass_the_question_hook_without_automatic_questions(master, monkeypatch):
+    from scripts.swarm import ledger_client
+
+    monkeypatch.setattr(ledger_client, "LedgerClient", lambda: master)
+    payload = {
+        "session_id": SID,
+        "tool_name": "Bash",
+        "tool_input": {"command": 'agentihooks ledger --slug sw priority add tasks/t1 "Choose the next phase"'},
+    }
+    assert hook_manager._operator_question(payload) == ""
+    assert master.questions == []
+
+
 def test_a_master_whose_operator_typed_in_the_last_ten_minutes_may_ask(master):
     typed_at(NOW - master_question.WINDOW_SEC + 1)
     assert master_question.move(ask(FOCUS), master, now=NOW) == ""
