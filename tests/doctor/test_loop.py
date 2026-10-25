@@ -110,6 +110,25 @@ def test_a_finding_whose_pair_is_still_open_is_refused(open_part, earlier):
         loop.fix_tasks(WATCHED, *judged("established"), "code", tasks)
 
 
+def test_the_pair_texts_name_the_finding_stem_evidence_and_earlier_pair_exactly():
+    finding, judgment = judged("established")
+    finding = {**finding, "evidence": ["task t1", "task t2"]}
+    stem = "fx-44b64fbe"
+    cause, _ = loop.fix_tasks(WATCHED, finding, judgment, "code", ())
+    text = (
+        f"Doctor finding {STALE.id}: {STALE.summary}. Threshold: {STALE.threshold}. "
+        "Evidence: task t1; task t2. Show the root cause with evidence, then fix it or file it."
+    )
+    assert (cause["task"], cause["description"]) == (f"{stem}-cause", text)
+    done = [{"id": f"{stem}-cause", "done": True}, {"id": f"{stem}-code", "done": True}]
+    cause, _ = loop.fix_tasks(WATCHED, finding, judgment, "tune", done)
+    assert cause["description"] == f"{text} Earlier pair {stem}-cause and {stem}-code is done; read its proof first."
+    opened = [{**task, "done": False} for task in done]
+    with pytest.raises(SwarmError) as refused:
+        loop.fix_tasks(WATCHED, finding, judgment, "tune", opened)
+    assert str(refused.value) == f"finding {STALE.id} already has tasks {stem}-cause and {stem}-code still open"
+
+
 def step(store, at, found=(), closed=None, environ=None):
     seen = []
 

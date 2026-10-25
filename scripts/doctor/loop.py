@@ -1,7 +1,6 @@
 """The Doctor master loop: a detection pass per interval, judged findings to tasks, and the close after quiet hours."""
 
 import hashlib
-import itertools
 import json
 import os
 from datetime import datetime, timezone
@@ -292,7 +291,7 @@ def run(store, doctor, now_ms, collect, close, environ=None, speed=None):
 def _free_stem(finding, base, tasks):
     """The first pair stem the ledger does not hold, and the done pair before it; an open pair refuses."""
     done, earlier = {task["id"]: task["done"] for task in tasks}, []
-    for n in itertools.count(1):
+    for n, _ in enumerate([base, *done], 1):
         stem = base if n == 1 else f"{base}-{n}"
         held = [task for task in (f"{stem}-{part}" for part in ("cause", *FIXES)) if task in done]
         if not held:
