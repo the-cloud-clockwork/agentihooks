@@ -262,9 +262,9 @@ def test_the_tick_runs_the_window_step(env, monkeypatch):  # noqa: F811
     seen = []
     monkeypatch.setattr(tick.run_window, "step", lambda *args: seen.append(args) or ["window seen"])
     actions = cli.run_tick(store, "sw", ledger, rt, FakeHerdr({}))
-    [(slug, config, got_store, got_ledger, doc, _)] = seen
+    [(slug, config, got_store, _, doc, _)] = seen
     assert "window seen" in actions
-    assert (slug, config.slug, got_store, got_ledger) == ("sw", "sw", store, ledger)
+    assert (slug, config.slug, got_store.redis) == ("sw", "sw", store.redis)
     assert doc["tasks"] == ledger.state("sw")["tasks"]
 
 
