@@ -64,6 +64,7 @@ def github_origin(monkeypatch):
 
     def git(root, *args):
         if args == ("remote", "get-url", "origin"):
+            assert root is not None
             return "https://github.com/example/repo.git"
         return original(root, *args)
 
@@ -166,9 +167,32 @@ def test_prepare_does_not_use_another_repositorys_merged_pull_request(repositori
     assert p.updates == []
 
 
+def test_prepare_continues_a_pushed_branch_without_rechecking_its_pull_request(
+    repositories, monkeypatch, github_origin
+):
+    p = repositories
+    root = p.swarm.parent / "existing-worktree"
+    git(p.swarm, "worktree", "add", "-b", "engineer-test", str(root))
+    git(root, "push", "origin", "HEAD:engineer-test")
+    p.task.update(branch="engineer-test", pr_url="https://github.com/example/repo/pull/7")
+    original = publish.execute
+
+    def execute(command, cwd):
+        assert command[0] != "gh"
+        return original(command, cwd)
+
+    monkeypatch.setattr(publish, "execute", execute)
+    result = publish.prepare("swarm", p.agent, str(p.swarm), p.ledger)
+    assert result["worktree"] == str(root)
+    assert result["branch"] == "engineer-test"
+
+
 @pytest.mark.parametrize("command", ["prepare", "publish"])
 @pytest.mark.parametrize("recorded_branch", ["deleted-secondary", "dev"])
-def test_cli_refusal_names_the_secondary_repositorys_branch(repositories, monkeypatch, command, recorded_branch):
+@pytest.mark.parametrize("mapped", [False, True])
+def test_cli_refusal_names_the_secondary_repositorys_branch(
+    repositories, monkeypatch, command, recorded_branch, mapped
+):
     import json
     import syslog
 
@@ -180,6 +204,9 @@ def test_cli_refusal_names_the_secondary_repositorys_branch(repositories, monkey
         branch="primary-branch",
         repository_branches={str(p.swarm): "primary-branch", str(p.bundle): recorded_branch},
     )
+    if not mapped:
+        p.task.pop("repository_branches")
+        p.task["branch"] = recorded_branch
     if command == "publish":
         root = p.bundle.parent / "bundle-worktree"
         git(p.bundle, "worktree", "add", "-b", "engineer-test", str(root))
@@ -191,8 +218,12 @@ def test_cli_refusal_names_the_secondary_repositorys_branch(repositories, monkey
     monkeypatch.setattr(syslog, "openlog", lambda ident: None)
     monkeypatch.setattr(syslog, "syslog", lambda priority, message: logged.append(json.loads(message)))
     args = SimpleNamespace(slug="swarm", command=command, message="Continue", files=["chosen.txt"])
-    with pytest.raises(publish.SwarmError):
+    with pytest.raises(publish.SwarmError) as refused:
         getattr(cli, f"cmd_{command}")(None, args)
+    if mapped or recorded_branch != "dev":
+        assert isinstance(refused.value, publish.PublicationRefusal)
+        assert refused.value.repository == str(p.bundle)
+        assert refused.value.branch == recorded_branch
     assert len(logged) == 1
     assert logged[0]["task"] == "t1"
     assert logged[0]["branch"] == recorded_branch

@@ -1131,13 +1131,27 @@ def test_cli_prepares_and_publishes_from_the_primary_checkout(publication, monke
 
 
 @pytest.mark.parametrize("command", ["prepare", "publish"])
-def test_cli_journals_each_publication_refusal_with_task_branch_and_reason(publication, monkeypatch, command):
+@pytest.mark.parametrize(
+    "recording,branch",
+    [("map", "recorded-delivery"), ("legacy", "engineer-test"), ("unrecorded", ""), ("missing", "")],
+)
+def test_cli_journals_each_publication_refusal_with_task_branch_and_reason(
+    publication, monkeypatch, command, recording, branch
+):
     import syslog
 
     from scripts.swarm import cli, publish
 
     p = publication
-    p.task["repository_branches"] = {str(p.repo): "recorded-delivery"}
+    if recording == "map":
+        p.task["repository_branches"] = {str(p.repo): "recorded-delivery"}
+    if recording == "unrecorded":
+        p.task.pop("branch")
+    if recording == "missing":
+        monkeypatch.setattr(p.ledger, "tasks", lambda slug: [])
+    reason = (
+        "publication requires this agent's claimed task" if recording == "missing" else "recorded branch is missing"
+    )
     monkeypatch.setattr(cli, "_worker", lambda store, args: p.agent)
     monkeypatch.setattr(cli, "_local_repo", lambda store, slug: str(p.repo))
     monkeypatch.setattr(cli, "LedgerClient", lambda: p.ledger)
@@ -1150,7 +1164,7 @@ def test_cli_journals_each_publication_refusal_with_task_branch_and_reason(publi
 
     monkeypatch.setattr(publish, command, refuse)
     args = SimpleNamespace(slug="swarm", command=command, message="Continue", files=["chosen.txt"])
-    with pytest.raises(publish.SwarmError, match="recorded branch is missing"):
+    with pytest.raises(publish.SwarmError, match=reason):
         getattr(cli, f"cmd_{command}")(None, args)
     assert opened == ["agentihooks-swarm"]
     assert logged == [
@@ -1161,8 +1175,8 @@ def test_cli_journals_each_publication_refusal_with_task_branch_and_reason(publi
                 "slug": "swarm",
                 "command": command,
                 "task": "t1",
-                "branch": "recorded-delivery",
-                "reason": "recorded branch is missing",
+                "branch": branch,
+                "reason": reason,
             },
         )
     ]

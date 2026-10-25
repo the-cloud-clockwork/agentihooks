@@ -137,6 +137,20 @@ def test_branch_setting_on_a_ledger_without_a_swarm_keeps_its_original_fields(mo
     assert sent == [{"item": "tasks/t1", "fields": {"branch": "work"}}]
 
 
+@pytest.mark.parametrize("branch,expected", [("work", {"/workspace/agentihooks": "work"}), ("", {})])
+def test_task_branch_setting_starts_with_an_empty_repository_map(monkeypatch, branch, expected):
+    from types import SimpleNamespace
+
+    store = SimpleNamespace(config=lambda slug: {SLUG: SimpleNamespace(repo="/workspace/agentihooks")}[slug])
+    monkeypatch.setattr(ledger.ports, "swarm", lambda: SimpleNamespace(store=SimpleNamespace(connect=lambda: store)))
+    monkeypatch.setattr(ledger, "resource", lambda slug, path: {(SLUG, "tasks/t1"): {}}[slug, path])
+    sent = []
+    monkeypatch.setattr(ledger, "send", lambda args, kind, **fields: sent.append(fields))
+    args = ledger.build_parser().parse_args(["--slug", SLUG, "--as", "swarm", "task", "set", "t1", f"branch={branch}"])
+    ledger.cmd_task(args)
+    assert sent == [{"item": "tasks/t1", "fields": {"branch": branch, "repository_branches": expected}}]
+
+
 @pytest.mark.parametrize("value", ("bundle", [""], [3], ["relative/repository"]))
 def test_task_repositories_require_absolute_local_paths(value):
     with pytest.raises(ValueError) as error:
