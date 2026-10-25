@@ -1487,11 +1487,12 @@ def test_a_weakened_forwarded_statistics_form_is_red(before, after):
     )
 
 
-def test_the_forwarded_statistics_line_without_the_selection_diagnostic_is_red():
+@pytest.mark.parametrize("prefix", ["", _SELECTION_DIAGNOSTIC])
+def test_the_forwarded_statistics_line_without_the_selection_diagnostic_is_red(prefix):
     base = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())
     head = copy.deepcopy(base)
     step = head["jobs"]["gate-required"]["steps"][0]
-    step["run"] = _FORWARDED_STATS + step["run"].removeprefix(_SELECTION_DIAGNOSTIC)
+    step["run"] = _FORWARDED_STATS + prefix + step["run"].removeprefix(_SELECTION_DIAGNOSTIC)
     assert "The head's Gate — Required changes its steps; the protected branch grades with its own." in _grade(
         {"test.yml": head}, base={"test.yml": base}
     )
