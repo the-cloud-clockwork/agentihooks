@@ -52,20 +52,24 @@ def test_a_write_to_one_task_hashes_only_that_task_on_the_next_list_read(tmp_pat
     from scripts.swarm_ledger.repository.sqlite import SQLiteLedgerRepository
 
     path = tmp_path / "ledger.sqlite3"
-    SQLiteLedgerRepository(path).import_document("one", {"title": "One", **ledger(2, *(f"T{n}" for n in range(200)))})
+    tasks = [{"title": f"T{n}", "phase": "p1", "lane": "eng"} for n in range(200)]
+    content = {"title": "One", "overview": "o", "sources": [], "phases": [{"title": "One", "description": "d"}]}
+    SQLiteLedgerRepository(path).create("one", {**content, "tasks": tasks})
     reader = SimpleNamespace(repository=SQLiteLedgerRepository(path))
-    before = routes.ledger_read(reader, "one", "tasks", {"limit": 5})
-    SQLiteLedgerRepository(path).apply_ops("one", changes=[{"path": "tasks/t150/title", "value": "Changed"}])
+    before = routes.ledger_read(reader, "one", "tasks", {"limit": 100})
+    comment = {"op": "add", "id": "c1", "thread": "tasks/t51/comments", "text": "Recorded evidence"}
+    SQLiteLedgerRepository(path).apply_ops("one", ops=[comment])
     hashes = []
     counting = SimpleNamespace(sha256=lambda *data: hashes.append(data) or hashlib.sha256(*data))
     monkeypatch.setattr(resources, "hashlib", counting)
-    after = routes.ledger_read(reader, "one", "tasks", {"limit": 200})
+    after = routes.ledger_read(reader, "one", "tasks", {"limit": 100})
     counted = len(hashes)
-    stored = SQLiteLedgerRepository(path).read("one", "tasks/t150")["tasks"][0]
+    monkeypatch.undo()
+    stored = SQLiteLedgerRepository(path).read("one", "tasks")["tasks"]
     assert after["revision"] != before["revision"]
-    assert after["data"][150]["title"] == "Changed"
-    assert after["data"][150]["revision"] == resources.revision(stored)
-    assert after["data"][149]["revision"] == resources.revision(ledger(2, *(f"T{n}" for n in range(200)))["tasks"][149])
+    assert after["data"][50]["comments_count"] == 1
+    assert [row["revision"] for row in after["data"]] == [resources.revision(row) for row in stored[:100]]
+    assert after["data"][49]["revision"] == before["data"][49]["revision"]
     assert counted <= 3, counted
 
 
