@@ -1,7 +1,10 @@
+import io
+import json
 import os
 import re
 import subprocess
 import tomllib
+import urllib.request
 from pathlib import Path
 
 import pytest
@@ -9,11 +12,14 @@ import yaml
 from packaging.requirements import Requirement
 from packaging.utils import canonicalize_name
 
+from scripts.swarm_v2.worker_base_revision import pinned_revision
+
 pytestmark = pytest.mark.unit
 ROOT = Path(__file__).resolve().parents[2]
 PROOF = ROOT / "deploy/worker/kind-proof.sh"
 CURRENT = ROOT / "deploy/worker/base-current.sh"
 BASE = "ghcr.io/the-cloud-clockwork/agentihooks-worker:dev"
+PINNED = "ghcr.io/the-cloud-clockwork/agentihooks-worker@sha256:amd64"
 INPUTS = "docker/swarm-node scripts/swarm_v2/worker_image.py profiles docs/swarm-v2/schemas"
 WHEEL = {"pyproject.toml", "README.md", "hooks/", "scripts/"}
 
@@ -23,15 +29,16 @@ def builds():
     return [line.strip() for line in joined.splitlines() if "docker build" in line]
 
 
-def judge(tmp_path, *, diff=0, pull=0, run=0, fetch=0):
+def judge(tmp_path, *, diff=0, read=0, fetch=0):
     tools = tmp_path / "bin"
     tools.mkdir()
     log = tmp_path / "commands"
-    (tools / "docker").write_text(
-        '#!/usr/bin/env bash\nprintf "docker %s\\n" "$*" >> "$COMMAND_LOG"\n'
-        'if [[ "$1" == pull ]]; then exit "$FAKE_PULL"; fi\n'
-        'if [[ "$1" == run ]]; then\n  [[ "$FAKE_RUN" == 0 ]] || exit "$FAKE_RUN"\n  echo rev123\nfi\n'
+    pinned = tmp_path / "pinned"
+    (tools / "python3").write_text(
+        '#!/usr/bin/env bash\nprintf "python3 %s\\n" "${1##*/} ${*:2}" >> "$COMMAND_LOG"\n'
+        f'[[ "$FAKE_READ" == 0 ]] || exit "$FAKE_READ"\necho "{PINNED} rev123"\n'
     )
+    (tools / "docker").write_text('#!/usr/bin/env bash\nprintf "docker %s\\n" "$*" >> "$COMMAND_LOG"\n')
     (tools / "git").write_text(
         '#!/usr/bin/env bash\nprintf "git %s\\n" "$*" >> "$COMMAND_LOG"\n'
         'if [[ "$1" == fetch ]]; then exit "$FAKE_FETCH"; fi\n'
@@ -44,25 +51,27 @@ def judge(tmp_path, *, diff=0, pull=0, run=0, fetch=0):
         "PATH": f"{tools}:{os.environ['PATH']}",
         "COMMAND_LOG": str(log),
         "FAKE_DIFF": str(diff),
-        "FAKE_PULL": str(pull),
-        "FAKE_RUN": str(run),
+        "FAKE_READ": str(read),
         "FAKE_FETCH": str(fetch),
     }
-    result = subprocess.run(["bash", str(CURRENT), BASE], env=env, capture_output=True, text=True)
-    return result.returncode, log.read_text().splitlines(), result.stdout
+    result = subprocess.run(["bash", str(CURRENT), BASE, str(pinned)], env=env, capture_output=True, text=True)
+    return result.returncode, log.read_text().splitlines(), result.stdout, pinned
 
 
 def test_kind_proof_layers_only_the_hive_on_a_current_base():
     assert len(builds()) == 2
     rebuilt_base, hive = builds()
-    assert f"base-current.sh {BASE}; then\n  worker_base=published\n  docker tag {BASE} local/worker-base:dev\n" in (
-        PROOF.read_text()
-    )
+    assert (
+        f'base-current.sh {BASE} "$out/worker-base.ref"; then\n  worker_base=published\n'
+        '  worker_image="$(cat "$out/worker-base.ref")"\n'
+    ) in PROOF.read_text()
     assert f"ARG WORKER_IMAGE={BASE}\n" in (ROOT / "deploy/worker/Dockerfile").read_text()
     assert "-f docker/swarm-node/Dockerfile" in rebuilt_base
     assert "--pull" not in hive
     assert "-f deploy/worker/Dockerfile" in hive
-    assert "--build-arg WORKER_IMAGE=local/worker-base:dev" in hive
+    assert '--build-arg WORKER_IMAGE="$worker_image"' in hive
+    assert "docker pull" not in PROOF.read_text() + CURRENT.read_text()
+    assert "docker tag" not in PROOF.read_text().split("\nwait ")[0]
     assert '--build-arg AGENTIHOOKS_REF="${AGENTIHOOKS_REF:-dev}"' in hive
 
 
@@ -97,7 +106,7 @@ def test_hive_image_can_install_agentihooks_from_the_local_build_context():
 
 def test_kind_proof_rebuilds_the_base_only_when_it_is_not_current():
     current, _, stale = PROOF.read_text().partition("\nelse\n")
-    assert f"if bash deploy/worker/base-current.sh {BASE}; then" in current
+    assert f'if bash deploy/worker/base-current.sh {BASE} "$out/worker-base.ref"; then' in current
     assert "docker/swarm-node/Dockerfile" not in current
     assert "docker/swarm-node/Dockerfile" in stale.split("\nfi\n")[0]
 
@@ -154,16 +163,19 @@ def test_base_inputs_cover_every_base_source_the_wheel_does_not_replace():
 
 
 def test_base_is_current_when_its_inputs_match_the_published_revision(tmp_path):
-    status, commands, _ = judge(tmp_path)
+    status, commands, _, pinned = judge(tmp_path)
     assert status == 0
-    assert commands[0] == f"docker pull -q --platform linux/amd64 {BASE}"
+    assert commands[0] == f"python3 worker_base_revision.py {BASE}"
+    assert not any(command.startswith("docker ") for command in commands)
     assert "git fetch -q --depth=1 origin rev123" in commands
     assert commands[-1] == f"git diff --quiet rev123 HEAD -- {INPUTS}"
+    assert pinned.read_text() == f"{PINNED}\n"
 
 
 def test_base_is_stale_when_an_input_changed(tmp_path):
-    status, commands, output = judge(tmp_path, diff=1)
+    status, commands, output, pinned = judge(tmp_path, diff=1)
     assert status == 1
+    assert not pinned.exists()
     assert commands[-1] == f"git diff --quiet rev123 HEAD -- {INPUTS}"
     assert "inputs changed since rev123" in output
 
@@ -171,17 +183,121 @@ def test_base_is_stale_when_an_input_changed(tmp_path):
 @pytest.mark.parametrize(
     ("failure", "reason"),
     [
-        ({"pull": 1}, "revision cannot be read"),
-        ({"run": 125}, "revision cannot be read"),
+        ({"read": 1}, "revision cannot be read"),
         ({"fetch": 128}, "revision rev123 cannot be fetched"),
         ({"diff": 128}, "inputs cannot be compared with revision rev123"),
     ],
 )
 def test_base_is_undetermined_with_a_visible_reason_when_the_comparison_fails(tmp_path, failure, reason):
-    status, _, output = judge(tmp_path, **failure)
+    status, _, output, pinned = judge(tmp_path, **failure)
     assert status == 2
+    assert not pinned.exists()
     assert output.startswith("::warning title=Worker hive base::")
     assert reason in output
+
+
+class Reply(io.BytesIO):
+    def __init__(self, body, digest):
+        super().__init__(json.dumps(body).encode())
+        self.headers = {"Docker-Content-Digest": digest} if digest else {}
+
+
+def registry(monkeypatch, labels, *, index=True, architecture="amd64"):
+    image = "/v2/the-cloud-clockwork/agentihooks-worker"
+    platform = {"config": {"digest": "sha256:config"}}
+    blobs = {
+        "/token?scope=repository:the-cloud-clockwork/agentihooks-worker:pull": ({"token": "t"}, None),
+        f"{image}/manifests/dev": (
+            {
+                "manifests": [
+                    {"digest": "sha256:unplatformed"},
+                    {"digest": "sha256:attestation", "platform": {"architecture": "unknown", "os": "unknown"}},
+                    {"digest": "sha256:amd64", "platform": {"architecture": "amd64", "os": "linux"}},
+                ]
+            }
+            if index
+            else platform,
+            "sha256:index" if index else "sha256:amd64",
+        ),
+        f"{image}/manifests/sha256:amd64": (platform, "sha256:amd64"),
+        f"{image}/blobs/sha256:config": ({"architecture": architecture, "config": {"Labels": labels}}, None),
+    }
+    seen = []
+
+    def urlopen(request, timeout):
+        assert timeout == 30
+        assert request.headers["Accept"] == (
+            "application/vnd.oci.image.index.v1+json, application/vnd.oci.image.manifest.v1+json, "
+            "application/vnd.docker.distribution.manifest.list.v2+json, "
+            "application/vnd.docker.distribution.manifest.v2+json"
+        )
+        path = re.sub(r"^https://[^/]+", "", request.full_url)
+        seen.append((path, request.headers.get("Authorization"), request.unredirected_hdrs.get("Authorization")))
+        return Reply(*blobs[path])
+
+    monkeypatch.setattr(urllib.request, "urlopen", urlopen)
+    return seen
+
+
+@pytest.mark.parametrize("index", [True, False])
+def test_base_revision_reads_the_amd64_label_from_the_registry_without_pulling(monkeypatch, index):
+    seen = registry(monkeypatch, {"org.opencontainers.image.revision": "rev123"}, index=index)
+    assert pinned_revision(BASE) == (PINNED, "rev123")
+    assert seen[0][1:] == (None, None)
+    assert {auth for _, auth, _ in seen} == {None}
+    assert {auth for _, _, auth in seen[1:]} == {"Bearer t"}
+    assert len(seen) == (4 if index else 3)
+
+
+def test_base_revision_refuses_a_single_manifest_of_another_architecture(monkeypatch):
+    registry(monkeypatch, {"org.opencontainers.image.revision": "rev123"}, index=False, architecture="arm64")
+    with pytest.raises(SystemExit, match="no amd64 image with a revision label"):
+        pinned_revision(BASE)
+
+
+def test_base_revision_keeps_a_registry_port(monkeypatch):
+    registry(monkeypatch, {"org.opencontainers.image.revision": "rev123"})
+    hosts = []
+    original = urllib.request.urlopen
+
+    def recording(request, timeout):
+        hosts.append(request.host)
+        return original(request, timeout)
+
+    monkeypatch.setattr(urllib.request, "urlopen", recording)
+    image = "registry.local:5000/the-cloud-clockwork/agentihooks-worker"
+    assert pinned_revision(f"{image}:dev") == (f"{image}@sha256:amd64", "rev123")
+    assert set(hosts) == {"registry.local:5000"}
+
+
+def test_base_revision_refuses_an_index_without_an_amd64_image(monkeypatch):
+    registry(monkeypatch, {"org.opencontainers.image.revision": "rev123"})
+    original = urllib.request.urlopen
+
+    def without_amd64(request, timeout):
+        reply = original(request, timeout)
+        if request.full_url.endswith("/manifests/dev"):
+            body = json.loads(reply.read())
+            body["manifests"] = body["manifests"][:1]
+            return Reply(body, "sha256:index")
+        return reply
+
+    monkeypatch.setattr(urllib.request, "urlopen", without_amd64)
+    with pytest.raises(SystemExit, match="has no amd64 image$"):
+        pinned_revision(BASE)
+
+
+def test_base_revision_refuses_a_base_without_its_revision_label(monkeypatch):
+    registry(monkeypatch, None)
+    with pytest.raises(SystemExit, match="no amd64 image with a revision label"):
+        pinned_revision(BASE)
+
+
+def test_the_worker_base_labels_its_source_revision():
+    assert (
+        "LABEL org.opencontainers.image.revision=$SOURCE_REVISION\n"
+        in (ROOT / "docker/swarm-node/Dockerfile").read_text()
+    )
 
 
 def test_the_hive_image_carries_the_pyproject_ruff_pin_and_the_kind_proof_runs_it():
