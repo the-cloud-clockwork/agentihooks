@@ -169,9 +169,8 @@ FINAL_OBSERVE = (
     "<!-- handoff complete -->"
 )
 ON_LEDGER = (
-    "Run window ended 25 October 12:00 UTC, gate log only. Tasks: 1 claimed, 1 done, 1 open. In flight: "
-    "engineer@abc-0001 on t1. Claims continue; window-gate=deny enforces the next cutoff. Full handoff: "
-    "master-watchdog."
+    "Run window ended 25 October 12:00 UTC, gate log only. Full handoff: master-watchdog. Tasks: 1 claimed, 1 done, 1 open. In flight: "
+    "engineer@abc-0001 on t1. Claims continue; window-gate=deny enforces the next cutoff."
 )
 
 
@@ -179,7 +178,7 @@ def test_the_cutoff_logs_only_and_publishes_the_final_handoff(swarm):
     store, ledger = swarm
     _step(store, ledger, ALERT_AT)
     assert _step(store, ledger, END) == [
-        "run window: observe at the cutoff: The run window ended at 25 October 12:00 UTC: new claims stop and 1 "
+        "run window: observe at the cutoff: The run window 25 October 00:00 UTC to 25 October 12:00 UTC ended: new claims stop and 1 "
         "agent in flight hand off: engineer@abc-0001.",
         "run window: published the final state to the ledger and the watchdog",
     ]
@@ -189,7 +188,7 @@ def test_the_cutoff_logs_only_and_publishes_the_final_handoff(swarm):
         "gate": "window",
         "kind": "observe",
         "agent": "swarm",
-        "reason": "The run window ended at 25 October 12:00 UTC: new claims stop and 1 agent in flight hand off: "
+        "reason": "The run window 25 October 00:00 UTC to 25 October 12:00 UTC ended: new claims stop and 1 agent in flight hand off: "
         "engineer@abc-0001.",
     }
     assert _items(store, OWNER) == []
@@ -216,8 +215,8 @@ def test_an_enforced_cutoff_stops_claims_and_asks_agents_to_hand_off(swarm):
         "stop. No new task starts until swarm set changes the window."
     ]
     assert ledger.notices == [
-        "Run window ended 25 October 12:00 UTC, gate deny. Tasks: 1 claimed, 1 done, 1 open. In flight: "
-        "engineer@abc-0001 on t1. Agents in flight hand off and claims stay stopped. Full handoff: master-watchdog."
+        "Run window ended 25 October 12:00 UTC, gate deny. Full handoff: master-watchdog. Tasks: 1 claimed, 1 done, 1 open. In flight: "
+        "engineer@abc-0001 on t1. Agents in flight hand off and claims stay stopped."
     ]
     config = store.config(SLUG)
     assert run_window.claims_stopped(store, SLUG, config, END - 1) == ""
@@ -236,8 +235,8 @@ def test_an_off_gate_skips_the_gate_and_still_publishes_the_final_handoff(swarm)
     ]
     assert gate_log.recent(SLUG) == [] and _items(store, OWNER) == []
     assert ledger.notices == [
-        "Run window ended 25 October 12:00 UTC, gate skip. Tasks: 1 claimed, 1 done, 1 open. In flight: "
-        "engineer@abc-0001 on t1. Claims continue. Full handoff: master-watchdog."
+        "Run window ended 25 October 12:00 UTC, gate skip. Full handoff: master-watchdog. Tasks: 1 claimed, 1 done, 1 open. In flight: "
+        "engineer@abc-0001 on t1. Claims continue."
     ]
     assert _items(store, "master@sw") == []
     assert run_window.claims_stopped(store, SLUG, store.update(SLUG, gates={"window": "off"}), END) == ""
@@ -419,8 +418,8 @@ def test_the_ledger_notice_fits_the_notifications_window():
     assert len(run_window.notice("observe", (START, END), rows, fits)) == TEXT_KEPT
     over = [AgentRecord("e" * (TEXT_KEPT - len(blank) + 1), "eng", "t1")]
     assert run_window.notice("observe", (START, END), rows, over) == (
-        "Run window ended 25 October 12:00 UTC, gate log only. Tasks: 1 claimed. In flight: 1 agent. Claims "
-        "continue; window-gate=deny enforces the next cutoff. Full handoff: master-watchdog."
+        "Run window ended 25 October 12:00 UTC, gate log only. Full handoff: master-watchdog. Tasks: 1 claimed. In flight: 1 agent. Claims "
+        "continue; window-gate=deny enforces the next cutoff."
     )
 
 
@@ -428,8 +427,8 @@ def test_the_ledger_notice_names_every_agent_in_flight():
     rows = {"t1": {"state": "claimed"}, "t4": {"state": "pr"}}
     flying = [AgentRecord(OWNER, "eng", "t1"), AgentRecord("engineer@abc-0002", "eng", "t4")]
     assert run_window.notice("off", (START, END), rows, flying) == (
-        "Run window ended 25 October 12:00 UTC, gate skip. Tasks: 1 claimed, 1 pr. In flight: engineer@abc-0001 on "
-        "t1, engineer@abc-0002 on t4. Claims continue. Full handoff: master-watchdog."
+        "Run window ended 25 October 12:00 UTC, gate skip. Full handoff: master-watchdog. Tasks: 1 claimed, 1 pr. In flight: engineer@abc-0001 on "
+        "t1, engineer@abc-0002 on t4. Claims continue."
     )
 
 
@@ -511,8 +510,21 @@ def test_a_retried_cutoff_keeps_one_gate_row_after_an_agent_leaves(swarm, monkey
         _step(store, ledger, END)
     run_window.step(SLUG, store.config(SLUG), store, ledger, {"tasks": []}, END + MINUTE)
     assert [row["reason"] for row in gate_log.recent(SLUG)] == [
-        "The run window ended at 25 October 12:00 UTC: new claims stop and 1 agent in flight hand off: "
+        "The run window 25 October 00:00 UTC to 25 October 12:00 UTC ended: new claims stop and 1 agent in flight hand off: "
         "engineer@abc-0001."
+    ]
+
+
+def test_a_window_reset_to_the_same_end_logs_its_own_cutoff(swarm):
+    store, ledger = swarm
+    _step(store, ledger, END)
+    store.update(SLUG, window={"start_ms": START + 60 * MINUTE, "minutes": 660})
+    _step(store, ledger, END + MINUTE)
+    assert [row["reason"] for row in gate_log.recent(SLUG)] == [
+        "The run window 25 October 00:00 UTC to 25 October 12:00 UTC ended: new claims stop and 1 agent in flight "
+        "hand off: engineer@abc-0001.",
+        "The run window 25 October 01:00 UTC to 25 October 12:00 UTC ended: new claims stop and 1 agent in flight "
+        "hand off: engineer@abc-0001.",
     ]
 
 
@@ -525,9 +537,8 @@ def test_the_count_fallback_notice_fits_with_every_task_state():
     text = run_window.notice("enforce", (START, END), rows, flying)
     assert len(text) <= TEXT_KEPT
     assert text == (
-        "Run window ended 25 October 12:00 UTC, gate deny. Tasks: 1000 blocked, 1000 claimed, 1000 done, 1000 open, "
-        "1000 pr. In flight: 1000 agents. Agents in flight hand off and claims stay stopped. Full handoff: "
-        "master-watchdog."
+        "Run window ended 25 October 12:00 UTC, gate deny. Full handoff: master-watchdog. Tasks: 1000 blocked, 1000 claimed, 1000 done, 1000 open, "
+        "1000 pr. In flight: 1000 agents. Agents in flight hand off and claims stay stopped."
     )
 
 
@@ -538,7 +549,7 @@ def test_a_cutoff_with_two_agents_in_flight_counts_them(swarm):
     doc["tasks"].append({"id": "t4", "title": "Ship it", "state": "pr", "claimed_by": "engineer@abc-0002"})
     config = store.update(SLUG, gates={"window": "enforce"})
     assert run_window.step(SLUG, config, store, ledger, doc, END)[:2] == [
-        "run window: deny at the cutoff: The run window ended at 25 October 12:00 UTC: new claims stop and 2 agents "
+        "run window: deny at the cutoff: The run window 25 October 00:00 UTC to 25 October 12:00 UTC ended: new claims stop and 2 agents "
         "in flight hand off: engineer@abc-0001, engineer@abc-0002.",
         "run window: asked 2 agents in flight to hand off",
     ]

@@ -41,7 +41,7 @@ ALERT = (
     "{effect}, and the swarm publishes the final state to the ledger and the watchdog. Only swarm set changes the "
     "window. Close this item once you have looked."
 )
-CUTOFF = "The run window ended at {end}: new claims stop and {agents} in flight hand off: {names}."
+CUTOFF = "The run window {start} to {end} ended: new claims stop and {agents} in flight hand off: {names}."
 ASK = (
     "The run window on swarm {slug} ended at {end}. Finish the step you are on, push any commits with agentihooks "
     "swarm {slug} publish, write a Handoff v2 for task {task}, run agentihooks swarm {slug} handoff <doc> and stop. "
@@ -53,7 +53,7 @@ SHORT = {
     "observe": "Claims continue; window-gate=deny enforces the next cutoff.",
     "off": "Claims continue.",
 }
-NOTICE = "Run window ended {end}, gate {mode}. Tasks: {counts}. In flight: {flying}. {next} Full handoff: {watchdog}."
+NOTICE = "Run window ended {end}, gate {mode}. Full handoff: {watchdog}. Tasks: {counts}. In flight: {flying}. {next}"
 FINAL = (
     "## Intent\nRun window on swarm {slug}, {start} to {end}, window gate {mode}.\n\n"
     "## Done\nTasks by state: {counts}.\n\n"
@@ -217,8 +217,9 @@ def _gate(slug, mode, store, rows, bounds, now_ms):
     if mode != "off":
         kind = "deny" if mode == "enforce" else "observe"
         names = ", ".join(agent.name for agent in flying) or "none"
-        reason = CUTOFF.format(end=end, agents=_count(len(flying), "agent"), names=names)
-        opening = CUTOFF.split("{agents}")[0].format(end=end)
+        start = _spoken(bounds[0])
+        reason = CUTOFF.format(start=start, end=end, agents=_count(len(flying), "agent"), names=names)
+        opening = CUTOFF.split("{agents}")[0].format(start=start, end=end)
         logged = any(
             row.get("gate") == GATE.name and str(row.get("reason")).startswith(opening)
             for row in gate_log.since(slug, bounds[1])
