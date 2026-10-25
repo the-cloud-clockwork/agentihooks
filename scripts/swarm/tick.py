@@ -1035,11 +1035,11 @@ def _spawn_stop(slug, config, store, runtime, now_ms):
 
 class _LaunchClock:
     def __init__(self):
-        self.begun, self.started, self.free, self.failing = time.monotonic(), 0, 0.0, ""
+        self.begun, self.tried, self.forgiven, self.free, self.failing = time.monotonic(), 0, 0, 0.0, ""
 
     def spent(self, task):
-        spent = time.monotonic() - self.begun - self.free
-        if self.started and spent + spent / self.started >= SPAWN_BUDGET_S:
+        spent, charged = time.monotonic() - self.begun - self.free, self.tried - self.forgiven
+        if charged and spent + spent / charged >= SPAWN_BUDGET_S:
             return f"spent this pass's {SPAWN_BUDGET_S} second launch budget, {task['id']} waits a pass"
         return None
 
@@ -1050,13 +1050,14 @@ class _LaunchClock:
     @contextmanager
     def launch(self):
         at = time.monotonic()
+        self.tried += 1
         try:
             yield
         except Exception as exc:
-            self.free += time.monotonic() - at
+            if not self.forgiven:
+                self.free, self.forgiven = time.monotonic() - at, 1
             self.failing = _steered_off(exc) or self.failing
             raise
-        self.started += 1
 
 
 def _steered_off(error):
