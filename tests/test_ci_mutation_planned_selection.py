@@ -546,6 +546,7 @@ def test_a_module_edit_that_only_binds_new_names_keeps_the_selection_narrow(
         ("from os import path\n", "from os import path\nimport json\n", True),
         ("X = 1\nfrom os import path\n", "from os import path, sep\nX = 1\n", True),
         ("from sys import sep\n", "from os import path, sep\n", False),
+        ("from os import path, sep\n", "from os import sep, path\n", True),
         ("", "from os import sep\n", True),
         ("X = 1\n", "X = 1\nimport json\n", True),
         ("X = 1\n", "X = 1\nprint(X)\n", False),
