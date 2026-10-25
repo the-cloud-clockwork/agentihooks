@@ -229,6 +229,37 @@ def test_cli_refusal_names_the_secondary_repositorys_branch(
     assert logged[0]["branch"] == recorded_branch
 
 
+@pytest.mark.parametrize("command", ["prepare", "publish"])
+def test_cli_refusal_keeps_an_unrecorded_secondary_branch_empty(repositories, monkeypatch, command):
+    import json
+    import syslog
+
+    from scripts.swarm import cli
+
+    p = repositories
+    p.task["repositories"] = [str(p.bundle)]
+    if command == "prepare":
+        stack.WT_SCRIPT.write_text("#!/usr/bin/env bash\nset -euo pipefail\nexit 1\n")
+    else:
+        root = p.bundle.parent / "unowned-worktree"
+        git(p.bundle, "worktree", "add", "-b", "another-task", str(root))
+        monkeypatch.chdir(root)
+    monkeypatch.setattr(cli, "_worker", lambda store, args: p.agent)
+    monkeypatch.setattr(cli, "_local_repo", lambda store, slug: str(p.swarm))
+    monkeypatch.setattr(cli, "LedgerClient", lambda: p.ledger)
+    logged = []
+    monkeypatch.setattr(syslog, "openlog", lambda ident: None)
+    monkeypatch.setattr(syslog, "syslog", lambda priority, message: logged.append(json.loads(message)))
+    args = SimpleNamespace(slug="swarm", command=command, message="Continue", files=["chosen.txt"])
+    with pytest.raises(publish.PublicationRefusal) as refused:
+        getattr(cli, f"cmd_{command}")(None, args)
+    assert refused.value.repository == str(p.bundle)
+    assert refused.value.branch == ""
+    assert len(logged) == 1
+    assert logged[0]["branch"] == ""
+    assert logged[0]["reason"]
+
+
 def test_prepare_names_the_default_repository_without_inferring_prose(repositories):
     p = repositories
     p.task["description"] = f"Work in {p.bundle}"
