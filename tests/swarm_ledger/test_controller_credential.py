@@ -123,3 +123,48 @@ def test_an_agent_token_cannot_write_as_the_swarm_beside_a_controller_credential
         os.environ.pop("AGENTIHOOKS_CONTROLLER_CREDENTIAL", None)
         reply = ledger.request(SLUG, [posing])
     assert "a1" in reply["rejected"]
+
+
+def test_a_service_credential_checks_while_its_key_lives_and_retires_no_other_credential(hive):
+    controller = auth.issue_controller(hive)
+    first = auth.issue_service(hive, "hub-a")
+    second = auth.issue_service(hive, "hub-b")
+    assert first.startswith("hub-a.") and second.startswith("hub-b.")
+    assert {first, second}.isdisjoint(hive.get(key) for key in hive.keys())
+    assert all(auth.controller(hive, credential) for credential in (controller, first, second))
+    assert 0 < hive.ttl(f"{auth.PREFIX}:controller:hub-a") <= auth.SERVICE_TTL_S
+
+
+def test_an_expired_service_credential_is_refused_until_it_is_kept(hive):
+    credential = auth.issue_service(hive, "hub-a")
+    hive.delete(f"{auth.PREFIX}:controller:hub-a")
+    assert not auth.controller(hive, credential)
+    auth.keep_service(hive, credential)
+    assert auth.controller(hive, credential)
+    assert 0 < hive.ttl(f"{auth.PREFIX}:controller:hub-a") <= auth.SERVICE_TTL_S
+
+
+def test_a_service_credential_checks_only_against_its_own_holder(hive):
+    auth.issue_controller(hive)
+    credential = auth.issue_service(hive, "hub-a")
+    token = credential.rpartition(".")[2]
+    assert not auth.controller(hive, f"hub-b.{token}")
+    assert not auth.controller(hive, token)
+    assert not auth.controller(hive, f".{token}")
+
+
+def test_reissuing_a_service_credential_retires_only_that_holders_old_one(hive):
+    old = auth.issue_service(hive, "hub-a")
+    other = auth.issue_service(hive, "hub-b")
+    new = auth.issue_service(hive, "hub-a")
+    assert not auth.controller(hive, old)
+    assert auth.controller(hive, new) and auth.controller(hive, other)
+
+
+def test_the_server_accepts_a_live_hub_service_credential_and_refuses_an_expired_one(live, hive):
+    credential = auth.issue_service(hive, "hub-a")
+    status, _, _ = send(live, "GET", f"/api/v1/ledgers/{SLUG}/tasks", **{"X-Controller-Credential": credential})
+    assert status == 200
+    hive.delete(f"{auth.PREFIX}:controller:hub-a")
+    status, data, _ = send(live, "GET", f"/api/v1/ledgers/{SLUG}/tasks", **{"X-Controller-Credential": credential})
+    assert (status, json.loads(data)["error"]["code"]) == (403, "forbidden")

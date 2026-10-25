@@ -352,6 +352,66 @@ def test_the_hub_loop_idles_only_after_a_pass_with_every_reactor_on_standby(monk
     assert slept == [runner.IDLE_S]
 
 
+@pytest.fixture
+def hive(monkeypatch):
+    import fakeredis
+
+    from scripts.swarm import store
+
+    redis = fakeredis.FakeRedis(decode_responses=True)
+    monkeypatch.setattr(store, "redis_client", lambda: redis)
+    monkeypatch.setenv("AGENTIHOOKS_CONTROLLER_CREDENTIAL", "")
+    monkeypatch.setenv("HOSTNAME", "hub-0")
+    monkeypatch.setattr(runner, "open_bus", lambda config: memory.open_bus(BusConfig()))
+    return redis
+
+
+def stop_after(passes):
+    def run_once(self):
+        try:
+            return next(passes)
+        except StopIteration:
+            raise Stop from None
+
+    return run_once
+
+
+def test_a_hub_with_a_remote_ledger_writes_as_its_own_service_and_keeps_that_credential(monkeypatch, hive):
+    import os
+
+    from scripts.hive import auth
+
+    times = iter([0.0, runner.KEEP_S - 1, runner.KEEP_S])
+    kept = []
+    keep_service = auth.keep_service
+    monkeypatch.setenv("AGENTIHOOKS_DEPLOYMENT", "distributed")
+    monkeypatch.setenv("LEDGER_URL", "https://ledger.example")
+    monkeypatch.setattr(runner, "monotonic", lambda: next(times))
+    monkeypatch.setattr(auth, "keep_service", lambda redis, credential: kept.append(keep_service(redis, credential)))
+    monkeypatch.setattr(runner.HubRunner, "run_once", stop_after(iter([{"page": ["handled"]}] * 2)))
+    with pytest.raises(Stop):
+        runner.main(["run"])
+    credential = os.environ["AGENTIHOOKS_CONTROLLER_CREDENTIAL"]
+    assert credential.startswith("hub-hub-0.")
+    assert auth.controller(hive, credential)
+    assert kept == [None]
+    assert 0 < hive.ttl(f"{auth.PREFIX}:controller:hub-hub-0") <= auth.SERVICE_TTL_S
+
+
+def test_a_hub_with_a_local_ledger_issues_no_service_credential(monkeypatch, hive):
+    import os
+
+    from scripts.swarm import store
+
+    monkeypatch.setenv("AGENTIHOOKS_DEPLOYMENT", "local")
+    monkeypatch.delenv("LEDGER_URL", raising=False)
+    monkeypatch.setattr(store, "redis_client", lambda: pytest.fail("a local hub touched Redis"))
+    monkeypatch.setattr(runner.HubRunner, "run_once", stop_after(iter([{"page": ["handled"]}])))
+    with pytest.raises(Stop):
+        runner.main(["run"])
+    assert os.environ["AGENTIHOOKS_CONTROLLER_CREDENTIAL"] == ""
+
+
 def test_a_failed_handler_names_its_reactor_and_event_on_stderr(bus, capsys):
     hosted = hub(bus, [registry.Reactor("lifecycle", "swarm.*.task.>", Recorder(fail=1))])
     bus.events.publish(SUBJECT, event("e1", 1))
