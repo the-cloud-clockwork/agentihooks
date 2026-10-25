@@ -439,6 +439,13 @@ def test_the_ledger_notice_names_every_agent_in_flight():
     )
 
 
+def test_the_ledger_notice_reads_none_with_no_agent_in_flight():
+    assert run_window.notice("off", (START, END), {}, []) == (
+        "Run window ended 25 October 12:00 UTC, gate skip. Full handoff: master-watchdog. Tasks: none. "
+        "In flight: none. Claims continue."
+    )
+
+
 def test_a_failed_alert_send_retries_and_a_resend_is_not_doubled(swarm, monkeypatch):
     from scripts.inbox.store import InboxStore
 

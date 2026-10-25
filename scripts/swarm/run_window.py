@@ -137,15 +137,18 @@ def step(slug, config, store, ledger, doc, now_ms) -> list[str]:
     progress = report(config.window, now_ms)
     marks.update(elapsed_minutes=progress["elapsed_minutes"], remaining_minutes=progress["remaining_minutes"])
     _save(store, key, marks)
-    rows, actions = {row["id"]: row for row in doc.get("tasks") or []}, []
-    if now_ms < bounds[1] <= now_ms + ALERT_MINUTES * MINUTE_MS and "alerted" not in marks:
-        actions.append(_alert(slug, config, store, bounds, progress["remaining_minutes"]))
+    if now_ms < bounds[1]:
+        if bounds[1] > now_ms + ALERT_MINUTES * MINUTE_MS or "alerted" in marks:
+            return []
+        told = _alert(slug, config, store, bounds, progress["remaining_minutes"])
         _save(store, key, marks, alerted=now_ms)
-    if now_ms >= bounds[1] and "cutoff" not in marks:
+        return [told]
+    rows, actions = {row["id"]: row for row in doc.get("tasks") or []}, []
+    if "cutoff" not in marks:
         mode = modes.configured(GATE, config.gates)
-        actions += _gate(slug, mode, store, rows, bounds, now_ms)
+        actions = _gate(slug, mode, store, rows, bounds, now_ms)
         _save(store, key, marks, cutoff=now_ms, mode=mode)
-    if now_ms >= bounds[1] and "published" not in marks:
+    if "published" not in marks:
         actions.append(_publish(slug, marks["mode"], store, ledger, rows, bounds))
         _save(store, key, marks, published=now_ms)
     return actions
