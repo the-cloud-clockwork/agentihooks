@@ -66,6 +66,51 @@ def test_required_gate_rejects_unsuccessful_sonar(sonar):
         assert "::error::" in result.stdout
 
 
+@pytest.mark.parametrize("selection", ["cancelled", "failure"])
+@pytest.mark.parametrize("scope", ["", "selected", "full", "none"])
+def test_required_gate_names_selection_failure_before_downstream_coverage(selection, scope):
+    jobs = _workflow()["jobs"]
+    needs = {job: {"result": "skipped"} for job in jobs["gate-required"]["needs"]}
+    needs["select"] = {"result": selection, "outputs": {"scope": scope}}
+    needs["sonar"] = {"result": "failure"}
+    result = subprocess.run(
+        ["bash", "-e", "-c", jobs["gate-required"]["steps"][0]["run"]],
+        env=dict(os.environ, NEEDS=json.dumps(needs), EVENT="pull_request", MUTATION="false"),
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert f"::error::Test selection {selection};" in result.stdout
+    assert "Every gate required for this event" not in result.stdout
+
+
+@pytest.mark.parametrize(
+    ("selection", "event", "admission", "expected"),
+    [
+        ("cancelled", "pull_request", "skipped", False),
+        ("failure", "pull_request", "skipped", False),
+        ("skipped", "pull_request", "skipped", False),
+        ("success", "pull_request", "skipped", True),
+        ("success", "push", "skipped", True),
+        ("success", "workflow_dispatch", "success", True),
+        ("success", "workflow_dispatch", "failure", False),
+        ("success", "merge_group", "skipped", False),
+    ],
+)
+def test_sonar_requires_successful_selection_before_looking_for_unit_coverage(selection, event, admission, expected):
+    expression = _workflow()["jobs"]["sonar"]["if"].removeprefix("${{").removesuffix("}}")
+    for token, value in {
+        "!cancelled()": "'false' != 'true'",
+        "needs.select.result": f"'{selection}'",
+        "github.event_name": f"'{event}'",
+        "needs.admission.result": f"'{admission}'",
+    }.items():
+        expression = expression.replace(token, value)
+    result = subprocess.run(["bash", "-c", f"[[ {expression} ]]"], capture_output=True, text=True)
+    assert result.returncode in (0, 1), result.stdout + result.stderr
+    assert (result.returncode == 0) == expected, result.stdout + result.stderr
+
+
 def _queued_step():
     steps = _workflow()["jobs"]["sonar"]["steps"]
     return next(step for step in steps if step.get("id") == "queued")

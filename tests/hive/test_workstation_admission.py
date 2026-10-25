@@ -241,6 +241,15 @@ def test_a_local_launch_over_the_swarm_share_is_refused_with_its_reason(setup, m
     setup.herdr.spawn.assert_not_called()
 
 
+def test_a_quiet_workstation_admits_past_the_swarm_share_up_to_the_root_hive_max_agents(setup, monkeypatch):
+    fenced = local_fenced(setup, monkeypatch, 16, load5=4.32)
+    write_hive(setup, id="workstation", ui="yes", excluded=[], max_agents=20)
+    setup.store.update(setup.config.slug, local_max_agents=20)
+    local_agents(setup, 12)
+    assert fenced.placement_refusal("eng", {"id": "task"}) == ""
+    assert fenced.spawn(setup.config, "eng", "next", {"id": "task"}) == setup.herdr.spawn.return_value
+
+
 def test_a_local_launch_over_the_host_line_is_refused_when_it_is_tighter_than_the_share(setup, monkeypatch):
     fenced = local_fenced(setup, monkeypatch, 10, load5=8.0)
     with pytest.raises(SpawnError) as raised:
