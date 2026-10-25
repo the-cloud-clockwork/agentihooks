@@ -672,6 +672,15 @@ def _detached(args, environ: dict[str, str]) -> bool:
     return bool(args.defer_canary and _binding_deferred(environ)) and _detach()
 
 
+def _await_route(route_path: Path, timeout: float, active_env: dict[str, str]) -> tuple[dict[str, str], int | None]:
+    deadline = time.monotonic() + timeout
+    while not route_path.exists() and time.monotonic() < deadline:
+        if _selection_refused(active_env):
+            break
+        time.sleep(0.25)
+    return _take_route_report(route_path)
+
+
 def _selection_refused(environ: dict[str, str]) -> bool:
     from scripts.profiles import binding
 
@@ -1158,13 +1167,7 @@ def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -
         print("\n".join([*report, "route_status=pending", *_binding_deferred(active_env)]))
         return 0
 
-    route_path = _route_report(launcher)
-    deadline = time.monotonic() + args.route_timeout
-    while not route_path.exists() and time.monotonic() < deadline:
-        if _selection_refused(active_env):
-            break
-        time.sleep(0.25)
-    route, harness_at = _take_route_report(route_path)
+    route, harness_at = _await_route(_route_report(launcher), args.route_timeout, active_env)
     report.append(f"route_status={route.get('status', 'pending')}")
     report.append(f"harness_at={harness_at or ''}")
     if route.get("account"):
