@@ -1,5 +1,7 @@
 import json
 import os
+import time
+from pathlib import Path
 
 import pytest
 
@@ -63,7 +65,11 @@ def _slot(number, account, grant=GRANT):
 
 
 def _left(values):
-    return lambda account, now: values[account]
+    def left(account, now):
+        assert abs(now - time.time()) < 60
+        return values[account]
+
+    return left
 
 
 def _environ(rendered, **extra):
@@ -94,6 +100,8 @@ def test_the_preferred_login_wins_over_the_one_with_more_room(rendered, monkeypa
     claude_ai.launch_claude("/opt/claude", [], _environ(rendered), "")
     assert [account for account, _, _ in checked] == ["nestor_coltatgmail_com"]
     assert executed[0][2][claude_ai.STORE] == str(login.home(2))
+    home = executed[0][2]["CLAUDE_CONFIG_DIR"]
+    assert json.loads((Path(home) / login.CONFIG).read_text())[login.ACCOUNT] == PREFERRED
 
 
 def test_a_spent_login_falls_to_the_next_in_order(rendered, monkeypatch, checked, executed, capsys):
@@ -128,15 +136,38 @@ def test_a_login_that_fails_its_native_check_falls_to_the_next(rendered, monkeyp
     assert executed[0][2][claude_ai.STORE] == str(login.home(2))
 
 
+class _Stdout:
+    def __init__(self):
+        self.text, self.flushed = "", ""
+
+    def write(self, text):
+        self.text += text
+
+    def flush(self):
+        self.flushed = self.text
+
+
 def test_the_session_shares_a_held_master_slot_without_claiming_it(rendered, monkeypatch, checked, executed, tmp_path):
+    from scripts import install
+
     _slot(1, PREFERRED)
     held = _master_holds(1)
     monkeypatch.setattr(master_logins, "left", lambda account, now: 50.0)
-    report = tmp_path / "route"
+    report, slots, out = tmp_path / "route", [], _Stdout()
+
+    def execute(harness, account, environ, invoke):
+        slots.append((harness, account, out.flushed))
+        return invoke(environ)
+
+    monkeypatch.setattr("scripts.hive.account_slots.execute", execute)
+    monkeypatch.setattr("sys.stdout", out)
     claude_ai.launch_claude(
         "/opt/claude", ["--model", "opus"], _environ(rendered, CLAUDE_CODE_OAUTH_TOKEN="x"), str(report)
     )
     binary, argv, env = executed[0]
+    assert slots == [
+        ("claude", "nestor_coltatgmail_com", "[agenti] account=nestor_coltatgmail_com route=claude-ai slot=1\n")
+    ]
     target = login.root(1).parent / "claude-ai" / "s_251025" / "claude"
     assert (login.root(1) / login.OWNER).read_bytes() == held
     assert login.holders(login.root(1)) == {"master@rig": os.getpid()}
@@ -148,7 +179,9 @@ def test_the_session_shares_a_held_master_slot_without_claiming_it(rendered, mon
     assert "CLAUDE_CODE_OAUTH_TOKEN" not in env
     assert env["AH_ROUTE_INTERACTIVE_nestor_coltatgmail_com"] == "1"
     assert binary == "/opt/claude"
-    assert argv[-4:] == ["--settings", '{"forceLoginMethod":"claudeai"}', "--model", "opus"]
+    assert argv == install._claude_command(
+        "/opt/claude", ["--settings", '{"forceLoginMethod":"claudeai"}', "--model", "opus"]
+    )
     assert report.read_text().splitlines() == ["status=routed", "account=nestor_coltatgmail_com", "placement=forced"]
 
 
@@ -162,10 +195,10 @@ def test_a_master_claim_after_a_standalone_launch_takes_the_slot_alone(rendered,
 
 def test_a_stored_copy_restores_into_a_free_slot_home(rendered, monkeypatch, checked, executed):
     copy = {"grant": json.dumps(GRANT), "account": json.dumps(PREFERRED), "epoch": "2"}
-    monkeypatch.setattr(openbao_kv, "from_env", lambda environ: "bao")
-    monkeypatch.setattr(login, "stored", lambda bao, number=None: copy if number == 3 else {})
+    monkeypatch.setattr(openbao_kv, "from_env", lambda environ: "bao" if environ.get("OPENBAO_URL") else None)
+    monkeypatch.setattr(login, "stored", lambda bao, number=None: copy if (bao, number) == ("bao", 3) else {})
     monkeypatch.setattr(master_logins, "left", lambda account, now: 50.0)
-    claude_ai.launch_claude("/opt/claude", [], _environ(rendered), "")
+    claude_ai.launch_claude("/opt/claude", [], _environ(rendered, OPENBAO_URL="u"), "")
     assert json.loads((login.home(3) / login.CREDENTIALS).read_text()) == {login.GRANT: GRANT}
     assert executed[0][2][claude_ai.STORE] == str(login.home(3))
     assert checked == [("nestor_coltatgmail_com", str(login.home(3)), executed[0][2]["CLAUDE_CONFIG_DIR"])]
