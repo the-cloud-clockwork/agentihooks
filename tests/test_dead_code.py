@@ -1,11 +1,15 @@
 import json
+import os
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
+import yaml
 
 from scripts import dead_code, size_limits
 
+_ROOT = Path(__file__).resolve().parents[1]
 pytestmark = pytest.mark.unit
 
 USED = "def used():\n    return 1\n\n\nprint(used())\n"
@@ -252,3 +256,50 @@ def test_the_grader_refuses_another_vulture_version(tmp_path, capsys, monkeypatc
     assert dead_code.main(["--write", "--head", str(_tree(tmp_path, {"hooks/guard.py": USED}))]) == 1
     out = capsys.readouterr().out
     assert out == f"::error::The dead code gate needs vulture {dead_code.VULTURE_VERSION}, found 0.0.1.\n"
+
+
+def _step():
+    steps = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())["jobs"]["lint"]["steps"]
+    return next(step for step in steps if step.get("name") == "Hold dead code in hooks and scripts")
+
+
+def test_the_gate_runs_in_lint_graded_by_dev_against_the_base():
+    steps = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())["jobs"]["lint"]["steps"]
+    install = next(step for step in steps if step.get("name") == "Install vulture")
+    assert install["run"] == f"python -m pip install vulture=={dead_code.VULTURE_VERSION}"
+    step = _step()
+    assert step["if"] == "${{ !cancelled() }}"
+    assert step["run"] == (
+        'if [[ -f "$RUNNER_TEMP/grader/scripts/dead_code.py" ]]; then\n'
+        '  cd "$RUNNER_TEMP/grader"\n'
+        '  python -m scripts.dead_code --base "$RUNNER_TEMP/base" --head "$GITHUB_WORKSPACE"\n'
+        "else\n"
+        '  python -m scripts.dead_code --base "$GITHUB_WORKSPACE" --head "$GITHUB_WORKSPACE"\n'
+        "fi\n"
+    )
+
+
+def _run_step(tmp_path, workspace):
+    (tmp_path / "grader").mkdir()
+    env = dict(
+        os.environ,
+        RUNNER_TEMP=str(tmp_path),
+        GITHUB_WORKSPACE=str(workspace),
+        PATH=f"{Path(sys.executable).parent}{os.pathsep}{os.environ['PATH']}",
+    )
+    return subprocess.run(["bash", "-e", "-c", _step()["run"]], env=env, cwd=_ROOT, capture_output=True, text=True)
+
+
+def test_before_dev_carries_the_grader_a_planted_unused_function_is_red(tmp_path):
+    head = _recorded(tmp_path / "head", {"hooks/guard.py": USED})
+    (head / "hooks/guard.py").write_text(PLANTED)
+    result = _run_step(tmp_path, head)
+    assert result.returncode == 1
+    assert "::error::hooks/guard.py has 1 unused names; the base allows 0\n" in result.stdout
+
+
+def test_before_dev_carries_the_grader_a_recorded_head_is_green(tmp_path):
+    head = _recorded(tmp_path / "head", {"hooks/guard.py": PLANTED})
+    result = _run_step(tmp_path, head)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "1 files hold dead code, 1 on the base allowlist, 0 errors" in result.stdout
