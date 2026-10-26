@@ -158,16 +158,16 @@ def render(repo: str, found: dict) -> str:
 
 
 def _gh(args: list[str], repo_dir: str, run: Callable) -> str:
-    for attempt in range(1, ATTEMPTS + 1):
+    for pause in [*(RETRY_S * attempt for attempt in range(1, ATTEMPTS)), None]:
         try:
             done = run(["gh", *args], cwd=repo_dir, capture_output=True, text=True, timeout=60)
         except (OSError, subprocess.SubprocessError) as exc:
             raise SwarmError(f"GitHub API: {exc}") from exc
         if not done.returncode:
             return done.stdout
-        if attempt == ATTEMPTS or not SERVER_ERROR.search(done.stderr):
+        if pause is None or not SERVER_ERROR.search(done.stderr):
             raise SwarmError(done.stderr.strip() or "GitHub API failed")
-        time.sleep(RETRY_S * attempt)
+        time.sleep(pause)
 
 
 def read_runs(repo_dir: str, event: str, window: tuple[float, float], run: Callable) -> list[dict]:
@@ -297,7 +297,7 @@ def red_head_jobs(runs: list[dict], window: tuple[float, float], repo_dir: str, 
             names = ["unreadable"]
         jobs = dict.fromkeys(map(_failed_job, names), 1) or {"no failed job": 1}
         failed.update(jobs)
-        last.update({job: max(last.get(job, 0), found["id"]) for job in jobs})
+        last.update({job: max(last.get(job, found["id"]), found["id"]) for job in jobs})
     return {job: {"runs": n, "last": last[job]} for job, n in failed.most_common()}
 
 
