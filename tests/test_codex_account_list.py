@@ -50,7 +50,8 @@ def test_the_hives_table_and_the_quota_table_list_the_same_deduplicated_codex_ac
 def test_the_page_quota_table_shows_a_duplicate_as_its_own_row_with_a_duplicate_state(tmp_path, monkeypatch):
     from hooks.context import account_sessions
 
-    for name, value in _environ(tmp_path).items():
+    environ = {**_environ(tmp_path), "AH_CX_TOKEN_delta": _jwt("acct-1") + "y"}
+    for name, value in environ.items():
         monkeypatch.setenv(name, value)
     agents_quota._page_cache.clear()
     monkeypatch.setattr(balancer, "cached_observations", lambda **kw: [])
@@ -60,13 +61,18 @@ def test_the_page_quota_table_shows_a_duplicate_as_its_own_row_with_a_duplicate_
     monkeypatch.setattr(codex_router, "quotas", lambda pool, environ: {})
     rows = agents_quota.page_quota(now=100.0)["rows"]
     codex = [row for row in rows if row["agent"] == "codex" and row["kind"] != "api"]
-    assert [row["account"] for row in codex] == ["gamma", KEPT, "alpha"]
-    assert [row["state"] == agents_quota.DUPLICATE for row in codex] == [False, False, True]
-    duplicate = codex[-1]
-    assert duplicate["sessions"] == 2
-    assert duplicate["source"] == f"same ChatGPT account as {KEPT}"
-    assert (duplicate["cap"], duplicate["routing_left"], duplicate["kind"]) == (None, None, "subscription")
-    assert duplicate["identity"] == codex_router.fingerprint("acct-1")
+    assert [row["account"] for row in codex[:2]] == ["gamma", KEPT]
+    assert agents_quota.DUPLICATE not in {row["state"] for row in codex[:2]}
+    duplicates = {row["account"]: row for row in codex[2:]}
+    assert sorted(duplicates) == ["alpha", "delta"]
+    assert {name: row["sessions"] for name, row in duplicates.items()} == {"alpha": 2, "delta": 0}
+    for row in duplicates.values():
+        assert row["state"] == agents_quota.DUPLICATE
+        assert row["source"] == f"same ChatGPT account as {KEPT}"
+        assert row["kind"] == "subscription"
+        assert row["identity"] == codex_router.fingerprint("acct-1")
+        empty = ("five_hour_left", "seven_day_left", "seven_day_resets_at", "cap", "routing_left")
+        assert [row[field] for field in empty] == [None] * len(empty)
     assert codex_router.routed_live([], {"alpha": 2, "other": 1}, dict(_environ(tmp_path))) == [
         codex_router.CodexAccount("other", "AH_CX_TOKEN_other")
     ]
