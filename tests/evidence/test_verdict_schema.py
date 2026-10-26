@@ -22,7 +22,7 @@ def test_valid_verdicts_load(doc):
 def test_pass_with_notes_is_refused():
     with pytest.raises(schema.SchemaError) as refused:
         schema.validate("verdict", {"verdict": "pass", "notes": [NOTE]})
-    assert str(refused.value) == f"verdict notes: {[NOTE]} should have at most 0 items"
+    assert str(refused.value) == f"verdict notes: {[NOTE]} is expected to be empty"
 
 
 def test_unknown_verdict_is_refused():
