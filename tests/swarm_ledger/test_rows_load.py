@@ -44,6 +44,15 @@ def test_load_skips_rows_whose_parent_is_not_stored():
     assert load(connection, SLUG) == {"a": [1]}
 
 
+def test_load_keeps_stored_table_order_for_children_sharing_a_position():
+    connection = stored({})
+    insert = "INSERT INTO {} (slug, path, parent, key, position, kind, value) VALUES (?, ?, ?, ?, ?, ?, ?)"
+    connection.execute(insert.format("fields"), (SLUG, '["b"]', "[]", '"b"', 0, "value", "1"))
+    connection.execute(insert.format("resources"), (SLUG, '["a"]', "[]", '"a"', 0, "value", "2"))
+    loaded = load(connection, SLUG)
+    assert repr(loaded) == repr(assemble(read_rows(connection, SLUG))) == repr({"b": 1, "a": 2})
+
+
 def test_load_reads_only_the_named_ledger():
     connection = stored({"a": 1})
     write_rows(connection, "other", {}, flatten({"b": [2]}))

@@ -157,7 +157,7 @@ def load(connection, slug: str) -> object:
             placed.setdefault(parent, []).append((position, key, child))
     for parent, items in placed.items():
         container = containers.get(parent)
-        items.sort()
+        items.sort(key=lambda item: item[0])
         if type(container) is list:
             container.extend(child for _, _, child in items)
         elif container is not None:
