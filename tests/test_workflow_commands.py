@@ -45,4 +45,3 @@ def test_ordinary_node_ids_pass():
     ]
     assert carrying_commands(nodeids) == []
     refuse_commands(nodeids)
-
