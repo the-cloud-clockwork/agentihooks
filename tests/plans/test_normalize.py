@@ -370,14 +370,14 @@ def test_the_marker_is_the_first_non_blank_line_after_the_heading():
     text = """# Plan
 
 ## Spaced phase
-
+{whitespace}
 <!-- phase: id=spaced planning=manual -->
 Spaced prose.
 
 ## Not a phase
 Prose first.
 <!-- phase: id=sneaky planning=auto -->
-"""
+""".format(whitespace="   ")
 
     result = normalize(text, "neighbors.md")
 

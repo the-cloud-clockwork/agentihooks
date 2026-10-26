@@ -319,7 +319,7 @@ def _join(lines: list[str]) -> str:
 def _bound(text: str, limit: int = DESCRIPTION_LIMIT) -> str:
     if len(text) <= limit:
         return text
-    words = text[: limit + 1].rsplit(" ", 1)
+    words = text[: limit + 1].rsplit(maxsplit=1)
     return words[0] if len(words) > 1 else text[:limit]
 
 
