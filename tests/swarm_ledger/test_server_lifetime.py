@@ -42,6 +42,8 @@ def test_running_reads_a_zombie_or_a_process_being_reaped_as_gone(monkeypatch, s
 @pytest.mark.parametrize("explicit_owner", [True, False])
 @pytest.mark.parametrize("mode", ["--ensure", "--serve"])
 def test_detached_server_stops_when_its_run_ends(tmp_path, ending, explicit_owner, mode, ledger_port):
+    from scripts.swarm_ledger import ledger_server
+
     port = ledger_port
     env = {
         **os.environ,
@@ -79,7 +81,7 @@ def test_detached_server_stops_when_its_run_ends(tmp_path, ending, explicit_owne
         else:
             getattr(run, ending)()
         run.wait(timeout=5)
-        deadline = time.monotonic() + 3
+        deadline = time.monotonic() + ledger_server.DRAIN_S + 5
         while running(pid) and time.monotonic() < deadline:
             time.sleep(0.02)
         assert not running(pid), f"ledger server {pid} on port {port} survived its ended run"
