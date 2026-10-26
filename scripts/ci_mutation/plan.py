@@ -162,11 +162,11 @@ def changed_recorded_units(root: Path, manifest: dict, changes: dict[str, set[in
 
 
 def new_functions(old: str | None, tree: ast.Module) -> set[str]:
+    if old is None:
+        return set()
     try:
-        known = _known_names(ast.parse(old)) if old is not None else None
+        known = _known_names(ast.parse(old))
     except SyntaxError:
-        known = None
-    if known is None:
         return set()
     return {
         statement.name

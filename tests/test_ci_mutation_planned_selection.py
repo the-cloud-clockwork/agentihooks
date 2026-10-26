@@ -710,7 +710,8 @@ def test_a_new_handler_table_entry_selects_only_the_tests_that_reach_it(tmp_path
     elif mode == "nested":
         edited = TABLE_SOURCE.replace(
             'HANDLERS = {"f": f}',
-            'def h(value):\n    def inner():\n        return value * 2\n\n    return inner()\n\n\nHANDLERS = {"f": f, "h": h}',
+            "def h(value):\n    def inner():\n        return value * 2\n\n    return inner()\n\n\n"
+            'HANDLERS = {"f": f, "h": h}',
         )
         changed = "        return value * 2"
     else:
