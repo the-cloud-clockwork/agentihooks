@@ -994,6 +994,7 @@ def test_the_worker_image_profiles_are_the_default_and_every_package_role():
         "dispatcher",
         "documentation",
         "engineer",
+        "judge",
         "master",
         "planner",
         "qa",
