@@ -39,5 +39,5 @@
   "pull_request": "https://github.com/the-cloud-clockwork/agentihooks/pull/7438",
   "rollback_rehearsal": "C rewound every consumer cursor and replayed all tombstones after a regrant: reads stayed refused, the dropped pack and redacted lesson stayed so, and nothing already converged changed",
   "status": "fixture_verified",
-  "tested_commit": "8755a2ca223b487b3597392648e08a511db8277d"
+  "tested_commit": "15b6b2accf906f2505c9332259a0631c24cefb5c"
 }
