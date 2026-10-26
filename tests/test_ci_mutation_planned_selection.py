@@ -625,7 +625,10 @@ def test_only_unkeyed_reads_of_a_dict_table_reach_its_new_entries():
 @pytest.mark.parametrize(
     ("old", "new", "expected"),
     [
-        ("X = 1\n", "X = 1\n\n\ndef h():\n    pass\n\n\nasync def k():\n    pass\n", {"h", "k"}),
+        ("X = 1\n", "X = 1\n\n\ndef h():\n    pass\n\n\nasync def k():\n    pass\n\n\nH = [h, k]\n", {"h", "k"}),
+        ("X = 1\n", "X = 1\n\n\ndef h():\n    pass\n\n\ndef k():\n    return h()\n", {"h"}),
+        ("X = 1\n", "X = 1\n\n\ndef h():\n    pass\n", set()),
+        ("X = 1\n", "X = 1\n\n\ndef h():\n    return h()\n", set()),
         ("def h():\n    pass\n", "def h():\n    return 1\n", set()),
         ("h = 1\n", "def h():\n    pass\n", set()),
         ("X = 1\n", "@cache\ndef h():\n    pass\n", set()),

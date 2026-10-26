@@ -162,7 +162,7 @@ def changed_recorded_units(root: Path, manifest: dict, changes: dict[str, set[in
 
 
 def new_functions(old: str | None, tree: ast.Module) -> set[str]:
-    # Only code changed in this push can name a new function, and that code's tests are already selected.
+    # A name the old source never used is reached only through the module code that names it, which changed too.
     try:
         known = _known_names(ast.parse(old)) if old is not None else None
     except SyntaxError:
@@ -175,6 +175,12 @@ def new_functions(old: str | None, tree: ast.Module) -> set[str]:
         if isinstance(statement, (ast.FunctionDef, ast.AsyncFunctionDef))
         and not statement.decorator_list
         and statement.name not in known
+        and any(
+            isinstance(found, ast.Name) and found.id == statement.name
+            for other in tree.body
+            if other is not statement
+            for found in ast.walk(other)
+        )
     }
 
 
