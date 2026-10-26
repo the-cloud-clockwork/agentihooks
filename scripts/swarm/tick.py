@@ -1454,7 +1454,7 @@ def _spawn_order(slug, config, store, agents, rows, doc, runtime):
     queue, waits = [], []
     for lane, cap in caps.items():
         running = [
-            rows[a.task]
+            rows.get(a.task, {"id": a.task, "lane": a.lane})
             for a in agents
             if a.lane == lane and not _ended(a, rows) and _current_owner(a, rows.get(a.task, {}))
         ]
@@ -1462,7 +1462,7 @@ def _spawn_order(slug, config, store, agents, rows, doc, runtime):
         ready = timing.timed(ready_in_order, slug, store, rows, doc, lane, dispatched, claims)
         if "tasks" in decision:
             ready = [task for task in ready if task["id"] in decision["tasks"]]
-        locate = partial(profile_first.placeable, slug, config, store, runtime, lane)
+        locate = partial(timing.timed, profile_first.placeable, slug, config, store, runtime, lane)
         ready, refused = focus_budget.place(doc, ready, lane, cap, config.focus_weight, running, locate)
         queue += [(busy + rank, lane, task) for rank, task in enumerate(ready)]
         waits += refused

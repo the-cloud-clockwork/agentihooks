@@ -33,7 +33,7 @@ def place(
     order = ranks(doc)
     unfocused = sum(row["verb"] == "focus" for row in doc.get("freezes", []))
     live = [task for task in running if task.get("lane") == lane]
-    holding = sum(order[task["id"]] < unfocused for task in live)
+    holding = sum(order.get(task["id"], unfocused) < unfocused for task in live)
     room = max(0, capacity - len(live))
     normal, notes = locate([task for task in ready if order[task["id"]] == unfocused], room)
     plain = [task for task in normal if profile_first.UNRESOLVED not in task]

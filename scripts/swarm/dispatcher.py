@@ -124,10 +124,10 @@ def ordered(doc: dict, named: str, scores: dict, caps: dict | None = None, weigh
         for t in sorted(
             rows,
             key=lambda t: (
-                focus[t["id"]],
                 -depth[t["id"]],
                 -scores.get(t["id"], 0),
                 t.get("lane") != lane,
+                focus[t["id"]],
                 position[t["id"]],
             ),
         )
