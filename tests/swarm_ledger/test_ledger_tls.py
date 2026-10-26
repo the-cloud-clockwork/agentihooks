@@ -230,6 +230,24 @@ def test_a_refusal_with_an_unread_body_answers_with_its_status_over_tls(tls_ledg
     assert json.loads(refused.value.read())["error"]["message"] == reason
 
 
+def test_a_refusal_over_a_body_past_the_drain_limit_still_answers_over_tls(tls_ledger, monkeypatch):
+    monkeypatch.setattr(ledger_server, "MAX_BODY", 16)
+    request = urllib.request.Request(
+        f"{tls_ledger['base']}/api/v1/ledgers/{SLUG}/agent-token",
+        b"{}" + b" " * 4096,
+        {"Content-Type": "application/json", "X-Ledger-Agent": "engineer@323133-0256"},
+        method="POST",
+    )
+    context = ssl.create_default_context(cadata=os.environ["LEDGER_CA_PEM"])
+
+    with pytest.raises(urllib.error.HTTPError) as refused:
+        urllib.request.urlopen(request, timeout=5, context=context)
+
+    assert refused.value.code == 403
+    assert refused.value.headers["Connection"] == "close"
+    assert json.loads(refused.value.read())["error"]["message"] == "Missing or wrong hive credential"
+
+
 def trusted(monkeypatch, cert):
     seen = []
 
