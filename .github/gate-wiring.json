@@ -6,7 +6,7 @@
       "expires": "2027-04-20"
     },
     "test.yml/mutation-self-plant": {
-      "reason": "Runs on every pull request but plants the sample only when the mutation gate or its plant changes, and is skipped in the merge queue; wiring it into Gate Required needs an aggregator change shipped tests first.",
+      "reason": "Runs on every pull request and plants the sample only when the mutation gate, its plant or its inputs change; it is skipped on queue and push runs, so making it a need of Gate Required changes the aggregator's per event rules, a gate change shipped tests first.",
       "owner": "ci-9@rig-grade-swarm",
       "expires": "2026-11-26"
     }

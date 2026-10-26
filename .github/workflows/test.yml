@@ -3286,7 +3286,9 @@ jobs:
         id: changed
         run: |
           if diff -rq base/scripts/ci_mutation head/scripts/ci_mutation >/dev/null \
-            && diff -rq base/tests/mutation_self_plant head/tests/mutation_self_plant >/dev/null; then
+            && diff -rq base/tests/mutation_self_plant head/tests/mutation_self_plant >/dev/null \
+            && cmp -s base/hooks/context/conditions.py head/hooks/context/conditions.py \
+            && cmp -s base/pyproject.toml head/pyproject.toml; then
             echo "plant=false" >> "$GITHUB_OUTPUT"
             echo "The mutation gate and its plant match the base; nothing to prove."
           else
