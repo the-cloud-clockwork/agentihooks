@@ -81,6 +81,9 @@ def test_a_each_target_receives_the_scoped_pack_with_a_receipt(home, monkeypatch
 
 
 def test_a_second_independent_fixture_does_not_lean_on_the_first(monkeypatch, capsys, tmp_path):
+    monkeypatch.setattr("hooks.config.BRAIN_ENABLED", True)
+    monkeypatch.delenv("AGENTIHOOKS_TASK_CONTEXT_OFF", raising=False)
+    emitter.drain()
     records = []
     for name in ("one", "two"):
         monkeypatch.setattr("hooks.config.AGENTIHOOKS_HOME", tmp_path / name)
