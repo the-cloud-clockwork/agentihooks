@@ -16,7 +16,16 @@ from scripts.ci_mutation.browser import needs_browser
 from scripts.ci_mutation.scope import discover_changes, graded_green, own_bases, select_tests, test_file
 from scripts.ci_mutation.selection import changed_mutations, file_seconds, split_parts, stats_shards
 from scripts.ci_test_plan import find_record
-from tests.dep_manifest import GLOBAL_FILES, MEASURED, _spans, changed_units, line_units, node
+from tests.dep_manifest import (
+    GLOBAL_FILES,
+    MEASURED,
+    _show,
+    _spans,
+    changed_units,
+    global_input,
+    line_units,
+    node,
+)
 from tests.dep_manifest import changes as recorded_changes
 
 # Upper quartile of measured worker seconds per mutant; stored test timings did not predict the cost.
@@ -114,14 +123,18 @@ def record_drift(root: Path, manifest: dict) -> tuple[set[str], set[int], set[st
     index = {unit: number for number, unit in enumerate(manifest["units"])}
     tests, units, paths = set(), set(), set()
     for path, old, new in recorded_changes(root, manifest["commit"], "HEAD"):
-        if path.startswith("tests/"):
-            # A changed helper, conftest or fixture can move what any test reaches.
-            if not (path.endswith(".py") and Path(path).name.startswith("test_")):
+        if path.startswith(".github/workflows/"):
+            if global_input(
+                path, _show(root, manifest["commit"], path), _show(root, "HEAD", path), manifest.get("version")
+            ):
+                return None
+            paths.add(path)
+        elif path.startswith("tests/") and path.endswith(".py"):
+            # A changed helper or conftest can move what any test reaches.
+            if not Path(path).name.startswith("test_"):
                 return None
             tests.add(path)
-        elif path in {*GLOBAL_FILES, ".github/workflows/test.yml"} or (
-            path.endswith(".py") and not path.startswith(MEASURED)
-        ):
+        elif path in GLOBAL_FILES or (path.endswith(".py") and not path.startswith(MEASURED)):
             return None
         elif path.endswith(".py"):
             units.update(index[unit] for name in changed_units(old, new) if (unit := f"{path}::{name}") in index)
