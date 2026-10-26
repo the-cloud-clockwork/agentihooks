@@ -17,25 +17,27 @@ backup store and returns its set id, the sha256 of its manifest:
 | objects | every archive object the catalog manifest names, plus every checkpoint object | each digest is `present` or carries the read error |
 
 Each component records its digest, byte size, `version` and encryption `key_id`. The manifest records `format`
-(`1.0`), `captured_at`, the object inventory, the checkpoint object lists per task and `omitted_projections`.
+(`1.0`), the `corpus` the set belongs to, `captured_at`, the object inventory, the checkpoint object lists per task and `omitted_projections`.
 A source object that is missing or altered is recorded with its error and never copied or replaced.
 
 ## Restore
 
-`restore(backup_store, set_id, root, keyring)` refuses, before it writes anything, a manifest whose format major
-differs from this release and any component whose `key_id` is not in the keyring. The target must be empty, or
+`restore(backup_store, set_id, root, access)` takes an `Access(grant, keyring, versions)`. Before it writes
+anything it refuses a manifest whose format major differs from this release, a grant whose corpus is not the set's
+corpus, any component whose `key_id` is not in the keyring and any component whose `version` the caller does not
+accept. The target must be empty, or
 hold a `restore.json` marker naming the same set; a rerun into that folder resumes, and content addressing keeps
 object copies idempotent. Every object is read back through its digest. Objects missing from the set are returned as
 `irrecoverable`.
 
-`rebuild(catalog, projections, now)` rebuilds the omitted chunk and vector projections for every retained session
+`rebuild(catalog, grant, projections, now)` rebuilds the omitted chunk and vector projections for every retained session
 from the restored events.
 
 ## Drill
 
-`drill(backup_store, set_id, Drill(root, keyring, projections, query, task_id, clock))` restores, rebuilds, runs the
+`drill(backup_store, set_id, Drill(root, access, projections, query, task_id, clock))` restores, rebuilds, runs the
 agreed historical query against the restored catalog and objects, and reads every object of the designated task
-checkpoint. Its report carries `backup_restore_verification_status`:
+checkpoint. Its report names its `set_id` and carries `backup_restore_verification_status`:
 
 | Status | Meaning |
 |---|---|
@@ -43,15 +45,17 @@ checkpoint. Its report carries `backup_restore_verification_status`:
 | `partial` | the query answered and the checkpoint recovered; the listed objects are irrecoverable |
 | `failed` | a component failed its digest, the query failed or the checkpoint did not recover |
 
-The report also records `recovery_point` (the set's `captured_at`) and `recovery_time_seconds` measured by the
+A refused restore raises `Refused` and produces no report. The report also records `recovery_point` (the set's `captured_at`) and `recovery_time_seconds` measured by the
 drill clock. Both are observations of that drill, not guarantees.
 
 ## Registry and retention
 
-`Registry(path)` keeps one entry per set. `record` starts it `uploaded`. `verify(set_id, attempt, report)` stores
-the drill status only for a higher attempt; the same attempt with the same report is a no-op, and an older or
-conflicting attempt is refused. `accepted` is true for `verified` and `partial` sets. `preserved` names the newest
-accepted set, which retention must keep. `retention_allowed` is true only while the newest set is `verified`, so a
+`Registry(path)` keeps one entry per set. `record` starts it `uploaded`. `Registry.drill(backup_store, set_id,
+attempt, plan)` runs the drill itself and stores its status and report digest, so no caller can hand it a report.
+An older attempt is refused before anything runs; the same attempt with the same report is a no-op, and the same
+attempt with a different report is refused. `accepted` is true while the latest drill is `verified` or `partial`.
+`preserved` names the newest set any drill accepted, and keeps naming it after a later failed drill, so retention
+keeps it. `retention_allowed` is true only while the newest set is `verified`, so a
 newer unverified, partial or failed set stops destructive retention until coverage is restored.
 
 ## Limitations
@@ -59,4 +63,7 @@ newer unverified, partial or failed set stops destructive retention until covera
 - Encryption happens in the storage layer; this module records key ids and checks them against a keyring.
 - The evidence is fixture-only: local folders and a SQLite file stand in for the buckets, the central database, the
   hosted ledger, Redis and the brain export. No deployed backup has been restored.
-- No scheduler runs capture or drills yet.
+- No scheduler runs capture or drills yet, and no deletion path exists: a retention collector must consult
+  `retention_allowed` and `preserved` before deleting a backup set.
+- Capture records the exports it is given under one capture time; taking the ledger, coordination and brain exports
+  under one fence is the caller's job.

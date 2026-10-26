@@ -19,6 +19,7 @@ from hooks.memory.index_worker import IndexWorker, Target
 FORMAT = "1.0"
 METRIC = "backup_restore_verification_status"
 UPLOADED, VERIFIED, PARTIAL, FAILED = "uploaded", "verified", "partial", "failed"
+STATUSES = (UPLOADED, VERIFIED, PARTIAL, FAILED)
 RESTORE_VERIFIED = (VERIFIED, PARTIAL)
 PRESENT = "present"
 CATALOG = "catalog"
@@ -26,14 +27,16 @@ FILES = ("ledger", "coordination", "brain")
 PROJECTIONS = chunking.CHUNK_TABLES + index_worker.INDEX_TABLES
 CATALOG_FILE = "catalog.sqlite3"
 MARKER = "restore.json"
+PARTIAL_WRITE = ".partial-"
 ARCHIVED = "SELECT DISTINCT object_digest FROM archive_manifest ORDER BY object_digest"
 RETAINED = "SELECT session_uid FROM session_record WHERE access_domain = ? AND state = 'retained' ORDER BY session_uid"
 UNSUPPORTED = "the backup format major version is not supported by this release; nothing was restored"
+FORBIDDEN = "the grant does not cover the backed up corpus; nothing was restored"
 NO_KEY = "no encryption key is available for a backup component; nothing was restored"
+OLD_VERSION = "a backup component version is not supported by this release; nothing was restored"
 NOT_ISOLATED = "the restore target holds other data; restore into an empty folder"
 UNKNOWN_SET = "the backup set is not recorded"
 STALE_DRILL = "a newer restore drill result is already recorded for this backup set; nothing changed"
-UNRECOVERED = "a designated checkpoint object is missing from the backup set"
 
 
 class Refused(Exception):
@@ -42,6 +45,7 @@ class Refused(Exception):
 
 @dataclass(frozen=True)
 class Sources:
+    corpus: str
     catalog: Path
     objects: archive.ObjectStore
     files: dict[str, bytes]
@@ -51,8 +55,14 @@ class Sources:
 
 
 @dataclass(frozen=True)
-class Projections:
+class Access:
     grant: Grant
+    keyring: frozenset[str]
+    versions: dict[str, frozenset[str]]
+
+
+@dataclass(frozen=True)
+class Projections:
     policy: Policy
     index_generation: str
     embedder: Embedder
@@ -61,7 +71,7 @@ class Projections:
 @dataclass(frozen=True)
 class Drill:
     root: Path
-    keyring: frozenset[str]
+    access: Access
     projections: Projections
     query: Callable[[Catalog, archive.ObjectStore], dict]
     task_id: str
@@ -81,12 +91,17 @@ def _encoded(doc: dict) -> bytes:
 
 
 def _write(path: Path, data: bytes) -> None:
-    descriptor, temporary = tempfile.mkstemp(dir=path.parent)
-    with os.fdopen(descriptor, "wb") as handle:
-        handle.write(data)
-        handle.flush()
-        os.fsync(handle.fileno())
-    Path(temporary).replace(path)
+    descriptor, temporary = tempfile.mkstemp(dir=path.parent, prefix=PARTIAL_WRITE)
+    try:
+        with os.fdopen(descriptor, "wb") as handle:
+            handle.write(data)
+            handle.flush()
+            os.fsync(handle.fileno())
+        Path(temporary).replace(path)
+    except BaseException:
+        Path(temporary).unlink(missing_ok=True)
+        raise
+    archive._sync(path.parent)
 
 
 def _catalog_copy(path: Path) -> tuple[bytes, list[str]]:
@@ -125,6 +140,7 @@ def capture(sources: Sources, backup: archive.ObjectStore, now: float) -> str:
     inventory = set(archived).union(*sources.checkpoints.values())
     manifest = {
         "format": FORMAT,
+        "corpus": sources.corpus,
         "captured_at": now,
         "components": components,
         "objects": {digest: _copied(sources.objects, backup, digest) for digest in sorted(inventory)},
@@ -134,16 +150,22 @@ def capture(sources: Sources, backup: archive.ObjectStore, now: float) -> str:
     return backup.put(_encoded(manifest))
 
 
-def _admit(manifest: dict, keyring: frozenset[str]) -> None:
+def _admit(manifest: dict, access: Access) -> None:
     if manifest["format"].split(".")[0] != FORMAT.split(".")[0]:
         raise Refused(UNSUPPORTED)
-    if any(component["key_id"] not in keyring for component in manifest["components"].values()):
+    if manifest["corpus"] != access.grant.corpus:
+        raise Refused(FORBIDDEN)
+    components = manifest["components"]
+    if any(component["key_id"] not in access.keyring for component in components.values()):
         raise Refused(NO_KEY)
+    if any(component["version"] not in access.versions.get(name, ()) for name, component in components.items()):
+        raise Refused(OLD_VERSION)
 
 
 def _claim(root: Path, set_id: str) -> None:
     marker = root / MARKER
-    if root.exists() and any(root.iterdir()):
+    held = [path for path in root.iterdir() if not path.name.startswith(PARTIAL_WRITE)] if root.exists() else []
+    if held:
         if not marker.exists() or json.loads(marker.read_text())["set_id"] != set_id:
             raise Refused(NOT_ISOLATED)
         return
@@ -151,10 +173,10 @@ def _claim(root: Path, set_id: str) -> None:
     _write(marker, _encoded({"set_id": set_id}))
 
 
-def restore(backup: archive.ObjectStore, set_id: str, root: Path, keyring: frozenset[str]) -> Restored:
+def restore(backup: archive.ObjectStore, set_id: str, root: Path, access: Access) -> Restored:
     """Rebuilds durable state in root from the backup store alone; a rerun into the same root resumes."""
     manifest = json.loads(backup.get(set_id))
-    _admit(manifest, keyring)
+    _admit(manifest, access)
     _claim(root, set_id)
     for name in FILES:
         _write(root / name, backup.get(manifest["components"][name]["digest"]))
@@ -169,9 +191,9 @@ def restore(backup: archive.ObjectStore, set_id: str, root: Path, keyring: froze
     return Restored(manifest, Catalog(path), store, lost)
 
 
-def rebuild(catalog: Catalog, projections: Projections, now: float) -> dict:
+def rebuild(catalog: Catalog, grant: Grant, projections: Projections, now: float) -> dict:
     """Rebuilds the chunk and vector projections the backup omits from the restored source events."""
-    grant, policy, generation = projections.grant, projections.policy, projections.index_generation
+    policy, generation = projections.policy, projections.index_generation
     chunks, worker = ChunkIndex(catalog), IndexWorker(catalog)
     worker.register(grant.corpus, generation, projections.embedder.model)
     sessions = [row[0] for row in catalog.db.execute(RETAINED, (grant.corpus,))]
@@ -182,13 +204,18 @@ def rebuild(catalog: Catalog, projections: Projections, now: float) -> dict:
     return {"sessions": len(sessions), "state": drained["state"], "pending": drained["pending"]}
 
 
+def _readable(store: archive.ObjectStore, digest: str) -> bool:
+    try:
+        store.get(digest)
+    except archive.EvidenceIntegrityError:
+        return False
+    return True
+
+
 def _checkpoint(restored: Restored, task_id: str) -> dict:
     digests = restored.manifest["checkpoints"].get(task_id, [])
-    missing = [digest for digest in digests if digest in restored.irrecoverable]
-    for digest in digests:
-        if digest not in missing:
-            restored.store.get(digest)
-    return {"task_id": task_id, "objects": len(digests), "recovered": bool(digests) and not missing}
+    recovered = all(digest not in restored.irrecoverable and _readable(restored.store, digest) for digest in digests)
+    return {"task_id": task_id, "objects": len(digests), "recovered": bool(digests) and recovered}
 
 
 def _status(answer: dict | None, checkpoint: dict, lost: dict) -> str:
@@ -198,14 +225,18 @@ def _status(answer: dict | None, checkpoint: dict, lost: dict) -> str:
 
 
 def drill(backup: archive.ObjectStore, set_id: str, plan: Drill) -> dict:
-    """Restores into an isolated folder, rebuilds projections, answers the query and recovers the checkpoint."""
+    """Restores into an isolated folder, rebuilds projections, answers the query and recovers the checkpoint.
+
+    A refused restore raises Refused and produces no report.
+    """
     started = plan.clock()
     try:
-        restored = restore(backup, set_id, plan.root, plan.keyring)
+        restored = restore(backup, set_id, plan.root, plan.access)
     except archive.EvidenceIntegrityError as error:
-        return {METRIC: FAILED, "reason": str(error), "recovery_time_seconds": plan.clock() - started}
+        report = {METRIC: FAILED, "reason": str(error), "recovery_time_seconds": plan.clock() - started}
+        return {"set_id": set_id, **report}
     try:
-        rebuilt = rebuild(restored.catalog, plan.projections, plan.clock())
+        rebuilt = rebuild(restored.catalog, plan.access.grant, plan.projections, plan.clock())
         try:
             answer = plan.query(restored.catalog, restored.store)
         except (archive.EvidenceIntegrityError, archive.EvidenceRefused):
@@ -214,6 +245,7 @@ def drill(backup: archive.ObjectStore, set_id: str, plan: Drill) -> dict:
     finally:
         restored.catalog.close()
     return {
+        "set_id": set_id,
         METRIC: _status(answer, checkpoint, restored.irrecoverable),
         "query_answered": answer is not None,
         "checkpoint": checkpoint,
@@ -225,7 +257,7 @@ def drill(backup: archive.ObjectStore, set_id: str, plan: Drill) -> dict:
 
 
 class Registry:
-    """Backup set states; acceptance needs a recorded restore drill, never an upload alone."""
+    """Backup set states; only a drill the registry runs itself can accept a set, never an upload alone."""
 
     def __init__(self, path: Path) -> None:
         self.path = path
@@ -241,40 +273,50 @@ class Registry:
         sets = self._load()
         if set_id not in sets:
             sets[set_id] = {"status": UPLOADED, "captured_at": captured_at, "attempt": 0, "report": None}
+            sets[set_id]["accepted_attempt"] = None
             self._save(sets)
         return sets[set_id]
 
-    def verify(self, set_id: str, attempt: int, report: dict) -> dict:
-        sets = self._load()
-        if set_id not in sets:
+    def _entry(self, set_id: str, attempt: int) -> dict:
+        entry = self._load().get(set_id)
+        if entry is None:
             raise Refused(UNKNOWN_SET)
-        entry, digest = sets[set_id], hashlib.sha256(_encoded(report)).hexdigest()
+        if attempt < entry["attempt"]:
+            raise Refused(STALE_DRILL)
+        return entry
+
+    def drill(self, backup: archive.ObjectStore, set_id: str, attempt: int, plan: Drill) -> dict:
+        """Runs a drill under an attempt number and records its status; a same attempt rerun changes nothing."""
+        entry = self._entry(set_id, attempt)
+        report = drill(backup, set_id, plan)
+        digest = hashlib.sha256(_encoded(report)).hexdigest()
         if attempt == entry["attempt"] and digest == entry["report"]:
             return entry
-        if attempt <= entry["attempt"]:
+        if attempt == entry["attempt"]:
             raise Refused(STALE_DRILL)
-        sets[set_id] = {**entry, "status": report[METRIC], "attempt": attempt, "report": digest}
+        status = report[METRIC]
+        accepted = attempt if status in RESTORE_VERIFIED else entry["accepted_attempt"]
+        sets = self._load()
+        sets[set_id] = {**entry, "status": status, "attempt": attempt, "report": digest, "accepted_attempt": accepted}
         self._save(sets)
         return sets[set_id]
 
     def accepted(self, set_id: str) -> bool:
         return self._load().get(set_id, {}).get("status") in RESTORE_VERIFIED
 
-    def _newest(self, statuses: tuple[str, ...]) -> str | None:
-        found = [(entry["captured_at"], key) for key, entry in self._load().items() if entry["status"] in statuses]
-        return max(found)[1] if found else None
-
     def preserved(self) -> str | None:
-        """The last independently verified set, which retention must never delete."""
-        return self._newest(RESTORE_VERIFIED)
+        """The newest set a drill ever accepted, which retention must never delete even after a later failed drill."""
+        found = [(entry["captured_at"], key) for key, entry in self._load().items() if entry["accepted_attempt"]]
+        return max(found)[1] if found else None
 
     def retention_allowed(self) -> bool:
         """Destructive retention runs only while the newest set restored with full coverage."""
-        newest = self._newest((UPLOADED, VERIFIED, PARTIAL, FAILED))
-        return newest is not None and self._load()[newest]["status"] == VERIFIED
+        sets = self._load()
+        newest = max(((entry["captured_at"], key) for key, entry in sets.items()), default=None)
+        return newest is not None and sets[newest[1]]["status"] == VERIFIED
 
-    def status(self) -> dict[str, int]:
-        counts = dict.fromkeys((UPLOADED, VERIFIED, PARTIAL, FAILED), 0)
+    def status(self) -> dict[str, dict[str, int]]:
+        counts = dict.fromkeys(STATUSES, 0)
         for entry in self._load().values():
             counts[entry["status"]] += 1
         return {METRIC: counts}

@@ -50,6 +50,8 @@
   "versions": {"catalog": "session-catalog-1", "ledger": "ledger-1", "coordination": "swarm-store-1", "brain": "brain-export-1"},
   "key_ids": {"catalog": "fixture-key-catalog", "ledger": "fixture-key-ledger", "coordination": "fixture-key-coordination", "brain": "fixture-key-brain"},
   "withheld_key": "fixture-key-brain",
+  "foreign_corpus": "personal-corpus",
+  "retired_version": {"component": "ledger", "accepted": "ledger-2"},
   "policy": {"version": "turn-v1", "max_chars": 2000},
   "index_generation": "fixture-embed-v1",
   "model": {"model": "fixture-hash-embedder-4", "dimension": 4},

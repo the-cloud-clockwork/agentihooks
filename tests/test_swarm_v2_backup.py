@@ -13,6 +13,7 @@ from tests import sv2_ret04_cases as cases
 
 pytestmark = pytest.mark.unit
 EVIDENCE = Path(__file__).parents[1] / "evidence" / "SV2-RET-04"
+READS_BEFORE_OBJECTS = 1 + len(backup.FILES)
 
 
 @pytest.fixture
@@ -26,14 +27,13 @@ def manifest(world, set_id):
 
 def test_capture_records_every_component_with_its_version_and_key_id(world):
     found = manifest(world, world.capture())
-    assert found["format"] == backup.FORMAT
+    assert (found["format"], found["corpus"]) == (backup.FORMAT, world.domain)
     assert found["captured_at"] == world.doc["clock"]["captured"]
     assert sorted(found["components"]) == sorted((backup.CATALOG, *backup.FILES))
     for name, component in found["components"].items():
         assert component["version"] == world.doc["versions"][name]
         assert component["key_id"] == world.doc["key_ids"][name]
-        data = world.backup.get(component["digest"])
-        assert component["bytes"] == len(data)
+        assert component["bytes"] == len(world.backup.get(component["digest"]))
     for name in backup.FILES:
         assert world.backup.get(found["components"][name]["digest"]).decode() == world.doc["files"][name]
 
@@ -55,7 +55,7 @@ def test_capture_omits_projection_tables_from_the_catalog_copy(world, tmp_path):
     copy.write_bytes(world.backup.get(found["components"][backup.CATALOG]["digest"]))
     tables = {row[0] for row in sqlite3.connect(copy).execute("SELECT name FROM sqlite_master WHERE type='table'")}
     assert not tables & set(backup.PROJECTIONS)
-    assert "session_event" in tables and "archive_manifest" in tables
+    assert {"session_event", "archive_manifest"} <= tables
     assert found["omitted_projections"] == list(backup.PROJECTIONS)
 
 
@@ -64,10 +64,20 @@ def test_the_set_id_is_the_digest_of_its_manifest(world):
     assert hashlib.sha256(world.backup.get(set_id)).hexdigest() == set_id
 
 
-def test_restore_refuses_a_withheld_key_before_writing(world):
+@pytest.mark.parametrize(
+    ("changes", "message"),
+    [
+        ({"withhold": "fixture-key-brain"}, backup.NO_KEY),
+        ({"corpus": "personal-corpus"}, backup.FORBIDDEN),
+        ({"versions": {"ledger": frozenset({"ledger-2"})}}, backup.OLD_VERSION),
+        ({"versions": {"catalog": frozenset()}}, backup.OLD_VERSION),
+    ],
+)
+def test_restore_refuses_access_it_cannot_honour_before_writing(world, changes, message):
     set_id, target = world.capture(), world.root / "restore"
-    with pytest.raises(backup.Refused, match=backup.NO_KEY):
-        backup.restore(world.backup, set_id, target, world.keyring(world.doc["withheld_key"]))
+    with pytest.raises(backup.Refused) as refused:
+        backup.restore(world.backup, set_id, target, world.access(**changes))
+    assert str(refused.value) == message
     assert not target.exists()
 
 
@@ -75,14 +85,14 @@ def test_restore_refuses_another_major_format_before_writing(world):
     found = manifest(world, world.capture())
     future = world.backup.put(json.dumps({**found, "format": "2.0"}).encode())
     with pytest.raises(backup.Refused, match="major version"):
-        backup.restore(world.backup, future, world.root / "restore", world.keyring())
+        backup.restore(world.backup, future, world.root / "restore", world.access())
     assert not (world.root / "restore").exists()
 
 
 def test_restore_accepts_a_newer_minor_format(world):
     found = manifest(world, world.capture())
     newer = world.backup.put(json.dumps({**found, "format": "1.7"}).encode())
-    restored = backup.restore(world.backup, newer, world.root / "restore", world.keyring())
+    restored = backup.restore(world.backup, newer, world.root / "restore", world.access())
     restored.catalog.close()
     assert restored.manifest["format"] == "1.7"
 
@@ -92,33 +102,42 @@ def test_restore_refuses_a_folder_holding_other_data(world):
     target.mkdir()
     (target / "other").write_text("kept")
     with pytest.raises(backup.Refused, match="empty folder"):
-        backup.restore(world.backup, set_id, target, world.keyring())
+        backup.restore(world.backup, set_id, target, world.access())
     assert sorted(path.name for path in target.iterdir()) == ["other"]
 
 
+def test_restore_ignores_a_partial_write_left_by_a_killed_attempt(world):
+    set_id, target = world.capture(), world.root / "restore"
+    target.mkdir()
+    (target / f"{backup.PARTIAL_WRITE}abc").write_bytes(b"half")
+    backup.restore(world.backup, set_id, target, world.access()).catalog.close()
+    assert json.loads((target / backup.MARKER).read_text()) == {"set_id": set_id}
+
+
 def test_restore_refuses_a_folder_claimed_by_another_set(world):
-    first = world.capture()
-    second = world.capture("later_capture")
+    first, second = world.capture(), world.capture("later_capture")
     target = world.root / "restore"
-    backup.restore(world.backup, first, target, world.keyring()).catalog.close()
+    backup.restore(world.backup, first, target, world.access()).catalog.close()
     with pytest.raises(backup.Refused, match="empty folder"):
-        backup.restore(world.backup, second, target, world.keyring())
+        backup.restore(world.backup, second, target, world.access())
 
 
 def test_restore_resumes_into_its_own_folder_without_duplicates(world):
     set_id, target = world.capture(), world.root / "restore"
     with pytest.raises(cases.Interrupted):
-        backup.restore(cases.Interrupting(world.backup.root, 5), set_id, target, world.keyring())
+        backup.restore(cases.Interrupting(world.backup.root, READS_BEFORE_OBJECTS + 1), set_id, target, world.access())
+    assert cases.object_files(target) == 1
     assert not (target / backup.CATALOG_FILE).exists()
-    restored = backup.restore(world.backup, set_id, target, world.keyring())
+    restored = backup.restore(world.backup, set_id, target, world.access())
     restored.catalog.close()
-    assert cases.object_files(target) == 5
+    assert cases.object_files(target) == cases.present(world, set_id)
     assert restored.irrecoverable == {world.lost[0]: archive.MISSING}
 
 
 def test_drill_rebuilds_projections_answers_the_query_and_recovers_the_checkpoint(world):
     set_id = world.capture()
     report = backup.drill(world.backup, set_id, world.plan())
+    assert report["set_id"] == set_id
     assert report[backup.METRIC] == backup.PARTIAL
     assert report["query_answered"] is True
     assert report["checkpoint"] == {"task_id": "fixture-task", "objects": 2, "recovered": True}
@@ -129,9 +148,7 @@ def test_drill_rebuilds_projections_answers_the_query_and_recovers_the_checkpoin
 
 
 def test_drill_is_verified_when_no_source_object_is_missing(world):
-    lost = next(item for item in world.doc["sessions"] if "lost_batch" in item)
-    data = b"".join(cases.line(record) for record in lost["turns"][lost["lost_batch"]])
-    assert world.objects.put(data) == world.lost[0]
+    world.heal()
     report = backup.drill(world.backup, world.capture(), world.plan())
     assert report[backup.METRIC] == backup.VERIFIED
     assert report["irrecoverable"] == {}
@@ -139,17 +156,14 @@ def test_drill_is_verified_when_no_source_object_is_missing(world):
 
 def test_drill_fails_when_the_query_cannot_be_answered(world):
     set_id = world.capture()
-    lost = next(item["session_uid"] for item in world.doc["sessions"] if "lost_batch" in item)
-    world.doc["query_session"] = lost
+    world.doc["query_session"] = cases.lost_session(world.doc)["session_uid"]
     report = backup.drill(world.backup, set_id, world.plan())
     assert report[backup.METRIC] == backup.FAILED
     assert report["query_answered"] is False
 
 
 def test_drill_fails_when_the_designated_checkpoint_is_unknown(world):
-    set_id = world.capture()
-    plan = world.plan()
-    report = backup.drill(world.backup, set_id, backup.Drill(**{**plan.__dict__, "task_id": "other-task"}))
+    report = backup.drill(world.backup, world.capture(), world.plan(task_id="other-task"))
     assert report[backup.METRIC] == backup.FAILED
     assert report["checkpoint"] == {"task_id": "other-task", "objects": 0, "recovered": False}
 
@@ -162,12 +176,30 @@ def test_drill_fails_when_a_designated_checkpoint_object_is_missing(world):
     assert report["irrecoverable"][world.checkpoint[1]] == archive.MISSING
 
 
+def test_a_checkpoint_object_altered_after_restore_does_not_recover(world):
+    restored = backup.restore(world.backup, world.capture(), world.root / "restore", world.access())
+    restored.store._path(world.checkpoint[0]).write_bytes(b"altered")
+    try:
+        assert backup._checkpoint(restored, "fixture-task")["recovered"] is False
+    finally:
+        restored.catalog.close()
+
+
 def test_drill_fails_on_an_altered_backup_component(world):
     set_id = world.capture()
     digest = manifest(world, set_id)["components"]["brain"]["digest"]
     world.backup._path(digest).write_bytes(b"altered")
     report = backup.drill(world.backup, set_id, world.plan())
-    assert report == {backup.METRIC: backup.FAILED, "reason": archive.ALTERED, "recovery_time_seconds": 2.5}
+    expected = {"set_id": set_id, backup.METRIC: backup.FAILED, "reason": archive.ALTERED}
+    assert report == {**expected, "recovery_time_seconds": world.doc["clock"]["step"]}
+
+
+def test_a_refused_drill_raises_and_records_nothing(world):
+    set_id = world.capture()
+    before = world.registry.path.read_bytes()
+    with pytest.raises(backup.Refused, match="encryption key"):
+        world.registry.drill(world.backup, set_id, 1, world.plan(access=world.access(withhold="fixture-key-brain")))
+    assert world.registry.path.read_bytes() == before
 
 
 def test_an_upload_without_a_drill_is_not_accepted(world):
@@ -175,50 +207,78 @@ def test_an_upload_without_a_drill_is_not_accepted(world):
     assert world.registry.accepted(set_id) is False
     assert world.registry.preserved() is None
     assert world.registry.retention_allowed() is False
-    assert world.registry.status()[backup.METRIC][backup.UPLOADED] == 1
+    assert world.registry.status()[backup.METRIC] == {"uploaded": 1, "verified": 0, "partial": 0, "failed": 0}
 
 
-def test_record_replays_without_resetting_a_verified_set(world):
+def test_record_replays_without_resetting_a_drilled_set(world):
     set_id = world.capture()
-    world.registry.verify(set_id, 1, {backup.METRIC: backup.VERIFIED})
-    assert world.registry.record(set_id, 0.0)["status"] == backup.VERIFIED
+    world.registry.drill(world.backup, set_id, 1, world.plan())
+    assert world.registry.record(set_id, 0.0)["status"] == backup.PARTIAL
+
+
+def test_a_registry_drill_records_the_report_it_ran(world):
+    set_id = world.capture()
+    entry = world.registry.drill(world.backup, set_id, 1, world.plan())
+    report = backup.drill(world.backup, set_id, world.plan("again"))
+    assert entry["report"] == hashlib.sha256(backup._encoded(report)).hexdigest()
+    assert (entry["status"], entry["attempt"], entry["accepted_attempt"]) == (backup.PARTIAL, 1, 1)
 
 
 @pytest.mark.parametrize(
-    ("status", "accepted", "retention"),
-    [(backup.VERIFIED, True, True), (backup.PARTIAL, True, False), (backup.FAILED, False, False)],
+    ("prepare", "status", "accepted", "retention"),
+    [("heal", backup.VERIFIED, True, True), (None, backup.PARTIAL, True, False), ("lose", backup.FAILED, False, False)],
 )
-def test_acceptance_and_retention_follow_the_drill_status(world, status, accepted, retention):
+def test_acceptance_and_retention_follow_the_drill_status(world, prepare, status, accepted, retention):
+    if prepare == "heal":
+        world.heal()
+    if prepare == "lose":
+        world.doc["query_session"] = cases.lost_session(world.doc)["session_uid"]
     set_id = world.capture()
-    world.registry.verify(set_id, 1, {backup.METRIC: status})
+    assert world.registry.drill(world.backup, set_id, 1, world.plan())["status"] == status
     assert world.registry.accepted(set_id) is accepted
     assert world.registry.retention_allowed() is retention
     assert (world.registry.preserved() == set_id) is accepted
 
 
 def test_a_newer_unverified_set_stops_retention_and_keeps_the_verified_set(world):
+    world.heal()
     verified = world.capture()
-    world.registry.verify(verified, 1, {backup.METRIC: backup.VERIFIED})
+    world.registry.drill(world.backup, verified, 1, world.plan())
     newer = world.capture("later_capture")
-    assert world.registry.retention_allowed() is False
-    assert world.registry.preserved() == verified
-    world.registry.verify(newer, 1, {backup.METRIC: backup.VERIFIED})
-    assert world.registry.retention_allowed() is True
-    assert world.registry.preserved() == newer
+    assert (world.registry.retention_allowed(), world.registry.preserved()) == (False, verified)
+    world.registry.drill(world.backup, newer, 1, world.plan("newer"))
+    assert (world.registry.retention_allowed(), world.registry.preserved()) == (True, newer)
 
 
-def test_a_stale_or_unknown_drill_result_changes_nothing(world):
+def test_a_failed_redrill_keeps_the_set_preserved_but_not_accepted(world):
     set_id = world.capture()
-    world.registry.verify(set_id, 2, {backup.METRIC: backup.PARTIAL})
+    world.registry.drill(world.backup, set_id, 1, world.plan())
+    world.backup._path(manifest(world, set_id)["components"]["brain"]["digest"]).write_bytes(b"damaged")
+    assert world.registry.drill(world.backup, set_id, 2, world.plan("again"))["status"] == backup.FAILED
+    assert world.registry.accepted(set_id) is False
+    assert world.registry.preserved() == set_id
+
+
+def test_a_stale_or_unknown_drill_changes_nothing(world):
+    set_id = world.capture()
+    world.registry.drill(world.backup, set_id, 2, world.plan())
     before = world.registry.path.read_bytes()
     with pytest.raises(backup.Refused, match="newer restore drill"):
-        world.registry.verify(set_id, 1, {backup.METRIC: backup.VERIFIED})
+        world.registry.drill(world.backup, set_id, 1, world.plan("older"))
+    assert not (world.root / "older").exists()
     with pytest.raises(backup.Refused, match="newer restore drill"):
-        world.registry.verify(set_id, 2, {backup.METRIC: backup.VERIFIED})
+        world.registry.drill(world.backup, set_id, 2, world.plan("conflict", task_id="other-task"))
     with pytest.raises(backup.Refused, match="not recorded"):
-        world.registry.verify("0" * 64, 3, {backup.METRIC: backup.VERIFIED})
+        world.registry.drill(world.backup, "0" * 64, 3, world.plan("unknown"))
     assert world.registry.path.read_bytes() == before
-    assert world.registry.verify(set_id, 2, {backup.METRIC: backup.PARTIAL})["attempt"] == 2
+
+
+def test_a_same_attempt_rerun_returns_the_recorded_entry(world):
+    set_id = world.capture()
+    first = world.registry.drill(world.backup, set_id, 1, world.plan())
+    before = world.registry.path.read_bytes()
+    assert world.registry.drill(world.backup, set_id, 1, world.plan()) == first
+    assert world.registry.path.read_bytes() == before
 
 
 @pytest.mark.parametrize("case", ["A", "B", "C"])
@@ -232,7 +292,8 @@ def test_package_cases_match_committed_evidence(tmp_path, case):
 def test_package_record_and_manifest_match_the_fixture_inputs():
     record = json.loads((EVIDENCE / "result.json").read_text())
     found = json.loads((EVIDENCE / "manifest.json").read_text())
-    assert found["input_sha256"] == {cases.FIXTURE.name: hashlib.sha256(cases.FIXTURE.read_bytes()).hexdigest()}
+    inputs = (cases.FIXTURE, cases.CASES_MODULE)
+    assert found["input_sha256"] == {path.name: hashlib.sha256(path.read_bytes()).hexdigest() for path in inputs}
     assert found["fixture_inputs"] == record["fixture_inputs"] == cases.FIXTURE_INPUTS
     assert found["tested_commit"] == record["tested_commit"]
     assert record["evidence_class"] == cases.EVIDENCE_CLASS

@@ -1,3 +1,4 @@
+import dataclasses
 import hashlib
 import json
 from pathlib import Path
@@ -11,6 +12,7 @@ from hooks.memory.embeddings import EmbeddingModel
 from scripts.swarm_v2 import backup
 
 FIXTURE = Path(__file__).parent / "fixtures" / "sv2_ret04" / "fixture.json"
+CASES_MODULE = Path(__file__)
 FIXTURE_INPUTS = {
     "catalog_backup": "a session catalog with two retained sessions, copied without its chunk and vector projections",
     "immutable_objects": "content addressed archive objects for every session batch and the fixture task checkpoint",
@@ -64,12 +66,17 @@ def fixture() -> dict:
     return json.loads(FIXTURE.read_text(encoding="utf-8"))
 
 
-def grant(doc) -> Grant:
-    return Grant(doc["grant"]["principal"], doc["grant"]["corpus"], frozenset(doc["grant"]["projects"]))
+def grant(doc, corpus=None) -> Grant:
+    data = doc["grant"]
+    return Grant(data["principal"], corpus or data["corpus"], frozenset(data["projects"]))
 
 
 def line(record) -> bytes:
     return json.dumps(record, ensure_ascii=False).encode() + b"\n"
+
+
+def lost_session(doc) -> dict:
+    return next(item for item in doc["sessions"] if "lost_batch" in item)
 
 
 class World:
@@ -111,11 +118,16 @@ class World:
                 lost = entry.object_digest
         return lost
 
+    def heal(self) -> None:
+        lost = lost_session(self.doc)
+        data = b"".join(line(record) for record in lost["turns"][lost["lost_batch"]])
+        assert self.objects.put(data) == self.lost[0]
+
     def sources(self) -> backup.Sources:
         files = {name: text.encode() for name, text in self.doc["files"].items()}
         checkpoints = {self.doc["checkpoint"]["task_id"]: self.checkpoint}
         return backup.Sources(
-            self.catalog_path, self.objects, files, checkpoints, self.doc["versions"], self.doc["key_ids"]
+            self.domain, self.catalog_path, self.objects, files, checkpoints, self.doc["versions"], self.doc["key_ids"]
         )
 
     def capture(self, at="captured") -> str:
@@ -123,14 +135,14 @@ class World:
         self.registry.record(set_id, self.doc["clock"][at])
         return set_id
 
-    def keyring(self, withhold=None) -> frozenset[str]:
-        return frozenset(key for key in self.doc["key_ids"].values() if key != withhold)
+    def access(self, withhold=None, corpus=None, versions=None) -> backup.Access:
+        keyring = frozenset(key for key in self.doc["key_ids"].values() if key != withhold)
+        accepted = {name: frozenset({version}) for name, version in self.doc["versions"].items()}
+        return backup.Access(grant(self.doc, corpus), keyring, {**accepted, **(versions or {})})
 
     def projections(self) -> backup.Projections:
         model = EmbeddingModel(**self.doc["model"])
-        return backup.Projections(
-            grant(self.doc), Policy(**self.doc["policy"]), self.doc["index_generation"], FixtureEmbedder(model)
-        )
+        return backup.Projections(Policy(**self.doc["policy"]), self.doc["index_generation"], FixtureEmbedder(model))
 
     def query(self, catalog, store) -> dict:
         found = archive.evidence(catalog, store, grant(self.doc), self.domain, self.doc["query_session"])
@@ -140,16 +152,17 @@ class World:
         first = archive.source_range(catalog, store, grant(self.doc), reference)
         return {"complete": found["complete"], "events": len(events), "first_record": json.loads(first)["text"]}
 
-    def plan(self, name="restore", keyring=None) -> backup.Drill:
+    def plan(self, name="restore", **changes) -> backup.Drill:
         clock = self.doc["clock"]
-        return backup.Drill(
+        plan = backup.Drill(
             self.root / name,
-            keyring or self.keyring(),
+            self.access(),
             self.projections(),
             self.query,
             self.doc["checkpoint"]["task_id"],
             Clock(clock["drill_start"], clock["step"]),
         )
+        return dataclasses.replace(plan, **changes)
 
     def protected(self) -> dict:
         catalog = Catalog(self.catalog_path)
@@ -157,11 +170,9 @@ class World:
             rows = catalog.snapshot()
         finally:
             catalog.close()
+        folders = (self.objects.root, self.backup.root)
         stored = {
-            path.name: path.read_bytes()
-            for folder in (self.objects.root, self.backup.root)
-            for path in sorted(folder.rglob("*"))
-            if path.is_file()
+            path.name: path.read_bytes() for folder in folders for path in sorted(folder.rglob("*")) if path.is_file()
         }
         registry = self.registry.path.read_bytes() if self.registry.path.exists() else b""
         return {"catalog": rows, "objects": stored, "registry": registry}
@@ -191,11 +202,10 @@ def refused(call) -> str:
 
 def lost_query(world, name="restore") -> str:
     catalog = Catalog(world.root / name / backup.CATALOG_FILE)
-    lost = next(item["session_uid"] for item in world.doc["sessions"] if "lost_batch" in item)
+    store = archive.ObjectStore(world.root / name / "objects")
+    uid = lost_session(world.doc)["session_uid"]
     try:
-        archive.evidence(
-            catalog, archive.ObjectStore(world.root / name / "objects"), grant(world.doc), world.domain, lost
-        )
+        archive.evidence(catalog, store, grant(world.doc), world.domain, uid)
     except archive.EvidenceIntegrityError as error:
         return str(error)
     finally:
@@ -207,18 +217,24 @@ def object_files(root: Path) -> int:
     return sum(path.is_file() for path in (root / "objects").rglob("*"))
 
 
+def present(world, set_id) -> int:
+    return sum(state == backup.PRESENT for state in json.loads(world.backup.get(set_id))["objects"].values())
+
+
 def drilled(root: Path) -> dict:
     world = World(root)
     set_id = world.capture()
     before = world.protected()
-    report = backup.drill(world.backup, set_id, world.plan())
-    entry = world.registry.verify(set_id, 1, report)
+    report = backup.drill(world.backup, set_id, world.plan("first-drill"))
+    entry = world.registry.drill(world.backup, set_id, 1, world.plan())
     rows, vectors = world.restored_rows()
     files = {name: (world.root / "restore" / name).read_bytes().decode() for name in backup.FILES}
     after = world.protected()
     return {
-        "report": report,
+        "report": {key: value for key, value in report.items() if key != "set_id"},
+        "report_names_its_set": report["set_id"] == set_id,
         "registry_status": entry["status"],
+        "registry_matches_report": entry["report"] == hashlib.sha256(backup._encoded(report)).hexdigest(),
         "events_match_source": rows == world.source_rows(),
         "files_match_source": files == world.doc["files"],
         "vectors_rebuilt": vectors,
@@ -234,7 +250,34 @@ def drilled(root: Path) -> dict:
 
 def positive(root: Path) -> dict:
     first, second = drilled(root / "first"), drilled(root / "second")
-    return {"case": "A", **first, "repeat_matches": first == second}
+    healed = World(root / "healed")
+    healed.heal()
+    healed_set = healed.capture()
+    entry = healed.registry.drill(healed.backup, healed_set, 1, healed.plan())
+    full = {"status": entry["status"], "retention_allowed": healed.registry.retention_allowed()}
+    return {"case": "A", **first, "repeat_matches": first == second, "without_missing_object": full}
+
+
+def refusals(world, set_id, occupied) -> dict:
+    manifest = json.loads(world.backup.get(set_id))
+    future = world.backup.put(json.dumps({**manifest, "format": "2.0"}, sort_keys=True).encode())
+    retired = world.doc["retired_version"]
+    retired_access = world.access(versions={retired["component"]: frozenset({retired["accepted"]})})
+    calls = {
+        "missing_key": (set_id, "nokey", world.access(withhold=world.doc["withheld_key"])),
+        "foreign_corpus": (set_id, "foreign", world.access(corpus=world.doc["foreign_corpus"])),
+        "unsupported_version": (set_id, "retired", retired_access),
+        "unsupported_format": (future, "future", world.access()),
+    }
+    found = {
+        name: refused(lambda call=call: backup.restore(world.backup, call[0], world.root / call[1], call[2]))
+        for name, call in calls.items()
+    }
+    found["not_isolated"] = refused(lambda: backup.restore(world.backup, set_id, occupied, world.access()))
+    found["unknown_set"] = refused(lambda: world.registry.drill(world.backup, "0" * 64, 1, world.plan("unknown")))
+    created = {name: (world.root / call[1]).exists() for name, call in calls.items()}
+    created["unknown_set"] = (world.root / "unknown").exists()
+    return {"messages": found, "targets_created": created}
 
 
 def rejection(root: Path) -> dict:
@@ -246,48 +289,55 @@ def rejection(root: Path) -> dict:
         "preserved": world.registry.preserved(),
         "metric": world.registry.status(),
     }
-    manifest = json.loads(world.backup.get(set_id))
-    future = world.backup.put(json.dumps({**manifest, "format": "2.0"}, sort_keys=True).encode())
     occupied = world.root / "occupied"
     occupied.mkdir()
     (occupied / "other.txt").write_text("another restore's data")
     before = world.protected()
-    withheld = world.doc["withheld_key"]
-    messages = {
-        "missing_key": refused(
-            lambda: backup.restore(world.backup, set_id, world.root / "nokey", world.keyring(withheld))
-        ),
-        "unsupported_format": refused(
-            lambda: backup.restore(world.backup, future, world.root / "future", world.keyring())
-        ),
-        "not_isolated": refused(lambda: backup.restore(world.backup, set_id, occupied, world.keyring())),
-        "unknown_set": refused(lambda: world.registry.verify("0" * 64, 1, {backup.METRIC: backup.VERIFIED})),
-    }
-    unchanged = world.protected() == before
-    untouched = {
-        "nokey_created": (world.root / "nokey").exists(),
-        "future_created": (world.root / "future").exists(),
-        "occupied": sorted(path.name for path in occupied.iterdir()),
-    }
-    sensitive = [text for text in world.doc["files"].values()]
-    disclosed = any(fragment in message for message in messages.values() for fragment in sensitive)
+    refusal = refusals(world, set_id, occupied)
+    after = world.protected()
+    unchanged = (before["catalog"], before["registry"]) == (after["catalog"], after["registry"]) and all(
+        after["objects"].get(name) == data for name, data in before["objects"].items()
+    )
+    fragments = [*world.doc["key_ids"].values(), str(world.root), set_id, world.doc["foreign_corpus"]]
+    disclosed = sorted(
+        {fragment for message in refusal["messages"].values() for fragment in fragments if fragment in message}
+    )
     tampered = World(root / "tampered")
     tampered_set = tampered.capture()
     ledger = json.loads(tampered.backup.get(tampered_set))["components"]["ledger"]["digest"]
     tampered.backup._path(ledger).write_bytes(b"tampered ledger")
-    failed = backup.drill(tampered.backup, tampered_set, tampered.plan())
-    tampered.registry.verify(tampered_set, 1, failed)
-    corrected = backup.drill(world.backup, set_id, world.plan("corrected"))
+    failed = tampered.registry.drill(tampered.backup, tampered_set, 1, tampered.plan())
+    corrected = world.registry.drill(world.backup, set_id, 1, world.plan("corrected"))
     return {
         "case": "B",
         "upload_without_drill": upload_only,
-        "refusals": messages,
+        "refusals": refusal["messages"],
+        "refused_targets_created": refusal["targets_created"],
+        "occupied_target": sorted(path.name for path in occupied.iterdir()),
         "protected_state_unchanged": unchanged,
-        "refused_targets": untouched,
-        "secret_values_disclosed": disclosed,
-        "tampered_drill": {backup.METRIC: failed[backup.METRIC], "reason": failed["reason"]},
+        "disclosed_fragments": disclosed,
+        "tampered_drill_status": failed["status"],
         "tampered_accepted": tampered.registry.accepted(tampered_set),
-        "corrected_request": corrected[backup.METRIC],
+        "corrected_request": corrected["status"],
+    }
+
+
+def rehearsal(world, set_id) -> dict:
+    newer = world.capture("later_capture")
+    newer_set = {
+        "retention_allowed": world.registry.retention_allowed(),
+        "preserved_is_drilled_set": world.registry.preserved() == set_id,
+        "newer_set_accepted": world.registry.accepted(newer),
+    }
+    brain = json.loads(world.backup.get(set_id))["components"]["brain"]["digest"]
+    world.backup._path(brain).write_bytes(b"damaged brain export")
+    demoted = world.registry.drill(world.backup, set_id, 3, world.plan("redrill"))
+    return {
+        "newer_unverified_set": newer_set,
+        "redrill_after_damage": demoted["status"],
+        "damaged_set_accepted": world.registry.accepted(set_id),
+        "preserved_after_failed_redrill": world.registry.preserved() == set_id,
+        "metric": world.registry.status(),
     }
 
 
@@ -298,47 +348,37 @@ def recovery(root: Path) -> dict:
     interrupted = ""
     try:
         backup.restore(
-            Interrupting(world.backup.root, world.doc["interrupt_after_gets"]), set_id, target, world.keyring()
+            Interrupting(world.backup.root, world.doc["interrupt_after_gets"]), set_id, target, world.access()
         )
     except Interrupted as error:
         interrupted = str(error)
     during = {
         "objects": object_files(target),
         "catalog_written": (target / backup.CATALOG_FILE).exists(),
-        "marker": json.loads((target / backup.MARKER).read_text())["set_id"] == set_id,
+        "marker_names_set": json.loads((target / backup.MARKER).read_text())["set_id"] == set_id,
     }
-    resumed = backup.drill(world.backup, set_id, world.plan())
+    accepted = world.registry.drill(world.backup, set_id, 2, world.plan())
     _, vectors = world.restored_rows()
-    replayed = backup.drill(world.backup, set_id, world.plan())
+    replay = world.registry.drill(world.backup, set_id, 2, world.plan())
     _, replayed_vectors = world.restored_rows()
-    present = sum(state == backup.PRESENT for state in json.loads(world.backup.get(set_id))["objects"].values())
-    accepted = world.registry.verify(set_id, 2, resumed)
-    replay = world.registry.verify(set_id, 2, resumed)
-    stale = refused(lambda: world.registry.verify(set_id, 1, {**resumed, backup.METRIC: backup.VERIFIED}))
-    newer = world.capture("later_capture")
-    rehearsal = {
-        "newer_set_status": world.registry.status(),
-        "retention_allowed": world.registry.retention_allowed(),
-        "preserved_is_verified_set": world.registry.preserved() == set_id,
-        "newer_set_accepted": world.registry.accepted(newer),
-    }
+    stale = refused(lambda: world.registry.drill(world.backup, set_id, 1, world.plan("stale")))
     manifest = json.loads(world.backup.get(set_id))
     return {
         "case": "C",
         "interrupted": interrupted,
         "during_interruption": during,
-        "resumed": resumed,
-        "replay_matches": replayed == resumed,
+        "resumed_status": accepted["status"],
+        "registry_replay_unchanged": replay == accepted,
         "objects_after_resume": object_files(target),
-        "present_in_backup": present,
+        "present_in_backup": present(world, set_id),
         "vectors_rebuilt": vectors,
         "vectors_after_replay": replayed_vectors,
         "omitted_projections": manifest["omitted_projections"],
+        "irrecoverable": {digest: state for digest, state in manifest["objects"].items() if state != backup.PRESENT},
         "lost_session_query": lost_query(world),
-        "registry_replay_unchanged": replay == accepted,
         "stale_attempt": stale,
-        "status_after_stale": world.registry.status(),
-        "rollback_rehearsal": rehearsal,
+        "stale_target_created": (world.root / "stale").exists(),
+        "rollback_rehearsal": rehearsal(world, set_id),
     }
 
 
