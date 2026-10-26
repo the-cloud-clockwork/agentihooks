@@ -435,6 +435,22 @@ def test_tick_reclaims_each_mismatched_agent_on_its_task(ticking, field):
     assert ledger.rows["one"]["claimed_by"] == new.name
 
 
+def test_tick_keeps_an_agent_whose_live_model_reads_blank(ticking):
+    from scripts.swarm.tick import tick
+
+    store, runtime, ledger = ticking
+    tick("sw", store, ledger, runtime, 100)
+    agent = replace(next(a for a in store.agents("sw") if a.lane == "eng"), profile="engineer", model="gpt-6.1-sol")
+    store.put_agent("sw", agent)
+    runtime.bindings = lambda agents: {
+        a.name: {**live_binding.assignment(a), "hooks": True, "model": ""} for a in agents
+    }
+    tick("sw", store, ledger, runtime, 200)
+    assert agent.name not in runtime.killed
+    found = [f.summary for f in live_binding.findings(store, "sw") if f.subject.startswith(f"{agent.name}/")]
+    assert found == [f"{agent.name} has no observed model"]
+
+
 def test_matching_agents_are_checked_on_every_pass(ticking):
     from scripts.swarm.tick import tick
 
