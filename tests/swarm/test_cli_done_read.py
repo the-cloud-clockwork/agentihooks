@@ -1,6 +1,7 @@
 import json
 
 from scripts.swarm import cli
+from scripts.swarm.ledger_events import view as read_pull_request
 from tests.swarm.test_cli import env, run  # noqa: F401
 from tests.swarm.test_pull_views import merged_with_empty_check_entries
 
@@ -44,8 +45,8 @@ def test_done_closes_a_task_whose_merged_pull_request_has_empty_check_entries(en
     run("sw", "create", "--repo", "/repo")
     run("sw", "start")
     monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "engineer@a1b2c3-0001")
-    read, github = cli.ledger_events.view, merged_with_empty_check_entries()
-    monkeypatch.setattr(cli.ledger_events, "view", lambda url: read(url, run=github))
+    github = merged_with_empty_check_entries()
+    monkeypatch.setattr(cli.ledger_events, "view", lambda url: read_pull_request(url, run=github))
     capsys.readouterr()
     assert run("sw", "done", "--pr", "https://github.com/o/r/pull/9") == 0
     assert json.loads(capsys.readouterr().out.splitlines()[-1])["state"] == "done"
