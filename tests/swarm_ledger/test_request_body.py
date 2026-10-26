@@ -151,6 +151,18 @@ def test_a_response_over_an_unread_body_closes_the_connection():
     assert handler.close_connection is True
 
 
+def test_each_parsed_request_reads_its_body_through_a_counted_reader():
+    handler = ledger_server.Handler.__new__(ledger_server.Handler)
+    handler.raw_rfile = io.BytesIO(b"Content-Length: 2\r\n\r\n{}next")
+    handler.rfile = handler.raw_rfile
+    handler.raw_requestline = b"POST /x HTTP/1.1\r\n"
+
+    assert handler.parse_request() is True
+    assert handler.rfile.raw is handler.raw_rfile
+    assert handler.rfile.left == 2
+    assert handler.rfile.read() == b"{}"
+
+
 def test_a_response_drains_an_unread_body_within_its_wait():
     handler = ledger_server.Handler.__new__(ledger_server.Handler)
     handler.request_version, handler.requestline = "HTTP/1.1", "POST /x HTTP/1.1"

@@ -209,11 +209,12 @@ def test_the_health_check_answers_over_tls(tls_ledger):
     assert ledger_link.serving(timeout=5, url=tls_ledger["base"]) == str(core.LEDGER_DIR)
 
 
+@pytest.mark.parametrize("body", [b"{}", b"{}" + b" " * (ledger_server.MAX_BODY - 2)], ids=["small", "at-the-limit"])
 @pytest.mark.parametrize(
-    "body", [b'{"ops": []}', b"{}" + b" " * (ledger_server.MAX_BODY - 2)], ids=["small", "at-the-limit"]
+    ("path", "reason"),
+    [("agent-token", "Missing or wrong hive credential"), ("ops", "Missing or wrong ledger credential")],
 )
-@pytest.mark.parametrize("path", ["agent-token", "ops"])
-def test_a_refusal_with_an_unread_body_answers_with_its_status_over_tls(tls_ledger, path, body):
+def test_a_refusal_with_an_unread_body_answers_with_its_status_over_tls(tls_ledger, path, reason, body):
     request = urllib.request.Request(
         f"{tls_ledger['base']}/api/v1/ledgers/{SLUG}/{path}",
         body,
@@ -225,8 +226,8 @@ def test_a_refusal_with_an_unread_body_answers_with_its_status_over_tls(tls_ledg
     with pytest.raises(urllib.error.HTTPError) as refused:
         urllib.request.urlopen(request, timeout=5, context=context)
 
-    assert refused.value.code in (400, 403)
-    assert "error" in json.loads(refused.value.read())
+    assert refused.value.code == 403
+    assert json.loads(refused.value.read())["error"]["message"] == reason
 
 
 def trusted(monkeypatch, cert):
