@@ -1,4 +1,3 @@
-import atexit
 import os
 import runpy
 import signal
@@ -20,8 +19,12 @@ def dump():
         yappi.get_thread_stats().print_all(out=handle)
 
 
-atexit.register(dump)
-signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
+def stop(*_):
+    dump()
+    os._exit(0)
+
+
+signal.signal(signal.SIGTERM, stop)
 yappi.set_clock_type("cpu")
 yappi.start(builtins=True)
 script = sys.argv[1]
