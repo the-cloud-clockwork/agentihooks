@@ -11,9 +11,11 @@ from scripts.swarm_ledger import ledger_phases, plan_ranges
 from scripts.swarm_ledger.ledger_phases import PLANNING_DEFAULT
 
 PHASE_MARKER = re.compile(r"^<!--\s*phase:\s*(?P<body>.*?)\s*-->$")
-TOKEN = re.compile(r'(\w+)=(".*?"|\S+)')
+TOKEN = re.compile(r'(\w+)=(?:"(.*?)"|(\S+))')
 PHASE_KEYS = {"id", "depends", "planning", "not_duplicate"}
 DESCRIPTION_LIMIT = 800
+ID_RULE = "id must start with a letter and hold only letters, digits, dots, dashes or underscores"
+NOT_DUPLICATE_RULE = "not_duplicate must say in plain words why the phase differs"
 
 
 class PlanError(ValueError):
@@ -32,7 +34,10 @@ class Normalized:
 
 
 def normalize(data: bytes | str, name: str, existing: Iterable[str] = ()) -> Normalized:
-    text = data.decode() if isinstance(data, bytes) else data
+    try:
+        text = data.decode() if isinstance(data, bytes) else data
+    except UnicodeDecodeError:
+        raise PlanError(["the plan is not UTF-8 text"]) from None
     if not text.strip():
         raise PlanError(["the plan has no content"])
     existing_ids = set(existing)
@@ -97,8 +102,8 @@ def _json_phase(position: int, entry: Any, errors: list[str]) -> dict:
 
 def _json_title(entry: dict, where: str, errors: list[str]) -> str:
     title = entry.get("title")
-    if not (isinstance(title, str) and title.strip()):
-        errors.append(f"{where}: needs a title")
+    if not (isinstance(title, str) and title.strip() and "\n" not in title):
+        errors.append(f"{where}: needs a one line title")
     return title
 
 
@@ -106,6 +111,8 @@ def _json_description(entry: dict, where: str, errors: list[str]) -> str:
     description = entry.get("description", "")
     if not isinstance(description, str):
         errors.append(f"{where}: description must be a string")
+    elif any(level for _, level, _ in plan_ranges.sections(description)):
+        errors.append(f"{where}: description must not hold headings")
     return description
 
 
@@ -133,20 +140,20 @@ def _json_id(entry: dict, phase: dict, where: str, errors: list[str]) -> None:
     phase_id = entry.get("id")
     if phase_id is None:
         return
-    if isinstance(phase_id, str) and phase_id.strip():
+    if isinstance(phase_id, str) and ledger_phases.ID_RE.fullmatch(phase_id):
         phase["id"] = phase_id
     else:
-        errors.append(f"{where}: id must be a string")
+        errors.append(f"{where}: {ID_RULE}")
 
 
 def _json_not_duplicate(entry: dict, phase: dict, where: str, errors: list[str]) -> None:
     not_duplicate = entry.get("not_duplicate")
     if not_duplicate is None:
         return
-    if isinstance(not_duplicate, str) and not_duplicate.strip():
+    if isinstance(not_duplicate, str) and not_duplicate.strip() and not re.search(r'"|-->|\n', not_duplicate):
         phase["not_duplicate"] = not_duplicate
     else:
-        errors.append(f"{where}: not_duplicate must say in plain words why the phase differs")
+        errors.append(f"{where}: {NOT_DUPLICATE_RULE}")
 
 
 def _render_markdown(title: str, phases: list[dict]) -> str:
@@ -163,9 +170,8 @@ def _marker_line(phase: dict) -> str:
     parts = []
     if "id" in phase:
         parts.append(f"id={phase['id']}")
-    depends_on = phase.get("depends_on")
-    if depends_on and all(isinstance(dep, str) for dep in depends_on):
-        parts.append(f"depends={','.join(depends_on)}")
+    if phase.get("depends_on"):
+        parts.append(f"depends={','.join(str(dep) for dep in phase['depends_on'])}")
     parts.append(f"planning={phase['planning']}")
     if "not_duplicate" in phase:
         parts.append(f'not_duplicate="{phase["not_duplicate"]}"')
@@ -222,11 +228,11 @@ def _marker_at(entries: list, i: int) -> int | None:
 
 def _marker_fields(body: str, where: str, errors: list[str]) -> dict:
     fields = {}
-    for key, raw in TOKEN.findall(body):
+    for key, quoted, bare in TOKEN.findall(body):
         if key not in PHASE_KEYS:
             errors.append(f"{where}: unknown key {key} in phase marker")
             continue
-        fields[key] = raw[1:-1] if raw.startswith('"') else raw
+        fields[key] = quoted or bare
     return fields
 
 
@@ -236,13 +242,17 @@ def _marked_phase(title: str, fields: dict, where: str, errors: list[str]) -> di
         errors.append(f"{where}: planning must be manual or auto")
     phase = {"title": title, "planning": planning}
     if fields.get("depends"):
-        phase["depends_on"] = [token.strip() for token in fields["depends"].split(",") if token.strip()]
+        tokens = [token.strip() for token in fields["depends"].split(",") if token.strip()]
+        phase["depends_on"] = [int(token) if token.isdigit() else token for token in tokens]
     if fields.get("id"):
-        phase["id"] = fields["id"]
+        if ledger_phases.ID_RE.fullmatch(fields["id"]):
+            phase["id"] = fields["id"]
+        else:
+            errors.append(f"{where}: {ID_RULE}")
     if "not_duplicate" in fields:
         value = fields["not_duplicate"]
         if not value.strip():
-            errors.append(f"{where}: not_duplicate must say in plain words why the phase differs")
+            errors.append(f"{where}: {NOT_DUPLICATE_RULE}")
         else:
             phase["not_duplicate"] = value
     return phase
@@ -285,6 +295,9 @@ def _first_paragraph(entries: list) -> str:
 
 
 def _dependency_errors(phases: list[dict], existing: set[str]) -> list[str]:
+    ids = [phase["id"] for phase in phases if phase.get("id")]
+    if repeated := sorted({phase_id for phase_id in ids if ids.count(phase_id) > 1}):
+        return [f"each phase needs its own id: {', '.join(repeated)}"]
     explicit = {phase["id"]: position for position, phase in enumerate(phases, 1) if phase.get("id")}
     graph: dict[int, list[int]] = {}
     errors = []

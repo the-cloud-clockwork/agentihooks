@@ -148,7 +148,7 @@ def test_a_json_phase_with_a_blank_title_is_refused():
     with pytest.raises(PlanError) as caught:
         normalize(data, "bad.json")
 
-    assert caught.value.errors == ["phase 1: needs a title"]
+    assert caught.value.errors == ["phase 1: needs a one line title"]
 
 
 def test_a_json_phase_with_a_non_string_description_is_refused():
@@ -193,7 +193,9 @@ def test_a_json_phase_with_a_non_string_id_is_refused():
     with pytest.raises(PlanError) as caught:
         normalize(data, "bad.json")
 
-    assert caught.value.errors == ["phase 1: id must be a string"]
+    assert caught.value.errors == [
+        "phase 1: id must start with a letter and hold only letters, digits, dots, dashes or underscores"
+    ]
 
 
 def test_a_json_phase_with_a_blank_not_duplicate_is_refused():
@@ -757,3 +759,70 @@ def test_a_three_phase_cycle_names_every_phase_in_order():
         normalize(json.dumps(plan), "cycle.json")
 
     assert caught.value.errors == ["phase dependency cycle: 1 -> 3 -> 2 -> 1"]
+
+
+def test_json_position_dependencies_survive_the_canonical_markdown():
+    plan = {"title": "Positions", "phases": [{"title": "A"}, {"title": "B", "depends_on": [1]}]}
+
+    rendered = normalize(json.dumps(plan), "positions.json")
+    again = normalize(rendered.markdown, "positions.md")
+
+    assert "<!-- phase: depends=1 planning=auto -->" in rendered.markdown
+    assert again.content == rendered.content
+
+
+@pytest.mark.parametrize(
+    ("phase", "error"),
+    [
+        ({"title": "A\nB"}, "phase 1: needs a one line title"),
+        ({"title": "A", "description": "Text.\n\n## Sneaky"}, "phase 1: description must not hold headings"),
+        (
+            {"title": "A", "id": "my phase"},
+            "phase 1: id must start with a letter and hold only letters, digits, dots, dashes or underscores",
+        ),
+        (
+            {"title": "A", "not_duplicate": 'a "quoted" reason'},
+            "phase 1: " + "not_duplicate must say in plain words why the phase differs",
+        ),
+        (
+            {"title": "A", "not_duplicate": "ends --> early"},
+            "phase 1: " + "not_duplicate must say in plain words why the phase differs",
+        ),
+        (
+            {"title": "A", "not_duplicate": "two\nlines"},
+            "phase 1: " + "not_duplicate must say in plain words why the phase differs",
+        ),
+    ],
+)
+def test_json_values_that_cannot_render_as_one_marked_phase_are_refused(phase, error):
+    with pytest.raises(PlanError) as caught:
+        normalize(json.dumps([phase]), "bad.json")
+
+    assert caught.value.errors == [error]
+
+
+def test_two_phases_with_one_id_are_refused():
+    plan = [{"title": "A", "id": "same"}, {"title": "B", "id": "same"}]
+
+    with pytest.raises(PlanError) as caught:
+        normalize(json.dumps(plan), "dup-id.json")
+
+    assert caught.value.errors == ["each phase needs its own id: same"]
+
+
+def test_a_marker_id_with_an_unclosed_quote_is_refused():
+    text = '# Plan\n\n## Phase one\n<!-- phase: id="abc planning=auto -->\nProse.\n'
+
+    with pytest.raises(PlanError) as caught:
+        normalize(text, "unclosed.md")
+
+    assert caught.value.errors == [
+        "phase 'Phase one': id must start with a letter and hold only letters, digits, dots, dashes or underscores"
+    ]
+
+
+def test_bytes_that_are_not_utf8_are_refused():
+    with pytest.raises(PlanError) as caught:
+        normalize(b"\xff\xfe plan", "binary.md")
+
+    assert caught.value.errors == ["the plan is not UTF-8 text"]
