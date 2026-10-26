@@ -38,7 +38,7 @@ class ProfileResult:
     exit_code: int | None
 
 
-def _claude_args(run: ProfileRun) -> list[str]:
+def claude_args(run: ProfileRun) -> list[str]:
     args = [
         "-p",
         run.input,
@@ -54,17 +54,17 @@ def _claude_args(run: ProfileRun) -> list[str]:
     return args
 
 
-def _codex_args(run: ProfileRun) -> list[str]:
+def codex_args(run: ProfileRun) -> list[str]:
     args = ["exec", "--json", "-o", str(run.run_dir / CODEX_LAST_MESSAGE)]
     if run.schema is not None:
         args += ["--output-schema", str(run.run_dir / CODEX_OUTPUT_SCHEMA)]
     return [*args, "--", run.input]
 
 
-_HARNESS_ARGS = {"claude": _claude_args, "codex": _codex_args}
+HARNESS_ARGS = {"claude": claude_args, "codex": codex_args}
 
 
-def _claude_result(text: str) -> tuple[object, str | None]:
+def claude_result(text: str) -> tuple[object, str | None]:
     for line in reversed(text.splitlines()):
         try:
             event = json.loads(line)
@@ -77,7 +77,7 @@ def _claude_result(text: str) -> tuple[object, str | None]:
     return "", None
 
 
-def _codex_result(run: ProfileRun, text: str) -> tuple[object, str | None]:
+def codex_result(run: ProfileRun, text: str) -> tuple[object, str | None]:
     session = None
     for line in text.splitlines():
         try:
@@ -91,7 +91,7 @@ def _codex_result(run: ProfileRun, text: str) -> tuple[object, str | None]:
     return (message.read_text() if message.exists() else ""), session
 
 
-def _execute(argv: list[str], env: dict[str, str], run_dir: Path, timeout: float) -> int | None:
+def execute(argv: list[str], env: dict[str, str], run_dir: Path, timeout: float) -> int | None:
     with (run_dir / TRANSCRIPT).open("w") as out, (run_dir / STDERR).open("w") as err:
         process = subprocess.Popen(
             argv, env=env, stdin=subprocess.DEVNULL, stdout=out, stderr=err, start_new_session=True
@@ -123,15 +123,15 @@ def run_profile(run: ProfileRun) -> ProfileResult:
         "--effort",
         run.effort,
         "--",
-        *_HARNESS_ARGS[harness](run),
+        *HARNESS_ARGS[harness](run),
     ]
     env = {**os.environ, WORKER_RUN: "1", WORKER_RUN_ID: run.run_dir.name}
     transcript = run.run_dir / TRANSCRIPT
-    exit_code = _execute(argv, env, run.run_dir, run.timeout)
+    exit_code = execute(argv, env, run.run_dir, run.timeout)
     if exit_code is None:
         return ProfileResult("timeout", None, transcript, None, None)
     text = transcript.read_text()
-    output, session = _claude_result(text) if harness == "claude" else _codex_result(run, text)
+    output, session = claude_result(text) if harness == "claude" else codex_result(run, text)
     if exit_code != 0:
         return ProfileResult("failed", output, transcript, session, exit_code)
     if run.schema is None:
