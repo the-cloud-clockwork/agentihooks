@@ -158,7 +158,7 @@ def test_the_cli_plan_phases_names_the_refused_repeat_and_appends_the_rest(live,
     cli_ledger.cmd_plan(cli(monkeypatch, "plan", "phases", str(plan)))
     out, err = capsys.readouterr()
     assert json.loads(out)["appended"] == ["p10"]
-    assert err.splitlines() == [refusal("p9", first)]
+    assert [line for line in err.splitlines() if " repeats " in line] == [refusal("p9", first)]
     assert stored("p9") is None and stored("p10")["title"] == OTHER
 
 

@@ -2516,7 +2516,7 @@ def test_cli_collection_consumers_read_all_pages(live, tmp_path, capsys, monkeyp
     )
     ledger.cmd_artifact_purge(SimpleNamespace(slug=SLUG, name="api-reader"))
     assert json.loads(capsys.readouterr().out) == {"purged": 0, "artifacts": 0}
-    send_operation = Mock()
+    send_operation = Mock(return_value={})
     monkeypatch.setattr(ledger, "send", send_operation)
     args = SimpleNamespace(
         action="add",
