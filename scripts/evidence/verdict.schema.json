@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "verdict",
+  "type": "object",
+  "required": ["verdict", "notes"],
+  "additionalProperties": false,
+  "properties": {
+    "verdict": {"enum": ["pass", "retry", "enhance"]},
+    "notes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["point", "missing"],
+        "additionalProperties": false,
+        "properties": {
+          "point": {"type": "string", "minLength": 1},
+          "missing": {"type": "string", "minLength": 1}
+        }
+      }
+    }
+  },
+  "if": {"properties": {"verdict": {"const": "pass"}}},
+  "then": {"properties": {"notes": {"maxItems": 0}}}
+}

@@ -56,10 +56,10 @@ controller:
     initialDelaySeconds: 5
     periodSeconds: 1
     timeoutSeconds: 5
-    failureThreshold: 2
-  terminationGracePeriodSeconds: 1
+    failureThreshold: 6
+  terminationGracePeriodSeconds: 30
   env:
-    AGENTIHOOKS_CONTROLLER_TICK_SECONDS: "2"
+    AGENTIHOOKS_CONTROLLER_TICK_SECONDS: "5"
 ```
 
 Liveness initial delay fell from ten to five seconds and its period from two

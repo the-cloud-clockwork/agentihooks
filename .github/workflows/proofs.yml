@@ -314,12 +314,12 @@ jobs:
         uses: ./.github/actions/browser-cache
 
       - name: Verify the baked browser without downloading
-        if: inputs.browser && runner.environment == 'self-hosted'
+        if: runner.environment == 'self-hosted'
         timeout-minutes: 1
         run: bash .github/actions/browser-cache/use-image.sh
 
       - name: Verify the same Playwright package and browser in an isolated home
-        if: inputs.browser
+        if: inputs.browser || runner.environment == 'self-hosted'
         timeout-minutes: 1
         run: |
           proof_home=$(mktemp -d "$RUNNER_TEMP/proof-browser.XXXXXX")
