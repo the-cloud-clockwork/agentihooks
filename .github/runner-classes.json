@@ -9,7 +9,6 @@
   "ci-templates.yml/actionlint": "hosted",
   "codex-cache.yml/seed": "standard",
   "count-record.yml/count-record": "standard",
-  "coverage-ratchet-speed.yml/replay": "hosted",
   "coverage-stability.yml/compare": "batch",
   "equivalence.yml/ledger-equivalence": "standard",
   "gate-protected.yml/grade": "hosted",

@@ -123,7 +123,6 @@ TARGET = {("gate-protected.yml", "grade")}
 
 # The runner class table holds the release path and the access read back on hosted runners.
 CLASSED = {
-    ("coverage-ratchet-speed.yml", "replay"),
     ("mutation-deadline-proof.yml", "receipts"),
     ("ci-templates.yml", "actionlint"),
     ("pages.yml", "build"),
