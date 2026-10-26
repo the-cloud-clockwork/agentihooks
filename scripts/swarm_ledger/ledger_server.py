@@ -896,9 +896,11 @@ class Handler(BaseHTTPRequestHandler):
         return parsed
 
     def send_response(self, code, message=None):
-        if isinstance(getattr(self, "rfile", None), request_body.Body) and not self.rfile.drain(MAX_BODY):
-            self.close_connection = True
+        unread = isinstance(getattr(self, "rfile", None), request_body.Body) and not self.rfile.drain()
         super().send_response(code, message)
+        if unread:
+            self.close_connection = True
+            self.send_header("Connection", "close")
 
     def send(self, code, body, ctype):
         if self.path.startswith("/api/v1/") and code >= 400 and ctype != "application/json":

@@ -2,29 +2,31 @@ CHUNK = 1 << 16
 
 
 class Body:
-    def __init__(self, raw, length: int) -> None:
+    def __init__(self, raw, length: int | None) -> None:
         self.raw, self.left = raw, length
 
     def read(self, size: int | None = -1) -> bytes:
-        size = self.left if size is None or size < 0 else min(size, self.left)
+        left = self.left or 0
+        size = left if size is None or size < 0 else min(size, left)
         data = self.raw.read(size) if size else b""
-        self.left -= len(data)
+        if self.left is not None:
+            self.left -= len(data)
         return data
 
-    def drain(self, limit: int) -> bool:
-        if self.left > limit:
+    def drain(self) -> bool:
+        if self.left is None:
             return False
         while self.left:
             if not self.read(CHUNK):
                 return False
         return True
 
-    def __getattr__(self, name: str):
-        return getattr(self.raw, name)
 
-
-def length(headers) -> int:
+def length(headers) -> int | None:
+    if headers.get("Transfer-Encoding"):
+        return None
     try:
-        return max(int(headers.get("Content-Length") or 0), 0)
+        found = int(headers.get("Content-Length") or 0)
     except ValueError:
-        return 0
+        return None
+    return found if found >= 0 else None

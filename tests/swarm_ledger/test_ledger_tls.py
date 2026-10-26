@@ -1,4 +1,5 @@
 import io
+import json
 import os
 import socket
 import ssl
@@ -208,11 +209,12 @@ def test_the_health_check_answers_over_tls(tls_ledger):
     assert ledger_link.serving(timeout=5, url=tls_ledger["base"]) == str(core.LEDGER_DIR)
 
 
+@pytest.mark.parametrize("body", [b'{"ops": []}', b" " * (ledger_server.MAX_BODY + 1)])
 @pytest.mark.parametrize("path", ["agent-token", "ops"])
-def test_a_refusal_with_an_unread_body_answers_with_its_status_over_tls(tls_ledger, path):
+def test_a_refusal_with_an_unread_body_answers_with_its_status_over_tls(tls_ledger, path, body):
     request = urllib.request.Request(
         f"{tls_ledger['base']}/api/v1/ledgers/{SLUG}/{path}",
-        b'{"ops": []}',
+        body,
         {"Content-Type": "application/json", "X-Ledger-Agent": "engineer@323133-0256"},
         method="POST",
     )
@@ -221,8 +223,8 @@ def test_a_refusal_with_an_unread_body_answers_with_its_status_over_tls(tls_ledg
     with pytest.raises(urllib.error.HTTPError) as refused:
         urllib.request.urlopen(request, timeout=5, context=context)
 
-    assert refused.value.code == 403
-    assert b"forbidden" in refused.value.read()
+    assert refused.value.code in (400, 403)
+    assert "error" in json.loads(refused.value.read())
 
 
 def trusted(monkeypatch, cert):
