@@ -409,3 +409,36 @@ def test_the_package_result_names_the_case_records_and_states():
     assert set(result["metrics"]) == {brain_routes.FAILURES}
     for case in "abc":
         assert (EVIDENCE.parents[1] / result["cases"][case]).exists()
+
+
+def test_the_home_falls_back_to_the_user_home_without_any_variable():
+    assert brain_routes.home({}) == Path.home() / ".agentihooks"
+
+
+def test_the_legacy_path_drops_an_inherited_receipt(tmp_path):
+    environ = {"AGENTIHOOKS_HOME": str(tmp_path), brain_routes.RECEIPT: json.dumps({"status": "routed"})}
+    assert brain_routes.apply(environ) is None
+    assert environ == {"AGENTIHOOKS_HOME": str(tmp_path)}
+    assert brain_routes.remember(environ, "s1") is None
+
+
+def test_a_changed_route_at_the_same_generation_still_invalidates(home, inputs):
+    first = home.environ()
+    brain_routes.apply(first)
+    brain_routes.remember(first, "s1")
+    _routes(home, inputs, routes={"personal": {"api": PERSONAL, "token_env": "BRAIN_OTHER_TOKEN"}})
+    second = home.environ(BRAIN_OTHER_TOKEN="fx2")
+    brain_routes.apply(second)
+    assert brain_routes.remember(second, "s1") == "invalidated"
+    assert _remembered(second) == json.loads(second[brain_routes.RECEIPT])
+
+
+def test_brain_status_reports_the_route_resolution_failures(home, inputs, monkeypatch):
+    from hooks.context import brain_adapter
+
+    brain_routes.apply(home.environ(**inputs["repository_override"]))
+    brain_routes.apply(home.environ(**{brain_routes.VARIABLE: "attacker"}))
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(home.agentihooks))
+    monkeypatch.setattr(brain_adapter, "_get_source", lambda: None)
+    monkeypatch.setattr("hooks.config.reload_brain_env", lambda: None)
+    assert brain_adapter.get_status()[brain_routes.FAILURES] == 2

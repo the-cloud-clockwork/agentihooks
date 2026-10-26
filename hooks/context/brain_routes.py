@@ -151,6 +151,7 @@ def apply(environ: MutableMapping[str, str]) -> dict | None:
         _count(environ, str(exc))
         return receipt
     if route is None:
+        environ.pop(RECEIPT, None)
         return None
     if route["route"] != SWARM:
         environ.pop("KB_ROUTER_TOKEN", None)
@@ -172,7 +173,7 @@ def cache(environ: Mapping[str, str], session: str, receipt: Mapping[str, object
 
 
 def remember(environ: Mapping[str, str], session: str) -> str | None:
-    """Persist this session's receipt; a changed route drops the old route's cache so its context is never replayed.
+    """Persist this session's receipt; a changed route removes the old route's cache folder before the feed refresh.
 
     An older routes revision than the one already accepted for the session is stale and leaves the newer receipt.
     """
