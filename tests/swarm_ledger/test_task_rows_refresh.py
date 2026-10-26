@@ -68,6 +68,17 @@ def test_rebuilt_gives_up_when_the_tasks_array_itself_changed(tmp_path):
         assert refresh.rebuilt(connection, "rows", TASKS_PATH, [{"id": "t0"}], {TASKS_PATH}) is None
 
 
+def test_rebuilt_gives_up_when_a_changed_task_is_no_longer_stored(tmp_path):
+    from scripts.swarm_ledger.repository import refresh
+    from scripts.swarm_ledger.repository.rows import encode
+    from scripts.swarm_ledger.repository.sqlite import TASKS_PATH, SQLiteLedgerRepository
+
+    path = stored(tmp_path, [{"id": "t0"}])
+    gone = {encode(["tasks", ["id", "gone", 0], "title"])}
+    with SQLiteLedgerRepository(path).connect() as connection:
+        assert refresh.rebuilt(connection, "rows", TASKS_PATH, [{"id": "t0"}], gone) is None
+
+
 def test_task_list_pages_and_ledgers_stay_within_their_caps(tmp_path, monkeypatch):
     from scripts.swarm_ledger.api import task_list
     from scripts.swarm_ledger.repository.sqlite import SQLiteLedgerRepository
