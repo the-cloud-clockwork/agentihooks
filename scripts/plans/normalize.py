@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from scripts.swarm_ledger import plan_ranges
+from scripts.swarm_ledger import ledger_phases, plan_ranges
 from scripts.swarm_ledger.ledger_phases import PLANNING_DEFAULT
 
 PHASE_MARKER = re.compile(r"^<!--\s*phase:\s*(?P<body>.*?)\s*-->$")
@@ -32,7 +32,7 @@ class Normalized:
 
 
 def normalize(data: bytes | str, name: str, existing: Iterable[str] = ()) -> Normalized:
-    text = data.decode("utf-8") if isinstance(data, bytes) else data
+    text = data.decode() if isinstance(data, bytes) else data
     if not text.strip():
         raise PlanError(["the plan has no content"])
     existing_ids = set(existing)
@@ -68,7 +68,7 @@ def _from_json(document: dict, name: str, existing: set[str]) -> Normalized:
     if errors:
         raise PlanError(errors)
     markdown = _render_markdown(title, phases)
-    ranged = [{"id": str(i), "title": phase["title"]} for i, phase in enumerate(phases, 1)]
+    ranged = [{"id": phase["title"], "title": phase["title"]} for phase in phases]
     try:
         plan_ranges.phase_lines(markdown, ranged)
     except ValueError as exc:
@@ -97,18 +97,16 @@ def _json_phase(position: int, entry: Any, errors: list[str]) -> dict:
 
 def _json_title(entry: dict, where: str, errors: list[str]) -> str:
     title = entry.get("title")
-    if isinstance(title, str) and title.strip():
-        return title
-    errors.append(f"{where}: needs a title")
-    return ""
+    if not (isinstance(title, str) and title.strip()):
+        errors.append(f"{where}: needs a title")
+    return title
 
 
 def _json_description(entry: dict, where: str, errors: list[str]) -> str:
     description = entry.get("description", "")
-    if isinstance(description, str):
-        return description
-    errors.append(f"{where}: description must be a string")
-    return ""
+    if not isinstance(description, str):
+        errors.append(f"{where}: description must be a string")
+    return description
 
 
 def _json_planning(entry: dict, where: str, errors: list[str]) -> str:
@@ -176,17 +174,17 @@ def _marker_line(phase: dict) -> str:
 
 def _from_markdown(text: str, name: str, existing: set[str]) -> Normalized:
     entries = plan_ranges.sections(text)
-    phase_idx = [i for i in range(len(entries)) if entries[i][1] and _has_marker(entries, i)]
-    if not phase_idx:
+    markers = {i: j for i in range(len(entries)) if entries[i][1] and (j := _marker_at(entries, i)) is not None}
+    if not markers:
         return _raw(text, name, entries)
     errors: list[str] = []
-    if len({entries[i][1] for i in phase_idx}) > 1:
+    if len({entries[i][1] for i in markers}) > 1:
         errors.append("phase headings must all sit at one heading level")
     phases, ranged = [], []
-    for i in phase_idx:
+    for i, j in markers.items():
         title = entries[i][2]
         where = f"phase {title!r}"
-        fields = _marker_fields(entries[i + 1][2].strip(), where, errors)
+        fields = _marker_fields(entries[j][2].strip(), where, errors)
         phases.append(_marked_phase(title, fields, where, errors))
         ranged.append({"id": str(i), "title": title})
     if errors:
@@ -204,22 +202,22 @@ def _from_markdown(text: str, name: str, existing: set[str]) -> Normalized:
     if errors:
         raise PlanError(errors)
     slices = {}
-    for i, phase, row in zip(phase_idx, phases, ranged):
+    for j, phase, row in zip(markers.values(), phases, ranged):
         rng = ranges[row["id"]]
         slices[phase["title"]] = plan_ranges.slice_anchors(text, rng)
         _, end = plan_ranges.bounds(rng)
-        phase["description"] = _phase_description(entries, entries[i + 1][0], end)
+        phase["description"] = _phase_description(entries, entries[j][0], end)
     title = next((text for _, level, text in entries if level == 1), None) or _stem(name)
     return Normalized(
         kind="marked", title=title, markdown=text, content={"title": title, "phases": phases}, slices=slices
     )
 
 
-def _has_marker(entries: list, i: int) -> bool:
-    if i + 1 >= len(entries):
-        return False
-    level, line = entries[i + 1][1], entries[i + 1][2]
-    return level == 0 and bool(PHASE_MARKER.fullmatch(line.strip()))
+def _marker_at(entries: list, i: int) -> int | None:
+    j = next((j for j in range(i + 1, len(entries)) if entries[j][1] or entries[j][2].strip()), None)
+    if j is not None and not entries[j][1] and PHASE_MARKER.fullmatch(entries[j][2].strip()):
+        return j
+    return None
 
 
 def _marker_fields(body: str, where: str, errors: list[str]) -> dict:
@@ -307,24 +305,10 @@ def _dependency_errors(phases: list[dict], existing: set[str]) -> list[str]:
         graph[position] = resolved
     if errors:
         return errors
-    visited: set[int] = set()
-    for node in graph:
-        cycle = _cycle(node, graph, [], visited)
-        if cycle:
-            return [f"phase dependency cycle: {' -> '.join(str(n) for n in cycle)}"]
-    return errors
-
-
-def _cycle(node: int, graph: dict[int, list[int]], chain: list[int], visited: set[int]) -> list[int]:
-    if node in chain:
-        return [*chain[chain.index(node) :], node]
-    if node in visited:
-        return []
-    for dep in graph[node]:
-        found = _cycle(dep, graph, [*chain, node], visited)
-        if found:
-            return found
-    visited.add(node)
+    try:
+        ledger_phases.validate([{"id": str(n), "depends_on": [str(dep) for dep in deps]} for n, deps in graph.items()])
+    except ValueError as exc:
+        return [str(exc)]
     return []
 
 
@@ -335,8 +319,8 @@ def _join(lines: list[str]) -> str:
 def _bound(text: str, limit: int = DESCRIPTION_LIMIT) -> str:
     if len(text) <= limit:
         return text
-    cut = text.rfind(" ", 0, limit + 1)
-    return text[: cut if cut > 0 else limit]
+    words = text[: limit + 1].rsplit(" ", 1)
+    return words[0] if len(words) > 1 else text[:limit]
 
 
 def _stem(name: str) -> str:

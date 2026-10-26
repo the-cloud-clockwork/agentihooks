@@ -366,19 +366,25 @@ Prose.
     assert [phase["title"] for phase in result.content["phases"]] == ["Real phase"]
 
 
-def test_has_marker_checks_only_the_immediately_following_line():
+def test_the_marker_is_the_first_non_blank_line_after_the_heading():
     text = """# Plan
 
-<!-- phase: id=decoy planning=auto -->
-## Not a phase
+## Spaced phase
 
+<!-- phase: id=spaced planning=manual -->
+Spaced prose.
+
+## Not a phase
+Prose first.
 <!-- phase: id=sneaky planning=auto -->
-Prose only, no real marker here.
 """
 
     result = normalize(text, "neighbors.md")
 
-    assert result.kind == "raw"
+    assert result.kind == "marked"
+    assert result.content["phases"] == [
+        {"title": "Spaced phase", "planning": "manual", "id": "spaced", "description": "Spaced prose."}
+    ]
 
 
 def test_has_marker_uses_the_markers_own_line_not_the_heading_after_it():
@@ -658,3 +664,79 @@ Body.
 
     assert "dup" in str(caught.value)
     assert "own name" in str(caught.value)
+
+
+def test_a_marker_on_the_last_line_of_the_file_marks_its_phase():
+    result = normalize("# Plan\n\n## Only phase\n<!-- phase: planning=manual -->", "last-line.md")
+
+    assert result.kind == "marked"
+    assert result.content["phases"] == [{"title": "Only phase", "planning": "manual", "description": ""}]
+
+
+def test_subheadings_without_any_slice_anchor_need_no_slice_markers():
+    text = """# Plan
+
+## Phase one
+<!-- phase: id=a planning=auto -->
+Prose.
+
+### Step one
+
+Body.
+
+### Step two
+
+Body.
+"""
+
+    result = normalize(text, "unsliced.md")
+
+    assert result.slices == {"Phase one": []}
+    assert result.content["phases"][0]["description"] == "Prose."
+
+
+def test_json_markdown_normalizes_back_to_the_same_marked_phases():
+    plan = {
+        "title": "Round trip",
+        "phases": [
+            {"id": "a", "title": "First", "description": "One.", "planning": "manual"},
+            {"id": "b", "title": "Second", "description": "Two.", "depends_on": ["a"]},
+        ],
+    }
+
+    rendered = normalize(json.dumps(plan), "plan.json")
+    again = normalize(rendered.markdown, "plan.md")
+
+    assert again.kind == "marked"
+    assert again.title == "Round trip"
+    assert again.content == rendered.content
+
+
+def test_a_long_description_without_spaces_is_cut_at_the_bound():
+    token = "x" * 900
+    text = f"# Plan\n\n## Phase one\n<!-- phase: id=a planning=auto -->\n{token}\n"
+
+    result = normalize(text, "nospace.md")
+
+    assert result.content["phases"][0]["description"] == "x" * 800
+
+
+def test_a_long_description_with_one_early_space_keeps_only_the_first_word():
+    text = f"# Plan\n\n## Phase one\n<!-- phase: id=a planning=auto -->\na {'y' * 900}\n"
+
+    result = normalize(text, "early-space.md")
+
+    assert result.content["phases"][0]["description"] == "a"
+
+
+def test_a_three_phase_cycle_names_every_phase_in_order():
+    plan = [
+        {"title": "A", "depends_on": [3]},
+        {"title": "B", "depends_on": [1]},
+        {"title": "C", "depends_on": [2]},
+    ]
+
+    with pytest.raises(PlanError) as caught:
+        normalize(json.dumps(plan), "cycle.json")
+
+    assert caught.value.errors == ["phase dependency cycle: 1 -> 3 -> 2 -> 1"]
