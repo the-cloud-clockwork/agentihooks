@@ -279,7 +279,10 @@ def test_early_repository_refusal_keeps_an_unrecorded_branch_empty(repositories,
             publish.publish("swarm", p.agent, str(p.swarm), p.ledger, "Continue", ["chosen.txt"])
     assert refused.value.branch == ""
     assert refused.value.repository == str(p.bundle if command == "prepare" else p.swarm)
-    assert str(refused.value)
+    if command == "prepare":
+        assert "origin" in str(refused.value)
+    else:
+        assert str(refused.value).startswith("publish from the task worktree to select one of its repositories")
 
 
 def test_prepare_names_the_default_repository_without_inferring_prose(repositories):

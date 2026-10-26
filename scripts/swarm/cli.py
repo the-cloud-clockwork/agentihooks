@@ -1603,7 +1603,7 @@ def publication_command(store: RedisStore, args: argparse.Namespace) -> dict:
         branch = (
             exc.branch
             if isinstance(exc, publish.PublicationRefusal)
-            else task.get("repository_branches", {}).get(repo, task.get("branch", ""))
+            else publish.refusal_branch(Path(repo), task)
         )
         syslog.openlog("agentihooks-swarm")
         syslog.syslog(

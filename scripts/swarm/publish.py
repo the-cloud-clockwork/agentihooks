@@ -117,6 +117,11 @@ def mapped_branch(repo: Path, task: dict) -> str | None:
     return branch
 
 
+def refusal_branch(repo: Path, task: dict) -> str:
+    branch = mapped_branch(repo, task)
+    return task.get("branch", "") if branch is None else branch
+
+
 def repository_task(repo: Path, task: dict) -> dict:
     branch = mapped_branch(repo, task)
     if branch is None:
@@ -153,8 +158,7 @@ def publishing_root(repo: str, task: dict, agent: AgentRecord) -> tuple[Path | N
             raise SwarmError(f"current worktree {root} does not belong to this task")
         return root, primary, scoped
     except SwarmError as exc:
-        branch = mapped_branch(primary, task)
-        raise PublicationRefusal(primary, task.get("branch", "") if branch is None else branch, str(exc)) from exc
+        raise PublicationRefusal(primary, refusal_branch(primary, task), str(exc)) from exc
 
 
 def pushed_branches(repo: str, task: dict, agent: AgentRecord) -> dict:
@@ -212,9 +216,7 @@ def prepare(slug: str, agent: AgentRecord, repo: str, ledger: LedgerClient) -> d
                     checkout["branch"] = delivery
             fields.append({**checkout, "repository": str(repository)})
         except SwarmError as exc:
-            branch = mapped_branch(repository, scoped)
-            branch = scoped.get("branch", "") if branch is None else branch
-            raise PublicationRefusal(repository, branch, str(exc)) from exc
+            raise PublicationRefusal(repository, refusal_branch(repository, scoped), str(exc)) from exc
     update = branch_record(fields[-1], Path(fields[-1]["repository"]), task)
     update["repository_branches"].update({entry["repository"]: entry["branch"] for entry in fields})
     ledger.update_task(slug, agent.task, update, by=agent.name)
