@@ -184,14 +184,10 @@ def _from_markdown(text: str, name: str, existing: set[str]) -> Normalized:
     if text.lstrip().partition("\n")[0].strip() == "---":
         raise PlanError(["the plan must not start with YAML front matter"])
     entries = plan_ranges.sections(text)
-    names = [match[1] for _, level, line in entries if not level and (match := plan_ranges.ANCHOR.fullmatch(line))]
     markers = {i: j for i in range(len(entries)) if entries[i][1] and (j := _marker_at(entries, i)) is not None}
+    names = _slice_names(entries, bool(markers))
     if not markers:
-        if names:
-            raise PlanError(["slice markers need phase markers above them"])
         return _raw(text, name, entries)
-    if repeated := sorted({slice_name for slice_name in names if names.count(slice_name) > 1}):
-        raise PlanError([f"each slice marker needs its own name in the file: {', '.join(repeated)}"])
     errors: list[str] = []
     if len({entries[i][1] for i in markers}) > 1:
         errors.append("phase headings must all sit at one heading level")
@@ -233,6 +229,15 @@ def _marker_at(entries: list, i: int) -> int | None:
     if j is not None and not entries[j][1] and PHASE_MARKER.fullmatch(entries[j][2].strip()):
         return j
     return None
+
+
+def _slice_names(entries: list, marked: bool) -> list[str]:
+    names = [match[1] for _, level, line in entries if not level and (match := plan_ranges.ANCHOR.fullmatch(line))]
+    if names and not marked:
+        raise PlanError(["slice markers need phase markers above them"])
+    if repeated := sorted({name for name in names if names.count(name) > 1}):
+        raise PlanError([f"each slice marker needs its own name in the file: {', '.join(repeated)}"])
+    return names
 
 
 def _marker_fields(body: str, where: str, errors: list[str]) -> dict:
