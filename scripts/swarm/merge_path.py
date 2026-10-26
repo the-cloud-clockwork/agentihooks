@@ -230,11 +230,18 @@ def read_pulls(repo_dir: str, repo: str, since_s: float, run: Callable) -> list[
 def collect(repo_dir: str, window: tuple[float, float], run: Callable = subprocess.run) -> tuple[str, dict]:
     repo = _gh(["api", "repos/{owner}/{repo}", "--jq", ".full_name"], repo_dir, run).strip()
     runs = [found for event in EVENTS for found in read_runs(repo_dir, event, window, run)]
-    jobs = {found["id"]: read_jobs(repo_dir, found["id"], run) for found in runs if found["event"] == "merge_group"}
+    jobs, unread = {}, 0
+    for found in runs:
+        if found["event"] != "merge_group":
+            continue
+        try:
+            jobs[found["id"]] = read_jobs(repo_dir, found["id"], run)
+        except SwarmError:
+            unread += 1
     pulls = read_pulls(repo_dir, repo, window[0], run)
     open_pages = _search(repo_dir, OPEN_READY, {"q": f"repo:{repo} is:pr is:open draft:false base:dev"}, run)
     ready = open_pages[0]["issueCount"]
-    return repo, count(runs, pulls, jobs, ready, window)
+    return repo, {**count(runs, pulls, jobs, ready, window), "queue_runs_without_jobs": unread}
 
 
 def _cause(run: dict, before: dict | None) -> str:

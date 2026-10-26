@@ -336,6 +336,7 @@ def test_collect_reads_runs_jobs_and_searches_with_these_calls():
     repo, found = merge_path.collect("/repo", WINDOW, gh)
     assert repo == "o/r"
     assert found["merges"] == 2 and found["enqueues"] == 3 and found["open_ready_pull_requests"] == 7
+    assert found["queue_runs_without_jobs"] == 0
     assert found["standard_jobs_per_queue_run"] == 0.5
     jobs = "repos/{owner}/{repo}/actions/runs/{}/jobs?per_page=30"
     labels = ["--paginate", "--jq", ".jobs[] | .labels | @json"]
@@ -352,6 +353,26 @@ def test_collect_reads_runs_jobs_and_searches_with_these_calls():
         (["gh", "api", "graphql", "--paginate", *search, "-f", f"query={merge_path.PULLS}", "-f", updated], GH),
         (["gh", "api", "graphql", *search, "-f", f"query={merge_path.OPEN_READY}", "-f", ready], GH),
     ]
+
+
+def test_collect_counts_a_queue_run_whose_jobs_cannot_be_read_and_goes_on():
+    gh = Gh(
+        [
+            (0, "o/r\n"),
+            page(RUNS[:4], 4),
+            page(RUNS[4:6], 2),
+            page(RUNS[8:9], 1),
+            (1, "", "gh: Not Found (HTTP 404)\n"),
+            (0, '["anton-oss-queue"]\n'),
+            searched(PULLS[:2], [PULLS[2], {}]),
+            (0, json.dumps({"issueCount": 7}) + "\n"),
+        ]
+    )
+    repo, found = merge_path.collect("/repo", WINDOW, gh)
+    assert repo == "o/r"
+    assert found["queue_runs_without_jobs"] == 1
+    assert found["standard_jobs_per_queue_run"] == 1.0
+    assert found["open_ready_pull_requests"] == 7
 
 
 def command(monkeypatch, found, argv):
