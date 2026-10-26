@@ -33,8 +33,9 @@ DEV_MERGE = re.compile(r"Merge (remote-tracking )?branch '(origin/)?dev'")
 AFTER = {"failure": "after red head", "success": "review fix"}
 LOOKBACK_S = 6 * 3600
 SERVER_ERROR = re.compile(r"HTTP 5\d\d|stream error")
-ATTEMPTS = 3
+ATTEMPTS = 5
 RETRY_S = 10
+JOB_PAGE = 30
 
 
 def _seconds(stamp: str) -> float:
@@ -163,7 +164,7 @@ def _gh(args: list[str], repo_dir: str, run: Callable) -> str:
             return done.stdout
         if not left or not SERVER_ERROR.search(done.stderr):
             raise SwarmError(done.stderr.strip() or "GitHub API failed")
-        time.sleep(RETRY_S)
+        time.sleep(RETRY_S * (ATTEMPTS - left))
 
 
 def read_runs(repo_dir: str, event: str, window: tuple[float, float], run: Callable) -> list[dict]:
@@ -186,7 +187,7 @@ def read_runs(repo_dir: str, event: str, window: tuple[float, float], run: Calla
 
 
 def read_jobs(repo_dir: str, run_id: int, run: Callable) -> list[list[str]]:
-    path = f"repos/{{owner}}/{{repo}}/actions/runs/{run_id}/jobs?per_page={PAGE}"
+    path = f"repos/{{owner}}/{{repo}}/actions/runs/{run_id}/jobs?per_page={JOB_PAGE}"
     out = _gh(["api", path, "--paginate", "--jq", ".jobs[] | .labels | @json"], repo_dir, run)
     return [json.loads(line) for line in out.splitlines()]
 
