@@ -250,7 +250,7 @@ def test_a_registry_drill_records_the_report_it_ran(world):
     set_id = world.capture()
     entry = world.registry.drill(world.backup, set_id, 1, world.plan())
     report = backup.drill(world.backup, set_id, world.plan("again"))
-    assert entry["report"] == hashlib.sha256(backup._encoded(report)).hexdigest()
+    assert entry["report"] == backup.recorded(report)
     assert (entry["status"], entry["attempt"], entry["accepted_attempt"]) == (backup.PARTIAL, 1, 1)
 
 
@@ -296,11 +296,18 @@ def test_a_stale_or_unknown_drill_changes_nothing(world):
     with pytest.raises(backup.Refused, match="newer restore drill"):
         world.registry.drill(world.backup, set_id, 1, world.plan("older"))
     assert not (world.root / "older").exists()
-    with pytest.raises(backup.Refused, match="newer restore drill"):
+    with pytest.raises(backup.Refused, match="different result"):
         world.registry.drill(world.backup, set_id, 2, world.plan("conflict", task_id="other-task"))
     with pytest.raises(backup.Refused, match="not recorded"):
         world.registry.drill(world.backup, "0" * 64, 3, world.plan("unknown"))
     assert world.registry.path.read_bytes() == before
+
+
+def test_a_same_attempt_rerun_on_a_slower_clock_returns_the_recorded_entry(world):
+    set_id = world.capture()
+    first = world.registry.drill(world.backup, set_id, 1, world.plan())
+    slower = world.plan(clock=cases.Clock(0.0, 40.0))
+    assert world.registry.drill(world.backup, set_id, 1, slower) == first
 
 
 def test_a_same_attempt_rerun_returns_the_recorded_entry(world):

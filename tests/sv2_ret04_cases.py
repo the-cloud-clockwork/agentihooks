@@ -241,7 +241,7 @@ def drilled(root: Path) -> dict:
         "report": {key: value for key, value in report.items() if key != "set_id"},
         "report_names_its_set": report["set_id"] == set_id,
         "registry_status": entry["status"],
-        "registry_matches_report": entry["report"] == hashlib.sha256(backup._encoded(report)).hexdigest(),
+        "registry_matches_report": entry["report"] == backup.recorded(report),
         "events_match_source": rows == world.source_rows(),
         "files_match_source": files == world.doc["files"],
         "vectors_rebuilt": vectors,

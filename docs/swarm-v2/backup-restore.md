@@ -53,7 +53,8 @@ drill clock. Both are observations of that drill, not guarantees.
 ## Registry and retention
 
 `Registry(path)` keeps one entry per set. `record` starts it `uploaded`. `Registry.drill(backup_store, set_id,
-attempt, plan)` runs the drill itself and stores its status and report digest, so no caller can hand it a report.
+attempt, plan)` runs the drill itself and stores its status and report digest (`recorded`, which leaves out
+`recovery_time_seconds`), so no caller can hand it a report.
 An older attempt is refused before anything runs; the same attempt with the same report is a no-op, and the same
 attempt with a different report is refused. `accepted` is true while the latest drill is `verified` or `partial`.
 `preserved` names the newest set any drill accepted, and keeps naming it after a later failed drill, so retention
@@ -62,6 +63,8 @@ newer unverified, partial or failed set stops destructive retention until covera
 
 ## Limitations
 
+- The grant's corpus gates a restore and its projects gate the query and the rebuild; its principal is not checked
+  against an operator role, because no stored grant exists for backup sets yet.
 - Encryption happens in the storage layer; this module records key ids and checks them against a keyring.
 - The evidence is fixture-only: local folders and a SQLite file stand in for the buckets, the central database, the
   hosted ledger, Redis and the brain export. No deployed backup has been restored.

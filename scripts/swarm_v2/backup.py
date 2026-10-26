@@ -38,6 +38,8 @@ OLD_VERSION = "a backup component version is not supported by this release; noth
 NOT_ISOLATED = "the restore target holds other data; restore into an empty folder"
 UNKNOWN_SET = "the backup set is not recorded"
 STALE_DRILL = "a newer restore drill result is already recorded for this backup set; nothing changed"
+CONFLICTING_DRILL = "this drill attempt already recorded a different result; use a new attempt number"
+TIMING = "recovery_time_seconds"
 
 
 class Refused(Exception):
@@ -136,6 +138,11 @@ def _component(backup: archive.ObjectStore, sources: Sources, name: str, data: b
 
 def _digest(doc: dict) -> str:
     return hashlib.sha256(_encoded(doc)).hexdigest()
+
+
+def recorded(report: dict) -> str:
+    """The digest a registry keeps for a drill report; timing is excluded so a same attempt rerun compares equal."""
+    return _digest({key: value for key, value in report.items() if key != TIMING})
 
 
 def _source_answer(sources: Sources) -> dict:
@@ -251,7 +258,7 @@ def drill(backup: archive.ObjectStore, set_id: str, plan: Drill) -> dict:
     try:
         restored = restore(backup, set_id, plan.root, plan.access)
     except archive.EvidenceIntegrityError as error:
-        report = {METRIC: FAILED, "reason": str(error), "recovery_time_seconds": plan.clock() - started}
+        report = {METRIC: FAILED, "reason": str(error), TIMING: plan.clock() - started}
         return {"set_id": set_id, **report}
     try:
         rebuilt = rebuild(restored.catalog, plan.access.grant, plan.projections, plan.clock())
@@ -272,7 +279,7 @@ def drill(backup: archive.ObjectStore, set_id: str, plan: Drill) -> dict:
         "rebuilt_projections": rebuilt,
         "irrecoverable": dict(sorted(restored.irrecoverable.items())),
         "recovery_point": restored.manifest["captured_at"],
-        "recovery_time_seconds": plan.clock() - started,
+        TIMING: plan.clock() - started,
     }
 
 
@@ -292,8 +299,8 @@ class Registry:
     def record(self, set_id: str, captured_at: float) -> dict:
         sets = self._load()
         if set_id not in sets:
-            sets[set_id] = {"status": UPLOADED, "captured_at": captured_at, "attempt": 0, "report": None}
-            sets[set_id]["accepted_attempt"] = None
+            entry = {"status": UPLOADED, "captured_at": captured_at, "attempt": 0, "report": None}
+            sets[set_id] = {**entry, "accepted_attempt": None}
             self._save(sets)
         return sets[set_id]
 
@@ -309,11 +316,11 @@ class Registry:
         """Runs a drill under an attempt number and records its status; a same attempt rerun changes nothing."""
         entry = self._entry(set_id, attempt)
         report = drill(backup, set_id, plan)
-        digest = _digest(report)
+        digest = recorded(report)
         if attempt == entry["attempt"] and digest == entry["report"]:
             return entry
         if attempt == entry["attempt"]:
-            raise Refused(STALE_DRILL)
+            raise Refused(CONFLICTING_DRILL)
         status = report[METRIC]
         accepted = attempt if status in RESTORE_VERIFIED else entry["accepted_attempt"]
         sets = self._load()
