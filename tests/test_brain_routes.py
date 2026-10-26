@@ -135,13 +135,13 @@ def test_a_repository_brain_url_is_refused_and_counted_without_disclosure(home, 
     assert brain_routes.failures(environ) == 1
 
 
-def test_failures_read_zero_without_a_log_and_counting_survives_an_unwritable_home(tmp_path):
+def test_failures_read_zero_without_a_log_and_counting_names_an_unwritable_home(tmp_path):
     blocked = tmp_path / "file"
     blocked.write_text("")
     environ = {"AGENTIHOOKS_HOME": str(blocked)}
     assert brain_routes.failures(environ) == 0
-    brain_routes._count(environ, "r")
-    assert brain_routes.failures(environ) == 0
+    with pytest.raises(OSError):
+        brain_routes._count(environ, "r")
 
 
 @pytest.mark.parametrize("mode", [0o644, 0o640, 0o604, 0o620, 0o602, 0o610, 0o601])

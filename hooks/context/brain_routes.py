@@ -123,12 +123,9 @@ def resolve(environ: Mapping[str, str]) -> dict | None:
 def _count(environ: Mapping[str, str], reason: str) -> None:
     folder = store(environ)
     route = SWARM if environ.get(brain_binding.VARIABLE) else environ.get(VARIABLE) or "default"
-    try:
-        folder.mkdir(parents=True, exist_ok=True)
-        with (folder / f"{FAILURES}.jsonl").open("a", encoding="utf-8") as log:
-            log.write(json.dumps({"route": route, "reason": reason}) + "\n")
-    except OSError:
-        pass
+    folder.mkdir(parents=True, exist_ok=True)
+    with (folder / f"{FAILURES}.jsonl").open("a", encoding="utf-8") as log:
+        log.write(json.dumps({"route": route, "reason": reason}) + "\n")
 
 
 def failures(environ: Mapping[str, str]) -> int:
