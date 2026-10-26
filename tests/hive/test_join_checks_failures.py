@@ -96,26 +96,73 @@ def ledger_probe(monkeypatch, failure):
     return join_checks.ledger_checks({"slug": "sw", "agent": "engineer", "checks": {}})
 
 
-def test_refused_write_and_unreachable_ledger_report_distinct_reasons(monkeypatch):
-    refused = ledger_probe(monkeypatch, "server refused: 403 the ledger refused the write")
-    unreachable = ledger_probe(
-        monkeypatch, "ledger server not answering on http://ledger.example: [Errno 111] Connection refused"
-    )
-    assert refused["ledger_join"] is unreachable["ledger_join"] is True
-    assert refused["ledger_write"] is unreachable["ledger_write"] is False
-    assert refused["errors"] == {
-        "ledger_write": {
-            "error": "LedgerRefused",
-            "status": 403,
-            "message": "ledger sw: server refused: 403 the ledger refused the write",
-        }
+def transport_failure(kind):
+    import io
+    import urllib.error
+
+    if kind == "unreachable":
+        return urllib.error.URLError(ConnectionRefusedError(111, "Connection refused"))
+    body = b'{"error": "Missing or wrong ledger credential"}' if kind == "credential" else b'{"error": "write refused"}'
+    return urllib.error.HTTPError("http://ledger.example/sw", 403, "Forbidden", {}, io.BytesIO(body))
+
+
+@pytest.mark.parametrize("probe", ["join", "ack"])
+def test_refused_unreachable_and_credential_faults_report_distinct_reasons(monkeypatch, probe):
+    from scripts.hive import join_checks
+    from scripts.swarm import ledger_client
+
+    ledger = ledger_client._ledger()
+    name = {"join": "ledger_join", "ack": "ledger_write"}[probe]
+    reported = {}
+    for kind in ("refused", "unreachable", "credential"):
+
+        def request(slug, ops, service, kind=kind):
+            if ops[0]["op"] == probe:
+                raise transport_failure(kind)
+            return {"_meta": {"rev": 1}}
+
+        monkeypatch.setattr(ledger, "request", request)
+        with ledger.ledger_route.scoped("sw", "http://ledger.example"):
+            checks = join_checks.ledger_checks({"slug": "sw", "agent": "engineer", "checks": {}})
+        assert checks[name] is False
+        assert set(checks["errors"]) == {name}
+        reported[kind] = checks["errors"][name]
+    assert reported["refused"] == {
+        "error": "LedgerRefused",
+        "status": 403,
+        "message": 'ledger sw: server refused: 403 {"error": "write refused"}',
     }
-    assert unreachable["errors"] == {
-        "ledger_write": {
-            "error": "SwarmError",
-            "status": None,
-            "message": "ledger sw: ledger server not answering on http://ledger.example: [Errno 111] Connection refused",
-        }
+    assert reported["unreachable"] == {
+        "error": "SwarmError",
+        "status": None,
+        "message": "ledger sw: ledger server not answering on http://ledger.example: "
+        "<urlopen error [Errno 111] Connection refused>",
+    }
+    assert reported["credential"] == {
+        "error": "Unauthenticated",
+        "status": None,
+        "message": "ledger sw: unauthenticated: the ledger server refused the credential",
+    }
+
+
+def test_hive_credential_status_and_value_stay_out_of_the_message(monkeypatch):
+    from scripts.hive import join_checks
+    from scripts.swarm import ledger_client
+
+    planted = "-".join(("hive", "probe", "value"))
+    monkeypatch.setenv("AGENTIHOOKS_HIVE_LEDGER_CREDENTIAL", planted)
+    ledger = ledger_client._ledger()
+
+    def request(slug, ops, **kwargs):
+        raise ledger.unauthenticated(f"the ledger server refused the hive credential: 401 {planted}")
+
+    monkeypatch.setattr(ledger, "call", request)
+    reported = join_checks.ledger_checks({"slug": "sw", "agent": "engineer", "checks": {}})
+    assert reported["errors"]["ledger_join"] == {
+        "error": "Unauthenticated",
+        "status": 401,
+        "message": "ledger sw: unauthenticated: the ledger server refused the hive credential: 401 "
+        "[REDACTED:AGENTIHOOKS_HIVE_LEDGER_CREDENTIAL]",
     }
 
 

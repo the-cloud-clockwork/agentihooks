@@ -11,7 +11,12 @@ if TYPE_CHECKING:
     from redis import Redis
 
 MESSAGE_LIMIT = 200
-STATUS = re.compile(r"server refused: (\d{3})")
+STATUS = re.compile(r"(?:server refused|credential): (\d{3})")
+CREDENTIAL_ENV = (
+    "AGENTIHOOKS_HIVE_LEDGER_CREDENTIAL",
+    "AGENTIHOOKS_LEDGER_AGENT_TOKEN",
+    "AGENTIHOOKS_CONTROLLER_CREDENTIAL",
+)
 
 
 def checked(probe: Callable[[], object]) -> bool:
@@ -21,16 +26,25 @@ def checked(probe: Callable[[], object]) -> bool:
         return False
 
 
+def scrubbed(text: str) -> str:
+    for name in CREDENTIAL_ENV:
+        if value := os.environ.get(name):
+            text = text.replace(value, f"[REDACTED:{name}]")
+    return " ".join(redact(text, mode="strict").split())[:MESSAGE_LIMIT]
+
+
 def failure(probe: Callable[[], object]) -> dict | None:
     try:
         if probe():
             return None
     except Exception as exc:
+        cause = exc.__cause__
+        named = cause if isinstance(cause, SystemExit) and type(cause) is not SystemExit else exc
         status = STATUS.search(str(exc))
         return {
-            "error": type(exc).__name__,
+            "error": type(named).__name__,
             "status": int(status[1]) if status else None,
-            "message": " ".join(redact(str(exc), mode="strict").split())[:MESSAGE_LIMIT],
+            "message": scrubbed(str(exc)),
         }
     return {"error": "falsy result", "status": None, "message": ""}
 
