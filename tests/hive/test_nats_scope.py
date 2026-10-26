@@ -114,8 +114,9 @@ def test_scoped_claims_refuse_to_grant_every_hive_slot_subject():
         member_claims("member", ("rig",))
 
 
+@pytest.mark.parametrize("legacy", [False, True])
 @pytest.mark.parametrize("kind", ["EVENTS", "DEAD", "QUEUE_eng", "STATE_spoke-work"])
-def test_scoped_credentials_use_their_own_stream_and_consumer(signer, kind):
+def test_scoped_credentials_use_their_own_stream_and_consumer(signer, kind, legacy):
 
     import nats as nats_client
     from nats.js import api
@@ -125,7 +126,9 @@ def test_scoped_credentials_use_their_own_stream_and_consumer(signer, kind):
 
     scoped = replace(signer, member_swarms={"m1": ("rig",)})
     credentials = nats_grant.mint(scoped, "m1")
-    stream = f"AGENTIHOOKS_726967_{kind}"
+    from scripts.events.subjects import stream_name
+
+    stream = f"AGENTIHOOKS_726967_{kind}" if legacy else stream_name("rig", kind)
     subject = "swarm.rig." + kind.lower().replace("_", ".")
 
     async def act(nc):
@@ -212,8 +215,11 @@ def test_scoped_claims_carry_the_canonical_per_resource_policy(signer):
         "STATE_execution-starts",
     )
     expected = {"swarm.rig.>", "slots.rig.m1"}
-    for resource in resources:
-        stream = f"AGENTIHOOKS_726967_{resource}"
+    from scripts.events.subjects import stream_name
+
+    for stream in [
+        name for resource in resources for name in (f"AGENTIHOOKS_726967_{resource}", stream_name("rig", resource))
+    ]:
         expected.update(
             (
                 f"$JS.API.STREAM.INFO.{stream}",

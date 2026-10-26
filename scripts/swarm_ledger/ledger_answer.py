@@ -22,7 +22,7 @@ def refusal(autonomy):
         return ""
     if not autonomy:
         return "answer refused: this ledger has no swarm, so the operator answers questions"
-    return f"answer refused: at {autonomy} autonomy the operator answers questions; raise it with priority add"
+    return f"answer refused: at {autonomy} autonomy the operator answers questions; wait for him to write"
 
 
 def check(op):

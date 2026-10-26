@@ -38,6 +38,12 @@ class Delivery:
     ledger_ca: str | None = None
 
 
+def hive_name(ordinal: int) -> str:
+    if type(ordinal) is not int or ordinal < 1:
+        raise ValueError("a hive needs a positive integer")
+    return f"{NAME_PREFIX}{ordinal:03d}"
+
+
 def name(redis: "Redis", machine: str, assign: bool = True) -> str:
     from redis.exceptions import WatchError
 
@@ -50,12 +56,8 @@ def name(redis: "Redis", machine: str, assign: bool = True) -> str:
                     return named[machine]
                 used = sorted(named.values())
                 found = next(
-                    (
-                        f"{NAME_PREFIX}{ordinal:03d}"
-                        for ordinal, held in enumerate(used, 1)
-                        if held != f"{NAME_PREFIX}{ordinal:03d}"
-                    ),
-                    f"{NAME_PREFIX}{len(used) + 1:03d}",
+                    (hive_name(ordinal) for ordinal, held in enumerate(used, 1) if held != hive_name(ordinal)),
+                    hive_name(len(used) + 1),
                 )
                 if assign:
                     pipe.multi()
