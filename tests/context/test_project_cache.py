@@ -20,7 +20,7 @@ def test_shared_cache_refresh_and_feed_change(monkeypatch, tmp_path):
         assert fork.call_count == 1
         args = fork.call_args.args
     with patch(
-        "hooks.context.project_memory.VaultProjectSource.fetch",
+        "hooks.context.project_memory.KernelProjectSource.fetch",
         return_value=ProjectMemory("alpha", lessons=["alpha lesson"]),
     ) as fetch:
         refresh_project_cache(*args[1:])
@@ -47,7 +47,7 @@ def test_expired_cache_keeps_last_good_on_failure(monkeypatch, tmp_path):
         project_context("one")
     args = fork.call_args.args[1:]
     with patch(
-        "hooks.context.project_memory.VaultProjectSource.fetch", return_value=ProjectMemory("alpha", lessons=["kept"])
+        "hooks.context.project_memory.KernelProjectSource.fetch", return_value=ProjectMemory("alpha", lessons=["kept"])
     ):
         refresh_project_cache(*args)
     monkeypatch.setenv("BRAIN_PROJECT_MEMORY_TTL", "0")
@@ -56,7 +56,7 @@ def test_expired_cache_keeps_last_good_on_failure(monkeypatch, tmp_path):
         assert fork.call_count == 1
     from hooks.context.brain_adapter import BrainSourceUnavailable
 
-    with patch("hooks.context.project_memory.VaultProjectSource.fetch", side_effect=BrainSourceUnavailable("down")):
+    with patch("hooks.context.project_memory.KernelProjectSource.fetch", side_effect=BrainSourceUnavailable("down")):
         refresh_project_cache(*args)
     with patch("hooks._async.fork_and_call"):
         assert "kept" in project_context("one")
@@ -100,7 +100,7 @@ def test_obsolete_worker_cannot_replace_new_feed_cache(monkeypatch, tmp_path):
         project_context("ordered")
         new_args = fork.call_args.args[1:]
     with patch(
-        "hooks.context.project_memory.VaultProjectSource.fetch",
+        "hooks.context.project_memory.KernelProjectSource.fetch",
         side_effect=[ProjectMemory("alpha", lessons=["new"]), ProjectMemory("alpha", lessons=["old"])],
     ) as fetch:
         refresh_project_cache(*new_args)
