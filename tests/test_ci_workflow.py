@@ -1767,6 +1767,56 @@ def test_a_one_part_one_shard_plan_mutates_inside_the_statistics_job():
     assert names.index(mutate["name"]) < names.index(report["name"])
 
 
+def test_every_pull_request_stats_part_restores_one_merged_cache_saved_once_after_all_parts_finish():
+    jobs = _mutation_workflow()["jobs"]
+    skipped = "needs.mutation-plan.outputs.forwarded != 'true'"
+    key = "mutation-test-stats-v2-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}"
+    steps = jobs["mutation-stats"]["steps"]
+    names = [step.get("name") for step in steps]
+    restore = steps[names.index("Restore compatible test stats")]
+    assert restore["uses"] == "actions/cache/restore@v4"
+    assert restore["if"] == skipped
+    assert restore["with"] == {
+        "path": ".mutation-stats-cache",
+        "key": key,
+        "restore-keys": "mutation-test-stats-v2-${{ runner.os }}-",
+    }
+    single = steps[names.index("Save the merged test stats")]
+    assert single["uses"] == "actions/cache/save@v4"
+    assert single["if"] == f"strategy.job-total == 1 && {skipped}"
+    assert single["with"] == {"path": ".mutation-stats-cache", "key": key}
+    part = steps[names.index("Upload this part's test stats cache")]
+    assert part["if"] == f"strategy.job-total != 1 && {skipped}"
+    assert part["uses"] == "actions/upload-artifact@v4"
+    assert part["with"] == {
+        "name": "mutation-test-stats-cache-${{ matrix.part }}",
+        "path": ".mutation-stats-cache/",
+        "include-hidden-files": True,
+        "if-no-files-found": "ignore",
+        "retention-days": 1,
+        "overwrite": True,
+    }
+    collect = names.index("Collect one stats part for every mutation shard")
+    assert names.index(restore["name"]) < collect < names.index(single["name"]) < names.index(part["name"])
+    assert [step for step in steps if step.get("uses", "").startswith("actions/cache/save")] == [single]
+    mutation = jobs["mutation"]["steps"]
+    mutation_names = [step.get("name") for step in mutation]
+    download = mutation[mutation_names.index("Download every part's test stats cache")]
+    assert download["if"] == f"strategy.job-index == 0 && {skipped}"
+    assert download["uses"] == "actions/download-artifact@v4"
+    assert download["with"] == {
+        "pattern": "mutation-test-stats-cache-*",
+        "path": ".mutation-stats-cache",
+        "merge-multiple": True,
+    }
+    merged = mutation[mutation_names.index("Save the merged test stats")]
+    assert merged["uses"] == "actions/cache/save@v4"
+    assert merged["if"] == f"strategy.job-index == 0 && {skipped} && hashFiles('.mutation-stats-cache/**') != ''"
+    assert merged["with"] == {"path": ".mutation-stats-cache", "key": key}
+    assert mutation_names.index(download["name"]) < mutation_names.index(merged["name"])
+    assert "matrix.part" not in str([restore, single, merged])
+
+
 PLANNER_PACKAGES = {"mutmut": "mutmut", "pytest": "pytest", "pyyaml": "yaml", "tomlkit": "tomlkit"}
 
 
@@ -1874,6 +1924,10 @@ def test_pull_request_mutation_reuses_the_preflight_of_its_exact_head_from_the_p
         f"github.event_name == 'workflow_dispatch' && {skipped}",
         f"always() && {skipped}",
         f"{skipped} && needs.mutation-plan.outputs.selection == 'true'",
+        f"strategy.job-total == 1 && {skipped}",
+        f"strategy.job-total != 1 && {skipped}",
+        f"strategy.job-index == 0 && {skipped}",
+        f"strategy.job-index == 0 && {skipped} && hashFiles('.mutation-stats-cache/**') != ''",
         f"needs.mutation-plan.outputs.shards == '[0]' && needs.mutation-plan.outputs.stats_parts == '[0]' && {skipped}",
         "always() && steps.mutate.outcome != 'skipped'",
     )
