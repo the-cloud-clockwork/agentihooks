@@ -22,9 +22,7 @@ MEMORY = Path("/dev/shm")
 
 @contextmanager
 def scratch() -> Iterator[tuple[Path, Path]]:
-    """The fixtures fsync thousands of times; on tmpfs that never waits on runner disk latency."""
-    where = MEMORY if MEMORY.is_dir() else None
-    with tempfile.TemporaryDirectory(dir=where) as one, tempfile.TemporaryDirectory(dir=where) as two:
+    with tempfile.TemporaryDirectory(dir=MEMORY) as one, tempfile.TemporaryDirectory(dir=MEMORY) as two:
         yield Path(one), Path(two)
 
 
