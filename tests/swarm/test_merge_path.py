@@ -447,11 +447,11 @@ def test_head_pushes_reads_a_missing_head_commit_as_no_dev_merge():
 def test_main_writes_the_merge_path_with_head_pushes_from_a_lookback(monkeypatch, tmp_path, capsys):
     found = {"tests_runs": {}, "removals": {}, "head_failure_rate": None}
     seen = []
-    monkeypatch.setattr(merge_path, "collect", lambda repo_dir, window: ("o/r", dict(found, window=window)))
-    monkeypatch.setattr(merge_path, "render", lambda repo, got: f"line {repo}")
+    monkeypatch.setattr(merge_path, "collect", lambda repo_dir, window: (f"o/r{repo_dir}", dict(found, window=window)))
+    monkeypatch.setattr(merge_path, "render", lambda repo, got: f"line {repo} {len(got['head_pushes'])}")
 
     def listed(repo_dir, event, window, run_fn):
-        seen.append((repo_dir, event, window))
+        seen.append((repo_dir, event, window, run_fn))
         return [head(1, "a", "success", 60)]
 
     monkeypatch.setattr(merge_path, "read_runs", listed)
@@ -460,11 +460,11 @@ def test_main_writes_the_merge_path_with_head_pushes_from_a_lookback(monkeypatch
     assert merge_path.main(["--hours", "4", "--until", stamp(4 * 3600), "--out", str(out)]) == 0
 
     written = json.loads(out.read_text())
-    assert written["repo"] == "o/r"
+    assert written["repo"] == "o/r."
     assert written["window"] == [SINCE, UNTIL]
     assert written["head_pushes"] == {"first push": {"runs": 1, "red": 0}}
-    assert seen == [(".", "pull_request", (SINCE - 6 * 3600, UNTIL))]
-    assert capsys.readouterr().out.splitlines() == ["line o/r", '{"first push": {"runs": 1, "red": 0}}']
+    assert seen == [(".", "pull_request", (SINCE - 6 * 3600, UNTIL), subprocess.run)]
+    assert capsys.readouterr().out.splitlines() == ["line o/r. 1", '{"first push": {"runs": 1, "red": 0}}']
 
 
 def test_main_reads_the_last_day_into_the_ci_minutes_file_by_default(monkeypatch, tmp_path):

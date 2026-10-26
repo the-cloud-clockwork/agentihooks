@@ -235,7 +235,7 @@ def collect(repo_dir: str, window: tuple[float, float], run: Callable = subproce
 
 
 def _cause(run: dict, before: dict | None) -> str:
-    if DEV_MERGE.match((run.get("head_commit") or {}).get("message") or ""):
+    if DEV_MERGE.match(str((run.get("head_commit") or {}).get("message"))):
         return "dev merge"
     if before is None:
         return "first push"
@@ -267,7 +267,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--until")
     parser.add_argument("--out", type=Path, default=Path("ci-minutes.json"))
     args = parser.parse_args(argv)
-    until_s = _seconds(args.until) if args.until else datetime.now(UTC).timestamp()
+    until_s = _seconds(args.until) if args.until else time.time()
     window = (until_s - args.hours * 3600, until_s)
     repo, found = collect(".", window)
     history = read_runs(".", "pull_request", (window[0] - LOOKBACK_S, until_s), subprocess.run)
