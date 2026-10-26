@@ -28,6 +28,36 @@ docker run -d --name "$cluster-registry" -p 127.0.0.1:5001:5000 mirror.gcr.io/li
   for warm in ghcr.io/the-cloud-clockwork/agentihooks-worker:dev mirror.gcr.io/library/redis:7-alpine; do
     docker exec "$cluster-control-plane" crictl pull "$warm" || echo "the node could not pre-pull $warm; the proof loads or pulls it later"
   done
+  openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj /CN=hive-join -addext subjectAltName=DNS:hive-join \
+    -keyout "$out/key.pem" -out "$out/cert.pem" 2>/dev/null
+  kubectl create secret generic hive-tls --from-file=key.pem="$out/key.pem" --from-file=cert.pem="$out/cert.pem" >/dev/null
+  kubectl apply -f - <<'EOF'
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hive-redis
+spec:
+  selector:
+    matchLabels: {proof: redis}
+  template:
+    metadata:
+      labels: {proof: redis}
+    spec:
+      containers:
+        - name: redis
+          image: mirror.gcr.io/library/redis:7-alpine
+          readinessProbe:
+            tcpSocket: {port: 6379}
+            periodSeconds: 1
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: hive-redis
+spec:
+  selector: {proof: redis}
+  ports: [{port: 6379}]
+EOF
 } > "$out/cluster.log" 2>&1 &
 cluster_pid=$!
 build_started="$SECONDS"
@@ -60,36 +90,7 @@ in_pod init 'agentihooks init --profile engineer && grep -qx "<!-- profile: engi
 init_pid=$!
 in_pod tools 'claude --version && codex --version && herdr --version && git --version && bash /usr/local/bin/wt.sh root && node --version && npm --version && uv --version && gh --version && ruff --version && test "$(getent passwd worker | cut -d: -f7)" = /bin/bash && test "$(npm config get prefix)" = "$HOME/.local" && [[ ":$PATH:" == *":$HOME/.local/bin:"* ]] && agentihooks hive --help' &
 tools_pid=$!
-openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj /CN=hive-join -addext subjectAltName=DNS:hive-join \
-  -keyout "$out/key.pem" -out "$out/cert.pem" 2>/dev/null
-kubectl create secret generic hive-tls --from-file=key.pem="$out/key.pem" --from-file=cert.pem="$out/cert.pem" >/dev/null
 kubectl apply -f - <<EOF
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: hive-redis
-spec:
-  selector:
-    matchLabels: {proof: redis}
-  template:
-    metadata:
-      labels: {proof: redis}
-    spec:
-      containers:
-        - name: redis
-          image: mirror.gcr.io/library/redis:7-alpine
-          readinessProbe:
-            tcpSocket: {port: 6379}
-            periodSeconds: 1
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: hive-redis
-spec:
-  selector: {proof: redis}
-  ports: [{port: 6379}]
----
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -153,6 +154,9 @@ from scripts.hive.orders import CommandOrder, Orders
 from scripts.swarm.store import redis_client
 
 redis, hive = redis_client(), os.environ['HIVE']
+orders = Orders(redis)
+order = CommandOrder('scratch-reap', 'reap', name='scratch-absent')
+orders.command(hive, order)
 record = None
 for _ in range(60):
     record = registry.show(redis, hive)
@@ -163,9 +167,6 @@ assert record and registry.live(record, int(time.time() * 1000)), 'pod did not r
 assert record['ui'] == 'no' and record['ephemeral'] == 'yes'
 assert record['excluded'] == ['master'] and record['max_agents'] == 1 and 'roles' not in record
 print('pod registered a live worker hive with its excluded list and capacity')
-orders = Orders(redis)
-order = CommandOrder('scratch-reap', 'reap', name='scratch-absent')
-orders.command(hive, order)
 ack = None
 for _ in range(60):
     ack = orders.command(hive, order)
