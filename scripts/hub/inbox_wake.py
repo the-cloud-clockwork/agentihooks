@@ -59,6 +59,9 @@ class InboxWake:
             for item_id in members[:32]:
                 if not guard():
                     return
+                if not inbox.redis.exists(inbox.key("item", item_id)):
+                    inbox.redis.srem(key, item_id)
+                    continue
                 item = inbox.get(item_id)
                 swarm = item.address.partition("@")[2] if is_seat(item.address) else inbox.names.slug_of(item.address)
                 if swarm:
