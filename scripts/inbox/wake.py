@@ -28,6 +28,7 @@ WAKE_TEXT = (
     "msg reply or the swarm commands, never as text in this terminal, and close the rest."
 )
 WOKEN, TO_MASTER, TO_OPERATOR = "woken", "escalated_master", "escalated_operator"
+PASSED = "passed_master"
 
 
 def window_ms(environ):
@@ -50,9 +51,10 @@ def typed_wake(inbox, agent):
     )
 
 
-def decide(item, pane, history, now_ms, window, slug, since=0):
+def decide(item, pane, history, now_ms, window, slug, since=0, frozen=False):
     """pane is the receiver's herdr status, None when it sits outside herdr; the window clock skips the swarm's
-    outage time since the item's last step, and starts no earlier than since. since None holds the item."""
+    outage time since the item's last step, and starts no earlier than since. since None holds the item. frozen is a
+    receiving master waiting on an input prompt while another master is live."""
     if item.state != "pending" or item.fyi or since is None:
         return None
     steps = [e.get("event") for e in history]
@@ -60,6 +62,8 @@ def decide(item, pane, history, now_ms, window, slug, since=0):
         return None
     last = max(since, *(e["at"] for e in history))
     due = now_ms - last - outage.paused_ms(slug, last, now_ms) >= window
+    if frozen:
+        return PASSED if due else None
     if TO_MASTER in steps:
         return TO_OPERATOR if due else None
     wakes = steps.count(WOKEN)
@@ -144,7 +148,7 @@ def _wake_world(inbox, slug, agents, herdr, ledger, clock: _Clock, items):
     boss = next((a for a in agents if a.lane == MASTER), None)
     master = (boss.seat or boss.name) if boss else ""
     marks = SeenMarks(inbox.redis)
-    statuses, prompted = {}, set()
+    statuses, prompted, spares = {}, set(), {}
     actions = []
     reads = _wake_inputs(inbox, slug, items, names, config, marks)
     doc = None
@@ -163,8 +167,13 @@ def _wake_world(inbox, slug, agents, herdr, ledger, clock: _Clock, items):
         if agent and agent.name not in statuses:
             statuses[agent.name] = _pane_state(inbox.redis, slug, herdr, agent, now_ms, quiet)
         since = reads.clocks[item.address]
-        step = decide(item, statuses.get(receiver), reads.histories[item.id], now_ms, window, slug, since)
-        if step == WOKEN and _still_held(inbox, held) and _wake(herdr, agent, prompted):
+        if receiver not in spares:
+            spares[receiver] = _spare_master(inbox, slug, agents, receiver)
+        frozen = bool(spares[receiver])
+        step = decide(item, statuses.get(receiver), reads.histories[item.id], now_ms, window, slug, since, frozen)
+        if step == PASSED:
+            actions += _pass(inbox, item, receiver, spares[receiver])
+        elif step == WOKEN and _still_held(inbox, held) and _wake(herdr, agent, prompted):
             if inbox.note(item.id, WOKEN, BY, f"prompted {receiver} to read its inbox", now_ms, held):
                 actions.append(f"woke {receiver} for message {item.id}")
         elif step == TO_MASTER and master and receiver != boss.name and not _sent_from(inbox, item, boss, master):
@@ -178,6 +187,22 @@ def _wake_world(inbox, slug, agents, herdr, ledger, clock: _Clock, items):
             inbox.note(item.id, TO_OPERATOR, BY, "shown to the operator on the ledger page", now_ms)
             actions.append(f"raised message {item.id} to the operator")
     return actions
+
+
+def _spare_master(inbox, slug, agents, receiver):
+    """A live master seat to take the mail of receiver, a master waiting on an input prompt; '' for anyone else."""
+    if not any(a.name == receiver and a.lane == MASTER and a.input_prompt for a in agents):
+        return ""
+    from scripts.inbox.pool import live_masters
+
+    return next(iter(live_masters(inbox.redis, slug, agents)), "")
+
+
+def _pass(inbox, item, receiver, seat):
+    reason = f"{receiver} waits on an input prompt; passed to {seat}, a live master"
+    if inbox.redirect(item.id, BY, seat, reason, expected_receiver=None) is None:
+        return []
+    return [f"passed message {item.id} from {receiver} to {seat}"]
 
 
 def wake_now(inbox, slug, agents, herdr, now_ms, window, quiet=DEFAULT_QUIET_S * 1000):
