@@ -246,8 +246,9 @@ def test_a_response_drains_an_unread_body_within_its_wait():
     handler.rfile = request_body.Body(io.BytesIO(b"{}"), 2)
     handler.connection = Connection()
 
-    handler.send_response(403)
+    handler.send_response(403, "Refused here")
 
+    assert handler._headers_buffer[0] == b"HTTP/1.1 403 Refused here\r\n"
     assert handler.rfile.left == 0
     assert handler.connection.timeouts == [2, None]
     assert b"Connection: close\r\n" not in b"".join(handler._headers_buffer)
