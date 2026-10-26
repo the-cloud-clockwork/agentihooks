@@ -969,3 +969,29 @@ def test_mutation_lane_cli_requires_capacity_width_and_run(missing, monkeypatch)
     with pytest.raises(SystemExit) as error:
         main()
     assert error.value.code == 2
+
+
+def test_the_importer_scan_maps_every_reach_key_of_every_tracked_file_to_that_file(tmp_path):
+    sources = {
+        "scripts/b.py": "VALUE = 1\n",
+        "scripts/a.py": "from scripts import b\n",
+        "tests/test_a.py": "import scripts.a\nPATH = 'scripts/b.py'\n",
+        "docs/skip.py": "import scripts.b\n",
+    }
+    for path, source in sources.items():
+        (tmp_path / path).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / path).write_text(source)
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    subprocess.run(["git", "-C", str(tmp_path), "add", "."], check=True)
+    plan._importers.cache_clear()
+    found = plan._importers(tmp_path)
+    plan._importers.cache_clear()
+    tracked = ["scripts/a.py", "scripts/b.py", "tests/test_a.py"]
+    expected = {"*": set(tracked)}
+    for path in tracked:
+        assert plan._path_keys(path, tmp_path) == plan._reach_keys(path, sources[path])
+        for key in plan._reach_keys(path, sources[path]):
+            expected.setdefault(key, set()).add(path)
+    assert found == expected
+    assert found["scripts.b"] == {"scripts/a.py"}
+    assert found["b.py"] == {"tests/test_a.py"}
