@@ -35,8 +35,8 @@
     "A project grant narrowed on a caller is enforced at read time and emits no tombstone."
   ],
   "compatibility": "search, record range expansion and the compatibility aliases keep their accepted SV2-IDX-05 behaviour of refusing sessions that are not retained; set_state keeps its signature with an optional clock",
-  "pull_request": "",
+  "pull_request": "https://github.com/the-cloud-clockwork/agentihooks/pull/7438",
   "rollback_rehearsal": "C rewound every consumer cursor and replayed all tombstones after a regrant: reads stayed refused, the dropped pack and redacted lesson stayed so, and nothing already converged changed",
   "status": "fixture_verified",
-  "tested_commit": "0ebe65cbea48e09110ba15b331d6bf40c32b68fe"
+  "tested_commit": "6e05841c54ed8f08ee60c84e7aab71a944c4576b"
 }
