@@ -12,7 +12,7 @@ from . import artifact_files, heap, hierarchy, media_files, outbox, refresh
 from .entry import Entry
 from .events import append_events, read_events, trim_events, write_events
 from .fragments import document
-from .rows import TABLES, assemble, diff, encode, flatten, read_rows, write_rows
+from .rows import TABLES, assemble, diff, encode, flatten, load, read_rows, write_rows
 from .seeds import read_seeds, sync_values, write_seeds
 
 SCHEMA = """
@@ -471,7 +471,7 @@ class SQLiteLedgerRepository:
             state = None if cached is None else self._refreshed(connection, slug, cached, row[0])
             whole = state is None
             if whole:
-                state = assemble(read_rows(connection, slug))
+                state = load(connection, slug)
             if "events" in state["_meta"]:
                 state["_meta"] = {**state["_meta"], "events": read_events(connection, slug)}
             fragments = document(state, None if whole else cached.fragments)
