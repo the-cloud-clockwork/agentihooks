@@ -237,7 +237,8 @@ def test_an_upload_without_a_drill_is_not_accepted(world):
     assert world.registry.accepted(set_id) is False
     assert world.registry.preserved() is None
     assert world.registry.retention_allowed() is False
-    assert world.registry.status()[backup.METRIC] == {"uploaded": 1, "verified": 0, "partial": 0, "failed": 0}
+    counts = {"uploaded": 1, "verified": 0, "partial": 0, "failed": 0}
+    assert world.registry.status() == {backup.METRIC: counts, backup.RETENTION: False}
 
 
 def test_record_replays_without_resetting_a_drilled_set(world):
@@ -267,6 +268,7 @@ def test_acceptance_and_retention_follow_the_drill_status(world, prepare, status
     assert world.registry.drill(world.backup, set_id, 1, world.plan())["status"] == status
     assert world.registry.accepted(set_id) is accepted
     assert world.registry.retention_allowed() is retention
+    assert world.registry.status()[backup.RETENTION] is retention
     assert (world.registry.preserved() == set_id) is accepted
 
 

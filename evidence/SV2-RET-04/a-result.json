@@ -11,7 +11,8 @@
       "partial": 1,
       "uploaded": 0,
       "verified": 0
-    }
+    },
+    "retention_allowed": false
   },
   "preserved_is_this_set": true,
   "registry_matches_report": true,

@@ -31,7 +31,8 @@
         "partial": 0,
         "uploaded": 1,
         "verified": 0
-      }
+      },
+      "retention_allowed": false
     },
     "preserved": null,
     "retention_allowed": false

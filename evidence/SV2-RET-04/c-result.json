@@ -31,7 +31,8 @@
         "partial": 0,
         "uploaded": 1,
         "verified": 0
-      }
+      },
+      "retention_allowed": false
     },
     "newer_unverified_set": {
       "newer_set_accepted": false,

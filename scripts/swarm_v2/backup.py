@@ -40,6 +40,7 @@ UNKNOWN_SET = "the backup set is not recorded"
 STALE_DRILL = "a newer restore drill result is already recorded for this backup set; nothing changed"
 CONFLICTING_DRILL = "this drill attempt already recorded a different result; use a new attempt number"
 TIMING = "recovery_time_seconds"
+RETENTION = "retention_allowed"
 
 
 class Refused(Exception):
@@ -346,4 +347,4 @@ class Registry:
         counts = dict.fromkeys(STATUSES, 0)
         for entry in self._load().values():
             counts[entry["status"]] += 1
-        return {METRIC: counts}
+        return {METRIC: counts, RETENTION: self.retention_allowed()}
