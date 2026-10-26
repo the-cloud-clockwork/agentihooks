@@ -1,0 +1,44 @@
+{
+  "cases": [
+    "A",
+    "B",
+    "C"
+  ],
+  "classes": "authoritative: objects named by the archive manifest or a checkpoint reference, never candidates; rebuildable: retired index generations, rebuilt from the session catalog by the index worker",
+  "compatibility": "objects written before reservations existed have no reservation and stay untouched; the archive acknowledge path, the index worker and the backup capture are unchanged",
+  "evidence_class": "mocked: a SQLite catalog file and a local content addressed object folder stand in for the central database and the archive bucket; a deterministic hash embedder builds vectors, a fake clock drives expiry and grace, and a patched unlink stands in for a collector crash; no Pod, bucket or database runs",
+  "fixture_inputs": {
+    "active_index": "two embedding generations over the committed session, the newer one active and the older one retired",
+    "foreign_lookalike_object": "a digest named object in a managed shard with no reservation, a stray root file and another domain's upload",
+    "newly_referenced_checkpoint": "an abandoned upload that a task checkpoint references after collection claimed it",
+    "uncommitted_upload": "an upload whose reservation expired past grace without an archive entry, beside one whose bytes never landed"
+  },
+  "interfaces": [
+    "scripts.swarm_v2.garbage_collection.Reservations.reserve records an upload attempt with its digest and deadline before the bytes land, replays an identical reservation and refuses a conflicting reuse or a digest under collection",
+    "scripts.swarm_v2.garbage_collection.Reservations.commit releases the reservation and acknowledges the archive entry, which verifies the bytes; an unknown or collected upload, another digest or another domain is refused before any write",
+    "scripts.swarm_v2.garbage_collection.retire marks a registered non active index generation retired and keeps the first retirement time on a replay",
+    "scripts.swarm_v2.garbage_collection.collect deletes an object only with an expired reservation past grace held by the grant's domain alone, no archive manifest or checkpoint reference and bytes that hash to its name; it drops a retired generation past grace that is not active and took no work after retirement; with destructive off it is a read only inventory",
+    "python -m scripts.swarm_v2.garbage_collection inventory|collect|retire for operators"
+  ],
+  "metrics": "garbage_collection_bytes counts reclaimed object bytes plus dropped vector text bytes; unsafe_delete_rejections counts unowned objects (no reservation, another domain's reservation, a name outside the managed shard layout) and objects whose bytes do not hash to their reserved name",
+  "mocked": true,
+  "outcomes": {
+    "accepted": "a reservation row or a retirement row in the catalog",
+    "committed": "deletions recorded by collect with committed true; inventory reports committed false",
+    "externally_verified": "none; no deployed catalog or bucket was collected",
+    "observed": "case outputs in the a, b and c result files from the focused fixture run"
+  },
+  "package": "SV2-RET-05",
+  "pull_request": null,
+  "remaining_limitations": [
+    "No live upload path reserves yet; the collector and spool do not write archive objects to this store, so collect reclaims only reservation backed uploads made through Reservations.",
+    "Checkpoint references come from a caller supplied set; there is no persisted checkpoint reference index in the catalog.",
+    "A reference added outside the catalog after collect's last reference read and before its unlink is not fenced; collect rereads references immediately before each unlink to narrow that window.",
+    "No scheduler runs collect; an operator or job invokes it.",
+    "The grant principal is not checked against an operator role; the grant corpus scopes ownership."
+  ],
+  "rollback_rehearsal": "B ran collect with destructive off and inside grace; the catalog, reservation and retirement rows, object files and vectors were unchanged, then a destructive collect reclaimed the same set the inventory listed",
+  "status": "fixture_verified",
+  "supported_versions": "session catalog schema with archive_manifest and the index worker tables; upload_reservation and index_retirement tables are created on first use",
+  "tested_commit": "b59d2e5d2b782e49297950716bb02a741cb0b085"
+}

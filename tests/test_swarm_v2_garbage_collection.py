@@ -232,16 +232,14 @@ def test_a_claim_rebound_between_claim_and_delete_keeps_the_bytes(world):
 
 def test_a_reservation_renewed_before_the_claim_keeps_the_object(world):
     target = world.uploads["abandoned"]
-    owner = gc._owner
-    calls = []
+    intact = gc._intact
 
-    def renewing(catalog, plan, digest):
-        calls.append(digest)
-        if digest == target and calls.count(digest) == 2:
+    def renewing(path, digest):
+        if digest == target:
             world.reserve("renewed", target, "attempt-new", world.clock["live_until"])
-        return owner(catalog, plan, digest)
+        return intact(path, digest)
 
-    with mock.patch.object(gc, "_owner", renewing):
+    with mock.patch.object(gc, "_intact", renewing):
         report = world.collect()
     assert target in report["protected"]["live"]
     assert world.store._path(target).exists()
