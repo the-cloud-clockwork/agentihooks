@@ -46,7 +46,7 @@ def test_chart_hub_offer_is_acknowledged_by_a_bound_scoped_spoke(signer, rig, mo
         own = hub.for_swarm("rig")
         audit = own.events.consumer("audit", "swarm.rig.execution.started")
         config = replace(rig.config, lane=lane, policy=hub._config.queue)
-        spoke = Spoke(config, client, rig.runtime, rig.tasks, reading)
+        spoke = Spoke(config, client, rig.runtime, rig.tasks, reading, view=lambda: view)
         assert spoke.poll(1000) == "started"
         rig.runtime.spawn.assert_called_once()
         [started] = audit.fetch(1, 1000)
