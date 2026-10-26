@@ -596,6 +596,8 @@ def test_a_module_edit_that_only_binds_new_names_keeps_the_selection_narrow(
         ("H = {'a'}\n", "H = {'b', 'a'}\n", True),
         ("H = ['a']\n", "H = ['a']\nH = ['a', 'b']\n", False),
         ("H = {'a': f}\nX = 1\n", "X = 1\nH = {'a': f, 'b': g}\n", False),
+        ("H = {'a': f}\nG = {'b': g}\n", "G = {'b': g, 'c': h}\nH = {'a': f}\n", False),
+        ("X = h\n", "X = h\n\n\ndef h():\n    pass\n", False),
     ],
 )
 def test_only_statements_binding_unknown_names_count_as_new(old, new, expected):
@@ -606,6 +608,8 @@ def test_only_statements_binding_unknown_names_count_as_new(old, new, expected):
     ("old", "new", "expected"),
     [
         ("H = {'a': f}\n", "H = {'a': f, 'b': g}\n", {"H": True}),
+        ("H = {'a': f, 'b': g}\n", "H = {'a': f, 'b': g, 'c': h}\n", {"H": True}),
+        ("H = ['a', 'b']\n", "H = ['a', 'b', 'c']\n", {"H": False}),
         ("H = G = {'a': f}\n", "H = G = {'a': f, 'b': g}\n", {"H": True, "G": True}),
         ("H = ['a']\nX = 1\n", "H = ['a', 'b']\nX = 1\n", {"H": False}),
         ("H = {'a': f}\n", "H = {'a': g}\n", {}),
@@ -642,6 +646,7 @@ def test_only_unkeyed_reads_of_a_dict_table_reach_its_new_entries():
         ("X = 1\n", "class A:\n    def h(self):\n        pass\n", set()),
         (None, "def h():\n    pass\n", set()),
         ("def f(:\n", "def h():\n    pass\n", set()),
+        ("def f(:\n", "def h():\n    pass\n\n\nH = [h]\n", set()),
     ],
 )
 def test_new_functions_are_undecorated_top_level_functions_the_old_source_never_named(old, new, expected):
@@ -661,6 +666,7 @@ TABLE_SOURCE = (
     ("mode", "mention", "expected"),
     [
         ("handler", False, ["tests/test_core.py::TestSpawn::test_child"]),
+        ("nested", False, ["tests/test_core.py::TestSpawn::test_child"]),
         ("entry", False, ["tests/test_core.py::TestSpawn::test_child", "tests/test_core.py::test_g"]),
         (
             "handler",
@@ -701,6 +707,12 @@ def test_a_new_handler_table_entry_selects_only_the_tests_that_reach_it(tmp_path
             'HANDLERS = {"f": f}', 'def h(value):\n    return value * 2\n\n\nHANDLERS = {"f": f, "h": h}'
         )
         changed = "    return value * 2"
+    elif mode == "nested":
+        edited = TABLE_SOURCE.replace(
+            'HANDLERS = {"f": f}',
+            'def h(value):\n    def inner():\n        return value * 2\n\n    return inner()\n\n\nHANDLERS = {"f": f, "h": h}',
+        )
+        changed = "        return value * 2"
     else:
         edited = TABLE_SOURCE.replace('{"f": f}', '{"f": f, "g": g}').replace("value - 1", "value - 2")
         changed = "    return value - 2"

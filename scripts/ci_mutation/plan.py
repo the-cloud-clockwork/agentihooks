@@ -280,9 +280,8 @@ def _adds_entries(old: ast.expr, new: ast.expr) -> bool:
     return isinstance(old, ast.Set) or list(map(_entry, after[: len(kept)])) == kept
 
 
-def _entry(entry: tuple[ast.expr | None, ast.expr]) -> tuple[str, str]:
-    key, value = entry
-    return ast.dump(key) if key else "", ast.dump(value)
+def _entry(entry: tuple[ast.expr | None, ast.expr]) -> tuple[str, ...]:
+    return tuple(map(ast.dump, filter(None, entry)))
 
 
 def _bound(alias: ast.alias) -> str:
