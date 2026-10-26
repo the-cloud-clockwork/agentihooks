@@ -928,6 +928,41 @@ def test_stats_cache_recollects_a_record_that_does_not_match_its_current_inputs(
     assert calls == [files, files, files]
 
 
+def test_stats_cache_recollects_a_truncated_record_and_saves_only_valid_records(tmp_path):
+    import json
+
+    from scripts.ci_mutation.stats_cache import collect_cached_stats
+
+    root = tmp_path / "repo"
+    files = ["tests/test_a.py", "tests/test_b.py"]
+    _repository(root, {path: "def test_sample():\n    pass\n" for path in files})
+    calls = []
+
+    def collect(chosen):
+        calls.append(chosen)
+        return [
+            {
+                "status": 0,
+                "tests": {"tests.x_sample": [f"{path}::test_sample" for path in chosen]},
+                "durations": {f"{path}::test_sample": 1 for path in chosen},
+                "cpu": 1,
+            }
+        ]
+
+    cache = tmp_path / "cache"
+    collect_cached_stats(root, cache, {}, files, [], collect)
+    for path in cache.glob("*.json"):
+        path.write_text(path.read_text()[:20])
+    part = collect_cached_stats(root, cache, {}, files[:1], [], collect)
+    assert calls == [files, files[:1]]
+    assert {test for result in part for test in result["durations"]} == {"tests/test_a.py::test_sample"}
+    records = [json.loads(path.read_text()) for path in cache.glob("*.json")]
+    assert len(records) == 1
+    assert records[0]["status"] == 0
+    assert collect_cached_stats(root, cache, {}, files[:1], [], collect) == part
+    assert calls == [files, files[:1]]
+
+
 def test_real_fixture_imports_do_not_invalidate_measured_unrelated_test_stats(tmp_path):
     from scripts.ci_mutation.stats_cache import collect_cached_stats
 
