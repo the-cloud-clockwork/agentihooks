@@ -195,3 +195,11 @@ def test_task_rows_read_stored_rows_when_the_cached_entry_is_from_another_genera
     rows = reader.task_rows("rows")
     assert rows[0] == generation
     assert rows[2] == tasks and rows[2] is not ahead
+
+
+def test_task_rows_of_a_cached_ledger_without_tasks_are_an_empty_list(tmp_path):
+    from scripts.swarm_ledger.repository.sqlite import SQLiteLedgerRepository
+
+    reader = SQLiteLedgerRepository(stored(tmp_path, []))
+    reader.current("rows")
+    assert reader.task_rows("rows")[2] == []
