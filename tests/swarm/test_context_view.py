@@ -169,6 +169,23 @@ def test_a_source_revoked_before_any_write_expands_as_revoked(store):
     assert (refused.value.status, refused.value.reason, str(refused.value)) == (410, "revoked", "withdrawn")
 
 
+def test_a_personal_pack_written_around_record_shows_every_item_as_private(store):
+    personal = {**FIXTURE["pack"], "brain": "personal:operator"}
+    personal["items"] = [{**item, "brain": "personal:operator"} for item in FIXTURE["pack"]["items"]]
+    items = cv.card("p1", personal, {}, NOW)["items"]
+    assert {(item["ref"], item["summary"], item["unavailable"]) for item in items} == {("", "", cv.OUTSIDE)}
+
+
+@pytest.mark.parametrize("value", ["off", "OFF", " false ", "0", "no"])
+def test_every_usual_false_value_turns_inspection_off(value):
+    assert cv.enabled({cv.SWITCH: value}) is False
+
+
+@pytest.mark.parametrize("value", ["", "on", "1", "true"])
+def test_other_values_keep_inspection_on(value):
+    assert cv.enabled({cv.SWITCH: value}) is True
+
+
 def test_the_ledger_api_serves_evidence_and_maps_refusals(store):
     services = SimpleNamespace(swarm=SimpleNamespace(store=lambda: store))
     path = f"swarm/context/{TASK}/arc:merge-queue"

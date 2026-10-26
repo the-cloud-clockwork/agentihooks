@@ -13,6 +13,7 @@ FAILURES = "context-expand-failures"
 METRIC = "ledger_evidence_expand_failures"
 SWITCH = "AGENTIHOOKS_CONTEXT_INSPECTION"
 SWARM_BRAIN = "swarm:"
+OFF_VALUES = ("off", "false", "0", "no")
 TRUST = {"archive": "transcript evidence", "synthesized": "brain synthesis", "inferred": "inferred intent"}
 FRESH, EXPIRED, NO_RECEIPT = "fresh", "expired", "no receipt"
 SUPERSEDED, REVOKED = "superseded", "revoked"
@@ -30,7 +31,7 @@ class Refused(Exception):
 
 
 def enabled(environ: Mapping[str, str]) -> bool:
-    return environ.get(SWITCH) != "off"
+    return environ.get(SWITCH, "").strip().lower() not in OFF_VALUES
 
 
 def record(store: RedisStore, slug: str, task: str, pack: dict) -> None:
@@ -89,7 +90,7 @@ def _labels(item: dict) -> list[str]:
     return labels
 
 
-def item_view(item: dict, brain: str, held: dict | None) -> dict:
+def item_view(item: dict, brain: str | None, held: dict | None) -> dict:
     if item["brain"] != brain:
         return {
             "ref": "",
@@ -107,6 +108,7 @@ def item_view(item: dict, brain: str, held: dict | None) -> dict:
 def card(task: str, pack: dict, evidence: dict[str, str], now_ms: int) -> dict:
     receipt = pack["receipt"]
     held = {ref: json.loads(raw) for ref, raw in evidence.items()}
+    scope = pack["brain"] if pack["brain"].startswith(SWARM_BRAIN) else None
     return {
         "task": task,
         "brain": pack["brain"],
@@ -114,7 +116,7 @@ def card(task: str, pack: dict, evidence: dict[str, str], now_ms: int) -> dict:
         "receipt": receipt["receipt_id"] if receipt else "",
         "receipt_state": freshness(receipt, now_ms),
         "delivery": [f"{adapter} {outcome}" for adapter, outcome in sorted(pack["delivery"].items())],
-        "items": [item_view(item, pack["brain"], held.get(item["ref"])) for item in pack["items"]],
+        "items": [item_view(item, scope, held.get(item["ref"])) for item in pack["items"]],
         "omitted": len(pack["omitted"]),
     }
 
