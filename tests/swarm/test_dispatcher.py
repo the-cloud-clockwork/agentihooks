@@ -774,7 +774,7 @@ def test_the_critical_chain_counts_only_work_no_focus_holds_unless_the_fix_phase
         task("w", depends_on=["c"]),
     ]
     phases = [{"id": "p1", "depends_on": []}, {"id": "p2", "depends_on": []}]
-    assert dispatcher.guarded(doc(tasks, phases=phases, freezes=FOCUS), "") == {"c", "t"}
+    assert dispatcher.guarded(doc(tasks, phases=phases, freezes=FOCUS), "") == {"t"}
 
 
 def test_the_doctor_fix_phase_reaches_the_guard_in_the_claim_key_and_the_chain_report(store, home, shipped):

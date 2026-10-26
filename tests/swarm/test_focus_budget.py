@@ -104,6 +104,26 @@ def test_refused_focused_tasks_do_not_hide_placeable_successors():
     assert selected == [hot, plain]
 
 
+def test_existing_normal_agents_support_new_focus_without_new_normal_work():
+    from scripts.swarm import focus_budget
+
+    normal = [work(f"running{i}", state="claimed") for i in range(4)]
+    hot = [work(f"hot{i}", hot=True) for i in range(10)]
+    assert focus_budget.select(document(normal + hot), hot, "eng", 10, 50) == hot[:4]
+
+
+def test_unresolved_profiles_do_not_count_as_running_normal_work():
+    from scripts.swarm import focus_budget, profile_first
+
+    hot, plain = work("hot", hot=True), work("plain")
+
+    def place(tasks, room):
+        return [{**task, profile_first.UNRESOLVED: "unknown"} if task == plain else task for task in tasks[:room]], []
+
+    selected, _ = focus_budget.place(document([hot, plain]), [hot, plain], "eng", 10, 50, [], place)
+    assert selected == [{**plain, profile_first.UNRESOLVED: "unknown"}]
+
+
 def test_unfocused_tasks_keep_their_existing_rank_order():
     from scripts.swarm import focus_budget
 

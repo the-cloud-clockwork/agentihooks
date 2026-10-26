@@ -311,6 +311,10 @@ def test_focus_weight_reads_persisted_value_and_apply_sends_the_change(open_page
     page = open_page(payload)
     field = page.tab.get_by_role("textbox", name="Focus weight", exact=True)
     assert field.input_value() == "30"
+    page.tab.set_viewport_size({"width": 1920, "height": 1080})
+    screenshot = Path("test-results/focus-panel-1920.png")
+    screenshot.parent.mkdir(exist_ok=True)
+    page.tab.screenshot(path=str(screenshot))
     field.fill("50")
     page.tab.get_by_role("button", name="Apply capacity", exact=True).click()
     assert page.puts == [{"action": "set", "focus_weight": 50}]
