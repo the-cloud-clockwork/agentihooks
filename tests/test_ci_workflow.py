@@ -1702,7 +1702,11 @@ def test_mutation_shards_reuse_stats_collected_once_in_planned_parts():
     }
     setup = [step for step in mutation["steps"] if not str(step.get("name", "")).startswith(("Mutate", "Upload"))]
     downloads = ("Download the shared mutation stats", "Download the reused preflight report")
-    setup = [step for step in setup if step.get("name") not in downloads]
+    setup = [
+        step
+        for step in setup
+        if step.get("name") not in downloads and step.get("with", {}).get("path") != ".mutation-stats-cache"
+    ]
     stats_steps = [step for step in stats["steps"] if step.get("with", {}).get("path") != ".mutation-stats-cache"]
     assert stats_steps[: len(setup)] == setup
     collect = stats_steps[len(setup)]
@@ -1712,7 +1716,8 @@ def test_mutation_shards_reuse_stats_collected_once_in_planned_parts():
         assert restore["uses"] == "actions/cache/restore@v4"
         assert save["uses"] == "actions/cache/save@v4"
         assert restore["with"]["key"] == save["with"]["key"]
-        assert restore["if"] == save["if"] == "needs.mutation-plan.outputs.forwarded != 'true'"
+        assert restore["if"] == "needs.mutation-plan.outputs.forwarded != 'true'"
+        assert save["if"] == "strategy.job-total == 1 && needs.mutation-plan.outputs.forwarded != 'true'"
         assert stats["steps"].index(restore) < stats["steps"].index(collect) < stats["steps"].index(save)
         assert stats["env"]["MUTATION_STATS_CACHE"] == "${{ github.workspace }}/.mutation-stats-cache"
     assert collect["env"]["BASES"] == "${{ needs.mutation-plan.outputs.bases }}"

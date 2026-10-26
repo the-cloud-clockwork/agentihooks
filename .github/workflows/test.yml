@@ -3049,23 +3049,6 @@ jobs:
           path: .mutation-stats-cache
           key: mutation-test-stats-v2-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}
 
-      - name: Keep only the test stats this part wrote
-        if: strategy.job-total != 1 && needs.mutation-plan.outputs.forwarded != 'true'
-        env:
-          PART: ${{ matrix.part }}
-        run: mkdir -p .mutation-stats-cache .mutation-stats-fresh && find .mutation-stats-cache -maxdepth 1 -type f -newer ".mutation-stats/collected-$PART" -exec cp -p {} .mutation-stats-fresh/ \;
-
-      - name: Upload this part's test stats cache
-        if: strategy.job-total != 1 && needs.mutation-plan.outputs.forwarded != 'true'
-        uses: actions/upload-artifact@v4
-        with:
-          name: mutation-test-stats-cache-${{ matrix.part }}
-          path: .mutation-stats-fresh/
-          include-hidden-files: true
-          if-no-files-found: ignore
-          retention-days: 1
-          overwrite: true
-
       - name: Upload mutation stats part
         if: needs.mutation-plan.outputs.forwarded != 'true'
         uses: actions/upload-artifact@v4
@@ -3085,6 +3068,23 @@ jobs:
           path: .mutation-gate/
           include-hidden-files: true
           retention-days: 7
+          overwrite: true
+
+      - name: Keep only the test stats this part wrote
+        if: strategy.job-total != 1 && needs.mutation-plan.outputs.forwarded != 'true'
+        env:
+          PART: ${{ matrix.part }}
+        run: mkdir -p .mutation-stats-cache .mutation-stats-fresh && find .mutation-stats-cache -maxdepth 1 -type f -newer ".mutation-stats/collected-$PART" -exec cp -p {} .mutation-stats-fresh/ \;
+
+      - name: Upload this part's test stats cache
+        if: strategy.job-total != 1 && needs.mutation-plan.outputs.forwarded != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: mutation-test-stats-cache-${{ matrix.part }}
+          path: .mutation-stats-fresh/
+          include-hidden-files: true
+          if-no-files-found: ignore
+          retention-days: 1
           overwrite: true
 
       - name: Mutate the only shard in the statistics job
