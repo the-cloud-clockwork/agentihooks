@@ -553,6 +553,28 @@ class SQLiteLedgerRepository:
                     heap.release()
         return entry.views[view]
 
+    def export_since(self, slug: str, since: int, view, changes) -> tuple[int, str | bytes]:
+        """(generation, text) of the stored ledger: changes(state, paths) when the database recorded every row
+        change after generation since, else view(state) as encoded_view builds it."""
+        self._adopt(slug)
+        with self.connect() as connection, connection:
+            connection.execute(BEGIN)
+            entry = self._entry(connection, slug)
+            paths = (
+                refresh.changed_paths(connection, slug, since, entry.generation, CHANGES_KEPT)
+                if 0 < since <= entry.generation
+                else None
+            )
+        text = None if paths is None else changes(entry.state, paths)
+        if text is not None:
+            return entry.generation, text
+        if view not in entry.views:
+            with VIEW_BUILD:
+                if view not in entry.views:
+                    entry.views[view] = view(entry.state)
+                    heap.release()
+        return entry.generation, entry.views[view]
+
     def read(self, slug: str, *keys: str) -> dict:
         """Only the named parts of a ledger, such as `overview`, `_meta.members` or `tasks/t1`."""
         self._adopt(slug)

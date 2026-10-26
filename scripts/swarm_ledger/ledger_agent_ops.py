@@ -52,6 +52,12 @@ def _check_text(op, kind, task_ids):
         and (op["list"] != "followups" or not isinstance(op["needs_operator"], bool))
     ):
         raise ValueError("needs_operator is a boolean flag on a follow-up")
+    if (
+        kind == "add_item"
+        and "not_duplicate" in op
+        and (op["list"] != "followups" or not (isinstance(op["not_duplicate"], str) and op["not_duplicate"].strip()))
+    ):
+        raise ValueError("not_duplicate must say in plain words why the follow up differs from the item it resembles")
     if kind == "retext" and (not TEXT_ITEM_RE.match(str(op.get("item"))) or not _text(op.get("text"))):
         raise ValueError("retext needs item questions/<id> or followups/<id> and text")
     if kind in ("add_item", "retext"):
@@ -204,7 +210,7 @@ def _add_item(doc, op, ctx):
         return True
     item = {"id": op["id"], "text": op["text"], "comments": []}
     item.update({"done": False} if op["list"] == "followups" else {"answers": []})
-    for field in ("hive", "task"):
+    for field in ("hive", "task", "not_duplicate"):
         if field in op:
             item[field] = op[field]
     if op.get("needs_operator"):
