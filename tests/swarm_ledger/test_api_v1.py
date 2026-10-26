@@ -1364,7 +1364,7 @@ def test_versioned_logs_exclude_query_and_bearer(live, capsys):
         )
     assert status == 403
     logged = capsys.readouterr().err
-    assert logged == f"09:00:00 GET /api/v1/ledgers/{SLUG}/metadata\n"
+    assert logged == f"09:00:00 GET /api/v1/ledgers/{SLUG}/metadata -\n"
     assert "private-canary" not in logged
     assert "credential-canary" not in logged
 
