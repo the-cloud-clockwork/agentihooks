@@ -13,9 +13,7 @@ def read(store: RedisStore, slug: str) -> dict:
     return {task: json.loads(raw) for task, raw in store.redis.hgetall(store.key(slug, WAITS)).items()}
 
 
-def observe(
-    store: RedisStore, slug: str, lane: str, task: str, reason: str, now: int, workstation: str = ""
-) -> None:
+def observe(store: RedisStore, slug: str, lane: str, task: str, reason: str, now: int, workstation: str = "") -> None:
     from redis.exceptions import WatchError
 
     key = store.key(slug, WAITS)
