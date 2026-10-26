@@ -33,16 +33,21 @@ def scrubbed(text: str) -> str:
     return " ".join(redact(text, mode="strict").split())[:MESSAGE_LIMIT]
 
 
+def error_class(exc: Exception) -> str:
+    cause = exc.__cause__
+    if isinstance(cause, SystemExit) and type(cause) is not SystemExit:
+        return type(cause).__name__
+    return type(exc).__name__
+
+
 def failure(probe: Callable[[], object]) -> dict | None:
     try:
         if probe():
             return None
     except Exception as exc:
-        cause = exc.__cause__
-        named = cause if isinstance(cause, SystemExit) and type(cause) is not SystemExit else exc
         status = STATUS.search(str(exc))
         return {
-            "error": type(named).__name__,
+            "error": error_class(exc),
             "status": int(status[1]) if status else None,
             "message": scrubbed(str(exc)),
         }
