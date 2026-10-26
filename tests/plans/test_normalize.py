@@ -33,7 +33,7 @@ def test_a_json_object_with_a_title_becomes_one_phase_per_entry():
     assert "## Beta" in result.markdown
 
 
-def test_a_bare_json_list_takes_its_title_from_the_file_stem():
+def test_a_bare_json_list_takes_its_title_from_the_file_stem_and_renders_exact_markdown():
     data = json.dumps([{"title": "Only phase", "description": "Just one."}])
 
     result = normalize(data, "my-plan.json")
@@ -44,6 +44,7 @@ def test_a_bare_json_list_takes_its_title_from_the_file_stem():
         "title": "my-plan",
         "phases": [{"title": "Only phase", "description": "Just one.", "planning": "auto"}],
     }
+    assert result.markdown == "# my-plan\n\n## Only phase\n\n<!-- phase: planning=auto -->\n\nJust one.\n"
 
 
 def test_bytes_input_is_decoded_as_utf8_and_an_absent_description_defaults_to_empty():
@@ -250,6 +251,8 @@ def test_marked_markdown_gives_one_phase_per_marker_with_slices_in_order_and_a_p
     assert "the example. More prose" in titles["First phase"]["description"]
     assert "### Task title" not in titles["First phase"]["description"]
     assert "<!-- phase:" not in titles["First phase"]["description"]
+    assert "Body of the first slice" not in titles["First phase"]["description"]
+    assert "pin1 - First slice" not in titles["First phase"]["description"]
     assert titles["Second phase"]["id"] == "wrk"
     assert titles["Second phase"]["planning"] == "manual"
     assert "depends_on" not in titles["Second phase"]
@@ -267,6 +270,20 @@ Prose.
     result = normalize(text, "nd.md")
 
     assert result.content["phases"][0]["not_duplicate"] == "it covers a different seam"
+
+
+def test_a_blank_not_duplicate_marker_is_refused():
+    text = """# Plan
+
+## Phase one
+<!-- phase: id=a planning=auto not_duplicate="   " -->
+Prose.
+"""
+
+    with pytest.raises(PlanError) as caught:
+        normalize(text, "blank-nd.md")
+
+    assert caught.value.errors == ["phase 'Phase one': not_duplicate must say in plain words why the phase differs"]
 
 
 def test_a_marker_without_a_planning_key_defaults_to_auto():
@@ -347,6 +364,20 @@ def test_a_long_phase_description_is_bound_to_about_800_characters_on_a_word_bou
     assert 790 < len(description) <= 800
     assert not description.endswith(" ")
     assert words.startswith(description)
+
+
+def test_bound_searches_up_to_and_including_the_800th_character():
+    tokens = "123456789 " * 85
+    text = f"""# Plan
+
+## Phase one
+<!-- phase: id=a planning=auto -->
+{tokens}
+"""
+
+    result = normalize(text, "boundary.md")
+
+    assert len(result.content["phases"][0]["description"]) == 799
 
 
 def test_a_phase_description_exactly_at_the_bound_is_kept_whole():
