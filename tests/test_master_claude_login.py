@@ -1417,7 +1417,12 @@ def _plain_shell(tmp_path, monkeypatch):
     )
     monkeypatch.setenv("HOME", str(operator))
     monkeypatch.setattr(Path, "home", classmethod(lambda cls: operator))
-    for name in ("CLAUDE_CONFIG_DIR", "CLAUDE_CODE_HOME_DIR", "AGENTIHOOKS_CLAUDE_HOME"):
+    decoy = tmp_path / "process-claude"
+    decoy.mkdir()
+    (decoy / "CLAUDE.md").write_text("process persona")
+    (decoy / ".claude.json").write_text(json.dumps({"decoy": True}))
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(decoy))
+    for name in ("CLAUDE_CODE_HOME_DIR", "AGENTIHOOKS_CLAUDE_HOME"):
         monkeypatch.delenv(name, raising=False)
     environ = {key: value for key, value in _environ(operator).items() if key != "CLAUDE_CONFIG_DIR"}
     return operator, {**environ, "HOME": str(operator)}
