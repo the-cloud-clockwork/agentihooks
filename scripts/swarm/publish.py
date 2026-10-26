@@ -107,13 +107,18 @@ def local_repository(value: str, repo: str) -> Path:
     return found.pop()
 
 
-def repository_task(repo: Path, task: dict) -> dict:
+def mapped_branch(repo: Path, task: dict) -> str | None:
     branches = task.get("repository_branches", {})
     branch = branches.get(str(repo))
     if branch is None:
         branch = next(
             (value for key, value in branches.items() if repository_name(key) == repository_name(str(repo))), None
         )
+    return branch
+
+
+def repository_task(repo: Path, task: dict) -> dict:
+    branch = mapped_branch(repo, task)
     if branch is None:
         branch = task.get("branch", "")
         remote = task.get("branch_repo")
@@ -148,8 +153,8 @@ def publishing_root(repo: str, task: dict, agent: AgentRecord) -> tuple[Path | N
             raise SwarmError(f"current worktree {root} does not belong to this task")
         return root, primary, scoped
     except SwarmError as exc:
-        branch = task.get("repository_branches", {}).get(str(primary), task.get("branch", ""))
-        raise PublicationRefusal(primary, branch, str(exc)) from exc
+        branch = mapped_branch(primary, task)
+        raise PublicationRefusal(primary, task.get("branch", "") if branch is None else branch, str(exc)) from exc
 
 
 def pushed_branches(repo: str, task: dict, agent: AgentRecord) -> dict:
@@ -207,7 +212,8 @@ def prepare(slug: str, agent: AgentRecord, repo: str, ledger: LedgerClient) -> d
                     checkout["branch"] = delivery
             fields.append({**checkout, "repository": str(repository)})
         except SwarmError as exc:
-            branch = scoped.get("repository_branches", {}).get(str(repository), scoped.get("branch", ""))
+            branch = mapped_branch(repository, scoped)
+            branch = scoped.get("branch", "") if branch is None else branch
             raise PublicationRefusal(repository, branch, str(exc)) from exc
     update = branch_record(fields[-1], Path(fields[-1]["repository"]), task)
     update["repository_branches"].update({entry["repository"]: entry["branch"] for entry in fields})
