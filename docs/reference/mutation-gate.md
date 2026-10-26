@@ -19,6 +19,38 @@ gh workflow run proofs.yml \
 
 For a stacked branch, set `base` to its dependency branch. Branch pushes run Mutation preflight before the first draft pull request; wait for its current head to pass. Once a branch has an open pull request into `dev`, the push preflight skips it and the pull request checks own mutation. Tests and mutation runs execute in CI only.
 
+## Required gate proof (T9)
+
+`mutation-plan`, `mutation-stats` and `mutation` are needs of `Gate — Required`
+in Tests, and `Gate — Required` is the required status check of both dev
+rulesets (`.github/rulesets/dev-history.json`, `dev-no-delete.json`). On a pull
+request into dev the gate requires all three to succeed; `mutation` may skip
+only when the plan grades inline in `mutation-stats`.
+
+Both-ways proof, full Tests dispatches with `gate_plant=true` on `diffcheck/`
+branches. Both add `bright()` to `scripts/term_colors.py`; they differ only in
+the assertion of `test_bright_shifts_a_colour_to_its_bright_code`:
+
+| Run | Assertion | Mutation result | Gate — Required |
+|---|---|---|---|
+| [Green 40419695070](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/40419695070), head `13dae34` | `colors.bright("31") == "91"` | 4 killed | GREEN_RESULT |
+| [Red 40419698727](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/40419698727), head `25a8fe4` | `colors.bright("31")` (truthiness only) | 3 survived, 1 killed on the changed line | RED_RESULT |
+
+### Red rate split
+
+Seventy completed, non cancelled Tests pull request runs between
+2026-10-26 15:22Z and 23:03Z carried 17 red mutation jobs:
+
+| Cause | Runs | Kind |
+|---|---|---|
+| Surviving mutants on changed lines | 8 | Real: the gate doing its job |
+| Selected tests failing on the unmutated head | 2 | Real: the pull request broke a test |
+| Dependabot pull requests: no Dependabot secrets, so `Mint the tcc main ci App token` gets an empty client id | 6 | Tool: every token minting job in those runs fails, not only mutation |
+| Shard ran the full 1080 second budget on eight large swarm files | 1 | Tool: budget |
+
+The audit's 38% (15 of 40) predates mutation moving into Tests. Excluding
+Dependabot runs, one of 64 runs (1.6%) was a mutation tool failure.
+
 ## Covering tests through production helpers
 
 Mutation planning supplements matching and importing test modules with recorded
