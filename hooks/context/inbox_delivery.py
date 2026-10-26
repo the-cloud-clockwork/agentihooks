@@ -1,5 +1,6 @@
 import os
 
+from hooks.context import worker_mode
 from hooks.targets import is_codex_memory_thread
 from scripts.inbox.cli import identity
 from scripts.inbox.seen import claim
@@ -10,7 +11,7 @@ CLOSE_HINT = "done|handoff <address>|blocked <what>|cancel [why]"
 
 
 def pending_context(session_id, environ=None, cwd=""):
-    if cwd and is_codex_memory_thread(cwd):
+    if worker_mode.active(environ) or cwd and is_codex_memory_thread(cwd):
         return ""
     started = now_ms()
     receiver = _receiver(session_id, environ)
@@ -25,6 +26,8 @@ def pending_context(session_id, environ=None, cwd=""):
 
 
 def confirm_shown(session_id, environ=None):
+    if worker_mode.active(environ):
+        return
     started = now_ms()
     receiver = _receiver(session_id, environ)
     if receiver is not None:
