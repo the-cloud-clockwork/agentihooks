@@ -641,7 +641,7 @@ def deliver_alerts(slug, state):
         addresses = {a.name: a.seat or a.name for a in live}
         alerts = [{**a, "target": addresses.get(a["target"], "master")} for a in fresh]
         tier = ledger_blockers.autonomy(slug)
-        sent = ledger_alerts.deliver(inbox, slug, alerts, meta["rev"], master, since=since, tier=tier)
+        sent = ledger_alerts.deliver(inbox, slug, alerts, meta["rev"], master, since=since, tier=tier, doc=state)
     except Exception as exc:  # the ledger write stands whatever the inbox does
         sys.stderr.write(f"alert delivery for {slug}: {exc}\n")
         unrelayed_on(ALERTS, slug, meta["rev"])

@@ -10,6 +10,7 @@ from scripts.swarm.store import SwarmError
 from scripts.swarm_ledger import ledger_blockers
 
 ACTIONS = ("attempt", "critic", "escalate", "status")
+FLAGS = {"text": "tried"}
 CRITIC_TIER = "high"
 CRITIC_EFFORT = "medium"
 CRITIC_SCHEMA = {
@@ -56,7 +57,7 @@ def run(store, args, by, ledger, critic=headless_critic):
         fields = {"run": launched, "digest": ledger_blockers.digest(prompt), "resolution": resolution}
         ledger.blocker(args.slug, "blocker_critic", by, args.item, fields)
     elif args.action != "status":
-        missing = [name for name, value in _fields(args).items() if not (value or "").strip()]
+        missing = [FLAGS.get(name, name) for name, value in _fields(args).items() if not (value or "").strip()]
         if missing:
             raise SwarmError(f"resolve {args.action} needs {' '.join('--' + m for m in missing)}")
         ledger.blocker(args.slug, f"blocker_{args.action}", by, args.item, _fields(args))

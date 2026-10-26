@@ -138,6 +138,8 @@ def _attempt(row, rec, op, ctx):
     step = next_step(rec)
     if step == CRITIC:
         return _refuse(ctx, ctx.slug, op["item"], rec, "two attempts are recorded before the critic")
+    if step in (ESCALATE, ESCALATED):
+        return _refuse(ctx, ctx.slug, op["item"], rec, "one attempt applies the critic resolution")
     entry = {key: op[key].strip() for key in FIELDS[op["op"]][1:]}
     rec["attempts"].append({"id": op["id"], "by": op["by"], "at": ctx.at, **entry, "after_critic": bool(rec["critic"])})
     ctx.record(op["by"], "blocker attempt", op["item"], id=op["id"], text=entry["text"])
@@ -165,8 +167,10 @@ def _comment(rec, reason, evidence):
 
 def _escalate(doc, row, rec, op, ctx):
     tier = autonomy(ctx.slug)
-    if tier in GATED and next_step(rec) != ESCALATE:
-        return _refuse(ctx, ctx.slug, op["item"], rec, f"at {tier} autonomy the item escalates only after the protocol")
+    step = next_step(rec)
+    if tier in GATED and step != ESCALATE:
+        why = "the item has already escalated" if step == ESCALATED else "the item escalates only after the protocol"
+        return _refuse(ctx, ctx.slug, op["item"], rec, f"at {tier} autonomy {why}")
     by, item = op["by"], op["item"]
     reason, evidence = op["reason"].strip(), op["evidence"].strip()
     rec["escalation"] = {"id": op["id"], "by": by, "at": ctx.at, "reason": reason, "evidence": evidence}
@@ -230,5 +234,6 @@ class Gate:
             return ""
         return (
             f"at {tier} autonomy {by} takes the decision itself; an item reaches the operator only after the blocker "
-            f"protocol, so the next step is to {step_text(self.slug, item or '<the item it concerns>', rec)}"
+            f"protocol{'' if item else ' of the existing item it concerns, never a new question or follow up'}, so "
+            f"the next step is to {step_text(self.slug, item or '<the item it concerns>', rec)}"
         )

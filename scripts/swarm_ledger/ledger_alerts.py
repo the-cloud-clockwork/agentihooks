@@ -160,11 +160,12 @@ def derive(doc, ctx, raised, before):
         doc["alerts"] = [a for a in rows if id(a) not in gone]
 
 
-def message(slug, alert, tier=""):
+def message(slug, alert, tier="", doc=None):
     from scripts.swarm_ledger import ledger_blockers
 
     item = alert.get("item") or "<the item it concerns>"
-    step = ledger_blockers.notice(slug, tier, item, ledger_blockers.record(None))
+    row = ledger_blockers.find(doc, item) if doc and alert.get("item") else None
+    step = ledger_blockers.notice(slug, tier, item, ledger_blockers.record(row))
     return (
         f"On ledger {slug}: alert {alert['id']} ({alert['source']}): {alert['text']}. Claim it with agentihooks "
         f"ledger --slug {slug} --as <you> alert claim {alert['id']}, then close it with alert close "
@@ -172,7 +173,7 @@ def message(slug, alert, tier=""):
     )
 
 
-def deliver(inbox, slug, alerts, rev, master, since=None, tier=""):
+def deliver(inbox, slug, alerts, rev, master, since=None, tier="", doc=None):
     """Send each alert raised from since through rev to its target's inbox, once."""
     since = rev if since is None else since
     sent = []
@@ -184,7 +185,7 @@ def deliver(inbox, slug, alerts, rev, master, since=None, tier=""):
             continue
         address = master if alert["target"] in ("master", OPERATOR) else alert["target"]
         notice = outbox.Post(
-            SENDER, address, message(slug, alert, tier), item=outbox.stable_id("alert", slug, alert["id"])
+            SENDER, address, message(slug, alert, tier, doc), item=outbox.stable_id("alert", slug, alert["id"])
         )
         item = outbox.post(inbox, notice)
         inbox.redis.set(mark, 1, ex=SENT_TTL_S)

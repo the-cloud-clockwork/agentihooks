@@ -176,6 +176,11 @@ class Protocol(unittest.TestCase):
         _, rejected = self.write(swarm, operator)
         self.assertEqual(rejected, [])
 
+    def test_one_attempt_applies_the_critic_resolution(self):
+        self.full_record()
+        _, rejected = self.write(attempt(4, self.item, "scaled the pool to eight"))
+        self.assertEqual(rejected, ["at-4"])
+
     def test_a_follow_up_flag_and_a_question_at_full_are_refused(self):
         state, _ = self.write()
         followup = f"followups/{state['followups'][0]['id']}/needs_operator"

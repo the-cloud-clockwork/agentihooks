@@ -76,8 +76,10 @@ def test_the_critic_is_refused_before_two_attempts(world):
 
 def test_an_attempt_needs_its_command_and_output(world):
     store, ledger = world
-    with pytest.raises(SwarmError, match="--command --output"):
+    with pytest.raises(SwarmError, match="needs --command --output$"):
         resolve.run(store, args("attempt", tried="x"), "eng", ledger)
+    with pytest.raises(SwarmError, match="needs --tried$"):
+        resolve.run(store, args("attempt", ran="ls", output="ok"), "eng", ledger)
 
 
 def test_an_unknown_item_is_refused(world):

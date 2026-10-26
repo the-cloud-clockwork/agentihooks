@@ -306,6 +306,15 @@ def test_the_alert_message_at_full_autonomy_names_the_next_protocol_step():
     )
 
 
+def test_the_alert_message_reads_the_step_from_the_item_record():
+    alert = {"id": "al-4-0", "source": "sync", "text": "refused", "item": "tasks/t1"}
+    blocker = {"attempts": [{"after_critic": False}] * 2, "critic": None, "escalation": None}
+    doc = {"tasks": [{"id": "t1", "blocker": blocker}]}
+    assert ledger_alerts.message("demo", alert, "full", doc).endswith(
+        "launch the blind critic: agentihooks swarm demo resolve critic tasks/t1."
+    )
+
+
 def test_delivery_marks_each_alert_sent_for_thirty_days_and_skips_claimed_and_sent_ones(inbox):
     claimed = {"id": "al-5-0", "text": "t", "source": "size", "target": "master", "state": "claimed", "rev": 5}
     sent_before = {**claimed, "id": "al-5-1", "state": "open"}
