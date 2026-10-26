@@ -174,7 +174,7 @@ def test_history_visits_each_sequence_and_preserves_empty_values(store_type):
     assert fetch.await_args_list == [mock.call("key", 1), mock.call("key", 2), mock.call("key", 3)]
 
 
-def test_a_chunk_created_twice_keeps_the_first_write():
+def test_a_losing_chunk_create_returns_quietly():
     create = mock.AsyncMock(side_effect=[1, nats.KeyWrongLastSequenceError()])
     store = SimpleNamespace(_kv=SimpleNamespace(create=create))
     assert asyncio.run(nats.NatsStateStore._create_chunk(store, "chunk", b"first")) is None
