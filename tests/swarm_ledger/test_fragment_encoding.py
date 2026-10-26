@@ -145,5 +145,6 @@ def test_a_reordered_mapping_with_the_same_rows_is_rebuilt():
 
 def test_a_leaf_is_encoded_canonically_and_its_signature_tells_number_spellings_apart():
     assert encoded(leaf(1e-7)) == "1e-07"
-    assert leaf(1).signature != leaf(1.0).signature != leaf(True).signature
+    signatures = [leaf(1).signature, leaf(1.0).signature, leaf(True).signature]
+    assert len(set(signatures)) == 3
     assert leaf({"a": 1, "b": 2}).signature != leaf({"b": 2, "a": 1}).signature

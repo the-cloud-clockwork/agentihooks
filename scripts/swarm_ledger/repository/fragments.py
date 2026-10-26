@@ -28,7 +28,7 @@ def leaf(value: object, previous: Fragment | None = None) -> Fragment:
         signature = hash(encode(value))
     if previous is not None and value == previous.value and signature == previous.signature:
         return previous
-    encode(value)
+    encode(value)  # rejects NaN and Infinity, which orjson writes as null
     return Fragment(value, signature=signature)
 
 
