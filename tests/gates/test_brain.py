@@ -3,6 +3,7 @@
 import hashlib
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -127,7 +128,6 @@ def test_ordinary_calls_never_match(payload):
     assert not BrainGate().matches(Call.from_payload(payload))
 
 
-@pytest.fixture
 def ledgers(tmp_path, monkeypatch):
     from scripts.swarm_v2.keyspace import Namespace
 
@@ -140,8 +140,7 @@ def ledgers(tmp_path, monkeypatch):
         legacy_page.store(folder, SWARM, doc)
 
     seed()
-    folder.seed = seed
-    return folder
+    return SimpleNamespace(path=folder, seed=seed)
 
 
 def write(session="s1"):
@@ -152,9 +151,9 @@ WHO = Who(name="engineer@100001-0001", swarm=SWARM, lane="eng", task=TASK)
 
 
 def test_task_row_reads_only_the_named_task(ledgers):
-    assert task_row(ledgers, SWARM, TASK) == {"id": TASK, **ROWS["first"]}
-    assert task_row(ledgers, SWARM, "t-missing") == {}
-    assert task_row(ledgers, "no-such-swarm", TASK) == {}
+    assert task_row(ledgers.path, SWARM, TASK) == {"id": TASK, **ROWS["first"]}
+    assert task_row(ledgers.path, SWARM, "t-missing") == {}
+    assert task_row(ledgers.path, "no-such-swarm", TASK) == {}
 
 
 def test_a_worker_outside_a_task_is_never_checked():
@@ -168,7 +167,9 @@ def test_a_worker_outside_a_task_is_never_checked():
 
 def test_a_first_write_without_a_receipt_is_refused(ledgers):
     seen = []
-    gate = BrainGate(environ={"LEDGER_DIR": str(ledgers)}, receipts=lambda s: seen.append(s) or {}, clock=lambda: NOW)
+    gate = BrainGate(
+        environ={"LEDGER_DIR": str(ledgers.path)}, receipts=lambda s: seen.append(s) or {}, clock=lambda: NOW
+    )
     decision = gate.decide(write("s9"), WHO, None)
     assert not decision.allowed
     assert decision.reason == REFUSAL.format(reason=NO_RECEIPT, task=TASK)
@@ -176,24 +177,24 @@ def test_a_first_write_without_a_receipt_is_refused(ledgers):
 
 
 def test_a_current_receipt_lets_every_repeated_write_through(ledgers):
-    gate = BrainGate(environ={"LEDGER_DIR": str(ledgers)}, receipts=lambda s: receipt(), clock=lambda: NOW)
+    gate = BrainGate(environ={"LEDGER_DIR": str(ledgers.path)}, receipts=lambda s: receipt(), clock=lambda: NOW)
     assert all(gate.decide(write(), WHO, None).allowed for _ in range(5))
 
 
 def test_a_spec_change_refuses_the_old_receipt(ledgers):
-    gate = BrainGate(environ={"LEDGER_DIR": str(ledgers)}, receipts=lambda s: receipt(), clock=lambda: NOW)
+    gate = BrainGate(environ={"LEDGER_DIR": str(ledgers.path)}, receipts=lambda s: receipt(), clock=lambda: NOW)
     ledgers.seed("changed")
     assert gate.decide(write(), WHO, None).reason == REFUSAL.format(reason=STALE_REVISION, task=TASK)
 
 
 def test_an_unreadable_task_refuses(ledgers):
-    gate = BrainGate(environ={"LEDGER_DIR": str(ledgers)}, receipts=lambda s: receipt(), clock=lambda: NOW)
+    gate = BrainGate(environ={"LEDGER_DIR": str(ledgers.path)}, receipts=lambda s: receipt(), clock=lambda: NOW)
     who = Who(name="n", swarm=SWARM, task="t-missing")
     assert gate.decide(write(), who, None).reason == REFUSAL.format(reason=UNREADABLE, task="t-missing")
 
 
 def test_the_gate_reads_the_process_environment_and_wall_clock_by_default(ledgers, monkeypatch):
-    monkeypatch.setenv("LEDGER_DIR", str(ledgers))
+    monkeypatch.setenv("LEDGER_DIR", str(ledgers.path))
     fresh = BrainGate(receipts=lambda s: receipt(expires=4_000_000_000.0))
     assert fresh.decide(write(), WHO, None).allowed
     old = BrainGate(receipts=lambda s: receipt(expires=NOW))
@@ -202,6 +203,6 @@ def test_the_gate_reads_the_process_environment_and_wall_clock_by_default(ledger
 
 def test_the_gate_reads_the_delivered_consultation_by_default(ledgers, monkeypatch):
     monkeypatch.setattr("hooks.context.task_context.consultation", lambda session: receipt() if session == "s1" else {})
-    gate = BrainGate(environ={"LEDGER_DIR": str(ledgers)}, clock=lambda: NOW)
+    gate = BrainGate(environ={"LEDGER_DIR": str(ledgers.path)}, clock=lambda: NOW)
     assert gate.decide(write("s1"), WHO, None).allowed
     assert not gate.decide(write("s2"), WHO, None).allowed
