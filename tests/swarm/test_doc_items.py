@@ -47,6 +47,7 @@ def test_mapping_keeps_every_open_item_and_expands_task_ranges():
         ("1. [open] " + "word " * 2000, {}),
         ("not numbered [open] Item. [Ledger: t1]", {}),
         ("1. [open] [Ledger: t1]", {}),
+        ("1. [open]   [Ledger: t1]", {}),
     ],
 )
 def test_mapping_handles_delimiters_and_untagged_text(line, expected):
@@ -86,7 +87,7 @@ def test_unknown_tag_refuses_before_any_task_changes():
     ledger.update_task.assert_not_called()
 
 
-@pytest.mark.parametrize("tag", ["t5 to t3", "t1 to t-two", "t1 garbage", ""])
+@pytest.mark.parametrize("tag", ["t5 to t3", "t1 to t-two", "t1 garbage", "", "t1] [Ledger: t2"])
 def test_invalid_task_tags_are_reported(tag):
     from scripts.swarm.doc_items import parse
 
