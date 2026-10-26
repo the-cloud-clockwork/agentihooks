@@ -394,6 +394,21 @@ def test_a_closed_pull_request_is_not_reused():
     assert listed[listed.index("--jq") + 1] == '[.[] | select(.state != "CLOSED")][0].url // ""'
 
 
+def test_a_file_mapped_to_none_is_deleted_from_the_tree():
+    bodies = []
+
+    def run(argv, **kwargs):
+        bodies.append(kwargs.get("input"))
+        return subprocess.CompletedProcess(argv, 0, "" if argv[1:3] == ["pr", "list"] else "sha", "")
+
+    create_github.open_pr(run, REPO, "dev", NAME, {"gone": None, "a": "b"}, "Remove worker hive")
+    tree = next(json.loads(body) for body in bodies if body and "base_tree" in body)["tree"]
+    assert tree == [
+        {"path": "gone", "mode": "100644", "type": "blob", "sha": None},
+        {"path": "a", "mode": "100644", "type": "blob", "content": "b"},
+    ]
+
+
 def test_a_branch_left_by_an_earlier_run_is_moved_to_the_new_commit():
     run = Run()
 

@@ -196,6 +196,21 @@ def test_remove_runs_every_step_in_order_and_deletes_the_hive_everywhere(store, 
     assert not (tmp_path / create.STATE_FILE).exists()
     commands = [argv[:4] for argv, _ in run.calls]
     assert commands.index(["herdr", "machine", "remove", "p7"]) < commands.index(["gh", "pr", "create", "-R"])
+    repo, message = "the-cloud-clockwork/antoncore", "Remove worker hive anton-9\n\nOpened by agentihooks hive remove."
+    posted = ["--input", "-", "--jq", ".sha"]
+    assert [argv for argv, _ in run.calls if argv[0] == "gh"] == [
+        READS[1],
+        ["gh", "pr", "list", "-R", repo, "--head", "remove-anton-9", "--state", "all", "--json", "url,state"]
+        + ["--jq", '[.[] | select(.state != "CLOSED")][0].url // ""'],
+        ["gh", "api", f"repos/{repo}/git/ref/heads/dev", "--jq", ".object.sha"],
+        ["gh", "api", f"repos/{repo}/git/commits/sha", "--jq", ".tree.sha"],
+        ["gh", "api", "-X", "POST", f"repos/{repo}/git/trees", *posted],
+        ["gh", "api", "-X", "POST", f"repos/{repo}/git/commits", *posted],
+        ["gh", "api", "-X", "POST", f"repos/{repo}/git/refs", *posted],
+        ["gh", "pr", "create", "-R", repo, "--base", "dev", "--head", "remove-anton-9"]
+        + ["--title", "Remove worker hive anton-9", "--body", message],
+        ["gh", "pr", "merge", PR, "--squash", "--auto"],
+    ]
     assert (["ssh-keygen", "-R", "[10.10.30.207]:2222", "-f", known], machine.SSH_TIMEOUT_S) in run.calls
     tree = next(json.loads(body) for body in run.inputs if body and "base_tree" in body)["tree"]
     assert tree == [{"path": path, "mode": "100644", "type": "blob", "sha": None} for path in OWNED]
@@ -246,6 +261,34 @@ def test_a_rerun_by_name_after_a_remove_that_failed_midway_finishes_on_the_real_
     assert again[-2:] == [
         f"manifests: opened pull request {PR} deleting {', '.join(OWNED)}; it merges once its checks pass",
         "openbao: deleted OpenBao secret/k8s/agentihooks-hive-anton-9",
+    ]
+
+
+def test_a_refused_auto_merge_asks_for_a_merge_once_checks_pass(store, tmp_path):
+    member, run, bao, plan = _removal(store, tmp_path)
+
+    def refused(argv, **kwargs):
+        if argv[:3] == ["gh", "pr", "merge"]:
+            return subprocess.CompletedProcess(argv, 1, "", "GraphQL: Auto merge is not allowed for this repository")
+        return run(argv, **kwargs)
+
+    done = remove.remove(store, bao, plan, _host(Clock(store, member, 2), refused, tmp_path))
+
+    assert f"manifests: opened pull request {PR} deleting {', '.join(OWNED)}; merge it once its checks pass" in done
+
+
+def test_the_drain_names_every_agent_it_waits_for_and_every_agent_that_handed_off(store, tmp_path):
+    member = _member(store)
+    plan = remove.Plan(member, "anton-9", "p", dry_run=True)
+    host = _host(Clock(store, member, 1), Run(), tmp_path)
+    wait = f"would stop placement on {member} and wait up to 3600 seconds for"
+    assert remove.drain(store, plan, host) == [f"{wait} no agents to hand off"]
+    _agent(store, member)
+    store.put_agent(SLUG, AgentRecord("engineer@2", "eng", "t2", seat="eng-2@demo", hive=member, state="working"))
+
+    assert remove.drain(store, plan, host) == [f"{wait} engineer@1, engineer@2 to hand off"]
+    assert remove.drain(store, replace(plan, dry_run=False), host) == [
+        f"drained {member}: 2 agents handed off: engineer@1, engineer@2"
     ]
 
 
@@ -304,6 +347,9 @@ def test_the_hive_is_named_by_its_member_or_its_name_and_a_gone_name_stands_for_
     remove.forget(store.redis, member)
     with pytest.raises(auth.HiveError, match="pass --label"):
         remove.resolve(store.redis, member)
+    registry.update(store.redis, "anton-8", ["ui=no"])
+    with pytest.raises(auth.HiveError, match="pass --label"):
+        remove.resolve(store.redis, "anton-8")
     assert remove.resolve(store.redis, "swarm-hive-004") == ("swarm-hive-004", "swarm-hive-004")
 
 

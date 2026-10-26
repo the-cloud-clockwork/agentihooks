@@ -155,9 +155,7 @@ def _listed(run: Callable[..., subprocess.CompletedProcess]) -> list[dict]:
         raise auth.HiveError(f"herdr machine list answered with output that is not JSON ({exc})") from exc
 
 
-def forget(
-    label: str, known_hosts: Path, run: Callable[..., subprocess.CompletedProcess], dry_run: bool = False
-) -> list[str]:
+def forget(label: str, known_hosts: Path, run: Callable[..., subprocess.CompletedProcess], dry_run: bool) -> list[str]:
     found = [machine for machine in _listed(run) if machine.get("label") == label]
     if not found:
         return [f"herdr holds no machine {label}"]
