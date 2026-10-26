@@ -223,8 +223,12 @@ def _from_markdown(text: str, name: str, existing: set[str]) -> Normalized:
     for j, phase, row in zip(markers.values(), phases, ranged):
         rng = ranges[row["id"]]
         slices[phase["title"]] = plan_ranges.slice_anchors(text, rng)
-        _, end = plan_ranges.bounds(rng)
+        start, end = plan_ranges.bounds(rng)
+        if not slices[phase["title"]] and any(level for n, level, _ in entries if start < n <= end):
+            errors.append(f"phase {phase['title']!r} has no slice markers, so it holds prose only")
         phase["description"] = _phase_description(entries, entries[j][0], end)
+    if errors:
+        raise PlanError(errors)
     title = next((text for _, level, text in entries if level == 1), None) or _stem(name)
     return Normalized(
         kind="marked", title=title, markdown=text, content={"title": title, "phases": phases}, slices=slices

@@ -675,7 +675,7 @@ def test_a_marker_on_the_last_line_of_the_file_marks_its_phase():
     assert result.content["phases"] == [{"title": "Only phase", "planning": "manual", "description": ""}]
 
 
-def test_subheadings_without_any_slice_anchor_need_no_slice_markers():
+def test_a_marked_phase_without_slice_markers_holds_prose_only():
     text = """# Plan
 
 ## Phase one
@@ -691,10 +691,10 @@ Body.
 Body.
 """
 
-    result = normalize(text, "unsliced.md")
+    with pytest.raises(PlanError) as caught:
+        normalize(text, "unsliced.md")
 
-    assert result.slices == {"Phase one": []}
-    assert result.content["phases"][0]["description"] == "Prose."
+    assert caught.value.errors == ["phase 'Phase one' has no slice markers, so it holds prose only"]
 
 
 def test_json_markdown_normalizes_back_to_the_same_marked_phases():
