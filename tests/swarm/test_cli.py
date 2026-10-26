@@ -120,6 +120,15 @@ def test_bare_pairs_set_the_caps(env):
     assert run("sw", "set", "max-eng-agents=x") == 1
 
 
+def test_focus_weight_defaults_to_fifty_and_is_settable(env):
+    store, _, _ = env
+    run("sw", "create", "--repo", "/repo")
+    assert store.config("sw").focus_weight == 50
+    assert run("sw", "set", "focus-weight=30") == 0
+    assert store.config("sw").focus_weight == 30
+    assert run("sw", "set", "focus-weight=x") == 1
+
+
 def test_done_closes_the_task_and_marks_the_agent_finished(env, monkeypatch):
     store, ledger, _ = env
     run("sw", "create", "--repo", "/repo")

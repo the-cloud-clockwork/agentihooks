@@ -264,6 +264,35 @@ def test_focus_on_an_ancestor_or_a_selector_lifts_its_task_above_ledger_order(ta
     assert dispatcher.ordered(found, "", dispatcher.leverage(found)) == [focused["id"], other["id"], "w"]
 
 
+def test_focus_order_leads_with_focused_tasks_when_no_cap_applies():
+    tasks = [task("a", phase="", kind="hot"), task("b", phase="")]
+    found = doc(tasks, phases=[], freezes=[{"verb": "focus", "target": "kind:hot"}])
+    order = dispatcher._focus_order(found)
+    assert order["a"] < order["b"]
+
+
+def test_focus_weight_caps_focused_claims_at_a_share_of_the_lane_cap():
+    holding = [task(f"r{i}", phase="", state="claimed", kind="hot") for i in range(5)]
+    holding += [task(f"n{i}", phase="", state="claimed", kind="code") for i in range(5)]
+    waiting_focused = task("open-hot", phase="", kind="hot")
+    waiting_plain = task("open-plain", phase="", kind="code")
+    tasks = [*holding, waiting_focused, waiting_plain]
+    found = doc(tasks, phases=[], freezes=[{"verb": "focus", "target": "kind:hot"}])
+    order = dispatcher._focus_order(found, {"eng": 10}, 50)
+    assert order["open-hot"] == order["open-plain"]
+
+
+def test_focus_weight_below_the_cap_still_leads_with_the_focused_task():
+    holding = [task(f"r{i}", phase="", state="claimed", kind="hot") for i in range(4)]
+    holding += [task(f"n{i}", phase="", state="claimed", kind="code") for i in range(6)]
+    waiting_focused = task("open-hot", phase="", kind="hot")
+    waiting_plain = task("open-plain", phase="", kind="code")
+    tasks = [*holding, waiting_focused, waiting_plain]
+    found = doc(tasks, phases=[], freezes=[{"verb": "focus", "target": "kind:hot"}])
+    order = dispatcher._focus_order(found, {"eng": 10}, 50)
+    assert order["open-hot"] < order["open-plain"]
+
+
 def test_below_delegate_a_high_leverage_task_yields_one_master_proposal_and_no_rank(store, home, shipped):
     store.update(SLUG, autonomy="assist")
     ledger, found = Ledger(), doc(ladder())

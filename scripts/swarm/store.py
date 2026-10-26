@@ -86,6 +86,7 @@ class SwarmConfig:
     local_max_agents: int = DEFAULT_LOCAL_MAX_AGENTS
     engine: str = "legacy"
     window: dict = field(default_factory=dict)
+    focus_weight: int = 50
 
     def __post_init__(self) -> None:
         if self.engine not in ("legacy", "events"):

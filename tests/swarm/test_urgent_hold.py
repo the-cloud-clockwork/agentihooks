@@ -93,9 +93,9 @@ def test_a_frozen_task_is_held_by_the_freeze_that_covers_it():
     assert hold(found, "b") == ""
 
 
-def test_a_focus_holds_a_normal_task_but_never_an_urgent_one():
+def test_a_focus_elsewhere_never_holds_a_normal_task_or_an_urgent_one():
     focus = [{"verb": "focus", "target": "lane:ci"}]
-    assert hold(doc([task("a")], freezes=focus), "a") == "a focus elsewhere holds it"
+    assert hold(doc([task("a")], freezes=focus), "a") == ""
     assert hold(doc([task("a", rank="urgent")], freezes=focus), "a") == ""
 
 
@@ -145,11 +145,11 @@ def test_a_recent_task_listed_first_does_not_hide_an_older_one(store):
     assert [f.id for f in urgent_hold.findings(store, SLUG)] == ["urgent-unclaimable/b"]
 
 
-def test_the_doctor_fix_phase_exempts_its_tasks_from_a_focus():
+def test_a_focus_never_holds_a_doctor_fix_task_either():
     found = doc([task("a", phase="fix")], freezes=[{"verb": "focus", "target": "lane:ci"}])
     found["phases"].append({"id": "fix", "title": "fix", "depends_on": []})
     assert hold(found, "a", fix="fix") == ""
-    assert hold(found, "a") == "a focus elsewhere holds it"
+    assert hold(found, "a") == ""
 
 
 def test_a_lane_freeze_is_named_by_its_lane():
