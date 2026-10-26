@@ -339,13 +339,18 @@ def test_the_interactive_route_still_launches_under_the_route_lock(tmp_path, mon
 
 
 def _plain_shell(tmp_path, monkeypatch):
-    operator = tmp_path / "operator"
+    operator, decoy = tmp_path / "operator", tmp_path / "process-claude"
     (operator / ".claude").mkdir(parents=True)
     (operator / ".claude" / "settings.json").write_text("{}")
     (operator / ".claude" / "CLAUDE.md").write_text("operator persona")
     (operator / ".claude.json").write_text(json.dumps({"hasCompletedOnboarding": True}))
+    decoy.mkdir()
+    (decoy / "settings.json").write_text('{"apiKeyHelper": "/bin/decoy"}')
+    (decoy / "CLAUDE.md").write_text("process persona")
+    (decoy / ".claude.json").write_text(json.dumps({"decoy": True}))
     monkeypatch.setenv("HOME", str(operator))
-    for name in ("CLAUDE_CONFIG_DIR", "CLAUDE_CODE_HOME_DIR", "AGENTIHOOKS_CLAUDE_HOME"):
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(decoy))
+    for name in ("CLAUDE_CODE_HOME_DIR", "AGENTIHOOKS_CLAUDE_HOME"):
         monkeypatch.delenv(name, raising=False)
     return operator
 
