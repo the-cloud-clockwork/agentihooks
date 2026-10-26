@@ -286,8 +286,8 @@ def test_master_stalled_after_a_failed_or_denied_call_is_recycled(store, monkeyp
     monkeypatch.setattr(activity, "time", SimpleNamespace(time=lambda: (START + MINUTE) / 1000))
     payload = {"tool_name": "Bash", "tool_input": {}, "tool_use_id": f"toolu_{outcome}"}
 
-    def refused(payload):
-        activity.record("Bash", {}, call_id=payload["tool_use_id"])
+    def refused(call):
+        activity.record("Bash", {}, call_id=call["tool_use_id"])
         raise hook_manager.BlockAction("denied")
 
     monkeypatch.setattr(hook_manager, "on_pre_tool_use", refused)
