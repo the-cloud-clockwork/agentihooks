@@ -511,9 +511,13 @@ def test_a_seat_whose_retire_request_was_withdrawn_keeps_its_claimants(world):
     master_scale._withdraw_asks(world.store, retiring)
     world.redis.hdel(masters.MasterSeats(world.redis).key(SLUG), master_scale.RETIRING)
 
-    with pytest.raises(InboxError, match=f"tasks/t2 belongs to {SECOND}, so {LEAD} cannot message its claimant"):
+    with pytest.raises(InboxError) as refused:
         master_fence.check_send(inbox(world), LEAD_NAME, OWN_CLAIMANT)
 
+    assert str(refused.value) == (
+        f"tasks/t2 belongs to {SECOND}, so {LEAD} cannot message its claimant; ask {SECOND} with agentihooks "
+        f'swarm {SLUG} masters-channel say "<text>"'
+    )
     assert master_fence.retiring(world.store, SLUG) == set()
 
 
