@@ -1,0 +1,73 @@
+{
+  "case": "T-SV2-PRF-04-C",
+  "corpus_revision": "sv2-prf-04-corpus-1",
+  "evidence_class": "mocked: a fixed held out corpus with human review labels and in process packers that follow the kernel ranking contract stand in for brain-api, its graph store and a live model; no embedding, HTTP server or agent runs, and usefulness is the share of injected items a reviewer labelled useful, not a model judgement",
+  "input_sha256": {
+    "cases.py": "775594a88daf1ea47c754c25296cd470c207752ce1fadce66185ccdced2183f6",
+    "corpus.json": "2ce82952b6bd4e2fa1eea69b246aa520fe6d54a789a3e5181eb89bff043f7d61",
+    "evaluate.py": "adea0528008250291963698843f0f028f1d7a2cbfb6024a3e774ee844ba1d213"
+  },
+  "observed": {
+    "applied": {
+      "sequence": 3,
+      "state": "accepted"
+    },
+    "final": {
+      "policy": "scoped",
+      "report_sha256": "83d31fd4f16035f3536cc9b53bb3f344eb854dae09162bb2280a82b6d3435e90",
+      "sequence": 3
+    },
+    "history": [
+      {
+        "kind": "seed",
+        "operation_id": "seed",
+        "policy": "scoped",
+        "sequence": 1
+      },
+      {
+        "kind": "promote",
+        "operation_id": "promote-graph",
+        "policy": "graph",
+        "sequence": 2
+      },
+      {
+        "kind": "revert",
+        "operation_id": "revert-to-scoped",
+        "policy": "scoped",
+        "sequence": 3
+      }
+    ],
+    "interrupted_revert": {
+      "discarded_staged_write": true,
+      "interruption": "simulated: the revert was staged and the registry reopened before the rename",
+      "sequence": 2,
+      "survived": {
+        "policy": "graph",
+        "sequence": 2
+      }
+    },
+    "refused": {
+      "irreproducible_report": "irreproducible_report",
+      "operation_id_reused": "operation_id_reused",
+      "other_corpus_revision": "other_corpus_revision",
+      "report_mismatch": "report_mismatch",
+      "stale_sequence": "stale_sequence"
+    },
+    "reproducible": {
+      "equal": true,
+      "revert_report_sha256": "83d31fd4f16035f3536cc9b53bb3f344eb854dae09162bb2280a82b6d3435e90",
+      "seed_report_sha256": "83d31fd4f16035f3536cc9b53bb3f344eb854dae09162bb2280a82b6d3435e90"
+    },
+    "rollback_rehearsal": {
+      "action": "restore the last accepted ranking and packing policy",
+      "comparison_reproduced_on_corpus_revision": "sv2-prf-04-corpus-1",
+      "from": "graph",
+      "restored": "scoped"
+    },
+    "same_operation_replay": {
+      "sequence": 3,
+      "state": "replayed"
+    }
+  },
+  "state": "passed"
+}
