@@ -10,7 +10,7 @@ from unittest.mock import Mock
 
 import pytest
 
-from scripts.swarm_ledger import ledger_link, server_lifetime
+from scripts.swarm_ledger import ledger_link, ledger_server, server_lifetime
 
 ROOT = Path(__file__).resolve().parents[2]
 SERVER = ROOT / "scripts/swarm_ledger/ledger_server.py"
@@ -78,7 +78,7 @@ def test_detached_server_stops_when_its_run_ends(tmp_path, ending, explicit_owne
         else:
             getattr(run, ending)()
         run.wait(timeout=5)
-        deadline = time.monotonic() + 3
+        deadline = time.monotonic() + ledger_server.DRAIN_S + 5
         while running(pid) and time.monotonic() < deadline:
             time.sleep(0.02)
         assert not running(pid), f"ledger server {pid} on port {port} survived its ended run"
