@@ -181,3 +181,16 @@ def test_wait_polls_only_the_jobs_page_until_every_shard_passes():
         ("repos/org/repo/actions/runs/123/attempts/2/jobs?per_page=100",)
     ] * 2
     sleep.assert_called_once_with(15)
+
+
+def test_runner_queue_wait_never_counts_against_the_watch_deadline():
+    queued = {"name": "unit (3.12, 1)", "status": "queued", "conclusion": None}
+    passed = {**queued, "status": "completed", "conclusion": "success"}
+    with (
+        patch.object(ci_gate_shards, "api", side_effect=[[{"jobs": [queued]}], [{"jobs": [passed]}]]),
+        patch.object(ci_gate_shards.time, "monotonic", side_effect=[0, 0, 1300, 1300]),
+        patch.object(ci_gate_shards.time, "sleep") as sleep,
+    ):
+        ci_gate_shards.watch("org/repo", "123", "2", [1], recover=False)
+    sleep.assert_called_once_with(15)
+    assert ci_gate_shards.rate_limit.deadline == 2500
