@@ -20,9 +20,9 @@ def dump():
 
 
 def stop(*_):
-    print('yprof dump start', file=sys.stderr, flush=True)
+    print("yprof dump start", file=sys.stderr, flush=True)
     dump()
-    print('yprof dump done', file=sys.stderr, flush=True)
+    print("yprof dump done", file=sys.stderr, flush=True)
     os._exit(0)
 
 
