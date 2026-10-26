@@ -73,6 +73,8 @@ def test_kind_proof_layers_only_the_hive_on_a_current_base():
     assert "docker pull" not in PROOF.read_text() + CURRENT.read_text()
     assert "docker tag" not in PROOF.read_text().split("\nwait ")[0]
     assert '--build-arg AGENTIHOOKS_REF="${AGENTIHOOKS_REF:-dev}"' in hive
+    assert hive.endswith('--output "type=image,name=$image,push=true,unpack=false" .')
+    assert "image=localhost:5001/agentihooks-hive-worker:dev\n" in PROOF.read_text()
 
 
 def worker_stage(name):
@@ -128,21 +130,51 @@ def test_base_lock_satisfies_every_requirement_of_the_workstation_install():
     assert unmet == []
 
 
-def test_kind_proof_checks_init_renders_the_engineer_profile_before_the_cluster_wait():
+def in_pod(tmp_path, *args):
+    text = PROOF.read_text()
+    function = text[text.index("in_pod() {") : text.index("\n}\n", text.index("in_pod() {")) + 3]
+    tools = tmp_path / "bin"
+    tools.mkdir()
+    (tools / "kubectl").write_text('#!/usr/bin/env bash\nprintf "%s\\n" "$@" > "$KUBECTL_ARGS"\n')
+    (tools / "kubectl").chmod(0o755)
+    (tmp_path / "out").mkdir()
+    env = {**os.environ, "PATH": f"{tools}:{os.environ['PATH']}", "KUBECTL_ARGS": str(tmp_path / "args")}
+    script = f'image=registry/hive:dev\nout={tmp_path / "out"}\n{function}in_pod "$@"\n'
+    subprocess.run(["bash", "-c", script, "proof", *args], env=env, check=True)
+    argv = (tmp_path / "args").read_text().splitlines()
+    overrides = json.loads(next(a for a in argv if a.startswith("--overrides=")).removeprefix("--overrides="))
+    return argv, overrides["spec"]
+
+
+def test_kind_proof_checks_init_renders_the_engineer_profile_in_a_pod_with_a_memory_home(tmp_path):
     lines = PROOF.read_text().splitlines()
     check = (
-        'docker run --rm --tmpfs /home/worker:uid=10001,gid=10001 --entrypoint bash "$image" -c '
-        "'agentihooks init --profile engineer && "
-        'grep -qx "<!-- profile: engineer -->" "$HOME/.claude/CLAUDE.md"\' > "$out/init.txt"'
+        "in_pod init 'agentihooks init --profile engineer && "
+        'grep -qx "<!-- profile: engineer -->" "$HOME/.claude/CLAUDE.md"\' tmpfs &'
     )
     assert lines[:2] == ["#!/usr/bin/env bash", "set -euo pipefail"]
     assert lines.count(check) == 1
-    assert lines.index(check) < lines.index('wait "$cluster_pid"')
+    assert lines.index('wait "$cluster_pid"') < lines.index(check)
+    assert lines.index('wait "$init_pid"') < lines.index("sha256sum -c deploy/helm/agentihooks-swarm-deps.sha256")
+    argv, spec = in_pod(tmp_path, "init", "true", "tmpfs")
+    assert argv[:2] == ["run", "init"]
+    assert {"--image=registry/hive:dev", "--restart=Never", "--attach", "--rm"} <= set(argv)
+    assert spec["containers"] == [
+        {
+            "name": "init",
+            "image": "registry/hive:dev",
+            "command": ["bash", "-c", "true"],
+            "volumeMounts": [{"name": "home", "mountPath": "/home/worker"}],
+        }
+    ]
+    assert spec["volumes"] == [{"name": "home", "emptyDir": {"medium": "Memory"}}]
+    assert spec["securityContext"] == {"fsGroup": 10001}
 
 
-def test_kind_proof_checks_the_bundle_system_tools_install_into_the_worker_home():
-    tools = [line for line in PROOF.read_text().splitlines() if '> "$out/tools.txt"' in line]
+def test_kind_proof_checks_the_bundle_system_tools_install_into_the_worker_home(tmp_path):
+    tools = [line for line in PROOF.read_text().splitlines() if line.startswith("in_pod tools '")]
     assert len(tools) == 1
+    assert tools[0].endswith("' &")
     for check in (
         "node --version",
         "npm --version",
@@ -152,6 +184,9 @@ def test_kind_proof_checks_the_bundle_system_tools_install_into_the_worker_home(
         '[[ ":$PATH:" == *":$HOME/.local/bin:"* ]]',
     ):
         assert f"&& {check} " in tools[0], check
+    _, spec = in_pod(tmp_path, "tools", "true")
+    assert spec == {"containers": [{"name": "tools", "image": "registry/hive:dev", "command": ["bash", "-c", "true"]}]}
+    assert (tmp_path / "out/tools.txt").exists()
 
 
 def test_base_inputs_cover_every_base_source_the_wheel_does_not_replace():
@@ -321,6 +356,8 @@ def test_the_kind_job_publishes_the_proven_image_on_dev_pushes_after_the_chart_p
     )
     dev_push = "github.event_name == 'push' && github.ref == 'refs/heads/dev'"
     assert [step.get("if") for step in kind["steps"] if "ghcr.io" in str(step)] == [dev_push, dev_push]
+    publish = next(step for step in kind["steps"] if step.get("name") == "Publish the proven hive worker image")
+    assert "docker tag localhost:5001/agentihooks-hive-worker:dev ghcr.io/" in publish["run"]
 
 
 @pytest.mark.parametrize(("installed", "downloads"), [(True, 0), (False, 2)])
@@ -377,15 +414,24 @@ def test_kind_proof_pulls_the_base_and_redis_into_the_node_while_the_hive_builds
     lines = PROOF.read_text().splitlines()
     start = lines.index("{")
     assert lines[start + 1].startswith('  kind create cluster --name "$cluster"')
-    assert lines[start + 2 : start + 6] == [
+    registry = (
+        'docker run -d --name "$cluster-registry" -p 127.0.0.1:5001:5000 mirror.gcr.io/library/registry:2 >/dev/null'
+    )
+    assert lines[start - 1] == registry
+    assert lines[start + 2 : start + 5] == [
+        '  docker network connect kind "$cluster-registry"',
+        '  docker exec "$cluster-control-plane" mkdir -p /etc/containerd/certs.d/localhost:5001',
+        '  printf \'[host."http://%s:5000"]\\n\' "$cluster-registry" | docker exec -i "$cluster-control-plane" cp /dev/stdin /etc/containerd/certs.d/localhost:5001/hosts.toml',
+    ]
+    assert lines[start + 5 : start + 9] == [
         f"  for warm in {BASE} mirror.gcr.io/library/redis:7-alpine; do",
         '    docker exec "$cluster-control-plane" crictl pull "$warm" || echo "the node could not pre-pull $warm; the proof loads or pulls it later"',
         "  done",
         '} > "$out/cluster.log" 2>&1 &',
     ]
-    load = lines.index('kind load docker-image "$image" --name "$cluster" &')
-    assert lines.index('wait "$cluster_pid"') < load < lines.index('wait "$load_pid"')
-    assert lines.index('wait "$load_pid"') < lines.index("kubectl apply -f - <<EOF")
+    assert "kind load" not in PROOF.read_text()
+    assert "imagePullPolicy: Never" not in PROOF.read_text()
+    assert '  docker rm -f "$cluster-registry" >/dev/null 2>&1 || true' in lines
 
 
 def test_kind_proof_ends_the_drain_hold_once_the_hive_reads_draining():

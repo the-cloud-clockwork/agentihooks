@@ -2196,7 +2196,7 @@ A shard listed with `success` stalled once and recovered; one listed with `failu
 
 ## Worker hive pod image build
 
-The Worker hive pod workflow (`hive-worker.yml`) runs `deploy/worker/kind-proof.sh` in its `kind` job. The script builds the image `local/agentihooks-hive-worker:dev` while a kind cluster starts, loads it into the cluster and proves that a worker Pod registers with the hive and acknowledges an order. The image has two parts:
+The Worker hive pod workflow (`hive-worker.yml`) runs `deploy/worker/kind-proof.sh` in its `kind` job. The script builds the image `localhost:5001/agentihooks-hive-worker:dev` while a kind cluster starts and pushes it, without unpacking it into Docker, to a registry container the kind node pulls from; the node already holds the base layers it pre-pulled, so it fetches only the hive layers. The script then proves that a worker Pod registers with the hive and acknowledges an order. The image has two parts:
 
 | Part | Dockerfile | Contents |
 |---|---|---|
@@ -2238,7 +2238,7 @@ Change these together in one pull request; `tests/deployment/test_worker_hive_im
 
 Limits: the check reads and compares only the `linux/amd64` base of a published image index, the kind node is pinned to `mirror.gcr.io/kindest/node:v1.37.0`, and the script needs `docker`, `git`, `python3`, `kind`, `kubectl`, `helm` and `openssl` on the runner and writes its output under `$HOME/scratchpad/worker-hive-proof`.
 
-The rest of the proof is unchanged: the same smoke check inside the image (`claude`, `codex`, `herdr` and `git --version`, `wt.sh root` and `agentihooks hive --help`), Pod registration and order acknowledgement, and on a `dev` push the `kind` job, which starts only after the `contracts` job passes, publishes the image it proved straight from its own Docker daemon.
+The init and tool checks run as Pods in the cluster rather than with `docker run`, so Docker never unpacks the image. The rest of the proof is unchanged: the same smoke check inside the image (`claude`, `codex`, `herdr` and `git --version`, `wt.sh root` and `agentihooks hive --help`), Pod registration and order acknowledgement, and on a `dev` push the `kind` job, which starts only after the `contracts` job passes, publishes the image it proved straight from its own Docker daemon, which keeps the pushed image under its registry name.
 
 ### Reading the result
 
