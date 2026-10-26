@@ -58,6 +58,11 @@ def main(argv=None, stdin=None, environ=None, home=None):
         return 1
     payload = json.loads((stdin or sys.stdin).read() or "{}")
     call = Call.from_payload(payload)
+    return evaluate(gate, call, environ, home)
+
+
+def evaluate(gate, call, environ=None, home=None):
+    environ = os.environ if environ is None else environ
     if not gate.matches(call):
         return 0
     who = Who.from_env(environ)
@@ -67,7 +72,7 @@ def main(argv=None, stdin=None, environ=None, home=None):
     decision = _decide(gate, call, who, home, mode)
     if decision.allowed:
         return 0
-    if lift.lifted(who.swarm, payload.get("session_id"), gate.name, home) or lift.held(
+    if lift.lifted(who.swarm, call.session, gate.name, home) or lift.held(
         who.swarm, who.name, who.task, gate.name, home, command=call.command
     ):
         _record(who, log.Row.of(gate.name, "observe", who, call.tool, LIFTED + decision.reason), home)

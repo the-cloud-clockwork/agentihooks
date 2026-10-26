@@ -329,6 +329,13 @@ def main(argv: list[str] | None = None) -> int:
     if args.stand_down and args.type == "claude":
         print("terminate-agent: --stand-down stops Codex conversations only, not --type claude", file=sys.stderr)
         return 2
+    if not args.dry_run:
+        from scripts.gates.base import Call
+        from scripts.gates.entry import evaluate
+        from scripts.gates.terminations import Terminations
+
+        if evaluate(Terminations(), Call("terminate-agent")):
+            return 2
     if args.stand_down:
         from scripts.codex_session import stand_down
 
