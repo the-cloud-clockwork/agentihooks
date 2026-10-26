@@ -171,7 +171,8 @@ def apply(environ: MutableMapping[str, str]) -> dict | None:
 def remember(environ: Mapping[str, str], session: str) -> str | None:
     """Persist this session's receipt and say whether it is fresh, unchanged, invalidated by a route change or stale.
 
-    An older routes revision than the one already accepted for the session is stale and leaves the newer receipt.
+    A routed receipt from an older routes revision than the one stored is stale and leaves the newer receipt; a refusal
+    always replaces it.
     """
     raw = environ.get(RECEIPT)
     if not raw or not _SESSION.fullmatch(session):
@@ -184,7 +185,7 @@ def remember(environ: Mapping[str, str], session: str) -> str | None:
         previous = None
     if previous == receipt:
         return SAME
-    if previous and receipt.get("generation", 0) < previous.get("generation", 0):
+    if previous and receipt["status"] == ROUTED and receipt["generation"] < previous.get("generation", 0):
         return STALE
     found.parent.mkdir(parents=True, exist_ok=True)
     found.write_text(json.dumps(receipt, sort_keys=True), encoding="utf-8")
