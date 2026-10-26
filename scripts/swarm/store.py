@@ -86,6 +86,7 @@ class SwarmConfig:
     local_max_agents: int = DEFAULT_LOCAL_MAX_AGENTS
     engine: str = "legacy"
     window: dict = field(default_factory=dict)
+    watchdog_address: str = ""
 
     def __post_init__(self) -> None:
         if self.engine not in ("legacy", "events"):
@@ -234,6 +235,7 @@ class RedisStore:
             int(raw.get("local_max_agents") or DEFAULT_LOCAL_MAX_AGENTS),
             raw.get("engine", "legacy"),
             json.loads(raw.get("window") or "{}"),
+            raw.get("watchdog_address", ""),
         )
 
     def update(self, slug, **changes):
