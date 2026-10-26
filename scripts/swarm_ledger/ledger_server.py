@@ -1116,13 +1116,20 @@ class Handler(BaseHTTPRequestHandler):
 
     def post_artifact(self, slug):
         name = self.headers.get("X-Artifact-Name", "")
+        try:
+            parsed = core.loads(self.headers.get("X-Artifact-Request", "{}"))
+        except (ValueError, TypeError):
+            parsed = {}
+        plan_requested = isinstance(parsed, dict) and parsed.get("plan") is True
 
         def store(data):
             try:
                 request = core.loads(self.headers.get("X-Artifact-Request", "{}"))
                 if not isinstance(request, dict) or set(request) - {"task", "title", "request", "plan"}:
                     raise ValueError("artifact upload takes task, title and optional request or plan")
-                op = {"op": "artifact_add", "by": self.headers.get("X-Ledger-Agent"), "task": "", **request}
+                operator_plan = self.principal == "" and plan_requested
+                by = self.headers.get("X-Ledger-Agent") or ("operator" if operator_plan else None)
+                op = {"op": "artifact_add", "by": by, "task": "", **request}
                 ledger_artifacts.check_add(
                     {**op, "id": "upload", "title": request.get("title", ""), "file": {"id": "0" * 64 + ".md"}}
                 )
@@ -1134,9 +1141,9 @@ class Handler(BaseHTTPRequestHandler):
                 raise ledger_media.Refused(403, reason)
             return ledger_artifacts.store(slug, name, data)
 
-        return self.receive(slug, ledger_artifacts.MAX_BYTES, store, agents_only=True)
+        return self.receive(slug, ledger_artifacts.MAX_BYTES, store, agents_only=True, operator_plan=plan_requested)
 
-    def receive(self, slug, limit, store, agents_only=False):
+    def receive(self, slug, limit, store, agents_only=False, operator_plan=False):
         if not self.exists(slug):
             return self.send(404, "no such ledger", "text/plain")
         origin = self.headers.get("Origin")
@@ -1145,7 +1152,7 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(403, "origin not allowed", "text/plain")
         if self.refused(slug):
             return None
-        if agent or agents_only:
+        if agent or (agents_only and not (operator_plan and self.principal == "")):
             meta = repository.read(slug, "_meta.members")["_meta"]
             if agent not in meta.get("members", {}):
                 return self.send(403, "agent must join this ledger before uploading", "text/plain")
