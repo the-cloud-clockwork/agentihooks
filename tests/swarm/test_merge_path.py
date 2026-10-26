@@ -360,3 +360,96 @@ def test_the_command_line_reads_the_last_day_by_default(monkeypatch, capsys):
 def test_the_command_line_refuses_an_empty_or_inverted_window(monkeypatch, hours):
     with pytest.raises(SwarmError, match="^merge-path takes hours above zero$"):
         command(monkeypatch, {}, ["--hours", hours])
+
+
+def head(run_id, branch, conclusion, offset_s, sha=None, message="fix"):
+    return run(
+        run_id,
+        "pull_request",
+        conclusion,
+        offset_s=offset_s,
+        head_branch=branch,
+        head_sha=sha or f"sha{run_id}",
+        head_commit={"message": message},
+    )
+
+
+def test_head_pushes_classes_each_head_run_by_the_run_before_it_on_its_branch():
+    runs = [
+        head(1, "a", "failure", -600),
+        head(2, "a", "success", 60),
+        head(3, "a", "failure", 120, message="Merge remote-tracking branch 'origin/dev' into a"),
+        head(4, "a", "cancelled", 180),
+        head(5, "a", "success", 240),
+        head(6, "a", "success", 300, sha="sha5"),
+        head(7, "b", "failure", 90, message="Merge branch 'dev' into b"),
+        head(8, "c", "success", 30),
+        head(9, "c", "failure", 400),
+        head(10, "a", "success", 4 * 3600),
+        run(11, "pull_request", "failure", head_branch="dev", head_sha="x", head_commit=None),
+        run(12, "merge_group", "failure", head_sha="y", head_commit=None),
+    ]
+
+    assert merge_path.head_pushes(runs, WINDOW) == {
+        "dev merge": {"runs": 2, "red": 2},
+        "after red head": {"runs": 2, "red": 0},
+        "after superseded head": {"runs": 1, "red": 0},
+        "same head": {"runs": 1, "red": 0},
+        "first push": {"runs": 1, "red": 0},
+        "review fix": {"runs": 1, "red": 1},
+    }
+    assert [tally["runs"] for tally in merge_path.head_pushes(runs, WINDOW).values()] == [2, 2, 1, 1, 1, 1]
+
+
+def test_head_pushes_orders_runs_created_together_by_id():
+    runs = [head(2, "a", "success", 60, sha="s2"), head(1, "a", "failure", 60, sha="s1")]
+
+    assert merge_path.head_pushes(runs, WINDOW) == {
+        "first push": {"runs": 1, "red": 1},
+        "after red head": {"runs": 1, "red": 0},
+    }
+
+
+def test_head_pushes_reads_a_missing_head_commit_as_no_dev_merge():
+    runs = [run(1, "pull_request", "success", head_sha="s", head_commit=None)]
+
+    assert merge_path.head_pushes(runs, WINDOW) == {"first push": {"runs": 1, "red": 0}}
+
+
+def test_main_writes_the_merge_path_with_head_pushes_from_a_lookback(monkeypatch, tmp_path, capsys):
+    found = {"tests_runs": {}, "removals": {}, "head_failure_rate": None}
+    seen = []
+    monkeypatch.setattr(merge_path, "collect", lambda repo_dir, window: ("o/r", dict(found, window=window)))
+    monkeypatch.setattr(merge_path, "render", lambda repo, got: f"line {repo}")
+
+    def listed(repo_dir, event, window, run_fn):
+        seen.append((repo_dir, event, window))
+        return [head(1, "a", "success", 60)]
+
+    monkeypatch.setattr(merge_path, "read_runs", listed)
+    out = tmp_path / "m.json"
+
+    assert merge_path.main(["--hours", "4", "--until", stamp(4 * 3600), "--out", str(out)]) == 0
+
+    written = json.loads(out.read_text())
+    assert written["repo"] == "o/r"
+    assert written["window"] == [SINCE, UNTIL]
+    assert written["head_pushes"] == {"first push": {"runs": 1, "red": 0}}
+    assert seen == [(".", "pull_request", (SINCE - 6 * 3600, UNTIL))]
+    assert capsys.readouterr().out.splitlines() == ["line o/r", '{"first push": {"runs": 1, "red": 0}}']
+
+
+def test_main_reads_the_last_day_into_the_ci_minutes_file_by_default(monkeypatch, tmp_path):
+    windows = []
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(merge_path, "collect", lambda repo_dir, window: windows.append(window) or ("o/r", {}))
+    monkeypatch.setattr(merge_path, "read_runs", lambda *args: [])
+    monkeypatch.setattr(merge_path, "render", lambda repo, got: "line")
+    before = time.time()
+
+    assert merge_path.main([]) == 0
+
+    ((since_s, until_s),) = windows
+    assert before <= until_s <= time.time()
+    assert until_s - since_s == 24 * 3600
+    assert json.loads((tmp_path / "ci-minutes.json").read_text()) == {"repo": "o/r", "head_pushes": {}}

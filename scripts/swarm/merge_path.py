@@ -1,11 +1,14 @@
 """The merge path of one repository over a window: Tests runs, merge queue entries and removals, and pull requests."""
 
+import argparse
 import json
+import re
 import statistics
 import subprocess
 from collections import Counter
 from collections.abc import Callable
 from datetime import UTC, datetime
+from pathlib import Path
 
 from scripts.swarm import ci_speed
 from scripts.swarm.store import SwarmError
@@ -25,6 +28,9 @@ PULLS = (
     " ... on AddedToMergeQueueEvent { createdAt } ... on RemovedFromMergeQueueEvent { createdAt reason } } } } } } }"
 )
 OPEN_READY = "query($q: String!) { search(query: $q, type: ISSUE, first: 1) { issueCount } }"
+DEV_MERGE = re.compile(r"Merge (remote-tracking )?branch '(origin/)?dev'")
+AFTER = {"failure": "after red head", "success": "review fix"}
+LOOKBACK_S = 6 * 3600
 
 
 def _seconds(stamp: str) -> float:
@@ -219,3 +225,51 @@ def collect(repo_dir: str, window: tuple[float, float], run: Callable = subproce
     open_pages = _search(repo_dir, OPEN_READY, {"q": f"repo:{repo} is:pr is:open draft:false base:dev"}, run)
     ready = open_pages[0]["issueCount"]
     return repo, count(runs, pulls, jobs, ready, window)
+
+
+def _cause(run: dict, before: dict | None) -> str:
+    if DEV_MERGE.match((run.get("head_commit") or {}).get("message") or ""):
+        return "dev merge"
+    if before is None:
+        return "first push"
+    if before["head_sha"] == run["head_sha"]:
+        return "same head"
+    return AFTER.get(before["conclusion"], "after superseded head")
+
+
+def head_pushes(runs: list[dict], window: tuple[float, float]) -> dict:
+    """Classes each pull request head Tests run created in the window by the head run before it on its branch."""
+    heads = sorted(
+        (found for found in runs if found["event"] == "pull_request" and not _promotion(found)),
+        key=lambda found: (found["created_at"], found["id"]),
+    )
+    last, causes = {}, {}
+    for found in heads:
+        cause = _cause(found, last.get(found["head_branch"]))
+        last[found["head_branch"]] = found
+        if _within(found["created_at"], *window):
+            tally = causes.setdefault(cause, {"runs": 0, "red": 0})
+            tally["runs"] += 1
+            tally["red"] += found["conclusion"] == "failure"
+    return dict(sorted(causes.items(), key=lambda item: -item[1]["runs"]))
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--hours", type=float, default=24)
+    parser.add_argument("--until")
+    parser.add_argument("--out", type=Path, default=Path("ci-minutes.json"))
+    args = parser.parse_args(argv)
+    until_s = _seconds(args.until) if args.until else datetime.now(UTC).timestamp()
+    window = (until_s - args.hours * 3600, until_s)
+    repo, found = collect(".", window)
+    history = read_runs(".", "pull_request", (window[0] - LOOKBACK_S, until_s), subprocess.run)
+    found["head_pushes"] = head_pushes(history, window)
+    args.out.write_text(json.dumps({"repo": repo, **found}))
+    print(render(repo, found))
+    print(json.dumps(found["head_pushes"]))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
