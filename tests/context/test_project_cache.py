@@ -54,7 +54,7 @@ def test_expired_cache_keeps_last_good_on_failure(monkeypatch, tmp_path):
     with patch("hooks._async.fork_and_call") as fork:
         assert "kept" in project_context("one")
         assert fork.call_count == 1
-    from hooks.context.brain_adapter import BrainSourceUnavailable
+    from hooks.context.project_memory import BrainSourceUnavailable
 
     with patch("hooks.context.project_memory.KernelProjectSource.fetch", side_effect=BrainSourceUnavailable("down")):
         refresh_project_cache(*args)

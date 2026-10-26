@@ -5,10 +5,11 @@ from unittest.mock import patch
 
 import pytest
 
-from hooks.context import project_cache
-from hooks.context.brain_adapter import BrainEntry, BrainSourceUnavailable
+from hooks.context import project_cache, project_memory
+from hooks.context.brain_adapter import BrainEntry
 from hooks.context.project_identity import ProjectIdentity
 from hooks.context.project_memory import (
+    BrainSourceUnavailable,
     KernelProjectSource,
     ProjectMemory,
     ScopedFeedRefused,
@@ -163,10 +164,6 @@ def test_the_source_setting_selects_the_kernel_by_default_and_the_vault_for_roll
 
 def _raising(error):
     def fetch(self, identity):
-        if error == "unavailable":
-            from hooks.context import brain_adapter
-
-            raise brain_adapter.BrainSourceUnavailable("down")
         raise error
 
     return fetch
@@ -201,15 +198,31 @@ def test_an_outage_marks_cached_memory_stale_and_counts_it(home, monkeypatch):
     _refresh(QUIET, lambda self, identity: ProjectMemory("quiet", lessons=["kept"]))
     monkeypatch.setenv("BRAIN_PROJECT_MEMORY_TTL", "0")
     monkeypatch.setattr(project_cache.time, "time", lambda: 200.0)
-    cached = _refresh(QUIET, _raising("unavailable"))
+    cached = _refresh(QUIET, _raising(project_memory.BrainSourceUnavailable("down")))
     assert cached["memory"]["lessons"] == ["kept"] and cached["at"] == 100.0 and cached["outage_at"] == 200.0
     assert project_cache.scoped_feed_fallbacks() == {"kernel_outage": 1}
     assert project_cache.scoped_feed_fallback_total() == 1
 
 
 def test_an_outage_without_cached_memory_writes_nothing(home):
-    assert _refresh(QUIET, _raising("unavailable")) == {}
+    assert _refresh(QUIET, _raising(project_memory.BrainSourceUnavailable("down"))) == {}
     assert project_cache.scoped_feed_fallbacks() == {}
+
+
+def test_a_kernel_outage_is_kept_stale_after_the_brain_adapter_module_reloads(home, monkeypatch):
+    import importlib
+
+    from hooks.context import brain_adapter
+
+    _refresh(QUIET, lambda self, identity: ProjectMemory("quiet", lessons=["kept"]))
+    importlib.reload(brain_adapter)
+    monkeypatch.setenv("BRAIN_PROJECT_MEMORY_TTL", "0")
+    feed = project_cache._scoped(project_cache.feed_file(), project_cache.namespace(), "feed")
+    scope = project_cache._project_scope(QUIET)
+    with _answer(None)[1]:
+        project_cache.refresh_project_cache(QUIET, [], feed["hash"], scope)
+    cached = project_cache._scoped(project_cache._cache_path(QUIET, scope), scope, "project-memory")
+    assert cached["memory"]["lessons"] == ["kept"] and "outage_at" in cached
 
 
 def test_a_legacy_fallback_is_counted_once_per_refresh(home):

@@ -7,7 +7,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from hooks.context.project_identity import ProjectIdentity, resolve_project
-from hooks.context.project_memory import KernelProjectSource, ProjectMemory, ScopedFeedRefused, VaultProjectSource
+from hooks.context.project_memory import (
+    BrainSourceUnavailable,
+    KernelProjectSource,
+    ProjectMemory,
+    ScopedFeedRefused,
+    VaultProjectSource,
+)
 from hooks.context.project_render import render_project_block
 from hooks.context.project_sessions import lookup
 from scripts.swarm_v2.keyspace import Namespace, admits, installation, key, stamp, sweep_legacy
@@ -131,7 +137,6 @@ def _fetch(
     identity: ProjectIdentity, rows: list[dict], scope: Namespace, path: Path, cached: dict
 ) -> ProjectMemory | None:
     from hooks.common import log
-    from hooks.context.brain_adapter import BrainSourceUnavailable
 
     source = _source(rows)
     try:
