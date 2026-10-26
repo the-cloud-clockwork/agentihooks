@@ -107,7 +107,9 @@ def test_a_response_over_an_unread_body_closes_the_connection():
     handler.close_connection = False
     handler.rfile = request_body.Body(io.BytesIO(b""), None)
 
-    handler.send_response(400)
+    handler.send_response(400, "Refused here")
 
-    assert b"Connection: close\r\n" in b"".join(handler._headers_buffer)
+    sent = b"".join(handler._headers_buffer)
+    assert sent.startswith(f"{handler.protocol_version} 400 Refused here\r\n".encode())
+    assert b"Connection: close\r\n" in sent
     assert handler.close_connection is True

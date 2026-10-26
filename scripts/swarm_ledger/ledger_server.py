@@ -892,7 +892,7 @@ class Handler(BaseHTTPRequestHandler):
     def parse_request(self) -> bool:
         parsed = super().parse_request()
         if parsed:
-            self.rfile = request_body.Body(getattr(self, "raw_rfile", self.rfile), request_body.length(self.headers))
+            self.rfile = request_body.Body(self.rfile, request_body.length(self.headers))
         return parsed
 
     def send_response(self, code, message=None):
