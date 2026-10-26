@@ -163,3 +163,87 @@ def test_counts_skip_unreadable_lines(actions, clock):  # noqa: F811
 
 def test_counts_are_empty_before_any_charged_request():
     assert github_reads.counts(0, 2_000) == {}
+
+
+def test_nested_cache_home_retains_runs_snapshots_and_caller_counts(monkeypatch, tmp_path):
+    for reader in ("run", "snapshot", "charge"):
+        monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path / reader / "nested" / "state"))
+        if reader == "charge":
+            github_reads.charge("doctor.ci", "jobs", 1_000)
+            assert github_reads.counts(0, 1_001) == {"doctor.ci": 1}
+        else:
+            calls = []
+            payload = {"status": "in_progress", "head": "first"}
+
+            def fetch():
+                calls.append(1)
+                return payload
+
+            read = getattr(github_reads, reader)
+            assert read("first", 1_000, fetch) == payload
+            assert read("first", 1_001, fetch) == payload
+            assert len(calls) == 1
+
+
+def test_snapshots_keep_distinct_resources_and_retry_partial_results(monkeypatch, tmp_path):
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
+    responses = iter([{"pull": "first"}, {"pull": "second"}, {"pull": None}, {"pull": "recovered"}])
+
+    def fetch():
+        return next(responses)
+
+    assert github_reads.snapshot("first", 1_000, fetch) == {"pull": "first"}
+    assert github_reads.snapshot("second", 1_000, fetch) == {"pull": "second"}
+    assert github_reads.snapshot("first", 1_001, fetch) == {"pull": "first"}
+    assert github_reads.snapshot("partial", 1_000, fetch) == {"pull": None}
+    assert github_reads.snapshot("partial", 1_001, fetch) == {"pull": "recovered"}
+
+
+@pytest.mark.parametrize("kind", ["job_log", "snapshot"])
+def test_retained_readers_share_the_lock_with_an_existing_process(kind, monkeypatch, tmp_path):
+    import fcntl
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
+    monkeypatch.setenv("GH_TOKEN", "lock-compatibility-test")
+    reader = getattr(github_reads, kind)
+    payload = "saved" if kind == "job_log" else {"pull": "saved"}
+
+    def read(fetch):
+        return reader("resource", fetch) if kind == "job_log" else reader("resource", 1_000, fetch)
+
+    assert read(lambda: payload) == payload
+    suffix = "*.log" if kind == "job_log" else "*.json"
+    entry = next(github_reads.home().glob(suffix))
+    entry.unlink()
+    original = fcntl.flock
+    contended = []
+    attempted = threading.Event()
+
+    def acquire(fd, operation):
+        try:
+            original(fd, operation | fcntl.LOCK_NB)
+        except BlockingIOError:
+            contended.append(True)
+            attempted.set()
+            original(fd, operation)
+        else:
+            attempted.set()
+
+    fetches = []
+    with entry.with_suffix(".lock").open("a") as holder, ThreadPoolExecutor() as pool:
+        original(holder, fcntl.LOCK_EX)
+        monkeypatch.setattr(fcntl, "flock", acquire)
+        future = pool.submit(read, lambda: fetches.append(1) or payload)
+        try:
+            assert attempted.wait(5)
+            if kind == "job_log":
+                entry.write_text(payload)
+            else:
+                entry.write_text(json.dumps({"at": 1_000, "snapshot": payload}))
+        finally:
+            original(holder, fcntl.LOCK_UN)
+        assert future.result(timeout=5) == payload
+    assert contended == [True]
+    assert fetches == []

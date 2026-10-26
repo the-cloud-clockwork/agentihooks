@@ -12,12 +12,13 @@ import functools
 import json
 import re
 import subprocess
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 
 from scripts.inbox.store import CLOSED, InboxError
-from scripts.swarm import idle, merge_queue, mutation_wait, outage
+from scripts.swarm import github_reads, idle, merge_queue, mutation_wait, outage
 from scripts.swarm.health.verdicts import VERDICTS
 from scripts.swarm.naming import lane_of
 from scripts.swarm.store import MASTER, PREFIX, SwarmError
@@ -321,6 +322,7 @@ def view(url, run=subprocess.run, required_checks=None):
     if mutation_wait.backing_off():
         return None
     try:
+        github_reads.charge("swarm.checks.fresh", "graphql", time.time())
         done = run(
             ["gh", "api", "graphql", "-f", f"query={PULL_QUERY.replace('$number', number)}", "-f", f"url={url}"],
             capture_output=True,
@@ -450,7 +452,12 @@ def views(
             f"p{i}:" + selection.replace("$url", json.dumps(url)).replace("$number", _number(url))
             for i, url in enumerate(batch)
         ]
-        data = _graphql("{" + " ".join(fields) + "}", run)
+        query = "{" + " ".join(fields) + "}"
+        data = (
+            github_reads.snapshot(query, time.time(), lambda: _graphql(query, run))
+            if cache is not None
+            else _graphql(query, run)
+        )
         gates = _workflow_gates(data, run, cache)
         for i, url in enumerate(batch):
             raw = data.get(f"p{i}")
@@ -464,6 +471,7 @@ def views(
 
 
 def _graphql(query, run, **variables):
+    github_reads.charge("swarm.checks", "graphql", time.time())
     try:
         done = run(
             ["gh", "api", "graphql", "-f", f"query={query}"]

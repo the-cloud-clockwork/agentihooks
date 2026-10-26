@@ -7,9 +7,11 @@ Without a token variable the credential is the gh config folder, so a gh auth sw
 the previous login's entry.
 """
 
+import fcntl
 import hashlib
 import json
 import os
+import subprocess
 from collections import Counter
 from collections.abc import Callable
 from pathlib import Path
@@ -50,6 +52,62 @@ def run(endpoint: str, now: float, fetch: Callable[[], dict]) -> dict:
     if found.get("status") != TERMINAL:
         _write(entry, {"at": now, "run": found})
     return found
+
+
+def _log_key(endpoint):
+    if source() in TOKENS:
+        return _key(endpoint)
+    host = os.environ.get("GH_HOST") or "github.com"
+    account = subprocess.run(
+        ["gh", "config", "get", "user", "--host", host],
+        capture_output=True,
+        text=True,
+        check=True,
+        timeout=5,
+    ).stdout.strip()
+    if not account:
+        raise ValueError("GitHub account identity is unavailable")
+    return _key(f"{host} {account} {endpoint}")
+
+
+def job_log(endpoint: str, fetch: Callable[[], str]) -> str:
+    entry = home() / f"{_log_key(endpoint)}.log"
+    entry.parent.mkdir(parents=True, exist_ok=True)
+    with entry.with_suffix(".lock").open("a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        try:
+            return entry.read_text()
+        except FileNotFoundError:
+            pass
+        found = fetch()
+        staged = entry.with_name(f"{entry.name}.{os.getpid()}")
+        staged.write_text(found)
+        staged.replace(entry)
+        return found
+
+
+def snapshot(endpoint: str, now: float, fetch: Callable[[], dict]) -> dict:
+    entry = home() / f"{_key(f'snapshot {endpoint}')}.json"
+    try:
+        entry.parent.mkdir(parents=True, exist_ok=True)
+        lock = entry.with_suffix(".lock").open("a")
+    except OSError:
+        return fetch()
+    with lock:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+        except OSError:
+            return fetch()
+        try:
+            cached = json.loads(entry.read_text())
+            if now - cached["at"] < RUN_TTL_S:
+                return cached["snapshot"]
+        except (OSError, ValueError, KeyError, TypeError):
+            pass
+        found = fetch()
+        if found and all(value is not None for value in found.values()):
+            _write(entry, {"at": now, "snapshot": found})
+        return found
 
 
 def _write(path, body):
