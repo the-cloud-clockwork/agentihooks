@@ -148,6 +148,22 @@ def test_task_rows_reuses_the_untouched_tasks_after_a_task_is_added(tmp_path):
     assert [row is old for row, old in zip(rows, since[2])] == [True, True, True]
 
 
+def test_task_rows_returns_the_earlier_rows_when_another_writer_changed_no_task(tmp_path):
+    from scripts.swarm_ledger.repository.sqlite import BEGIN_IMMEDIATE, SQLiteLedgerRepository
+
+    path = stored(tmp_path, [{"id": "t0"}, {"id": "t1"}])
+    reader = SQLiteLedgerRepository(path)
+    since = reader.task_rows("rows")
+    writer = SQLiteLedgerRepository(path)
+    entry = writer.current("rows")
+    with writer.connect() as connection, connection:
+        connection.execute(BEGIN_IMMEDIATE)
+        writer._write(connection, "rows", entry, {**entry.mutable(), "title": "Renamed"}, [])
+    generation, _, rows = reader.task_rows("rows", since)
+    assert generation > since[0]
+    assert rows is since[2]
+
+
 def test_task_rows_reads_every_task_row_when_the_kept_history_was_trimmed_past_since(tmp_path, monkeypatch):
     from scripts.swarm_ledger.repository import sqlite as sqlite_module
     from scripts.swarm_ledger.repository.sqlite import SQLiteLedgerRepository
