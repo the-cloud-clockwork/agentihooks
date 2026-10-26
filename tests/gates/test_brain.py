@@ -5,6 +5,9 @@ import json
 from pathlib import Path
 
 import pytest
+
+from scripts.gates import entry
+from scripts.gates.base import Call, Gate, Who
 from scripts.gates.brain import (
     EXPIRED,
     FAILED_RESULT,
@@ -21,9 +24,6 @@ from scripts.gates.brain import (
     check,
     task_row,
 )
-
-from scripts.gates import entry
-from scripts.gates.base import Call, Gate, Who
 from tests.swarm_ledger import legacy_page
 
 FIXTURE = Path(__file__).parents[1] / "fixtures/swarm_v2/consultation-gates.json"

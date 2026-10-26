@@ -6,6 +6,14 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
+
+from hooks.context import brain_adapter, project_cache, task_context
+from hooks.context.project_identity import ProjectIdentity
+from hooks.context.project_memory import ProjectMemory
+from hooks.context.project_render import NO_MEMORY, render_project_block
+from hooks.targets import emitter
+from scripts.gates import entry, log
+from scripts.gates.base import Call, Who
 from scripts.gates.brain import (
     EXPIRED,
     FAILED_RESULT,
@@ -18,14 +26,6 @@ from scripts.gates.brain import (
     BrainGate,
     bind,
 )
-
-from hooks.context import brain_adapter, project_cache, task_context
-from hooks.context.project_identity import ProjectIdentity
-from hooks.context.project_memory import ProjectMemory
-from hooks.context.project_render import NO_MEMORY, render_project_block
-from hooks.targets import emitter
-from scripts.gates import entry, log
-from scripts.gates.base import Call, Who
 from scripts.swarm_v2.keyspace import stamp
 from tests.swarm_ledger import legacy_page
 
@@ -117,6 +117,17 @@ def test_a_valid_empty_result_counts_as_consultation(world):
     deliver("empty", PACKS["empty"])
     assert task_context.consultation("empty")["result"] == "empty"
     assert write("empty").allowed
+
+
+def test_recalled_text_quoting_the_markers_is_still_a_delivered_pack(world):
+    world["seed"](**{TASK: "first"})
+    memory = ProjectMemory("alpha", lessons=[project_cache.UNREACHABLE, NO_MEMORY])
+    pack = render_project_block(memory, 4096)
+    assert task_context.classify(pack) == "delivered"
+    assert task_context.classify(PACKS["failed"]) == "failed"
+    assert task_context.classify(PACKS["empty"]) == "empty"
+    deliver("quoted", pack)
+    assert write("quoted").allowed
 
 
 def test_b_an_unrelated_query_receipt_cannot_satisfy_the_gate(world):

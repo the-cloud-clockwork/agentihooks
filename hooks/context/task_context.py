@@ -74,9 +74,10 @@ def consultation(session_id: str) -> dict:
 def classify(pack: str) -> str:
     from scripts.gates.brain import DELIVERED, EMPTY, FAILED
 
-    if project_cache.UNREACHABLE in pack:
+    lines = pack.splitlines()
+    if any(line.startswith(project_cache.UNREACHABLE) for line in lines):
         return FAILED
-    return EMPTY if NO_MEMORY in pack else DELIVERED
+    return EMPTY if NO_MEMORY in lines else DELIVERED
 
 
 def _consulted(session_id: str, bound: dict) -> bool:
