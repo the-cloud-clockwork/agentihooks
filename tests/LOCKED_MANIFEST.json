@@ -10,12 +10,12 @@
   "cases": 1
  },
  "tests/context/test_branch_guard.py::TestBranchGuard::test_checkout_dev": {
-  "assertions": 1,
+  "assertions": 0,
   "calls": 1,
   "cases": 1
  },
  "tests/context/test_branch_guard.py::TestBranchGuard::test_checkout_feature_allowed_with_signal": {
-  "assertions": 1,
+  "assertions": 0,
   "calls": 2,
   "cases": 1
  },
@@ -25,32 +25,32 @@
   "cases": 1
  },
  "tests/context/test_branch_guard.py::TestBranchGuard::test_checkout_main": {
-  "assertions": 1,
+  "assertions": 0,
   "calls": 1,
   "cases": 1
  },
  "tests/context/test_branch_guard.py::TestBranchGuard::test_commit": {
-  "assertions": 1,
+  "assertions": 0,
   "calls": 1,
   "cases": 1
  },
  "tests/context/test_branch_guard.py::TestBranchGuard::test_commit_message_with_main_allowed": {
-  "assertions": 1,
+  "assertions": 0,
   "calls": 1,
   "cases": 1
  },
  "tests/context/test_branch_guard.py::TestBranchGuard::test_diff": {
-  "assertions": 1,
+  "assertions": 0,
   "calls": 1,
   "cases": 1
  },
  "tests/context/test_branch_guard.py::TestBranchGuard::test_echo_with_main_allowed": {
-  "assertions": 1,
+  "assertions": 0,
   "calls": 1,
   "cases": 1
  },
  "tests/context/test_branch_guard.py::TestBranchGuard::test_empty_command": {
-  "assertions": 1,
+  "assertions": 0,
   "calls": 1,
   "cases": 1
  },
@@ -70,22 +70,22 @@
   "cases": 1
  },
  "tests/context/test_branch_guard.py::TestBranchGuard::test_gh_pr_merge": {
-  "assertions": 1,
+  "assertions": 0,
   "calls": 1,
   "cases": 1
  },
  "tests/context/test_branch_guard.py::TestBranchGuard::test_heredoc_commit_with_main_allowed": {
-  "assertions": 1,
+  "assertions": 0,
   "calls": 1,
   "cases": 1
  },
  "tests/context/test_branch_guard.py::TestBranchGuard::test_log_main": {
-  "assertions": 1,
+  "assertions": 0,
   "calls": 1,
   "cases": 1
  },
  "tests/context/test_branch_guard.py::TestBranchGuard::test_merge_dev": {
-  "assertions": 1,
+  "assertions": 0,
   "calls": 1,
   "cases": 1
  },
@@ -95,27 +95,27 @@
   "cases": 1
  },
  "tests/context/test_branch_guard.py::TestBranchGuard::test_non_git": {
-  "assertions": 1,
+  "assertions": 0,
   "calls": 1,
   "cases": 1
  },
  "tests/context/test_branch_guard.py::TestBranchGuard::test_pull_main_allowed": {
-  "assertions": 1,
+  "assertions": 0,
   "calls": 1,
   "cases": 1
  },
  "tests/context/test_branch_guard.py::TestBranchGuard::test_push_dev": {
-  "assertions": 1,
+  "assertions": 0,
   "calls": 1,
   "cases": 1
  },
  "tests/context/test_branch_guard.py::TestBranchGuard::test_push_feature_branch": {
-  "assertions": 1,
+  "assertions": 0,
   "calls": 1,
   "cases": 1
  },
  "tests/context/test_branch_guard.py::TestBranchGuard::test_push_head_allowed": {
-  "assertions": 1,
+  "assertions": 0,
   "calls": 1,
   "cases": 1
  },
@@ -150,12 +150,12 @@
   "cases": 1
  },
  "tests/context/test_branch_guard.py::TestBranchGuard::test_status": {
-  "assertions": 1,
+  "assertions": 0,
   "calls": 1,
   "cases": 1
  },
  "tests/context/test_branch_guard.py::TestBranchGuard::test_switch_master": {
-  "assertions": 1,
+  "assertions": 0,
   "calls": 1,
   "cases": 1
  },
@@ -185,7 +185,7 @@
   "cases": 1
  },
  "tests/context/test_branch_guard.py::TestPRBaseGuard::test_pr_base_dev_allowed": {
-  "assertions": 1,
+  "assertions": 0,
   "calls": 1,
   "cases": 1
  },

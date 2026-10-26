@@ -45,17 +45,42 @@ def _assertions(function: ast.FunctionDef | ast.AsyncFunctionDef, helpers: froze
         if isinstance(node, ast.Assert):
             count += 1
         elif isinstance(node, ast.Call) and (name := _named(node.func)):
-            count += name in CHECKING_CALLS or name in helpers or name.lstrip("_").startswith("assert")
+            method = isinstance(node.func, ast.Attribute) and name.startswith("assert")
+            count += name in CHECKING_CALLS or name in helpers or method
     return count
 
 
-def _skips_itself(function: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
+def _skips_itself(function: ast.FunctionDef | ast.AsyncFunctionDef, pytests: set[str], skippers: set[str]) -> bool:
     return any(
         isinstance(node, ast.Call)
-        and _named(node.func) in DISABLING_CALLS
-        and (isinstance(node.func, ast.Name) or _named(node.func.value) == "pytest")
+        and (
+            _named(node.func) in skippers
+            if isinstance(node.func, ast.Name)
+            else _named(node.func) in DISABLING_CALLS and _named(getattr(node.func, "value", None)) in pytests
+        )
         for node in _body(function)
     )
+
+
+def _returns_early(function: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
+    pending = list(function.body)
+    while pending:
+        node = pending.pop()
+        if isinstance(node, ast.Return):
+            return True
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)):
+            pending.extend(ast.iter_child_nodes(node))
+    return False
+
+
+def _pytest_names(module: ast.Module) -> tuple[set[str], set[str]]:
+    pytests, skippers = {"pytest"}, set()
+    for node in ast.walk(module):
+        if isinstance(node, ast.Import):
+            pytests |= {alias.asname or alias.name for alias in node.names if alias.name == "pytest"}
+        elif isinstance(node, ast.ImportFrom) and node.module == "pytest":
+            skippers |= {alias.asname or alias.name for alias in node.names if alias.name in DISABLING_CALLS}
+    return pytests, skippers
 
 
 def _length(node: ast.AST | None, constants: dict[str, ast.AST], seen: frozenset[str] = frozenset()) -> int | None:
@@ -122,6 +147,13 @@ def measure(tree: Path) -> dict[str, dict]:
             for _, function, _ in functions
             if not function.name.startswith("test") and _assertions(function)
         )
+        pytests, skippers = _pytest_names(module)
+        while grown := {
+            function.name
+            for _, function, _ in functions
+            if function.name not in skippers and _skips_itself(function, pytests, skippers)
+        }:
+            skippers |= grown
         for key, function, decorators in functions:
             test = function.name.startswith("test")
             assertions = _assertions(function, helpers) if test else _assertions(function)
@@ -132,9 +164,29 @@ def measure(tree: Path) -> dict[str, dict]:
                 "calls": sum(isinstance(node, ast.Call) for node in _body(function)),
                 "cases": _cases(decorators, constants) if test else 1,
                 "disabled": test
-                and (any(_disables(mark, constants) for mark in decorators) or _skips_itself(function)),
+                and (
+                    any(_disables(mark, constants) for mark in decorators)
+                    or _skips_itself(function, pytests, skippers)
+                    or _returns_early(function)
+                ),
             }
     return measured
+
+
+def unlocking_configs(tree: Path) -> list[str]:
+    stems = [Path(name).stem for name in LOCKED]
+    configs = [
+        *sorted((tree / "tests").rglob("conftest.py")),
+        *sorted((tree / ".github/workflows").glob("*.yml")),
+        *(tree / name for name in ("conftest.py", "pyproject.toml", "pytest.ini", "setup.cfg", "tox.ini")),
+    ]
+    return [
+        f"{path.relative_to(tree)} names the locked module {stem}; locked tests cannot be ignored, deselected or hooked."
+        for path in configs
+        if path.is_file()
+        for stem in stems
+        if stem in path.read_text()
+    ]
 
 
 def load(tree: Path) -> dict[str, dict] | None:
@@ -163,13 +215,13 @@ def write(tree: Path) -> None:
 
 
 def grade(base: dict, recorded: dict, head: dict) -> list[str]:
-    errors = []
+    errors = [
+        f"The locked test {key} is skipped or xfailed." for key, found in sorted(head.items()) if found["disabled"]
+    ]
     for key, floor in sorted(base.items()):
         found = head.get(key)
         if found is None:
             errors.append(f"The locked test {key} is deleted or renamed.")
-        elif found["disabled"]:
-            errors.append(f"The locked test {key} is skipped or xfailed.")
         for field in FIELDS:
             if found is not None and found[field] < floor[field]:
                 errors.append(f"The locked test {key} has {found[field]} {field}, the base locks {floor[field]}.")
@@ -208,7 +260,7 @@ def main(argv: list[str] | None = None) -> int:
     except (GradeError, ValueError, OSError) as exc:
         print(f"::error::{exc}")
         return 1
-    errors = grade(base, recorded, head)
+    errors = grade(base, recorded, head) + unlocking_configs(args.head)
     print(f"{len(base)} locked tests on the base, {len(head)} measured on the head, {len(errors)} errors")
     for error in errors:
         print(f"::error::{error}")
