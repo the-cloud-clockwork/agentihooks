@@ -11,7 +11,7 @@ from scripts.hub.registry import Reactor
 from scripts.inbox import wake
 from scripts.inbox.bus import Message, SeatInbox, SentElsewhere
 from scripts.inbox.seats import is_seat
-from scripts.inbox.store import REDELIVERED, REDELIVERER, InboxStore, redelivery_ms
+from scripts.inbox.store import REDELIVERED, REDELIVERER, InboxError, InboxStore, redelivery_ms
 from scripts.swarm import outage
 from scripts.swarm.delivery import HerdrMessenger
 from scripts.swarm.ledger_client import LedgerClient
@@ -59,10 +59,11 @@ class InboxWake:
             for item_id in members[:32]:
                 if not guard():
                     return
-                if not inbox.redis.exists(inbox.key("item", item_id)):
+                try:
+                    item = inbox.get(item_id)
+                except InboxError:
                     inbox.redis.srem(key, item_id)
                     continue
-                item = inbox.get(item_id)
                 swarm = item.address.partition("@")[2] if is_seat(item.address) else inbox.names.slug_of(item.address)
                 if swarm:
                     message = Message(item.id, item.sender, item.text, item.ref, item.fyi, item.task)
