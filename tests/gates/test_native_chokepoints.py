@@ -44,3 +44,49 @@ def test_native_termination_dry_run_remains_exempt(monkeypatch, native_gate):
     monkeypatch.setattr(terminate_agent, "herdr_pane", lambda pid: ("", ""))
     assert terminate_agent.main(["uuid-1", "--dry-run"]) == 0
     assert log.recent("proof", home=native_gate) == []
+
+
+@pytest.mark.parametrize("provider", ["claude", "codex"])
+@pytest.mark.parametrize("mode,code,calls", [("enforce", 2, 0), ("observe", 17, 1), ("off", 17, 1)])
+def test_native_authentication_is_gated(monkeypatch, native_gate, provider, mode, code, calls):
+    from scripts import claude_login, codex_login
+
+    monkeypatch.setenv("AGENTIHOOKS_GATE_SIGN_INS", mode)
+    module = claude_login if provider == "claude" else codex_login
+    login = Mock(return_value=(17, {}))
+    monkeypatch.setattr(module, "_capture" if provider == "claude" else "_login", login)
+    assert module.main(["proof", "--no-openbao"]) == code
+    assert login.call_count == calls
+    rows = log.recent("proof", home=native_gate)
+    assert [(row["gate"], row["kind"]) for row in rows] == (
+        [] if mode == "off" else [("sign-ins", "deny" if mode == "enforce" else "observe")]
+    )
+
+
+@pytest.mark.parametrize("mode,code,calls", [("enforce", 2, 0), ("observe", 0, 1), ("off", 0, 1)])
+def test_hive_create_runs_node_cap_gate_before_creation(monkeypatch, native_gate, mode, code, calls):
+    from scripts.hive import cli
+
+    monkeypatch.setenv("AGENTIHOOKS_GATE_NODE_CAPS", mode)
+    create = Mock(return_value="created")
+    monkeypatch.setattr(cli, "_create", create)
+    assert cli.main(["create", "--dry-run"]) == code
+    assert create.call_count == calls
+    rows = log.recent("proof", home=native_gate)
+    assert [(row["gate"], row["kind"]) for row in rows] == (
+        [] if mode == "off" else [("node-caps", "deny" if mode == "enforce" else "observe")]
+    )
+
+
+@pytest.mark.parametrize("auth,denied", [("interactive", True), ("", False)])
+def test_only_explicit_auth_launches_run_sign_in_gate(monkeypatch, native_gate, auth, denied):
+    from scripts import init_agent
+
+    monkeypatch.setenv("AGENTIHOOKS_GATE_SIGN_INS", "enforce")
+    resolve = Mock(side_effect=ValueError("stop before launch"))
+    monkeypatch.setattr(init_agent, "_resolve_directory", resolve)
+    monkeypatch.setattr(init_agent.operator_env, "fill", lambda env: None)
+    args = ["--dry-run", *(["--auth", auth] if auth else [])]
+    assert init_agent.main(args, {}) == 2
+    assert resolve.call_count == (0 if denied else 1)
+    assert [row["gate"] for row in log.recent("proof", home=native_gate)] == (["sign-ins"] if denied else [])
