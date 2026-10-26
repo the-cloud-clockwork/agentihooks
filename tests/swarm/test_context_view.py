@@ -44,6 +44,11 @@ def test_the_card_names_brain_purpose_receipt_delivery_and_omissions(store):
     assert card["omitted"] == 1
 
 
+def test_a_pack_without_a_receipt_shows_none():
+    shown = cv.card(TASK, {**FIXTURE["pack"], "receipt": None}, {}, NOW)
+    assert (shown["receipt"], shown["receipt_state"]) == ("", "no receipt")
+
+
 def test_items_carry_trust_inferred_and_superseded_labels_and_hide_other_brains(store):
     items = cv.view(store, SLUG, NOW)["cards"][0]["items"]
     assert items[0] == {

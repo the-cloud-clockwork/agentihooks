@@ -182,8 +182,8 @@ record in `~/development-ledger/ledgers.sqlite3` read and written only through
   viewer across reloads: the Ledger tab's own sections below Overview; the
   Swarm tab panels below Capacity (Quota, Hives, Overlays, Agents, Handoff
   outcomes, Recovery, Brain context, Freezes, Architecture); the outline
-  categories, with
-  one toggle on top flipping between Expand all and Collapse all; and comment
+  categories, with one toggle on top flipping between Expand all and
+  Collapse all; and comment
   dropdowns,
   each section with one toggle for its own items flipping between Show all
   comments and Hide all comments. Nothing else folds: the chat, artifacts,

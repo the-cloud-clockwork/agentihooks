@@ -127,13 +127,15 @@ def view(store: RedisStore, slug: str, now_ms: int) -> dict:
 
 
 def _resolve(store: RedisStore, slug: str, task: str, ref: str) -> dict:
-    pack = json.loads(store.redis.hget(store.key(slug, PACKS), task) or '{"brain": "", "items": []}')
-    item = next((item for item in pack["items"] if item["ref"] == ref), None)
+    raw = store.redis.hget(store.key(slug, PACKS), task)
+    pack = json.loads(raw) if raw else None
+    item = next((item for item in pack["items"] if item["ref"] == ref), None) if pack else None
     if item is None:
         raise Refused(404, "not_in_pack", NOT_IN_PACK)
     held = _held(store.redis, store.key(slug, EVIDENCE), ref)
-    brains = {pack["brain"], item["brain"], (held or item)["brain"]}
-    if len(brains) != 1 or not pack["brain"].startswith(SWARM_BRAIN):
+    if not pack["brain"].startswith(SWARM_BRAIN) or item["brain"] != pack["brain"]:
+        raise Refused(403, "forbidden_scope", OUTSIDE)
+    if held and held["brain"] != pack["brain"]:
         raise Refused(403, "forbidden_scope", OUTSIDE)
     if held is None:
         raise Refused(410, "unavailable", GONE)

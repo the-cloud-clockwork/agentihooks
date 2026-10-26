@@ -1,5 +1,6 @@
 import json
 from pathlib import Path
+from urllib.parse import unquote
 
 from scripts.swarm import context_view as cv
 from tests.swarm_ledger import test_swarm_layout as layout
@@ -22,7 +23,7 @@ def payload(revoked=False):
 
 def answer(page, replies):
     def fulfill(route):
-        ref = route.request.url.rsplit("/", 1)[1].replace("%3A", ":")
+        ref = unquote(route.request.url.rsplit("/", 1)[1])
         code, body = replies[ref]
         route.fulfill(status=code, json=body)
 
@@ -65,6 +66,14 @@ def test_evidence_opens_inline_and_a_refusal_shows_unavailable(open_page):
     item(page, 0).locator("button").click()
     item(page, 0).locator(".ctx-evidence").wait_for()
     assert "unavailable: the session was deleted by its owner" in item(page, 0).inner_text()
+
+
+def test_an_unreachable_ledger_shows_unavailable_on_the_item(open_page):
+    page = open_page(payload())
+    page.tab.route("**/swarm/context/**", lambda route: route.abort())
+    item(page, 0).locator("button").click()
+    item(page, 0).locator(".ctx-evidence").wait_for()
+    assert "unavailable: the ledger could not be reached" in item(page, 0).inner_text()
 
 
 def test_a_revoked_source_replaces_opened_evidence_with_its_reason(open_page):
