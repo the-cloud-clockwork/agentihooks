@@ -55,6 +55,7 @@ def watch(repository: str, run: str, attempt: str, shards: list[int], *, recover
 
 
 def main() -> None:
+    rate_limit.budget("Shard verification", "start")
     try:
         watch(
             os.environ["GITHUB_REPOSITORY"],
@@ -64,6 +65,7 @@ def main() -> None:
             recover=os.environ.get("GITHUB_EVENT_NAME") == "merge_group",
         )
     finally:
+        rate_limit.budget("Shard verification", "end")
         rate_limit.report("Shard verification")
 
 
