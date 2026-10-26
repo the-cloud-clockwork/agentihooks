@@ -229,16 +229,26 @@ def build(rendered: Path, report: str | None = None) -> Path:
     return target
 
 
-def _rebuild(folder: Path, rendered: Path) -> Path:
+def _rebuild(folder: Path, rendered: Path, linked: tuple[str, ...] = ()) -> Path:
     target, staging = folder / "claude", folder / "staging"
     kept = _private(target)
     grant = kept.read_bytes() if kept else None
     account = _read(target / CONFIG).get(ACCOUNT)
     shutil.rmtree(staging, ignore_errors=True)
     shutil.copytree(
-        rendered, staging, symlinks=True, ignore=lambda found, _: [CREDENTIALS] if Path(found) == rendered else []
+        rendered,
+        staging,
+        symlinks=True,
+        ignore=lambda found, _: [CREDENTIALS, *linked] if Path(found) == rendered else [],
     )
     staging.chmod(PRIVATE_DIR)
+    for name in linked:
+        shared = (rendered / name).resolve()
+        shared.mkdir(parents=True, exist_ok=True)
+        (staging / name).symlink_to(shared)
+        copied = target / name
+        if copied.is_dir() and not copied.is_symlink():
+            shutil.copytree(copied, shared, ignore=_links, dirs_exist_ok=True, copy_function=_copy_newer)
     if grant is not None:
         (staging / CREDENTIALS).write_bytes(grant)
         (staging / CREDENTIALS).chmod(PRIVATE_FILE)
@@ -252,6 +262,16 @@ def _rebuild(folder: Path, rendered: Path) -> Path:
     shutil.rmtree(target, ignore_errors=True)
     staging.rename(target)
     return target
+
+
+def _copy_newer(source: str, destination: str) -> None:
+    found = Path(destination)
+    if not found.exists() or Path(source).stat().st_mtime > found.stat().st_mtime:
+        shutil.copy2(source, destination)
+
+
+def _links(folder: str, names: list[str]) -> list[str]:
+    return [name for name in names if (Path(folder) / name).is_symlink()]
 
 
 def _adopt() -> None:

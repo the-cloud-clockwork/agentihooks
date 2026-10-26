@@ -14,6 +14,7 @@ from scripts.routing import native_login
 ROUTE = "claude-ai"
 STORE = "CLAUDE_SECURESTORAGE_CONFIG_DIR"
 FOLDER = "claude-ai"
+LINKED = ("projects", "sessions")
 EMPTY = "no claude ai login is stored: run agentihooks claude login --master"
 NONE = "no usable claude ai login: {reasons}"
 SPENT = "{account} has {left:.0f}% left"
@@ -37,7 +38,7 @@ def _restored(number: int, copy: Mapping[str, str]) -> None:
 def _home(environ: Mapping[str, str], number: int) -> Path:
     name = aicode_tokens.slug(environ.get("AGENTIHOOKS_AGENT_NAME") or f"pid-{os.getpid()}")
     with login._locked(Path(login.hooks_config.AGENTIHOOKS_HOME) / FOLDER / name) as folder:
-        target = login._rebuild(folder, claude_home(environ))
+        target = login._rebuild(folder, claude_home(environ), LINKED)
         account = login._read(login.home(number) / login.CONFIG).get(login.ACCOUNT)
         login._write(target / login.CONFIG, {**login._read(claude_json(environ)), login.ACCOUNT: account})
     if environ.get(binding.REPORT):
