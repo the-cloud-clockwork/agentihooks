@@ -184,7 +184,7 @@ def test_default_collector_follows_the_environment_switch(tmp_path, monkeypatch,
 
 
 def test_checkpoint_completed_during_collection_protects_what_it_references(tmp_path):
-    inventory, holds, collector = _collector(tmp_path)
+    inventory, _, collector = _collector(tmp_path)
     original = inventory.remove
 
     def remove(object_id):

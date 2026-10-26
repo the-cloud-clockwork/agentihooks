@@ -188,6 +188,7 @@ class Collector:
 
     def _execute(self, run_id: str, entries: list[dict]) -> Report:
         settled = {entry["object_id"] for entry in entries[1:]}
+        decisions = self._decisions()
         for object_id in entries[0]["eligible"]:
             if object_id in settled:
                 continue
@@ -202,7 +203,7 @@ class Collector:
         final = self.journal.entries(run_id)[1:]
         deleted = tuple(entry["object_id"] for entry in final if entry["op"] == DELETED)
         skipped = {entry["object_id"]: entry["reason"] for entry in final if entry["op"] == SKIPPED}
-        return Report(run_id, self._decisions(), True, deleted, skipped)
+        return Report(run_id, decisions, True, deleted, skipped)
 
     def _decisions(self) -> dict[str, str]:
         now, objects, checkpoints = self.clock(), self.inventory.objects(), self.inventory.checkpoints()
