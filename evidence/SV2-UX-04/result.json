@@ -14,16 +14,15 @@
   "evidence_class": "mocked: a fakeredis swarm store holding the fixture's delivered pack and its evidence records, read through the ledger page projection and the evidence expand path a ledger API read calls; no ledger HTTP server, browser, brain or cluster runs",
   "integration_gate": "G10",
   "interfaces": [
-    "scripts.swarm.context_view.record(store, slug, task, pack) stores the delivered pack per task; put_evidence(store, slug, ref, evidence) stores one source's record range or lesson revision and refuses to overwrite a revocation; revoke(store, slug, ref, reason) replaces the source with a tombstone naming only ref, brain, kind and reason",
-    "context_view.view(store, slug, now_ms) projects one card per task with brain, purpose, receipt id and freshness (fresh, expired, no receipt), delivery per adapter, omitted references and items labelled transcript evidence, brain synthesis or inferred intent and superseded by their successor; an item from another brain shows no reference or summary; a revoked or missing source shows unavailable with its reason; it carries ledger_evidence_expand_failures by reason",
+    "scripts.swarm.context_view.record(store, slug, task, pack) stores the delivered pack per task and refuses a pack whose brain is not a swarm brain; put_evidence(store, slug, ref, evidence) stores one source's record range or lesson revision and refuses to overwrite a revocation inside a watched Redis transaction, so a write racing a revocation retries and loses; revoke(store, slug, ref, reason) replaces the source with a tombstone naming only ref, brain, kind and reason",
+    "context_view.view(store, slug, now_ms) projects one card per task with brain, purpose, receipt id and freshness (fresh, expired, no receipt), delivery per adapter, the count of omitted references and items labelled transcript evidence, brain synthesis or inferred intent and superseded by their successor; an item from another brain shows only its trust class, with no reference, summary or successor; a revoked or missing source shows unavailable with its reason; it carries ledger_evidence_expand_failures by reason",
     "context_view.expand(store, slug, task, ref) returns the supporting evidence for a reference in the task's pack only when both the item and the stored evidence belong to the task's brain; it refuses not_in_pack (404), forbidden_scope (403), unavailable (410) and revoked (410) and counts each refusal",
     "GET /api/v1/ledgers/<slug>/swarm/context/<task>/<ref> serves expand behind the ledger credential check with Cache-Control no-store; the swarm view carries context; the ledger page renders a foldable, resizable Brain context panel in the Swarm tab after Recovery whose evidence buttons open the evidence inline"
   ],
   "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/7622",
   "limitations": [
     "Nothing records packs or evidence in production yet: the consultation gate that consumes brain receipts must call context_view.record and put_evidence when it delivers a pack",
-    "A personal brain item is never expandable on the ledger; there is no grant path for a personal brain viewer on the swarm ledger",
-    "The revocation tombstone write is check then set, not atomic with a concurrent put_evidence"
+    "A ledger records only packs from a swarm brain and never expands a personal brain item; there is no grant path for a personal brain viewer on the swarm ledger"
   ],
   "measurements": {
     "ledger_evidence_expand_failures": {
@@ -41,7 +40,7 @@
   "package": "SV2-UX-04",
   "package_complete": false,
   "pull_request": "",
-  "rollback": "Hide context inspection panels while preserving core task controls and evidence ids: removing the Brain context panel and the swarm view's context key leaves every task control and the stored packs and evidence untouched. Rehearsed by test_without_context_the_table_says_so, which renders the page with no context and keeps the other panels.",
+  "rollback": "Hide context inspection panels while preserving core task controls and evidence ids: AGENTIHOOKS_CONTEXT_INSPECTION=off on the ledger server makes the swarm view carry context null, the page hides the Brain context panel and its grip, and the evidence read answers 404; stored packs, evidence and every other panel stay as they were. Rehearsed by test_inspection_off_hides_the_projection_and_refuses_the_read and test_with_inspection_off_the_panel_and_its_grip_are_hidden.",
   "states": {
     "accepted": "Pending Standards and Spec review on the pull request",
     "committed": "Case records, manifest and result committed on the task branch; the change reaches dev only when its pull request merges",

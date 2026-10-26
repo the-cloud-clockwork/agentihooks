@@ -3,7 +3,7 @@ import json
 import logging
 import os
 import re
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import parse_qs, unquote, urlsplit
 
 from scripts.swarm_ledger import ledger_closed, ports
 
@@ -66,8 +66,8 @@ def ledger_get(handler: object, services: Services, slug: str, path: str) -> dic
     if path == "swarm/models":
         catalog = services.swarm.models()
         return {"data": catalog, "revision": resources.revision(catalog)}
-    if CONTEXT_RE.fullmatch(path):
-        return context_evidence(services, slug, *path.split("/")[2:])
+    if CONTEXT_RE.fullmatch(unquote(path)):
+        return context_evidence(services, slug, *unquote(path).split("/")[2:])
     if path == "swarm" or path.startswith("swarm/"):
         return resources.swarm_read(services.swarm.status(slug), path, query)
     if WORKSPACE_RE.fullmatch(path):
@@ -95,6 +95,8 @@ def ledger_read(services: Services, slug: str, path: str, query: dict) -> dict:
 def context_evidence(services: Services, slug: str, task: str, ref: str) -> dict:
     from scripts.swarm import context_view
 
+    if not context_view.enabled(os.environ):
+        raise APIError(404, "resource_missing", context_view.OFF)
     try:
         return {"data": context_view.expand(services.swarm.store(), slug, task, ref)}
     except context_view.Refused as refused:

@@ -44,13 +44,15 @@ function receipt(card) {
 }
 
 export function renderContext(sw) {
+  const off = !!sw && sw.context === null;
+  for (const el of [$("context-box"), document.querySelector('[data-row="context-box"]')]) el.hidden = off;
   const cards = contextCards(sw);
   $("context-count").textContent = cards.length ? `${cards.length} ${cards.length === 1 ? "task" : "tasks"}` : "none delivered";
   $("swarm-context").replaceChildren(...(cards.length
     ? cards.map((card) => withId(cells(idCell(card.task), card.brain, card.purpose, receipt(card),
       h("div", { class: "sw-lines" }, ...card.delivery.map((text) => h("span", { text }))),
       h("div", { class: "ctx-items" }, ...card.items.map((item) => itemLine(card, item, sw)),
-        card.omitted.length ? h("span", { class: "ctx-text", text: `${card.omitted.length} omitted: ${card.omitted.join(", ")}` }) : null)),
+        card.omitted ? h("span", { class: "ctx-text", text: `${card.omitted} omitted` }) : null)),
     `context-${card.task}`))
     : [emptyRow(6, "No task has been given brain context yet.")]));
 }

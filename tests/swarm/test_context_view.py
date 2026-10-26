@@ -41,7 +41,7 @@ def test_the_card_names_brain_purpose_receipt_delivery_and_omissions(store):
     assert card["receipt"] == "rcpt-pb10-1"
     assert card["receipt_state"] == cv.FRESH
     assert card["delivery"] == ["claude delivered", "codex unsupported_event"]
-    assert card["omitted"] == ["arc:old-ci-speed"]
+    assert card["omitted"] == 1
 
 
 def test_items_carry_trust_inferred_and_superseded_labels_and_hide_other_brains(store):
@@ -180,3 +180,62 @@ def test_a_revocation_is_terminal_and_a_replayed_write_cannot_restore_the_conten
     held = json.loads(store.redis.hget(store.key(SLUG, cv.EVIDENCE), "session:s-41"))
     assert (held["state"], held["reason"], "records" in held) == ("revoked", "deleted", False)
     assert cv.put_evidence(store, SLUG, "arc:new", {"brain": "swarm:rig", "kind": "arc", "state": "available"}) is True
+
+
+def test_an_item_from_another_brain_keeps_its_successor_private():
+    item = {**FIXTURE["pack"]["items"][2], "brain": "personal:operator"}
+    shown = cv.item_view(item, "swarm:rig", None)
+    assert shown == {
+        "ref": "",
+        "kind": "decision",
+        "labels": ["brain synthesis"],
+        "summary": "",
+        "unavailable": cv.OUTSIDE,
+    }
+
+
+def test_a_ledger_records_only_swarm_brain_packs_and_never_expands_a_personal_one(store):
+    with pytest.raises(ValueError, match=cv.NOT_SWARM):
+        cv.record(store, SLUG, "p1", {**FIXTURE["pack"], "brain": "personal:operator"})
+    assert store.redis.hget(store.key(SLUG, cv.PACKS), "p1") is None
+    personal = {**FIXTURE["pack"], "brain": "personal:operator", "items": [FIXTURE["pack"]["items"][4]]}
+    store.redis.hset(store.key(SLUG, cv.PACKS), "p1", json.dumps(personal))
+    with pytest.raises(cv.Refused) as refused:
+        cv.expand(store, SLUG, "p1", "session:p-7")
+    assert (refused.value.status, refused.value.reason) == (403, "forbidden_scope")
+
+
+def test_the_api_decodes_an_encoded_reference(store):
+    services = SimpleNamespace(swarm=SimpleNamespace(store=lambda: store))
+    path = f"swarm/context/{TASK}/session%3As-41"
+    handler = SimpleNamespace(path=f"/api/v1/ledgers/{SLUG}/{path}", headers={})
+    assert routes.ledger_get(handler, services, SLUG, path)["data"]["first"] == 120
+
+
+def test_inspection_off_hides_the_projection_and_refuses_the_read(store, monkeypatch):
+    from scripts.swarm import commands
+
+    assert cv.enabled({}) is True
+    assert cv.enabled({cv.SWITCH: "off"}) is False
+    monkeypatch.setenv(cv.SWITCH, "off")
+    assert commands.view(store, SLUG)["context"] is None
+    services = SimpleNamespace(swarm=SimpleNamespace(store=lambda: store))
+    with pytest.raises(APIError) as error:
+        routes.context_evidence(services, SLUG, TASK, "arc:merge-queue")
+    assert (error.value.status, error.value.code, str(error.value)) == (404, "resource_missing", cv.OFF)
+
+
+def test_a_write_racing_a_revocation_retries_and_loses(store, monkeypatch):
+    original, calls = cv._held, []
+
+    def racing(pipe, key, ref):
+        held = original(pipe, key, ref)
+        if not calls:
+            calls.append(ref)
+            cv.revoke(store, SLUG, ref, "deleted")
+        return held
+
+    monkeypatch.setattr(cv, "_held", racing)
+    assert cv.put_evidence(store, SLUG, "session:s-41", FIXTURE["evidence"]["session:s-41"]) is False
+    held = json.loads(store.redis.hget(store.key(SLUG, cv.EVIDENCE), "session:s-41"))
+    assert (held["state"], "records" in held) == ("revoked", False)

@@ -47,6 +47,32 @@ def outcome(store: RedisStore, task: str, ref: str) -> dict:
         return {"state": "refused", "status": refused.status, "reason": refused.reason, "text": str(refused)}
 
 
+def recordable(store: RedisStore, pack: dict) -> bool:
+    try:
+        cv.record(store, SLUG, "copied", pack)
+    except ValueError:
+        return False
+    return True
+
+
+def racing_write(store: RedisStore, ref: str, evidence: dict, reason: str) -> bool:
+    """A source write whose read is overtaken by a revocation before it commits."""
+    original, raced = cv._held, []
+
+    def overtaken(pipe, key, held_ref):
+        held = original(pipe, key, held_ref)
+        if not raced:
+            raced.append(held_ref)
+            cv.revoke(store, SLUG, held_ref, reason)
+        return held
+
+    cv._held = overtaken
+    try:
+        return cv.put_evidence(store, SLUG, ref, evidence)
+    finally:
+        cv._held = original
+
+
 def case_a() -> dict:
     found = {}
     for run in ("first", "second"):
@@ -78,6 +104,7 @@ def case_b() -> dict:
         "state_unchanged": protected(store) == before,
         "nothing_disclosed": "private planning notes" not in private and "personal session" not in private,
         "a_new_valid_request_succeeds": outcome(store, data["task"], "arc:merge-queue")["state"] == "expanded",
+        "personal_pack_not_recordable": not recordable(store, {**data["pack"], "brain": "personal:operator"}),
     }
     return {"observed": {"refused": refused, cv.METRIC: cv.failures(store, SLUG)}, "checks": checks}
 
@@ -104,6 +131,7 @@ def case_c() -> dict:
         "page_shows_unavailable": (item["summary"], item["unavailable"]) == ("", reason),
         "replayed_revoke_is_idempotent": held == tombstone,
         "stale_write_cannot_restore": replayed is False and "records" not in json.loads(held),
+        "racing_write_loses": not racing_write(world()[0], "session:s-41", data["evidence"]["session:s-41"], reason),
     }
     return {"observed": {"after": after, "item": item, cv.METRIC: cv.failures(restarted, SLUG)}, "checks": checks}
 

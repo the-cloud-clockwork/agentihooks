@@ -666,6 +666,7 @@ body.resizing-x { cursor: col-resize; user-select: none; }
 .lbl.fresh { color: var(--positive); }
 .lbl.expired, .lbl.no-receipt, .lbl.inferred-intent, .lbl[class*="superseded-by"] { color: var(--warn); }
 #context-table td { vertical-align: top; }
+#context-box[hidden], .sw-grip[hidden] { display: none; }
 .ctx-items { display: flex; flex-direction: column; gap: 6px; max-width: 72ch; }
 .ctx-item { display: flex; flex-direction: column; gap: 2px; }
 .ctx-tags { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }

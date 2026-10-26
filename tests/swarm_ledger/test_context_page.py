@@ -42,7 +42,7 @@ def test_the_context_row_shows_brain_purpose_receipt_delivery_and_labelled_items
     assert "INFERRED INTENT" in item(page, 1).inner_text()
     assert "SUPERSEDED BY DECISION:QUEUE-V2" in item(page, 2).inner_text()
     assert "TRANSCRIPT EVIDENCE" in item(page, 3).inner_text()
-    assert "1 omitted: arc:old-ci-speed" in row[5]
+    assert "1 omitted" in row[5] and "arc:old-ci-speed" not in row[5]
 
 
 def test_an_item_from_another_brain_shows_no_reference_summary_or_evidence_button(open_page):
@@ -87,3 +87,10 @@ def test_without_context_the_table_says_so(open_page):
     page = open_page(status())
     assert page.table("swarm-context") == [["No task has been given brain context yet."]]
     assert page.text("#context-count").lower() == "none delivered"
+
+
+def test_with_inspection_off_the_panel_and_its_grip_are_hidden(open_page):
+    page = open_page(status(context=None))
+    assert page.tab.locator("#context-box").is_hidden()
+    assert page.tab.locator('[data-row="context-box"]').is_hidden()
+    assert page.tab.locator("#recovery-box").is_visible()

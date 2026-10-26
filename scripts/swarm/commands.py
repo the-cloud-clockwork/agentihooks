@@ -141,7 +141,7 @@ def view(store: RedisStore, slug: str) -> dict:
         "ledger_state_projection_errors": errors,
         "lifecycle": lifecycle.view(store, slug),
         "recovery": recovery_view.view(store, slug, now),
-        "context": context_view.view(store, slug, now),
+        "context": context_view.view(store, slug, now) if context_view.enabled(os.environ) else None,
     }
 
 
