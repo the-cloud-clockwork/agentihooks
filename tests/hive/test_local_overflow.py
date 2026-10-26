@@ -552,6 +552,8 @@ def test_a_wait_pinned_to_another_workstation_or_not_for_a_seat_reserves_nothing
     local_agents(setup, 7)
     pinned_wait(setup, "watched", "elsewhere", machine="another-workstation")
     pinned_wait(setup, "watched", "gpu", reason=NEEDS_CAPABILITY.format(needs="gpu"))
+    pinned_wait(setup, "watched", "quota", reason="no advertised Claude account has room")
+    pinned_wait(setup, "watched", "repo", reason="no hive for eng lists the repo agentihooks")
     assert fenced.placement_refusal("eng", {"id": "task"}) == ""
 
 

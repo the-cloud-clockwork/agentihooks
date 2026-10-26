@@ -1,6 +1,6 @@
 import json
 
-from scripts.hive.placement import HAS_ROOM, NEEDS_WORKSTATION, NO_UI_HIVE
+from scripts.hive.placement import HAS_ROOM, HIVE, NEEDS_WORKSTATION, NO_UI_HIVE
 from scripts.swarm.health.findings import Finding
 from scripts.swarm.store import RedisStore
 
@@ -53,7 +53,10 @@ def workstation_waiting(store: RedisStore, machine: str, now: int, own: str) -> 
         for task, row in read(store, slug).items()
         if row.get("workstation") == machine
         and now - row["seen_at"] < FRESH_MS
-        and (f" {HAS_ROOM}" in row["reason"] or row["reason"] == NEEDS_WORKSTATION)
+        and (
+            (row["reason"].startswith(f"no {HIVE} ") and f" {HAS_ROOM}" in row["reason"])
+            or row["reason"] == NEEDS_WORKSTATION
+        )
         and f"{slug}/{task}" != own
     )
 
