@@ -293,9 +293,7 @@ def _dependency_errors(phases: list[dict], existing: set[str]) -> list[str]:
     for position, phase in enumerate(phases, 1):
         resolved = []
         for dep in phase.get("depends_on", []):
-            if isinstance(dep, bool) or not isinstance(dep, (int, str)):
-                errors.append(f"phase {position} depends_on entries must be an integer position or an id string")
-            elif isinstance(dep, int):
+            if isinstance(dep, int):
                 if 1 <= dep <= len(phases):
                     resolved.append(dep)
                 else:
