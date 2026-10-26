@@ -117,9 +117,10 @@ def held(fragment):
 def test_no_fragment_keeps_encoded_text_and_the_document_is_encoded_when_read():
     state = {"title": "é", "tasks": [{"id": "one"}], "_meta": {"events": [{"rev": 1}], "stamps": {"a": {"rev": 1}}}}
     root = document(state)
-    kept = [name for item in held(root) for name in Fragment.__slots__ if name != "value"]
-    assert [name for item in held(root) for name in kept if isinstance(getattr(item, name, None), str)] == []
-    assert len(list(held(root))) == 8
+    fragments = list(held(root))
+    assert len(fragments) == 9
+    names = [name for name in Fragment.__slots__ if name != "value"]
+    assert [name for item in fragments for name in names if isinstance(getattr(item, name), str)] == []
     assert encoded(root) == encode(state)
     assert encoded(root.parts["tasks"].parts[0]) == encode({"id": "one"})
 
