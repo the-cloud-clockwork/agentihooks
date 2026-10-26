@@ -325,6 +325,8 @@ def test_codex_app_server_on_a_hive_reads_its_model_from_the_config_override(hiv
     assert live_binding.read(agent, 42, proc)["model"] == "gpt-6.1-sol"
     (root / "cmdline").write_bytes(b"codex\0app-server\0")
     assert live_binding.read(agent, 42, proc)["model"] == "gpt-5"
+    (root / "cmdline").write_bytes(b'codex\0-c\0model="gpt-7"\0')
+    assert live_binding.read(agent, 42, proc)["model"] == "gpt-7"
 
 
 def test_codex_hive_agent_with_no_model_reading_is_unknown_not_mismatched(hive_codex, ticking):
@@ -337,11 +339,16 @@ def test_codex_hive_agent_with_no_model_reading_is_unknown_not_mismatched(hive_c
     assert live_binding.record(store, "sw", agent, facts, 5) == {}
     report = json.loads(store.redis.hget(store.key("sw", "live-bindings"), agent.name))
     assert (report["state"], report["unobserved"]) == ("matching", {"model": "gpt-6.1-sol", "effort": "high"})
-    assert [(f.subject, f.summary, f.evidence) for f in live_binding.findings(store, "sw")] == [
+    assert [(f.as_dict(), f.measure) for f in live_binding.findings(store, "sw")] == [
         (
-            f"{agent.name}/{field}",
-            f"{agent.name} has no observed {field}",
-            (f"expected {expected}; observed none, so it is unknown and never retires the agent",),
+            {
+                "kind": "live binding",
+                "subject": f"{agent.name}/{field}",
+                "summary": f"{agent.name} has no observed {field}",
+                "evidence": [f"expected {expected}; observed none, so it is unknown and never retires the agent"],
+                "threshold": "assigned launch must be observed",
+            },
+            1,
         )
         for field, expected in (("model", "gpt-6.1-sol"), ("effort", "high"))
     ]
