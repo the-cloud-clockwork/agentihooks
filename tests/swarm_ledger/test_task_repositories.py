@@ -187,6 +187,26 @@ def test_repository_publication_branches_are_persisted():
     assert state["tasks"][0]["repository_branches"] == branches
 
 
+@pytest.mark.parametrize("corrected", ["recorded", ""])
+def test_a_corrected_top_level_branch_keeps_its_repository_entry_in_step(corrected):
+    add = {"op": "task_add", "id": "add", "by": "swarm", "task": "t1", "title": "continue", "lane": "ci"}
+    add["repository_branches"] = {"/workspace/agentihooks": "predecessor", "/workspace/bundle": "bundle-work"}
+    core.check_op(add)
+    core.sync(SLUG, ops=[add])
+    first = {"op": "task_update", "id": "first", "by": "swarm", "item": "tasks/t1", "fields": {"branch": "predecessor"}}
+    core.check_op(first)
+    core.sync(SLUG, ops=[first])
+    fix = {"op": "task_update", "id": "fix", "by": "swarm", "item": "tasks/t1", "fields": {"branch": corrected}}
+    core.check_op(fix)
+    state, rejected = core.sync(SLUG, ops=[fix])
+    assert rejected == []
+    expected = {"/workspace/bundle": "bundle-work"}
+    if corrected:
+        expected["/workspace/agentihooks"] = corrected
+    assert state["tasks"][0]["branch"] == corrected
+    assert state["tasks"][0]["repository_branches"] == expected
+
+
 @pytest.mark.parametrize(
     "branches", ([], {"relative": "branch"}, {"/repo": None}, {"/repo": ""}, {"/repo": "bad branch"})
 )
