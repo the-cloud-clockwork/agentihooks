@@ -200,6 +200,7 @@ def test_consumers_read_provenance_only_while_active(world):
     assert world.migrator.provenance(world.domain, "s-attributed-e1") == {
         "trust_class": "original",
         "project_state": "attributed",
+        "recorded": True,
     }
     assert world.migrator.provenance(world.domain, "missing") is None
     assert world.migrator.provenance("other-domain", "s-attributed-e1") is None
@@ -207,6 +208,21 @@ def test_consumers_read_provenance_only_while_active(world):
     with pytest.raises(Conflict, match="not active"):
         world.migrator.provenance(world.domain, "s-attributed-e1")
     assert provenance_rows(world) == 9
+
+
+@pytest.mark.parametrize(("uid", "project_state"), [("s-unattributed", "unknown"), ("s-attributed", "attributed")])
+def test_a_previous_writer_after_activation_reads_as_unrecorded(world, uid, project_state):
+    world.migrator.add()
+    world.backfill()
+    world.staged("verify")
+    world.staged("activate")
+    world.previous_write(uid, "g1", range(20, 21))
+    assert world.migrator.provenance(world.domain, f"{uid}-e20") == {
+        "trust_class": "original",
+        "project_state": project_state,
+        "recorded": False,
+    }
+    assert world.migrator.status()["migration_rows_remaining"] == 1
 
 
 def test_deactivate_needs_an_active_migration(world):
@@ -251,7 +267,7 @@ def test_startup_without_index_tables_blocks_nothing(tmp_path):
     migrator = migrations.Migrator(catalog)
     assert migrator.startup()["blocked"] == []
     approval = migrations.Approval("op", "operator", migrations.DIMENSION, "d", "g")
-    assert migrator.dimensions.drop(approval, 1.0) == {"dropped": [], "requeued": 0}
+    assert migrator.dimensions.drop(approval, 1.0) == {"dropped": [], "requeued": []}
     catalog.close()
 
 
@@ -279,7 +295,7 @@ def test_operator_approval_drops_only_scoped_mismatches_and_requeues_them(world)
         "content_hash, model, dimension, vector FROM chunk_vector WHERE chunk_id = 'c-current'"
     )
     answer = world.migrator.dimensions.drop(world.approval(), 42.0)
-    assert answer == {"dropped": ["c-legacy-1", "c-legacy-2"], "requeued": 2}
+    assert answer == {"dropped": ["c-legacy-1", "c-legacy-2"], "requeued": ["c-legacy-1", "c-legacy-2"]}
     assert world.vectors() == [["c-current", 3], ["c-current", 3]]
     assert world.work() == [["c-legacy-1", 42.0], ["c-legacy-2", 42.0]]
     queued = world.catalog.db.execute(
@@ -292,6 +308,14 @@ def test_operator_approval_drops_only_scoped_mismatches_and_requeues_them(world)
     ]
     blocked = world.migrator.dimensions.blocked()
     assert [(item["index_generation"], item["mismatched_vectors"]) for item in blocked] == [("idx-v2", 1)]
+
+
+@pytest.mark.parametrize("state", ["restricted", "deleted"])
+def test_operator_drop_never_requeues_a_session_that_is_not_retained(world, state):
+    world.catalog.set_state(world.domain, "s-unattributed", state, 1, 10.0)
+    answer = world.migrator.dimensions.drop(world.approval(), 42.0)
+    assert answer == {"dropped": ["c-legacy-1", "c-legacy-2"], "requeued": ["c-legacy-1"]}
+    assert world.work() == [["c-legacy-1", 42.0]]
 
 
 def test_interrupted_backfill_rolls_back_its_open_batch(world):

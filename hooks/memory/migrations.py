@@ -58,8 +58,12 @@ CHECKS = {
     ),
 }
 PROVENANCE_ROW = (
-    "SELECT trust_class, project_state FROM session_event_provenance WHERE access_domain = ? AND event_id = ?"
+    f"SELECT COALESCE(p.trust_class, '{ORIGINAL}'), COALESCE(p.project_state, "
+    f"CASE WHEN e.project_id IS NULL THEN '{UNKNOWN_PROJECT}' ELSE '{ATTRIBUTED}' END), p.event_id IS NOT NULL "
+    "FROM session_event e LEFT JOIN session_event_provenance p "
+    "ON p.access_domain = e.access_domain AND p.event_id = e.event_id WHERE e.access_domain = ? AND e.event_id = ?"
 )
+PROVENANCE_KEYS = ("trust_class", "project_state", "recorded")
 INDEX_TABLES = (
     "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name IN ('chunk_vector', 'index_generation')"
 )
@@ -72,8 +76,9 @@ MISMATCHES = (
     "GROUP BY g.access_domain, g.index_generation, g.dimension ORDER BY g.access_domain, g.index_generation"
 )
 MISMATCHED = (
-    f"SELECT v.chunk_id, v.session_uid, v.chunker_version, v.content_hash {MISMATCH_JOIN} "
-    "AND v.access_domain = ? AND v.index_generation = ? ORDER BY v.chunk_id"
+    f"SELECT v.chunk_id, v.session_uid, v.chunker_version, v.content_hash, EXISTS (SELECT 1 FROM session_record r "
+    "WHERE r.access_domain = v.access_domain AND r.session_uid = v.session_uid AND r.state = 'retained') "
+    f"{MISMATCH_JOIN} AND v.access_domain = ? AND v.index_generation = ? ORDER BY v.chunk_id"
 )
 STALE_CURSOR = "the migration cursor revision is stale; nothing changed"
 NOT_ADDED = "the migration schema has not been added"
@@ -115,13 +120,16 @@ class VectorDimensions:
             raise Conflict(UNAUTHORIZED)
         index = (approval.access_domain, approval.index_generation)
         if not self._indexed():
-            return {"dropped": [], "requeued": 0}
+            return {"dropped": [], "requeued": []}
         with self.catalog._transaction():
             rows = self.db.execute(MISMATCHED, index).fetchall()
-            for chunk_id, session_uid, chunker_version, content_hash in rows:
+            requeued = []
+            for chunk_id, session_uid, chunker_version, content_hash, retained in rows:
                 self.db.execute(DROP_VECTOR, (*index, chunk_id))
-                self.db.execute(QUEUE, (*index, chunk_id, session_uid, chunker_version, content_hash, now))
-        return {"dropped": [row[0] for row in rows], "requeued": len(rows)}
+                if retained:
+                    self.db.execute(QUEUE, (*index, chunk_id, session_uid, chunker_version, content_hash, now))
+                    requeued.append(chunk_id)
+        return {"dropped": [row[0] for row in rows], "requeued": requeued}
 
 
 class Migrator:
@@ -225,7 +233,7 @@ class Migrator:
         if (self._ledger() or {}).get("state") != ACTIVE:
             raise Conflict(INACTIVE)
         row = self.db.execute(PROVENANCE_ROW, (domain, event_id)).fetchone()
-        return {"trust_class": row[0], "project_state": row[1]} if row else None
+        return {**dict(zip(PROVENANCE_KEYS, row)), "recorded": bool(row[2])} if row else None
 
     def startup(self) -> dict:
         added = [PROVENANCE] if self.add() else []

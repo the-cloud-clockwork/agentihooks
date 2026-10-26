@@ -6,12 +6,20 @@ import time
 from collections.abc import Callable
 
 from hooks.memory.catalog import Catalog
-from hooks.memory.migrations import DIMENSION, Approval, Migrator
+from hooks.memory.migrations import DIMENSION, OPERATOR, Approval, Migrator
+from scripts.gates.base import Who
 
 STAGED = ("backfill", "verify", "activate", "deactivate")
+AGENT = "agent"
 
 
-def _run(migrator: Migrator, args: argparse.Namespace, now: float) -> dict:
+def approval(who: Who, domain: str, generation: str) -> Approval:
+    if who.name or who.swarm:
+        return Approval(who.name or who.swarm, AGENT, DIMENSION, domain, generation)
+    return Approval(OPERATOR, OPERATOR, DIMENSION, domain, generation)
+
+
+def _run(migrator: Migrator, args: argparse.Namespace, now: float, who: Who | None) -> dict:
     if args.command == "status":
         return {**migrator.status(), "blocked": migrator.dimensions.blocked()}
     if args.command == "startup":
@@ -20,31 +28,29 @@ def _run(migrator: Migrator, args: argparse.Namespace, now: float) -> dict:
         return migrator.backfill(args.revision, args.batch_size, args.max_batches)
     if args.command in STAGED:
         return getattr(migrator, args.command)(args.revision)
-    approval = Approval(args.actor, args.role, DIMENSION, args.domain, args.generation)
-    return migrator.dimensions.drop(approval, now)
+    caller = Who.from_env() if who is None else who
+    return migrator.dimensions.drop(approval(caller, args.domain, args.generation), now)
 
 
-def main(argv: list[str] | None = None, clock: Callable[[], float] | None = None) -> int:
+def main(argv: list[str] | None = None, clock: Callable[[], float] | None = None, who: Who | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("command", choices=("status", "startup", *STAGED, "drop-vectors"))
     parser.add_argument("catalog")
     parser.add_argument("--revision", type=int)
     parser.add_argument("--batch-size", type=int, default=500)
     parser.add_argument("--max-batches", type=int, default=20)
-    parser.add_argument("--actor")
-    parser.add_argument("--role")
     parser.add_argument("--domain")
     parser.add_argument("--generation")
     args = parser.parse_args(argv)
     if (args.command in STAGED) != (args.revision is not None):
         parser.error("--revision is given with backfill, verify, activate and deactivate and only with them")
-    given = [value is not None for value in (args.actor, args.role, args.domain, args.generation)]
+    given = [value is not None for value in (args.domain, args.generation)]
     misplaced = not all(given) if args.command == "drop-vectors" else any(given)
     if misplaced:
-        parser.error("--actor, --role, --domain and --generation are given with drop-vectors and only with it")
+        parser.error("--domain and --generation are given with drop-vectors and only with it")
     catalog = Catalog(args.catalog)
     try:
-        answer = _run(Migrator(catalog), args, time.time() if clock is None else clock())
+        answer = _run(Migrator(catalog), args, time.time() if clock is None else clock(), who)
     finally:
         catalog.close()
     print(json.dumps(answer, sort_keys=True))

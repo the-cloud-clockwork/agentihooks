@@ -176,6 +176,7 @@ def refused(call) -> str:
 def migrate(root: Path) -> dict:
     world = World(root)
     before = {"events": world.events(), "previous_reader": world.previous_reader(), "vectors": world.vectors()}
+    before_rows, previous_rows = before["events"], world.catalog.db.execute(PREVIOUS_READER).fetchall()
     started = world.migrator.startup()
     window = world.window()
     after_window = world.migrator.status()["migration_rows_remaining"]
@@ -183,7 +184,12 @@ def migrate(root: Path) -> dict:
     verified = world.staged("verify")
     active = world.staged("activate")
     after = world.events()
-    unchanged = all(after[uid][: len(rows)] == rows for uid, rows in before["events"].items())
+    unchanged = all(after[uid][: len(rows)] == rows for uid, rows in before_rows.items())
+    after_rows = world.catalog.db.execute(PREVIOUS_READER).fetchall()
+    late = world.doc["window"]["previous_writer"]
+    sequence = len(after["s-unattributed"]) + 1
+    world.previous_write(late["session_uid"], late["source_generation"], range(sequence, sequence + 1))
+    late_id = f"{late['session_uid']}-e{sequence}"
     return {
         "before": before,
         "startup": {"added": started["added"], "status": stage(started["status"]), "blocked": started["blocked"]},
@@ -194,6 +200,12 @@ def migrate(root: Path) -> dict:
         "provenance": world.provenance(),
         "previous_reader_after": world.previous_reader(),
         "previous_events_unchanged": unchanged,
+        "previous_rows_unchanged": all(row in after_rows for row in previous_rows),
+        "previous_writer_after_activation": {
+            "event_id": late_id,
+            "provenance": world.migrator.provenance(world.domain, late_id),
+            "migration_rows_remaining": world.migrator.status()["migration_rows_remaining"],
+        },
         "unattributed_project_ids": sorted({pid for _, pid in after["s-unattributed"]}, key=str),
         "vectors_after": world.vectors(),
     }

@@ -41,7 +41,9 @@ rewritten. When the cursor reaches the end while rows still lack provenance, it 
 source generation is not registered), `orphan_provenance` (provenance without its event), `inconsistent_provenance`
 and `rows_lost` against the count recorded at add. Every value must be zero.
 
-`Migrator.provenance(domain, event_id)` refuses while the migration is not `active`.
+`Migrator.provenance(domain, event_id)` refuses while the migration is not `active`. Once active, an event a
+previous writer added after activation reads with `recorded` false and the values the backfill would derive from
+the event itself; it still counts in `migration_rows_remaining` until the next backfill.
 
 ## Vector dimension
 
@@ -51,7 +53,8 @@ A vector stored with a dimension other than its index generation's is a mismatch
 never change a vector.
 
 `VectorDimensions.drop(approval, now)` deletes the mismatched vectors of one access domain and index generation
-and queues their chunks for embedding again. It runs only with an `Approval` whose role is `operator` and that
+and queues the chunks of retained sessions for embedding again; a restricted or deleted session's vectors are
+dropped and never queued. It runs only with an `Approval` whose role is `operator` and that
 names an actor, `0002-vector-dimension`, the access domain and the index generation. A refusal changes nothing and names no scope. A model with another dimension
 otherwise gets its own index generation, which leaves the old vectors in place.
 
@@ -62,8 +65,11 @@ python -m scripts.swarm_v2.migrations status CATALOG
 python -m scripts.swarm_v2.migrations startup CATALOG
 python -m scripts.swarm_v2.migrations backfill CATALOG --revision N [--batch-size 500] [--max-batches 20]
 python -m scripts.swarm_v2.migrations verify|activate|deactivate CATALOG --revision N
-python -m scripts.swarm_v2.migrations drop-vectors CATALOG --actor A --role operator --domain D --generation G
+python -m scripts.swarm_v2.migrations drop-vectors CATALOG --domain D --generation G
 ```
+
+`drop-vectors` takes its approval from the session identity: an operator shell, with no agent name and no swarm,
+approves as `operator`; an agent session approves as `agent` and is refused.
 
 ## Compatibility window and rollback
 
