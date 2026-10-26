@@ -1,0 +1,52 @@
+{
+  "package": "SV2-GAT-02",
+  "dependencies": [
+    "SV2-GAT-01"
+  ],
+  "dependency_evidence": "SV2-GAT-01 merged into dev as pull request 7417; this package asks the brain that route selected and never chooses one itself.",
+  "integration_gate": "G6",
+  "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/7478",
+  "pull_request": "pending",
+  "package_complete": false,
+  "evidence_class": "mocked: an in-process fake brain HTTP surface answering the fixture's scoped, legacy, empty, refused and outage responses stands in for brain-api; hooks run in a temporary home with a fake clock; no network call runs",
+  "interfaces": [
+    "hooks.context.project_memory.KernelProjectSource.fetch(identity) asks GET /feed?project=<canonical project id> on the session brain and maps the kernel's arcs and lessons into ProjectMemory with the kernel feed revision, keeping only rows whose projects list is exactly the requested project",
+    "An identity with an unknown project id is scoped empty and is never sent to the kernel",
+    "Only the legacy fleet feed shape (hot_arcs, inject_blocks or entries and no scope field) falls back to VaultProjectSource, the reconstruction from the stored fleet feed; each such refresh counts once as legacy_endpoint in scoped_feed_fallback_total",
+    "A refusal (401 or 403) or an answer whose scope or project id differs from the request raises ScopedFeedRefused; the project cache then stores empty memory, so earlier memory stops being served and no fleet memory replaces it",
+    "A transport failure or another HTTP error raises BrainSourceUnavailable; the cached memory of the same brain and project is kept, marked with outage_at, counted as kernel_outage, and served with a Stale project memory line until BRAIN_PROJECT_MEMORY_STALE_SECONDS (default 86400) past its last refresh, then no memory is served",
+    "hooks.context.project_cache keys the project memory cache by the session brain and the canonical project id (_project_scope) and stores the kernel revision with the memory",
+    "BRAIN_PROJECT_FEED_SOURCE=vault selects the previous VaultProjectSource",
+    "hooks.context.brain_adapter.get_status, the brain_status tool, reports scoped_feed_fallback_total"
+  ],
+  "supported_versions": {
+    "python": "3.11 and later",
+    "brain_api": "agentibrain-kernel brain-api with GET /feed?project= (project_feed_payload, scope project); older brain-api answering the plain fleet feed is the legacy endpoint"
+  },
+  "states": {
+    "observed": "pending CI run",
+    "accepted": "A refresh is accepted when the kernel answers scope project for the requested canonical project id; the memory and revision are then written to the project cache under the session brain and project namespace.",
+    "committed": "The project memory cache file and the scoped_feed_fallback_total counter file under the agentihooks home are the only writes; the fleet feed cache is never written by a project refresh.",
+    "externally_verified": "Not yet: no deployed session read a project feed from a live brain-api; a live check belongs to the G6 rollout gate."
+  },
+  "metrics": {
+    "scoped_feed_fallback_total": "per reason counts in $AGENTIHOOKS_HOME/brain/project-memory/scoped_feed_fallback_total.json: legacy_endpoint for a refresh served by the vault reconstruction because the brain answered the legacy fleet feed, kernel_outage for a refresh that kept stale cached memory; a scoped empty or refused result never counts"
+  },
+  "cases": {
+    "a": "evidence/SV2-GAT-02/a-result.json",
+    "b": "evidence/SV2-GAT-02/b-result.json",
+    "c": "evidence/SV2-GAT-02/c-result.json"
+  },
+  "rollback_rehearsal": {
+    "action": "Set BRAIN_PROJECT_FEED_SOURCE=vault to switch the source adapter back to the reconstruction from the fleet feed; marker provenance is untouched and the strict client filter on the identity project stays in VaultProjectSource.",
+    "authoritative_objects": "The brain's own project snapshots and markers; the project memory cache and the fallback counter are derived and are never treated as authoritative.",
+    "proof": "test_the_source_setting_selects_the_kernel_by_default_and_the_vault_for_rollback selects VaultProjectSource when the setting is vault and KernelProjectSource otherwise."
+  },
+  "remaining_limitations": [
+    "Kernel decisions and signals in the project feed are not rendered; the project block still carries arcs and lessons only.",
+    "Fleet warnings in the project feed are not rendered in the project block; shared warnings keep reaching sessions through the fleet feed broadcast.",
+    "The project cache still refreshes when the fleet feed hash changes or its TTL expires, so a project revision change between those points is picked up at the next refresh."
+  ],
+  "compatibility": "Compared with the preceding accepted path, VaultProjectSource reconstruction from the stored fleet feed: it stays reachable through a legacy brain-api answer and through BRAIN_PROJECT_FEED_SOURCE=vault.",
+  "authority": "The project comes only from the session's resolved canonical project identity; the brain-api enforces the token's project grant and the client refuses any answer naming another project."
+}
