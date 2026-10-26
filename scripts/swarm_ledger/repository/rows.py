@@ -142,7 +142,7 @@ def read_rows(connection, slug: str) -> dict:
 
 
 def load(connection, slug: str) -> object:
-    """assemble(read_rows(connection, slug)) without holding every stored row at once."""
+    """assemble(read_rows(connection, slug)) without first collecting every stored row and its raw value text."""
     containers = {}
     for table in TABLES:
         for path, kind in connection.execute(f"SELECT path, kind FROM {table} WHERE slug=? AND kind<>'value'", (slug,)):
