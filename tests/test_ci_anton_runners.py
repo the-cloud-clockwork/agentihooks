@@ -84,6 +84,7 @@ MOVED = {
     ("test.yml", "coverage-ratchet"): LIGHT,
     ("test.yml", "flake-budget"): LIGHT,
     ("test.yml", "gate-required"): LIGHT,
+    ("test.yml", "install-smoke"): LIGHT,
     ("test.yml", "kind-due"): QUEUED,
     ("test.yml", "lint"): QUEUED,
     ("test.yml", "mutation"): BATCH,

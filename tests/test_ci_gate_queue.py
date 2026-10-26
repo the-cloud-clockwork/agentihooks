@@ -27,6 +27,7 @@ def complete():
         "worker-image",
         "brain-smoke",
         "writer-lock",
+        "install-smoke",
         "kind-due",
         "helm-kind",
         "semgrep",

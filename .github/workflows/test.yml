@@ -181,6 +181,71 @@ jobs:
     needs: [reuse, admission]
     uses: ./.github/workflows/writer-lock.yml
 
+  install-smoke:
+    if: ${{ !cancelled() && (github.event_name == 'push' || github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch') && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') }}
+    needs: [reuse, admission]
+    runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && 'anton-oss-light' || 'ubuntu-latest' }}
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: astral-sh/setup-uv@v10.2.0
+        with:
+          version: '0.12.23'
+          checksum: '9167d72b3319674b6303c4cbe071854bba13ebdf3d76b1a7cbdc175471fb66d6'
+          enable-cache: false
+
+      - name: Build the wheel
+        env:
+          SETUPTOOLS_SCM_PRETEND_VERSION: "0.0.0"
+        run: bash .github/scripts/pypi-retry.sh "Build the wheel" -- uv build --wheel --out-dir "$RUNNER_TEMP/dist"
+
+      - name: Install the wheel into a clean venv
+        run: |
+          uv venv --python 3.12 "$RUNNER_TEMP/clean"
+          wheel=$(ls "$RUNNER_TEMP"/dist/agentihooks-*.whl)
+          bash .github/scripts/pypi-retry.sh "Install the wheel" -- uv pip install --python "$RUNNER_TEMP/clean/bin/python" "$wheel[all]"
+
+      - name: Run the installed command and import every module
+        working-directory: ${{ runner.temp }}
+        env:
+          HOME: ${{ runner.temp }}/home
+        run: |
+          mkdir -p "$HOME"
+          "$RUNNER_TEMP/clean/bin/agentihooks" --help > /dev/null
+          "$RUNNER_TEMP/clean/bin/python" -I - <<'EOF'
+          import importlib
+          import pkgutil
+          import sys
+          import traceback
+
+          failed = []
+          count = 0
+          for top in ("hooks", "scripts"):
+              package = importlib.import_module(top)
+              if not package.__file__.startswith(sys.prefix):
+                  sys.exit(f"{top} imported from {package.__file__}, not the clean venv")
+              for module in pkgutil.walk_packages(package.__path__, f"{top}.", onerror=failed.append):
+                  if module.name.endswith(".__main__"):
+                      continue
+                  count += 1
+                  try:
+                      importlib.import_module(module.name)
+                  except BaseException:
+                      failed.append(module.name)
+                      traceback.print_exc()
+          for name in failed:
+              print(f"::error title=Install smoke::{name} does not import from the installed wheel")
+          print(f"Imported {count - len(failed)} of {count} modules from the installed wheel")
+          sys.exit(1 if failed else 0)
+          EOF
+
   ledger-load:
     needs: [reuse, admission]
     if: ${{ !cancelled() && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') }}
@@ -2659,7 +2724,7 @@ jobs:
 
   # Reports only: it fails when it cannot read the run, never because a stage ran slow.
   stage-budget:
-    needs: [select, split, unit, unit-lost, unit-rerun, unit-selected, shard-check, test-count, coverage-ratchet, lint, docs, sonar, mutation-plan, mutation-stats, mutation, swarm-image, worker-image, brain-smoke, writer-lock, kind-due, helm-kind, semgrep, ledger-load, reuse]
+    needs: [select, split, unit, unit-lost, unit-rerun, unit-selected, shard-check, test-count, coverage-ratchet, lint, docs, sonar, mutation-plan, mutation-stats, mutation, swarm-image, worker-image, brain-smoke, writer-lock, install-smoke, kind-due, helm-kind, semgrep, ledger-load, reuse]
     if: ${{ always() && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') }}
     runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && 'anton-oss-light' || 'ubuntu-latest' }}
     timeout-minutes: 3
@@ -2732,7 +2797,7 @@ jobs:
 
   gate-required:
     name: ${{ github.event_name == 'merge_group' && 'Queue gate summary' || 'Gate — Required' }}
-    needs: [select, split, unit, unit-lost, unit-rerun, unit-selected, shard-check, test-count, coverage-ratchet, lint, docs, sonar, mutation-plan, mutation-stats, mutation, swarm-image, worker-image, brain-smoke, writer-lock, kind-due, helm-kind, semgrep, ledger-load, stage-budget, reuse, queue-fail-fast]
+    needs: [select, split, unit, unit-lost, unit-rerun, unit-selected, shard-check, test-count, coverage-ratchet, lint, docs, sonar, mutation-plan, mutation-stats, mutation, swarm-image, worker-image, brain-smoke, writer-lock, install-smoke, kind-due, helm-kind, semgrep, ledger-load, stage-budget, reuse, queue-fail-fast]
     if: ${{ always() }}
     runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && 'anton-oss-light' || 'ubuntu-latest' }}
     timeout-minutes: 5
@@ -2758,7 +2823,7 @@ jobs:
               | (if $event == "merge_group" then
                 ["select", "split", "shard-check", "test-count"]
               else
-                ["select", "test-count", "lint", "docs", "semgrep", "sonar", "writer-lock"]
+                ["select", "test-count", "install-smoke", "lint", "docs", "semgrep", "sonar", "writer-lock"]
                 + (if $scope == "full" then ["split", "unit", "shard-check"] elif $scope == "selected" then ["unit-selected"] else [] end)
                 + (if $mutation == "true" then ["mutation-plan", "mutation-stats"] + (if $inline == "true" then [] else ["mutation"] end) else [] end)
               end) as $required
