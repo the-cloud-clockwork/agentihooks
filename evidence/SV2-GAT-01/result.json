@@ -25,7 +25,7 @@
     "swarm_binding": "the swarm-brain-binding document read by scripts.swarm.brain_binding"
   },
   "states": {
-    "observed": "Cases A, B and C each ran twice from independent temporary folders with identical records.",
+    "observed": "Cases A, B and C each ran twice from independent temporary folders with identical records in https://github.com/the-cloud-clockwork/agentihooks/actions/runs/40260788699 at 57ec60e638cbc4e8f08539c6af46111fd1a10f6a, with every pull request check green including the changed line mutation shards.",
     "accepted": "A session route is accepted when the routes file, endpoint, allow list and credential pass; its receipt is set in the session environment.",
     "committed": "The receipt file per session and the failure log are the only writes; the routes file and the swarm binding are never written.",
     "externally_verified": "Not yet: no deployed session talked to a brain through a route; a live check belongs to the G6 rollout gate."

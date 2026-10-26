@@ -10,5 +10,6 @@
   },
   "package": "SV2-GAT-01",
   "red_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/40258538484",
-  "tested_commit": "ebb73c822185666a16b8b9de685356d042452fa8"
+  "tested_commit": "57ec60e638cbc4e8f08539c6af46111fd1a10f6a",
+  "run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/40260788699"
 }
