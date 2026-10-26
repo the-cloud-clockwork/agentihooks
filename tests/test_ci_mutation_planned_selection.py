@@ -725,6 +725,10 @@ def test_only_the_jobs_running_recorded_tests_decide_a_collection_change(edit, e
     assert plan.collection_changed(old, yaml.safe_dump(edit)) is expected
     assert plan.collection_changed(old, old) is False
     assert plan.collection_changed(old, "jobs: [") is True
+    unit_only = yaml.safe_dump({"jobs": {"unit": UNIT_JOBS["unit"]}})
+    assert (
+        plan.collection_changed(unit_only, yaml.safe_dump({"jobs": {"unit": UNIT_JOBS["unit"], "lint": {}}})) is False
+    )
 
 
 @pytest.mark.parametrize(
@@ -739,6 +743,19 @@ def test_only_the_jobs_running_recorded_tests_decide_a_collection_change(edit, e
         ("", {"scripts/uses.py": "from tests.helpers import H\n"}, "tests/helpers.py", False),
         ("", {"tests/__init__.py": "X = 1\n"}, "tests/__init__.py", False),
         ("", {"tests/nested/conftest.py": "X = 1\n"}, "tests/nested/conftest.py", True),
+        (
+            "from tests.chain import H\n",
+            {"tests/chain.py": "from tests.helpers import H\n", "tests/helpers.py": "from tests.chain import H\n"},
+            "tests/helpers.py",
+            False,
+        ),
+        ("import tests.pkg\n", {"tests/pkg/__init__.py": "X = 1\n"}, "tests/pkg/__init__.py", False),
+        (
+            "",
+            {"tests/test_unrelated.py": "X = 1\n", "scripts/uses.py": "from tests.test_unrelated import X\n"},
+            "tests/test_unrelated.py",
+            True,
+        ),
         ("", {}, "tests/helpers.py", True),
         ("from tests.helpers_extra import H\n", {"tests/helpers_extra.py": "H = 1\n"}, "tests/helpers.py", True),
         ("from tests.chain import H\n", {"tests/chain.py": "H = 1\n"}, "tests/helpers.py", True),
@@ -755,7 +772,7 @@ def test_a_shared_helper_edit_keeps_whole_only_the_test_files_it_reaches(
         (tmp_path / path).parent.mkdir(parents=True, exist_ok=True)
         (tmp_path / path).write_text(text)
     manifest["commit"] = _commit(tmp_path, "recorded helpers")
-    (tmp_path / changed).write_text("H = 2\n")
+    (tmp_path / changed).write_text((tmp_path / changed).read_text() + "H = 2\n")
     _commit(tmp_path, "helper")
     selection = {}
     plan.estimate(tmp_path, {"scripts/core.py": {6}}, selection, manifest)
@@ -768,3 +785,23 @@ def test_an_unparsable_file_still_reaches_the_modules_its_text_names():
     assert plan._reach_keys("tests/a.py", 'run("tests/x/y.py")\n') == {"tests/x/y.py", "y.py"}
     assert plan._reach_keys("tests/a/b.py", "from tests import c\n") == {"tests", "tests.c"}
     assert plan._reach_keys("tests/a/b.py", "from ..d import e\n") == {"tests", "tests.d", "tests.d.e"}
+
+
+@pytest.mark.parametrize(
+    "path,version,narrowed",
+    [
+        (".github/workflows/lint.yml", 2, True),
+        (".github/workflows/lint.yml", 1, False),
+        (".github/workflows/helper.py", 2, False),
+    ],
+)
+def test_an_edit_to_a_workflow_that_runs_no_recorded_test_keeps_narrowing(
+    tmp_path, monkeypatch, path, version, narrowed
+):
+    manifest = {**_recorded_project(tmp_path, monkeypatch), "version": version}
+    (tmp_path / path).parent.mkdir(parents=True)
+    (tmp_path / path).write_text("a: 1\n")
+    _commit(tmp_path, "workflow")
+    selection = {}
+    plan.estimate(tmp_path, {"scripts/core.py": {6}}, selection, manifest)
+    assert selection == {"scripts/core.py": NARROWED if narrowed else WHOLE}

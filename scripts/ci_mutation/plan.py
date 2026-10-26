@@ -10,6 +10,7 @@ import zipfile
 from datetime import UTC, datetime
 from difflib import SequenceMatcher
 from functools import cache
+from itertools import accumulate
 from pathlib import Path
 
 import yaml
@@ -26,7 +27,6 @@ from tests.dep_manifest import (
     _show,
     _spans,
     changed_units,
-    global_input,
     line_units,
     node,
 )
@@ -149,10 +149,11 @@ def record_drift(root: Path, manifest: dict) -> tuple[set[str], set[int], set[st
 
 
 def workflow_changed(root: Path, manifest: dict, path: str) -> bool:
-    before, after = _show(root, manifest["commit"], path), _show(root, "HEAD", path)
-    if path == TEST_WORKFLOW and manifest.get("version") == 2:
-        return collection_changed(before, after)
-    return global_input(path, before, after, manifest.get("version"))
+    if manifest.get("version") != 2 or path.endswith(".py"):
+        return True
+    return path == TEST_WORKFLOW and collection_changed(
+        _show(root, manifest["commit"], path), _show(root, "HEAD", path)
+    )
 
 
 def collection_changed(old: str | None, new: str | None) -> bool:
@@ -209,12 +210,19 @@ def _importers(root: Path) -> dict[str, set[str]]:
 def _reach_keys(path: str, source: str) -> set[str]:
     keys = set(re.findall(r"[\w./-]+\.py\b", source))
     keys.update(Path(key).name for key in list(keys))
-    names = re.findall(r"\b(?:tests|hooks|scripts)(?:\.\w+)+", source)
+    names = [*re.findall(r"\b(?:tests|hooks|scripts)(?:\.\w+)+", source), *_imported(path, source)]
+    for name in names:
+        keys.update(accumulate(name.split("."), lambda prefix, part: f"{prefix}.{part}"))
+    return keys
+
+
+def _imported(path: str, source: str) -> list[str]:
     try:
         tree = ast.parse(source)
     except SyntaxError:
-        tree = ast.Module(body=[], type_ignores=[])
+        return []
     package = path.removesuffix(".py").replace("/", ".").split(".")
+    names = []
     for found in ast.walk(tree):
         if isinstance(found, ast.Import):
             names.extend(alias.name for alias in found.names)
@@ -223,10 +231,7 @@ def _reach_keys(path: str, source: str) -> set[str]:
             base = ".".join([*parent, *filter(None, [found.module])])
             names.append(base)
             names.extend(f"{base}.{alias.name}" if base else alias.name for alias in found.names)
-    for name in names:
-        parts = name.split(".")
-        keys.update(".".join(parts[:end]) for end in range(1, len(parts) + 1))
-    return keys
+    return names
 
 
 def changed_recorded_units(root: Path, manifest: dict, changes: dict[str, set[int]]) -> tuple[set[int], set[str]]:
