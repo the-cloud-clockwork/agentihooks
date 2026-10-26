@@ -73,6 +73,7 @@ def words(item: dict) -> set[str]:
 def _pool(doc, kind):
     pool = [(kind, i) for i in doc.get(LISTS[kind], []) if not i.get("out_of_scope")]
     if kind == "followup":
+        pool = [c for c in pool if not c[1].get("done")]
         pool += [("task", t) for t in doc.get("tasks", []) if t.get("state") != "done" and not t.get("out_of_scope")]
     return pool
 
