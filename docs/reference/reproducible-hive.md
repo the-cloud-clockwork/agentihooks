@@ -74,11 +74,11 @@ agentihooks hive remove <name>
 
 | Step | What it does |
 |---|---|
-| drain | stops placement on the hive and orders each agent on it, through its inbox, to finish its step and hand off; its successor starts on another hive. Waits up to `--wait` (3600) seconds; past that it refuses naming the agents still running, and a rerun keeps waiting |
-| member | revokes the hive's NATS credential, its member credential and its Redis user |
+| drain | marks the hive's registry record draining, so placement sends it no new agent, and orders each agent on it, through its inbox, to finish its step and hand off; its successor starts on another hive. Waits up to `--wait` (3600) seconds; past that it refuses naming the agents still running, and a rerun keeps waiting |
+| member | revokes the hive's member credential and its Redis user, and its NATS credential when a NATS signer is configured |
 | herdr | deletes the herdr machine and its `known_hosts` entry |
-| registry | deletes the hive's registry records, keeping its wait history in the swarm, releases the node's hive name and deletes the saved create of that hive |
-| manifests | opens one pull request into antoncore `dev` deleting the hive's ArgoCD application, manifests and values, and merges it once its checks pass; ArgoCD then prunes the namespace |
+| registry | deletes the hive's registry records, keeping its wait history in the swarm, releases the hive name of every node holding that name and deletes the saved create when it names that hive |
+| manifests | opens one pull request into antoncore `dev` deleting the hive's ArgoCD application, manifests and values, and turns on auto merge; where the repository refuses auto merge, it prints that the pull request must be merged once its checks pass |
 | openbao | deletes the hive's record `k8s/agentihooks-hive-<name>` |
 
 A refusal prints `hive remove refused: <reason>` and exits 1. `--label`, `--path`, `--repo` and `--base` override the
