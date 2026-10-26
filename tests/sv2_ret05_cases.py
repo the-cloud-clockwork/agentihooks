@@ -166,7 +166,10 @@ def refused(call) -> str:
 
 
 def summary(report: dict) -> dict:
-    return {key: report[key] for key in ("mode", "committed", gc.BYTES, gc.REJECTIONS, "reclaimed", "protected")}
+    return {
+        key: report[key]
+        for key in ("mode", "committed", gc.BYTES, gc.REJECTIONS, "reclaimed", "protected", "foreign_domain_objects")
+    }
 
 
 def collected(root: Path) -> dict:
@@ -192,6 +195,7 @@ def positive(root: Path) -> dict:
 
 def rejection(root: Path) -> dict:
     world = World(root, referenced=False)
+    before = world.protected()
     refusals = {
         "retire_active": refused(lambda: world.retire("active")),
         "bad_digest": refused(lambda: world.reserve("bad", "not-a-digest", "attempt-bad", 1.0)),
@@ -204,7 +208,6 @@ def rejection(root: Path) -> dict:
             )
         ),
     }
-    before = world.protected()
     early = world.collect(at="early")
     inventory = world.collect(destructive=False)
     untouched = world.protected() == before
@@ -215,7 +218,7 @@ def rejection(root: Path) -> dict:
         "refusals": refusals,
         "early": summary(early),
         "inventory": summary(inventory),
-        "inventory_and_early_left_state_unchanged": untouched,
+        "refusals_inventory_and_early_left_state_unchanged": untouched,
         "collect": summary(report),
         "lookalike_kept": world.readable([world.lookalike]),
         "stray_kept": "stray.tmp" in world.present(),
@@ -244,6 +247,9 @@ def recovery(root: Path) -> dict:
     world.pinned.add(target)
     rerun = world.collect()
     replay = world.collect()
+    item = world.doc["session"]
+    stale = catalog_module.ArchiveEntry(world.domain, item["session_uid"], item["source_generation"], 900, 950, target)
+    stale_commit = refused(lambda: world.reservations.commit(grant(world.doc), "upload-checkpoint", world.store, stale))
     return {
         "case": "C",
         "crashed": crashed,
@@ -253,6 +259,8 @@ def recovery(root: Path) -> dict:
         "checkpoint_readable": world.readable([target]),
         "reservations_after": [list(row) for row in world.catalog.db.execute(RESERVATIONS)],
         "replay": summary(replay),
+        "stale_attempt_commit": stale_commit,
+        "stale_commit_archived_nothing": world.catalog.db.execute(gc.ARCHIVED, (target,)).fetchone() is None,
         "reserve_after": world.reserve("again", target, "attempt-again", world.clock["live_until"])["upload_id"],
     }
 

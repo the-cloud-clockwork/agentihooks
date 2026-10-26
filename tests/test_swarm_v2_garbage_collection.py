@@ -59,7 +59,7 @@ def test_a_reservation_past_its_grace_is_collected(world, grace):
 
 def test_a_lookalike_and_a_stray_file_without_reservation_are_rejected_and_kept(world):
     report = world.collect()
-    assert report["protected"]["unowned"] == sorted([world.lookalike, "stray.tmp", world.uploads["foreign"]])
+    assert report["protected"]["unowned"] == sorted([world.lookalike, "stray.tmp"])
     assert world.store.get(world.lookalike) == world.doc["lookalike"].encode()
     assert (world.store.root / "stray.tmp").read_text() == world.doc["stray"]
     assert report[gc.REJECTIONS] == 4
@@ -67,8 +67,26 @@ def test_a_lookalike_and_a_stray_file_without_reservation_are_rejected_and_kept(
 
 def test_another_domains_reservation_is_not_ownership_for_this_grant(world):
     report = world.collect()
-    assert world.uploads["foreign"] in report["protected"]["unowned"]
+    assert report["foreign_domain_objects"] == 1
+    assert world.uploads["foreign"] not in json.dumps(report)
     assert world.store.get(world.uploads["foreign"]) == world.doc["uploads"]["foreign"].encode()
+
+
+def test_objects_archived_before_reservations_existed_stay_authoritative_or_unowned(world):
+    data, legacy = (
+        b"an object archived by the older acknowledge path\n",
+        b"an unreferenced object from the older path\n",
+    )
+    item = world.doc["session"]
+    entry = catalog_module.ArchiveEntry(
+        world.domain, item["session_uid"], item["source_generation"], 900, 900 + len(data), world.store.put(data)
+    )
+    assert archive.acknowledge(world.catalog, world.store, entry) is True
+    orphan = world.store.put(legacy)
+    report = world.collect()
+    assert entry.object_digest in report["protected"]["authoritative"]
+    assert orphan in report["protected"]["unowned"]
+    assert world.store.get(orphan) == legacy
 
 
 def test_bytes_that_do_not_hash_to_the_reserved_name_are_rejected_and_kept(world):
@@ -282,11 +300,13 @@ def test_main_runs_inventory_collect_and_retire(world, tmp_path, capsys):
     world.catalog.close()
     references = tmp_path / "references.json"
     references.write_text(json.dumps(sorted(world.pinned)))
-    args = [path, world.domain, "--objects", objects, "--references", str(references), "--grace", "300"]
+    args = [path, world.domain, "--principal", "operator-fixture", "--objects", objects]
+    args += ["--references", str(references), "--grace", "300"]
     assert gc.main(["inventory", *args], clock=lambda: world.clock["collect"]) == 0
     inventory = json.loads(capsys.readouterr().out)
     retired = world.doc["generations"]["retired"]
-    assert gc.main(["retire", path, world.domain, "--generation", retired], clock=lambda: 1300.0) == 0
+    retire = ["retire", path, world.domain, "--principal", "operator-fixture", "--generation", retired]
+    assert gc.main(retire, clock=lambda: 1300.0) == 0
     assert json.loads(capsys.readouterr().out) == {"index_generation": retired, "retired_at": 1300.0}
     assert gc.main(["collect", *args], clock=lambda: world.clock["collect"]) == 0
     collected = json.loads(capsys.readouterr().out)
@@ -299,10 +319,11 @@ def test_main_runs_inventory_collect_and_retire(world, tmp_path, capsys):
 @pytest.mark.parametrize(
     "argv",
     [
-        ["retire", "c", "d"],
-        ["inventory", "c", "d"],
-        ["collect", "c", "d", "--objects", "o", "--generation", "g"],
-        ["collect", "c", "d", "--objects", "o"],
+        ["retire", "c", "d", "--principal", "p"],
+        ["inventory", "c", "d", "--principal", "p"],
+        ["collect", "c", "d", "--principal", "p", "--objects", "o", "--generation", "g"],
+        ["collect", "c", "d", "--principal", "p", "--objects", "o"],
+        ["retire", "c", "d", "--generation", "g"],
     ],
 )
 def test_main_refuses_mismatched_flags(argv):

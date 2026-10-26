@@ -79,7 +79,13 @@ class Report:
         }
     )
 
+    foreign: int = 0
+
     def keep(self, reason: str, name: str, rejected: bool = False) -> None:
+        if reason == "foreign":
+            self.foreign += 1
+            self.rejections += 1
+            return
         self.protected[reason].append(name)
         self.rejections += rejected
 
@@ -91,6 +97,7 @@ class Report:
             REJECTIONS: self.rejections,
             "reclaimed": {"uploads": sorted(self.uploads), "index_generations": sorted(self.generations)},
             "protected": {reason: sorted(names) for reason, names in self.protected.items()},
+            "foreign_domain_objects": self.foreign,
         }
 
 
@@ -121,7 +128,11 @@ class Reservations:
         return {"upload_id": upload_id, "object_digest": digest, "expires_at": expires_at}
 
     def commit(self, grant: Grant, upload_id: str, store: archive.ObjectStore, entry: ArchiveEntry) -> bool:
-        """Releases the reservation, then acknowledges the entry; the bytes must still verify or nothing is archived."""
+        """Releases the reservation, then acknowledges the entry; the bytes must still verify or nothing is archived.
+
+        Releasing first leaves collection no reservation to claim while the entry is archived; bytes whose verify
+        fails stay as unowned objects that collection keeps.
+        """
         if entry.access_domain != grant.corpus:
             raise Conflict(FOREIGN_ENTRY)
         with self.catalog._transaction():
@@ -172,8 +183,10 @@ def _referenced(catalog: Catalog, plan: Plan, digest: str) -> bool:
 def _owner(catalog: Catalog, plan: Plan, digest: str) -> str | None:
     """The protection reason for a digest, or None when every reservation on it is ours and expired past grace."""
     rows = catalog.db.execute(DIGEST_STATES, (digest,)).fetchall()
-    if not rows or any(domain != plan.grant.corpus for domain, _, _ in rows):
+    if not rows:
         return "unowned"
+    if any(domain != plan.grant.corpus for domain, _, _ in rows):
+        return "foreign"
     if any(state == RESERVED and expires_at + plan.grace > plan.now for _, expires_at, state in rows):
         return "live"
     return None
@@ -214,7 +227,7 @@ def _collect_upload(catalog: Catalog, plan: Plan, digest: str, path: Path | None
     if reason is not None:
         report.keep(reason, digest, rejected=reason == "unowned")
         return
-    rebound = digest in plan.references()
+    rebound = _referenced(catalog, plan, digest)
     if path and not rebound:
         path.unlink(missing_ok=True)
     with catalog._transaction():
@@ -290,7 +303,7 @@ def main(argv: list[str] | None = None, clock: Callable[[], float] | None = None
     parser.add_argument("command", choices=("inventory", "collect", "retire"))
     parser.add_argument("catalog")
     parser.add_argument("domain")
-    parser.add_argument("--principal", default="operator")
+    parser.add_argument("--principal", required=True)
     parser.add_argument("--objects", type=Path)
     parser.add_argument("--references", type=Path)
     parser.add_argument("--grace", type=float, default=86400.0)
