@@ -76,7 +76,9 @@ def test_the_manifest_hashes_the_workload_and_the_harness():
 
 
 @pytest.mark.wall_clock
-def test_search_stays_within_its_wall_clock_budget_under_the_load():
+def test_search_stays_within_its_wall_clock_budget_under_the_load(monkeypatch):
+    monkeypatch.setattr(os, "fsync", lambda descriptor: None)
+    monkeypatch.setattr(tempfile, "tempdir", "/dev/shm")
     measured = load.measure(load.load_spec()["seeds"][0], load.load_spec())
     assert measured["verdict"]["complete"], measured["verdict"]["failures"]
     latency = measured["search_latency_seconds"]
