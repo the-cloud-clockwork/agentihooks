@@ -134,6 +134,27 @@ def test_detached_server_stop_deadline_excludes_startup_after_pid_publication(tm
     assert (tmp_path / "startup-paused").read_text() == "yes"
 
 
+def test_detached_server_stop_deadline_covers_a_close_within_the_drain_bound(tmp_path, monkeypatch, ledger_port):
+    closing = tmp_path / "closing"
+    closing.mkdir()
+    (closing / "sitecustomize.py").write_text(
+        "import socketserver, time\n"
+        "close = socketserver.TCPServer.server_close\n"
+        "def slow(self):\n"
+        "    time.sleep(4)\n"
+        "    close(self)\n"
+        "socketserver.TCPServer.server_close = slow\n"
+    )
+    popen = subprocess.Popen
+
+    def start(*args, **kwargs):
+        kwargs["env"]["PYTHONPATH"] = os.pathsep.join((str(closing), kwargs["env"]["PYTHONPATH"]))
+        return popen(*args, **kwargs)
+
+    monkeypatch.setattr(subprocess, "Popen", start)
+    test_detached_server_stops_when_its_run_ends(tmp_path, "exit", True, "--ensure", ledger_port)
+
+
 def fake_process(proc, pid=7, ppid=1, start=99, state="S", comm="python", argv=(b"python",)):
     root = proc / str(pid)
     root.mkdir(parents=True, exist_ok=True)
