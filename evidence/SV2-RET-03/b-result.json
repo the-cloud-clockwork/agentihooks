@@ -17,7 +17,10 @@
       "c-legacy-1",
       "c-legacy-2"
     ],
-    "requeued": 2
+    "requeued": [
+      "c-legacy-1",
+      "c-legacy-2"
+    ]
   },
   "protected_state_unchanged": true,
   "requeued_work": [

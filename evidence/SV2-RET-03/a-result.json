@@ -73,15 +73,27 @@
   "previous_events_unchanged": true,
   "previous_reader_after": {
     "columns": 10,
-    "rows": 12
+    "rows": 13
+  },
+  "previous_rows_unchanged": true,
+  "previous_writer_after_activation": {
+    "event_id": "s-unattributed-e6",
+    "migration_rows_remaining": 1,
+    "provenance": {
+      "project_state": "unknown",
+      "recorded": false,
+      "trust_class": "original"
+    }
   },
   "provenance": {
     "s-attributed": {
       "project_state": "attributed",
+      "recorded": true,
       "trust_class": "original"
     },
     "s-unattributed": {
       "project_state": "unknown",
+      "recorded": true,
       "trust_class": "original"
     }
   },
