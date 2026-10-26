@@ -173,13 +173,15 @@ def prepare(slug: str, agent: AgentRecord, repo: str, ledger: LedgerClient) -> d
         retired = merged_record(repository, scoped)
         if retired:
             cleared = {"pr_url": ""}
-            for key in ("handoff_envelope", "reclaim"):
-                cleared[key] = {
+            hints = {
+                key: {
                     name: value
                     for name, value in (task.get(key) or {}).items()
                     if name != "continue_from" or value != f"origin/{scoped['branch']}"
                 }
-            scoped = {**scoped, **cleared, "branch": ""}
+                for key in ("handoff_envelope", "reclaim")
+            }
+            scoped = {**scoped, **cleared, **hints, "branch": ""}
         root = None if retired else existing(repository, scoped, agent)
         if root is None:
             command = ["bash", str(stack.WT_SCRIPT), "new", "--repo", str(repository)]
