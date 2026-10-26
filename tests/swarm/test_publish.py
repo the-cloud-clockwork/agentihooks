@@ -477,8 +477,9 @@ def test_prepare_stacks_on_the_recorded_branch_and_publish_pushes_its_current_br
         ("MERGED", False, "another-branch"),
     ],
 )
+@pytest.mark.parametrize("hint", ["handoff_envelope", "reclaim"])
 def test_prepare_selects_fresh_dev_after_the_recorded_pull_request_merged(
-    repository, tmp_path, monkeypatch, state, deleted, head
+    repository, tmp_path, monkeypatch, state, deleted, head, hint
 ):
     from scripts.swarm import publish, stack
     from scripts.swarm_ledger import ledger_tasks
@@ -509,7 +510,7 @@ def test_prepare_selects_fresh_dev_after_the_recorded_pull_request_merged(
         "branch": "predecessor",
         "pr_url": pr_url,
         "repository_branches": {str(repository): "predecessor"},
-        "handoff_envelope": {"continue_from": "origin/predecessor", "source": "origin/predecessor"},
+        hint: {"continue_from": "origin/predecessor", "source": "origin/predecessor"},
     }
     native = publish.execute
     native_git = publish.git
@@ -546,7 +547,7 @@ def test_prepare_selects_fresh_dev_after_the_recorded_pull_request_merged(
     assert result["branch"] == task["branch"] == "engineer-test"
     assert task["repository_branches"] == {str(repository): "engineer-test"}
     assert task["pr_url"] == ("" if retired else pr_url)
-    assert task["handoff_envelope"] == {"continue_from": "origin/predecessor", "source": "origin/predecessor"}
+    assert task[hint] == {"continue_from": "origin/predecessor", "source": "origin/predecessor"}
     assert publish.prepare("swarm", agent, str(repository), ledger) == result
 
 
