@@ -284,21 +284,23 @@ def _failed_job(line: str) -> str:
 
 
 def red_head_jobs(runs: list[dict], window: tuple[float, float], repo_dir: str, run: Callable) -> dict:
-    """Counts red pull request head Tests runs created in the window by each job that failed them."""
-    failed = Counter()
+    """Counts red pull request head Tests runs created in the window by each job that failed them, with the last such
+    run's id to read its log."""
+    failed, last = Counter(), {}
     for found in runs:
         if found["event"] != "pull_request" or _promotion(found) or found["conclusion"] != "failure":
             continue
         if not _within(found["created_at"], *window):
             continue
         path = f"repos/{{owner}}/{{repo}}/actions/runs/{found['id']}/jobs?filter=latest&per_page={PAGE}"
-        query = FAILED_STEP
         try:
-            names = _gh(["api", path, "--paginate", "--jq", query], repo_dir, run).splitlines()
+            names = _gh(["api", path, "--paginate", "--jq", FAILED_STEP], repo_dir, run).splitlines()
         except SwarmError:
             names = ["unreadable"]
-        failed.update(dict.fromkeys(map(_failed_job, names), 1) or {"no failed job": 1})
-    return dict(failed.most_common())
+        jobs = dict.fromkeys(map(_failed_job, names), 1) or {"no failed job": 1}
+        failed.update(jobs)
+        last.update(dict.fromkeys(jobs, found["id"]))
+    return {job: {"runs": n, "last": last[job]} for job, n in failed.most_common()}
 
 
 def main(argv: list[str] | None = None) -> int:

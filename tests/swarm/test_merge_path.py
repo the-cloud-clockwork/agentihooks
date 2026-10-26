@@ -535,11 +535,11 @@ def test_red_head_jobs_counts_each_failed_job_once_per_red_head_run_in_the_windo
     found = merge_path.red_head_jobs(runs, WINDOW, "/repo", gh)
 
     assert list(found.items()) == [
-        ("unit: Run tests", 2),
-        ("lint: Dead code", 1),
-        ("sonar", 1),
-        ("unreadable", 1),
-        ("no failed job", 1),
+        ("unit: Run tests", {"runs": 2, "last": 2}),
+        ("lint: Dead code", {"runs": 1, "last": 1}),
+        ("sonar", {"runs": 1, "last": 2}),
+        ("unreadable", {"runs": 1, "last": 3}),
+        ("no failed job", {"runs": 1, "last": 8}),
     ]
     query = merge_path.FAILED_STEP
     assert query == (
