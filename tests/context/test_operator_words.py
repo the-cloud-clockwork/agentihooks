@@ -611,7 +611,7 @@ def test_swarm_words_reach_a_server_without_the_local_store_and_unowned_words_st
     from scripts.swarm.store import PREFIX
 
     assert shared.smembers(f"{PREFIX}:operator-words") == {"master@a1-1"}
-    assert shared.llen(f"{PREFIX}:operator-words:master@a1-1") == 2
+    assert shared.zcard(f"{PREFIX}:operator-words:master@a1-1:entries") == 2
     _hosted(tmp_path, monkeypatch)
     assert operator_words.matching("master@a1-1", "scale the hive up", now=200) == "Scale the hive  up"
     assert operator_words.matching("master@a1-1", "hold the", now=200) == "Hold the release"
@@ -686,9 +686,24 @@ def test_older_shared_rows_match_and_forget_drops_every_copy(shared, tmp_path, m
     operator_words.forget("demo")
     from scripts.swarm.store import PREFIX
 
-    assert shared.lrange(f"{PREFIX}:operator-words:master@a1-1", 0, -1) == [
+    assert shared.zrange(f"{PREFIX}:operator-words:master@a1-1:entries", 0, -1) == [
         json.dumps({"swarm": "other", "at": 110, "words": "merge the other work"})
     ]
+
+
+def test_legacy_shared_lists_remain_readable_and_forgettable(shared, tmp_path, monkeypatch):
+    from scripts.swarm.store import PREFIX
+
+    key = f"{PREFIX}:operator-words:master@a1-1"
+    shared.sadd(f"{PREFIX}:operator-words", "master@a1-1")
+    shared.lpush(key, json.dumps({"swarm": "demo", "at": 100, "words": "Mark it urgent"}))
+    operator_words.record("master@a1-1", "Mark it normal", now=90, swarm="demo")
+    _hosted(tmp_path, monkeypatch)
+    assert operator_words.matching("master@a1-1", "mark it", within=None) == "Mark it urgent"
+    operator_words.forget("demo")
+    assert operator_words.matching("master@a1-1", "mark it", within=None) == ""
+    assert shared.lrange(key, 0, -1) == []
+    assert shared.zrange(f"{key}:entries", 0, -1) == []
 
 
 def test_an_unreachable_or_failing_shared_redis_keeps_the_local_words(tmp_path, monkeypatch):
