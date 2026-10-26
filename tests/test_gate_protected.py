@@ -578,9 +578,13 @@ def test_protected_provenance_admits_only_the_retried_evidence_upload(uses, boun
         ({"set": {"files_1": "${{ steps.other.outputs.files_1 }}"}}, True),
         ({"drop": ("files_1", "files_2", "files_3"), "set": {"extra": "1"}}, True),
         ({"absent": ("files_3",), "drop": ("files_1", "files_2")}, True),
+        ({"set": {"sonar": "${{ steps.select.outputs.sonar }}"}}, False),
+        ({"set": {"sonar": "skip"}}, True),
+        ({"drop": ("legs",), "set": {"sonar": "${{ steps.select.outputs.sonar }}"}}, True),
+        ({"base": {"sonar": "skip"}, "set": {"sonar": "${{ steps.select.outputs.sonar }}"}}, True),
     ],
 )
-def test_protected_select_outputs_admit_only_dropping_the_unused_file_outputs(change, red):
+def test_protected_select_outputs_admit_only_dropping_the_unused_file_outputs_or_adding_sonar(change, red):
     from scripts import ci_reuse
 
     base = _workflow()
@@ -594,6 +598,7 @@ def test_protected_select_outputs_admit_only_dropping_the_unused_file_outputs(ch
     }
     for key in change.get("absent", ()):
         del base["jobs"]["select"]["outputs"][key]
+    base["jobs"]["select"]["outputs"].update(change.get("base", {}))
     base["jobs"]["gate"]["needs"].append("select")
     head = copy.deepcopy(base)
     outputs = head["jobs"]["select"]["outputs"]
@@ -1043,6 +1048,24 @@ def test_the_tests_gate_may_start_requiring_the_postgres_scenario_on_pull_reques
     config = json.loads((_ROOT / ".github/gate-wiring.json").read_text())
     policy = json.loads((_ROOT / ".github/workflows/trusted-actors.json").read_text())
     assert gate_protected.grade(base, config, head, config, _TODAY, policy) == []
+
+
+@pytest.mark.parametrize("weakened", [False, True])
+def test_the_tests_gate_may_skip_sonar_when_selection_marks_the_pull_request_test_only(weakened):
+    from scripts import ci_reuse
+
+    base = {path.name: yaml.safe_load(path.read_text()) for path in (_ROOT / ".github/workflows").glob("*.yml")}
+    head = copy.deepcopy(base)
+    head["test.yml"]["jobs"]["select"]["outputs"]["sonar"] = "${{ steps.select.outputs.sonar }}"
+    gate = head["test.yml"]["jobs"]["gate-required"]
+    gate["steps"] = ci_reuse.test_only_sonar(gate["steps"])
+    assert '(if .select.outputs.sonar == "skip" then [] else ["sonar"] end)' in gate["steps"][0]["run"]
+    if weakened:
+        gate["steps"][0]["run"] = gate["steps"][0]["run"].replace('"skip"', '"skip" or true')
+    config = json.loads((_ROOT / ".github/gate-wiring.json").read_text())
+    policy = json.loads((_ROOT / ".github/workflows/trusted-actors.json").read_text())
+    problems = gate_protected.grade(base, config, head, config, _TODAY, policy)
+    assert bool(problems) == weakened, problems
 
 
 @pytest.mark.parametrize("existing", [False, True])
@@ -1698,7 +1721,7 @@ def test_a_weakened_forwarded_statistics_form_is_red(before, after):
     )
 
 
-@pytest.mark.parametrize("prefix", ["", _SELECTION_DIAGNOSTIC])
+@pytest.mark.parametrize("prefix", ["", _SELECTION_DIAGNOSTIC], ids=["bare", "after_selection_diagnostic"])
 def test_the_forwarded_statistics_line_without_the_selection_diagnostic_is_red(prefix):
     base = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())
     head = copy.deepcopy(base)

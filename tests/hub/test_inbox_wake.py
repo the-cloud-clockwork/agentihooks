@@ -441,6 +441,23 @@ def test_an_item_that_fails_every_pass_does_not_hold_back_the_rest(rig):
     assert rig.inbox.redis.smembers(rig.inbox.key("wake-outbox")) == {bad.id}
 
 
+def test_an_outbox_id_whose_message_is_gone_is_dropped_without_failing_the_pass(rig, monkeypatch):
+    from scripts.hive import scope
+    from scripts.inbox.store import InboxStore
+
+    monkeypatch.setattr(scope, "member", lambda: False)
+    monkeypatch.setattr(scope, "members", lambda redis: ["hive"])
+    hive = InboxStore(rig.inbox.redis, world="hive")
+    item = rig.inbox.send("sender", "eng-1@sw", "still here")
+    rig.inbox.redis.sadd(rig.inbox.key("wake-outbox"), "gone0000000a", "gone0000000b")
+    rig.inbox.redis.sadd(hive.key("wake-outbox"), "gone0000000c")
+    rig.reactor.flush()
+    assert rig.inbox.redis.scard(rig.inbox.key("wake-outbox")) == 0
+    assert rig.inbox.redis.scard(hive.key("wake-outbox")) == 0
+    [delivery] = rig.bus.events.consumer("gone-proof", "swarm.sw.inbox.*").fetch(10, 0)
+    assert delivery.event.data["id"] == item.id
+
+
 @pytest.mark.parametrize("state", ["read", "confirmed", "done", "fyi"])
 def test_settled_or_information_items_cancel_their_timer(rig, state):
     item = rig.inbox.send("sender", "worker", "request", fyi=state == "fyi")

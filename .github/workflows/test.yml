@@ -1587,6 +1587,19 @@ jobs:
       - *python
 
       - name: Download collected tests
+        id: shard-data
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          pattern: "{collected,reused-tests}-${{ matrix.python-version }}"
+          path: shard-data
+
+      - name: Wait before downloading collected tests again
+        if: steps.shard-data.outcome == 'failure'
+        run: sleep 30
+
+      - name: Download collected tests again
+        if: steps.shard-data.outcome == 'failure'
         uses: actions/download-artifact@v4
         with:
           pattern: "{collected,reused-tests}-${{ matrix.python-version }}"
@@ -1630,6 +1643,19 @@ jobs:
 
       # The artifact service download spends none of the App installation's hourly REST budget.
       - name: Download shard reports
+        id: shard-reports
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          pattern: "{durations,flakes}-${{ matrix.python-version }}-*"
+          path: shard-reports
+
+      - name: Wait before downloading shard reports again
+        if: steps.shard-reports.outcome == 'failure'
+        run: sleep 30
+
+      - name: Download shard reports again
+        if: steps.shard-reports.outcome == 'failure'
         uses: actions/download-artifact@v4
         with:
           pattern: "{durations,flakes}-${{ matrix.python-version }}-*"
@@ -1746,7 +1772,7 @@ jobs:
           ) < /dev/null > "$RUNNER_TEMP/combine.log" 2>&1 &
           echo "pid=$!" >> "$GITHUB_OUTPUT"
 
-      # Builds beside the scan, outside the scanned tree; the wait after the scan holds its result.
+      # Builds beside the proxy start, outside the scanned tree; the wait before the scan holds its result.
       - name: Build the test dependency manifest
         id: manifest
         if: steps.source.outputs.test_only != 'true' && needs.select.outputs.scope == 'full'
@@ -1839,6 +1865,23 @@ jobs:
           cat "$RUNNER_TEMP/combine.log"
           exit "$(< "$RUNNER_TEMP/combine.status")"
 
+      - name: Wait for the test dependency manifest
+        if: steps.source.outputs.test_only != 'true' && needs.select.outputs.scope == 'full'
+        timeout-minutes: 10
+        env:
+          MANIFEST_PID: ${{ steps.manifest.outputs.pid }}
+        run: |
+          until [[ -s "$RUNNER_TEMP/manifest.status" ]]; do
+            if ! kill -0 "$MANIFEST_PID" 2> /dev/null && [[ ! -s "$RUNNER_TEMP/manifest.status" ]]; then
+              echo "::error::The test dependency manifest build ended without a status."
+              cat "$RUNNER_TEMP/manifest.log" 2> /dev/null || true
+              exit 1
+            fi
+            sleep 0.2
+          done
+          cat "$RUNNER_TEMP/manifest.log"
+          exit "$(< "$RUNNER_TEMP/manifest.status")"
+
       # Runs the CLI directly: sonarqube-scan-action never finds its tool cache entry, since a four part version is not semver.
       - name: SonarQube Scan
         env:
@@ -1863,23 +1906,6 @@ jobs:
           threads=$(python "$GITHUB_WORKSPACE/scripts/ci_cpu_quota.py")
           bash "$GITHUB_WORKSPACE/.github/coverage/sonar-retry.sh" --unless .scannerwork/report-task.txt "SonarQube Scan" -- "$scanner/bin/sonar-scanner" -Dsonar.projectBaseDir=. -Dsonar.python.analysis.threads="$threads" "${extra[@]}"
           [[ ! -s "$RUNNER_TEMP/sonar-gc.log" ]] || awk '/Pause/ { n++; sub(/ms$/, "", $NF); t += $NF } END { printf "GC pauses %d, %.0f ms\n", n, t }' "$RUNNER_TEMP/sonar-gc.log"
-
-      - name: Wait for the test dependency manifest
-        if: steps.source.outputs.test_only != 'true' && needs.select.outputs.scope == 'full'
-        timeout-minutes: 5
-        env:
-          MANIFEST_PID: ${{ steps.manifest.outputs.pid }}
-        run: |
-          until [[ -s "$RUNNER_TEMP/manifest.status" ]]; do
-            if ! kill -0 "$MANIFEST_PID" 2> /dev/null && [[ ! -s "$RUNNER_TEMP/manifest.status" ]]; then
-              echo "::error::The test dependency manifest build ended without a status."
-              cat "$RUNNER_TEMP/manifest.log" 2> /dev/null || true
-              exit 1
-            fi
-            sleep 0.2
-          done
-          cat "$RUNNER_TEMP/manifest.log"
-          exit "$(< "$RUNNER_TEMP/manifest.status")"
 
       - name: Upload the test dependency manifest
         if: steps.source.outputs.test_only != 'true' && needs.select.outputs.scope == 'full'
@@ -2177,6 +2203,19 @@ jobs:
             cd "$RUNNER_TEMP/grader"
           fi
           python -m scripts.dead_code --base "$RUNNER_TEMP/base" --head "$GITHUB_WORKSPACE"
+
+      # dev's copy grades the head against the base's manifest, so a pull request cannot unlock its own guard test.
+      # Only the pull request that introduces the gate meets a base without a manifest; its own copy grades.
+      - name: Hold the locked guard tests
+        if: ${{ !cancelled() }}
+        run: |
+          if [[ -f "$RUNNER_TEMP/grader/scripts/locked_tests.py" ]]; then
+            cd "$RUNNER_TEMP/grader"
+          elif [[ -f "$RUNNER_TEMP/base/tests/LOCKED_MANIFEST.json" ]]; then
+            echo "::error::The base locks guard tests but dev carries no scripts/locked_tests.py, so nothing trusted can grade."
+            exit 1
+          fi
+          python -m scripts.locked_tests --base "$RUNNER_TEMP/base" --head "$GITHUB_WORKSPACE"
 
       # The base revision's copy grades, so a pull request cannot loosen its own audit.
       - name: Fail on known vulnerabilities new against the base
