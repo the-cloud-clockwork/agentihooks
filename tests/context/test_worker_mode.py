@@ -1,6 +1,6 @@
 import json
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import pytest
 
@@ -8,12 +8,15 @@ import hooks.context.inbox_delivery as delivery
 import hooks.context.ledger_decision as decision
 import hooks.context.swarm_refocus as refocus
 from hooks import hook_manager
-from hooks.context import broadcast, worker_mode
+from hooks.context import broadcast, swarm_ledger, swarm_wait_nudge, worker_mode
 from hooks.context.retry_breaker import _set_state
 from hooks.hook_manager import BlockAction
 from hooks.targets.emitter import flush
 from scripts.headless import profile_run
 from scripts.inbox.store import InboxStore
+from scripts.swarm_ledger import ledger_hook
+from scripts.swarm_v2 import broadcast_bridge
+from scripts.swarm_v2 import broadcasts as fleet
 from tests.swarm_ledger import legacy_page
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -177,3 +180,46 @@ def test_a_worker_run_keeps_the_retry_breaker(worker):
         hook_manager.on_pre_tool_use(
             {"session_id": "s-breaker", "tool_name": "Bash", "tool_input": {"command": "npm install"}}
         )
+
+
+def test_a_worker_run_skips_the_swarm_ledger_hook(worker, monkeypatch):
+    dispatch = Mock()
+    monkeypatch.setattr(ledger_hook, "dispatch", dispatch)
+    assert swarm_ledger.run({"session_id": "s1", "hook_event_name": "Stop"}) == ([], None)
+    dispatch.assert_not_called()
+
+
+def test_an_interactive_session_still_runs_the_swarm_ledger_hook(monkeypatch):
+    def stop(payload):
+        print(json.dumps({"decision": "block", "reason": "events unhandled"}))
+
+    monkeypatch.setattr(ledger_hook, "dispatch", stop)
+    assert swarm_ledger.run({"session_id": "s1", "hook_event_name": "Stop"}) == ([], "events unhandled")
+
+
+WAIT_ENV = {
+    "AGENTIHOOKS_SWARM": "rig",
+    "AGENTIHOOKS_SWARM_TASK": "w1",
+    "AGENTIHOOKS_AGENT_NAME": "engineer@323133-0001",
+}
+SLEEP = {"tool_name": "Bash", "tool_input": {"command": "sleep 60"}}
+
+
+def test_a_worker_run_gets_no_wait_nudge(monkeypatch):
+    declared = Mock(return_value=None)
+    monkeypatch.setattr(swarm_wait_nudge, "declared_wait", declared)
+    assert swarm_wait_nudge.nudge(SLEEP, {**WAIT_ENV, worker_mode.FLAG: "1"}) == ""
+    declared.assert_not_called()
+
+
+def test_an_interactive_worker_lane_session_still_gets_the_wait_nudge(monkeypatch):
+    monkeypatch.setattr(swarm_wait_nudge, "declared_wait", Mock(return_value=None))
+    assert "SWARM WAIT" in swarm_wait_nudge.nudge(SLEEP, WAIT_ENV)
+
+
+def test_a_worker_run_claims_no_fleet_broadcast(monkeypatch):
+    sync = Mock(return_value=3)
+    monkeypatch.setattr(fleet, "sync_local", sync)
+    environ = {fleet.FLAG: "1", broadcast_bridge.GRANT_FILE: "/x/grant", broadcast_bridge.API_URL: "http://x"}
+    assert broadcast_bridge.claim("s1", ["brain"], {**environ, worker_mode.FLAG: "1"}) == 0
+    sync.assert_not_called()
