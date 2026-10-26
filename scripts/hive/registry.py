@@ -238,8 +238,14 @@ def live(record: dict, now_ms: int) -> bool:
 
 
 def touch(redis: "Redis", hive_id: str, now_ms: int) -> None:
-    if redis.hexists(key(hive_id), "heartbeat_at"):
-        redis.hset(key(hive_id), "heartbeat_at", now_ms)
+    hash_key = key(hive_id)
+
+    def refresh(pipe: "Pipeline") -> None:
+        if pipe.hexists(hash_key, "heartbeat_at"):
+            pipe.multi()
+            pipe.hset(hash_key, "heartbeat_at", now_ms)
+
+    redis.transaction(refresh, hash_key)
 
 
 def home(environ: Mapping[str, str] = os.environ) -> Path:

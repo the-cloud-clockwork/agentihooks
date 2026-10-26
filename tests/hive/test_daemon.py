@@ -411,9 +411,10 @@ def test_headroom_keeps_a_registered_hive_live_while_its_beat_runs_long(redis, m
     monkeypatch.setattr(headroom, "publish", lambda client, hive, now_ms: None)
     monkeypatch.setattr(daemon.time, "time", lambda: 200.25)
     stop, _, beats = _paced(monkeypatch, 2)
+    assert not registry.live(registry.show(redis, "machine"), 200_250)
     PUBLISH_HEADROOM(redis, object(), "machine", stop)
     assert redis.hget(registry.key("machine"), "heartbeat_at") == "200250"
-    assert registry.live(registry.show(redis, "machine"), 200_250 + registry.LIVE_MS)
+    assert registry.live(registry.show(redis, "machine"), 200_250)
     assert beats == [(redis, "machine")]
 
 
