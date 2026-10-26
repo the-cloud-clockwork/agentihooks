@@ -37,7 +37,7 @@ jobs:
     timeout-minutes: 15
     services:
       redis:
-        image: public.ecr.aws/docker/library/redis:7-alpine
+        image: mirror.gcr.io/library/redis:7-alpine
         ports:
           - 6379:6379
         options: >-
@@ -138,7 +138,7 @@ jobs:
         pair: [1, 2, 3, 4, 5]
     services:
       redis:
-        image: public.ecr.aws/docker/library/redis:7-alpine
+        image: mirror.gcr.io/library/redis:7-alpine
         ports:
           - 6379:6379
         options: >-

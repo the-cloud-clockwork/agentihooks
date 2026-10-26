@@ -183,7 +183,7 @@ def test_every_master_seat_is_placed_by_the_ui_host_rule(setup, monkeypatch, sea
     from scripts.swarm.profile_choice import ProfileDecision
     from scripts.swarm_v2.masters import MasterSeats
 
-    monkeypatch.setattr(controller, "_workstation_herdr", lambda: False)
+    monkeypatch.setattr(controller, "_workstation_herdr", lambda memo=None: False)
     MasterSeats(setup.store.redis).set_count(setup.config.slug, 3)
     two_hosts(setup)
     setup.herdr._profile_decision.return_value = ProfileDecision("master", "lane", "master")
@@ -209,7 +209,7 @@ def test_a_refused_master_spawns_on_the_workstation_herdr_server(setup, monkeypa
     fenced = hive_controller(setup)
     fenced.runtime.hive_launch.spawn = Mock()
     setup.herdr.spawn.return_value = "placed on the workstation"
-    monkeypatch.setattr(controller, "_workstation_herdr", lambda: True)
+    monkeypatch.setattr(controller, "_workstation_herdr", lambda memo=None: True)
     assert fenced.placement_refusal("master", {"id": seat}) == ""
     assert fenced.spawn(setup.config, "master", "master name", {"id": seat}) == "placed on the workstation"
     _, lane, name, task = setup.herdr.spawn.call_args.args
@@ -217,7 +217,7 @@ def test_a_refused_master_spawns_on_the_workstation_herdr_server(setup, monkeypa
     fenced.spawn(setup.config, "master", "master name", {})
     assert setup.herdr.spawn.call_args.args[3]["id"] == "master"
     setup.herdr.spawn.reset_mock()
-    monkeypatch.setattr(controller, "_workstation_herdr", lambda: False)
+    monkeypatch.setattr(controller, "_workstation_herdr", lambda memo=None: False)
     with pytest.raises(controller.SwarmError, match=f"the workstation hive spawns master work: {MASTER_WAIT}"):
         fenced.spawn(setup.config, "master", "master name", {"id": seat})
     setup.herdr.spawn.assert_not_called()
@@ -229,7 +229,7 @@ def test_only_master_work_moves_to_the_workstation_herdr_server(setup, monkeypat
 
     two_hosts(setup)
     fenced = hive_controller(setup)
-    monkeypatch.setattr(controller, "_workstation_herdr", lambda: True)
+    monkeypatch.setattr(controller, "_workstation_herdr", lambda memo=None: True)
     assert (
         fenced.placement_refusal(OFF_HIVE_LANE, {"id": OFF_HIVE_LANE})
         == f"the workstation hive spawns {OFF_HIVE_LANE} work"
@@ -246,7 +246,7 @@ def test_a_refused_hive_lane_stays_refused_when_the_workstation_herdr_answers(se
     two_hosts(setup)
     setup.herdr._profile_decision.return_value = ProfileDecision("qa", "task", "qa")
     fenced = hive_controller(setup)
-    monkeypatch.setattr(controller, "_workstation_herdr", lambda: True)
+    monkeypatch.setattr(controller, "_workstation_herdr", lambda memo=None: True)
     task = {"id": "task", "hive": "anton"}
     assert fenced.placement_refusal("eng", task) == "no live hive takes qa"
     with pytest.raises(controller.SwarmError, match="no live hive takes qa"):
@@ -276,11 +276,11 @@ def test_master_fill_spawns_a_refused_seat_two_master_on_the_workstation_herdr_s
     held = lease.acquire(store, "sw", "controller")
     routed = RoutedRuntime(herdr, RuntimeRouter([LocalHerdrRuntime(herdr)]))
     fenced = controller.FencedRuntime(store, "sw", held, routed, "compose")
-    monkeypatch.setattr(controller, "_workstation_herdr", lambda: False)
+    monkeypatch.setattr(controller, "_workstation_herdr", lambda memo=None: False)
     actions = master_fill.run("sw", store.config("sw"), store, fenced, {}, 1)
     assert actions == ["the workstation hive spawns master work: no live hive takes master"]
     assert herdr.masters == []
-    monkeypatch.setattr(controller, "_workstation_herdr", lambda: True)
+    monkeypatch.setattr(controller, "_workstation_herdr", lambda memo=None: True)
     actions = master_fill.run("sw", store.config("sw"), store, fenced, {}, 2)
     assert len(actions) == 1 and actions[0].startswith("spawned master ")
     [(_, task)] = herdr.masters

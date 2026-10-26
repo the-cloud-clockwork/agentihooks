@@ -22,7 +22,7 @@ INTERACTIONS = frozenset(
 def refusal(what):
     return (
         f"sign in: this browser call opens or fills {what}. Agents never sign in, solve a CAPTCHA or grant OAuth; "
-        "use a page already signed in, or raise the step for the operator in Priorities."
+        "use a page already signed in, or send the step to the front door master by inbox."
     )
 
 

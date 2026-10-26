@@ -238,7 +238,7 @@ def test_the_operator_launch_opens_claude_in_the_swarm_space_with_the_inbox_chan
         "--host",
         "herdr",
         "--workspace",
-        f"{tmp_path.name}-a1b2c3",
+        f"{tmp_path.name.replace('_', '-')}-a1b2c3",
         "--dir",
         str(tmp_path),
         "--name",

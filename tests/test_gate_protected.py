@@ -539,6 +539,35 @@ def test_protected_provenance_checkout_accepts_only_exact_git_bounds(bounded, ch
 
 
 @pytest.mark.parametrize(
+    "uses",
+    [
+        "./provenance-grader/.github/actions/retry-upload",
+        "./.github/actions/retry-upload",
+        "./provenance-grader/.github/actions/other-upload",
+    ],
+)
+@pytest.mark.parametrize("bounded", [False, True])
+def test_protected_provenance_admits_only_the_retried_evidence_upload(uses, bounded):
+    from scripts import ci_reuse
+
+    base = _workflow()
+    base["jobs"]["reuse"] = {"if": "github.event_name != 'merge_group' && github.event_name != 'pull_request'"}
+    base["jobs"]["select"] = {"steps": ci_reuse.duration_provenance_steps()}
+    base["jobs"]["gate"]["needs"].append("select")
+    head = copy.deepcopy(base)
+    head["jobs"]["select"]["steps"] = ci_reuse.retried_duration_provenance_steps()
+    if bounded:
+        head["jobs"]["select"]["steps"][0]["env"] = {
+            "GIT_HTTP_LOW_SPEED_LIMIT": "1000",
+            "GIT_HTTP_LOW_SPEED_TIME": "60",
+        }
+    head["jobs"]["select"]["steps"][-1]["uses"] = uses
+    problems = gate_protected.grade({"test.yml": base}, {}, {"test.yml": head}, {}, _TODAY)
+    admitted = uses == "./provenance-grader/.github/actions/retry-upload"
+    assert problems == ([] if admitted else ["The head skips reuse without protected durations provenance."])
+
+
+@pytest.mark.parametrize(
     ("change", "red"),
     [
         ({}, False),

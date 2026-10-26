@@ -1,0 +1,6 @@
+{
+  "scripts/events/nats_names.py:scripts.events.nats_names.x_root_stream__mutmut_19:6fb2d87fcae4fa9b2e425fef07dba2a9864e2f510d95e9f466e98b0cb564abd3": {
+    "reader": "standards-reader",
+    "reason": "Omitting the dict.get default produces None instead of an empty list. Both are false and not allow short circuits iteration, with no later use of allow, so stream selection and requests are identical."
+  }
+}

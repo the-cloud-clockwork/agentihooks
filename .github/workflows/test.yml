@@ -275,7 +275,7 @@ jobs:
 
       - name: Publish protected tested tree evidence
         if: (github.event_name == 'merge_group' || github.event_name == 'pull_request') && steps.provenance.outputs.recorded == 'true'
-        uses: actions/upload-artifact@v4
+        uses: ./provenance-grader/.github/actions/retry-upload
         with:
           name: required-tree-${{ github.run_attempt }}
           path: ${{ runner.temp }}/provenance.json
@@ -1613,7 +1613,7 @@ jobs:
           permission-actions: read
           permission-contents: read
 
-      - name: Prefetch reports while every planned shard finishes
+      - name: Wait for every planned shard
         shell: bash
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
@@ -1625,7 +1625,30 @@ jobs:
             SHARDS="$(seq 1 20 | jq -sc '.')"
           fi
           export SHARDS
+          echo "SHARDS=$SHARDS" >> "$GITHUB_ENV"
           python -m scripts.ci_gate_shards
+
+      # The artifact service download spends none of the App installation's hourly REST budget.
+      - name: Download shard reports
+        uses: actions/download-artifact@v4
+        with:
+          pattern: "{durations,flakes}-${{ matrix.python-version }}-*"
+          path: shard-reports
+
+      - name: Require every planned shard report
+        shell: bash
+        run: |
+          IFS=, read -ra shards <<< "${SHARDS//[][ ]/}"
+          missing=()
+          for shard in "${shards[@]}"; do
+            for kind in durations flakes; do
+              [[ -d "shard-reports/$kind-3.12-$shard" ]] || missing+=("$kind-3.12-$shard")
+            done
+          done
+          if (( ${#missing[@]} )); then
+            echo "::error::Missing shard reports: ${missing[*]}"
+            exit 1
+          fi
 
       - name: Check every collected test ran in exactly one shard
         env:

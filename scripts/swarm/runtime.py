@@ -312,6 +312,7 @@ def deferring(herdr: "HerdrRuntime") -> "HerdrRuntime":
 
 class HerdrRuntime:
     quota_accounts: Callable[..., list] | None = None
+    pass_memo: dict | None = None
 
     def __init__(self, home=SWARM_HOME, run=subprocess.run, choose=None, herdr=herdr_call, defer_master_canary=False):
         self.home, self.run, self.herdr = home, run, herdr
@@ -597,8 +598,15 @@ class HerdrRuntime:
             )
         if not decision.bundle_revision:
             kept = _recorded_revision(saved) if saved.get("profile") == decision.profile else ""
-            decision = replace(decision, bundle_revision=kept or overlays.revision())
+            decision = replace(decision, bundle_revision=kept or self._bundle_revision())
         return decision
+
+    def _bundle_revision(self):
+        if self.pass_memo is None:
+            return timing.call(overlays.revision)
+        if "bundle_revision" not in self.pass_memo:
+            self.pass_memo["bundle_revision"] = timing.call(overlays.revision)
+        return self.pass_memo["bundle_revision"]
 
     def planned_account(self, task_id, agent):
         planned = getattr(self, "_quota_tasks", {}).get(task_id)

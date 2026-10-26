@@ -25,6 +25,16 @@ def state(container):
     return json.loads(docker("inspect", "--format", "{{json .State}}", container))
 
 
+def exit_code(container, timeout):
+    try:
+        return int(docker("wait", container, timeout=timeout))
+    except subprocess.TimeoutExpired:
+        observed = state(container)
+        if observed["Running"]:
+            raise
+        return observed["ExitCode"]
+
+
 def snapshot(container):
     code = "import json; from pathlib import Path; r=Path('/home/worker/current.json'); a=Path(json.loads(r.read_text())['attempt']); c=list((a/'run/supervision').glob('*/context.json')); print(json.dumps({'root':str(c[0].parent),'running':(c[0].parent/'running.json').exists(),'grandchildren':len(list(c[0].parent.glob('fixture-grandchild*.json')))}))"
     return json.loads(docker("exec", container, "python", "-c", code))
@@ -189,7 +199,7 @@ def run_case(image, mode, output, kill=False, supervised=False, viewer=True):
             start = time.monotonic()
             docker("kill", "--signal", "TERM", container)
         try:
-            code = int(docker("wait", container, timeout=SHUTDOWN_WAIT_SECONDS))
+            code = exit_code(container, SHUTDOWN_WAIT_SECONDS)
         except subprocess.TimeoutExpired:
             stalled(container, output, root)
             raise
@@ -361,7 +371,7 @@ def rollback_case(image, prior_image, output):
         if prior:
             docker("rm", "--force", prior)
         docker("kill", "--signal", "TERM", current)
-        docker("wait", current, timeout=12)
+        exit_code(current, 12)
         docker("rm", "--force", current)
 
 
