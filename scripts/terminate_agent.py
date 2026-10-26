@@ -334,11 +334,9 @@ def _execute(args: argparse.Namespace, items: list[Session]) -> int:
         print("terminate-agent: --stand-down stops Codex conversations only, not --type claude", file=sys.stderr)
         return 2
     if not args.dry_run:
-        from scripts.gates.base import Call
-        from scripts.gates.entry import evaluate
-        from scripts.gates.terminations import Terminations
+        from scripts.gates.entry import native
 
-        if evaluate(Terminations(), Call("terminate-agent")):
+        if native("terminations", "terminate-agent"):
             return 2
     if args.stand_down:
         from scripts.codex_session import stand_down

@@ -90,3 +90,20 @@ def test_only_explicit_auth_launches_run_sign_in_gate(monkeypatch, native_gate, 
     assert init_agent.main(args, {"AGENTIHOOKS_GATE_SIGN_INS": "enforce"}) == 2
     assert resolve.call_count == (0 if denied else 1)
     assert [row["gate"] for row in log.recent("proof", home=native_gate)] == (["sign-ins"] if denied else [])
+
+
+@pytest.mark.parametrize(
+    "name,operation", [("terminations", "terminate-agent"), ("sign-ins", "claude-login"), ("node-caps", "hive-create")]
+)
+@pytest.mark.parametrize("key", ["CLAUDE_CODE_SESSION_ID", "CODEX_THREAD_ID"])
+def test_native_calls_honor_only_the_callers_session_lift(native_gate, name, operation, key):
+    from scripts.gates import lift, modes
+
+    lift.arm("proof", "lifted-session", name, native_gate)
+    env = {key: "lifted-session", modes.env_name(name): "enforce"}
+    assert entry.native(name, operation, env) == 0
+    env[key] = "another-session"
+    assert entry.native(name, operation, env) == 2
+    rows = log.recent("proof", home=native_gate)
+    assert [row["kind"] for row in rows] == ["observe", "deny"]
+    assert rows[0]["reason"].startswith(entry.LIFTED)

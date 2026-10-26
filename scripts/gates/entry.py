@@ -86,7 +86,9 @@ def evaluate(gate, call, environ=None, home=None):
 
 
 def native(name, operation, environ=None):
-    return evaluate(HOST_GATES[name], Call(operation), environ)
+    from scripts.inbox.seen import receiving_session
+
+    return evaluate(HOST_GATES[name], Call(operation, session=receiving_session(environ)), environ)
 
 
 def _decide(gate, call, who, home, mode="enforce"):
