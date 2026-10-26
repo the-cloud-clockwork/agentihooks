@@ -215,6 +215,20 @@ def test_agent_writes_and_cleared_chat_are_not_relayed(swarm):
     assert inbox.pending() == []
 
 
+def test_plan_and_slice_additions_are_quiet_but_other_operator_events_still_relay(swarm):
+    _, inbox = swarm
+    sent = relay(
+        swarm,
+        write(5, "plans/p1", kind="added", text="Plan title"),
+        write(6, "slices/p1.first", kind="added", text="## Step one"),
+        write(7, "tasks/t1"),
+    )
+    assert len(sent) == 1
+    [(_, text, _)] = pending(inbox, ENG.seat)
+    assert text == f"On ledger {SLUG}: " + line(write(7, "tasks/t1"))
+    assert pending(inbox, MASTER_SEAT) == [] and pending(inbox, CI.seat) == []
+
+
 def test_a_ledger_without_a_swarm_sends_nothing(swarm):
     store, inbox = swarm
     assert operator_mail.relay(inbox, store, "other", DOC, [write(5, "phases/p1")], line) == []
