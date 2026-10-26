@@ -284,7 +284,7 @@ def relay_stderr(pipe: BinaryIO, fd: int, tail: collections.deque[bytes]) -> Non
 def stop_server(server: subprocess.Popen) -> None:
     server.terminate()
     try:
-        server.wait(timeout=10)
+        server.wait(timeout=180)
     except subprocess.TimeoutExpired:
         server.kill()
         server.wait()
