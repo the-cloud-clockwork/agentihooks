@@ -181,7 +181,7 @@ def unlocking_configs(tree: Path) -> list[str]:
         *(tree / name for name in ("conftest.py", "pyproject.toml", "pytest.ini", "setup.cfg", "tox.ini")),
     ]
     return [
-        f"{path.relative_to(tree)} names the locked module {stem}; locked tests cannot be ignored, deselected or hooked."
+        f"{path.relative_to(tree)} names the locked module {stem}; a locked test cannot be ignored or deselected."
         for path in configs
         if path.is_file()
         for stem in stems
@@ -216,7 +216,9 @@ def write(tree: Path) -> None:
 
 def grade(base: dict, recorded: dict, head: dict) -> list[str]:
     errors = [
-        f"The locked test {key} is skipped or xfailed." for key, found in sorted(head.items()) if found["disabled"]
+        f"The locked test {key} is skipped, xfailed or returns early."
+        for key, found in sorted(head.items())
+        if found["disabled"]
     ]
     for key, floor in sorted(base.items()):
         found = head.get(key)
@@ -249,6 +251,7 @@ def main(argv: list[str] | None = None) -> int:
             write(args.head)
             return 0
         head = measure(args.head)
+        configs = unlocking_configs(args.head)
         recorded = load(args.head)
         if recorded is None:
             raise GradeError(f"the head has no {MANIFEST}")
@@ -260,7 +263,7 @@ def main(argv: list[str] | None = None) -> int:
     except (GradeError, ValueError, OSError) as exc:
         print(f"::error::{exc}")
         return 1
-    errors = grade(base, recorded, head) + unlocking_configs(args.head)
+    errors = grade(base, recorded, head) + configs
     print(f"{len(base)} locked tests on the base, {len(head)} measured on the head, {len(errors)} errors")
     for error in errors:
         print(f"::error::{error}")

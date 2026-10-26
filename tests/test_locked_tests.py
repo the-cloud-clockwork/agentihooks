@@ -104,7 +104,7 @@ def test_a_skipped_or_xfailed_locked_test_is_red(tmp_path, capsys, planted):
     head = _tree(tmp_path / "head", planted, record=GUARD)
     code, out = _grade(base, head, capsys)
     assert code == 1
-    assert "is skipped or xfailed." in out
+    assert "is skipped, xfailed or returns early." in out
 
 
 def test_a_deleted_locked_test_is_red(tmp_path, capsys):
@@ -149,7 +149,7 @@ def test_a_new_skipped_test_in_a_locked_file_is_red(tmp_path, capsys):
     head = _tree(tmp_path / "head", GUARD + "\n\n@pytest.mark.skip\ndef test_new():\n    assert True\n")
     code, out = _grade(base, head, capsys)
     assert code == 1
-    assert f"::error::The locked test {LOCKED}::test_new is skipped or xfailed.\n" in out
+    assert f"::error::The locked test {LOCKED}::test_new is skipped, xfailed or returns early.\n" in out
 
 
 def test_only_assert_methods_and_asserting_helpers_count_as_assertions(tmp_path):
@@ -231,7 +231,7 @@ def test_the_repository_manifest_matches_its_locked_tests():
 @pytest.mark.parametrize(
     "locked_base,message",
     [
-        (False, f"::error::The locked test {LOCKED}::TestGuard::test_raises is skipped or xfailed.\n"),
+        (False, f"::error::The locked test {LOCKED}::TestGuard::test_raises is skipped, xfailed or returns early.\n"),
         (True, "::error::The base locks guard tests but dev carries no scripts/locked_tests.py"),
     ],
     ids=["introducing pull request", "dev without the grader"],
