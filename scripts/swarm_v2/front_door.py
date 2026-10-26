@@ -1,7 +1,11 @@
 """The front door master: the bare master seat alone faces the operator, in page chat and on the claude ai login.
 
-Backend master seats reach the operator only through the front door, over the masters channel.
+Every other agent reaches the operator only through the front door's inbox. No agent asks the operator first: page
+chat takes only the front door's answer to an operator line, and questions, priorities and needs operator follow ups
+from agents are refused.
 """
+
+import re
 
 from scripts.gates import log
 from scripts.gates.base import Who
@@ -11,6 +15,7 @@ from scripts.swarm.store import MASTER
 NAME = "front-door"
 CHAT = "chat"
 CHAT_WRITES = ("add", "edit", "delete")
+NEEDS_OPERATOR = re.compile(r"^followups/[^/]+/needs_operator$")
 
 
 def seat(slug: str) -> str:
@@ -26,10 +31,34 @@ def chat_write(op: dict) -> bool:
     return op.get("op") in CHAT_WRITES and op.get("thread") == CHAT and "by" in op
 
 
+def asks_operator(op: dict) -> bool:
+    kind = op.get("op")
+    if kind == "priority":
+        return True
+    if kind == "add_item":
+        return op.get("list") == "questions" or (op.get("list") == "followups" and bool(op.get("needs_operator")))
+    return kind == "set" and op.get("value") is True and bool(NEEDS_OPERATOR.match(str(op.get("path"))))
+
+
+def route(slug: str) -> str:
+    return f'send it to the front door master by inbox with agentihooks msg send {seat(slug)} "<text>"'
+
+
 def refusal(slug: str, held: str) -> str:
+    return f"page chat belongs to the front door master {seat(slug)}, so {held} cannot write it; {route(slug)}"
+
+
+def say_refusal(slug: str, by: str) -> str:
     return (
-        f"page chat belongs to the front door master {seat(slug)}, so {held} cannot write it; ask the front door "
-        f'with agentihooks swarm {slug} masters-channel say "<text>"'
+        f"no agent writes to the operator first, so {by} cannot say to him; the front door answers him only when "
+        f"he writes; {route(slug)}"
+    )
+
+
+def ask_refusal(slug: str, by: str) -> str:
+    return (
+        f"no agent asks the operator first, so {by} cannot add a question, priority or needs operator follow up; "
+        f"the front door answers him only when he writes; {route(slug)}"
     )
 
 
@@ -47,11 +76,18 @@ class Door:
     def apply(self, doc: dict, op: dict, ctx, apply) -> bool:
         from scripts.swarm.naming import lane_of
 
-        if not chat_write(op):
+        if "by" not in op:
             return self._inner(doc, op, ctx, apply)
         by = ctx.author(op["by"])
-        if lane_of(by) != MASTER:
+        lane = lane_of(by)
+        if not lane:
             return self._inner(doc, op, ctx, apply)
+        if asks_operator(op):
+            return self._deny(by, ask_refusal(self.slug, by), ctx)
+        if not chat_write(op):
+            return self._inner(doc, op, ctx, apply)
+        if lane != MASTER:
+            return self._deny(by, refusal(self.slug, by), ctx)
         try:
             if self._redis is None:
                 self._redis = self.connect()
@@ -62,7 +98,9 @@ class Door:
             return self._inner(doc, op, ctx, apply)
         if holds(self.slug, held):
             return self._inner(doc, op, ctx, apply)
-        reason = refusal(self.slug, held)
+        return self._deny(by, refusal(self.slug, held), ctx)
+
+    def _deny(self, by, reason, ctx):
         log.append(self.slug, log.Row.of(NAME, "deny", Who(name=by), "ledger", reason), self.home)
         ctx.refused.append(reason)
         return False

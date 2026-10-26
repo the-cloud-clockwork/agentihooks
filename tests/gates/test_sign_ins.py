@@ -40,7 +40,7 @@ def test_it_matches_playwright_tools_only():
 def test_the_refusal_names_what_it_saw_and_the_way_out():
     assert refusal("a sign in page") == (
         "sign in: this browser call opens or fills a sign in page. Agents never sign in, solve a CAPTCHA or grant "
-        "OAuth; use a page already signed in, or raise the step for the operator in Priorities."
+        "OAuth; use a page already signed in, or send the step to the front door master by inbox."
     )
 
 

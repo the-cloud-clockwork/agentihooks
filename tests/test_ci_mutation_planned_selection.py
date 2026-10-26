@@ -638,6 +638,47 @@ def test_selection_keeps_whole_files_where_recorded_coverage_cannot_speak(tmp_pa
     assert selection == {"scripts/core.py": WHOLE}
 
 
+def test_a_changed_tests_data_file_adds_only_the_tests_that_read_it(tmp_path, monkeypatch):
+    manifest = _recorded_project(tmp_path, monkeypatch)
+    manifest["tests"]["tests/test_core.py::test_other"]["files"] = ["tests/data/rules.json"]
+    (tmp_path / "tests/data").mkdir()
+    (tmp_path / "tests/data/rules.json").write_text("{}\n")
+    _commit(tmp_path, "data")
+    selection = {}
+    plan.estimate(tmp_path, {"scripts/core.py": {6}}, selection, manifest)
+    assert selection == {"scripts/core.py": sorted([*NARROWED, "tests/test_core.py::test_other"])}
+
+
+WORKFLOW = (
+    "env:\n  FLAG: {env}\njobs:\n  split:\n    runs-on: {split}\n  unit:\n    needs: split\n    steps:\n"
+    "      - run: {unit}\n  lint:\n    steps:\n      - run: {lint}\n"
+)
+RECORDED_WORKFLOW = {"env": "1", "split": "x", "unit": "pytest", "lint": "ruff"}
+
+
+@pytest.mark.parametrize(
+    "edit,expected",
+    [
+        ({"lint": "ruff check"}, sorted([*NARROWED, "tests/test_core.py::test_other"])),
+        ({"unit": "pytest -x"}, WHOLE),
+        ({"split": "y"}, WHOLE),
+        ({"env": "2"}, WHOLE),
+    ],
+)
+def test_a_workflow_edit_drops_narrowing_only_when_it_changes_the_test_command(tmp_path, monkeypatch, edit, expected):
+    manifest = {**_recorded_project(tmp_path, monkeypatch), "version": 2}
+    manifest["tests"]["tests/test_core.py::test_other"]["files"] = [".github/workflows/test.yml"]
+    workflow = tmp_path / ".github/workflows/test.yml"
+    workflow.parent.mkdir(parents=True)
+    workflow.write_text(WORKFLOW.format(**RECORDED_WORKFLOW))
+    manifest["commit"] = _commit(tmp_path, "recorded workflow")
+    workflow.write_text(WORKFLOW.format(**{**RECORDED_WORKFLOW, **edit}))
+    _commit(tmp_path, "workflow")
+    selection = {}
+    plan.estimate(tmp_path, {"scripts/core.py": {6}}, selection, manifest)
+    assert selection == {"scripts/core.py": expected}
+
+
 def test_a_path_whose_covering_tests_are_gone_keeps_its_selected_files(tmp_path, monkeypatch):
     manifest = _recorded_project(tmp_path, monkeypatch)
     manifest["commit"] = subprocess.check_output([*GIT, "-C", str(tmp_path), "rev-parse", "HEAD"], text=True).strip()

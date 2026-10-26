@@ -180,7 +180,7 @@ from scripts.swarm_ledger import (
     plan_shape,
     workflow_task,
 )
-from scripts.swarm_v2 import master_scale, masters
+from scripts.swarm_v2 import front_door, master_scale, masters
 from scripts.swarm_v2.runtime.routed import routed
 
 SETTABLE = {
@@ -2176,9 +2176,7 @@ def _retire(store, slug, agent, exit_text):
 def cmd_say(store, args):
     agent = _me(store, args)
     if args.to in ("", delivery.OPERATOR):
-        LedgerClient().say(args.slug, args.text, by=agent.name)
-        print(json.dumps({"posted": True}))
-        return
+        raise SwarmError(front_door.say_refusal(args.slug, agent.name))
     sent = delivery.send(store, args.slug, args.text, sender=agent.name, to=args.to, fyi=args.fyi)
     print(json.dumps({"sent": sent}))
 
