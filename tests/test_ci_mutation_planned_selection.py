@@ -393,7 +393,7 @@ def test_statistics_select_only_contexts_executing_the_edited_branch(tmp_path, m
     line = 3 if mode == "repeated" else 4
     plan.estimate(tmp_path, {"scripts/core.py": {line + shift}}, selection, manifest)
     expected = ["tests/test_core.py::test_g"]
-    if mode in {"legacy", "inserted", "header", "drift", "module"}:
+    if mode in {"legacy", "inserted", "header", "drift"}:
         expected = [
             f"tests/test_core.py::{name}" for name in ("TestSpawn::test_child", "test_f", "test_g", "test_other")
         ]
@@ -480,6 +480,99 @@ def test_a_changed_nested_signature_adds_the_tests_reaching_the_nested_function(
         "tests/test_edited.py",
         "tests/test_fresh.py",
     ]
+
+
+@pytest.mark.parametrize(
+    ("mode", "line", "expected"),
+    [
+        ("import", 12, ["tests/test_core.py::test_g"]),
+        ("constant", 12, ["tests/test_core.py::test_g"]),
+        ("from", 11, ["tests/test_core.py::test_g"]),
+        (
+            "rebound",
+            11,
+            [
+                "tests/test_core.py::TestSpawn::test_child",
+                "tests/test_core.py::test_f",
+                "tests/test_core.py::test_g",
+                "tests/test_core.py::test_other",
+            ],
+        ),
+    ],
+)
+def test_a_module_edit_that_only_binds_new_names_keeps_the_selection_narrow(
+    tmp_path, monkeypatch, mode, line, expected
+):
+    from coverage import CoverageData
+
+    from tests.dep_manifest import build
+
+    _recorded_project(tmp_path, monkeypatch)
+    source = (
+        "from os import path\n\n\n"
+        "def f(value):\n    return value + 1\n\n\n"
+        "def g(value):\n    if value:\n        return value + 1\n    return value - 1\n"
+    )
+    (tmp_path / "scripts/core.py").write_text(source)
+    commit = _commit(tmp_path, "two functions")
+    data = CoverageData(basename=str(tmp_path / ".coverage"))
+    for test, lines in (
+        ("tests/test_core.py::test_f", [5]),
+        ("tests/test_core.py::test_g", [9, 11]),
+        ("tests/test_core.py::test_other", [9, 10]),
+        ("tests/test_core.py::TestSpawn::test_child", [9, 10]),
+    ):
+        data.set_context(f"{test}|run")
+        data.add_lines({str(tmp_path / "scripts/core.py"): lines})
+    data.write()
+    manifest = build(tmp_path / ".coverage", [], tmp_path, commit, "test")
+    edited = {
+        "import": source.replace("from os import path\n", "from os import path\nimport json\n"),
+        "constant": source.replace("from os import path\n", "from os import path\nLIMIT = 3\n"),
+        "from": source.replace("from os import path\n", "from os import path, sep\n"),
+        "rebound": source + "\n\npath = None\n",
+    }[mode]
+    (tmp_path / "scripts/core.py").write_text(edited.replace("value - 1", "value - 2"))
+    _commit(tmp_path, "module edit")
+    selection = {}
+    plan.estimate(tmp_path, {"scripts/core.py": {line}}, selection, manifest)
+    assert selection["scripts/core.py"] == [*expected, "tests/test_edited.py", "tests/test_fresh.py"]
+
+
+@pytest.mark.parametrize(
+    ("old", "new", "expected"),
+    [
+        ("def f(:\n", "def f():\n    pass\n", False),
+        ("from os import path\n", "from os import path\nimport json\n", True),
+        ("X = 1\nfrom os import path\n", "X = 1\nfrom os import path, sep\n", True),
+        ("X = 1\nfrom os import path\n", "from os import path, sep\nX = 1\n", False),
+        ("A = 1\nB = 2\n", "B = 2\nA = 1\n", False),
+        ("A.append(1)\nA.append(2)\n", "A.append(2)\nA.append(1)\n", False),
+        ("from sys import sep\n", "from os import path, sep\n", False),
+        ("from os import path, sep\n", "from os import sep, path\n", True),
+        ("", "from os import sep\n", True),
+        ("X = 1\n", "X = 1\nimport json\n", True),
+        ("X = 1\n", "X = 1\nprint(X)\n", False),
+        ("", "from os import *\n", False),
+        ("os = 1\n", "os = 1\nimport os.path\n", False),
+        ("y = x\n", "y = x\nx = 1\n", False),
+        ("def f():\n    pass\n", "def f():\n    pass\n\n\nf = 1\n", False),
+        ("def f():\n    return 1\n", "import json\n\n\ndef f():\n    return 2\n", True),
+        ("def f():\n    return 1\n", "@cache\ndef f():\n    return 1\n", False),
+        (
+            "class A:\n    def m(self):\n        return 1\n",
+            "import json\n\n\nclass A:\n    def m(self):\n        return 2\n",
+            True,
+        ),
+        ("class A:\n    pass\n", "class A(B):\n    pass\n", False),
+        ("class A:\n    pass\n", "class A(metaclass=M):\n    pass\n", False),
+        ("class A:\n    pass\n", "@dataclass\nclass A:\n    pass\n", False),
+        ("class A:\n    X = 1\n", "class A:\n    X = 2\n", False),
+        ("X = 1\n", "Y = 1\n", False),
+    ],
+)
+def test_only_statements_binding_unknown_names_count_as_new(old, new, expected):
+    assert plan.binds_only_new_names(old, new) is expected
 
 
 def test_plan_publishes_covering_test_ids_and_checks_their_files(tmp_path, monkeypatch):
