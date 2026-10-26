@@ -467,6 +467,7 @@ def _listing_line(world):
 
 
 def _keep_member(world):
+    world.tools.redis.hset(machine.MACHINES, "worker-001", NAME)
     grant = auth.mint(world.tools.redis, NAME, "redis://127.0.0.1:6379/0")
     world.bao.records[RECORD] = {"credential": auth.env_text("https://hive.example:8770", grant)}
     world.bao.versions[RECORD] = 1
