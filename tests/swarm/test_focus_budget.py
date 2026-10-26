@@ -9,6 +9,26 @@ def document(tasks):
     return {"tasks": tasks, "phases": [], "plans": [], "freezes": [{"verb": "focus", "target": "kind:hot"}]}
 
 
+def test_scheduler_batch_keeps_five_focused_slots_and_never_claims_frozen_work():
+    import fakeredis
+
+    from scripts.swarm.store import RedisStore, SwarmConfig
+    from scripts.swarm.tick import _spawn_order
+    from tests.swarm.test_tick import FakeLedger, FakeRuntime
+
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    config = SwarmConfig("sw", "/repo", max_eng=10, max_ci=0, max_plan=0)
+    store.create(config)
+    hot = [work(f"hot{i}", hot=True) for i in range(10)]
+    plain = [work(f"plain{i}", rank="urgent") for i in range(10)]
+    frozen = work("frozen", hot=True, rank="urgent")
+    ledger = FakeLedger([*plain, frozen, *hot])
+    doc = {**ledger.state("sw"), "freezes": document([])["freezes"] + [{"verb": "freeze", "target": "tasks/frozen"}]}
+    selected, _ = _spawn_order("sw", config, store, [], ledger.rows, doc, FakeRuntime())
+    ids = [task["id"] for _, task in selected]
+    assert ids == [task["id"] for task in hot[:5] + plain[:5]]
+
+
 def test_ten_lane_slots_allocate_five_focused_and_five_normal_tasks():
     from scripts.swarm import focus_budget
 

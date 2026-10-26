@@ -51,6 +51,11 @@ def test_focus_weight_defaults_to_fifty_and_is_settable(env):
     assert run(SLUG, "set", "focus-weight=30") == 0
     assert store.config(SLUG).focus_weight == 30
     assert run(SLUG, "set", "focus-weight=x") == 1
+    assert run(SLUG, "set", "focus-weight=101") == 1
+    assert store.config(SLUG).focus_weight == 30
+    for weight in (0, 100):
+        assert run(SLUG, "set", f"focus-weight={weight}") == 0
+        assert store.config(SLUG).focus_weight == weight
 
 
 def test_only_claimable_unclaimed_urgent_tasks_raise_a_finding(store):

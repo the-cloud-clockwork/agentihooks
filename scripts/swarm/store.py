@@ -89,6 +89,8 @@ class SwarmConfig:
     focus_weight: int = 50
 
     def __post_init__(self) -> None:
+        if type(self.focus_weight) is not int or not 0 <= self.focus_weight <= 100:
+            raise SwarmError("focus weight must be a whole number from 0 to 100")
         if self.engine not in ("legacy", "events"):
             raise SwarmError("engine must be one of legacy, events")
 
@@ -235,6 +237,7 @@ class RedisStore:
             int(raw.get("local_max_agents") or DEFAULT_LOCAL_MAX_AGENTS),
             raw.get("engine", "legacy"),
             json.loads(raw.get("window") or "{}"),
+            int(raw.get("focus_weight", 50)),
         )
 
     def update(self, slug, **changes):

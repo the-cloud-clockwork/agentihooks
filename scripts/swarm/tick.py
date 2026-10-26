@@ -1442,7 +1442,7 @@ def _collect_acks(slug, config, store, ledger, runtime, doc, now_ms):
 
 
 def _spawn_order(slug, config, store, agents, rows, doc, runtime):
-    from scripts.swarm import capacity
+    from scripts.swarm import capacity, focus_budget
 
     if begin := getattr(runtime, "begin_placement_pass", None):
         begin()
@@ -1459,12 +1459,15 @@ def _spawn_order(slug, config, store, agents, rows, doc, runtime):
         ready = timing.timed(ready_in_order, slug, store, rows, doc, lane, dispatched, claims)
         if "tasks" in decision:
             ready = [task for task in ready if task["id"] in decision["tasks"]]
+        ready = focus_budget.select(doc, ready, lane, cap, config.focus_weight)
         ready, refused = timing.timed(
             profile_first.placeable, slug, config, store, runtime, lane, ready, max(cap - busy, 0)
         )
         queue += [(busy + rank, lane, task) for rank, task in enumerate(ready)]
         waits += refused
-    return timing.timed(_ranked, slug, store, queue, dispatched), waits
+    ranked = timing.timed(_ranked, slug, store, queue, dispatched)
+    focus = focus_budget.ranks(doc)
+    return sorted(ranked, key=lambda entry: focus[entry[1]["id"]]), waits
 
 
 def _ranked(slug, store, queue, dispatched):

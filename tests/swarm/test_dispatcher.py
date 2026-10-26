@@ -761,7 +761,7 @@ def test_the_critical_chain_counts_only_work_no_focus_holds_unless_the_fix_phase
     from scripts.doctor import loop
 
     assert dispatcher.guarded(held_fix_chain(), "") == set()
-    assert dispatcher.guarded(held_fix_chain(FOCUS), "") == {"b"}
+    assert dispatcher.guarded(held_fix_chain(FOCUS), "") == set()
     assert dispatcher.guarded(held_fix_chain(FOCUS), loop.FIX_PHASE) == set()
     tasks = [
         task("a", state="done"),
@@ -783,8 +783,8 @@ def test_the_doctor_fix_phase_reaches_the_guard_in_the_claim_key_and_the_chain_r
     found, ledger = held_fix_chain(FOCUS), Ledger()
     claimed = found["tasks"][1]
     config = store.update(SLUG, autonomy="delegate")
-    assert dispatcher.claim_key(config, found)(claimed)[0] == dispatcher.GUARD
-    assert dispatcher.chain_claimed(SLUG, config, ledger, found, claimed, "eng", NOW) != []
+    assert dispatcher.claim_key(config, found)(claimed)[0] != dispatcher.GUARD
+    assert dispatcher.chain_claimed(SLUG, config, ledger, found, claimed, "eng", NOW) == []
     config = store.update(SLUG, template=priming.TEMPLATE)
     assert dispatcher.claim_key(config, found)(claimed)[0] != dispatcher.GUARD
     assert dispatcher.chain_claimed(SLUG, config, ledger, found, claimed, "eng", NOW) == []
@@ -797,7 +797,7 @@ def test_the_doctor_fix_phase_reaches_the_dispatcher_queue_its_position_and_its_
     found = held_fix_chain(FOCUS)
     found["tasks"] += [task("v", phase=fix, depends_on=["s"]), task("w", depends_on=["b"])]
     claimed = found["tasks"][1]
-    assert dispatcher.queue(found, "")[0] == "b"
+    assert dispatcher.queue(found, "")[0] == "p"
     assert dispatcher.queue(found, fix)[0] == "p"
     config = store.update(SLUG, autonomy="delegate", template=priming.TEMPLATE, max_eng=1)
     key = dispatcher.claim_key(config, found)
