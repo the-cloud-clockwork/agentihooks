@@ -7,6 +7,7 @@ from scripts.swarm_ledger.events import patch
 from scripts.swarm_ledger.events.hub import Hub
 from scripts.swarm_ledger.repository.rows import encode
 from scripts.swarm_ledger.repository.sqlite import Entry, SQLiteLedgerRepository
+from tests.swarm_ledger.test_fragment_encoding import held
 from tests.swarm_ledger.test_operation_snapshot import SLUG, message, repository
 from tests.swarm_ledger.test_operations_cpu_contract import small_corpus
 
@@ -34,7 +35,7 @@ def test_a_generation_joins_its_text_when_read_and_keeps_no_copy(tmp_path, monke
     stored = repository(tmp_path, monkeypatch)
     new, _ = stored.apply_ops(SLUG, ops=[message("chat")], copy_state=False)
     entry = stored.current(SLUG)
-    assert entry.fragments.text is None
+    assert [item for item in held(entry.fragments) if isinstance(getattr(item, "text", None), str)] == []
     assert entry.text == encode(new)
     assert Entry(1, "stored text", {}).text == "stored text"
 
