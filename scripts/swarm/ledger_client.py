@@ -66,15 +66,7 @@ class LedgerClient:
 
     def task(self, slug, task_id):
         """One task without its threads, or None when the ledger holds no such task."""
-        try:
-            return self._resource(slug, f"tasks/{quote(task_id, safe='')}")
-        except urllib.error.HTTPError as exc:
-            from scripts.swarm_ledger.api.client import failure
-
-            replay, error = failure(exc)
-            if exc.code != 404 or error.get("code") != "resource_missing":
-                raise replay from None
-            return None
+        return self.item(slug, f"tasks/{task_id}")
 
     def item(self, slug, path):
         """One item by its list path, or None when the ledger holds no such item."""

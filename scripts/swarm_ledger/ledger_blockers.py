@@ -39,8 +39,8 @@ def autonomy(slug: str) -> str:
 
 
 def find(doc: dict, item: str) -> dict | None:
-    name, _, item_id = item.partition("/")
-    return next((row for row in doc.get(name, []) if row.get("id") == item_id), None)
+    name, item_id = item.split("/")
+    return next((row for row in doc.get(name) or () if row.get("id") == item_id), None)
 
 
 def record(row: dict | None) -> dict:
@@ -129,17 +129,17 @@ def _priority_text(reason: str) -> str:
     return "Blocked: " + " ".join(words[:PRIORITY_WORDS]) + ("…" if len(words) > PRIORITY_WORDS else "")
 
 
-def _refuse(ctx, slug, item, rec, why):
-    ctx.refused.append(f"{why}; {step_text(slug, item, rec)}")
+def _refuse(ctx, item, rec, why):
+    ctx.refused.append(f"{why}; {step_text(ctx.slug, item, rec)}")
     return False
 
 
 def _attempt(row, rec, op, ctx):
     step = next_step(rec)
     if step == CRITIC:
-        return _refuse(ctx, ctx.slug, op["item"], rec, "two attempts are recorded before the critic")
+        return _refuse(ctx, op["item"], rec, "two attempts are recorded before the critic")
     if step in (ESCALATE, ESCALATED):
-        return _refuse(ctx, ctx.slug, op["item"], rec, "one attempt applies the critic resolution")
+        return _refuse(ctx, op["item"], rec, "one attempt applies the critic resolution")
     entry = {key: op[key].strip() for key in FIELDS[op["op"]][1:]}
     rec["attempts"].append({"id": op["id"], "by": op["by"], "at": ctx.at, **entry, "after_critic": bool(rec["critic"])})
     ctx.record(op["by"], "blocker attempt", op["item"], id=op["id"], text=entry["text"])
@@ -148,10 +148,10 @@ def _attempt(row, rec, op, ctx):
 
 def _critic(row, rec, op, ctx):
     if next_step(rec) != CRITIC:
-        return _refuse(ctx, ctx.slug, op["item"], rec, "the critic runs once, after two attempts")
+        return _refuse(ctx, op["item"], rec, "the critic runs once, after two attempts")
     expected = digest(blind_prompt(op["item"], subject(row), autonomy(ctx.slug), rec["attempts"]))
     if op["digest"] != expected:
-        return _refuse(ctx, ctx.slug, op["item"], rec, "the critic record does not match the code built blind prompt")
+        return _refuse(ctx, op["item"], rec, "the critic record does not match the code built blind prompt")
     rec["critic"] = {"id": op["id"], "by": op["by"], "at": ctx.at, "run": op["run"], "digest": op["digest"]}
     rec["critic"]["resolution"] = op["resolution"].strip()
     ctx.record(op["by"], "blocker critic", op["item"], id=op["id"], text=rec["critic"]["resolution"])
@@ -170,7 +170,7 @@ def _escalate(doc, row, rec, op, ctx):
     step = next_step(rec)
     if tier in GATED and step != ESCALATE:
         why = "the item has already escalated" if step == ESCALATED else "the item escalates only after the protocol"
-        return _refuse(ctx, ctx.slug, op["item"], rec, f"at {tier} autonomy {why}")
+        return _refuse(ctx, op["item"], rec, f"at {tier} autonomy {why}")
     by, item = op["by"], op["item"]
     reason, evidence = op["reason"].strip(), op["evidence"].strip()
     rec["escalation"] = {"id": op["id"], "by": by, "at": ctx.at, "reason": reason, "evidence": evidence}
@@ -202,9 +202,9 @@ def apply(doc, op, ctx):
 
 
 def asked_item(op: dict) -> str:
-    if op.get("op") == "priority":
-        return str(op.get("item", ""))
-    found = NEEDS_OPERATOR.match(str(op.get("path", ""))) if op.get("op") == "set" else None
+    if op["op"] == "priority":
+        return op["item"]
+    found = NEEDS_OPERATOR.match(op["path"]) if op["op"] == "set" else None
     return found.group(1) if found else ""
 
 

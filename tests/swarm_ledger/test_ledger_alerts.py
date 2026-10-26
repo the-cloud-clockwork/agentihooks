@@ -755,7 +755,10 @@ def test_a_raise_of_the_full_text_length_is_accepted():
     ledger_alerts.check({"op": "alert_raise", "id": "z", "by": "swarm", "source": "promotion", "text": "x" * 2000})
 
 
-def test_a_raised_promotion_alert_reaches_the_master_inbox(inbox):
+def test_a_raised_promotion_alert_reaches_the_master_inbox(inbox, monkeypatch):
+    from scripts.swarm_ledger import ledger_blockers
+
+    monkeypatch.setattr(ledger_blockers, "autonomy", lambda slug: "full" if slug == SLUG else "")
     make_ledger()
     handler = ledger_server.Handler.__new__(ledger_server.Handler)
     handler.path = f"/api/{SLUG}?view=agent"
@@ -763,11 +766,19 @@ def test_a_raised_promotion_alert_reaches_the_master_inbox(inbox):
     handler.reply_state(SLUG, ops=[raise_promotion("r1")])
     [item] = inbox.inbox(seat_address(SLUG, MASTER))
     [alert] = core.sync(SLUG)[0]["alerts"]
-    assert item.text.startswith(
+    assert item.text == (
         f"On ledger {SLUG}: alert {alert['id']} (promotion): Dev promotion is red. Claim it with agentihooks "
         f"ledger --slug {SLUG} --as <you> alert claim {alert['id']}, then close it with alert close "
-        f'{alert["id"]} "<outcome>". Autonomy '
+        f'{alert["id"]} "<outcome>". Autonomy full: take the decision yourself, with no question to the operator. '
+        f"On a blocker, the next protocol step is to attempt 1 of 2: agentihooks swarm {SLUG} resolve attempt "
+        '<the item it concerns> --tried "<what you tried>" --command "<the command run>" --output "<its output>".'
     )
+
+
+def test_a_blocker_step_is_an_item_write():
+    from scripts.swarm_ledger.api import schemas
+
+    assert schemas.target({"op": "blocker_attempt", "item": "tasks/t1"}) == "tasks/t1"
 
 
 def test_alias_operation_stores_the_canonical_author(monkeypatch):

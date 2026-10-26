@@ -164,7 +164,7 @@ def message(slug, alert, tier="", doc=None):
     from scripts.swarm_ledger import ledger_blockers
 
     item = alert.get("item") or "<the item it concerns>"
-    row = ledger_blockers.find(doc, item) if doc and alert.get("item") else None
+    row = ledger_blockers.find(doc, item) if doc and ledger_blockers.ITEM_RE.match(item) else None
     step = ledger_blockers.notice(slug, tier, item, ledger_blockers.record(row))
     return (
         f"On ledger {slug}: alert {alert['id']} ({alert['source']}): {alert['text']}. Claim it with agentihooks "
