@@ -429,7 +429,7 @@ def test_closing_an_alerted_item_clears_its_alert_once(inbox):
     actions = run(inbox, herdr, ledger, sent_at(item) + 5 * W)
     run(inbox, herdr, ledger, sent_at(item) + 6 * W)
     assert ledger.cleared == [("sw", item.id, "The message was closed.")]
-    assert f"cleared the ledger alert for message {item.id}" in actions
+    assert actions == [f"cleared the ledger alert for message {item.id}"]
     assert inbox.redis.smembers(inbox.key(wake.ALERTED, "sw")) == set()
 
 
@@ -472,7 +472,8 @@ def test_an_unread_alert_notice_never_raises_another_alert(inbox):
     for n in range(8):
         run(inbox, herdr, ledger, sent_at(item) + n * W)
     assert ledger.alerts == [] and ledger.followups == []
-    assert events(inbox, item.id) == ["escalated_operator"]
+    [note] = [e for e in inbox.history(item.id) if e.get("event") == "escalated_operator"]
+    assert note["reason"] == "its alert is already on the ledger page"
 
 
 @pytest.mark.parametrize("harness", ["", "claude", "codex"])

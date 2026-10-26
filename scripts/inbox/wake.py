@@ -11,7 +11,7 @@ from scripts.inbox import addresses, exits
 from scripts.inbox.dispatch import Dispatcher
 from scripts.inbox.seats import is_seat
 from scripts.inbox.seen import SEEN_ON_LEDGER, SeenMarks
-from scripts.inbox.store import CLOSED, InboxError, Item, redelivery_ms
+from scripts.inbox.store import CLOSED, Item, redelivery_ms
 from scripts.swarm import capabilities, idle, outage
 from scripts.swarm.delivery import READY, post
 from scripts.swarm.store import MASTER, RedisStore, SwarmError
@@ -183,10 +183,12 @@ def _wake_world(inbox, slug, agents, herdr, ledger, clock: _Clock, items):
             inbox.note(item.id, TO_MASTER, BY, raised_note(master, raised.id), now_ms)
             actions.append(f"raised message {item.id} to {master}")
         elif step in (TO_MASTER, TO_OPERATOR):
-            if item.sender != ledger_alerts.SENDER and not _alert(inbox, slug, ledger, item):
+            notice = item.sender == ledger_alerts.SENDER
+            if not notice and not _alert(inbox, slug, ledger, item):
                 actions.append(f"the ledger page refused message {item.id}, closed it")
                 continue
-            inbox.note(item.id, TO_OPERATOR, BY, "shown to the operator on the ledger page", now_ms)
+            shown = "its alert is already on the ledger page" if notice else "shown to the operator on the ledger page"
+            inbox.note(item.id, TO_OPERATOR, BY, shown, now_ms)
             actions.append(f"raised message {item.id} to the operator")
     return actions
 
@@ -367,21 +369,16 @@ def _operator_text(item):
 
 def _alert(inbox, slug, ledger, item):
     text = f"{_operator_text(item)} (message {item.id})"
-    if not post(inbox, item, lambda: ledger.raise_alert(slug, ledger_alerts.INBOX, text, item=item.id)):
-        return False
     inbox.redis.sadd(inbox.key(ALERTED, slug), item.id)
-    return True
+    return post(inbox, item, lambda: ledger.raise_alert(slug, ledger_alerts.INBOX, text, item=item.id))
 
 
 def clear_alerts(inbox, slug, ledger):
     """Close the ledger alert of each escalated item that has since closed or gone."""
     key, actions = inbox.key(ALERTED, slug), []
     for item_id in sorted(inbox.redis.smembers(key)):
-        try:
-            if inbox.get(item_id).state not in CLOSED:
-                continue
-        except InboxError:
-            pass
+        if inbox.redis.exists(inbox.key("item", item_id)) and inbox.get(item_id).state not in CLOSED:
+            continue
         try:
             ledger.close_item_alerts(slug, item_id, "The message was closed.")
         except SwarmError:
