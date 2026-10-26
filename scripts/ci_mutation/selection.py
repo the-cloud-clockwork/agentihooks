@@ -8,7 +8,7 @@ import tempfile
 import traceback
 from pathlib import Path
 from time import process_time
-from types import ModuleType
+from types import ModuleType, SimpleNamespace
 
 import pytest
 from mutmut.utils.format_utils import get_mutant_name
@@ -128,15 +128,14 @@ def collect_test_ids(test_runner, files: list[str], work: Path) -> list[str]:
     def collect():
         import pytest
 
-        class Collector:
-            def pytest_collection_finish(self, session):
-                output.write_text(json.dumps(sorted({item.nodeid for item in session.items})))
+        def finish(session):
+            output.write_text(json.dumps(sorted({item.nodeid for item in session.items})))
 
         os.environ["MUTANT_UNDER_TEST"] = "stats"
         try:
             status = pytest.main(
                 [*test_runner._pytest_add_cli_args, "--collect-only", "-q", "-m", "not wall_clock", *files],
-                plugins=[Collector()],
+                plugins=[SimpleNamespace(pytest_collection_finish=finish)],
             )
             code = int(status not in (0, 5))
         except BaseException:
