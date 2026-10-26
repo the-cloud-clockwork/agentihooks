@@ -593,6 +593,22 @@ def test_only_statements_binding_unknown_names_count_as_new(old, new, expected):
     assert plan.binds_only_new_names(old, new) is expected
 
 
+@pytest.mark.parametrize(
+    ("old", "new", "expected"),
+    [
+        ("class A:\n    X = 1\n", "class A:\n    X = 2\n    Y = 3\n", True),
+        ("class A(B):\n    X = 1\n", "class A(B):\n    X = 2\n", True),
+        ("class A(B):\n    pass\n", "class A(C):\n    pass\n", False),
+        ("class A:\n    def m(self):\n        return 1\n", "class A:\n    def m(self):\n        return 2\n", True),
+        ("class A:\n    def m(self):\n        pass\n", "class A:\n    @cache\n    def m(self):\n        pass\n", False),
+        ("X = 1\n", "X = 2\n", False),
+        ("def f(:\n", "def f(:\n", True),
+    ],
+)
+def test_only_top_level_statement_edits_change_the_module_keys(old, new, expected):
+    assert (plan._module_keys(old) == plan._module_keys(new)) is expected
+
+
 def test_plan_publishes_covering_test_ids_and_checks_their_files(tmp_path, monkeypatch):
     manifest = _recorded_project(tmp_path, monkeypatch)
     monkeypatch.setenv("GITHUB_OUTPUT", str(tmp_path / "output"))

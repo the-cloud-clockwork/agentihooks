@@ -277,16 +277,7 @@ def recorded_lines(root: Path, manifest: dict, changes: dict[str, set[int]]) -> 
             for line in range(first, body)
         }
         fallback.update(headers[line] for line in affected if line in headers)
-        by_line = line_units(old)
-        functions = [
-            (min([node.lineno, *(item.lineno for item in node.decorator_list)]), node.end_lineno)
-            for node in ast.walk(ast.parse(old))
-            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
-        ]
-        if not binds_only_new_names(old, new) and (
-            _module_keys(old) != _module_keys(new)
-            or any(line not in by_line and any(first <= line <= last for first, last in functions) for line in affected)
-        ):
+        if not binds_only_new_names(old, new) and _module_keys(old) != _module_keys(new):
             fallback.update(number for unit, number in index.items() if unit.startswith(f"{path}::"))
         lines[path] = affected | {mapping[line] for line in changes.get(path, ()) if line in mapping}
     return lines, fallback
