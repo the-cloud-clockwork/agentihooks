@@ -4,21 +4,21 @@
   "dependency_evidence": "evidence/SV2-PRF-03/result.json records the preceding performance package; the ranking contract the packers follow is the kernel's SV2-CTX-02 retrieval rank and SV2-CTX-03 packing, which stay unchanged",
   "integration_gate": "G10",
   "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/7432",
-  "pull_request": "",
+  "pull_request": "https://github.com/the-cloud-clockwork/agentihooks/pull/7434",
   "package_complete": false,
   "evidence_class": "mocked: a fixed held out corpus with human review labels and in process packers that follow the kernel ranking contract stand in for brain-api, its graph store and a live model; no embedding, HTTP server or agent runs, and usefulness is the share of injected items a reviewer labelled useful, not a model judgement",
   "interfaces": [
-    "tests.evaluation.brain_context.evaluate.pack(policy, task, fixture, budget) packs one held out task under one policy: feed_only ranks the fleet by heat with no scope, scoped admits only lexical matches inside the fixture grant after superseded guidance yields to a visible successor, graph adds one hop over accepted resolved_by, decided_by and related edges whose far end is inside the grant",
-    "evaluate.score grades a pack against the task's expected sources and review labels; out of scope items are counted as scope_leakage and never named",
-    "evaluate.totals gives context_source_recall, reviewed_usefulness, repeated_mistakes_avoided, scope_leakage, irrelevant_injection, stale_injection, arcs, context_tokens and context_tokens_per_found_source together",
+    "tests.evaluation.brain_context.evaluate.pack(policy, task, fixture, budget) packs one held out task under one policy: feed_only ranks the fleet by heat with no scope, scoped admits only lexical matches inside the fixture grant after superseded guidance yields to a visible successor, graph adds one hop from source to target over accepted resolved_by, decided_by and related edges whose target is inside the grant; every pack names its omitted superseded and over budget items",
+    "evaluate.score grades a pack against the task's expected sources and review labels; out of scope items are counted as scope_leakage and never named, including in the omission lists",
+    "evaluate.totals gives context_source_recall, reviewed_usefulness, repeated_mistakes_avoided, scope_leakage, irrelevant_injection, stale_injection, arcs, context_tokens, context_tokens_per_found_source and context_tokens_per_task together",
     "evaluate.qualify(accepted, candidate) qualifies a policy only on a gain in recall, usefulness or repeated mistakes avoided with no regression and no leakage; a change in arcs or context tokens is reported as volume_delta and is never a gain",
-    "evaluate.Registry holds the accepted ranking and packing policy for one corpus revision: a promote needs a qualified verdict, a revert needs the report hash the policy was accepted with, every change is compare and set on the sequence, a reused operation id replays its earlier result and a staged write that never published is discarded on recover",
+    "evaluate.Registry holds the accepted ranking and packing policy for one corpus revision under a file lock: a request carries the whole report, the registry digests it and qualifies its totals against the accepted totals itself and ignores any caller verdict, a revert needs the report hash the policy was accepted with, every change is compare and set on the sequence, a reused operation id replays its earlier result and a staged write that never published is discarded on recover",
     "python -m tests.evaluation.brain_context.evaluate [--fixture alpha|beta] [--policy NAME ...] prints the totals for each policy"
   ],
   "supported_versions": {
     "python": "3.11 and later",
     "corpus": "sv2-prf-04-corpus-1, two independent fixtures of four held out tasks each",
-    "ranking_contract": "kernel retrieval rank policy revision 2 semantics without semantic or heat sources: scope before scoring, heat never admits, accepted edges only, supersedes is not a similarity edge"
+    "ranking_contract": "kernel retrieval rank policy revision 2 semantics without semantic or heat sources: scope before scoring, heat never admits, accepted edges only, edges followed in their stored direction, supersedes is not a similarity edge; the graph_wide and scoped_padded rejection policies break this contract on purpose"
   },
   "states": {
     "observed": "Cases A, B and C each ran in CI from fresh temporary folders and matched their committed records; case A ran both fixtures, whose corpus hashes differ.",
@@ -48,7 +48,8 @@
   },
   "remaining_limitations": [
     "The packers mirror the kernel ranking contract rather than calling brain-api; semantic similarity and heat sources are not modelled, so the comparison grades lexical seeds and graph expansion only.",
-    "Usefulness comes from fixture review labels; no agent consumed a pack and no task outcome was measured.",
+    "The held out questions are authored from incidents, decisions and superseded guidance recorded in this fleet's seat lessons and swarm culture, not sampled from live brain arcs.",
+    "The review labels were written by the implementing agent and await human review, recorded in the corpus labels block; usefulness comes from those labels, no agent consumed a pack and no task outcome was measured.",
     "Eight held out tasks over two fixtures are a qualification floor, not a statistically powered sample.",
     "Context tokens are fixture token sizes, not tokenizer counts of rendered pack text."
   ],

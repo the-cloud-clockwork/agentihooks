@@ -3,7 +3,9 @@
   "corpus_revision": "sv2-prf-04-corpus-1",
   "evidence_class": "mocked: a fixed held out corpus with human review labels and in process packers that follow the kernel ranking contract stand in for brain-api, its graph store and a live model; no embedding, HTTP server or agent runs, and usefulness is the share of injected items a reviewer labelled useful, not a model judgement",
   "input_sha256": {
-    "corpus.json": "8badfaf3acaf7b548fb6a4da646a82277e9d05320a2230e75505f620b5fc74a0"
+    "cases.py": "fc57bc51bc8f9d2007d906b36ca889c890e0596b2fbbe294d14b305057f90f2e",
+    "corpus.json": "2ce82952b6bd4e2fa1eea69b246aa520fe6d54a789a3e5181eb89bff043f7d61",
+    "evaluate.py": "a79a58be94d16dba5e338b5b9a5380488529d6e1d2edb3ff05c14520fdfedbf2"
   },
   "observed": {
     "applied": {
@@ -12,7 +14,7 @@
     },
     "final": {
       "policy": "scoped",
-      "report_sha256": "594dabba3f7e64403ec432f42b4d0bf6b1345d7618a5d701fc38ea72c8b6d13c",
+      "report_sha256": "83d31fd4f16035f3536cc9b53bb3f344eb854dae09162bb2280a82b6d3435e90",
       "sequence": 3
     },
     "history": [
@@ -37,8 +39,8 @@
     ],
     "interrupted_revert": {
       "discarded_staged_write": true,
+      "interruption": "simulated: the revert was staged and the registry reopened before the rename",
       "sequence": 2,
-      "staged_then_interrupted": true,
       "survived": {
         "policy": "graph",
         "sequence": 2
@@ -52,8 +54,8 @@
     },
     "reproducible": {
       "equal": true,
-      "revert_report_sha256": "594dabba3f7e64403ec432f42b4d0bf6b1345d7618a5d701fc38ea72c8b6d13c",
-      "seed_report_sha256": "594dabba3f7e64403ec432f42b4d0bf6b1345d7618a5d701fc38ea72c8b6d13c"
+      "revert_report_sha256": "83d31fd4f16035f3536cc9b53bb3f344eb854dae09162bb2280a82b6d3435e90",
+      "seed_report_sha256": "83d31fd4f16035f3536cc9b53bb3f344eb854dae09162bb2280a82b6d3435e90"
     },
     "rollback_rehearsal": {
       "action": "restore the last accepted ranking and packing policy",

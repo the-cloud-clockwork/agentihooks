@@ -26,12 +26,17 @@ that project, a proposed edge to an unrelated arc and an accepted inferred edge 
 |---|---|
 | `feed_only` | Today's fleet feed: hottest items, no scope, no query. |
 | `scoped` | Accepted baseline: lexical matches inside the grant, superseded guidance omitted when its successor is visible. |
-| `graph` | `scoped` plus one hop over accepted `resolved_by`, `decided_by` and `related` edges inside the grant. |
+| `graph` | `scoped` plus one hop from source to target over accepted `resolved_by`, `decided_by` and `related` edges inside the grant. |
 | `graph_wide` | Two hops, proposed edges, `supersedes` followed as a similarity edge, no superseded omission. |
 | `scoped_padded` | `scoped`, then filled with the hottest remaining items up to a larger budget. |
 
 Every policy packs at most 6 items and 900 tokens unless it names its own limit; the two rejection policies allow 12
-items and 1800 tokens.
+items and 1800 tokens and break the kernel contract on purpose. Every pack names the superseded and over budget
+items it left out, without naming anything outside the grant.
+
+The questions are authored from incidents, decisions and superseded guidance recorded in this fleet's seat lessons
+and swarm culture. The implementing agent wrote the review labels; the corpus `labels` block records that human
+review is pending.
 
 ## Results
 
@@ -59,9 +64,11 @@ and name no out of scope item.
 
 ## Rollback
 
-The accepted policy lives in `evaluate.Registry`, keyed by corpus revision and sequence. Rollback is a revert to an
-earlier accepted policy: the registry recomputes nothing itself but refuses a revert whose report hash differs from
-the hash that policy was accepted with, so a revert proves the comparison reproduces on the same corpus revision.
+The accepted policy lives in `evaluate.Registry`, keyed by corpus revision and sequence and changed only under a
+file lock. A request carries the whole report: the registry digests it, qualifies a promote against the accepted
+totals itself and ignores any verdict the caller sends. Rollback is a revert to an earlier accepted policy, refused
+when the report hash differs from the hash that policy was accepted with, so a revert proves the comparison
+reproduces on the same corpus revision.
 Case C interrupts a revert after staging, restarts, discards the staged write, applies the revert by the same
 operation id, replays it without a second effect and refuses a stale sequence, another corpus revision, a reused
 operation id and a drifted report.

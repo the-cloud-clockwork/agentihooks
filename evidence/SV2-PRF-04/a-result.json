@@ -3,14 +3,16 @@
   "corpus_revision": "sv2-prf-04-corpus-1",
   "evidence_class": "mocked: a fixed held out corpus with human review labels and in process packers that follow the kernel ranking contract stand in for brain-api, its graph store and a live model; no embedding, HTTP server or agent runs, and usefulness is the share of injected items a reviewer labelled useful, not a model judgement",
   "input_sha256": {
-    "corpus.json": "8badfaf3acaf7b548fb6a4da646a82277e9d05320a2230e75505f620b5fc74a0"
+    "cases.py": "fc57bc51bc8f9d2007d906b36ca889c890e0596b2fbbe294d14b305057f90f2e",
+    "corpus.json": "2ce82952b6bd4e2fa1eea69b246aa520fe6d54a789a3e5181eb89bff043f7d61",
+    "evaluate.py": "a79a58be94d16dba5e338b5b9a5380488529d6e1d2edb3ff05c14520fdfedbf2"
   },
   "observed": {
     "fixtures": {
       "alpha": {
         "accepted_record": {
           "policy": "graph",
-          "report_sha256": "835a791339a6dd809b923edf36605fe3b7b6a5f8dbe4f675d9a9f4439f92a149",
+          "report_sha256": "ec3f03a9028a8a974c0fd056fcbc20cf5286499c3c6ffef374a1eeed449964fe",
           "sequence": 2
         },
         "actor": "engineer@fixture-alpha",
@@ -170,7 +172,7 @@
       "beta": {
         "accepted_record": {
           "policy": "graph",
-          "report_sha256": "c081e2192f4daa604e6b4073b7466d8ea8a99581ba77a9a57b957542aa27df05",
+          "report_sha256": "598e3fc9f13d8fcb8f5dfb891048c29d25220b44dfc4a8d3ec0e77f83bf062a1",
           "sequence": 2
         },
         "actor": "engineer@fixture-beta",

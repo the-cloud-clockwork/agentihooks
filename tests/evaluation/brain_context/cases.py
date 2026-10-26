@@ -49,22 +49,14 @@ def per_case(reports: dict[str, dict]) -> dict:
     }
 
 
-def request(operation_id: str, kind: str, report: dict, sequence: int, verdict: dict | None = None) -> dict:
-    return {
-        "operation_id": operation_id,
-        "kind": kind,
-        "corpus_revision": report["corpus_revision"],
-        "expected_sequence": sequence,
-        "policy": report["policy"]["name"],
-        "report_sha256": evaluate.digest(report),
-        "verdict": verdict,
-    }
+def request(operation_id: str, kind: str, report: dict, sequence: int) -> dict:
+    return {"operation_id": operation_id, "kind": kind, "expected_sequence": sequence, "report": report}
 
 
 def seeded(corpus: dict, name: str, root: Path) -> tuple[Registry, dict]:
     accepted = evaluate.evaluate(corpus["accepted_policy"], name, corpus)
     registry = Registry(root / f"{name}-accepted.json")
-    registry.seed(corpus["corpus_revision"], accepted["policy"]["name"], evaluate.digest(accepted))
+    registry.seed(accepted)
     return registry, accepted
 
 
@@ -83,18 +75,17 @@ def promoted(corpus: dict, name: str, root: Path) -> dict:
     improves(reports["scoped"], reports["graph"])
     assert reports["feed_only"]["totals"]["scope_leakage"] > 0
     registry, accepted = seeded(corpus, name, root)
-    verdict = evaluate.qualify(accepted["totals"], reports["graph"]["totals"])
-    assert verdict["qualified"], verdict
-    result = registry.submit(request(f"{name}-promote-graph", "promote", reports["graph"], 1, verdict))
+    result = registry.submit(request(f"{name}-promote-graph", "promote", reports["graph"], 1))
     record = registry.read()
     assert result == {"state": "accepted", "sequence": 2} and record["policy"] == "graph"
+    assert record["verdict"] == evaluate.qualify(accepted["totals"], reports["graph"]["totals"])
     assert record["report_sha256"] == evaluate.digest(evaluate.evaluate("graph", name, corpus))
     return {
         "fixture_sha256": fixture_sha256(corpus, name),
         "actor": accepted["actor"],
         "totals": {policy: headline(report) for policy, report in reports.items()},
         "per_case": per_case(reports),
-        "verdict": verdict,
+        "verdict": record["verdict"],
         "accepted_record": {key: record[key] for key in ("sequence", "policy", "report_sha256")},
     }
 
@@ -112,7 +103,7 @@ def refused(registry: Registry, payload: dict) -> str:
     except Refused as error:
         assert registry.path.read_bytes() == before and not registry.staged.exists()
         return str(error)
-    raise AssertionError(f"{payload['policy']} was accepted")
+    raise AssertionError(f"{payload['operation_id']} was accepted")
 
 
 def foreign_names(corpus: dict, name: str) -> list[str]:
@@ -131,10 +122,12 @@ def contained(corpus: dict, name: str, root: Path) -> dict:
         report = evaluate.evaluate(policy, name, corpus)
         verdict = evaluate.qualify(accepted["totals"], report["totals"])
         assert not verdict["qualified"] and verdict["regressions"], verdict
-        reason = refused(registry, request(f"{name}-reject-{index}", "promote", report, 1, verdict))
-        attempts[policy] = {"verdict": verdict, "refused": reason, "totals": headline(report)}
+        asserted = {**request(f"{name}-reject-{index}", "promote", report, 1), "verdict": {"qualified": True}}
+        attempts[policy] = {"verdict": verdict, "refused": refused(registry, asserted), "totals": headline(report)}
     wide = attempts["graph_wide"]["verdict"]
     assert {"irrelevant_injection", "stale_injection"} <= set(wide["regressions"]) and wide["volume_delta"]["arcs"] > 0
+    padded = attempts["scoped_padded"]["verdict"]
+    assert "irrelevant_injection" in padded["regressions"] and padded["volume_delta"]["context_tokens"] > 0
     assert "scope_leakage" in attempts["feed_only"]["verdict"]["regressions"]
     graph = evaluate.evaluate("graph", name, corpus)
     louder = {
@@ -144,11 +137,11 @@ def contained(corpus: dict, name: str, root: Path) -> dict:
     }
     volume_only = evaluate.qualify(graph["totals"], louder)
     assert volume_only["reason"] == "no_gain" and not volume_only["qualified"]
-    corrected = evaluate.qualify(accepted["totals"], graph["totals"])
-    result = registry.submit(request(f"{name}-promote-graph", "promote", graph, 1, corrected))
+    result = registry.submit(request(f"{name}-promote-graph", "promote", graph, 1))
     assert result == {"state": "accepted", "sequence": 2}
     observed = {
         "attempts": attempts,
+        "caller_verdict_ignored": True,
         "volume_only": volume_only,
         "protected_state_unchanged_by_refusals": True,
         "corrected": {"request": "new operation id against sequence 1", **result},
@@ -161,17 +154,13 @@ def rejection(corpus: dict, root: Path) -> dict:
     return {name: contained(corpus, name, root) for name in FIXTURES}
 
 
-def reverted(corpus: dict, root: Path) -> dict:
+def reverted(corpus: dict, root: Path) -> tuple[dict, Registry, dict]:
     name = FIXTURES[0]
-    registry, accepted = seeded(corpus, name, root)
-    graph = evaluate.evaluate("graph", name, corpus)
-    registry.submit(
-        request("promote-graph", "promote", graph, 1, evaluate.qualify(accepted["totals"], graph["totals"]))
-    )
+    registry, _ = seeded(corpus, name, root)
+    registry.submit(request("promote-graph", "promote", evaluate.evaluate("graph", name, corpus), 1))
     rerun = evaluate.evaluate(corpus["accepted_policy"], name, corpus)
     revert = request("revert-to-scoped", "revert", rerun, 2)
-    planned = registry.plan(revert)
-    registry.stage(planned["record"])
+    registry.stage(registry.plan(revert)["record"])
     survived = registry.read()
     restarted = Registry(registry.path)
     recovered = restarted.recover()
@@ -181,41 +170,34 @@ def reverted(corpus: dict, root: Path) -> dict:
     record = restarted.read()
     assert applied == {"state": "accepted", "sequence": 3} and replay == {"state": "replayed", "sequence": 3}
     assert len(record["history"]) == 3 and record["report_sha256"] == record["history"][0]["report_sha256"]
-    return (
-        {
-            "interrupted_revert": {
-                "staged_then_interrupted": True,
-                "survived": {"sequence": 2, "policy": "graph"},
-                **recovered,
-            },
-            "applied": applied,
-            "same_operation_replay": replay,
-            "reproducible": {
-                "seed_report_sha256": record["history"][0]["report_sha256"],
-                "revert_report_sha256": record["report_sha256"],
-                "equal": True,
-            },
+    observed = {
+        "interrupted_revert": {
+            "interruption": "simulated: the revert was staged and the registry reopened before the rename",
+            "survived": {key: survived[key] for key in ("sequence", "policy")},
+            **recovered,
         },
-        restarted,
-        rerun,
-    )
+        "applied": applied,
+        "same_operation_replay": replay,
+        "reproducible": {
+            "seed_report_sha256": record["history"][0]["report_sha256"],
+            "revert_report_sha256": record["report_sha256"],
+            "equal": True,
+        },
+    }
+    return observed, restarted, rerun
 
 
 def recovery(corpus: dict, root: Path) -> dict:
     observed, registry, rerun = reverted(corpus, root)
     graph = evaluate.evaluate("graph", FIXTURES[0], corpus)
-    late = request("late-promote-graph", "promote", graph, 2, evaluate.qualify(rerun["totals"], graph["totals"]))
-    other = {
-        **request("other-revision", "promote", graph, 3, late["verdict"]),
-        "corpus_revision": "sv2-prf-04-corpus-0",
-    }
-    altered = {**request("revert-to-scoped", "revert", rerun, 3), "report_sha256": "0" * 64}
-    drifted = {**request("revert-drifted", "revert", rerun, 3), "report_sha256": "0" * 64}
+    drifted = {**rerun, "totals": {**rerun["totals"], "arcs": rerun["totals"]["arcs"] + 1}}
     outcomes = {
-        "stale_sequence": refused(registry, late),
-        "other_corpus_revision": refused(registry, other),
-        "operation_id_reused": refused(registry, altered),
-        "irreproducible_report": refused(registry, drifted),
+        "stale_sequence": refused(registry, request("late-promote-graph", "promote", graph, 2)),
+        "other_corpus_revision": refused(
+            registry, request("other-revision", "promote", {**graph, "corpus_revision": "sv2-prf-04-corpus-0"}, 3)
+        ),
+        "operation_id_reused": refused(registry, request("revert-to-scoped", "revert", graph, 3)),
+        "irreproducible_report": refused(registry, request("revert-drifted", "revert", drifted, 3)),
     }
     assert outcomes == {key: key for key in outcomes}
     record = registry.read()
@@ -229,14 +211,15 @@ def recovery(corpus: dict, root: Path) -> dict:
         ],
         "rollback_rehearsal": {
             "action": "restore the last accepted ranking and packing policy",
-            "restored": corpus["accepted_policy"],
-            "from": "graph",
-            "comparison_reproduced_on_corpus_revision": corpus["corpus_revision"],
+            "restored": record["policy"],
+            "from": record["history"][-2]["policy"],
+            "comparison_reproduced_on_corpus_revision": record["corpus_revision"],
         },
     }
 
 
 CASES = {"a": positive, "b": rejection, "c": recovery}
+INPUTS = (evaluate.CORPUS, Path(evaluate.__file__), Path(__file__))
 
 
 def run_case(case: str) -> dict:
@@ -248,6 +231,6 @@ def run_case(case: str) -> dict:
         "state": "passed",
         "evidence_class": EVIDENCE_CLASS,
         "corpus_revision": corpus["corpus_revision"],
-        "input_sha256": {evaluate.CORPUS.name: hashlib.sha256(evaluate.CORPUS.read_bytes()).hexdigest()},
+        "input_sha256": {path.name: hashlib.sha256(path.read_bytes()).hexdigest() for path in INPUTS},
         "observed": observed,
     }

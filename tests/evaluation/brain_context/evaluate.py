@@ -6,6 +6,8 @@ successor. A pack is graded by human labels in the corpus, never by how many arc
 """
 
 import argparse
+import contextlib
+import fcntl
 import hashlib
 import json
 import os
@@ -101,10 +103,9 @@ def relevance(query: str, items: dict[str, dict]) -> dict[str, float]:
 
 def _reach(edge: dict, scores: dict[str, float], items: dict[str, dict], found: dict[str, float]) -> None:
     factor = GRAPH_DECAY * (INFERRED_FACTOR if edge["confidence"] == "inferred" else 1.0)
-    for near, far in ((edge["source"], edge["target"]), (edge["target"], edge["source"])):
-        value = scores.get(near, 0.0) * factor
-        if far in items and far not in scores and value > found.get(far, 0.0):
-            found[far] = value
+    value, far = scores.get(edge["source"], 0.0) * factor, edge["target"]
+    if far in items and far not in scores and value > found.get(far, 0.0):
+        found[far] = value
 
 
 def expand(policy: Policy, scores: dict[str, float], edges: list[dict], items: dict[str, dict]) -> dict[str, float]:
@@ -138,17 +139,17 @@ def pack(policy: Policy, task: dict, fixture: dict, budget: dict) -> dict:
     if policy.current_only:
         items, omitted = current(items)
     limit, ceiling = policy.limit or budget["limit"], policy.tokens or budget["tokens"]
-    selected, tokens, over = [], 0, 0
+    selected, tokens, over = [], 0, []
     for ident in ranked(policy, task, items, fixture["edges"]):
         if len(selected) == limit:
             break
         cost = items[ident]["tokens"]
         if tokens + cost > ceiling:
-            over += 1
+            over.append(ident)
             continue
         selected.append(ident)
         tokens += cost
-    return {"selected": selected, "tokens": tokens, "omitted_superseded": len(omitted), "omitted_over_budget": over}
+    return {"selected": selected, "tokens": tokens, "omitted": {"superseded": omitted, "over_budget": over}}
 
 
 def score(task: dict, packed: dict, fixture: dict) -> dict:
@@ -171,8 +172,10 @@ def score(task: dict, packed: dict, fixture: dict) -> dict:
         "scope_leakage": len(packed["selected"]) - len(inside),
         "arcs": len(packed["selected"]),
         "context_tokens": packed["tokens"],
-        "omitted_superseded": packed["omitted_superseded"],
-        "omitted_over_budget": packed["omitted_over_budget"],
+        "omitted": {
+            reason: [ident for ident in idents if projects[ident] in granted]
+            for reason, idents in packed["omitted"].items()
+        },
         "repeated_mistake_avoided": avoided if task["repeated_mistake"] else None,
     }
 
@@ -192,6 +195,7 @@ def totals(scored: dict[str, dict]) -> dict:
         "reviewed_usefulness": _ratio(sums["useful"], sums["arcs"]),
         "repeated_mistakes_avoided": _ratio(sum(mistakes), len(mistakes)),
         "context_tokens_per_found_source": round(sums["context_tokens"] / sums["found"], 1) if sums["found"] else None,
+        "context_tokens_per_task": round(sums["context_tokens"] / len(rows), 1) if rows else None,
     }
 
 
@@ -231,27 +235,38 @@ def qualify(accepted: dict, candidate: dict) -> dict:
 
 
 class Registry:
-    """The accepted ranking and packing policy for one corpus revision, replaced only by compare and set."""
+    """The accepted ranking and packing policy for one corpus revision, replaced only by compare and set.
+
+    A request carries the whole report: the registry digests it and qualifies its totals itself, so no caller verdict,
+    hash or policy name is trusted.
+    """
 
     def __init__(self, path: Path):
         self.path = path
         self.staged = path.with_name(path.name + ".staged")
+        self.lock = path.with_name(path.name + ".lock")
 
     def read(self) -> dict:
         return json.loads(self.path.read_text(encoding="utf-8"))
 
-    def seed(self, corpus_revision: str, policy: str, report_sha256: str) -> dict:
-        if self.path.exists():
-            raise Refused("already_seeded")
-        entry = {
-            "operation_id": "seed",
-            "kind": "seed",
-            "sequence": 1,
-            "policy": policy,
-            "report_sha256": report_sha256,
+    @staticmethod
+    def _entry(operation_id: str, kind: str, sequence: int, report: dict) -> dict:
+        return {
+            "operation_id": operation_id,
+            "kind": kind,
+            "sequence": sequence,
+            "policy": report["policy"]["name"],
+            "report_sha256": digest(report),
+            "totals": report["totals"],
         }
-        record = {"corpus_revision": corpus_revision, **entry, "history": [entry]}
-        self.publish(self.stage(record))
+
+    def seed(self, report: dict) -> dict:
+        with self._locked():
+            if self.path.exists():
+                raise Refused("already_seeded")
+            entry = self._entry("seed", "seed", 1, report)
+            record = {"corpus_revision": report["corpus_revision"], **entry, "history": [entry]}
+            self.publish(self.stage(record))
         return record
 
     def recover(self) -> dict:
@@ -264,37 +279,39 @@ class Registry:
         earlier = next((e for e in record["history"] if e["operation_id"] == request["operation_id"]), None)
         if earlier is None:
             return None
-        fields = ("kind", "policy", "report_sha256")
-        if [earlier[key] for key in fields] != [request[key] for key in fields]:
+        report = request["report"]
+        same = (earlier["kind"], earlier["report_sha256"]) == (request["kind"], digest(report))
+        if not same or report["corpus_revision"] != record["corpus_revision"]:
             raise Refused("operation_id_reused")
         return {"state": "replayed", "sequence": earlier["sequence"]}
 
-    def _admit(self, record: dict, request: dict) -> None:
-        if request["corpus_revision"] != record["corpus_revision"]:
+    def _admit(self, record: dict, request: dict) -> dict | None:
+        report = request["report"]
+        if report["corpus_revision"] != record["corpus_revision"]:
             raise Refused("other_corpus_revision")
         if request["expected_sequence"] != record["sequence"]:
             raise Refused("stale_sequence")
-        if request["kind"] == "promote" and not (request.get("verdict") or {}).get("qualified"):
-            raise Refused("not_qualified")
-        if request["kind"] == "revert":
-            earlier = {e["policy"]: e["report_sha256"] for e in record["history"]}
-            if request["policy"] not in earlier:
-                raise Refused("never_accepted")
-            if earlier[request["policy"]] != request["report_sha256"]:
-                raise Refused("irreproducible_report")
+        if request["kind"] == "promote":
+            verdict = qualify(record["totals"], report["totals"])
+            if not verdict["qualified"]:
+                raise Refused("not_qualified")
+            return verdict
+        earlier = {e["policy"]: e["report_sha256"] for e in record["history"]}
+        if report["policy"]["name"] not in earlier:
+            raise Refused("never_accepted")
+        if earlier[report["policy"]["name"]] != digest(report):
+            raise Refused("irreproducible_report")
+        return None
 
     def plan(self, request: dict) -> dict:
         record = self.read()
         replayed = self._replayed(record, request)
         if replayed:
             return replayed
-        self._admit(record, request)
+        verdict = self._admit(record, request)
         entry = {
-            "operation_id": request["operation_id"],
-            "kind": request["kind"],
-            "sequence": record["sequence"] + 1,
-            "policy": request["policy"],
-            "report_sha256": request["report_sha256"],
+            **self._entry(request["operation_id"], request["kind"], record["sequence"] + 1, request["report"]),
+            "verdict": verdict,
         }
         return {"state": "accepted", "record": {**record, **entry, "history": [*record["history"], entry]}}
 
@@ -308,11 +325,21 @@ class Registry:
     def publish(self, staged: Path) -> None:
         os.replace(staged, self.path)
 
+    @contextlib.contextmanager
+    def _locked(self):
+        with self.lock.open("w") as handle:
+            fcntl.flock(handle, fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(handle, fcntl.LOCK_UN)
+
     def submit(self, request: dict) -> dict:
-        planned = self.plan(request)
-        if planned["state"] == "replayed":
-            return planned
-        self.publish(self.stage(planned["record"]))
+        with self._locked():
+            planned = self.plan(request)
+            if planned["state"] == "replayed":
+                return planned
+            self.publish(self.stage(planned["record"]))
         return {"state": "accepted", "sequence": planned["record"]["sequence"]}
 
 

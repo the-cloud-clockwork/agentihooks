@@ -67,7 +67,8 @@ def test_the_token_ceiling_skips_an_item_that_does_not_fit_and_keeps_filling(cor
     fixture = corpus["fixtures"]["alpha"]
     task = fixture["tasks"][0]
     packed = evaluate.pack(POLICIES["graph"], task, fixture, {"tokens": 100, "limit": 6})
-    assert packed["selected"] == ["alpha-incident-lesson"] and packed["omitted_over_budget"] == 1
+    assert packed["selected"] == ["alpha-incident-lesson"]
+    assert packed["omitted"] == {"superseded": ["alpha-mutation-old"], "over_budget": ["alpha-incident-arc"]}
 
 
 def test_score_counts_leakage_without_naming_out_of_scope_items(corpus):
@@ -78,12 +79,12 @@ def test_score_counts_leakage_without_naming_out_of_scope_items(corpus):
         {
             "selected": ["alpha-foreign-arc", "alpha-incident-arc"],
             "tokens": 280,
-            "omitted_superseded": 0,
-            "omitted_over_budget": 0,
+            "omitted": {"superseded": [], "over_budget": ["alpha-foreign-lesson", "alpha-noise-second-hop"]},
         },
         fixture,
     )
     assert scored["injected"] == ["alpha-incident-arc"] and scored["scope_leakage"] == 1
+    assert scored["omitted"] == {"superseded": [], "over_budget": ["alpha-noise-second-hop"]}
     assert scored["found"] == 1 and scored["repeated_mistake_avoided"] is False
 
 
@@ -106,49 +107,54 @@ def test_a_gain_with_any_regression_or_leakage_is_refused():
     assert leaking["regressions"] == ["scope_leakage"]
 
 
+def report(policy, corpus_revision="rev-1", **changes):
+    return {"corpus_revision": corpus_revision, "policy": {"name": policy}, "totals": totals(**changes)}
+
+
+def promote(operation_id, payload, sequence):
+    return {"operation_id": operation_id, "kind": "promote", "expected_sequence": sequence, "report": payload}
+
+
+def test_the_registry_qualifies_the_report_itself_and_ignores_a_caller_verdict(tmp_path):
+    registry = Registry(tmp_path / "accepted.json")
+    registry.seed(report("scoped"))
+    louder = {**promote("op-1", report("graph", arcs=9, context_tokens=1200), 1), "verdict": {"qualified": True}}
+    with pytest.raises(Refused, match="not_qualified"):
+        registry.submit(louder)
+    assert registry.submit(promote("op-2", report("graph", context_source_recall=1.0), 1)) == {
+        "state": "accepted",
+        "sequence": 2,
+    }
+    assert registry.read()["verdict"]["gains"] == ["context_source_recall"]
+
+
 def test_the_registry_refuses_a_stale_sequence_and_replays_an_operation_once(tmp_path):
     registry = Registry(tmp_path / "accepted.json")
-    registry.seed("rev-1", "scoped", "a" * 64)
-    promote = {
-        "operation_id": "op-1",
-        "kind": "promote",
-        "corpus_revision": "rev-1",
-        "expected_sequence": 1,
-        "policy": "graph",
-        "report_sha256": "b" * 64,
-        "verdict": {"qualified": True},
-    }
-    assert registry.submit(promote) == {"state": "accepted", "sequence": 2}
-    assert registry.submit(promote) == {"state": "replayed", "sequence": 2}
+    registry.seed(report("scoped"))
+    better = promote("op-1", report("graph", context_source_recall=1.0), 1)
+    assert registry.submit(better) == {"state": "accepted", "sequence": 2}
+    assert registry.submit(better) == {"state": "replayed", "sequence": 2}
     before = registry.path.read_bytes()
     with pytest.raises(Refused, match="stale_sequence"):
-        registry.submit({**promote, "operation_id": "op-2"})
+        registry.submit({**better, "operation_id": "op-2"})
     with pytest.raises(Refused, match="never_accepted"):
         registry.submit(
-            {**promote, "operation_id": "op-3", "kind": "revert", "expected_sequence": 2, "policy": "feed_only"}
+            {**better, "operation_id": "op-3", "kind": "revert", "expected_sequence": 2, "report": report("feed_only")}
         )
+    with pytest.raises(Refused, match="operation_id_reused"):
+        registry.submit({**better, "report": report("graph", "rev-0", context_source_recall=1.0)})
     assert registry.path.read_bytes() == before and len(registry.read()["history"]) == 2
 
 
-def test_the_registry_refuses_a_reseed_a_missing_verdict_and_a_reused_id_of_another_kind(tmp_path):
+def test_the_registry_refuses_a_reseed_and_a_reused_id_of_another_kind(tmp_path):
     registry = Registry(tmp_path / "accepted.json")
-    registry.seed("rev-1", "scoped", "a" * 64)
+    registry.seed(report("scoped"))
     with pytest.raises(Refused, match="already_seeded"):
-        registry.seed("rev-1", "graph", "b" * 64)
-    promote = {
-        "operation_id": "op-1",
-        "kind": "promote",
-        "corpus_revision": "rev-1",
-        "expected_sequence": 1,
-        "policy": "graph",
-        "report_sha256": "b" * 64,
-        "verdict": None,
-    }
-    with pytest.raises(Refused, match="not_qualified"):
-        registry.submit(promote)
-    registry.submit({**promote, "verdict": {"qualified": True}})
+        registry.seed(report("graph"))
+    better = promote("op-1", report("graph", context_source_recall=1.0), 1)
+    registry.submit(better)
     with pytest.raises(Refused, match="operation_id_reused"):
-        registry.submit({**promote, "kind": "revert", "expected_sequence": 2})
+        registry.submit({**better, "kind": "revert", "expected_sequence": 2})
     assert registry.read()["sequence"] == 2 and registry.read()["history"][0]["policy"] == "scoped"
 
 

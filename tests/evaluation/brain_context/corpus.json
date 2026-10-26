@@ -2,6 +2,7 @@
   "corpus_revision": "sv2-prf-04-corpus-1",
   "budget": {"tokens": 900, "limit": 6},
   "accepted_policy": "scoped",
+  "labels": {"labelled_by": "engineer@323133-3695", "labelled_on": "2026-10-26", "human_review": "pending", "questions": "authored from incidents, decisions and superseded guidance recorded in this fleet's seat lessons and swarm culture; not sampled from live brain arcs"},
   "fixtures": {
     "alpha": {
       "grant": {"actor": "engineer@fixture-alpha", "role": "engineer", "projects": ["agentihooks"]},
