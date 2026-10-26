@@ -201,7 +201,7 @@ def _from_markdown(text: str, name: str, existing: set[str]) -> Normalized:
     for i, j in markers.items():
         title = entries[i][2]
         where = f"phase {title!r}"
-        fields = _marker_fields(entries[j][2].strip().removeprefix("<!--").removesuffix("-->"), where, errors)
+        fields = _marker_fields(entries[j][2].strip().removesuffix("-->"), where, errors)
         phases.append(_marked_phase(title, fields, where, errors))
         ranged.append({"id": str(i), "title": title})
     if errors:

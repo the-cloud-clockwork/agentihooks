@@ -862,6 +862,80 @@ def test_a_plain_comment_or_phase_word_after_a_heading_is_not_a_marker():
     assert normalize(text, "comments.md").kind == "raw"
 
 
+def test_front_matter_after_leading_blank_lines_is_refused():
+    with pytest.raises(PlanError) as caught:
+        normalize("\n\n---\ntitle: x\n---\n\n# Plan\n\nBody.\n", "front.md")
+
+    assert caught.value.errors == ["the plan must not start with YAML front matter"]
+
+
+def test_a_task_heading_without_its_slice_marker_is_refused_by_name():
+    text = """# Plan
+
+## Phase one
+<!-- phase: id=a planning=auto -->
+Prose.
+
+<!-- slice: one -->
+### Task one
+
+Body.
+
+### Task two
+
+Body.
+"""
+
+    with pytest.raises(PlanError) as caught:
+        normalize(text, "missing-marker.md")
+
+    assert caught.value.errors == [
+        "plan task sections need a slice marker above each heading, written as "
+        "<!-- slice: name --> on its own line: Task two on line 12"
+    ]
+
+
+def test_every_repeated_slice_name_is_listed():
+    text = """# Plan
+
+## Phase one
+<!-- phase: planning=auto -->
+
+<!-- slice: a -->
+### A1
+
+<!-- slice: b -->
+### B1
+
+<!-- slice: a -->
+### A2
+
+<!-- slice: b -->
+### B2
+"""
+
+    with pytest.raises(PlanError) as caught:
+        normalize(text, "two-dups.md")
+
+    assert caught.value.errors == ["each slice marker needs its own name in the file: a, b"]
+
+
+def test_every_repeated_phase_id_is_listed():
+    plan = [{"title": t, "id": i} for t, i in (("A", "x"), ("B", "y"), ("C", "x"), ("D", "y"))]
+
+    with pytest.raises(PlanError) as caught:
+        normalize(json.dumps(plan), "dup-ids.json")
+
+    assert caught.value.errors == ["each phase needs its own id: x, y"]
+
+
+def test_a_heading_on_the_last_line_of_an_unsliced_phase_is_refused():
+    with pytest.raises(PlanError) as caught:
+        normalize("# Plan\n\n## Only phase\n<!-- phase: planning=auto -->\nProse.\n### Last", "last-heading.md")
+
+    assert caught.value.errors == ["phase 'Only phase' has no slice markers, so it holds prose only"]
+
+
 def test_bytes_that_are_not_utf8_are_refused():
     with pytest.raises(PlanError) as caught:
         normalize(b"\xff\xfe plan", "binary.md")
