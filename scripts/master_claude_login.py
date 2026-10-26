@@ -13,6 +13,7 @@ from pathlib import Path
 from hooks import config as hooks_config
 from hooks.context.account_sessions import API_MARKER, INTERACTIVE_PREFIX, TOKEN_PREFIX
 from scripts import aicode_tokens, openbao_kv
+from scripts.claude_config import claude_home, claude_json
 from scripts.profiles import binding
 from scripts.routing import master_account
 from scripts.routing.settings import SettingsStore, open_store
@@ -229,7 +230,7 @@ def build(rendered: Path, report: str | None = None) -> Path:
     return target
 
 
-def _rebuild(folder: Path, rendered: Path) -> Path:
+def _rebuild(folder: Path, rendered: Path, config: Path | None = None) -> Path:
     target, staging = folder / "claude", folder / "staging"
     kept = _private(target)
     grant = kept.read_bytes() if kept else None
@@ -242,8 +243,8 @@ def _rebuild(folder: Path, rendered: Path) -> Path:
     if grant is not None:
         (staging / CREDENTIALS).write_bytes(grant)
         (staging / CREDENTIALS).chmod(PRIVATE_FILE)
-    config = {key: value for key, value in _read(staging / CONFIG).items() if key != ACCOUNT}
-    _write(staging / CONFIG, {**config, **({ACCOUNT: account} if account else {})})
+    kept_config = {key: value for key, value in _read(config or staging / CONFIG).items() if key != ACCOUNT}
+    _write(staging / CONFIG, {**kept_config, **({ACCOUNT: account} if account else {})})
     evidence = _read(staging / binding.FILE)
     (staging / binding.FILE).write_text(json.dumps({**evidence, "home": str(target.resolve())}) + "\n")
     for name in MANIFESTS:
@@ -484,7 +485,7 @@ def _take(name: str, bao: openbao_kv.OpenBao | None) -> tuple[int, int, dict[str
 
 
 def prepare(environ: Mapping[str, str], cwd: Path) -> tuple[Path, str]:
-    rendered = Path(environ["CLAUDE_CONFIG_DIR"])
+    rendered = claude_home(environ)
     refused = refusal(rendered, cwd)
     if refused:
         raise LoginRefused(refused)
@@ -495,7 +496,7 @@ def prepare(environ: Mapping[str, str], cwd: Path) -> tuple[Path, str]:
         target = home(number)
         shared = any(owner != name for owner in holders(folder)) and (target / binding.FILE).is_file()
         if not shared:
-            target = _rebuild(folder, rendered)
+            target = _rebuild(folder, rendered, claude_json(environ))
         if environ.get(binding.REPORT):
             binding.rehome(Path(environ[binding.REPORT]), target, shared=shared)
         if not shared:
@@ -511,7 +512,7 @@ def browser_home(environ: Mapping[str, str]) -> Path:
             if _private(home(number)) or holders(folder):
                 continue
             _claim(folder, environ["AGENTIHOOKS_AGENT_NAME"], os.getpid(), _alive, 0, True)
-            return _rebuild(folder, Path(environ["CLAUDE_CONFIG_DIR"]))
+            return _rebuild(folder, claude_home(environ), claude_json(environ))
     raise LoginRefused(FULL.format(cap=MAX_SLOTS))
 
 
@@ -600,7 +601,7 @@ def _token_folder(environ: Mapping[str, str]) -> Path:
 def token_home(environ: Mapping[str, str]) -> Path:
     folder = _token_folder(environ)
     with _locked(folder):
-        target = _rebuild(folder, Path(environ["CLAUDE_CONFIG_DIR"]))
+        target = _rebuild(folder, claude_home(environ), claude_json(environ))
         (target / CREDENTIALS).unlink(missing_ok=True)
         path = target / "settings.json"
         settings = _read(path)
