@@ -646,11 +646,7 @@ def test_a_changed_tests_data_file_adds_only_the_tests_that_read_it(tmp_path, mo
     _commit(tmp_path, "data")
     selection = {}
     plan.estimate(tmp_path, {"scripts/core.py": {6}}, selection, manifest)
-    assert selection == {
-        "scripts/core.py": sorted(
-            [*NARROWED, "tests/test_core.py::test_other", "tests/test_core.py::TestSpawn::test_child"]
-        )
-    }
+    assert selection == {"scripts/core.py": sorted([*NARROWED, "tests/test_core.py::test_other"])}
 
 
 WORKFLOW = (
@@ -658,13 +654,12 @@ WORKFLOW = (
     "      - run: {unit}\n  lint:\n    steps:\n      - run: {lint}\n"
 )
 RECORDED_WORKFLOW = {"env": "1", "split": "x", "unit": "pytest", "lint": "ruff"}
-READERS = ["tests/test_core.py::TestSpawn::test_child", "tests/test_core.py::test_other"]
 
 
 @pytest.mark.parametrize(
     "edit,expected",
     [
-        ({"lint": "ruff check"}, sorted([*NARROWED, *READERS])),
+        ({"lint": "ruff check"}, sorted([*NARROWED, "tests/test_core.py::test_other"])),
         ({"unit": "pytest -x"}, WHOLE),
         ({"split": "y"}, WHOLE),
         ({"env": "2"}, WHOLE),

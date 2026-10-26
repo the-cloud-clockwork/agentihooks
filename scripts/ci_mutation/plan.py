@@ -56,11 +56,6 @@ def estimate(
             covering = line_covering_tests(root, manifest, changes, paths)
         else:
             covering = covering_tests(manifest, units | drifted, paths)
-        if any(path.startswith(("tests/", ".github/workflows/")) for path in paths):
-            # A child process can read a tests data or workflow file the tracer never sees.
-            covering.update(
-                node(test).partition("[")[0] for test, found in manifest["tests"].items() if found["escapes"]
-            )
         recorded = {}
         for test in manifest["tests"]:
             if not manifest["tests"][test]["units"] or "lines" in manifest and test not in manifest["lines"]:
