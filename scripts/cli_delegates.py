@@ -20,6 +20,7 @@ DELEGATED_CLIS = {
     "timer": "scripts.scheduler.cli:timer",
     "stopwatch": "scripts.scheduler.cli:stopwatch",
     "cron": "scripts.scheduler.cli:cron",
+    "judge": "scripts.judge.cli",
 }
 
 
