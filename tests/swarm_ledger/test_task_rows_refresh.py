@@ -148,6 +148,19 @@ def test_task_rows_reuses_the_untouched_tasks_after_a_task_is_added(tmp_path):
     assert [row is old for row, old in zip(rows, since[2])] == [True, True, True]
 
 
+def test_task_rows_returns_the_earlier_rows_when_no_changed_path_touches_tasks(tmp_path, monkeypatch):
+    from scripts.swarm_ledger.repository import refresh
+    from scripts.swarm_ledger.repository.sqlite import SQLiteLedgerRepository
+
+    tasks = [{"id": "t0", "title": "T0"}]
+    path = stored(tmp_path, tasks)
+    reader = SQLiteLedgerRepository(path)
+    since = reader.task_rows("rows")
+    write_tasks(path, tasks)
+    monkeypatch.setattr(refresh, "changed_paths", lambda *args, **kwargs: {"unrelated"})
+    assert reader.task_rows("rows", since)[2] is since[2]
+
+
 def test_rebuilt_replaces_one_changed_item_of_an_array_nested_in_a_task(tmp_path):
     import json
 
