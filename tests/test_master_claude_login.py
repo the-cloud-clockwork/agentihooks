@@ -1438,7 +1438,7 @@ def test_prepare_from_a_plain_shell_builds_from_the_default_claude_home(ah, tmp_
 
 
 def test_browser_home_from_a_plain_shell_builds_from_the_default_claude_home(ah, tmp_path, monkeypatch):
-    operator, environ = _plain_shell(tmp_path, monkeypatch)
+    _, environ = _plain_shell(tmp_path, monkeypatch)
     target = login.browser_home(environ)
     assert target == login.home()
     assert (target / "CLAUDE.md").read_text() == "operator persona"
@@ -1446,7 +1446,7 @@ def test_browser_home_from_a_plain_shell_builds_from_the_default_claude_home(ah,
 
 
 def test_token_home_from_a_plain_shell_builds_from_the_default_claude_home(ah, tmp_path, monkeypatch):
-    operator, environ = _plain_shell(tmp_path, monkeypatch)
+    _, environ = _plain_shell(tmp_path, monkeypatch)
     target = login.token_home(environ)
     assert target == ah / "master-token" / "masterata_1" / "claude"
     assert (target / "CLAUDE.md").read_text() == "operator persona"
