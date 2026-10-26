@@ -221,7 +221,6 @@ def duplicate_rows(environ: Mapping[str, str], sessions: dict[str, int]) -> list
             seven_day_left=None,
             seven_day_resets_at=None,
             source=DUPLICATE_SOURCE.format(kept=repeated[account.name]),
-            kind=account.kind,
             identity=identities[account.name],
         )
         for account in tokens
