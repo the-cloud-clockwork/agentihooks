@@ -739,18 +739,20 @@ def test_older_shared_rows_match_and_forget_drops_every_copy(shared, tmp_path, m
     ]
 
 
-def test_legacy_shared_lists_remain_readable_and_forgettable(shared, tmp_path, monkeypatch):
+@pytest.mark.parametrize("copies", [1, 3])
+def test_legacy_shared_lists_remain_readable_and_forgettable(shared, tmp_path, monkeypatch, copies):
     from scripts.swarm.store import PREFIX
 
     key = f"{PREFIX}:operator-words:master@a1-1"
     shared.sadd(f"{PREFIX}:operator-words", "master@a1-1")
     for at, words in ((100, "Mark it urgent"), (110, "Keep it high"), (120, "Keep it normal")):
         row = json.dumps({"swarm": "demo", "at": at, "words": words})
-        shared.lpush(key, row, row, row)
+        shared.lpush(key, *([row] * copies))
     operator_words.record("master@a1-1", "Mark it normal", now=90, swarm="demo")
     _hosted(tmp_path, monkeypatch)
     assert operator_words.matching("master@a1-1", "mark it", within=None) == "Mark it urgent"
     assert operator_words.matching("master@a1-1", "keep it high", within=None) == "Keep it high"
+    assert operator_words.matching("master@a1-1", "keep it normal", within=None) == "Keep it normal"
     operator_words.forget("demo")
     assert operator_words.matching("master@a1-1", "mark it", within=None) == ""
     assert shared.lrange(key, 0, -1) == []
