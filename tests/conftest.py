@@ -29,6 +29,7 @@ from tests.shards import (
     source_sizes,
     warm_imports,
 )
+from tests.workflow_commands import refuse_commands
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
 
@@ -77,6 +78,7 @@ def pytest_configure_node(node):
 
 
 def pytest_collection_modifyitems(config, items):
+    refuse_commands([item.nodeid for item in items])
     reused = _reused(config)[0]
     if reused:
         kept = [item for item in items if re.sub(r"@[^\[\]]*$", "", item.nodeid) not in reused]
