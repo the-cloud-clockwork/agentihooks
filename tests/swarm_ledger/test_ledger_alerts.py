@@ -293,7 +293,7 @@ def test_the_alert_message_names_the_alert_and_how_to_claim_and_close_it():
     assert ledger_alerts.message("demo", alert) == (
         "On ledger demo: alert al-4-0 (size): phase p1 description has 120 words, limit 100. Claim it with "
         "agentihooks ledger --slug demo --as <you> alert claim al-4-0, then close it with alert close "
-        'al-4-0 "<outcome>". Autonomy unknown: resolve it if the call is yours, else leave it for the operator.'
+        'al-4-0 "<outcome>". Autonomy unknown. Triage it: resolve it if the call is yours, else leave it for the operator.'
     )
 
 

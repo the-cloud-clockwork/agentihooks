@@ -84,7 +84,7 @@ def notice(slug: str, tier: str, item: str, rec: dict) -> str:
             f"Autonomy {tier}: take the decision yourself, with no question to the operator. "
             f"On a blocker, the next protocol step is to {step_text(slug, item, rec)}."
         )
-    return f"Autonomy {tier or 'unknown'}: resolve it if the call is yours, else leave it for the operator."
+    return f"Autonomy {tier or 'unknown'}. Triage it: resolve it if the call is yours, else leave it for the operator."
 
 
 def _attempt_lines(attempts: list) -> list[str]:
