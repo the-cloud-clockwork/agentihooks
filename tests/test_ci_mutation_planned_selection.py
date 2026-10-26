@@ -724,13 +724,19 @@ def test_only_the_jobs_running_recorded_tests_decide_a_collection_change(edit, e
     import yaml
 
     old = yaml.safe_dump({"jobs": UNIT_JOBS})
-    assert plan.collection_changed(old, yaml.safe_dump(edit)) is expected
-    assert plan.collection_changed(old, old) is False
-    assert plan.collection_changed(old, "jobs: [") is True
+    jobs = plan.COLLECTING_JOBS[plan.TEST_WORKFLOW]
+    assert plan.collection_changed(old, yaml.safe_dump(edit), jobs) is expected
+    assert plan.collection_changed(old, old, jobs) is False
+    assert plan.collection_changed(old, "jobs: [", jobs) is True
     unit_only = yaml.safe_dump({"jobs": {"unit": UNIT_JOBS["unit"]}})
     assert (
-        plan.collection_changed(unit_only, yaml.safe_dump({"jobs": {"unit": UNIT_JOBS["unit"], "lint": {}}})) is False
+        plan.collection_changed(unit_only, yaml.safe_dump({"jobs": {"unit": UNIT_JOBS["unit"], "lint": {}}}), jobs)
+        is False
     )
+    preflight = plan.COLLECTING_JOBS[".github/workflows/mutation-preflight.yml"]
+    stats = yaml.safe_dump({"jobs": {"stats": {"steps": [{"run": "collect"}]}, "plan": {}}})
+    assert plan.collection_changed(stats, stats.replace("plan: {}", "plan: {a: 1}"), preflight) is False
+    assert plan.collection_changed(stats, stats.replace("run: collect", "run: other"), preflight) is True
 
 
 @pytest.mark.parametrize(
@@ -794,6 +800,7 @@ def test_an_unparsable_file_still_reaches_the_modules_its_text_names():
     [
         (".github/workflows/lint.yml", 2, True),
         (".github/workflows/lint.yml", 1, False),
+        (".github/workflows/mutation-preflight.yml", 2, False),
         (".github/workflows/helper.py", 2, False),
     ],
 )

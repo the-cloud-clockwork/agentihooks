@@ -37,7 +37,10 @@ MUTANT_SECONDS = 5.6
 WORKERS = 4
 RECORD_RETRY_SECONDS = 10
 TEST_WORKFLOW = ".github/workflows/test.yml"
-COLLECTING_JOBS = ("unit", "unit-selected", "mutation-stats")
+COLLECTING_JOBS = {
+    TEST_WORKFLOW: ("unit", "unit-selected", "mutation-stats"),
+    ".github/workflows/mutation-preflight.yml": ("stats",),
+}
 SCHEDULING_KEYS = {"needs", "if", "timeout-minutes", "outputs"}
 RECORD_ERRORS = (subprocess.SubprocessError, OSError, ValueError, KeyError, zipfile.BadZipFile)
 
@@ -151,20 +154,20 @@ def record_drift(root: Path, manifest: dict) -> tuple[set[str], set[int], set[st
 def workflow_changed(root: Path, manifest: dict, path: str) -> bool:
     if manifest.get("version") != 2 or path.endswith(".py"):
         return True
-    return path == TEST_WORKFLOW and collection_changed(
-        _show(root, manifest["commit"], path), _show(root, "HEAD", path)
+    return path in COLLECTING_JOBS and collection_changed(
+        _show(root, manifest["commit"], path), _show(root, "HEAD", path), COLLECTING_JOBS[path]
     )
 
 
-def collection_changed(old: str | None, new: str | None) -> bool:
+def collection_changed(old: str | None, new: str | None, jobs: tuple[str, ...]) -> bool:
     # Only the jobs that run the recorded tests decide what a test reaches; the jobs before them schedule tests.
     try:
         before, after = (yaml.safe_load(text) for text in (old, new))
-        if not all(isinstance(workflow["jobs"]["unit"], dict) for workflow in (before, after)):
+        if not all(isinstance(workflow["jobs"][jobs[0]], dict) for workflow in (before, after)):
             return True
         if any(before.get(key) != after.get(key) for key in ("env", "defaults")):
             return True
-        for name in COLLECTING_JOBS:
+        for name in jobs:
             old_job, new_job = (
                 {key: value for key, value in workflow["jobs"].get(name, {}).items() if key not in SCHEDULING_KEYS}
                 for workflow in (before, after)
