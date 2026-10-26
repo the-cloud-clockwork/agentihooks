@@ -122,7 +122,7 @@ def _kernel_memory(identity: ProjectIdentity, found: dict) -> ProjectMemory:
             "title": row.get("title", ""),
         }
         for row in _own_rows(found, "arcs", identity.project_id)
-        if str(row.get("ref", "")).startswith("arc:")
+        if str(row.get("ref")).startswith("arc:")
     ]
     lessons = [str(row.get("content", "")).strip() for row in _own_rows(found, "lessons", identity.project_id)]
     return ProjectMemory(

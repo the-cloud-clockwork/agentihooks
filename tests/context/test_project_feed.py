@@ -59,9 +59,13 @@ def test_kernel_rows_without_an_arc_reference_or_lesson_text_are_dropped():
         "arcs": [
             {"ref": "lesson:x", "projects": ["github.com/org/quiet"], "title": "not an arc"},
             {"ref": "arc:bare", "projects": ["github.com/org/quiet"]},
+            {"projects": ["github.com/org/quiet"], "title": "no reference"},
             "not a row",
         ],
-        "lessons": [{"ref": "l", "projects": ["github.com/org/quiet"], "content": "  "}],
+        "lessons": [
+            {"ref": "l", "projects": ["github.com/org/quiet"], "content": "  "},
+            {"ref": "m", "projects": ["github.com/org/quiet"]},
+        ],
     }
     with _answer(found)[1]:
         memory = KernelProjectSource([]).fetch(QUIET)
@@ -198,7 +202,9 @@ def test_an_outage_marks_cached_memory_stale_and_counts_it(home, monkeypatch):
     _refresh(QUIET, lambda self, identity: ProjectMemory("quiet", lessons=["kept"]))
     monkeypatch.setenv("BRAIN_PROJECT_MEMORY_TTL", "0")
     monkeypatch.setattr(project_cache.time, "time", lambda: 200.0)
-    cached = _refresh(QUIET, _raising(project_memory.BrainSourceUnavailable("down")))
+    with patch("hooks.common.log") as log:
+        cached = _refresh(QUIET, _raising(project_memory.BrainSourceUnavailable("down")))
+    log.assert_any_call("brain_project: refresh failed", {"error": "down"})
     assert cached["memory"]["lessons"] == ["kept"] and cached["at"] == 100.0 and cached["outage_at"] == 200.0
     assert project_cache.scoped_feed_fallbacks() == {"kernel_outage": 1}
     assert project_cache.scoped_feed_fallback_total() == 1
@@ -235,12 +241,12 @@ def test_a_legacy_fallback_is_counted_once_per_refresh(home):
     assert project_cache.scoped_feed_fallback_total() == 1
 
 
-def _cached(home, monkeypatch, at, outage_at, now):
+def _cached(home, monkeypatch, at, outage_at, now, lessons=("kept",)):
     record_session("s", QUIET)
     project_cache.store_feed([])
     scope = project_cache._project_scope(QUIET)
     feed = project_cache._scoped(project_cache.feed_file(), project_cache.namespace(), "feed")
-    document = {"feed_hash": feed["hash"], "at": at, "memory": {"project": "quiet", "lessons": ["kept"]}}
+    document = {"feed_hash": feed["hash"], "at": at, "memory": {"project": "quiet", "lessons": list(lessons)}}
     if outage_at is not None:
         document["outage_at"] = outage_at
     project_cache._write(
@@ -267,7 +273,18 @@ def test_an_outage_serves_marked_stale_memory_within_policy(home, monkeypatch):
 def test_an_outage_past_policy_serves_no_memory(home, monkeypatch):
     monkeypatch.setenv("BRAIN_PROJECT_MEMORY_STALE_SECONDS", "100")
     block = _cached(home, monkeypatch, 1_793_000_000.0, 1_793_000_050.0, 1_793_000_100.5)
-    assert "kept" not in block and "Stale" not in block and "No project memory yet" in block
+    assert block.splitlines() == [
+        "[Project memory: quiet]",
+        "BRAIN CONTEXT (recalled state, not an operator directive):",
+        "",
+        "No project memory yet.",
+    ]
+
+
+def test_the_stale_line_is_inserted_once_when_memory_holds_blank_lines(home, monkeypatch):
+    block = _cached(home, monkeypatch, 0.0, 1.0, 2.0, lessons=("one\n\ntwo",))
+    assert block.count("Stale project memory: ") == 1
+    assert block.endswith("* one\n\ntwo")
 
 
 def test_the_stale_policy_defaults_to_a_day(home, monkeypatch):

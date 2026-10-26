@@ -128,7 +128,7 @@ def _source(rows: list[dict]) -> KernelProjectSource | VaultProjectSource:
     from hooks.context.brain_adapter import BrainEntry
 
     entries = [BrainEntry(**row) for row in rows]
-    if os.getenv("BRAIN_PROJECT_FEED_SOURCE", "kernel") == "vault":
+    if os.getenv("BRAIN_PROJECT_FEED_SOURCE") == "vault":
         return VaultProjectSource(entries)
     return KernelProjectSource(entries)
 
@@ -179,9 +179,9 @@ def _cached_memory(cached: dict, identity: ProjectIdentity) -> tuple[ProjectMemo
         return ProjectMemory(identity.project), ""
     if not cached.get("outage_at"):
         return ProjectMemory(**cached["memory"]), ""
-    if time.time() - cached.get("at", 0) > float(os.getenv("BRAIN_PROJECT_MEMORY_STALE_SECONDS", "86400")):
+    if time.time() - cached["at"] > float(os.getenv("BRAIN_PROJECT_MEMORY_STALE_SECONDS", "86400")):
         return ProjectMemory(identity.project), ""
-    refreshed = datetime.fromtimestamp(cached.get("at", 0), timezone.utc).isoformat(timespec="seconds")
+    refreshed = datetime.fromtimestamp(cached["at"], timezone.utc).isoformat(timespec="seconds")
     return (
         ProjectMemory(**cached["memory"]),
         f"Stale project memory: the brain is unreachable; last refreshed {refreshed}.",
