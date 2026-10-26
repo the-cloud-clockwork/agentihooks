@@ -902,7 +902,6 @@ class Handler(BaseHTTPRequestHandler):
         )
         super().send_response(code, message)
         if unread:
-            self.close_connection = True
             self.send_header("Connection", "close")
 
     def send(self, code, body, ctype):
