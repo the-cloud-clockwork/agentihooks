@@ -766,3 +766,5 @@ def test_an_unparsable_file_still_reaches_the_modules_its_text_names():
     assert plan._reach_keys("tests/a.py", "from tests.helpers import (\n") == {"tests", "tests.helpers"}
     assert plan._reach_keys("tests/pkg/__init__.py", "from . import b\n") == {"tests", "tests.pkg", "tests.pkg.b"}
     assert plan._reach_keys("tests/a.py", 'run("tests/x/y.py")\n') == {"tests/x/y.py", "y.py"}
+    assert plan._reach_keys("tests/a/b.py", "from tests import c\n") == {"tests", "tests.c"}
+    assert plan._reach_keys("tests/a/b.py", "from ..d import e\n") == {"tests", "tests.d", "tests.d.e"}

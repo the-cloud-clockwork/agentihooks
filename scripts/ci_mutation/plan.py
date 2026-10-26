@@ -219,7 +219,8 @@ def _reach_keys(path: str, source: str) -> set[str]:
         if isinstance(found, ast.Import):
             names.extend(alias.name for alias in found.names)
         elif isinstance(found, ast.ImportFrom):
-            base = ".".join([*package[: len(package) - found.level], *filter(None, [found.module])])
+            parent = package[: len(package) - found.level] if found.level else []
+            base = ".".join([*parent, *filter(None, [found.module])])
             names.append(base)
             names.extend(f"{base}.{alias.name}" if base else alias.name for alias in found.names)
     for name in names:
