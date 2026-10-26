@@ -49,7 +49,7 @@ Swarms created before the setting existed read as `legacy`. Any other value is r
 
 1. **Ledger write.** Every task and phase change goes through the ledger outbox, which relays it within a second as a
    `task.changed`, `task.removed`, `phase.changed` or `phase.removed` event on `swarm.<slug>.task.<id>` or
-   `swarm.<slug>.phase.<id>`. All events live in the `AGENTIHOOKS_EVENTS` stream. Each time `claimed_by` changes, the
+   `swarm.<slug>.phase.<id>`. All events live in the `AGENTIHOOKS-EVENTS` stream. Each time `claimed_by` changes, the
    task's `claim_generation` goes up by one.
 2. **Offer.** The hub's `readiness` reactor offers each claimable task of an `events` swarm on every pass. The
    offer is a `task.ready` event, with id `ready:<slug>:<task>:<generation>`, on the lane work queue
@@ -67,7 +67,7 @@ Swarms created before the setting existed read as `legacy`. Any other value is r
 6. **Redelivery.**
    - An offer that is not acknowledged within 30 seconds comes back, up to 5 deliveries.
    - A claim conflict, or another live hive holding the claim, sends the offer back for later.
-   - After the last delivery the spoke writes a `dead_lettered` event to `AGENTIHOOKS_DEAD` and reopens the task.
+   - After the last delivery the spoke writes a `dead_lettered` event to `AGENTIHOOKS-DEAD` and reopens the task.
 7. **Exit.** When the agent ends, `execution.exited` reaches the hub's `lifecycle` reactor. Only for the claim and
    generation it started, it releases the slot and the claim, then settles the task: `done`, or back to `open` with no
    claimant.
@@ -699,7 +699,8 @@ minutes at a lower wanted count:
 
 1. The tick sends each extra backend master an inbox item from `swarm`: write a Handoff v2 for the lead master, run
    `agentihooks swarm <id> handoff <doc>` and stop. The tick prints
-   `asked <agent> to hand off retiring seat master-2@<id>`.
+   `asked <agent> to hand off retiring seat master-2@<id>`. From the ask on, the claimants of the retiring seat's
+   tasks belong to the front door: it messages them, and the retiring master no longer does.
 2. When that master has left its seat, the tick retires the seat. Its handoff document reaches `master@<id>` as an
    inbox item. Every open item still at the seat is redirected to `master@<id>`, except the retire request, which
    is withdrawn. The tick prints `retired master seat master-2@<id> after <seconds> seconds`.
@@ -2809,13 +2810,26 @@ process tree. Lower `swap-floor` only on a host with little memory, where a
 
 ### Host samples
 
-Each tick's metrics pass writes one `host_samples` row to the swarm metrics
+Each metrics collector pass writes one `host_samples` row to the swarm metrics
 outbox (`~/.agentihooks/swarm/metrics-outbox.sqlite`, relayed to the ClickHouse
 `swarm` database): `available_mb`, `load_per_cpu`, `live_agents`,
 `swap_used_mb`, `swap_total_mb`, `agent_mb` (the measured mean, 0 when no tree
-was read), the held spawn count and its reason. Count minutes with swap above
-ninety percent while room was above zero from these rows; the `reason` column
-and the tick's `holding spawns: host memory room N` line name the hold.
+was read), the held spawn count and its reason. Each row covers the span to the
+next row, up to twenty minutes; sum those spans for minutes with swap above
+ninety percent while room was above zero. The `reason` column and the tick's
+`holding spawns: host memory room N` line name the hold.
+
+The tick row is written every pass. The ledger and swarm collectors, host
+samples included, run at most once per `AGENTIHOOKS_METRICS_EVERY_MINUTES`
+(default 10) per swarm, and a held sample counts for up to twenty minutes or
+until the next sample.
+
+The same pass writes the ledger probe's latest pass to `ledger_probes`
+(`read_s`, `write_s`, `read_failure`, `write_failure`, `wall_s`; a failure
+reads `timed out`, `gave no answer` or `answered with a server error`) and one
+`hive_samples` row per registered hive (`hive`, `name`, `live`,
+`heartbeat_age_s`, -1 when the hive never beat). A hive recovery is a
+`hive_samples` row with `live` 1 after one with `live` 0 for the same hive.
 
 ### Troubleshooting
 

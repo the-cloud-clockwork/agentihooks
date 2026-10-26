@@ -1,5 +1,7 @@
 import re
 
+from .resource_names import consumer_name
+
 PREFIX = "swarm"
 SLOTS = "slots"
 
@@ -31,4 +33,4 @@ def inbox(user: str) -> str:
 
 
 def stream_name(swarm: str, resource: str) -> str:
-    return f"AGENTIHOOKS_{_token(swarm).encode().hex()}_{_token(resource)}"
+    return f"AGENTIHOOKS-{_token(swarm).encode().hex()}-{consumer_name(_token(resource))}"

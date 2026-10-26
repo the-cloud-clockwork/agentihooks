@@ -204,7 +204,6 @@ def test_publish_registered_worktree_ignores_a_prerequisite_pull_request(publica
         publication.task["branch"] = "prerequisite"
         publication.task["repository_branches"] = {str(publication.repo): "engineer-test"}
     monkeypatch.chdir(root)
-    monkeypatch.setattr(publish.publish_queue, "open_head", lambda remote, url: "prerequisite")
 
     result = publish.publish(
         "swarm", publication.agent, str(publication.repo), publication.ledger, "Change chosen", ["chosen.txt"]
@@ -467,6 +466,89 @@ def test_prepare_stacks_on_the_recorded_branch_and_publish_pushes_its_current_br
     assert task["repository_branches"] == {str(repository): "engineer-test"}
     assert git(repository, "ls-remote", "origin", "refs/heads/engineer-test").split()[0] == head
     assert git(repository, "ls-remote", "origin", "refs/heads/predecessor").split()[0] != head
+
+
+@pytest.mark.parametrize(
+    "state, deleted, head",
+    [
+        ("MERGED", True, "predecessor"),
+        ("MERGED", False, "predecessor"),
+        ("OPEN", False, "predecessor"),
+        ("MERGED", False, "another-branch"),
+    ],
+)
+@pytest.mark.parametrize("hint", ["handoff_envelope", "reclaim"])
+def test_prepare_selects_fresh_dev_after_the_recorded_pull_request_merged(
+    repository, tmp_path, monkeypatch, state, deleted, head, hint
+):
+    from scripts.swarm import publish, stack
+    from scripts.swarm_ledger import ledger_tasks
+
+    git(repository, "push", "origin", "HEAD:predecessor")
+    old_head = git(repository, "rev-parse", "HEAD")
+    fresh = git(repository, "commit-tree", "HEAD^{tree}", "-p", "HEAD", "-m", "New dev")
+    git(repository, "push", "origin", f"{fresh}:refs/heads/dev")
+    if deleted:
+        git(repository, "push", "origin", "--delete", "predecessor")
+    worktree = tmp_path / "worktrees" / "repo" / "engineer-test"
+    script = tmp_path / "wt.sh"
+    script.write_text(
+        "#!/usr/bin/env bash\nset -euo pipefail\n"
+        'git -C "$3" fetch origin dev >&2\n'
+        "base=origin/dev\n"
+        'if [[ "${4:-}" == --from ]]; then base="$5"; fi\n'
+        'git -C "$3" worktree add -b engineer-test "$PUBLISH_PREPARED" "$base" >&2\n'
+        'printf "%s\\n" "$PUBLISH_PREPARED"\n'
+    )
+    monkeypatch.setattr(stack, "WT_SCRIPT", script)
+    monkeypatch.setenv("PUBLISH_PREPARED", str(worktree))
+    pr_url = "https://github.com/example/repo/pull/7"
+    task = {
+        "id": "t1",
+        "claimed_by": "engineer@test",
+        "state": "claimed",
+        "branch": "predecessor",
+        "pr_url": pr_url,
+        "repository_branches": {str(repository): "predecessor"},
+        hint: {"continue_from": "origin/predecessor", "source": "origin/predecessor"},
+    }
+    native = publish.execute
+    native_git = publish.git
+
+    def git_call(root, *args):
+        if args == ("remote", "get-url", "origin"):
+            return "git@github.com:example/repo.git"
+        return native_git(root, *args)
+
+    monkeypatch.setattr(publish, "git", git_call)
+
+    def execute(command, root):
+        if command[:3] == ["gh", "pr", "view"]:
+            assert command == ["gh", "pr", "view", pr_url, "--json", "state,headRefName"]
+            return json.dumps({"state": state, "headRefName": head})
+        return native(command, root)
+
+    monkeypatch.setattr(publish, "execute", execute)
+
+    def update_task(slug, task_id, fields, by):
+        ledger_tasks.check({"op": "task_update", "item": f"tasks/{task_id}", "fields": fields, "by": by})
+        task.update(fields)
+
+    ledger = SimpleNamespace(tasks=lambda slug: [task], update_task=update_task)
+    agent = AgentRecord("engineer@test", "ci", "t1")
+
+    result = publish.prepare("swarm", agent, str(repository), ledger)
+
+    retired = state == "MERGED" and head == "predecessor"
+    assert git(worktree, "rev-parse", "HEAD") == (fresh if retired else old_head)
+    assert git(worktree, "rev-parse", "--abbrev-ref", "@{upstream}") == (
+        "origin/dev" if retired else "origin/predecessor"
+    )
+    assert result["branch"] == task["branch"] == "engineer-test"
+    assert task["repository_branches"] == {str(repository): "engineer-test"}
+    assert task["pr_url"] == ("" if retired else pr_url)
+    assert task[hint] == {"continue_from": "origin/predecessor", "source": "origin/predecessor"}
+    assert publish.prepare("swarm", agent, str(repository), ledger) == result
 
 
 def test_publish_uses_its_current_branch_over_inherited_tracking(publication):
@@ -1338,21 +1420,6 @@ def test_a_continuation_publishes_its_registered_branch_regardless_of_its_pull_r
     assert git(root, "ls-remote", "origin", "refs/heads/engineer-test").split()[0] == head
     assert git(root, "ls-remote", "origin", "refs/heads/predecessor").split()[0] == parked
     assert git(root, "rev-parse", "--abbrev-ref", "@{upstream}") == "origin/engineer-test"
-
-
-def test_a_pull_request_on_another_host_is_never_looked_up(monkeypatch):
-    from scripts.swarm import merge_queue, publish_queue
-
-    monkeypatch.setattr(merge_queue, "graphql", lambda *args: pytest.fail("looked up"))
-    assert publish_queue.open_head("/srv/remote.git", "https://github.com/example/repo/pull/7") == ""
-    assert publish_queue.open_head("git@github.com:example/repo.git", "") == ""
-
-
-def test_a_recorded_url_that_names_no_pull_request_keeps_the_current_branch(monkeypatch):
-    from scripts.swarm import merge_queue, publish_queue
-
-    monkeypatch.setattr(merge_queue, "graphql", lambda document, variables: {"resource": None})
-    assert publish_queue.open_head("git@github.com:example/repo.git", "https://github.com/example/repo/issues/7") == ""
 
 
 def test_a_missing_branch_never_descends_and_prints_nothing(publication, capfd):

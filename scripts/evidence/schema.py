@@ -7,7 +7,7 @@ from jsonschema import Draft202012Validator
 from jsonschema.exceptions import best_match
 
 SCHEMAS = Path(__file__).parent
-KINDS = ("case", "evidence")
+KINDS = ("case", "evidence", "verdict")
 
 
 class SchemaError(ValueError):

@@ -4,11 +4,11 @@ import pytest
 
 import scripts.swarm_ledger.repository  # noqa: F401  puts the ledger folder on sys.path before ledger_core loads
 from scripts.inbox import cli as inbox_cli
-from scripts.inbox.store import InboxError, InboxStore
+from scripts.inbox.store import InboxError, InboxStore, now_ms
 from scripts.swarm import delivery, master_retire
 from scripts.swarm.store import AgentRecord, SwarmConfig
 from scripts.swarm_ledger import ledger_core as core
-from scripts.swarm_v2 import master_fence, masters
+from scripts.swarm_v2 import master_fence, master_scale, masters
 from tests import sv2_mst04_cases as cases
 from tests.sv2_mst04_cases import ENGINEER, LEAD, LEAD_NAME, SECOND, SECOND_NAME, SLUG
 
@@ -384,6 +384,174 @@ def test_the_front_door_replies_to_the_claimant(world):
     record = {"op": "reply", "by": LEAD_NAME, "item": "i-reply-lead", "args": {"id": asked.id, "text": "Stage it"}}
 
     assert inbox_cli.apply(inbox(world), record | {"args": record["args"] | {"fyi": False}})["closed"] == asked.id
+
+
+def waiting_on_the_backend_master(world, age_s, state="pending", fyi=False):
+    item = inbox(world).send(CLAIMANT, SECOND, "Replicate without auth?", fyi=fyi)
+    world.redis.hset(inbox(world).key("item", item.id), mapping={"created_at": now_ms() - age_s * 1000, "state": state})
+    return item
+
+
+@pytest.mark.parametrize(
+    ("age_s", "state", "fyi"),
+    [(None, "", False), (299, "pending", False), (301, "read", False), (301, "pending", True)],
+)
+def test_the_front_door_cannot_message_a_backend_masters_claimant_while_that_master_keeps_up(world, age_s, state, fyi):
+    if age_s is not None:
+        waiting_on_the_backend_master(world, age_s, state, fyi)
+
+    with pytest.raises(InboxError) as refused:
+        master_fence.check_send(inbox(world), LEAD_NAME, OWN_CLAIMANT)
+
+    assert str(refused.value) == (
+        f"tasks/t2 belongs to {SECOND}, so {LEAD} cannot message its claimant; ask {SECOND} with agentihooks "
+        f'swarm {SLUG} masters-channel say "<text>"'
+    )
+    assert world.refusals() == 1
+
+
+@pytest.mark.parametrize("state", ["pending", "delivered", "confirmed"])
+def test_the_front_door_messages_a_backend_masters_claimant_once_its_item_is_unread_past_the_wake_window(world, state):
+    waiting_on_the_backend_master(world, 301, state)
+
+    master_fence.check_send(inbox(world), LEAD_NAME, OWN_CLAIMANT)
+
+    assert world.refusals() == 0
+
+
+def test_the_wake_window_setting_bounds_how_long_the_front_door_waits(world, monkeypatch):
+    monkeypatch.setenv("AGENTIHOOKS_INBOX_RETRY_WINDOW_S", "60")
+    waiting_on_the_backend_master(world, 61)
+
+    master_fence.check_send(inbox(world), LEAD_NAME, OWN_CLAIMANT)
+
+    assert world.refusals() == 0
+
+
+def test_outage_time_does_not_count_toward_a_backend_masters_wake_window(world, monkeypatch):
+    from scripts.inbox import store as inbox_store
+    from scripts.swarm import outage
+
+    created = inbox(world).get(waiting_on_the_backend_master(world, 0).id).created_at
+    now = created + 301_000
+    seen = []
+
+    def paused(slug, since, until):
+        seen.append((slug, since, until))
+        return 1_000
+
+    monkeypatch.setattr(inbox_store, "now_ms", lambda: now)
+    monkeypatch.setattr(outage, "paused_ms", paused)
+
+    with pytest.raises(InboxError, match=f"so {LEAD} cannot message its claimant"):
+        master_fence.check_send(inbox(world), LEAD_NAME, OWN_CLAIMANT)
+    assert seen == [(SLUG, created, now)]
+
+
+def test_the_front_door_replies_to_a_stuck_backend_masters_claimant(world):
+    waiting_on_the_backend_master(world, 301)
+    asked = inbox(world).send(OWN_CLAIMANT, LEAD_NAME, "Who owns this now?")
+    record = {"op": "reply", "by": LEAD_NAME, "item": "i-reply-stuck", "args": {"id": asked.id, "text": "I do"}}
+
+    assert inbox_cli.apply(inbox(world), record | {"args": record["args"] | {"fyi": False}})["closed"] == asked.id
+
+
+def test_a_stuck_backend_master_does_not_let_another_backend_master_message_its_claimant(world):
+    world.redis.hset(masters.MasterSeats(world.redis).key(SLUG), "count", 3)
+    world.seat("master@abcdef-0009", f"master-3@{SLUG}")
+    waiting_on_the_backend_master(world, 301)
+
+    with pytest.raises(InboxError, match=f"so master-3@{SLUG} cannot message its claimant"):
+        master_fence.check_send(inbox(world), "master@abcdef-0009", OWN_CLAIMANT)
+
+
+def asked_to_retire(world, handoff):
+    second = next(a for a in world.store.agents(SLUG) if a.name == SECOND_NAME)
+    retiring = {}
+    master_scale._ask(SLUG, world.store, {SECOND: second}, retiring, [2], 1, 1_000)
+    world.redis.hset(masters.MasterSeats(world.redis).key(SLUG), master_scale.RETIRING, json.dumps(retiring))
+    world.store.put_handoff(SLUG, "master-2", handoff, seat=SECOND)
+    return retiring
+
+
+def third_live_master(world):
+    table = masters.MasterSeats(world.redis)
+    table.set_count(SLUG, 3)
+    world.seat(world.store.names.next(SLUG, "master"), f"master-3@{SLUG}")
+    assert table.owners(SLUG, world.doc()) == {"p1": LEAD, "p2": SECOND}
+
+
+def test_a_seat_asked_to_retire_hands_its_claimants_to_the_front_door_before_its_handoff_is_in(world):
+    third_live_master(world)
+    asked_to_retire(world, "")
+
+    master_fence.check_send(inbox(world), LEAD_NAME, OWN_CLAIMANT)
+
+    assert world.refusals() == 0
+    assert master_fence.Seats(SLUG, world.store, {}).live == [LEAD, f"master-3@{SLUG}"]
+    assert master_fence.retiring(world.store, SLUG) == {SECOND}
+
+
+def test_a_retiring_seat_cannot_message_the_claimants_it_handed_to_the_front_door(world):
+    third_live_master(world)
+    asked_to_retire(world, "")
+
+    with pytest.raises(InboxError) as refused:
+        master_fence.check_send(inbox(world), SECOND_NAME, OWN_CLAIMANT)
+
+    assert str(refused.value) == (
+        f"tasks/t2 belongs to {LEAD}, so {SECOND} cannot message its claimant; ask {LEAD} with agentihooks "
+        f'swarm {SLUG} masters-channel say "<text>"'
+    )
+
+
+def test_the_front_door_messages_a_retired_backend_masters_claimant_while_its_agent_is_still_running(world):
+    third_live_master(world)
+    retiring = asked_to_retire(world, "")
+
+    master_scale._retire(SLUG, world.store, SECOND, retiring[SECOND], 2_000)
+
+    master_fence.check_send(inbox(world), LEAD_NAME, OWN_CLAIMANT)
+    assert world.refusals() == 0
+    assert masters.MasterSeats(world.redis).owners(SLUG, world.doc())["p2"] == LEAD
+
+
+def test_a_seat_whose_retire_request_was_withdrawn_keeps_its_claimants(world):
+    retiring = asked_to_retire(world, "")
+    master_scale._withdraw_asks(world.store, retiring)
+    world.redis.hdel(masters.MasterSeats(world.redis).key(SLUG), master_scale.RETIRING)
+
+    with pytest.raises(InboxError) as refused:
+        master_fence.check_send(inbox(world), LEAD_NAME, OWN_CLAIMANT)
+
+    assert str(refused.value) == (
+        f"tasks/t2 belongs to {SECOND}, so {LEAD} cannot message its claimant; ask {SECOND} with agentihooks "
+        f'swarm {SLUG} masters-channel say "<text>"'
+    )
+    assert master_fence.retiring(world.store, SLUG) == set()
+
+
+def test_a_retiring_seat_hands_its_claimants_to_the_front_door_with_its_handoff(world):
+    asked_to_retire(world, "# Handoff v2\nnotes of master two")
+
+    master_fence.check_send(inbox(world), LEAD_NAME, OWN_CLAIMANT)
+
+    assert world.refusals() == 0
+    assert master_fence.Seats(SLUG, world.store, {}).live == [LEAD]
+    assert master_fence.retiring(world.store, SLUG) == {SECOND}
+
+
+def test_the_front_door_keeps_a_retired_seats_claimants_after_the_tick_retires_the_seat(world):
+    retiring = asked_to_retire(world, "# Handoff v2\nnotes of master two")
+    world.down(SECOND_NAME)
+
+    master_scale._retire(SLUG, world.store, SECOND, retiring[SECOND], 2_000)
+
+    master_fence.check_send(inbox(world), LEAD_NAME, OWN_CLAIMANT)
+    assert world.refusals() == 0
+    assert masters.MasterSeats(world.redis).retired(SLUG) == [SECOND]
+    assert masters.MasterSeats(world.redis).owners(SLUG, world.doc())["p2"] == LEAD
+    assert any(item.text.endswith("notes of master two") for item in inbox(world).inbox(LEAD))
 
 
 def test_a_message_check_keeps_the_owner_of_every_phase(world):

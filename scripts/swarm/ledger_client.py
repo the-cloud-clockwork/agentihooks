@@ -150,10 +150,12 @@ class LedgerClient:
             op.pop("to")
         self._call(slug, [op])
 
-    def relay(self, slug: str, text: str, by: str, op_id: str = "") -> None:
+    def relay(self, slug: str, text: str, by: str, op_id: str = "", reply_to: str = "") -> None:
         op = _op("add", by, thread="chat", text=text, to="operator")
         if op_id:
             op["id"] = op_id
+        if reply_to:
+            op["reply_to"] = reply_to
         LedgerClient(service=True)._call(slug, [op])
 
     def relay_comment(self, slug, entry, text, by, op_id):

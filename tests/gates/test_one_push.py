@@ -50,7 +50,11 @@ class Ledger:
         self.pr_url, self.branch = pr_url, branch
 
     def tasks(self, slug):
-        return [{"id": "t1", "pr_url": self.pr_url, "branch": self.branch}] if slug == "demo" else []
+        raise AssertionError(f"read every task of {slug!r} on a push")
+
+    def task(self, slug, task_id):
+        found = slug == "demo" and task_id == "t1"
+        return {"id": "t1", "pr_url": self.pr_url, "branch": self.branch} if found else None
 
 
 def pull(state="OPEN", red=False, running=True, queued=False):

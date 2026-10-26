@@ -177,49 +177,54 @@ def pushed_branches(repo: str, task: dict, agent: AgentRecord) -> dict:
     return record
 
 
-def preparation_base(repository: Path, task: dict) -> dict:
-    branch = task.get("branch")
-    if not branch or remote_head(repository, branch) or not task.get("pr_url"):
-        return task
-    remote = stack.repo_key(git(repository, "remote", "get-url", "origin"))
-    if stack.repo_key(task["pr_url"].split("/pull/")[0]) != remote:
-        return task
-    pull = json.loads(
-        execute(["gh", "pr", "view", task["pr_url"], "--json", "state,baseRefName,headRefName"], repository)
-    )
-    if pull["state"] == "MERGED" and pull["baseRefName"] == "dev" and pull["headRefName"] == branch:
-        return {**task, "branch": ""}
-    return task
+def merged_record(repo: Path, task: dict) -> bool:
+    if not task.get("branch") or not task.get("pr_url"):
+        return False
+    if stack.repo_key(task["pr_url"].split("/pull/")[0]) != stack.repo_key(git(repo, "remote", "get-url", "origin")):
+        return False
+    pull = json.loads(execute(["gh", "pr", "view", task["pr_url"], "--json", "state,headRefName"], Path(repo)))
+    return pull["state"] == "MERGED" and pull["headRefName"] == task["branch"]
 
 
 def prepare(slug: str, agent: AgentRecord, repo: str, ledger: LedgerClient) -> dict:
     task = task_row(slug, agent, ledger)
-    fields = []
+    fields, cleared = [], {}
     repositories = dict.fromkeys(local_repository(value, repo) for value in task.get("repositories") or [repo])
     for repository in repositories:
         scoped = task
         try:
             scoped = repository_task(repository, task)
-            base = preparation_base(repository, scoped)
-            root = existing(repository, base, agent)
+            retired = merged_record(repository, scoped)
+            if retired:
+                cleared = {"pr_url": ""}
+                hints = {
+                    key: {
+                        name: value
+                        for name, value in (task.get(key) or {}).items()
+                        if name != "continue_from" or value != f"origin/{scoped['branch']}"
+                    }
+                    for key in ("handoff_envelope", "reclaim")
+                }
+                scoped = {**scoped, **cleared, **hints, "branch": ""}
+            root = None if retired else existing(repository, scoped, agent)
             if root is None:
                 command = ["bash", str(stack.WT_SCRIPT), "new", "--repo", str(repository)]
-                if base.get("branch"):
-                    command.extend(["--from", f"origin/{base['branch']}"])
+                if scoped.get("branch"):
+                    command.extend(["--from", f"origin/{scoped['branch']}"])
                 output = execute(command, repository)
                 root = Path(output.splitlines()[-1])
             checkout = checkout_fields(root)
-            delivery = target_branch(root, base, checkout["branch"], task)
+            delivery = target_branch(root, scoped, checkout["branch"], scoped if retired else task)
             if delivery != checkout["branch"]:
                 git(root, "branch", f"--set-upstream-to=origin/{delivery}")
-                if publish_queue.open_head(checkout["branch_repo"], task.get("pr_url", "")) == delivery:
+                if publish_queue.open_head(checkout["branch_repo"], scoped.get("pr_url", "")) == delivery:
                     checkout["branch"] = delivery
             fields.append({**checkout, "repository": str(repository)})
         except SwarmError as exc:
             raise PublicationRefusal(repository, refusal_branch(repository, scoped), str(exc)) from exc
     update = branch_record(fields[-1], Path(fields[-1]["repository"]), task)
     update["repository_branches"].update({entry["repository"]: entry["branch"] for entry in fields})
-    ledger.update_task(slug, agent.task, update, by=agent.name)
+    ledger.update_task(slug, agent.task, {**cleared, **update}, by=agent.name)
     result = fields[0] if len(fields) == 1 else {"worktrees": fields}
     return {**result, "repository_source": "task" if task.get("repositories") else "swarm default"}
 

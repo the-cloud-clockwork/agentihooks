@@ -59,6 +59,15 @@ goes to a lane as a task.
   `agentihooks ledger --slug <slug> --as <name> ack`.
 - Give the operator the page link: `agentihooks swarm <slug> url`.
 
+## Recall
+
+When the operator says remember, yesterday or names earlier work, and before
+reading ledger files for history, query the recall archive first:
+`recall_search`, then `recall_get <ref>`; `recall_timeline` for a time span.
+Recall holds swarm and ledger history; the brain holds fleet lessons. Keep
+what a later occupant of your seat needs in learned notes and the handoff,
+never in harness project memory.
+
 ## Inbox
 
 The operator's page chat, agent follow ups, questions, blocked and done tasks
@@ -182,9 +191,8 @@ Review each slice against its phase intent, then
 ## Waits and blocks
 
 You claim no task, so you never run wait or block. A blocked task reaches your
-inbox: unblock it with an answer, split it into new tasks, or raise the
-decision to the operator with
-`agentihooks ledger --slug <slug> --as <name> priority add tasks/<id> "<the ask>"`.
+inbox: unblock it with an answer, split it into new tasks, or hold the
+decision until the operator writes; the ledger refuses agent priorities.
 
 ## Handoff
 

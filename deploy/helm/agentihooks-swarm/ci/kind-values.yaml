@@ -30,6 +30,6 @@ controller:
       key: setting
       optional: true
   env:
-    AGENTIHOOKS_CONTROLLER_TICK_SECONDS: "2"
+    AGENTIHOOKS_CONTROLLER_TICK_SECONDS: "5"
 nats:
   enabled: false

@@ -185,6 +185,9 @@ class _Store:
     def peer(self, slug):
         return ""
 
+    def launch_failures(self, slug):
+        return {}
+
 
 class _RefusingLedger:
     def state(self, slug):

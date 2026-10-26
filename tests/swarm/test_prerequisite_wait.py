@@ -2,9 +2,11 @@ import json
 
 import pytest
 
+from scripts.hive import auth
+from scripts.inbox.store import InboxStore
 from scripts.swarm import cli, idle, merge_queue, prerequisite_wait
 from scripts.swarm.ledger_events import PullRequest
-from scripts.swarm.store import AgentRecord
+from scripts.swarm.store import AgentRecord, RedisStore
 from tests.swarm.test_cli import env, run  # noqa: F401
 
 ME = "engineer@a1b2c3-0001"
@@ -369,6 +371,78 @@ def test_a_reclaimed_tasks_prerequisite_reopens_after_it_merges(waiting, monkeyp
     assert prerequisite_wait.reopen_pass("sw", store, ledger, ledger.rows) == [
         f"task t1 reopened after prerequisite {URL} merged"
     ]
+
+
+MEMBER_READS = {
+    "GET",
+    "HGET",
+    "HGETALL",
+    "HEXISTS",
+    "EXISTS",
+    "SMEMBERS",
+    "SISMEMBER",
+    "MGET",
+    "HKEYS",
+    "HMGET",
+    "TTL",
+    "PTTL",
+    "ZRANGE",
+    "ZRANGEBYSCORE",
+    "ZSCORE",
+    "ZCARD",
+    "SCARD",
+    "HLEN",
+    "LRANGE",
+    "TYPE",
+    "SCAN",
+}
+
+
+@pytest.mark.parametrize("kind", ["checks", "merge", "reply"])
+def test_a_hive_member_credential_declares_checked_waits_under_claim_generation_drift(waiting, monkeypatch, kind):
+    import fakeredis
+
+    _, ledger, state = waiting
+    state["entry"]["position"] = 1
+    ledger.rows["t1"]["claim_generation"] = 7
+    server = fakeredis.FakeServer()
+    admin = fakeredis.FakeRedis(server=server, decode_responses=True)
+    monkeypatch.setattr(cli, "connect", lambda: RedisStore(admin))
+    assert run("sw", "create", "--repo", "/repo") == 0
+    RedisStore(admin).put_agent("sw", AgentRecord(name=ME, lane="eng", task="t1", seat="eng-1@sw"))
+    admin.acl_setuser(
+        "hive-m1",
+        enabled=True,
+        nopass=True,
+        categories=auth.ACL_CATEGORIES,
+        keys=auth._acl_keys("m1"),
+        channels=auth.ACL_PATTERNS,
+    )
+
+    # fakeredis drops %R~ read selectors, so direct reads go through the admin client; pipelines stay on the member.
+    class Member(fakeredis.FakeRedis):
+        def execute_command(self, *args, **options):
+            if str(args[0]).upper() in MEMBER_READS:
+                return admin.execute_command(*args, **options)
+            return super().execute_command(*args, **options)
+
+    member = Member(server=server, decode_responses=True, username="hive-m1")
+    member.auth("", username="hive-m1")
+    assert member.acl_whoami() == "hive-m1"
+    admin.hset(prerequisite_wait.key("sw"), "t1", "{}")
+    admin.set(f"{RedisStore(admin).key('sw', 'claim', 't1')}:generation", 3)
+    monkeypatch.setenv("AGENTIHOOKS_DEPLOYMENT", "distributed")
+    monkeypatch.setenv("AGENTIHOOKS_HIVE_ID", "m1")
+    monkeypatch.setenv("AGENTIHOOKS_HIVE_REDIS_URL", "redis://hive.example:6380/2")
+    runs = {"checks": "https://github.com/o/r/actions/runs/40200544185", "merge": URL}
+    target = runs[kind] if kind in runs else InboxStore(member).send(ME, "operator", "which branch?").id
+    monkeypatch.setattr(cli, "connect", lambda: RedisStore(member))
+    # The agent lookup runs a read-only script the fake server checks as a write; real Redis grants it by %R~.
+    agent = RedisStore(admin).agents("sw")[0]
+    monkeypatch.setattr(cli, "_me", lambda store, args: agent)
+    assert run("sw", "--as", ME, "wait", "--on", kind, target) == 0
+    assert idle.wait(member, "sw", ME)["on"] == {"kind": kind, "target": target}
+    assert not admin.hexists(prerequisite_wait.key("sw"), "t1")
 
 
 @pytest.mark.parametrize("record_agent,generation,accepted", [(ME, 5, True), (ME, 4, False), ("other", 5, False)])

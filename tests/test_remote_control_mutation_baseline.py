@@ -16,7 +16,7 @@ from scripts.ci_mutation.stats import SharedStats
 
 # One xdist worker builds the baseline pass once; a module cache behind a function fixture keeps that pass inside
 # the function scoped home isolation, which a module fixture would run before.
-pytestmark = [pytest.mark.xdist_group("remote_control_mutation"), pytest.mark.timeout(method="signal")]
+pytestmark = [pytest.mark.xdist_group("remote_control_mutation"), pytest.mark.timeout(250, method="signal")]
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE = "scripts/swarm/commands.py"
 DEADLINE = 120
@@ -79,7 +79,9 @@ def baseline_cache():
 
 @pytest.fixture
 def baseline(baseline_cache, tmp_path_factory, monkeypatch):
-    if not baseline_cache:
+    # A cached pass that recorded an error is rebuilt, so a rerun or the next test retries a load-bound overrun.
+    if not baseline_cache or baseline_cache[0][4]:
+        baseline_cache.clear()
         line = next(
             number
             for number, text in enumerate((ROOT / SOURCE).read_text().splitlines(), 1)

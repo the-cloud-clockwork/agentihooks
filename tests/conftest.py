@@ -6,6 +6,7 @@ import os
 import re
 import socket
 import sys
+import tempfile
 import time
 import zlib
 from pathlib import Path
@@ -419,6 +420,13 @@ def _real_ledger_folder_guard():
 
 
 @pytest.fixture(autouse=True)
+def _no_runner_git_config(monkeypatch):
+    # CI jobs export maintenance.auto through these; tests that build git config environments start from none.
+    for name in ("GIT_CONFIG_COUNT", "GIT_CONFIG_KEY_0", "GIT_CONFIG_VALUE_0"):
+        monkeypatch.delenv(name, raising=False)
+
+
+@pytest.fixture(autouse=True)
 def _production_redis_key_guard(monkeypatch):
     # The isolation fixture above drops every AGENTIHOOKS_ variable; subprocesses need the prefix back.
     monkeypatch.setenv(redis_key_guard.keyspace.ENV, redis_key_guard.keyspace.ROOT)
@@ -431,6 +439,13 @@ def _production_redis_key_guard(monkeypatch):
 def ledger_port():
     with ledger_guard.reserve_port() as hold:
         yield hold.getsockname()[1]
+
+
+@pytest.fixture
+def memory_path():
+    """A scratch folder on tmpfs, so a ledger database there commits without waiting on runner disk fsync."""
+    with tempfile.TemporaryDirectory(dir="/dev/shm") as path:
+        yield Path(path)
 
 
 @pytest.fixture(autouse=True)
@@ -459,6 +474,13 @@ def _swarm_tick_leaves_user_units_alone(monkeypatch):
     monkeypatch.setattr(timer, "schedule", lambda: True)
     monkeypatch.setattr(timer, "undelivered", lambda: "")
     monkeypatch.setattr(timer, "guard", lambda binary: True)
+
+
+@pytest.fixture(autouse=True)
+def _switch_interval_restored():
+    before = sys.getswitchinterval()
+    yield
+    sys.setswitchinterval(before)
 
 
 @pytest.fixture(autouse=True)

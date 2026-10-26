@@ -5,6 +5,7 @@ import pytest
 
 from scripts.swarm import publish, stack
 from scripts.swarm.store import AgentRecord
+from scripts.swarm_ledger import ledger_tasks
 
 pytestmark = pytest.mark.unit
 
@@ -45,6 +46,7 @@ def repositories(tmp_path, monkeypatch):
 
     def update(slug, task_id, fields, by):
         assert (slug, task_id, by) == ("swarm", "t1", task["claimed_by"])
+        ledger_tasks.check({"op": "task_update", "item": f"tasks/{task_id}", "fields": fields, "by": by})
         updates.append(fields)
         task.update(fields)
 
@@ -112,7 +114,7 @@ def test_prepare_starts_from_dev_after_the_recorded_branch_merged_and_was_delete
 
     def execute(command, cwd):
         if command[0] == "gh":
-            assert command == ["gh", "pr", "view", p.task["pr_url"], "--json", "state,baseRefName,headRefName"]
+            assert command == ["gh", "pr", "view", p.task["pr_url"], "--json", "state,headRefName"]
             assert cwd == root
             return '{"state":"MERGED","baseRefName":"dev","headRefName":"predecessor"}'
         return original(command, cwd)
@@ -129,7 +131,6 @@ def test_prepare_starts_from_dev_after_the_recorded_branch_merged_and_was_delete
     [
         '{"state":"OPEN","baseRefName":"dev","headRefName":"predecessor"}',
         '{"state":"CLOSED","baseRefName":"dev","headRefName":"predecessor"}',
-        '{"state":"MERGED","baseRefName":"main","headRefName":"predecessor"}',
         '{"state":"MERGED","baseRefName":"dev","headRefName":"another-task"}',
     ],
 )
@@ -165,26 +166,6 @@ def test_prepare_does_not_use_another_repositorys_merged_pull_request(repositori
     with pytest.raises(publish.SwarmError, match="origin/predecessor"):
         publish.prepare("swarm", p.agent, str(p.swarm), p.ledger)
     assert p.updates == []
-
-
-def test_prepare_continues_a_pushed_branch_without_rechecking_its_pull_request(
-    repositories, monkeypatch, github_origin
-):
-    p = repositories
-    root = p.swarm.parent / "existing-worktree"
-    git(p.swarm, "worktree", "add", "-b", "engineer-test", str(root))
-    git(root, "push", "origin", "HEAD:engineer-test")
-    p.task.update(branch="engineer-test", pr_url="https://github.com/example/repo/pull/7")
-    original = publish.execute
-
-    def execute(command, cwd):
-        assert command[0] != "gh"
-        return original(command, cwd)
-
-    monkeypatch.setattr(publish, "execute", execute)
-    result = publish.prepare("swarm", p.agent, str(p.swarm), p.ledger)
-    assert result["worktree"] == str(root)
-    assert result["branch"] == "engineer-test"
 
 
 @pytest.mark.parametrize("command", ["prepare", "publish"])
@@ -283,6 +264,58 @@ def test_early_repository_refusal_keeps_an_unrecorded_branch_empty(repositories,
         assert "origin" in str(refused.value)
     else:
         assert str(refused.value).startswith("publish from the task worktree to select one of its repositories")
+
+
+@pytest.mark.parametrize("reverse", [False, True])
+def test_prepare_retires_only_the_merged_repository_branch(repositories, monkeypatch, reverse):
+    p = repositories
+    roots = [p.swarm, p.bundle]
+    for root in roots:
+        git(root, "push", "origin", "HEAD:predecessor")
+    open_worktree = f"{p.bundle}-open"
+    git(p.bundle, "worktree", "add", "-b", "predecessor", open_worktree, "origin/predecessor")
+    git(p.swarm, "push", "origin", "--delete", "predecessor")
+    fresh = git(p.swarm, "commit-tree", "HEAD^{tree}", "-p", "HEAD", "-m", "New dev")
+    git(p.swarm, "push", "origin", f"{fresh}:refs/heads/dev")
+    p.task.update(
+        repositories=[str(root) for root in (reversed(roots) if reverse else roots)],
+        branch="predecessor",
+        branch_repo="git@github.com:example/agentihooks.git",
+        pr_url="https://github.com/example/agentihooks/pull/7",
+        repository_branches={str(root): "predecessor" for root in roots},
+        handoff_envelope={"continue_from": "origin/predecessor", "task": "t1"},
+        reclaim={"continue_from": "origin/predecessor", "reason": "retained"},
+    )
+    native_git, native_execute = publish.git, publish.execute
+    queries = []
+
+    def git_call(root, *args):
+        if args == ("remote", "get-url", "origin"):
+            return f"git@github.com:example/{root.name.removesuffix('-worktree')}.git"
+        return native_git(root, *args)
+
+    def execute(command, root):
+        if command[:3] == ["gh", "pr", "view"]:
+            queries.append(str(root))
+            return '{"state": "MERGED", "headRefName": "predecessor"}'
+        return native_execute(command, root)
+
+    monkeypatch.setattr(publish, "git", git_call)
+    monkeypatch.setattr(publish, "execute", execute)
+
+    result = publish.prepare("swarm", p.agent, str(p.swarm), p.ledger)
+
+    by_repo = {entry["repository"]: entry for entry in result["worktrees"]}
+    assert queries == [str(p.swarm)]
+    assert by_repo[str(p.bundle)]["worktree"] == open_worktree
+    assert by_repo[str(p.bundle)]["branch"] == "predecessor"
+    assert git(open_worktree, "rev-parse", "--abbrev-ref", "@{upstream}") == "origin/predecessor"
+    assert git(by_repo[str(p.swarm)]["worktree"], "rev-parse", "HEAD") == fresh
+    assert by_repo[str(p.swarm)]["branch"] == "engineer-test"
+    assert p.task["repository_branches"] == {str(p.swarm): "engineer-test", str(p.bundle): "predecessor"}
+    assert p.task["pr_url"] == ""
+    assert p.task["handoff_envelope"] == {"continue_from": "origin/predecessor", "task": "t1"}
+    assert p.task["reclaim"] == {"continue_from": "origin/predecessor", "reason": "retained"}
 
 
 def test_prepare_names_the_default_repository_without_inferring_prose(repositories):

@@ -31,9 +31,9 @@ ROLL = (
     "another hive."
 )
 MANIFESTS = (
-    "k8s/argocd/apps/agentihooks-hive-{label}.yaml",
-    "k8s/manifests/agentihooks-hive-{label}",
-    "k8s/values-overlays/agentihooks-hive-{label}",
+    "k8s/argocd/apps/{release}.yaml",
+    "k8s/manifests/{release}",
+    "k8s/values-overlays/{release}",
 )
 
 
@@ -59,6 +59,13 @@ def label(redis: "Redis", hive: str) -> str:
     name = redis.hget(member_key(hive), "name")
     if not name:
         raise auth.HiveError(f"hive {hive} holds no member record to name it; pass --label")
+    for key in redis.scan_iter(match=member_key("*")):
+        other = key.removeprefix(member_key(""))
+        if other != hive and redis.hget(key, "name") == name:
+            raise auth.HiveError(
+                f"hive {hive} is named {name}, a name hive {other} also holds, so its herdr machine "
+                "could be the other hive's; pass --label"
+            )
     return name
 
 
@@ -153,7 +160,8 @@ def unbank(bao: openbao_kv.OpenBao, path: str) -> list[str]:
 def unmanifest(checkout: Path | None, name: str, run: Callable[..., subprocess.CompletedProcess]) -> list[str]:
     if checkout is None:
         return ["left the antoncore manifests: pass --antoncore with a checkout to remove them"]
-    paths = [pattern.format(label=name) for pattern in MANIFESTS]
+    release = name if name.startswith(machine.NAME_PREFIX) else f"agentihooks-hive-{name}"
+    paths = [pattern.format(release=release) for pattern in MANIFESTS]
     argv = ["git", "-C", str(checkout), "rm", "-r", "-q", "--ignore-unmatch", "--", *paths]
     machine.run_checked(run, argv, None, machine.SSH_TIMEOUT_S)
     return [f"staged the removal of {', '.join(paths)} in {checkout}; commit it and open a pull request"]

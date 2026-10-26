@@ -12,7 +12,6 @@ again under its own name, is no trigger.
 import json
 from dataclasses import replace
 
-from scripts.inbox.store import CLOSED as INBOX_CLOSED
 from scripts.inbox.store import InboxError, InboxStore
 from scripts.swarm import (
     bottleneck,
@@ -38,6 +37,7 @@ LEFT = "dispatch-left"
 CLOSED = "its triggers closed"
 DEPARTED = "it left the ledger"
 ENDED_STATES = ("stopping", "stopped")
+WAITING = ("pending", "delivered")
 PAUSED = "paused"
 BOTTLENECK = "bottleneck:"
 REFUSED = "dispatcher triggers are still open; settle them, or the tick ends your seat once they close:\n{lines}"
@@ -127,13 +127,16 @@ def line(trigger: dict) -> str:
 
 def inbox_work(store, slug: str) -> list[dict]:
     inbox = InboxStore(store.redis)
-    addresses = [f"{SEAT}@{slug}", *(a.name for a in store.agents(slug) if a.lane == LANE and a.state != "finished")]
-    items = {item.id: item for address in addresses for item in inbox.open_mail(address)}
+    items = {item.id: item for address in _addresses(store, slug) for item in inbox.open_mail(address)}
     return [
         {"id": f"inbox:{item.id}", "kind": "inbox", "item": item.id}
         for item in items.values()
         if not item.fyi and not (item.sender == SENDER and item.text.startswith("New dispatcher triggers in swarm "))
     ]
+
+
+def _addresses(store, slug: str) -> list[str]:
+    return [f"{SEAT}@{slug}", *(a.name for a in store.agents(slug) if a.lane == LANE and a.state != "finished")]
 
 
 def open_triggers(slug: str, config, store, doc: dict, now_ms: int, sleeping: bool, write: bool = True) -> list[dict]:
@@ -192,8 +195,9 @@ class _NoTriggers(Exception):
     pass
 
 
-def _launch_triggers(store, found):
+def _launch_triggers(store, slug, found):
     inbox = InboxStore(store.redis)
+    owners = set(_addresses(store, slug))
     live = []
     for trigger in found:
         if trigger.get("kind") == "inbox":
@@ -201,14 +205,14 @@ def _launch_triggers(store, found):
                 item = inbox.get(trigger["item"])
             except InboxError:
                 continue
-            if item.state in INBOX_CLOSED:
+            if item.state not in WAITING or inbox.names.resolve(item.address) not in owners:
                 continue
         live.append(trigger)
     return live
 
 
 def _spawn(slug, config, store, runtime, found, now_ms):
-    found = _launch_triggers(store, found)
+    found = _launch_triggers(store, slug, found)
     if not found:
         return []
     from scripts.swarm import tick
@@ -216,7 +220,7 @@ def _spawn(slug, config, store, runtime, found, now_ms):
     def prepare(record):
         nonlocal found
         task = tick.primed(store, slug, record.seat, {"id": SEAT, "title": "Dispatch"})
-        found = _launch_triggers(store, found)
+        found = _launch_triggers(store, slug, found)
         if not found:
             raise _NoTriggers
         task["triggers"] = found
@@ -231,7 +235,19 @@ def _spawn(slug, config, store, runtime, found, now_ms):
         return [f"dispatcher spawn failed: {failed.error}"]
     store.put_agent(slug, tick.placed_record(record, placed))
     _sent(store, slug, found)
+    _move_mail_home(store, record)
     return [f"spawned dispatcher {record.name} for {_count(found)}"]
+
+
+def _move_mail_home(store, record):
+    """Runs just after launch, because the runtime picks the host inside spawn."""
+    from scripts.inbox import exits
+
+    inbox = InboxStore(store.redis)
+    home = inbox.home_store(record.seat)
+    for world in inbox.worlds():
+        if world.world != home.world:
+            exits._move_world_mail(world, [(record, home)])
 
 
 def _wake(slug, store, seat, found):

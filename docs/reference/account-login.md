@@ -126,13 +126,17 @@ subscription token routing. This fallback has no Remote Control and no forced
 claude.ai login; Remote Control requires a native login. Held slots remain
 untouched. After a browser CAPTCHA or failure, or when no slot can take the
 browser login, the token branch sends the operator one email through the
-operator email module. One master agent name is one login attempt: a repeated
-launch of the same master sends no second email, even after a later failure,
-and a respawned master with a new name gets its own email. The current session
+operator email module: SMTP when the relay answers, else the gateway
+`notifications-send_email` tool at `LANGFUSE_MCP_URL` with the session's
+`MCP_KEY_GATEWAY`; either one unset is a refusal. One master agent name is
+one login attempt: a repeated launch of the same master sends no second email,
+even after a later failure, and a respawned master with a new name gets its
+own email. The current session
 and browser success paths send no email. Browser outcomes are recorded in the
 slot's `login-notifications.jsonl` with transport `inbox`; the email is
 recorded in the master token folder's `login-notifications.jsonl` with
-transport `email` and the agent name. Neither holds credentials.
+transport `email` and the agent name; a refused send is recorded there with
+transport `refused` and its `reason`. Neither holds credentials.
 
 At 98% of the week or 99% of five hours the quota policy hands the master's seat
 off. The successor runs the same chain, returning to a valid native login when

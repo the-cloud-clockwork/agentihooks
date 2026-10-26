@@ -1,0 +1,62 @@
+{
+  "now": 100000000,
+  "policies": [
+    {
+      "corpus": "swarm",
+      "version": "swarm-retention-1",
+      "max_age_seconds": {
+        "raw_evidence": 7776000,
+        "native_resume": 1209600,
+        "preview": 604800,
+        "vector": 2592000,
+        "operational_log": 604800
+      }
+    },
+    {
+      "corpus": "personal",
+      "version": "personal-retention-1",
+      "max_age_seconds": {
+        "raw_evidence": null,
+        "native_resume": 2592000,
+        "preview": 2592000,
+        "vector": null,
+        "operational_log": 1209600
+      }
+    }
+  ],
+  "objects": [
+    {"object_id": "ckpt-old", "corpus": "swarm", "data_class": "native_resume", "age_days": 20},
+    {"object_id": "old-transcript", "corpus": "swarm", "data_class": "raw_evidence", "age_days": 100},
+    {"object_id": "old-native", "corpus": "swarm", "data_class": "native_resume", "age_days": 20},
+    {"object_id": "old-shared", "corpus": "swarm", "data_class": "raw_evidence", "age_days": 100},
+    {"object_id": "ckpt-recent", "corpus": "swarm", "data_class": "native_resume", "age_days": 2},
+    {"object_id": "ckpt-live-1", "corpus": "swarm", "data_class": "native_resume", "age_days": 20},
+    {"object_id": "ckpt-live-2", "corpus": "swarm", "data_class": "native_resume", "age_days": 16},
+    {"object_id": "ckpt-live-3", "corpus": "swarm", "data_class": "native_resume", "age_days": 15},
+    {"object_id": "live-shared", "corpus": "swarm", "data_class": "raw_evidence", "age_days": 100},
+    {"object_id": "live2-native", "corpus": "swarm", "data_class": "native_resume", "age_days": 16},
+    {"object_id": "ckpt-restore", "corpus": "swarm", "data_class": "native_resume", "age_days": 30},
+    {"object_id": "restore-native", "corpus": "swarm", "data_class": "native_resume", "age_days": 30},
+    {"object_id": "restore-transcript", "corpus": "swarm", "data_class": "raw_evidence", "age_days": 120},
+    {"object_id": "evidence-held", "corpus": "swarm", "data_class": "raw_evidence", "age_days": 200},
+    {"object_id": "log-old", "corpus": "swarm", "data_class": "operational_log", "age_days": 10},
+    {"object_id": "log-new", "corpus": "swarm", "data_class": "operational_log", "age_days": 1},
+    {"object_id": "preview-kept", "corpus": "swarm", "data_class": "preview", "age_days": 50, "retention": "retain-until-deleted"},
+    {"object_id": "personal-transcript", "corpus": "personal", "data_class": "raw_evidence", "age_days": 400},
+    {"object_id": "personal-preview", "corpus": "personal", "data_class": "preview", "age_days": 40},
+    {"object_id": "personal-vector", "corpus": "personal", "data_class": "vector", "age_days": 400}
+  ],
+  "checkpoints": [
+    {"checkpoint_id": "ckpt-old", "task_id": "t-done", "sequence": 1, "complete": true, "objects": ["old-transcript", "old-native", "old-shared"]},
+    {"checkpoint_id": "ckpt-recent", "task_id": "t-done", "sequence": 2, "complete": true, "objects": ["old-shared"]},
+    {"checkpoint_id": "ckpt-live-1", "task_id": "t-live", "sequence": 1, "complete": true, "objects": ["live-shared"]},
+    {"checkpoint_id": "ckpt-live-2", "task_id": "t-live", "sequence": 2, "complete": true, "objects": ["live-shared", "live2-native"]},
+    {"checkpoint_id": "ckpt-live-3", "task_id": "t-live", "sequence": 3, "complete": false, "objects": []},
+    {"checkpoint_id": "ckpt-restore", "task_id": "t-restore", "sequence": 1, "complete": true, "objects": ["restore-native", "restore-transcript"]}
+  ],
+  "holds": {
+    "restoring": ["ckpt-restore"],
+    "evidence": ["evidence-held"],
+    "active_tasks": ["t-live", "t-restore"]
+  }
+}

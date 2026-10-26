@@ -23,7 +23,12 @@ def backend(metadata=None, messages=0):
         config=StreamConfig(name="target", metadata=metadata), state=SimpleNamespace(messages=messages)
     )
     js = SimpleNamespace(stream_info=AsyncMock(return_value=info), update_stream=AsyncMock(), publish=AsyncMock())
-    return SimpleNamespace(_config=BusConfig(scoped=True), _loop=SimpleNamespace(run=asyncio.run), _js=js)
+    return SimpleNamespace(
+        _config=BusConfig(scoped=True),
+        _loop=SimpleNamespace(run=asyncio.run),
+        _js=js,
+        _legacy_dead=SimpleNamespace(_stream="AGENTIHOOKS_DEAD"),
+    )
 
 
 def message(swarm="rig", sequence=7):
@@ -176,7 +181,7 @@ def test_dead_import_walks_holes_and_includes_last_record_with_conditional_write
     calls = []
 
     async def get_msg(stream, *, seq):
-        assert (stream, seq) == (migration.DEAD_STREAM, len(calls) + 1)
+        assert (stream, seq) == (root._legacy_dead._stream, len(calls) + 1)
         calls.append(seq)
         if seq == 1:
             raise NotFoundError()

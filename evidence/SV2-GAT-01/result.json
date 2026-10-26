@@ -1,0 +1,54 @@
+{
+  "package": "SV2-GAT-01",
+  "dependencies": [
+    "SV2-CTX-05",
+    "SV2-LDG-05"
+  ],
+  "dependency_evidence": "SV2-CTX-05 is still open in agentibrain-kernel; this package routes the session to a brain and does not call the kernel task context interface, so nothing here waits on it. SV2-LDG-05 is not read by this package.",
+  "integration_gate": "G6",
+  "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/7416",
+  "pull_request": "https://github.com/the-cloud-clockwork/agentihooks/pull/7417",
+  "package_complete": false,
+  "evidence_class": "mocked: in-process environments and operator owned files in a temporary home stand in for a launched session, its hooks and the operator's routes and swarm binding files; no brain server, network call or Pod runs",
+  "interfaces": [
+    "hooks.context.brain_routes.resolve(environ) picks the session brain: the swarm binding when AGENTIHOOKS_SWARM_BRAIN is set, else the route AGENTIHOOKS_BRAIN_ROUTE names, else the routes file default; None without a routes file outside a swarm; Refused names why there is no brain",
+    "The routes file is $AGENTIHOOKS_HOME/brain-routes.json, a regular file owned by the session user and readable by its owner alone (no group or other permission bits), holding an integer revision, a default, an allow list of origins and routes each with an api endpoint and the name of a dedicated credential variable; a repository checkout, created 0644 under the usual umask, is refused",
+    "A route endpoint must be a plain https origin, or http on a loopback host, inside the allow list; its credential variable must not be BRAIN_HTTP_TOKEN, KB_ROUTER_TOKEN or BRAIN_URL",
+    "A session BRAIN_URL whose origin is outside the allow list, or in a swarm session any origin other than the swarm API, such as one a repository settings file exported, refuses the brain: BRAIN_URL, BRAIN_HTTP_TOKEN and KB_ROUTER_TOKEN are removed and BRAIN_ENABLED and BRAIN_WRITER_ENABLED set false",
+    "hooks.context.brain_routes.apply(environ) sets BRAIN_URL to the route endpoint and BRAIN_HTTP_TOKEN from the route's own credential variable, and writes AGENTIHOOKS_BRAIN_RECEIPT with status, route, origin, generation and revision; hooks.config runs it after the swarm brain guard at import and on every reload",
+    "hooks.context.brain_routes.remember(environ, session) persists the receipt under $AGENTIHOOKS_HOME/brain-routes/sessions and answers fresh, same, invalidated or stale; a refused receipt replaces a routed one; an older routes revision than the stored one is stale and leaves the newer receipt; hooks.hook_manager calls it at every session start, before and regardless of the brain adapter",
+    "hooks.context.brain_adapter.get_status, the brain_status tool, reports brain_route_resolution_failures"
+  ],
+  "supported_versions": {
+    "python": "3.11 and later",
+    "routes_file": "revision is an operator managed integer; a missing revision reads as zero",
+    "swarm_binding": "the swarm-brain-binding document read by scripts.swarm.brain_binding"
+  },
+  "states": {
+    "observed": "Cases A, B and C each ran twice from independent temporary folders with identical records in https://github.com/the-cloud-clockwork/agentihooks/actions/runs/40260788699 at 57ec60e638cbc4e8f08539c6af46111fd1a10f6a, with every pull request check green including the changed line mutation shards.",
+    "accepted": "A session route is accepted when the routes file, endpoint, allow list and credential pass; its receipt is set in the session environment.",
+    "committed": "The receipt file per session and the failure log are the only writes; the routes file and the swarm binding are never written.",
+    "externally_verified": "Not yet: no deployed session talked to a brain through a route; a live check belongs to the G6 rollout gate."
+  },
+  "metrics": {
+    "brain_route_resolution_failures": "one line per refused resolution in $AGENTIHOOKS_HOME/brain-routes/brain_route_resolution_failures.jsonl holding the requested route (swarm, the explicit route name, or default) and the refusal reason; case records report the count per route"
+  },
+  "cases": {
+    "a": "evidence/SV2-GAT-01/a-result.json",
+    "b": "evidence/SV2-GAT-01/b-result.json",
+    "c": "evidence/SV2-GAT-01/c-result.json"
+  },
+  "rollback_rehearsal": {
+    "action": "Restore the previous routes document with a revision above the current one so sessions accept it; removing the routes file returns every session outside a swarm to the legacy BRAIN_URL path.",
+    "authoritative_objects": "The operator's routes file and swarm binding file, and the brains they name; receipts, the failure log and the cache folders are derived and are never treated as authoritative.",
+    "proof": "Case C changes the route revision: the stored receipt reads invalidated, the older receipt is refused as stale, and the project cache namespace derived from each route's BRAIN_URL differs, so context cached under the old brain is not read for the new one."
+  },
+  "remaining_limitations": [
+    "The rejection contract holds only where the operator has a routes file or a swarm binding. Without either, a session outside a swarm keeps the legacy BRAIN_URL path, so a repository BRAIN_URL can still receive a BRAIN_HTTP_TOKEN from the operator's env files; existing installs and tests set the brain address without a routes file, and making it required is proposed as a follow up.",
+    "A routes revision change that keeps the same origin keeps the same project cache namespace; keying the project feed caches on the receipt revision belongs to SV2-GAT-02, which owns the feed and project cache modules.",
+    "A process that can set AGENTIHOOKS_HOME for the hooks can point them at another routes file; the owner-only mode check is what refuses a repository checkout there.",
+    "The route credential stays in the session environment; the brain server still authorizes every mutation."
+  ],
+  "compatibility": "Explicitly local compatibility path: with no routes file and no swarm binding resolve returns None and the environment is unchanged, as before this package. A swarm session keeps the preceding SV2 swarm brain binding behaviour and only adds a receipt.",
+  "authority": "Routes come only from the operator's owner-only routes file and the swarm binding; AGENTIHOOKS_BRAIN_ROUTE can only pick among routes the operator listed, and a session BRAIN_URL can never add an endpoint."
+}
