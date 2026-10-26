@@ -442,8 +442,15 @@ def test_conversations_copied_into_an_older_route_home_move_to_the_default_folde
     folder = login.root(1).parent / "claude-ai" / "s_251026"
     older = login._rebuild(folder, operator / ".claude")
     assert not (older / "projects").is_symlink()
-    (older / "projects" / "repo" / "kept.jsonl").write_text("stale\n")
+    (shared / "appended.jsonl").write_text("operator\n")
+    os.utime(shared / "appended.jsonl", (1000, 1000))
+    (older / "projects" / "repo" / "kept.jsonl").write_text("same age\n")
+    os.utime(older / "projects" / "repo" / "kept.jsonl", (2000, 2000))
+    os.utime(shared / "kept.jsonl", (2000, 2000))
+    (older / "projects" / "repo" / "appended.jsonl").write_text("operator\nresumed\n")
+    os.utime(older / "projects" / "repo" / "appended.jsonl", (3000, 3000))
     (older / "projects" / "repo" / "resumed.jsonl").write_text("resumed\n")
+    (older / "projects" / "repo" / "link.jsonl").symlink_to(tmp_path / "gone.jsonl")
     (older / "sessions").mkdir()
     (older / "sessions" / "1.json").write_text("{}")
     claude_ai.launch_claude("/opt/claude", [], {"HOME": str(operator), "AGENTIHOOKS_AGENT_NAME": "s-251026"}, "")
@@ -451,5 +458,8 @@ def test_conversations_copied_into_an_older_route_home_move_to_the_default_folde
     assert target == older
     assert (target / "projects").readlink() == operator / ".claude" / "projects"
     assert (shared / "kept.jsonl").read_text() == "operator\n"
+    assert (shared / "kept.jsonl").stat().st_mtime == 2000
     assert (shared / "resumed.jsonl").read_text() == "resumed\n"
+    assert (shared / "appended.jsonl").read_text() == "operator\nresumed\n"
+    assert (shared / "link.jsonl").readlink() == tmp_path / "gone.jsonl"
     assert (operator / ".claude" / "sessions" / "1.json").read_text() == "{}"
