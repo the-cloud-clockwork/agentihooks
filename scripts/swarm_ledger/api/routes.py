@@ -7,6 +7,7 @@ from urllib.parse import parse_qs, urlsplit
 
 from scripts.swarm_ledger import ledger_closed, ports
 
+from ..repository.rows import children, encode
 from . import resources, schemas, task_list
 from .errors import APIError
 from .services import Services
@@ -177,13 +178,7 @@ def ledger_operation(handler: object, services: Services, slug: str, path: str, 
     if path == "swarm/actions":
         return admin.control(services, slug, principal, payload)
     if path in ("export", "swarm/export"):
-        schemas.validate({"type": "object", "maxProperties": 0}, payload)
-        if path == "swarm/export":
-            status = services.swarm.status(slug)
-            if status is None:
-                raise APIError(404, "swarm_missing", "No swarm for this ledger")
-            return {"data": status}
-        return handler.send_export(services.repository.encoded_view(slug, export_bytes))
+        return export(handler, services, slug, path, payload)
     if path == "operations":
         return mutations.apply(services, slug, principal, payload)
     if path == "architecture/actions":
@@ -196,12 +191,76 @@ def ledger_operation(handler: object, services: Services, slug: str, path: str, 
 PAGE_WRITES = {"saves": "put_ledger", "swarm/controls": "put_swarm"}
 
 
+def export(handler: object, services: Services, slug: str, path: str, payload: dict) -> dict | None:
+    if path == "export" and isinstance(payload, dict) and "since" in payload:
+        schemas.validate(SINCE_SCHEMA, payload)
+        generation, body = services.repository.export_since(slug, payload["since"], export_bytes, export_changes)
+        body = body if isinstance(body, bytes) else body.encode()
+        return handler.send_export(b'{"generation":' + str(generation).encode() + b"," + body[1:])
+    schemas.validate({"type": "object", "maxProperties": 0}, payload)
+    if path == "swarm/export":
+        status = services.swarm.status(slug)
+        if status is None:
+            raise APIError(404, "swarm_missing", "No swarm for this ledger")
+        return {"data": status}
+    return handler.send_export(services.repository.encoded_view(slug, export_bytes))
+
+
 def export_bytes(state: dict) -> bytes:
     meta = {key: item for key, item in state["_meta"].items() if key not in ("seeds", "api_operations")}
     with io.BytesIO() as stream:
         for chunk in json.JSONEncoder(ensure_ascii=False).iterencode({"data": {**state, "_meta": meta}}):
             stream.write(chunk.encode())
         return stream.getvalue()
+
+
+SINCE_SCHEMA = {
+    "type": "object",
+    "properties": {"since": {"type": "integer", "minimum": 0}},
+    "required": ["since"],
+    "additionalProperties": False,
+}
+HIDDEN_META = ("seeds", "api_operations")
+HIDDEN_PATHS = [[key] for key in HIDDEN_META]
+
+
+def change_unit(path: str) -> tuple | None:
+    parts = json.loads(path)
+    if parts[:1] != ["_meta"]:
+        return tuple(encode(part) for part in parts[:2])
+    if parts[1:2] in HIDDEN_PATHS:
+        return None
+    return tuple(encode(part) for part in parts[: 3 if parts[1:2] == ["stamps"] else 2])
+
+
+def identities(items: list) -> list:
+    return [encode(parts[-1]) for _, parts, *_ in children(items, [], None)]
+
+
+def export_changes(state: dict, paths: set) -> str | None:
+    """The export items whose rows changed: dictionary entries set or dropped, and for each list holding a
+    changed item its item identities in order with every changed item."""
+    view = {**state, "_meta": {key: item for key, item in state["_meta"].items() if key not in HIDDEN_META}}
+    units = {unit for unit in map(change_unit, paths) if unit is not None} | {(encode("_meta"), encode("events"))}
+    if () in units:
+        return None
+    kept = [unit for unit in units if not any(unit[:depth] in units for depth in range(1, len(unit)))]
+    changes = {"set": [], "drop": [], "lists": {}}
+    for unit in sorted(kept):
+        path, parent = [json.loads(part) for part in unit], view
+        for part in path[:-1]:
+            parent = parent[part]
+        if isinstance(parent, list):
+            items = dict(zip(identities(parent), parent))
+            touched = changes["lists"].setdefault(path[0], {"order": list(items), "items": {}})
+            _, identity = unit
+            if identity in items:
+                touched["items"][identity] = items[identity]
+        elif path[-1] in parent:
+            changes["set"].append([path, parent[path[-1]]])
+        else:
+            changes["drop"].append(path)
+    return json.dumps({"changes": changes})
 
 
 def handle(handler: object, services: Services) -> None:
