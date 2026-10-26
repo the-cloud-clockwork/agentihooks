@@ -84,40 +84,71 @@ def _json_phase(position: int, entry: Any, errors: list[str]) -> dict:
     if not isinstance(entry, dict):
         errors.append(f"{where}: must be an object")
         return {"title": "", "description": "", "planning": PLANNING_DEFAULT}
+    phase = {
+        "title": _json_title(entry, where, errors),
+        "description": _json_description(entry, where, errors),
+        "planning": _json_planning(entry, where, errors),
+    }
+    _json_depends_on(entry, phase, where, errors)
+    _json_id(entry, phase, where, errors)
+    _json_not_duplicate(entry, phase, where, errors)
+    return phase
+
+
+def _json_title(entry: dict, where: str, errors: list[str]) -> str:
     title = entry.get("title")
-    if not isinstance(title, str) or not title.strip():
-        errors.append(f"{where}: needs a title")
-        title = ""
+    if isinstance(title, str) and title.strip():
+        return title
+    errors.append(f"{where}: needs a title")
+    return ""
+
+
+def _json_description(entry: dict, where: str, errors: list[str]) -> str:
     description = entry.get("description", "")
-    if not isinstance(description, str):
-        errors.append(f"{where}: description must be a string")
-        description = ""
+    if isinstance(description, str):
+        return description
+    errors.append(f"{where}: description must be a string")
+    return ""
+
+
+def _json_planning(entry: dict, where: str, errors: list[str]) -> str:
     planning = entry.get("planning", PLANNING_DEFAULT)
     if planning not in ("manual", "auto"):
         errors.append(f"{where}: planning must be manual or auto")
-    phase = {"title": title, "description": description, "planning": planning}
+    return planning
+
+
+def _json_depends_on(entry: dict, phase: dict, where: str, errors: list[str]) -> None:
     depends_on = entry.get("depends_on")
-    if depends_on is not None:
-        valid = isinstance(depends_on, list) and all(
-            isinstance(dep, (int, str)) and not isinstance(dep, bool) for dep in depends_on
-        )
-        if not valid:
-            errors.append(f"{where}: depends_on must be a list of positions or ids")
-        elif depends_on:
-            phase["depends_on"] = depends_on
+    if depends_on is None:
+        return
+    valid = isinstance(depends_on, list) and all(
+        isinstance(dep, (int, str)) and not isinstance(dep, bool) for dep in depends_on
+    )
+    if not valid:
+        errors.append(f"{where}: depends_on must be a list of positions or ids")
+    elif depends_on:
+        phase["depends_on"] = depends_on
+
+
+def _json_id(entry: dict, phase: dict, where: str, errors: list[str]) -> None:
     phase_id = entry.get("id")
-    if phase_id is not None:
-        if not isinstance(phase_id, str) or not phase_id.strip():
-            errors.append(f"{where}: id must be a string")
-        else:
-            phase["id"] = phase_id
+    if phase_id is None:
+        return
+    if isinstance(phase_id, str) and phase_id.strip():
+        phase["id"] = phase_id
+    else:
+        errors.append(f"{where}: id must be a string")
+
+
+def _json_not_duplicate(entry: dict, phase: dict, where: str, errors: list[str]) -> None:
     not_duplicate = entry.get("not_duplicate")
-    if not_duplicate is not None:
-        if not isinstance(not_duplicate, str) or not not_duplicate.strip():
-            errors.append(f"{where}: not_duplicate must say in plain words why the phase differs")
-        else:
-            phase["not_duplicate"] = not_duplicate
-    return phase
+    if not_duplicate is None:
+        return
+    if isinstance(not_duplicate, str) and not_duplicate.strip():
+        phase["not_duplicate"] = not_duplicate
+    else:
+        errors.append(f"{where}: not_duplicate must say in plain words why the phase differs")
 
 
 def _render_markdown(title: str, phases: list[dict]) -> str:
