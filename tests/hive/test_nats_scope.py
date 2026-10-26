@@ -186,17 +186,18 @@ def test_hub_record_refuses_malformed_member_swarm_membership(monkeypatch, membe
 
 
 @pytest.mark.parametrize("signer", [4096], indirect=True)
-def test_scoped_credentials_require_more_than_the_default_control_line(signer):
+def test_scoped_credentials_require_more_than_the_default_control_line(signer, tmp_path):
     import nats as nats_client
 
     from scripts.events import nats
     from scripts.events.config import BusConfig
+    from tests.events import nats_server
 
     scoped = replace(signer, member_swarms={"m1": ("rig",)})
     credentials = nats_grant.mint(scoped, "m1")
-    with pytest.raises(nats_client.errors.Error) as error:
+    with pytest.raises((nats_client.errors.Error, ConnectionResetError)):
         nats.open_bus(BusConfig(backend="nats", url=signer.url, credentials=credentials, provision=False))
-    assert str(error.value) == "nats: 'maximum control line exceeded'"
+    nats_server.wait_logged(tmp_path / "nats.log", "maximum control line exceeded")
 
 
 def test_scoped_claims_carry_the_canonical_per_resource_policy(signer):
