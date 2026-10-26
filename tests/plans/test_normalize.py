@@ -107,6 +107,14 @@ def test_json_markdown_joins_multiple_dependencies_with_a_comma():
     assert "depends=alpha-id,gamma-id" in result.markdown
 
 
+def test_a_json_dependency_on_the_last_position_is_accepted():
+    data = json.dumps({"phases": [{"title": "A", "depends_on": [3]}, {"title": "B"}, {"title": "C"}]})
+
+    result = normalize(data, "boundary-dep.json")
+
+    assert result.content["phases"][0]["depends_on"] == [3]
+
+
 def test_a_json_boolean_dependency_is_refused():
     data = json.dumps({"phases": [{"title": "A", "depends_on": [True]}]})
 
@@ -195,6 +203,15 @@ def test_a_json_phase_with_a_blank_not_duplicate_is_refused():
         normalize(data, "bad.json")
 
     assert caught.value.errors == ["phase 1: not_duplicate must say in plain words why the phase differs"]
+
+
+def test_json_phases_sharing_a_title_are_refused():
+    data = json.dumps({"phases": [{"title": "Same"}, {"title": "Same"}]})
+
+    with pytest.raises(PlanError) as caught:
+        normalize(data, "dup.json")
+
+    assert "Same" in str(caught.value)
 
 
 MARKED = """# Tiny plan
@@ -299,6 +316,19 @@ Prose.
     assert result.content["phases"][0]["planning"] == "auto"
 
 
+def test_a_marker_with_multiple_dependencies_splits_on_comma():
+    text = """# Plan
+
+## Phase one
+<!-- phase: id=a depends=x,y planning=auto -->
+Prose.
+"""
+
+    result = normalize(text, "multi.md", existing=["x", "y"])
+
+    assert result.content["phases"][0]["depends_on"] == ["x", "y"]
+
+
 def test_marked_markdown_without_a_level_one_heading_falls_back_to_the_file_stem():
     text = """## Phase one
 <!-- phase: id=a planning=auto -->
@@ -317,6 +347,23 @@ def test_a_heading_with_nothing_after_it_at_end_of_file_is_not_treated_as_a_phas
     result = normalize(text, "trailing.md")
 
     assert result.kind == "raw"
+
+
+def test_a_prose_line_immediately_before_a_marker_is_not_treated_as_a_phase():
+    text = """# Plan
+
+Some prose line immediately above a marker.
+<!-- phase: id=x planning=auto -->
+Should not be its own phase.
+
+## Real phase
+<!-- phase: id=a planning=auto -->
+Prose.
+"""
+
+    result = normalize(text, "prose-marker.md")
+
+    assert [phase["title"] for phase in result.content["phases"]] == ["Real phase"]
 
 
 def test_has_marker_checks_only_the_immediately_following_line():
@@ -347,6 +394,27 @@ Prose.
     result = normalize(text, "adjacent.md")
 
     assert [phase["title"] for phase in result.content["phases"]] == ["First phase", "Second phase"]
+    assert result.content["phases"][0]["description"] == ""
+
+
+def test_an_unknown_marker_key_does_not_stop_scanning_and_errors_join_with_semicolons():
+    text = """# Plan
+
+## Phase one
+<!-- phase: bogus1=1 id=a bogus2=2 planning=auto -->
+Prose.
+"""
+
+    with pytest.raises(PlanError) as caught:
+        normalize(text, "two-unknown.md")
+
+    assert caught.value.errors == [
+        "phase 'Phase one': unknown key bogus1 in phase marker",
+        "phase 'Phase one': unknown key bogus2 in phase marker",
+    ]
+    assert str(caught.value) == (
+        "phase 'Phase one': unknown key bogus1 in phase marker; phase 'Phase one': unknown key bogus2 in phase marker"
+    )
 
 
 def test_a_long_phase_description_is_bound_to_about_800_characters_on_a_word_boundary():
@@ -437,7 +505,7 @@ def test_empty_input_is_refused():
     with pytest.raises(PlanError) as caught:
         normalize("   \n\n", "empty.md")
 
-    assert "no content" in str(caught.value)
+    assert caught.value.errors == ["the plan has no content"]
 
 
 def test_duplicate_phase_titles_are_refused():
@@ -473,7 +541,7 @@ Prose.
     with pytest.raises(PlanError) as caught:
         normalize(text, "mixed.md")
 
-    assert "one heading level" in str(caught.value)
+    assert caught.value.errors == ["phase headings must all sit at one heading level"]
 
 
 def test_a_marker_with_an_unknown_key_is_refused():
@@ -529,6 +597,24 @@ Prose.
     result = normalize(text, "existing-dep.md", existing=["already-there"])
 
     assert result.content["phases"][0]["depends_on"] == ["already-there"]
+
+
+def test_a_dependency_list_with_an_existing_id_still_checks_the_rest():
+    text = """# Plan
+
+## Phase A
+<!-- phase: id=a depends=already-there,b planning=auto -->
+Prose A.
+
+## Phase B
+<!-- phase: id=b depends=a planning=auto -->
+Prose B.
+"""
+
+    with pytest.raises(PlanError) as caught:
+        normalize(text, "existing-then-cycle.md", existing=["already-there"])
+
+    assert "dependency cycle" in str(caught.value)
 
 
 def test_a_dependency_cycle_is_refused():
