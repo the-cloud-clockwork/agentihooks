@@ -139,6 +139,16 @@ def test_b_a_disabled_target_gets_no_pack_and_keeps_its_fleet_feed(home, monkeyp
     assert task_context.offer(session, "PostToolUse", PACKS["second"]) is None
 
 
+def test_b_a_pack_held_before_a_disable_is_not_replayed_after_it(home, monkeypatch):
+    _target(monkeypatch, "codex")
+    task_context.hold("off", PACKS["first"])
+    monkeypatch.setenv("AGENTIHOOKS_TASK_CONTEXT_OFF", "codex")
+    assert task_context.offer("off", "PostToolUse", PACKS["second"]) is None
+    monkeypatch.delenv("AGENTIHOOKS_TASK_CONTEXT_OFF")
+    assert task_context.deliver_pending("off", "PostToolUse") is None
+    assert task_context.receipt("off") == {}
+
+
 @pytest.mark.parametrize("target", ["claude", "codex"])
 def test_c_unchanged_packs_are_not_repeated_and_compaction_gets_the_current_pack(home, monkeypatch, capsys, target):
     _target(monkeypatch, target)

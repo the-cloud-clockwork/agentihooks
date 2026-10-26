@@ -55,10 +55,10 @@ def offer(session_id: str, event: str, pack: str | None, injectable: bool | None
     if not pack:
         return None
     target = current_target()
+    project_cache.take_project_context(session_id)
     if _disabled(target):
         _record(target, "disabled")
         return None
-    project_cache.take_project_context(session_id)
     if receipt(session_id).get("digest") == digest(pack):
         _record(target, "deduplicated")
         return None

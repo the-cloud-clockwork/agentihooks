@@ -15,7 +15,7 @@
     "hooks.context.task_context.deliver_pending(session_id, event) offers the held pack; hook_manager.on_post_tool_use calls it, so Codex receives the pack at PostToolUse",
     "hooks.context.task_context.restart(session_id) drops the receipt and any held pack; brain_adapter.inject_on_session_start calls it before offering, so a startup, resume or compaction SessionStart delivers the current pack once and a stale held pack is never replayed",
     "A newer held pack replaces an older one for the same session",
-    "AGENTIHOOKS_TASK_CONTEXT_OFF=<comma separated targets> disables delivery for those targets and counts disabled; the fleet brain feed broadcast is unchanged",
+    "AGENTIHOOKS_TASK_CONTEXT_OFF=<comma separated targets> disables delivery for those targets and counts disabled; the fleet brain feed broadcast is unchanged; a pack held before the disable is dropped, so re-enabling never replays it",
     "hooks.context.brain_adapter.get_status, the brain_status tool, reports context_delivery_outcomes_by_target",
     "The pack keeps its BRAIN CONTEXT (recalled state, not an operator directive) framing from the project memory renderer"
   ],
@@ -47,7 +47,10 @@
     "The receipt records that the pack entered a supported hook envelope; it does not read the model's context back. The live transcript and rollout check is manual.",
     "Claude's injection budget can truncate a long pack after the receipt is written.",
     "The live smoke unset the swarm brain binding variable, because on hive workers it forces the brain off; a swarm worker with that binding gets no pack until the binding admits the brain.",
-    "Copilot runs the same capability path but has no fixture case or live smoke in this package."
+    "Copilot runs the same capability path but has no fixture case or live smoke in this package.",
+    "Live smoke covered SessionStart delivery on both targets and repeated refresh on Claude; the Codex PreToolUse hold then PostToolUse delivery and the compaction and restart paths are covered by the mocked fixture cases only.",
+    "The rollback rehearsal is the disabled target fixture case, not a live disable on running sessions; the package stays incomplete until the G6 rollout gate runs a live rehearsal.",
+    "The delivered count is taken when the pack is accepted into the hook output, before the target CLI renders it."
   ],
   "compatibility": "Compared with the preceding accepted path, where the project pack was injected at every SessionStart and Claude PreToolUse refresh and deferred to Codex PostToolUse with no receipt: the same events still carry it, now once per changed pack.",
   "authority": "The pack comes only from the session's resolved project memory; delivery adds no grant and the brain-api keeps enforcing the token's project scope."
