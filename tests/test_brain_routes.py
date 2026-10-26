@@ -315,6 +315,28 @@ def test_a_refused_session_after_a_routed_one_still_invalidates_its_receipt(home
     assert _remembered(refused)["status"] == "refused"
 
 
+@pytest.mark.parametrize("enabled", [True, False])
+def test_session_start_remembers_the_route_before_any_brain_gate(home, monkeypatch, enabled):
+    from unittest.mock import Mock
+
+    from hooks import config
+    from hooks.context import brain_adapter
+
+    order = []
+    monkeypatch.setattr(config, "BRAIN_ENABLED", enabled)
+    monkeypatch.setattr(brain_routes, "remember", lambda env, session: order.append(("remember", env, session)))
+    monkeypatch.setattr(brain_adapter, "force_refresh", lambda: order.append(("refresh",)) or True)
+    monkeypatch.setattr("hooks.context.project_identity.resolve_project", Mock(return_value=None))
+    monkeypatch.setattr("hooks.context.project_sessions.record_session", Mock())
+    monkeypatch.setattr("hooks.context.project_cache.project_context", Mock(return_value=None))
+    assert brain_adapter.inject_on_session_start("s1", "") is enabled
+    assert order[0] == ("remember", brain_adapter.os.environ, "s1")
+    assert order[1:] == ([("refresh",)] if enabled else [])
+    order.clear()
+    brain_adapter.inject_on_session_start("", "")
+    assert all(step[0] != "remember" for step in order)
+
+
 @pytest.fixture
 def hook_env(home, monkeypatch):
     from hooks import config

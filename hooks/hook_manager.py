@@ -517,21 +517,11 @@ def on_session_start(payload: dict) -> None:
         log("ci_manifesto session_start failed", {"error": str(e)})
 
     # --- Broadcast: register session + deliver pending ---
-    try:
-        from hooks.context import brain_routes
-
-        brain_routes.remember(os.environ, session_id)
-    except Exception as e:
-        log("brain_routes session_start failed", {"error": str(e)})
-
     # Brain adapter FIRST — publishes brain content to broadcast.json
     try:
-        from hooks.config import BRAIN_ENABLED
+        from hooks.context.brain_adapter import inject_on_session_start
 
-        if BRAIN_ENABLED:
-            from hooks.context.brain_adapter import inject_on_session_start
-
-            inject_on_session_start(session_id, payload.get("cwd", ""))
+        inject_on_session_start(session_id, payload.get("cwd", ""))
     except Exception as e:
         log("brain_adapter session_start failed", {"error": str(e)})
 

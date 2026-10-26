@@ -180,19 +180,10 @@ def test_brain_reader_session_start_dispatch(enabled, brain_dispatch, monkeypatc
     monkeypatch.setattr("hooks.context.voice_output.cleanup_stale_flags", Mock(return_value=0))
     inject = Mock()
     monkeypatch.setattr("hooks.context.brain_adapter.inject_on_session_start", inject)
-    remember = Mock(side_effect=RuntimeError("routes unreadable"))
-    monkeypatch.setattr("hooks.context.brain_routes.remember", remember)
-    logged = []
-    monkeypatch.setattr("hooks.hook_manager.log", lambda message, data=None: logged.append((message, data)))
     EVENT_HANDLERS["SessionStart"]({"session_id": "session", "cwd": str(tmp_path)})
 
     codex_refresh_kick.assert_called_once_with()
-    remember.assert_called_once_with(os.environ, "session")
-    assert ("brain_routes session_start failed", {"error": "routes unreadable"}) in logged
-    if enabled:
-        inject.assert_called_once_with("session", str(tmp_path))
-    else:
-        inject.assert_not_called()
+    inject.assert_called_once_with("session", str(tmp_path))
 
 
 _START_PAYLOADS = {
