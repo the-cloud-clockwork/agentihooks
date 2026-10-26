@@ -1716,20 +1716,21 @@ jobs:
         id: shard-data
         continue-on-error: true
         uses: actions/download-artifact@v4
-        with:
+        with: &shard-check-download-collected-tests
           pattern: "{collected,reused-tests}-${{ matrix.python-version }}"
           path: shard-data
 
-      - name: Wait before downloading collected tests again
+      - name: Download collected tests, wait before attempt 2
         if: steps.shard-data.outcome == 'failure'
-        run: sleep 30
+        shell: bash
+        run: |
+          echo "::warning::Download collected tests failed, as an artifact service outage does; retrying it once in 30 seconds."
+          sleep 30
 
-      - name: Download collected tests again
+      - name: Download collected tests, attempt 2
         if: steps.shard-data.outcome == 'failure'
         uses: actions/download-artifact@v4
-        with:
-          pattern: "{collected,reused-tests}-${{ matrix.python-version }}"
-          path: shard-data
+        with: *shard-check-download-collected-tests
 
       - name: Arrange shard verification data
         shell: bash
@@ -1772,20 +1773,21 @@ jobs:
         id: shard-reports
         continue-on-error: true
         uses: actions/download-artifact@v4
-        with:
+        with: &shard-check-download-shard-reports
           pattern: "{durations,flakes}-${{ matrix.python-version }}-*"
           path: shard-reports
 
-      - name: Wait before downloading shard reports again
+      - name: Download shard reports, wait before attempt 2
         if: steps.shard-reports.outcome == 'failure'
-        run: sleep 30
+        shell: bash
+        run: |
+          echo "::warning::Download shard reports failed, as an artifact service outage does; retrying it once in 30 seconds."
+          sleep 30
 
-      - name: Download shard reports again
+      - name: Download shard reports, attempt 2
         if: steps.shard-reports.outcome == 'failure'
         uses: actions/download-artifact@v4
-        with:
-          pattern: "{durations,flakes}-${{ matrix.python-version }}-*"
-          path: shard-reports
+        with: *shard-check-download-shard-reports
 
       - name: Require every planned shard report
         shell: bash
