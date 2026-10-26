@@ -7,10 +7,11 @@ world = render_world
 JUDGE = Path(__file__).resolve().parents[1] / "profiles" / "package" / "roles" / "judge"
 
 
-def test_judge_role_resolves_from_the_package():
-    from hooks.context import profile_chain
+def test_judge_role_resolves_on_the_install_path(world):
+    install = world["install"]
+    install._save_state({})
 
-    assert profile_chain.profile_dirs(None, "judge", {}) == [("judge", JUDGE)]
+    assert (install._resolve_profile_dir("judge"), "judge" in install._available_profiles()) == (JUDGE, True)
 
 
 def test_judge_role_renders_its_doctrine_with_no_mcp_or_conditions(world, monkeypatch):
@@ -25,5 +26,7 @@ def test_judge_role_renders_its_doctrine_with_no_mcp_or_conditions(world, monkey
     assert "mcpServers" not in json.loads((out / "settings.json").read_text())
     assert sorted(path.name for path in JUDGE.iterdir()) == ["CLAUDE.md", "profile.yml"]
     monkeypatch.setenv("AGENTIHOOKS_PROFILE", "judge")
-    entries, invalid = conditions.scan_layers(conditions.layer_dirs({})[0])
+    layers = conditions.layer_dirs({})[0]
+    assert ("profile:judge", JUDGE / ".claude" / "conditions") in layers
+    entries, invalid = conditions.scan_layers(layers)
     assert ([e for e in entries if e["source"] == "profile:judge"], invalid) == ([], [])
