@@ -73,6 +73,18 @@ class StoredStats:
             }
         )
 
+    @staticmethod
+    def read(record_file: Path) -> dict | None:
+        try:
+            return json.loads(record_file.read_text())
+        except ValueError:
+            record_file.unlink()
+            return None
+
+    def prune(self) -> None:
+        for record_file in self.folder.glob("*.json"):
+            self.read(record_file)
+
     def load(self, path: str, check: Callable[[dict, bool, str], bool] | None = None) -> dict | None:
         pointer = self.pointer(path)
         if not pointer.is_file():
@@ -80,7 +92,8 @@ class StoredStats:
         key = pointer.read_text()
         if not re.fullmatch(r"[0-9a-f]{64}", key) or not (record_file := self.folder / f"{key}.json").is_file():
             return None
-        record = json.loads(record_file.read_text())
+        if (record := self.read(record_file)) is None:
+            return None
         inputs, scope, measured = record["inputs"], record["scope"], record["measured"]
         discovery = record.get("discovery", "")
         if (
