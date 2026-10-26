@@ -99,8 +99,7 @@ def execute(argv: list[str], env: dict[str, str], run_dir: Path, timeout: float)
         try:
             return process.wait(timeout=timeout)
         except subprocess.TimeoutExpired:
-            # select-profile launches the harness as a nested child; killing only
-            # process.pid would leave that grandchild running.
+            # select-profile spawns the harness as a grandchild, so kill the whole process group
             os.killpg(os.getpgid(process.pid), signal.SIGKILL)
             process.wait()
             return None
