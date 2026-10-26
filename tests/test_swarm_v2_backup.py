@@ -332,6 +332,39 @@ def test_write_stages_its_temporary_file_beside_the_target(tmp_path):
     assert sorted(path.name for path in target.parent.iterdir()) == ["file"]
 
 
+def test_a_failed_write_removes_its_temporary_file_and_raises_the_cause(tmp_path):
+    target = tmp_path / "file"
+    with mock.patch.object(backup.os, "fsync", side_effect=OSError("disk full")):
+        with pytest.raises(OSError, match="disk full"):
+            backup._write(target, b"data")
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_restore_refuses_a_component_this_release_lists_no_versions_for(world):
+    set_id, target = world.capture(), world.root / "restore"
+    access = dataclasses.replace(world.access(), versions={})
+    with pytest.raises(backup.Refused) as refused:
+        backup.restore(world.backup, set_id, target, access)
+    assert str(refused.value) == backup.OLD_VERSION
+    assert not target.exists()
+
+
+def test_an_empty_registry_allows_no_retention(tmp_path):
+    assert backup.Registry(tmp_path / "registry.json").retention_allowed() is False
+
+
+def test_a_refused_query_is_unanswered_even_when_an_empty_answer_matches_capture(world):
+    sources = dataclasses.replace(world.sources(), query=lambda catalog, store: "")
+    set_id = backup.capture(sources, world.backup, world.doc["clock"]["captured"])
+
+    def refused(catalog, store):
+        raise archive.EvidenceRefused("withheld")
+
+    report = backup.drill(world.backup, set_id, world.plan(query=refused))
+    assert report["query_answered"] is False
+    assert report[backup.METRIC] == backup.FAILED
+
+
 @pytest.mark.parametrize("make", [False, True])
 def test_restore_creates_a_nested_root_or_uses_an_existing_empty_one(world, make):
     set_id, target = world.capture(), world.root / "nested" / "deeper" / "restore"

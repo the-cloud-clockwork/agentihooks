@@ -104,7 +104,7 @@ def _write(path: Path, data: bytes) -> None:
             os.fsync(handle.fileno())
         Path(temporary).replace(path)
     except BaseException:
-        Path(temporary).unlink(missing_ok=True)
+        Path(temporary).unlink()
         raise
     archive._sync(path.parent)
 
