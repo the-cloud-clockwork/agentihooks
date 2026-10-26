@@ -894,7 +894,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(code)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(data)))
-        self.send_header("Cache-Control", "no-store")
+        self.send_header("Cache-Control", "no-store, max-age=0")
         if self.path.startswith("/api/") and self.headers.get("Origin") == FILE_ORIGIN:
             self.send_header("Access-Control-Allow-Origin", FILE_ORIGIN)
         self.end_headers()
