@@ -1,0 +1,190 @@
+import json
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+import pytest
+import yaml
+
+from scripts import locked_tests
+
+_ROOT = Path(__file__).resolve().parents[1]
+pytestmark = pytest.mark.unit
+
+LOCKED = locked_tests.LOCKED[0]
+GUARD = """import pytest
+
+CASES = [("a", 1), ("b", 2)]
+
+
+def _blocked(command):
+    assert command
+
+
+@pytest.mark.parametrize("command,code", CASES)
+def test_blocks(command, code):
+    _blocked(command)
+    assert code
+
+
+class TestGuard:
+    def test_raises(self):
+        with pytest.raises(ValueError):
+            int("x")
+
+    def test_no_raise(self):
+        str(1)
+"""
+
+
+def _tree(root: Path, text: str, record: str | None = None) -> Path:
+    (root / LOCKED).parent.mkdir(parents=True, exist_ok=True)
+    (root / LOCKED).write_text(record if record is not None else text)
+    assert locked_tests.main(["--write", "--head", str(root)]) == 0
+    (root / LOCKED).write_text(text)
+    return root
+
+
+def _grade(base: Path, head: Path, capsys) -> tuple[int, str]:
+    code = locked_tests.main(["--base", str(base), "--head", str(head)])
+    return code, capsys.readouterr().out
+
+
+def test_the_unchanged_guard_tests_are_green(tmp_path, capsys):
+    base = _tree(tmp_path / "base", GUARD)
+    code, out = _grade(base, _tree(tmp_path / "head", GUARD), capsys)
+    assert code == 0
+    assert "4 locked tests on the base, 4 measured on the head, 0 errors" in out
+
+
+def test_the_manifest_counts_assertions_calls_and_cases(tmp_path):
+    tree = _tree(tmp_path, GUARD)
+    assert locked_tests.load(tree) == {
+        f"{LOCKED}::_blocked": {"assertions": 1, "calls": 0, "cases": 1},
+        f"{LOCKED}::test_blocks": {"assertions": 2, "calls": 1, "cases": 2},
+        f"{LOCKED}::TestGuard::test_raises": {"assertions": 1, "calls": 2, "cases": 1},
+        f"{LOCKED}::TestGuard::test_no_raise": {"assertions": 0, "calls": 1, "cases": 1},
+    }
+
+
+@pytest.mark.parametrize(
+    "planted",
+    [
+        GUARD.replace("@pytest.mark.parametrize", "@pytest.mark.skip\n@pytest.mark.parametrize"),
+        GUARD.replace("    def test_raises", "    @pytest.mark.xfail\n    def test_raises"),
+        GUARD.replace("class TestGuard:\n", "class TestGuard:\n    pytestmark = pytest.mark.skip\n"),
+        GUARD.replace("import pytest\n", "import pytest\n\npytestmark = [pytest.mark.skipif(True, reason='x')]\n"),
+        GUARD.replace("    _blocked(command)\n", "    pytest.skip('later')\n    _blocked(command)\n"),
+        GUARD.replace('CASES = [("a", 1), ("b", 2)]', 'CASES = [pytest.param("a", 1, marks=pytest.mark.skip)]'),
+    ],
+    ids=["skip", "xfail", "class mark", "module mark", "skip call", "skipped case"],
+)
+def test_a_skipped_or_xfailed_locked_test_is_red(tmp_path, capsys, planted):
+    base = _tree(tmp_path / "base", GUARD)
+    head = _tree(tmp_path / "head", planted, record=GUARD)
+    code, out = _grade(base, head, capsys)
+    assert code == 1
+    assert "is skipped or xfailed." in out
+
+
+def test_a_deleted_locked_test_is_red(tmp_path, capsys):
+    base = _tree(tmp_path / "base", GUARD)
+    head = _tree(tmp_path / "head", GUARD.replace("test_no_raise", "check_no_raise"))
+    code, out = _grade(base, head, capsys)
+    assert code == 1
+    assert f"::error::The locked test {LOCKED}::TestGuard::test_no_raise is deleted or renamed.\n" in out
+    assert f"The head {locked_tests.MANIFEST} drops or lowers the locked assertions of" in out
+
+
+@pytest.mark.parametrize(
+    "planted,message",
+    [
+        (GUARD.replace("    assert code\n", ""), "test_blocks has 1 assertions, the base locks 2."),
+        (GUARD.replace("    assert command\n", "    pass\n"), "_blocked is deleted or renamed."),
+        (GUARD.replace(', ("b", 2)', ""), "test_blocks has 1 cases, the base locks 2."),
+        (GUARD.replace("        str(1)\n", "        pass\n"), "test_no_raise has 0 calls, the base locks 1."),
+    ],
+    ids=["assert", "helper", "case", "call"],
+)
+def test_a_weakened_locked_test_is_red_even_when_rerecorded(tmp_path, capsys, planted, message):
+    base = _tree(tmp_path / "base", GUARD)
+    code, out = _grade(base, _tree(tmp_path / "head", planted), capsys)
+    assert code == 1
+    assert message in out
+
+
+def test_a_manifest_recording_more_than_the_head_measures_is_red(tmp_path, capsys):
+    base = _tree(tmp_path / "base", GUARD)
+    head = _tree(tmp_path / "head", GUARD.replace("    def test_no_raise", "    def test_more"), record=GUARD)
+    data = locked_tests.load(head)
+    data[f"{LOCKED}::TestGuard::test_more"] = {"assertions": 5, "calls": 0, "cases": 1}
+    (head / locked_tests.MANIFEST).write_text(json.dumps(data))
+    code, out = _grade(base, head, capsys)
+    assert code == 1
+    assert f"records more than {LOCKED}::TestGuard::test_more measures" in out
+
+
+def test_a_base_without_a_manifest_locks_the_head(tmp_path, capsys):
+    base = tmp_path / "base"
+    base.mkdir()
+    code, out = _grade(base, _tree(tmp_path / "head", GUARD), capsys)
+    assert code == 0
+    assert "::notice::The base has no" in out
+
+
+def test_a_head_without_a_manifest_is_red(tmp_path, capsys):
+    base = _tree(tmp_path / "base", GUARD)
+    head = _tree(tmp_path / "head", GUARD)
+    (head / locked_tests.MANIFEST).unlink()
+    code, out = _grade(base, head, capsys)
+    assert code == 1
+    assert "::error::the head has no" in out
+
+
+@pytest.mark.parametrize("broken", ["manifest", "test"])
+def test_an_unreadable_tree_cannot_be_graded(tmp_path, capsys, broken):
+    base = _tree(tmp_path / "base", GUARD)
+    head = _tree(tmp_path / "head", GUARD)
+    (head / (locked_tests.MANIFEST if broken == "manifest" else LOCKED)).write_text("{")
+    code, out = _grade(base, head, capsys)
+    assert code == 1
+    assert "::error::" in out
+
+
+def test_grading_without_a_base_is_refused():
+    with pytest.raises(SystemExit):
+        locked_tests.main([])
+
+
+def test_the_repository_manifest_matches_its_locked_tests():
+    measured = locked_tests.measure(_ROOT)
+    assert not [key for key, entry in measured.items() if entry["disabled"]]
+    assert locked_tests.load(_ROOT) == {
+        key: {field: entry[field] for field in locked_tests.FIELDS} for key, entry in measured.items()
+    }
+    assert {key.split("::")[0] for key in measured} == set(locked_tests.LOCKED)
+
+
+def test_the_gate_runs_in_lint_graded_by_dev_against_the_base(tmp_path):
+    steps = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())["jobs"]["lint"]["steps"]
+    step = next(step for step in steps if step.get("name") == "Hold the locked guard tests")
+    assert step["if"] == "${{ !cancelled() }}"
+    assert step["run"] == (
+        'if [[ -f "$RUNNER_TEMP/grader/scripts/locked_tests.py" ]]; then\n'
+        '  cd "$RUNNER_TEMP/grader"\n'
+        "fi\n"
+        'python -m scripts.locked_tests --base "$RUNNER_TEMP/base" --head "$GITHUB_WORKSPACE"\n'
+    )
+    (tmp_path / "grader").mkdir()
+    _tree(tmp_path / "base", GUARD)
+    head = _tree(tmp_path / "head", GUARD.replace("    def test_raises", "    @pytest.mark.skip\n    def test_raises"))
+    env = dict(
+        os.environ,
+        RUNNER_TEMP=str(tmp_path),
+        GITHUB_WORKSPACE=str(head),
+        PATH=f"{Path(sys.executable).parent}{os.pathsep}{os.environ['PATH']}",
+    )
+    result = subprocess.run(["bash", "-e", "-c", step["run"]], env=env, cwd=_ROOT, capture_output=True, text=True)
+    assert result.returncode == 1
+    assert f"::error::The locked test {LOCKED}::TestGuard::test_raises is skipped or xfailed.\n" in result.stdout

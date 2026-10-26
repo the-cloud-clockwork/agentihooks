@@ -2178,6 +2178,16 @@ jobs:
           fi
           python -m scripts.dead_code --base "$RUNNER_TEMP/base" --head "$GITHUB_WORKSPACE"
 
+      # dev's copy grades the head against the base's manifest, so a pull request cannot unlock its own guard test.
+      # Until dev carries the grader, the head's copy grades.
+      - name: Hold the locked guard tests
+        if: ${{ !cancelled() }}
+        run: |
+          if [[ -f "$RUNNER_TEMP/grader/scripts/locked_tests.py" ]]; then
+            cd "$RUNNER_TEMP/grader"
+          fi
+          python -m scripts.locked_tests --base "$RUNNER_TEMP/base" --head "$GITHUB_WORKSPACE"
+
       # The base revision's copy grades, so a pull request cannot loosen its own audit.
       - name: Fail on known vulnerabilities new against the base
         if: ${{ !cancelled() }}
