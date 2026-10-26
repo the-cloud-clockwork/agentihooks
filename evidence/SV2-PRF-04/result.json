@@ -21,7 +21,7 @@
     "ranking_contract": "kernel retrieval rank policy revision 2 semantics without semantic or heat sources: scope before scoring, heat never admits, accepted edges only, edges followed in their stored direction, supersedes is not a similarity edge; the graph_wide and scoped_padded rejection policies break this contract on purpose"
   },
   "states": {
-    "observed": "Cases A, B and C each ran in CI from fresh temporary folders and matched their committed records; case A ran both fixtures, whose corpus hashes differ.",
+    "observed": "Cases A, B and C each ran in CI (Tests run 40276331653 on 1c69f9f25) from fresh temporary folders and matched their committed records; case A ran both fixtures, whose corpus hashes differ.",
     "accepted": "A policy is accepted when the registry publishes a record with the next sequence for the same corpus revision; a qualified verdict alone is not acceptance.",
     "committed": "The accepted record is written to a staged file, flushed with fsync and renamed over the record; a staged file that was never renamed is not committed.",
     "externally_verified": "Not yet: no deployed brain-api, graph store or agent consumed these packs; a live comparison on real task outcomes belongs to the G10 rollout gate."

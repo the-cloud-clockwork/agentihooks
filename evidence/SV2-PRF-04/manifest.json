@@ -13,6 +13,6 @@
   },
   "corpus_revision": "sv2-prf-04-corpus-1",
   "red_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/40274963899",
-  "records_run": "",
-  "tested_commit": ""
+  "records_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/40276331653",
+  "tested_commit": "1c69f9f25ba77d3b5b8144b268dbc4ffd9622f44"
 }
