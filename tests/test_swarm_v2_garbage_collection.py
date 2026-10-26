@@ -15,6 +15,7 @@ from tests import sv2_ret05_cases as cases
 
 pytestmark = pytest.mark.unit
 EVIDENCE = Path(__file__).parents[1] / "evidence" / "SV2-RET-05"
+UNKNOWN_UPLOAD = "no reservation is held under this upload id; nothing was committed"
 
 
 @pytest.fixture
@@ -143,7 +144,7 @@ def test_a_generation_activated_after_retirement_is_kept(world):
 
 
 def test_retiring_the_active_generation_is_refused(world):
-    assert cases.refused(lambda: world.retire("active")) == gc.RETIRE_ACTIVE
+    assert cases.refused(lambda: world.retire("active")) == "the active index generation cannot be retired"
     assert world.catalog.db.execute("SELECT * FROM index_retirement").fetchall() == []
 
 
@@ -167,7 +168,8 @@ def test_reserve_replays_and_refuses_a_conflicting_reuse_of_an_upload_id(world):
     target = world.uploads["abandoned"]
     expires = world.clock["expired"]
     assert world.reserve("upload-abandoned", target, "attempt-abandoned", expires)["upload_id"] == "upload-abandoned"
-    assert cases.refused(lambda: world.reserve("upload-abandoned", target, "other", expires)) == gc.RESERVATION_CONFLICT
+    conflict = cases.refused(lambda: world.reserve("upload-abandoned", target, "other", expires))
+    assert conflict == "this upload id is already reserved for different bytes or another attempt"
 
 
 def test_commit_releases_the_reservation_and_archives_the_entry(world):
@@ -186,9 +188,11 @@ def test_commit_refuses_an_unknown_upload_and_another_domain(world):
     item = world.doc["session"]
     entry = catalog_module.ArchiveEntry(world.domain, item["session_uid"], item["source_generation"], 0, 1, "0" * 64)
     commit = world.reservations.commit
-    assert cases.refused(lambda: commit(cases.grant(world.doc), "nope", world.store, entry)) == gc.UNKNOWN_UPLOAD
+    assert cases.refused(lambda: commit(cases.grant(world.doc), "nope", world.store, entry)) == UNKNOWN_UPLOAD
     foreign = cases.grant(world.doc, world.doc["foreign_corpus"])
-    assert cases.refused(lambda: commit(foreign, "upload-foreign", world.store, entry)) == gc.FOREIGN_ENTRY
+    assert cases.refused(lambda: commit(foreign, "upload-foreign", world.store, entry)) == (
+        "the archive entry belongs to another access domain than the grant; nothing was committed"
+    )
 
 
 def test_commit_after_collection_finds_no_reservation_and_archives_nothing(world):
@@ -198,7 +202,7 @@ def test_commit_after_collection_finds_no_reservation_and_archives_nothing(world
     entry = catalog_module.ArchiveEntry(world.domain, item["session_uid"], item["source_generation"], 900, 950, target)
     commit = world.reservations.commit
     grant = cases.grant(world.doc)
-    assert cases.refused(lambda: commit(grant, "upload-abandoned", world.store, entry)) == gc.UNKNOWN_UPLOAD
+    assert cases.refused(lambda: commit(grant, "upload-abandoned", world.store, entry)) == UNKNOWN_UPLOAD
     assert world.catalog.db.execute(gc.ARCHIVED, (target,)).fetchone() is None
 
 
@@ -207,7 +211,9 @@ def test_a_crash_after_claiming_resumes_and_keeps_a_newly_referenced_checkpoint(
     target_state = report["claimed_before_rerun"]
     assert report["crashed"] is True
     assert [state for _, state in target_state] == [gc.COLLECTING]
-    assert report["reserve_during_collection"] == gc.UNDER_COLLECTION
+    assert report["reserve_during_collection"] == (
+        "this object is being collected; reserve it again after the collection finishes"
+    )
     assert report["checkpoint_readable"] is True
     assert len(report["rerun"]["protected"]["rebound"]) == 1
     assert report["replay"]["reclaimed"] == {"uploads": [], "index_generations": []}
@@ -245,6 +251,24 @@ def test_a_reservation_renewed_before_the_claim_keeps_the_object(world):
     assert world.store._path(target).exists()
 
 
+def test_a_reference_found_at_the_claim_keeps_a_live_attempts_reservation(world):
+    target = world.uploads["abandoned"]
+    intact = gc._intact
+
+    def referencing(path, digest):
+        if digest == target:
+            world.reserve("renewed", target, "attempt-new", world.clock["live_until"])
+            world.pinned.add(target)
+        return intact(path, digest)
+
+    with mock.patch.object(gc, "_intact", referencing):
+        report = world.collect()
+    assert target in report["protected"]["authoritative"]
+    assert world.store._path(target).exists()
+    states = world.catalog.db.execute(gc.DIGEST_STATES, (target,)).fetchall()
+    assert sorted(states) == [(world.domain, 1100.0, "reserved"), (world.domain, 5000.0, "reserved")]
+
+
 def test_a_missing_store_folder_collects_only_reservations(tmp_path):
     world = cases.World(tmp_path / "w")
     plan = world.plan()
@@ -274,7 +298,12 @@ def test_main_runs_inventory_collect_and_retire(world, tmp_path, capsys):
 
 @pytest.mark.parametrize(
     "argv",
-    [["retire", "c", "d"], ["inventory", "c", "d"], ["collect", "c", "d", "--objects", "o", "--generation", "g"]],
+    [
+        ["retire", "c", "d"],
+        ["inventory", "c", "d"],
+        ["collect", "c", "d", "--objects", "o", "--generation", "g"],
+        ["collect", "c", "d", "--objects", "o"],
+    ],
 )
 def test_main_refuses_mismatched_flags(argv):
     with pytest.raises(SystemExit) as raised:

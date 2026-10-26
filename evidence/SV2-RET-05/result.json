@@ -33,9 +33,9 @@
   "remaining_limitations": [
     "No live upload path reserves yet; the collector and spool do not write archive objects to this store, so collect reclaims only reservation backed uploads made through Reservations.",
     "Checkpoint references come from a caller supplied set; there is no persisted checkpoint reference index in the catalog.",
-    "A reference added outside the catalog after collect's last reference read and before its unlink is not fenced; collect rereads references immediately before each unlink to narrow that window.",
+    "A reference added outside the catalog after collect's last reference read and before its unlink is not fenced; collect rereads references immediately before each unlink to narrow that window. A crash after an unlink and before its reservation rows are dropped leaves a claim with no bytes, and a later reference to that digest settles the claim as rebound although the bytes are gone; archive evidence reads still report the object missing.",
     "No scheduler runs collect; an operator or job invokes it.",
-    "The grant principal is not checked against an operator role; the grant corpus scopes ownership."
+    "The grant principal is not checked against an operator role; the grant corpus scopes ownership, and the command line builds its grant from the domain an operator names."
   ],
   "rollback_rehearsal": "B ran collect with destructive off and inside grace; the catalog, reservation and retirement rows, object files and vectors were unchanged, then a destructive collect reclaimed the same set the inventory listed",
   "status": "fixture_verified",

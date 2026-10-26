@@ -182,8 +182,8 @@ def _owner(catalog: Catalog, plan: Plan, digest: str) -> str | None:
 def _claim(catalog: Catalog, plan: Plan, digest: str) -> str | None:
     with catalog._transaction():
         if _referenced(catalog, plan, digest):
-            catalog.db.execute(DROP_DIGEST, (digest,))
-            return "rebound"
+            settled = catalog.db.execute(SETTLE, (digest, COLLECTING)).rowcount > 0
+            return "rebound" if settled else "authoritative"
         reason = _owner(catalog, plan, digest)
         if reason is None:
             catalog.db.execute(CLAIM, (COLLECTING, digest))
@@ -191,7 +191,8 @@ def _claim(catalog: Catalog, plan: Plan, digest: str) -> str | None:
 
 
 def _intact(path: Path, digest: str) -> bool:
-    return hashlib.sha256(path.read_bytes()).hexdigest() == digest
+    with path.open("rb") as handle:
+        return hashlib.file_digest(handle, "sha256").hexdigest() == digest
 
 
 def _settle(catalog: Catalog, digest: str) -> bool:
@@ -299,16 +300,20 @@ def main(argv: list[str] | None = None, clock: Callable[[], float] | None = None
         parser.error("--generation is given with retire and only with it")
     if (args.command != "retire") != (args.objects is not None):
         parser.error("--objects is given with inventory and collect and only with them")
+    if args.command == "collect" and args.references is None:
+        parser.error("collect needs --references naming every checkpoint referenced object, even an empty list")
     now = time.time() if clock is None else clock()
     grant = Grant(args.principal, args.domain, frozenset())
     catalog = Catalog(args.catalog)
-    if args.command == "retire":
-        answer = {"index_generation": args.generation, "retired_at": retire(catalog, grant, args.generation, now)}
-    else:
-        pinned = frozenset(json.loads(args.references.read_bytes())) if args.references else frozenset()
-        plan = Plan(grant, lambda: pinned, args.grace, now, args.command == "collect")
-        answer = collect(catalog, archive.ObjectStore(args.objects), plan)
-    catalog.close()
+    try:
+        if args.command == "retire":
+            answer = {"index_generation": args.generation, "retired_at": retire(catalog, grant, args.generation, now)}
+        else:
+            pinned = frozenset(json.loads(args.references.read_bytes())) if args.references else frozenset()
+            plan = Plan(grant, lambda: pinned, args.grace, now, args.command == "collect")
+            answer = collect(catalog, archive.ObjectStore(args.objects), plan)
+    finally:
+        catalog.close()
     print(json.dumps(answer))
     return 0
 
