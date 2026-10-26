@@ -192,7 +192,7 @@ def test_a_deleted_locked_test_is_red(tmp_path, capsys):
         (GUARD.replace("    assert code\n", ""), "test_blocks has 1 assertions, the base locks 2."),
         (GUARD.replace("    assert command\n", "    pass\n"), "_blocked is deleted or renamed."),
         (GUARD.replace(', ("b", 2)', ""), "test_blocks has 1 cases, the base locks 2."),
-        (GUARD.replace("        str(1)\n", "        pass\n"), "test_no_raise has 0 calls, the base locks 1."),
+        (GUARD.replace("        str(1)\n", "        pass\n"), "TestGuard::test_no_raise has 0 calls, the base locks 1."),
     ],
     ids=["assert", "helper", "case", "call"],
 )
