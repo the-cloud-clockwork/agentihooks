@@ -787,6 +787,7 @@ def test_alert_delivery_reads_the_step_from_the_ledger_state(inbox, monkeypatch)
     rendered = []
     monkeypatch.setattr(ledger_blockers, "autonomy", lambda slug: "full")
     alert = {"id": "al-5-0", "source": "sync", "text": "refused", "item": "tasks/t1", "state": "open", "rev": 5}
+    alert["target"] = "master"
 
     def deliver(inbox, slug, alerts, rev, master, since, render):
         rendered.append(render(slug, alert))
