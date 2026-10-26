@@ -412,7 +412,7 @@ def test_an_item_readdressed_to_another_swarm_publishes_its_wake_there(rig):
         "entity": "inbox-wake",
         "key": item.id,
         "version": 1,
-        "time": 4242,
+        "time": 1000,
         "author": "sender",
         "data": {"address": "eng-1@other"},
         "cause": None,

@@ -78,7 +78,7 @@ class InboxWake:
             entity="inbox-wake",
             key=item.id,
             version=1,
-            time=self.clock(),
+            time=item.created_at,
             author=item.sender,
             data={"address": item.address},
         )
