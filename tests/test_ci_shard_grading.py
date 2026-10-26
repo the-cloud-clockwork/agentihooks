@@ -165,6 +165,10 @@ def test_grouped_download_preserves_shard_integrity_without_installed_dependenci
         assert first["continue-on-error"] is True
         assert retry["if"] == f"steps.{first['id']}.outcome == 'failure'"
         assert "continue-on-error" not in retry
+        assert "if" not in first
+        wait = steps[steps.index(retry) - 1]
+        assert wait["if"] == retry["if"]
+        assert wait["run"] == "sleep 30"
     require = next(step for step in steps if step.get("name") == "Require every planned shard report")
     assert steps.index(downloads[2]) < steps.index(downloads[3]) < steps.index(require)
     assert not any(step.get("name") == "Install grader dependencies" for step in steps)
