@@ -416,10 +416,18 @@ def test_cli_collect_removes_eligible_objects_from_the_document(tmp_path, capsys
     assert store.active_tasks() == frozenset({"t-live", "t-restore"})
 
 
-def test_cli_requires_a_journal(tmp_path, capsys):
+@pytest.mark.parametrize("argv", [["plan", "store.json"], ["purge", "store.json", "--journal", "j"]])
+def test_cli_refuses_a_missing_journal_or_unknown_command(argv, capsys):
     with pytest.raises(SystemExit) as raised:
-        retention.main(["plan", str(tmp_path / "store.json")])
+        retention.main(argv)
     assert raised.value.code == 2
+
+
+def test_policy_accepts_a_one_second_max_age():
+    parsed = policy.Policy.parse(
+        {"corpus": "swarm", "version": "1", "max_age_seconds": dict.fromkeys(policy.CLASSES, 1)}
+    )
+    assert dict(parsed.max_age_seconds) == dict.fromkeys(policy.CLASSES, 1)
 
 
 @pytest.mark.parametrize("case", ["A", "B", "C"])
