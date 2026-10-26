@@ -10,7 +10,10 @@ import zipfile
 from datetime import UTC, datetime
 from difflib import SequenceMatcher
 from functools import cache
+from itertools import accumulate
 from pathlib import Path
+
+import yaml
 
 from scripts.ci_cpu_quota import worker_count as quota_workers
 from scripts.ci_mutation.browser import needs_browser
@@ -20,10 +23,10 @@ from scripts.ci_test_plan import find_record
 from tests.dep_manifest import (
     GLOBAL_FILES,
     MEASURED,
+    _git,
     _show,
     _spans,
     changed_units,
-    global_input,
     line_units,
     node,
 )
@@ -33,6 +36,12 @@ from tests.dep_manifest import changes as recorded_changes
 MUTANT_SECONDS = 5.6
 WORKERS = 4
 RECORD_RETRY_SECONDS = 10
+TEST_WORKFLOW = ".github/workflows/test.yml"
+COLLECTING_JOBS = {
+    TEST_WORKFLOW: ("unit", "unit-selected", "mutation-stats"),
+    ".github/workflows/mutation-preflight.yml": ("stats",),
+}
+SCHEDULING_KEYS = {"needs", "if", "timeout-minutes", "outputs"}
 RECORD_ERRORS = (subprocess.SubprocessError, OSError, ValueError, KeyError, zipfile.BadZipFile)
 
 
@@ -125,16 +134,14 @@ def record_drift(root: Path, manifest: dict) -> tuple[set[str], set[int], set[st
     tests, units, paths = set(), set(), set()
     for path, old, new in recorded_changes(root, manifest["commit"], "HEAD"):
         if path.startswith(".github/workflows/"):
-            if global_input(
-                path, _show(root, manifest["commit"], path), _show(root, "HEAD", path), manifest.get("version")
-            ):
+            if workflow_changed(root, manifest, path):
                 return None
             paths.add(path)
         elif path.startswith("tests/") and path.endswith(".py"):
-            # A changed helper or conftest can move what any test reaches.
-            if not Path(path).name.startswith("test_"):
+            reached = helper_tests(root, path)
+            if reached is None:
                 return None
-            tests.add(path)
+            tests.update(reached)
         elif path in GLOBAL_FILES or (path.endswith(".py") and not path.startswith(MEASURED)):
             return None
         elif path.endswith(".py"):
@@ -142,6 +149,96 @@ def record_drift(root: Path, manifest: dict) -> tuple[set[str], set[int], set[st
         else:
             paths.add(path)
     return tests, units, paths
+
+
+def workflow_changed(root: Path, manifest: dict, path: str) -> bool:
+    if manifest.get("version") != 2 or path.endswith(".py"):
+        return True
+    return path in COLLECTING_JOBS and collection_changed(
+        _show(root, manifest["commit"], path), _show(root, "HEAD", path), COLLECTING_JOBS[path]
+    )
+
+
+def collection_changed(old: str | None, new: str | None, jobs: tuple[str, ...]) -> bool:
+    # Only the jobs that run the recorded tests, and the jobs whose outputs they read, decide what a test reaches.
+    try:
+        before, after = (yaml.safe_load(text) for text in (old, new))
+        if not all(isinstance(workflow["jobs"][jobs[0]], dict) for workflow in (before, after)):
+            return True
+        if any(before.get(key) != after.get(key) for key in ("env", "defaults")):
+            return True
+        named = set(jobs)
+        for workflow in (before, after):
+            for name in jobs:
+                needs = workflow["jobs"].get(name, {}).get("needs", [])
+                named.update([needs] if isinstance(needs, str) else needs)
+        for name in named:
+            old_job, new_job = (
+                {key: value for key, value in workflow["jobs"].get(name, {}).items() if key not in SCHEDULING_KEYS}
+                for workflow in (before, after)
+            )
+            if old_job != new_job:
+                return True
+        return False
+    except (TypeError, KeyError, AttributeError, yaml.YAMLError):
+        return True
+
+
+def helper_tests(root: Path, path: str) -> set[str] | None:
+    importers = _importers(root)
+    reached = [path]
+    for current in reached:
+        module = current.removesuffix(".py").removesuffix("/__init__").replace("/", ".")
+        keys = {module, current}
+        if Path(current).name in ("conftest.py", "__init__.py"):
+            folder = f"{Path(current).parent.as_posix()}/"
+            found = {name for name in importers["*"] if name.startswith(folder)}
+        else:
+            keys.update((Path(current).stem, Path(current).name))
+            found = set()
+        found.update(name for key in keys for name in importers.get(key, ()))
+        reached.extend(sorted(found.difference(reached)))
+    if any(not found.startswith("tests/") for found in reached):
+        return None
+    return {found for found in reached if Path(found).name.startswith("test_")}
+
+
+@cache
+def _importers(root: Path) -> dict[str, set[str]]:
+    found = {"*": set()}
+    for path in _git(root, "ls-files", "--", "hooks/*.py", "scripts/*.py", "tests/*.py").splitlines():
+        found["*"].add(path)
+        for key in _reach_keys(path, (root / path).read_text(errors="replace")):
+            found.setdefault(key, set()).add(path)
+    return found
+
+
+def _reach_keys(path: str, source: str) -> set[str]:
+    tokens = (token.rstrip(".") for token in re.split(r"[^\w./-]+", source))
+    keys = {token for token in tokens if token.endswith(".py")}
+    keys.update(Path(key).name for key in list(keys))
+    names = [*re.findall(r"\b(?:tests|hooks|scripts)(?:\.\w+)+", source), *_imported(path, source)]
+    for name in names:
+        keys.update(accumulate(name.split("."), lambda prefix, part: f"{prefix}.{part}"))
+    return keys
+
+
+def _imported(path: str, source: str) -> list[str]:
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return []
+    package = path.removesuffix(".py").replace("/", ".").split(".")
+    names = []
+    for found in ast.walk(tree):
+        if isinstance(found, ast.Import):
+            names.extend(alias.name for alias in found.names)
+        elif isinstance(found, ast.ImportFrom):
+            parent = package[: len(package) - found.level] if found.level else []
+            base = ".".join([*parent, *filter(None, [found.module])])
+            names.append(base)
+            names.extend(f"{base}.{alias.name}" if base else alias.name for alias in found.names)
+    return names
 
 
 def changed_recorded_units(root: Path, manifest: dict, changes: dict[str, set[int]]) -> tuple[set[int], set[str]]:
