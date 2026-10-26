@@ -236,7 +236,7 @@ class RedisStore:
             int(raw.get("swap_floor_mb") or DEFAULT_SWAP_FLOOR_MB),
             raw.get("hive_placement") == "True",
             int(raw.get("local_max_agents") or DEFAULT_LOCAL_MAX_AGENTS),
-            raw.get("engine", "legacy"),
+            raw.get("engine") or "legacy",
             json.loads(raw.get("window") or "{}"),
             int(raw.get("focus_weight", 50)),
             raw.get("watchdog_address", ""),
