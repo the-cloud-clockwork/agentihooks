@@ -768,7 +768,8 @@ def test_main_writes_one_matrix_entry_per_shard(tmp_path, monkeypatch, capsys):
         "shards=[0, 1, 2, 3]\nstats_parts=[0, 1, 2]\nbases=earlier,merged\nchanged=1\nbrowser=false\n"
     )
     text = capsys.readouterr().out
-    assert "Mutation bases: earlier merged\nChanged line mutants: 40\n" in text
+    assert "Mutation bases: earlier merged\n" in text
+    assert "Changed line mutants: 40\n" in text
     assert "Estimated mutation seconds: 1601, slowest stats bucket: 121\n" in text
     assert "Mutation shards: 4\nStats parts: 3\n" in text
 
@@ -797,6 +798,65 @@ def test_main_reads_the_recorded_coverage_only_when_a_module_changed(tmp_path, m
     assert f"changed={len(changed)}\n" in (tmp_path / "github-output").read_text()
     if not changed:
         assert "No change remains to mutate, so the recorded dev coverage is not read.\n" in capsys.readouterr().out
+
+
+def test_stage_prints_its_start_and_duration(monkeypatch, capsys):
+    clock = [100.0]
+    monkeypatch.setattr(plan.time, "monotonic", lambda: clock[0])
+    with plan._stage("widgets"):
+        clock[0] += 7.4
+    assert capsys.readouterr().out == "stage widgets started\nstage widgets finished in 7s\n"
+
+
+def test_main_times_the_record_search_before_the_shard_sizing_stage(tmp_path, monkeypatch, capsys):
+    _project(tmp_path, {})
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("sys.argv", ["plan", "--base", "base", "--repository", "owner/repo"])
+    monkeypatch.setenv("GITHUB_OUTPUT", str(tmp_path / "github-output"))
+    monkeypatch.setattr(plan, "own_bases", lambda *args: ["base"])
+    monkeypatch.setattr(plan, "discover_changes", lambda *args: {"scripts/sample.py": {2}})
+    monkeypatch.setattr(plan, "read_record", lambda repository: (None, ""))
+    monkeypatch.setattr(plan.time, "monotonic", lambda: 42.0)
+    assert plan.main() == 0
+    lines = capsys.readouterr().out.splitlines()
+    assert lines.index("stage record search started") < lines.index("stage record search finished in 0s")
+    assert lines.index("stage record search finished in 0s") < lines.index("stage shard sizing started")
+    assert lines.index("stage shard sizing started") < lines.index("stage shard sizing finished in 0s")
+
+
+def test_read_record_retries_once_after_a_short_wait_within_its_budget(monkeypatch):
+    monkeypatch.setattr(plan.time, "monotonic", lambda: 0.0)
+    sleeps = []
+    monkeypatch.setattr(plan.time, "sleep", sleeps.append)
+    calls = []
+
+    def record(repository, before, record_deadline):
+        calls.append(record_deadline)
+        raise OSError("boom")
+
+    monkeypatch.setattr(plan, "find_record", record)
+    assert plan.read_record("owner/repo") == (None, "OSError: boom")
+    assert len(calls) == 2
+    assert calls[0] == calls[1] == plan.RECORD_BUDGET_SECONDS
+    assert sleeps == [plan.RECORD_RETRY_SECONDS]
+
+
+def test_read_record_skips_its_retry_once_the_budget_is_gone(monkeypatch):
+    clock = [0.0]
+    monkeypatch.setattr(plan.time, "monotonic", lambda: clock[0])
+    sleeps = []
+    monkeypatch.setattr(plan.time, "sleep", sleeps.append)
+    calls = []
+
+    def record(repository, before, record_deadline):
+        calls.append(record_deadline)
+        clock[0] = record_deadline
+        raise OSError("boom")
+
+    monkeypatch.setattr(plan, "find_record", record)
+    assert plan.read_record("owner/repo") == (None, "OSError: boom")
+    assert len(calls) == 1
+    assert sleeps == []
 
 
 @pytest.mark.parametrize("source, matched", [("sample", False), ("sample", True), ("plain", False)])

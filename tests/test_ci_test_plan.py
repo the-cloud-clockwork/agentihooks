@@ -386,6 +386,48 @@ def test_a_page_whose_worst_case_exactly_fills_the_budget_is_still_read(monkeypa
     )
 
 
+def test_each_api_call_during_the_search_is_capped_to_the_time_left_in_the_budget(monkeypatch):
+    clock = [0.0]
+    monkeypatch.setattr(ci_test_plan.time, "monotonic", lambda: clock[0])
+    pages = [
+        json.dumps({"workflow_runs": [_run(n, event="merge_group") for n in range(ci_test_plan.CANDIDATES)]}).encode(),
+        json.dumps({"workflow_runs": []}).encode(),
+    ]
+    timeouts = []
+
+    def run(command, **kwargs):
+        timeouts.append(kwargs["timeout"])
+        clock[0] += 50
+        return subprocess.CompletedProcess(command, 0, stdout=pages[len(timeouts) - 1])
+
+    monkeypatch.setattr(ci_test_plan.subprocess, "run", run)
+    assert ci_test_plan.find_record(REPOSITORY, LATER, 80.0) is None
+    assert timeouts == [60, 30]
+
+
+def test_the_record_search_stops_within_its_time_budget_and_reports_the_reason(monkeypatch, capsys):
+    clock = [0.0]
+    monkeypatch.setattr(ci_test_plan.time, "monotonic", lambda: clock[0])
+    pages = [
+        json.dumps({"workflow_runs": [_run(n, event="merge_group") for n in range(ci_test_plan.CANDIDATES)]}).encode(),
+        json.dumps({"workflow_runs": []}).encode(),
+    ]
+    calls = []
+
+    def run(command, **kwargs):
+        calls.append(command)
+        clock[0] += 50
+        return subprocess.CompletedProcess(command, 0, stdout=pages[len(calls) - 1])
+
+    monkeypatch.setattr(ci_test_plan.subprocess, "run", run)
+    assert ci_test_plan.find_record(REPOSITORY, LATER, 80.0) is None
+    assert len(calls) == 2
+    assert capsys.readouterr().out == (
+        "Searched 0 dev push runs in 2 of 100 GitHub requests, time budget exhausted:"
+        " 0 kept no manifest or shard coverage, 0 failed unit shards, 0 recorded another commit\n"
+    )
+
+
 def test_the_search_ends_when_no_older_runs_remain(monkeypatch, capsys):
     _github(monkeypatch, [_run(n) for n in range(15, 0, -1)], manifests={})
     requests = _counted(monkeypatch)
