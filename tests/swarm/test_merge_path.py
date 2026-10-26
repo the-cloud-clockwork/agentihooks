@@ -246,7 +246,13 @@ def test_a_missing_gh_is_a_swarm_error():
 def test_a_server_error_is_retried_after_a_pause(monkeypatch):
     pauses = []
     monkeypatch.setattr(merge_path.time, "sleep", pauses.append)
-    gh = Gh([(1, "", "gh: Server Error (HTTP 502)\n"), (1, "", "gh: HTTP 503\n"), (0, '["x"]\n')])
+    gh = Gh(
+        [
+            (1, "", "gh: Server Error (HTTP 502)\n"),
+            (1, "", "stream error: stream ID 1; CANCEL; received from peer\n"),
+            (0, '["x"]\n'),
+        ]
+    )
 
     assert merge_path.read_jobs("/repo", 5, gh) == [["x"]]
     assert pauses == [10, 10]

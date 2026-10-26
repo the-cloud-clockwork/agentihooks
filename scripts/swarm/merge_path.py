@@ -32,7 +32,7 @@ OPEN_READY = "query($q: String!) { search(query: $q, type: ISSUE, first: 1) { is
 DEV_MERGE = re.compile(r"Merge (remote-tracking )?branch '(origin/)?dev'")
 AFTER = {"failure": "after red head", "success": "review fix"}
 LOOKBACK_S = 6 * 3600
-SERVER_ERROR = re.compile(r"HTTP 5\d\d")
+SERVER_ERROR = re.compile(r"HTTP 5\d\d|stream error")
 ATTEMPTS = 3
 RETRY_S = 10
 
@@ -152,14 +152,16 @@ def render(repo: str, found: dict) -> str:
 
 
 def _gh(args: list[str], repo_dir: str, run: Callable) -> str:
-    for attempt in range(1, ATTEMPTS + 1):
+    left = ATTEMPTS
+    while True:
+        left -= 1
         try:
             done = run(["gh", *args], cwd=repo_dir, capture_output=True, text=True, timeout=60)
         except (OSError, subprocess.SubprocessError) as exc:
             raise SwarmError(f"GitHub API: {exc}") from exc
         if not done.returncode:
             return done.stdout
-        if attempt == ATTEMPTS or not SERVER_ERROR.search(done.stderr):
+        if not left or not SERVER_ERROR.search(done.stderr):
             raise SwarmError(done.stderr.strip() or "GitHub API failed")
         time.sleep(RETRY_S)
 
