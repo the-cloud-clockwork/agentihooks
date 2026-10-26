@@ -331,7 +331,7 @@ def test_codex_hive_agent_with_no_model_reading_is_unknown_not_mismatched(hive_c
         (
             f"{agent.name}/{field}",
             f"{agent.name} has no observed {field}",
-            (f"expected {expected}; the live launch showed none, so it is unknown and never retires the agent",),
+            (f"expected {expected}; observed none, so it is unknown and never retires the agent",),
         )
         for field, expected in (("model", "gpt-6.1-sol"), ("effort", "high"))
     ]

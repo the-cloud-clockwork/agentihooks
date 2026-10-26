@@ -306,7 +306,7 @@ def findings(store: RedisStore, slug: str) -> list[Finding]:
                     "live binding",
                     f"{report['agent']}/{field}",
                     f"{report['agent']} has no observed {field}",
-                    (f"expected {expected}; the live launch showed none, so it is unknown and never retires the agent",),
+                    (f"expected {expected}; observed none, so it is unknown and never retires the agent",),
                     "assigned launch must be observed",
                     1,
                 )
