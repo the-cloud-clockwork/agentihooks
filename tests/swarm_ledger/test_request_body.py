@@ -28,6 +28,43 @@ def test_a_sized_read_returns_at_most_that_many_bytes():
     assert body.read(None) == b"defgh"
 
 
+class Connection:
+    def __init__(self):
+        self.timeouts = []
+
+    def settimeout(self, seconds):
+        self.timeouts.append(seconds)
+
+
+class Silent:
+    def read(self, size=-1):
+        raise TimeoutError("timed out")
+
+
+def test_drain_bounds_its_wait_and_restores_a_blocking_socket():
+    connection = Connection()
+    body = request_body.Body(io.BytesIO(b"abc"), 3)
+
+    assert body.drain(10, connection, 2) is True
+    assert connection.timeouts == [2, None]
+
+
+def test_drain_gives_up_on_a_client_that_stops_sending():
+    connection = Connection()
+    body = request_body.Body(Silent(), 3)
+
+    assert body.drain(10, connection, 2) is False
+    assert connection.timeouts == [2, None]
+
+
+def test_drain_waits_on_nothing_it_will_not_read():
+    connection = Connection()
+
+    assert request_body.Body(io.BytesIO(b"x" * 11), 11).drain(10, connection, 2) is False
+    assert request_body.Body(io.BytesIO(b""), None).drain(10, connection, 2) is False
+    assert connection.timeouts == []
+
+
 class Recording(io.BytesIO):
     def __init__(self, data):
         super().__init__(data)
@@ -43,7 +80,7 @@ def test_drain_reads_in_chunks_and_accepts_a_body_at_the_limit():
     raw = Recording(b"x" * size)
     body = request_body.Body(raw, size)
 
-    assert body.drain(size) is True
+    assert body.drain(size, Connection(), 2) is True
     assert raw.sizes == [request_body.CHUNK, request_body.CHUNK]
 
 
@@ -53,7 +90,7 @@ def test_drain_reads_what_the_handler_left_up_to_the_limit():
     body = request_body.Body(raw, size)
     body.read(7)
 
-    assert body.drain(size) is True
+    assert body.drain(size, Connection(), 2) is True
     assert body.left == 0
     assert raw.read() == b"next"
 
@@ -62,21 +99,21 @@ def test_drain_leaves_a_body_over_the_limit_unread():
     raw = io.BytesIO(b"x" * 11)
     body = request_body.Body(raw, 11)
 
-    assert body.drain(10) is False
+    assert body.drain(10, Connection(), 2) is False
     assert raw.read() == b"x" * 11
 
 
 def test_drain_fails_when_the_body_ends_early():
     body = request_body.Body(io.BytesIO(b"abc"), 10)
 
-    assert body.drain(10) is False
+    assert body.drain(10, Connection(), 2) is False
 
 
 def test_drain_fails_on_an_unknown_length():
     body = request_body.Body(io.BytesIO(b"abc"), None)
 
     assert body.read() == b""
-    assert body.drain(10) is False
+    assert body.drain(10, Connection(), 2) is False
 
 
 def test_close_closes_the_connection_stream():
@@ -106,8 +143,25 @@ def test_a_response_over_an_unread_body_closes_the_connection():
     handler.command, handler.path, handler.client_address = "POST", "/x", ("127.0.0.1", 0)
     handler.close_connection = False
     handler.rfile = request_body.Body(io.BytesIO(b""), None)
+    handler.connection = Connection()
 
     handler.send_response(400)
 
     assert b"Connection: close\r\n" in b"".join(handler._headers_buffer)
     assert handler.close_connection is True
+
+
+def test_a_response_drains_an_unread_body_within_its_wait():
+    handler = ledger_server.Handler.__new__(ledger_server.Handler)
+    handler.request_version, handler.requestline = "HTTP/1.1", "POST /x HTTP/1.1"
+    handler.command, handler.path, handler.client_address = "POST", "/x", ("127.0.0.1", 0)
+    handler.close_connection = False
+    handler.rfile = request_body.Body(io.BytesIO(b"{}"), 2)
+    handler.connection = Connection()
+
+    handler.send_response(403)
+
+    assert handler.rfile.left == 0
+    assert handler.connection.timeouts == [2, None]
+    assert b"Connection: close\r\n" not in b"".join(handler._headers_buffer)
+    assert handler.close_connection is False

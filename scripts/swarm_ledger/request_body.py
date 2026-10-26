@@ -13,12 +13,18 @@ class Body:
             self.left -= len(data)
         return data
 
-    def drain(self, limit: int) -> bool:
+    def drain(self, limit: int, connection, seconds: float) -> bool:
         if self.left is None or self.left > limit:
             return False
-        while self.left:
-            if not self.read(CHUNK):
-                return False
+        connection.settimeout(seconds)
+        try:
+            while self.left:
+                if not self.read(CHUNK):
+                    return False
+        except OSError:
+            return False
+        finally:
+            connection.settimeout(None)
         return True
 
     def close(self) -> None:

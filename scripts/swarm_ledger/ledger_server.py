@@ -93,6 +93,7 @@ WATCH_PASS = threading.Lock()
 HANDOFF = {}
 THREADS_EXHAUSTED = 75
 TLS_HANDSHAKE_S = 10
+DRAIN_S = 2
 PROBE_FILE = ".healthz"
 FILE_ORIGIN = "null"
 MAX_BODY = 1 << 20
@@ -896,7 +897,9 @@ class Handler(BaseHTTPRequestHandler):
         return parsed
 
     def send_response(self, code, message=None):
-        unread = isinstance(getattr(self, "rfile", None), request_body.Body) and not self.rfile.drain(MAX_BODY)
+        unread = isinstance(getattr(self, "rfile", None), request_body.Body) and not self.rfile.drain(
+            MAX_BODY, self.connection, DRAIN_S
+        )
         super().send_response(code, message)
         if unread:
             self.close_connection = True
