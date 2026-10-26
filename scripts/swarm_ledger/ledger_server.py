@@ -872,7 +872,7 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):
         if self.path.startswith("/api/v1/"):
             caller = request_caller(getattr(self, "headers", None))
-            sys.stderr.write(f"{time.strftime('%H:%M:%S')} {self.command} {self.path.split('?', 1)[0]} {caller}\n")
+            sys.stderr.write(f"{time.strftime('%H:%M:%S')} {self.command} {self.path.partition('?')[0]} {caller}\n")
             return
         sys.stderr.write("%s %s\n" % (time.strftime("%H:%M:%S"), fmt % args))
 

@@ -5,9 +5,13 @@ import pytest
 
 
 def headers(**pairs):
+    return {key.replace("_", "-"): value for key, value in pairs.items()}
+
+
+def parsed(**pairs):
     found = Message()
-    for key, value in pairs.items():
-        found[key.replace("_", "-")] = value
+    for key, value in headers(**pairs).items():
+        found[key] = value
     return found
 
 
@@ -36,7 +40,9 @@ def test_an_api_request_log_line_carries_its_caller(capsys, monkeypatch):
 
     monkeypatch.setattr(ledger_server.time, "strftime", lambda fmt: f"<{fmt}>")
     handler = SimpleNamespace(
-        path="/api/v1/ledgers/demo/tasks?limit=100", command="GET", headers=headers(X_Ledger_Agent="engineer@1-1")
+        path="/api/v1/ledgers/demo/tasks?limit=100?cursor=a",
+        command="GET",
+        headers=parsed(X_Ledger_Agent="engineer@1-1"),
     )
     ledger_server.Handler.log_message(handler, '"%s" %s', "GET", "200")
     assert capsys.readouterr().err == "<%H:%M:%S> GET /api/v1/ledgers/demo/tasks engineer@1-1\n"
