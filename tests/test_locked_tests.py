@@ -126,6 +126,9 @@ def test_the_head_defaults_to_the_working_directory(tmp_path, capsys, monkeypatc
         GUARD.replace("        str(1)\n", "        request.node.add_marker('xfail')\n"),
         GUARD.replace("        str(1)\n", "        pytest.exit('x', returncode=0)\n"),
         GUARD.replace("        str(1)\n", "        self.skipTest('x')\n"),
+        GUARD.replace("        str(1)\n", "        raise unittest.SkipTest('x')\n"),
+        GUARD.replace("        str(1)\n", "        os._exit(0)\n"),
+        GUARD.replace('CASES = [("a", 1), ("b", 2)]', "CASES = []"),
         GUARD.replace("        str(1)\n", "        return\n        str(1)\n"),
         GUARD.replace("        str(1)\n", "        if str(1):\n            return\n"),
     ],
@@ -146,6 +149,9 @@ def test_the_head_defaults_to_the_working_directory(tmp_path, capsys, monkeypatc
         "string marker",
         "exit",
         "unittest skip",
+        "unittest SkipTest",
+        "process exit",
+        "empty cases",
         "early return",
         "nested return",
     ],
@@ -165,9 +171,10 @@ def test_returns_inside_nested_definitions_do_not_disable_a_test(tmp_path):
     assert not any(entry["disabled"] for entry in measured.values())
 
 
-def test_a_new_skipped_test_in_a_locked_file_is_red(tmp_path, capsys):
+@pytest.mark.parametrize("decorator", ["@pytest.mark.skip", "@pytest.mark.parametrize('x', [])"])
+def test_a_new_skipped_test_in_a_locked_file_is_red(tmp_path, capsys, decorator):
     base = _tree(tmp_path / "base", GUARD)
-    head = _tree(tmp_path / "head", GUARD + "\n\n@pytest.mark.skip\ndef test_new():\n    assert True\n")
+    head = _tree(tmp_path / "head", GUARD + f"\n\n{decorator}\ndef test_new():\n    assert True\n")
     code, out = _grade(base, head, capsys)
     assert code == 1
     assert f"::error::The locked test {LOCKED}::test_new is skipped, xfailed or returns early.\n" in out

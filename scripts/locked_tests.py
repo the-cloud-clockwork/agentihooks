@@ -15,7 +15,7 @@ LOCKED = tuple(
 )
 MANIFEST = Path("tests/LOCKED_MANIFEST.json")
 FIELDS = ("assertions", "calls", "cases")
-DISABLING = {"skip", "skipif", "xfail", "importorskip", "exit", "skipTest"}
+DISABLING = {"skip", "skipif", "xfail", "importorskip", "exit", "_exit", "skipTest", "SkipTest"}
 CHECKING_CALLS = {"raises", "warns", "deprecated_call", "fail"}
 CONFIGS = (
     "conftest.py",
@@ -148,12 +148,17 @@ def measure(tree: Path) -> dict[str, dict]:
             assertions = _assertions(bodies[key], helpers)
             if not (test or assertions):
                 continue
+            cases = _cases(context, constants)
             measured[key] = {
                 "assertions": assertions,
                 "calls": sum(isinstance(node, ast.Call) for node in bodies[key]),
-                "cases": _cases(context, constants),
+                "cases": cases,
                 "disabled": test
-                and (_disables([*bodies[key], *_nodes(context)], skippers) or _returns_early(function.body)),
+                and (
+                    not cases
+                    or _disables([*bodies[key], *_nodes(context)], skippers)
+                    or _returns_early(function.body)
+                ),
             }
     return measured
 
