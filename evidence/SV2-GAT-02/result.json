@@ -6,7 +6,7 @@
   "dependency_evidence": "SV2-GAT-01 merged into dev as pull request 7417; this package asks the brain that route selected and never chooses one itself.",
   "integration_gate": "G6",
   "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/7478",
-  "pull_request": "pending",
+  "pull_request": "https://github.com/the-cloud-clockwork/agentihooks/pull/7486",
   "package_complete": false,
   "evidence_class": "mocked: an in-process fake brain HTTP surface answering the fixture's scoped, legacy, empty, refused and outage responses stands in for brain-api; hooks run in a temporary home with a fake clock; no network call runs",
   "interfaces": [
@@ -25,7 +25,7 @@
     "brain_ops": "agentibrain-kernel brain-ops project_feed.py writes the projects/<key>.json snapshots whose arc rows carry ref arc:<cluster_id> and whose lesson rows carry content, each with a projects list"
   },
   "states": {
-    "observed": "pending CI run",
+    "observed": "Cases A, B and C each ran twice from independent temporary folders with identical records in https://github.com/the-cloud-clockwork/agentihooks/actions/runs/40312321843 at 4d538173375ce3f161598a7e23bb2f17649d8742; the branch mutation preflight passed at the same commit in https://github.com/the-cloud-clockwork/agentihooks/actions/runs/40312258684.",
     "accepted": "A refresh is accepted when the kernel answers scope project for the requested canonical project id; the memory and revision are then written to the project cache under the session brain and project namespace.",
     "committed": "The project memory cache file and the scoped_feed_fallback_total counter file under the agentihooks home are the only writes; the fleet feed cache is never written by a project refresh.",
     "externally_verified": "Not yet: no deployed session read a project feed from a live brain-api; a live check belongs to the G6 rollout gate."
