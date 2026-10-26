@@ -5,6 +5,7 @@ import re
 import sys
 from pathlib import Path
 
+from hooks.context import brain_routes
 from scripts import gh_config
 from scripts.swarm import brain_binding
 
@@ -304,9 +305,14 @@ def _guard_swarm_brain() -> None:
         os.environ["BRAIN_ENABLED"] = os.environ["BRAIN_WRITER_ENABLED"] = "false"
 
 
+def _route_brain() -> None:
+    _guard_swarm_brain()
+    brain_routes.apply(os.environ)
+
+
 _load_user_env()
 _load_brain_env()
-_guard_swarm_brain()
+_route_brain()
 _ENV_FINGERPRINT = _env_files_fingerprint()
 # The scripts package pin ran before the env files above could set XDG_CONFIG_HOME.
 gh_config.pin(os.environ)
@@ -352,7 +358,7 @@ def reload_brain_env(force: bool = False) -> dict:
 
     _load_user_env(override_file_owned=True)
     _load_brain_env(override_file_owned=True)
-    _guard_swarm_brain()
+    _route_brain()
 
     _feed_dir = Path(AGENTIHOOKS_HOME) / "brain-feed"
     _default = "true" if (_brain_http_configured() or (_feed_dir.is_dir() and any(_feed_dir.glob("*.md")))) else "false"
