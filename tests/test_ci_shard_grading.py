@@ -174,7 +174,7 @@ def test_grouped_download_preserves_shard_integrity_without_installed_dependenci
     assert not any(step.get("name") == "Install grader dependencies" for step in steps)
     prefetch = next(step for step in steps if "python -m scripts.ci_gate_shards" in step.get("run", ""))
     layout = next(step for step in steps if step.get("name") == "Arrange shard verification data")
-    assert steps.index(layout) < steps.index(prefetch) < steps.index(downloads[1])
+    assert steps.index(layout) < steps.index(prefetch) < steps.index(downloads[2])
     root = tmp_path / "shard-data"
     reports = tmp_path / "shard-reports"
     for index, nodeids in enumerate(
