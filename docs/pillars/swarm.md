@@ -699,7 +699,8 @@ minutes at a lower wanted count:
 
 1. The tick sends each extra backend master an inbox item from `swarm`: write a Handoff v2 for the lead master, run
    `agentihooks swarm <id> handoff <doc>` and stop. The tick prints
-   `asked <agent> to hand off retiring seat master-2@<id>`.
+   `asked <agent> to hand off retiring seat master-2@<id>`. From the ask on, the claimants of the retiring seat's
+   tasks belong to the front door: it messages them, and the retiring master no longer does.
 2. When that master has left its seat, the tick retires the seat. Its handoff document reaches `master@<id>` as an
    inbox item. Every open item still at the seat is redirected to `master@<id>`, except the retire request, which
    is withdrawn. The tick prints `retired master seat master-2@<id> after <seconds> seconds`.
