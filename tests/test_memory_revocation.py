@@ -119,8 +119,23 @@ def test_lessons_keep_permitted_support_and_redact_without_it(catalog, propagato
 @pytest.mark.parametrize("domain,lesson_id", [(DOMAIN, "missing"), ("other", "only")])
 def test_an_unknown_or_foreign_lesson_is_withheld(propagator, domain, lesson_id):
     propagator.put_lesson("other", "only", "t", ["s1"])
-    with pytest.raises(revocation.Withheld):
+    with pytest.raises(revocation.Withheld) as raised:
         propagator.lesson(GRANT, domain, lesson_id)
+    assert str(raised.value) == revocation.WITHHELD
+
+
+def test_replay_reads_only_tombstones_after_its_own_cursor(catalog, propagator, monkeypatch):
+    catalog.set_state(DOMAIN, "s1", "deleted", 1, 10.0)
+    propagator.replay(DOMAIN, "packs", 10.0)
+    catalog.set_state(DOMAIN, "s2", "deleted", 1, 11.0)
+    seen = []
+    original = catalog.tombstones
+    monkeypatch.setattr(
+        catalog, "tombstones", lambda domain, after=0: seen.append((domain, after)) or original(domain, after)
+    )
+    propagator.replay(DOMAIN, "packs", 12.0)
+    propagator.replay(DOMAIN, "lessons", 12.0)
+    assert seen == [(DOMAIN, 1), (DOMAIN, 0)]
 
 
 def test_search_projections_of_a_revoked_session_are_removed(catalog, propagator):

@@ -17,7 +17,7 @@ SCHEMA = (
         PRIMARY KEY (access_domain, consumer))""",
     """CREATE TABLE IF NOT EXISTS revocation_applied (
         access_domain TEXT NOT NULL, consumer TEXT NOT NULL, sequence INTEGER NOT NULL, session_uid TEXT NOT NULL,
-        lag_seconds REAL NOT NULL, refs TEXT NOT NULL, PRIMARY KEY (access_domain, consumer, sequence))""",
+        lag_seconds REAL NOT NULL, PRIMARY KEY (access_domain, consumer, sequence))""",
     """CREATE TABLE IF NOT EXISTS context_pack (
         access_domain TEXT NOT NULL, pack_id TEXT NOT NULL, body TEXT NOT NULL, sessions TEXT NOT NULL,
         PRIMARY KEY (access_domain, pack_id))""",
@@ -46,7 +46,7 @@ ADVANCE = (
     "INSERT INTO revocation_cursor VALUES (?, ?, ?) "
     "ON CONFLICT (access_domain, consumer) DO UPDATE SET through = excluded.through"
 )
-APPLIED = "INSERT OR REPLACE INTO revocation_applied VALUES (?, ?, ?, ?, ?, ?)"
+APPLIED = "INSERT OR REPLACE INTO revocation_applied VALUES (?, ?, ?, ?, ?)"
 LAGS = (
     "SELECT consumer, sequence, session_uid, lag_seconds FROM revocation_applied WHERE access_domain = ? "
     "ORDER BY consumer, sequence"
@@ -112,7 +112,7 @@ class Propagator:
             uid = tombstone["session_uid"]
             refs = [] if self._retained(domain, uid) else self.consumers[consumer](domain, uid)
             lag = round(now - tombstone["recorded_at"], 6)
-            self.catalog.db.execute(APPLIED, (domain, consumer, tombstone["sequence"], uid, lag, json.dumps(refs)))
+            self.catalog.db.execute(APPLIED, (domain, consumer, tombstone["sequence"], uid, lag))
             self.catalog.db.execute(ADVANCE, (domain, consumer, tombstone["sequence"]))
         return {"consumer": consumer, "sequence": tombstone["sequence"], "session_uid": uid, "references": refs}
 
@@ -158,6 +158,6 @@ class Propagator:
         if domain != grant.corpus or row is None:
             raise Withheld(WITHHELD)
         permitted = [uid for uid in json.loads(row[1]) if self._retained(domain, uid)]
-        if not permitted or row[0] is None:
+        if not permitted:
             return {"lesson_id": lesson_id, "state": REDACTED, "text": None, "support": []}
         return {"lesson_id": lesson_id, "state": row[2], "text": row[0], "support": permitted}
