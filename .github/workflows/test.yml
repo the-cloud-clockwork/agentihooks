@@ -1630,6 +1630,19 @@ jobs:
 
       # The artifact service download spends none of the App installation's hourly REST budget.
       - name: Download shard reports
+        id: shard-reports
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          pattern: "{durations,flakes}-${{ matrix.python-version }}-*"
+          path: shard-reports
+
+      - name: Wait before downloading shard reports again
+        if: steps.shard-reports.outcome == 'failure'
+        run: sleep 30
+
+      - name: Download shard reports again
+        if: steps.shard-reports.outcome == 'failure'
         uses: actions/download-artifact@v4
         with:
           pattern: "{durations,flakes}-${{ matrix.python-version }}-*"
