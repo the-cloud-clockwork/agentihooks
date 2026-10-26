@@ -39,6 +39,22 @@ def test_mapping_keeps_every_open_item_and_expands_task_ranges():
     }
 
 
+@pytest.mark.parametrize(
+    ("line", "expected"),
+    [
+        ("  1. [open] Item.  [Ledger: t1]  ", {"t1": ["1 Item."]}),
+        ("1. [open] Item. [Ledger: t1", {}),
+        ("1. [open] " + "word " * 2000, {}),
+        ("not numbered [open] Item. [Ledger: t1]", {}),
+        ("1. [open] [Ledger: t1]", {}),
+    ],
+)
+def test_mapping_handles_delimiters_and_untagged_text(line, expected):
+    from scripts.swarm.doc_items import parse
+
+    assert parse(line) == expected
+
+
 def test_mapping_updates_done_tasks_preserves_links_and_is_idempotent():
     from scripts.swarm.doc_items import sync
 

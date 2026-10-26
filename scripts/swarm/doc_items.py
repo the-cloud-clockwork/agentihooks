@@ -23,10 +23,11 @@ def task_ids(tag: str) -> list[str]:
 def parse(document: str) -> dict[str, list[str]]:
     mapping = {}
     for line in document.splitlines():
-        item = re.fullmatch(r"\s*(\d+)\. \[open\] (.+?)\s*\[Ledger:\s*(.*?)\]\s*", line)
-        if item:
+        prefix, separator, tag = line.strip().partition("[Ledger:")
+        item = re.fullmatch(r"(\d+)\. \[open\] (.+)", prefix.rstrip())
+        if item and separator and tag.endswith("]"):
             text = f"{item[1]} {item[2].strip()}"
-            for task in task_ids(item[3]):
+            for task in task_ids(tag[:-1]):
                 links = mapping.setdefault(task, [])
                 if text not in links:
                     links.append(text)
