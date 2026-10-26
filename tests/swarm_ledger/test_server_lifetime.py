@@ -140,7 +140,7 @@ def test_detached_server_stop_deadline_excludes_startup_after_pid_publication(tm
 def test_detached_server_stop_deadline_covers_a_request_held_through_the_drain_bound(
     tmp_path, monkeypatch, ledger_port
 ):
-    held = []
+    held, held_at = [], []
     serving = ledger_link.serving
 
     def hold(**kwargs):
@@ -148,15 +148,19 @@ def test_detached_server_stop_deadline_covers_a_request_held_through_the_drain_b
         if found == str(tmp_path) and not held:
             held.append(socket.create_connection(("127.0.0.1", ledger_port)))
             held[0].sendall(b"GET / HTTP/1.1\r\n")
+            held_at.append(time.monotonic())
         return found
 
     monkeypatch.setattr(ledger_link, "serving", hold)
     try:
         test_detached_server_stops_when_its_run_ends(tmp_path, "exit", True, "--ensure", ledger_port)
+        stopped = time.monotonic()
     finally:
         for connection in held:
             connection.close()
-    assert held
+    from scripts.swarm_ledger import ledger_server
+
+    assert stopped - held_at[0] >= ledger_server.DRAIN_S
 
 
 def fake_process(proc, pid=7, ppid=1, start=99, state="S", comm="python", argv=(b"python",)):
