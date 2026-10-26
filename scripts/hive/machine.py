@@ -45,7 +45,7 @@ def hive_name(ordinal: int) -> str:
     return f"{NAME_PREFIX}{ordinal:03d}"
 
 
-def name(redis: "Redis", machine: str, assign: bool = True, taken: Iterable[str] = ()) -> str:
+def name(redis: "Redis", machine: str, assign: bool = True, taken: Callable[[], Iterable[str]] = tuple) -> str:
     from redis.exceptions import WatchError
 
     with redis.pipeline() as pipe:
@@ -55,7 +55,7 @@ def name(redis: "Redis", machine: str, assign: bool = True, taken: Iterable[str]
                 named = pipe.hgetall(MACHINES)
                 if machine in named:
                     return named[machine]
-                used = {*named.values(), *taken}
+                used = {*named.values(), *taken()}
                 found = next(hive_name(ordinal) for ordinal in count(1) if hive_name(ordinal) not in used)
                 if assign:
                     pipe.multi()
@@ -64,6 +64,13 @@ def name(redis: "Redis", machine: str, assign: bool = True, taken: Iterable[str]
                 return found
             except WatchError:
                 continue
+
+
+def taken(redis: "Redis", run: Callable[..., subprocess.CompletedProcess]) -> set[str]:
+    members = {redis.hget(key, "name") for key in redis.scan_iter(match=f"{auth.PREFIX}:member:*")}
+    hives = {record["name"] for record in registry.hives(redis)}
+    herdr = {saved.get("label") for saved in _listed(run)}
+    return {label for label in members | hives | herdr if label}
 
 
 def host(target: str) -> str:

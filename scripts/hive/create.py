@@ -95,7 +95,9 @@ def _start(tools: Tools, options: Options) -> dict:
     if saved.get("name") and not saved.get("finished"):
         tools.out(f"hive create {saved['name']}: resuming the unfinished create")
         return saved
-    name = machine.name(tools.redis, options.node, assign=not options.dry_run, taken=_taken(tools))
+    name = machine.name(
+        tools.redis, options.node, assign=not options.dry_run, taken=lambda: machine.taken(tools.redis, tools.run)
+    )
     if saved.get("name") == name:
         tools.out(f"hive create {name}: redeploying the hive of node {options.node}")
         return {**saved, "finished": False}
@@ -103,13 +105,6 @@ def _start(tools: Tools, options: Options) -> dict:
     lan_ip = create_render.lan_address(services)
     port = create_render.kept_port(services, name) or create_render.next_port(services, lan_ip)
     return {"name": name, "record": invite.default_path(name), "ssh_port": port, "lan_ip": lan_ip, "node": options.node}
-
-
-def _taken(tools: Tools) -> set[str]:
-    members = {tools.redis.hget(key, "name") for key in tools.redis.scan_iter(match=f"{auth.PREFIX}:member:*")}
-    hives = {record["name"] for record in registry.hives(tools.redis)}
-    herdr = {saved.get("label") for saved in machine._listed(tools.run)}
-    return {name for name in members | hives | herdr if name}
 
 
 def _save(tools: Tools) -> None:

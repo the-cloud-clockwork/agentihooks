@@ -463,12 +463,12 @@ def test_remove_of_hive_three_leaves_live_hive_two_untouched(store, tmp_path):
 
 
 def test_a_label_another_hive_member_holds_is_refused_as_the_default(store):
-    two, three = _member(store, "swarm-hive-002"), _member(store, "swarm-hive-002")
+    live, duplicate = _member(store, "swarm-hive-002"), _member(store, "swarm-hive-002")
 
     with pytest.raises(auth.HiveError) as refused:
-        remove.label(store.redis, three)
+        remove.label(store.redis, duplicate)
 
     assert str(refused.value) == (
-        f"hive {three} is named swarm-hive-002, a name hive {two} also holds, so its herdr machine "
+        f"hive {duplicate} is named swarm-hive-002, a name hive {live} also holds, so its herdr machine "
         "could be the other hive's; pass --label"
     )

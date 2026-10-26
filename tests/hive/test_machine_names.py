@@ -230,11 +230,13 @@ def test_remove_stages_the_files_of_a_hive_that_hive_create_named(tmp_path):
 def test_a_new_machine_skips_every_name_a_live_hive_already_holds(admin):
     admin.hset(machine.MACHINES, "worker-001", "swarm-hive-001")
 
-    assert machine.name(admin, "worker-002", taken={"swarm-hive-002", "anton-9"}) == "swarm-hive-003"
+    assert machine.name(admin, "worker-002", taken=lambda: {"swarm-hive-002", "anton-9"}) == "swarm-hive-003"
     assert admin.hgetall(machine.MACHINES) == {"worker-001": "swarm-hive-001", "worker-002": "swarm-hive-003"}
 
 
 def test_a_known_machine_keeps_its_name_even_when_it_is_taken(admin):
     admin.hset(machine.MACHINES, "worker-002", "swarm-hive-002")
 
-    assert machine.name(admin, "worker-002", taken={"swarm-hive-002"}) == "swarm-hive-002"
+    assert machine.name(admin, "worker-002", taken=lambda: pytest.fail("a known machine reads no taken names")) == (
+        "swarm-hive-002"
+    )

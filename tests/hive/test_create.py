@@ -616,7 +616,10 @@ def test_a_new_node_beside_live_hives_one_and_two_is_named_hive_three(world):
     ]
     world.run.on_merge = lambda: None
 
-    with pytest.raises(auth.HiveError, match="heartbeat"):
+    with pytest.raises(
+        auth.HiveError,
+        match=r"^timed out after 0s waiting for hive [0-9a-f]{16} to send a heartbeat; rerun hive create to resume$",
+    ):
         create.create(world.tools, create.Options(node="worker-002", timeout_s=0))
 
     assert _state(world)["name"] == "swarm-hive-003"

@@ -60,7 +60,7 @@ def label(redis: "Redis", hive: str) -> str:
     if not name:
         raise auth.HiveError(f"hive {hive} holds no member record to name it; pass --label")
     for key in redis.scan_iter(match=member_key("*")):
-        other = key.rsplit(":", 1)[1]
+        other = key.removeprefix(member_key(""))
         if other != hive and redis.hget(key, "name") == name:
             raise auth.HiveError(
                 f"hive {hive} is named {name}, a name hive {other} also holds, so its herdr machine "
