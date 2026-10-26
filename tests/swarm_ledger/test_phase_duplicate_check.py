@@ -278,3 +278,27 @@ def test_an_append_with_no_repeat_passes_through_unchanged():
     assert gate.apply({"phases": []}, plan, ctx, "apply") is True
     assert gate.inner.applied == [(plan, "apply")] and ctx.refused == []
     assert gate.screen.warnings == {}
+
+
+def test_an_append_the_locked_apply_refuses_is_not_flagged():
+    screen = ledger_task_duplicates.Screen(seen=frozenset({"phases/p10"}))
+    gate = ledger_task_duplicates.Gate(screen, Inner(accepted=False))
+    doc = {"phases": [{"id": "p4", "title": "Landed meanwhile"}]}
+    assert gate.apply(doc, append(entry("p10", OTHER)), SimpleNamespace(refused=[]), "apply") is False
+    assert screen.warnings == {}
+
+
+def test_a_phase_with_a_reason_is_not_flagged_for_phases_that_landed_during_the_write():
+    screen = ledger_task_duplicates.Screen(seen=frozenset({"phases/p9"}))
+    gate = ledger_task_duplicates.Gate(screen, Inner())
+    doc = {"phases": [{"id": "p4", "title": AGAIN}]}
+    assert gate.apply(doc, phase("p9", not_duplicate="the docs site"), None, "apply") is True
+    assert screen.warnings == {}
+
+
+def test_a_phase_add_naming_a_phase_already_on_the_ledger_is_not_screened(monkeypatch):
+    asked = []
+    monkeypatch.setattr(ledger_task_duplicates, "find", lambda doc, adds, kind: asked.append(adds) or [None])
+    screen = ledger_task_duplicates.screen({"phases": [{"id": "p1", "title": AGAIN}]}, [phase("p1"), phase("p9")])
+    assert [[add["phase"] for add in adds] for adds in asked] == [["p9"]]
+    assert screen.seen == frozenset({"phases/p1", "phases/p9"})

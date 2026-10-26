@@ -95,7 +95,8 @@ class Gate:
 
 def screen(doc: dict, ops: list[dict]) -> Screen:
     items = [item for op in ops for item in _items(op)]
-    adds = [item for item in items if checked(item)]
+    held = {p["id"] for p in doc.get("phases", [])}
+    adds = [item for item in items if checked(item) and not (item["op"] == "phase_add" and item["phase"] in held)]
     if not adds:
         return Screen()
     refused, warnings = {}, {}
@@ -174,9 +175,7 @@ def _new(op):
 def _items(op):
     if op["op"] != "phase_append":
         return [op]
-    return [
-        {**entry, "op": "phase_add", "id": f"{op['id']}/{entry['phase']}", "by": op["by"]} for entry in op["phases"]
-    ]
+    return [{**entry, "op": "phase_add", "id": f"{op['id']}/{entry['phase']}"} for entry in op["phases"]]
 
 
 def _phase(phase_id):
