@@ -5,6 +5,8 @@ from pathlib import Path
 import pytest
 import yaml
 
+from tests.mutation_sandbox_input_proof import REPORT_ARTIFACT, nested_report
+
 _ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -198,8 +200,6 @@ def test_proofs_reuse_selected_mutation_and_smoke_execution():
 
 
 def test_a_nested_report_with_workflow_command_text_stays_out_of_the_log(tmp_path):
-    from tests.mutation_sandbox_input_proof import REPORT_ARTIFACT, nested_report
-
     planted = "tests/test_plant.py::test_case[##[error]planted]"
     junit = tmp_path / "source-7.xml"
     junit.write_text(
@@ -220,8 +220,6 @@ def test_a_nested_report_with_workflow_command_text_stays_out_of_the_log(tmp_pat
 
 
 def test_focused_proofs_upload_every_nested_report():
-    from tests.mutation_sandbox_input_proof import REPORT_ARTIFACT
-
     steps = _workflow()["jobs"]["tests"]["steps"]
     run = next(s for s in steps if s.get("name") == "Run selected tests")
     upload = next(s for s in steps if s.get("name") == "Retain nested proof reports")

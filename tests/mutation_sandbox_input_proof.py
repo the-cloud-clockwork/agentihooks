@@ -25,7 +25,10 @@ def nested_report(result: subprocess.CompletedProcess, junit: Path) -> str:
             f"{key} {sum(int(suite.get(key, 0)) for suite in suites)}"
             for key in ("tests", "failures", "errors", "skipped")
         )
-    return f"nested pytest exited {result.returncode}; {counts}; read {junit.name} and {log.name} in the {REPORT_ARTIFACT} artifact"
+    return (
+        f"nested pytest exited {result.returncode}; {counts}; "
+        f"read {junit.name} and {log.name} in the {REPORT_ARTIFACT} artifact"
+    )
 
 
 @pytest.mark.parametrize(
