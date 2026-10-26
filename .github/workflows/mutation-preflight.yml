@@ -382,6 +382,13 @@ jobs:
           path: .mutation-stats
           merge-multiple: true
 
+      - name: Restore the merged test stats
+        uses: actions/cache/restore@v4
+        with:
+          path: .mutation-stats-cache
+          key: mutation-test-stats-v2-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: mutation-test-stats-v2-${{ runner.os }}-
+
       - name: Download every part's test stats cache
         uses: actions/download-artifact@v4
         with:

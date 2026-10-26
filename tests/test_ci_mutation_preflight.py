@@ -344,6 +344,8 @@ def test_every_stats_part_restores_one_merged_cache_saved_once_after_all_parts_f
     assert [step for step in steps if step.get("uses", "").startswith("actions/cache/save")] == [single]
     assert not part["with"]["name"].startswith("mutation-stats-")
     refine_steps, refine_names = _steps(jobs["refine"])
+    base = refine_steps[refine_names.index("Restore the merged test stats")]
+    assert base == restore
     download = refine_steps[refine_names.index("Download every part's test stats cache")]
     assert download["uses"] == "actions/download-artifact@v4"
     assert download["with"] == {
@@ -355,7 +357,7 @@ def test_every_stats_part_restores_one_merged_cache_saved_once_after_all_parts_f
     assert merged["uses"] == "actions/cache/save@v4"
     assert merged["if"] == "success() && hashFiles('.mutation-stats-cache/**') != ''"
     assert merged["with"] == {"path": ".mutation-stats-cache", "key": key}
-    assert refine_names.index(download["name"]) < refine_names.index(merged["name"])
+    assert refine_names.index(base["name"]) < refine_names.index(download["name"]) < refine_names.index(merged["name"])
     assert "matrix.part" not in str([restore, single, merged])
 
 
