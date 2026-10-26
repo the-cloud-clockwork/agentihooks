@@ -96,7 +96,7 @@ def _start(tools: Tools, options: Options) -> dict:
         tools.out(f"hive create {saved['name']}: resuming the unfinished create")
         return saved
     name = machine.name(
-        tools.redis, options.node, assign=not options.dry_run, taken=lambda: machine.taken(tools.redis, tools.run)
+        tools.redis, options.node, assign=not options.dry_run, taken=lambda: machine.held_names(tools.redis, tools.run)
     )
     if saved.get("name") == name:
         tools.out(f"hive create {name}: redeploying the hive of node {options.node}")

@@ -66,7 +66,7 @@ def name(redis: "Redis", machine: str, assign: bool = True, taken: Callable[[], 
                 continue
 
 
-def taken(redis: "Redis", run: Callable[..., subprocess.CompletedProcess]) -> set[str]:
+def held_names(redis: "Redis", run: Callable[..., subprocess.CompletedProcess]) -> set[str]:
     members = {redis.hget(key, "name") for key in redis.scan_iter(match=f"{auth.PREFIX}:member:*")}
     hives = {record["name"] for record in registry.hives(redis)}
     herdr = {saved.get("label") for saved in _listed(run)}
