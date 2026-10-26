@@ -331,6 +331,16 @@ jobs:
       - name: Run selected tests
         env:
           PYTHONUNBUFFERED: '1'
+          PROOF_REPORT_DIR: ${{ runner.temp }}/proof-reports
         run: |
           read -r -a paths <<< "$TEST_PATHS"
           workers=$(python -m scripts.ci_cpu_quota) && python -m pytest "${paths[@]}" -v -n "$workers" --dist loadgroup -p tests.flake_ledger --tb=short
+
+      - name: Retain nested proof reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: proof-reports
+          path: ${{ runner.temp }}/proof-reports
+          if-no-files-found: ignore
+          retention-days: 7
