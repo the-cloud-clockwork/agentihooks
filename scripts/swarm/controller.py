@@ -201,7 +201,12 @@ class FencedRuntime:
             return waited.reason
         found, held, local_max = self._workstation_room(machine, task)
         refused = f": {found.reason}: {found.detail}"
-        chosen = overflow(waited.role, waited, held, local_max)
+        reserved = (
+            0
+            if task.get("workstation")
+            else placement_waits.workstation_waiting(self.store, lease.now_ms(self.store), f"{self.slug}/{task['id']}")
+        )
+        chosen = overflow(waited.role, waited, held, local_max, reserved)
         if not isinstance(chosen, Choice):
             if LOCAL_FULL not in chosen.reason:
                 return chosen.reason
@@ -209,7 +214,8 @@ class FencedRuntime:
             return chosen.reason + refused
         if (
             claim
-            and (taken := local_slots.claim(self.store, machine, self.slug, task["id"], claim, local_max)) >= local_max
+            and (taken := local_slots.claim(self.store, machine, self.slug, task["id"], claim, local_max - reserved))
+            >= local_max - reserved
         ):
             self._local_full(machine, taken, local_max)
             return f"{waited.reason}{LOCAL_FULL}{taken} of its {local_max} agents{refused}"

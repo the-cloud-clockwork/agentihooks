@@ -146,11 +146,12 @@ def place(role: str, harness: str, slot: str, route_kind: str, repo: str, hives:
     return chosen.hive if isinstance(chosen, Choice) else chosen
 
 
-def overflow(role: str, waited: Wait, local_agents: int, local_max: int) -> Choice | Wait:
+def overflow(role: str, waited: Wait, local_agents: int, local_max: int, reserved: int = 0) -> Choice | Wait:
     if role in UI_ROLES:
         return waited
-    if local_agents >= local_max:
-        return Wait(f"{waited.reason}{LOCAL_FULL}{local_agents} of its {local_max} agents")
+    if local_agents + reserved >= local_max:
+        kept = f" with {reserved} kept for waiting workstation tasks" if reserved else ""
+        return Wait(f"{waited.reason}{LOCAL_FULL}{local_agents} of its {local_max} agents{kept}")
     return Choice(LOCAL_MACHINE, waited.reason)
 
 
