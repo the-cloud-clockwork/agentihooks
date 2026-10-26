@@ -57,11 +57,12 @@ class FileLedger(LedgerClient):
 
 
 @pytest.fixture
-def env(monkeypatch, tmp_path):
+def env(monkeypatch, memory_path):
     import fakeredis
 
-    monkeypatch.setattr(core, "LEDGER_DIR", tmp_path)
-    monkeypatch.setenv("LEDGER_DIR", str(tmp_path))
+    monkeypatch.setattr(core, "LEDGER_DIR", memory_path)
+    monkeypatch.setenv("LEDGER_DIR", str(memory_path))
+    monkeypatch.setenv("AGENTIHOOKS_SWARM_SNAPSHOT_MINUTES", "0")
     content = {"title": "Watched work", "overview": "o", "phases": [{"title": "One", "description": "d"}]}
     assert new_ledger.create(WATCHED, content)
     store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
@@ -71,12 +72,12 @@ def env(monkeypatch, tmp_path):
     monkeypatch.setattr(swarm_cli, "HerdrRuntime", lambda: rt)
     monkeypatch.setattr(swarm_cli.timer, "ensure", lambda binary: True)
     monkeypatch.setattr(swarm_cli.delivery, "HerdrMessenger", lambda: FakeHerdr({}))
-    monkeypatch.setattr(doctor, "linked_bundle", lambda: tmp_path / "bundle")
+    monkeypatch.setattr(doctor, "linked_bundle", lambda: memory_path / "bundle")
     monkeypatch.setattr(doctor.detect, "readers", lambda *args, **kwargs: {})
     monkeypatch.setattr(doctor.loop, "speed", lambda *args: [])
     monkeypatch.setattr("hooks.context.broadcast.session_name", lambda pid: "")
     assert swarm_cli.main([WATCHED, "create", "--repo", "/repo"]) == 0
-    return store, rt, tmp_path
+    return store, rt, memory_path
 
 
 def state(slug):
