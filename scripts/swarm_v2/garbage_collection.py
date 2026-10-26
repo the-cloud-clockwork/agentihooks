@@ -75,7 +75,16 @@ class Report:
     protected: dict[str, list[str]] = field(
         default_factory=lambda: {
             name: []
-            for name in ("authoritative", "live", "rebound", "unowned", "altered", "active_index", "index_in_use")
+            for name in (
+                "authoritative",
+                "live",
+                "rebound",
+                "missing",
+                "unowned",
+                "altered",
+                "active_index",
+                "index_in_use",
+            )
         }
     )
 
@@ -248,7 +257,11 @@ def _uploads(catalog: Catalog, store: archive.ObjectStore, plan: Plan, report: R
     pinned = archived | plan.references()
     for name in sorted(files.keys() | reserved):
         if name in pinned:
-            report.keep("rebound" if plan.destructive and _settle(catalog, name) else "authoritative", name)
+            settled = plan.destructive and _settle(catalog, name)
+            if settled and name not in files:
+                report.keep("missing", name, rejected=True)
+            else:
+                report.keep("rebound" if settled else "authoritative", name)
             continue
         reason = _owner(catalog, plan, name)
         if reason is not None:

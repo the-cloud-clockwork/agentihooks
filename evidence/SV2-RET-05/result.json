@@ -20,7 +20,7 @@
     "scripts.swarm_v2.garbage_collection.collect deletes an object only with an expired reservation past grace held by the grant's domain alone, no archive manifest or checkpoint reference and bytes that hash to its name; it drops a retired generation past grace that is not active and took no work after retirement; with destructive off it deletes and claims nothing and writes no rows, creating only the collector's own tables when they are missing; another domain's objects are counted, never named",
     "python -m scripts.swarm_v2.garbage_collection inventory|collect|retire for operators; --principal is required and collect refuses to run without a --references list"
   ],
-  "metrics": "garbage_collection_bytes counts reclaimed object bytes plus dropped vector text bytes; unsafe_delete_rejections counts unowned objects (no reservation, another domain's reservation, a name outside the managed shard layout) and objects whose bytes do not hash to their reserved name",
+  "metrics": "garbage_collection_bytes counts reclaimed object bytes plus dropped vector text bytes; unsafe_delete_rejections counts unowned objects (no reservation or a name outside the managed shard layout), objects reserved by another domain (counted in foreign_domain_objects, never named), objects whose bytes do not hash to their reserved name, and referenced objects whose bytes a crashed run already deleted",
   "mocked": true,
   "outcomes": {
     "accepted": "a reservation row or a retirement row in the catalog",
@@ -33,7 +33,7 @@
   "remaining_limitations": [
     "No live upload path reserves yet; the collector and spool do not write archive objects to this store, so collect reclaims only reservation backed uploads made through Reservations.",
     "Checkpoint references come from a caller supplied set; there is no persisted checkpoint reference index in the catalog.",
-    "A reference added outside the catalog after collect's last reference read and before its unlink is not fenced; collect rereads references immediately before each unlink to narrow that window. A crash after an unlink and before its reservation rows are dropped leaves a claim with no bytes, and a later reference to that digest settles the claim as rebound although the bytes are gone; archive evidence reads still report the object missing.",
+    "A reference added outside the catalog after collect's last reference read and before its unlink is not fenced; collect rereads the archive manifest and references immediately before each unlink to narrow that window. A crash after an unlink leaves a claim with no bytes; a later reference to that digest is reported missing and counted as an unsafe delete rejection.",
     "No scheduler runs collect; an operator or job invokes it.",
     "The grant principal is not checked against an operator role; the grant corpus scopes ownership, and the command line builds its grant from the domain an operator names.",
     "Two collect runs over one domain are not fenced against each other; the caller runs one collector per domain. A second run treats the first run's claims as resumable and both can count the same bytes."

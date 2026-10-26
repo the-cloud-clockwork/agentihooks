@@ -287,6 +287,18 @@ def test_a_reference_found_at_the_claim_keeps_a_live_attempts_reservation(world)
     assert sorted(states) == [(world.domain, 1100.0, "reserved"), (world.domain, 5000.0, "reserved")]
 
 
+def test_a_reference_to_bytes_a_crashed_run_already_deleted_is_reported_missing(world):
+    target = world.uploads["abandoned"]
+    world.catalog.db.execute(gc.CLAIM, (gc.COLLECTING, target))
+    world.store._path(target).unlink()
+    world.pinned.add(target)
+    report = world.collect()
+    assert report["protected"]["missing"] == [target]
+    assert target not in report["protected"]["rebound"]
+    assert report[gc.REJECTIONS] == 5
+    assert world.catalog.db.execute(gc.DIGEST_STATES, (target,)).fetchall() == []
+
+
 def test_a_missing_store_folder_collects_only_reservations(tmp_path):
     world = cases.World(tmp_path / "w")
     plan = world.plan()
