@@ -630,3 +630,30 @@ def test_a_session_start_with_only_a_shared_database_starts_the_local_ledger_ser
     monkeypatch.setenv(postgres.URL, ADDRESS)
     ledger_hook.serve_ledgers()
     assert started == [[str(ledger_hook.HERE / "ledger_server.py"), "--ensure"]]
+
+
+def test_a_stream_reads_through_a_named_server_cursor_two_thousand_rows_at_a_time(monkeypatch):
+    made = []
+
+    class Named:
+        def __init__(self, name):
+            self.name, self.itersize, self.ran = name, None, None
+
+        def execute(self, sql, parameters):
+            self.ran = (sql, parameters)
+
+    class Streaming(Raw):
+        def cursor(self, name=None):
+            made.append(Named(name))
+            return made[-1]
+
+    monkeypatch.setattr(postgres, "POOLS", {})
+    monkeypatch.setattr(psycopg2, "connect", lambda address, **settings: Streaming())
+    connection = postgres.Connection(ADDRESS)
+    first = connection.stream("SELECT path FROM fields WHERE slug=?", ("s",))
+    second = connection.stream("SELECT 1")
+    assert made == [first, second]
+    assert first.itersize == second.itersize == 2000
+    assert first.ran == ("SELECT path FROM fields WHERE slug=%s", ("s",))
+    assert second.ran == ("SELECT 1", ())
+    assert first.name.startswith("stream_") and second.name.startswith("stream_") and first.name != second.name

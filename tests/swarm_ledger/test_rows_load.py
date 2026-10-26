@@ -52,6 +52,22 @@ def test_load_reads_only_the_named_ledger():
         load(connection, "missing")
 
 
+def test_load_reads_through_the_connection_stream_when_it_has_one():
+    inner = stored({"a": [1, {"b": 2}]})
+    streamed = []
+
+    class Streaming:
+        def stream(self, sql, parameters):
+            streamed.append(sql)
+            return inner.execute(sql, parameters)
+
+        def execute(self, sql, parameters):
+            raise AssertionError("buffered read")
+
+    assert load(Streaming(), SLUG) == {"a": [1, {"b": 2}]}
+    assert len(streamed) == 6
+
+
 def test_a_cold_ledger_read_never_holds_every_stored_row_at_once(tmp_path, monkeypatch):
     from tests.swarm_ledger.test_task_list_memory import document
 
