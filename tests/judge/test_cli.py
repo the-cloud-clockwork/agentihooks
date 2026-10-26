@@ -1,3 +1,4 @@
+import hashlib
 import json
 from datetime import UTC, datetime
 from pathlib import Path
@@ -275,3 +276,63 @@ def test_the_record_build_is_fixed_by_its_inputs():
 
 def test_the_cli_delegates_judge_to_this_module():
     assert cli_delegates.delegated_cli(["judge", "--case", "x"]) is cli.main
+
+
+def test_the_help_names_the_command_its_purpose_and_the_record_default(capsys, monkeypatch):
+    monkeypatch.setenv("COLUMNS", "200")
+    with pytest.raises(SystemExit):
+        cli.parse(["--help"])
+    text = capsys.readouterr().out
+    assert text.startswith("usage: agentihooks judge ")
+    assert "Judge a case against an evidence set" in text
+    assert "verdict record path, default <case>.verdict.json" in text
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["--case", "c.json"],
+        ["--case", "c.json", "--evidence", "e.json", "--tier", "medium"],
+        ["--case", "c.json", "--evidence", "e.json", "--harness", "gemini"],
+    ],
+)
+def test_the_parser_refuses_a_missing_evidence_or_an_unknown_choice(argv, capsys):
+    with pytest.raises(SystemExit) as raised:
+        cli.parse(argv)
+    assert raised.value.code == 2
+    assert capsys.readouterr().err.startswith("usage: agentihooks judge ")
+
+
+def test_the_parser_takes_every_tier_and_harness():
+    for tier in ("high", "low"):
+        for harness in ("auto", "claude", "codex"):
+            args = cli.parse(["--case", "c", "--evidence", "e", "--tier", tier, "--harness", harness])
+            assert (args.tier, args.harness) == (tier, harness)
+
+
+def test_the_judge_input_is_indented_json_of_the_shuffled_items(monkeypatch):
+    monkeypatch.setattr(schema, "shuffled", lambda items: list(reversed(items)))
+    evidence = _evidence("a", "b")
+    expected = {"case": CASE, "evidence": {"items": list(reversed(evidence["items"]))}}
+    assert cli.judge_input(CASE, evidence) == json.dumps(expected, indent=2)
+
+
+def test_the_sent_back_findings_print_as_indented_json(files, fake_runner, filters, capsys):
+    case_path, evidence_path = files()
+    fake_runner()
+    filters(FilterOutcome("deny", "one\ntwo"))
+
+    assert cli.main(["--case", str(case_path), "--evidence", str(evidence_path)]) == 3
+    expected = json.dumps({"sent_back": True, "findings": ["one", "two"]}, indent=2) + "\n"
+    assert capsys.readouterr().out == expected
+
+
+def test_the_digest_hashes_compact_sorted_json():
+    expected = hashlib.sha256(b'{"a":[1,2],"b":"x"}').hexdigest()
+    assert record.digest({"b": "x", "a": [1, 2]}) == expected
+
+
+def test_the_record_write_creates_missing_parent_folders(tmp_path):
+    path = tmp_path / "a" / "b" / "verdict.json"
+    assert record.write(path, {"verdict": "pass"}) == path
+    assert path.read_text() == '{\n  "verdict": "pass"\n}\n'
