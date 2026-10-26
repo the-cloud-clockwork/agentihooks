@@ -8,6 +8,8 @@ ANCHOR_RE = re.compile(r"^[\w.-]{1,64}$")
 ADDRESS_RE = re.compile(r"^(?:ledgers/(?P<ledger>[^/\s]+)/)?(?P<kind>[^/\s]+)/(?P<id>[^/\s]+)$")
 AUTHOR_RE = re.compile(r"^[A-Za-z][\w.@-]{0,63}$")
 URL_RE = re.compile(r"^https?://[^\s]+$")
+SOURCE_KEYS = {"harness", "session", "path", "sha256"}
+SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 LINKS = ("artifact", "url")
 NOUNS = {"plans": "plan", "phases": "phase", "slices": "slice"}
 PARENTS = (("phases", "plan"), ("tasks", "slice"))
@@ -23,13 +25,14 @@ def check(op: dict) -> None:
         if not isinstance(op.get("phase"), str) or not isinstance(anchor, str) or not ANCHOR_RE.fullmatch(anchor):
             raise ValueError("slice_add needs phase and an anchor")
         return
-    if set(op) - {"op", "id", "by", "plan", "title", *LINKS}:
-        raise ValueError("plan_add takes only plan title artifact url")
+    if set(op) - {"op", "id", "by", "plan", "title", "source", *LINKS}:
+        raise ValueError("plan_add takes only plan title artifact url source")
     if not isinstance(op.get("plan"), str) or not PLAN_RE.fullmatch(op["plan"]):
         raise ValueError("plan_add needs plan, an id of letters, digits, _ and -")
     if not isinstance(op.get("title"), str) or not op["title"].strip():
         raise ValueError("plan_add needs a title")
     check_links(op)
+    check_source(op)
 
 
 def check_links(fields: dict) -> None:
@@ -37,6 +40,20 @@ def check_links(fields: dict) -> None:
         value = fields.get(key, "")
         if not isinstance(value, str) or value and not URL_RE.fullmatch(value):
             raise ValueError(f"{key} must be an http or https link")
+
+
+def check_source(op: dict) -> None:
+    if "source" not in op:
+        return
+    source = op["source"]
+    if (
+        not isinstance(source, dict)
+        or set(source) != SOURCE_KEYS
+        or not all(isinstance(value, str) and value for value in source.values())
+    ):
+        raise ValueError("source needs harness, session, path and sha256, each a non-empty string")
+    if not SHA256_RE.fullmatch(source["sha256"]):
+        raise ValueError("source.sha256 must be 64 lowercase hex characters")
 
 
 def validate(doc: dict) -> None:
@@ -248,7 +265,12 @@ def apply(doc: dict, op: dict, ctx) -> bool:
 
 def add_plan(doc: dict, op: dict, ctx) -> str:
     plans = doc.setdefault("plans", [])
-    plan = {"id": op["plan"], "title": op["title"].strip(), **{key: op.get(key, "") for key in LINKS}}
+    plan = {
+        "id": op["plan"],
+        "title": op["title"].strip(),
+        **{key: op.get(key, "") for key in LINKS},
+        **({"source": op["source"]} if "source" in op else {}),
+    }
     if existing := next((row for row in plans if row["id"] == plan["id"]), None):
         return "" if existing == plan else f"plan {plan['id']} already exists"
     plans.append(plan)

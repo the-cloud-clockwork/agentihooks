@@ -230,7 +230,32 @@ def test_legacy_plan_fields_are_checked_against_the_new_parents():
         ({"op": "plan_add", "plan": "a", "title": "A", "artifact": 1}, "artifact must be an http or https link"),
         ({"op": "slice_add", "phase": "phases/p1", "anchor": "bad anchor"}, "slice_add needs phase and an anchor"),
         ({"op": "slice_add", "phase": 3, "anchor": "first"}, "slice_add needs phase and an anchor"),
-        ({"op": "plan_add", "plan": "a", "title": "A", "extra": 1}, "plan_add takes only plan title artifact url"),
+        (
+            {"op": "plan_add", "plan": "a", "title": "A", "extra": 1},
+            "plan_add takes only plan title artifact url source",
+        ),
+        (
+            {"op": "plan_add", "plan": "a", "title": "A", "source": {"harness": "claude"}},
+            "source needs harness, session, path and sha256, each a non-empty string",
+        ),
+        (
+            {
+                "op": "plan_add",
+                "plan": "a",
+                "title": "A",
+                "source": {"harness": "", "session": "s1", "path": "/p", "sha256": "a" * 64},
+            },
+            "source needs harness, session, path and sha256, each a non-empty string",
+        ),
+        (
+            {
+                "op": "plan_add",
+                "plan": "a",
+                "title": "A",
+                "source": {"harness": "claude", "session": "s1", "path": "/p", "sha256": "ZZ"},
+            },
+            "source.sha256 must be 64 lowercase hex characters",
+        ),
     ],
 )
 def test_malformed_plan_ops_are_refused(op, error):
@@ -326,6 +351,16 @@ def test_plan_and_slice_ops_start_their_collections_and_record_events():
     assert ctx.refused == []
 
 
+def test_plan_add_with_a_source_stores_it_and_an_operator_by_is_accepted():
+    doc, ctx = {}, Recorder()
+    source = {"harness": "claude", "session": "s-1", "path": "/tmp/plan.md", "sha256": "a" * 64}
+    op = {"op": "plan_add", "by": "operator", "plan": "a", "title": "Plan", "source": source}
+    ledger_plans.check(op)
+    assert ledger_plans.apply(doc, op, ctx)
+    assert doc["plans"] == [{"id": "a", "title": "Plan", "artifact": "", "url": "", "source": source}]
+    assert ctx.refused == []
+
+
 def test_a_document_without_plan_collections_validates():
     assert ledger_plans.validate({}) is None
     assert ledger_plans.validate({"phases": [{"id": "p1"}], "tasks": [{"id": "t1"}]}) is None
@@ -411,6 +446,9 @@ def test_plan_ops_target_their_collections_and_artifacts_keep_a_boolean_plan():
     assert schemas.target({"op": "slice_add"}) == "slices"
     assert schemas.operation_schema("artifact_add")["properties"]["plan"] == {"type": "boolean"}
     assert schemas.operation_schema("plan_add")["properties"]["plan"]["type"] == "string"
+    assert schemas.operation_schema("plan_add")["properties"]["source"] == {"type": "object"}
+    bad_source = {"op": "plan_add", "id": "x", "source": "nope"}
+    assert schemas.mismatched_field(schemas.operation_schema("plan_add"), bad_source) == "source"
 
 
 PLANNED = {
