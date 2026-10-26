@@ -221,12 +221,7 @@ def _from_markdown(text: str, name: str, existing: set[str]) -> Normalized:
         raise PlanError(errors)
     slices = {}
     for j, phase, row in zip(markers.values(), phases, ranged):
-        rng = ranges[row["id"]]
-        slices[phase["title"]] = plan_ranges.slice_anchors(text, rng)
-        start, end = plan_ranges.bounds(rng)
-        if not slices[phase["title"]] and any(level for n, level, _ in entries if start < n <= end):
-            errors.append(f"phase {phase['title']!r} has no slice markers, so it holds prose only")
-        phase["description"] = _phase_description(entries, entries[j][0], end)
+        slices[phase["title"]] = _phase_slices(text, entries, phase, entries[j][0], ranges[row["id"]], errors)
     if errors:
         raise PlanError(errors)
     title = next((text for _, level, text in entries if level == 1), None) or _stem(name)
@@ -248,6 +243,15 @@ def _slice_names(entries: list, marked: bool) -> list[str]:
         raise PlanError(["slice markers need phase markers above them"])
     if repeated := sorted({name for name in names if names.count(name) > 1}):
         raise PlanError([f"each slice marker needs its own name in the file: {', '.join(repeated)}"])
+    return names
+
+
+def _phase_slices(text: str, entries: list, phase: dict, marker_line: int, rng: str, errors: list[str]) -> list[str]:
+    names = plan_ranges.slice_anchors(text, rng)
+    start, end = plan_ranges.bounds(rng)
+    if not names and any(level for n, level, _ in entries if start < n <= end):
+        errors.append(f"phase {phase['title']!r} has no slice markers, so it holds prose only")
+    phase["description"] = _phase_description(entries, marker_line, end)
     return names
 
 
