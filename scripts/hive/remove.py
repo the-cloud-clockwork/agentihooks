@@ -1,5 +1,6 @@
 """agentihooks hive remove: drain a hive, then delete it from Redis, herdr, OpenBao and antoncore."""
 
+import json
 import subprocess
 import time
 from collections.abc import Callable
@@ -8,7 +9,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from scripts import openbao_kv
-from scripts.hive import auth, machine, nats_grant, registry
+from scripts.hive import auth, create, create_github, machine, nats_grant, registry
 from scripts.swarm.keyspace import ROOT
 
 if TYPE_CHECKING:
@@ -32,9 +33,10 @@ ROLL = (
 )
 MANIFESTS = (
     "k8s/argocd/apps/{release}.yaml",
-    "k8s/manifests/{release}",
-    "k8s/values-overlays/{release}",
+    "k8s/manifests/{release}/",
+    "k8s/values-overlays/{release}/",
 )
+TREE = '.tree[] | select(.type == "blob") | .path'
 
 
 @dataclass(frozen=True)
@@ -42,9 +44,11 @@ class Plan:
     hive: str
     label: str
     bao_path: str
-    antoncore: Path | None = None
+    repo: str = create.Options.repo
+    base: str = create.Options.base
     wait_s: int = 3600
     signer: "nats_grant.Signer | None" = None
+    dry_run: bool = False
 
 
 @dataclass(frozen=True)
@@ -53,13 +57,17 @@ class Host:
     sleep: Callable[[float], None] = time.sleep
     clock: Callable[[], float] = time.monotonic
     known_hosts: Path = field(default_factory=lambda: Path.home() / ".ssh" / "known_hosts")
+    home: Path = field(default_factory=registry.home)
 
 
-def label(redis: "Redis", hive: str) -> str:
-    name = redis.hget(member_key(hive), "name")
-    if not name:
-        raise auth.HiveError(f"hive {hive} holds no member record to name it; pass --label")
-    return name
+def resolve(redis: "Redis", given: str) -> tuple[str, str]:
+    if name := redis.hget(member_key(given), "name"):
+        return given, name
+    if member := machine.named_member(redis, given):
+        return member, given
+    if registry.show(redis, given) is not None:
+        raise auth.HiveError(f"hive {given} holds no member record to name it; pass --label")
+    return given, given
 
 
 def member_key(hive: str) -> str:
@@ -78,7 +86,11 @@ def hosted(store: "RedisStore", hive: str) -> list[tuple[str, "AgentRecord"]]:
 def drain(store: "RedisStore", plan: Plan, host: Host) -> list[str]:
     from scripts.inbox.store import InboxStore
 
-    registry.update(store.redis, plan.hive, ["draining=yes"])
+    if plan.dry_run:
+        names = ", ".join(agent.name for _, agent in hosted(store, plan.hive)) or "no agents"
+        return [f"would stop placement on {plan.hive} and wait up to {plan.wait_s} seconds for {names} to hand off"]
+    if registry.show(store.redis, plan.hive) is not None:
+        registry.update(store.redis, plan.hive, ["draining=yes"])
     inbox, ordered = InboxStore(store.redis), set()
     deadline = host.clock() + plan.wait_s
     while remaining := hosted(store, plan.hive):
@@ -90,7 +102,8 @@ def drain(store: "RedisStore", plan: Plan, host: Host) -> list[str]:
                 "run remove again to keep waiting"
             )
         host.sleep(POLL_S)
-    return [f"drained {plan.hive}: {len(ordered)} agents handed off"]
+    handed = ", ".join(sorted(name for _, name in ordered)) or "none"
+    return [f"drained {plan.hive}: {len(ordered)} agents handed off: {handed}"]
 
 
 def _order(inbox, ordered: set, remaining: list[tuple[str, "AgentRecord"]], text: str, hive: str) -> None:
@@ -117,16 +130,45 @@ def settle(store: "RedisStore", hive: str, wait_s: int, host: Host) -> str:
     return f"hive {hive} drained: no agents running, {len(ordered)} ordered to hand off"
 
 
-def revoke(redis: "Redis", hive: str, signer: "nats_grant.Signer | None" = None) -> list[str]:
+def revoke(redis: "Redis", hive: str, signer: "nats_grant.Signer | None" = None, dry_run: bool = False) -> list[str]:
+    held = redis.exists(member_key(hive))
+    if dry_run:
+        return [f"would revoke member {hive} and its Redis user" if held else f"{hive} holds no member credential"]
     bus = [nats_grant.revoke(redis, signer, hive)] if signer is not None else []
-    if not redis.exists(member_key(hive)):
+    if not held:
         return [*bus, f"{hive} holds no member credential"]
     auth.revoke(redis, hive)
     return [*bus, f"revoked member {hive} and its Redis user"]
 
 
-def forget(redis: "Redis", hive: str) -> list[str]:
-    keys = [registry.key(hive), *redis.scan_iter(match=f"{registry.key(hive)}:*")]
+def forget(redis: "Redis", plan: Plan, home: Path) -> list[str]:
+    keys = [registry.key(plan.hive), *redis.scan_iter(match=f"{registry.key(plan.hive)}:*")]
+    nodes = sorted(node for node, name in redis.hgetall(machine.MACHINES).items() if name == plan.label)
+    state = home / create.STATE_FILE
+    created = _created(state) == plan.label
+    if plan.dry_run:
+        lines = [f"would delete {redis.exists(*keys)} registry records of {plan.hive}"]
+    else:
+        lines = [_delete(redis, plan.hive, keys)]
+        if nodes:
+            redis.hdel(machine.MACHINES, *nodes)
+        if created:
+            state.unlink()
+    verb = "would release" if plan.dry_run else "released"
+    lines += [f"{verb} the hive name {plan.label} of node {node}" for node in nodes]
+    if created:
+        lines.append(f"{'would delete' if plan.dry_run else 'deleted'} the hive create state of {plan.label}")
+    return lines
+
+
+def _created(state: Path) -> str | None:
+    try:
+        return json.loads(state.read_text()).get("name")
+    except (OSError, ValueError, AttributeError):
+        return None
+
+
+def _delete(redis: "Redis", hive: str, keys: list[str]) -> str:
     prefix = f"{registry.key(hive)}:swarm:"
     histories = {
         f"{ROOT}:swarm:{source.removeprefix(prefix)}": redis.hgetall(source)
@@ -139,10 +181,12 @@ def forget(redis: "Redis", hive: str) -> list[str]:
         pipe.delete(*keys)
         pipe.srem(registry.INDEX, hive)
         deleted, _ = pipe.execute()[-2:]
-    return [f"deleted {deleted} registry records of {hive}"]
+    return f"deleted {deleted} registry records of {hive}"
 
 
-def unbank(bao: openbao_kv.OpenBao, path: str) -> list[str]:
+def unbank(bao: openbao_kv.OpenBao, path: str, dry_run: bool = False) -> list[str]:
+    if dry_run:
+        return [f"would delete OpenBao {openbao_kv.MOUNT}/{path}"]
     try:
         openbao_kv.delete(bao, path)
     except openbao_kv.OpenBaoError as exc:
@@ -150,22 +194,38 @@ def unbank(bao: openbao_kv.OpenBao, path: str) -> list[str]:
     return [f"deleted OpenBao {openbao_kv.MOUNT}/{path}"]
 
 
-def unmanifest(checkout: Path | None, name: str, run: Callable[..., subprocess.CompletedProcess]) -> list[str]:
-    if checkout is None:
-        return ["left the antoncore manifests: pass --antoncore with a checkout to remove them"]
-    release = name if name.startswith(machine.NAME_PREFIX) else f"agentihooks-hive-{name}"
-    paths = [pattern.format(release=release) for pattern in MANIFESTS]
-    argv = ["git", "-C", str(checkout), "rm", "-r", "-q", "--ignore-unmatch", "--", *paths]
-    machine.run_checked(run, argv, None, machine.SSH_TIMEOUT_S)
-    return [f"staged the removal of {', '.join(paths)} in {checkout}; commit it and open a pull request"]
+def unmanifest(plan: Plan, run: Callable[..., subprocess.CompletedProcess]) -> list[str]:
+    release = plan.label if plan.label.startswith(machine.NAME_PREFIX) else f"agentihooks-hive-{plan.label}"
+    owned = [pattern.format(release=release) for pattern in MANIFESTS]
+    tree = create_github.gh(run, ["api", f"repos/{plan.repo}/git/trees/{plan.base}?recursive=1", "--jq", TREE])
+    paths = [
+        path
+        for path in tree.splitlines()
+        if any(path == own or own.endswith("/") and path.startswith(own) for own in owned)
+    ]
+    if not paths:
+        return [f"{plan.repo} {plan.base} holds no manifests of {release}"]
+    listed = ", ".join(paths)
+    if plan.dry_run:
+        return [f"would open a pull request into {plan.repo} {plan.base} deleting {listed}"]
+    message = f"Remove worker hive {plan.label}\n\nOpened by agentihooks hive remove."
+    url = create_github.open_pr(run, plan.repo, plan.base, f"remove-{plan.label}", dict.fromkeys(paths), message)
+    merging = "it merges once its checks pass" if create_github.merge(run, url) else "merge it once its checks pass"
+    return [f"opened pull request {url} deleting {listed}; {merging}"]
+
+
+STEPS = (
+    ("drain", lambda store, bao, plan, host: drain(store, plan, host)),
+    ("member", lambda store, bao, plan, host: revoke(store.redis, plan.hive, plan.signer, plan.dry_run)),
+    ("herdr", lambda store, bao, plan, host: machine.forget(plan.label, host.known_hosts, host.run, plan.dry_run)),
+    ("registry", lambda store, bao, plan, host: forget(store.redis, plan, host.home)),
+    ("manifests", lambda store, bao, plan, host: unmanifest(plan, host.run)),
+    ("openbao", lambda store, bao, plan, host: unbank(bao, plan.bao_path, plan.dry_run)),
+)
 
 
 def remove(store: "RedisStore", bao: openbao_kv.OpenBao, plan: Plan, host: Host) -> list[str]:
-    return [
-        *drain(store, plan, host),
-        *revoke(store.redis, plan.hive, plan.signer),
-        *machine.forget(plan.label, host.known_hosts, host.run),
-        *forget(store.redis, plan.hive),
-        *unbank(bao, plan.bao_path),
-        *unmanifest(plan.antoncore, plan.label, host.run),
-    ]
+    lines = [f"{title}: {line}" for title, step in STEPS for line in step(store, bao, plan, host)]
+    if plan.dry_run:
+        return [*lines, f"dry run of hive remove {plan.label}: nothing written"]
+    return lines
