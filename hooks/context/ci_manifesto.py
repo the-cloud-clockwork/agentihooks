@@ -197,7 +197,7 @@ def _signal_match(text: str, signals: list[str]) -> bool:
     """Check if any signal phrase is present WITHOUT being negated."""
     if not text:
         return False
-    low = text.lower()
+    low = text
     for phrase in signals:
         idx = low.find(phrase)
         if idx == -1:
