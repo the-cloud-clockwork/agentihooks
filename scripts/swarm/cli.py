@@ -1601,20 +1601,45 @@ def origin_repo(run=subprocess.run):
     return stack.public_url(done.stdout.strip()) if done.returncode == 0 else ""
 
 
-def cmd_prepare(store, args):
+def publication_command(store: RedisStore, args: argparse.Namespace) -> dict:
+    import syslog
+
     from scripts.swarm import publish
 
-    fields = publish.prepare(args.slug, _worker(store, args), _local_repo(store, args.slug), LedgerClient())
-    print(json.dumps(fields))
+    agent = _worker(store, args)
+    repo = _local_repo(store, args.slug)
+    ledger = LedgerClient()
+    task = {}
+    try:
+        task = next((row for row in ledger.tasks(args.slug) if row.get("id") == agent.task), {})
+        if args.command == "prepare":
+            return publish.prepare(args.slug, agent, repo, ledger)
+        return publish.publish(args.slug, agent, repo, ledger, args.message, args.files)
+    except SwarmError as exc:
+        branch = exc.branch if isinstance(exc, publish.PublicationRefusal) else publish.refusal_branch(Path(repo), task)
+        syslog.openlog("agentihooks-swarm")
+        syslog.syslog(
+            syslog.LOG_WARNING,
+            json.dumps(
+                {
+                    "event": "swarm_publication_refused",
+                    "slug": args.slug,
+                    "command": args.command,
+                    "task": agent.task,
+                    "branch": branch,
+                    "reason": str(exc),
+                }
+            ),
+        )
+        raise
+
+
+def cmd_prepare(store, args):
+    print(json.dumps(publication_command(store, args)))
 
 
 def cmd_publish(store, args):
-    from scripts.swarm import publish
-
-    fields = publish.publish(
-        args.slug, _worker(store, args), _local_repo(store, args.slug), LedgerClient(), args.message, args.files
-    )
-    print(json.dumps(fields))
+    print(json.dumps(publication_command(store, args)))
 
 
 def cmd_branch(store, args):
