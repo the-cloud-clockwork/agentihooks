@@ -158,18 +158,16 @@ def render(repo: str, found: dict) -> str:
 
 
 def _gh(args: list[str], repo_dir: str, run: Callable) -> str:
-    left = ATTEMPTS
-    while True:
-        left -= 1
+    for attempt in range(1, ATTEMPTS + 1):
         try:
             done = run(["gh", *args], cwd=repo_dir, capture_output=True, text=True, timeout=60)
         except (OSError, subprocess.SubprocessError) as exc:
             raise SwarmError(f"GitHub API: {exc}") from exc
         if not done.returncode:
             return done.stdout
-        if not left or not SERVER_ERROR.search(done.stderr):
+        if attempt == ATTEMPTS or not SERVER_ERROR.search(done.stderr):
             raise SwarmError(done.stderr.strip() or "GitHub API failed")
-        time.sleep(RETRY_S * (ATTEMPTS - left))
+        time.sleep(RETRY_S * attempt)
 
 
 def read_runs(repo_dir: str, event: str, window: tuple[float, float], run: Callable) -> list[dict]:
