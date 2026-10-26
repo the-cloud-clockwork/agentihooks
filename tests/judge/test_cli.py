@@ -120,7 +120,9 @@ def test_a_valid_verdict_is_printed_and_recorded(files, fake_runner, filters, ca
     [call] = fake.calls
     assert (call["clamp"], call["tier"], call["effort"], call["harness"]) == (SEALED, "high", "medium", "claude")
     assert call["profile_prompt"] == (ROOT / "profiles/package/roles/judge/CLAUDE.md").read_text()
-    assert call["schema"] == json.loads((schema.SCHEMAS / "verdict.schema.json").read_text())
+    full = json.loads((schema.SCHEMAS / "verdict.schema.json").read_text())
+    assert call["schema"] == {key: full[key] for key in ("type", "required", "additionalProperties", "properties")}
+    assert "$schema" not in call["schema"]
     assert json.loads(call["user_input"]) == {"case": CASE, "evidence": _evidence("the cache keeps one entry")}
 
 

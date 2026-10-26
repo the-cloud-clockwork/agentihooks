@@ -31,6 +31,11 @@ def judge_input(case: dict, evidence: dict) -> str:
     return json.dumps({"case": case, "evidence": {"items": items}}, indent=2)
 
 
+def reply_schema() -> dict:
+    full = json.loads((schema.SCHEMAS / "verdict.schema.json").read_text())
+    return {key: full[key] for key in ("type", "required", "additionalProperties", "properties")}
+
+
 def main(argv: list[str]) -> int:
     args = parse(argv)
     try:
@@ -45,12 +50,11 @@ def main(argv: list[str]) -> int:
         return SENT_BACK
     screened = outcome.tool_input if outcome.decision == "rewrite" else {"case": case, "evidence": evidence}
     harness = runner.harness_for(args.harness, os.environ)
-    verdict_schema = json.loads((schema.SCHEMAS / "verdict.schema.json").read_text())
     try:
         verdict = runner.run(
             ROLE.read_text(),
             judge_input(screened["case"], screened["evidence"]),
-            verdict_schema,
+            reply_schema(),
             SEALED,
             args.tier,
             EFFORT,
