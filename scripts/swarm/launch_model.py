@@ -34,6 +34,10 @@ def _codex_overrides(argv):
     return {key: _toml_value(raw) for key, _, raw in pairs}
 
 
+def overridden(argv) -> dict:
+    return _renamed(_codex_overrides(argv), CODEX_KEYS)
+
+
 def _load(path, parse, error):
     try:
         return parse(path.read_text())
@@ -51,7 +55,7 @@ def configured(harness: str, home: Path | None = None) -> dict:
 
 def read(harness: str, argv: tuple[str, ...]) -> tuple[str, str]:
     if harness == "codex":
-        flags = {**_renamed(_codex_overrides(argv), CODEX_KEYS), **_named(argv, CODEX_FLAGS)}
+        flags = {**overridden(argv), **_named(argv, CODEX_FLAGS)}
     else:
         flags = _named(argv, CLAUDE_FLAGS)
     found = {"model": "", "effort": "", **configured(harness), **flags}

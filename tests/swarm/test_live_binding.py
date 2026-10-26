@@ -145,7 +145,7 @@ def test_model_and_effort_require_native_flags(mounted):
     facts = live_binding.read(agent, 42, proc)
     assert (facts["model"], facts["effort"]) == ("", "")
     assert live_binding.compare(agent, facts) == {}
-    assert live_binding.unobserved(agent, facts) == ["model", "effort"]
+    assert live_binding.unobserved(agent, facts) == {"model": "opus", "effort": "high"}
 
 
 def test_codex_home_hooks_and_native_effort(mounted):
@@ -326,7 +326,7 @@ def test_codex_hive_agent_with_no_model_reading_is_unknown_not_mismatched(hive_c
     store.put_agent("sw", agent)
     assert live_binding.record(store, "sw", agent, facts, 5) == {}
     report = json.loads(store.redis.hget(store.key("sw", "live-bindings"), agent.name))
-    assert (report["state"], report["unobserved"]) == ("matching", ["model", "effort"])
+    assert (report["state"], report["unobserved"]) == ("matching", {"model": "gpt-6.1-sol", "effort": "high"})
     assert [(f.subject, f.summary, f.evidence) for f in live_binding.findings(store, "sw")] == [
         (
             f"{agent.name}/{field}",
