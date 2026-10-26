@@ -950,6 +950,42 @@ def test_launch_preparation_reports_a_refused_operator_email(ah, rendered, tmp_p
     monkeypatch.setattr(operator_email, "send", lambda *_: "email failed: down")
     assert login.prepare_launch(_environ(rendered), tmp_path) is None
     assert capsys.readouterr().err == "[agenti] operator login email refused: email failed: down\n"
+    token_records = (login._token_folder(_environ(rendered)) / "login-notifications.jsonl").read_text()
+    assert [json.loads(line) for line in token_records.splitlines()] == [
+        {
+            "step": "token",
+            "outcome": "captcha",
+            "transport": "refused",
+            "agent": "master@a-1",
+            "reason": "email failed: down",
+        }
+    ]
+
+
+def test_a_forced_fallback_sends_once_through_the_gateway_notifications_tool(ah, rendered, tmp_path, monkeypatch):
+    from hooks.integrations.mailer import EmailClient
+    from scripts import master_login_chain as chain
+    from scripts.routing import native_login
+    from scripts.swarm import operator_email
+
+    _seed(rendered)
+    monkeypatch.setattr(openbao_kv, "from_env", lambda environ: None)
+
+    def check(environ, account):
+        raise native_login.LoginError(native_login.EXPIRED)
+
+    monkeypatch.setattr(native_login, "check", check)
+    monkeypatch.setattr(chain, "authorize", lambda *_: "failure", raising=False)
+    monkeypatch.setattr(EmailClient, "reachable", lambda self, timeout=3.0: False)
+    sent = []
+    monkeypatch.setattr(operator_email, "gateway_send", lambda *args: sent.append(args) or {"status": "sent"})
+    environ = {**_environ(rendered), "AGENTIHOOKS_OPERATOR_EMAIL": "op@example.com", "MCP_KEY_GATEWAY": "k"}
+    assert login.prepare_launch(environ, tmp_path) is None
+    assert [(url, key, arguments["to"], arguments["subject"]) for url, key, arguments in sent] == [
+        ("https://10.10.30.200/mcp/", "k", "op@example.com", "Master login fell back to token routing")
+    ]
+    token_records = (login._token_folder(environ) / "login-notifications.jsonl").read_text()
+    assert [json.loads(line)["transport"] for line in token_records.splitlines()] == ["email"]
 
 
 def test_launch_preparation_recovers_the_stored_login_before_any_browser_step(ah, rendered, tmp_path, monkeypatch):
