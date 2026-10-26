@@ -1721,7 +1721,7 @@ def test_a_weakened_forwarded_statistics_form_is_red(before, after):
     )
 
 
-@pytest.mark.parametrize("prefix", ["", _SELECTION_DIAGNOSTIC])
+@pytest.mark.parametrize("prefix", ["", _SELECTION_DIAGNOSTIC], ids=["bare", "after_selection_diagnostic"])
 def test_the_forwarded_statistics_line_without_the_selection_diagnostic_is_red(prefix):
     base = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())
     head = copy.deepcopy(base)
