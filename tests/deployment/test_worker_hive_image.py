@@ -439,12 +439,12 @@ def test_kind_proof_pulls_the_base_and_redis_into_the_node_while_the_hive_builds
         '  docker exec "$cluster-control-plane" mkdir -p /etc/containerd/certs.d/localhost:5001',
         '  printf \'[host."http://%s:5000"]\\n\' "$cluster-registry" | docker exec -i "$cluster-control-plane" cp /dev/stdin /etc/containerd/certs.d/localhost:5001/hosts.toml',
     ]
-    assert lines[start + 5 : start + 9] == [
+    assert lines[start + 5 : start + 8] == [
         f"  for warm in {BASE} mirror.gcr.io/library/redis:7-alpine; do",
         '    docker exec "$cluster-control-plane" crictl pull "$warm" || echo "the node could not pre-pull $warm; the proof loads or pulls it later"',
         "  done",
-        '} > "$out/cluster.log" 2>&1 &',
     ]
+    assert lines[lines.index("EOF") + 1] == '} > "$out/cluster.log" 2>&1 &'
     assert "kind load" not in PROOF.read_text()
     assert "imagePullPolicy: Never" not in PROOF.read_text()
     assert lines.index('  docker rm -f "$cluster-registry" >/dev/null 2>&1 || true') < lines.index(
