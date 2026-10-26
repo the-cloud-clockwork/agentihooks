@@ -1,0 +1,49 @@
+{
+  "case": "C",
+  "during_interruption": {
+    "catalog_written": false,
+    "marker_names_set": true,
+    "objects": 2
+  },
+  "interrupted": "the restore process stopped while copying archive objects",
+  "irrecoverable": {
+    "5e4c27c55fc931af70647f722e3fee35467dd84a9614fa7dbe34742b3ad5ce79": "an archived object is missing; the evidence is incomplete and was not returned"
+  },
+  "lost_session_query": "an archived object is missing; the evidence is incomplete and was not returned",
+  "objects_after_resume": 5,
+  "omitted_projections": [
+    "chunk_generation",
+    "search_chunk",
+    "chunk_cutover",
+    "index_generation",
+    "index_cutover",
+    "embedding_work",
+    "chunk_vector"
+  ],
+  "present_in_backup": 5,
+  "registry_replay_unchanged": true,
+  "resumed_status": "partial",
+  "rollback_rehearsal": {
+    "damaged_set_accepted": false,
+    "metric": {
+      "backup_restore_verification_status": {
+        "failed": 1,
+        "partial": 0,
+        "uploaded": 1,
+        "verified": 0
+      },
+      "retention_allowed": false
+    },
+    "newer_unverified_set": {
+      "newer_set_accepted": false,
+      "preserved_is_drilled_set": true,
+      "retention_allowed": false
+    },
+    "preserved_after_failed_redrill": true,
+    "redrill_after_damage": "failed"
+  },
+  "stale_attempt": "a newer restore drill result is already recorded for this backup set; nothing changed",
+  "stale_target_created": false,
+  "vectors_after_replay": 4,
+  "vectors_rebuilt": 4
+}
