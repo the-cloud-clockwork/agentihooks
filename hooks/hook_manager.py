@@ -38,6 +38,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 # Only import lightweight common module at startup
 from hooks.common import log
+from hooks.context import tool_end
 from hooks.prompt_budget import PromptBudget
 
 
@@ -2013,9 +2014,9 @@ def on_post_tool_use(payload: dict) -> None:
             recycle_context = _recycle_directive(_trace_session_id)
             if recycle_context:
                 inject_context(recycle_context, also_log=False, skip_compression=True)
-            from hooks.context.project_cache import take_project_context
+            from hooks.context.task_context import deliver_pending
 
-            project_context = take_project_context(_trace_session_id)
+            project_context = deliver_pending(_trace_session_id, "PostToolUse")
             if project_context:
                 inject_context(project_context, also_log=False, skip_compression=True)
             if BROADCAST_ENABLED:
@@ -2815,7 +2816,7 @@ EVENT_HANDLERS = {
     "SessionStart": on_session_start,
     "SessionEnd": on_session_end,
     "UserPromptSubmit": on_user_prompt_submit,
-    "PreToolUse": on_pre_tool_use,
+    "PreToolUse": lambda payload: tool_end.closing_denied(on_pre_tool_use, payload, BlockAction, _swarm_tool_end),
     "PostToolUse": on_post_tool_use,
     "Stop": on_stop,
     "SubagentStart": on_subagent_start,

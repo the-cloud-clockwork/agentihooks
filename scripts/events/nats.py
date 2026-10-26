@@ -1,5 +1,6 @@
 import asyncio
 import base64
+import datetime
 import threading
 from collections.abc import Callable, Coroutine, Iterator
 from dataclasses import dataclass
@@ -347,6 +348,7 @@ class NatsStateStore:
         self._loop = loop
         self._js = js
         self._bucket = bucket
+        self._swept = None
         self._kv = loop.run(
             js.create_key_value(bucket=bucket, history=KV_HISTORY) if provision else js.key_value(bucket)
         )
@@ -383,6 +385,9 @@ class NatsStateStore:
             await nats_payload.discard(self._js, f"KV_{self._bucket}", f"$KV.{self._bucket}.", value)
             raise StateConflict(conflict) from err
         await self._reclaim(key, revision)
+        if now := nats_payload.due(self._swept, datetime.datetime.now(datetime.UTC)):
+            self._swept = now
+            await nats_payload.sweep(self._js, f"KV_{self._bucket}", f"$KV.{self._bucket}.", self._key_history, now)
         return revision
 
     async def _reclaim(self, key: str, below: int) -> None:
@@ -397,6 +402,9 @@ class NatsStateStore:
             sequence = msg.seq + 1
             values.append(msg.data or b"")
         return values
+
+    async def _key_history(self, key: str) -> list[bytes]:
+        return await self._history(f"$KV.{self._bucket}.{key}")
 
     def watch(self, key: str, from_revision: int = 1) -> Iterator[StateEntry]:
         subject = f"$KV.{self._bucket}.{key}"

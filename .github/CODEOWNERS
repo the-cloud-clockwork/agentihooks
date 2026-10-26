@@ -17,6 +17,7 @@
 /scripts/swarm_ledger/artifact_sanity.py @nestorcolt
 /scripts/swarm_v2/resource_bench.py @nestorcolt
 /scripts/swarm_v2/startup_bench.py @nestorcolt
+/scripts/swarm/merge_path.py @nestorcolt
 /tests/registry/ @nestorcolt
 /tests/*MANIFEST* @nestorcolt
 /tests/*BASELINE* @nestorcolt
