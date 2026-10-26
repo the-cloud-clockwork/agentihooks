@@ -18,6 +18,10 @@ on:
       since:
         description: Only include pull requests merged after this UTC timestamp
         required: false
+      merge_path:
+        description: Count the merge path and class each head Tests run by the push before it instead
+        required: false
+        default: "false"
   push:
     branches: [diffcheck/ci-minutes]
 
@@ -51,8 +55,15 @@ jobs:
           permission-actions: read
           permission-metadata: read
           permission-pull-requests: read
+      - name: Count the merge path and head push causes
+        if: inputs.merge_path == 'true'
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          UNTIL: ${{ inputs.until }}
+          HOURS: ${{ inputs.hours || '24' }}
+        run: python -m scripts.swarm.merge_path --hours "$HOURS" ${UNTIL:+--until "$UNTIL"} --out ci-minutes.json
       - name: Measure runner minutes per merged pull request
-        if: inputs.stats_prs == '0' || inputs.stats_prs == ''
+        if: inputs.merge_path != 'true' && (inputs.stats_prs == '0' || inputs.stats_prs == '')
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           UNTIL: ${{ inputs.until }}

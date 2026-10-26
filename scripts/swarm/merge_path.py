@@ -1,11 +1,15 @@
 """The merge path of one repository over a window: Tests runs, merge queue entries and removals, and pull requests."""
 
+import argparse
 import json
+import re
 import statistics
 import subprocess
+import time
 from collections import Counter
 from collections.abc import Callable
 from datetime import UTC, datetime
+from pathlib import Path
 
 from scripts.swarm import ci_speed
 from scripts.swarm.store import SwarmError
@@ -25,6 +29,18 @@ PULLS = (
     " ... on AddedToMergeQueueEvent { createdAt } ... on RemovedFromMergeQueueEvent { createdAt reason } } } } } } }"
 )
 OPEN_READY = "query($q: String!) { search(query: $q, type: ISSUE, first: 1) { issueCount } }"
+DEV_MERGE = re.compile(r"Merge (remote-tracking )?branch '(origin/)?dev'")
+AFTER = {"failure": "after red head", "success": "review fix"}
+LOOKBACK_S = 6 * 3600
+SERVER_ERROR = re.compile(r"HTTP 5\d\d|stream error")
+ATTEMPTS = 5
+RETRY_S = 10
+JOB_PAGE = 30
+MATRIX = re.compile(r" \(.*\)$")
+FAILED_STEP = (
+    '.jobs[] | select(.conclusion == "failure")'
+    ' | .name + "\\t" + ([.steps[]? | select(.conclusion == "failure") | .name][0] // "")'
+)
 
 
 def _seconds(stamp: str) -> float:
@@ -142,13 +158,16 @@ def render(repo: str, found: dict) -> str:
 
 
 def _gh(args: list[str], repo_dir: str, run: Callable) -> str:
-    try:
-        done = run(["gh", *args], cwd=repo_dir, capture_output=True, text=True, timeout=60)
-    except (OSError, subprocess.SubprocessError) as exc:
-        raise SwarmError(f"GitHub API: {exc}") from exc
-    if done.returncode:
-        raise SwarmError(done.stderr.strip() or "GitHub API failed")
-    return done.stdout
+    for pause in [*(RETRY_S * attempt for attempt in range(1, ATTEMPTS)), None]:
+        try:
+            done = run(["gh", *args], cwd=repo_dir, capture_output=True, text=True, timeout=60)
+        except (OSError, subprocess.SubprocessError) as exc:
+            raise SwarmError(f"GitHub API: {exc}") from exc
+        if not done.returncode:
+            return done.stdout
+        if pause is None or not SERVER_ERROR.search(done.stderr):
+            raise SwarmError(done.stderr.strip() or "GitHub API failed")
+        time.sleep(pause)
 
 
 def read_runs(repo_dir: str, event: str, window: tuple[float, float], run: Callable) -> list[dict]:
@@ -171,7 +190,7 @@ def read_runs(repo_dir: str, event: str, window: tuple[float, float], run: Calla
 
 
 def read_jobs(repo_dir: str, run_id: int, run: Callable) -> list[list[str]]:
-    path = f"repos/{{owner}}/{{repo}}/actions/runs/{run_id}/jobs?per_page={PAGE}"
+    path = f"repos/{{owner}}/{{repo}}/actions/runs/{run_id}/jobs?per_page={JOB_PAGE}"
     out = _gh(["api", path, "--paginate", "--jq", ".jobs[] | .labels | @json"], repo_dir, run)
     return [json.loads(line) for line in out.splitlines()]
 
@@ -211,11 +230,95 @@ def read_pulls(repo_dir: str, repo: str, since_s: float, run: Callable) -> list[
     return pulls
 
 
-def collect(repo_dir: str, window: tuple[float, float], run: Callable = subprocess.run) -> tuple[str, dict]:
+def collect(
+    repo_dir: str, window: tuple[float, float], run: Callable = subprocess.run, queue_jobs: bool = True
+) -> tuple[str, dict]:
     repo = _gh(["api", "repos/{owner}/{repo}", "--jq", ".full_name"], repo_dir, run).strip()
     runs = [found for event in EVENTS for found in read_runs(repo_dir, event, window, run)]
-    jobs = {found["id"]: read_jobs(repo_dir, found["id"], run) for found in runs if found["event"] == "merge_group"}
+    jobs, unread = {}, 0
+    for found in runs:
+        if not queue_jobs or found["event"] != "merge_group":
+            continue
+        try:
+            jobs[found["id"]] = read_jobs(repo_dir, found["id"], run)
+        except SwarmError:
+            unread += 1
     pulls = read_pulls(repo_dir, repo, window[0], run)
     open_pages = _search(repo_dir, OPEN_READY, {"q": f"repo:{repo} is:pr is:open draft:false base:dev"}, run)
     ready = open_pages[0]["issueCount"]
-    return repo, count(runs, pulls, jobs, ready, window)
+    return repo, {**count(runs, pulls, jobs, ready, window), "queue_runs_without_jobs": unread if queue_jobs else None}
+
+
+def _cause(run: dict, before: dict | None) -> str:
+    if DEV_MERGE.match(str((run.get("head_commit") or {}).get("message"))):
+        return "dev merge"
+    if before is None:
+        return "first push"
+    if before["head_sha"] == run["head_sha"]:
+        return "same head"
+    return AFTER.get(before["conclusion"], "after superseded head")
+
+
+def head_pushes(runs: list[dict], window: tuple[float, float]) -> dict:
+    """Classes each pull request head Tests run created in the window by the head run before it on its branch."""
+    heads = sorted(
+        (found for found in runs if found["event"] == "pull_request" and not _promotion(found)),
+        key=lambda found: (found["created_at"], found["id"]),
+    )
+    last, causes = {}, {}
+    for found in heads:
+        cause = _cause(found, last.get(found["head_branch"]))
+        last[found["head_branch"]] = found
+        if _within(found["created_at"], *window):
+            tally = causes.setdefault(cause, {"runs": 0, "red": 0})
+            tally["runs"] += 1
+            tally["red"] += found["conclusion"] == "failure"
+    return dict(sorted(causes.items(), key=lambda item: -item[1]["runs"]))
+
+
+def _failed_job(line: str) -> str:
+    name, _, step = line.partition("\t")
+    return f"{MATRIX.sub('', name)}: {step}" if step else MATRIX.sub("", name)
+
+
+def red_head_jobs(runs: list[dict], window: tuple[float, float], repo_dir: str, run: Callable) -> dict:
+    """Counts red pull request head Tests runs created in the window by each job that failed them, with the last such
+    run's id to read its log."""
+    failed, last = Counter(), {}
+    for found in runs:
+        if found["event"] != "pull_request" or _promotion(found) or found["conclusion"] != "failure":
+            continue
+        if not _within(found["created_at"], *window):
+            continue
+        path = f"repos/{{owner}}/{{repo}}/actions/runs/{found['id']}/jobs?filter=latest&per_page={PAGE}"
+        try:
+            names = _gh(["api", path, "--paginate", "--jq", FAILED_STEP], repo_dir, run).splitlines()
+        except SwarmError:
+            names = ["unreadable"]
+        jobs = dict.fromkeys(map(_failed_job, names), 1) or {"no failed job": 1}
+        failed.update(jobs)
+        last.update({job: max(last.get(job, found["id"]), found["id"]) for job in jobs})
+    return {job: {"runs": n, "last": last[job]} for job, n in failed.most_common()}
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--hours", type=float, default=24)
+    parser.add_argument("--until")
+    parser.add_argument("--out", type=Path, default=Path("ci-minutes.json"))
+    args = parser.parse_args(argv)
+    until_s = _seconds(args.until) if args.until else time.time()
+    window = (until_s - args.hours * 3600, until_s)
+    repo, found = collect(".", window, queue_jobs=False)
+    history = read_runs(".", "pull_request", (window[0] - LOOKBACK_S, until_s), subprocess.run)
+    found["head_pushes"] = head_pushes(history, window)
+    found["red_head_jobs"] = red_head_jobs(history, window, ".", subprocess.run)
+    args.out.write_text(json.dumps({"repo": repo, **found}))
+    print(render(repo, found))
+    print(json.dumps(found["head_pushes"]))
+    print(json.dumps(found["red_head_jobs"]))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

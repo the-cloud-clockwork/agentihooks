@@ -25,6 +25,7 @@ EQUIVALENCE = ("equivalence.yml", "ledger-equivalence")
 EQUIVALENCE_WORDS = ("GRADER", "GITHUB_ENV", "GITHUB_PATH", "equivalence.sh")
 EQUIVALENCE_TUNABLE = ("steps", "timeout-minutes")
 UNUSED_SELECT_OUTPUTS = ("files_1", "files_2", "files_3")
+SONAR_SELECT_OUTPUT = {"sonar": "${{ steps.select.outputs.sonar }}"}
 FROZEN = "tests/registry/FROZEN_GATES.json"
 
 
@@ -94,17 +95,19 @@ def _aggregator_problems(
             and base_id == "gate-required"
             and head_job.get("steps")
             in [
-                diagnostic(
-                    forward(
-                        finish(
-                            rerun(
-                                shape(
-                                    required(
-                                        ci_reuse.gate_steps(
-                                            **form,
-                                            summary=summary,
-                                            docs="docs" in ci_wiring.needs_of(head_job),
-                                            watcher_loss=watcher_loss,
+                sonar(
+                    diagnostic(
+                        forward(
+                            finish(
+                                rerun(
+                                    shape(
+                                        required(
+                                            ci_reuse.gate_steps(
+                                                **form,
+                                                summary=summary,
+                                                docs="docs" in ci_wiring.needs_of(head_job),
+                                                watcher_loss=watcher_loss,
+                                            )
                                         )
                                     )
                                 )
@@ -112,6 +115,7 @@ def _aggregator_problems(
                         )
                     )
                 )
+                for sonar in (list, ci_reuse.test_only_sonar)
                 for diagnostic, forward in (
                     (list, list),
                     (ci_reuse.selection_diagnostic, list),
@@ -187,8 +191,12 @@ def _duration_problems(base: dict, head: dict) -> list[str]:
         and not (
             field == "outputs"
             and producer is head["jobs"].get("select")
-            and set(UNUSED_SELECT_OUTPUTS).issubset(outputs)
-            and producer.get(field) == trimmed
+            and (
+                set(UNUSED_SELECT_OUTPUTS).issubset(outputs)
+                and producer.get(field) == trimmed
+                or "sonar" not in outputs
+                and producer.get(field) == outputs | SONAR_SELECT_OUTPUT
+            )
         )
     ]
     problems += [
