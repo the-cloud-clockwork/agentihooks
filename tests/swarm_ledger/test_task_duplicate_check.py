@@ -47,10 +47,10 @@ class Judge:
         self.spec, self.asked, self.lock_free = json.dumps([sorted(yes), error, hold]), [], []
         self.find = ledger_task_duplicates.find
 
-    def __call__(self, doc, adds):
+    def __call__(self, doc, adds, kind="task"):
         self.asked.append("ledger-duplicate")
         self.lock_free.append(core.LOCK.acquire(blocking=False) and (core.LOCK.release() or True))
-        return self.find(doc, adds)
+        return self.find(doc, adds, kind)
 
 
 @pytest.fixture
@@ -303,7 +303,7 @@ def gate_for(screen, accepted=True):
 
 
 def test_the_screen_remembers_the_tasks_it_compared_and_the_adds_it_screened(monkeypatch):
-    monkeypatch.setattr(ledger_task_duplicates, "find", lambda doc, adds: [None] * len(adds))
+    monkeypatch.setattr(ledger_task_duplicates, "find", lambda doc, adds, kind: [None] * len(adds))
     doc = {"tasks": [{"id": "t1"}, {"id": "t2"}]}
     ops = [task("t9", REPEAT, "p1"), {"op": "task_update", "id": "u", "by": "swarm", "item": "tasks/t1"}]
     assert ledger_task_duplicates.screen(doc, ops) == ledger_task_duplicates.Screen(
@@ -532,8 +532,8 @@ def test_the_finder_runs_from_the_repository_root(monkeypatch, tmp_path):
 
 
 def test_a_refusal_without_a_phase_says_none():
-    match = {"id": "t1", "title": "Fold chat", "state": "open", "rank": "low", "phase_title": None}
-    assert ledger_task_duplicates.refusal({"task": "t9"}, match) == (
+    match = {"id": "t1", "kind": "task", "title": "Fold chat", "state": "open", "rank": "low", "phase_title": None}
+    assert ledger_task_duplicates.refusal({"op": "task_add", "task": "t9"}, match) == (
         'task t9 repeats task t1 "Fold chat" (open, rank low, phase none): it is on the ledger and will be built. '
         'If it is a different change, add it with --not-duplicate "<why it differs>"'
     )
