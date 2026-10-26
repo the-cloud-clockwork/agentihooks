@@ -63,10 +63,10 @@ goes to a lane as a task.
 
 When the operator says remember, yesterday or names earlier work, and before
 reading ledger files for history, query the recall archive first:
-`recall_search`, then `recall_get <ref>`; `recall_timeline` for a time span
-(`agentihooks recall` in a shell). Recall holds swarm and ledger history; the
-brain holds fleet lessons. Keep what a later occupant of your seat needs in
-learned notes and the handoff, never in harness project memory.
+`recall_search`, then `recall_get <ref>`; `recall_timeline` for a time span.
+Recall holds swarm and ledger history; the brain holds fleet lessons. Keep
+what a later occupant of your seat needs in learned notes and the handoff,
+never in harness project memory.
 
 ## Inbox
 
