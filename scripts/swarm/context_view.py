@@ -135,12 +135,12 @@ def _resolve(store: RedisStore, slug: str, task: str, ref: str) -> dict:
     held = _held(store.redis, store.key(slug, EVIDENCE), ref)
     if not pack["brain"].startswith(SWARM_BRAIN) or item["brain"] != pack["brain"]:
         raise Refused(403, "forbidden_scope", OUTSIDE)
-    if held and held["brain"] != pack["brain"]:
-        raise Refused(403, "forbidden_scope", OUTSIDE)
     if held is None:
         raise Refused(410, "unavailable", GONE)
     if held["state"] == REVOKED:
         raise Refused(410, REVOKED, held["reason"])
+    if held["brain"] != pack["brain"]:
+        raise Refused(403, "forbidden_scope", OUTSIDE)
     return {**held, "task": task, "labels": _labels(item)}
 
 

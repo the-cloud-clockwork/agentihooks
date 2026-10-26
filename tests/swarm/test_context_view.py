@@ -161,6 +161,14 @@ def test_revoking_an_unknown_source_writes_an_empty_tombstone(store):
     assert held == {"ref": "arc:never", "brain": "", "kind": "", "state": "revoked", "reason": "gone"}
 
 
+def test_a_source_revoked_before_any_write_expands_as_revoked(store):
+    store.redis.hdel(store.key(SLUG, cv.EVIDENCE), "arc:merge-queue")
+    cv.revoke(store, SLUG, "arc:merge-queue", "withdrawn")
+    with pytest.raises(cv.Refused) as refused:
+        cv.expand(store, SLUG, TASK, "arc:merge-queue")
+    assert (refused.value.status, refused.value.reason, str(refused.value)) == (410, "revoked", "withdrawn")
+
+
 def test_the_ledger_api_serves_evidence_and_maps_refusals(store):
     services = SimpleNamespace(swarm=SimpleNamespace(store=lambda: store))
     path = f"swarm/context/{TASK}/arc:merge-queue"
