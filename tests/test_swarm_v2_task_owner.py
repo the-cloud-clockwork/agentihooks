@@ -474,13 +474,47 @@ def asked_to_retire(world, handoff):
     return retiring
 
 
-def test_a_seat_asked_to_retire_keeps_its_claimants_until_its_handoff_is_in(world):
+def test_a_seat_asked_to_retire_hands_its_claimants_to_the_front_door_before_its_handoff_is_in(world):
     asked_to_retire(world, "")
+
+    master_fence.check_send(inbox(world), LEAD_NAME, OWN_CLAIMANT)
+
+    assert world.refusals() == 0
+    assert master_fence.Seats(SLUG, world.store, {}).live == [LEAD]
+    assert master_fence.retiring(world.store, SLUG) == {SECOND}
+
+
+def test_a_retiring_seat_cannot_message_the_claimants_it_handed_to_the_front_door(world):
+    asked_to_retire(world, "")
+
+    with pytest.raises(InboxError) as refused:
+        master_fence.check_send(inbox(world), SECOND_NAME, OWN_CLAIMANT)
+
+    assert str(refused.value) == (
+        f"tasks/t2 belongs to {LEAD}, so {SECOND} cannot message its claimant; ask {LEAD} with agentihooks "
+        f'swarm {SLUG} masters-channel say "<text>"'
+    )
+
+
+def test_the_front_door_messages_a_retired_backend_masters_claimant_while_its_agent_is_still_running(world):
+    retiring = asked_to_retire(world, "")
+
+    master_scale._retire(SLUG, world.store, SECOND, retiring[SECOND], 2_000)
+
+    master_fence.check_send(inbox(world), LEAD_NAME, OWN_CLAIMANT)
+    assert world.refusals() == 0
+    assert masters.MasterSeats(world.redis).owners(SLUG, world.doc())["p2"] == LEAD
+
+
+def test_a_seat_whose_retire_request_was_withdrawn_keeps_its_claimants(world):
+    retiring = asked_to_retire(world, "")
+    master_scale._withdraw_asks(world.store, retiring)
+    world.redis.hdel(masters.MasterSeats(world.redis).key(SLUG), master_scale.RETIRING)
 
     with pytest.raises(InboxError, match=f"tasks/t2 belongs to {SECOND}, so {LEAD} cannot message its claimant"):
         master_fence.check_send(inbox(world), LEAD_NAME, OWN_CLAIMANT)
 
-    assert master_fence.Seats(SLUG, world.store, {}).live == [LEAD, SECOND]
+    assert master_fence.retiring(world.store, SLUG) == set()
 
 
 def test_a_retiring_seat_hands_its_claimants_to_the_front_door_with_its_handoff(world):
@@ -490,7 +524,7 @@ def test_a_retiring_seat_hands_its_claimants_to_the_front_door_with_its_handoff(
 
     assert world.refusals() == 0
     assert master_fence.Seats(SLUG, world.store, {}).live == [LEAD]
-    assert master_fence.handed_off(world.store, SLUG) == {SECOND}
+    assert master_fence.retiring(world.store, SLUG) == {SECOND}
 
 
 def test_the_front_door_keeps_a_retired_seats_claimants_after_the_tick_retires_the_seat(world):
