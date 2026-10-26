@@ -4,6 +4,24 @@ from tests.workflow_commands import carrying_commands, refuse_commands
 
 pytestmark = pytest.mark.unit
 
+COMMANDS = [
+    "error",
+    "warning",
+    "notice",
+    "debug",
+    "group",
+    "endgroup",
+    "add-mask",
+    "stop-commands",
+    "echo",
+    "set-output",
+    "save-state",
+    "add-path",
+    "set-env",
+    "add-matcher",
+    "remove-matcher",
+]
+
 
 def test_a_node_id_carrying_the_error_command_fails_collection():
     nodeid = 'tests/test_x.py::test_y[echo "::error::boom"]'
@@ -12,9 +30,10 @@ def test_a_node_id_carrying_the_error_command_fails_collection():
     assert nodeid in str(raised.value)
 
 
-@pytest.mark.parametrize("command", ["error file=a.py", "warning::", "add-mask::", "group::"])
-def test_every_command_form_is_found(command):
-    assert carrying_commands([f"tests/test_x.py::test_y[{command}]"]) != []
+@pytest.mark.parametrize("command", COMMANDS)
+@pytest.mark.parametrize("ending", [" file=a.py", "::"], ids=["with_parameters", "bare"])
+def test_every_command_form_is_found(command, ending):
+    assert carrying_commands([f"tests/test_x.py::test_y[::{command}{ending}]"]) != []
 
 
 def test_ordinary_node_ids_pass():
@@ -27,14 +46,3 @@ def test_ordinary_node_ids_pass():
     assert carrying_commands(nodeids) == []
     refuse_commands(nodeids)
 
-
-def test_the_suite_collection_refuses_command_ids():
-    from tests import conftest
-
-    class Config:
-        def getoption(self, name):
-            return None
-
-    item = type("Item", (), {"nodeid": "tests/test_x.py::test_y[::error::boom]"})()
-    with pytest.raises(pytest.UsageError):
-        conftest.pytest_collection_modifyitems(Config(), [item])
