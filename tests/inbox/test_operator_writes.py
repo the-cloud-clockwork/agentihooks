@@ -215,18 +215,29 @@ def test_agent_writes_and_cleared_chat_are_not_relayed(swarm):
     assert inbox.pending() == []
 
 
-def test_plan_and_slice_additions_are_quiet_but_other_operator_events_still_relay(swarm):
+def test_plan_and_slice_additions_are_quiet_but_other_adds_and_events_still_relay(swarm):
     _, inbox = swarm
     sent = relay(
         swarm,
         write(5, "plans/p1", kind="added", text="Plan title"),
         write(6, "slices/p1.first", kind="added", text="## Step one"),
-        write(7, "tasks/t1"),
+        write(7, "tasks/t1", kind="added", text="New task"),
+        write(8, "tasks/t1"),
     )
-    assert len(sent) == 1
-    [(_, text, _)] = pending(inbox, ENG.seat)
-    assert text == f"On ledger {SLUG}: " + line(write(7, "tasks/t1"))
+    assert len(sent) == 2
+    texts = {text for _, text, _ in pending(inbox, ENG.seat)}
+    assert texts == {
+        f"On ledger {SLUG}: " + line(write(7, "tasks/t1", kind="added", text="New task")),
+        f"On ledger {SLUG}: " + line(write(8, "tasks/t1")),
+    }
     assert pending(inbox, MASTER_SEAT) == [] and pending(inbox, CI.seat) == []
+
+
+def test_an_added_event_without_a_target_does_not_crash_and_still_relays(swarm):
+    _, inbox = swarm
+    sent = relay(swarm, {"rev": 5, "at": 5, "by": "operator", "kind": "added"})
+    assert len(sent) == 1
+    assert len(pending(inbox, MASTER_SEAT)) == 1
 
 
 def test_a_ledger_without_a_swarm_sends_nothing(swarm):

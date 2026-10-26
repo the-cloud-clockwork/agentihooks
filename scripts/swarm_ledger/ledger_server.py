@@ -1127,8 +1127,7 @@ class Handler(BaseHTTPRequestHandler):
                 request = core.loads(self.headers.get("X-Artifact-Request", "{}"))
                 if not isinstance(request, dict) or set(request) - {"task", "title", "request", "plan"}:
                     raise ValueError("artifact upload takes task, title and optional request or plan")
-                operator_plan = self.principal == "" and plan_requested
-                by = self.headers.get("X-Ledger-Agent") or ("operator" if operator_plan else None)
+                by = self.headers.get("X-Ledger-Agent") or ("operator" if plan_requested else None)
                 op = {"op": "artifact_add", "by": by, "task": "", **request}
                 ledger_artifacts.check_add(
                     {**op, "id": "upload", "title": request.get("title", ""), "file": {"id": "0" * 64 + ".md"}}

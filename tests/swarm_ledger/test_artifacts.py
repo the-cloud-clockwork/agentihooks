@@ -334,6 +334,30 @@ def test_artifact_op_shape_is_checked():
             core.check_op(bad)
 
 
+def test_artifact_add_by_validation_names_the_right_fault():
+    good = {"op": "artifact_add", "id": "a", "task": "t1", "title": "Plan", "file": {"id": "a" * 64 + ".md"}}
+    with pytest.raises(ValueError, match="^artifact_add needs `by`, an agent name$"):
+        artifacts.check_add({**good, "by": ""})
+
+
+def test_a_master_lane_upload_by_a_non_member_operator_does_not_crash():
+    from scripts.swarm_ledger import ledger_core
+
+    doc = {}
+    ctx = ledger_core.Context({"rev": 0, "stamps": {}, "members": {}}, 1)
+    op = {
+        "op": "artifact_add",
+        "id": "a-master",
+        "by": "operator",
+        "task": "master",
+        "title": "Plan",
+        "file": {"id": "a" * 64 + ".md"},
+        "plan": True,
+    }
+    assert artifacts.apply(doc, op, ctx)
+    assert doc["artifacts"][0]["task"] == "master"
+
+
 def test_artifact_command_uploads_the_file_and_records_it_on_the_task(tmp_path, capsys, monkeypatch):
     doc = tmp_path / "proposal.md"
     doc.write_bytes(MARKDOWN)
