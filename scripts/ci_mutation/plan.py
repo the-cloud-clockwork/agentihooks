@@ -178,7 +178,7 @@ def recorded_lines(root: Path, manifest: dict, changes: dict[str, set[int]]) -> 
                             fallback.add(index[unit])
         by_line = line_units(old)
         functions = [
-            (min(node.lineno, *(item.lineno for item in node.decorator_list)), node.end_lineno)
+            (min([node.lineno, *(item.lineno for item in node.decorator_list)]), node.end_lineno)
             for node in ast.walk(ast.parse(old))
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
         ]
