@@ -349,6 +349,7 @@ def _plain_shell(tmp_path, monkeypatch):
     (decoy / "CLAUDE.md").write_text("process persona")
     (decoy / ".claude.json").write_text(json.dumps({"decoy": True}))
     monkeypatch.setenv("HOME", str(operator))
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: operator))
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(decoy))
     for name in ("CLAUDE_CODE_HOME_DIR", "AGENTIHOOKS_CLAUDE_HOME"):
         monkeypatch.delenv(name, raising=False)
