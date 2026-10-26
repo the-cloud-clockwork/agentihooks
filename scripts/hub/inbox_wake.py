@@ -1,3 +1,4 @@
+import contextlib
 import hashlib
 import os
 from dataclasses import replace
@@ -8,7 +9,7 @@ from scripts.events.envelope import Envelope
 from scripts.hub import lease
 from scripts.hub.registry import Reactor
 from scripts.inbox import wake
-from scripts.inbox.bus import Message, SeatInbox
+from scripts.inbox.bus import Message, SeatInbox, SentElsewhere
 from scripts.inbox.seats import is_seat
 from scripts.inbox.store import REDELIVERED, REDELIVERER, InboxStore, redelivery_ms
 from scripts.swarm import outage
@@ -61,9 +62,10 @@ class InboxWake:
                 item = inbox.get(item_id)
                 swarm = item.address.partition("@")[2] if is_seat(item.address) else inbox.names.slug_of(item.address)
                 if swarm:
-                    SeatInbox(self.bus, swarm).send(
-                        item.address, Message(item.id, item.sender, item.text, item.ref, item.fyi, item.task)
-                    )
+                    message = Message(item.id, item.sender, item.text, item.ref, item.fyi, item.task)
+                    # A readdressed item keeps its id; its first send already scheduled the timer, which follows the id.
+                    with contextlib.suppress(SentElsewhere):
+                        SeatInbox(self.bus, swarm).send(item.address, message)
                 inbox.redis.srem(key, item_id)
 
     def _mail(self, item_id):

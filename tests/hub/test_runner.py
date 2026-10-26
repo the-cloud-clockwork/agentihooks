@@ -348,6 +348,8 @@ def test_a_running_hub_keeps_its_leases_on_a_daemon_thread(monkeypatch, hive):
         kept.append(hub_runner)
         started.set()
 
+    monkeypatch.setenv("AGENTIHOOKS_DEPLOYMENT", "local")
+    monkeypatch.delenv("LEDGER_URL", raising=False)
     monkeypatch.setattr(runner, "_keep_leases", keep)
     monkeypatch.setattr(runner.HubRunner, "run_once", stop_after(iter([{"page": ["handled"]}])))
     with pytest.raises(Stop):
