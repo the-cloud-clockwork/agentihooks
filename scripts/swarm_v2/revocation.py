@@ -18,7 +18,7 @@ def _register(propagator: Propagator, domain: str, document: dict) -> dict:
     return {"packs": len(document.get("packs", [])), "lessons": len(document.get("lessons", []))}
 
 
-def main(argv: list[str] | None = None, clock: Callable[[], float] = time.time) -> int:
+def main(argv: list[str] | None = None, clock: Callable[[], float] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("command", choices=("catch-up", "exposures", "lags", "register"))
     parser.add_argument("catalog", type=Path)
@@ -33,7 +33,7 @@ def main(argv: list[str] | None = None, clock: Callable[[], float] = time.time) 
     catalog = Catalog(args.catalog)
     propagator = Propagator(catalog)
     if args.command == "catch-up":
-        answer = {"notices": propagator.catch_up(args.domain, clock())}
+        answer = {"notices": propagator.catch_up(args.domain, time.time() if clock is None else clock())}
     elif args.command == "exposures":
         answer = {"exposures": propagator.exposures(args.domain, args.session)}
     elif args.command == "lags":
