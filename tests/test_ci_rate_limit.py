@@ -303,6 +303,43 @@ def test_the_shard_check_reports_its_calls(monkeypatch, capsys):
     )
 
 
+def _fail(*args, **kwargs):
+    raise TimeoutError("verification timed out")
+
+
+def test_a_failed_queue_verification_still_logs_its_end_budget(monkeypatch, capsys):
+    _budget(monkeypatch)
+    monkeypatch.setattr(ci_gate_queue, "watch", _fail)
+    for name, value in {
+        "GITHUB_EVENT_NAME": "merge_group",
+        "GITHUB_REPOSITORY": "o/r",
+        "GITHUB_RUN_ID": "1",
+        "GITHUB_RUN_ATTEMPT": "1",
+        "QUEUE_PLAN": "[]",
+        "GITHUB_REF": "refs/queue",
+        "GITHUB_SHA": "head",
+    }.items():
+        monkeypatch.setenv(name, value)
+    with pytest.raises(TimeoutError):
+        ci_gate_queue.main()
+    assert "Queue verification end: 4321 of 5000 App API calls left" in capsys.readouterr().err
+
+
+def test_a_failed_shard_check_still_logs_its_end_budget(monkeypatch, capsys):
+    _budget(monkeypatch)
+    monkeypatch.setattr(ci_gate_shards, "watch", _fail)
+    for name, value in {
+        "GITHUB_REPOSITORY": "o/r",
+        "GITHUB_RUN_ID": "1",
+        "GITHUB_RUN_ATTEMPT": "1",
+        "SHARDS": "[]",
+    }.items():
+        monkeypatch.setenv(name, value)
+    with pytest.raises(TimeoutError):
+        ci_gate_shards.main()
+    assert "Shard verification end: 4321 of 5000 App API calls left" in capsys.readouterr().err
+
+
 def test_the_test_planner_reports_its_calls(monkeypatch, capsys, tmp_path):
     monkeypatch.setattr(rate_limit, "calls", 6)
     monkeypatch.setattr(ci_test_plan, "find_record", lambda repository, before: None)
