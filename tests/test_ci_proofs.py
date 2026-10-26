@@ -213,7 +213,8 @@ def test_a_nested_report_with_workflow_command_text_stays_out_of_the_log(tmp_pat
         "nested pytest exited 1; tests 3 failures 1 errors 0 skipped 1; "
         f"read source-7.xml and source-7.log in the {REPORT_ARTIFACT} artifact"
     )
-    assert (tmp_path / "source-7.log").read_text() == f"FAILED {planted}\n::error::nested\n"
+    kept = (tmp_path / "source-7.log").read_text() == f"FAILED {planted}\n::error::nested\n"
+    assert kept, "the report log lost the nested output"
     assert nested_report(subprocess.CompletedProcess([], 2, stdout="", stderr=""), tmp_path / "missing.xml") == (
         f"nested pytest exited 2; no junit report; read missing.xml and missing.log in the {REPORT_ARTIFACT} artifact"
     )
