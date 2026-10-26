@@ -29,7 +29,7 @@
     "observed": "case outputs in the a, b and c result files from the focused fixture run"
   },
   "package": "SV2-RET-05",
-  "pull_request": null,
+  "pull_request": "https://github.com/the-cloud-clockwork/agentihooks/pull/7642",
   "remaining_limitations": [
     "No live upload path reserves yet; the collector and spool do not write archive objects to this store, so collect reclaims only reservation backed uploads made through Reservations.",
     "Checkpoint references come from a caller supplied set; there is no persisted checkpoint reference index in the catalog.",
@@ -48,5 +48,5 @@
   },
   "status": "fixture_verified",
   "supported_versions": "session catalog schema with archive_manifest and the index worker tables; upload_reservation and index_retirement tables are created on first use",
-  "tested_commit": "697f8005b962927d151fe52361e6a311363225b4"
+  "tested_commit": "31edd33011172c04056c0b8679c6c8d5987eff91"
 }
