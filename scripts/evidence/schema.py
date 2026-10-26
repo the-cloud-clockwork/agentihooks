@@ -49,6 +49,10 @@ def load_evidence(path: Path) -> dict:
     return _load("evidence", path)
 
 
+def load_verdict(path: Path) -> dict:
+    return _load("verdict", path)
+
+
 def fresh_seed() -> int:
     return secrets.randbits(64)
 

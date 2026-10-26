@@ -1,3 +1,5 @@
+import json
+
 import pytest
 
 from scripts.evidence import schema
@@ -17,6 +19,16 @@ NOTE = {"point": "The judge returns a verdict", "missing": "no run shows a verdi
 )
 def test_valid_verdicts_load(doc):
     assert schema.validate("verdict", doc) == doc
+
+
+def test_judge_answer_file_loads_as_a_verdict(tmp_path):
+    answer = tmp_path / "verdict.json"
+    answer.write_text(json.dumps({"verdict": "enhance", "notes": [NOTE]}))
+    assert schema.load_verdict(answer) == {"verdict": "enhance", "notes": [NOTE]}
+    answer.write_text(json.dumps({"verdict": "pass", "notes": [NOTE]}))
+    with pytest.raises(schema.SchemaError) as refused:
+        schema.load_verdict(answer)
+    assert str(refused.value) == f"verdict notes: {[NOTE]} is expected to be empty"
 
 
 def test_pass_with_notes_is_refused():
