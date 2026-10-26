@@ -1133,6 +1133,11 @@ def test_clearing_an_absent_alarm_opens_no_ledger(tmp_path, monkeypatch):
 
     monkeypatch.setattr(operator_setup, "LedgerClient", refuse)
     operator_setup.clear_alarm(operator_setup.Placement(tmp_path / operator_setup.FOLDER))
+    placement = operator_setup.Placement(tmp_path / "other")
+    placement.alarm.parent.mkdir(parents=True)
+    placement.alarm.write_text(json.dumps({"message": "refused"}))
+    operator_setup.clear_alarm(placement)
+    assert not placement.alarm.exists()
 
 
 def test_a_refused_setup_without_a_transport_only_reaches_the_journal(tmp_path, monkeypatch):

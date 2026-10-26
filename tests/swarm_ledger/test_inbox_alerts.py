@@ -68,6 +68,16 @@ def test_a_closed_items_alert_returns_when_the_item_is_raised_again():
     assert [(a["text"], a["state"]) for a in doc["alerts"]] == [("unread one", "done"), ("unread one later", "open")]
 
 
+def test_closing_by_item_without_a_closer_names_the_operator_and_tolerates_no_alerts():
+    doc = {}
+    apply(doc, raise_op("m1"))
+    unsigned = {k: v for k, v in close_op("m1").items() if k != "by"}
+    assert apply(doc, unsigned) is True
+    assert doc["alerts"][0]["closed_by"] == "operator"
+    empty = {}
+    assert apply(empty, close_op("m1")) is True and empty == {"alerts": []}
+
+
 def test_closing_by_item_leaves_other_sources_alone():
     doc = {"alerts": [{"id": "s", "source": "sync", "item": "m1", "text": "t", "state": "open"}]}
     ctx = Ctx()

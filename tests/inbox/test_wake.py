@@ -457,6 +457,37 @@ def test_an_open_item_keeps_its_alert_and_a_refused_clear_is_retried(inbox):
     assert [i for _, i, _ in ledger.cleared] == [item.id]
 
 
+def test_the_operator_step_records_who_showed_it_and_when(inbox):
+    item = inbox.send("sw-eng-2", "sw-eng-1", "check the plan")
+    herdr, ledger = FakeHerdr({"p1": "working"}), FakeLedger()
+    for n in range(3):
+        run(inbox, herdr, ledger, sent_at(item) + n * W)
+    [note] = [e for e in inbox.history(item.id) if e.get("event") == "escalated_operator"]
+    assert (note["by"], note["reason"], note["at"]) == (
+        "swarm",
+        "shown to the operator on the ledger page",
+        sent_at(item) + 2 * W,
+    )
+
+
+def test_one_open_or_refused_item_never_stops_the_clear_of_the_next(inbox):
+    from scripts.swarm.store import SwarmError
+
+    class RefuseFirst(FakeLedger):
+        def close_item_alerts(self, slug, item, outcome):
+            if item == "a-refused":
+                raise SwarmError("ledger sw is gone")
+            super().close_item_alerts(slug, item, outcome)
+
+    still_open = inbox.send("sw-eng-2", "sw-eng-1", "still open")
+    key = inbox.key(wake.ALERTED, "sw")
+    inbox.redis.sadd(key, "a-refused", still_open.id, "z-gone")
+    ledger = RefuseFirst()
+    assert wake.clear_alerts(inbox, "sw", ledger) == ["cleared the ledger alert for message z-gone"]
+    assert ledger.cleared == [("sw", "z-gone", "The message was closed.")]
+    assert inbox.redis.smembers(key) == {"a-refused", still_open.id}
+
+
 def test_a_vanished_alerted_item_clears_its_alert(inbox):
     inbox.redis.sadd(inbox.key(wake.ALERTED, "sw"), "gone-item")
     ledger = FakeLedger()
