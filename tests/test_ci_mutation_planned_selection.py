@@ -1,3 +1,4 @@
+import ast
 import json
 import subprocess
 import time
@@ -300,6 +301,12 @@ def _line_project(tmp_path, monkeypatch, mode):
     source = "def f(value):\n    if value:\n        return value + 1\n    return value - 1\n"
     if mode == "repeated":
         source = "def f(value):\n    if value:\n        value += 1\n" + "    pass\n" * 300
+    elif mode in {"constant", "dropped"}:
+        source += "\n\nclass Config:\n    SETTING = 1\n    OTHER = 2\n"
+    elif mode == "rebound":
+        source += "\nSETTING = 1\n"
+    elif mode == "decorator":
+        source += "\n\n@staticmethod\ndef h():\n    pass\n"
     (tmp_path / "scripts/core.py").write_text(source)
     (tmp_path / "scripts/helper.py").write_text("from scripts.core import f\n")
     (tmp_path / "scripts/aaa.py").write_text("def other():\n    return 1\n")
@@ -350,6 +357,16 @@ def _line_contexts(tmp_path, manifest, mode):
         (tmp_path / "scripts/aaa.py").write_text("def other():\n    return 2\n")
 
 
+LINE_EDITS = {
+    "constant": ("SETTING = 1", "SETTING = 2"),
+    "decorator": ("@staticmethod", "@classmethod"),
+    "dropped": ("    SETTING = 1\n", ""),
+    "header": ("def f(value)", "def f(value=1)"),
+    "rebound": ("SETTING = 1", "SETTING = 2"),
+    "inserted": ("    return value - 2", "    value += 1\n    return value - 2"),
+}
+
+
 @pytest.mark.parametrize("shift", [0, 2])
 @pytest.mark.parametrize(
     "mode",
@@ -364,6 +381,10 @@ def _line_contexts(tmp_path, manifest, mode):
         "separate",
         "data",
         "module",
+        "constant",
+        "dropped",
+        "rebound",
+        "decorator",
         "new",
         "deleted",
         "trailing",
@@ -383,17 +404,15 @@ def test_statistics_select_only_contexts_executing_the_edited_branch(tmp_path, m
         new = source + "\n"
     elif mode == "repeated":
         new = source.replace("value += 1", "value += 2")
-    if mode == "header":
-        new = new.replace("def f(value)", "def f(value=1)")
-    if mode == "inserted":
-        new = new.replace("    return value - 2", "    value += 1\n    return value - 2")
+    if mode in LINE_EDITS:
+        new = new.replace(*LINE_EDITS[mode])
     (tmp_path / "scripts/core.py").write_text("\n" * shift + new)
     _commit(tmp_path, "edited branch")
     selection = {}
     line = 3 if mode == "repeated" else 4
     plan.estimate(tmp_path, {"scripts/core.py": {line + shift}}, selection, manifest)
     expected = ["tests/test_core.py::test_g"]
-    if mode in {"legacy", "inserted", "header", "drift"}:
+    if mode in {"legacy", "inserted", "header", "decorator", "rebound", "drift"}:
         expected = [
             f"tests/test_core.py::{name}" for name in ("TestSpawn::test_child", "test_f", "test_g", "test_other")
         ]
@@ -569,10 +588,178 @@ def test_a_module_edit_that_only_binds_new_names_keeps_the_selection_narrow(
         ("class A:\n    pass\n", "@dataclass\nclass A:\n    pass\n", False),
         ("class A:\n    X = 1\n", "class A:\n    X = 2\n", False),
         ("X = 1\n", "Y = 1\n", False),
+        ("X = 1\n", "X = 1\n\n\ndef h():\n    pass\n", True),
+        ("X = 1\n", "X = 1\n\n\nasync def h():\n    pass\n", True),
+        ("X = 1\n", "X = 1\n\n\n@cache\ndef h():\n    pass\n", False),
+        ("H = {'a': f}\n", "H = {'a': f, 'b': g}\n", True),
+        ("H = {'a': f}\n", "H = {'b': g, 'a': f}\n", True),
+        ("H = {'a': f}\n", "H = {'a': f, 'a': g}\n", False),
+        ("H = {'a': f}\n", "H = {'a': f, 'b': g, 'b': h}\n", False),
+        ("H = {'a': f}\n", "H = {'a': g, 'b': g}\n", False),
+        ("H = {'a': f, 'b': g}\n", "H = {'a': f, 'c': h}\n", False),
+        ("H = {'a': f}\n", "H = {'a': f, **B}\n", False),
+        ("H = {'a': f}\n", "H = {'a': f, 'b': make()}\n", False),
+        ("H = {'a': f}\n", "H = {'a': f, make(): g}\n", False),
+        ("H = {'a': f}\n", "H = {'a': f, K: g}\n", False),
+        ("H = {K: f}\n", "H = {K: f, 'b': g}\n", False),
+        ("H = {1: f}\n", "H = {1: f, True: g}\n", False),
+        ("H = {1: f}\n", "H = {1: f, 2: g, 2.0: h}\n", False),
+        ("H = {'a': f}\n", "G = {'a': f, 'b': g}\n", False),
+        ("H = {'a': f}\n", "H = ['a', 'b']\n", False),
+        ("H: dict = {'a': f}\n", "H: dict = {'a': f, 'b': g}\n", False),
+        ("H = ('a',)\n", "H = ('a', 'b')\n", True),
+        ("H = ['a']\n", "H = ['a', 'b']\n", True),
+        ("H = ['a']\n", "H = ['b', 'a']\n", False),
+        ("H = ['a', 'c']\n", "H = ['a', 'b', 'c']\n", False),
+        ("H = {'a'}\n", "H = {'b', 'a'}\n", True),
+        ("H = ['a']\n", "H = ['a']\nH = ['a', 'b']\n", False),
+        ("H = {'a': f}\nX = 1\n", "X = 1\nH = {'a': f, 'b': g}\n", False),
+        ("H = {'a': f}\nG = {'b': g}\n", "G = {'b': g, 'c': h}\nH = {'a': f}\n", False),
+        ("X = h\n", "X = h\n\n\ndef h():\n    pass\n", False),
     ],
 )
 def test_only_statements_binding_unknown_names_count_as_new(old, new, expected):
     assert plan.binds_only_new_names(old, new) is expected
+
+
+@pytest.mark.parametrize(
+    ("old", "new", "expected"),
+    [
+        ("class A:\n    X = 1\n", "class A:\n    X = 2\n    Y = 3\n", True),
+        ("class A(B):\n    X = 1\n", "class A(B):\n    X = 2\n", True),
+        ("class A(B):\n    pass\n", "class A(C):\n    pass\n", False),
+        ("class A:\n    def m(self):\n        return 1\n", "class A:\n    def m(self):\n        return 2\n", True),
+        ("class A:\n    def m(self):\n        pass\n", "class A:\n    @cache\n    def m(self):\n        pass\n", False),
+        ("X = 1\n", "X = 2\n", False),
+        ("def f(:\n", "def f(:\n", True),
+        ("def f():\n    pass\n", "def f(:\n", False),
+        ("class A:\n    X: int = 1\n", "class A:\n    X: int = 2\n", True),
+        ("class A:\n    H = {'a': f}\n", "class A:\n    H = {'a': f, 'b': g}\n", False),
+        ("class A:\n    H: dict = {'a': f}\n", "class A:\n    H: dict = {'a': f, 'b': g}\n", False),
+    ],
+)
+def test_only_top_level_statement_edits_change_the_module_keys(old, new, expected):
+    assert (plan._module_keys(old) == plan._module_keys(new)) is expected
+
+
+@pytest.mark.parametrize(
+    ("old", "new", "expected"),
+    [
+        ("H = {'a': f}\n", "H = {'a': f, 'b': g}\n", {"H": True}),
+        ("H = {'a': f, 'b': g}\n", "H = {'a': f, 'b': g, 'c': h}\n", {"H": True}),
+        ("H = ['a', 'b']\n", "H = ['a', 'b', 'c']\n", {"H": False}),
+        ("H = G = {'a': f}\n", "H = G = {'a': f, 'b': g}\n", {"H": True, "G": True}),
+        ("H = ['a']\nX = 1\n", "H = ['a', 'b']\nX = 1\n", {"H": False}),
+        ("H = {'a': f}\n", "H = {'a': g}\n", {}),
+        ("H = {'a': f}\n", "H = {'a': f}\n", {}),
+    ],
+)
+def test_extended_tables_name_each_table_that_only_gained_entries(old, new, expected):
+    assert plan.extended_tables(old, new) == expected
+
+
+def test_only_unkeyed_reads_of_a_dict_table_reach_its_new_entries():
+    source = (
+        "def apply(name):\n    return H[name]()\n\n\n"
+        "def find(name):\n    return H.get(name)\n\n\n"
+        "def names():\n    return sorted(H)\n\n\n"
+        "def first():\n    return L[0]\n\n\n"
+        "def store():\n    H = {}\n    return O\n\n\n"
+        "def guarded(name):\n    try:\n        return H[name]\n    except KeyError:\n        return None\n\n\n"
+        "def cleanup(name):\n    try:\n        return H[name]\n    finally:\n        pass\n"
+    )
+    assert plan.table_reads(ast.parse(source), {"H": True, "L": False}) == {6, 10, 14, 24}
+
+
+@pytest.mark.parametrize(
+    ("old", "new", "expected"),
+    [
+        ("X = 1\n", "X = 1\n\n\ndef h():\n    pass\n\n\nasync def k():\n    pass\n\n\nH = [h, k]\n", {"h", "k"}),
+        ("X = 1\n", "X = 1\n\n\ndef h():\n    pass\n\n\ndef k():\n    return h()\n", {"h"}),
+        ("X = 1\n", "X = 1\n\n\ndef h():\n    pass\n", set()),
+        ("X = 1\n", "X = 1\n\n\ndef h():\n    return h()\n", set()),
+        ("def h():\n    pass\n", "def h():\n    return 1\n", set()),
+        ("h = 1\n", "def h():\n    pass\n", set()),
+        ("X = 1\n", "@cache\ndef h():\n    pass\n", set()),
+        ("X = 1\n", "class A:\n    def h(self):\n        pass\n", set()),
+        (None, "def h():\n    pass\n", set()),
+        ("def f(:\n", "def h():\n    pass\n", set()),
+        ("def f(:\n", "def h():\n    pass\n\n\nH = [h]\n", set()),
+    ],
+)
+def test_new_functions_are_undecorated_top_level_functions_the_old_source_never_named(old, new, expected):
+    assert plan.new_functions(old, ast.parse(new)) == expected
+
+
+TABLE_SOURCE = (
+    "def f(value):\n    return value + 1\n\n\n"
+    "def g(value):\n    return value - 1\n\n\n"
+    'HANDLERS = {"f": f}\n\n\n'
+    "def apply(name, value):\n    return HANDLERS[name](value)\n\n\n"
+    "def names():\n    return sorted(HANDLERS)\n"
+)
+
+
+@pytest.mark.parametrize(
+    ("mode", "mention", "expected"),
+    [
+        ("handler", False, ["tests/test_core.py::TestSpawn::test_child"]),
+        ("nested", False, ["tests/test_core.py::TestSpawn::test_child"]),
+        ("entry", False, ["tests/test_core.py::TestSpawn::test_child", "tests/test_core.py::test_g"]),
+        (
+            "handler",
+            True,
+            [
+                "tests/test_core.py::TestSpawn::test_child",
+                "tests/test_core.py::test_f",
+                "tests/test_core.py::test_g",
+                "tests/test_core.py::test_other",
+            ],
+        ),
+    ],
+)
+def test_a_new_handler_table_entry_selects_only_the_tests_that_reach_it(tmp_path, monkeypatch, mode, mention, expected):
+    from coverage import CoverageData
+
+    from tests.dep_manifest import build
+
+    _recorded_project(tmp_path, monkeypatch)
+    (tmp_path / "scripts/core.py").write_text(TABLE_SOURCE)
+    if mention:
+        test_core = tmp_path / "tests/test_core.py"
+        test_core.write_text("from scripts.core import HANDLERS\n" + test_core.read_text())
+    commit = _commit(tmp_path, "handler table")
+    data = CoverageData(basename=str(tmp_path / ".coverage"))
+    for test, lines in (
+        ("tests/test_core.py::test_f", [2, 13]),
+        ("tests/test_core.py::test_g", [6]),
+        ("tests/test_core.py::test_other", [13]),
+        ("tests/test_core.py::TestSpawn::test_child", [17]),
+    ):
+        data.set_context(f"{test}|run")
+        data.add_lines({str(tmp_path / "scripts/core.py"): lines})
+    data.write()
+    manifest = build(tmp_path / ".coverage", [], tmp_path, commit, "test")
+    if mode == "handler":
+        edited = TABLE_SOURCE.replace(
+            'HANDLERS = {"f": f}', 'def h(value):\n    return value * 2\n\n\nHANDLERS = {"f": f, "h": h}'
+        )
+        changed = "    return value * 2"
+    elif mode == "nested":
+        edited = TABLE_SOURCE.replace(
+            'HANDLERS = {"f": f}',
+            "def h(value):\n    def inner():\n        return value * 2\n\n    return inner()\n\n\n"
+            'HANDLERS = {"f": f, "h": h}',
+        )
+        changed = "        return value * 2"
+    else:
+        edited = TABLE_SOURCE.replace('{"f": f}', '{"f": f, "g": g}').replace("value - 1", "value - 2")
+        changed = "    return value - 2"
+    (tmp_path / "scripts/core.py").write_text(edited)
+    _commit(tmp_path, "table edit")
+    selection = {}
+    plan.estimate(tmp_path, {"scripts/core.py": {edited.splitlines().index(changed) + 1}}, selection, manifest)
+    assert selection["scripts/core.py"] == [*expected, "tests/test_edited.py", "tests/test_fresh.py"]
 
 
 def test_plan_publishes_covering_test_ids_and_checks_their_files(tmp_path, monkeypatch):
@@ -638,6 +825,50 @@ def test_selection_keeps_whole_files_where_recorded_coverage_cannot_speak(tmp_pa
     assert selection == {"scripts/core.py": WHOLE}
 
 
+def test_a_changed_tests_data_file_adds_only_the_tests_that_read_it(tmp_path, monkeypatch):
+    manifest = _recorded_project(tmp_path, monkeypatch)
+    manifest["tests"]["tests/test_core.py::test_other"]["files"] = ["tests/data/rules.json"]
+    (tmp_path / "tests/data").mkdir()
+    (tmp_path / "tests/data/rules.json").write_text("{}\n")
+    _commit(tmp_path, "data")
+    selection = {}
+    plan.estimate(tmp_path, {"scripts/core.py": {6}}, selection, manifest)
+    assert selection == {"scripts/core.py": sorted([*NARROWED, "tests/test_core.py::test_other"])}
+
+
+WORKFLOW = (
+    "env:\n  FLAG: {env}\njobs:\n  split:\n    runs-on: {split}\n  unit:\n    needs: split\n"
+    "    timeout-minutes: {timeout}\n    steps:\n      - run: {unit}\n  unit-selected:\n    steps:\n"
+    "      - run: {selected}\n  lint:\n    steps:\n      - run: {lint}\n"
+)
+RECORDED_WORKFLOW = {"env": "1", "split": "x", "unit": "pytest", "timeout": 10, "selected": "pytest", "lint": "ruff"}
+
+
+@pytest.mark.parametrize(
+    "edit,expected",
+    [
+        ({"lint": "ruff check"}, sorted([*NARROWED, "tests/test_core.py::test_other"])),
+        ({"split": "y"}, WHOLE),
+        ({"timeout": 20}, sorted([*NARROWED, "tests/test_core.py::test_other"])),
+        ({"unit": "pytest -x"}, WHOLE),
+        ({"selected": "pytest -x"}, WHOLE),
+        ({"env": "2"}, WHOLE),
+    ],
+)
+def test_a_workflow_edit_drops_narrowing_only_when_it_changes_the_test_command(tmp_path, monkeypatch, edit, expected):
+    manifest = {**_recorded_project(tmp_path, monkeypatch), "version": 2}
+    manifest["tests"]["tests/test_core.py::test_other"]["files"] = [".github/workflows/test.yml"]
+    workflow = tmp_path / ".github/workflows/test.yml"
+    workflow.parent.mkdir(parents=True)
+    workflow.write_text(WORKFLOW.format(**RECORDED_WORKFLOW))
+    manifest["commit"] = _commit(tmp_path, "recorded workflow")
+    workflow.write_text(WORKFLOW.format(**{**RECORDED_WORKFLOW, **edit}))
+    _commit(tmp_path, "workflow")
+    selection = {}
+    plan.estimate(tmp_path, {"scripts/core.py": {6}}, selection, manifest)
+    assert selection == {"scripts/core.py": expected}
+
+
 def test_a_path_whose_covering_tests_are_gone_keeps_its_selected_files(tmp_path, monkeypatch):
     manifest = _recorded_project(tmp_path, monkeypatch)
     manifest["commit"] = subprocess.check_output([*GIT, "-C", str(tmp_path), "rev-parse", "HEAD"], text=True).strip()
@@ -652,3 +883,127 @@ def test_a_path_whose_covering_tests_are_gone_keeps_its_selected_files(tmp_path,
     selection = {}
     plan.estimate(tmp_path, {"scripts/core.py": {6}}, selection, manifest)
     assert selection == {"scripts/core.py": WHOLE}
+
+
+UNIT_JOBS = {"unit": {"needs": "split", "steps": [{"run": "pytest"}]}, "unit-selected": {"steps": [{"run": "pytest"}]}}
+
+
+@pytest.mark.parametrize(
+    "edit,expected",
+    [
+        ({"jobs": {**UNIT_JOBS, "split": {"runs-on": "y"}}}, True),
+        ({"jobs": {**UNIT_JOBS, "unit-selected": {"needs": ["select"], "steps": [{"run": "pytest"}]}}}, False),
+        ({"jobs": {**UNIT_JOBS, "lint": {"runs-on": "y"}}}, False),
+        ({"jobs": {**UNIT_JOBS, "unit": {**UNIT_JOBS["unit"], "needs": ["split", "count"]}}}, False),
+        ({"jobs": {**UNIT_JOBS, "unit": {**UNIT_JOBS["unit"], "if": "always()"}}}, False),
+        ({"jobs": {**UNIT_JOBS, "unit": {**UNIT_JOBS["unit"], "outputs": {"a": "b"}}}}, False),
+        ({"jobs": {**UNIT_JOBS, "unit": {**UNIT_JOBS["unit"], "runs-on": "other"}}}, True),
+        ({"jobs": {**UNIT_JOBS, "unit-selected": {"steps": []}}}, True),
+        ({"jobs": {**UNIT_JOBS, "mutation-stats": {"steps": [{"run": "collect"}]}}}, True),
+        ({"jobs": {**UNIT_JOBS, "mutation-stats": {"needs": "mutation-plan"}}}, False),
+        ({"jobs": {"unit": UNIT_JOBS["unit"]}}, True),
+        ({"jobs": {**UNIT_JOBS, "unit": "pytest"}}, True),
+        ({"jobs": {"unit-selected": UNIT_JOBS["unit-selected"]}}, True),
+        ({"jobs": UNIT_JOBS, "defaults": {"run": {"shell": "sh"}}}, True),
+        ({"jobs": UNIT_JOBS, "env": {"FLAG": "1"}}, True),
+        ({"jobs": []}, True),
+    ],
+)
+def test_only_the_jobs_running_recorded_tests_decide_a_collection_change(edit, expected):
+    import yaml
+
+    old = yaml.safe_dump({"jobs": UNIT_JOBS})
+    jobs = plan.COLLECTING_JOBS[plan.TEST_WORKFLOW]
+    assert plan.collection_changed(old, yaml.safe_dump(edit), jobs) is expected
+    assert plan.collection_changed(old, old, jobs) is False
+    assert plan.collection_changed(old, "jobs: [", jobs) is True
+    unit_only = yaml.safe_dump({"jobs": {"unit": UNIT_JOBS["unit"]}})
+    assert (
+        plan.collection_changed(unit_only, yaml.safe_dump({"jobs": {"unit": UNIT_JOBS["unit"], "lint": {}}}), jobs)
+        is False
+    )
+    preflight = plan.COLLECTING_JOBS[".github/workflows/mutation-preflight.yml"]
+    stats = yaml.safe_dump({"jobs": {"stats": {"steps": [{"run": "collect"}]}, "plan": {}}})
+    assert plan.collection_changed(stats, stats.replace("plan: {}", "plan: {a: 1}"), preflight) is False
+    assert plan.collection_changed(stats, stats.replace("run: collect", "run: other"), preflight) is True
+
+
+@pytest.mark.parametrize(
+    "importer,extra,changed,narrowed",
+    [
+        ("from tests.helpers import H\n", {}, "tests/helpers.py", False),
+        ("from tests import helpers\n", {}, "tests/helpers.py", False),
+        ("from .helpers import H\n", {}, "tests/helpers.py", False),
+        ("import helpers\n", {}, "tests/helpers.py", False),
+        ('HELPER = "tests/helpers.py"\n', {}, "tests/helpers.py", False),
+        ("from tests.chain import H\n", {"tests/chain.py": "from tests.helpers import H\n"}, "tests/helpers.py", False),
+        ("", {"scripts/uses.py": "from tests.helpers import H\n"}, "tests/helpers.py", False),
+        ("", {"tests/__init__.py": "X = 1\n"}, "tests/__init__.py", False),
+        ("", {"tests/nested/conftest.py": "X = 1\n"}, "tests/nested/conftest.py", True),
+        (
+            "from tests.chain import H\n",
+            {"tests/chain.py": "from tests.helpers import H\n", "tests/helpers.py": "from tests.chain import H\n"},
+            "tests/helpers.py",
+            False,
+        ),
+        ("import tests.pkg\n", {"tests/pkg/__init__.py": "X = 1\n"}, "tests/pkg/__init__.py", False),
+        (
+            "",
+            {"tests/test_unrelated.py": "X = 1\n", "scripts/uses.py": "from tests.test_unrelated import X\n"},
+            "tests/test_unrelated.py",
+            False,
+        ),
+        ("", {"tests/test_unrelated.py": "X = 1\n"}, "tests/test_unrelated.py", True),
+        ("from tests.test_shared import X\n", {"tests/test_shared.py": "X = 1\n"}, "tests/test_shared.py", False),
+        ("", {}, "tests/helpers.py", True),
+        ("from tests.helpers_extra import H\n", {"tests/helpers_extra.py": "H = 1\n"}, "tests/helpers.py", True),
+        ("from tests.chain import H\n", {"tests/chain.py": "H = 1\n"}, "tests/helpers.py", True),
+    ],
+)
+def test_a_shared_helper_edit_keeps_whole_only_the_test_files_it_reaches(
+    tmp_path, monkeypatch, importer, extra, changed, narrowed
+):
+    manifest = _recorded_project(tmp_path, monkeypatch)
+    core = tmp_path / "tests/test_core.py"
+    core.write_text(importer + core.read_text())
+    (tmp_path / "tests/helpers.py").write_text("H = 1\n")
+    for path, text in extra.items():
+        (tmp_path / path).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / path).write_text(text)
+    manifest["commit"] = _commit(tmp_path, "recorded helpers")
+    (tmp_path / changed).write_text((tmp_path / changed).read_text() + "H = 2\n")
+    _commit(tmp_path, "helper")
+    selection = {}
+    plan.estimate(tmp_path, {"scripts/core.py": {6}}, selection, manifest)
+    assert selection == {"scripts/core.py": NARROWED if narrowed else WHOLE}
+
+
+def test_an_unparsable_file_still_reaches_the_modules_its_text_names():
+    assert plan._reach_keys("tests/a.py", "from tests.helpers import (\n") == {"tests", "tests.helpers"}
+    assert plan._reach_keys("tests/pkg/__init__.py", "from . import b\n") == {"tests", "tests.pkg", "tests.pkg.b"}
+    assert plan._reach_keys("tests/a.py", 'run("tests/x/y.py")\n') == {"tests/x/y.py", "y.py"}
+    assert plan._reach_keys("tests/a.py", "# see tests/x/y.py.\n# not y.pyc\n") == {"tests/x/y.py", "y.py"}
+    assert plan._reach_keys("tests/a.py", "tests/x/y.pyX\n") == set()
+    assert plan._reach_keys("tests/a/b.py", "from tests import c\n") == {"tests", "tests.c"}
+    assert plan._reach_keys("tests/a/b.py", "from ..d import e\n") == {"tests", "tests.d", "tests.d.e"}
+
+
+@pytest.mark.parametrize(
+    "path,version,narrowed",
+    [
+        (".github/workflows/lint.yml", 2, True),
+        (".github/workflows/lint.yml", 1, False),
+        (".github/workflows/mutation-preflight.yml", 2, False),
+        (".github/workflows/helper.py", 2, False),
+    ],
+)
+def test_an_edit_to_a_workflow_that_runs_no_recorded_test_keeps_narrowing(
+    tmp_path, monkeypatch, path, version, narrowed
+):
+    manifest = {**_recorded_project(tmp_path, monkeypatch), "version": version}
+    (tmp_path / path).parent.mkdir(parents=True)
+    (tmp_path / path).write_text("a: 1\n")
+    _commit(tmp_path, "workflow")
+    selection = {}
+    plan.estimate(tmp_path, {"scripts/core.py": {6}}, selection, manifest)
+    assert selection == {"scripts/core.py": NARROWED if narrowed else WHOLE}

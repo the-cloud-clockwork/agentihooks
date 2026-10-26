@@ -8,7 +8,7 @@ Usage: ledger.py --slug SLUG --as NAME <command> [args]
   status                              crew, my unhandled operator events
   events                              my unhandled operator events, one line each
   ack [--rev N]                       mark operator events up to N (default: latest) as handled
-  say TEXT [--long]                   chat message (TEXT "-" reads stdin); --long only when the operator asked to expand
+  say TEXT --reply-to ID [--long]     answer an operator chat line by its id (TEXT "-" reads stdin); --long only when he asked to expand
   comment ITEM TEXT [--image PATH]    attach an image (repeatable) to your status on phases/<id>, questions/<id> or followups/<id>; amends your last one
   artifact PATH TITLE [--task ID] [--request ENTRY]
                                       publish a markdown, JSON, SVG or image file the operator asked for; its task
@@ -24,9 +24,9 @@ Usage: ledger.py --slug SLUG --as NAME <command> [args]
                                       review; a taken phase id refuses them all
   phase ID done|open [--status T]     set a phase state, T becomes your status comment
   followup add TEXT | done|open ID    add a follow-up, close one, or reopen one
-  followup add TEXT --needs-operator  add a follow-up that waits on the operator's decision; it shows in Priorities
+  followup add TEXT --needs-operator  operator and swarm only: agents are refused, they never ask the operator first
   followup flag|unflag ID             mark a follow-up as waiting on the operator's decision, or no longer
-  question add TEXT                   ask a question on the ledger; the master answers it or raises it to the operator
+  question add TEXT                   operator and swarm only: agents send questions to master@<slug> by inbox
   scope ITEM in|out [--status T]      mark an item out of scope (or back in); T says why
   retext ITEM TEXT                    rewrite the text of a follow-up or question
   edit chat|ITEM ENTRY TEXT           rewrite an entry (yours; the orchestrator: any agent's)
@@ -38,7 +38,7 @@ Usage: ledger.py --slug SLUG --as NAME <command> [args]
                                       or priorities/<id> (no --as needed)
   tasks [--state S] [--lane L] [--text T]
                                       list open tasks, one line each, by state, lane or title text (no --as needed)
-  priority add ITEM TEXT              ask the operator: only what blocks on his answer, at most 20 words; ITEM may
+  priority add ITEM TEXT              operator and swarm only, at most 20 words; agents are refused; ITEM may
                                       be phases/<id>, questions/<id>, followups/<id> or tasks/<id>. Unanswered
                                       questions, blocked tasks, merge approvals and flagged follow-ups show on their own
   priority clear ID... | --all        clear priorities once answered
@@ -469,6 +469,8 @@ def cmd_say(args):
         "by": args.name,
         "to": "operator",
     }
+    if vars(args).get("reply_to"):
+        op["reply_to"] = args.reply_to
     if args.long:
         op["long"] = True
     posted(call(args.slug, [op]), [op])
@@ -601,10 +603,16 @@ def cmd_plan(args):
     phases = ledger_phase_cli.append_phases(
         plan, [phase["id"] for phase in resource(args.slug, "phases", collection=True)]
     )
-    send(args, "phase_append", phases=phases)
+    state = send(args, "phase_append", phases=phases)
+    repeats = ledger_phase_cli.repeats(state.get("_meta", {}).get("warnings", []), phases)
+    for warning in repeats.values():
+        print(warning, file=sys.stderr)
     print(
         json.dumps(
-            {"appended": [phase["phase"] for phase in phases], "planning": {p["phase"]: p["planning"] for p in phases}}
+            {
+                "appended": [phase["phase"] for phase in phases if phase["phase"] not in repeats],
+                "planning": {p["phase"]: p["planning"] for p in phases if p["phase"] not in repeats},
+            }
         )
     )
 
@@ -642,6 +650,7 @@ def cmd_followup(args):
             list="followups",
             text=args.value,
             **({"needs_operator": True} if args.needs_operator else {}),
+            **({"not_duplicate": args.not_duplicate} if args.not_duplicate else {}),
             **hive_fields(args),
             **({"task": task} if (task := os.environ.get("AGENTIHOOKS_SWARM_TASK")) else {}),
         )
@@ -959,6 +968,7 @@ def build_parser():
     say = sub.add_parser("say")
     say.add_argument("text")
     say.add_argument("--long", action="store_true")
+    say.add_argument("--reply-to")
     for name, first, second in (("comment", "item", "text"), ("retext", "item", "text")):
         parser_ = sub.add_parser(name)
         parser_.add_argument(first)
@@ -985,12 +995,20 @@ def build_parser():
     phase.add_argument("--depends-on", default="")
     phase.add_argument("--planning", choices=["manual", "auto"], default=ledger_phases.PLANNING_DEFAULT)
     phase.add_argument("--release", action="store_true")
+    phase.add_argument(
+        "--not-duplicate", default="", help="why the phase differs from the one it resembles; skips the duplicate check"
+    )
     followup = sub.add_parser("followup")
     followup.add_argument("action", choices=["add", "done", "open", "flag", "unflag"])
     followup.add_argument("value")
     followup.add_argument("--status")
     followup.add_argument("--needs-operator", action="store_true")
     followup.add_argument("--hive", help="hive whose master owns the new follow up")
+    followup.add_argument(
+        "--not-duplicate",
+        default="",
+        help="why the follow up differs from the item it resembles; skips the duplicate check",
+    )
     question = sub.add_parser("question")
     question.add_argument("action", choices=["add"])
     question.add_argument("text")

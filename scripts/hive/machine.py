@@ -2,7 +2,7 @@
 
 import json
 import subprocess
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -44,7 +44,7 @@ def hive_name(ordinal: int) -> str:
     return f"{NAME_PREFIX}{ordinal:03d}"
 
 
-def name(redis: "Redis", machine: str, assign: bool = True) -> str:
+def name(redis: "Redis", machine: str, assign: bool = True, taken: Callable[[], Iterable[str]] = tuple) -> str:
     from redis.exceptions import WatchError
 
     with redis.pipeline() as pipe:
@@ -54,11 +54,9 @@ def name(redis: "Redis", machine: str, assign: bool = True) -> str:
                 named = pipe.hgetall(MACHINES)
                 if machine in named:
                     return named[machine]
-                used = sorted(named.values())
-                found = next(
-                    (hive_name(ordinal) for ordinal, held in enumerate(used, 1) if held != hive_name(ordinal)),
-                    hive_name(len(used) + 1),
-                )
+                used = {*named.values(), *taken()}
+                ordinals = (ordinal for ordinal, _ in enumerate([*used, None], 1))
+                found = next(hive_name(ordinal) for ordinal in ordinals if hive_name(ordinal) not in used)
                 if assign:
                     pipe.multi()
                     pipe.hset(MACHINES, machine, found)
@@ -66,6 +64,13 @@ def name(redis: "Redis", machine: str, assign: bool = True) -> str:
                 return found
             except WatchError:
                 continue
+
+
+def held_names(redis: "Redis", run: Callable[..., subprocess.CompletedProcess]) -> set[str]:
+    members = {redis.hget(key, "name") for key in redis.scan_iter(match=f"{auth.PREFIX}:member:*")}
+    hives = {record["name"] for record in registry.hives(redis)}
+    herdr = {saved.get("label") for saved in _listed(run)}
+    return {label for label in members | hives | herdr if label}
 
 
 def host(target: str) -> str:

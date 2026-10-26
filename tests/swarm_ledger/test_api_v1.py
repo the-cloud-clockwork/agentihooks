@@ -64,9 +64,9 @@ def request(live, method, resource, body=None, **headers):
 
 
 def stored(monkeypatch, document):
-    from types import SimpleNamespace
+    from tests.swarm_ledger.api_fakes import serve_document
 
-    monkeypatch.setattr(server.repository, "current", lambda slug: SimpleNamespace(state=document, views={}))
+    serve_document(monkeypatch, server.repository, document)
 
 
 def test_invalid_schema_leaves_resource_unchanged(live):
@@ -1364,7 +1364,7 @@ def test_versioned_logs_exclude_query_and_bearer(live, capsys):
         )
     assert status == 403
     logged = capsys.readouterr().err
-    assert logged == f"09:00:00 GET /api/v1/ledgers/{SLUG}/metadata\n"
+    assert logged == f"09:00:00 GET /api/v1/ledgers/{SLUG}/metadata -\n"
     assert "private-canary" not in logged
     assert "credential-canary" not in logged
 
@@ -1658,7 +1658,7 @@ def test_operator_doctor_phrase_keeps_the_ledger(live, monkeypatch):
     assert state["chat"][-1]["text"] == server.DOCTOR_PHRASE
 
 
-def test_mutations_enforce_the_ledger_talk_budget(live, monkeypatch):
+def test_mutations_enforce_the_ledger_talk_budget_on_phase_comments(live, monkeypatch):
     import fakeredis
 
     from scripts.gates import progress, talk
@@ -1679,10 +1679,10 @@ def test_mutations_enforce_the_ledger_talk_budget(live, monkeypatch):
 
     monkeypatch.setattr(talk.Budget, "_marks", _talk_marks)
     monkeypatch.setattr(talk.Budget, "__init__", budget)
-    revision = request(live, "GET", "chat")[1]["revision"]
+    revision = request(live, "GET", thread := "phases/p1/comments")[1]["revision"]
     payload = {
-        "ops": [{"op": "add", "id": "budget-denied", "thread": "chat", "text": "Beyond the budget", "by": worker}],
-        "guards": {"chat": revision},
+        "ops": [{"op": "add", "id": "budget-denied", "thread": thread, "text": "Beyond the budget", "by": worker}],
+        "guards": {thread: revision},
     }
     status, result = request(live, "POST", "operations", payload)
     assert status == 200
@@ -1692,7 +1692,6 @@ def test_mutations_enforce_the_ledger_talk_budget(live, monkeypatch):
         "phase p1 description has 101 words, limit 100",
         talk.refusal(worker, talk.BUDGET, SLUG),
     ]
-    assert request(live, "GET", "chat")[1]["revision"] == revision
     assert marks.read(worker).talk == talk.BUDGET
 
 
@@ -2373,7 +2372,8 @@ def test_known_hash_shaped_task_ids_keep_the_comment_exemption(live):
                 "task": "deadb33f",
                 "title": "Known task",
                 "lane": "eng",
-            }
+            },
+            {"op": "add", "id": "operator-ask", "thread": "chat", "text": "Which task covers it"},
         ],
     )
     revision = request(live, "GET", "chat")[1]["revision"]
@@ -2385,6 +2385,7 @@ def test_known_hash_shaped_task_ids_keep_the_comment_exemption(live):
                 "thread": "chat",
                 "by": "api-reader",
                 "to": "operator",
+                "reply_to": "operator-ask",
                 "text": "The deadb33f task is covered",
             }
         ],
@@ -2515,7 +2516,7 @@ def test_cli_collection_consumers_read_all_pages(live, tmp_path, capsys, monkeyp
     )
     ledger.cmd_artifact_purge(SimpleNamespace(slug=SLUG, name="api-reader"))
     assert json.loads(capsys.readouterr().out) == {"purged": 0, "artifacts": 0}
-    send_operation = Mock()
+    send_operation = Mock(return_value={})
     monkeypatch.setattr(ledger, "send", send_operation)
     args = SimpleNamespace(
         action="add",

@@ -12,7 +12,7 @@ from . import artifact_files, heap, hierarchy, media_files, outbox, refresh
 from .entry import Entry
 from .events import append_events, read_events, trim_events, write_events
 from .fragments import document
-from .rows import TABLES, assemble, diff, encode, flatten, read_rows, write_rows
+from .rows import TABLES, assemble, diff, encode, flatten, load, read_rows, write_rows
 from .seeds import read_seeds, sync_values, write_seeds
 
 SCHEMA = """
@@ -47,6 +47,10 @@ BEGIN_IMMEDIATE = "BEGIN IMMEDIATE"
 STORED = "SELECT 1 FROM ledgers WHERE slug=?"
 GENERATION = "SELECT generation FROM ledgers WHERE slug=?"
 TOKEN = "SELECT token FROM ledgers WHERE slug=?"
+TASK_REVISION = "SELECT path, value FROM fields WHERE slug=? AND path IN (?, ?)"
+TASK_REVISION_PATHS = (encode(["_meta", "task_revision"]), encode(["_meta", "rev"]))
+TASKS_PATH = encode(["tasks"])
+TASKS_PREFIX = TASKS_PATH[:-1] + ","
 SUMMARIES = "SELECT summary FROM ledgers ORDER BY touched_at DESC, slug"
 SLUGS = "SELECT slug FROM ledgers ORDER BY slug"
 ROOT = refresh.ROOT
@@ -467,7 +471,7 @@ class SQLiteLedgerRepository:
             state = None if cached is None else self._refreshed(connection, slug, cached, row[0])
             whole = state is None
             if whole:
-                state = assemble(read_rows(connection, slug))
+                state = load(connection, slug)
             if "events" in state["_meta"]:
                 state["_meta"] = {**state["_meta"], "events": read_events(connection, slug)}
             fragments = document(state, None if whole else cached.fragments)
@@ -549,6 +553,28 @@ class SQLiteLedgerRepository:
                     heap.release()
         return entry.views[view]
 
+    def export_since(self, slug: str, since: int, view, changes) -> tuple[int, str | bytes]:
+        """(generation, text) of the stored ledger: changes(state, paths) when the database recorded every row
+        change after generation since, else view(state) as encoded_view builds it."""
+        self._adopt(slug)
+        with self.connect() as connection, connection:
+            connection.execute(BEGIN)
+            entry = self._entry(connection, slug)
+            paths = (
+                refresh.changed_paths(connection, slug, since, entry.generation, CHANGES_KEPT)
+                if 0 < since <= entry.generation
+                else None
+            )
+        text = None if paths is None else changes(entry.state, paths)
+        if text is not None:
+            return entry.generation, text
+        if view not in entry.views:
+            with VIEW_BUILD:
+                if view not in entry.views:
+                    entry.views[view] = view(entry.state)
+                    heap.release()
+        return entry.generation, entry.views[view]
+
     def read(self, slug: str, *keys: str) -> dict:
         """Only the named parts of a ledger, such as `overview`, `_meta.members` or `tasks/t1`."""
         self._adopt(slug)
@@ -561,6 +587,37 @@ class SQLiteLedgerRepository:
         with self.connect() as connection:
             row = connection.execute(TOKEN, (slug,)).fetchone()
         return None if row is None else row[0]
+
+    def task_rows(self, slug: str, since: tuple | None = None) -> tuple:
+        """(generation, `_meta` task revision fields, task rows) as stored now, reusing each row of since that no
+        write reached; since is a tuple this returned earlier."""
+        self._adopt(slug)
+        with self.connect() as connection, connection:
+            connection.execute(BEGIN)
+            row = connection.execute(GENERATION, (slug,)).fetchone()
+            if row is None:
+                raise Missing(slug)
+            if since is not None and since[0] == row[0]:
+                return since
+            values = dict(connection.execute(TASK_REVISION, (slug, *TASK_REVISION_PATHS)))
+            meta = {json.loads(path)[1]: json.loads(value) for path, value in values.items()}
+            cached = self._cache.get(self._key(slug))
+            if cached is not None and cached.generation == row[0]:
+                return row[0], meta, cached.state.get("tasks") or []
+            paths = None
+            if since is not None and since[0] < row[0]:
+                paths = refresh.changed_paths(connection, slug, since[0], row[0], CHANGES_KEPT)
+            if paths is not None:
+                dirty = {path for path in paths if path == TASKS_PATH or path.startswith(TASKS_PREFIX)}
+                if not dirty:
+                    return row[0], meta, since[2]
+                with suppress(KeyError):
+                    rows = refresh.rebuilt(connection, slug, TASKS_PATH, since[2], dirty)
+                    if rows is None:
+                        built = refresh.build(connection, slug, TASKS_PATH, since[2], refresh.touched(dirty))
+                        rows = [item for _, item in built]
+                    return row[0], meta, rows
+            return row[0], meta, read_partial(connection, slug, (["tasks"],)).get("tasks") or []
 
     def apply_ops(
         self, slug: str, changes: list | None = None, ops: list | None = None, gate=None, *, copy_state: bool = True

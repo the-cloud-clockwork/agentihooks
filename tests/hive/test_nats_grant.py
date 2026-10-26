@@ -44,6 +44,7 @@ def signer(tmp_path, request):
     config = tmp_path / "nats.conf"
     config.write_text(
         f"host: 127.0.0.1\nport: {port}\nmax_control_line: {getattr(request, 'param', 65536)}\n"
+        f'log_file: "{tmp_path / "nats.log"}"\n'
         f"operator: {nkey.encode_jwt(operator, operator.public, 'op', claims)}\n"
         f"system_account: {system.public}\n"
         f'jetstream: {{store_dir: "{tmp_path / "js"}"}}\n'

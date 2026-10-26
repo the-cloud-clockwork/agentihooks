@@ -85,8 +85,8 @@ def test_validate_refuses_schema_errors(kind, doc, message):
 
 def test_validate_refuses_unknown_kind():
     with pytest.raises(ValueError) as refused:
-        schema.validate("verdict", {})
-    assert str(refused.value) == "unknown schema verdict"
+        schema.validate("ruling", {})
+    assert str(refused.value) == "unknown schema ruling"
 
 
 def test_load_refuses_malformed_json(tmp_path):

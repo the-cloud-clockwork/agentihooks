@@ -986,7 +986,7 @@ def test_shard_verification_starts_from_the_plan_and_prefetches_complete_reports
         "tests.shard_check shard-reports/durations-*/durations.json --collected collected-data/collected.json" in check
     )
     assert "REUSED" in check
-    assert job["timeout-minutes"] == 25
+    assert job["timeout-minutes"] == "${{ github.event_name == 'merge_group' && 42 || 60 }}"
     assert job["permissions"] == {"contents": "read"}
 
 
@@ -1702,7 +1702,11 @@ def test_mutation_shards_reuse_stats_collected_once_in_planned_parts():
     }
     setup = [step for step in mutation["steps"] if not str(step.get("name", "")).startswith(("Mutate", "Upload"))]
     downloads = ("Download the shared mutation stats", "Download the reused preflight report")
-    setup = [step for step in setup if step.get("name") not in downloads]
+    setup = [
+        step
+        for step in setup
+        if step.get("name") not in downloads and step.get("with", {}).get("path") != ".mutation-stats-cache"
+    ]
     stats_steps = [step for step in stats["steps"] if step.get("with", {}).get("path") != ".mutation-stats-cache"]
     assert stats_steps[: len(setup)] == setup
     collect = stats_steps[len(setup)]
@@ -1712,7 +1716,8 @@ def test_mutation_shards_reuse_stats_collected_once_in_planned_parts():
         assert restore["uses"] == "actions/cache/restore@v4"
         assert save["uses"] == "actions/cache/save@v4"
         assert restore["with"]["key"] == save["with"]["key"]
-        assert restore["if"] == save["if"] == "needs.mutation-plan.outputs.forwarded != 'true'"
+        assert restore["if"] == "needs.mutation-plan.outputs.forwarded != 'true'"
+        assert save["if"] == "strategy.job-total == 1 && needs.mutation-plan.outputs.forwarded != 'true'"
         assert stats["steps"].index(restore) < stats["steps"].index(collect) < stats["steps"].index(save)
         assert stats["env"]["MUTATION_STATS_CACHE"] == "${{ github.workspace }}/.mutation-stats-cache"
     assert collect["env"]["BASES"] == "${{ needs.mutation-plan.outputs.bases }}"
@@ -1765,6 +1770,76 @@ def test_a_one_part_one_shard_plan_mutates_inside_the_statistics_job():
         report["with"]["path"] == "${{ job.status == 'success' && '.mutation-gate/report.json' || '.mutation-gate/' }}"
     )
     assert names.index(mutate["name"]) < names.index(report["name"])
+
+
+def test_every_pull_request_stats_part_restores_one_merged_cache_saved_once_after_all_parts_finish():
+    jobs = _mutation_workflow()["jobs"]
+    skipped = "needs.mutation-plan.outputs.forwarded != 'true'"
+    key = "mutation-test-stats-v2-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}"
+    cached = {
+        "path": ".mutation-stats-cache",
+        "key": key,
+        "restore-keys": "mutation-test-stats-v2-${{ runner.os }}-",
+    }
+    steps = jobs["mutation-stats"]["steps"]
+    names = [step.get("name") for step in steps]
+    restore = steps[names.index("Restore compatible test stats")]
+    assert restore["uses"] == "actions/cache/restore@v4"
+    assert restore["if"] == skipped
+    assert restore["with"] == cached
+    single = steps[names.index("Save the merged test stats")]
+    assert single["uses"] == "actions/cache/save@v4"
+    assert single["if"] == f"strategy.job-total == 1 && {skipped}"
+    assert single["with"] == {"path": ".mutation-stats-cache", "key": key}
+    fresh = steps[names.index("Keep only the test stats this part wrote")]
+    assert fresh["if"] == f"strategy.job-total != 1 && {skipped}"
+    assert fresh["env"] == {"PART": "${{ matrix.part }}"}
+    assert fresh["run"] == (
+        "mkdir -p .mutation-stats-cache .mutation-stats-fresh && find .mutation-stats-cache -maxdepth 1 -type f"
+        ' -newer ".mutation-stats/collected-$PART" -exec cp -p {} .mutation-stats-fresh/ \\;'
+    )
+    part = steps[names.index("Upload this part's test stats cache")]
+    assert part["if"] == f"strategy.job-total != 1 && {skipped}"
+    assert part["uses"] == "actions/upload-artifact@v4"
+    assert part["with"] == {
+        "name": "mutation-test-stats-cache-${{ matrix.part }}",
+        "path": ".mutation-stats-fresh/",
+        "include-hidden-files": True,
+        "if-no-files-found": "ignore",
+        "retention-days": 1,
+        "overwrite": True,
+    }
+    order = [
+        restore["name"],
+        "Collect one stats part for every mutation shard",
+        single["name"],
+        fresh["name"],
+        part["name"],
+    ]
+    assert [names.index(name) for name in order] == sorted(names.index(name) for name in order)
+    assert [step for step in steps if step.get("uses", "").startswith("actions/cache/save")] == [single]
+    first = f"strategy.job-index == 0 && needs.mutation-plan.outputs.stats_parts != '[0]' && {skipped}"
+    mutation = jobs["mutation"]["steps"]
+    mutation_names = [step.get("name") for step in mutation]
+    base = mutation[mutation_names.index("Restore compatible test stats")]
+    assert base["uses"] == "actions/cache/restore@v4"
+    assert base["if"] == first
+    assert base["with"] == cached
+    download = mutation[mutation_names.index("Download every part's test stats cache")]
+    assert download["if"] == first
+    assert download["uses"] == "actions/download-artifact@v4"
+    assert download["with"] == {
+        "pattern": "mutation-test-stats-cache-*",
+        "path": ".mutation-stats-cache",
+        "merge-multiple": True,
+    }
+    merged = mutation[mutation_names.index("Save the merged test stats")]
+    assert merged["uses"] == "actions/cache/save@v4"
+    assert merged["if"] == f"{first} && hashFiles('.mutation-stats-cache/**') != ''"
+    assert merged["with"] == {"path": ".mutation-stats-cache", "key": key}
+    assert mutation_names.index(base["name"]) == 1
+    order = [base["name"], download["name"], merged["name"], "Install dependencies", "Mutate changed Python files"]
+    assert [mutation_names.index(name) for name in order] == sorted(mutation_names.index(name) for name in order)
 
 
 PLANNER_PACKAGES = {"mutmut": "mutmut", "pytest": "pytest", "pyyaml": "yaml", "tomlkit": "tomlkit"}
@@ -1874,6 +1949,11 @@ def test_pull_request_mutation_reuses_the_preflight_of_its_exact_head_from_the_p
         f"github.event_name == 'workflow_dispatch' && {skipped}",
         f"always() && {skipped}",
         f"{skipped} && needs.mutation-plan.outputs.selection == 'true'",
+        f"strategy.job-total == 1 && {skipped}",
+        f"strategy.job-total != 1 && {skipped}",
+        f"strategy.job-index == 0 && needs.mutation-plan.outputs.stats_parts != '[0]' && {skipped}",
+        f"strategy.job-index == 0 && needs.mutation-plan.outputs.stats_parts != '[0]' && {skipped}"
+        " && hashFiles('.mutation-stats-cache/**') != ''",
         f"needs.mutation-plan.outputs.shards == '[0]' && needs.mutation-plan.outputs.stats_parts == '[0]' && {skipped}",
         "always() && steps.mutate.outcome != 'skipped'",
     )

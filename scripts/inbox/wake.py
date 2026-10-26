@@ -28,6 +28,7 @@ WAKE_TEXT = (
     "msg reply or the swarm commands, never as text in this terminal, and close the rest."
 )
 WOKEN, TO_MASTER, TO_OPERATOR = "woken", "escalated_master", "escalated_operator"
+PASSED, FROZEN = "passed_master", "frozen"
 
 
 def window_ms(environ):
@@ -51,8 +52,9 @@ def typed_wake(inbox, agent):
 
 
 def decide(item, pane, history, now_ms, window, slug, since=0):
-    """pane is the receiver's herdr status, None when it sits outside herdr; the window clock skips the swarm's
-    outage time since the item's last step, and starts no earlier than since. since None holds the item."""
+    """pane is the receiver's herdr status, None when it sits outside herdr, FROZEN for a master waiting on an input
+    prompt while another master is live; the window clock skips the swarm's outage time since the item's last step,
+    and starts no earlier than since. since None holds the item."""
     if item.state != "pending" or item.fyi or since is None:
         return None
     steps = [e.get("event") for e in history]
@@ -60,6 +62,8 @@ def decide(item, pane, history, now_ms, window, slug, since=0):
         return None
     last = max(since, *(e["at"] for e in history))
     due = now_ms - last - outage.paused_ms(slug, last, now_ms) >= window
+    if pane == FROZEN:
+        return PASSED if due else None
     if TO_MASTER in steps:
         return TO_OPERATOR if due else None
     wakes = steps.count(WOKEN)
@@ -142,11 +146,10 @@ def _wake_world(inbox, slug, agents, herdr, ledger, clock: _Clock, items):
     names, config = {a.name for a in agents}, _swarm_config(inbox, slug)
     panes = {a.name: a for a in agents if typed_wake(inbox, a)}
     boss = next((a for a in agents if a.lane == MASTER), None)
-    master = (boss.seat or boss.name) if boss else ""
+    master = _escalation_seat(inbox, slug, agents, boss)
     marks = SeenMarks(inbox.redis)
     statuses, prompted = {}, set()
-    actions = []
-    reads = _wake_inputs(inbox, slug, items, names, config, marks)
+    reads, actions = _pass_frozen(inbox, slug, agents, _wake_inputs(inbox, slug, items, names, config, marks), clock)
     doc = None
     for item in reads.items:
         receiver, held = reads.receivers[item.address]
@@ -167,7 +170,12 @@ def _wake_world(inbox, slug, agents, herdr, ledger, clock: _Clock, items):
         if step == WOKEN and _still_held(inbox, held) and _wake(herdr, agent, prompted):
             if inbox.note(item.id, WOKEN, BY, f"prompted {receiver} to read its inbox", now_ms, held):
                 actions.append(f"woke {receiver} for message {item.id}")
-        elif step == TO_MASTER and master and receiver != boss.name and not _sent_from(inbox, item, boss, master):
+        elif (
+            step == TO_MASTER
+            and master not in ("", item.address)
+            and receiver != boss.name
+            and not _sent_from(inbox, item, boss, master)
+        ):
             raised = inbox.send(BY, master, _master_text(item), ref=f"inbox-escalation:{item.id}")
             inbox.note(item.id, TO_MASTER, BY, raised_note(master, raised.id), now_ms)
             actions.append(f"raised message {item.id} to {master}")
@@ -178,6 +186,45 @@ def _wake_world(inbox, slug, agents, herdr, ledger, clock: _Clock, items):
             inbox.note(item.id, TO_OPERATOR, BY, "shown to the operator on the ledger page", now_ms)
             actions.append(f"raised message {item.id} to the operator")
     return actions
+
+
+def _escalation_seat(inbox, slug, agents, boss):
+    """The lead master's seat, or a live master's while the lead waits on an input prompt."""
+    if boss is None:
+        return ""
+    return _spare_master(inbox, slug, agents, boss.name) or boss.seat or boss.name
+
+
+def _spare_master(inbox, slug, agents, receiver):
+    """A live master seat to take the mail of receiver, a master waiting on an input prompt; '' for anyone else."""
+    if not any(a.name == receiver and a.lane == MASTER and a.input_prompt for a in agents):
+        return ""
+    from scripts.inbox.pool import live_masters
+
+    return (live_masters(inbox.redis, slug, agents) or [""])[0]
+
+
+def _pass_frozen(inbox, slug, agents, reads, clock):
+    """Items whose receiver is a master waiting on an input prompt move to a live master's seat once their window
+    passes; the rest go on to the wake ladder."""
+    actions, kept, spares = [], [], {}
+    for item in reads.items:
+        receiver = reads.receivers[item.address][0]
+        if receiver not in spares:
+            spares[receiver] = _spare_master(inbox, slug, agents, receiver)
+        history, since = reads.histories[item.id], reads.clocks[item.address]
+        if spares[receiver] and decide(item, FROZEN, history, clock.now_ms, clock.window, slug, since) == PASSED:
+            actions += _pass(inbox, item, receiver, spares[receiver])
+        else:
+            kept.append(item)
+    return replace(reads, items=kept), actions
+
+
+def _pass(inbox, item, receiver, seat):
+    reason = f"{receiver} waits on an input prompt; passed to {seat}, a live master"
+    if inbox.redirect(item.id, BY, seat, reason, expected_receiver=None) is None:
+        return []
+    return [f"passed message {item.id} from {receiver} to {seat}"]
 
 
 def wake_now(inbox, slug, agents, herdr, now_ms, window, quiet=DEFAULT_QUIET_S * 1000):

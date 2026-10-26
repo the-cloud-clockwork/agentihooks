@@ -18,7 +18,6 @@ from hooks.context.swarm_heartbeat import is_operator_prompt
 
 TTL_SEC = 3600
 KEPT = 50
-SHARED_KEPT = 500
 _SHARED = []
 
 
@@ -53,11 +52,14 @@ def _store(migrate=True):
             "name TEXT NOT NULL, hash TEXT NOT NULL, entry INTEGER NOT NULL REFERENCES entries(id) ON DELETE CASCADE);"
             "CREATE INDEX IF NOT EXISTS line_hash ON lines(name, hash);"
             "CREATE TABLE IF NOT EXISTS legacy (name TEXT PRIMARY KEY);"
+            "CREATE TABLE IF NOT EXISTS published ("
+            "entry INTEGER PRIMARY KEY REFERENCES entries(id) ON DELETE CASCADE);"
         )
         if migrate:
             _migrate(connection)
         with connection:
             yield connection
+        _publish_pending(connection)
     finally:
         connection.close()
 
@@ -111,15 +113,38 @@ def _shared_call(action, default):
 def _mirror(swarm, name, at, words):
     def push(redis):
         row = json.dumps({"swarm": swarm, "at": at, "words": words})
-        key = _shared_key(name)
         with redis.pipeline() as pipe:
-            pipe.sadd(_shared_key(), name).lpush(key, row).ltrim(key, 0, SHARED_KEPT - 1).execute()
+            pipe.sadd(_shared_key(), name).zadd(_shared_key(name, "entries"), {row: at}).execute()
+        return True
 
-    _shared_call(push, None)
+    return _shared_call(push, False)
+
+
+def _publish_pending(connection):
+    rows = connection.execute(
+        "SELECT id, swarm, name, at, words FROM entries WHERE swarm != '' "
+        "AND id NOT IN (SELECT entry FROM published) ORDER BY at, id"
+    ).fetchall()
+    published = []
+    for entry, swarm, name, at, words in rows:
+        if not _mirror(swarm, name, at, words):
+            break
+        published.append((entry,))
+    with connection:
+        connection.executemany("INSERT OR IGNORE INTO published VALUES (?)", published)
 
 
 def _shared_rows(name):
-    return [json.loads(row) for row in _shared_call(lambda redis: redis.lrange(_shared_key(name), 0, -1), [])]
+    def read(redis):
+        return [
+            json.loads(row)
+            for row in [
+                *redis.zrevrange(_shared_key(name, "entries"), 0, -1),
+                *redis.lrange(_shared_key(name), 0, -1),
+            ]
+        ]
+
+    return sorted(_shared_call(read, []), key=lambda row: row["at"], reverse=True)
 
 
 def _shared_match(name, needle, since):
@@ -132,10 +157,11 @@ def _shared_match(name, needle, since):
 def _shared_forget(swarm):
     def drop(redis):
         for name in redis.smembers(_shared_key()):
-            key = _shared_key(name)
-            for row in set(redis.lrange(key, 0, -1)):
-                if json.loads(row)["swarm"] == swarm:
-                    redis.lrem(key, 0, row)
+            for row in _shared_rows(name):
+                if row["swarm"] == swarm:
+                    encoded = json.dumps(row)
+                    redis.zrem(_shared_key(name, "entries"), encoded)
+                    redis.lrem(_shared_key(name), 0, encoded)
 
     _shared_call(drop, None)
 
@@ -235,8 +261,6 @@ def record(name: str, words: str, now: float | None = None, swarm: str = "") -> 
         return False
     with _store(migrate=False) as connection:
         _append(connection, swarm or "", name, now, text)
-    if swarm:
-        _mirror(swarm, name, now, text)
     return True
 
 

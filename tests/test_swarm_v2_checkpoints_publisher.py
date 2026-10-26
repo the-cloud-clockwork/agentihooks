@@ -8,6 +8,7 @@ import pytest
 from scripts.swarm_v2 import contracts
 from scripts.swarm_v2.artifacts.base import ABSENT, VERIFIED, ArtifactRef
 from scripts.swarm_v2.checkpoints import model, native, publisher, redaction
+from tests.sv2_ckp02_cases import MEMORY, scratch
 from tests.sv2_ckp04_cases import LostAck, checkpoint, files, make, pointers, run_case
 
 pytestmark = pytest.mark.unit
@@ -473,6 +474,14 @@ def test_package_cases_match_their_committed_evidence(case):
     path = EVIDENCE / f"{case}-result.json"
     committed = json.loads(path.read_text()) if path.exists() else None
     assert committed == first, json.dumps(first, indent=2, sort_keys=True)
+
+
+def test_package_case_fixtures_run_on_the_memory_filesystem():
+    mounts = dict(line.split()[1:3] for line in Path("/proc/mounts").read_text().splitlines())
+    assert mounts[str(MEMORY)] == "tmpfs"
+    with scratch() as directories:
+        assert [path.parent for path in directories] == [MEMORY, MEMORY]
+        assert all(path.is_dir() for path in directories)
 
 
 TOKEN = "ghp_" + "Z9" * 18

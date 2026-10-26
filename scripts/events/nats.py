@@ -369,20 +369,34 @@ class NatsStateStore:
         return StateEntry(key=key, value=value, revision=entry.revision)
 
     def create(self, key: str, value: bytes) -> int:
-        limit = self._js._nc.max_payload - nats_payload.KV_HEADER_BUDGET
-        value = self._loop.run(nats_payload.encode(self._create_chunk, value, limit))
-        try:
-            return self._loop.run(self._kv.create(key, value))
-        except KeyWrongLastSequenceError as err:
-            raise StateConflict(f"state key {key!r} exists") from err
+        return self._loop.run(self._write(key, value, 0, f"state key {key!r} exists"))
 
     def update(self, key: str, value: bytes, revision: int) -> int:
+        return self._loop.run(self._write(key, value, revision, f"state key {key!r} is not at revision {revision}"))
+
+    async def _write(self, key: str, value: bytes, last: int, conflict: str) -> int:
         limit = self._js._nc.max_payload - nats_payload.KV_HEADER_BUDGET
-        value = self._loop.run(nats_payload.encode(self._create_chunk, value, limit))
+        value = await nats_payload.encode(self._create_chunk, value, limit, nats_payload.scope(key, last))
         try:
-            return self._loop.run(self._kv.update(key, value, last=revision))
+            revision = await (self._kv.update(key, value, last=last) if last else self._kv.create(key, value))
         except KeyWrongLastSequenceError as err:
-            raise StateConflict(f"state key {key!r} is not at revision {revision}") from err
+            await nats_payload.discard(self._js, f"KV_{self._bucket}", f"$KV.{self._bucket}.", value)
+            raise StateConflict(conflict) from err
+        await self._reclaim(key, revision)
+        return revision
+
+    async def _reclaim(self, key: str, below: int) -> None:
+        subject = f"$KV.{self._bucket}.{key}"
+        await nats_payload.reclaim(
+            self._js, f"KV_{self._bucket}", f"$KV.{self._bucket}.", key, lambda: self._history(subject), below
+        )
+
+    async def _history(self, subject: str) -> list[bytes]:
+        values, sequence = [], 1
+        while (msg := await self._next(subject, sequence)) is not None:
+            sequence = msg.seq + 1
+            values.append(msg.data or b"")
+        return values
 
     def watch(self, key: str, from_revision: int = 1) -> Iterator[StateEntry]:
         subject = f"$KV.{self._bucket}.{key}"

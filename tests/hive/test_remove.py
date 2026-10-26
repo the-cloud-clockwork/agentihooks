@@ -560,3 +560,38 @@ def test_the_remove_help_names_every_option(monkeypatch, capsys):
     assert " Drain a hive, then delete it from Redis, herdr, known hosts, OpenBao and antoncore\n" in (
         cli._parser().format_help()
     )
+
+
+def test_remove_of_hive_three_leaves_live_hive_two_untouched(store, tmp_path):
+    two, three = _member(store, "swarm-hive-002"), _member(store, "swarm-hive-003")
+    run = Run(
+        [
+            {"id": "p2", "label": "swarm-hive-002", "target": TARGET},
+            {"id": "p3", "label": "swarm-hive-003", "target": "ssh://worker@10.10.30.207:2225"},
+        ]
+    )
+    bao = openbao_kv.OpenBao("https://bao.example", "t", opener=Bao())
+    hive, label = remove.resolve(store.redis, three)
+    plan = remove.Plan(hive, label, "k8s/agentihooks-hive-swarm-hive-003", wait_s=600)
+
+    remove.remove(store, bao, plan, _host(Clock(store, three, 0), run, tmp_path))
+
+    assert label == "swarm-hive-003"
+    assert [argv for argv, _ in run.calls if argv[:3] == ["herdr", "machine", "remove"]] == [
+        ["herdr", "machine", "remove", "p3"]
+    ]
+    assert [argv[2] for argv, _ in run.calls if argv[0] == "ssh-keygen"] == ["[10.10.30.207]:2225"]
+    assert store.redis.exists(remove.member_key(two))
+    assert two in store.redis.smembers(registry.INDEX)
+
+
+def test_a_label_another_hive_member_holds_is_refused_as_the_default(store):
+    live, duplicate = _member(store, "swarm-hive-002"), _member(store, "swarm-hive-002")
+
+    with pytest.raises(auth.HiveError) as refused:
+        remove.resolve(store.redis, duplicate)
+
+    assert str(refused.value) == (
+        f"hive {duplicate} is named swarm-hive-002, a name hive {live} also holds, so its herdr machine "
+        "could be the other hive's; pass --label"
+    )

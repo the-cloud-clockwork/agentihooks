@@ -9,14 +9,13 @@ from .rows import encode
 @dataclass(frozen=True, slots=True)
 class Fragment:
     value: object
-    text: str | None
     parts: dict | tuple | None = None
-    signature: str | None = None
+    signature: int | None = None
 
 
 def encoded(fragment: Fragment) -> str:
-    if fragment.text is not None:
-        return fragment.text
+    if fragment.parts is None:
+        return encode(fragment.value)
     if isinstance(fragment.parts, tuple):
         return "[" + ",".join(encoded(item) for item in fragment.parts) + "]"
     return "{" + ",".join(encode(key) + ":" + encoded(item) for key, item in fragment.parts.items()) + "}"
@@ -24,13 +23,13 @@ def encoded(fragment: Fragment) -> str:
 
 def leaf(value: object, previous: Fragment | None = None) -> Fragment:
     try:
-        signature = orjson.dumps(value).decode()
+        signature = hash(orjson.dumps(value))
     except orjson.JSONEncodeError:
-        signature = encode(value)
+        signature = hash(encode(value))
     if previous is not None and value == previous.value and signature == previous.signature:
         return previous
-    text = encode(value)
-    return Fragment(value, text, signature=text if signature == text else signature)
+    encode(value)  # rejects NaN and Infinity, which orjson writes as null
+    return Fragment(value, signature=signature)
 
 
 def sequence(value: list, previous: Fragment | None = None) -> Fragment:
@@ -39,7 +38,7 @@ def sequence(value: list, previous: Fragment | None = None) -> Fragment:
     parts = tuple(leaf(item, known[index] if index < len(known) else None) for index, item in enumerate(value))
     if old is not None and len(parts) == len(old) and all(new is kept for new, kept in zip(parts, old)):
         return previous
-    return Fragment([item.value for item in parts], None, parts)
+    return Fragment([item.value for item in parts], parts)
 
 
 def mapping(
@@ -50,7 +49,7 @@ def mapping(
     parts = {key: make(key, item, known.get(key)) for key, item in value.items()}
     if old is not None and list(parts) == list(old) and all(parts[key] is old[key] for key in parts):
         return previous
-    return Fragment({key: item.value for key, item in parts.items()}, None, parts)
+    return Fragment({key: item.value for key, item in parts.items()}, parts)
 
 
 def meta_part(key: str, value: object, previous: Fragment | None) -> Fragment:

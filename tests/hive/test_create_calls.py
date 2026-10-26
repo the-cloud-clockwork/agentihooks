@@ -108,6 +108,7 @@ def test_a_full_create_makes_exactly_these_calls(world):
 
     member = invite._env(world.bao.records[RECORD]["credential"])[invite.HIVE_ID]
     assert world.run.plain() == [
+        list(machine.LIST),
         ["kubectl", "get", "service", "-A", "-o", "json"],
         RESYNC,
         ["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-C", NAME, "-f", "host_key"],

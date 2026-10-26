@@ -64,12 +64,23 @@ class Host:
 
 def resolve(redis: "Redis", given: str) -> tuple[str, str]:
     if name := redis.hget(member_key(given), "name"):
-        return given, name
+        return _sole(redis, given, name), name
     if member := machine.named_member(redis, given):
-        return member, given
+        return _sole(redis, member, given), given
     if registry.show(redis, given) is not None or MEMBER_ID.fullmatch(given):
         raise auth.HiveError(f"hive {given} holds no member record to name it; pass --label")
     return given, given
+
+
+def _sole(redis: "Redis", hive: str, name: str) -> str:
+    for key in redis.scan_iter(match=member_key("*")):
+        other = key.removeprefix(member_key(""))
+        if other != hive and redis.hget(key, "name") == name:
+            raise auth.HiveError(
+                f"hive {hive} is named {name}, a name hive {other} also holds, so its herdr machine "
+                "could be the other hive's; pass --label"
+            )
+    return hive
 
 
 def member_key(hive: str) -> str:
