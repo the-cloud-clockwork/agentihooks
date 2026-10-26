@@ -389,3 +389,37 @@ def test_the_resume_flag_passes_through_from_a_plain_shell(tmp_path, monkeypatch
     monkeypatch.setattr(master_logins, "left", lambda account, now: 50.0)
     claude_ai.launch_claude("/opt/claude", ["-r"], {"HOME": str(operator)}, "")
     assert executed[0][1] == install._claude_command("/opt/claude", [*login.SETTINGS, "-r"])
+
+
+def test_a_conversation_written_under_the_route_home_survives_the_next_launch(tmp_path, monkeypatch, checked, executed):
+    operator = _plain_shell(tmp_path, monkeypatch)
+    _slot(1, PREFERRED)
+    monkeypatch.setattr(master_logins, "left", lambda account, now: 50.0)
+    environ = {"HOME": str(operator), "AGENTIHOOKS_AGENT_NAME": "s-251026"}
+    claude_ai.launch_claude("/opt/claude", [], environ, "")
+    target = Path(executed[0][2]["CLAUDE_CONFIG_DIR"])
+    for name in ("projects", "sessions"):
+        assert (target / name).readlink() == operator / ".claude" / name
+    (target / "projects" / "repo").mkdir()
+    (target / "projects" / "repo" / "conversation.jsonl").write_text("resumed\n")
+    (target / "sessions" / "1.json").write_text("{}")
+    claude_ai.launch_claude("/opt/claude", ["-r"], environ, "")
+    assert Path(executed[1][2]["CLAUDE_CONFIG_DIR"]) == target
+    assert (target / "projects" / "repo" / "conversation.jsonl").read_text() == "resumed\n"
+    assert (operator / ".claude" / "projects" / "repo" / "conversation.jsonl").read_text() == "resumed\n"
+    assert (operator / ".claude" / "sessions" / "1.json").read_text() == "{}"
+
+
+def test_the_route_home_links_a_rendered_home_folder_to_where_it_points(
+    rendered, tmp_path, monkeypatch, checked, executed
+):
+    shared = tmp_path / "shared-projects"
+    (rendered / "projects").symlink_to(shared)
+    _slot(1, PREFERRED)
+    monkeypatch.setattr(master_logins, "left", lambda account, now: 50.0)
+    claude_ai.launch_claude("/opt/claude", [], _environ(rendered), "")
+    target = Path(executed[0][2]["CLAUDE_CONFIG_DIR"])
+    assert (target / "projects").readlink() == shared
+    assert shared.is_dir()
+    assert (target / "sessions").readlink() == rendered / "sessions"
+    assert (rendered / "sessions").is_dir()
