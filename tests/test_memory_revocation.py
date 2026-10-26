@@ -196,7 +196,10 @@ def test_package_cases_match_committed_evidence(tmp_path, case):
 def test_package_record_and_manifest_match_the_fixture_inputs():
     record = json.loads((EVIDENCE / "result.json").read_text())
     manifest = json.loads((EVIDENCE / "manifest.json").read_text())
-    digest = hashlib.sha256(cases.FIXTURE.read_bytes()).hexdigest()
-    assert manifest["input_sha256"] == {cases.FIXTURE.name: digest}
+    base = cases.FIXTURE.parent.parent / cases.fixture()["base"]
+    assert manifest["input_sha256"] == {
+        cases.FIXTURE.name: hashlib.sha256(cases.FIXTURE.read_bytes()).hexdigest(),
+        base.name: hashlib.sha256(base.read_bytes()).hexdigest(),
+    }
     assert manifest["fixture_inputs"] == record["fixture_inputs"] == cases.FIXTURE_INPUTS
     assert manifest["tested_commit"] == record["tested_commit"]

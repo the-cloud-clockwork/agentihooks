@@ -5,7 +5,8 @@
     "source_in_search_results": "session lock, the top hit of the recall search and the cited source of its records"
   },
   "input_sha256": {
-    "fixture.json": "12eae530048fd965488e5e70ff3ee4b65b0dbb46716a11fa7c2b89816d069d71"
+    "fixture.json": "12eae530048fd965488e5e70ff3ee4b65b0dbb46716a11fa7c2b89816d069d71",
+    "session-search.json": "a8d3c56f8710490765686d36fb367d571edf1f1d9280a0d2168992908ee650b8"
   },
   "mocked": true,
   "package": "SV2-RET-02",
