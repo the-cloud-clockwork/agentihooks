@@ -180,6 +180,7 @@ def test_task_rows_share_the_cached_entry_rows_at_the_same_generation(tmp_path):
     assert shared[0] == entry.generation == since[0] + 1
     assert shared[2] is entry.state["tasks"]
     assert shared[2] == SQLiteLedgerRepository(path).read("rows", "tasks")["tasks"]
+    assert shared[1] == SQLiteLedgerRepository(path).task_rows("rows")[1] != {}
 
 
 def test_task_rows_read_stored_rows_when_the_cached_entry_is_from_another_generation(tmp_path):
@@ -198,8 +199,10 @@ def test_task_rows_read_stored_rows_when_the_cached_entry_is_from_another_genera
 
 
 def test_task_rows_of_a_cached_ledger_without_tasks_are_an_empty_list(tmp_path):
+    from scripts.swarm_ledger.repository.entry import Entry
     from scripts.swarm_ledger.repository.sqlite import SQLiteLedgerRepository
 
     reader = SQLiteLedgerRepository(stored(tmp_path, []))
-    reader.current("rows")
+    generation = reader.current("rows").generation
+    reader._cache[reader._key("rows")] = Entry(generation, None, {"_meta": {}})
     assert reader.task_rows("rows")[2] == []
