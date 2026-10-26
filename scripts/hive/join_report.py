@@ -25,6 +25,7 @@ REQUIRED = (
 OPTIONAL = ("brain",)
 HEARTBEAT_MS = 180_000
 LEDGER_RETRY_MS = 30_000
+LEDGER_CHECKS = ("ledger_join", "ledger_write")
 GONE = "agent gone from the swarm"
 ENDED = ("finished", "ended")
 
@@ -140,7 +141,7 @@ def claim_ledger_retry(redis: "Redis", agent: "AgentRecord", session: str, at: i
                 return {}
             if at - report.get("ledger_checked_at", report["started_at"]) < LEDGER_RETRY_MS:
                 return {}
-            if all(report["checks"].get(name) is True for name in ("ledger_join", "ledger_write")):
+            if all(report["checks"].get(name) is True for name in LEDGER_CHECKS):
                 return {}
             claimed = {**report, "ledger_checked_at": at}
             pipe.multi()
@@ -170,9 +171,7 @@ def retry_ledger(redis: "Redis", agent: "AgentRecord", session: str, at: int) ->
             if current.get("status") != "running" or current.get("ledger_checked_at") != at:
                 return
             errors = checks.get("errors", {})
-            recovered = {
-                name: current["checks"].get(name) is True or value for name, value in checks.items() if name != "errors"
-            }
+            recovered = {name: current["checks"].get(name) is True or checks[name] for name in LEDGER_CHECKS}
             merged = {name: value for name, value in current["checks"].items() if name != "errors"} | recovered
             if kept := {name: error for name, error in errors.items() if not recovered[name]}:
                 merged["errors"] = kept

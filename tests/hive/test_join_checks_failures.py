@@ -181,8 +181,11 @@ def test_ledger_probe_error_message_is_short_and_carries_no_credential(monkeypat
     from scripts.hive import join_checks
 
     token = "ghp_" + "a1B2c3D4e5" * 4
-    reported = ledger_probe(monkeypatch, f"server refused: 401 token\n\t{token}  " + "x" * 400)
+    signed = ".".join(("eyJ" + "a" * 12, "eyJ" + "b" * 12, "c" * 12))
+    reported = ledger_probe(monkeypatch, f"server refused: 401 token\n\t{token} {signed}  " + "x" * 400)
     message = reported["errors"]["ledger_write"]["message"]
+    assert signed not in message
+    assert "[REDACTED:jwt_token]" in message
     assert message.startswith("ledger sw: server refused: 401 ")
     assert "\n" not in message and "\t" not in message
     assert token not in message
