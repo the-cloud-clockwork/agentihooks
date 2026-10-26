@@ -1002,10 +1002,14 @@ def test_setup_command_reads_the_hive_redis_address_from_its_environment(tmp_pat
 
 class Ledger:
     def __init__(self) -> None:
-        self.alerts = []
+        self.alerts, self.cleared = [], []
 
-    def raise_alert(self, slug, source, text):
+    def raise_alert(self, slug, source, text, item=None):
+        assert item == operator_setup.SETUP_ITEM
         self.alerts.append((slug, text, source))
+
+    def close_item_alerts(self, slug, item, outcome):
+        self.cleared.append((slug, item, outcome))
 
 
 class Flaky(Ledger):
@@ -1013,8 +1017,8 @@ class Flaky(Ledger):
         super().__init__()
         self.failed = set()
 
-    def raise_alert(self, slug, source, text):
-        super().raise_alert(slug, source, text)
+    def raise_alert(self, slug, source, text, item=None):
+        super().raise_alert(slug, source, text, item)
         if slug in self.failed or slug == "hive-c":
             return
         self.failed.add(slug)
@@ -1101,6 +1105,34 @@ def test_a_successful_setup_clears_the_alarm_so_a_recurring_refusal_raises_again
     assert run_main(["setup"], refused, Who(), tmp_path / "home")[0] == 1
 
     assert [slug for slug, _, _ in ledger.alerts] == ["hive-a", "hive-a"]
+    assert ledger.cleared == [("hive-a", operator_setup.SETUP_ITEM, "The operator terminal setup succeeded.")]
+
+
+def test_clearing_the_alarm_skips_a_refused_close_and_still_removes_the_alarm(tmp_path, monkeypatch):
+    class Refusing(Ledger):
+        def close_item_alerts(self, slug, item, outcome):
+            if slug == "hive-a":
+                raise SwarmError("the ledger server is gone")
+            super().close_item_alerts(slug, item, outcome)
+
+    ledger = Refusing()
+    monkeypatch.setattr(operator_setup, "LedgerClient", lambda: ledger)
+    placement = operator_setup.Placement(tmp_path / operator_setup.FOLDER)
+    placement.alarm.parent.mkdir(parents=True)
+    placement.alarm.write_text(json.dumps({"message": "refused", "raised": ["hive-a", "hive-b"]}))
+
+    operator_setup.clear_alarm(placement)
+
+    assert ledger.cleared == [("hive-b", operator_setup.SETUP_ITEM, "The operator terminal setup succeeded.")]
+    assert not placement.alarm.exists()
+
+
+def test_clearing_an_absent_alarm_opens_no_ledger(tmp_path, monkeypatch):
+    def refuse():
+        raise AssertionError("no ledger without a raised alarm")
+
+    monkeypatch.setattr(operator_setup, "LedgerClient", refuse)
+    operator_setup.clear_alarm(operator_setup.Placement(tmp_path / operator_setup.FOLDER))
 
 
 def test_a_refused_setup_without_a_transport_only_reaches_the_journal(tmp_path, monkeypatch):

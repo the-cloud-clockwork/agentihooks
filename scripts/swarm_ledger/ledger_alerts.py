@@ -21,6 +21,7 @@ TARGETS = {
     SETUP: "master",
 }
 RAISED = (PROMOTION, RELEASE, SEAT, SPAWN, MERGE, INBOX, SETUP)
+ITEMIZED = (INBOX, SETUP)
 OPEN, CLAIMED, DONE = "open", "claimed", "done"
 OPERATOR = "operator"
 SENDER = "ledger"
@@ -40,12 +41,12 @@ def check_raise(op):
         or not text.strip()
         or len(text) > MAX_OUTCOME
         or not isinstance(item, str)
-        or ("item" in op or op["source"] == INBOX)
-        and not (op["source"] == INBOX and item)
+        or ("item" in op or op["source"] in ITEMIZED)
+        and not (op["source"] in ITEMIZED and item)
     ):
         raise ValueError(
             f"alert_raise takes by, a source among {RAISED}, a text of up to {MAX_OUTCOME} characters "
-            f"and, for {INBOX}, an item"
+            f"and, for {' and '.join(ITEMIZED)}, an item"
         )
 
 
@@ -101,7 +102,7 @@ def apply(doc, op, ctx):
 def close_item(doc, op, ctx):
     who, outcome = op.get("by", OPERATOR), op["outcome"].strip()
     for alert in doc.setdefault("alerts", []):
-        if alert["source"] == INBOX and alert.get("item") == op["item"] and alert["state"] != DONE:
+        if alert["source"] in ITEMIZED and alert.get("item") == op["item"] and alert["state"] != DONE:
             alert.update(state=DONE, closed_by=who, closed_at=ctx.at, outcome=outcome)
             ctx.record(who, "alert closed", f"alerts/{alert['id']}", text=outcome)
     return True

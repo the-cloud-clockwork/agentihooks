@@ -77,14 +77,23 @@ def test_closing_by_item_leaves_other_sources_alone():
 
 def test_a_raise_without_an_item_still_dedupes_by_source():
     doc = {}
-    apply(doc, {"op": "alert_raise", "id": "a", "by": "swarm", "source": "setup", "text": "refused"})
-    apply(doc, {"op": "alert_raise", "id": "b", "by": "swarm", "source": "setup", "text": "refused again"})
-    assert [(a["source"], a.get("item")) for a in doc["alerts"]] == [("setup", None)]
+    apply(doc, {"op": "alert_raise", "id": "a", "by": "swarm", "source": "promotion", "text": "red"})
+    apply(doc, {"op": "alert_raise", "id": "b", "by": "swarm", "source": "promotion", "text": "red again"})
+    assert [(a["source"], a.get("item")) for a in doc["alerts"]] == [("promotion", None)]
+
+
+def test_a_setup_alert_carries_its_item_and_closes_by_it():
+    doc = {}
+    apply(doc, {**raise_op("operator-terminal-setup", "refused"), "source": "setup"})
+    apply(doc, close_op("operator-terminal-setup"), Ctx(rev=6))
+    assert [(a["source"], a["item"], a["state"]) for a in doc["alerts"]] == [
+        ("setup", "operator-terminal-setup", "done")
+    ]
 
 
 INBOX_REFUSED = (
     "alert_raise takes by, a source among ('promotion', 'release', 'seat', 'spawn', 'merge', 'inbox', 'setup'), "
-    "a text of up to 2000 characters and, for inbox, an item"
+    "a text of up to 2000 characters and, for inbox and setup, an item"
 )
 CLOSE_REFUSED = "alert_close takes target, an alert id, and an optional by, or an inbox item instead of target"
 
@@ -93,6 +102,7 @@ CLOSE_REFUSED = "alert_close takes target, an alert id, and an optional by, or a
     "op, says",
     [
         ({**raise_op("m1"), "source": "promotion"}, INBOX_REFUSED),
+        ({"op": "alert_raise", "id": "z", "by": "swarm", "source": "setup", "text": "t"}, INBOX_REFUSED),
         (raise_op(""), INBOX_REFUSED),
         (raise_op(7), INBOX_REFUSED),
         ({k: v for k, v in raise_op("m1").items() if k != "item"}, INBOX_REFUSED),

@@ -43,6 +43,7 @@ POLICY_KEY = "pod-policy.json"
 ANTONCORE_ENV = "AGENTIHOOKS_ANTONCORE_DIR"
 # Not a top level *.env: the hooks autoload ~/.agentihooks/*.env into every agent session.
 FOLDER = "swarm-terminal"
+SETUP_ITEM = "operator-terminal-setup"
 UNIT = "agentihooks-swarm-terminal.service"
 TIMER = "agentihooks-swarm-terminal.timer"
 SYNC = "agentihooks-swarm-terminal-sync.service"
@@ -188,8 +189,22 @@ def place(home: Path, bao: openbao_kv.OpenBao, antoncore: Path, address: str = "
     if placement.redis_url.exists():
         env += f"{URL_FILE_ENV}={placement.redis_url}\n"
     _stage(placement.env, env.encode()).replace(placement.env)
-    placement.alarm.unlink(missing_ok=True)
+    clear_alarm(placement)
     return report
+
+
+def clear_alarm(placement: Placement) -> None:
+    try:
+        raised = json.loads(placement.alarm.read_text()).get("raised", [])
+    except (OSError, ValueError):
+        raised = []
+    ledger = LedgerClient() if raised else None
+    for slug in raised:
+        try:
+            ledger.close_item_alerts(slug, SETUP_ITEM, "The operator terminal setup succeeded.")
+        except SwarmError:
+            continue
+    placement.alarm.unlink(missing_ok=True)
 
 
 def setup(root: Path, environ: Mapping[str, str], antoncore: str | None = None) -> int:
@@ -241,7 +256,7 @@ def alarm(root: Path, environ: Mapping[str, str], message: str) -> None:
     ledger = LedgerClient()
     for slug in sorted(set(slugs) - raised):
         try:
-            ledger.raise_alert(slug, ledger_alerts.SETUP, message)
+            ledger.raise_alert(slug, ledger_alerts.SETUP, message, item=SETUP_ITEM)
         except SwarmError:
             continue
         raised.add(slug)
