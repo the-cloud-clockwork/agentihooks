@@ -205,7 +205,9 @@ def test_a_new_priority_makes_one_master_item_naming_the_item_and_the_ask(store)
     (item,) = InboxStore(store.redis).inbox(MASTER_SEAT)
     assert item.text == (
         "New priority on ledger sw for tasks/t1: Blocked: the deploy key is missing\n"
-        "Triage it: resolve it if the call is yours, else leave it for the operator."
+        "Autonomy delegate: take the decision yourself, with no question to the operator. On a blocker, the next "
+        'protocol step is to attempt 1 of 2: agentihooks swarm sw resolve attempt tasks/t1 --tried "<what you tried>" '
+        '--command "<the command run>" --output "<its output>".'
     )
     assert item.ref == "sw:priority:tasks/t1" and not item.fyi
     assert actions == [f"told {MASTER_SEAT}: priority tasks/t1"]

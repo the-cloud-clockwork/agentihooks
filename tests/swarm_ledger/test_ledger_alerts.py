@@ -293,7 +293,16 @@ def test_the_alert_message_names_the_alert_and_how_to_claim_and_close_it():
     assert ledger_alerts.message("demo", alert) == (
         "On ledger demo: alert al-4-0 (size): phase p1 description has 120 words, limit 100. Claim it with "
         "agentihooks ledger --slug demo --as <you> alert claim al-4-0, then close it with alert close "
-        'al-4-0 "<outcome>".'
+        'al-4-0 "<outcome>". Autonomy unknown: resolve it if the call is yours, else leave it for the operator.'
+    )
+
+
+def test_the_alert_message_at_full_autonomy_names_the_next_protocol_step():
+    alert = {"id": "al-4-0", "source": "sync", "text": "refused", "item": "tasks/t1"}
+    assert ledger_alerts.message("demo", alert, "full").endswith(
+        "Autonomy full: take the decision yourself, with no question to the operator. On a blocker, the next protocol "
+        'step is to attempt 1 of 2: agentihooks swarm demo resolve attempt tasks/t1 --tried "<what you tried>" '
+        '--command "<the command run>" --output "<its output>".'
     )
 
 
@@ -745,10 +754,10 @@ def test_a_raised_promotion_alert_reaches_the_master_inbox(inbox):
     handler.reply_state(SLUG, ops=[raise_promotion("r1")])
     [item] = inbox.inbox(seat_address(SLUG, MASTER))
     [alert] = core.sync(SLUG)[0]["alerts"]
-    assert item.text == (
+    assert item.text.startswith(
         f"On ledger {SLUG}: alert {alert['id']} (promotion): Dev promotion is red. Claim it with agentihooks "
         f"ledger --slug {SLUG} --as <you> alert claim {alert['id']}, then close it with alert close "
-        f'{alert["id"]} "<outcome>".'
+        f'{alert["id"]} "<outcome>". Autonomy '
     )
 
 
