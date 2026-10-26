@@ -1,4 +1,5 @@
 import json
+import os
 from pathlib import Path
 from unittest.mock import Mock, patch
 
@@ -127,6 +128,25 @@ def test_an_interactive_session_still_gets_its_inbox_item(store, capsys):
 def test_a_worker_run_gets_no_refocus_block(worker, capsys):
     assert refocus.refocus_context("s1", "prompt") == ""
     assert "SWARM REFOCUS" not in _prompt(capsys)
+
+
+def test_the_flag_in_an_explicit_environment_quiets_inbox_refocus_and_plan_directive(isolated, store):
+    environ = {**os.environ, worker_mode.FLAG: "1"}
+    item = store.send("alice", "bob", "review my branch")
+    (isolated / ".sessions" / f"{PLAN_ACCEPT['session_id']}.json").write_text(
+        json.dumps({"slug": "rig", "name": "master@323133-0001"}), encoding="utf-8"
+    )
+    assert delivery.pending_context("s1", environ) == ""
+    assert store.get(item.id).state == "pending"
+    with patch.object(store, "confirm_shown") as confirm:
+        delivery.confirm_shown("s1", environ)
+    confirm.assert_not_called()
+    assert refocus.refocus_context("s1", "prompt", environ) == ""
+    assert decision.directive(dict(PLAN_ACCEPT), environ) == ""
+
+
+def test_a_bound_session_without_a_session_id_gets_no_refocus_block():
+    assert refocus.refocus_context("", "prompt") == ""
 
 
 def test_an_interactive_bound_session_still_gets_its_refocus_block():
