@@ -293,3 +293,27 @@ def test_a_downloaded_report_that_is_a_file_is_still_missing(tmp_path):
     )
     assert result.returncode == 1
     assert "Missing shard reports: flakes-3.12-4" in result.stdout
+
+
+def test_a_failed_shard_report_download_names_the_outage_and_retries_once_before_the_reports_are_required():
+    steps = _jobs()["shard-check"]["steps"]
+    names = [step.get("name") for step in steps]
+    first = steps[names.index("Download shard reports")]
+    notice = steps[names.index("Name the artifact service outage")]
+    second = steps[names.index("Download shard reports, attempt 2")]
+    required = names.index("Require every planned shard report")
+    assert names.index("Download shard reports") + 1 == names.index("Name the artifact service outage")
+    assert names.index("Name the artifact service outage") + 1 == names.index("Download shard reports, attempt 2")
+    assert names.index("Download shard reports, attempt 2") + 1 == required
+    assert first["continue-on-error"] is True
+    assert "if" not in first
+    retry = f"steps.{first['id']}.outcome == 'failure'"
+    assert notice["if"] == retry and second["if"] == retry
+    assert "::warning::" in notice["run"] and "artifact service" in notice["run"]
+    assert "continue-on-error" not in second
+    assert second["uses"] == first["uses"] == "actions/download-artifact@v4"
+    assert second["with"] == first["with"] == {
+        "pattern": "{durations,flakes}-${{ matrix.python-version }}-*",
+        "path": "shard-reports",
+    }
+    assert "if" not in steps[required]
