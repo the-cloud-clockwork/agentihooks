@@ -475,8 +475,10 @@ def asked_to_retire(world, handoff):
 
 
 def third_live_master(world):
-    masters.MasterSeats(world.redis).set_count(SLUG, 3)
+    table = masters.MasterSeats(world.redis)
+    table.set_count(SLUG, 3)
     world.seat(world.store.names.next(SLUG, "master"), f"master-3@{SLUG}")
+    assert table.owners(SLUG, world.doc()) == {"p1": LEAD, "p2": SECOND}
 
 
 def test_a_seat_asked_to_retire_hands_its_claimants_to_the_front_door_before_its_handoff_is_in(world):
