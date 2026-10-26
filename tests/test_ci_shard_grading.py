@@ -312,8 +312,12 @@ def test_a_failed_shard_report_download_names_the_outage_and_retries_once_before
     assert "::warning::" in notice["run"] and "artifact service" in notice["run"]
     assert "continue-on-error" not in second
     assert second["uses"] == first["uses"] == "actions/download-artifact@v4"
-    assert second["with"] == first["with"] == {
-        "pattern": "{durations,flakes}-${{ matrix.python-version }}-*",
-        "path": "shard-reports",
-    }
+    assert (
+        second["with"]
+        == first["with"]
+        == {
+            "pattern": "{durations,flakes}-${{ matrix.python-version }}-*",
+            "path": "shard-reports",
+        }
+    )
     assert "if" not in steps[required]
