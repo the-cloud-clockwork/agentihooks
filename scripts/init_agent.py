@@ -8,11 +8,12 @@ import subprocess
 import sys
 import time
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any, NamedTuple
 
 from scripts import agent_choice, claude_trust, gh_config, herdr_host, herdr_panes, operator_env
-from scripts.swarm import effort_range
+from scripts.swarm import brain_binding, effort_range
 from scripts.targets.codex_target import codex_home, restore_hook_order
 
 
@@ -93,17 +94,62 @@ class AgentSpec:
     transport: str = ""
     seat: str = ""
     previous_execution: str = ""
+    execution: str = ""
+    title: str = ""
+    home: str = ""
+
+
+class Names(NamedTuple):
+    agent: str
+    title: str = ""
+
+
+class LaunchDeadline:
+    """The launch waits share one deadline so a swarm spawn returns inside its own timeout."""
+
+    def __init__(self, seconds: float) -> None:
+        self.seconds = seconds
+        self.ends = time.monotonic() + seconds
+        self.cut = ""
+        self.spent: dict[str, float] = {}
+
+    def run(self, wait: str, limit: float, waiter: Callable[[float], Any]) -> Any:
+        began = time.monotonic()
+        granted = max(0.0, min(limit, self.ends - began))
+        self.cut = self.cut or (wait if granted < limit else "")
+        try:
+            result = waiter(granted)
+        except ValueError as exc:
+            self.spent[wait] = self.spent.get(wait, 0.0) + time.monotonic() - began
+            if granted < limit:
+                raise ValueError(f"{self._overrun()}: {exc}") from exc
+            raise
+        self.spent[wait] = self.spent.get(wait, 0.0) + time.monotonic() - began
+        return result
+
+    def _overrun(self) -> str:
+        spent = ", ".join(f"{wait} {seconds:.0f}s" for wait, seconds in self.spent.items())
+        return f"the {self.seconds:g}s launch deadline ran out in the {self.cut} wait after {spent}"
+
+
+@dataclass(frozen=True)
+class Launch:
+    since: float
+    deadline: LaunchDeadline = field(default_factory=lambda: LaunchDeadline(float("inf")))
 
 
 APP_SERVER = "app_server"
 SPAWN = "AGENTIHOOKS_SWARM_SPAWN"
 PREDECESSOR = "AGENTIHOOKS_PREDECESSOR_SESSION"
+LAUNCHER_PIN = "AGENTIHOOKS_SWARM_LAUNCHER=$$ "
 SWARM_IDENTITY = (
     "AGENTIHOOKS_SWARM",
     "AGENTIHOOKS_SWARM_LANE",
     "AGENTIHOOKS_SWARM_TASK",
     "AGENTIHOOKS_SWARM_AUTONOMY",
     "AGENTIHOOKS_SWARM_LAUNCHER",
+    "AGENTIHOOKS_CLAIM_FENCE",
+    brain_binding.VARIABLE,
     effort_range.VARIABLE,
 )
 
@@ -137,11 +183,26 @@ def _telemetry_exports(name: str, environ: dict[str, str]) -> str:
 def _swarm_exports(environ: dict[str, str]) -> str:
     if not environ.get("AGENTIHOOKS_SWARM"):
         return ""
-    names = ("AGENTIHOOKS_SWARM", "AGENTIHOOKS_SWARM_LANE", "AGENTIHOOKS_SWARM_TASK", "AGENTIHOOKS_COMPACT_LIMIT")
+    names = (
+        "AGENTIHOOKS_SWARM",
+        "AGENTIHOOKS_SWARM_LANE",
+        "AGENTIHOOKS_SWARM_TASK",
+        "AGENTIHOOKS_COMPACT_LIMIT",
+        "AGENTIHOOKS_LEDGER_AGENT_TOKEN",
+        "AGENTIHOOKS_CLAIM_FENCE",
+        "AGENTIHOOKS_BUS",
+        "AGENTIHOOKS_BUS_URL",
+        "AGENTIHOOKS_SLOT_HIVE",
+        "AGENTIHOOKS_SLOT_EXECUTION",
+    )
     exports = {name: environ[name] for name in names if environ.get(name)}
     exports["AGENTIHOOKS_LANGFUSE_ENABLED"] = "1"
-    pin = "export AGENTIHOOKS_SWARM_LAUNCHER=$$\n"
+    pin = "unset SWARM_SECRET\nexport AGENTIHOOKS_SWARM_LAUNCHER=$$\n"
     return "".join(f"export {key}={shlex.quote(value)}\n" for key, value in exports.items()) + pin
+
+
+def _access_export() -> str:
+    return f'eval "$({shlex.join([sys.executable, "-P", "-m", "scripts.access_env", "env"])})"\n'
 
 
 def _launch_environ(environ: dict[str, str], name: str, handoff: bool) -> dict[str, str]:
@@ -153,6 +214,17 @@ def _launch_environ(environ: dict[str, str], name: str, handoff: bool) -> dict[s
         if gateway:
             launch_env["MCP_KEY_GATEWAY"] = gateway
     return launch_env
+
+
+def _bind_brain(environ: dict[str, str]) -> None:
+    # The profile renderer reads the binding from the process environment.
+    if not environ.get("AGENTIHOOKS_SWARM"):
+        os.environ.pop(brain_binding.VARIABLE, None)
+        environ.pop(brain_binding.VARIABLE, None)
+        return
+    # A herdr pane gets credentials only from the env files its launcher sources.
+    decided = brain_binding.decide(environ, operator_env.values(environ))
+    environ[brain_binding.VARIABLE] = os.environ[brain_binding.VARIABLE] = json.dumps(decided, sort_keys=True)
 
 
 def _with_predecessor(environ: dict[str, str], handoff: bool) -> dict[str, str]:
@@ -199,6 +271,8 @@ LAUNCH_GRACE_S = 3
 STARTED_ROUTES = ("routed", "bare", "direct")
 PROMPT_AFTER_START = "AGENTIHOOKS_PROMPT_AFTER_START"
 CODEX_READY_S = 120.0
+CANARY_TIMEOUT_S = {"claude": 120.0, "codex": 90.0}
+LAUNCH_DEADLINE_S = 270.0
 
 
 def _flag_value(args: list[str], names: tuple[str, ...]) -> str:
@@ -288,14 +362,17 @@ def _profile_command(command: list[str], spec: AgentSpec) -> list[str]:
     worn = [f"--overlay={overlay}" for overlay in spec.overlays]
     if spec.bundle_revision:
         worn.append(f"--bundle-revision={spec.bundle_revision}")
+    if spec.home:
+        worn.append(f"--home={spec.home}")
     return [command[0], "select-profile", spec.profile, *worn, "--agent", spec.agent, "--", *command[2:]]
 
 
 def _app_server_command(
     spec: AgentSpec, report: Path, agent_args: list[str], environ: dict[str, str], directory: Path, opening: Path | None
 ) -> list[str]:
-    return [
+    command = [
         sys.executable,
+        "-P",
         "-m",
         "scripts.codex_session",
         "serve",
@@ -311,6 +388,7 @@ def _app_server_command(
         "--report",
         str(report),
         *(["--previous-execution", spec.previous_execution] if spec.previous_execution else []),
+        *(["--execution", spec.execution] if spec.execution else []),
         *(["--resume", spec.resume] if spec.resume else []),
         *(["--prompt-file", str(opening)] if opening else []),
         "--",
@@ -320,6 +398,20 @@ def _app_server_command(
         *_model_args("codex", agent_args, environ),
         *agent_args,
     ]
+    if environ.get("AGENTIHOOKS_SLOT_HIVE") and spec.execution:
+        command = [
+            sys.executable,
+            "-P",
+            "-m",
+            "scripts.hive.launch_logs",
+            "--slug",
+            environ["AGENTIHOOKS_SWARM"],
+            "--execution",
+            spec.execution,
+            "--",
+            *command,
+        ]
+    return command
 
 
 def _viewer_lines(serve: str, launcher: Path, name: str, environ: dict[str, str], inputs: list[str]) -> str:
@@ -327,6 +419,7 @@ def _viewer_lines(serve: str, launcher: Path, name: str, environ: dict[str, str]
     log = launcher.with_name(f"{launcher.stem}.serve.log")
     viewer = [
         sys.executable,
+        "-P",
         "-m",
         "scripts.codex_session",
         "attach",
@@ -335,7 +428,7 @@ def _viewer_lines(serve: str, launcher: Path, name: str, environ: dict[str, str]
         "--agent",
         name,
     ]
-    server = shlex.quote(f"{serve}; rm -f {shlex.join(inputs)}")
+    server = shlex.quote(f"{LAUNCHER_PIN}{serve}; rm -f {shlex.join(inputs)}")
     return f"setsid -f sh -c {server} </dev/null >>{shlex.quote(str(log))} 2>&1\n{shlex.join(viewer)}"
 
 
@@ -368,7 +461,7 @@ def _agent_command(
         ]
         command = _profile_command(command, spec)
         if environ.get("AGENTIHOOKS_SWARM"):
-            command = [sys.executable, "-m", "scripts.codex_input", "--", *command]
+            command = [sys.executable, "-P", "-m", "scripts.codex_input", "--", *command]
         return command, ""
     command = [
         agentihooks_bin,
@@ -379,7 +472,7 @@ def _agent_command(
         "--agentihooks-report",
         str(report),
         "--name",
-        name,
+        spec.title or name,
         *(["--resume", spec.resume] if spec.resume else []),
         *_model_args("claude", agent_args, environ),
         *agent_args,
@@ -426,9 +519,11 @@ def _write_launcher(
     from scripts import session_exit
 
     exit_record = session_exit.path_for(launcher, environ)
-    exit_command = shlex.join([sys.executable, "-m", "scripts.session_exit", str(exit_record)])
+    exit_command = shlex.join([sys.executable, "-P", "-m", "scripts.session_exit", str(exit_record)])
     exit_identity = shlex.join([spec.agent, identity])
     command_text = shlex.join(command)
+    if environ.get("HIVE_GITHUB_AUTH_MODE"):
+        command_text = f"{shlex.join([sys.executable, '-P', '-m', 'scripts.github_app_cli', 'exec'])} {command_text}"
     inputs = [*([str(prompt_file)] if prompt_file is not None else []), str(_route_report(launcher))]
     if app_server:
         command_text = _viewer_lines(command_text, launcher, name, environ, inputs)
@@ -448,6 +543,7 @@ def _write_launcher(
         f"cd {shlex.quote(str(directory))} || exit 1\n"
         f": > {shlex.quote(str(_started_marker(launcher)))}\n"
         f"{operator_env.source_line(environ)}"
+        f"{_access_export()}"
         f"{_predecessor_export(environ)}"
         f"{gh_config.SHELL_PIN}"
         f"export AGENTIHOOKS_EXIT_RECORD={shlex.quote(str(exit_record))}\n"
@@ -458,6 +554,7 @@ def _write_launcher(
         f"{_swarm_exports(environ)}"
         f"{langfuse_export}"
         f"{_binding_export(environ)}"
+        f"{brain_binding.exports(environ)}"
         f"sleep {LAUNCH_GRACE_S}\n"
         f"{before}{command_text}\n"
         "native_status=$?\n"
@@ -504,7 +601,7 @@ def _plain_codex_handoff(flags: list[str], session_id: str) -> list[str]:
 
 def _prepare_profile(args: argparse.Namespace, agent: str, flags: list[str], environ: dict[str, str]) -> list[str]:
     from scripts.profiles import binding
-    from scripts.select_profile import BUNDLE_REVISION, OVERLAYS, prepare
+    from scripts.select_profile import BUNDLE_REVISION, OVERLAYS, RECORDED_HOME, prepare
 
     continuing = args.handoff or args.resume or "--resume" in flags or (agent == "codex" and flags[:1] == ["resume"])
     if not args.profile and continuing:
@@ -520,9 +617,16 @@ def _prepare_profile(args: argparse.Namespace, agent: str, flags: list[str], env
     if args.handoff:
         flags = binding.continuation(flags, agent, environ)
     environ[BUNDLE_REVISION] = args.bundle_revision
+    environ.pop(RECORDED_HOME, None)
     profile_env, flags = prepare(args.profile, agent, "", "", flags, environ, args.overlay)
     environ.update(profile_env)
     return flags
+
+
+def _recorded_home(agent: str, environ: dict[str, str]) -> str | None:
+    from scripts.profiles import binding
+
+    return environ.get(binding.HOMES[agent])
 
 
 def _binding_request(args, agent: str, prompt: str, environ: dict[str, str], flags: list[str]) -> str:
@@ -534,6 +638,8 @@ def _binding_request(args, agent: str, prompt: str, environ: dict[str, str], fla
     report = _runtime_dir(environ) / f"profile-{os.getpid()}-{time.time_ns()}.json"
     binding.request(report, args.profile, agent, home)
     environ[binding.REPORT] = str(report)
+    if not args.defer_canary:
+        print(f"profile_report={report}", flush=True)
     environ["AGENTIHOOKS_RUN_MODEL"], environ["AGENTIHOOKS_RUN_EFFORT"] = model_effort(agent, flags, environ)
     return f"{binding.PROMPT}\n\n{prompt}"
 
@@ -551,6 +657,50 @@ def _binding_result(environ: dict[str, str], timeout: float, route: dict) -> lis
         f"profile_binding={json.dumps(result, separators=(',', ':'))}",
         *(f"{key}={result[key]}" for key in ("model", "effort") if result.get(key)),
     ]
+
+
+def _binding_deferred(environ: dict[str, str]) -> list[str]:
+    from scripts.profiles import binding
+
+    if not environ.get(binding.REPORT):
+        return []
+    return ["profile_validation=pending", f"profile_report={environ[binding.REPORT]}"]
+
+
+def _profile_canary(args, agent: str, environ: dict[str, str], launch, route: dict) -> list[str]:
+    if args.defer_canary and (deferred := _binding_deferred(environ)):
+        return deferred
+    canary = CANARY_TIMEOUT_S[agent] if args.canary_timeout is None else args.canary_timeout
+    return launch.run("profile canary", canary, lambda seconds: _binding_result(environ, seconds, route))
+
+
+def _detach() -> bool:
+    if os.fork():
+        return True
+    os.setsid()
+    null = os.open(os.devnull, os.O_RDWR)
+    for stream in (0, 1, 2):
+        os.dup2(null, stream)
+    return False
+
+
+def _detached(args, environ: dict[str, str]) -> bool:
+    """The detached child's output goes to /dev/null; its failures reach the caller only through the binding report."""
+    return bool(args.defer_canary and _binding_deferred(environ)) and _detach()
+
+
+def _refuse_binding(environ: dict[str, str], exc: Exception) -> None:
+    from scripts.profiles import binding
+
+    if environ.get(binding.REPORT):
+        binding.refuse(Path(environ[binding.REPORT]), str(exc))
+
+
+def _codex_hooks(agent: str, environ: dict[str, str]) -> list[str]:
+    if agent != "codex":
+        return []
+    moved = restore_hook_order(codex_home(environ))
+    return [f"codex_hooks=restored:{','.join(moved)}" if moved else "codex_hooks=unchanged"]
 
 
 def _selection_refused(environ: dict[str, str]) -> bool:
@@ -666,6 +816,7 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Open a routed Claude session in a new terminal")
     parser.add_argument("--dir", default="", help="Target directory; relative paths resolve below the configured base")
     parser.add_argument("--name", default="", help="Claude session and terminal name")
+    parser.add_argument("--title", default="", help="Display name and herdr tab label in place of the name")
     prompt = parser.add_mutually_exclusive_group()
     prompt.add_argument("--prompt", default="", help="Opening Claude prompt")
     prompt.add_argument("--prompt-file", default="", help="Read the opening prompt from this file")
@@ -681,6 +832,17 @@ def _parser() -> argparse.ArgumentParser:
         type=float,
         default=150.0,
         help="Seconds to wait for the new session to report which account it was routed to",
+    )
+    parser.add_argument(
+        "--canary-timeout",
+        type=float,
+        help="Seconds to wait for the new session to run its profile canary; default 120 for Claude, 90 for Codex",
+    )
+    parser.add_argument(
+        "--defer-canary",
+        action="store_true",
+        help="Return once the session is routed and print its pending profile validation request for the caller "
+        "to confirm later",
     )
     parser.add_argument(
         "--handoff",
@@ -709,6 +871,7 @@ def _parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--auth", choices=("interactive",), default="", help="Use the declared interactive login")
     parser.add_argument("--profile", default="", help="Role profile for this run")
+    parser.add_argument("--claim-fence", default="", help="Pinned event bus claim identity for this execution")
     parser.add_argument(
         "--overlay", action="append", default=[], help="Overlay the profile wears; repeat for up to three"
     )
@@ -722,6 +885,7 @@ def _parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--seat", default="", help="Codex app-server: the swarm seat this execution occupies")
     parser.add_argument("--previous-execution", default="", help="Codex app-server: the execution this launch replaces")
+    parser.add_argument("--execution", default="", help="Codex app-server: the admitted execution this launch serves")
     parser.add_argument(
         "--inbox-channel",
         action="store_true",
@@ -751,8 +915,9 @@ def _select_host(requested: str, environ: dict[str, str]) -> tuple[str, bool]:
 
 def _start_herdr(launcher: Path, directory: Path, name: str, args, agent: str, environ: dict[str, str]) -> list[str]:
     started = herdr_host.ensure_server(environ)
-    env = {"HERDR_AGENT": agent, **({PROMPT_AFTER_START: "1"} if _held_prompt(launcher, agent) else {})}
-    placed = herdr_host.open_pane(directory, name, env, args.placement, args.workspace, environ)
+    held = _held_prompt(launcher, agent) and not args.resume
+    env = {"HERDR_AGENT": agent, **({PROMPT_AFTER_START: "1"} if held else {})}
+    placed = herdr_host.open_pane(directory, args.title or name, env, args.placement, args.workspace, environ)
     herdr_panes.record(placed, "init-agent", name, environ, int(time.time() * 1000))
     herdr_host.run(placed.pane_id, launcher, environ)
     return [
@@ -778,9 +943,10 @@ PROMPT_ARGUMENT_LIMIT = 131_072
 OPENING_FILE_INSTRUCTION = "Read the complete opening instructions in this file and follow them: "
 
 
-def _inbox_channel_args() -> list[str]:
+def _inbox_channel_args(environ: dict[str, str]) -> list[str]:
     from scripts.inbox import channel
 
+    channel.register(environ)
     return channel.launch_args()
 
 
@@ -790,20 +956,41 @@ def _answer_channel_warning(pane: str, environ: dict[str, str]) -> str:
     return "answered" if herdr_host.answer(pane, channel.WARNING, environ, CHANNEL_WARNING_MS) else "unseen"
 
 
-def _name_in_herdr(pane: str, name: str, agent: str, environ: dict[str, str], opening: str, since: float) -> list[str]:
-    detected = herdr_host.rename_agent(pane, name, environ)
-    ready = agent == "codex" and (detected or bool(opening)) and herdr_host.wait_ready(pane, environ, CODEX_READY_S)
-    named = [f"agent_name={herdr_host.agent_name(name)}"] if detected else ["agent_name=unset"]
+def _name_in_herdr(
+    pane: str,
+    names: Names,
+    agent: str,
+    environ: dict[str, str],
+    opening: str,
+    launch: Launch,
+    served: bool = False,
+) -> list[str]:
+    """A served viewer's thread is named by its server before the first turn."""
+    detected = herdr_host.rename_agent(pane, names.agent, environ)
+    named = [f"agent_name={herdr_host.agent_name(names.agent)}"] if detected else ["agent_name=unset"]
+    if served:
+        return named
+    ready = (
+        agent == "codex"
+        and (detected or bool(opening))
+        and launch.deadline.run(
+            "Codex ready", CODEX_READY_S, lambda seconds: herdr_host.wait_ready(pane, environ, seconds)
+        )
+    )
     if detected and agent == "codex":
-        named += _name_codex_session(pane, name, environ, since, ready)
+        named += _name_codex_session(pane, names.title or names.agent, environ, launch.since, ready)
     if opening:
-        named.append(f"opening_prompt={_send_opening(pane, opening, environ, ready)}")
+        named.append(f"opening_prompt={_send_opening(pane, opening, environ, ready, launch.deadline)}")
     return named
 
 
-def _send_opening(pane: str, opening: str, environ: dict[str, str], ready: bool) -> str:
+def _send_opening(pane: str, opening: str, environ: dict[str, str], ready: bool, deadline: LaunchDeadline) -> str:
     """Codex can read busy again right after its rename."""
-    ready = ready and herdr_host.wait_ready(pane, environ, CODEX_READY_S)
+    ready = ready and deadline.run(
+        "Codex ready for the opening prompt",
+        CODEX_READY_S,
+        lambda seconds: herdr_host.wait_ready(pane, environ, seconds),
+    )
     why = herdr_host.busy(pane, environ) if ready else "not-ready"
     if why:
         return f"held:{why}"
@@ -813,6 +1000,11 @@ def _send_opening(pane: str, opening: str, environ: dict[str, str], ready: bool)
 def _names_pane(route: dict, launcher: Path, agent: str) -> bool:
     """Codex may start after the route wait ends with no report."""
     return route.get("status") in STARTED_ROUTES or (not route.get("status") and bool(_held_prompt(launcher, agent)))
+
+
+def _served(args) -> bool:
+    """A resumed thread is already named, like a served viewer's, so nothing is typed into its pane."""
+    return args.codex_transport == APP_SERVER or bool(args.resume)
 
 
 def _name_codex_session(pane: str, name: str, environ: dict[str, str], since: float, ready: bool) -> list[str]:
@@ -843,8 +1035,18 @@ def _codex_named(environ: dict[str, str], name: str, since: float) -> Callable[[
     return named
 
 
+def _launch_seconds(args) -> float:
+    from scripts.master_login_chain import BUDGET
+
+    if args.agent in ("", "claude") and _flag_value(args.claude_args, ("--route",)) == "master-login":
+        args.route_timeout = max(args.route_timeout, BUDGET.route)
+        return BUDGET.launch
+    return LAUNCH_DEADLINE_S
+
+
 def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -> int:
     args = _parser().parse_args(argv)
+    launch = LaunchDeadline(_launch_seconds(args))
     active_env = dict(os.environ if environ is None else environ)
     active_env.pop("AGENTIHOOKS_PROFILE_REPORT", None)
     operator_env.fill(active_env)
@@ -853,6 +1055,7 @@ def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -
         prompt = Path(args.prompt_file).expanduser().read_text(encoding="utf-8") if args.prompt_file else args.prompt
         name = args.name or f"s-{time.strftime('%y%m%d-%H%M%S')}"
         active_env = _launch_environ(_with_predecessor(active_env, args.handoff), name, args.handoff)
+        active_env.update({"AGENTIHOOKS_CLAIM_FENCE": args.claim_fence} if args.claim_fence else {})
         claude_args = args.claude_args[1:] if args.claude_args[:1] == ["--"] else args.claude_args
         exclude = ""
         agent, reason = (
@@ -865,12 +1068,16 @@ def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -
             exclude = _handoff_exclude(agent, active_env)
             if not prompt:
                 raise ValueError("--handoff needs the handoff document as --prompt-file")
+        _bind_brain(active_env)
         claude_args = _prepare_profile(args, agent, claude_args, active_env)
         claude_args = effort_range.launch_args(agent, claude_args, active_env)
         if not args.dry_run:
+            from scripts.scheduler.service import ensure_running
+
+            ensure_running(active_env)
             prompt = _binding_request(args, agent, prompt, active_env, claude_args)
         channel = args.inbox_channel and agent == "claude"
-        claude_args = [*_inbox_channel_args(), *claude_args] if channel else claude_args
+        claude_args = [*_inbox_channel_args(active_env), *claude_args] if channel else claude_args
         # A handoff must land on another account, so it never falls back to bare Claude.
         launcher, prompt_file = _write_launcher(
             directory,
@@ -891,6 +1098,9 @@ def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -
                 transport=_transport(args, agent),
                 seat=args.seat,
                 previous_execution=args.previous_execution,
+                execution=args.execution,
+                title=args.title,
+                home=_recorded_home(agent, active_env),
             ),
         )
         host, explicit = _select_host(args.host, active_env)
@@ -911,6 +1121,7 @@ def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -
         f"claude_args={shlex.join(claude_args)}",
         f"launcher={launcher}",
         f"prompt_file={prompt_file or 'none'}",
+        *brain_binding.report(active_env),
         *(f"{k}={v}" for k, v in zip(("model", "effort"), model_effort(agent, claude_args, active_env))),
     ]
     if args.dry_run:
@@ -931,9 +1142,7 @@ def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -
                 f"agentihooks init-agent: Claude does not trust {directory} ({why}); {claude_trust.WAIT_NOTICE}",
                 file=sys.stderr,
             )
-    if agent == "codex":
-        moved = restore_hook_order(codex_home(active_env))
-        report.append(f"codex_hooks=restored:{','.join(moved)}" if moved else "codex_hooks=unchanged")
+    report += _codex_hooks(agent, active_env)
     marker = _started_marker(launcher)
     if host == "herdr":
         try:
@@ -974,6 +1183,9 @@ def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -
     marker.unlink(missing_ok=True)
     report.append("status=started")
     report.append(f"launcher_at={launcher_at}")
+    if _detached(args, active_env):
+        print("\n".join([*report, "route_status=pending", *_binding_deferred(active_env)]))
+        return 0
 
     route_path = _route_report(launcher)
     deadline = time.monotonic() + args.route_timeout
@@ -993,7 +1205,15 @@ def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -
     pane = next((line.split("=", 1)[1] for line in report if line.startswith("pane_id=")), "")
     herdr_panes.mark(pane, active_env, route_status=route.get("status", "pending"))
     if pane and _names_pane(route, launcher, agent):
-        report += _name_in_herdr(pane, name, agent, active_env, _held_prompt(launcher, agent), launcher_at / 1000)
+        report += _name_in_herdr(
+            pane,
+            Names(name, args.title),
+            agent,
+            active_env,
+            _held_prompt(launcher, agent),
+            Launch(launcher_at / 1000, deadline=launch),
+            served=_served(args),
+        )
         if channel:
             report.append(f"channel_warning={_answer_channel_warning(pane, active_env)}")
     if args.handoff and route.get("status") != "routed":
@@ -1004,8 +1224,9 @@ def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -
         return 3
     try:
         _route_reported(active_env, args.route_timeout, route)
-        report += _binding_result(active_env, args.route_timeout, route)
+        report += _profile_canary(args, agent, active_env, launch, route)
     except (OSError, ValueError) as exc:
+        _refuse_binding(active_env, exc)
         print("\n".join([*report, "profile_validation=failed"]))
         print(f"agentihooks init-agent: {exc}", file=sys.stderr)
         return 3

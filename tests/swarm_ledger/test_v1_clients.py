@@ -4,21 +4,17 @@ import sys
 import urllib.error
 import uuid
 
-import pytest
-
-from tests.swarm_ledger.test_api_v1 import authority_live, live  # noqa: F401
-from tests.swarm_ledger.test_ledger_authority import SLUG, cli_ledger, server
-
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 import chat_ledger  # noqa: E402
 import ledger_hook  # noqa: E402
+import pytest
 
 from scripts.swarm.ledger_client import LedgerClient  # noqa: E402
 from scripts.swarm_ledger import chat_ledger as chat_ledger_module  # noqa: E402, F401
 from scripts.swarm_ledger import ledger as ledger_module  # noqa: E402
 from scripts.swarm_ledger import ledger_hook as ledger_hook_module  # noqa: E402, F401
 from scripts.swarm_ledger.api import client as api_client  # noqa: E402
+from tests.swarm_ledger.test_api_v1 import authority_live, live  # noqa: F401
+from tests.swarm_ledger.test_ledger_authority import SLUG, cli_ledger, server
 
 
 @pytest.fixture
@@ -56,7 +52,8 @@ def request_rows(path):
 
 
 def test_chat_command_posts_through_the_versioned_operations_route(routes, monkeypatch, capsys):
-    monkeypatch.setattr(sys, "argv", ["chat_ledger.py", SLUG, "--as", "api-reader", "Through v1"])
+    cli_ledger.call(SLUG, [{"op": "add", "id": "o-0", "thread": "chat", "text": "Where are we"}])
+    monkeypatch.setattr(sys, "argv", ["chat_ledger.py", SLUG, "--as", "api-reader", "--reply-to", "o-0", "Through v1"])
     chat_ledger.main()
     posted = json.loads(capsys.readouterr().out)["posted"]
     assert [row["text"] for row in chat_rows() if row["id"] == posted] == ["Through v1"]
@@ -66,7 +63,7 @@ def test_chat_command_posts_through_the_versioned_operations_route(routes, monke
 
 def test_chat_command_reports_a_dead_server(monkeypatch):
     monkeypatch.setattr(cli_ledger, "BASE", "http://127.0.0.1:9")
-    monkeypatch.setattr(sys, "argv", ["chat_ledger.py", SLUG, "--as", "api-reader", "Nobody"])
+    monkeypatch.setattr(sys, "argv", ["chat_ledger.py", SLUG, "--as", "api-reader", "--reply-to", "o-0", "Nobody"])
     with pytest.raises(SystemExit) as exit_:
         chat_ledger.main()
     assert str(exit_.value).startswith("ledger server not answering on http://127.0.0.1:9: ")
@@ -91,7 +88,7 @@ def test_stop_gate_bypass_never_raises_when_the_server_is_gone(monkeypatch):
 
 def test_tick_client_writes_and_reads_only_versioned_routes(routes):
     client = LedgerClient()
-    client.say(SLUG, "From the tick", by="swarm")
+    client.say(SLUG, "From the tick")
     client.followup(SLUG, "Tick follow up")
     client.comment_phase(SLUG, "p1", "Tick phase note", by="swarm")
     assert "From the tick" in [row["text"] for row in client.chat(SLUG)]
@@ -155,7 +152,7 @@ class Recorder:
 def test_chat_command_sends_one_service_chat_operation(monkeypatch, capsys):
     recorder = Recorder({"applied": ["x"], "rejected": []})
     monkeypatch.setattr(cli_ledger, "request", recorder)
-    monkeypatch.setattr(sys, "argv", ["chat_ledger.py", SLUG, "--as", "api-reader", "  Spaced  "])
+    monkeypatch.setattr(sys, "argv", ["chat_ledger.py", SLUG, "--as", "api-reader", "--reply-to", "o-0", "  Spaced  "])
     chat_ledger.main()
     [(slug, [op], service)] = recorder.calls
     assert (slug, service) == (SLUG, True)
@@ -166,13 +163,25 @@ def test_chat_command_sends_one_service_chat_operation(monkeypatch, capsys):
         "text": "Spaced",
         "by": "api-reader",
         "to": "operator",
+        "reply_to": "o-0",
     }
     assert capsys.readouterr().out == json.dumps({"posted": op["id"]}) + "\n"
 
 
+def test_chat_command_requires_the_operator_line_it_answers(monkeypatch, capsys):
+    recorder = Recorder({"applied": ["x"], "rejected": []})
+    monkeypatch.setattr(cli_ledger, "request", recorder)
+    monkeypatch.setattr(sys, "argv", ["chat_ledger.py", SLUG, "--as", "api-reader", "Unasked"])
+    with pytest.raises(SystemExit) as exit_:
+        chat_ledger.main()
+    assert exit_.value.code == 2
+    assert "--reply-to" in capsys.readouterr().err
+    assert recorder.calls == []
+
+
 def test_chat_command_exits_on_a_rejected_message(monkeypatch, capsys):
     monkeypatch.setattr(cli_ledger, "request", Recorder({"applied": [], "rejected": ["m-1"]}))
-    monkeypatch.setattr(sys, "argv", ["chat_ledger.py", SLUG, "--as", "api-reader", "No"])
+    monkeypatch.setattr(sys, "argv", ["chat_ledger.py", SLUG, "--as", "api-reader", "--reply-to", "o-0", "No"])
     with pytest.raises(SystemExit) as exit_:
         chat_ledger.main()
     assert str(exit_.value) == "message rejected: ['m-1']"
@@ -183,7 +192,7 @@ def test_chat_command_exits_with_the_server_refusal(monkeypatch):
     body = io.BytesIO(b'{"error": {"code": "forbidden"}}')
     refusal = urllib.error.HTTPError(cli_ledger.BASE, 403, "Forbidden", {}, body)
     monkeypatch.setattr(cli_ledger, "request", Recorder(error=refusal))
-    monkeypatch.setattr(sys, "argv", ["chat_ledger.py", SLUG, "--as", "api-reader", "No"])
+    monkeypatch.setattr(sys, "argv", ["chat_ledger.py", SLUG, "--as", "api-reader", "--reply-to", "o-0", "No"])
     with pytest.raises(SystemExit) as exit_:
         chat_ledger.main()
     assert str(exit_.value) == 'server refused: 403 {"error": {"code": "forbidden"}}'
@@ -288,7 +297,7 @@ def test_a_refusal_without_details_keeps_its_body(code, body):
 def test_the_client_timeout_reaches_the_transport(monkeypatch):
     seen = []
 
-    def urlopen(request, timeout):
+    def urlopen(request, timeout, **options):
         seen.append(timeout)
         return io.BytesIO(b'{"revision": "r"}')
 

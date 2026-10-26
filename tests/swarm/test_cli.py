@@ -1,4 +1,5 @@
 import json
+import multiprocessing
 import subprocess
 
 import pytest
@@ -7,18 +8,18 @@ from scripts.gates import intent
 from scripts.gates import log as gate_log
 from scripts.gates.verdicts import Verdicts
 from scripts.inbox.store import InboxStore
-from scripts.swarm import cli, dispatcher, runtime, timer
+from scripts.swarm import cli, commands, dispatcher, lease, publish, runtime, timer
 from scripts.swarm.health import checks
 from scripts.swarm.ledger_events import PullRequest
 from scripts.swarm.resume import Outcome
-from scripts.swarm.store import AgentRecord, RedisStore, SwarmError
+from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig, SwarmError
+from scripts.swarm_v2 import front_door
 from scripts.swarm_v2.runtime.routed import RoutedRuntime
 from tests.swarm.test_delivery import FakeHerdr
 from tests.swarm.test_tick import FakeLedger, FakeRuntime
+from tests.swarm.test_tick_lock import hold_tick
 
 real_reconcile = timer.reconcile
-
-pytestmark = pytest.mark.xdist_group("fakeredis")
 
 
 from tests.swarm.profile_fixture import validated
@@ -40,7 +41,7 @@ def env(monkeypatch, tmp_path):
     ledger.said = []
     ledger.comments = []
     ledger.say = lambda slug, text, by=None: ledger.said.append((text, by))
-    ledger.relay = lambda slug, text, by, op_id="": ledger.said.append((text, by))
+    ledger.relay = lambda slug, text, by, op_id="", reply_to="": ledger.said.append((text, by))
     ledger.comment = lambda slug, task, text, by: ledger.comments.append((task, text, by))
     rt = FakeRuntime()
     monkeypatch.setattr(cli, "connect", lambda: store)
@@ -51,6 +52,7 @@ def env(monkeypatch, tmp_path):
     monkeypatch.setattr(cli.delivery, "HerdrMessenger", lambda: FakeHerdr({}))
     ledger.pulls = {}
     monkeypatch.setattr(cli, "pull_branch", lambda url: ("", ""))
+    monkeypatch.setattr(publish, "pushed_branches", lambda repo, task, agent: {})
     monkeypatch.setattr(
         cli.ledger_events, "view", lambda url: ledger.pulls.get(url, PullRequest("MERGED", 1, 1, False))
     )
@@ -99,6 +101,15 @@ def test_create_marks_the_ledger_as_a_swarm_ledger(env):
     _, ledger, _ = env
     assert run("sw", "create", "--repo", "/repo") == 0
     assert ledger.swarm_sized == ["sw"]
+
+
+def test_create_stores_and_reports_automatic_scaling_even_with_pinned_caps(env, capsys):
+    store, _, _ = env
+    assert run("sw", "create", "--repo", "/repo", "--max-eng-agents", "2") == 0
+    report = json.loads(capsys.readouterr().out.splitlines()[0])
+    assert report == {"created": "sw", "repo": "/repo", "state": "paused", "template": "", "scaling": "auto"}
+    assert store.redis.hget(store.key("sw", "config"), "scaling") == "auto"
+    assert store.config("sw").scaling == "auto"
 
 
 def test_bare_pairs_set_the_caps(env):
@@ -202,7 +213,11 @@ def test_done_from_the_dispatcher_seat_ends_it_without_a_pull_request_once_its_t
     assert [a.state for a in store.agents("sw") if a.name == seat] == ["working"]
     ledger.state = lambda slug: {**settled(slug), "priorities": [handed] if slug == "sw" else [stale]}
     inbox = InboxStore(store.redis)
-    item = inbox.send("master@a1b2c3-0001", seat, "one more look")
+    work = inbox.send("master@a1b2c3-0001", seat, "one more look")
+    assert run("sw", "done") == 1
+    assert work.id in capsys.readouterr().err
+    inbox.close(work.id, seat, "done", "Evidence considered")
+    item = inbox.send("master@a1b2c3-0001", seat, "Status only", fyi=True)
     assert run("sw", "done") == 0
     assert json.loads(capsys.readouterr().out) == {
         "seat": seat,
@@ -253,20 +268,6 @@ def test_done_waits_on_a_queued_pull_request_and_accepts_only_after_it_lands(env
     assert run("sw", "done") == 0
     assert ledger.rows["t1"]["state"] == "done"
     assert next(a for a in store.agents("sw") if a.name == name).state == "finished"
-
-
-def test_an_ops_task_completes_with_its_proof_even_when_a_linked_pull_request_is_queued(env, monkeypatch):
-    store, ledger, _ = env
-    run("sw", "create", "--repo", "/repo")
-    run("sw", "start")
-    name = "engineer@a1b2c3-0001"
-    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", name)
-    ledger.rows["t1"]["kind"] = "ops"
-    url = "https://github.com/o/r/pull/9"
-    ledger.pulls[url] = PullRequest("OPEN", None, 1, False, queued=True)
-    assert run("sw", "done", "--pr", url, "--command", "probe", "--output", "passed") == 0
-    assert ledger.rows["t1"]["state"] == "done"
-    assert cli.idle.wait(store.redis, "sw", name) is None
 
 
 def test_the_tick_reopens_a_done_task_whose_pull_request_closed_unmerged(env, monkeypatch):
@@ -337,9 +338,11 @@ def test_block_on_dev_red_records_the_failing_dev_run(env, capsys, monkeypatch):
     monkeypatch.setattr(
         dev_red, "latest", lambda repo, run=None: read.append(repo) or {"id": 41, "conclusion": "failure"}
     )
+    store.redis.hset(store.key("sw", "started-lives"), "t2", 2)
     capsys.readouterr()
     assert run("sw", "--as", "ci@a1b2c3-0001", "block", "--dev-red", "dev Tests is red on a test I never touched") == 0
     assert read == ["/repo"]
+    assert store.claims("sw", "t2") == 1
     assert ledger.rows["t2"]["state"] == "blocked"
     assert ledger.comments == [("t2", "dev Tests is red on a test I never touched", "ci@a1b2c3-0001")]
     assert store.redis.hgetall(dev_red.key("sw")) == {"t2": "41"}
@@ -349,6 +352,19 @@ def test_block_on_dev_red_records_the_failing_dev_run(env, capsys, monkeypatch):
         "dev_red_run": 41,
         "next": "stop now; the swarm closes this session",
     }
+
+
+def test_block_on_dev_red_refunds_nothing_once_the_agent_no_longer_holds_its_claim(env, monkeypatch):
+    from scripts.swarm import dev_red
+
+    store, ledger, _ = env
+    run("sw", "create", "--repo", "/repo")
+    run("sw", "start")
+    monkeypatch.setattr(dev_red, "latest", lambda repo, run=None: {"id": 41, "conclusion": "failure"})
+    store.redis.hset(store.key("sw", "started-lives"), "t2", 2)
+    assert store.release("sw", "t2", "ci@a1b2c3-0001")
+    assert run("sw", "--as", "ci@a1b2c3-0001", "block", "--dev-red", "dev Tests is red on a test I never touched") == 0
+    assert store.claims("sw", "t2") == 2
 
 
 def test_block_on_dev_red_is_refused_while_dev_is_green(env, capsys, monkeypatch):
@@ -469,8 +485,8 @@ def test_say_addresses_and_strangers_are_refused(env, capsys):
     assert ledger.said == []
     [item] = InboxStore(store.redis).inbox("ci@a1b2c3-0001")
     assert (item.sender, item.text, item.state) == ("engineer@a1b2c3-0001", "the docs task is merged", "pending")
-    assert run("sw", "--as", "engineer@a1b2c3-0001", "say", "status for the page only") == 0
-    assert ledger.said[-1] == ("status for the page only", "engineer@a1b2c3-0001")
+    assert run("sw", "--as", "engineer@a1b2c3-0001", "say", "status for the page only") == 1
+    assert ledger.said == [] and "msg send master@sw" in capsys.readouterr().err
     assert [i.text for i in InboxStore(store.redis).inbox("ci@a1b2c3-0001")] == ["the docs task is merged"]
 
     assert run("sw", "--as", "stranger", "say", "hello") == 1
@@ -492,17 +508,17 @@ def test_say_to_an_agent_a_lane_or_everyone_never_posts_to_chat(env, to, capsys)
     assert "engineer@a1b2c3-0001" in json.loads(capsys.readouterr().out)["sent"]
 
 
-def test_say_to_the_operator_posts_to_chat_and_reaches_no_inbox(env, capsys):
+def test_say_to_the_operator_is_refused_naming_the_front_door_inbox(env, capsys):
     store, ledger, _ = env
     run("sw", "create", "--repo", "/repo")
     run("sw", "start")
     ledger.said.clear()
-    ledger.say = lambda slug, text, by=None: ledger.said.append((slug, text, by))
     capsys.readouterr()
-    assert run("sw", "--as", "engineer@a1b2c3-0001", "say", "phase one is done", "--to", "operator") == 0
-    assert ledger.said == [("sw", "phase one is done", "engineer@a1b2c3-0001")]
+    assert run("sw", "--as", "engineer@a1b2c3-0001", "say", "phase one is done", "--to", "operator") == 1
+    err = capsys.readouterr().err
+    assert front_door.say_refusal("sw", "engineer@a1b2c3-0001") in err and 'msg send master@sw "<text>"' in err
+    assert ledger.said == []
     assert InboxStore(store.redis).inbox("ci@a1b2c3-0001") == []
-    assert json.loads(capsys.readouterr().out) == {"posted": True}
 
 
 @pytest.mark.parametrize("flag, env_name", [("engineer@a1b2c3-0001", ""), ("", "engineer@a1b2c3-0001")])
@@ -662,6 +678,94 @@ def test_binning_releases_and_reopens_only_this_swarms_claims(env):
     assert (store.claimant("sw", "t1"), store.claimant("sw", "t2")) == (None, None)
 
 
+def _die_holding_the_tick_lock(store):
+    held = lease.acquire(store, "sw", commands.hive_id())
+    receiver, sender = multiprocessing.Pipe()
+    child = multiprocessing.get_context("fork").Process(target=hold_tick, args=(store, held, sender))
+    child.start()
+    try:
+        assert receiver.poll(10)
+        token = receiver.recv()
+        child.kill()
+        child.join(10)
+        assert child.exitcode == -9
+    finally:
+        if child.is_alive():
+            child.kill()
+        child.join(10)
+        receiver.close()
+        sender.close()
+    store.redis.set(store.key("sw", "tick-lock"), token, px=600_000)
+    return token
+
+
+def test_a_binned_swarm_reopened_by_a_tick_that_died_holding_the_lock_spawns_its_master_at_the_next_tick(
+    env, monkeypatch
+):
+    store, ledger, rt = env
+    run("sw", "create", "--repo", "/repo")
+    run("sw", "start")
+    ledger.bin = {"sw"}
+    assert run("sw", "stop", "--now") == 0
+    store.update("sw", state="running")
+    assert cli.run_tick(store, "sw", ledger, rt, FakeHerdr({})) == ["the ledger is in the bin, stopped"]
+    assert store.redis.get(store.key("sw", "tick-lock")) is None
+    ledger.reopen = lambda slug, by: ledger.bin.discard(slug)
+    real_tick, died = cli.run_tick, []
+    monkeypatch.setattr(cli, "run_tick", lambda store, slug: died.append(_die_holding_the_tick_lock(store)) or [])
+    assert run("sw", "reopen") == 0
+    assert store.config("sw").state == "running" and ledger.bin == set()
+    assert store.redis.get(store.key("sw", "tick-lock")) == died[0]
+    masters = len(rt.masters)
+    actions = real_tick(store, "sw", ledger, rt, FakeHerdr({}))
+    assert "another tick is running" not in actions
+    assert len(rt.masters) == masters + 1
+    assert store.redis.get(store.key("sw", "tick-lock")) is None
+
+
+def _fail_the_first_state_read(ledger, failure):
+    state, calls = ledger.state, []
+
+    def fail_once(slug):
+        calls.append(slug)
+        if len(calls) == 1:
+            raise failure
+        return state(slug)
+
+    ledger.state = fail_once
+
+
+def test_a_tick_that_finds_its_ledger_gone_releases_its_lock(env):
+    store, ledger, rt = env
+    run("sw", "create", "--repo", "/repo")
+    run("sw", "start")
+    _fail_the_first_state_read(ledger, cli.LedgerGone("ledger sw is gone"))
+    assert cli.run_tick(store, "sw", ledger, rt, FakeHerdr({})) == [
+        "ledger sw is gone; agentihooks swarm remove sw clears this swarm once it has no agents"
+    ]
+    assert store.redis.get(store.key("sw", "tick-lock")) is None
+
+
+def test_a_tick_that_fails_mid_run_releases_its_lock(env):
+    store, ledger, rt = env
+    run("sw", "create", "--repo", "/repo")
+    run("sw", "start")
+    _fail_the_first_state_read(ledger, RuntimeError("ledger down"))
+    with pytest.raises(RuntimeError, match="^ledger down$"):
+        cli.run_tick(store, "sw", ledger, rt, FakeHerdr({}))
+    assert store.redis.get(store.key("sw", "tick-lock")) is None
+
+
+def test_a_tick_whose_ledger_health_probe_fails_releases_its_lock(env, monkeypatch):
+    store, ledger, rt = env
+    run("sw", "create", "--repo", "/repo")
+    run("sw", "start")
+    monkeypatch.setattr(cli.outage, "ledger_health", lambda slug, at, probe: False)
+    unprobed = object.__new__(cli.ledger_client.LedgerClient)
+    assert cli.run_tick(store, "sw", unprobed, rt, FakeHerdr({})) == ["Ledger health probe failed"]
+    assert store.redis.get(store.key("sw", "tick-lock")) is None
+
+
 def test_stop_now_prints_its_state_and_who_is_still_running(env, capsys):
     store, ledger, rt = env
     run("sw", "create", "--repo", "/repo")
@@ -734,11 +838,14 @@ def test_review_budget_keeps_each_pull_requests_rounds(env, monkeypatch, capsys,
     capsys.readouterr()
     first = "https://github.com/o/r/pull/1"
     second = "https://github.com/o/r/pull/2"
-    if not legacy:
+    if legacy:
+        for _ in range(3):
+            cli.review_rounds.Budget("sw", "reviews").spend("t1", "rounds", 3)
+    else:
         ledger.rows["t1"]["pr_url"] = first
-    for n in (1, 2, 3):
-        assert run("sw", "--as", "engineer@a1b2c3-0001", "review") == 0
-        assert json.loads(capsys.readouterr().out)["round"] == n
+        for n in (1, 2, 3):
+            assert run("sw", "--as", "engineer@a1b2c3-0001", "review") == 0
+            assert json.loads(capsys.readouterr().out)["round"] == n
     if legacy and register_first:
         ledger.rows["t1"]["pr_url"] = first
         assert run("sw", "--as", "engineer@a1b2c3-0001", "review") == 1
@@ -844,24 +951,45 @@ def test_the_tick_hands_the_wake_pass_its_clock_window_and_quiet_window(env, mon
     calls = []
     monkeypatch.setattr(cli, "now_ms", lambda: 9_000_000)
     monkeypatch.setenv(cli.wake.WINDOW_ENV, "60")
-    monkeypatch.setenv(cli.wake.QUIET_ENV, "7")
-    monkeypatch.setattr(cli.wake, "wake_pass", lambda *args: calls.append(args[-3:]) or [])
+    monkeypatch.setattr(cli.wake, "maintenance", lambda *args: calls.append(args[-2:]) or [])
+    monkeypatch.setattr(cli.wake, "wake_pass", lambda *args: pytest.fail("tick swept the wake ladder"))
     cli.run_tick(store, "sw", ledger, rt, FakeHerdr({}))
-    assert calls == [(9_000_000, 60_000, 7_000)]
+    assert calls == [(9_000_000, 60_000)]
 
 
-def test_only_scheduled_ticks_sample_langfuse(env, monkeypatch):
-    from scripts.swarm import langfuse
+def test_only_scheduled_ticks_start_the_refresh_job(env, monkeypatch):
+    from scripts.swarm import grafana_alerts, langfuse, refresh_job
 
     store, ledger, rt = env
     run("sw", "create", "--repo", "/repo")
-    called = []
-    monkeypatch.setattr(langfuse, "refresh", lambda *args: called.append(args) or [])
+    started, sampled = [], []
+    monkeypatch.setattr(refresh_job, "spawn", started.append)
+    monkeypatch.setattr(langfuse, "refresh", lambda *args: sampled.append("langfuse") or [])
+    monkeypatch.setattr(grafana_alerts, "refresh", lambda *args: sampled.append("grafana") or ["fired ci_queue on sw"])
     monkeypatch.setattr(cli, "now_ms", lambda: 9000000)
     cli.run_tick(store, "sw", ledger, rt, FakeHerdr({}))
-    assert called == []
-    cli.run_tick(store, "sw", ledger, rt, FakeHerdr({}), scheduled=True)
-    assert called == [(store, "sw", 9000000)]
+    assert started == []
+    actions = cli.run_tick(store, "sw", ledger, rt, FakeHerdr({}), scheduled=True)
+    assert started == ["sw"]
+    assert sampled == [] and "fired ci_queue on sw" not in actions
+
+
+def test_the_tick_publishes_status_with_the_pull_request_view_it_built(env, monkeypatch):
+    from scripts.swarm import command_runner, ledger_events
+
+    store, ledger, rt = env
+    run("sw", "create", "--repo", "/repo")
+    built, published = [], []
+
+    def tick_view(*args):
+        built.append(lambda url: None)
+        return built[-1]
+
+    monkeypatch.setattr(ledger_events, "tick_view", tick_view)
+    monkeypatch.setattr(command_runner, "publish", lambda *args: published.append(args))
+    cli.run_tick(store, "sw", ledger, rt, FakeHerdr({}))
+    assert len(published) == 1
+    assert published[0][3] is built[-1]
 
 
 def test_timer_units_and_enable(tmp_path):
@@ -869,12 +997,11 @@ def test_timer_units_and_enable(tmp_path):
     ok = timer.ensure(
         "/bin/agentihooks", tmp_path, run=lambda argv, **kw: calls.append(argv) or subprocess.CompletedProcess(argv, 0)
     )
-    assert ok and (tmp_path / "agentihooks-swarm.timer").exists()
-    service = (tmp_path / "agentihooks-swarm.service").read_text()
-    assert 'ExecStart="/bin/agentihooks" swarm tick' in service
-    assert "Environment=PATH=%h/.local/bin" in service and "EnvironmentFile=-%h/.agentihooks/.env" in service
-    assert "KillMode=process" in service
-    assert calls[-1] == ["systemctl", "--user", "enable", "--now", "agentihooks-swarm.timer"]
+    assert ok and (tmp_path / "agentihooks-swarm-waits.timer").exists()
+    assert not (tmp_path / "agentihooks-swarm.timer").exists()
+    assert not (tmp_path / "agentihooks-swarm.service").exists()
+    assert ["systemctl", "--user", "disable", "--now", "agentihooks-swarm.timer"] not in calls
+    assert calls[-1] == ["systemctl", "--user", "enable", "--now", "agentihooks-swarm-waits.timer"]
 
 
 def test_timer_ensure_also_runs_the_inbox_waker_service(tmp_path):
@@ -924,7 +1051,7 @@ def test_timer_from_a_scratch_copy_leaves_the_shared_units_alone(shared_units, t
     assert timer.ensure("/scratch/bin/agentihooks", shared, run=run) is False
 
     assert {path.name: path.read_text() for path in shared.iterdir()} == before
-    assert 'ExecStart="/installed/bin/agentihooks" swarm tick' in before["agentihooks-swarm.service"]
+    assert 'ExecStart="/installed/bin/agentihooks" swarm waker' in before["agentihooks-inbox-waker.service"]
     assert calls == []
     refusal = (
         f"this run comes from {scratch}, not the installed agentihooks at {installed}, "
@@ -934,7 +1061,10 @@ def test_timer_from_a_scratch_copy_leaves_the_shared_units_alone(shared_units, t
 
     proof_dir = tmp_path / "proof-units"
     assert timer.ensure("/scratch/bin/agentihooks", proof_dir, run=run)
-    assert 'ExecStart="/scratch/bin/agentihooks" swarm tick' in (proof_dir / "agentihooks-swarm.service").read_text()
+    assert (
+        'ExecStart="/scratch/bin/agentihooks" swarm waker'
+        in (proof_dir / "agentihooks-inbox-waker.service").read_text()
+    )
 
 
 def test_timer_from_the_installed_agentihooks_writes_the_shared_units(shared_units):
@@ -946,7 +1076,7 @@ def test_timer_from_the_installed_agentihooks_writes_the_shared_units(shared_uni
     assert (
         'ExecStart="/installed/bin/agentihooks" swarm waker' in (shared / "agentihooks-inbox-waker.service").read_text()
     )
-    assert calls[-1] == ["systemctl", "--user", "enable", "--now", "agentihooks-swarm.timer"]
+    assert calls[-1] == ["systemctl", "--user", "enable", "--now", "agentihooks-swarm-waits.timer"]
 
 
 def test_main_runs_the_inbox_waker_and_renames_without_a_slug(monkeypatch):
@@ -958,25 +1088,23 @@ def test_main_runs_the_inbox_waker_and_renames_without_a_slug(monkeypatch):
     assert ran == [("waker", "store", {}), ("rename", "store", {})]
 
 
-def test_timer_ensure_also_runs_the_alert_intake_service(tmp_path):
+def test_timer_ensure_retires_the_alert_intake_service(tmp_path):
     calls = []
-    timer.ensure(
-        "/bin/agentihooks",
-        tmp_path,
-        run=lambda argv, **kw: calls.append((argv, kw)) or subprocess.CompletedProcess(argv, 0),
-    )
-    assert (tmp_path / "agentihooks-alert-intake.service").read_text() == (
-        "[Unit]\nDescription=agentihooks swarm alert intake for Grafana\n\n"
-        "[Service]\nType=simple\nEnvironment=PYTHONUNBUFFERED=1\n"
-        "Environment=PATH=%h/.local/bin:%h/.cargo/bin:/usr/local/bin:/usr/bin:/bin\n"
-        "EnvironmentFile=-%h/.agentihooks/.env\n"
-        'ExecStart="/bin/agentihooks" swarm alerts\n'
-        "Restart=on-failure\nRestartSec=5\n\n"
-        "[Install]\nWantedBy=default.target\n"
-    )
-    enable = ["systemctl", "--user", "enable", "--now", "agentihooks-alert-intake.service"]
-    assert (enable, {"capture_output": True, "text": True, "timeout": 30}) in calls
-    assert calls[-1][0] == ["systemctl", "--user", "enable", "--now", "agentihooks-swarm.timer"]
+    leftover = tmp_path / "agentihooks-alert-intake.service"
+    leftover.write_text("[Service]\nExecStart=agentihooks swarm alerts\n")
+    run = lambda argv, **kw: calls.append((argv, kw)) or subprocess.CompletedProcess(argv, 0)  # noqa: E731
+    timer.ensure("/bin/agentihooks", tmp_path, run=run)
+    assert not leftover.exists()
+    assert "agentihooks-alert-intake.service" not in timer.units("/bin/agentihooks")
+    disable = ["systemctl", "--user", "disable", "--now", "agentihooks-alert-intake.service"]
+    kw = {"capture_output": True, "text": True, "timeout": 30, "check": False}
+    argvs = [argv for argv, _ in calls]
+    assert calls[0] == (disable, kw)
+    assert argvs[1] == ["systemctl", "--user", "daemon-reload"]
+    assert not [argv for argv in argvs[1:] if "agentihooks-alert-intake.service" in argv]
+    calls.clear()
+    timer.ensure("/bin/agentihooks", tmp_path, run=run)
+    assert [argv for argv, _ in calls if argv[2] in ("disable", "daemon-reload")] == []
 
 
 def test_timer_reconcile_installs_a_newly_added_service_and_leaves_current_units_alone(tmp_path, monkeypatch):
@@ -992,28 +1120,42 @@ def test_timer_reconcile_installs_a_newly_added_service_and_leaves_current_units
     assert timer.ensure("/bin/agentihooks", tmp_path, run=run)
     calls.clear()
     assert timer.reconcile("/bin/agentihooks", tmp_path, run=run)
-    names = ["agentihooks-inbox-waker.service", "agentihooks-alert-intake.service", "agentihooks-swarm.timer"]
+    names = [
+        "agentihooks-inbox-waker.service",
+        "agentihooks-quota-prober.service",
+        "agentihooks-tick-watch.service",
+        "agentihooks-swarm-waits.timer",
+    ]
     assert calls == [(["systemctl", "--user", "is-enabled", "--quiet", name], kw) for name in names]
 
     calls.clear()
     failing.add("is-enabled")
     assert timer.reconcile("/bin/agentihooks", tmp_path, run=run)
-    assert [call[0][2] for call in calls] == ["is-enabled", "enable", "enable", "enable"]
+    assert [call[0][2] for call in calls] == ["is-enabled", "enable", "enable", "enable", "enable"]
 
     calls.clear()
     failing.clear()
     failing.add(names[1])
     assert timer.reconcile("/bin/agentihooks", tmp_path, run=run) is False
-    assert [call[0][2] for call in calls] == ["is-enabled", "is-enabled", "enable", "enable", "enable"]
+    assert [call[0][2] for call in calls] == ["is-enabled", "is-enabled", *["enable"] * 4]
     failing.clear()
 
     calls.clear()
-    (tmp_path / "agentihooks-alert-intake.service").unlink()
+    (tmp_path / "agentihooks-quota-prober.service").unlink()
     assert timer.reconcile("/bin/agentihooks", tmp_path, run=run)
-    assert (tmp_path / "agentihooks-alert-intake.service").read_text() == timer.units("/bin/agentihooks")[
-        "agentihooks-alert-intake.service"
+    assert (tmp_path / "agentihooks-quota-prober.service").read_text() == timer.units("/bin/agentihooks")[
+        "agentihooks-quota-prober.service"
     ]
     assert calls[0] == (["systemctl", "--user", "daemon-reload"], {**kw, "check": False})
+
+    calls.clear()
+    (tmp_path / "agentihooks-alert-intake.service").write_text("[Service]\n")
+    assert timer.reconcile("/bin/agentihooks", tmp_path, run=run)
+    assert not (tmp_path / "agentihooks-alert-intake.service").exists()
+    assert calls[0] == (
+        ["systemctl", "--user", "disable", "--now", "agentihooks-alert-intake.service"],
+        {**kw, "check": False},
+    )
 
     original = timer.units
     added = "[Unit]\nDescription=a service merged while the swarm runs\n"
@@ -1024,9 +1166,10 @@ def test_timer_reconcile_installs_a_newly_added_service_and_leaves_current_units
     assert calls == [
         (["systemctl", "--user", "daemon-reload"], {**kw, "check": False}),
         enable("agentihooks-inbox-waker.service"),
-        enable("agentihooks-alert-intake.service"),
+        enable("agentihooks-quota-prober.service"),
+        enable("agentihooks-tick-watch.service"),
         enable("agentihooks-new-intake.service"),
-        enable("agentihooks-swarm.timer"),
+        enable("agentihooks-swarm-waits.timer"),
     ]
 
 
@@ -1034,7 +1177,7 @@ def test_the_host_tick_reconciles_the_user_services_once_per_pass(monkeypatch):
     monkeypatch.setattr(timer, "entry_point", lambda: "/installed/bin/agentihooks")
     store = _tick_all(monkeypatch, lambda store, slug: [], ["a", "b"])
     assert store.reconciled == ["/installed/bin/agentihooks"]
-    assert _tick_all(monkeypatch, lambda store, slug: [], []).reconciled == []
+    assert _tick_all(monkeypatch, lambda store, slug: [], []).reconciled == ["/installed/bin/agentihooks"]
 
 
 def test_a_failed_service_install_warns_and_lets_the_tick_go_on(monkeypatch, capsys):
@@ -1057,26 +1200,6 @@ def test_a_failed_service_install_warns_and_lets_the_tick_go_on(monkeypatch, cap
         f"{warning}: Command '['systemctl']' timed out after 30 seconds",
         f"{warning}: read only",
     ]
-
-
-def test_main_runs_the_alert_intake_without_a_slug(monkeypatch):
-    ran = []
-    monkeypatch.setattr(cli, "connect", lambda: "store")
-    monkeypatch.setattr(cli, "cmd_alerts", lambda store, args: ran.append((store, vars(args))))
-    assert cli.main(["alerts"]) == 0
-    assert ran == [("store", {})]
-
-
-def test_the_alerts_command_serves_the_intake_with_the_swarm_store_and_clock(monkeypatch):
-    from types import SimpleNamespace
-
-    from scripts.swarm import alert_intake
-
-    ran = []
-    monkeypatch.setenv("AGENTIHOOKS_ALERT_INTAKE_PORT", "9002")
-    monkeypatch.setattr(alert_intake, "serve", lambda redis, settings, clock: ran.append((redis, settings, clock)))
-    cli.cmd_alerts(SimpleNamespace(redis="redis"), None)
-    assert ran == [("redis", alert_intake.Settings("0.0.0.0", 9002, None, "", "", ""), cli.now_ms)]
 
 
 def test_the_waker_command_runs_the_waker_with_the_swarm_clock(monkeypatch):
@@ -1196,7 +1319,7 @@ def test_runtime_retire_reports_a_refused_end_and_closes_no_pane(tmp_path):
     from scripts.swarm.reaper import Outcome
 
     closed = []
-    rt = runtime.HerdrRuntime(home=tmp_path, herdr=lambda args: closed.append(args) or {})
+    rt = runtime.HerdrRuntime(home=tmp_path, herdr=lambda args: args[0] == "pane" and closed.append(args) or {})
     rt.end = lambda name, pid, homes, start=0: Outcome((), 4242, "survived SIGKILL: 4242")
     agent = AgentRecord("engineer@a1b2c3-0001", "eng", "t1", pane_id="w3:p1")
     assert rt.retire(agent) is False and closed == []
@@ -1245,6 +1368,7 @@ def test_runtime_reaps_every_session_holding_a_stray_name(tmp_path, monkeypatch)
 
     held = [SimpleNamespace(name=n, process=SimpleNamespace(pid=p)) for n, p in (("x@a", 5), ("y@b", 6), ("x@a", 7))]
     monkeypatch.setattr(terminate_agent, "sessions", lambda: held)
+    monkeypatch.setattr(terminate_agent, "agent_environ", lambda pid, keys: ("x@a" if pid in {5, 7} else "y@b",))
     reaped = []
     rt = runtime.HerdrRuntime(home=tmp_path)
     rt.reap = lambda pids: reaped.append(pids) or Outcome(tuple(pids))
@@ -1469,17 +1593,17 @@ def test_a_tick_with_a_refused_page_post_still_runs_every_other_pass(env, monkey
     run("sw", "create", "--repo", "/repo")
     run("sw", "start")
 
-    def refuse(slug, text, by=None, op_id=""):
+    def refuse(slug, text, by=None, op_id="", reply_to=""):
         raise SwarmError("ledger sw refused: chat refused: clock time '18:45'")
 
     ledger.relay = refuse
     ran = []
-    for module, name in ((cli.ledger_events, "event_pass"), (cli.phases, "phase_pass"), (cli.wake, "wake_pass")):
+    for module, name in ((cli.ledger_events, "event_pass"), (cli.phases, "phase_pass"), (cli.wake, "maintenance")):
         real = getattr(module, name)
         monkeypatch.setattr(module, name, lambda *a, _n=name, _r=real: ran.append(_n) or _r(*a))
     item = InboxStore(store.redis).send("engineer@a1b2c3-0001", "operator", "the job finished at 18:45")
     cli.run_tick(store, "sw")
-    assert ran == ["phase_pass", "event_pass", "wake_pass"]
+    assert ran == ["phase_pass", "event_pass", "maintenance"]
     assert InboxStore(store.redis).get(item.id).state == "cancelled"
 
 
@@ -1489,7 +1613,7 @@ def test_agent_prompt_starts_by_reading_the_ledger_json(monkeypatch):
     monkeypatch.delenv("LEDGER_DIR")
 
     text = prompt.build("sw", "/repo", "eng", "engineer@a1b2c3-0001", {"id": "t1", "title": "x"})
-    assert text.index("agentihooks ledger --slug sw show") < text.index("Work it end to end")
+    assert text.index("agentihooks ledger --slug sw get tasks/t1") < text.index("Work it end to end")
 
 
 def test_status_json_gives_every_agent_a_status_and_its_model(env, capsys):
@@ -2006,7 +2130,6 @@ def test_master_prompt_runs_the_swarm_and_never_codes():
         f"{led} task add",
         f"{led} time-left",
         f"{led} followup add",
-        "agentihooks swarm sw --as master@a1b2c3-0002 say --to operator",
         "agentihooks msg reply",
         "--fyi",
         "agentihooks swarm sw --as master@a1b2c3-0002 send-message",
@@ -2023,12 +2146,11 @@ def test_master_prompt_runs_the_swarm_and_never_codes():
         "and the operator's environment with him through the agentihooks commands and tools. You never edit code "
         "or config files in a repository, commit, merge or claim a task: engineers do that.\n"
     ) in text
-    assert "wt.sh new" not in text and "done --pr" not in text
+    assert "wt.sh new" not in text and "done --pr" not in text and "say --to operator" not in text
 
 
 def test_the_tick_wakes_an_idle_pane_holding_a_pending_inbox_item(env):
     from scripts.inbox.store import InboxStore
-    from scripts.inbox.wake import WAKE_TEXT
 
     store, ledger, rt = env
     run("sw", "create", "--repo", "/repo")
@@ -2037,8 +2159,8 @@ def test_the_tick_wakes_an_idle_pane_holding_a_pending_inbox_item(env):
     item = InboxStore(store.redis).send("operator", "engineer@a1b2c3-0001", "look at the failing check")
     herdr = FakeHerdr({"p1": "idle"})
     actions = cli.run_tick(store, "sw", ledger, rt, herdr)
-    assert herdr.prompts == [("p1", WAKE_TEXT)]
-    assert f"woke engineer@a1b2c3-0001 for message {item.id}" in actions
+    assert herdr.prompts == []
+    assert f"woke engineer@a1b2c3-0001 for message {item.id}" not in actions
 
 
 def test_the_tick_turns_an_engineer_follow_up_into_a_master_inbox_item(env):
@@ -2208,6 +2330,34 @@ def test_the_operator_may_give_a_verdict_and_a_worker_may_not(env, capsys, monke
     assert run("sw", "--as", "operator", "verdict", "idle-with-claim/engineer@a1b2c3-0001", "resolved") == 0
 
 
+@pytest.mark.parametrize(
+    ("session", "named", "by"),
+    [
+        ({"AGENTIHOOKS_AGENT_NAME": "master@unregistered-0001"}, "operator", None),
+        ({"AGENTIHOOKS_AGENT_NAME": "master@unregistered-0001"}, "", None),
+        ({"AGENTIHOOKS_SWARM": "sw"}, "", None),
+        ({}, "master@a1b2c3-0001", "master@a1b2c3-0001"),
+        ({"AGENTIHOOKS_AGENT_NAME": "master@a1b2c3-0001"}, "operator", "master@a1b2c3-0001"),
+        ({"AGENTIHOOKS_AGENT_NAME": "operator"}, "operator", "operator"),
+        ({}, "", "operator"),
+    ],
+)
+def test_only_a_registered_master_or_the_operator_session_gives_a_verdict(
+    env, capsys, monkeypatch, tmp_path, session, named, by
+):
+    _idle_finding(env, monkeypatch, tmp_path)
+    _findings(capsys)
+    for key, value in session.items():
+        monkeypatch.setenv(key, value)
+    finding = "idle-with-claim/engineer@a1b2c3-0001"
+    named_args = ["--as", named] if named else []
+    assert run("sw", *named_args, "verdict", finding, "resolved") == (1 if by is None else 0)
+    if by is None:
+        assert capsys.readouterr().err == "swarm: only the master or the operator gives a finding a verdict\n"
+    kept = cli.verdict_store(env[0], "sw")
+    assert (json.loads(kept.redis.hget(kept.key, finding)).get("verdict") or {}).get("by") == by
+
+
 def test_status_skips_idle_with_claim_while_the_pull_request_waits_on_checks(env, capsys, monkeypatch, tmp_path):
     store, ledger, _ = env
     _idle_finding(env, monkeypatch, tmp_path)
@@ -2344,7 +2494,7 @@ def test_status_shows_each_agent_conversation_id_or_a_dash(env, capsys):
     env[2].live.update({"engineer@a1b2c3-0001", "engineer@a1b2c3-0002"})
     run("sw", "status")
     lines = {line.split("\t")[0]: line.split("\t") for line in capsys.readouterr().out.splitlines() if "\t" in line}
-    assert lines["engineer@a1b2c3-0001"][-5] == "5c90d80c" and lines["engineer@a1b2c3-0002"][-5] == "-"
+    assert lines["engineer@a1b2c3-0001"][-6] == "5c90d80c" and lines["engineer@a1b2c3-0002"][-6] == "-"
     run("sw", "status", "--json")
     agents = {a["name"]: a for a in json.loads(capsys.readouterr().out.splitlines()[-1])["agents"]}
     assert (agents["engineer@a1b2c3-0001"]["conversation_id"], agents["engineer@a1b2c3-0002"]["conversation_id"]) == (
@@ -2422,7 +2572,7 @@ def test_restore_decision_hands_resume_the_routed_runtime_the_clock_and_the_ledg
 
 @pytest.mark.parametrize("command", ["create", "start", "url"])
 def test_create_start_and_url_end_with_the_ledger_page_line(env, capsys, monkeypatch, command):
-    monkeypatch.setattr(cli.ledger_link, "serving", lambda: str(cli.ledger_link.folder()))
+    monkeypatch.setattr(cli.ledger_link, "serving", lambda **kw: str(cli.ledger_link.folder()))
     if command != "create":
         run("sw", "create", "--repo", "/repo")
         capsys.readouterr()
@@ -2458,7 +2608,7 @@ def _traced(env, monkeypatch, tmp_path, plan, *p_yes):
 
     store, ledger, _ = env
     ledger.followups = []
-    ledger.followup = lambda slug, text: ledger.followups.append((slug, text))
+    ledger.followup_once = lambda slug, text, by, op_id: ledger.followups.append((slug, text, by)) or True
     ledger.phases = [{"id": "p1", "title": "Build", "description": "Build the doghouse."}]
     ledger.rows["t1"].update(phase="p1", title="Doghouse", description="A house for the dog.")
     asked = {f"piece_{i}": Answer(type="noul", noul=p) for i, p in enumerate(p_yes)}
@@ -2486,7 +2636,7 @@ def test_trace_plan_traces_the_callers_task_and_files_cut_pieces(env, capsys, mo
     assert (report["task"], report["verdict"], report["cut"]) == ("t1", "pass", ["a generator"])
     assert seen[0]["task intent"] == "A house for the dog." and seen[0]["phase intent"] == "Build the doghouse."
     assert seen[0]["project intent"] == "Project intent"
-    assert ledger.followups == [("sw", "Cut from the plan of task t1: a generator")]
+    assert ledger.followups == [("sw", "Cut from the plan: a generator", "engineer@a1b2c3-0001")]
     assert json.loads((folder / "plan-verdict.json").read_text())["verdict"] == "pass"
     assert ledger.rows["t1"]["state"] != "blocked"
 
@@ -2590,8 +2740,9 @@ def _tick_all(monkeypatch, run_tick, slugs, tick_seconds=0.05):
     monkeypatch.setattr(timer, "installed_refusal", lambda: "")
     monkeypatch.setattr(operator_env, "fill", lambda environ: filled.append(environ))
     monkeypatch.setattr(operator_env, "classifier", lambda environ: [])
+    monkeypatch.setattr(cli, "_tickable", lambda slug: True)
     monkeypatch.setattr(cli, "now_ms", lambda: 77)
-    monkeypatch.setattr(herdr_gc, "run", lambda environ, now, apply: swept.append((environ, now, apply)) or ["swept"])
+    monkeypatch.setattr(herdr_gc, "run", lambda env, now, act, **kw: swept.append((env, now, act, kw)) or ["swept"])
     counts = {}
 
     def bounded(store, slug, scheduled):
@@ -2605,10 +2756,16 @@ def _tick_all(monkeypatch, run_tick, slugs, tick_seconds=0.05):
     monkeypatch.setattr(cli, "run_tick", bounded)
     reconciled = []
     monkeypatch.setattr(timer, "reconcile", lambda binary: reconciled.append(binary) or True)
-    store = types.SimpleNamespace(slugs=lambda: slugs, reconciled=reconciled)
+    store = types.SimpleNamespace(
+        slugs=lambda: slugs,
+        reconciled=reconciled,
+        config=lambda slug: SwarmConfig(slug, "/repo", 0, 0),
+        redis=types.SimpleNamespace(hget=lambda *_: None),
+        key=lambda slug, tail: f"{slug}:{tail}",
+    )
     cli.cmd_tick(store, None)
     assert filled == [os.environ]
-    assert swept == [(dict(os.environ), 77, True)]
+    assert swept == [(dict(os.environ), 77, True, {"swarm_only": True})]
     return store
 
 
@@ -2627,7 +2784,7 @@ def test_the_host_tick_refuses_a_controller_tick_setting(monkeypatch):
         cli.cmd_tick(types.SimpleNamespace(slugs=lambda: ["sw"]), None)
     assert str(error.value) == (
         "the tick refused to run: AGENTIHOOKS_CONTROLLER_TICK_SECONDS is for controller installs, "
-        "and the host timer ticks every 60 seconds"
+        "and the host scheduler ticks every 60 seconds"
     )
     assert ticked == []
 
@@ -2810,19 +2967,6 @@ def test_set_refuses_bad_scaling_settings(env, capsys, pair, reason):
     assert run("sw", "set", pair) == 1
     assert capsys.readouterr().err.strip() == f"swarm: {reason}"
     assert store.config("sw") == before
-
-
-def test_set_stores_the_swarm_api_address_and_clears_it(env, capsys):
-    store, _, _ = env
-    run("sw", "create", "--repo", "/repo")
-    assert store.config("sw").api_url == ""
-    assert run("sw", "set", "api-url=https://swarm.example.test:8443") == 0
-    assert store.config("sw").api_url == "https://swarm.example.test:8443"
-    assert json.loads(capsys.readouterr().out.splitlines()[-1])["api_url"] == "https://swarm.example.test:8443"
-    assert run("sw", "set", "api-url=http://swarm-api.agentihooks-swarm.svc:8780") == 0
-    assert store.config("sw").api_url == "http://swarm-api.agentihooks-swarm.svc:8780"
-    assert run("sw", "set", "api-url=") == 0
-    assert store.config("sw").api_url == ""
 
 
 @pytest.mark.parametrize(

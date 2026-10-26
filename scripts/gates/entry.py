@@ -15,12 +15,16 @@ from scripts.gates.build import BuildGate
 from scripts.gates.claim_stop import ClaimStop
 from scripts.gates.identity import PinnedIdentity
 from scripts.gates.intent import IntentGate
+from scripts.gates.node_caps import NodeCaps
+from scripts.gates.one_push import OnePush
 from scripts.gates.placement import PlacementGate
 from scripts.gates.prompts import PromptGuard
 from scripts.gates.push_stop import PushStop
 from scripts.gates.quiet import QuietClaim
 from scripts.gates.reruns import RerunBudget
+from scripts.gates.sign_ins import SignIns
 from scripts.gates.subagents import SubagentBudget
+from scripts.gates.terminations import Terminations
 from scripts.gates.verdicts import Verdicts
 from scripts.gates.watch import WatchBudget
 
@@ -38,9 +42,10 @@ GATES = {
         ClaimStop(),
         PushStop(),
         QuietClaim(),
+        OnePush(),
     )
 }
-HOST_GATES = {gate.name: gate for gate in (PlacementGate(), PromptGuard())}
+HOST_GATES = {gate.name: gate for gate in (PlacementGate(), PromptGuard(), NodeCaps(), Terminations(), SignIns())}
 
 
 def main(argv=None, stdin=None, environ=None, home=None):

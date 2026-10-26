@@ -3,6 +3,7 @@ when that launch fails, promote one live engineer whose only purpose is restorin
 
 import json
 import os
+from dataclasses import replace
 
 from scripts.inbox.seats import seat_address
 from scripts.inbox.store import InboxStore
@@ -15,17 +16,18 @@ SENDER = "swarm"
 FORCED = "master down {minutes} minutes, forced a master launch"
 NO_HOOK = "the forced master launch reported no hook within two minutes"
 NO_LAUNCH = "no master launched"
+SUSPECT = "suspect"
 PROMPT = (
     "PROMOTED: swarm {slug} has had no live master for {minutes} minutes and the forced master launch failed: "
     "{reason}. The exact launch error: {error}. This replaces any master down notice you were sent. You stay {name} "
     "on task {task}, but until a master binds your only purpose is, in this order: "
     "1. Bring the master back as soon as possible. The tick forces a new master launch every {minutes} minutes; read "
-    "why it fails with agentihooks swarm {slug} status and journalctl --user -u agentihooks-swarm.service. "
+    "why it fails with agentihooks swarm {slug} status and journalctl --user _SYSTEMD_USER_UNIT=agentihooks-swarm.service + SYSLOG_IDENTIFIER=agentihooks-swarm. "
     "2. Fix the causes of the outage right away in code: find where that error is raised and fix it through your own "
     "pull request into dev, never as follow ups. Once it merges and wt.sh done syncs local dev, the next forced "
     "launch runs the fixed code, or start one at once with agentihooks swarm {slug} master up --new. "
-    "3. Throughout, tell the swarm and the operator what failed and what you are doing, with agentihooks swarm "
-    '{slug} say "<text>" and agentihooks swarm {slug} say --to eng "<text>". '
+    "3. Throughout, tell the swarm what failed and what you are doing, with agentihooks swarm "
+    '{slug} say --to eng "<text>"; never write to the operator first. '
     "You do not act as master: never answer chat as master, write tasks or steer the swarm. "
     "The tick ends this promotion when a real master binds and tells you; then return to task {task}."
 )
@@ -73,10 +75,13 @@ def run(slug, config, store, ledger, runtime, now_ms, launch) -> list[str]:
     """launch runs the tick's own master launch and returns its actions."""
     state, minutes = read(store, slug), down_minutes(os.environ)
     forcing = bool(state) and config.state != "stopping" and _due(state, now_ms, minutes)
+    finished = _finish_dead(store, slug) if forcing else []
     if forcing and not _starting(store, slug):
-        store.redis.delete(store.key(slug, "master-start"))
+        master_start.clear_unalerted(store, slug)
     launched = launch()
-    actions = [FORCED.format(minutes=_shown(minutes)), *launched] if forcing else launched
+    if forcing and not launched:
+        launched = [_launch_refusal(store, slug)]
+    actions = [FORCED.format(minutes=_shown(minutes)), *finished, *launched] if forcing else launched
     if config.state == "stopping":
         master_alarm.drop(store, slug)
         return actions + _stop(slug, store, ledger, state, now_ms)
@@ -87,10 +92,8 @@ def run(slug, config, store, ledger, runtime, now_ms, launch) -> list[str]:
         _save(store, slug, {"since": now_ms})
         return actions
     if forcing:
-        state = {**state, "forced_at": now_ms}
-        if not _starting(store, slug):
-            state["failure"] = "; ".join(launched) or NO_LAUNCH
-    elif _starting(store, slug) and now_ms - state.get("forced_at", now_ms) >= master_start.DEADLINE_MS:
+        state = _forced(store, slug, state, now_ms, launched)
+    elif _hookless(store, slug, state, now_ms):
         state["failure"] = NO_HOOK
     if state.get("failure"):
         state, promoted_actions = _promote(slug, store, ledger, runtime, state, minutes, now_ms)
@@ -117,6 +120,44 @@ def _masters(store, slug):
 
 def _starting(store, slug):
     return bool(_masters(store, slug))
+
+
+def _hookless(store, slug, state, now_ms):
+    leads = _masters(store, slug)
+    if not leads:
+        return False
+    started = state.get("started_at", state.get("forced_at", now_ms))
+    return now_ms - started >= max(map(master_start.deadline_ms, leads))
+
+
+def _forced(store, slug, state, now_ms, launched):
+    """A forced launch still starting keeps its first start, because each later forced tick moves forced_at."""
+    if _starting(store, slug):
+        return {"started_at": now_ms, **state, "forced_at": now_ms}
+    state = {key: value for key, value in state.items() if key != "started_at"}
+    return {**state, "forced_at": now_ms, "failure": "; ".join(launched) or NO_LAUNCH}
+
+
+def _finish_dead(store, slug):
+    """A suspect lead has not answered through the whole down window, so the forced launch may replace it."""
+    actions = []
+    for lead in _masters(store, slug):
+        if lead.state == SUSPECT:
+            store.put_agent(slug, replace(lead, state="finished"))
+            actions.append(f"finished dead lead {lead.name} ({SUSPECT})")
+    return actions
+
+
+def _launch_refusal(store, slug):
+    if leads := _masters(store, slug):
+        names = ", ".join(f"{a.name} ({a.state})" for a in leads)
+        return f"master launch refused: unfinished lead {names}"
+    pending = master_start.read(store, slug)
+    if name := pending.get("name"):
+        return f"master launch refused: startup pending for {name}"
+    if pending.get("alerted"):
+        return "master launch refused: startup retry backoff pending"
+    return NO_LAUNCH
 
 
 def _bound(store, slug, runtime):

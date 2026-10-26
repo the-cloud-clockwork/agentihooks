@@ -5,7 +5,7 @@ A fact the runtime looked for and could not find is "unknown"; one it found abse
 
 import json
 import subprocess
-from collections.abc import Collection
+from collections.abc import Collection, Mapping
 from datetime import datetime, timezone
 
 from scripts.inbox.store import CLOSED, InboxStore
@@ -99,12 +99,19 @@ def continuation(worktree, branch, run):
     return {"remote_branch": remote, "remote_head": head, "continue_from": "fresh", "fresh_reason": why}
 
 
-def reclaim(repo: str, lives: list[str], recorded: str, run=subprocess.run, forbidden: Collection[str] = ()) -> dict:
+def reclaim(
+    repo: str,
+    lives: list[str],
+    recorded: str,
+    run=subprocess.run,
+    forbidden: Collection[str] = (),
+    heads: Mapping[str, str] | None = None,
+) -> dict:
     checked = [recorded] if recorded else list(dict.fromkeys(plain(name) for name in lives))
     checked = [branch for branch in checked if branch not in forbidden]
     unread = []
     for branch in checked:
-        head = _remote_head(repo, branch, run)
+        head = _remote_head(repo, branch, run) if heads is None else heads.get(branch, NONE)
         if head == UNKNOWN:
             unread.append(branch)
         elif head != NONE:
@@ -144,6 +151,22 @@ def _remote_head(worktree, remote, run):
     return done.stdout.split()[0] if done.returncode == 0 else UNKNOWN
 
 
+def remote_heads(repo: str, run=subprocess.run) -> dict[str, str] | None:
+    argv = ["git", "-C", repo, "ls-remote", "--heads", "origin"]
+    try:
+        done = run(argv, capture_output=True, text=True, timeout=20)
+    except FAILED:
+        return None
+    if done.returncode != 0:
+        return None
+    heads = {}
+    for line in done.stdout.splitlines():
+        head, _, ref = line.partition("\t")
+        if ref.startswith("refs/heads/"):
+            heads[ref.removeprefix("refs/heads/")] = head
+    return heads
+
+
 def _pull_request(row, run):
     if row is None:
         return UNKNOWN
@@ -171,5 +194,5 @@ def _checks(rollup):
 
 
 def _open_items(store, agent):
-    items = InboxStore(store.redis).mailbox(agent.name)
+    items = [i for world in InboxStore(store.redis).worlds() for i in world.mailbox(agent.name)]
     return [{"id": i.id, "from": i.sender, "state": i.state} for i in items if i.state not in CLOSED]

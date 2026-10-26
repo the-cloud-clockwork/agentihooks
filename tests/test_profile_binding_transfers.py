@@ -30,7 +30,7 @@ def launching(tmp_path):
     return engine, config, task, saved, calls
 
 
-@pytest.mark.parametrize("key", ["profile", "harness", "model", "effort", "launch"])
+@pytest.mark.parametrize("key", ["profile", "harness", "launch"])
 def test_handoff_missing_original_choices_cannot_spawn(launching, key):
     engine, config, task, saved, calls = launching
     if key == "launch":
@@ -43,6 +43,15 @@ def test_handoff_missing_original_choices_cannot_spawn(launching, key):
         engine.spawn(config, "eng", "worker", task)
     assert error.value.status == "unsupported"
     assert not calls
+
+
+@pytest.mark.parametrize("key", ["model", "effort"])
+def test_handoff_missing_run_options_uses_defaults(launching, key):
+    engine, config, task, saved, calls = launching
+    saved.pop(key)
+    engine.spawn(config, "eng", "worker", task)
+    assert len(calls) == 1
+    assert calls[0][calls[0].index("--profile") + 1] == "qa"
 
 
 def test_handoff_rejects_unsupported_harness_and_router_substitution(launching):
@@ -234,7 +243,13 @@ def test_missing_live_validation_retires_the_named_process(tmp_path):
     engine = runtime.HerdrRuntime(home=tmp_path, run=run)
     config = SimpleNamespace(slug="proof", repo=str(tmp_path), autonomy="delegate", compact_limit=0)
     with pytest.raises(SpawnError, match="validation is missing"):
-        engine._launch(config, "eng", "task", "worker", ["init-agent", "--agent", "codex", "--profile", "engineer"])
+        engine._launch(
+            config,
+            "eng",
+            "task",
+            "worker",
+            ["init-agent", "--dir", "/repo", "--agent", "codex", "--profile", "engineer"],
+        )
     assert calls[-1][1:] == ["terminate-agent", "worker", "--force-shared"]
 
 

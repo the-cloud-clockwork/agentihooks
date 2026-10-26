@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 import pytest
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 
 EVIDENCE = Path(__file__).parents[1] / "evidence" / "SV2-LDG-03"
 PR = "https://github.com/the-cloud-clockwork/agentihooks/pull/1"

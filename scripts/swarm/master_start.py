@@ -6,13 +6,14 @@ from typing import TYPE_CHECKING
 
 from scripts.handoff import transfers
 from scripts.swarm import master_alarm, reaper
-from scripts.swarm.store import MASTER, RedisStore, SwarmConfig
+from scripts.swarm.store import MASTER, AgentRecord, RedisStore, SwarmConfig
 from scripts.swarm_v2 import masters as master_seats
 
 if TYPE_CHECKING:
     from scripts.swarm.tick import Ledger, Runtime
 
 DEADLINE_MS = 2 * 60 * 1000
+RETRY_MS = 5 * 60 * 1000
 NO_HOOK = "master {name} reported no hook within two minutes of its launch"
 
 
@@ -25,9 +26,37 @@ def save(store: RedisStore, slug: str, pending: dict) -> None:
     store.redis.set(store.key(slug, "master-start"), json.dumps(pending))
 
 
+def clear_unalerted(store: RedisStore, slug: str) -> None:
+    if not read(store, slug).get("alerted"):
+        store.redis.delete(store.key(slug, "master-start"))
+
+
 def begin(store: RedisStore, slug: str, name: str, task: dict, at: int) -> None:
     pending = read(store, slug)
-    save(store, slug, {"name": name, "task": task, "attempt": pending.get("attempt", 0) + 1, "at": at})
+    state = {"name": name, "task": task, "attempt": pending.get("attempt", 0) + 1, "at": at}
+    if pending.get("alerted"):
+        state["alerted"] = True
+    save(store, slug, state)
+
+
+def blocked(pending: dict, at: int) -> bool:
+    if pending.get("alerted"):
+        return at - pending["at"] < RETRY_MS
+    return bool(pending.get("name"))
+
+
+def deadline_ms(agent: AgentRecord) -> int:
+    """A deferred launch returns before its login, so its hook may come as late as the launch budget it carries."""
+    return max(DEADLINE_MS, agent.profile_decision.get("validation", {}).get("deadline_ms", DEADLINE_MS))
+
+
+def failed(store: RedisStore, slug: str, error: str, at: int) -> list[str]:
+    pending = read(store, slug)
+    repeated = pending.get("alerted") and master_alarm.read(store, slug).get("error") == error
+    master_alarm.failed(store, slug, error, at)
+    if pending.get("attempt") == 1:
+        save(store, slug, {**pending, "name": "", "retry": True})
+    return [] if repeated else [error]
 
 
 def observe(slug: str, config: SwarmConfig, store: RedisStore, ledger: Ledger, runtime: Runtime, at: int) -> list[str]:
@@ -50,7 +79,7 @@ def observe(slug: str, config: SwarmConfig, store: RedisStore, ledger: Ledger, r
         store.clear_handoff(slug, MASTER)
         store.redis.delete(store.key(slug, "master-start"))
         return []
-    if pending.get("alerted") or at - pending["at"] < DEADLINE_MS:
+    if (pending.get("alerted") and not agent) or at - pending["at"] < (deadline_ms(agent) if agent else DEADLINE_MS):
         return []
     if agent:
         master_alarm.failed(store, slug, NO_HOOK.format(name=agent.name), at)
@@ -64,12 +93,15 @@ def observe(slug: str, config: SwarmConfig, store: RedisStore, ledger: Ledger, r
     if agent:
         transfers.failed(store, slug, agent)
         store.drop_agent(slug, agent.name)
+    if pending.get("alerted"):
+        save(store, slug, {**pending, "at": at})
+        return []
     if pending["attempt"] == 1 and not pending.get("retry"):
         save(store, slug, {**pending, "name": "", "retry": True, "at": at})
         return [f"lost {agent.name}"] if agent else ["master launch failed, retrying once"]
-    save(store, slug, {**pending, "alerted": True})
+    save(store, slug, {**pending, "alerted": True, "at": at})
     ledger.notify(
         slug,
-        "The master reported no hook within two minutes on either launch. Automatic retry is exhausted; operator action is required. The original handoff is retained.",
+        "The master reported no hook within two minutes on either launch. The operator has been alerted; automatic retries continue every five minutes. The original handoff is retained.",
     )
     return ["master startup failed twice, raised to the operator"]

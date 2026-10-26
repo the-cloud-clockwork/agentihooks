@@ -4,32 +4,43 @@ from types import SimpleNamespace
 
 import pytest
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
+
+FIXTURE = Path(__file__).parents[1] / "fixtures/swarm/langfuse-summary.json"
 
 
-def test_recorded_turn_sample_yields_one_standing_finding_per_breaching_account():
+def test_recorded_long_turn_sample_without_errors_yields_no_finding():
     import fakeredis
 
     from scripts.swarm import langfuse
     from scripts.swarm.health import standing
     from scripts.swarm.langfuse_config import Limits
 
-    sample = json.loads((Path(__file__).parents[1] / "fixtures/swarm/langfuse-summary.json").read_text())
+    sample = json.loads(FIXTURE.read_text())
+    assert [row["turn_latency_ms"]["p95"] > 600000 for row in sample["summary"]["agents"]] == [True, False, True]
+    assert {row["error_rate"] for row in sample["summary"]["agents"]} == {0}
     bindings = [SimpleNamespace(**row) for row in sample["bindings"]]
     redis = fakeredis.FakeRedis(decode_responses=True)
-    limits = Limits()
-    langfuse.apply(redis, "rig-grade-swarm", sample["summary"], bindings, 2000000, limits)
+    assert langfuse.apply(redis, "rig-grade-swarm", sample["summary"], bindings, 2000000, Limits()) == 0
+    assert standing.read(redis, "rig-grade-swarm") == {}
+
+
+def test_error_breaches_yield_one_standing_finding_per_breaching_account():
+    from scripts.swarm import langfuse
+    from scripts.swarm.health import standing
+
+    redis, summary, bindings, limits = recorded_case()
+    assert langfuse.apply(redis, "rig-grade-swarm", summary, bindings, 2000000, limits) == 2
     rows = standing.read(redis, "rig-grade-swarm")
     assert set(rows) == {
         "langfuse_account_nestorcoltathotmail_com",
         "langfuse_account_nestor_coltatthecloudclockwork_com",
     }
-    assert "engineer@323133-1125" in rows["langfuse_account_nestorcoltathotmail_com"]["detail"]
-    assert "ncx5" in rows["langfuse_account_nestorcoltathotmail_com"]["detail"]
-    assert "719854" in rows["langfuse_account_nestorcoltathotmail_com"]["detail"]
-    assert "engineer@323133-1138" in rows["langfuse_account_nestor_coltatthecloudclockwork_com"]["detail"]
-    assert "t439" in rows["langfuse_account_nestor_coltatthecloudclockwork_com"]["detail"]
-    assert "600000" in rows["langfuse_account_nestorcoltathotmail_com"]["detail"]
+    hotmail = rows["langfuse_account_nestorcoltathotmail_com"]["detail"]
+    assert "agent engineer@323133-1125; task ncx5; error rate 0.36 fraction, threshold 0.2" in hotmail
+    clockwork = rows["langfuse_account_nestor_coltatthecloudclockwork_com"]["detail"]
+    assert "agent engineer@323133-1138; task t439; error rate 0.3 fraction, threshold 0.2" in clockwork
+    assert all("turn latency" not in row["detail"] for row in rows.values())
     assert len(standing.findings(redis, "rig-grade-swarm", 2000000)) == 2
 
 
@@ -61,10 +72,13 @@ def recorded_case():
 
     from scripts.swarm.langfuse_config import Limits
 
-    sample = json.loads((Path(__file__).parents[1] / "fixtures/swarm/langfuse-summary.json").read_text())
+    sample = json.loads(FIXTURE.read_text())
+    summary = sample["summary"]
+    summary["agents"][0].update(errors=119, error_rate=0.36)
+    summary["agents"][2].update(errors=74, error_rate=0.3)
     return (
         fakeredis.FakeRedis(decode_responses=True),
-        sample["summary"],
+        summary,
         [SimpleNamespace(**row) for row in sample["bindings"]],
         Limits(),
     )
@@ -121,7 +135,7 @@ def test_clean_recorded_sample_clears_only_langfuse_findings():
     assert set(standing.read(redis, "rig-grade-swarm")) == {"ci_budget"}
 
 
-def test_error_and_latency_breaches_share_one_account_finding_and_repeat_updates():
+def test_error_breaches_of_two_agents_share_one_account_finding_and_repeat_updates():
     from scripts.swarm import langfuse
     from scripts.swarm.health import standing
 
@@ -137,7 +151,8 @@ def test_error_and_latency_breaches_share_one_account_finding_and_repeat_updates
     assert row["value"] == 2
     assert row["threshold"] == 1
     assert "error rate 0.4 fraction, threshold 0.2" in row["detail"]
-    assert "turn latency p95" in row["detail"]
+    assert "error rate 0.36 fraction, threshold 0.2" in row["detail"]
+    assert "turn latency" not in row["detail"]
     assert "engineer@323133-1135" in row["detail"]
     assert "t414" in row["detail"]
     summary["window"]["toTimestamp"] = "2026-10-11T19:10:00Z"
@@ -181,42 +196,49 @@ def test_threshold_boundaries_and_minimum_sample_counts():
     redis, summary, bindings, limits = recorded_case()
     row = summary["agents"][0]
     summary["agents"] = [row]
-    row.update(observations=10, error_rate=0.2, turns=3, turn_latency_ms={"p95": 600000})
+    row.update(observations=10, error_rate=0.2, turns=50, turn_latency_ms={"p50": 3000000, "p95": 3000000})
     assert langfuse.apply(redis, "rig-grade-swarm", summary, bindings, 1, limits) == 0
-    row.update(observations=9, error_rate=0.9, turns=2, turn_latency_ms={"p95": 900000})
+    row.update(observations=9, error_rate=0.9)
     assert langfuse.apply(redis, "rig-grade-swarm", summary, bindings, 2, limits) == 0
-    row.update(observations=10, turns=3)
+    row.update(observations=10)
     assert langfuse.apply(redis, "rig-grade-swarm", summary, bindings, 3, limits) == 1
     assert len(standing.read(redis, "rig-grade-swarm")) == 1
 
 
-def test_unavailable_turn_latency_keeps_error_breaches_and_other_accounts():
-    from scripts.swarm import langfuse
-    from scripts.swarm.health import standing
-
-    redis, summary, bindings, limits = recorded_case()
-    langfuse.apply(redis, "rig-grade-swarm", summary, bindings, 2000000, limits)
-    summary["agents"][0]["turn_latency_ms"]["p95"] = None
-    summary["agents"][0]["error_rate"] = 0.4
-    assert langfuse.apply(redis, "rig-grade-swarm", summary, bindings, 2000001, limits) == 2
-    rows = standing.read(redis, "rig-grade-swarm")
-    assert "error rate 0.4" in rows["langfuse_account_nestorcoltathotmail_com"]["detail"]
-    assert "turn latency p95" in rows["langfuse_account_nestor_coltatthecloudclockwork_com"]["detail"]
-    summary["agents"][0]["error_rate"] = 0
-    before = rows["langfuse_account_nestorcoltathotmail_com"]
-    langfuse.apply(redis, "rig-grade-swarm", summary, bindings, 2000002, limits)
-    assert standing.read(redis, "rig-grade-swarm")["langfuse_account_nestorcoltathotmail_com"] == before
-
-
-def test_each_stage_breaches_at_its_minimum_count():
+def test_only_error_rate_breaches_whatever_the_turn_latency():
     from scripts.swarm.langfuse import breaches
 
     _, summary, _, limits = recorded_case()
     row = summary["agents"][0]
-    row.update(observations=limits.min_observations, error_rate=0.4, turns=0)
+    row.update(observations=limits.min_observations, error_rate=0.4, turns=0, turn_latency_ms={"p95": None})
     assert breaches(row, limits) == [("error rate", 0.4, limits.error_rate, "fraction")]
-    row.update(error_rate=0, turns=limits.min_turns, turn_latency_ms={"p95": 900000})
-    assert breaches(row, limits) == [("turn latency p95", 900000, limits.turn_latency_ms, "ms")]
+    row.update(error_rate=0, turns=100, turn_latency_ms={"p50": 9000000, "p95": 9000000})
+    assert breaches(row, limits) == []
+
+
+def test_missing_turn_latency_no_longer_holds_a_finding_open():
+    from scripts.swarm import langfuse
+    from scripts.swarm.health import standing
+
+    redis, summary, bindings, limits = recorded_case()
+    langfuse.apply(redis, "rig-grade-swarm", summary, bindings, 1, limits)
+    summary["agents"][0].update(error_rate=0, errors=0, turns=8, turn_latency_ms={"p50": None, "p95": None})
+    assert langfuse.apply(redis, "rig-grade-swarm", summary, bindings, 2, limits) == 1
+    assert set(standing.read(redis, "rig-grade-swarm")) == {"langfuse_account_nestor_coltatthecloudclockwork_com"}
+
+
+def test_long_turns_without_errors_clear_an_earlier_error_finding():
+    from scripts.swarm import langfuse
+    from scripts.swarm.health import standing
+
+    redis, summary, bindings, limits = recorded_case()
+    langfuse.apply(redis, "rig-grade-swarm", summary, bindings, 1, limits)
+    assert "langfuse_account_nestorcoltathotmail_com" in standing.read(redis, "rig-grade-swarm")
+    summary["agents"][0].update(
+        observations=331, error_rate=0, errors=0, turns=8, turn_latency_ms={"p50": 3000000, "p95": 3000000}
+    )
+    assert langfuse.apply(redis, "rig-grade-swarm", summary, bindings, 2, limits) == 1
+    assert set(standing.read(redis, "rig-grade-swarm")) == {"langfuse_account_nestor_coltatthecloudclockwork_com"}
 
 
 def test_account_evidence_retains_units_window_and_stage_numbers():
@@ -234,8 +256,7 @@ def test_account_evidence_retains_units_window_and_stage_numbers():
     assert finding["unit"] == "threshold ratio"
     assert finding["detail"] == (
         "account nestorcoltathotmail_com; window 2026-10-11T18:00:00Z to 2026-10-11T19:00:00Z; "
-        "agent engineer@323133-1125; task ncx5; error rate 0.4 fraction, threshold 0.2; "
-        "agent engineer@323133-1125; task ncx5; turn latency p95 900000 ms, threshold 600000"
+        "agent engineer@323133-1125; task ncx5; error rate 0.4 fraction, threshold 0.2"
     )
 
 
@@ -263,29 +284,6 @@ def test_foreign_swarm_summary_is_refused_before_findings_change():
         langfuse.apply(redis, "rig-grade-swarm", summary, bindings, 2, limits)
     assert str(error.value) == "Langfuse summary belongs to another swarm"
     assert standing.read(redis, "rig-grade-swarm") == before
-
-
-def test_unavailable_latency_at_minimum_turns_preserves_then_clean_reading_clears():
-    from scripts.swarm import langfuse
-    from scripts.swarm.health import standing
-
-    redis, summary, bindings, limits = recorded_case()
-    row = summary["agents"][0]
-    summary["agents"] = [row]
-    langfuse.apply(redis, "rig-grade-swarm", summary, bindings, 1, limits)
-    before = standing.read(redis, "rig-grade-swarm")
-    row.update(turns=limits.min_turns, turn_latency_ms={"p95": None})
-    langfuse.apply(redis, "rig-grade-swarm", summary, bindings, 2, limits)
-    assert standing.read(redis, "rig-grade-swarm") == before
-    row["turn_latency_ms"]["p95"] = limits.turn_latency_ms
-    langfuse.apply(redis, "rig-grade-swarm", summary, bindings, 3, limits)
-    assert standing.read(redis, "rig-grade-swarm") == {}
-    langfuse.apply(redis, "rig-grade-swarm", {**summary, "agents": []}, bindings, 4, limits)
-    row.update(turns=limits.min_turns - 1, turn_latency_ms={"p95": None}, error_rate=0.4)
-    langfuse.apply(redis, "rig-grade-swarm", summary, bindings, 5, limits)
-    row["error_rate"] = 0
-    langfuse.apply(redis, "rig-grade-swarm", summary, bindings, 6, limits)
-    assert standing.read(redis, "rig-grade-swarm") == {}
 
 
 def test_scheduled_breach_uses_execution_identity_and_persists_success_state(monkeypatch):

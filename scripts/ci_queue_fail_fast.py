@@ -1,34 +1,24 @@
-import argparse
-import json
-from pathlib import Path
+import re
+import subprocess
+
+from scripts.ci_queue_retry import FAILED_RESULT, STEP_EXITED, job_text, log_errors, runner_lost
 
 SELF = "queue-fail-fast"
-# Needs every graded job, so once it completes nothing graded can still fail.
-LAST = "stage-budget"
-FATAL = ("failure", "timed_out", "cancelled")
+EXITED = re.compile(r"##\[error\]" + STEP_EXITED.pattern)
 
 
-def failed(jobs: list[dict]) -> str | None:
-    return next((job["name"] for job in jobs if job["name"] != SELF and job.get("conclusion") in FATAL), None)
-
-
-def settled(jobs: list[dict]) -> bool:
-    return any(job["name"] == LAST and job["status"] == "completed" for job in jobs)
-
-
-def verdict(jobs: list[dict]) -> str:
-    if name := failed(jobs):
-        return f"failed={name}"
-    return "failed=" if settled(jobs) else "wait"
-
-
-def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("jobs", type=Path)
-    args = parser.parse_args(argv)
-    print(verdict([json.loads(line) for line in args.jobs.read_text().splitlines() if line]))
-    return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())
+def logged_loss(repo: str, job: dict, seen: dict[str, bool]) -> bool:
+    # A lost runner may leave no log or only an annotation; only a step that exited nonzero proves a real failure.
+    key = str(job["id"])
+    if key not in seen:
+        try:
+            errors = log_errors(repo, job["id"])
+        except subprocess.CalledProcessError:
+            try:
+                text = job_text(repo, job["id"], False)
+            except subprocess.CalledProcessError:
+                return True
+            return runner_lost(text) or not (FAILED_RESULT.search(text) or STEP_EXITED.search(text))
+        text = "\n".join(errors)
+        seen[key] = runner_lost(text) or not (FAILED_RESULT.search(text) or EXITED.search(text))
+    return seen[key]

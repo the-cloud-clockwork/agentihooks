@@ -11,7 +11,6 @@ from scripts.swarm.tick import Placed
 from tests.swarm.profile_fixture import validated
 from tests.swarm.test_cli import env, run  # noqa: F401
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
 ROLES = {"planner": "planner", "engineer": "engineer", "qa": "qa", "cicd": "cicd", "frontend": "engineer"}
 
 
@@ -239,7 +238,7 @@ def test_the_operator_launch_opens_claude_in_the_swarm_space_with_the_inbox_chan
         "--host",
         "herdr",
         "--workspace",
-        f"{tmp_path.name}-a1b2c3",
+        f"{tmp_path.name.replace('_', '-')}-a1b2c3",
         "--dir",
         str(tmp_path),
         "--name",
@@ -289,7 +288,8 @@ def test_the_planner_prompt_plans_with_the_operator_then_registers_the_plan_and_
         "You are planner@a1b2c3-0001, a planner profile agent the operator launched on swarm sw over the repo /repo "
         "with agentihooks swarm sw planner up. You hold no task and no lane slot, and the swarm never nudges or "
         "retires you. You answer to the operator in this pane: wait for his first message.",
-        f"Read the swarm ledger with {prompt.ledger_read('sw')} for context; change nothing on it until the "
+        "Read the relevant item through the ledger API with agentihooks ledger --slug sw get <item> "
+        "(tasks/<id>, phases/<id>, questions/<id> or priorities/<id>) for context; change nothing on it until the "
         "operator accepts a plan.",
         'Other sessions reach you as inbox messages: answer one with agentihooks msg reply <id> "<text>" and reach '
         'the master with agentihooks msg send master@sw "<text>".',
@@ -322,7 +322,8 @@ def test_another_role_works_with_the_operator_and_exits_when_he_says_so():
         "retires you. You answer to the operator in this pane: wait for his first message."
     )
     assert lines[1] == (
-        f"Read the swarm ledger with {prompt.ledger_read('sw')} for context; change nothing on it unless the "
+        "Read the relevant item through the ledger API with agentihooks ledger --slug sw get <item> "
+        "(tasks/<id>, phases/<id>, questions/<id> or priorities/<id>) for context; change nothing on it unless the "
         "operator asks."
     )
     assert lines[4:] == [

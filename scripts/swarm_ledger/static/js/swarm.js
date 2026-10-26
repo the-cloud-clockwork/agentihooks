@@ -4,16 +4,18 @@ import { readRouting, writeRouting, writeSwarm } from "./api.js";
 import { renderStats } from "./render.js";
 import { renderChatTo } from "./chat.js";
 import { appliedCaps, clearNoteError, renderControls, renderGates, settleCaps, showNote } from "./controls.js";
-import { firstPage, moreButton, wanted } from "./pages.js";
+import { firstPage, moreButton } from "./pages.js";
 import { doc, queue } from "./sync.js";
+import { tips } from "./state.js";
 import { snowflake, targetText } from "./freezes.js";
 import { agentActions, reconcile, settle, titlePause } from "./lifecycle.js";
+import { quotaCount, renderHives } from "./hives.js";
+import { agentCellTips, joinCell } from "./agent_cells.js";
+import { capacityShown, liveAgents, renderRoles } from "./roles.js";
+import { renderHandoffs, renderRecovery } from "./recovery.js";
 
 const LIVE_LANES = [["eng", "max_eng"], ["ci", "max_ci"], ["plan", "max_plan"]];
 const ROLES = ["master", "engineer", "planner", "qa", "cicd", "documentation"];
-const OVERLAY_CAP = 3;
-const VERDICTS = ["false-positive", "early-real", "established", "insufficient-evidence", "resolved"];
-const VERDICT_TEXT = { "false-positive": "FP", "early-real": "early real", established: "established", "insufficient-evidence": "insufficient", resolved: "resolved" };
 export let swarm = null;
 let swarmReadError = false;
 export let pending = "";
@@ -71,26 +73,26 @@ export function label(text, tone) {
   return h("span", { class: `lbl ${tone || String(text).replace(/\s+/g, "-")}`, text });
 }
 
-function idCell(text) {
+export function idCell(text) {
   return h("span", { class: "sw-id", title: text, text });
 }
 
-function cells(...values) {
+export function cells(...values) {
   return h("tr", {}, ...values.map((v) => (v && v.nodeType ? h("td", {}, v) : h("td", { text: v == null || v === "" ? "—" : String(v) }))));
 }
 
-function moreRow(key, total, noun, columns, again) {
+export function moreRow(key, total, noun, columns, again) {
   const cell = moreButton(key, total, noun, again, "td");
   if (cell) cell.colSpan = columns;
   return cell && h("tr", { class: "page-more" }, cell);
 }
 
-function withId(row, id) {
+export function withId(row, id) {
   row.id = id;
   return row;
 }
 
-function emptyRow(columns, text) {
+export function emptyRow(columns, text) {
   return h("tr", { class: "sw-empty" }, h("td", { colspan: String(columns), text }));
 }
 
@@ -99,7 +101,7 @@ function openFindings(sw) {
 }
 
 function liveCaps(sw) {
-  const live = (lane) => (sw.agents || []).filter((a) => a.lane === lane && a.state !== "finished").length;
+  const live = (lane) => liveAgents(sw).filter((a) => a.lane === lane).length;
   return LIVE_LANES.map(([lane, key]) => `${lane} ${live(lane)}/${sw.config[key] ?? 0}`);
 }
 
@@ -137,7 +139,7 @@ function agentRows(sw, now) {
   const agents = [...(sw.agents || [])].sort((x, y) => (y.lane === "master") - (x.lane === "master"));
   return agents.map((a) => {
     const master = a.lane === "master", offer = sw.lifecycle && sw.lifecycle.agents && sw.lifecycle.agents[a.name];
-    return { name: a.name, master, gates: a.gates || [], lane: master ? "—" : a.lane, profile: a.profile || "—", overlays: (a.overlays || []).join(" · ") || "—", model: modelText(a) || "—", transport: a.capabilities || null, task: master ? "" : a.task || "",
+    return { name: a.name, master, hiveJoin: a.hive_join || null, gates: a.gates || [], lane: master ? "—" : a.lane, profile: a.profile || "—", overlays: (a.overlays || []).join(" · ") || "—", model: modelText(a) || "—", transport: a.capabilities || null, task: master ? "" : a.task || "", account: master ? a.account || "" : "", hive: a.hive || "", remoteControl: master && a.remote_control && a.remote_control.state ? a.remote_control : null,
       state: master && (a.status || "working") === "working" ? "live" : a.status || "working", promoted: !!a.promoted, age: a.started_at ? span(now - a.started_at) : "—",
       finished: a.status === "finished", since: a.state_since || 0, terminal: terminalView((sw.terminals || {})[a.name], now),
       execution: executionView((sw.executions || {})[a.name], now), lifecycle: offer ? { offer, controls: sw.lifecycle.controls.filter((c) => c.action in offer.disabled), terminate: !!offer.terminate } : null };
@@ -145,13 +147,13 @@ function agentRows(sw, now) {
 }
 
 function agentRow(a, remote) {
-  return withId(cells(idCell(a.name), a.lane, a.profile, a.overlays, a.model, transportCell(a.transport), a.task ? h("a", { href: `#item-tasks-${a.task}`, text: a.task }) : "—",
-    a.promoted ? h("span", { class: "sw-promoted", "data-tip": `${a.state} · promoted` }, label(a.state), label("promoted")) : label(a.state),
-    ...(remote ? [executionCell(a.execution), terminalCell(a.terminal, a.execution)] : []), a.age, a.finished ? h("span") : agentActions(a, pending, swarmReadError)), `agent-${a.name}`);
+  return agentCellTips(withId(cells(((id) => a.hive ? h("span", {}, id, h("span", { class: "sw-sub", title: `hive ${a.hive}`, text: a.hive })) : id)(a.account ? h("span", {}, idCell(a.name), h("span", { class: "sw-sub", title: `account ${a.account}`, text: a.account })) : idCell(a.name)), a.lane, a.profile, a.overlays, a.model, a.remoteControl ? h("span", { "data-tip": `Remote Control: ${a.remoteControl.state} (${a.remoteControl.detail})` }, label(`remote control ${a.remoteControl.state}`, a.remoteControl.state), h("span", { class: "sw-sub", text: a.remoteControl.detail }), ...(a.transport ? [transportCell(a.transport)] : [])) : transportCell(a.transport), a.task ? h("a", { href: `#item-tasks-${a.task}`, text: a.task }) : "—",
+    h("span", {}, a.promoted ? h("span", { class: "sw-promoted", "data-tip": `${a.state} · promoted` }, label(a.state), " ", label("promoted")) : label(a.state), joinCell(a.hiveJoin)),
+    ...(remote ? [executionCell(a.execution), terminalCell(a.terminal, a.execution)] : []), a.age, a.finished ? h("span") : agentActions(a, pending, swarmReadError)), `agent-${a.name}`));
 }
 
 const transportCell = (c) => c ? h("span", { class: "sw-transport", "data-tip": `${c.push_inbox ? "push" : "no push"} · ${c.native_terminal_attach ? "native terminal" : "no native terminal"}` },
-  label(c.push_inbox ? "push" : "no push", c.push_inbox ? "on" : "off"), label(c.native_terminal_attach ? "native terminal" : "no native terminal", c.native_terminal_attach ? "on" : "off")) : "—";
+  label(c.push_inbox ? "push" : "no push", c.push_inbox ? "on" : "off"), " ", label(c.native_terminal_attach ? "native terminal" : "no native terminal", c.native_terminal_attach ? "on" : "off")) : "—";
 
 function executionCell(e) {
   return e ? h("span", {}, label(e.shown, e.tone), ` ${e.seen}`, h("span", { class: "sw-sub", text: e.where })) : "—";
@@ -175,7 +177,7 @@ export function overlayChanges(sw) {
 
 export function toggleOverlay(sw, role, name) {
   const worn = wornOverlays(sw, role);
-  overlayDraft[role] = worn.includes(name) ? worn.filter((n) => n !== name) : worn.length < OVERLAY_CAP ? [...worn, name] : worn;
+  overlayDraft[role] = worn.includes(name) ? worn.filter((n) => n !== name) : worn.length >= tips.overlays ? worn : [...worn, name];
 }
 
 function overlayRow(sw, role) {
@@ -183,13 +185,13 @@ function overlayRow(sw, role) {
   const names = [...new Set([...(sw.overlays_available || []).filter((o) => (o.wears || []).includes(role)).map((o) => o.name), ...worn])];
   return h("div", { class: "sw-ovl-row", role: "group", "aria-label": `Overlays the ${role} role wears` }, h("span", { class: "sw-cap-name", text: role }),
     names.length ? h("div", { class: "sw-ctl" }, ...names.map((name) => h("button", { class: "sw-btn sw-mode", type: "button", "data-overlay-role": role, "data-overlay": name,
-      "aria-pressed": String(worn.includes(name)), disabled: !!pending || (!worn.includes(name) && worn.length >= OVERLAY_CAP), text: name })))
+      "aria-pressed": String(worn.includes(name)), disabled: !!pending || (!worn.includes(name) && worn.length >= tips.overlays), text: name })))
       : h("span", { class: "sw-ovl-none", text: "no overlay in the bundle wears this role" }));
 }
 
 function renderOverlays(sw) {
   const offered = (sw && sw.overlays_available) || [];
-  $("overlays-count").textContent = `${offered.length} offered · ${OVERLAY_CAP} max`;
+  $("overlays-count").textContent = `${offered.length} offered` + (tips.overlays ? ` · ${tips.overlays} max` : "");
   $("swarm-overlays").replaceChildren(...(sw ? ROLES.map((role) => overlayRow(sw, role)) : []));
   $("overlays-apply").disabled = !sw || !!pending || !Object.keys(overlayChanges(sw)).length;
 }
@@ -209,14 +211,13 @@ function resetIn(at, now) {
   return s < 3600 ? `${m}m` : s < 86400 ? `${hr}h${pad(m)}m` : `${d}d${pad(hr)}h`;
 }
 
-function accountState(sw, r) {
-  const seen = ((sw.quota_capacity || {}).accounts || []).find((a) => a.name === r.account && a.harness === r.agent);
-  return seen ? { state: seen.state.toLowerCase(), routing: percent(seen.routing) } : { state: "—", routing: "—" };
+function accountState(r) {
+  return r.state ? { state: r.state.toLowerCase().replace(/_/g, " "), routing: percent(r.routing_left) } : { state: "—", routing: "—" };
 }
 
 function quotaRows(sw, now) {
   const quota = sw.quota || {}, master = (sw.agents || []).find((a) => a.lane === "master") || {};
-  return (quota.rows || []).map((r) => ({ account: r.account, harness: r.agent, kind: r.kind || "subscription", ...accountState(sw, r), five: percent(r.five_hour_left), fiveReset: resetIn(r.five_hour_resets_at, now),
+  return (quota.rows || []).map((r) => ({ account: r.account, harness: r.agent, kind: r.kind || "subscription", ...accountState(r), five: percent(r.five_hour_left), fiveReset: resetIn(r.five_hour_resets_at, now),
     seven: percent(r.seven_day_left), sevenReset: resetIn(r.seven_day_resets_at, now), sessions: r.sessions, cap: r.cap, weight: r.weight,
     master: !!master.account && r.account === master.account && r.agent === (master.harness || "claude") }));
 }
@@ -251,7 +252,7 @@ function quotaRow(q) {
     q.master ? label("master", "master") : h("span"));
 }
 
-function renderQuota(sw, now, force) {
+export function renderQuota(sw, now, force) {
   if (!sw || (!force && $("swarm-quota").contains(document.activeElement))) return;
   loadRouting();
   const quota = quotaRows(sw, now);
@@ -279,11 +280,6 @@ function sessionCell(q) {
   return h("span", { class: "sw-sessions-value", text: String(q.sessions) });
 }
 
-function quotaCount(sw, count, now) {
-  const at = (sw.quota || {}).probed_at, accounts = `${count} ${count === 1 ? "account" : "accounts"}`;
-  return at ? `${accounts} · probed ${age(now - at * 1000)} ago` : accounts;
-}
-
 function renderDoctor(sw, now) {
   const doctor = sw.doctor || {}, on = doctorOn(sw);
   $("doctor-dot").replaceChildren(label(on ? "on" : "off", on ? "on" : "off"));
@@ -292,7 +288,7 @@ function renderDoctor(sw, now) {
   $("doctor-findings").textContent = `findings ${on ? doctor.findings : "—"}`;
 }
 
-function seatText(seat) {
+export function seatText(seat) {
   return seat.startsWith("master@") ? seat : seat.split("@")[0].replace(/-(\d+)$/, " $1");
 }
 
@@ -317,6 +313,8 @@ export function renderSwarm(sw) {
     sw && (openFindings(sw).length || sw.tasks.blocked) ? h("span", { class: "attention-dot", "aria-label": "Needs attention" }) : null].filter(Boolean));
   renderGates(sw);
   renderControls();
+  capacityShown(sw, swarmReadError);
+  renderRoles(sw);
   titlePause(sw);
   if ($("swarm").hidden) return renderStats();
   renderFreezes();
@@ -334,9 +332,10 @@ export function renderSwarm(sw) {
   renderAgents(sw, now);
   renderOverlays(sw);
   renderQuota(sw, now);
+  renderHives();
   renderDoctor(sw, now);
-  if (wanted.id || !$("health").contains(document.activeElement)) renderHealth(sw.findings, now);
-  renderHandoffs(sw.handoffs || []);
+  renderHandoffs(sw.handoffs || [], sw);
+  renderRecovery(sw);
   renderStats();
 }
 
@@ -354,32 +353,6 @@ function renderAgents(sw, now = Date.now()) {
   terminalHead(remote);
   $("swarm-agents").replaceChildren(...(live.length ? live.map(row) : [emptyRow(columns, "No agents running. Start the swarm to work the open tasks.")]),
     ...firstPage("agents", finished, (a) => `agent-${a.name}`).map(row), moreRow("agents", finished.length, "more finished agents", columns, () => renderAgents(swarm)) || "");
-}
-
-function renderHealth(findings, now = Date.now()) {
-  const list = findings || [];
-  $("health-count").textContent = `${list.length} open`;
-  $("health").replaceChildren(...(list.length ? firstPage("health", list, (f) => `finding-${f.id}`).map((f) => withId(healthRow(f, now), `finding-${f.id}`))
-    : [emptyRow(7, "No health findings. The swarm checks every minute.")]), moreRow("health", list.length, "more findings", 7, () => renderHealth(swarm && swarm.findings)) || "");
-}
-
-function healthRow(f, now) {
-  const earlier = f.verdict || {};
-  const pick = h("select", { class: "hl-pick", "aria-label": `Verdict on ${f.kind} ${f.subject}`, "data-verdict": f.id },
-    h("option", { value: "", text: "?" }), ...VERDICTS.map((v) => h("option", { value: v, text: VERDICT_TEXT[v] })));
-  pick.value = earlier.value || "";
-  const note = h("input", { class: "hl-note", type: "text", maxlength: "500", placeholder: "—", "aria-label": `Verdict note on ${f.kind} ${f.subject}` });
-  note.value = earlier.note || "";
-  return cells(f.kind, idCell(f.subject), (f.evidence || []).join(" · ") || f.summary, f.threshold, f.seen_at ? `${span(now - f.seen_at)} ago` : "—", pick, note);
-}
-
-function renderHandoffs(rows) {
-  $("handoff-count").textContent = `${rows.length} ${rows.length === 1 ? "seat" : "seats"}`;
-  $("swarm-handoffs").replaceChildren(...(rows.length ? firstPage("seats", rows, (r) => `seat-${r.seat}`).map((r) => withId(cells(idCell(seatText(r.seat)), clock(r.at), r.reason,
-    r.continuity ? label(r.continuity) : "—", r.binding ? h("span", {}, label(r.binding), r.bound_at && ` ${clock(r.bound_at)}`) : "—",
-    r.awaiting ? h("span", { class: "sw-ctl" }, ...(r.resume_available === false ? ["fresh"] : ["resume", "fresh"]).map((choice) => h("button", { class: "sw-btn", type: "button",
-      "data-agent": r.awaiting, "data-restore-choice": choice, disabled: !!pending, text: choice === "resume" ? r.resume_label || choice : choice }))) : r.successor ? idCell(r.successor) : "—"), `seat-${r.seat}`))
-    : [emptyRow(6, "No seats yet. Seats appear when agents start.")]), moreRow("seats", rows.length, "more seats", 6, () => renderHandoffs(rows)) || "");
 }
 
 function freezeRow(r) {

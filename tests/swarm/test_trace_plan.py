@@ -10,8 +10,6 @@ from scripts.gates import Who
 from scripts.gates import log as gate_log
 from scripts.swarm import trace_plan
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 DOGHOUSE = (
     "# Plan\n\n"
     "Pieces of the doghouse task.\n"
@@ -115,9 +113,9 @@ def test_parse_refuses_a_piece_the_ledger_would_refuse_as_a_follow_up():
     assert "file name or path" in str(refused.value)
 
 
-def test_parse_refuses_a_task_id_the_ledger_would_refuse_in_a_follow_up():
-    with pytest.raises(ValueError, match="^plan line 1: the ledger would refuse its follow up"):
-        trace_plan.parse("- a light | a | b", "my_task")
+@pytest.mark.parametrize("task_id", ["my_task", "promo-38842603017-0"])
+def test_parse_accepts_task_identifiers_the_ledger_would_refuse_in_prose(task_id):
+    assert trace_plan.parse("- a light | a | b", task_id) == [trace_plan.Piece("a light", ("a",), "b")]
 
 
 def test_parse_names_every_problem_of_a_piece():
@@ -133,8 +131,11 @@ def test_parse_caps_the_number_of_pieces():
         trace_plan.parse(allowed + "- one more | a | b\n", "t1")
 
 
-def test_followup_text_names_the_task_and_the_piece():
-    assert trace_plan.followup_text("t1", "a generator") == "Cut from the plan of task t1: a generator"
+@pytest.mark.parametrize("task_id", ["t1", "promo-38842603017-0"])
+def test_followup_text_keeps_the_piece_without_the_task_identifier(task_id):
+    text = trace_plan.followup_text(task_id, "a generator")
+    assert text == "Cut from the plan: a generator"
+    assert trace_plan.ledger_comments.problems(text, "item") == []
 
 
 def test_plan_hash_changes_with_any_field_and_ignores_nothing():
@@ -312,7 +313,7 @@ def test_trace_asks_one_needed_question_per_piece_and_one_size_question(ask):
         ],
     }
     assert list(questions) == ["piece_0", "piece_1", "piece_2", "size"]
-    assert questions["piece_2"].instructions == "Is piece 3, a diesel generator, needed to deliver the task?"
+    assert questions["piece_2"].instructions.startswith("Is piece 3, a diesel generator, needed to deliver the task?")
     assert (questions["piece_2"].true, questions["piece_2"].false) == ("the task needs it", "it serves something else")
     assert questions["size"].instructions == (
         "How much source work is the plan? Judge only pieces with nonempty areas; "
@@ -351,8 +352,30 @@ def test_trace_asks_one_needed_question_per_piece_and_one_size_question(ask):
         "calibrated": True,
         "failures": 0,
         "filed": [],
+        "accepted": [],
         "at": 5,
     }
+
+
+def test_scope_questions_keep_required_runner_registration_without_allowing_unrelated_workflows(ask):
+    fake = ask(0.95, 0.95, 0.05)
+    pieces = [
+        piece("Add the receipt replay CI job", ".github/workflows/proofs.yml"),
+        piece("Register the receipt replay job in the runner class table", "scripts/ci_runner_classes.py"),
+        piece("Change the release workflow schedule", ".github/workflows/release.yml"),
+    ]
+    state = {**INTENT, "task": "Add a CI job that replays receipt requests"}
+    record = trace_plan.trace(pieces, state, None, now_ms=5)
+    [(sent, questions, _)] = fake.calls
+    assert sent["task"] == state["task"]
+    for key in ("piece_0", "piece_1", "piece_2"):
+        assert (
+            "Registering a CI job added by the task in the runner class table is required"
+            in questions[key].instructions
+        )
+        assert "Unrelated workflow edits remain out of scope" in questions[key].instructions
+    assert [row["kept"] for row in record["pieces"]] == [True, True, False]
+    assert record["verdict"] == "pass"
 
 
 @pytest.mark.parametrize(
@@ -453,6 +476,34 @@ def test_clearance_pieces_never_count_as_cut_toward_a_failed_plan(ask):
     assert [row["kept"] for row in record["pieces"]] == [True, False, True]
 
 
+@pytest.mark.parametrize(
+    ("areas", "kept"),
+    [
+        (("changelog.d/fix-replay.md",), True),
+        (("./changelog.d/fix-replay.md",), True),
+        (("changelog.d/README.md",), False),
+        (("changelog.d",), False),
+        (("changelog.d/fix-replay.txt",), False),
+        (("docs/changelog.d/fix-replay.md",), False),
+        (("changelog.d/../guide.md",), False),
+        (("changelog.d/nested/fix-replay.md",), False),
+        (("changelog.d/fix-replay.md", "docs/guide.md"), False),
+        (("docs/guide.md",), False),
+    ],
+)
+def test_required_changelog_fragment_is_kept_without_scope_comment(ask, areas, kept):
+    ask(0.95, 0.0, 0.0)
+    pieces = [
+        piece("Repair receipt replay", "scripts/receipt.py"),
+        piece("Add the required changelog fragment for receipt replay", *areas),
+        piece("Add an unrelated user guide", "docs/guide.md"),
+    ]
+    record = trace_plan.trace(pieces, INTENT, None, now_ms=5)
+    assert record.get("authorizations", []) == []
+    assert [row["kept"] for row in record["pieces"]] == [True, kept, False]
+    assert record["verdict"] == ("pass" if kept else "fail")
+
+
 @pytest.mark.parametrize(("p_yes", "kept"), [(0.3, True), (0.29, False), (0.0, False), (1.0, True)])
 def test_a_piece_under_three_tenths_is_cut(ask, p_yes, kept):
     ask(p_yes, 0.9, 0.9)
@@ -502,9 +553,9 @@ def test_both_failure_reasons_are_given_together(ask):
 
 def test_failures_add_up_across_plans_and_filed_pieces_carry(ask):
     ask(0.1)
-    previous = {"verdict": "fail", "plan_hash": "old", "failures": 1, "filed": ["x"], "pieces": []}
+    previous = {"verdict": "fail", "plan_hash": "old", "failures": 1, "filed": ["x"], "accepted": ["y"], "pieces": []}
     record = trace_plan.trace([piece("a")], INTENT, previous)
-    assert (record["verdict"], record["failures"], record["filed"]) == ("fail", 2, ["x"])
+    assert (record["verdict"], record["failures"], record["filed"], record["accepted"]) == ("fail", 2, ["x"], ["y"])
     ask(0.9)
     record = trace_plan.trace([piece("a")], INTENT, previous)
     assert (record["verdict"], record["failures"]) == ("pass", 1)
@@ -527,6 +578,7 @@ def test_no_classifier_answer_is_unchecked_with_every_piece_kept(ask):
         "calibrated": False,
         "failures": 1,
         "filed": ["x"],
+        "accepted": [],
         "at": 7,
     }
 
@@ -542,7 +594,7 @@ def test_a_piece_appended_to_a_passing_plan_is_traced_alone(ask):
     first = [piece("walls"), piece("a light")]
     ask(0.9, 0.9)
     passed = trace_plan.trace(first, INTENT, None)
-    passed["filed"] = ["k"]
+    passed["filed"], passed["accepted"] = ["k"], ["j"]
     fake = ask(0.2, score=None, start=2)
     fake.source, fake.calibrated = "claude-haiku", False
     later = trace_plan.trace([*first, piece("a generator")], INTENT, passed, now_ms=9)
@@ -559,6 +611,7 @@ def test_a_piece_appended_to_a_passing_plan_is_traced_alone(ask):
         "kept": False,
     }
     assert (later["verdict"], later["size"], later["reasons"], later["filed"]) == ("pass", passed["size"], [], ["k"])
+    assert later["accepted"] == ["j"]
     assert later["plan_hash"] == trace_plan.plan_hash([*first, piece("a generator")])
 
 
@@ -607,11 +660,17 @@ def test_a_changed_failed_or_unchecked_plan_is_traced_whole(ask, previous):
 
 class Ledger:
     def __init__(self, refuse=False):
-        self.followups, self.refuse = [], refuse
+        self.followups, self.refuse, self.ids, self.doc = [], refuse, [], {}
 
-    def followup(self, slug, text):
-        assert slug == "sw"
+    def followup_once(self, slug, text, by, op_id):
+        assert (slug, by) == ("sw", "engineer@1-1")
         self.followups.append(text)
+        self.ids.append(op_id)
+        return not self.refuse
+
+    def state(self, slug):
+        assert slug == "sw"
+        return self.doc
 
 
 def write_plan(folder, text=DOGHOUSE):
@@ -633,8 +692,10 @@ def test_run_files_each_cut_piece_once_and_writes_the_verdict(ask, tmp_path):
     ask(0.9, 0.8, 0.1)
     record, block = run(folder, ledger, home)
     assert (block, record["at"]) == (False, 11)
-    assert ledger.followups == ["Cut from the plan of task t1: a diesel generator"]
-    assert record["filed"] == ["a diesel generator | power/generator | it powers the light"]
+    assert ledger.followups == ["Cut from the plan: a diesel generator"]
+    assert ledger.ids == [trace_plan.cut_id(WHO, "a diesel generator | power/generator | it powers the light")]
+    assert record["accepted"] == ["a diesel generator | power/generator | it powers the light"]
+    assert record["filed"] == []
     assert json.loads((folder / "plan-verdict.json").read_text()) == record
     [row] = rows(home)
     assert {k: row[k] for k in ("gate", "kind", "agent", "task", "reason")} == {
@@ -648,7 +709,7 @@ def test_run_files_each_cut_piece_once_and_writes_the_verdict(ask, tmp_path):
     fake = ask(0.9, score=None, start=3)
     record, _ = run(folder, ledger, home)
     assert len(fake.calls) == 1
-    assert ledger.followups == ["Cut from the plan of task t1: a diesel generator"]
+    assert ledger.followups == ["Cut from the plan: a diesel generator"]
     assert len(record["pieces"]) == 4 and len(rows(home)) == 1
 
 
@@ -658,7 +719,7 @@ def test_run_files_no_cut_for_a_piece_the_master_authorized_outside_the_descript
     covered(monkeypatch, 0.9, 0.8, 0.0, covers=[("covers_0_0", 0.0), ("covers_1_0", 0.0), ("covers_2_0", 0.8)])
     state = {**INTENT, "scope authorizations": [AUTHORIZED]}
     record, block = trace_plan.run(folder, state, ledger, WHO, "enforce", home=home, now_ms=11)
-    assert (block, record["verdict"], record["filed"]) == (False, "pass", [])
+    assert (block, record["verdict"], record["accepted"]) == (False, "pass", [])
     assert ledger.followups == [] and rows(home) == []
     assert record["pieces"][2] == {
         "what": "a diesel generator",
@@ -697,20 +758,107 @@ def test_a_retrace_for_a_new_authorization_counts_no_new_failed_plan(monkeypatch
     assert (record["verdict"], record["failures"], block) == ("fail", 1, False)
 
 
-def test_run_saves_the_filed_cut_before_its_follow_up(ask, tmp_path):
+def test_run_saves_the_pass_and_accepts_a_cut_only_after_its_follow_up_lands(ask, tmp_path):
     from scripts.swarm.store import SwarmError
 
     class Failing(Ledger):
-        def followup(self, slug, text):
+        def followup_once(self, slug, text, by, op_id):
+            self.ids.append(op_id)
             raise SwarmError("ledger sw: connection reset")
 
-    folder, home = tmp_path / "t1", tmp_path / "home"
+    folder, home, failing = tmp_path / "t1", tmp_path / "home", Failing()
     write_plan(folder)
     ask(0.9, 0.8, 0.1)
     with pytest.raises(SwarmError):
-        run(folder, Failing(), home)
+        run(folder, failing, home)
     saved = json.loads((folder / "plan-verdict.json").read_text())
-    assert saved["filed"] == ["a diesel generator | power/generator | it powers the light"]
+    assert (saved["verdict"], saved["accepted"], rows(home)) == ("pass", [], [])
+    fake, ledger = ask(0.1, 0.1, 0.9), Ledger()
+    record, block = run(folder, ledger, home, now_ms=99)
+    assert (fake.calls, block, record["at"]) == ([], False, 11)
+    assert ledger.ids == failing.ids
+    assert json.loads((folder / "plan-verdict.json").read_text())["accepted"] == [
+        "a diesel generator | power/generator | it powers the light"
+    ]
+    assert [row["reason"] for row in rows(home)] == ["cut: a diesel generator"]
+    run(folder, ledger, home)
+    assert len(ledger.ids) == 1
+
+
+def test_a_legacy_filed_cut_is_resent_only_when_the_ledger_lacks_its_text(ask, tmp_path):
+    folder, home, ledger = tmp_path / "t1", tmp_path / "home", Ledger()
+    write_plan(folder)
+    ask(0.9, 0.8, 0.1)
+    run(folder, ledger, home)
+    record = json.loads((folder / "plan-verdict.json").read_text())
+    record["filed"] = record.pop("accepted")
+    (folder / "plan-verdict.json").write_text(json.dumps(record))
+    ledger.doc = {"followups": [{"id": "add_item-1", "text": "Cut from the plan: a diesel generator"}]}
+    run(folder, ledger, home)
+    assert len(ledger.ids) == 1
+    (folder / "plan-verdict.json").write_text(json.dumps(record))
+    ledger.doc = {}
+    run(folder, ledger, home)
+    assert len(ledger.ids) == 2 and ledger.ids[0] == ledger.ids[1]
+    assert json.loads((folder / "plan-verdict.json").read_text())["accepted"] == record["filed"]
+
+
+def test_a_cut_queued_while_the_ledger_is_down_stays_unaccepted_and_resends_its_identity(ask, tmp_path):
+    folder, home, queued = tmp_path / "t1", tmp_path / "home", Ledger(refuse=True)
+    write_plan(folder)
+    ask(0.9, 0.8, 0.1)
+    record, _ = run(folder, queued, home)
+    assert (record["verdict"], record["accepted"], rows(home)) == ("pass", [], [])
+    assert json.loads((folder / "plan-verdict.json").read_text())["accepted"] == []
+    ledger = Ledger()
+    record, _ = run(folder, ledger, home)
+    assert ledger.ids == queued.ids and len(ledger.ids) == 1
+    assert record["accepted"] == ["a diesel generator | power/generator | it powers the light"]
+    assert [row["reason"] for row in rows(home)] == ["cut: a diesel generator"]
+
+
+def test_a_refused_cut_does_not_stop_the_next_cut_in_the_same_run(ask, tmp_path):
+    class RefusesFirst(Ledger):
+        def followup_once(self, slug, text, by, op_id):
+            return super().followup_once(slug, text, by, op_id) and len(self.ids) > 1
+
+    folder, home, ledger = tmp_path / "t1", tmp_path / "home", RefusesFirst()
+    write_plan(folder, DOGHOUSE + "- a dog bed | doghouse/bed | the dog sleeps on it\n")
+    ask(0.9, 0.8, 0.1, 0.1)
+    record, _ = run(folder, ledger, home)
+    assert ledger.followups == ["Cut from the plan: a diesel generator", "Cut from the plan: a dog bed"]
+    assert record["accepted"] == ["a dog bed | doghouse/bed | the dog sleeps on it"]
+    assert [row["reason"] for row in rows(home)] == ["cut: a dog bed"]
+
+
+def test_followup_once_reports_a_queued_write_as_not_accepted(monkeypatch):
+    from scripts.swarm import ledger_client
+
+    sent = []
+    answers = iter([{"queued": "cut-1"}, {"followups": []}])
+    monkeypatch.setattr(
+        ledger_client.LedgerClient, "_call", lambda self, slug, ops: sent.append((slug, ops)) or next(answers)
+    )
+    client = ledger_client.LedgerClient()
+    assert client.followup_once("sw", "Cut from the plan: a light", "engineer@1-1", "cut-1") is False
+    assert client.followup_once("sw", "Cut from the plan: a light", "engineer@1-1", "cut-1") is True
+    [(slug, [op])] = sent[:1]
+    assert (slug, op["op"], op["id"], op["by"], op["list"], op["text"]) == (
+        "sw",
+        "add_item",
+        "cut-1",
+        "engineer@1-1",
+        "followups",
+        "Cut from the plan: a light",
+    )
+
+
+def test_a_cut_identity_is_stable_and_names_swarm_task_and_piece():
+    key = "a diesel generator | power/generator | it powers the light"
+    digest = hashlib.sha256(f"sw\nt1\n{key}".encode()).hexdigest()[:16]
+    assert trace_plan.cut_id(WHO, key) == f"cut-{digest}"
+    other = Who(name="engineer@1-1", swarm="sw", task="t2")
+    assert trace_plan.cut_id(other, key) != trace_plan.cut_id(WHO, key)
 
 
 def test_a_later_cut_is_filed_beside_the_earlier_one(ask, tmp_path):
@@ -721,7 +869,7 @@ def test_a_later_cut_is_filed_beside_the_earlier_one(ask, tmp_path):
     write_plan(folder, DOGHOUSE + "- a dog bed | doghouse/bed | the dog sleeps on it\n")
     ask(0.1, score=None, start=3)
     record, _ = run(folder, ledger, home)
-    assert record["filed"] == [
+    assert record["accepted"] == [
         "a diesel generator | power/generator | it powers the light",
         "a dog bed | doghouse/bed | the dog sleeps on it",
     ]
@@ -784,17 +932,39 @@ def test_run_needs_a_plan_file(tmp_path):
     assert str(refused.value) == f"write the plan first: {tmp_path / 't1' / 'plan.md'}, {trace_plan.FORMAT}"
 
 
-def test_run_checks_follow_ups_against_its_own_task(ask, tmp_path):
+@pytest.mark.parametrize(("mode", "kind"), [("enforce", "deny"), ("observe", "observe"), ("off", None)])
+@pytest.mark.parametrize(
+    ("text", "refusal"),
+    [
+        (None, "write the plan first"),
+        ("- a light\n", "plan line 1 is not a piece"),
+        ("- fix Run 38842603017 failed | a | b\n", "plan line 1: the ledger would refuse its follow up"),
+        ("prose only\n", "the plan holds no pieces"),
+    ],
+)
+def test_run_logs_every_refusal_by_its_mode_before_raising(ask, tmp_path, mode, kind, text, refusal):
+    folder, home = tmp_path / "t1", tmp_path / "home"
+    if text is not None:
+        write_plan(folder, text)
+    fake = ask(0.9)
+    with pytest.raises(ValueError) as refused:
+        trace_plan.run(folder, INTENT, Ledger(), WHO, mode, home=home)
+    assert str(refused.value).startswith(refusal) and fake.calls == []
+    expected = [("trace-plan", kind, WHO.name, WHO.task, str(refused.value))] if kind else []
+    assert [(r["gate"], r["kind"], r["agent"], r["task"], r["reason"]) for r in rows(home)] == expected
+
+
+def test_run_accepts_a_task_identifier_the_ledger_would_refuse_in_prose(ask, tmp_path):
     folder = tmp_path / "t1"
     write_plan(folder, "- a light | a | b\n")
     fake = ask(0.9)
     who = Who(name="engineer@1-1", swarm="sw", task="my_task")
-    with pytest.raises(ValueError, match="^plan line 1: the ledger would refuse its follow up"):
-        trace_plan.run(folder, INTENT, Ledger(), who, "observe", home=tmp_path / "home")
-    assert fake.calls == []
+    record, block = trace_plan.run(folder, INTENT, Ledger(), who, "observe", home=tmp_path / "home")
+    assert record["verdict"] == "pass" and not block
+    assert len(fake.calls) == 1
 
 
-@pytest.mark.parametrize("task_id", ["fx-8be892c4", "fx-8be892c4-code", "fx-8be892c4-cause"])
+@pytest.mark.parametrize("task_id", ["fx-8be892c4", "fx-8be892c4-code", "fx-8be892c4-cause", "promo-38842603017-0"])
 def test_run_accepts_registered_doctor_task_and_files_cut_piece(ask, tmp_path, task_id):
     folder = tmp_path / "task"
     write_plan(folder)
@@ -807,14 +977,33 @@ def test_run_accepts_registered_doctor_task_and_files_cut_piece(ask, tmp_path, t
     who = Who(name="engineer@1-1", swarm="sw", task=task_id)
 
     class CheckedLedger(Ledger):
-        def followup(self, slug, text):
-            trace_plan.ledger_comments.check(text, "item", task_ids=[task["id"] for task in doc["tasks"]])
-            super().followup(slug, text)
+        def followup_once(self, slug, text, by, op_id):
+            trace_plan.ledger_comments.check(text, "item")
+            super().followup_once(slug, text, by, op_id)
 
     ledger = CheckedLedger()
     record, block = trace_plan.run(folder, state, ledger, who, "observe", home=tmp_path / "home")
     assert record["verdict"] == "pass" and not block
-    assert ledger.followups == [f"Cut from the plan of task {task_id}: a diesel generator"]
+    assert ledger.followups == ["Cut from the plan: a diesel generator"]
+
+
+@pytest.mark.parametrize("task_id", ["fx-8be892c4-code", "promo-38842603017-0"])
+def test_run_accepts_registered_task_identifiers_in_piece_text(ask, tmp_path, task_id):
+    folder = tmp_path / "task"
+    write_plan(folder, f"- fix {task_id} | a | keep the task working\n")
+    ask(0.9)
+    state = {**INTENT, "task ids": [task_id]}
+    record, block = trace_plan.run(folder, state, Ledger(), WHO, "enforce", home=tmp_path / "home")
+    assert record["verdict"] == "pass" and not block
+    assert record["pieces"][0]["what"] == f"fix {task_id}"
+
+
+@pytest.mark.parametrize(
+    "text", ["Run 38842603017 failed", "promo-38842603017-1", "promo-38842603017-0 Run 38842603017 failed"]
+)
+def test_promotion_task_context_still_refuses_free_run_numbers(text):
+    found = trace_plan.ledger_comments.problems(text, "item", task_ids=["promo-38842603017-0"])
+    assert any("run or job id" in problem for problem in found)
 
 
 def test_run_reads_a_broken_verdict_file_as_no_verdict(ask, tmp_path):

@@ -8,8 +8,6 @@ from scripts.swarm_ledger import ledger_core as core
 from scripts.swarm_ledger import new_ledger
 from tests.swarm_ledger import legacy_page  # noqa: E402
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 SLUG = "talk-2026-01-01"
 ENG, CI, MASTER = "engineer@abcdef-0001", "ci@abcdef-0002", "master@abcdef-0003"
 
@@ -23,10 +21,14 @@ def redis(tmp_path, monkeypatch):
     client = fakeredis.FakeRedis(decode_responses=True)
     RedisStore(client).create(SwarmConfig(SLUG, "repo", 1, 1))
     content = {"title": "Demo", "overview": "o", "sources": [], "phases": [{"title": "one", "description": "d"}]}
-    html_path, _ = core.paths(SLUG)
+    html_path, _ = legacy_page.paths(SLUG, core)
     html_path.write_text(legacy_page.render(new_ledger.build_doc(content), SLUG, 8765), encoding="utf-8")
     core.sync(SLUG)
+    core.sync(SLUG, ops=[{"op": "add", "thread": "chat", "id": OPERATOR_LINE, "text": "Carry on"}])
     return client
+
+
+OPERATOR_LINE = "o-0"
 
 
 def mode(redis, chosen):
@@ -38,7 +40,16 @@ def budget(redis, home):
 
 
 def say(redis, home, by=ENG, n=0, **extra):
-    op = {"op": "add", "thread": "chat", "id": f"m-{by}-{n}", "text": f"note {n}", "by": by, "to": "operator", **extra}
+    op = {
+        "op": "add",
+        "thread": "chat",
+        "id": f"m-{by}-{n}",
+        "text": f"note {n}",
+        "by": by,
+        "to": "operator",
+        "reply_to": OPERATOR_LINE,
+        **extra,
+    }
     return core.sync(SLUG, ops=[op], gate=budget(redis, home))
 
 
@@ -182,7 +193,7 @@ def test_comments_and_followups_count_as_talk(redis, tmp_path):
 @pytest.mark.parametrize("by", [MASTER, "operator", "swarm"])
 def test_only_eng_and_ci_agents_are_counted(redis, tmp_path, by):
     mode(redis, "enforce")
-    extra = {} if by == "operator" else {"by": by, "to": "operator"}
+    extra = {} if by == "operator" else {"by": by, "to": "operator", "reply_to": OPERATOR_LINE}
     op = {"op": "add", "thread": "chat", "id": "m-x", "text": "hello", **extra}
     for n in range(talk.BUDGET + 2):
         _, rejected = core.sync(SLUG, ops=[{**op, "id": f"m-{n}"}], gate=budget(redis, tmp_path))
@@ -234,7 +245,15 @@ def test_redis_down_lets_the_write_through_with_a_fail_open_row(redis, tmp_path)
     def down():
         raise ConnectionError("refused")
 
-    op = {"op": "add", "thread": "chat", "id": "m-down", "text": "hi", "by": ENG, "to": "operator"}
+    op = {
+        "op": "add",
+        "thread": "chat",
+        "id": "m-down",
+        "text": "hi",
+        "by": ENG,
+        "to": "operator",
+        "reply_to": OPERATOR_LINE,
+    }
     _, rejected = core.sync(SLUG, ops=[op], gate=talk.Budget(SLUG, connect=down, home=tmp_path))
     assert rejected == []
     rows = gate_rows(tmp_path)
@@ -285,7 +304,8 @@ def test_the_server_gates_only_requests_that_carry_ops(monkeypatch, ops, gated):
     assert handler.reply_state(SLUG, changes=changes, ops=ops) == 200
     assert [type(gate).__name__ for gate in seen] == (["Fence"] if gated else ["NoneType"])
     assert seen_changes == [changes]
-    assert not gated or (seen[0].slug, type(seen[0].inner).__name__, seen[0].inner.slug) == (SLUG, "Budget", SLUG)
+    budget = seen[0].inner.inner if gated else None
+    assert not gated or (seen[0].slug, type(budget).__name__, budget.slug) == (SLUG, "Budget", SLUG)
 
 
 @pytest.mark.parametrize(
@@ -395,7 +415,15 @@ def test_a_fail_open_row_names_the_gate_and_the_ledger(redis, tmp_path):
     def down():
         raise ConnectionError("refused")
 
-    op = {"op": "add", "thread": "chat", "id": "m-down", "text": "hi", "by": ENG, "to": "operator"}
+    op = {
+        "op": "add",
+        "thread": "chat",
+        "id": "m-down",
+        "text": "hi",
+        "by": ENG,
+        "to": "operator",
+        "reply_to": OPERATOR_LINE,
+    }
     core.sync(SLUG, ops=[op], gate=talk.Budget(SLUG, connect=down, home=tmp_path))
     assert [(r["gate"], r["tool"], r["agent"]) for r in gate_rows(tmp_path)] == [("talk", "ledger", ENG)]
 

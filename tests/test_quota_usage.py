@@ -243,3 +243,98 @@ def test_pretool_banner_fires_on_every_fifth_tool_call(tmp_path):
     assert "7D REMAINING: 52%" in results[4].stdout
     assert "Shown every 5 tool calls" in results[4].stdout
     assert "used" not in results[4].stdout
+
+
+def _limits(five: float, week: float) -> dict:
+    return {
+        "five_hour": {"used_percentage": five, "resets_at": 5_000},
+        "seven_day": {"used_percentage": week, "resets_at": 9_000},
+    }
+
+
+def test_an_interactive_session_snapshot_names_its_account(monkeypatch, tmp_path):
+    import hooks.context.quota_usage as quota_usage
+
+    monkeypatch.setattr(quota_usage, "AGENTIHOOKS_HOME", tmp_path)
+    quota_usage.record_rate_limits("one", _limits(10, 20), {"AH_ROUTE_INTERACTIVE_main": "1"})
+    quota_usage.record_rate_limits("two", _limits(10, 20), {"AH_ROUTE_INTERACTIVE_": "1", "AH_CC_TOKEN_main": "t"})
+    quota_usage.record_rate_limits(
+        "three", _limits(10, 20), {"AH_ROUTE_INTERACTIVE_a": "1", "AH_ROUTE_INTERACTIVE_b": "1"}
+    )
+    quota_usage.record_rate_limits("four", _limits(10, 20), {"AH_ROUTE_INTERACTIVE_main": ""})
+    saved = {path.stem: json.loads(path.read_text()) for path in (tmp_path / "quota_usage").glob("*.json")}
+    assert saved["one"]["account"] == "main"
+    assert ["account" in saved[name] for name in ("two", "three", "four")] == [False, False, False]
+
+
+def test_account_snapshot_is_the_freshest_fresh_snapshot_of_that_account(monkeypatch, tmp_path):
+    import hooks.context.quota_usage as quota_usage
+
+    monkeypatch.setattr(quota_usage, "AGENTIHOOKS_HOME", tmp_path)
+    monkeypatch.setattr(quota_usage, "QUOTA_USAGE_STALE_SEC", 300)
+    for session, at, limits, environ in (
+        ("old", 1_000.0, _limits(1, 2), {"AH_ROUTE_INTERACTIVE_main": "1"}),
+        ("new", 1_200.0, _limits(30, 40), {"AH_ROUTE_INTERACTIVE_main": "1"}),
+        ("other", 1_250.0, _limits(50, 60), {"AH_ROUTE_INTERACTIVE_spare": "1"}),
+        ("plain", 1_260.0, _limits(70, 80), {}),
+    ):
+        monkeypatch.setattr(quota_usage.time, "time", lambda at=at: at)
+        quota_usage.record_rate_limits(session, limits, environ)
+    folder = tmp_path / "quota_usage"
+    for name, text in (
+        ("broken", "{"),
+        ("listed", "[]"),
+        ("empty", "{}"),
+        ("unset", '{"updated_at": null, "account": "main", "rate_limits": {}}'),
+        ("shape", '{"updated_at": 1400, "account": "main", "rate_limits": []}'),
+    ):
+        (folder / f"{name}.json").write_text(text, encoding="utf-8")
+    (folder / "folder.json").mkdir()
+    expected = {
+        name: {**window, "used_percentage": float(window["used_percentage"])}
+        for name, window in _limits(30, 40).items()
+    }
+    assert quota_usage.account_snapshot("main", 1_500.0) == (1_200.0, expected)
+    assert quota_usage.account_snapshot("main", 1_501.0) is None
+    assert quota_usage.account_snapshot("spare", 1_300.0)[0] == 1_250.0
+    assert quota_usage.account_snapshot("absent", 1_300.0) is None
+
+
+def test_account_snapshot_picks_one_of_two_snapshots_written_at_the_same_second(monkeypatch, tmp_path):
+    import hooks.context.quota_usage as quota_usage
+
+    monkeypatch.setattr(quota_usage, "AGENTIHOOKS_HOME", tmp_path)
+    monkeypatch.setattr(quota_usage.time, "time", lambda: 1_000.0)
+    quota_usage.record_rate_limits("left", _limits(10, 20), {"AH_ROUTE_INTERACTIVE_main": "1"})
+    quota_usage.record_rate_limits("right", _limits(30, 40), {"AH_ROUTE_INTERACTIVE_main": "1"})
+    at, limits = quota_usage.account_snapshot("main", 1_000.0)
+    assert at == 1_000.0
+    assert limits["seven_day"]["used_percentage"] in (20.0, 40.0)
+
+
+def test_latest_snapshot_is_the_newest_of_that_account_however_old(monkeypatch, tmp_path):
+    import hooks.context.quota_usage as quota_usage
+
+    monkeypatch.setattr(quota_usage, "AGENTIHOOKS_HOME", tmp_path)
+    for session, at, limits in (
+        ("old", 10.0, _limits(1, 2)),
+        ("left", 20.0, _limits(10, 20)),
+        ("right", 20.0, _limits(30, 40)),
+    ):
+        monkeypatch.setattr(quota_usage.time, "time", lambda at=at: at)
+        quota_usage.record_rate_limits(session, limits, {"AH_ROUTE_INTERACTIVE_main": "1"})
+    at, limits = quota_usage.latest_snapshot("main")
+    assert at == 20.0
+    assert limits["seven_day"]["used_percentage"] in (20.0, 40.0)
+    assert quota_usage.latest_snapshot("absent") is None
+
+
+def test_the_statusline_snapshot_reads_the_session_environment(monkeypatch, tmp_path):
+    import hooks.context.quota_usage as quota_usage
+
+    monkeypatch.setattr(quota_usage, "AGENTIHOOKS_HOME", tmp_path)
+    for name in [name for name in os.environ if name.startswith("AH_ROUTE_INTERACTIVE_")]:
+        monkeypatch.delenv(name)
+    monkeypatch.setenv("AH_ROUTE_INTERACTIVE_main", "1")
+    quota_usage.record_rate_limits("live", _limits(10, 20))
+    assert json.loads((tmp_path / "quota_usage" / "live.json").read_text())["account"] == "main"

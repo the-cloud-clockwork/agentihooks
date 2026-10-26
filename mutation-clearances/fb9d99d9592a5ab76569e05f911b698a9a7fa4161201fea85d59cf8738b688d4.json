@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/stack.py:scripts.swarm.stack.x_pushed__mutmut_1:3b9b70d958ac4b9970b15543db341f09851e9c9758d2bbc88007357975ecae30": {
+    "reader": "Standards",
+    "reason": "The sole production caller publish.pushed_branches always supplies the scoped recorded branch argument, so changing its unused default does not alter output."
+  }
+}

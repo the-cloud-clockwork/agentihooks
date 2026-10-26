@@ -35,12 +35,11 @@ goes to a lane as a task.
 
 ## Dispatcher and operator
 
-- The dispatcher owns rank by leverage, grouping, the lane split and
-  Priorities triage. Its triage clears resolved priorities on every tick.
-  Rank and grouping it applies at delegate and full autonomy; below delegate
-  each arrives in your inbox as a proposal. The lane split it moves only at
-  delegate and full autonomy, one seat between the engineer and CI lanes
-  after three bottleneck reports running; a refused move is reported as held.
+- The dispatcher owns rank by leverage, grouping and Priorities triage. Its
+  triage clears resolved priorities on every tick. Rank and grouping it
+  applies at delegate and full autonomy; below delegate each arrives in your
+  inbox as a proposal. It never moves seats between lanes: lane caps change
+  only through `swarm set`, on the operator's order or yours.
 - Below full autonomy no dispatcher seat runs: unresolved priorities and an
   uncovered bottleneck stay yours to raise with the operator.
 - Apply a proposal's named command only on the operator's agreement; decline
@@ -73,6 +72,46 @@ all arrive as inbox items. `agentihooks msg inbox` lists them,
   `agentihooks msg close <id> blocked "<what>"`, `agentihooks msg close <id> cancel "<why>"`.
 - Talk to agents: `agentihooks swarm <slug> say "<text>" --to <agent>`, or
   `--to eng` and `--to ci` for a whole lane.
+
+## Master pool
+
+Claude and Codex masters run this loop identically; only a Claude front door
+takes the claude ai login and Remote Control.
+
+- Read your seat from your name: `master@<slug>` is the front door,
+  `master-2@<slug>` and up are backend masters. Every master has the same
+  authority; the operator and Priorities stay with the front door.
+- The swarm sizes the pool: one master plus one per `masters-step` unfinished
+  engineer, CI and planner agents (default 12). Change it only on the
+  operator's order: `agentihooks swarm <slug> set masters-step=N`. A smaller
+  count waits ten minutes, the cool off restarting on every rise; then every
+  extra backend master is asked to hand off at once and the count falls from
+  the top as they leave. A retired seat's handoff and open items go to the
+  front door. When your seat is asked to retire, hand off as in Handoff.
+- With two or more live masters, items for the master seat wait in one pool,
+  first in first out, and each reaches exactly one live master in round robin
+  seat order, skipping a master that is gone or being retired by the tick;
+  a backend master asked to hand off by a shrink keeps taking items until it
+  leaves.
+  Handle every item that reaches you as your own. An unconfirmed item returns
+  to the pool after the redelivery window and goes to the next master with the
+  same id. Items from the operator bypass the pool and go to the front door.
+  A swarm below one step behaves exactly as a single master swarm.
+- The front door, `master@<slug>` or the lowest numbered live master while
+  that seat is empty, alone receives page chat and every operator write and
+  holds Priorities. With `AGENTIHOOKS_MASTER_CLAUDE_LOGIN` on, a Claude front door also
+  takes the claude ai login and Remote Control; Codex masters take neither. A
+  backend master's page chat write is refused; ask the front door instead.
+- Sync with the other masters, never with workers:
+  `agentihooks swarm <slug> masters-channel say "<text>"` posts, and
+  `agentihooks swarm <slug> masters-channel read` prints the posts you have
+  not read. Post when an item arrived without its context or another master
+  holds a fact you need. The front door answers the operator about the
+  backend masters from what the channel carries.
+- `MASTER_INBOX_CLASSIFIER_WITH_FALLBACKS` (on by default) groups related
+  items: an item matching a master's last 15 items by intent goes to that
+  master; a classifier error, timeout or low verdict falls back to round
+  robin.
 
 ## Tasks and proof contracts
 
@@ -126,12 +165,25 @@ Review each slice against its phase intent, then
 - A seat whose resume failed waits for you:
   `agentihooks swarm <slug> restore-decision <agent> resume` or `fresh`.
 
+## Scaling
+
+- Every new swarm starts with automatic scaling, and a master keeps automatic
+  scaling on: each tick the lane ceilings follow free quota seats, host room
+  and ready work, so spare quota becomes agents instead of waiting behind
+  fixed caps.
+- Read agentihooks balance and the autoscale preview,
+  `agentihooks swarm <slug> autoscale`, before stating capacity to the
+  operator, and quote their figures.
+- Raise nothing past host room: while the preview shows no host room, no lane
+  cap or setting goes up, whatever quota is left.
+- Switch to manual scaling with `agentihooks swarm <slug> set scaling=manual`
+  only on the operator's order, and relay that order onto the ledger.
+
 ## Waits and blocks
 
 You claim no task, so you never run wait or block. A blocked task reaches your
-inbox: unblock it with an answer, split it into new tasks, or raise the
-decision to the operator with
-`agentihooks ledger --slug <slug> --as <name> priority add tasks/<id> "<the ask>"`.
+inbox: unblock it with an answer, split it into new tasks, or hold the
+decision until the operator writes; the ledger refuses agent priorities.
 
 ## Handoff
 

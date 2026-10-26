@@ -101,7 +101,7 @@ def test_the_interval_sits_well_inside_the_admission_lease():
     assert (lease_renewal.INTERVAL_SECONDS, lease_renewal.RETRY_SECONDS, lease_renewal.CREDENTIAL_SECONDS) == (
         15.0,
         2.0,
-        120.0,
+        60.0,
     )
 
 
@@ -295,6 +295,56 @@ def test_a_lease_that_lapses_through_failures_is_lost_without_another_call(tmp_p
 
     assert lease.lost == "lease_expired"
     assert len(controller.calls) == calls
+
+
+HANDOVER_MS = 240_000
+GRANT_SECONDS = 300
+
+
+class Rollout:
+    def __init__(self, clock: Clock, start: float, end: float) -> None:
+        self.clock, self.start, self.end = clock, start, end
+        self.issued, self.calls, self.acknowledged = {GRANT: clock.wall}, [], None
+
+    def __call__(self, method: str, url: str, grant: str, body: dict) -> tuple[int, object]:
+        self.calls.append((self.clock.now, method))
+        if self.start <= self.clock.now < self.end:
+            return 503, {}
+        if self.clock.wall - self.issued.get(grant, float("-inf")) >= GRANT_SECONDS:
+            return 401, {}
+        if method == "POST":
+            renewed = f"sv2.grant-{len(self.issued)}"
+            self.issued[renewed] = self.clock.wall
+            return 200, {"execution_id": EXECUTION, "credential": renewed, "expires_at": "x"}
+        self.acknowledged = self.clock.now
+        return 200, acknowledged(self.clock, lease_deadline_ms=int(self.clock.wall * 1000) + HANDOVER_MS)
+
+
+def roll(tmp_path: Path, end: float) -> tuple[lease_renewal.Renewer, Rollout, float]:
+    clock = Clock()
+    controller = Rollout(clock, 100.0 + lease_renewal.CREDENTIAL_SECONDS - 1, end)
+    lease = lease_renewal.load(attempt_folder(tmp_path), controller, clock.monotonic, clock.time)
+    while clock.now < 500.0:
+        lease.tick()
+        if lease.lost is not None:
+            break
+        clock.advance(1.0)
+    return lease, controller, clock.now
+
+
+def test_a_worker_keeps_its_lease_through_a_controller_rollout_longer_than_the_old_lease(tmp_path):
+    lease, controller, _ = roll(tmp_path, 100.0 + lease_renewal.CREDENTIAL_SECONDS - 1 + 225)
+
+    assert lease.lost is None
+    assert controller.acknowledged > controller.end
+    assert "POST" in {method for at, method in controller.calls if at >= controller.end}
+
+
+def test_a_worker_loses_its_lease_when_the_controller_stays_gone_past_the_handover(tmp_path):
+    lease, controller, lost_at = roll(tmp_path, float("inf"))
+
+    assert lease.lost == "lease_expired"
+    assert lost_at == controller.acknowledged + HANDOVER_MS / 1000
 
 
 def test_a_lease_deadline_comes_from_the_last_acknowledgement(tmp_path):

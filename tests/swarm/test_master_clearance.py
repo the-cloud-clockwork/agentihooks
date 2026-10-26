@@ -10,7 +10,7 @@ from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
 from scripts.swarm_ledger import ledger_server
 from tests.swarm.test_tick import FakeLedger, FakeRuntime
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 
 MASTER, ENGINEER, PLANNER, STRANGER = (
     "master@a1b2c3-0001",
@@ -157,6 +157,13 @@ def test_a_finished_master_holds_no_clearance(swarm, monkeypatch, capsys):
     acting(monkeypatch, MASTER, "demo")
     assert cli.main(["demo", "pause"]) == 1
     assert capsys.readouterr().err == refused(MASTER)
+
+
+def test_the_holder_judges_the_operator_by_the_environment_it_is_given(swarm, monkeypatch):
+    from scripts.gates import Who
+
+    acting(monkeypatch, "engineer@unregistered-0009", "")
+    assert clearance.holder(swarm[0], "demo", Who(), {}) == clearance.OPERATOR
 
 
 @pytest.mark.parametrize("argv", [["pause"], ["--as", MASTER, "pause"], ["set", "intent-gate=coach"]])

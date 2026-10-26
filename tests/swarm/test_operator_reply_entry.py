@@ -8,8 +8,6 @@ from scripts.swarm import delivery, ledger_client, operator_mail
 from scripts.swarm.store import MASTER, AgentRecord, RedisStore, SwarmConfig
 from scripts.swarm_ledger.watch_ledger import line
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 SLUG = "sw"
 ENG = AgentRecord("sw-eng-1", "eng", "t1", pane_id="p1", seat=f"eng-1@{SLUG}")
 BOSS = AgentRecord("sw-master-1", MASTER, MASTER, pane_id="pm", seat=f"master@{SLUG}")
@@ -21,7 +19,7 @@ class PageLedger:
     def __init__(self):
         self.said, self.commented, self.ids = [], [], []
 
-    def relay(self, slug, text, by, op_id=""):
+    def relay(self, slug, text, by, op_id="", reply_to=""):
         self.said.append((slug, text, by))
 
     def relay_comment(self, slug, entry, text, by, op_id):

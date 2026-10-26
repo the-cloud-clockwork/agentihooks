@@ -7,10 +7,11 @@ from scripts.swarm.health import standing
 from tests.swarm.test_stages import agent, delivery, rows, run, stage
 from tests.swarm.test_stages import store as store
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 
 H = 3_600_000
 NOW = 1_791_744_000_000
+FIVE = {"AGENTIHOOKS_STAGE_DETECTOR_TICKS": "5"}
 
 
 def replay():
@@ -413,25 +414,25 @@ def test_detector_refuses_cadence_or_windows_outside_retained_history(ticks, hou
 
 
 def test_detector_defaults_and_the_longest_equal_windows_are_supported():
-    assert stage_detector.settings({}) == stage_detector.Settings(5, 4 * H)
-    assert stage_detector.settings({"AGENTIHOOKS_STAGE_DETECTOR_TICKS": "1"}) == stage_detector.Settings(1, 4 * H)
+    assert stage_detector.settings({}) == stage_detector.Settings(1, 4 * H)
+    assert stage_detector.settings({"AGENTIHOOKS_STAGE_DETECTOR_TICKS": "5"}) == stage_detector.Settings(5, 4 * H)
     assert stage_detector.settings({"AGENTIHOOKS_STAGE_DETECTOR_WINDOW_HOURS": "12"}) == stage_detector.Settings(
-        5, 12 * H
+        1, 12 * H
     )
 
 
-def test_each_ledger_has_its_own_default_detector_cadence(tmp_path, store):
+def test_each_ledger_has_its_own_detector_cadence(tmp_path, store):
     from scripts.swarm.metrics_outbox import Outbox, Settings
 
     box = Outbox(tmp_path / "empty.db", Settings("http://sink", "writer", ""))
     try:
-        initial = stage_detector.record(box, store, "scratch", NOW, [], {})
-        other = stage_detector.record(box, store, "another", NOW + 60_000, [], {})
+        initial = stage_detector.record(box, store, "scratch", NOW, [], FIVE)
+        other = stage_detector.record(box, store, "another", NOW + 60_000, [], FIVE)
         assert initial["at"] == NOW
         assert other["at"] == NOW + 60_000
         for tick in range(1, 5):
-            assert stage_detector.record(box, store, "scratch", NOW + tick * 60_000, [], {}) == initial
-        assert stage_detector.record(box, store, "scratch", NOW + 300_000, [], {})["at"] == NOW + 300_000
+            assert stage_detector.record(box, store, "scratch", NOW + tick * 60_000, [], FIVE) == initial
+        assert stage_detector.record(box, store, "scratch", NOW + 300_000, [], FIVE)["at"] == NOW + 300_000
     finally:
         box.close()
 
@@ -530,8 +531,8 @@ def test_restarted_detector_respects_the_saved_cadence_counter(tmp_path, store):
     box = Outbox(tmp_path / "restart.db", Settings("http://sink", "writer", ""))
     store.redis.set(store.key("scratch", "stage-detector-ticks"), 3)
     try:
-        assert stage_detector.record(box, store, "scratch", NOW, [], {}) == {}
-        assert stage_detector.record(box, store, "scratch", NOW + 60_000, [], {}) == {}
-        assert stage_detector.record(box, store, "scratch", NOW + 120_000, [], {})["at"] == NOW + 120_000
+        assert stage_detector.record(box, store, "scratch", NOW, [], FIVE) == {}
+        assert stage_detector.record(box, store, "scratch", NOW + 60_000, [], FIVE) == {}
+        assert stage_detector.record(box, store, "scratch", NOW + 120_000, [], FIVE)["at"] == NOW + 120_000
     finally:
         box.close()

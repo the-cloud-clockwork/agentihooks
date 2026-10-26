@@ -1,0 +1,6 @@
+{
+  "scripts/inbox/store.py:scripts.inbox.store.x\u01c1InboxStore\u01c1return_to_pool__mutmut_41:2fcf04abf11980c8e836aca6f0b9e9b88c4cdeeb738394f1fbc6dc856ef0f022": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "InboxStore.send always appends the initial pending history entry before any delivery. Starting history at index one removes only that pending entry, which the delivered/read receiver filter already excludes."
+  }
+}

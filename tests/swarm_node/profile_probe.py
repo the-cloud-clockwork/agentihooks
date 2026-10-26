@@ -1,21 +1,28 @@
+import ctypes
 import hashlib
 import json
 import os
+import signal
 import subprocess
 import sys
 import time
 import tomllib
 from collections.abc import Callable
+from contextlib import suppress
 from pathlib import Path
 
+from hooks.proc import processes
 from hooks.secrets import redact
-from scripts.swarm_v2 import worker_home
+from scripts.swarm_v2 import supervision_processes, worker_home
 from scripts.targets.codex_hook_trust import trusted_state
 
 SERVERS = {"claude": ["agentihooks", "fixture-claude-mcp"], "codex": ["agentihooks", "fixture-codex-mcp"]}
 TMP = Path("/tmp")
 REGISTRATION_BUDGET_SECONDS = 10.0
 POLL_SECONDS = 0.25
+POLL_HOOK_SECONDS = 0.01
+HOOK_CHILD_SECONDS = 1.0
+PR_SET_CHILD_SUBREAPER = 36
 OUTPUT_LIMIT = 4000
 
 
@@ -51,37 +58,115 @@ def sessions(home: Path) -> dict:
     return {session: entry["cwd"] for session, entry in registered.items()}
 
 
+def first_registration(home: Path, session: str) -> float | None:
+    registry = home / ".agentihooks" / "active-sessions.json"
+    try:
+        before = registry.stat().st_mtime_ns
+        registered = session in json.loads(registry.read_text(encoding="utf-8"))
+        after = registry.stat().st_mtime_ns
+    except (OSError, ValueError):
+        return None
+    return before / 1e9 if registered and before == after else None
+
+
+def awaited_registration(home: Path, session: str) -> float:
+    budget = REGISTRATION_BUDGET_SECONDS
+    deadline = time.monotonic() + budget
+    while (registered_at := first_registration(home, session)) is None:
+        if time.monotonic() >= deadline:
+            raise AssertionError(f"Codex session {session} never registered within {budget} seconds")
+        time.sleep(POLL_SECONDS)
+    return registered_at
+
+
+def reaper(flag: int) -> None:
+    if ctypes.CDLL(None, use_errno=True).prctl(PR_SET_CHILD_SUBREAPER, flag, 0, 0, 0) != 0:
+        raise OSError(ctypes.get_errno(), "PR_SET_CHILD_SUBREAPER failed")
+
+
+def hook_descendants(existing: dict) -> dict:
+    return {
+        pid: item
+        for pid, item in supervision_processes.descendants(os.getpid(), processes()).items()
+        if existing.get(pid) != item.start_time
+    }
+
+
+def surviving_hook_children(existing: dict, seconds: float = HOOK_CHILD_SECONDS) -> list[str]:
+    deadline = time.monotonic() + seconds
+    while True:
+        new = hook_descendants(existing)
+        survivors = {pid: item for pid, item in new.items() if item.state != "Z"}
+        if not survivors or time.monotonic() >= deadline:
+            break
+        time.sleep(POLL_HOOK_SECONDS)
+    supervision_processes.send(survivors, signal.SIGKILL)
+    deadline = time.monotonic() + 1
+    while (children := [pid for pid, item in new.items() if item.ppid == os.getpid()]) and time.monotonic() < deadline:
+        for pid in children:
+            with suppress(ChildProcessError):
+                os.waitpid(pid, os.WNOHANG)
+        time.sleep(POLL_HOOK_SECONDS)
+        new = hook_descendants(existing)
+    return sorted(f"{pid} {' '.join(item.argv) or item.comm}" for pid, item in survivors.items())
+
+
 def codex_session_start(home: Path, tmp: Path | None = None) -> dict:
     tmp = tmp or home
     document = json.loads((home / ".codex/hooks.json").read_text(encoding="utf-8"))
     commands = [hook["command"] for group in document["hooks"]["SessionStart"] for hook in group["hooks"]]
     assert commands, "the rendered Codex profile has no SessionStart hook"
-    payload = json.dumps(
-        {
-            "hook_event_name": "SessionStart",
-            "session_id": "worker-profile-codex",
-            "cwd": str(Path.cwd()),
-            "source": "startup",
-        }
+    session = "worker-profile-codex"
+    payload = tmp / "codex-run.payload"
+    payload.write_text(
+        json.dumps(
+            {"hook_event_name": "SessionStart", "session_id": session, "cwd": str(Path.cwd()), "source": "startup"}
+        )
     )
+    existing = {pid: item.start_time for pid, item in supervision_processes.living(os.getpid()).items()}
+    registered_at = None
+    failure = None
     (tmp / "codex-run.started").write_text(str(time.time_ns()))
     started = time.monotonic()
-    with (tmp / "codex-run.txt").open("w") as output:
-        for command in commands:
-            result = subprocess.run(
-                command,
-                shell=True,
-                input=payload,
-                text=True,
-                env=os.environ | {"HOME": str(home), "CODEX_HOME": str(home / ".codex")},
-                stdout=output,
-                stderr=subprocess.STDOUT,
-                timeout=60,
-            )
-            (tmp / "codex-run.exit").write_text(str(result.returncode))
-            result.check_returncode()
-    assert sessions(home) == {"worker-profile-codex": str(Path.cwd())}
-    registered_at = (home / ".agentihooks/active-sessions.json").stat().st_mtime
+    reaper(1)
+    try:
+        try:
+            with (tmp / "codex-run.txt").open("w") as output:
+                for command in commands:
+                    with payload.open() as stdin:
+                        process = subprocess.Popen(
+                            command,
+                            shell=True,
+                            stdin=stdin,
+                            env=os.environ | {"HOME": str(home), "CODEX_HOME": str(home / ".codex")},
+                            stdout=output,
+                            stderr=subprocess.STDOUT,
+                            start_new_session=True,
+                        )
+                    deadline = time.monotonic() + 60
+                    while process.poll() is None:
+                        registered_at = registered_at or first_registration(home, session)
+                        if time.monotonic() >= deadline:
+                            with suppress(ProcessLookupError):
+                                os.killpg(process.pid, signal.SIGKILL)
+                            process.wait()
+                            raise subprocess.TimeoutExpired(command, 60)
+                        time.sleep(POLL_HOOK_SECONDS)
+                    registered_at = registered_at or first_registration(home, session)
+                    (tmp / "codex-run.exit").write_text(str(process.returncode))
+                    if process.returncode:
+                        raise subprocess.CalledProcessError(process.returncode, command)
+            registered_at = registered_at or awaited_registration(home, session)
+        except BaseException as error:
+            failure = error
+        survivors = surviving_hook_children(existing)
+    finally:
+        reaper(0)
+    if survivors:
+        raise AssertionError(f"Codex hook children outlived registration: {survivors}") from failure
+    if failure is not None:
+        raise failure
+    assert sessions(home) == {session: str(Path.cwd())}
     return {
         "registered_at": registered_at,
         "registration_to_exit_seconds": time.time() - registered_at,

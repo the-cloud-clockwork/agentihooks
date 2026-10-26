@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import socket
 import sys
@@ -56,7 +57,10 @@ def deliver(redis: Redis, kind: str, raised: str, resolved: str) -> None:
         return
     try:
         event = redis.lindex(f"{root}:outbox", 0)
-        if event and push.send("critical" if kind == "ledger" else "alerts", raised if event == "raised" else resolved):
+        text = (
+            json.loads(event)["text"] if event and event.startswith("{") else raised if event == "raised" else resolved
+        )
+        if event and push.send("critical" if kind == "ledger" else "alerts", text):
             redis.lpop(f"{root}:outbox")
     finally:
 

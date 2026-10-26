@@ -1,0 +1,6 @@
+{
+  "scripts/ci_mutation/selection.py:scripts.ci_mutation.selection.x_collect_shard_stats__mutmut_9:b3a3d6021f301342085515d9ff88637a4cad187f27b505744f12fbeb60bc635a": {
+    "reader": "standards-reader",
+    "reason": "The computed path is used by both COVERAGE_FILE and the CoverageData reader; the internal suffix has no semantic effect."
+  }
+}

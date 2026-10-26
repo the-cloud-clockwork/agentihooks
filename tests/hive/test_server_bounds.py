@@ -11,8 +11,6 @@ import pytest
 
 from scripts.hive import auth, server
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 PUBLIC = "redis://hive.example:6380/2"
 
 
@@ -55,10 +53,14 @@ def _trickle(port, dropped):
         dropped.append(time.monotonic() - started)
 
 
-def _join(port, code):
-    body = json.dumps({"code": code}).encode()
+def _credential(admin):
+    return auth.mint(admin, "laptop", PUBLIC)["ledger_credential"]
+
+
+def _refresh(port, credential):
+    body = json.dumps({"ledger_credential": credential}).encode()
     with socket.create_connection(("127.0.0.1", port), timeout=5) as conn:
-        conn.sendall(b"POST /hive/join HTTP/1.0\r\nContent-Length: %d\r\n\r\n%s" % (len(body), body))
+        conn.sendall(b"POST /hive/refresh HTTP/1.0\r\nContent-Length: %d\r\n\r\n%s" % (len(body), body))
         reply = b""
         while chunk := conn.recv(65536):
             reply += chunk
@@ -77,7 +79,7 @@ def test_silent_connections_never_run_more_handlers_than_the_cap(bounded):
 
 
 @pytest.mark.wall_clock
-def test_trickling_connections_are_dropped_and_a_real_join_is_served(admin, bounded):
+def test_trickling_connections_are_dropped_and_a_real_refresh_is_served(admin, bounded):
     dropped = []
     slow = [threading.Thread(target=_trickle, args=(bounded, dropped)) for _ in range(server.MAX_HANDLERS)]
     for thread in slow:
@@ -85,7 +87,7 @@ def test_trickling_connections_are_dropped_and_a_real_join_is_served(admin, boun
     time.sleep(0.3)
 
     started = time.monotonic()
-    assert _join(bounded, auth.invite(admin, "laptop")) == 200
+    assert _refresh(bounded, _credential(admin)) == 200
     assert time.monotonic() - started < server.REQUEST_DEADLINE_S + 2
 
     for thread in slow:
@@ -99,7 +101,7 @@ def test_a_saturated_server_drops_a_stalled_connection_soon_after_its_deadline(a
     opened = time.monotonic()
     silent = [socket.create_connection(("127.0.0.1", bounded), timeout=5) for _ in range(server.MAX_HANDLERS)]
     time.sleep(0.8)
-    waiting = threading.Thread(target=_join, args=(bounded, auth.invite(admin, "laptop")))
+    waiting = threading.Thread(target=_refresh, args=(bounded, _credential(admin)))
     waiting.start()
     try:
         for conn in silent:
@@ -168,7 +170,7 @@ def cert(tmp_path):
 
 
 @pytest.mark.wall_clock
-def test_silent_tls_handshakes_are_dropped_and_a_real_https_join_is_served(admin, cert, monkeypatch):
+def test_silent_tls_handshakes_are_dropped_and_a_real_https_refresh_is_served(admin, cert, monkeypatch):
     monkeypatch.setattr(server, "MAX_HANDLERS", 2)
     monkeypatch.setattr(server, "REQUEST_DEADLINE_S", 1)
     monkeypatch.setattr(server, "REQUEST_TIMEOUT_S", 30)
@@ -178,12 +180,12 @@ def test_silent_tls_handshakes_are_dropped_and_a_real_https_join_is_served(admin
     try:
         silent = [socket.create_connection(("localhost", port), timeout=5) for _ in range(server.MAX_HANDLERS)]
         time.sleep(0.3)
-        body = json.dumps({"code": auth.invite(admin, "laptop")}).encode()
+        body = json.dumps({"ledger_credential": _credential(admin)}).encode()
         trusting = ssl.create_default_context(cafile=cert[0])
         started = time.monotonic()
         with socket.create_connection(("localhost", port), timeout=5) as raw:
             with trusting.wrap_socket(raw, server_hostname="localhost") as conn:
-                conn.sendall(b"POST /hive/join HTTP/1.0\r\nContent-Length: %d\r\n\r\n%s" % (len(body), body))
+                conn.sendall(b"POST /hive/refresh HTTP/1.0\r\nContent-Length: %d\r\n\r\n%s" % (len(body), body))
                 reply = b""
                 while chunk := conn.recv(65536):
                     reply += chunk
@@ -199,12 +201,12 @@ def test_silent_tls_handshakes_are_dropped_and_a_real_https_join_is_served(admin
 
 def test_a_handler_error_names_the_accepted_client(admin, bounded, monkeypatch, capsys):
     def broken(*_):
-        raise RuntimeError("exchange broke")
+        raise RuntimeError("refresh broke")
 
-    monkeypatch.setattr(auth, "exchange", broken)
-    body = b'{"code": "any"}'
+    monkeypatch.setattr(auth, "refresh", broken)
+    body = b'{"ledger_credential": "any"}'
     with socket.create_connection(("127.0.0.1", bounded), timeout=5) as conn:
-        conn.sendall(b"POST /hive/join HTTP/1.0\r\nContent-Length: %d\r\n\r\n%s" % (len(body), body))
+        conn.sendall(b"POST /hive/refresh HTTP/1.0\r\nContent-Length: %d\r\n\r\n%s" % (len(body), body))
         while conn.recv(65536):
             pass
     time.sleep(0.3)
@@ -231,12 +233,12 @@ def test_a_thread_that_cannot_start_gives_its_slot_back(admin, monkeypatch):
         httpd.server_close()
 
 
-def test_a_served_join_gives_its_slot_back(admin, monkeypatch):
+def test_a_served_refresh_gives_its_slot_back(admin, monkeypatch):
     monkeypatch.setattr(server, "MAX_HANDLERS", 1)
     httpd = server.make_server(admin, PUBLIC, "127.0.0.1", 0)
     threading.Thread(target=httpd.serve_forever, kwargs={"poll_interval": 0.05}, daemon=True).start()
     try:
-        assert _join(httpd.server_address[1], auth.invite(admin, "laptop")) == 200
+        assert _refresh(httpd.server_address[1], _credential(admin)) == 200
         deadline = time.monotonic() + 5
         while httpd._admitted and time.monotonic() < deadline:
             time.sleep(0.05)
@@ -281,3 +283,54 @@ def test_reaping_continues_when_an_expired_socket_shutdown_raises(admin, monkeyp
     failed.shutdown.assert_called_once_with(socket.SHUT_RDWR)
     expired.shutdown.assert_called_once_with(socket.SHUT_RDWR)
     unexpired.shutdown.assert_not_called()
+
+
+@pytest.fixture
+def stalled_redis():
+    listener = socket.create_server(("127.0.0.1", 0))
+    accepted = []
+
+    def accept():
+        while True:
+            try:
+                accepted.append(listener.accept()[0])
+            except OSError:
+                return
+
+    threading.Thread(target=accept, daemon=True).start()
+    yield f"redis://127.0.0.1:{listener.getsockname()[1]}/0"
+    listener.shutdown(socket.SHUT_RDWR)
+    listener.close()
+    for conn in accepted:
+        conn.close()
+
+
+@pytest.mark.wall_clock
+@pytest.mark.parametrize(("path", "field"), [(server.REFRESH_PATH, "ledger_credential")])
+def test_a_request_stalled_inside_redis_answers_and_frees_its_slot_within_the_bound(
+    stalled_redis, path, field, monkeypatch
+):
+    import redis
+
+    monkeypatch.setattr(server, "MAX_HANDLERS", 1)
+    monkeypatch.setattr(server, "REDIS_TIMEOUT_S", 1)
+    httpd = server.make_server(redis.Redis.from_url(stalled_redis, decode_responses=True), PUBLIC, "127.0.0.1", 0)
+    threading.Thread(target=httpd.serve_forever, kwargs={"poll_interval": 0.05}, daemon=True).start()
+    body = json.dumps({field: "any"}).encode()
+    try:
+        started = time.monotonic()
+        with socket.create_connection(("127.0.0.1", httpd.server_address[1]), timeout=5) as conn:
+            conn.sendall(b"POST %s HTTP/1.0\r\nContent-Length: %d\r\n\r\n%s" % (path.encode(), len(body), body))
+            reply = b""
+            while chunk := conn.recv(65536):
+                reply += chunk
+        while httpd._admitted and time.monotonic() - started < 5:
+            time.sleep(0.05)
+
+        assert time.monotonic() - started < server.REDIS_TIMEOUT_S * 2
+        assert int(reply.split()[1]) == 503
+        assert json.loads(reply.partition(b"\r\n\r\n")[2]) == {"error": server.REDIS_STALLED}
+        assert not httpd._admitted
+    finally:
+        httpd.shutdown()
+        httpd.server_close()

@@ -12,8 +12,6 @@ from scripts.swarm.notice_text import plain
 from scripts.swarm.store import PREFIX, SwarmError
 from scripts.swarm_ledger import ledger_comments
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 NOW_MS = 1_791_700_000_000
 TEST = "tests/swarm_ledger/test_alerts_page.py::test_the_panel_fold_is_remembered_after_a_reload"
 OTHER = "tests/Inbox_Cases/test_Notify.py::TestNotify::test_Notify_Within_Budget"
@@ -39,6 +37,8 @@ def _budget(*tests):
 def _gh(calls, budget=None, artifact="77", archive=None):
     def run(command, **kwargs):
         calls.append((command, kwargs))
+        if "/commits?" in command[2]:
+            return subprocess.CompletedProcess(command, 0, "", "")
         if command[2] == LISTING:
             return subprocess.CompletedProcess(command, 0, f"{artifact}\n", "")
         return subprocess.CompletedProcess(command, 0, archive if archive is not None else _zip(budget), b"")
@@ -92,7 +92,7 @@ def test_a_test_flaky_in_two_runs_is_filed_once_in_plain_words(swarm):
         ),
     ]
     assert all(ledger_comments.problems(text, "item") == [] and plain(text, "item") == text for _, text in ledger.added)
-    assert actions == ["filed a ledger follow up for a test flaky in two dev runs within seven days"] * 2
+    assert actions == ["filed a ledger follow up for a test flaky in 2 dev runs within seven days"] * 2
     assert calls[0][0][4] == JQ and calls[0][1]["cwd"] == "/repo"
     raised = f"{PREFIX}:sw:ci-budget:flaky:{TEST}"
     assert flakes.RAISED_TTL_S == 604800

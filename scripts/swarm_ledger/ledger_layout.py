@@ -8,10 +8,11 @@ import ledger_core as core
 ROWS = {
     "capacity-box": ("height",),
     "quota-box": ("height",),
+    "hives-box": ("height",),
     "overlays-box": ("height",),
     "agents-box": ("height",),
-    "health-box": ("height",),
     "handoff-box": ("height",),
+    "recovery-box": ("height",),
 }
 LIMITS = {"height": (48, 4000, 0), "split": (15, 85, 1)}
 COLUMNS = "columns"
@@ -21,6 +22,7 @@ MAX_TABLES = 32
 MAX_COLUMNS = 24
 STATS = "stats"
 MAX_STATS = 32
+LISTS = (COLUMNS, STATS)
 
 
 def path():

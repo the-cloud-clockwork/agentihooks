@@ -9,12 +9,10 @@ they are imported.
 """
 
 import difflib
-import hashlib
 import json
 import os
 import re
 import sys
-import tempfile
 import threading
 import time
 from pathlib import Path
@@ -37,47 +35,39 @@ import ledger_title
 import ledger_verdict
 import orjson
 
-from scripts.swarm_ledger import ledger_freezes, ledger_groups, ledger_phases, ledger_plans, ledger_rank, ledger_splits
+from scripts.swarm_ledger import (
+    ledger_freezes,
+    ledger_groups,
+    ledger_phases,
+    ledger_plans,
+    ledger_rank,
+    ledger_splits,
+    models,
+    ports,
+)
+from scripts.swarm_ledger.ledger_files import LOG_MAX_BYTES, append_capped, atomic_write, rotate_if_full  # noqa: F401
+from scripts.swarm_ledger.page_assets import (  # noqa: F401
+    HOME,
+    MODULES,
+    PAGE_RE,
+    PAGES,
+    PALETTE,
+    SEED_RE,
+    SHELL,
+    TOKEN_RE,
+    TOOLTIPS,
+    page_version,
+    read_token,
+    static_assets,
+)
 
 LEDGER_DIR = Path(os.environ.get("LEDGER_DIR", Path.home() / "development-ledger")).expanduser()
 SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,120}$")
-SEED_RE = re.compile(r'(<script id="ledger-data" type="application/json">)(.*?)(</script>)', re.S)
-PAGE_RE = re.compile(r'<meta name="ledger-page" content="([0-9a-f]+)">')
-TEMPLATE = Path(__file__).resolve().parent / "template.html"
-PALETTE = TEMPLATE.with_name("palette.css")
-TOOLTIPS = TEMPLATE.with_name("tooltips.js")
-MODULES = TEMPLATE.parent / "static" / "js"
-SHELL = TEMPLATE.with_name("shell.html")
-HOME = TEMPLATE.with_name("home.html")
-TOKEN_RE = re.compile(r'<meta name="ledger-token" content="([A-Za-z0-9_-]{16,})">')
 LEGACY_LINE_RE = re.compile(r"^([A-Za-z][\w.-]*)(?: [0-9:]+Z?| \([^)]*\))?: (.+)$")
-LISTS = {
-    "phases": ("title", "description", "done", "out_of_scope", "depends_on", "planning", "release"),
-    "questions": ("text", "out_of_scope"),
-    "followups": ("text", "done", "out_of_scope"),
-    "tasks": (
-        "title",
-        "description",
-        "phase",
-        "lane",
-        "state",
-        "claimed_by",
-        "issue_url",
-        "pr_url",
-        "done",
-        "out_of_scope",
-    ),
-    "plans": ("out_of_scope",),
-}
-BOOL_FIELDS = ("done", "out_of_scope")
+LISTS = models.LISTS
+BOOL_FIELDS = models.CHECKBOXES
 STATE_EVENTS = {"done": ("checked", "unchecked"), "out_of_scope": ("out of scope", "back in scope")}
-THREADS = {
-    "notes": ("comments",),
-    "phases": ("comments",),
-    "questions": ("answers", "comments"),
-    "followups": ("comments",),
-    "tasks": ("comments",),
-}
+THREADS = models.THREADS
 AGENT_OPS = ("join", "leave", "ack", "claim", "set", "add_item", "retext", "gate_bypass", "gate_lift")
 ARTIFACT_OPS = ("artifact_add", "artifact_delete", "artifact_restore", "artifact_purge")
 AUTHOR_RE = re.compile(r"^[A-Za-z][\w.@-]{0,63}$")
@@ -93,7 +83,6 @@ EVENTS_KEPT = 2000
 EVENTS_CEILING = 10000
 EVENTS_WINDOW_MS = 24 * 60 * 60 * 1000
 MAX_TEXT = 20000
-LOG_MAX_BYTES = 5 << 20
 LOCK = threading.Lock()
 
 EXTENSION_OPS = {
@@ -126,12 +115,6 @@ EXTENSION_OPS = {
 
 def now_ms():
     return int(time.time() * 1000)
-
-
-def paths(slug):
-    if not isinstance(slug, str) or not SLUG_RE.match(slug):
-        raise ValueError(f"invalid slug: {slug!r}")
-    return LEDGER_DIR / f"{slug}.html", LEDGER_DIR / f"{slug}.json"
 
 
 def _reject_constant(name):
@@ -235,7 +218,7 @@ def validate(doc):
         type(doc["time_left_minutes"]) is not int or time_left_value(doc["time_left_minutes"]) is None
     ):
         raise ValueError("time_left_minutes must be a nonnegative integer")
-    for key in ("title", "overview", "orchestrator", "chat_instructions"):
+    for key in models.TEXT_FIELDS:
         if not isinstance(doc.get(key, ""), str):
             raise ValueError(f"{key} must be a string")
     if not isinstance(doc.get("sources", []), list) or not all(isinstance(s, str) for s in doc.get("sources", [])):
@@ -255,7 +238,7 @@ def validate(doc):
             raise ValueError(f"every {name} item needs a unique string id without '/'")
         for item in items:
             for field in fields:
-                expected = list if field == "depends_on" else bool if field in (*BOOL_FIELDS, "release") else str
+                expected = models.field_type(name, field)
                 if field in item and not isinstance(item[field], expected):
                     raise ValueError(f"{name}/{item['id']}/{field} must be {expected.__name__}")
             for thread in THREADS[name]:
@@ -300,64 +283,15 @@ def parse_seed(html):
 
 
 def watch_path(slug, name):
-    from scripts.swarm.naming import addresses
+    addresses = ports.swarm().naming.addresses
 
     paths = [LEDGER_DIR / ".sessions" / f"{slug}.{candidate}.watch" for candidate in addresses(name)]
     return next((path for path in paths if path.exists()), paths[0])
 
 
-def static_assets():
-    """Every file a page loads, by its path under /static/<page version>/."""
-    static = MODULES.parent
-    return {
-        "palette.css": PALETTE,
-        "tooltips.js": TOOLTIPS,
-        **{f"css/{p.name}": p for p in sorted((static / "css").glob("*.css"))},
-        **{f"js/{p.name}": p for p in sorted(MODULES.glob("*.js"))},
-        **{f"home/{p.name}": p for p in sorted((static / "home").glob("*.js"))},
-    }
-
-
-def page_version(assets=None):
-    if assets is None:
-        assets = {name: path.read_bytes() for name, path in static_assets().items()}
-    digest = hashlib.sha256(TEMPLATE.read_bytes() + SHELL.read_bytes() + HOME.read_bytes())
-    for name, data in assets.items():
-        digest.update(name.encode() + b"\0" + data)
-    return digest.hexdigest()[:12]
-
-
-def read_token(html):
-    match = TOKEN_RE.search(html)
-    return match.group(1) if match else None
-
-
 def seed_text(doc, rev=None):
     body = doc if rev is None else {"_rev": rev, **doc}
     return "\n" + pretty(body).replace("<", "\\u003c") + "\n"
-
-
-def rotate_if_full(path, limit=LOG_MAX_BYTES):
-    try:
-        if path.stat().st_size >= limit:
-            path.replace(path.with_name(path.name + ".1"))
-    except FileNotFoundError:
-        pass
-
-
-def append_capped(path, text, limit=LOG_MAX_BYTES):
-    rotate_if_full(path, limit)
-    with open(path, "a", encoding="utf-8") as fh:
-        fh.write(text)
-
-
-def atomic_write(path, text):
-    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.")
-    with os.fdopen(fd, "w", encoding="utf-8") as fh:
-        fh.write(text)
-    written = os.stat(tmp)
-    os.replace(tmp, path)
-    return written
 
 
 def text_diff(old, new):
@@ -387,12 +321,13 @@ class Context:
         self.at, self.rev = at, meta["rev"] + 1
         self.stamps, self.events = meta["stamps"], []
         self.meta, self.dirty, self.refused, self.dropped = meta, False, [], []
+        self.unstored = set()
         self.names = {}
         self.slug = slug
 
     def author(self, name: str) -> str:
         if name not in self.names:
-            from scripts.swarm.naming import resolve_name
+            resolve_name = ports.swarm().naming.resolve_name
 
             resolved = resolve_name(name)
             self.names[name] = resolved
@@ -550,8 +485,8 @@ def apply_op(doc, op, ctx):
 def _screened(op):
     if not op["thread"].endswith("/comments"):
         return op["text"]
-    from hooks.context.conditions import LEDGER_WRITE
-    from hooks.filters import check as filters
+    LEDGER_WRITE = ports.hooks().conditions.LEDGER_WRITE
+    filters = ports.hooks().filters
 
     return filters.screen(LEDGER_WRITE, op["text"])
 
@@ -643,6 +578,8 @@ def gated(gate, doc, op, ctx):
 
 
 def sync(slug, changes=None, ops=None, gate=None):
-    from scripts.swarm_ledger.repository import repository
+    from scripts.swarm_ledger import storage
+
+    repository = storage.default()
 
     return repository.bound(sys.modules[__name__]).apply_ops(slug, changes=changes, ops=ops, gate=gate)

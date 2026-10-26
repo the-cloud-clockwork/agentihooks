@@ -17,7 +17,6 @@ from tests.swarm_ledger.test_caps_columns import browser as chromium_browser
 
 browser = chromium_browser
 ROOT = Path(__file__).resolve().parents[2]
-TEMPLATE = ROOT / "scripts" / "swarm_ledger" / "template.html"
 URL = "http://ledger.test/layout"
 NOW_MS = 1_791_300_000_000
 NOW_S = NOW_MS // 1000
@@ -32,10 +31,13 @@ ROWS = [
     "swarm-alert",
     "capacity-box",
     "quota-box",
+    "hives-box",
     "overlays-box",
     "agents-box",
-    "health-box",
     "handoff-box",
+    "recovery-box",
+    "freeze-box",
+    "architecture-box",
 ]
 
 
@@ -48,6 +50,7 @@ def status(**changes):
             "max_eng": 3,
             "max_ci": 1,
             "max_plan": 1,
+            "masters_step": 12,
             "autonomy": "delegate",
             "effort_min": "medium",
             "effort_max": "high",
@@ -127,8 +130,10 @@ class Page:
         html = shell_html()
         self.context = browser.new_context(viewport={"width": width, "height": 2400}, **options)
         if clock:
-            self.context.clock.install(time=NOW_MS)
-        self.context.add_init_script(f"Date.now = () => {NOW_MS};")
+            self.context.clock.install(time=NOW_S - 1)
+            self.context.clock.pause_at(NOW_S)
+        else:
+            self.context.add_init_script(f"Date.now = () => {NOW_MS};")
         self.context.route("**/*", lambda route: self.route(route, html))
         serve_modules(self.context)
         self.tab = self.context.new_page()
@@ -142,7 +147,7 @@ class Page:
         request = route.request
         if is_events(request.url):
             fulfill_events(route, ledger_state(DOC), self.payload)
-        elif "/api/swarm/" in request.url:
+        elif "/swarm/" in request.url:
             if request.method == "PUT":
                 self.puts.append(json.loads(request.post_data))
             route.fulfill(json=self.payload)
@@ -178,7 +183,7 @@ def open_page(browser):
         page.context.close()
 
 
-def test_rows_run_header_alert_capacity_quota_overlays_agents_health_handoffs():
+def test_rows_run_header_alert_capacity_quota_overlays_agents_handoffs_recovery_with_no_health_panel():
     page = page_source()
     box = page.split('<div id="swarm-box">', 1)[1].split('<aside id="stats-column"', 1)[0]
     positions = [box.index(f'id="{row}"') for row in ROWS]
@@ -186,6 +191,7 @@ def test_rows_run_header_alert_capacity_quota_overlays_agents_health_handoffs():
     assert 'id="command-log"' not in box
     assert '<details class="fold sw-fold" id="overlays-fold" open>' in box
     assert '<details class="fold sw-fold" id="quota-fold" open>' in box
+    assert '<details class="fold sw-fold" id="recovery-fold" open>' in box
     for gone in (
         "crew",
         "needs-you",
@@ -195,6 +201,7 @@ def test_rows_run_header_alert_capacity_quota_overlays_agents_health_handoffs():
         "swarm-row-work",
         "swarm-row-accounts",
         "doctor-box",
+        'id="health',
         "<section",
     ):
         assert gone not in box, gone
@@ -204,7 +211,14 @@ def test_every_swarm_row_stays_full_width_at_every_viewport(open_page):
     for width in (1440, 390):
         page = open_page(status(), width)
         full = page.box("swarm-box")["width"]
-        for row in ("capacity-box", "quota-box", "overlays-box", "agents-box", "health-box", "handoff-box"):
+        for row in (
+            "capacity-box",
+            "quota-box",
+            "hives-box",
+            "overlays-box",
+            "agents-box",
+            "handoff-box",
+        ):
             assert abs(page.box(row)["width"] - full) < 1, row
 
 
@@ -289,6 +303,20 @@ def test_capacity_fields_take_typed_values_and_apply_sends_one_set(open_page):
         page.tab.wait_for_timeout(100)
     assert page.puts == [{"action": "set", "max_eng": 5, "max_ci": 2, "compact_limit": 750}]
     assert apply.is_disabled()
+
+
+def test_the_masters_step_stepper_drafts_and_apply_sends_it(open_page):
+    page = open_page()
+    field = page.tab.locator("#cap-masters")
+    assert field.input_value() == "12"
+    page.tab.get_by_role("button", name="Lower masters step").click()
+    assert field.input_value() == "11"
+    page.tab.get_by_role("button", name="Apply capacity").click()
+    for _ in range(100):
+        if page.puts:
+            break
+        page.tab.wait_for_timeout(100)
+    assert page.puts == [{"action": "set", "masters_step": 11}]
 
 
 def test_the_effort_range_shows_in_the_caps_row_and_apply_sends_it(open_page):
@@ -378,8 +406,8 @@ def test_capacity_caps_and_apply_share_one_row_and_gates_start_below(open_page):
           };
         }"""
     )
-    assert len(boxes["row"]) == 10
-    caps, (affinity, apply) = boxes["row"][:6], boxes["row"][8:]
+    assert len(boxes["row"]) == 11
+    caps, (affinity, apply) = boxes["row"][:7], boxes["row"][9:]
     middle = (caps[0][0] + caps[0][1]) / 2
     assert all(top <= middle <= bottom for top, bottom in caps)
     last = (affinity[0] + affinity[1]) / 2
@@ -401,7 +429,7 @@ def test_agents_table_lists_the_master_first_with_overlays_and_stats_carry_the_t
     payload["agents"][1]["overlays"] = ["qitp-tuner", "trader", "reviewer"]
     page = open_page(payload)
     assert page.table("swarm-agents") == [
-        ["master-1", "—", "—", "—", "opus high", "—", "—", "LIVE", "2h 0m", "message\nterminate"],
+        ["master-1\nluna", "—", "—", "—", "opus high", "—", "—", "LIVE", "2h 0m", "message\nterminate"],
         [
             "eng-58",
             "eng",
@@ -544,7 +572,7 @@ def test_agents_table_shows_each_agents_execution_identity_beside_its_terminal(o
     ]
     rows = page.table("swarm-agents")
     assert [row[:2] + row[7:10] for row in rows] == [
-        ["master-1", "—", "LIVE", "WORKING seen 1m ago\nlocal · gen 1", "—"],
+        ["master-1\nluna", "—", "LIVE", "WORKING seen 1m ago\nlocal · gen 1", "—"],
         ["eng-58", "eng", "IDLE", "INPUT WAIT not seen\nlocal · gen 3", "—"],
         [
             "eng-60",
@@ -621,7 +649,7 @@ def test_agents_table_lists_live_agents_first_and_pages_the_finished_ones_newest
     payload["agents"] = finished[:60] + payload["agents"] + finished[60:]
     page = open_page(payload, width=1920)
     rows = page.table("swarm-agents")
-    assert [row[0] for row in rows[:2]] == ["master-1", "eng-58"]
+    assert [row[0] for row in rows[:2]] == ["master-1\nluna", "eng-58"]
     assert [row[0] for row in rows[2:52]] == [f"done-{i}" for i in range(119, 69, -1)]
     assert all(row[7] == "FINISHED" and row[9] == "" for row in rows[2:52])
     assert [cell.lower() for cell in rows[52]] == ["show 50 more finished agents · 70 left"]
@@ -762,7 +790,7 @@ def test_full_length_agent_names_stay_on_one_line_and_fit_the_desktop_column(ope
         })""",
     )
     assert lines and all(count == 1 for _text, count in lines if "\n" not in _text), lines
-    assert [row[0] for row in page.table("swarm-agents")] == ["master@323133-0004", "engineer@323133-0072"]
+    assert [row[0] for row in page.table("swarm-agents")] == ["master@323133-0004\nluna", "engineer@323133-0072"]
     titles = page.tab.eval_on_selector_all("#swarm-agents td:first-child .sw-id", "ids => ids.map(e => e.title)")
     assert titles == ["master@323133-0004", "engineer@323133-0072"]
 
@@ -801,24 +829,7 @@ def test_quota_rows_come_from_the_stubbed_balance_and_mark_the_master_account(op
 
 def test_the_quota_table_fits_its_box_at_1920(open_page):
     payload = status()
-    payload["quota_capacity"] = {
-        "configured": {"eng": 4, "ci": 1, "plan": 1},
-        "effective": {"eng": 2, "ci": 1, "plan": 0},
-        "reason": "accounts are closed; Claude has 1 free seats and Codex has 1 free seats",
-        "lanes": ["eng", "ci", "plan"],
-        "accounts": [
-            {
-                "harness": "claude",
-                "name": "tccgma",
-                "state": "CLOSED",
-                "sessions": 2,
-                "five_left": 92,
-                "week_left": 78,
-                "routing": 78,
-            }
-        ],
-        "at": NOW_MS - 7 * 60_000,
-    }
+    payload["quota"]["rows"][0] = {**payload["quota"]["rows"][0], "state": "CLOSED", "routing_left": 78}
     page = open_page(payload, 1920)
     scroll = page.tab.eval_on_selector("#quota-box .sw-scroll", "s => [s.scrollWidth, s.clientWidth]")
     assert scroll[0] == scroll[1]
@@ -846,6 +857,7 @@ def test_every_capacity_stepper_puts_minus_before_and_plus_after_its_value(open_
         ["eng", ["−", "3", "+"]],
         ["ci", ["−", "1", "+"]],
         ["plan", ["−", "1", "+"]],
+        ["masters step", ["−", "12", "+"]],
         ["compact limit", ["−", "600k", "+"]],
         ["effort min", ["−", "medium", "+"]],
         ["effort max", ["−", "high", "+"]],
@@ -874,15 +886,19 @@ def test_the_refresh_icon_beside_the_title_probes_every_account_and_redraws(open
 
 def test_an_untouched_page_probes_quota_every_five_minutes(open_page):
     page = open_page(clock=True)
-    page.tab.clock.run_for(299_000)
-    page.tab.wait_for_timeout(200)
-    assert {"action": "quota_refresh"} not in page.puts
-    page.tab.clock.run_for(2_000)
-    for _ in range(50):
-        if {"action": "quota_refresh"} in page.puts:
-            break
-        page.tab.wait_for_timeout(50)
-    assert page.puts.count({"action": "quota_refresh"}) == 1
+    assert page.tab.evaluate("Date.now()") == NOW_MS
+    for count in (1, 2):
+        page.tab.clock.run_for(299_999)
+        assert page.tab.evaluate("Date.now()") == NOW_MS + count * 300_000 - 1
+        assert page.puts.count({"action": "quota_refresh"}) == count - 1
+        with page.tab.expect_response(
+            lambda response: (
+                response.request.method == "PUT" and response.request.post_data_json == {"action": "quota_refresh"}
+            )
+        ):
+            page.tab.clock.run_for(1)
+        assert page.tab.evaluate("Date.now()") == NOW_MS + count * 300_000
+        assert page.puts.count({"action": "quota_refresh"}) == count
 
 
 def test_doctor_row_shows_off_or_on_and_toggles_its_own_button(open_page):
@@ -904,27 +920,6 @@ def test_doctor_row_shows_off_or_on_and_toggles_its_own_button(open_page):
     assert on.text("#doctor-findings") == "findings 2"
     assert on.tab.locator("[data-swarm=doctor_stop]").is_visible()
     assert not on.tab.locator("[data-swarm=doctor_start]").is_visible()
-
-
-def test_health_rows_carry_evidence_threshold_seen_verdict_and_note(open_page):
-    finding = {
-        "id": "ceremony/eng-59",
-        "kind": "ceremony",
-        "subject": "eng-59",
-        "evidence": ["24 moves", "1 outcome"],
-        "threshold": "20 · ratio 12",
-        "seen_at": NOW_MS - 540_000,
-        "verdict": {"value": "false-positive", "note": "pr open"},
-    }
-    page = open_page(status(findings=[finding]))
-    row = page.table("health")[0]
-    assert row[:5] == ["ceremony", "eng-59", "24 moves · 1 outcome", "20 · ratio 12", "9m ago"]
-    assert page.tab.locator("#health .hl-pick").input_value() == "false-positive"
-    assert page.tab.locator("#health .hl-note").input_value() == "pr open"
-    page.tab.locator("#health .hl-note").fill("still open")
-    page.tab.locator("#health .hl-pick").select_option("resolved")
-    page.tab.wait_for_function("() => !document.querySelector('#swarm-modes button').disabled")
-    assert page.puts == [{"action": "verdict", "id": "ceremony/eng-59", "verdict": "resolved", "note": "still open"}]
 
 
 def test_handoff_rows_show_each_seat_and_offer_the_restore_decision(open_page):
@@ -961,7 +956,7 @@ def test_handoff_rows_show_each_seat_and_offer_the_restore_decision(open_page):
 
 def test_swarm_tab_styles_use_only_palette_tokens():
     page = page_source()
-    rules = re.findall(r"^\s*(?:\.sw-|#swarm|\.lbl|#health-table|#agents-table|#quota-table)[^{]*\{[^}]*\}", page, re.M)
+    rules = re.findall(r"^\s*(?:\.sw-|#swarm|\.lbl|#agents-table|#quota-table)[^{]*\{[^}]*\}", page, re.M)
     assert len(rules) > 30
     for rule in rules:
         assert not re.search(

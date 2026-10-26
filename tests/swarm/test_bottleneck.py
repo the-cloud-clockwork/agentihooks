@@ -6,7 +6,7 @@ from scripts.swarm import bottleneck
 from scripts.swarm.metrics_outbox import Outbox, Settings
 from scripts.swarm.store import RedisStore, SwarmConfig
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 SLUG = "scratch"
 H = 3_600_000
 NOW = 10 * H
@@ -44,11 +44,14 @@ def run(branch, created, ended, conclusion, queue_s=600.0):
     }
 
 
+GAP_S = bottleneck.SAMPLE_GAP_MS / 1000
+
+
 def sample(at, held, held_by):
     return {"ledger": SLUG, "ts_ms": int(at), "held_spawns": held, "held_by": held_by}
 
 
-def every_five_minutes(start, end, held, held_by):
+def every_gap(start, end, held, held_by):
     return [sample(at, held, held_by) for at in range(start, end, bottleneck.SAMPLE_GAP_MS)]
 
 
@@ -90,7 +93,7 @@ def test_a_ci_heavy_window_names_ci_with_its_numbers():
 
 def test_a_host_held_window_names_host():
     found = bottleneck.report(
-        rows(agent=[claim("t2", 9 * H)], host=every_five_minutes(6 * H, NOW, 2, "host")),
+        rows(agent=[claim("t2", 9 * H)], host=every_gap(6 * H, NOW, 2, "host")),
         open_task("t2", "claimed"),
         NOW,
     )
@@ -100,7 +103,7 @@ def test_a_host_held_window_names_host():
 
 def test_spawns_held_by_quota_count_as_quota():
     found = bottleneck.report(rows(host=[sample(9 * H, 3, "quota")]), [], NOW)
-    assert found["seconds"] == seconds(quota=900.0)
+    assert found["seconds"] == seconds(quota=3 * GAP_S)
     assert found["bottleneck"] == "quota"
 
 
@@ -113,14 +116,25 @@ def test_a_held_span_names_the_held_harness_and_none_for_an_older_sample():
     ]
 
 
+def test_a_held_sample_counts_until_a_next_sample_thirteen_minutes_later():
+    late = 9 * H + 13 * 60_000
+    assert bottleneck.held_spans([sample(9 * H, 1, "host"), sample(late, 1, "host")], NOW)[0] == (
+        "host",
+        9 * H,
+        late,
+        1,
+        "",
+    )
+
+
 def test_a_sample_spooled_before_the_held_by_column_counts_as_quota():
     older = {"ledger": SLUG, "ts_ms": 9 * H, "held_spawns": 2, "reason": "accounts have quota"}
-    assert bottleneck.report(rows(host=[older]), [], NOW)["seconds"] == seconds(quota=600.0)
+    assert bottleneck.report(rows(host=[older]), [], NOW)["seconds"] == seconds(quota=2 * GAP_S)
 
 
 def test_a_sample_covers_at_most_one_gap_and_stops_at_now_in_any_row_order():
     samples = [sample(NOW - 60_000, 1, "host"), sample(8 * H, 1, "host"), sample(7 * H, 1, "host")]
-    assert bottleneck.report(rows(host=samples), [], NOW)["seconds"] == seconds(host=660.0)
+    assert bottleneck.report(rows(host=samples), [], NOW)["seconds"] == seconds(host=2 * GAP_S + 60.0)
 
 
 def test_time_before_the_window_is_not_counted():

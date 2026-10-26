@@ -1,0 +1,6 @@
+{
+  "scripts/ci_mutation/stats_cache.py:scripts.ci_mutation.stats_cache.x_test_inputs__mutmut_1:36716423dc240d783697de9d7b426a2a25e490a1cda7c46defd8b92eea200b2a": {
+    "reader": "standards-reader",
+    "reason": "Equivalent: every production caller explicitly supplies dynamic_imports, so changing its unused default has no effect."
+  }
+}

@@ -9,7 +9,6 @@ from tests.swarm_ledger.test_proof_controls import hive as _hive
 from tests.swarm_ledger.test_proof_controls import live as _live
 from tests.swarm_ledger.test_proof_controls import owned as _owned
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
 credential, hive, live, owned = _credential, _hive, _live, _owned
 
 
@@ -39,6 +38,7 @@ def test_remote_creator_uses_its_own_parent_identity_and_bounded_transport(owned
         return original(request, **options)
 
     monkeypatch.setattr(urllib.request, "urlopen", open_request)
+    monkeypatch.setattr(proof_ledger.ledger_link, "transport", lambda environ=None: {})
     result = proof_ledger.control(owned.slug, {"control": "pause"}, environ)
     assert result["state"] == "pending" and result["argv"] == ["pause"]
     assert minted == ([] if provided else [(SLUG, owned.owner)])
@@ -92,6 +92,7 @@ def test_controller_client_adopts_external_owner_and_uses_scoped_controls(owned,
         return original(request, **options)
 
     monkeypatch.setattr(urllib.request, "urlopen", open_request)
+    monkeypatch.setattr(proof_ledger.ledger_link, "transport", lambda environ=None: {})
     assert proof_ledger.migrate(owned.slug, owner, environ) == {"parent": "external-parent", "owner": owned.owner}
     result = proof_ledger.controller_control(owned.slug, owner, {"control": "pause"}, environ)
     assert result["state"] == "pending" and result["argv"] == ["pause"]

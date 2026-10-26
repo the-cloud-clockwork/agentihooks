@@ -1,3 +1,4 @@
+import dataclasses
 import json
 import subprocess
 
@@ -10,11 +11,11 @@ from scripts.gates.verdicts import Verdicts
 from scripts.handoff import check as handoff_check
 from scripts.handoff import transfers
 from scripts.inbox.seats import SeatRegistry
-from scripts.swarm import cli, dispatcher, stack, tick
+from scripts.swarm import claim_hold, cli, dispatcher, stack, tick
 from scripts.swarm.store import SwarmError
+from scripts.swarm_ledger import ledger_comments, task_dependencies
 from tests.swarm.test_cli import HANDOFF, env
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
 _fixture = env
 AGENT = "engineer@a1b2c3-0001"
 HEAD = "a" * 40
@@ -181,7 +182,6 @@ def test_park_refuses_an_unreadable_answer_on_issues(parked, capsys):
         (("git", "fetch", "origin"), "cannot fetch eng-a"),
         (("git", "merge-base", "HEAD"), "eng-a shares no history"),
         (("git", "rev-list", "--count"), f"cannot count {BASE}"),
-        (("gh", "issue", "comment"), "could not comment on the issue"),
     ],
 )
 def test_park_refuses_when_a_command_fails(parked, capsys, failing, says):
@@ -199,6 +199,60 @@ def test_park_refuses_a_task_with_no_open_dependency(parked, capsys):
 def test_park_refuses_when_no_open_dependency_records_a_branch(parked, capsys):
     parked[1].rows["a"]["branch"] = ""
     _refused(parked, capsys, "no open dependency records a branch, so there is nothing to stack on")
+
+
+def _branchless_ops(ledger):
+    ledger.rows["a"].update({"kind": "ops", "branch": "", "state": "claimed"})
+
+
+@pytest.mark.parametrize("kind", [{}, {"kind": "ci"}, {"kind": "plan"}])
+def test_park_refuses_a_branchless_code_ci_or_plan_dependency_beside_a_branchless_ops_one(parked, capsys, kind):
+    _branchless_ops(parked[1])
+    parked[1].rows["c"] = {"id": "c", "title": "Ship the queue", "state": "claimed", "lane": "eng", **kind}
+    parked[1].rows["t1"]["depends_on"] = ["a", "b", "c"]
+    _refused(parked, capsys, "no open dependency records a branch, so there is nothing to stack on")
+
+
+@pytest.mark.parametrize("kind", ["ops", "tune", "troubleshoot", "research"])
+def test_park_stacks_on_dev_when_every_open_dependency_is_a_branchless_non_code_task(parked, capsys, kind):
+    _, ledger, _, shell, doc = parked
+    _branchless_ops(ledger)
+    ledger.rows["a"]["kind"] = kind
+    assert park(doc) == 0
+    assert ("t1", {"parked_on": ["a"], "stacked_base": BASE, "parked_repos": []}, AGENT) in ledger.updates
+    body = f"Parked on branch `eng-t1` until a is done. Stacked base `{BASE}`. {NOTE}"
+    assert shell.calls == [
+        ["git", "ls-remote", "--heads", "origin", "eng-t1"],
+        ["git", "rev-parse", "HEAD"],
+        ["git", "status", "--porcelain"],
+        *LOCATE,
+        ["git", "fetch", "origin", "dev"],
+        ["git", "merge-base", "HEAD", "origin/dev"],
+        ["git", "rev-list", "--count", BASE],
+        ["gh", "issue", "comment", ISSUE, "--body", body],
+        REMOVE,
+    ]
+    assert json.loads(capsys.readouterr().out)["stacked_base"] == BASE
+
+
+def test_a_task_parked_on_a_branchless_ops_dependency_waits_then_goes_to_the_next_engineer(parked):
+    store, ledger, rt, _, doc = parked
+    _branchless_ops(ledger)
+    text = doc.read_text()
+    assert park(doc) == 0
+    assert store.handoff("sw", "t1") == text
+    tick._reap("sw", store, ledger, rt, ledger.rows, 1)
+    assert ledger.rows["t1"]["state"] == "open" and ledger.rows["t1"]["parked_on"] == ["a"]
+    assert not task_dependencies.ready(ledger.rows["t1"], ledger.rows)
+    assert claim_hold.waits(ledger.rows["t1"], ledger.rows) == "it waits on task a"
+    ledger.rows["a"]["state"] = "done"
+    ledger.update_task = type(ledger).update_task.__get__(ledger)
+    before = len(rt.tasks)
+    tick.tick("sw", store, ledger, rt, now_ms=NOW + 1)
+    [launched] = [task for task in rt.tasks[before:] if task["id"] == "t1"]
+    assert (launched["parked_on"], launched["stacked_base"], launched["stack_base"]) == (["a"], BASE, [])
+    assert launched["handoff"] == text
+    assert ledger.rows["t1"]["state"] == "claimed" and store.claimant("sw", "t1") != AGENT
 
 
 def test_park_refuses_a_malformed_document(parked, capsys):
@@ -246,6 +300,66 @@ def test_park_writes_the_open_dependencies_and_the_stacked_base(parked, capsys):
         "worktree_removed": TOP,
         "next": "stop now; the task waits on its branch",
     }
+
+
+def test_a_read_only_task_releases_its_seat_without_a_branch_or_worktree(parked, capsys):
+    store, ledger, _, shell, doc = parked
+    ledger.rows["t1"].update({"kind": "tune", "branch": "", "issue_url": ""})
+    assert park(doc) == 0
+    assert ("t1", {"parked_on": ["a"]}, AGENT) in ledger.updates
+    assert ledger.rows["t1"]["parked_on"] == ["a"] and "stacked_base" not in ledger.rows["t1"]
+    assert shell.calls == []
+    assert ("sw", "t1", stack.READ_ONLY_NOTE.format(names="Build the parser"), AGENT) in ledger.comments
+    assert store.handoff("sw", "t1") == doc.read_text()
+    assert [a.state for a in store.agents("sw") if a.name == AGENT] == ["finished"]
+    assert json.loads(capsys.readouterr().out) == {
+        "task": "t1",
+        "parked_on": ["a"],
+        "worktree_removed": "",
+        "next": "stop now; the task waits on its dependencies and the next engineer continues it",
+    }
+
+
+def test_a_read_only_task_with_no_open_dependency_is_refused(parked, capsys):
+    ledger = parked[1]
+    ledger.rows["t1"].update({"kind": "tune", "branch": ""})
+    ledger.rows["a"]["state"] = "done"
+    _refused(parked, capsys, "the task waits on no open dependency; finish it, or hand it off for its window")
+
+
+def test_a_read_only_task_names_each_open_dependency_including_one_missing_from_the_ledger(parked):
+    _, ledger, _, _, doc = parked
+    ledger.rows["t1"].update({"kind": "tune", "branch": "", "depends_on": ["a", "gone"]})
+    assert park(doc) == 0
+    assert ledger.rows["t1"]["parked_on"] == ["a", "gone"]
+    note = stack.READ_ONLY_NOTE.format(names="Build the parser and its dependency")
+    assert ("sw", "t1", note, AGENT) in ledger.comments
+
+
+def test_a_read_only_task_names_a_title_the_comment_filter_refuses_only_as_its_dependencies(parked):
+    _, ledger, _, _, doc = parked
+    ledger.rows["t1"].update({"kind": "tune", "branch": ""})
+    ledger.rows["a"]["title"] = "Fix the parser — then the schema"
+    assert park(doc) == 0
+    assert ("sw", "t1", stack.READ_ONLY_NOTE.format(names="its dependencies"), AGENT) in ledger.comments
+
+
+def test_a_read_only_task_refuses_a_malformed_document(parked, capsys):
+    parked[1].rows["t1"].update({"kind": "tune", "branch": ""})
+    doc = parked[4]
+    doc.write_text(doc.read_text().replace("<!-- handoff complete -->", ""))
+    found = handoff_check.problems(doc.read_text(), lambda address: True)
+    _refused(parked, capsys, handoff_check.refusal(found))
+
+
+def test_a_doctor_tune_task_parks_on_a_merged_fix_not_yet_applied(parked, monkeypatch):
+    store, ledger, _, _, doc = parked
+    config = store.config
+    monkeypatch.setattr(store, "config", lambda slug: dataclasses.replace(config(slug), template="doctor"))
+    ledger.rows["t1"].update({"kind": "tune", "branch": "", "depends_on": ["a"]})
+    ledger.rows["a"].update({"state": "done", "kind": "code"})
+    assert park(doc) == 0
+    assert ledger.rows["t1"]["parked_on"] == ["a"]
 
 
 @pytest.mark.parametrize("repo", [None, "https://github.com/o/other"])
@@ -484,6 +598,245 @@ def test_park_reads_no_origin_url_when_no_dependency_records_a_repository(parked
     assert ledger.rows["t1"]["parked_repos"] == []
 
 
+ANTONCORE = "https://github.com/o/antoncore"
+CHECKOUT = "/home/me/dev/antoncore"
+
+
+def _antoncore_dependency(parked, monkeypatch, origin):
+    _, ledger, _, shell, _ = parked
+    ledger.rows["a"].update({"branch_repo": ANTONCORE, "repository_branches": {CHECKOUT: "eng-a"}})
+
+    def answer(argv):
+        if argv == ["git", "-C", CHECKOUT, "remote", "get-url", "origin"]:
+            return subprocess.CompletedProcess(argv, 0, stdout=f"{origin}\n", stderr="")
+        return shell(argv)
+
+    monkeypatch.setattr(stack, "shell", answer)
+
+
+def test_park_fetches_an_antoncore_dependency_through_the_antoncore_checkout(parked, monkeypatch):
+    _, ledger, _, shell, doc = parked
+    _antoncore_dependency(parked, monkeypatch, "git@github.com:O/antoncore.git")
+    assert park(doc) == 0
+    assert ["git", "-C", CHECKOUT, "fetch", "origin", "eng-a"] in shell.calls
+    assert [c for c in shell.calls if c[:3] == ["git", "fetch", "--"]] == []
+    assert ledger.rows["t1"]["parked_repos"] == [ANTONCORE]
+
+
+@pytest.mark.parametrize("origin", ["git@github.com:o/bundle.git", ""])
+def test_park_fetches_by_url_when_the_recorded_checkout_has_no_matching_origin(parked, monkeypatch, origin):
+    _, ledger, _, shell, doc = parked
+    _antoncore_dependency(parked, monkeypatch, origin)
+    assert park(doc) == 0
+    assert ["git", "fetch", "--", ANTONCORE, "eng-a"] in shell.calls
+    assert [c for c in shell.calls if c[:2] == ["git", "-C"]] == []
+
+
+def test_park_refuses_when_the_antoncore_checkout_cannot_fetch(parked, monkeypatch, capsys):
+    _antoncore_dependency(parked, monkeypatch, "https://github.com/o/antoncore.git")
+    parked[3].fail = (("git", "-C", CHECKOUT),)
+    _refused(parked, capsys, f"cannot fetch eng-a in {CHECKOUT}: boom")
+
+
+UNVERIFIED = "Host key verification failed.\nfatal: Could not read from remote repository."
+KEY_REFUSED = "git@github.com: Permission denied (publickey).\nfatal: Could not read from remote repository."
+PROMPTLESS = ["env", "GIT_TERMINAL_PROMPT=0"]
+
+
+def _ssh_refused(shell, refused, inner=None, stderr=UNVERIFIED):
+    def answer(argv):
+        if argv in refused:
+            shell.calls.append(argv)
+            return subprocess.CompletedProcess(argv, 128, stdout="", stderr=stderr)
+        return (inner or shell)(argv)
+
+    return answer
+
+
+@pytest.mark.parametrize("stderr", [UNVERIFIED, KEY_REFUSED])
+def test_park_fetches_an_ssh_dependency_over_https_when_the_host_key_cannot_be_verified(parked, monkeypatch, stderr):
+    _, ledger, _, shell, doc = parked
+    ledger.rows["a"]["branch_repo"] = "git@github.com:O/bundle.git"
+    refused = [["git", "fetch", "--", "git@github.com:O/bundle.git", "eng-a"]]
+    monkeypatch.setattr(stack, "shell", _ssh_refused(shell, refused, stderr=stderr))
+    assert park(doc) == 0
+    assert [*PROMPTLESS, "git", "fetch", "--", "https://github.com/O/bundle.git", "eng-a"] in shell.calls
+    assert ledger.rows["t1"]["parked_on"] == ["a"]
+
+
+def test_park_fetches_a_same_repository_dependency_over_https_when_origin_is_unverified(parked, monkeypatch):
+    _, ledger, _, shell, doc = parked
+    monkeypatch.setattr(stack, "shell", _ssh_refused(shell, [["git", "fetch", "origin", "eng-a"]]))
+    assert park(doc) == 0
+    refspec = "+refs/heads/eng-a:refs/remotes/origin/eng-a"
+    assert [*PROMPTLESS, "git", "fetch", "--", "https://github.com/O/r.git", refspec] in shell.calls
+    assert ["git", "merge-base", "HEAD", "origin/eng-a"] in shell.calls
+
+
+def test_park_fetches_through_an_unverified_checkout_origin_over_https(parked, monkeypatch):
+    _, ledger, _, shell, doc = parked
+    _antoncore_dependency(parked, monkeypatch, "git@github.com:O/antoncore.git")
+    refused = [["git", "-C", CHECKOUT, "fetch", "origin", "eng-a"]]
+    monkeypatch.setattr(stack, "shell", _ssh_refused(shell, refused, stack.shell))
+    assert park(doc) == 0
+    refspec = "+refs/heads/eng-a:refs/remotes/origin/eng-a"
+    assert [
+        *PROMPTLESS,
+        "git",
+        "-C",
+        CHECKOUT,
+        "fetch",
+        "--",
+        "https://github.com/O/antoncore.git",
+        refspec,
+    ] in shell.calls
+
+
+def test_park_refuses_naming_both_errors_when_the_https_retry_fails(parked, monkeypatch, capsys):
+    _, ledger, _, shell, doc = parked
+    ledger.rows["a"]["branch_repo"] = "ssh://git@github.com:22/O/bundle"
+    https = [*PROMPTLESS, "git", "fetch", "--", "https://github.com/O/bundle", "eng-a"]
+    monkeypatch.setattr(
+        stack, "shell", _ssh_refused(shell, [["git", "fetch", "--", "ssh://git@github.com:22/O/bundle", "eng-a"]])
+    )
+    shell.fail = (tuple(https[:3]),)
+    assert park(doc) == 1
+    says = (
+        "swarm: cannot fetch eng-a from ssh://git@github.com:22/O/bundle: "
+        f"{UNVERIFIED}; over https://github.com/O/bundle: boom\n"
+    )
+    assert capsys.readouterr().err == says
+    assert https in shell.calls
+    assert "parked_on" not in ledger.rows["t1"]
+
+
+def test_park_names_the_ssh_error_when_the_https_retry_cannot_run(parked, monkeypatch, capsys):
+    _, ledger, _, shell, doc = parked
+    ledger.rows["a"]["branch_repo"] = "git@github.com:O/bundle.git"
+    inner = _ssh_refused(shell, [["git", "fetch", "--", "git@github.com:O/bundle.git", "eng-a"]])
+
+    def answer(argv):
+        if argv[:2] == PROMPTLESS:
+            raise SwarmError("env GIT_TERMINAL_PROMPT=0 could not run: timed out")
+        return inner(argv)
+
+    monkeypatch.setattr(stack, "shell", answer)
+    assert park(doc) == 1
+    says = (
+        f"swarm: cannot fetch eng-a from git@github.com:O/bundle.git: {UNVERIFIED}; "
+        "over https://github.com/O/bundle.git: env GIT_TERMINAL_PROMPT=0 could not run: timed out\n"
+    )
+    assert capsys.readouterr().err == says
+    assert "parked_on" not in ledger.rows["t1"]
+
+
+def test_park_names_the_ssh_error_when_the_origin_url_cannot_be_read(parked, monkeypatch, capsys):
+    _, ledger, _, shell, doc = parked
+    inner = _ssh_refused(shell, [["git", "fetch", "origin", "eng-a"]])
+
+    def answer(argv):
+        if argv == ["git", "remote", "get-url", "origin"]:
+            raise SwarmError("git remote could not run: timed out")
+        return inner(argv)
+
+    monkeypatch.setattr(stack, "shell", answer)
+    assert park(doc) == 1
+    assert capsys.readouterr().err == f"swarm: cannot fetch eng-a: {UNVERIFIED}; git remote could not run: timed out\n"
+    assert [c for c in shell.calls if c[:2] == PROMPTLESS] == []
+
+
+def test_park_refuses_an_unverified_fetch_from_an_address_with_no_https_form(parked, monkeypatch, capsys):
+    _, ledger, _, shell, doc = parked
+    ledger.rows["a"]["branch_repo"] = OTHER
+    monkeypatch.setattr(stack, "shell", _ssh_refused(shell, [["git", "fetch", "--", OTHER, "eng-a"]]))
+    assert park(doc) == 1
+    assert capsys.readouterr().err == f"swarm: cannot fetch eng-a from {OTHER}: {UNVERIFIED}\n"
+    assert [c for c in shell.calls if c[:2] == PROMPTLESS] == []
+
+
+def test_park_never_retries_over_https_when_the_ssh_failure_is_not_verification(parked, capsys):
+    _, ledger, _, shell, doc = parked
+    ledger.rows["a"]["branch_repo"] = "git@github.com:O/bundle.git"
+    shell.fail = (("git", "fetch", "--"),)
+    _refused(parked, capsys, "cannot fetch eng-a from git@github.com:O/bundle.git: boom")
+    assert [c[3] for c in shell.calls if c[:3] == ["git", "fetch", "--"]] == ["git@github.com:O/bundle.git"]
+
+
+@pytest.mark.parametrize(
+    ("url", "https"),
+    [
+        ("git@github.com:O/bundle.git", "https://github.com/O/bundle.git"),
+        ("ssh://git@github.com/O/bundle", "https://github.com/O/bundle"),
+        ("ssh://git@github.com:22/O/bundle.git", "https://github.com/O/bundle.git"),
+        ("https://github.com/O/bundle", ""),
+        ("/srv/repos/docs.git", ""),
+        ("./a:b/docs.git", ""),
+        ("file:///srv/docs.git", ""),
+        ("git+ssh://git@github.com/O/bundle", "https://github.com/O/bundle"),
+        ("ssh://git@github.com/O/r://x", "https://github.com/O/r://x"),
+        ("git@github.com:O/a:b.git", "https://github.com/O/a:b.git"),
+        ("git@github.com:/O/bundle.git/", "https://github.com/O/bundle.git/"),
+        ("deploy@ops@github.com:O/bundle.git", "https://github.com/O/bundle.git"),
+        ("ssh://deploy@ops@github.com/O/bundle", "https://github.com/O/bundle"),
+        ("git@github.com:Xen/bundle.git", "https://github.com/Xen/bundle.git"),
+        ("ssh://git@github.com", ""),
+        ("git@github.com:", ""),
+    ],
+)
+def test_https_url_maps_only_ssh_addresses(url, https):
+    assert stack.https_url(url) == https
+
+
+LONG = "Teach the ledger server to keep every agent status comment short enough for the operator to read at once"
+
+
+def test_park_keeps_the_ledger_note_within_the_comment_limit_for_three_long_titled_dependencies(parked):
+    _, ledger, _, _, doc = parked
+    for name in ("a", "b", "c"):
+        ledger.rows[name] = {"id": name, "title": f"{LONG} part {name}", "state": "pr", "branch": f"eng-{name}"}
+    ledger.rows["t1"]["depends_on"] = ["a", "b", "c"]
+    assert park(doc) == 0
+    note = f"Parked on its branch until every open dependency is done. {NOTE}"
+    assert ledger.comments == [("sw", "t1", note, AGENT)]
+    assert ledger_comments.problems(note, "comment") == []
+
+
+def test_park_names_a_title_the_comment_filter_refuses_only_as_an_open_dependency(parked):
+    _, ledger, _, _, doc = parked
+    ledger.rows["a"]["title"] = "Fix the parser — then the schema"
+    assert park(doc) == 0
+    assert ledger.comments == [("sw", "t1", f"Parked on its branch until every open dependency is done. {NOTE}", AGENT)]
+
+
+def test_park_writes_the_ledger_note_before_the_issue_comment_and_the_task_update(parked, monkeypatch, capsys):
+    store, ledger, _, shell, doc = parked
+    note = ("sw", "t1", f"Parked on its branch until Build the parser is done. {NOTE}", AGENT)
+    seen = []
+
+    def answer(argv):
+        if argv[:3] == ["gh", "issue", "comment"]:
+            seen.append((list(ledger.comments), list(ledger.updates)))
+        return shell(argv)
+
+    def amend(slug, task, text, by):
+        if ledger.comments[-1:] != [(slug, task, text, by)]:
+            ledger.comments.append((slug, task, text, by))
+
+    monkeypatch.setattr(stack, "shell", answer)
+    ledger.comment = amend
+    shell.fail = (("gh", "issue", "comment"),)
+    assert park(doc) == 1
+    assert capsys.readouterr().err == "swarm: could not comment on the issue: boom\n"
+    assert seen == [([note], [])]
+    assert "parked_on" not in ledger.rows["t1"] and REMOVE not in shell.calls
+    assert store.handoff("sw", "t1") == ""
+    assert [a.state for a in store.agents("sw") if a.name == AGENT] == ["working"]
+    shell.fail = ()
+    assert park(doc) == 0
+    assert ledger.rows["t1"]["parked_on"] == ["a"]
+    assert ledger.comments == [note]
+
+
 @pytest.mark.parametrize(
     ("failing", "says"),
     [
@@ -704,6 +1057,17 @@ def test_restack_registers_the_successor_branch_before_returning(stacked_repo):
     assert task["parked_on"] == []
 
 
+def test_restack_finds_a_parked_branch_kept_only_in_the_local_checkout(stacked_repo):
+    _, ledger, repo, _ = stacked_repo
+    _git(repo, "push", "origin", "--delete", "parked")
+    assert _git(repo, "ls-remote", "origin", "refs/heads/parked") == ""
+    assert _git(repo, "for-each-ref", "refs/remotes/origin/parked") == ""
+    assert restack() == 0
+    assert _git(repo, "log", "--format=%s", "origin/dev..HEAD") == "Task work"
+    assert _git(repo, "rev-parse", "HEAD^") == _git(repo, "rev-parse", "origin/dev")
+    assert ledger.rows["t1"]["parked_on"] == []
+
+
 def test_restack_refuses_when_the_remote_predecessor_has_work_missing_locally(stacked_repo, capsys):
     _, ledger, repo, _ = stacked_repo
     advanced = _git(repo, "commit-tree", "HEAD^{tree}", "-p", "HEAD", "-m", "New predecessor work")
@@ -819,6 +1183,28 @@ def test_restack_of_a_task_parked_on_another_repository_rebases_onto_dev(parked,
     assert (repo / "dev.txt").read_text() == "integration\n" and (repo / "task.txt").read_text() == "task work\n"
     assert ledger.rows["t1"]["parked_on"] == []
     assert json.loads(capsys.readouterr().out.splitlines()[-1]) == {"task": "t1", "parked_on": []}
+
+
+def test_restack_fetches_origin_over_https_when_its_ssh_host_cannot_be_verified(stacked_repo, monkeypatch):
+    _, ledger, repo, _ = stacked_repo
+    calls = []
+    real = stack.shell
+    whole = "+refs/heads/*:refs/remotes/origin/*"
+
+    def answer(argv):
+        calls.append(argv)
+        if argv == ["git", "fetch", "origin"]:
+            return subprocess.CompletedProcess(argv, 128, stdout="", stderr=UNVERIFIED)
+        if argv == ["git", "remote", "get-url", "origin"]:
+            return subprocess.CompletedProcess(argv, 0, stdout="git@github.com:O/r.git\n", stderr="")
+        if argv == [*PROMPTLESS, "git", "fetch", "--", "https://github.com/O/r.git", whole]:
+            return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
+        return real(argv)
+
+    monkeypatch.setattr(stack, "shell", answer)
+    assert restack() == 0
+    assert [*PROMPTLESS, "git", "fetch", "--", "https://github.com/O/r.git", whole] in calls
+    assert ledger.rows["t1"]["parked_on"] == []
 
 
 def test_restack_reports_only_conflicted_files_when_other_work_changes(stacked_repo, monkeypatch, capsys):

@@ -4,8 +4,6 @@ from hooks.context import master_coding, operator_words
 from scripts.swarm_ledger import ledger_relay
 from tests.swarm_ledger.test_ledger_relay import _cli, core, make_ledger
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 
 @pytest.fixture
 def doctor(monkeypatch):
@@ -104,3 +102,13 @@ def test_watched_quote_lookup_fails_closed_when_its_registry_is_unavailable(doct
     operator_words.record("master@bb2222-0001", "Keep the local instruction")
     assert ledger_relay.watched_masters("master@bb2222-0001") == []
     assert ledger_relay.verified("master@bb2222-0001", "Keep the local instruction") == "Keep the local instruction"
+
+
+def test_a_window_limits_verified_quotes_to_recent_words(doctor):
+    import time
+
+    operator_words.record("master@aa1111-0001", "Restart the doctor crew", now=time.time() - 2400)
+    operator_words.record("master@aa1111-0001", "Stop the doctor crew", now=time.time() - 60)
+    assert ledger_relay.verified("master@aa1111-0001", "restart the doctor crew") == "Restart the doctor crew"
+    assert ledger_relay.verified("master@aa1111-0001", "restart the doctor crew", within=1800) == ""
+    assert ledger_relay.verified("master@aa1111-0001", "stop the doctor crew", within=1800) == "Stop the doctor crew"

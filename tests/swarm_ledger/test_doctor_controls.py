@@ -33,7 +33,7 @@ class DoctorControls(unittest.TestCase):
     def setUpClass(cls):
         content = {"title": "Demo", "overview": "o", "phases": [{"title": "One", "description": "d"}]}
         new_ledger.create(SLUG, content)
-        cls.token = legacy_page.stored_token(core.paths(SLUG)[0])
+        cls.token = legacy_page.stored_token(legacy_page.paths(SLUG, core)[0])
         cls.httpd = ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
         cls.port = cls.httpd.server_address[1]
         threading.Thread(target=cls.httpd.serve_forever, args=(0.01,), daemon=True).start()

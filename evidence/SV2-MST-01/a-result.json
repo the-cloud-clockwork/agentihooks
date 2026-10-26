@@ -7,14 +7,14 @@
     "input_sha256": "442c3c3caf41df962800006dea2f299f7e410a3f7a0ceaafa626d89c09177ca7",
     "observed": {
       "after_task_comment": {
-        "master-2@fixture": 1,
-        "master-3@fixture": 0,
-        "master@fixture": 0
-      },
-      "after_unaddressed_chat": {
-        "master-2@fixture": 1,
+        "master-2@fixture": 0,
         "master-3@fixture": 0,
         "master@fixture": 1
+      },
+      "after_unaddressed_chat": {
+        "master-2@fixture": 0,
+        "master-3@fixture": 0,
+        "master@fixture": 2
       },
       "owners": {
         "p1": "master@fixture",

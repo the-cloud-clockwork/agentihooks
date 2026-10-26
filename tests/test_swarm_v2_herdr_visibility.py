@@ -8,7 +8,6 @@ import pytest
 from scripts.swarm_v2.herdr import visibility
 from scripts.swarm_v2.herdr.visibility import CACHED, FRESH_MS, KEY, LIVE, UNVERIFIED, View, judged
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
 NOW = 1_790_000_100_000
 AGENT = "engineer@a1b2c3-0001"
 

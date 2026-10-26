@@ -11,6 +11,7 @@ class PaneObservation:
     provider_error: str = ""
     provider_checked: bool = field(default=False, compare=False)
     provider_error_id: str = ""
+    content_refusal: bool = False
 
 
 PROVIDER_ERRORS = {
@@ -30,6 +31,22 @@ PROVIDER_ERRORS = {
         r"Failed to connect to (?:the )?model provider",
     ),
 }
+
+
+def content_refusal(harness: str, text: str) -> bool:
+    if harness != "codex":
+        return False
+    plain = ESCAPE.sub("", text)
+    notices = list(re.finditer(r"(?m)^ⓘ This content can[’']t be shown\s*$", plain))
+    if not notices:
+        return False
+    tail = plain[notices[-1].end() :]
+    return len(re.findall(r"(?m)^› ", tail)) == 1 and not re.search(r"(?m)^• ", tail) and not selection_prompt(text)
+
+
+def refusal_input(text: str) -> str:
+    typed = typed_input(text)
+    return "" if typed == "Ask Codex to do anything" else typed
 
 
 def provider_error(harness: str, text: str) -> str:

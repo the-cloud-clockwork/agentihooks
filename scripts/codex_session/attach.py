@@ -8,10 +8,11 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from scripts.codex_session.binding import CONNECTED, EXITED, FAILED, TransportRecord
+from scripts.codex_session.binding import CONNECTED, EXITED, FAILED, BindingStore, TransportRecord
 
 if TYPE_CHECKING:
     from scripts.herdr_host import Placement
+    from scripts.herdr_panes import PaneRecord
     from scripts.swarm.store import AgentRecord, RedisStore
 
 READY_TIMEOUT_S = 120.0
@@ -34,7 +35,15 @@ class AttachError(RuntimeError):
 
 
 def viewer_argv(codex_bin: str, record: TransportRecord) -> list[str]:
-    return [codex_bin, "resume", "--remote", record.endpoint_ref, record.thread_id]
+    return [
+        codex_bin,
+        "-c",
+        "check_for_update_on_startup=false",
+        "resume",
+        "--remote",
+        record.endpoint_ref,
+        record.thread_id,
+    ]
 
 
 def attachable(record: TransportRecord | None) -> bool:
@@ -104,13 +113,40 @@ def reopenable(store: "RedisStore", slug: str, execution_id: str) -> "AgentRecor
     return agent
 
 
-def reopen(store: "RedisStore", agent: "AgentRecord", open_viewer: Open, codex_bin: str) -> dict:
+def launch_records(name: str, environ: dict[str, str]) -> list["PaneRecord"]:
+    from scripts import herdr_panes
+    from scripts.swarm import naming
+
+    return [
+        r
+        for r in herdr_panes.load(environ)
+        if r.kind == "init-agent" and naming.plain(r.owner_session) == naming.plain(name)
+    ]
+
+
+def recorded_terminals(name: str, viewers: dict[str, str], environ: dict[str, str]) -> dict[str, str]:
+    """herdr reuses pane ids, so a pane is the agent's only on its recorded terminal."""
+    launched = {r.pane_id: r.terminal_id for r in launch_records(name, environ)}
+    return {pane: terminal for pane, terminal in {**launched, **viewers}.items() if terminal}
+
+
+def reopen(
+    store: "RedisStore",
+    slug: str,
+    agent: "AgentRecord",
+    open_viewer: Open,
+    codex_bin: str,
+    close_earlier: Callable[[str], None] = lambda pane: None,
+) -> dict:
     from scripts.swarm import live_binding
 
     record = live_binding.transport(store, agent)
     if not attachable(record):
         raise AttachError(NO_THREAD.format(agent.name))
     placed = open_viewer(agent.name, viewer_argv(codex_bin, record))
+    store.execution_registry.set_pane(slug, agent.execution_id, placed.pane_id)
+    if agent.pane_id and agent.pane_id != placed.pane_id:
+        close_earlier(agent.pane_id)
     return {"agent": agent.name, "thread": record.thread_id, "pane": placed.pane_id}
 
 
@@ -123,11 +159,21 @@ def local_terminal(store: "RedisStore", slug: str, execution_id: str, environ: d
         return None
     config = store.config(slug)
     workspace = naming.space(config.repo, config.code, config.slug)
+    bindings = BindingStore(store)
 
     def open_viewer(title: str, argv: list[str]) -> "Placement":
-        return herdr_host.open_command(Path(config.repo), title, argv, workspace, environ)
+        placed = herdr_host.open_command(Path(config.repo), title, argv, workspace, environ)
+        bindings.add_viewer(slug, execution_id, placed.pane_id, placed.terminal_id)
+        return placed
 
-    return reopen(store, agent, open_viewer, "codex")
+    def close_earlier(pane_id: str) -> None:
+        terminal = recorded_terminals(agent.name, bindings.viewers(slug, execution_id), environ).get(pane_id)
+        listed = {p["pane_id"]: p.get("terminal_id") for p in herdr_host._cli(["pane", "list"], environ)["panes"]}
+        if terminal and listed.get(pane_id) == terminal:
+            herdr_host._cli(["pane", "close", pane_id], environ)
+            bindings.forget_viewers(slug, [pane_id])
+
+    return reopen(store, slug, agent, open_viewer, "codex", close_earlier)
 
 
 def _parser() -> argparse.ArgumentParser:

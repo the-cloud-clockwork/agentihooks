@@ -5,8 +5,6 @@ import pytest
 from scripts.swarm import commands
 from scripts.swarm.store import RedisStore, SwarmConfig
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 
 @pytest.fixture
 def store():

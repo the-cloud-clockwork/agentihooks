@@ -5,14 +5,20 @@ import os
 import re
 import sys
 import tempfile
+import traceback
 from pathlib import Path
 from time import process_time
+from types import ModuleType
 
+import pytest
 from mutmut.utils.format_utils import get_mutant_name
 
+from scripts.ci_cpu_quota import quota_cpus
+from scripts.ci_cpu_quota import worker_count as quota_workers
 from scripts.ci_mutation.killers import KillMemory
-from scripts.ci_mutation.mutant_shards import shard_names
+from scripts.ci_mutation.mutant_shards import shard_names, shard_tests
 from scripts.ci_mutation.report import mutation_lines
+from scripts.ci_mutation.scope import selects, test_file
 from scripts.ci_mutation.stats import write_part
 
 GROUP = re.compile(r"xdist_group\(\s*(?:name\s*=\s*)?[\"']([^\"']+)[\"']")
@@ -49,11 +55,34 @@ def selected_mutants(filename: str, source: str, changed: set[int]) -> tuple[str
     return code, list(names)
 
 
+def selected_mutant_names(filename: str, source: str, changed: set[int]) -> list[str]:
+    import libcst as cst
+    from mutmut.mutation.file_mutation import group_by_top_level_node
+    from mutmut.mutation.trampoline_templates import mangle_function_name
+
+    module, selected = changed_mutations(filename, source, changed)
+    grouped = group_by_top_level_node(selected)
+    names = []
+    for statement in module.body:
+        if isinstance(statement, cst.FunctionDef):
+            functions = [(statement, None)]
+        elif isinstance(statement, cst.ClassDef) and isinstance(statement.body, cst.IndentedBlock):
+            functions = [
+                (method, statement.name.value) for method in statement.body.body if isinstance(method, cst.FunctionDef)
+            ]
+        else:
+            continue
+        for function, class_name in functions:
+            name = mangle_function_name(name=function.name.value, class_name=class_name)
+            names.extend(f"{name}__mutmut_{index + 1}" for index in range(len(grouped.get(function, ()))))
+    return names
+
+
 def keep_selected_tests(stats: dict[str, set[str]], tests_by_prefix: dict[str, set[str]]) -> set[str]:
     kept = set()
     for function, tests in stats.items():
         allowed = tests_by_prefix.get(function.rpartition(".")[0] + ".", set())
-        stats[function] = {test for test in tests if test.partition("::")[0] in allowed}
+        stats[function] = {test for test in tests if any(selects(entry, test) for entry in allowed)}
         kept |= stats[function]
     return kept
 
@@ -62,29 +91,37 @@ def file_seconds(root: Path, files: list[str]) -> dict[str, float]:
     durations = root / ".test_durations"
     durations = json.loads(durations.read_text()) if durations.exists() else {}
     seconds = dict.fromkeys(files, 0.01)
+    by_file = {}
+    for entry in files:
+        by_file.setdefault(test_file(entry), []).append(entry)
     for nodeid, duration in durations.items():
-        if (path := nodeid.partition("::")[0]) in seconds:
-            seconds[path] += duration
+        for entry in by_file.get(test_file(nodeid), ()):
+            if selects(entry, nodeid):
+                seconds[entry] += duration
     return seconds
 
 
 def part_files(root: Path, files: list[str], part: tuple[int, int]) -> list[str]:
+    return split_parts(files, file_seconds(root, files), part)
+
+
+def split_parts(files: list[str], seconds: dict[str, float], part: tuple[int, int]) -> list[str]:
     # Each part runs on its own runner, so an xdist group may span parts; stats_shards keeps it whole within one.
     index, total = part
-    seconds = file_seconds(root, files)
     parts = [[] for _ in range(total)]
     for path in sorted(files, key=lambda path: (-seconds[path], path)):
         min(parts, key=lambda chosen: sum(seconds[path] for path in chosen)).append(path)
     return sorted(parts[index])
 
 
-def stats_shards(root: Path, files: list[str], count: int) -> list[list[str]]:
-    seconds = file_seconds(root, files)
+def stats_shards(root: Path, files: list[str], count: int, seconds: dict[str, float] | None = None) -> list[list[str]]:
+    if seconds is None:
+        seconds = file_seconds(root, files)
     # Files that share an xdist group never run concurrently in CI, so they share a shard here.
     units = []
     for path in files:
-        groups = set(GROUP.findall((root / path).read_text())) - IMPORT_GROUPS
-        keys = {f"group {group}" for group in groups} or {path}
+        groups = set(GROUP.findall((root / test_file(path)).read_text())) - IMPORT_GROUPS
+        keys = {f"group {group}" for group in groups} or {test_file(path)}
         members = [path]
         for unit in [unit for unit in units if unit[0] & keys]:
             units.remove(unit)
@@ -96,6 +133,17 @@ def stats_shards(root: Path, files: list[str], count: int) -> list[list[str]]:
         min(shards, key=lambda shard: sum(seconds[path] for path in shard)).extend(members)
     # pytest drops a package conftest for files given after a file from another folder.
     return [sorted(shard) for shard in shards]
+
+
+def loaded_files(bases: list[Path], modules: dict[str, ModuleType] = sys.modules) -> list[str]:
+    found = set()
+    for module in list(modules.values()):
+        if origin := getattr(module, "__file__", None):
+            path = Path(origin).resolve()
+            base = next((base for base in bases if path.is_relative_to(base)), None)
+            if base is not None:
+                found.add(path.relative_to(base).as_posix())
+    return sorted(found)
 
 
 def collect_shard_stats(runner, test_runner, tests: list[str], output: Path, basetemp: str) -> None:
@@ -112,19 +160,65 @@ def collect_shard_stats(runner, test_runner, tests: list[str], output: Path, bas
         "not wall_clock",
         f"--basetemp={basetemp}",
     ]
+    measured = bool(os.environ.get("MUTATION_STATS_CACHE"))
+    coverage_file = output.with_suffix(".coverage")
+    if measured:
+        # An exported COVERAGE_FILE reaches every subprocess a test starts, whose coverage runs then write here.
+        os.environ.pop("COVERAGE_FILE", None)
+        config = output.with_suffix(".coveragerc")
+        config.write_text(f"[run]\ndata_file = {coverage_file.resolve()}\n")
+        test_runner._pytest_add_cli_args.extend(
+            ["-p", "pytest_cov.plugin", "--cov=.", "--cov-context=test", "--cov-report=", f"--cov-config={config}"]
+        )
+    work = Path.cwd().resolve()
+    bases = [
+        work / "mutants",
+        work,
+        *(Path(root).resolve() for root in [os.environ.get("MUTATION_STATS_ROOT")] if root),
+    ]
     start = process_time()
     status = test_runner.run_stats(tests=tests)
+    # A bucket of only wall clock tests deselects everything, and pytest reports that as no tests collected.
+    status = 0 if status == pytest.ExitCode.NO_TESTS_COLLECTED else status
+    dependencies = {}
+    if measured:
+        from subprocess import check_output
+
+        from scripts.ci_mutation.stats_dependencies import measured_dependencies
+
+        root = Path(os.environ["MUTATION_STATS_ROOT"])
+        tracked = set(check_output(["git", "ls-files", "-z"], cwd=root, text=True).split("\0"))
+        dependencies["dependencies"] = measured_dependencies(
+            coverage_file, Path.cwd() / "mutants", root, list(runner.mutmut.duration_by_test), tracked
+        )
     tests_by_function = {name: sorted(names) for name, names in runner.mutmut.tests_by_mangled_function_name.items()}
     output.write_text(
         json.dumps(
             {
+                **dependencies,
                 "status": status,
                 "cpu": process_time() - start,
                 "tests": tests_by_function,
                 "durations": runner.mutmut.duration_by_test,
+                "files": tests,
+                "modules": loaded_files(bases),
             }
         )
     )
+
+
+def collect_and_exit(runner, test_runner, tests: list[str], output: Path, basetemp: str) -> None:
+    try:
+        collect_shard_stats(runner, test_runner, tests, output, basetemp)
+    except BaseException:
+        traceback.print_exc()
+        code = 1
+    else:
+        code = 0
+    sys.stdout.flush()
+    sys.stderr.flush()
+    # A normal child exit joins every thread and child process a test left running, which can wait forever.
+    os._exit(code)
 
 
 def run_stats_buckets(runner, test_runner, shards: list[list[str]], work: Path) -> list[dict]:
@@ -133,7 +227,7 @@ def run_stats_buckets(runner, test_runner, shards: list[list[str]], work: Path) 
     for index, tests in enumerate(shards):
         output = work / f"stats-{index}.json"
         basetemp = tempfile.mkdtemp(prefix="mutation-stats-")
-        process = context.Process(target=collect_shard_stats, args=(runner, test_runner, tests, output, basetemp))
+        process = context.Process(target=collect_and_exit, args=(runner, test_runner, tests, output, basetemp))
         process.start()
         processes.append((process, output))
     results = []
@@ -163,7 +257,7 @@ def collect_parallel_stats(runner, test_runner, shards: list[list[str]], work: P
 
 
 def worker_count(requested: int) -> int:
-    return requested if os.environ.get("CI") else min(requested, 2)
+    return quota_workers(requested, quota_cpus()) if os.environ.get("CI") else min(requested, 2)
 
 
 def shard_collector(collect, shard: tuple[int, int]):
@@ -269,6 +363,15 @@ LIGHT_BOOTSTRAP = (
 )
 
 
+def run_unit(
+    run_tests, runner, mutant_name: str | None, tests: list[str], chosen: list[str], memory: KillMemory
+) -> int:
+    if tests and not chosen:
+        # Each unit runs the head and one slice and together they cover every test, so a unit with none votes survived.
+        return 0
+    return run_tests(runner, mutant_name=mutant_name, tests=memory.prepare(mutant_name, chosen))
+
+
 def run_selected(selection: Path, shard: tuple[int, int], mode: str = "", *stats: str) -> None:
     from mutmut import __main__ as runner
 
@@ -335,7 +438,8 @@ def run_selected(selection: Path, shard: tuple[int, int], mode: str = "", *stats
             except runner.BadTestExecutionCommandsException:
                 # The stats shards proved these node ids collect, so a usage error here is the forced failure at import.
                 return 1
-        return run_tests(self, mutant_name=mutant_name, tests=memory.prepare(mutant_name, tests))
+        tests = list(tests)
+        return run_unit(run_tests, self, mutant_name, tests, shard_tests(tests, mutant_name, shard[0]), memory)
 
     memory = KillMemory(Path.cwd() / "killers")
 

@@ -25,7 +25,7 @@ from hooks.targets.capabilities import (
     supports_arg_mutation,
 )
 from hooks.targets.emitter import buffer_context, drain, flush, has_buffered
-from hooks.targets.normalizer import normalize_payload
+from hooks.targets.normalizer import exec_calls, normalize_payload
 
 
 @pytest.fixture
@@ -160,6 +160,10 @@ class TestCodexToolNames:
         program = 'const r = await tools.exec_command({cmd: "sudo rm -rf /srv"});'
         payload = normalize_payload({"tool_name": "exec", "tool_input": {"input": program}})
         assert payload["tool_input"]["command"] == program
+
+    def test_program_strings_decode_javascript_escapes(self):
+        program = 'await tools.exec_command({cmd:"it\\\'s\\v \\\nok\\q"});'
+        assert exec_calls(program) == [{"cmd": "it's\x0b okq"}]
 
     def test_unmapped_name_passes_through(self, codex):
         payload = normalize_payload({"tool_name": "update_plan", "tool_input": {"plan": []}})
@@ -600,11 +604,12 @@ class TestCodexEnforcementFallback:
         hm.on_post_tool_use({"hook_event_name": "PostToolUse", "tool_output": "ok", **call})
         assert any("agentihooks swarm sw handoff" in text for text in captured)
 
-    def test_a_codex_swarm_agent_over_the_compact_limit_is_denied_work(self, codex, monkeypatch):
+    def test_a_codex_swarm_agent_over_the_compact_limit_is_denied_work(self, codex, monkeypatch, tmp_path):
         import hooks.context.context_recycle as recycle
         import hooks.hook_manager as hm
 
         monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "sw-eng-1")
+        monkeypatch.setattr(recycle, "AGENTIHOOKS_HOME", tmp_path)
         monkeypatch.setattr(recycle, "used_tokens", lambda session_id: 900_000)
         call = {"session_id": "codex-recycle", "tool_name": "Bash", "tool_input": {"command": "git commit -m x"}}
         with pytest.raises(hm.BlockAction, match="agentihooks swarm sw handoff"):

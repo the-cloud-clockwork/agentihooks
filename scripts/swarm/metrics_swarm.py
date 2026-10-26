@@ -1,7 +1,7 @@
 import hashlib
 import json
 import socket
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
@@ -9,6 +9,7 @@ from pathlib import Path
 from hooks.classifier import decision_log
 from scripts import agent_choice
 from scripts.gates import log as gate_log
+from scripts.hive import placement_waits
 from scripts.swarm import capacity, host_budget, metrics_outbox
 from scripts.swarm.store import RedisStore
 from scripts.swarm.tick import SPAWN_HOLD
@@ -28,6 +29,11 @@ HOST = metrics_outbox.Table(
         ("available_mb", "Int64"),
         ("load_per_cpu", "Float64"),
         ("live_agents", "Int64"),
+        ("workstation_agents", "Int64"),
+        ("hive_agents", "Int64"),
+        ("swap_used_mb", "Int64"),
+        ("swap_total_mb", "Int64"),
+        ("agent_mb", "Int64"),
         ("held_spawns", "Int64"),
         ("held_by", "String"),
         ("held_harness", "String"),
@@ -297,6 +303,18 @@ def signal_rows(slug: str, doc: dict, agents: list, handoffs: list, found: list)
     return rows
 
 
+def placement_counts(agents: list[dict]) -> dict:
+    from scripts.swarm.commands import hive_id
+
+    here = hive_id()
+    remote = sum(
+        agent.get("runtime_backend", "local") != "local"
+        or (agent.get("runtime_target") or {}).get("host_id", here) not in ("", here)
+        for agent in agents
+    )
+    return {"workstation_agents": len(agents) - remote, "hive_agents": remote}
+
+
 def host_row(slug: str, now_ms: int, sample: host_budget.HostSample, quota: dict) -> dict:
     return {
         **_base(slug, now_ms, ["host", now_ms], {}),
@@ -304,6 +322,11 @@ def host_row(slug: str, now_ms: int, sample: host_budget.HostSample, quota: dict
         "available_mb": sample.available_mb,
         "load_per_cpu": sample.load1 / sample.cpus,
         "live_agents": sample.agents,
+        "workstation_agents": quota.get("workstation_agents", 0),
+        "hive_agents": quota.get("hive_agents", 0),
+        "swap_used_mb": sample.swap_used_mb,
+        "swap_total_mb": sample.swap_total_mb,
+        "agent_mb": sample.agent_mb,
         "held_spawns": quota.get("held_spawns", 0),
         "held_by": quota.get("held_by", ""),
         "held_harness": quota.get("held_harness", ""),
@@ -347,22 +370,26 @@ def classifier_rows(calls: list, host: str) -> list[dict]:
     ]
 
 
-def pull_rows(box: metrics_outbox.Outbox, now_ms: int, swarm: TickInput) -> dict:
-    completed = {
-        event["target"].removeprefix("tasks/")
-        for event in swarm.doc.get("_meta", {}).get("events", [])
-        if event["kind"] == "task done" and event["at"] >= now_ms - metrics_outbox.DAY_MS
-    }
-    recent = box.recent("delivery_events", now_ms)
+def pull_targets(doc: dict, now_ms: int, recent: Sequence[dict] = ()) -> list[tuple[str, bool]]:
     recorded = {row["pull_request"] for row in recent if row["kind"] == "merge"}
     merged = {row["pull_request"] for row in recent if row["kind"] == "pull_request_merged"}
-    return {
-        url: swarm.view(url)
-        for task in swarm.doc["tasks"]
-        if task["state"] in ("pr", "claimed") or task["id"] in completed
+    completed = {
+        event["target"].removeprefix("tasks/")
+        for event in doc.get("_meta", {}).get("events", [])
+        if event["kind"] == "task done" and event["at"] >= now_ms - metrics_outbox.DAY_MS
+    }
+    return [
+        (url, url == task.get("pr_url"))
+        for task in doc.get("tasks", [])
+        if task.get("state") in ("pr", "claimed") or task.get("id") in completed
         for url in dict.fromkeys([*(task.get("split_pulls") or []), task.get("pr_url")])
         if url and url not in (recorded if url == task.get("pr_url") else merged)
-    }
+    ]
+
+
+def pull_rows(box: metrics_outbox.Outbox, now_ms: int, swarm: TickInput) -> dict:
+    recent = box.recent("delivery_events", now_ms)
+    return {url: swarm.view(url) for url, _ in pull_targets(swarm.doc, now_ms, recent)}
 
 
 def read_review_events(slug: str, box: metrics_outbox.Outbox) -> LogBatch:
@@ -392,6 +419,20 @@ def read_review_events(slug: str, box: metrics_outbox.Outbox) -> LogBatch:
     return LogBatch(batch.source, batch.position, events)
 
 
+def read_review_rounds(slug: str, box: metrics_outbox.Outbox) -> LogBatch:
+    batch = _log_batch(gate_log.gates_dir(slug) / "reviews" / "rounds.jsonl", box)
+    events = [
+        {
+            "kind": "review round",
+            "target": f"tasks/{source['task']}",
+            "at": source["at"],
+            "review_id": f"swarm:{source['task']}:{source['counter']}:{source['round']}",
+        }
+        for source in batch.rows
+    ]
+    return LogBatch(batch.source, batch.position, events)
+
+
 def read_classifier_calls(box: metrics_outbox.Outbox) -> LogBatch:
     return _log_batch(decision_log.log_path(), box)
 
@@ -414,6 +455,20 @@ def held_harness(lanes: dict, held: dict) -> str:
     return agents.pop() if len(agents) == 1 and agents.issubset(agent_choice.AGENTS) else ""
 
 
+def held_pins(lanes: dict, held: dict, reason: str | None) -> str:
+    notes = [
+        f"{count} {lane} {'spawn' if count == 1 else 'spawns'} held on the {lane} lane pinned to {agent}"
+        for lane, count in sorted(held.items())
+        if count and (agent := lanes.get(lane, {}).get("agent")) in agent_choice.AGENTS
+    ]
+    return "; ".join(part for part in (reason, *notes) if part)
+
+
+def hive_wait(store: RedisStore, slug: str, held: dict) -> str:
+    reasons = sorted(wait["reason"] for wait in placement_waits.read(store, slug).values() if held.get(wait["lane"]))
+    return f"hive placement: {reasons[0]}" if reasons else ""
+
+
 def record_pass(
     box: metrics_outbox.Outbox, slug: str, now_ms: int, store: RedisStore, doc: dict, found: list, pulls: dict
 ) -> None:
@@ -426,11 +481,14 @@ def record_pass(
     live = [asdict(agent) for agent in store.agents(slug)]
     held = _held_lanes(store, slug, doc, quota, live, bool(hold))
     quota["held_spawns"] = sum(held.values())
-    quota["held_by"] = ("host" if hold else "quota") if quota["held_spawns"] else ""
-    quota["held_harness"] = "" if hold else held_harness(store.config(slug).lanes, held)
-    quota["reason"] = hold or quota.get("reason", "")
+    room = hold or hive_wait(store, slug, held)
+    quota["held_by"] = ("host" if room else "quota") if quota["held_spawns"] else ""
+    quota["held_harness"] = "" if room else held_harness(store.config(slug).lanes, held)
+    quota["reason"] = room or held_pins(store.config(slug).lanes, held, quota.get("reason"))
+    quota.update(placement_counts(live))
     reviews, classifiers = read_review_events(slug, box), read_classifier_calls(box)
-    review_doc = {**doc, "_meta": {"events": [*doc.get("_meta", {}).get("events", []), *reviews.rows]}}
+    rounds = read_review_rounds(slug, box)
+    review_doc = {**doc, "_meta": {"events": [*doc.get("_meta", {}).get("events", []), *reviews.rows, *rounds.rows]}}
     batches = (
         (
             AGENTS,
@@ -453,4 +511,5 @@ def record_pass(
             _supersede_merges(box, recent)
         box.append(table, recent)
     _checkpoint(box, reviews)
+    _checkpoint(box, rounds)
     _checkpoint(box, classifiers)

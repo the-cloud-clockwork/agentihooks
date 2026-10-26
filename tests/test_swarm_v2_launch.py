@@ -21,7 +21,7 @@ from scripts.swarm_v2.registry import CLOSED, LIVE, FleetRegistry, Scope, Sessio
 from scripts.swarm_v2.runtime.base import Capability, Outcome, Placement, RuntimeRouter, SpawnRequest, Status
 from scripts.swarm_v2.runtime.routed import routed
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 
 SLUG = "fixture"
 ACCOUNT = "fixture"
@@ -994,6 +994,7 @@ def test_the_worker_image_profiles_are_the_default_and_every_package_role():
         "dispatcher",
         "documentation",
         "engineer",
+        "judge",
         "master",
         "planner",
         "qa",

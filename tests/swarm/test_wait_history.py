@@ -5,8 +5,6 @@ import pytest
 from scripts.doctor import detect, traces_read
 from scripts.swarm import idle, waits
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 
 @pytest.fixture
 def redis():
@@ -78,8 +76,9 @@ def test_tick_resolution_records_the_actual_end_of_the_wait(redis):
     ]
 
 
-@pytest.mark.parametrize("until, expected", [(3_660_000, []), (3_600_000, ["turn-gap/session"])])
-def test_doctor_reads_ended_wait_history_for_historical_agents(redis, monkeypatch, until, expected):
+@pytest.mark.parametrize("hive", ["", "removed-hive"])
+@pytest.mark.parametrize("until, expected", [(3_660_000, []), (1_800_000, ["turn-gap/session"])])
+def test_doctor_reads_ended_wait_history_for_historical_agents(redis, monkeypatch, until, expected, hive):
     record = {
         "traces": [
             {
@@ -112,9 +111,47 @@ def test_doctor_reads_ended_wait_history_for_historical_agents(redis, monkeypatc
         assert slug == "sw"
         return []
 
-    store = SimpleNamespace(redis=redis, agents=rows)
+    from scripts.swarm.store import RedisStore
+
+    store = RedisStore(redis)
     ledger = SimpleNamespace(tasks=rows)
+    from scripts.hive import remove, scope
+
+    monkeypatch.setattr(scope, "member", lambda: hive)
     idle.declare_wait(redis, "sw", "engineer", until, "proof", 60_000)
     idle.end_wait(redis, "sw", "engineer", until)
+    history = [{"at": 60_000, "until": until, "reason": "proof"}]
+    assert idle.wait_history(redis, "sw", "engineer") == history
+    if hive:
+        remove.forget(redis, hive)
+        assert idle.wait_history(redis, "sw", "engineer") == history
+        monkeypatch.setattr(scope, "member", lambda: "")
+        assert idle.wait_history(redis, "sw", "engineer") == history
     found = detect.readers(store, ledger, "sw", 4_000_000, environ={})["trace"]()
     assert [f.id for f in found if f.kind == "turn gap"] == expected
+
+
+def test_doctor_reads_wait_history_only_for_agents_with_a_long_turn_gap(redis, monkeypatch):
+    def trace(name, second_start):
+        return {
+            "name": name,
+            "tags": [f"agent:{name}"],
+            "session_id": f"{name}-session",
+            "observations": [
+                {"type": "SPAN", "turn": 1, "start": 0, "end": 60_000},
+                {"type": "SPAN", "turn": 2, "start": second_start, "end": second_start + 60_000},
+            ],
+        }
+
+    record = {"traces": [trace("engineer", 3_660_000), trace("ci", 120_000)], "sessions": [], "merged": []}
+    monkeypatch.setattr(traces_read, "client", lambda env: None)
+    monkeypatch.setattr(traces_read, "record", lambda *args: record)
+    asked = []
+    monkeypatch.setattr(idle, "wait_history", lambda r, slug, name: asked.append((slug, name)) or [])
+    from scripts.swarm.store import RedisStore
+
+    store = RedisStore(redis)
+    found = detect.readers(store, SimpleNamespace(tasks=lambda slug: []), "sw", 4_000_000, environ={})["trace"]()
+    assert asked == [("sw", "engineer")]
+    assert [f.id for f in found if f.kind == "turn gap"] == ["turn-gap/engineer-session"]
+    assert record["waits_unread"] == []

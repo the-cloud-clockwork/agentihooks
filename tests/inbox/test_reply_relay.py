@@ -6,8 +6,6 @@ import pytest
 from scripts.inbox.store import InboxStore
 from scripts.swarm import delivery, ledger_client
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 
 def test_reply_and_page_relay_retries_keep_one_answer_and_one_page_post(tmp_path, monkeypatch):
     import fakeredis
@@ -31,7 +29,8 @@ def test_reply_and_page_relay_retries_keep_one_answer_and_one_page_post(tmp_path
 
     monkeypatch.setattr(ledger_client, "_ledger", lambda: SimpleNamespace(call=call))
     box = InboxStore(fakeredis.FakeRedis(decode_responses=True))
-    original = box.send("operator", "master", "status please")
+    repository.apply_ops("reply-proof", ops=[{"op": "add", "thread": "chat", "id": "m-ask", "text": "status please"}])
+    original = box.send("operator", "master", "status please", ref="reply-proof:1:m-ask")
     answer = box.reply(original.id, "master", "the work is complete")
     client = ledger_client.LedgerClient()
     agents = [SimpleNamespace(name="master")]
@@ -50,8 +49,9 @@ def test_reply_and_page_relay_retries_keep_one_answer_and_one_page_post(tmp_path
     assert delivery.relay_to_page(box, "reply-proof", agents, client) == 1
     state, rejected = repository.apply_ops("reply-proof")
     assert rejected == []
-    assert [(post["id"], post["by"], post["text"]) for post in state["chat"]] == [
-        (answer.id, "master", "the work is complete")
+    assert [(post["id"], post["by"], post["text"], post.get("reply_to")) for post in state["chat"]] == [
+        ("m-ask", "operator", "status please", None),
+        (answer.id, "master", "the work is complete", "m-ask"),
     ]
     assert [item.id for item in box.inbox("operator")] == [answer.id]
     assert box.get(answer.id).state == "done"

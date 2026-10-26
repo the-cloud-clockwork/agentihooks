@@ -1,5 +1,4 @@
 import json
-import subprocess
 from pathlib import Path
 
 import pytest
@@ -7,14 +6,11 @@ import pytest
 from tests.swarm_ledger.ledger_page import (
     ledger_state,
     loaded,
-    page_source,
-    reload_after_folds,
     serve_modules,
     shell_html,
 )
 
 ROOT = Path(__file__).resolve().parents[2]
-TEMPLATE = ROOT / "scripts" / "swarm_ledger" / "template.html"
 CASES = json.loads((ROOT / "tests" / "fixtures" / "phase_lifecycle.json").read_text())
 URL = "http://ledger.test/phase-rows"
 DOC = {
@@ -29,30 +25,21 @@ DOC = {
 }
 
 
-def function_source(name):
-    page = page_source()
-    return f"function {name}(" + page.split(f"  function {name}(", 1)[1].split("\n  }\n", 1)[0] + "\n}"
+def served_answers():
+    from scripts.swarm_ledger import ledger_server
+
+    answers = []
+    for c in CASES:
+        view = ledger_server.page_view(
+            {"phases": c["phases"], "tasks": c["tasks"], "_meta": {}}, *ledger_server.NO_DOCTOR
+        )
+        status = view["phase_status"]
+        answers.append([status[c["phase"]]["state"], status[c["phase"]]["label"]])
+    return answers
 
 
-def page_answers():
-    source = "\n".join(function_source(name) for name in ("phaseLifecycle", "phaseLabel"))
-    script = (
-        f"const PHASE_LABELS = {page_constant('PHASE_LABELS')};\n{source}\nconst cases = {json.dumps(CASES)};\n"
-        "process.stdout.write(JSON.stringify(cases.map((c) => {\n"
-        "  const phase = c.phases.find((p) => p.id === c.phase), doc = { phases: c.phases, tasks: c.tasks };\n"
-        "  return [phaseLifecycle(phase, doc), phaseLabel(phase, doc)];\n"
-        "})));"
-    )
-    return json.loads(subprocess.run(["node", "-e", script], check=True, capture_output=True, text=True).stdout)
-
-
-def page_constant(name):
-    page = page_source()
-    return page.split(f"  const {name} = ", 1)[1].split(";\n", 1)[0]
-
-
-def test_the_page_derives_the_same_lifecycle_and_label_as_the_fixture():
-    assert page_answers() == [[c["state"], c["label"]] for c in CASES]
+def test_the_served_status_carries_the_same_lifecycle_and_label_as_the_fixture():
+    assert served_answers() == [[c["state"], c["label"]] for c in CASES]
 
 
 @pytest.fixture(scope="module")
@@ -83,10 +70,8 @@ def context(browser):
 def rows(page):
     page.wait_for_selector("#phases > li .phase-state", state="attached")
     return page.evaluate(
-        """() => [...document.querySelectorAll("#phases > li")].map((li) => {
-          const fold = li.querySelector("details.phase-fold");
-          return [li.querySelector(".phase-state").textContent, fold.open, fold.querySelector(".desc").textContent];
-        })"""
+        """() => [...document.querySelectorAll("#phases > li")].map((li) => [
+          li.querySelector(".phase-state").textContent, li.querySelector(".phase-body .desc").textContent])"""
     )
 
 
@@ -94,20 +79,15 @@ def test_each_phase_row_shows_its_lifecycle_and_a_waiting_phase_names_its_blocke
     page = context.new_page()
     page.goto(URL)
     loaded(page)
-    assert rows(page) == [
-        ["Building", True, "first"],
-        ["Planning", True, "second"],
-        ["Waits for phase Inbox, Seats", True, "third"],
-    ]
+    assert rows(page) == [["Building", "first"], ["Planning", "second"], ["Waits for phase Inbox, Seats", "third"]]
 
 
-def test_a_folded_phase_row_stays_folded_after_a_reload(context):
+def test_a_phase_row_never_folds_and_always_shows_its_description(context):
     page = context.new_page()
     page.goto(URL)
     loaded(page)
-    page.click("#item-phases-p3 details.phase-fold > summary")
-    reload_after_folds(page, "#item-phases-p3 details.phase-fold")
-    assert [open_ for _, open_, _ in rows(page)] == [True, True, False]
+    assert page.locator("#phases details:not([data-key])").count() == 0
+    assert page.locator("#item-phases-p3 .phase-body .desc").is_visible()
 
 
 REVIEW_DOC = {
@@ -156,11 +136,14 @@ def test_only_a_phase_in_review_shows_the_review_buttons(review_page):
     assert page.locator("#item-phases-p2 .phase-review, #item-phases-p3 .phase-review").count() == 0
 
 
-def test_approve_sends_the_review_op_as_the_operator(review_page):
+def test_approve_sends_the_review_op_as_the_operator_and_waits_for_the_served_status(review_page):
     page, sent = review_page
     page.click("#item-phases-p1 .phase-review button:has-text('Approve plan')")
-    page.wait_for_function("() => document.querySelector('#item-phases-p1 .phase-state').textContent === 'Building'")
-    assert page.locator("#item-phases-p1 .phase-review").count() == 0
+    page.wait_for_function(
+        "() => document.querySelector('#item-phases-p1 .phase-review').textContent === 'review sent'"
+    )
+    assert page.locator("#item-phases-p1 .phase-state").text_content() == "Plan in review"
+    assert page.locator("#item-phases-p1 .phase-review button").count() == 0
     assert review_ops(page, sent) == [
         {"op": "phase_review", "by": "operator", "item": "phases/p1", "state": "approved"}
     ]
@@ -174,7 +157,9 @@ def test_send_back_needs_a_note_and_sends_it(review_page):
     assert review_ops(page, sent) == []
     page.fill("#item-phases-p1 .phase-note", "Split the parser task")
     page.click(back)
-    page.wait_for_function("() => document.querySelector('#item-phases-p1 .phase-review') === null")
+    page.wait_for_function(
+        "() => document.querySelector('#item-phases-p1 .phase-review').textContent === 'review sent'"
+    )
     assert review_ops(page, sent) == [
         {
             "op": "phase_review",

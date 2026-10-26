@@ -33,8 +33,12 @@ jobs:
 
   kind:
     if: ${{ !inputs.contracts_only }}
+    needs: contracts
     runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && 'anton-oss' || 'ubuntu-latest' }}
     timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: write
     steps:
       - uses: actions/checkout@v4
         with:
@@ -43,12 +47,17 @@ jobs:
         env:
           KIND_VERSION: v0.33.0
         run: |
-          curl -fsSLo kind "https://kind.sigs.k8s.io/dl/$KIND_VERSION/kind-linux-amd64"
-          curl -fsSLo kind.sha256sum "https://kind.sigs.k8s.io/dl/$KIND_VERSION/kind-linux-amd64.sha256sum"
-          mv kind kind-linux-amd64
-          sha256sum -c kind.sha256sum
-          sudo install -m 0755 kind-linux-amd64 /usr/local/bin/kind
+          if ! kind version; then
+            curl -fsSLo kind "https://kind.sigs.k8s.io/dl/$KIND_VERSION/kind-linux-amd64"
+            curl -fsSLo kind.sha256sum "https://kind.sigs.k8s.io/dl/$KIND_VERSION/kind-linux-amd64.sha256sum"
+            mv kind kind-linux-amd64
+            sha256sum -c kind.sha256sum
+            sudo install -m 0755 kind-linux-amd64 /usr/local/bin/kind
+          fi
+          kind version
       - name: Build the worker image while kind starts, then prove registration and order acknowledgement
+        env:
+          AGENTIHOOKS_REF: ${{ github.sha }}
         run: bash deploy/worker/kind-proof.sh
       - name: Retain proof output
         if: always()
@@ -56,35 +65,15 @@ jobs:
         with:
           name: worker-hive-proof
           path: ~/scratchpad/worker-hive-proof/*.txt
-      - name: Retain the proven image for publication
-        if: github.event_name == 'push' && github.ref == 'refs/heads/dev'
-        uses: actions/upload-artifact@v4
-        with:
-          name: worker-hive-image
-          path: ~/scratchpad/worker-hive-proof/image.tar
-          compression-level: 0
-          retention-days: 1
-
-  publish:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/dev'
-    needs: [contracts, kind]
-    runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && 'anton-oss' || 'ubuntu-latest' }}
-    timeout-minutes: 10
-    permissions:
-      contents: read
-      packages: write
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          name: worker-hive-image
-          path: ~/scratchpad/worker-hive-publish
+          retention-days: 7
       - uses: docker/login-action@v3
+        if: github.event_name == 'push' && github.ref == 'refs/heads/dev'
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Publish the proven hive worker image
+        if: github.event_name == 'push' && github.ref == 'refs/heads/dev'
         run: |
-          docker load -i "$HOME/scratchpad/worker-hive-publish/image.tar"
-          docker tag local/agentihooks-hive-worker:dev ghcr.io/the-cloud-clockwork/agentihooks-hive-worker:dev
+          docker tag localhost:5001/agentihooks-hive-worker:dev ghcr.io/the-cloud-clockwork/agentihooks-hive-worker:dev
           docker push ghcr.io/the-cloud-clockwork/agentihooks-hive-worker:dev

@@ -4,8 +4,6 @@ import pytest
 
 from scripts.gates import progress
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 SLUG, ME = "hookprogress-2026-01-01", "engineer@abcdef-0001"
 
 

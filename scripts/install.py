@@ -88,6 +88,11 @@ def _resolve_claude_home() -> Path:
 
 
 CLAUDE_HOME = _resolve_claude_home()
+ROUTE_LAUNCHERS = {
+    "interactive": "scripts.routing.interactive",
+    "master-login": "scripts.master_claude_login",
+    "claude-ai": "scripts.routing.claude_ai",
+}
 
 # Persistent state directory for user-level agentihooks configuration.
 # Overridable via AGENTIHOOKS_HOME for per-pod isolation on shared filesystems.
@@ -2204,14 +2209,7 @@ def cmd_init_unified(args: argparse.Namespace) -> None:
 def _rerender_profile_homes(target: str) -> None:
     from scripts.profiles import render
 
-    for name in render.rendered_profiles(target):
-        profile, overlays = render.split_key(name)
-        try:
-            render.render(target, profile, force=True, overlays=overlays)
-        except ValueError as exc:
-            print(f"{_DIM}[--] Profile home {name} kept as it was: {exc}{_RESET}")
-            continue
-        print(f"{_GREEN}[OK]{_RESET} Re-rendered the {name} profile home")
+    render.rerender(target)
 
 
 def _remove_bashrc_block() -> bool:
@@ -2287,7 +2285,7 @@ def _update_bashrc_block() -> None:
         f"}}\n"
         f"agentienv\n"
         f'case ":$PATH:" in *":$HOME/.local/bin:"*) ;; *) export PATH="$HOME/.local/bin:$PATH" ;; esac\n'
-        f'command -v agentihooks >/dev/null && eval "$(agentihooks accounts env)"\n'
+        f'command -v agentihooks >/dev/null && eval "$(agentihooks accounts env)" && eval "$(agentihooks access env)"\n'
         f'alias agenti="agentihooks claude"\n'
         f"{_BLOCK_END}\n"
     )
@@ -3007,10 +3005,10 @@ def _install_global_inner(args: argparse.Namespace) -> None:
         _remove_systemd_user_unit()
 
     from hooks.lifecycle.guard import enabled as _gc_enabled
-    from hooks.lifecycle.timer import install_timer, remove_timer
+    from hooks.lifecycle.timer import reconcile_units
 
     _gc_python, _gc_root = str(_resolve_hooks_python()), str(AGENTIHOOKS_ROOT)
-    _cprint("  " + (install_timer(_gc_python, _gc_root) if _gc_enabled() else remove_timer()))
+    _cprint("  " + reconcile_units(_gc_python, _gc_root, _gc_enabled()))
 
     # MCP layers, target-native. A layer that ships the target's own MCP file
     # (copilot: mcp-config.overrides.json, codex: mcp.overrides.toml) is used
@@ -5449,12 +5447,9 @@ def _claude_command(claude_bin: str, extra_args: list[str]) -> list[str]:
 
 
 def cmd_claude(extra_args: list[str]) -> None:
-    import fcntl
-
     from hooks.context.account_sessions import sessions_by_account
     from scripts.claude_quota_balancer import (
         RoutingError,
-        _cache_path,
         forced,
         format_selection,
         launch_environment,
@@ -5462,6 +5457,8 @@ def cmd_claude(extra_args: list[str]) -> None:
         route_requires_fable,
         select_credential,
     )
+    from scripts.hive.account_slots import execute
+    from scripts.master_claude_login import _token_lock
 
     fallback_flag = "--agentihooks-fallback-bare"
     fallback_bare = fallback_flag in extra_args
@@ -5484,17 +5481,12 @@ def cmd_claude(extra_args: list[str]) -> None:
         deps_ensure()
     except Exception as exc:  # noqa: BLE001 - a broken manifest must not stop a launch
         print(f"[agentihooks] deps: preflight skipped: {exc}", file=sys.stderr)
-    route_lock_path = _cache_path(os.environ).with_name("claude-route.lock")
-    route_lock_path.parent.mkdir(parents=True, exist_ok=True)
-    # Held until exec: the descriptor is close-on-exec, so the next launch counts this
-    # process only once it already runs as claude.
-    route_lock = route_lock_path.open("a+", encoding="utf-8")
-    fcntl.flock(route_lock, fcntl.LOCK_EX)
+    route_lock = _token_lock(os.environ)
     try:
-        if route == "interactive":
-            from scripts.routing import interactive
-
-            return interactive.launch_claude(claude_bin, extra_args, os.environ, report)
+        if route in ROUTE_LAUNCHERS:
+            if route != "interactive":
+                route_lock.close()
+            return import_module(ROUTE_LAUNCHERS[route]).launch_claude(claude_bin, extra_args, os.environ, report)
         decision = (
             forced(os.environ, route)
             if route
@@ -5512,25 +5504,24 @@ def cmd_claude(extra_args: list[str]) -> None:
             _write_route_report(report, status="bare", error=str(exc))
             os.environ.pop("AGENTIHOOKS_ROUTE_ACCOUNT", None)
             cmd = _claude_command(claude_bin, extra_args)
-            os.execvpe(claude_bin, cmd, os.environ)
+            execute("claude", "unrouted", os.environ, lambda env: os.execvpe(claude_bin, cmd, env))
         print(f"agentihooks: {exc}", file=sys.stderr)
         if exc.results:
             print(render_table(exc.results, include_fable=include_fable), file=sys.stderr)
         _write_route_report(report, status="failed", error=str(exc))
         raise SystemExit(3) from exc
-    _write_route_report(
-        report,
-        status="routed",
-        account=decision.account,
-        placement="forced" if route else "open",
-    )
+    _write_route_report(report, status="routed", account=decision.account, placement="forced" if route else "open")
     print(
         f"[agenti] account={decision.account} route=forced" if route else format_selection(decision, include_fable),
         flush=True,
     )
-    cmd = _claude_command(claude_bin, extra_args)
     # nosemgrep: python.lang.security.audit.dangerous-os-exec-tainted-env-args.dangerous-os-exec-tainted-env-args
-    os.execvpe(claude_bin, cmd, launch_environment(decision, os.environ))
+    execute(
+        "claude",
+        decision.account,
+        launch_environment(decision, os.environ),
+        lambda env: os.execvpe(claude_bin, _claude_command(claude_bin, extra_args), env),
+    )
 
 
 def cmd_balance(
@@ -5805,7 +5796,7 @@ def _cmd_refresh_rules(args: argparse.Namespace) -> None:
     """Handle the refresh-rules CLI command — push rules to running sessions."""
     sys.path.insert(0, str(AGENTIHOOKS_ROOT))
     from hooks.context.rules_refresh import _delete_marker, _load_marker, home_profile, write_refresh_marker
-    from scripts.targets.claude_target import refresh_rules
+    from scripts.targets.claude_target import refresh_every_home, refresh_rules
 
     profile = args.profile or home_profile(claude_home()) or _detect_active_profile()
     rules_dir = claude_home() / "rules"
@@ -5864,6 +5855,8 @@ def _cmd_refresh_rules(args: argparse.Namespace) -> None:
         print("  No running sessions to notify — marker will GC in 24h.")
     else:
         print("  Each session will consume the refresh on its next UserPromptSubmit.")
+
+    refresh_every_home(profile)
 
 
 def _cmd_broadcast(args: argparse.Namespace) -> None:
@@ -6279,7 +6272,7 @@ def main() -> None:
     if _argv and _argv[0] in ("swarm", "controller"):
         from scripts.swarm import cli, controller
 
-        raise SystemExit({"swarm": cli.main, "controller": controller.main}[_argv[0]](_argv[1:]))
+        raise SystemExit({"swarm": cli.typed, "controller": controller.main}[_argv[0]](_argv[1:]))
     if _crew_doctor(_argv):
         from scripts.doctor.cli import main as doctor_main
 
@@ -6326,7 +6319,7 @@ def main() -> None:
         from scripts.profiles.scaffold import main as scaffold_main
 
         raise SystemExit(scaffold_main(_argv))
-    if _argv and _argv[0] in ("gc", "lease", "scratch", "name"):
+    if _argv and _argv[0] in ("gc", "lease", "scratch", "name", "host-guard"):
         from scripts.gc_cli import main as gc_main
 
         raise SystemExit(gc_main(_argv))
@@ -6470,7 +6463,7 @@ def main() -> None:
         help="Swarm of agents over a swarm ledger: <id> create|start|pause|stop|set|status|send-message, list, tick",
     )
     sub.add_parser("msg", help="Durable messages between sessions: send|inbox|read|close")
-    sub.add_parser("recall", help="Recall archive of ledgers and swarms: reindex")
+    sub.add_parser("recall", help="Recall archive of ledgers and swarms: search|get|timeline|sources, reindex, eval")
     sub.add_parser("plan", help="Read only your task's plan chunk: read [--task ID] [--phase ID]")
     sub.add_parser(
         "trace", help="Directives a session received and the layer behind each; --wrong records a correction"

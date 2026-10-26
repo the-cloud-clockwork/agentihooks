@@ -1,3 +1,4 @@
+import hashlib
 import json
 import os
 
@@ -33,6 +34,10 @@ def test_the_server_and_the_swarm_share_one_list_of_code_folders():
         "gates",
         "hive",
         "codex_session",
+        "scheduler",
+        "events",
+        "hub",
+        "workflows",
         "hooks",
     ]
 
@@ -40,9 +45,12 @@ def test_the_server_and_the_swarm_share_one_list_of_code_folders():
 def test_the_record_names_the_process_its_folders_and_the_stamp_it_loaded(tmp_path):
     code = code_tree(tmp_path)
     server_code.record(tmp_path, 4242, 17, (code,))
-    assert json.loads((tmp_path / ".server.code").read_text()) == {"pid": 4242, "stamp": 17, "dirs": [str(code)]}
-    assert server_code.loaded(tmp_path) == {"pid": 4242, "stamp": 17, "dirs": [str(code)]}
+    held = {"pid": 4242, "stamp": 17, "dirs": [str(code)], "digest": server_code.code_digest((code,))}
+    assert json.loads((tmp_path / ".server.code").read_text()) == held
+    assert server_code.loaded(tmp_path) == held
     assert not (tmp_path / ".server.code.4242").exists()
+    server_code.record(tmp_path, 4242, 17, (code,), "loaded")
+    assert server_code.loaded(tmp_path)["digest"] == "loaded"
 
 
 def test_a_code_file_that_cannot_be_read_counts_as_no_change(tmp_path):
@@ -53,6 +61,36 @@ def test_a_code_file_that_cannot_be_read_counts_as_no_change(tmp_path):
     only.mkdir()
     (only / "broken.py").symlink_to(tmp_path / "missing.py")
     assert server_code.code_stamp((only,)) == 0
+
+
+def test_the_digest_follows_content_and_names_but_not_file_times(tmp_path):
+    page = tmp_path / "page.py"
+    page.write_text("old = 1\n")
+    (tmp_path / "notes.txt").write_text("ignored")
+    first = server_code.code_digest((tmp_path,))
+    os.utime(page, ns=(5, 5_000_000_000))
+    (tmp_path / "notes.txt").write_text("still ignored")
+    assert server_code.code_digest((tmp_path,)) == first
+    page.write_text("new = 1\n")
+    changed = server_code.code_digest((tmp_path,))
+    assert changed != first
+    page.rename(tmp_path / "renamed.py")
+    assert server_code.code_digest((tmp_path,)) not in (first, changed)
+
+
+def test_the_digest_hashes_each_path_beside_its_content_hash(tmp_path):
+    page = tmp_path / "page.py"
+    page.write_text("old = 1\n")
+    expected = hashlib.sha256(str(page).encode() + b"\0" + hashlib.sha256(b"old = 1\n").digest()).hexdigest()
+    assert server_code.code_digest((tmp_path,)) == expected
+
+
+def test_a_code_file_that_vanished_is_left_out_of_the_digest(tmp_path):
+    (tmp_path / "kept.py").write_text("kept = 1\n")
+    alone = server_code.code_digest((tmp_path,))
+    (tmp_path / "gone.py").symlink_to(tmp_path / "missing.py")
+    assert server_code.code_digest((tmp_path,)) == alone
+    assert len(alone) == 64
 
 
 def test_a_record_without_folders_is_current_while_its_stamp_is_zero(tmp_path):
@@ -84,6 +122,9 @@ def test_a_server_is_current_only_while_its_own_record_matches_the_code_on_disk(
     assert not server_code.stale(tmp_path, 4242)
     assert server_code.stale(tmp_path, 4243)
     os.utime(code / "a.py", ns=(31, 31))
+    assert not server_code.stale(tmp_path, 4242)
+    (code / "a.py").write_text("changed = 1\n")
+    os.utime(code / "a.py", ns=(31, 31))
     assert server_code.stale(tmp_path, 4242)
     os.utime(code / "a.py", ns=(29, 29))
     assert not server_code.stale(tmp_path, 4242)
@@ -102,8 +143,11 @@ def test_serve_records_the_code_it_loaded_beside_its_pid_file(monkeypatch, tmp_p
         def server_activate(self):
             pass
 
-        def serve_forever(self):
+        def serve_forever(self, poll_interval):
             pass
+
+        def drained(self, timeout):
+            return True
 
         def server_close(self):
             pass
@@ -116,8 +160,10 @@ def test_serve_records_the_code_it_loaded_beside_its_pid_file(monkeypatch, tmp_p
     monkeypatch.setattr(
         ledger_server.server_code,
         "record",
-        lambda *args: recorded.append((*args, (tmp_path / ".server.pid").exists())),
+        lambda *args, **kwargs: recorded.append((*args, kwargs, (tmp_path / ".server.pid").exists())),
     )
     ledger_server.serve()
-    assert recorded == [(tmp_path, os.getpid(), ledger_server.LOADED_STAMP, False)]
+    assert recorded == [
+        (tmp_path, os.getpid(), ledger_server.LOADED_STAMP, {"digest": ledger_server.LOADED_DIGEST}, False)
+    ]
     assert ledger_server.LOADED_STAMP > 0

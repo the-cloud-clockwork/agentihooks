@@ -1,3 +1,4 @@
+import json
 import sqlite3
 from pathlib import Path
 
@@ -104,6 +105,52 @@ def test_media_folder_glob_and_search_refused(ledger):
     assert check({"tool_name": "Grep", "tool_input": {"pattern": "x", "path": f"{ledger}/{SLUG}.media"}}, env(ledger))
 
 
+def test_named_migration_inventory_and_copy_pass_without_allowing_other_reads(ledger):
+    module = "scripts.swarm_ledger.storage_migration.hosted"
+    commands = [
+        f"python -m {module} --source {ledger}",
+        f"/venv/bin/python -m {module} --source {ledger} --url https://hosted.example --freeze",
+        f"python -m {module} --source {ledger} > /home/x/scratch/inventory.jsonl",
+    ]
+    for command in commands:
+        assert check(bash(command), env(ledger)) is None
+    assert check(bash(f"cat {ledger}/{SLUG}.media/*.md"), env(ledger))
+    assert check(bash(f"python -m {module} --source {ledger}; cat {stored(ledger)}"), env(ledger))
+    assert check(bash(f"python -c 'print(1)' -m {module} --source {ledger}"), env(ledger))
+
+
+def test_migration_flags_and_redirects_preserve_guard_operands(ledger):
+    module = "scripts.swarm_ledger.storage_migration.hosted"
+    for redirect in (">", ">>"):
+        assert check(bash(f"python -m {module} --source {ledger} {redirect} {stored(ledger)}"), env(ledger))
+    valid = f"python3 -m {module} --freeze --slug demo --source {ledger} --url https://hosted.example >> /home/x/scratch/proof.jsonl"
+    assert check(bash(valid), env(ledger)) is None
+    for ending in ("--slug", "--unknown value", "unexpected value", "> one two", "--source"):
+        assert check(bash(f"python -m {module} --source {ledger} {ending}"), env(ledger))
+
+
+def test_shared_conversion_and_its_dry_run_pass_without_allowing_other_flags(ledger):
+    module = "scripts.swarm_ledger.storage_migration.shared"
+    for command in (
+        f"python -m {module} --source {ledger}",
+        f"/venv/bin/python -m {module} --dry-run --source {ledger} > /home/x/scratch/dry-run.json",
+        f"python -m {module} --source {ledger} --unfence",
+    ):
+        assert check(bash(command), env(ledger)) is None
+    for ending in ("--freeze", "--url https://hosted.example", "--slug demo"):
+        assert check(bash(f"python -m {module} --source {ledger} {ending}"), env(ledger))
+    assert check(bash(f"python -X {module} --source {ledger}"), env(ledger))
+    hosted = "scripts.swarm_ledger.storage_migration.hosted"
+    assert check(bash(f"python -m {hosted} --source {ledger} --dry-run"), env(ledger))
+
+
+def test_migration_flag_cannot_be_mistaken_for_the_configured_store(ledger):
+    folder = ledger / "--source"
+    put(folder, SLUG, {"artifacts": [{"file": {"id": PLAN}, "plan": True}]})
+    command = "python -m scripts.swarm_ledger.storage_migration.hosted --source /home/x/source"
+    assert check(bash(command), env(folder)) is None
+
+
 def test_grep_and_fetch_of_plan_refused(ledger):
     assert check({"tool_name": "Grep", "tool_input": {"pattern": "x", "path": stored(ledger)}}, env(ledger))
     url = f"http://127.0.0.1:8765/artifacts/{SLUG}/{PLAN}"
@@ -187,9 +234,36 @@ def test_boolean_offset_or_limit_refused(ledger):
     assert check(read(stored(ledger), offset=45, limit=True), env(ledger))
 
 
-def test_errors_while_deciding_refuse(ledger):
-    assert check(bash(f"cat ~nosuchuser/x {PLAN}"), env(ledger))
-    assert check(read(["x", PLAN], offset=45, limit=5), env(ledger))
+def test_bad_read_input_fails_open_and_logs(ledger, tmp_path, monkeypatch):
+    from hooks import common
+
+    log_file = tmp_path / "guard.log"
+    monkeypatch.setattr(common, "LOG_FILE", str(log_file))
+    monkeypatch.setattr(common, "LOG_ENABLED", True)
+    assert check(read(["x", PLAN], offset=45, limit=5), env(ledger)) is None
+    entry = json.loads(log_file.read_text())
+    assert entry["message"] == "plan_read_guard failed"
+    assert "str" in entry["payload"]["error"]
+    assert set(entry["payload"]) == {"error"}
+
+
+@pytest.mark.parametrize("lane", ["eng", "ci"])
+@pytest.mark.parametrize(
+    "command",
+    [
+        "cd ~; agentihooks plan read",
+        "cd ~&& gh pr view 3183",
+        "printf '%s' ~nosuchuser/x",
+    ],
+)
+def test_unexpandable_tokens_without_plan_artifacts_pass(ledger, lane, command):
+    assert check(bash(command), env(ledger, lane=lane)) is None
+
+
+@pytest.mark.parametrize("token", ["~;", "~&&", "~nosuchuser/x"])
+def test_unexpandable_token_does_not_hide_a_plan_read(ledger, token):
+    assert check(bash(f"cd {token} cat {PLAN}"), env(ledger)) == plan_read_guard.refusal((PLAN, 30, 70))
+    assert check(bash(f"cd {token} rg needle {ledger}"), env(ledger)) == plan_read_guard.refusal((PLAN, 30, 70))
 
 
 def test_ledger_root_by_variable_or_relative_name_refused(ledger, monkeypatch):
@@ -289,6 +363,49 @@ def test_ledger_root_search_refused_and_ledger_file_allowed(ledger):
     assert check({"tool_name": "Grep", "tool_input": {"pattern": "x", "path": str(ledger)}}, env(ledger))
     assert check(bash(f"cat {ledger}/{SLUG}.json"), env(ledger)) is None
     assert check(read(str(ledger / f"{SLUG}.json")), env(ledger)) is None
+
+
+def test_progress_and_proof_appends_quoting_the_ledger_folder_allowed(ledger):
+    folder = "/home/x/.agentihooks/swarm/demo/tasks/t1"
+    assert (
+        check(bash(f'echo "plan read done, ledger at {ledger} checked" >> {folder}/progress.md'), env(ledger)) is None
+    )
+    assert check(bash(f"printf '%s\\n' 'listed {ledger}/{SLUG}.media' >> {folder}/proof.md"), env(ledger)) is None
+    assert check(bash(f"cat >> {folder}/proof.md <<'EOF'\nsearched {ledger} with grep -rn\nEOF"), env(ledger)) is None
+    assert (
+        check(bash(f'echo "read lines 40 to 60 of {PLAN} by plan read" >> {folder}/progress.md'), env(ledger)) is None
+    )
+    assert check({"tool_name": "Bash", "tool_input": {}}, env(ledger)) is None
+    assert check(bash(f'cd {folder} && echo "ledger at {ledger} ok" >> progress.md'), env(ledger)) is None
+    every_sink = f"echo a | printf b | tee {folder}/proof.md | cat <<'EOF'\nsee {ledger}\nEOF"
+    assert check(bash(every_sink), env(ledger)) is None
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "cat {root}/demo.media/{plan}",
+        'cat "{root}/demo.media/{plan}" >> progress.md',
+        "grep -rn needle {root}",
+        "bash -c 'grep -rn needle {root}'",
+        'echo "$(cat {root}/*/*.md)" >> progress.md',
+        "bash <<'EOF'\ngrep -rn needle {root}\nEOF",
+        "ksh <<'EOF'\ngrep -rn needle {root}\nEOF",
+        "ssh localhost <<'EOF'\ngrep -rn needle {root}\nEOF",
+        'flock /dev/null -c "grep -rn needle {root}"',
+        'echo ok\nbash -c "grep -rn needle {root}"',
+        "echo x\nbash <<'EOF'\ngrep -rn needle {root}\nEOF",
+        'echo <(bash -c "grep -rn needle {root}")',
+        "cat >> progress.md <<EOF\n$(cat {root}/demo.media/{plan})\nEOF",
+        "cat <<'EOF' > {root}\nnotes\nEOF",
+        'echo "`ls {root} `" >> progress.md',
+        "cat {root}/a:b/*",
+        'curl -H "X-Ref: $RUN" https://ci.example/artifacts/plan.md',
+        'grep -rn needle "{root} "',
+    ],
+)
+def test_direct_plan_reads_still_refused_beside_quoted_evidence(ledger, command):
+    assert check(bash(command.format(root=ledger, plan=PLAN)), env(ledger))
 
 
 def test_reads_process_environment(ledger, monkeypatch):

@@ -1,0 +1,6 @@
+{
+  "scripts/doctor/ci_speed.py:scripts.doctor.ci_speed.x__wait__mutmut_25:87085efda3df32af72fd58195964a2231525a60d8ca93b3ac6ea4df092b7d044": {
+    "reader": "Standards reader /root/standards_reader",
+    "reason": "The only extra excluded case has created equal to since and started before since. Its elapsed time is negative and is already excluded by the five minute threshold, so no input changes its returned findings."
+  }
+}

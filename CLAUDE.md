@@ -140,7 +140,7 @@ live session cap, computed from each account's five-hour window left (6 at
 below 5% of the week either), counted from `/proc` by
 `hooks/context/account_sessions.py`. `hooks/context/quota_policy.py` is pure code
 deciding HANDOFF / WAIT / STOP / PUSH from the session's statusline quota and the
-router cache; PreToolUse blocks on STOP and WAIT. `init-agent --handoff` runs
+router cache; STOP and WAIT are alerts injected at PreToolUse and never block a tool. `init-agent --handoff` runs
 the handoff and marks the old session `handed_off`. Register the real agent PID
 (`agent_pid()`), never `os.getppid()` — that is the hook's short-lived shell.
 Docs: `docs/pillars/load-balancing.md`.

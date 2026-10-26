@@ -6,6 +6,14 @@ from tests.swarm_ledger import legacy_page  # noqa: E402
 
 SLUG = "taskrank-2026-01-01"
 MASTER = "master@abcdef-0001"
+UNRELAYED_WORDS = (
+    "a rank relay refused: the quote is not at least three of the operator's exact words the hooks recorded "
+    "in a master or planner session of this swarm: quote his exact words or set the rank without a quote"
+)
+UNNAMED_HIGH = (
+    "a rank relay refused: the operator's quoted words do not name the rank high: quote words that say it "
+    "or set the rank without a quote"
+)
 ENGINEER = "engineer@abcdef-0002"
 PLANNER = "planner@abcdef-0003"
 DISPATCHER = "dispatcher@abcdef-0005"
@@ -18,7 +26,7 @@ def ledger_dir(tmp_path, monkeypatch):
     monkeypatch.setitem(core.EXTENSION_OPS, "task_update", ledger_tasks)
     monkeypatch.setitem(core.EXTENSION_OPS, "task_rank", ledger_rank)
     content = {"title": "Demo", "overview": "o", "sources": [], "phases": [{"title": "one", "description": "d"}]}
-    html_path, _ = core.paths(SLUG)
+    html_path, _ = legacy_page.paths(SLUG, core)
     html_path.write_text(legacy_page.render(new_ledger.build_doc(content), SLUG, 8765), encoding="utf-8")
     core.sync(SLUG, ops=[{"op": "task_add", "id": "seed", "by": "swarm", "task": "t1", "title": "a", "lane": "eng"}])
 
@@ -175,6 +183,31 @@ def test_order_puts_each_rank_in_its_place(task, position):
     assert ledger_rank.order(task) == position
 
 
+GENERATED = {"profile": "documentation", "follow_up": True}
+
+
+@pytest.mark.parametrize(
+    ("task", "position"),
+    [(GENERATED, 3), ({**GENERATED, "rank": "x"}, 3), ({**GENERATED, "rank": "high"}, 1)],
+)
+def test_an_unranked_generated_documentation_task_orders_low(task, position):
+    assert ledger_rank.order(task) == position
+
+
+@pytest.mark.parametrize(
+    ("task", "found"),
+    [
+        (GENERATED, True),
+        ({"profile": "documentation"}, False),
+        ({"profile": "documentation", "follow_up": "yes"}, False),
+        ({"profile": "engineer", "follow_up": True}, False),
+        ({"follow_up": True}, False),
+    ],
+)
+def test_only_a_documentation_follow_up_counts_as_generated(task, found):
+    assert ledger_rank.generated(task) is found
+
+
 @pytest.mark.parametrize(
     "extra",
     [
@@ -315,7 +348,7 @@ def test_a_relay_on_a_missing_task_is_refused():
     core.sync(SLUG, ops=[{"op": "join", "id": "j1", "by": MASTER, "role": "orchestrator"}])
     op = {"op": "task_update", "id": "rel-9", "by": MASTER, "item": "tasks/nope", "fields": {"rank": "high"}}
     state, rejected = core.sync(SLUG, ops=[{**op, "quote": "rank the login fix high"}])
-    assert (rejected, state["_meta"]["warnings"][0]) == (["rel-9"], ledger_tasks.UNRELAYED)
+    assert (rejected, state["_meta"]["warnings"][0]) == (["rel-9"], "a rank relay refused: the task does not exist")
 
 
 @pytest.mark.parametrize("meta", [None, {}, {"stamps": {}}])
@@ -339,20 +372,27 @@ def test_a_relayed_rank_without_recorded_words_or_from_a_non_orchestrator_is_ref
         core.sync(SLUG, ops=[{"op": "join", "id": "j1", "by": MASTER, "role": member}])
     state, rejected = relayed("rank the login fix high")
     assert (rejected, rank_of(state)) == (["rel-1"], None)
-    assert state["_meta"]["warnings"][0] == ledger_tasks.UNRELAYED
+    assert state["_meta"]["warnings"][0] == (
+        f"a rank relay refused: {MASTER} is not the ledger's orchestrator; only the master relays the operator's "
+        "rank, anyone else sets the rank without a quote"
+    )
     core.sync(SLUG, ops=[{"op": "join", "id": "j2", "by": MASTER, "role": "orchestrator"}])
     state, rejected = relayed("words he never said", 2)
     assert (rejected, rank_of(state)) == (["rel-2"], None)
+    assert UNRELAYED_WORDS in state["_meta"]["warnings"]
 
 
-@pytest.mark.parametrize("quote", ["high", "the login fix", "Rank the login"])
-def test_a_relayed_rank_needs_three_of_his_words_naming_the_rank(quote):
+@pytest.mark.parametrize(
+    ("quote", "warning"),
+    [("high", UNRELAYED_WORDS), ("the login fix", UNNAMED_HIGH), ("Rank the login", UNNAMED_HIGH)],
+)
+def test_a_relayed_rank_needs_three_of_his_words_naming_the_rank(quote, warning):
     from hooks.context import operator_words
 
     operator_words.record(MASTER, "Rank the login fix high, it blocks everything")
     core.sync(SLUG, ops=[{"op": "join", "id": "j1", "by": MASTER, "role": "orchestrator"}])
     state, rejected = relayed(quote)
-    assert (rejected, rank_of(state), state["_meta"]["warnings"][0]) == (["rel-1"], None, ledger_tasks.UNRELAYED)
+    assert (rejected, rank_of(state), state["_meta"]["warnings"][0]) == (["rel-1"], None, warning)
 
 
 @pytest.mark.parametrize(

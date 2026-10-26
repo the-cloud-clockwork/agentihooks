@@ -1,3 +1,4 @@
+{{- if not .Values.hiveOnly }}
 {{- $api := .Values.controller.api }}
 {{- $workers := .Values.controller.workers }}
 {{- $ca := .Values.controller.terminalCa | default dict }}
@@ -20,6 +21,25 @@
 {{- end }}
 {{- if not (regexMatch "^proof-[0-9a-f]{6}-[a-z0-9]+-[0-9]+$" (toString $api.swarm)) }}
 {{- fail "controller.api.proof needs controller.api.swarm to name the proof swarm, proof-<code>-<task>-<n>" }}
+{{- end }}
+{{- end }}
+{{- $scratchNames := list }}
+{{- range $scratch := .Values.controller.scratchSwarms }}
+{{- if has $scratch.swarm $scratchNames }}
+{{- fail "controller.scratchSwarms lists a swarm more than once" }}
+{{- end }}
+{{- $scratchNames = append $scratchNames $scratch.swarm }}
+{{- if not (and $scratch.swarm $scratch.agent $scratch.task $scratch.repo) }}
+{{- fail "each controller.scratchSwarms entry needs swarm, agent, task and repo: the controller names its ledger from the agent and task" }}
+{{- end }}
+{{- if not (regexMatch "^proof-[0-9a-f]{6}-[a-z0-9]+-[0-9]+$" (toString $scratch.swarm)) }}
+{{- fail "each controller.scratchSwarms swarm must be a proof swarm name, proof-<code>-<task>-<n>" }}
+{{- end }}
+{{- if has $scratch.swarm ($.Values.controller.hostSwarms | default list) }}
+{{- fail "a controller.scratchSwarms swarm must not be in controller.hostSwarms: the controller ticks the scratch swarms it creates" }}
+{{- end }}
+{{- if and $api.proof (eq $scratch.swarm $api.swarm) }}
+{{- fail "a controller.scratchSwarms swarm must not be the served proof controller.api.swarm" }}
 {{- end }}
 {{- end }}
 {{- if and (or $ca.secretName $workers.apiUrl) (not (and $ca.secretName $ca.key)) }}
@@ -66,6 +86,9 @@ data:
 {{- if $api.enabled }}
 {{- if not $api.swarm }}
 {{- fail "controller.api.swarm must name the swarm the control API serves" }}
+{{- end }}
+{{- if has $api.swarm (.Values.controller.hostSwarms | default list) }}
+{{- fail "controller.api.swarm must not be in controller.hostSwarms: the control API holds the tick lease of the swarm it serves" }}
 {{- end }}
 {{- if not (and $api.signingKey.keyId $api.signingKey.secretName) }}
 {{- fail "controller.api.signingKey needs keyId and secretName: workers verify launch grants with that key" }}
@@ -138,12 +161,13 @@ spec:
             - python
             - -c
             - |
-              import os, time, urllib.request
+              import os, ssl, time, urllib.request
               from scripts.swarm.store import redis_client
               for _ in range(120):
                   try:
                       redis_client()
-                      urllib.request.urlopen(os.environ["LEDGER_URL"] + "/healthz", timeout=2).read()
+                      context = ssl.create_default_context(cadata=os.environ.get("LEDGER_CA_PEM") or None)
+                      urllib.request.urlopen(os.environ["LEDGER_URL"] + "/healthz", timeout=2, context=context).read()
                       break
                   except Exception as exc:
                       print(f"waiting for Redis and the ledger: {exc}", flush=True)
@@ -232,8 +256,10 @@ spec:
                 - python
                 - -c
                 - >-
-                  from scripts.swarm import lease; from scripts.swarm.store import connect;
-                  store = connect(); stale = [slug for slug in store.slugs() if not lease.current(store, slug)];
+                  import os; from scripts.swarm import lease; from scripts.swarm.store import connect;
+                  from scripts.swarm.controller_probes import HOST_SWARMS_ENV, ticked; store = connect();
+                  held = ticked(store.slugs(), os.environ.get(HOST_SWARMS_ENV, ""));
+                  stale = [slug for slug in held if not lease.current(store, slug)];
                   assert not stale, f"no live controller lease for {stale}"
               {{- end }}
             {{- toYaml .Values.controller.livenessProbe | nindent 12 }}
@@ -241,6 +267,28 @@ spec:
             {{- include "swarm.env" (dict "root" . "role" "controller") | nindent 12 }}
             - name: AGENTIHOOKS_HOME
               value: /run/agentihooks
+            - name: AGENTIHOOKS_POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: AGENTIHOOKS_POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: AGENTIHOOKS_POD_UID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.uid
+            - name: AGENTIHOOKS_POD_CONTAINER
+              value: controller
+            {{- with .Values.controller.hostSwarms }}
+            - name: AGENTIHOOKS_CONTROL_HOST_SWARMS
+              value: {{ join "," . | quote }}
+            {{- end }}
+            {{- with .Values.controller.scratchSwarms }}
+            - name: AGENTIHOOKS_CONTROL_SCRATCH_SWARMS
+              value: {{ toJson . | quote }}
+            {{- end }}
             {{- if $api.enabled }}
             - name: AGENTIHOOKS_CONTROL_API_PORT
               value: {{ $api.port | quote }}
@@ -279,7 +327,7 @@ spec:
             - name: AGENTIHOOKS_TERMINAL_JUMP_STATE
               value: /run/jump/state
             {{- end }}
-            {{- include "swarm.controllerSecretEnv" . | nindent 12 }}
+            {{- include "swarm.secretKeyEnv" .Values.controller.secretEnv | nindent 12 }}
             {{- include "swarm.extraEnv" .Values.controller.env | nindent 12 }}
           {{- include "swarm.envFrom" . | nindent 10 }}
           resources:
@@ -335,3 +383,4 @@ spec:
               - key: {{ $ca.key }}
                 path: {{ $ca.key }}
         {{- end }}
+{{- end }}

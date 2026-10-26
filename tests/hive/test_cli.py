@@ -16,8 +16,6 @@ import pytest
 
 from scripts.hive import auth, cli, registry, server
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 PUBLIC = "redis://hive.example:6380/2"
 
 
@@ -54,29 +52,33 @@ def _raw(port, request):
 
 
 def _post(port, body):
-    return _raw(port, b"POST /hive/join HTTP/1.0\r\nContent-Length: %d\r\n\r\n%s" % (len(body), body))
+    return _raw(port, b"POST /hive/refresh HTTP/1.0\r\nContent-Length: %d\r\n\r\n%s" % (len(body), body))
 
 
-def test_the_endpoint_answers_200_with_the_grant_and_403_for_a_used_code(admin, hive):
-    code = auth.invite(admin, "laptop")
+UNKNOWN = {"error": "the ledger credential belongs to no hive member"}
 
-    status, grant = _post(hive, json.dumps({"code": code}).encode())
+
+def test_the_endpoint_answers_200_with_the_grant_and_403_for_an_unknown_credential(admin, hive):
+    member = auth.mint(admin, "laptop", PUBLIC)
+
+    status, grant = _post(hive, json.dumps({"ledger_credential": member["ledger_credential"]}).encode())
 
     assert status == 200
-    assert grant["name"] == "laptop"
-    assert _post(hive, json.dumps({"code": code}).encode()) == (
-        403,
-        {"error": "invite code is invalid, expired or already used"},
-    )
+    assert grant["id"] == member["id"]
+    assert _post(hive, json.dumps({"ledger_credential": "unknown"}).encode()) == (403, UNKNOWN)
+
+
+def test_a_join_is_not_found(hive):
+    assert _raw(hive, b"POST /hive/join HTTP/1.0\r\nContent-Length: 2\r\n\r\n{}") == (404, {"error": "not found"})
 
 
 def test_a_request_without_content_length_is_refused(hive):
-    assert _raw(hive, b"POST /hive/join HTTP/1.0\r\n\r\n") == (400, {"error": server.BAD_BODY})
+    assert _raw(hive, b"POST /hive/refresh HTTP/1.0\r\n\r\n") == (400, {"error": server.BAD_REFRESH_BODY})
 
 
 @pytest.mark.parametrize(("size", "status"), [(server.MAX_BODY, 403), (server.MAX_BODY + 1, 400)])
 def test_the_body_limit_is_inclusive(hive, size, status):
-    body = b'{"code": "' + b"x" * (size - 12) + b'"}'
+    body = b'{"ledger_credential": "' + b"x" * (size - 25) + b'"}'
     assert len(body) == size
 
     assert _post(hive, body)[0] == status
@@ -131,7 +133,7 @@ def test_a_stalled_tls_client_is_dropped_after_the_request_timeout(admin, cert, 
     assert stalled_tls_client(admin, cert, monkeypatch)[1] < 3
 
 
-def test_an_https_join_completes_the_tls_handshake(admin, cert, tmp_path, monkeypatch, capsys):
+def test_an_https_refresh_completes_the_tls_handshake(admin, cert, tmp_path, monkeypatch, capsys):
     httpd = server.make_server(admin, PUBLIC, "localhost", 0, cert)
     port = _serve(httpd)
     trusting = ssl.create_default_context(cafile=cert[0])
@@ -140,13 +142,76 @@ def test_an_https_join_completes_the_tls_handshake(admin, cert, tmp_path, monkey
         urllib.request, "urlopen", lambda request, timeout: real(request, timeout=timeout, context=trusting)
     )
     monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
+    monkeypatch.setenv("AGENTIHOOKS_HIVE_URL", f"https://localhost:{port}")
+    monkeypatch.setenv("AGENTIHOOKS_HIVE_LEDGER_CREDENTIAL", auth.mint(admin, "laptop", PUBLIC)["ledger_credential"])
     try:
-        assert cli.main(["join", f"https://localhost:{port}", auth.invite(admin, "laptop")]) == 0
+        assert cli.main(["refresh"]) == 0
     finally:
         httpd.shutdown()
         httpd.server_close()
 
-    assert capsys.readouterr().out.startswith("joined the hive as ")
+    assert capsys.readouterr().out.startswith("refreshed the Redis credential of hive member ")
+
+
+def _refresh_over_tls(admin, cert, tmp_path, monkeypatch):
+    httpd = server.make_server(admin, PUBLIC, "localhost", 0, cert)
+    port = _serve(httpd)
+    for name in ("LEDGER_CA_PEM", "LEDGER_CA_FILE"):
+        monkeypatch.setenv(name, "")
+        monkeypatch.delenv(name)
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
+    monkeypatch.setenv("AGENTIHOOKS_HIVE_URL", f"https://localhost:{port}")
+    monkeypatch.setenv("AGENTIHOOKS_HIVE_LEDGER_CREDENTIAL", auth.mint(admin, "laptop", PUBLIC)["ledger_credential"])
+    return httpd
+
+
+def _refresh(httpd):
+    try:
+        return cli.main(["refresh"])
+    finally:
+        httpd.shutdown()
+        httpd.server_close()
+
+
+def test_a_refresh_trusts_the_ledger_ca_pem(admin, cert, tmp_path, monkeypatch, capsys):
+    httpd = _refresh_over_tls(admin, cert, tmp_path, monkeypatch)
+    monkeypatch.setenv("LEDGER_CA_PEM", Path(cert[0]).read_text())
+
+    assert _refresh(httpd) == 0
+    assert capsys.readouterr().out.startswith("refreshed the Redis credential of hive member ")
+
+
+def test_a_refresh_trusts_the_saved_ledger_ca_file(admin, cert, tmp_path, monkeypatch, capsys):
+    httpd = _refresh_over_tls(admin, cert, tmp_path, monkeypatch)
+    (tmp_path / "ledger-ca.pem").write_text(Path(cert[0]).read_text())
+
+    assert _refresh(httpd) == 0
+    assert capsys.readouterr().out.startswith("refreshed the Redis credential of hive member ")
+
+
+def test_a_refresh_without_the_ledger_ca_refuses_the_unverified_hive(admin, cert, tmp_path, monkeypatch, capsys):
+    httpd = _refresh_over_tls(admin, cert, tmp_path, monkeypatch)
+
+    assert _refresh(httpd) == 1
+    assert "CERTIFICATE_VERIFY_FAILED" in capsys.readouterr().err
+
+
+def test_a_refresh_waits_at_most_the_request_timeout(tmp_path, monkeypatch):
+    seen = []
+
+    def urlopen(request, timeout):
+        seen.append(timeout)
+        return io.BytesIO(json.dumps({"id": "ab12", "redis_url": PUBLIC}).encode())
+
+    monkeypatch.setattr(urllib.request, "urlopen", urlopen)
+    environ = {
+        "AGENTIHOOKS_HOME": str(tmp_path),
+        "AGENTIHOOKS_HIVE_URL": "https://hive.example",
+        "AGENTIHOOKS_HIVE_LEDGER_CREDENTIAL": "led",
+    }
+
+    assert cli.refresh_env(environ) == "ab12"
+    assert seen == [server.REQUEST_TIMEOUT_S]
 
 
 def _head_and_body(port, request):
@@ -162,13 +227,9 @@ def _head_and_body(port, request):
 @pytest.mark.parametrize(
     ("request_line", "body", "expected"),
     [
-        (
-            b"POST /hive/join HTTP/1.0",
-            b'{"code": "unknown"}',
-            {"error": "invite code is invalid, expired or already used"},
-        ),
+        (b"POST /hive/refresh HTTP/1.0", b'{"ledger_credential": "unknown"}', UNKNOWN),
         (b"POST /elsewhere HTTP/1.0", b"{}", {"error": "not found"}),
-        (b"POST /hive/join HTTP/1.0", b"[]", {"error": server.BAD_BODY}),
+        (b"POST /hive/refresh HTTP/1.0", b"[]", {"error": server.BAD_REFRESH_BODY}),
     ],
 )
 def test_every_answer_carries_its_length(hive, request_line, body, expected):
@@ -187,8 +248,8 @@ def tls_hive(admin, cert):
     httpd.server_close()
 
 
-def test_curl_reads_a_full_https_join_with_no_stream_error(admin, cert, tls_hive, capsys):
-    code = auth.invite(admin, "laptop")
+def test_curl_reads_a_full_https_refresh_with_no_stream_error(admin, cert, tls_hive, capsys):
+    member = auth.mint(admin, "laptop", PUBLIC)
 
     result = subprocess.run(
         [
@@ -199,8 +260,8 @@ def test_curl_reads_a_full_https_join_with_no_stream_error(admin, cert, tls_hive
             "--cacert",
             cert[0],
             "--data",
-            json.dumps({"code": code}),
-            f"https://localhost:{tls_hive}{server.JOIN_PATH}",
+            json.dumps({"ledger_credential": member["ledger_credential"]}),
+            f"https://localhost:{tls_hive}{server.REFRESH_PATH}",
         ],
         capture_output=True,
         timeout=30,
@@ -209,7 +270,7 @@ def test_curl_reads_a_full_https_join_with_no_stream_error(admin, cert, tls_hive
     head, _, body = result.stdout.partition(b"\r\n\r\n")
     assert (result.returncode, result.stderr) == (0, b"")
     assert b"Content-Length: %d" % len(body) in head.split(b"\r\n")
-    assert json.loads(body)["name"] == "laptop"
+    assert json.loads(body)["id"] == member["id"]
     assert capsys.readouterr().err == ""
 
 
@@ -259,56 +320,56 @@ def test_a_connection_dropped_before_or_during_the_tls_handshake_logs_nothing(ad
 @pytest.mark.parametrize("error", [RuntimeError, ConnectionError])
 def test_an_unexpected_handler_error_is_still_logged(admin, monkeypatch, capsys, error):
     def broken(*_):
-        raise error("exchange broke")
+        raise error("refresh broke")
 
-    monkeypatch.setattr(auth, "exchange", broken)
+    monkeypatch.setattr(auth, "refresh", broken)
     httpd = server.make_server(admin, PUBLIC, "127.0.0.1", 0)
     client = socket.create_connection(("127.0.0.1", httpd.server_address[1]), timeout=5)
     address = client.getsockname()
     try:
         _process_one(
-            httpd, lambda: client.sendall(b'POST /hive/join HTTP/1.0\r\nContent-Length: 12\r\n\r\n{"code": ""}')
+            httpd,
+            lambda: client.sendall(
+                b'POST /hive/refresh HTTP/1.0\r\nContent-Length: 25\r\n\r\n{"ledger_credential": ""}'
+            ),
         )
     finally:
         client.close()
         httpd.server_close()
 
     err = capsys.readouterr().err
-    assert f"{error.__name__}: exchange broke" in err
+    assert f"{error.__name__}: refresh broke" in err
     assert f"Exception occurred during processing of request from {address}\n" in err
 
 
-def test_join_posts_the_code_to_the_join_path_with_the_request_timeout(tmp_path, monkeypatch, capsys):
-    sent = {}
-
-    def urlopen(request, timeout):
-        sent.update(url=request.full_url, method=request.get_method(), data=request.data, timeout=timeout)
-        return io.BytesIO(b'{"id": "ab12", "ledger_credential": "led", "redis_url": "redis://u:p@h:1/0"}')
-
-    monkeypatch.setattr(urllib.request, "urlopen", urlopen)
-    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
-
-    assert cli.main(["join", "https://hive.example/baseX/", "the-code"]) == 0
-
-    assert sent == {
-        "url": "https://hive.example/baseX/hive/join",
-        "method": "POST",
-        "data": b'{"code": "the-code"}',
-        "timeout": server.REQUEST_TIMEOUT_S,
-    }
-    assert capsys.readouterr().out == f"joined the hive as ab12; credentials are in {tmp_path / 'hive.env'}\n"
-
-
-def test_join_names_the_status_of_an_error_without_a_json_body(tmp_path, monkeypatch, capsys):
+def test_refresh_names_the_status_of_an_error_without_a_json_body(tmp_path, monkeypatch, capsys):
     def urlopen(request, timeout):
         raise urllib.error.HTTPError(request.full_url, 502, "Bad Gateway", {}, io.BytesIO(b"<html>"))
 
     monkeypatch.setattr(urllib.request, "urlopen", urlopen)
     monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
+    monkeypatch.setenv("AGENTIHOOKS_HIVE_URL", "https://hive.example")
+    monkeypatch.setenv("AGENTIHOOKS_HIVE_LEDGER_CREDENTIAL", "led")
 
-    assert cli.main(["join", "https://hive.example", "code"]) == 1
+    assert cli.main(["refresh"]) == 1
 
-    assert capsys.readouterr().err == "hive join refused: HTTP 502\n"
+    assert capsys.readouterr().err == "hive refresh refused: HTTP 502\n"
+
+
+def test_refresh_names_an_unreachable_hive(tmp_path, monkeypatch, capsys):
+    def urlopen(request, timeout):
+        raise urllib.error.URLError("refused")
+
+    monkeypatch.setattr(urllib.request, "urlopen", urlopen)
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
+    monkeypatch.setenv("AGENTIHOOKS_HIVE_URL", "https://hive.example")
+    monkeypatch.setenv("AGENTIHOOKS_HIVE_LEDGER_CREDENTIAL", "led")
+
+    assert cli.main(["refresh"]) == 1
+
+    assert capsys.readouterr().err == (
+        "hive refresh refused: the hive at https://hive.example is unreachable (<urlopen error refused>)\n"
+    )
 
 
 def test_is_loopback_refuses_a_missing_host():
@@ -332,12 +393,12 @@ def test_help_names_every_command_and_option(monkeypatch, capsys):
     assert top.startswith("usage: agentihooks hive ")
     assert "\n\nHive credentials for remote swarm hosts\n" in top
     for text in (
-        "Print a one-time join code, valid fifteen minutes",
-        "Exchange a join code for credentials in hive.env",
+        "Save an SSH machine in herdr and deliver its member credential to it",
         "Delete a member's ledger credential and Redis user",
+        "Drain a hive, then delete it from Redis, herdr, known hosts, OpenBao and antoncore",
         "Write a new controller service credential to a private file, retiring the previous one",
-        "Run the join endpoint",
-        "Set name, ui, ephemeral, roles, prefer, max-agents as key=value",
+        "Run the hive refresh endpoint",
+        "Set name, ui, ephemeral, draining, excluded, master-swarms, prefer, max-agents, capabilities as key=value",
         "Print a hive's record as JSON",
         "One line per hive with its liveness",
     ):
@@ -374,7 +435,7 @@ def test_serve_defaults_and_port_type():
 def served(admin, monkeypatch):
     calls, printed = [], []
 
-    def make_server(*args):
+    def make_server(*args, **kwargs):
         calls.append(args)
         return SimpleNamespace(server_address=("127.0.0.1", 4321), serve_forever=lambda: None)
 
@@ -399,7 +460,7 @@ def test_serve_passes_its_settings_and_announces_the_endpoint(admin, served, fla
     assert cli.main(["serve", "--host", "h", "--port", "5", *flags]) == 0
 
     assert calls == [(admin, redis_url, "h", 5, tls)]
-    assert printed == [((f"hive join endpoint on {scheme}://h:4321/hive/join",), {"flush": True})]
+    assert printed == [((f"hive endpoint on {scheme}://h:4321/hive/refresh",), {"flush": True})]
 
 
 @pytest.mark.parametrize("flags", [["--tls-cert", "/c.pem"], ["--tls-key", "/k.pem"]])
@@ -417,16 +478,16 @@ def test_a_handler_error_is_still_logged_when_the_client_resets_before_the_tls_c
 
     def broken(*_):
         raised.set()
-        raise RuntimeError("exchange broke")
+        raise RuntimeError("refresh broke")
 
-    monkeypatch.setattr(auth, "exchange", broken)
+    monkeypatch.setattr(auth, "refresh", broken)
     httpd = server.make_server(admin, PUBLIC, "localhost", 0, cert)
     trusting = ssl.create_default_context(cafile=cert[0])
 
     def client():
         raw = socket.create_connection(("localhost", httpd.server_address[1]), timeout=5)
         conn = trusting.wrap_socket(raw, server_hostname="localhost")
-        conn.sendall(b'POST /hive/join HTTP/1.0\r\nContent-Length: 12\r\n\r\n{"code": ""}')
+        conn.sendall(b'POST /hive/refresh HTTP/1.0\r\nContent-Length: 25\r\n\r\n{"ledger_credential": ""}')
         raised.wait(5)
         conn.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack("ii", 1, 0))
         conn.close()
@@ -440,4 +501,4 @@ def test_a_handler_error_is_still_logged_when_the_client_resets_before_the_tls_c
         resetting.join()
         httpd.server_close()
 
-    assert "RuntimeError: exchange broke" in capsys.readouterr().err
+    assert "RuntimeError: refresh broke" in capsys.readouterr().err

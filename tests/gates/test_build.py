@@ -324,7 +324,7 @@ class TestMore:
         folder.mkdir(parents=True)
         (folder / "plan.md").write_text(DOGHOUSE)
         legacy_page.store(world.repo.parent / "ledgers", SLUG, {})
-        assert "commit hash" in world.decide(file_path=str(world.repo / "a.py"), task=task).reason
+        assert "no verdict for its current text" in world.decide(file_path=str(world.repo / "a.py"), task=task).reason
 
     def test_registered_doctor_task_plan_allows_editing_kept_area(self, world):
         task = "fx-8be892c4-code"

@@ -1,3 +1,4 @@
+{{- if not .Values.hiveOnly }}
 apiVersion: v1
 kind: Pod
 metadata:
@@ -21,11 +22,14 @@ spec:
       env:
         - name: LEDGER_URL
           value: {{ include "swarm.ledgerUrl" . | quote }}
+        {{- include "swarm.ledgerCa" . | nindent 8 }}
       command:
         - python
         - -c
         - |
-          import os, urllib.request
-          with urllib.request.urlopen(os.environ["LEDGER_URL"] + "/healthz", timeout=5) as response:
+          import os, ssl, urllib.request
+          context = ssl.create_default_context(cadata=os.environ.get("LEDGER_CA_PEM") or None)
+          with urllib.request.urlopen(os.environ["LEDGER_URL"] + "/healthz", timeout=5, context=context) as response:
               print("GET /healthz:", response.status, response.read().decode())
               assert response.status == 200
+{{- end }}

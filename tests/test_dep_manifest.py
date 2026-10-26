@@ -1,9 +1,13 @@
+import ast
+import hashlib
 import json
 import os
 import subprocess
 import sys
+import sysconfig
 from pathlib import Path
 
+import pytest
 import yaml
 from coverage import CoverageData
 
@@ -42,6 +46,26 @@ def _job(name):
 
 def _step(job, name):
     return next(step for step in _job(job)["steps"] if step.get("name") == name)
+
+
+def _deselect_in_test_count(tmp_path, head_manifest):
+    collected = ["tests/test_a.py::one", "tests/test_a.py::two", "tests/test_b.py::one", "tests/test_b.py::new"]
+    reused = ["tests/test_a.py::one", "tests/test_a.py::two", "tests/test_b.py::one"]
+    runner = tmp_path / "runner"
+    workspace = tmp_path / "workspace"
+    for checkout, manifest in (
+        (runner / "planner", (ROOT / "tests" / "dep_manifest.py").read_text()),
+        (workspace, head_manifest),
+    ):
+        (checkout / "tests").mkdir(parents=True)
+        (checkout / "tests" / "__init__.py").write_text("")
+        (checkout / "tests" / "dep_manifest.py").write_text(manifest)
+    (workspace / "reused-tests.json").write_text(json.dumps({"tests": reused}))
+    (runner / "collected.json").write_text(json.dumps(collected))
+    env = {**os.environ, "RUNNER_TEMP": str(runner), "GITHUB_WORKSPACE": str(workspace), "PYTHON_PATH": sys.executable}
+    run = _step("test-count", "Deselect the reused tests")["run"]
+    subprocess.run(["bash", "-eo", "pipefail", "-c", run], cwd=workspace, env=env, check=True)
+    return json.loads((runner / "reused.json").read_text()), dep_manifest.deselect(reused, collected)
 
 
 def test_lines_map_to_the_innermost_function_and_definitions_to_their_scope():
@@ -118,6 +142,13 @@ def test_the_manifest_holds_the_functions_each_test_executed(tmp_path):
         "files": ["docs/data.json"],
         "escapes": True,
     }
+
+
+def test_the_manifest_preserves_each_contexts_executed_lines(tmp_path):
+    manifest = _measure(tmp_path)
+    assert manifest["lines"]["tests/test_a.py::test_double"] == {"hooks/sample.py": [7]}
+    assert manifest["lines"]["tests/test_b.py::test_grow[1]"] == {"hooks/sample.py": [14, 15, 17]}
+    assert "tests/test_c.py::test_nothing" not in manifest["lines"]
 
 
 def test_a_planted_change_to_one_function_invalidates_exactly_the_tests_that_ran_it(tmp_path):
@@ -199,6 +230,32 @@ def test_the_inputs_plugin_records_opened_files_and_escapes(tmp_path):
     ]
 
 
+def test_the_inputs_plugin_records_files_a_child_process_reads_for_its_test_only(tmp_path):
+    (tmp_path / "child.txt").write_text("x")
+    (tmp_path / "test_sample.py").write_text(
+        "import subprocess, sys\n"
+        "def test_child_reads():\n"
+        "    subprocess.run([sys.executable, '-c', \"open('child.txt').read()\"], env={}, check=True)\n"
+        "def test_child_reads_nothing():\n"
+        "    subprocess.run([sys.executable, '-c', 'pass'], env={}, check=True)\n"
+    )
+    out = tmp_path / "inputs"
+    subprocess.run(
+        [sys.executable, "-m", "pytest", "-q", "-p", "tests.dep_inputs", "-p", "no:cacheprovider", "test_sample.py"],
+        cwd=tmp_path,
+        env={**os.environ, "PYTHONPATH": str(ROOT), "DEP_INPUTS_DIR": str(out), "PYTEST_ADDOPTS": ""},
+        check=True,
+        capture_output=True,
+    )
+    lines = [json.loads(line) for report in out.glob("*.jsonl") for line in report.read_text().splitlines()]
+    assert sorted(lines, key=lambda line: line["test"]) == [
+        {"test": "test_sample.py::test_child_reads", "files": ["child.txt"], "escapes": True},
+        {"test": "test_sample.py::test_child_reads_nothing", "files": [], "escapes": True},
+    ]
+    name = hashlib.sha256(str(out / "children").encode()).hexdigest()[:16]
+    assert not (Path(sysconfig.get_path("purelib")) / f"agentihooks-dep-inputs-{name}.pth").exists()
+
+
 def test_the_coverage_shards_record_per_test_contexts_and_inputs():
     run = _step("unit", "Run tests")
     coverage_options = run["env"]["PYTEST_ADDOPTS"].split("||")[0]
@@ -210,11 +267,19 @@ def test_the_coverage_shards_record_per_test_contexts_and_inputs():
 
 def test_sonar_builds_the_manifest_and_only_dev_pushes_save_it():
     steps = [step.get("name") for step in _job("sonar")["steps"]]
-    assert steps.index("Wait for the coverage merge") < steps.index("Build the test dependency manifest")
+    assert (
+        steps.index("Merge shard coverage")
+        < steps.index("Build the test dependency manifest")
+        < steps.index("Start Cloudflare Access proxy")
+    )
     build = _step("sonar", "Build the test dependency manifest")
     assert "python -m tests.dep_manifest build" in build["run"]
     assert "< /dev/null" in build["run"] and 'echo "pid=$!"' in build["run"]
     assert '--out "$RUNNER_TEMP/dep-manifest/manifest.json"' in build["run"]
+    contexts = '--data-file="$RUNNER_TEMP/dep-manifest/.coverage"'
+    assert f"python -m coverage combine --rcfile=.github/coverage/coverage.ini --keep {contexts}" in build["run"]
+    assert '--coverage "$RUNNER_TEMP/dep-manifest/.coverage"' in build["run"]
+    assert build["run"].index(contexts) < build["run"].index("python -m tests.dep_manifest build")
     assert (
         steps.index("Build the test dependency manifest")
         < steps.index("SonarQube Scan")
@@ -262,6 +327,139 @@ def test_the_plan_reuses_every_test_the_change_left_valid_without_its_group_suff
     assert dep_manifest.plan(manifest, [(".github/workflows/test.yml", None, None)], "41")["tests"] == []
 
 
+@pytest.mark.parametrize("path", [".github/workflows/swarm-smoke.yml", ".github/workflows/test.yml"])
+def test_a_workflow_only_plant_reuses_unrelated_tests_and_a_graded_plant_runs_its_tests(path):
+    manifest = {
+        "version": 2,
+        "commit": "c" * 40,
+        "units": ["hooks/sample.py::double", "hooks/sample.py::<module>"],
+        "tests": {
+            "tests/test_workflow.py::test_workflow": {"units": [], "files": [path], "escapes": False},
+            "tests/test_math.py::test_double": {"units": [0, 1], "files": [], "escapes": False},
+            "tests/test_other.py::test_other": {"units": [], "files": [], "escapes": False},
+        },
+    }
+    old = "jobs:\n  unit:\n    steps: []\n  split:\n    steps: []\n  lint:\n    name: before\n"
+    new = old.replace("name: before", "name: after")
+    chosen = dep_manifest.plan(manifest, [(path, old, new)], "41")
+    assert chosen == {
+        "run": "41",
+        "commit": "c" * 40,
+        "global": None,
+        "invalidated": 1,
+        "tests": ["tests/test_math.py::test_double", "tests/test_other.py::test_other"],
+    }
+    graded = [("hooks/sample.py", SOURCE, SOURCE.replace("value * 2", "value * 3"))]
+    assert dep_manifest.plan(manifest, graded, "41")["tests"] == [
+        "tests/test_other.py::test_other",
+        "tests/test_workflow.py::test_workflow",
+    ]
+
+
+@pytest.mark.parametrize("shared_import", [None, "helper", "test_reader", "dynamic"])
+def test_collection_workflow_inputs_belong_only_to_the_module_that_reads_them(tmp_path, shared_import):
+    workflow = tmp_path / ".github" / "workflows" / "smoke.yml"
+    workflow.parent.mkdir(parents=True)
+    workflow.write_text("name: smoke\n")
+    (tmp_path / "test_reader.py").write_text(
+        "from pathlib import Path\n"
+        "WORKFLOW = Path('.github/workflows/smoke.yml').read_text()\n"
+        "def test_reads():\n    assert WORKFLOW == 'name: smoke\\n'\n"
+    )
+    consumers = []
+    if shared_import:
+        if shared_import == "helper":
+            (tmp_path / "helper.py").write_text(
+                "from pathlib import Path\nWORKFLOW = Path('.github/workflows/smoke.yml').read_text()\n"
+            )
+            (tmp_path / "test_reader.py").write_text(
+                "from helper import WORKFLOW\ndef test_reads():\n    assert WORKFLOW == 'name: smoke\\n'\n"
+            )
+        imported = (
+            "import importlib\nWORKFLOW = importlib.import_module('test_reader').WORKFLOW\n"
+            if shared_import == "dynamic"
+            else f"from {shared_import} import WORKFLOW\n"
+        )
+        (tmp_path / "test_consumer.py").write_text(
+            imported + "def test_cached():\n    assert WORKFLOW == 'name: smoke\\n'\n"
+        )
+        consumers = ["test_consumer.py"]
+    (tmp_path / "test_unrelated.py").write_text("def test_other():\n    assert 2 + 2 == 4\n")
+    out = tmp_path / "inputs"
+    subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "pytest",
+            "-q",
+            "-p",
+            "tests.dep_inputs",
+            "-p",
+            "no:cacheprovider",
+            "test_reader.py",
+            *consumers,
+            "test_unrelated.py",
+        ],
+        cwd=tmp_path,
+        env={**os.environ, "PYTHONPATH": str(ROOT), "DEP_INPUTS_DIR": str(out), "PYTEST_ADDOPTS": ""},
+        check=True,
+        capture_output=True,
+    )
+    rows = [json.loads(line) for report in out.glob("*.jsonl") for line in report.read_text().splitlines()]
+    expected = (
+        []
+        if not shared_import
+        else [
+            {
+                "test": "test_consumer.py::test_cached",
+                "files": [] if shared_import == "dynamic" else [".github/workflows/smoke.yml"],
+                "escapes": shared_import == "dynamic",
+            }
+        ]
+    )
+    assert sorted(rows, key=lambda row: row["test"]) == expected + [
+        {"test": "test_reader.py::test_reads", "files": [".github/workflows/smoke.yml"], "escapes": False},
+        {"test": "test_unrelated.py::test_other", "files": [], "escapes": False},
+    ]
+
+
+@pytest.mark.parametrize(
+    "new",
+    [
+        None,
+        "jobs: [broken]",
+        "jobs:\n  unit: [broken]\n  split: {}\n",
+        "jobs:\n  unit: {}\n  split: {}\nenv:\n  MODE: changed\n",
+        "jobs:\n  unit: {}\n  split: {}\ndefaults:\n  run:\n    shell: python\n",
+        "jobs:\n  unit:\n    steps: [{run: changed}]\n  split: {}\n",
+        "jobs:\n  unit:\n    needs: select\n  split: {}\n  select:\n    steps: [{run: changed}]\n",
+    ],
+)
+def test_execution_input_plants_still_invalidate_every_test(tmp_path, new):
+    manifest = _measure(tmp_path)
+    old = "jobs:\n  unit:\n    needs: select\n  split: {}\n  select: {}\n"
+    result = dep_manifest.plan(manifest, [(".github/workflows/test.yml", old, new)], "41")
+    assert result["tests"] == []
+    assert result["global"] == ".github/workflows/test.yml"
+
+
+@pytest.mark.parametrize("version", [None, 1])
+def test_legacy_manifests_keep_workflow_changes_global(tmp_path, version):
+    manifest = _measure(tmp_path)
+    manifest["version"] = version
+    result = dep_manifest.plan(manifest, [(".github/workflows/smoke.yml", "name: old", "name: new")], "41")
+    assert result["tests"] == []
+    assert result["global"] == ".github/workflows/smoke.yml"
+
+
+@pytest.mark.parametrize("path", [".github/test-excludes.txt", ".github/actions/retry-download/action.yml"])
+def test_shared_github_execution_inputs_remain_global(tmp_path, path):
+    manifest = _measure(tmp_path)
+    result = dep_manifest.plan(manifest, [(path, "old", "new")], "41")
+    assert result["tests"] == []
+    assert result["global"] == path
+
+
 def test_deselection_keeps_new_tests_and_skips_only_wholly_reused_files(tmp_path):
     collected = ["tests/test_a.py::one", "tests/test_a.py::two", "tests/test_b.py::one", "tests/test_b.py::new"]
     reused = ["tests/test_a.py::one", "tests/test_a.py::two", "tests/test_b.py::one", "tests/test_gone.py::x"]
@@ -279,16 +477,114 @@ def test_deselection_keeps_new_tests_and_skips_only_wholly_reused_files(tmp_path
 
 
 def test_queue_shards_split_on_the_tests_the_planner_did_not_reuse():
-    plan = _step("split", "Plan the tests whose inputs did not change")
-    assert plan["env"]["GRADER"] == "${{ github.event.merge_group.base_sha || github.sha }}"
+    plan = _step("test-count", "Plan the tests whose inputs did not change")
+    assert plan["env"]["GRADER"] == (
+        "${{ github.event.merge_group.base_sha || github.event_name == 'pull_request' && 'origin/dev' || github.sha }}"
+    )
     assert 'cd "$RUNNER_TEMP/planner"' in plan["run"]
     assert _job("split")["outputs"]["reused"] == "${{ steps.plan.outputs.reused }}"
     assert _job("unit")["outputs"]["reused"] == "${{ needs.split.outputs.reused }}"
-    assert _step("split", "Deselect the reused tests")["run"].startswith("python -m tests.dep_manifest deselect")
+    assert _step("test-count", "Wait for the test plan")["id"] == "plan"
+    assert _step("split", "Adopt the test plan")["id"] == "plan"
+    deselected = _step("test-count", "Deselect the reused tests")
+    assert deselected["run"].startswith('cd "$RUNNER_TEMP/planner"\n"$PYTHON_PATH" -m tests.dep_manifest deselect')
+    assert deselected["env"]["PYTHON_PATH"] == plan["env"]["PYTHON_PATH"]
     assert _step("unit", "Run tests")["env"]["CI_REUSED"] == "${{ github.workspace }}/reused.json"
     check = _step("shard-check", "Check every collected test ran in exactly one shard")
     assert check["run"].endswith(" $REUSED")
     assert "reused-plan/reused-tests.json" in check["env"]["REUSED"]
+
+
+def _imports(module):
+    path = ROOT / Path(*module.split("."))
+    path = path / "__init__.py" if path.is_dir() else path.with_suffix(".py")
+    loaded, lazy = [], []
+    for statement in ast.parse(path.read_text()).body:
+        names = lazy if isinstance(statement, (ast.FunctionDef, ast.AsyncFunctionDef)) else loaded
+        for node in ast.walk(statement):
+            if isinstance(node, ast.Import):
+                names += [a.name for a in node.names]
+            elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+                names += [node.module] + [f"{node.module}.{a.name}" for a in node.names]
+    return loaded, lazy
+
+
+def test_the_manifest_code_needs_only_yaml_beyond_the_standard_library():
+    pending, seen = ["scripts", "tests", "scripts.ci_test_plan", "tests.dep_manifest"], set()
+    third_party = {"loaded": set(), "lazy": set()}
+    while pending:
+        module = pending.pop()
+        if module in seen:
+            continue
+        seen.add(module)
+        for kind, names in zip(("loaded", "lazy"), _imports(module), strict=True):
+            for name in names:
+                parts = name.split(".")
+                if parts[0] not in {"scripts", "tests", "hooks"}:
+                    # Mutation runs read mutmut's trampoline import in the mutated copy.
+                    harness = parts[0] == "mutmut" and "MUTANT_UNDER_TEST" in os.environ
+                    if parts[0] not in sys.stdlib_module_names and not harness:
+                        third_party[kind].add(parts[0])
+                    continue
+                for depth in range(1, len(parts) + 1):
+                    candidate = ROOT / Path(*parts[:depth])
+                    if candidate.is_dir() or candidate.with_suffix(".py").is_file():
+                        pending.append(".".join(parts[:depth]))
+    assert third_party == {"loaded": {"yaml"}, "lazy": {"coverage"}}
+
+
+def test_every_bare_interpreter_call_into_the_manifest_code_installs_pyyaml_first():
+    calls = set()
+    for name, job in yaml.safe_load(WORKFLOW.read_text())["jobs"].items():
+        steps = job.get("steps", [])
+        for index, step in enumerate(steps):
+            run = step.get("run", "")
+            for call in ("-m scripts.ci_test_plan", "-m tests.dep_manifest"):
+                if call in run:
+                    calls.add((name, step["name"]))
+                    earlier = [s.get("run", "") for s in steps[:index]]
+                    lines = "\n".join([*earlier, run[: run.index(call)]]).splitlines()
+                    assert any(
+                        ("-m pip install" in line or '"$HOME/venv/bin/uv" pip install' in line)
+                        and "PyYAML==6.0.3" in line
+                        for line in lines
+                    ), (
+                        name,
+                        step["name"],
+                    )
+    assert calls == {
+        ("test-count", "Plan the tests whose inputs did not change"),
+        ("test-count", "Deselect the reused tests"),
+        ("sonar", "Build the test dependency manifest"),
+    }
+
+
+def test_the_split_deselects_with_the_grader_manifest_code_not_the_heads(tmp_path):
+    planted = (
+        (ROOT / "tests" / "dep_manifest.py")
+        .read_text()
+        .replace(
+            "def deselect(",
+            "def deselect(reused, collected):\n"
+            "    return {'tests': sorted(collected), 'files': sorted({n.split('::')[0] for n in collected})}\n\n\n"
+            "def _planted(",
+            1,
+        )
+    )
+    chosen, expected = _deselect_in_test_count(tmp_path, planted)
+    assert chosen == expected
+
+
+def test_the_split_deselects_the_same_tests_when_the_head_keeps_the_manifest_code(tmp_path):
+    chosen, expected = _deselect_in_test_count(tmp_path, (ROOT / "tests" / "dep_manifest.py").read_text())
+    assert (
+        chosen
+        == expected
+        == {
+            "tests": ["tests/test_a.py::one", "tests/test_a.py::two", "tests/test_b.py::one"],
+            "files": ["tests/test_a.py"],
+        }
+    )
 
 
 def test_the_reused_plan_reaches_workers_but_never_nested_pytest_runs(tmp_path, monkeypatch):

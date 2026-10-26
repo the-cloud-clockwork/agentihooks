@@ -79,6 +79,7 @@ def test_two_swarms_masters_sum():
                 _Agent("master", "codex", "main"),
                 _Agent("master", "claude", "main", state="finished"),
                 _Agent("master", "claude", "main", route_kind="interactive"),
+                _Agent("master", "claude", "main", route_kind="master-login"),
             ],
         }
     )
@@ -255,6 +256,32 @@ def test_only_workers_are_held_by_the_reservation(monkeypatch):
     )
 
 
+def test_launch_slot_reading_keeps_the_exact_decision_arguments():
+    from unittest.mock import Mock
+
+    from scripts.hive import registry
+    from scripts.swarm.keyspace import ROOT
+
+    redis = Mock()
+    redis.eval.return_value = [0, 7]
+    reading = reservation.LaunchSlots(redis).reserve_reading("codex:one", "next", 4, 1000, "old")
+    assert reading == reservation.SlotReading(False, 7)
+    redis.eval.assert_called_once_with(
+        reservation._LAUNCH,
+        3,
+        f"{ROOT}:launch-slots",
+        f"{ROOT}:launch-slot:next",
+        registry.INDEX,
+        "reserve",
+        "codex:one",
+        "next",
+        4,
+        1000,
+        ROOT,
+        "old",
+    )
+
+
 def test_codex_masters_are_counted_by_the_codex_marker(tmp_path):
     _process(tmp_path, 15, ["codex"], {"AH_ROUTE_INTERACTIVE_default": "1"}, "codex")
     assert reservation.masters_live("codex", "default", None, tmp_path) == 1
@@ -272,3 +299,16 @@ def test_an_interactive_master_counts_once(tmp_path):
     _process(tmp_path, 10, ["claude"], {"AH_ROUTE_INTERACTIVE_main": "1"}, "claude")
     store = _Store({"one": [_Agent("master", "claude", "main", route_kind="interactive")]})
     assert reservation.masters_live("claude", "main", store, tmp_path) == 1
+
+
+def test_a_reservation_closes_only_a_subscription_row_of_its_harness_and_slug_past_the_ceiling():
+    held = reservation.Reservation("codex", "default", 1)
+    assert held.closes_row("codex", "subscription", "default", 30.0)
+    assert [
+        held.closes_row("codex", "subscription", "default", 30.1),
+        held.closes_row("claude", "subscription", "default", 10.0),
+        held.closes_row("codex", "api", "default", 10.0),
+        held.closes_row("codex", "subscription", "spare", 10.0),
+        held.closes_row("codex", "subscription", "default", None),
+        reservation.Reservation("codex", "default", 0).closes_row("codex", "subscription", "default", 10.0),
+    ] == [False] * 6

@@ -1,0 +1,31 @@
+services:
+  swarm:
+    command: [python, "${SWARM_ADOPT_CODE:?run agentihooks swarm init --adopt}/scripts/swarm_ledger/server_supervisor.py"]
+    working_dir: ${SWARM_ADOPT_CODE}
+    user: ${SWARM_ADOPT_UID:?run agentihooks swarm init --adopt}:${SWARM_ADOPT_GID:?run agentihooks swarm init --adopt}
+    pid: host
+    network_mode: host
+    ports: !reset []
+    depends_on: !reset {}
+    environment:
+      HOME: ${SWARM_ADOPT_HOME}
+      LEDGER_DIR: ${SWARM_ADOPT_LEDGER_DIR}
+      LEDGER_HOST: 127.0.0.1
+      # The certificate and key must sit under a mounted folder, such as ~/.agentihooks.
+      LEDGER_TLS_CERT: ${LEDGER_TLS_CERT:-}
+      LEDGER_TLS_KEY: ${LEDGER_TLS_KEY:-}
+      PYTHONPATH: ${SWARM_ADOPT_CODE}
+      SWARM_RELOAD: "1"
+      MALLOC_ARENA_MAX: "2"
+      AGENTIHOOKS_SWARM_REDIS_URL: ${SWARM_ADOPT_REDIS_URL:?run agentihooks swarm init --adopt}
+    volumes:
+      - ${SWARM_ADOPT_LEDGER_DIR}:${SWARM_ADOPT_LEDGER_DIR}
+      - ${SWARM_ADOPT_HOME}/.agentihooks:${SWARM_ADOPT_HOME}/.agentihooks
+      - ${SWARM_ADOPT_CODE}:${SWARM_ADOPT_CODE}:ro
+    mem_limit: 1536m
+    memswap_limit: 1536m
+    cpus: 2
+    pids_limit: 200
+  redis:
+    environment:
+      SWARM_REDIS_ADOPTED: "1"

@@ -5,13 +5,16 @@ import { showArtifacts } from "./artifacts.js";
 import { render, renderStats } from "./render.js";
 import { editOverview, editTitle, saveOverview, saveTitle } from "./edits.js";
 import { clearNotification, clearPriority, showAlerts, showNotifications } from "./notices.js";
-import { foldSections, markOutline, outlineBoxes, reveal, sectionBoxes, showOutline, wireOutline } from "./outline.js";
-import { collapsible, commentBoxes, groupOpen, markToggles, rememberGroup, rememberUnanimous, setAllComments } from "./folds.js";
-import { openHash, startLayout, wireRail, wireTabs } from "./layout.js";
+import { completeList, foldSections, markOutline, outlineBoxes, reveal, sectionBoxes, showOutline, wireOutline } from "./outline.js";
+import { closeComplete, collapsible, commentBoxes, groupOpen, markToggles, rememberGroup, rememberUnanimous, setAllComments } from "./folds.js";
+import { openHash, startLayout, wireRail, wireStatsDrawer, wireTabs } from "./layout.js";
 import { showChat, wireChat, wireChatInput } from "./chat.js";
 import { refreshQuota, wireSwarm } from "./controls.js";
 import { connectEvents } from "./events.js";
 import { loadArchitecture } from "./architecture.js";
+import { loadTips } from "./api.js";
+import { tips } from "./state.js";
+import { toggleFrozenView } from "./frozen_view.js";
 
 function start() {
   loadSaved();
@@ -62,6 +65,7 @@ function start() {
     }, true);
   }
   $("sections-all").addEventListener("click", foldSections);
+  $("frozen-view").addEventListener("click", () => { toggleFrozenView(); render(); });
   $("comments-all").addEventListener("click", () => {
     const open = !groupOpen("all-comments");
     for (const section of document.querySelectorAll(".col > section")) setAllComments(section, open);
@@ -75,7 +79,7 @@ function start() {
   document.querySelector(".col").addEventListener("toggle", (ev) => {
     if (!sectionBoxes().includes(ev.target)) return;
     rememberUnanimous("sections", sectionBoxes());
-    if (ev.target.open) render();
+    if (ev.target.open) render(null, true);
     else markToggles();
   }, true);
   $("outline").addEventListener("toggle", (ev) => {
@@ -84,10 +88,15 @@ function start() {
   render();
   wireTabs();
   wireRail();
+  wireStatsDrawer();
   $("main-content").addEventListener("scroll", markOutline, { passive: true });
   loadMetadata();
+  loadTips().then((values) => { if (values) { Object.assign(tips, values); render(); } });
   connectEvents();
-  loaded.then(() => { if (location.hash.length > 1) openHash(); });
+  loaded.then(() => {
+    closeComplete(sectionBoxes(), (box) => completeList(box.closest("section").dataset.outline));
+    if (location.hash.length > 1) openHash();
+  });
   setInterval(refreshQuota, QUOTA_REFRESH_MS);
   setInterval(renderStats, 30000);
   setInterval(renderSync, 1000);

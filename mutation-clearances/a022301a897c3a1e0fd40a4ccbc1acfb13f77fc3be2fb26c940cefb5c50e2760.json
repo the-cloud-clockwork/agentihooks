@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/stack.py:scripts.swarm.stack.x_pushed__mutmut_26:aa0c53cabf22799e1d4ed0ba2140c9e3b1fbe773d938740066c1e7f9986bd01c": {
+    "reader": "Standards",
+    "reason": "Git upstream remote and ref names cannot contain spaces, so the explicit for-each-ref format has one separator (or is empty with no upstream); partition and rpartition return the same tuple."
+  }
+}

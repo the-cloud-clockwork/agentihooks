@@ -8,7 +8,7 @@ from scripts.swarm import delivery, idle
 from scripts.swarm.rename import _move_agent
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 
 
 @pytest.fixture
@@ -75,7 +75,7 @@ def test_existing_replies_and_targeted_messages_use_aliases(store):
     assert delivery.recipients(store, "sw", old, "master") == [agent]
     assert delivery.recipients(store, "sw", "all", old) == []
     posted = []
-    ledger = SimpleNamespace(relay=lambda slug, text, by, op_id="": posted.append((text, by)))
+    ledger = SimpleNamespace(relay=lambda slug, text, by, op_id="", reply_to="": posted.append((text, by)))
     assert delivery.relay_to_page(inbox, "sw", [agent], ledger) == 1
     assert posted == [("report", new)]
     assert inbox.get(item.id).state == "done"

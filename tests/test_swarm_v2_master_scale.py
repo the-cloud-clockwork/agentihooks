@@ -13,7 +13,7 @@ from scripts.swarm_v2 import master_scale, masters
 from scripts.swarm_v2.masters_channel import MastersChannel
 from tests.swarm.test_tick import FakeLedger, FakeRuntime
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 
 FIXTURE = json.loads((Path(__file__).parent / "fixtures" / "swarm_v2" / "master-scaling.json").read_text())
 SLUG = FIXTURE["slug"]
@@ -242,7 +242,8 @@ def test_an_emptied_lower_seat_is_not_relaunched_while_a_higher_seat_retires(swa
     inbox = InboxStore(store.redis)
     second, _, _ = asked(swarm)
     question = inbox.send(f"{SLUG}-eng-1", SECOND, "a question for seat two")
-    held = [p for p in PHASES if owners(store)[p] == SECOND]
+    owners_before = owners(store)
+    held = [p for p in PHASES if owners_before[p] == SECOND]
     hand_off(store, runtime, second)
 
     actions = run(store, runtime, NOW + 2 * MINUTE + HOLD)
@@ -253,8 +254,8 @@ def test_an_emptied_lower_seat_is_not_relaunched_while_a_higher_seat_retires(swa
     assert inbox.get(question.id).address == LEAD
     moved = owners(store)
     assert SECOND not in moved.values()
-    loads = Counter(moved[p] for p in PHASES)
-    assert set(loads) == {LEAD, THIRD, FOURTH} and max(loads.values()) - min(loads.values()) <= 1
+    assert held and all(moved[p] == LEAD for p in held)
+    assert all(moved[p] == before for p, before in owners_before.items() if before != SECOND)
     assert masters.route(f"phases/{held[0]}", DOC, lambda: owners(store), [LEAD, THIRD, FOURTH], LEAD) == moved[held[0]]
     text = master_scale.EARLY.format(address=SECOND, moved=", ".join(f"{p} to {moved[p]}" for p in held))
     assert posts(store)[-1].text == text
@@ -282,7 +283,7 @@ def test_a_lower_count_forgets_a_retired_seat_it_no_longer_holds(swarm):
     seats = masters.MasterSeats(store.redis)
     seats.set_count(SLUG, 4)
     for address in (SECOND, THIRD, FOURTH):
-        seats.retire(SLUG, address)
+        seats.retire(SLUG, address, NOW)
 
     seats.set_count(SLUG, 3)
 
@@ -308,7 +309,7 @@ def test_turning_the_rule_off_refills_a_retired_seat_with_its_phases(swarm):
     store, runtime = swarm
     seats = masters.MasterSeats(store.redis)
     seats.set_count(SLUG, 4)
-    seats.retire(SLUG, SECOND)
+    seats.retire(SLUG, SECOND, NOW)
     master_scale.set_rule(store.redis, SLUG, "")
 
     run(store, runtime)
@@ -363,9 +364,10 @@ def test_twenty_back_to_five_retires_extra_seats_through_their_handoffs(swarm, t
     ]
     assert count(store) == 2 and len(runtime.masters) == 3
     after = owners(store)
-    assert Counter(after.values()) == {LEAD: 8, SECOND: 8}
+    assert Counter(after.values()) == {LEAD: 12, SECOND: 4}
+    assert all(after[p] == LEAD for p in PHASES if before[p] in (THIRD, FOURTH))
     assert all(after[p] == before[p] for p in PHASES if before[p] in (LEAD, SECOND))
-    texts = [item.text for item in inbox.pending_items(LEAD)]
+    texts = [item.text for address in (LEAD, SECOND) for item in inbox.pending_items(address)]
     assert any("notes of " + THIRD in text for text in texts)
     assert any("notes of " + FOURTH in text for text in texts)
     assert inbox.get(question.id).address == LEAD

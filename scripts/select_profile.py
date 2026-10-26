@@ -11,9 +11,12 @@ import yaml
 from scripts import init_agent
 from scripts.profiles import binding, plugins
 from scripts.profiles import render as profiles
+from scripts.swarm import launches
 
 OVERLAYS = "AGENTIHOOKS_OVERLAYS"
 BUNDLE_REVISION = "AGENTIHOOKS_BUNDLE_REVISION"
+RECORDED_HOME = "AGENTIHOOKS_RECORDED_PROFILE_HOME"
+PUSH = "AGENTIHOOKS_CODEX_PUSH"
 
 
 def prepare(
@@ -42,14 +45,25 @@ def prepare(
     )
     revision = environ.get(BUNDLE_REVISION, "")
     isolate = agent == "codex" and bool(environ.get("AGENTIHOOKS_SWARM"))
-    options = {"isolate": True} if isolate else {}
-    profiles.render(agent, name, overlays=overlays, bundle_revision=revision, **options)
+    recorded = environ.get(RECORDED_HOME)
+    if recorded:
+        binding.inspect(Path(recorded), name, agent)
+    else:
+        options = {"isolate": True} if isolate else {}
+        if agent == "codex" and environ.get(PUSH):
+            options["push"] = True
+        profiles.render(agent, name, overlays=overlays, bundle_revision=revision, **options)
     env = {"AGENTIHOOKS_PROFILE": name, profiles.CHANNELS: profiles.channels(name), OVERLAYS: ",".join(overlays)}
     env[BUNDLE_REVISION] = revision
     home = "CLAUDE_CONFIG_DIR" if agent == "claude" else "CODEX_HOME"
-    env[home] = str(profiles.profile_dir(name, overlays) / agent)
+    env[home] = recorded or str(profiles.profile_dir(name, overlays) / agent)
     if isolate and Path(env[home]).resolve() == profiles.operator_codex_home().resolve():
         raise ValueError("swarm codex profile resolves to the operator Codex home")
+    if agent == "claude":
+        from scripts.inbox import channel
+
+        if channel.FLAG in remaining:
+            channel.register({**environ, **env})
     return env, [*flags, *remaining]
 
 
@@ -112,10 +126,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--effort", choices=("minimal", "low", "medium", "high", "xhigh", "max"), default="")
     parser.add_argument("--overlay", action="append", default=[], help="Wear this overlay; repeat for up to three")
     parser.add_argument("--bundle-revision", default="", help="Render only from this bundle commit")
+    parser.add_argument("--home", help="Mount this rendered home instead of rendering")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args(arguments[:split])
     try:
-        environ = {**os.environ, BUNDLE_REVISION: args.bundle_revision}
+        environ = {**os.environ, BUNDLE_REVISION: args.bundle_revision, RECORDED_HOME: args.home}
         env, command = prepare(
             args.name, args.agent, args.model, args.effort, arguments[split + 1 :], environ, args.overlay
         )
@@ -128,6 +143,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.dry_run:
         print("\n".join([*(f"{key}={value}" for key, value in env.items()), f"argv={shlex.join(command)}"]))
         return 0
+    launches.record(dict(os.environ))
     return subprocess.run(command, env={**os.environ, **env}).returncode
 
 

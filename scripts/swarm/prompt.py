@@ -22,6 +22,18 @@ GROUP_LINE = (
     "each in its body. When it merges, swarm done on your task closes them all:"
 )
 PUBLISHED = "It opens a GitHub issue where the repo has issues, else a ledger artifact"
+PULLED_KINDS = ("ops", "tune", "troubleshoot", "research")
+READY_PULL = (
+    "If this work opens a pull request, record it with {me} pr <pr url>. Once its review closed and it is out of "
+    "draft, write a Handoff v2 document, leave the crew with {led} leave and release your seat with {me} ready "
+    "<handoff doc> instead of done: the swarm merges it and reopens the task for its proof. Done refuses while a "
+    "recorded pull request is open, unless the proof gives --filed for a fix proposed instead of made."
+)
+OPERATOR_PULL = (
+    "If this work opens a pull request, record it with {me} pr <pr url>. This swarm's autonomy leaves the merge "
+    "to the operator: ask for it on the ledger task, wait for the merge, then close the task. Done refuses while a "
+    "recorded pull request is open, unless the proof gives --filed for a fix proposed instead of made."
+)
 THROUGH_CODE = (
     "Reach that state through code: any change to what runs goes through a worktree (wt.sh new {name}), a pull "
     "request into dev and CI, never a live patch."
@@ -38,9 +50,23 @@ RESTACK = (
 )
 CONTRACT_LABELS = (("must", "Must be true"), ("check", "Checked by"), ("judge", "Judged by"))
 OLDER_RECAPS = 3
+CARRIED = "hive_opening"
+WORKSTATION_LINE = (
+    "A task that reads or changes the workstation's primary checkout or its local task folders, such as a "
+    "checkout landing or a final reconciliation, gets --workstation on task add or workstation=yes on task set, "
+    "so no remote hive runs it."
+)
 INBOX_LINE = (
     "Operator writes on the ledger reach you as inbox messages at your next tool call, and the swarm wakes you with a "
     "prompt when you sit idle."
+)
+FIRST_CONTACT = (
+    "Never write to the operator first: the ledger refuses every chat line, question, priority and needs operator "
+    "follow up that does not answer a message he sent. Speak to him only to answer what he writes."
+)
+NO_ASKS = (
+    "Never ask the operator yourself: the ledger refuses every agent question, priority and needs operator follow up. "
+    'Send anything he must decide to the front door master by inbox: agentihooks msg send master@{slug} "<text>".'
 )
 
 LANE_ROLE = {
@@ -78,18 +104,14 @@ def build_master(slug, repo, name, task, autonomy=DELEGATE):
         *priming_lines(task),
         *summary,
         "",
-        f"Before anything else, read the ledger in full with {ledger_read(slug)}: every task and its state, "
-        "the operator's notes, answers, comments and chat.",
+        f"Never run {ledger_read(slug)}: it downloads the whole ledger and slows every write for the swarm. Read "
+        f"through the ledger API one item at a time: agentihooks ledger --slug {slug} get tasks/<id> prints one task "
+        "(phases/<id>, followups/<id> and priorities/<id> work the same way), and "
+        f"agentihooks ledger --slug {slug} tasks --state <state> --lane <lane> --text <words> lists the open tasks, "
+        "each filter optional.",
         f"Run once: {led} join --role orchestrator. {INBOX_LINE} Act on every OPERATOR line, then run {led} ack.",
         "",
-        (
-            "After posting your summary acknowledgement in ledger chat, send the ledger page link as your second chat line: "
-            if summary
-            else "Your first message after joining gives the operator the ledger page link: "
-        )
-        + f"run {me} url and post its line "
-        f'with {me} say --to operator "<line>". Answer any question like what is my ledger link with that line at '
-        "once.",
+        f"{FIRST_CONTACT} When he asks for his ledger link, answer with the line {me} url prints.",
         "",
         "Your standing duties:",
         *([codex_master.waiting(slug, push)] if codex else []),
@@ -105,8 +127,7 @@ def build_master(slug, repo, name, task, autonomy=DELEGATE):
         ),
         "- Answer every operator chat message. Messages from the page reach this session as inbox messages from "
         'operator: answer each with agentihooks msg reply <id> "<text>", which shows the answer on the page and '
-        f'closes the message. Post your own updates with {me} say --to operator "<text>". Answer what the operator '
-        "types in this pane here.",
+        "closes the message. Answer what the operator types in this pane here.",
         "- A message that needs no work, such as a thanks, a confirmation or a reply that asks for nothing, carries "
         '--fyi: agentihooks msg send <address> --fyi "<text>", agentihooks msg reply <id> --fyi "<text>" or '
         f'{me} say "<text>" --to <agent name> --fyi. Information closes on read or confirmed receipt. '
@@ -114,9 +135,9 @@ def build_master(slug, repo, name, task, autonomy=DELEGATE):
         "keep unresolved work and proof checks open.",
         f'- Keep the ledger current: {led} phase <phase id> done|open, {led} comment phases/<phase id> "<status>", '
         f'{led} followup add "<text>", and {led} time-left "<duration>" whenever progress or blockers change it.',
-        f"- {waiting_line(led)}",
         f"- {artifact_line(led)} When the operator asks for a file to review, add or set its task with --artifact "
         "or artifact=yes so its agent may publish it.",
+        f"- {WORKSTATION_LINE}",
         *peer_lines(task.get("peer", "")),
         *priming.master_lines(slug, task.get("peer", "")),
         f'- Turn each operator request into a task with a full spec: {led} task add <id> "<title>" --lane eng|ci '
@@ -189,7 +210,7 @@ def summary_lines(slug):
     return [
         "Ledger summary from the previous close:",
         f"Summary\n{summary}",
-        "In your first ledger chat line, name this summary and say where the work stopped in plain words.",
+        "When the operator writes, use this summary to say where the work stopped in plain words.",
     ]
 
 
@@ -201,7 +222,8 @@ def build_operator(slug, repo, name, role, profile):
         f"You are {name}, a {profile} profile agent the operator launched on swarm {slug} over the repo {repo} with "
         f"agentihooks swarm {slug} {profile} up. You hold no task and no lane slot, and the swarm never nudges or "
         "retires you. You answer to the operator in this pane: wait for his first message.",
-        f"Read the swarm ledger with {ledger_read(slug)} for context; change nothing on it "
+        f"Read the relevant item through the ledger API with agentihooks ledger --slug {slug} get <item> "
+        "(tasks/<id>, phases/<id>, questions/<id> or priorities/<id>) for context; change nothing on it "
         + ("until the operator accepts a plan." if planner else "unless the operator asks."),
         'Other sessions reach you as inbox messages: answer one with agentihooks msg reply <id> "<text>" and reach '
         f'the master with agentihooks msg send master@{slug} "<text>".',
@@ -252,14 +274,13 @@ def build_dispatcher(slug: str, repo: str, name: str, task: dict, autonomy: str 
         *(dispatch_seat.line(trigger) for trigger in task.get("triggers", [])),
         *priming_lines(task),
         "",
-        f"Before anything else, run once: {led} join. Then read the ledger with {ledger_read(slug)} and each trigger's "
-        "item in it.",
+        f"Before anything else, run once: {led} join. Read each trigger's item through the ledger API with "
+        f"agentihooks ledger --slug {slug} get <item> (priorities/<id>, tasks/<id> or followups/<id>).",
         "Settle each trigger within the swarm's autonomy with the agentihooks commands, the classifiers and read only sub "
         f'agents: comment on its item with {led} comment <item> "<text>", close a decided follow up, rank a task, and '
         f"clear the priority once it is resolved with {led} priority clear <priority id>.",
-        "For a decision only the operator can make, tell the master and hand its priority to the operator with "
-        f'{led} priority add <item> "<the ask in plain words>": it stays in his Priorities and no longer counts as your '
-        "trigger. Never ask the operator yourself. You never edit code or config files, commit, merge or claim a task.",
+        "For a decision only the operator can make, tell the master by inbox and leave the trigger open. "
+        f"{NO_ASKS.format(slug=slug)} You never edit code or config files, commit, merge or claim a task.",
         f'After each trigger, tell the master what you did: agentihooks msg send {MASTER}@{slug} "<plain words>".',
         'New triggers arrive as inbox messages: answer one with agentihooks msg reply <id> "<text>", or close it with '
         'agentihooks msg close <id> done "<where the work went>".',
@@ -271,6 +292,8 @@ def build_dispatcher(slug: str, repo: str, name: str, task: dict, autonomy: str 
 
 
 def build(slug, repo, lane, name, task, role="", autonomy=DELEGATE):
+    if (carried := task.get(CARRIED)) is not None:
+        return carried
     if lane == MASTER:
         return build_master(slug, repo, name, task, autonomy)
     if lane == DISPATCH:
@@ -304,13 +327,14 @@ def build(slug, repo, lane, name, task, role="", autonomy=DELEGATE):
         f"You are a member of the ledger crew. Before anything else, run once: {led} join. {INBOX_LINE} "
         f"Act on every OPERATOR line about your work, then run {led} ack.",
         "",
-        f"Then read the ledger in full with {ledger_read(slug)}: every task and its state, "
-        "the operator's notes, answers and comments. It is your starting point; take only your own task.",
+        f"Read your task through the ledger API with agentihooks ledger --slug {slug} get tasks/{task['id']}, "
+        f"then its phase with agentihooks ledger --slug {slug} get phases/{phase}. "
+        "Read another item only when your task or inbox names it; take only your own task.",
         "Page chat is for the master: act on a chat line only when it starts with @ and your name.",
         f'Keep the ledger current as you go: {led} comment phases/{phase} "<what you did>" when your work lands, '
         f'{led} followup add "<text>" for a blocker or follow up you find. A hook blocks your stop while operator '
         "events are unhandled or you have gone many tool calls without a ledger command.",
-        waiting_line(led),
+        NO_ASKS.format(slug=slug),
         artifact_line(led),
         f'Record a lesson the next occupant of your seat should know with {me} learned "<lesson because reason>" (a note; add '
         "--maturity data for a raw figure or insight for one that held up more than once).",
@@ -327,7 +351,7 @@ def build(slug, repo, lane, name, task, role="", autonomy=DELEGATE):
             f'branch, open a draft pull request, then {me} block "<plain words naming the blocker>" and stop.'
         ),
         "",
-        f'Talk to the swarm and the operator with {me} say "<text>" (add --to <agent name>, eng or ci). '
+        f'Talk to the swarm with {me} say "<text>" --to <agent name>, eng or ci. '
         'Messages for you arrive in this session as inbox messages: answer one with agentihooks msg reply <id> "<text>". '
         "Mark status reports with --fyi when they request no receiver action; information closes on receipt. "
         "After handling confirmed work, explicitly reply or close it with an outcome. "
@@ -337,15 +361,6 @@ def build(slug, repo, lane, name, task, role="", autonomy=DELEGATE):
         "Other agents work other tasks in parallel. Touch only what your task needs.",
     ]
     return "\n".join(lines) + "\n"
-
-
-def waiting_line(led):
-    return (
-        "Whenever you wait on the operator, raise it where he looks instead of only writing it in chat: "
-        f'{led} priority add <item> "<the ask in plain words>", where the item is phases/<id>, questions/<id>, '
-        f'followups/<id> or tasks/<id>, or {led} followup add "<text>" --needs-operator for a decision only he can '
-        "make. Unanswered questions, blocked tasks and merge approvals show in Priorities on their own."
-    )
 
 
 def artifact_line(led):
@@ -468,6 +483,8 @@ def _by(recap):
 
 def contract_lines(contract):
     parts = [f"{label}: {contract[key]}." for key, label in CONTRACT_LABELS if contract.get(key)]
+    if contract.get("after") == "yes":
+        parts.append("After merge, record --command and --output before swarm done.")
     return ["Proof contract. " + " ".join(parts)] if parts else []
 
 
@@ -485,9 +502,19 @@ def overlap_lines(task):
     overlaps = task.get("overlaps") or []
     if not overlaps:
         return []
-    return [OVERLAP_LINE] + [
-        f"Task {o['task']}, claimed by {o['claimant']}, shares {' and '.join(o['areas'])}." for o in overlaps
-    ]
+    lines = [OVERLAP_LINE]
+    for overlap in overlaps:
+        owner = (
+            f"claimed by {overlap['claimant']}"
+            if overlap["claimant"]
+            else (
+                "waiting on checks with no agent; no coordination note needed"
+                if overlap["checks"]
+                else "no live agent; no coordination note needed"
+            )
+        )
+        lines.append(f"Task {overlap['task']}, {owner}, shares {' and '.join(overlap['areas'])}.")
+    return lines
 
 
 def group_lines(task):
@@ -723,6 +750,9 @@ GATED_SHIP = {MANUAL: manual_ship, ASSIST: assist_ship}
 
 def kind_steps(kind, me, led, name, phase, autonomy, task_id):
     steps = STEPS[kind](me, led, naming.plain(name), phase)
+    if kind in PULLED_KINDS:
+        pulled = OPERATOR_PULL if autonomy in GATED_SHIP else READY_PULL
+        return [*steps[:-1], pulled.format(me=me, led=led), steps[-1]]
     if kind not in ("code", "ci") or autonomy not in GATED_SHIP:
         return steps
     return steps[:5] + GATED_SHIP[autonomy](me, led, task_id)

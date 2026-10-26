@@ -16,8 +16,8 @@ DOCTOR = (
 )
 NOTICE = (
     "The master of swarm {slug} is down: its launch failed with {error}. Keep working your own task through to "
-    "merge, put each question on the ledger with agentihooks ledger --slug {slug} --as {name} question add "
-    '"<text>", and do not wait on master replies.'
+    'merge, send each question to the front door inbox with agentihooks msg send master@{slug} "<text>", and do '
+    "not wait on master replies."
 )
 BACK = "The master of swarm {slug} is live again and answers questions and replies as before."
 
@@ -42,7 +42,7 @@ def clear(store, slug) -> list[str]:
     told = [*state.get("told", []), *([seat_address(state["doctor"], MASTER)] if state.get("doctor") else [])]
     inbox = InboxStore(store.redis)
     for address in told:
-        inbox.send(SENDER, address, BACK.format(slug=slug))
+        inbox.send(SENDER, address, BACK.format(slug=slug), fyi=True)
     return [f"told {address} the master is back" for address in told]
 
 

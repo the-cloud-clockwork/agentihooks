@@ -13,7 +13,6 @@ from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
 from scripts.swarm.tick import EXITED_BEFORE_LIFE, SpawnError, tick
 from tests.swarm.test_tick import FakeRuntime, tasks
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
 LAUNCH_CHECKED = True
 
 SCREEN = "$ agentihooks codex --route default\nCodex account default not found\n\n$ \n\n"

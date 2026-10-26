@@ -2,6 +2,7 @@ import json
 import os
 import socket
 import sqlite3
+import threading
 from pathlib import Path
 from unittest.mock import Mock
 
@@ -57,6 +58,38 @@ def test_a_second_writer_on_the_same_folder_is_refused_and_counted(tmp_path, lea
     assert ledger_writer.holder(tmp_path) == CLAIMANT
     assert ledger_writer.conflicts_total(tmp_path) == 1
     assert (tmp_path / ledger_writer.CONFLICTS).read_text() == '{"holder": 4242, "claimant": 4343, "at": 2000}\n'
+
+
+def test_a_waiting_writer_takes_the_lease_once_the_holder_releases_it(tmp_path, lease):
+    timer = threading.Timer(0.1, lease.release)
+    timer.start()
+    taken = ledger_writer.WriterLease(tmp_path).acquire(OTHER, wait=10)
+    timer.join()
+    try:
+        assert taken.held is True
+        assert ledger_writer.holder(tmp_path) == OTHER
+        assert ledger_writer.conflicts_total(tmp_path) == 0
+    finally:
+        taken.release()
+
+
+def test_a_waiting_writer_is_refused_and_counted_once_when_the_wait_ends(tmp_path, lease, monkeypatch):
+    clock = iter([0.0, 0.4, 0.8, 1.0])
+    naps = []
+    monkeypatch.setattr(ledger_writer.time, "monotonic", lambda: next(clock))
+    monkeypatch.setattr(ledger_writer.time, "sleep", naps.append)
+    with pytest.raises(ledger_writer.WriterConflict):
+        ledger_writer.WriterLease(tmp_path).acquire(OTHER, wait=1.0)
+    assert naps == [ledger_writer.LEASE_POLL_S, ledger_writer.LEASE_POLL_S]
+    assert ledger_writer.conflicts_total(tmp_path) == 1
+
+
+def test_a_writer_that_does_not_wait_is_refused_without_polling(tmp_path, lease, monkeypatch):
+    naps = []
+    monkeypatch.setattr(ledger_writer.time, "sleep", naps.append)
+    with pytest.raises(ledger_writer.WriterConflict):
+        ledger_writer.WriterLease(tmp_path).acquire(OTHER)
+    assert naps == []
 
 
 def test_each_refusal_adds_one_conflict(tmp_path, lease):
@@ -335,7 +368,7 @@ def test_a_second_server_on_a_held_folder_exits_before_touching_it(serving, leas
 def test_the_server_holds_the_lease_while_it_serves_and_releases_it_after(serving):
     seen = []
 
-    def serve_forever():
+    def serve_forever(poll_interval):
         seen.append(ledger_writer.holder(serving)["pid"])
         with pytest.raises(ledger_writer.WriterConflict):
             ledger_writer.WriterLease(serving).acquire(OTHER)
@@ -346,6 +379,14 @@ def test_the_server_holds_the_lease_while_it_serves_and_releases_it_after(servin
     server.legacy.adopt.assert_called_once_with(server.stored)
     successor = ledger_writer.WriterLease(serving).acquire(OTHER)
     successor.release()
+
+
+def test_a_server_on_the_shared_database_serves_beside_a_held_folder(serving, lease, monkeypatch):
+    monkeypatch.setenv(server.storage.postgres.URL, "postgresql://ledger.invalid/swarm")
+    server.serve()
+    server.ThreadingHTTPServer.return_value.serve_forever.assert_called_once_with(server.POLL_S)
+    assert ledger_writer.holder(serving)["pid"] == CLAIMANT["pid"]
+    assert ledger_writer.conflicts_total(serving) == 0
 
 
 @pytest.mark.parametrize("case", ["a", "b", "c"])

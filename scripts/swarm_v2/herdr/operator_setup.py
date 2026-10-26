@@ -1,28 +1,28 @@
 """agentihooks swarm-terminal setup|install|sync: the operator machine's terminal attach files, placed by reference,
-and the service that keeps every hive's published workers in the operator's herdr."""
+and the scheduled jobs that refresh them and keep every hive's published workers in the operator's herdr."""
 
 import argparse
 import base64
 import dataclasses
 import hashlib
-import itertools
 import json
 import os
-import shutil
 import subprocess
 import sys
-import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 from urllib.parse import quote
 
 import yaml
 
-from scripts import openbao_kv
+from scripts import openbao_kv, operator_env
 from scripts.gates.base import Who
+from scripts.scheduler import Scheduler
+from scripts.scheduler.service import ensure_running
 from scripts.swarm.ledger_client import LedgerClient
-from scripts.swarm.store import RedisStore, SwarmError
+from scripts.swarm.store import RedisStore, SwarmError, redis_client
 from scripts.swarm_v2.deployed import POLICY_ENV, pod_policy
 from scripts.swarm_v2.herdr import publications
 from scripts.swarm_v2.herdr.attach import ClientHome, Run
@@ -31,6 +31,9 @@ from scripts.swarm_v2.herdr.operator_service import Service
 from scripts.swarm_v2.herdr.upkeep import Upkeep
 from scripts.swarm_v2.kubernetes import operator_terminal
 from scripts.swarm_v2.kubernetes.operator_terminal import CA_KEY_ENV, authority
+
+if TYPE_CHECKING:
+    from redis import Redis
 
 CA_PATH = "agentihooks-swarm/terminal-attach"
 CA_FIELD = "user_ca"
@@ -42,7 +45,12 @@ FOLDER = "swarm-terminal"
 UNIT = "agentihooks-swarm-terminal.service"
 TIMER = "agentihooks-swarm-terminal.timer"
 SYNC = "agentihooks-swarm-terminal-sync.service"
+LEGACY = (TIMER, UNIT, SYNC)
 SYNC_SECONDS = 15
+REFRESH_SECONDS = 900
+OWNER = "swarm-terminal"
+LIVE = ("active", "pending")
+STATE_KEYS = {"due", "seen", "synced", "jump"}
 REDIS_PATH = "k8s/agentihooks-swarm"
 REDIS_FIELD = "redis_password"
 REDIS_USER = "swarm"
@@ -77,6 +85,14 @@ class Placement:
     @property
     def alarm(self) -> Path:
         return self.root / "alarm"
+
+    @property
+    def schedule(self) -> Path:
+        return self.root / "schedule.json"
+
+    @property
+    def state(self) -> Path:
+        return self.root / "sync-state.json"
 
 
 def _stage(path: Path, data: bytes) -> Path:
@@ -175,6 +191,22 @@ def place(home: Path, bao: openbao_kv.OpenBao, antoncore: Path, address: str = "
     return report
 
 
+def setup(root: Path, environ: Mapping[str, str], antoncore: str | None = None) -> int:
+    try:
+        bao = openbao_kv.from_env(environ)
+        if bao is None:
+            raise SetupRefused(f"it needs {openbao_kv.URL_ENV} and {openbao_kv.TOKEN_ENV}")
+        report = place(root, bao, antoncore_dir(environ, antoncore), environ.get(ADDRESS_ENV, ""))
+    except SwarmError as refused:
+        message = f"operator terminal setup refused: {refused}"
+        print(message, file=sys.stderr, flush=True)
+        alarm(root, environ, message)
+        return 1
+    Placement(root / FOLDER).state.unlink(missing_ok=True)
+    print(json.dumps(report), flush=True)
+    return 0
+
+
 def transport(environ: Mapping[str, str], placed: Mapping[str, str]) -> Mapping[str, str]:
     name = publications.URL_ENVS[0]
     if environ.get(name) or URL_FILE_ENV not in placed:
@@ -236,14 +268,70 @@ def service(
     return Service(Upkeep(terminal), connect or (lambda: publications.connect(transport(environ, placed))))
 
 
-def serve(running: Service, passes: int | None = None, sleep: Callable = time.sleep, out=None) -> int:
-    for count in itertools.count(1):
-        report = running.run_pass()
-        if report is not None:
-            print(json.dumps(dataclasses.asdict(report)), file=out or sys.stdout, flush=True)
-        if count == passes:
-            return 0
-        sleep(SYNC_SECONDS)
+def _saved(placement: Placement) -> dict | None:
+    try:
+        saved = json.loads(placement.state.read_text())
+    except (OSError, ValueError):
+        return None
+    return saved if isinstance(saved, dict) and saved.keys() >= STATE_KEYS else None
+
+
+def sync_pass(running: Service, root: Path, out=None) -> None:
+    placement = Placement(root / FOLDER)
+    saved = _saved(placement)
+    if saved is not None:
+        running.resume(saved)
+    report = running.run_pass()
+    _stage(placement.state, json.dumps(running.saved()).encode()).replace(placement.state)
+    if report is not None:
+        print(json.dumps(dataclasses.asdict(report)), file=out or sys.stdout, flush=True)
+
+
+def sync_once(environ: Mapping[str, str], root: Path) -> int:
+    sync_pass(service(environ, operator_terminal.client_home(environ), root), root)
+    return 0
+
+
+def _job(event: dict) -> tuple[Path, str]:
+    job = json.loads(event["payload"])
+    return Path(job["home"]), job["address"]
+
+
+def _contained(command: str, work: Callable[[], object]) -> None:
+    # A raised slot error stops this machine's scheduler runner for every job, so it is reported here instead.
+    try:
+        work()
+    except SwarmError as refused:
+        print(f"operator terminal {command} refused: {refused}", file=sys.stderr, flush=True)
+    except Exception as error:
+        print(f"operator terminal {command} failed: {type(error).__name__}: {error}", file=sys.stderr, flush=True)
+
+
+def shell_environ() -> dict[str, str]:
+    return {**os.environ, **operator_env.values(os.environ)}
+
+
+def _setup_environ(address: str) -> dict[str, str]:
+    environ = shell_environ()
+    if address:
+        environ[ADDRESS_ENV] = address
+    return environ
+
+
+def refresh(event: dict, _delivery_id: str, _redis: "Redis") -> None:
+    root, address = _job(event)
+    _contained("setup", lambda: setup(root, _setup_environ(address)))
+
+
+def _awaiting_setup(placement: Placement) -> bool:
+    return placement.alarm.exists() and not placement.env.exists()
+
+
+def sync(event: dict, _delivery_id: str, _redis: "Redis") -> None:
+    root, _ = _job(event)
+    if _awaiting_setup(Placement(root / FOLDER)):
+        return
+    _contained("sync", lambda: sync_once(shell_environ(), root))
 
 
 def outside_agent(who: Who) -> None:
@@ -257,90 +345,101 @@ def antoncore_dir(environ: Mapping[str, str], flag: str | None) -> Path:
     return Path(flag or environ.get(ANTONCORE_ENV) or Path.home() / "dev" / "tcc-ecosystem" / "antoncore")
 
 
-def unit(binary: str, address: str = "") -> str:
-    return (
-        "[Unit]\nDescription=agentihooks operator terminal setup\n\n"
-        "[Service]\nType=oneshot\n"
-        "Environment=PATH=%h/.local/bin:%h/.cargo/bin:/usr/local/bin:/usr/bin:/bin\n"
-        + (f"Environment={ADDRESS_ENV}={address}\n" if address else "")
-        + "EnvironmentFile=-%h/.agentihooks/.env\n"
-        f'ExecStart="{binary}" swarm-terminal setup\n'
-        f"ExecStartPost=-systemctl --user try-restart {SYNC}\n"
-    )
+JOBS = (("refresh", refresh, REFRESH_SECONDS), ("sync", sync, SYNC_SECONDS))
 
 
-def timer() -> str:
-    return (
-        "[Unit]\nDescription=agentihooks operator terminal setup, refreshed\n\n"
-        "[Timer]\nOnBootSec=1min\nOnUnitActiveSec=15min\n\n"
-        "[Install]\nWantedBy=timers.target\n"
-    )
+def _payload(root: Path, address: str) -> str:
+    return json.dumps({"home": str(root), "address": address}, sort_keys=True)
 
 
-def sync_unit(binary: str) -> str:
-    return (
-        "[Unit]\nDescription=agentihooks operator herdr sync of hive workers\n\n"
-        "[Service]\nType=simple\nRestart=always\nRestartSec=30\n"
-        "Environment=PATH=%h/.local/bin:%h/.cargo/bin:/usr/local/bin:/usr/bin:/bin\n"
-        "EnvironmentFile=-%h/.agentihooks/.env\n"
-        f'ExecStart="{binary}" swarm-terminal sync\n\n'
-        "[Install]\nWantedBy=default.target\n"
-    )
+def _recorded(placement: Placement) -> dict:
+    try:
+        return json.loads(placement.schedule.read_text())
+    except (OSError, ValueError):
+        return {}
 
 
-def _wanted(binary: str, unit_dir: Path, address: str) -> tuple[tuple[Path, str], ...]:
-    return (
-        (unit_dir / UNIT, unit(binary, address)),
-        (unit_dir / TIMER, timer()),
-        (unit_dir / SYNC, sync_unit(binary)),
-    )
-
-
-def installed(
-    binary: str | None = None, unit_dir: Path | None = None, run: Callable = subprocess.run, address: str = ""
-) -> bool:
-    binary = binary or shutil.which("agentihooks")
-    unit_dir = unit_dir or Path.home() / ".config" / "systemd" / "user"
-    if not binary or any(
-        not path.exists() or path.read_text() != text for path, text in _wanted(binary, unit_dir, address)
-    ):
+def _live(scheduler: Scheduler, entry_id: str) -> bool:
+    try:
+        return scheduler.get(entry_id).state in LIVE
+    except KeyError:
         return False
-    return all(
-        run(
-            ["systemctl", "--user", "is-enabled", "--quiet", name], capture_output=True, text=True, timeout=30
-        ).returncode
-        == 0
-        for name in (TIMER, SYNC)
+
+
+def scheduled(root: Path, address: str, scheduler: Scheduler) -> bool:
+    record = _recorded(Placement(root / FOLDER))
+    return record.get("payload") == _payload(root, address) and all(
+        _live(scheduler, record.get(name)) for name, _, _ in JOBS
     )
+
+
+def schedule(root: Path, address: str, scheduler: Scheduler) -> None:
+    if scheduled(root, address, scheduler):
+        return
+    placement, payload = Placement(root / FOLDER), _payload(root, address)
+    entries = {}
+    for name, slot, seconds in JOBS:
+        entries[name] = scheduler.interval(owner=OWNER, payload=payload, every=seconds)
+        entries[name].timeout.connect(slot)
+    record = {"payload": payload, **{name: entry.id for name, entry in entries.items()}}
+    _stage(placement.schedule, json.dumps(record).encode()).replace(placement.schedule)
+    for entry in entries.values():
+        entry.start()
+    kept = {entry.id for entry in entries.values()}
+    for entry in scheduler.owned(OWNER):
+        if entry.id not in kept and entry.state in LIVE and _job(entry.record)[0] == root:
+            entry.cancel()
+
+
+def remove_units(unit_dir: Path, run: Callable = subprocess.run) -> None:
+    present = [name for name in LEGACY if (unit_dir / name).exists()]
+    if not present:
+        return
+    enabled = [name for name in (TIMER, SYNC) if name in present]
+    try:
+        if enabled:
+            result = run(
+                ["systemctl", "--user", "disable", "--now", *enabled], capture_output=True, text=True, timeout=30
+            )
+            if result.returncode:
+                raise SetupRefused(f"systemctl could not disable {', '.join(enabled)}: {result.stderr.strip()}")
+        for name in present:
+            (unit_dir / name).unlink()
+        run(["systemctl", "--user", "daemon-reload"], capture_output=True, text=True, timeout=30, check=True)
+    except (OSError, subprocess.SubprocessError) as error:
+        raise SetupRefused(f"systemctl could not remove {', '.join(present)}: {type(error).__name__}") from None
+
+
+def _scheduler() -> Scheduler:
+    from redis.exceptions import RedisError
+
+    try:
+        return Scheduler(redis_client())
+    except RedisError as error:
+        raise SetupRefused(f"the scheduler Redis is unreachable: {type(error).__name__}") from None
+
+
+def _unit_dir() -> Path:
+    return Path.home() / ".config" / "systemd" / "user"
+
+
+def installed(root: Path, address: str = "", unit_dir: Path | None = None, scheduler: Scheduler | None = None) -> bool:
+    if any(((unit_dir or _unit_dir()) / name).exists() for name in LEGACY):
+        return False
+    return scheduled(root, address, scheduler or _scheduler())
 
 
 def install(
-    binary: str | None = None, unit_dir: Path | None = None, run: Callable = subprocess.run, address: str = ""
+    root: Path,
+    address: str = "",
+    unit_dir: Path | None = None,
+    run: Callable = subprocess.run,
+    scheduler: Scheduler | None = None,
+    start: Callable | None = None,
 ) -> None:
-    binary = binary or shutil.which("agentihooks")
-    if not binary:
-        raise SetupRefused("the agentihooks executable is not on PATH")
-    unit_dir = unit_dir or Path.home() / ".config" / "systemd" / "user"
-    unit_dir.mkdir(parents=True, exist_ok=True)
-    stale = [
-        (path, text)
-        for path, text in _wanted(binary, unit_dir, address)
-        if not path.exists() or path.read_text() != text
-    ]
-    for path, text in stale:
-        _stage(path, text.encode()).replace(path)
-    try:
-        if stale:
-            run(["systemctl", "--user", "daemon-reload"], capture_output=True, text=True, timeout=30, check=True)
-        results = {
-            name: run(["systemctl", "--user", "enable", "--now", name], capture_output=True, text=True, timeout=30)
-            for name in (TIMER, SYNC)
-        }
-    except (OSError, subprocess.SubprocessError) as error:
-        raise SetupRefused(f"systemctl could not enable {TIMER} and {SYNC}: {type(error).__name__}") from None
-    failed = [f"{name}: {result.stderr.strip()}" for name, result in results.items() if result.returncode]
-    if failed:
-        raise SetupRefused(f"systemctl could not enable {'; '.join(failed)}")
+    schedule(root, address, scheduler or _scheduler())
+    remove_units(unit_dir or _unit_dir(), run)
+    (start or ensure_running)()
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -348,10 +447,14 @@ def _parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="command", required=True)
     setup = sub.add_parser("setup", help="Place the terminal user CA key and the Pod policy from their sources")
     setup.add_argument("--antoncore", help=f"antoncore checkout; defaults to {ANTONCORE_ENV}")
-    installed = sub.add_parser("install", help="Write and enable the user timer that runs setup and the sync service")
+    installed = sub.add_parser(
+        "install", help="Schedule setup and the herdr sync on the agentihooks scheduler, removing the old systemd units"
+    )
     installed.add_argument("--redis-address", default="", help=f"hive Redis host:port setup composes, as {ADDRESS_ENV}")
-    installed.add_argument("--check", action="store_true", help="exit 0 only when the units are current and enabled")
-    sub.add_parser("sync", help="Keep every hive's published workers in the operator's herdr")
+    installed.add_argument(
+        "--check", action="store_true", help="exit 0 only when both jobs are scheduled and no old systemd unit remains"
+    )
+    sub.add_parser("sync", help="Run one sync of every hive's published workers into the operator's herdr")
     return parser
 
 
@@ -362,27 +465,20 @@ def main(
     environ = os.environ if environ is None else environ
     root = home or Path(environ.get("AGENTIHOOKS_HOME") or Path.home() / ".agentihooks")
     try:
-        outside_agent(Who.from_env() if who is None else who)
+        if args.command != "install":
+            outside_agent(Who.from_env() if who is None else who)
     except SetupRefused as refused:
         print(f"operator terminal {args.command} refused: {refused}", file=sys.stderr)
         return 1
+    if args.command == "setup":
+        return setup(root, environ, args.antoncore)
     try:
-        if args.command == "install" and args.check:
-            return 0 if installed(address=args.redis_address) else 1
-        if args.command == "install":
-            install(address=args.redis_address)
-            return 0
         if args.command == "sync":
-            return serve(service(environ, operator_terminal.client_home(environ), root))
-        bao = openbao_kv.from_env(environ)
-        if bao is None:
-            raise SetupRefused(f"it needs {openbao_kv.URL_ENV} and {openbao_kv.TOKEN_ENV}")
-        report = place(root, bao, antoncore_dir(environ, args.antoncore), environ.get(ADDRESS_ENV, ""))
+            return sync_once(environ, root)
+        if args.check:
+            return 0 if installed(root, args.redis_address) else 1
+        install(root, args.redis_address)
+        return 0
     except SwarmError as refused:
-        message = f"operator terminal {args.command} refused: {refused}"
-        print(message, file=sys.stderr)
-        if args.command == "setup":
-            alarm(root, environ, message)
+        print(f"operator terminal {args.command} refused: {refused}", file=sys.stderr)
         return 1
-    print(json.dumps(report))
-    return 0

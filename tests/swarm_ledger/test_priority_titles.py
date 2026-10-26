@@ -38,7 +38,7 @@ def tab(browser):
     html = shell_html()
 
     def route(request):
-        if "/api/swarm/" in request.request.url:
+        if "/swarm/" in request.request.url:
             request.fulfill(json=SWARM)
         elif request.request.url.startswith(URL):
             request.fulfill(body=html, content_type="text/html")

@@ -128,6 +128,22 @@ def test_plan_grades_size_with_the_base_grader_and_runs_two_workers(repo, tmp_pa
     assert (grade / "scripts/size_limits.py").read_text() == "GRADER = 1\n"
 
 
+def test_plan_reads_the_allowlist_and_grader_at_the_merge_base(repo, tmp_path):
+    _git(repo, "checkout", "-q", "-b", "work")
+    _commit(repo, {"scripts/beta.py": "B = 2\n"}, "change")
+    _git(repo, "checkout", "-q", "base")
+    _commit(
+        repo, {"tests/SIZE_ALLOWLIST.json": '{"shrunk": {}}\n', "scripts/size_limits.py": "GRADER = 3\n"}, "base moves"
+    )
+    _git(repo, "checkout", "-q", "work")
+    grade = tmp_path / "grade"
+
+    ci_prepush.plan(repo, "base", grade)
+
+    assert (grade / "tests/SIZE_ALLOWLIST.json").read_text() == '{"base": {}}\n'
+    assert (grade / "scripts/size_limits.py").read_text() == "GRADER = 1\n"
+
+
 @pytest.mark.parametrize("value", [None, "false", "0", "yes"])
 def test_plan_skips_local_tests_unless_true(repo, tmp_path, monkeypatch, value):
     _commit(repo, {"scripts/beta.py": "B = 2\n"}, "change")

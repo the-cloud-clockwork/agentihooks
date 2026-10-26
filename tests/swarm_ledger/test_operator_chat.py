@@ -18,7 +18,7 @@ SLUG = "opchat-2026-01-01"
 @pytest.fixture(autouse=True)
 def ledger():
     content = {"title": "Demo", "overview": "o", "sources": [], "phases": [{"title": "one", "description": "d"}]}
-    html_path, json_path = core.paths(SLUG)
+    html_path, json_path = legacy_page.paths(SLUG, core)
     core.LEDGER_DIR.mkdir(parents=True, exist_ok=True)
     html_path.write_text(legacy_page.render(new_ledger.build_doc(content), SLUG, 8765), encoding="utf-8")
     json_path.unlink(missing_ok=True)
@@ -43,12 +43,13 @@ def test_an_agent_line_addressed_to_nobody_is_refused():
     state, rejected = core.sync(SLUG, ops=[said(1, "The docs task is merged.", by="boss")])
     assert chat() == []
     assert rejected == ["m-1"]
-    assert "chat is the operator's conversation" in " ".join(state["_meta"]["warnings"])
+    assert "chat is reply only" in " ".join(state["_meta"]["warnings"])
 
 
-def test_an_agent_line_to_the_operator_is_shown():
-    core.sync(SLUG, ops=[said(1, "Phase one is half done.", by="boss", to="operator")])
-    assert chat() == [("boss", "Phase one is half done.")]
+def test_an_unprompted_agent_line_to_the_operator_is_refused():
+    _, rejected = core.sync(SLUG, ops=[said(1, "Phase one is half done.", by="boss", to="operator")])
+    assert rejected == ["m-1"]
+    assert chat() == []
 
 
 def test_an_agent_line_answering_an_operator_line_is_shown():
@@ -64,10 +65,11 @@ def test_an_agent_line_answering_an_operator_line_is_shown():
 
 @pytest.mark.parametrize("reply_to", ["m-1", "m-9"])
 def test_an_answer_to_an_agent_line_or_a_missing_line_is_refused(reply_to):
-    core.sync(SLUG, ops=[said(1, "Phase one is half done.", by="boss", to="operator")])
+    core.sync(SLUG, ops=[said(0, "where are we")])
+    core.sync(SLUG, ops=[said(1, "Phase one is half done.", by="boss", reply_to="m-0")])
     _, rejected = core.sync(SLUG, ops=[said(2, "Thanks.", by="boss", reply_to=reply_to)])
     assert rejected == ["m-2"]
-    assert chat() == [("boss", "Phase one is half done.")]
+    assert chat() == [("operator", "where are we"), ("boss", "Phase one is half done.")]
 
 
 def test_the_operator_writes_without_an_address():

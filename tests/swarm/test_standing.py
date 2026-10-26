@@ -10,7 +10,7 @@ from scripts.swarm.store import PREFIX
 from tests.swarm.test_cli import env as env
 from tests.swarm.test_spawn_stall import stalled as stalled
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 
 NOW = 1_791_700_000_000
 HOUR_MS = 3_600_000
@@ -54,6 +54,13 @@ def test_a_first_reading_creates_one_finding_with_its_numbers(redis):
             2.5,
         )
     ]
+
+
+def test_evidence_without_links_is_still_kept_on_the_finding(redis):
+    found = standing.Reading(2.5, 1.0, "task hours in the window", "e1", evidence=("mutation: 1 run over budget.",))
+    standing.fire(redis, "sw", "ci_overrun", found, NOW)
+    row = standing.read(redis, "sw")["ci_overrun"]
+    assert (row["evidence"], row["links"]) == (["mutation: 1 run over budget."], [])
 
 
 def test_a_repeat_of_the_same_episode_updates_numbers_without_counting_again(redis):

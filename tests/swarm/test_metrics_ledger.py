@@ -242,3 +242,23 @@ def test_snapshot_after_a_phase_tick_shows_counts_priorities_time_left_and_freez
         assert any(row["ts_ms"] == NOW + 600_000 for row in read(box, "ledger_snapshots"))
     finally:
         box.close()
+
+
+def test_tick_document_records_and_acknowledges_its_revision_without_another_read(box):
+    from scripts.swarm import metrics_ledger
+
+    ledger = Ledger()
+    ledger.move("claimed", 1, NOW)
+    document = ledger.state("example")
+    ledger.move("done", 2, NOW + 1)
+    ledger.calls.clear()
+
+    metrics_ledger.record(box, "example", NOW, ledger, document)
+
+    assert [(row["state"], row["revision"]) for row in read(box, "ledger_events")] == [("claimed", 1)]
+    assert ledger.calls == [("ack", "example", 1)]
+
+    metrics_ledger.record(box, "example", NOW + 1, ledger)
+
+    assert [(row["state"], row["revision"]) for row in read(box, "ledger_events")] == [("claimed", 1), ("done", 2)]
+    assert ledger.calls[-1] == ("ack", "example", 2)

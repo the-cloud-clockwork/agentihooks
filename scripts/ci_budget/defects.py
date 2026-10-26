@@ -82,7 +82,40 @@ def defect(item: dict, jobs: list[dict]) -> str | None:
         budget = ci_budget.BUDGETS.get(slowest)
         against = f"against {_spoken(budget)}" if budget else "with no budget"
         text += f" Its slowest stage {slowest} took {_spoken(stages[slowest])} {against}."
-    return f"{text} {gate['html_url']}"
+    return text
+
+
+def _stage_evidence(redis, slug: str, item: dict, jobs: list[dict], now_ms: int) -> tuple:
+    cache = key(slug, "stages")
+    gate = next(job for job in jobs if job["name"] == ci_budget.GATE and job.get("completed_at"))
+    sample = {
+        "at": round(ci_budget.seconds(gate["completed_at"]) * 1000),
+        "stages": {
+            stage: spent
+            for stage, spent in ci_budget.stages(jobs).items()
+            if stage != "gate-required" and stage in ci_budget.BUDGETS and spent > ci_budget.BUDGETS[stage]
+        },
+        "url": item.get("html_url") or gate["html_url"],
+    }
+    redis.hset(cache, str(item["id"]), json.dumps(sample))
+    redis.expire(cache, WINDOW_S)
+    samples = {run_id: json.loads(raw) for run_id, raw in redis.hgetall(cache).items()}
+    expired = [run_id for run_id, row in samples.items() if now_ms - row["at"] >= WINDOW_S * 1000]
+    if expired:
+        redis.hdel(cache, *expired)
+    groups = {}
+    links = []
+    for run_id, row in sorted(samples.items()):
+        if run_id in expired:
+            continue
+        links.append({"label": f"Slow run {run_id}", "url": row["url"]})
+        for stage, spent in row["stages"].items():
+            groups.setdefault(stage, []).append(spent)
+    evidence = tuple(
+        f"{stage}: {len(spents)} {'run' if len(spents) == 1 else 'runs'} over budget; worst {_spoken(max(spents))}."
+        for stage, spents in sorted(groups.items())
+    )
+    return evidence, tuple(links)
 
 
 def _log(repo_dir: str, job_id: int, run: Callable) -> str:
@@ -160,8 +193,9 @@ def refresh(
                 continue
             text = defect(item, jobs_of(item["id"]))
             if text:
+                evidence, links = _stage_evidence(redis, slug, item, jobs_of(item["id"]), now_ms)
                 reading = standing.Reading(
-                    round(spent / 60, 1), ci_budget.RUN_BUDGET_S / 60, UNIT, str(item["id"]), text
+                    round(spent / 60, 1), ci_budget.RUN_BUDGET_S / 60, UNIT, str(item["id"]), text, evidence, links
                 )
                 standing.fire(redis, slug, STAGE, reading, now_ms)
                 actions.append(
@@ -176,6 +210,10 @@ def refresh(
             listed = listed + ci_speed.read_runs(config.repo, since_s, run, event="push")
         except READ_ERRORS as exc:
             _skipped("reading dev push Tests runs", exc)
+        try:
+            listed = listed + ci_speed.read_runs(config.repo, since_s, run, event="merge_group")
+        except READ_ERRORS as exc:
+            _skipped("reading merge queue Tests runs", exc)
         runs = metrics_ci.metered(listed)
         actions += _meter(slug, redis, runs, now_ms, lambda job_id: _log(config.repo, job_id, run), jobs_of, environ)
     return actions

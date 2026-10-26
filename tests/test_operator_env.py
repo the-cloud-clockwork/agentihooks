@@ -60,6 +60,42 @@ def test_values_follow_the_shell_where_a_later_file_wins(tmp_path):
     assert not operator_env.SHELL_NAMES & loaded.keys()
 
 
+def test_shared_env_files_cannot_load_the_server_secret(tmp_path, monkeypatch):
+    state = _home(tmp_path)
+    (state / "swarm.env").write_text("SWARM_SECRET='$FIXTURE_SWARM_SECRET'\nSWARM_URL=https://hosted.example\n")
+    loaded = operator_env.values({"HOME": str(tmp_path), "PATH": os.environ["PATH"]})
+    assert "SWARM_SECRET" not in loaded
+    assert loaded["SWARM_URL"] == "https://hosted.example"
+    monkeypatch.setattr(operator_env, "block_tokens", lambda: {})
+    trusted = "$TRUSTED_SWARM_SECRET"
+    environ = {"HOME": str(tmp_path), "PATH": os.environ["PATH"], "SWARM_SECRET": trusted}
+    operator_env.fill(environ)
+    assert environ["SWARM_SECRET"] == trusted
+
+
+def test_captured_shell_output_cannot_import_server_authority(monkeypatch):
+    monkeypatch.setattr(operator_env, "source_line", lambda environ: "load operator configuration")
+    response = subprocess.CompletedProcess(
+        [], 0, stdout=b"SWARM_SECRET=$FIXTURE_SERVER_AUTHORITY\0SWARM_URL=https://hosted.example\0"
+    )
+    monkeypatch.setattr(operator_env.subprocess, "run", lambda *args, **kwargs: response)
+    assert operator_env.values({}) == {"SWARM_URL": "https://hosted.example"}
+
+
+def test_generated_shell_loader_also_removes_shared_server_authority(tmp_path):
+    import subprocess
+
+    state = _home(tmp_path)
+    (state / "swarm.env").write_text("SWARM_SECRET='$FIXTURE_SWARM_SECRET'\n")
+    environ = {"HOME": str(tmp_path), "PATH": os.environ["PATH"]}
+    script = operator_env.source_line(environ) + "env -0"
+    done = subprocess.run(["bash", "--noprofile", "--norc", "-c", script], env=environ, capture_output=True)
+    names = {item.partition(b"=")[0] for item in done.stdout.split(b"\0") if item}
+    assert done.returncode == 0
+    assert b"SWARM_SECRET" not in names
+    assert b"SECONDARY_ONLY" in names
+
+
 def test_accounts_are_the_interactive_shell_account_variables_only(tmp_path):
     (tmp_path / ".profile").write_text(
         "echo AH_CC_TOKEN_noise=printed\n"
@@ -195,6 +231,28 @@ def test_the_tick_fills_its_environment_before_any_spawn(tmp_path, monkeypatch):
     assert os.environ["PERSONAL_ONLY"] == "personal"
 
 
+def test_remote_tick_loads_the_server_secret_before_processing_ledgers(tmp_path, monkeypatch):
+    from scripts.swarm_ledger import authority_context
+    from scripts.swarm_ledger.storage_migration import hosted
+
+    _home(tmp_path)
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("SWARM_URL", "https://hosted.example")
+    monkeypatch.delenv("SWARM_SECRET", raising=False)
+    trusted = "$TRUSTED_SWARM_SECRET"
+    monkeypatch.setattr(hosted, "server_secret", lambda: trusted, raising=False)
+    seen = []
+
+    class Store:
+        def slugs(self):
+            seen.append((os.environ.get("SWARM_SECRET"), authority_context.secret()))
+            return []
+
+    swarm_cli.cmd_tick(Store(), None)
+    assert seen == [(None, trusted)]
+    assert authority_context.secret() is None
+
+
 def _launcher(tmp_path, environ):
     env = {"XDG_RUNTIME_DIR": str(tmp_path / "run"), "SHELL": "/bin/bash", **environ}
     launcher, _ = init_agent._write_launcher(tmp_path, "grace", "", [], env, init_agent.AgentSpec())
@@ -207,7 +265,7 @@ def test_the_launcher_waits_its_grace_before_the_agent_command(tmp_path):
     grace = lines.index("sleep 3")
     assert any(line.endswith(".started") for line in lines[:grace])
     assert "claude" in lines[grace + 1] and lines[grace + 2] == "native_status=$?"
-    assert "scripts.session_exit" in lines[grace + 3] and lines[grace + 4].startswith("rm -f ")
+    assert "-P -m scripts.session_exit" in lines[grace + 3] and lines[grace + 4].startswith("rm -f ")
 
 
 def test_the_launcher_sources_the_shared_list_before_its_own_exports(tmp_path):

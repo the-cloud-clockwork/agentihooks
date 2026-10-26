@@ -10,8 +10,6 @@ from scripts.swarm.tick import tick
 from scripts.swarm_ledger import ledger_server, ledger_tasks
 from tests.swarm.test_tick import FakeLedger, FakeRuntime
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 
 @pytest.fixture
 def store():
@@ -116,7 +114,8 @@ def test_empty_page_set_names_all_cap_fields():
     with pytest.raises(ValueError) as caught:
         ledger_server.control_argv({"action": "set"})
     assert (
-        str(caught.value) == "set needs max_eng, max_ci, max_plan, compact_limit, effort_min, effort_max, autonomy, "
+        str(caught.value)
+        == "set needs max_eng, max_ci, max_plan, masters_step, compact_limit, effort_min, effort_max, autonomy, "
         "scaling, load_high, load_low, memory_per_agent_mb, claude_model, codex_model, master_agent, overlays or gates"
     )
 

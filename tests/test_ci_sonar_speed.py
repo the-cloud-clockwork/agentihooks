@@ -152,7 +152,7 @@ def _scanner_zip(path):
         archive.writestr(info, '#!/usr/bin/env bash\necho "$0 $*" > "$SCAN_LOG"\n')
 
 
-def _scan(tmp_path, cached, partial=False, checksum=None):
+def _scan(tmp_path, cached, partial=False, checksum=None, node=""):
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     tool_cache = tmp_path / "toolcache"
@@ -183,6 +183,7 @@ def _scan(tmp_path, cached, partial=False, checksum=None):
         SONAR_SCANNER_SHA256=checksum or hashlib.sha256(archive.read_bytes()).hexdigest(),
         ARGS="-Dsonar.pullrequest.key=7 -Dsonar.pullrequest.base=dev",
         SCAN_LOG=str(tmp_path / "scan"),
+        SONAR_NODE=node,
     )
     downloads = (tmp_path / "downloads").read_text() if (tmp_path / "downloads").exists() else ""
     return result, scanner, downloads
@@ -236,16 +237,20 @@ def test_the_pinned_checksum_tracks_the_scanner_version():
     assert env["SONAR_SCANNER_SHA256"] == "da9f4e64a3d555f08ce38b5469ebd91fe2b311af473f7001a5ee5c1fd58b004b"
 
 
-def test_the_node_runtime_has_its_own_cache_so_the_downloads_entry_keeps_its_version():
-    names = [step.get("name") for step in _sonar()["steps"]]
-    node = _step("Restore the SonarJS Node runtime")
-    assert node["uses"] == "actions/cache@v4"
-    assert node["with"]["path"] == "~/.sonar/js/node-runtime"
-    assert "${{ steps.proxy.outputs.version }}" in node["with"]["key"]
-    assert "if" not in node
-    assert names.index("Start Cloudflare Access proxy") < names.index("Restore the SonarJS Node runtime")
-    assert names.index("Restore the SonarJS Node runtime") < names.index("SonarQube Scan")
-    assert "node-runtime" not in _step("Restore Sonar downloads")["with"]["path"]
+def test_the_runner_image_node_is_handed_to_sonarjs(tmp_path):
+    node = tmp_path / "node"
+    node.write_text("#!/usr/bin/env bash\n")
+    node.chmod(0o755)
+    result, _, downloads = _scan(tmp_path, cached=True, node=str(node))
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert downloads == ""
+    assert f"-Dsonar.nodejs.executable={node}" in (tmp_path / "scan").read_text().split()
+
+
+def test_a_runner_without_the_image_node_lets_sonarjs_use_its_own(tmp_path):
+    result, _, _ = _scan(tmp_path, cached=True, node=str(tmp_path / "missing"))
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "sonar.nodejs.executable" not in (tmp_path / "scan").read_text()
 
 
 def _merge_tree(tmp_path, combine_body):
@@ -309,7 +314,6 @@ def test_setup_and_evidence_upload_overlap_existing_waits():
         "Download shard coverage",
         "Merge shard coverage",
         "Start Cloudflare Access proxy",
-        "Restore Sonar downloads",
         "Wait for the coverage merge",
         "SonarQube Scan",
         "Upload coverage and analysis evidence",
@@ -325,14 +329,11 @@ def test_setup_and_evidence_upload_overlap_existing_waits():
 
 def test_sonar_evidence_does_not_upload_shard_databases_twice():
     upload = _step("Upload coverage and analysis evidence")
-    assert upload["with"]["path"].splitlines() == [
-        "coverage.xml",
-        "lcov.info",
-        ".scannerwork/report-task.txt",
-    ]
+    reports = ["coverage.xml", "lcov.info", ".scannerwork/report-task.txt"]
+    assert upload["with"]["path"].splitlines() in (reports, ["sonar-scope.txt", *reports])
     assert upload["if"] == "always()"
     assert upload["with"]["if-no-files-found"] == "error"
     unit = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())["jobs"]["unit"]
     shards = next(step for step in unit["steps"] if step.get("name") == "Upload coverage")
-    assert shards["with"]["path"].splitlines() == [".coverage", "js-coverage/", "dep-inputs/"]
+    assert shards["with"]["path"].splitlines() == [".coverage", "js-coverage/", "dep-inputs/", "reused-coverage/"]
     assert shards["with"]["include-hidden-files"] is True

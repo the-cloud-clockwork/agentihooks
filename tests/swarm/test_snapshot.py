@@ -15,8 +15,6 @@ from tests.swarm_ledger import legacy_page
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts" / "swarm_ledger"))
 import ledger_core as core  # noqa: E402
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 
 @pytest.fixture
 def store():

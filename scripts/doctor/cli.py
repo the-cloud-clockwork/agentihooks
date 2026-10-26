@@ -1,8 +1,9 @@
 """agentihooks doctor: a Doctor crew that watches the swarm on one ledger from its own linked ledger and swarm.
 
-agentihooks doctor <slug> start [--repo DIR]   create ledger <slug>-doctor, link both ledgers, pair the two
-                                               masters as inbox peers and start the Doctor swarm
-agentihooks doctor <slug> stop                 close the Doctor ledger with every fix and the number it moved,
+agentihooks doctor <slug> start [--repo DIR] [--max-eng-agents N] [--max-ci-agents N] [--quote WORDS]
+                                               create ledger <slug>-doctor, link both ledgers, pair the two
+                                               masters as inbox peers and start the Doctor swarm with those lane caps
+agentihooks doctor <slug> stop [--quote WORDS] close the Doctor ledger with every fix and the number it moved,
                                                retire its agents (the operator's chat line rig doctor stop does too)
 agentihooks doctor <slug> status               the link, the peers and the Doctor swarm's status
 agentihooks doctor <slug> verdict FINDING VERDICT [--note TEXT]
@@ -10,10 +11,24 @@ agentihooks doctor <slug> verdict FINDING VERDICT [--note TEXT]
 agentihooks doctor <slug> task FINDING --fix code|tune
                                                an established or early-real finding becomes a troubleshoot task and
                                                a fix task naming the number to move
-agentihooks doctor <slug> measure FINDING      run the detectors once and print the finding's number, 0 when gone;
+agentihooks doctor <slug> measure FINDING      run the detectors once and print the finding's number, 0 when a
+                                               seen finding is gone while the agent it names is live, refusing
+                                               an unseen id, a retired agent or a failed detector; a bare class
+                                               name prints count, unknown and max over every live target: for
+                                               telemetry-stale and exporter-backlog the active bindings, unknown
+                                               those with no exporter progress; for other classes the current
+                                               findings, unknown the detectors that failed. failed-spawn ids
+                                               count the spawn journal's window, so 0 there is a reading for a
+                                               ledger task or the master, and other tasks are refused;
                                                master-launch-missed replays the last hour's (or --since to --until)
                                                failed master launches and counts those no finding put before the
-                                               Doctor master, refusing when the journal is unreadable
+                                               Doctor master, refusing when the journal is unreadable; a CI speed
+                                               finding prints its run's own value, then its tier or runner label
+                                               class over the last hour (or --since to --until); a bare class name
+                                               prints every tier or label set
+agentihooks doctor <slug> verdict-log --since TIME --until TIME
+                                               print retained verdict events and counts beside latest finding verdicts
+                                               for the half open window, within seven days, as JSON
 agentihooks doctor <slug> rates [--hours N] [--at TIME] [--json]
                                                each coordination failure's number and the gate log counts over the
                                                last N hours (24), or the N hours before and after TIME side by side;
@@ -22,8 +37,11 @@ agentihooks doctor <slug> intervene ACTION [--to ADDRESS] [--text TEXT] [--file 
                                                apply a merged fix to the watched swarm: pull-dev, restart-ledger-server,
                                                refresh-rules, culture, handoff-at-stop or message; logged on both ledgers
 <slug> names the watched ledger or its Doctor ledger. Start refuses without a linked bundle.
+The watched master starts, scales or stops its Doctor only with --quote: the operator's own words typed in its
+pane within the last thirty minutes; each relay is noted on both ledgers. Other agents are refused.
 Every swarm tick runs the detectors once per AGENTIHOOKS_DOCTOR_INTERVAL_MINUTES (10) and closes the Doctor after
-AGENTIHOOKS_DOCTOR_QUIET_MINUTES (120) with no new finding.
+AGENTIHOOKS_DOCTOR_QUIET_MINUTES (120) with no new finding. The CI speed read runs once per
+AGENTIHOOKS_DOCTOR_SPEED_MINUTES (5).
 """
 
 import argparse
@@ -32,24 +50,47 @@ import os
 import re
 import sys
 from argparse import Namespace
+from collections import Counter
+from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
 
-from scripts.doctor import detect, interventions, loop, master_launches, rates, rates_read, spawn_read, spawns
+from scripts.doctor import (
+    ci_measure,
+    detect,
+    interventions,
+    loop,
+    master_launches,
+    measure,
+    rates,
+    rates_read,
+    registry,
+    spawn_read,
+    spawns,
+    traces_read,
+)
 from scripts.doctor.priming import SUFFIX, TEMPLATE, cancel_master_items, doctor_slug
+from scripts.gates import Who
 from scripts.inbox.store import InboxError, InboxStore
+from scripts.swarm import clearance
 from scripts.swarm import cli as swarm
 from scripts.swarm.health.findings import MINUTE_MS, limits
 from scripts.swarm.health.verdicts import VERDICTS
 from scripts.swarm.ledger_client import LEDGER_DIR
 from scripts.swarm.store import SwarmError
-from scripts.swarm_ledger import ledger_creator
+from scripts.swarm_ledger import ledger_creator, ledger_relay
 
 BY = "doctor"
 ROOT = Path(__file__).resolve().parents[2]
 NOTE_MAX = 4000
 HOUR_MS = 60 * MINUTE_MS
 QUIET = "Closed on its own after two hours with no new finding.\n"
+RELAY_WINDOW_SEC = 1800
+UNORDERED = (
+    "the master starts, scales or stops its Doctor only on the operator's order: pass --quote with his own words "
+    "typed in the master pane within the last thirty minutes"
+)
+RELAYED = "{name} relayed the operator's order to {action} the Doctor crew. His words: {words}"
 PHASES = [
     {"title": "Watch", "description": "Run the detectors on a timer and give every finding a verdict."},
     {
@@ -145,6 +186,12 @@ def cmd_start(store, args):
     slug, doctor = args.slug, doctor_slug(args.slug)
     if not swarm.SLUG_RE.match(doctor):
         raise SwarmError(f"the Doctor swarm id {doctor} is not a swarm id: lowercase letters, digits and dashes")
+    caps = {
+        key: value
+        for key, value in (("max_eng", args.max_eng_agents), ("max_ci", args.max_ci_agents))
+        if value is not None
+    }
+    relay = _order(store, slug, args.quote, "start")
     ledger = swarm.LedgerClient()
     _create_ledger(doctor, slug, ledger.state(slug).get("title") or slug)
     _link(ledger, slug, doctor)
@@ -156,12 +203,33 @@ def cmd_start(store, args):
                 slug=doctor, repo=repo, template=TEMPLATE, max_eng_agents=None, max_ci_agents=None, max_plan_agents=None
             ),
         )
+    if caps:
+        store.update(doctor, **caps, caps_pinned=True)
     _pair(store, slug, doctor)
     loop.reset(store, doctor)
     if ledger.closed(doctor):
         swarm.cmd_reopen(store, Namespace(slug=doctor, name=_name()))
     else:
         swarm.cmd_start(store, Namespace(slug=doctor))
+    _relay(slug, doctor, relay)
+
+
+def _order(store, slug, quote, action):
+    """The relay note for a watched master's order; empty for the operator, who needs no quote."""
+    name = clearance.holder(store, slug, Who.from_env())
+    if name == clearance.OPERATOR:
+        return ""
+    words = ledger_relay.verified(name, quote, within=RELAY_WINDOW_SEC)
+    if not words:
+        raise SwarmError(UNORDERED)
+    return RELAYED.format(name=name.replace("-", " ").replace("@", " "), action=action, words=words)
+
+
+def _relay(slug, doctor, note):
+    if note:
+        ledger = swarm.LedgerClient()
+        for target in (slug, doctor):
+            ledger.notify(target, note)
 
 
 def proof_numbers(task: dict) -> str:
@@ -206,7 +274,10 @@ def _close(store, slug, doctor, lead="", announce=True):
 
 
 def cmd_stop(store, args):
-    _close(store, *_pair_of(store, args.slug), announce=False)
+    slug, doctor = _pair_of(store, args.slug)
+    relay = _order(store, slug, args.quote, "stop")
+    _relay(slug, doctor, relay)
+    _close(store, slug, doctor, announce=False)
 
 
 def timer(store, doctor, now_ms, telemetry):
@@ -217,6 +288,9 @@ def timer(store, doctor, now_ms, telemetry):
         now_ms,
         lambda watched: detect.collect(detect.readers(store, ledger, watched, now_ms, telemetry=telemetry)),
         lambda: _close(store, store.peer(doctor), doctor, QUIET),
+        speed=lambda watched: (
+            loop.speed(store, doctor, watched, now_ms) if loop.speed_due(store, doctor, now_ms) else []
+        ),
     )
 
 
@@ -244,8 +318,8 @@ def cmd_verdict(store, args):
 
 def cmd_task(store, args):
     slug, doctor = _pair_of(store, args.slug)
-    specs = loop.fix_tasks(slug, *loop.judged(store, doctor, args.finding), args.fix)
     ledger = swarm.LedgerClient()
+    specs = loop.fix_tasks(slug, *loop.judged(store, doctor, args.finding), args.fix, ledger.tasks(doctor))
     for spec in specs:
         ledger.add_task(doctor, spec, _name())
     print(json.dumps({"finding": args.finding, "tasks": [spec["task"] for spec in specs]}))
@@ -258,15 +332,48 @@ def cmd_measure(store, args):
     if args.finding == master_launches.MISSED:
         print(f"{args.finding} {_master_missed(store, slug, doctor, now, window or (now - HOUR_MS, now))}")
         return
+    ci = ci_measure.target(args.finding)
+    if ci:
+        for line in ci_measure.measure(args.finding, ci, window or (now - HOUR_MS, now), now):
+            print(line)
+        return
     if args.finding.startswith("failed-spawn/"):
         bounds = {"since": _at(window[0]), "until": _at(window[1])} if window else {}
         found = spawns.failed(spawn_read.records(store, slug, now, **bounds))
-        failed = []
-    else:
-        found, failed = detect.collect(detect.readers(store, swarm.LedgerClient(), slug, now))
+        tasks = {t["id"] for t in swarm.LedgerClient().tasks(slug)}
+        print(f"{args.finding} {measure.spawn_count(args.finding, found, tasks)}")
+        return
+    if "/" not in args.finding:
+        print(_class_read(store, slug, doctor, now, args.finding).line(args.finding))
+        return
+    found, failed = _collect(_measured_readers(store, slug, now))
+    live = {name for a in store.agents(slug) if a.state == registry.ACTIVE for name in (a.name, a.seat) if name}
+    print(f"{args.finding} {measure.exact(args.finding, found, failed, loop.seen(store, doctor), live)}")
+
+
+def _collect(readers):
+    found, failed = detect.collect(readers)
     for line in failed:
         print(line, file=sys.stderr)
-    print(f"{args.finding} {next((f.measure for f in found if f.id == args.finding), 0)}")
+    return found, failed
+
+
+def _measured_readers(store, slug, now):
+    return detect.readers(store, swarm.LedgerClient(), slug, now, telemetry=traces_read.measured_client)
+
+
+def _class_read(store, slug, doctor, now, name):
+    readers = _measured_readers(store, slug, now)
+    if name in measure.LAG_CLASSES:
+        found, failed = detect.collect({"trace": readers["trace"]})
+        if failed:
+            raise SwarmError(f"{name} is unknown: {failed[0]}")
+        bindings = registry.bindings([asdict(a) for a in store.agents(slug)])
+        progress = [registry.progress(b["session_id"], b["harness"]) if b["session_id"] else None for b in bindings]
+        return measure.of_lag_class(name, found, [measure.lag(local, now) for local in progress])
+    found, failed = _collect(readers)
+    seen = {measure.class_of(record["kind"]) for record in loop.seen(store, doctor).values()}
+    return measure.of_class(name, found, failed, seen)
 
 
 def _at(ms):
@@ -294,8 +401,11 @@ def _window(args: Namespace, now: int) -> tuple[int, int] | None:
         raise SwarmError("--since and --until must be supplied together")
     if args.since is None:
         return None
-    if not args.finding.startswith("failed-spawn/") and args.finding != master_launches.MISSED:
-        raise SwarmError(f"journal bounds are only supported for failed-spawn findings and {master_launches.MISSED}")
+    bounded = args.finding.startswith("failed-spawn/") or args.finding == master_launches.MISSED
+    if not bounded and not ci_measure.target(args.finding):
+        raise SwarmError(
+            f"journal bounds are only supported for failed-spawn and CI speed findings and {master_launches.MISSED}"
+        )
     since, until = _at_ms(args.since, "--since"), _at_ms(args.until, "--until")
     zoned = all(datetime.fromisoformat(text).tzinfo for text in (args.since, args.until))
     if args.finding == master_launches.MISSED and not zoned:
@@ -313,6 +423,31 @@ def _at_ms(text, flag="--at"):
     except ValueError as exc:
         raise SwarmError(f"{flag} takes an ISO time such as 2026-10-06T12:00Z, not {text}") from exc
     return int((when if when.tzinfo else when.replace(tzinfo=timezone.utc)).timestamp() * 1000)
+
+
+def cmd_verdict_log(store, args):
+    now = swarm.now_ms()
+    since, until = _at_ms(args.since, "--since"), _at_ms(args.until, "--until")
+    _, doctor = _pair_of(store, args.slug)
+    judgments = loop.verdicts(store, doctor)
+    events = judgments.events(since, until, now)
+    records = [json.loads(raw) for raw in store.redis.hgetall(judgments.key).values()]
+    latest = [
+        record["verdict"] for record in records if record.get("verdict") and since <= record["verdict"]["at"] < until
+    ]
+    print(
+        json.dumps(
+            {
+                "since": since,
+                "until": until,
+                "event_count": len(events),
+                "latest_count": len(latest),
+                "events_by_value": dict(Counter(event["value"] for event in events)),
+                "latest_by_value": dict(Counter(verdict["value"] for verdict in latest)),
+                "events": events,
+            }
+        )
+    )
 
 
 def cmd_rates(store, args):
@@ -340,8 +475,12 @@ def build_parser():
     )
     parser.add_argument("slug")
     sub = parser.add_subparsers(dest="command", required=True)
-    sub.add_parser("start").add_argument("--repo", default="")
-    sub.add_parser("stop")
+    start = sub.add_parser("start")
+    start.add_argument("--repo", default="")
+    start.add_argument("--max-eng-agents", type=int)
+    start.add_argument("--max-ci-agents", type=int)
+    start.add_argument("--quote", default="")
+    sub.add_parser("stop").add_argument("--quote", default="")
     sub.add_parser("status")
     verdict = sub.add_parser("verdict")
     verdict.add_argument("finding")
@@ -354,6 +493,9 @@ def build_parser():
     measured.add_argument("finding")
     measured.add_argument("--since")
     measured.add_argument("--until")
+    logged = sub.add_parser("verdict-log")
+    logged.add_argument("--since", required=True)
+    logged.add_argument("--until", required=True)
     rated = sub.add_parser("rates")
     rated.add_argument("--hours", type=float, default=24)
     rated.add_argument("--at")
@@ -373,6 +515,7 @@ COMMANDS = {
     "task": cmd_task,
     "measure": cmd_measure,
     "rates": cmd_rates,
+    "verdict-log": cmd_verdict_log,
     "intervene": cmd_intervene,
 }
 

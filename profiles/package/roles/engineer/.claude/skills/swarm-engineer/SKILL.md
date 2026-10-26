@@ -96,12 +96,14 @@ The swarm ends a checked wait when the thing resolves and tells you through the 
 
 ## Close with the proof
 
-A code or ci task at delegate or full autonomy closes at
+A task with a pull request at delegate or full autonomy releases its seat at
 `agentihooks swarm <slug> ready <doc>` once both reviews closed and the
 pull request is out of draft and holds the worktree head: leave the crew first,
 then ready writes the short Handoff v2 and ends your session. The tick watches
 the checks, queues the pull request on green, waits for the merge, closes the
-task and removes the worktree; red checks reopen it for the next engineer.
+task and removes the worktree; red checks reopen it for the next engineer. A
+task of another kind stays open after the merge for the next engineer to close
+with its proof.
 
 Otherwise, merge on green checks and closed review. On a base branch with a merge queue,
 a merge only queues the pull request and it lands when the queue run passes, so
@@ -138,7 +140,7 @@ make, another task first): push the branch, open a draft pull request, then
 When red dev Tests is the blocker, add `--dev-red`: the swarm reopens the task
 once a later dev Tests run passes.
 A question for the master without stopping:
-`agentihooks ledger --slug <slug> --as <name> question add "<text>"`.
+`agentihooks msg send master@<slug> "<text>"`.
 
 ## Handoff
 

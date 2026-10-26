@@ -1,10 +1,12 @@
 import { $, h, headCount, newId, noticeTime } from "./dom.js";
 import { doc, queue } from "./sync.js";
+import { hiddenDone, pendingOf } from "./state.js";
 import { verdictButton } from "./render.js";
 import { jumpTo } from "./outline.js";
 import { foldSaved } from "./folds.js";
 import { showChat } from "./chat.js";
 import { firstPage, moreButton, wanted } from "./pages.js";
+import { viewCount, viewVisible } from "./frozen_view.js";
 
 export function anchorPanel(panel, icon) {
   panel.style.setProperty("--anchor-top", `${icon.getBoundingClientRect().top}px`);
@@ -22,27 +24,29 @@ function prioritySubject(item) {
   const [field, noun] = PRIORITY_KINDS[list];
   const found = doc[list].find((i) => i.id === id && !i.deleted);
   const label = field === "title" ? id : noun;
-  return found ? { label, title: found[field] } : { label, title: `This ${noun} was removed`, gone: true };
+  if (found) return { label, title: found[field] };
+  return hiddenDone(doc, list).has(id) ? { label, title: `This ${noun} is done` } : { label, title: `This ${noun} was removed`, gone: true };
 }
 
 export function renderPriorities() {
-  const list = doc.priorities;
-  $("prio-count").textContent = headCount([[list.length]]);
+  const list = doc.priorities.filter((p) => viewVisible(p.item));
+  $("prio-count").textContent = headCount([[list.length]]) + viewCount("priorities", doc.priorities);
   $("tab-ledger").textContent = list.length ? `Ledger · ${list.length}` : "Ledger";
   if (list.length && typeof foldSaved()["prio-box"] !== "boolean") $("prio-box").open = true;
   document.querySelector(".prio-head").hidden = !list.length;
   if (!$("prio-box").open) return $("priorities").replaceChildren();
   $("priorities").replaceChildren(...firstPage("priorities", list, (p) => `item-priorities-${p.id}`).map((p) => {
     const { label, title, gone } = prioritySubject(p.item);
+    const clearing = pendingOf(doc, `priorities/${p.id}`) || pendingOf(doc, "priorities/all");
     const link = (cls, text) => h("a", { class: cls, href: `#item-${p.item.replace("/", "-")}`, text, on: { click: (ev) => jumpTo(ev, p.item) } });
-    return h("li", { class: "prio", id: `item-priorities-${p.id}` },
+    return h("li", { class: "prio" + (clearing ? " pending" : ""), id: `item-priorities-${p.id}` },
       h("div", { class: "prio-body" },
         h("div", { class: "prio-head-line" }, link("prio-link", label), link(gone ? "prio-title gone" : "prio-title", title)),
         h("div", { class: "prio-text", text: p.text })),
       verdictButton(p.item, "approved", "approve", "Approve"),
-      h("button", { class: "link danger", type: "button", text: "Clear", on: { click: () => clearPriority(p.id) } }));
+      h("button", { class: "link danger", type: "button", text: clearing ? "clearing" : "Clear", disabled: !!clearing, on: { click: () => clearPriority(p.id) } }));
   }), moreButton("priorities", list.length, "more priorities", renderPriorities) || "");
-  if (!list.length) $("priorities").append(h("li", { class: "empty", text: "Nothing waits on you." }));
+  if (!list.length) $("priorities").append(h("li", { class: "empty", text: doc.priorities.length ? "All priorities are hidden." : "Nothing waits on you." }));
 }
 
 function jumpToNotice(ev, item) {
@@ -93,14 +97,15 @@ function alertRow(a) {
     } } },
     outcome, h("button", { class: "link", type: "submit", text: "Save" }));
   const openForm = () => { Object.assign(alertDraft, { id: a.id, text: "" }); form.hidden = false; outcome.value = ""; outcome.focus(); };
-  return h("li", { class: "notif-row", id: `alert-${a.id}` },
+  const sending = pendingOf(doc, `alerts/${a.id}`);
+  return h("li", { class: "notif-row" + (sending ? " pending" : ""), id: `alert-${a.id}` },
     h("div", { class: "notif-meta" },
       h("span", { text: noticeTime(a.at) }),
       h("span", { text: ALERT_SOURCES[a.source] || a.source }),
       h("span", { text: `For the ${a.target}` }),
-      h("span", { class: "alert-state", text: a.state === "claimed" ? `Claimed by ${a.claimed_by}` : "Open" }),
+      h("span", { class: "alert-state", text: sending ? "sending" : a.state === "claimed" ? `Claimed by ${a.claimed_by}` : "Open" }),
       h("span", { class: "alert-acts" },
-        a.state === "open" && h("button", { class: "link alert-claim", type: "button", text: "Claim", on: { click: () => queue({ op: "alert_claim", id: newId("alert"), target: a.id }) } }),
+        a.state === "open" && h("button", { class: "link alert-claim", type: "button", text: "Claim", disabled: sending ? "" : false, on: { click: () => queue({ op: "alert_claim", id: newId("alert"), target: a.id }) } }),
         h("button", { class: "link alert-done", type: "button", text: "Mark done", on: { click: openForm } }))),
     h("div", { class: "notif-text", text: a.text }), form);
 }

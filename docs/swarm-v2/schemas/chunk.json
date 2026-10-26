@@ -1,0 +1,72 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:swarm-v2:chunk",
+  "title": "Session search chunk",
+  "description": "A search projection of committed session events. The id derives from the chunker version and the source event sequences, never list position. The preview is bounded for embedding; the evidence list locates the full supporting bytes in the session archive.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "chunk_id",
+    "chunker_version",
+    "access_domain",
+    "session_uid",
+    "parent_session_uid",
+    "source_generation",
+    "turn_id",
+    "kind",
+    "project_ids",
+    "preview",
+    "truncated",
+    "omitted_chars",
+    "content_hash",
+    "tool",
+    "evidence"
+  ],
+  "properties": {
+    "chunk_id": {"type": "string", "pattern": "^chunk-[0-9a-f]{40}$"},
+    "chunker_version": {"$ref": "urn:swarm-v2:common#/$defs/identifier"},
+    "access_domain": {"$ref": "urn:swarm-v2:common#/$defs/identifier"},
+    "session_uid": {"type": "string", "minLength": 1},
+    "parent_session_uid": {"anyOf": [{"type": "string", "minLength": 1}, {"type": "null"}]},
+    "source_generation": {"type": "string", "minLength": 1},
+    "turn_id": {"type": "string", "pattern": "^turn-[0-9a-f]{40}$"},
+    "kind": {"enum": ["turn", "tool"]},
+    "project_ids": {"type": "array", "items": {"$ref": "urn:swarm-v2:common#/$defs/project_id"}, "uniqueItems": true},
+    "preview": {"type": "string"},
+    "truncated": {"type": "boolean"},
+    "omitted_chars": {"type": "integer", "minimum": 0},
+    "content_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "tool": {
+      "anyOf": [
+        {"type": "null"},
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["tool_use_id", "tool_name", "is_error", "call_event_id", "result_event_id"],
+          "properties": {
+            "tool_use_id": {"type": "string"},
+            "tool_name": {"type": ["string", "null"]},
+            "is_error": {"type": ["boolean", "null"]},
+            "call_event_id": {"type": ["string", "null"]},
+            "result_event_id": {"type": ["string", "null"]}
+          }
+        }
+      ]
+    },
+    "evidence": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["event_id", "sequence", "byte_start", "byte_end"],
+        "properties": {
+          "event_id": {"type": "string", "minLength": 1},
+          "sequence": {"type": "integer", "minimum": 0},
+          "byte_start": {"type": "integer", "minimum": 0},
+          "byte_end": {"type": "integer", "minimum": 0}
+        }
+      }
+    }
+  }
+}

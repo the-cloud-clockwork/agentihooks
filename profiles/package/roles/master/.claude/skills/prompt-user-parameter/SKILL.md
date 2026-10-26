@@ -5,9 +5,8 @@ description: >
   runs a command he must take part in, without the value entering any
   transcript. Writes a throwaway script in a scratch folder, opens it in a
   herdr pane beside the master pane where he types the value hidden, and
-  watches a status file for DONE or ERROR. Use when the master needs a key,
-  token or password, or when the operator says "prompt me for it", "let me
-  type the secret" or "run it in a pane".
+  watches a status file for DONE or ERROR. Use when he says "open a pane and
+  prompt me for it" or "open a pane for the secret".
 argument-hint: "<what is needed>"
 ---
 
@@ -17,9 +16,9 @@ The operator types the value into a pane only he sees. The value reaches the
 command that needs it through the environment of a throwaway script and never
 passes through your context, a log, a status file or a command argument.
 
-Run it only while operator on is set in this pane. Otherwise add the ask to
-Priorities with `agentihooks ledger --slug <slug> --as <name> priority add
-<item> "<the ask in plain words>"` and continue other work.
+Run it when the operator asks for the value; no typed phrase and no guard gate
+it. When he is away, wait until he writes: no agent writes to him first, and the
+ledger refuses agent priorities.
 
 ## Steps
 
@@ -39,7 +38,7 @@ Priorities with `agentihooks ledger --slug <slug> --as <name> priority add
    long lived process. Use a tool's environment variable or stdin option when
    it has one. The script runs with `bash -e`, so the first failing step ends
    it; an empty value fails `read_secret`.
-3. Open the pane: `bash <skill dir>/scripts/open.sh <script> "<pane title>"`.
+3. Open the pane: `bash <skill dir>/scripts/open_param_pane.sh <script> "<pane title>"`.
    It prints `pane=<id>` and `status=<file>`.
 4. Tell the operator in plain words what to type in the new pane, then start
    a Monitor on the status file that emits its first line and exits when the

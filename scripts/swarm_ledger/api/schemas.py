@@ -1,7 +1,19 @@
 from jsonschema import Draft202012Validator
 from jsonschema.exceptions import best_match
 
+from scripts.swarm_ledger import models
+
 from .errors import APIError
+
+
+def checkbox_path() -> str:
+    groups = {}
+    for name, model in models.MODELS.items():
+        if boxes := models.checkboxes(model):
+            groups.setdefault(boxes, []).append(name)
+    paths = (f"({'|'.join(names)})/[^/]+/({'|'.join(boxes)})" for boxes, names in groups.items())
+    return f"^({'|'.join(paths)})$"
+
 
 MUTATION = {
     "type": "object",
@@ -20,10 +32,7 @@ MUTATION = {
                 "required": ["path", "value"],
                 "additionalProperties": False,
                 "properties": {
-                    "path": {
-                        "type": "string",
-                        "pattern": "^((phases|questions|followups|tasks)/[^/]+/(done|out_of_scope)|plans/[^/]+/out_of_scope)$",
-                    },
+                    "path": {"type": "string", "pattern": checkbox_path()},
                     "base": {"type": "boolean"},
                     "value": {"type": "boolean"},
                 },
@@ -48,11 +57,14 @@ PAGINATION = {
     "properties": {
         "limit": {"type": "integer", "minimum": 1, "maximum": 100},
         "cursor": {"type": "string", "pattern": "^[a-f0-9]{64}:[0-9]{1,12}$"},
+        "state": {"enum": ["done"]},
+        "offset": {"type": "integer", "minimum": 0, "maximum": 1000000},
+        "q": {"type": "string", "maxLength": 200},
     },
 }
 
 FIELDS = {
-    "add": "thread text by long attachments to reply_to outcome",
+    "add": "thread text by long attachments to reply_to outcome notice",
     "edit": "thread text by",
     "delete": "thread by",
     "clear": "thread",
@@ -63,7 +75,7 @@ FIELDS = {
     "ack": "by rev",
     "claim": "by item status",
     "set": "by path value status",
-    "add_item": "by list text needs_operator",
+    "add_item": "by list text needs_operator hive task not_duplicate",
     "retext": "by item text",
     "gate_bypass": "by unhandled",
     "gate_lift": "by gate",
@@ -71,7 +83,7 @@ FIELDS = {
     "priority_clear": "by target reason",
     "notification_clear": "target",
     "notice": "by text",
-    "task_add": "by task title lane phase description depends_on territory kind contract proof workspace artifact profile plan_url plan_slice rank gain difficulty difficulty_source difficulty_confidence not_duplicate slice follow_up",
+    "task_add": "by task title lane phase description depends_on territory overlays repositories kind contract proof workspace artifact profile plan_url plan_slice rank gain difficulty difficulty_source difficulty_confidence not_duplicate slice follow_up workstation needs",
     "task_update": "by item fields if_state if_match if_plan_lines_missing quote",
     "task_rank": "by item rank if_owned",
     "task_group": "by item members",
@@ -108,10 +120,12 @@ FIELDS = {
 }
 TYPES = {
     "long": {"type": "boolean"},
+    "notice": {"const": True},
     "to": {"const": "operator"},
     "needs_operator": {"type": "boolean"},
     "artifact": {"type": "boolean"},
     "follow_up": {"type": "boolean"},
+    "workstation": {"type": "boolean"},
     "release": {"type": "boolean"},
     "if_plan_lines_missing": {"type": "boolean"},
     "rounds": {"type": "integer", "minimum": 0},
@@ -139,7 +153,17 @@ KIND_TYPES = {
     "plan_add": {"artifact": {"type": "string", "maxLength": 100000}},
     "task_rank": {"if_owned": {"type": "boolean"}},
 }
-for _field in ("depends_on", "territory", "if_state", "members", "watched", "halves"):
+for _field in (
+    "depends_on",
+    "territory",
+    "overlays",
+    "repositories",
+    "needs",
+    "if_state",
+    "members",
+    "watched",
+    "halves",
+):
     TYPES[_field] = {"type": "array", "maxItems": 100, "items": {"type": "string", "maxLength": 2000}}
 
 

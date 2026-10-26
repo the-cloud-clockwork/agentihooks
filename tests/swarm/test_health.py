@@ -234,7 +234,9 @@ def test_rising_gain_or_master_queued_tasks_are_not_inflation():
 
 def test_proof_loop_names_the_task_its_reruns_and_review_rounds():
     events = [ev("task started", "tasks/t1", by="swarm") for _ in range(4)] + [ev("task pr", "tasks/t1")]
-    assert run({"tasks": [task("t1")], "_meta": {"events": events}, "review_rounds": {"t1": {"first": 1}}}) == [
+    assert run(
+        {"tasks": [task("t1", state="pr")], "_meta": {"events": events}, "review_rounds": {"t1": {"first": 1}}}
+    ) == [
         {
             "kind": "proof loop",
             "subject": "t1",
@@ -247,7 +249,7 @@ def test_proof_loop_names_the_task_its_reruns_and_review_rounds():
 
 def test_claims_without_started_lives_raise_no_proof_loop():
     events = [ev("task claimed", "tasks/t1", by="swarm") for _ in range(5)]
-    assert run({"tasks": [task("t1")], "_meta": {"events": events}}) == []
+    assert run({"tasks": [task("t1", state="pr")], "_meta": {"events": events}}) == []
 
 
 def test_repeated_failed_launches_measure_their_count():
@@ -275,7 +277,7 @@ def test_failed_launch_findings_require_repetition_and_keep_each_launch_error():
 
 def test_review_rounds_over_the_cap_are_a_proof_loop():
     events = [ev("task started", "tasks/t1", by="swarm")] + [ev("task pr", "tasks/t1") for _ in range(4)]
-    found = run({"tasks": [task("t1")], "_meta": {"events": events}, "review_rounds": {"t1": {"first": 4}}})
+    found = run({"tasks": [task("t1", state="pr")], "_meta": {"events": events}, "review_rounds": {"t1": {"first": 4}}})
     assert [(f["kind"], f["evidence"]) for f in found] == [
         ("proof loop", ["task t1", "started 1 time (0 reruns)", "4 review rounds"])
     ]
@@ -283,17 +285,17 @@ def test_review_rounds_over_the_cap_are_a_proof_loop():
 
 def test_pull_request_registrations_are_not_review_rounds():
     events = [ev("task pr", "tasks/t1") for _ in range(4)]
-    assert run({"tasks": [task("t1")], "_meta": {"events": events}}) == []
+    assert run({"tasks": [task("t1", state="pr")], "_meta": {"events": events}}) == []
 
 
 def test_review_rounds_are_not_summed_across_pull_requests():
-    ledger = {"tasks": [task("t1")], "review_rounds": {"t1": {"first": 3, "second": 1}}}
+    ledger = {"tasks": [task("t1", state="pr")], "review_rounds": {"t1": {"first": 3, "second": 1}}}
     assert run(ledger) == []
 
 
 def test_reruns_with_no_reviews_report_zero_rounds():
     events = [ev("task started", "tasks/t1", by="swarm") for _ in range(4)]
-    [found] = run({"tasks": [task("t1")], "_meta": {"events": events}})
+    [found] = run({"tasks": [task("t1", state="pr")], "_meta": {"events": events}})
     assert found["evidence"] == ["task t1", "started 4 times (3 reruns)", "0 review rounds"]
 
 
@@ -301,26 +303,54 @@ def test_reruns_with_no_reviews_report_zero_rounds():
 def test_restarts_after_a_watchdog_reopen_a_park_or_a_master_change_are_not_reruns(cause):
     first = ev("task started", "tasks/t1", by="swarm")
     events = [first] + [{**first, "after": cause} for _ in range(5)]
-    assert run({"tasks": [task("t1")], "_meta": {"events": events}}) == []
+    assert run({"tasks": [task("t1", state="pr")], "_meta": {"events": events}}) == []
 
 
 def test_plain_restarts_among_excused_ones_still_raise_the_proof_loop():
     plain = ev("task started", "tasks/t1", by="swarm")
     events = [plain, {**plain, "after": "park"}, plain, {**plain, "after": "watchdog"}, plain, plain]
-    [found] = run({"tasks": [task("t1")], "_meta": {"events": events}})
+    [found] = run({"tasks": [task("t1", state="pr")], "_meta": {"events": events}})
     assert found["evidence"] == ["task t1", "started 6 times (3 reruns)", "0 review rounds"]
 
 
 def test_plain_restarts_after_an_excused_first_life_are_all_reruns():
     plain = ev("task started", "tasks/t1", by="swarm")
     events = [{**plain, "at": NOW + n} for n in (3, 2, 1)] + [{**plain, "after": "master", "at": NOW}]
-    [found] = run({"tasks": [task("t1")], "_meta": {"events": events}})
+    [found] = run({"tasks": [task("t1", state="pr")], "_meta": {"events": events}})
+    assert found["evidence"] == ["task t1", "started 4 times (3 reruns)", "0 review rounds"]
+
+
+def test_lives_that_push_a_new_pull_request_head_are_progress_not_reruns():
+    plain = ev("task started", "tasks/t1", by="swarm")
+    events = [{**plain, "at": NOW + n, "head": head} for n, head in enumerate(["", "a", "b", "c", "d"])]
+    assert run({"tasks": [task("t1", state="pr")], "_meta": {"events": events}}) == []
+
+
+def test_only_lives_that_end_on_the_head_they_started_on_are_reruns():
+    plain = ev("task started", "tasks/t1", by="swarm")
+    heads = ["a", "a", "b", "b", "b", "c", "c"]
+    events = [{**plain, "at": NOW + n, "head": head} for n, head in enumerate(heads)]
+    [found] = run({"tasks": [task("t1", state="pr")], "_meta": {"events": events}})
+    assert found["evidence"] == ["task t1", "started 7 times (4 reruns)", "0 review rounds"]
+
+
+def test_lives_without_a_pull_request_on_either_side_are_reruns():
+    plain = ev("task started", "tasks/t1", by="swarm")
+    events = [{**plain, "at": NOW + n, "head": ""} for n in range(4)]
+    [found] = run({"tasks": [task("t1", state="pr")], "_meta": {"events": events}})
+    assert found["evidence"] == ["task t1", "started 4 times (3 reruns)", "0 review rounds"]
+
+
+def test_a_launch_recorded_before_heads_were_kept_counts_as_a_rerun():
+    plain = ev("task started", "tasks/t1", by="swarm")
+    events = [{**plain, "at": NOW + n, "head": head} for n, head in enumerate([None, "a", None, "b"])]
+    [found] = run({"tasks": [task("t1", state="pr")], "_meta": {"events": events}})
     assert found["evidence"] == ["task t1", "started 4 times (3 reruns)", "0 review rounds"]
 
 
 def test_reruns_at_the_cap_are_no_proof_loop_and_one_more_measures_reruns_plus_rounds():
     started = ev("task started", "tasks/t1", by="swarm")
-    tasks = {"t1": task("t1")}
+    tasks = {"t1": task("t1", state="pr")}
     reviews = {"t1": {"first": 1}}
     assert health.proof_loops([started] * 3, tasks, LIMITS, reviews) == []
     [found] = health.proof_loops([started] * 4, tasks, LIMITS, reviews)

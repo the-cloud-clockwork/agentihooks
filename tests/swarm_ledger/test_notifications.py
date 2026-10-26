@@ -21,7 +21,7 @@ def make_ledger():
         "questions": [],
         "followups": [],
     }
-    html_path, json_path = core.paths(SLUG)
+    html_path, json_path = legacy_page.paths(SLUG, core)
     core.LEDGER_DIR.mkdir(parents=True, exist_ok=True)
     html_path.write_text(legacy_page.render(new_ledger.build_doc(content), SLUG, 8765), encoding="utf-8")
     json_path.unlink(missing_ok=True)
@@ -89,7 +89,7 @@ class Notifications(unittest.TestCase):
         core.sync(
             SLUG,
             ops=[
-                {"op": "add", "thread": "chat", "id": "m2", "by": "boss", "long": True, "to": "operator", "text": long}
+                {"op": "add", "thread": "chat", "id": "m2", "by": "boss", "long": True, "reply_to": "m1", "text": long}
             ],
         )
         self.assertEqual(notes()[0]["text"], long[:280])
@@ -129,6 +129,6 @@ class Notifications(unittest.TestCase):
         }
         doc = new_ledger.build_doc(content)
         doc["notifications"] = [{"id": "f", "item": "chat", "label": "Reply", "text": "x", "by": "boss", "at": 1}]
-        core.paths(slug)[0].write_text(legacy_page.render(doc, slug, 8765), encoding="utf-8")
+        legacy_page.paths(slug, core)[0].write_text(legacy_page.render(doc, slug, 8765), encoding="utf-8")
         state, _ = core.sync(slug)
         self.assertEqual(state["notifications"], [])

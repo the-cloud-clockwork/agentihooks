@@ -28,6 +28,7 @@ ALL = ["test_suite.py::test_a", "test_suite.py::test_b", "test_suite.py::test_c[
 def _check(tmp_path, *shards, suite=SUITE, hashes=None):
     tests = tmp_path / "suite"
     tests.mkdir(exist_ok=True)
+    (tests / "pytest.ini").write_text("[pytest]\n")
     (tests / "test_suite.py").write_text(suite)
     paths = []
     for index, nodeids in enumerate(shards, 1):
@@ -114,21 +115,47 @@ def test_a_shard_without_durations_is_red_and_named(tmp_path):
 def test_shard_check_grades_every_unit_shard_before_the_required_gate():
     jobs = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())["jobs"]
     job = jobs["shard-check"]
-    assert job["needs"] == ["unit", "select", "reuse", "admission"]
+    assert job["needs"] in (
+        ["unit", "unit-rerun", "select", "reuse", "admission"],
+        ["split", "select", "reuse", "admission"],
+    )
     assert job["if"] in (
         "${{ !cancelled() && (github.event_name != 'merge_group' || needs.reuse.outputs.reused != 'true') }}",
         "${{ !cancelled() && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && (github.event_name != 'merge_group' || needs.reuse.outputs.reused != 'true') }}",
         "${{ !cancelled() && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && (github.event_name != 'merge_group' || needs.reuse.outputs.reused != 'true') && (github.event_name != 'pull_request' || needs.select.outputs.scope == 'full') }}",
         "${{ !cancelled() && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && (github.event_name != 'pull_request' || needs.select.outputs.scope == 'full') }}",
     )
-    assert job["strategy"]["matrix"]["python-version"] == jobs["unit"]["strategy"]["matrix"]["python-version"]
+    assert (
+        job["strategy"]["matrix"]["python-version"] == jobs["unit"]["strategy"]["matrix"]["python-version"] == ["3.12"]
+    )
     assert "shard-check" in jobs["gate-required"]["needs"]
     steps = job["steps"]
     assert all("steps.lookup" not in step.get("if", "") for step in steps)
     download = next(step for step in steps if step.get("uses", "").startswith("actions/download-artifact"))
-    assert download["with"]["pattern"] == "durations-${{ matrix.python-version }}-*"
-    check = next(step for step in steps if step.get("run", "").startswith("python -m tests.shard_check"))
-    assert download["with"]["path"] in check["run"]
+    if job["needs"][0] == "split":
+        assert download["with"] == {
+            "pattern": "{collected,reused-tests}-${{ matrix.python-version }}",
+            "path": "shard-data",
+        }
+        prefetch = next(step for step in steps if step.get("name") == "Wait for every planned shard")
+        assert prefetch["env"]["GH_TOKEN"] == "${{ steps.app-token.outputs.token }}"
+        assert "python -m scripts.ci_gate_shards" in prefetch["run"]
+        assert steps.index(prefetch) < next(
+            i
+            for i, step in enumerate(steps)
+            if step.get("run", "").startswith(("python -m tests.shard_check", "python3 -m tests.shard_check"))
+        )
+    else:
+        assert download["with"]["pattern"] in (
+            "durations-${{ matrix.python-version }}-*",
+            "{durations,flakes,collected,reused-tests}-${{ matrix.python-version }}{,-*}",
+        )
+    check = next(
+        step
+        for step in steps
+        if step.get("run", "").startswith(("python -m tests.shard_check", "python3 -m tests.shard_check"))
+    )
+    assert "--collected collected-data/collected.json" in check["run"]
     assert steps.index(download) < steps.index(check)
 
 
@@ -183,3 +210,19 @@ def test_an_unreadable_plan_is_red(tmp_path):
     result = _check_reused(tmp_path, plan, ALL)
     assert result.returncode == 1
     assert "::error::Cannot read the test plan" in result.stdout
+
+
+def test_supplied_collection_is_verified_without_installed_dependencies(tmp_path):
+    collected = tmp_path / "collected.json"
+    collected.write_text(json.dumps(["suite::a", "suite::b"]))
+    durations = tmp_path / "durations.json"
+    durations.write_text(json.dumps({"suite::a": 0.1, "suite::b": 0.1}))
+    (tmp_path / "durations.sha256").write_text("a" * 64)
+    result = subprocess.run(
+        [sys.executable, "-S", "-m", "tests.shard_check", str(durations), "--collected", str(collected)],
+        cwd=_ROOT,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "2 collected tests, 0 ran zero times or more than once" in result.stdout

@@ -28,7 +28,7 @@ def make_ledger():
         "phases": [{"title": "one", "description": "d"}],
         "questions": [{"text": "which broker?"}],
     }
-    html_path, json_path = core.paths(SLUG)
+    html_path, json_path = legacy_page.paths(SLUG, core)
     core.LEDGER_DIR.mkdir(parents=True, exist_ok=True)
     html_path.write_text(legacy_page.render(new_ledger.build_doc(content), SLUG, 8765), encoding="utf-8")
     json_path.unlink(missing_ok=True)
@@ -188,7 +188,7 @@ def test_refusal_names_the_autonomy():
     assert ledger_answer.refusal(DELEGATE) == ""
     assert ledger_answer.refusal(FULL) == ""
     assert ledger_answer.refusal(MANUAL) == (
-        "answer refused: at manual autonomy the operator answers questions; raise it with priority add"
+        "answer refused: at manual autonomy the operator answers questions; wait for him to write"
     )
     assert ledger_answer.refusal("") == "answer refused: this ledger has no swarm, so the operator answers questions"
 

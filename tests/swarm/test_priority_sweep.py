@@ -3,10 +3,9 @@ import pytest
 from hooks.classifier import Answer, ClassifierUnavailable, DecisionResult
 from scripts.swarm import priority_sweep
 from scripts.swarm.ledger_events import PullRequest
-from scripts.swarm.store import RedisStore
+from scripts.swarm.store import RedisStore, SwarmError
 from tests.doctor.test_doctor_cli import FileLedger, core, new_ledger, state
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
 SLUG = "prio-sweep"
 ASK = "Pick the port for the demo server."
 
@@ -171,6 +170,18 @@ def test_operator_comment_that_resolves_a_follow_up_clears_it_and_marks_it_done(
     assert "Pick a port for the demo" in question.instructions and ASK in question.instructions
 
 
+def test_a_cleared_blocked_task_priority_stays_cleared_after_the_swarm_comment(env):
+    env[1].update_task(SLUG, "t1", {"state": "blocked"})
+    agent_comment("tasks/t1", "Waiting on the port choice.", cid="c-why")
+    assert priorities()["tasks/t1"]["derived"] is True
+    run(env)
+    agent_comment("tasks/t1", "The port is set to nine thousand, nothing waits now.", cid="c-done")
+    reason = "the classifier judged that the comment from an agent resolves it, at probability 0.90"
+    assert run(env, Judge(yes=0.9)) == [f"cleared the priority on tasks/t1: {reason}"]
+    assert state(SLUG)["tasks"][0]["comments"][-1]["text"] == f"Priority cleared by the swarm: {reason}."
+    assert "tasks/t1" not in priorities()
+
+
 def test_a_no_leaves_the_priority(env):
     path = item("followups")
     raise_priority(env, path)
@@ -242,9 +253,10 @@ def test_an_agent_comment_asking_for_the_approval_never_clears_it(env):
     assert cleared("tasks/t1") == []
 
 
-def test_an_agent_chat_line_naming_an_approval_never_clears_it(env):
+def test_an_agent_chat_line_naming_an_approval_is_refused_and_never_clears_it(env):
     await_approval(env)
-    env[1].say(SLUG, "Approval for t1 is in, merging now.", by="engineer@sw-0001")
+    with pytest.raises(SwarmError):
+        env[1].say(SLUG, "Approval for t1 is in, merging now.", by="engineer@sw-0001")
     judge = Judge(yes=1.0)
     assert run(env, judge) == []
     assert judge.asked == []
@@ -311,23 +323,23 @@ def test_only_operator_decisions_refuse_an_agents_write(path, item, decides):
 
 
 @pytest.mark.parametrize(
-    "by, handed",
+    "by, handed, operator_only",
     [
-        ("dispatcher@a1b2c3-0001", True),
-        ("master@a1b2c3-0001", False),
-        ("engineer@a1b2c3-0001", False),
-        ("dispatcher", False),
-        ("ledger", False),
-        (None, False),
+        ("dispatcher@a1b2c3-0001", True, True),
+        ("master@a1b2c3-0001", False, True),
+        ("engineer@a1b2c3-0001", False, False),
+        ("dispatcher", False, False),
+        ("ledger", False, False),
+        (None, False, False),
     ],
 )
-def test_a_priority_a_dispatcher_handed_to_the_operator_counts_only_his_writes(by, handed):
+def test_a_priority_a_dispatcher_handed_to_the_operator_counts_only_his_writes(by, handed, operator_only):
     path = "tasks/t1"
     row = {"item": path, "by": by}
     doc = {"tasks": [{"id": "t1", "state": "blocked"}]}
     assert priority_sweep.handed(row) is handed
     for agent in ("dispatcher@a1b2c3-0001", "eng-1@sw"):
-        assert priority_sweep._counts(doc, row, priority_sweep.Write(agent, "comment", path, "x")) is not handed
+        assert priority_sweep._counts(doc, row, priority_sweep.Write(agent, "comment", path, "x")) is not operator_only
     assert priority_sweep._counts(doc, row, priority_sweep.Write("operator", "comment", path, "x")) is True
 
 
@@ -338,6 +350,68 @@ def test_operator_only_covers_handed_rows_and_operator_decisions():
     assert priority_sweep.operator_only(empty, {"item": "tasks/t1", "by": "dispatcher@a1b2c3-0001"}) is True
     approval = {"tasks": [{"id": "t1", "awaiting": "approval"}]}
     assert priority_sweep.operator_only(approval, {"item": "tasks/t1", "by": "master@a1b2c3-0001"}) is True
+
+
+@pytest.mark.parametrize("raiser", ["master@a1b2c3-0001", "dispatcher@a1b2c3-0001"])
+@pytest.mark.parametrize("writer", ["master@a1b2c3-0001", "engineer@a1b2c3-0823"])
+@pytest.mark.parametrize("kind", ["comment added", "message added"])
+def test_agent_evidence_never_resolves_a_priority_raised_for_the_operator(raiser, writer, kind):
+    text = "Operator acceptance is still required before merge or installation."
+    priority = row("tasks/t1") | {"by": raiser, "text": "Accept the shorter reminder wording proposal?"}
+    event = write(1, "tasks/t1" if kind == "comment added" else "chat", text, by=writer, kind=kind)
+    if kind == "message added":
+        event["text"] = f"tasks/t1: {text}"
+    judge = Judge(yes=0.83)
+    actions, calls = dict_pass([priority], [event], judge, tasks=[{"id": "t1", "state": "blocked"}])
+    assert actions == []
+    assert calls == []
+    assert judge.asked == []
+
+
+@pytest.mark.parametrize("raiser", ["master@a1b2c3-0001", "dispatcher@a1b2c3-0001"])
+@pytest.mark.parametrize("yes, resolves", [(0.95, True), (0.05, False)])
+def test_operator_answer_to_a_raised_priority_still_needs_the_classifier(raiser, yes, resolves):
+    priority = row("tasks/t1") | {"by": raiser}
+    judge = Judge(yes=yes)
+    actions, calls = dict_pass(
+        [priority], [write(1, "tasks/t1", "Approved, merge it.")], judge, tasks=[{"id": "t1", "state": "blocked"}]
+    )
+    assert bool(actions) is resolves
+    assert bool(calls) is resolves
+    assert judge.asked[0][0]["write"]["by"] == "the operator"
+
+
+@pytest.mark.parametrize("raiser", ["master@sw-0001", "dispatcher@sw-0001"])
+@pytest.mark.parametrize("verified", [True, False])
+def test_a_raised_priority_requires_a_verified_operator_relay(env, raiser, verified):
+    from hooks.context import operator_words
+
+    master = "master@sw-0001"
+    core.sync(SLUG, ops=[{"op": "join", "id": "j-m", "by": master, "role": "orchestrator"}])
+    core.sync(SLUG, ops=[{"op": "priority", "id": "p-op", "by": raiser, "item": "tasks/t1", "text": ASK}])
+    run(env)
+    if verified:
+        operator_words.record(master, "yes approve the demo merge")
+    core.sync(
+        SLUG,
+        ops=[
+            {
+                "op": "relay",
+                "id": "rl-op",
+                "by": master,
+                "item": "tasks/t1",
+                "text": "Approved, merge it.",
+                "quote": "approve the demo merge",
+            }
+        ],
+    )
+    judge = Judge(yes=0.95)
+    actions = run(env, judge)
+    assert bool(actions) is verified
+    assert ("tasks/t1" not in priorities()) is verified
+    assert len(judge.asked) == int(verified)
+    if verified:
+        assert judge.asked[0][0]["write"]["by"] == "the operator"
 
 
 def test_a_priority_on_a_collection_the_ledger_lacks_counts_as_gone():
@@ -504,7 +578,7 @@ def test_a_cleared_priority_is_not_judged_again_in_the_same_pass():
     events = [write(1, "tasks/t1", "Ship it."), write(2, "tasks/t1", "Really, ship it.")]
     _, calls = dict_pass([row("tasks/t1")], events, judge, tasks=tasks)
     assert asked_texts(judge) == [("Ship", "Ship it.")]
-    assert [c[0] for c in calls] == ["clear_priority", "comment_item"]
+    assert [c[0] for c in calls] == ["comment_item", "clear_priority"]
 
 
 def test_an_even_answer_counts_as_a_yes():

@@ -387,7 +387,9 @@ def write_markdown(record: Path | str, markdown: Path | str, key: Ed25519PublicK
 
 
 def _page_credential(slug: str) -> str | None:
-    from scripts.swarm_ledger.repository import repository
+    from scripts.swarm_ledger import storage
+
+    repository = storage.default()
 
     return repository.token(slug)
 

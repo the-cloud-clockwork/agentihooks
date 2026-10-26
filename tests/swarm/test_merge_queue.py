@@ -3,7 +3,7 @@ import subprocess
 
 import pytest
 
-from scripts.swarm import cli, ledger_events, merge_queue, waits
+from scripts.swarm import cli, ledger_events, merge_queue, queue_exit, waits
 from scripts.swarm.store import SwarmError
 
 URL = "https://github.com/o/r/pull/7"
@@ -23,7 +23,6 @@ AUTHORED = {"sha": "abc", "commit": {"message": "Change the code"}, "committer":
 REFRESHED = {"sha": "abc", "commit": {"message": "Merge branch 'dev' into ci-1"}, "committer": {"login": "web-flow"}}
 
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
 READ_PULL = ledger_events.view
 
 
@@ -101,56 +100,59 @@ def checked_resource(conclusion="SUCCESS", head="abc"):
     }
 
 
-def test_queue_uses_antoncores_required_checks_in_its_own_workflow():
-    from scripts.swarm import ledger_events
-
-    url = "https://github.com/the-cloud-clockwork/antoncore/pull/42"
-    calls, queued = [], []
+@pytest.mark.parametrize(
+    "repo, number, workflow",
+    [("the-cloud-clockwork/antoncore", "42", "CI Validate"), ("the-cloud-clockwork/agentibrain-kernel", "127", "ci")],
+)
+def test_queue_adds_another_repositorys_pull_request_to_its_own_merge_queue(repo, number, workflow):
+    url = f"https://github.com/{repo}/pull/{number}"
+    rest_paths, enqueued = [], []
 
     def run(command, **kwargs):
-        calls.append(command)
         if command[2] != "graphql":
-            assert command[2] == "repos/the-cloud-clockwork/antoncore/rules/branches/dev"
+            rest_paths.append(command[2])
+            if command[2] != f"repos/{repo}/rules/branches/dev":
+                return subprocess.CompletedProcess(command, 1, "", "gh: Not Found (HTTP 404)")
             response = [
+                {"type": "required_linear_history"},
                 {
                     "type": "required_status_checks",
-                    "parameters": {
-                        "required_status_checks": [{"context": "Gate — Required", "integration_id": 15368}],
-                    },
-                }
+                    "parameters": {"required_status_checks": [{"context": "Gate — Required", "integration_id": 15368}]},
+                },
+                {"type": "merge_queue", "parameters": {"merge_method": "SQUASH", "grouping_strategy": "ALLGREEN"}},
             ]
         elif command[4] == f"query={merge_queue.STATE}":
-            response = {"data": {"resource": {**OPEN, "mergeQueueEntry": ENTRY if queued else None}}}
+            assert command[5:] == ["-f", f"url={url}"]
+            response = {"data": {"resource": {**OPEN, "mergeQueueEntry": ENTRY if enqueued else None}}}
         elif command[4] == f"query={merge_queue.FRESHNESS}":
             response = {
                 "data": {
                     "resource": {
-                        "repository": {"nameWithOwner": "the-cloud-clockwork/antoncore"},
+                        "repository": {"nameWithOwner": repo},
                         "baseRefName": "dev",
                         "baseRef": {"branchProtectionRule": None},
                     }
                 }
             }
         elif command[4] == f"query={merge_queue.QUEUE}":
-            queued.append(True)
-            response = {"data": {}}
+            enqueued.append(command[5:])
+            response = {"data": {"enqueuePullRequest": {"mergeQueueEntry": {"id": ENTRY["id"]}}}}
         else:
-            assert command[4] == f"query={ledger_events.PULL_QUERY.replace('$number', '42')}"
+            assert command[4] == f"query={ledger_events.PULL_QUERY.replace('$number', number)}"
             assert command[5:] == ["-f", f"url={url}"]
             response = checked_resource()
-            required = response["data"]["resource"]["commits"]["nodes"][0]["commit"]["statusCheckRollup"]["contexts"][
+            check = response["data"]["resource"]["commits"]["nodes"][0]["commit"]["statusCheckRollup"]["contexts"][
                 "nodes"
             ][0]
-            required["name"] = "Gate — Required"
-            required["checkSuite"] = {
-                "app": {"databaseId": 15368},
-                "workflowRun": {"workflow": {"name": "CI Validate"}},
-            }
+            check["name"] = "Gate — Required"
+            check["checkSuite"] = {"app": {"databaseId": 15368}, "workflowRun": {"workflow": {"name": workflow}}}
         return subprocess.CompletedProcess(command, 0, json.dumps(response))
 
-    assert merge_queue.operate("queue", url, run)["queued"]
-    assert queued == [True]
-    assert all("workflows/test.yml" not in str(command) for command in calls)
+    result = merge_queue.operate("queue", url, run)
+
+    assert enqueued == [["-f", "id=PR_one", "-f", "head=abc"]]
+    assert result == {"url": url, "state": "OPEN", "head": "abc", "queued": True, "entry": ENTRY}
+    assert rest_paths and all(path.startswith(f"repos/{repo}/") for path in rest_paths)
 
 
 @pytest.mark.parametrize(
@@ -194,20 +196,23 @@ def test_queue_waits_until_every_configured_check_exists(missing):
 
 
 @pytest.mark.parametrize(
-    "source, expected",
+    "source, state, expected",
     [
-        ("status", False),
-        ("other app", False),
-        ("required app", True),
-        ("both apps", True),
+        ("status", "SUCCESS", True),
+        ("status", "PENDING", False),
+        ("status", "FAILURE", False),
+        ("status", "ERROR", False),
+        ("other app", "SUCCESS", False),
+        ("required app", "SUCCESS", True),
+        ("both apps", "SUCCESS", True),
     ],
 )
 @pytest.mark.parametrize("policy", ["rules", "classic"])
-def test_queue_checks_the_app_required_by_repository_policy(source, expected, policy):
+def test_queue_checks_the_app_required_by_repository_policy(source, state, expected, policy):
     response = checked_resource()
     commit = response["data"]["resource"]["commits"]["nodes"][0]["commit"]
     if source == "status":
-        check = {"context": "CI Validate", "state": "SUCCESS", "isRequired": True}
+        check = {"context": "CI Validate", "state": state, "isRequired": True}
     else:
         check = {
             "name": "CI Validate",
@@ -228,7 +233,13 @@ def test_queue_checks_the_app_required_by_repository_policy(source, expected, po
         )
     reader, _ = runner(response)
     assert READ_PULL(URL, reader, required_checks={"CI Validate": 15368}) == ledger_events.PullRequest(
-        "OPEN", None, None, False, resolved=expected, head="abc"
+        "OPEN",
+        None,
+        None,
+        state in {"FAILURE", "ERROR"},
+        resolved=expected,
+        failed=("CI Validate",) if state in {"FAILURE", "ERROR"} else (),
+        head="abc",
     )
     original, calls = runner(
         {"data": {"resource": OPEN}},
@@ -509,6 +520,7 @@ def test_queue_squash_merges_the_observed_head_when_the_repository_has_no_queue(
         "head": "abc",
         "queued": False,
         "entry": None,
+        "merge_commit": None,
     }
     assert len(calls) == 6
     assert "mergePullRequest(input:" in calls[4][4]
@@ -751,13 +763,38 @@ def test_cli_routes_each_operation_and_prints_its_state(monkeypatch, capsys, act
     seen = []
 
     def operate(verb, url, **kwargs):
-        seen.append((verb, url))
+        seen.append((verb, url, kwargs["journal"].url, kwargs.get("attempts")))
         return {"queued": True}
 
     monkeypatch.setattr(merge_queue, "operate", operate)
     assert cli.main(["sw", "merge", action, URL]) == 0
-    assert seen == [(action, URL)]
+    assert seen == [(action, URL, URL, 40 if action == "queue" else None)]
     assert capsys.readouterr().out == '{"queued": true}\n'
+
+
+@pytest.mark.parametrize("failed", [False, True])
+def test_cli_queue_refuses_a_head_whose_last_group_failed_after_intent(monkeypatch, capsys, failed):
+    monkeypatch.setattr(cli, "connect", lambda: swarm_of("eng"))
+    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "engineer@a1b2c3-0001")
+    seen = []
+
+    def fresh(url, head):
+        seen.append(("fresh", url, head))
+        if failed:
+            raise SwarmError(f"head {head} failed its last merge group run (Tests run)")
+
+    monkeypatch.setattr(queue_exit, "require_fresh", fresh)
+    monkeypatch.setattr(cli, "_queue_intent", lambda store, args, agent, head: seen.append(("intent", head)))
+    queued = []
+    monkeypatch.setattr(
+        merge_queue, "operate", lambda verb, url, **kwargs: kwargs["admit"]("abc") or queued.append(url) or {}
+    )
+
+    assert cli.main(["sw", "merge", "queue", URL]) == (1 if failed else 0)
+    assert seen == [("intent", "abc"), ("fresh", URL, "abc")]
+    assert queued == ([] if failed else [URL])
+    if failed:
+        assert "head abc failed its last merge group run (Tests run)" in capsys.readouterr().err
 
 
 @pytest.mark.parametrize("action", ["queue", "dequeue"])
@@ -879,10 +916,12 @@ def test_cli_queue_applies_the_judged_intent_mode(monkeypatch, tmp_path, capsys,
     Verdicts("sw", "intent", tmp_path).write("t1", "fail", "missing required behavior", head="abc", url=URL)
     monkeypatch.setattr(intent, "Verdicts", lambda slug, gate, home=None: Verdicts(slug, gate, tmp_path))
     monkeypatch.setattr(intent, "pr_head", lambda url: pytest.fail("use the observed head"))
+    monkeypatch.setattr(queue_exit, "require_fresh", lambda url, head: None)
     queued, events = [], []
     monkeypatch.setattr(intent.log, "append", lambda slug, row, home=None: events.append((slug, row, home)))
 
-    def operate(action, url, admit):
+    def operate(action, url, admit, journal, attempts):
+        assert journal.url == URL
         admit("abc")
         queued.append(url)
         return {"queued": True}
@@ -976,9 +1015,7 @@ def test_state_reports_queue_state_and_pull_request_lifecycle(state):
     ],
 )
 def test_api_failures_remain_cli_failures(monkeypatch, capsys, code, stderr, stdout, message):
-    from types import SimpleNamespace
-
-    monkeypatch.setattr(cli, "connect", lambda: SimpleNamespace(names=SimpleNamespace(swarm_slug=lambda s: s)))
+    monkeypatch.setattr(cli, "connect", lambda: swarm_of("eng"))
 
     def run(command, **kwargs):
         return subprocess.CompletedProcess(command, code, stdout, stderr)

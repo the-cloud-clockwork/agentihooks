@@ -3,7 +3,7 @@
 import json
 import shlex
 import subprocess
-from collections.abc import Iterable, Mapping, MutableMapping
+from collections.abc import Callable, Iterable, Mapping, MutableMapping
 from pathlib import Path
 
 from scripts import aicode_tokens
@@ -35,7 +35,7 @@ def values(environ: Mapping[str, str]) -> dict[str, str]:
     base = {key: environ[key] for key in ("HOME", "PATH", "AGENTIHOOKS_HOME") if environ.get(key)}
     done = subprocess.run(["bash", "--noprofile", "--norc", "-c", f"{script}env -0"], env=base, capture_output=True)
     pairs = (item.decode(errors="surrogateescape").partition("=") for item in done.stdout.split(b"\0") if item)
-    return {key: value for key, _, value in pairs if key not in SHELL_NAMES}
+    return {key: value for key, _, value in pairs if key not in SHELL_NAMES and key != "SWARM_SECRET"}
 
 
 def fill(environ: MutableMapping[str, str]) -> list[str]:
@@ -56,10 +56,10 @@ def block_tokens() -> dict[str, str]:
     return aicode_tokens.token_exports(text)
 
 
-def distinct(environ: Mapping[str, str], names: Iterable[str]) -> list[str]:
+def distinct(environ: Mapping[str, str], names: Iterable[str], key: Callable[[str], object] | None = None) -> list[str]:
     block = block_tokens()
     chosen: dict[str, str] = {}
-    for name in sorted(names):
+    for name in sorted(names, key=key):
         value = environ[name]
         held = chosen.get(value)
         if held is None or (block.get(name) == value and block.get(held) != value):
@@ -69,7 +69,7 @@ def distinct(environ: Mapping[str, str], names: Iterable[str]) -> list[str]:
 
 def source_line(environ: Mapping[str, str]) -> str:
     paths = files(environ)
-    return f"set -- {shlex.join(map(str, paths))}; {SOURCE}; set --\n" if paths else ""
+    return f"set -- {shlex.join(map(str, paths))}; {SOURCE}; unset SWARM_SECRET; set --\n" if paths else ""
 
 
 def _shell_exports(environ: Mapping[str, str], prefix: str) -> dict[str, str]:

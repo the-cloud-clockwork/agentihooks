@@ -8,6 +8,8 @@ nav_order: 5
 # MCP Transport — stdio and network modes
 {: .no_toc }
 
+AgentiHooks supports Claude Code and Codex. These configuration examples use Claude Code; Codex supports stdio and streamable HTTP, and skips SSE servers with a warning. See [Codex MCP registration](../reference/CODEX-COMPAT.md#7-mcp-registration).
+
 1. TOC
 {:toc}
 

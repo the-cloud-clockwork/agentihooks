@@ -2,11 +2,9 @@ import json
 import re
 import subprocess
 import unittest
-from pathlib import Path
 
 from tests.swarm_ledger.ledger_page import page_source
 
-TEMPLATE = Path(__file__).resolve().parents[2] / "scripts" / "swarm_ledger" / "template.html"
 STUB_H = "function h(tag, attrs, ...kids) { return { tag, attrs: attrs || {}, kids: kids.filter(Boolean) }; }\n"
 STUB_FOLD = "function collapsible() {}\n"
 STUB_PAGES = (
@@ -27,7 +25,11 @@ def function_source(name):
 
 def run_js(names, expr, prelude=""):
     script = (
-        prelude + "".join(function_source(n) + "\n" for n in names) + f"process.stdout.write(JSON.stringify({expr}));"
+        "function closedLeft() { return 0; }\nfunction closedMore() { return null; }\n"
+        "function viewItems(list, all) { return all; }\nfunction viewCount() { return ''; }\n"
+        + prelude
+        + "".join(function_source(n) + "\n" for n in names)
+        + f"process.stdout.write(JSON.stringify({expr}));"
     )
     return json.loads(subprocess.run(["node", "-e", script], check=True, capture_output=True, text=True).stdout)
 
@@ -65,7 +67,7 @@ HEADS = [
     {"id": "sec-questions", "title": "Questions", "list": "questions"},
     {"id": "sec-followups", "title": "Follow ups", "list": "followups"},
 ]
-OUTLINE_FNS = ["outlineOf", "itemState"]
+OUTLINE_FNS = ["outlineEntry", "outlineOf", "itemState"]
 
 
 def states(doc):
@@ -96,7 +98,7 @@ class OutlineDotsByState(unittest.TestCase):
         flipped = json.loads(json.dumps(DOC))
         flipped["phases"][0]["done"] = True
         self.assertEqual(states(flipped)["item-phases-p1"], "done")
-        self.assertIn("JSON.stringify(tree)", function_source("renderOutline"))
+        self.assertIn("JSON.stringify(shaped)", function_source("renderOutline"))
 
     def test_the_outline_link_carries_its_state_as_a_class(self):
         expr = """(() => {
@@ -106,7 +108,14 @@ class OutlineDotsByState(unittest.TestCase):
   return { items, head: group.kids[0].kids[0].kids[0].attrs.class || "" };
 })()"""
         self.assertEqual(
-            run_js(["outlineLink", "outlineGroup"], expr, STUB_H + STUB_FOLD + STUB_PAGES),
+            run_js(
+                ["outlineLink", "outlineRow", "phaseRows", "remoteMore", "filtering", "outlineGroup"],
+                expr,
+                STUB_H
+                + STUB_FOLD
+                + STUB_PAGES
+                + "const filter = { text: '', state: '' }; const remote = {}; const remoteTotal = {};\n",
+            ),
             {"items": ["st-done", ""], "head": ""},
         )
 

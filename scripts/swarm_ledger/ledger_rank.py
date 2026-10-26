@@ -5,13 +5,17 @@ Distinct from the Priorities panel, which holds operator decisions. `next` is an
 
 import re
 
+from scripts.swarm_ledger import ports
+
 RANKS = ("urgent", "high", "normal", "low")
 ALIASES = {"next": "urgent"}
 DEFAULT = "normal"
+GENERATED_PROFILE = "documentation"
 OPERATOR = "operator"
 QUOTE_WORDS = 3
 OPS = ("task_rank",)
 ITEM_RE = re.compile(r"^tasks/[^/]+$")
+HELD = "; move it to a phase that admits it or lift the hold first"
 
 
 def canonical(value) -> str:
@@ -23,7 +27,13 @@ def canonical(value) -> str:
 
 def order(task: dict) -> int:
     rank = task.get("rank")
-    return RANKS.index(rank if rank in RANKS else DEFAULT)
+    if rank not in RANKS:
+        rank = RANKS[-1] if generated(task) else DEFAULT
+    return RANKS.index(rank)
+
+
+def generated(task: dict) -> bool:
+    return task.get("profile") == GENERATED_PROFILE and task.get("follow_up") is True
 
 
 def check(op):
@@ -53,6 +63,9 @@ def apply(doc, op, ctx):
     if by != OPERATOR and (refusal := pinned(task_id, author(ctx, path) if "rank" in task else None)):
         ctx.refused.append(refusal)
         return False
+    if refusal := urgent_refusal({**task, "rank": rank}, doc):
+        ctx.refused.append(refusal)
+        return False
     if task.get("rank") != rank or author(ctx, path) != by:
         task["rank"] = rank
         ctx.stamp(path, by)
@@ -75,3 +88,13 @@ def quoted(rank, words) -> bool:
     said = set(re.findall(r"[a-z]+", words.lower()))
     names = {rank} | {alias for alias, target in ALIASES.items() if target == rank}
     return len(words.split()) >= QUOTE_WORDS and bool(names & said)
+
+
+def urgent_refusal(task: dict, doc: dict) -> str:
+    from scripts.swarm_ledger.repository import hierarchy
+
+    claim_hold = ports.swarm().claim_hold
+    if task.get("rank") != "urgent" or task.get("state", "open") != "open":
+        return ""
+    why = claim_hold.phased(task, doc) or claim_hold.freezes(task, doc, hierarchy.project(doc)[0])
+    return f"task {task['id']} cannot be urgent: {why}{HELD}" if why else ""

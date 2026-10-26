@@ -7,6 +7,9 @@ from pathlib import Path
 import pytest
 import yaml
 
+from scripts import ci_dev_reuse, ci_test_plan
+from tests import coverage_stability, refresh_durations
+
 pytestmark = pytest.mark.unit
 ROOT = Path(__file__).resolve().parents[1]
 API_CALL = re.compile(r"\b_?gh\b(?!-)|api\.github\.com|GITHUB_API_URL")
@@ -15,11 +18,14 @@ BESIDE = re.compile(r"\$\(dirname \"\$0\"\)|\$\{?GITHUB_ACTION_PATH\}?")
 WORKSPACE = re.compile(r"\$\{?GITHUB_WORKSPACE\}?")
 # These API functions run only in local downloads or steps bound to the App token.
 LOCAL_ONLY = {
-    ROOT / "scripts/ci_budget/jobs.py": {"read_page"},
+    ROOT / "scripts/ci_budget/rate_limit.py": {"reset_wait", "_run", "budget"},
     ROOT / "scripts/ci_mutation/reuse.py": {"api"},
     ROOT / "tests/refresh_durations.py": {"_gh", "ci_run_ids", "ci_download"},
 }
-METADATA_ONLY = {ROOT / "scripts/ci_reuse.py": {"paged_reuse_job"}}
+METADATA_ONLY = {
+    ROOT / "scripts/ci_reuse.py": {"paged_reuse_job"},
+    ROOT / "scripts/ci_gate_queue.py": {"watcher"},
+}
 TOKEN = re.compile(
     r"github\s*(\.\s*token|\[\s*['\"]token['\"]\s*\])"
     r"|secrets\s*(\.|\[\s*['\"])\s*(github|gh)(_\w*|\w*(token|pat)(?![a-z]))"
@@ -53,7 +59,7 @@ def _all_steps():
             if isinstance(values, dict) and TOKEN.search(_values(values)):
                 yield name, {"name": f"job {key}", "env": values}, ROOT
         for step in job.get("steps", []):
-            action = step.get("uses", "")
+            action = step.get("uses", "").replace("./.workflow-revision/", "./", 1)
             if action.startswith("./.github/actions/"):
                 folder = ROOT / action
                 for inner in yaml.safe_load((folder / "action.yml").read_text())["runs"]["steps"]:
@@ -83,7 +89,14 @@ def _offends(step: dict) -> bool:
 
 
 def test_no_step_on_any_event_holds_the_workflow_token_or_calls_the_api():
-    offenders = [f"{job}: {step.get('name') or step.get('uses')}" for job, step, _ in _all_steps() if _offends(step)]
+    offenders = []
+    for job, step, _ in _all_steps():
+        if job == "select" and step.get("id") == "select":
+            env = step.get("env") or {}
+            assert env["GH_TOKEN"] == "${{ steps.app-token.outputs.token || github.token }}"
+            step = {**step, "env": {key: value for key, value in env.items() if key != "GH_TOKEN"}}
+        if _offends(step):
+            offenders.append(f"{job}: {step.get('name') or step.get('uses')}")
     assert offenders == []
 
 
@@ -131,7 +144,7 @@ def _reached_source(path: Path) -> str:
     lines = path.read_text().splitlines()
     exemptions = LOCAL_ONLY.get(path, set()) | METADATA_ONLY.get(path, set())
     for node in ast.parse("\n".join(lines)).body if exemptions else []:
-        if isinstance(node, ast.FunctionDef) and node.name in exemptions:
+        if isinstance(node, ast.FunctionDef) and node.name.removeprefix("x_").partition("__mutmut_")[0] in exemptions:
             lines[node.lineno - 1 : node.end_lineno] = [""] * (node.end_lineno - node.lineno + 1)
     return "\n".join(lines)
 
@@ -142,8 +155,10 @@ def test_no_script_a_step_runs_calls_the_api():
         ".github/actions/browser-cache/select-artifacts.sh",
         ".github/actions/browser-cache/verify.sh",
         ".github/coverage/combine.sh",
+        ".github/coverage/flatten.py",
         ".github/coverage/proxy.py",
         ".github/coverage/sonar-retry.sh",
+        ".github/scripts/pypi-retry.sh",
         "deploy/helm/agentihooks-swarm/ci/kind-smoke.sh",
         "docker/swarm-node/base-copy.sh",
         "docker/swarm-node/pull-base.sh",
@@ -154,35 +169,52 @@ def test_no_script_a_step_runs_calls_the_api():
         "scripts/brain-smoke",
         "scripts/ci_budget/__main__.py",
         "scripts/ci_budget/jobs.py",
+        "scripts/ci_budget/rate_limit.py",
         "scripts/ci_cpu_quota.py",
         "scripts/ci_dependency_audit.py",
         "scripts/ci_dev_reuse.py",
+        "scripts/ci_gate_summary.py",
+        "scripts/ci_hive_nats_grants.py",
         "scripts/ci_input_key.py",
         "scripts/ci_mutation/__main__.py",
-        "scripts/ci_mutation/browser.py",
         "scripts/ci_mutation/plan.py",
         "scripts/ci_mutation/reuse.py",
-        "scripts/ci_queue_fail_fast.py",
         "scripts/ci_release.sh",
-        "scripts/ci_semgrep.py",
+        "scripts/ci_semgrep_floors.py",
+        "scripts/ci_unit_rerun.py",
         "scripts/ci_wiring.py",
+        "scripts/hive/nats_grant.py",
         "scripts/packaging/compose-hive-smoke.sh",
+        "scripts/packaging/compose-recovery-drill.sh",
+        "scripts/packaging/compose-task-smoke.sh",
         "scripts/packaging/hive-join-smoke.sh",
         "scripts/packaging/hive-launch-attestation-proof.sh",
         "scripts/packaging/hive-launch-smoke.sh",
         "scripts/packaging/pull-runtime-image.sh",
         "scripts/packaging/swarm-image-clients.sh",
+        "scripts/packaging/swarm-init-smoke.sh",
         "scripts/packaging/swarm-smoke.sh",
         "scripts/packaging/swarm-smoke-parallel.sh",
+        "scripts/dead_code.py",
         "scripts/size_limits.py",
+        "scripts/swallowed_exceptions.py",
         "scripts/swarm_ledger/artifact_sanity.py",
         "scripts/swarm_ledger/ledger_server.py",
+        "tests/chart_examples.py",
+        "tests/chart_github_auth.py",
+        "tests/chart_hive_home.py",
         "tests/chart_hive_join.py",
+        "tests/chart_hive_only.py",
+        "tests/chart_hub.py",
+        "tests/chart_nats.py",
         "tests/chart_network.py",
         "tests/chart_redis.py",
+        "tests/chart_scratch_swarms.py",
         "tests/chart_secrets.py",
         "tests/chart_workers.py",
+        "tests/ci_charts/chart_timers.py",
         "tests/count_floor.py",
+        "tests/coverage_check.py",
         "tests/coverage_baseline.py",
         "tests/coverage_ratchet.py",
         "tests/dep_manifest.py",
@@ -192,17 +224,27 @@ def test_no_script_a_step_runs_calls_the_api():
         "tests/js_lcov.py",
         "tests/kind_request.py",
         "tests/ledger_load/gate.py",
+        "tests/ledger_load/hierarchy_paired.py",
+        "tests/ledger_load/hierarchy_probe.py",
+        "tests/ledger_load/memory.py",
         "tests/ledger_load/paired.py",
         "tests/ledger_load/streams.py",
         "tests/refresh_durations.py",
+        "tests/reused_coverage.py",
         "tests/shard_budget.py",
         "tests/shard_check.py",
+        "tests/shard_summary.py",
         "scripts/ci_select.py",
         "tests/__init__.py",
         "tests/browser_coverage.py",
         "tests/flake_ledger.py",
         "tests/routing/test_codex_api.py",
         "tests/shards.py",
+        "tests/swarm_ledger/test_postgres_writer_lock.py",
+        "tests/swarm_ledger/test_postgres_outbox.py",
+        "tests/swarm_ledger/test_postgres_writer_floor.py",
+        "tests/swarm_ledger/test_postgres_repository.py",
+        "tests/test_suite_speed.py",
         "scripts/ci_reuse.py",
         "scripts/ci_runner_classes.py",
     ]
@@ -210,7 +252,20 @@ def test_no_script_a_step_runs_calls_the_api():
         expected.extend(("scripts/ci_runner_trust.py", "scripts/gate_protected.py"))
     if (ROOT / "scripts/ci_wall_clock.py").exists():
         expected.append("scripts/ci_wall_clock.py")
-    assert sorted(str(path.relative_to(ROOT)) for path in calls) == sorted(expected)
+    if (ROOT / ".github/actions/browser-cache/use-image.sh").exists():
+        expected.append(".github/actions/browser-cache/use-image.sh")
+    routing_contracts = [
+        "tests/test_ci_anton_runners.py",
+        "tests/test_ci_runner_classes.py",
+        "tests/test_ci_runner_trust.py",
+    ]
+    expected += [name for name in ("scripts/ci_gate_shards.py", "scripts/ci_gate_queue.py") if ROOT / name in calls]
+    assert sorted(str(path.relative_to(ROOT)) for path in calls) in (
+        sorted(expected),
+        sorted(expected + routing_contracts),
+        sorted(expected + ["tests/queue_shards.py"]),
+        sorted(expected + routing_contracts + ["tests/queue_shards.py"]),
+    )
     assert {path: count for path, count in calls.items() if count} == {}
 
 
@@ -226,6 +281,13 @@ def test_the_reuse_factory_exemption_contains_only_command_replacements():
         source = path.read_text()
         functions = {node.name: node for node in ast.parse(source).body if isinstance(node, ast.FunctionDef)}
         for name in names:
+            if path == ROOT / "scripts/ci_gate_queue.py":
+                assert name == "watcher"
+                assert len(functions[name].body) == 1
+                assert isinstance(functions[name].body[0], ast.Return)
+                assert isinstance(functions[name].body[0].value, ast.Dict)
+                assert not any(isinstance(node, ast.Call) for node in ast.walk(functions[name]))
+                continue
             calls = [
                 node
                 for node in ast.walk(functions[name])
@@ -460,10 +522,31 @@ def test_sonar_downloads_this_runs_coverage_after_the_shards():
     assert download["with"] == {"pattern": "coverage-3.12-*", "path": ".coverage-shards"}
     assert steps.index(download) < steps.index(merge)
     assert merge["env"] == {
-        "SHARDS": "${{ needs.select.outputs.scope == 'selected' && needs.select.outputs.count || 12 }}",
+        "SHARDS": "${{ needs.select.outputs.scope == 'selected' && needs.select.outputs.count || 20 }}",
         "SCOPE": "${{ needs.select.outputs.scope }}",
     }
     assert 'bash .github/coverage/combine.sh --downloaded "$SHARDS" ||' in merge["run"]
+
+
+def test_every_reader_of_the_unit_shard_count_matches_the_matrix():
+    jobs = _jobs()
+    shards = jobs["unit"]["strategy"]["matrix"]["shard"]
+    count = len(shards)
+    assert shards == list(range(1, count + 1))
+    run = next(step for step in jobs["unit"]["steps"] if step.get("name") == "Run tests")
+    assert (
+        run["env"]["SHARD"]
+        == f"${{{{ matrix.shard }}}}/${{{{ matrix.python-version == '3.12' && {count} || {count} }}}}"
+    )
+    floor = jobs["unit"]["strategy"]["matrix"]["exclude"]
+    assert [entry["shard"] for entry in floor] == shards[12:]
+    assert ci_test_plan.UNIT_JOBS == {f"unit (3.12, {shard})" for shard in shards}
+    assert ci_test_plan.COVERAGE == {f"coverage-3.12-{shard}" for shard in shards}
+    assert {f"coverage-3.12-{shard}" for shard in shards} <= ci_dev_reuse.artifact_names()
+    assert coverage_stability.SHARDS == refresh_durations.SHARDS == count
+    workflow = (ROOT / ".github/workflows/test.yml").read_text()
+    assert workflow.count(f"--shards {count} \\") == 2
+    assert f"needs.select.outputs.count || {count} }}}}" in workflow
 
 
 @pytest.mark.parametrize("job", ["unit", "shard-check", "test-count", "lint"])
@@ -476,7 +559,11 @@ def test_a_dev_push_runs_every_step_of_the_job_itself(job):
 
 @pytest.mark.parametrize("job", sorted(_jobs()))
 def test_no_job_is_granted_the_actions_api(job):
-    assert "actions" not in (_jobs()[job].get("permissions") or {})
+    permissions = _jobs()[job].get("permissions") or {}
+    if job == "select":
+        assert permissions in ({"contents": "read"}, {"contents": "read", "actions": "read"})
+    else:
+        assert "actions" not in permissions
 
 
 def test_no_job_skips_on_a_tree_another_run_passed():

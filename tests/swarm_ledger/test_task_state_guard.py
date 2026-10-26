@@ -140,6 +140,29 @@ def test_a_branch_or_stacked_base_that_is_not_a_string_is_refused(fields):
         update(stacked_ledger(), fields, [])
 
 
+RELEASE_REFUSAL = "after_release must be a release tag such as v2.17.1, or empty to clear it"
+
+
+@pytest.mark.parametrize("value", ["latest", "v2.17", "v2.17.1-rc1", "xv2.17.1", "v2.17.1x", "v 2.17.1", "v2.17.1\n"])
+def test_an_after_release_that_is_not_a_release_tag_is_refused(value):
+    with pytest.raises(ValueError) as refused:
+        update(stacked_ledger(), {"after_release": value}, [])
+    assert str(refused.value) == RELEASE_REFUSAL
+
+
+def test_an_after_release_that_is_not_a_string_is_refused():
+    with pytest.raises(ValueError) as refused:
+        ledger_tasks.check_release({"after_release": 5})
+    assert str(refused.value) == RELEASE_REFUSAL
+
+
+@pytest.mark.parametrize("value", ["v2.17.1", "2.17.1", ""])
+def test_a_task_can_name_the_release_it_waits_on(value):
+    doc = stacked_ledger()
+    applied, ctx = update(doc, {"after_release": value}, [])
+    assert applied is True and ctx.refused == [] and doc["tasks"][1]["after_release"] == value
+
+
 @pytest.mark.parametrize("base", ["0a86fd7", "0" * 64])
 def test_a_stacked_base_of_seven_to_sixty_four_hex_characters_is_kept(base):
     doc = stacked_ledger()
@@ -197,7 +220,14 @@ def test_the_ledger_keeps_how_a_replacement_continued_and_from_which_watermark()
     assert applied is True
     assert doc["tasks"][0]["recovery"] == recovery
     assert sorted(ctx.stamps) == ["tasks/t1/recovery"]
-    assert ledger_tasks.OBJECT_FIELDS == ("contract", "proof", "recovery", "repository_branches")
+    assert ledger_tasks.OBJECT_FIELDS == (
+        "contract",
+        "proof",
+        "recovery",
+        "repository_branches",
+        "pull_scopes",
+        "watchdog",
+    )
     assert ledger_tasks.UPDATABLE[-1] == "recovery"
 
 
@@ -232,3 +262,37 @@ def test_parked_on_names_only_tasks_on_the_ledger():
     doc = stacked_ledger()
     applied, ctx = update(doc, {"parked_on": ["t9"]}, [])
     assert applied is False and "parked_on" not in doc["tasks"][1] and ctx.dirty is False
+
+
+APPLIED_REFUSAL = "applied_at must be a UTC time such as 2026-10-18T12:00:00Z, or empty to clear it"
+
+
+@pytest.mark.parametrize(
+    "value",
+    ["2026-10-18", "2026-10-18T12:00Z", "2026-10-18T12:00:00", "x2026-10-18T12:00:00Z", "2026-10-18T12:00:00Zx"],
+)
+def test_an_applied_time_that_is_not_a_utc_time_is_refused(value):
+    with pytest.raises(ValueError) as refused:
+        update(stacked_ledger(), {"applied_at": value}, [])
+    assert str(refused.value) == APPLIED_REFUSAL
+
+
+def test_an_applied_time_that_is_not_a_string_is_refused():
+    with pytest.raises(ValueError) as refused:
+        ledger_tasks.check_applied({"applied_at": 5})
+    assert str(refused.value) == APPLIED_REFUSAL
+
+
+@pytest.mark.parametrize("value", ["2026-10-18T12:00:00Z", ""])
+def test_a_task_records_when_its_fix_was_applied(value):
+    doc = stacked_ledger()
+    applied, ctx = update(doc, {"applied_at": value}, [])
+    assert applied is True and ctx.refused == [] and doc["tasks"][1]["applied_at"] == value
+
+
+@pytest.mark.parametrize("kind", ["tune", "ops", "troubleshoot", "research"])
+def test_a_read_only_task_parks_without_a_branch_or_stacked_base(kind):
+    doc = stacked_ledger()
+    doc["tasks"][1]["kind"] = kind
+    applied, ctx = update(doc, {"parked_on": ["t0"]}, [])
+    assert applied is True and ctx.refused == [] and doc["tasks"][1]["parked_on"] == ["t0"]

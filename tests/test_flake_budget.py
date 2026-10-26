@@ -21,6 +21,19 @@ def test_a_flaky_report_joins_the_history_once_per_run():
     assert flake_budget.gather(history, [_report()], NOW + 60) == history
 
 
+def test_retry_evidence_survives_history_deduplication_and_expiry():
+    first = {**_report(f"{TEST}[first]"), "tracebacks": ["first frame\nRuntimeError: first"]}
+    second = {**_report(f"{TEST}[second]"), "tracebacks": ["second frame\nRuntimeError: second"]}
+    third = {**_report(run="8"), "tracebacks": ["third frame\nRuntimeError: third"]}
+    history = flake_budget.gather([], [first, second, first], NOW)
+    history = flake_budget.gather(history, [first, third], NOW + 60)
+    assert flake_budget.budget(history)["retried"] == [
+        {"test": TEST, "count": 2, "runs": ["7", "8"], "reports": [first, second, third]}
+    ]
+    history = flake_budget.gather(history, [], NOW + flake_budget.WINDOW_S)
+    assert flake_budget.budget(history)["retried"] == [{"test": TEST, "count": 1, "runs": ["8"], "reports": [third]}]
+
+
 def test_a_failed_report_is_not_a_flake():
     assert flake_budget.gather([], [_report(outcome="failed")], NOW) == []
 
@@ -39,9 +52,31 @@ def test_a_test_flaky_in_two_runs_is_over_budget():
         {"test": other, "run": "9", "at": NOW},
         {"test": TEST, "run": "10", "at": NOW},
     ]
-    assert flake_budget.budget(history) == {"flaky_tests": 2, "over_budget": [{"test": TEST, "runs": ["10", "9"]}]}
-    assert flake_budget.budget(history[:2]) == {"flaky_tests": 2, "over_budget": []}
-    assert flake_budget.budget([]) == {"flaky_tests": 0, "over_budget": []}
+    assert flake_budget.budget(history)["over_budget"] == [{"test": TEST, "runs": ["10", "9"]}]
+    assert flake_budget.budget(history[:2])["over_budget"] == []
+    assert flake_budget.budget([]) == {"flaky_tests": 0, "over_budget": [], "retried": []}
+
+
+def test_every_retry_pass_is_listed_with_its_count_and_runs():
+    other = "tests/test_x.py::test_once"
+    history = [
+        {"test": TEST, "run": "9", "at": NOW},
+        {"test": other, "run": "9", "at": NOW},
+        {"test": TEST, "run": "10", "at": NOW},
+    ]
+    assert flake_budget.budget(history) == {
+        "flaky_tests": 2,
+        "over_budget": [{"test": TEST, "runs": ["10", "9"]}],
+        "retried": [
+            {"test": TEST, "count": 2, "runs": ["10", "9"]},
+            {"test": other, "count": 1, "runs": ["9"]},
+        ],
+    }
+    assert flake_budget.budget(history[1:2]) == {
+        "flaky_tests": 1,
+        "over_budget": [],
+        "retried": [{"test": other, "count": 1, "runs": ["9"]}],
+    }
 
 
 def test_the_command_keeps_the_history_and_writes_the_budget(tmp_path, capsys):
@@ -55,15 +90,25 @@ def test_the_command_keeps_the_history_and_writes_the_budget(tmp_path, capsys):
     argv = ["--history", str(history), "--reports", str(reports), "--out", str(out), "--now", str(NOW)]
 
     assert flake_budget.main(argv) == 0
-    assert json.loads(out.read_text()) == {"flaky_tests": 1, "over_budget": []}
+    assert json.loads(out.read_text()) == {
+        "flaky_tests": 1,
+        "over_budget": [],
+        "retried": [{"test": TEST, "count": 1, "runs": ["20"]}],
+    }
+    assert capsys.readouterr().out.splitlines()[-1] == f"{TEST} passed on a retry in 1 dev runs: 20"
     (reports / "flakes-3.12-1" / "flakes.jsonl").write_text(json.dumps(_report(run="21")) + "\n")
     assert flake_budget.main(argv[:-1] + [str(NOW + 60)]) == 0
 
     assert [json.loads(line)["run"] for line in history.read_text().splitlines()] == ["20", "21"]
-    assert json.loads(out.read_text()) == {"flaky_tests": 1, "over_budget": [{"test": TEST, "runs": ["20", "21"]}]}
+    assert json.loads(out.read_text()) == {
+        "flaky_tests": 1,
+        "over_budget": [{"test": TEST, "runs": ["20", "21"]}],
+        "retried": [{"test": TEST, "count": 2, "runs": ["20", "21"]}],
+    }
     printed = capsys.readouterr().out.splitlines()
-    assert printed[-2:] == [
+    assert printed[-3:] == [
         "Flaky test ids in the last seven days of dev runs: 1",
+        f"{TEST} passed on a retry in 2 dev runs: 20, 21",
         f"::warning title=Flake budget::{TEST} was flaky in 2 dev runs: 20, 21",
     ]
 
@@ -83,7 +128,7 @@ def test_no_flake_reports_is_red(tmp_path, capsys):
     out = tmp_path / "out.json"
     argv = ["--history", str(tmp_path / "h.jsonl"), "--reports", str(tmp_path), "--out", str(out)]
     assert flake_budget.main(argv) == 1
-    assert capsys.readouterr().err == f"no flake reports under {tmp_path}\n"
+    assert capsys.readouterr().out == f"::error::No flake reports under {tmp_path}\n"
     assert not out.exists()
 
 

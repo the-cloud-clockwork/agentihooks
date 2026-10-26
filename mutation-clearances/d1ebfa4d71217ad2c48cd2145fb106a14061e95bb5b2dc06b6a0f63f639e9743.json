@@ -1,0 +1,6 @@
+{
+  "scripts/inbox/pool.py:scripts.inbox.pool.x\u01c1MasterPool\u01c1_try_claim__mutmut_21:c3fd5f4800f508e8420907eb72e1eea1cd17e9749504eb999fb0e4f15b2c607f": {
+    "reader": "standards_reader",
+    "reason": "zrange(pool, 0, 1) returns the same emptiness as zrange(pool, 0, 0), and _try_claim reads only head[0], so the claimed item and every write are unchanged."
+  }
+}

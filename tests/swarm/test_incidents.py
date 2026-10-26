@@ -203,10 +203,10 @@ def test_watchdog_failures_and_fast_probes_form_one_incident_per_tick(store, mon
     plant(host.proc, host.argv)
     (host.folder / ".server.pid").write_text(str(PID))
 
-    def refused(pid, sig):
+    def refused(*args, **kw):
         raise PermissionError("restart refused")
 
-    host.kill = refused
+    host.run = host.kill = refused
     monkeypatch.setattr(ledger_watchdog, "default_host", lambda: host)
     ledger, runtime = ProbedLedger(Clock()), FakeRuntime()
     for _ in range(bad_ticks):
@@ -216,7 +216,7 @@ def test_watchdog_failures_and_fast_probes_form_one_incident_per_tick(store, mon
     assert len(master_mail(store)) == expected
     current(host, tmp_path)
     cli.run_tick(store, "sw", ledger, runtime, FakeHerdr({}))
-    assert sent.call_count == expected
+    assert sent.call_count == expected * 2
     cli.run_tick(store, "sw", ledger, runtime, FakeHerdr({}))
     assert sent.call_count == expected * 2
     assert len(master_mail(store)) == expected * 2
@@ -303,14 +303,22 @@ def test_probe_push_retry_after_recovery_preserves_the_delivery_messages(store, 
     ledger = ProbedLedger(clock, read_s=6.0)
     observe(store, ledger, clock)
     observe(store, ledger, clock)
+    first_payload = sent.call_args.args
     ledger.read_s = 0.1
     observe(store, ledger, clock)
     observe(store, ledger, clock)
     observe(store, ledger, clock)
-    assert sent.call_args_list[-2].args == ("critical", "The ledger is slow or unavailable.")
+    assert sent.call_args_list[-2].args == first_payload
+    assert first_payload[0] == "critical"
+    assert "sw pass 1: read 6.0" in first_payload[1]
+    assert "sw pass 2: read 6.0" in first_payload[1]
     assert sent.call_args_list[-1].args == (
         "critical",
-        "The ledger server answers fast again: two swarm passes took read 0.1 seconds and write 0.1 seconds. "
+        "The ledger server answers fast again: two swarm passes took "
+        "sw pass 3: read 0.1 seconds and write 0.1 seconds, CPU unknown over pass, "
+        "streaks before/after slow 2/0, fast 0/1. "
+        "sw pass 4: read 0.1 seconds and write 0.1 seconds, CPU unknown over pass, "
+        "streaks before/after slow 0/0, fast 1/2. "
         "Idle and stale claim checks resume.",
     )
 

@@ -39,7 +39,6 @@ if TYPE_CHECKING:
 
 MIN_ROUTING_LEFT = 5.0
 PUSH_SIGNALS = ["keep pushing", "push to 100", "push until 100", "burn it to 100"]
-WAIT_TOOLS = frozenset({"CronCreate", "CronList", "CronDelete"})
 RESET_TOLERANCE_S = 600
 
 
@@ -52,6 +51,7 @@ class Candidate:
     observed_at: float
     cap: int | None = None
     reserved: bool = False
+    login: bool = False
 
     def full(self) -> bool:
         return self.cap is not None and self.sessions >= self.cap
@@ -256,7 +256,8 @@ def evaluate(session_id: str) -> Decision | None:
     harness = "codex" if os.environ.get("AGENTIHOOKS_TARGET") == "codex" else "claude"
     held = reservation.current(harness, os.environ)
     account = session_account(agent_pid())
-    ceiling = _own_ceiling(held, account, reservation.is_master_session(os.environ))
+    master_seat = _master(os.environ)
+    ceiling = _own_ceiling(held, account, reservation.is_master_session(os.environ), master_seat)
     week_pct = QUOTA_HANDOFF_WEEK_PCT if ceiling is None else min(QUOTA_HANDOFF_WEEK_PCT, ceiling)
     if five_used < QUOTA_HANDOFF_5H_PCT and week_used < week_pct:
         return None
@@ -264,16 +265,45 @@ def evaluate(session_id: str) -> Decision | None:
     subscriptions = (
         _codex_accounts() if harness == "codex" else _other_accounts(sessions, fleet_observations(os.environ))
     )
-    return decide_reserved(
-        ceiling,
-        account=account,
-        five_used=five_used,
-        week_used=week_used,
-        five_reset=five_reset,
-        week_reset=week_reset,
-        others=reserved(subscriptions, held) + _api_accounts(sessions),
-        push=push_active(session_id),
-    )
+    others = reserved(subscriptions, held) + _api_accounts(sessions) + _login_accounts(os.environ)
+    inputs = {
+        "account": account,
+        "five_used": five_used,
+        "week_used": week_used,
+        "five_reset": five_reset,
+        "week_reset": week_reset,
+        "push": push_active(session_id),
+    }
+    decision = decide_reserved(ceiling, others=master_targets(others, os.environ), **inputs)
+    if master_seat and ceiling is not None and decision and (decision.action, decision.trigger) == ("stop", "week"):
+        return decide_reserved(ceiling, others=[c for c in others if c.account != "api"], **inputs)
+    return decision
+
+
+def _master(environ) -> bool:
+    from scripts.routing import reservation
+
+    return str(environ.get(reservation.AGENT_NAME)).startswith(reservation.MASTER_NAME)
+
+
+def master_targets(candidates: list[Candidate], environ) -> list[Candidate]:
+    if not _master(environ):
+        return candidates
+    return [c for c in candidates if c.login]
+
+
+def _login_accounts(environ) -> list[Candidate]:
+    from scripts import master_claude_login, master_logins
+    from scripts.routing import reservation
+
+    if not _master(environ):
+        return []
+    now = time.time()
+    found = []
+    for account in master_claude_login.free(environ[reservation.AGENT_NAME]):
+        five, week, observed = master_logins.usage(account, now)
+        found.append(Candidate(account, five, week, 0, observed, 1, login=True))
+    return found
 
 
 def decide_reserved(ceiling: float | None, *, week_used: float, **inputs) -> Decision | None:
@@ -283,8 +313,14 @@ def decide_reserved(ceiling: float | None, *, week_used: float, **inputs) -> Dec
     return decision and replace(decision, week_used=week_used, week_limit=ceiling)
 
 
-def _own_ceiling(held: "Reservation | None", account: str, master: bool) -> float | None:
-    return None if held is None or master or account != held.slug else held.ceiling
+def _own_ceiling(held: "Reservation | None", account: str, master: bool, master_seat: bool = False) -> float | None:
+    from scripts.routing import reservation
+
+    if held is None or account != held.slug:
+        return None
+    if master_seat:
+        return reservation.MASTER_LEAVES
+    return None if master else held.ceiling
 
 
 def reserved(candidates: list[Candidate], held: "Reservation | None") -> list[Candidate]:
@@ -375,6 +411,15 @@ def _repo_slug(cwd: str) -> str:
 def render(d: Decision, session_id: str, cwd: str) -> str:
     account = d.account or "this login"
     head = f"{_trigger_text(d)} on {account}."
+    swarm = os.environ.get("AGENTIHOOKS_SWARM")
+    if d.action == "handoff" and d.target and swarm:
+        return (
+            f"QUOTA HANDOFF REQUIRED — {head}\n"
+            f"Policy decision (deterministic): hand this seat to a successor on another account now.\n"
+            f"1. Write your Handoff v2 with the handoff skill.\n"
+            f"2. Run: agentihooks swarm {swarm} handoff DOC --reason quota\n"
+            f"3. Stop. The tick keeps your seat and task and routes the successor to an account with room."
+        )
     if d.action == "handoff" and d.target:
         t = d.target
         age = max(0, int(time.time() - t.observed_at)) // 60
@@ -415,14 +460,14 @@ def render(d: Decision, session_id: str, cwd: str) -> str:
             f'1. CronCreate a one-shot job, cron "{cron}" (local time {at.strftime("%a %H:%M")}), recurring '
             f'false, prompt: "The 5-hour quota window has reset. Continue the task from where you stopped."\n'
             f"2. Tell the operator this session waits until the reset at {reset_when(d.five_reset)}, then stop. "
-            f"Every other tool is blocked until the window resets."
+            f"Tools are not blocked."
         )
     reset = d.week_reset if d.trigger == "week" else d.five_reset
     prefix = "AH_CX_TOKEN_" if os.environ.get("AGENTIHOOKS_TARGET") == "codex" else "AH_CC_TOKEN_"
     return (
         f"QUOTA STOP — {head} Resets {reset_when(reset)}. No other account has room: {_others_text(d)}.\n"
         f"Stop working and tell the operator to add another {prefix}<slug> account, or to say "
-        f'"keep pushing" to continue on this account until 100%. Every tool is blocked.'
+        f'"keep pushing" to continue on this account until 100%. Tools are not blocked.'
     )
 
 
@@ -449,10 +494,7 @@ def pretool(session_id: str, tool_name: str, cwd: str) -> tuple[str | None, str 
     d = evaluate(session_id)
     if d is None or d.action == "push":
         return None, None
-    text = render(d, session_id, cwd)
-    if d.action == "stop" or (d.action == "wait" and tool_name not in WAIT_TOOLS):
-        return f"BLOCKED: {text}", None
-    return None, text
+    return None, render(d, session_id, cwd)
 
 
 def prompt_context(session_id: str, cwd: str) -> str | None:

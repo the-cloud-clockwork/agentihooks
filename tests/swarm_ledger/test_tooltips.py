@@ -24,6 +24,7 @@ sys.path.insert(0, str(LEDGER))
 
 from scripts.swarm_ledger import ledger_core as core  # noqa: E402
 from scripts.swarm_ledger import ledger_server as server  # noqa: E402
+from scripts.swarm_ledger import page_assets  # noqa: E402
 
 URL = "http://ledger.test/tips"
 CONTROLS = 'button, [role="tab"], [role="button"], [role="switch"], a.sync, a.fab'
@@ -80,7 +81,7 @@ COLLECTIONS = {
 
 
 def home_html(view):
-    return server.index_page(view)
+    return server.index_page()
 
 
 def route(r, html):
@@ -90,12 +91,12 @@ def route(r, html):
         fulfill_events(r, ledger=ledger_state(DOC), swarm=STATUS)
     elif rows is not None:
         r.fulfill(json={"data": rows, "next_cursor": None})
-    elif "/api/swarm/" in url:
+    elif "/swarm/" in url:
         r.fulfill(json=STATUS)
+    elif "/files/" in url:
+        r.fulfill(body="# Shot", content_type="text/markdown")
     elif "/api/" in url:
         r.fulfill(json={})
-    elif "/media/" in url or "/artifacts/" in url:
-        r.fulfill(body="# Shot", content_type="text/markdown")
     else:
         r.fulfill(body=html, content_type="text/html")
 
@@ -273,7 +274,7 @@ ROW_BUTTONS = {
     "home": (
         ".act.del",
         f"Move {ROW_TITLE} to the bin",
-        "Move this ledger to the bin. Its swarm stops; the bin keeps it thirty days.",
+        "Move this ledger to the bin. Its swarm stops; the bin keeps it 30 days.",
     ),
     "bin": (".act.restore", f"Restore {ROW_TITLE} to HOME", "Restore this ledger from the bin to HOME."),
 }
@@ -353,7 +354,7 @@ def test_the_page_version_follows_the_tip_module(tmp_path):
     before = core.page_version()
     changed = tmp_path / "tooltips.js"
     changed.write_text(core.TOOLTIPS.read_text() + ";")
-    with patch.object(core, "TOOLTIPS", changed):
+    with patch.object(page_assets, "TOOLTIPS", changed):
         after = core.page_version()
     assert re.fullmatch(r"[0-9a-f]{12}", before)
     assert after != before

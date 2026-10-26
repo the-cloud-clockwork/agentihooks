@@ -4,8 +4,6 @@ import pytest
 
 from scripts.swarm import metrics, metrics_outbox, metrics_swarm
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 
 @pytest.mark.parametrize("slug", ["live-looking", "proof-looking"])
 def test_scratch_marker_prevents_all_metrics_and_shared_spool_work(tmp_path, monkeypatch, slug):
@@ -40,7 +38,13 @@ def test_live_marker_keeps_export_enabled_regardless_of_name(tmp_path, monkeypat
     monkeypatch.setattr(metrics_outbox, "post", lambda *args: sent.append(args) or True)
     monkeypatch.setattr(metrics.metrics_ledger, "record", lambda *args: None)
     monkeypatch.setattr(metrics, "_collect", lambda *args: None)
-    store = SimpleNamespace(config=lambda value: SimpleNamespace(scratch=False))
+    import fakeredis
+
+    store = SimpleNamespace(
+        config=lambda value: SimpleNamespace(scratch=False),
+        redis=fakeredis.FakeRedis(decode_responses=True),
+        key=lambda slug, name: f"{slug}:{name}",
+    )
     swarm = metrics_swarm.TickInput(store, {}, [], lambda url: None, None)
 
     assert (

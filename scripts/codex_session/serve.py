@@ -10,9 +10,10 @@ import time
 from collections.abc import Mapping
 from pathlib import Path
 
-from scripts import codex_router, select_profile
+from scripts import codex_router, profile_telemetry, select_profile
 from scripts.codex_session import supervisor
 from scripts.codex_session.binding import BindingError
+from scripts.profiles import binding
 from scripts.routing import codex_api, envs
 from scripts.swarm.store import AgentRecord, SwarmError, connect
 
@@ -23,6 +24,7 @@ ROUTE_FLAG = "--route"
 ROUTE_PREFIX = f"{ROUTE_FLAG}="
 EFFORT_PREFIX = "model_reasoning_effort="
 QUOTE = '"'
+PUMP_EXITED = "agentihooks codex-session: inbox pump exited with status {}; stopping the app server"
 
 
 def take_route(args: list[str]) -> tuple[str, list[str]]:
@@ -97,6 +99,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--exclude", default="")
     parser.add_argument("--report", default="")
     parser.add_argument("--previous-execution", default="")
+    parser.add_argument("--execution", default="")
     parser.add_argument("--resume", default="")
     parser.add_argument("--prompt-file", default="")
     parser.add_argument("--startup-timeout", type=float, default=supervisor.STARTUP_TIMEOUT_S)
@@ -110,10 +113,12 @@ def prepare(args: argparse.Namespace, agent_args: list[str], environ: dict[str, 
     slug, lane, task, name = (environ[name] for name in IDENTITY_ENV)
     route, agent_args = take_route(agent_args)
     environ = {**environ, select_profile.BUNDLE_REVISION: args.bundle_revision}
-    profile_env, flags = select_profile.prepare(args.profile, "codex", "", "", agent_args, environ, args.overlay)
+    pushed = {**environ, select_profile.PUSH: "1"}
+    profile_env, flags = select_profile.prepare(args.profile, "codex", "", "", agent_args, pushed, args.overlay)
     model, effort, server_args = server_options(flags)
     environ.update(profile_env)
     account, placement, child = route_account(environ, route, args.exclude)
+    child.update(profile_telemetry.agentihooks_langfuse_keys())
     codex_router._report(args.report, status="routed", account=account.name, placement=placement)
     agent = AgentRecord(
         name,
@@ -135,6 +140,7 @@ def prepare(args: argparse.Namespace, agent_args: list[str], environ: dict[str, 
         environ=child,
         server_args=(*provider_args(account), *server_args),
         previous_execution_id=args.previous_execution,
+        execution_id=args.execution,
         resume_thread=args.resume,
         opening=_opening(args.prompt_file),
         account_type=account_type(account, route),
@@ -164,6 +170,8 @@ def main(
         started = supervisor.launch(store, spec, deps or supervisor.Deps())
     except (supervisor.LaunchFailure, SwarmError, BindingError) as exc:
         print(f"agentihooks codex-session: launch refused: {exc}", file=sys.stderr)
+        if spec.environ.get(binding.REPORT):
+            binding.refuse(Path(spec.environ[binding.REPORT]), f"codex-session launch refused: {exc}")
         return 3
     record = started.record
     print(
@@ -175,7 +183,7 @@ def main(
     try:
         pump = subprocess.Popen(
             # nosemgrep: python.lang.security.audit.dangerous-subprocess-use-tainted-env-args.dangerous-subprocess-use-tainted-env-args
-            [sys.executable, "-m", "scripts.inbox.codex", spec.slug, record.execution_id],
+            [sys.executable, "-P", "-m", "scripts.inbox.codex", spec.slug, record.execution_id],
             cwd=spec.cwd,
             env=spec.environ,
         )
@@ -186,6 +194,7 @@ def main(
             except subprocess.TimeoutExpired:
                 pass
         else:
+            print(PUMP_EXITED.format(pump.returncode), file=sys.stderr)
             return pump.returncode or 3
     finally:
         if pump is not None:

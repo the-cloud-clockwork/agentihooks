@@ -11,6 +11,7 @@ CLASSIFIED_LANE = "eng"
 PURPOSE = "profile-pick"
 RESPONSIBILITIES = ("frontend", "engineer", "qa")
 HARNESS_ORDER = {"frontend": ("claude", "codex")}
+FRESH = "fresh_spawn"
 
 
 class ProfileUnresolved(RuntimeError):
@@ -85,9 +86,9 @@ def transfer(task: dict) -> dict:
     from scripts.swarm.tick import SpawnError
 
     saved = (task.get("handoff_envelope") or {}).get("launch")
-    if not task.get("handoff") and not saved:
+    if task.get(FRESH) or (not task.get("handoff") and not saved):
         return {}
-    if not saved or not all(saved.get(key) for key in ("profile", "harness", "model", "effort")):
+    if not saved or not all(saved.get(key) for key in ("profile", "harness")):
         raise SpawnError("unsupported handoff: original profile and run options are missing", "unsupported")
     if saved["harness"] not in ("claude", "codex"):
         raise SpawnError(f"unsupported handoff harness: {saved['harness']}", "unsupported")

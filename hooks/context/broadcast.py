@@ -243,18 +243,20 @@ def _sessions_path() -> Path:
 
 
 def _read_broadcasts() -> list[dict]:
+    from hooks.context import scheduled_broadcasts
+
     path = _broadcast_path()
     if not path.exists() or path.stat().st_size == 0:
-        return []
+        return scheduled_broadcasts.merge(path, [])
     try:
         data = json.loads(path.read_text())
     except (json.JSONDecodeError, OSError):
-        return []
+        return scheduled_broadcasts.merge(path, [])
 
     if not isinstance(data, list):
-        return []
+        return scheduled_broadcasts.merge(path, [])
 
-    return data
+    return scheduled_broadcasts.merge(path, data)
 
 
 def _load_broadcasts(cleanup: bool = False) -> list[dict]:
@@ -278,7 +280,10 @@ def _unique_tmp(path: Path) -> Path:
 
 
 def _save_broadcasts(messages: list[dict]) -> None:
+    from hooks.context import scheduled_broadcasts
+
     path = _broadcast_path()
+    messages = scheduled_broadcasts.save(path, messages)
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = _unique_tmp(path)
     tmp.write_text(json.dumps(messages, indent=2))
@@ -426,8 +431,9 @@ def create_broadcast(
     source: str = "operator",
     persistent: bool | None = None,
     channel: str | None = None,
+    delivery_id: str = "",
 ) -> str | None:
-    """Publish a broadcast to the shared file (and Redis if configured).
+    """Publish a broadcast; delivery_id makes scheduled publication idempotent.
 
     Args:
         message: Body text. Empty / whitespace-only messages are dropped.
@@ -443,9 +449,10 @@ def create_broadcast(
             sessions whose ``AGENTIHOOKS_BASE_CHANNELS`` env var includes this
             channel name (or contains the wildcard ``*``). When ``None``, the
             message is global and reaches every session regardless of subscription.
+        delivery_id: Durable identity; retries cannot republish an entry after clearing.
 
     Returns:
-        The 12-char message ID on success, or ``None`` for empty input.
+        The generated message ID or supplied delivery identity, or ``None`` for empty input.
     """
     if channel and channel.startswith(MASTERS_CHANNEL_PREFIX):
         slug = channel.removeprefix(MASTERS_CHANNEL_PREFIX)
@@ -456,9 +463,15 @@ def create_broadcast(
     if entry is None:
         return None
 
+    from hooks.context import scheduled_broadcasts
+
     with _file_lock(_broadcast_path()):
+        if delivery_id:
+            entry["id"] = delivery_id
+            scheduled_broadcasts.publish(_broadcast_path(), entry)
         msgs = _read_broadcasts()
-        msgs.append(entry)
+        if not delivery_id:
+            msgs.append(entry)
 
         # Enforce max messages — keep newest
         if len(msgs) > BROADCAST_MAX_MESSAGES:
@@ -763,6 +776,7 @@ def acknowledge_broadcast(session_id: str, message_id: str) -> bool:
 
 SESSION_MAX_AGE_SECONDS = 86400  # 24h retention for crash recovery
 SESSION_SUSPECT_SECONDS = 300
+LAUNCHER = "launcher"
 
 
 def _now_iso() -> str:
@@ -780,6 +794,14 @@ def encode_cwd(cwd: str) -> str:
       → -home-iamroot-dev-antoncore--claude-worktrees-foo
     """
     return cwd.replace("/", "-").replace(".", "-")
+
+
+def _named(records: list[dict], name: str) -> dict:
+    """A launcher's name from this session or the live session it supersedes wins over the given name."""
+    for info in records:
+        if info.get("named_by") == LAUNCHER and info.get("name"):
+            return {"name": info["name"], "named_by": LAUNCHER}
+    return {"name": name} if name else {}
 
 
 def register_session(
@@ -805,21 +827,25 @@ def register_session(
         # previously-alive entries for that pid (they're from an earlier
         # session lifecycle — /resume or /clear). Subagents share their
         # parent's pid and pass supersede=False.
-        if pid and supersede and not is_codex_memory_thread(cwd):
-            for existing_sid, existing_info in sessions.items():
-                if existing_sid == session_id:
-                    continue
-                if existing_info.get("pid") == pid and existing_info.get("status") == "alive":
-                    existing_info["status"] = "superseded"
-                    existing_info["superseded_at"] = now
-                    existing_info["superseded_by"] = session_id
+        rivals = (
+            [
+                info
+                for sid, info in sessions.items()
+                if sid != session_id and info.get("pid") == pid and info.get("status") == "alive"
+            ]
+            if pid and supersede and not is_codex_memory_thread(cwd)
+            else []
+        )
+        existing = sessions.get(session_id)
+        named = _named([existing or {}, *rivals], name)
+        for info in rivals:
+            info["status"] = "superseded"
+            info["superseded_at"] = now
+            info["superseded_by"] = session_id
         # Preserve started_at across re-registrations (SessionStart can fire
         # multiple times per session — resume, reconnect — and we want the
         # age to reflect the true session start, not the last event).
-        existing = sessions.get(session_id)
         started_at = existing.get("started_at", now) if existing else now
-        name = (existing or {}).get("name") or name
-        named = {"name": name} if name else {}
         sessions[session_id] = {
             **named,
             "started_at": started_at,
@@ -843,12 +869,12 @@ def deregister_session(session_id: str) -> None:
         _save_sessions(sessions)
 
 
-def _mark_session(pid: int, key: str, value: str) -> int:
+def _mark_session(pid: int, fields: dict[str, str]) -> int:
     with _file_lock(_sessions_path()):
         sessions = _load_sessions()
         live = [info for info in sessions.values() if info.get("pid") == pid and info.get("status") == "alive"]
         for info in live:
-            info[key] = value
+            info.update(fields)
         if live:
             _save_sessions(sessions)
     return len(live)
@@ -867,7 +893,7 @@ def _session_mark(pid: int, key: str) -> str:
 
 def name_session(pid: int, name: str) -> int:
     """Give every live session of ``pid`` an agent name; returns how many records carry it."""
-    return _mark_session(pid, "name", name)
+    return _mark_session(pid, {"name": name, "named_by": LAUNCHER})
 
 
 def session_name(pid: int) -> str:
@@ -875,7 +901,7 @@ def session_name(pid: int) -> str:
 
 
 def pin_session(pid: int, swarm: str) -> int:
-    return _mark_session(pid, "swarm", swarm)
+    return _mark_session(pid, {"swarm": swarm})
 
 
 def session_swarm(pid: int) -> str:

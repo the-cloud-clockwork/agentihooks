@@ -2,6 +2,9 @@ image:
   repository: local/agentihooks-swarm
   tag: dev
   pullPolicy: Never
+ledger:
+  tls:
+    secretName: swarm-ledger-tls
 redis:
   image:
     repository: mirror.gcr.io/library/redis
@@ -11,11 +14,15 @@ controller:
   readinessProbe:
     periodSeconds: 1
   livenessProbe:
-    initialDelaySeconds: 10
-    periodSeconds: 2
+    initialDelaySeconds: 5
+    periodSeconds: 1
     timeoutSeconds: 5
-    failureThreshold: 2
-  terminationGracePeriodSeconds: 1
+    failureThreshold: 6
+  terminationGracePeriodSeconds: 30
+  # The proofs run their Python through kubectl exec in this container, beside probes every second.
+  resources:
+    limits:
+      memory: 1Gi
   # Never created in kind; optional lets the controller start without it.
   secretEnv:
     - name: AGENTIHOOKS_WORKER_TERMINAL
@@ -23,4 +30,6 @@ controller:
       key: setting
       optional: true
   env:
-    AGENTIHOOKS_CONTROLLER_TICK_SECONDS: "2"
+    AGENTIHOOKS_CONTROLLER_TICK_SECONDS: "5"
+nats:
+  enabled: false

@@ -14,6 +14,7 @@ import new_ledger  # noqa: E402
 from tests.swarm_ledger import legacy_page  # noqa: E402
 
 SLUG = "caps-2026-01-01"
+SAFETY_S = 120
 
 
 def make_ledger():
@@ -25,7 +26,7 @@ def make_ledger():
         "questions": [],
         "followups": [],
     }
-    html_path, json_path = core.paths(SLUG)
+    html_path, json_path = legacy_page.paths(SLUG, core)
     core.LEDGER_DIR.mkdir(parents=True, exist_ok=True)
     html_path.write_text(legacy_page.render(new_ledger.build_doc(content), SLUG, 8765), encoding="utf-8")
     json_path.unlink(missing_ok=True)
@@ -65,7 +66,9 @@ class EventsCap(unittest.TestCase):
         make_ledger()
 
     def test_events_are_capped_and_the_start_time_does_not_move(self):
-        from scripts.swarm_ledger.repository import repository
+        from scripts.swarm_ledger.storage import default as default_repository
+
+        repository = default_repository()
 
         state = repository.get_document(SLUG)
         state["_meta"]["events"] = [
@@ -94,6 +97,17 @@ def signal_state(pid):
         if line.startswith(("State", "SigQ", "SigPnd", "ShdPnd", "SigBlk", "SigIgn", "SigCgt"))
     ]
     return "\n".join([*fields, f"wchan: {wchan}"])
+
+
+def wait_for_beat(proc, beat, stderr):
+    deadline = time.monotonic() + SAFETY_S
+    while not beat.exists():
+        if proc.poll() is not None or time.monotonic() > deadline:
+            stderr.seek(0)
+            raise AssertionError(
+                f"watcher wrote no beat file; exit code {proc.poll()}\n{stderr.read().decode(errors='replace')}"
+            )
+        time.sleep(0.05)
 
 
 def stop_or_report_stack(proc, stderr, timeout):
@@ -167,6 +181,7 @@ class Watch(unittest.TestCase):
 
     def test_watcher_removes_its_beat_file_on_sigterm(self):
         beat = core.watch_path(SLUG, "watcher")
+        beat.unlink(missing_ok=True)
         env = {**os.environ, "LEDGER_DIR": str(core.LEDGER_DIR), "LEDGER_PORT": "9"}
         command = [
             sys.executable,
@@ -182,16 +197,44 @@ class Watch(unittest.TestCase):
         with open(core.LEDGER_DIR / "watcher.stderr", "w+b") as stderr:
             proc = subprocess.Popen(command, env=env, stdout=subprocess.DEVNULL, stderr=stderr)
             try:
-                for _ in range(50):
-                    if beat.exists():
-                        break
-                    time.sleep(0.1)
-                self.assertTrue(beat.exists())
-                stop_or_report_stack(proc, stderr, timeout=5)
+                wait_for_beat(proc, beat, stderr)
+                stop_or_report_stack(proc, stderr, timeout=10)
             finally:
                 if proc.poll() is None:
                     proc.kill()
                     proc.wait()
+        self.assertEqual(proc.returncode, 0)
+        self.assertFalse(beat.exists())
+
+    def test_watcher_does_not_reconnect_after_sigterm_in_a_weakref_callback(self):
+        beat = core.watch_path(SLUG, "watcher")
+        beat.unlink(missing_ok=True)
+        env = {**os.environ, "LEDGER_DIR": str(core.LEDGER_DIR), "LEDGER_PORT": "9"}
+        code = (
+            "import os, signal, sys, weakref\n"
+            "sys.path.insert(0, sys.argv.pop(1))\n"
+            "import watch_ledger\n"
+            "def credentials(slug):\n"
+            "    class Target: pass\n"
+            "    target = Target()\n"
+            "    reference = weakref.ref(target, lambda _: os.kill(os.getpid(), signal.SIGTERM))\n"
+            "    del target\n"
+            "    return {}\n"
+            "def stream(*args):\n"
+            "    raise AssertionError('stream opened after SIGTERM')\n"
+            "watch_ledger.credentials = credentials\n"
+            "watch_ledger.stream = stream\n"
+            "watch_ledger.main()\n"
+        )
+        result = subprocess.run(
+            [sys.executable, "-X", "faulthandler", "-c", code, str(SCRIPTS), SLUG, "--as", "watcher"],
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("SystemExit: 0", result.stderr)
         self.assertFalse(beat.exists())
 
 

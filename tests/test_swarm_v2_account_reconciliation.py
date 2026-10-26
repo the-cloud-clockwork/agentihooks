@@ -157,6 +157,17 @@ def test_a_handoff_releases_the_old_slot_only_after_the_successor_occupies(world
     }
 
 
+def test_stored_accounts_scans_the_keyspace_in_pages_of_ten_thousand():
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+
+    scan = Mock(return_value=iter([accounts.account_key("b"), accounts.account_key("a")]))
+    store = SimpleNamespace(redis=SimpleNamespace(scan_iter=scan))
+
+    assert accounts.stored_accounts(store) == ["a", "b"]
+    scan.assert_called_once_with(match=accounts.account_key("*"), count=10000)
+
+
 def test_a_successor_that_never_confirms_leaves_the_old_slot_counted(world):
     world.scene()
     world.clock[0] += TTL

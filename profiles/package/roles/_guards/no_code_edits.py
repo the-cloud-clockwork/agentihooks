@@ -21,13 +21,17 @@ SERENA_WRITES = {
 
 
 def _allowed_roots(role: str, home: Path) -> list[Path]:
+    from hooks.context import master_coding
+
     roots = [(home / "scratchpad").resolve()]
     if role in PLANNERS:
         config = Path(os.environ.get("CLAUDE_CONFIG_DIR") or home / ".claude")
         roots.append((config / "plans").resolve())
     swarm = os.environ.get("AGENTIHOOKS_SWARM", "")
     task = os.environ.get("AGENTIHOOKS_SWARM_TASK", "")
-    if task != "master" and all(re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]*", value) for value in (swarm, task)):
+    if not master_coding.MASTER_TASK.fullmatch(task) and all(
+        re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]*", value) for value in (swarm, task)
+    ):
         folder = home.resolve() / ".agentihooks" / "swarm" / swarm / "tasks" / task
         if folder.resolve() == folder:
             roots.append(folder)
@@ -42,14 +46,8 @@ def _inside(tool: str, value: str, cwd: Path, roots: list[Path]) -> bool:
     return any(target.is_relative_to(root) for root in roots)
 
 
-def _seated(session: str, agentihooks: Path) -> bool:
-    if os.environ.get("AGENTIHOOKS_SWARM_TASK") == "master":
-        return True
-    return bool(session) and (agentihooks / "master_seats" / f"{session}.json").is_file()
-
-
 def hotfix_open(payload: dict, role: str) -> bool:
-    """The operator typed allow-master-coding in this master pane within the last thirty minutes."""
+    """The operator typed allow-master-coding in this master session and has not closed it."""
     if role != "master":
         return False
     from hooks.context import master_coding
@@ -57,10 +55,14 @@ def hotfix_open(payload: dict, role: str) -> bool:
     return master_coding.is_open(str(payload.get("session_id") or ""))
 
 
-def _delegated(payload: dict, role: str, home: Path) -> bool:
-    session = re.sub(r"[^A-Za-z0-9_.@-]", "_", str(payload.get("session_id") or ""))
-    agentihooks = Path(os.environ.get("AGENTIHOOKS_HOME") or home / ".agentihooks")
-    return role == "master" and bool(payload.get("agent_id")) and _seated(session, agentihooks)
+def _delegated(payload: dict, role: str) -> bool:
+    from hooks.context import master_coding
+
+    return (
+        role == "master"
+        and bool(payload.get("agent_id"))
+        and master_coding.is_master(str(payload.get("session_id") or ""))
+    )
 
 
 def deny_reason(payload: dict, role: str, home: Path) -> str:
@@ -72,7 +74,7 @@ def deny_reason(payload: dict, role: str, home: Path) -> str:
     paths.extend(inputs.get("file_paths", []))
     cwd = Path(payload.get("cwd") or os.getcwd())
     roots = _allowed_roots(role, home)
-    if _delegated(payload, role, home) or hotfix_open(payload, role):
+    if _delegated(payload, role) or hotfix_open(payload, role):
         from hooks.context.master_coding import closed_in_window
 
         if any(closed_in_window(value, cwd) for value in paths):

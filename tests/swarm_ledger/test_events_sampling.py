@@ -1,6 +1,7 @@
 import os
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -13,6 +14,7 @@ LEDGER = {
     "tasks": [{"id": "t1", "workspace": "w"}, {"id": "t2"}, {"id": "bad id", "workspace": "w"}],
     "_meta": {"rev": 3},
 }
+NO_AGENTS = SimpleNamespace(agents=lambda slug: [])
 
 
 from scripts.swarm import command_runner, commands
@@ -45,11 +47,11 @@ def test_a_work_folder_read_returns_the_lines_the_tick_last_published(folders, m
     assert server.workspace_tails("s", "t1") == {}
     progress.write_text("first step\n")
     assert server.workspace_tails("s", "t1") == {}
-    command_runner.publish("store", "s", {"tasks": [LEDGER["tasks"][0]]})
+    command_runner.publish(NO_AGENTS, "s", {"tasks": [LEDGER["tasks"][0]]})
     assert server.workspace_tails("s", "t1") == {"latest_progress": "first step"}
     progress.write_text("first step\nsecond step\n")
     (folders / "t1" / "proof.md").write_text("run green\n")
-    command_runner.publish("store", "s", {"tasks": [LEDGER["tasks"][0]]})
+    command_runner.publish(NO_AGENTS, "s", {"tasks": [LEDGER["tasks"][0]]})
     assert server.workspace_tails("s", "t1") == {
         "latest_progress": "first step\nsecond step",
         "latest_proof": "run green",
@@ -77,7 +79,7 @@ def test_one_ledger_failing_its_swarm_read_never_stops_the_others(folders, monke
     def status(slug, state=None):
         if slug == "a":
             raise RuntimeError("redis went away")
-        return {"config": {"state": state["_meta"]["rev"]}}
+        return {"config": {"state": state["_meta"]["rev"]}, "history": [1]}
 
     monkeypatch.setattr(server, "swarm_status", status)
     for slug in ("a", "b"):
@@ -114,6 +116,7 @@ def test_the_served_page_version_is_computed_once_per_process(monkeypatch):
     try:
         assert server.ledger_view({"tasks": [], "_meta": {"rev": 1, "seeds": {}, "api_operations": {}}})["_meta"] == {
             "rev": 1,
+            "limits": server.PAGE_LIMITS,
             "page_version": "v1",
             "crew": [],
         }
@@ -156,12 +159,22 @@ def test_stream_resources_loads_the_stored_view_without_reconciling(monkeypatch)
         return state
 
     monkeypatch.setattr(server.repository, "get_document", get_document)
-    monkeypatch.setattr(server, "ledger_view", lambda given: {**given, "view": True})
-    monkeypatch.setattr(server, "swarm_status", lambda slug, ledger: calls.append(("swarm", slug, ledger)) or "S")
+    monkeypatch.setattr(server, "ledger_view", lambda given, *_: {**given, "view": True})
+    monkeypatch.setattr(
+        server, "swarm_status", lambda slug, ledger: calls.append(("swarm", slug, ledger)) or {"q": 1, "transfers": {}}
+    )
     monkeypatch.setattr(server, "workspace_tails", lambda *a: calls.append(("tails", *a)))
     view = {**state, "view": True}
-    assert server.stream_resources("s") == {"ledger": view, "swarm": "S"}
+    assert server.stream_resources("s") == {"ledger": view, "swarm": {"q": 1}}
     assert calls == [("document", "s"), ("swarm", "s", view)]
+
+
+def test_the_page_stream_leaves_out_the_swarm_records_the_page_never_reads(monkeypatch):
+    status = {"agents": [1], "history": [2], "transfers": {"a": 3}, "launch_checks": [4], "handoffs": [5]}
+    monkeypatch.setattr(server, "swarm_status", lambda slug, ledger: status)
+    assert server.stream_swarm("s", {}) == {"agents": [1], "handoffs": [5]}
+    monkeypatch.setattr(server, "swarm_status", lambda slug, ledger: None)
+    assert server.stream_swarm("s", {}) is None
 
 
 def test_sampling_leaves_work_folder_changes_to_the_lazy_read(folders, monkeypatch):
@@ -169,7 +182,7 @@ def test_sampling_leaves_work_folder_changes_to_the_lazy_read(folders, monkeypat
     server.HUB.open("empty", lambda: {"swarm": None})
     server.HUB.open("s", lambda: {"ledger": LEDGER, "swarm": None})
     (folders / "t1" / "progress.md").write_text("step one\n")
-    command_runner.publish("store", "s", {"tasks": [LEDGER["tasks"][0]]})
+    command_runner.publish(NO_AGENTS, "s", {"tasks": [LEDGER["tasks"][0]]})
     tails = counted(monkeypatch, ledger_workspace, "tails")
     reads = counted(monkeypatch, commands, "workspaces")
     server.sample_streams()

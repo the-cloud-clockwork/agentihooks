@@ -10,8 +10,6 @@ from scripts.swarm.store import SwarmConfig, SwarmError
 from tests.swarm.test_cli import env, run  # noqa: F401
 from tests.swarm.test_runtime import _launched, _passed, _resuming
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 TASK = {"id": "t1", "title": "x"}
 
 
@@ -342,7 +340,7 @@ def test_set_names_every_key_it_takes_and_every_level(env, capsys):  # noqa: F81
     assert (
         "autonomy=manual|assist|delegate|full, effort-min=E, effort-max=E, claude-model=M, codex-model=M, "
         "scaling=auto|manual, "
-        "load-high=N, load-low=N, memory-per-agent=MB, api-url=URL, codex-inbox-transport=legacy|app_server "
+        "load-high=N, load-low=N, memory-per-agent=MB, swap-full-share=N, swap-floor=MB, api-url=URL, codex-inbox-transport=legacy|app_server "
         "or eng-role, "
     ) in err
     assert run("sw", "set", "effort-min=huge") == 1

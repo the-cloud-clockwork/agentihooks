@@ -12,6 +12,7 @@ import hashlib
 import json
 import os
 import shutil
+import string
 import subprocess
 import sys
 import time
@@ -27,7 +28,16 @@ from hooks.context.account_sessions import (
     INTERNAL_RUN,
     codex_sessions_by_account,
 )
-from scripts import codex_quota, codex_rollouts, codex_sessions, codex_usage, operator_env, session_bands
+from scripts import (
+    account_names,
+    codex_quota,
+    codex_rollouts,
+    codex_sessions,
+    codex_usage,
+    operator_env,
+    quota_freshness,
+    session_bands,
+)
 from scripts.codex_quota import CodexQuota
 from scripts.routing import codex_api, envs, place
 from scripts.routing.slots import API, INTERACTIVE, SUBSCRIPTION, Slot
@@ -49,6 +59,8 @@ ACCOUNT_ID_ENV = envs.CHATGPT_ACCOUNT_ID_ENV
 BEARER_PROVIDER = "agentihooks-chatgpt"
 CHATGPT_BASE_URL = "https://chatgpt.com/backend-api/codex"
 OPENAI_AUTH_CLAIM = "https://api.openai.com/auth"
+OPENAI_PROFILE_CLAIM = "https://api.openai.com/profile"
+SLUG_CHARS = frozenset(string.ascii_lowercase + string.digits + "_")
 AGENT_IDENTITY_CLAIM = "agent_runtime_id"
 API_KEY_PREFIX = "sk-"
 PERSONAL_TOKEN_PREFIX = "at-"
@@ -72,6 +84,10 @@ class CodexAccount:
     @property
     def is_token(self) -> bool:
         return bool(self.env_name)
+
+    @property
+    def kind(self) -> str:
+        return SUBSCRIPTION if self.is_token else INTERACTIVE
 
     @property
     def is_api(self) -> bool:
@@ -157,7 +173,14 @@ def token_accounts(environ: Mapping[str, str]) -> list[CodexAccount]:
         and name.removeprefix(CODEX_TOKEN_PREFIX) not in ("", API_ACCOUNT)
         and environ[name]
     ]
-    return [CodexAccount(name.removeprefix(CODEX_TOKEN_PREFIX), name) for name in operator_env.distinct(environ, names)]
+
+    def account(name: str) -> CodexAccount:
+        return CodexAccount(name.removeprefix(CODEX_TOKEN_PREFIX), name)
+
+    def rank(name: str) -> tuple[bool, bool, str]:
+        return _routed_rank(account(name), environ)
+
+    return [account(name) for name in operator_env.distinct(environ, names, key=rank)]
 
 
 def _without_tokens(environ: Mapping[str, str]) -> dict[str, str]:
@@ -303,16 +326,58 @@ def fingerprint(account_id: str) -> str:
 
 
 def duplicates(pool: list[CodexAccount], environ: Mapping[str, str]) -> dict[str, str]:
-    """Each token account whose ChatGPT account repeats an earlier token account's, mapped to that earlier name."""
-    first: dict[str, str] = {}
-    repeated = {}
+    """Each token account whose ChatGPT account another token account shares, mapped to the one routed for both."""
+    groups: dict[str, list[CodexAccount]] = {}
     for account in pool:
         found = identity(account, environ) if account.is_token else ""
-        if found and found in first:
-            repeated[account.name] = first[found]
-        elif found:
-            first[found] = account.name
+        if found:
+            groups.setdefault(found, []).append(account)
+    repeated = {}
+    for group in groups.values():
+        kept = min(group, key=lambda account: _routed_rank(account, environ))
+        repeated.update({account.name: kept.name for account in group if account is not kept})
     return repeated
+
+
+def _routed_rank(account: CodexAccount, environ: Mapping[str, str]) -> tuple[bool, bool, str]:
+    claims = _claims(environ[account.env_name])
+    profile = claims.get(OPENAI_PROFILE_CLAIM)
+    email = profile.get("email") if isinstance(profile, dict) else None
+    named = isinstance(email, str) and account.name == account_names.secret_key(email).replace("-", "_")
+    return not named, not email_shaped(account.name), account.name
+
+
+def email_shaped(name: str) -> bool:
+    head, _, domain_end = name.rpartition("_")
+    return (
+        "at" in head[1:-1]
+        and set(head) <= SLUG_CHARS
+        and len(domain_end) >= 2
+        and set(domain_end) <= set(string.ascii_lowercase)
+    )
+
+
+def routed(pool: list[CodexAccount], environ: Mapping[str, str]) -> list[CodexAccount]:
+    repeated = duplicates(pool, environ)
+    return [account for account in pool if account.name not in repeated]
+
+
+def routed_live(
+    pool: list[CodexAccount], sessions: Mapping[str, int], environ: Mapping[str, str]
+) -> list[CodexAccount]:
+    tokens = token_accounts(environ)
+    repeated = set(duplicates(tokens, environ)) | _shadowed(tokens, environ)
+    return [account for account in live_accounts(pool, sessions) if account.name not in repeated]
+
+
+def _shadowed(tokens: list[CodexAccount], environ: Mapping[str, str]) -> set[str]:
+    kept = {account.env_name for account in tokens}
+    held = {environ[name] for name in kept}
+    return {
+        name.removeprefix(CODEX_TOKEN_PREFIX)
+        for name in environ
+        if name.startswith(CODEX_TOKEN_PREFIX) and name not in kept and environ[name] in held
+    }
 
 
 def identity_warnings(environ: Mapping[str, str]) -> list[str]:
@@ -374,15 +439,23 @@ def _probe_attempts() -> dict[str, float]:
 
 
 def fresh_quotas(
-    pool: list[CodexAccount], environ: Mapping[str, str], now: float, run: Callable = subprocess.run
+    pool: list[CodexAccount],
+    environ: Mapping[str, str],
+    now: float,
+    run: Callable = subprocess.run,
+    force: bool = False,
 ) -> dict[str, CodexQuota | None]:
-    """Each account's newest reading, probed again when it is missing or stale, at most once per freshness window."""
+    """Each account's newest reading, probed again when it is missing or stale, at most once per freshness window;
+    ``force`` probes every signed in account."""
     found = quotas(pool, environ)
     attempts = _probe_attempts()
     for account in pool:
         seen = found.get(account.name)
-        stale = not session_bands.fresh(seen.observed_at if seen else None, now)
-        if account.signed_in and stale and not session_bands.fresh(attempts.get(account.name), now):
+        stale = seen is None or quota_freshness.stale(
+            seen.observed_at, (seen.five_hour.resets_at, seen.seven_day.resets_at), now
+        )
+        due = force or (stale and not session_bands.fresh(attempts.get(account.name), now))
+        if account.signed_in and due:
             attempts[account.name] = now
             found[account.name] = probe(account, environ, run) or seen
     with contextlib.suppress(OSError):
@@ -406,8 +479,7 @@ class CodexAccountSource:
             for account in accounts(environ, *self._run())
             if account.signed_in and not refusal(account, environ)
         ]
-        repeated = duplicates(found, environ)
-        return [account for account in found if account.name not in repeated]
+        return routed(found, environ)
 
     def readings(
         self, pool: list[CodexAccount], environ: Mapping[str, str], now: float
@@ -422,7 +494,7 @@ class CodexAccountSource:
                 cap,
                 self.sessions.get(account.name, 0),
                 _spend_by(quota, now),
-                kind=SUBSCRIPTION if account.is_token else INTERACTIVE,
+                kind=account.kind,
             )
             for account in pool
             if account.signed_in
@@ -596,6 +668,10 @@ def _own_command(args: list[str], environ: Mapping[str, str]) -> int | None:
         from scripts import codex_login
 
         return codex_login.main(args[1:], environ)
+    if args[:1] == ["logout"] and len(args) > 1 and not _passthrough_login(args[1]):
+        from scripts import codex_logout
+
+        return codex_logout.main(args[1:], environ)
     return None
 
 
@@ -649,6 +725,8 @@ def main(
         if route == "interactive"
         else child_environment(account, active)
     )
-    execvpe(codex_bin, command(account, codex_bin, args), child)
+    from scripts.hive.account_slots import execute
+
+    execute("codex", account.name, child, lambda env: execvpe(codex_bin, command(account, codex_bin, args), env))
     lock.close()
     return 0

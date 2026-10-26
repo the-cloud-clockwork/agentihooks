@@ -7,8 +7,6 @@ from scripts.swarm.store import AUTONOMY, MASTER, SwarmConfig, SwarmError
 from tests.swarm.test_cli import env, home, run  # noqa: F401
 from tests.swarm.test_runtime import _spawn_env
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 TASK = {"id": "t1", "title": "x", "phase": "p1"}
 
 
@@ -110,7 +108,11 @@ def test_full_engineers_merge_on_green_like_delegate():
 
 def test_the_level_shapes_only_code_and_ci_tasks():
     for kind in ("ops", "tune", "troubleshoot", "research"):
-        assert build("manual", kind=kind) == build("delegate", kind=kind)
+        manual, delegate = build("manual", kind=kind).splitlines(), build("delegate", kind=kind).splitlines()
+        changed = [(m, d) for m, d in zip(manual, delegate, strict=True) if m != d]
+        assert len(changed) == 1
+        assert "leaves the merge to the operator" in changed[0][0]
+        assert "ready <handoff doc> instead of done" in changed[0][1]
     assert "open a draft pull request into dev" in build("manual", "ci", kind="ci")
 
 
@@ -133,9 +135,9 @@ def test_a_pull_request_in_an_assist_swarm_waits_for_the_operator_approval(env, 
 
 
 @pytest.mark.parametrize("lane", ["eng", "ci", MASTER])
-def test_every_prompt_says_to_raise_a_priority_when_waiting_on_the_operator(lane):
+def test_no_prompt_orders_an_ask_to_the_operator(lane):
     text = build(lane=lane)
-    led = f"agentihooks ledger --slug sw --as sw-{lane}-1"
-    assert "Whenever you wait on the operator" in text
-    assert f'{led} priority add <item> "<' in text
-    assert f'{led} followup add "<text>" --needs-operator' in text
+    assert "Whenever you wait on the operator" not in text
+    assert lane == MASTER or prompt.NO_ASKS.format(slug="sw") in text
+    assert "priority add <item>" not in text
+    assert "--needs-operator" not in text

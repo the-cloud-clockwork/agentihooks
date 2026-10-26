@@ -11,8 +11,6 @@ import pytest
 from scripts.hive import auth, cli, registry, server
 from scripts.swarm import store
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 PUBLIC = "rediss://hive.example:6380/0"
 BAD_REFRESH_BODY = "the body must be a JSON object with a string ledger_credential"
 NO_MEMBER = "the ledger credential belongs to no hive member"
@@ -62,24 +60,26 @@ def _accepts(redis, url):
 
 
 def test_a_ledger_credential_recreates_a_redis_user_lost_on_restart(admin):
-    grant = auth.exchange(admin, auth.invite(admin, "laptop"), PUBLIC)
+    grant = auth.mint(admin, "laptop", PUBLIC)
     admin.acl_deluser(f"hive-{grant['id']}")
+    admin.srem(auth.INDEX, grant["id"])
 
     refreshed = auth.refresh(admin, grant["ledger_credential"], PUBLIC)
 
     assert refreshed["id"] == grant["id"]
+    assert admin.smembers(auth.INDEX) == {grant["id"]}
     assert refreshed["redis_url"].startswith(f"rediss://hive-{grant['id']}:")
     assert refreshed["redis_url"].endswith("@hive.example:6380/0")
     assert _accepts(admin, refreshed["redis_url"])
     user = admin.acl_getuser(f"hive-{grant['id']}")
     assert user["enabled"] is True
-    assert user["keys"] == [f"~{pattern}" for pattern in auth.ACL_PATTERNS]
+    assert f"~{auth.ROOT}:hive:{grant['id']}" in user["keys"]
     assert user["channels"] == [f"&{pattern}" for pattern in auth.ACL_PATTERNS]
     assert user["categories"] == list(auth.ACL_CATEGORIES)
 
 
 def test_a_refresh_retires_the_previous_password(admin):
-    grant = auth.exchange(admin, auth.invite(admin, "laptop"), PUBLIC)
+    grant = auth.mint(admin, "laptop", PUBLIC)
 
     refreshed = auth.refresh(admin, grant["ledger_credential"], PUBLIC)
 
@@ -98,7 +98,7 @@ def test_an_unknown_ledger_credential_is_refused(admin, credential):
 
 
 def test_a_revoked_member_cannot_refresh(admin):
-    grant = auth.exchange(admin, auth.invite(admin, "laptop"), PUBLIC)
+    grant = auth.mint(admin, "laptop", PUBLIC)
     auth.revoke(admin, grant["id"])
 
     with pytest.raises(auth.HiveError, match=f"^{NO_MEMBER}$"):
@@ -108,7 +108,7 @@ def test_a_revoked_member_cannot_refresh(admin):
 
 
 def test_a_redis_refusal_during_refresh_is_reported(admin, redis_lib, monkeypatch):
-    grant = auth.exchange(admin, auth.invite(admin, "laptop"), PUBLIC)
+    grant = auth.mint(admin, "laptop", PUBLIC)
 
     def refuse(self, *args, **kwargs):
         raise redis_lib.exceptions.ResponseError("NOPERM")
@@ -126,7 +126,7 @@ def _saved_users(aclfile):
 def test_join_refresh_and_revoke_save_the_acl_file(saved):
     redis, aclfile = saved
 
-    grant = auth.exchange(redis, auth.invite(redis, "laptop"), PUBLIC)
+    grant = auth.mint(redis, "laptop", PUBLIC)
     assert _saved_users(aclfile) == ["default", f"hive-{grant['id']}"]
 
     aclfile.write_text("")
@@ -148,7 +148,7 @@ def test_a_failed_acl_save_undoes_the_join(saved, redis_lib, monkeypatch):
     monkeypatch.setattr(redis_lib.Redis, "acl_save", refuse)
 
     with pytest.raises(auth.HiveError, match=r"^Redis refused the new member \(.*save the ACLs\)$"):
-        auth.exchange(redis, auth.invite(redis, "laptop"), PUBLIC)
+        auth.mint(redis, "laptop", PUBLIC)
 
     assert redis.acl_users() == ["default"]
     assert redis.keys(f"{auth.PREFIX}:member:*") == []
@@ -157,7 +157,7 @@ def test_a_failed_acl_save_undoes_the_join(saved, redis_lib, monkeypatch):
 
 def test_a_revoke_whose_acl_save_fails_is_reported_and_completes_on_retry(saved, redis_lib, monkeypatch):
     redis, aclfile = saved
-    grant = auth.exchange(redis, auth.invite(redis, "laptop"), PUBLIC)
+    grant = auth.mint(redis, "laptop", PUBLIC)
 
     def refuse(self):
         raise redis_lib.exceptions.ResponseError("ERR There was an error trying to save the ACLs")
@@ -184,7 +184,7 @@ def test_a_revoke_whose_acl_save_fails_is_reported_and_completes_on_retry(saved,
 
 
 def test_the_refresh_endpoint_answers_with_the_refreshed_grant(admin, hive):
-    grant = auth.exchange(admin, auth.invite(admin, "laptop"), PUBLIC)
+    grant = auth.mint(admin, "laptop", PUBLIC)
     body = json.dumps({"ledger_credential": grant["ledger_credential"]}).encode()
 
     with urllib.request.urlopen(urllib.request.Request(hive + "/hive/refresh", data=body), timeout=5) as response:
@@ -216,7 +216,7 @@ def test_the_refresh_endpoint_refuses_bad_credentials_and_bodies(hive, body, sta
 
 def _joined(admin, hive, tmp_path, monkeypatch):
     monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
-    grant = auth.exchange(admin, auth.invite(admin, "laptop"), PUBLIC)
+    grant = auth.mint(admin, "laptop", PUBLIC)
     auth.write_env(tmp_path, hive, grant)
     monkeypatch.setenv("AGENTIHOOKS_HIVE_ID", grant["id"])
     monkeypatch.setenv("AGENTIHOOKS_HIVE_URL", hive)
@@ -444,7 +444,7 @@ def test_the_refresh_command_is_listed_with_its_help():
     (commands,) = cli._parser()._subparsers._group_actions
     helps = {action.dest: action.help for action in commands._choices_actions}
 
-    assert helps["refresh"] == "Mint a new Redis credential for this hive through its join service"
+    assert helps["refresh"] == "Mint a new Redis credential for this hive through its hive endpoint"
 
 
 def test_the_hive_home_comes_from_the_mapping_then_the_process(tmp_path, monkeypatch):
@@ -479,3 +479,165 @@ def test_a_refused_refresh_reports_both_refusals(admin, hive, redis_lib, tmp_pat
     assert str(refused.value) == (f"the hive Redis credential was refused and the hive refused a refresh ({NO_MEMBER})")
     assert pinged == [f"hive-{grant['id']}"]
     assert environ["AGENTIHOOKS_HIVE_REDIS_URL"] == grant["redis_url"]
+
+
+def test_a_member_the_process_env_left_behind_yields_to_the_saved_member(admin, hive, redis_lib, tmp_path, monkeypatch):
+    left = auth.mint(admin, "pod-before-restart", PUBLIC)
+    grant = _joined(admin, hive, tmp_path, monkeypatch)
+    pinged = _fake_ping(admin, redis_lib, monkeypatch)
+    environ = {
+        **_hive_environ(hive, grant, tmp_path),
+        "AGENTIHOOKS_HIVE_ID": left["id"],
+        "AGENTIHOOKS_HIVE_REDIS_URL": left["redis_url"],
+    }
+
+    client = store.redis_client(environ)
+
+    assert pinged == [f"hive-{grant['id']}"]
+    assert environ["AGENTIHOOKS_HIVE_ID"] == grant["id"]
+    assert environ["AGENTIHOOKS_HIVE_REDIS_URL"] == grant["redis_url"]
+    assert client.connection_pool.connection_kwargs["username"] == f"hive-{grant['id']}"
+
+
+def test_a_hive_process_with_a_swarm_redis_and_no_member_keeps_its_swarm_redis(
+    admin, hive, redis_lib, tmp_path, monkeypatch
+):
+    _joined(admin, hive, tmp_path, monkeypatch)
+    swarm_url = auth._with_user("redis://h:1/0", "swarm", "p")
+    admin.acl_setuser("swarm", enabled=True, passwords=["+p"], keys=["*"], commands=["+@all"])
+    pinged = _fake_ping(admin, redis_lib, monkeypatch)
+    environ = {
+        "AGENTIHOOKS_HOME": str(tmp_path),
+        "AGENTIHOOKS_DEPLOYMENT": "distributed",
+        "AGENTIHOOKS_SWARM_REDIS_URL": swarm_url,
+    }
+
+    store.redis_client(environ)
+
+    assert pinged == ["swarm"]
+    assert "AGENTIHOOKS_HIVE_REDIS_URL" not in environ
+
+
+@pytest.mark.parametrize(
+    ("lines", "member"),
+    [
+        (None, set()),
+        (["AGENTIHOOKS_HIVE_ID=", "AGENTIHOOKS_HIVE_REDIS_URL="], set()),
+        (["AGENTIHOOKS_HIVE_ID=a", "OTHER=b"], {"AGENTIHOOKS_HIVE_ID"}),
+        (
+            ["AGENTIHOOKS_HIVE_ID=a", "AGENTIHOOKS_HIVE_REDIS_URL={url}"],
+            {"AGENTIHOOKS_HIVE_ID", "AGENTIHOOKS_HIVE_REDIS_URL"},
+        ),
+    ],
+)
+def test_the_saved_member_holds_only_its_set_id_and_redis_url(tmp_path, lines, member):
+    url = auth._with_user("rediss://hive.example:6380/0?x=y", "hive-a", "p")
+    if lines is not None:
+        (tmp_path / "hive.env").write_text("".join(line.format(url=url) + "\n" for line in lines))
+
+    saved = cli.saved_member({"AGENTIHOOKS_HOME": str(tmp_path)})
+
+    assert set(saved) == member
+    assert saved.get("AGENTIHOOKS_HIVE_ID", "a") == "a"
+    assert saved.get("AGENTIHOOKS_HIVE_REDIS_URL", url) == url
+
+
+def test_a_workstation_keeps_its_swarm_redis_beside_a_saved_hive_member(admin, hive, redis_lib, tmp_path, monkeypatch):
+    _joined(admin, hive, tmp_path, monkeypatch)
+    swarm_url = auth._with_user("redis://h:1/0", "swarm", "p")
+    admin.acl_setuser("swarm", enabled=True, passwords=["+p"], keys=["*"], commands=["+@all"])
+    pinged = _fake_ping(admin, redis_lib, monkeypatch)
+    environ = {"AGENTIHOOKS_HOME": str(tmp_path), "AGENTIHOOKS_SWARM_REDIS_URL": swarm_url}
+
+    store.redis_client(environ)
+
+    assert pinged == ["swarm"]
+    assert "AGENTIHOOKS_HIVE_REDIS_URL" not in environ
+    assert "AGENTIHOOKS_HIVE_ID" not in environ
+
+
+@pytest.mark.parametrize("deployment", [{}, {"AGENTIHOOKS_DEPLOYMENT": "local"}])
+def test_a_workstation_keeps_a_different_member_in_its_env(admin, hive, redis_lib, tmp_path, monkeypatch, deployment):
+    left = auth.mint(admin, "pod-before-restart", PUBLIC)
+    _joined(admin, hive, tmp_path, monkeypatch)
+    admin.acl_setuser("swarm", enabled=True, passwords=["+p"], keys=["*"], commands=["+@all"])
+    pinged = _fake_ping(admin, redis_lib, monkeypatch)
+    environ = {
+        **deployment,
+        "AGENTIHOOKS_HOME": str(tmp_path),
+        "AGENTIHOOKS_SWARM_REDIS_URL": auth._with_user("redis://h:1/0", "swarm", "p"),
+        "AGENTIHOOKS_HIVE_ID": left["id"],
+        "AGENTIHOOKS_HIVE_REDIS_URL": left["redis_url"],
+    }
+
+    store.redis_client(environ)
+
+    assert pinged == ["swarm"]
+    assert environ["AGENTIHOOKS_HIVE_ID"] == left["id"]
+    assert environ["AGENTIHOOKS_HIVE_REDIS_URL"] == left["redis_url"]
+
+
+def test_a_saved_member_adopted_after_a_refusal_brings_its_own_id(admin, hive, redis_lib, tmp_path, monkeypatch):
+    left = auth.mint(admin, "pod-before-recreate", PUBLIC)
+    grant = _joined(admin, hive, tmp_path, monkeypatch)
+    sibling = auth.refresh(admin, grant["ledger_credential"], PUBLIC)
+    auth.write_env(tmp_path, hive, {**sibling, "ledger_credential": grant["ledger_credential"]})
+    _fake_ping(admin, redis_lib, monkeypatch)
+    environ = {**_hive_environ(hive, grant, tmp_path), "AGENTIHOOKS_HIVE_ID": left["id"]}
+
+    store.redis_client(environ)
+
+    assert environ["AGENTIHOOKS_HIVE_ID"] == grant["id"]
+    assert environ["AGENTIHOOKS_HIVE_REDIS_URL"] == sibling["redis_url"]
+
+
+def test_a_refreshed_credential_brings_the_id_of_the_member_it_was_made_for(
+    admin, hive, redis_lib, tmp_path, monkeypatch
+):
+    left = auth.mint(admin, "pod-before-recreate", PUBLIC)
+    grant = _joined(admin, hive, tmp_path, monkeypatch)
+    admin.acl_deluser(f"hive-{grant['id']}")
+    _fake_ping(admin, redis_lib, monkeypatch)
+    environ = {**_hive_environ(hive, grant, tmp_path), "AGENTIHOOKS_HIVE_ID": left["id"]}
+
+    store.redis_client(environ)
+
+    assert environ["AGENTIHOOKS_HIVE_ID"] == grant["id"]
+    assert urllib.parse.urlsplit(environ["AGENTIHOOKS_HIVE_REDIS_URL"]).username == f"hive-{grant['id']}"
+
+
+SCHEDULER_SUFFIXES = ("entries", "due", "pending", "retired", "dispatch-lock")
+
+
+def test_a_daemon_first_start_keys_every_scheduler_key_under_its_redis_member(
+    admin, hive, redis_lib, tmp_path, monkeypatch
+):
+    from scripts.hive import daemon
+    from scripts.scheduler.core import Scheduler
+    from scripts.swarm.keyspace import ROOT
+
+    left = auth.mint(admin, "pod-before-recreate", PUBLIC)
+    grant = _joined(admin, hive, tmp_path, monkeypatch)
+    admin.acl_deluser(f"hive-{grant['id']}")
+    _fake_ping(admin, redis_lib, monkeypatch)
+    monkeypatch.setenv("AGENTIHOOKS_DEPLOYMENT", "distributed")
+    monkeypatch.setenv("AGENTIHOOKS_HIVE_ID", left["id"])
+    monkeypatch.setattr(daemon.quota_refresh, "refresh", lambda environ: None)
+    monkeypatch.setattr(daemon.quota_refresh, "start", lambda environ, worker, attempted_at: (None, attempted_at))
+    monkeypatch.setattr(daemon.github_app_cli, "renew", lambda renewed, now: renewed)
+    monkeypatch.setattr(daemon, "publish_headroom", lambda redis, waiter, local_id, stop: None)
+    started = []
+
+    def beat(redis, local_id):
+        scheduler = Scheduler(redis, machine="pod")
+        user = redis.connection_pool.connection_kwargs["username"]
+        started.append((user, local_id, [scheduler.key(suffix) for suffix in SCHEDULER_SUFFIXES]))
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(daemon, "beat", beat)
+
+    with pytest.raises(KeyboardInterrupt):
+        daemon.run(lambda: daemon.clients(store.redis_client()))
+
+    own = f"{ROOT}:hive:{grant['id']}:scheduler:pod"
+    assert started == [(f"hive-{grant['id']}", grant["id"], [f"{own}:{suffix}" for suffix in SCHEDULER_SUFFIXES])]

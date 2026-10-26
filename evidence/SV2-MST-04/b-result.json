@@ -7,23 +7,21 @@
     "input_sha256": "a11c82985cdf497aa9f0644d8381ed5e34b2cf4f3c2145206aa6e262ba70ad96",
     "observed": {
       "answers": [],
-      "decisions": {},
+      "cross": {},
+      "deciders": {},
       "followup_done": false,
       "operator_write_kept": true,
       "posts": [],
-      "refusals": 4,
+      "refusals": 3,
       "refused": {
         "answer": [
-          "questions/q1 belongs to master@race-2026-01-01, so master-2@race-2026-01-01 cannot answer it"
+          "questions/q1 belongs to master@race-2026-01-01, so master@abcdef-0009 cannot answer it"
         ],
         "decide": [
-          "followups/f1 belongs to master@race-2026-01-01, so master-2@race-2026-01-01 cannot decide it"
-        ],
-        "former": [
           "followups/f1 belongs to master@race-2026-01-01, so master@abcdef-0009 cannot decide it"
         ],
         "set_task": [
-          "tasks/t1 belongs to master@race-2026-01-01, so master-2@race-2026-01-01 cannot set it"
+          "tasks/t1 belongs to master@race-2026-01-01, so master@abcdef-0009 cannot set it"
         ]
       },
       "t1_description": ""

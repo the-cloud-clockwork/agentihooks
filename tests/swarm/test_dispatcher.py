@@ -9,8 +9,6 @@ from scripts.swarm import capacity, dispatcher, grouping, metrics, priority_swee
 from scripts.swarm.ledger_client import LedgerRefused
 from scripts.swarm.store import MASTER, RedisStore, SwarmConfig, SwarmError
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 SLUG = "sw"
 NOW = 1_800_000_000_000
 MASTER_NAME = "master@abcdef-0001"
@@ -330,6 +328,33 @@ def test_at_delegate_a_task_entering_the_queue_head_gets_one_comment_and_a_log_r
     assert len({r["event_id"] for r in rows}) == 3
 
 
+def test_the_rank_pass_reads_releases_from_the_swarm_repository(store, home, shipped, monkeypatch):
+    from scripts.swarm import release_wait
+
+    repos = []
+    monkeypatch.setattr(release_wait, "checker", lambda repo: repos.append(repo) or (lambda task: True))
+    dispatcher.rank_pass(SLUG, store.config(SLUG), store, Ledger(), doc(ladder()), NOW)
+    assert repos == [store.config(SLUG).repo]
+
+
+def test_the_rank_pass_holds_tasks_the_applied_check_refuses(store, home, shipped, monkeypatch):
+    from scripts.swarm import apply_wait
+
+    seen = []
+
+    def checker(config, rows):
+        seen.append((config, sorted(rows)))
+        return lambda task: False
+
+    monkeypatch.setattr(apply_wait, "checker", checker)
+    store.update(SLUG, autonomy="delegate", max_eng=3)
+    ledger = Ledger()
+    found = doc(ladder())
+    actions = dispatcher.rank_pass(SLUG, store.config(SLUG), store, ledger, found, NOW)
+    assert seen == [(store.config(SLUG), sorted(t["id"] for t in found["tasks"]))]
+    assert [a for a in actions if "head of" in a] == [] and ledger.comments == []
+
+
 def test_the_queue_head_follows_claims_operator_ranks_and_freezes_with_one_comment_per_change(store, home, shipped):
     store.update(SLUG, autonomy="full", max_eng=2)
     tasks = [*deep_and_wide(), task("w1", phase="", depends_on=["l1"])]
@@ -530,7 +555,7 @@ def spawned(store, config, ledger, found):
     from tests.swarm.test_tick import FakeRuntime
 
     return [
-        (lane, t["id"]) for lane, t in tick._spawn_order(SLUG, config, store, [], ledger.rows, found, FakeRuntime())
+        (lane, t["id"]) for lane, t in tick._spawn_order(SLUG, config, store, [], ledger.rows, found, FakeRuntime())[0]
     ]
 
 
@@ -549,13 +574,14 @@ def test_a_busy_seat_leaves_three_claims_from_the_top_of_the_queue(store):
     config, ledger, found = queue_ledger(store, "delegate")
     ledger.rows["x"] = {"id": "x", "state": "claimed", "lane": "eng", "depends_on": []}
     busy = [AgentRecord("engineer@abcdef-0001", "eng", "x", state="working")]
-    claims = tick._spawn_order(SLUG, config, store, busy, ledger.rows, found, FakeRuntime())
+    claims, _ = tick._spawn_order(SLUG, config, store, busy, ledger.rows, found, FakeRuntime())
     assert [(lane, t["id"]) for lane, t in claims] == [("eng", t) for t in ("l4", "h1", "s")]
 
 
 def test_a_task_whose_launch_failed_falls_behind_its_band_in_the_dispatcher_queue(store, monkeypatch):
     config, ledger, found = queue_ledger(store, "delegate")
     monkeypatch.setattr(store, "launch_failure", lambda slug, task_id: "boom" if task_id in ("h1", "l4") else None)
+    monkeypatch.setattr(store, "launch_failures", lambda slug: {"h1": "boom", "l4": "boom"})
     assert spawned(store, config, ledger, found) == [("eng", t) for t in ("l4", "s", "l1", "l2")]
 
 
@@ -613,6 +639,63 @@ def test_a_critical_chain_successor_takes_the_next_seat_ahead_of_operator_urgent
     assert spawned(store, config, ledger, found) == [("eng", "b")]
     config, ledger, found = chain_merge(store, "assist")
     assert spawned(store, config, ledger, found) == [("eng", "x")]
+
+
+def documentation_wait(store, autonomy, *waiting, ranked=True):
+    from tests.swarm.test_tick import FakeLedger
+
+    config = store.update(SLUG, autonomy=autonomy, max_eng=1)
+    low = {"rank": "low"} if ranked else {}
+    generated = task("doc-s", phase="", profile="documentation", follow_up=True, depends_on=["s"], **low)
+    rows = [*waiting, generated] if ranked else [generated, *waiting]
+    ledger = FakeLedger([task("s", phase="", state="done"), *rows])
+    found = ledger.state(SLUG)
+    found["_meta"]["stamps"] = {
+        "tasks/s/state": {"by": "engineer@abcdef-0001", "at": NOW - 30_000},
+        **({"tasks/doc-s/rank": {"by": "swarm"}} if ranked else {}),
+        **{f"tasks/{t['id']}/rank": {"by": MASTER_NAME} for t in waiting if "rank" in t},
+    }
+    return config, ledger, found
+
+
+@pytest.mark.parametrize("autonomy", ["delegate", "full", "assist"])
+@pytest.mark.parametrize("rank", ["urgent", "high"])
+def test_a_free_seat_takes_urgent_or_high_work_over_a_newer_documentation_task(store, autonomy, rank):
+    config, ledger, found = documentation_wait(store, autonomy, task("u", phase="", rank=rank))
+    assert spawned(store, config, ledger, found) == [("eng", "u")]
+    assert "doc-s" not in dispatcher.guarded(found, "")
+
+
+@pytest.mark.parametrize("autonomy", ["delegate", "full", "assist"])
+def test_an_unranked_older_documentation_task_sorts_low_behind_urgent_work(store, autonomy):
+    config, ledger, found = documentation_wait(store, autonomy, task("u", phase="", rank="urgent"), ranked=False)
+    assert spawned(store, config, ledger, found) == [("eng", "u")]
+    assert "doc-s" not in dispatcher.guarded(found, "")
+    assert dispatcher.queue(found, "")[-1] == "doc-s"
+
+
+def test_a_documentation_task_ranked_above_low_keeps_its_chain_guard_place(store):
+    _, ledger, found = documentation_wait(store, "delegate", ranked=False)
+    ledger.rows["doc-s"]["rank"] = "high"
+    found["_meta"]["stamps"]["tasks/doc-s/rank"] = {"by": MASTER_NAME}
+    assert dispatcher.guarded(found, "") == {"doc-s"}
+
+
+@pytest.mark.parametrize("autonomy", ["delegate", "full", "assist"])
+def test_a_documentation_task_takes_the_seat_when_no_urgent_or_high_task_is_claimable(store, autonomy):
+    waiting = (task("w", phase="", state="claimed"), task("u", phase="", rank="urgent", depends_on=["w"]))
+    config, ledger, found = documentation_wait(store, autonomy, *waiting)
+    assert spawned(store, config, ledger, found) == [("eng", "doc-s")]
+
+
+@pytest.mark.parametrize("autonomy", ["assist", "delegate"])
+def test_a_swarm_low_task_that_unblocks_work_is_never_proposed_or_put_at_the_queue_head(store, home, shipped, autonomy):
+    store.update(SLUG, autonomy=autonomy, max_eng=3)
+    ledger, found = Ledger(), stamped(ladder(), {"a": "swarm"}, rank="low")
+    actions = dispatcher.rank_pass(SLUG, store.config(SLUG), store, ledger, found, NOW)
+    assert proposed(actions) == (["b", "c"] if autonomy == "assist" else [])
+    assert "a" not in {task_id for task_id, _, _ in ledger.comments}
+    assert ledger.comments
 
 
 def chain_of(*ids):
@@ -962,3 +1045,24 @@ def test_the_tick_hands_its_clock_to_the_dispatcher_steps(monkeypatch):
     monkeypatch.setattr(dispatcher, "rank_pass", lambda *a: seen.append(("rank", a[-1])) or [])
     tick.tick(SLUG, saved, FakeLedger([{"id": "a"}]), FakeRuntime(), now_ms=4_321)
     assert seen == [("group", 4_321), ("rank", 4_321)]
+
+
+@pytest.mark.parametrize("author", [MASTER_NAME, "swarm", "operator", dispatcher.AUTHOR])
+def test_an_urgent_rank_sorts_in_the_urgent_band_whoever_set_it(store, author):
+    config = store.update(SLUG, autonomy="delegate")
+    found = stamped([task("u", phase=""), task("h", phase=""), task("m", phase="")], {"u": author}, rank="urgent")
+    rows = {t["id"]: t for t in found["tasks"]}
+    rows["h"]["rank"], rows["m"]["rank"] = "high", "high"
+    found["_meta"]["stamps"]["tasks/h/rank"] = {"by": "operator"}
+    found["_meta"]["stamps"]["tasks/m/rank"] = {"by": MASTER_NAME}
+    key = dispatcher.claim_key(config, found)
+    assert [key(rows[t])[0] for t in ("u", "h", "m")] == [0, 1, 2]
+    assert dispatcher.queue(found, "") == ["u", "h", "m"]
+
+
+def test_a_master_urgent_task_with_no_leverage_heads_its_lane_at_delegate(store, home, shipped):
+    config = store.update(SLUG, autonomy="delegate", max_eng=1)
+    found = stamped([task("x", phase=""), task("u", phase="")], {"u": MASTER_NAME}, rank="urgent")
+    ledger = Ledger()
+    dispatcher.rank_pass(SLUG, config, store, ledger, found, NOW)
+    assert (ledger.ranks, ledger.comments) == ([], [entered("u", dispatcher.URGENT_RANK)])

@@ -1,6 +1,7 @@
 import shlex
 import sys
 from dataclasses import replace
+from unittest.mock import Mock
 
 import pytest
 
@@ -42,6 +43,8 @@ def reads(*records):
 def test_the_viewer_resumes_the_recorded_thread_over_the_recorded_endpoint():
     assert attach.viewer_argv("codex", RECORD) == [
         "codex",
+        "-c",
+        "check_for_update_on_startup=false",
         "resume",
         "--remote",
         "unix:///run/exe-1/codex.sock",
@@ -209,12 +212,13 @@ def test_the_app_server_pane_runs_the_server_in_its_own_session_and_the_viewer_i
     words = shlex.split(lines[serve])
     log = launcher.with_name(f"{launcher.stem}.serve.log")
     assert words[:4] == ["setsid", "-f", "sh", "-c"]
-    server, _, removed = words[4].partition("; rm -f ")
-    assert shlex.split(server)[:4] == [sys.executable, "-m", "scripts.codex_session", "serve"]
+    server, _, removed = words[4].removeprefix(init_agent.LAUNCHER_PIN).partition("; rm -f ")
+    assert shlex.split(server)[:5] == [sys.executable, "-P", "-m", "scripts.codex_session", "serve"]
     assert shlex.split(removed) == [str(opening), str(init_agent._route_report(launcher))]
     assert words[5:] == ["</dev/null", f">>{log}", "2>&1"]
     assert shlex.split(lines[serve + 1]) == [
         sys.executable,
+        "-P",
         "-m",
         "scripts.codex_session",
         "attach",
@@ -233,7 +237,7 @@ def test_a_viewer_launched_outside_a_swarm_names_an_empty_slug(tmp_path):
     launcher, _ = init_agent._write_launcher(tmp_path, "a", "Open.", [], {"XDG_RUNTIME_DIR": str(tmp_path)}, spec)
     lines = launcher.read_text().splitlines()
     serve = next(index for index, line in enumerate(lines) if line.startswith("setsid -f "))
-    assert shlex.split(lines[serve + 1])[4:] == ["--slug", "", "--agent", "a"]
+    assert shlex.split(lines[serve + 1])[5:] == ["--slug", "", "--agent", "a"]
 
 
 def _agents():
@@ -265,17 +269,47 @@ def test_only_a_local_app_server_execution_reopens_in_a_native_terminal(executio
 def test_reopen_resumes_the_recorded_thread_and_never_starts_a_server(monkeypatch):
     from types import SimpleNamespace
 
-    store, agent = SimpleNamespace(), _agents()[1]
+    written, agent = [], _agents()[1]
+    store = SimpleNamespace(execution_registry=SimpleNamespace(set_pane=lambda *pane: written.append(pane)))
     monkeypatch.setattr(
         "scripts.swarm.live_binding.transport",
         lambda found, seen: RECORD if (found, seen) == (store, agent) else None,
     )
     opened = []
     placed = SimpleNamespace(pane_id="w9:p4")
-    result = attach.reopen(store, agent, lambda title, argv: opened.append((title, argv)) or placed, "/bin/codex")
-    assert opened == [("sw-master-1", ["/bin/codex", "resume", "--remote", RECORD.endpoint_ref, "thread-1"])]
+    result = attach.reopen(store, "sw", agent, lambda title, argv: opened.append((title, argv)) or placed, "/bin/codex")
+    assert opened == [
+        (
+            "sw-master-1",
+            [
+                "/bin/codex",
+                "-c",
+                "check_for_update_on_startup=false",
+                "resume",
+                "--remote",
+                RECORD.endpoint_ref,
+                "thread-1",
+            ],
+        )
+    ]
     assert not {"app-server", "serve", "scripts.codex_session"} & set(opened[0][1])
     assert result == {"agent": "sw-master-1", "thread": "thread-1", "pane": "w9:p4"}
+    assert written == [("sw", "exe-1", "w9:p4")]
+
+
+def test_reopen_refused_by_the_viewer_records_no_pane(monkeypatch):
+    from types import SimpleNamespace
+
+    written = []
+    store = SimpleNamespace(execution_registry=SimpleNamespace(set_pane=lambda *pane: written.append(pane)))
+    monkeypatch.setattr("scripts.swarm.live_binding.transport", lambda found, seen: RECORD)
+
+    def refuse(title, argv):
+        raise RuntimeError("herdr refused the pane")
+
+    with pytest.raises(RuntimeError):
+        attach.reopen(store, "sw", _agents()[1], refuse, "codex")
+    assert written == []
 
 
 @pytest.mark.parametrize("record", [None, replace(RECORD, state=STARTING), replace(RECORD, thread_id="")])
@@ -285,7 +319,7 @@ def test_reopen_refuses_an_execution_with_no_connected_thread(monkeypatch, recor
     monkeypatch.setattr("scripts.swarm.live_binding.transport", lambda found, seen: record)
     opened = []
     with pytest.raises(attach.AttachError) as refused:
-        attach.reopen(SimpleNamespace(), _agents()[1], lambda title, argv: opened.append(argv), "codex")
+        attach.reopen(SimpleNamespace(), "sw", _agents()[1], lambda title, argv: opened.append(argv), "codex")
     assert str(refused.value) == "sw-master-1 has no connected thread to reopen"
     assert opened == []
 
@@ -300,16 +334,20 @@ def test_the_local_terminal_opens_the_viewer_in_the_swarm_workspace(monkeypatch,
     from scripts import herdr_host
 
     config = SimpleNamespace(repo="/home/op/dev/agentihooks", code="323133", slug=slug)
+    written = []
     store = SimpleNamespace(
         agents=lambda asked: _agents() if asked == slug else [],
         config=lambda asked: config if asked == slug else None,
+        execution_registry=SimpleNamespace(set_pane=lambda *pane: written.append(pane)),
+        redis=Mock(),
+        key=lambda *parts: ":".join(parts),
     )
     monkeypatch.setattr("scripts.swarm.live_binding.transport", lambda found, seen: RECORD if found is store else None)
     opened = []
     monkeypatch.setattr(
         herdr_host,
         "open_command",
-        lambda *call: opened.append(call) or herdr_host.Placement("w1", "w1:t1", "w1:p1"),
+        lambda *call: opened.append(call) or herdr_host.Placement("w1", "w1:t1", "w1:p1", "term-1"),
     )
     environ = {"HERDR_SOCKET": "/run/herdr.sock"}
     assert attach.local_terminal(store, slug, "exe-1", environ) == {
@@ -326,6 +364,8 @@ def test_the_local_terminal_opens_the_viewer_in_the_swarm_workspace(monkeypatch,
             environ,
         )
     ]
+    assert written == [(slug, "exe-1", "w1:p1")]
+    store.redis.hset.assert_called_once_with(f"{slug}:codex-viewers", "w1:p1", '["exe-1", "term-1"]')
 
 
 def test_the_local_terminal_leaves_other_executions_to_the_worker_terminal(monkeypatch):
@@ -336,6 +376,66 @@ def test_the_local_terminal_leaves_other_executions_to_the_worker_terminal(monke
     store = SimpleNamespace(agents=lambda slug: _agents(), config=lambda slug: pytest.fail("config read"))
     monkeypatch.setattr(herdr_host, "open_command", lambda *call: pytest.fail("pane opened"))
     assert attach.local_terminal(store, "sw", "exe-4", {}) is None
+
+
+@pytest.mark.parametrize(
+    ("launched", "viewed", "listed", "closed"),
+    [
+        ("term-0", "", "term-0", True),
+        ("", "term-0", "term-0", True),
+        ("term-0", "", "operator-shell", False),
+        ("", "", "term-0", False),
+    ],
+)
+def test_a_reopen_closes_the_earlier_launch_pane_only_on_its_recorded_terminal(
+    monkeypatch, launched, viewed, listed, closed
+):
+    import json
+    from types import SimpleNamespace
+
+    from scripts import herdr_host, herdr_panes
+
+    agents = [replace(agent, pane_id="w1:p0") for agent in _agents()]
+    config = SimpleNamespace(repo="/home/op/dev/agentihooks", code="323133", slug="sw")
+    redis = Mock()
+    redis.hgetall.return_value = {"w1:p0": json.dumps(["exe-1", viewed])} if viewed else {}
+    store = SimpleNamespace(
+        agents=lambda asked: agents,
+        config=lambda asked: config,
+        execution_registry=SimpleNamespace(set_pane=lambda *pane: None),
+        redis=redis,
+        key=lambda *parts: ":".join(parts),
+    )
+    environ = {"HERDR_SOCKET": "/run/herdr.sock"}
+    monkeypatch.setattr("scripts.swarm.live_binding.transport", lambda found, seen: RECORD)
+    monkeypatch.setattr(
+        herdr_host, "open_command", lambda *call: herdr_host.Placement("w1", "w1:t1", "w1:p1", "term-1")
+    )
+    records = [
+        SimpleNamespace(pane_id="w1:p0", terminal_id=launched, kind="init-agent", owner_session="sw-master-1"),
+        SimpleNamespace(pane_id="w1:p0", terminal_id="other", kind="init-agent", owner_session="sw-eng-9"),
+        SimpleNamespace(pane_id="w1:p0", terminal_id="other", kind="run-in-terminal", owner_session="sw-master-1"),
+    ]
+    monkeypatch.setattr(herdr_panes, "load", lambda seen: records[: 3 if launched else 0] if seen is environ else [])
+    calls = []
+
+    def cli(args, seen):
+        assert seen is environ
+        calls.append(args)
+        if args == ["pane", "list"]:
+            return {
+                "panes": [{"pane_id": "w1:p0", "terminal_id": listed}, {"pane_id": "w1:p1", "terminal_id": "term-1"}]
+            }
+        return {}
+
+    monkeypatch.setattr(herdr_host, "_cli", cli)
+    assert attach.local_terminal(store, "sw", "exe-1", environ)["pane"] == "w1:p1"
+    assert (["pane", "close", "w1:p0"] in calls) is closed
+    assert ["pane", "close", "w1:p1"] not in calls
+    if closed:
+        redis.hdel.assert_called_once_with("sw:codex-viewers", "w1:p0")
+    else:
+        redis.hdel.assert_not_called()
 
 
 def test_swarm_terminal_reopens_a_local_execution_before_the_worker_terminal(monkeypatch, capsys):

@@ -6,12 +6,46 @@ import time
 import urllib.error
 import urllib.request
 import uuid
+from collections.abc import Iterator
+from contextlib import contextmanager
 from urllib.parse import quote, urlencode
 
+from .. import ledger_link
+from ..repository.entry import thawed
+from ..repository.rows import children, encode
 from . import resources, schemas
 
 RETRIES = 5
 BACKOFF = 0.25
+KEPT = None
+
+
+@contextmanager
+def kept_exports() -> Iterator[None]:
+    """Keep each ledger's last export while inside, so later snapshots read only what changed since it."""
+    global KEPT
+    KEPT = {}
+    try:
+        yield
+    finally:
+        KEPT = None
+
+
+def patched(state: dict, changes: dict) -> dict:
+    for key, touched in changes["lists"].items():
+        old = {encode(parts[-1]): child for child, parts, *_ in children(state[key], [], None)}
+        state[key] = [touched["items"][item] if item in touched["items"] else old[item] for item in touched["order"]]
+    for path, value in changes["set"]:
+        located(state, path[:-1])[path[-1]] = value
+    for path in changes["drop"]:
+        located(state, path[:-1]).pop(path[-1], None)
+    return state
+
+
+def located(state: object, path: list) -> object:
+    for part in path:
+        state = state[part]
+    return state
 
 
 class ResourceClient:
@@ -27,7 +61,7 @@ class ResourceClient:
             headers={"Content-Type": "application/json", **self.credentials},
             method="GET" if payload is None else "POST",
         )
-        with urllib.request.urlopen(request, timeout=self.timeout) as response:
+        with ledger_link.urlopen(request, self.timeout) as response:
             return json.loads(response.read())
 
     def collection(self, slug: str, path: str) -> list:
@@ -61,11 +95,30 @@ class ResourceClient:
             query["cursor"] = reply["next_cursor"]
 
     def snapshot(self, slug: str) -> dict:
-        state = self.request(slug, "export", {})["data"]
+        state = self.export(slug) if KEPT is not None else self.request(slug, "export", {})["data"]
         import ledger_gate
 
         state["_meta"]["crew"] = ledger_gate.crew(state["_meta"])
         return state
+
+    def export(self, slug: str) -> dict:
+        """The full export, read as the changes since the one this process kept for this server and ledger."""
+        key = (self.base, slug)
+        generation, kept = KEPT.get(key, (0, None))
+        try:
+            reply = self.request(slug, "export", {"since": generation})
+        except urllib.error.HTTPError as exc:
+            if exc.code != 400:
+                raise
+            KEPT.pop(key, None)
+            return self.request(slug, "export", {})["data"]
+        try:
+            state = patched(kept, reply["changes"]) if "changes" in reply else reply["data"]
+        except (KeyError, IndexError, TypeError, AttributeError):
+            KEPT.pop(key, None)
+            return self.export(slug)
+        KEPT[key] = (reply["generation"], state)
+        return thawed(state)
 
     def mutate(self, slug: str, operations: list) -> dict:
         unpinned = [

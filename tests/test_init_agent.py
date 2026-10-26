@@ -77,13 +77,64 @@ def test_dry_run_preserves_claude_flags_and_keeps_prompt_out_of_launcher(monkeyp
     launcher_text = launcher.read_text()
     route_report = launcher.with_suffix(".route")
     assert (
-        f"/usr/bin/agentihooks select-profile engineer --agent claude -- --agentihooks-fallback-bare --agentihooks-report {route_report} --name quota-test"
+        f"/usr/bin/agentihooks select-profile engineer --home={profile_env['CLAUDE_CONFIG_DIR']} --agent claude -- "
+        f"--agentihooks-fallback-bare --agentihooks-report {route_report} --name quota-test"
     ) in launcher_text
     assert "--resume session-id --fork-session --model fable" in launcher_text
     assert prompt not in launcher_text
     prompt_file = next((runtime / "agentihooks-claude-terminal").glob("*.prompt"))
     assert prompt_file.read_text() == prompt
     assert "host=linux" in capsys.readouterr().out
+
+
+def test_private_master_login_gets_its_coordinated_launch_deadline(monkeypatch, tmp_path):
+    from scripts import master_login_chain as chain
+
+    _, profile_env = _profile(monkeypatch, tmp_path)
+    original, seen = init_agent.LaunchDeadline, []
+
+    def deadline(seconds):
+        seen.append(seconds)
+        return original(seconds)
+
+    monkeypatch.setattr(init_agent, "LaunchDeadline", deadline)
+    monkeypatch.setattr(init_agent, "_launch_command", lambda *args: ("linux", ["terminal"]))
+    argv = [
+        "--dir",
+        str(tmp_path),
+        "--name",
+        "master-proof",
+        "--agent",
+        "claude",
+        "--dry-run",
+        "--",
+        "--route",
+        "master-login",
+    ]
+    assert (
+        init_agent.main(argv, {"HOME": str(tmp_path), "XDG_RUNTIME_DIR": str(tmp_path / "runtime"), **profile_env}) == 0
+    )
+    assert seen[0] >= chain.BUDGET.launch
+
+
+@pytest.mark.parametrize(
+    "agent,route",
+    [
+        ("", "master-login"),
+        ("claude", "master-login"),
+        ("codex", "master-login"),
+        ("claude", "worker"),
+    ],
+)
+def test_launch_budget_changes_only_for_a_native_claude_master(agent, route):
+    from types import SimpleNamespace
+
+    from scripts import master_login_chain as chain
+
+    args = SimpleNamespace(agent=agent, claude_args=["--route", route], route_timeout=10)
+    native = agent in ("", "claude") and route == "master-login"
+    assert init_agent._launch_seconds(args) == (chain.BUDGET.launch if native else init_agent.LAUNCH_DEADLINE_S)
+    assert args.route_timeout == (chain.BUDGET.route if native else 10)
 
 
 def test_wsl_command_hands_windows_terminal_a_windows_resolvable_program(monkeypatch, tmp_path):
@@ -120,7 +171,18 @@ def test_wsl_command_hands_windows_terminal_a_windows_resolvable_program(monkeyp
     assert not any(argument.startswith("/mnt/") for argument in command[1:])
 
 
+def _ordinary_launch_budget(monkeypatch):
+    original = init_agent.LaunchDeadline
+
+    def deadline(seconds):
+        assert seconds == init_agent.LAUNCH_DEADLINE_S
+        return original(seconds)
+
+    monkeypatch.setattr(init_agent, "LaunchDeadline", deadline)
+
+
 def _launch(monkeypatch, tmp_path, popen):
+    _ordinary_launch_budget(monkeypatch)
     monkeypatch.setattr(init_agent.agent_choice, "choose", lambda requested, environ: ("claude", "rotation"))
     monkeypatch.setattr(init_agent.shutil, "which", lambda name: None)
     monkeypatch.setattr(
@@ -163,6 +225,29 @@ def test_launch_succeeds_only_after_the_terminal_starts_the_launcher(monkeypatch
     assert "claude_args=--model opus" in out
     assert "harness_at=" in out.splitlines()
     assert not list((tmp_path / "runtime" / "agentihooks-claude-terminal").glob("*.started"))
+
+
+def test_a_session_launch_starts_the_supervised_scheduler(monkeypatch, tmp_path):
+    from scripts.scheduler import service
+
+    calls = []
+    monkeypatch.setattr(service, "ensure_running", lambda environ: calls.append(environ))
+
+    def popen(command, **kwargs):
+        Path(command[-1]).with_suffix(".started").touch()
+
+    assert _launch(monkeypatch, tmp_path, popen) == 0
+    assert len(calls) == 1
+    assert calls[0]["HOME"] == str(tmp_path)
+
+
+def test_a_dry_launch_does_not_start_the_scheduler(monkeypatch, tmp_path):
+    from scripts.scheduler import service
+
+    monkeypatch.setattr(service, "ensure_running", lambda environ: pytest.fail("dry launch started scheduler"))
+    monkeypatch.setattr(init_agent.agent_choice, "choose", lambda requested, environ: ("claude", "rotation"))
+    monkeypatch.setattr(init_agent, "_launch_command", lambda *args: ("linux", ["terminal"]))
+    assert init_agent.main(["--dir", str(tmp_path), "--dry-run"], {"HOME": str(tmp_path)}) == 0
 
 
 def test_launch_reports_when_the_launcher_and_the_harness_started(monkeypatch, tmp_path, capsys):
@@ -233,6 +318,60 @@ def test_a_codex_launch_that_never_reports_its_route_fails_without_the_binding_w
     assert waited == []
     assert (fields["status"], fields["route_status"], fields["profile_validation"]) == ("started", "pending", "failed")
     assert output.err == "agentihooks init-agent: the harness did not report its route within 0.1s\n"
+    retained = json.loads(Path(fields["profile_report"]).read_text())
+    assert retained["state"] == "failed"
+    assert retained["reason"] == output.err.removeprefix("agentihooks init-agent: ").strip()
+
+
+@pytest.mark.parametrize("failure", ["timeout", "capacity"])
+def test_failed_canary_report_is_published_before_startup_and_records_reason(tmp_path, monkeypatch, capsys, failure):
+    from scripts.swarm.runtime import parse_fields
+
+    binding, _ = _profile(monkeypatch, tmp_path, "codex")
+    monkeypatch.setattr(init_agent.agent_choice, "choose", lambda *a: ("codex", "explicit"))
+    published = []
+    reason = "Selected model is at capacity" if failure == "capacity" else "no canary within 90s"
+
+    def launch(launcher, directory, name, args, agent, environ):
+        fields = parse_fields(capsys.readouterr().out)
+        assert fields["profile_report"] == environ[binding.REPORT]
+        published.append(Path(fields["profile_report"]))
+        init_agent._started_marker(launcher).touch()
+        init_agent._route_report(launcher).write_text("status=routed\naccount=routed-account\n")
+        return []
+
+    def wait(report, timeout):
+        assert report == published[0]
+        if failure == "capacity":
+            binding.refuse(report, reason)
+        raise ValueError(reason)
+
+    monkeypatch.setattr(init_agent, "_start_herdr", launch)
+    monkeypatch.setattr(binding, "wait", wait)
+    argv = ["--host", "herdr", "--agent", "codex", "--profile", "engineer", "--dir", str(tmp_path)]
+    assert init_agent.main(argv, {"XDG_RUNTIME_DIR": str(tmp_path / "runtime")}) == 3
+    retained = json.loads(published[0].read_text())
+    assert retained["state"] == "failed"
+    assert retained["reason"] == reason
+    assert "profile_validation=failed" in capsys.readouterr().out
+
+
+def test_profile_report_is_flushed_before_native_startup(tmp_path, monkeypatch):
+    import io
+    from types import SimpleNamespace
+
+    binding, environ = _profile(monkeypatch, tmp_path, "codex")
+    environ["XDG_RUNTIME_DIR"] = str(tmp_path / "runtime")
+    delivered = []
+
+    class Output(io.StringIO):
+        def flush(self):
+            delivered.append(self.getvalue())
+
+    monkeypatch.setattr("sys.stdout", Output())
+    args = SimpleNamespace(profile="engineer", defer_canary=False)
+    init_agent._binding_request(args, "codex", "task", environ, [])
+    assert delivered == [f"profile_report={environ[binding.REPORT]}\n"]
 
 
 def test_terminal_that_never_starts_the_launcher_fails_and_discards_it(monkeypatch, tmp_path, capsys):
@@ -350,7 +489,11 @@ def test_handoff_excludes_this_account_and_never_falls_back_to_bare(monkeypatch,
     assert rc == 0
     launcher = next((tmp_path / "runtime" / "agentihooks-claude-terminal").glob("*.sh"))
     text = launcher.read_text()
-    assert "select-profile engineer --agent claude -- --agentihooks-exclude alpha --agentihooks-report" in text
+    home = tmp_path / "engineer" / "claude"
+    assert (
+        f"select-profile engineer --home={home} --agent claude -- --agentihooks-exclude alpha --agentihooks-report"
+        in text
+    )
     assert "--agentihooks-fallback-bare" not in text
 
 
@@ -507,6 +650,16 @@ def _launcher_text(tmp_path, environ, agent="claude", name="swarm-buildout-eng-4
     return launcher.read_text()
 
 
+def test_hive_launch_refreshes_github_credentials_by_reference(tmp_path):
+    launcher = _launcher_text(tmp_path, {"HIVE_GITHUB_AUTH_MODE": "app", "GITHUB_APP_PRIVATE_KEY": "fixture"})
+    assert "-P -m scripts.github_app_cli exec" in launcher
+    assert "fixture" not in launcher
+
+
+def test_workstation_launch_without_hive_auth_keeps_its_existing_github_environment(tmp_path):
+    assert "scripts.github_app_cli" not in _launcher_text(tmp_path, {})
+
+
 def test_swarm_display_name_preserves_the_inbox_identity(monkeypatch, tmp_path):
     text = _dry_launcher(
         monkeypatch,
@@ -576,6 +729,18 @@ def test_a_swarm_spawn_exports_its_identity_and_enables_langfuse_traces(tmp_path
     assert text.index("AGENTIHOOKS_LANGFUSE_ENABLED") < text.index(" claude ")
 
 
+def test_hive_slot_markers_survive_a_launcher_without_the_callers_environment(tmp_path):
+    import subprocess
+
+    env = {"AGENTIHOOKS_SWARM": "rig", "AGENTIHOOKS_SLOT_HIVE": "hive-a", "AGENTIHOOKS_SLOT_EXECUTION": "execution-a"}
+    text = _launcher_text(tmp_path, env)
+    assert "export AGENTIHOOKS_SLOT_HIVE=hive-a\n" in text
+    assert "export AGENTIHOOKS_SLOT_EXECUTION=execution-a\n" in text
+    script = init_agent._swarm_exports(env) + 'printf "%s\\n%s" "$AGENTIHOOKS_SLOT_HIVE" "$AGENTIHOOKS_SLOT_EXECUTION"'
+    result = subprocess.run(["bash", "-c", script], env={}, capture_output=True, text=True, check=True)
+    assert result.stdout == "hive-a\nexecution-a"
+
+
 def test_a_swarm_spawn_exports_its_compact_limit(tmp_path):
     env = {"AGENTIHOOKS_SWARM": "sw", "AGENTIHOOKS_COMPACT_LIMIT": "40"}
     text = _launcher_text(tmp_path, env)
@@ -589,6 +754,18 @@ def test_a_swarm_launcher_pins_its_own_pid(tmp_path):
     assert "export AGENTIHOOKS_SWARM_LAUNCHER=$$" in lines
     text = "\n".join(lines)
     assert text.index("AGENTIHOOKS_SWARM_LAUNCHER") < text.index(" claude ")
+
+
+def test_a_swarm_launcher_exports_the_agent_s_ledger_token_and_drops_the_server_secret(tmp_path):
+    (tmp_path / ".env").write_text("PLAIN=1\n")
+    env = {"HOME": str(tmp_path), "AGENTIHOOKS_SWARM": "sw", "AGENTIHOOKS_LEDGER_AGENT_TOKEN": "derived-one"}
+    text = _launcher_text(tmp_path, env)
+    lines = text.splitlines()
+    assert "export AGENTIHOOKS_LEDGER_AGENT_TOKEN=derived-one" in lines
+    assert "unset SWARM_SECRET" in lines
+    assert text.index("unset SWARM_SECRET") < text.index(" claude ")
+    assert text.index(init_agent.operator_env.SOURCE) < text.index("unset SWARM_SECRET")
+    assert "AGENTIHOOKS_LEDGER_AGENT_TOKEN" not in _launcher_text(tmp_path, {"AGENTIHOOKS_SWARM": "sw"})
 
 
 AGENT_ENV = {
@@ -624,6 +801,27 @@ def test_a_tick_spawn_keeps_its_swarm_identity_without_the_mark(monkeypatch, tmp
     assert "export AGENTIHOOKS_SWARM_TASK=t1\n" in text
     assert "export AGENTIHOOKS_SWARM_LAUNCHER=$$\n" in text
     assert "AGENTIHOOKS_SWARM_SPAWN" not in text
+
+
+def test_a_claimed_launch_exports_the_pinned_claim_from_its_option(monkeypatch, tmp_path):
+    fence = json.dumps({"key": "claim-a", "revision": 7})
+    text = _dry_launcher(
+        monkeypatch,
+        tmp_path,
+        "engineer@abcdef-0002",
+        {**AGENT_ENV, "AGENTIHOOKS_SWARM_SPAWN": "1"},
+        "--claim-fence",
+        fence,
+    )
+    assert "export AGENTIHOOKS_CLAIM_FENCE=" in text
+    assert fence in text
+
+
+def test_the_claim_fence_option_documents_its_identity_and_defaults_to_no_claim():
+    parser = init_agent._parser()
+    assert parser.parse_args([]).claim_fence == ""
+    action = next(item for item in parser._actions if item.dest == "claim_fence")
+    assert action.help == "Pinned event bus claim identity for this execution"
 
 
 @pytest.mark.parametrize("name", ["engineer@abcdef-0002", "master@abcdef-0001"])
@@ -824,6 +1022,7 @@ def test_report_names_the_model_and_effort(monkeypatch, tmp_path, capsys):
 
 
 def _trust_launch(monkeypatch, tmp_path, project, env_extra=None):
+    _ordinary_launch_budget(monkeypatch)
     seen = {}
 
     def popen(command, **kwargs):
@@ -986,6 +1185,40 @@ def test_inbox_channel_puts_the_channel_flags_first_for_claude_only(monkeypatch,
     assert line.endswith("--model opus")
 
 
+@pytest.mark.parametrize("profile_home", [False, True])
+def test_inbox_channel_registers_before_native_startup(monkeypatch, tmp_path, capsys, profile_home):
+    import json
+
+    monkeypatch.setattr(init_agent.agent_choice, "choose", lambda requested, environ: ("claude", "requested"))
+    monkeypatch.setattr(init_agent, "_launch_command", lambda *args: ("linux", ["t"]))
+    environ = {"HOME": str(tmp_path), "XDG_RUNTIME_DIR": str(tmp_path / "rt")}
+    config = tmp_path / ".claude.json"
+    if profile_home:
+        native_home = tmp_path / "master"
+        native_home.mkdir()
+        environ["CLAUDE_CONFIG_DIR"] = str(native_home)
+        config = native_home / ".claude.json"
+    config.write_text(json.dumps({"hasCompletedOnboarding": True, "mcpServers": {"existing": {"command": "existing"}}}))
+    argv = ["--dir", str(tmp_path), "--agent", "claude", "--inbox-channel", "--dry-run"]
+    assert init_agent.main(argv, environ) == 0
+    registered = json.loads(config.read_text())
+    assert registered["hasCompletedOnboarding"] is True
+    assert registered["mcpServers"]["existing"] == {"command": "existing"}
+    args = next(line for line in capsys.readouterr().out.splitlines() if line.startswith("claude_args="))
+    inline = shlex.split(args.removeprefix("claude_args="))[0].removeprefix("--mcp-config=")
+    native = registered["mcpServers"]["inbox"]
+    active = json.loads(inline)["mcpServers"]["inbox"]
+    assert native["command"] == active["command"]
+    assert native["args"][:-1] == active["args"][:-1]
+    calls = []
+    from scripts.inbox import channel
+
+    monkeypatch.setattr(channel, "main", lambda active=True: calls.append(active))
+    exec(native["args"][-1])
+    exec(active["args"][-1])
+    assert calls == [False, True]
+
+
 @pytest.mark.parametrize("channel", [True, False])
 def test_a_channel_launch_pins_legacy_mcp_negotiation_before_claude(tmp_path, channel):
     env = {"XDG_RUNTIME_DIR": str(tmp_path)}
@@ -1038,7 +1271,12 @@ def test_herdr_names_the_agent_and_a_codex_session_by_its_raw_name(monkeypatch, 
     monkeypatch.setattr(
         init_agent.herdr_panes, "mark", lambda pane, environ, **changes: marked.append((pane, environ, changes))
     )
-    assert init_agent._name_in_herdr("w1:p2", "engineer@abc-0001", agent, {"K": "v"}, "", 12.5) == named
+    assert (
+        init_agent._name_in_herdr(
+            "w1:p2", init_agent.Names("engineer@abc-0001"), agent, {"K": "v"}, "", init_agent.Launch(12.5)
+        )
+        == named
+    )
     expected = [("agent", "w1:p2", "engineer@abc-0001", {"K": "v"})]
     if agent == "codex" and detected:
         expected.append(("ready", "w1:p2", {"K": "v"}, init_agent.CODEX_READY_S))
@@ -1051,13 +1289,23 @@ def test_herdr_names_the_agent_and_a_codex_session_by_its_raw_name(monkeypatch, 
     assert init_agent.CODEX_READY_S == 120.0
 
 
+def test_an_app_server_viewer_gets_no_typed_rename_because_its_server_names_the_thread(monkeypatch):
+    monkeypatch.setattr(init_agent.herdr_host, "rename_agent", lambda *args: True)
+    monkeypatch.setattr(init_agent.herdr_host, "wait_ready", lambda *args: pytest.fail("waited on a served viewer"))
+    monkeypatch.setattr(init_agent.herdr_host, "name_session", lambda *args: pytest.fail("typed a rename"))
+    monkeypatch.setattr(init_agent.herdr_panes, "mark", lambda *args, **changes: pytest.fail("marked a session name"))
+    assert init_agent._name_in_herdr(
+        "w1:p2", init_agent.Names("eng-a"), "codex", {}, "", init_agent.Launch(0.0), served=True
+    ) == ["agent_name=eng-a"]
+
+
 def test_a_codex_session_that_never_reads_ready_is_recorded_unnamed(monkeypatch):
     marked = []
     monkeypatch.setattr(init_agent.herdr_host, "rename_agent", lambda *args: True)
     monkeypatch.setattr(init_agent.herdr_host, "wait_ready", lambda *args: False)
     monkeypatch.setattr(init_agent.herdr_host, "name_session", lambda *args: pytest.fail("renamed while not ready"))
     monkeypatch.setattr(init_agent.herdr_panes, "mark", lambda pane, environ, **changes: marked.append(changes))
-    assert init_agent._name_in_herdr("w1:p2", "eng-a", "codex", {}, "", 0.0) == [
+    assert init_agent._name_in_herdr("w1:p2", init_agent.Names("eng-a"), "codex", {}, "", init_agent.Launch(0.0)) == [
         "agent_name=eng-a",
         "session_name=unset",
         "session_name_error=not-ready",
@@ -1079,7 +1327,9 @@ def test_the_opening_prompt_follows_the_names(monkeypatch, sent, said):
     calls = []
     _ready_codex(monkeypatch, calls)
     monkeypatch.setattr(init_agent.herdr_host, "prompt", lambda *args: calls.append(("prompt", *args)) or sent)
-    named = init_agent._name_in_herdr("w1:p2", "eng-a", "codex", {"K": "v"}, "Start.", 0.0)
+    named = init_agent._name_in_herdr(
+        "w1:p2", init_agent.Names("eng-a"), "codex", {"K": "v"}, "Start.", init_agent.Launch(0.0)
+    )
     assert named == ["agent_name=eng-a", "session_name=eng-a", f"opening_prompt={said}"]
     assert calls == [
         "agent",
@@ -1096,7 +1346,7 @@ def test_an_opening_prompt_is_held_from_a_busy_pane(monkeypatch, ready, busy, sa
     calls = []
     _ready_codex(monkeypatch, calls, ready, busy)
     monkeypatch.setattr(init_agent.herdr_host, "prompt", lambda *args: pytest.fail("prompted a busy pane"))
-    named = init_agent._name_in_herdr("w1:p2", "eng-a", "codex", {}, "Start.", 0.0)
+    named = init_agent._name_in_herdr("w1:p2", init_agent.Names("eng-a"), "codex", {}, "Start.", init_agent.Launch(0.0))
     assert named[-1] == f"opening_prompt={said}"
     assert [call for call in calls if call[0] == "busy"] == ([("busy", "w1:p2", {})] if ready else [])
 
@@ -1127,7 +1377,9 @@ def test_an_undetected_agent_still_gets_its_opening_prompt_after_the_ready_wait(
     monkeypatch.setattr(init_agent.herdr_host, "wait_ready", lambda *args: calls.append(("ready", *args)) or True)
     monkeypatch.setattr(init_agent.herdr_host, "busy", lambda *args: "")
     monkeypatch.setattr(init_agent.herdr_host, "prompt", lambda *args: calls.append(("prompt", *args)) or True)
-    assert init_agent._name_in_herdr("w1:p2", "eng-a", "codex", {}, "Start.", 0.0) == [
+    assert init_agent._name_in_herdr(
+        "w1:p2", init_agent.Names("eng-a"), "codex", {}, "Start.", init_agent.Launch(0.0)
+    ) == [
         "agent_name=unset",
         "opening_prompt=sent",
     ]
@@ -1141,7 +1393,36 @@ def test_an_undetected_agent_still_gets_its_opening_prompt_after_the_ready_wait(
 def test_an_undetected_codex_agent_without_a_prompt_waits_for_nothing(monkeypatch):
     monkeypatch.setattr(init_agent.herdr_host, "rename_agent", lambda *args: False)
     monkeypatch.setattr(init_agent.herdr_host, "wait_ready", lambda *args: pytest.fail("waited"))
-    assert init_agent._name_in_herdr("w1:p2", "eng-a", "codex", {}, "", 0.0) == ["agent_name=unset"]
+    assert init_agent._name_in_herdr("w1:p2", init_agent.Names("eng-a"), "codex", {}, "", init_agent.Launch(0.0)) == [
+        "agent_name=unset"
+    ]
+
+
+@pytest.mark.parametrize(("resume", "held"), [("c0ffee", False), ("", True)])
+def test_a_codex_resume_passes_its_prompt_to_codex_instead_of_typing_it(tmp_path, monkeypatch, resume, held):
+    from types import SimpleNamespace
+
+    launcher = tmp_path / "eng.sh"
+    launcher.with_suffix(".prompt").write_text("Continue.", encoding="utf-8")
+    opened = {}
+    placed = SimpleNamespace(workspace_id="w1", tab_id="t1", pane_id="w1:p2")
+    monkeypatch.setattr(init_agent.herdr_host, "ensure_server", lambda environ: False)
+    monkeypatch.setattr(init_agent.herdr_host, "open_pane", lambda d, t, env, *rest: opened.update(env) or placed)
+    monkeypatch.setattr(init_agent.herdr_host, "run", lambda *args: None)
+    monkeypatch.setattr(init_agent.herdr_panes, "record", lambda *args: None)
+    args = SimpleNamespace(title="", placement=None, workspace=None, resume=resume)
+    init_agent._start_herdr(launcher, tmp_path, "eng-a", args, "codex", {})
+    assert (init_agent.PROMPT_AFTER_START in opened) is held
+
+
+@pytest.mark.parametrize(
+    ("transport", "resume", "served"),
+    [(init_agent.APP_SERVER, "", True), ("", "c0ffee", True), ("", "", False), ("legacy", "", False)],
+)
+def test_a_resumed_or_served_session_is_named_without_typing(transport, resume, served):
+    from types import SimpleNamespace
+
+    assert init_agent._served(SimpleNamespace(codex_transport=transport, resume=resume)) is served
 
 
 @pytest.mark.parametrize(("held", "argv"), [("1", "<a b>\n"), ("", "<a b><Start the task.>\n")])
@@ -1404,7 +1685,11 @@ def test_a_codex_handoff_resumes_the_conversation_on_another_codex_account(monke
     assert "agent=codex\n" in report and "agent_reason=handoff\n" in report
     launcher = next(line.split("=", 1)[1] for line in report.splitlines() if line.startswith("launcher="))
     command = Path(launcher).read_text()
-    assert "select-profile engineer --agent codex -- --agentihooks-exclude alpha --agentihooks-report" in command
+    home = profile_env["CODEX_HOME"]
+    assert (
+        f"select-profile engineer --home={home} --agent codex -- --agentihooks-exclude alpha --agentihooks-report"
+        in command
+    )
     assert " resume thread-1 " in command
     assert "-m gpt-6.1-sol" in command
 

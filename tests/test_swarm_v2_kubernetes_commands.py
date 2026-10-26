@@ -12,7 +12,7 @@ from scripts.swarm_v2.runtime.commands import Action
 from scripts.swarm_v2.runtime.operations import Observation, Operation, Phase, digest
 from scripts.swarm_v2.worker.control import encode
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 
 EVIDENCE = Path(__file__).parents[1] / "evidence" / "SV2-KUB-03"
 TEXT = "$(rm -rf /) `id` \"q\" 'q'\nnext line ü"

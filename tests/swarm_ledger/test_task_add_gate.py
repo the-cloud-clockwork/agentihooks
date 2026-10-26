@@ -26,7 +26,7 @@ def make_ledger(claims=()):
         "sources": [],
         "phases": [{"title": "one", "description": "d"}, {"title": "two", "description": "d"}],
     }
-    html_path, _ = core.paths(SLUG)
+    html_path, _ = legacy_page.paths(SLUG, core)
     html_path.write_text(legacy_page.render(new_ledger.build_doc(content), SLUG, 8765), encoding="utf-8")
     core.sync(SLUG)
     for n, (lane, state, by) in enumerate(claims):
@@ -78,6 +78,16 @@ def test_the_master_and_the_dispatcher_add_a_ranked_task(by):
     state, rejected = add_ranked(by)
     assert rejected == []
     assert next(t for t in state["tasks"] if t["id"] == "t9")["rank"] == "high"
+
+
+def test_the_swarm_adds_a_generated_documentation_task_at_rank_low_under_its_own_name():
+    make_ledger()
+    op = {"op": "task_add", "id": "add-t9", "by": "swarm", "task": "t9", "title": "x", "lane": "eng", "phase": "p1"}
+    generated = {"rank": "low", "profile": "documentation", "follow_up": True, "not_duplicate": "documents it"}
+    state, rejected = core.sync(SLUG, ops=[{**op, **generated}])
+    assert rejected == []
+    assert next(t for t in state["tasks"] if t["id"] == "t9")["rank"] == "low"
+    assert state["_meta"]["stamps"]["tasks/t9/rank"]["by"] == "swarm"
 
 
 def test_an_engineer_cannot_add_a_task():

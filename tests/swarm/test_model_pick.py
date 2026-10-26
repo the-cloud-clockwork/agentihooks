@@ -8,8 +8,6 @@ from scripts.swarm.model_pick import ModelPick
 from tests.swarm.profile_fixture import validated
 from tests.swarm.test_runtime import _launched
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 AUTO = {"model": "auto", "effort": "auto"}
 SONNET_XHIGH, OPUS_MEDIUM, OPUS_HIGH, OPUS_XHIGH = (
     ("sonnet", "xhigh"),
@@ -438,7 +436,7 @@ def test_status_shows_model_source_and_confidence(monkeypatch, capsys):
     saved.put_agent("sw", AgentRecord("old", "ci", "t"))
     cli.cmd_status(saved, SimpleNamespace(slug="sw", json=False))
     old = next(line for line in capsys.readouterr().out.splitlines() if line.startswith("old\t"))
-    assert old.split("\t")[-2:] == ["-", "-"]
+    assert old.split("\t")[-3:-1] == ["-", "-"]
     agent = next(a for a in status.status_report(saved, "sw", {"tasks": []})["agents"] if a["name"] == "a")
     assert (agent["model_source"], agent["model_confidence"]) == ("jev-1.13", 0.72)
 

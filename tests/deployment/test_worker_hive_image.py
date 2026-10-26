@@ -1,0 +1,456 @@
+import io
+import json
+import os
+import re
+import subprocess
+import tomllib
+import urllib.request
+from pathlib import Path
+
+import pytest
+import yaml
+from packaging.requirements import Requirement
+from packaging.utils import canonicalize_name
+
+from scripts.swarm_v2.worker_base_revision import pinned_revision
+
+pytestmark = pytest.mark.unit
+ROOT = Path(__file__).resolve().parents[2]
+PROOF = ROOT / "deploy/worker/kind-proof.sh"
+CURRENT = ROOT / "deploy/worker/base-current.sh"
+BASE = "ghcr.io/the-cloud-clockwork/agentihooks-worker:dev"
+PINNED = "ghcr.io/the-cloud-clockwork/agentihooks-worker@sha256:amd64"
+INPUTS = "docker/swarm-node scripts/swarm_v2/worker_image.py profiles docs/swarm-v2/schemas"
+WHEEL = {"pyproject.toml", "README.md", "hooks/", "scripts/"}
+
+
+def builds():
+    joined = re.sub(r"\\\n\s*", " ", PROOF.read_text())
+    return [line.strip() for line in joined.splitlines() if "docker build" in line]
+
+
+def judge(tmp_path, *, diff=0, read=0, fetch=0):
+    tools = tmp_path / "bin"
+    tools.mkdir()
+    log = tmp_path / "commands"
+    pinned = tmp_path / "pinned"
+    (tools / "python3").write_text(
+        '#!/usr/bin/env bash\nprintf "python3 %s\\n" "${1##*/} ${*:2}" >> "$COMMAND_LOG"\n'
+        f'[[ "$FAKE_READ" == 0 ]] || exit "$FAKE_READ"\necho "{PINNED} rev123"\n'
+    )
+    (tools / "docker").write_text('#!/usr/bin/env bash\nprintf "docker %s\\n" "$*" >> "$COMMAND_LOG"\n')
+    (tools / "git").write_text(
+        '#!/usr/bin/env bash\nprintf "git %s\\n" "$*" >> "$COMMAND_LOG"\n'
+        'if [[ "$1" == fetch ]]; then exit "$FAKE_FETCH"; fi\n'
+        '[[ "$1" != diff ]] || exit "$FAKE_DIFF"\n'
+    )
+    for tool in tools.iterdir():
+        tool.chmod(0o755)
+    env = {
+        **os.environ,
+        "PATH": f"{tools}:{os.environ['PATH']}",
+        "COMMAND_LOG": str(log),
+        "FAKE_DIFF": str(diff),
+        "FAKE_READ": str(read),
+        "FAKE_FETCH": str(fetch),
+    }
+    result = subprocess.run(["bash", str(CURRENT), BASE, str(pinned)], env=env, capture_output=True, text=True)
+    return result.returncode, log.read_text().splitlines(), result.stdout, pinned
+
+
+def test_kind_proof_layers_only_the_hive_on_a_current_base():
+    assert len(builds()) == 2
+    rebuilt_base, hive = builds()
+    assert (
+        f'base-current.sh {BASE} "$out/worker-base.ref"; then\n  worker_base=published\n'
+        '  worker_image="$(cat "$out/worker-base.ref")"\n'
+    ) in PROOF.read_text()
+    assert f"ARG WORKER_IMAGE={BASE}\n" in (ROOT / "deploy/worker/Dockerfile").read_text()
+    assert "-f docker/swarm-node/Dockerfile" in rebuilt_base
+    assert "--pull" not in hive
+    assert "-f deploy/worker/Dockerfile" in hive
+    assert '--build-arg WORKER_IMAGE="$worker_image"' in hive
+    assert "docker pull" not in PROOF.read_text() + CURRENT.read_text()
+    assert "docker tag" not in PROOF.read_text().split("\nwait ")[0]
+    assert '--build-arg AGENTIHOOKS_REF="${AGENTIHOOKS_REF:-dev}"' in hive
+    assert hive.endswith('--output "type=image,name=$image,push=true,unpack=false" .')
+    assert "image=localhost:5001/agentihooks-hive-worker:dev\n" in PROOF.read_text()
+
+
+def worker_stage(name):
+    dockerfile = (ROOT / "deploy/worker/Dockerfile").read_text()
+    start = dockerfile.rindex("\nFROM ", 0, dockerfile.index(f" AS {name}\n")) + 1
+    return dockerfile[start : dockerfile.index("\nFROM ", start)]
+
+
+def test_hive_image_installs_agentihooks_cloned_from_the_chosen_branch():
+    dockerfile = (ROOT / "deploy/worker/Dockerfile").read_text()
+    assert "ARG AGENTIHOOKS_SOURCE=git" in dockerfile[: dockerfile.index("\nFROM ")].splitlines()
+    clone = worker_stage("source-git")
+    assert "ARG AGENTIHOOKS_REF=dev\n" in clone
+    assert "ADD https://github.com/the-cloud-clockwork/agentihooks.git#${AGENTIHOOKS_REF} /build\n" in clone
+    assert "COPY" not in clone
+    wheel = worker_stage("wheel")
+    assert wheel.startswith("FROM source-${AGENTIHOOKS_SOURCE} AS wheel\n")
+    assert "COPY" not in wheel
+    assert "ADD" not in wheel
+
+
+def test_hive_image_can_install_agentihooks_from_the_local_build_context():
+    local = worker_stage("source-local")
+    assert "ADD" not in local
+    sources = {s for line in re.findall(r"^COPY (.+) \S+$", local, re.M) for s in line.split()}
+    assert sources == {"pyproject.toml", "README.md", "hooks", "scripts", "profiles"}
+    allowed = (ROOT / "deploy/worker/Dockerfile.dockerignore").read_text().splitlines()
+    for source in sources:
+        assert f"!{source}" in allowed or f"!{source}/" in allowed, source
+
+
+def test_kind_proof_rebuilds_the_base_only_when_it_is_not_current():
+    current, _, stale = PROOF.read_text().partition("\nelse\n")
+    assert f'if bash deploy/worker/base-current.sh {BASE} "$out/worker-base.ref"; then' in current
+    assert "docker/swarm-node/Dockerfile" not in current
+    assert "docker/swarm-node/Dockerfile" in stale.split("\nfi\n")[0]
+
+
+def test_base_lock_satisfies_every_requirement_of_the_workstation_install():
+    project = tomllib.loads((ROOT / "pyproject.toml").read_text())["project"]
+    wanted = [Requirement(spec) for spec in project["dependencies"] + project["optional-dependencies"]["all"]]
+    lock = (ROOT / "docker/swarm-node/requirements.lock").read_text()
+    pins = {
+        canonicalize_name(name): version
+        for name, version in re.findall(r"^([A-Za-z0-9][A-Za-z0-9._-]*)==(\S+)", lock, re.M)
+    }
+    assert {"croniter", "boto3", "psycopg2-binary", "redis"} <= {canonicalize_name(r.name) for r in wanted}
+    unmet = [
+        str(r)
+        for r in wanted
+        if not r.specifier.contains(pins.get(canonicalize_name(r.name), "0.0.0a0"), prereleases=True)
+    ]
+    assert unmet == []
+
+
+def in_pod(tmp_path, *args):
+    text = PROOF.read_text()
+    function = text[text.index("in_pod() {") : text.index("\n}\n", text.index("in_pod() {")) + 3]
+    tools = tmp_path / "bin"
+    tools.mkdir()
+    (tools / "kubectl").write_text('#!/usr/bin/env bash\nprintf "%s\\n" "$@" > "$KUBECTL_ARGS"\n')
+    (tools / "kubectl").chmod(0o755)
+    (tmp_path / "out").mkdir()
+    env = {**os.environ, "PATH": f"{tools}:{os.environ['PATH']}", "KUBECTL_ARGS": str(tmp_path / "args")}
+    script = f'image=registry/hive:dev\nout={tmp_path / "out"}\n{function}in_pod "$@"\n'
+    subprocess.run(["bash", "-c", script, "proof", *args], env=env, check=True)
+    argv = (tmp_path / "args").read_text().splitlines()
+    overrides = json.loads(next(a for a in argv if a.startswith("--overrides=")).removeprefix("--overrides="))
+    return argv, overrides["spec"]
+
+
+def test_kind_proof_checks_init_renders_the_engineer_profile_in_a_pod_with_a_memory_home(tmp_path):
+    lines = PROOF.read_text().splitlines()
+    check = (
+        "in_pod init 'agentihooks init --profile engineer && "
+        'grep -qx "<!-- profile: engineer -->" "$HOME/.claude/CLAUDE.md"\' tmpfs &'
+    )
+    assert lines[:2] == ["#!/usr/bin/env bash", "set -euo pipefail"]
+    assert lines.count(check) == 1
+    assert lines.index('wait "$cluster_pid"') < lines.index(check)
+    assert lines.index('wait "$init_pid"') < lines.index("sha256sum -c deploy/helm/agentihooks-swarm-deps.sha256")
+    argv, spec = in_pod(tmp_path, "init", "true", "tmpfs")
+    assert argv[:2] == ["run", "init"]
+    assert {"--image=registry/hive:dev", "--restart=Never", "--attach", "--rm"} <= set(argv)
+    assert spec["containers"] == [
+        {
+            "name": "init",
+            "image": "registry/hive:dev",
+            "command": ["bash", "-c", "true"],
+            "volumeMounts": [{"name": "home", "mountPath": "/home/worker"}],
+        }
+    ]
+    assert spec["volumes"] == [{"name": "home", "emptyDir": {"medium": "Memory"}}]
+    assert spec["securityContext"] == {"fsGroup": 10001}
+
+
+def test_kind_proof_checks_the_bundle_system_tools_install_into_the_worker_home(tmp_path):
+    tools = [line for line in PROOF.read_text().splitlines() if line.startswith("in_pod tools '")]
+    assert len(tools) == 1
+    assert tools[0].endswith("' &")
+    for check in (
+        "node --version",
+        "npm --version",
+        "uv --version",
+        "gh --version",
+        'test "$(npm config get prefix)" = "$HOME/.local"',
+        '[[ ":$PATH:" == *":$HOME/.local/bin:"* ]]',
+    ):
+        assert f"&& {check} " in tools[0], check
+    _, spec = in_pod(tmp_path, "tools", "true")
+    assert spec == {"containers": [{"name": "tools", "image": "registry/hive:dev", "command": ["bash", "-c", "true"]}]}
+
+
+def test_base_inputs_cover_every_base_source_the_wheel_does_not_replace():
+    dockerfile = (ROOT / "docker/swarm-node/Dockerfile").read_text()
+    sources = {s for line in re.findall(r"^COPY (?:--\S+ )*(.+) \S+$", dockerfile, re.M) for s in line.split()}
+    assert sources - WHEEL
+    for source in sources - WHEEL:
+        assert any(source.startswith(path) for path in INPUTS.split()), source
+
+
+def test_base_is_current_when_its_inputs_match_the_published_revision(tmp_path):
+    status, commands, _, pinned = judge(tmp_path)
+    assert status == 0
+    assert commands[0] == f"python3 worker_base_revision.py {BASE}"
+    assert not any(command.startswith("docker ") for command in commands)
+    assert "git fetch -q --depth=1 origin rev123" in commands
+    assert commands[-1] == f"git diff --quiet rev123 HEAD -- {INPUTS}"
+    assert pinned.read_text() == f"{PINNED}\n"
+
+
+def test_base_is_stale_when_an_input_changed(tmp_path):
+    status, commands, output, pinned = judge(tmp_path, diff=1)
+    assert status == 1
+    assert not pinned.exists()
+    assert commands[-1] == f"git diff --quiet rev123 HEAD -- {INPUTS}"
+    assert "inputs changed since rev123" in output
+
+
+@pytest.mark.parametrize(
+    ("failure", "reason"),
+    [
+        ({"read": 1}, "revision cannot be read"),
+        ({"fetch": 128}, "revision rev123 cannot be fetched"),
+        ({"diff": 128}, "inputs cannot be compared with revision rev123"),
+    ],
+)
+def test_base_is_undetermined_with_a_visible_reason_when_the_comparison_fails(tmp_path, failure, reason):
+    status, _, output, pinned = judge(tmp_path, **failure)
+    assert status == 2
+    assert not pinned.exists()
+    assert output.startswith("::warning title=Worker hive base::")
+    assert reason in output
+
+
+class Reply(io.BytesIO):
+    def __init__(self, body, digest):
+        super().__init__(json.dumps(body).encode())
+        self.headers = {"Docker-Content-Digest": digest} if digest else {}
+
+
+def registry(monkeypatch, labels, *, index=True, architecture="amd64"):
+    image = "/v2/the-cloud-clockwork/agentihooks-worker"
+    platform = {"config": {"digest": "sha256:config"}}
+    blobs = {
+        "/token?scope=repository:the-cloud-clockwork/agentihooks-worker:pull": ({"token": "t"}, None),
+        f"{image}/manifests/dev": (
+            {
+                "manifests": [
+                    {"digest": "sha256:unplatformed"},
+                    {"digest": "sha256:attestation", "platform": {"architecture": "unknown", "os": "unknown"}},
+                    {"digest": "sha256:amd64", "platform": {"architecture": "amd64", "os": "linux"}},
+                ]
+            }
+            if index
+            else platform,
+            "sha256:index" if index else "sha256:amd64",
+        ),
+        f"{image}/manifests/sha256:amd64": (platform, "sha256:amd64"),
+        f"{image}/blobs/sha256:config": ({"architecture": architecture, "config": {"Labels": labels}}, None),
+    }
+    seen = []
+
+    def urlopen(request, timeout):
+        assert timeout == 30
+        assert request.headers["Accept"] == (
+            "application/vnd.oci.image.index.v1+json, application/vnd.oci.image.manifest.v1+json, "
+            "application/vnd.docker.distribution.manifest.list.v2+json, "
+            "application/vnd.docker.distribution.manifest.v2+json"
+        )
+        path = re.sub(r"^https://[^/]+", "", request.full_url)
+        seen.append((path, request.headers.get("Authorization"), request.unredirected_hdrs.get("Authorization")))
+        return Reply(*blobs[path])
+
+    monkeypatch.setattr(urllib.request, "urlopen", urlopen)
+    return seen
+
+
+@pytest.mark.parametrize("index", [True, False])
+def test_base_revision_reads_the_amd64_label_from_the_registry_without_pulling(monkeypatch, index):
+    seen = registry(monkeypatch, {"org.opencontainers.image.revision": "rev123"}, index=index)
+    assert pinned_revision(BASE) == (PINNED, "rev123")
+    assert seen[0][1:] == (None, None)
+    assert {auth for _, auth, _ in seen} == {None}
+    assert {auth for _, _, auth in seen[1:]} == {"Bearer t"}
+    assert len(seen) == (4 if index else 3)
+
+
+def test_base_revision_refuses_a_single_manifest_of_another_architecture(monkeypatch):
+    registry(monkeypatch, {"org.opencontainers.image.revision": "rev123"}, index=False, architecture="arm64")
+    with pytest.raises(SystemExit, match="no amd64 image with a revision label"):
+        pinned_revision(BASE)
+
+
+def test_base_revision_keeps_a_registry_port(monkeypatch):
+    registry(monkeypatch, {"org.opencontainers.image.revision": "rev123"})
+    hosts = []
+    original = urllib.request.urlopen
+
+    def recording(request, timeout):
+        hosts.append(request.host)
+        return original(request, timeout)
+
+    monkeypatch.setattr(urllib.request, "urlopen", recording)
+    image = "registry.local:5000/the-cloud-clockwork/agentihooks-worker"
+    assert pinned_revision(f"{image}:dev") == (f"{image}@sha256:amd64", "rev123")
+    assert set(hosts) == {"registry.local:5000"}
+
+
+def test_base_revision_refuses_an_index_without_an_amd64_image(monkeypatch):
+    registry(monkeypatch, {"org.opencontainers.image.revision": "rev123"})
+    original = urllib.request.urlopen
+
+    def without_amd64(request, timeout):
+        reply = original(request, timeout)
+        if request.full_url.endswith("/manifests/dev"):
+            body = json.loads(reply.read())
+            body["manifests"] = body["manifests"][:1]
+            return Reply(body, "sha256:index")
+        return reply
+
+    monkeypatch.setattr(urllib.request, "urlopen", without_amd64)
+    with pytest.raises(SystemExit, match="has no amd64 image$"):
+        pinned_revision(BASE)
+
+
+def test_base_revision_refuses_a_base_without_its_revision_label(monkeypatch):
+    registry(monkeypatch, None)
+    with pytest.raises(SystemExit, match="no amd64 image with a revision label"):
+        pinned_revision(BASE)
+
+
+def test_the_worker_base_labels_its_source_revision():
+    assert (
+        "LABEL org.opencontainers.image.revision=$SOURCE_REVISION\n"
+        in (ROOT / "docker/swarm-node/Dockerfile").read_text()
+    )
+
+
+def test_the_hive_image_carries_the_pyproject_ruff_pin_and_the_kind_proof_runs_it():
+    assert "&& ruff --version &&" in PROOF.read_text()
+    assert "r.startswith('ruff==')" in (ROOT / "deploy/worker/Dockerfile").read_text()
+
+
+def hive_jobs():
+    return yaml.safe_load((ROOT / ".github/workflows/hive-worker.yml").read_text())["jobs"]
+
+
+def test_the_kind_job_publishes_the_proven_image_on_dev_pushes_after_the_chart_proof():
+    jobs = hive_jobs()
+    kind = jobs["kind"]
+    assert "publish" not in jobs
+    assert kind["needs"] == "contracts"
+    names = [step.get("name", step.get("uses", "")) for step in kind["steps"]]
+    assert names.index("Publish the proven hive worker image") > names.index("docker/login-action@v3")
+    assert names.index("docker/login-action@v3") > names.index(
+        "Build the worker image while kind starts, then prove registration and order acknowledgement"
+    )
+    dev_push = "github.event_name == 'push' && github.ref == 'refs/heads/dev'"
+    assert [step.get("if") for step in kind["steps"] if "ghcr.io" in str(step)] == [dev_push, dev_push]
+    publish = next(step for step in kind["steps"] if step.get("name") == "Publish the proven hive worker image")
+    assert "docker tag localhost:5001/agentihooks-hive-worker:dev ghcr.io/" in publish["run"]
+
+
+@pytest.mark.parametrize(("installed", "downloads"), [(True, 0), (False, 2)])
+def test_the_kind_job_keeps_the_runner_kind_and_downloads_only_without_one(tmp_path, installed, downloads):
+    step = next(step for step in hive_jobs()["kind"]["steps"] if step.get("name") == "Install kind")
+    tools = tmp_path / "bin"
+    tools.mkdir()
+    log = tmp_path / "commands"
+    fakes = {
+        "kind": f'echo "kind $*" >> {log}; [ -e {tmp_path}/installed ]',
+        "curl": f'echo "curl $*" >> {log}; touch "$2"',
+        "sha256sum": f'echo "sha256sum $*" >> {log}',
+        "sudo": f'echo "sudo $*" >> {log}; touch {tmp_path}/installed',
+    }
+    for name, body in fakes.items():
+        (tools / name).write_text(f"#!/usr/bin/env bash\n{body}\n")
+        (tools / name).chmod(0o755)
+    if installed:
+        (tmp_path / "installed").touch()
+    env = {**os.environ, **step["env"], "PATH": f"{tools}:{os.environ['PATH']}"}
+    subprocess.run(["bash", "-e", "-c", step["run"]], cwd=tmp_path, env=env, check=True)
+    commands = log.read_text().splitlines()
+    assert sum(line.startswith("curl ") for line in commands) == downloads
+    assert any(line.startswith("sudo ") for line in commands) is not installed
+    assert commands[-1] == "kind version"
+
+
+def test_a_release_builds_the_hive_worker_on_its_released_worker_and_moves_release_only_when_newest():
+    jobs = yaml.safe_load((ROOT / ".github/workflows/swarm-node-image.yml").read_text())["jobs"]
+    hive = jobs["hive"]
+    assert hive["if"] == "github.event_name == 'release'"
+    assert hive["needs"] == "image"
+    assert jobs["image"]["outputs"]["latest"] == "${{ steps.main.outputs.latest }}"
+    assert hive["env"]["IMAGE"] == "ghcr.io/the-cloud-clockwork/agentihooks-hive-worker"
+    steps = {step.get("name", step.get("uses")): step for step in hive["steps"]}
+    build = steps["Build the hive worker on the released worker image"]["run"]
+    assert 'WORKER_IMAGE="ghcr.io/the-cloud-clockwork/agentihooks-worker:${RELEASE#v}"' in build
+    assert 'AGENTIHOOKS_REF="$GITHUB_SHA"' in build
+    names = list(steps)
+    assert names.index("Prove the hive worker installs its profile") < names.index(
+        "Publish the release version and move the release tag when it is the newest"
+    )
+    publish = steps["Publish the release version and move the release tag when it is the newest"]
+    assert publish["env"]["LATEST"] == "${{ needs.image.outputs.latest }}"
+    assert 'if [[ "$LATEST" == true ]]; then' in publish["run"]
+
+
+def test_the_proven_image_skips_the_artifact_round_trip():
+    assert "docker save" not in PROOF.read_text()
+    assert all("image.tar" not in str(step) for job in hive_jobs().values() for step in job["steps"])
+
+
+def test_kind_proof_pulls_the_base_and_redis_into_the_node_while_the_hive_builds():
+    lines = PROOF.read_text().splitlines()
+    start = lines.index("{")
+    assert lines[start + 1].startswith('  kind create cluster --name "$cluster"')
+    registry = (
+        'docker run -d --name "$cluster-registry" -p 127.0.0.1:5001:5000 mirror.gcr.io/library/registry:2 >/dev/null'
+    )
+    assert lines[start - 1] == registry
+    assert lines[start + 2 : start + 5] == [
+        '  docker network connect kind "$cluster-registry"',
+        '  docker exec "$cluster-control-plane" mkdir -p /etc/containerd/certs.d/localhost:5001',
+        '  printf \'[host."http://%s:5000"]\\n\' "$cluster-registry" | docker exec -i "$cluster-control-plane" cp /dev/stdin /etc/containerd/certs.d/localhost:5001/hosts.toml',
+    ]
+    assert lines[start + 5 : start + 9] == [
+        f"  for warm in {BASE} mirror.gcr.io/library/redis:7-alpine; do",
+        '    docker exec "$cluster-control-plane" crictl pull "$warm" || echo "the node could not pre-pull $warm; the proof loads or pulls it later"',
+        "  done",
+        '} > "$out/cluster.log" 2>&1 &',
+    ]
+    assert "kind load" not in PROOF.read_text()
+    assert "imagePullPolicy: Never" not in PROOF.read_text()
+    assert lines.index('  docker rm -f "$cluster-registry" >/dev/null 2>&1 || true') < lines.index(
+        '  kind delete cluster --name "$cluster"'
+    )
+    assert lines.index('docker image inspect --format \'{{.Id}}\' "$image" > "$out/image.txt"') < lines.index(
+        'wait "$cluster_pid"'
+    )
+
+
+def test_kind_proof_ends_the_drain_hold_once_the_hive_reads_draining():
+    text = PROOF.read_text()
+    assert "sleep 45" not in text
+    lines = text.splitlines()
+    started = (
+        'started="$(kubectl get pod "$pod" -o jsonpath=\'{.status.containerStatuses[0].state.running.startedAt}\')"'
+    )
+    restart = lines.index('kubectl rollout restart "deployment/$deployment"')
+    assert lines.index(started) < restart
+    assert lines[restart + 1 : restart + 4] == ["hold_agent draining", "for _ in {1..5}; do", "  sleep 1"]
+    window = lines[restart + 4 : restart + 7]
+    assert window[0].startswith('  [[ "$(kubectl get pod "$pod" -o jsonpath=')
+    assert '== "$started" ]]' in window[0]
+    assert '== "pod/$pod" ]]' in window[1]
+    assert window[2] == "done"
+    assert "        if registry.show(store.redis, os.environ['HIVE'])['draining'] == 'yes':" in lines

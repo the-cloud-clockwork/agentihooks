@@ -5,6 +5,7 @@ import pytest
 
 from scripts.swarm import publish, stack
 from scripts.swarm.store import AgentRecord
+from scripts.swarm_ledger import ledger_tasks
 
 pytestmark = pytest.mark.unit
 
@@ -45,6 +46,7 @@ def repositories(tmp_path, monkeypatch):
 
     def update(slug, task_id, fields, by):
         assert (slug, task_id, by) == ("swarm", "t1", task["claimed_by"])
+        ledger_tasks.check({"op": "task_update", "item": f"tasks/{task_id}", "fields": fields, "by": by})
         updates.append(fields)
         task.update(fields)
 
@@ -79,6 +81,58 @@ def test_prepare_keeps_one_worktree_per_repository(repositories):
     assert [git(root, "show", "HEAD:chosen.txt") for root in roots] == ["agentihooks", "agentihooks-bundle"]
     assert publish.prepare("swarm", p.agent, str(p.swarm), p.ledger) == fields
     assert p.task["repository_branches"] == {str(p.swarm): "engineer-test", str(p.bundle): "engineer-test"}
+
+
+@pytest.mark.parametrize("reverse", [False, True])
+def test_prepare_retires_only_the_merged_repository_branch(repositories, monkeypatch, reverse):
+    p = repositories
+    roots = [p.swarm, p.bundle]
+    for root in roots:
+        git(root, "push", "origin", "HEAD:predecessor")
+    open_worktree = f"{p.bundle}-open"
+    git(p.bundle, "worktree", "add", "-b", "predecessor", open_worktree, "origin/predecessor")
+    git(p.swarm, "push", "origin", "--delete", "predecessor")
+    fresh = git(p.swarm, "commit-tree", "HEAD^{tree}", "-p", "HEAD", "-m", "New dev")
+    git(p.swarm, "push", "origin", f"{fresh}:refs/heads/dev")
+    p.task.update(
+        repositories=[str(root) for root in (reversed(roots) if reverse else roots)],
+        branch="predecessor",
+        branch_repo="git@github.com:example/agentihooks.git",
+        pr_url="https://github.com/example/agentihooks/pull/7",
+        repository_branches={str(root): "predecessor" for root in roots},
+        handoff_envelope={"continue_from": "origin/predecessor", "task": "t1"},
+        reclaim={"continue_from": "origin/predecessor", "reason": "retained"},
+    )
+    native_git, native_execute = publish.git, publish.execute
+    queries = []
+
+    def git_call(root, *args):
+        if args == ("remote", "get-url", "origin"):
+            return f"git@github.com:example/{root.name.removesuffix('-worktree')}.git"
+        return native_git(root, *args)
+
+    def execute(command, root):
+        if command[:3] == ["gh", "pr", "view"]:
+            queries.append(str(root))
+            return '{"state": "MERGED", "headRefName": "predecessor"}'
+        return native_execute(command, root)
+
+    monkeypatch.setattr(publish, "git", git_call)
+    monkeypatch.setattr(publish, "execute", execute)
+
+    result = publish.prepare("swarm", p.agent, str(p.swarm), p.ledger)
+
+    by_repo = {entry["repository"]: entry for entry in result["worktrees"]}
+    assert queries == [str(p.swarm)]
+    assert by_repo[str(p.bundle)]["worktree"] == open_worktree
+    assert by_repo[str(p.bundle)]["branch"] == "predecessor"
+    assert git(open_worktree, "rev-parse", "--abbrev-ref", "@{upstream}") == "origin/predecessor"
+    assert git(by_repo[str(p.swarm)]["worktree"], "rev-parse", "HEAD") == fresh
+    assert by_repo[str(p.swarm)]["branch"] == "engineer-test"
+    assert p.task["repository_branches"] == {str(p.swarm): "engineer-test", str(p.bundle): "predecessor"}
+    assert p.task["pr_url"] == ""
+    assert p.task["handoff_envelope"] == {"continue_from": "origin/predecessor", "task": "t1"}
+    assert p.task["reclaim"] == {"continue_from": "origin/predecessor", "reason": "retained"}
 
 
 def test_prepare_names_the_default_repository_without_inferring_prose(repositories):
@@ -117,6 +171,7 @@ def test_publish_selects_the_current_repository_and_retains_both_branches(reposi
         Path(root, "chosen.txt").write_text("after")
     git(roots[1], "branch", "-m", "engineer-test-2")
     fields["worktrees"][1]["branch"] = "engineer-test-2"
+    p.task["repository_branches"][str(p.bundle)] = "engineer-test-2"
     monkeypatch.chdir(roots[1])
     first = publish.publish("swarm", p.agent, str(p.swarm), p.ledger, "Change bundle", ["chosen.txt"])
     assert first["worktree"] == roots[1]
@@ -579,3 +634,102 @@ def test_fallback_grades_an_unparsable_base_as_new(repositories, monkeypatch, ba
     assert status in {line[0] for line in git(root, "diff", "--name-status", "-M", "HEAD~1", "HEAD").splitlines()}
     monkeypatch.chdir(root)
     assert publish_gate.main() == 0
+
+
+def test_prepare_and_publish_resolve_a_repository_recorded_on_another_host(repositories, monkeypatch, tmp_path):
+    from pathlib import Path
+
+    p = repositories
+    monkeypatch.setenv("HIVE_REPO_ROOT", str(tmp_path / "empty"))
+    foreign = f"/srv/workstation/dev/{p.bundle.name}"
+    p.task["repositories"] = [foreign]
+    fields = publish.prepare("swarm", p.agent, str(p.swarm), p.ledger)
+    root = Path(fields["worktree"])
+    assert (fields["repository"], root) == (str(p.bundle), Path(f"{p.bundle}-worktree"))
+    install_gate(root)
+    (root / "chosen.txt").write_text("after")
+    monkeypatch.chdir(root)
+    first = publish.publish("swarm", p.agent, str(p.swarm), p.ledger, "Change bundle", ["chosen.txt"])
+    assert first["worktree"] == str(root)
+    assert git(p.bundle, "ls-remote", "origin", "refs/heads/engineer-test").split()[0] == git(root, "rev-parse", "HEAD")
+    (root / "chosen.txt").write_text("again")
+    monkeypatch.chdir(p.swarm)
+    second = publish.publish("swarm", p.agent, str(p.swarm), p.ledger, "Change from primary", ["chosen.txt"])
+    assert second["worktree"] == str(root)
+    assert git(p.bundle, "ls-remote", "origin", "refs/heads/engineer-test").split()[0] == git(root, "rev-parse", "HEAD")
+
+
+def test_prepare_finds_a_foreign_repository_in_the_hive_checkout_root(repositories, monkeypatch, tmp_path):
+    p = repositories
+    monkeypatch.setenv("HIVE_REPO_ROOT", str(tmp_path))
+    p.task["repositories"] = ["git@github.com:The-Cloud-Clockwork/AgentiHooks-Bundle.git"]
+    fields = publish.prepare("swarm", p.agent, str(tmp_path / "elsewhere" / "agentihooks"), p.ledger)
+    assert fields["repository"] == str(p.bundle)
+
+
+def test_prepare_uses_a_recorded_checkout_present_here_outside_the_search(repositories, monkeypatch, tmp_path):
+    p = repositories
+    monkeypatch.setenv("HIVE_REPO_ROOT", str(tmp_path / "empty"))
+    copy = tmp_path / "scratch" / "copy"
+    git(tmp_path, "clone", "-q", str(tmp_path / "agentihooks-bundle.git"), str(copy))
+    p.task["repositories"] = [str(copy)]
+    assert publish.prepare("swarm", p.agent, str(p.swarm), p.ledger)["repository"] == str(copy)
+
+
+def test_publish_from_a_worktree_skips_a_declared_repository_missing_here(repositories, monkeypatch, tmp_path):
+    from pathlib import Path
+
+    p = repositories
+    monkeypatch.setenv("HIVE_REPO_ROOT", str(tmp_path / "empty"))
+    p.task["repositories"] = [str(p.bundle)]
+    root = publish.prepare("swarm", p.agent, str(p.swarm), p.ledger)["worktree"]
+    install_gate(Path(root))
+    p.task["repositories"] = ["/srv/workstation/dev/agentibrain-kernel", str(p.bundle)]
+    monkeypatch.chdir(root)
+    result = publish.publish("swarm", p.agent, str(p.swarm), p.ledger, "Gate bundle", ["chosen.txt"])
+    assert result["worktree"] == root
+
+
+def test_prepare_reuses_a_branch_recorded_under_another_host_path(repositories, monkeypatch, tmp_path):
+    p = repositories
+    monkeypatch.setenv("HIVE_REPO_ROOT", str(tmp_path / "empty"))
+    p.task["repositories"] = [str(p.bundle)]
+    root = publish.prepare("swarm", p.agent, str(p.swarm), p.ledger)["worktree"]
+    git(root, "branch", "-m", "prior-task-branch")
+    foreign = "/srv/workstation/dev/AgentiHooks-Bundle"
+    p.task.update(repositories=[foreign], repository_branches={foreign: "prior-task-branch"})
+    p.task.pop("branch", None)
+    result = publish.prepare("swarm", p.agent, str(p.swarm), p.ledger)
+    assert (result["worktree"], result["branch"]) == (root, "prior-task-branch")
+
+
+def test_prepare_prefers_this_host_branch_record_over_a_same_named_foreign_one(repositories, monkeypatch, tmp_path):
+    p = repositories
+    monkeypatch.setenv("HIVE_REPO_ROOT", str(tmp_path / "empty"))
+    p.task["repositories"] = [str(p.bundle)]
+    first = publish.prepare("swarm", p.agent, str(p.swarm), p.ledger)
+    git(p.bundle, "push", "origin", "dev:refs/heads/stale-branch")
+    git(p.bundle, "fetch", "origin")
+    foreign = f"/srv/workstation/dev/{p.bundle.name}"
+    p.task["repository_branches"] = {foreign: "stale-branch", str(p.bundle): "engineer-test"}
+    p.task.pop("branch", None)
+    result = publish.prepare("swarm", p.agent, str(p.swarm), p.ledger)
+    assert (result["worktree"], result["branch"]) == (first["worktree"], "engineer-test")
+
+
+@pytest.mark.parametrize("copies", [0, 2])
+def test_prepare_refuses_a_foreign_repository_without_one_local_checkout(repositories, monkeypatch, tmp_path, copies):
+    from scripts.swarm.store import SwarmError
+
+    p = repositories
+    hive = tmp_path / "hive"
+    hive.mkdir()
+    monkeypatch.setenv("HIVE_REPO_ROOT", str(hive))
+    name = "agentihooks-bundle" if copies else "agentibrain-kernel"
+    if copies:
+        git(hive, "clone", "-q", str(tmp_path / "agentihooks-bundle.git"), name)
+    foreign = f"/srv/workstation/dev/{name}"
+    p.task["repositories"] = [foreign]
+    with pytest.raises(SwarmError) as error:
+        publish.prepare("swarm", p.agent, str(p.swarm), p.ledger)
+    assert str(error.value) == f"repository {foreign} has {copies} checkouts named {name} on this host"

@@ -11,7 +11,6 @@ from scripts.swarm.tick import tick
 from tests.swarm.test_cli import env, run  # noqa: F401
 from tests.swarm.test_close import closing  # noqa: F401
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
 DOC = "# Handoff v2\n## Next\nRead the saved proof.\n## Read first\nNone\n"
 
 
@@ -353,7 +352,7 @@ def test_take_master_prints_the_full_master_priming(taker, capsys):
         "Left the docs task waiting on review",
         "Continue from the master handoff notes",
         "Your standing duties:",
-        "agentihooks swarm sw --as master@a1b2c3-0001 say --to operator",
+        "Never write to the operator first",
     ):
         assert part in out, part
     assert store.handoff("sw", "master") == ""

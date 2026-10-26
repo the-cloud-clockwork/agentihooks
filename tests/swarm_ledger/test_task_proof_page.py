@@ -23,11 +23,11 @@ def render(task, tail=None):
         "const h = (tag, attrs, ...kids) => ({ tag, attrs: attrs || {}, kids: kids.filter(Boolean), addEventListener() {},"
         " replaceWith(node) { Object.assign(this, node); } });"
         "const itemActions = () => null; const commentsView = (key) => ({ tag: 'comments', attrs: { key }, kids: [] });"
-        "const doc = { freezes: [] }; const frozen = () => false; const holdClass = () => ''; const holdMark = () => null;"
+        "const doc = { freezes: [], pending: {} }; const pendingOf = () => null; const frozen = () => false; const holdClass = () => ''; const holdMark = () => null;"
         "const ser = (n) => (n && typeof n === 'object' ? [n.tag, n.attrs.class || '', n.attrs.text || '', n.kids.map(ser)] : n);"
         "const lazy = (box, fill) => { box.kids.push(...[fill()].flat().filter(Boolean)); return box; };"
-        f"const readWorkspace = () => Promise.resolve({{ ok: {json.dumps(tail is not None)},"
-        f" json: () => Promise.resolve({{ data: {json.dumps(tail or {})} }}) }});"
+        "const readWorkspace = () => Promise.resolve({ ok: false }); const render = () => null;"
+        f"const workTails = new Map({json.dumps([[task['id'], tail]] if tail is not None else [])});"
     )
     script = (
         stubs
@@ -38,7 +38,7 @@ def render(task, tail=None):
                 "taskBlockers",
                 "proofRows",
                 "proofList",
-                "proofBody",
+                "workButton",
                 "taskProof",
                 "taskLink",
                 "taskRanks",
@@ -52,7 +52,7 @@ def render(task, tail=None):
         + f"const t = {json.dumps(task)}; const el = taskRow(t, [t]);"
         + "setTimeout(() => {"
         + " const proof = (function find(n) { if (!n || typeof n !== 'object') return null;"
-        + " if (n.tag === 'details') return n; for (const k of n.kids) { const f = find(k); if (f) return f; } return null; })(el);"
+        + " if (n.attrs.class === 'task-proof') return n; for (const k of n.kids) { const f = find(k); if (f) return f; } return null; })(el);"
         + " process.stdout.write(JSON.stringify({ tree: ser(el), proof: proof && { comments_key: proof.attrs['data-key'] || null, open: !!proof.open } }));"
         + " }, 0);"
     )
@@ -163,10 +163,14 @@ class TaskProofOnThePage(unittest.TestCase):
         self.assertEqual([n[2] for n in nodes(out["tree"], "kind")], ["code"])
         self.assertIsNone(out["proof"])
 
-    def test_a_proof_dropdown_keeps_its_open_state_across_renders(self):
+    def test_the_proof_block_never_folds_and_reads_the_work_folder_only_on_request(self):
         source = function_source("taskProof")
-        self.assertIn("openComments.has(key)", source)
-        self.assertIn('addEventListener("toggle"', source)
+        self.assertNotIn("details", source)
+        self.assertNotIn("toggle", source)
+        self.assertNotIn("readWorkspace", source)
+        self.assertIn("readWorkspace(item.id)", function_source("workButton"))
+        shown = texts(render({**PLAIN, "workspace": "/w/t1"})["tree"])
+        self.assertIn("Show work folder", shown)
 
     def test_show_and_hide_all_comments_leave_the_proof_dropdown_alone(self):
         self.assertIn("commentBoxes(section)", function_source("setAllComments"))

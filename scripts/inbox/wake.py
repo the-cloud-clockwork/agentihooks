@@ -4,13 +4,13 @@ Ladder per pending item: up to three wakes one retry window apart, then an inbox
 then a follow-up on the ledger page. Every step is appended to the item's history, so the count survives restarts.
 """
 
-from dataclasses import replace
+from dataclasses import dataclass, replace
 
 from scripts.inbox import addresses, exits
 from scripts.inbox.dispatch import Dispatcher
 from scripts.inbox.seats import is_seat
 from scripts.inbox.seen import SEEN_ON_LEDGER, SeenMarks
-from scripts.inbox.store import redelivery_ms
+from scripts.inbox.store import Item, redelivery_ms
 from scripts.swarm import capabilities, idle, outage
 from scripts.swarm.delivery import READY, post
 from scripts.swarm.store import MASTER, RedisStore, SwarmError
@@ -39,8 +39,11 @@ def quiet_ms(environ):
 
 
 def typed_wake(inbox, agent):
+    from scripts.hive import reports
+
     return (
         bool(agent.pane_id)
+        and not reports.host(agent)
         and agent.lane != MASTER
         and not capabilities.of_agent(agent).push_inbox
         and not Dispatcher(inbox).owner(agent.name)
@@ -50,7 +53,7 @@ def typed_wake(inbox, agent):
 def decide(item, pane, history, now_ms, window, slug, since=0):
     """pane is the receiver's herdr status, None when it sits outside herdr; the window clock skips the swarm's
     outage time since the item's last step, and starts no earlier than since. since None holds the item."""
-    if item.state != "pending" or since is None:
+    if item.state != "pending" or item.fyi or since is None:
         return None
     steps = [e.get("event") for e in history]
     if TO_OPERATOR in steps:
@@ -62,9 +65,7 @@ def decide(item, pane, history, now_ms, window, slug, since=0):
     wakes = steps.count(WOKEN)
     if pane in READY and wakes < MAX_WAKES and (wakes == 0 or due):
         return WOKEN
-    return (
-        TO_MASTER if due and not item.ref.startswith(("inbox-escalation:", "spawn-stall:")) and not item.fyi else None
-    )
+    return TO_MASTER if due and not item.ref.startswith(("inbox-escalation:", "spawn-stall:")) else None
 
 
 def raised_note(master: str, raised_id: str) -> str:
@@ -76,39 +77,97 @@ def raised_id(entry: dict) -> str:
     return entry["reason"].rpartition(" ")[2] if entry.get("event") == TO_MASTER else ""
 
 
+@dataclass(frozen=True)
+class _WakeInputs:
+    items: list[Item]
+    receivers: dict[str, tuple[str, tuple[str, int] | None]]
+    clocks: dict[str, int | None]
+    histories: dict[str, list[dict]]
+    seen: set[tuple[str, str]]
+
+
+def _wake_inputs(inbox, slug, items, names, config, marks):
+    aliases = inbox.names.resolve_many(
+        list(dict.fromkeys(value for item in items for value in (item.address, item.sender)))
+    )
+    resolved = [replace(item, address=aliases[item.address], sender=aliases[item.sender]) for item in items]
+    eligible = [
+        item for item in resolved if item.address in names or item.sender in names or item.address.endswith(f"@{slug}")
+    ]
+    receivers = {address: _receiver(inbox, address) for address in dict.fromkeys(item.address for item in eligible)}
+    clocks = {
+        address: _seat_clock(inbox, receiver, held, names, config) for address, (receiver, held) in receivers.items()
+    }
+    histories = inbox.histories([item.id for item in eligible])
+    pairs = list(
+        dict.fromkeys(
+            (receivers[item.address][0], item.ref) for item in eligible if item.ref and receivers[item.address][0]
+        )
+    )
+    return _WakeInputs(eligible, receivers, clocks, histories, marks.seen_many(pairs))
+
+
 def wake_pass(inbox, slug, agents, herdr, ledger, now_ms, window, quiet=DEFAULT_QUIET_S * 1000):
+    return maintenance(inbox, slug, agents, now_ms, window) + [
+        action
+        for world in inbox.worlds()
+        for action in _wake_world(
+            world, slug, agents, herdr, ledger, _Clock(now_ms, window, quiet), _ladder(world, slug)
+        )
+    ]
+
+
+def maintenance(inbox, slug, agents, now_ms, window):
+    actions = []
+    names = {agent.name for agent in agents}
+    for world in inbox.worlds():
+        actions += [f"redelivered message {item.id}" for item in world.redeliver(now_ms, redelivery_ms())]
+        actions += addresses.settle_unresolved(world, names, _ladder(world, slug), now_ms, window)
+    return actions
+
+
+def wake_item(inbox, slug, agents, herdr, ledger, item, clock):
+    return _wake_world(inbox, slug, agents, herdr, ledger, clock, [] if outage.open_records(slug) else [item])
+
+
+@dataclass(frozen=True)
+class _Clock:
+    now_ms: int
+    window: int
+    quiet: int
+
+
+def _wake_world(inbox, slug, agents, herdr, ledger, clock: _Clock, items):
+    now_ms, window, quiet = clock.now_ms, clock.window, clock.quiet
     names, config = {a.name for a in agents}, _swarm_config(inbox, slug)
     panes = {a.name: a for a in agents if typed_wake(inbox, a)}
     boss = next((a for a in agents if a.lane == MASTER), None)
     master = (boss.seat or boss.name) if boss else ""
     marks = SeenMarks(inbox.redis)
     statuses, prompted = {}, set()
-    actions = [f"redelivered message {item.id}" for item in inbox.redeliver(now_ms, redelivery_ms())]
-    actions += addresses.settle_unresolved(inbox, names, _ladder(inbox, slug), now_ms, window)
+    actions = []
+    reads = _wake_inputs(inbox, slug, items, names, config, marks)
     doc = None
-    for item in _ladder(inbox, slug):
-        item = replace(item, address=inbox.names.resolve(item.address), sender=inbox.names.resolve(item.sender))
-        if item.address not in names and item.sender not in names and not item.address.endswith(f"@{slug}"):
-            continue
-        receiver, held = _receiver(inbox, item.address)
+    for item in reads.items:
+        receiver, held = reads.receivers[item.address]
         if item.sender == BY and item.ref.startswith(f"{slug}:event:"):
             if doc is None:
                 doc = ledger.state(slug)
             if _decided(item.ref, doc):
                 inbox.close(item.id, BY, "done", "decided on the ledger")
                 continue
-        if item.ref and receiver and marks.seen(receiver, item.ref):
+        if item.ref and receiver and (receiver, item.ref) in reads.seen:
             inbox.close(item.id, receiver, "done", SEEN_ON_LEDGER)
             continue
         agent = panes.get(receiver)
         if agent and agent.name not in statuses:
             statuses[agent.name] = _pane_state(inbox.redis, slug, herdr, agent, now_ms, quiet)
-        since = _seat_clock(inbox, receiver, held, names, config)
-        step = decide(item, statuses.get(receiver), inbox.history(item.id), now_ms, window, slug, since)
+        since = reads.clocks[item.address]
+        step = decide(item, statuses.get(receiver), reads.histories[item.id], now_ms, window, slug, since)
         if step == WOKEN and _still_held(inbox, held) and _wake(herdr, agent, prompted):
             if inbox.note(item.id, WOKEN, BY, f"prompted {receiver} to read its inbox", now_ms, held):
                 actions.append(f"woke {receiver} for message {item.id}")
-        elif step == TO_MASTER and master and receiver != boss.name:
+        elif step == TO_MASTER and master and receiver != boss.name and not _sent_from(inbox, item, boss, master):
             raised = inbox.send(BY, master, _master_text(item), ref=f"inbox-escalation:{item.id}")
             inbox.note(item.id, TO_MASTER, BY, raised_note(master, raised.id), now_ms)
             actions.append(f"raised message {item.id} to {master}")
@@ -139,6 +198,11 @@ def wake_now(inbox, slug, agents, herdr, now_ms, window, quiet=DEFAULT_QUIET_S *
             inbox.note(item.id, WOKEN, BY, f"prompted {agent.name} to read its inbox", now_ms)
             actions.append(f"woke {agent.name} for message {item.id}")
     return actions
+
+
+def _sent_from(inbox, item, boss, master):
+    """The master or an earlier occupant of its seat sent the item."""
+    return item.sender == boss.name or inbox.seats.known_seat(item.sender) == master
 
 
 def _wake_due(inbox, item, state, swarm, clock):

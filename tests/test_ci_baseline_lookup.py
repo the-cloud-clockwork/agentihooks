@@ -11,7 +11,7 @@ pytestmark = pytest.mark.unit
 _ROOT = Path(__file__).resolve().parents[1]
 _SELECTORS = [
     ("coverage-ratchet", "Find the run that published the base baseline"),
-    ("durations", "Find the dev push run of the dispatched base"),
+    ("select", "Find the dev push run of the dispatched base"),
 ]
 
 
@@ -59,8 +59,11 @@ def lookup(tmp_path):
         )
         jobs = [
             {"name": f"unit ({version}, {shard})", "conclusion": "success"}
-            for version, count in (("3.11", 6), ("3.12", 12))
-            for shard in range(1, count + 1)
+            for version, count in ([("3.12", 20)] if fault == "twenty-shards" else [("3.11", 6), ("3.12", 12)])
+            for shard in (
+                [*range(1, 7), *range(8, 14)] if fault == "shard-gap" and version == "3.12" else range(1, count + 1)
+            )
+            if fault != "no-units"
         ]
         jobs.extend(
             [
@@ -153,7 +156,7 @@ def lookup(tmp_path):
         (selector, event)
         for selector in _SELECTORS
         for event in ("push", "merge_group")
-        if selector[0] != "durations" or event == "push"
+        if selector[0] != "select" or event == "push"
     ],
 )
 def test_lookup_accepts_measured_publication_when_its_ratchet_failed(lookup, selector, event):
@@ -161,6 +164,13 @@ def test_lookup_accepts_measured_publication_when_its_ratchet_failed(lookup, sel
     assert result.returncode == 0, result.stdout + result.stderr
     assert "id=222\n" in output
     assert "/runs/222/jobs" in requests
+
+
+@pytest.mark.parametrize("selector", _SELECTORS)
+def test_lookup_accepts_the_twenty_shard_plan_of_a_dev_push_run(lookup, selector):
+    result, output, _ = lookup(selector, fault="twenty-shards")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "id=222\n" in output
 
 
 @pytest.mark.parametrize("selector", _SELECTORS[:1])
@@ -185,6 +195,8 @@ def test_lookup_rejects_unverified_queue_reuse(lookup, selector, fault):
     [
         "unit",
         "missing-unit",
+        "shard-gap",
+        "no-units",
         "measure",
         "publish",
         "missing-publisher",

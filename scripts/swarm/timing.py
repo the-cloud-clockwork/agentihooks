@@ -3,15 +3,31 @@ import os
 import resource
 import sys
 import time
+import traceback
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
 from functools import wraps
+from pathlib import Path
 from typing import Any
+
+from scripts.swarm import tick_stop
 
 SWARM = ContextVar("tick_swarm", default=None)
 BEFORE_STEP = ContextVar("tick_before_step", default=None)
 ON_FAILURE = ContextVar("tick_failure", default=None)
+ROOT = Path(__file__).resolve().parents[2]
+PACKAGES = ("scripts", "hooks", "tests")
+
+
+def raised_at(exc: BaseException) -> str:
+    here = []
+    for frame in traceback.extract_tb(exc.__traceback__):
+        path = Path(frame.filename).resolve()
+        relative = path.relative_to(ROOT) if path.is_relative_to(ROOT) else None
+        if relative and relative.parts[0] in PACKAGES:
+            here.append(f"{relative.as_posix()}:{frame.lineno} {frame.name}")
+    return here[-1] if here else ""
 
 
 def emit(stream, line: str) -> None:
@@ -29,7 +45,7 @@ def tick(slug: str) -> Iterator[None]:
 
 
 @contextmanager
-def step(name: str) -> Iterator[None]:
+def step(name: str, report: bool = True) -> Iterator[None]:
     slug = SWARM.get()
     if slug is None:
         yield
@@ -49,9 +65,13 @@ def step(name: str) -> Iterator[None]:
     outcome = "success"
     try:
         yield
+    except tick_stop.Stopped:
+        outcome = "stopped"
+        raise
     except BaseException as exc:
         outcome = "error"
-        if record_failure := ON_FAILURE.get():
+        record.update(error=f"{type(exc).__module__}.{type(exc).__qualname__}", raised_at=raised_at(exc))
+        if report and (record_failure := ON_FAILURE.get()):
             record_failure(name, exc)
         raise
     finally:
@@ -74,9 +94,18 @@ def keep() -> None:
         before()
 
 
+def named(function: Callable) -> str:
+    return f"{function.__module__}.{function.__qualname__}"
+
+
 def call(function: Callable, *args, **kwargs) -> Any:
     keep()
-    with step(f"{function.__module__}.{function.__qualname__}"):
+    with step(named(function)):
+        return function(*args, **kwargs)
+
+
+def timed(function: Callable, *args, **kwargs) -> Any:
+    with step(named(function), report=False):
         return function(*args, **kwargs)
 
 

@@ -294,7 +294,8 @@ def materialize(attempt: Path, target: str) -> None:
         )
         if layer:
             servers.update(_i._load_native_layer(layer).get("mcpServers") or {})
-    adapter.register_mcp(browser.configure(servers, names))
+    workable = {name: server for name, server in servers.items() if not name.lower().startswith(browser.EXTENSION)}
+    adapter.register_mcp(browser.configure(workable, names))
 
 
 def _strings(value: object) -> list[str]:

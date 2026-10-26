@@ -246,6 +246,33 @@ def test_fresh_quotas_hands_its_pool_environment_and_runner_on_and_skips_fresh_r
     assert calls == [(pool, ENV), ("alpha", ENV, runner)]
 
 
+@pytest.mark.parametrize(
+    "five,week",
+    [(QuotaWindow(10.0, NOW), QuotaWindow(95.0, NOW + 3_600)), (QuotaWindow(), QuotaWindow(95.0, NOW - 1))],
+)
+def test_a_minute_old_reading_taken_before_a_passed_reset_is_probed_again(monkeypatch, five, week):
+    probed = []
+    before = CodexQuota(NOW - 60, "pro", five, week)
+    live = _quota(2.0)
+    monkeypatch.setattr(router, "quotas", lambda pool, environ: {"default": before})
+    monkeypatch.setattr(router, "probe", lambda account, environ, run: probed.append(account.name) or live)
+    assert router.fresh_quotas([router.CodexAccount("default")], ENV, NOW) == {"default": live}
+    assert probed == ["default"]
+
+
+def test_a_forced_refresh_probes_every_signed_in_account_however_fresh_or_recently_tried(monkeypatch):
+    probed = []
+    fresh, live = _quota(10.0), _quota(3.0)
+    monkeypatch.setattr(router, "quotas", lambda pool, environ: {"default": fresh, "alpha": fresh})
+    monkeypatch.setattr(router, "probe", lambda account, environ, run: probed.append(account.name) or live)
+    pool = [router.CodexAccount("default"), router.CodexAccount("alpha", "AH_CX_TOKEN_alpha", signed_in=False)]
+    assert router.fresh_quotas(pool, ENV, NOW, force=True) == {"default": live, "alpha": fresh}
+    router.fresh_quotas(pool, ENV, NOW, force=True)
+    assert probed == ["default", "default"]
+    assert router.fresh_quotas(pool, ENV, NOW) == {"default": fresh, "alpha": fresh}
+    assert probed == ["default", "default"]
+
+
 def test_probe_attempts_live_in_one_file_and_survive_bad_contents(monkeypatch):
     from pathlib import Path
 

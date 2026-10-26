@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/staged_compatibility.py:scripts.swarm.staged_compatibility.x_target__mutmut_24:f070915341c407e71fb08b69e6da49fb934c686bac422c1dd6f9c1ba3284d749": {
+    "reader": "standards_reader",
+    "reason": "Missing URL, head or run defaults change from empty string to XXXX; neither matches its existing fullmatch validator, and the same role-specific rejection remains."
+  }
+}

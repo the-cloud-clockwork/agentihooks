@@ -59,14 +59,25 @@ def _snapshot_commit(path: Path, admin: Path, skipped: list[str]) -> str:
     return _run(path, "commit-tree", tree, "-p", "HEAD", "-m", "\n".join(lines), env=env)
 
 
-def snapshot(path: Path) -> str:
+def snapshot(path: Path, keep_local: bool = False) -> str:
     admin = admin_dir(path)
     if admin is None:
         raise ActionError("not a linked worktree")
     commit = _snapshot_commit(path, admin, _oversized(path))
     ref = f"wip/{admin.parent.parent.parent.name}/{path.name}-{time.strftime('%Y%m%d%H%M%S')}"
+    if keep_local:
+        _run(path, "update-ref", f"refs/heads/{ref}", commit)
     _run(path, "push", "--no-follow-tags", "origin", f"{commit}:refs/heads/{ref}", timeout=600)
     return ref
+
+
+def _scratch_snapshot(path: Path) -> str:
+    try:
+        return f"pushed {snapshot(path, keep_local=True)}; "
+    except ActionError as error:
+        if not str(error).startswith("git push:"):
+            raise
+        return f"kept a local wip/ branch, push failed ({error}); "
 
 
 def _drop_branch(primary: Path, branch: str) -> None:
@@ -152,7 +163,7 @@ def apply(item: Finding, journal: Journal) -> str:
     if item.category == "worktree":
         note = ""
         if item.action == "snapshot":
-            note = f"pushed {snapshot(path)}; "
+            note = _scratch_snapshot(path) if item.disposable else f"pushed {snapshot(path)}; "
         journal.begin(item.path, "worktree")
         remove_worktree(path)
         journal.end(item.path)

@@ -28,6 +28,7 @@ def test_sonar_remains_required_during_promotion_trigger_rollout():
         "${{ !cancelled() && (github.event_name != 'merge_group' || needs.reuse.outputs.reused != 'true') }}",
         "${{ !cancelled() && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && (github.event_name != 'merge_group' || needs.reuse.outputs.reused != 'true') }}",
         "${{ !cancelled() && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && github.event_name != 'merge_group' }}",
+        "${{ !cancelled() && needs.select.result == 'success' && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && github.event_name != 'merge_group' }}",
     )
     assert not sonar.get("continue-on-error")
     gate = next(step for step in sonar["steps"] if step.get("name") == "SonarQube Quality Gate")
@@ -37,35 +38,17 @@ def test_sonar_remains_required_during_promotion_trigger_rollout():
     assert jobs["unit"]["needs"] == ["split", "select", "reuse", "admission"]
 
 
-def test_sonar_restores_downloads_before_every_scan():
+def test_sonar_restores_no_cache_since_the_runner_image_carries_the_downloads():
     steps = _workflow()["jobs"]["sonar"]["steps"]
-    scan_index = next(i for i, step in enumerate(steps) if step.get("name") == "SonarQube Scan")
-    cache = next(step for step in steps[:scan_index] if step.get("name") == "Restore Sonar downloads")
-    assert set(cache["with"]["path"].splitlines()) == {
-        "~/.sonar/cache",
-        "${{ runner.tool_cache }}/sonar-scanner-cli",
-    }
-    key = cache["with"]["key"]
-    assert "${{ runner.os }}" in key
-    assert "${{ runner.arch }}" in key
-    assert "hashFiles(" not in key
-    assert "if" not in cache
-    assert "if" not in steps[scan_index]
-    assert not cache.get("continue-on-error")
+    assert not any(step.get("uses", "").startswith("actions/cache") for step in steps)
+    assert not any("Restore" in step.get("name", "") for step in steps)
 
 
-def test_sonar_download_cache_tracks_scanner_and_server_versions():
+def test_sonar_scans_with_the_pinned_scanner_version():
     sonar = _workflow()["jobs"]["sonar"]
-    steps = sonar["steps"]
-    cache = next(step for step in steps if step.get("name") == "Restore Sonar downloads")
-    scan = next(step for step in steps if step.get("name") == "SonarQube Scan")
-    proxy = next(step for step in steps if step.get("id") == "proxy")
+    scan = next(step for step in sonar["steps"] if step.get("name") == "SonarQube Scan")
     assert sonar["env"]["SONAR_SCANNER_VERSION"]
     assert "$SONAR_SCANNER_VERSION" in scan["run"]
-    assert "${{ env.SONAR_SCANNER_VERSION }}" in cache["with"]["key"]
-    assert "${{ steps.proxy.outputs.version }}" in cache["with"]["key"]
-    assert "/api/server/version" in proxy["run"]
-    assert '>> "$GITHUB_OUTPUT"' in proxy["run"]
 
 
 @pytest.mark.parametrize("sonar", ["success", "failure", "skipped", "cancelled", "pending"])
@@ -81,6 +64,51 @@ def test_required_gate_rejects_unsuccessful_sonar(sonar):
     assert (result.returncode == 0) == (sonar == "success"), result.stdout + result.stderr
     if result.returncode:
         assert "::error::" in result.stdout
+
+
+@pytest.mark.parametrize("selection", ["cancelled", "failure"])
+@pytest.mark.parametrize("scope", ["", "selected", "full", "none"])
+def test_required_gate_names_selection_failure_before_downstream_coverage(selection, scope):
+    jobs = _workflow()["jobs"]
+    needs = {job: {"result": "skipped"} for job in jobs["gate-required"]["needs"]}
+    needs["select"] = {"result": selection, "outputs": {"scope": scope}}
+    needs["sonar"] = {"result": "failure"}
+    result = subprocess.run(
+        ["bash", "-e", "-c", jobs["gate-required"]["steps"][0]["run"]],
+        env=dict(os.environ, NEEDS=json.dumps(needs), EVENT="pull_request", MUTATION="false"),
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert f"::error::Test selection {selection};" in result.stdout
+    assert "Every gate required for this event" not in result.stdout
+
+
+@pytest.mark.parametrize(
+    ("selection", "event", "admission", "expected"),
+    [
+        ("cancelled", "pull_request", "skipped", False),
+        ("failure", "pull_request", "skipped", False),
+        ("skipped", "pull_request", "skipped", False),
+        ("success", "pull_request", "skipped", True),
+        ("success", "push", "skipped", True),
+        ("success", "workflow_dispatch", "success", True),
+        ("success", "workflow_dispatch", "failure", False),
+        ("success", "merge_group", "skipped", False),
+    ],
+)
+def test_sonar_requires_successful_selection_before_looking_for_unit_coverage(selection, event, admission, expected):
+    expression = _workflow()["jobs"]["sonar"]["if"].removeprefix("${{").removesuffix("}}")
+    for token, value in {
+        "!cancelled()": "'false' != 'true'",
+        "needs.select.result": f"'{selection}'",
+        "github.event_name": f"'{event}'",
+        "needs.admission.result": f"'{admission}'",
+    }.items():
+        expression = expression.replace(token, value)
+    result = subprocess.run(["bash", "-c", f"[[ {expression} ]]"], capture_output=True, text=True)
+    assert result.returncode in (0, 1), result.stdout + result.stderr
+    assert (result.returncode == 0) == expected, result.stdout + result.stderr
 
 
 def _queued_step():
@@ -188,3 +216,4 @@ def test_secret_detection_includes_all_tracked_text_and_hidden_configuration():
     assert properties["sonar.scanner.excludeHiddenFiles"] == "false"
     assert properties["sonar.sources"] == "."
     assert "tests/**" in properties["sonar.exclusions"].split(",")
+    assert ".git/**" in properties["sonar.exclusions"].split(",")

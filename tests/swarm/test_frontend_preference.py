@@ -3,7 +3,7 @@ from types import SimpleNamespace
 import pytest
 
 from scripts.swarm import capacity, profile_choice, runtime
-from scripts.swarm.store import SwarmConfig
+from scripts.swarm.store import AgentRecord, SwarmConfig
 from tests.swarm.profile_fixture import validated
 
 
@@ -68,7 +68,9 @@ def _planned(tmp_path, monkeypatch, rows, ready):
     rt = runtime.HerdrRuntime(home=tmp_path)
     config = SwarmConfig("sw", str(tmp_path), max_eng=len(ready), max_ci=0, max_plan=0)
     requirements = rt.quota_requirements(config, {"eng": ready, "ci": [], "plan": []})
-    return rt.quota_capacity(config, [], 100, {"eng": len(ready), "ci": 0, "plan": 0}, requirements)["tasks"]
+    return rt.quota_capacity(
+        config, [AgentRecord("master", "master", "master")], 100, {"eng": len(ready), "ci": 0, "plan": 0}, requirements
+    )["tasks"]
 
 
 def test_the_quota_plan_gives_a_frontend_task_the_open_claude_seat(tmp_path, monkeypatch):

@@ -43,6 +43,7 @@ mkdir -p "$output"
 docker info --format '{{.DriverStatus}}' > "$output/docker-driver.txt"
 if [[ "$(< "$output/docker-driver.txt")" == *io.containerd.snapshotter.v1* ]]; then
     build_args+=(--provenance=false --output "type=image,compression=uncompressed")
+    if [[ -n "${WORKER_LAYERS:-}" ]]; then build_args+=(--cache-from "type=local,src=$WORKER_LAYERS"); fi
 fi
 fixture="$(python3 -c 'import uuid; print(uuid.uuid4().hex)')"
 image="agentihooks-worker-proof:$fixture"
@@ -63,6 +64,7 @@ shutil.rmtree(sys.argv[1])
 PY
 }
 trap cleanup EXIT
+trap 'echo "worker proof failed at line $LINENO: $BASH_COMMAND (exit $?)" >&2' ERR
 
 bash "$context/docker/swarm-node/scan.sh" --pull-scanner > "$output/scanner-pull.log" 2>&1 &
 scanner_pid=$!
@@ -99,6 +101,9 @@ if [[ "$proof" != profiles ]]; then
         -v "$context/tests/contracts/swarm_v2/fixtures/checkpoint/current.json:/checkpoint.json:ro" \
         "$image" python -c 'import json; from pathlib import Path; from scripts.swarm_v2.contracts import load; load()["validators"]["checkpoint"].validate(json.loads(Path("/checkpoint.json").read_text())); print("installed checkpoint contract accepted")' \
         > "$output/checkpoint-contracts.log"
+    docker run --rm --network none --read-only --tmpfs /home/worker:uid=10001,gid=10001 --tmpfs /tmp \
+        -v "$context/tests/swarm_node/code_mode_probe.py:/opt/probe/code_mode_probe.py:ro" \
+        "$image" python /opt/probe/code_mode_probe.py /usr/local/bin/codex > "$output/codex-code-mode.json"
 
 fi
 
@@ -108,6 +113,7 @@ if [[ "$proof" != startup ]]; then
     chmod -R a+rX "$probe" "$fixtures"
     (
         probes=()
+        names=()
         for case in positive positive-second rejection recovery rollback noexec; do
             volume=/home/worker:uid=10001,gid=10001,exec
             if [[ "$case" == noexec ]]; then
@@ -140,11 +146,22 @@ PYEXIT
             fi
             ) &
             probes+=("$!")
+            names+=("$case")
         done
         status=0
-        for pid in "${probes[@]}"; do wait "$pid" || status=$?; done
+        for index in "${!probes[@]}"; do
+            wait "${probes[$index]}" || {
+                status=$?
+                echo "worker profile probe ${names[$index]} failed with exit $status" >&2
+                tail -n 40 "$output/profile-${names[$index]}.log" "$output/profile-${names[$index]}.json" >&2
+            }
+        done
         if (( status )); then exit "$status"; fi
-        python3 "$probe/profile_evidence.py" "$output" "$fixture" "$revision" "$fixtures"
+        python3 "$probe/profile_evidence.py" "$output" "$fixture" "$revision" "$fixtures" || {
+            status=$?
+            echo "worker profile evidence failed with exit $status" >&2
+            exit "$status"
+        }
     ) &
     profile_pid=$!
 fi
@@ -225,3 +242,4 @@ if sys.argv[4]=='all':
     (output/'result.json').write_text(json.dumps(shared|{'cases':['A','B','C'],'status':'passed','production_rollout':'not exercised'},indent=2)+'\n')
 print('SV2-IMG-01 passed: two offline startups, three rejected builds, uncached rebuild and retained image rollback' if sys.argv[4]=='all' else 'Worker startup and rejection proof passed')
 PY
+if [[ -n "${WORKER_KEEP_IMAGE:-}" ]]; then docker tag "$image" "$WORKER_KEEP_IMAGE"; fi

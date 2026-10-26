@@ -1,3 +1,4 @@
+{{- if not .Values.hiveOnly }}
 {{- $fullname := include "swarm.fullname" . }}
 {{- $host := printf "%s-ledger" $fullname }}
 {{- $port := .Values.ledger.port }}
@@ -24,6 +25,10 @@ apiVersion: apps/v1
 kind: StatefulSet
 metadata:
   name: {{ $host }}
+  {{- with .Values.ledger.tls.secretName }}
+  annotations:
+    secret.reloader.stakater.com/reload: {{ . | quote }}
+  {{- end }}
   labels:
     {{- include "swarm.labels" . | nindent 4 }}
     app.kubernetes.io/component: ledger
@@ -68,12 +73,21 @@ spec:
               value: {{ $port | quote }}
             - name: LEDGER_DIR
               value: /data
+            {{- if .Values.ledger.tls.secretName }}
+            - name: LEDGER_TLS_CERT
+              value: /run/ledger-tls/tls.crt
+            - name: LEDGER_TLS_KEY
+              value: /run/ledger-tls/tls.key
+            {{- end }}
             - name: SWARM_RELOAD
               value: "0"
+            - name: MALLOC_ARENA_MAX
+              value: "2"
             - name: SWARM_PUBLIC_URL
               value: {{ .Values.ledger.publicUrl | default (ternary (printf "https://%s" .Values.ingress.host) (include "swarm.ledgerUrl" .) .Values.ingress.enabled) | quote }}
             - name: SWARM_ALLOWED_HOSTS
               value: {{ printf "%s:%v,%s.%s:%v,%s.%s.svc:%v,%s.%s.svc.cluster.local:%v%s" $host $port $host .Release.Namespace $port $host .Release.Namespace $port $host .Release.Namespace $port (ternary (printf ",%s" .Values.ingress.host) "" .Values.ingress.enabled) | quote }}
+            {{- include "swarm.secretKeyEnv" .Values.ledger.secretEnv | nindent 12 }}
             {{- include "swarm.extraEnv" .Values.ledger.env | nindent 12 }}
           {{- include "swarm.envFrom" . | nindent 10 }}
           readinessProbe:
@@ -88,8 +102,22 @@ spec:
           volumeMounts:
             - name: data
               mountPath: /data
+            {{- if .Values.ledger.tls.secretName }}
+            - name: ledger-tls
+              mountPath: /run/ledger-tls
+              readOnly: true
+            {{- end }}
           resources:
             {{- toYaml .Values.ledger.resources | nindent 12 }}
+      {{- with .Values.ledger.tls.secretName }}
+      volumes:
+        - name: ledger-tls
+          secret:
+            secretName: {{ . | quote }}
+            items:
+              - {key: tls.crt, path: tls.crt}
+              - {key: tls.key, path: tls.key}
+      {{- end }}
   volumeClaimTemplates:
     - metadata:
         name: data
@@ -101,3 +129,4 @@ spec:
         resources:
           requests:
             storage: {{ .Values.ledger.persistence.size }}
+{{- end }}

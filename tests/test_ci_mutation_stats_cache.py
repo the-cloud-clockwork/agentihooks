@@ -50,6 +50,29 @@ def test_unchanged_test_stats_are_reused_and_only_the_changed_file_is_collected(
     assert calls == [files, ["tests/test_b.py"]]
 
 
+def test_selectors_of_one_test_file_trace_its_dependencies_once(tmp_path, monkeypatch):
+    from scripts.ci_mutation import stats_cache
+
+    root = tmp_path / "repo"
+    (root / "tests").mkdir(parents=True)
+    (root / "tests/test_a.py").write_text("def test_one():\n    pass\n\n\ndef test_two():\n    pass\n")
+    subprocess.run(["git", "init", "-q", str(root)], check=True)
+    subprocess.run(["git", "add", "tests/test_a.py"], cwd=root, check=True)
+    files = ["tests/test_a.py::test_one", "tests/test_a.py::test_two"]
+    traced = []
+    trace = stats_cache.test_inputs
+    monkeypatch.setattr(
+        stats_cache, "test_inputs", lambda root, path, *rest: traced.append(path) or trace(root, path, *rest)
+    )
+
+    def collect(chosen):
+        return [{"status": 0, "tests": {}, "durations": {path: 1 for path in chosen}, "cpu": 1}]
+
+    results = stats_cache.collect_cached_stats(root, tmp_path / "cache", {}, files, ["-q"], collect)
+    assert traced == ["tests/test_a.py"]
+    assert {test for result in results for test in result["durations"]} == set(files)
+
+
 def test_failed_collection_never_populates_reusable_stats(tmp_path):
     from scripts.ci_mutation.stats_cache import collect_cached_stats
 
@@ -210,6 +233,44 @@ def test_incompatible_source_fixture_and_runtime_stats_are_recollected(tmp_path,
     assert calls == [files, files]
 
 
+@pytest.mark.parametrize(
+    ("package", "before", "after", "recollected"),
+    [
+        ("sample-project", "1.2.dev3+gabc", "1.2.dev4+gdef", False),
+        ("sample-project", "1.2.dev3", "1.2.dev4", False),
+        ("sample-project", "1.2+gabc", "1.2+gdef", False),
+        ("sample-project", "1.2.dev3+gabc", "1.3.dev1+gdef", True),
+        ("sample-project", "1.2", "1.3", True),
+        ("dependency", "1.2+gabc", "1.2+gdef", True),
+        ("dependency", "1.2.dev3", "1.2.dev4", True),
+    ],
+)
+def test_the_project_build_number_alone_keeps_stats(tmp_path, monkeypatch, package, before, after, recollected):
+    from importlib import metadata
+    from types import SimpleNamespace
+
+    from scripts.ci_mutation.stats_cache import collect_cached_stats
+
+    root = tmp_path / "repo"
+    files = ["tests/test_sample.py"]
+    _repository(
+        root,
+        {files[0]: "def test_sample():\n    pass\n", "pyproject.toml": '[project]\nname = "sample-project"\n'},
+    )
+    calls = []
+
+    def collect(chosen):
+        calls.append(chosen)
+        return [{"status": 0, "tests": {}, "durations": {}, "cpu": 1}]
+
+    cache = tmp_path / "cache"
+    for version in (before, after):
+        distribution = SimpleNamespace(metadata={"Name": package}, version=version)
+        monkeypatch.setattr(metadata, "distributions", lambda distribution=distribution: [distribution])
+        collect_cached_stats(root, cache, {}, files, [], collect)
+    assert calls == ([files, files] if recollected else [files])
+
+
 def test_persisted_stats_reuse_survives_a_new_python_process(tmp_path):
     import json
     import os
@@ -303,6 +364,435 @@ def _repository(root: Path, files: dict[str, str]) -> None:
     subprocess.run(["git", "add", *files], cwd=root, check=True)
 
 
+@pytest.mark.parametrize("changed", ["unrelated", "imported", "test", "scope"])
+def test_import_scoped_stats_only_recollect_affected_files(tmp_path, changed):
+    from scripts.ci_mutation.stats_cache import collect_cached_stats
+
+    root = tmp_path / "repo"
+    files = ["tests/test_a.py", "tests/test_b.py"]
+    _repository(
+        root,
+        {
+            "scripts/a.py": "value = 1\n",
+            "scripts/b.py": "value = 1\n",
+            "scripts/other.py": "value = 1\n",
+            files[0]: "from scripts.a import value\n",
+            files[1]: "from scripts.b import value\n",
+        },
+    )
+    calls = []
+
+    def collect(chosen):
+        calls.append(chosen)
+        return [
+            {
+                "status": 0,
+                "tests": {f"scripts.{Path(path).stem[5:]}.x_value": [f"{path}::test_value"] for path in chosen},
+                "durations": {f"{path}::test_value": 1 for path in chosen},
+                "cpu": 1,
+            }
+        ]
+
+    cache = tmp_path / "cache"
+    scope = {"scripts/a.py": [1], "scripts/b.py": [1]}
+    collect_cached_stats(root, cache, scope, files, [], collect)
+    if changed == "unrelated":
+        (root / "scripts/other.py").write_text("value = 2\n")
+        scope["scripts/other.py"] = [1]
+    elif changed == "imported":
+        (root / "scripts/a.py").write_text("value = 2\n")
+    elif changed == "test":
+        (root / files[0]).write_text("from scripts.a import value\nassert value\n")
+    else:
+        scope["scripts/a.py"] = [1, 2]
+    warm = collect_cached_stats(root, cache, scope, files, [], collect)
+    assert calls == [files] if changed == "unrelated" else calls == [files, files[:1]]
+    assert {test for result in warm for test in result["durations"]} == {
+        "tests/test_a.py::test_value",
+        "tests/test_b.py::test_value",
+    }
+
+
+@pytest.mark.parametrize("change", ["add_source", "add_test", "add_document", "remove_source"])
+def test_unrelated_inventory_changes_keep_stats_and_function_mapping(tmp_path, change):
+    from scripts.ci_mutation.stats_cache import collect_cached_stats
+
+    root = tmp_path / "repo"
+    path = "tests/test_a.py"
+    _repository(root, {path: "import scripts.a\n", "scripts/a.py": "value = 1\n", "other.py": "value = 2\n"})
+    calls = []
+    result = {
+        "status": 0,
+        "tests": {"scripts.a.x_value": [f"{path}::test_value"]},
+        "durations": {f"{path}::test_value": 1},
+        "cpu": 1,
+    }
+
+    def collect(chosen):
+        calls.append(chosen)
+        return [result]
+
+    cache = tmp_path / "cache"
+    cold = collect_cached_stats(root, cache, {"scripts/a.py": [1]}, [path], [], collect)
+    if change == "remove_source":
+        subprocess.run(["git", "rm", "-f", "--", "other.py"], cwd=root, check=True)
+    else:
+        added = {"add_source": "unrelated.py", "add_test": "tests/test_other.py", "add_document": "NOTES.md"}[change]
+        (root / added).write_text("value = 3\n")
+        subprocess.run(["git", "add", "--", added], cwd=root, check=True)
+    warm = collect_cached_stats(root, cache, {"scripts/a.py": [1]}, [path], [], collect)
+    assert calls == [[path]]
+    assert warm == cold
+
+
+@pytest.mark.parametrize("added", ["tests/conftest.py", "scripts/missing.py", "assets/data.txt"])
+def test_new_applicable_discovery_inputs_recollect_stats(tmp_path, added):
+    from scripts.ci_mutation.stats_cache import collect_cached_stats
+
+    root = tmp_path / "repo"
+    path = "tests/test_a.py"
+    _repository(
+        root,
+        {
+            path: "import scripts.missing\nfrom pathlib import Path\nPath('assets/data.txt')\n",
+            "scripts/a.py": "value = 1\n",
+        },
+    )
+    calls = []
+
+    def collect(chosen):
+        calls.append(chosen)
+        return [{"status": 0, "tests": {}, "durations": {}, "cpu": 1}]
+
+    cache = tmp_path / "cache"
+    collect_cached_stats(root, cache, {}, [path], [], collect)
+    (root / added).parent.mkdir(parents=True, exist_ok=True)
+    (root / added).write_text("value = 2\n")
+    subprocess.run(["git", "add", "--", added], cwd=root, check=True)
+    collect_cached_stats(root, cache, {}, [path], [], collect)
+    assert calls == [[path], [path]]
+
+
+@pytest.mark.parametrize("discovery", ["glob", "iter_modules"])
+def test_measured_stats_recollect_new_dynamically_discovered_modules(tmp_path, discovery):
+    from scripts.ci_mutation.stats_cache import collect_cached_stats
+
+    root = tmp_path / "repo"
+    path = "tests/test_plugins.py"
+    sources = {
+        "glob": "import importlib\nfrom pathlib import Path\nfor path in Path('plugins').glob('*.py'):\n    importlib.import_module(f'plugins.{path.stem}')\n",
+        "iter_modules": "import importlib\nimport pkgutil\nimport plugins\nfor item in pkgutil.iter_modules(plugins.__path__):\n    importlib.import_module(f'plugins.{item.name}')\n",
+    }
+    _repository(root, {path: sources[discovery], "plugins/__init__.py": "", "plugins/a.py": "value = 1\n"})
+    calls = []
+    test = f"{path}::test_plugins"
+
+    def collect(chosen):
+        calls.append(chosen)
+        loaded = [str(source.relative_to(root)) for source in sorted((root / "plugins").glob("*.py"))]
+        return [
+            {
+                "status": 0,
+                "tests": {f"plugins.{Path(source).stem}.x_value": [test] for source in loaded},
+                "durations": {test: 1},
+                "dependencies": {test: [path, *loaded]},
+                "cpu": 1,
+            }
+        ]
+
+    cache = tmp_path / "cache"
+    collect_cached_stats(root, cache, {}, [path], [], collect)
+    (root / "plugins/notes.md").write_text("unrelated\n")
+    (root / "outside.py").write_text("value = 3\n")
+    subprocess.run(["git", "add", "--", "plugins/notes.md", "outside.py"], cwd=root, check=True)
+    collect_cached_stats(root, cache, {}, [path], [], collect)
+    assert calls == [[path]]
+    (root / "plugins/b.py").write_text("value = 2\n")
+    subprocess.run(["git", "add", "--", "plugins/b.py"], cwd=root, check=True)
+    warm = collect_cached_stats(root, cache, {}, [path], [], collect)
+    assert calls == [[path], [path]]
+    assert "plugins.b.x_value" in warm[0]["tests"]
+
+
+@pytest.mark.parametrize("discovery", ["file_parent", "default_path"])
+def test_measured_stats_recollect_unbounded_discovery_additions(tmp_path, discovery):
+    from scripts.ci_mutation.stats_cache import collect_cached_stats
+
+    root = tmp_path / "repo"
+    path = "tests/test_plugins.py"
+    source = {
+        "file_parent": "import importlib\nfrom pathlib import Path\nfor item in Path(__file__).parent.glob('plugin_*.py'):\n    importlib.import_module(f'tests.{item.stem}')\n",
+        "default_path": "import importlib\nfrom pkgutil import iter_modules as discover\nfor item in discover():\n    importlib.import_module(item.name)\n",
+    }[discovery]
+    folder = "tests/" if discovery == "file_parent" else ""
+    _repository(root, {path: source, f"{folder}plugin_a.py": "value = 1\n"})
+    calls = []
+    test = f"{path}::test_plugins"
+
+    def collect(chosen):
+        calls.append(chosen)
+        loaded = sorted(str(item.relative_to(root)) for item in (root / folder).glob("plugin_*.py"))
+        return [
+            {
+                "status": 0,
+                "tests": {f"{Path(item).stem}.x_value": [test] for item in loaded},
+                "durations": {test: 1},
+                "dependencies": {test: [path, *loaded]},
+                "cpu": 1,
+            }
+        ]
+
+    cache = tmp_path / "cache"
+    collect_cached_stats(root, cache, {}, [path], [], collect)
+    (root / "NOTES.md").write_text("unrelated\n")
+    subprocess.run(["git", "add", "--", "NOTES.md"], cwd=root, check=True)
+    collect_cached_stats(root, cache, {}, [path], [], collect)
+    assert calls == [[path]]
+    added = f"{folder}plugin_b.py"
+    (root / added).write_text("value = 2\n")
+    subprocess.run(["git", "add", "--", added], cwd=root, check=True)
+    warm = collect_cached_stats(root, cache, {}, [path], [], collect)
+    assert calls == [[path], [path]]
+    assert "plugin_b.x_value" in warm[0]["tests"]
+
+
+@pytest.mark.parametrize(
+    "expression",
+    [
+        "Path('pluginsX/').glob('*.py')",
+        "Path('pluginsX/').rglob('*.py')",
+        "Path('pluginsX/').iterdir()",
+        "os.listdir('pluginsX/')",
+        "os.scandir('pluginsX/')",
+        "os.walk('pluginsX/')",
+        "scan('pluginsX/')",
+    ],
+)
+def test_directory_discovery_keeps_its_scope_and_glob_filter(expression):
+    import ast
+
+    from scripts.ci_mutation.stats_cache import discovery_inputs
+
+    resources = {"pluginsX/": {"pluginsX/a.py", "pluginsX/note.txt"}, "elsewhere/": {"elsewhere/b.py"}}
+    nodes = list(ast.walk(ast.parse("from os import listdir as scan\n" + expression)))
+    expected = {"pluginsX/a.py"} if "glob" in expression else resources["pluginsX/"]
+    assert discovery_inputs(nodes, set(), resources) == expected
+
+
+@pytest.mark.parametrize("module", ["glob", "os"])
+def test_imported_scanner_aliases_use_the_imported_module(module):
+    import ast
+
+    from scripts.ci_mutation.stats_cache import discovery_inputs
+
+    source = (
+        "from glob import glob as scan\nscan('pluginsX/*.py')"
+        if module == "glob"
+        else "from os import scandir as scan\nscan('pluginsX/')"
+    )
+    resources = {"pluginsX/": {"pluginsX/a.py", "pluginsX/note.txt"}, "elsewhere/": {"elsewhere/b.py"}}
+    expected = {"pluginsX/a.py"} if module == "glob" else resources["pluginsX/"]
+    assert discovery_inputs(list(ast.walk(ast.parse(source))), set(), resources) == expected
+
+
+@pytest.mark.parametrize("scanner", ["iter_modules", "walk_packages"])
+@pytest.mark.parametrize("package", ["plugins", "plugins.nested"])
+def test_package_discovery_keeps_nested_package_scope_and_python_files(scanner, package):
+    import ast
+
+    from scripts.ci_mutation.stats_cache import discovery_inputs
+
+    folder = package.replace(".", "/")
+    resources = {folder + "/": {folder + "/a.py", folder + "/note.txt"}, "elsewhere/": {"elsewhere/b.py"}}
+    source = f"pkgutil.{scanner}({package}.__path__)"
+    assert discovery_inputs(list(ast.walk(ast.parse(source))), {package}, resources) == {folder + "/a.py"}
+
+
+def test_ast_walk_does_not_add_repository_discovery_or_skip_later_scans():
+    import ast
+
+    from scripts.ci_mutation.stats_cache import discovery_inputs
+
+    resources = {"pluginsX/": {"pluginsX/a.py"}, "elsewhere/": {"elsewhere/b.py"}}
+    source = "ast.walk(tree)\nPath('pluginsX/').glob('*.py')"
+    assert discovery_inputs(list(ast.walk(ast.parse(source))), set(), resources) == {"pluginsX/a.py"}
+
+
+@pytest.mark.parametrize("changed", ["documentation", "unrelated_fixture", "comment", "initializer"])
+def test_stats_reuse_tracks_only_applicable_import_and_fixture_inputs(tmp_path, changed):
+    from scripts.ci_mutation.stats_cache import collect_cached_stats
+
+    root = tmp_path / "repo"
+    files = ["tests/test_sample.py"]
+    _repository(
+        root,
+        {
+            "scripts/pkg/__init__.py": "value = 1\n",
+            "scripts/pkg/sample.py": "# importlib is mentioned in a comment\nvalue = 1\n",
+            "scripts/other.py": "value = 1\n",
+            files[0]: "import scripts.pkg.sample\n",
+            "tests/other/conftest.py": "value = 1\n",
+            "docs/other.md": "original\n",
+        },
+    )
+    calls = []
+
+    def collect(chosen):
+        calls.append(chosen)
+        return [{"status": 0, "tests": {}, "durations": {}, "cpu": 1}]
+
+    cache = tmp_path / "cache"
+    scope = {"scripts/pkg/sample.py": [2]}
+    collect_cached_stats(root, cache, scope, files, [], collect)
+    target = {
+        "documentation": "docs/other.md",
+        "unrelated_fixture": "tests/other/conftest.py",
+        "comment": "scripts/other.py",
+        "initializer": "scripts/pkg/__init__.py",
+    }[changed]
+    (root / target).write_text("value = 2\n")
+    collect_cached_stats(root, cache, scope, files, [], collect)
+    assert calls == ([files, files] if changed == "initializer" else [files])
+
+
+@pytest.mark.parametrize(
+    "loader",
+    [
+        "from importlib import import_module as load\nload('scripts.a')\n",
+        "from builtins import __import__ as load\nload('scripts.a')\n",
+        "from importlib.util import spec_from_file_location as load\nload('virtual', location)\n",
+        "import importlib.util\nimportlib.util.spec_from_file_location('virtual', location)\n",
+        "import importlib\nimportlib.import_module('.a', package='scripts')\n",
+        "import importlib\nload = importlib.import_module\nload('scripts.a')\n",
+    ],
+)
+def test_dynamic_import_dependencies_invalidate_stats_alongside_static_imports(tmp_path, loader):
+    from scripts.ci_mutation.stats_cache import collect_cached_stats
+
+    root = tmp_path / "repo"
+    files = ["tests/test_sample.py"]
+    _repository(
+        root,
+        {
+            files[0]: "import scripts.other\n" + loader,
+            "scripts/a.py": "value = 1\n",
+            "scripts/other.py": "value = 1\n",
+        },
+    )
+    calls = []
+
+    def collect(chosen):
+        calls.append(chosen)
+        return [{"status": 0, "tests": {}, "durations": {}, "cpu": 1}]
+
+    cache = tmp_path / "cache"
+    collect_cached_stats(root, cache, {}, files, [], collect)
+    (root / "scripts/a.py").write_text("value = 2\n")
+    collect_cached_stats(root, cache, {}, files, [], collect)
+    assert calls == [files, files]
+
+
+@pytest.mark.parametrize(
+    "loader",
+    [
+        "from importlib import import_module as load\nload('scripts.a')\n",
+        "from builtins import __import__ as load\nload('scripts.a')\n",
+        "import importlib\nimportlib.import_module('scripts.a')\n",
+    ],
+)
+def test_literal_dynamic_imports_reuse_stats_after_unrelated_source_changes(tmp_path, loader):
+    from scripts.ci_mutation.stats_cache import collect_cached_stats
+
+    root = tmp_path / "repo"
+    files = ["tests/test_sample.py"]
+    _repository(
+        root,
+        {
+            files[0]: "import scripts.other\n" + loader,
+            "scripts/a.py": "value = 1\n",
+            "scripts/other.py": "value = 1\n",
+            "scripts/unrelated.py": "value = 1\n",
+        },
+    )
+    calls = []
+
+    def collect(chosen):
+        calls.append(chosen)
+        return [{"status": 0, "tests": {}, "durations": {}, "cpu": 1}]
+
+    cache = tmp_path / "cache"
+    collect_cached_stats(root, cache, {}, files, [], collect)
+    (root / "scripts/unrelated.py").write_text("value = 2\n")
+    collect_cached_stats(root, cache, {}, files, [], collect)
+    assert calls == [files]
+
+
+def test_implicit_source_stats_track_resources_and_recollect_when_a_resource_is_deleted(tmp_path):
+    from scripts.ci_mutation.stats_cache import collect_cached_stats
+
+    root = tmp_path / "repo"
+    files = ["tests/test_sample.py"]
+    _repository(
+        root,
+        {
+            files[0]: "def test_sample():\n    pass\n",
+            "scripts/a.py": "from pathlib import Path\nvalue = Path('assets/data').read_text()\n",
+            "assets/data": "original",
+        },
+    )
+    calls = []
+
+    def collect(chosen):
+        calls.append(chosen)
+        return [{"status": 0 if (root / "assets/data").exists() else 1, "tests": {}, "durations": {}, "cpu": 1}]
+
+    cache = tmp_path / "cache"
+    scope = {"scripts/a.py": [2]}
+    collect_cached_stats(root, cache, scope, files, [], collect)
+    (root / "assets/data").write_text("changed")
+    collect_cached_stats(root, cache, scope, files, [], collect)
+    (root / "assets/data").unlink()
+    with pytest.raises(SystemExit):
+        collect_cached_stats(root, cache, scope, files, [], collect)
+    assert calls == [files, files, files]
+
+
+@pytest.mark.parametrize(
+    "target", ["pyproject.toml", "scripts/ci_mutation/example.py", "assets/image.bin", "scripts/fixture.py"]
+)
+def test_configuration_collector_fixture_and_binary_resource_changes_recollect_stats(tmp_path, target):
+    from scripts.ci_mutation.stats_cache import collect_cached_stats
+
+    root = tmp_path / "repo"
+    files = ["tests/test_sample.py"]
+    _repository(
+        root,
+        {
+            files[0]: "import scripts.a\nfrom pathlib import Path\nPath('assets/image.bin').read_bytes()\n",
+            "scripts/a.py": "value = 1\n",
+            "scripts/fixture.py": "value = 1\n",
+            "tests/conftest.py": "import scripts.fixture\n",
+            "scripts/ci_mutation/example.py": "value = 1\n",
+            "pyproject.toml": "[tool.pytest.ini_options]\n",
+            "assets/image.bin": "original",
+        },
+    )
+    (root / "assets/image.bin").write_bytes(bytes([0, 255]))
+    calls = []
+
+    def collect(chosen):
+        calls.append(chosen)
+        return [{"status": 0, "tests": {}, "durations": {}, "cpu": 1}]
+
+    cache = tmp_path / "cache"
+    collect_cached_stats(root, cache, {}, files, [], collect)
+    collect_cached_stats(root, cache, {}, files, [], collect)
+    assert calls == [files]
+    (root / target).write_text("value = 2\n")
+    collect_cached_stats(root, cache, {}, files, [], collect)
+    assert calls == [files, files]
+
+
 def test_each_stored_file_keeps_only_its_own_tests_from_every_bucket(tmp_path, capsys):
     import json
 
@@ -331,6 +821,32 @@ def test_each_stored_file_keeps_only_its_own_tests_from_every_bucket(tmp_path, c
     assert warm[0] == {"status": 0, "tests": {"m.x_first": [a], "m.x_second": []}, "durations": {a: 1}, "cpu": 3.0}
     stored = [json.loads(path.read_text())["durations"] for path in cache.glob("*.json")]
     assert {a: 1} in stored and {b: 2} in stored
+
+
+def test_a_selected_test_id_keeps_its_own_tests_and_recollects_when_its_file_changes(tmp_path):
+    import json
+
+    from scripts.ci_mutation.stats_cache import collect_cached_stats
+
+    root = tmp_path / "repo"
+    _repository(root, {"tests/test_a.py": "def test_one():\n    pass\n\n\ndef test_two():\n    pass\n"})
+    entries = ["tests/test_a.py::test_one", "tests/test_a.py::test_two"]
+    one, two, wide = f"{entries[0]}[1]", entries[1], "tests/test_a.py::test_one_more"
+    calls = []
+
+    def collect(chosen):
+        calls.append(chosen)
+        return [{"status": 0, "tests": {"m.x_f": [one, two, wide]}, "durations": {one: 1, two: 2, wide: 4}, "cpu": 2}]
+
+    cache = tmp_path / "cache"
+    collect_cached_stats(root, cache, {}, entries, [], collect)
+    stored = [json.loads(path.read_text())["durations"] for path in cache.glob("*.json")]
+    assert sorted(stored, key=str) == sorted([{one: 1}, {two: 2}], key=str)
+    collect_cached_stats(root, cache, {}, entries, [], collect)
+    assert calls == [entries]
+    (root / "tests/test_a.py").write_text("def test_one():\n    assert True\n")
+    collect_cached_stats(root, cache, {}, entries, [], collect)
+    assert calls == [entries, entries]
 
 
 @pytest.mark.parametrize(
@@ -370,6 +886,203 @@ def test_stats_cache_refuses_a_root_outside_git(tmp_path):
         collect_cached_stats(tmp_path, tmp_path / "cache", {}, [], [], lambda files: [])
 
 
+@pytest.mark.parametrize("record", ["stale", "failed"])
+def test_stats_cache_recollects_a_record_that_does_not_match_its_current_inputs(tmp_path, record):
+    import json
+
+    from scripts.ci_mutation.stats_cache import collect_cached_stats
+
+    root = tmp_path / "repo"
+    files = ["tests/test_a.py"]
+    _repository(root, {"scripts/a.py": "value = 1\n", files[0]: "from scripts.a import value\n"})
+    calls = []
+
+    def collect(chosen):
+        calls.append(chosen)
+        return [
+            {
+                "status": 0,
+                "tests": {"scripts.a.x_value": ["tests/test_a.py::test_value"]},
+                "durations": {"tests/test_a.py::test_value": 1},
+                "cpu": 1,
+            }
+        ]
+
+    cache = tmp_path / "cache"
+    cold = collect_cached_stats(root, cache, {}, files, [], collect)
+    original = next(cache.glob("*.json"))
+    stale = original.read_text()
+    assert collect_cached_stats(root, cache, {}, files, [], collect) == cold
+    assert calls == [files]
+    (root / "scripts/a.py").write_text("value = 2\n")
+    collect_cached_stats(root, cache, {}, files, [], collect)
+    assert calls == [files, files]
+    if record == "stale":
+        next(path for path in cache.glob("*.json") if path != original).write_text(stale)
+    else:
+        for path in cache.glob("*.json"):
+            value = json.loads(path.read_text())
+            value["status"] = 1
+            path.write_text(json.dumps(value))
+    collect_cached_stats(root, cache, {}, files, [], collect)
+    assert calls == [files, files, files]
+
+
+def test_stats_cache_recollects_a_truncated_record_and_saves_only_valid_records(tmp_path):
+    import json
+
+    from scripts.ci_mutation.stats_cache import collect_cached_stats
+
+    root = tmp_path / "repo"
+    files = ["tests/test_a.py", "tests/test_b.py"]
+    _repository(root, {path: "def test_sample():\n    pass\n" for path in files})
+    calls = []
+
+    def collect(chosen):
+        calls.append(chosen)
+        return [
+            {
+                "status": 0,
+                "tests": {"tests.x_sample": [f"{path}::test_sample" for path in chosen]},
+                "durations": {f"{path}::test_sample": 1 for path in chosen},
+                "cpu": 1,
+            }
+        ]
+
+    cache = tmp_path / "cache"
+    collect_cached_stats(root, cache, {}, files, [], collect)
+    for path in cache.glob("*.json"):
+        path.write_text(path.read_text()[:20])
+    part = collect_cached_stats(root, cache, {}, files[:1], [], collect)
+    assert calls == [files, files[:1]]
+    assert {test for result in part for test in result["durations"]} == {"tests/test_a.py::test_sample"}
+    records = [json.loads(path.read_text()) for path in cache.glob("*.json")]
+    assert len(records) == 1
+    assert records[0]["status"] == 0
+    assert collect_cached_stats(root, cache, {}, files[:1], [], collect) == part
+    assert calls == [files, files[:1]]
+
+
+def test_real_fixture_imports_do_not_invalidate_measured_unrelated_test_stats(tmp_path):
+    from scripts.ci_mutation.stats_cache import collect_cached_stats
+
+    content = {
+        "tests/conftest.py": "from tests import fixture_probe\n",
+        "tests/fixture_probe.py": 'directory = "scripts/"\n',
+        "scripts/cache_unrelated_probe.py": "value = 1\n",
+        "scripts/cache_covered_probe.py": "value = 1\n",
+        "tests/test_cache_measured_probe.py": "from scripts.cache_covered_probe import value\n",
+    }
+    root = tmp_path / "repo"
+    _repository(root, content)
+    files = ["tests/test_cache_measured_probe.py"]
+    node = files[0] + "::test_value"
+    calls = []
+
+    def collect(chosen):
+        calls.append(chosen)
+        return [
+            {
+                "status": 0,
+                "tests": {"scripts.cache_covered_probe.x_value": [node]},
+                "durations": {node: 1},
+                "cpu": 1,
+                "dependencies": {node: ["scripts/cache_covered_probe.py"]},
+            }
+        ]
+
+    cache = tmp_path / "cache"
+    collect_cached_stats(root, cache, {}, files, [], collect)
+    (root / "scripts/cache_unrelated_probe.py").write_text("value = 2\n")
+    warm = collect_cached_stats(root, cache, {}, files, [], collect)
+    assert calls == [files]
+    assert warm[0]["durations"] == {node: 1}
+    assert warm[0]["dependencies"] == {node: ["scripts/cache_covered_probe.py"]}
+    assert warm[0]["reused"] is True
+    (root / "scripts/cache_covered_probe.py").write_text("value = 2\n")
+    collect_cached_stats(root, cache, {}, files, [], collect)
+    assert calls == [files, files]
+
+
+@pytest.mark.parametrize("changed", ["module", "scope", "deleted", "stale", "truncated"])
+def test_stored_statistics_validate_record_inputs_and_mutation_scope(tmp_path, changed):
+    import hashlib
+
+    from scripts.ci_mutation.stats_dependencies import StoredStats
+
+    root = tmp_path / "repo"
+    folder = tmp_path / "cache"
+    folder.mkdir()
+    _repository(root, {"module.py": "value = 1\n"})
+    inputs = {"module.py": hashlib.sha256((root / "module.py").read_bytes()).hexdigest()}
+    context = {"inventory": ["module.py"]}
+    cache = StoredStats(root, folder, context, {"module.py": [1]})
+    result = {"status": 0, "tests": {}, "durations": {"test": 1}, "cpu": 1}
+    cache.save("tests/test_module.py", result, inputs, True)
+    assert cache.load("tests/test_module.py") == {**result, "reused": True}
+    if changed == "module":
+        (root / "module.py").write_text("value = 2\n")
+    elif changed == "scope":
+        cache.changes = {"module.py": [1, 2]}
+    elif changed == "deleted":
+        (root / "module.py").unlink()
+    elif changed == "stale":
+        next(folder.glob("*.json")).write_text('{"key":"stale","status":0,"inputs":{},"scope":{},"measured":true}')
+    else:
+        next(folder.glob("*.json")).write_text('{"key":"')
+    assert cache.load("tests/test_module.py") is None
+    assert len(list(folder.glob("*.json"))) == (changed != "truncated")
+
+
+@pytest.mark.parametrize(
+    "evidence", [{}, {"tests/test_a.py::test_one": []}, {"tests/test_a.py::test_one": ["module.py"]}]
+)
+def test_partial_runtime_statistics_are_never_reused(tmp_path, evidence):
+    from scripts.ci_mutation.stats_cache import collect_cached_stats
+
+    root = tmp_path / "repo"
+    files = ["tests/test_a.py"]
+    _repository(root, {"module.py": "value = 1\n", files[0]: "import module\n"})
+    calls = []
+
+    def collect(chosen):
+        calls.append(chosen)
+        return [
+            {
+                "status": 0,
+                "tests": {},
+                "durations": {files[0] + "::test_one": 1, files[0] + "::test_two": 1},
+                "cpu": 1,
+                "dependencies": evidence,
+            }
+        ]
+
+    folder = tmp_path / "cache"
+    collect_cached_stats(root, folder, {}, files, [], collect)
+    collect_cached_stats(root, folder, {}, files, [], collect)
+    assert calls == [files, files]
+    assert list(folder.iterdir()) == []
+
+
+def test_stored_statistics_are_portable_across_metadata_ordering(tmp_path):
+    import hashlib
+
+    from scripts.ci_mutation.stats_dependencies import StoredStats
+
+    root = tmp_path / "repo"
+    folder = tmp_path / "cache"
+    folder.mkdir()
+    _repository(root, {"a.py": "value = 1\n", "b.py": "value = 2\n"})
+    inputs = {name: hashlib.sha256((root / name).read_bytes()).hexdigest() for name in ("a.py", "b.py")}
+    first = StoredStats(root, folder, {"inventory": ["a.py", "b.py"], "runtime": "same"}, {})
+    result = {"status": 0, "tests": {}, "durations": {"test": 1}, "cpu": 1}
+    first.save("tests/test_a.py", result, inputs, True)
+    second = StoredStats(root, folder, {"runtime": "same", "inventory": ["a.py", "b.py"]}, {})
+    assert second.load("tests/test_a.py") == {**result, "reused": True}
+    second.save("tests/test_a.py", result, dict(reversed(list(inputs.items()))), True)
+    assert len(list(folder.glob("*.json"))) == 1
+
+
 def test_file_stats_pass_sorted_changed_lines_and_runner_options_to_the_cache(tmp_path, monkeypatch):
     import json
     from types import SimpleNamespace
@@ -397,3 +1110,277 @@ def test_file_stats_pass_sorted_changed_lines_and_runner_options_to_the_cache(tm
             ["-q", "-x"],
         )
     ]
+
+
+@pytest.mark.parametrize("changed", ["unloaded", "loaded", "loaded_resource", "other_test"])
+def test_dynamic_import_stats_track_the_modules_the_collection_loaded(tmp_path, changed):
+    from scripts.ci_mutation.stats_cache import collect_cached_stats
+
+    root = tmp_path / "repo"
+    files = ["tests/test_sample.py", "tests/test_other.py"]
+    _repository(
+        root,
+        {
+            files[0]: "import importlib\nimport sys\nimportlib.import_module(sys.argv[0])\n",
+            files[1]: "def test_other():\n    pass\n",
+            "scripts/a.py": (
+                "import importlib\nimport sys\nfrom pathlib import Path\n"
+                "importlib.import_module(sys.argv[0])\nvalue = Path('assets/data').read_text()\n"
+            ),
+            "scripts/unloaded.py": "value = 1\n",
+            "assets/data": "original",
+        },
+    )
+    calls = []
+
+    def collect(chosen):
+        calls.append(chosen)
+        return [
+            {
+                "status": 0,
+                "tests": {},
+                "durations": {},
+                "cpu": 1,
+                "files": chosen,
+                "modules": [*chosen, "scripts/a.py", "outside/site.py"],
+            }
+        ]
+
+    cache = tmp_path / "cache"
+    cold = collect_cached_stats(root, cache, {}, files, [], collect)
+    assert all("modules" not in result and "files" not in result for result in cold)
+    target, text = {
+        "unloaded": ("scripts/unloaded.py", "value = 2\n"),
+        "loaded": ("scripts/a.py", "value = 2\n"),
+        "loaded_resource": ("assets/data", "changed"),
+        "other_test": (files[1], "def test_other():\n    assert True\n"),
+    }[changed]
+    (root / target).write_text(text)
+    warm = collect_cached_stats(root, cache, {}, files, [], collect)
+    assert all(not result.keys() & {"modules", "files", "loaded"} for result in warm)
+    assert (
+        calls
+        == {
+            "unloaded": [files],
+            "loaded": [files, [files[0]]],
+            "loaded_resource": [files, [files[0]]],
+            "other_test": [files, [files[1]]],
+        }[changed]
+    )
+
+
+def test_dynamic_import_stats_without_a_module_record_track_every_module(tmp_path):
+    from scripts.ci_mutation.stats_cache import collect_cached_stats
+
+    root = tmp_path / "repo"
+    files = ["tests/test_sample.py"]
+    _repository(
+        root,
+        {
+            files[0]: "import importlib\nimport sys\nimportlib.import_module(sys.argv[0])\n",
+            "scripts/unloaded.py": "value = 1\n",
+        },
+    )
+    calls = []
+
+    def collect(chosen):
+        calls.append(chosen)
+        return [{"status": 0, "tests": {}, "durations": {}, "cpu": 1, "files": chosen}]
+
+    cache = tmp_path / "cache"
+    collect_cached_stats(root, cache, {}, files, [], collect)
+    collect_cached_stats(root, cache, {}, files, [], collect)
+    (root / "scripts/unloaded.py").write_text("value = 2\n")
+    collect_cached_stats(root, cache, {}, files, [], collect)
+    assert calls == [files, files]
+
+
+def test_dynamic_import_stats_recollect_when_a_loaded_module_changes_its_mutated_lines(tmp_path):
+    from scripts.ci_mutation.stats_cache import collect_cached_stats
+
+    root = tmp_path / "repo"
+    files = ["tests/test_sample.py"]
+    _repository(
+        root,
+        {
+            files[0]: "import importlib\nimport sys\nimport scripts.other\nimportlib.import_module(sys.argv[0])\n",
+            "scripts/a.py": "def first():\n    return 1\n\n\ndef second():\n    return 2\n",
+            "scripts/other.py": "value = 1\n",
+        },
+    )
+    calls = []
+
+    def collect(chosen):
+        calls.append(chosen)
+        return [{"status": 0, "tests": {}, "durations": {}, "cpu": 1, "files": chosen, "modules": ["scripts/a.py"]}]
+
+    cache = tmp_path / "cache"
+    collect_cached_stats(root, cache, {"scripts/a.py": [2]}, files, [], collect)
+    collect_cached_stats(root, cache, {"scripts/a.py": [2]}, files, [], collect)
+    collect_cached_stats(root, cache, {"scripts/a.py": [6]}, files, [], collect)
+    assert calls == [files, files]
+
+
+def test_loaded_files_name_repository_modules_under_the_first_matching_base(tmp_path):
+    import types
+
+    from scripts.ci_mutation.selection import loaded_files
+
+    work = tmp_path / "work"
+    (work / "mutants/scripts").mkdir(parents=True)
+    (work / "conftest.py").write_text("")
+    (work / "mutants/scripts/a.py").write_text("")
+    entries = {
+        "mutated": types.SimpleNamespace(__file__=str(work / "mutants/scripts/a.py")),
+        "copied": types.SimpleNamespace(__file__=str(work / "conftest.py")),
+        "outside": types.SimpleNamespace(__file__=str(tmp_path / "site/b.py")),
+        "builtin": types.SimpleNamespace(),
+        "namespace": types.SimpleNamespace(__file__=None),
+    }
+    assert loaded_files([work / "mutants", work], entries) == ["conftest.py", "scripts/a.py"]
+
+
+@pytest.mark.parametrize("record_files", [True, False])
+def test_dynamic_import_stats_check_only_the_modules_of_their_own_bucket(tmp_path, record_files):
+    from scripts.ci_mutation.stats_cache import collect_cached_stats
+
+    root = tmp_path / "repo"
+    files = ["tests/test_a.py", "tests/test_b.py"]
+    loader = "import importlib\nimport sys\nimport scripts.other\nimportlib.import_module(sys.argv[0])\n"
+    _repository(
+        root,
+        {
+            files[0]: loader,
+            files[1]: loader + "# b\n",
+            "scripts/other.py": "value = 1\n",
+            "scripts/a_module.py": "value = 1\n",
+            "scripts/b_module.py": "value = 1\n",
+        },
+    )
+    calls = []
+
+    def collect(chosen):
+        calls.append(chosen)
+        buckets = [
+            {"status": 0, "tests": {}, "durations": {}, "cpu": 1, "modules": [f"scripts/{path[-4]}_module.py"]}
+            | ({"files": [path]} if record_files else {})
+            for path in chosen
+        ]
+        return buckets if record_files else [{**buckets[0], "modules": [m for b in buckets for m in b["modules"]]}]
+
+    cache = tmp_path / "cache"
+    collect_cached_stats(root, cache, {}, files, [], collect)
+    (root / "scripts/b_module.py").write_text("value = 2\n")
+    collect_cached_stats(root, cache, {}, files, [], collect)
+    assert calls == ([files, [files[1]]] if record_files else [files, files])
+
+
+def test_measured_stats_trace_every_covered_source_in_one_walk(tmp_path, monkeypatch):
+    from scripts.ci_mutation import stats_cache
+
+    root = tmp_path / "repo"
+    sources = [f"scripts/covered_{index}/source.py" for index in range(3)]
+    _repository(
+        root,
+        {
+            **{source: "value = 1\n" for source in sources},
+            "scripts/covered_2/conftest.py": "from scripts.shared_helper import value\n",
+            "scripts/shared_helper.py": "value = 1\n",
+            "tests/test_measured.py": "def test_value():\n    pass\n",
+        },
+    )
+    files = ["tests/test_measured.py"]
+    node = files[0] + "::test_value"
+    traced = []
+    trace = stats_cache.test_inputs
+    monkeypatch.setattr(
+        stats_cache, "test_inputs", lambda root, path, *rest: traced.append(path) or trace(root, path, *rest)
+    )
+    calls = []
+
+    def collect(chosen):
+        calls.append(chosen)
+        return [{"status": 0, "tests": {}, "durations": {node: 1}, "cpu": 1, "dependencies": {node: sources}}]
+
+    cache = tmp_path / "cache"
+    stats_cache.collect_cached_stats(root, cache, {}, files, [], collect)
+    assert traced == ["tests/test_measured.py", sources]
+    stats_cache.collect_cached_stats(root, cache, {}, files, [], collect)
+    assert calls == [files]
+    (root / "scripts/shared_helper.py").write_text("value = 2\n")
+    stats_cache.collect_cached_stats(root, cache, {}, files, [], collect)
+    assert calls == [files, files]
+
+
+def test_selected_test_ids_read_the_collected_stats_once_not_once_per_id(tmp_path):
+    from scripts.ci_mutation.stats_cache import collect_cached_stats
+
+    reads = []
+
+    class Durations(dict):
+        def items(self):
+            reads.append("durations")
+            return super().items()
+
+    class Tests(list):
+        def __iter__(self):
+            reads.append("tests")
+            return super().__iter__()
+
+    root = tmp_path / "repo"
+    count = 50
+    _repository(root, {"tests/test_a.py": "".join(f"def test_{index}():\n    pass\n" for index in range(count))})
+    entries = [f"tests/test_a.py::test_{index}" for index in range(count)]
+    calls = []
+
+    def collect(chosen):
+        calls.append(chosen)
+        tests = {"m.x_f": Tests(f"{entry}[1]" for entry in chosen), "m.x_g": Tests()}
+        return [{"status": 0, "tests": tests, "durations": Durations({f"{entry}[1]": 1 for entry in chosen}), "cpu": 2}]
+
+    cache = tmp_path / "cache"
+    collect_cached_stats(root, cache, {}, entries, [], collect)
+    assert reads.count("durations") <= 2
+    assert reads.count("tests") <= 4
+    warm = collect_cached_stats(root, cache, {}, entries, [], collect)
+    assert calls == [entries]
+    assert sorted(warm, key=str) == sorted(
+        [
+            {
+                "status": 0,
+                "tests": {"m.x_f": [f"{entry}[1]"], "m.x_g": []},
+                "durations": {f"{entry}[1]": 1},
+                "cpu": 0.04,
+            }
+            for entry in entries
+        ],
+        key=str,
+    )
+
+
+def test_selected_test_ids_keep_durations_recorded_with_an_at_suffix():
+    from scripts.ci_mutation.stats_cache import fresh_by_path
+
+    entries = ["tests/test_a.py::test_x", "tests/test_a.py::test_y[1]", "tests/test_a.py"]
+    fresh = [
+        {
+            "cpu": 1,
+            "tests": {
+                "m.x_f": ["tests/test_a.py::test_x@1", "tests/test_a.py::test_y[1]@2", "tests/test_b.py::test_z"]
+            },
+            "dependencies": {"tests/test_a.py::test_x@1": ["m.py"], "tests/test_b.py::test_z": ["m.py"]},
+            "durations": {
+                "tests/test_a.py::test_x@1": 1,
+                "tests/test_a.py::test_x@a@b": 3,
+                "tests/test_a.py::test_y[1]@2": 2,
+            },
+        }
+    ]
+    sliced = fresh_by_path(entries, fresh)
+    assert sliced["tests/test_a.py::test_x"][0]["durations"] == {
+        "tests/test_a.py::test_x@1": 1,
+        "tests/test_a.py::test_x@a@b": 3,
+    }
+    assert sliced["tests/test_a.py::test_y[1]"][0]["tests"] == {"m.x_f": ["tests/test_a.py::test_y[1]@2"]}
+    assert sliced["tests/test_a.py"][0]["durations"] == fresh[0]["durations"]
+    assert sliced["tests/test_a.py"][0]["dependencies"] == {"tests/test_a.py::test_x@1": ["m.py"]}

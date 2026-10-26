@@ -72,6 +72,49 @@ def test_an_answer_does_not_count_against_the_one_status_rule():
     assert ledger_comments.audit_item("phases/p1", item) == [("phases/p1", "-", "eng", ["2 comments, keep one status"])]
 
 
+def test_consecutive_status_comments_are_flagged():
+    item = {
+        "comments": [
+            {"id": "c-1", "by": "eng", "text": "Working on the phase."},
+            {"id": "c-2", "by": "eng", "text": "The change is ready."},
+        ]
+    }
+    assert ledger_comments.audit_item("phases/p1", item) == [("phases/p1", "-", "eng", ["2 comments, keep one status"])]
+
+
+def test_status_comments_separated_by_another_author_are_not_flagged():
+    for author in ("other", "operator"):
+        item = {
+            "comments": [
+                {"id": "c-1", "by": "eng", "text": "Working on the phase."},
+                {"id": "c-2", "by": author, "text": "The review is ready."},
+                {"id": "c-3", "by": "eng", "text": "The change is ready."},
+            ]
+        }
+        assert ledger_comments.audit_item("phases/p1", item) == []
+
+
+def test_deleted_comment_does_not_interrupt_consecutive_statuses():
+    item = {
+        "comments": [
+            {"id": "c-1", "by": "eng", "text": "Working on the phase."},
+            {"id": "c-2", "by": "other", "text": "The review is ready.", "deleted": True},
+            {"id": "c-3", "by": "eng", "text": "The change is ready."},
+        ]
+    }
+    assert ledger_comments.audit_item("phases/p1", item) == [("phases/p1", "-", "eng", ["2 comments, keep one status"])]
+
+
+def test_consecutive_operator_comments_are_not_repeated_agent_statuses():
+    item = {
+        "comments": [
+            {"id": "c-1", "by": "operator", "text": "The review is ready."},
+            {"id": "c-2", "by": "operator", "text": "The change is ready."},
+        ]
+    }
+    assert ledger_comments.audit_item("phases/p1", item) == []
+
+
 def test_an_agent_status_comment_still_amends_its_last_one():
     thread, c = [{"id": "c-0", "by": "eng", "at": 1, "text": "Working on the phase."}], ctx()
     assert ledger_comments.agent_thread_op(thread, op("phases/p1/comments"), c, "phases/p1", "comment") is True
@@ -93,7 +136,8 @@ def test_an_agent_chat_message_to_anyone_else_is_refused(field):
 @pytest.mark.parametrize(
     "fields, thread, expected",
     [
-        ({"to": "operator"}, [], True),
+        ({"to": "operator"}, [], False),
+        ({"to": "operator"}, [{"id": "m-0", "by": "operator"}], False),
         ({"reply_to": "m-0"}, [{"id": "m-0", "by": "operator"}], True),
         ({"reply_to": "m-0"}, [{"id": "m-0", "by": "eng"}], False),
         ({"reply_to": "m-0"}, [{"id": "m-0", "by": "operator", "deleted": True}], False),
@@ -102,7 +146,7 @@ def test_an_agent_chat_message_to_anyone_else_is_refused(field):
         ({"to": "eng"}, [], False),
     ],
 )
-def test_a_message_is_addressed_only_to_the_operator_or_a_live_line_of_his(fields, thread, expected):
+def test_a_message_is_addressed_only_as_a_reply_to_a_live_line_of_his(fields, thread, expected):
     assert ledger_comments.addressed(thread, fields) is expected
 
 
@@ -117,15 +161,18 @@ def test_an_unaddressed_agent_message_is_refused_and_not_kept():
     assert [e["id"] for e in thread] == ["m-0"]
 
 
-@pytest.mark.parametrize(
-    ("fields", "reply"),
-    [({"to": "operator"}, {}), ({"reply_to": "m-0"}, {"reply_to": "m-0"})],
-)
-def test_an_addressed_agent_message_is_kept(fields, reply):
+def test_an_unprompted_message_to_the_operator_is_refused_and_not_kept():
     thread, c = [{"id": "m-0", "by": "operator", "text": "hi"}], ctx()
-    assert ledger_comments.agent_thread_op(thread, op(**fields), c, "chat", "message") is True
+    assert ledger_comments.agent_thread_op(thread, op(to="operator"), c, "chat", "message") is False
+    assert c.refused == [f"eng message refused: {ledger_comments.UNADDRESSED}"]
+    assert [e["id"] for e in thread] == ["m-0"]
+
+
+def test_a_reply_to_an_operator_line_is_kept():
+    thread, c = [{"id": "m-0", "by": "operator", "text": "hi"}], ctx()
+    assert ledger_comments.agent_thread_op(thread, op(reply_to="m-0"), c, "chat", "message") is True
     assert c.refused == []
-    assert thread[-1] == {"id": "m-1", "by": "eng", "at": 7, "text": "Phase one is done.", **reply}
+    assert thread[-1] == {"id": "m-1", "by": "eng", "at": 7, "text": "Phase one is done.", "reply_to": "m-0"}
 
 
 def notice(**fields):

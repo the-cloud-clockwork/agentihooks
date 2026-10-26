@@ -173,18 +173,18 @@ One blue accent family over a near-black canvas, with red as a structural signal
 
 ## Layout
 
-The ledger page is a three-column desktop layout at 1920 width: a fixed outline on the left (280px), the main column of folding sections (max 1802px overall), and a sidebar of Stats and the swarm panel that scrolls on its own. Floating action buttons (sync, top, bell, home, chat) sit in the corners at 16px from the edge. Breakpoints at 1599, 1279, 1023 and 600px drop the sidebar and outline into the flow. HOME is a full-width hairline table on a fixed column grid: ledger, kind, overview, open, done, swarm, activity, actions. Spacing steps are 4, 8, 12, 16 and 32px; panels pad 16–18px, rows 6–12px.
+The ledger page is a three-column desktop layout at 1920 width: a fixed outline on the left (280px), the main column of folding sections (max 1802px overall), and a sidebar of Stats and the swarm panel that scrolls on its own. Floating action buttons (sync, top, bell, home, chat) sit in the corners at 16px from the edge. Below 1280px the outline gives way to a Jump to menu. Below 1024px the icon rail becomes a bottom bar of seven equal slots with the chat bubble last, side panels open above it, and Stats becomes a drawer from the right: an inward arrow in the icon colour or a left swipe opens it, a right swipe, a tap outside or Escape closes it. Below 768px body and label text step up to 14px and 12px and row actions wrap under their text; HOME keeps its compact list up to 1100px. Touch screens get 44px controls, tabs, steppers and fold heads, 32px small controls and 16px text in inputs so the browser never zooms on focus, and every scrollbar is thin over a transparent track. HOME is a full-width hairline table on a fixed column grid: ledger, kind, overview, open, done, swarm, activity, actions. Spacing steps are 4, 8, 12, 16 and 32px; panels pad 16–18px, rows 6–12px.
 
 **Scroll gutter (operator decision 2026-10-12).** Content never touches a scrollbar. The main column keeps `max(.5%, 12px)` and the Stats column `max(.5%, 8px)` of padding between its content and its scrollbar, on the Ledger and Swarm tabs alike.
 
 ### Swarm tab
 - **Control bar.** Left: swarm name, state and tick. Right: the controls row (start, pause, stop, stop now, close ledger, autonomy modes, reset layout), and under it, right aligned, the Doctor row in this order: DOCTOR, last check, findings, start doctor or stop doctor (red), the on or off dot, the Doctor state (a link to its ledger when running). The Doctor row is always visible; with no Doctor it reads `last check —`, `findings —`, `not running`. There is no Doctor side panel.
 - **Status line.** The line under the control bar shows failures only ("Could not … Try again or ask the master."). Progress notes such as "sending", "pending, waiting for the hive tick" or "acknowledged" never show, and there is no Commands log.
-- **Capacity.** Two strips: the caps (eng, ci, plan, compact limit, effort min, effort max), then Claude model, Codex model, master affinity and apply together on their own strip. Gates follow.
-- **Panels.** Below Capacity, full width, in this order: Quota, Overlays, Agents, Health, Handoff outcomes, Freezes, Architecture. Each folds on its header and keeps a drag height grip; a folded panel shrinks to its header. Reset layout restores sizes; the order is fixed. The Quota panel has no capacity line under its table and lists only accounts read within 15 minutes of the newest reading. The Architecture panel lists each design inventory proposal, marked approved or awaiting approval, with a reason field and approve while it awaits, and each earlier record revision with roll back; only the page credential's operator may use them.
+- **Capacity.** Two strips: the caps (eng, ci, plan, masters step, compact limit, effort min, effort max), then Claude model, Codex model, master affinity and apply together on their own strip. Roles follow: every role beside its lane with its live agent count (engineer, frontend, qa, documentation under eng; cicd under ci; planner under plan; dispatcher and master under seats), plus any other profile a live agent of that lane runs. Gates follow. Strips and roles appear only once a status arrives. When swarm status cannot be read, one muted notice replaces them, or sits under the strips when they keep the last observed state; no empty input shows.
+- **Panels.** Below Capacity, full width, in this order: Quota, Hives, Overlays, Agents, Handoff outcomes, Recovery, Freezes, Architecture. Each folds on its header and keeps a drag height grip; a folded panel shrinks to its header. Reset layout restores sizes; the order is fixed. The Quota panel has no capacity line under its table and lists only accounts read within 15 minutes of the newest reading; its header count names the accounts and the probe age, never a hive. The Hives panel lists only hives that beat within the last day, by name, with no per account column. The Architecture panel lists each design inventory proposal, marked approved or awaiting approval, with a reason field and approve while it awaits, and each earlier record revision with roll back; only the page credential's operator may use them. The Recovery panel holds one row per seat waiting on a recovery decision: its failure, state, checkpoint and watermark, diagnosis, wait and the native resume, context continuation and fresh start choices. Each checkpoint and diagnosis line ends in an ellipsis with its full text on hover, and a choice the seat cannot take stays visible and disabled with its reason as its title.
 
 ### Stats
-Default order (operator choice 2026-10-12): Started, Elapsed, Time left, Phases, Tasks, Follow-ups, Frozen, Unfrozen, Open, Claimed, Blocked, In PR, Done today, Next phase, Out of scope, Inbox pending, Agents · 2 h, Last activity, then Top bottleneck last: its title carries the measured age (`Top bottleneck · 3m ago`) over a bullet list of stage, trend and last action, then seat wait and queue wait in task hours, each with its meaning. Each row is a key and value on a fixed label track (104px), labels muted and values right aligned on one column, hairlines between rows. A value stays on one line; one that does not fit ends in an ellipsis and never covers its label. Every row, Top bottleneck included, carries a dim `≡` grip 16px in from the panel's left edge, the same margin the values keep on the right, 8px before its label: drag it, or focus it and press the up or down arrow, to reorder. The order is saved in the shared page layout (`/api/layout`, `stats`), so every browser shows it, and Reset layout clears it.
+Default order (operator choice 2026-10-12): Started, Elapsed, Time left, Phases, Tasks, Follow-ups, Frozen, Unfrozen, Open, Claimed, Blocked, In PR, Done today, Next phase, Out of scope, Inbox pending, Agents · 2 h, Last activity, then Top bottleneck last: its title carries the measured age (`Top bottleneck · 3m ago`) over a bullet list of stage, trend and last action, then seat wait and queue wait in task hours, each with its meaning, then, while any launch waits, one Admission refusals line counting the waiting launches by reason (cpu, ram, quota, placement, node cap, missing telemetry). Each row is a key and value on a fixed label track (104px), labels muted and values right aligned on one column, hairlines between rows. A value stays on one line; one that does not fit ends in an ellipsis and never covers its label. Every row, Top bottleneck included, carries a dim `≡` grip 16px in from the panel's left edge, the same margin the values keep on the right, 8px before its label: drag it, or focus it and press the up or down arrow, to reorder. The order is saved in the shared page layout (`/api/layout`, `stats`), so every browser shows it, and Reset layout clears it.
 
 ## Elevation & Depth
 
@@ -217,7 +217,7 @@ Small, quiet radii: 4px for inline controls, checkboxes and code, 6px for panels
 ### Inputs / Fields
 - **Inset:** `--surface-2` well, 6px radius, no border. Focus draws an accent inset underline.
 - **Line:** transparent with an edge underline that turns accent on focus.
-- **Checkbox:** 16px, 4px radius, surface-2; checked fills positive green with an ink tick.
+- **Checkbox:** 16px (24px on touch screens), 4px radius, surface-2; checked fills positive green with an ink tick.
 
 ### Panels / Sections
 - **Corner Style:** 6px.
@@ -227,11 +227,12 @@ Small, quiet radii: 4px for inline controls, checkboxes and code, 6px for panels
 
 ### Folding (operator rule 2026-10-12)
 - Only four things fold, each remembering its choice per viewer: the Ledger tab's sections below Overview, the Swarm tab panels below Capacity, the outline categories (with Expand all / Collapse all) and comment dropdowns (with Show all / Hide all comments).
-- Nothing else folds: Overview, Stats, the chat, artifacts, alerts and notifications windows, the Swarm control bar and Capacity, HOME and BIN. A fold anywhere else fails its test.
+- Nothing else folds: Overview, Stats, the chat, artifacts, alerts and notifications windows, the Swarm control bar and Capacity, HOME and BIN, and inside a section the plan groups, phase rows, done groups and task contract and proof blocks. A fold anywhere else fails its test.
 - A button inside a fold header (quota refresh, overlays apply) acts without folding its panel.
 
 ### Overview
 - A muted 11px uppercase OVERVIEW label with a pen beside it. The pen opens an inset textarea with Save and Cancel; Ctrl+Enter saves, Esc cancels. Saving sends `overview_set`, an operator-only operation recorded as "overview changed".
+- **The Overview Cap Rule.** The page shows at most the first 200 words of the overview, cut at a word boundary and ending with an ellipsis; nothing folds or expands, and the stored overview and the editor keep the full text.
 
 ### Tables
 - **Columns resize (operator rule 2026-10-12, cannot be broken).** Every column in the front end resizes by dragging its header's right edge: every table on the ledger page and the HOME and BIN columns. An 8px grip shows a 1px `--grip` hairline on hover, drag or keyboard focus; arrow keys move it 16px (Shift ×4). Only columns resize this way. Widths are saved in the shared page layout (`/api/layout`, `columns` per table) beside the panel sizes, apply to every ledger page, and clear with Reset layout. A table the grips cannot reach fails its test.
@@ -244,7 +245,7 @@ Small, quiet radii: 4px for inline controls, checkboxes and code, 6px for panels
 - Apply sits in the panel header after the count and appears only when an overlay change is pending.
 
 ### Freeze marks
-- A snowflake marks a frozen or held item. On a plan row it sits inside the header between the fold arrow and the title; it never floats outside its panel.
+- A snowflake marks a frozen or held item. On a plan row it sits inside the header before the title; it never floats outside its panel.
 
 ### Outline marks
 - An outline entry with a pending notification carries a `+` placed against its own link, section headers included.
@@ -257,6 +258,9 @@ Small, quiet radii: 4px for inline controls, checkboxes and code, 6px for panels
 
 ### Navigation
 - **Outline:** a fixed left list of section links, muted at rest, white on hover with the hover lift, accent when current. Items lead with a red or green bullet for open or done.
+- **Outline filter:** a line input and a state select above the list filter it by title, id and state; done items not yet loaded are searched on the server. Swarm tasks sit under muted uppercase phase labels that never fold.
+- **Fresh defaults:** an outline category or Ledger section whose every item is done or answered starts closed for a viewer with no saved choice.
+- **Keyboard:** ArrowUp and ArrowDown, or j and k outside form controls, move focus through the visible outline links or task ids; Enter reveals the target.
 
 ## Do's and Don'ts
 

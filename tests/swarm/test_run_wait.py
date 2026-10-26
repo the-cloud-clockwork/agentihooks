@@ -7,8 +7,6 @@ from scripts.swarm import cli, idle, mutation_wait, waits
 from tests.swarm.test_cli import env, run  # noqa: F401
 from tests.swarm.test_waits import ME, held, started, tick  # noqa: F401
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 RUN = "https://github.com/org/repo/actions/runs/123"
 ENDPOINT = "repos/org/repo/actions/runs/123"
 JOBS = f"{ENDPOINT}/jobs?per_page=100"
@@ -170,3 +168,228 @@ def test_a_malformed_jobs_answer_still_ends_a_red_run_wait(tick, actions, answer
     outcome = f"checks on {RUN}, now red; the run concluded timed_out; its jobs could not be read"
     assert tick.end() == [f"ended the wait of {ME}: {outcome}"]
     assert idle.wait(tick.store.redis, "sw", ME) is None
+
+
+def test_the_wait_timer_ends_a_run_wait_while_the_tick_snapshot_is_blocked(env, actions, monkeypatch):  # noqa: F811
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Event
+
+    from scripts.inbox.store import InboxStore
+    from scripts.swarm import snapshot
+    from scripts.swarm.store import AgentRecord
+    from tests.swarm.test_delivery import FakeHerdr
+
+    store, ledger, runtime = env
+    run("sw", "create", "--repo", "/repo")
+    entered, release = Event(), Event()
+
+    def slow_snapshot(*args):
+        entered.set()
+        assert release.wait(5)
+
+    monkeypatch.setattr(snapshot, "auto", slow_snapshot)
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        future = pool.submit(cli.run_tick, store, "sw", ledger, runtime, FakeHerdr({}))
+        try:
+            assert entered.wait(5)
+            store.put_agent("sw", AgentRecord(name=ME, lane="eng", task="t1", seat="eng-1@sw"))
+            idle.declare_wait(store.redis, "sw", ME, 10_000_000, "", 1, on={"kind": "checks", "target": RUN})
+            actions["run"] = {"status": "completed", "conclusion": "success"}
+            assert cli.main(["waits"]) == 0
+            assert not future.done()
+            assert idle.wait(store.redis, "sw", ME) is None
+            inbox = InboxStore(store.redis)
+            notices = [item.text for item in inbox.inbox("eng-1@sw")]
+            assert notices == [
+                f"Your wait on checks on {RUN}, now green has ended. Pick task t1 back up: "
+                "agentihooks swarm sw done, block, or wait on the next thing."
+            ]
+            assert cli.main(["waits"]) == 0
+            assert [item.text for item in inbox.inbox("eng-1@sw")] == notices
+        finally:
+            release.set()
+        future.result()
+
+
+def test_the_wait_pass_leaves_a_foreign_controllers_wait_untouched(tick, monkeypatch):  # noqa: F811
+    from scripts.swarm import lease
+
+    hold_run(tick)
+    before = idle.wait(tick.store.redis, "sw", ME)
+    lease.acquire(tick.store, "sw", "another-controller")
+    monkeypatch.setattr(cli, "LedgerClient", lambda: pytest.fail("foreign ledger was read"))
+    assert cli.run_waits(tick.store, "sw") == []
+    assert idle.wait(tick.store.redis, "sw", ME) == before
+    assert tick.told() == []
+
+
+@pytest.mark.parametrize("held", ["none", "bare", "finished"])
+def test_the_wait_pass_skips_ledger_reads_without_active_checked_waits(tick, monkeypatch, held):  # noqa: F811
+    if held != "none":
+        hold_run(tick)
+    if held == "bare":
+        idle.declare_wait(tick.store.redis, "sw", ME, 10_000_000, "a short break", 1)
+    if held == "finished":
+        from dataclasses import replace
+
+        tick.store.put_agent("sw", replace(tick.store.agents("sw")[0], state="finished"))
+    monkeypatch.setattr(cli, "LedgerClient", lambda: pytest.fail("idle ledger was read"))
+    assert cli.run_waits(tick.store, "sw") == []
+    assert tick.told() == []
+
+
+def test_the_wait_command_checks_other_swarms_despite_a_failure_or_slow_pass(monkeypatch, capsys):
+    from argparse import Namespace
+    from threading import Event
+    from types import SimpleNamespace
+
+    slow, checked = Event(), Event()
+
+    def check(store, slug):
+        if slug == "broken":
+            raise RuntimeError("unavailable")
+        if slug == "slow":
+            slow.set()
+            assert checked.wait(5)
+        else:
+            assert slow.wait(5)
+            checked.set()
+        return ["wait checked"]
+
+    monkeypatch.setattr(cli.timer, "installed_refusal", lambda: "")
+    monkeypatch.setattr(cli, "run_waits", check)
+    cli.cmd_waits(SimpleNamespace(slugs=lambda: ["broken", "slow", "fast"]), Namespace())
+    output = capsys.readouterr()
+    assert set(output.out.splitlines()) == {"slow: wait checked", "fast: wait checked"}
+    assert output.err == "broken: RuntimeError: unavailable\n"
+
+
+def test_the_wait_command_accepts_an_empty_swarm_list(monkeypatch, capsys):
+    from argparse import Namespace
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(cli.timer, "installed_refusal", lambda: "")
+    cli.cmd_waits(SimpleNamespace(slugs=lambda: []), Namespace())
+    assert capsys.readouterr() == ("", "")
+
+
+def test_every_wait_pass_guards_the_scheduled_tick(monkeypatch, capsys):
+    from argparse import Namespace
+    from types import SimpleNamespace
+
+    guarded = []
+    monkeypatch.setattr(cli.timer, "installed_refusal", lambda: "")
+    monkeypatch.setattr(cli.timer, "entry_point", lambda: "/installed/bin/agentihooks")
+    monkeypatch.setattr(cli.timer, "guard", lambda binary: guarded.append(binary) or True)
+    cli.cmd_waits(SimpleNamespace(slugs=lambda: []), Namespace())
+    cli.cmd_waits(SimpleNamespace(slugs=lambda: []), Namespace())
+    assert guarded == ["/installed/bin/agentihooks"] * 2
+    assert capsys.readouterr() == ("", "")
+
+
+def test_a_failed_tick_guard_is_logged_and_the_wait_pass_goes_on(monkeypatch, capsys):
+    from argparse import Namespace
+    from types import SimpleNamespace
+
+    def broken(binary):
+        raise OSError("no systemctl")
+
+    monkeypatch.setattr(cli.timer, "installed_refusal", lambda: "")
+    monkeypatch.setattr(cli.timer, "guard", broken)
+    monkeypatch.setattr(cli, "run_waits", lambda store, slug: ["wait checked"])
+    cli.cmd_waits(SimpleNamespace(slugs=lambda: ["sw"]), Namespace())
+    output = capsys.readouterr()
+    assert output.out == "sw: wait checked\n"
+    assert output.err == "the scheduled swarm tick guard failed: OSError: no systemctl\n"
+
+
+def test_a_guard_that_cannot_enable_the_tick_timer_warns(monkeypatch, capsys):
+    from argparse import Namespace
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(cli.timer, "installed_refusal", lambda: "")
+    monkeypatch.setattr(cli.timer, "guard", lambda binary: False)
+    cli.cmd_waits(SimpleNamespace(slugs=lambda: []), Namespace())
+    assert capsys.readouterr() == (
+        "",
+        "warning: the scheduled swarm tick guard could not enable the swarm tick timer\n",
+    )
+
+
+def test_the_wait_command_refuses_a_run_outside_the_install(monkeypatch):
+    from argparse import Namespace
+
+    from scripts.swarm.store import SwarmError
+
+    monkeypatch.setattr(cli.timer, "installed_refusal", lambda: "outside the installed checkout")
+    with pytest.raises(SwarmError, match="the wait pass refused to run: outside the installed checkout"):
+        cli.cmd_waits(None, Namespace())
+
+
+def test_the_wait_pass_rechecks_ownership_after_reading_github(tick, monkeypatch):  # noqa: F811
+    from types import SimpleNamespace
+
+    from scripts.swarm import lease
+    from scripts.swarm.store import SwarmError
+
+    hold_run(tick)
+    before = idle.wait(tick.store.redis, "sw", ME)
+
+    def changed_owner(*args):
+        tick.store.redis.delete(tick.store.key("sw", "control-owner"))
+        lease.acquire(tick.store, "sw", "another-controller")
+        return lambda url: None
+
+    monkeypatch.setattr(cli.ledger_events, "tick_view", changed_owner)
+    ledger = SimpleNamespace(state=lambda slug: {"tasks": []})
+    with pytest.raises(SwarmError):
+        cli.run_waits(tick.store, "sw", ledger)
+    assert idle.wait(tick.store.redis, "sw", ME) == before
+    assert tick.told() == []
+
+
+def test_the_wait_pass_confirms_a_merge_wait_with_an_uncached_github_read(tick, monkeypatch):  # noqa: F811
+    from types import SimpleNamespace
+
+    from tests.swarm.test_waits import LISTED, UNLISTED, URL
+
+    tick.hold("merge", URL)
+    monkeypatch.setattr(cli.ledger_events, "tick_view", lambda *args: {URL: UNLISTED}.get)
+    monkeypatch.setattr(cli.ledger_events, "view", {URL: LISTED}.get)
+    ledger = SimpleNamespace(state=lambda slug: {"tasks": []})
+    assert cli.run_waits(tick.store, "sw", ledger) == []
+    assert idle.wait(tick.store.redis, "sw", ME)["on"] == {"kind": "merge", "target": URL, "queued": True}
+    assert tick.told() == []
+
+
+def test_the_wait_pass_resolves_against_current_ledger_tasks(tick):  # noqa: F811
+    from types import SimpleNamespace
+
+    tick.hold("task", "t2")
+    documents = {"sw": {"tasks": [{"id": "t2", "state": "done"}]}}
+    ledger = SimpleNamespace(state=documents.__getitem__)
+    assert cli.run_waits(tick.store, "sw", ledger) == [f"ended the wait of {ME}: task t2, now done"]
+    assert idle.wait(tick.store.redis, "sw", ME) is None
+    assert len(tick.told()) == 1
+
+
+def test_the_wait_pass_resolves_waits_beside_an_open_red_check_notice(tick, monkeypatch):  # noqa: F811
+    from types import SimpleNamespace
+
+    from tests.swarm.test_waits import URL
+
+    tick.hold("task", "t2")
+    notice = tick.inbox.send("swarm", "eng-1@sw", "A previous pull request has failed checks")
+    tick.store.redis.hset(tick.store.key("sw", "red-notices"), notice.id, URL)
+    monkeypatch.setattr(cli.ledger_events, "views", lambda urls, cache: {})
+    documents = {"sw": {"tasks": [{"id": "t2", "state": "done"}]}}
+    assert cli.run_waits(tick.store, "sw", SimpleNamespace(state=documents.__getitem__)) == [
+        f"ended the wait of {ME}: task t2, now done"
+    ]
+    assert idle.wait(tick.store.redis, "sw", ME) is None
+    assert tick.inbox.get(notice.id).state == "pending"
+    assert tick.told() == [
+        "A previous pull request has failed checks",
+        "Your wait on task t2, now done has ended. Pick task t1 back up: "
+        "agentihooks swarm sw done, block, or wait on the next thing.",
+    ]

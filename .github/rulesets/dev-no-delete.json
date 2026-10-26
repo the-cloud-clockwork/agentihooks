@@ -49,15 +49,26 @@
     {
       "type": "merge_queue",
       "parameters": {
-        "check_response_timeout_minutes": 25,
+        "check_response_timeout_minutes": 45,
         "grouping_strategy": "ALLGREEN",
-        "max_entries_to_build": 2,
-        "max_entries_to_merge": 2,
+        "max_entries_to_build": 5,
+        "max_entries_to_merge": 5,
         "merge_method": "SQUASH",
         "min_entries_to_merge": 1,
-        "min_entries_to_merge_wait_minutes": 0
+        "min_entries_to_merge_wait_minutes": 1
       }
     }
   ],
-  "bypass_actors": []
+  "bypass_actors": [
+    {
+      "actor_id": 5,
+      "actor_type": "RepositoryRole",
+      "bypass_mode": "pull_request"
+    },
+    {
+      "actor_id": 2988497,
+      "actor_type": "Integration",
+      "bypass_mode": "pull_request"
+    }
+  ]
 }

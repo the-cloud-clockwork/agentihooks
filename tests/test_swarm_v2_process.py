@@ -2,7 +2,9 @@ import faulthandler
 import os
 import signal
 import subprocess
+import sys
 import threading
+import time
 from contextlib import contextmanager, suppress
 from dataclasses import replace
 
@@ -20,8 +22,6 @@ from scripts.swarm_v2.runtime.routed import RoutedRuntime
 from tests.swarm.test_tick import FakeLedger
 from tests.swarm.test_tick import FakeRuntime as TickRuntime
 from tests.test_swarm_v2_runtime import REMOTE, herdr_runtime, local_fake, remote_fake, request
-
-pytestmark = pytest.mark.xdist_group("fakeredis")
 
 ANTON = "boot-anton/pid:[4026531836]"
 WORKER = "boot-aws-worker/pid:[4026532001]"
@@ -221,13 +221,391 @@ def test_the_recorded_pid_of_a_reused_process_is_never_signalled_but_pane_and_ho
 def test_a_foreign_namespace_terminate_signals_nothing_and_counts_one_rejection(tmp_path, monkeypatch):
     local, calls, ended = adapter(tmp_path, monkeypatch, {PID: proc()})
     router = RuntimeRouter([local])
-    outcome = router.terminate(record(namespace=WORKER))
+    outcome = router.terminate(record(namespace="boot-anton/pid:[4026539999]"))
     assert outcome == Outcome(
         "terminate", Status.REFUSED, LOCAL, Unqualified.FOREIGN_NAMESPACE, "process belongs to another PID namespace"
     )
     assert WORKER not in repr(outcome)
     assert (ended, calls) == ([], [])
     assert router.rejected == {(LOCAL, Unqualified.FOREIGN_NAMESPACE): 1}
+
+
+@pytest.mark.parametrize("pid_namespace", ["pid:[4026531836]", "pid:[4026539999]"])
+def test_a_local_record_from_a_previous_boot_retires_as_ended_without_signalling(tmp_path, monkeypatch, pid_namespace):
+    local, calls, ended = adapter(tmp_path, monkeypatch, {PID: proc()})
+    router = RuntimeRouter([local])
+    agent = record(namespace=f"boot-before/{pid_namespace}")
+    monkeypatch.setattr(local, "table", lambda: pytest.fail("previous boot retirement read the current process table"))
+    assert router.terminate(agent, ("/scratch/t1",)) == Outcome(
+        "terminate", Status.OK, LOCAL, detail="its process ended with a previous boot"
+    )
+    assert (ended, calls) == ([], [])
+    assert router.rejected == {}
+
+
+def test_an_old_boot_record_retires_its_reopened_conversation_process(tmp_path, monkeypatch):
+    from scripts.terminate_agent import Session
+
+    local, calls, ended = adapter(tmp_path, monkeypatch, {PID: proc()})
+    agent = replace(record(namespace=WORKER), harness="codex", conversation_id="restored")
+    current = proc(pid=PID + 1, start=STARTED + 1)
+    unrelated = Session("another", "codex", NAME, proc(pid=PID + 2), "", "alive")
+    reopened = Session("restored", "codex", NAME, current, "", "alive")
+    monkeypatch.setattr("scripts.terminate_agent.sessions", lambda: [unrelated, reopened])
+    router = RuntimeRouter([local])
+    assert router.terminate(agent, ("/scratch/t1",)) == Outcome("terminate", Status.OK, LOCAL)
+    assert ended == [(NAME, PID + 1, ("/scratch/t1",), STARTED + 1)]
+    assert ["pane", "close", "w1:p1"] in calls
+    assert router.rejected == {}
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [("name", "another"), ("session_id", "another"), ("target", "claude"), ("status", "dead")],
+)
+def test_previous_boot_retirement_does_not_signal_another_conversation_process(tmp_path, monkeypatch, field, value):
+    from scripts.terminate_agent import Session
+
+    local, calls, ended = adapter(tmp_path, monkeypatch, {PID: proc()})
+    agent = replace(record(namespace=WORKER), harness="codex", conversation_id="restored")
+    candidate = replace(Session("restored", "codex", NAME, proc(pid=PID + 1), "", "alive"), **{field: value})
+    monkeypatch.setattr("scripts.terminate_agent.sessions", lambda: [candidate])
+    assert RuntimeRouter([local]).terminate(agent) == Outcome(
+        "terminate", Status.OK, LOCAL, detail="its process ended with a previous boot"
+    )
+    assert (ended, calls) == ([], [])
+
+
+def test_previous_boot_retirement_without_a_conversation_never_selects_a_named_process(tmp_path, monkeypatch):
+    local, calls, ended = adapter(tmp_path, monkeypatch, {PID: proc()})
+    monkeypatch.setattr("scripts.terminate_agent.sessions", lambda: pytest.fail("no recorded conversation to recover"))
+    assert RuntimeRouter([local]).terminate(record(namespace=WORKER)) == Outcome(
+        "terminate", Status.OK, LOCAL, detail="its process ended with a previous boot"
+    )
+    assert (ended, calls) == ([], [])
+
+
+def test_reopened_process_retirement_keeps_the_reaper_refusal(tmp_path, monkeypatch):
+    from scripts.terminate_agent import Session
+
+    local, calls, ended = adapter(tmp_path, monkeypatch, {PID: proc()})
+    agent = replace(record(namespace=WORKER), harness="codex", conversation_id="restored")
+    reopened = Session("restored", "codex", NAME, proc(pid=PID + 1), "", "alive")
+    monkeypatch.setattr("scripts.terminate_agent.sessions", lambda: [reopened])
+    local.herdr.end = lambda *args: reaper.Outcome(process=PID + 1, refusal="process identity changed")
+    assert RuntimeRouter([local]).terminate(agent) == Outcome(
+        "terminate",
+        Status.REFUSED,
+        LOCAL,
+        {"process": PID + 1, "refusal": "process identity changed"},
+        "process identity changed",
+    )
+    assert (ended, calls) == ([], [])
+
+
+@pytest.mark.parametrize("host_id", ["", "hive-a"])
+def test_a_same_boot_foreign_pid_namespace_stays_refused(tmp_path, monkeypatch, host_id):
+    monkeypatch.setattr("scripts.swarm.commands.hive_id", lambda: "hive-a")
+    local, calls, ended = adapter(tmp_path, monkeypatch, {PID: proc()})
+    agent = record(namespace="boot-anton/pid:[4026539999]")
+    if host_id:
+        agent = replace(agent, runtime_target={**agent.runtime_target, "host_id": host_id})
+    router = RuntimeRouter([local])
+    assert router.terminate(agent) == Outcome(
+        "terminate", Status.REFUSED, LOCAL, Unqualified.FOREIGN_NAMESPACE, "process belongs to another PID namespace"
+    )
+    assert (ended, calls) == ([], [])
+    assert router.rejected == {(LOCAL, Unqualified.FOREIGN_NAMESPACE): 1}
+
+
+@pytest.mark.parametrize("field", ["namespace", "pid", "start"])
+def test_local_retirement_refuses_an_incomplete_process_identity(tmp_path, monkeypatch, field):
+    local, calls, ended = adapter(tmp_path, monkeypatch, {PID: proc()})
+    router = RuntimeRouter([local])
+    assert router.terminate(record(**{field: None})) == Outcome(
+        "terminate", Status.REFUSED, LOCAL, Unqualified.NO_PROCESS, "runtime target names no process"
+    )
+    assert (ended, calls) == ([], [])
+    assert router.rejected == {(LOCAL, Unqualified.NO_PROCESS): 1}
+
+
+def test_retirement_without_a_recorded_pid_ends_only_its_owned_pane(tmp_path, monkeypatch):
+    from scripts import terminate_agent
+
+    pane = {"pane_id": "w1:p1", "name": NAME, "agent_session": None}
+    herdr, calls = herdr_runtime(tmp_path, monkeypatch, panes={"w1:p1": pane})
+    herdr.end = reaper.retire
+    environment = {
+        **os.environ,
+        "AGENTIHOOKS_AGENT_NAME": NAME,
+        "HERDR_PANE_ID": "w1:p1",
+        "HERDR_SOCKET_PATH": "/owned/herdr.sock",
+    }
+    monkeypatch.setenv("HERDR_SOCKET_PATH", "/owned/herdr.sock")
+    child = subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(60)"], env=environment, start_new_session=True
+    )
+    try:
+        table = processes()
+        session = terminate_agent.Session("", "claude", NAME, table[child.pid], "", "alive")
+        monkeypatch.setattr(terminate_agent, "sessions", lambda: [session])
+        local = LocalHerdrRuntime(herdr, namespace=lambda: ANTON, table=lambda: table)
+        agent = replace(record(pid=None, start=None), state="finished")
+        assert RuntimeRouter([local]).terminate(agent).ok
+        assert child.wait(timeout=5) == -signal.SIGTERM
+        assert ["pane", "close", "w1:p1"] in calls
+        assert all(NAME not in call for call in calls)
+    finally:
+        if child.poll() is None:
+            child.kill()
+        child.wait(timeout=5)
+
+
+@pytest.mark.parametrize("owner", [None, "", "engineer@a1b2c3-0009"])
+def test_a_live_agent_without_a_pid_or_owned_pane_is_refused(tmp_path, monkeypatch, owner):
+    panes = {} if owner is None else {"w1:p1": {"pane_id": "w1:p1", "name": owner, "agent_session": {"value": "other"}}}
+    herdr, calls = herdr_runtime(tmp_path, monkeypatch, panes=panes)
+    monkeypatch.setattr(herdr, "live_names", lambda: {NAME})
+    local = LocalHerdrRuntime(herdr, namespace=lambda: ANTON, table=lambda: {PID: proc()})
+    outcome = RuntimeRouter([local]).terminate(record(pid=None, start=None))
+    assert not outcome.ok
+    assert outcome.detail == "no owned pane for unrecorded process"
+    assert herdr.refusal(record(pid=None, start=None)) == {
+        "process": 0,
+        "refusal": "no owned pane for unrecorded process",
+    }
+    assert ["pane", "close", "w1:p1"] not in calls
+
+
+def test_a_live_agent_with_no_pid_and_no_recorded_pane_retires_by_its_session_name(tmp_path, monkeypatch):
+    from scripts import terminate_agent
+
+    herdr, calls = herdr_runtime(tmp_path, monkeypatch, panes={})
+    herdr.end = reaper.retire
+    inherited = {key: value for key, value in os.environ.items() if not key.startswith("HERDR_")}
+    environment = {**inherited, "AGENTIHOOKS_AGENT_NAME": NAME, "AGENTIHOOKS_SWARM_TASK": "t1"}
+    child = subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(60)"], env=environment, start_new_session=True
+    )
+    try:
+        table = processes()
+        for _ in range(100):
+            if child.pid in table and table[child.pid].pgid == child.pid:
+                break
+            time.sleep(0.05)
+            table = processes()
+        assert child.pid in table
+        session = terminate_agent.Session("", "claude", NAME, table[child.pid], "", "alive")
+        monkeypatch.setattr(terminate_agent, "sessions", lambda: [session])
+        local = LocalHerdrRuntime(herdr, namespace=lambda: ANTON, table=lambda: table)
+        agent = replace(record(pid=None, start=None), pane_id="", state="finished")
+        assert RuntimeRouter([local]).terminate(agent).ok
+        assert child.wait(timeout=5) == -signal.SIGTERM
+        assert not any(call[:2] == ["pane", "close"] for call in calls)
+    finally:
+        if child.poll() is None:
+            child.kill()
+        child.wait(timeout=5)
+
+
+def test_named_retirement_passes_the_process_start_and_skips_a_vanished_recorded_pane(tmp_path, monkeypatch):
+    herdr, calls = herdr_runtime(tmp_path, monkeypatch, panes={})
+    ended = []
+    herdr.end = lambda *args: ended.append(args) or reaper.Outcome()
+    monkeypatch.setattr(herdr, "live_names", lambda: {NAME})
+    monkeypatch.setattr("scripts.swarm.runtime._named_process", lambda agent: proc(start=999))
+    agent = replace(record(pid=None, start=None), pane_id="w7:p7", state="finished")
+    assert herdr.retire_pane(agent)
+    assert ended == [(NAME, PID, [], 999)]
+    assert ["pane", "close", "w7:p7"] not in calls
+
+
+@pytest.mark.parametrize(
+    ("recorded", "task", "carried", "retired"),
+    [
+        ("", "t1", ("", "", "t1"), True),
+        ("w7:p7", "t1", ("w7:p7", "/owned/herdr.sock", "t1"), True),
+        ("w7:p7", "t1", ("w9:p9", "/owned/herdr.sock", "t1"), False),
+        ("", "t1", ("w9:p9", "/other/herdr.sock", "t1"), False),
+        ("", "t1", ("", "", "t2"), False),
+        ("", "t1", ("", "", ""), False),
+        ("", "", ("", "", ""), False),
+    ],
+)
+def test_named_retirement_ends_only_a_process_of_this_task_pane_and_server(
+    tmp_path, monkeypatch, recorded, task, carried, retired
+):
+    from scripts import terminate_agent
+
+    herdr, calls = herdr_runtime(tmp_path, monkeypatch, panes={})
+    ended = []
+    herdr.end = lambda *args: ended.append(args) or reaper.Outcome()
+    monkeypatch.setattr(herdr, "live_names", lambda: {NAME})
+    monkeypatch.setenv("HERDR_SOCKET_PATH", "/owned/herdr.sock")
+    session = terminate_agent.Session("", "claude", NAME, proc(), "", "alive")
+    monkeypatch.setattr(terminate_agent, "sessions", lambda: [session])
+    monkeypatch.setattr(terminate_agent, "validate", lambda *args, **kwargs: [])
+    asked = []
+    monkeypatch.setattr(terminate_agent, "agent_environ", lambda pid, keys: asked.append((pid, keys)) or carried)
+    agent = replace(record(pid=None, start=None), task=task, pane_id=recorded, state="finished")
+    assert herdr.retire_pane(agent) is retired
+    assert asked == [(PID, ("HERDR_PANE_ID", "HERDR_SOCKET_PATH", "AGENTIHOOKS_SWARM_TASK"))]
+    assert ended == ([(NAME, PID, [], STARTED)] if retired else [])
+    if not retired:
+        assert herdr.refusal(agent) == {"process": 0, "refusal": "no owned pane for unrecorded process"}
+
+
+@pytest.mark.parametrize(("pane_id", "socket"), [("w9:p9", "/owned/herdr.sock"), ("w1:p1", "/other/herdr.sock")])
+def test_unrecorded_retirement_refuses_a_named_process_on_another_pane_or_server(
+    tmp_path, monkeypatch, pane_id, socket
+):
+    from scripts import terminate_agent
+
+    pane = {"pane_id": "w1:p1", "name": NAME}
+    herdr, calls = herdr_runtime(tmp_path, monkeypatch, panes={"w1:p1": pane})
+    ended = []
+    herdr.end = lambda *args: ended.append(args) or reaper.Outcome()
+    monkeypatch.setenv("HERDR_SOCKET_PATH", "/owned/herdr.sock")
+    session = terminate_agent.Session("", "claude", NAME, proc(), "", "alive")
+    monkeypatch.setattr(terminate_agent, "sessions", lambda: [session])
+    monkeypatch.setattr(terminate_agent, "herdr_pane", lambda pid: (pane_id, socket))
+    local = LocalHerdrRuntime(herdr, namespace=lambda: ANTON, table=lambda: {PID: proc()})
+    assert not RuntimeRouter([local]).terminate(record(pid=None, start=None)).ok
+    assert ended == []
+    assert ["pane", "close", "w1:p1"] not in calls
+
+
+@pytest.mark.parametrize("wrapped", [True, False])
+@pytest.mark.parametrize("named", [True, False])
+def test_unrecorded_retirement_uses_the_oldest_owned_process_with_its_start_and_scratch_homes(
+    tmp_path, monkeypatch, wrapped, named
+):
+    from scripts import terminate_agent
+
+    pane = {
+        "pane_id": "w1:p1",
+        "name": NAME if named else "",
+        "agent_session": {"kind": "id", "value": "conversation"},
+    }
+    herdr, calls = herdr_runtime(tmp_path, monkeypatch, panes={"w1:p1": pane})
+    original = herdr.herdr
+
+    def lookup(args):
+        result = original(args)
+        return result["agent"] if not wrapped and args[:2] == ["agent", "get"] else result
+
+    herdr.herdr = lookup
+    monkeypatch.setenv("HERDR_SOCKET_PATH", "/owned/herdr.sock")
+    recent, oldest = proc(PID, 900), proc(PID + 1, 100)
+    sessions = [terminate_agent.Session("", "claude", NAME, p, "", "alive") for p in (recent, oldest)]
+    monkeypatch.setattr(terminate_agent, "sessions", lambda: sessions)
+    monkeypatch.setattr(terminate_agent, "herdr_pane", lambda pid: ("w1:p1", "/owned/herdr.sock"))
+    ended = []
+    herdr.end = lambda *args: ended.append(args) or reaper.Outcome()
+    local = LocalHerdrRuntime(herdr, namespace=lambda: ANTON, table=lambda: {})
+    agent = replace(record(pid=None, start=None), conversation_id="conversation")
+    assert RuntimeRouter([local]).terminate(agent, ("/scratch/task",)).ok
+    assert ended == [(NAME, PID + 1, ["/scratch/task"], 100)]
+    assert ["pane", "close", "w1:p1"] in calls
+
+
+def test_unrecorded_retirement_reports_an_unavailable_pane_service(tmp_path, monkeypatch):
+    herdr, calls = herdr_runtime(tmp_path, monkeypatch)
+
+    def unavailable(args):
+        calls.append(args)
+        raise RuntimeError("pane service unavailable")
+
+    herdr.herdr = unavailable
+    local = LocalHerdrRuntime(herdr, namespace=lambda: ANTON, table=lambda: {})
+    agent = record(pid=None, start=None)
+    outcome = RuntimeRouter([local]).terminate(agent)
+    assert not outcome.ok and outcome.detail == "pane service unavailable"
+    assert herdr.refusal(agent) == {"process": 0, "refusal": "pane service unavailable"}
+    assert calls == [["agent", "get", "w1:p1"]]
+
+
+@pytest.mark.parametrize("present", [True, False])
+def test_unrecorded_retirement_reaps_scratch_homes_when_the_process_is_already_gone(tmp_path, monkeypatch, present):
+    from scripts import terminate_agent
+
+    panes = {"w1:p1": {"pane_id": "w1:p1", "name": NAME}} if present else {}
+    herdr, calls = herdr_runtime(tmp_path, monkeypatch, panes=panes)
+    monkeypatch.setattr(terminate_agent, "sessions", lambda: [])
+    ended = []
+    herdr.end = lambda *args: ended.append(args) or reaper.Outcome()
+    local = LocalHerdrRuntime(herdr, namespace=lambda: ANTON, table=lambda: {})
+    assert RuntimeRouter([local]).terminate(record(pid=None, start=None), ("/scratch/task",)).ok
+    assert ended == [(NAME, None, ["/scratch/task"], 0)]
+    closed = [call for call in calls if call[:2] == ["pane", "close"]]
+    assert closed == ([["pane", "close", "w1:p1"]] if present else [])
+
+
+@pytest.mark.parametrize("conversation", ["", "recorded-conversation"])
+def test_unrecorded_retirement_refuses_an_unnamed_pane_without_its_recorded_conversation(
+    tmp_path, monkeypatch, conversation
+):
+    from scripts import terminate_agent
+
+    pane = {"pane_id": "w1:p1", "name": "", "agent_session": None}
+    herdr, calls = herdr_runtime(tmp_path, monkeypatch, panes={"w1:p1": pane})
+    monkeypatch.setenv("HERDR_SOCKET_PATH", "/owned/herdr.sock")
+    session = terminate_agent.Session("", "claude", NAME, proc(), "", "alive")
+    monkeypatch.setattr(terminate_agent, "sessions", lambda: [session])
+    monkeypatch.setattr(terminate_agent, "herdr_pane", lambda pid: ("w1:p1", "/owned/herdr.sock"))
+    ended = []
+    herdr.end = lambda *args: ended.append(args) or reaper.Outcome()
+    local = LocalHerdrRuntime(herdr, namespace=lambda: ANTON, table=lambda: {})
+    agent = replace(record(pid=None, start=None), conversation_id=conversation)
+    outcome = RuntimeRouter([local]).terminate(agent)
+    assert not outcome.ok and outcome.detail == "no owned pane for unrecorded process"
+    assert ended == []
+    assert ["pane", "close", "w1:p1"] not in calls
+
+
+@pytest.mark.parametrize(
+    ("recorded", "current", "expected"),
+    [
+        ("old/pid:[1]", "new/pid:[1]", True),
+        ("old/pid:[1]", "new/pid:[2]", True),
+        ("same/pid:[1]", "same/pid:[2]", False),
+        ("same/pid:[1]", "same/pid:[1]", False),
+        ("", "new/pid:[1]", False),
+        ("old/pid:[1]", "", False),
+        ("old", "new/pid:[1]", False),
+        ("old/pid:[1]", "new", False),
+        ("/pid:[1]", "new/pid:[1]", False),
+        ("old/pid:[1]", "/pid:[1]", False),
+        ("old/", "new/pid:[1]", False),
+        ("old/pid:[1]", "new/", False),
+    ],
+)
+def test_previous_boot_requires_two_readable_boot_qualified_namespaces(recorded, current, expected):
+    assert process.previous_boot(recorded, current) is expected
+
+
+def test_a_record_this_host_launched_before_its_namespace_restarted_retires_without_signalling(tmp_path, monkeypatch):
+    monkeypatch.setattr("scripts.swarm.commands.hive_id", lambda: "hive-a")
+    local, calls, ended = adapter(tmp_path, monkeypatch, {PID: proc()})
+    agent = record(namespace=WORKER)
+    agent = replace(agent, runtime_target={**agent.runtime_target, "host_id": "hive-a"})
+    router = RuntimeRouter([local])
+    assert router.terminate(agent, ("/scratch/t1",)) == Outcome(
+        "terminate", Status.OK, LOCAL, detail="its process ended with a previous boot"
+    )
+    assert (ended, calls) == ([], [])
+    assert router.rejected == {}
+
+
+def test_a_record_of_this_host_is_still_refused_when_the_local_namespace_is_unreadable(tmp_path, monkeypatch):
+    monkeypatch.setattr("scripts.swarm.commands.hive_id", lambda: "hive-a")
+    local, calls, ended = adapter(tmp_path, monkeypatch, {PID: proc()}, namespace="")
+    agent = record(namespace=WORKER)
+    agent = replace(agent, runtime_target={**agent.runtime_target, "host_id": "hive-a"})
+    assert RuntimeRouter([local]).terminate(agent) == Outcome(
+        "terminate", Status.REFUSED, LOCAL, Unqualified.NO_NAMESPACE, "local process namespace is unreadable"
+    )
+    assert (ended, calls) == ([], [])
 
 
 def test_a_legacy_local_record_keeps_the_recorded_launch_pid_path(tmp_path, monkeypatch):
@@ -456,6 +834,34 @@ def test_retire_process_hands_the_reaper_the_verified_start_time_and_legacy_reti
     assert herdr.retire_process(AgentRecord(NAME, "eng", "t1"), PID, ("/scratch/t1",), STARTED)
     assert herdr.retire(AgentRecord(NAME, "eng", "t1", profile_decision={"validation": {"pid": 55}}))
     assert seen == [(NAME, PID, ["/scratch/t1"], STARTED), (NAME, 55, [], 0)]
+
+
+@pytest.mark.parametrize(("owner", "closed"), [("engineer@a1b2c3-0009", False), (NAME, True), ("", True)])
+def test_retire_process_closes_the_recorded_pane_only_while_it_belongs_to_the_ended_worker(
+    tmp_path, monkeypatch, owner, closed
+):
+    pane = {"pane_id": "w1:p1", "name": owner, "agent_session": None}
+    herdr, calls = herdr_runtime(tmp_path, monkeypatch, panes={"w1:p1": pane})
+    assert herdr.retire_process(AgentRecord(NAME, "eng", "t1", pane_id="w1:p1"), PID, (), STARTED) is True
+    assert (["pane", "close", "w1:p1"] in calls) is closed
+    assert herdr.refusal(AgentRecord(NAME, "eng", "t1")) == {"process": 0, "refusal": "unknown"}
+
+
+def test_retire_process_refuses_and_closes_nothing_when_herdr_cannot_name_the_pane_owner(tmp_path, monkeypatch):
+    herdr, calls = herdr_runtime(tmp_path, monkeypatch)
+    answer = herdr.herdr
+
+    def unavailable(args):
+        if args[:2] == ["agent", "get"]:
+            calls.append(args)
+            raise RuntimeError("herdr agent get: server unavailable")
+        return answer(args)
+
+    herdr.herdr = unavailable
+    agent = AgentRecord(NAME, "eng", "t1", pane_id="w1:p1")
+    assert herdr.retire_process(agent, PID, (), STARTED) is False
+    assert calls == [["agent", "get", "w1:p1"]]
+    assert herdr.refusal(agent) == {"process": PID, "refusal": "pane w1:p1: herdr agent get: server unavailable"}
 
 
 def test_each_unqualified_terminate_is_counted():

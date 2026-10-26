@@ -27,25 +27,25 @@ def _budget(tmp_path, *shards, budget=None, report=False):
 
 
 def test_shards_inside_the_budget_pass_and_every_shard_is_reported(tmp_path):
-    result = _budget(tmp_path, [300.0, 200.0], [100.0], [450.0, 449.0])
+    result = _budget(tmp_path, [300.0, 200.0], [100.0], [360.0, 359.0])
     assert result.returncode == 0, result.stdout + result.stderr
     lines = result.stdout.splitlines()
-    assert lines[0] == "3 shards, slowest 899.0 s of test time against a budget of 900 s"
+    assert lines[0] == "3 shards, slowest 719.0 s of test time against the 12 minute Run tests deadline of 720 s"
     assert [line.split()[0] for line in lines[1:]] == ["durations-3.12-3", "durations-3.12-1", "durations-3.12-2"]
 
 
-def test_a_shard_over_the_fifteen_minute_default_is_red_and_named(tmp_path):
-    result = _budget(tmp_path, [100.0], [450.0, 451.0])
+def test_a_shard_over_the_twelve_minute_default_is_red_and_named(tmp_path):
+    result = _budget(tmp_path, [100.0], [360.0, 361.0])
     assert result.returncode == 1
-    assert "durations-3.12-2 901.0 s over budget" in result.stdout
-    assert "::error::1 of 2 shards passed the 900 s budget" in result.stdout
+    assert "durations-3.12-2 721.0 s over budget" in result.stdout
+    assert "::error::1 of 2 shards passed the 720 s budget" in result.stdout
 
 
 def test_a_report_names_the_shard_over_budget_without_failing(tmp_path):
-    result = _budget(tmp_path, [100.0], [450.0, 451.0], report=True)
+    result = _budget(tmp_path, [100.0], [360.0, 361.0], report=True)
     assert result.returncode == 0, result.stdout + result.stderr
-    assert "durations-3.12-2 901.0 s over budget" in result.stdout
-    assert "::warning::1 of 2 shards passed the 900 s budget" in result.stdout
+    assert "durations-3.12-2 721.0 s over budget" in result.stdout
+    assert "::warning::1 of 2 shards passed the 720 s budget" in result.stdout
     assert "::error::" not in result.stdout
 
 
@@ -61,9 +61,9 @@ def test_a_report_still_fails_when_a_shard_cannot_be_read(tmp_path):
 
 
 def test_a_shard_exactly_at_the_budget_passes(tmp_path):
-    result = _budget(tmp_path, [450.0, 450.0])
+    result = _budget(tmp_path, [360.0, 360.0])
     assert result.returncode == 0, result.stdout + result.stderr
-    assert "durations-3.12-1 900.0 s" in result.stdout.splitlines()
+    assert "durations-3.12-1 720.0 s" in result.stdout.splitlines()
 
 
 def test_shards_sharing_a_folder_name_are_each_graded(tmp_path):
@@ -84,6 +84,7 @@ def test_the_budget_flag_moves_the_limit(tmp_path):
     result = _budget(tmp_path, [61.0], [59.0], budget=60)
     assert result.returncode == 1
     assert "::error::1 of 2 shards passed the 60 s budget" in result.stdout
+    assert result.stdout.splitlines()[0].endswith("against a budget of 60 s")
 
 
 def test_a_missing_shard_file_is_red(tmp_path):
@@ -148,6 +149,41 @@ def test_an_elapsed_time_over_the_budget_is_red(tmp_path):
 
 def test_the_shard_check_job_grades_the_budget_on_the_stored_durations():
     steps = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())["jobs"]["shard-check"]["steps"]
-    step = next(step for step in steps if step.get("run", "").startswith("python -m tests.shard_budget"))
-    assert step["run"] == "python -m tests.shard_budget $REPORT shard-durations/*/durations.json"
+    commands = ("python -m tests.shard_budget", "python3 -m tests.shard_budget")
+    step = next(step for step in steps if step.get("run", "").startswith(commands))
+    assert step["run"] in (
+        f"{command} $REPORT {path}/durations.json"
+        for command in commands
+        for path in ("shard-durations/*", "shard-reports/durations-*")
+    )
     assert step["if"] == "github.event_name != 'merge_group'"
+
+
+def test_the_default_budget_is_the_run_tests_step_deadline(tmp_path):
+    minutes = _step_minutes("unit", "Run tests")
+    result = _budget(tmp_path, [100.0])
+    assert result.stdout.splitlines()[0] == (
+        f"1 shards, slowest 100.0 s of test time against the {minutes} minute Run tests deadline of {minutes * 60} s"
+    )
+
+
+def _step_minutes(job, name):
+    steps = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())["jobs"][job]["steps"]
+    return next(step for step in steps if step.get("name") == name)["timeout-minutes"]
+
+
+def test_a_selected_leg_is_graded_against_the_selected_tests_step_deadline(tmp_path):
+    seconds = _step_minutes("unit-selected", "Run the selected tests") * 60
+    path = tmp_path / "durations-3.12-1" / "durations.json"
+    path.parent.mkdir()
+    path.write_text(json.dumps({"test_suite.py::test_0": 10.0}))
+    (path.parent / "elapsed.json").write_text(json.dumps({"seconds": seconds + 1, "job": "unit-selected"}))
+    result = subprocess.run(
+        [sys.executable, "-m", "tests.shard_budget", str(path)], cwd=_ROOT, capture_output=True, text=True
+    )
+    assert result.returncode == 1
+    assert result.stdout.splitlines()[0] == (
+        f"1 shards, slowest {seconds + 1:.1f} s of test time against the {seconds // 60} minute "
+        f"Run the selected tests deadline of {seconds} s"
+    )
+    assert f"::error::1 of 1 shards passed the {seconds} s budget." in result.stdout

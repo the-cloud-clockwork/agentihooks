@@ -10,8 +10,7 @@ import sys
 from collections.abc import Callable
 from dataclasses import asdict, dataclass
 
-from hooks.classifier import ClassifierError, code_rules, decide, runner
-from scripts.swarm_ledger import ledger_rank
+from scripts.swarm_ledger import ledger_rank, ports
 
 PURPOSE = "ledger-duplicate"
 SHORTLIST = 4
@@ -50,9 +49,10 @@ def find(doc: dict, kind: str, items: list[dict], judge: Callable | None = None)
         for i, found in enumerate(shortlists)
         for j, c in enumerate(found)
     ]
+    classifier = ports.hooks().classifier
     try:
-        output = runner.run(PURPOSE, _state(items, shortlists), {"pairs": pairs}, decider=judge or decide)
-    except ClassifierError:
+        output = classifier.runner.run(PURPOSE, _state(items, shortlists), {"pairs": pairs}, decider=judge or decide)
+    except classifier.ClassifierError:
         return [UNCHECKED if found else None for found in shortlists]
     floor = output.thresholds["same"]
     return [_best(doc, i, found, output.raw.answers, floor) for i, found in enumerate(shortlists)]
@@ -73,6 +73,7 @@ def words(item: dict) -> set[str]:
 def _pool(doc, kind):
     pool = [(kind, i) for i in doc.get(LISTS[kind], []) if not i.get("out_of_scope")]
     if kind == "followup":
+        pool = [c for c in pool if not c[1].get("done")]
         pool += [("task", t) for t in doc.get("tasks", []) if t.get("state") != "done" and not t.get("out_of_scope")]
     return pool
 
@@ -137,7 +138,15 @@ def _verdicts(definition, state, params, answers):
     return {"duplicate": any(_yes(answers[_name(p["new"], p["slot"])].noul, floor) for p in params["pairs"])}
 
 
-RULE = code_rules.CodeRule(code_rules.asked, _verdicts, {"duplicate": (True, False)}, {"duplicate": False})
+def decide(*args, **kwargs):
+    return ports.hooks().classifier.decide(*args, **kwargs)
+
+
+def __getattr__(name):
+    if name != "RULE":
+        raise AttributeError(name)
+    code_rules = ports.hooks().classifier.code_rules
+    return code_rules.CodeRule(code_rules.asked, _verdicts, {"duplicate": (True, False)}, {"duplicate": False})
 
 
 def main() -> None:
@@ -147,4 +156,7 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+    from scripts.swarm_ledger import composition
+
+    composition.wire()
     main()

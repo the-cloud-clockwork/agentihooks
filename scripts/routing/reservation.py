@@ -5,13 +5,16 @@ from typing import TYPE_CHECKING
 
 from hooks.context import account_sessions
 from hooks.context.account_sessions import INTERACTIVE_PREFIX
+from scripts import session_bands
 from scripts.routing import master_account
+from scripts.routing.slots import API
 
 if TYPE_CHECKING:
     from scripts.swarm.store import RedisStore
 
 CEILINGS = ((3, 50.0), (2, 60.0), (1, 70.0))
 LOWEST = min(limit for _, limit in CEILINGS)
+MASTER_LEAVES = 100.0 - session_bands.WEEK_FLOOR
 MASTER_NAME = "master@"
 AGENT_NAME = "AGENTIHOOKS_AGENT_NAME"
 
@@ -61,7 +64,7 @@ def master_agents(store: "RedisStore | None", harness: str, slug: str) -> int:
         and agent.state != "finished"
         and agent.harness == harness
         and agent.account == slug
-        and agent.route_kind != "interactive"
+        and agent.route_kind not in ("interactive", "master-login")
     )
 
 
@@ -87,6 +90,9 @@ class Reservation:
 
     def closes(self, slug: str, week_used: float | None) -> bool:
         return slug == self.slug and reached(week_used, self.masters)
+
+    def closes_row(self, harness: str, kind: str, slug: str, week_left: float | None) -> bool:
+        return harness == self.harness and kind != API and week_left is not None and self.closes(slug, 100 - week_left)
 
 
 def _store(environ: Mapping[str, str]) -> "RedisStore | None":
@@ -164,15 +170,20 @@ if mode == 'release' then
     return 1
 end
 if mode == 'ack' then
-    if not held or held.state == 'exited' then return 0 end
-    if held.state == 'live' then return 1 end
+    if held and held.state == 'exited' then return 0 end
+    if held and held.state == 'live' then return 1 end
+    if not held then
+        if slot == '' then return 0 end
+        held = {slot=slot}
+        redis.call('SADD', KEYS[1], execution)
+    end
     held.state = 'live'
     redis.call('SET', KEYS[2], cjson.encode(held), 'PX', ARGV[5])
     return 1
 end
 if held then
-    if held.slot ~= slot or held.state == 'exited' then return 0 end
-    return 1
+    if held.slot ~= slot or held.state == 'exited' then return {0, used} end
+    return {1, used}
 end
 for _, id in ipairs(redis.call('SMEMBERS', KEYS[1])) do
     local other = redis.call('GET', ARGV[6] .. ':launch-slot:' .. id)
@@ -189,52 +200,61 @@ for _, id in ipairs(redis.call('SMEMBERS', KEYS[1])) do
         end
     end
 end
-if used >= tonumber(ARGV[4]) then return 0 end
+if used >= tonumber(ARGV[4]) then return {0, used} end
 if previous then
     redis.call('DEL', ARGV[6] .. ':launch-slot:' .. previous)
     redis.call('SREM', KEYS[1], previous)
 end
 redis.call('SET', KEYS[2], cjson.encode({slot=slot, state='reserved'}), 'PX', ARGV[5])
 redis.call('SADD', KEYS[1], execution)
-return 1
+return {1, used}
 """
+
+
+@dataclass(frozen=True)
+class SlotReading:
+    accepted: bool
+    sessions: int
 
 
 @dataclass(frozen=True)
 class LaunchSlots:
     redis: object
 
-    def _call(self, mode: str, slot: str, execution: str, cap: int, ttl_ms: int, previous: str = "") -> bool:
+    def _call(self, mode: str, slot: str, execution: str, cap: int, ttl_ms: int, previous: str = "") -> object:
         from scripts.hive import registry
         from scripts.swarm.keyspace import ROOT
 
-        return bool(
-            self.redis.eval(
-                _LAUNCH,
-                3,
-                f"{ROOT}:launch-slots",
-                f"{ROOT}:launch-slot:{execution}",
-                registry.INDEX,
-                mode,
-                slot,
-                execution,
-                cap,
-                ttl_ms,
-                ROOT,
-                previous,
-            )
+        return self.redis.eval(
+            _LAUNCH,
+            3,
+            f"{ROOT}:launch-slots",
+            f"{ROOT}:launch-slot:{execution}",
+            registry.INDEX,
+            mode,
+            slot,
+            execution,
+            cap,
+            ttl_ms,
+            ROOT,
+            previous,
         )
 
     def reserve(self, slot: str, execution: str, cap: int, ttl_ms: int, previous: str = "") -> bool:
+        return self.reserve_reading(slot, execution, cap, ttl_ms, previous).accepted
+
+    def reserve_reading(self, slot: str, execution: str, cap: int, ttl_ms: int, previous: str = "") -> SlotReading:
         if type(cap) is not int or cap < 0 or type(ttl_ms) is not int or not 0 < ttl_ms <= 300000:
             raise ValueError("invalid launch slot cap or lifetime")
-        return self._call("reserve", slot, execution, cap, ttl_ms, previous)
+        accepted, used = self._call("reserve", slot, execution, cap, ttl_ms, previous)
+        return SlotReading(bool(accepted), used)
 
-    def acknowledge(self, execution: str) -> bool:
-        return self._call("ack", "", execution, 0, 45000)
+    def acknowledge(self, execution: str, slot: str = "") -> bool:
+        """A named slot records a row that expired before its acknowledgement was read as live again."""
+        return bool(self._call("ack", slot, execution, 0, 45000))
 
     def release(self, execution: str) -> bool:
-        return self._call("release", "", execution, 0, 0)
+        return bool(self._call("release", "", execution, 0, 0))
 
     def counts(self, seen: set[str] | None = None) -> dict[str, int]:
         import json
@@ -255,7 +275,7 @@ class LaunchSlots:
                 counts[slot] = counts.get(slot, 0) + delta
         return counts
 
-    def refresh(self, executions: list[str]) -> None:
+    def refresh(self, executions: list[str], ttl_ms: int = 45000) -> None:
         import json
 
         from scripts.swarm.keyspace import ROOT
@@ -264,4 +284,23 @@ class LaunchSlots:
             key = f"{ROOT}:launch-slot:{execution}"
             raw = self.redis.get(key)
             if raw is not None and json.loads(raw)["state"] == "live":
-                self.redis.pexpire(key, 45000)
+                self.redis.pexpire(key, ttl_ms)
+
+    def refresh_reported(self, now_ms: int) -> None:
+        """Keep each live hive's reported rows of executions placed on that hive alive across two controller ticks,
+        for members, whose Redis users cannot refresh them."""
+        import json
+
+        from scripts.hive import registry
+        from scripts.swarm import lease
+        from scripts.swarm.store import RedisStore
+
+        store = RedisStore(self.redis)
+        placed = {agent.execution_id: agent.hive for slug in store.slugs() for agent in store.agents(slug)}
+        for hive in registry.hives(self.redis):
+            if registry.live(hive, now_ms):
+                report = json.loads(self.redis.get(f"{registry.key(hive['id'])}:sessions") or "{}")
+                reported = [execution for ids in report.get("_executions", {}).values() for execution in ids]
+                self.refresh(
+                    [execution for execution in reported if placed.get(execution) == hive["id"]], 2 * lease.tick_ms()
+                )

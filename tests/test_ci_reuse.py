@@ -260,12 +260,37 @@ def test_the_required_workflow_uses_the_protected_canonical_aggregation():
     workflow = yaml.safe_load((root / ".github/workflows/test.yml").read_text())
     policy = json.loads((root / ".github/workflows/trusted-actors.json").read_text())
     steps = workflow["jobs"]["gate-required"]["steps"]
+    steps[0]["run"] = steps[0]["run"].replace('"lint", "docs", "semgrep"', '"lint", "semgrep"')
     forms = (
         ({"selected": True}, {}, {"queue_tier": True}, {"queue_tier": True, "promotion": True})
         if "durations" in workflow["jobs"]
         else ({"queue_tier": True, "consolidated": True}, {"queue_tier": True, "promotion": True, "consolidated": True})
     )
-    assert steps in [ci_reuse.gate_steps(**form, summary=summary) for form in forms for summary in (False, True)]
+    assert steps in [
+        diagnostic(
+            forward(
+                finish(
+                    rerun(
+                        ci_reuse.inline_mutation(
+                            ci_reuse.postgres_required(
+                                ci_reuse.gate_steps(**form, summary=summary, watcher_loss=watcher_loss)
+                            )
+                        )
+                    )
+                )
+            )
+        )
+        for diagnostic, forward in (
+            (list, list),
+            (ci_reuse.selection_diagnostic, list),
+            (ci_reuse.selection_diagnostic, ci_reuse.forwarded_stats),
+        )
+        for form in forms
+        for summary in (False, True)
+        for watcher_loss in (False, True)
+        for rerun in (list, ci_reuse.lost_rerun)
+        for finish in (list, ci_reuse.pipefail_summary)
+    ]
 
     assert workflow["jobs"]["gate-required"]["runs-on"] in gate_protected.runners(policy)
     assert workflow["jobs"]["reuse"] in gate_protected.reuse_jobs(policy)
@@ -946,6 +971,180 @@ def _gate(steps, needs, event="merge_group"):
     return subprocess.run(["bash", "-e", "-c", step["run"]], env=env, capture_output=True, text=True)
 
 
+@pytest.mark.parametrize("watcher", ["success", "failure", "cancelled", "skipped", "pending", None])
+@pytest.mark.parametrize("failed", ["", "unit (3.11, 1)", "queue group is no longer current"])
+def test_queue_watcher_loss_does_not_drop_passed_graded_jobs(watcher, failed):
+    from scripts import ci_reuse
+
+    needs = {name: {"result": "success"} for name in ("select", "split", "unit", "shard-check", "test-count")}
+    if watcher is not None:
+        needs["queue-fail-fast"] = {"result": watcher, "outputs": {"failed": failed}}
+    result = _gate(ci_reuse.gate_steps(queue_tier=True, consolidated=True, watcher_loss=True), needs)
+    assert (result.returncode == 0) == (watcher in {"success", "failure", "cancelled"} and not failed), (
+        result.stdout + result.stderr
+    )
+
+
+@pytest.mark.parametrize("job", ["select", "split", "unit", "shard-check", "test-count"])
+@pytest.mark.parametrize("status", ["failure", "cancelled", "skipped", "pending", None])
+def test_queue_watcher_loss_never_masks_a_graded_failure(job, status):
+    from scripts import ci_reuse
+
+    needs = {name: {"result": "success"} for name in ("select", "split", "unit", "shard-check", "test-count")}
+    needs["queue-fail-fast"] = {"result": "failure"}
+    if status is None:
+        del needs[job]
+    else:
+        needs[job]["result"] = status
+    result = _gate(ci_reuse.gate_steps(queue_tier=True, consolidated=True, watcher_loss=True), needs)
+    assert result.returncode != 0, result.stdout + result.stderr
+
+
+_LOST_RERUN_FORM = {"queue_tier": True, "promotion": True, "consolidated": True, "watcher_loss": True}
+
+
+@pytest.mark.parametrize(
+    ("unit", "lost", "rerun", "passes"),
+    [
+        ("success", "skipped", "skipped", True),
+        ("failure", "success", "success", True),
+        ("failure", "success", "failure", False),
+        ("failure", "success", "skipped", False),
+        ("failure", "failure", "skipped", False),
+        ("failure", "skipped", "skipped", False),
+        ("success", "success", "success", False),
+        ("cancelled", "success", "success", True),
+        ("cancelled", "success", "failure", False),
+        ("cancelled", "skipped", "skipped", False),
+    ],
+)
+def test_a_lost_unit_shard_passes_the_queue_only_on_its_green_rerun(unit, lost, rerun, passes):
+    from scripts import ci_reuse
+
+    needs = {name: {"result": "success"} for name in ("select", "split", "shard-check", "test-count")}
+    needs["queue-fail-fast"] = {"result": "success", "outputs": {"failed": ""}}
+    needs |= {"unit": {"result": unit}, "unit-lost": {"result": lost}, "unit-rerun": {"result": rerun}}
+    result = _gate(ci_reuse.lost_rerun(ci_reuse.inline_mutation(ci_reuse.gate_steps(**_LOST_RERUN_FORM))), needs)
+    assert (result.returncode == 0) == passes, result.stdout + result.stderr
+
+
+@pytest.mark.parametrize("event", ["push", "workflow_dispatch", "pull_request"])
+@pytest.mark.parametrize("rerun", ["skipped", "success", "failure"])
+def test_outside_the_queue_the_rerun_jobs_never_pass_a_failure(event, rerun):
+    from scripts import ci_reuse
+
+    needs = {name: {"result": "success"} for name in ("select", "split", "unit", "shard-check", "test-count")}
+    needs["select"]["outputs"] = {"scope": "full"}
+    for name in ("lint", "semgrep", "sonar"):
+        needs[name] = {"result": "success"}
+    needs["reuse"] = {"result": "skipped" if event == "pull_request" else "success", "outputs": {"reused": "false"}}
+    needs |= {"unit-lost": {"result": rerun}, "unit-rerun": {"result": rerun}}
+    result = _gate(
+        ci_reuse.lost_rerun(ci_reuse.inline_mutation(ci_reuse.gate_steps(**_LOST_RERUN_FORM))), needs, event=event
+    )
+    passes = rerun == "skipped" or (rerun == "success" and event != "pull_request")
+    assert (result.returncode == 0) == passes, result.stdout + result.stderr
+
+
+def _mutation_gate(form, event, inline, stats, mutation):
+    from scripts import ci_reuse
+
+    needs = {name: {"result": "success"} for name in ("test-count", "lint", "semgrep", "sonar")}
+    needs["select"] = {"result": "success", "outputs": {"scope": "none"}}
+    if form.get("queue_tier") and not form.get("consolidated"):
+        needs["durations"] = {"result": "success"}
+    needs["mutation-plan"] = {"result": "success"}
+    needs["mutation-stats"] = {"result": stats}
+    needs["mutation"] = {"result": mutation}
+    [step] = ci_reuse.inline_mutation(ci_reuse.gate_steps(**form))
+    env = dict(
+        os.environ,
+        NEEDS=json.dumps(needs),
+        MUTATION="true",
+        KIND="false",
+        EVENT=event,
+        REUSED="false",
+        INLINE=inline or "",
+    )
+    return subprocess.run(["bash", "-e", "-c", step["run"]], env=env, capture_output=True, text=True)
+
+
+@pytest.mark.parametrize(
+    "form",
+    [{}, {"selected": True}, {"queue_tier": True}, {"promotion": True}, {"queue_tier": True, "consolidated": True}],
+)
+@pytest.mark.parametrize("event", ["pull_request", "workflow_dispatch"])
+@pytest.mark.parametrize(
+    ("inline", "stats", "mutation", "passes"),
+    [
+        ("true", "success", "skipped", True),
+        ("false", "success", "success", True),
+        ("false", "success", "skipped", False),
+        (None, "success", "skipped", False),
+        ("true", "failure", "skipped", False),
+        ("true", "skipped", "skipped", False),
+        ("true", "success", "failure", False),
+        ("true", "success", "cancelled", False),
+    ],
+)
+def test_the_inline_mutation_form_skips_the_shard_job_only_for_an_inline_plan(
+    form, event, inline, stats, mutation, passes
+):
+    result = _mutation_gate(form, event, inline, stats, mutation)
+    assert (result.returncode == 0) == passes, result.stdout + result.stderr
+
+
+def test_the_inline_mutation_form_derives_inline_from_a_one_part_one_shard_plan():
+    from scripts import ci_reuse
+
+    [step] = ci_reuse.inline_mutation(ci_reuse.gate_steps(queue_tier=True, consolidated=True))
+    assert step["env"]["INLINE"] == (
+        "${{ needs.mutation-plan.outputs.shards == '[0]' && needs.mutation-plan.outputs.stats_parts == '[0]' }}"
+    )
+    [plain] = ci_reuse.gate_steps(queue_tier=True, consolidated=True)
+    assert "INLINE" not in plain["env"]
+    assert "$inline" not in plain["run"]
+
+
+def test_the_watcher_loss_rule_is_written_once_for_the_watcher_job():
+    from scripts import ci_queue_fail_fast, ci_reuse
+
+    assert ci_reuse.WATCHER == ci_queue_fail_fast.SELF
+    assert ci_reuse.WATCHER in ci_reuse.WATCHER_LOSS
+    [step] = ci_reuse.gate_steps(queue_tier=True, consolidated=True, watcher_loss=True)
+    assert step["run"].count(ci_reuse.WATCHER_LOSS) == 1
+    [plain] = ci_reuse.gate_steps(queue_tier=True, consolidated=True)
+    assert ci_reuse.WATCHER_LOSS not in plain["run"]
+
+
+@pytest.mark.parametrize("watcher", ["success", "failure", "cancelled", None])
+@pytest.mark.parametrize("failed", ["", "unit (3.11, 1)", "queue group is no longer current"])
+@pytest.mark.parametrize("graded", ["success", "failure", "cancelled", "skipped"])
+def test_the_workflow_gate_distinguishes_watcher_loss_from_reported_failures(watcher, failed, graded):
+    from scripts.ci_queue_fail_fast import SELF
+
+    jobs = yaml.safe_load((PROGRAM.parents[1] / ".github/workflows/test.yml").read_text())["jobs"]
+    assert SELF in jobs
+    assert SELF in jobs["gate-required"]["needs"]
+    required = {"select", "split", "unit", "shard-check", "test-count"}
+    needs = {name: {"result": "success" if name in required else "skipped"} for name in jobs["gate-required"]["needs"]}
+    if watcher is None:
+        del needs[SELF]
+    else:
+        needs[SELF] = {"result": watcher, "outputs": {"failed": failed}}
+    needs["unit"]["result"] = graded
+    step = next(step for step in jobs["gate-required"]["steps"] if step.get("name") == "Require every gate to succeed")
+    result = _gate([step], needs)
+    assert (result.returncode == 0) == (watcher is not None and not failed and graded == "success"), (
+        result.stdout + result.stderr
+    )
+
+
+def test_the_workflow_watcher_exports_reported_failures_to_the_gate():
+    jobs = yaml.safe_load((PROGRAM.parents[1] / ".github/workflows/test.yml").read_text())["jobs"]
+    assert jobs["queue-fail-fast"]["outputs"]["failed"] == "${{ steps.watch.outputs.failed }}"
+
+
 def test_queue_gate_keeps_legacy_duration_admission_by_default():
     from scripts import ci_reuse
 
@@ -973,6 +1172,52 @@ def test_consolidated_gate_requires_the_shared_admission(event, promotion, admis
         needs["select"]["result"] = admission
     result = _gate(ci_reuse.gate_steps(queue_tier=True, promotion=promotion, consolidated=True), needs, event)
     assert (result.returncode == 0) == (admission == "success"), result.stdout + result.stderr
+
+
+@pytest.mark.parametrize("status", ["success", "failure", "skipped", "cancelled", None])
+def test_documentation_gate_requires_a_successful_build_on_pull_requests(status):
+    from scripts import ci_reuse
+
+    required = {"select", "test-count", "lint", "semgrep", "sonar"}
+    needs = {name: {"result": "success"} for name in required}
+    needs["select"]["outputs"] = {"scope": "none"}
+    if status is not None:
+        needs["docs"] = {"result": status}
+    result = _gate(
+        ci_reuse.gate_steps(queue_tier=True, consolidated=True, docs=True),
+        needs,
+        event="pull_request",
+    )
+    assert (result.returncode == 0) == (status == "success"), result.stdout + result.stderr
+
+
+@pytest.mark.parametrize("event", ["pull_request", "merge_group"])
+@pytest.mark.parametrize("status", ["success", "failure", "skipped", "cancelled", None])
+def test_postgres_gate_requires_the_writer_lock_scenario_only_on_pull_requests(event, status):
+    from scripts import ci_reuse
+
+    required = (
+        {"select", "test-count", "lint", "docs", "semgrep", "sonar"}
+        if event == "pull_request"
+        else {"select", "split", "unit", "shard-check", "test-count", "queue-fail-fast"}
+    )
+    needs = {name: {"result": "success"} for name in required}
+    needs["select"]["outputs"] = {"scope": "none"}
+    if status is not None:
+        needs["writer-lock"] = {"result": status}
+    canonical = ci_reuse.gate_steps(queue_tier=True, consolidated=True, docs=True, summary=True)
+    steps = ci_reuse.postgres_required(canonical)
+    assert steps[0]["run"] == canonical[0]["run"].replace('"sonar"]', '"sonar", "writer-lock"]')
+    assert steps[0]["run"].count('"writer-lock"') == 1
+    assert steps[1:] == canonical[1:] and len(steps) > 1
+    assert {**steps[0], "run": canonical[0]["run"]} == canonical[0]
+    result = _gate(
+        ci_reuse.postgres_required(ci_reuse.gate_steps(queue_tier=True, consolidated=True, docs=True)),
+        needs,
+        event=event,
+    )
+    green = status == "success" if event == "pull_request" else status in ("skipped", None)
+    assert (result.returncode == 0) == green, result.stdout + result.stderr
 
 
 def test_the_canonical_gate_still_needs_the_standalone_ratchet_in_the_queue():

@@ -61,9 +61,9 @@ def test_record_keeps_rows_without_a_reservation_unchanged():
 
 def test_quota_view_names_the_reservation():
     row = capacity.record(capacity.reserve([_row()], ONE)[0])
-    line = quota_view._account_line(row, [row])
+    line = quota_view._account_line(row, [row], 0)
     assert line.endswith(f"routing 30% left, {REASON}  sessions 1")
-    assert ", reserved" not in quota_view._account_line(capacity.record(_row()), [row])
+    assert ", reserved" not in quota_view._account_line(capacity.record(_row()), [row], 0)
 
 
 def _result(name, week_used):

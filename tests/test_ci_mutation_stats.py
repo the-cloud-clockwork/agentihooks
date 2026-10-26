@@ -1,6 +1,8 @@
 import json
 from pathlib import Path
 
+import pytest
+
 from scripts.ci_mutation.stats import SharedStats, load_parts, stats_key, write_part
 
 SELECTED = {"hooks/a.py": ({3, 1}, ["tests/test_b.py", "tests/test_a.py"]), "hooks/b.py": (set(), [])}
@@ -71,3 +73,251 @@ def test_a_part_collected_for_another_commit_or_selection_is_stale(tmp_path):
         [],
         "mutation stats stale: parts [1, 2] were collected for another commit or selection",
     )
+
+
+def test_measured_dependencies_include_collection_phases_and_preloaded_modules(tmp_path, monkeypatch):
+    import sys
+    from types import SimpleNamespace
+
+    from coverage import CoverageData
+
+    from scripts.ci_mutation.stats_dependencies import measured_dependencies
+
+    root = tmp_path / "source"
+    work = tmp_path / "mutants"
+    paths = ["global.py", "setup.py", "run.py", "teardown.py", "loaded.py", "other.py"]
+    for path in paths + ["untracked.py"]:
+        for prefix in (root, work):
+            (prefix / path).parent.mkdir(parents=True, exist_ok=True)
+            (prefix / path).write_text("value = 1\n")
+    coverage_file = tmp_path / "coverage"
+    data = CoverageData(basename=str(coverage_file))
+    data.set_context("")
+    data.add_lines(
+        {
+            str(work / "global.py"): {1},
+            str(work / "00_missing.py"): {1},
+            str(work / "untracked.py"): {1},
+            str(tmp_path / "00_external.py"): {1},
+        }
+    )
+    first = "tests/test_a.py::test_a[one|two]"
+    second = "tests/test_b.py::test_b"
+    for phase in ("setup", "run", "teardown"):
+        data.set_context(first + "|" + phase)
+        data.add_lines({str(work / f"{phase}.py"): {1}})
+    data.set_context(second + "|run")
+    data.add_lines({str(work / "other.py"): {1}})
+    data.write()
+    monkeypatch.setitem(sys.modules, "stats_loaded_probe", SimpleNamespace(__file__=str(root / "loaded.py")))
+    monkeypatch.setitem(sys.modules, "stats_untracked_probe", SimpleNamespace(__file__=str(root / "untracked.py")))
+    tracked = set(paths) | {"00_missing.py"}
+    found = measured_dependencies(coverage_file, work, root, [first, second], tracked)
+    assert found == {
+        first: ["global.py", "loaded.py", "run.py", "setup.py", "teardown.py"],
+        second: ["global.py", "loaded.py", "other.py"],
+    }
+    assert measured_dependencies(coverage_file, work, root, ["tests/test_missing.py::test_missing"], tracked) == {}
+
+
+@pytest.mark.parametrize("inherited", ["before", None])
+def test_statistics_collect_runtime_dependencies_with_plugin_discovery_disabled(tmp_path, monkeypatch, inherited):
+    import os
+    import subprocess
+    import sys
+    from types import SimpleNamespace
+
+    from scripts.ci_mutation.selection import collect_shard_stats
+
+    original = tmp_path / "original"
+    work = tmp_path / "work"
+    node = "tests/test_sample.py::test_value"
+    files = {
+        "scripts/sample.py": "def value():\n    return 1\n",
+        "tests/test_sample.py": "from scripts.sample import value\nfrom scripts import untracked\ndef test_value():\n    assert value() == 1\n",
+    }
+    for root in (original, work / "mutants"):
+        for name, text in files.items():
+            (root / name).parent.mkdir(parents=True, exist_ok=True)
+            (root / name).write_text(text)
+    for root in (original, work / "mutants"):
+        (root / "scripts/untracked.py").write_text("value = 2\n")
+    subprocess.run(["git", "init", "-q", str(original)], check=True)
+    subprocess.run(["git", "add", *files], cwd=original, check=True)
+    monkeypatch.chdir(work)
+    monkeypatch.setenv("PYTEST_DISABLE_PLUGIN_AUTOLOAD", "1")
+    # collect_shard_stats sets MUTANT_UNDER_TEST; restoring it keeps a mutation run's later tests on their mutant.
+    monkeypatch.setenv("MUTANT_UNDER_TEST", os.environ.get("MUTANT_UNDER_TEST", ""))
+    monkeypatch.setenv("MUTATION_STATS_CACHE", str(tmp_path / "cache"))
+    monkeypatch.setenv("MUTATION_STATS_ROOT", str(original))
+    if inherited:
+        monkeypatch.setenv("COVERAGE_FILE", str(tmp_path / inherited))
+    else:
+        monkeypatch.delenv("COVERAGE_FILE", raising=False)
+    engine = SimpleNamespace(
+        tests_by_mangled_function_name={"scripts.sample.x_value": {node}}, duration_by_test={node: 1}
+    )
+
+    exported = []
+
+    class Runner:
+        _pytest_add_cli_args = []
+
+        def run_stats(self, *, tests):
+            exported.append(os.environ.get("COVERAGE_FILE"))
+            done = subprocess.run(
+                [sys.executable, "-m", "pytest", "-q", *self._pytest_add_cli_args, *tests],
+                cwd=work / "mutants",
+                env=dict(os.environ),
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            assert done.returncode == 0, done.stdout + done.stderr
+            return done.returncode
+
+    output = tmp_path / "part.json"
+    collect_shard_stats(
+        SimpleNamespace(mutmut=engine), Runner(), ["tests/test_sample.py"], output, str(tmp_path / "base")
+    )
+    result = json.loads(output.read_text())
+    assert exported == [None]
+    assert (
+        tmp_path / "part.coveragerc"
+    ).read_text() == f"[run]\ndata_file = {(tmp_path / 'part.coverage').resolve()}\n"
+    assert result["status"] == 0
+    assert result["durations"] == {node: 1}
+    assert "scripts/sample.py" in result["dependencies"][node]
+    assert "tests/test_sample.py" in result["dependencies"][node]
+    assert "scripts/untracked.py" not in result["dependencies"][node]
+
+
+def test_a_stats_bucket_of_only_wall_clock_tests_collects_nothing_and_succeeds(tmp_path, monkeypatch):
+    import os
+    import subprocess
+    import sys
+    from types import SimpleNamespace
+
+    from scripts.ci_mutation.selection import collect_shard_stats
+
+    work = tmp_path / "work"
+    test = work / "mutants" / "tests" / "test_sample.py"
+    test.parent.mkdir(parents=True)
+    test.write_text("import pytest\n@pytest.mark.wall_clock\ndef test_value():\n    assert True\n")
+    monkeypatch.chdir(work)
+    monkeypatch.setenv("PYTEST_DISABLE_PLUGIN_AUTOLOAD", "1")
+    monkeypatch.setenv("MUTANT_UNDER_TEST", os.environ.get("MUTANT_UNDER_TEST", ""))
+    monkeypatch.delenv("MUTATION_STATS_CACHE", raising=False)
+    engine = SimpleNamespace(tests_by_mangled_function_name={}, duration_by_test={})
+    codes = []
+
+    class Runner:
+        _pytest_add_cli_args = []
+
+        def run_stats(self, *, tests):
+            done = subprocess.run(
+                [sys.executable, "-m", "pytest", "-q", *self._pytest_add_cli_args, *tests],
+                cwd=work / "mutants",
+                env=dict(os.environ),
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            codes.append(done.returncode)
+            return done.returncode
+
+    output = tmp_path / "part.json"
+    node = "tests/test_sample.py::test_value"
+    collect_shard_stats(SimpleNamespace(mutmut=engine), Runner(), [node], output, str(tmp_path / "base"))
+    result = json.loads(output.read_text())
+    assert codes == [pytest.ExitCode.NO_TESTS_COLLECTED]
+    assert result["status"] == 0
+    assert result["durations"] == {}
+    assert result["files"] == [node]
+
+
+@pytest.mark.wall_clock
+def test_a_stats_bucket_returns_while_a_test_left_a_thread_running(tmp_path, monkeypatch):
+    import threading
+    import time
+    from types import SimpleNamespace
+
+    from scripts.ci_mutation.selection import run_stats_buckets
+
+    node = "tests/test_sample.py::test_value"
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("MUTATION_STATS_CACHE", raising=False)
+
+    class Runner:
+        _pytest_add_cli_args = []
+
+        def run_stats(self, *, tests):
+            threading.Thread(target=time.sleep, args=(60,)).start()
+            engine.duration_by_test[node] = 1
+            return 0
+
+    engine = SimpleNamespace(tests_by_mangled_function_name={}, duration_by_test={})
+    started = time.monotonic()
+    results = run_stats_buckets(SimpleNamespace(mutmut=engine), Runner(), [["tests/test_sample.py"]], tmp_path)
+    assert time.monotonic() - started < 30
+    assert [result["status"] for result in results] == [0]
+    assert results[0]["durations"] == {node: 1}
+    assert results[0]["files"] == ["tests/test_sample.py"]
+
+
+@pytest.mark.wall_clock
+def test_a_failing_stats_bucket_reports_exit_one_and_its_error_while_a_thread_runs(tmp_path, monkeypatch, capfd):
+    import threading
+    import time
+    from types import SimpleNamespace
+
+    from scripts.ci_mutation.selection import run_stats_buckets
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("MUTATION_STATS_CACHE", raising=False)
+
+    class Runner:
+        _pytest_add_cli_args = []
+
+        def run_stats(self, *, tests):
+            threading.Thread(target=time.sleep, args=(60,)).start()
+            raise RuntimeError("stats broke")
+
+    engine = SimpleNamespace(tests_by_mangled_function_name={}, duration_by_test={})
+    started = time.monotonic()
+    with pytest.raises(SystemExit) as stopped:
+        run_stats_buckets(SimpleNamespace(mutmut=engine), Runner(), [["tests/test_sample.py"]], tmp_path)
+    assert time.monotonic() - started < 30
+    assert stopped.value.code == 1
+    output = capfd.readouterr()
+    assert "failed to collect stats. runner returned [1]" in output.out
+    assert "RuntimeError: stats broke" in output.err
+
+
+def test_a_stats_bucket_passes_its_arguments_and_exits_zero_or_one_in_process(monkeypatch, capfd):
+    from scripts.ci_mutation import selection
+
+    arguments = (object(), object(), ["tests/test_sample.py"], Path("stats-0.json"), "base")
+    calls = []
+
+    class Exited(Exception):
+        pass
+
+    def exit_now(code):
+        raise Exited(code)
+
+    def collect(*given):
+        calls.append(given)
+        if len(calls) == 2:
+            raise RuntimeError("stats broke")
+
+    monkeypatch.setattr(selection, "collect_shard_stats", collect)
+    monkeypatch.setattr(selection.os, "_exit", exit_now)
+    codes = []
+    for _ in range(2):
+        with pytest.raises(Exited) as exited:
+            selection.collect_and_exit(*arguments)
+        codes.append(exited.value.args[0])
+    assert codes == [0, 1]
+    assert calls == [arguments, arguments]
+    assert "RuntimeError: stats broke" in capfd.readouterr().err

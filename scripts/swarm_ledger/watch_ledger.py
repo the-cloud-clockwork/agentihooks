@@ -37,6 +37,7 @@ import ledger_gate as gate  # noqa: E402
 import ledger_link  # noqa: E402
 
 from scripts.inbox import seen  # noqa: E402
+from scripts.swarm_ledger import ledger_closed  # noqa: E402
 from scripts.swarm_ledger.events import Expired, patch  # noqa: E402
 from scripts.swarm_ledger.events import stream as events_stream  # noqa: E402
 
@@ -53,7 +54,7 @@ def stream(slug, cursor=None, headers=None):
     """Yield (event, data, cursor) from the ledger server's event stream; Expired when the cursor is gone."""
     url, headers = request(slug, cursor, credentials(slug) if headers is None else headers)
     try:
-        response = urllib.request.urlopen(urllib.request.Request(url, headers=headers), timeout=STREAM_TIMEOUT_S)
+        response = ledger_link.urlopen(urllib.request.Request(url, headers=headers), STREAM_TIMEOUT_S)
     except urllib.error.HTTPError as exc:
         if exc.code == 410:
             raise Expired from None
@@ -89,7 +90,7 @@ class Watch:
                 self.since = state["_meta"]["rev"]
         self.state = state
         meta, args = state["_meta"], self.args
-        members, tasks = meta.get("members", {}), state.get("tasks", [])
+        members, tasks = meta.get("members", {}), state.get("tasks", []) + ledger_closed.hidden_claims(state)
         if meta.get("events_trimmed", self.since) > self.since:
             say(
                 f"WARNING ledger history trimmed events after revision {self.since}"
@@ -158,20 +159,31 @@ def main():
     parser.add_argument("--as", dest="name")
     parser.add_argument("--since-rev", type=int)
     args = parser.parse_args()
-    from scripts.swarm_ledger.repository import repository
+    from scripts.swarm_ledger import storage
+
+    repository = storage.default()
 
     if not repository.exists(args.slug):
         sys.exit(f"no ledger {args.slug} in {core.LEDGER_DIR}")
     beat = core.watch_path(args.slug, args.name) if args.name else None
     watch = Watch(args, f"ledger {args.slug}", seen.marks_for(args.slug) if args.name else None)
+    stopping = False
+
+    def stop(*_):
+        nonlocal stopping
+        stopping = True
+        sys.exit(0)
+
     if beat:
         atexit.register(beat.unlink, missing_ok=True)
-        signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
+        signal.signal(signal.SIGTERM, stop)
     headers, cursor, failure = None, None, None
-    while True:
+    while not stopping:
         alive(beat)
         try:
             headers = headers or credentials(args.slug)
+            if stopping:
+                continue
             for name, data, event_id in stream(args.slug, cursor, headers):
                 alive(beat)
                 watch.take(name, data)

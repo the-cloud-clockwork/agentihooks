@@ -8,7 +8,6 @@ import os
 import subprocess
 import sys
 import threading
-import time
 from pathlib import Path
 
 import pytest
@@ -27,14 +26,25 @@ SLUG, ME, SID = "pushexec-2026-01-01", "engineer@abcdef-0001", "sid-push"
 BRANCH = "engineer-abcdef-0001"
 URL = "https://github.com/o/r/pull/7"
 PACKAGE = ".".join(("scripts", "gates"))
-SHIM = f"import runpy\nimport sys\n\nsys.argv = ['gate', 'push-stop']\nrunpy.run_module({PACKAGE!r}, run_name='__main__')\n"
+SHIM = f"""import os
+import runpy
+import sys
+import time
+
+started = time.monotonic()
+sys.argv = ['gate', 'push-stop']
+try:
+    runpy.run_module({PACKAGE!r}, run_name='__main__')
+finally:
+    if os.environ.get('CONDITION_CLOCK'):
+        with open(os.environ['CONDITION_CLOCK'], 'w') as clock:
+            clock.write(f'{{started}} {{time.monotonic()}}')
+"""
 TEMPLATE = (
     "You cannot leave uncommitted or unpushed changes. Commit them now. If the task is done, open the pull request. "
     "If not, update the issue and the pull request and record progress on the ledger."
 )
 IDENTITY = ("-c", "user.name=t", "-c", "user.email=t@example.com")
-
-pytestmark = pytest.mark.xdist_group("fakeredis")
 
 
 def git(path, *args):
@@ -46,6 +56,8 @@ def git(path, *args):
 def rig(tmp_path, monkeypatch, ledger_port):
     import redis
     from fakeredis import TcpFakeServer
+
+    from tests.scheduler.process_service import start_scheduler, stop_scheduler
 
     server = TcpFakeServer(("127.0.0.1", 0), server_type="redis")
     threading.Thread(target=server.serve_forever, daemon=True).start()
@@ -63,7 +75,7 @@ def rig(tmp_path, monkeypatch, ledger_port):
     }
     doc = new_ledger.build_doc(content)
     doc["tasks"][0].update(state="claimed", claimed_by=ME)
-    html_path, _ = core.paths(SLUG)
+    html_path, _ = legacy_page.paths(SLUG, core)
     html_path.write_text(legacy_page.render(doc, SLUG, 8765), encoding="utf-8")
     core.sync(SLUG)
     task = doc["tasks"][0]["id"]
@@ -122,7 +134,9 @@ def rig(tmp_path, monkeypatch, ledger_port):
         )
 
     def ledger_task():
-        from scripts.swarm_ledger.repository import repository
+        from scripts.swarm_ledger.storage import default as default_repository
+
+        repository = default_repository()
 
         return next(t for t in repository.get_document(SLUG)["tasks"] if t["id"] == task)
 
@@ -151,6 +165,7 @@ def rig(tmp_path, monkeypatch, ledger_port):
         path = tmp_path / ".agentihooks" / "swarm" / SLUG / "gates" / "log.jsonl"
         return [json.loads(line) for line in path.read_text().splitlines()] if path.exists() else []
 
+    scheduler = start_scheduler(env)
     rig = type("Rig", (), {})()
     rig.stop, rig.redis, rig.task, rig.ledger_task, rig.cli, rig.rows = stop, client, task, ledger_task, cli, rows
     rig.commit, rig.remote_head, rig.tree, rig.env = commit, remote_head, tree, env
@@ -159,6 +174,7 @@ def rig(tmp_path, monkeypatch, ledger_port):
         yield rig
     finally:
         subprocess.run([sys.executable, str(SCRIPTS / "ledger_server.py"), "--stop"], env=env, timeout=30)
+        stop_scheduler(scheduler, client)
         server.shutdown()
         server.server_close()
 
@@ -167,14 +183,19 @@ def test_unpushed_commits_reach_origin_and_the_task_until_the_agent_records_prog
     head = rig.commit()
     first = rig.stop()
     assert first.returncode == 2, (first.stderr, rig.rows())
-    assert TEMPLATE in first.stderr
+    progress = (
+        "Pushed work has no recorded progress since the push. "
+        f'Run agentihooks swarm {SLUG} progress --doing "Describe current work" --ends-when "Describe completion". '
+        "A checks wait does not waive recording progress."
+    )
+    assert progress in first.stderr
     assert rig.remote_head() == head
     comments = rig.ledger_task()["comments"]
     assert [(c["by"], c["text"]) for c in comments] == [
         ("swarm", f"The stop hook pushed the task branch {BRANCH} to origin")
     ]
     inbox = rig.redis.zrange(f"{KEY_ROOT}:inbox:address:{ME}", 0, -1)
-    assert [rig.redis.hget(f"{KEY_ROOT}:inbox:item:{item}", "text") for item in inbox] == [TEMPLATE]
+    assert [rig.redis.hget(f"{KEY_ROOT}:inbox:item:{item}", "text") for item in inbox] == [progress]
     rig.cli("comment", f"tasks/{rig.task}", "Pushed the first slice of the work.")
     second = rig.stop()
     assert second.returncode == 0, (second.stderr, rig.rows())
@@ -203,19 +224,21 @@ def overrun(rig, seconds):
     git(rig.tree, "add", "scripts")
     git(rig.tree, "commit", "-m", "gate")
     rig.env["CONDITIONS_TIMEOUT_SEC"] = str(seconds)
-    started = time.monotonic()
-    done = rig.stop()
-    return done, time.monotonic() - started
+    clock = rig.tree.parent / "condition-clock"
+    rig.env["CONDITION_CLOCK"] = str(clock)
+    return rig.stop(), clock
 
 
 @pytest.mark.wall_clock
 def test_a_pre_push_gate_that_overruns_is_stopped_by_the_gate_inside_the_stop_condition(rig):
-    done, took = overrun(rig, 6)
+    seconds = 8
+    done, clock = overrun(rig, seconds)
     assert done.returncode == 2, (done.stderr, rig.rows())
     assert "The pre push gate did not finish in " in done.stderr
     assert f" s in {rig.tree}, so the stop hook did not push it." in done.stderr
     assert rig.remote_head() == ""
-    assert took < 6
+    started, finished = map(float, clock.read_text().split())
+    assert finished - started < seconds, "the stop condition process ran past its timeout"
 
 
 def test_a_pre_push_gate_that_overruns_is_stopped_inside_the_stop_condition(rig):

@@ -3,7 +3,7 @@ import { $, store, stored } from "./dom.js";
 import { readLayout, writeLayout } from "./api.js";
 import { showArtifacts } from "./artifacts.js";
 import { anchorPanel, showAlerts, showNotifications } from "./notices.js";
-import { revealTarget } from "./outline.js";
+import { pageTo, revealTarget } from "./outline.js";
 import { renderSwarm, swarm } from "./swarm.js";
 
 const tabScroll = {};
@@ -30,7 +30,10 @@ export function openHash() {
   const target = id && revealTarget(id);
   if (target) {
     requestAnimationFrame(() => target.scrollIntoView({ block: "start" }));
-  } else selectTab(stored(`plan-ledger:${SLUG}:tab`, "ledger"), false);
+    return;
+  }
+  selectTab(stored(`plan-ledger:${SLUG}:tab`, "ledger"), false);
+  pageTo(id);
 }
 
 export function wireTabs() {
@@ -52,8 +55,13 @@ export function wireTabs() {
 let layout = {};
 let layoutSave = 0;
 
+function knownRows(next) {
+  const rows = new Set([...document.querySelectorAll("#swarm-box [data-grip]")].map((grip) => grip.dataset.row));
+  return Object.fromEntries(Object.entries(next).filter(([key]) => ["columns", "stats"].includes(key) || rows.has(key)));
+}
+
 function applyLayout(next) {
-  layout = next && typeof next === "object" && !Array.isArray(next) ? next : {};
+  layout = next && typeof next === "object" && !Array.isArray(next) ? knownRows(next) : {};
   for (const grip of document.querySelectorAll("#swarm-box [data-grip]")) {
     const row = $(grip.dataset.row), value = (layout[row.id] || {})[grip.dataset.grip];
     const [cls, prop, unit] = grip.dataset.grip === "height" ? ["sized", "--h", "px"] : ["split", "--split", "%"];
@@ -266,7 +274,7 @@ export function startLayout() {
   wireStats();
   $("layout-reset").addEventListener("click", () => setLayout({}, 0));
   readLayout()
-    .then((resp) => (resp.ok ? resp.json() : null))
+    .then((resp) => (resp.ok ? resp.json().then((reply) => reply.data) : null))
     .then((saved) => {
       if (saved && !layoutSave) { applyLayout(saved); mirrorLayout(); }
     })
@@ -291,4 +299,50 @@ export function wireRail() {
     if (path.some((el) => el instanceof HTMLDialogElement)) return;
     for (const [panel, icon, show] of stripPanels) if (!panel.hidden && !path.includes(panel) && !path.includes(icon)) show(false);
   });
+}
+
+export function wireStatsDrawer() {
+  const panel = $("stats-column");
+  const narrow = window.matchMedia("(max-width: 1023px)");
+  const toggle = document.createElement("button");
+  toggle.className = "stats-toggle";
+  toggle.id = "stats-toggle";
+  toggle.type = "button";
+  toggle.setAttribute("aria-controls", "stats-column");
+  toggle.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg>';
+  document.body.append(toggle);
+  const isOpen = () => document.body.classList.contains("stats-open");
+  const show = (open) => {
+    document.body.classList.toggle("stats-open", open);
+    toggle.setAttribute("aria-expanded", String(open));
+    toggle.setAttribute("aria-label", open ? "Hide stats" : "Show stats");
+  };
+  show(false);
+  toggle.addEventListener("click", () => show(!isOpen()));
+  let start = null;
+  document.addEventListener("touchstart", (ev) => {
+    const touch = ev.touches[0];
+    const skip = ev.touches.length !== 1 || ev.target.closest(".sw-scroll, .chat-panel, .notif, dialog, .art-body, .image-scroll, input, textarea, select");
+    start = narrow.matches && !skip ? { x: touch.clientX, y: touch.clientY } : null;
+  }, { passive: true });
+  document.addEventListener("touchend", (ev) => {
+    if (!start) return;
+    const touch = ev.changedTouches[0];
+    const dx = touch.clientX - start.x;
+    const dy = touch.clientY - start.y;
+    const from = start.x;
+    start = null;
+    if (Math.abs(dx) < 60 || Math.abs(dy) > Math.abs(dx) / 2) return;
+    if (dx > 0 && isOpen()) show(false);
+    else if (dx < 0 && !isOpen() && from > window.innerWidth * 0.5) show(true);
+  }, { passive: true });
+  document.addEventListener("click", (ev) => {
+    const path = ev.composedPath();
+    if (!isOpen() || path.includes(panel) || path.includes(toggle)) return;
+    ev.preventDefault();
+    ev.stopPropagation();
+    show(false);
+  }, true);
+  document.addEventListener("keydown", (ev) => { if (ev.key === "Escape" && isOpen()) show(false); });
+  narrow.addEventListener("change", () => show(false));
 }

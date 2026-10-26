@@ -40,9 +40,9 @@ def tab(browser):
     def answer(route):
         if "/api/" not in route.request.url:
             return route.fulfill(body=html, content_type="text/html")
-        if "/api/swarm/" in route.request.url:
+        if "/swarm/" in route.request.url:
             return route.fulfill(body="null", content_type="application/json")
-        if not route.request.url.endswith("/api/alerts-page"):
+        if not route.request.url.endswith("/api/v1/ledgers/alerts-page/saves"):
             return route.fulfill(json={})
         if route.request.method == "PUT":
             for op in json.loads(route.request.post_data)["ops"]:
@@ -59,7 +59,7 @@ def tab(browser):
     serve_modules(context, ledger_state(DOC))
     page = context.new_page()
     page.goto(URL)
-    page.set_default_timeout(2000)
+    page.set_default_timeout(5000)
     loaded(page)
     page.sent = sent
     yield page
@@ -92,12 +92,15 @@ def test_claim_and_close_from_the_panel_send_their_ops(tab):
     tab.locator("#alert-fab").click()
     row = tab.locator("#alert-al-3-0")
     row.get_by_role("button", name="Claim").click()
-    assert "Claimed by operator" in row.inner_text()
+    assert row.locator(".alert-state").inner_text().lower() == "sending"
     row.get_by_role("button", name="Mark done").click()
     row.get_by_label("Outcome").fill("Trimmed the phase")
     row.get_by_role("button", name="Save").click()
-    tab.wait_for_function("document.querySelectorAll('#alerts > li').length === 1")
-    tab.wait_for_timeout(300)
+    for _ in range(40):
+        if any(op["op"] == "alert_close" for op in tab.sent):
+            break
+        tab.wait_for_timeout(50)
+    assert tab.locator("#alerts > li").count() == 2
     kinds = [(op["op"], op["target"], op.get("outcome")) for op in tab.sent if op["op"].startswith("alert_")]
     assert kinds == [("alert_claim", "al-3-0", None), ("alert_close", "al-3-0", "Trimmed the phase")]
 

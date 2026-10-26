@@ -5,7 +5,9 @@ import re
 import sys
 from pathlib import Path
 
+from hooks.context import brain_routes
 from scripts import gh_config
+from scripts.swarm import brain_binding
 
 # A name outside this shape cannot be a shell variable, and a mistyped line can
 # put a secret in the name, so such a line is reported by position only.
@@ -189,7 +191,7 @@ def _load_brain_env(*, override_file_owned: bool = False) -> None:
     .env already set is left alone, so this is a default, not an override.
     """
     env_file = _brain_env_file()
-    if not env_file.is_file():
+    if os.environ.get(brain_binding.VARIABLE) or not env_file.is_file():
         return
     try:
         lines = env_file.read_text(encoding="utf-8").splitlines()
@@ -234,7 +236,7 @@ def _load_user_env(*, override_file_owned: bool = False) -> None:
     _pass_keys: set[str] = set()
 
     # 1. Main .env first
-    blocked = set(_BRAIN_KEYS_FROM_KERNEL)
+    blocked = set(_BRAIN_KEYS_FROM_KERNEL) | {"SWARM_SECRET"}
     multiline = _parse_env_file(
         _home / ".env",
         override_file_owned=override_file_owned,
@@ -293,8 +295,24 @@ def _env_files_fingerprint() -> tuple:
     return tuple(sorted(stamps))
 
 
+def _guard_swarm_brain() -> None:
+    if not os.environ.get(brain_binding.VARIABLE):
+        return
+    os.environ["BRAIN_SOURCE_TYPE"] = "none"
+    if not brain_binding.audience(os.environ):
+        for key in ("BRAIN_URL", "BRAIN_HTTP_TOKEN", "KB_ROUTER_TOKEN"):
+            os.environ.pop(key, None)
+        os.environ["BRAIN_ENABLED"] = os.environ["BRAIN_WRITER_ENABLED"] = "false"
+
+
+def _route_brain() -> None:
+    _guard_swarm_brain()
+    brain_routes.apply(os.environ)
+
+
 _load_user_env()
 _load_brain_env()
+_route_brain()
 _ENV_FINGERPRINT = _env_files_fingerprint()
 # The scripts package pin ran before the env files above could set XDG_CONFIG_HOME.
 gh_config.pin(os.environ)
@@ -340,6 +358,7 @@ def reload_brain_env(force: bool = False) -> dict:
 
     _load_user_env(override_file_owned=True)
     _load_brain_env(override_file_owned=True)
+    _route_brain()
 
     _feed_dir = Path(AGENTIHOOKS_HOME) / "brain-feed"
     _default = "true" if (_brain_http_configured() or (_feed_dir.is_dir() and any(_feed_dir.glob("*.md")))) else "false"
@@ -416,6 +435,9 @@ LOG_USE_COLORS = _env_bool("LOG_USE_COLORS", "true")
 # Enable/disable automatic memory save on session Stop
 # Captures session digest and stores it via MemoryStore
 MEMORY_AUTO_SAVE = _env_bool("MEMORY_AUTO_SAVE", "true")
+
+# The front door master of every swarm launches on the one claude ai master login
+MASTER_CLAUDE_LOGIN = _env_bool("AGENTIHOOKS_MASTER_CLAUDE_LOGIN", "false")
 
 # =============================================================================
 # SECRETS SCANNING MODE

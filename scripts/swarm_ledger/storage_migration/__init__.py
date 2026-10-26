@@ -4,14 +4,15 @@ import functools
 import json
 from pathlib import Path
 
-from scripts.swarm_ledger.repository import legacy, repository
+from scripts.swarm_ledger import storage
+from scripts.swarm_ledger.repository import legacy
 
 EXPORT_JSON = functools.partial(json.dumps, indent=2, ensure_ascii=False)
 
 
 def export(slug: str, out: Path | None = None) -> dict:
     """The complete stored document; written to `out` when given, else returned."""
-    state = repository.export_document(slug)
+    state = storage.default().export_document(slug)
     if out is not None:
         Path(out).write_bytes((EXPORT_JSON(state) + "\n").encode())
     return state
@@ -26,11 +27,11 @@ def load(path: Path, slug: str | None = None, replace: bool = False) -> str:
     state = legacy.core.loads(path.read_bytes())
     if not isinstance(state, dict) or not isinstance(state.get("_meta"), dict) or "rev" not in state["_meta"]:
         raise ValueError(f"{path} is not an exported ledger document")
-    repository.import_document(slug, state, replace=replace)
+    storage.default().import_document(slug, state, replace=replace)
     return slug
 
 
 def cutover() -> list:
     """Import every ledger file still in the ledger folder, after its verified backup; the slugs now stored."""
-    legacy.adopt(repository)
-    return sorted(summary["slug"] for summary in repository.list_summaries())
+    legacy.adopt(storage.default())
+    return sorted(summary["slug"] for summary in storage.default().list_summaries())

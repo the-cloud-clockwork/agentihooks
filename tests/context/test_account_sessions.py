@@ -1,13 +1,12 @@
 """Tests for hooks.context.account_sessions — live sessions per account from /proc."""
 
+import hashlib
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
 from hooks.context import account_sessions as acc
-
-pytestmark = pytest.mark.xdist_group("fakeredis")
 
 
 def _proc(root, pid, comm, ppid, argv, env):
@@ -57,6 +56,84 @@ def test_an_email_named_token_counts_under_its_email_slug():
     from scripts.account_names import token_env
 
     assert acc.account_from_names(["HOME", token_env("NESTOR.COLT@GMAIL.COM")]) == "nestor_coltatgmail_com"
+
+
+def _renamed(tmp_path):
+    root = tmp_path / "proc"
+    _proc(root, 300, "claude", 1, ["claude"], {"AH_CC_TOKEN_old": "secret-a"})
+    _proc(root, 301, "claude", 1, ["claude"], {"AH_CC_TOKEN_old": "secret-a"})
+    _proc(root, 302, "claude", 1, ["claude"], {"AH_CC_TOKEN_mail": "secret-a"})
+    _proc(root, 303, "claude", 1, ["claude"], {"AH_CC_TOKEN_beta": "secret-b"})
+    _proc(root, 304, "claude", 1, ["claude"], {"AH_CC_TOKEN_gone": "secret-c"})
+    return root
+
+
+def test_sessions_under_an_old_name_count_against_the_account_holding_the_same_token(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr("scripts.operator_env.block_tokens", lambda: {})
+    environ = {"AH_CC_TOKEN_mail": "secret-a", "AH_CC_TOKEN_beta": "secret-b", "AH_CC_TOKEN_x": ""}
+    with patch.object(acc, "handed_off_pids", return_value=set()):
+        counts = acc.sessions_by_account(_renamed(tmp_path), local=True, environ=environ)
+    sessions = acc.live_sessions(_renamed(tmp_path / "again"), environ=environ)
+
+    assert counts == {"mail": 3, "beta": 1, "gone": 1}
+    assert sessions == {300: "mail", 301: "mail", 302: "mail", 303: "beta", 304: "gone"}
+    shown = repr(counts) + repr(sessions) + "".join(capsys.readouterr())
+    for secret in ("secret-a", "secret-b", "secret-c"):
+        digest = hashlib.sha256(secret.encode()).hexdigest()
+        assert secret not in shown and digest[:8] not in shown
+
+
+def test_the_managed_block_name_wins_when_two_configured_names_hold_one_token(tmp_path, monkeypatch):
+    monkeypatch.setattr("scripts.operator_env.block_tokens", lambda: {"AH_CC_TOKEN_zmail": "secret-a"})
+    root = tmp_path / "proc"
+    _proc(root, 400, "claude", 1, ["claude"], {"AH_CC_TOKEN_alpha": "secret-a"})
+    found = acc.token_accounts({"AH_CC_TOKEN_alpha": "secret-a", "AH_CC_TOKEN_api": "secret-z", "AH_CC_TOKEN_": "s"})
+
+    assert acc.live_sessions(root, environ={"AH_CC_TOKEN_alpha": "secret-a"}) == {400: "zmail"}
+    assert list(found.values()) == ["zmail"]
+    assert "secret-a" not in found
+
+
+def test_an_unrouted_or_api_session_keeps_its_account(tmp_path, monkeypatch):
+    monkeypatch.setattr("scripts.operator_env.block_tokens", lambda: {})
+    root = tmp_path / "proc"
+    _proc(root, 500, "claude", 1, ["claude"], {acc.API_MARKER: "1", "AH_CC_TOKEN_old": "secret-a"})
+    _proc(root, 501, "claude", 1, ["claude"], {"AH_CC_TOKEN_old": "secret-a", "AH_CC_TOKEN_two": "secret-b"})
+    _proc(root, 502, "claude", 1, ["claude"], {"HOME": "/home/u"})
+
+    assert acc.live_sessions(root, environ={"AH_CC_TOKEN_mail": "secret-a"}) == {
+        500: "api",
+        501: acc.UNROUTED,
+        502: acc.UNROUTED,
+    }
+
+
+def test_the_calling_session_resolves_its_old_name_to_the_routed_account(tmp_path, monkeypatch):
+    monkeypatch.setattr("scripts.operator_env.block_tokens", lambda: {})
+    monkeypatch.setenv("AH_CC_TOKEN_mail", "secret-a")
+    root = tmp_path / "proc"
+    _proc(root, 600, "claude", 1, ["claude"], {"AH_CC_TOKEN_old": "secret-a"})
+    _proc(root, 601, "claude", 1, ["claude"], {"AH_CC_TOKEN_old": "secret-x"})
+
+    assert acc.session_account(600, root) == "mail"
+    assert acc.session_account(601, root) == "old"
+
+
+def test_a_token_fingerprint_reads_raw_environment_bytes(tmp_path):
+    root = tmp_path / "proc"
+    (root / "700").mkdir(parents=True)
+    (root / "700" / "environ").write_bytes(
+        b"AH_CC_TOKEN_old=secret-\xff\0AH_CC_TOKEN_none=\0AH_CC_TOKEN_eq=a=b\0HOME=/home/u\0"
+    )
+    expected = hashlib.sha256(b"secret-\xff").hexdigest()
+
+    assert acc._env_fingerprint(700, root, "AH_CC_TOKEN_eq") == hashlib.sha256(b"a=b").hexdigest()
+
+    assert acc.token_fingerprint("secret-\udcff") == expected
+    assert acc._env_fingerprint(700, root, "AH_CC_TOKEN_old") == expected
+    assert acc._env_fingerprint(700, root, "AH_CC_TOKEN_none") == ""
+    assert acc._env_fingerprint(700, root, "AH_CC_TOKEN_absent") == ""
+    assert acc._env_fingerprint(701, root, "AH_CC_TOKEN_old") == ""
 
 
 def test_the_route_marker_attributes_an_api_session():

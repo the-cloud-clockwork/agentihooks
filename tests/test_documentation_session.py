@@ -6,12 +6,19 @@ import pytest
 from hooks.classifier.errors import ClassifierUnavailable
 from hooks.classifier.result import Answer, DecisionResult
 from hooks.context import documentation, documentation_session
-from tests.test_documentation_evidence import git, repository
+from tests.test_documentation_evidence import git, pull, repository, unrelated
 
 
 class Ledger:
     def __init__(self):
-        self.source = {"id": "t1", "title": "Add retry policy", "phase": "p1", "profile": "engineer", "state": "done"}
+        self.source = {
+            "id": "t1",
+            "title": "Add retry policy",
+            "phase": "p1",
+            "profile": "engineer",
+            "state": "done",
+            "pr_url": "https://example.test/pull/7",
+        }
         self.added = []
 
     def task(self, slug, task_id):
@@ -25,8 +32,13 @@ class Ledger:
 def world(tmp_path, monkeypatch):
     root = tmp_path / "repo"
     root.mkdir()
-    repository(root)
+    baseline = repository(root)
     ledger, jobs = Ledger(), []
+    monkeypatch.setattr(
+        documentation_session.documentation_evidence,
+        "pull_request_diff",
+        lambda url: git(root, "diff", baseline, "HEAD", "--", "policy.py"),
+    )
     monkeypatch.setattr(documentation_session, "HOME", tmp_path / "state")
     monkeypatch.setattr(documentation_session, "LedgerClient", lambda **kwargs: ledger)
     monkeypatch.setattr(documentation_session, "fork_and_call", lambda fn, *args, **kwargs: jobs.append((fn, args)))
@@ -58,6 +70,7 @@ def answer(needed=0.95, covered=0.05):
 def test_session_end_queues_one_documentation_task_with_source_and_docs_evidence(world, monkeypatch):
     root, payload, ledger, jobs = world
     monkeypatch.setattr(documentation.runner, "decide", answer())
+    unrelated(root)
     documentation_session.end(payload)
     assert not ledger.added
     fn, args = jobs.pop()
@@ -68,11 +81,64 @@ def test_session_end_queues_one_documentation_task_with_source_and_docs_evidence
     assert len(ledger.added) == 1
     task = ledger.added[0]
     assert (task["profile"], task["lane"], task["kind"]) == ("documentation", "eng", "code")
+    assert task["rank"] == "low"
     assert task["depends_on"] == ["t1"]
     assert task["phase"] == "p1"
     assert "handbook/policy.md" in task["description"]
     assert "small" in task["description"]
     assert "WidgetPolicy" in task["description"]
+    assert "LoginRecovery" not in task["description"]
+
+
+def test_a_source_task_without_a_pull_request_queues_documentation_with_no_diff_and_says_so(world, monkeypatch):
+    root, payload, ledger, jobs = world
+    del ledger.source["pr_url"]
+    monkeypatch.setattr(documentation.runner, "decide", answer())
+    (root / "login.py").write_text("class LoginRecovery:\n    attempts = 2\n")
+    git(root, "add", "login.py")
+    git(root, "commit", "-qm", "Recover the master login")
+    documentation_session.end(payload)
+    fn, args = jobs.pop()
+    fn(*args)
+    description = ledger.added[0]["description"]
+    assert "Delivered pull request: none recorded on the source task, so no delivered diff is attached." in description
+    assert "LoginRecovery" not in description
+    assert "+class WidgetPolicy:" not in description
+
+
+@pytest.mark.parametrize("task", ["master", "t9"])
+def test_a_session_named_for_no_ledger_task_queues_no_documentation_task(world, monkeypatch, task):
+    root, _, ledger, jobs = world
+    monkeypatch.setattr(documentation.runner, "decide", answer())
+    monkeypatch.setenv("AGENTIHOOKS_SWARM_TASK", task)
+    payload = {"session_id": f"documentation-{task}", "cwd": str(root)}
+    documentation_session.start(payload)
+    (root / "limits.py").write_text("class WidgetLimits:\n    ceiling = 5\n")
+    git(root, "add", "limits.py")
+    git(root, "commit", "-qm", "Add widget limits")
+    documentation_session.end(payload)
+    fn, args = jobs.pop()
+    fn(*args)
+    assert ledger.added == []
+    row = json.loads(args[0].read_text())
+    assert row["status"] == "complete"
+    assert row["verdict"] == {"needs_documentation": False, "size": "none", "source": "no ledger task"}
+
+
+def test_a_swarm_session_without_a_task_queues_documentation_without_a_dependency(world, monkeypatch):
+    root, _, ledger, jobs = world
+    monkeypatch.setattr(documentation.runner, "decide", answer())
+    monkeypatch.setenv("AGENTIHOOKS_SWARM_TASK", "")
+    payload = {"session_id": "documentation-untasked", "cwd": str(root)}
+    documentation_session.start(payload)
+    (root / "limits.py").write_text("class WidgetLimits:\n    ceiling = 5\n")
+    git(root, "add", "limits.py")
+    git(root, "commit", "-qm", "Add widget limits")
+    documentation_session.end(payload)
+    fn, args = jobs.pop()
+    fn(*args)
+    assert len(ledger.added) == 1
+    assert ledger.added[0]["depends_on"] == []
 
 
 @pytest.mark.parametrize(("needed", "covered"), [(0.05, 0.05), (0.95, 0.95)])
@@ -255,3 +321,24 @@ def test_an_interrupted_worker_advances_the_pending_request_retry_order(world, m
     with pytest.raises(Interrupted):
         fn(*args)
     assert args[0].stat().st_mtime_ns > 1
+
+
+def test_commits_pulled_from_dev_are_not_delivered_by_the_session(tmp_path, monkeypatch):
+    repository(tmp_path)
+    monkeypatch.setattr(documentation_session, "HOME", tmp_path / "state")
+    monkeypatch.delenv("AGENTIHOOKS_SWARM", raising=False)
+    monkeypatch.delenv("AGENTIHOOKS_CLASSIFIER_CHILD", raising=False)
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("pulled work needs no model call")
+
+    monkeypatch.setattr(documentation.runner, "decide", forbidden)
+    monkeypatch.setattr(documentation_session, "fork_and_call", lambda fn, *args, **kwargs: fn(*args))
+    payload = {"session_id": "fast-forward-fixture", "cwd": str(tmp_path)}
+    documentation_session.start(payload)
+    pull(tmp_path, "policy.py", "class WidgetPolicy:\n    retries = 3\n")
+    documentation_session.end(payload)
+    row = json.loads(next((documentation_session.HOME / "documentation").glob("*.json")).read_text())
+    assert row["status"] == "complete"
+    assert row["verdict"]["needs_documentation"] is False
+    assert "notice" not in row

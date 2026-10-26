@@ -56,7 +56,7 @@ def git_root(path):
 
 
 def task_territory(ledger_dir, slug, task):
-    from scripts.swarm_ledger.repository.sqlite import read_ledger
+    from scripts.swarm_ledger.storage import read_ledger
 
     doc = read_ledger(ledger_dir, slug, f"tasks/{task}") or {}
     row = next((t for t in doc.get("tasks", []) if isinstance(t, dict) and t.get("id") == task), {})
@@ -64,7 +64,7 @@ def task_territory(ledger_dir, slug, task):
 
 
 def task_ids(ledger_dir: Path, slug: str) -> tuple[str, ...]:
-    from scripts.swarm_ledger.repository.sqlite import read_ids
+    from scripts.swarm_ledger.storage import read_ids
 
     return read_ids(ledger_dir, slug, "tasks")
 

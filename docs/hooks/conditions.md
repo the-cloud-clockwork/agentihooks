@@ -172,7 +172,7 @@ matcher: `stop-<name>[.async].<ext>` (`stop-idle.sh`), `start-<name>[.async].<ex
 
 One grammar serves conditions and the [enforcement `matcher`](#enforcement-matcher).
 Matching is case-insensitive and runs on the tool name after target normalization,
-so `bash` also matches the Codex and Copilot shell tools.
+so `bash` also matches the Codex shell tools.
 
 | Token | Matches |
 |---|---|
@@ -214,7 +214,7 @@ matcher, where the same string matches no tool.
 | `AH_TOOL_NAME` | normalized tool name |
 | `AH_TOOL_USE_ID` | the call's id, for keying concurrent runs |
 | `AH_SESSION_ID`, `AH_CWD`, `AH_TRANSCRIPT_PATH`, `AH_PERMISSION_MODE` | from the payload |
-| `AH_TARGET` | `claude`, `codex` or `copilot` |
+| `AH_TARGET` | `claude` or `codex` for the supported harnesses |
 | `AH_CONDITION` | the condition's filename |
 | `AH_CONDITION_SOURCE` | `bundle` or `profile:<name>` |
 
@@ -267,7 +267,8 @@ condition that blocks on every Stop keeps the agent working forever: read
 
 ## Start step
 
-A `start` condition runs at SessionStart. Its stdin is the SessionStart
+A `start` condition runs at SessionStart, after swarm refocus on compaction and
+before the handler's remaining context injection. Its stdin is the SessionStart
 payload: `session_id`, `cwd`, `source` (`startup`, `resume`, `clear`,
 `compact`), `transcript_path`. A `start` condition can only add context —
 `tool_input`, `tool_output` and `decision` are never read from it, so it can
@@ -311,16 +312,16 @@ rules in settings still apply to the rewritten input.
 
 ## Harness support
 
-| Capability | Claude Code | Codex | Copilot |
-|---|---|---|---|
-| Context (pre) | yes | no (no PreToolUse context channel) | yes |
-| Context (post) | yes | yes | yes |
-| Context (start) | yes | yes | yes |
-| Deny (pre) | yes | yes | yes |
-| `ask` | yes | treated as deny | treated as deny |
-| Input rewrite | yes | dropped with a note | dropped with a note |
-| Output rewrite / post block | yes | dropped / becomes context | dropped / becomes context |
-| Stop block | yes | yes (exit 2) | not settled live |
+| Capability | Claude Code | Codex |
+|---|---|---|
+| Context (pre) | yes | no (no PreToolUse context channel) |
+| Context (post) | yes | yes |
+| Context (start) | yes | yes |
+| Deny (pre) | yes | yes |
+| `ask` | yes | treated as deny |
+| Input rewrite | yes | dropped with a note |
+| Output rewrite / post block | yes | dropped / becomes context |
+| Stop block | yes | yes (exit 2) |
 
 PostToolUse does not fire for tools that fail, so a `post` condition never sees
 failed calls.

@@ -124,9 +124,20 @@ def test_claude_render_tree(world, capsys):
     assert render.binding.inspect(out, "rb-role", "claude")["profile"] == "rb-role"
 
 
-@pytest.mark.parametrize("role", ["engineer", "cicd", "planner", "master", "qa", "frontend"])
-@pytest.mark.parametrize("target", ["claude", "codex"])
-def test_swarm_roles_render_only_the_task_browser(world, role, target):
+@pytest.mark.parametrize(
+    ("role", "browser"),
+    [
+        ("engineer", False),
+        ("cicd", False),
+        ("planner", False),
+        ("master", True),
+        ("qa", True),
+        ("frontend", True),
+        ("documentation", True),
+    ],
+)
+@pytest.mark.parametrize("target", ["claude", "codex", "copilot"])
+def test_swarm_roles_render_only_the_task_browser(world, role, browser, target):
     from scripts.profiles import render
 
     root = world["bundle"] / "profiles" / role
@@ -146,13 +157,22 @@ def test_swarm_roles_render_only_the_task_browser(world, role, target):
     out = render.render(target, role)
     if target == "claude":
         servers = json.loads((out / ".claude.json").read_text())["mcpServers"]
+    elif target == "codex":
+        servers = tomllib.loads((out / "config.toml").read_text()).get("mcp_servers", {})
     else:
-        servers = tomllib.loads((out / "config.toml").read_text())["mcp_servers"]
+        servers = json.loads((out / "mcp-config.json").read_text())["mcpServers"]
     browsers = {k: v for k, v in servers.items() if "playwright" in k}
-    assert list(browsers) == ["playwright-cmd"]
-    assert browsers["playwright-cmd"]["command"] == str(world["python"])
-    assert browsers["playwright-cmd"]["args"] == ["-I", "-m", "scripts.profiles.browser"]
-    assert render.stamp(role)["browser"] == browsers["playwright-cmd"]
+    if browser:
+        assert list(browsers) == ["playwright-cmd"]
+        assert browsers["playwright-cmd"]["command"] == str(world["python"])
+        assert browsers["playwright-cmd"]["args"] == ["-I", "-m", "scripts.profiles.browser"]
+        assert render.stamp(role)["browser"] == {
+            "command": str(world["python"]),
+            "args": ["-I", "-m", "scripts.profiles.browser"],
+        }
+    else:
+        assert browsers == {}
+        assert "browser" not in render.stamp(role)
     settings = json.loads((render.rendered_root() / role / "claude" / "settings.json").read_text())
     assert not settings["enabledPlugins"].get("playwright@claude-plugins-official", False)
 
@@ -201,7 +221,7 @@ def test_a_role_overlay_keeps_the_logged_in_extension_browser(world, target):
     master = browsers("master")
     assert sorted(master) == ["playwright-cmd", "playwright-ext-nestorcolt-gmail"]
     assert "--extension" in master["playwright-ext-nestorcolt-gmail"]["args"]
-    assert list(browsers("engineer")) == ["playwright-cmd"]
+    assert browsers("engineer") == {}
 
 
 def test_operator_profile_keeps_its_browser(world):
@@ -281,6 +301,57 @@ def test_refresh_rules_updates_the_rendered_claude_md(world, monkeypatch):
     assert "ROLE LOCAL OVERRIDE" in payload
 
 
+def test_refresh_rules_rerenders_every_home_from_a_new_bundle_commit(world, monkeypatch, tmp_path, capsys):
+    from argparse import Namespace
+
+    from hooks.context import rules_refresh
+    from scripts.profiles import render
+
+    monkeypatch.delenv("CI_MANIFESTO_PATH", raising=False)
+    monkeypatch.delenv("MANIFESTOS_DIR", raising=False)
+    monkeypatch.setattr(rules_refresh, "_refresh_dir", lambda: tmp_path / "force_refresh")
+    monkeypatch.setattr(rules_refresh, "_collect_pending_sessions", lambda: ["s-master"])
+    bundle = world["bundle"]
+    _write(bundle / "profiles" / "master" / "profile.yml", "name: master\nextends: [package:master]\n")
+    manifesto = _write(bundle / "manifestos" / "FLEET-MANIFESTO.md", "OLD FLEET DOCTRINE\n")
+    _commit(bundle, "two")
+    master = render.render_claude("master")
+    render.render_claude("rb-role")
+    caller = render.render_claude("rb-other")
+    assert "OLD FLEET DOCTRINE" in (master / "CLAUDE.md").read_text()
+    manifesto.write_text("MERGED FLEET DOCTRINE\n")
+    _commit(bundle, "three")
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(caller))
+
+    world["install"]._cmd_refresh_rules(Namespace(profile=None, clear=False, dry_run=False))
+
+    rerendered = render.profile_dir("master") / "claude"
+    assert rerendered != master
+    assert "MERGED FLEET DOCTRINE" in (rerendered / "CLAUDE.md").read_text()
+    for key in ("master", "rb-role", "rb-other"):
+        marker = rules_refresh._load_marker(key)
+        assert (marker["home"], marker["pending"]) == (key, ["s-master"])
+        assert "MERGED FLEET DOCTRINE" in marker["payload"]
+    install = world["install"]
+    out = capsys.readouterr().out
+    assert f"{install._GREEN}[OK]{install._RESET} Refresh marker written for profile 'master' (1 sessions).\n" in out
+    assert f"{install._GREEN}[OK]{install._RESET} Re-rendered the rb-role profile home\n" in out
+    assert "Re-rendered the rb-other profile home" not in out
+    caller_homes = [p for p in (render.rendered_root() / ".homes" / "rb-other").iterdir() if not p.is_symlink()]
+    assert len(caller_homes) == 2
+    assert "MERGED FLEET DOCTRINE" in (render.profile_dir("rb-other") / "claude" / "CLAUDE.md").read_text()
+    received = []
+    monkeypatch.setattr(rules_refresh, "inject_context", received.append)
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(master))
+
+    rules_refresh.maybe_inject("s-master")
+
+    assert len(received) == 1
+    assert "MERGED FLEET DOCTRINE" in received[0]
+    assert "OLD FLEET DOCTRINE" not in received[0]
+    assert rules_refresh._load_marker("master") is None
+
+
 def test_claude_md_sanity_still_caps_the_rendered_claude_md(world, monkeypatch):
     from hooks.context import claude_md_sanity
     from hooks.hook_manager import BlockAction
@@ -293,6 +364,28 @@ def test_claude_md_sanity_still_caps_the_rendered_claude_md(world, monkeypatch):
 
     with pytest.raises(BlockAction, match="CLAUDE.md cap of 3 lines"):
         claude_md_sanity.check_claude_md_write(payload)
+
+
+@pytest.mark.parametrize("characters", [149_999, 150_000, 150_001])
+def test_render_enforces_the_compiled_instruction_character_limit(world, characters):
+    from scripts.profiles import render
+
+    out = render.render_claude("rb-role")
+    original = out / "CLAUDE.md"
+    before = original.read_text()
+    source = world["role"] / "CLAUDE.md"
+    source.write_text(source.read_text().strip() + "é" * (characters - len(before)))
+
+    if characters > 150_000:
+        with pytest.raises(ValueError, match=r"rb-role.*150001 characters.*150000"):
+            render.render_claude("rb-role", force=True)
+        assert render.profile_dir("rb-role") == out.parent
+        assert original.read_text() == before
+    else:
+        rebuilt = render.render_claude("rb-role", force=True)
+        text = (rebuilt / "CLAUDE.md").read_text()
+        assert len(text) == characters
+        assert "é" * (characters - len(before)) in text
 
 
 def test_claude_render_settings(world):
@@ -770,6 +863,10 @@ def test_the_package_prefix_names_the_same_role(world, tmp_path, monkeypatch):
     out = render.render_claude("package:master")
 
     assert json.loads((out / "settings.json").read_text())["enabledPlugins"] == {}
+    assert json.loads((out / ".claude.json").read_text())["mcpServers"]["playwright-cmd"] == {
+        "command": str(world["python"]),
+        "args": ["-I", "-m", "scripts.profiles.browser"],
+    }
 
 
 def test_claude_render_keeps_a_home_without_brain_off_the_brain_channel(world):
@@ -858,6 +955,17 @@ def test_claude_render_mcp_and_shared_data(world, capsys):
     assert links == SHARED
     for name in SHARED:
         assert os.readlink(out / name) == str(home / ".claude" / name)
+
+
+def test_claude_render_creates_the_shared_folders_a_fresh_home_lacks(world):
+    from scripts.profiles import render
+
+    shared = world["home"] / ".claude"
+    shutil.rmtree(shared, ignore_errors=True)
+    out = render.render_claude("rb-role")
+    for name in ("projects", "sessions", "todos"):
+        assert (shared / name).is_dir()
+        assert (out / name).resolve() == (shared / name).resolve()
 
 
 @pytest.mark.parametrize("present", [True, False])
@@ -1653,9 +1761,11 @@ def test_isolated_codex_render_keeps_session_state_private(world):
 
     out = render.render_codex("rb-role", isolate=True)
 
-    for item in ("sessions", "history.jsonl", "session_index.jsonl"):
+    for item in ("history.jsonl", "session_index.jsonl"):
         assert not (out / item).exists()
         assert not (out / item).is_symlink()
+    for item in ("sessions", "archived_sessions"):
+        assert os.readlink(out / item) == str(render.rendered_root() / ".rollouts" / "rb-role" / "codex" / item)
     for item in ("auth.json", "hooks.json"):
         assert os.readlink(out / item) == str(home / ".codex" / item)
     doc = tomllib.loads((out / "config.toml").read_text())
@@ -1672,7 +1782,7 @@ def test_codex_render_refreshes_when_session_isolation_changes(world):
     assert isolated is not None
     assert isolated != shared
     assert (shared / "sessions").is_symlink()
-    assert not (isolated / "sessions").is_symlink()
+    assert os.readlink(isolated / "sessions") != os.readlink(shared / "sessions")
 
     restored = render.render_codex("rb-role")
 
@@ -1687,8 +1797,9 @@ def test_swarm_codex_preparation_renders_isolated_storage(world):
     env, _ = select_profile.prepare("rb-role", "codex", "", "", [], {"AGENTIHOOKS_SWARM": "crew"})
     out = Path(env["CODEX_HOME"])
 
-    for item in ("sessions", "history.jsonl", "session_index.jsonl"):
+    for item in ("history.jsonl", "session_index.jsonl"):
         assert not (out / item).is_symlink()
+    assert Path(os.readlink(out / "sessions")).parts[-4:] == (".rollouts", "rb-role", "codex", "sessions")
     assert (out / "hooks.json").is_symlink()
     assert tomllib.loads((out / "config.toml").read_text())["sqlite_home"] == str(out)
 
@@ -2100,7 +2211,7 @@ def test_running_profile_validates_its_launched_persona_after_other_profile_rend
     home = render.render(target, "rb-role")
     launched = binding.inspect(home, "rb-role", target)
     env = {"AGENTIHOOKS_PROFILE": "rb-role", binding.HOMES[target]: str(home), "XDG_RUNTIME_DIR": str(world["home"])}
-    init_agent._binding_request(SimpleNamespace(profile="rb-role"), target, "", env, [])
+    init_agent._binding_request(SimpleNamespace(profile="rb-role", defer_canary=False), target, "", env, [])
     report = Path(env[binding.REPORT])
     monkeypatch.setattr(binding, "process", lambda: (123, target, env, "default"))
     if validated:
@@ -2155,6 +2266,10 @@ def test_stamp_names_bundle_commit_and_chain(world):
         "chain": chain,
         "overlays": [],
         "enabled_plugins": {},
+        "mcp_urls": {},
+        "mcp_bearer_env": {},
+        "hosted_ledger": "",
+        "swarm_brain": None,
         "corrections": "",
     }
     assert render._stamp(None, []) == {
@@ -2164,6 +2279,10 @@ def test_stamp_names_bundle_commit_and_chain(world):
         "chain": [],
         "overlays": [],
         "enabled_plugins": {},
+        "mcp_urls": {},
+        "mcp_bearer_env": {},
+        "hosted_ledger": "",
+        "swarm_brain": None,
         "corrections": "",
     }
     assert render._roots(None, [("rb-role", world["role"])]) == [world["role"]]

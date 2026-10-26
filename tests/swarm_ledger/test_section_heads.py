@@ -1,10 +1,7 @@
-from pathlib import Path
-
 import pytest
 
 from tests.swarm_ledger.ledger_page import ledger_state, loaded, reload_after_folds, serve_modules, shell_html
 
-TEMPLATE = Path(__file__).resolve().parents[2] / "scripts" / "swarm_ledger" / "template.html"
 URL = "http://ledger.test/swarm-buildout"
 ANSWER = {"id": "a1", "by": "operator", "at": 1, "text": "yes"}
 DOC = {
@@ -143,7 +140,8 @@ def test_counts_follow_an_item_change(tab):
     tab.locator("#item-phases-p0 input[type=checkbox]").evaluate("(el) => el.click()")
     settle(tab)
     assert counts(tab)["phases"] == "· 1 open · 2 done"
-    tab.locator("#followups-done > summary").click()
+    assert not tab.locator("#followups-box").evaluate("(box) => box.open")
+    tab.click("#followups-box > summary")
     tab.locator("#item-followups-f1 input[type=checkbox]").evaluate("(el) => el.click()")
     settle(tab)
     assert counts(tab)["followups"] == "· 1 open"

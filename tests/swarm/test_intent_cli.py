@@ -9,8 +9,6 @@ from scripts.inbox.store import InboxStore
 from scripts.swarm import cli
 from tests.swarm.test_cli import env, run  # noqa: F401
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 ME = "engineer@a1b2c3-0001"
 URL = "https://github.com/o/r/pull/9"
 
@@ -164,7 +162,7 @@ def test_the_tick_batches_active_tasks_and_red_notices_then_refreshes_the_next_t
     cli.run_tick(store, "sw")
     assert heads == []
     cli.run_tick(store, "sw")
-    assert batches == [{URL, other}, {URL, other}, {URL, other}, {URL, other}]
+    assert batches == [{URL, other}, set(), {URL, other}, set()]
     assert heads == [URL]
 
 

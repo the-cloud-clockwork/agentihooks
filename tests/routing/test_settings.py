@@ -6,8 +6,6 @@ import pytest
 from scripts.routing import settings
 from scripts.swarm import keyspace
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 NOW = 1_900_000_000.0
 
 
@@ -109,6 +107,42 @@ def test_a_write_needs_an_actor(store):
         store.set("claude-api-weight", 5, "", NOW)
     assert str(raised.value) == "a routing setting write needs an actor"
     assert store.history() == []
+
+
+def test_a_claim_sets_an_unset_key_once_and_returns_the_holder(store):
+    assert store.claim("master-account-claude", "a", "master@x", NOW) == "a"
+    assert store.claim("master-account-claude", "b", "master@y", NOW + 1) == "a"
+    assert store.get("master-account-claude") == "a"
+    assert store.history() == [{"key": "master-account-claude", "value": "a", "actor": "master@x", "at": NOW}]
+
+
+@pytest.mark.parametrize(
+    ("value", "actor", "said"),
+    [
+        (None, "m", "^invalid value for master-account-claude: None$"),
+        ("", "m", "^invalid value for master-account-claude: ''$"),
+        ("a", "", "^a routing setting write needs an actor$"),
+    ],
+)
+def test_a_claim_refuses_an_empty_value_or_actor(store, value, actor, said):
+    with pytest.raises(ValueError, match=said):
+        store.claim("master-account-claude", value, actor, NOW)
+    with pytest.raises(ValueError, match="unknown routing setting"):
+        store.claim("nope", "a", "m", NOW)
+    assert store.history() == []
+
+
+def test_a_file_claim_creates_missing_parent_folders(tmp_path):
+    store = settings.FileSettings(tmp_path / "a" / "b" / "routing-settings.json")
+    assert store.claim("master-account-claude", "a", "m", NOW) == "a"
+    assert store.get("master-account-claude") == "a"
+
+
+def test_the_file_claim_holds_a_lock_beside_the_settings(home, monkeypatch):
+    locked = []
+    monkeypatch.setattr(settings.fcntl, "flock", lambda handle, mode: locked.append((Path(handle.name).name, mode)))
+    settings.open_store(None, home).claim("master-account-claude", "a", "m", NOW)
+    assert locked == [("routing-settings.json.lock", settings.fcntl.LOCK_EX)]
 
 
 def test_an_unknown_key_is_refused_on_read_and_write(store):

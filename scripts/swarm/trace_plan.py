@@ -54,7 +54,7 @@ class Piece:
 
 
 def followup_text(task_id, what):
-    return f"Cut from the plan of task {task_id}: {what}"
+    return f"Cut from the plan: {what}"
 
 
 def _piece(line, number, task_id, task_ids):
@@ -132,7 +132,7 @@ def _row(piece, probability, off_intent, authorized=None):
 
 
 def _ruling(areas) -> bool:
-    return all(is_clearance(area) for area in areas)
+    return all(is_clearance(area) for area in areas) or (len(areas) == 1 and _changelog_fragment(areas[0]))
 
 
 def _kept(ruling, probability, off_intent) -> bool:
@@ -212,6 +212,11 @@ def is_clearance(area: str) -> bool:
     return path == CLEARANCE or path == CLEARANCE_FOLDER or CLEARANCE_FOLDER in path.parents
 
 
+def _changelog_fragment(area: str) -> bool:
+    path = PurePosixPath(area)
+    return len(path.parts) == 2 and path.parts[0] == "changelog.d" and path.suffix == ".md" and path.name != "README.md"
+
+
 def _source_areas(areas: tuple) -> list[str]:
     return [area for area in areas if PurePosixPath(area).parts[:1] != ("tests",) and not is_clearance(area)]
 
@@ -228,6 +233,7 @@ def trace(pieces, state, previous, now_ms=None):
         "plan_hash": plan_hash(pieces),
         "failures": previous.get("failures", 0),
         "filed": list(previous.get("filed", [])),
+        "accepted": list(previous.get("accepted", [])),
         "at": int(time.time() * 1000) if now_ms is None else now_ms,
         "authorizations": ids,
     }
@@ -267,6 +273,7 @@ def _record(verdict, rows, size, reasons, source, calibrated, base):
         "calibrated": calibrated,
         "failures": base["failures"],
         "filed": base["filed"],
+        "accepted": base["accepted"],
         "at": base["at"],
     } | ({"authorizations": base["authorizations"]} if base["authorizations"] else {})
 
@@ -286,39 +293,61 @@ def save(folder, record):
     os.replace(staged, path)
 
 
-def _cuts(record):
-    rows = [row for row in record["pieces"] if not row["kept"] and _row_key(row) not in record["filed"]]
-    record["filed"] += [_row_key(row) for row in rows]
-    return rows
+def cut_id(who, key):
+    digest = hashlib.sha256("\n".join((who.swarm, who.task, key)).encode()).hexdigest()
+    return f"cut-{digest[:16]}"
 
 
-def _file_cuts(rows, ledger, who, home):
-    for row in rows:
-        ledger.followup(who.swarm, followup_text(who.task, row["what"]))
-        gate_log.append(who.swarm, gate_log.Row.of(GATE.name, "count", who, reason=f"cut: {row['what']}"), home)
+def _log(record, who, mode, home):
+    if record["verdict"] == UNCHECKED:
+        gate_log.append(who.swarm, gate_log.Row.of(GATE.name, "fail-open", who, reason=NO_ANSWER), home)
+    elif record["verdict"] == FAIL and mode in FAIL_KINDS:
+        reason = " and ".join(record["reasons"])
+        gate_log.append(who.swarm, gate_log.Row.of(GATE.name, FAIL_KINDS[mode], who, reason=reason), home)
+
+
+def _legacy_filed(record, key, text, ledger, who):
+    return key in record["filed"] and text in {item["text"] for item in ledger.state(who.swarm).get("followups", [])}
+
+
+def _file_cuts(folder, record, ledger, who, home):
+    accepted = record.setdefault("accepted", [])
+    for row in record["pieces"]:
+        key, text = _row_key(row), followup_text(who.task, row["what"])
+        if row["kept"] or key in accepted:
+            continue
+        if not _legacy_filed(record, key, text, ledger, who):
+            if not ledger.followup_once(who.swarm, text, who.name, cut_id(who, key)):
+                continue
+            gate_log.append(who.swarm, gate_log.Row.of(GATE.name, "count", who, reason=f"cut: {row['what']}"), home)
+        accepted.append(key)
+        save(folder, record)
+
+
+def _read(folder, who, state):
+    try:
+        text = (folder / PLAN).read_text()
+    except OSError:
+        raise ValueError(f"write the plan first: {folder / PLAN}, {FORMAT}") from None
+    return parse(text, who.task, state.get("task ids", ()))
 
 
 def run(folder, state, ledger, who, mode, home=None, now_ms=None):
     """Trace the plan in folder; returns the verdict record and whether the task must be blocked."""
     try:
-        text = (folder / PLAN).read_text()
-    except OSError:
-        raise ValueError(f"write the plan first: {folder / PLAN}, {FORMAT}") from None
-    pieces = parse(text, who.task, state.get("task ids", ()))
-    previous = load(folder)
-    if previous.get("plan_hash") == plan_hash(pieces) and previous.get("authorizations", []) == _ids(state):
-        return previous, False
-    record, cuts = trace(pieces, state, previous, now_ms), []
+        pieces = _read(folder, who, state)
+    except ValueError as exc:
+        if mode in FAIL_KINDS:
+            gate_log.append(who.swarm, gate_log.Row.of(GATE.name, FAIL_KINDS[mode], who, reason=str(exc)), home)
+        raise
+    record, block = load(folder), False
+    if record.get("plan_hash") != plan_hash(pieces) or record.get("authorizations", []) != _ids(state):
+        record = trace(pieces, state, record, now_ms)
+        _log(record, who, mode, home)
+        save(folder, record)
+        block = record["verdict"] == FAIL and record["failures"] > RETURNS and mode == "enforce"
     if record["verdict"] == PASS:
-        cuts = _cuts(record)
-    elif record["verdict"] == UNCHECKED:
-        gate_log.append(who.swarm, gate_log.Row.of(GATE.name, "fail-open", who, reason=NO_ANSWER), home)
-    elif mode in FAIL_KINDS:
-        reason = " and ".join(record["reasons"])
-        gate_log.append(who.swarm, gate_log.Row.of(GATE.name, FAIL_KINDS[mode], who, reason=reason), home)
-    save(folder, record)
-    _file_cuts(cuts, ledger, who, home)
-    block = record["verdict"] == FAIL and record["failures"] > RETURNS and mode == "enforce"
+        _file_cuts(folder, record, ledger, who, home)
     return record, block
 
 

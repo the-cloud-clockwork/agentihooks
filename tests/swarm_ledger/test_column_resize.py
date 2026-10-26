@@ -44,12 +44,12 @@ def test_the_ledger_page_and_home_wire_column_grips_and_save_their_widths():
     assert "columns: { ...(layout.columns || {})" in ledger
     home = ROOT.joinpath("static", "home", "home.js").read_text()
     assert 'document.querySelectorAll(".row.head > *")' in home
-    assert 'fetch("/api/layout", { method: "PUT"' in home
+    assert "writeLayout(layout)" in home
 
 
 def test_column_widths_round_trip_beside_panel_sizes_and_reset_with_them():
     saved = layout.write(
-        {"health-box": {"height": 200}, "columns": {"agents-table-9": [250.4, 60, 0], "home": [280, 56]}}
+        {"handoff-box": {"height": 200}, "columns": {"agents-table-9": [250.4, 60, 0], "home": [280, 56]}}
     )
     assert saved["columns"] == {"agents-table-9": [250, 60, 0], "home": [280, 56]}
     assert layout.read() == saved
@@ -83,5 +83,5 @@ def test_the_column_limits_are_inclusive_and_each_refusal_names_its_cause():
 
 
 def test_rows_after_the_columns_entry_are_still_saved():
-    saved = layout.write({"columns": {"t": [40]}, "health-box": {"height": 200}})
-    assert saved == {"columns": {"t": [40]}, "health-box": {"height": 200}}
+    saved = layout.write({"columns": {"t": [40]}, "handoff-box": {"height": 200}})
+    assert saved == {"columns": {"t": [40]}, "handoff-box": {"height": 200}}

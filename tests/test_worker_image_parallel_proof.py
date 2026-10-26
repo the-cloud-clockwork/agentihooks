@@ -64,6 +64,7 @@ elif args[0] == 'run':
             (state / 'profile-started').touch()
             wait('rebuild')
         if os.environ['FAILURE'] == 'profile':
+            print(f'probe {args[-1]} traceback', file=sys.stderr)
             sys.exit(18)
         print(json.dumps({'codex_probe': {'registered_at': time.time() -\n              (3 if os.environ['FAILURE'] == 'profile-late' else 0)}}))
         if '--name' in args:
@@ -102,7 +103,7 @@ if os.environ['FAILURE'] == 'profile-evidence':
 """
 
 
-def run_proof(tmp_path, failure, proof="all", driver="[]"):
+def run_proof(tmp_path, failure, proof="all", driver="[]", extra=None):
     state = tmp_path / "state"
     state.mkdir()
     if proof != "all":
@@ -154,14 +155,18 @@ def run_proof(tmp_path, failure, proof="all", driver="[]"):
         path.write_text(content)
         path.chmod(0o755)
     output = tmp_path / "evidence"
-    env = {key: value for key, value in os.environ.items() if key != "WORKER_BASE_CONTEXT"} | {
-        "PATH": f"{commands}:{os.environ['PATH']}",
-        "STATE": str(state),
-        "REPO": str(tmp_path),
-        "ARCHIVE": str(archive),
-        "FAILURE": failure,
-        "DRIVER": driver,
-    }
+    env = (
+        {key: value for key, value in os.environ.items() if key != "WORKER_BASE_CONTEXT"}
+        | {
+            "PATH": f"{commands}:{os.environ['PATH']}",
+            "STATE": str(state),
+            "REPO": str(tmp_path),
+            "ARCHIVE": str(archive),
+            "FAILURE": failure,
+            "DRIVER": driver,
+        }
+        | (extra or {})
+    )
     result = subprocess.run(
         ["bash", str(ROOT / "docker/swarm-node/smoke.sh"), str(output), proof],
         cwd=tmp_path,
@@ -186,7 +191,8 @@ def test_independent_worker_proofs_overlap_and_keep_every_check(tmp_path):
     assert "--no-cache-filter" in builds[-1]
     assert builds[-1][builds[-1].index("--no-cache-filter") + 1] == "worker"
     runs = [call for call in calls if call[0] == "run"]
-    assert len(runs) == 12
+    assert len(runs) == 13
+    assert [call[-1] for call in runs if "/opt/probe/code_mode_probe.py" in call] == ["/usr/local/bin/codex"]
     assert all("--read-only" in call and call[call.index("--network") + 1] == "none" for call in runs)
     profiles = [call[-1] for call in runs if "/opt/probe/profile-probe.sh" in call]
     assert sorted(profiles) == ["noexec", "positive", "positive", "recovery", "rejection", "rollback"]
@@ -206,7 +212,7 @@ def test_a_failed_background_worker_check_keeps_the_proof_red(tmp_path, failure,
     assert calls[-1][:2] == ["image", "rm"]
 
 
-@pytest.mark.parametrize("proof,builds,runs", [("startup", 4, 5), ("rebuild", 1, 1), ("profiles", 1, 7)])
+@pytest.mark.parametrize("proof,builds,runs", [("startup", 4, 6), ("rebuild", 1, 1), ("profiles", 1, 7)])
 def test_worker_proof_modes_run_only_their_independent_checks(tmp_path, proof, builds, runs):
     result, calls, state, output = run_proof(tmp_path, "", proof)
     assert result.returncode == 0, result.stderr
@@ -223,6 +229,18 @@ def test_worker_proof_modes_run_only_their_independent_checks(tmp_path, proof, b
             assert json.loads((output / name).read_text())["codex_probe"]["registration_to_container_exit_seconds"] < 2
     assert (state / "scanner-pulled").exists()
     assert (state / "scan-agentihooks-worker-proof-finished").exists()
+
+
+@pytest.mark.parametrize("failure,kept", [("", True), ("scan", False)])
+def test_startup_proof_keeps_its_proven_image_only_after_it_passes(tmp_path, failure, kept):
+    result, calls, state, output = run_proof(tmp_path, failure, "startup", extra={"WORKER_KEEP_IMAGE": "kept:worker"})
+    build = next(call for call in calls if call[0] == "build")
+    assert (result.returncode == 0) is kept, result.stderr
+    assert [call for call in calls if call[0] == "tag"] == (
+        [["tag", build[build.index("-t") + 1], "kept:worker"]] if kept else []
+    )
+    assert calls[-1][:2] == ["image", "rm"]
+    assert "kept:worker" not in calls[-1]
 
 
 def test_slow_container_removal_is_not_counted_as_codex_exit_latency(tmp_path):
@@ -267,6 +285,40 @@ def test_a_failed_selected_worker_proof_never_reports_success(tmp_path, proof, f
     assert result.returncode == status, result.stderr
     assert not (output / "mode-result.json").exists()
     assert not list(output.glob("context-*"))
+
+
+@pytest.mark.parametrize("proof", ["all", "profiles"])
+def test_a_failed_profile_probe_prints_its_case_and_output(tmp_path, proof):
+    result, calls, state, output = run_proof(tmp_path, "profile", proof)
+    assert result.returncode == 18, result.stderr
+    for case in ("positive", "positive-second", "rejection", "recovery", "rollback", "noexec"):
+        assert f"worker profile probe {case} failed with exit 18" in result.stderr
+        assert f"==> {output}/profile-{case}.log <==" in result.stderr
+    assert "probe noexec traceback" in result.stderr
+
+
+@pytest.mark.parametrize("proof", ["all", "profiles"])
+def test_a_failed_profile_evidence_names_its_step(tmp_path, proof):
+    result, calls, state, output = run_proof(tmp_path, "profile-evidence", proof)
+    assert result.returncode == 19, result.stderr
+    assert "worker profile evidence failed with exit 19" in result.stderr
+
+
+@pytest.mark.parametrize("proof", ["all", "profiles"])
+def test_a_late_codex_exit_prints_its_probe_and_latency(tmp_path, proof):
+    result, calls, state, output = run_proof(tmp_path, "profile-late", proof)
+    assert result.returncode == 1, result.stderr
+    assert "worker profile probe positive failed with exit 1" in result.stderr
+    assert "Codex registration to container exit took" in result.stderr
+
+
+@pytest.mark.parametrize("proof,command", [("startup", 'wait "$scan_pid"'), ("profiles", "scan.sh")])
+def test_a_failed_worker_step_names_its_command(tmp_path, proof, command):
+    result, calls, state, output = run_proof(tmp_path, "scan", proof)
+    assert result.returncode == 17, result.stderr
+    message = next(line for line in result.stderr.splitlines() if line.startswith("worker proof failed at line"))
+    assert command in message
+    assert message.endswith("(exit 17)")
 
 
 @pytest.mark.parametrize(
@@ -418,3 +470,46 @@ def test_health_worker_build_exports_uncompressed_on_the_containerd_store(tmp_pa
     assert ("--provenance=false --output type=image,compression=uncompressed" in worker) is exported
     assert not any("--output" in line for line in builds if line != worker)
     assert (tmp_path / "out" / "docker-driver.txt").read_text().strip() == driver
+
+
+@pytest.mark.parametrize("present", [True, False])
+def test_health_proof_reuses_the_proven_worker_image_and_builds_only_when_missing(tmp_path, present):
+    state = tmp_path / "state"
+    state.mkdir()
+    commands = tmp_path / "bin"
+    commands.mkdir()
+    (commands / "docker").write_text(
+        "#!/usr/bin/env bash\n"
+        'if [[ "$1" == info ]]; then echo "[]"; exit 0; fi\n'
+        'printf "%s\\n" "$*" >> "$STATE/docker-calls"\n'
+        'if [[ "$1 $2" == "image inspect" ]]; then [[ -n "$PRESENT" ]]; exit; fi\n'
+        'if [[ "${!#}" == - ]]; then cat > /dev/null; fi\n'
+    )
+    (commands / "python").write_text(HEALTH_PYTHON)
+    for name in ("docker", "python"):
+        (commands / name).chmod(0o755)
+    env = {key: value for key, value in os.environ.items() if key != "WORKER_BASE_CONTEXT"} | {
+        "PATH": f"{commands}:{os.environ['PATH']}",
+        "STATE": str(state),
+        "PRESENT": "1" if present else "",
+        "WORKER_IMAGE": "proven:worker",
+        "SWARM_PROOF_PYTHON": str(commands / "python"),
+    }
+    done = subprocess.run(
+        ["bash", str(ROOT / "tests/integration/swarm_node/run_health_proof.sh"), str(tmp_path / "out")],
+        cwd=ROOT,
+        env=env,
+        text=True,
+        capture_output=True,
+        stdin=subprocess.DEVNULL,
+        timeout=15,
+    )
+    assert done.returncode == 0, done.stderr
+    calls = (state / "docker-calls").read_text().splitlines()
+    worker = [line for line in calls if line.startswith("build ") and "docker/swarm-node/Dockerfile" in line]
+    assert len(worker) == (0 if present else 1)
+    assert all("--tag proven:worker" in line for line in worker)
+    fixture = next(line for line in calls if "tests/integration/swarm_node/Dockerfile" in line)
+    assert "--build-arg WORKER_IMAGE=proven:worker" in fixture
+    assert "health_proof ran" in done.stdout
+    assert "entrypoint_proof ran" in done.stdout

@@ -15,14 +15,17 @@ BUDGETS = {
     "promote": 10 * 60,
     "admission": 30,
     "reuse": 30,
-    "durations": 60,
-    "split": 120,
+    "split": 90,
     "select": 60,
     "unit": 300,
+    # Merge queue only, after a lost runner; stage budgets grade push and dispatch runs.
+    "unit-lost": 0,
+    "unit-rerun": 0,
     "unit-selected": 300,
     "shard-check": 90,
     "test-count": 120,
     "lint": 240,
+    "docs": 120,
     "sonar": 240,
     "coverage-ratchet": 90,
     "queue-fail-fast": 60,
@@ -33,10 +36,13 @@ BUDGETS = {
     "swarm-image": 180,
     "semgrep": 120,
     "ledger-load": 240,
+    "hierarchy-cpu": 15 * 60,
     "brain-smoke": 90,
+    "writer-lock": 180,
     "kind-due": 60,
     "helm-kind": 480,
     "gate-required": 60,
+    "test-summary": 60,
     "refresh-durations": 120,
     "coverage-baseline": 120,
     "flake-budget": 120,
@@ -49,14 +55,20 @@ def seconds(stamp: str) -> float:
 
 
 def stage_of(name: str) -> str:
-    return "gate-required" if name == GATE else name.split(" / ")[0].split(" (")[0]
+    return {GATE: "gate-required", "Queue gate summary": "test-summary"}.get(name, name.split(" / ")[0].split(" (")[0])
 
 
 def stages(jobs: list[dict]) -> dict[str, float]:
     spans: dict[str, tuple[float, float]] = {}
+    queue_pair = any(job["name"] == "Queue gate summary" for job in jobs)
     for job in jobs:
         stage = stage_of(job["name"])
-        if stage == WATCHER or job.get("conclusion") == "skipped" or not job.get("completed_at"):
+        if (
+            stage == WATCHER
+            or (queue_pair and job["name"] == GATE)
+            or job.get("conclusion") == "skipped"
+            or not job.get("completed_at")
+        ):
             continue
         begin, end = seconds(job["created_at"]), seconds(job["completed_at"])
         first, last = spans.get(stage, (begin, end))

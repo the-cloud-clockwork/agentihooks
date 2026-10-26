@@ -1,7 +1,9 @@
-"""Owner fenced master writes: only the master seat owning an item answers it, decides it or sets it.
+"""Owner fenced master writes: any live master seat answers, decides, sets, comments on or relays onto an item; a
+master without a live seat is refused unless it owns the item. A write by a seat other than the owner keeps the owner
+and is recorded under the cross write record with its writer.
 
 The fence runs inside the ledger's locked write, so the owner check and the write never interleave with another
-master's. A question or follow up keeps the seat that decided it until someone other than a master changes it; a task
+master's. A question or follow up keeps its owning seat until someone other than a master changes it; a task
 follows its phase owner.
 """
 
@@ -18,9 +20,12 @@ NAME = "master-fence"
 SWITCH = "AGENTIHOOKS_MASTER_FENCE"
 OFF = "off"
 DECISIONS = "master_decisions"
+CROSS = "master_cross_writes"
+CROSS_KEPT = 20
 REFUSALS = "write_refusals"
 DECIDED = ("questions/", "followups/")
-VERBS = {"answer": "answer", "set": "decide", "task_update": "set"}
+TASKS = "tasks/"
+VERBS = {"answer": "answer", "set": "decide", "task_update": "set", "add": "comment on", "relay": "relay onto"}
 
 
 def decision(op: dict) -> str:
@@ -28,6 +33,12 @@ def decision(op: dict) -> str:
     kind = op.get("op")
     if kind in ("answer", "task_update"):
         return op["item"]
+    if kind == "relay":
+        item = str(op.get("item", ""))
+        return item if item.startswith(TASKS) else ""
+    if kind == "add":
+        item, _, thread = str(op.get("thread", "")).rpartition("/")
+        return item if thread == "comments" and item.startswith(TASKS) else ""
     if kind != "set":
         return ""
     item = op["path"].rpartition("/")[0]
@@ -44,27 +55,37 @@ def refusal(item: str, owner: str, writer: str, action: str, rev: int = 0) -> st
     return f"{item} belongs to {owner}, so {writer} cannot {action} it"
 
 
+def send_refusal(slug: str, task: str, owner: str, writer: str) -> str:
+    return (
+        f"{TASKS}{task} belongs to {owner}, so {writer} cannot message its claimant; ask {owner} with agentihooks "
+        f'swarm {slug} masters-channel say "<text>"'
+    )
+
+
 def _fields(stamps: dict, item: str) -> dict:
     return {
         path: stamp for path, stamp in stamps.items() if path.startswith(f"{item}/") and not path.endswith("/comments")
     }
 
 
-def current(record: dict, item: str, stamps: dict) -> bool:
-    """A record holds while its own write is still stamped and nobody but a master has written the item since."""
+def current(record: dict, item: str, stamps: dict, retired_at: int) -> bool:
+    """A record holds while its own write is still stamped after its seat last retired and nobody but a master has
+    written the item since."""
     from scripts.swarm.naming import lane_of
 
     fields = _fields(stamps, item).values()
     later = [stamp for stamp in fields if stamp["rev"] > record["rev"]]
-    return any(stamp["rev"] == record["rev"] for stamp in fields) and all(lane_of(s["by"]) == MASTER for s in later)
+    own = any(stamp["rev"] == record["rev"] and stamp["at"] > retired_at for stamp in fields)
+    return own and all(lane_of(s["by"]) == MASTER for s in later)
 
 
-def announcement(seat: str, op: dict) -> str:
+def announcement(seat: str, op: dict, owner: str = "") -> str:
+    suffix = f" for {owner}" if owner and owner != seat else ""
     if op["op"] == "answer":
-        return f"{seat} answered {op['item']}: {op['text'].strip()}"
+        return f"{seat} answered {op['item']}{suffix}: {op['text'].strip()}"
     if op["op"] == "set":
-        return f"{seat} set {op['path']} to {json.dumps(op['value'])}"
-    return f"{seat} set {op['item']}: {', '.join(sorted(op['fields']))}"
+        return f"{seat} set {op['path']} to {json.dumps(op['value'])}{suffix}"
+    return f"{seat} set {op['item']}: {', '.join(sorted(op['fields']))}{suffix}"
 
 
 def measurements(redis, slug: str) -> dict:
@@ -78,14 +99,73 @@ def _connect():
     return redis_client()
 
 
+def _ledger_state(slug: str) -> dict:
+    from scripts.swarm.ledger_client import LedgerClient
+
+    return LedgerClient().state(slug)
+
+
+def check_send(inbox, sender: str, address: str) -> None:
+    """A master's message to a task's claimant rules on that task, so only the task's owning master sends one."""
+    from scripts.inbox.seats import master_of
+    from scripts.inbox.store import InboxError
+    from scripts.swarm.naming import lane_of
+    from scripts.swarm.store import RedisStore
+
+    if lane_of(sender) != MASTER or os.environ.get(SWITCH) == OFF:
+        return
+    task = inbox.receiver_task(address)
+    if not task:
+        return
+    slug = master_of(inbox.names.resolve(address), inbox.names).partition("@")[2]
+    try:
+        seats = Seats(slug, RedisStore(inbox.redis), {})
+        if len(seats.live) < 2 or _doctor_master_send(inbox, seats, sender, address):
+            return
+        seats.doc = _ledger_state(slug)
+        owner, _ = seats.owner(f"{TASKS}{task}", {})
+    except Exception as exc:  # a crashed check lets the message through, counted in the gate log
+        log.append(slug, log.Row.of(NAME, "fail-open", Who(name=sender), "inbox", f"{type(exc).__name__}: {exc}"))
+        return
+    writer = seats.writer(sender)
+    if writer != owner and not (writer == seats.lead and seats.stuck(inbox, owner)):
+        inbox.redis.hincrby(seats.table.key(slug), REFUSALS)
+        raise InboxError(send_refusal(slug, task, owner, writer))
+
+
+def _doctor_master_send(inbox, seats, sender: str, address: str) -> bool:
+    from scripts.swarm.store import RedisStore
+
+    if seats.writer(inbox.names.resolve(address)) not in seats.live:
+        return False
+    store = RedisStore(inbox.redis)
+    doctor = inbox.names.slug_of(sender)
+    if store.peer(seats.slug) != doctor or store.peer(doctor) != seats.slug:
+        return False
+    return sender in masters.held(inbox.redis, doctor, store.agents(doctor)).values()
+
+
+def handed_off(store, slug: str) -> set[str]:
+    """Seats asked to retire as the swarm shrank whose master has submitted its handoff: what they owned is the front
+    door's from then on, before the tick retires the seat."""
+    from scripts.swarm_v2 import master_scale
+
+    table = masters.MasterSeats(store.redis)
+    retiring = json.loads(table.redis.hget(table.key(slug), master_scale.RETIRING) or "{}")
+    return {address for address in retiring if store.handoff(slug, address.removesuffix(f"@{slug}"))}
+
+
 class Seats:
     """The swarm's live master seats and phase owners, as one write reads them."""
 
     def __init__(self, slug: str, store, doc: dict) -> None:
-        live = [a for a in store.agents(slug) if a.lane == MASTER and a.state != "finished"]
+        agents = store.agents(slug)
+        held = masters.held(store.redis, slug, agents)
         self.slug, self.doc = slug, doc
-        self.names = {a.name: a.seat or a.name for a in live}
-        self.live = list(self.names.values())
+        self.names = {a.name: a.seat or a.name for a in agents if a.lane == MASTER and a.state != "finished"}
+        self.names.update({name: seat for seat, name in held.items()})
+        handed = handed_off(store, slug)
+        self.live = [address for address in held if address not in handed]
         self.lead = masters.lead_of(slug, self.live)
         self.table = masters.MasterSeats(store.redis)
         self.count = self.table.count(slug)
@@ -96,10 +176,24 @@ class Seats:
     def owner(self, item: str, meta: dict) -> tuple[str, int]:
         record = meta.get(DECISIONS, {}).get(item)
         known = [*masters.seats(self.slug, self.count), *self.live]
-        if record and record["seat"] in known and current(record, item, meta["stamps"]):
+        if record and record["seat"] in known and current(record, item, meta["stamps"], self._retired(record)):
             return record["seat"], record["rev"]
         owners = functools.partial(self.table.owners, self.slug, self.doc)
         return masters.route(item, self.doc, owners, self.live, self.lead), 0
+
+    def stuck(self, inbox, seat: str) -> bool:
+        """The seat's master has left an item that needs work unread past the wake window, outage time excluded."""
+        from scripts.inbox import wake
+        from scripts.inbox.store import now_ms
+        from scripts.swarm import outage
+
+        now, window = now_ms(), wake.window_ms(os.environ)
+        names = [name for name, held in self.names.items() if held == seat]
+        items = [item for name in names for item in inbox.open_mail(name) if not item.fyi and item.state != "read"]
+        return any(now - item.created_at - outage.paused_ms(self.slug, item.created_at, now) > window for item in items)
+
+    def _retired(self, record: dict) -> int:
+        return self.table.retired_at(self.slug, record["seat"])
 
 
 class Fence:
@@ -127,21 +221,26 @@ class Fence:
             return self._inner(doc, op, ctx, apply)
         writer = seats.writer(by)
         owner, rev = seats.owner(item, ctx.meta)
-        if writer != owner:
+        if writer != owner and writer not in seats.live:
             ctx.refused.append(refusal(item, owner, writer, verb(op), rev))
             self._redis.hincrby(seats.table.key(self.slug), REFUSALS)
             return False
         before = _fields(ctx.stamps, item)
         done = self._inner(doc, op, ctx, apply)
+        if done and writer != owner:
+            rows = ctx.meta.setdefault(CROSS, {}).setdefault(item, [])
+            rows.append({"owner": owner, "seat": writer, "by": by, "rev": ctx.rev})
+            del rows[:-CROSS_KEPT]
         if done and _fields(ctx.stamps, item) != before:
-            self._decided(op, item, writer, by, seats.count, ctx)
+            self._decided(op, item, (owner, writer, by), seats.count, ctx)
         return done
 
-    def _decided(self, op, item, writer, by, count, ctx) -> None:
+    def _decided(self, op, item, authors, count, ctx) -> None:
+        owner, writer, by = authors
         if item.startswith(DECIDED):
-            ctx.meta.setdefault(DECISIONS, {})[item] = {"seat": writer, "rev": ctx.rev}
+            ctx.meta.setdefault(DECISIONS, {})[item] = {"seat": owner, "rev": ctx.rev}
         if count > 1:
-            self.decided.append((op["id"], writer, by, announcement(writer, op), ctx.at / 1000))
+            self.decided.append((op["id"], writer, by, announcement(writer, op, owner), ctx.at / 1000))
 
     def _seats(self, doc):
         from scripts.swarm.store import RedisStore, SwarmError

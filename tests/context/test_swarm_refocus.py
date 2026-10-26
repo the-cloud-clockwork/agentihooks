@@ -4,6 +4,7 @@ import pytest
 
 import hooks.context.swarm_refocus as refocus
 from hooks import hook_manager
+from hooks.context import master_coding
 from hooks.targets.emitter import flush
 from scripts.swarm_ledger import plan_read
 from scripts.swarm_ledger.repository.sqlite import DATABASE
@@ -137,6 +138,19 @@ def test_a_bound_session_gets_the_block_again_after_compaction(bound, capsys):
     assert "Inject a refocus block." not in _pre(capsys)
 
 
+def test_each_tool_call_records_its_call_id_for_the_stall_clock(bound, monkeypatch, capsys):
+    from scripts.swarm.health import activity
+
+    seen = []
+    monkeypatch.setattr(activity, "record", lambda name, tool_input, call_id: seen.append((name, call_id)))
+    for call_id in ("toolu_x", None):
+        payload = {"session_id": "s1", "tool_name": "Bash", "tool_input": {}, "cwd": "/", "tool_use_id": call_id}
+        hook_manager.on_pre_tool_use(payload)
+    flush("PreToolUse")
+    capsys.readouterr()
+    assert seen == [("Bash", "toolu_x"), ("Bash", "")]
+
+
 def test_an_unbound_session_gets_nothing(unbound, capsys):
     assert "Inject a refocus block." not in _prompt(capsys)
     _compact()
@@ -199,7 +213,7 @@ def _session_start(payload, capsys):
     return capsys.readouterr().out
 
 
-@pytest.mark.parametrize("task_id", ["master", "i1"])
+@pytest.mark.parametrize("task_id", ["master", "master-2", "i1"])
 def test_codex_compact_start_restores_intent_once(bound, monkeypatch, capsys, compact_events, task_id):
     monkeypatch.setenv("AGENTIHOOKS_TARGET", "codex")
     monkeypatch.setenv("AGENTIHOOKS_SWARM_TASK", task_id)
@@ -209,7 +223,7 @@ def test_codex_compact_start_restores_intent_once(bound, monkeypatch, capsys, co
     assert "PostCompact" not in hook_manager.EVENT_HANDLERS
     out = _session_start(compact_events[2], capsys)
     assert "SWARM REFOCUS" in out
-    if task_id == "master":
+    if master_coding.MASTER_TASK.fullmatch(task_id):
         assert "Master obligations:" in out
         assert "Your task master" not in out
     else:

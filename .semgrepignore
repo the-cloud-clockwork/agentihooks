@@ -32,3 +32,9 @@ testsuite/
 
 # Helm templates are Go templates, not YAML; the strict scan cannot parse them
 deploy/helm/*/templates/
+
+# Domain rule fixtures are red by design; each runs only under semgrep --test
+.semgrep/
+
+# Guard rule fixtures are red by design; scripts.ci_semgrep_floors tests them
+.semgrep-guards/

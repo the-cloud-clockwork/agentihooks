@@ -49,7 +49,7 @@ def test_client_waits_for_a_reloading_server_without_starting_another(
         "if os.environ['RELEASE_SOCKET'] == 'True': httpd.server_close()\n"
         "(server.core.LEDGER_DIR / 'reloading').touch()\n"
         "time.sleep(0.3)\n"
-        "server.reload_if_changed(0, (server.core.LEDGER_DIR,))\n"
+        "os.execv(sys.executable, [sys.executable, str(server.CODE_DIR / 'ledger_server.py'), '--serve'])\n"
     )
     env = {**os.environ, "LEDGER_DIR": str(tmp_path), "LEDGER_PORT": str(port)}
     env["RELEASE_SOCKET"] = str(release_socket)
@@ -67,8 +67,8 @@ def test_client_waits_for_a_reloading_server_without_starting_another(
                 time.sleep(0.01)
             urlopen = server.ledger_link.urllib.request.urlopen
 
-            def impatient(request, timeout):
-                return urlopen(request, timeout=min(timeout, 0.05))
+            def impatient(request, timeout, **options):
+                return urlopen(request, timeout=min(timeout, 0.05), **options)
 
             with patch.object(server.ledger_link.urllib.request, "urlopen", side_effect=impatient):
                 assert server.ledger_link.serving(url=base) is None
@@ -267,10 +267,15 @@ def test_deadline_is_enforced_at_exact_expiry(isolated_server):
 
 
 def test_health_requests_use_short_timeouts(isolated_server):
-    with patch.object(server.ledger_link.urllib.request, "urlopen") as health:
+    with (
+        patch.object(server.ledger_link, "transport", return_value={}),
+        patch.object(server.ledger_link.urllib.request, "urlopen") as health,
+    ):
         health.return_value.__enter__.return_value.read.return_value = f'{{"dir": "{isolated_server}"}}'.encode()
         server.ensure()
-        health.assert_called_once_with(f"{server.BASE}/healthz", timeout=1)
+        health.assert_called_once()
+        assert health.call_args.args[0].full_url == f"{server.BASE}/healthz"
+        assert health.call_args.kwargs == {"timeout": 1}
     with (
         patch.object(server.time, "monotonic", return_value=100),
         patch.object(server, "SERVER_WAIT", 5),

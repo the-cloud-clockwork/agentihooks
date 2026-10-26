@@ -25,6 +25,7 @@ ATTEMPTS_ENV = "AGENTIHOOKS_INBOX_OUTBOX_MAX_ATTEMPTS"
 DEFAULT_ATTEMPTS = 3
 LOCK = "inbox-outbox.lock"
 OPS = ("send", "reply", "close", "post", "say", "ledger")
+APPEND_ONLY = ("add", "add_item", "relay", "answer")
 MAX_ENV = "AGENTIHOOKS_INBOX_OUTBOX_MAX_BYTES"
 WARN_ENV = "AGENTIHOOKS_INBOX_OUTBOX_WARN_BYTES"
 DEFAULT_MAX_BYTES = 1_048_576
@@ -46,6 +47,12 @@ class LedgerDown(Exception):
 
 
 class LedgerBusy(LedgerDown):
+    def __init__(self, message: str, targets: frozenset = frozenset()) -> None:
+        super().__init__(message)
+        self.targets = targets
+
+
+class RevisionConflict(Exception):
     pass
 
 
@@ -189,7 +196,8 @@ def submit(store, entry: dict, apply) -> dict:
 
 
 def flush(store) -> Report:
-    """Replay every queued record in order; a destination that fails keeps that record and its later ones for later."""
+    """Replay every queued record in order; a failing destination keeps that record and its later ones for later, and a
+    resource still in revision conflict keeps only the later records that write it or a resource a kept record writes."""
     report = Report()
     if not waiting():
         return report
@@ -205,7 +213,7 @@ def _replay(store, report: Report) -> None:
 
     from scripts.inbox.cli import apply
 
-    kept, down = [], {"redis"} if store is None else set()
+    kept, down, held = [], {"redis"} if store is None else set(), set()
     tracked, cap = _attempts(), max_attempts()
     for line in path().read_text().splitlines(keepends=True):
         entry = parse(line)
@@ -213,17 +221,17 @@ def _replay(store, report: Report) -> None:
             _set_aside(line, "corrupt")
             report.corrupt += 1
             continue
-        if lane(entry) in down:
-            kept.append(line)
-            continue
         try:
+            if _keep_behind(entry, down, held):
+                kept.append(line)
+                continue
             apply(store, entry)
             report.applied.append(entry["item"])
         except DuplicateItem:
             report.already.append(entry["item"])
         except LedgerBusy as exc:
             if not stale(entry):
-                down.add(lane(entry))
+                _hold(entry, exc, down, held)
                 kept.append(line)
                 continue
             reason = f"{exc} for over {busy_age()} seconds ({BUSY_AGE_ENV})"
@@ -246,6 +254,23 @@ def _replay(store, report: Report) -> None:
         _keep(kept, report)
     else:
         _clear()
+
+
+def _keep_behind(entry: dict, down: set, held: set) -> bool:
+    if lane(entry) in down:
+        return True
+    shared = targets(entry)
+    if held & shared:
+        held.update(shared)
+        return True
+    return False
+
+
+def _hold(entry: dict, exc: LedgerBusy, down: set, held: set) -> None:
+    if exc.targets:
+        held.update(exc.targets)
+    else:
+        down.add(lane(entry))
 
 
 def _gave_up(line: str, entry: dict, error: str, count: int, report: Report, cap: int) -> bool:
@@ -366,21 +391,51 @@ def ledger_record(slug: str, ops: list, agent: str, service: bool) -> dict:
 
 
 def apply_ledger(store, by: str, entry: dict) -> dict:
+    ops = entry["args"]["ops"]
+    pinned = any(op.get("expected_revision") for op in ops)
+    try:
+        state = _send_ledger(entry["args"], ops)
+    except RevisionConflict as exc:
+        if not pinned:
+            raise LedgerBusy(str(exc), targets(entry)) from None
+        if not all(op["op"] in APPEND_ONLY for op in ops):
+            raise InboxError(f"{exc} since this write was queued, so its expected revision can never apply") from None
+        fresh = [{key: value for key, value in op.items() if key != "expected_revision"} for op in ops]
+        try:
+            state = _send_ledger(entry["args"], fresh)
+        except RevisionConflict as again:
+            raise LedgerBusy(str(again), targets(entry)) from None
+    if state.get("rejected"):
+        raise InboxError(f"the ledger server rejected {', '.join(state['rejected'])}")
+    return state
+
+
+def _send_ledger(args: dict, ops: list) -> dict:
     import urllib.error
 
     from scripts.swarm_ledger import ledger
 
-    args = entry["args"]
     try:
-        state = ledger.replay(args["slug"], args["ops"], args["agent"], args["service"])
+        return ledger.replay(args["slug"], ops, args["agent"], args["service"])
     except urllib.error.HTTPError as exc:
         from scripts.swarm_ledger.api.client import failure
 
-        if exc.code >= 500 or exc.code == 429 or failure(exc)[1].get("code") == "revision_conflict":
+        error = failure(exc)[1]
+        if error.get("code") == "revision_conflict":
+            where = (error.get("details") or {}).get("path")
+            raise RevisionConflict(
+                f"the ledger server answered {exc.code} revision conflict" + (f" on {where}" if where else "")
+            ) from None
+        if exc.code >= 500 or exc.code == 429:
             raise LedgerBusy(f"the ledger server answered {exc.code}") from None
         raise InboxError(f"the ledger server refused it: {exc.code}") from None
     except OSError as exc:
         raise LedgerDown(str(exc)) from None
-    if state.get("rejected"):
-        raise InboxError(f"the ledger server rejected {', '.join(state['rejected'])}")
-    return state
+
+
+def targets(entry: dict) -> frozenset:
+    from scripts.swarm_ledger.api import schemas
+
+    if lane(entry) != "ledger":
+        return frozenset()
+    return frozenset(schemas.target(op) for op in entry["args"]["ops"])

@@ -17,15 +17,17 @@ from scripts.inbox import seen  # noqa: E402
 from scripts.swarm_ledger import ledger_server as server  # noqa: E402
 from scripts.swarm_ledger import watch_ledger  # noqa: E402
 from scripts.swarm_ledger.events import Expired, Hub, stream  # noqa: E402
-from scripts.swarm_ledger.repository import repository  # noqa: E402
+from scripts.swarm_ledger.storage import default as default_repository  # noqa: E402
 from tests.swarm_ledger import legacy_page  # noqa: E402
+
+repository = default_repository()
 
 SLUG = "watchstream-2026-01-01"
 
 
 def make_ledger():
     content = {"title": "Demo", "overview": "o", "sources": [], "phases": [], "questions": [], "followups": []}
-    html_path, json_path = core.paths(SLUG)
+    html_path, json_path = legacy_page.paths(SLUG, core)
     html_path.write_text(legacy_page.render(new_ledger.build_doc(content), SLUG, 8765), encoding="utf-8")
     json_path.unlink(missing_ok=True)
     core.sync(SLUG)
@@ -254,7 +256,7 @@ def test_the_watcher_connects_with_header_credentials_and_no_token_in_the_url(mo
         def __iter__(self):
             return iter([b"event: heartbeat\n", b"data: {}\n", b"\n"])
 
-    def urlopen(request, timeout):
+    def urlopen(request, timeout, **options):
         seen.append((request.full_url, dict(request.header_items()), timeout))
         return Answer()
 
@@ -345,3 +347,48 @@ def test_a_patch_that_cannot_apply_reconnects_without_a_cursor(monkeypatch, caps
     with pytest.raises(SystemExit):
         watch_ledger.main()
     assert calls == [None, None]
+
+
+@pytest.mark.parametrize("swallowed", [False, True])
+def test_a_stop_request_survives_an_ignored_exit_exception(monkeypatch, swallowed):
+    make_ledger()
+    handlers = []
+
+    def credentials(slug):
+        with pytest.raises(SystemExit) as stopped:
+            handlers[0]()
+        assert stopped.value.code == 0
+        if not swallowed:
+            raise stopped.value
+        return {}
+
+    def stream(*args):
+        pytest.fail("stream connected after SIGTERM")
+
+    def register(number, handler):
+        assert callable(handler)
+        handlers.append(handler)
+
+    monkeypatch.setattr(watch_ledger.signal, "signal", register)
+    monkeypatch.setattr(watch_ledger.atexit, "register", lambda *args, **kwargs: None)
+    monkeypatch.setattr(watch_ledger, "credentials", credentials)
+    monkeypatch.setattr(watch_ledger, "stream", stream)
+    monkeypatch.setattr(sys, "argv", ["watch_ledger.py", SLUG, "--as", "watcher"])
+    if swallowed:
+        watch_ledger.main()
+    else:
+        with pytest.raises(SystemExit) as stopped:
+            watch_ledger.main()
+        assert stopped.value.code == 0
+
+
+def test_a_comment_on_a_hidden_done_task_still_reaches_its_claimant(capsys):
+    members = {"engineer@demo-0001": {}, "master@demo-0001": {"role": "orchestrator"}}
+    comment = {"rev": 2, "by": "operator", "kind": "comment added", "target": "tasks/t1", "id": "c1", "text": "look"}
+    closed = {"tasks": {"hidden": 1, "kept": 10, "ids": ["t1"], "claimed_by": {"t1": "engineer@demo-0001"}}}
+    state = {"tasks": [], "_meta": {"rev": 2, "events": [comment], "members": members, "closed": closed}}
+    watch = watch_ledger.Watch(args(since_rev=0, name="engineer@demo-0001"), "path.json", None)
+    watch.take("snapshot", {"ledger": state})
+    assert [line for line in capsys.readouterr().out.splitlines() if line.startswith("OPERATOR")] == [
+        'OPERATOR rev=2 comment added on tasks/t1 [c1]: "look"'
+    ]

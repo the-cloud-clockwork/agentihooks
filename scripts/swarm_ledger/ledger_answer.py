@@ -8,6 +8,8 @@ import re
 
 import ledger_comments
 
+from scripts.swarm_ledger import ports
+
 ITEM_RE = re.compile(r"^questions/[^/]+$")
 AUTHOR_RE = re.compile(r"^[A-Za-z][\w.@-]{0,63}$")
 OPS = ("answer",)
@@ -20,7 +22,7 @@ def refusal(autonomy):
         return ""
     if not autonomy:
         return "answer refused: this ledger has no swarm, so the operator answers questions"
-    return f"answer refused: at {autonomy} autonomy the operator answers questions; raise it with priority add"
+    return f"answer refused: at {autonomy} autonomy the operator answers questions; wait for him to write"
 
 
 def check(op):
@@ -36,7 +38,7 @@ def check(op):
 
 
 def apply(doc, op, ctx):
-    from scripts.swarm.naming import lane_of
+    lane_of = ports.swarm().naming.lane_of
 
     question = next((q for q in doc["questions"] if q["id"] == op["item"].split("/")[1]), None)
     if question is None:

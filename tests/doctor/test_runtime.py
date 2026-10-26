@@ -8,7 +8,6 @@ from scripts.doctor import detect, loop
 from scripts.swarm.health.verdicts import VerdictStore
 from scripts.swarm.store import RedisStore
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
 NOW = 10_000_000
 BLOCK = 4096
 

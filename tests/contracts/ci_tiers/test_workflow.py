@@ -15,9 +15,17 @@ DURATION_JOB = (
     if "durations" in yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())["jobs"]
     else "select"
 )
-UNIT = {DURATION_JOB, "split", "unit", "shard-check", "test-count", "gate-required"}
+UNIT = {DURATION_JOB, "split", "unit", "shard-check", "test-count", "gate-required"} | (
+    {"test-summary"}
+    if "test-summary" in yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())["jobs"]
+    else set()
+)
 QUEUE = UNIT | {"queue-fail-fast"}
-PULL_REQUEST = UNIT | {"select", "lint", "semgrep", "sonar", "mutation-plan", "mutation-stats", "mutation"}
+PULL_REQUEST = (
+    UNIT
+    | {"select", "lint", "semgrep", "sonar", "mutation-plan", "mutation-stats", "mutation", "writer-lock"}
+    | ({"docs"} if "docs" in yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())["jobs"] else set())
+)
 SELECTED = PULL_REQUEST - {"split", "unit", "shard-check"} | {"unit-selected"}
 PROMOTION = (PULL_REQUEST - {"mutation-plan", "mutation-stats", "mutation", "lint", "semgrep", "test-count"}) | {
     "queue-fail-fast",
@@ -26,11 +34,14 @@ PROMOTION = (PULL_REQUEST - {"mutation-plan", "mutation-stats", "mutation", "lin
     "coverage-baseline",
     "promote",
     "refresh-durations",
+    "count-record",
     "flake-budget",
     "swarm-image",
     "worker-image",
     "brain-smoke",
+    "writer-lock",
     "ledger-load",
+    "hierarchy-cpu",
     "kind-due",
     "helm-kind",
     "stage-budget",
@@ -81,7 +92,13 @@ def jobs_for(event, base_ref="dev", scope="full"):
             completed[name] = SimpleNamespace(
                 result="success" if runs else "skipped",
                 outputs=SimpleNamespace(
-                    due="true", reused="false", scope=scope if runs else "", analysis="A1" if runs else ""
+                    due="true",
+                    reused="false",
+                    forwarded="false",
+                    scope=scope if runs else "",
+                    analysis="A1" if runs else "",
+                    shards="[0, 1]",
+                    stats_parts="[0, 1]",
                 ),
             )
             del pending[name]
@@ -94,6 +111,8 @@ def jobs_for(event, base_ref="dev", scope="full"):
     "event,expected", [("merge_group", QUEUE), ("pull_request", PULL_REQUEST), ("push", PROMOTION)]
 )
 def test_each_event_runs_only_its_tier_jobs(event, expected):
+    if event == "push" and (ROOT / ".github/workflows/count-record.yml").exists():
+        expected = expected - {"count-record"}
     assert jobs_for(event) == expected
 
 
@@ -112,9 +131,37 @@ def test_the_retired_queue_baseline_leaves_the_workflow_and_the_gate_takes_the_p
     assert "queue-baseline" not in jobs
     assert not any("queue-baseline" in job.get("needs", []) for job in jobs.values())
     options = {"consolidated": True} if DURATION_JOB == "select" else {}
-    assert jobs["gate-required"]["steps"] in [
-        ci_reuse.gate_steps(queue_tier=True, promotion=True, **options, summary=summary) for summary in (False, True)
+    steps = jobs["gate-required"]["steps"]
+    steps[0]["run"] = steps[0]["run"].replace('"lint", "docs", "semgrep"', '"lint", "semgrep"')
+    assert steps in [
+        ci_reuse.selection_diagnostic(
+            forward(
+                finish(
+                    rerun(
+                        ci_reuse.inline_mutation(
+                            ci_reuse.postgres_required(
+                                ci_reuse.gate_steps(
+                                    queue_tier=True, promotion=True, **options, summary=summary, watcher_loss=True
+                                )
+                            )
+                        )
+                    )
+                )
+            )
+        )
+        for forward in (list, ci_reuse.forwarded_stats)
+        for summary in (False, True)
+        for rerun in (list, ci_reuse.lost_rerun)
+        for finish in (list, ci_reuse.pipefail_summary)
     ]
+
+
+def test_the_queue_gate_needs_the_fail_fast_watcher():
+    from scripts.ci_queue_fail_fast import SELF
+
+    jobs = yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())["jobs"]
+    assert SELF in jobs, f"the Tests workflow has no {SELF} job"
+    assert SELF in jobs["gate-required"]["needs"], f"the required gate does not need {SELF}"
 
 
 def test_the_queue_keeps_completeness_but_skips_the_shard_time_budget():
@@ -134,7 +181,10 @@ def test_the_shard_time_budget_grades_pull_requests_and_reports_on_promotion():
     flag = budget["env"]["REPORT"]
     assert _resolve({"group": flag}, event_name="push")["group"] == "--report"
     assert _resolve({"group": flag}, event_name="pull_request")["group"] == ""
-    assert budget["run"] == "python -m tests.shard_budget $REPORT shard-durations/*/durations.json"
+    assert re.fullmatch(
+        r"python3? -m tests\.shard_budget \$REPORT (shard-durations/\*|shard-reports/durations-\*)/durations\.json",
+        budget["run"],
+    )
 
 
 def _concurrency(event, run_id, number=None):

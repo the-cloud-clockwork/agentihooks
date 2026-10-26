@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_v2/worker_base_revision.py:scripts.swarm_v2.worker_base_revision.x_get__mutmut_14:648ba35b22f7d91919beefbb82afd0b2b1d7a5f1989669399c67341a2af0a40c": {
+    "reader": "Standards code-reviewer sub-agent",
+    "reason": "add_unredirected_header stores key.capitalize(). Probe: add_unredirected_header('authorization', 't') gives unredirected_hdrs {'Authorization': 't'}, identical to the original; redirect handling drops unredirected headers by stored key, which is unchanged."
+  }
+}

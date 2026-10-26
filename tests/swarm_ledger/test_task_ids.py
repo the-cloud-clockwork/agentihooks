@@ -49,7 +49,7 @@ def tab(browser):
 
 def test_every_task_card_leads_its_title_with_its_id_as_a_link_to_itself(tab):
     tab.locator("#tasks-box > summary").click()
-    tab.locator("#tasks-done > summary").click()
+    tab.locator("#item-tasks-rb3c").wait_for()
     for task in DOC["tasks"]:
         title = tab.locator(f"#item-tasks-{task['id']} .item-title")
         label = title.locator(".task-id")
@@ -62,7 +62,7 @@ def test_every_task_card_leads_its_title_with_its_id_as_a_link_to_itself(tab):
 
 def test_the_id_label_is_bare_flat_red_text_in_the_priorities_red(tab):
     tab.locator("#tasks-box > summary").click()
-    tab.locator("#tasks-done > summary").click()
+    tab.locator("#item-tasks-rb3c").wait_for()
     label = tab.locator("#item-tasks-rb3c .task-id")
     prio = tab.locator("#priorities .prio-link")
     style = (
@@ -83,12 +83,59 @@ def test_the_id_label_is_bare_flat_red_text_in_the_priorities_red(tab):
 
 def test_a_focused_id_label_keeps_a_visible_focus_ring(tab):
     tab.locator("#priorities .prio-link").click()
+    tab.evaluate(
+        """async () => {
+          const main = document.querySelector("script[type=module][src$='/js/main.js']").src;
+          const {render} = await import(new URL('render.js', main));
+          await render(null, true);
+        }"""
+    )
     label = tab.locator("#item-tasks-rb3c .task-id")
     label.wait_for(state="visible")
     label.focus()
     tab.keyboard.press("Tab")
     tab.keyboard.press("Shift+Tab")
     assert label.evaluate("el => el.matches(':focus-visible')")
+    assert label.evaluate("el => getComputedStyle(el).outlineStyle") != "none"
+
+
+def test_a_focused_id_label_keeps_its_focus_ring_through_later_renders(tab):
+    tab.locator("#tasks-box > summary").click()
+    label = tab.locator("#item-tasks-rb3c .task-id")
+    label.wait_for(state="visible")
+    label.focus()
+    tab.keyboard.press("Tab")
+    tab.keyboard.press("Shift+Tab")
+    tab.evaluate(
+        """async () => {
+          const main = document.querySelector("script[type=module][src$='/js/main.js']").src;
+          const {render} = await import(new URL('render.js', main));
+          await render();
+          await render(null, true);
+        }"""
+    )
+    assert label.evaluate("el => el === document.activeElement && el.matches(':focus-visible')")
+    assert label.evaluate("el => getComputedStyle(el).outlineStyle") != "none"
+
+
+def test_an_id_label_focused_while_a_render_runs_keeps_its_focus_ring(tab):
+    tab.locator("#tasks-box > summary").click()
+    label = tab.locator("#item-tasks-rb3c .task-id")
+    label.wait_for(state="visible")
+    label.focus()
+    tab.keyboard.press("Tab")
+    tab.keyboard.press("Shift+Tab")
+    tab.evaluate(
+        """async () => {
+          const main = document.querySelector("script[type=module][src$='/js/main.js']").src;
+          const {render} = await import(new URL('render.js', main));
+          document.activeElement.blur();
+          const running = render(null, true);
+          document.querySelector("#item-tasks-rb3c .task-id").focus();
+          await running;
+        }"""
+    )
+    assert label.evaluate("el => el === document.activeElement && el.matches(':focus-visible')")
     assert label.evaluate("el => getComputedStyle(el).outlineStyle") != "none"
 
 

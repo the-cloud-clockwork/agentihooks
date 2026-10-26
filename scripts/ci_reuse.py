@@ -44,13 +44,55 @@ PROMOTION_SKIPS = (
     '(.key == "queue-baseline" and .value.result == "skipped" and $event != "merge_group")'
     ' or ((.key == "lint" or .key == "semgrep" or .key == "test-count") and .value.result == "skipped" and $event == "push")',
 )
+WATCHER = "queue-fail-fast"
+WATCHER_LOSS = (
+    f' elif $event == "merge_group" and $job == "{WATCHER}" then'
+    ' (.value.result | IN("success", "failure", "cancelled")) and (.value.outputs.failed // "") == ""'
+)
+LOST_RERUN = (
+    ('"split", "unit", "shard-check", "test-count"]', '"split", "shard-check", "test-count"]'),
+    (
+        "and all($required[];",
+        'and ($event != "merge_group" or ([$jobs.unit.result, $jobs."unit-lost".result, $jobs."unit-rerun".result]'
+        ' | IN(["success", "skipped", "skipped"], ["failure", "success", "success"], ["cancelled", "success", "success"])))'
+        "\n      and all($required[];",
+    ),
+    (
+        ' else .value.result == "skipped" end)',
+        ' elif $event == "merge_group" and ($job | IN("unit", "unit-lost", "unit-rerun")) then true'
+        ' else .value.result == "skipped" end)',
+    ),
+    (
+        '(.key == "helm-kind" and .value.result == "skipped" and $kind == "false")',
+        '(.key == "helm-kind" and .value.result == "skipped" and $kind == "false")'
+        ' or ((.key == "unit-lost" or .key == "unit-rerun") and .value.result == "skipped" and $event != "merge_group")',
+    ),
+)
 
+INLINE_REQUIRED = (
+    '(if $mutation == "true" then ["mutation-plan", "mutation-stats", "mutation"] else [] end)',
+    '(if $mutation == "true" then ["mutation-plan", "mutation-stats"]'
+    ' + (if $inline == "true" then [] else ["mutation"] end) else [] end)',
+)
+INLINE_SKIP = (
+    '.value.result == "skipped" and $mutation == "false")',
+    '.value.result == "skipped" and $mutation == "false")'
+    ' or (.key == "mutation" and .value.result == "skipped" and $inline == "true")',
+)
 
-QUEUE_TIER = """if [[ "${EVENT:-}" == merge_group || "${EVENT:-}" == pull_request ]]; then
+POSTGRES_REQUIRED = ('"semgrep", "sonar"]', '"semgrep", "sonar", "writer-lock"]')
+
+FORWARDED_STATS = """NEEDS=$(jq 'if ."mutation-plan".result == "success" and ."mutation-plan".outputs.forwarded == "true" and ."mutation-stats".result == "skipped" then ."mutation-stats".result = "success" else . end' <<< "$NEEDS")
+"""
+
+QUEUE_TIER = (
+    """if [[ "${EVENT:-}" == merge_group || "${EVENT:-}" == pull_request ]]; then
   if ! jq -e --arg event "$EVENT" --arg mutation "$MUTATION" '
     (.select.outputs.scope // "") as $scope
     | (if $event == "merge_group" then
-      ["durations", "split", "unit", "shard-check", "test-count", "queue-fail-fast"]
+      ["durations", "split", "unit", "shard-check", "test-count", \""""
+    + WATCHER
+    + """\"]
     else
       ["durations", "select", "test-count", "lint", "semgrep", "sonar"]
       + (if $scope == "full" then ["split", "unit", "shard-check"] elif $scope == "selected" then ["unit-selected"] else [] end)
@@ -68,6 +110,7 @@ QUEUE_TIER = """if [[ "${EVENT:-}" == merge_group || "${EVENT:-}" == pull_reques
   exit 0
 fi
 """
+)
 
 
 def gate_steps(
@@ -76,6 +119,8 @@ def gate_steps(
     promotion: bool = False,
     consolidated: bool = False,
     summary: bool = False,
+    docs: bool = False,
+    watcher_loss: bool = False,
 ) -> list[dict]:
     run = 'echo "$NEEDS"\nif [[ "${REUSED:-false}" == true ]]; then\n  if [[ "${EVENT:-}" != merge_group ]] || ! jq -e \'has("reuse") and .reuse.result == "success" and .reuse.outputs.reused == "true" and (.reuse.outputs.run // "" | test("^[0-9]+$")) and has("queue-baseline") and ."queue-baseline".result == "success" and all(to_entries[]; ((.key == "reuse" or .key == "queue-baseline" or .key == "stage-budget") and .value.result == "success") or (.key != "reuse" and .key != "queue-baseline" and .key != "stage-budget" and .value.result == "skipped"))\' <<< "$NEEDS"; then\n    echo "::error::Verified queue reuse and its coverage baseline must succeed."\n    exit 1\n  fi\n  exit 0\nfi\nif ! jq -e --arg event "${EVENT:-}" --arg mutation "$MUTATION" --arg kind "${KIND:-}" \'all(to_entries[]; .value.result == "success" or ((.key == "mutation" or .key == "mutation-plan" or .key == "mutation-stats") and .value.result == "skipped" and $mutation == "false") or (.key == "helm-kind" and .value.result == "skipped" and $kind == "false") or (.key == "queue-baseline" and .value.result == "skipped" and $event != "merge_group"))\' <<< "$NEEDS"; then\n  echo "::error::Every required gate must succeed."\n  exit 1\nfi\n'
     if selected or queue_tier:
@@ -88,6 +133,20 @@ def gate_steps(
         run = run.replace('["durations", "split",', '["select", "split",').replace(
             '["durations", "select",', '["select",'
         )
+    if watcher_loss:
+        run = (
+            run.replace(f', "{WATCHER}"]', "]")
+            .replace(
+                "and all($required[];",
+                f'and ($event != "merge_group" or has("{WATCHER}"))\n      and all($required[];',
+            )
+            .replace(
+                'then .value.result == "success" else .value.result == "skipped" end)',
+                f'then .value.result == "success"{WATCHER_LOSS} else .value.result == "skipped" end)',
+            )
+        )
+    if docs:
+        run = run.replace('"lint", "semgrep"', '"lint", "docs", "semgrep"')
     return [
         {
             "name": "Require every gate to succeed",
@@ -103,8 +162,56 @@ def gate_steps(
     ] + (summary_steps() if summary else [])
 
 
+def inline_mutation(steps: list[dict]) -> list[dict]:
+    [aggregation, *rest] = steps
+    run = (
+        aggregation["run"]
+        .replace('--arg mutation "$MUTATION"', '--arg mutation "$MUTATION" --arg inline "${INLINE:-}"')
+        .replace(*INLINE_REQUIRED)
+        .replace(*INLINE_SKIP)
+    )
+    env = {
+        **aggregation["env"],
+        "INLINE": "${{ needs.mutation-plan.outputs.shards == '[0]' && needs.mutation-plan.outputs.stats_parts == '[0]' }}",
+    }
+    return [{**aggregation, "env": env, "run": run}, *rest]
+
+
+def lost_rerun(steps: list[dict]) -> list[dict]:
+    [aggregation, *rest] = steps
+    run = aggregation["run"]
+    for old, new in LOST_RERUN:
+        run = run.replace(old, new)
+    return [{**aggregation, "run": run}, *rest]
+
+
+def postgres_required(steps: list[dict]) -> list[dict]:
+    [aggregation, *rest] = steps
+    return [{**aggregation, "run": aggregation["run"].replace(*POSTGRES_REQUIRED)}, *rest]
+
+
 def summary_steps() -> list[dict]:
     return yaml.safe_load(Path(__file__).with_name("ci_gate_summary_steps.yml").read_text())
+
+
+def pipefail_summary(steps: list[dict]) -> list[dict]:
+    return [{**step, "shell": "bash"} if step.get("name") == "Summarize this run's tests" else step for step in steps]
+
+
+def selection_diagnostic(steps: list[dict]) -> list[dict]:
+    [aggregation, *rest] = steps
+    prefix = """selection=$(jq -r '.select.result // ""' <<< "$NEEDS")
+if [[ "$selection" == failure || "$selection" == cancelled ]]; then
+  echo "::error::Test selection $selection; fix selection before downstream test and coverage checks."
+  exit 1
+fi
+"""
+    return [{**aggregation, "run": prefix + aggregation["run"]}, *rest]
+
+
+def forwarded_stats(steps: list[dict]) -> list[dict]:
+    [aggregation, *rest] = steps
+    return [{**aggregation, "run": FORWARDED_STATS + aggregation["run"]}, *rest]
 
 
 def reuse_job() -> dict:
@@ -115,6 +222,12 @@ def duration_provenance_steps() -> list[dict]:
     return yaml.safe_load(Path(__file__).with_name("ci_duration_provenance.yml").read_text())
 
 
+def retried_duration_provenance_steps() -> list[dict]:
+    steps = duration_provenance_steps()
+    steps[-1]["uses"] = "./provenance-grader/.github/actions/retry-upload"
+    return steps
+
+
 def paged_reuse_job() -> dict:
     job = reuse_job()
     [fetch] = [step for step in job["steps"] if step.get("name") == "Fetch the evidence of recent passed runs"]
@@ -122,6 +235,13 @@ def paged_reuse_job() -> dict:
         "gh api --paginate \"$actions/runs/$1/attempts/$2/jobs?per_page=100\" --jq '.jobs[]'",
         'python3 -m scripts.ci_budget.jobs "$actions/runs/$1/attempts/$2/jobs" --page-size 5',
     )
+    return job
+
+
+def retried_reuse_job() -> dict:
+    job = paged_reuse_job()
+    [publish] = [step for step in job["steps"] if step.get("name") == "Publish protected tested tree evidence"]
+    publish["uses"] = "./.github/actions/retry-upload"
     return job
 
 
@@ -188,10 +308,18 @@ def _passed(workflow, jobs):
     definitions = workflow["jobs"]
     gate = definitions["gate-required"]
     required = gate["needs"]
-    if not any(job["name"] == gate["name"] and job["conclusion"] == "success" for job in jobs):
+    label = gate["name"]
+    if label == "${{ github.event_name == 'merge_group' && 'Queue gate summary' || 'Gate — Required' }}":
+        label = "Gate — Required"
+    if not any(job["name"] == label and job["conclusion"] == "success" for job in jobs):
         return False
     for name in required:
         label = definitions[name].get("name", name)
+        if (
+            name == "queue-fail-fast"
+            and label == "${{ github.event_name == 'merge_group' && 'Gate — Required' || 'queue-fail-fast' }}"
+        ):
+            label = "queue-fail-fast"
         results = [
             job["conclusion"]
             for job in jobs

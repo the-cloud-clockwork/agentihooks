@@ -205,3 +205,10 @@ def test_the_first_job_names_the_runner_on_a_pickup_tie_and_a_job_never_started_
     stages = {row["stage"]: row for row in metrics_ci.rows("sw", RUN, jobs, {})[metrics_ci.STAGES]}
     assert (stages["lint"]["runner"], stages["lint"]["pickup_s"]) == ("first", 0.0)
     assert (stages["sonar"]["runner"], stages["sonar"]["pickup_s"]) == ("", 0.0)
+
+
+def test_finished_merge_group_runs_are_metered_as_the_queue_tier():
+    group = {**RUN, "id": 30, "event": "merge_group", "head_branch": "gh-readonly-queue/dev/pr-1-abc"}
+    running = {**group, "id": 31, "status": "in_progress"}
+    cancelled = {**group, "id": 32, "conclusion": "cancelled"}
+    assert [r["id"] for r in metrics_ci.metered([group, running, cancelled])] == [30]

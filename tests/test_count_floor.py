@@ -1,3 +1,5 @@
+import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -69,6 +71,38 @@ def _collection_tree(tmp_path):
     ):
         subprocess.run(["git", *arguments], cwd=root, check=True, capture_output=True)
     return root
+
+
+@pytest.mark.parametrize("lost", [False, True])
+def test_the_floor_exports_the_same_head_collection_without_collecting_it_again(tmp_path, monkeypatch, lost):
+    from tests.count_floor import main
+
+    base = _collection_tree(tmp_path / "base")
+    head = _collection_tree(tmp_path / "head")
+    expected = ["tests/test_a.py::test_a", "tests/test_a.py::test_b[1]", "tests/test_a.py::test_b[2]"]
+    if lost:
+        (head / "tests" / "test_a.py").write_text("def test_a():\n    pass\n")
+        expected = ["tests/test_a.py::test_a"]
+    output = tmp_path / "collected.json"
+    monkeypatch.setenv("TEST_COUNT_HEAD_COLLECTION", str(output))
+    assert main(["--base", str(base), "--head", str(head)]) == int(lost)
+    assert json.loads(output.read_text()) == expected
+    assert (head / ".collection-runs").read_text() == "x"
+    from tests.duration_coverage import collected_tests
+
+    assert json.loads(output.read_text()) == collected_tests(head)
+
+
+def test_a_failed_head_collection_exports_no_list_for_splitting(tmp_path, monkeypatch):
+    from tests.count_floor import main
+
+    base = _collection_tree(tmp_path / "base")
+    head = _collection_tree(tmp_path / "head")
+    (head / "tests" / "test_a.py").write_text("this is invalid python\n")
+    output = tmp_path / "collected.json"
+    monkeypatch.setenv("TEST_COUNT_HEAD_COLLECTION", str(output))
+    assert main(["--base", str(base), "--head", str(head)]) == 1
+    assert not output.exists()
 
 
 def test_collection_reuses_only_an_exact_clean_tree_and_environment(tmp_path):
@@ -151,6 +185,276 @@ def test_changed_pytest_selection_cannot_reuse_a_full_collection(tmp_path, monke
     assert (root / ".collection-runs").read_text() == "xx"
 
 
+def test_collection_splits_across_processes_and_matches_one_process(tmp_path, monkeypatch):
+    import tests.count_floor as count_floor
+
+    root = _tree(
+        tmp_path / "tree",
+        {
+            "test_a.py": SUITE,
+            "alpha/test_x.py": OTHER,
+            "helpers/__init__.py": "",
+            "test_m.py": OTHER.replace("test_c", "test_m"),
+            "zeta/inner/test_z.py": SUITE,
+            "conftest.py": "import os\nwith open('pids', 'a') as out:\n    out.write(f'{os.getpid()}\\n')\n",
+        },
+    )
+    single = subprocess.run(
+        [sys.executable, "-m", "pytest", "--collect-only", "-q", "-p", "no:cacheprovider", "tests/"],
+        cwd=root,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    expected = [line for line in single.stdout.splitlines() if "::" in line]
+    (root / "pids").unlink()
+    monkeypatch.setattr(count_floor, "collection_processes", lambda: 3)
+    assert count_floor.collect_all({"head": root}, "tests/") == {"head": expected}
+    assert len(expected) == 8
+    assert len(set((root / "pids").read_text().split())) == 3
+
+
+def test_collection_groups_are_contiguous_runs_weighted_by_test_files(tmp_path, monkeypatch):
+    from tests.count_floor import collection_groups
+
+    root = (
+        _tree(
+            tmp_path,
+            {
+                "__init__.py": "",
+                "conftest.py": "",
+                "alpha/test_x.py": OTHER,
+                "alpha/test_y.py": OTHER,
+                "beta/data.txt": "",
+                "notes.txt": "",
+                "test_a.py": SUITE,
+                "test_b.py": OTHER,
+                "test_data.json": "",
+            },
+        )
+        / "tests"
+    )
+    shared = ["__init__.py", "conftest.py"]
+    assert collection_groups(root, 2) == [
+        [*shared, "alpha", "beta", "notes.txt"],
+        [*shared, "test_a.py", "test_b.py", "test_data.json"],
+    ]
+    assert collection_groups(root, 3) == [
+        [*shared, "alpha", "beta", "notes.txt"],
+        [*shared, "test_a.py"],
+        [*shared, "test_b.py", "test_data.json"],
+    ]
+    assert collection_groups(root, 1) == [
+        [*shared, "alpha", "beta", "notes.txt", "test_a.py", "test_b.py", "test_data.json"]
+    ]
+    assert collection_groups(tmp_path / "missing", 4) == [shared]
+    listed = Path.iterdir
+    monkeypatch.setattr(Path, "iterdir", lambda path: reversed(list(listed(path))))
+    assert collection_groups(root, 2)[0] == [*shared, "alpha", "beta", "notes.txt"]
+
+
+def test_each_collected_side_shares_the_processes(tmp_path, monkeypatch):
+    import tests.count_floor as count_floor
+
+    files = {
+        "alpha/test_x.py": OTHER,
+        "test_a.py": SUITE,
+        "test_m.py": OTHER.replace("test_c", "test_m"),
+        "zeta/test_z.py": SUITE,
+        "conftest.py": "import os\nwith open('pids', 'a') as out:\n    out.write(f'{os.getpid()}\\n')\n",
+    }
+    trees = {side: _tree(tmp_path / side, files) for side in ("base", "head")}
+    monkeypatch.setattr(count_floor, "collection_processes", lambda: 4)
+    collected = count_floor.collect_all(trees, "tests/")
+    assert len(collected["base"]) == len(collected["head"]) == 8
+    assert [len(set((tree / "pids").read_text().split())) for tree in trees.values()] == [2, 2]
+
+
+def test_one_failed_group_fails_the_whole_side(tmp_path, monkeypatch):
+    import tests.count_floor as count_floor
+
+    root = _tree(tmp_path, {"alpha/test_x.py": "raise RuntimeError('collection fails')\n", "test_a.py": SUITE})
+    monkeypatch.setattr(count_floor, "collection_processes", lambda: 2)
+    assert count_floor.collect_all({"head": root}, "tests/") == {"head": None}
+
+
+def test_groups_that_overlap_fail_the_side_instead_of_inflating_the_count(tmp_path, monkeypatch):
+    import tests.count_floor as count_floor
+
+    root = _tree(tmp_path, {"test_a.py": SUITE, "test_b.py": OTHER})
+    every = ["__init__.py", "conftest.py", "test_a.py", "test_b.py"]
+    monkeypatch.setattr(count_floor, "collection_groups", lambda root, count: [every, every])
+    assert count_floor.collect_all({"head": root}, "tests/") == {"head": None}
+
+
+def test_a_group_that_collects_no_tests_adds_nothing(tmp_path, monkeypatch):
+    import tests.count_floor as count_floor
+
+    root = _tree(tmp_path, {"test_a.py": SUITE, "test_empty.py": "x = 1\n"})
+    monkeypatch.setattr(count_floor, "collection_processes", lambda: 2)
+    assert count_floor.collection_groups(root / "tests", 2)[1][-1] == "test_empty.py"
+    assert count_floor.collect_all({"head": root}, "tests/") == {
+        "head": ["tests/test_a.py::test_a", "tests/test_a.py::test_b[1]", "tests/test_a.py::test_b[2]"]
+    }
+
+
+def test_collection_processes_follow_the_cpu_quota(monkeypatch):
+    import scripts.ci_cpu_quota as quota
+    from tests.count_floor import collection_processes
+
+    monkeypatch.setattr(os, "sched_getaffinity", lambda pid: set(range(6)))
+    monkeypatch.setattr(quota, "quota_cpus", lambda: 2.5)
+    assert collection_processes() == 2
+    monkeypatch.setattr(quota, "quota_cpus", lambda: None)
+    assert collection_processes() == 6
+
+
+def _recorded_floor(tmp_path, base_files, head_files, recorded, environ=None):
+    base = _collection_tree(tmp_path / "b")
+    for name, text in base_files.items():
+        (base / "tests" / name).write_text(text)
+    subprocess.run(["git", "add", "tests"], cwd=base, check=True, capture_output=True)
+    subprocess.run(
+        [
+            "git",
+            "-c",
+            "user.name=Fixture",
+            "-c",
+            "user.email=fixture@example.invalid",
+            "commit",
+            "--allow-empty",
+            "-m",
+            "Base",
+        ],
+        cwd=base,
+        check=True,
+        capture_output=True,
+    )
+    record = tmp_path / "record.json"
+    subprocess.run(
+        [sys.executable, "-m", "tests.count_floor", "--record", str(record), "--head", str(base)],
+        cwd=_ROOT,
+        check=True,
+        capture_output=True,
+    )
+    if recorded is not None:
+        record.write_text(recorded(record.read_text()))
+    head = _tree(tmp_path / "head", head_files)
+    runs_before = (base / ".collection-runs").read_text()
+    result = subprocess.run(
+        [sys.executable, "-m", "tests.count_floor", "--base", str(base), "--head", str(head)],
+        cwd=_ROOT,
+        capture_output=True,
+        text=True,
+        env={**os.environ, "TEST_COUNT_BASE_RECORD": str(record), **(environ or {})},
+    )
+    return result, (base / ".collection-runs").read_text() != runs_before
+
+
+def test_a_matching_dev_record_grades_the_base_without_collecting_it(tmp_path):
+    result, collected = _recorded_floor(tmp_path, {}, {"test_a.py": SUITE}, None)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "head collects 3 tests, base floor 3" in result.stdout
+    assert "base count read from the dev record" in result.stdout
+    assert not collected
+
+
+def test_a_dev_record_keeps_the_floor_red_on_a_lost_test(tmp_path):
+    result, collected = _recorded_floor(tmp_path, {}, {"test_a.py": OTHER}, None)
+    assert result.returncode == 1
+    assert "tests/test_a.py::test_a is in the base and not in the head" in result.stdout
+    assert not collected
+
+
+@pytest.mark.parametrize(
+    "recorded",
+    [
+        lambda text: json.dumps({**json.loads(text), "identity": "0" * 64}),
+        lambda text: "not json",
+        lambda text: json.dumps({"identity": json.loads(text)["identity"]}),
+        lambda text: json.dumps({**json.loads(text), "nodeids": [3]}),
+    ],
+    ids=["other-tree-or-environment", "unreadable", "no-tests", "invalid-tests"],
+)
+def test_a_record_that_does_not_match_the_base_falls_back_to_collecting_it(tmp_path, recorded):
+    result, collected = _recorded_floor(tmp_path, {"test_a.py": SUITE + OTHER}, {"test_a.py": SUITE}, recorded)
+    assert collected
+    assert result.returncode == 1
+    assert "no dev record matches the base, so it is collected" in result.stdout
+    assert "base floor 4" in result.stdout
+
+
+def test_a_missing_record_file_collects_the_base(tmp_path):
+    result, collected = _recorded_floor(
+        tmp_path, {}, {"test_a.py": SUITE}, None, {"TEST_COUNT_BASE_RECORD": str(tmp_path / "absent.json")}
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert collected
+
+
+def test_a_record_from_an_exported_collection_matches_a_collected_record_without_collecting(tmp_path):
+    tree = _collection_tree(tmp_path)
+    collected = tmp_path / "collected.json"
+    collected_record, exported_record = tmp_path / "collected-record.json", tmp_path / "exported-record.json"
+    record = [sys.executable, "-m", "tests.count_floor", "--head", str(tree)]
+    subprocess.run([*record, "--record", str(collected_record)], cwd=_ROOT, check=True, capture_output=True)
+    collected.write_text(json.dumps(json.loads(collected_record.read_text())["nodeids"]))
+    runs_before = (tree / ".collection-runs").read_text()
+    result = subprocess.run(
+        [*record, "--record", str(exported_record), "--collected", str(collected)],
+        cwd=_ROOT,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert (tree / ".collection-runs").read_text() == runs_before
+    assert json.loads(exported_record.read_text()) == json.loads(collected_record.read_text())
+
+
+@pytest.mark.parametrize("exported", ["[]", "[3]", "{}", "not json", None])
+def test_an_unusable_exported_collection_writes_no_record(tmp_path, exported):
+    tree = _collection_tree(tmp_path)
+    collected, record = tmp_path / "collected.json", tmp_path / "record.json"
+    if exported is not None:
+        collected.write_text(exported)
+    result = subprocess.run(
+        [sys.executable, "-m", "tests.count_floor", "--head", str(tree), "--record", str(record)]
+        + ["--collected", str(collected)],
+        cwd=_ROOT,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 1
+    assert not record.exists()
+
+
+@pytest.mark.parametrize(
+    "artifact, picked",
+    [
+        ({}, True),
+        ({"head_branch": "ci-plant"}, False),
+        ({"head_sha": "f" * 40}, False),
+        ({"head_repository_id": 2}, False),
+        ({"expired": True}, False),
+        ({"head_branch": "gh-readonly-queue/dev/pr-1-" + "b" * 40}, True),
+        ({"head_branch": "gh-readonly-queue/main/pr-1-" + "b" * 40}, False),
+    ],
+    ids=["dev-push", "pull-request-branch", "other-commit", "fork", "expired", "dev-queue-group", "main-queue-group"],
+)
+def test_only_an_artifact_from_dev_for_the_exact_base_commit_is_trusted(artifact, picked):
+    from tests.count_floor import dev_record
+
+    run = {"head_branch": "dev", "head_sha": "a" * 40, "repository_id": 1, "head_repository_id": 1}
+    expired = artifact.pop("expired", False)
+    listing = {
+        "artifacts": [
+            {"id": 7, "expired": False, "workflow_run": {**run, "head_branch": "ci-plant"}},
+            {"id": 9, "expired": expired, "workflow_run": {**run, **artifact}},
+        ]
+    }
+    assert dev_record(listing, "a" * 40) == (9 if picked else None)
+
+
 def test_head_matching_the_base_count_passes(tmp_path):
     result = _floor(tmp_path, {"test_a.py": SUITE}, {"test_a.py": SUITE})
     assert result.returncode == 0, result.stdout + result.stderr
@@ -180,12 +484,21 @@ def test_a_renamed_test_keeps_the_floor(tmp_path):
 
 @pytest.mark.parametrize("side", ["base", "head"])
 def test_a_collection_error_on_either_side_is_red(tmp_path, side):
-    broken = {"test_a.py": SUITE, "test_x.py": "import not_a_module_anywhere\n"}
+    broken = {
+        "test_a.py": SUITE,
+        "test_x.py": "import not_a_module_anywhere\n",
+        "test_y.py": "raise RuntimeError('another collection exception')\n",
+    }
     sides = {"base": {"test_a.py": SUITE}, "head": {"test_a.py": SUITE}}
     sides[side] = broken
     result = _floor(tmp_path, sides["base"], sides["head"])
     assert result.returncode == 1
     assert f"::error::Collecting the {side} tests failed" in result.stdout
+    output = result.stdout + result.stderr
+    assert "tests/test_x.py" in output
+    assert "ModuleNotFoundError: No module named 'not_a_module_anywhere'" in output
+    assert "tests/test_y.py" in output
+    assert "RuntimeError: another collection exception" in output
 
 
 SUBJECT = "def subject():\n    return 1\n"
@@ -239,6 +552,240 @@ def test_a_lost_test_whose_subject_was_deleted_is_admitted(tmp_path):
         result.stdout
     )
     assert "head collects 1 tests, base floor 1" in result.stdout
+
+
+@pytest.mark.parametrize("deleted", [True, False], ids=["deleted", "retained"])
+@pytest.mark.parametrize(
+    "collision",
+    [SUBJECT, "class Runner:\n    def subject(self):\n        return 3\n", "subject = 3\n"],
+    ids=["function", "method", "constant"],
+)
+def test_a_preexisting_unrelated_name_does_not_hide_subject_deletion(tmp_path, deleted, collision):
+    result = _floor(
+        tmp_path,
+        {"test_mod.py": SUBJECT_TESTS},
+        {"test_mod.py": OTHER_TEST},
+        {
+            "base": _package(mod=SUBJECT + "\n\n" + KEPT, elsewhere=collision),
+            "head": _package(mod=("" if deleted else SUBJECT) + "\n\n" + KEPT, elsewhere=collision),
+        },
+    )
+    assert result.returncode == (0 if deleted else 1), result.stdout + result.stderr
+    assert ("test_subject is admitted" in result.stdout) == deleted
+
+
+@pytest.mark.parametrize("deleted", [True, False], ids=["deleted", "retained"])
+@pytest.mark.parametrize("called", [True, False], ids=["called", "uncalled"])
+def test_only_a_called_local_helper_can_explain_a_deleted_subject(tmp_path, deleted, called):
+    tests = (
+        "from pkg.mod import subject, other\n\n"
+        "def first():\n    return second()\n\n"
+        "def second():\n    return subject()\n\n"
+        "def test_subject():\n    assert " + ("first() == 1" if called else "True") + "\n\n"
+        "def test_other():\n    assert other() == 2\n"
+    )
+    result = _floor(
+        tmp_path,
+        {"test_mod.py": tests},
+        {"test_mod.py": OTHER_TEST},
+        {
+            "base": _package(mod=SUBJECT + "\n\n" + KEPT),
+            "head": _package(mod=("" if deleted else SUBJECT) + "\n\n" + KEPT),
+        },
+    )
+    admitted = called and deleted
+    assert result.returncode == (0 if admitted else 1), result.stdout + result.stderr
+    assert ("test_subject is admitted" in result.stdout) == admitted
+
+
+@pytest.mark.parametrize("deleted", [True, False], ids=["deleted", "retained"])
+@pytest.mark.parametrize("executable", [True, False], ids=["code", "data"])
+def test_a_deleted_executable_fixture_explains_only_its_own_lost_test(tmp_path, deleted, executable):
+    fixture = json.dumps({"steps": [{"run": "printf retired"}]} if executable else {"label": "retired"})
+    tests = (
+        "import json\nfrom pathlib import Path\n\n"
+        "_ROOT = Path(__file__).resolve().parents[1]\n\n"
+        "def fixture():\n    return json.loads((_ROOT / 'tests/fixtures/watch.json').read_text())\n\n"
+        "def test_fixture():\n    assert fixture()\n\n"
+        "def test_kept():\n    assert True\n"
+    )
+    result = _floor(
+        tmp_path,
+        {"test_mod.py": tests},
+        {"test_mod.py": "def test_kept():\n    assert True\n"},
+        {
+            "base": {"tests/fixtures/watch.json": fixture},
+            "head": {} if deleted else {"tests/fixtures/watch.json": fixture},
+        },
+    )
+    admitted = deleted and executable
+    assert result.returncode == (0 if admitted else 1), result.stdout + result.stderr
+    assert ("test_fixture is admitted" in result.stdout) == admitted
+
+
+@pytest.mark.parametrize("deleted", [True, False], ids=["deleted", "retained"])
+@pytest.mark.parametrize("run_name", ["__main__", "other"], ids=["entrypoint", "import"])
+def test_a_runpy_entrypoint_explains_only_deleted_executed_code(tmp_path, deleted, run_name):
+    entrypoint = SUBJECT.replace("subject", "main")
+    tests = (
+        "import runpy\nfrom pkg.mod import other\n\n"
+        "def test_subject():\n    assert runpy.run_module('pkg.mod', run_name=" + repr(run_name) + ")\n\n"
+        "def test_other():\n    assert other() == 2\n"
+    )
+    result = _floor(
+        tmp_path,
+        {"test_mod.py": tests},
+        {"test_mod.py": OTHER_TEST},
+        {
+            "base": _package(mod=entrypoint + "\n\n" + KEPT + "\nif __name__ == '__main__':\n    main()\n"),
+            "head": _package(mod=("" if deleted else entrypoint) + "\n\n" + KEPT),
+        },
+    )
+    admitted = deleted and run_name == "__main__"
+    assert result.returncode == (0 if admitted else 1), result.stdout + result.stderr
+    assert ("test_subject is admitted" in result.stdout) == admitted
+
+
+@pytest.mark.parametrize(
+    "helper,test",
+    [
+        ("def first():\n    return subject()\n", "def test_subject(first):\n    assert first()\n"),
+        (
+            "def first():\n    return subject()\n",
+            "def test_subject():\n    first = lambda: 1\n    assert first() == 1\n",
+        ),
+        (
+            "def first():\n    def unused():\n        return subject()\n    return 1\n",
+            "def test_subject():\n    assert first() == 1\n",
+        ),
+    ],
+    ids=["parameter", "local", "uncalled-nested"],
+)
+def test_an_unreached_helper_subject_never_explains_a_lost_test(tmp_path, helper, test):
+    result = _floor(
+        tmp_path,
+        {
+            "test_mod.py": "from pkg.mod import subject, other\n\n"
+            + helper
+            + "\n"
+            + test
+            + "\ndef test_other():\n    assert other() == 2\n"
+        },
+        {"test_mod.py": OTHER_TEST},
+        {"base": _package(mod=SUBJECT + "\n\n" + KEPT), "head": _package(mod=KEPT)},
+    )
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "test_subject is admitted" not in result.stdout
+
+
+def test_replacing_an_existing_binding_with_the_subject_is_still_a_move(tmp_path):
+    result = _floor(
+        tmp_path,
+        {"test_mod.py": SUBJECT_TESTS},
+        {"test_mod.py": OTHER_TEST},
+        {
+            "base": _package(mod=SUBJECT + "\n\n" + KEPT, elsewhere=SUBJECT.replace("return 1", "return 3")),
+            "head": _package(mod=KEPT, elsewhere=SUBJECT),
+        },
+    )
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "test_subject is admitted" not in result.stdout
+
+
+def test_moving_an_executable_fixture_keeps_its_lost_test_red(tmp_path):
+    fixture = json.dumps({"steps": [{"run": "printf retired"}]})
+    result = _floor(
+        tmp_path,
+        {
+            "test_mod.py": "from pathlib import Path\n\ndef test_fixture():\n    assert (Path(__file__).resolve().parent / 'fixtures/watch.json').read_text()\n\ndef test_kept():\n    assert True\n"
+        },
+        {"test_mod.py": "def test_kept():\n    assert True\n"},
+        {"base": {"tests/fixtures/watch.json": fixture}, "head": {"tests/fixtures/moved.json": fixture}},
+    )
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "test_fixture is admitted" not in result.stdout
+
+
+@pytest.mark.parametrize("escape", ["parent", "symlink"])
+def test_fixture_admission_never_reads_outside_the_base(tmp_path, monkeypatch, escape):
+    from tests import count_floor
+
+    outside = tmp_path / "outside.json"
+    outside.write_text(json.dumps({"steps": [{"run": "printf outside"}]}))
+    resource = "../outside.json" if escape == "parent" else "tests/fixtures/watch.json"
+    source = (
+        "from pathlib import Path\n_ROOT = Path(__file__).resolve().parents[1]\n\n"
+        "def test_fixture():\n    assert (_ROOT / " + repr(resource) + ").read_text()\n\n"
+        "def test_kept():\n    assert True\n"
+    )
+    base = _tree(tmp_path / "base", {"test_mod.py": source})
+    head = _tree(tmp_path / "head", {"test_mod.py": "def test_kept():\n    assert True\n"})
+    if escape == "symlink":
+        link = base / resource
+        link.parent.mkdir(parents=True)
+        link.symlink_to(outside)
+    read_bytes = Path.read_bytes
+
+    def guarded(path):
+        assert path.resolve() != outside, "the gate read a resource outside its base"
+        return read_bytes(path)
+
+    monkeypatch.setattr(Path, "read_bytes", guarded)
+    monkeypatch.setattr(
+        count_floor,
+        "collect_sides",
+        lambda *args: {
+            "base": ["tests/test_mod.py::test_fixture", "tests/test_mod.py::test_kept"],
+            "head": ["tests/test_mod.py::test_kept"],
+        },
+    )
+    assert count_floor.main(["--base", str(base), "--head", str(head)]) == 1
+
+
+@pytest.mark.parametrize(
+    "helper,admitted",
+    [
+        ("def first():\n    from pkg.mod import subject\n    subject = lambda: 1\n    return subject()\n", False),
+        ("def first():\n    return subject()\nfirst = lambda: 1\n", False),
+        ("def first():\n    from pkg.mod import subject\n    return subject()\n", True),
+    ],
+    ids=["rebound-import", "rebound-helper", "local-import"],
+)
+def test_rebound_names_do_not_restore_an_unreached_subject(tmp_path, helper, admitted):
+    result = _floor(
+        tmp_path,
+        {
+            "test_mod.py": "from pkg.mod import subject, other\n\n"
+            + helper
+            + "\ndef test_subject():\n    assert first() == 1\n\ndef test_other():\n    assert other() == 2\n"
+        },
+        {"test_mod.py": OTHER_TEST},
+        {"base": _package(mod=SUBJECT + "\n\n" + KEPT), "head": _package(mod=KEPT)},
+    )
+    assert result.returncode == (0 if admitted else 1), result.stdout + result.stderr
+    assert ("test_subject is admitted" in result.stdout) == admitted
+
+
+def test_an_import_replacing_a_helper_never_reaches_its_old_subject(tmp_path):
+    tests = (
+        "from pkg.mod import subject, other\n\n"
+        "def first():\n    return subject()\n\n"
+        "from pkg.elsewhere import first\n\n"
+        "def test_subject():\n    assert first() == 1\n\n"
+        "def test_other():\n    assert other() == 2\n"
+    )
+    replacement = "def first():\n    return 1\n"
+    result = _floor(
+        tmp_path,
+        {"test_mod.py": tests},
+        {"test_mod.py": OTHER_TEST},
+        {
+            "base": _package(mod=SUBJECT + "\n\n" + KEPT, elsewhere=replacement),
+            "head": _package(mod=KEPT, elsewhere=replacement),
+        },
+    )
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "test_subject is admitted" not in result.stdout
 
 
 @pytest.mark.parametrize(

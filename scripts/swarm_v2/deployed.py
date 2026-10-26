@@ -5,6 +5,7 @@ from functools import partial
 from typing import TYPE_CHECKING
 
 from scripts.swarm.host_budget import UNKNOWN, Room
+from scripts.swarm.runtime import HerdrRuntime
 from scripts.swarm.store import RedisStore, SwarmError
 from scripts.swarm_v2 import image_tag, masters, proof_swarm
 from scripts.swarm_v2.accounts import AccountCapacity, fleet_held
@@ -18,6 +19,7 @@ from scripts.swarm_v2.kubernetes.approved import INDEX, AccountRoute, FleetAccou
 from scripts.swarm_v2.kubernetes.cleanup import Cleanup
 from scripts.swarm_v2.kubernetes.client import ApiRefused, KubeHttp, PodApi, PodClient
 from scripts.swarm_v2.kubernetes.completion import Completion
+from scripts.swarm_v2.kubernetes.diagnostics import retain as retain_startup
 from scripts.swarm_v2.kubernetes.failures import AccountSlot, Recovery, restore_directive
 from scripts.swarm_v2.kubernetes.grants import PodGrants, Supervision
 from scripts.swarm_v2.kubernetes.pool import WorkerPool
@@ -199,7 +201,15 @@ class Workers:
         )
         api = pod_api(environ, self.policy["namespace"])
         terminal = None if self.terminal is None else TerminalObjects(api, self.terminal, HostKeys(store))
-        return PodGrants(api, slug, verify, supervision, terminal, partial(restore_directive, store, slug))
+        return PodGrants(
+            api,
+            slug,
+            verify,
+            supervision,
+            terminal,
+            partial(restore_directive, store, slug),
+            partial(retain_startup, store, slug),
+        )
 
 
 def tick_runtime(service: "ControlService", workers: Workers, environ: Mapping[str, str]) -> RoutedRuntime:
@@ -220,7 +230,10 @@ def tick_runtime(service: "ControlService", workers: Workers, environ: Mapping[s
     prompts = None if controller.terminals is None else TerminalPrompts(controller.terminals.terminal.router())
     kubernetes = KubernetesRuntime(controller.execute, workers.launch, prompts)
     runtime = routed(
-        environ, kubernetes=kubernetes, launch=partial(launcher.from_tick, terms=workers.terms, target=workers.target)
+        environ,
+        herdr=HerdrRuntime(defer_master_canary=True),
+        kubernetes=kubernetes,
+        launch=partial(launcher.from_tick, terms=workers.terms, target=workers.target),
     )
 
     def seats() -> frozenset[str]:

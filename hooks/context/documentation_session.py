@@ -10,23 +10,27 @@ from hooks.common import inject_context, log
 from hooks.config import AGENTIHOOKS_HOME as HOME
 from hooks.context import documentation, documentation_evidence
 from scripts.swarm.ledger_client import LedgerClient
+from scripts.swarm_ledger import ledger_rank
 
 TERMINAL = {"queued", "complete"}
 
 
 WORKER_OPTIONS = {"timeout_sec": 180, "task_name": "documentation-session-end"}
 NO_CHANGES = {"needs_documentation": False, "size": "none", "source": "no changes"}
+UNKNOWN_TASK = {"needs_documentation": False, "size": "none", "source": "no ledger task"}
 TASK_DEFAULTS = {
-    "profile": "documentation",
+    "profile": ledger_rank.GENERATED_PROFILE,
     "lane": "eng",
     "kind": "code",
     "follow_up": True,
+    "rank": "low",
     "not_duplicate": "Documents delivered behavior rather than implementing it",
 }
 DOCUMENTATION_INSTRUCTIONS = (
     "Extend the existing documentation and navigation with complete usage and configuration examples. "
     "Follow the project's documentation conventions; default to docs when no source exists."
 )
+NO_PULL_REQUEST = "none recorded on the source task, so no delivered diff is attached"
 NOTICE_COMMAND = "Start it here: agentihooks init-agent --profile documentation"
 NOTICE_SUBJECT_LENGTH = 160
 TASK_HASH_LENGTH = 16
@@ -121,9 +125,10 @@ def _queue(ledger: LedgerClient, row: dict, source: dict, evidence: dict, verdic
     )
     if ledger.task(row["swarm"], task):
         return task
+    pull_request = source.get("pr_url") or (NO_PULL_REQUEST if source else "")
     description = (
         f"Document the delivered behavior of {source.get('title', evidence['summary'])}.\n"
-        f"Source task: {row['task']}. Delivered pull request: {source.get('pr_url', '')}.\n"
+        f"Source task: {row['task']}. Delivered pull request: {pull_request}.\n"
         f"Change size: {verdict['size']}.\n"
         f"Source requirements: {source.get('description', '')}\n"
         f"Documentation sources: {json.dumps(evidence['doc_sources'])}\n"
@@ -138,7 +143,7 @@ def _queue(ledger: LedgerClient, row: dict, source: dict, evidence: dict, verdic
             "description": description,
             **TASK_DEFAULTS,
             "phase": source.get("phase", ""),
-            "depends_on": [row["task"]] if row["task"] else [],
+            "depends_on": [row["task"]] if source else [],
         },
         by="swarm",
     )
@@ -148,6 +153,10 @@ def _queue(ledger: LedgerClient, row: dict, source: dict, evidence: dict, verdic
 def _finish(path: Path, row: dict) -> None:
     ledger = LedgerClient(service=True) if row["swarm"] else None
     source = ledger.task(row["swarm"], row["task"]) or {} if ledger and row["task"] else {}
+    if ledger and row["task"] and not source:
+        row.update(status="complete", verdict=dict(UNKNOWN_TASK))
+        _write(path, row)
+        return
     root = Path(row["root"])
     if not root.is_dir():
         root = Path(row["repository"])

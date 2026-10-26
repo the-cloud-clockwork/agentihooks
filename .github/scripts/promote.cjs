@@ -20,6 +20,28 @@ async function gradeIsComplete(github, context, api) {
     [...latest.values()].every(state => state === 'success');
 }
 
+async function deleteSnapshot(github, api, ref) {
+  try {
+    await github.rest.git.deleteRef({ ...api, ref });
+  } catch (error) {
+    if (error.status !== 404 && !(error.status === 422 && error.message.includes('Reference does not exist'))) throw error;
+  }
+}
+
+async function supersededBy(github, api, graded, main) {
+  const promoted = /^Graded dev revision: ([0-9a-f]{40})$/m.exec(main.commit.message)?.[1];
+  if (!promoted || (await github.rest.repos.compareCommits({ ...api, base: promoted, head: graded })).data.status === 'ahead') return null;
+  return promoted;
+}
+
+async function endSuperseded(core, graded, main, promoted) {
+  core.setOutput('graded', graded);
+  core.setOutput('superseded', promoted);
+  await core.summary.addHeading('Promotion superseded').addTable([
+    ['Graded dev', graded], ['Main', main.sha], ['Main already promoted dev', promoted],
+  ]).write();
+}
+
 module.exports = async ({ github, context, core, sleep = ms => new Promise(resolve => setTimeout(resolve, ms)) }) => {
   const { owner, repo } = context.repo;
   const repository = `${owner}/${repo}`;
@@ -32,26 +54,33 @@ module.exports = async ({ github, context, core, sleep = ms => new Promise(resol
     const head = `promotion/${context.sha}`;
     const ref = `heads/${head}`;
     const pulls = (await github.rest.pulls.list({ ...api, state: 'open', base: 'main', head: `${owner}:${head}` })).data;
-    if (!pulls.length) {
-      try {
-        const snapshot = (await github.rest.git.getRef({ ...api, ref })).data;
-        if (snapshot.object.sha !== context.sha) throw new Error('Promotion snapshot differs from the graded revision');
-      } catch (error) {
-        if (error.status !== 404) throw error;
-        await github.rest.git.createRef({ ...api, ref: `refs/${ref}`, sha: context.sha });
-      }
+    let promoted = await supersededBy(github, api, context.sha, main);
+    if (promoted) return endSuperseded(core, context.sha, main, promoted);
+    const body = `Graded dev revision: ${context.sha}\n\nTests: ${context.serverUrl}/${repository}/actions/runs/${context.runId}`;
+    let snapshot;
+    try {
+      snapshot = (await github.rest.git.getRef({ ...api, ref })).data.object.sha;
+    } catch (error) {
+      if (error.status !== 404 || pulls.length) throw error;
+      snapshot = (await github.rest.git.createCommit({
+        ...api, message: `Promote green dev to main\n\n${body}`, tree: graded.commit.tree.sha, parents: [main.sha],
+      })).data.sha;
+      await github.rest.git.createRef({ ...api, ref: `refs/${ref}`, sha: snapshot });
+    }
+    const staged = (await github.rest.git.getCommit({ ...api, commit_sha: snapshot })).data;
+    if (staged.tree.sha !== graded.commit.tree.sha || staged.parents.length !== 1 || staged.parents[0].sha !== main.sha) {
+      throw new Error('Promotion snapshot is not the graded tree on main');
     }
     const pull = pulls[0] || (await github.rest.pulls.create({
-      ...api, base: 'main', head, title: 'Promote green dev to main',
-      body: `Graded dev revision: ${context.sha}\n\nTests: ${context.serverUrl}/${repository}/actions/runs/${context.runId}`,
+      ...api, base: 'main', head, title: 'Promote green dev to main', body,
     })).data;
-    if (pull.head.sha !== context.sha || pull.head.repo.full_name !== repository || pull.base.ref !== 'main') {
-      throw new Error('Promotion pull request does not match the graded dev head');
+    if (pull.head.sha !== snapshot || pull.head.repo.full_name !== repository || pull.base.ref !== 'main') {
+      throw new Error('Promotion pull request does not match the snapshot commit');
     }
     let ready = false;
     for (let attempt = 0; attempt < 48; attempt++) {
       const latest = (await github.rest.pulls.get({ ...api, pull_number: pull.number })).data;
-      if (latest.head.sha !== context.sha) throw new Error('Promotion pull request moved away from the graded head');
+      if (latest.head.sha !== snapshot) throw new Error('Promotion pull request moved away from the graded head');
       if (latest.mergeable === false) throw new Error('Promotion pull request has merge conflicts');
       if (latest.mergeable === true && (latest.mergeable_state === 'clean' ||
           latest.mergeable_state === 'unstable' && await gradeIsComplete(github, context, api))) {
@@ -61,15 +90,21 @@ module.exports = async ({ github, context, core, sleep = ms => new Promise(resol
       await sleep(5000);
     }
     if (!ready) throw new Error('Promotion checks did not become mergeable within four minutes');
-    const merged = (await github.rest.pulls.merge({ ...api, pull_number: pull.number, sha: context.sha, merge_method: 'squash' })).data;
+    const current = (await github.rest.repos.getCommit({ ...api, ref: 'main' })).data;
+    if (current.sha !== main.sha) {
+      promoted = await supersededBy(github, api, context.sha, current);
+      if (promoted) {
+        await github.rest.pulls.update({ ...api, pull_number: pull.number, state: 'closed' });
+        await deleteSnapshot(github, api, ref);
+        return endSuperseded(core, context.sha, current, promoted);
+      }
+      throw new Error('Promotion snapshot is stale, main moved during the wait');
+    }
+    const merged = (await github.rest.pulls.merge({ ...api, pull_number: pull.number, sha: snapshot, merge_method: 'squash', commit_message: body })).data;
     if (!merged.merged) throw new Error('GitHub refused the promotion merge');
     main = (await github.rest.repos.getCommit({ ...api, ref: merged.sha })).data;
     if (main.commit.tree.sha !== graded.commit.tree.sha) throw new Error('Promoted tree differs from the graded dev tree');
-    try {
-      await github.rest.git.deleteRef({ ...api, ref });
-    } catch (error) {
-      if (error.status !== 404 && !(error.status === 422 && error.message.includes('Reference does not exist'))) throw error;
-    }
+    await deleteSnapshot(github, api, ref);
     core.setOutput('pull-request', pull.html_url);
   }
   core.setOutput('graded', context.sha);
@@ -77,4 +112,48 @@ module.exports = async ({ github, context, core, sleep = ms => new Promise(resol
   await core.summary.addHeading('Promotion').addTable([
     ['Graded dev', context.sha], ['Promoted main', main.sha], ['Tree', graded.commit.tree.sha],
   ]).write();
+};
+
+module.exports.closeAbandoned = async ({ github, context, core, app, deadline = Infinity }) => {
+  const { owner, repo } = context.repo;
+  const repository = `${owner}/${repo}`;
+  if (context.eventName !== 'push' || context.ref !== 'refs/heads/dev' ||
+      context.payload.repository.full_name !== repository) return;
+  if (!app) throw new Error('The promotion App slug is required to recognise its own pull requests');
+  const api = { owner, repo };
+  const run = `${context.serverUrl}/${repository}/actions/runs/${context.runId}`;
+  const outcomes = [];
+  const failures = [];
+  const open = await github.paginate(github.rest.pulls.list, { ...api, state: 'open', base: 'main', per_page: 100 });
+  for (const [index, pull] of open.entries()) {
+    if (Date.now() > deadline) {
+      outcomes.push([`${open.length - index} not examined`, '', 'left for the next run, the cleanup time budget ran out']);
+      break;
+    }
+    const graded = /^promotion\/([0-9a-f]{40})$/.exec(pull.head.ref)?.[1];
+    if (!graded || graded === context.sha || pull.user?.login !== `${app}[bot]` ||
+        pull.head.repo?.full_name !== repository || pull.base.ref !== 'main') continue;
+    try {
+      if ((await github.rest.repos.compareCommits({ ...api, base: graded, head: context.sha })).data.status !== 'ahead') continue;
+      await github.rest.issues.createComment({ ...api, issue_number: pull.number,
+        body: `Abandoned: graded dev revision ${context.sha} supersedes ${graded}. Closed by the promotion run ${run}.` });
+      await github.rest.pulls.update({ ...api, pull_number: pull.number, state: 'closed' });
+      const ref = `heads/${pull.head.ref}`;
+      let snapshot = 'deleted';
+      try {
+        if ((await github.rest.git.getRef({ ...api, ref })).data.object.sha === pull.head.sha) await deleteSnapshot(github, api, ref);
+        else snapshot = 'kept, it moved';
+      } catch (error) {
+        if (error.status !== 404) throw error;
+        snapshot = 'already gone';
+      }
+      outcomes.push([`#${pull.number}`, graded, `closed, snapshot ${snapshot}`]);
+    } catch (error) {
+      failures.push(`#${pull.number}: ${error.message}`);
+      outcomes.push([`#${pull.number}`, graded, `failed: ${error.message}`]);
+    }
+  }
+  await core.summary.addHeading('Abandoned promotion pull requests')
+    .addTable([['Pull request', 'Graded dev', 'Outcome'], ...outcomes]).write();
+  if (failures.length) throw new Error(`Abandoned promotion cleanup failed: ${failures.join('; ')}`);
 };

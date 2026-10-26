@@ -1,6 +1,10 @@
 import os
+import re
 import subprocess
+import sys
 from argparse import Namespace
+from datetime import datetime, timezone
+from pathlib import Path
 
 import pytest
 
@@ -9,7 +13,6 @@ from scripts.inbox.store import InboxStore
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig, SwarmError
 from scripts.swarm_ledger import server_code
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
 WATCHED, DOCTOR = "watch", "watch-doctor"
 ENGINEER = f"{WATCHED}-eng-1"
 
@@ -26,14 +29,20 @@ class FakeRun:
 
 
 class FakeLedger:
-    def __init__(self):
-        self.said, self.noted = [], []
+    def __init__(self, rows=()):
+        self.said, self.noted, self.rows, self.updates = [], [], {slug: list(rows) for slug in (DOCTOR,)}, []
 
     def say(self, slug, text, by=None):
         self.said.append((slug, text, by))
 
     def notify(self, slug, text):
         self.noted.append((slug, text))
+
+    def tasks(self, slug):
+        return self.rows.get(slug, [])
+
+    def update_task(self, slug, task_id, fields, by="swarm"):
+        self.updates.append((slug, task_id, fields, by))
 
 
 @pytest.fixture
@@ -75,7 +84,10 @@ def test_the_allow_list_refuses_every_other_action_and_touches_nothing(store, ac
 def test_pull_dev_fast_forwards_the_main_checkout_and_logs_on_both_ledgers(store):
     ctx = context(store)
     interventions.apply(ctx, "pull-dev", args())
-    assert ctx.run.calls[-1] == ["git", "-C", "/repo", "pull", "--ff-only", "origin", "dev"]
+    assert ctx.run.calls[-2:] == [
+        ["git", "-C", "/repo", "fetch", "origin", "dev"],
+        ["git", "-C", "/repo", "merge", "--ff-only", "origin/dev"],
+    ]
     assert logged_on_both(ctx)
 
 
@@ -83,11 +95,94 @@ def test_pull_dev_refuses_a_checkout_that_is_not_on_dev(store):
     ctx = context(store, FakeRun({"rev-parse": "feature\n"}))
     with pytest.raises(SwarmError, match="not dev"):
         interventions.apply(ctx, "pull-dev", args())
-    assert not any("pull" in call for call in ctx.run.calls) and ctx.ledger.noted == []
+    assert not any("fetch" in call or "merge" in call for call in ctx.run.calls) and ctx.ledger.noted == []
+
+
+def test_pull_dev_records_the_applied_time_of_each_merged_fix_an_open_tune_task_measures(store):
+    rows = [
+        {"id": "m", "kind": "tune", "state": "open", "depends_on": ["a", "b", "c", "d", "e", "g", "h", "ghost"]},
+        {"id": "done-tune", "kind": "tune", "state": "done", "depends_on": ["f"]},
+        {"id": "a", "state": "done"},
+        {"id": "b", "kind": "ci", "state": "done"},
+        {"id": "c", "kind": "code", "state": "pr"},
+        {"id": "d", "kind": "code", "state": "done", "applied_at": "2026-10-17T01:00:00Z"},
+        {"id": "e", "kind": "research", "state": "done"},
+        {"id": "f", "kind": "code", "state": "done"},
+        {"id": "g", "kind": "code", "state": "done", "branch_repo": "git@github.com:O/bundle.git"},
+        {"id": "h", "kind": "code", "state": "done", "branch_repo": "https://github.com/o/r"},
+    ]
+    run = FakeRun({"rev-parse": "dev\n", "get-url": "git@github.com:O/r.git\n"})
+    ledger = FakeLedger(rows)
+    read = ledger.tasks
+    ledger.tasks = lambda slug: run.calls.append(["ledger-read", slug]) or read(slug)
+    ctx = interventions.Context(store, ledger, WATCHED, DOCTOR, run)
+    line = interventions.apply(ctx, "pull-dev", args())
+    stamped = [(slug, task, by) for slug, task, _, by in ctx.ledger.updates]
+    assert stamped == [(DOCTOR, t, f"master@{DOCTOR}") for t in ("a", "b", "h")]
+    times = {fields["applied_at"] for *_, fields, _ in ctx.ledger.updates}
+    assert len(times) == 1 and re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ", times.pop())
+    pull = ["git", "-C", "/repo", "fetch", "origin", "dev"]
+    assert run.calls.index(["ledger-read", DOCTOR]) < run.calls.index(pull)
+    assert ["git", "-C", "/repo", "remote", "get-url", "origin"] in run.calls
+    assert (
+        line == "The Doctor pulled dev into the main checkout of the watched swarm and recorded 3 merged fixes applied."
+    )
+    assert logged_on_both(ctx)
+
+
+def test_pull_dev_with_no_unapplied_fix_records_nothing(store):
+    ctx = context(store)
+    line = interventions.apply(ctx, "pull-dev", args())
+    assert ctx.ledger.updates == []
+    assert line == "The Doctor pulled dev into the main checkout of the watched swarm."
+
+
+class SourceRun(FakeRun):
+    def __init__(self, before, after):
+        super().__init__({"rev-parse": "dev\n"})
+        self.text, self.after = before, after
+
+    def __call__(self, argv, **kwargs):
+        done = super().__call__(argv, **kwargs)
+        if "merge" in argv:
+            self.text = self.after
+        return subprocess.CompletedProcess(argv, 0, self.text, "") if "show" in argv else done
+
+
+def test_pull_dev_of_the_tool_source_installs_a_newly_declared_dependency(store):
+    before = '[project]\ndependencies = ["redis>=5"]\n'
+    run = SourceRun(before, before.replace('"redis>=5"', '"redis>=5", "croniter>=6.2.4,<7", "rich"'))
+    ctx = context(store, run, source=Path("/repo"), python="/tool/python")
+    line = interventions.apply(ctx, "pull-dev", args())
+    assert run.calls[-1] == ["uv", "pip", "install", "--python", "/tool/python", "croniter>=6.2.4,<7", "rich"]
+    assert line == (
+        "The Doctor pulled dev into the main checkout of the watched swarm. "
+        "It installed croniter>=6.2.4,<7, rich into the agentihooks tool environment."
+    )
+    assert logged_on_both(ctx)
+
+
+def test_pull_dev_of_another_repository_installs_nothing(store):
+    run = SourceRun("", '[project]\ndependencies = ["croniter"]\n')
+    ctx = context(store, run, source=Path("/elsewhere"), python="/tool/python")
+    interventions.apply(ctx, "pull-dev", args())
+    assert not any("show" in call or "install" in call for call in run.calls)
+
+
+def test_record_applied_stamps_utc_whatever_the_local_zone(store, monkeypatch):
+    class Clock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return datetime(2026, 10, 18, 12, tzinfo=timezone.utc).astimezone(tz) if tz else datetime(2026, 10, 18, 21)
+
+    monkeypatch.setattr(interventions, "datetime", Clock)
+    ctx = context(store)
+    assert interventions.record_applied(ctx, ["a"]) == ["a"]
+    assert ctx.ledger.updates == [(DOCTOR, "a", {"applied_at": "2026-10-18T12:00:00Z"}, f"master@{DOCTOR}")]
 
 
 def test_a_failed_command_is_reported_and_not_logged(store):
-    ctx = context(store, FakeRun({"rev-parse": "dev\n"}, failing=("pull",)))
+    ctx = context(store, FakeRun({"rev-parse": "dev\n"}, failing=("merge",)))
     with pytest.raises(SwarmError, match="refused"):
         interventions.apply(ctx, "pull-dev", args())
     assert ctx.ledger.noted == []
@@ -109,7 +204,7 @@ def server_tree(tmp_path):
         "scripts/swarm_ledger/ledger_server.py": (
             "import os\nimport ledger_core\n\n\ndef relay():\n    from scripts.swarm import operator_mail\n"
         ),
-        "scripts/swarm_ledger/template.html": "<html></html>",
+        "scripts/swarm_ledger/shell.html": "<html></html>",
         "scripts/swarm_ledger/__pycache__/ledger_core.cpython-312.pyc": "",
     }
     for name, text in files.items():
@@ -146,7 +241,7 @@ def test_the_ledger_server_restarts_only_when_its_code_changed(store, tmp_path):
     os.utime(code / "ledger_server.py", (300, 300))
     os.utime(code / "ledger_gate.py", (300, 300))
     line = interventions.apply(ctx, "restart-ledger-server", args())
-    assert [call[-1] for call in ctx.run.calls] == ["--stop", "--ensure"]
+    assert ctx.run.calls == [[sys.executable, str(code / "ledger_server.py"), "--reload"]]
     assert line == restarted(
         "scripts/swarm_ledger/ledger_gate.py, scripts/swarm_ledger/ledger_server.py changed since it started"
     )
@@ -166,7 +261,7 @@ def test_rewritten_pidfile_does_not_hide_code_newer_than_the_process(store, tmp_
 
     line = interventions.apply(ctx, "restart-ledger-server", args())
 
-    assert [call[-1] for call in ctx.run.calls] == ["--stop", "--ensure"]
+    assert [call[-1] for call in ctx.run.calls] == ["--reload"]
     assert line == restarted("scripts/swarm_ledger/ledger_server.py changed since it started")
     assert logged_on_both(ctx)
 
@@ -233,7 +328,7 @@ def test_legacy_restart_preserves_nanosecond_process_start_boundary(store, tmp_p
 
     if newer:
         line = interventions.apply(ctx, "restart-ledger-server", args())
-        assert [call[-1] for call in ctx.run.calls] == ["--stop", "--ensure"]
+        assert [call[-1] for call in ctx.run.calls] == ["--reload"]
         assert line == restarted("scripts/swarm_ledger/ledger_server.py changed since it started")
         assert logged_on_both(ctx)
     else:
@@ -249,7 +344,7 @@ def test_legacy_restart_preserves_nanosecond_process_start_boundary(store, tmp_p
         "scripts/swarm/relay.py",
         "scripts/swarm/naming.py",
         "scripts/swarm/__init__.py",
-        "scripts/swarm_ledger/template.html",
+        "scripts/swarm_ledger/shell.html",
     ],
 )
 def test_a_change_to_any_module_the_server_imports_allows_the_restart_and_names_it(store, tmp_path, changed):
@@ -257,7 +352,7 @@ def test_a_change_to_any_module_the_server_imports_allows_the_restart_and_names_
     os.utime(tmp_path / changed, (300, 300))
     ctx = context(store, code=code, pidfile=pidfile)
     line = interventions.apply(ctx, "restart-ledger-server", args())
-    assert [call[-1] for call in ctx.run.calls] == ["--stop", "--ensure"]
+    assert [call[-1] for call in ctx.run.calls] == ["--reload"]
     assert line == restarted(f"{changed} changed since it started") and logged_on_both(ctx)
 
 
@@ -283,7 +378,7 @@ def test_a_server_without_a_pidfile_is_restarted(store, tmp_path):
     pidfile.unlink()
     ctx = context(store, code=code, pidfile=pidfile)
     line = interventions.apply(ctx, "restart-ledger-server", args())
-    assert [call[-1] for call in ctx.run.calls] == ["--stop", "--ensure"]
+    assert [call[-1] for call in ctx.run.calls] == ["--ensure"]
     assert line == restarted("no running server recorded its start") and logged_on_both(ctx)
 
 

@@ -11,6 +11,7 @@ import json
 from scripts.inbox import links, outbox
 from scripts.inbox.store import Contended, DuplicateItem, InboxError, InboxStore, Item
 from scripts.swarm.store import RedisStore, SwarmError
+from scripts.swarm_v2 import master_fence
 
 READY = ("idle", "done")
 OPERATOR = "operator"
@@ -33,15 +34,24 @@ class HerdrMessenger:
     def agent_status(self, agent):
         result = self.herdr(["agent", "get", self.target(agent)])
         found = result.get("agent", result)
-        return found.get("agent_status") or found.get("status") or "unknown"
+        state = found.get("agent_status") or found.get("status") or "unknown"
+        if agent.harness == "codex" and state == "blocked":
+            from scripts.swarm.pane import content_refusal, refusal_input
+
+            capture = self.herdr(["pane", "read", agent.pane_id, "--source", "visible", "--format", "ansi"])
+            if content_refusal(agent.harness, capture["text"]) and not refusal_input(capture["text"]):
+                return "idle"
+        return state
 
     def prompt(self, agent, text):
         self.herdr(["agent", "prompt", self.target(agent), marked(text)])
 
     def typed_input(self, agent):
-        from scripts.swarm.pane import typed_input
+        from scripts.swarm.pane import content_refusal, refusal_input, typed_input
 
         capture = self.herdr(["pane", "read", agent.pane_id, "--source", "visible", "--format", "ansi"])
+        if content_refusal(agent.harness, capture["text"]):
+            return refusal_input(capture["text"])
         return typed_input(capture["text"])
 
 
@@ -78,6 +88,7 @@ def send(store, slug, text, sender, to, fyi=False):
     inbox = InboxStore(store.redis)
     for agent in found:
         links.check_send(inbox, sender, agent.name)
+        master_fence.check_send(inbox, sender, agent.name)
     for agent in found:
         outbox.post(inbox, outbox.Post(sender, agent.name, text, fyi=fyi, task=agent.task))
     return [a.name for a in found]
@@ -98,6 +109,7 @@ def apply_say(inbox, sender, entry):
         raise InboxError(str(exc)) from exc
     for agent in found:
         links.check_send(inbox, sender, agent.name)
+        master_fence.check_send(inbox, sender, agent.name)
     for agent in found:
         item = outbox.stable_id(entry["item"], agent.name)
         with contextlib.suppress(DuplicateItem):
@@ -112,17 +124,36 @@ def relay_to_page(inbox, slug, agents, ledger):
         sender = inbox.names.resolve(item.sender)
         if item.state != "pending" or sender not in names:
             continue
-        if not post(inbox, item, functools.partial(show, ledger, slug, item, sender, inbox.entry_of(item.id))):
+        if not post(
+            inbox,
+            item,
+            functools.partial(
+                show, ledger, slug, item, sender, inbox.entry_of(item.id), operator_line(inbox, slug, item)
+            ),
+        ):
             continue
         inbox.close(item.id, OPERATOR, "done", "shown on the ledger page")
         shown += 1
     return shown
 
 
-def show(ledger, slug, item, sender, entry):
+def show(ledger, slug, item, sender, entry, line):
     if entry:
         return ledger.relay_comment(slug, entry, item.text, sender, item.id)
-    return ledger.relay(slug, item.text, sender, item.id)
+    return ledger.relay(slug, item.text, sender, item.id, line)
+
+
+def operator_line(inbox, slug, item):
+    if not item.ref:
+        return ""
+    try:
+        asked = inbox.get(item.ref)
+    except InboxError:
+        return ""
+    ledger, _, rest = asked.ref.partition(":")
+    if asked.sender != OPERATOR or ledger != slug:
+        return ""
+    return rest.partition(":")[2]
 
 
 def post(inbox, item, write):

@@ -1,6 +1,7 @@
 """Each swarm timer pass restarts the shared ledger server by its own process id when the code on disk is newer than the
 code it loaded, or when its threads or memory pass a limit."""
 
+import json
 import os
 import signal
 import subprocess
@@ -13,7 +14,7 @@ from scripts.inbox.store import InboxStore
 from scripts.swarm import incidents, ledger_host, ledger_probe, time_left
 from scripts.swarm.ledger_client import LedgerGone, LedgerRefused
 from scripts.swarm.store import PREFIX
-from scripts.swarm_ledger import server_code
+from scripts.swarm_ledger import ledger_link, server_code
 
 PROC = Path("/proc")
 THREADS_MAX = 150
@@ -31,8 +32,10 @@ STARTED_KEY = f"{PREFIX}:ledger-server-started"
 DOWN_KEY = f"{PREFIX}:ledger-server-restart-failed"
 DOWN_MS = 3_600_000
 SCRIPT = "ledger_server.py"
+LOG = ".watchdog.log"
 ERROR_KEPT = 200
 RUNAWAY, STALE = "runaway", "stale"
+STALE_REASON = "its code changed on disk"
 RUNAWAY_TEXT = "The ledger server was restarted because {why}."
 SLOW_TEXT = "The ledger server restarted on new code and its writes are slow: {took}."
 DOWN_TEXT = "The ledger server needed a restart because {why}, and the restart failed: {error}."
@@ -98,10 +101,14 @@ def why(folder: Path, pid: int, facts: dict) -> tuple[str, str] | None:
         stale = server_code.stale(folder, pid)
     except OSError:
         return None
-    return (STALE, "its code changed on disk") if stale else None
+    return (STALE, STALE_REASON) if stale else None
 
 
-def _signal(host: Host, pid: int, sig: int) -> None:
+def _signal(host: Host, pid: int, sig: int, reason: str) -> None:
+    caller = {"pid": os.getpid(), "argv": sys.argv}
+    record = {"at": time.time(), "reason": reason, "signal": signal.Signals(sig).name, "pid": pid, "caller": caller}
+    with (host.folder / LOG).open("a") as log:
+        log.write(json.dumps(record) + "\n")
     try:
         host.kill(pid, sig)
     except ProcessLookupError:
@@ -113,20 +120,39 @@ def _ours(pid: int, proc: Path) -> bool:
     return facts is not None and script(facts["argv"]) is not None
 
 
-def restart(host: Host, pid: int, command: list[str]) -> str:
+def failed_reload(host: Host, pid: int, reason: str, error: str) -> None:
+    record = {"at": time.time(), "reason": reason, "reload": "failed", "error": error, "pid": pid}
+    with (host.folder / LOG).open("a") as log:
+        log.write(json.dumps(record) + "\n")
+
+
+def reload_stale(host: Host, command: list[str]) -> str:
+    error = relaunch(host, command, "--reload")
+    if not error:
+        return ""
+    pid = ledger_host.server_pid(host.folder)
+    failed_reload(host, pid, STALE_REASON, error)
+    return restart(host, pid, command, STALE_REASON)
+
+
+def restart(host: Host, pid: int, command: list[str], reason: str) -> str:
     try:
-        _signal(host, pid, signal.SIGTERM)
+        _signal(host, pid, signal.SIGTERM, reason)
         for _ in range(round(STOP_WAIT_S / POLL_S)):
             if not alive(pid, host.proc):
                 break
             host.sleep(POLL_S)
         if alive(pid, host.proc) and _ours(pid, host.proc):
-            _signal(host, pid, signal.SIGKILL)
-    except PermissionError as exc:
+            _signal(host, pid, signal.SIGKILL, reason)
+    except OSError as exc:
         return str(exc)
+    return relaunch(host, command, "--ensure")
+
+
+def relaunch(host: Host, command: list[str], flag: str) -> str:
     try:
         done = host.run(
-            [*command, "--ensure"],
+            [*command, flag],
             env={**os.environ, "LEDGER_DIR": str(host.folder)},
             capture_output=True,
             text=True,
@@ -196,7 +222,12 @@ def _claimed(store, folder: Path, pid: int, kind: str) -> bool:
 
 
 def watch(store, slug: str, ledger, runtime, host: Host | None = None) -> list[str]:
-    if getattr(ledger, "time_left", None) is None:
+    if getattr(ledger, "time_left", None) is None or ledger_link.remote():
+        return []
+    config = store.config(slug)
+    if config.state == "stopped" or (config.scratch and host is None):
+        return []
+    if ledger.binned(slug):
         return []
     host = host or default_host()
     pid = ledger_host.server_pid(host.folder)
@@ -210,7 +241,11 @@ def watch(store, slug: str, ledger, runtime, host: Host | None = None) -> list[s
     if not _claimed(store, host.folder, pid, found[0]):
         return []
     kind, reason = found
-    if error := restart(host, pid, command):
+    if kind == RUNAWAY:
+        error = restart(host, pid, command, reason)
+    else:
+        error = reload_stale(host, command)
+    if error:
         text = DOWN_TEXT.format(why=reason, error=error)
         store.redis.hset(incidents.key("ledger"), "watchdog", text)
         store.redis.set(DOWN_KEY, pid, px=DOWN_MS)

@@ -14,9 +14,22 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
+from hooks.context.account_sessions import (
+    API_ACCOUNT,
+    API_MARKER,
+    INTERACTIVE_PREFIX,
+    TOKEN_PREFIX,
+    UNROUTED,
+    environment_account,
+)
 from hooks.observability.agent_trace import TRIGGER_ENV
+from hooks.observability.correlation import KEYS
+from scripts.scheduler.process_timer import wait as timer_wait
 
 POLL_SEC = 1.0
+STOP_REASONS = ("stop", "end")
+IDENTITY_KEYS = (*KEYS, "AGENTIHOOKS_SWARM_LANE")
+ACCOUNT_NAMES = (TOKEN_PREFIX, INTERACTIVE_PREFIX, API_MARKER)
 
 
 @dataclass(frozen=True)
@@ -120,13 +133,27 @@ def request(
         "transcript": transcript_path or previous.get("transcript", ""),
         "target": os.environ.get("AGENTIHOOKS_TARGET", "claude"),
         "reason": reason,
+        "stopped": reason in STOP_REASONS or bool(previous.get("stopped")),
         "at": time.time_ns(),
+        "identity": _identity(),
     }
     _write(request_path(session_id), record)
     if alive(_owner(_read(owner_path(session_id)), "supervisor_")):
         return False
     (spawn or _spawn)(session_id)
     return True
+
+
+def _identity_key(name: str) -> bool:
+    return name in IDENTITY_KEYS or name.startswith(ACCOUNT_NAMES)
+
+
+def _identity() -> dict:
+    found = {key: os.environ[key] for key in IDENTITY_KEYS if key in os.environ}
+    account = environment_account()
+    if account != UNROUTED:
+        found[API_MARKER if account == API_ACCOUNT else INTERACTIVE_PREFIX + account] = "1"
+    return found
 
 
 def _replay_source(session_id: str, record: dict) -> str:
@@ -205,7 +232,14 @@ def _transcript(session_id: str, record: dict) -> str:
 def attempt(session_id: str, transcript_path: str, timeout: float, trigger: str) -> bool:
     from hooks._async import _worker_env
 
-    env = {**_worker_env(), TRIGGER_ENV: trigger, "AGENTIHOOKS_TRACE_FLUSH_ATTEMPT_TIMEOUT_SEC": str(timeout)}
+    caller = {key: value for key, value in _worker_env().items() if not _identity_key(key)}
+    recorded = _read(request_path(session_id)).get("identity", {})
+    env = {
+        **caller,
+        **{key: value for key, value in recorded.items() if _identity_key(key)},
+        TRIGGER_ENV: trigger,
+        "AGENTIHOOKS_TRACE_FLUSH_ATTEMPT_TIMEOUT_SEC": str(timeout),
+    }
     command = [sys.executable, "-m", "hooks.observability.trace_flush", session_id, transcript_path]
     try:
         return subprocess.run(command, env=env, timeout=timeout).returncode == 0
@@ -251,6 +285,15 @@ def _lock(session_id: str, wait: float, clock: Callable[[], float], sleep: Calla
             sleep(POLL_SEC)
 
 
+def scheduled_wait(delay: float) -> None:
+    from redis.exceptions import ConnectionError, TimeoutError
+
+    try:
+        timer_wait(delay)
+    except (ConnectionError, TimeoutError):
+        time.sleep(delay)
+
+
 def supervise(
     session_id: str,
     limits: Budget | None = None,
@@ -258,6 +301,7 @@ def supervise(
     clock: Callable[[], float] = time.monotonic,
     sleep: Callable[[float], None] = time.sleep,
     is_alive: Callable[[Owner], bool] = alive,
+    timer_wait: Callable[[float], None] = scheduled_wait,
 ) -> str:
     limits = limits or budget()
     handle = _lock(session_id, limits.attempts * limits.attempt_timeout + limits.interval, clock, sleep)
@@ -272,7 +316,7 @@ def supervise(
             owner_alive = is_alive(_owner(record, "owner_"))
             fresh = record.get("at") != seen
             if (failing or not fresh) and owner_alive and clock() < due:
-                sleep(POLL_SEC)
+                timer_wait(POLL_SEC)
                 continue
             seen = record.get("at")
             trigger = "final" if not owner_alive else f"request:{record.get('reason', '')}" if fresh else "interval"

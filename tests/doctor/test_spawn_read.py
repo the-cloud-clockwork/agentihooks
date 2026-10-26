@@ -1,12 +1,8 @@
 import subprocess
 from dataclasses import asdict
 
-import pytest
-
 from scripts.doctor import spawn_read, spawns
 from tests.doctor.recorded import load
-
-pytestmark = pytest.mark.xdist_group("fakeredis")
 
 
 def test_spawn_reader_is_read_only_and_uses_the_swarm_target(monkeypatch):
@@ -26,7 +22,15 @@ def test_spawn_reader_is_read_only_and_uses_the_swarm_target(monkeypatch):
     before = store.export(slug)
 
     def journal(argv, **kwargs):
-        assert argv[:6] == ["journalctl", "--user", "-u", "agentihooks-swarm.service", "--since", "1 hour ago"]
+        assert argv[:7] == [
+            "journalctl",
+            "--user",
+            "_SYSTEMD_USER_UNIT=agentihooks-swarm.service",
+            "+",
+            "SYSLOG_IDENTIFIER=agentihooks-swarm",
+            "--since",
+            "1 hour ago",
+        ]
         assert kwargs["check"] is True
         return subprocess.CompletedProcess(
             argv,
@@ -68,8 +72,9 @@ def test_spawn_reader_passes_an_explicit_upper_journal_bound(monkeypatch):
         assert argv == [
             "journalctl",
             "--user",
-            "-u",
-            "agentihooks-swarm.service",
+            "_SYSTEMD_USER_UNIT=agentihooks-swarm.service",
+            "+",
+            "SYSLOG_IDENTIFIER=agentihooks-swarm",
             "--since",
             "2026-10-07T09:58:24Z",
             "--until",
@@ -92,3 +97,41 @@ def test_spawn_reader_passes_an_explicit_upper_journal_bound(monkeypatch):
     assert record["actions"] == ["sw: spawn failed for mu1, task mu1 reopened: timeout"]
     assert spawns.failed(record)[0].measure == 1
     assert store.export("sw") == before
+
+
+def test_spawn_reader_keeps_capacity_beside_its_refusal():
+    import fakeredis
+
+    from scripts.swarm.store import RedisStore, SwarmConfig
+
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    store.create(SwarmConfig("sw", "/repo", 1, 0))
+    capacity = {
+        "harness": "claude",
+        "accounts": [
+            {"harness": "claude", "state": "OPEN", "sessions": 6, "cap": 6},
+        ],
+    }
+    import json
+
+    context = f"sw: spawn capacity for mu1: {json.dumps(capacity)}"
+    refusal = "sw: spawn failed for mu1: account reservation is full"
+
+    def journal(argv, **kwargs):
+        return subprocess.CompletedProcess(
+            argv,
+            0,
+            "\n".join(
+                [
+                    "other: spawn capacity for mu1: {}",
+                    context,
+                    refusal,
+                    "sw: unrelated",
+                ]
+            ),
+            "",
+        )
+
+    record = spawn_read.records(store, "sw", 5, run=journal)
+    assert record["actions"] == [context, refusal]
+    assert spawns.failed(record) == []

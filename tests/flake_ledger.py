@@ -43,6 +43,14 @@ class RefillingLoadGroupScheduling(LoadGroupScheduling):
             self._assign_work_unit(node)
 
 
+def pytest_xdist_make_scheduler(config, log):
+    # xdist's own load group scheduler requeues every unit a crashed worker completed and hands its
+    # replacement an empty one, so a run whose last test crashes its worker never ends.
+    if config.getvalue("dist") == "loadgroup":
+        return RefillingLoadGroupScheduling(config, log)
+    return None
+
+
 def _error(report):
     crash = getattr(report.longrepr, "reprcrash", None)
     if crash:
@@ -59,17 +67,14 @@ class FlakeLedger:
         self.path = path
         self.attempts = {}
         self.errors = {}
+        self.tracebacks = {}
+        self.reports = []
         self.retrying = set()
         self.failed = set()
         self.crashes = {}
         self.crashing = set()
         self.crash_failed = {}
         self.workers_down = 0
-
-    def pytest_xdist_make_scheduler(self, config, log):
-        if config.getvalue("dist") == "loadgroup":
-            return RefillingLoadGroupScheduling(config, log)
-        return None
 
     def pytest_testnodedown(self, node, error):
         self.workers_down += bool(error)
@@ -97,6 +102,7 @@ class FlakeLedger:
         else:
             return
         self.errors.setdefault(report.nodeid, []).append(_error(report))
+        self.tracebacks.setdefault(report.nodeid, []).append(report.longreprtext)
         if report.nodeid in self.crashing:
             self.crashing.discard(report.nodeid)
             self.pytest_runtest_logfinish(report.nodeid)
@@ -114,13 +120,19 @@ class FlakeLedger:
             return
         attempts = self.attempts.pop(nodeid)
         errors = self.errors.pop(nodeid, [])
-        if attempts > 1:
+        if attempts > 1 or failed:
             self._write(nodeid, attempts, failed, errors)
 
     def pytest_sessionfinish(self):
         for nodeid, crashes in self.crashes.items():
             failed = self.crash_failed.get(nodeid, True)
             self._write(nodeid, self.attempts[nodeid], failed, self.errors[nodeid], crashes=crashes)
+
+    def pytest_terminal_summary(self, terminalreporter):
+        for report in self.reports:
+            terminalreporter.write_sep("=", f"Retry failure reports: {report['test']}")
+            for traceback in report["tracebacks"]:
+                terminalreporter.write_line(traceback)
 
     def _write(self, nodeid, attempts, failed, errors, **extra):
         record = {
@@ -130,8 +142,11 @@ class FlakeLedger:
             "attempts": attempts,
             "outcome": "failed" if failed else "flaky",
             "errors": errors,
+            "tracebacks": self.tracebacks.pop(nodeid, []),
             **extra,
         }
+        if not failed:
+            self.reports.append(record)
         with self.path.open("a") as ledger:
             ledger.write(json.dumps(record) + "\n")
 

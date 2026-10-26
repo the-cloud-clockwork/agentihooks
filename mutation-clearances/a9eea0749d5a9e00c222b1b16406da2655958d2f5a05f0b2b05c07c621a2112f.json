@@ -1,0 +1,6 @@
+{
+  "scripts/recall/search.py:scripts.recall.search.x__where__mutmut_21:d8ae2e161fa9db7e09e33133a6b66664bc7dbab5e4eea3478cd5ce7b000ab565": {
+    "reader": "standards_reader",
+    "reason": "Only the case of the records.author identifier changes, which SQLite treats as case-insensitive."
+  }
+}

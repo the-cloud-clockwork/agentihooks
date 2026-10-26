@@ -10,8 +10,6 @@ from scripts.swarm.store import RedisStore, SwarmConfig, SwarmError
 from tests.inbox.test_wake import FakeHerdr
 from tests.swarm.test_tick import FakeLedger, FakeRuntime
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 NOW = 1_800_000_000_000
 ON = {"AGENTIHOOKS_METRICS_URL": "http://ch:8123", "AGENTIHOOKS_METRICS_USER": "writer"}
 
@@ -76,6 +74,36 @@ def test_record_pass_collects_ledger_rows_before_flushing(spool, monkeypatch, re
     )
     assert received["INSERT INTO swarm.ticks FORMAT JSONEachRow"][0]["actions"] == 3
     assert acks == [("sw", 1)]
+
+
+def test_record_pass_uses_its_tick_document_and_client_without_reading_a_new_revision(
+    spool, sent, monkeypatch, real_ledger_record
+):
+    import fakeredis
+
+    from tests.swarm.test_metrics_ledger import Ledger
+
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    store.create(SwarmConfig("sw", "/repo", 0, 0))
+    ledger = Ledger()
+    ledger.move("claimed", 1, NOW - 1)
+    doc = ledger.state("sw")
+    ledger.move("done", 2, NOW)
+    ledger.calls.clear()
+    monkeypatch.setattr(metrics, "LedgerClient", lambda: ledger)
+    monkeypatch.setattr(metrics.metrics_ledger, "record", real_ledger_record)
+    swarm = metrics.metrics_swarm.TickInput(store, doc, [], lambda url: None, ledger)
+
+    assert metrics.record_pass("sw", NOW, 0, ON, swarm) == []
+
+    events = [
+        json.loads(line)
+        for _, query, body in sent
+        if query == "INSERT INTO swarm.ledger_events FORMAT JSONEachRow"
+        for line in body.splitlines()
+    ]
+    assert [(row["ledger"], row["state"], row["revision"]) for row in events] == [("sw", "claimed", 1)]
+    assert ledger.calls == [("ack", "sw", 1)]
 
 
 @pytest.mark.parametrize("error", [OSError, LedgerGone, SwarmError])
@@ -202,6 +230,45 @@ def test_ledger_rows_are_collected_before_a_failing_swarm_collector(spool, sent,
     assert order == ["ledger", "swarm"]
 
 
+def test_a_failing_collector_pass_leaves_the_interval_open_for_the_next_pass(spool, sent, monkeypatch):
+    import fakeredis
+
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    store.create(SwarmConfig("sw", "/repo", 0, 0))
+    runs = []
+
+    def collect(*args):
+        runs.append(len(runs))
+        if len(runs) == 1:
+            raise ValueError("bad swarm row")
+
+    monkeypatch.setattr(metrics, "_collect", collect)
+    swarm = metrics.metrics_swarm.TickInput(store, {"tasks": []}, [], lambda url: None, None)
+    assert metrics.record_pass("sw", NOW, 0, ON, swarm) == ["metrics outbox failed: bad swarm row"]
+    assert metrics.record_pass("sw", NOW + 60_000, 0, ON, swarm) == []
+    assert runs == [0, 1]
+
+
+def test_a_reported_ledger_failure_leaves_the_interval_open_for_the_next_pass(spool, sent, monkeypatch):
+    import fakeredis
+
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    store.create(SwarmConfig("sw", "/repo", 0, 0))
+    calls = []
+
+    def ledger_record(*args):
+        calls.append(len(calls))
+        if len(calls) == 1:
+            raise SwarmError("ledger unavailable")
+
+    monkeypatch.setattr(metrics.metrics_ledger, "record", ledger_record)
+    monkeypatch.setattr(metrics, "_collect", lambda *args: None)
+    swarm = metrics.metrics_swarm.TickInput(store, {"tasks": []}, [], lambda url: None, None)
+    assert metrics.record_pass("sw", NOW, 0, ON, swarm) == ["ledger metrics failed: ledger unavailable"]
+    assert metrics.record_pass("sw", NOW + 60_000, 0, ON, swarm) == []
+    assert calls == [0, 1]
+
+
 def test_a_ledger_without_tasks_still_names_the_bottleneck(spool, sent, monkeypatch):
     import fakeredis
 
@@ -300,3 +367,69 @@ def test_a_swarm_pass_measures_the_stages_of_the_ledger_tasks_and_reports_a_flee
     swarm = metrics.metrics_swarm.TickInput(store, doc, [], lambda url: None, None)
     assert metrics.record_pass("sw", NOW, 0, ON, swarm) == ["fleet metrics failed: registry down"]
     assert seen == [(tasks, [True, False, False], {"eng": 0, "ci": 0, "plan": 1})]
+
+
+@pytest.mark.parametrize("minutes,collected", [(None, [NOW, NOW + 600_000]), ("5", [NOW, NOW + 360_000])])
+def test_ledger_and_swarm_collectors_run_once_per_interval_while_every_pass_writes_its_tick_row(
+    spool, sent, monkeypatch, minutes, collected
+):
+    import fakeredis
+
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    store.create(SwarmConfig("sw", "/repo", 0, 0))
+    seen = []
+    monkeypatch.setattr(metrics, "_ledger", lambda slug, now_ms, errors, box, swarm=None: seen.append(now_ms))
+    monkeypatch.setattr(metrics, "_collect", lambda *args: None)
+    clock = [NOW]
+    monkeypatch.setattr(store.redis, "set", _expiring(store.redis, clock))
+    environ = ON if minutes is None else {**ON, "AGENTIHOOKS_METRICS_EVERY_MINUTES": minutes}
+    swarm = metrics.metrics_swarm.TickInput(store, {"tasks": []}, [], lambda url: None, None)
+    passes = [NOW, NOW + 180_000, NOW + 360_000, NOW + 600_000]
+    for at in passes:
+        clock[0] = at
+        assert metrics.record_pass("sw", at, 1, environ, swarm) == []
+
+    assert seen == collected
+    ticks = [
+        json.loads(line)["ts_ms"]
+        for _, query, body in sent
+        if query == "INSERT INTO swarm.ticks FORMAT JSONEachRow"
+        for line in body.splitlines()
+    ]
+    assert sorted(set(ticks)) == passes
+
+
+def _expiring(redis, clock):
+    real_set, expiry = redis.set, {}
+
+    def set_(name, value, nx=False, px=None, **kwargs):
+        if nx and redis.exists(name) and clock[0] < expiry[name]:
+            return None
+        if px is not None:
+            expiry[name] = clock[0] + px
+        return real_set(name, value, **kwargs)
+
+    return set_
+
+
+def test_a_one_millisecond_metrics_interval_is_accepted(spool, sent):
+    import fakeredis
+
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    store.create(SwarmConfig("sw", "/repo", 0, 0))
+    swarm = metrics.metrics_swarm.TickInput(store, {"tasks": []}, [], lambda url: None, None)
+    environ = {**ON, "AGENTIHOOKS_METRICS_EVERY_MINUTES": repr(1 / 60_000)}
+    assert metrics.record_pass("sw", NOW, 1, environ, swarm) == []
+
+
+@pytest.mark.parametrize("minutes", ["0", "-1", "0.00001", "inf", "nan"])
+def test_a_metrics_interval_outside_positive_finite_minutes_is_reported(spool, sent, minutes):
+    import fakeredis
+
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    store.create(SwarmConfig("sw", "/repo", 0, 0))
+    swarm = metrics.metrics_swarm.TickInput(store, {"tasks": []}, [], lambda url: None, None)
+    environ = {**ON, "AGENTIHOOKS_METRICS_EVERY_MINUTES": minutes}
+    assert metrics.record_pass("sw", NOW, 1, environ, swarm) == [
+        "metrics outbox failed: metrics collectors need a positive interval in minutes"
+    ]

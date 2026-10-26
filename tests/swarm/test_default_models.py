@@ -9,7 +9,6 @@ import pytest
 from scripts.swarm import cli, default_models, model_catalog, model_pick, runtime
 from scripts.swarm.store import RedisStore, SwarmConfig, SwarmError
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
 CATALOG = {
     "claude": [{"model": "opus"}, {"model": "sonnet"}],
     "codex": [{"model": "gpt-6.1-sol"}, {"model": "gpt-6-sol"}],

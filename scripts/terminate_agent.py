@@ -39,13 +39,14 @@ def _registry() -> dict[str, dict]:
 
 def _name(process: Process, proc: Path, table: dict[int, Process]) -> str:
     from scripts.swarm.naming import plain
+    from scripts.swarm_v2.masters import is_title
 
     named = _argument(process.argv, "--name")
     parent = table.get(process.ppid)
     if parent and _target(parent) and not named:
         return ""
     identity = agent_environ(process.pid, ("AGENTIHOOKS_AGENT_NAME",), proc)[0]
-    return identity if not named or named == plain(identity) else named
+    return identity if not named or named == plain(identity) or (identity and is_title(named)) else named
 
 
 def _main_thread(target: str, session_id: str, info: dict, records: dict[str, dict]) -> tuple[str, str]:
@@ -265,6 +266,36 @@ def _close_pane(pane: str, socket: str) -> str:
     return "closed"
 
 
+def _mark_exit(pid: int) -> tuple[str, str]:
+    import redis
+
+    from scripts.swarm import deliberate_exit, store
+
+    swarm, agent = agent_environ(pid, ("AGENTIHOOKS_SWARM", "AGENTIHOOKS_AGENT_NAME"))
+    if not swarm or not agent:
+        return "", ""
+    try:
+        deliberate_exit.record(store.connect(), swarm, agent, int(time.time() * 1000))
+    except (store.SwarmError, redis.RedisError) as exc:
+        print(f"swarm_exit=not-recorded ({exc})")
+        return "", ""
+    print("swarm_exit=recorded")
+    return swarm, agent
+
+
+def _withdraw_exit(swarm: str, agent: str) -> None:
+    import redis
+
+    from scripts.swarm import deliberate_exit, store
+
+    if not swarm or not agent:
+        return
+    try:
+        deliberate_exit.take(store.connect(), swarm, agent)
+    except (store.SwarmError, redis.RedisError) as exc:
+        print(f"swarm_exit=not-withdrawn ({exc})")
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="List or terminate a Claude Code or Codex agent session")
     parser.add_argument("selector", nargs="?", default="", help="Exact session name, UUID, or PID")
@@ -295,10 +326,14 @@ def main(argv: list[str] | None = None) -> int:
     if not args.selector:
         print("terminate-agent: selector is required unless --list is used", file=sys.stderr)
         return 2
+    if args.stand_down and args.type == "claude":
+        print("terminate-agent: --stand-down stops Codex conversations only, not --type claude", file=sys.stderr)
+        return 2
     if args.stand_down:
         from scripts.codex_session import stand_down
 
-        return stand_down.run(args.selector, args.swarm, args.dry_run, items)
+        codex = [item for item in items if item.target == "codex"]
+        return stand_down.run(args.selector, args.swarm, args.dry_run, codex, args.json)
     try:
         selected = resolve(items, args.selector, args.type)
         members = validate(selected, items, force_shared=args.force_shared)
@@ -324,9 +359,11 @@ def main(argv: list[str] | None = None) -> int:
     if args.dry_run:
         print("result=validated signal=none")
         return 0
+    marked = _mark_exit(selected.process.pid)
     try:
         escalated = terminate(selected, members, args.term_timeout)
     except (OSError, RuntimeError) as exc:
+        _withdraw_exit(*marked)
         print(f"terminate-agent: {exc}", file=sys.stderr)
         return 1
     print(f"result=terminated escalation={'SIGKILL' if escalated else 'none'}")

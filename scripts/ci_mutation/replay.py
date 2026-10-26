@@ -10,8 +10,8 @@ from zipfile import ZipFile
 
 from scripts.ci_mutation.clearances import load_clearances
 from scripts.ci_mutation.measured import refine_plan
-from scripts.ci_mutation.report import evaluate
-from scripts.ci_mutation.runner import mutate_files, record_shard_measurement
+from scripts.ci_mutation.mutant_shards import unit_count
+from scripts.ci_mutation.runner import grade_shard_rows, mutate_files, record_shard_measurement, split_plan_names
 from scripts.ci_mutation.stats import SharedStats, stats_key, write_part
 
 ARTIFACTS = {"second": 11756407264, "third": 11758451635}
@@ -79,12 +79,12 @@ def grade(folder: Path, index: int, total: int) -> dict:
     stats = SharedStats(folder / "stats", "retained")
     rows, reason = mutate_files(folder / "source", work, selected, started + 1080, (index, total), stats.group(0))
     cleared = load_clearances(folder / "source")
-    report = {
-        "files": [evaluate(path, rows[path], lines, cleared) for path, (lines, _) in selected.items()]
-        if not reason
-        else [],
-        "not_mutated": [{"path": path, "reason": reason} for path in selected] if reason else [],
-    }
+    split = split_plan_names(stats)
+    report = {"files": [], "not_mutated": [{"path": path, "reason": reason} for path in selected] if reason else []}
+    if not reason:
+        report["files"] = [
+            grade_shard_rows(report, path, rows[path], lines, cleared, split) for path, (lines, _) in selected.items()
+        ]
     report["failed"] = bool(reason) or any(file["failures"] for file in report["files"])
     record_shard_measurement(report, output, stats, started, 1080, (index, total))
     (output / "report.json").write_text(json.dumps(report))
@@ -98,18 +98,18 @@ def verify(folder: Path) -> dict:
     manifest = json.loads((folder / "manifest.json").read_text())
     plan = json.loads((folder / "stats/plan.json").read_text())
     reports = [json.loads(path.read_text()) for path in sorted((folder / "grades").glob("*/report.json"))]
-    report = merge_reports(reports)
+    report = merge_reports(reports, load_clearances(folder / "source"))
     shards = report.get("shards", [])
     complete = (
         sorted(shard["index"] for shard in shards) == list(range(plan["shards"]))
         and all(shard["complete"] for shard in shards)
-        and sum(shard["expected"] for shard in shards) == manifest["mutants"]
-        and sum(shard["graded"] for shard in shards) == manifest["mutants"]
+        and sum(shard["expected"] for shard in shards) == unit_count(plan)
+        and sum(shard["graded"] for shard in shards) == unit_count(plan)
     )
     survivors = sum(row["status"] in {"survived", "no tests"} for file in report["files"] for row in file["failures"])
     proof = {
         "case": manifest["case"],
-        "expected": manifest["mutants"],
+        "expected": unit_count(plan),
         "graded": sum(shard["graded"] for shard in shards),
         "exhausted_shards": sum(shard["budget_exhausted"] for shard in shards),
         "complete": complete,

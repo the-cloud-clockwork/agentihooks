@@ -22,13 +22,13 @@ from tests.swarm_ledger import legacy_page  # noqa: E402
 SLUG, ENG, SID = "talkexec-2026-01-01", "engineer@abcdef-0001", "sid-talk"
 BUDGET = 10
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 
 @pytest.fixture
 def rig(tmp_path, monkeypatch, ledger_port):
     import redis
     from fakeredis import TcpFakeServer
+
+    from tests.scheduler.process_service import start_scheduler, stop_scheduler
 
     server = TcpFakeServer(("127.0.0.1", 0), server_type="redis")
     threading.Thread(target=server.serve_forever, daemon=True).start()
@@ -42,7 +42,7 @@ def rig(tmp_path, monkeypatch, ledger_port):
     ledgers.mkdir()
     monkeypatch.setattr(core, "LEDGER_DIR", ledgers)
     content = {"title": "Demo", "overview": "o", "sources": [], "phases": [{"title": "one", "description": "d"}]}
-    html_path, _ = core.paths(SLUG)
+    html_path, _ = legacy_page.paths(SLUG, core)
     html_path.write_text(legacy_page.render(new_ledger.build_doc(content), SLUG, 8765), encoding="utf-8")
     core.sync(SLUG)
     (tmp_path / "home" / ".agentihooks").mkdir(parents=True)
@@ -91,6 +91,7 @@ def rig(tmp_path, monkeypatch, ledger_port):
         path = tmp_path / "home" / ".agentihooks" / "swarm" / SLUG / "gates" / "log.jsonl"
         return [json.loads(line) for line in path.read_text().splitlines()] if path.exists() else []
 
+    scheduler = start_scheduler(env)
     rig = type("Rig", (), {})()
     rig.cli, rig.hook, rig.mode, rig.rows, rig.redis = cli, hook, mode, rows, client
     try:
@@ -101,6 +102,7 @@ def rig(tmp_path, monkeypatch, ledger_port):
         yield rig
     finally:
         subprocess.run([sys.executable, str(SCRIPTS / "ledger_server.py"), "--stop"], env=env, timeout=30)
+        stop_scheduler(scheduler, client)
         server.shutdown()
         server.server_close()
 
@@ -110,28 +112,28 @@ def say_budget(rig):
 
     Progress(rig.redis, SLUG).outcome(ENG, "pushed", 1)
     for n in range(BUDGET):
-        said = rig.cli("say", f"step {n} landed")
+        said = rig.cli("followup", "add", f"step {n} landed")
         assert said.returncode == 0, said.stderr
 
 
 def test_the_write_past_the_budget_is_refused_until_a_push_lands(rig):
     rig.mode("enforce")
     say_budget(rig)
-    refused = rig.cli("say", "one more line")
+    refused = rig.cli("followup", "add", "one more line")
     assert refused.returncode != 0
     assert f"talk refused: {ENG} made {BUDGET} talk writes since its last outcome" in refused.stderr
     assert [(r["gate"], r["kind"], r["agent"]) for r in rig.rows()] == [("talk", "deny", ENG)]
     pushed = rig.hook("git push -u origin feature")
     assert pushed.returncode == 0, pushed.stderr
     assert rig.redis.hgetall(f"{KEY_ROOT}:swarm:{SLUG}:progress:{ENG}").get("outcome") == "pushed"
-    passed = rig.cli("say", "one more line")
+    passed = rig.cli("followup", "add", "one more line")
     assert passed.returncode == 0, passed.stderr
-    assert json.loads(passed.stdout) == {"posted": True}
+    assert json.loads(passed.stdout) == {"followup": "add"}
 
 
 def test_observe_posts_the_line_and_logs_the_would_be_deny(rig):
     rig.mode("observe")
     say_budget(rig)
-    passed = rig.cli("say", "one more line")
+    passed = rig.cli("followup", "add", "one more line")
     assert passed.returncode == 0, passed.stderr
     assert [(r["gate"], r["kind"]) for r in rig.rows()] == [("talk", "observe")]

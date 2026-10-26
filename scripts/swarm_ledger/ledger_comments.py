@@ -5,12 +5,13 @@ Agent text is for the operator: plain words saying what was done or why it was s
 """
 
 import re
+from itertools import groupby
 
 LIMITS = {"comment": 50, "chat": 100, "item": 40, "priority": 20}
 OUTCOMES = ("done", "blocked")
 UNADDRESSED = (
-    "chat is the operator's conversation: send it to the operator or answer his line, "
-    "and talk to agents through the inbox"
+    "chat is reply only: the front door master answers an operator line by its id and never writes first; "
+    'every other word goes by inbox with agentihooks msg send master@<slug> "<text>"'
 )
 RULES = (
     ("clock time", re.compile(r"\b\d{1,2}:[\dx]{2}(?::\d{2})?(?:\.\d+)?\s?(?:Z|UTC)?\b", re.I)),
@@ -52,7 +53,7 @@ def problems(text, kind, long=False, task_ids=()):
     prose = web_links().sub(" ", text)
     hash_prose = re.sub(r"[\w-]+", lambda match: " " if match.group() in task_ids else match.group(), prose)
     for name, pattern in RULES:
-        match = pattern.search(hash_prose if name == "commit hash" else prose)
+        match = pattern.search(hash_prose if name in ("commit hash", "run or job id") else prose)
         if match:
             found.append(f"{name} '{match.group(0).strip()}'")
     for name, mark, most in PUNCTUATION:
@@ -80,11 +81,10 @@ def can_change(entry, by, members):
 
 
 def post_status(thread, by, entry_id, text, ctx, target, attachments=None):
-    """An agent's comment amends its own latest one on the item, unless the operator spoke after it."""
+    """An agent's comment amends its own latest one on the item, unless anyone commented after it or it is a notice."""
     live = [e for e in thread if not e.get("deleted")]
     mine = next((e for e in reversed(live) if e.get("by") == by and "to" not in e), None)
-    replied = mine is not None and any(e.get("by") == "operator" for e in live[live.index(mine) + 1 :])
-    if mine is None or replied or "outcome" in mine:
+    if mine is None or mine is not live[-1] or "outcome" in mine or "notice" in mine:
         if any(e["id"] == entry_id for e in thread):
             return
         thread.append({"id": entry_id, "by": by, "at": ctx.at, "text": text})
@@ -109,9 +109,10 @@ def post_outcome(thread, op, ctx, target):
 
 
 def post_answer(thread, op, ctx, target):
-    """An agent's answer to the operator stays beside its status comment: it never amends one or is amended."""
+    """An answer to the operator or a swarm notice never amends a status comment and is never amended."""
     if not any(e["id"] == op["id"] for e in thread):
-        thread.append({"id": op["id"], "by": op["by"], "at": ctx.at, "text": op["text"], "to": op["to"]})
+        key = "to" if "to" in op else "notice"
+        thread.append({"id": op["id"], "by": op["by"], "at": ctx.at, "text": op["text"], key: op[key]})
         ctx.record(op["by"], "comment added", target, id=op["id"], text=op["text"])
     seen(ctx, op["by"])
 
@@ -123,9 +124,11 @@ def seen(ctx, by):
 
 
 def check_outcome(op):
+    agent_comment = op["op"] == "add" and "by" in op and op["thread"].endswith("/comments")
+    if "notice" in op and (op["notice"] is not True or not agent_comment or "outcome" in op or "to" in op):
+        raise ValueError("notice rides only on an agent add to a comment thread, as true, without outcome or to")
     if "outcome" not in op:
         return
-    agent_comment = op["op"] == "add" and "by" in op and op["thread"].endswith("/comments")
     if op["outcome"] not in OUTCOMES or not agent_comment or "attachments" in op:
         raise ValueError(
             "outcome rides only on an agent add to a comment thread, as done or blocked, without attachments"
@@ -140,8 +143,6 @@ def refused(text, kind, where, ctx):
 
 
 def addressed(thread, op):
-    if op.get("to") == "operator":
-        return True
     return any(e["id"] == op.get("reply_to") and e.get("by") == "operator" and not e.get("deleted") for e in thread)
 
 
@@ -152,7 +153,7 @@ def agent_thread_op(thread, op, ctx, target, noun):
     if op["op"] == "add" and "outcome" in op:
         post_outcome(thread, op, ctx, target)
         return True
-    if op["op"] == "add" and noun == "comment" and "to" in op:
+    if op["op"] == "add" and noun == "comment" and {"to", "notice"} & op.keys():
         post_answer(thread, op, ctx, target)
         return True
     if op["op"] == "add" and noun == "comment":
@@ -188,14 +189,18 @@ def audit_item(where, item, task_ids=()):
     rows = []
     if "text" in item and problems(item["text"], "item", task_ids=task_ids):
         rows.append((where, "text", "", problems(item["text"], "item", task_ids=task_ids)))
-    counts = {}
-    for entry in item.get("comments", []):
-        if entry.get("deleted") or entry.get("by") == "operator":
+    counts = []
+    live = (entry for entry in item.get("comments", []) if not entry.get("deleted"))
+    for by, entries in groupby(live, key=lambda entry: entry["by"]):
+        if by == "operator":
             continue
-        counts[entry["by"]] = counts.get(entry["by"], 0) + ("to" not in entry)
-        if problems(entry["text"], "comment", task_ids=task_ids):
-            rows.append((where, entry["id"], entry["by"], problems(entry["text"], "comment", task_ids=task_ids)))
-    rows += [(where, "-", by, [f"{n} comments, keep one status"]) for by, n in counts.items() if n > 1]
+        count = 0
+        for entry in entries:
+            count += "to" not in entry
+            if problems(entry["text"], "comment", task_ids=task_ids):
+                rows.append((where, entry["id"], by, problems(entry["text"], "comment", task_ids=task_ids)))
+        counts.append((by, count))
+    rows += [(where, "-", by, [f"{n} comments, keep one status"]) for by, n in counts if n > 1]
     return rows
 
 
