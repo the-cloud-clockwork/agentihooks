@@ -1639,8 +1639,9 @@ jobs:
 
       - name: Name the artifact service outage
         if: steps.shard-reports.outcome == 'failure'
+        shell: bash
         run: |
-          echo "::warning::The artifact service failed the shard report download; retrying it once in 30 seconds."
+          echo "::warning::The shard report download failed, as an artifact service outage does; retrying it once in 30 seconds."
           sleep 30
 
       - name: Download shard reports, attempt 2
