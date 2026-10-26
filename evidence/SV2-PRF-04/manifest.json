@@ -1,0 +1,18 @@
+{
+  "package": "SV2-PRF-04",
+  "cases": [
+    "T-SV2-PRF-04-A",
+    "T-SV2-PRF-04-B",
+    "T-SV2-PRF-04-C"
+  ],
+  "evidence_class": "mocked: a fixed held out corpus with human review labels and in process packers that follow the kernel ranking contract stand in for brain-api, its graph store and a live model; no embedding, HTTP server or agent runs, and usefulness is the share of injected items a reviewer labelled useful, not a model judgement",
+  "inputs": {
+    "tests/evaluation/brain_context/corpus.json": "8badfaf3acaf7b548fb6a4da646a82277e9d05320a2230e75505f620b5fc74a0",
+    "tests/evaluation/brain_context/evaluate.py": "7e8b36da903c0f9bf1aa4d5994bb23fb5d28ea10b6d82602a174a528ffe2d6ec",
+    "tests/evaluation/brain_context/cases.py": "d860bcabd1d4bad0c8c1f754ec0a892cf9258b7d5e7f2361cd0b05284dcf0288"
+  },
+  "corpus_revision": "sv2-prf-04-corpus-1",
+  "red_run": "",
+  "records_run": "",
+  "tested_commit": ""
+}

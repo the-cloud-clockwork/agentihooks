@@ -1,0 +1,334 @@
+{
+  "case": "T-SV2-PRF-04-A",
+  "corpus_revision": "sv2-prf-04-corpus-1",
+  "evidence_class": "mocked: a fixed held out corpus with human review labels and in process packers that follow the kernel ranking contract stand in for brain-api, its graph store and a live model; no embedding, HTTP server or agent runs, and usefulness is the share of injected items a reviewer labelled useful, not a model judgement",
+  "input_sha256": {
+    "corpus.json": "8badfaf3acaf7b548fb6a4da646a82277e9d05320a2230e75505f620b5fc74a0"
+  },
+  "observed": {
+    "fixtures": {
+      "alpha": {
+        "accepted_record": {
+          "policy": "graph",
+          "report_sha256": "835a791339a6dd809b923edf36605fe3b7b6a5f8dbe4f675d9a9f4439f92a149",
+          "sequence": 2
+        },
+        "actor": "engineer@fixture-alpha",
+        "fixture_sha256": "d33947bd0b21109fe401cb8bd89d7b2fa397e1690c05f0d99f643da502dd5a36",
+        "per_case": {
+          "alpha-held-out-incident": {
+            "case": "held_out_incident",
+            "feed_only": {
+              "found": 1,
+              "injected": [
+                "alpha-hot-arc",
+                "alpha-mutation-old",
+                "alpha-store-arc",
+                "alpha-incident-arc"
+              ]
+            },
+            "graph": {
+              "found": 2,
+              "injected": [
+                "alpha-incident-arc",
+                "alpha-incident-lesson"
+              ]
+            },
+            "scoped": {
+              "found": 1,
+              "injected": [
+                "alpha-incident-arc"
+              ]
+            }
+          },
+          "alpha-prior-decision": {
+            "case": "prior_design_decision",
+            "feed_only": {
+              "found": 0,
+              "injected": [
+                "alpha-hot-arc",
+                "alpha-mutation-old",
+                "alpha-store-arc",
+                "alpha-incident-arc"
+              ]
+            },
+            "graph": {
+              "found": 1,
+              "injected": [
+                "alpha-store-arc",
+                "alpha-store-decision"
+              ]
+            },
+            "scoped": {
+              "found": 0,
+              "injected": [
+                "alpha-store-arc"
+              ]
+            }
+          },
+          "alpha-superseded": {
+            "case": "superseded_guidance",
+            "feed_only": {
+              "found": 0,
+              "injected": [
+                "alpha-hot-arc",
+                "alpha-mutation-old",
+                "alpha-store-arc",
+                "alpha-incident-arc"
+              ]
+            },
+            "graph": {
+              "found": 1,
+              "injected": [
+                "alpha-mutation-new",
+                "alpha-queue-lesson"
+              ]
+            },
+            "scoped": {
+              "found": 1,
+              "injected": [
+                "alpha-mutation-new",
+                "alpha-queue-lesson"
+              ]
+            }
+          },
+          "alpha-unrelated-hot": {
+            "case": "unrelated_hot_arc",
+            "feed_only": {
+              "found": 0,
+              "injected": [
+                "alpha-hot-arc",
+                "alpha-mutation-old",
+                "alpha-store-arc",
+                "alpha-incident-arc"
+              ]
+            },
+            "graph": {
+              "found": 1,
+              "injected": [
+                "alpha-queue-lesson"
+              ]
+            },
+            "scoped": {
+              "found": 1,
+              "injected": [
+                "alpha-queue-lesson"
+              ]
+            }
+          }
+        },
+        "totals": {
+          "feed_only": {
+            "arcs": 24,
+            "context_source_recall": 0.2,
+            "context_tokens": 3560,
+            "context_tokens_per_found_source": 3560.0,
+            "irrelevant_injection": 13,
+            "repeated_mistakes_avoided": 0.0,
+            "reviewed_usefulness": 0.0833,
+            "scope_leakage": 8,
+            "stale_injection": 1
+          },
+          "graph": {
+            "arcs": 7,
+            "context_source_recall": 1.0,
+            "context_tokens": 720,
+            "context_tokens_per_found_source": 144.0,
+            "irrelevant_injection": 1,
+            "repeated_mistakes_avoided": 1.0,
+            "reviewed_usefulness": 0.8571,
+            "scope_leakage": 0,
+            "stale_injection": 0
+          },
+          "scoped": {
+            "arcs": 5,
+            "context_source_recall": 0.6,
+            "context_tokens": 520,
+            "context_tokens_per_found_source": 173.3,
+            "irrelevant_injection": 1,
+            "repeated_mistakes_avoided": 0.5,
+            "reviewed_usefulness": 0.8,
+            "scope_leakage": 0,
+            "stale_injection": 0
+          }
+        },
+        "verdict": {
+          "gains": [
+            "context_source_recall",
+            "reviewed_usefulness",
+            "repeated_mistakes_avoided"
+          ],
+          "qualified": true,
+          "reason": "qualified",
+          "regressions": [],
+          "volume_delta": {
+            "arcs": 2,
+            "context_tokens": 200
+          }
+        }
+      },
+      "beta": {
+        "accepted_record": {
+          "policy": "graph",
+          "report_sha256": "c081e2192f4daa604e6b4073b7466d8ea8a99581ba77a9a57b957542aa27df05",
+          "sequence": 2
+        },
+        "actor": "engineer@fixture-beta",
+        "fixture_sha256": "78c9193fd95a151f411df359c46e3b1ebf5bbe59f0caa10bada52a04f0a2bc65",
+        "per_case": {
+          "beta-held-out-incident": {
+            "case": "held_out_incident",
+            "feed_only": {
+              "found": 0,
+              "injected": [
+                "beta-hot-arc",
+                "beta-image-old",
+                "beta-state-arc",
+                "beta-image-new"
+              ]
+            },
+            "graph": {
+              "found": 2,
+              "injected": [
+                "beta-incident-arc",
+                "beta-incident-lesson"
+              ]
+            },
+            "scoped": {
+              "found": 1,
+              "injected": [
+                "beta-incident-arc"
+              ]
+            }
+          },
+          "beta-prior-decision": {
+            "case": "prior_design_decision",
+            "feed_only": {
+              "found": 0,
+              "injected": [
+                "beta-hot-arc",
+                "beta-image-old",
+                "beta-state-arc",
+                "beta-image-new"
+              ]
+            },
+            "graph": {
+              "found": 1,
+              "injected": [
+                "beta-state-arc",
+                "beta-state-decision"
+              ]
+            },
+            "scoped": {
+              "found": 0,
+              "injected": [
+                "beta-state-arc"
+              ]
+            }
+          },
+          "beta-superseded": {
+            "case": "superseded_guidance",
+            "feed_only": {
+              "found": 1,
+              "injected": [
+                "beta-hot-arc",
+                "beta-image-old",
+                "beta-state-arc",
+                "beta-image-new"
+              ]
+            },
+            "graph": {
+              "found": 1,
+              "injected": [
+                "beta-image-new"
+              ]
+            },
+            "scoped": {
+              "found": 1,
+              "injected": [
+                "beta-image-new"
+              ]
+            }
+          },
+          "beta-unrelated-hot": {
+            "case": "unrelated_hot_arc",
+            "feed_only": {
+              "found": 0,
+              "injected": [
+                "beta-hot-arc",
+                "beta-image-old",
+                "beta-state-arc",
+                "beta-image-new"
+              ]
+            },
+            "graph": {
+              "found": 1,
+              "injected": [
+                "beta-park-lesson",
+                "beta-hot-arc"
+              ]
+            },
+            "scoped": {
+              "found": 1,
+              "injected": [
+                "beta-park-lesson",
+                "beta-hot-arc"
+              ]
+            }
+          }
+        },
+        "totals": {
+          "feed_only": {
+            "arcs": 24,
+            "context_source_recall": 0.2,
+            "context_tokens": 3440,
+            "context_tokens_per_found_source": 3440.0,
+            "irrelevant_injection": 13,
+            "repeated_mistakes_avoided": 0.0,
+            "reviewed_usefulness": 0.0833,
+            "scope_leakage": 8,
+            "stale_injection": 1
+          },
+          "graph": {
+            "arcs": 7,
+            "context_source_recall": 1.0,
+            "context_tokens": 960,
+            "context_tokens_per_found_source": 192.0,
+            "irrelevant_injection": 1,
+            "repeated_mistakes_avoided": 1.0,
+            "reviewed_usefulness": 0.8571,
+            "scope_leakage": 0,
+            "stale_injection": 0
+          },
+          "scoped": {
+            "arcs": 5,
+            "context_source_recall": 0.6,
+            "context_tokens": 760,
+            "context_tokens_per_found_source": 253.3,
+            "irrelevant_injection": 1,
+            "repeated_mistakes_avoided": 0.5,
+            "reviewed_usefulness": 0.8,
+            "scope_leakage": 0,
+            "stale_injection": 0
+          }
+        },
+        "verdict": {
+          "gains": [
+            "context_source_recall",
+            "reviewed_usefulness",
+            "repeated_mistakes_avoided"
+          ],
+          "qualified": true,
+          "reason": "qualified",
+          "regressions": [],
+          "volume_delta": {
+            "arcs": 2,
+            "context_tokens": 200
+          }
+        }
+      }
+    },
+    "independent_fixtures_differ": true
+  },
+  "state": "passed"
+}

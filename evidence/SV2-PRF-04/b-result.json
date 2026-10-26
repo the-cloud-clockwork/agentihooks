@@ -1,0 +1,235 @@
+{
+  "case": "T-SV2-PRF-04-B",
+  "corpus_revision": "sv2-prf-04-corpus-1",
+  "evidence_class": "mocked: a fixed held out corpus with human review labels and in process packers that follow the kernel ranking contract stand in for brain-api, its graph store and a live model; no embedding, HTTP server or agent runs, and usefulness is the share of injected items a reviewer labelled useful, not a model judgement",
+  "input_sha256": {
+    "corpus.json": "8badfaf3acaf7b548fb6a4da646a82277e9d05320a2230e75505f620b5fc74a0"
+  },
+  "observed": {
+    "alpha": {
+      "attempts": {
+        "feed_only": {
+          "refused": "not_qualified",
+          "totals": {
+            "arcs": 24,
+            "context_source_recall": 0.2,
+            "context_tokens": 3560,
+            "context_tokens_per_found_source": 3560.0,
+            "irrelevant_injection": 13,
+            "repeated_mistakes_avoided": 0.0,
+            "reviewed_usefulness": 0.0833,
+            "scope_leakage": 8,
+            "stale_injection": 1
+          },
+          "verdict": {
+            "gains": [],
+            "qualified": false,
+            "reason": "regressed",
+            "regressions": [
+              "context_source_recall",
+              "reviewed_usefulness",
+              "repeated_mistakes_avoided",
+              "scope_leakage",
+              "irrelevant_injection",
+              "stale_injection"
+            ],
+            "volume_delta": {
+              "arcs": 19,
+              "context_tokens": 3040
+            }
+          }
+        },
+        "graph_wide": {
+          "refused": "not_qualified",
+          "totals": {
+            "arcs": 11,
+            "context_source_recall": 1.0,
+            "context_tokens": 1170,
+            "context_tokens_per_found_source": 234.0,
+            "irrelevant_injection": 4,
+            "repeated_mistakes_avoided": 0.5,
+            "reviewed_usefulness": 0.5455,
+            "scope_leakage": 0,
+            "stale_injection": 1
+          },
+          "verdict": {
+            "gains": [
+              "context_source_recall"
+            ],
+            "qualified": false,
+            "reason": "regressed",
+            "regressions": [
+              "reviewed_usefulness",
+              "irrelevant_injection",
+              "stale_injection"
+            ],
+            "volume_delta": {
+              "arcs": 6,
+              "context_tokens": 650
+            }
+          }
+        },
+        "scoped_padded": {
+          "refused": "not_qualified",
+          "totals": {
+            "arcs": 36,
+            "context_source_recall": 1.0,
+            "context_tokens": 4720,
+            "context_tokens_per_found_source": 944.0,
+            "irrelevant_injection": 30,
+            "repeated_mistakes_avoided": 1.0,
+            "reviewed_usefulness": 0.1667,
+            "scope_leakage": 0,
+            "stale_injection": 0
+          },
+          "verdict": {
+            "gains": [
+              "context_source_recall",
+              "repeated_mistakes_avoided"
+            ],
+            "qualified": false,
+            "reason": "regressed",
+            "regressions": [
+              "reviewed_usefulness",
+              "irrelevant_injection"
+            ],
+            "volume_delta": {
+              "arcs": 31,
+              "context_tokens": 4200
+            }
+          }
+        }
+      },
+      "corrected": {
+        "request": "new operation id against sequence 1",
+        "sequence": 2,
+        "state": "accepted"
+      },
+      "foreign_names_absent_from_diagnostics": true,
+      "protected_state_unchanged_by_refusals": true,
+      "volume_only": {
+        "gains": [],
+        "qualified": false,
+        "reason": "no_gain",
+        "regressions": [],
+        "volume_delta": {
+          "arcs": 3,
+          "context_tokens": 400
+        }
+      }
+    },
+    "beta": {
+      "attempts": {
+        "feed_only": {
+          "refused": "not_qualified",
+          "totals": {
+            "arcs": 24,
+            "context_source_recall": 0.2,
+            "context_tokens": 3440,
+            "context_tokens_per_found_source": 3440.0,
+            "irrelevant_injection": 13,
+            "repeated_mistakes_avoided": 0.0,
+            "reviewed_usefulness": 0.0833,
+            "scope_leakage": 8,
+            "stale_injection": 1
+          },
+          "verdict": {
+            "gains": [],
+            "qualified": false,
+            "reason": "regressed",
+            "regressions": [
+              "context_source_recall",
+              "reviewed_usefulness",
+              "repeated_mistakes_avoided",
+              "scope_leakage",
+              "irrelevant_injection",
+              "stale_injection"
+            ],
+            "volume_delta": {
+              "arcs": 19,
+              "context_tokens": 2680
+            }
+          }
+        },
+        "graph_wide": {
+          "refused": "not_qualified",
+          "totals": {
+            "arcs": 10,
+            "context_source_recall": 1.0,
+            "context_tokens": 1270,
+            "context_tokens_per_found_source": 254.0,
+            "irrelevant_injection": 3,
+            "repeated_mistakes_avoided": 0.5,
+            "reviewed_usefulness": 0.6,
+            "scope_leakage": 0,
+            "stale_injection": 1
+          },
+          "verdict": {
+            "gains": [
+              "context_source_recall"
+            ],
+            "qualified": false,
+            "reason": "regressed",
+            "regressions": [
+              "reviewed_usefulness",
+              "irrelevant_injection",
+              "stale_injection"
+            ],
+            "volume_delta": {
+              "arcs": 5,
+              "context_tokens": 510
+            }
+          }
+        },
+        "scoped_padded": {
+          "refused": "not_qualified",
+          "totals": {
+            "arcs": 36,
+            "context_source_recall": 1.0,
+            "context_tokens": 4720,
+            "context_tokens_per_found_source": 944.0,
+            "irrelevant_injection": 30,
+            "repeated_mistakes_avoided": 1.0,
+            "reviewed_usefulness": 0.1667,
+            "scope_leakage": 0,
+            "stale_injection": 0
+          },
+          "verdict": {
+            "gains": [
+              "context_source_recall",
+              "repeated_mistakes_avoided"
+            ],
+            "qualified": false,
+            "reason": "regressed",
+            "regressions": [
+              "reviewed_usefulness",
+              "irrelevant_injection"
+            ],
+            "volume_delta": {
+              "arcs": 31,
+              "context_tokens": 3960
+            }
+          }
+        }
+      },
+      "corrected": {
+        "request": "new operation id against sequence 1",
+        "sequence": 2,
+        "state": "accepted"
+      },
+      "foreign_names_absent_from_diagnostics": true,
+      "protected_state_unchanged_by_refusals": true,
+      "volume_only": {
+        "gains": [],
+        "qualified": false,
+        "reason": "no_gain",
+        "regressions": [],
+        "volume_delta": {
+          "arcs": 3,
+          "context_tokens": 400
+        }
+      }
+    }
+  },
+  "state": "passed"
+}
