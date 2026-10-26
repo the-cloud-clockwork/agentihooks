@@ -128,7 +128,7 @@ def recorded_branch(repo: Path, task: dict) -> str:
         return ""
     if not remote and len(task.get("repositories", [])) > 1:
         return ""
-    return task.get("branch", "")
+    return task.get("branch") or ""
 
 
 def repository_task(repo: Path, task: dict) -> dict:
@@ -139,14 +139,11 @@ def repository_task(repo: Path, task: dict) -> dict:
 
 
 def continuation_task(repo: Path, task: dict, scoped: dict, branch: str) -> dict:
-    mapped, recorded = scoped.get("branch"), recorded_branch(repo, task)
-    if branch == mapped or not mapped or not recorded or recorded == mapped:
+    mapped, recorded = scoped["branch"], recorded_branch(repo, task)
+    heads = {name for name in (mapped, recorded) if name and git(repo, "ls-remote", "origin", f"refs/heads/{name}")}
+    if branch == mapped or mapped in heads or recorded not in heads:
         return scoped
-    if git(repo, "ls-remote", "origin", f"refs/heads/{mapped}"):
-        return scoped
-    if not git(repo, "ls-remote", "origin", f"refs/heads/{recorded}"):
-        return scoped
-    return {**scoped, "branch": require_branch(recorded)}
+    return {**scoped, "branch": recorded}
 
 
 def publishing_root(repo: str, task: dict, agent: AgentRecord) -> tuple[Path | None, Path, dict]:

@@ -560,8 +560,7 @@ def _update_fields(task: dict, fields: dict) -> dict:
     if (
         "branch" in fields
         and "repository_branches" not in fields
-        and task.get("branch")
-        and list(task.get("repository_branches", {}).values()).count(task["branch"]) == 1
+        and list(task.get("repository_branches", {}).values()).count(task.get("branch")) == 1
     ):
         branches = {
             repo: fields["branch"] if branch == task["branch"] else branch

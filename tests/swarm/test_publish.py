@@ -1555,6 +1555,21 @@ def test_a_fresh_continuation_on_the_recorded_branch_publishes_past_an_unpushed_
     assert git(p.repo, "ls-remote", "origin", "refs/heads/predecessor") == ""
 
 
+@pytest.mark.parametrize(
+    "pushed,expected", [((), "predecessor"), (("recorded",), "recorded"), (("predecessor", "recorded"), "predecessor")]
+)
+def test_continuation_takes_the_recorded_branch_only_over_an_unpushed_entry(publication, pushed, expected):
+    from scripts.swarm import publish
+
+    p = publication
+    for name in pushed:
+        git(p.root, "push", "origin", f"HEAD:{name}")
+    task = {**p.task, "branch": "recorded", "branch_repo": str(p.repo.parent / "remote.git")}
+    scoped = {**task, "branch": "predecessor"}
+    assert publish.continuation_task(p.repo, task, scoped, "engineer-test")["branch"] == expected
+    assert publish.continuation_task(p.repo, task, scoped, "predecessor") == scoped
+
+
 @pytest.mark.parametrize("open_branch,diverged", [("", False), ("another-task", False), ("predecessor", True)])
 def test_publish_refuses_unverified_or_diverged_retained_delivery(publication, monkeypatch, open_branch, diverged):
     from scripts.swarm import publish
