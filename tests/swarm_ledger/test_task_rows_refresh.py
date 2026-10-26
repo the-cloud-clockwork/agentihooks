@@ -30,7 +30,7 @@ def write_tasks(path, tasks: list) -> None:
         ([{"id": "a"}], 1, ["id", "a", 0], False),
         ([{"id": "a"}], 0, ["index", 0, 0], False),
         ([["a"]], 0, ["id", "a", 0], False),
-        ([{"title": "a"}], 0, ["id", None, 0], False),
+        ([{"title": "a"}], 0, ["id", "a", 0], False),
     ],
 )
 def test_same_child_matches_only_the_first_old_task_with_that_id(old, position, identity, same):
