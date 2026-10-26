@@ -1,4 +1,4 @@
-"""Screens task adds against the tasks the ledger already holds, before the locked apply takes the write lock."""
+"""Screens task and follow up adds against what the ledger already holds, before the locked apply takes the write lock."""
 
 import json
 import os
@@ -14,12 +14,14 @@ BUDGET_S = 5.0
 UNCHECKED = "unchecked"
 TICK = "swarm"
 MINTED = ("plan", "release")
+KINDS = {"task_add": "task", "add_item": "followup"}
+LABELS = {"task": "task", "followup": "follow up"}
 REFUSAL = (
-    'task {new} repeats task {id} "{title}" ({state}, rank {rank}, phase {phase}): {fate}. '
+    '{label} {new} repeats {kind} {id} "{title}" ({state}, rank {rank}, phase {phase}): {fate}. '
     'If it is a different change, add it with --not-duplicate "<why it differs>"'
 )
 UNCHECKED_PREFIX = "the duplicate check did not"
-UNCHECKED_WARNING = UNCHECKED_PREFIX + " run for task {new} because {why}, so it was added unchecked"
+UNCHECKED_WARNING = UNCHECKED_PREFIX + " run for {label} {new} because {why}, so it was added unchecked"
 LANDED_REPEAT = (
     'task {new} repeats task {id} "{title}", added while its duplicate check ran. '
     'If it is a different change, add it with --not-duplicate "<why it differs>"'
@@ -45,7 +47,7 @@ class Gate:
     def apply(self, doc: dict, op: dict, ctx: object, apply_op: object) -> bool:
         reason = self.screen.refused.get(op["id"]) or self.landed_repeat(doc, op)
         accepted = self.inner.apply(doc, op, ctx, _refuse(reason) if reason else apply_op)
-        if accepted and op["id"] not in self.screen.warnings and checked(op):
+        if accepted and op["id"] not in self.screen.warnings and checked(op) and op["op"] == "task_add":
             self.flag_concurrent(doc, op)
         return accepted
 
@@ -53,7 +55,7 @@ class Gate:
         return [t for t in doc.get("tasks", []) if t["id"] not in self.screen.seen]
 
     def landed_repeat(self, doc: dict, op: dict) -> str:
-        if not checked(op):
+        if not checked(op) or op["op"] != "task_add":
             return ""
         title = _plain(op["title"])
         match = next((t for t in self.landed(doc) if _plain(t["title"]) == title), None)
@@ -68,18 +70,17 @@ def screen(doc: dict, ops: list[dict]) -> Screen:
     adds = [op for op in ops if checked(op)]
     if not adds:
         return Screen()
-    found, why = _find(doc, adds)
     refused, warnings = {}, {}
-    for op, match in zip(adds, found):
-        if match == UNCHECKED:
-            warnings[op["id"]] = UNCHECKED_WARNING.format(new=op["task"], why=why)
-        elif match is not None:
-            refused[op["id"]] = refusal(op, match)
+    for kind in ("task", "followup"):
+        if group := [op for op in adds if KINDS[op["op"]] == kind]:
+            _judge(doc, kind, group, refused, warnings)
     seen = {t["id"] for t in doc.get("tasks", [])} | {op["task"] for op in ops if op["op"] == "task_add"}
     return Screen(refused, warnings, frozenset(seen))
 
 
 def checked(op: dict) -> bool:
+    if op["op"] == "add_item":
+        return op["list"] == "followups" and not op.get("not_duplicate")
     if op["op"] != "task_add" or op.get("not_duplicate"):
         return False
     return not (op["by"] == TICK and op["task"] in {f"{kind}-{op.get('phase', '')}" for kind in MINTED})
@@ -88,19 +89,21 @@ def checked(op: dict) -> bool:
 def refusal(op: dict, match: dict) -> str:
     fate = "it is already built" if match["state"] == "done" else "it is on the ledger and will be built"
     return REFUSAL.format(
-        new=op["task"],
+        label=LABELS[KINDS[op["op"]]],
+        new=_new(op),
+        kind=LABELS[match["kind"]],
         id=match["id"],
         title=match["title"],
         state=match["state"],
-        rank=match["rank"],
+        rank=match["rank"] or "none",
         phase=match["phase_title"] or "none",
         fate=fate,
     )
 
 
-def find(doc: dict, adds: list[dict]) -> list:
+def find(doc: dict, adds: list[dict], kind: str = "task") -> list:
     held = {key: doc.get(key, []) for key in ("tasks", "phases", "followups")}
-    request = json.dumps({"doc": held, "kind": "task", "items": adds})
+    request = json.dumps({"doc": held, "kind": kind, "items": adds})
     pipes = {"stdin": subprocess.PIPE, "stdout": subprocess.PIPE, "stderr": subprocess.PIPE}
     with subprocess.Popen(CHILD, **pipes, text=True, cwd=ROOT, start_new_session=True) as child:
         try:
@@ -117,9 +120,22 @@ class Died(Exception):
     pass
 
 
-def _find(doc, adds):
+def _judge(doc, kind, adds, refused, warnings):
+    found, why = _find(doc, adds, kind)
+    for op, match in zip(adds, found):
+        if match == UNCHECKED:
+            warnings[op["id"]] = UNCHECKED_WARNING.format(label=LABELS[kind], new=_new(op), why=why)
+        elif match is not None:
+            refused[op["id"]] = refusal(op, match)
+
+
+def _new(op):
+    return op["task"] if op["op"] == "task_add" else op["id"]
+
+
+def _find(doc, adds, kind):
     try:
-        return find(doc, adds), UNANSWERED
+        return find(doc, adds, kind), UNANSWERED
     except subprocess.TimeoutExpired:
         why = SLOW.format(budget=BUDGET_S)
     except Died as exc:
