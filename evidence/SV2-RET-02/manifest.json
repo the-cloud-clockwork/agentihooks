@@ -10,6 +10,6 @@
   },
   "mocked": true,
   "package": "SV2-RET-02",
-  "run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/40277942293",
-  "tested_commit": "6e05841c54ed8f08ee60c84e7aab71a944c4576b"
+  "run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/40279602345",
+  "tested_commit": "8755a2ca223b487b3597392648e08a511db8277d"
 }
