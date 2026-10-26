@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/publish.py:scripts.swarm.publish.x_publish__mutmut_3:a6ed0c19ef5ad397cca8ad26c54593209a0c3f1d6b0f27f3b8d84ebc9a5265d3": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "Before shlex.join assignment retry is observed only by its truth value in exception formatting. Both empty string and None are false and neither is returned or interpolated on that path; after assignment they are identical strings."
+  }
+}

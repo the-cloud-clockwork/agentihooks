@@ -149,7 +149,7 @@ jobs:
 
       - name: Publish protected tested tree evidence
         if: steps.decision.outputs.recorded == 'true'
-        uses: actions/upload-artifact@v4
+        uses: ./.github/actions/retry-upload
         with:
           name: required-tree-${{ github.run_attempt }}
           path: ${{ runner.temp }}/provenance.json
@@ -222,6 +222,7 @@ jobs:
     runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && 'anton-oss-light' || 'ubuntu-latest' }}
     timeout-minutes: 5
     permissions:
+      actions: read
       contents: read
     outputs:
       key: ${{ steps.stored.outputs.cache-matched-key }}
@@ -274,7 +275,7 @@ jobs:
 
       - name: Publish protected tested tree evidence
         if: (github.event_name == 'merge_group' || github.event_name == 'pull_request') && steps.provenance.outputs.recorded == 'true'
-        uses: actions/upload-artifact@v4
+        uses: ./provenance-grader/.github/actions/retry-upload
         with:
           name: required-tree-${{ github.run_attempt }}
           path: ${{ runner.temp }}/provenance.json
@@ -315,7 +316,7 @@ jobs:
       # Queue refs and dispatched branches cannot read caches saved on dev, so they fetch dev's artifacts on the App's own API quota.
       - name: Mint the tcc main ci App token
         id: app-token
-        if: github.event_name == 'merge_group' || github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && hashFiles('scripts/ci_dev_reuse.py') != '')
+        if: (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]') || github.event_name == 'merge_group' || github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && hashFiles('scripts/ci_dev_reuse.py') != '')
         uses: actions/create-github-app-token@v3.2.0
         with:
           client-id: ${{ secrets.TCC_CI_CLIENT_ID }}
@@ -582,6 +583,8 @@ jobs:
           BASE: origin/${{ github.base_ref }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           EVENT: ${{ github.event_name }}
+          CI_SELECT_REPOSITORY: ${{ github.repository }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token || github.token }}
         run: |
           if [[ "$EVENT" != pull_request || ! -f "$RUNNER_TEMP/grader/scripts/ci_select.py" ]]; then
             printf 'scope=full\nlegs=[]\ncount=0\n' >> "$GITHUB_OUTPUT"
@@ -594,7 +597,7 @@ jobs:
           cd "$RUNNER_TEMP/grader"
           set -o pipefail
           mkdir -p "$RUNNER_TEMP/selection"
-          python -m scripts.ci_select --root "$GITHUB_WORKSPACE" --base "$BASE" --head "$HEAD_SHA" --event "$EVENT" --legs 12 --durations "${durations[@]}" | tee "$RUNNER_TEMP/selection/selection.txt"
+          "$RUNNER_TEMP/provenance-python/bin/python" -m scripts.ci_select --root "$GITHUB_WORKSPACE" --base "$BASE" --head "$HEAD_SHA" --event "$EVENT" --legs 12 --durations "${durations[@]}" | tee "$RUNNER_TEMP/selection/selection.txt"
 
       # Job outputs are protected, so each leg reads its files from this artifact.
       - name: Upload the selected legs
@@ -1568,7 +1571,7 @@ jobs:
     if: ${{ !cancelled() && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && (github.event_name != 'pull_request' || needs.select.outputs.scope == 'full') }}
     needs: [split, select, reuse, admission]
     runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && 'anton-oss-light' || 'ubuntu-latest' }}
-    timeout-minutes: 25
+    timeout-minutes: ${{ github.event_name == 'merge_group' && 42 || 60 }}
     permissions:
       contents: read
     strategy:
@@ -1610,7 +1613,7 @@ jobs:
           permission-actions: read
           permission-contents: read
 
-      - name: Prefetch reports while every planned shard finishes
+      - name: Wait for every planned shard
         shell: bash
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
@@ -1622,7 +1625,30 @@ jobs:
             SHARDS="$(seq 1 20 | jq -sc '.')"
           fi
           export SHARDS
+          echo "SHARDS=$SHARDS" >> "$GITHUB_ENV"
           python -m scripts.ci_gate_shards
+
+      # The artifact service download spends none of the App installation's hourly REST budget.
+      - name: Download shard reports
+        uses: actions/download-artifact@v4
+        with:
+          pattern: "{durations,flakes}-${{ matrix.python-version }}-*"
+          path: shard-reports
+
+      - name: Require every planned shard report
+        shell: bash
+        run: |
+          IFS=, read -ra shards <<< "${SHARDS//[][ ]/}"
+          missing=()
+          for shard in "${shards[@]}"; do
+            for kind in durations flakes; do
+              [[ -d "shard-reports/$kind-3.12-$shard" ]] || missing+=("$kind-3.12-$shard")
+            done
+          done
+          if (( ${#missing[@]} )); then
+            echo "::error::Missing shard reports: ${missing[*]}"
+            exit 1
+          fi
 
       - name: Check every collected test ran in exactly one shard
         env:
@@ -2053,6 +2079,9 @@ jobs:
       - name: Install PyYAML
         run: python -m pip install "pyyaml>=6.0"
 
+      - name: Install vulture
+        run: python -m pip install vulture==2.14
+
       - name: Set up uv
         uses: astral-sh/setup-uv@v10.2.0
         with:
@@ -2138,6 +2167,16 @@ jobs:
             echo "::error::dev carries no scripts/swallowed_exceptions.py, so nothing trusted can grade."
             exit 1
           fi
+
+      # dev's copy measures the base and the head, so a pull request cannot grade or allowlist its own dead code.
+      # Until dev carries the grader, the head's copy measures them.
+      - name: Hold dead code in hooks and scripts
+        if: ${{ !cancelled() }}
+        run: |
+          if [[ -f "$RUNNER_TEMP/grader/scripts/dead_code.py" ]]; then
+            cd "$RUNNER_TEMP/grader"
+          fi
+          python -m scripts.dead_code --base "$RUNNER_TEMP/base" --head "$GITHUB_WORKSPACE"
 
       # The base revision's copy grades, so a pull request cannot loosen its own audit.
       - name: Fail on known vulnerabilities new against the base
@@ -2846,6 +2885,18 @@ jobs:
           [[ -f ~/dev-durations/.test_durations ]] || { echo "Using committed durations"; exit 0; }
           python -c 'import json, sys; from pathlib import Path; from tests.dev_durations import adopt; Path(".test_durations").write_text(json.dumps(adopt(Path(sys.argv[1]), sys.argv[2]), indent=4, sort_keys=True) + "\n")' ~/dev-durations "$PYTHON_VERSION"
 
+      - name: Restore measured statistics timings
+        if: steps.reuse.outputs.reused != 'true'
+        uses: actions/cache/restore@v4
+        env:
+          SEGMENT_DOWNLOAD_TIMEOUT_MINS: "1"
+        with:
+          path: .mutation-stats-cache
+          key: mutation-test-stats-v2-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            mutation-test-stats-v2-${{ runner.os }}-
+            mutation-test-stats-v1-${{ runner.os }}-
+
       - name: Size mutation shards from stored timings
         id: plan
         if: steps.reuse.outputs.reused != 'true'
@@ -2991,8 +3042,8 @@ jobs:
           SEGMENT_DOWNLOAD_TIMEOUT_MINS: "1"
         with:
           path: .mutation-stats-cache
-          key: mutation-test-stats-v1-${{ runner.os }}-${{ matrix.part }}-${{ github.run_id }}-${{ github.run_attempt }}
-          restore-keys: mutation-test-stats-v1-${{ runner.os }}-${{ matrix.part }}-
+          key: mutation-test-stats-v2-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: mutation-test-stats-v2-${{ runner.os }}-
 
       - name: Collect one stats part for every mutation shard
         if: needs.mutation-plan.outputs.forwarded != 'true'
@@ -3003,12 +3054,12 @@ jobs:
           PARTS: ${{ strategy.job-total }}
         run: mkdir -p .mutation-stats && touch ".mutation-stats/collected-$PART" && python -m scripts.ci_mutation --bases "$BASES" --budget 1080 --stats .mutation-stats --stats-part "$PART" --stats-parts "$PARTS"
 
-      - name: Store successful test stats
-        if: needs.mutation-plan.outputs.forwarded != 'true'
+      - name: Save the merged test stats
+        if: strategy.job-total == 1 && needs.mutation-plan.outputs.forwarded != 'true'
         uses: actions/cache/save@v4
         with:
           path: .mutation-stats-cache
-          key: mutation-test-stats-v1-${{ runner.os }}-${{ matrix.part }}-${{ github.run_id }}-${{ github.run_attempt }}
+          key: mutation-test-stats-v2-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}
 
       - name: Upload mutation stats part
         if: needs.mutation-plan.outputs.forwarded != 'true'
@@ -3029,6 +3080,23 @@ jobs:
           path: .mutation-gate/
           include-hidden-files: true
           retention-days: 7
+          overwrite: true
+
+      - name: Keep only the test stats this part wrote
+        if: strategy.job-total != 1 && needs.mutation-plan.outputs.forwarded != 'true'
+        env:
+          PART: ${{ matrix.part }}
+        run: mkdir -p .mutation-stats-cache .mutation-stats-fresh && find .mutation-stats-cache -maxdepth 1 -type f -newer ".mutation-stats/collected-$PART" -exec cp -p {} .mutation-stats-fresh/ \;
+
+      - name: Upload this part's test stats cache
+        if: strategy.job-total != 1 && needs.mutation-plan.outputs.forwarded != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: mutation-test-stats-cache-${{ matrix.part }}
+          path: .mutation-stats-fresh/
+          include-hidden-files: true
+          if-no-files-found: ignore
+          retention-days: 1
           overwrite: true
 
       - name: Mutate the only shard in the statistics job
@@ -3065,6 +3133,31 @@ jobs:
         with:
           fetch-depth: 0
           ref: ${{ github.event.pull_request.head.sha }}
+
+      - name: Restore compatible test stats
+        if: strategy.job-index == 0 && needs.mutation-plan.outputs.stats_parts != '[0]' && needs.mutation-plan.outputs.forwarded != 'true'
+        uses: actions/cache/restore@v4
+        env:
+          SEGMENT_DOWNLOAD_TIMEOUT_MINS: "1"
+        with:
+          path: .mutation-stats-cache
+          key: mutation-test-stats-v2-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: mutation-test-stats-v2-${{ runner.os }}-
+
+      - name: Download every part's test stats cache
+        if: strategy.job-index == 0 && needs.mutation-plan.outputs.stats_parts != '[0]' && needs.mutation-plan.outputs.forwarded != 'true'
+        uses: actions/download-artifact@v4
+        with:
+          pattern: mutation-test-stats-cache-*
+          path: .mutation-stats-cache
+          merge-multiple: true
+
+      - name: Save the merged test stats
+        if: strategy.job-index == 0 && needs.mutation-plan.outputs.stats_parts != '[0]' && needs.mutation-plan.outputs.forwarded != 'true' && hashFiles('.mutation-stats-cache/**') != ''
+        uses: actions/cache/save@v4
+        with:
+          path: .mutation-stats-cache
+          key: mutation-test-stats-v2-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}
 
       - uses: actions/setup-python@v5
         if: needs.mutation-plan.outputs.forwarded != 'true'

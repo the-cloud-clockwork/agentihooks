@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import os
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from pathlib import Path
 
 import yaml
@@ -15,6 +15,7 @@ PACKAGE_PREFIX = "package:"
 BUNDLE_PROFILES = "profiles"
 RENDER_STAMP = ".agentihooks-render.json"
 OVERLAY_CAP = 3
+HIVE_CAPABILITIES = "AGENTIHOOKS_HIVE_CAPABILITIES"
 
 
 def state_path() -> Path:
@@ -91,6 +92,22 @@ def wears(path: Path) -> list[str]:
     if not isinstance(roles, list):
         raise ValueError(f"overlay {path.name} wears must be a list of roles")
     return [str(role) for role in roles]
+
+
+def hive_capabilities(environ: Mapping[str, str]) -> set[str]:
+    return {value.strip() for value in environ.get(HIVE_CAPABILITIES, "").split(",") if value.strip()}
+
+
+def require_capabilities(profile_dirs: list[tuple[str, Path]], available: set[str]) -> None:
+    for name, path in profile_dirs:
+        manifest = path / "profile.yml"
+        data = yaml.safe_load(manifest.read_text()) or {} if manifest.is_file() else {}
+        required = data.get("required_capabilities", []) if isinstance(data, dict) else None
+        if not isinstance(required, list) or any(not isinstance(item, str) or not item.strip() for item in required):
+            raise ValueError(f"profile {name} required_capabilities must be a list of nonempty strings")
+        missing = sorted(set(required) - available)
+        if missing:
+            raise ValueError(f"overlay {name} requires hive capabilities: {', '.join(missing)}")
 
 
 def role(profile_dirs: list[tuple[str, Path]]) -> str | None:

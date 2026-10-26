@@ -520,12 +520,9 @@ def on_session_start(payload: dict) -> None:
     # --- Broadcast: register session + deliver pending ---
     # Brain adapter FIRST — publishes brain content to broadcast.json
     try:
-        from hooks.config import BRAIN_ENABLED
+        from hooks.context.brain_adapter import inject_on_session_start
 
-        if BRAIN_ENABLED:
-            from hooks.context.brain_adapter import inject_on_session_start
-
-            inject_on_session_start(session_id, payload.get("cwd", ""))
+        inject_on_session_start(session_id, payload.get("cwd", ""))
     except Exception as e:
         log("brain_adapter session_start failed", {"error": str(e)})
 
@@ -2306,9 +2303,9 @@ def on_stop(payload: dict) -> None:
     """Handle Stop event."""
     _stop_block = None
     try:
-        from hooks.context import conditions
+        from hooks.context import conditions, operator_mode
 
-        _stop_block = conditions.stop_block(payload)
+        _stop_block = conditions.stop_block(payload) or operator_mode.reply_refusal(payload) or None
     except Exception as e:
         log("conditions stop failed", {"error": str(e)})
     if _stop_block is not None:

@@ -14,7 +14,7 @@ from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from contextvars import copy_context
 from dataclasses import dataclass, field, replace
-from itertools import count
+from functools import partial
 from typing import Protocol
 
 from hooks.context import context_recycle
@@ -23,7 +23,7 @@ from scripts.gates import Who, modes
 from scripts.gates import claims as claim_cap
 from scripts.gates import log as gate_log
 from scripts.handoff import transfers
-from scripts.handoff.envelope import reclaim
+from scripts.handoff.envelope import reclaim, remote_heads
 from scripts.hive import reports
 from scripts.inbox import exits, wake
 from scripts.inbox.seats import seat_address
@@ -81,7 +81,7 @@ from scripts.swarm import (
 )
 from scripts.swarm import idle as idle_state
 from scripts.swarm.ledger_client import LedgerRefused
-from scripts.swarm.naming import lane_of, parse
+from scripts.swarm.naming import lane_of, parse, seat_label
 from scripts.swarm.pane import PaneObservation
 from scripts.swarm.profile_choice import ProfileUnresolved
 from scripts.swarm.ready import awaiting as awaiting_merge
@@ -916,6 +916,7 @@ class Claims:
 
 def claim_view(slug, store, rows, doc, dispatched=None):
     awaiting = _owned_tasks(slug, store)
+    claimed = store.claimed(slug, [task_id for task_id, t in rows.items() if t.get("state") == "open"])
     held = [t.get("territory") or [] for t in rows.values() if t.get("state") in ACTIVE]
     config = store.config(slug)
     graph, fix = hierarchy.project(doc)[0], freeze.fix_phase(config)
@@ -926,18 +927,19 @@ def claim_view(slug, store, rows, doc, dispatched=None):
         doc,
         graph,
         fix,
-        lambda task_id: task_id in awaiting or store.claimant(slug, task_id) is not None,
+        lambda task_id: task_id in awaiting or task_id in claimed,
         lambda task: released(task) and applied(task),
     )
     return Claims(view, held, sorted(rows.values(), key=dispatched or claim_order.key(rows)))
 
 
 def _launch_order(slug, store, tasks, dispatched=None):
+    failed = store.launch_failures(slug)
     return sorted(
         tasks,
         key=lambda task: (
             dispatched(task)[0] if dispatched else ledger_rank.order(task),
-            bool(store.launch_failure(slug, task["id"])),
+            bool(failed.get(task["id"])),
             not claim_order.resumed(task),
         ),
     )
@@ -1162,6 +1164,13 @@ class _Pass:
     rows: dict
     doc: dict
     now_ms: int
+    memo: dict = field(default_factory=dict)
+
+
+def _pass_reclaim(run):
+    if "heads" not in run.memo:
+        run.memo["heads"] = timing.call(remote_heads, run.config.repo)
+    return partial(reclaim, heads=run.memo["heads"])
 
 
 @dataclass(frozen=True)
@@ -1198,10 +1207,10 @@ def _prepare(run, lane, task, taken, failing, peers):
             rows,
             lives,
             store.handoff_envelope(slug, task["id"]) or {},
-            reclaim,
+            _pass_reclaim(run),
         )
     elif lives or task.get("branch"):
-        task["reclaim"] = timing.timed(continuation.resolve, config.repo, task, rows, lives, {}, reclaim)
+        task["reclaim"] = timing.timed(continuation.resolve, config.repo, task, rows, lives, {}, _pass_reclaim(run))
         store.put_reclaim(slug, name, task["reclaim"])
     task["stack_base"] = _stack_base(task, rows, config.repo)
     task["overlaps"] = timing.timed(_sharing, task, rows, timing.timed(_reported, slug, store, runtime, peers))
@@ -1433,7 +1442,7 @@ def _collect_acks(slug, config, store, ledger, runtime, doc, now_ms):
 
 
 def _spawn_order(slug, config, store, agents, rows, doc, runtime):
-    from scripts.swarm import capacity
+    from scripts.swarm import capacity, focus_budget
 
     if begin := getattr(runtime, "begin_placement_pass", None):
         begin()
@@ -1444,18 +1453,22 @@ def _spawn_order(slug, config, store, agents, rows, doc, runtime):
     claims = timing.timed(claim_view, slug, store, rows, doc, dispatched)
     queue, waits = [], []
     for lane, cap in caps.items():
-        busy = sum(
-            1 for a in agents if a.lane == lane and not _ended(a, rows) and _current_owner(a, rows.get(a.task, {}))
-        )
+        running = [
+            rows.get(a.task, {"id": a.task, "lane": a.lane})
+            for a in agents
+            if a.lane == lane and not _ended(a, rows) and _current_owner(a, rows.get(a.task, {}))
+        ]
+        busy = len(running)
         ready = timing.timed(ready_in_order, slug, store, rows, doc, lane, dispatched, claims)
         if "tasks" in decision:
             ready = [task for task in ready if task["id"] in decision["tasks"]]
-        ready, refused = timing.timed(
-            profile_first.placeable, slug, config, store, runtime, lane, ready, max(cap - busy, 0)
-        )
+        locate = partial(timing.timed, profile_first.placeable, slug, config, store, runtime, lane)
+        ready, refused = focus_budget.place(doc, ready, lane, cap, config.focus_weight, running, locate)
         queue += [(busy + rank, lane, task) for rank, task in enumerate(ready)]
         waits += refused
-    return timing.timed(_ranked, slug, store, queue, dispatched), waits
+    ranked = timing.timed(_ranked, slug, store, queue, dispatched)
+    focus = focus_budget.ranks(doc)
+    return sorted(ranked, key=lambda entry: focus[entry[1]["id"]]), waits
 
 
 def _ranked(slug, store, queue, dispatched):
@@ -1585,7 +1598,9 @@ def primed(store, slug, seat, task):
 def _free_seat(slug, lane, taken, preferred):
     if preferred and preferred not in taken:
         return preferred
-    return next(seat for k in count(1) if (seat := seat_address(slug, f"{lane}-{k}")) not in taken)
+    return next(
+        seat for k in range(1, len(taken) + 2) if (seat := seat_address(slug, seat_label(lane, k))) not in taken
+    )
 
 
 def placed_record(record, placed):

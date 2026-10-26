@@ -5,6 +5,7 @@ import pytest
 
 from scripts.swarm import publish, stack
 from scripts.swarm.store import AgentRecord
+from scripts.swarm_ledger import ledger_tasks
 
 pytestmark = pytest.mark.unit
 
@@ -45,6 +46,7 @@ def repositories(tmp_path, monkeypatch):
 
     def update(slug, task_id, fields, by):
         assert (slug, task_id, by) == ("swarm", "t1", task["claimed_by"])
+        ledger_tasks.check({"op": "task_update", "item": f"tasks/{task_id}", "fields": fields, "by": by})
         updates.append(fields)
         task.update(fields)
 
@@ -56,6 +58,19 @@ def repositories(tmp_path, monkeypatch):
         ledger=SimpleNamespace(tasks=lambda slug: [task], update_task=update),
         updates=updates,
     )
+
+
+@pytest.fixture
+def github_origin(monkeypatch):
+    original = publish.git
+
+    def git(root, *args):
+        if args == ("remote", "get-url", "origin"):
+            assert root is not None
+            return "https://github.com/example/repo.git"
+        return original(root, *args)
+
+    monkeypatch.setattr(publish, "git", git)
 
 
 def test_prepare_uses_the_explicit_bundle_repository(repositories):
@@ -79,6 +94,176 @@ def test_prepare_keeps_one_worktree_per_repository(repositories):
     assert [git(root, "show", "HEAD:chosen.txt") for root in roots] == ["agentihooks", "agentihooks-bundle"]
     assert publish.prepare("swarm", p.agent, str(p.swarm), p.ledger) == fields
     assert p.task["repository_branches"] == {str(p.swarm): "engineer-test", str(p.bundle): "engineer-test"}
+
+
+@pytest.mark.parametrize("repository", ["swarm", "bundle"])
+def test_prepare_starts_from_dev_after_the_recorded_branch_merged_and_was_deleted(
+    repositories, monkeypatch, repository, github_origin
+):
+    p = repositories
+    root = getattr(p, repository)
+    git(root, "push", "origin", "HEAD:predecessor")
+    git(root, "push", "origin", "--delete", "predecessor")
+    p.task.update(
+        repositories=[str(root)],
+        branch="predecessor",
+        repository_branches={str(root): "predecessor"},
+        pr_url="https://github.com/example/repo/pull/7",
+    )
+    original = publish.execute
+
+    def execute(command, cwd):
+        if command[0] == "gh":
+            assert command == ["gh", "pr", "view", p.task["pr_url"], "--json", "state,headRefName"]
+            assert cwd == root
+            return '{"state":"MERGED","baseRefName":"dev","headRefName":"predecessor"}'
+        return original(command, cwd)
+
+    monkeypatch.setattr(publish, "execute", execute)
+    result = publish.prepare("swarm", p.agent, str(p.swarm), p.ledger)
+    assert git(result["worktree"], "rev-parse", "HEAD") == git(root, "rev-parse", "origin/dev")
+    assert p.task["branch"] == "engineer-test"
+    assert p.task["repository_branches"] == {str(root): "engineer-test"}
+
+
+@pytest.mark.parametrize(
+    "pull",
+    [
+        '{"state":"OPEN","baseRefName":"dev","headRefName":"predecessor"}',
+        '{"state":"CLOSED","baseRefName":"dev","headRefName":"predecessor"}',
+        '{"state":"MERGED","baseRefName":"dev","headRefName":"another-task"}',
+    ],
+)
+def test_prepare_does_not_discard_missing_work_without_a_matching_dev_merge(
+    repositories, monkeypatch, pull, github_origin
+):
+    p = repositories
+    p.task.update(branch="predecessor", pr_url="https://github.com/example/repo/pull/7")
+    original = publish.execute
+
+    def execute(command, cwd):
+        if command[0] == "gh":
+            return pull
+        return original(command, cwd)
+
+    monkeypatch.setattr(publish, "execute", execute)
+    with pytest.raises(publish.SwarmError, match="origin/predecessor"):
+        publish.prepare("swarm", p.agent, str(p.swarm), p.ledger)
+    assert p.updates == []
+
+
+def test_prepare_does_not_use_another_repositorys_merged_pull_request(repositories, monkeypatch, github_origin):
+    p = repositories
+    p.task.update(branch="predecessor", pr_url="https://github.com/example/another/pull/7")
+    original = publish.execute
+
+    def execute(command, cwd):
+        if command[0] == "gh":
+            return '{"state":"MERGED","baseRefName":"dev","headRefName":"predecessor"}'
+        return original(command, cwd)
+
+    monkeypatch.setattr(publish, "execute", execute)
+    with pytest.raises(publish.SwarmError, match="origin/predecessor"):
+        publish.prepare("swarm", p.agent, str(p.swarm), p.ledger)
+    assert p.updates == []
+
+
+@pytest.mark.parametrize("command", ["prepare", "publish"])
+@pytest.mark.parametrize("recorded_branch", ["deleted-secondary", "dev"])
+@pytest.mark.parametrize("mapped", [False, True, "foreign"])
+@pytest.mark.parametrize("checkout_branch", ["engineer-test", "engineer-other"])
+def test_cli_refusal_names_the_secondary_repositorys_branch(
+    repositories, monkeypatch, command, recorded_branch, mapped, checkout_branch
+):
+    import json
+    import syslog
+
+    from scripts.swarm import cli
+
+    p = repositories
+    p.task.update(
+        repositories=[str(p.bundle)],
+        branch="primary-branch",
+        repository_branches={str(p.swarm): "primary-branch", str(p.bundle): recorded_branch},
+    )
+    if mapped == "foreign":
+        p.task["repository_branches"] = {"/srv/workstation/dev/agentihooks-bundle": recorded_branch}
+    if not mapped:
+        p.task.pop("repository_branches")
+        p.task["branch"] = recorded_branch
+    if command == "publish":
+        root = p.bundle.parent / "bundle-worktree"
+        git(p.bundle, "worktree", "add", "-b", checkout_branch, str(root))
+        monkeypatch.chdir(root)
+    monkeypatch.setattr(cli, "_worker", lambda store, args: p.agent)
+    monkeypatch.setattr(cli, "_local_repo", lambda store, slug: str(p.swarm))
+    monkeypatch.setattr(cli, "LedgerClient", lambda: p.ledger)
+    logged = []
+    monkeypatch.setattr(syslog, "openlog", lambda ident: None)
+    monkeypatch.setattr(syslog, "syslog", lambda priority, message: logged.append(json.loads(message)))
+    args = SimpleNamespace(slug="swarm", command=command, message="Continue", files=["chosen.txt"])
+    with pytest.raises(publish.SwarmError) as refused:
+        getattr(cli, f"cmd_{command}")(None, args)
+    if mapped or recorded_branch != "dev":
+        assert isinstance(refused.value, publish.PublicationRefusal)
+        assert refused.value.repository == str(p.bundle)
+        assert refused.value.branch == recorded_branch
+    assert len(logged) == 1
+    assert logged[0]["task"] == "t1"
+    assert logged[0]["branch"] == recorded_branch
+
+
+@pytest.mark.parametrize("command", ["prepare", "publish"])
+def test_cli_refusal_keeps_an_unrecorded_secondary_branch_empty(repositories, monkeypatch, command):
+    import json
+    import syslog
+
+    from scripts.swarm import cli
+
+    p = repositories
+    p.task["repositories"] = [str(p.bundle)]
+    if command == "prepare":
+        stack.WT_SCRIPT.write_text("#!/usr/bin/env bash\nset -euo pipefail\nexit 1\n")
+    else:
+        root = p.bundle.parent / "unowned-worktree"
+        git(p.bundle, "worktree", "add", "-b", "another-task", str(root))
+        monkeypatch.chdir(root)
+    monkeypatch.setattr(cli, "_worker", lambda store, args: p.agent)
+    monkeypatch.setattr(cli, "_local_repo", lambda store, slug: str(p.swarm))
+    monkeypatch.setattr(cli, "LedgerClient", lambda: p.ledger)
+    logged = []
+    monkeypatch.setattr(syslog, "openlog", lambda ident: None)
+    monkeypatch.setattr(syslog, "syslog", lambda priority, message: logged.append(json.loads(message)))
+    args = SimpleNamespace(slug="swarm", command=command, message="Continue", files=["chosen.txt"])
+    with pytest.raises(publish.PublicationRefusal) as refused:
+        getattr(cli, f"cmd_{command}")(None, args)
+    assert refused.value.repository == str(p.bundle)
+    assert refused.value.branch == ""
+    assert len(logged) == 1
+    assert logged[0]["branch"] == ""
+    assert logged[0]["reason"]
+
+
+@pytest.mark.parametrize("command", ["prepare", "publish"])
+def test_early_repository_refusal_keeps_an_unrecorded_branch_empty(repositories, monkeypatch, command):
+    p = repositories
+    if command == "prepare":
+        p.task.update(repositories=[str(p.bundle)], branch_repo=str(p.bundle))
+        git(p.bundle, "remote", "remove", "origin")
+    else:
+        p.task["repositories"] = [str(p.swarm), str(p.bundle)]
+        monkeypatch.chdir(p.swarm)
+    with pytest.raises(publish.PublicationRefusal) as refused:
+        if command == "prepare":
+            publish.prepare("swarm", p.agent, str(p.swarm), p.ledger)
+        else:
+            publish.publish("swarm", p.agent, str(p.swarm), p.ledger, "Continue", ["chosen.txt"])
+    assert refused.value.branch == ""
+    assert refused.value.repository == str(p.bundle if command == "prepare" else p.swarm)
+    if command == "prepare":
+        assert "origin" in str(refused.value)
+    else:
+        assert str(refused.value).startswith("publish from the task worktree to select one of its repositories")
 
 
 @pytest.mark.parametrize("reverse", [False, True])
@@ -129,8 +314,8 @@ def test_prepare_retires_only_the_merged_repository_branch(repositories, monkeyp
     assert by_repo[str(p.swarm)]["branch"] == "engineer-test"
     assert p.task["repository_branches"] == {str(p.swarm): "engineer-test", str(p.bundle): "predecessor"}
     assert p.task["pr_url"] == ""
-    assert p.task["handoff_envelope"] == {"task": "t1"}
-    assert p.task["reclaim"] == {"reason": "retained"}
+    assert p.task["handoff_envelope"] == {"continue_from": "origin/predecessor", "task": "t1"}
+    assert p.task["reclaim"] == {"continue_from": "origin/predecessor", "reason": "retained"}
 
 
 def test_prepare_names_the_default_repository_without_inferring_prose(repositories):

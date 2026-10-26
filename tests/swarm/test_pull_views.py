@@ -142,11 +142,79 @@ def test_each_batch_fetch_observes_the_new_head_and_merge():
     assert (changed.head, changed.state) == ("h2", "MERGED")
 
 
+def test_tick_rollups_share_reads_until_expiry_but_merge_reads_stay_fresh(monkeypatch, tmp_path):
+    import time
+
+    import fakeredis
+
+    from scripts.swarm import github_reads
+
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
+    clock = [1_000.0]
+    monkeypatch.setattr(time, "time", lambda: clock[0])
+    url = "https://github.com/o/r/pull/1"
+    cache = fakeredis.FakeRedis(decode_responses=True)
+    current = [resource()]
+    calls = []
+
+    def run(command, **kwargs):
+        calls.append(command)
+        data = {"p0": current[0]} if "p0:" in command[-1] else {"resource": current[0]}
+        return SimpleNamespace(returncode=0, stdout=json.dumps({"data": data}))
+
+    assert views([url], run, cache)[url].head == "h1"
+    current[0] = resource("h2", "MERGED")
+    assert views([url], run, cache)[url].head == "h1"
+    assert len(calls) == 1
+    assert single_view(url, run).state == "MERGED"
+    assert len(calls) == 2
+    clock[0] += github_reads.RUN_TTL_S
+    assert views([url], run, cache)[url].head == "h2"
+    assert len(calls) == 3
+    assert github_reads.counts(0, clock[0] + 1) == {"swarm.checks": 2, "swarm.checks.fresh": 1}
+
+    rows = [json.loads(line) for line in (github_reads.home() / "charged.jsonl").read_text().splitlines()]
+    assert [row["endpoint"] for row in rows] == ["graphql"] * 3
+
+
+def test_shared_rollup_snapshots_are_kept_apart_per_query(monkeypatch, tmp_path):
+    import fakeredis
+
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
+    first, second = "https://github.com/o/r/pull/1", "https://github.com/o/r/pull/2"
+    cache = fakeredis.FakeRedis(decode_responses=True)
+    heads = {json.dumps(first): "h1", json.dumps(second): "h2"}
+
+    def run(command, **kwargs):
+        head = next(head for key, head in heads.items() if key in command[-1])
+        return SimpleNamespace(returncode=0, stdout=json.dumps({"data": {"p0": resource(head)}}))
+
+    assert views([first], run, cache)[first].head == "h1"
+    assert views([second], run, cache)[second].head == "h2"
+
+
+def test_unavailable_shared_snapshot_storage_keeps_live_rollups_readable(monkeypatch, tmp_path):
+    import fakeredis
+
+    unavailable = tmp_path / "file"
+    unavailable.touch()
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(unavailable))
+    url = "https://github.com/o/r/pull/1"
+    cache = fakeredis.FakeRedis(decode_responses=True)
+    responses = iter([resource(), resource("h2", "MERGED")])
+
+    def run(*args, **kwargs):
+        return SimpleNamespace(returncode=0, stdout=json.dumps({"data": {"p0": next(responses)}}))
+
+    assert views([url], run, cache)[url].head == "h1"
+    assert views([url], run, cache)[url].head == "h2"
+
+
 def test_empty_batch_never_launches_a_command():
     assert views([], lambda *a, **k: pytest.fail("empty request")) == {}
 
 
-def test_workflow_declarations_cache_by_immutable_tree_while_heads_and_checks_refresh():
+def test_workflow_declarations_cache_by_immutable_tree_while_heads_and_checks_refresh(monkeypatch):
     import fakeredis
 
     cache = fakeredis.FakeRedis(decode_responses=True)
@@ -185,9 +253,16 @@ def test_workflow_declarations_cache_by_immutable_tree_while_heads_and_checks_re
         commit["statusCheckRollup"] = {"contexts": {"nodes": [{"name": GATE, "conclusion": "SUCCESS"}], "pageInfo": {}}}
         return SimpleNamespace(returncode=0, stdout=json.dumps({"data": {"p0": pr}}))
 
+    import time
+
+    clock = [1_000.0]
+    monkeypatch.setattr(time, "time", lambda: clock[0])
     first = views([url], run, cache)[url]
+    clock[0] += 60
     second = views([url], run, cache)[url]
+    clock[0] += 60
     third = views([url], run, cache)[url]
+    clock[0] += 60
     fourth = views([url], run, cache)[url]
     assert len(calls) == 6
     assert fourth.gate_passed is False
@@ -292,7 +367,7 @@ def test_unreadable_workflow_declaration_is_unknown_and_is_not_cached():
 
     assert views([url], run, cache) == {url: None}
     assert views([url], run, cache) == {url: None}
-    assert len(calls) == 4
+    assert len(calls) == 3
     assert cache.dbsize() == 0
 
 
@@ -587,3 +662,26 @@ def test_any_other_refused_read_stays_unknown(state, errors):
 def test_a_refused_read_with_unparsable_output_stays_unknown():
     run = lambda *args, **kwargs: SimpleNamespace(returncode=1, stdout="gh: forbidden", stderr="")  # noqa: E731
     assert single_view("https://github.com/o/r/pull/9", run) is None
+
+
+def merged_with_empty_check_entries():
+    raw = resource(state="MERGED")
+    raw["mergedAt"] = "2026-10-21T10:00:00Z"
+    commit = raw["commits"]["nodes"][0]["commit"]
+    commit["statusCheckRollup"] = {
+        "contexts": {"nodes": [None, {"name": "Tests", "conclusion": "SUCCESS"}], "pageInfo": {}}
+    }
+    commit["checkSuites"] = {"nodes": [None], "pageInfo": {}}
+    stdout = json.dumps({"data": {"resource": raw}})
+    return lambda *args, **kwargs: SimpleNamespace(returncode=0, stdout=stdout, stderr="")
+
+
+def test_a_merged_pull_request_with_empty_check_entries_reads_merged():
+    pull = single_view("https://github.com/o/r/pull/9", merged_with_empty_check_entries())
+    assert (pull.state, pull.merged_at, pull.head, pull.red, pull.checks_passed) == (
+        "MERGED",
+        1_792_576_800_000,
+        "h1",
+        False,
+        True,
+    )

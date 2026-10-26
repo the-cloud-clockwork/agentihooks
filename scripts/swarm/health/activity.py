@@ -196,7 +196,7 @@ def finished_events(slug: str, root=None) -> dict[str, int]:
     found = {}
     for path in sorted(folder.glob("*.done")) if folder.is_dir() else []:
         try:
-            found[path.stem] = int(path.read_text(encoding="utf-8"))
+            found[path.stem] = int(path.read_text())
         except ValueError:
             continue
     return found

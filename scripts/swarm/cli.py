@@ -145,6 +145,7 @@ from scripts.swarm.health import findings as health
 from scripts.swarm.ledger_client import LedgerClient, LedgerGone, LedgerRefused
 from scripts.swarm.runtime import REPO_VARIABLE, HerdrRuntime, deferring
 from scripts.swarm.status import (
+    agent_hive,
     auto_snapshot,
     findings,
     live_agents,
@@ -179,7 +180,7 @@ from scripts.swarm_ledger import (
     plan_shape,
     workflow_task,
 )
-from scripts.swarm_v2 import master_scale, masters
+from scripts.swarm_v2 import front_door, master_scale, masters
 from scripts.swarm_v2.runtime.routed import routed
 
 SETTABLE = {
@@ -191,6 +192,7 @@ SETTABLE = {
     "snapshot-minutes": "snapshot_minutes",
     "master-move-grace": "master_move_grace",
     "local-max-agents": "local_max_agents",
+    "focus-weight": "focus_weight",
 }
 LANE_KEYS = {f"{lane}-{key}": (lane, key) for lane in templates.LANES for key in templates.LANE_FIELDS}
 EFFORT_KEYS = {"effort-min": "effort_min", "effort-max": "effort_max"}
@@ -215,9 +217,9 @@ CONFIG_KEYS = {
     **TRANSPORT_KEYS,
     HIVE_PLACEMENT: "hive_placement",
     "engine": "engine",
+    "watchdog-address": "watchdog_address",
 }
 GATE_KEYS = {f"{name}-gate": name for name in catalog.defaults()}
-GATE_MODES = modes.MODES
 RETIRES_MASTER = frozenset({"stop now", "close ledger"})
 TICK_LOCK_MS = 10 * 60 * 1000
 TICK_SECONDS = 60
@@ -435,7 +437,9 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None, scheduled=F
                 doc,
             )
             actions += skip_refused(quiet.quiet_pass, store, slug, rows, now_ms())
-            actions += skip_refused(doc_report.report_pass, inbox, ledger, slug, doc["tasks"], now_ms())
+            actions += skip_refused(
+                doc_report.report_pass, inbox, ledger, slug, doc["tasks"], now_ms(), config.watchdog_address
+            )
             actions += skip_refused(dispatcher.priorities, store, slug, doc, ledger, view, now_ms())
             if scheduled:
                 from scripts.swarm import refresh_job
@@ -581,6 +585,7 @@ def _tickable(slug):
 def cmd_tick(store, args):
     from scripts.hive import workstation
     from scripts.swarm import scheduled_tick, tick_reaper
+    from scripts.swarm_ledger.api import client as ledger_api
 
     if not workstation.runs_engine(os.environ):
         print(workstation.NO_ENGINE, file=sys.stderr)
@@ -595,7 +600,8 @@ def cmd_tick(store, args):
                     f"reaped leftover swarm tick process {left.pid} after {left.age_s} seconds "
                     f"with {left.signal}: {left.command}"
                 )
-            _tick_host(store, started)
+            with ledger_api.kept_exports():
+                _tick_host(store, started)
     except scheduled_tick.AlreadyRunning:
         print("another swarm tick is running on this machine", file=sys.stderr)
 
@@ -1022,7 +1028,7 @@ def api_address(value):
 
 
 def config_value(key, value):
-    if key in default_models.KEYS or key in TRANSPORT_KEYS or key == "engine":
+    if key in default_models.KEYS or key in TRANSPORT_KEYS or key in ("engine", "watchdog-address"):
         return value
     if key == HIVE_PLACEMENT:
         return on_off(value)
@@ -1126,6 +1132,7 @@ def cmd_set(store, args):
                 "max_plan": config.max_plan,
                 "masters_step": config.masters_step,
                 "compact_limit": config.compact_limit,
+                "focus_weight": config.focus_weight,
                 "autonomy": config.autonomy,
                 "snapshot_minutes": config.snapshot_minutes,
                 "effort_min": config.effort_min,
@@ -1243,7 +1250,7 @@ def cmd_status(store, args):
     counts = task_counts(tasks)
     found = findings(store, args.slug, config, tasks, ledger.events(args.slug))
     print(
-        f"{naming.swarm_name(config.code) or '-'}  {config.slug}  {config.state}  eng {config.max_eng}  ci {config.max_ci}  plan {config.max_plan}  masters step {config.masters_step}  scaling {config.scaling}  effort {config.effort_min} to {config.effort_max}  repo {config.repo}"
+        f"{naming.swarm_name(config.code) or '-'}  {config.slug}  {config.state}  eng {config.max_eng}  ci {config.max_ci}  plan {config.max_plan}  masters step {config.masters_step}  scaling {config.scaling}  focus weight {config.focus_weight}  effort {config.effort_min} to {config.effort_max}  repo {config.repo}"
     )
     print(
         "gate modes  "
@@ -1273,7 +1280,7 @@ def cmd_status(store, args):
     if promotion := tick_master.status_line(tick_master.read(store, args.slug)):
         print(promotion)
     print(
-        "Agent\tLane\tHarness\tProfile\tModel\tAccount\tPane\tTask\tState\tConversation\tPush inbox\tNative terminal\tModel source\tConfidence"
+        "Agent\tLane\tHarness\tProfile\tModel\tAccount\tPane\tTask\tState\tConversation\tPush inbox\tNative terminal\tModel source\tConfidence\tHive"
     )
     for a in agents:
         model = " ".join(filter(None, (a.model, a.effort))) if a.model else "unknown"
@@ -1281,7 +1288,7 @@ def cmd_status(store, args):
         push = "yes" if can["push_inbox"] else "no"
         attach = "yes" if can["native_terminal_attach"] else "no"
         print(
-            f"{a.name}\t{a.lane}\t{a.harness}\t{a.profile or 'unknown'}\t{model}\t{a.account or '-'}\t{a.pane_id}\t{a.task}\t{agent_status(a)}\t{a.conversation_id or '-'}\t{push}\t{attach}\t{a.model_source or '-'}\t{a.model_confidence if a.model_confidence is not None else '-'}"
+            f"{a.name}\t{a.lane}\t{a.harness}\t{a.profile or 'unknown'}\t{model}\t{a.account or '-'}\t{a.pane_id}\t{a.task}\t{agent_status(a)}\t{a.conversation_id or '-'}\t{push}\t{attach}\t{a.model_source or '-'}\t{a.model_confidence if a.model_confidence is not None else '-'}\t{agent_hive(a) or '-'}"
         )
     from scripts.hive import join_report
 
@@ -1526,6 +1533,12 @@ def cmd_issue(store, args):
     print(json.dumps({"task": agent.task, "issue_url": args.url}))
 
 
+def cmd_resolve(store, args):
+    from scripts.swarm import resolve
+
+    resolve.run(store, args, _me(store, args).name, LedgerClient())
+
+
 def cmd_review(store, args):
     agent = _worker(store, args)
     row = LedgerClient().task(args.slug, agent.task) or {}
@@ -1588,20 +1601,45 @@ def origin_repo(run=subprocess.run):
     return stack.public_url(done.stdout.strip()) if done.returncode == 0 else ""
 
 
-def cmd_prepare(store, args):
+def publication_command(store: RedisStore, args: argparse.Namespace) -> dict:
+    import syslog
+
     from scripts.swarm import publish
 
-    fields = publish.prepare(args.slug, _worker(store, args), _local_repo(store, args.slug), LedgerClient())
-    print(json.dumps(fields))
+    agent = _worker(store, args)
+    repo = _local_repo(store, args.slug)
+    ledger = LedgerClient()
+    task = {}
+    try:
+        task = next((row for row in ledger.tasks(args.slug) if row.get("id") == agent.task), {})
+        if args.command == "prepare":
+            return publish.prepare(args.slug, agent, repo, ledger)
+        return publish.publish(args.slug, agent, repo, ledger, args.message, args.files)
+    except SwarmError as exc:
+        branch = exc.branch if isinstance(exc, publish.PublicationRefusal) else publish.refusal_branch(Path(repo), task)
+        syslog.openlog("agentihooks-swarm")
+        syslog.syslog(
+            syslog.LOG_WARNING,
+            json.dumps(
+                {
+                    "event": "swarm_publication_refused",
+                    "slug": args.slug,
+                    "command": args.command,
+                    "task": agent.task,
+                    "branch": branch,
+                    "reason": str(exc),
+                }
+            ),
+        )
+        raise
+
+
+def cmd_prepare(store, args):
+    print(json.dumps(publication_command(store, args)))
 
 
 def cmd_publish(store, args):
-    from scripts.swarm import publish
-
-    fields = publish.publish(
-        args.slug, _worker(store, args), _local_repo(store, args.slug), LedgerClient(), args.message, args.files
-    )
-    print(json.dumps(fields))
+    print(json.dumps(publication_command(store, args)))
 
 
 def cmd_branch(store, args):
@@ -1745,7 +1783,9 @@ def cmd_done(store, args):
     _close_members(ledger, args.slug, agent, row, {**fields, "pr_url": args.pr or row.get("pr_url")})
     waits.settle_notices(InboxStore(store.redis), agent, "done")
     _retire(store, args.slug, agent, "finished its task and exited")
-    doc_report.report(InboxStore(store.redis), ledger, args.slug, closed, now_ms())
+    doc_report.report(
+        InboxStore(store.redis), ledger, args.slug, closed, now_ms(), store.config(args.slug).watchdog_address
+    )
     fallback = {"pull_request": pull.fallback} if pull is not None and pull.fallback else {}
     print(
         json.dumps({"task": agent.task, "state": "done", **fallback, "next": "stop now; the swarm closes this session"})
@@ -1811,6 +1851,9 @@ def cmd_block(store, args):
             return
     from scripts.swarm import publish
 
+    refused = "" if args.dev_red else _block_refusal(store, args.slug, rows[agent.task])
+    if refused:
+        raise SwarmError(refused)
     pushed = publish.pushed_branches(_local_repo(store, args.slug), rows[agent.task], agent)
     red_run = _dev_red_run(store, args.slug) if args.dev_red else None
     if pushed:
@@ -1820,6 +1863,12 @@ def cmd_block(store, args):
     print(
         json.dumps({"task": agent.task, "state": "blocked", **cause, "next": "stop now; the swarm closes this session"})
     )
+
+
+def _block_refusal(store, slug, task):
+    from scripts.swarm import resolve
+
+    return resolve.block_refusal(store.config(slug).autonomy, slug, task)
 
 
 def _dev_red_run(store, slug):
@@ -2175,9 +2224,7 @@ def _retire(store, slug, agent, exit_text):
 def cmd_say(store, args):
     agent = _me(store, args)
     if args.to in ("", delivery.OPERATOR):
-        LedgerClient().say(args.slug, args.text, by=agent.name)
-        print(json.dumps({"posted": True}))
-        return
+        raise SwarmError(front_door.say_refusal(args.slug, agent.name))
     sent = delivery.send(store, args.slug, args.text, sender=agent.name, to=args.to, fyi=args.fyi)
     print(json.dumps({"sent": sent}))
 
@@ -2291,6 +2338,12 @@ def build_parser():
     publish.add_argument("files", nargs="*")
     sub.add_parser("branch")
     sub.add_parser("review")
+    resolve_cmd = sub.add_parser("resolve")
+    resolve_cmd.add_argument("action", choices=("attempt", "critic", "escalate", "status"))
+    resolve_cmd.add_argument("item")
+    for flag in ("--tried", "--output", "--reason", "--evidence"):
+        resolve_cmd.add_argument(flag, default="")
+    resolve_cmd.add_argument("--command", dest="ran", default="")
     done = sub.add_parser("done")
     done.add_argument("--pr", default="")
     for key in ledger_kinds.PROOF_KEYS:

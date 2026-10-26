@@ -124,17 +124,36 @@ def relay_to_page(inbox, slug, agents, ledger):
         sender = inbox.names.resolve(item.sender)
         if item.state != "pending" or sender not in names:
             continue
-        if not post(inbox, item, functools.partial(show, ledger, slug, item, sender, inbox.entry_of(item.id))):
+        if not post(
+            inbox,
+            item,
+            functools.partial(
+                show, ledger, slug, item, sender, inbox.entry_of(item.id), operator_line(inbox, slug, item)
+            ),
+        ):
             continue
         inbox.close(item.id, OPERATOR, "done", "shown on the ledger page")
         shown += 1
     return shown
 
 
-def show(ledger, slug, item, sender, entry):
+def show(ledger, slug, item, sender, entry, line):
     if entry:
         return ledger.relay_comment(slug, entry, item.text, sender, item.id)
-    return ledger.relay(slug, item.text, sender, item.id)
+    return ledger.relay(slug, item.text, sender, item.id, line)
+
+
+def operator_line(inbox, slug, item):
+    if not item.ref:
+        return ""
+    try:
+        asked = inbox.get(item.ref)
+    except InboxError:
+        return ""
+    ledger, _, rest = asked.ref.partition(":")
+    if asked.sender != OPERATOR or ledger != slug:
+        return ""
+    return rest.partition(":")[2]
 
 
 def post(inbox, item, write):

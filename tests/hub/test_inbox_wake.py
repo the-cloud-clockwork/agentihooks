@@ -1,3 +1,4 @@
+import hashlib
 from dataclasses import replace
 from types import SimpleNamespace
 
@@ -370,6 +371,55 @@ def test_outbox_retry_is_bounded_to_thirty_two_messages_per_pass(rig):
     rig.reactor.flush()
     assert rig.inbox.redis.scard(rig.inbox.key("wake-outbox")) == 1
     rig.reactor.flush()
+    assert rig.inbox.redis.scard(rig.inbox.key("wake-outbox")) == 0
+
+
+def test_outbox_reuses_the_send_of_an_item_readdressed_after_its_first_send(rig):
+    item = rig.inbox.send("sender", "eng-1@sw", "moved request")
+    rig.reactor.flush()
+    pump(rig)
+    seat = rig.bus.events.consumer("moved-proof", "swarm.sw.inbox.*")
+    sent = seat.fetch(10, 0)
+    for delivery in sent:
+        delivery.ack()
+    rig.inbox.redirect(item.id, "swarm", "eng-2@sw", "seat moved")
+    rig.inbox.seats.occupy("eng-2@sw", "worker", at=1000)
+    rig.inbox.redis.sadd(rig.inbox.key("wake-outbox"), item.id)
+    for now in range(1001, 1006):
+        rig.clock.now = now
+        rig.reactor.flush()
+    pump(rig)
+    assert rig.inbox.redis.scard(rig.inbox.key("wake-outbox")) == 0
+    assert [delivery.event.key for delivery in sent] == ["eng-1@sw"]
+    assert seat.fetch(10, 0) == []
+    assert steps(rig, item) == []
+    advance(rig, 1000 + W)
+    assert steps(rig, item) == ["woken"]
+    assert rig.inbox.get(item.id).address == "eng-2@sw"
+
+
+def test_an_item_readdressed_to_another_swarm_publishes_its_wake_there(rig):
+    item = rig.inbox.send("sender", "eng-1@sw", "moved across swarms", ref="ledger:2", task="t9")
+    rig.reactor.flush()
+    rig.inbox.redis.hset(rig.inbox.key("item", item.id), "address", "eng-1@other")
+    rig.inbox.redis.sadd(rig.inbox.key("wake-outbox"), item.id)
+    rig.clock.now = 4242
+    rig.reactor.flush()
+    [delivery] = rig.bus.events.consumer("other-proof", "swarm.other.inbox-wake.requested").fetch(10, 0)
+    digest = hashlib.sha256("other\0eng-1@other".encode()).hexdigest()
+    assert delivery.event.to_dict() == {
+        "id": f"wake-{item.id}-{digest[:16]}",
+        "type": "inbox.wake",
+        "swarm": "other",
+        "entity": "inbox-wake",
+        "key": item.id,
+        "version": 1,
+        "time": 1000,
+        "author": "sender",
+        "data": {"address": "eng-1@other"},
+        "cause": None,
+        "schema_version": 1,
+    }
     assert rig.inbox.redis.scard(rig.inbox.key("wake-outbox")) == 0
 
 

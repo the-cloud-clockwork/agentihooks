@@ -1,0 +1,6 @@
+{
+  "scripts/ci_select.py:scripts.ci_select.x_selected_tests__mutmut_7:3c8b443022f4457da6f73783a4e64ef0729969ed824609ef8cd80d8b464dd52c": {
+    "reader": "/root/standards_reader",
+    "reason": "Equivalent for current generated repository manifests: dep_manifest._executed constructs units as relative_path plus one :: separator plus an AST qualified name. _spans uses identifiers and dots, and the repository contains no filenames with ::. Each generated unit therefore has exactly one separator, so partition and rpartition return the same source path. This verdict does not cover arbitrary malformed strings or future filenames containing ::. Independently reviewed against preflight 40190427471."
+  }
+}

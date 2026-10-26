@@ -9,6 +9,7 @@
 /scripts/gates/ @nestorcolt
 /scripts/gate_* @nestorcolt
 /scripts/size_limits.py @nestorcolt
+/scripts/dead_code.py @nestorcolt
 /scripts/swallowed_exceptions.py @nestorcolt
 /scripts/check_* @nestorcolt
 /scripts/github_access.sh @nestorcolt
@@ -55,6 +56,8 @@
 /tests/test_shards.py @nestorcolt
 /tests/test_queue_shards.py @nestorcolt
 /tests/test_size_limits.py @nestorcolt
+/tests/test_dead_code.py @nestorcolt
+/tests/DEAD_CODE_ALLOWLIST.json @nestorcolt
 /tests/test_swallowed_exceptions.py @nestorcolt
 /mutation-cleared.txt @nestorcolt
 /mutation-clearances/ @nestorcolt
