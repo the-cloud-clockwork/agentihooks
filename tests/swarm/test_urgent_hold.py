@@ -44,6 +44,15 @@ def test_a_claimable_task_has_no_hold():
     assert hold(doc([task("a")]), "a") == ""
 
 
+def test_focus_weight_defaults_to_fifty_and_is_settable(env):
+    store, _, _ = env
+    run(SLUG, "create", "--repo", "/repo")
+    assert store.config(SLUG).focus_weight == 50
+    assert run(SLUG, "set", "focus-weight=30") == 0
+    assert store.config(SLUG).focus_weight == 30
+    assert run(SLUG, "set", "focus-weight=x") == 1
+
+
 def test_only_claimable_unclaimed_urgent_tasks_raise_a_finding(store):
     from scripts.swarm.health import urgent_hold
 
