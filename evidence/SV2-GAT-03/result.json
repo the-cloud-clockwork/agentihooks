@@ -6,7 +6,7 @@
   "dependency_evidence": "SV2-GAT-02 merged into dev as pull request 7486; this package delivers the project pack that path retrieves and never retrieves it itself.",
   "integration_gate": "G6",
   "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/7558",
-  "pull_request": null,
+  "pull_request": "https://github.com/the-cloud-clockwork/agentihooks/pull/7586",
   "package_complete": false,
   "evidence_class": "mocked for the fixture cases: hooks run in a temporary agentihooks home with the brain refresh and project retrieval patched to return the fixture packs, through the Claude and Codex target emitters; live: one Claude and one Codex session on a hive worker ran the branch hooks with an isolated agentihooks home",
   "interfaces": [
@@ -25,7 +25,7 @@
     "cli_versions": "The live smoke ran the Claude Code and Codex CLIs installed in the hive worker image; the smoke did not record their version strings"
   },
   "states": {
-    "observed": "The fixture cases A, B and C ran in the touched tests job https://github.com/the-cloud-clockwork/agentihooks/actions/runs/40382454881/job/121781988190 at 71af5fff70b7. Live: Claude session 8415c8ec and Codex session 01a17930 each received the pack at SessionStart with a receipt; the pack text appears in the Claude transcript and in the Codex rollout; a second run that refreshed on every tool call recorded deduplicated 1 on Claude.",
+    "observed": "The fixture cases A, B and C ran in the touched tests job https://github.com/the-cloud-clockwork/agentihooks/actions/runs/40382454881/job/121781988190 at 71af5fff70b7; the Proofs mutation run https://github.com/the-cloud-clockwork/agentihooks/actions/runs/40385218043 passed at b88480c58ed148b0f6f408688f38330cec3acd98, which adds only these records. Live: Claude session 8415c8ec and Codex session 01a17930 each received the pack at SessionStart with a receipt; the pack text appears in the Claude transcript and in the Codex rollout; a second run that refreshed on every tool call recorded deduplicated 1 on Claude.",
     "accepted": "A delivery is accepted when offer returns the pack for an event the target can inject at; the receipt is written in the same call.",
     "committed": "The receipt file and the context_delivery_outcomes_by_target counter file under the agentihooks home brain state folder, and the held pack file of the project cache, are the only writes.",
     "externally_verified": "The pack text was read back from the Claude transcript and the Codex rollout of the live smoke sessions; no deployed swarm session has been checked yet, which belongs to the G6 rollout gate."
