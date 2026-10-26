@@ -738,6 +738,21 @@ def test_equivalence_runs_on_every_ledger_pull_request_without_a_body_marker():
     assert "paths" not in workflow[True]["pull_request"]
 
 
+def test_mutation_gate_plants_itself_whenever_its_code_changes():
+    workflow = yaml.safe_load((_ROOT / ".github/workflows/mutation-self-plant.yml").read_text())
+    assert "scripts/ci_mutation/**" in workflow[True]["pull_request"]["paths"]
+    job = workflow["jobs"]["plant"]
+    assert "if" not in job
+    assert job["strategy"]["matrix"]["mode"] == ["kill", "survive"]
+    [base] = [step for step in job["steps"] if step.get("with", {}).get("path") == "base"]
+    assert base["with"]["ref"] == "${{ github.event.pull_request.base.sha }}"
+    [pick] = [step for step in job["steps"] if step.get("name") == "Pick the protected grader"]
+    assert pick["run"].startswith("if [[ -f base/tests/mutation_self_plant/plant.py ]]; then\n")
+    [grade] = [step for step in job["steps"] if '"$GRADER"' in step.get("run", "")]
+    assert grade["working-directory"] == "head"
+    assert job["steps"].index(base) < job["steps"].index(pick) < job["steps"].index(grade)
+
+
 @pytest.mark.parametrize("doc", ["README.md", "index.md"])
 def test_workflow_badges_point_at_existing_workflows(doc):
     names = re.findall(r"actions/workflows/([\w.-]+\.yml)", (_ROOT / doc).read_text())

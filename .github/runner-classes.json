@@ -37,6 +37,7 @@
   "mutation-replay.yml/grade": "batch",
   "mutation-replay.yml/plan": "light",
   "mutation-replay.yml/verify": "light",
+  "mutation-self-plant.yml/plant": "standard",
   "pages.yml/build": "hosted",
   "pages.yml/deploy": "hosted",
   "promote.yml/promote": "hosted",
