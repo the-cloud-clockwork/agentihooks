@@ -125,11 +125,13 @@ def _publish_pending(connection):
         "SELECT id, swarm, name, at, words FROM entries WHERE swarm != '' "
         "AND id NOT IN (SELECT entry FROM published) ORDER BY at, id"
     ).fetchall()
+    published = []
+    for entry, swarm, name, at, words in rows:
+        if not _mirror(swarm, name, at, words):
+            break
+        published.append((entry,))
     with connection:
-        for entry, swarm, name, at, words in rows:
-            if not _mirror(swarm, name, at, words):
-                break
-            connection.execute("INSERT INTO published VALUES (?)", (entry,))
+        connection.executemany("INSERT OR IGNORE INTO published VALUES (?)", published)
 
 
 def _shared_rows(name):
