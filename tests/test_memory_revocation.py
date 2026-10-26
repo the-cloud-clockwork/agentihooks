@@ -168,6 +168,22 @@ def test_a_tombstone_for_a_regranted_session_removes_nothing(catalog, propagator
     assert propagator.pack(GRANT, DOMAIN, "p1") == {}
 
 
+def test_notices_list_references_in_order_and_packs_store_sorted_sessions(catalog, propagator):
+    propagator.put_pack(DOMAIN, "pz", {}, ["s2", "s1", "s2"])
+    propagator.put_pack(DOMAIN, "pa", {}, ["s1"])
+    propagator.put_lesson(DOMAIN, "zeta", "t", ["s2", "s1", "s1"])
+    propagator.put_lesson(DOMAIN, "alpha", "t", ["s1"])
+    stored = catalog.db.execute("SELECT pack_id, sessions FROM context_pack ORDER BY pack_id").fetchall()
+    assert stored == [("pa", '["s1"]'), ("pz", '["s1", "s2"]')]
+    assert catalog.db.execute("SELECT support FROM derived_lesson WHERE lesson_id = 'zeta'").fetchone() == (
+        '["s1", "s2"]',
+    )
+    catalog.set_state(DOMAIN, "s1", "deleted", 1, 10.0)
+    notices = propagator.catch_up(DOMAIN, 10.1234567)
+    assert [item["references"] for item in notices[1:]] == [["pa", "pz"], ["alpha", "zeta"]]
+    assert [item[revocation.METRIC] for item in propagator.lags(DOMAIN)] == [0.123457] * 3
+
+
 def test_an_unknown_consumer_is_refused(propagator):
     with pytest.raises(ValueError) as raised:
         propagator.replay(DOMAIN, "vectors", 1.0)

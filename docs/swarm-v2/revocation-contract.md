@@ -5,7 +5,8 @@ and how consumers converge after downtime.
 
 ## Tombstones
 
-`Catalog.set_state` writes a row to `session_tombstone` in the same transaction as the state change: a per
+`Catalog.set_state` writes a row to `session_tombstone` in the same transaction as every state change, a
+regrant to `retained` included: a per
 access domain sequence, the session, its new state and revision, and the time it was recorded. A stale revision
 changes nothing and writes no tombstone. `Catalog.tombstones(domain, after)` reads them in sequence order.
 
