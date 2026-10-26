@@ -21,7 +21,6 @@ SCHEMA = (
         access_domain TEXT NOT NULL, index_generation TEXT NOT NULL, retired_at REAL NOT NULL,
         PRIMARY KEY (access_domain, index_generation))""",
 )
-GC_TABLES = ("upload_reservation", "index_retirement")
 RESERVED, COLLECTING = "reserved", "collecting"
 REJECTED = frozenset({"unowned", "altered", "missing"})
 BYTES = "garbage_collection_bytes"
@@ -157,7 +156,7 @@ class Reservations:
 
 def retire(catalog: Catalog, grant: Grant, generation: str, now: float) -> float:
     """Marks a non-active index generation retired; the first retirement time is kept on a replay."""
-    _schema(catalog)
+    Reservations(catalog)
     worker = IndexWorker(catalog)
     with catalog._transaction():
         worker.model(grant.corpus, generation)
@@ -304,7 +303,7 @@ def collect(catalog: Catalog, store: archive.ObjectStore, plan: Plan) -> dict:
 
     With destructive off it is a read only inventory of what a collection would reclaim.
     """
-    _schema(catalog)
+    Reservations(catalog)
     IndexWorker(catalog)
     report = Report(plan.destructive)
     _uploads(catalog, store, plan, report)

@@ -27,6 +27,7 @@ EVIDENCE_CLASS = (
 )
 VECTORS = "SELECT index_generation, COUNT(*) FROM chunk_vector GROUP BY index_generation ORDER BY index_generation"
 RESERVATIONS = "SELECT object_digest, state FROM upload_reservation ORDER BY object_digest"
+GC_TABLES = ("upload_reservation", "index_retirement")
 
 
 class Interrupted(OSError):
@@ -147,7 +148,7 @@ class World:
         )
 
     def protected(self) -> dict:
-        rows = {table: sorted(self.catalog.db.execute(f"SELECT * FROM {table}").fetchall()) for table in gc.GC_TABLES}
+        rows = {table: sorted(self.catalog.db.execute(f"SELECT * FROM {table}").fetchall()) for table in GC_TABLES}
         return {"catalog": self.catalog.snapshot(), "gc": rows, "objects": self.present(), "vectors": self.vectors()}
 
     def vectors(self) -> list:
