@@ -555,7 +555,7 @@ def slowest_bucket(root: Path, tests: list[str], parts: int, seconds: dict[str, 
     buckets = [
         bucket
         for chosen in partition(tests, seconds, parts)
-        for bucket in stats_shards(root, sorted(chosen), shard_workers(), seconds)
+        for bucket in stats_shards(root, chosen, shard_workers(), seconds)
     ]
     return max(sum(seconds[path] for path in bucket) for bucket in buckets)
 

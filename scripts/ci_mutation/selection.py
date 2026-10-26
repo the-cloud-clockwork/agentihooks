@@ -175,7 +175,7 @@ def part_files(root: Path, files: list[str], part: tuple[int, int]) -> list[str]
 def split_parts(files: list[str], seconds: dict[str, float], part: tuple[int, int]) -> list[str]:
     # Each part runs on its own runner, so an xdist group may span parts; stats_shards keeps it whole within one.
     index, total = part
-    return sorted(partition(files, seconds, total)[index])
+    return partition(files, seconds, total)[index]
 
 
 def partition(files: list[str], seconds: dict[str, float], total: int) -> list[list[str]]:
@@ -185,7 +185,7 @@ def partition(files: list[str], seconds: dict[str, float], total: int) -> list[l
         chosen = min(range(total), key=loads.__getitem__)
         parts[chosen].append(path)
         loads[chosen] += seconds[path]
-    return parts
+    return [sorted(part) for part in parts]
 
 
 def stats_shards(root: Path, files: list[str], count: int, seconds: dict[str, float] | None = None) -> list[list[str]]:
