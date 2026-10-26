@@ -14,6 +14,7 @@
     }
   },
   "preserved_is_this_set": true,
+  "registry_matches_report": true,
   "registry_status": "partial",
   "repeat_matches": true,
   "report": {
@@ -35,7 +36,12 @@
     "recovery_point": 1000.0,
     "recovery_time_seconds": 5.0
   },
+  "report_names_its_set": true,
   "retention_allowed": false,
   "source_unchanged": true,
-  "vectors_rebuilt": 4
+  "vectors_rebuilt": 4,
+  "without_missing_object": {
+    "retention_allowed": true,
+    "status": "verified"
+  }
 }

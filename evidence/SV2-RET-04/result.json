@@ -5,6 +5,7 @@
     "C"
   ],
   "compatibility": "format 1.x manifests restore under this release; another major is refused before any write; the catalog copy keeps the current session catalog schema and only drops derived projection tables",
+  "drill_status": "partial: the deliberately missing source object is irrecoverable; a set without it drills verified",
   "evidence_class": "mocked: a SQLite catalog file, local content addressed object folders and fixture bytes stand in for the central database, the archive bucket, the backup bucket, the hosted ledger, the swarm Redis and the brain export; a deterministic hash embedder rebuilds vectors and a fake clock measures time; no Pod, bucket or database runs",
   "fixture_inputs": {
     "brain_backup": "a brain export copied beside the ledger and coordination snapshot, each under its own key id",
@@ -14,15 +15,15 @@
   },
   "interfaces": [
     "scripts.swarm_v2.backup.capture copies the catalog without projections, the ledger, the coordination snapshot, the brain export and every archive and checkpoint object into a content addressed backup store and returns the manifest digest as the set id",
-    "scripts.swarm_v2.backup.restore refuses an unsupported format major, an absent key id and a folder holding other data before writing, and resumes into its own marked folder",
+    "scripts.swarm_v2.backup.restore refuses an unsupported format major, a grant for another corpus, an absent key id, an unaccepted component version and a folder holding other data before writing, and resumes into its own marked folder",
     "scripts.swarm_v2.backup.rebuild rebuilds chunk and vector projections from the restored events",
     "scripts.swarm_v2.backup.drill restores, rebuilds, answers the agreed query, recovers the designated checkpoint and reports backup_restore_verification_status",
-    "scripts.swarm_v2.backup.Registry record, verify, accepted, preserved, retention_allowed and status"
+    "scripts.swarm_v2.backup.Registry record, drill (runs the drill itself under an attempt number), accepted, preserved, retention_allowed and status"
   ],
   "metrics": "backup_restore_verification_status per drill report and as counts per status from Registry.status",
   "mocked": true,
   "outcomes": {
-    "accepted": "a drill status stored by Registry.verify under a higher attempt number",
+    "accepted": "a drill status stored by Registry.drill under a higher attempt number",
     "committed": "the backup set manifest and its objects in the content addressed backup store",
     "externally_verified": "none; no deployed catalog, bucket, ledger, Redis or brain was backed up or restored",
     "observed": "case outputs in the a, b and c result files from the focused fixture run"
@@ -33,10 +34,12 @@
     "Encryption is the storage layer's job; the module records key ids and checks them against a keyring but encrypts nothing.",
     "No scheduler captures sets or runs drills; a caller invokes capture and drill.",
     "Ledger, coordination and brain components are opaque bytes from their exporters; no live exporter is wired in.",
-    "A partial set stays accepted with its irrecoverable objects listed, and retention stays stopped until a fully verified set exists."
+    "A partial set stays accepted with its irrecoverable objects listed, and retention stays stopped until a fully verified set exists.",
+    "No deletion path exists; a retention collector must consult Registry.retention_allowed and Registry.preserved.",
+    "Capture records the exports it is given under one capture time; taking them under one fence is the caller's job."
   ],
-  "rollback_rehearsal": "C recorded a newer set as uploaded only: retention_allowed turned false and preserved still named the drilled set, which stays accepted",
-  "status": "fixture_verified",
-  "supported_versions": "backup format 1.0; session catalogs with or without the event provenance table",
-  "tested_commit": "4b906acb91bcfa23bc6480ad7904f69b021ffa6a"
+  "rollback_rehearsal": "C recorded a newer set as uploaded only, so retention_allowed turned false and preserved named the drilled set; a re-drill after damaging its brain component failed, the set lost acceptance and preserved still named it",
+  "status": "fixture_partial",
+  "supported_versions": "backup format 1.x; component versions the caller lists in Access.versions",
+  "tested_commit": "54354b2522c582d44f4a89e088da528802036610"
 }

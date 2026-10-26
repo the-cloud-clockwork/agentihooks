@@ -2,10 +2,13 @@
   "case": "C",
   "during_interruption": {
     "catalog_written": false,
-    "marker": true,
+    "marker_names_set": true,
     "objects": 2
   },
   "interrupted": "the restore process stopped while copying archive objects",
+  "irrecoverable": {
+    "5e4c27c55fc931af70647f722e3fee35467dd84a9614fa7dbe34742b3ad5ce79": "an archived object is missing; the evidence is incomplete and was not returned"
+  },
   "lost_session_query": "an archived object is missing; the evidence is incomplete and was not returned",
   "objects_after_resume": 5,
   "omitted_projections": [
@@ -19,48 +22,27 @@
   ],
   "present_in_backup": 5,
   "registry_replay_unchanged": true,
-  "replay_matches": true,
-  "resumed": {
-    "backup_restore_verification_status": "partial",
-    "checkpoint": {
-      "objects": 2,
-      "recovered": true,
-      "task_id": "fixture-task"
-    },
-    "irrecoverable": {
-      "5e4c27c55fc931af70647f722e3fee35467dd84a9614fa7dbe34742b3ad5ce79": "an archived object is missing; the evidence is incomplete and was not returned"
-    },
-    "query_answered": true,
-    "rebuilt_projections": {
-      "pending": 0,
-      "sessions": 2,
-      "state": "drained"
-    },
-    "recovery_point": 1000.0,
-    "recovery_time_seconds": 5.0
-  },
+  "resumed_status": "partial",
   "rollback_rehearsal": {
-    "newer_set_accepted": false,
-    "newer_set_status": {
+    "damaged_set_accepted": false,
+    "metric": {
       "backup_restore_verification_status": {
-        "failed": 0,
-        "partial": 1,
+        "failed": 1,
+        "partial": 0,
         "uploaded": 1,
         "verified": 0
       }
     },
-    "preserved_is_verified_set": true,
-    "retention_allowed": false
+    "newer_unverified_set": {
+      "newer_set_accepted": false,
+      "preserved_is_drilled_set": true,
+      "retention_allowed": false
+    },
+    "preserved_after_failed_redrill": true,
+    "redrill_after_damage": "failed"
   },
   "stale_attempt": "a newer restore drill result is already recorded for this backup set; nothing changed",
-  "status_after_stale": {
-    "backup_restore_verification_status": {
-      "failed": 0,
-      "partial": 1,
-      "uploaded": 1,
-      "verified": 0
-    }
-  },
+  "stale_target_created": false,
   "vectors_after_replay": 4,
   "vectors_rebuilt": 4
 }
