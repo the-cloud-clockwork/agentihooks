@@ -474,17 +474,24 @@ def asked_to_retire(world, handoff):
     return retiring
 
 
+def third_live_master(world):
+    masters.MasterSeats(world.redis).set_count(SLUG, 3)
+    world.seat(world.store.names.next(SLUG, "master"), f"master-3@{SLUG}")
+
+
 def test_a_seat_asked_to_retire_hands_its_claimants_to_the_front_door_before_its_handoff_is_in(world):
+    third_live_master(world)
     asked_to_retire(world, "")
 
     master_fence.check_send(inbox(world), LEAD_NAME, OWN_CLAIMANT)
 
     assert world.refusals() == 0
-    assert master_fence.Seats(SLUG, world.store, {}).live == [LEAD]
+    assert master_fence.Seats(SLUG, world.store, {}).live == [LEAD, f"master-3@{SLUG}"]
     assert master_fence.retiring(world.store, SLUG) == {SECOND}
 
 
 def test_a_retiring_seat_cannot_message_the_claimants_it_handed_to_the_front_door(world):
+    third_live_master(world)
     asked_to_retire(world, "")
 
     with pytest.raises(InboxError) as refused:
@@ -497,6 +504,7 @@ def test_a_retiring_seat_cannot_message_the_claimants_it_handed_to_the_front_doo
 
 
 def test_the_front_door_messages_a_retired_backend_masters_claimant_while_its_agent_is_still_running(world):
+    third_live_master(world)
     retiring = asked_to_retire(world, "")
 
     master_scale._retire(SLUG, world.store, SECOND, retiring[SECOND], 2_000)
