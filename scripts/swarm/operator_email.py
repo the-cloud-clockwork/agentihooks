@@ -5,7 +5,6 @@ import subprocess
 MAIL_TO = "AGENTIHOOKS_OPERATOR_EMAIL"
 GATEWAY_KEY = "MCP_KEY_GATEWAY"
 GATEWAY_URL = "LANGFUSE_MCP_URL"
-DEFAULT_GATEWAY_URL = "https://10.10.30.200/mcp/"
 TOOL = "notifications-send_email"
 TIMEOUT_S = 10
 
@@ -24,10 +23,10 @@ def send(subject: str, text: str, environ: dict, repo: str) -> str:
 
 
 def _notify(to: str, subject: str, text: str, environ: dict) -> str:
-    bearer = environ.get(GATEWAY_KEY)
-    if not bearer:
-        return f"email failed: the SMTP relay is unreachable and {GATEWAY_KEY} is not set"
-    url = environ.get(GATEWAY_URL) or DEFAULT_GATEWAY_URL
+    bearer, url = environ.get(GATEWAY_KEY), environ.get(GATEWAY_URL)
+    for name, value in ((GATEWAY_KEY, bearer), (GATEWAY_URL, url)):
+        if not value:
+            return f"email failed: the SMTP relay is unreachable and {name} is not set"
     try:
         reply = gateway_send(url, bearer, {"to": to, "subject": subject, "body": text})
     except Exception as exc:

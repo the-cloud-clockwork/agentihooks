@@ -4,7 +4,7 @@ from hooks.integrations import mailer
 from hooks.integrations.mailer import EmailClient, EmailResult
 from scripts.swarm import operator_email
 
-ENV = {"AGENTIHOOKS_OPERATOR_EMAIL": "op@example.com", "MCP_KEY_GATEWAY": "k"}
+ENV = {"AGENTIHOOKS_OPERATOR_EMAIL": "op@example.com", "MCP_KEY_GATEWAY": "k", "LANGFUSE_MCP_URL": "https://gw/mcp/"}
 SENT = {"status": "sent", "message_id": "m1"}
 
 
@@ -33,20 +33,22 @@ def test_an_unreachable_relay_sends_once_through_the_gateway_notifications_tool(
     assert operator_email.send("S", "T", ENV, ".") == ""
     assert sent == {
         "smtp": [],
-        "gateway": [("https://10.10.30.200/mcp/", "k", {"to": "op@example.com", "subject": "S", "body": "T"})],
+        "gateway": [("https://gw/mcp/", "k", {"to": "op@example.com", "subject": "S", "body": "T"})],
     }
 
 
-def test_the_gateway_url_comes_from_the_session(sent, monkeypatch):
+def test_no_gateway_url_is_a_named_refusal(sent, monkeypatch):
     _reachable(monkeypatch, False)
-    env = {**ENV, "LANGFUSE_MCP_URL": "https://gateway.local/mcp/"}
-    assert operator_email.send("S", "T", env, ".") == ""
-    assert [call[0] for call in sent["gateway"]] == ["https://gateway.local/mcp/"]
+    env = {**ENV, "LANGFUSE_MCP_URL": ""}
+    assert operator_email.send("S", "T", env, ".") == (
+        "email failed: the SMTP relay is unreachable and LANGFUSE_MCP_URL is not set"
+    )
+    assert sent == {"smtp": [], "gateway": []}
 
 
 def test_no_gateway_key_is_a_named_refusal(sent, monkeypatch):
     _reachable(monkeypatch, False)
-    env = {"AGENTIHOOKS_OPERATOR_EMAIL": "op@example.com"}
+    env = {"AGENTIHOOKS_OPERATOR_EMAIL": "op@example.com", "LANGFUSE_MCP_URL": "https://gw/mcp/"}
     assert operator_email.send("S", "T", env, ".") == (
         "email failed: the SMTP relay is unreachable and MCP_KEY_GATEWAY is not set"
     )

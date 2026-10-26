@@ -979,10 +979,15 @@ def test_a_forced_fallback_sends_once_through_the_gateway_notifications_tool(ah,
     monkeypatch.setattr(EmailClient, "reachable", lambda self, timeout=3.0: False)
     sent = []
     monkeypatch.setattr(operator_email, "gateway_send", lambda *args: sent.append(args) or {"status": "sent"})
-    environ = {**_environ(rendered), "AGENTIHOOKS_OPERATOR_EMAIL": "op@example.com", "MCP_KEY_GATEWAY": "k"}
+    environ = {
+        **_environ(rendered),
+        "AGENTIHOOKS_OPERATOR_EMAIL": "op@example.com",
+        "MCP_KEY_GATEWAY": "k",
+        "LANGFUSE_MCP_URL": "https://gw/mcp/",
+    }
     assert login.prepare_launch(environ, tmp_path) is None
     assert [(url, key, arguments["to"], arguments["subject"]) for url, key, arguments in sent] == [
-        ("https://10.10.30.200/mcp/", "k", "op@example.com", "Master login fell back to token routing")
+        ("https://gw/mcp/", "k", "op@example.com", "Master login fell back to token routing")
     ]
     token_records = (login._token_folder(environ) / "login-notifications.jsonl").read_text()
     assert [json.loads(line)["transport"] for line in token_records.splitlines()] == ["email"]
