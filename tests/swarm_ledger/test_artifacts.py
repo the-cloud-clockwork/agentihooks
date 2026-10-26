@@ -82,7 +82,12 @@ class ArtifactEndpoint(Endpoint):
             return exc.code, exc.read().decode()
 
     def publish_as_operator(self, filename, data, request=None):
-        headers = {"Host": f"127.0.0.1:{server.PORT}", "X-Artifact-Name": filename, "X-Ledger-Token": self.token}
+        headers = {
+            "Host": f"127.0.0.1:{server.PORT}",
+            "Origin": f"http://127.0.0.1:{server.PORT}",
+            "X-Artifact-Name": filename,
+            "X-Ledger-Token": self.token,
+        }
         metadata = {"task": ""} if request is None else request
         if isinstance(metadata, dict):
             metadata = {"title": "Upload", **metadata}
