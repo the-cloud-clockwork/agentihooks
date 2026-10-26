@@ -534,15 +534,18 @@ def test_red_head_jobs_counts_each_failed_job_once_per_red_head_run_in_the_windo
     assert found == {"unit": 2, "lint": 1, "unreadable": 1, "no failed job": 1}
     assert list(found) == ["unit", "lint", "unreadable", "no failed job"]
     query = '.jobs[] | select(.conclusion == "failure") | .name'
-    assert [args for args, _ in gh.calls] == [
-        [
-            "gh",
-            "api",
-            f"repos/{{owner}}/{{repo}}/actions/runs/{n}/jobs?filter=latest&per_page=100",
-            "--paginate",
-            "--jq",
-            query,
-        ]
+    assert gh.calls == [
+        (
+            [
+                "gh",
+                "api",
+                f"repos/{{owner}}/{{repo}}/actions/runs/{n}/jobs?filter=latest&per_page=100",
+                "--paginate",
+                "--jq",
+                query,
+            ],
+            GH,
+        )
         for n in (1, 2, 3, 8)
     ]
 
@@ -562,6 +565,14 @@ def test_main_writes_the_merge_path_with_head_pushes_from_a_lookback(monkeypatch
         return [head(1, "a", "success", 60)]
 
     monkeypatch.setattr(merge_path, "read_runs", listed)
+    monkeypatch.setattr(
+        merge_path,
+        "red_head_jobs",
+        lambda runs, window, repo_dir, run_fn: {
+            "lint": len(runs),
+            "args": [window, repo_dir, run_fn is subprocess.run],
+        },
+    )
     out = tmp_path / "m.json"
 
     assert merge_path.main(["--hours", "4", "--until", stamp(4 * 3600), "--out", str(out)]) == 0
@@ -572,8 +583,12 @@ def test_main_writes_the_merge_path_with_head_pushes_from_a_lookback(monkeypatch
     assert written["queue_jobs"] is False
     assert written["head_pushes"] == {"first push": {"runs": 1, "red": 0}}
     assert seen == [(".", "pull_request", (SINCE - 6 * 3600, UNTIL), subprocess.run)]
-    assert written["red_head_jobs"] == {}
-    assert capsys.readouterr().out.splitlines() == ["line o/r. 1", '{"first push": {"runs": 1, "red": 0}}', "{}"]
+    assert written["red_head_jobs"] == {"lint": 1, "args": [[SINCE, UNTIL], ".", True]}
+    assert capsys.readouterr().out.splitlines() == [
+        "line o/r. 1",
+        '{"first push": {"runs": 1, "red": 0}}',
+        json.dumps(written["red_head_jobs"]),
+    ]
 
 
 def test_main_reads_the_last_day_into_the_ci_minutes_file_by_default(monkeypatch, tmp_path):
