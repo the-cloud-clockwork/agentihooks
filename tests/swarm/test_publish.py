@@ -477,13 +477,17 @@ def test_prepare_stacks_on_the_recorded_branch_and_publish_pushes_its_current_br
         ("MERGED", False, "another-branch"),
     ],
 )
-@pytest.mark.parametrize("hint", ["handoff_envelope", "reclaim"])
-@pytest.mark.parametrize("continued", ["predecessor", "kept"])
+@pytest.mark.parametrize(
+    "continuation",
+    [(hint, continued) for hint in ("handoff_envelope", "reclaim") for continued in ("predecessor", "kept")],
+)
 def test_prepare_selects_fresh_dev_after_the_recorded_pull_request_merged(
-    repository, tmp_path, monkeypatch, state, deleted, head, hint, continued
+    repository, tmp_path, monkeypatch, state, deleted, head, continuation
 ):
     from scripts.swarm import publish, stack
     from scripts.swarm_ledger import ledger_tasks
+
+    hint, continued = continuation
 
     git(repository, "push", "origin", "HEAD:predecessor")
     git(repository, "push", "origin", "HEAD:kept")
