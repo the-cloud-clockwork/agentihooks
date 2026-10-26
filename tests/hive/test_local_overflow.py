@@ -491,12 +491,13 @@ def test_the_machine_count_leaves_out_the_task_itself_and_holds_other_swarms_pen
     assert fenced.placement_refusal("eng", {"id": "next"}) == capped(3, 2, 1, cpus=3)
 
 
-def pinned_wait(setup, slug, task, seen_at=None):
+def pinned_wait(setup, slug, task, seen_at=None, machine=None, reason=FULL):
     from scripts.hive import placement_waits
     from scripts.swarm import lease
+    from scripts.swarm.commands import hive_id
 
     now = lease.now_ms(setup.store) if seen_at is None else seen_at
-    row = {"lane": "eng", "reason": FULL, "started_at": now, "seen_at": now, "workstation": True}
+    row = {"lane": "eng", "reason": reason, "started_at": now, "seen_at": now, "workstation": machine or hive_id()}
     setup.store.redis.hset(setup.store.key(slug, placement_waits.WAITS), task, json.dumps(row))
 
 
@@ -539,6 +540,37 @@ def test_a_stale_workstation_wait_reserves_nothing(setup, monkeypatch):
     local_agents(setup, 7)
     pinned_wait(setup, "watched", "gone", seen_at=1)
     assert fenced.placement_refusal("eng", {"id": "task"}) == ""
+
+
+def test_a_wait_pinned_to_another_workstation_or_not_for_a_seat_reserves_nothing(setup, monkeypatch):
+    from scripts.hive.placement import NEEDS_CAPABILITY
+    from scripts.swarm.store import SwarmConfig
+
+    fenced = hybrid(setup, monkeypatch)
+    fill_anton(setup)
+    setup.store.create(SwarmConfig("watched", "agentihooks", 1, 1))
+    local_agents(setup, 7)
+    pinned_wait(setup, "watched", "elsewhere", machine="another-workstation")
+    pinned_wait(setup, "watched", "gpu", reason=NEEDS_CAPABILITY.format(needs="gpu"))
+    assert fenced.placement_refusal("eng", {"id": "task"}) == ""
+
+
+def test_a_waiting_workstation_task_records_its_machine_and_clears_when_it_starts(setup, monkeypatch):
+    from scripts.hive import placement_waits
+    from scripts.swarm.commands import hive_id
+
+    fenced = hybrid(setup, monkeypatch)
+    fill_anton(setup)
+    local_agents(setup, 7)
+    setup.store.update(setup.config.slug, local_max_agents=7)
+    pinned = {"id": "pinned", "workstation": True}
+    fenced.placement_refusal("eng", pinned)
+    fenced.placement_refusal("eng", {"id": "task"})
+    rows = placement_waits.read(setup.store, setup.config.slug)
+    assert (rows["pinned"]["workstation"], "workstation" in rows["task"]) == (hive_id(), False)
+    setup.store.update(setup.config.slug, local_max_agents=8)
+    fenced.spawn(setup.config, "eng", "eng pinned", pinned)
+    assert "pinned" not in placement_waits.read(setup.store, setup.config.slug)
 
 
 def test_overflow_counts_reserved_seats_against_the_cap():

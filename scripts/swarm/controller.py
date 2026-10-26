@@ -204,7 +204,9 @@ class FencedRuntime:
         reserved = (
             0
             if task.get("workstation")
-            else placement_waits.workstation_waiting(self.store, lease.now_ms(self.store), f"{self.slug}/{task['id']}")
+            else placement_waits.workstation_waiting(
+                self.store, machine, lease.now_ms(self.store), f"{self.slug}/{task['id']}"
+            )
         )
         chosen = overflow(waited.role, waited, held, local_max, reserved)
         if not isinstance(chosen, Choice):

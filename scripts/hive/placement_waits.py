@@ -1,6 +1,6 @@
 import json
 
-from scripts.hive.placement import NO_UI_HIVE
+from scripts.hive.placement import NEEDS_WORKSTATION, NO_UI_HIVE
 from scripts.swarm.health.findings import Finding
 from scripts.swarm.store import RedisStore
 
@@ -14,7 +14,7 @@ def read(store: RedisStore, slug: str) -> dict:
 
 
 def observe(
-    store: RedisStore, slug: str, lane: str, task: str, reason: str, now: int, workstation: bool = False
+    store: RedisStore, slug: str, lane: str, task: str, reason: str, now: int, workstation: str = ""
 ) -> None:
     from redis.exceptions import WatchError
 
@@ -32,7 +32,7 @@ def observe(
                 if reason:
                     row = {"lane": lane, "reason": reason, "started_at": started, "seen_at": now}
                     if workstation:
-                        row["workstation"] = True
+                        row["workstation"] = workstation
                     pipe.hset(key, task, json.dumps(row))
                 else:
                     pipe.hdel(key, task)
@@ -48,12 +48,15 @@ def prune(store: RedisStore, slug: str, tasks: list[dict]) -> None:
         store.redis.hdel(store.key(slug, WAITS), task)
 
 
-def workstation_waiting(store: RedisStore, now: int, own: str) -> int:
+def workstation_waiting(store: RedisStore, machine: str, now: int, own: str) -> int:
     return sum(
         1
         for slug in store.slugs()
         for task, row in read(store, slug).items()
-        if row.get("workstation") and now - row["seen_at"] < FRESH_MS and f"{slug}/{task}" != own
+        if row.get("workstation") == machine
+        and now - row["seen_at"] < FRESH_MS
+        and (row["reason"].startswith("no hive for ") or row["reason"] == NEEDS_WORKSTATION)
+        and f"{slug}/{task}" != own
     )
 
 
