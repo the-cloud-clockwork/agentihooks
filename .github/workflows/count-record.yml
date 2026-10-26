@@ -35,13 +35,13 @@ jobs:
         python-version:
         - '3.12'
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
       with:
         ref: ${{ github.sha }}
     - name: Set up Python ${{ matrix.python-version }}
       if: env.UNIT_SOURCE == ''
       id: python
-      uses: actions/setup-python@v5
+      uses: actions/setup-python@v6
       with:
         python-version: ${{ matrix.python-version }}
     - name: Stamp the day
@@ -51,14 +51,14 @@ jobs:
     - name: Restore the test environment
       if: env.UNIT_SOURCE == ''
       id: venv
-      uses: actions/cache/restore@v4
+      uses: actions/cache/restore@v6
       with:
         path: ~/venv
         key: venv-${{ runner.os }}-${{ steps.python.outputs.python-version }}-${{ steps.day.outputs.date }}-${{ hashFiles('pyproject.toml',
           '.github/test-excludes.txt') }}-${{ hashFiles('.github/test-constraints.txt') }}
     - name: Set up uv
       if: env.UNIT_SOURCE == '' && steps.venv.outputs.cache-hit != 'true'
-      uses: astral-sh/setup-uv@v10.2.0
+      uses: astral-sh/setup-uv@v10.3.0
       with:
         version: 0.12.23
         checksum: 9167d72b3319674b6303c4cbe071854bba13ebdf3d76b1a7cbdc175471fb66d6
@@ -75,7 +75,7 @@ jobs:
     - name: Save the test environment from dev
       if: env.UNIT_SOURCE == '' && steps.venv.outputs.cache-hit != 'true' && github.event_name == 'push' && github.ref ==
         'refs/heads/dev'
-      uses: actions/cache/save@v4
+      uses: actions/cache/save@v6
       with:
         path: ~/venv
         key: ${{ steps.venv.outputs.cache-primary-key }}
@@ -95,7 +95,7 @@ jobs:
 
         '
     - name: Upload the suite count record
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: count-record-${{ matrix.python-version }}
         path: ${{ runner.temp }}/count-record/record.json
