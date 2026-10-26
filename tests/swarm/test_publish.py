@@ -1439,6 +1439,29 @@ def test_a_recorded_url_that_names_no_pull_request_keeps_the_current_branch(monk
     assert publish_queue.open_head("git@github.com:example/repo.git", "https://github.com/example/repo/issues/7") == ""
 
 
+@pytest.mark.parametrize(
+    "pull, expected",
+    [
+        ({"state": "OPEN", "isCrossRepository": False, "repository": {"nameWithOwner": "Example/Repo"}}, "task"),
+        ({"state": "MERGED", "isCrossRepository": False, "repository": {"nameWithOwner": "example/repo"}}, ""),
+        ({"state": "OPEN", "isCrossRepository": True, "repository": {"nameWithOwner": "example/repo"}}, ""),
+        ({"state": "OPEN", "isCrossRepository": False, "repository": {"nameWithOwner": "example/other"}}, ""),
+    ],
+)
+def test_open_head_names_only_an_open_pull_request_in_the_same_repository(monkeypatch, pull, expected):
+    from scripts.swarm import merge_queue, publish_queue
+
+    url = "https://github.com/example/repo/pull/7"
+
+    def graphql(document, variables):
+        assert document == publish_queue.HEAD
+        assert variables == {"url": url}
+        return {"resource": {**pull, "headRefName": "task"}}
+
+    monkeypatch.setattr(merge_queue, "graphql", graphql)
+    assert publish_queue.open_head("git@github.com:example/repo.git", url) == expected
+
+
 def test_a_missing_branch_never_descends_and_prints_nothing(publication, capfd):
     from scripts.swarm import publish
 
