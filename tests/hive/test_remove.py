@@ -224,6 +224,31 @@ def test_a_rerun_after_a_completed_remove_writes_nothing_and_succeeds(store, tmp
     assert len(_orders(store, SEAT)) == 1
 
 
+def test_a_rerun_by_name_after_a_remove_that_failed_midway_finishes_on_the_real_name(store, tmp_path):
+    member, run, bao, plan = _removal(store, tmp_path)
+    failing = [True]
+
+    def flaky(argv, **kwargs):
+        if failing and argv[:2] == ["gh", "api"] and argv[2].endswith("?recursive=1"):
+            failing.clear()
+            return subprocess.CompletedProcess(argv, 1, "", "boom")
+        return run(argv, **kwargs)
+
+    host = _host(Clock(store, member, 2), flaky, tmp_path)
+    with pytest.raises(auth.HiveError, match="boom"):
+        remove.remove(store, bao, plan, host)
+    assert bao.opener.requests == []
+
+    hive, label = remove.resolve(store.redis, "anton-9")
+    again = remove.remove(store, bao, replace(plan, hive=hive, label=label), host)
+
+    assert (hive, label) == ("anton-9", "anton-9")
+    assert again[-2:] == [
+        f"manifests: opened pull request {PR} deleting {', '.join(OWNED)}; it merges once its checks pass",
+        "openbao: deleted OpenBao secret/k8s/agentihooks-hive-anton-9",
+    ]
+
+
 def test_a_dry_run_prints_every_step_first_and_writes_nothing(store, tmp_path):
     member, run, bao, plan = _removal(store, tmp_path)
     host = _host(Clock(store, member, 99), run, tmp_path)
