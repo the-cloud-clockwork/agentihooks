@@ -1600,11 +1600,7 @@ def publication_command(store: RedisStore, args: argparse.Namespace) -> dict:
             return publish.prepare(args.slug, agent, repo, ledger)
         return publish.publish(args.slug, agent, repo, ledger, args.message, args.files)
     except SwarmError as exc:
-        branch = (
-            exc.branch
-            if isinstance(exc, publish.PublicationRefusal)
-            else publish.refusal_branch(Path(repo), task)
-        )
+        branch = exc.branch if isinstance(exc, publish.PublicationRefusal) else publish.refusal_branch(Path(repo), task)
         syslog.openlog("agentihooks-swarm")
         syslog.syslog(
             syslog.LOG_WARNING,
