@@ -11,7 +11,7 @@ CLOSE_HINT = "done|handoff <address>|blocked <what>|cancel [why]"
 
 
 def pending_context(session_id, environ=None, cwd=""):
-    if worker_mode.active(environ) or cwd and is_codex_memory_thread(cwd):
+    if worker_mode.active(environ) or (cwd and is_codex_memory_thread(cwd)):
         return ""
     started = now_ms()
     receiver = _receiver(session_id, environ)

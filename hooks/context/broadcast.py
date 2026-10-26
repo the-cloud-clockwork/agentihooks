@@ -1236,7 +1236,7 @@ def get_posttool_context(session_id: str) -> str | None:
 
 def get_broadcast_context(session_id: str, message_ids: list[str]) -> str | None:
     wanted = set(message_ids)
-    if not wanted:
+    if not wanted or worker_mode.active():
         return None
     pending = [message for message in get_pending_broadcasts(session_id) if message.get("id") in wanted]
     pending.sort(key=lambda message: _SEVERITY_RANK.get(message.get("severity", "info"), 9))

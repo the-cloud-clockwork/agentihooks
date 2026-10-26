@@ -9,6 +9,7 @@ import hooks.context.ledger_decision as decision
 import hooks.context.swarm_refocus as refocus
 from hooks import hook_manager
 from hooks.context import broadcast, worker_mode
+from hooks.context.retry_breaker import _set_state
 from hooks.hook_manager import BlockAction
 from hooks.targets.emitter import flush
 from scripts.headless import profile_run
@@ -93,12 +94,19 @@ def test_the_flag_is_the_one_a_headless_profile_run_sets():
     assert worker_mode.active({worker_mode.FLAG: "1"})
     assert not worker_mode.active({})
     assert not worker_mode.active({worker_mode.FLAG: "0"})
+    assert not worker_mode.active({worker_mode.FLAG: "true"})
 
 
 def test_a_worker_run_is_shown_no_inbox_item_and_leaves_it_pending(store, worker, capsys):
     item = store.send("alice", "bob", "review my branch")
     assert "review my branch" not in _pre(capsys)
     assert store.get(item.id).state == "pending"
+
+
+def test_a_worker_run_confirms_no_inbox_item(store, worker):
+    with patch.object(store, "confirm_shown") as confirm:
+        delivery.confirm_shown("s1")
+    confirm.assert_not_called()
 
 
 def test_an_interactive_session_still_gets_its_inbox_item(store, capsys):
@@ -136,10 +144,15 @@ def test_a_worker_run_gets_no_broadcast(broadcasts, worker, capsys):
     assert "Fleet incident" not in capsys.readouterr().out
     assert broadcast.get_pretool_context("s1") is None
     assert broadcast.get_posttool_context("s1") is None
+    assert broadcast.get_broadcast_context("s1", [m["id"] for m in broadcast.list_broadcasts()]) is None
 
 
 def test_an_interactive_session_still_gets_the_broadcast(broadcasts):
     assert "Fleet incident" in broadcast.get_pretool_context("s1")
+
+
+def test_an_interactive_session_still_gets_the_brain_refresh_broadcast(broadcasts):
+    assert "Fleet incident" in broadcast.get_broadcast_context("s1", [m["id"] for m in broadcast.list_broadcasts()])
 
 
 def test_a_worker_run_keeps_the_credential_guard(worker):
@@ -159,8 +172,6 @@ def test_a_worker_run_keeps_the_secret_scan(worker):
 
 
 def test_a_worker_run_keeps_the_retry_breaker(worker):
-    from hooks.context.retry_breaker import _set_state
-
     _set_state("s-breaker", "bash:npm", {"count": 10, "last_error_key": "enoent", "last_input": "npm install"})
     with pytest.raises(BlockAction, match="(?i)hard stop"):
         hook_manager.on_pre_tool_use(
