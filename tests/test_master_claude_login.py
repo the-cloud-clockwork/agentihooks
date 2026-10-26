@@ -1405,3 +1405,48 @@ def test_token_home_creates_settings_when_rendered_settings_are_absent(ah, rende
     (rendered / "settings.json").unlink()
     target = login.token_home(_environ(rendered))
     assert json.loads((target / "settings.json").read_text()) == {}
+
+
+def _plain_shell(tmp_path, monkeypatch):
+    operator = tmp_path / "plain"
+    (operator / ".claude").mkdir(parents=True)
+    (operator / ".claude" / "settings.json").write_text('{"forceLoginMethod": "claudeai"}')
+    (operator / ".claude" / "CLAUDE.md").write_text("operator persona")
+    (operator / ".claude.json").write_text(json.dumps({"hasCompletedOnboarding": True, login.ACCOUNT: OPERATOR_ACCOUNT}))
+    monkeypatch.setenv("HOME", str(operator))
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: operator))
+    for name in ("CLAUDE_CONFIG_DIR", "CLAUDE_CODE_HOME_DIR", "AGENTIHOOKS_CLAUDE_HOME"):
+        monkeypatch.delenv(name, raising=False)
+    environ = {key: value for key, value in _environ(operator).items() if key != "CLAUDE_CONFIG_DIR"}
+    return operator, {**environ, "HOME": str(operator)}
+
+
+def test_prepare_from_a_plain_shell_builds_from_the_default_claude_home(ah, tmp_path, monkeypatch):
+    operator, environ = _plain_shell(tmp_path, monkeypatch)
+    _login(login.build(operator / ".claude"))
+    monkeypatch.setattr(openbao_kv, "from_env", lambda environ: None)
+    monkeypatch.setattr(login, "keep", lambda *_: True)
+    target, found = login.prepare(environ, tmp_path)
+    assert (target, found) == (login.home(), "masteratexample_com")
+    assert (target / "CLAUDE.md").read_text() == "operator persona"
+    assert json.loads((target / login.CONFIG).read_text()) == {
+        "hasCompletedOnboarding": True,
+        login.ACCOUNT: MASTER_ACCOUNT,
+    }
+
+
+def test_browser_home_from_a_plain_shell_builds_from_the_default_claude_home(ah, tmp_path, monkeypatch):
+    operator, environ = _plain_shell(tmp_path, monkeypatch)
+    target = login.browser_home(environ)
+    assert target == login.home()
+    assert (target / "CLAUDE.md").read_text() == "operator persona"
+    assert json.loads((target / login.CONFIG).read_text()) == {"hasCompletedOnboarding": True}
+
+
+def test_token_home_from_a_plain_shell_builds_from_the_default_claude_home(ah, tmp_path, monkeypatch):
+    operator, environ = _plain_shell(tmp_path, monkeypatch)
+    target = login.token_home(environ)
+    assert target == ah / "master-token" / "masterata_1" / "claude"
+    assert (target / "CLAUDE.md").read_text() == "operator persona"
+    assert json.loads((target / "settings.json").read_text()) == {}
+    assert json.loads((target / login.CONFIG).read_text()) == {"hasCompletedOnboarding": True}
