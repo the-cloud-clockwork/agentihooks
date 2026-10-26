@@ -226,9 +226,10 @@ def test_a_rerun_after_a_completed_remove_writes_nothing_and_succeeds(store, tmp
 
 def test_a_dry_run_prints_every_step_first_and_writes_nothing(store, tmp_path):
     member, run, bao, plan = _removal(store, tmp_path)
+    host = _host(Clock(store, member, 99), run, tmp_path)
     before = _written(store, tmp_path)
 
-    shown = remove.remove(store, bao, replace(plan, dry_run=True), _host(Clock(store, member, 99), run, tmp_path))
+    shown = remove.remove(store, bao, replace(plan, dry_run=True), host)
 
     assert shown == [
         f"drain: would stop placement on {member} and wait up to 600 seconds for engineer@1 to hand off",

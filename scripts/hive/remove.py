@@ -141,15 +141,14 @@ def revoke(redis: "Redis", hive: str, signer: "nats_grant.Signer | None" = None,
     return [*bus, f"revoked member {hive} and its Redis user"]
 
 
-def forget(redis: "Redis", plan: Plan, home: Path) -> list[str]:
-    keys = [registry.key(plan.hive), *redis.scan_iter(match=f"{registry.key(plan.hive)}:*")]
+def unregister(redis: "Redis", plan: Plan, home: Path) -> list[str]:
     nodes = sorted(node for node, name in redis.hgetall(machine.MACHINES).items() if name == plan.label)
     state = home / create.STATE_FILE
     created = _created(state) == plan.label
     if plan.dry_run:
-        lines = [f"would delete {redis.exists(*keys)} registry records of {plan.hive}"]
+        lines = [f"would delete {redis.exists(*_keys(redis, plan.hive))} registry records of {plan.hive}"]
     else:
-        lines = [_delete(redis, plan.hive, keys)]
+        lines = forget(redis, plan.hive)
         if nodes:
             redis.hdel(machine.MACHINES, *nodes)
         if created:
@@ -168,7 +167,12 @@ def _created(state: Path) -> str | None:
         return None
 
 
-def _delete(redis: "Redis", hive: str, keys: list[str]) -> str:
+def _keys(redis: "Redis", hive: str) -> list[str]:
+    return [registry.key(hive), *redis.scan_iter(match=f"{registry.key(hive)}:*")]
+
+
+def forget(redis: "Redis", hive: str) -> list[str]:
+    keys = _keys(redis, hive)
     prefix = f"{registry.key(hive)}:swarm:"
     histories = {
         f"{ROOT}:swarm:{source.removeprefix(prefix)}": redis.hgetall(source)
@@ -181,7 +185,7 @@ def _delete(redis: "Redis", hive: str, keys: list[str]) -> str:
         pipe.delete(*keys)
         pipe.srem(registry.INDEX, hive)
         deleted, _ = pipe.execute()[-2:]
-    return f"deleted {deleted} registry records of {hive}"
+    return [f"deleted {deleted} registry records of {hive}"]
 
 
 def unbank(bao: openbao_kv.OpenBao, path: str, dry_run: bool = False) -> list[str]:
@@ -218,7 +222,7 @@ STEPS = (
     ("drain", lambda store, bao, plan, host: drain(store, plan, host)),
     ("member", lambda store, bao, plan, host: revoke(store.redis, plan.hive, plan.signer, plan.dry_run)),
     ("herdr", lambda store, bao, plan, host: machine.forget(plan.label, host.known_hosts, host.run, plan.dry_run)),
-    ("registry", lambda store, bao, plan, host: forget(store.redis, plan, host.home)),
+    ("registry", lambda store, bao, plan, host: unregister(store.redis, plan, host.home)),
     ("manifests", lambda store, bao, plan, host: unmanifest(plan, host.run)),
     ("openbao", lambda store, bao, plan, host: unbank(bao, plan.bao_path, plan.dry_run)),
 )
