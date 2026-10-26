@@ -413,7 +413,7 @@ def test_a_conversation_written_under_the_route_home_survives_the_next_launch(tm
 def test_the_route_home_links_a_rendered_home_folder_to_where_it_points(
     rendered, tmp_path, monkeypatch, checked, executed
 ):
-    shared = tmp_path / "shared-projects"
+    shared = tmp_path / "operator-claude" / "projects"
     (rendered / "projects").symlink_to(shared)
     _slot(1, PREFERRED)
     monkeypatch.setattr(master_logins, "left", lambda account, now: 50.0)

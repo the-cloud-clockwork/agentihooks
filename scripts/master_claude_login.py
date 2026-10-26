@@ -229,16 +229,23 @@ def build(rendered: Path, report: str | None = None) -> Path:
     return target
 
 
-def _rebuild(folder: Path, rendered: Path) -> Path:
+def _rebuild(folder: Path, rendered: Path, linked: tuple[str, ...] = ()) -> Path:
     target, staging = folder / "claude", folder / "staging"
     kept = _private(target)
     grant = kept.read_bytes() if kept else None
     account = _read(target / CONFIG).get(ACCOUNT)
     shutil.rmtree(staging, ignore_errors=True)
     shutil.copytree(
-        rendered, staging, symlinks=True, ignore=lambda found, _: [CREDENTIALS] if Path(found) == rendered else []
+        rendered,
+        staging,
+        symlinks=True,
+        ignore=lambda found, _: [CREDENTIALS, *linked] if Path(found) == rendered else [],
     )
     staging.chmod(PRIVATE_DIR)
+    for name in linked:
+        shared = (rendered / name).resolve()
+        shared.mkdir(parents=True, exist_ok=True)
+        (staging / name).symlink_to(shared)
     if grant is not None:
         (staging / CREDENTIALS).write_bytes(grant)
         (staging / CREDENTIALS).chmod(PRIVATE_FILE)
