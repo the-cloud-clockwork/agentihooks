@@ -509,6 +509,44 @@ def test_head_pushes_reads_a_missing_head_commit_as_no_dev_merge():
     assert merge_path.head_pushes(runs, WINDOW) == {"first push": {"runs": 1, "red": 0}}
 
 
+def test_red_head_jobs_counts_each_failed_job_once_per_red_head_run_in_the_window():
+    runs = [
+        head(1, "a", "failure", 60),
+        head(2, "a", "failure", 120),
+        head(3, "a", "failure", 180),
+        head(4, "b", "success", 240),
+        head(5, "a", "failure", -60),
+        head(6, "dev", "failure", 300),
+        run(7, "merge_group", "failure"),
+        head(8, "a", "failure", 360),
+    ]
+    gh = Gh(
+        [
+            (0, "unit (3.11, 1)\nunit (3.11, 2)\nlint\n"),
+            (0, "unit (3.12, 4)\n"),
+            (1, "", "gh: Not Found (HTTP 404)\n"),
+            (0, ""),
+        ]
+    )
+
+    found = merge_path.red_head_jobs(runs, WINDOW, "/repo", gh)
+
+    assert found == {"unit": 2, "lint": 1, "unreadable": 1, "no failed job": 1}
+    assert list(found) == ["unit", "lint", "unreadable", "no failed job"]
+    query = '.jobs[] | select(.conclusion == "failure") | .name'
+    assert [args for args, _ in gh.calls] == [
+        [
+            "gh",
+            "api",
+            f"repos/{{owner}}/{{repo}}/actions/runs/{n}/jobs?filter=latest&per_page=100",
+            "--paginate",
+            "--jq",
+            query,
+        ]
+        for n in (1, 2, 3, 8)
+    ]
+
+
 def test_main_writes_the_merge_path_with_head_pushes_from_a_lookback(monkeypatch, tmp_path, capsys):
     found = {"tests_runs": {}, "removals": {}, "head_failure_rate": None}
     seen = []
@@ -534,7 +572,8 @@ def test_main_writes_the_merge_path_with_head_pushes_from_a_lookback(monkeypatch
     assert written["queue_jobs"] is False
     assert written["head_pushes"] == {"first push": {"runs": 1, "red": 0}}
     assert seen == [(".", "pull_request", (SINCE - 6 * 3600, UNTIL), subprocess.run)]
-    assert capsys.readouterr().out.splitlines() == ["line o/r. 1", '{"first push": {"runs": 1, "red": 0}}']
+    assert written["red_head_jobs"] == {}
+    assert capsys.readouterr().out.splitlines() == ["line o/r. 1", '{"first push": {"runs": 1, "red": 0}}', "{}"]
 
 
 def test_main_reads_the_last_day_into_the_ci_minutes_file_by_default(monkeypatch, tmp_path):
@@ -552,4 +591,8 @@ def test_main_reads_the_last_day_into_the_ci_minutes_file_by_default(monkeypatch
     ((since_s, until_s),) = windows
     assert before <= until_s <= time.time()
     assert until_s - since_s == 24 * 3600
-    assert json.loads((tmp_path / "ci-minutes.json").read_text()) == {"repo": "o/r", "head_pushes": {}}
+    assert json.loads((tmp_path / "ci-minutes.json").read_text()) == {
+        "repo": "o/r",
+        "head_pushes": {},
+        "red_head_jobs": {},
+    }

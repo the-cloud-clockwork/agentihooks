@@ -36,6 +36,7 @@ SERVER_ERROR = re.compile(r"HTTP 5\d\d|stream error")
 ATTEMPTS = 5
 RETRY_S = 10
 JOB_PAGE = 30
+MATRIX = re.compile(r" \(.*\)$")
 
 
 def _seconds(stamp: str) -> float:
@@ -273,6 +274,24 @@ def head_pushes(runs: list[dict], window: tuple[float, float]) -> dict:
     return dict(sorted(causes.items(), key=lambda item: -item[1]["runs"]))
 
 
+def red_head_jobs(runs: list[dict], window: tuple[float, float], repo_dir: str, run: Callable) -> dict:
+    """Counts red pull request head Tests runs created in the window by each job that failed them."""
+    failed = Counter()
+    for found in runs:
+        if found["event"] != "pull_request" or _promotion(found) or found["conclusion"] != "failure":
+            continue
+        if not _within(found["created_at"], *window):
+            continue
+        path = f"repos/{{owner}}/{{repo}}/actions/runs/{found['id']}/jobs?filter=latest&per_page={PAGE}"
+        query = '.jobs[] | select(.conclusion == "failure") | .name'
+        try:
+            names = _gh(["api", path, "--paginate", "--jq", query], repo_dir, run).splitlines()
+        except SwarmError:
+            names = ["unreadable"]
+        failed.update({MATRIX.sub("", name) for name in names} or {"no failed job"})
+    return dict(failed.most_common())
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--hours", type=float, default=24)
@@ -284,9 +303,11 @@ def main(argv: list[str] | None = None) -> int:
     repo, found = collect(".", window, queue_jobs=False)
     history = read_runs(".", "pull_request", (window[0] - LOOKBACK_S, until_s), subprocess.run)
     found["head_pushes"] = head_pushes(history, window)
+    found["red_head_jobs"] = red_head_jobs(history, window, ".", subprocess.run)
     args.out.write_text(json.dumps({"repo": repo, **found}))
     print(render(repo, found))
     print(json.dumps(found["head_pushes"]))
+    print(json.dumps(found["red_head_jobs"]))
     return 0
 
 
