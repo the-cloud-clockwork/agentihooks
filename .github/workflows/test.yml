@@ -1587,6 +1587,19 @@ jobs:
       - *python
 
       - name: Download collected tests
+        id: shard-data
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          pattern: "{collected,reused-tests}-${{ matrix.python-version }}"
+          path: shard-data
+
+      - name: Wait before downloading collected tests again
+        if: steps.shard-data.outcome == 'failure'
+        run: sleep 30
+
+      - name: Download collected tests again
+        if: steps.shard-data.outcome == 'failure'
         uses: actions/download-artifact@v4
         with:
           pattern: "{collected,reused-tests}-${{ matrix.python-version }}"

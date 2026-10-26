@@ -157,14 +157,16 @@ def test_grouped_download_preserves_shard_integrity_without_installed_dependenci
     downloads = [step for step in steps if step.get("uses", "").startswith("actions/download-artifact@")]
     assert [download["with"] for download in downloads] == [
         {"pattern": "{collected,reused-tests}-${{ matrix.python-version }}", "path": "shard-data"},
+        {"pattern": "{collected,reused-tests}-${{ matrix.python-version }}", "path": "shard-data"},
         {"pattern": "{durations,flakes}-${{ matrix.python-version }}-*", "path": "shard-reports"},
         {"pattern": "{durations,flakes}-${{ matrix.python-version }}-*", "path": "shard-reports"},
     ]
-    assert downloads[1]["continue-on-error"] is True
-    assert downloads[2]["if"] == f"steps.{downloads[1]['id']}.outcome == 'failure'"
-    assert "continue-on-error" not in downloads[2]
+    for first, retry in ((downloads[0], downloads[1]), (downloads[2], downloads[3])):
+        assert first["continue-on-error"] is True
+        assert retry["if"] == f"steps.{first['id']}.outcome == 'failure'"
+        assert "continue-on-error" not in retry
     require = next(step for step in steps if step.get("name") == "Require every planned shard report")
-    assert steps.index(downloads[1]) < steps.index(downloads[2]) < steps.index(require)
+    assert steps.index(downloads[2]) < steps.index(downloads[3]) < steps.index(require)
     assert not any(step.get("name") == "Install grader dependencies" for step in steps)
     prefetch = next(step for step in steps if "python -m scripts.ci_gate_shards" in step.get("run", ""))
     layout = next(step for step in steps if step.get("name") == "Arrange shard verification data")
