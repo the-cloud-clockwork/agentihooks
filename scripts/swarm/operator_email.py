@@ -48,12 +48,12 @@ async def _send(url: str, bearer: str, arguments: dict) -> dict:
             async with ClientSession(read, write) as session:
                 await session.initialize()
                 result = await session.call_tool(TOOL, arguments)
-    text = next((item.text for item in result.content if item.type == "text"), "")
+    texts = [item.text for item in result.content if item.type == "text"]
     if result.isError:
-        raise RuntimeError(text or "an error")
-    reply = json.loads(text) if text else {}
+        raise RuntimeError(texts[0] if texts else "an error")
+    reply = json.loads(texts[0]) if texts else {}
     if not isinstance(reply, dict):
-        raise RuntimeError(f"a reply that is not an object: {text}")
+        raise RuntimeError(f"a reply that is not an object: {texts[0]}")
     return reply
 
 
