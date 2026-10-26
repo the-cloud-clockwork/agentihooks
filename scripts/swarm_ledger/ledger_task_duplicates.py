@@ -1,4 +1,4 @@
-"""Screens task and follow up adds against what the ledger already holds, before the locked apply takes the write lock."""
+"""Screens task, follow up and phase adds against what the ledger already holds, before the locked apply takes the write lock."""
 
 import json
 import os
