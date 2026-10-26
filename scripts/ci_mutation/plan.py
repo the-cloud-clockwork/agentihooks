@@ -178,20 +178,18 @@ def collection_changed(old: str | None, new: str | None) -> bool:
 
 def helper_tests(root: Path, path: str) -> set[str] | None:
     importers = _importers(root)
-    pending, reached = [path], set()
-    while pending:
-        current = pending.pop()
-        if current in reached:
-            continue
-        reached.add(current)
+    reached = [path]
+    for current in reached:
         module = current.removesuffix(".py").removesuffix("/__init__").replace("/", ".")
         keys = {module, current}
         if Path(current).name in ("conftest.py", "__init__.py"):
             folder = f"{Path(current).parent.as_posix()}/"
-            pending.extend(found for found in importers["*"] if found.startswith(folder))
+            found = {name for name in importers["*"] if name.startswith(folder)}
         else:
             keys.update((Path(current).stem, Path(current).name))
-        pending.extend(found for key in keys for found in importers.get(key, ()))
+            found = set()
+        found.update(name for key in keys for name in importers.get(key, ()))
+        reached.extend(sorted(found.difference(reached)))
     if any(not found.startswith("tests/") for found in reached):
         return None
     return {found for found in reached if Path(found).name.startswith("test_")}
