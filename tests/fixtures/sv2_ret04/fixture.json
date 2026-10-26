@@ -52,7 +52,7 @@
   "withheld_key": "fixture-key-brain",
   "foreign_corpus": "personal-corpus",
   "retired_version": {"component": "ledger", "accepted": "ledger-2"},
-  "policy": {"version": "turn-v1", "max_chars": 2000},
+  "policy": {"version": "backup-turn-v1", "max_chars": 1200},
   "index_generation": "fixture-embed-v1",
   "model": {"model": "fixture-hash-embedder-4", "dimension": 4},
   "clock": {"captured": 1000.0, "later_capture": 2000.0, "drill_start": 1100.0, "step": 2.5},

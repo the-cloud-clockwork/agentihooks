@@ -27,6 +27,7 @@ FILES = ("ledger", "coordination", "brain")
 PROJECTIONS = chunking.CHUNK_TABLES + index_worker.INDEX_TABLES
 CATALOG_FILE = "catalog.sqlite3"
 MARKER = "restore.json"
+MEMORY = ":memory:"
 PARTIAL_WRITE = ".partial-"
 ARCHIVED = "SELECT DISTINCT object_digest FROM archive_manifest ORDER BY object_digest"
 RETAINED = "SELECT session_uid FROM session_record WHERE access_domain = ? AND state = 'retained' ORDER BY session_uid"
@@ -66,6 +67,7 @@ class Projections:
     policy: Policy
     index_generation: str
     embedder: Embedder
+    limits: index_worker.Limits = index_worker.DEFAULT_LIMITS
 
 
 @dataclass(frozen=True)
@@ -105,7 +107,7 @@ def _write(path: Path, data: bytes) -> None:
 
 
 def _catalog_copy(path: Path) -> tuple[bytes, list[str]]:
-    source, copy = sqlite3.connect(path), sqlite3.connect(":memory:")
+    source, copy = sqlite3.connect(path), sqlite3.connect(MEMORY)
     try:
         source.backup(copy)
         for table in PROJECTIONS:
@@ -194,7 +196,7 @@ def restore(backup: archive.ObjectStore, set_id: str, root: Path, access: Access
 def rebuild(catalog: Catalog, grant: Grant, projections: Projections, now: float) -> dict:
     """Rebuilds the chunk and vector projections the backup omits from the restored source events."""
     policy, generation = projections.policy, projections.index_generation
-    chunks, worker = ChunkIndex(catalog), IndexWorker(catalog)
+    chunks, worker = ChunkIndex(catalog), IndexWorker(catalog, projections.limits)
     worker.register(grant.corpus, generation, projections.embedder.model)
     sessions = [row[0] for row in catalog.db.execute(RETAINED, (grant.corpus,))]
     for uid in sessions:

@@ -1,13 +1,16 @@
 """Tests for SV2-RET-04 backup manifests and restore drills."""
 
+import dataclasses
 import hashlib
 import json
 import sqlite3
+import tempfile
 from pathlib import Path
+from unittest import mock
 
 import pytest
 
-from hooks.memory import archive
+from hooks.memory import archive, index_worker
 from scripts.swarm_v2 import backup
 from tests import sv2_ret04_cases as cases
 
@@ -279,6 +282,52 @@ def test_a_same_attempt_rerun_returns_the_recorded_entry(world):
     before = world.registry.path.read_bytes()
     assert world.registry.drill(world.backup, set_id, 1, world.plan()) == first
     assert world.registry.path.read_bytes() == before
+
+
+def test_encoded_documents_are_key_ordered():
+    assert backup._encoded({"b": 1, "a": 2}) == b'{"a": 2, "b": 1}'
+
+
+def test_write_stages_its_temporary_file_beside_the_target(tmp_path):
+    target = tmp_path / "folder" / "file"
+    target.parent.mkdir()
+    with mock.patch.object(backup.tempfile, "mkstemp", wraps=tempfile.mkstemp) as staged:
+        backup._write(target, b"data")
+    staged.assert_called_once_with(dir=target.parent, prefix=backup.PARTIAL_WRITE)
+    assert target.read_bytes() == b"data"
+    assert sorted(path.name for path in target.parent.iterdir()) == ["file"]
+
+
+@pytest.mark.parametrize("make", [False, True])
+def test_restore_creates_a_nested_root_or_uses_an_existing_empty_one(world, make):
+    set_id, target = world.capture(), world.root / "nested" / "deeper" / "restore"
+    if make:
+        target.mkdir(parents=True)
+    backup.restore(world.backup, set_id, target, world.access()).catalog.close()
+    assert json.loads((target / backup.MARKER).read_text()) == {"set_id": set_id}
+
+
+def test_a_registry_under_a_missing_folder_records_its_first_set(tmp_path):
+    registry = backup.Registry(tmp_path / "a" / "b" / "registry.json")
+    entry = registry.record("0" * 64, 5.0)
+    expected = {"status": backup.UPLOADED, "captured_at": 5.0, "attempt": 0, "report": None, "accepted_attempt": None}
+    assert entry == expected
+    assert json.loads(registry.path.read_text()) == {"0" * 64: expected}
+
+
+def test_an_unknown_set_is_not_accepted_and_statuses_are_counted(world):
+    world.capture()
+    world.capture("later_capture")
+    assert world.registry.accepted("0" * 64) is False
+    assert world.registry.status()[backup.METRIC][backup.UPLOADED] == 2
+
+
+def test_a_bounded_rebuild_reports_its_pending_backlog(world):
+    set_id = world.capture()
+    limited = dataclasses.replace(world.projections(), limits=index_worker.Limits(1, 64000, 1))
+    report = backup.drill(world.backup, set_id, world.plan(projections=limited))
+    assert report["rebuilt_projections"]["state"] == "bounded"
+    assert report["rebuilt_projections"]["pending"] > 0
 
 
 @pytest.mark.parametrize("case", ["A", "B", "C"])
