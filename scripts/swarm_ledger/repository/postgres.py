@@ -1,3 +1,4 @@
+import itertools
 import re
 import sqlite3
 import threading
@@ -11,6 +12,8 @@ from .sqlite import BEGIN, BEGIN_IMMEDIATE, ROWS_SCHEMA, SCHEMA, TABLES_SQL, Sna
 URL = "AGENTIHOOKS_SWARM_DATABASE_URL"
 WRITER_LOCK = 0x4C454447
 KEPT = 8
+STREAM_ROWS = 2000
+STREAMS = itertools.count()
 LOCK_WAIT = 10
 LOCK_TRIES = 3
 LOCK_REFUSED = f"the ledger writer lock was not granted in {LOCK_TRIES} waits of {LOCK_WAIT} seconds"
@@ -212,6 +215,14 @@ class Connection:
             cursor = self.raw.cursor()
             cursor.execute(translate(sql, isinstance(parameters, Mapping)), parameters)
         return cursor
+
+    def stream(self, sql: str, parameters: tuple = ()) -> Iterator[tuple]:
+        """Rows of a read the server sends STREAM_ROWS at a time, so no whole result is held here at once."""
+        with mapped():
+            cursor = self.raw.cursor(name=f"stream_{next(STREAMS)}")
+            cursor.execute(translate(sql), parameters)
+            while batch := cursor.fetchmany(STREAM_ROWS):
+                yield from batch
 
     def lock(self) -> object:
         """The writer lock, asked for again after each wait the server ends at its lock timeout."""
