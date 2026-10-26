@@ -729,6 +729,23 @@ def test_a_long_description_with_one_early_space_keeps_only_the_first_word():
     assert result.content["phases"][0]["description"] == "a"
 
 
+def test_a_word_ending_exactly_at_the_bound_is_kept():
+    description = f"a {'x' * 798} {'y' * 50}"
+    text = f"# Plan\n\n## Phase one\n<!-- phase: id=a planning=auto -->\n{description}\n"
+
+    result = normalize(text, "word-at-bound.md")
+
+    assert result.content["phases"][0]["description"] == f"a {'x' * 798}"
+
+
+def test_a_space_just_past_the_bound_is_not_used_as_the_cut():
+    text = f"# Plan\n\n## Phase one\n<!-- phase: id=a planning=auto -->\n{'x' * 801} y\n"
+
+    result = normalize(text, "space-past-bound.md")
+
+    assert result.content["phases"][0]["description"] == "x" * 800
+
+
 def test_a_three_phase_cycle_names_every_phase_in_order():
     plan = [
         {"title": "A", "depends_on": [3]},
