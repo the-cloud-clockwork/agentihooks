@@ -875,8 +875,9 @@ def test_a_frozen_front_doors_window_starts_when_it_took_the_seat(inbox):
 
 
 def test_a_pass_leaves_an_item_its_receiver_already_took(inbox):
+    inbox.seats.occupy("master@sw", MASTER_NAME, at=1)
     item = inbox.send("sw-eng-1", "master@sw", "check the plan")
-    inbox.deliver(item.id, MASTER_NAME)
+    assert inbox.deliver(item.id, MASTER_NAME).state == "delivered"
     assert wake._pass(inbox, item, MASTER_NAME, "master-2@sw") == []
     assert inbox.get(item.id).address == "master@sw"
 
