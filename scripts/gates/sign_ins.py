@@ -52,6 +52,10 @@ class SignIns:
 
     def decide(self, call, who, state):
         if call.tool in ("claude-login", "codex-login", "init-agent-auth"):
-            return Decision.deny("sign in: agents never initiate authentication; send the step to the front door master.") if who.name else Decision()
+            return (
+                Decision.deny("sign in: agents never initiate authentication; send the step to the front door master.")
+                if who.name
+                else Decision()
+            )
         found = sign_in(call.tool, call.tool_input)
         return Decision.deny(refusal(found)) if found else Decision()

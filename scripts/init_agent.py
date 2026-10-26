@@ -1044,18 +1044,21 @@ def _launch_seconds(args) -> float:
     return LAUNCH_DEADLINE_S
 
 
+def _auth_request(args: argparse.Namespace, environ: dict[str, str]) -> None:
+    from scripts.gates.entry import native
+
+    if args.auth and native("sign-ins", "init-agent-auth", environ):
+        raise ValueError("explicit authentication refused by the sign ins gate")
+
+
 def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -> int:
     args = _parser().parse_args(argv)
     launch = LaunchDeadline(_launch_seconds(args))
     active_env = dict(os.environ if environ is None else environ)
-    if args.auth:
-        from scripts.gates.entry import native
-
-        if native("sign-ins", "init-agent-auth", active_env):
-            return 2
     active_env.pop("AGENTIHOOKS_PROFILE_REPORT", None)
     operator_env.fill(active_env)
     try:
+        _auth_request(args, active_env)
         directory = _resolve_directory(args.dir, active_env)
         prompt = Path(args.prompt_file).expanduser().read_text(encoding="utf-8") if args.prompt_file else args.prompt
         name = args.name or f"s-{time.strftime('%y%m%d-%H%M%S')}"
