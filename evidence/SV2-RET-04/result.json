@@ -35,11 +35,12 @@
     "No scheduler captures sets or runs drills; a caller invokes capture and drill.",
     "Ledger, coordination and brain components are opaque bytes from their exporters; no live exporter is wired in.",
     "A partial set stays accepted with its irrecoverable objects listed, and retention stays stopped until a fully verified set exists.",
+    "The grant corpus gates a restore and its projects gate the query and rebuild; the grant principal is not checked against an operator role because no stored grant exists for backup sets.",
     "No deletion path exists; a retention collector must consult Registry.retention_allowed and Registry.preserved.",
     "Capture records the exports it is given under one capture time; taking them under one fence is the caller's job."
   ],
   "rollback_rehearsal": "C recorded a newer set as uploaded only, so retention_allowed turned false and preserved named the drilled set; a re-drill after damaging its brain component failed, the set lost acceptance and preserved still named it",
   "status": "fixture_partial",
   "supported_versions": "backup format 1.x; component versions the caller lists in Access.versions",
-  "tested_commit": "af68b9ea5fd29a66ff49e52688f626318d629fa4"
+  "tested_commit": "d62c718f5ffeb8689c32b8b772992af15f9e28c6"
 }
