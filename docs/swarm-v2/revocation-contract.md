@@ -48,6 +48,16 @@ and cutover once a session is retained again. A redacted lesson stays redacted a
 after a regrant; restoring revoked access is never a rollback step. Rewinding the consumer cursors and replaying
 every tombstone keeps all reads refused and changes nothing that is already converged.
 
+## Command line
+
+`python -m scripts.swarm_v2.revocation <command> <catalog> <access domain>`:
+
+- `register --document <file>` stores the packs and lessons in a JSON document, `{"packs": [{"pack_id", "body",
+  "sessions"}], "lessons": [{"lesson_id", "text", "support"}]}`;
+- `catch-up` replays every consumer and prints the notices;
+- `exposures --session <uid>` prints every surface still holding the session;
+- `lags` prints the recorded lag per consumer and tombstone.
+
 ## Metric
 
 `revocation_propagation_lag_seconds`: the time between a tombstone being recorded and a consumer applying it,
