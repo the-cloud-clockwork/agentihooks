@@ -1,6 +1,7 @@
 import json
 import os
 import signal
+import socket
 import subprocess
 import sys
 import time
@@ -10,7 +11,7 @@ from unittest.mock import Mock
 
 import pytest
 
-from scripts.swarm_ledger import ledger_link, ledger_server, server_lifetime
+from scripts.swarm_ledger import ledger_link, server_lifetime
 
 ROOT = Path(__file__).resolve().parents[2]
 SERVER = ROOT / "scripts/swarm_ledger/ledger_server.py"
@@ -78,7 +79,7 @@ def test_detached_server_stops_when_its_run_ends(tmp_path, ending, explicit_owne
         else:
             getattr(run, ending)()
         run.wait(timeout=5)
-        deadline = time.monotonic() + ledger_server.DRAIN_S + 5
+        deadline = time.monotonic() + 3
         while running(pid) and time.monotonic() < deadline:
             time.sleep(0.02)
         assert not running(pid), f"ledger server {pid} on port {port} survived its ended run"
@@ -134,25 +135,26 @@ def test_detached_server_stop_deadline_excludes_startup_after_pid_publication(tm
     assert (tmp_path / "startup-paused").read_text() == "yes"
 
 
-def test_detached_server_stop_deadline_covers_a_close_within_the_drain_bound(tmp_path, monkeypatch, ledger_port):
-    closing = tmp_path / "closing"
-    closing.mkdir()
-    (closing / "sitecustomize.py").write_text(
-        "import socketserver, time\n"
-        "close = socketserver.TCPServer.server_close\n"
-        "def slow(self):\n"
-        "    time.sleep(4)\n"
-        "    close(self)\n"
-        "socketserver.TCPServer.server_close = slow\n"
-    )
-    popen = subprocess.Popen
+def test_detached_server_stop_deadline_covers_a_request_held_through_the_drain_bound(
+    tmp_path, monkeypatch, ledger_port
+):
+    held = []
+    serving = ledger_link.serving
 
-    def start(*args, **kwargs):
-        kwargs["env"]["PYTHONPATH"] = os.pathsep.join((str(closing), kwargs["env"]["PYTHONPATH"]))
-        return popen(*args, **kwargs)
+    def hold(**kwargs):
+        found = serving(**kwargs)
+        if found == str(tmp_path) and not held:
+            held.append(socket.create_connection(("127.0.0.1", ledger_port)))
+            held[0].sendall(b"GET / HTTP/1.1\r\n")
+        return found
 
-    monkeypatch.setattr(subprocess, "Popen", start)
-    test_detached_server_stops_when_its_run_ends(tmp_path, "exit", True, "--ensure", ledger_port)
+    monkeypatch.setattr(ledger_link, "serving", hold)
+    try:
+        test_detached_server_stops_when_its_run_ends(tmp_path, "exit", True, "--ensure", ledger_port)
+    finally:
+        for connection in held:
+            connection.close()
+    assert held
 
 
 def fake_process(proc, pid=7, ppid=1, start=99, state="S", comm="python", argv=(b"python",)):
