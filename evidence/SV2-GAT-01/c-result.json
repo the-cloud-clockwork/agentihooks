@@ -14,11 +14,8 @@
     ],
     "old_origin": "http://localhost:8104",
     "new_origin": "http://localhost:8105",
-    "old_cache_removed": true,
+    "cache_namespaces_differ": true,
     "stored_generation": 2,
-    "brain_route_resolution_failures": {
-      "session": "fixture-session",
-      "value": 0
-    }
+    "brain_route_resolution_failures": {}
   }
 }

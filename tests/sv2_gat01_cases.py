@@ -1,5 +1,7 @@
 import hashlib
 import json
+import shutil
+import subprocess
 import sys
 import tempfile
 import traceback
@@ -7,6 +9,7 @@ from pathlib import Path
 
 from hooks.context import brain_routes
 from scripts.swarm import brain_binding
+from scripts.swarm_v2 import keyspace
 
 FIXTURE = Path(__file__).parent / "fixtures/swarm_v2/brain-routes.json"
 EVIDENCE_CLASS = (
@@ -54,6 +57,28 @@ class Home:
         }
 
 
+def launched(environ):
+    shown = 'printf "%s\\n%s" "${BRAIN_URL:-}" "${BRAIN_HTTP_TOKEN:-}"'
+    script = brain_binding.exports(environ) + shown
+    bash = shutil.which("bash")
+    url, token = subprocess.run(
+        [bash, "-c", script], env=environ, capture_output=True, text=True, check=True
+    ).stdout.split("\n")
+    return {**environ, "BRAIN_URL": url, "BRAIN_HTTP_TOKEN": token}
+
+
+def failure_counts(environ):
+    try:
+        lines = (brain_routes.store(environ) / f"{brain_routes.FAILURES}.jsonl").read_text().splitlines()
+    except OSError:
+        return {}
+    counts = {}
+    for line in lines:
+        route = json.loads(line)["route"]
+        counts[route] = counts.get(route, 0) + 1
+    return dict(sorted(counts.items()))
+
+
 def _session(environ):
     receipt = brain_routes.apply(environ)
     return {
@@ -69,7 +94,7 @@ def _sessions(inputs, root):
     home = Home(inputs, root)
     personal = home.environ()
     observed = {
-        "swarm": _session(home.swarm(**{brain_routes.VARIABLE: inputs["explicit_route"]})),
+        "swarm": _session(launched(home.swarm(**{brain_routes.VARIABLE: inputs["explicit_route"]}))),
         "personal": _session(personal),
         "explicit": _session(home.environ(**{brain_routes.VARIABLE: inputs["explicit_route"]})),
     }
@@ -81,19 +106,20 @@ def positive(inputs, root):
     _, second, _, _ = _sessions(inputs, root / "second")
     assert first == second
     assert first["swarm"]["receipt"]["route"] == brain_routes.SWARM
-    assert first["swarm"]["receipt"]["origin"] == inputs["swarm_binding"]["origins"]["lan"]["api"]
+    swarm_api = inputs["swarm_binding"]["origins"]["lan"]["api"]
+    assert first["swarm"]["receipt"]["origin"] == first["swarm"]["brain_url"] == swarm_api
+    assert first["swarm"]["credential_from"] == "SWARM_BRAIN_API_TOKEN"
     assert first["personal"]["brain_url"] == inputs["routes"]["routes"]["personal"]["api"]
     assert first["personal"]["credential_from"] == "BRAIN_PERSONAL_TOKEN"
     assert first["explicit"]["receipt"]["route"] == inputs["explicit_route"]
     assert first["explicit"]["credential_from"] == "BRAIN_RESEARCH_TOKEN"
     assert remembered == brain_routes.FRESH
     stored = json.loads((brain_routes.store(home.environ()) / "sessions" / f"{SESSION}.json").read_text())
-    failures = brain_routes.failures(home.environ())
-    assert stored == receipt and failures == 0
+    assert stored == receipt and brain_routes.failures(home.environ()) == 0
     return {
         "sessions": first,
         "second_fixture_identical": True,
-        brain_routes.FAILURES: {"session": SESSION, "value": failures},
+        brain_routes.FAILURES: failure_counts(home.environ()),
     }
 
 
@@ -112,20 +138,22 @@ def rejection(inputs, root):
     secrets = [*inputs["credentials"].values(), *inputs["repository_override"].values()]
     assert not any(secret in json.dumps(receipt) for secret in secrets)
     unknown, _ = _refusal(home.environ(**{brain_routes.VARIABLE: "attacker"}))
-    home.write_routes(inputs["routes"], mode=0o666)
-    shared, _ = _refusal(home.environ())
+    home.write_routes(inputs["routes"], mode=0o644)
+    checkout, _ = _refusal(home.environ())
     home.write_routes(inputs["routes"])
     corrected = brain_routes.apply(home.environ())
     assert corrected["route"] == "personal"
-    failures = brain_routes.failures(home.environ())
-    assert failures == 3
+    swarm, swarm_left = _refusal(home.swarm(**inputs["repository_override"]))
+    assert swarm == receipt and swarm_left == left
+    assert brain_routes.failures(home.environ()) == 4
     return {
         "repository_override": {"receipt": receipt, "session_brain_variables": left},
+        "swarm_repository_override": {"receipt": swarm, "session_brain_variables": swarm_left},
         "unknown_route": unknown,
-        "group_writable_routes_file": shared,
+        "repository_checkout_routes_file": checkout,
         "corrected_request": {key: corrected[key] for key in ("status", "route", "origin")},
         "protected_state_unchanged": True,
-        brain_routes.FAILURES: {"session": SESSION, "value": failures},
+        brain_routes.FAILURES: failure_counts(home.environ()),
     }
 
 
@@ -135,9 +163,6 @@ def recovery(inputs, root):
     brain_routes.apply(first)
     old = json.loads(first[brain_routes.RECEIPT])
     states = [brain_routes.remember(first, SESSION)]
-    cached = brain_routes.cache(first, SESSION, old)
-    cached.mkdir(parents=True)
-    (cached / "context.md").write_text("old route context")
     states.append(brain_routes.remember(first, SESSION))
     home.write_routes(inputs["changed_routes"])
     restarted = home.environ()
@@ -148,14 +173,15 @@ def recovery(inputs, root):
     stored = json.loads((brain_routes.store(first) / "sessions" / f"{SESSION}.json").read_text())
     assert states == [brain_routes.FRESH, brain_routes.SAME, brain_routes.INVALIDATED, brain_routes.STALE]
     assert new["revision"] != old["revision"] and stored == new
-    assert not cached.exists()
+    namespaces = [keyspace.brain_identity(url=environ["BRAIN_URL"]) for environ in (first, restarted)]
+    assert namespaces[0] != namespaces[1]
     return {
         "states": states,
         "old_origin": old["origin"],
         "new_origin": new["origin"],
-        "old_cache_removed": True,
+        "cache_namespaces_differ": True,
         "stored_generation": stored["generation"],
-        brain_routes.FAILURES: {"session": SESSION, "value": brain_routes.failures(first)},
+        brain_routes.FAILURES: failure_counts(first),
     }
 
 

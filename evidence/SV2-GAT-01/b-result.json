@@ -18,11 +18,23 @@
         "BRAIN_ENABLED": "false"
       }
     },
+    "swarm_repository_override": {
+      "receipt": {
+        "status": "refused",
+        "reason": "the session BRAIN_URL is not an authorized brain origin"
+      },
+      "session_brain_variables": {
+        "BRAIN_URL": null,
+        "BRAIN_HTTP_TOKEN": null,
+        "KB_ROUTER_TOKEN": null,
+        "BRAIN_ENABLED": "false"
+      }
+    },
     "unknown_route": {
       "status": "refused",
       "reason": "no authorized brain route named attacker"
     },
-    "group_writable_routes_file": {
+    "repository_checkout_routes_file": {
       "status": "refused",
       "reason": "the brain routes file is not an operator owned file"
     },
@@ -33,8 +45,9 @@
     },
     "protected_state_unchanged": true,
     "brain_route_resolution_failures": {
-      "session": "fixture-session",
-      "value": 3
+      "attacker": 1,
+      "default": 2,
+      "swarm": 1
     }
   }
 }

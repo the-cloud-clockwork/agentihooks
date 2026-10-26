@@ -3,7 +3,8 @@
 The routes file names each authorized brain, the variable holding its bearer credential, the operator's allowlist of
 origins and the personal default. A managed swarm session always takes its swarm binding. Every other session takes
 its explicit route, else the default. A BRAIN_URL outside the allowlist, such as one a repository settings file
-exported, refuses the brain for that session instead of receiving the credential. Without a routes file and outside a
+exported, refuses the brain for that session instead of receiving the credential. The routes file must be readable by
+its owner alone, which a repository checkout never produces under a normal umask. Without a routes file and outside a
 swarm the legacy BRAIN_URL path is left as it was.
 """
 
@@ -13,7 +14,6 @@ import hashlib
 import json
 import os
 import re
-import shutil
 import stat
 from collections.abc import Mapping, MutableMapping
 from pathlib import Path
@@ -22,7 +22,6 @@ from urllib.parse import urlsplit
 from scripts.swarm import brain_binding
 
 VARIABLE = "AGENTIHOOKS_BRAIN_ROUTE"
-FILE_VARIABLE = "AGENTIHOOKS_BRAIN_ROUTES"
 RECEIPT = "AGENTIHOOKS_BRAIN_RECEIPT"
 FAILURES = "brain_route_resolution_failures"
 SWARM = "swarm"
@@ -44,8 +43,6 @@ def home(environ: Mapping[str, str]) -> Path:
 
 
 def path(environ: Mapping[str, str]) -> Path:
-    if environ.get(FILE_VARIABLE):
-        return Path(environ[FILE_VARIABLE]).expanduser()
     return home(environ) / "brain-routes.json"
 
 
@@ -58,7 +55,7 @@ def _routes(found: Path) -> dict | None:
         info = found.lstat()
     except OSError:
         return None
-    if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or info.st_mode & 0o022:
+    if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or info.st_mode & 0o077:
         raise Refused("the brain routes file is not an operator owned file")
     try:
         doc = json.loads(found.read_bytes())
@@ -85,9 +82,11 @@ def _revision(route: Mapping[str, object]) -> str:
     return hashlib.sha256(json.dumps(route, sort_keys=True).encode()).hexdigest()
 
 
-def _swarm(binding: dict) -> dict:
+def _swarm(binding: dict, current: str | None) -> dict:
     if binding.get("status") != brain_binding.BOUND:
         raise Refused("the swarm brain binding refused this session")
+    if current and brain_binding.origin(current) != brain_binding.origin(binding["api"]):
+        raise Refused(UNAUTHORIZED_URL)
     route = {"route": SWARM, "api": binding["api"], "token_env": binding["api_env"]}
     return {**route, "generation": 0, "revision": _revision({**route, "instance": binding.get("instance", "")})}
 
@@ -96,7 +95,7 @@ def resolve(environ: Mapping[str, str]) -> dict | None:
     """The route this session must use; None on the legacy path; Refused names why there is no brain."""
     binding = brain_binding.current(environ)
     if binding is not None:
-        return _swarm(binding)
+        return _swarm(binding, environ.get("BRAIN_URL"))
     doc = _routes(path(environ))
     if doc is None:
         return None
@@ -123,10 +122,11 @@ def resolve(environ: Mapping[str, str]) -> dict | None:
 
 def _count(environ: Mapping[str, str], reason: str) -> None:
     folder = store(environ)
+    route = SWARM if environ.get(brain_binding.VARIABLE) else environ.get(VARIABLE) or "default"
     try:
         folder.mkdir(parents=True, exist_ok=True)
         with (folder / f"{FAILURES}.jsonl").open("a", encoding="utf-8") as log:
-            log.write(json.dumps({"reason": reason}) + "\n")
+            log.write(json.dumps({"route": route, "reason": reason}) + "\n")
     except OSError:
         pass
 
@@ -168,12 +168,8 @@ def apply(environ: MutableMapping[str, str]) -> dict | None:
     return receipt
 
 
-def cache(environ: Mapping[str, str], session: str, receipt: Mapping[str, object]) -> Path:
-    return store(environ) / "cache" / session / str(receipt["revision"])
-
-
 def remember(environ: Mapping[str, str], session: str) -> str | None:
-    """Persist this session's receipt; a changed route removes the old route's cache folder before the feed refresh.
+    """Persist this session's receipt and say whether it is fresh, unchanged, invalidated by a route change or stale.
 
     An older routes revision than the one already accepted for the session is stale and leaves the newer receipt.
     """
@@ -190,8 +186,6 @@ def remember(environ: Mapping[str, str], session: str) -> str | None:
         return SAME
     if previous and receipt.get("generation", 0) < previous.get("generation", 0):
         return STALE
-    if previous and previous.get("revision"):
-        shutil.rmtree(cache(environ, session, previous), ignore_errors=True)
     found.parent.mkdir(parents=True, exist_ok=True)
     found.write_text(json.dumps(receipt, sort_keys=True), encoding="utf-8")
     return FRESH if previous is None else INVALIDATED

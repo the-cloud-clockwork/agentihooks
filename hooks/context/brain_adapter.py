@@ -563,10 +563,6 @@ def inject_on_session_start(session_id: str = "", cwd: str = "") -> bool:
         return False
     if not BRAIN_ENABLED:
         return False
-    if session_id:
-        from hooks.context import brain_routes
-
-        brain_routes.remember(os.environ, session_id)
     refreshed = force_refresh()
     if session_id:
         from hooks.common import inject_context

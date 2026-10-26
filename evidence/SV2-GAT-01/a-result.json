@@ -14,8 +14,8 @@
           "origin": "https://swarm-brain-api.example.test",
           "generation": 0
         },
-        "brain_url": null,
-        "credential_from": null
+        "brain_url": "https://swarm-brain-api.example.test",
+        "credential_from": "SWARM_BRAIN_API_TOKEN"
       },
       "personal": {
         "receipt": {
@@ -39,9 +39,6 @@
       }
     },
     "second_fixture_identical": true,
-    "brain_route_resolution_failures": {
-      "session": "fixture-session",
-      "value": 0
-    }
+    "brain_route_resolution_failures": {}
   }
 }

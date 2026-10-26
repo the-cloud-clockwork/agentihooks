@@ -1,6 +1,5 @@
 import json
 from pathlib import Path
-from unittest.mock import Mock
 
 import pytest
 
@@ -41,7 +40,6 @@ def _routes(home, inputs, **changes):
 def test_paths_follow_the_agentihooks_home_and_the_routes_variable(tmp_path):
     assert brain_routes.home({"HOME": str(tmp_path)}) == tmp_path / ".agentihooks"
     assert brain_routes.path({"AGENTIHOOKS_HOME": str(tmp_path)}) == tmp_path / "brain-routes.json"
-    assert brain_routes.path({brain_routes.FILE_VARIABLE: "~/r.json"}) == Path.home() / "r.json"
     assert brain_routes.store({"AGENTIHOOKS_HOME": str(tmp_path)}) == tmp_path / "brain-routes"
 
 
@@ -100,6 +98,30 @@ def test_a_refused_swarm_binding_refuses_the_brain(home):
     _refused(environ, "the swarm brain binding refused this session")
 
 
+def test_a_swarm_session_refuses_a_repository_brain_url(home, inputs):
+    environ = home.swarm(**inputs["repository_override"])
+    receipt = brain_routes.apply(environ)
+    assert receipt == {"status": "refused", "reason": brain_routes.UNAUTHORIZED_URL}
+    for key in brain_routes.SESSION_KEYS:
+        assert key not in environ
+    log = brain_routes.store(environ) / "brain_route_resolution_failures.jsonl"
+    assert json.loads(log.read_text()) == {"route": "swarm", "reason": brain_routes.UNAUTHORIZED_URL}
+
+
+def test_a_swarm_session_keeps_its_own_brain_url(home, inputs):
+    api = inputs["swarm_binding"]["origins"]["lan"]["api"]
+    environ = home.swarm(BRAIN_URL=api + "/v1", BRAIN_HTTP_TOKEN="fxswarmapi1")
+    assert brain_routes.apply(environ)["route"] == "swarm"
+    assert (environ["BRAIN_URL"], environ["BRAIN_HTTP_TOKEN"]) == (api + "/v1", "fxswarmapi1")
+
+
+def test_an_explicit_route_names_the_failure_dimension(home):
+    environ = home.environ(**{brain_routes.VARIABLE: "attacker"})
+    brain_routes.apply(environ)
+    log = brain_routes.store(environ) / "brain_route_resolution_failures.jsonl"
+    assert json.loads(log.read_text())["route"] == "attacker"
+
+
 def test_a_repository_brain_url_is_refused_and_counted_without_disclosure(home, inputs):
     environ = home.environ(**inputs["repository_override"], KB_ROUTER_TOKEN="fxkb1")
     receipt = brain_routes.apply(environ)
@@ -109,7 +131,7 @@ def test_a_repository_brain_url_is_refused_and_counted_without_disclosure(home, 
         assert key not in environ
     assert environ["BRAIN_ENABLED"] == environ["BRAIN_WRITER_ENABLED"] == "false"
     log = brain_routes.store(environ) / "brain_route_resolution_failures.jsonl"
-    assert log.read_text() == json.dumps({"reason": brain_routes.UNAUTHORIZED_URL}) + "\n"
+    assert log.read_text() == json.dumps({"route": "default", "reason": brain_routes.UNAUTHORIZED_URL}) + "\n"
     assert brain_routes.failures(environ) == 1
 
 
@@ -122,7 +144,7 @@ def test_failures_read_zero_without_a_log_and_counting_survives_an_unwritable_ho
     assert brain_routes.failures(environ) == 0
 
 
-@pytest.mark.parametrize("mode", [0o620, 0o602])
+@pytest.mark.parametrize("mode", [0o644, 0o640, 0o604, 0o620, 0o602, 0o610, 0o601])
 def test_a_routes_file_others_can_write_is_refused(home, inputs, mode):
     home.write_routes(inputs["routes"], mode=mode)
     _refused(home.environ(), "the brain routes file is not an operator owned file")
@@ -130,11 +152,10 @@ def test_a_routes_file_others_can_write_is_refused(home, inputs, mode):
 
 def test_a_routes_symlink_is_refused(home, inputs, tmp_path):
     target = home.write_routes(inputs["routes"])
-    link = tmp_path / "link.json"
-    link.symlink_to(target)
-    _refused(
-        home.environ(**{brain_routes.FILE_VARIABLE: str(link)}), "the brain routes file is not an operator owned file"
-    )
+    moved = tmp_path / "elsewhere.json"
+    target.rename(moved)
+    target.symlink_to(moved)
+    _refused(home.environ(), "the brain routes file is not an operator owned file")
 
 
 def test_a_routes_file_owned_by_another_user_is_refused(home, monkeypatch):
@@ -254,16 +275,11 @@ def test_remember_tracks_fresh_same_invalidated_and_stale(home, inputs):
     old = json.loads(first[brain_routes.RECEIPT])
     assert brain_routes.remember(first, "s1") == "fresh"
     assert _remembered(first) == old
-    cached = brain_routes.cache(first, "s1", old)
-    assert cached == brain_routes.store(first) / "cache" / "s1" / old["revision"]
-    cached.mkdir(parents=True)
     assert brain_routes.remember(first, "s1") == "same"
-    assert cached.exists()
     home.write_routes(inputs["changed_routes"])
     second = home.environ()
     brain_routes.apply(second)
     assert brain_routes.remember(second, "s1") == "invalidated"
-    assert not cached.exists()
     assert brain_routes.remember(first, "s1") == "stale"
     assert _remembered(first) == json.loads(second[brain_routes.RECEIPT])
 
@@ -287,28 +303,16 @@ def test_a_corrupt_stored_receipt_is_treated_as_fresh(home):
     assert brain_routes.remember(environ, "s1") == "fresh"
 
 
-def test_session_start_remembers_the_route_before_refreshing(home, monkeypatch):
-    from hooks import config
-    from hooks.context import brain_adapter
-
-    environ = home.environ()
-    brain_routes.apply(environ)
-    for key, value in environ.items():
-        monkeypatch.setenv(key, value)
-    order = []
-    monkeypatch.setattr(config, "BRAIN_ENABLED", True)
-    monkeypatch.setattr(
-        brain_routes, "remember", lambda env, session: order.append(("remember", env[brain_routes.RECEIPT], session))
-    )
-    monkeypatch.setattr(brain_adapter, "force_refresh", lambda: order.append(("refresh",)) or True)
-    monkeypatch.setattr("hooks.context.project_identity.resolve_project", Mock(return_value=None))
-    monkeypatch.setattr("hooks.context.project_sessions.record_session", Mock())
-    monkeypatch.setattr("hooks.context.project_cache.project_context", Mock(return_value=None))
-    assert brain_adapter.inject_on_session_start("s1", "") is True
-    assert order == [("remember", environ[brain_routes.RECEIPT], "s1"), ("refresh",)]
-    order.clear()
-    assert brain_adapter.inject_on_session_start("", "") is True
-    assert order == [("refresh",)]
+def test_a_refused_session_after_a_routed_one_still_invalidates_its_receipt(home, inputs):
+    routed = home.environ()
+    brain_routes.apply(routed)
+    assert brain_routes.remember(routed, "s1") == "fresh"
+    home.write_routes({**inputs["routes"], "allow": [RESEARCH]})
+    refused = home.environ()
+    brain_routes.apply(refused)
+    assert refused["BRAIN_ENABLED"] == "false"
+    assert brain_routes.remember(refused, "s1") == "invalidated"
+    assert _remembered(refused)["status"] == "refused"
 
 
 @pytest.fixture
@@ -325,7 +329,6 @@ def hook_env(home, monkeypatch):
         brain_binding.VARIABLE,
         brain_routes.VARIABLE,
         brain_routes.RECEIPT,
-        brain_routes.FILE_VARIABLE,
     ):
         monkeypatch.delenv(key, raising=False)
     for key, value in home.environ(AGENTIBRAIN_HOME=str(home.root / ".agentibrain")).items():
