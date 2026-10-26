@@ -112,6 +112,12 @@ def test_a_worker_run_confirms_no_inbox_item(store, worker):
     confirm.assert_not_called()
 
 
+def test_an_interactive_session_still_confirms_its_inbox_items(store):
+    with patch.object(store, "confirm_shown") as confirm:
+        delivery.confirm_shown("s1")
+    confirm.assert_called_once()
+
+
 def test_an_interactive_session_still_gets_its_inbox_item(store, capsys):
     item = store.send("alice", "bob", "review my branch")
     assert "review my branch" in _pre(capsys)
@@ -217,9 +223,22 @@ def test_an_interactive_worker_lane_session_still_gets_the_wait_nudge(monkeypatc
     assert "SWARM WAIT" in swarm_wait_nudge.nudge(SLEEP, WAIT_ENV)
 
 
-def test_a_worker_run_claims_no_fleet_broadcast(monkeypatch):
+@pytest.fixture
+def fleet_claim(tmp_path, monkeypatch):
+    grant = tmp_path / "launch-grant"
+    broadcast_bridge.store_grant(grant, "v2.worker.grant")
     sync = Mock(return_value=3)
     monkeypatch.setattr(fleet, "sync_local", sync)
-    environ = {fleet.FLAG: "1", broadcast_bridge.GRANT_FILE: "/x/grant", broadcast_bridge.API_URL: "http://x"}
+    return sync, {fleet.FLAG: "1", broadcast_bridge.GRANT_FILE: str(grant), broadcast_bridge.API_URL: "http://x"}
+
+
+def test_a_worker_run_claims_no_fleet_broadcast(fleet_claim):
+    sync, environ = fleet_claim
     assert broadcast_bridge.claim("s1", ["brain"], {**environ, worker_mode.FLAG: "1"}) == 0
     sync.assert_not_called()
+
+
+def test_an_interactive_session_still_claims_its_fleet_broadcast(fleet_claim):
+    sync, environ = fleet_claim
+    assert broadcast_bridge.claim("s1", ["brain"], environ) == 3
+    sync.assert_called_once()
