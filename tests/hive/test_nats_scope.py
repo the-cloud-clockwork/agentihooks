@@ -195,8 +195,9 @@ def test_scoped_credentials_require_more_than_the_default_control_line(signer, t
 
     scoped = replace(signer, member_swarms={"m1": ("rig",)})
     credentials = nats_grant.mint(scoped, "m1")
-    with pytest.raises((nats_client.errors.Error, ConnectionResetError)):
+    with pytest.raises((nats_client.errors.Error, ConnectionResetError)) as error:
         nats.open_bus(BusConfig(backend="nats", url=signer.url, credentials=credentials, provision=False))
+    assert isinstance(error.value, ConnectionResetError) or str(error.value) == "nats: 'maximum control line exceeded'"
     nats_server.wait_logged(tmp_path / "nats.log", "maximum control line exceeded")
 
 
