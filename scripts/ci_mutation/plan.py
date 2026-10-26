@@ -7,10 +7,11 @@ import re
 import subprocess
 import time
 import zipfile
+from concurrent.futures import ProcessPoolExecutor
 from datetime import UTC, datetime
 from difflib import SequenceMatcher
 from functools import cache
-from itertools import accumulate
+from itertools import accumulate, repeat
 from pathlib import Path
 
 import yaml
@@ -36,6 +37,7 @@ from tests.dep_manifest import changes as recorded_changes
 MUTANT_SECONDS = 5.6
 WORKERS = 4
 RECORD_RETRY_SECONDS = 10
+IMPORTER_CHUNK = 64
 TEST_WORKFLOW = ".github/workflows/test.yml"
 COLLECTING_JOBS = {
     TEST_WORKFLOW: ("unit", "unit-selected", "mutation-stats"),
@@ -205,12 +207,17 @@ def helper_tests(root: Path, path: str) -> set[str] | None:
 
 @cache
 def _importers(root: Path) -> dict[str, set[str]]:
-    found = {"*": set()}
-    for path in _git(root, "ls-files", "--", "hooks/*.py", "scripts/*.py", "tests/*.py").splitlines():
-        found["*"].add(path)
-        for key in _reach_keys(path, (root / path).read_text(errors="replace")):
-            found.setdefault(key, set()).add(path)
+    paths = _git(root, "ls-files", "--", "hooks/*.py", "scripts/*.py", "tests/*.py").splitlines()
+    found = {"*": set(paths)}
+    with ProcessPoolExecutor() as pool:
+        for path, keys in zip(paths, pool.map(_path_keys, paths, repeat(root), chunksize=IMPORTER_CHUNK)):
+            for key in keys:
+                found.setdefault(key, set()).add(path)
     return found
+
+
+def _path_keys(path: str, root: Path) -> set[str]:
+    return _reach_keys(path, (root / path).read_text(errors="replace"))
 
 
 def _reach_keys(path: str, source: str) -> set[str]:

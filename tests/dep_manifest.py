@@ -138,6 +138,34 @@ def build(coverage_file: Path, inputs: list[Path], root: Path, commit: str, envi
     }
 
 
+def pack(manifest: dict) -> dict:
+    files, spans = {}, {}
+    packed = {key: value for key, value in manifest.items() if key not in ("tests", "lines")}
+    packed["tests"] = {
+        test: [found["units"], files.setdefault(tuple(found["files"]), len(files)), found["escapes"]]
+        for test, found in manifest["tests"].items()
+    }
+    if "lines" in manifest:
+        packed["lines"] = {
+            test: [spans.setdefault((path, tuple(found)), len(spans)) for path, found in paths.items()]
+            for test, paths in manifest["lines"].items()
+        }
+    packed["files"] = [list(found) for found in files]
+    packed["spans"] = [[path, list(found)] for path, found in spans]
+    return packed
+
+
+def unpack(packed: dict) -> dict:
+    files, spans = packed.pop("files"), packed.pop("spans")
+    packed["tests"] = {
+        test: {"units": units, "files": files[index], "escapes": escapes}
+        for test, (units, index, escapes) in packed["tests"].items()
+    }
+    if "lines" in packed:
+        packed["lines"] = {test: dict(spans[index] for index in found) for test, found in packed["lines"].items()}
+    return packed
+
+
 def _git(repo: Path, *args: str) -> str:
     return subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True, text=True).stdout
 
@@ -272,6 +300,7 @@ def main(argv: list[str] | None = None) -> int:
     built.add_argument("--commit", required=True)
     built.add_argument("--environment", required=True)
     built.add_argument("--out", type=Path, required=True)
+    built.add_argument("--packed", type=Path)
     checked = commands.add_parser("invalidated")
     checked.add_argument("--manifest", type=Path, required=True)
     checked.add_argument("--repo", type=Path, default=Path.cwd())
@@ -302,6 +331,8 @@ def main(argv: list[str] | None = None) -> int:
             print("::error::The coverage data holds no per test contexts.", file=sys.stderr)
             return 1
         args.out.write_text(json.dumps(manifest, separators=(",", ":")))
+        if args.packed:
+            args.packed.write_text(json.dumps(pack(manifest), separators=(",", ":")))
         escaping = sum(found["escapes"] for found in manifest["tests"].values())
         print(f"Dependency manifest: {len(manifest['tests'])} tests, {len(manifest['units'])} units, {escaping} escape")
         return 0
