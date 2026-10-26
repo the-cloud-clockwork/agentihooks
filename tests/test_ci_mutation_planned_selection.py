@@ -96,7 +96,7 @@ def test_plan_adds_tests_whose_recorded_coverage_reaches_a_changed_function_thro
     }
     asked = []
 
-    def record(repository, before):
+    def record(repository, before, record_deadline):
         asked.append((repository, datetime.strptime(before, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC)))
         return ({"id": 7}, manifest) if recorded else None
 
@@ -152,7 +152,7 @@ def test_plan_retries_an_unreadable_record_once_then_selects_every_test(tmp_path
     }
     calls, pauses = [], []
 
-    def record(repository, before):
+    def record(repository, before, record_deadline):
         calls.append((repository, before))
         if len(calls) <= failures:
             raise error
