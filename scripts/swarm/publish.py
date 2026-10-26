@@ -140,8 +140,10 @@ def repository_task(repo: Path, task: dict) -> dict:
 
 def continuation_task(repo: Path, task: dict, scoped: dict, branch: str) -> dict:
     mapped, recorded = scoped["branch"], recorded_branch(repo, task)
-    heads = {name for name in (mapped, recorded) if name and git(repo, "ls-remote", "origin", f"refs/heads/{name}")}
-    if branch == mapped or mapped in heads or recorded not in heads:
+    if branch == mapped or recorded in ("", mapped):
+        return scoped
+    heads = {name for name in (mapped, recorded) if git(repo, "ls-remote", "origin", f"refs/heads/{name}")}
+    if mapped in heads or recorded not in heads:
         return scoped
     return {**scoped, "branch": recorded}
 
