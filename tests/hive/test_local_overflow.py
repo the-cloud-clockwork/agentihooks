@@ -575,6 +575,40 @@ def test_a_waiting_workstation_task_records_its_machine_and_clears_when_it_start
     assert "pinned" not in placement_waits.read(setup.store, setup.config.slug)
 
 
+def test_a_workstation_wait_reserves_only_while_fresh(setup):
+    from scripts.hive import placement_waits
+
+    pinned_wait(setup, setup.config.slug, "pinned", seen_at=0, machine="box")
+    assert placement_waits.workstation_waiting(setup.store, "box", placement_waits.FRESH_MS - 1) == 1
+    assert placement_waits.workstation_waiting(setup.store, "box", placement_waits.FRESH_MS) == 0
+
+
+def test_workstation_tasks_keep_no_seats_from_each_other(setup, monkeypatch):
+    from scripts.swarm.store import SwarmConfig
+
+    fenced = hybrid(setup, monkeypatch)
+    fill_anton(setup)
+    setup.store.create(SwarmConfig("watched", "agentihooks", 1, 1))
+    local_agents(setup, 7)
+    pinned_wait(setup, "watched", "first")
+    assert fenced.placement_refusal("eng", {"id": "pinned", "workstation": True}) == ""
+
+
+def test_a_slot_claim_keeps_the_reserved_seats(setup, monkeypatch):
+    from scripts.swarm import local_slots
+    from scripts.swarm.store import SwarmConfig
+
+    fenced = hybrid(setup, monkeypatch)
+    fill_anton(setup)
+    setup.store.create(SwarmConfig("watched", "agentihooks", 1, 1))
+    local_agents(setup, 7)
+    pinned_wait(setup, "watched", "first")
+    monkeypatch.setattr(local_slots, "held", lambda *_: 0)
+    with pytest.raises(SpawnError, match="runs 7 of its 8 agents with 1 kept for waiting workstation tasks"):
+        fenced.spawn(setup.config, "eng", "eng name", {"id": "task"})
+    setup.herdr.spawn.assert_not_called()
+
+
 def test_overflow_counts_reserved_seats_against_the_cap():
     assert overflow("engineer", Wait(FULL), 6, 8, 1) == Choice(LOCAL_MACHINE, FULL)
     assert overflow("engineer", Wait(FULL), 7, 8, 1) == Wait(

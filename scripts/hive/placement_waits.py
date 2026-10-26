@@ -46,18 +46,17 @@ def prune(store: RedisStore, slug: str, tasks: list[dict]) -> None:
         store.redis.hdel(store.key(slug, WAITS), task)
 
 
-def workstation_waiting(store: RedisStore, machine: str, now: int, own: str) -> int:
+def workstation_waiting(store: RedisStore, machine: str, now: int) -> int:
     return sum(
         1
         for slug in store.slugs()
-        for task, row in read(store, slug).items()
+        for row in read(store, slug).values()
         if row.get("workstation") == machine
         and now - row["seen_at"] < FRESH_MS
         and (
             (row["reason"].startswith(f"no {HIVE} ") and f" {HAS_ROOM}" in row["reason"])
             or row["reason"] == NEEDS_WORKSTATION
         )
-        and f"{slug}/{task}" != own
     )
 
 

@@ -151,9 +151,13 @@ def overflow(role: str, waited: Wait, local_agents: int, local_max: int, reserve
     if role in UI_ROLES:
         return waited
     if local_agents + reserved >= local_max:
-        kept = f" with {reserved} kept for waiting workstation tasks" if reserved else ""
-        return Wait(f"{waited.reason}{LOCAL_FULL}{local_agents} of its {local_max} agents{kept}")
+        return local_full(waited, local_agents, local_max, reserved)
     return Choice(LOCAL_MACHINE, waited.reason)
+
+
+def local_full(waited: Wait, local_agents: int, local_max: int, reserved: int) -> Wait:
+    kept = f" with {reserved} kept for waiting workstation tasks" if reserved else ""
+    return Wait(f"{waited.reason}{LOCAL_FULL}{local_agents} of its {local_max} agents{kept}")
 
 
 def _private_master(hive: dict, harness: str, front: bool) -> bool:
