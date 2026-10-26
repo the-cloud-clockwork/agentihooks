@@ -1,16 +1,12 @@
 import io
-from email.message import Message
 
 import pytest
 
-from scripts.swarm_ledger import request_body
+from scripts.swarm_ledger import ledger_server, request_body
 
 
 def headers(**fields):
-    message = Message()
-    for name, value in fields.items():
-        message[name.replace("_", "-")] = value
-    return message
+    return {name.replace("_", "-"): value for name, value in fields.items()}
 
 
 def test_a_read_stops_at_the_declared_length():
@@ -20,6 +16,35 @@ def test_a_read_stops_at_the_declared_length():
     assert body.read() == b'{"a": 1}'
     assert body.read(10) == b""
     assert raw.read() == b"GET / HTTP/1.1"
+
+
+def test_a_sized_read_returns_at_most_that_many_bytes():
+    raw = io.BytesIO(b"abcdefgh")
+    body = request_body.Body(raw, 8)
+
+    assert body.read(0) == b""
+    assert body.read(3) == b"abc"
+    assert body.left == 5
+    assert body.read(None) == b"defgh"
+
+
+class Recording(io.BytesIO):
+    def __init__(self, data):
+        super().__init__(data)
+        self.sizes = []
+
+    def read(self, size=-1):
+        self.sizes.append(size)
+        return super().read(size)
+
+
+def test_drain_reads_in_chunks_and_accepts_a_body_at_the_limit():
+    size = request_body.CHUNK * 2
+    raw = Recording(b"x" * size)
+    body = request_body.Body(raw, size)
+
+    assert body.drain(size) is True
+    assert raw.sizes == [request_body.CHUNK, request_body.CHUNK]
 
 
 def test_drain_reads_what_the_handler_left_up_to_the_limit():
@@ -73,3 +98,16 @@ def test_close_closes_the_connection_stream():
 )
 def test_length_reads_content_length_and_refuses_what_it_cannot_count(fields, expected):
     assert request_body.length(headers(**fields)) == expected
+
+
+def test_a_response_over_an_unread_body_closes_the_connection():
+    handler = ledger_server.Handler.__new__(ledger_server.Handler)
+    handler.request_version, handler.requestline = "HTTP/1.1", "POST /x HTTP/1.1"
+    handler.command, handler.path, handler.client_address = "POST", "/x", ("127.0.0.1", 0)
+    handler.close_connection = False
+    handler.rfile = request_body.Body(io.BytesIO(b""), None)
+
+    handler.send_response(400)
+
+    assert b"Connection: close\r\n" in b"".join(handler._headers_buffer)
+    assert handler.close_connection is True
