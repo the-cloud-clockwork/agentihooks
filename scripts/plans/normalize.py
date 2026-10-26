@@ -68,7 +68,7 @@ def _from_json(document: dict, name: str, existing: set[str]) -> Normalized:
     if errors:
         raise PlanError(errors)
     markdown = _render_markdown(title, phases)
-    ranged = [{"id": phase.get("id") or f"_pos{i}", "title": phase["title"]} for i, phase in enumerate(phases, 1)]
+    ranged = [{"id": str(i), "title": phase["title"]} for i, phase in enumerate(phases, 1)]
     try:
         plan_ranges.phase_lines(markdown, ranged)
     except ValueError as exc:
@@ -336,7 +336,7 @@ def _bound(text: str, limit: int = DESCRIPTION_LIMIT) -> str:
     if len(text) <= limit:
         return text
     cut = text.rfind(" ", 0, limit + 1)
-    return text[: cut if cut > 0 else limit].rstrip()
+    return text[: cut if cut > 0 else limit]
 
 
 def _stem(name: str) -> str:

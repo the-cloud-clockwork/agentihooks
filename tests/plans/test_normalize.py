@@ -46,13 +46,14 @@ def test_a_bare_json_list_takes_its_title_from_the_file_stem():
     }
 
 
-def test_bytes_input_is_decoded_as_utf8():
+def test_bytes_input_is_decoded_as_utf8_and_an_absent_description_defaults_to_empty():
     data = json.dumps({"phases": [{"title": "Only"}]}).encode("utf-8")
 
     result = normalize(data, "bytes.json")
 
     assert result.kind == "json"
     assert result.content["phases"][0]["title"] == "Only"
+    assert result.content["phases"][0]["description"] == ""
 
 
 def test_json_markdown_renders_the_full_marker_line_when_every_field_is_set():
@@ -87,6 +88,31 @@ def test_json_markdown_renders_the_full_marker_line_when_every_field_is_set():
         "id": "beta-id",
         "not_duplicate": "it ships a different seam",
     }
+
+
+def test_json_markdown_joins_multiple_dependencies_with_a_comma():
+    data = json.dumps(
+        {
+            "phases": [
+                {"title": "Alpha", "id": "alpha-id"},
+                {"title": "Gamma", "id": "gamma-id"},
+                {"title": "Beta", "depends_on": ["alpha-id", "gamma-id"]},
+            ]
+        }
+    )
+
+    result = normalize(data, "multi-dep.json")
+
+    assert "depends=alpha-id,gamma-id" in result.markdown
+
+
+def test_a_json_boolean_dependency_is_refused():
+    data = json.dumps({"phases": [{"title": "A", "depends_on": [True]}]})
+
+    with pytest.raises(PlanError) as caught:
+        normalize(data, "bool-dep.json")
+
+    assert caught.value.errors == ["phase 1: depends_on must be a list of positions or ids"]
 
 
 def test_a_json_phases_list_that_is_empty_is_refused():
@@ -221,7 +247,7 @@ def test_marked_markdown_gives_one_phase_per_marker_with_slices_in_order_and_a_p
     assert titles["First phase"]["planning"] == "auto"
     assert "not_duplicate" not in titles["First phase"]
     assert "Intro prose before the example." in titles["First phase"]["description"]
-    assert "More prose after the example." in titles["First phase"]["description"]
+    assert "the example. More prose" in titles["First phase"]["description"]
     assert "### Task title" not in titles["First phase"]["description"]
     assert "<!-- phase:" not in titles["First phase"]["description"]
     assert titles["Second phase"]["id"] == "wrk"
@@ -318,7 +344,7 @@ def test_a_long_phase_description_is_bound_to_about_800_characters_on_a_word_bou
     result = normalize(text, "long.md")
     description = result.content["phases"][0]["description"]
 
-    assert len(description) <= 800
+    assert 790 < len(description) <= 800
     assert not description.endswith(" ")
     assert words.startswith(description)
 
