@@ -1,4 +1,5 @@
-from scripts.swarm import freeze, hierarchy
+from scripts.swarm import freeze
+from scripts.swarm_ledger.repository import hierarchy
 
 
 def ranks(doc: dict) -> dict[str, int]:

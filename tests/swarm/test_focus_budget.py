@@ -44,6 +44,7 @@ def test_existing_focus_holders_leave_only_the_remaining_focus_slots(state):
     from scripts.swarm import focus_budget
 
     held = [work(f"held{i}", hot=True, state=state) for i in range(4)]
+    held += [work(f"normal{i}", state=state) for i in range(4)]
     hot = [work(f"hot{i}", hot=True) for i in range(3)]
     plain = [work("normal")]
     assert focus_budget.select(document(held + hot + plain), plain + hot, "eng", 10, 50) == hot[:1] + plain
@@ -57,12 +58,20 @@ def test_focus_is_held_at_the_cap_even_if_normal_work_is_absent():
     assert focus_budget.select(document(held + [hot]), [hot], "eng", 10, 50) == []
 
 
+def test_no_normal_work_means_no_new_focused_agents_at_fifty_percent():
+    from scripts.swarm import focus_budget
+
+    hot = [work(f"hot{i}", hot=True) for i in range(3)]
+    assert focus_budget.select(document(hot), hot, "eng", 10, 50) == []
+
+
 def test_focus_cap_is_independent_per_lane():
     from scripts.swarm import focus_budget
 
     held = [work(f"held{i}", hot=True, state="claimed") for i in range(5)]
     hot = work("ci", lane="ci", hot=True)
-    assert focus_budget.select(document(held + [hot]), [hot], "ci", 2, 50) == [hot]
+    plain = work("ci-normal", lane="ci")
+    assert focus_budget.select(document(held + [hot, plain]), [plain, hot], "ci", 2, 50) == [hot, plain]
 
 
 @pytest.mark.parametrize("capacity,weight,count", [(10, 0, 0), (10, 100, 10), (3, 50, 1), (1, 50, 0)])
@@ -70,7 +79,29 @@ def test_percentage_boundaries_use_integer_floor(capacity, weight, count):
     from scripts.swarm import focus_budget
 
     hot = [work(f"hot{i}", hot=True) for i in range(10)]
-    assert focus_budget.select(document(hot), hot, "eng", capacity, weight) == hot[:count]
+    normal = [work(f"plain{i}") for i in range(10)]
+    selected = focus_budget.select(document(hot + normal), hot + normal, "eng", capacity, weight)
+    assert [task for task in selected if task["kind"] == "hot"] == hot[:count]
+
+
+def test_focused_pull_requests_without_live_owners_do_not_spend_agent_slots():
+    from scripts.swarm import focus_budget
+
+    held = [work(f"pr{i}", hot=True, state="pr") for i in range(5)]
+    hot, plain = work("hot", hot=True), work("plain")
+    assert focus_budget.select(document(held + [hot, plain]), [plain, hot], "eng", 10, 50, running=[]) == [hot, plain]
+
+
+def test_refused_focused_tasks_do_not_hide_placeable_successors():
+    from scripts.swarm import focus_budget
+
+    refused, hot, plain = work("remote", hot=True), work("local", hot=True), work("plain")
+
+    def place(tasks, room):
+        return [task for task in tasks if task["id"] != "remote"][:room], []
+
+    selected, _ = focus_budget.place(document([refused, hot, plain]), [refused, hot, plain], "eng", 2, 50, [], place)
+    assert selected == [hot, plain]
 
 
 def test_unfocused_tasks_keep_their_existing_rank_order():
