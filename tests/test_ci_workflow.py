@@ -1316,7 +1316,11 @@ def test_unit_shards_upload_their_durations_for_the_refresh():
     upload_index, upload = _unit_step_index(lambda s: s.get("name") == "Upload durations")
     run_index, _ = _unit_step_index(lambda s: s.get("name") == "Run tests")
     job = _workflow()["jobs"]["unit"]
-    between = job["steps"][run_index + 1 : upload_index]
+    between = [
+        step
+        for step in job["steps"][run_index + 1 : upload_index]
+        if not step["name"].endswith((", wait before attempt 2", ", attempt 2"))
+    ]
     assert [step["name"] for step in between] in (
         [],
         [
@@ -1701,11 +1705,16 @@ def test_mutation_shards_reuse_stats_collected_once_in_planned_parts():
         "matrix": {"part": "${{ fromJSON(needs.mutation-plan.outputs.stats_parts) }}"},
     }
     setup = [step for step in mutation["steps"] if not str(step.get("name", "")).startswith(("Mutate", "Upload"))]
-    downloads = ("Download the shared mutation stats", "Download the reused preflight report")
+    downloads = (
+        "Download the shared mutation stats",
+        "Download the reused preflight report",
+        "Download every part's test stats cache",
+    )
     setup = [
         step
         for step in setup
-        if step.get("name") not in downloads and step.get("with", {}).get("path") != ".mutation-stats-cache"
+        if not str(step.get("name", "")).startswith(downloads)
+        and step.get("with", {}).get("path") != ".mutation-stats-cache"
     ]
     stats_steps = [step for step in stats["steps"] if step.get("with", {}).get("path") != ".mutation-stats-cache"]
     assert stats_steps[: len(setup)] == setup

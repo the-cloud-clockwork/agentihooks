@@ -24,7 +24,7 @@ def _duration_steps():
     jobs = _jobs()
     steps = jobs.get("durations", jobs["select"])["steps"]
     end = next(index for index, step in enumerate(steps) if step.get("id") == "republished")
-    return steps[: end + 1]
+    return [step for step in steps[: end + 1] if not step.get("name", "").endswith("attempt 2")]
 
 
 def _step(steps, name):
