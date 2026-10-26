@@ -38,6 +38,15 @@ first: the project intent, the phase intent and any send back note.
   when it expires. Act on every OPERATOR line about your phase, then
   `agentihooks ledger --slug <slug> --as <name> ack`.
 
+## Recall
+
+When the operator says remember, yesterday or names earlier work, and before
+reading ledger files for history, query the recall archive first:
+`recall_search`, then `recall_get <ref>`; `recall_timeline` for a time span
+(`agentihooks recall` in a shell). Recall holds swarm and ledger history; the
+brain holds fleet lessons. Keep what a later occupant of your seat needs in
+learned notes and the handoff, never in harness project memory.
+
 ## Inbox
 
 `agentihooks msg inbox` lists your items, `agentihooks msg read <id>` shows one.
