@@ -1521,7 +1521,9 @@ def test_prepare_and_publish_keep_the_open_pull_requests_delivery_branch(publica
     assert git(p.repo, "ls-remote", "origin", "refs/heads/engineer-test") == ""
 
 
-def test_a_fresh_continuation_on_the_recorded_branch_publishes_past_an_unpushed_predecessor_entry(publication, monkeypatch):
+def test_a_fresh_continuation_on_the_recorded_branch_publishes_past_an_unpushed_predecessor_entry(
+    publication, monkeypatch
+):
     from scripts.swarm import publish
 
     p = publication
