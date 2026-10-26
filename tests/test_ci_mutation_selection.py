@@ -427,7 +427,7 @@ def test_selection_collects_one_stats_part_or_reuses_the_shared_stats(tmp_path, 
         raise SystemExit(7)
 
     runner.cli = cli
-    monkeypatch.setattr("scripts.ci_mutation.selection.collect_test_ids", lambda value, files, work: files)
+    monkeypatch.setattr("scripts.ci_mutation.selection.collect_test_ids", lambda value, files: files)
     monkeypatch.setattr("scripts.ci_mutation.selection.run_stats_buckets", buckets)
     monkeypatch.setattr("scripts.ci_mutation.selection.stats_shards", bucket_split)
     monkeypatch.setitem(sys.modules, "mutmut", SimpleNamespace(__main__=runner))
@@ -676,15 +676,15 @@ def test_statistics_collection_filters_wall_clock_and_rejects_collection_errors(
     test = "test_sample.py"
     (tmp_path / test).write_text("import pytest\n@pytest.mark.wall_clock\ndef test_bounded(): pass\n")
     runner = SimpleNamespace(_pytest_add_cli_args=[])
-    assert collect_test_ids(runner, [test], tmp_path) == []
+    assert collect_test_ids(runner, [test]) == []
     with pytest.raises(SystemExit) as failed:
-        collect_test_ids(runner, [f"{test}::test_missing"], tmp_path)
+        collect_test_ids(runner, [f"{test}::test_missing"])
     assert failed.value.code == 1
 
 
 @pytest.mark.parametrize("override", [False, True])
 def test_statistics_timings_keep_maxima_and_normalize_groups_from_each_cache_location(tmp_path, monkeypatch, override):
-    from scripts.ci_mutation.selection import file_seconds, recorded_seconds
+    from scripts.ci_mutation.selection import file_seconds, recorded_seconds, traced_records, unit_records
 
     test = "tests/test_sample.py::test_value"
     (tmp_path / ".test_durations").write_text(json.dumps({f"{test}@port": 0.75}))
@@ -698,7 +698,10 @@ def test_statistics_timings_keep_maxima_and_normalize_groups_from_each_cache_loc
         json.dumps({"status": 0, "durations": {test: 0.25, "tests/test_sample.py::test_cached": 0.5}})
     )
     (cache / "failed.json").write_text(json.dumps({"status": 1, "durations": {test: 20}}))
-    assert recorded_seconds(tmp_path) == {test: 0.75, "tests/test_sample.py::test_cached": 0.5}
+    assert recorded_seconds([*unit_records(tmp_path), *traced_records(tmp_path)]) == {
+        test: 0.75,
+        "tests/test_sample.py::test_cached": 0.5,
+    }
     assert file_seconds(tmp_path, [test, "tests/test_new.py"], split=True) == {
         test: 0.76,
         "tests/test_new.py": 0.01,
@@ -733,7 +736,7 @@ def test_statistics_collection_sets_the_mutmut_mode_and_preserves_runner_options
         "import os\nassert os.environ['MUTANT_UNDER_TEST'] == 'stats'\ndef test_keep(): pass\ndef test_omit(): pass\n"
     )
     runner = SimpleNamespace(_pytest_add_cli_args=["-k", "keep"])
-    assert collect_test_ids(runner, [test], tmp_path) == [f"{test}::test_keep"]
+    assert collect_test_ids(runner, [test]) == [f"{test}::test_keep"]
     assert os.environ["MUTANT_UNDER_TEST"] == parent
 
 
@@ -769,7 +772,7 @@ def test_statistics_collection_exceptions_exit_the_fork_child_with_failure(tmp_p
     monkeypatch.setattr(pytest, "main", fail)
     monkeypatch.setattr("os._exit", exit_child)
     with pytest.raises(SystemExit) as failed:
-        collect_test_ids(SimpleNamespace(_pytest_add_cli_args=[]), ["test_mode.py"], tmp_path)
+        collect_test_ids(SimpleNamespace(_pytest_add_cli_args=[]), ["test_mode.py"])
     assert failed.value.code == 1
 
 

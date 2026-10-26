@@ -87,24 +87,32 @@ def keep_selected_tests(stats: dict[str, set[str]], tests_by_prefix: dict[str, s
     return kept
 
 
-def recorded_seconds(root: Path, *, traced: bool = True) -> dict[str, float]:
+def unit_records(root: Path) -> list[dict[str, float]]:
     path = root / ".test_durations"
-    recorded = [json.loads(path.read_text())] if path.exists() else []
+    return [json.loads(path.read_text())] if path.exists() else []
+
+
+def traced_records(root: Path) -> list[dict[str, float]]:
     folder = Path(os.environ.get("MUTATION_STATS_CACHE", root / ".mutation-stats-cache"))
-    for path in folder.glob("*.json") if traced else ():
-        record = json.loads(path.read_text())
-        if record["status"] == 0:
-            recorded.append(record["durations"])
+    records = [json.loads(path.read_text()) for path in folder.glob("*.json")]
+    return [record["durations"] for record in records if record["status"] == 0]
+
+
+def recorded_seconds(records: list[dict[str, float]]) -> dict[str, float]:
     durations = {}
-    for record in recorded:
+    for record in records:
         for nodeid, seconds in record.items():
             nodeid = re.sub(r"@[^\[\]]*$", "", nodeid)
             durations[nodeid] = max(durations.get(nodeid, 0), seconds)
     return durations
 
 
-def file_seconds(root: Path, files: list[str], *, split: bool = False, traced: bool = True) -> dict[str, float]:
-    durations = recorded_seconds(root, traced=traced)
+def file_seconds(root: Path, files: list[str], *, split: bool = False) -> dict[str, float]:
+    durations = recorded_seconds([*unit_records(root), *traced_records(root)])
+    return entry_seconds(durations, files, split=split)
+
+
+def entry_seconds(durations: dict[str, float], files: list[str], *, split: bool = False) -> dict[str, float]:
     seconds = {} if split else dict.fromkeys(files, 0.01)
     by_file = {}
     for entry in files:
@@ -122,8 +130,10 @@ def file_seconds(root: Path, files: list[str], *, split: bool = False, traced: b
     return seconds
 
 
-def collect_test_ids(test_runner, files: list[str], work: Path) -> list[str]:
-    output = work / "stats-test-ids.json"
+def collect_test_ids(test_runner, files: list[str]) -> list[str]:
+    handle, name = tempfile.mkstemp()
+    os.close(handle)
+    output = Path(name)
 
     def collect():
         import pytest
@@ -145,17 +155,20 @@ def collect_test_ids(test_runner, files: list[str], work: Path) -> list[str]:
         sys.stderr.flush()
         os._exit(code)
 
-    process = multiprocessing.get_context("fork").Process(target=collect)
-    process.start()
-    process.join()
-    if process.exitcode != 0:
-        raise SystemExit(process.exitcode)
-    return json.loads(output.read_text())
+    try:
+        process = multiprocessing.get_context("fork").Process(target=collect)
+        process.start()
+        process.join()
+        if process.exitcode != 0:
+            raise SystemExit(process.exitcode)
+        return json.loads(output.read_text())
+    finally:
+        output.unlink()
 
 
 def part_files(root: Path, files: list[str], part: tuple[int, int]) -> list[str]:
     # Every part must split identically, and each restores its own traced cache.
-    return split_parts(files, file_seconds(root, files, traced=False), part)
+    return split_parts(files, entry_seconds(recorded_seconds(unit_records(root)), files), part)
 
 
 def split_parts(files: list[str], seconds: dict[str, float], part: tuple[int, int]) -> list[str]:
@@ -368,7 +381,7 @@ def load_or_collect_stats(runner, test_runner, paths: list[str], mode: str, stat
             output, key, index, total = Path(stats[0]), stats[1], int(stats[2]), int(stats[3])
             files = config.pytest_add_cli_args_test_selection
             if total > 1:
-                files = collect_test_ids(test_runner, files, Path.cwd())
+                files = collect_test_ids(test_runner, files)
             files = part_files(Path.cwd(), files, (index, total))
             write_part(output, key, (index, total), collect_file_stats(runner, test_runner, files, workers, Path.cwd()))
             raise SystemExit(0)
