@@ -629,8 +629,8 @@ def test_remove_revokes_with_the_plan_signer(admin, monkeypatch):
     monkeypatch.setattr(remove, "revoke", lambda *args: (calls.append(args), ["revoked"])[1])
     store = SimpleNamespace(redis=admin)
     plan = remove.Plan("m1", "h1", "k8s/agentihooks-hive-h1", signer=signed)
-    assert remove.remove(store, None, plan, remove.Host()) == ["revoked"]
-    assert calls == [(admin, "m1", signed)]
+    assert remove.remove(store, None, plan, remove.Host()) == ["member: revoked"]
+    assert calls == [(admin, "m1", signed, False)]
 
 
 def _claims(jwt: str) -> dict:
