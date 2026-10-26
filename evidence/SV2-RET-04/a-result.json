@@ -1,0 +1,41 @@
+{
+  "accepted": true,
+  "case": "A",
+  "events_match_source": true,
+  "files_match_source": true,
+  "lost_objects": 1,
+  "lost_session_query": "an archived object is missing; the evidence is incomplete and was not returned",
+  "metric": {
+    "backup_restore_verification_status": {
+      "failed": 0,
+      "partial": 1,
+      "uploaded": 0,
+      "verified": 0
+    }
+  },
+  "preserved_is_this_set": true,
+  "registry_status": "partial",
+  "repeat_matches": true,
+  "report": {
+    "backup_restore_verification_status": "partial",
+    "checkpoint": {
+      "objects": 2,
+      "recovered": true,
+      "task_id": "fixture-task"
+    },
+    "irrecoverable": {
+      "5e4c27c55fc931af70647f722e3fee35467dd84a9614fa7dbe34742b3ad5ce79": "an archived object is missing; the evidence is incomplete and was not returned"
+    },
+    "query_answered": true,
+    "rebuilt_projections": {
+      "pending": 0,
+      "sessions": 2,
+      "state": "drained"
+    },
+    "recovery_point": 1000.0,
+    "recovery_time_seconds": 5.0
+  },
+  "retention_allowed": false,
+  "source_unchanged": true,
+  "vectors_rebuilt": 4
+}

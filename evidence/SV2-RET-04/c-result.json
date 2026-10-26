@@ -1,0 +1,66 @@
+{
+  "case": "C",
+  "during_interruption": {
+    "catalog_written": false,
+    "marker": true,
+    "objects": 2
+  },
+  "interrupted": "the restore process stopped while copying archive objects",
+  "lost_session_query": "an archived object is missing; the evidence is incomplete and was not returned",
+  "objects_after_resume": 5,
+  "omitted_projections": [
+    "chunk_generation",
+    "search_chunk",
+    "chunk_cutover",
+    "index_generation",
+    "index_cutover",
+    "embedding_work",
+    "chunk_vector"
+  ],
+  "present_in_backup": 5,
+  "registry_replay_unchanged": true,
+  "replay_matches": true,
+  "resumed": {
+    "backup_restore_verification_status": "partial",
+    "checkpoint": {
+      "objects": 2,
+      "recovered": true,
+      "task_id": "fixture-task"
+    },
+    "irrecoverable": {
+      "5e4c27c55fc931af70647f722e3fee35467dd84a9614fa7dbe34742b3ad5ce79": "an archived object is missing; the evidence is incomplete and was not returned"
+    },
+    "query_answered": true,
+    "rebuilt_projections": {
+      "pending": 0,
+      "sessions": 2,
+      "state": "drained"
+    },
+    "recovery_point": 1000.0,
+    "recovery_time_seconds": 5.0
+  },
+  "rollback_rehearsal": {
+    "newer_set_accepted": false,
+    "newer_set_status": {
+      "backup_restore_verification_status": {
+        "failed": 0,
+        "partial": 1,
+        "uploaded": 1,
+        "verified": 0
+      }
+    },
+    "preserved_is_verified_set": true,
+    "retention_allowed": false
+  },
+  "stale_attempt": "a newer restore drill result is already recorded for this backup set; nothing changed",
+  "status_after_stale": {
+    "backup_restore_verification_status": {
+      "failed": 0,
+      "partial": 1,
+      "uploaded": 1,
+      "verified": 0
+    }
+  },
+  "vectors_after_replay": 4,
+  "vectors_rebuilt": 4
+}
