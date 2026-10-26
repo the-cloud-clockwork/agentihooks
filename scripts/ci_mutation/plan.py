@@ -209,7 +209,8 @@ def _importers(root: Path) -> dict[str, set[str]]:
 
 
 def _reach_keys(path: str, source: str) -> set[str]:
-    keys = set(re.findall(r"[\w./-]+\.py\b", source))
+    tokens = (token.rstrip(".") for token in re.split(r"[^\w./-]+", source))
+    keys = {token for token in tokens if token.endswith(".py")}
     keys.update(Path(key).name for key in list(keys))
     names = [*re.findall(r"\b(?:tests|hooks|scripts)(?:\.\w+)+", source), *_imported(path, source)]
     for name in names:
