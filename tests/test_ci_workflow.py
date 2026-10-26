@@ -739,24 +739,22 @@ def test_equivalence_runs_on_every_ledger_pull_request_without_a_body_marker():
 
 
 def test_mutation_gate_plants_itself_whenever_its_code_changes():
-    job = _workflow()["jobs"]["mutation-self-plant"]
-    assert job["if"] == "${{ !cancelled() && github.event_name == 'pull_request' }}"
-    assert job["strategy"]["matrix"]["mode"] == ["kill", "survive"]
-    steps = job["steps"]
-    [base] = [step for step in steps if step.get("with", {}).get("path") == "base"]
-    assert base["with"]["ref"] == "${{ github.event.pull_request.base.sha }}"
-    [changed] = [step for step in steps if step.get("id") == "changed"]
+    steps = _workflow()["jobs"]["lint"]["steps"]
+    [changed] = [step for step in steps if step.get("id") == "self-plant"]
+    assert changed["if"] == "${{ !cancelled() && github.event_name == 'pull_request' }}"
     listed = changed["run"].split("for path in ", 1)[1].split("; do", 1)[0].replace("\\\n", " ").split()
     assert {"scripts/ci_mutation", "tests/mutation_self_plant", "hooks/context/conditions.py", "pyproject.toml"} <= set(
         listed
     )
-    assert '! diff -rq "base/$path" "head/$path"' in changed["run"]
-    [pick] = [step for step in steps if step.get("name") == "Pick the protected grader"]
-    assert pick["run"].startswith("if [[ -f base/tests/mutation_self_plant/plant.py ]]; then\n")
-    [grade] = [step for step in steps if '"$GRADER"' in step.get("run", "")]
-    assert grade["working-directory"] == "head"
-    assert steps.index(base) < steps.index(changed) < steps.index(pick) < steps.index(grade)
-    assert all("steps.changed.outputs.plant == 'true'" in str(step["if"]) for step in steps[steps.index(changed) + 1 :])
+    assert '! diff -rq "$RUNNER_TEMP/base/$path" "$path"' in changed["run"]
+    [grade] = [step for step in steps if "self-plant-$mode" in step.get("run", "")]
+    assert grade["run"].startswith('grader="$RUNNER_TEMP/grader/tests/mutation_self_plant/plant.py"\n')
+    assert "for mode in kill survive; do" in grade["run"] and ' &\n' in grade["run"]
+    assert 'exit "$failed"' in grade["run"]
+    later = steps[steps.index(changed) + 1 : steps.index(grade) + 1]
+    assert all("steps.self-plant.outputs.changed == 'true'" in step["if"] for step in later)
+    names = [step.get("name") for step in steps]
+    assert names.index("Check out the protected grader") < names.index(changed["name"])
 
 
 @pytest.mark.parametrize("doc", ["README.md", "index.md"])

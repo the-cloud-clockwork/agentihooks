@@ -2278,6 +2278,50 @@ jobs:
         if: ${{ !cancelled() && steps.artifacts.outputs.browser == 'true' }}
         run: python -m scripts.swarm_ledger.artifact_sanity tests/fixtures/artifacts/*
 
+      - name: Plant only when the mutation gate or an input it reads changed
+        if: ${{ !cancelled() && github.event_name == 'pull_request' }}
+        id: self-plant
+        run: |
+          changed=false
+          for path in scripts/ci_mutation tests/mutation_self_plant hooks/context/conditions.py scripts/ci_cpu_quota.py \
+            pyproject.toml pytest.ini setup.cfg tox.ini uv.lock .coveragerc; do
+            if [[ -e "$RUNNER_TEMP/base/$path" || -e "$path" ]] && ! diff -rq "$RUNNER_TEMP/base/$path" "$path" >/dev/null 2>&1; then
+              echo "Changed: $path"
+              changed=true
+            fi
+          done
+          echo "changed=$changed" >> "$GITHUB_OUTPUT"
+
+      - name: Install the mutation gate for its self plant
+        if: ${{ !cancelled() && steps.self-plant.outputs.changed == 'true' }}
+        run: uv pip install --system --excludes .github/test-excludes.txt -e '.[dev,all]'
+
+      - name: Prove the mutation gate kills with the real test and fails with a weakened one
+        if: ${{ !cancelled() && steps.self-plant.outputs.changed == 'true' }}
+        env:
+          PYTEST_DISABLE_PLUGIN_AUTOLOAD: '1'
+        run: |
+          grader="$RUNNER_TEMP/grader/tests/mutation_self_plant/plant.py"
+          if [[ ! -f "$grader" ]]; then
+            echo "::warning::The protected grader predates the self plant; the head copy grades this run."
+            grader=tests/mutation_self_plant/plant.py
+          fi
+          for mode in kill survive; do
+            PYTHONPATH="$GITHUB_WORKSPACE" python "$grader" "$mode" "$RUNNER_TEMP/self-plant-$mode" > "$RUNNER_TEMP/self-plant-$mode.log" 2>&1 &
+            echo "$!" > "$RUNNER_TEMP/self-plant-$mode.pid"
+          done
+          failed=0
+          for mode in kill survive; do
+            if wait "$(cat "$RUNNER_TEMP/self-plant-$mode.pid")"; then
+              echo "The $mode self plant passed."
+            else
+              failed=1
+              cat "$RUNNER_TEMP/self-plant-$mode.log"
+              echo "::error::The mutation gate self plant failed in $mode mode."
+            fi
+          done
+          exit "$failed"
+
   coverage-ratchet:
     needs: [select, unit, reuse]
     if: ${{ !cancelled() && needs.unit.result == 'success' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') }}
@@ -3261,76 +3305,5 @@ jobs:
         with:
           name: mutation-report-${{ matrix.shard }}
           path: ${{ job.status == 'success' && '.mutation-gate/report.json' || '.mutation-gate/' }}
-          include-hidden-files: true
-          retention-days: 7
-
-  mutation-self-plant:
-    if: ${{ !cancelled() && github.event_name == 'pull_request' }}
-    runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && 'anton-oss' || 'ubuntu-latest' }}
-    timeout-minutes: 15
-    strategy:
-      fail-fast: false
-      matrix:
-        mode: [kill, survive]
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          path: head
-          persist-credentials: false
-      - uses: actions/checkout@v4
-        with:
-          path: base
-          ref: ${{ github.event.pull_request.base.sha }}
-          persist-credentials: false
-      - name: Plant only when the mutation gate or an input it reads changed
-        id: changed
-        run: |
-          plant=false
-          for path in scripts/ci_mutation tests/mutation_self_plant hooks/context/conditions.py scripts/ci_cpu_quota.py \
-            pyproject.toml pytest.ini setup.cfg tox.ini uv.lock .coveragerc; do
-            if [[ -e "base/$path" || -e "head/$path" ]] && ! diff -rq "base/$path" "head/$path" >/dev/null 2>&1; then
-              echo "Changed: $path"
-              plant=true
-            fi
-          done
-          echo "plant=$plant" >> "$GITHUB_OUTPUT"
-      - name: Pick the protected grader
-        if: steps.changed.outputs.plant == 'true'
-        run: |
-          if [[ -f base/tests/mutation_self_plant/plant.py ]]; then
-            echo "GRADER=$PWD/base/tests/mutation_self_plant/plant.py" >> "$GITHUB_ENV"
-          else
-            echo "::warning::The base predates the protected self plant grader; the head copy grades this run."
-            echo "GRADER=$PWD/head/tests/mutation_self_plant/plant.py" >> "$GITHUB_ENV"
-          fi
-      - uses: actions/setup-python@v5
-        if: steps.changed.outputs.plant == 'true'
-        with:
-          python-version: '3.12'
-      - uses: astral-sh/setup-uv@v10.2.0
-        if: steps.changed.outputs.plant == 'true'
-        with:
-          version: '0.12.23'
-          checksum: '9167d72b3319674b6303c4cbe071854bba13ebdf3d76b1a7cbdc175471fb66d6'
-          enable-cache: false
-      - name: Install dependencies
-        if: steps.changed.outputs.plant == 'true'
-        working-directory: head
-        run: uv pip install --system --excludes .github/test-excludes.txt -e '.[dev,all]'
-      - name: Grade the sample with the ${{ matrix.mode }} test through the head mutation gate
-        if: steps.changed.outputs.plant == 'true'
-        working-directory: head
-        env:
-          MODE: ${{ matrix.mode }}
-          PYTHONPATH: ${{ github.workspace }}/head
-          PYTEST_DISABLE_PLUGIN_AUTOLOAD: '1'
-        run: python "$GRADER" "$MODE"
-      - uses: actions/upload-artifact@v4
-        if: ${{ always() && steps.changed.outputs.plant == 'true' }}
-        with:
-          name: mutation-self-plant-${{ matrix.mode }}
-          path: |
-            head/.mutation-self-plant/evidence/report.json
-            head/.mutation-self-plant/evidence/*/run.log
           include-hidden-files: true
           retention-days: 7

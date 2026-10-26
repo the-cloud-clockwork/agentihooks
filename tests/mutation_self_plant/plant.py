@@ -36,5 +36,4 @@ def plant(root: Path, work: Path, mode: str) -> dict:
 
 
 if __name__ == "__main__":
-    root = Path.cwd()
-    plant(root, root / ".mutation-self-plant", sys.argv[1])
+    plant(Path.cwd(), Path(sys.argv[2]), sys.argv[1])
