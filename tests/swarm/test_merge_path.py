@@ -522,8 +522,8 @@ def test_red_head_jobs_counts_each_failed_job_once_per_red_head_run_in_the_windo
     ]
     gh = Gh(
         [
-            (0, "unit (3.11, 1)\nunit (3.11, 2)\nlint\n"),
-            (0, "unit (3.12, 4)\n"),
+            (0, "lint\tDead code\nunit (3.11, 1)\tRun tests\nunit (3.11, 2)\tRun tests\n"),
+            (0, "unit (3.12, 4)\tRun tests\nsonar\t\n"),
             (1, "", "gh: Not Found (HTTP 404)\n"),
             (0, ""),
         ]
@@ -531,9 +531,18 @@ def test_red_head_jobs_counts_each_failed_job_once_per_red_head_run_in_the_windo
 
     found = merge_path.red_head_jobs(runs, WINDOW, "/repo", gh)
 
-    assert found == {"unit": 2, "lint": 1, "unreadable": 1, "no failed job": 1}
-    assert list(found) == ["unit", "lint", "unreadable", "no failed job"]
-    query = '.jobs[] | select(.conclusion == "failure") | .name'
+    assert list(found.items()) == [
+        ("unit: Run tests", 2),
+        ("lint: Dead code", 1),
+        ("sonar", 1),
+        ("unreadable", 1),
+        ("no failed job", 1),
+    ]
+    query = merge_path.FAILED_STEP
+    assert query == (
+        '.jobs[] | select(.conclusion == "failure") | .name + "\\t" + '
+        '([.steps[]? | select(.conclusion == "failure") | .name][0] // "")'
+    )
     assert gh.calls == [
         (
             [

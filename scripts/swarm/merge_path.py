@@ -37,6 +37,10 @@ ATTEMPTS = 5
 RETRY_S = 10
 JOB_PAGE = 30
 MATRIX = re.compile(r" \(.*\)$")
+FAILED_STEP = (
+    '.jobs[] | select(.conclusion == "failure")'
+    ' | .name + "\\t" + ([.steps[]? | select(.conclusion == "failure") | .name][0] // "")'
+)
 
 
 def _seconds(stamp: str) -> float:
@@ -274,6 +278,11 @@ def head_pushes(runs: list[dict], window: tuple[float, float]) -> dict:
     return dict(sorted(causes.items(), key=lambda item: -item[1]["runs"]))
 
 
+def _failed_job(line: str) -> str:
+    name, _, step = line.partition("\t")
+    return f"{MATRIX.sub('', name)}: {step}" if step else MATRIX.sub("", name)
+
+
 def red_head_jobs(runs: list[dict], window: tuple[float, float], repo_dir: str, run: Callable) -> dict:
     """Counts red pull request head Tests runs created in the window by each job that failed them."""
     failed = Counter()
@@ -283,12 +292,12 @@ def red_head_jobs(runs: list[dict], window: tuple[float, float], repo_dir: str, 
         if not _within(found["created_at"], *window):
             continue
         path = f"repos/{{owner}}/{{repo}}/actions/runs/{found['id']}/jobs?filter=latest&per_page={PAGE}"
-        query = '.jobs[] | select(.conclusion == "failure") | .name'
+        query = FAILED_STEP
         try:
             names = _gh(["api", path, "--paginate", "--jq", query], repo_dir, run).splitlines()
         except SwarmError:
             names = ["unreadable"]
-        failed.update({MATRIX.sub("", name) for name in names} or {"no failed job"})
+        failed.update(dict.fromkeys(map(_failed_job, names), 1) or {"no failed job": 1})
     return dict(failed.most_common())
 
 
