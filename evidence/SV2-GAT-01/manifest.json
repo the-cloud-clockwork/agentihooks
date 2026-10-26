@@ -1,0 +1,14 @@
+{
+  "cases": [
+    "T-SV2-GAT-01-A",
+    "T-SV2-GAT-01-B",
+    "T-SV2-GAT-01-C"
+  ],
+  "evidence_class": "mocked: in-process environments and operator owned files in a temporary home stand in for a launched session, its hooks and the operator's routes and swarm binding files; no brain server, network call or Pod runs",
+  "inputs": {
+    "tests/fixtures/swarm_v2/brain-routes.json": "487ae92e28708e9196297f4dc95d9b2178be5fd04514ce7bb157f2870379c479"
+  },
+  "package": "SV2-GAT-01",
+  "red_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/40258538484",
+  "tested_commit": "ebb73c822185666a16b8b9de685356d042452fa8"
+}
