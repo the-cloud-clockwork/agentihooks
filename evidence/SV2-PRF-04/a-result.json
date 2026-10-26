@@ -3,9 +3,9 @@
   "corpus_revision": "sv2-prf-04-corpus-1",
   "evidence_class": "mocked: a fixed held out corpus with human review labels and in process packers that follow the kernel ranking contract stand in for brain-api, its graph store and a live model; no embedding, HTTP server or agent runs, and usefulness is the share of injected items a reviewer labelled useful, not a model judgement",
   "input_sha256": {
-    "cases.py": "fc57bc51bc8f9d2007d906b36ca889c890e0596b2fbbe294d14b305057f90f2e",
+    "cases.py": "775594a88daf1ea47c754c25296cd470c207752ce1fadce66185ccdced2183f6",
     "corpus.json": "2ce82952b6bd4e2fa1eea69b246aa520fe6d54a789a3e5181eb89bff043f7d61",
-    "evaluate.py": "a79a58be94d16dba5e338b5b9a5380488529d6e1d2edb3ff05c14520fdfedbf2"
+    "evaluate.py": "adea0528008250291963698843f0f028f1d7a2cbfb6024a3e774ee844ba1d213"
   },
   "observed": {
     "fixtures": {
@@ -125,6 +125,7 @@
             "context_source_recall": 0.2,
             "context_tokens": 3560,
             "context_tokens_per_found_source": 3560.0,
+            "context_tokens_per_task": 890.0,
             "irrelevant_injection": 13,
             "repeated_mistakes_avoided": 0.0,
             "reviewed_usefulness": 0.0833,
@@ -136,6 +137,7 @@
             "context_source_recall": 1.0,
             "context_tokens": 720,
             "context_tokens_per_found_source": 144.0,
+            "context_tokens_per_task": 180.0,
             "irrelevant_injection": 1,
             "repeated_mistakes_avoided": 1.0,
             "reviewed_usefulness": 0.8571,
@@ -147,6 +149,7 @@
             "context_source_recall": 0.6,
             "context_tokens": 520,
             "context_tokens_per_found_source": 173.3,
+            "context_tokens_per_task": 130.0,
             "irrelevant_injection": 1,
             "repeated_mistakes_avoided": 0.5,
             "reviewed_usefulness": 0.8,
@@ -285,6 +288,7 @@
             "context_source_recall": 0.2,
             "context_tokens": 3440,
             "context_tokens_per_found_source": 3440.0,
+            "context_tokens_per_task": 860.0,
             "irrelevant_injection": 13,
             "repeated_mistakes_avoided": 0.0,
             "reviewed_usefulness": 0.0833,
@@ -296,6 +300,7 @@
             "context_source_recall": 1.0,
             "context_tokens": 960,
             "context_tokens_per_found_source": 192.0,
+            "context_tokens_per_task": 240.0,
             "irrelevant_injection": 1,
             "repeated_mistakes_avoided": 1.0,
             "reviewed_usefulness": 0.8571,
@@ -307,6 +312,7 @@
             "context_source_recall": 0.6,
             "context_tokens": 760,
             "context_tokens_per_found_source": 253.3,
+            "context_tokens_per_task": 190.0,
             "irrelevant_injection": 1,
             "repeated_mistakes_avoided": 0.5,
             "reviewed_usefulness": 0.8,

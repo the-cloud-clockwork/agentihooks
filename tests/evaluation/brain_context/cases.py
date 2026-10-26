@@ -24,6 +24,7 @@ HEADLINE = (
     "arcs",
     "context_tokens",
     "context_tokens_per_found_source",
+    "context_tokens_per_task",
 )
 
 
@@ -55,7 +56,7 @@ def request(operation_id: str, kind: str, report: dict, sequence: int) -> dict:
 
 def seeded(corpus: dict, name: str, root: Path) -> tuple[Registry, dict]:
     accepted = evaluate.evaluate(corpus["accepted_policy"], name, corpus)
-    registry = Registry(root / f"{name}-accepted.json")
+    registry = Registry(root / f"{name}-accepted.json", corpus)
     registry.seed(accepted)
     return registry, accepted
 
@@ -141,7 +142,7 @@ def contained(corpus: dict, name: str, root: Path) -> dict:
     assert result == {"state": "accepted", "sequence": 2}
     observed = {
         "attempts": attempts,
-        "caller_verdict_ignored": True,
+        "caller_verdict_ignored": all(row["refused"] == "not_qualified" for row in attempts.values()),
         "volume_only": volume_only,
         "protected_state_unchanged_by_refusals": True,
         "corrected": {"request": "new operation id against sequence 1", **result},
@@ -162,7 +163,7 @@ def reverted(corpus: dict, root: Path) -> tuple[dict, Registry, dict]:
     revert = request("revert-to-scoped", "revert", rerun, 2)
     registry.stage(registry.plan(revert)["record"])
     survived = registry.read()
-    restarted = Registry(registry.path)
+    restarted = Registry(registry.path, corpus)
     recovered = restarted.recover()
     assert recovered == {"discarded_staged_write": True, "sequence": 2} and survived["policy"] == "graph"
     applied = restarted.submit(revert)
@@ -187,6 +188,17 @@ def reverted(corpus: dict, root: Path) -> tuple[dict, Registry, dict]:
     return observed, restarted, rerun
 
 
+def relabelled(corpus: dict, registry: Registry, rerun: dict) -> str:
+    fixture = corpus["fixtures"][rerun["fixture"]]
+    task = fixture["tasks"][0]
+    edited = json.loads(json.dumps(corpus))
+    edited["fixtures"][rerun["fixture"]]["tasks"][0]["labels"] = {ident: "irrelevant" for ident in task["labels"]}
+    unbumped = Registry(registry.path, edited)
+    report = evaluate.evaluate(rerun["policy"]["name"], rerun["fixture"], edited)
+    assert report["corpus_revision"] == rerun["corpus_revision"] and evaluate.digest(report) != evaluate.digest(rerun)
+    return refused(unbumped, request("revert-relabelled", "revert", report, 3))
+
+
 def recovery(corpus: dict, root: Path) -> dict:
     observed, registry, rerun = reverted(corpus, root)
     graph = evaluate.evaluate("graph", FIXTURES[0], corpus)
@@ -197,7 +209,8 @@ def recovery(corpus: dict, root: Path) -> dict:
             registry, request("other-revision", "promote", {**graph, "corpus_revision": "sv2-prf-04-corpus-0"}, 3)
         ),
         "operation_id_reused": refused(registry, request("revert-to-scoped", "revert", graph, 3)),
-        "irreproducible_report": refused(registry, request("revert-drifted", "revert", drifted, 3)),
+        "report_mismatch": refused(registry, request("revert-inflated", "revert", drifted, 3)),
+        "irreproducible_report": relabelled(corpus, registry, rerun),
     }
     assert outcomes == {key: key for key in outcomes}
     record = registry.read()

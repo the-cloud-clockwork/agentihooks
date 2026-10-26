@@ -107,55 +107,63 @@ def test_a_gain_with_any_regression_or_leakage_is_refused():
     assert leaking["regressions"] == ["scope_leakage"]
 
 
-def report(policy, corpus_revision="rev-1", **changes):
-    return {"corpus_revision": corpus_revision, "policy": {"name": policy}, "totals": totals(**changes)}
-
-
 def promote(operation_id, payload, sequence):
     return {"operation_id": operation_id, "kind": "promote", "expected_sequence": sequence, "report": payload}
 
 
-def test_the_registry_qualifies_the_report_itself_and_ignores_a_caller_verdict(tmp_path):
-    registry = Registry(tmp_path / "accepted.json")
-    registry.seed(report("scoped"))
-    louder = {**promote("op-1", report("graph", arcs=9, context_tokens=1200), 1), "verdict": {"qualified": True}}
+@pytest.fixture
+def registry(tmp_path, corpus):
+    registry = Registry(tmp_path / "accepted.json", corpus)
+    registry.seed(evaluate.evaluate("scoped", "alpha", corpus))
+    return registry
+
+
+def test_the_registry_recomputes_the_report_and_ignores_a_caller_verdict(registry, corpus):
+    wide = evaluate.evaluate("graph_wide", "alpha", corpus)
     with pytest.raises(Refused, match="not_qualified"):
-        registry.submit(louder)
-    assert registry.submit(promote("op-2", report("graph", context_source_recall=1.0), 1)) == {
-        "state": "accepted",
-        "sequence": 2,
-    }
-    assert registry.read()["verdict"]["gains"] == ["context_source_recall"]
+        registry.submit({**promote("op-1", wide, 1), "verdict": {"qualified": True}})
+    inflated = {**wide, "totals": {**wide["totals"], "irrelevant_injection": 0, "stale_injection": 0}}
+    with pytest.raises(Refused, match="report_mismatch"):
+        registry.submit(promote("op-2", inflated, 1))
+    graph = evaluate.evaluate("graph", "alpha", corpus)
+    assert registry.submit(promote("op-3", graph, 1)) == {"state": "accepted", "sequence": 2}
+    assert registry.read()["verdict"]["gains"] == [
+        "context_source_recall",
+        "reviewed_usefulness",
+        "repeated_mistakes_avoided",
+    ]
 
 
-def test_the_registry_refuses_a_stale_sequence_and_replays_an_operation_once(tmp_path):
-    registry = Registry(tmp_path / "accepted.json")
-    registry.seed(report("scoped"))
-    better = promote("op-1", report("graph", context_source_recall=1.0), 1)
+def test_the_registry_refuses_a_stale_sequence_and_replays_an_operation_once(registry, corpus):
+    better = promote("op-1", evaluate.evaluate("graph", "alpha", corpus), 1)
     assert registry.submit(better) == {"state": "accepted", "sequence": 2}
     assert registry.submit(better) == {"state": "replayed", "sequence": 2}
     before = registry.path.read_bytes()
     with pytest.raises(Refused, match="stale_sequence"):
         registry.submit({**better, "operation_id": "op-2"})
+    feed = evaluate.evaluate("feed_only", "alpha", corpus)
     with pytest.raises(Refused, match="never_accepted"):
-        registry.submit(
-            {**better, "operation_id": "op-3", "kind": "revert", "expected_sequence": 2, "report": report("feed_only")}
-        )
+        registry.submit({**better, "operation_id": "op-3", "kind": "revert", "expected_sequence": 2, "report": feed})
     with pytest.raises(Refused, match="operation_id_reused"):
-        registry.submit({**better, "report": report("graph", "rev-0", context_source_recall=1.0)})
+        registry.submit({**better, "report": {**better["report"], "corpus_revision": "rev-0"}})
     assert registry.path.read_bytes() == before and len(registry.read()["history"]) == 2
 
 
-def test_the_registry_refuses_a_reseed_and_a_reused_id_of_another_kind(tmp_path):
-    registry = Registry(tmp_path / "accepted.json")
-    registry.seed(report("scoped"))
+def test_the_registry_refuses_a_reseed_and_a_reused_id_of_another_kind(registry, corpus):
     with pytest.raises(Refused, match="already_seeded"):
-        registry.seed(report("graph"))
-    better = promote("op-1", report("graph", context_source_recall=1.0), 1)
+        registry.seed(evaluate.evaluate("graph", "alpha", corpus))
+    better = promote("op-1", evaluate.evaluate("graph", "alpha", corpus), 1)
     registry.submit(better)
     with pytest.raises(Refused, match="operation_id_reused"):
         registry.submit({**better, "kind": "revert", "expected_sequence": 2})
     assert registry.read()["sequence"] == 2 and registry.read()["history"][0]["policy"] == "scoped"
+
+
+def test_recover_discards_only_a_staged_write_and_keeps_the_record(registry, corpus):
+    planned = registry.plan(promote("op-1", evaluate.evaluate("graph", "alpha", corpus), 1))
+    registry.stage(planned["record"])
+    assert registry.recover() == {"discarded_staged_write": True, "sequence": 1}
+    assert registry.recover() == {"discarded_staged_write": False, "sequence": 1}
 
 
 def test_the_measure_command_prints_totals_per_policy(capsys):

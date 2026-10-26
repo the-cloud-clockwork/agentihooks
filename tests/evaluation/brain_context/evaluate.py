@@ -237,12 +237,13 @@ def qualify(accepted: dict, candidate: dict) -> dict:
 class Registry:
     """The accepted ranking and packing policy for one corpus revision, replaced only by compare and set.
 
-    A request carries the whole report: the registry digests it and qualifies its totals itself, so no caller verdict,
-    hash or policy name is trusted.
+    A request carries the whole report: the registry recomputes it from its own corpus and qualifies the totals
+    itself, so no caller verdict, hash, totals or policy name is trusted.
     """
 
-    def __init__(self, path: Path):
+    def __init__(self, path: Path, corpus: dict):
         self.path = path
+        self.corpus = corpus
         self.staged = path.with_name(path.name + ".staged")
         self.lock = path.with_name(path.name + ".lock")
 
@@ -264,16 +265,19 @@ class Registry:
         with self._locked():
             if self.path.exists():
                 raise Refused("already_seeded")
+            if digest(report) != digest(evaluate(report["policy"]["name"], report["fixture"], self.corpus)):
+                raise Refused("report_mismatch")
             entry = self._entry("seed", "seed", 1, report)
             record = {"corpus_revision": report["corpus_revision"], **entry, "history": [entry]}
             self.publish(self.stage(record))
         return record
 
     def recover(self) -> dict:
-        discarded = self.staged.exists()
-        if discarded:
-            self.staged.unlink()
-        return {"discarded_staged_write": discarded, "sequence": self.read()["sequence"]}
+        with self._locked():
+            discarded = self.staged.exists()
+            if discarded:
+                self.staged.unlink()
+            return {"discarded_staged_write": discarded, "sequence": self.read()["sequence"]}
 
     def _replayed(self, record: dict, request: dict) -> dict | None:
         earlier = next((e for e in record["history"] if e["operation_id"] == request["operation_id"]), None)
@@ -291,6 +295,8 @@ class Registry:
             raise Refused("other_corpus_revision")
         if request["expected_sequence"] != record["sequence"]:
             raise Refused("stale_sequence")
+        if digest(report) != digest(evaluate(report["policy"]["name"], report["fixture"], self.corpus)):
+            raise Refused("report_mismatch")
         if request["kind"] == "promote":
             verdict = qualify(record["totals"], report["totals"])
             if not verdict["qualified"]:

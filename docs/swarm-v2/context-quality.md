@@ -27,7 +27,7 @@ that project, a proposed edge to an unrelated arc and an accepted inferred edge 
 | `feed_only` | Today's fleet feed: hottest items, no scope, no query. |
 | `scoped` | Accepted baseline: lexical matches inside the grant, superseded guidance omitted when its successor is visible. |
 | `graph` | `scoped` plus one hop from source to target over accepted `resolved_by`, `decided_by` and `related` edges inside the grant. |
-| `graph_wide` | Two hops, proposed edges, `supersedes` followed as a similarity edge, no superseded omission. |
+| `graph_wide` | Two hops, proposed edges, `supersedes` followed from new to old guidance, no superseded omission. |
 | `scoped_padded` | `scoped`, then filled with the hottest remaining items up to a larger budget. |
 
 Every policy packs at most 6 items and 900 tokens unless it names its own limit; the two rejection policies allow 12
@@ -65,7 +65,7 @@ and name no out of scope item.
 ## Rollback
 
 The accepted policy lives in `evaluate.Registry`, keyed by corpus revision and sequence and changed only under a
-file lock. A request carries the whole report: the registry digests it, qualifies a promote against the accepted
+file lock. A request carries the whole report: the registry recomputes it from its own corpus, refuses a mismatch, qualifies a promote against the accepted
 totals itself and ignores any verdict the caller sends. Rollback is a revert to an earlier accepted policy, refused
 when the report hash differs from the hash that policy was accepted with, so a revert proves the comparison
 reproduces on the same corpus revision.
