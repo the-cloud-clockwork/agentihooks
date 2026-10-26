@@ -22,9 +22,9 @@ from tests.dep_manifest import (
     _show,
     _spans,
     changed_units,
+    global_input,
     line_units,
     node,
-    workflow_execution_changed,
 )
 from tests.dep_manifest import changes as recorded_changes
 
@@ -56,6 +56,11 @@ def estimate(
             covering = line_covering_tests(root, manifest, changes, paths)
         else:
             covering = covering_tests(manifest, units | drifted, paths)
+        if any(path.startswith("tests/") for path in paths):
+            # A child process can read a tests data file the tracer never sees.
+            covering.update(
+                node(test).partition("[")[0] for test, found in manifest["tests"].items() if found["escapes"]
+            )
         recorded = {}
         for test in manifest["tests"]:
             if not manifest["tests"][test]["units"] or "lines" in manifest and test not in manifest["lines"]:
@@ -123,8 +128,10 @@ def record_drift(root: Path, manifest: dict) -> tuple[set[str], set[int], set[st
     index = {unit: number for number, unit in enumerate(manifest["units"])}
     tests, units, paths = set(), set(), set()
     for path, old, new in recorded_changes(root, manifest["commit"], "HEAD"):
-        if path == ".github/workflows/test.yml":
-            if workflow_execution_changed(_show(root, manifest["commit"], path), _show(root, "HEAD", path)):
+        if path.startswith(".github/workflows/"):
+            if global_input(
+                path, _show(root, manifest["commit"], path), _show(root, "HEAD", path), manifest.get("version")
+            ):
                 return None
         elif path.startswith("tests/") and path.endswith(".py"):
             # A changed helper or conftest can move what any test reaches.

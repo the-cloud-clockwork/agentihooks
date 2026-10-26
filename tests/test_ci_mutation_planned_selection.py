@@ -646,7 +646,11 @@ def test_a_changed_tests_data_file_adds_only_the_tests_that_read_it(tmp_path, mo
     _commit(tmp_path, "data")
     selection = {}
     plan.estimate(tmp_path, {"scripts/core.py": {6}}, selection, manifest)
-    assert selection == {"scripts/core.py": sorted([*NARROWED, "tests/test_core.py::test_other"])}
+    assert selection == {
+        "scripts/core.py": sorted(
+            [*NARROWED, "tests/test_core.py::test_other", "tests/test_core.py::TestSpawn::test_child"]
+        )
+    }
 
 
 WORKFLOW = "jobs:\n  split:\n    runs-on: x\n  unit:\n    needs: split\n    steps:\n      - run: {unit}\n  lint:\n    steps:\n      - run: {lint}\n"
@@ -657,7 +661,7 @@ WORKFLOW = "jobs:\n  split:\n    runs-on: x\n  unit:\n    needs: split\n    step
     [({"unit": "pytest", "lint": "ruff check"}, NARROWED), ({"unit": "pytest -x", "lint": "ruff"}, WHOLE)],
 )
 def test_a_workflow_edit_drops_narrowing_only_when_it_changes_the_test_command(tmp_path, monkeypatch, edit, expected):
-    manifest = _recorded_project(tmp_path, monkeypatch)
+    manifest = {**_recorded_project(tmp_path, monkeypatch), "version": 2}
     workflow = tmp_path / ".github/workflows/test.yml"
     workflow.parent.mkdir(parents=True)
     workflow.write_text(WORKFLOW.format(unit="pytest", lint="ruff"))
