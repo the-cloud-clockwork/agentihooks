@@ -764,3 +764,66 @@ def test_fyi_seat_mail_waits_for_no_successor_and_gets_no_wake_after_binding(inb
         run(inbox, herdr, ledger, bound + n * W + 1, SEATED)
     assert events(inbox, fyi.id) == [] and ledger.followups == []
     assert events(inbox, work.id)[0] == "woken"
+
+
+FRONT = AgentRecord(MASTER_NAME, MASTER, MASTER, pane_id="pm", seat="master@sw", input_prompt="Which phase next?")
+BACKEND = AgentRecord("sw-master-2", MASTER, MASTER, pane_id="pm2", seat="master-2@sw")
+
+
+@pytest.mark.parametrize("ref", ["", "inbox-escalation:abc"])
+def test_a_front_door_frozen_on_a_prompt_passes_its_pending_mail_to_a_live_master(inbox, ref):
+    inbox.seats.occupy("master@sw", MASTER_NAME, at=1)
+    inbox.seats.occupy("master-2@sw", "sw-master-2", at=1)
+    item = inbox.send("sw-eng-1", "master@sw", "check the plan", ref=ref)
+    herdr, ledger = FakeHerdr({}), FakeLedger()
+    agents = [AGENTS[0], FRONT, BACKEND]
+    assert run(inbox, herdr, ledger, sent_at(item) + W - 1, agents) == []
+    assert inbox.get(item.id).address == "master@sw"
+    actions = run(inbox, herdr, ledger, sent_at(item) + W, agents)
+    assert actions == [f"passed message {item.id} from {MASTER_NAME} to master-2@sw"]
+    moved = inbox.get(item.id)
+    assert (moved.address, moved.state) == ("master-2@sw", "pending")
+    assert moved.reason == f"{MASTER_NAME} waits on an input prompt; passed to master-2@sw, a live master"
+    assert ledger.followups == [] and inbox.open_items("master@sw") == []
+    assert [i.id for i in inbox.open_items("master-2@sw")] == [item.id]
+
+
+def test_a_frozen_front_door_with_no_other_live_master_escalates_as_before(inbox):
+    inbox.seats.occupy("master@sw", MASTER_NAME, at=1)
+    item = inbox.send("sw-eng-1", "master@sw", "check the plan")
+    herdr, ledger = FakeHerdr({}), FakeLedger()
+    run(inbox, herdr, ledger, sent_at(item) + W, [AGENTS[0], FRONT])
+    assert inbox.get(item.id).address == "master@sw"
+    assert events(inbox, item.id) == ["escalated_operator"] and len(ledger.followups) == 1
+
+
+def test_a_front_door_not_waiting_on_a_prompt_keeps_its_mail(inbox):
+    from dataclasses import replace
+
+    inbox.seats.occupy("master@sw", MASTER_NAME, at=1)
+    inbox.seats.occupy("master-2@sw", "sw-master-2", at=1)
+    item = inbox.send("sw-eng-1", "master@sw", "check the plan")
+    herdr, ledger = FakeHerdr({}), FakeLedger()
+    run(inbox, herdr, ledger, sent_at(item) + W, [AGENTS[0], replace(FRONT, input_prompt=""), BACKEND])
+    assert inbox.get(item.id).address == "master@sw"
+    assert events(inbox, item.id) == ["escalated_operator"]
+
+
+def test_a_frozen_backend_master_passes_its_mail_to_the_front_door(inbox):
+    from dataclasses import replace
+
+    inbox.seats.occupy("master@sw", MASTER_NAME, at=1)
+    inbox.seats.occupy("master-2@sw", "sw-master-2", at=1)
+    item = inbox.send("sw-eng-1", "master-2@sw", "check the plan")
+    agents = [AGENTS[0], replace(FRONT, input_prompt=""), replace(BACKEND, input_prompt="Continue?")]
+    run(inbox, FakeHerdr({}), FakeLedger(), sent_at(item) + W, agents)
+    assert inbox.get(item.id).address == "master@sw"
+
+
+def test_decide_passes_a_frozen_masters_item_only_once_its_window_is_due():
+    from scripts.inbox.store import Item
+
+    item = Item("i1", "sw-eng-1", "master@sw", "text", "pending", 0, 0)
+    assert wake.decide(item, None, [{"at": 0}], W - 1, W, "sw", frozen=True) is None
+    assert wake.decide(item, None, [{"at": 0}], W, W, "sw", frozen=True) == wake.PASSED
+    assert wake.decide(item, None, [{"at": 0, "event": wake.TO_OPERATOR}], W, W, "sw", frozen=True) is None

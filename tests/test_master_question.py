@@ -200,6 +200,54 @@ def test_a_master_whose_operator_left_ten_minutes_ago_moves_every_question_to_pr
     ]
 
 
+def _gate_rows():
+    from scripts.gates import log
+
+    return log.recent("sw", None)
+
+
+def _row(kind, reason):
+    return {
+        "at": int(NOW * 1000),
+        "gate": "question",
+        "kind": kind,
+        "agent": NAME,
+        "task": "master",
+        "tool": "AskUserQuestion",
+        "reason": reason,
+    }
+
+
+def test_an_open_question_tool_writes_the_last_typed_turn_to_the_gate_log(master):
+    typed_at(NOW - master_question.WINDOW_SEC + 1)
+    master_question.move(ask(FOCUS), master, now=NOW)
+    assert _gate_rows() == [_row("count", "opened: the operator typed 599 seconds ago")]
+
+
+def test_moved_questions_write_a_deny_row_to_the_gate_log(master):
+    typed_at(NOW - master_question.WINDOW_SEC)
+    master_question.move(ask(FOCUS, FREEZE), master, now=NOW)
+    assert _gate_rows() == [_row("deny", "moved 2 questions: the operator typed 600 seconds ago")]
+
+
+def test_a_question_left_to_the_presence_check_writes_that_no_turn_was_read(master):
+    payload = ask(FOCUS)
+    payload.pop("tool_use_id")
+    master_question.move(payload, master, now=NOW)
+    assert _gate_rows() == [_row("count", "left to the operator presence check: typed never since his last turn ended")]
+
+
+def test_a_session_bound_to_no_swarm_writes_no_gate_row(master, monkeypatch):
+    monkeypatch.delenv("AGENTIHOOKS_SWARM")
+    master_coding_seat = Path(os.environ["AGENTIHOOKS_HOME"]) / "master_seats" / f"{SID}.json"
+    master_coding_seat.parent.mkdir(parents=True, exist_ok=True)
+    master_coding_seat.write_text(json.dumps({"name": NAME}))
+    typed_at(NOW - 1)
+    assert master_question.move(ask(FOCUS), master, now=NOW) == ""
+    assert _gate_rows() == []
+    assert not (Path.home() / ".agentihooks" / "swarm" / "_slug_").exists()
+
+
 def test_a_master_with_no_typed_prompt_moves_the_question(master):
     operator_mode._save(SID, {"on": True, "turn_at": None})
     assert master_question.move(ask(FOCUS), master, now=NOW)
