@@ -1,5 +1,4 @@
-"""Checkpoint and corpus collection: the eligibility plan is journaled before any delete, every delete re-reads the
-restore and evidence holds, and an interrupted run resumes from its journal under the holds current at resume."""
+"""Checkpoint and corpus collection: the plan is journaled before any delete and every delete re-decides its object."""
 
 import json
 import os
@@ -73,8 +72,6 @@ class Journal(Protocol):
 
 
 class FileJournal:
-    """Append only JSON lines, synced per entry; a torn final line from a crash is ignored and closed off."""
-
     def __init__(self, path: Path) -> None:
         self.path = path
 
@@ -92,14 +89,14 @@ class FileJournal:
         return found
 
     def append(self, run_id: str, entry: dict) -> None:
-        torn = self.path.exists() and not self.path.read_bytes().endswith(b"\n") and self.path.stat().st_size > 0
+        torn = self.path.exists() and self.path.read_bytes()[-1:] not in (b"", b"\n")
         with self.path.open("a", encoding="utf-8") as handle:
             handle.write(("\n" if torn else "") + json.dumps({**entry, "run_id": run_id}, sort_keys=True) + "\n")
             handle.flush()
             os.fsync(handle.fileno())
 
 
-def destructive(env: Mapping[str, str] = os.environ) -> bool:
+def destructive_enabled(env: Mapping[str, str] = os.environ) -> bool:
     return env.get(SWITCH, "on") != "off"
 
 
@@ -151,10 +148,11 @@ class Collector:
         policies: Policies,
         journal: Journal,
         clock: Callable[[], float],
-        destructive: bool = True,
+        destructive: bool | None = None,
     ) -> None:
         self.inventory, self.holds, self.policies = inventory, holds, policies
-        self.journal, self.clock, self.destructive = journal, clock, destructive
+        self.journal, self.clock = journal, clock
+        self.destructive = destructive_enabled() if destructive is None else destructive
 
     def plan(self, run_id: str = "") -> Report:
         """A dry run: the eligibility of every stored object, deleting nothing and writing no journal entry."""
@@ -189,14 +187,11 @@ class Collector:
         return self._execute(run_id, entries)
 
     def _execute(self, run_id: str, entries: list[dict]) -> Report:
-        planned = entries[0]["eligible"]
-        settled = {entry["object_id"]: entry for entry in entries[1:]}
-        decisions = self._decisions()
-        by_id = {checkpoint.checkpoint_id: checkpoint for checkpoint in self.inventory.checkpoints()}
-        for object_id in planned:
+        settled = {entry["object_id"] for entry in entries[1:]}
+        for object_id in entries[0]["eligible"]:
             if object_id in settled:
                 continue
-            reason = self._held_now(by_id).get(object_id) or decisions.get(object_id, ABSENT)
+            reason = self._decisions().get(object_id, ABSENT)
             if reason == ABSENT:
                 self.journal.append(run_id, {"op": ABSENT, "object_id": object_id})
             elif reason != ELIGIBLE:
@@ -207,15 +202,7 @@ class Collector:
         final = self.journal.entries(run_id)[1:]
         deleted = tuple(entry["object_id"] for entry in final if entry["op"] == DELETED)
         skipped = {entry["object_id"]: entry["reason"] for entry in final if entry["op"] == SKIPPED}
-        return Report(run_id, decisions, True, deleted, skipped)
-
-    def _held_now(self, by_id: dict[str, Checkpoint]) -> dict[str, str]:
-        held = {object_id: EVIDENCE_HOLD for object_id in self.holds.evidence()}
-        for checkpoint_id in self.holds.restoring():
-            checkpoint = by_id.get(checkpoint_id)
-            for object_id in (checkpoint_id, *(checkpoint.objects if checkpoint else ())):
-                held[object_id] = ACTIVE_RESTORE
-        return held
+        return Report(run_id, self._decisions(), True, deleted, skipped)
 
     def _decisions(self) -> dict[str, str]:
         now, objects, checkpoints = self.clock(), self.inventory.objects(), self.inventory.checkpoints()
@@ -246,6 +233,6 @@ class Collector:
 
 
 def _ordered(eligible: list[str], checkpoints: list[Checkpoint]) -> list[str]:
-    """Manifests go before the objects they name, so a crash never leaves a manifest pointing at a deleted object."""
+    """Manifests are deleted before the objects they name."""
     manifests = {checkpoint.checkpoint_id for checkpoint in checkpoints}
     return sorted(eligible, key=lambda object_id: (object_id not in manifests, object_id))

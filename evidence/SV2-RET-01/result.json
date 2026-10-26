@@ -14,7 +14,7 @@
     "scripts.swarm_v2.checkpoints.retention.Collector.collect",
     "scripts.swarm_v2.checkpoints.retention.Collector.delete",
     "scripts.swarm_v2.checkpoints.retention.FileJournal",
-    "scripts.swarm_v2.checkpoints.retention.destructive"
+    "scripts.swarm_v2.checkpoints.retention.destructive_enabled"
   ],
   "metrics": "retention_protected_objects counts kept objects by protection reason in each plan",
   "mocked": true,
@@ -27,8 +27,14 @@
   "package": "SV2-RET-01",
   "remaining_limitations": [
     "No backend adapter over the artifact store or the session catalog implements the Inventory and Holds protocols yet; collection of live stores is unproven.",
-    "The hold check runs immediately before each removal; a backend without a conditional delete leaves the window between that check and the removal."
+    "Each object is decided again immediately before its removal; a backend without a conditional delete leaves the window between that decision and the removal.",
+    "The collector takes no grant; the calling store owner holds the delete authority and the inventory scope."
   ],
+  "compatibility": "new modules with no preceding retention protocol; the catalog retain-until-deleted session retention is honoured as never expiring",
+  "supported_policy_versions": {
+    "personal": "personal-retention-1",
+    "swarm": "swarm-retention-1"
+  },
   "rollback_rehearsal": "B ran collection with destructive collection off: the plan was journaled, nothing was removed, and a later run resumed from that plan",
   "status": "fixture_verified",
   "tested_commit": "74c607ab433bccb686da8f4f625d4497db4d3865"

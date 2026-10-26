@@ -167,9 +167,86 @@ def test_dry_run_journals_plan_and_deletes_nothing(tmp_path):
 
 
 def test_destructive_switch_reads_environment():
-    assert retention.destructive({}) is True
-    assert retention.destructive({"SWARM_RETENTION_DESTRUCTIVE": "on"}) is True
-    assert retention.destructive({"SWARM_RETENTION_DESTRUCTIVE": "off"}) is False
+    assert retention.destructive_enabled({}) is True
+    assert retention.destructive_enabled({"SWARM_RETENTION_DESTRUCTIVE": "on"}) is True
+    assert retention.destructive_enabled({"SWARM_RETENTION_DESTRUCTIVE": "off"}) is False
+
+
+@pytest.mark.parametrize(("switch", "removed"), [("off", 0), ("on", 7)])
+def test_default_collector_follows_the_environment_switch(tmp_path, monkeypatch, switch, removed):
+    monkeypatch.setenv("SWARM_RETENTION_DESTRUCTIVE", switch)
+    inventory, holds, policies, now = cases.world()
+    collector = retention.Collector(inventory, holds, policies, retention.FileJournal(tmp_path / "j"), lambda: now)
+    report = collector.collect("run")
+    assert collector.destructive is (switch == "on")
+    assert len(inventory.removals) == removed
+    assert len(report.deleted) == removed
+
+
+def test_checkpoint_completed_during_collection_protects_what_it_references(tmp_path):
+    inventory, holds, collector = _collector(tmp_path)
+    original = inventory.remove
+
+    def remove(object_id):
+        original(object_id)
+        if object_id == "ckpt-live-1":
+            inventory.stored["ckpt-new"] = retention.StoredObject("ckpt-new", "swarm", "native_resume", 100000000.0)
+            inventory.manifests.append(retention.Checkpoint("ckpt-new", "t-done", 3, True, ("old-native", "log-old")))
+
+    inventory.remove = remove
+    report = collector.collect("run")
+    assert report.skipped == {"log-old": "referenced", "old-native": "referenced"}
+    assert inventory.removals == ["ckpt-live-1", "ckpt-live-3", "ckpt-old", "old-transcript", "personal-preview"]
+
+
+def test_restore_on_a_checkpoint_added_during_collection_holds_its_objects(tmp_path):
+    inventory, holds, collector = _collector(tmp_path)
+    original = inventory.remove
+
+    def remove(object_id):
+        original(object_id)
+        if object_id == "ckpt-live-1":
+            inventory.stored["ckpt-new"] = retention.StoredObject("ckpt-new", "swarm", "native_resume", 0.0)
+            inventory.manifests.append(retention.Checkpoint("ckpt-new", "t-done", 3, False, ("personal-preview",)))
+            holds.restores.add("ckpt-new")
+
+    inventory.remove = remove
+    report = collector.collect("run")
+    assert report.skipped == {"personal-preview": "active_restore"}
+
+
+def test_object_removed_out_of_band_during_collection_is_journaled_absent(tmp_path):
+    inventory, _, collector = _collector(tmp_path)
+    original = inventory.remove
+
+    def remove(object_id):
+        original(object_id)
+        inventory.stored.pop("log-old", None)
+
+    inventory.remove = remove
+    report = collector.collect("run")
+    assert "log-old" not in report.deleted
+    assert [e["op"] for e in collector.journal.entries("run") if e.get("object_id") == "log-old"] == ["absent"]
+
+
+def test_restore_pin_outranks_a_latest_checkpoint_sharing_an_object():
+    checkpoints = [
+        retention.Checkpoint("r", "a", 1, True, ("shared", "own")),
+        retention.Checkpoint("l", "b", 1, True, ("shared",)),
+    ]
+    assert retention._pinned(checkpoints, frozenset({"r"}), {"l"}) == {
+        "r": "active_restore",
+        "shared": "active_restore",
+        "own": "active_restore",
+        "l": "latest_checkpoint",
+    }
+
+
+def test_file_journal_appends_to_an_empty_file_without_a_blank_line(tmp_path):
+    path = tmp_path / "journal.jsonl"
+    path.write_bytes(b"")
+    retention.FileJournal(path).append("run", {"op": "planned"})
+    assert path.read_bytes() == b'{"op": "planned", "run_id": "run"}\n'
 
 
 def test_file_journal_ignores_and_closes_a_torn_line(tmp_path):
