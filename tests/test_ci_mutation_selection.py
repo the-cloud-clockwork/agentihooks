@@ -620,6 +620,21 @@ def test_stats_parts_split_files_by_duration_across_runners_even_inside_an_xdist
     assert part_files(tmp_path, files[:1], (2, 3)) == []
 
 
+def test_statistics_split_reads_each_duration_a_bounded_number_of_times():
+    from scripts.ci_mutation.selection import split_parts
+
+    class Counted(dict):
+        reads = 0
+
+        def __getitem__(self, key):
+            self.reads += 1
+            return super().__getitem__(key)
+
+    seconds = Counted({f"tests/test_x.py::test_{index}": float(index % 7) for index in range(400)})
+    split_parts(list(seconds), seconds, (0, 4))
+    assert seconds.reads <= 2 * len(seconds)
+
+
 def test_statistics_parts_split_one_file_without_losing_new_parameter_cases(tmp_path, monkeypatch):
     from scripts.ci_mutation.selection import load_or_collect_stats
 
