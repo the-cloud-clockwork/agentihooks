@@ -29,6 +29,7 @@
     "observed": "case outputs in the a, b and c result files from the focused fixture run"
   },
   "package": "SV2-RET-04",
+  "pull_request": "https://github.com/the-cloud-clockwork/agentihooks/pull/7590",
   "recovery_measurement": "recovery_point is the set capture time and recovery_time_seconds is measured by the drill clock; the fixture clock steps 2.5 seconds per read, so 5.0 seconds is a fixture value, not a live measurement",
   "remaining_limitations": [
     "Encryption is the storage layer's job; the module records key ids and checks them against a keyring but encrypts nothing.",
@@ -43,5 +44,5 @@
   "rollback_rehearsal": "C recorded a newer set as uploaded only, so retention_allowed turned false and preserved named the drilled set; a re-drill after damaging its brain component failed, the set lost acceptance and preserved still named it",
   "status": "fixture_partial",
   "supported_versions": "backup format 1.x; component versions the caller lists in Access.versions",
-  "tested_commit": "d62c718f5ffeb8689c32b8b772992af15f9e28c6"
+  "tested_commit": "d6d4b9aac3faf59f6afa2ded81b0c9368f642fe8"
 }
