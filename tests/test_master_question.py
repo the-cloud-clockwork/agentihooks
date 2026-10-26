@@ -239,6 +239,16 @@ def test_a_question_left_to_the_presence_check_writes_that_no_turn_was_read(mast
     assert _gate_rows() == [_row("count", "left to the operator presence check: typed never since his last turn ended")]
 
 
+def test_a_question_left_to_the_presence_check_writes_the_turn_it_read(master):
+    typed_at(NOW - master_question.WINDOW_SEC)
+    payload = ask(FOCUS)
+    payload.pop("tool_use_id")
+    master_question.move(payload, master, now=NOW)
+    assert _gate_rows() == [
+        _row("count", "left to the operator presence check: typed at 1970-01-12T13:36:40Z, 600 seconds ago")
+    ]
+
+
 def test_a_session_bound_to_no_swarm_writes_no_gate_row(master, monkeypatch):
     monkeypatch.delenv("AGENTIHOOKS_SWARM")
     master_coding_seat = Path(os.environ["AGENTIHOOKS_HOME"]) / "master_seats" / f"{SID}.json"

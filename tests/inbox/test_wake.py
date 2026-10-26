@@ -847,6 +847,40 @@ def test_an_agents_unread_mail_escalates_to_a_live_master_while_the_front_door_i
     assert raised.ref == f"inbox-escalation:{item.id}"
 
 
+def test_every_due_item_of_a_frozen_front_door_passes_in_one_pass_by_the_swarm(inbox):
+    inbox.seats.occupy("master@sw", MASTER_NAME, at=1)
+    inbox.seats.occupy("master-2@sw", "sw-master-2", at=1)
+    first = inbox.send("sw-eng-1", "master@sw", "check the plan")
+    second = inbox.send("sw-eng-1", "master@sw", "check the phase")
+    actions = run(inbox, FakeHerdr({}), FakeLedger(), sent_at(second) + W, [AGENTS[0], FRONT, BACKEND])
+    assert actions == [
+        f"passed message {first.id} from {MASTER_NAME} to master-2@sw",
+        f"passed message {second.id} from {MASTER_NAME} to master-2@sw",
+    ]
+    assert [inbox.history(i.id)[-1]["by"] for i in (first, second)] == ["swarm", "swarm"]
+
+
+def test_a_frozen_front_doors_window_starts_when_it_took_the_seat(inbox):
+    inbox.seats.occupy("master@sw", "sw-master-0", at=1)
+    inbox.seats.occupy("master-2@sw", "sw-master-2", at=1)
+    item = inbox.send("sw-eng-1", "master@sw", "check the plan")
+    bound = sent_at(item) + 2 * W
+    inbox.seats.occupy("master@sw", MASTER_NAME, at=bound)
+    agents = [AGENTS[0], FRONT, BACKEND]
+    assert run(inbox, FakeHerdr({}), FakeLedger(), bound + W - 1, agents) == []
+    assert inbox.get(item.id).address == "master@sw"
+    assert run(inbox, FakeHerdr({}), FakeLedger(), bound + W, agents) == [
+        f"passed message {item.id} from {MASTER_NAME} to master-2@sw"
+    ]
+
+
+def test_a_pass_leaves_an_item_its_receiver_already_took(inbox):
+    item = inbox.send("sw-eng-1", "master@sw", "check the plan")
+    inbox.deliver(item.id, MASTER_NAME)
+    assert wake._pass(inbox, item, MASTER_NAME, "master-2@sw") == []
+    assert inbox.get(item.id).address == "master@sw"
+
+
 def test_decide_passes_a_frozen_masters_item_only_once_its_window_is_due():
     from scripts.inbox.store import Item
 

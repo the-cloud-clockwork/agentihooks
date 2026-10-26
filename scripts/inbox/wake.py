@@ -201,7 +201,7 @@ def _spare_master(inbox, slug, agents, receiver):
         return ""
     from scripts.inbox.pool import live_masters
 
-    return next(iter(live_masters(inbox.redis, slug, agents)), "")
+    return (live_masters(inbox.redis, slug, agents) or [""])[0]
 
 
 def _pass_frozen(inbox, slug, agents, reads, clock):
