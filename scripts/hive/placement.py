@@ -16,6 +16,7 @@ HEADLESS = "headless hive"
 UI_HIVE = "UI hive"
 LOCAL_MACHINE = "local machine"
 LOCAL_FULL = ", and the local machine runs "
+HAS_ROOM = "has room"
 NEEDS_WORKSTATION = "the task needs the workstation, so no remote hive takes it"
 NEEDS_CAPABILITY = "the task needs a hive with {needs}, and no hive declares it"
 NEEDS_TOGETHER = "the task needs a hive with {needs}, and no single hive declares all of them"
@@ -81,7 +82,7 @@ def _checks(
     role: str, harness: str, slot: str, route_kind: str, repo: str, kind: str = HIVE
 ) -> list[tuple[Callable[[dict], bool], str]]:
     return [
-        (lambda hive: role == MASTER or _room(hive) > 0, f"no {kind} for {role} has room"),
+        (lambda hive: role == MASTER or _room(hive) > 0, f"no {kind} for {role} {HAS_ROOM}"),
         (
             lambda hive: any(item["harness"] == harness and item["account"] == slot for item in hive["slots"]),
             f"no {kind} for {role} advertises the {harness} slot {slot}",

@@ -502,7 +502,7 @@ class HiveLaunch:
         if local:
             local_slots.release(self.store, selected.hive, self.slug, request.name)
         refused = admission.refusal(admission.room(reading, pending=held))
-        return f"no hive for {request.lane} has room: {selected.hive} {refused}"
+        return f"no hive for {request.lane} {placement.HAS_ROOM}: {selected.hive} {refused}"
 
     def admit(self, request: SpawnRequest, selected: Selection) -> AgentRecord:
         from scripts.swarm_v2.runtime import codex
