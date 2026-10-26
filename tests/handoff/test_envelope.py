@@ -4,7 +4,7 @@ from dataclasses import replace
 
 import pytest
 
-from scripts.handoff.envelope import REASONS, build, reclaim
+from scripts.handoff.envelope import REASONS, build, reclaim, remote_heads
 from scripts.inbox.store import InboxStore
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
 
@@ -308,3 +308,58 @@ def test_a_reclaim_lists_every_remote_head_it_could_not_read():
     assert verdict["fresh_reason"] == (
         "the remote heads of engineer-a1b2c3-0002, engineer-a1b2c3-0001 could not be read"
     )
+
+
+def _no_git(argv, **kwargs):
+    raise AssertionError(argv)
+
+
+def test_a_reclaim_with_listed_heads_reads_no_remote_and_takes_the_newest_pushed_life():
+    heads = {"engineer-a1b2c3-0001": HEAD, "other": "f" * 40}
+    assert reclaim("/repo", [NEWER, OLDER], "", run=_no_git, heads=heads) == {
+        "remote_branch": "engineer-a1b2c3-0001",
+        "remote_head": HEAD,
+        "continue_from": "origin/engineer-a1b2c3-0001",
+        "fresh_reason": "none",
+    }
+
+
+def test_a_reclaim_with_listed_heads_starts_fresh_when_no_life_is_listed():
+    assert reclaim("/repo", [NEWER, OLDER], "", run=_no_git, heads={"other": HEAD}) == {
+        "remote_branch": "none",
+        "remote_head": "none",
+        "continue_from": "fresh",
+        "fresh_reason": (
+            "no earlier life pushed a branch: checked engineer-a1b2c3-0002 and engineer-a1b2c3-0001 on the remote"
+        ),
+    }
+
+
+def test_a_reclaim_with_an_empty_listing_starts_fresh_without_reading_the_remote():
+    verdict = reclaim("/repo", [OLDER], "", run=_no_git, heads={})
+    assert verdict["continue_from"] == "fresh"
+    assert verdict["fresh_reason"] == "no earlier life pushed a branch: checked engineer-a1b2c3-0001 on the remote"
+
+
+def test_remote_heads_lists_every_branch_head_in_one_call():
+    calls = []
+
+    def run(argv, **kwargs):
+        calls.append((argv, kwargs))
+        return _done(
+            f"{HEAD}\trefs/heads/feature-x\n{'a' * 40}\trefs/heads/dev\n{'b' * 40}\trefs/tags/v1\n"
+            f"{'c' * 40}\trefs/heads/split\tafter\n"
+        )
+
+    assert remote_heads("/repo", run=run) == {"feature-x": HEAD, "dev": "a" * 40, "split\tafter": "c" * 40}
+    assert calls == [(["git", "-C", "/repo", "ls-remote", "--heads", "origin"], {**GIT, "timeout": 20})]
+
+
+@pytest.mark.parametrize("failure", ["code", "raise"])
+def test_remote_heads_is_none_when_the_remote_cannot_be_read(failure):
+    def run(argv, **kwargs):
+        if failure == "raise":
+            raise subprocess.TimeoutExpired(argv, 20)
+        return _done(f"{HEAD}\trefs/heads/feature-x\n", code=128)
+
+    assert remote_heads("/repo", run=run) is None
