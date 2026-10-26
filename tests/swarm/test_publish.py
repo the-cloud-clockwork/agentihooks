@@ -529,6 +529,7 @@ def test_prepare_selects_fresh_dev_after_the_recorded_pull_request_merged(
         return native(command, root)
 
     monkeypatch.setattr(publish, "execute", execute)
+    monkeypatch.setattr(publish.publish_queue, "open_head", lambda remote, url: head if state == "OPEN" else "")
 
     def update_task(slug, task_id, fields, by):
         ledger_tasks.check({"op": "task_update", "item": f"tasks/{task_id}", "fields": fields, "by": by})
@@ -540,12 +541,13 @@ def test_prepare_selects_fresh_dev_after_the_recorded_pull_request_merged(
     result = publish.prepare("swarm", agent, str(repository), ledger)
 
     retired = state == "MERGED" and head == "predecessor"
+    registered = "predecessor" if state == "OPEN" else "engineer-test"
     assert git(worktree, "rev-parse", "HEAD") == (fresh if retired else old_head)
     assert git(worktree, "rev-parse", "--abbrev-ref", "@{upstream}") == (
         "origin/dev" if retired else "origin/predecessor"
     )
-    assert result["branch"] == task["branch"] == "engineer-test"
-    assert task["repository_branches"] == {str(repository): "engineer-test"}
+    assert result["branch"] == task["branch"] == registered
+    assert task["repository_branches"] == {str(repository): registered}
     assert task["pr_url"] == ("" if retired else pr_url)
     assert task[hint] == {"continue_from": "origin/predecessor", "source": "origin/predecessor"}
     assert publish.prepare("swarm", agent, str(repository), ledger) == result
