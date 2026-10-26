@@ -4,6 +4,7 @@ from scripts.swarm_ledger import ledger_plans
 
 OPS = ("phase_add", "phase_update", "phase_review", "phase_append")
 FIELDS = ("title", "description", "depends_on", "planning", "release", "plan_url", "plan_ref", "plan")
+STORED = (*FIELDS, "not_duplicate")
 URL_RE = re.compile(r"^https?://[^\s]+$")
 ID_RE = re.compile(r"^[A-Za-z][\w.-]{0,63}$")
 AUTHOR_RE = re.compile(r"^[A-Za-z][\w.@-]{0,63}$")
@@ -67,7 +68,8 @@ def check(op: dict) -> None:
             raise ValueError("phase_add needs a phase id")
         if not isinstance(op.get("title"), str) or not op["title"].strip():
             raise ValueError("phase_add needs a title")
-        fields = {k: v for k, v in op.items() if k not in ("op", "id", "by", "phase")}
+        check_reason(op)
+        fields = {k: v for k, v in op.items() if k not in ("op", "id", "by", "phase", "not_duplicate")}
     else:
         if not ITEM_RE.fullmatch(str(op.get("item"))):
             raise ValueError("phase ops need item phases/<id>")
@@ -77,6 +79,11 @@ def check(op: dict) -> None:
     if not isinstance(fields, dict) or not fields or set(fields) - set(FIELDS):
         raise ValueError(f"phase fields may set only {FIELDS}")
     check_fields(fields)
+
+
+def check_reason(op: dict) -> None:
+    if "not_duplicate" in op and not (isinstance(op["not_duplicate"], str) and op["not_duplicate"].strip()):
+        raise ValueError("not_duplicate must say in plain words why the phase differs from the one it resembles")
 
 
 def check_review(op: dict) -> None:
@@ -138,7 +145,7 @@ def append(doc: dict, op: dict, ctx) -> bool:
             "id": entry["phase"],
             "description": "",
             "done": False,
-            **{k: entry[k] for k in FIELDS if k in entry},
+            **{k: entry[k] for k in STORED if k in entry},
             "planning": entry.get("planning", PLANNING_DEFAULT),
             "added_by": op["by"],
             **({"review": dict(review)} if entry.get("planning") == "manual" else {}),
@@ -172,7 +179,7 @@ def apply(doc: dict, op: dict, ctx) -> bool:
         fields = {"review": review_record(phase, op, ctx.at)}
     else:
         fields = (
-            {"planning": PLANNING_DEFAULT, **{k: op[k] for k in FIELDS if k in op}} if phase is None else op["fields"]
+            {"planning": PLANNING_DEFAULT, **{k: op[k] for k in STORED if k in op}} if phase is None else op["fields"]
         )
     after = {**(phase or {"id": phase_id, "description": "", "done": False, "comments": []}), **fields}
     try:

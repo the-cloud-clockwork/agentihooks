@@ -603,10 +603,16 @@ def cmd_plan(args):
     phases = ledger_phase_cli.append_phases(
         plan, [phase["id"] for phase in resource(args.slug, "phases", collection=True)]
     )
-    send(args, "phase_append", phases=phases)
+    state = send(args, "phase_append", phases=phases)
+    repeats = ledger_phase_cli.repeats(state.get("_meta", {}).get("warnings", []), phases)
+    for warning in repeats.values():
+        print(warning, file=sys.stderr)
     print(
         json.dumps(
-            {"appended": [phase["phase"] for phase in phases], "planning": {p["phase"]: p["planning"] for p in phases}}
+            {
+                "appended": [phase["phase"] for phase in phases if phase["phase"] not in repeats],
+                "planning": {p["phase"]: p["planning"] for p in phases if p["phase"] not in repeats},
+            }
         )
     )
 
@@ -989,6 +995,9 @@ def build_parser():
     phase.add_argument("--depends-on", default="")
     phase.add_argument("--planning", choices=["manual", "auto"], default=ledger_phases.PLANNING_DEFAULT)
     phase.add_argument("--release", action="store_true")
+    phase.add_argument(
+        "--not-duplicate", default="", help="why the phase differs from the one it resembles; skips the duplicate check"
+    )
     followup = sub.add_parser("followup")
     followup.add_argument("action", choices=["add", "done", "open", "flag", "unflag"])
     followup.add_argument("value")
