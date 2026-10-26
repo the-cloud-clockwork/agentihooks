@@ -243,6 +243,34 @@ def test_a_missing_gh_is_a_swarm_error():
         merge_path.read_jobs("/repo", 5, Gh([OSError("no gh")]))
 
 
+def test_a_server_error_is_retried_after_a_pause(monkeypatch):
+    pauses = []
+    monkeypatch.setattr(merge_path.time, "sleep", pauses.append)
+    gh = Gh([(1, "", "gh: Server Error (HTTP 502)\n"), (1, "", "gh: HTTP 503\n"), (0, '["x"]\n')])
+
+    assert merge_path.read_jobs("/repo", 5, gh) == [["x"]]
+    assert pauses == [10, 10]
+    assert len(gh.calls) == 3
+
+
+def test_a_third_server_error_is_a_swarm_error(monkeypatch):
+    monkeypatch.setattr(merge_path.time, "sleep", lambda seconds: None)
+    gh = Gh([(1, "", "gh: HTTP 502\n")] * 3)
+
+    with pytest.raises(SwarmError, match="^gh: HTTP 502$"):
+        merge_path.read_jobs("/repo", 5, gh)
+    assert len(gh.calls) == 3
+
+
+def test_a_client_error_is_not_retried(monkeypatch):
+    monkeypatch.setattr(merge_path.time, "sleep", lambda seconds: pytest.fail("slept"))
+    gh = Gh([(1, "", "gh: Not Found (HTTP 404)\n")])
+
+    with pytest.raises(SwarmError, match=r"^gh: Not Found \(HTTP 404\)$"):
+        merge_path.read_jobs("/repo", 5, gh)
+    assert len(gh.calls) == 1
+
+
 def test_jobs_are_read_as_runner_labels():
     gh = Gh([(0, '["anton-oss-queue"]\n["anton-oss-light", "x"]\n')])
     assert merge_path.read_jobs("/repo", 5, gh) == [["anton-oss-queue"], ["anton-oss-light", "x"]]
