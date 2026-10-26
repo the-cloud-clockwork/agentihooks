@@ -1818,11 +1818,9 @@ def cmd_block(store, args):
             waits.settle_notices(InboxStore(store.redis), agent, "a new wait")
             print(json.dumps({"task": agent.task, "state": "claimed", "waits_on": held}))
             return
-    from scripts.swarm import publish, resolve
+    from scripts.swarm import publish
 
-    refused = (
-        "" if args.dev_red else resolve.block_refusal(store.config(args.slug).autonomy, args.slug, rows[agent.task])
-    )
+    refused = "" if args.dev_red else _block_refusal(store, args.slug, rows[agent.task])
     if refused:
         raise SwarmError(refused)
     pushed = publish.pushed_branches(_local_repo(store, args.slug), rows[agent.task], agent)
@@ -1834,6 +1832,12 @@ def cmd_block(store, args):
     print(
         json.dumps({"task": agent.task, "state": "blocked", **cause, "next": "stop now; the swarm closes this session"})
     )
+
+
+def _block_refusal(store, slug, task):
+    from scripts.swarm import resolve
+
+    return resolve.block_refusal(store.config(slug).autonomy, slug, task)
 
 
 def _dev_red_run(store, slug):
