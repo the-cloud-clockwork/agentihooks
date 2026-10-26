@@ -192,13 +192,17 @@ def test_an_unknown_explicit_route_and_a_missing_default_are_refused(home, input
         ("https://research-brain.example.test#x", [RESEARCH]),
         ("https://u@research-brain.example.test", [RESEARCH]),
         ("https:///path", ["https://"]),
-        (None, [RESEARCH]),
-        (RESEARCH, RESEARCH),
     ],
 )
 def test_a_route_outside_the_allowlist_is_refused(home, inputs, api, allow):
     _routes(home, inputs, allow=allow, routes={"personal": {"api": api, "token_env": "BRAIN_PERSONAL_TOKEN"}})
     _refused(home.environ(), "the route endpoint is not an allowlisted brain origin")
+
+
+@pytest.mark.parametrize("api, allow", [(None, [RESEARCH]), (3, [RESEARCH]), (RESEARCH, RESEARCH), (RESEARCH, None)])
+def test_a_route_without_an_endpoint_or_allow_list_is_refused(home, inputs, api, allow):
+    _routes(home, inputs, allow=allow, routes={"personal": {"api": api, "token_env": "BRAIN_PERSONAL_TOKEN"}})
+    _refused(home.environ(), "the route names no allowlisted endpoint")
 
 
 @pytest.mark.parametrize("host", ["localhost", "127.0.0.1", "[::1]"])
