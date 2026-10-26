@@ -1064,20 +1064,23 @@ def test_cache_miss_report_names_only_the_five_most_changed_inputs(tmp_path, cap
 
     root = tmp_path / "repo"
     modules = [f"m{index}" for index in range(6)]
-    test = "tests/test_a.py"
-    _repository(root, {f"{name}.py": "value = 1\n" for name in modules} | {test: f"import {', '.join(modules)}\n"})
+    tests = [f"tests/test_{index}.py" for index in range(6)]
+    imports = {test: f"import {', '.join(modules[: 6 - index])}\n" for index, test in enumerate(tests)}
+    _repository(root, {f"{name}.py": "value = 1\n" for name in modules} | imports)
 
     def collect(chosen):
-        return [{"status": 0, "tests": {}, "durations": {f"{test}::test_one": 1}, "cpu": 1}]
+        return [{"status": 0, "tests": {}, "durations": {f"{test}::test_one": 1}, "cpu": 1} for test in chosen]
 
-    collect_cached_stats(root, tmp_path / "cache", {}, [test], [], collect)
+    collect_cached_stats(root, tmp_path / "cache", {}, tests, [], collect)
     for name in modules:
         (root / f"{name}.py").write_text("value = 2\n")
     capsys.readouterr()
-    collect_cached_stats(root, tmp_path / "cache", {}, [test], [], collect)
+    collect_cached_stats(root, tmp_path / "cache", {}, tests, [], collect)
     line = next(line for line in capsys.readouterr().out.splitlines() if "misses" in line)
-    assert line.startswith('Mutation stats cache: misses {"inputs": 1}; changed inputs ')
-    assert ast.literal_eval(line.partition("changed inputs ")[2]) == [(f"{name}.py", 1) for name in modules[:5]]
+    assert line.startswith('Mutation stats cache: misses {"inputs": 6}; changed inputs ')
+    assert ast.literal_eval(line.partition("changed inputs ")[2]) == [
+        (f"{name}.py", 6 - index) for index, name in enumerate(modules[:5])
+    ]
 
 
 @pytest.mark.parametrize(
