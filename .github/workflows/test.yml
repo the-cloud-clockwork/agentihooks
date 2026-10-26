@@ -2885,6 +2885,18 @@ jobs:
           [[ -f ~/dev-durations/.test_durations ]] || { echo "Using committed durations"; exit 0; }
           python -c 'import json, sys; from pathlib import Path; from tests.dev_durations import adopt; Path(".test_durations").write_text(json.dumps(adopt(Path(sys.argv[1]), sys.argv[2]), indent=4, sort_keys=True) + "\n")' ~/dev-durations "$PYTHON_VERSION"
 
+      - name: Restore measured statistics timings
+        if: steps.reuse.outputs.reused != 'true'
+        uses: actions/cache/restore@v4
+        env:
+          SEGMENT_DOWNLOAD_TIMEOUT_MINS: "1"
+        with:
+          path: .mutation-stats-cache
+          key: mutation-test-stats-v2-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            mutation-test-stats-v2-${{ runner.os }}-
+            mutation-test-stats-v1-${{ runner.os }}-
+
       - name: Size mutation shards from stored timings
         id: plan
         if: steps.reuse.outputs.reused != 'true'

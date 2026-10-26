@@ -344,3 +344,12 @@ jobs:
           path: ${{ runner.temp }}/proof-reports
           if-no-files-found: ignore
           retention-days: 7
+
+      - name: Retain focused browser screenshots
+        if: always() && inputs.browser
+        uses: actions/upload-artifact@v4
+        with:
+          name: focused-browser-screenshots
+          path: test-results/*.png
+          if-no-files-found: ignore
+          retention-days: 7

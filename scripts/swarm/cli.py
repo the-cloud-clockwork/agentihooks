@@ -192,6 +192,7 @@ SETTABLE = {
     "snapshot-minutes": "snapshot_minutes",
     "master-move-grace": "master_move_grace",
     "local-max-agents": "local_max_agents",
+    "focus-weight": "focus_weight",
 }
 LANE_KEYS = {f"{lane}-{key}": (lane, key) for lane in templates.LANES for key in templates.LANE_FIELDS}
 EFFORT_KEYS = {"effort-min": "effort_min", "effort-max": "effort_max"}
@@ -219,7 +220,6 @@ CONFIG_KEYS = {
     "watchdog-address": "watchdog_address",
 }
 GATE_KEYS = {f"{name}-gate": name for name in catalog.defaults()}
-GATE_MODES = modes.MODES
 RETIRES_MASTER = frozenset({"stop now", "close ledger"})
 TICK_LOCK_MS = 10 * 60 * 1000
 TICK_SECONDS = 60
@@ -1132,6 +1132,7 @@ def cmd_set(store, args):
                 "max_plan": config.max_plan,
                 "masters_step": config.masters_step,
                 "compact_limit": config.compact_limit,
+                "focus_weight": config.focus_weight,
                 "autonomy": config.autonomy,
                 "snapshot_minutes": config.snapshot_minutes,
                 "effort_min": config.effort_min,
@@ -1249,7 +1250,7 @@ def cmd_status(store, args):
     counts = task_counts(tasks)
     found = findings(store, args.slug, config, tasks, ledger.events(args.slug))
     print(
-        f"{naming.swarm_name(config.code) or '-'}  {config.slug}  {config.state}  eng {config.max_eng}  ci {config.max_ci}  plan {config.max_plan}  masters step {config.masters_step}  scaling {config.scaling}  effort {config.effort_min} to {config.effort_max}  repo {config.repo}"
+        f"{naming.swarm_name(config.code) or '-'}  {config.slug}  {config.state}  eng {config.max_eng}  ci {config.max_ci}  plan {config.max_plan}  masters step {config.masters_step}  scaling {config.scaling}  focus weight {config.focus_weight}  effort {config.effort_min} to {config.effort_max}  repo {config.repo}"
     )
     print(
         "gate modes  "
@@ -1530,6 +1531,12 @@ def cmd_issue(store, args):
     agent = _worker(store, args)
     LedgerClient().update_task(args.slug, agent.task, {"issue_url": args.url}, by=agent.name)
     print(json.dumps({"task": agent.task, "issue_url": args.url}))
+
+
+def cmd_resolve(store, args):
+    from scripts.swarm import resolve
+
+    resolve.run(store, args, _me(store, args).name, LedgerClient())
 
 
 def cmd_review(store, args):
@@ -1819,6 +1826,9 @@ def cmd_block(store, args):
             return
     from scripts.swarm import publish
 
+    refused = "" if args.dev_red else _block_refusal(store, args.slug, rows[agent.task])
+    if refused:
+        raise SwarmError(refused)
     pushed = publish.pushed_branches(_local_repo(store, args.slug), rows[agent.task], agent)
     red_run = _dev_red_run(store, args.slug) if args.dev_red else None
     if pushed:
@@ -1828,6 +1838,12 @@ def cmd_block(store, args):
     print(
         json.dumps({"task": agent.task, "state": "blocked", **cause, "next": "stop now; the swarm closes this session"})
     )
+
+
+def _block_refusal(store, slug, task):
+    from scripts.swarm import resolve
+
+    return resolve.block_refusal(store.config(slug).autonomy, slug, task)
 
 
 def _dev_red_run(store, slug):
@@ -2297,6 +2313,12 @@ def build_parser():
     publish.add_argument("files", nargs="*")
     sub.add_parser("branch")
     sub.add_parser("review")
+    resolve_cmd = sub.add_parser("resolve")
+    resolve_cmd.add_argument("action", choices=("attempt", "critic", "escalate", "status"))
+    resolve_cmd.add_argument("item")
+    for flag in ("--tried", "--output", "--reason", "--evidence"):
+        resolve_cmd.add_argument(flag, default="")
+    resolve_cmd.add_argument("--command", dest="ran", default="")
     done = sub.add_parser("done")
     done.add_argument("--pr", default="")
     for key in ledger_kinds.PROOF_KEYS:

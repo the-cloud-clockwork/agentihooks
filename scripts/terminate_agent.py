@@ -326,9 +326,18 @@ def main(argv: list[str] | None = None) -> int:
     if not args.selector:
         print("terminate-agent: selector is required unless --list is used", file=sys.stderr)
         return 2
+    return _execute(args, items)
+
+
+def _execute(args: argparse.Namespace, items: list[Session]) -> int:
     if args.stand_down and args.type == "claude":
         print("terminate-agent: --stand-down stops Codex conversations only, not --type claude", file=sys.stderr)
         return 2
+    if not args.dry_run:
+        from scripts.gates.entry import native
+
+        if native("terminations", "terminate-agent"):
+            return 2
     if args.stand_down:
         from scripts.codex_session import stand_down
 

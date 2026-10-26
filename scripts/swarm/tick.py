@@ -1442,7 +1442,7 @@ def _collect_acks(slug, config, store, ledger, runtime, doc, now_ms):
 
 
 def _spawn_order(slug, config, store, agents, rows, doc, runtime):
-    from scripts.swarm import capacity
+    from scripts.swarm import capacity, focus_budget
 
     if begin := getattr(runtime, "begin_placement_pass", None):
         begin()
@@ -1453,18 +1453,22 @@ def _spawn_order(slug, config, store, agents, rows, doc, runtime):
     claims = timing.timed(claim_view, slug, store, rows, doc, dispatched)
     queue, waits = [], []
     for lane, cap in caps.items():
-        busy = sum(
-            1 for a in agents if a.lane == lane and not _ended(a, rows) and _current_owner(a, rows.get(a.task, {}))
-        )
+        running = [
+            rows.get(a.task, {"id": a.task, "lane": a.lane})
+            for a in agents
+            if a.lane == lane and not _ended(a, rows) and _current_owner(a, rows.get(a.task, {}))
+        ]
+        busy = len(running)
         ready = timing.timed(ready_in_order, slug, store, rows, doc, lane, dispatched, claims)
         if "tasks" in decision:
             ready = [task for task in ready if task["id"] in decision["tasks"]]
-        ready, refused = timing.timed(
-            profile_first.placeable, slug, config, store, runtime, lane, ready, max(cap - busy, 0)
-        )
+        locate = partial(timing.timed, profile_first.placeable, slug, config, store, runtime, lane)
+        ready, refused = focus_budget.place(doc, ready, lane, cap, config.focus_weight, running, locate)
         queue += [(busy + rank, lane, task) for rank, task in enumerate(ready)]
         waits += refused
-    return timing.timed(_ranked, slug, store, queue, dispatched), waits
+    ranked = timing.timed(_ranked, slug, store, queue, dispatched)
+    focus = focus_budget.ranks(doc)
+    return sorted(ranked, key=lambda entry: focus[entry[1]["id"]]), waits
 
 
 def _ranked(slug, store, queue, dispatched):

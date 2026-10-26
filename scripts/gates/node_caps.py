@@ -71,9 +71,11 @@ class NodeCaps:
     default_mode = "observe"
 
     def matches(self, call):
-        return call.tool in EDITS or call.tool == "Bash"
+        return call.tool in EDITS or call.tool in ("Bash", "hive-create")
 
     def decide(self, call, who, state):
+        if call.tool == "hive-create":
+            return Decision.deny(refusal(["hive create adds infrastructure capacity"])) if who.name else Decision()
         if call.tool == "Bash":
             return Decision.deny(refusal([RESIZE_COMMAND])) if resizes(call.command) else Decision()
         edited = _edited(call)

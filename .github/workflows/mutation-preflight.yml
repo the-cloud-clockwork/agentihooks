@@ -88,6 +88,18 @@ jobs:
         if: steps.open.outputs.open != 'true' && steps.reuse.outputs.reused != 'true'
         run: bash .github/scripts/pypi-retry.sh "Install dependencies" -- uv pip install --system --excludes .github/test-excludes.txt -e ".[dev,all]"
 
+      - name: Restore measured statistics timings
+        if: steps.open.outputs.open != 'true' && steps.reuse.outputs.reused != 'true'
+        uses: actions/cache/restore@v4
+        env:
+          SEGMENT_DOWNLOAD_TIMEOUT_MINS: "1"
+        with:
+          path: .mutation-stats-cache
+          key: mutation-test-stats-v2-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            mutation-test-stats-v2-${{ runner.os }}-
+            mutation-test-stats-v1-${{ runner.os }}-
+
       - name: Size mutation shards from stored timings
         id: plan
         if: steps.open.outputs.open != 'true' && steps.reuse.outputs.reused != 'true'

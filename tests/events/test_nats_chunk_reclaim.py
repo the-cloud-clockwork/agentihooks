@@ -174,6 +174,14 @@ def test_history_visits_each_sequence_and_preserves_empty_values(store_type):
     assert fetch.await_args_list == [mock.call("key", 1), mock.call("key", 2), mock.call("key", 3)]
 
 
+def test_a_losing_chunk_create_returns_quietly():
+    create = mock.AsyncMock(side_effect=[1, nats.KeyWrongLastSequenceError()])
+    store = SimpleNamespace(_kv=SimpleNamespace(create=create))
+    assert asyncio.run(nats.NatsStateStore._create_chunk(store, "chunk", b"first")) is None
+    assert asyncio.run(nats.NatsStateStore._create_chunk(store, "chunk", b"second")) is None
+    assert create.await_args_list == [mock.call("chunk", b"first"), mock.call("chunk", b"second")]
+
+
 def test_scoped_reclaim_compares_local_sequences_after_migration():
     reclaim = mock.AsyncMock()
     write = mock.AsyncMock(return_value=109)
