@@ -8,11 +8,11 @@
   "evidence_class": "mocked: a fixed held out corpus with human review labels and in process packers that follow the kernel ranking contract stand in for brain-api, its graph store and a live model; no embedding, HTTP server or agent runs, and usefulness is the share of injected items a reviewer labelled useful, not a model judgement",
   "inputs": {
     "tests/evaluation/brain_context/corpus.json": "8badfaf3acaf7b548fb6a4da646a82277e9d05320a2230e75505f620b5fc74a0",
-    "tests/evaluation/brain_context/evaluate.py": "7e8b36da903c0f9bf1aa4d5994bb23fb5d28ea10b6d82602a174a528ffe2d6ec",
-    "tests/evaluation/brain_context/cases.py": "d860bcabd1d4bad0c8c1f754ec0a892cf9258b7d5e7f2361cd0b05284dcf0288"
+    "tests/evaluation/brain_context/evaluate.py": "ead0ab386f3c6fb4831da0822cfce63066ef866ff58fe00142ca46ca0eec113e",
+    "tests/evaluation/brain_context/cases.py": "8c7fdb326cfd2a097923a2c22ef9ed30d9fabcced0a886fb8a29dfae818a4868"
   },
   "corpus_revision": "sv2-prf-04-corpus-1",
-  "red_run": "",
+  "red_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/40274963899",
   "records_run": "",
   "tested_commit": ""
 }

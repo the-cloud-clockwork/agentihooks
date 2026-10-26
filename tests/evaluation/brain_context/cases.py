@@ -181,27 +181,28 @@ def reverted(corpus: dict, root: Path) -> dict:
     record = restarted.read()
     assert applied == {"state": "accepted", "sequence": 3} and replay == {"state": "replayed", "sequence": 3}
     assert len(record["history"]) == 3 and record["report_sha256"] == record["history"][0]["report_sha256"]
-    return {
-        "interrupted_revert": {
-            "staged_then_interrupted": True,
-            "survived": {"sequence": 2, "policy": "graph"},
-            **recovered,
+    return (
+        {
+            "interrupted_revert": {
+                "staged_then_interrupted": True,
+                "survived": {"sequence": 2, "policy": "graph"},
+                **recovered,
+            },
+            "applied": applied,
+            "same_operation_replay": replay,
+            "reproducible": {
+                "seed_report_sha256": record["history"][0]["report_sha256"],
+                "revert_report_sha256": record["report_sha256"],
+                "equal": True,
+            },
         },
-        "applied": applied,
-        "same_operation_replay": replay,
-        "reproducible": {
-            "seed_report_sha256": record["history"][0]["report_sha256"],
-            "revert_report_sha256": record["report_sha256"],
-            "equal": True,
-        },
-        "registry": restarted,
-        "rerun": rerun,
-    }
+        restarted,
+        rerun,
+    )
 
 
 def recovery(corpus: dict, root: Path) -> dict:
-    observed = reverted(corpus, root)
-    registry, rerun = observed.pop("registry"), observed.pop("rerun")
+    observed, registry, rerun = reverted(corpus, root)
     graph = evaluate.evaluate("graph", FIXTURES[0], corpus)
     late = request("late-promote-graph", "promote", graph, 2, evaluate.qualify(rerun["totals"], graph["totals"]))
     other = {

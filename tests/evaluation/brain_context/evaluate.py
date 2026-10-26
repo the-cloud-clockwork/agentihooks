@@ -241,6 +241,8 @@ class Registry:
         return json.loads(self.path.read_text(encoding="utf-8"))
 
     def seed(self, corpus_revision: str, policy: str, report_sha256: str) -> dict:
+        if self.path.exists():
+            raise Refused("already_seeded")
         entry = {
             "operation_id": "seed",
             "kind": "seed",
@@ -262,7 +264,8 @@ class Registry:
         earlier = next((e for e in record["history"] if e["operation_id"] == request["operation_id"]), None)
         if earlier is None:
             return None
-        if (earlier["policy"], earlier["report_sha256"]) != (request["policy"], request["report_sha256"]):
+        fields = ("kind", "policy", "report_sha256")
+        if [earlier[key] for key in fields] != [request[key] for key in fields]:
             raise Refused("operation_id_reused")
         return {"state": "replayed", "sequence": earlier["sequence"]}
 
@@ -271,7 +274,7 @@ class Registry:
             raise Refused("other_corpus_revision")
         if request["expected_sequence"] != record["sequence"]:
             raise Refused("stale_sequence")
-        if request["kind"] == "promote" and not request["verdict"]["qualified"]:
+        if request["kind"] == "promote" and not (request.get("verdict") or {}).get("qualified"):
             raise Refused("not_qualified")
         if request["kind"] == "revert":
             earlier = {e["policy"]: e["report_sha256"] for e in record["history"]}

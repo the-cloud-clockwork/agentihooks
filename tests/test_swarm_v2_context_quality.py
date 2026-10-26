@@ -130,6 +130,28 @@ def test_the_registry_refuses_a_stale_sequence_and_replays_an_operation_once(tmp
     assert registry.path.read_bytes() == before and len(registry.read()["history"]) == 2
 
 
+def test_the_registry_refuses_a_reseed_a_missing_verdict_and_a_reused_id_of_another_kind(tmp_path):
+    registry = Registry(tmp_path / "accepted.json")
+    registry.seed("rev-1", "scoped", "a" * 64)
+    with pytest.raises(Refused, match="already_seeded"):
+        registry.seed("rev-1", "graph", "b" * 64)
+    promote = {
+        "operation_id": "op-1",
+        "kind": "promote",
+        "corpus_revision": "rev-1",
+        "expected_sequence": 1,
+        "policy": "graph",
+        "report_sha256": "b" * 64,
+        "verdict": None,
+    }
+    with pytest.raises(Refused, match="not_qualified"):
+        registry.submit(promote)
+    registry.submit({**promote, "verdict": {"qualified": True}})
+    with pytest.raises(Refused, match="operation_id_reused"):
+        registry.submit({**promote, "kind": "revert", "expected_sequence": 2})
+    assert registry.read()["sequence"] == 2 and registry.read()["history"][0]["policy"] == "scoped"
+
+
 def test_the_measure_command_prints_totals_per_policy(capsys):
     assert evaluate.main(["--fixture", "beta", "--policy", "graph"]) == 0
     printed = json.loads(capsys.readouterr().out)
