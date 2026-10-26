@@ -826,3 +826,23 @@ def test_bytes_that_are_not_utf8_are_refused():
         normalize(b"\xff\xfe plan", "binary.md")
 
     assert caught.value.errors == ["the plan is not UTF-8 text"]
+
+
+@pytest.mark.parametrize(
+    ("text", "error"),
+    [
+        ("# Plan\n\n<!-- slice: one -->\n### Task\n\nBody.\n", "slice markers need phase markers above them"),
+        (
+            "# Plan\n\n<!-- slice: dup -->\nEarly.\n\n## Phase\n<!-- phase: planning=auto -->\n\n"
+            "<!-- slice: dup -->\n### Task\n\nBody.\n",
+            "each slice marker needs its own name in the file: dup",
+        ),
+        ("---\ntitle: x\n# not a title\n---\n\n# Plan\n\nBody.\n", "the plan must not start with YAML front matter"),
+        ('{"title": "No phases"}', "a JSON plan needs a phases list"),
+    ],
+)
+def test_sources_that_break_the_marker_rules_are_refused(text, error):
+    with pytest.raises(PlanError) as caught:
+        normalize(text, "bad.md")
+
+    assert caught.value.errors == [error]

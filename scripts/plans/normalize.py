@@ -52,11 +52,13 @@ def _as_json(text: str) -> dict | None:
         document = json.loads(text)
     except json.JSONDecodeError:
         return None
-    if isinstance(document, dict) and isinstance(document.get("phases"), list):
-        return document
     if isinstance(document, list):
         return {"phases": document}
-    return None
+    if not isinstance(document, dict):
+        return None
+    if not isinstance(document.get("phases"), list):
+        raise PlanError(["a JSON plan needs a phases list"])
+    return document
 
 
 def _from_json(document: dict, name: str, existing: set[str]) -> Normalized:
@@ -179,10 +181,17 @@ def _marker_line(phase: dict) -> str:
 
 
 def _from_markdown(text: str, name: str, existing: set[str]) -> Normalized:
+    if text.lstrip().partition("\n")[0].strip() == "---":
+        raise PlanError(["the plan must not start with YAML front matter"])
     entries = plan_ranges.sections(text)
+    names = [match[1] for _, level, line in entries if not level and (match := plan_ranges.ANCHOR.fullmatch(line))]
     markers = {i: j for i in range(len(entries)) if entries[i][1] and (j := _marker_at(entries, i)) is not None}
     if not markers:
+        if names:
+            raise PlanError(["slice markers need phase markers above them"])
         return _raw(text, name, entries)
+    if repeated := sorted({slice_name for slice_name in names if names.count(slice_name) > 1}):
+        raise PlanError([f"each slice marker needs its own name in the file: {', '.join(repeated)}"])
     errors: list[str] = []
     if len({entries[i][1] for i in markers}) > 1:
         errors.append("phase headings must all sit at one heading level")
@@ -199,7 +208,7 @@ def _from_markdown(text: str, name: str, existing: set[str]) -> Normalized:
         ranges = plan_ranges.phase_lines(text, ranged)
     except ValueError as exc:
         raise PlanError([str(exc)]) from None
-    if any(level == 0 and plan_ranges.ANCHOR.fullmatch(line) for _, level, line in entries):
+    if names:
         try:
             plan_ranges.require_markers(text, ranges)
         except ValueError as exc:
