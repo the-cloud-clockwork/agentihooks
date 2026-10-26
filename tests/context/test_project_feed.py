@@ -157,11 +157,16 @@ def test_the_source_setting_selects_the_kernel_by_default_and_the_vault_for_roll
     if setting:
         monkeypatch.setenv("BRAIN_PROJECT_FEED_SOURCE", setting)
     source = project_cache._source([{"id": "a", "title": "b", "content": "c"}])
-    assert type(source) is kind and source.entries == [BrainEntry("a", "b", "c")]
+    assert type(source) is kind
+    assert [(entry.id, entry.title, entry.content) for entry in source.entries] == [("a", "b", "c")]
 
 
 def _raising(error):
     def fetch(self, identity):
+        if error == "unavailable":
+            from hooks.context import brain_adapter
+
+            raise brain_adapter.BrainSourceUnavailable("down")
         raise error
 
     return fetch
@@ -181,7 +186,8 @@ def test_the_project_scope_names_the_canonical_project(home):
     assert project_cache._project_scope(QUIET).brain == project_cache.namespace().brain
 
 
-def test_a_refusal_replaces_cached_memory_with_empty_memory(home):
+def test_a_refusal_replaces_cached_memory_with_empty_memory(home, monkeypatch):
+    monkeypatch.setenv("BRAIN_PROJECT_MEMORY_TTL", "0")
     _refresh(QUIET, lambda self, identity: ProjectMemory("quiet", lessons=["old"]))
     with patch("hooks.common.log") as log:
         cached = _refresh(QUIET, _raising(ScopedFeedRefused("no")))
@@ -195,14 +201,14 @@ def test_an_outage_marks_cached_memory_stale_and_counts_it(home, monkeypatch):
     _refresh(QUIET, lambda self, identity: ProjectMemory("quiet", lessons=["kept"]))
     monkeypatch.setenv("BRAIN_PROJECT_MEMORY_TTL", "0")
     monkeypatch.setattr(project_cache.time, "time", lambda: 200.0)
-    cached = _refresh(QUIET, _raising(BrainSourceUnavailable("down")))
+    cached = _refresh(QUIET, _raising("unavailable"))
     assert cached["memory"]["lessons"] == ["kept"] and cached["at"] == 100.0 and cached["outage_at"] == 200.0
     assert project_cache.scoped_feed_fallbacks() == {"kernel_outage": 1}
     assert project_cache.scoped_feed_fallback_total() == 1
 
 
 def test_an_outage_without_cached_memory_writes_nothing(home):
-    assert _refresh(QUIET, _raising(BrainSourceUnavailable("down"))) == {}
+    assert _refresh(QUIET, _raising("unavailable")) == {}
     assert project_cache.scoped_feed_fallbacks() == {}
 
 
