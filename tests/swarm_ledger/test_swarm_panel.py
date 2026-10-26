@@ -262,6 +262,16 @@ class SwarmPanel(unittest.TestCase):
             ["swarm", SLUG, "set", "max-eng-agents=3", "max-ci-agents=0"],
         )
 
+    def test_set_writes_focus_weight_and_refuses_values_outside_percent_bounds(self):
+        for weight in (0, 50, 100):
+            code, _, run = self.control({"action": "set", "focus_weight": weight})
+            self.assertEqual(code, 200)
+            self.assertEqual(run.call_args_list[0].args[3], ["set", f"focus-weight={weight}"])
+        for weight in (-1, 101, True, "50"):
+            code, _, run = self.control({"action": "set", "focus_weight": weight})
+            self.assertEqual(code, 400)
+            run.assert_not_called()
+
     def test_set_writes_the_swarm_compact_limit(self):
         for limit in (100, 450, 1000):
             code, _, run = self.control({"action": "set", "compact_limit": limit})

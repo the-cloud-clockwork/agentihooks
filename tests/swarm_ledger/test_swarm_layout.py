@@ -305,6 +305,17 @@ def test_capacity_fields_take_typed_values_and_apply_sends_one_set(open_page):
     assert apply.is_disabled()
 
 
+def test_focus_weight_reads_persisted_value_and_apply_sends_the_change(open_page):
+    payload = status()
+    payload["config"]["focus_weight"] = 30
+    page = open_page(payload)
+    field = page.tab.get_by_role("textbox", name="Focus weight", exact=True)
+    assert field.input_value() == "30"
+    field.fill("50")
+    page.tab.get_by_role("button", name="Apply capacity", exact=True).click()
+    assert page.puts == [{"action": "set", "focus_weight": 50}]
+
+
 def test_the_masters_step_stepper_drafts_and_apply_sends_it(open_page):
     page = open_page()
     field = page.tab.locator("#cap-masters")
