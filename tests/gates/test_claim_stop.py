@@ -26,10 +26,15 @@ CLOSED = PullRequest("CLOSED", None, 1, False, True)
 class FakeLedger:
     def __init__(self, task):
         self.rows = {task["id"]: task}
-        self.comments, self.updates = [], []
+        self.comments, self.updates, self.reads = [], [], []
 
     def tasks(self, slug):
-        return list(self.rows.values()) if slug == SLUG else []
+        raise AssertionError(f"read every task of {slug!r} on a Stop")
+
+    def task(self, slug, task_id):
+        assert slug == SLUG
+        self.reads.append(task_id)
+        return self.rows.get(task_id)
 
     def update_task(self, slug, task_id, fields, by="swarm", if_state=(), if_match=None):
         assert slug == SLUG
@@ -611,8 +616,23 @@ def test_only_a_pinned_worker_with_a_task_is_gated(rig, who):
     def unread(slug):
         raise AssertionError(f"read the ledger of {slug!r} for an agent the gate skips")
 
-    rig.ledger.tasks = unread
+    rig.ledger.task = lambda slug, task_id: unread(slug)
     assert rig.stop(who).allowed
+
+
+def test_a_stop_reads_only_its_own_task(rig):
+    rig.ledger.rows["other"] = {"id": "other", "state": "open"}
+    rig.stop()
+    assert rig.ledger.reads == ["t1"]
+
+
+def test_a_wait_on_a_task_reads_only_that_dependency(rig):
+    rig.ledger.rows["d0"] = {"id": "d0", "state": "claimed"}
+    idle.declare_wait(
+        rig.store.redis, SLUG, ME, rig.clock[0] + 60_000, "task d0", rig.clock[0], on={"kind": "task", "target": "d0"}
+    )
+    assert rig.stop().allowed
+    assert rig.ledger.reads == ["t1", "d0"]
 
 
 def test_a_ci_worker_is_gated(rig):

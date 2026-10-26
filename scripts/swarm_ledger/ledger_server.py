@@ -811,6 +811,14 @@ def sample_streams():
             sys.stderr.write(f"stream sample {slug}: {exc}\n")
 
 
+def request_caller(headers) -> str:
+    if headers is None:
+        return "-"
+    if headers.get("X-Ledger-Agent"):
+        return headers["X-Ledger-Agent"]
+    return "controller" if headers.get("X-Controller-Credential") else "-"
+
+
 class Handshake(Exception):
     pass
 
@@ -861,7 +869,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def log_message(self, fmt, *args):
         if self.path.startswith("/api/v1/"):
-            sys.stderr.write(f"{time.strftime('%H:%M:%S')} {self.command} {self.path.split('?', 1)[0]}\n")
+            caller = request_caller(getattr(self, "headers", None))
+            sys.stderr.write(f"{time.strftime('%H:%M:%S')} {self.command} {self.path.split('?', 1)[0]} {caller}\n")
             return
         sys.stderr.write("%s %s\n" % (time.strftime("%H:%M:%S"), fmt % args))
 
