@@ -333,11 +333,12 @@ def test_write_stages_its_temporary_file_beside_the_target(tmp_path):
 
 
 def test_a_failed_write_removes_its_temporary_file_and_raises_the_cause(tmp_path):
-    target = tmp_path / "file"
+    target = tmp_path / "folder" / "file"
+    target.parent.mkdir()
     with mock.patch.object(backup.os, "fsync", side_effect=OSError("disk full")):
         with pytest.raises(OSError, match="disk full"):
             backup._write(target, b"data")
-    assert list(tmp_path.iterdir()) == []
+    assert list(target.parent.iterdir()) == []
 
 
 def test_restore_refuses_a_component_this_release_lists_no_versions_for(world):
