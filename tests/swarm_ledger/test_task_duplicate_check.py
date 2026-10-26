@@ -383,7 +383,7 @@ def test_a_refused_add_is_not_flagged_and_gets_the_refusal():
 
 
 def test_the_cli_prints_the_warning_when_tasks_landed_during_the_check(monkeypatch, capsys):
-    warning = ledger_task_duplicates.CONCURRENT.format(new="t9", ids="t4")
+    warning = ledger_task_duplicates.CONCURRENT.format(label="task", new="t9", ids="t4")
     monkeypatch.setattr(ledger, "call", lambda slug, ops: {"applied": ["x"], "_meta": {"warnings": [warning]}})
     ledger.send(SimpleNamespace(slug=SLUG, name=MASTER), "task_add", task="t9", title=REPEAT, lane="eng")
     assert capsys.readouterr().err.strip() == warning

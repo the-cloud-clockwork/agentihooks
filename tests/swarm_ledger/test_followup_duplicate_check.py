@@ -1,10 +1,12 @@
+import json
+import uuid
 from types import SimpleNamespace
 
 import pytest
 
 from scripts.swarm_ledger import ledger_agent_ops, ledger_duplicates, ledger_task_duplicates
-from tests.swarm_ledger.test_ledger_authority import MASTER, SLUG, admin_put, cli_ledger, core
-from tests.swarm_ledger.test_task_duplicate_check import REPEAT, Judge, authority_live, judged, operations
+from tests.swarm_ledger.test_ledger_authority import MASTER, SLUG, admin_put, cli_ledger, core, send
+from tests.swarm_ledger.test_task_duplicate_check import REPEAT, Judge, authority_live, judged
 from tests.swarm_ledger.test_task_duplicate_check import live as _task_live
 
 live_tasks = _task_live
@@ -33,6 +35,20 @@ def live(live_tasks):
 
 def followup(item_id, text, by=MASTER, **fields):
     return {"op": "add_item", "id": item_id, "by": by, "list": "followups", "text": text, **fields}
+
+
+def operations(live, *ops):
+    headers = {"X-Ledger-Token": live["admin"]}
+    guards = {
+        path: json.loads(send(live, "GET", f"/api/v1/ledgers/{SLUG}/{path}", **headers)[1])["revision"]
+        for path in ("tasks", "followups")
+    }
+    body = {"operation_id": uuid.uuid4().hex, "ops": list(ops), "guards": guards}
+    path = f"/api/v1/ledgers/{SLUG}/operations"
+    status, data, _ = send(
+        live, "POST", path, json.dumps(body).encode(), **headers, **{"Content-Type": "application/json"}
+    )
+    return status, json.loads(data)
 
 
 def stored(item_id):
@@ -192,3 +208,52 @@ def test_a_not_duplicate_reason_must_be_plain_words_on_a_follow_up(op):
 
 def test_a_follow_up_add_with_a_reason_passes_the_check():
     ledger_agent_ops.check(followup("f9", AGAIN, not_duplicate="the inbox watch"))
+
+
+class Inner:
+    def __init__(self, accepted=True):
+        self.applied, self.accepted = [], accepted
+
+    def apply(self, doc, op, ctx, apply_op):
+        self.applied.append((op["id"], apply_op))
+        return self.accepted
+
+
+def test_a_follow_up_repeating_one_that_landed_during_its_check_is_refused():
+    screen = ledger_task_duplicates.Screen(seen=frozenset({"followups/f9"}))
+    gate = ledger_task_duplicates.Gate(screen, Inner(accepted=False))
+    landed = {"id": "f4", "text": f"  {AGAIN.upper()} "}
+    assert gate.apply({"followups": [landed]}, followup("f9", AGAIN), None, "apply") is False
+    (applied_id, refuse), ctx = gate.inner.applied[0], SimpleNamespace(refused=[])
+    assert applied_id == "f9" and refuse({}, {}, ctx) is False
+    assert ctx.refused == [
+        f'follow up f9 repeats follow up f4 "{landed["text"]}", added while its duplicate check ran. '
+        'If it is a different change, add it with --not-duplicate "<why it differs>"'
+    ]
+
+
+def test_a_follow_up_names_the_open_follow_ups_that_landed_while_its_check_ran():
+    screen = ledger_task_duplicates.Screen(seen=frozenset({"followups/f1", "followups/f9"}))
+    gate = ledger_task_duplicates.Gate(screen, Inner())
+    doc = {
+        "tasks": [{"id": "t4", "title": "Other"}],
+        "followups": [
+            {"id": "f1", "text": "Seen"},
+            {"id": "f9", "text": AGAIN},
+            {"id": "f4", "text": "Other"},
+            {"id": "f5", "text": "Closed", "done": True},
+        ],
+    }
+    assert gate.apply(doc, followup("f9", AGAIN), None, "apply") is True
+    assert screen.warnings == {
+        "f9": "the duplicate check did not compare follow up f9 with f4, added while it ran, so check them for repeats"
+    }
+    assert gate.inner.applied == [("f9", "apply")]
+
+
+def test_the_screen_remembers_the_follow_ups_it_compared_and_the_adds_it_screened(monkeypatch):
+    monkeypatch.setattr(ledger_task_duplicates, "find", lambda doc, adds, kind: [None] * len(adds))
+    doc = {"tasks": [{"id": "t1"}], "followups": [{"id": "f1"}]}
+    assert ledger_task_duplicates.screen(doc, [followup("f9", AGAIN)]).seen == frozenset(
+        {"t1", "followups/f1", "followups/f9"}
+    )
