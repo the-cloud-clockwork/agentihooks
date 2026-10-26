@@ -36,7 +36,8 @@
     "A reference added outside the catalog after collect's last reference read and before its unlink is not fenced; collect rereads the archive manifest and references immediately before each unlink to narrow that window. A crash after an unlink leaves a claim with no bytes; a later reference to that digest is reported missing and counted as an unsafe delete rejection.",
     "No scheduler runs collect; an operator or job invokes it.",
     "The grant principal is not checked against an operator role; the grant corpus scopes ownership, and the command line builds its grant from the domain an operator names.",
-    "Two collect runs over one domain are not fenced against each other; the caller runs one collector per domain. A second run treats the first run's claims as resumable and both can count the same bytes."
+    "Two collect runs over one domain are not fenced against each other; the caller runs one collector per domain. A second run treats the first run's claims as resumable and both can count the same bytes.",
+    "Bytes whose commit fails verification after the reservation is released stay as unowned objects that collection never reclaims; removing them is a manual operator action."
   ],
   "rollback_rehearsal": "B ran collect with destructive off and inside grace; the catalog, reservation and retirement rows, object files and vectors were unchanged, then a destructive collect reclaimed the same set the inventory listed",
   "spec_mapping": {

@@ -336,6 +336,7 @@ def test_main_runs_inventory_collect_and_retire(world, tmp_path, capsys):
         ["collect", "c", "d", "--principal", "p", "--objects", "o", "--generation", "g"],
         ["collect", "c", "d", "--principal", "p", "--objects", "o"],
         ["retire", "c", "d", "--generation", "g"],
+        ["retire", "c", "d", "--principal", "p", "--generation", "g", "--objects", "o"],
     ],
 )
 def test_main_refuses_mismatched_flags(argv):
