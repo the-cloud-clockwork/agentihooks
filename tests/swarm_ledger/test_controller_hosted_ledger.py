@@ -586,7 +586,7 @@ def test_the_prompt_summary_reads_the_close_summary_through_the_hosted_server(co
     assert prompt.summary_lines(SLUG) == [
         "Ledger summary from the previous close:",
         "Summary\nStopped after the hosted reads",
-        "In your first ledger chat line, name this summary and say where the work stopped in plain words.",
+        "When the operator writes, use this summary to say where the work stopped in plain words.",
     ]
 
 

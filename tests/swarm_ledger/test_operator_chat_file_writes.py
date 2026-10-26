@@ -27,7 +27,15 @@ def stored(tmp_path, monkeypatch):
         "chat-proof",
         ops=[
             {"op": "add", "thread": "chat", "id": "question", "text": "Where are we?"},
-            {"op": "add", "thread": "chat", "id": "addressed", "by": "boss", "to": "operator", "text": "Work started."},
+            {
+                "op": "add",
+                "thread": "chat",
+                "id": "addressed",
+                "by": "boss",
+                "to": "operator",
+                "reply_to": "question",
+                "text": "Work started.",
+            },
             {
                 "op": "add",
                 "thread": "chat",
@@ -73,7 +81,7 @@ def test_legacy_file_write_cannot_add_chat_to_stored_ledger(stored, suffix, entr
 
 
 @pytest.mark.parametrize(
-    "address,accepted", [({}, False), ({"to": "operator"}, True), ({"reply_to": "question"}, True)]
+    "address,accepted", [({}, False), ({"to": "operator"}, False), ({"reply_to": "question"}, True)]
 )
 def test_stored_chat_accepts_only_operator_conversation(stored, address, accepted):
     repo, before = stored

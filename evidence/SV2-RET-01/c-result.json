@@ -1,0 +1,96 @@
+{
+  "after_interruption": {
+    "journal": [
+      [
+        "planned",
+        "",
+        ""
+      ],
+      [
+        "deleted",
+        "ckpt-live-1",
+        ""
+      ]
+    ],
+    "removals": [
+      "ckpt-live-1"
+    ]
+  },
+  "case": "C",
+  "duplicate_removals": 0,
+  "interrupted": "transport lost before the removal",
+  "journal": [
+    [
+      "planned",
+      "",
+      ""
+    ],
+    [
+      "deleted",
+      "ckpt-live-1",
+      ""
+    ],
+    [
+      "deleted",
+      "ckpt-live-3",
+      ""
+    ],
+    [
+      "deleted",
+      "ckpt-old",
+      ""
+    ],
+    [
+      "skipped",
+      "log-old",
+      "evidence_hold"
+    ],
+    [
+      "deleted",
+      "old-native",
+      ""
+    ],
+    [
+      "deleted",
+      "old-transcript",
+      ""
+    ],
+    [
+      "deleted",
+      "personal-preview",
+      ""
+    ]
+  ],
+  "metrics": {
+    "retention_protected_objects": {
+      "active_restore": 3,
+      "evidence_hold": 2,
+      "latest_checkpoint": 3,
+      "not_expired": 5,
+      "referenced": 1
+    }
+  },
+  "newly_protected_present": true,
+  "removals": [
+    "ckpt-live-1",
+    "ckpt-live-3",
+    "ckpt-old",
+    "old-native",
+    "old-transcript",
+    "personal-preview"
+  ],
+  "replay_removals": 6,
+  "resumed": {
+    "deleted": [
+      "ckpt-live-1",
+      "ckpt-live-3",
+      "ckpt-old",
+      "old-native",
+      "old-transcript",
+      "personal-preview"
+    ],
+    "skipped": {
+      "log-old": "evidence_hold"
+    }
+  }
+}

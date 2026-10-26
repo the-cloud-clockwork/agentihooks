@@ -1,3 +1,4 @@
+import math
 import os
 import sqlite3
 from collections.abc import Mapping
@@ -78,10 +79,31 @@ def _ledger(slug, now_ms, errors, box, swarm=None):
         errors.append(f"ledger metrics failed: {exc}")
 
 
+def _interval_ms(environ):
+    every_ms = float(environ.get("AGENTIHOOKS_METRICS_EVERY_MINUTES", "10")) * 60_000
+    if not 1 <= every_ms < math.inf:
+        raise ValueError("metrics collectors need a positive interval in minutes")
+    return int(every_ms)
+
+
+def _claim_interval(slug, store, now_ms, environ):
+    return bool(store.redis.set(store.key(slug, "metrics-collected"), now_ms, nx=True, px=_interval_ms(environ)))
+
+
 def _pass(slug, now_ms, swarm, errors, box, environ):
-    timing.call(_ledger, slug, now_ms, errors, box, swarm)
-    if swarm is not None:
+    if swarm is None:
+        timing.call(_ledger, slug, now_ms, errors, box)
+        return
+    if not _claim_interval(slug, swarm.store, now_ms, environ):
+        return
+    reported, failed = len(errors), True
+    try:
+        timing.call(_ledger, slug, now_ms, errors, box, swarm)
         timing.call(_collect, slug, now_ms, swarm, box, errors, environ)
+        failed = len(errors) > reported
+    finally:
+        if failed:
+            swarm.store.redis.delete(swarm.store.key(slug, "metrics-collected"))
 
 
 def record_pass(

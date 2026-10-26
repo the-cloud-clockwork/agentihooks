@@ -87,6 +87,15 @@ def test_a_hive_that_beat_at_the_first_millisecond_reads_its_real_age(store):
     assert row["heartbeat_age_s"] == (NOW - 1) / 1000
 
 
+def test_a_heartbeat_after_the_sample_time_reads_age_zero(store):
+    registry.update(store.redis, "h1", ["name=anton-1"])
+    store.redis.hset(registry.key("h1"), "heartbeat_at", json.dumps(NOW + 20_000))
+
+    (row,) = metrics_service.hive_rows(store, "sw", NOW)
+
+    assert row["heartbeat_age_s"] == 0.0
+
+
 def test_record_appends_probe_and_hive_rows_to_the_outbox(store, tmp_path):
     _probe(store)
     registry.update(store.redis, "h1", ["name=anton-1"])

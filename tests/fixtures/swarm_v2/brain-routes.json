@@ -1,0 +1,36 @@
+{
+  "routes": {
+    "revision": 1,
+    "default": "personal",
+    "allow": ["http://localhost:8104", "https://research-brain.example.test"],
+    "routes": {
+      "personal": {"api": "http://localhost:8104", "token_env": "BRAIN_PERSONAL_TOKEN"},
+      "research": {"api": "https://research-brain.example.test/", "token_env": "BRAIN_RESEARCH_TOKEN"}
+    }
+  },
+  "changed_routes": {
+    "revision": 2,
+    "default": "personal",
+    "allow": ["http://localhost:8105", "https://research-brain.example.test"],
+    "routes": {
+      "personal": {"api": "http://localhost:8105", "token_env": "BRAIN_PERSONAL_TOKEN"},
+      "research": {"api": "https://research-brain.example.test/", "token_env": "BRAIN_RESEARCH_TOKEN"}
+    }
+  },
+  "explicit_route": "research",
+  "swarm_binding": {
+    "instance": "swarm-brain",
+    "origins": {"lan": {"api": "https://swarm-brain-api.example.test", "mcp": "https://swarm-brain-mcp.example.test/mcp"}},
+    "credentials": {
+      "api": {"header": "Authorization", "scheme": "Bearer"},
+      "mcp": {"header": "X-API-Key", "scheme": ""}
+    }
+  },
+  "credentials": {
+    "BRAIN_PERSONAL_TOKEN": "fxpersonal1",
+    "BRAIN_RESEARCH_TOKEN": "fxresearch1",
+    "SWARM_BRAIN_API_TOKEN": "fxswarmapi1",
+    "SWARM_BRAIN_MCP_KEY": "fxswarmmcp1"
+  },
+  "repository_override": {"BRAIN_URL": "http://attacker-brain.example.test:8080", "BRAIN_HTTP_TOKEN": "fxrepository1"}
+}

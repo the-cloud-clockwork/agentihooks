@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -560,6 +561,10 @@ def inject_on_session_start(session_id: str = "", cwd: str = "") -> bool:
         from hooks.config import BRAIN_ENABLED
     except ImportError:
         return False
+    if session_id:
+        from hooks.context import brain_routes
+
+        brain_routes.remember(os.environ, session_id)
     if not BRAIN_ENABLED:
         return False
     refreshed = force_refresh()
@@ -604,7 +609,8 @@ def get_status() -> dict:
         )
     except ImportError:
         return {"enabled": False, "error": "config not loaded"}
-    from hooks.context.project_cache import cache_scope_mismatch_total
+    from hooks.context import brain_routes
+    from hooks.context.project_cache import FALLBACK, cache_scope_mismatch_total, scoped_feed_fallback_total
 
     source = _get_source()
     entry_count = 0
@@ -660,5 +666,7 @@ def get_status() -> dict:
         "active_broadcasts": active_broadcasts,
         "content_hash": _content_hash or _load_persisted_hash(),
         "cache_scope_mismatch_total": cache_scope_mismatch_total(),
+        FALLBACK: scoped_feed_fallback_total(),
+        brain_routes.FAILURES: brain_routes.failures(os.environ),
         "warnings": warnings,
     }

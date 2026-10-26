@@ -53,8 +53,8 @@
   "PLR0912": 18
  },
  "hooks/hook_manager.py::on_session_start": {
-  "C901": 31,
-  "PLR0912": 30
+  "C901": 30,
+  "PLR0912": 29
  },
  "hooks/hook_manager.py::on_stop": {
   "C901": 23,

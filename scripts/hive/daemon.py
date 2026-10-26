@@ -10,7 +10,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from hooks.context import account_sessions, broadcast
+from hooks.context import account_sessions, broadcast, profile_chain
 from scripts import claude_quota_balancer as balancer
 from scripts import codex_router, github_app_cli, master_claude_login, session_bands
 from scripts.hive import quota_refresh, registry
@@ -76,6 +76,7 @@ def beat(redis: "Redis", local_id: str) -> None:
     headroom.publish(redis, local_id, beat_ms)
     if not member:
         _refresh_launch_slots(redis, executions)
+    adopt_capabilities(redis, local_id)
     if not fenced:
         poll_orders(consumer)
     consumer.poll_commands()
@@ -148,6 +149,13 @@ def _slot_errors() -> tuple[type[Exception], ...]:
     from scripts.hive import account_slots
 
     return NatsError, TimeoutError, account_slots.Unavailable
+
+
+def adopt_capabilities(redis: "Redis", local_id: str) -> None:
+    """Launches inherit the daemon environment, so a render sees the capabilities this hive's record declares."""
+    os.environ.pop(profile_chain.HIVE_CAPABILITIES, None)
+    declared = json.loads(redis.hget(registry.key(local_id), "capabilities") or "[]")
+    os.environ[profile_chain.HIVE_CAPABILITIES] = ",".join(declared)
 
 
 def adopt_caps(redis: "Redis", report: dict) -> None:

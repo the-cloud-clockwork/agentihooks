@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING
 from scripts import openbao_kv
 from scripts.events import nkey, subjects
 from scripts.events.dead import DEAD_STREAM
+from scripts.events.resource_names import legacy_stream_name
 from scripts.hive import auth, buckets
 from scripts.hub import slots
 
@@ -46,6 +47,11 @@ MEMBER_PUBLISH = (
     "dead.*.*",
     "$JS.API.INFO",
     f"$JS.API.STREAM.MSG.GET.{DEAD_STREAM}",
+    "$JS.API.STREAM.MSG.GET.AGENTIHOOKS_DEAD",
+    "$JS.API.STREAM.INFO.AGENTIHOOKS-EVENTS",
+    "$JS.API.STREAM.INFO.AGENTIHOOKS_EVENTS",
+    "$JS.API.STREAM.INFO.AGENTIHOOKS-DEAD",
+    "$JS.API.STREAM.INFO.AGENTIHOOKS_DEAD",
     "$JS.API.CONSUMER.INFO.>",
     "$JS.API.CONSUMER.MSG.NEXT.>",
     "$JS.ACK.>",
@@ -116,7 +122,11 @@ def swarm_publish(swarm: str) -> list[str]:
         *(f"QUEUE_{lane}" for lane in ("eng", "ci", "plan")),
         *(f"STATE_{bucket}" for bucket in buckets.NAMES),
     )
-    streams = [subjects.stream_name(swarm, resource) for resource in resources]
+    streams = [
+        name
+        for resource in resources
+        for name in (subjects.stream_name(swarm, resource), legacy_stream_name(swarm, resource))
+    ]
     return [
         f"{subjects.PREFIX}.{swarm}.>",
         *(

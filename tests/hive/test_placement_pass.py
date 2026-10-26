@@ -1,3 +1,4 @@
+import os
 from unittest.mock import Mock
 
 import pytest
@@ -122,3 +123,155 @@ def test_a_running_tick_ends_the_placement_pass_after_spawning():
     tick("sw", store, FakeLedger([{"id": "t1", "lane": "eng"}]), runtime, now_ms=1_000)
     assert runtime.spawned
     assert runtime.passes[-1] == ("end", len(runtime.spawned))
+
+
+def test_a_placement_pass_loads_the_hives_once_and_the_next_pass_reloads(setup, monkeypatch):  # noqa: F811
+    from scripts.hive import launch as launch_module
+
+    loads = []
+    loaded = launch_module.loaded_hives
+    monkeypatch.setattr(launch_module, "loaded_hives", lambda store: loads.append(store) or loaded(store))
+    launch = setup.launcher
+    launch.placement_cache = None
+    first = launch.hives()
+    assert launch.hives() == first
+    assert len(loads) == 2
+    launch.placement_cache = {}
+    passed = launch.hives()
+    assert launch.hives() is passed
+    assert len(loads) == 3
+    launch.placement_cache = {}
+    assert launch.hives() is not passed
+    assert len(loads) == 4
+
+
+def test_a_local_slot_limit_leaves_the_pass_hives_unchanged_for_later_tasks(setup, monkeypatch):  # noqa: F811
+    import copy
+
+    from scripts.hive import admission
+    from scripts.hive.placement import Wait
+    from scripts.swarm import commands
+
+    monkeypatch.setattr(commands, "hive_id", lambda: "remote")
+    monkeypatch.setattr(admission, "capped", lambda found, agents, maximum: admission.Room(0, "max agents", "full"))
+    launch = setup.launcher
+    launch.placement_cache = {}
+    before = copy.deepcopy(launch.hives())
+    assert isinstance(launch.select(setup.config, "eng", {"id": "one"}), Wait)
+    assert launch.hives() == before
+
+
+def test_a_placement_pass_opens_the_master_seat_on_hives_named_for_its_swarm(setup):  # noqa: F811
+    write_hive(setup, excluded=["master", "engineer"], master_swarms=[setup.config.slug])
+    setup.launcher.placement_cache = {}
+    assert [hive["excluded"] for hive in setup.launcher.hives()] == [["engineer"]]
+
+
+def test_a_placement_pass_reads_the_bundle_revision_once_and_the_next_pass_reads_again(monkeypatch, tmp_path):
+    from scripts.swarm import overlays, profile_choice
+    from scripts.swarm import runtime as runtime_module
+    from scripts.swarm.profile_choice import ProfileDecision
+    from scripts.swarm.store import SwarmConfig
+
+    reads = iter(("first", "second", "third", "fourth"))
+    monkeypatch.setattr(overlays, "revision", lambda: next(reads))
+    monkeypatch.setattr(profile_choice, "choose", lambda *args: ProfileDecision("engineer", "task", "engineer"))
+    herdr = runtime_module.HerdrRuntime(home=tmp_path)
+    config = SwarmConfig("fixture", "agentihooks", 1, 1)
+
+    def revision(task_id):
+        return herdr._profile_decision(config, "eng", {}, {"id": task_id}, {}, {}, {}).bundle_revision
+
+    assert herdr.pass_memo is None
+    assert [revision("one"), revision("two")] == ["first", "second"]
+    herdr.pass_memo = {}
+    assert [revision("one"), revision("two")] == ["third", "third"]
+    herdr.pass_memo = {}
+    assert revision("one") == "fourth"
+
+
+def test_a_placement_pass_checks_the_workstation_herdr_once_and_the_next_pass_checks_again(
+    setup,  # noqa: F811
+    monkeypatch,
+):
+    from scripts import herdr_host
+
+    write_hive(setup, excluded=["engineer"])
+    checks = []
+
+    def running(environ):
+        checks.append(environ)
+        return True
+
+    monkeypatch.setattr(herdr_host, "server_running", running)
+    original = RoutedRuntime(setup.herdr, RuntimeRouter([]))
+    runtime = controller.FencedRuntime(setup.store, setup.config.slug, setup.held, original, controller.HYBRID)
+
+    runtime.placement_refusal("eng", {"id": "one"})
+    runtime.placement_refusal("eng", {"id": "two"})
+    assert len(checks) == 2
+    runtime.begin_placement_pass()
+    assert runtime.runtime.hive_launch.herdr.pass_memo == {}
+    runtime.placement_refusal("eng", {"id": "one"})
+    runtime.placement_refusal("eng", {"id": "two"})
+    assert len(checks) == 3
+    runtime.end_placement_pass()
+    assert runtime.runtime.hive_launch.herdr.pass_memo is None
+    runtime.begin_placement_pass()
+    runtime.placement_refusal("eng", {"id": "one"})
+    assert len(checks) == 4
+
+
+def test_a_master_moved_to_the_workstation_shares_the_pass_herdr_check(monkeypatch):
+    from scripts import herdr_host
+
+    checks = []
+
+    def running(environ):
+        checks.append(environ)
+        return True
+
+    monkeypatch.setattr(herdr_host, "server_running", running)
+    refused = controller.WORKSTATION.format(lane="master")
+    memo = {}
+    assert controller._to_workstation("master", refused, memo) is True
+    assert controller._to_workstation("master", refused, memo) is True
+    assert len(checks) == 1
+    assert checks[0] == dict(os.environ)
+    assert memo == {"workstation_herdr": True}
+    assert controller._to_workstation("master", refused) is True
+    assert len(checks) == 2
+    assert controller._to_workstation("eng", refused, memo) is False
+    assert len(checks) == 2
+
+
+class _Stop(Exception):
+    pass
+
+
+@pytest.mark.parametrize("step", ["placement_refusal", "spawn"])
+def test_master_placement_and_spawn_hand_the_pass_memo_to_the_workstation_check(
+    setup,  # noqa: F811
+    monkeypatch,
+    step,
+):
+    original = RoutedRuntime(setup.herdr, RuntimeRouter([]))
+    runtime = controller.FencedRuntime(setup.store, setup.config.slug, setup.held, original, controller.HYBRID)
+    refused = controller.WORKSTATION.format(lane="master")
+    monkeypatch.setattr(runtime, "_refusal", lambda lane, task, claim="": refused)
+    memos = []
+
+    def to_workstation(lane, seen, memo=None):
+        memos.append(memo)
+        raise _Stop
+
+    monkeypatch.setattr(controller, "_to_workstation", to_workstation)
+    runtime.begin_placement_pass()
+    pass_memo = runtime.runtime.hive_launch.herdr.pass_memo
+    with pytest.raises(_Stop):
+        if step == "spawn":
+            runtime._spawn(setup.config, "master", "master@x-1", {"id": "master"})
+        else:
+            runtime.placement_refusal("master", {"id": "master"})
+    assert len(memos) == 1
+    assert memos[0] is pass_memo

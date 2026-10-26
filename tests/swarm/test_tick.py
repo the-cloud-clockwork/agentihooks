@@ -1806,7 +1806,7 @@ RECLAIMED = {
 def reclaims(monkeypatch):
     seen = []
 
-    def lookup(repo, lives, recorded):
+    def lookup(repo, lives, recorded, heads=None):
         seen.append((repo, lives, recorded))
         return RECLAIMED
 

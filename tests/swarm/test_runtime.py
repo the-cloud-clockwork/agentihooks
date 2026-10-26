@@ -740,7 +740,7 @@ def test_resume_relaunches_the_same_harness_name_task_and_account_into_its_conve
     assert argv[argv.index("--agent") + 1] == "codex"
     assert argv[argv.index("--resume") + 1] == "c0ffee"
     assert argv[argv.index("--dir") + 1] == str(tmp_path)
-    assert argv[argv.index("--workspace") + 1] == f"{tmp_path.name}-a1b2c3"
+    assert argv[argv.index("--workspace") + 1] == f"{tmp_path.name.replace('_', '-')}-a1b2c3"
     assert _passed(argv)[:2] == ["--route", "a1"] and "-m" in _passed(argv)
     assert Path(argv[argv.index("--prompt-file") + 1]).read_text() == "you were restored"
     assert (seen["env"]["AGENTIHOOKS_SWARM_LANE"], seen["env"]["AGENTIHOOKS_SWARM_TASK"]) == ("eng", "t1")

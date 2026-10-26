@@ -95,7 +95,9 @@ def _start(tools: Tools, options: Options) -> dict:
     if saved.get("name") and not saved.get("finished"):
         tools.out(f"hive create {saved['name']}: resuming the unfinished create")
         return saved
-    name = machine.name(tools.redis, options.node, assign=not options.dry_run)
+    name = machine.name(
+        tools.redis, options.node, assign=not options.dry_run, taken=lambda: machine.held_names(tools.redis, tools.run)
+    )
     if saved.get("name") == name:
         tools.out(f"hive create {name}: redeploying the hive of node {options.node}")
         return {**saved, "finished": False}
@@ -240,7 +242,8 @@ def _merged(tools: Tools, options: Options) -> str:
     if found != "MERGED":
         if not create_github.merge(tools.run, url):
             checks = f"pull request {url} checks to pass"
-            _wait(tools, options, checks, lambda: create_github.checks_passed(tools.run, url))
+            required = create_github.required_checks(tools.run, options.repo, options.base)
+            _wait(tools, options, checks, lambda: create_github.checks_passed(tools.run, url, required))
             create_github.squash(tools.run, url)
         _wait(
             tools, options, f"pull request {url} to merge", lambda: create_github.pr_state(tools.run, url) == "MERGED"

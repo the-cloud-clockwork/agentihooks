@@ -52,7 +52,7 @@ def hybrid(setup, monkeypatch, deployment="hybrid"):
     from scripts.swarm_v2.runtime.base import RuntimeRouter
     from scripts.swarm_v2.runtime.routed import RoutedRuntime
 
-    monkeypatch.setattr(controller, "_workstation_herdr", lambda: True)
+    monkeypatch.setattr(controller, "_workstation_herdr", lambda memo=None: True)
     workstation(monkeypatch, 10)
     setup.store.redis.delete(registry.key("remote"))
     setup.store.redis.srem(registry.INDEX, "remote")
@@ -294,7 +294,7 @@ def test_no_workstation_herdr_leaves_the_hive_wait(setup, monkeypatch):
 
     fenced = hybrid(setup, monkeypatch)
     fill_anton(setup)
-    monkeypatch.setattr(controller, "_workstation_herdr", lambda: False)
+    monkeypatch.setattr(controller, "_workstation_herdr", lambda memo=None: False)
     assert fenced.placement_refusal("eng", {"id": "task"}) == HIVE_FULL
 
 

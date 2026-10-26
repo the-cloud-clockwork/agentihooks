@@ -88,6 +88,7 @@ dev = [
     "pytest-split>=0.10",
     "pytest-asyncio>=0.23",
     "ruff==0.15.12",
+    "vulture==2.14",
     "boto3>=1.34.0",
     "fakeredis[lua]>=2.0",
     "mutmut==3.6.0",
@@ -95,6 +96,7 @@ dev = [
     "pytest-reportlog>=1.0",
     "pytest-rerunfailures>=16.7",
     "pytest-timeout>=2.4",
+    "hypothesis>=6.100",
     "detect-test-pollution==1.2.0",
     "uv>=0.5",
 ]
