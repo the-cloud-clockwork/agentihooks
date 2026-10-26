@@ -3,13 +3,17 @@ import ast
 import json
 import math
 import os
+import re
 import subprocess
 import time
 import zipfile
 from datetime import UTC, datetime
 from difflib import SequenceMatcher
 from functools import cache
+from itertools import accumulate
 from pathlib import Path
+
+import yaml
 
 from scripts.ci_cpu_quota import worker_count as quota_workers
 from scripts.ci_mutation.browser import needs_browser
@@ -19,10 +23,10 @@ from scripts.ci_test_plan import find_record
 from tests.dep_manifest import (
     GLOBAL_FILES,
     MEASURED,
+    _git,
     _show,
     _spans,
     changed_units,
-    global_input,
     line_units,
     node,
 )
@@ -32,6 +36,12 @@ from tests.dep_manifest import changes as recorded_changes
 MUTANT_SECONDS = 5.6
 WORKERS = 4
 RECORD_RETRY_SECONDS = 10
+TEST_WORKFLOW = ".github/workflows/test.yml"
+COLLECTING_JOBS = {
+    TEST_WORKFLOW: ("unit", "unit-selected", "mutation-stats"),
+    ".github/workflows/mutation-preflight.yml": ("stats",),
+}
+SCHEDULING_KEYS = {"needs", "if", "timeout-minutes", "outputs"}
 RECORD_ERRORS = (subprocess.SubprocessError, OSError, ValueError, KeyError, zipfile.BadZipFile)
 
 
@@ -124,16 +134,14 @@ def record_drift(root: Path, manifest: dict) -> tuple[set[str], set[int], set[st
     tests, units, paths = set(), set(), set()
     for path, old, new in recorded_changes(root, manifest["commit"], "HEAD"):
         if path.startswith(".github/workflows/"):
-            if global_input(
-                path, _show(root, manifest["commit"], path), _show(root, "HEAD", path), manifest.get("version")
-            ):
+            if workflow_changed(root, manifest, path):
                 return None
             paths.add(path)
         elif path.startswith("tests/") and path.endswith(".py"):
-            # A changed helper or conftest can move what any test reaches.
-            if not Path(path).name.startswith("test_"):
+            reached = helper_tests(root, path)
+            if reached is None:
                 return None
-            tests.add(path)
+            tests.update(reached)
         elif path in GLOBAL_FILES or (path.endswith(".py") and not path.startswith(MEASURED)):
             return None
         elif path.endswith(".py"):
@@ -143,19 +151,133 @@ def record_drift(root: Path, manifest: dict) -> tuple[set[str], set[int], set[st
     return tests, units, paths
 
 
+def workflow_changed(root: Path, manifest: dict, path: str) -> bool:
+    if manifest.get("version") != 2 or path.endswith(".py"):
+        return True
+    return path in COLLECTING_JOBS and collection_changed(
+        _show(root, manifest["commit"], path), _show(root, "HEAD", path), COLLECTING_JOBS[path]
+    )
+
+
+def collection_changed(old: str | None, new: str | None, jobs: tuple[str, ...]) -> bool:
+    # Only the jobs that run the recorded tests, and the jobs whose outputs they read, decide what a test reaches.
+    try:
+        before, after = (yaml.safe_load(text) for text in (old, new))
+        if not all(isinstance(workflow["jobs"][jobs[0]], dict) for workflow in (before, after)):
+            return True
+        if any(before.get(key) != after.get(key) for key in ("env", "defaults")):
+            return True
+        named = set(jobs)
+        for workflow in (before, after):
+            for name in jobs:
+                needs = workflow["jobs"].get(name, {}).get("needs", [])
+                named.update([needs] if isinstance(needs, str) else needs)
+        for name in named:
+            old_job, new_job = (
+                {key: value for key, value in workflow["jobs"].get(name, {}).items() if key not in SCHEDULING_KEYS}
+                for workflow in (before, after)
+            )
+            if old_job != new_job:
+                return True
+        return False
+    except (TypeError, KeyError, AttributeError, yaml.YAMLError):
+        return True
+
+
+def helper_tests(root: Path, path: str) -> set[str] | None:
+    importers = _importers(root)
+    reached = [path]
+    for current in reached:
+        module = current.removesuffix(".py").removesuffix("/__init__").replace("/", ".")
+        keys = {module, current}
+        if Path(current).name in ("conftest.py", "__init__.py"):
+            folder = f"{Path(current).parent.as_posix()}/"
+            found = {name for name in importers["*"] if name.startswith(folder)}
+        else:
+            keys.update((Path(current).stem, Path(current).name))
+            found = set()
+        found.update(name for key in keys for name in importers.get(key, ()))
+        reached.extend(sorted(found.difference(reached)))
+    if any(not found.startswith("tests/") for found in reached):
+        return None
+    return {found for found in reached if Path(found).name.startswith("test_")}
+
+
+@cache
+def _importers(root: Path) -> dict[str, set[str]]:
+    found = {"*": set()}
+    for path in _git(root, "ls-files", "--", "hooks/*.py", "scripts/*.py", "tests/*.py").splitlines():
+        found["*"].add(path)
+        for key in _reach_keys(path, (root / path).read_text(errors="replace")):
+            found.setdefault(key, set()).add(path)
+    return found
+
+
+def _reach_keys(path: str, source: str) -> set[str]:
+    tokens = (token.rstrip(".") for token in re.split(r"[^\w./-]+", source))
+    keys = {token for token in tokens if token.endswith(".py")}
+    keys.update(Path(key).name for key in list(keys))
+    names = [*re.findall(r"\b(?:tests|hooks|scripts)(?:\.\w+)+", source), *_imported(path, source)]
+    for name in names:
+        keys.update(accumulate(name.split("."), lambda prefix, part: f"{prefix}.{part}"))
+    return keys
+
+
+def _imported(path: str, source: str) -> list[str]:
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return []
+    package = path.removesuffix(".py").replace("/", ".").split(".")
+    names = []
+    for found in ast.walk(tree):
+        if isinstance(found, ast.Import):
+            names.extend(alias.name for alias in found.names)
+        elif isinstance(found, ast.ImportFrom):
+            parent = package[: len(package) - found.level] if found.level else []
+            base = ".".join([*parent, *filter(None, [found.module])])
+            names.append(base)
+            names.extend(f"{base}.{alias.name}" if base else alias.name for alias in found.names)
+    return names
+
+
 def changed_recorded_units(root: Path, manifest: dict, changes: dict[str, set[int]]) -> tuple[set[int], set[str]]:
     index = {unit: number for number, unit in enumerate(manifest["units"])}
     units, unrecorded = set(), set()
     for path, lines in changes.items():
-        spans = _spans(ast.parse((root / path).read_text()))
+        tree = ast.parse((root / path).read_text())
+        spans = _spans(tree)
+        new = new_functions(_show(root, manifest["commit"], path), tree)
         for line in lines:
             if inside := [span for span in spans if span[0] <= line <= span[2]]:
                 unit = f"{path}::{max(inside)[3]}"
                 if unit in index:
                     units.add(index[unit])
-                else:
+                elif max(inside)[3].partition(".")[0] not in new:
                     unrecorded.add(path)
     return units, unrecorded
+
+
+def new_functions(old: str | None, tree: ast.Module) -> set[str]:
+    if old is None:
+        return set()
+    try:
+        known = _known_names(ast.parse(old))
+    except SyntaxError:
+        return set()
+    return {
+        statement.name
+        for statement in tree.body
+        if isinstance(statement, (ast.FunctionDef, ast.AsyncFunctionDef))
+        and not statement.decorator_list
+        and statement.name not in known
+        and any(
+            isinstance(found, ast.Name) and found.id == statement.name
+            for other in tree.body
+            if other is not statement
+            for found in ast.walk(other)
+        )
+    }
 
 
 def covering_tests(manifest: dict, units: set[int], paths: set[str]) -> set[str]:
@@ -177,6 +299,27 @@ def _statement(node: ast.stmt) -> str | tuple:
     return ast.dump(node)
 
 
+def _module_key(node: ast.stmt) -> str | tuple:
+    if isinstance(node, ast.ClassDef):
+        heads = [*node.bases, *node.keywords, *node.decorator_list]
+        kept = (
+            item
+            for item in node.body
+            if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+            or isinstance(item, (ast.Assign, ast.AnnAssign))
+            and isinstance(item.value, ast.Dict)
+        )
+        return (node.name, *map(ast.dump, heads), *map(_module_key, kept))
+    return _statement(node)
+
+
+def _module_keys(source: str) -> list:
+    try:
+        return [_module_key(node) for node in ast.parse(source).body]
+    except SyntaxError:
+        return [source]
+
+
 def binds_only_new_names(old: str, new: str) -> bool:
     try:
         before, after = ast.parse(old), ast.parse(new)
@@ -185,12 +328,20 @@ def binds_only_new_names(old: str, new: str) -> bool:
     pending, bound = list(before.body), set()
     for statement in after.body:
         match = next((kept for kept in pending[:1] if _statement(kept) == _statement(statement)), None)
+        if match is None:
+            match = _extended_table(pending[:1], statement)
         if match is None and isinstance(statement, ast.ImportFrom):
             match = _extended_import(pending, statement)
             present = {ast.dump(alias) for alias in match.names} if match else set()
             bound.update(_bound(alias) for alias in statement.names if ast.dump(alias) not in present)
         elif match is None and isinstance(statement, ast.Import):
             bound.update(_bound(alias) for alias in statement.names)
+        elif (
+            match is None
+            and isinstance(statement, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and not statement.decorator_list
+        ):
+            bound.add(statement.name)
         elif (
             match is None
             and isinstance(statement, ast.Assign)
@@ -202,6 +353,53 @@ def binds_only_new_names(old: str, new: str) -> bool:
         if match is not None:
             pending.remove(match)
     return not pending and "*" not in bound and not bound & _known_names(before)
+
+
+def _extended_table(candidates: list[ast.stmt], statement: ast.stmt) -> ast.Assign | None:
+    return next(
+        (
+            kept
+            for kept in candidates
+            if isinstance(kept, ast.Assign)
+            and isinstance(statement, ast.Assign)
+            and all(isinstance(target, ast.Name) for target in statement.targets)
+            and list(map(ast.dump, kept.targets)) == list(map(ast.dump, statement.targets))
+            and _adds_entries(kept.value, statement.value)
+        ),
+        None,
+    )
+
+
+def _adds_entries(old: ast.expr, new: ast.expr) -> bool:
+    if type(old) is not type(new) or not isinstance(old, (ast.Dict, ast.List, ast.Tuple, ast.Set)):
+        return False
+    before, after = (
+        list(zip(table.keys, table.values)) if isinstance(table, ast.Dict) else [(None, item) for item in table.elts]
+        for table in (old, new)
+    )
+    kept = [_entry(entry) for entry in before]
+    added, position = [], 0
+    for entry in after:
+        if kept[position : position + 1] == [_entry(entry)]:
+            position += 1
+        else:
+            added.append(entry)
+    if (
+        position < len(kept)
+        or not added
+        or any(isinstance(node, ast.Call) for entry in added for node in ast.walk(entry[1]))
+    ):
+        return False
+    if isinstance(old, ast.Dict):
+        if not all(isinstance(key, ast.Constant) for key in [*old.keys, *(key for key, _ in added)]):
+            return False
+        keys = [key.value for key, _ in added]
+        return len(set(keys)) == len(keys) and not set(keys) & {key.value for key in old.keys}
+    return isinstance(old, ast.Set) or list(map(_entry, after[: len(kept)])) == kept
+
+
+def _entry(entry: tuple[ast.expr | None, ast.expr]) -> tuple[str, ...]:
+    return tuple(map(ast.dump, filter(None, entry)))
 
 
 def _bound(alias: ast.alias) -> str:
@@ -234,9 +432,11 @@ def _known_names(tree: ast.Module) -> set[str]:
     return known
 
 
-def recorded_lines(root: Path, manifest: dict, changes: dict[str, set[int]]) -> tuple[dict[str, set[int]], set[int]]:
+def recorded_lines(
+    root: Path, manifest: dict, changes: dict[str, set[int]]
+) -> tuple[dict[str, set[int]], set[int], set[tuple[str, str]]]:
     lines = {path: set(found) for path, found in changes.items()}
-    fallback = set()
+    fallback, tables = set(), set()
     index = {unit: number for number, unit in enumerate(manifest["units"])}
     for path, old, new in recorded_changes(root, manifest["commit"], "HEAD"):
         if not path.endswith(".py") or not path.startswith(MEASURED):
@@ -262,14 +462,52 @@ def recorded_lines(root: Path, manifest: dict, changes: dict[str, set[int]]) -> 
             for line in range(first, body)
         }
         fallback.update(headers[line] for line in affected if line in headers)
-        if not binds_only_new_names(old, new):
+        if not binds_only_new_names(old, new) and _module_keys(old) != _module_keys(new):
             fallback.update(number for unit, number in index.items() if unit.startswith(f"{path}::"))
-        lines[path] = affected | {mapping[line] for line in changes.get(path, ()) if line in mapping}
-    return lines, fallback
+        extended = extended_tables(old, new)
+        tables.update((path, name) for name in extended)
+        lines[path] = (
+            affected
+            | {mapping[line] for line in changes.get(path, ()) if line in mapping}
+            | table_reads(ast.parse(old), extended)
+        )
+    return lines, fallback, tables
+
+
+def extended_tables(old: str, new: str) -> dict[str, bool]:
+    before = list(ast.parse(old).body)
+    return {
+        target.id: isinstance(statement.value, ast.Dict)
+        for statement in ast.parse(new).body
+        if _extended_table(before, statement)
+        for target in statement.targets
+    }
+
+
+def table_reads(tree: ast.Module, tables: dict[str, bool]) -> set[int]:
+    # A lookup that raises on a missing key reaches a new entry only for a test that passes that new key.
+    guarded = {
+        id(node)
+        for found in ast.walk(tree)
+        if isinstance(found, ast.Try) and found.handlers
+        for statement in found.body
+        for node in ast.walk(statement)
+    }
+    keyed = {
+        id(found.value) for found in ast.walk(tree) if isinstance(found, ast.Subscript) and id(found) not in guarded
+    }
+    return {
+        found.lineno
+        for found in ast.walk(tree)
+        if isinstance(found, ast.Name)
+        and found.id in tables
+        and isinstance(found.ctx, ast.Load)
+        and not (tables[found.id] and id(found) in keyed)
+    }
 
 
 def line_covering_tests(root: Path, manifest: dict, changes: dict[str, set[int]], paths: set[str]) -> set[str]:
-    lines, fallback = recorded_lines(root, manifest, changes)
+    lines, fallback, tables = recorded_lines(root, manifest, changes)
     return {
         node(test).partition("[")[0]
         for test, found in manifest["tests"].items()
@@ -277,7 +515,16 @@ def line_covering_tests(root: Path, manifest: dict, changes: dict[str, set[int]]
         or fallback.intersection(found["units"])
         or paths.intersection(found.get("files", ()))
         or any(changed.intersection(manifest["lines"][test].get(path, ())) for path, changed in lines.items())
+        or any(
+            path in manifest["lines"][test] and re.search(rf"\b{name}\b", file_text(root / test_file(test)))
+            for path, name in tables
+        )
     }
+
+
+@cache
+def file_text(path: Path) -> str:
+    return path.read_text() if path.is_file() else ""
 
 
 @cache

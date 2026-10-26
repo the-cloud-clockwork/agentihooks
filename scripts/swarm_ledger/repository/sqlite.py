@@ -12,7 +12,7 @@ from . import artifact_files, heap, hierarchy, media_files, outbox, refresh
 from .entry import Entry
 from .events import append_events, read_events, trim_events, write_events
 from .fragments import document
-from .rows import TABLES, assemble, diff, encode, flatten, read_rows, write_rows
+from .rows import TABLES, assemble, diff, encode, flatten, load, read_rows, write_rows
 from .seeds import read_seeds, sync_values, write_seeds
 
 SCHEMA = """
@@ -471,7 +471,7 @@ class SQLiteLedgerRepository:
             state = None if cached is None else self._refreshed(connection, slug, cached, row[0])
             whole = state is None
             if whole:
-                state = assemble(read_rows(connection, slug))
+                state = load(connection, slug)
             if "events" in state["_meta"]:
                 state["_meta"] = {**state["_meta"], "events": read_events(connection, slug)}
             fragments = document(state, None if whole else cached.fragments)
@@ -553,6 +553,28 @@ class SQLiteLedgerRepository:
                     heap.release()
         return entry.views[view]
 
+    def export_since(self, slug: str, since: int, view, changes) -> tuple[int, str | bytes]:
+        """(generation, text) of the stored ledger: changes(state, paths) when the database recorded every row
+        change after generation since, else view(state) as encoded_view builds it."""
+        self._adopt(slug)
+        with self.connect() as connection, connection:
+            connection.execute(BEGIN)
+            entry = self._entry(connection, slug)
+            paths = (
+                refresh.changed_paths(connection, slug, since, entry.generation, CHANGES_KEPT)
+                if 0 < since <= entry.generation
+                else None
+            )
+        text = None if paths is None else changes(entry.state, paths)
+        if text is not None:
+            return entry.generation, text
+        if view not in entry.views:
+            with VIEW_BUILD:
+                if view not in entry.views:
+                    entry.views[view] = view(entry.state)
+                    heap.release()
+        return entry.generation, entry.views[view]
+
     def read(self, slug: str, *keys: str) -> dict:
         """Only the named parts of a ledger, such as `overview`, `_meta.members` or `tasks/t1`."""
         self._adopt(slug)
@@ -579,6 +601,9 @@ class SQLiteLedgerRepository:
                 return since
             values = dict(connection.execute(TASK_REVISION, (slug, *TASK_REVISION_PATHS)))
             meta = {json.loads(path)[1]: json.loads(value) for path, value in values.items()}
+            cached = self._cache.get(self._key(slug))
+            if cached is not None and cached.generation == row[0]:
+                return row[0], meta, cached.state.get("tasks") or []
             paths = None
             if since is not None and since[0] < row[0]:
                 paths = refresh.changed_paths(connection, slug, since[0], row[0], CHANGES_KEPT)

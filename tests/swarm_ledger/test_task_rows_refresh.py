@@ -148,6 +148,21 @@ def test_task_rows_reuses_the_untouched_tasks_after_a_task_is_added(tmp_path):
     assert [row is old for row, old in zip(rows, since[2])] == [True, True, True]
 
 
+def test_task_rows_reads_every_task_row_when_the_kept_history_was_trimmed_past_since(tmp_path, monkeypatch):
+    from scripts.swarm_ledger.repository import sqlite as sqlite_module
+    from scripts.swarm_ledger.repository.sqlite import SQLiteLedgerRepository
+
+    tasks = [{"id": f"t{n}", "title": f"T{n}"} for n in range(3)]
+    path = stored(tmp_path, tasks)
+    reader = SQLiteLedgerRepository(path)
+    since = reader.task_rows("rows")
+    changed = [*tasks[:2], {**tasks[2], "title": "Changed"}]
+    write_tasks(path, changed)
+    write_tasks(path, changed)
+    monkeypatch.setattr(sqlite_module, "CHANGES_KEPT", 1)
+    assert reader.task_rows("rows", since)[2] == changed
+
+
 def test_rebuilt_replaces_one_changed_item_of_an_array_nested_in_a_task(tmp_path):
     import json
 
@@ -165,3 +180,44 @@ def test_rebuilt_replaces_one_changed_item_of_an_array_nested_in_a_task(tmp_path
         paths = refresh.changed_paths(connection, "rows", since[0], since[0] + 1, 256)
         inside = {changed_path for changed_path in paths if json.loads(changed_path)[:3] == parts}
         assert inside and refresh.rebuilt(connection, "rows", encode(parts), items, inside) == changed
+
+
+def test_task_rows_share_the_cached_entry_rows_at_the_same_generation(tmp_path):
+    from scripts.swarm_ledger.repository.sqlite import SQLiteLedgerRepository
+
+    tasks = [{"id": f"t{n}", "title": f"T{n}"} for n in range(3)]
+    path = stored(tmp_path, tasks)
+    reader = SQLiteLedgerRepository(path)
+    since = reader.task_rows("rows")
+    write_tasks(path, [*tasks[:2], {**tasks[2], "title": "Changed"}])
+    entry = reader.current("rows")
+    shared = reader.task_rows("rows", since)
+    assert shared[0] == entry.generation == since[0] + 1
+    assert shared[2] is entry.state["tasks"]
+    assert shared[2] == SQLiteLedgerRepository(path).read("rows", "tasks")["tasks"]
+    assert shared[1] == SQLiteLedgerRepository(path).task_rows("rows")[1] != {}
+
+
+def test_task_rows_read_stored_rows_when_the_cached_entry_is_from_another_generation(tmp_path):
+    from scripts.swarm_ledger.repository.entry import Entry
+    from scripts.swarm_ledger.repository.sqlite import SQLiteLedgerRepository
+
+    tasks = [{"id": "t0", "title": "T0"}]
+    path = stored(tmp_path, tasks)
+    reader = SQLiteLedgerRepository(path)
+    generation = reader.current("rows").generation
+    ahead = [{"id": "ahead"}]
+    reader._cache[reader._key("rows")] = Entry(generation + 1, None, {"tasks": ahead})
+    rows = reader.task_rows("rows")
+    assert rows[0] == generation
+    assert rows[2] == tasks and rows[2] is not ahead
+
+
+def test_task_rows_of_a_cached_ledger_without_tasks_are_an_empty_list(tmp_path):
+    from scripts.swarm_ledger.repository.entry import Entry
+    from scripts.swarm_ledger.repository.sqlite import SQLiteLedgerRepository
+
+    reader = SQLiteLedgerRepository(stored(tmp_path, []))
+    generation = reader.current("rows").generation
+    reader._cache[reader._key("rows")] = Entry(generation, None, {"_meta": {}})
+    assert reader.task_rows("rows")[2] == []

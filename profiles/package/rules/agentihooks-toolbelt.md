@@ -49,6 +49,7 @@ for compliance.
 | Serena refuses, or which worktrees hold a backend | `agentihooks serena status` (page http://127.0.0.1:8643/); router down → `agentihooks serena restart` |
 | A dev-environment tool is missing or out of state | `agentihooks deps check`, then `agentihooks deps ensure`; a tool `deps.json` lacks → add it to the bundle by PR |
 | A change only reaches sessions after a restart (MCP registration, plugin) | `agentihooks deps mark-changed --reason <x>`; `init-agent` sessions restart at their next stop |
+| The operator says remember, yesterday, or names earlier work | `recall_search` (scope a ledger or swarm slug, default this swarm; `all` crosses swarms), then `recall_get <ref>`; `recall_timeline` for a time span, `recall_sources` for what is indexed (`agentihooks recall` in a shell). Recall before reading ledger files. Recall holds swarm and ledger history; fleet lessons stay in the brain |
 
 Use channels for live coordination. Put durable knowledge in brain markers or
 `brain_ingest`.

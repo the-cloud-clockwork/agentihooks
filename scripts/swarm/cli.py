@@ -216,6 +216,7 @@ CONFIG_KEYS = {
     **TRANSPORT_KEYS,
     HIVE_PLACEMENT: "hive_placement",
     "engine": "engine",
+    "watchdog-address": "watchdog_address",
 }
 GATE_KEYS = {f"{name}-gate": name for name in catalog.defaults()}
 GATE_MODES = modes.MODES
@@ -436,7 +437,9 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None, scheduled=F
                 doc,
             )
             actions += skip_refused(quiet.quiet_pass, store, slug, rows, now_ms())
-            actions += skip_refused(doc_report.report_pass, inbox, ledger, slug, doc["tasks"], now_ms())
+            actions += skip_refused(
+                doc_report.report_pass, inbox, ledger, slug, doc["tasks"], now_ms(), config.watchdog_address
+            )
             actions += skip_refused(dispatcher.priorities, store, slug, doc, ledger, view, now_ms())
             if scheduled:
                 from scripts.swarm import refresh_job
@@ -582,6 +585,7 @@ def _tickable(slug):
 def cmd_tick(store, args):
     from scripts.hive import workstation
     from scripts.swarm import scheduled_tick, tick_reaper
+    from scripts.swarm_ledger.api import client as ledger_api
 
     if not workstation.runs_engine(os.environ):
         print(workstation.NO_ENGINE, file=sys.stderr)
@@ -596,7 +600,8 @@ def cmd_tick(store, args):
                     f"reaped leftover swarm tick process {left.pid} after {left.age_s} seconds "
                     f"with {left.signal}: {left.command}"
                 )
-            _tick_host(store, started)
+            with ledger_api.kept_exports():
+                _tick_host(store, started)
     except scheduled_tick.AlreadyRunning:
         print("another swarm tick is running on this machine", file=sys.stderr)
 
@@ -1023,7 +1028,7 @@ def api_address(value):
 
 
 def config_value(key, value):
-    if key in default_models.KEYS or key in TRANSPORT_KEYS or key == "engine":
+    if key in default_models.KEYS or key in TRANSPORT_KEYS or key in ("engine", "watchdog-address"):
         return value
     if key == HIVE_PLACEMENT:
         return on_off(value)
@@ -1746,7 +1751,9 @@ def cmd_done(store, args):
     _close_members(ledger, args.slug, agent, row, {**fields, "pr_url": args.pr or row.get("pr_url")})
     waits.settle_notices(InboxStore(store.redis), agent, "done")
     _retire(store, args.slug, agent, "finished its task and exited")
-    doc_report.report(InboxStore(store.redis), ledger, args.slug, closed, now_ms())
+    doc_report.report(
+        InboxStore(store.redis), ledger, args.slug, closed, now_ms(), store.config(args.slug).watchdog_address
+    )
     fallback = {"pull_request": pull.fallback} if pull is not None and pull.fallback else {}
     print(
         json.dumps({"task": agent.task, "state": "done", **fallback, "next": "stop now; the swarm closes this session"})

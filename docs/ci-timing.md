@@ -56,10 +56,10 @@ controller:
     initialDelaySeconds: 5
     periodSeconds: 1
     timeoutSeconds: 5
-    failureThreshold: 2
-  terminationGracePeriodSeconds: 1
+    failureThreshold: 6
+  terminationGracePeriodSeconds: 30
   env:
-    AGENTIHOOKS_CONTROLLER_TICK_SECONDS: "2"
+    AGENTIHOOKS_CONTROLLER_TICK_SECONDS: "5"
 ```
 
 Liveness initial delay fell from ten to five seconds and its period from two
@@ -2196,12 +2196,12 @@ A shard listed with `success` stalled once and recovered; one listed with `failu
 
 ## Worker hive pod image build
 
-The Worker hive pod workflow (`hive-worker.yml`) runs `deploy/worker/kind-proof.sh` in its `kind` job. The script builds the image `local/agentihooks-hive-worker:dev` while a kind cluster starts, loads it into the cluster and proves that a worker Pod registers with the hive and acknowledges an order. The image has two parts:
+The Worker hive pod workflow (`hive-worker.yml`) runs `deploy/worker/kind-proof.sh` in its `kind` job. The script builds the image `localhost:5001/agentihooks-hive-worker:dev` while a kind cluster starts and pushes it, without unpacking it into Docker, to a registry container the kind node pulls from; the node already holds the base layers it pre-pulled, so it fetches only the hive layers. The script then proves that a worker Pod registers with the hive and acknowledges an order. The image has two parts:
 
 | Part | Dockerfile | Contents |
 |---|---|---|
 | Worker base | `docker/swarm-node/Dockerfile` | the tools: Claude CLI, Codex CLI, herdr, git and the rest of the swarm worker toolchain |
-| Hive layer | `deploy/worker/Dockerfile` | a wheel of the checked out agentihooks source, installed over the base, the `wt.sh` link and the worker start script |
+| Hive layer | `deploy/worker/Dockerfile` | a wheel of the checked out agentihooks source installed into a separate venv, linked over the base with `COPY --link=true` so the build never unpacks the base, the `wt.sh` link and the worker start script |
 
 The hive layer's `WORKER_IMAGE` build argument defaults to the published base, `ghcr.io/the-cloud-clockwork/agentihooks-worker:dev`, which the Swarm worker image workflow (`swarm-node-image.yml`) publishes on pushes to `dev`. The proof reuses that base and builds only the hive layer, unless the base's inputs changed since it was published. Before this change every run rebuilt the base and reinstalled every tool, and the build took 133 to 137 seconds; on the published base it takes 58 to 76 seconds (see [Measurements](#measurements)).
 
@@ -2238,7 +2238,7 @@ Change these together in one pull request; `tests/deployment/test_worker_hive_im
 
 Limits: the check reads and compares only the `linux/amd64` base of a published image index, the kind node is pinned to `mirror.gcr.io/kindest/node:v1.37.0`, and the script needs `docker`, `git`, `python3`, `kind`, `kubectl`, `helm` and `openssl` on the runner and writes its output under `$HOME/scratchpad/worker-hive-proof`.
 
-The rest of the proof is unchanged: the same smoke check inside the image (`claude`, `codex`, `herdr` and `git --version`, `wt.sh root` and `agentihooks hive --help`), Pod registration and order acknowledgement, and on a `dev` push the `kind` job, which starts only after the `contracts` job passes, publishes the image it proved straight from its own Docker daemon.
+The init and tool checks run as Pods in the cluster rather than with `docker run`, so Docker never unpacks the image; the init check's fresh home is an `emptyDir` with `fsGroup` 10001, as in the chart's worker Pod. The rest of the proof is unchanged: the same smoke check inside the image (`claude`, `codex`, `herdr` and `git --version`, `wt.sh root` and `agentihooks hive --help`), Pod registration and order acknowledgement, and on a `dev` push the `kind` job, which starts only after the `contracts` job passes, publishes the image it proved straight from its own Docker daemon, which keeps the pushed image under its registry name; the proof records that image id in `image.txt`.
 
 ### Reading the result
 

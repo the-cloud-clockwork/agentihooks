@@ -1,0 +1,6 @@
+{
+  "hooks/context/operator_words.py:hooks.context.operator_words.x__mirror__mutmut_17:f5e20a1ff4058fb81635ec66be999ac35ab1e4ef92469760cfa1cefda18c61cf": {
+    "reader": "standards-reader",
+    "reason": "None and False both stop publication through the sole caller truthiness check; the fallback value is not otherwise observed."
+  }
+}

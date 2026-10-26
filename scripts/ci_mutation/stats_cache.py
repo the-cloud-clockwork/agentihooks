@@ -18,6 +18,8 @@ CONTEXT_FIELDS = ("schema", "sources", "options", "runtime")
 KEY_FIELDS = ("path", "tests")
 DYNAMIC_IMPORTS = ("import_module", "__import__", "spec_from_file_location", "module_from_spec")
 CONFIGURATION = {"pyproject.toml", "pytest.ini", "setup.cfg", "tox.ini", "uv.lock", ".coveragerc"}
+# CI rewrites the durations from dev each run; they only order and split tests, and records keep their own durations.
+UNKEYED = {".test_durations"}
 TRACKED = ("git", "ls-files", "-z")
 report = functools.partial(print, flush=True)
 encode = functools.partial(json.dumps, sort_keys=True)
@@ -331,7 +333,7 @@ def collect_cached_stats(
     folder.mkdir(parents=True, exist_ok=True)
     resources = {}
     for path in tracked:
-        if path and (root / path).is_file():
+        if path and path not in UNKEYED and (root / path).is_file():
             parts = Path(path).parts
             for index in range(len(parts)):
                 resources.setdefault("/".join(parts[index:]), set()).add(path)
@@ -348,6 +350,8 @@ def collect_cached_stats(
     reused = list(compatible.values())
     missing = [path for path in files if path not in compatible]
     report(f"Mutation stats cache: reused {len(reused)} test files; collect {len(missing)}")
+    if stored.misses:
+        report(f"Mutation stats cache: misses {encode(stored.misses)}; changed inputs {stored.changed.most_common(5)}")
     fresh = collect(missing) if missing else []
     if any(result["status"] != 0 for result in fresh):
         raise SystemExit(1)

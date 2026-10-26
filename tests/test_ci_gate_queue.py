@@ -321,7 +321,7 @@ def test_missing_jobs_timeout_and_an_api_failure_never_claims_success(monkeypatc
         ci_gate_queue, "api", lambda endpoint: [[{"ref": "refs/queue", "object": {"sha": "head"}}]], raising=False
     )
     monkeypatch.setattr(ci_gate_queue, "read_jobs", lambda endpoint, size: [], raising=False)
-    clock = iter([0, 0, 1200])
+    clock = iter([0, 0, ci_gate_queue.DEADLINE_SECONDS])
     monkeypatch.setattr(ci_gate_queue.time, "monotonic", lambda: next(clock))
     monkeypatch.setattr(ci_gate_queue.time, "sleep", lambda seconds: None)
     with pytest.raises(TimeoutError, match=re.compile("expected job", re.I)):
@@ -332,6 +332,33 @@ def test_missing_jobs_timeout_and_an_api_failure_never_claims_success(monkeypatc
     )
     with pytest.raises(RuntimeError, match="API unavailable"):
         ci_gate_queue.watch("owner/repo", "123", "2", [2, 7], "refs/queue", "head")
+
+
+def test_shards_still_waiting_for_runners_at_twenty_minutes_keep_the_group_alive(monkeypatch):
+    monkeypatch.setattr(
+        ci_gate_queue, "api", lambda endpoint: [[{"ref": "refs/queue", "object": {"sha": "head"}}]], raising=False
+    )
+    polls = iter([[], complete()])
+    monkeypatch.setattr(ci_gate_queue, "read_jobs", lambda endpoint, size: next(polls), raising=False)
+    clock = iter([0, 0, 1200])
+    monkeypatch.setattr(ci_gate_queue.time, "monotonic", lambda: next(clock))
+    monkeypatch.setattr(ci_gate_queue.time, "sleep", lambda seconds: None)
+    ci_gate_queue.watch("owner/repo", "123", "2", [2, 7], "refs/queue", "head")
+
+
+def test_the_verifier_deadline_ends_inside_the_queue_check_timeout():
+    from pathlib import Path
+
+    import yaml
+
+    root = Path(__file__).resolve().parents[1]
+    ruleset = json.loads((root / ".github" / "rulesets" / "dev-no-delete.json").read_text())
+    queue = next(rule for rule in ruleset["rules"] if rule["type"] == "merge_queue")["parameters"]
+    jobs = yaml.safe_load((root / ".github" / "workflows" / "test.yml").read_text())["jobs"]
+    assert ci_gate_queue.DEADLINE_SECONDS < queue["check_response_timeout_minutes"] * 60
+    assert ci_gate_queue.DEADLINE_SECONDS < jobs["queue-fail-fast"]["timeout-minutes"] * 60
+    shard_check = int(re.search(r"merge_group' && (\d+)", jobs["shard-check"]["timeout-minutes"])[1]) * 60
+    assert ci_gate_queue.DEADLINE_SECONDS < shard_check < queue["check_response_timeout_minutes"] * 60
 
 
 def test_the_early_gate_rejects_a_changed_graded_job_inventory():

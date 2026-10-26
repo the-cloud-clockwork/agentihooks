@@ -18,6 +18,7 @@ See [Cancelled watcher after the gate change](delivery-tiers.md#cancelled-watche
 
 | Page | What it covers |
 |------|---------------|
+| [Semgrep feature tests](semgrep-features.md) | One dated rule per operator ordered feature, regression and passing fixtures, and required CI proofs |
 | [Local test guard](local-test-guard.md) | Source and symbol inspection, prose mentioning runners, execution refusals, configuration and troubleshooting |
 | [Process environment reads](credential-guard-proc-environ.md) | Credential guard refusals of process environment files under `/proc`, commands that still pass, leak free alternatives, configuration and troubleshooting |
 | [Host process guard](host-process-guard.md) | Which piled up processes the workstation guard ends, the agent session wrapper and tick exclusions, configuration, install and drift check, log lines and troubleshooting several agent sessions ending together |

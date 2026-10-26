@@ -603,10 +603,16 @@ def cmd_plan(args):
     phases = ledger_phase_cli.append_phases(
         plan, [phase["id"] for phase in resource(args.slug, "phases", collection=True)]
     )
-    send(args, "phase_append", phases=phases)
+    state = send(args, "phase_append", phases=phases)
+    repeats = ledger_phase_cli.repeats(state.get("_meta", {}).get("warnings", []), phases)
+    for warning in repeats.values():
+        print(warning, file=sys.stderr)
     print(
         json.dumps(
-            {"appended": [phase["phase"] for phase in phases], "planning": {p["phase"]: p["planning"] for p in phases}}
+            {
+                "appended": [phase["phase"] for phase in phases if phase["phase"] not in repeats],
+                "planning": {p["phase"]: p["planning"] for p in phases if p["phase"] not in repeats},
+            }
         )
     )
 
@@ -644,6 +650,7 @@ def cmd_followup(args):
             list="followups",
             text=args.value,
             **({"needs_operator": True} if args.needs_operator else {}),
+            **({"not_duplicate": args.not_duplicate} if args.not_duplicate else {}),
             **hive_fields(args),
             **({"task": task} if (task := os.environ.get("AGENTIHOOKS_SWARM_TASK")) else {}),
         )
@@ -988,12 +995,20 @@ def build_parser():
     phase.add_argument("--depends-on", default="")
     phase.add_argument("--planning", choices=["manual", "auto"], default=ledger_phases.PLANNING_DEFAULT)
     phase.add_argument("--release", action="store_true")
+    phase.add_argument(
+        "--not-duplicate", default="", help="why the phase differs from the one it resembles; skips the duplicate check"
+    )
     followup = sub.add_parser("followup")
     followup.add_argument("action", choices=["add", "done", "open", "flag", "unflag"])
     followup.add_argument("value")
     followup.add_argument("--status")
     followup.add_argument("--needs-operator", action="store_true")
     followup.add_argument("--hive", help="hive whose master owns the new follow up")
+    followup.add_argument(
+        "--not-duplicate",
+        default="",
+        help="why the follow up differs from the item it resembles; skips the duplicate check",
+    )
     question = sub.add_parser("question")
     question.add_argument("action", choices=["add"])
     question.add_argument("text")

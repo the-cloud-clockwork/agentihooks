@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/repository/sqlite.py:scripts.swarm_ledger.repository.sqlite.xǁSQLiteLedgerRepositoryǁexport_since__mutmut_19:fd46c91af611eac9e3ce9697896e5756699b45fdd482f274138c04d2e04bb305": {
+    "reader": "standards_reader",
+    "reason": "Excludes since 1 from the change path, so a reader at generation 1 gets the full export instead of a change set. Both answers produce the same ledger for the reader; only transfer size differs, which no contract fixes at that boundary."
+  }
+}
