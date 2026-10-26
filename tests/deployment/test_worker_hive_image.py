@@ -96,6 +96,23 @@ def test_hive_image_installs_agentihooks_cloned_from_the_chosen_branch():
     assert "ADD" not in wheel
 
 
+def test_hive_layer_only_links_files_onto_the_base_so_the_build_never_unpacks_it():
+    dockerfile = (ROOT / "deploy/worker/Dockerfile").read_text()
+    hive = dockerfile[dockerfile.rindex("\nFROM ${WORKER_IMAGE}\n") + 1 :]
+    steps = [line.split()[0] for line in hive.splitlines()[1:] if line and not line.startswith(" ")]
+    assert set(steps) == {"COPY", "ENV", "USER", "ENTRYPOINT", "CMD"}
+    assert all(line.startswith("COPY --link=true ") for line in hive.splitlines() if line.startswith("COPY"))
+    assert "COPY --link=true --from=overlay /opt/venv/ /opt/venv/\n" in hive
+    overlay = worker_stage("overlay")
+    assert "bin/pip install --no-cache-dir --no-deps /wheels/*.whl -r /wheels/tools.txt" in overlay
+    assert "lib/python3.12/site-packages/pip " in overlay
+    assert (
+        "useradd --uid 10001 --gid worker --create-home --shell /bin/bash worker"
+        in (ROOT / "docker/swarm-node/Dockerfile").read_text()
+    )
+    assert 'test "$(getent passwd worker | cut -d: -f7)" = /bin/bash' in PROOF.read_text()
+
+
 def test_hive_image_can_install_agentihooks_from_the_local_build_context():
     local = worker_stage("source-local")
     assert "ADD" not in local
