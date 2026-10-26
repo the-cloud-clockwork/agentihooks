@@ -138,7 +138,7 @@ def record_drift(root: Path, manifest: dict) -> tuple[set[str], set[int], set[st
                 return None
             paths.add(path)
         elif path.startswith("tests/") and path.endswith(".py"):
-            reached = {path} if Path(path).name.startswith("test_") else helper_tests(root, path)
+            reached = helper_tests(root, path)
             if reached is None:
                 return None
             tests.update(reached)
@@ -160,14 +160,19 @@ def workflow_changed(root: Path, manifest: dict, path: str) -> bool:
 
 
 def collection_changed(old: str | None, new: str | None, jobs: tuple[str, ...]) -> bool:
-    # Only the jobs that run the recorded tests decide what a test reaches; the jobs before them schedule tests.
+    # Only the jobs that run the recorded tests, and the jobs whose outputs they read, decide what a test reaches.
     try:
         before, after = (yaml.safe_load(text) for text in (old, new))
         if not all(isinstance(workflow["jobs"][jobs[0]], dict) for workflow in (before, after)):
             return True
         if any(before.get(key) != after.get(key) for key in ("env", "defaults")):
             return True
-        for name in jobs:
+        named = set(jobs)
+        for workflow in (before, after):
+            for name in jobs:
+                needs = workflow["jobs"].get(name, {}).get("needs", [])
+                named.update([needs] if isinstance(needs, str) else needs)
+        for name in named:
             old_job, new_job = (
                 {key: value for key, value in workflow["jobs"].get(name, {}).items() if key not in SCHEDULING_KEYS}
                 for workflow in (before, after)
