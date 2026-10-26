@@ -14,6 +14,7 @@ from .services import Services
 
 WORKSPACE_RE = re.compile(r"tasks/[\w.-]+/workspace")
 FILE_RE = re.compile(r"files/(media|artifacts)/[\w.-]+")
+CONTEXT_RE = re.compile(r"swarm/context/[\w.-]+/[\w.:-]+")
 
 
 def body(handler: object, services: Services) -> dict:
@@ -65,6 +66,8 @@ def ledger_get(handler: object, services: Services, slug: str, path: str) -> dic
     if path == "swarm/models":
         catalog = services.swarm.models()
         return {"data": catalog, "revision": resources.revision(catalog)}
+    if CONTEXT_RE.fullmatch(path):
+        return context_evidence(services, slug, *path.split("/")[2:])
     if path == "swarm" or path.startswith("swarm/"):
         return resources.swarm_read(services.swarm.status(slug), path, query)
     if WORKSPACE_RE.fullmatch(path):
@@ -87,6 +90,15 @@ def ledger_read(services: Services, slug: str, path: str, query: dict) -> dict:
         return task_list.read(services.repository, slug, query)
     entry = services.repository.current(slug)
     return resources.read(entry.state, path, query, entry.views)
+
+
+def context_evidence(services: Services, slug: str, task: str, ref: str) -> dict:
+    from scripts.swarm import context_view
+
+    try:
+        return {"data": context_view.expand(services.swarm.store(), slug, task, ref)}
+    except context_view.Refused as refused:
+        raise APIError(refused.status, refused.reason, str(refused)) from None
 
 
 def agent_token(handler: object, services: Services, slug: str) -> dict:

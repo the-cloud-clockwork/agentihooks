@@ -13,6 +13,7 @@ import { quotaCount, renderHives } from "./hives.js";
 import { agentCellTips, joinCell } from "./agent_cells.js";
 import { capacityShown, liveAgents, renderRoles } from "./roles.js";
 import { renderHandoffs, renderRecovery } from "./recovery.js";
+import { renderContext } from "./context.js";
 
 const LIVE_LANES = [["eng", "max_eng"], ["ci", "max_ci"], ["plan", "max_plan"]];
 const ROLES = ["master", "engineer", "planner", "qa", "cicd", "documentation"];
@@ -336,6 +337,7 @@ export function renderSwarm(sw) {
   renderDoctor(sw, now);
   renderHandoffs(sw.handoffs || [], sw);
   renderRecovery(sw);
+  renderContext(sw);
   renderStats();
 }
 
