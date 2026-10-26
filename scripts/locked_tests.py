@@ -51,15 +51,15 @@ def _assertions(function: ast.FunctionDef | ast.AsyncFunctionDef, helpers: froze
 
 
 def _skips_itself(function: ast.FunctionDef | ast.AsyncFunctionDef, pytests: set[str], skippers: set[str]) -> bool:
-    return any(
-        isinstance(node, ast.Call)
-        and (
-            _named(node.func) in skippers
-            if isinstance(node.func, ast.Name)
-            else _named(node.func) in DISABLING_CALLS and _named(getattr(node.func, "value", None)) in pytests
-        )
-        for node in _body(function)
-    )
+    for node in _body(function):
+        if _named(node) in DISABLING_MARKS:
+            return True
+        if isinstance(node, ast.Call):
+            name = _named(node.func)
+            receiver = _named(getattr(node.func, "value", None))
+            if name in skippers or (name in DISABLING_CALLS | {"exit"} and receiver in pytests):
+                return True
+    return False
 
 
 def _returns_early(function: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:

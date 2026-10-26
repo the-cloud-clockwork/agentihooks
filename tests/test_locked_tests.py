@@ -85,6 +85,13 @@ def test_the_manifest_counts_assertions_calls_and_cases(tmp_path):
         .replace("        str(1)\n", "        _later()\n        str(1)\n")
         .replace("def _gate():", "def _later():\n    _gate()\n\n\ndef _gate():"),
         GUARD.replace("        str(1)\n", "        return\n        str(1)\n"),
+        GUARD.replace("        str(1)\n", "        self._gate()\n        str(1)\n").replace(
+            "    def test_raises", "    def _gate(self):\n        pytest.skip('x')\n\n    def test_raises"
+        ),
+        GUARD.replace(
+            "        str(1)\n", "        request.applymarker(pytest.mark.skip(reason='x'))\n        str(1)\n"
+        ),
+        GUARD.replace("        str(1)\n", "        pytest.exit('x', returncode=0)\n        str(1)\n"),
     ],
     ids=[
         "skip",
@@ -97,6 +104,9 @@ def test_the_manifest_counts_assertions_calls_and_cases(tmp_path):
         "aliased pytest",
         "skipping helper",
         "early return",
+        "skipping method",
+        "applied marker",
+        "exit",
     ],
 )
 def test_a_skipped_or_xfailed_locked_test_is_red(tmp_path, capsys, planted):
