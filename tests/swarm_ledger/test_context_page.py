@@ -76,6 +76,19 @@ def test_an_unreachable_ledger_shows_unavailable_on_the_item(open_page):
     assert "unavailable: the ledger could not be reached" in item(page, 0).inner_text()
 
 
+def test_opened_evidence_hides_again_and_each_item_names_its_reference(open_page):
+    page = open_page(payload())
+    session = {"data": {**FIXTURE["evidence"]["session:s-41"], "ref": "session:s-41"}}
+    answer(page, {"session:s-41": (200, session)})
+    assert "session:s-41" in item(page, 3).inner_text()
+    item(page, 3).locator("button").click()
+    item(page, 3).locator(".ctx-evidence").wait_for()
+    assert item(page, 3).locator("button").inner_text() == "hide"
+    item(page, 3).locator("button").click()
+    assert item(page, 3).locator(".ctx-evidence").count() == 0
+    assert item(page, 3).locator("button").inner_text() == "evidence"
+
+
 def test_a_revoked_source_replaces_opened_evidence_with_its_reason(open_page):
     page = open_page(payload())
     session = {"data": {**FIXTURE["evidence"]["session:s-41"], "ref": "session:s-41"}}

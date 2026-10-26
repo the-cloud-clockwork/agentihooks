@@ -33,14 +33,21 @@ async function expand(card, item) {
   renderContext(latest);
 }
 
+function collapse(key) {
+  opened.delete(key);
+  renderContext(latest);
+}
+
 function itemLine(card, item) {
   const key = `${card.task}|${item.ref}`;
   if (item.unavailable) opened.delete(key);
   const tags = item.labels.map((text) => label(text));
   const text = item.unavailable ? `unavailable: ${item.unavailable}` : item.summary;
+  const shown = opened.has(key);
   const open = item.ref && !item.unavailable && h("button", { class: "sw-btn", type: "button", "data-context-ref": item.ref,
-    "aria-label": `Show the evidence behind ${item.ref}`, text: opened.has(key) ? "refresh" : "evidence", on: { click: () => expand(card, item) } });
-  return h("div", { class: "ctx-item" }, h("span", { class: "ctx-tags" }, label(item.kind, "kind"), ...tags, open),
+    "aria-label": `${shown ? "Hide" : "Show"} the evidence behind ${item.ref}`, text: shown ? "hide" : "evidence",
+    on: { click: () => (shown ? collapse(key) : expand(card, item)) } });
+  return h("div", { class: "ctx-item" }, h("span", { class: "ctx-tags" }, label(item.kind, "kind"), item.ref && idCell(item.ref), ...tags, open),
     h("span", { class: item.unavailable ? "ctx-text unavailable" : "ctx-text", text, title: text }), evidence(key));
 }
 
