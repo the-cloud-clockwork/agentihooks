@@ -219,7 +219,6 @@ def test_a_deleted_locked_test_is_red(tmp_path, capsys):
             GUARD.replace("        str(1)\n", "        pass\n"),
             "TestGuard::test_no_raise has 0 calls, the base locks 1.",
         ),
-    ],
         (
             GUARD.replace("    assert code\n", "    assert True\n"),
             "test_blocks changes or drops an assertion the base locks.",
