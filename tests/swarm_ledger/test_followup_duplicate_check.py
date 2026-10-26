@@ -254,6 +254,11 @@ def test_a_follow_up_names_the_open_follow_ups_that_landed_while_its_check_ran()
 def test_the_screen_remembers_the_follow_ups_it_compared_and_the_adds_it_screened(monkeypatch):
     monkeypatch.setattr(ledger_task_duplicates, "find", lambda doc, adds, kind: [None] * len(adds))
     doc = {"tasks": [{"id": "t1"}], "followups": [{"id": "f1"}]}
-    assert ledger_task_duplicates.screen(doc, [followup("f9", AGAIN)]).seen == frozenset(
-        {"t1", "followups/f1", "followups/f9"}
+    ops = [
+        followup("f9", AGAIN),
+        followup("f8", AGAIN, not_duplicate="the inbox watch"),
+        {"op": "add_item", "id": "q9", "by": MASTER, "list": "questions", "text": AGAIN},
+    ]
+    assert ledger_task_duplicates.screen(doc, ops).seen == frozenset(
+        {"t1", "followups/f1", "followups/f9", "followups/f8"}
     )

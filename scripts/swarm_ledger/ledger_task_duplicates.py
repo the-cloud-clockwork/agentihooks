@@ -80,7 +80,9 @@ def screen(doc: dict, ops: list[dict]) -> Screen:
         if group := [op for op in adds if KINDS[op["op"]] == kind]:
             _judge(doc, kind, group, refused, warnings)
     seen = {t["id"] for t in doc.get("tasks", [])} | {op["task"] for op in ops if op["op"] == "task_add"}
-    seen |= {_seen(f) for f in doc.get("followups", [])} | {_seen(op) for op in adds if op["op"] == "add_item"}
+    seen |= {_seen(f) for f in doc.get("followups", [])} | {
+        _seen(op) for op in ops if op["op"] == "add_item" and op["list"] == "followups"
+    }
     return Screen(refused, warnings, frozenset(seen))
 
 
