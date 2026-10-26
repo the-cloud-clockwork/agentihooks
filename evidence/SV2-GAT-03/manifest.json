@@ -1,0 +1,15 @@
+{
+  "cases": [
+    "T-SV2-GAT-03-A",
+    "T-SV2-GAT-03-B",
+    "T-SV2-GAT-03-C"
+  ],
+  "evidence_class": "mocked for the fixture cases: hooks run in a temporary agentihooks home with the brain refresh and project retrieval patched to return the fixture packs, through the Claude and Codex target emitters; live: one Claude and one Codex session on a hive worker ran the branch hooks with an isolated agentihooks home",
+  "inputs": {
+    "tests/fixtures/swarm_v2/task-context-hooks.json": "af5c49ace45c0caff54d07734c71e396462e7a51deaa0c838e34c14ff1776b8a"
+  },
+  "package": "SV2-GAT-03",
+  "red_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/40363834315",
+  "tested_commit": "71af5fff70b7",
+  "run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/40382454881"
+}
