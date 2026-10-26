@@ -813,10 +813,16 @@ def test_each_stored_file_keeps_only_its_own_tests_from_every_bucket(tmp_path, c
 
     cache = tmp_path / "cache/nested"
     collect_cached_stats(root, cache, {}, files, [], collect)
-    assert "Mutation stats cache: reused 0 test files; collect 2" in capsys.readouterr().out
+    cold = capsys.readouterr().out
+    assert "Mutation stats cache: reused 0 test files; collect 2" in cold
+    assert 'Mutation stats cache: misses {"no pointer": 2}; changed inputs []\n' in cold
     (root / files[1]).write_text("def test_sample():\n    assert True\n")
     warm = collect_cached_stats(root, cache, {}, files, [], collect)
-    assert "Mutation stats cache: reused 1 test files; collect 1" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert "Mutation stats cache: reused 1 test files; collect 1" in out
+    assert "Mutation stats cache: misses {\"inputs\": 1}; changed inputs [('tests/test_b.py', 1)]\n" in out
+    collect_cached_stats(root, cache, {}, files, [], collect)
+    assert "misses" not in capsys.readouterr().out
     assert calls == [files, ["tests/test_b.py"]]
     assert warm[0] == {"status": 0, "tests": {"m.x_first": [a], "m.x_second": []}, "durations": {a: 1}, "cpu": 3.0}
     stored = [json.loads(path.read_text())["durations"] for path in cache.glob("*.json")]
@@ -1032,6 +1038,23 @@ def test_stored_statistics_validate_record_inputs_and_mutation_scope(tmp_path, c
         next(folder.glob("*.json")).write_text('{"key":"')
     assert cache.load("tests/test_module.py") is None
     assert len(list(folder.glob("*.json"))) == (changed != "truncated")
+    reason = {"module": "inputs", "deleted": "inputs", "scope": "scope", "stale": "identity"}.get(changed, "no record")
+    assert cache.misses == {reason: 1}
+    assert cache.changed == ({"module.py": 1} if reason == "inputs" else {})
+
+
+def test_stored_statistics_count_a_missing_pointer_and_a_failed_check(tmp_path):
+    from scripts.ci_mutation.stats_dependencies import StoredStats
+
+    root = tmp_path / "repo"
+    folder = tmp_path / "cache"
+    folder.mkdir()
+    _repository(root, {"module.py": "value = 1\n"})
+    cache = StoredStats(root, folder, {"inventory": ["module.py"]}, {})
+    assert cache.load("tests/test_module.py") is None
+    cache.save("tests/test_module.py", {"status": 0, "tests": {}, "durations": {}, "cpu": 1}, {}, False)
+    assert cache.load("tests/test_module.py", lambda inputs, measured, discovery: False) is None
+    assert cache.misses == {"no pointer": 1, "check": 1}
 
 
 @pytest.mark.parametrize(

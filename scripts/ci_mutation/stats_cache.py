@@ -348,6 +348,8 @@ def collect_cached_stats(
     reused = list(compatible.values())
     missing = [path for path in files if path not in compatible]
     report(f"Mutation stats cache: reused {len(reused)} test files; collect {len(missing)}")
+    if stored.misses:
+        report(f"Mutation stats cache: misses {encode(stored.misses)}; changed inputs {stored.changed.most_common(5)}")
     fresh = collect(missing) if missing else []
     if any(result["status"] != 0 for result in fresh):
         raise SystemExit(1)
