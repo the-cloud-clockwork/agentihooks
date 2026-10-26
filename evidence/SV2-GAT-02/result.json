@@ -21,7 +21,8 @@
   ],
   "supported_versions": {
     "python": "3.11 and later",
-    "brain_api": "agentibrain-kernel brain-api with GET /feed?project= (project_feed_payload, scope project); older brain-api answering the plain fleet feed is the legacy endpoint"
+    "brain_api": "agentibrain-kernel brain-api with GET /feed?project= (project_feed_payload, scope project); older brain-api answering the plain fleet feed is the legacy endpoint",
+    "brain_ops": "agentibrain-kernel brain-ops project_feed.py writes the projects/<key>.json snapshots whose arc rows carry ref arc:<cluster_id> and whose lesson rows carry content, each with a projects list"
   },
   "states": {
     "observed": "pending CI run",
@@ -45,7 +46,10 @@
   "remaining_limitations": [
     "Kernel decisions and signals in the project feed are not rendered; the project block still carries arcs and lessons only.",
     "Fleet warnings in the project feed are not rendered in the project block; shared warnings keep reaching sessions through the fleet feed broadcast.",
-    "The project cache still refreshes when the fleet feed hash changes or its TTL expires, so a project revision change between those points is picked up at the next refresh."
+    "The project cache still refreshes when the fleet feed hash changes or its TTL expires, so a project revision change between those points is picked up at the next refresh.",
+    "During a brain outage the cached project memory is served for up to BRAIN_PROJECT_MEMORY_STALE_SECONDS after its last refresh, so evidence the brain restricted during that window can still be shown, marked stale; the recovery contract requires this serving and INV-M07 holds again at the first successful refresh or at the policy limit. The operator owns the policy value.",
+    "The legacy endpoint is recognised by shape: an answer with no scope field carrying hot_arcs, inject_blocks or entries, which is exactly the plain fleet feed of a brain-api without project scoping; any other answer without a project scope is refused.",
+    "The rollback rehearsal is the source selection test and case A's legacy path, which runs VaultProjectSource; a live rollback on a populated cache belongs to the G6 rollout gate."
   ],
   "compatibility": "Compared with the preceding accepted path, VaultProjectSource reconstruction from the stored fleet feed: it stays reachable through a legacy brain-api answer and through BRAIN_PROJECT_FEED_SOURCE=vault.",
   "authority": "The project comes only from the session's resolved canonical project identity; the brain-api enforces the token's project grant and the client refuses any answer naming another project."
