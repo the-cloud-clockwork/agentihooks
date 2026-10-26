@@ -79,3 +79,71 @@ def test_unavailable_github_cli_is_a_failed_required_check(monkeypatch, error):
 
     monkeypatch.setattr(join_checks.subprocess, "run", run)
     assert join_checks.github_ready() is False
+
+
+def ledger_probe(monkeypatch, failure):
+    from scripts.hive import join_checks
+    from scripts.swarm import ledger_client
+
+    ledger = ledger_client._ledger()
+
+    def request(slug, ops, **kwargs):
+        if ops[0]["op"] == "ack":
+            raise SystemExit(failure)
+        return {"_meta": {"rev": 1}}
+
+    monkeypatch.setattr(ledger, "call", request)
+    return join_checks.ledger_checks({"slug": "sw", "agent": "engineer", "checks": {}})
+
+
+def test_refused_write_and_unreachable_ledger_report_distinct_reasons(monkeypatch):
+    refused = ledger_probe(monkeypatch, "server refused: 403 the ledger refused the write")
+    unreachable = ledger_probe(
+        monkeypatch, "ledger server not answering on http://ledger.example: [Errno 111] Connection refused"
+    )
+    assert refused["ledger_join"] is unreachable["ledger_join"] is True
+    assert refused["ledger_write"] is unreachable["ledger_write"] is False
+    assert refused["errors"] == {
+        "ledger_write": {
+            "error": "LedgerRefused",
+            "status": 403,
+            "message": "ledger sw: server refused: 403 the ledger refused the write",
+        }
+    }
+    assert unreachable["errors"] == {
+        "ledger_write": {
+            "error": "SwarmError",
+            "status": None,
+            "message": "ledger sw: ledger server not answering on http://ledger.example: [Errno 111] Connection refused",
+        }
+    }
+
+
+def test_ledger_probe_success_records_no_errors(monkeypatch):
+    from scripts.hive import join_checks
+    from scripts.swarm import ledger_client
+
+    monkeypatch.setattr(ledger_client._ledger(), "call", lambda slug, ops, **kwargs: {"_meta": {"rev": 1}})
+    assert join_checks.ledger_checks({"slug": "sw", "agent": "engineer", "checks": {}}) == {
+        "ledger_join": True,
+        "ledger_write": True,
+    }
+
+
+def test_ledger_probe_error_message_is_short_and_carries_no_credential(monkeypatch):
+    from scripts.hive import join_checks
+
+    token = "ghp_" + "a1B2c3D4e5" * 4
+    reported = ledger_probe(monkeypatch, f"server refused: 401 token {token} " + "x" * 400)
+    message = reported["errors"]["ledger_write"]["message"]
+    assert token not in message
+    assert "[REDACTED:" in message
+    assert len(message) == join_checks.MESSAGE_LIMIT
+    assert reported["errors"]["ledger_write"]["status"] == 401
+
+
+def test_a_falsy_probe_is_a_miss_without_an_exception():
+    from scripts.hive import join_checks
+
+    assert join_checks.failure(lambda: False) == {"error": "falsy result", "status": None, "message": ""}
+    assert join_checks.failure(lambda: 1) is None
