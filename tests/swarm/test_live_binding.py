@@ -146,6 +146,9 @@ def test_model_and_effort_require_native_flags(mounted):
     assert (facts["model"], facts["effort"]) == ("", "")
     assert live_binding.compare(agent, facts) == {}
     assert live_binding.unobserved(agent, facts) == {"model": "opus", "effort": "high"}
+    unassigned = replace(agent, model="", profile_decision={"validation": {"home": facts["home"], "effort": "high"}})
+    assert live_binding.unobserved(unassigned, facts) == {"effort": "high"}
+    assert live_binding.unobserved(agent, {**facts, "model": "opus"}) == {"effort": "high"}
 
 
 def test_codex_home_hooks_and_native_effort(mounted):
@@ -315,6 +318,13 @@ def test_codex_app_server_on_a_hive_reads_its_model_from_the_config_override(hiv
     (root / "cmdline").write_bytes(b'codex\0app-server\0-c\0model="gpt-7"\0-c\0model_reasoning_effort="high"\0')
     facts = live_binding.read(agent, 42, proc)
     assert live_binding.compare(agent, facts) == {"model": {"expected": "gpt-6.1-sol", "actual": "gpt-7"}}
+    home = Path(facts["home"])
+    (home / "config.toml").write_text('model = "gpt-5"\n\n[features]\nhooks = true\n')
+    assert live_binding.read(agent, 42, proc)["model"] == "gpt-7"
+    (root / "cmdline").write_bytes(b'codex\0app-server\0-m\0gpt-6.1-sol\0-c\0model="gpt-7"\0')
+    assert live_binding.read(agent, 42, proc)["model"] == "gpt-6.1-sol"
+    (root / "cmdline").write_bytes(b"codex\0app-server\0")
+    assert live_binding.read(agent, 42, proc)["model"] == "gpt-5"
 
 
 def test_codex_hive_agent_with_no_model_reading_is_unknown_not_mismatched(hive_codex, ticking):

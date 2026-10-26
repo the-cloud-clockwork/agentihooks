@@ -34,7 +34,7 @@ def _codex_overrides(argv):
     return {key: _toml_value(raw) for key, _, raw in pairs}
 
 
-def overridden(argv) -> dict:
+def overridden(argv: tuple[str, ...] | list[str]) -> dict:
     return _renamed(_codex_overrides(argv), CODEX_KEYS)
 
 
