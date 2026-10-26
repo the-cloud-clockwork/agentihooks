@@ -7,8 +7,9 @@ from scripts.workflows import loader, machine, schema
 from scripts.workflows.schema import WorkflowError
 
 
-def simple() -> schema.Workflow:
-    return loader.read(loader.PACKAGE_WORKFLOWS / "simple-workflow.yaml")
+def simple(head: str = "build") -> schema.Workflow:
+    shipped = loader.read(loader.PACKAGE_WORKFLOWS / "simple-workflow.yaml")
+    return dataclasses.replace(shipped, head=head)
 
 
 def never(text, outputs):
@@ -57,7 +58,7 @@ def test_start_puts_the_head_stage_first_with_nothing_counted():
 
 
 def test_simple_workflow_with_five_passes_reaches_passed():
-    definition = dataclasses.replace(simple(), head="scout")
+    definition = simple(head="scout")
     seen = []
     state = machine.start(definition)
     for _ in range(5):
@@ -72,7 +73,7 @@ def test_simple_workflow_with_five_passes_reaches_passed():
     assert json.loads(json.dumps(state)) == state
 
 
-def test_the_shipped_head_passes_through_build_and_its_verdict():
+def test_a_head_at_build_passes_through_build_and_its_verdict():
     state = run(simple(), machine.start(simple()), ["pass", "pass"])
 
     assert state["status"] == "passed"
@@ -136,7 +137,7 @@ def test_a_new_visit_resets_the_stage_count():
 
 
 def test_a_free_text_stage_exit_ends_the_stage_when_the_stub_says_yes():
-    definition = dataclasses.replace(simple(), head="scout")
+    definition = simple(head="scout")
     check = answers(True)
     state = machine.advance(definition, machine.start(definition), "scout", "retry", {"points": 3}, check)
 
@@ -147,7 +148,7 @@ def test_a_free_text_stage_exit_ends_the_stage_when_the_stub_says_yes():
 
 
 def test_a_free_text_stage_exit_that_says_no_runs_the_stage_again():
-    definition = dataclasses.replace(simple(), head="scout")
+    definition = simple(head="scout")
     state = machine.advance(definition, machine.start(definition), "scout", "pass", {"points": 1}, answers(False))
 
     assert state["stage"] == "scout"
@@ -156,7 +157,7 @@ def test_a_free_text_stage_exit_that_says_no_runs_the_stage_again():
 
 
 def test_a_free_text_stage_exit_out_of_runs_takes_the_reported_outcome():
-    definition = dataclasses.replace(simple(), head="scout")
+    definition = simple(head="scout")
     state = run(definition, machine.start(definition), ["pass", "pass"], answers(False, False))
 
     assert state["stage"] == "evidence-verdict"
