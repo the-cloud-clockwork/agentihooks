@@ -821,11 +821,11 @@ def test_two_phases_with_one_id_are_refused():
     assert caught.value.errors == ["each phase needs its own id: same"]
 
 
-def test_a_marker_id_with_an_unclosed_quote_is_refused():
-    text = '# Plan\n\n## Phase one\n<!-- phase: id="abc planning=auto -->\nProse.\n'
+def test_a_marker_id_starting_with_a_digit_is_refused():
+    text = "# Plan\n\n## Phase one\n<!-- phase: id=9abc planning=auto -->\nProse.\n"
 
     with pytest.raises(PlanError) as caught:
-        normalize(text, "unclosed.md")
+        normalize(text, "digit-id.md")
 
     assert caught.value.errors == [
         "phase 'Phase one': id must start with a letter and hold only letters, digits, dots, dashes or underscores"
@@ -838,7 +838,7 @@ def test_a_marker_not_duplicate_with_an_unclosed_quote_is_refused():
     with pytest.raises(PlanError) as caught:
         normalize(text, "unclosed-reason.md")
 
-    assert caught.value.errors == ["phase 'Phase one': not_duplicate must say in plain words why the phase differs"]
+    assert caught.value.errors == ["phase 'Phase one': phase marker has an unclosed quote"]
 
 
 def test_a_superscript_digit_dependency_stays_an_id_and_is_refused_as_unknown():

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+import shlex
 from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
@@ -10,7 +11,6 @@ from typing import Any
 from scripts.swarm_ledger import ledger_phases, plan_ranges
 from scripts.swarm_ledger.ledger_phases import PLANNING_DEFAULT
 
-TOKEN = re.compile(r'(\w+)=(?:"([^"]*)"|(\S+))')
 PHASE_KEYS = {"id", "depends", "planning", "not_duplicate"}
 DESCRIPTION_LIMIT = 800
 ID_RULE = "id must start with a letter and hold only letters, digits, dots, dashes or underscores"
@@ -201,7 +201,8 @@ def _from_markdown(text: str, name: str, existing: set[str]) -> Normalized:
     for i, j in markers.items():
         title = entries[i][2]
         where = f"phase {title!r}"
-        fields = _marker_fields(entries[j][2].strip().removesuffix("-->"), where, errors)
+        body = entries[j][2].strip().removeprefix("<!--").removesuffix("-->").strip().removeprefix("phase:")
+        fields = _marker_fields(body, where, errors)
         phases.append(_marked_phase(title, fields, where, errors))
         ranged.append({"id": str(i), "title": title})
     if errors:
@@ -261,12 +262,18 @@ def _phase_slices(text: str, entries: list, phase: dict, marker_line: int, rng: 
 
 
 def _marker_fields(body: str, where: str, errors: list[str]) -> dict:
+    try:
+        tokens = shlex.split(body)
+    except ValueError:
+        errors.append(f"{where}: phase marker has an unclosed quote")
+        return {}
     fields = {}
-    for key, quoted, bare in TOKEN.findall(body):
+    for token in tokens:
+        key, _, value = token.partition("=")
         if key not in PHASE_KEYS:
             errors.append(f"{where}: unknown key {key} in phase marker")
             continue
-        fields[key] = quoted or bare
+        fields[key] = value
     return fields
 
 
