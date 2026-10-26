@@ -15,7 +15,7 @@ LOCKED = tuple(
 )
 MANIFEST = Path("tests/LOCKED_MANIFEST.json")
 FIELDS = ("assertions", "calls", "cases")
-DISABLING = {"skip", "skipif", "xfail", "importorskip", "exit"}
+DISABLING = {"skip", "skipif", "xfail", "importorskip", "exit", "skipTest"}
 CHECKING_CALLS = {"raises", "warns", "deprecated_call", "fail"}
 CONFIGS = (
     "conftest.py",
@@ -99,7 +99,8 @@ def _cases(context: list[ast.AST], constants: dict[str, ast.AST]) -> int:
         if isinstance(node, ast.Call) and _named(node.func) == "parametrize":
             keywords = {keyword.arg: keyword.value for keyword in node.keywords}
             values = node.args[1] if len(node.args) > 1 else keywords.get("argvalues")
-            cases *= _length(values, constants) or 1
+            length = _length(values, constants)
+            cases *= 1 if length is None else length
     return cases
 
 

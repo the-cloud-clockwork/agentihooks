@@ -125,6 +125,7 @@ def test_the_head_defaults_to_the_working_directory(tmp_path, capsys, monkeypatc
         GUARD.replace("        str(1)\n", "        request.applymarker(pytest.mark.skip(reason='x'))\n"),
         GUARD.replace("        str(1)\n", "        request.node.add_marker('xfail')\n"),
         GUARD.replace("        str(1)\n", "        pytest.exit('x', returncode=0)\n"),
+        GUARD.replace("        str(1)\n", "        self.skipTest('x')\n"),
         GUARD.replace("        str(1)\n", "        return\n        str(1)\n"),
         GUARD.replace("        str(1)\n", "        if str(1):\n            return\n"),
     ],
@@ -144,6 +145,7 @@ def test_the_head_defaults_to_the_working_directory(tmp_path, capsys, monkeypatc
         "applied marker",
         "string marker",
         "exit",
+        "unittest skip",
         "early return",
         "nested return",
     ],
@@ -238,6 +240,7 @@ def test_only_checks_assert_methods_and_asserting_helpers_count_as_assertions(tm
         ("list(A) + B", 1),
         ("list(A)", 1),
         ("C", 1),
+        ("[]", 0),
     ],
 )
 def test_parametrized_cases_resolve_literal_lists(tmp_path, values, cases):
