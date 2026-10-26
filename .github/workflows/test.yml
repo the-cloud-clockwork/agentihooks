@@ -1746,7 +1746,7 @@ jobs:
           ) < /dev/null > "$RUNNER_TEMP/combine.log" 2>&1 &
           echo "pid=$!" >> "$GITHUB_OUTPUT"
 
-      # Builds beside the scan, outside the scanned tree; the wait after the scan holds its result.
+      # Builds beside the proxy start, outside the scanned tree; the wait before the scan holds its result.
       - name: Build the test dependency manifest
         id: manifest
         if: steps.source.outputs.test_only != 'true' && needs.select.outputs.scope == 'full'
@@ -1841,7 +1841,7 @@ jobs:
 
       - name: Wait for the test dependency manifest
         if: steps.source.outputs.test_only != 'true' && needs.select.outputs.scope == 'full'
-        timeout-minutes: 5
+        timeout-minutes: 10
         env:
           MANIFEST_PID: ${{ steps.manifest.outputs.pid }}
         run: |
