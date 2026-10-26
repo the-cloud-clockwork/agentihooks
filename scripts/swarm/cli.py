@@ -620,6 +620,9 @@ def _tick_host(store, started):
     sys.setswitchinterval(TICK_SWITCH_INTERVAL_S)
     with authority_context.for_tick(store) as slugs:
         _reconcile_services()
+        from hooks.context import documentation_session
+
+        documentation_session.schedule_retry()
         if slugs:
             firsts, until = _Firsts(len(slugs)), time.monotonic() + EXTRA_TICKS_UNTIL
             if tick_stop.run(
