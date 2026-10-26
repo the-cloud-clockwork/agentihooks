@@ -37,19 +37,21 @@ class DepInputs:
 
     def register(self, log: Path) -> None:
         registration = self.children / str(os.getpid())
-        registration.with_suffix(".new").write_text(str(log))
-        registration.with_suffix(".new").replace(registration)
+        staged = registration.with_suffix(".new")
+        staged.write_text(str(log))
+        staged.replace(registration)
 
     def follow_children(self) -> None:
         self.children.mkdir(parents=True, exist_ok=True)
         self.register(self.children / f"{os.getpid()}-shared")
-        hook = Path(__file__).resolve().with_name("dep_child.py")
+        hook, children = str(Path(__file__).resolve().with_name("dep_child.py")), str(self.children)
         site = self.site_file()
-        site.with_suffix(f".{os.getpid()}").write_text(
-            f"import os, pathlib; os.path.isdir({str(self.children)!r}) and exec(pathlib.Path({str(hook)!r}).read_text(),"
-            f" {{'__name__': 'dep_child', 'CHILDREN': {str(self.children)!r}, 'ROOT': {self.root!r}}})\n"
+        staged = site.with_suffix(f".{os.getpid()}")
+        staged.write_text(
+            f"import os, pathlib; os.path.isdir({children!r}) and exec(pathlib.Path({hook!r}).read_text(),"
+            f" {{'__name__': 'dep_child', 'CHILDREN': {children!r}, 'ROOT': {self.root!r}}})\n"
         )
-        site.with_suffix(f".{os.getpid()}").replace(site)
+        staged.replace(site)
 
     def pytest_unconfigure(self, config):
         (self.children / str(os.getpid())).unlink(missing_ok=True)
@@ -181,7 +183,7 @@ def pytest_configure(config):
     controller = not hasattr(config, "workerinput") and config.getoption("dist", "no") != "no"
     if not folder or controller:
         return
-    plugin = DepInputs(Path(folder).resolve(), config.rootpath)
+    plugin = DepInputs(Path(os.path.abspath(folder)), config.rootpath)
     sys.addaudithook(plugin.audit)
     plugin.follow_children()
     config.pluginmanager.register(plugin, "dep-inputs")

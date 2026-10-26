@@ -1,4 +1,5 @@
 import ast
+import hashlib
 import json
 import os
 import subprocess
@@ -251,7 +252,8 @@ def test_the_inputs_plugin_records_files_a_child_process_reads_for_its_test_only
         {"test": "test_sample.py::test_child_reads", "files": ["child.txt"], "escapes": True},
         {"test": "test_sample.py::test_child_reads_nothing", "files": [], "escapes": True},
     ]
-    assert not list(Path(sysconfig.get_path("purelib")).glob("agentihooks-dep-inputs-*.pth"))
+    name = hashlib.sha256(str(out / "children").encode()).hexdigest()[:16]
+    assert not (Path(sysconfig.get_path("purelib")) / f"agentihooks-dep-inputs-{name}.pth").exists()
 
 
 def test_the_coverage_shards_record_per_test_contexts_and_inputs():
