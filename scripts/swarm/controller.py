@@ -212,13 +212,10 @@ class FencedRuntime:
                 return chosen.reason
             self._local_full(machine, held, local_max)
             return chosen.reason + refused
-        if (
-            claim
-            and (taken := local_slots.claim(self.store, machine, self.slug, task["id"], claim, local_max - reserved))
-            >= local_max - reserved
-        ):
+        room = local_max - reserved
+        if claim and (taken := local_slots.claim(self.store, machine, self.slug, task["id"], claim, room)) >= room:
             self._local_full(machine, taken, local_max)
-            return f"{waited.reason}{LOCAL_FULL}{taken} of its {local_max} agents{refused}"
+            return overflow(waited.role, waited, taken, local_max, reserved).reason + refused
         if claim:
             admission.record(self.store.redis, machine, f"{self.slug}/{claim}")
         self.store.redis.hdel(self.store.key(self.slug, placement_waits.WAITS), task["id"])
