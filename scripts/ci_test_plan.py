@@ -3,8 +3,10 @@ import io
 import itertools
 import json
 import os
+import re
 import subprocess
 import sys
+import time
 import zipfile
 import zlib
 from collections import Counter
@@ -23,6 +25,9 @@ CANDIDATES = 10
 REQUESTS = 100
 PAGE_REQUESTS = 1 + 3 * CANDIDATES
 JOB_PAGE = 100
+SERVER_ERROR = re.compile(r"HTTP 5\d\d")
+SERVER_ATTEMPTS = 3
+SERVER_BACKOFF = 5
 
 
 class UnusableRecord(ValueError):
@@ -30,11 +35,15 @@ class UnusableRecord(ValueError):
 
 
 def _api(endpoint: str) -> bytes:
-    try:
-        return gh_api([endpoint], timeout=60).stdout
-    except subprocess.CalledProcessError as error:
-        print(error.stderr.decode(), file=sys.stderr)
-        raise
+    for attempt in range(SERVER_ATTEMPTS):
+        try:
+            return gh_api([endpoint], timeout=60).stdout
+        except subprocess.CalledProcessError as error:
+            stderr = error.stderr.decode()
+            print(stderr, file=sys.stderr)
+            if attempt + 1 == SERVER_ATTEMPTS or not SERVER_ERROR.search(stderr):
+                raise
+            time.sleep(SERVER_BACKOFF * 2**attempt)
 
 
 def _strings(value: object) -> bool:
