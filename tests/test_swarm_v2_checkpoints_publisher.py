@@ -476,6 +476,8 @@ def test_package_cases_match_their_committed_evidence(case):
 
 
 def test_package_case_fixtures_run_on_the_memory_filesystem():
+    mounts = dict(line.split()[1:3] for line in Path("/proc/mounts").read_text().splitlines())
+    assert mounts[str(MEMORY)] == "tmpfs"
     with scratch() as directories:
         assert [path.parent for path in directories] == [MEMORY, MEMORY]
         assert all(path.is_dir() for path in directories)
