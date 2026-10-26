@@ -328,7 +328,7 @@ def test_a_nats_request_passes_its_timeout_and_maps_a_nats_timeout():
     bus = object.__new__(nats.NatsBus)
     silent = AsyncMock(side_effect=NatsTimeout)
     bus._loop = SimpleNamespace(run=asyncio.run)
-    bus._nc = SimpleNamespace(request=silent)
+    bus._nc = SimpleNamespace(request=silent, max_payload=1048576)
     with pytest.raises(TimeoutError, match="^no responders for 'swarm.rig.silent'$"):
         bus.request("swarm.rig.silent", b"", 300)
     silent.assert_awaited_once_with("swarm.rig.silent", b"", timeout=0.3)

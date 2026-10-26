@@ -145,6 +145,7 @@ from scripts.swarm.health import findings as health
 from scripts.swarm.ledger_client import LedgerClient, LedgerGone, LedgerRefused
 from scripts.swarm.runtime import REPO_VARIABLE, HerdrRuntime, deferring
 from scripts.swarm.status import (
+    agent_hive,
     auto_snapshot,
     findings,
     live_agents,
@@ -179,7 +180,7 @@ from scripts.swarm_ledger import (
     plan_shape,
     workflow_task,
 )
-from scripts.swarm_v2 import master_scale, masters
+from scripts.swarm_v2 import front_door, master_scale, masters
 from scripts.swarm_v2.runtime.routed import routed
 
 SETTABLE = {
@@ -1273,7 +1274,7 @@ def cmd_status(store, args):
     if promotion := tick_master.status_line(tick_master.read(store, args.slug)):
         print(promotion)
     print(
-        "Agent\tLane\tHarness\tProfile\tModel\tAccount\tPane\tTask\tState\tConversation\tPush inbox\tNative terminal\tModel source\tConfidence"
+        "Agent\tLane\tHarness\tProfile\tModel\tAccount\tPane\tTask\tState\tConversation\tPush inbox\tNative terminal\tModel source\tConfidence\tHive"
     )
     for a in agents:
         model = " ".join(filter(None, (a.model, a.effort))) if a.model else "unknown"
@@ -1281,7 +1282,7 @@ def cmd_status(store, args):
         push = "yes" if can["push_inbox"] else "no"
         attach = "yes" if can["native_terminal_attach"] else "no"
         print(
-            f"{a.name}\t{a.lane}\t{a.harness}\t{a.profile or 'unknown'}\t{model}\t{a.account or '-'}\t{a.pane_id}\t{a.task}\t{agent_status(a)}\t{a.conversation_id or '-'}\t{push}\t{attach}\t{a.model_source or '-'}\t{a.model_confidence if a.model_confidence is not None else '-'}"
+            f"{a.name}\t{a.lane}\t{a.harness}\t{a.profile or 'unknown'}\t{model}\t{a.account or '-'}\t{a.pane_id}\t{a.task}\t{agent_status(a)}\t{a.conversation_id or '-'}\t{push}\t{attach}\t{a.model_source or '-'}\t{a.model_confidence if a.model_confidence is not None else '-'}\t{agent_hive(a) or '-'}"
         )
     from scripts.hive import join_report
 
@@ -2175,9 +2176,7 @@ def _retire(store, slug, agent, exit_text):
 def cmd_say(store, args):
     agent = _me(store, args)
     if args.to in ("", delivery.OPERATOR):
-        LedgerClient().say(args.slug, args.text, by=agent.name)
-        print(json.dumps({"posted": True}))
-        return
+        raise SwarmError(front_door.say_refusal(args.slug, agent.name))
     sent = delivery.send(store, args.slug, args.text, sender=agent.name, to=args.to, fyi=args.fyi)
     print(json.dumps({"sent": sent}))
 

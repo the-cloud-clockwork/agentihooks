@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from importlib import metadata
 from pathlib import Path
 
-from scripts.ci_mutation.scope import imported_names, module_name, selects, test_file
+from scripts.ci_mutation.scope import imported_names, module_name, selected_name, selects, test_file
 
 SCHEMA = 4
 CONTEXT_FIELDS = ("schema", "sources", "options", "runtime")
@@ -247,7 +247,9 @@ class StatsInputs:
         return hashlib.sha256(encode(sorted(paths)).encode()).hexdigest()
 
 
-def per_test_stats(path: str, fresh: list[dict], count: int) -> tuple[dict | None, list[str] | None]:
+def per_test_stats(
+    path: str, fresh: list[dict], count: int, functions: set[str]
+) -> tuple[dict | None, list[str] | None]:
     durations = {
         test: seconds for result in fresh for test, seconds in result["durations"].items() if selects(path, test)
     }
@@ -259,7 +261,7 @@ def per_test_stats(path: str, fresh: list[dict], count: int) -> tuple[dict | Non
         return None, None
     tests = {
         function: sorted({test for result in fresh for test in result["tests"].get(function, []) if test in durations})
-        for function in {function for result in fresh for function in result["tests"]}
+        for function in functions
     }
     result = {
         "status": 0,
@@ -273,6 +275,37 @@ def per_test_stats(path: str, fresh: list[dict], count: int) -> tuple[dict | Non
     if not measured and any("modules" in result for result in fresh):
         covered = []
     return result, covered
+
+
+def fresh_by_path(paths: list[str], fresh: list[dict]) -> dict[str, list[dict]]:
+    entries = set(paths)
+    owners = {test: selecting_entries(entries, test) for result in fresh for test, _ in result["durations"].items()}
+    sliced: dict[str, list[dict]] = {path: [] for path in paths}
+    for result in fresh:
+        for path, part in result_by_path(result, paths, owners).items():
+            sliced[path].append(part)
+    return sliced
+
+
+def selecting_entries(entries: set[str], test: str) -> list[str]:
+    name = selected_name(test)
+    cuts = {name[:index] for index in range(len(name)) if name.startswith(("::", "["), index)} | {name}
+    return [entry for entry in cuts if entry in entries and selects(entry, test)]
+
+
+def result_by_path(result: dict, paths: list[str], owners: dict[str, list[str]]) -> dict[str, dict]:
+    kept = {key: result[key] for key in ("cpu", "modules") if key in result}
+    names = [name for name in ("durations", "dependencies") if name in result]
+    parts = {path: {**kept, "tests": {}, **{name: {} for name in names}} for path in paths}
+    for name in names:
+        for test, value in result[name].items():
+            for path in owners.get(test, ()):
+                parts[path][name][test] = value
+    for function, tests in result["tests"].items():
+        for test in tests:
+            for path in owners.get(test, ()):
+                parts[path]["tests"].setdefault(function, []).append(test)
+    return parts
 
 
 def collect_cached_stats(
@@ -306,6 +339,7 @@ def collect_cached_stats(
                 resources.setdefault(str(parent) + "/", set()).add(path)
     inputs = StatsInputs(root, modules, resources, changes)
     stored = StoredStats(root, folder, context, changes)
+    stored.prune()
     compatible = {
         path: record
         for path in files
@@ -317,8 +351,10 @@ def collect_cached_stats(
     fresh = collect(missing) if missing else []
     if any(result["status"] != 0 for result in fresh):
         raise SystemExit(1)
+    functions = {function for result in fresh for function in result["tests"]}
+    sliced = fresh_by_path(missing, fresh)
     for path in missing:
-        result, covered = per_test_stats(path, fresh, len(missing))
+        result, covered = per_test_stats(path, sliced[path], len(missing), functions)
         if result is not None:
             dependencies = inputs.for_test(path, covered, fresh)
             stored.save(path, result, dependencies, covered is not None, inputs.discovery(dependencies))

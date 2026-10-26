@@ -16,7 +16,16 @@ from scripts.ci_mutation.browser import needs_browser
 from scripts.ci_mutation.scope import discover_changes, graded_green, own_bases, select_tests, test_file
 from scripts.ci_mutation.selection import changed_mutations, file_seconds, split_parts, stats_shards
 from scripts.ci_test_plan import find_record
-from tests.dep_manifest import GLOBAL_FILES, MEASURED, _spans, changed_units, line_units, node
+from tests.dep_manifest import (
+    GLOBAL_FILES,
+    MEASURED,
+    _show,
+    _spans,
+    changed_units,
+    global_input,
+    line_units,
+    node,
+)
 from tests.dep_manifest import changes as recorded_changes
 
 # Upper quartile of measured worker seconds per mutant; stored test timings did not predict the cost.
@@ -114,14 +123,18 @@ def record_drift(root: Path, manifest: dict) -> tuple[set[str], set[int], set[st
     index = {unit: number for number, unit in enumerate(manifest["units"])}
     tests, units, paths = set(), set(), set()
     for path, old, new in recorded_changes(root, manifest["commit"], "HEAD"):
-        if path.startswith("tests/"):
-            # A changed helper, conftest or fixture can move what any test reaches.
-            if not (path.endswith(".py") and Path(path).name.startswith("test_")):
+        if path.startswith(".github/workflows/"):
+            if global_input(
+                path, _show(root, manifest["commit"], path), _show(root, "HEAD", path), manifest.get("version")
+            ):
+                return None
+            paths.add(path)
+        elif path.startswith("tests/") and path.endswith(".py"):
+            # A changed helper or conftest can move what any test reaches.
+            if not Path(path).name.startswith("test_"):
                 return None
             tests.add(path)
-        elif path in {*GLOBAL_FILES, ".github/workflows/test.yml"} or (
-            path.endswith(".py") and not path.startswith(MEASURED)
-        ):
+        elif path in GLOBAL_FILES or (path.endswith(".py") and not path.startswith(MEASURED)):
             return None
         elif path.endswith(".py"):
             units.update(index[unit] for name in changed_units(old, new) if (unit := f"{path}::{name}") in index)
@@ -155,6 +168,72 @@ def covering_tests(manifest: dict, units: set[int], paths: set[str]) -> set[str]
     }
 
 
+def _statement(node: ast.stmt) -> str | tuple:
+    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+        return (node.name, *map(ast.dump, node.decorator_list))
+    if isinstance(node, ast.ClassDef):
+        heads = [*node.bases, *node.keywords, *node.decorator_list]
+        return (node.name, *map(ast.dump, heads), *map(_statement, node.body))
+    return ast.dump(node)
+
+
+def binds_only_new_names(old: str, new: str) -> bool:
+    try:
+        before, after = ast.parse(old), ast.parse(new)
+    except SyntaxError:
+        return False
+    pending, bound = list(before.body), set()
+    for statement in after.body:
+        match = next((kept for kept in pending[:1] if _statement(kept) == _statement(statement)), None)
+        if match is None and isinstance(statement, ast.ImportFrom):
+            match = _extended_import(pending, statement)
+            present = {ast.dump(alias) for alias in match.names} if match else set()
+            bound.update(_bound(alias) for alias in statement.names if ast.dump(alias) not in present)
+        elif match is None and isinstance(statement, ast.Import):
+            bound.update(_bound(alias) for alias in statement.names)
+        elif (
+            match is None
+            and isinstance(statement, ast.Assign)
+            and all(isinstance(t, ast.Name) for t in statement.targets)
+        ):
+            bound.update(target.id for target in statement.targets)
+        elif match is None:
+            return False
+        if match is not None:
+            pending.remove(match)
+    return not pending and "*" not in bound and not bound & _known_names(before)
+
+
+def _bound(alias: ast.alias) -> str:
+    return (alias.asname or alias.name).partition(".")[0]
+
+
+def _extended_import(pending: list[ast.stmt], statement: ast.ImportFrom) -> ast.ImportFrom | None:
+    names = {ast.dump(alias) for alias in statement.names}
+    return next(
+        (
+            kept
+            for kept in pending[:1]
+            if isinstance(kept, ast.ImportFrom)
+            and (kept.module, kept.level) == (statement.module, statement.level)
+            and {ast.dump(alias) for alias in kept.names} <= names
+        ),
+        None,
+    )
+
+
+def _known_names(tree: ast.Module) -> set[str]:
+    known = set()
+    for found in ast.walk(tree):
+        if isinstance(found, ast.Name):
+            known.add(found.id)
+        elif isinstance(found, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            known.add(found.name)
+        elif isinstance(found, (ast.Import, ast.ImportFrom)):
+            known.update(_bound(alias) for alias in found.names)
+    return known
+
+
 def recorded_lines(root: Path, manifest: dict, changes: dict[str, set[int]]) -> tuple[dict[str, set[int]], set[int]]:
     lines = {path: set(found) for path, found in changes.items()}
     fallback = set()
@@ -176,8 +255,14 @@ def recorded_lines(root: Path, manifest: dict, changes: dict[str, set[int]]) -> 
                     for first, _, last, name in _spans(ast.parse(source)):
                         if first <= end and start < last and (unit := f"{path}::{name}") in index:
                             fallback.add(index[unit])
-        by_line = line_units(old)
-        if any(line not in by_line for line in affected) or "<module>" in changed_units(old, new):
+        headers = {
+            line: index[unit]
+            for first, body, _, name in _spans(ast.parse(old))
+            if (unit := f"{path}::{name}") in index
+            for line in range(first, body)
+        }
+        fallback.update(headers[line] for line in affected if line in headers)
+        if not binds_only_new_names(old, new):
             fallback.update(number for unit, number in index.items() if unit.startswith(f"{path}::"))
         lines[path] = affected | {mapping[line] for line in changes.get(path, ()) if line in mapping}
     return lines, fallback

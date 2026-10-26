@@ -108,13 +108,13 @@ def _post(url: str, path: str, body: dict, action: str, environ: Mapping[str, st
         raise auth.HiveError(f"the hive at {url} answered with a body that is not JSON") from exc
 
 
-def _add(args: argparse.Namespace, label: str) -> dict:
+def _add(args: argparse.Namespace, redis: "Redis", label: str) -> dict:
     from scripts.hive import machine
     from scripts.swarm.commands import hive_id
     from scripts.swarm.store import redis_url
 
     return machine.add(
-        redis_client(),
+        redis,
         hive_id(),
         args.target,
         label,
@@ -465,8 +465,9 @@ def main(argv: list[str]) -> int:
         if args.command == "add":
             from scripts.hive import machine
 
-            label = machine.label(time.time())
-            grant = _add(args, label)
+            redis = redis_client()
+            label = machine.name(redis, machine.host(args.target))
+            grant = _add(args, redis, label)
             print(f"added {args.target} to herdr as {label}; its hive member is {grant['id']}")
         elif args.command in ("invite", "create", "scope"):
             print({"invite": _invite, "create": _create, "scope": _scope}[args.command](args))

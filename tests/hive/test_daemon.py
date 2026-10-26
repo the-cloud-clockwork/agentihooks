@@ -715,6 +715,7 @@ def test_initial_beat_creates_a_complete_registry_record(redis, monkeypatch):
         "master_login": {"claude": ""},
         "master_login_enabled": "no",
         "repos": [],
+        "capabilities": [],
         "heartbeat_at": registry.show(redis, "machine")["heartbeat_at"],
         "version": "",
     }

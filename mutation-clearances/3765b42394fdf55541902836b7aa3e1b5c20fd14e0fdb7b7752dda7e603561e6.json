@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_v2/worker_base_revision.py:scripts.swarm_v2.worker_base_revision.x_get__mutmut_7:a08cdf2d44b95e736d39944292f1d264a08e94e385c6b90fcf0341e3521f9e97": {
+    "reader": "Standards code-reviewer sub-agent",
+    "reason": "Request.__init__ stores every header through add_header as key.capitalize(). Probe: Request(url, headers={'accept': 'a'}).header_items() gives [('Accept', 'a')], identical to the original, so the wire bytes and redirect copies are unchanged."
+  }
+}

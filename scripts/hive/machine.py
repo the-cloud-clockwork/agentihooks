@@ -15,6 +15,8 @@ if TYPE_CHECKING:
     from redis import Redis
 
 REMOTE_SESSION = "default"
+NAME_PREFIX = "swarm-hive-"
+MACHINES = f"{auth.PREFIX}:machines"
 LIST = ("herdr", "machine", "list", "--json")
 HERDR_TIMEOUT_S = 300
 SSH_TIMEOUT_S = 60
@@ -36,8 +38,45 @@ class Delivery:
     ledger_ca: str | None = None
 
 
-def label(now: float) -> str:
-    return f"swarm-hive-{int(now)}"
+def hive_name(ordinal: int) -> str:
+    if type(ordinal) is not int or ordinal < 1:
+        raise ValueError("a hive needs a positive integer")
+    return f"{NAME_PREFIX}{ordinal:03d}"
+
+
+def name(redis: "Redis", machine: str, assign: bool = True) -> str:
+    from redis.exceptions import WatchError
+
+    with redis.pipeline() as pipe:
+        while True:
+            try:
+                pipe.watch(MACHINES)
+                named = pipe.hgetall(MACHINES)
+                if machine in named:
+                    return named[machine]
+                used = sorted(named.values())
+                found = next(
+                    (hive_name(ordinal) for ordinal, held in enumerate(used, 1) if held != hive_name(ordinal)),
+                    hive_name(len(used) + 1),
+                )
+                if assign:
+                    pipe.multi()
+                    pipe.hset(MACHINES, machine, found)
+                    pipe.execute()
+                return found
+            except WatchError:
+                continue
+
+
+def host(target: str) -> str:
+    found = _hostname(target)
+    if not found:
+        raise auth.HiveError(f"the SSH target {target!r} names no host")
+    return found
+
+
+def _hostname(target: str) -> str | None:
+    return urlsplit(target if "://" in target else f"ssh://{target}").hostname
 
 
 def add(
@@ -48,7 +87,13 @@ def add(
     delivery: Delivery,
     run: Callable[..., subprocess.CompletedProcess] = subprocess.run,
 ) -> dict:
-    save(redis, local_id, target, label, run)
+    _ui(redis, local_id)
+    listed = _listed(run)
+    _one_per_machine(listed, target, label)
+    member = _member(redis, label)
+    _keep(listed, target, label, run)
+    if member:
+        return {"id": member, "name": label}
     grant = auth.mint(redis, label, delivery.redis_url)
     try:
         run_checked(
@@ -62,23 +107,44 @@ def add(
     return grant
 
 
+def _one_per_machine(listed: list[dict], target: str, label: str) -> None:
+    machine = host(target)
+    for saved in listed:
+        if saved.get("label") != label and _hostname(saved.get("target") or "") == machine:
+            raise auth.HiveError(
+                f"{machine} already runs hive {saved.get('label')}; one machine runs one hive, "
+                "so grow it with more max agents"
+            )
+
+
+def _member(redis: "Redis", label: str) -> str | None:
+    for key in redis.scan_iter(match=f"{auth.PREFIX}:member:*"):
+        if redis.hget(key, "name") == label:
+            return key.rsplit(":", 1)[1]
+    return None
+
+
 def save(
     redis: "Redis", local_id: str, target: str, label: str, run: Callable[..., subprocess.CompletedProcess]
 ) -> None:
+    _ui(redis, local_id)
+    _keep(_listed(run), target, label, run)
+
+
+def _ui(redis: "Redis", local_id: str) -> None:
     local = registry.show(redis, local_id)
     if local is None or local["ui"] != YES:
         raise auth.HiveError(f"hive {local_id} is headless; only a UI hive adds machines")
-    if not _saved(run, target):
+
+
+def _keep(listed: list[dict], target: str, label: str, run: Callable[..., subprocess.CompletedProcess]) -> None:
+    if not any(saved.get("target") == target or saved.get("label") == label for saved in listed):
         run_checked(
             run,
             ["herdr", "machine", "add", "--label", label, "--remote-session", REMOTE_SESSION, target],
             None,
             HERDR_TIMEOUT_S,
         )
-
-
-def _saved(run: Callable[..., subprocess.CompletedProcess], target: str) -> bool:
-    return any(machine.get("target") == target for machine in _listed(run))
 
 
 def _listed(run: Callable[..., subprocess.CompletedProcess]) -> list[dict]:

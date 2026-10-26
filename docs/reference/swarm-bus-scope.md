@@ -77,10 +77,23 @@ Stream names carry the swarm id as the hex of its UTF-8 bytes, so `rig` becomes 
 
 | Resource | Stream | Subjects | Consumer |
 |---|---|---|---|
-| Events | `AGENTIHOOKS_<hex>_EVENTS` | `swarm.<swarm>.events.>` | durable per reactor |
-| Dead letters | `AGENTIHOOKS_<hex>_DEAD` | `swarm.<swarm>.dead.>` | durable per reader |
-| Work queue, one per lane `eng`, `ci`, `plan` | `AGENTIHOOKS_<hex>_QUEUE_<lane>` | `swarm.<swarm>.queue.<lane>.>`; offers publish to `swarm.<swarm>.queue.<lane>.work` | durable named `<lane>` |
-| State bucket | `AGENTIHOOKS_<hex>_STATE_<bucket>` | `swarm.<swarm>.state.<bucket>.<key>`, 64 revisions kept per key | none; reads use direct message get |
+| Events | `AGENTIHOOKS-<hex>-EVENTS` | `swarm.<swarm>.events.>` | durable per reactor |
+| Dead letters | `AGENTIHOOKS-<hex>-DEAD` | `swarm.<swarm>.dead.>` | durable per reader |
+| Work queue, one per lane `eng`, `ci`, `plan` | `AGENTIHOOKS-<hex>-h-<queue-digest>` | `swarm.<swarm>.queue.<lane>.>`; offers publish to `swarm.<swarm>.queue.<lane>.work` | durable named `<lane>` |
+| State bucket | `AGENTIHOOKS-<hex>-h-<state-digest>` | `swarm.<swarm>.state.<bucket>.<key>`, 64 revisions kept per key | none; reads use direct message get |
+
+New stream and consumer names use letters, digits and hyphens. Queue and state resource components use
+`h-` followed by the full SHA-256 digest of `QUEUE_<lane>` or `STATE_<bucket>`. For example,
+the state stream for `other` and `spoke-work` is
+`AGENTIHOOKS-6f74686572-h-bfdb74b91986464723022e957a6d5e52d6a5eb0070241ac54c0c979b13c398a6`.
+Dotted subject separators remain NATS routing syntax. Valid long consumer names keep their identity;
+other consumer names use the same reserved digest prefix.
+
+Existing streams with underscore separators and their consumer cursors remain readable. A hub reuses
+those stored identities, and scoped grants include both name formats for each owned resource. New global
+streams use `AGENTIHOOKS-EVENTS` and `AGENTIHOOKS-DEAD`; existing `AGENTIHOOKS_EVENTS` and
+`AGENTIHOOKS_DEAD` streams remain selected while present. Workspace lookups likewise reuse old labels
+before creating a normalized label.
 
 Each swarm has a state stream for `spoke-work`, `spoke-pending`, `hive-presence`, `hive-executions`
 and `execution-starts`.
@@ -122,7 +135,7 @@ Unscoped credentials and scoped credentials work against the same server at once
   updates an existing stream to that subject list at start. An unscoped publisher whose credential allows
   `legacy.swarm.<...>` publishes there; one that does not keeps its original subject. Hub consumers filter on both,
   and an existing durable that filters on the original subject alone is still accepted. In scoped mode the hub fans
-  in the legacy stream and every swarm's own events stream, found from the `AGENTIHOOKS_<hex>_EVENTS` streams on the
+  in the legacy stream and every swarm's own events stream, found from the `AGENTIHOOKS-<hex>-EVENTS` streams on the
   server, so existing reactor filters see both.
 - **State.** Before a hub handles an event for a swarm, it creates that swarm's state streams. A scoped state stream
   is not created over a legacy `KV_<bucket>` that still holds entries: it fails with `legacy state requires explicit
@@ -173,7 +186,9 @@ nats --server "$AGENTIHOOKS_BUS_URL" --creds "$AGENTIHOOKS_BUS_CREDENTIALS" \
 
 `hive join` saves the credential as `hive.creds` beside `hive.env` and points `AGENTIHOOKS_BUS_CREDENTIALS` at it. The same refusal holds for `swarm.other.dead.<id>`,
 `swarm.other.state.<bucket>.<key>` and the JetStream API subjects of another swarm's streams, such as
-`$JS.API.STREAM.MSG.GET.AGENTIHOOKS_6f74686572_STATE_spoke-work`. The pull request suite proves this against the pinned
+`$JS.API.STREAM.MSG.GET.AGENTIHOOKS-6f74686572-h-bfdb74b91986464723022e957a6d5e52d6a5eb0070241ac54c0c979b13c398a6`
+and the legacy `$JS.API.STREAM.MSG.GET.AGENTIHOOKS_6f74686572_STATE_spoke-work`.
+The pull request suite proves this against the pinned
 NATS server in the scoped NATS tests, together with a member's own queue, dead letter and state round trip and a
 legacy bus working beside a scoped one.
 

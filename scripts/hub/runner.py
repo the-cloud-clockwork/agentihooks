@@ -6,6 +6,7 @@ import socket
 import sys
 import threading
 import traceback
+from dataclasses import replace
 from typing import TYPE_CHECKING
 
 from scripts.events.bus import Bus, Delivery, StateConflict, StateStore
@@ -77,11 +78,23 @@ class HubRunner:
         }
 
     def run_once(self, batch: int = BATCH, timeout_ms: int = FETCH_TIMEOUT_MS) -> dict[str, list[str]]:
-        return {reactor.name: self._pass(reactor, batch, timeout_ms) for reactor in self._reactors}
+        passes = {}
+        for reactor in self._reactors:
+            try:
+                passes[reactor.name] = self._pass(reactor, batch, timeout_ms)
+            except Exception:
+                print(f"hub: reactor {reactor.name} transport failed", file=sys.stderr)
+                traceback.print_exc()
+                passes[reactor.name] = ["failed"]
+        return passes
 
     def stop(self) -> None:
-        for held in self._leases.values():
-            held.release()
+        for name, held in self._leases.items():
+            try:
+                held.release()
+            except Exception:
+                print(f"hub: reactor {name} lease release failed", file=sys.stderr)
+                traceback.print_exc()
 
     def _pass(self, reactor: Reactor, batch: int, timeout_ms: int) -> list[str]:
         held = self._leases.get(reactor.name)
@@ -133,7 +146,9 @@ def _run(hub: HubRunner, once: bool) -> int:
                 print(f"{name}: {outcome}")
         if once:
             return 0
-        if all(outcomes == ["standby"] for outcomes in passes.values()):
+        if all(outcomes == ["standby"] for outcomes in passes.values()) or any(
+            "failed" in outcomes for outcomes in passes.values()
+        ):
             scheduled_wait(IDLE_S)
 
 
@@ -170,7 +185,8 @@ def main(argv: list[str]) -> int:
     if issued:
         os.environ[CREDENTIAL_ENV] = issued[1]
         _renewal(*issued)
-    bus = open_bus(BusConfig.from_environ(os.environ))
+    config = BusConfig.from_environ(os.environ)
+    bus = open_bus(replace(config, reconnect=True) if config.backend == "nats" else config)
     buckets.provision(bus)
     slots.serve(bus)
     hub = HubRunner(bus, registry.configured(bus), holder)

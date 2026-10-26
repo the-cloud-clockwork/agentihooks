@@ -120,7 +120,17 @@ def plain(name):
 
 
 def _clean(text):
-    return re.sub(r"[^a-z0-9._-]+", "-", text.lower()).strip("-.")
+    return re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")
+
+
+def pane_label(title: str) -> str:
+    return _clean(title) or "pane"
+
+
+def seat_label(lane: str, index: int) -> str:
+    if lane not in TYPES or type(index) is not int or index < 1:
+        raise NamingError("a seat needs a known lane and a positive integer")
+    return lane if lane in {"master", "dispatch"} and index == 1 else f"{lane}-{index}"
 
 
 def repo_name(path):
@@ -177,12 +187,12 @@ def scratch(environ, cwd):
 
 
 def scratch_folder(swarm, task):
-    return f"{swarm}-{_clean(task)}"
+    return f"{_clean(swarm)}-{_clean(task)}"
 
 
 def plan_slug(plan, date):
-    stem = re.sub(r"[^a-z0-9]+", "-", Path(plan).stem.lower()).strip("-") or "plan"
-    return f"{stem}-{date}"
+    stem = _clean(Path(plan).stem) or "plan"
+    return f"{stem}-{_clean(date)}"
 
 
 def small_slug(environ):

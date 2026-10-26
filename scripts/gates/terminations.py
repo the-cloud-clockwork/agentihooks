@@ -14,8 +14,8 @@ KILLERS = frozenset({"pkill", "killall"})
 AGENTS = ("claude", "codex")
 INSPECTS = frozenset({"--list", "--dry-run"})
 REFUSAL = (
-    "termination: a master terminates, kills or retires an agent only on the operator's order. Ask him in your pane "
-    "or raise it in Priorities, and leave the agent running until he says so."
+    "termination: a master terminates, kills or retires an agent only on the operator's order. Answer him in your pane "
+    "only when he writes, and leave the agent running until he says so."
 )
 
 
