@@ -45,7 +45,9 @@ def move(payload: dict, ledger=None, environ=None, now: float | None = None, hom
 
 
 def _ago(typed: float | None, now: float) -> str:
-    return "never since his last turn ended" if typed is None else f"{int(now - typed)} seconds ago"
+    if typed is None:
+        return "never since his last turn ended"
+    return f"at {time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime(typed))}, {int(now - typed)} seconds ago"
 
 
 def _record(slug: str, name: str, kind: str, reason: str, now: float, home=None) -> None:

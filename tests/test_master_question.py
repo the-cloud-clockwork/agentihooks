@@ -221,13 +221,15 @@ def _row(kind, reason):
 def test_an_open_question_tool_writes_the_last_typed_turn_to_the_gate_log(master):
     typed_at(NOW - master_question.WINDOW_SEC + 1)
     master_question.move(ask(FOCUS), master, now=NOW)
-    assert _gate_rows() == [_row("count", "opened: the operator typed 599 seconds ago")]
+    assert _gate_rows() == [_row("count", "opened: the operator typed at 1970-01-12T13:36:41Z, 599 seconds ago")]
 
 
 def test_moved_questions_write_a_deny_row_to_the_gate_log(master):
     typed_at(NOW - master_question.WINDOW_SEC)
     master_question.move(ask(FOCUS, FREEZE), master, now=NOW)
-    assert _gate_rows() == [_row("deny", "moved 2 questions: the operator typed 600 seconds ago")]
+    assert _gate_rows() == [
+        _row("deny", "moved 2 questions: the operator typed at 1970-01-12T13:36:40Z, 600 seconds ago")
+    ]
 
 
 def test_a_question_left_to_the_presence_check_writes_that_no_turn_was_read(master):
