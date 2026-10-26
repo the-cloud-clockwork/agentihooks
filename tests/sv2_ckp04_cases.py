@@ -1,6 +1,8 @@
 import hashlib
 import json
 import tempfile
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 
 from scripts.swarm_v2 import contracts
@@ -14,6 +16,16 @@ EVIDENCE_CLASS = (
     "mocked: a local durable directory backend behind a granted artifact store, fixture launch registrations, a "
     "backend wrapper that loses acknowledgements and a fake clock; no object store, worker Pod or harness was used"
 )
+
+MEMORY = Path("/dev/shm")
+
+
+@contextmanager
+def scratch() -> Iterator[tuple[Path, Path]]:
+    """The fixtures fsync thousands of times; on tmpfs that never waits on runner disk latency."""
+    where = MEMORY if MEMORY.is_dir() else None
+    with tempfile.TemporaryDirectory(dir=where) as one, tempfile.TemporaryDirectory(dir=where) as two:
+        yield Path(one), Path(two)
 
 
 class LostAck:
@@ -129,8 +141,8 @@ def _positive_fixture(root: Path) -> dict:
 
 
 def _positive() -> tuple[dict, bool]:
-    with tempfile.TemporaryDirectory() as one, tempfile.TemporaryDirectory() as two:
-        observed = {"fixture": _positive_fixture(Path(one)), "second_fixture": _positive_fixture(Path(two))}
+    with scratch() as (one, two):
+        observed = {"fixture": _positive_fixture(one), "second_fixture": _positive_fixture(two)}
     first = observed["fixture"]
     checks = [
         observed["fixture"] == observed["second_fixture"],
@@ -187,8 +199,8 @@ def _rejection_fixture(root: Path) -> dict:
 
 
 def _rejection() -> tuple[dict, bool]:
-    with tempfile.TemporaryDirectory() as one, tempfile.TemporaryDirectory() as two:
-        observed = {"fixture": _rejection_fixture(Path(one)), "second_fixture": _rejection_fixture(Path(two))}
+    with scratch() as (one, two):
+        observed = {"fixture": _rejection_fixture(one), "second_fixture": _rejection_fixture(two)}
     first = observed["fixture"]
     checks = [
         observed["fixture"] == observed["second_fixture"],
@@ -294,8 +306,8 @@ def _rollback(pub: publisher.Publisher) -> dict:
 
 
 def _recovery() -> tuple[dict, bool]:
-    with tempfile.TemporaryDirectory() as one, tempfile.TemporaryDirectory() as two:
-        observed = {"fixture": _recovery_fixture(Path(one)), "second_fixture": _recovery_fixture(Path(two))}
+    with scratch() as (one, two):
+        observed = {"fixture": _recovery_fixture(one), "second_fixture": _recovery_fixture(two)}
     first = observed["fixture"]
     last = first["boundaries"][-1]
     checks = [
