@@ -276,6 +276,9 @@ def test_the_hive_is_named_by_its_member_or_its_name_and_a_gone_name_stands_for_
     auth.revoke(store.redis, member)
     with pytest.raises(auth.HiveError, match="pass --label"):
         remove.resolve(store.redis, member)
+    remove.forget(store.redis, member)
+    with pytest.raises(auth.HiveError, match="pass --label"):
+        remove.resolve(store.redis, member)
     assert remove.resolve(store.redis, "swarm-hive-004") == ("swarm-hive-004", "swarm-hive-004")
 
 
@@ -451,12 +454,17 @@ def test_the_remove_command_builds_its_plan_from_the_member_and_its_options(stor
     assert cli.main(["remove", "anton-9", "--dry-run"]) == 0
     given = ["--label", "l", "--path", "p", "--repo", "o/r", "--base", "main2", "--wait", "5"]
     assert cli.main(["remove", member, *given]) == 0
+    assert cli.main(["remove", "anton-9", "--label", "l"]) == 0
     bao = openbao_kv.OpenBao("https://bao.example", "t")
     assert seen == [
         (True, bao, remove.Plan(member, "anton-9", "k8s/agentihooks-hive-anton-9"), remove.Host),
         (True, bao, remove.Plan(member, "anton-9", "k8s/agentihooks-hive-anton-9", dry_run=True), remove.Host),
         (True, bao, remove.Plan(member, "l", "p", "o/r", "main2", 5), remove.Host),
+        (True, bao, remove.Plan(member, "l", "k8s/agentihooks-hive-l"), remove.Host),
     ]
+    monkeypatch.delenv(openbao_kv.TOKEN_ENV)
+    assert cli.main(["remove", member, "--dry-run"]) == 0
+    assert seen[-1][1] is None
 
 
 def test_the_remove_help_names_every_option(monkeypatch, capsys):

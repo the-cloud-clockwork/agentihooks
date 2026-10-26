@@ -1,6 +1,7 @@
 """agentihooks hive remove: drain a hive, then delete it from Redis, herdr, OpenBao and antoncore."""
 
 import json
+import re
 import subprocess
 import time
 from collections.abc import Callable
@@ -36,7 +37,8 @@ MANIFESTS = (
     "k8s/manifests/{release}/",
     "k8s/values-overlays/{release}/",
 )
-TREE = '.tree[] | select(.type == "blob") | .path'
+MEMBER_ID = re.compile("[0-9a-f]{16}")
+TREE = 'if .truncated then error("the tree listing is truncated") else .tree[] | select(.type == "blob") | .path end'
 
 
 @dataclass(frozen=True)
@@ -65,7 +67,7 @@ def resolve(redis: "Redis", given: str) -> tuple[str, str]:
         return given, name
     if member := machine.named_member(redis, given):
         return member, given
-    if registry.show(redis, given) is not None:
+    if registry.show(redis, given) is not None or MEMBER_ID.fullmatch(given):
         raise auth.HiveError(f"hive {given} holds no member record to name it; pass --label")
     return given, given
 
@@ -131,12 +133,12 @@ def settle(store: "RedisStore", hive: str, wait_s: int, host: Host) -> str:
 
 
 def revoke(redis: "Redis", hive: str, signer: "nats_grant.Signer | None" = None, dry_run: bool = False) -> list[str]:
-    held = redis.exists(member_key(hive))
+    if not redis.exists(member_key(hive)):
+        return [f"{hive} holds no member credential"]
     if dry_run:
-        return [f"would revoke member {hive} and its Redis user" if held else f"{hive} holds no member credential"]
+        bus = [f"would revoke the NATS credential of {hive}"] if signer is not None else []
+        return [*bus, f"would revoke member {hive} and its Redis user"]
     bus = [nats_grant.revoke(redis, signer, hive)] if signer is not None else []
-    if not held:
-        return [*bus, f"{hive} holds no member credential"]
     auth.revoke(redis, hive)
     return [*bus, f"revoked member {hive} and its Redis user"]
 
@@ -188,7 +190,7 @@ def forget(redis: "Redis", hive: str) -> list[str]:
     return [f"deleted {deleted} registry records of {hive}"]
 
 
-def unbank(bao: openbao_kv.OpenBao, path: str, dry_run: bool = False) -> list[str]:
+def unbank(bao: openbao_kv.OpenBao | None, path: str, dry_run: bool = False) -> list[str]:
     if dry_run:
         return [f"would delete OpenBao {openbao_kv.MOUNT}/{path}"]
     try:
@@ -228,7 +230,7 @@ STEPS = (
 )
 
 
-def remove(store: "RedisStore", bao: openbao_kv.OpenBao, plan: Plan, host: Host) -> list[str]:
+def remove(store: "RedisStore", bao: openbao_kv.OpenBao | None, plan: Plan, host: Host) -> list[str]:
     lines = [f"{title}: {line}" for title, step in STEPS for line in step(store, bao, plan, host)]
     if plan.dry_run:
         return [*lines, f"dry run of hive remove {plan.label}: nothing written"]

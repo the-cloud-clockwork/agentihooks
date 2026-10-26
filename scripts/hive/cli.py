@@ -180,14 +180,17 @@ def _create(args: argparse.Namespace) -> str:
 
 def _remove(args: argparse.Namespace) -> list[str]:
     from scripts import openbao_kv
-    from scripts.hive import invite, remove
+    from scripts.hive import invite, machine, remove
     from scripts.swarm.store import RedisStore
 
     bao = openbao_kv.from_env(os.environ)
-    if bao is None:
+    if bao is None and not args.dry_run:
         raise auth.HiveError(f"{openbao_kv.URL_ENV} and {openbao_kv.TOKEN_ENV} must both be set")
     store = RedisStore(redis_client())
-    hive, label = (args.id, args.label) if args.label else remove.resolve(store.redis, args.id)
+    if args.label:
+        hive, label = machine.named_member(store.redis, args.id) or args.id, args.label
+    else:
+        hive, label = remove.resolve(store.redis, args.id)
     given = {"repo": args.repo, "base": args.base}
     plan = remove.Plan(
         hive,
