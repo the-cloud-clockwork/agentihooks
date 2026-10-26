@@ -55,6 +55,7 @@ from scripts.swarm_ledger import (  # noqa: E402
     ledger_task_duplicates,
     page_policy,
     ports,
+    request_body,
     request_metrics,
     server_code,
     server_compose,
@@ -873,6 +874,7 @@ class Handler(BaseHTTPRequestHandler):
                 raise Handshake from exc
             self.request.settimeout(None)
         super().setup()
+        self.raw_rfile = self.rfile
 
     def log_message(self, fmt, *args):
         if self.path.startswith("/api/v1/"):
@@ -884,7 +886,19 @@ class Handler(BaseHTTPRequestHandler):
     @request_metrics.measured
     def handle_one_request(self) -> None:
         self.command, self.path, self.raw_requestline = None, "/", b""
+        self.rfile = getattr(self, "raw_rfile", self.rfile)
         return super().handle_one_request()
+
+    def parse_request(self) -> bool:
+        parsed = super().parse_request()
+        if parsed:
+            self.rfile = request_body.Body(getattr(self, "raw_rfile", self.rfile), request_body.length(self.headers))
+        return parsed
+
+    def send_response(self, code, message=None):
+        if isinstance(getattr(self, "rfile", None), request_body.Body) and not self.rfile.drain(MAX_BODY):
+            self.close_connection = True
+        super().send_response(code, message)
 
     def send(self, code, body, ctype):
         if self.path.startswith("/api/v1/") and code >= 400 and ctype != "application/json":
