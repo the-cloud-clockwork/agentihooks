@@ -301,6 +301,8 @@ def _line_project(tmp_path, monkeypatch, mode):
     if mode == "repeated":
         source = "def f(value):\n    if value:\n        value += 1\n" + "    pass\n" * 300
     elif mode in {"constant", "dropped"}:
+        source += "\n\nclass Config:\n    SETTING = 1\n    OTHER = 2\n"
+    elif mode == "rebound":
         source += "\nSETTING = 1\n"
     elif mode == "decorator":
         source += "\n\n@staticmethod\ndef h():\n    pass\n"
@@ -357,8 +359,9 @@ def _line_contexts(tmp_path, manifest, mode):
 LINE_EDITS = {
     "constant": ("SETTING = 1", "SETTING = 2"),
     "decorator": ("@staticmethod", "@classmethod"),
-    "dropped": ("\nSETTING = 1\n", ""),
+    "dropped": ("    SETTING = 1\n", ""),
     "header": ("def f(value)", "def f(value=1)"),
+    "rebound": ("SETTING = 1", "SETTING = 2"),
     "inserted": ("    return value - 2", "    value += 1\n    return value - 2"),
 }
 
@@ -379,6 +382,7 @@ LINE_EDITS = {
         "module",
         "constant",
         "dropped",
+        "rebound",
         "decorator",
         "new",
         "deleted",
@@ -407,7 +411,7 @@ def test_statistics_select_only_contexts_executing_the_edited_branch(tmp_path, m
     line = 3 if mode == "repeated" else 4
     plan.estimate(tmp_path, {"scripts/core.py": {line + shift}}, selection, manifest)
     expected = ["tests/test_core.py::test_g"]
-    if mode in {"legacy", "inserted", "header", "decorator", "drift"}:
+    if mode in {"legacy", "inserted", "header", "decorator", "rebound", "drift"}:
         expected = [
             f"tests/test_core.py::{name}" for name in ("TestSpawn::test_child", "test_f", "test_g", "test_other")
         ]

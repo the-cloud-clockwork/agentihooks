@@ -177,6 +177,21 @@ def _statement(node: ast.stmt) -> str | tuple:
     return ast.dump(node)
 
 
+def _module_key(node: ast.stmt) -> str | tuple:
+    if isinstance(node, ast.ClassDef):
+        heads = [*node.bases, *node.keywords, *node.decorator_list]
+        kept = (item for item in node.body if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)))
+        return (node.name, *map(ast.dump, heads), *map(_module_key, kept))
+    return _statement(node)
+
+
+def _module_keys(source: str) -> list:
+    try:
+        return [_module_key(node) for node in ast.parse(source).body]
+    except SyntaxError:
+        return [source]
+
+
 def binds_only_new_names(old: str, new: str) -> bool:
     try:
         before, after = ast.parse(old), ast.parse(new)
@@ -268,8 +283,9 @@ def recorded_lines(root: Path, manifest: dict, changes: dict[str, set[int]]) -> 
             for node in ast.walk(ast.parse(old))
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
         ]
-        if not binds_only_new_names(old, new) and any(
-            line not in by_line and any(first <= line <= last for first, last in functions) for line in affected
+        if not binds_only_new_names(old, new) and (
+            _module_keys(old) != _module_keys(new)
+            or any(line not in by_line and any(first <= line <= last for first, last in functions) for line in affected)
         ):
             fallback.update(number for unit, number in index.items() if unit.startswith(f"{path}::"))
         lines[path] = affected | {mapping[line] for line in changes.get(path, ()) if line in mapping}
