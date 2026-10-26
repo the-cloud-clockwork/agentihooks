@@ -745,6 +745,7 @@ def test_a_doctor_start_leaves_the_first_telemetry_pass_to_the_scheduled_tick(en
         "master prompt",
         "ci",
         "dev workflow",
+        "feature",
         "trace",
         "runtime storage",
         "scheduled tick",

@@ -2,7 +2,7 @@
 
 import json
 import subprocess
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 
 from scripts.hive import auth
 
@@ -12,6 +12,7 @@ RAW = "Accept: application/vnd.github.raw"
 AUTO_REFUSED = "auto merge is not allowed"
 PASSED = ("SUCCESS", "NEUTRAL", "SKIPPED")
 WAITING = (None, "PENDING", "EXPECTED")
+REQUIRED = '[.[] | select(.type == "required_status_checks") | .parameters.required_status_checks[].context] | unique'
 
 
 def gh(run: Run, argv: list[str], body: dict | None = None) -> str:
@@ -78,17 +79,31 @@ def merge(run: Run, url: str) -> bool:
     return True
 
 
-def checks_passed(run: Run, url: str) -> bool:
+def required_checks(run: Run, repo: str, base: str) -> list[str]:
+    return json.loads(gh(run, ["api", f"repos/{repo}/rules/branches/{base}", "--jq", REQUIRED]))
+
+
+def checks_passed(run: Run, url: str, required: Sequence[str] = ()) -> bool:
     rollup = json.loads(gh(run, ["pr", "view", url, "--json", "statusCheckRollup"]))["statusCheckRollup"] or []
     results = [
         (check.get("name") or check.get("context"), check.get("conclusion") or check.get("state")) for check in rollup
     ]
+    if required:
+        results = [(name, _best([result for found, result in results if found == name])) for name in required]
     failed = [name for name, result in results if result not in (*PASSED, *WAITING)]
     if failed:
         raise auth.HiveError(
             f"pull request {url} has failed checks: {', '.join(failed)}; fix them and rerun hive create"
         )
     return bool(results) and all(result in PASSED for _, result in results)
+
+
+def _best(results: list[str | None]) -> str | None:
+    for group in (PASSED, WAITING):
+        found = [result for result in results if result in group]
+        if found:
+            return found[0]
+    return results[0] if results else None
 
 
 def squash(run: Run, url: str) -> None:

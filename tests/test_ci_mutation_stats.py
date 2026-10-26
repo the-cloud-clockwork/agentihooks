@@ -120,7 +120,8 @@ def test_measured_dependencies_include_collection_phases_and_preloaded_modules(t
     assert measured_dependencies(coverage_file, work, root, ["tests/test_missing.py::test_missing"], tracked) == {}
 
 
-def test_statistics_collect_runtime_dependencies_with_plugin_discovery_disabled(tmp_path, monkeypatch):
+@pytest.mark.parametrize("inherited", ["before", None])
+def test_statistics_collect_runtime_dependencies_with_plugin_discovery_disabled(tmp_path, monkeypatch, inherited):
     import os
     import subprocess
     import sys
@@ -145,17 +146,25 @@ def test_statistics_collect_runtime_dependencies_with_plugin_discovery_disabled(
     subprocess.run(["git", "add", *files], cwd=original, check=True)
     monkeypatch.chdir(work)
     monkeypatch.setenv("PYTEST_DISABLE_PLUGIN_AUTOLOAD", "1")
+    # collect_shard_stats sets MUTANT_UNDER_TEST; restoring it keeps a mutation run's later tests on their mutant.
+    monkeypatch.setenv("MUTANT_UNDER_TEST", os.environ.get("MUTANT_UNDER_TEST", ""))
     monkeypatch.setenv("MUTATION_STATS_CACHE", str(tmp_path / "cache"))
     monkeypatch.setenv("MUTATION_STATS_ROOT", str(original))
-    monkeypatch.setenv("COVERAGE_FILE", str(tmp_path / "before"))
+    if inherited:
+        monkeypatch.setenv("COVERAGE_FILE", str(tmp_path / inherited))
+    else:
+        monkeypatch.delenv("COVERAGE_FILE", raising=False)
     engine = SimpleNamespace(
         tests_by_mangled_function_name={"scripts.sample.x_value": {node}}, duration_by_test={node: 1}
     )
+
+    exported = []
 
     class Runner:
         _pytest_add_cli_args = []
 
         def run_stats(self, *, tests):
+            exported.append(os.environ.get("COVERAGE_FILE"))
             done = subprocess.run(
                 [sys.executable, "-m", "pytest", "-q", *self._pytest_add_cli_args, *tests],
                 cwd=work / "mutants",
@@ -172,11 +181,59 @@ def test_statistics_collect_runtime_dependencies_with_plugin_discovery_disabled(
         SimpleNamespace(mutmut=engine), Runner(), ["tests/test_sample.py"], output, str(tmp_path / "base")
     )
     result = json.loads(output.read_text())
+    assert exported == [None]
+    assert (
+        tmp_path / "part.coveragerc"
+    ).read_text() == f"[run]\ndata_file = {(tmp_path / 'part.coverage').resolve()}\n"
     assert result["status"] == 0
     assert result["durations"] == {node: 1}
     assert "scripts/sample.py" in result["dependencies"][node]
     assert "tests/test_sample.py" in result["dependencies"][node]
     assert "scripts/untracked.py" not in result["dependencies"][node]
+
+
+def test_a_stats_bucket_of_only_wall_clock_tests_collects_nothing_and_succeeds(tmp_path, monkeypatch):
+    import os
+    import subprocess
+    import sys
+    from types import SimpleNamespace
+
+    from scripts.ci_mutation.selection import collect_shard_stats
+
+    work = tmp_path / "work"
+    test = work / "mutants" / "tests" / "test_sample.py"
+    test.parent.mkdir(parents=True)
+    test.write_text("import pytest\n@pytest.mark.wall_clock\ndef test_value():\n    assert True\n")
+    monkeypatch.chdir(work)
+    monkeypatch.setenv("PYTEST_DISABLE_PLUGIN_AUTOLOAD", "1")
+    monkeypatch.setenv("MUTANT_UNDER_TEST", os.environ.get("MUTANT_UNDER_TEST", ""))
+    monkeypatch.delenv("MUTATION_STATS_CACHE", raising=False)
+    engine = SimpleNamespace(tests_by_mangled_function_name={}, duration_by_test={})
+    codes = []
+
+    class Runner:
+        _pytest_add_cli_args = []
+
+        def run_stats(self, *, tests):
+            done = subprocess.run(
+                [sys.executable, "-m", "pytest", "-q", *self._pytest_add_cli_args, *tests],
+                cwd=work / "mutants",
+                env=dict(os.environ),
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            codes.append(done.returncode)
+            return done.returncode
+
+    output = tmp_path / "part.json"
+    node = "tests/test_sample.py::test_value"
+    collect_shard_stats(SimpleNamespace(mutmut=engine), Runner(), [node], output, str(tmp_path / "base"))
+    result = json.loads(output.read_text())
+    assert codes == [pytest.ExitCode.NO_TESTS_COLLECTED]
+    assert result["status"] == 0
+    assert result["durations"] == {}
+    assert result["files"] == [node]
 
 
 @pytest.mark.wall_clock

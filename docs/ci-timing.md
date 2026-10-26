@@ -56,10 +56,10 @@ controller:
     initialDelaySeconds: 5
     periodSeconds: 1
     timeoutSeconds: 5
-    failureThreshold: 2
-  terminationGracePeriodSeconds: 1
+    failureThreshold: 6
+  terminationGracePeriodSeconds: 30
   env:
-    AGENTIHOOKS_CONTROLLER_TICK_SECONDS: "2"
+    AGENTIHOOKS_CONTROLLER_TICK_SECONDS: "5"
 ```
 
 Liveness initial delay fell from ten to five seconds and its period from two
@@ -2196,7 +2196,7 @@ A shard listed with `success` stalled once and recovered; one listed with `failu
 
 ## Worker hive pod image build
 
-The Worker hive pod workflow (`hive-worker.yml`) runs `deploy/worker/kind-proof.sh` in its `kind` job. The script builds the image `local/agentihooks-hive-worker:dev` while a kind cluster starts, loads it into the cluster and proves that a worker Pod registers with the hive and acknowledges an order. The image has two parts:
+The Worker hive pod workflow (`hive-worker.yml`) runs `deploy/worker/kind-proof.sh` in its `kind` job. The script builds the image `localhost:5001/agentihooks-hive-worker:dev` while a kind cluster starts and pushes it, without unpacking it into Docker, to a registry container the kind node pulls from; the node already holds the base layers it pre-pulled, so it fetches only the hive layers. The script then proves that a worker Pod registers with the hive and acknowledges an order. The image has two parts:
 
 | Part | Dockerfile | Contents |
 |---|---|---|
@@ -2209,21 +2209,21 @@ The hive layer builds its wheel from the GitHub ref named by `AGENTIHOOKS_REF`. 
 
 ### How the base is chosen
 
-Before building, the script runs `deploy/worker/base-current.sh ghcr.io/the-cloud-clockwork/agentihooks-worker:dev`, which:
+Before building, the script runs `deploy/worker/base-current.sh ghcr.io/the-cloud-clockwork/agentihooks-worker:dev "$out/worker-base.ref"`, which:
 
-1. pulls the published base for `linux/amd64` and reads `source_revision`, the commit the base was built from, out of `/opt/swarm-node/manifest.json` in the image;
+1. runs `scripts/swarm_v2/worker_base_revision.py`, which reads the published base's `linux/amd64` manifest and image config from the registry, without pulling its layers, and returns the manifest digest and the `org.opencontainers.image.revision` label, the commit the base was built from (`docker/swarm-node/Dockerfile` sets it from `SOURCE_REVISION`);
 2. fetches that commit from `origin` at depth one;
 3. compares it with `HEAD` over the base inputs: `docker/swarm-node`, `scripts/swarm_v2/worker_image.py`, `profiles` and `docs/swarm-v2/schemas`.
 
 | Exit | Meaning | Output | Build |
 |---|---|---|---|
-| 0 | no base input differs from the published base's revision | none | hive layer only, on the published base the check already pulled |
+| 0 | no base input differs from the published base's revision | the digest pinned base written to the second argument | hive layer only, `FROM` that digest, so BuildKit fetches and extracts the base once |
 | 1 | at least one base input changed | `the worker base inputs changed since <revision>` in the step log | base as `local/worker-base:dev`, then the hive layer with `--build-arg WORKER_IMAGE=local/worker-base:dev` |
 | 2 | the comparison could not be made | a `Worker hive base` warning annotation naming the reason, ending `; rebuilding the worker base` | the same rebuild as exit 1 |
 
-The three warning reasons are `the published worker base revision cannot be read` (the pull or the manifest read failed), `the published worker base revision <revision> cannot be fetched` and `the worker base inputs cannot be compared with revision <revision>`. Every failure to decide falls back to the rebuild, so a missing or unreadable base slows the run but does not fail it.
+The three warning reasons are `the published worker base revision cannot be read` (the registry read failed or the base has no revision label), `the published worker base revision <revision> cannot be fetched` and `the worker base inputs cannot be compared with revision <revision>`. Every failure to decide falls back to the rebuild, so a missing or unreadable base slows the run but does not fail it.
 
-On a `dev` push that changes a base input, the Worker hive pod run and the same push's Swarm worker image run start independently. When the check pulls the base before that run publishes it, the base is rebuilt; when it pulls after, the base is current and only the hive layer is built.
+On a `dev` push that changes a base input, the Worker hive pod run and the same push's Swarm worker image run start independently. When the check reads the base before that run publishes it, the base is rebuilt; when it reads after, the base is current and only the hive layer is built.
 
 The base inputs are the sources the base Dockerfile copies that the hive layer does not replace: the hive layer's wheel reinstalls `pyproject.toml`, `README.md`, `hooks/` and `scripts/`, so changes there need no base rebuild, except `scripts/swarm_v2/worker_image.py`, which the base build runs to write its manifest. `tests/deployment/test_worker_hive_image.py` reads the `COPY` sources of `docker/swarm-node/Dockerfile` and fails when one of them is neither replaced by the wheel nor covered by the input list.
 
@@ -2236,9 +2236,9 @@ Change these together in one pull request; `tests/deployment/test_worker_hive_im
 | Published base image | the `base-current.sh` argument in `kind-proof.sh`, the `ARG WORKER_IMAGE=` default in `deploy/worker/Dockerfile` and the test's `BASE` |
 | Base inputs | the `git diff` paths in `base-current.sh` and the test's `INPUTS`; add a path when the base Dockerfile starts copying a new source |
 
-Limits: the check pulls and compares only the `linux/amd64` base, the kind node is pinned to `mirror.gcr.io/kindest/node:v1.37.0`, and the script needs `docker`, `git`, `python3`, `kind`, `kubectl`, `helm` and `openssl` on the runner and writes its output under `$HOME/scratchpad/worker-hive-proof`.
+Limits: the check reads and compares only the `linux/amd64` base of a published image index, the kind node is pinned to `mirror.gcr.io/kindest/node:v1.37.0`, and the script needs `docker`, `git`, `python3`, `kind`, `kubectl`, `helm` and `openssl` on the runner and writes its output under `$HOME/scratchpad/worker-hive-proof`.
 
-The rest of the proof is unchanged: the same smoke check inside the image (`claude`, `codex`, `herdr` and `git --version`, `wt.sh root` and `agentihooks hive --help`), Pod registration and order acknowledgement, and on a `dev` push the `kind` job, which starts only after the `contracts` job passes, publishes the image it proved straight from its own Docker daemon.
+The init and tool checks run as Pods in the cluster rather than with `docker run`, so Docker never unpacks the image; the init check's fresh home is an `emptyDir` with `fsGroup` 10001, as in the chart's worker Pod. The rest of the proof is unchanged: the same smoke check inside the image (`claude`, `codex`, `herdr` and `git --version`, `wt.sh root` and `agentihooks hive --help`), Pod registration and order acknowledgement, and on a `dev` push the `kind` job, which starts only after the `contracts` job passes, publishes the image it proved straight from its own Docker daemon, which keeps the pushed image under its registry name; the proof records that image id in `image.txt`.
 
 ### Reading the result
 

@@ -1,0 +1,187 @@
+{
+  "case": "T-SV2-IDX-04-A",
+  "evidence_class": "mocked: an in-process caller, a SQLite catalog file, a local content addressed object folder and a deterministic concept embedder stand in for the session service, the central database, the archive bucket and the embedding provider; no model, HTTP server, vector database or Pod runs",
+  "input_sha256": {
+    "session-search.json": "a8d3c56f8710490765686d36fb367d571edf1f1d9280a0d2168992908ee650b8"
+  },
+  "observed": {
+    "authoritative_state_unchanged": true,
+    "other_project_excluded": [
+      "kernel:0:turn"
+    ],
+    "recall": {
+      "mode": "hybrid",
+      "results": [
+        {
+          "context": {
+            "after": [
+              "lock:0:tool"
+            ],
+            "before": []
+          },
+          "explain": {
+            "fused": 0.032787,
+            "lexical": {
+              "matched": [
+                "database is locked",
+                "ingest"
+              ],
+              "rank": 1,
+              "score": 3.583519
+            },
+            "vector": {
+              "rank": 1,
+              "score": 1.0
+            }
+          },
+          "label": "lock:0:turn"
+        },
+        {
+          "context": {
+            "after": [
+              "lock:1:turn"
+            ],
+            "before": [
+              "lock:0:turn"
+            ]
+          },
+          "explain": {
+            "fused": 0.032258,
+            "lexical": {
+              "matched": [
+                "database is locked"
+              ],
+              "rank": 2,
+              "score": 1.504077
+            },
+            "vector": {
+              "rank": 2,
+              "score": 1.0
+            }
+          },
+          "label": "lock:0:tool"
+        },
+        {
+          "context": {
+            "after": [
+              "lock:1:tool"
+            ],
+            "before": [
+              "lock:0:tool"
+            ]
+          },
+          "explain": {
+            "fused": 0.015873,
+            "lexical": null,
+            "vector": {
+              "rank": 3,
+              "score": 0.707107
+            }
+          },
+          "label": "lock:1:turn"
+        }
+      ],
+      "state": "answered",
+      "vector": {
+        "index_generation": "fixture-search-v1",
+        "model": "fixture-concept-embedder-4",
+        "state": "used"
+      }
+    },
+    "recall_fusion": {
+      "k": 60,
+      "method": "reciprocal_rank"
+    },
+    "recall_query": {
+      "phrases": [
+        "database is locked"
+      ],
+      "terms": [
+        "fail",
+        "ingest"
+      ]
+    },
+    "recall_sessions": [
+      {
+        "hits": 3,
+        "session": "search-lock"
+      }
+    ],
+    "session_search_relevance": {
+      "recall_lexical": {
+        "recall": 1.0,
+        "reciprocal_rank": 1.0
+      },
+      "recall_semantic": {
+        "recall": 1.0,
+        "reciprocal_rank": 0.333333
+      },
+      "symbol": {
+        "recall": 1.0,
+        "reciprocal_rank": 1.0
+      }
+    },
+    "session_search_scope_rejections": 0,
+    "single_project_grant_matches_narrowed": true,
+    "stopwords_only": {
+      "query": {
+        "phrases": [],
+        "terms": []
+      },
+      "results": 0,
+      "state": "answered"
+    },
+    "symbol": {
+      "mode": "hybrid",
+      "results": [
+        {
+          "context": {
+            "after": [],
+            "before": []
+          },
+          "explain": {
+            "fused": 0.032522,
+            "lexical": {
+              "matched": [
+                "chunkindex.build"
+              ],
+              "rank": 1,
+              "score": 2.197225
+            },
+            "vector": {
+              "rank": 2,
+              "score": 1.0
+            }
+          },
+          "label": "symbol:0:turn"
+        },
+        {
+          "context": {
+            "after": [],
+            "before": []
+          },
+          "explain": {
+            "fused": 0.016393,
+            "lexical": null,
+            "vector": {
+              "rank": 1,
+              "score": 1.0
+            }
+          },
+          "label": "symbol:0:tool"
+        }
+      ],
+      "state": "answered",
+      "vector": {
+        "index_generation": "fixture-search-v1",
+        "model": "fixture-concept-embedder-4",
+        "state": "used"
+      }
+    },
+    "top_hit_evidence_has_error_string": true,
+    "unnarrowed_includes_other_project": [
+      "kernel:0:turn"
+    ]
+  },
+  "state": "passed"
+}

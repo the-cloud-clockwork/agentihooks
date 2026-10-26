@@ -10,6 +10,7 @@ from pathlib import Path
 from time import process_time
 from types import ModuleType
 
+import pytest
 from mutmut.utils.format_utils import get_mutant_name
 
 from scripts.ci_cpu_quota import quota_cpus
@@ -162,9 +163,12 @@ def collect_shard_stats(runner, test_runner, tests: list[str], output: Path, bas
     measured = bool(os.environ.get("MUTATION_STATS_CACHE"))
     coverage_file = output.with_suffix(".coverage")
     if measured:
-        os.environ["COVERAGE_FILE"] = str(coverage_file.resolve())
+        # An exported COVERAGE_FILE reaches every subprocess a test starts, whose coverage runs then write here.
+        os.environ.pop("COVERAGE_FILE", None)
+        config = output.with_suffix(".coveragerc")
+        config.write_text(f"[run]\ndata_file = {coverage_file.resolve()}\n")
         test_runner._pytest_add_cli_args.extend(
-            ["-p", "pytest_cov.plugin", "--cov=.", "--cov-context=test", "--cov-report=", "--cov-config=/dev/null"]
+            ["-p", "pytest_cov.plugin", "--cov=.", "--cov-context=test", "--cov-report=", f"--cov-config={config}"]
         )
     work = Path.cwd().resolve()
     bases = [
@@ -174,6 +178,8 @@ def collect_shard_stats(runner, test_runner, tests: list[str], output: Path, bas
     ]
     start = process_time()
     status = test_runner.run_stats(tests=tests)
+    # A bucket of only wall clock tests deselects everything, and pytest reports that as no tests collected.
+    status = 0 if status == pytest.ExitCode.NO_TESTS_COLLECTED else status
     dependencies = {}
     if measured:
         from subprocess import check_output

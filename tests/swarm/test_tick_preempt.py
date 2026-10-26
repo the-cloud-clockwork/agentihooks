@@ -67,7 +67,7 @@ def test_the_freed_seat_goes_to_the_urgent_task_and_the_normal_successor_yields(
 
 def test_spawn_order_shares_one_handoff_batch_across_lanes_and_queue_sort(store, monkeypatch):  # noqa: F811
     from importlib import import_module
-    from unittest.mock import Mock
+    from unittest.mock import Mock, call
 
     from scripts.swarm import capacity, dispatcher, profile_first
     from tests.swarm.test_preempt import Keyed
@@ -87,7 +87,7 @@ def test_spawn_order_shares_one_handoff_batch_across_lanes_and_queue_sort(store,
     monkeypatch.setattr(profile_first, "placeable", lambda slug, config, store, runtime, lane, ready, cap: (ready, []))
     seen = []
 
-    def ready(slug, store, rows, doc, lane, dispatched):
+    def ready(slug, store, rows, doc, lane, dispatched, claims=None):
         seen.append(lane)
         return sorted([task for task in tasks if task["lane"] == lane], key=dispatched)
 
@@ -98,7 +98,10 @@ def test_spawn_order_shares_one_handoff_batch_across_lanes_and_queue_sort(store,
     assert seen == ["eng", "ci"]
     assert order == [("ci", tasks[1]), ("eng", tasks[0]), ("eng", tasks[2])]
     assert waits == []
-    batch.assert_called_once_with([store.key("sw", "handoff", task["id"]) for task in tasks])
+    assert batch.call_args_list == [
+        call([store.key("sw", "handoff", task["id"]) for task in tasks]),
+        call([store.key("sw", "claim", task["id"]) for task in tasks]),
+    ]
 
 
 def test_no_holder_is_asked_while_a_seat_is_free(store):  # noqa: F811

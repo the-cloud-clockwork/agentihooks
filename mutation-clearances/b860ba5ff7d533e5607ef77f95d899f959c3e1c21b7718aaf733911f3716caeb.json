@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/api/routes.py:scripts.swarm_ledger.api.routes.x_export_changes__mutmut_27:8b1b5820a18c7ce4ed7d4daec7c1c86c9de0a41360c71532a9a775113d3ffdc0": {
+    "reader": "standards_reader",
+    "reason": "Adds depth 0 to the ancestor prune range; unit[:0] is the empty tuple, and export_changes already returned None when the empty tuple is among the units, so the extra term is never true and kept is unchanged."
+  }
+}

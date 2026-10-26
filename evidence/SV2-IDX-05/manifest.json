@@ -1,0 +1,15 @@
+{
+  "cases": [
+    "T-SV2-IDX-05-A",
+    "T-SV2-IDX-05-B",
+    "T-SV2-IDX-05-C"
+  ],
+  "evidence_class": "mocked: an in-process caller, a SQLite catalog file and a local content addressed object folder stand in for the session service, the central database and the archive bucket, and a recording stub stands in for the MCP server; no model, HTTP server, MCP transport or Pod runs",
+  "inputs": {
+    "tests/fixtures/swarm_v2/session-tools.json": "88df786b2ad1eb5fbf9875b1735643b1ddbb09ac66b8a04cc1c01b358764a69d"
+  },
+  "package": "SV2-IDX-05",
+  "red_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/40200544185",
+  "run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/40208107174",
+  "tested_commit": "99da74ac5cd23955ea6be0494c12a796a21beca4"
+}

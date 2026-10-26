@@ -56,7 +56,9 @@ def container(monkeypatch):
 
     monkeypatch.setattr(proof, "docker", docker)
     monkeypatch.setattr(proof, "ready", lambda _: {"root": "/home/worker/attempts/fixture/run/supervision/incarnation"})
-    monkeypatch.setattr(proof, "state", lambda _: {"Running": observed.running, "Pid": observed.pid})
+    monkeypatch.setattr(
+        proof, "state", lambda _: {"Running": observed.running, "Pid": observed.pid, "ExitCode": observed.code}
+    )
     monkeypatch.setattr(proof.time, "sleep", lambda _: None)
 
     def monotonic():
@@ -87,8 +89,21 @@ def test_delayed_host_observation_accepts_the_container_exit_event(container, tm
     assert container.calls[-1][0] == ("rm", "--force", "container")
 
 
+def test_a_wait_that_outlives_the_exit_reads_the_code_from_the_stopped_container(container, tmp_path):
+    container.wait_error = subprocess.TimeoutExpired(["docker", "wait", "container"], 12)
+    container.code = 75
+    container.checkpoint = "incomplete"
+
+    result = proof.run_case("image", "forced", tmp_path, viewer=False)
+
+    assert result["exit_code"] == 75
+    assert not list(tmp_path.glob("stalled-*"))
+    assert container.calls[-1][0] == ("rm", "--force", "container")
+
+
 def test_a_container_that_never_exits_still_fails_and_is_removed(container, tmp_path):
     container.wait_error = subprocess.TimeoutExpired(["docker", "wait", "container"], 12)
+    container.running = True
 
     with pytest.raises(subprocess.TimeoutExpired):
         proof.run_case("image", "complete", tmp_path, viewer=False)
@@ -113,6 +128,7 @@ def test_a_container_that_never_exits_still_fails_and_is_removed(container, tmp_
 
 def test_unavailable_stall_evidence_is_recorded_and_the_timeout_still_fails(container, tmp_path, monkeypatch):
     container.wait_error = subprocess.TimeoutExpired(["docker", "wait", "container"], 12)
+    container.running = True
     docker = proof.docker
 
     def failing(*args, timeout=30):

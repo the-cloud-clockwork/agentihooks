@@ -150,6 +150,7 @@ def test_status_displays_profile_column_and_record_fields(monkeypatch, capsys):
         "Native terminal",
         "Model source",
         "Confidence",
+        "Hive",
     ]
     agents = {row[0]: row for row in rows[1:]}
     assert agents["m"][3:5] == ["master", "sonnet low"]

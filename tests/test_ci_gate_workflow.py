@@ -16,12 +16,15 @@ LINT_CONTROLS = [
     "Format check",
     "Check every pull request job is a need of Gate Required",
     "Hold the size and complexity limits",
+    "Hold swallowed exceptions in hooks and gates",
+    "Hold dead code in hooks and scripts",
     "Fail on known vulnerabilities new against the base",
     "Run every Swarm Ledger dashboard query against this head's metrics tables",
 ]
 LINT_SETUP = [
     "Install ruff",
     "Install PyYAML",
+    "Install vulture",
     "Set up uv",
     "Check out the base revision",
     "Check out the protected grader",

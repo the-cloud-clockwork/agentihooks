@@ -22,6 +22,9 @@ DIFF_NAMES = ("diff", "--name-only", "-z")
 DIFF_CONTENT = ("diff", "--no-ext-diff", "--unified=3")
 TRACKED_FILES = ("ls-files", "-z")
 COMMIT_SUBJECT = ("log", "-1", "--format=%s")
+GH_OPTIONS = {"text": True, "stderr": subprocess.DEVNULL, "timeout": 60}
+DIFF_SECTION = re.compile(r"^(?=diff --git )", re.MULTILINE)
+DIFF_PATH = re.compile(r"diff --git a/.+? b/(.+)")
 EXCLUDED_DOCS = {"AGENTS.md", "CLAUDE.md"}
 READ_OPTIONS = {"errors": "replace"}
 REDACT_OPTIONS = {"mode": "memory"}
@@ -71,6 +74,31 @@ def _delivered_base(root: Path, base: str, head: str) -> str:
     return base if authored.intersection(on_integration) else integrated
 
 
+def _kept(name: str) -> bool:
+    return bool(name) and not sensitive_kind(name) and Path(name).suffix in CODE_TYPES | DOC_TYPES
+
+
+def _local_changes(root: Path, base: str, head: str) -> tuple[list[str], str]:
+    base = git(root, "merge-base", base, head) if base else head
+    base = _delivered_base(root, base, head)
+    files = [name for name in git(root, *DIFF_NAMES, base, head).split("\0") if _kept(name)]
+    changes = git(root, *DIFF_CONTENT, base, head, "--", *files[:FILE_LIMIT]) if files else ""
+    return files, changes
+
+
+def pull_request_diff(url: str) -> str:
+    return subprocess.check_output(["gh", "pr", "diff", url, "--color", "never"], **GH_OPTIONS)
+
+
+def _pull_request_changes(url: str | None) -> tuple[list[str], str]:
+    if not url:
+        return [], ""
+    sections = [section for section in DIFF_SECTION.split(pull_request_diff(url)) if section]
+    kept = [(match.group(1), section) for section in sections if (match := DIFF_PATH.match(section))]
+    kept = [(name, section) for name, section in kept if _kept(name)]
+    return [name for name, _ in kept], "".join(section for _, section in kept[:FILE_LIMIT])
+
+
 def collect(root: Path, base: str, context: dict | None = None) -> dict:
     root = Path(root)
     context = context or {}
@@ -78,13 +106,10 @@ def collect(root: Path, base: str, context: dict | None = None) -> dict:
         head = git(root, *VERIFY_REVISION, context.get("branch") or DEFAULT_REVISION)
     except subprocess.CalledProcessError:
         head = git(root, *HEAD_REVISION)
-    base = git(root, "merge-base", base, head) if base else head
-    base = _delivered_base(root, base, head)
-    names = git(root, *DIFF_NAMES, base, head).split("\0")
-    files = [
-        name for name in names if name and not sensitive_kind(name) and Path(name).suffix in CODE_TYPES | DOC_TYPES
-    ]
-    changes = git(root, *DIFF_CONTENT, base, head, "--", *files[:FILE_LIMIT]) if files else ""
+    if context.get("id"):
+        files, changes = _pull_request_changes(context.get("pr_url"))
+    else:
+        files, changes = _local_changes(root, base, head)
     tracked = git(root, *TRACKED_FILES).split("\0")
     sources = sorted(
         name

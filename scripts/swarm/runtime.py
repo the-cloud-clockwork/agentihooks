@@ -6,9 +6,11 @@ import os
 import shutil
 import subprocess
 import sys
+import threading
 import time
 import uuid
 from collections.abc import Callable
+from contextlib import contextmanager
 from dataclasses import replace
 from pathlib import Path
 
@@ -310,6 +312,7 @@ def deferring(herdr: "HerdrRuntime") -> "HerdrRuntime":
 
 class HerdrRuntime:
     quota_accounts: Callable[..., list] | None = None
+    pass_memo: dict | None = None
 
     def __init__(self, home=SWARM_HOME, run=subprocess.run, choose=None, herdr=herdr_call, defer_master_canary=False):
         self.home, self.run, self.herdr = home, run, herdr
@@ -323,6 +326,14 @@ class HerdrRuntime:
         self.end, self.reap = reaper.retire, reaper.reap
         self._quota_previous = {}
         self._host_spent = capacity.no_spawns
+        self._reserving = threading.Lock()
+
+    def launch_room(self, config):
+        if not hasattr(self, "_quota_accounts"):
+            return 1
+        from scripts.swarm.capacity import free_seats
+
+        return sum(free_seats(row) for row in self._quota_open(""))
 
     def has_capacity(self, config):
         environ = dict(os.environ)
@@ -587,8 +598,15 @@ class HerdrRuntime:
             )
         if not decision.bundle_revision:
             kept = _recorded_revision(saved) if saved.get("profile") == decision.profile else ""
-            decision = replace(decision, bundle_revision=kept or overlays.revision())
+            decision = replace(decision, bundle_revision=kept or self._bundle_revision())
         return decision
+
+    def _bundle_revision(self):
+        if self.pass_memo is None:
+            return timing.call(overlays.revision)
+        if "bundle_revision" not in self.pass_memo:
+            self.pass_memo["bundle_revision"] = timing.call(overlays.revision)
+        return self.pass_memo["bundle_revision"]
 
     def planned_account(self, task_id, agent):
         planned = getattr(self, "_quota_tasks", {}).get(task_id)
@@ -612,12 +630,27 @@ class HerdrRuntime:
             row = next(row for row in eligible if row.name == seat.account)
         return row
 
-    def _reserve_account(self, account, lane, agent):
+    def _claim_account(self, agent, preferred, lane):
+        with self._reserving:
+            account = self._quota_account(agent, preferred, None, lane)
+            self._reserve_account(account, lane, agent)
+        return account
+
+    @contextmanager
+    def _seat_returned_on_failure(self, account, lane, agent):
+        try:
+            yield
+        except BaseException:
+            with self._reserving:
+                self._reserve_account(account, lane, agent, -1)
+            raise
+
+    def _reserve_account(self, account, lane, agent, seats=1):
         if account is not None:
             if lane in getattr(self, "_quota_allocations", {}):
-                self._quota_allocations[lane][agent] -= 1
+                self._quota_allocations[lane][agent] -= seats
             self._quota_accounts = [
-                replace(row, sessions=row.sessions + 1)
+                replace(row, sessions=row.sessions + seats)
                 if (row.harness, row.name) == (account.harness, account.name)
                 else row
                 for row in self._quota_accounts
@@ -752,31 +785,29 @@ class HerdrRuntime:
         rc = remote_control.decision(lane, agent, route_kind, config.slug, login) if front else {}
         account = None
         if hasattr(self, "_quota_accounts") and route_kind != "interactive":
-            account = self._quota_account(
-                agent, saved.get("account") or self.planned_account(task["id"], agent), None, lane
-            )
+            account = self._claim_account(agent, saved.get("account") or self.planned_account(task["id"], agent), lane)
             route = ["--route", account.name]
-        placed = self._account_launch(
-            config,
-            lane,
-            task,
-            name,
-            [
-                *argv,
-                "--",
-                *route,
-                *remote_control.arguments(rc),
-                *_model_args(
-                    agent,
-                    picked.__dict__,
-                    environ,
-                    effort_range.bounds(config, lane),
-                    preserve=preserves_effort(bool(saved), lane),
-                ),
-                *mode,
-            ],
-        )
-        self._reserve_account(account, lane, agent)
+        with self._seat_returned_on_failure(account, lane, agent):
+            placed = self._account_launch(
+                config,
+                lane,
+                task,
+                name,
+                [
+                    *argv,
+                    "--",
+                    *route,
+                    *remote_control.arguments(rc),
+                    *_model_args(
+                        agent,
+                        picked.__dict__,
+                        environ,
+                        effort_range.bounds(config, lane),
+                        preserve=preserves_effort(bool(saved), lane),
+                    ),
+                    *mode,
+                ],
+            )
         placed = codex.complete(config, name, placed, self._terminate)
         placed_kind = "api" if placed.account == "api" else route_kind
         return replace(
@@ -947,7 +978,10 @@ class HerdrRuntime:
                 proof = native_login.check(os.environ, "native", self.run)
             except native_login.LoginError as exc:
                 raise SpawnError(str(exc), "unavailable") from exc
+        from scripts.swarm.launch_evidence import Attempt
+
         launched_at = int(time.time() * 1000)
+        attempt = Attempt(self.home / config.slug, name, task_id, agent, launched_at)
         load_at_launch = list(os.getloadavg())
         try:
             proc = self.run(
@@ -971,10 +1005,8 @@ class HerdrRuntime:
                 },
             )
         except subprocess.TimeoutExpired as exc:
-            self._terminate(name)
-            raise SpawnError(
-                f"init-agent timed out for {name}", "ambiguous", _opened_pane(name, launched_at), harness=agent
-            ) from exc
+            pane = self._failed_launch(attempt, exc.stdout, exc.stderr, f"init-agent timed out for {name}")
+            raise SpawnError(f"init-agent timed out for {name}", "ambiguous", pane, harness=agent) from exc
         timings = {
             "launched_at": launched_at,
             "returned_at": int(time.time() * 1000),
@@ -986,15 +1018,15 @@ class HerdrRuntime:
             if step in fields and fields[step].isdigit():
                 timings[step] = int(fields[step])
         if proc.returncode or fields.get("status") != "started" or not _routed(fields):
-            self._terminate(name)
             tail = (proc.stderr or proc.stdout).strip().splitlines()
             message = tail[-1] if tail else f"init-agent exit {proc.returncode}"
-            raise SpawnError(message, pane_id=fields.get("pane_id") or _opened_pane(name, launched_at), harness=agent)
+            pane = self._failed_launch(attempt, proc.stdout, proc.stderr, message)
+            raise SpawnError(message, pane_id=pane, harness=agent)
         try:
             validated = _validation(fields, argv[argv.index("--profile") + 1], agent, timeout)
         except ValueError as exc:
-            self._terminate(name)
-            raise SpawnError(str(exc), pane_id=fields.get("pane_id", ""), harness=agent) from exc
+            pane = self._failed_launch(attempt, proc.stdout, proc.stderr, str(exc))
+            raise SpawnError(str(exc), pane_id=pane, harness=agent) from exc
         if proof is not None:
             native_login.record(self.home, config.slug, proof)
         return Placed(
@@ -1010,6 +1042,16 @@ class HerdrRuntime:
             launch_timings=timings,
             conversation_id=(self.conversations() or {}).get(fields.get("pane_id"), ""),
         )
+
+    def _failed_launch(self, attempt, stdout, stderr, reason):
+        from scripts.swarm import launch_evidence
+
+        output, error = launch_evidence.text(stdout), launch_evidence.text(stderr)
+        fields = parse_fields(output)
+        fields["pane_id"] = fields.get("pane_id") or _opened_pane(attempt.name, attempt.launched_at)
+        launch_evidence.retain(attempt, fields, output, error, self.pane_tail, reason)
+        self._terminate(attempt.name)
+        return fields["pane_id"]
 
     def recover(self, name: str) -> Placed:
         found = self._get(herdr_target(name)) or {}

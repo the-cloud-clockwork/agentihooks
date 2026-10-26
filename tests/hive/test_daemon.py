@@ -56,6 +56,38 @@ def test_beat_refreshes_reported_fields_and_expires_telemetry(redis, monkeypatch
     assert json.loads(redis.get(f"{registry.key('machine')}:sessions")) == {}
 
 
+def test_beat_exports_the_registered_capabilities_before_launching(redis, monkeypatch):
+    from hooks.context import profile_chain
+
+    seen = []
+    monkeypatch.setattr(
+        daemon, "observe", lambda **kwargs: {"slots": [], "interactive": {}, "repos": [], "sessions": {}, "quota": {}}
+    )
+    monkeypatch.setattr(
+        daemon, "poll_orders", lambda consumer: seen.append(daemon.os.environ[profile_chain.HIVE_CAPABILITIES])
+    )
+    monkeypatch.setenv(profile_chain.HIVE_CAPABILITIES, "headed")
+    registry.update(redis, "machine", ["name=Worker"])
+    daemon.beat(redis, "machine")
+    registry.update(redis, "machine", ["capabilities=headed,gpu"])
+    daemon.beat(redis, "machine")
+    assert seen == ["", "headed,gpu"]
+    assert profile_chain.hive_capabilities(daemon.os.environ) == {"headed", "gpu"}
+
+
+def test_an_unreadable_record_withdraws_the_exported_capabilities(redis, monkeypatch):
+    from hooks.context import profile_chain
+
+    monkeypatch.setenv(profile_chain.HIVE_CAPABILITIES, "headed")
+    redis.hset(registry.key("machine"), "capabilities", "not json")
+    with pytest.raises(ValueError):
+        daemon.adopt_capabilities(redis, "machine")
+    assert profile_chain.HIVE_CAPABILITIES not in daemon.os.environ
+    redis.delete(registry.key("machine"))
+    daemon.adopt_capabilities(redis, "machine")
+    assert daemon.os.environ[profile_chain.HIVE_CAPABILITIES] == ""
+
+
 def test_hive_heartbeat_renews_account_counters_from_its_own_quota_and_executions(redis, monkeypatch):
     from scripts.hive import account_slots
 
@@ -715,6 +747,7 @@ def test_initial_beat_creates_a_complete_registry_record(redis, monkeypatch):
         "master_login": {"claude": ""},
         "master_login_enabled": "no",
         "repos": [],
+        "capabilities": [],
         "heartbeat_at": registry.show(redis, "machine")["heartbeat_at"],
         "version": "",
     }

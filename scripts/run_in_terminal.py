@@ -38,7 +38,7 @@ def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -
     args = _parser().parse_args(argv)
     env = dict(os.environ if environ is None else environ)
     directory = Path(args.dir or env.get("HOME", str(Path.home()))).expanduser().resolve()
-    title = args.title or directory.name
+    title = args.title or herdr_host.pane_label(directory.name)
     parts = args.command[1:] if args.command[:1] == ["--"] else args.command
     command = parts[0] if len(parts) == 1 else shlex.join(parts)
     host, explicit = _select_host(args.host, env)

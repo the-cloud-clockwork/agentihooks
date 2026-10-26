@@ -194,8 +194,17 @@ def program(tree):
 
 @pytest.fixture(scope="module")
 def published():
-    # Built in a subprocess: under the coverage tracer the repository map runs near the hung test dump bound.
-    command = [sys.executable, "-m", "scripts.swarm.redis_commands"]
+    import os
+
+    root = os.environ.get("MUTATION_STATS_ROOT", str(redis_commands.ROOT))
+    command = [
+        sys.executable,
+        "-c",
+        "import json, sys; from pathlib import Path; "
+        "from scripts.swarm.redis_commands import consumer_map; "
+        "json.dump(consumer_map('distributed', root=Path(sys.argv[1])), sys.stdout)",
+        root,
+    ]
     out = subprocess.run(command, cwd=redis_commands.ROOT, stdout=subprocess.PIPE, text=True, check=True).stdout
     return json.loads(out)["consumers"]
 

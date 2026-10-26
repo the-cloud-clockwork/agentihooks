@@ -34,6 +34,17 @@ def test_concurrent_reservations_at_cap_one_have_one_winner(redis):
     assert slots.counts() == {"claude:one": 1}
 
 
+def test_reservation_reading_retains_the_atomic_refusal_count(redis):
+    slots = reservation.LaunchSlots(redis)
+    assert slots.reserve_reading("claude:one", "first", 2, 1000) == reservation.SlotReading(True, 0)
+    assert slots.reserve("claude:one", "second", 2, 1000) is True
+    refused = slots.reserve_reading("claude:one", "third", 2, 1000)
+    assert slots.release("first") is True
+    assert refused == reservation.SlotReading(False, 2)
+    assert slots.counts() == {"claude:one": 1}
+    assert slots.reserve("claude:one", "third", 2, 1000) is True
+
+
 def test_expiry_and_exit_release_capacity(redis, clock):
     slots = reservation.LaunchSlots(redis)
     assert slots.reserve("claude:one", "first", 1, 1000)

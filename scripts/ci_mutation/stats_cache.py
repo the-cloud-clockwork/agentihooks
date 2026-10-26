@@ -1,4 +1,5 @@
 import ast
+import fnmatch
 import functools
 import hashlib
 import json
@@ -10,7 +11,7 @@ from dataclasses import dataclass, field
 from importlib import metadata
 from pathlib import Path
 
-from scripts.ci_mutation.scope import imported_names, module_name, selects, test_file
+from scripts.ci_mutation.scope import imported_names, module_name, selected_name, selects, test_file
 
 SCHEMA = 4
 CONTEXT_FIELDS = ("schema", "sources", "options", "runtime")
@@ -28,6 +29,60 @@ def loader_name(node: ast.AST) -> str | None:
     if isinstance(node, ast.Attribute):
         return node.attr
     return None
+
+
+def discovery_inputs(nodes: list[ast.AST], names: set[str], resources: dict[str, set[str]]) -> set[str]:
+    scanners = {
+        name: name
+        for name in ("glob", "rglob", "iterdir", "listdir", "scandir", "walk", "iter_modules", "walk_packages")
+    }
+    scanners.update(
+        (alias.asname or alias.name, alias.name)
+        for node in nodes
+        if isinstance(node, ast.ImportFrom) and node.module in ("glob", "os", "pkgutil")
+        for alias in node.names
+        if alias.name in scanners
+    )
+    inputs = set()
+    for node in nodes:
+        if not isinstance(node, ast.Call) or loader_name(node.func) not in scanners:
+            continue
+        if (
+            isinstance(node.func, ast.Attribute)
+            and isinstance(node.func.value, ast.Name)
+            and node.func.value.id == "ast"
+        ):
+            continue
+        expressions = [*node.args, *(keyword.value for keyword in node.keywords)]
+        if isinstance(node.func, ast.Attribute):
+            expressions.append(node.func.value)
+        parts = [part for expression in expressions for part in ast.walk(expression)]
+        scoped = {
+            path
+            for part in parts
+            if isinstance(part, ast.Constant) and isinstance(part.value, str)
+            for path in resources.get(part.value.rstrip("/") + "/", ())
+        }
+        if any(isinstance(part, ast.Attribute) and part.attr == "__path__" for part in parts):
+            scoped.update(path for name in names for path in resources.get(name.replace(".", "/") + "/", ()))
+        candidates = scoped or {path for paths in resources.values() for path in paths}
+        kind = scanners[loader_name(node.func)]
+        if kind in ("iter_modules", "walk_packages"):
+            candidates = {path for path in candidates if Path(path).suffix == ".py"}
+        elif (
+            kind in ("glob", "rglob")
+            and node.args
+            and isinstance(node.args[0], ast.Constant)
+            and isinstance(node.args[0].value, str)
+        ):
+            pattern = node.args[0].value
+            candidates = {
+                path
+                for path in candidates
+                if fnmatch.fnmatchcase(path, pattern) or fnmatch.fnmatchcase(Path(path).name, pattern)
+            }
+        inputs.update(candidates)
+    return inputs
 
 
 def test_inputs(
@@ -91,7 +146,10 @@ def test_inputs(
                     for node in nodes
                     if isinstance(node, ast.Constant) and isinstance(node.value, str) and node.value
                 }
-                dependencies.update(resource for value in literals for resource in resources.get(value, ()))
+                dependencies.update(
+                    resource for value in literals if not value.endswith("/") for resource in resources.get(value, ())
+                )
+
             if unresolved:
                 dependencies.update(dynamic_modules)
             records[current] = (hashlib.sha256(content).hexdigest(), dependencies, unresolved)
@@ -146,6 +204,7 @@ class StatsInputs:
     changes: dict
     records: dict = field(default_factory=lambda: {True: {}, False: {}})
     traced: dict = field(default_factory=dict)
+    discovered: dict = field(default_factory=dict)
 
     def for_test(self, path: str, covered: list[str] | None, fresh: list[dict] | None = None) -> dict:
         measured = covered is not None
@@ -172,8 +231,25 @@ class StatsInputs:
             )
         return inputs
 
+    def matches(self, path: str, inputs: dict, measured: bool, discovery: str) -> bool:
+        return self.for_test(path, list(inputs) if measured else None) == inputs and self.discovery(inputs) == discovery
 
-def per_test_stats(path: str, fresh: list[dict], count: int) -> tuple[dict | None, list[str] | None]:
+    def discovery(self, inputs: dict) -> str:
+        paths = set()
+        for source in inputs:
+            if Path(source).suffix != ".py":
+                continue
+            if source not in self.discovered:
+                text = (self.root / source).read_text()
+                names = set(imported_names(text, Path(source).parent.parts))
+                self.discovered[source] = discovery_inputs(list(ast.walk(ast.parse(text))), names, self.resources)
+            paths.update(self.discovered[source])
+        return hashlib.sha256(encode(sorted(paths)).encode()).hexdigest()
+
+
+def per_test_stats(
+    path: str, fresh: list[dict], count: int, functions: set[str]
+) -> tuple[dict | None, list[str] | None]:
     durations = {
         test: seconds for result in fresh for test, seconds in result["durations"].items() if selects(path, test)
     }
@@ -185,7 +261,7 @@ def per_test_stats(path: str, fresh: list[dict], count: int) -> tuple[dict | Non
         return None, None
     tests = {
         function: sorted({test for result in fresh for test in result["tests"].get(function, []) if test in durations})
-        for function in {function for result in fresh for function in result["tests"]}
+        for function in functions
     }
     result = {
         "status": 0,
@@ -199,6 +275,37 @@ def per_test_stats(path: str, fresh: list[dict], count: int) -> tuple[dict | Non
     if not measured and any("modules" in result for result in fresh):
         covered = []
     return result, covered
+
+
+def fresh_by_path(paths: list[str], fresh: list[dict]) -> dict[str, list[dict]]:
+    entries = set(paths)
+    owners = {test: selecting_entries(entries, test) for result in fresh for test, _ in result["durations"].items()}
+    sliced: dict[str, list[dict]] = {path: [] for path in paths}
+    for result in fresh:
+        for path, part in result_by_path(result, paths, owners).items():
+            sliced[path].append(part)
+    return sliced
+
+
+def selecting_entries(entries: set[str], test: str) -> list[str]:
+    name = selected_name(test)
+    cuts = {name[:index] for index in range(len(name)) if name.startswith(("::", "["), index)} | {name}
+    return [entry for entry in cuts if entry in entries and selects(entry, test)]
+
+
+def result_by_path(result: dict, paths: list[str], owners: dict[str, list[str]]) -> dict[str, dict]:
+    kept = {key: result[key] for key in ("cpu", "modules") if key in result}
+    names = [name for name in ("durations", "dependencies") if name in result]
+    parts = {path: {**kept, "tests": {}, **{name: {} for name in names}} for path in paths}
+    for name in names:
+        for test, value in result[name].items():
+            for path in owners.get(test, ()):
+                parts[path][name][test] = value
+    for function, tests in result["tests"].items():
+        for test in tests:
+            for path in owners.get(test, ()):
+                parts[path]["tests"].setdefault(function, []).append(test)
+    return parts
 
 
 def collect_cached_stats(
@@ -228,19 +335,29 @@ def collect_cached_stats(
             parts = Path(path).parts
             for index in range(len(parts)):
                 resources.setdefault("/".join(parts[index:]), set()).add(path)
+            for parent in Path(path).parents:
+                resources.setdefault(str(parent) + "/", set()).add(path)
     inputs = StatsInputs(root, modules, resources, changes)
     stored = StoredStats(root, folder, context, changes)
-    compatible = {path: record for path in files if (record := stored.load(path)) is not None}
+    stored.prune()
+    compatible = {
+        path: record
+        for path in files
+        if (record := stored.load(path, functools.partial(inputs.matches, path))) is not None
+    }
     reused = list(compatible.values())
     missing = [path for path in files if path not in compatible]
     report(f"Mutation stats cache: reused {len(reused)} test files; collect {len(missing)}")
     fresh = collect(missing) if missing else []
     if any(result["status"] != 0 for result in fresh):
         raise SystemExit(1)
+    functions = {function for result in fresh for function in result["tests"]}
+    sliced = fresh_by_path(missing, fresh)
     for path in missing:
-        result, covered = per_test_stats(path, fresh, len(missing))
+        result, covered = per_test_stats(path, sliced[path], len(missing), functions)
         if result is not None:
-            stored.save(path, result, inputs.for_test(path, covered, fresh), covered is not None)
+            dependencies = inputs.for_test(path, covered, fresh)
+            stored.save(path, result, dependencies, covered is not None, inputs.discovery(dependencies))
     return reused + [
         {name: value for name, value in result.items() if name not in ("files", "modules")} for result in fresh
     ]

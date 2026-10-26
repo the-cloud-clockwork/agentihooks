@@ -123,6 +123,22 @@ def test_a_young_live_unassigned_hosted_or_finished_job_is_not_lost(candidate):
     assert ci_lost_runner.lost_jobs([candidate], RUNNERS, NOW, GRACE) == []
 
 
+def test_a_job_whose_every_step_completed_on_an_absent_runner_is_not_lost():
+    candidate = {**lost("unit (3.12, 2)", stamp(NOW - GRACE)), "steps": [{"status": "completed"}] * 2}
+    assert ci_lost_runner.lost_jobs([candidate], RUNNERS, NOW, GRACE) == []
+
+
+@pytest.mark.parametrize(
+    "steps",
+    [None, [], [{"status": "completed"}, {"status": "in_progress"}], [{"status": "completed"}, {"status": "queued"}]],
+)
+def test_a_job_with_no_steps_or_an_unfinished_step_on_an_absent_runner_is_lost(steps):
+    candidate = lost("unit (3.12, 2)", stamp(NOW - GRACE))
+    if steps is not None:
+        candidate["steps"] = steps
+    assert ci_lost_runner.lost_jobs([candidate], RUNNERS, NOW, GRACE) == [candidate]
+
+
 def test_job_ids_map_base_names_to_workflow_keys():
     from scripts import ci_gate_queue
 

@@ -135,9 +135,9 @@ def test_a_pull_request_in_an_assist_swarm_waits_for_the_operator_approval(env, 
 
 
 @pytest.mark.parametrize("lane", ["eng", "ci", MASTER])
-def test_every_prompt_says_to_raise_a_priority_when_waiting_on_the_operator(lane):
+def test_no_prompt_orders_an_ask_to_the_operator(lane):
     text = build(lane=lane)
-    led = f"agentihooks ledger --slug sw --as sw-{lane}-1"
-    assert "Whenever you wait on the operator" in text
-    assert f'{led} priority add <item> "<' in text
-    assert f'{led} followup add "<text>" --needs-operator' in text
+    assert "Whenever you wait on the operator" not in text
+    assert lane == MASTER or prompt.NO_ASKS.format(slug="sw") in text
+    assert "priority add <item>" not in text
+    assert "--needs-operator" not in text

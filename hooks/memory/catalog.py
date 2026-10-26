@@ -2,6 +2,7 @@
 
 import json
 import sqlite3
+import time
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -36,6 +37,9 @@ SCHEMA = (
         access_domain TEXT NOT NULL, session_uid TEXT NOT NULL, source_generation TEXT NOT NULL,
         byte_start INTEGER NOT NULL, byte_end INTEGER NOT NULL, object_digest TEXT NOT NULL,
         PRIMARY KEY (access_domain, session_uid, source_generation, byte_start))""",
+    """CREATE TABLE IF NOT EXISTS session_tombstone (
+        access_domain TEXT NOT NULL, sequence INTEGER NOT NULL, session_uid TEXT NOT NULL, state TEXT NOT NULL,
+        revision INTEGER NOT NULL, recorded_at REAL NOT NULL, PRIMARY KEY (access_domain, sequence))""",
 )
 TABLES = (
     "session_event",
@@ -110,6 +114,15 @@ EVENTS = (
 )
 QUARANTINED = f"SELECT sequence, event_id, reason FROM session_quarantine WHERE {SCOPE} ORDER BY sequence"
 COUNTER = "SELECT value FROM ingest_counter WHERE access_domain = ? AND name = ?"
+TOMBSTONE = (
+    "INSERT INTO session_tombstone SELECT ?, COALESCE(MAX(sequence), 0) + 1, ?, ?, ?, ? "
+    "FROM session_tombstone WHERE access_domain = ?"
+)
+TOMBSTONES = (
+    "SELECT sequence, session_uid, state, revision, recorded_at FROM session_tombstone "
+    "WHERE access_domain = ? AND sequence > ? ORDER BY sequence"
+)
+TOMBSTONE_KEYS = ("sequence", "session_uid", "state", "revision", "recorded_at")
 
 
 class Conflict(Exception):
@@ -330,13 +343,20 @@ class Catalog:
         rows = self.db.execute(SOURCES, (domain, session_uid)).fetchall()
         return [{"source_generation": row[0], "origin": row[1]} for row in rows]
 
-    def set_state(self, domain: str, session_uid: str, state: str, revision: int) -> int:
+    def set_state(self, domain: str, session_uid: str, state: str, revision: int, now: float | None = None) -> int:
         if state not in SESSION_STATES:
             raise ValueError(UNKNOWN_STATE)
         with self._transaction():
             if self.db.execute(SET_STATE, (state, domain, session_uid, revision)).rowcount != 1:
                 raise Conflict(STALE_REVISION)
-            return self.session(domain, session_uid)["revision"]
+            current = self.session(domain, session_uid)["revision"]
+            recorded = time.time() if now is None else now
+            self.db.execute(TOMBSTONE, (domain, session_uid, state, current, recorded, domain))
+            return current
+
+    def tombstones(self, domain: str, after: int = 0) -> list[dict]:
+        rows = self.db.execute(TOMBSTONES, (domain, after)).fetchall()
+        return [dict(zip(TOMBSTONE_KEYS, row)) for row in rows]
 
     def archive(self, entry: ArchiveEntry) -> bool:
         scope = (entry.access_domain, entry.session_uid, entry.source_generation)
