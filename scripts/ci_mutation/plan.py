@@ -561,9 +561,9 @@ def slowest_bucket(root: Path, tests: list[str], parts: int, seconds: dict[str, 
 
 
 def stats_part_count(root: Path, tests: list[str], target: float, limit: int) -> tuple[int, float]:
-    seconds = file_seconds(root, tests)
+    seconds = file_seconds(root, tests, split=True)
+    tests = sorted(seconds)
     walls = [slowest_bucket(root, tests, parts, seconds) for parts in range(1, limit + 1)]
-    # One file never splits, so past the floor another part only adds a job.
     reachable = max(target, min(walls))
     parts = next(parts for parts, wall in enumerate(walls, 1) if wall <= reachable)
     return parts, walls[parts - 1]
