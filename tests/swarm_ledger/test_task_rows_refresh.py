@@ -87,3 +87,16 @@ def test_task_list_pages_and_ledgers_stay_within_their_caps(tmp_path, monkeypatc
         task_list.read(repository, slug, {})
     assert list(task_list.HELD) == ["two", "three"]
     assert task_list.HELD["three"].pages
+
+
+def test_task_rows_adopts_only_the_legacy_ledger_it_reads(tmp_path):
+    import json
+
+    from scripts.swarm_ledger.repository.sqlite import SQLiteLedgerRepository
+
+    for name in ("alpha", "beta"):
+        document = {"title": name, "tasks": [{"id": "t1", "title": name}], "_meta": {"rev": 1}}
+        (tmp_path / f"{name}.json").write_text(json.dumps(document))
+    repository = SQLiteLedgerRepository(tmp_path / "ledgers.sqlite3")
+    assert [row["title"] for row in repository.task_rows("alpha")[2]] == ["alpha"]
+    assert (tmp_path / "beta.json").exists() and not (tmp_path / "alpha.json").exists()
