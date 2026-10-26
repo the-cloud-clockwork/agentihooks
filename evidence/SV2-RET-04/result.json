@@ -20,7 +20,7 @@
     "scripts.swarm_v2.backup.drill restores, rebuilds, answers the agreed query, recovers the designated checkpoint and reports backup_restore_verification_status",
     "scripts.swarm_v2.backup.Registry record, drill (runs the drill itself under an attempt number), accepted, preserved, retention_allowed and status"
   ],
-  "metrics": "backup_restore_verification_status per drill report and as counts per status from Registry.status",
+  "metrics": "backup_restore_verification_status per drill report, and Registry.status reports counts per status with retention_allowed",
   "mocked": true,
   "outcomes": {
     "accepted": "a drill status stored by Registry.drill under a higher attempt number",
@@ -44,5 +44,5 @@
   "rollback_rehearsal": "C recorded a newer set as uploaded only, so retention_allowed turned false and preserved named the drilled set; a re-drill after damaging its brain component failed, the set lost acceptance and preserved still named it",
   "status": "fixture_partial",
   "supported_versions": "backup format 1.x; component versions the caller lists in Access.versions",
-  "tested_commit": "d6d4b9aac3faf59f6afa2ded81b0c9368f642fe8"
+  "tested_commit": "fcc25dddecd7e9609adf0acc8fedf48770519915"
 }
