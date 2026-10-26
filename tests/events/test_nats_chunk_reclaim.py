@@ -249,7 +249,8 @@ def test_sweep_purges_only_idle_unreferenced_chunk_groups():
     kept, old, young, lost, vanished = (f"{index:032x}" for index in range(5))
     names = ["held", f"_chunks.{owner}.1.{kept}.0", f"_chunks.{owner}.1.{old}.0", f"_chunks.{owner}.1.{old}.10"]
     names += [f"_chunks.{owner}.1.{old}.9", f"_chunks.{owner}.2.{young}.0", f"_chunks.{gone}.0.{lost}.0"]
-    names += ["_chunks.user.7", f"_chunks.{owner}.1.{vanished}.0"]
+    names += ["_chunks.user.7"]
+    first = f"_chunks.{owner}.1.{vanished}.0"
     ages = {kept: 60, old: 16, young: 14, lost: 15}
 
     def last(stream, name):
@@ -260,7 +261,7 @@ def test_sweep_purges_only_idle_unreferenced_chunk_groups():
 
     js = SimpleNamespace(
         stream_info=mock.AsyncMock(
-            return_value=SimpleNamespace(state=SimpleNamespace(subjects={f"p.{name}": 1 for name in names}))
+            return_value=SimpleNamespace(state=SimpleNamespace(subjects={f"p.{name}": 1 for name in [first, *names]}))
         ),
         get_last_msg=mock.AsyncMock(side_effect=last),
         purge_stream=mock.AsyncMock(),
@@ -274,7 +275,10 @@ def test_sweep_purges_only_idle_unreferenced_chunk_groups():
         f"p.{name}" for name in names[2:5] + names[6:7]
     )
     assert all(call.args == ("s",) for call in js.purge_stream.await_args_list)
-    assert "p._chunks.user.7" not in {call.args[1] for call in js.get_last_msg.await_args_list}
+    looked = [call.args[1] for call in js.get_last_msg.await_args_list]
+    assert "p._chunks.user.7" not in looked
+    assert f"p._chunks.{owner}.1.{old}.10" in looked
+    assert f"p._chunks.{owner}.1.{old}.9" not in looked
     js.stream_info.return_value.state.subjects = None
     js.purge_stream.reset_mock()
     asyncio.run(nats_payload.sweep(js, "s", "p.", history, now))
