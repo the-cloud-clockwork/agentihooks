@@ -31,13 +31,13 @@ class Refused(Exception):
 
 
 def enabled(environ: Mapping[str, str]) -> bool:
-    return environ.get(SWITCH, "").strip().lower() not in OFF_VALUES
+    return str(environ.get(SWITCH)).strip().lower() not in OFF_VALUES
 
 
 def record(store: RedisStore, slug: str, task: str, pack: dict) -> None:
     if not pack["brain"].startswith(SWARM_BRAIN):
         raise ValueError(NOT_SWARM)
-    store.redis.hset(store.key(slug, PACKS), task, json.dumps(pack, sort_keys=True))
+    store.redis.hset(store.key(slug, PACKS), task, json.dumps(pack))
 
 
 def _held(pipe, key: str, ref: str) -> dict | None:
@@ -54,7 +54,7 @@ def put_evidence(store: RedisStore, slug: str, ref: str, evidence: dict) -> bool
         if held and held["state"] == REVOKED:
             return False
         pipe.multi()
-        pipe.hset(key, ref, json.dumps({**evidence, "ref": ref}, sort_keys=True))
+        pipe.hset(key, ref, json.dumps({**evidence, "ref": ref}))
         return True
 
     return store.redis.transaction(write, key, value_from_callable=True)
@@ -68,7 +68,7 @@ def revoke(store: RedisStore, slug: str, ref: str, reason: str) -> None:
         held = _held(pipe, key, ref) or {}
         tombstone = {"ref": ref, "brain": held.get("brain", ""), "kind": held.get("kind", ""), "state": REVOKED}
         pipe.multi()
-        pipe.hset(key, ref, json.dumps({**tombstone, "reason": reason}, sort_keys=True))
+        pipe.hset(key, ref, json.dumps({**tombstone, "reason": reason}))
 
     store.redis.transaction(write, key)
 
@@ -151,5 +151,5 @@ def expand(store: RedisStore, slug: str, task: str, ref: str) -> dict:
     try:
         return _resolve(store, slug, task, ref)
     except Refused as refused:
-        store.redis.hincrby(store.key(slug, FAILURES), refused.reason, 1)
+        store.redis.hincrby(store.key(slug, FAILURES), refused.reason)
         raise

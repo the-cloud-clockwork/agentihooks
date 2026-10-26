@@ -111,7 +111,7 @@ def test_evidence_held_under_another_brain_is_refused_even_when_the_item_names_t
     cv.put_evidence(store, SLUG, "arc:merge-queue", {**FIXTURE["evidence"]["arc:merge-queue"], "brain": "personal:x"})
     with pytest.raises(cv.Refused) as refused:
         cv.expand(store, SLUG, TASK, "arc:merge-queue")
-    assert (refused.value.status, refused.value.reason) == (403, "forbidden_scope")
+    assert (refused.value.status, refused.value.reason, str(refused.value)) == (403, "forbidden_scope", cv.OUTSIDE)
 
 
 def test_an_unknown_task_and_a_missing_source_are_refused():
