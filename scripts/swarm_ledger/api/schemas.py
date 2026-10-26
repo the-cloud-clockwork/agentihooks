@@ -97,7 +97,7 @@ FIELDS = {
     "reopen": "by",
     "size_set": "by size",
     "source_add": "by source",
-    "phase_add": "by phase title description depends_on planning release plan_url plan_ref plan",
+    "phase_add": "by phase title description depends_on planning release plan_url plan_ref plan not_duplicate",
     "plan_add": "by plan title artifact url",
     "slice_add": "by phase anchor",
     "phase_update": "by item fields",
