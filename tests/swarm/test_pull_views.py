@@ -177,6 +177,22 @@ def test_tick_rollups_share_reads_until_expiry_but_merge_reads_stay_fresh(monkey
     assert [row["endpoint"] for row in rows] == ["graphql"] * 3
 
 
+def test_shared_rollup_snapshots_are_kept_apart_per_query(monkeypatch, tmp_path):
+    import fakeredis
+
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
+    first, second = "https://github.com/o/r/pull/1", "https://github.com/o/r/pull/2"
+    cache = fakeredis.FakeRedis(decode_responses=True)
+    heads = {json.dumps(first): "h1", json.dumps(second): "h2"}
+
+    def run(command, **kwargs):
+        head = next(head for key, head in heads.items() if key in command[-1])
+        return SimpleNamespace(returncode=0, stdout=json.dumps({"data": {"p0": resource(head)}}))
+
+    assert views([first], run, cache)[first].head == "h1"
+    assert views([second], run, cache)[second].head == "h2"
+
+
 def test_unavailable_shared_snapshot_storage_keeps_live_rollups_readable(monkeypatch, tmp_path):
     import fakeredis
 
