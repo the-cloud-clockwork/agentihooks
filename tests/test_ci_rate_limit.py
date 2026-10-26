@@ -262,6 +262,18 @@ def test_budget_reads_header_names_in_any_case(monkeypatch, capsys):
     )
 
 
+def test_budget_prints_the_reset_in_utc_whatever_the_runner_zone(monkeypatch, capsys):
+    _budget(monkeypatch)
+    monkeypatch.setenv("TZ", "Asia/Tokyo")
+    rate_limit.time.tzset()
+    try:
+        rate_limit.budget("Shard verification", "start")
+    finally:
+        monkeypatch.undo()
+        rate_limit.time.tzset()
+    assert capsys.readouterr().err.endswith("resets 1970-01-01T00:00:00Z\n")
+
+
 def test_the_queue_gate_reports_its_calls(monkeypatch, capsys):
     _budget(monkeypatch)
     monkeypatch.setattr(rate_limit, "calls", 4)
