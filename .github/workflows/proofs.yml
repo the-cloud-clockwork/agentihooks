@@ -51,18 +51,18 @@ jobs:
       RECEIPT_STATS_BASE: ${{ inputs.base }}
       RECEIPT_STATS_TESTS: ${{ inputs.tests || 'tests/swarm_ledger/receipt_probe.py' }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           path: head
           fetch-depth: 0
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.base == 'origin/dev' && 'dev' || inputs.base }}
           path: base
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: '3.12'
-      - uses: astral-sh/setup-uv@v10.2.0
+      - uses: astral-sh/setup-uv@v10.3.0
         with:
           version: '0.12.23'
           enable-cache: false
@@ -95,17 +95,17 @@ jobs:
     runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && 'anton-oss-batch' || 'ubuntu-latest' }}
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           path: head
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.base == 'origin/dev' && 'dev' || inputs.base }}
           path: base
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: '3.12'
-      - uses: astral-sh/setup-uv@v10.2.0
+      - uses: astral-sh/setup-uv@v10.3.0
         with:
           version: '0.12.23'
           enable-cache: false
@@ -198,7 +198,7 @@ jobs:
           PY
       - name: Retain the CPU profile and every outcome
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: operations-cpu
           path: operations-*.json
@@ -263,7 +263,7 @@ jobs:
       PYTHONNOUSERSITE: '1'
       UV_CONSTRAINT: ${{ github.workspace }}/.github/test-constraints.txt
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
@@ -291,11 +291,11 @@ jobs:
             echo "TEST_PATHS=${selected[*]}" >> "$GITHUB_ENV"
           fi
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: '3.12'
 
-      - uses: astral-sh/setup-uv@v10.2.0
+      - uses: astral-sh/setup-uv@v10.3.0
         with:
           version: '0.12.23'
           checksum: '9167d72b3319674b6303c4cbe071854bba13ebdf3d76b1a7cbdc175471fb66d6'
@@ -338,7 +338,7 @@ jobs:
 
       - name: Retain nested proof reports
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: proof-reports
           path: ${{ runner.temp }}/proof-reports
@@ -347,7 +347,7 @@ jobs:
 
       - name: Retain focused browser screenshots
         if: always() && inputs.browser
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: focused-browser-screenshots
           path: test-results/*.png
