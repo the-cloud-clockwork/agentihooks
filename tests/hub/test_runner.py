@@ -320,6 +320,8 @@ def test_lease_changes_name_the_reactor_and_holder(bus, clock, capsys):
     two.run_once(batch=10, timeout_ms=0)
     one.run_once(batch=10, timeout_ms=0)
     assert capsys.readouterr().out == "timers: lease taken by b\ntimers: lease lost by a\n"
+    one.run_once(batch=10, timeout_ms=0)
+    assert capsys.readouterr().out == ""
 
 
 class Stopping(threading.Event):
