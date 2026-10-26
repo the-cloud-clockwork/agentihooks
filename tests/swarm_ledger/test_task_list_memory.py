@@ -1,6 +1,7 @@
 import json
 import re
 import threading
+import tracemalloc
 from types import SimpleNamespace
 
 import pytest
@@ -8,6 +9,7 @@ import pytest
 pytestmark = pytest.mark.unit
 
 READERS = 20
+HUNDRED = 100
 TASKS = 2000
 SLUG = "ledger"
 CURSOR = re.compile(r'"next_cursor": (?:"([^"]+)"|null)')
@@ -136,3 +138,44 @@ def test_concurrent_full_task_list_walks_return_the_same_pages(stored):
         thread.join()
     assert not failures, failures[0]
     assert len(pages) == READERS and len(set(pages)) == 1 and pages[0] > 1
+
+
+def test_hundred_concurrent_full_task_list_reads_stay_under_a_fixed_peak(stored):
+    from scripts.swarm_ledger.repository.sqlite import SQLiteLedgerRepository
+
+    tracemalloc.start()
+    try:
+        SQLiteLedgerRepository(stored).current(SLUG)
+        _, whole = tracemalloc.get_traced_memory()
+        tracemalloc.reset_peak()
+        SQLiteLedgerRepository(stored).read(SLUG, "tasks")
+        _, tasks = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+    server = services(SQLiteLedgerRepository(stored))
+    barrier, pages, failures = threading.Barrier(HUNDRED), [], []
+
+    def reader():
+        try:
+            barrier.wait()
+            pages.append(walk(server))
+        except Exception as exc:
+            failures.append(exc)
+
+    threads = [threading.Thread(target=reader) for _ in range(HUNDRED)]
+    tracemalloc.start()
+    try:
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+        _, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+    assert not failures, failures[0]
+    assert len(pages) == HUNDRED and len(set(pages)) == 1 and pages[0] > 1
+    report = (
+        f"{HUNDRED} task list walks peaked at {peak} bytes; one load peaks at {whole} whole, {tasks} task rows only"
+    )
+    assert peak < whole / 2, report
+    assert peak < tasks * 1.5, report
