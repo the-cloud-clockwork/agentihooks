@@ -40,7 +40,12 @@ SCHEMA = (
     """CREATE TABLE IF NOT EXISTS session_tombstone (
         access_domain TEXT NOT NULL, sequence INTEGER NOT NULL, session_uid TEXT NOT NULL, state TEXT NOT NULL,
         revision INTEGER NOT NULL, recorded_at REAL NOT NULL, PRIMARY KEY (access_domain, sequence))""",
+    """CREATE TABLE IF NOT EXISTS session_event_provenance (
+        access_domain TEXT NOT NULL, event_id TEXT NOT NULL, trust_class TEXT NOT NULL, project_state TEXT NOT NULL,
+        PRIMARY KEY (access_domain, event_id))""",
 )
+ORIGINAL, ATTRIBUTED, UNKNOWN_PROJECT = "original", "attributed", "unknown"
+INSERT_PROVENANCE = "INSERT INTO session_event_provenance VALUES (?, ?, ?, ?)"
 TABLES = (
     "session_event",
     "session_quarantine",
@@ -230,6 +235,8 @@ class Catalog:
                 event.normalized_hash,
             ),
         )
+        project_state = UNKNOWN_PROJECT if event.project_id is None else ATTRIBUTED
+        self.db.execute(INSERT_PROVENANCE, (batch.access_domain, event.event_id, ORIGINAL, project_state))
         return True
 
     def _insert_quarantine(self, batch: BatchCommit, item: dict) -> None:
