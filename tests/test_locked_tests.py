@@ -92,6 +92,8 @@ def test_the_manifest_counts_assertions_calls_and_cases(tmp_path):
             "        str(1)\n", "        request.applymarker(pytest.mark.skip(reason='x'))\n        str(1)\n"
         ),
         GUARD.replace("        str(1)\n", "        pytest.exit('x', returncode=0)\n        str(1)\n"),
+        GUARD.replace("import pytest\n", "import pytest\n\npytest.skip('x', allow_module_level=True)\n"),
+        GUARD.replace("        str(1)\n", "        request.node.add_marker('skip')\n        str(1)\n"),
     ],
     ids=[
         "skip",
@@ -107,6 +109,8 @@ def test_the_manifest_counts_assertions_calls_and_cases(tmp_path):
         "skipping method",
         "applied marker",
         "exit",
+        "module skip",
+        "string marker",
     ],
 )
 def test_a_skipped_or_xfailed_locked_test_is_red(tmp_path, capsys, planted):

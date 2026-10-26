@@ -29,7 +29,7 @@ def _named(node: ast.AST) -> str | None:
     return None
 
 
-def _body(function: ast.FunctionDef | ast.AsyncFunctionDef) -> list[ast.AST]:
+def _body(function: ast.FunctionDef | ast.AsyncFunctionDef | ast.Module) -> list[ast.AST]:
     return [node for statement in function.body for node in ast.walk(statement)]
 
 
@@ -50,9 +50,11 @@ def _assertions(function: ast.FunctionDef | ast.AsyncFunctionDef, helpers: froze
     return count
 
 
-def _skips_itself(function: ast.FunctionDef | ast.AsyncFunctionDef, pytests: set[str], skippers: set[str]) -> bool:
+def _skips_itself(
+    function: ast.FunctionDef | ast.AsyncFunctionDef | ast.Module, pytests: set[str], skippers: set[str]
+) -> bool:
     for node in _body(function):
-        if _named(node) in DISABLING_MARKS:
+        if _named(node) in DISABLING_MARKS or (isinstance(node, ast.Constant) and node.value in DISABLING_MARKS):
             return True
         if isinstance(node, ast.Call):
             name = _named(node.func)
@@ -154,6 +156,10 @@ def measure(tree: Path) -> dict[str, dict]:
             if function.name not in skippers and _skips_itself(function, pytests, skippers)
         }:
             skippers |= grown
+        statements = [
+            node for node in module.body if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+        ]
+        module_skips = _skips_itself(ast.Module(body=statements, type_ignores=[]), pytests, skippers)
         for key, function, decorators in functions:
             test = function.name.startswith("test")
             assertions = _assertions(function, helpers) if test else _assertions(function)
@@ -166,6 +172,7 @@ def measure(tree: Path) -> dict[str, dict]:
                 "disabled": test
                 and (
                     any(_disables(mark, constants) for mark in decorators)
+                    or module_skips
                     or _skips_itself(function, pytests, skippers)
                     or _returns_early(function)
                 ),
