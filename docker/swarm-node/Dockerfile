@@ -52,7 +52,7 @@ RUN python /opt/swarm-node/worker_image.py manifest --architecture "$TARGETARCH"
     && find /opt/venv \! -type l -perm /222 -exec chmod a-w {} + \
     && chmod a+x /opt/swarm-node/entrypoint.sh /opt/swarm-node/ssh/start.sh \
     && groupadd --gid 10001 worker \
-    && useradd --uid 10001 --gid worker --create-home worker \
+    && useradd --uid 10001 --gid worker --create-home --shell /bin/bash worker \
     && chown worker:worker /home/worker \
     && rm -r /build
 USER 10001:10001

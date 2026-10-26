@@ -611,7 +611,7 @@ def test_swarm_words_reach_a_server_without_the_local_store_and_unowned_words_st
     from scripts.swarm.store import PREFIX
 
     assert shared.smembers(f"{PREFIX}:operator-words") == {"master@a1-1"}
-    assert shared.llen(f"{PREFIX}:operator-words:master@a1-1") == 2
+    assert shared.zcard(f"{PREFIX}:operator-words:master@a1-1:entries") == 2
     _hosted(tmp_path, monkeypatch)
     assert operator_words.matching("master@a1-1", "scale the hive up", now=200) == "Scale the hive  up"
     assert operator_words.matching("master@a1-1", "hold the", now=200) == "Hold the release"
@@ -622,14 +622,96 @@ def test_swarm_words_reach_a_server_without_the_local_store_and_unowned_words_st
     assert operator_words.recorded("master@*") == ["master@a1-1"]
 
 
-def test_the_newest_shared_words_win_and_only_the_latest_are_kept(shared, tmp_path, monkeypatch):
-    monkeypatch.setattr(operator_words, "SHARED_KEPT", 2)
+def test_earlier_master_hook_words_upgrade_to_the_hosted_rank_store(shared, tmp_path, monkeypatch):
+    from hooks.context import master_coding
+    from scripts.swarm_ledger import ledger_relay
+
+    master_coding.record_seat("earlier-master", "demo", "master@abcdef-0001")
+    master_coding.record_seat("current-master", "demo", "master@abcdef-0002")
+    with monkeypatch.context() as offline:
+        offline.setattr(operator_words, "_shared", lambda: None)
+        assert hook_manager._operator_words(
+            {
+                "session_id": "earlier-master",
+                "tool_name": "AskUserQuestion",
+                "tool_response": {"answers": {"rank": "Mark it urgent"}},
+            }
+        )
+    assert hook_manager._operator_words({"session_id": "current-master", "prompt": "Keep the work moving"})
+    assert operator_words.record("master@123456-0001", "Keep it normal", swarm="other")
+    _hosted(tmp_path, monkeypatch)
+    assert ledger_relay.verified("master@abcdef-0002", "Mark it urgent") == "Mark it urgent"
+    assert ledger_relay.verified("master@abcdef-0002", "Keep it normal") == ""
+    assert ledger_relay.verified("master@abcdef-0002", "Never said these words") == ""
+
+
+def test_shared_history_upgrade_retries_and_does_not_duplicate_words(shared, tmp_path, monkeypatch):
+    with monkeypatch.context() as offline:
+        offline.setattr(operator_words, "_shared", lambda: None)
+        operator_words.record("master@a1-1", "Mark it urgent", now=100, swarm="demo")
+        operator_words.record("master@b2-1", "Private local words", now=100)
+    assert operator_words.matching("master@a1-1", "mark it urgent", within=None)
+    assert operator_words.matching("master@a1-1", "mark it urgent", within=None)
+    _hosted(tmp_path, monkeypatch)
+    assert [row["words"] for row in operator_words._shared_rows("master@a1-1")] == ["Mark it urgent"]
+    assert operator_words.matching("master@b2-1", "private local words", within=None) == ""
+
+
+def test_overlapping_history_publishers_keep_recording_available(shared, monkeypatch):
+    with monkeypatch.context() as offline:
+        offline.setattr(operator_words, "_shared", lambda: None)
+        operator_words.record("master@a1-1", "Mark it urgent", now=100, swarm="demo")
+        operator_words.record("master@a1-1", "Keep it high", now=110, swarm="demo")
+    mirror = operator_words._mirror
+    calls = []
+
+    def overlapping(swarm, name, at, words):
+        calls.append(words)
+        if len(calls) == 2:
+            assert operator_words.record("master@a1-2", "Keep recording words", now=120, swarm="demo")
+        return mirror(swarm, name, at, words)
+
+    monkeypatch.setattr(operator_words, "_mirror", overlapping)
+    assert operator_words.matching("master@a1-1", "mark it urgent", within=None) == "Mark it urgent"
+    with operator_words._store() as connection:
+        assert connection.execute("SELECT COUNT(*) FROM published").fetchone() == (3,)
+    assert operator_words._shared_rows("master@a1-1") == [
+        {"swarm": "demo", "at": 110.0, "words": "Keep it high"},
+        {"swarm": "demo", "at": 100.0, "words": "Mark it urgent"},
+    ]
+    assert operator_words.matching("master@a1-2", "keep recording words", within=None) == "Keep recording words"
+
+
+def test_partial_history_publication_checkpoints_success_before_retry(shared, monkeypatch):
+    with monkeypatch.context() as offline:
+        offline.setattr(operator_words, "_shared", lambda: None)
+        operator_words.record("master@a1-1", "Mark it urgent", now=100, swarm="demo")
+        operator_words.record("master@a1-1", "Keep it high", now=110, swarm="demo")
+    mirror = operator_words._mirror
+    calls = []
+
+    def interrupted(swarm, name, at, words):
+        calls.append(words)
+        return False if len(calls) == 2 else mirror(swarm, name, at, words)
+
+    monkeypatch.setattr(operator_words, "_mirror", interrupted)
+    with operator_words._store():
+        pass
+    assert calls == ["Mark it urgent", "Keep it high"]
+    with operator_words._store() as connection:
+        assert connection.execute("SELECT entry FROM published").fetchall() == [(1,)]
+    assert calls == ["Mark it urgent", "Keep it high", "Keep it high"]
+    with operator_words._store() as connection:
+        assert connection.execute("SELECT COUNT(*) FROM published").fetchone() == (2,)
+
+
+def test_the_newest_shared_words_win_and_older_words_remain_available(shared, tmp_path, monkeypatch):
     for at, words in ((100, "ship the first build"), (110, "ship the second build"), (120, "ship the third build")):
         operator_words.record("master@a1-1", words, now=at, swarm="demo")
     _hosted(tmp_path, monkeypatch)
     assert operator_words.matching("master@a1-1", "ship the", within=None) == "ship the third build"
     assert operator_words.matching("master@a1-1", "ship the second", within=None) == "ship the second build"
-    assert operator_words.matching("master@a1-1", "ship the first", within=None) == ""
+    assert operator_words.matching("master@a1-1", "ship the first", within=None) == "ship the first build"
 
 
 def test_forget_drops_only_that_swarms_shared_words(shared, tmp_path, monkeypatch):
@@ -652,9 +734,29 @@ def test_older_shared_rows_match_and_forget_drops_every_copy(shared, tmp_path, m
     operator_words.forget("demo")
     from scripts.swarm.store import PREFIX
 
-    assert shared.lrange(f"{PREFIX}:operator-words:master@a1-1", 0, -1) == [
-        json.dumps({"swarm": "other", "at": 110, "words": "merge the other work"})
+    assert shared.zrange(f"{PREFIX}:operator-words:master@a1-1:entries", 0, -1) == [
+        json.dumps({"swarm": "other", "at": 110.0, "words": "merge the other work"})
     ]
+
+
+@pytest.mark.parametrize("copies", [1, 3])
+def test_legacy_shared_lists_remain_readable_and_forgettable(shared, tmp_path, monkeypatch, copies):
+    from scripts.swarm.store import PREFIX
+
+    key = f"{PREFIX}:operator-words:master@a1-1"
+    shared.sadd(f"{PREFIX}:operator-words", "master@a1-1")
+    for at, words in ((100, "Mark it urgent"), (110, "Keep it high"), (120, "Keep it normal")):
+        row = json.dumps({"swarm": "demo", "at": at, "words": words})
+        shared.lpush(key, *([row] * copies))
+    operator_words.record("master@a1-1", "Mark it normal", now=90, swarm="demo")
+    _hosted(tmp_path, monkeypatch)
+    assert operator_words.matching("master@a1-1", "mark it", within=None) == "Mark it urgent"
+    assert operator_words.matching("master@a1-1", "keep it high", within=None) == "Keep it high"
+    assert operator_words.matching("master@a1-1", "keep it normal", within=None) == "Keep it normal"
+    operator_words.forget("demo")
+    assert operator_words.matching("master@a1-1", "mark it", within=None) == ""
+    assert shared.lrange(key, 0, -1) == []
+    assert shared.zrange(f"{key}:entries", 0, -1) == []
 
 
 def test_an_unreachable_or_failing_shared_redis_keeps_the_local_words(tmp_path, monkeypatch):

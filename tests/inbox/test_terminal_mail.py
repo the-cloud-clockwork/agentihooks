@@ -123,7 +123,7 @@ def test_wake_settles_an_unresolved_recipient(setup, monkeypatch, address):
     assert inbox.get(item.id).state == "cancelled"
     assert "recipient no longer resolves" in inbox.get(item.id).reason
     assert inbox.history(item.id)[-1]["by"] == "swarm"
-    assert ledger.followups == []
+    assert ledger.alerts == [] and ledger.followups == []
 
 
 @pytest.mark.parametrize("state", ["pending", "delivered", "read"])

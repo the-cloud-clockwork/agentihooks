@@ -8,7 +8,7 @@ import { meta } from "./sync.js";
 
 const GATE_MODES = ["enforce", "observe", "off"];
 const GATE_LABELS = { enforce: "deny", observe: "log only", off: "skip" };
-const STEPS = { eng: ["max_eng", 1], ci: ["max_ci", 1], plan: ["max_plan", 1], masters: ["masters_step", 1, "masters step"], compact: ["compact_limit", 50, "compact limit"] };
+const STEPS = { eng: ["max_eng", 1], ci: ["max_ci", 1], plan: ["max_plan", 1], masters: ["masters_step", 1, "masters step"], compact: ["compact_limit", 50, "compact limit"], focus: ["focus_weight", 1, "focus weight"] };
 const EFFORT_CAPS = { effort_min: "effort floor", effort_max: "effort ceiling" };
 const MASTER_AGENTS = ["claude", "codex"];
 
@@ -61,7 +61,7 @@ function affinityNote(sw) {
 }
 
 function capValues(sw) {
-  return { ...sw.config, compact_limit: sw.compact_limit, master_agent: affinityValue(sw) };
+  return { ...sw.config, focus_weight: sw.config.focus_weight ?? 50, compact_limit: sw.compact_limit, master_agent: affinityValue(sw) };
 }
 
 function pageLimits() {
@@ -142,8 +142,22 @@ export function showNote(phase, action, error) {
   $("swarm-note").title = text;
 }
 
+function renderFocus(config) {
+  const found = $("capacity-caps").querySelector("[data-focus-weight]");
+  if (!("focus_weight" in config)) {
+    if (found) found.remove();
+    return;
+  }
+  if (found) return;
+  const step = (up) => h("button", { class: "sw-btn sw-step", type: "button", "data-swarm": `focus_${up ? "up" : "down"}`, "aria-label": `${up ? "Raise" : "Lower"} focus weight`, text: up ? "+" : "−" });
+  const row = h("div", { class: "sw-cap", "data-focus-weight": "" }, h("span", { class: "sw-cap-name", text: "focus weight" }), step(false),
+    h("label", { class: "sw-field" }, h("input", { class: "sw-num", id: "cap-focus", type: "text", inputmode: "numeric", autocomplete: "off", "data-cap": "focus_weight", "aria-label": "Focus weight" }), h("span", { class: "sw-unit", text: "%" })), step(true));
+  $("capacity-caps").querySelector(".sw-break").after(row);
+}
+
 export function renderControls() {
   const config = swarm ? swarm.config : {};
+  renderFocus(config);
   const changes = swarm ? capChanges(capValues(swarm), capDraft, pageLimits(), models) : { body: {}, bad: [] };
   const off = swarm ? { ...swarmControls(config.state), ...capBounds(capCurrent(), pageLimits()), apply: !unsent(changes.body) && !changes.bad.length } : swarmControls("");
   for (const btn of [...$("swarm-box").querySelectorAll("button[data-swarm]"), ...$("closed-banner").querySelectorAll("button[data-swarm]")]) {

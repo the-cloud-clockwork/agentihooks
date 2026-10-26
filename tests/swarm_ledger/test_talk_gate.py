@@ -304,7 +304,7 @@ def test_the_server_gates_only_requests_that_carry_ops(monkeypatch, ops, gated):
     assert handler.reply_state(SLUG, changes=changes, ops=ops) == 200
     assert [type(gate).__name__ for gate in seen] == (["Fence"] if gated else ["NoneType"])
     assert seen_changes == [changes]
-    budget = seen[0].inner.inner if gated else None
+    budget = seen[0].inner.inner.inner if gated else None
     assert not gated or (seen[0].slug, type(budget).__name__, budget.slug) == (SLUG, "Budget", SLUG)
 
 

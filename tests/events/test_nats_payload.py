@@ -23,6 +23,7 @@ def bus(tmp_path):
             opened.close()
 
 
+@pytest.mark.timeout(5, method="thread", func_only=True)
 @pytest.mark.parametrize("compressible", [False, True])
 @pytest.mark.parametrize("scoped", [False, True])
 def test_large_state_round_trips_with_atomic_revisions_and_history(bus, compressible, scoped):

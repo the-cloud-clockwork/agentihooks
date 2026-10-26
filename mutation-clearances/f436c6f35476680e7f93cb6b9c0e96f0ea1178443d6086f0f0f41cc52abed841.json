@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/ledger_client.py:scripts.swarm.ledger_client.x\u01c1LedgerClient\u01c1item__mutmut_13:9574b21827f35afbe8e64fbb2ea1c3a74a60cddc94ed69f8e26b01efe1dc1a84": {
+    "reader": "standards_reader",
+    "reason": "Equivalent mutant. urllib.parse.quote never encodes ASCII letters, since they are always safe, so adding X to safe cannot change the output for any input."
+  }
+}

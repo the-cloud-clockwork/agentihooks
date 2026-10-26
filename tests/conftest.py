@@ -6,6 +6,7 @@ import os
 import re
 import socket
 import sys
+import tempfile
 import time
 import zlib
 from pathlib import Path
@@ -438,6 +439,13 @@ def _production_redis_key_guard(monkeypatch):
 def ledger_port():
     with ledger_guard.reserve_port() as hold:
         yield hold.getsockname()[1]
+
+
+@pytest.fixture
+def memory_path():
+    """A scratch folder on tmpfs, so a ledger database there commits without waiting on runner disk fsync."""
+    with tempfile.TemporaryDirectory(dir="/dev/shm") as path:
+        yield Path(path)
 
 
 @pytest.fixture(autouse=True)

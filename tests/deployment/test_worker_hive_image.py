@@ -96,6 +96,23 @@ def test_hive_image_installs_agentihooks_cloned_from_the_chosen_branch():
     assert "ADD" not in wheel
 
 
+def test_hive_layer_only_links_files_onto_the_base_so_the_build_never_unpacks_it():
+    dockerfile = (ROOT / "deploy/worker/Dockerfile").read_text()
+    hive = dockerfile[dockerfile.rindex("\nFROM ${WORKER_IMAGE}\n") + 1 :]
+    steps = [line.split()[0] for line in hive.splitlines()[1:] if line and not line.startswith(" ")]
+    assert set(steps) == {"COPY", "ENV", "USER", "ENTRYPOINT", "CMD"}
+    assert all(line.startswith("COPY --link=true ") for line in hive.splitlines() if line.startswith("COPY"))
+    assert "COPY --link=true --from=overlay /opt/venv/ /opt/venv/\n" in hive
+    overlay = worker_stage("overlay")
+    assert "bin/pip install --no-cache-dir --no-deps /wheels/*.whl -r /wheels/tools.txt" in overlay
+    assert "lib/python3.12/site-packages/pip " in overlay
+    assert (
+        "useradd --uid 10001 --gid worker --create-home --shell /bin/bash worker"
+        in (ROOT / "docker/swarm-node/Dockerfile").read_text()
+    )
+    assert 'test "$(getent passwd worker | cut -d: -f7)" = /bin/bash' in PROOF.read_text()
+
+
 def test_hive_image_can_install_agentihooks_from_the_local_build_context():
     local = worker_stage("source-local")
     assert "ADD" not in local
@@ -422,12 +439,12 @@ def test_kind_proof_pulls_the_base_and_redis_into_the_node_while_the_hive_builds
         '  docker exec "$cluster-control-plane" mkdir -p /etc/containerd/certs.d/localhost:5001',
         '  printf \'[host."http://%s:5000"]\\n\' "$cluster-registry" | docker exec -i "$cluster-control-plane" cp /dev/stdin /etc/containerd/certs.d/localhost:5001/hosts.toml',
     ]
-    assert lines[start + 5 : start + 9] == [
+    assert lines[start + 5 : start + 8] == [
         f"  for warm in {BASE} mirror.gcr.io/library/redis:7-alpine; do",
         '    docker exec "$cluster-control-plane" crictl pull "$warm" || echo "the node could not pre-pull $warm; the proof loads or pulls it later"',
         "  done",
-        '} > "$out/cluster.log" 2>&1 &',
     ]
+    assert lines[lines.index("EOF") + 1] == '} > "$out/cluster.log" 2>&1 &'
     assert "kind load" not in PROOF.read_text()
     assert "imagePullPolicy: Never" not in PROOF.read_text()
     assert lines.index('  docker rm -f "$cluster-registry" >/dev/null 2>&1 || true') < lines.index(
@@ -454,3 +471,13 @@ def test_kind_proof_ends_the_drain_hold_once_the_hive_reads_draining():
     assert '== "pod/$pod" ]]' in window[1]
     assert window[2] == "done"
     assert "        if registry.show(store.redis, os.environ['HIVE'])['draining'] == 'yes':" in lines
+
+
+def test_kind_proof_sets_up_redis_and_tls_while_the_cluster_starts_and_posts_the_order_before_registration():
+    text = PROOF.read_text()
+    cluster = text[: text.index('} > "$out/cluster.log" 2>&1 &')]
+    assert "kubectl create secret generic hive-tls" in cluster
+    assert "  name: hive-redis\n" in cluster.split("kubectl apply -f - <<'EOF'\n")[1]
+    assert text.count("  name: hive-redis\n") == 2
+    proof = text[text.index("prove_worker() {") :]
+    assert proof.index("orders.command(hive, order)\n") < proof.index("    record = registry.show(redis, hive)")

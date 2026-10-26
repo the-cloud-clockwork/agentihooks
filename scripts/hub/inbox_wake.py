@@ -5,10 +5,11 @@ from dataclasses import replace
 from scripts.events import deadlines
 from scripts.events.bus import Bus
 from scripts.events.envelope import Envelope
+from scripts.events.subjects import subject
 from scripts.hub import lease
 from scripts.hub.registry import Reactor
 from scripts.inbox import wake
-from scripts.inbox.bus import Message, SeatInbox
+from scripts.inbox.bus import Message, SeatInbox, SentElsewhere
 from scripts.inbox.seats import is_seat
 from scripts.inbox.store import REDELIVERED, REDELIVERER, InboxStore, redelivery_ms
 from scripts.swarm import outage
@@ -61,10 +62,27 @@ class InboxWake:
                 item = inbox.get(item_id)
                 swarm = item.address.partition("@")[2] if is_seat(item.address) else inbox.names.slug_of(item.address)
                 if swarm:
-                    SeatInbox(self.bus, swarm).send(
-                        item.address, Message(item.id, item.sender, item.text, item.ref, item.fyi, item.task)
-                    )
+                    message = Message(item.id, item.sender, item.text, item.ref, item.fyi, item.task)
+                    try:
+                        SeatInbox(self.bus, swarm).send(item.address, message)
+                    except SentElsewhere:
+                        # A readdressed item keeps its id, so only its wake is published for the new address.
+                        self._wake(swarm, item)
                 inbox.redis.srem(key, item_id)
+
+    def _wake(self, swarm: str, item) -> None:
+        request = Envelope(
+            id=f"wake-{item.id}-{self._key(swarm, item.address)[:16]}",
+            type="inbox.wake",
+            swarm=swarm,
+            entity="inbox-wake",
+            key=item.id,
+            version=1,
+            time=item.created_at,
+            author=item.sender,
+            data={"address": item.address},
+        )
+        self.bus.events.publish(subject(swarm, "inbox-wake", "requested"), request)
 
     def _mail(self, item_id):
         inbox = InboxStore(self.store.redis)

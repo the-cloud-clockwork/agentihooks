@@ -302,6 +302,11 @@ def test_removing_a_member_revokes_its_bus_credential(admin, signer):
     other = auth.mint(admin, "h2", PUBLIC)
     creds = _refresh(admin, signer, member["ledger_credential"])["nats_credentials"]
     kept = _refresh(admin, signer, other["ledger_credential"])["nats_credentials"]
+    assert remove.revoke(admin, member["id"], signer, dry_run=True) == [
+        f"would revoke the NATS credential of {member['id']}",
+        f"would revoke member {member['id']} and its Redis user",
+    ]
+    assert admin.hgetall(nats_grant.REVOKED) == {}
     lines = remove.revoke(admin, member["id"], signer)
     assert lines == [
         f"revoked the NATS credential of {member['id']}",
@@ -309,7 +314,10 @@ def test_removing_a_member_revokes_its_bus_credential(admin, signer):
     ]
     assert not _opens(signer, creds)
     assert _opens(signer, kept)
-    assert set(admin.hgetall(nats_grant.REVOKED)) == {nats_grant.member_user(signer, member["id"]).public}
+    revoked = admin.hgetall(nats_grant.REVOKED)
+    assert set(revoked) == {nats_grant.member_user(signer, member["id"]).public}
+    assert remove.revoke(admin, member["id"], signer) == [f"{member['id']} holds no member credential"]
+    assert admin.hgetall(nats_grant.REVOKED) == revoked
 
 
 def test_a_claims_update_the_server_refuses_raises(signer):
@@ -630,8 +638,8 @@ def test_remove_revokes_with_the_plan_signer(admin, monkeypatch):
     monkeypatch.setattr(remove, "revoke", lambda *args: (calls.append(args), ["revoked"])[1])
     store = SimpleNamespace(redis=admin)
     plan = remove.Plan("m1", "h1", "k8s/agentihooks-hive-h1", signer=signed)
-    assert remove.remove(store, None, plan, remove.Host()) == ["revoked"]
-    assert calls == [(admin, "m1", signed)]
+    assert remove.remove(store, None, plan, remove.Host()) == ["member: revoked"]
+    assert calls == [(admin, "m1", signed, False)]
 
 
 def _claims(jwt: str) -> dict:

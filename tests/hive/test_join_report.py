@@ -586,3 +586,45 @@ def test_heartbeat_skips_a_report_removed_during_its_probe(monkeypatch):
     join_report.heartbeat(redis, "worker", 181000)
     assert join_report.read(redis, removed) == {}
     assert join_report.read(redis, running)["heartbeat_at"] == 181000
+
+
+def test_summary_prints_the_reason_of_each_ledger_miss():
+    from scripts.hive import join_report
+
+    refused = {"error": "LedgerRefused", "status": 403, "message": "ledger sw: server refused: 403 no"}
+    unreachable = {"error": "SwarmError", "status": None, "message": "ledger sw: ledger server not answering"}
+    report = join_report.graded(
+        {
+            "agent": "one",
+            "heartbeat_at": 5,
+            "checks": {
+                **passing(),
+                "ledger_join": False,
+                "ledger_write": False,
+                "errors": {"ledger_join": unreachable, "ledger_write": refused},
+            },
+        }
+    )
+    assert report["misses"]["ledger_write"] == {"required": True, "reason": refused}
+    assert join_report.summary(report) == (
+        "one\tfailed\tmisses=ledger_join (required: SwarmError ledger sw: ledger server not answering), "
+        "ledger_write (required: LedgerRefused 403 ledger sw: server refused: 403 no)\theartbeat=5"
+    )
+
+
+def test_ledger_retry_keeps_the_latest_reason_and_drops_it_on_recovery(monkeypatch):
+    from scripts.hive import join_checks, join_report
+
+    redis, agent, before = retry_report()
+    refused = {"error": "LedgerRefused", "status": 403, "message": "refused"}
+    checks = {"ledger_join": True, "ledger_write": False, "errors": {"ledger_write": refused}}
+    monkeypatch.setattr(join_checks, "ledger_checks", lambda report: checks)
+    join_report.retry_ledger(redis, agent, "session", 31_000)
+    failed = join_report.read(redis, agent)
+    assert failed["checks"]["errors"] == {"ledger_write": refused}
+    assert failed["misses"] == {"ledger_write": {"required": True, "reason": refused}}
+    checks = {"ledger_join": True, "ledger_write": True}
+    join_report.retry_ledger(redis, agent, "session", 61_000)
+    recovered = join_report.read(redis, agent)
+    assert "errors" not in recovered["checks"]
+    assert recovered["grade"] == "complete"

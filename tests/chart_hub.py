@@ -40,7 +40,7 @@ def hub_problems(deployment: dict) -> list[str]:
 
 def scope_problems(chart: str) -> list[str]:
     found = []
-    for setting, expected in ((None, None), ("false", None), ("true", "1")):
+    for setting, expected in ((None, "1"), ("false", None), ("true", "1")):
         options = [] if setting is None else ["--set", f"hub.bus.scoped={setting}"]
         result = render(chart, *ENABLED, *options)
         if result.returncode:

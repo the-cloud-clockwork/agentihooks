@@ -97,7 +97,7 @@ FIELDS = {
     "reopen": "by",
     "size_set": "by size",
     "source_add": "by source",
-    "phase_add": "by phase title description depends_on planning release plan_url plan_ref plan",
+    "phase_add": "by phase title description depends_on planning release plan_url plan_ref plan not_duplicate",
     "plan_add": "by plan title artifact url",
     "slice_add": "by phase anchor",
     "phase_update": "by item fields",
@@ -111,12 +111,15 @@ FIELDS = {
     "artifact_restore": "target",
     "artifact_purge": "by",
     "alert_claim": "by target",
-    "alert_close": "by target outcome",
-    "alert_raise": "by source text",
+    "alert_close": "by target item outcome",
+    "alert_raise": "by source text item",
     "time_left": "by slots ci_minutes fix_phase watched",
     "freeze_set": "by verb target reason quote",
     "freeze_clear": "by target reason quote",
     "events_ack": "by rev",
+    "blocker_attempt": "by item text command output",
+    "blocker_critic": "by item run digest resolution",
+    "blocker_escalate": "by item reason evidence",
 }
 TYPES = {
     "long": {"type": "boolean"},
@@ -258,7 +261,7 @@ def target(op: dict) -> str:
         return "notifications"
     if kind.startswith("artifact_"):
         return "artifacts"
-    if kind in ("claim", "retext", "relay", "answer", "verdict"):
+    if kind in ("claim", "retext", "relay", "answer", "verdict") or kind.startswith("blocker_"):
         return op["item"]
     return {
         "alert_claim": "alerts",

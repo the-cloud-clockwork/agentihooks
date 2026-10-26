@@ -601,6 +601,9 @@ class SQLiteLedgerRepository:
                 return since
             values = dict(connection.execute(TASK_REVISION, (slug, *TASK_REVISION_PATHS)))
             meta = {json.loads(path)[1]: json.loads(value) for path, value in values.items()}
+            cached = self._cache.get(self._key(slug))
+            if cached is not None and cached.generation == row[0]:
+                return row[0], meta, cached.state.get("tasks") or []
             paths = None
             if since is not None and since[0] < row[0]:
                 paths = refresh.changed_paths(connection, slug, since[0], row[0], CHANGES_KEPT)
