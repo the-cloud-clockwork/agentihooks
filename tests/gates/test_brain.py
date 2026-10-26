@@ -94,6 +94,13 @@ def test_check_names_the_first_reason_a_receipt_fails(given, reason):
     assert check(given, bind(TASK, ROWS["first"], BRAIN), NOW) == reason
 
 
+def test_a_receipt_without_an_expiry_counts_as_expired_from_time_zero():
+    current = bind(TASK, ROWS["first"], BRAIN)
+    undated = {k: v for k, v in receipt().items() if k != "expires"}
+    assert check(undated, current, 0.5) == EXPIRED
+    assert check(receipt(expires=0.6), current, 0.5) == ""
+
+
 def test_refusals_say_what_failed_and_how_to_recover():
     assert NO_RECEIPT == "no task context was delivered to this session"
     assert UNRELATED == "the receipt answers another purpose than this task"

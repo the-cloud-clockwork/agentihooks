@@ -26,7 +26,7 @@ from scripts.gates.brain import (
     BrainGate,
     bind,
 )
-from scripts.swarm_v2.keyspace import stamp
+from scripts.swarm_v2.keyspace import key, stamp
 from tests.swarm_ledger import legacy_page
 
 FIXTURE = Path(__file__).parents[1] / "fixtures/swarm_v2/consultation-gates.json"
@@ -230,3 +230,23 @@ def test_outside_a_swarm_task_no_consultation_is_written(world, monkeypatch):
     monkeypatch.delenv("AGENTIHOOKS_SWARM")
     assert deliver("o2", PACKS["first"]) == PACKS["first"]
     assert task_context.consultation("o2") == {}
+
+
+def test_binding_reads_no_ledger_without_both_swarm_and_task(world, monkeypatch):
+    def refuse(*args):
+        raise AssertionError("no ledger read without a swarm task")
+
+    monkeypatch.setattr("scripts.gates.brain.task_row", refuse)
+    assert task_context.binding(SWARM, None) == {}
+    assert task_context.binding(None, TASK) == {}
+    assert task_context.binding("", "") == {}
+
+
+def test_each_session_keeps_its_own_consultation_receipt(world):
+    world["seed"](**{TASK: "first"})
+    name = key(project_cache.namespace(), "consultation", "one")
+    assert task_context._consultation_path("one") == project_cache._state_dir() / f"{name}.json"
+    deliver("one", PACKS["first"])
+    assert task_context.consultation("one")["result"] == "delivered"
+    assert task_context.consultation("two") == {}
+    assert write("two").reason == refused(NO_RECEIPT)

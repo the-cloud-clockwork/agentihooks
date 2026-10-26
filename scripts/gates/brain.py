@@ -33,7 +33,7 @@ def task_row(ledger_dir, slug, task):
     from scripts.swarm_ledger.storage import read_ledger
 
     doc = read_ledger(ledger_dir, slug, f"tasks/{task}") or {}
-    return next((t for t in doc.get("tasks", []) if isinstance(t, dict) and t.get("id") == task), {})
+    return next((t for t in doc.get("tasks", []) if t.get("id") == task), {})
 
 
 def bind(task, row, brain):
