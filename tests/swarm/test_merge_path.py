@@ -355,7 +355,8 @@ def test_collect_reads_runs_jobs_and_searches_with_these_calls():
     ]
 
 
-def test_collect_counts_a_queue_run_whose_jobs_cannot_be_read_and_goes_on():
+def test_collect_counts_a_queue_run_whose_jobs_cannot_be_read_and_goes_on(monkeypatch):
+    monkeypatch.setattr(merge_path.time, "sleep", lambda seconds: pytest.fail("slept"))
     gh = Gh(
         [
             (0, "o/r\n"),
@@ -375,7 +376,8 @@ def test_collect_counts_a_queue_run_whose_jobs_cannot_be_read_and_goes_on():
     assert found["open_ready_pull_requests"] == 7
 
 
-def test_collect_counts_every_queue_run_whose_jobs_cannot_be_read():
+def test_collect_counts_every_queue_run_whose_jobs_cannot_be_read(monkeypatch):
+    monkeypatch.setattr(merge_path.time, "sleep", lambda seconds: pytest.fail("slept"))
     gh = Gh(
         [
             (0, "o/r\n"),
@@ -509,7 +511,8 @@ def test_head_pushes_reads_a_missing_head_commit_as_no_dev_merge():
     assert merge_path.head_pushes(runs, WINDOW) == {"first push": {"runs": 1, "red": 0}}
 
 
-def test_red_head_jobs_counts_each_failed_job_once_per_red_head_run_in_the_window():
+def test_red_head_jobs_counts_each_failed_job_once_per_red_head_run_in_the_window(monkeypatch):
+    monkeypatch.setattr(merge_path.time, "sleep", lambda seconds: pytest.fail("slept"))
     runs = [
         head(1, "a", "failure", 60),
         head(2, "a", "failure", 120),
@@ -523,7 +526,7 @@ def test_red_head_jobs_counts_each_failed_job_once_per_red_head_run_in_the_windo
     gh = Gh(
         [
             (0, "lint\tDead code\nunit (3.11, 1)\tRun tests\nunit (3.11, 2)\tRun tests\n"),
-            (0, "unit (3.12, 4)\tRun tests\nsonar\t\n"),
+            (0, "unit (3.12, 4)\tRun tests\nsonar (3.12)\t\n"),
             (1, "", "gh: Not Found (HTTP 404)\n"),
             (0, ""),
         ]
