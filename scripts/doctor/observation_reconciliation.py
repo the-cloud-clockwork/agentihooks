@@ -45,11 +45,12 @@ def _remote_ids(get, trace_id, cancelled):
         if cancelled():
             raise TimeoutError("observation identity read cancelled")
         body = get("observations", {"traceId": trace_id, "limit": PAGE, "page": page})
+        previous_count = len(ids)
         ids.update(row["id"] for row in body["data"])
         total = body["meta"]["totalItems"]
-        if page * PAGE >= total:
-            if len(ids) != total:
-                raise ValueError("observation identity listing is incomplete")
+        if len(ids) != previous_count + len(body["data"]) or (len(body["data"]) < PAGE and page * PAGE < total):
+            raise ValueError("observation identity listing is incomplete")
+        if len(body["data"]) < PAGE or page * PAGE >= total:
             return ids
     raise ValueError("observation identity page budget exhausted")
 

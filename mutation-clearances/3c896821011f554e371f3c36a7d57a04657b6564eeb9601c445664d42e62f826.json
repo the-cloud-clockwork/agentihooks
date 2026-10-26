@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/tick.py:scripts.swarm.tick.x__free_seat__mutmut_8:078169f230415924185ed8e07c525f4f0435200cec839e92c494f7b5775927b1": {
+    "reader": "standards-reader",
+    "reason": "Valid callers provide a finite occupied set of size N. Generated addresses are distinct, so one of indices one through N plus one is unoccupied. next returns before requesting the added candidate; both versions return the same first free address and perform identical membership checks. The preferred address path is unchanged."
+  }
+}

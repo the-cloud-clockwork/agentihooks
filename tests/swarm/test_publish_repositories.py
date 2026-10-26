@@ -5,6 +5,7 @@ import pytest
 
 from scripts.swarm import publish, stack
 from scripts.swarm.store import AgentRecord
+from scripts.swarm_ledger import ledger_tasks
 
 pytestmark = pytest.mark.unit
 
@@ -45,6 +46,7 @@ def repositories(tmp_path, monkeypatch):
 
     def update(slug, task_id, fields, by):
         assert (slug, task_id, by) == ("swarm", "t1", task["claimed_by"])
+        ledger_tasks.check({"op": "task_update", "item": f"tasks/{task_id}", "fields": fields, "by": by})
         updates.append(fields)
         task.update(fields)
 
@@ -129,8 +131,8 @@ def test_prepare_retires_only_the_merged_repository_branch(repositories, monkeyp
     assert by_repo[str(p.swarm)]["branch"] == "engineer-test"
     assert p.task["repository_branches"] == {str(p.swarm): "engineer-test", str(p.bundle): "predecessor"}
     assert p.task["pr_url"] == ""
-    assert p.task["handoff_envelope"] == {"task": "t1"}
-    assert p.task["reclaim"] == {"reason": "retained"}
+    assert p.task["handoff_envelope"] == {"continue_from": "origin/predecessor", "task": "t1"}
+    assert p.task["reclaim"] == {"continue_from": "origin/predecessor", "reason": "retained"}
 
 
 def test_prepare_names_the_default_repository_without_inferring_prose(repositories):

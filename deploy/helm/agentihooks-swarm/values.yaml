@@ -66,10 +66,10 @@ ledger:
   resources:
     requests:
       cpu: 50m
-      memory: 128Mi
+      memory: 512Mi
       ephemeral-storage: 64Mi
     limits:
-      memory: 512Mi
+      memory: 2Gi
       ephemeral-storage: 256Mi
 
 redis:

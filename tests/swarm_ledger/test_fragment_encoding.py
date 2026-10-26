@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from scripts.swarm_ledger.repository.fragments import document, encoded, leaf
+from scripts.swarm_ledger.repository.fragments import Fragment, document, encoded, leaf
 from scripts.swarm_ledger.repository.rows import encode
 
 
@@ -107,17 +107,22 @@ def test_opaque_document_fields_reuse_unchanged_container_generations():
     assert encoded(new) == encode(state(2))
 
 
-def test_only_rows_keep_canonical_text_and_the_root_is_joined_from_them():
-    state = {"tasks": [{"id": "one"}], "_meta": {"events": [{"rev": 1}], "stamps": {"a": {"rev": 1}}}}
+def held(fragment):
+    yield fragment
+    parts = fragment.parts.values() if isinstance(fragment.parts, dict) else fragment.parts or ()
+    for part in parts:
+        yield from held(part)
+
+
+def test_no_fragment_keeps_encoded_text_and_the_document_is_encoded_when_read():
+    state = {"title": "é", "tasks": [{"id": "one"}], "_meta": {"events": [{"rev": 1}], "stamps": {"a": {"rev": 1}}}}
     root = document(state)
-    assert root.text is None
+    fragments = list(held(root))
+    assert len(fragments) == 9
+    names = [name for name in Fragment.__slots__ if name != "value"]
+    assert [name for item in fragments for name in names if isinstance(getattr(item, name), str)] == []
     assert encoded(root) == encode(state)
-    assert root.parts["tasks"].text is None
-    assert root.parts["_meta"].text is None
-    assert root.parts["_meta"].parts["events"].text is None
-    assert root.parts["_meta"].parts["stamps"].text is None
-    assert root.parts["tasks"].parts[0].text == encode({"id": "one"})
-    assert root.parts["_meta"].parts["stamps"].parts["a"].text == encode({"rev": 1})
+    assert encoded(root.parts["tasks"].parts[0]) == encode({"id": "one"})
 
 
 def test_a_container_replacing_a_scalar_or_starting_empty_is_its_own_value():
@@ -138,9 +143,8 @@ def test_a_reordered_mapping_with_the_same_rows_is_rebuilt():
     assert second.value["_meta"]["stamps"]["a"] is first.value["_meta"]["stamps"]["a"]
 
 
-def test_a_leaf_keeps_a_distinct_signature_and_shares_an_equal_one_with_its_text():
-    distinct = leaf(1e-7)
-    assert distinct.text == "1e-07"
-    assert distinct.signature == "1e-7"
-    equal = leaf("same")
-    assert equal.signature is equal.text
+def test_a_leaf_is_encoded_canonically_and_its_signature_tells_number_spellings_apart():
+    assert encoded(leaf(1e-7)) == "1e-07"
+    signatures = [leaf(1).signature, leaf(1.0).signature, leaf(True).signature]
+    assert len(set(signatures)) == 3
+    assert leaf({"a": 1, "b": 2}).signature != leaf({"b": 2, "a": 1}).signature

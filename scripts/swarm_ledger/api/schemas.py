@@ -75,7 +75,7 @@ FIELDS = {
     "ack": "by rev",
     "claim": "by item status",
     "set": "by path value status",
-    "add_item": "by list text needs_operator hive task",
+    "add_item": "by list text needs_operator hive task not_duplicate",
     "retext": "by item text",
     "gate_bypass": "by unhandled",
     "gate_lift": "by gate",
@@ -83,7 +83,7 @@ FIELDS = {
     "priority_clear": "by target reason",
     "notification_clear": "target",
     "notice": "by text",
-    "task_add": "by task title lane phase description depends_on territory overlays repositories kind contract proof workspace artifact profile plan_url plan_slice rank gain difficulty difficulty_source difficulty_confidence not_duplicate slice follow_up workstation",
+    "task_add": "by task title lane phase description depends_on territory overlays repositories kind contract proof workspace artifact profile plan_url plan_slice rank gain difficulty difficulty_source difficulty_confidence not_duplicate slice follow_up workstation needs",
     "task_update": "by item fields if_state if_match if_plan_lines_missing quote",
     "task_rank": "by item rank if_owned",
     "task_group": "by item members",
@@ -97,7 +97,7 @@ FIELDS = {
     "reopen": "by",
     "size_set": "by size",
     "source_add": "by source",
-    "phase_add": "by phase title description depends_on planning release plan_url plan_ref plan",
+    "phase_add": "by phase title description depends_on planning release plan_url plan_ref plan not_duplicate",
     "plan_add": "by plan title artifact url",
     "slice_add": "by phase anchor",
     "phase_update": "by item fields",
@@ -153,7 +153,17 @@ KIND_TYPES = {
     "plan_add": {"artifact": {"type": "string", "maxLength": 100000}},
     "task_rank": {"if_owned": {"type": "boolean"}},
 }
-for _field in ("depends_on", "territory", "overlays", "repositories", "if_state", "members", "watched", "halves"):
+for _field in (
+    "depends_on",
+    "territory",
+    "overlays",
+    "repositories",
+    "needs",
+    "if_state",
+    "members",
+    "watched",
+    "halves",
+):
     TYPES[_field] = {"type": "array", "maxItems": 100, "items": {"type": "string", "maxLength": 2000}}
 
 

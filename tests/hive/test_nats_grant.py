@@ -44,6 +44,7 @@ def signer(tmp_path, request):
     config = tmp_path / "nats.conf"
     config.write_text(
         f"host: 127.0.0.1\nport: {port}\nmax_control_line: {getattr(request, 'param', 65536)}\n"
+        f'log_file: "{tmp_path / "nats.log"}"\n'
         f"operator: {nkey.encode_jwt(operator, operator.public, 'op', claims)}\n"
         f"system_account: {system.public}\n"
         f'jetstream: {{store_dir: "{tmp_path / "js"}"}}\n'
@@ -662,7 +663,12 @@ def test_a_member_credential_carries_exactly_the_hive_member_claims():
         "dead.*",
         "dead.*.*",
         "$JS.API.INFO",
+        "$JS.API.STREAM.MSG.GET.AGENTIHOOKS-DEAD",
         "$JS.API.STREAM.MSG.GET.AGENTIHOOKS_DEAD",
+        "$JS.API.STREAM.INFO.AGENTIHOOKS-EVENTS",
+        "$JS.API.STREAM.INFO.AGENTIHOOKS_EVENTS",
+        "$JS.API.STREAM.INFO.AGENTIHOOKS-DEAD",
+        "$JS.API.STREAM.INFO.AGENTIHOOKS_DEAD",
         "$JS.API.CONSUMER.INFO.>",
         "$JS.API.CONSUMER.MSG.NEXT.>",
         "$JS.ACK.>",

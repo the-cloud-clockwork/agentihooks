@@ -2,8 +2,9 @@ import hashlib
 import json
 import re
 import sys
+from collections import Counter
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 
@@ -52,6 +53,8 @@ class StoredStats:
     folder: Path
     context: dict
     changes: dict
+    misses: Counter = field(default_factory=Counter)
+    changed: Counter = field(default_factory=Counter)
 
     def pointer(self, path: str) -> Path:
         context = {name: value for name, value in self.context.items() if name != "inventory"}
@@ -73,14 +76,30 @@ class StoredStats:
             }
         )
 
+    @staticmethod
+    def read(record_file: Path) -> dict | None:
+        try:
+            return json.loads(record_file.read_text())
+        except ValueError:
+            record_file.unlink()
+            return None
+
+    def prune(self) -> None:
+        for record_file in self.folder.glob("*.json"):
+            self.read(record_file)
+
     def load(self, path: str, check: Callable[[dict, bool, str], bool] | None = None) -> dict | None:
         pointer = self.pointer(path)
         if not pointer.is_file():
+            self.misses["no pointer"] += 1
             return None
         key = pointer.read_text()
         if not re.fullmatch(r"[0-9a-f]{64}", key) or not (record_file := self.folder / f"{key}.json").is_file():
+            self.misses["no record"] += 1
             return None
-        record = json.loads(record_file.read_text())
+        if (record := self.read(record_file)) is None:
+            self.misses["no record"] += 1
+            return None
         inputs, scope, measured = record["inputs"], record["scope"], record["measured"]
         discovery = record.get("discovery", "")
         if (
@@ -88,16 +107,23 @@ class StoredStats:
             or record["status"] != 0
             or key != self.identity(path, inputs, scope, measured, discovery)
         ):
+            self.misses["identity"] += 1
             return None
         if not inputs.keys() <= set(self.context["inventory"]) or scope != self.scope(inputs):
+            self.misses["scope"] += 1
             return None
-        if any(
-            not (self.root / name).is_file()
-            or hashlib.sha256((self.root / name).read_bytes()).hexdigest() != fingerprint
+        changed = [
+            name
             for name, fingerprint in inputs.items()
-        ):
+            if not (self.root / name).is_file()
+            or hashlib.sha256((self.root / name).read_bytes()).hexdigest() != fingerprint
+        ]
+        if changed:
+            self.misses["inputs"] += 1
+            self.changed.update(changed)
             return None
         if check is not None and not check(inputs, measured, discovery):
+            self.misses["check"] += 1
             return None
         result = {
             name: value

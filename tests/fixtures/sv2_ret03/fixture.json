@@ -1,0 +1,20 @@
+{
+  "domain": "corpus-ret03",
+  "sessions": [
+    {"session_uid": "s-attributed", "source_generation": "g1", "provider": "claude", "origin": "origin-a", "project_id": "proj-alpha", "events": 5},
+    {"session_uid": "s-unattributed", "source_generation": "g1", "provider": "codex", "origin": "origin-b", "project_id": null, "events": 4}
+  ],
+  "window": {
+    "new_writer": {"session_uid": "s-attributed", "source_generation": "g1", "events": 2},
+    "previous_writer": {"session_uid": "s-unattributed", "source_generation": "g1", "events": 1}
+  },
+  "backfill": {"batch_size": 2, "max_batches": 50, "interrupt_after": 2},
+  "index": {"generation": "idx-v1", "model": "concept-3", "dimension": 3, "chunker_version": "chunker-v1"},
+  "vectors": [
+    {"chunk_id": "c-current", "session_uid": "s-attributed", "dimension": 3},
+    {"chunk_id": "c-legacy-1", "session_uid": "s-attributed", "dimension": 4},
+    {"chunk_id": "c-legacy-2", "session_uid": "s-unattributed", "dimension": 4}
+  ],
+  "operator": {"actor": "operator-fixture", "role": "operator"},
+  "clock": {"requeued": 5000.0}
+}
