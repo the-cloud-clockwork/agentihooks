@@ -19,10 +19,13 @@ def headers(**pairs):
         (headers(X_Ledger_Agent="engineer@1-1"), "engineer@1-1"),
         (headers(X_Ledger_Agent="engineer@1-1", X_Controller_Credential="c"), "engineer@1-1"),
         (headers(X_Ledger_Agent="", X_Controller_Credential="c"), "controller"),
+        (headers(X_Ledger_Tick="k"), "tick"),
+        (headers(X_Ledger_Tick="k", X_Controller_Credential="c"), "tick"),
+        (headers(X_Ledger_Agent="engineer@1-1", X_Ledger_Tick="k"), "engineer@1-1"),
         (headers(X_Controller_Credential="c"), "controller"),
     ],
 )
-def test_the_request_caller_names_the_agent_then_the_controller(given, caller):
+def test_the_request_caller_names_the_agent_then_the_tick_then_the_controller(given, caller):
     from scripts.swarm_ledger import ledger_server
 
     assert ledger_server.request_caller(given) == caller

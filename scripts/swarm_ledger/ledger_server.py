@@ -816,6 +816,8 @@ def request_caller(headers) -> str:
         return "-"
     if headers.get("X-Ledger-Agent"):
         return headers["X-Ledger-Agent"]
+    if headers.get("X-Ledger-Tick"):
+        return "tick"
     return "controller" if headers.get("X-Controller-Credential") else "-"
 
 

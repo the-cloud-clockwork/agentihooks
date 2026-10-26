@@ -635,6 +635,14 @@ def test_a_wait_on_a_task_reads_only_that_dependency(rig):
     assert rig.ledger.reads == ["t1", "d0"]
 
 
+@pytest.mark.parametrize("on", [{"kind": "task"}, {"kind": "merge", "target": "d0"}])
+def test_a_wait_naming_no_task_reads_no_dependency(rig, on):
+    rig.ledger.rows["d0"] = {"id": "d0", "state": "claimed"}
+    idle.declare_wait(rig.store.redis, SLUG, ME, rig.clock[0] + 60_000, "waiting", rig.clock[0], on=on)
+    rig.stop()
+    assert rig.ledger.reads == ["t1"]
+
+
 def test_a_ci_worker_is_gated(rig):
     ci = "ci@100001-0001"
     rig.task.update(claimed_by=ci)
