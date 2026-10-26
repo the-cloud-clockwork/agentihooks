@@ -216,13 +216,13 @@ class Connection:
             cursor.execute(translate(sql, isinstance(parameters, Mapping)), parameters)
         return cursor
 
-    def stream(self, sql: str, parameters: tuple = ()) -> object:
-        """A read whose rows the server sends STREAM_ROWS at a time, so no whole result is held here at once."""
+    def stream(self, sql: str, parameters: tuple = ()) -> Iterator[tuple]:
+        """Rows of a read the server sends STREAM_ROWS at a time, so no whole result is held here at once."""
         with mapped():
             cursor = self.raw.cursor(name=f"stream_{next(STREAMS)}")
-            cursor.itersize = STREAM_ROWS
             cursor.execute(translate(sql), parameters)
-        return cursor
+            while batch := cursor.fetchmany(STREAM_ROWS):
+                yield from batch
 
     def lock(self) -> object:
         """The writer lock, asked for again after each wait the server ends at its lock timeout."""

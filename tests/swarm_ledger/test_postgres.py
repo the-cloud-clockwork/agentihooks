@@ -637,10 +637,15 @@ def test_a_stream_reads_through_a_named_server_cursor_two_thousand_rows_at_a_tim
 
     class Named:
         def __init__(self, name):
-            self.name, self.itersize, self.ran = name, None, None
+            self.name, self.ran, self.fetches = name, None, []
+            self.batches = [[(1,), (2,)], [(3,)], []]
 
         def execute(self, sql, parameters):
             self.ran = (sql, parameters)
+
+        def fetchmany(self, size):
+            self.fetches.append(size)
+            return self.batches.pop(0)
 
     class Streaming(Raw):
         def cursor(self, name=None):
@@ -650,10 +655,10 @@ def test_a_stream_reads_through_a_named_server_cursor_two_thousand_rows_at_a_tim
     monkeypatch.setattr(postgres, "POOLS", {})
     monkeypatch.setattr(psycopg2, "connect", lambda address, **settings: Streaming())
     connection = postgres.Connection(ADDRESS)
-    first = connection.stream("SELECT path FROM fields WHERE slug=?", ("s",))
-    second = connection.stream("SELECT 1")
-    assert made == [first, second]
-    assert first.itersize == second.itersize == 2000
+    assert list(connection.stream("SELECT path FROM fields WHERE slug=?", ("s",))) == [(1,), (2,), (3,)]
+    assert list(connection.stream("SELECT 1")) == [(1,), (2,), (3,)]
+    first, second = made
+    assert first.fetches == second.fetches == [2000, 2000, 2000]
     assert first.ran == ("SELECT path FROM fields WHERE slug=%s", ("s",))
     assert second.ran == ("SELECT 1", ())
     assert first.name.startswith("stream_") and second.name.startswith("stream_") and first.name != second.name
