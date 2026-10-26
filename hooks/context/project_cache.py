@@ -127,7 +127,9 @@ def _source(rows: list[dict]) -> KernelProjectSource | VaultProjectSource:
     return KernelProjectSource(entries)
 
 
-def _fetch(identity: ProjectIdentity, rows: list[dict], path: Path, cached: dict) -> ProjectMemory | None:
+def _fetch(
+    identity: ProjectIdentity, rows: list[dict], scope: Namespace, path: Path, cached: dict
+) -> ProjectMemory | None:
     from hooks.common import log
     from hooks.context.brain_adapter import BrainSourceUnavailable
 
@@ -140,10 +142,10 @@ def _fetch(identity: ProjectIdentity, rows: list[dict], path: Path, cached: dict
     except BrainSourceUnavailable as error:
         log("brain_project: refresh failed", {"error": str(error)})
         if cached.get("memory"):
-            _write(path, {**cached, "outage_at": time.time()})
+            _write(path, stamp(scope, "project-memory", {**cached, "outage_at": time.time()}))
             _count(_fallback_path(), "kernel_outage")
         return None
-    if getattr(source, "fell_back", False):
+    if isinstance(source, KernelProjectSource) and source.fell_back:
         _count(_fallback_path(), "legacy_endpoint")
     return memory
 
@@ -159,7 +161,7 @@ def refresh_project_cache(identity: ProjectIdentity, rows: list[dict], feed_hash
         cached = _scoped(path, scope, "project-memory")
         if _fresh(cached, feed_hash):
             return
-        memory = _fetch(identity, rows, path, cached)
+        memory = _fetch(identity, rows, scope, path, cached)
         if memory is not None and _scoped(_feed_path(brain), brain, "feed").get("hash") == feed_hash:
             _write(
                 path,
