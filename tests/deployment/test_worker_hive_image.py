@@ -471,3 +471,13 @@ def test_kind_proof_ends_the_drain_hold_once_the_hive_reads_draining():
     assert '== "pod/$pod" ]]' in window[1]
     assert window[2] == "done"
     assert "        if registry.show(store.redis, os.environ['HIVE'])['draining'] == 'yes':" in lines
+
+
+def test_kind_proof_sets_up_redis_and_tls_while_the_cluster_starts_and_posts_the_order_before_registration():
+    text = PROOF.read_text()
+    cluster = text[: text.index('} > "$out/cluster.log" 2>&1 &')]
+    assert "kubectl create secret generic hive-tls" in cluster
+    assert "  name: hive-redis\n" in cluster.split("kubectl apply -f - <<'EOF'\n")[1]
+    assert text.count("  name: hive-redis\n") == 2
+    proof = text[text.index("prove_worker() {") :]
+    assert proof.index("orders.command(hive, order)\n") < proof.index("    record = registry.show(redis, hive)")
