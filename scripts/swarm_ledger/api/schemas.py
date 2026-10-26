@@ -75,7 +75,7 @@ FIELDS = {
     "ack": "by rev",
     "claim": "by item status",
     "set": "by path value status",
-    "add_item": "by list text needs_operator hive task",
+    "add_item": "by list text needs_operator hive task not_duplicate",
     "retext": "by item text",
     "gate_bypass": "by unhandled",
     "gate_lift": "by gate",

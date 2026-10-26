@@ -1,8 +1,10 @@
 import ast
+import hashlib
 import json
 import os
 import subprocess
 import sys
+import sysconfig
 from pathlib import Path
 
 import pytest
@@ -226,6 +228,32 @@ def test_the_inputs_plugin_records_opened_files_and_escapes(tmp_path):
         {"test": "test_sample.py::test_second", "files": ["shared.txt"], "escapes": True},
         {"test": "test_sample.py::test_spawns", "files": ["shared.txt"], "escapes": True},
     ]
+
+
+def test_the_inputs_plugin_records_files_a_child_process_reads_for_its_test_only(tmp_path):
+    (tmp_path / "child.txt").write_text("x")
+    (tmp_path / "test_sample.py").write_text(
+        "import subprocess, sys\n"
+        "def test_child_reads():\n"
+        "    subprocess.run([sys.executable, '-c', \"open('child.txt').read()\"], env={}, check=True)\n"
+        "def test_child_reads_nothing():\n"
+        "    subprocess.run([sys.executable, '-c', 'pass'], env={}, check=True)\n"
+    )
+    out = tmp_path / "inputs"
+    subprocess.run(
+        [sys.executable, "-m", "pytest", "-q", "-p", "tests.dep_inputs", "-p", "no:cacheprovider", "test_sample.py"],
+        cwd=tmp_path,
+        env={**os.environ, "PYTHONPATH": str(ROOT), "DEP_INPUTS_DIR": str(out), "PYTEST_ADDOPTS": ""},
+        check=True,
+        capture_output=True,
+    )
+    lines = [json.loads(line) for report in out.glob("*.jsonl") for line in report.read_text().splitlines()]
+    assert sorted(lines, key=lambda line: line["test"]) == [
+        {"test": "test_sample.py::test_child_reads", "files": ["child.txt"], "escapes": True},
+        {"test": "test_sample.py::test_child_reads_nothing", "files": [], "escapes": True},
+    ]
+    name = hashlib.sha256(str(out / "children").encode()).hexdigest()[:16]
+    assert not (Path(sysconfig.get_path("purelib")) / f"agentihooks-dep-inputs-{name}.pth").exists()
 
 
 def test_the_coverage_shards_record_per_test_contexts_and_inputs():

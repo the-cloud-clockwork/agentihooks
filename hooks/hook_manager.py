@@ -519,12 +519,9 @@ def on_session_start(payload: dict) -> None:
     # --- Broadcast: register session + deliver pending ---
     # Brain adapter FIRST — publishes brain content to broadcast.json
     try:
-        from hooks.config import BRAIN_ENABLED
+        from hooks.context.brain_adapter import inject_on_session_start
 
-        if BRAIN_ENABLED:
-            from hooks.context.brain_adapter import inject_on_session_start
-
-            inject_on_session_start(session_id, payload.get("cwd", ""))
+        inject_on_session_start(session_id, payload.get("cwd", ""))
     except Exception as e:
         log("brain_adapter session_start failed", {"error": str(e)})
 

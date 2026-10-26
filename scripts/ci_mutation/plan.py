@@ -3,6 +3,7 @@ import ast
 import json
 import math
 import os
+import re
 import subprocess
 import time
 import zipfile
@@ -147,15 +148,39 @@ def changed_recorded_units(root: Path, manifest: dict, changes: dict[str, set[in
     index = {unit: number for number, unit in enumerate(manifest["units"])}
     units, unrecorded = set(), set()
     for path, lines in changes.items():
-        spans = _spans(ast.parse((root / path).read_text()))
+        tree = ast.parse((root / path).read_text())
+        spans = _spans(tree)
+        new = new_functions(_show(root, manifest["commit"], path), tree)
         for line in lines:
             if inside := [span for span in spans if span[0] <= line <= span[2]]:
                 unit = f"{path}::{max(inside)[3]}"
                 if unit in index:
                     units.add(index[unit])
-                else:
+                elif max(inside)[3].partition(".")[0] not in new:
                     unrecorded.add(path)
     return units, unrecorded
+
+
+def new_functions(old: str | None, tree: ast.Module) -> set[str]:
+    if old is None:
+        return set()
+    try:
+        known = _known_names(ast.parse(old))
+    except SyntaxError:
+        return set()
+    return {
+        statement.name
+        for statement in tree.body
+        if isinstance(statement, (ast.FunctionDef, ast.AsyncFunctionDef))
+        and not statement.decorator_list
+        and statement.name not in known
+        and any(
+            isinstance(found, ast.Name) and found.id == statement.name
+            for other in tree.body
+            if other is not statement
+            for found in ast.walk(other)
+        )
+    }
 
 
 def covering_tests(manifest: dict, units: set[int], paths: set[str]) -> set[str]:
@@ -185,12 +210,20 @@ def binds_only_new_names(old: str, new: str) -> bool:
     pending, bound = list(before.body), set()
     for statement in after.body:
         match = next((kept for kept in pending[:1] if _statement(kept) == _statement(statement)), None)
+        if match is None:
+            match = _extended_table(pending[:1], statement)
         if match is None and isinstance(statement, ast.ImportFrom):
             match = _extended_import(pending, statement)
             present = {ast.dump(alias) for alias in match.names} if match else set()
             bound.update(_bound(alias) for alias in statement.names if ast.dump(alias) not in present)
         elif match is None and isinstance(statement, ast.Import):
             bound.update(_bound(alias) for alias in statement.names)
+        elif (
+            match is None
+            and isinstance(statement, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and not statement.decorator_list
+        ):
+            bound.add(statement.name)
         elif (
             match is None
             and isinstance(statement, ast.Assign)
@@ -202,6 +235,53 @@ def binds_only_new_names(old: str, new: str) -> bool:
         if match is not None:
             pending.remove(match)
     return not pending and "*" not in bound and not bound & _known_names(before)
+
+
+def _extended_table(candidates: list[ast.stmt], statement: ast.stmt) -> ast.Assign | None:
+    return next(
+        (
+            kept
+            for kept in candidates
+            if isinstance(kept, ast.Assign)
+            and isinstance(statement, ast.Assign)
+            and all(isinstance(target, ast.Name) for target in statement.targets)
+            and list(map(ast.dump, kept.targets)) == list(map(ast.dump, statement.targets))
+            and _adds_entries(kept.value, statement.value)
+        ),
+        None,
+    )
+
+
+def _adds_entries(old: ast.expr, new: ast.expr) -> bool:
+    if type(old) is not type(new) or not isinstance(old, (ast.Dict, ast.List, ast.Tuple, ast.Set)):
+        return False
+    before, after = (
+        list(zip(table.keys, table.values)) if isinstance(table, ast.Dict) else [(None, item) for item in table.elts]
+        for table in (old, new)
+    )
+    kept = [_entry(entry) for entry in before]
+    added, position = [], 0
+    for entry in after:
+        if kept[position : position + 1] == [_entry(entry)]:
+            position += 1
+        else:
+            added.append(entry)
+    if (
+        position < len(kept)
+        or not added
+        or any(isinstance(node, ast.Call) for entry in added for node in ast.walk(entry[1]))
+    ):
+        return False
+    if isinstance(old, ast.Dict):
+        if not all(isinstance(key, ast.Constant) for key in [*old.keys, *(key for key, _ in added)]):
+            return False
+        keys = [key.value for key, _ in added]
+        return len(set(keys)) == len(keys) and not set(keys) & {key.value for key in old.keys}
+    return isinstance(old, ast.Set) or list(map(_entry, after[: len(kept)])) == kept
+
+
+def _entry(entry: tuple[ast.expr | None, ast.expr]) -> tuple[str, ...]:
+    return tuple(map(ast.dump, filter(None, entry)))
 
 
 def _bound(alias: ast.alias) -> str:
@@ -234,9 +314,11 @@ def _known_names(tree: ast.Module) -> set[str]:
     return known
 
 
-def recorded_lines(root: Path, manifest: dict, changes: dict[str, set[int]]) -> tuple[dict[str, set[int]], set[int]]:
+def recorded_lines(
+    root: Path, manifest: dict, changes: dict[str, set[int]]
+) -> tuple[dict[str, set[int]], set[int], set[tuple[str, str]]]:
     lines = {path: set(found) for path, found in changes.items()}
-    fallback = set()
+    fallback, tables = set(), set()
     index = {unit: number for number, unit in enumerate(manifest["units"])}
     for path, old, new in recorded_changes(root, manifest["commit"], "HEAD"):
         if not path.endswith(".py") or not path.startswith(MEASURED):
@@ -264,12 +346,50 @@ def recorded_lines(root: Path, manifest: dict, changes: dict[str, set[int]]) -> 
         fallback.update(headers[line] for line in affected if line in headers)
         if not binds_only_new_names(old, new):
             fallback.update(number for unit, number in index.items() if unit.startswith(f"{path}::"))
-        lines[path] = affected | {mapping[line] for line in changes.get(path, ()) if line in mapping}
-    return lines, fallback
+        extended = extended_tables(old, new)
+        tables.update((path, name) for name in extended)
+        lines[path] = (
+            affected
+            | {mapping[line] for line in changes.get(path, ()) if line in mapping}
+            | table_reads(ast.parse(old), extended)
+        )
+    return lines, fallback, tables
+
+
+def extended_tables(old: str, new: str) -> dict[str, bool]:
+    before = list(ast.parse(old).body)
+    return {
+        target.id: isinstance(statement.value, ast.Dict)
+        for statement in ast.parse(new).body
+        if _extended_table(before, statement)
+        for target in statement.targets
+    }
+
+
+def table_reads(tree: ast.Module, tables: dict[str, bool]) -> set[int]:
+    # A lookup that raises on a missing key reaches a new entry only for a test that passes that new key.
+    guarded = {
+        id(node)
+        for found in ast.walk(tree)
+        if isinstance(found, ast.Try) and found.handlers
+        for statement in found.body
+        for node in ast.walk(statement)
+    }
+    keyed = {
+        id(found.value) for found in ast.walk(tree) if isinstance(found, ast.Subscript) and id(found) not in guarded
+    }
+    return {
+        found.lineno
+        for found in ast.walk(tree)
+        if isinstance(found, ast.Name)
+        and found.id in tables
+        and isinstance(found.ctx, ast.Load)
+        and not (tables[found.id] and id(found) in keyed)
+    }
 
 
 def line_covering_tests(root: Path, manifest: dict, changes: dict[str, set[int]], paths: set[str]) -> set[str]:
-    lines, fallback = recorded_lines(root, manifest, changes)
+    lines, fallback, tables = recorded_lines(root, manifest, changes)
     return {
         node(test).partition("[")[0]
         for test, found in manifest["tests"].items()
@@ -277,7 +397,16 @@ def line_covering_tests(root: Path, manifest: dict, changes: dict[str, set[int]]
         or fallback.intersection(found["units"])
         or paths.intersection(found.get("files", ()))
         or any(changed.intersection(manifest["lines"][test].get(path, ())) for path, changed in lines.items())
+        or any(
+            path in manifest["lines"][test] and re.search(rf"\b{name}\b", file_text(root / test_file(test)))
+            for path, name in tables
+        )
     }
+
+
+@cache
+def file_text(path: Path) -> str:
+    return path.read_text() if path.is_file() else ""
 
 
 @cache

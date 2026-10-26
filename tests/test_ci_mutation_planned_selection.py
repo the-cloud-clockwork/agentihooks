@@ -1,3 +1,4 @@
+import ast
 import json
 import subprocess
 import time
@@ -569,10 +570,158 @@ def test_a_module_edit_that_only_binds_new_names_keeps_the_selection_narrow(
         ("class A:\n    pass\n", "@dataclass\nclass A:\n    pass\n", False),
         ("class A:\n    X = 1\n", "class A:\n    X = 2\n", False),
         ("X = 1\n", "Y = 1\n", False),
+        ("X = 1\n", "X = 1\n\n\ndef h():\n    pass\n", True),
+        ("X = 1\n", "X = 1\n\n\nasync def h():\n    pass\n", True),
+        ("X = 1\n", "X = 1\n\n\n@cache\ndef h():\n    pass\n", False),
+        ("H = {'a': f}\n", "H = {'a': f, 'b': g}\n", True),
+        ("H = {'a': f}\n", "H = {'b': g, 'a': f}\n", True),
+        ("H = {'a': f}\n", "H = {'a': f, 'a': g}\n", False),
+        ("H = {'a': f}\n", "H = {'a': f, 'b': g, 'b': h}\n", False),
+        ("H = {'a': f}\n", "H = {'a': g, 'b': g}\n", False),
+        ("H = {'a': f, 'b': g}\n", "H = {'a': f, 'c': h}\n", False),
+        ("H = {'a': f}\n", "H = {'a': f, **B}\n", False),
+        ("H = {'a': f}\n", "H = {'a': f, 'b': make()}\n", False),
+        ("H = {'a': f}\n", "H = {'a': f, make(): g}\n", False),
+        ("H = {'a': f}\n", "H = {'a': f, K: g}\n", False),
+        ("H = {K: f}\n", "H = {K: f, 'b': g}\n", False),
+        ("H = {1: f}\n", "H = {1: f, True: g}\n", False),
+        ("H = {1: f}\n", "H = {1: f, 2: g, 2.0: h}\n", False),
+        ("H = {'a': f}\n", "G = {'a': f, 'b': g}\n", False),
+        ("H = {'a': f}\n", "H = ['a', 'b']\n", False),
+        ("H: dict = {'a': f}\n", "H: dict = {'a': f, 'b': g}\n", False),
+        ("H = ('a',)\n", "H = ('a', 'b')\n", True),
+        ("H = ['a']\n", "H = ['a', 'b']\n", True),
+        ("H = ['a']\n", "H = ['b', 'a']\n", False),
+        ("H = ['a', 'c']\n", "H = ['a', 'b', 'c']\n", False),
+        ("H = {'a'}\n", "H = {'b', 'a'}\n", True),
+        ("H = ['a']\n", "H = ['a']\nH = ['a', 'b']\n", False),
+        ("H = {'a': f}\nX = 1\n", "X = 1\nH = {'a': f, 'b': g}\n", False),
+        ("H = {'a': f}\nG = {'b': g}\n", "G = {'b': g, 'c': h}\nH = {'a': f}\n", False),
+        ("X = h\n", "X = h\n\n\ndef h():\n    pass\n", False),
     ],
 )
 def test_only_statements_binding_unknown_names_count_as_new(old, new, expected):
     assert plan.binds_only_new_names(old, new) is expected
+
+
+@pytest.mark.parametrize(
+    ("old", "new", "expected"),
+    [
+        ("H = {'a': f}\n", "H = {'a': f, 'b': g}\n", {"H": True}),
+        ("H = {'a': f, 'b': g}\n", "H = {'a': f, 'b': g, 'c': h}\n", {"H": True}),
+        ("H = ['a', 'b']\n", "H = ['a', 'b', 'c']\n", {"H": False}),
+        ("H = G = {'a': f}\n", "H = G = {'a': f, 'b': g}\n", {"H": True, "G": True}),
+        ("H = ['a']\nX = 1\n", "H = ['a', 'b']\nX = 1\n", {"H": False}),
+        ("H = {'a': f}\n", "H = {'a': g}\n", {}),
+        ("H = {'a': f}\n", "H = {'a': f}\n", {}),
+    ],
+)
+def test_extended_tables_name_each_table_that_only_gained_entries(old, new, expected):
+    assert plan.extended_tables(old, new) == expected
+
+
+def test_only_unkeyed_reads_of_a_dict_table_reach_its_new_entries():
+    source = (
+        "def apply(name):\n    return H[name]()\n\n\n"
+        "def find(name):\n    return H.get(name)\n\n\n"
+        "def names():\n    return sorted(H)\n\n\n"
+        "def first():\n    return L[0]\n\n\n"
+        "def store():\n    H = {}\n    return O\n\n\n"
+        "def guarded(name):\n    try:\n        return H[name]\n    except KeyError:\n        return None\n\n\n"
+        "def cleanup(name):\n    try:\n        return H[name]\n    finally:\n        pass\n"
+    )
+    assert plan.table_reads(ast.parse(source), {"H": True, "L": False}) == {6, 10, 14, 24}
+
+
+@pytest.mark.parametrize(
+    ("old", "new", "expected"),
+    [
+        ("X = 1\n", "X = 1\n\n\ndef h():\n    pass\n\n\nasync def k():\n    pass\n\n\nH = [h, k]\n", {"h", "k"}),
+        ("X = 1\n", "X = 1\n\n\ndef h():\n    pass\n\n\ndef k():\n    return h()\n", {"h"}),
+        ("X = 1\n", "X = 1\n\n\ndef h():\n    pass\n", set()),
+        ("X = 1\n", "X = 1\n\n\ndef h():\n    return h()\n", set()),
+        ("def h():\n    pass\n", "def h():\n    return 1\n", set()),
+        ("h = 1\n", "def h():\n    pass\n", set()),
+        ("X = 1\n", "@cache\ndef h():\n    pass\n", set()),
+        ("X = 1\n", "class A:\n    def h(self):\n        pass\n", set()),
+        (None, "def h():\n    pass\n", set()),
+        ("def f(:\n", "def h():\n    pass\n", set()),
+        ("def f(:\n", "def h():\n    pass\n\n\nH = [h]\n", set()),
+    ],
+)
+def test_new_functions_are_undecorated_top_level_functions_the_old_source_never_named(old, new, expected):
+    assert plan.new_functions(old, ast.parse(new)) == expected
+
+
+TABLE_SOURCE = (
+    "def f(value):\n    return value + 1\n\n\n"
+    "def g(value):\n    return value - 1\n\n\n"
+    'HANDLERS = {"f": f}\n\n\n'
+    "def apply(name, value):\n    return HANDLERS[name](value)\n\n\n"
+    "def names():\n    return sorted(HANDLERS)\n"
+)
+
+
+@pytest.mark.parametrize(
+    ("mode", "mention", "expected"),
+    [
+        ("handler", False, ["tests/test_core.py::TestSpawn::test_child"]),
+        ("nested", False, ["tests/test_core.py::TestSpawn::test_child"]),
+        ("entry", False, ["tests/test_core.py::TestSpawn::test_child", "tests/test_core.py::test_g"]),
+        (
+            "handler",
+            True,
+            [
+                "tests/test_core.py::TestSpawn::test_child",
+                "tests/test_core.py::test_f",
+                "tests/test_core.py::test_g",
+                "tests/test_core.py::test_other",
+            ],
+        ),
+    ],
+)
+def test_a_new_handler_table_entry_selects_only_the_tests_that_reach_it(tmp_path, monkeypatch, mode, mention, expected):
+    from coverage import CoverageData
+
+    from tests.dep_manifest import build
+
+    _recorded_project(tmp_path, monkeypatch)
+    (tmp_path / "scripts/core.py").write_text(TABLE_SOURCE)
+    if mention:
+        test_core = tmp_path / "tests/test_core.py"
+        test_core.write_text("from scripts.core import HANDLERS\n" + test_core.read_text())
+    commit = _commit(tmp_path, "handler table")
+    data = CoverageData(basename=str(tmp_path / ".coverage"))
+    for test, lines in (
+        ("tests/test_core.py::test_f", [2, 13]),
+        ("tests/test_core.py::test_g", [6]),
+        ("tests/test_core.py::test_other", [13]),
+        ("tests/test_core.py::TestSpawn::test_child", [17]),
+    ):
+        data.set_context(f"{test}|run")
+        data.add_lines({str(tmp_path / "scripts/core.py"): lines})
+    data.write()
+    manifest = build(tmp_path / ".coverage", [], tmp_path, commit, "test")
+    if mode == "handler":
+        edited = TABLE_SOURCE.replace(
+            'HANDLERS = {"f": f}', 'def h(value):\n    return value * 2\n\n\nHANDLERS = {"f": f, "h": h}'
+        )
+        changed = "    return value * 2"
+    elif mode == "nested":
+        edited = TABLE_SOURCE.replace(
+            'HANDLERS = {"f": f}',
+            "def h(value):\n    def inner():\n        return value * 2\n\n    return inner()\n\n\n"
+            'HANDLERS = {"f": f, "h": h}',
+        )
+        changed = "        return value * 2"
+    else:
+        edited = TABLE_SOURCE.replace('{"f": f}', '{"f": f, "g": g}').replace("value - 1", "value - 2")
+        changed = "    return value - 2"
+    (tmp_path / "scripts/core.py").write_text(edited)
+    _commit(tmp_path, "table edit")
+    selection = {}
+    plan.estimate(tmp_path, {"scripts/core.py": {edited.splitlines().index(changed) + 1}}, selection, manifest)
+    assert selection["scripts/core.py"] == [*expected, "tests/test_edited.py", "tests/test_fresh.py"]
 
 
 def test_plan_publishes_covering_test_ids_and_checks_their_files(tmp_path, monkeypatch):

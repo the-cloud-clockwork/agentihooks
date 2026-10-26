@@ -2,7 +2,7 @@
 set -euo pipefail
 
 cluster="$(python3 -c 'import uuid; print("worker-hive-" + uuid.uuid4().hex[:12])')"
-image=local/agentihooks-hive-worker:dev
+image=localhost:5001/agentihooks-hive-worker:dev
 out="$HOME/scratchpad/worker-hive-proof"
 mkdir -p "$out"
 cleanup() {
@@ -14,11 +14,17 @@ cleanup() {
     kubectl logs deployment/hive-join --tail=100 > "$out/join.txt" 2>&1 || true
     kubectl logs deployment/hive-join --previous --tail=100 > "$out/previous-join.txt" 2>&1 || true
   fi
+  kill ${init_pid:-} ${tools_pid:-} 2>/dev/null || true
+  docker rm -f "$cluster-registry" >/dev/null 2>&1 || true
   kind delete cluster --name "$cluster"
 }
 trap cleanup EXIT
+docker run -d --name "$cluster-registry" -p 127.0.0.1:5001:5000 mirror.gcr.io/library/registry:2 >/dev/null
 {
   kind create cluster --name "$cluster" --image mirror.gcr.io/kindest/node:v1.37.0 --wait 120s
+  docker network connect kind "$cluster-registry"
+  docker exec "$cluster-control-plane" mkdir -p /etc/containerd/certs.d/localhost:5001
+  printf '[host."http://%s:5000"]\n' "$cluster-registry" | docker exec -i "$cluster-control-plane" cp /dev/stdin /etc/containerd/certs.d/localhost:5001/hosts.toml
   for warm in ghcr.io/the-cloud-clockwork/agentihooks-worker:dev mirror.gcr.io/library/redis:7-alpine; do
     docker exec "$cluster-control-plane" crictl pull "$warm" || echo "the node could not pre-pull $warm; the proof loads or pulls it later"
   done
@@ -33,17 +39,30 @@ else
   worker_image=local/worker-base:dev
   docker build -f docker/swarm-node/Dockerfile -t "$worker_image" .
 fi
-docker build -f deploy/worker/Dockerfile --build-arg WORKER_IMAGE="$worker_image" --build-arg AGENTIHOOKS_REF="${AGENTIHOOKS_REF:-dev}" -t "$image" .
+docker build -f deploy/worker/Dockerfile --build-arg WORKER_IMAGE="$worker_image" --build-arg AGENTIHOOKS_REF="${AGENTIHOOKS_REF:-dev}" --output "type=image,name=$image,push=true,unpack=false" .
+docker image inspect --format '{{.Id}}' "$image" > "$out/image.txt"
 printf 'worker_hive_image_build_seconds=%s\nworker_base=%s\n' "$((SECONDS - build_started))" "$worker_base" | tee "$out/build.txt"
-docker run --rm --tmpfs /home/worker:uid=10001,gid=10001 --entrypoint bash "$image" -c 'agentihooks init --profile engineer && grep -qx "<!-- profile: engineer -->" "$HOME/.claude/CLAUDE.md"' > "$out/init.txt"
 wait "$cluster_pid"
-kind load docker-image "$image" --name "$cluster" &
-load_pid=$!
-docker run --rm --entrypoint bash "$image" -c 'claude --version && codex --version && herdr --version && git --version && bash /usr/local/bin/wt.sh root && node --version && npm --version && uv --version && gh --version && ruff --version && test "$(npm config get prefix)" = "$HOME/.local" && [[ ":$PATH:" == *":$HOME/.local/bin:"* ]] && agentihooks hive --help' > "$out/tools.txt"
+in_pod() {
+  kubectl run "$1" --image="$image" --restart=Never --attach --rm --quiet --pod-running-timeout=120s --overrides="$(python3 -c '
+import json, sys
+name, image, script, home = sys.argv[1:]
+container = {"name": name, "image": image, "command": ["bash", "-c", script]}
+spec = {"containers": [container]}
+if home:
+    container["volumeMounts"] = [{"name": "home", "mountPath": "/home/worker"}]
+    spec["volumes"] = [{"name": "home", "emptyDir": {"medium": "Memory"}}]
+    spec["securityContext"] = {"fsGroup": 10001}
+print(json.dumps({"spec": spec}))
+' "$1" "$image" "$2" "${3:-}")" > "$out/$1.txt"
+}
+in_pod init 'agentihooks init --profile engineer && grep -qx "<!-- profile: engineer -->" "$HOME/.claude/CLAUDE.md"' tmpfs &
+init_pid=$!
+in_pod tools 'claude --version && codex --version && herdr --version && git --version && bash /usr/local/bin/wt.sh root && node --version && npm --version && uv --version && gh --version && ruff --version && test "$(npm config get prefix)" = "$HOME/.local" && [[ ":$PATH:" == *":$HOME/.local/bin:"* ]] && agentihooks hive --help' &
+tools_pid=$!
 openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj /CN=hive-join -addext subjectAltName=DNS:hive-join \
   -keyout "$out/key.pem" -out "$out/cert.pem" 2>/dev/null
 kubectl create secret generic hive-tls --from-file=key.pem="$out/key.pem" --from-file=cert.pem="$out/cert.pem" >/dev/null
-wait "$load_pid"
 kubectl apply -f - <<EOF
 apiVersion: apps/v1
 kind: Deployment
@@ -86,7 +105,7 @@ spec:
       containers:
         - name: join
           image: $image
-          imagePullPolicy: Never
+          imagePullPolicy: IfNotPresent
           command: [agentihooks, hive, serve, --host, 0.0.0.0, --port, "8770", --tls-cert, /tls/cert.pem, --tls-key, /tls/key.pem]
           readinessProbe:
             tcpSocket: {port: 8770}
@@ -117,10 +136,12 @@ print(auth.env_text("https://hive-join:8770", auth.mint(redis_client(), "worker"
 ')"
 printf '%s' "$member_env" | kubectl create secret generic hive-member --from-file=credential=/dev/stdin >/dev/null
 unset member_env
+wait "$init_pid"
+wait "$tools_pid"
 sha256sum -c deploy/helm/agentihooks-swarm-deps.sha256
 helm template proof deploy/helm/agentihooks-swarm --show-only templates/worker-hive.yaml \
-  --set workers.replicas=1 --set workers.maxAgents=1 --set workers.drainSeconds=120 --set workers.image.repository=local/agentihooks-hive-worker \
-  --set workers.image.pullPolicy=Never --set workers.credentialSecret.name=hive-member --set workers.credentialSecret.key=credential \
+  --set workers.replicas=1 --set workers.maxAgents=1 --set workers.drainSeconds=120 --set workers.image.repository=localhost:5001/agentihooks-hive-worker \
+  --set workers.image.pullPolicy=IfNotPresent --set workers.credentialSecret.name=hive-member --set workers.credentialSecret.key=credential \
   --set workers.caSecret.name=hive-tls --set workers.caSecret.key=cert.pem | kubectl apply -f -
 deployment=proof-agentihooks-swarm-worker-hive
 kubectl rollout status "deployment/$deployment" --timeout=120s
