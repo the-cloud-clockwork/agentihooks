@@ -408,7 +408,7 @@ def test_collect_without_queue_jobs_reads_no_job_lists():
     )
     _, found = merge_path.collect("/repo", WINDOW, gh, queue_jobs=False)
     assert not any("/jobs?" in " ".join(args) for args, _ in gh.calls)
-    assert found["queue_runs_without_jobs"] == 0
+    assert found["queue_runs_without_jobs"] is None
     assert found["standard_jobs_per_queue_run"] is None
     assert found["merges"] == 2 and found["open_ready_pull_requests"] == 7
 
@@ -514,21 +514,21 @@ def test_head_pushes_reads_a_missing_head_commit_as_no_dev_merge():
 def test_red_head_jobs_counts_each_failed_job_once_per_red_head_run_in_the_window(monkeypatch):
     monkeypatch.setattr(merge_path.time, "sleep", lambda seconds: pytest.fail("slept"))
     runs = [
-        head(1, "a", "failure", 60),
-        head(2, "a", "failure", 120),
-        head(3, "a", "failure", 180),
-        head(4, "b", "success", 240),
-        head(5, "a", "failure", -60),
-        head(6, "dev", "failure", 300),
-        run(7, "merge_group", "failure"),
         head(8, "a", "failure", 360),
+        run(7, "merge_group", "failure"),
+        head(6, "dev", "failure", 300),
+        head(5, "a", "failure", -60),
+        head(4, "b", "success", 240),
+        head(3, "a", "failure", 180),
+        head(2, "a", "failure", 120),
+        head(1, "a", "failure", 60),
     ]
     gh = Gh(
         [
-            (0, "lint\tDead code\nunit (3.11, 1)\tRun tests\nunit (3.11, 2)\tRun tests\n"),
-            (0, "unit (3.12, 4)\tRun tests\nsonar (3.12)\t\n"),
-            (1, "", "gh: Not Found (HTTP 404)\n"),
             (0, ""),
+            (1, "", "gh: Not Found (HTTP 404)\n"),
+            (0, "unit (3.12, 4)\tRun tests\nsonar (3.12)\t\n"),
+            (0, "lint\tDead code\nunit (3.11, 1)\tRun tests\nunit (3.11, 2)\tRun tests\n"),
         ]
     )
 
@@ -536,10 +536,10 @@ def test_red_head_jobs_counts_each_failed_job_once_per_red_head_run_in_the_windo
 
     assert list(found.items()) == [
         ("unit: Run tests", {"runs": 2, "last": 2}),
-        ("lint: Dead code", {"runs": 1, "last": 1}),
-        ("sonar", {"runs": 1, "last": 2}),
-        ("unreadable", {"runs": 1, "last": 3}),
         ("no failed job", {"runs": 1, "last": 8}),
+        ("unreadable", {"runs": 1, "last": 3}),
+        ("sonar", {"runs": 1, "last": 2}),
+        ("lint: Dead code", {"runs": 1, "last": 1}),
     ]
     query = merge_path.FAILED_STEP
     assert query == (
@@ -558,7 +558,7 @@ def test_red_head_jobs_counts_each_failed_job_once_per_red_head_run_in_the_windo
             ],
             GH,
         )
-        for n in (1, 2, 3, 8)
+        for n in (8, 3, 2, 1)
     ]
 
 

@@ -248,7 +248,7 @@ def collect(
     pulls = read_pulls(repo_dir, repo, window[0], run)
     open_pages = _search(repo_dir, OPEN_READY, {"q": f"repo:{repo} is:pr is:open draft:false base:dev"}, run)
     ready = open_pages[0]["issueCount"]
-    return repo, {**count(runs, pulls, jobs, ready, window), "queue_runs_without_jobs": unread}
+    return repo, {**count(runs, pulls, jobs, ready, window), "queue_runs_without_jobs": unread if queue_jobs else None}
 
 
 def _cause(run: dict, before: dict | None) -> str:
@@ -299,7 +299,7 @@ def red_head_jobs(runs: list[dict], window: tuple[float, float], repo_dir: str, 
             names = ["unreadable"]
         jobs = dict.fromkeys(map(_failed_job, names), 1) or {"no failed job": 1}
         failed.update(jobs)
-        last.update(dict.fromkeys(jobs, found["id"]))
+        last.update({job: max(last.get(job, 0), found["id"]) for job in jobs})
     return {job: {"runs": n, "last": last[job]} for job, n in failed.most_common()}
 
 
