@@ -1,3 +1,4 @@
+import hashlib
 from dataclasses import replace
 from types import SimpleNamespace
 
@@ -405,8 +406,9 @@ def test_an_item_readdressed_to_another_swarm_publishes_its_wake_there(rig):
     rig.clock.now = 4242
     rig.reactor.flush()
     [delivery] = rig.bus.events.consumer("other-proof", "swarm.other.inbox-wake.requested").fetch(10, 0)
+    digest = hashlib.sha256("other\0eng-1@other".encode()).hexdigest()
     assert delivery.event.to_dict() == {
-        "id": f"wake-{item.id}",
+        "id": f"wake-{item.id}-{digest[:16]}",
         "type": "inbox.wake",
         "swarm": "other",
         "entity": "inbox-wake",

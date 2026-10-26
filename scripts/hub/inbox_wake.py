@@ -72,7 +72,7 @@ class InboxWake:
 
     def _wake(self, swarm: str, item) -> None:
         request = Envelope(
-            id=f"wake-{item.id}",
+            id=f"wake-{item.id}-{self._key(swarm, item.address)[:16]}",
             type="inbox.wake",
             swarm=swarm,
             entity="inbox-wake",
