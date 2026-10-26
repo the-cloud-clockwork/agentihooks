@@ -54,7 +54,7 @@ def _tool_call(payload, pack):
         returned = brain_adapter.maybe_refresh_on_tool_call(
             payload["session_id"], 1, claim_delivery=can_inject_context("PreToolUse")
         )
-    assert retrieval.call_count == 1
+    retrieval.assert_called_once_with(payload["session_id"])
     return returned
 
 
@@ -76,8 +76,13 @@ def test_a_each_target_receives_the_scoped_pack_with_a_receipt(home, monkeypatch
     else:
         assert delivered is None
         assert task_context.deliver_pending(session, "PostToolUse") == PACKS["second"]
-    assert task_context.receipt(session)["digest"] == task_context.digest(PACKS["second"])
+    latest = task_context.receipt(session)
+    assert latest["digest"] == task_context.digest(PACKS["second"])
+    assert latest["event"] == ("PreToolUse" if target == "claude" else "PostToolUse")
+    assert latest["at"] >= receipt["at"] > 0
+    assert task_context.receipt("another session") == {}
     assert task_context.outcomes()[target]["delivered"] == 2
+    assert Path(f"{task_context._outcomes_path()}.lock").exists()
 
 
 def test_a_second_independent_fixture_does_not_lean_on_the_first(monkeypatch, capsys, tmp_path):
@@ -130,6 +135,8 @@ def test_b_a_disabled_target_gets_no_pack_and_keeps_its_fleet_feed(home, monkeyp
     assert task_context.outcomes() == {"codex": {"disabled": 1}}
     monkeypatch.setenv("AGENTIHOOKS_TASK_CONTEXT_OFF", "claude")
     assert task_context.offer(session, "PostToolUse", PACKS["first"]) == PACKS["first"]
+    monkeypatch.setenv("AGENTIHOOKS_TASK_CONTEXT_OFF", "codex,claude")
+    assert task_context.offer(session, "PostToolUse", PACKS["second"]) is None
 
 
 @pytest.mark.parametrize("target", ["claude", "codex"])
@@ -159,9 +166,37 @@ def test_c_a_newer_held_pack_replaces_an_older_one(home, monkeypatch):
     task_context.hold("held", PACKS["second"])
     assert task_context.deliver_pending("held", "PostToolUse") == PACKS["second"]
     assert task_context.deliver_pending("held", "PostToolUse") is None
+    task_context.hold("held", PACKS["first"])
     task_context.restart("held")
     assert task_context.receipt("held") == {}
+    assert task_context.deliver_pending("held", "PostToolUse") is None
     assert task_context.offer("held", "PostToolUse", "") is None
+
+    task_context.hold("fresh", PACKS["first"])
+    assert task_context.offer("fresh", "PostToolUse", PACKS["second"]) == PACKS["second"]
+    assert task_context.deliver_pending("fresh", "PostToolUse") is None
+
+    task_context.hold("pre", PACKS["first"])
+    assert task_context.deliver_pending("pre", "PreToolUse") is None
+    assert task_context.receipt("pre") == {}
+
+
+def test_codex_post_tool_use_delivers_the_held_pack(home, monkeypatch):
+    import hooks.common as common
+    import hooks.context.broadcast as broadcast
+    import hooks.context.enforcement as enforcement
+    from hooks import hook_manager
+
+    _target(monkeypatch, "codex")
+    payload = INPUTS["hooks"]["codex"]["PostToolUse"]
+    captured = []
+    monkeypatch.setattr(common, "inject_context", lambda message, **kwargs: captured.append(message))
+    monkeypatch.setattr(broadcast, "get_posttool_context", lambda session_id: None)
+    monkeypatch.setattr(enforcement, "get_posttool_enforcements", lambda session_id, cwd, **kw: None)
+    task_context.hold(payload["session_id"], PACKS["second"])
+    hook_manager.on_post_tool_use(payload)
+    assert PACKS["second"] in captured
+    assert task_context.receipt(payload["session_id"])["event"] == "PostToolUse"
 
 
 def test_status_reports_delivery_outcomes(home, monkeypatch):

@@ -43,7 +43,8 @@ def receipt(session_id: str) -> dict:
 
 
 def _disabled(target: str) -> bool:
-    return target in {name.strip() for name in os.getenv("AGENTIHOOKS_TASK_CONTEXT_OFF", "").split(",")}
+    names = os.getenv("AGENTIHOOKS_TASK_CONTEXT_OFF")
+    return bool(names) and target in {name.strip() for name in names.split(",")}
 
 
 def hold(session_id: str, pack: str) -> None:
