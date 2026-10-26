@@ -322,6 +322,16 @@ def test_lease_changes_name_the_reactor_and_holder(bus, clock, capsys):
     assert capsys.readouterr().out == "timers: lease taken by b\ntimers: lease lost by a\n"
 
 
+class Stopping(threading.Event):
+    def __init__(self, wait):
+        super().__init__()
+        self._wait = wait
+
+    def wait(self, timeout=None):
+        self._wait(timeout)
+        return self.is_set()
+
+
 def test_the_lease_keeper_renews_each_interval_past_a_failure_until_the_hub_stops(monkeypatch, bus, clock, capsys):
     hub_runner = hub(bus, [], "a", clock)
     calls, waits = [], []
@@ -334,9 +344,9 @@ def test_the_lease_keeper_renews_each_interval_past_a_failure_until_the_hub_stop
             hub_runner.stop()
 
     monkeypatch.setattr(hub_runner, "renew", renew)
-    monkeypatch.setattr(runner, "scheduled_wait", waits.append)
+    hub_runner.stopped = Stopping(waits.append)
     runner._keep_leases(hub_runner)
-    assert waits == [5.0] * 3
+    assert waits == [5.0] * 4
     assert calls == [1, 2, 3]
     assert capsys.readouterr().err.startswith("hub: reactor lease renewal failed\nTraceback")
 
@@ -352,7 +362,7 @@ def test_the_lease_keeper_thread_holds_the_lease_while_the_loop_is_blocked(monke
         renewed.set()
 
     monkeypatch.setattr(one, "renew", counted)
-    monkeypatch.setattr(runner, "scheduled_wait", lambda seconds: gate.acquire())
+    one.stopped = Stopping(lambda seconds: gate.acquire())
     one.run_once(timeout_ms=0)
     keeper = threading.Thread(target=runner._keep_leases, args=(one,), daemon=True)
     keeper.start()

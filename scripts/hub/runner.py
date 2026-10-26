@@ -204,8 +204,7 @@ def _renewal(redis: "Redis", credential: str) -> threading.Thread:
 
 
 def _keep_leases(hub: HubRunner) -> None:
-    while not hub.stopped.is_set():
-        scheduled_wait(LEASE_RENEW_S)
+    while not hub.stopped.wait(LEASE_RENEW_S):
         try:
             hub.renew()
         except Exception:

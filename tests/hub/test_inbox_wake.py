@@ -400,7 +400,7 @@ def test_outbox_reuses_the_send_of_an_item_readdressed_after_its_first_send(rig)
 def test_an_item_readdressed_to_another_swarm_publishes_its_wake_there(rig):
     item = rig.inbox.send("sender", "eng-1@sw", "moved across swarms", ref="ledger:2", task="t9")
     rig.reactor.flush()
-    rig.inbox.redirect(item.id, "swarm", "eng-1@other", "swarm moved")
+    rig.inbox.redis.hset(rig.inbox.key("item", item.id), "address", "eng-1@other")
     rig.inbox.redis.sadd(rig.inbox.key("wake-outbox"), item.id)
     rig.clock.now = 4242
     rig.reactor.flush()
