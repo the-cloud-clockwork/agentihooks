@@ -144,6 +144,8 @@ def continuation_task(repo: Path, task: dict, scoped: dict, branch: str) -> dict
         return scoped
     if git(repo, "ls-remote", "origin", f"refs/heads/{mapped}"):
         return scoped
+    if not git(repo, "ls-remote", "origin", f"refs/heads/{recorded}"):
+        return scoped
     return {**scoped, "branch": require_branch(recorded)}
 
 
