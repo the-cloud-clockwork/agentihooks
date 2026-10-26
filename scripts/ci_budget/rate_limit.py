@@ -3,6 +3,7 @@ import re
 import subprocess
 import sys
 import time
+from datetime import UTC, datetime
 
 LIMITED = re.compile(r"rate limit", re.IGNORECASE)
 SECONDARY_WAIT = 60
@@ -49,6 +50,24 @@ def gh_api(args: list[str], *, timeout: float, text: bool = False) -> subprocess
 
 def report(name: str) -> None:
     print(f"{name} made {calls} GitHub API calls", file=sys.stderr)
+
+
+def budget(name: str, when: str) -> None:
+    try:
+        done = subprocess.run(
+            ["gh", "api", "--include", "rate_limit"], capture_output=True, check=True, timeout=30, text=True
+        )
+        headers = dict(
+            (key.strip().lower(), value.strip())
+            for key, _, value in (line.partition(":") for line in done.stdout.split("\n\n")[0].splitlines())
+        )
+        reset = datetime.fromtimestamp(int(headers["x-ratelimit-reset"]), UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+        line = (
+            f"{headers['x-ratelimit-remaining']} of {headers['x-ratelimit-limit']} App API calls left, resets {reset}"
+        )
+    except (subprocess.SubprocessError, KeyError, ValueError):
+        line = "App API budget unreadable"
+    print(f"{name} {when}: {line}", file=sys.stderr)
 
 
 if __name__ == "__main__":

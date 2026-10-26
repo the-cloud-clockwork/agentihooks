@@ -208,6 +208,7 @@ def watch(repository: str, run: str, attempt: str, shards: list[int], ref: str, 
 def main() -> None:
     if os.environ["GITHUB_EVENT_NAME"] != "merge_group":
         raise ValueError("The early queue gate runs only on merge_group")
+    rate_limit.budget("Queue verification", "start")
     try:
         watch(
             os.environ["GITHUB_REPOSITORY"],
@@ -218,6 +219,7 @@ def main() -> None:
             os.environ["GITHUB_SHA"],
         )
     finally:
+        rate_limit.budget("Queue verification", "end")
         rate_limit.report("Queue verification")
 
 
