@@ -1,0 +1,126 @@
+{
+  "case": "A",
+  "first": {
+    "decisions": {
+      "ckpt-live-1": "eligible",
+      "ckpt-live-2": "latest_checkpoint",
+      "ckpt-live-3": "eligible",
+      "ckpt-old": "eligible",
+      "ckpt-recent": "not_expired",
+      "ckpt-restore": "active_restore",
+      "evidence-held": "evidence_hold",
+      "live-shared": "latest_checkpoint",
+      "live2-native": "latest_checkpoint",
+      "log-new": "not_expired",
+      "log-old": "eligible",
+      "old-native": "eligible",
+      "old-shared": "referenced",
+      "old-transcript": "eligible",
+      "personal-preview": "eligible",
+      "personal-transcript": "not_expired",
+      "personal-vector": "not_expired",
+      "preview-kept": "not_expired",
+      "restore-native": "active_restore",
+      "restore-transcript": "active_restore"
+    },
+    "deleted": [
+      "ckpt-live-1",
+      "ckpt-live-3",
+      "ckpt-old",
+      "log-old",
+      "old-native",
+      "old-transcript",
+      "personal-preview"
+    ],
+    "journal": [
+      [
+        "planned",
+        "",
+        ""
+      ],
+      [
+        "deleted",
+        "ckpt-live-1",
+        ""
+      ],
+      [
+        "deleted",
+        "ckpt-live-3",
+        ""
+      ],
+      [
+        "deleted",
+        "ckpt-old",
+        ""
+      ],
+      [
+        "deleted",
+        "log-old",
+        ""
+      ],
+      [
+        "deleted",
+        "old-native",
+        ""
+      ],
+      [
+        "deleted",
+        "old-transcript",
+        ""
+      ],
+      [
+        "deleted",
+        "personal-preview",
+        ""
+      ]
+    ],
+    "metrics": {
+      "retention_protected_objects": {
+        "active_restore": 3,
+        "evidence_hold": 1,
+        "latest_checkpoint": 3,
+        "not_expired": 5,
+        "referenced": 1
+      }
+    },
+    "remaining": [
+      "ckpt-live-2",
+      "ckpt-recent",
+      "ckpt-restore",
+      "evidence-held",
+      "live-shared",
+      "live2-native",
+      "log-new",
+      "old-shared",
+      "personal-transcript",
+      "personal-vector",
+      "preview-kept",
+      "restore-native",
+      "restore-transcript"
+    ],
+    "removals": [
+      "ckpt-live-1",
+      "ckpt-live-3",
+      "ckpt-old",
+      "log-old",
+      "old-native",
+      "old-transcript",
+      "personal-preview"
+    ],
+    "replay_deleted": [
+      "ckpt-live-1",
+      "ckpt-live-3",
+      "ckpt-old",
+      "log-old",
+      "old-native",
+      "old-transcript",
+      "personal-preview"
+    ]
+  },
+  "independent_fixture_matches": true,
+  "personal_without_policy": {
+    "personal-preview": "no_policy",
+    "personal-transcript": "no_policy",
+    "personal-vector": "no_policy"
+  }
+}
