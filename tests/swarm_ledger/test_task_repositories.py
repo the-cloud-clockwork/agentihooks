@@ -210,6 +210,20 @@ def test_a_corrected_top_level_branch_keeps_its_repository_entry_in_step(correct
     assert state["tasks"][0]["repository_branches"] == expected
 
 
+def test_an_explicit_repository_map_with_the_branch_is_kept_as_written():
+    add = {"op": "task_add", "id": "add", "by": "swarm", "task": "t1", "title": "continue", "lane": "ci"}
+    add["repository_branches"] = {"/workspace/agentihooks": "predecessor"}
+    first = {"op": "task_update", "id": "first", "by": "swarm", "item": "tasks/t1", "fields": {"branch": "predecessor"}}
+    written = {"/workspace/agentihooks": "written", "/workspace/bundle": "bundle-work"}
+    fields = {"branch": "recorded", "repository_branches": written}
+    fix = {"op": "task_update", "id": "fix", "by": "swarm", "item": "tasks/t1", "fields": fields}
+    for op in (add, first, fix):
+        core.check_op(op)
+    state, rejected = core.sync(SLUG, ops=[add, first, fix])
+    assert rejected == []
+    assert state["tasks"][0]["repository_branches"] == written
+
+
 @pytest.mark.parametrize(
     "branches", ([], {"relative": "branch"}, {"/repo": None}, {"/repo": ""}, {"/repo": "bad branch"})
 )
