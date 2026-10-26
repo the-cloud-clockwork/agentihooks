@@ -2825,6 +2825,7 @@ EVENT_HANDLERS = {
     "PreCompact": on_pre_compact,
     "PermissionRequest": on_permission_request,
     "PostToolUseFailure": _swarm_tool_end,
+    "TaskCompleted": on_stop,
 }
 
 
