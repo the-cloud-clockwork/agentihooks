@@ -13,11 +13,19 @@ QUERY = """query($owner: String!, $name: String!, $branch: String!) {
 }"""
 
 
-def require_unqueued(remote: str, branch: str) -> None:
+def github(remote: str) -> tuple[str, str] | None:
     parsed = urlsplit(remote if "://" in remote else f"ssh://{remote.replace(':', '/')}")
     if parsed.hostname not in {"github.com", "ssh.github.com"}:
-        return
+        return None
     owner, name = parsed.path.strip("/").removesuffix(".git").split("/")
+    return owner, name
+
+
+def require_unqueued(remote: str, branch: str) -> None:
+    repository = github(remote)
+    if repository is None:
+        return
+    owner, name = repository
     data = merge_queue.graphql(QUERY, {"owner": owner, "name": name, "branch": branch})
     pulls = data["repository"]["pullRequests"]
     if pulls["pageInfo"]["hasNextPage"]:

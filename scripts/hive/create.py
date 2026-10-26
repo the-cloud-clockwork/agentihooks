@@ -17,7 +17,6 @@ if TYPE_CHECKING:
     from redis import Redis
 
 STATE_FILE = "hive-create.json"
-NAME_PREFIX = "swarm-hive-"
 WORKSTATION_RECORD = "k8s/agentihooks-swarm-workstation-hive"
 HOST_KEY = "ssh_host_key"
 HOST_PUBLIC_KEY = "ssh_host_public_key"
@@ -96,10 +95,13 @@ def _start(tools: Tools, options: Options) -> dict:
     if saved.get("name") and not saved.get("finished"):
         tools.out(f"hive create {saved['name']}: resuming the unfinished create")
         return saved
-    name = f"{NAME_PREFIX}{int(tools.clock())}"
+    name = machine.name(tools.redis, options.node, assign=not options.dry_run)
+    if saved.get("name") == name:
+        tools.out(f"hive create {name}: redeploying the hive of node {options.node}")
+        return {**saved, "finished": False}
     services = json.loads(_kubectl(tools, ["get", "service", "-A", "-o", "json"]))["items"]
     lan_ip = create_render.lan_address(services)
-    port = create_render.next_port(services, lan_ip)
+    port = create_render.kept_port(services, name) or create_render.next_port(services, lan_ip)
     return {"name": name, "record": invite.default_path(name), "ssh_port": port, "lan_ip": lan_ip, "node": options.node}
 
 
@@ -238,7 +240,8 @@ def _merged(tools: Tools, options: Options) -> str:
     if found != "MERGED":
         if not create_github.merge(tools.run, url):
             checks = f"pull request {url} checks to pass"
-            _wait(tools, options, checks, lambda: create_github.checks_passed(tools.run, url))
+            required = create_github.required_checks(tools.run, options.repo, options.base)
+            _wait(tools, options, checks, lambda: create_github.checks_passed(tools.run, url, required))
             create_github.squash(tools.run, url)
         _wait(
             tools, options, f"pull request {url} to merge", lambda: create_github.pr_state(tools.run, url) == "MERGED"
@@ -281,13 +284,12 @@ def _herdr(tools: Tools, options: Options) -> str:
     if tools.state.get("added"):
         return f"kept {target} in herdr"
     if options.dry_run:
-        return f"would trust the hive host key and run hive add {target} --label {tools.state['name']}"
+        return f"would trust the hive host key and save {target} in herdr as {tools.state['name']}"
     _trust(tools)
-    member = _member(tools)
-    delivery = machine.Delivery(member[invite.HIVE_URL], member[invite.REDIS_URL], tools.ledger_ca)
-    grant = machine.add(tools.redis, tools.local_id, target, tools.state["name"], delivery, tools.run)
-    tools.state["added"] = grant["id"]
-    return f"added {target} to herdr; its hive member is {grant['id']}"
+    machine.save(tools.redis, tools.local_id, target, tools.state["name"], tools.run)
+    member = _member(tools)[invite.HIVE_ID]
+    tools.state["added"] = member
+    return f"added {target} to herdr; its hive member is {member}"
 
 
 def _engineer(tools: Tools, options: Options) -> str:

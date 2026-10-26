@@ -58,6 +58,8 @@ finish() {
     kubectl exec "$release-redis-0" -- redis-cli ping || true
     kubectl exec "$ledger_pod" -- env SLUG="$slug" python -c 'import json, os; from scripts.swarm.store import connect; store = connect(); key = store.key(os.environ["SLUG"], "tick-lock"); raw = store.redis.get(key); held = json.loads(raw) if raw else {}; print(json.dumps({"tick_lock": {field: held.get(field) for field in ("epoch", "host", "pid", "start")}, "ttl_ms": store.redis.pttl(key)}))' || true
     kubectl get pods "${controller[@]}" -o jsonpath='{range .items[*].status.initContainerStatuses[*]}{.name} last state {.lastState}{"\n"}{end}{range .items[*].status.containerStatuses[*]}{.name} last state {.lastState}{"\n"}{end}' || true
+    kubectl exec "deployment/$release-controller" -c controller -- sh -c 'cat /sys/fs/cgroup/memory.events /sys/fs/cgroup/memory.peak' || true
+    kubectl get events --sort-by=.lastTimestamp | grep -F "$release-controller" | tail -30 || true
     kubectl logs "$ledger_pod" --tail 100 || true
   fi
   kind delete cluster --name "$cluster" || true

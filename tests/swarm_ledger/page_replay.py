@@ -40,9 +40,21 @@ JUMP = """() => {
   pick.value = "sec-followups";
   pick.dispatchEvent(new Event("change", { bubbles: true }));
 }"""
+FLUSH = """() => {
+  const token = {};
+  window.__probe = token;
+  window.__flushed = false;
+  const probe = new IntersectionObserver(() => {
+    probe.disconnect();
+    if (window.__probe === token) window.__flushed = true;
+  });
+  probe.observe(document.documentElement);
+}"""
+FLUSHED = "() => window.__flushed"
 CAPTURE = """() => {
   const body = document.body.cloneNode(true);
   for (const s of body.querySelectorAll("script")) s.remove();
+  for (const el of body.querySelectorAll('[class=""]')) el.removeAttribute("class");
   const storage = {};
   for (let i = 0; i < localStorage.length; i++) storage[localStorage.key(i)] = localStorage.getItem(localStorage.key(i));
   const fields = [...document.querySelectorAll("input, textarea, select")].map((el) =>
@@ -131,9 +143,12 @@ class FakeApi:
 
 def quiet(page):
     last, same = None, 0
-    for _ in range(200):
-        time.sleep(0.05)
+    deadline = time.monotonic() + 10
+    page.evaluate(FLUSH)
+    while time.monotonic() < deadline:
+        page.wait_for_function(FLUSHED, polling=10, timeout=max(1, (deadline - time.monotonic()) * 1000))
         now = page.evaluate(f"() => [window.__inflight, JSON.stringify(({CAPTURE})())]")
+        page.evaluate(FLUSH)
         same = same + 1 if now[0] == 0 and now == last else 0
         if same == 3:
             return now

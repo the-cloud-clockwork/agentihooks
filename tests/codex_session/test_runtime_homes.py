@@ -1,9 +1,12 @@
 import errno
+import json
 from pathlib import Path
 
 import pytest
 
+from hooks.context import profile_chain
 from scripts.codex_session import supervisor
+from scripts.swarm import launch_check
 from tests.codex_session.fakes import Clock, Server
 from tests.codex_session.test_supervisor import SLUG, deps, launch_spec
 from tests.codex_session.test_supervisor import root as root
@@ -41,6 +44,62 @@ def test_launch_storage_does_not_grow_with_canonical_rollouts(store, server, roo
     assert not home.exists()
     assert rollout.stat().st_size == 1024 * 1024
     assert (sessions / "rollout-new.jsonl").read_text() == "new transcript"
+
+
+@pytest.mark.parametrize("linked_auth", [False, True])
+def test_launch_stages_only_startup_files_and_auth_references(store, server, root, tmp_path, linked_auth):
+    profile = Path(server.codex_home)
+    for name in ("config.toml", "AGENTS.md", "AGENTS.override.md"):
+        (profile / name).write_text(name)
+    for name in ("rules", "skills"):
+        (profile / name).mkdir()
+        (profile / name / "nested").mkdir()
+        (profile / name / "nested" / "instructions.md").write_text(name)
+    auth = tmp_path / "login-reference"
+    auth.touch()
+    if linked_auth:
+        (profile / "auth.json").symlink_to(auth)
+    else:
+        (profile / "auth.json").touch()
+    unrelated = profile / "future-cache"
+    unrelated.mkdir()
+    (unrelated / "large").write_bytes(b"x" * 1024 * 1024)
+    (profile / "unknown-state").write_bytes(b"y" * 1024 * 1024)
+    (profile / "unknown-link").symlink_to(unrelated, target_is_directory=True)
+    started = supervisor.launch(store, launch_spec(store, server, tmp_path), deps(server, Clock(), root))
+    home = Path(server.spawns[0]["env"]["CODEX_HOME"])
+
+    assert not (home / "future-cache").exists()
+    assert not (home / "unknown-state").exists()
+    assert not (home / "unknown-link").exists()
+    for name in ("config.toml", "AGENTS.md", "AGENTS.override.md"):
+        assert (home / name).read_text() == name
+    for name in ("rules", "skills"):
+        assert (home / name / "nested" / "instructions.md").read_text() == name
+    assert (home / "auth.json").is_symlink()
+    assert (home / "auth.json").samefile(profile / "auth.json")
+    assert (home / "sessions").is_symlink()
+    assert sum(p.stat().st_size for p in home.rglob("*") if p.is_file()) < 4096
+    supervisor.stop(started.process)
+    supervisor.finish(store, SLUG, started, 5000)
+
+    assert not home.parent.exists()
+    assert (profile / "auth.json").exists()
+    assert (unrelated / "large").stat().st_size == 1024 * 1024
+
+
+def test_launch_stages_the_render_stamp_the_launch_check_reads(store, server, root, tmp_path):
+    profile = Path(server.codex_home)
+    stamp = {"render": {"chain": ["anton-base", "package:engineer"], "overlays": ["frontend"]}}
+    (profile / launch_check.STAMP).write_text(json.dumps(stamp))
+    started = supervisor.launch(store, launch_spec(store, server, tmp_path), deps(server, Clock(), root))
+    home = Path(server.spawns[0]["env"]["CODEX_HOME"])
+
+    assert json.loads((home / launch_check.STAMP).read_text()) == stamp
+    assert launch_check.chain(home) == ["anton-base", "package:engineer"]
+    assert profile_chain.rendered_overlays(home) == ["frontend"]
+    supervisor.stop(started.process)
+    supervisor.finish(store, SLUG, started, 5000)
 
 
 def test_launch_ignores_a_full_user_runtime_disk(store, server, root, tmp_path, monkeypatch):

@@ -1,0 +1,6 @@
+{
+  "scripts/ci_gate_queue.py:scripts.ci_gate_queue.x_originals__mutmut_44:bf8ec0fb6baa6ed8eb57010a9199ef5be0d41db8c1aae1b271ba58e9e15f6ac2": {
+    "reader": "standards-reader",
+    "reason": "Canonical original names generated from positive integers contain unit exactly once, so replacing one, two or all occurrences produces the identical recovery name. Independently approved from complete CI report 40165669788."
+  }
+}

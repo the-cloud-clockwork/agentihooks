@@ -212,8 +212,8 @@ def test_priority_never_restores_an_unfinished_prerequisite():
 
     result = merge_queue.prioritize(PRIORITY_URL, run=run)
     assert ("queue", 2) not in fake.mutations
-    assert ("queue", 3) in fake.mutations
-    assert result["displaced"] == ["https://github.com/o/r/pull/3"]
+    assert ("queue", 3) not in fake.mutations
+    assert result["displaced"] == []
     assert len(result["errors"]) == 1
     assert "planned prerequisite edits" in result["errors"][0]
 
@@ -445,7 +445,7 @@ def test_priority_accepts_complete_exact_head_proof(monkeypatch):
         ],
         endpoints,
     )
-    monkeypatch.setattr(merge_queue, "waiting_ahead", lambda *args: [])
+    monkeypatch.setattr(merge_queue, "waiting_around", lambda *args: ([], []))
     assert merge_queue.prioritize(URL, run=run)["errors"] == []
     assert any(f"query={merge_queue.QUEUE}" in cmd and f"head={HEAD}" in cmd for cmd, _ in calls)
 
@@ -471,10 +471,13 @@ def test_priority_restores_a_completed_staged_prerequisite_on_its_original_head(
     )
     monkeypatch.setattr(
         merge_queue,
-        "waiting_ahead",
-        lambda *args: [
-            {"id": "PR_two", "url": other, "headRefOid": HEAD},
-        ],
+        "waiting_around",
+        lambda *args: (
+            [
+                {"id": "PR_two", "url": other, "headRefOid": HEAD},
+            ],
+            [],
+        ),
     )
     result = merge_queue.prioritize(URL, run=run)
     assert result["errors"] == []

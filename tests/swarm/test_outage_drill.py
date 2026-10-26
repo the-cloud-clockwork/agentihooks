@@ -197,7 +197,7 @@ def fake_runtime():
 
 
 @pytest.fixture
-def drill(tmp_path, monkeypatch):
+def drill(memory_path, monkeypatch):
     import fakeredis
 
     from scripts.inbox import cli as inbox_cli
@@ -211,7 +211,7 @@ def drill(tmp_path, monkeypatch):
     server = fakeredis.FakeServer()
     redis = fakeredis.FakeRedis(server=server, decode_responses=True)
     store = RedisStore(redis)
-    store.create(SwarmConfig("sw", str(tmp_path), max_eng=3, max_ci=0))
+    store.create(SwarmConfig("sw", str(memory_path), max_eng=3, max_ci=0))
     ledger, runtime = fake_ledger(), fake_runtime()
 
     def connect():
@@ -227,12 +227,12 @@ def drill(tmp_path, monkeypatch):
     monkeypatch.setattr("scripts.inbox.store.connect", relay_connect)
     monkeypatch.setattr(inbox_cli, "connect", connect)
     monkeypatch.setattr(swarm_cli, "connect", lambda: store)
-    monkeypatch.setattr(outbox, "home", lambda: tmp_path / "outbox")
-    monkeypatch.setattr(outage, "HOME", tmp_path / "outages")
-    monkeypatch.setattr(ledger_server, "stored", storage.build(tmp_path / storage.DATABASE))
+    monkeypatch.setattr(outbox, "home", lambda: memory_path / "outbox")
+    monkeypatch.setattr(outage, "HOME", memory_path / "outages")
+    monkeypatch.setattr(ledger_server, "stored", storage.build(memory_path / storage.DATABASE))
     monkeypatch.setattr(ledger_server.repository, "get_document", ledger.state)
     monkeypatch.setattr(ledger_link, "serving", lambda: ledger.online)
-    monkeypatch.setattr(snapshot, "worktrees", lambda repo, names: {name: str(tmp_path) for name in names})
+    monkeypatch.setattr(snapshot, "worktrees", lambda repo, names: {name: str(memory_path) for name in names})
     monkeypatch.setenv("AGENTIHOOKS_SWARM_SNAPSHOT_MINUTES", "0")
     monkeypatch.setenv("AGENTIHOOKS_INBOX_QUIET_S", "0")
     monkeypatch.setenv("AGENTIHOOKS_DEPLOYMENT", "local")

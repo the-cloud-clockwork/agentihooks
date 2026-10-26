@@ -98,7 +98,9 @@ def _chain(name: str, overlays: Sequence[str] = ()) -> list[tuple[str, Path]]:
         raise ValueError(f"Profile '{name}' not found")
     always = [name, *declared(name)]
     worn = profile_chain.worn(_resolve_chain(always), list(overlays), _resolve)
-    return _resolve_chain([*always, *worn])
+    dirs = _resolve_chain([*always, *worn])
+    profile_chain.require_capabilities(dirs, profile_chain.hive_capabilities(os.environ))
+    return dirs
 
 
 def _bundle() -> Path | None:
@@ -148,6 +150,7 @@ def _stamp(bundle: Path | None, dirs: list[tuple[str, Path]]) -> dict:
         "overlays": _overlays(dirs),
         "mcp_urls": json.loads(os.environ.get("AGENTIHOOKS_MCP_URLS", "{}")),
         "mcp_bearer_env": json.loads(os.environ.get("AGENTIHOOKS_MCP_BEARER_ENV", "{}")),
+        "hosted_ledger": os.environ.get("AGENTIHOOKS_HOSTED_LEDGER_URL", ""),
         "swarm_brain": brain_binding.current(os.environ),
         "enabled_plugins": _plugins(chain, _settings("claude", bundle, dirs).get("enabledPlugins") or {}),
         **({"browser": browser.spec()} if browser.proxy_enabled(chain) else {}),
@@ -191,6 +194,8 @@ def claude_environment(doc: dict, dirs: list[tuple[str, Path]]) -> dict:
     from scripts.profile_telemetry import apply_collector_env, apply_langfuse_env
 
     env = doc["env"]
+    if hosted := os.environ.get("AGENTIHOOKS_HOSTED_LEDGER_URL"):
+        env["AGENTIHOOKS_HOSTED_LEDGER_URL"] = hosted
     subscribed = _channels(env.get(CHANNELS, ""), dirs)
     if subscribed:
         env[CHANNELS] = subscribed

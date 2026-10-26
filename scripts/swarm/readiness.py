@@ -40,15 +40,25 @@ class Source:
     def __init__(self, store: RedisStore | None = None, ledger: LedgerClient | None = None):
         self._store = store
         self._ledger = ledger or LedgerClient(service=True)
+        self._exported: dict[str, tuple[int, dict]] = {}
 
     def slugs(self) -> list[str]:
         self._store = self._store or connect()
-        return [slug for slug in self._store.slugs() if _on_events(self._store, slug)]
+        found = [slug for slug in self._store.slugs() if _on_events(self._store, slug)]
+        self._exported = {slug: kept for slug, kept in self._exported.items() if slug in found}
+        return found
+
+    def state(self, slug: str) -> dict:
+        rev = self._ledger.metadata(slug)["_meta"]["rev"]
+        kept = self._exported.get(slug)
+        if kept is None or kept[0] != rev:
+            kept = self._exported[slug] = (rev, self._ledger.state(slug))
+        return kept[1]
 
     def snapshot(self, slug: str) -> Snapshot:
         self._store = self._store or connect()
         config = self._store.config(slug)
-        doc = self._ledger.state(slug)
+        doc = self.state(slug)
         rows = {task["id"]: task for task in doc["tasks"]}
         owned = {agent.task for agent in self._store.agents(slug) if agent.state != "finished"}
         released = release_wait.checker(config.repo)
@@ -141,10 +151,11 @@ def withdrawal(event: Envelope, view: Snapshot) -> str:
     return "" if view.admits(task) else "a release or apply wait holds it"
 
 
-def take(queue: WorkQueue, view: Snapshot | Callable[[], Snapshot], timeout_ms: int) -> Delivery | None:
+def take(queue: WorkQueue, view: Snapshot | Callable[[], Snapshot | None], timeout_ms: int) -> Delivery | None:
+    """A view that yields no snapshot leaves the recheck to the hub, which admits the offer."""
     while (delivery := queue.take(timeout_ms)) is not None:
         current = view() if callable(view) else view
-        if not withdrawal(delivery.event, current):
+        if current is None or not withdrawal(delivery.event, current):
             return delivery
         delivery.term()
     return None

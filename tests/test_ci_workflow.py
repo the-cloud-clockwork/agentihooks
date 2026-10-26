@@ -15,12 +15,14 @@ import pytest
 import yaml
 from _pytest.config import default_plugins
 
+from scripts import ci_gate_queue
 from tests import refresh_durations
 from tests.refresh_durations import ci_run_ids, ci_samples, median_durations
 
 pytestmark = pytest.mark.unit
 
 _ROOT = Path(__file__).parent.parent
+_EQUIVALENCE = _ROOT / "tests/swarm_ledger/equivalence.sh"
 
 
 def _pytest_command() -> str:
@@ -30,9 +32,39 @@ def _pytest_command() -> str:
     raise AssertionError("no pytest step in test.yml")
 
 
-def _slowest_committed_test() -> float:
+def _rearms_hung_test_dump(fixture: ast.FunctionDef) -> bool:
+    autouse = any(
+        isinstance(decorator, ast.Call)
+        and any(keyword.arg == "autouse" and getattr(keyword.value, "value", False) for keyword in decorator.keywords)
+        for decorator in fixture.decorator_list
+    )
+    return autouse and any(
+        isinstance(node, ast.Attribute)
+        and node.attr == "dump_traceback_later"
+        and isinstance(node.value, ast.Name)
+        and node.value.id == "faulthandler"
+        for node in ast.walk(fixture)
+    )
+
+
+def _slowest_committed_test(skip_rearmed: bool = True) -> float:
+    rearmed = {
+        path.relative_to(_ROOT).as_posix()
+        for path in (_ROOT / "tests").rglob("test_*.py")
+        if skip_rearmed
+        and any(
+            isinstance(node, ast.FunctionDef) and _rearms_hung_test_dump(node)
+            for node in ast.parse(path.read_text()).body
+        )
+    }
     return max(
-        max(json.loads(subprocess.check_output(["git", "show", f"HEAD:{name}"], cwd=_ROOT, text=True)).values())
+        max(
+            seconds
+            for nodeid, seconds in json.loads(
+                subprocess.check_output(["git", "show", f"HEAD:{name}"], cwd=_ROOT, text=True)
+            ).items()
+            if nodeid.split("::", 1)[0] not in rearmed
+        )
         for name in (".test_durations", ".test_durations-3.12")
     )
 
@@ -469,6 +501,7 @@ def test_a_hung_unit_test_dumps_every_thread_stack_within_a_minute():
     slowest_test = _slowest_committed_test()
     timeout = int(re.search(r"-o faulthandler_timeout=(\d+)", command).group(1))
     assert slowest_test < timeout <= 60
+    assert _slowest_committed_test(skip_rearmed=False) < int(re.search(r"--timeout=(\d+)", command).group(1))
     assert "no:faulthandler" not in command
     assert "faulthandler_exit_on_timeout" not in command
 
@@ -485,6 +518,26 @@ def test_the_hung_test_bound_reads_the_committed_durations_not_the_downloaded_co
         (tmp_path / name).write_text(json.dumps({"tests/test_a.py::test_a": 90.0}))
     monkeypatch.setattr(sys.modules[__name__], "_ROOT", tmp_path)
     assert _slowest_committed_test() == 1.0
+
+
+def test_the_hung_test_bound_skips_a_file_that_rearms_its_own_dump(tmp_path, monkeypatch):
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests/test_a.py").write_text("def test_a():\n    pass\n")
+    (tmp_path / "tests/test_slow.py").write_text(
+        "@pytest.fixture(autouse=True)\ndef rearm():\n    faulthandler.dump_traceback_later(250)\n"
+    )
+    durations = {"tests/test_a.py::test_a": 1.0, "tests/test_slow.py::test_slow": 90.0}
+    for name in (".test_durations", ".test_durations-3.12"):
+        (tmp_path / name).write_text(json.dumps(durations))
+    subprocess.run(["git", "-C", str(tmp_path), "add", "."], check=True)
+    subprocess.run(
+        ["git", "-C", str(tmp_path), "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "d"], check=True
+    )
+    monkeypatch.setattr(sys.modules[__name__], "_ROOT", tmp_path)
+    assert _slowest_committed_test() == 1.0
+    (tmp_path / "tests/test_slow.py").write_text("def test_slow():\n    pass\n")
+    assert _slowest_committed_test() == 90.0
 
 
 def test_tests_keep_dev_pull_request_and_integration_triggers():
@@ -618,32 +671,61 @@ def test_lint_and_equivalence_browser_setup_uses_the_working_mirror():
 
 
 def test_equivalence_runs_storage_then_page_replays_each_group_at_once():
-    steps = yaml.safe_load((_ROOT / ".github/workflows/equivalence.yml").read_text())["jobs"]["ledger-equivalence"][
-        "steps"
-    ]
-    store, pages = [step for step in steps if "_replay.py" in step.get("run", "")]
-    assert store["run"].count("repository_replay.py") == 3 and "page_replay.py" not in store["run"]
-    assert pages["run"].count("page_replay.py") == 3 and "repository_replay.py" not in pages["run"]
-    for step in (store, pages):
-        run = step["run"]
+    steps = _equivalence_steps()
+    script = _EQUIVALENCE.read_text()
+    store, pages = _equivalence_group("store"), _equivalence_group("page")
+    assert store.count("repository_replay.py") == 3 and "page_replay.py" not in store
+    assert pages.count("page_replay.py") == 3 and "repository_replay.py" not in pages
+    for run in (store, pages):
         assert run.count(" &\n") == 3
-        assert "|| failed=1" in run and 'exit "$failed"' in run
-        assert 'cat "$RUNNER_TEMP/$name.log"' in run and "return 1" in run
-    assert steps.index(store) < steps.index(_browser_install(steps)) < steps.index(pages)
-    assert all("Path('head/" not in step.get("run", "") for step in steps)
+        assert run.index(" &\n") < run.index("settle") < run.index("cmp ")
+    assert "|| failed=1" in script and 'return "$failed"' in script
+    assert 'cat "$RUNNER_TEMP/$name.log"' in script and "return 1" in script
+    [store_step] = [step for step in steps if step.get("run", "").endswith(" store")]
+    [page_step] = [step for step in steps if step.get("run", "").endswith(" page")]
+    assert steps.index(store_step) < steps.index(_browser_install(steps)) < steps.index(page_step)
+    assert "Path('head/" not in script
 
 
 def test_equivalence_plants_each_fault_in_a_file_that_exists():
-    steps = yaml.safe_load((_ROOT / ".github/workflows/equivalence.yml").read_text())["jobs"]["ledger-equivalence"][
-        "steps"
-    ]
-    [plant] = [step for step in steps if step.get("name", "").startswith("Plant ")]
-    script = plant["run"].split("<<'PY'\n", 1)[1].rsplit("PY", 1)[0]
+    script = _equivalence_group("plant").split("<<'PY'\n", 1)[1].rsplit("PY", 1)[0]
     loop = next(node for node in ast.walk(ast.parse(script)) if isinstance(node, ast.For))
     planted = [(ast.literal_eval(entry.elts[0].args[0]), ast.literal_eval(entry.elts[1])) for entry in loop.iter.elts]
     assert [path.split("/", 1)[0] for path, _ in planted] == ["fault-store", "fault-chat"]
     for path, needle in planted:
         assert (_ROOT / path.split("/", 1)[1]).read_text().count(needle) == 1
+
+
+def test_equivalence_grades_with_the_base_copy():
+    steps = _equivalence_steps()
+    [base] = [step for step in steps if step.get("with", {}).get("path") == "base"]
+    assert base["with"]["ref"] == "${{ github.event.pull_request.base.sha }}"
+    [pick] = [step for step in steps if step.get("name") == "Pick the protected grader"]
+    assert pick["run"].startswith("if [[ -f base/tests/swarm_ledger/equivalence.sh ]]; then\n")
+    assert pick["run"].index('"GRADER=$PWD/base"') < pick["run"].index("else") < pick["run"].index('"GRADER=$PWD/head"')
+    assert pick["run"].index("else") < pick["run"].index("::warning::")
+    graded = [step for step in steps if "equivalence.sh" in step.get("run", "") and step is not pick]
+    assert [step["run"] for step in graded] == [
+        f'bash "$GRADER/tests/swarm_ledger/equivalence.sh" {group}' for group in ("plant", "store", "page")
+    ]
+    assert all(steps.index(base) < steps.index(pick) < steps.index(step) for step in graded)
+    assert _browser_install(steps)["uses"] == "./base/.github/actions/browser-cache"
+    for step in steps:
+        run = step.get("run", "")
+        assert "cmp " not in run and "_replay.py" not in run and "head/tests" not in run
+        assert step is pick or "GITHUB_ENV" not in run
+    script = _EQUIVALENCE.read_text()
+    assert 'replays=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)' in script and "head/tests" not in script
+
+
+def _equivalence_steps() -> list[dict]:
+    return yaml.safe_load((_ROOT / ".github/workflows/equivalence.yml").read_text())["jobs"]["ledger-equivalence"][
+        "steps"
+    ]
+
+
+def _equivalence_group(name: str) -> str:
+    return _EQUIVALENCE.read_text().split(f"\n{name}() {{\n", 1)[1].split("\n}\n", 1)[0]
 
 
 def test_equivalence_runs_on_every_ledger_pull_request_without_a_body_marker():
@@ -653,8 +735,7 @@ def test_equivalence_runs_on_every_ledger_pull_request_without_a_body_marker():
     assert all("pull_request.body" not in str(step.get("if", "")) for step in job["steps"])
     [head] = [step for step in job["steps"] if step.get("with", {}).get("path") == "head"]
     assert "ref" not in head["with"]
-    paths = workflow[True]["pull_request"]["paths"]
-    assert {"scripts/swarm_ledger/**", "tests/swarm_ledger/**"} <= set(paths)
+    assert "paths" not in workflow[True]["pull_request"]
 
 
 @pytest.mark.parametrize("doc", ["README.md", "index.md"])
@@ -879,6 +960,47 @@ def test_promotion_shard_reports_use_the_pushed_grader_and_prs_keep_the_base():
     assert "github.event_name == 'push' && github.sha" in ref
     assert "github.event_name == 'pull_request' && github.base_ref" in ref
     assert ref.index("github.event_name == 'push' && github.sha") < ref.index("github.event.before")
+
+
+def test_shard_verification_starts_from_the_plan_and_prefetches_complete_reports():
+    jobs = _workflow()["jobs"]
+    job = jobs["shard-check"]
+    assert set(job["needs"]) == {"split", "select", "reuse", "admission"}
+    stream = next(step for step in job["steps"] if "python -m scripts.ci_gate_shards" in step.get("run", ""))
+    assert stream["env"]["GH_TOKEN"] == "${{ steps.app-token.outputs.token }}"
+    mint = next(step for step in job["steps"] if step.get("id") == "app-token")
+    assert "if" not in mint
+    assert mint["with"]["permission-actions"] == "read"
+    assert (
+        stream["env"]["QUEUE_PLAN"]
+        == "${{ github.event_name == 'merge_group' && format('[{0}]', needs.split.outputs.queue_312) || '' }}"
+    )
+    assert f"seq 1 {len(jobs['unit']['strategy']['matrix']['shard'])}" in stream["run"]
+    assert "jq -ce '[.[].shard]'" in stream["run"]
+    check = next(
+        step["run"]
+        for step in job["steps"]
+        if step.get("name") == "Check every collected test ran in exactly one shard"
+    )
+    assert (
+        "tests.shard_check shard-reports/durations-*/durations.json --collected collected-data/collected.json" in check
+    )
+    assert "REUSED" in check
+    assert job["timeout-minutes"] == "${{ github.event_name == 'merge_group' && 42 || 60 }}"
+    assert job["permissions"] == {"contents": "read"}
+
+
+def test_queue_gate_is_the_early_verifier_and_the_standard_gate_summarizes_queue_runs():
+    workflow = _workflow()
+    jobs = workflow["jobs"]
+    summary = jobs["gate-required"]
+    assert summary["name"] == ci_gate_queue.SUMMARY_NAME
+    assert jobs["queue-fail-fast"] == ci_gate_queue.watcher(summary["runs-on"])
+    normalized = ci_gate_queue.normalize({"test.yml": workflow})["test.yml"]["jobs"]
+    assert normalized["gate-required"]["name"] == "Gate — Required"
+    assert normalized["queue-fail-fast"]["name"] == "queue-fail-fast"
+    labels = [job.get("name", key) for key, job in jobs.items()]
+    assert sum("Gate — Required" in label for label in labels) == 2
 
 
 def test_unit_shards_check_out_full_history_without_old_file_contents():
@@ -1570,7 +1692,7 @@ def test_mutation_shards_reuse_stats_collected_once_in_planned_parts():
             "${{ (github.event_name == 'pull_request' && github.base_ref == 'dev') || github.event_name == 'workflow_dispatch' }}",
         ),
         (
-            "${{ !cancelled() && needs.mutation-plan.result == 'success' && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && ((github.event_name == 'pull_request' && github.base_ref == 'dev') || github.event_name == 'workflow_dispatch') }}",
+            "${{ !cancelled() && needs.mutation-plan.result == 'success' && needs.mutation-plan.outputs.forwarded != 'true' && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && ((github.event_name == 'pull_request' && github.base_ref == 'dev') || github.event_name == 'workflow_dispatch') }}",
             "${{ !cancelled() && needs.mutation-plan.result == 'success' && (needs.mutation-plan.outputs.shards != '[0]' || needs.mutation-plan.outputs.stats_parts != '[0]') && needs.mutation-stats.result == 'success' && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && ((github.event_name == 'pull_request' && github.base_ref == 'dev') || github.event_name == 'workflow_dispatch') }}",
         ),
     )
@@ -1580,7 +1702,11 @@ def test_mutation_shards_reuse_stats_collected_once_in_planned_parts():
     }
     setup = [step for step in mutation["steps"] if not str(step.get("name", "")).startswith(("Mutate", "Upload"))]
     downloads = ("Download the shared mutation stats", "Download the reused preflight report")
-    setup = [step for step in setup if step.get("name") not in downloads]
+    setup = [
+        step
+        for step in setup
+        if step.get("name") not in downloads and step.get("with", {}).get("path") != ".mutation-stats-cache"
+    ]
     stats_steps = [step for step in stats["steps"] if step.get("with", {}).get("path") != ".mutation-stats-cache"]
     assert stats_steps[: len(setup)] == setup
     collect = stats_steps[len(setup)]
@@ -1590,7 +1716,8 @@ def test_mutation_shards_reuse_stats_collected_once_in_planned_parts():
         assert restore["uses"] == "actions/cache/restore@v4"
         assert save["uses"] == "actions/cache/save@v4"
         assert restore["with"]["key"] == save["with"]["key"]
-        assert restore["if"] == save["if"] == "needs.mutation-plan.outputs.forwarded != 'true'"
+        assert restore["if"] == "needs.mutation-plan.outputs.forwarded != 'true'"
+        assert save["if"] == "strategy.job-total == 1 && needs.mutation-plan.outputs.forwarded != 'true'"
         assert stats["steps"].index(restore) < stats["steps"].index(collect) < stats["steps"].index(save)
         assert stats["env"]["MUTATION_STATS_CACHE"] == "${{ github.workspace }}/.mutation-stats-cache"
     assert collect["env"]["BASES"] == "${{ needs.mutation-plan.outputs.bases }}"
@@ -1643,6 +1770,76 @@ def test_a_one_part_one_shard_plan_mutates_inside_the_statistics_job():
         report["with"]["path"] == "${{ job.status == 'success' && '.mutation-gate/report.json' || '.mutation-gate/' }}"
     )
     assert names.index(mutate["name"]) < names.index(report["name"])
+
+
+def test_every_pull_request_stats_part_restores_one_merged_cache_saved_once_after_all_parts_finish():
+    jobs = _mutation_workflow()["jobs"]
+    skipped = "needs.mutation-plan.outputs.forwarded != 'true'"
+    key = "mutation-test-stats-v2-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}"
+    cached = {
+        "path": ".mutation-stats-cache",
+        "key": key,
+        "restore-keys": "mutation-test-stats-v2-${{ runner.os }}-",
+    }
+    steps = jobs["mutation-stats"]["steps"]
+    names = [step.get("name") for step in steps]
+    restore = steps[names.index("Restore compatible test stats")]
+    assert restore["uses"] == "actions/cache/restore@v4"
+    assert restore["if"] == skipped
+    assert restore["with"] == cached
+    single = steps[names.index("Save the merged test stats")]
+    assert single["uses"] == "actions/cache/save@v4"
+    assert single["if"] == f"strategy.job-total == 1 && {skipped}"
+    assert single["with"] == {"path": ".mutation-stats-cache", "key": key}
+    fresh = steps[names.index("Keep only the test stats this part wrote")]
+    assert fresh["if"] == f"strategy.job-total != 1 && {skipped}"
+    assert fresh["env"] == {"PART": "${{ matrix.part }}"}
+    assert fresh["run"] == (
+        "mkdir -p .mutation-stats-cache .mutation-stats-fresh && find .mutation-stats-cache -maxdepth 1 -type f"
+        ' -newer ".mutation-stats/collected-$PART" -exec cp -p {} .mutation-stats-fresh/ \\;'
+    )
+    part = steps[names.index("Upload this part's test stats cache")]
+    assert part["if"] == f"strategy.job-total != 1 && {skipped}"
+    assert part["uses"] == "actions/upload-artifact@v4"
+    assert part["with"] == {
+        "name": "mutation-test-stats-cache-${{ matrix.part }}",
+        "path": ".mutation-stats-fresh/",
+        "include-hidden-files": True,
+        "if-no-files-found": "ignore",
+        "retention-days": 1,
+        "overwrite": True,
+    }
+    order = [
+        restore["name"],
+        "Collect one stats part for every mutation shard",
+        single["name"],
+        fresh["name"],
+        part["name"],
+    ]
+    assert [names.index(name) for name in order] == sorted(names.index(name) for name in order)
+    assert [step for step in steps if step.get("uses", "").startswith("actions/cache/save")] == [single]
+    first = f"strategy.job-index == 0 && needs.mutation-plan.outputs.stats_parts != '[0]' && {skipped}"
+    mutation = jobs["mutation"]["steps"]
+    mutation_names = [step.get("name") for step in mutation]
+    base = mutation[mutation_names.index("Restore compatible test stats")]
+    assert base["uses"] == "actions/cache/restore@v4"
+    assert base["if"] == first
+    assert base["with"] == cached
+    download = mutation[mutation_names.index("Download every part's test stats cache")]
+    assert download["if"] == first
+    assert download["uses"] == "actions/download-artifact@v4"
+    assert download["with"] == {
+        "pattern": "mutation-test-stats-cache-*",
+        "path": ".mutation-stats-cache",
+        "merge-multiple": True,
+    }
+    merged = mutation[mutation_names.index("Save the merged test stats")]
+    assert merged["uses"] == "actions/cache/save@v4"
+    assert merged["if"] == f"{first} && hashFiles('.mutation-stats-cache/**') != ''"
+    assert merged["with"] == {"path": ".mutation-stats-cache", "key": key}
+    assert mutation_names.index(base["name"]) == 1
+    order = [base["name"], download["name"], merged["name"], "Install dependencies", "Mutate changed Python files"]
+    assert [mutation_names.index(name) for name in order] == sorted(mutation_names.index(name) for name in order)
 
 
 PLANNER_PACKAGES = {"mutmut": "mutmut", "pytest": "pytest", "pyyaml": "yaml", "tomlkit": "tomlkit"}
@@ -1752,6 +1949,11 @@ def test_pull_request_mutation_reuses_the_preflight_of_its_exact_head_from_the_p
         f"github.event_name == 'workflow_dispatch' && {skipped}",
         f"always() && {skipped}",
         f"{skipped} && needs.mutation-plan.outputs.selection == 'true'",
+        f"strategy.job-total == 1 && {skipped}",
+        f"strategy.job-total != 1 && {skipped}",
+        f"strategy.job-index == 0 && needs.mutation-plan.outputs.stats_parts != '[0]' && {skipped}",
+        f"strategy.job-index == 0 && needs.mutation-plan.outputs.stats_parts != '[0]' && {skipped}"
+        " && hashFiles('.mutation-stats-cache/**') != ''",
         f"needs.mutation-plan.outputs.shards == '[0]' && needs.mutation-plan.outputs.stats_parts == '[0]' && {skipped}",
         "always() && steps.mutate.outcome != 'skipped'",
     )

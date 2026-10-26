@@ -35,7 +35,7 @@ def judged(value):
 @pytest.mark.parametrize("value", ["established", "early-real"])
 @pytest.mark.parametrize("fix", ["code", "tune"])
 def test_a_judged_real_finding_becomes_a_troubleshoot_task_then_a_fix_naming_its_number_and_measure(value, fix):
-    cause, fixed = loop.fix_tasks(WATCHED, *judged(value), fix)
+    cause, fixed = loop.fix_tasks(WATCHED, *judged(value), fix, ())
     measure = f"agentihooks doctor {WATCHED} measure {STALE.id}"
     assert (cause["kind"], fixed["kind"]) == ("troubleshoot", fix)
     assert fixed["depends_on"] == [cause["task"]]
@@ -54,18 +54,79 @@ def test_a_judged_real_finding_becomes_a_troubleshoot_task_then_a_fix_naming_its
 def test_a_finding_not_judged_real_never_becomes_a_task(verdict):
     finding, judgment = judged(verdict or "established")
     with pytest.raises(SwarmError, match="established or early-real"):
-        loop.fix_tasks(WATCHED, finding, judgment if verdict else None, "code")
+        loop.fix_tasks(WATCHED, finding, judgment if verdict else None, "code", ())
 
 
 def test_a_fix_task_is_code_or_tune():
     with pytest.raises(SwarmError, match="code or tune"):
-        loop.fix_tasks(WATCHED, *judged("established"), "ops")
+        loop.fix_tasks(WATCHED, *judged("established"), "ops", ())
 
 
 def test_the_same_finding_always_gives_the_same_task_ids():
-    first = [t["task"] for t in loop.fix_tasks(WATCHED, *judged("established"), "code")]
-    again = [t["task"] for t in loop.fix_tasks(WATCHED, *judged("early-real"), "code")]
+    first = [t["task"] for t in loop.fix_tasks(WATCHED, *judged("established"), "code", ())]
+    again = [t["task"] for t in loop.fix_tasks(WATCHED, *judged("early-real"), "code", ())]
     assert first == again
+
+
+def pair(fix="code", done=True):
+    return [{"id": t["task"], "done": done} for t in loop.fix_tasks(WATCHED, *judged("established"), fix, ())]
+
+
+@pytest.mark.parametrize("earlier", ["code", "tune"])
+def test_a_returned_finding_whose_earlier_pair_is_done_gets_the_next_free_pair_linking_the_earlier(earlier):
+    done = pair(earlier)
+    cause, fixed = loop.fix_tasks(WATCHED, *judged("established"), "code", done)
+    stem = done[0]["id"].removesuffix("-cause")
+    assert (cause["task"], fixed["task"]) == (f"{stem}-2-cause", f"{stem}-2-code")
+    assert fixed["depends_on"] == [cause["task"]]
+    assert all(t["id"] in cause["description"] for t in done)
+    for task in (cause, fixed):
+        assert TASK_ID.match(task["task"])
+        ledger_kinds.check(task)
+
+
+def test_each_done_pair_moves_the_new_pair_to_the_next_free_ids():
+    first = pair()
+    second = [{"id": t["task"], "done": True} for t in loop.fix_tasks(WATCHED, *judged("established"), "code", first)]
+    cause, fixed = loop.fix_tasks(WATCHED, *judged("established"), "tune", first + second)
+    stem = first[0]["id"].removesuffix("-cause")
+    assert (cause["task"], fixed["task"]) == (f"{stem}-3-cause", f"{stem}-3-tune")
+    assert all(t["id"] in cause["description"] for t in second)
+    assert not any(t["id"] in cause["description"] for t in first)
+
+
+def test_a_finding_with_no_earlier_pair_names_none_in_its_description():
+    cause, _ = loop.fix_tasks(WATCHED, *judged("established"), "code", [{"id": "t1", "done": True}])
+    assert cause["task"] == pair()[0]["id"]
+    assert "earlier" not in cause["description"].lower()
+
+
+@pytest.mark.parametrize("earlier", ["code", "tune"])
+@pytest.mark.parametrize("open_part", [0, 1])
+def test_a_finding_whose_pair_is_still_open_is_refused(open_part, earlier):
+    tasks = pair(earlier)
+    tasks[open_part]["done"] = False
+    with pytest.raises(SwarmError, match="still open"):
+        loop.fix_tasks(WATCHED, *judged("established"), "code", tasks)
+
+
+def test_the_pair_texts_name_the_finding_stem_evidence_and_earlier_pair_exactly():
+    finding, judgment = judged("established")
+    finding = {**finding, "evidence": ["task t1", "task t2"]}
+    stem = "fx-44b64fbe"
+    cause, _ = loop.fix_tasks(WATCHED, finding, judgment, "code", ())
+    text = (
+        f"Doctor finding {STALE.id}: {STALE.summary}. Threshold: {STALE.threshold}. "
+        "Evidence: task t1; task t2. Show the root cause with evidence, then fix it or file it."
+    )
+    assert (cause["task"], cause["description"]) == (f"{stem}-cause", text)
+    done = [{"id": f"{stem}-cause", "done": True}, {"id": f"{stem}-code", "done": True}]
+    cause, _ = loop.fix_tasks(WATCHED, finding, judgment, "tune", done)
+    assert cause["description"] == f"{text} Earlier pair {stem}-cause and {stem}-code is done; read its proof first."
+    opened = [{**task, "done": False} for task in done]
+    with pytest.raises(SwarmError) as refused:
+        loop.fix_tasks(WATCHED, finding, judgment, "tune", opened)
+    assert str(refused.value) == f"finding {STALE.id} already has tasks {stem}-cause and {stem}-code still open"
 
 
 def step(store, at, found=(), closed=None, environ=None):

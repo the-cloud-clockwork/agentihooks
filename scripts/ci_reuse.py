@@ -82,6 +82,9 @@ INLINE_SKIP = (
 
 POSTGRES_REQUIRED = ('"semgrep", "sonar"]', '"semgrep", "sonar", "writer-lock"]')
 
+FORWARDED_STATS = """NEEDS=$(jq 'if ."mutation-plan".result == "success" and ."mutation-plan".outputs.forwarded == "true" and ."mutation-stats".result == "skipped" then ."mutation-stats".result = "success" else . end' <<< "$NEEDS")
+"""
+
 QUEUE_TIER = (
     """if [[ "${EVENT:-}" == merge_group || "${EVENT:-}" == pull_request ]]; then
   if ! jq -e --arg event "$EVENT" --arg mutation "$MUTATION" '
@@ -195,12 +198,34 @@ def pipefail_summary(steps: list[dict]) -> list[dict]:
     return [{**step, "shell": "bash"} if step.get("name") == "Summarize this run's tests" else step for step in steps]
 
 
+def selection_diagnostic(steps: list[dict]) -> list[dict]:
+    [aggregation, *rest] = steps
+    prefix = """selection=$(jq -r '.select.result // ""' <<< "$NEEDS")
+if [[ "$selection" == failure || "$selection" == cancelled ]]; then
+  echo "::error::Test selection $selection; fix selection before downstream test and coverage checks."
+  exit 1
+fi
+"""
+    return [{**aggregation, "run": prefix + aggregation["run"]}, *rest]
+
+
+def forwarded_stats(steps: list[dict]) -> list[dict]:
+    [aggregation, *rest] = steps
+    return [{**aggregation, "run": FORWARDED_STATS + aggregation["run"]}, *rest]
+
+
 def reuse_job() -> dict:
     return yaml.safe_load(Path(__file__).with_name("ci_reuse_job.yml").read_text())
 
 
 def duration_provenance_steps() -> list[dict]:
     return yaml.safe_load(Path(__file__).with_name("ci_duration_provenance.yml").read_text())
+
+
+def retried_duration_provenance_steps() -> list[dict]:
+    steps = duration_provenance_steps()
+    steps[-1]["uses"] = "./provenance-grader/.github/actions/retry-upload"
+    return steps
 
 
 def paged_reuse_job() -> dict:
@@ -210,6 +235,13 @@ def paged_reuse_job() -> dict:
         "gh api --paginate \"$actions/runs/$1/attempts/$2/jobs?per_page=100\" --jq '.jobs[]'",
         'python3 -m scripts.ci_budget.jobs "$actions/runs/$1/attempts/$2/jobs" --page-size 5',
     )
+    return job
+
+
+def retried_reuse_job() -> dict:
+    job = paged_reuse_job()
+    [publish] = [step for step in job["steps"] if step.get("name") == "Publish protected tested tree evidence"]
+    publish["uses"] = "./.github/actions/retry-upload"
     return job
 
 
@@ -276,10 +308,18 @@ def _passed(workflow, jobs):
     definitions = workflow["jobs"]
     gate = definitions["gate-required"]
     required = gate["needs"]
-    if not any(job["name"] == gate["name"] and job["conclusion"] == "success" for job in jobs):
+    label = gate["name"]
+    if label == "${{ github.event_name == 'merge_group' && 'Queue gate summary' || 'Gate — Required' }}":
+        label = "Gate — Required"
+    if not any(job["name"] == label and job["conclusion"] == "success" for job in jobs):
         return False
     for name in required:
         label = definitions[name].get("name", name)
+        if (
+            name == "queue-fail-fast"
+            and label == "${{ github.event_name == 'merge_group' && 'Gate — Required' || 'queue-fail-fast' }}"
+        ):
+            label = "queue-fail-fast"
         results = [
             job["conclusion"]
             for job in jobs

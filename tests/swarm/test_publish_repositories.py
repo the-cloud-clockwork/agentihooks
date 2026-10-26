@@ -5,6 +5,7 @@ import pytest
 
 from scripts.swarm import publish, stack
 from scripts.swarm.store import AgentRecord
+from scripts.swarm_ledger import ledger_tasks
 
 pytestmark = pytest.mark.unit
 
@@ -45,6 +46,7 @@ def repositories(tmp_path, monkeypatch):
 
     def update(slug, task_id, fields, by):
         assert (slug, task_id, by) == ("swarm", "t1", task["claimed_by"])
+        ledger_tasks.check({"op": "task_update", "item": f"tasks/{task_id}", "fields": fields, "by": by})
         updates.append(fields)
         task.update(fields)
 
@@ -79,6 +81,58 @@ def test_prepare_keeps_one_worktree_per_repository(repositories):
     assert [git(root, "show", "HEAD:chosen.txt") for root in roots] == ["agentihooks", "agentihooks-bundle"]
     assert publish.prepare("swarm", p.agent, str(p.swarm), p.ledger) == fields
     assert p.task["repository_branches"] == {str(p.swarm): "engineer-test", str(p.bundle): "engineer-test"}
+
+
+@pytest.mark.parametrize("reverse", [False, True])
+def test_prepare_retires_only_the_merged_repository_branch(repositories, monkeypatch, reverse):
+    p = repositories
+    roots = [p.swarm, p.bundle]
+    for root in roots:
+        git(root, "push", "origin", "HEAD:predecessor")
+    open_worktree = f"{p.bundle}-open"
+    git(p.bundle, "worktree", "add", "-b", "predecessor", open_worktree, "origin/predecessor")
+    git(p.swarm, "push", "origin", "--delete", "predecessor")
+    fresh = git(p.swarm, "commit-tree", "HEAD^{tree}", "-p", "HEAD", "-m", "New dev")
+    git(p.swarm, "push", "origin", f"{fresh}:refs/heads/dev")
+    p.task.update(
+        repositories=[str(root) for root in (reversed(roots) if reverse else roots)],
+        branch="predecessor",
+        branch_repo="git@github.com:example/agentihooks.git",
+        pr_url="https://github.com/example/agentihooks/pull/7",
+        repository_branches={str(root): "predecessor" for root in roots},
+        handoff_envelope={"continue_from": "origin/predecessor", "task": "t1"},
+        reclaim={"continue_from": "origin/predecessor", "reason": "retained"},
+    )
+    native_git, native_execute = publish.git, publish.execute
+    queries = []
+
+    def git_call(root, *args):
+        if args == ("remote", "get-url", "origin"):
+            return f"git@github.com:example/{root.name.removesuffix('-worktree')}.git"
+        return native_git(root, *args)
+
+    def execute(command, root):
+        if command[:3] == ["gh", "pr", "view"]:
+            queries.append(str(root))
+            return '{"state": "MERGED", "headRefName": "predecessor"}'
+        return native_execute(command, root)
+
+    monkeypatch.setattr(publish, "git", git_call)
+    monkeypatch.setattr(publish, "execute", execute)
+
+    result = publish.prepare("swarm", p.agent, str(p.swarm), p.ledger)
+
+    by_repo = {entry["repository"]: entry for entry in result["worktrees"]}
+    assert queries == [str(p.swarm)]
+    assert by_repo[str(p.bundle)]["worktree"] == open_worktree
+    assert by_repo[str(p.bundle)]["branch"] == "predecessor"
+    assert git(open_worktree, "rev-parse", "--abbrev-ref", "@{upstream}") == "origin/predecessor"
+    assert git(by_repo[str(p.swarm)]["worktree"], "rev-parse", "HEAD") == fresh
+    assert by_repo[str(p.swarm)]["branch"] == "engineer-test"
+    assert p.task["repository_branches"] == {str(p.swarm): "engineer-test", str(p.bundle): "predecessor"}
+    assert p.task["pr_url"] == ""
+    assert p.task["handoff_envelope"] == {"continue_from": "origin/predecessor", "task": "t1"}
+    assert p.task["reclaim"] == {"continue_from": "origin/predecessor", "reason": "retained"}
 
 
 def test_prepare_names_the_default_repository_without_inferring_prose(repositories):
@@ -117,6 +171,7 @@ def test_publish_selects_the_current_repository_and_retains_both_branches(reposi
         Path(root, "chosen.txt").write_text("after")
     git(roots[1], "branch", "-m", "engineer-test-2")
     fields["worktrees"][1]["branch"] = "engineer-test-2"
+    p.task["repository_branches"][str(p.bundle)] = "engineer-test-2"
     monkeypatch.chdir(roots[1])
     first = publish.publish("swarm", p.agent, str(p.swarm), p.ledger, "Change bundle", ["chosen.txt"])
     assert first["worktree"] == roots[1]

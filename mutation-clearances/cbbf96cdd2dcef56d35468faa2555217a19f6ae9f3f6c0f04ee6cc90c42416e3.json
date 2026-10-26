@@ -1,0 +1,6 @@
+{
+  "scripts/ci_gate_queue.py:scripts.ci_gate_queue.x_normalize__mutmut_58:51bcd5f4e75fda5d83993a1b57250acd5c18ba6bfb83cfea9db347262b1236c5": {
+    "reader": "standards-reader",
+    "reason": "Only XX wrapping changes; ValueError branch and every original diagnostic fact are preserved. Independently approved from complete CI report 40169108156."
+  }
+}

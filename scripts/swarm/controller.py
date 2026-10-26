@@ -22,6 +22,7 @@ from scripts.swarm_v2.runtime.base import HIVE_LANES
 from scripts.swarm_v2.runtime.base import LOCAL as WORKSTATION_BACKEND
 
 if TYPE_CHECKING:
+    from scripts.hive.admission import Room
     from scripts.hive.placement import Wait
     from scripts.swarm_v2.control_service import ControlService
 
@@ -100,9 +101,23 @@ class FencedRuntime:
         router = getattr(self.runtime, "router", None)
         return "" if getattr(router, "placement", None) is not None else NO_KUBERNETES
 
+    def begin_placement_pass(self) -> None:
+        if launch := getattr(self.runtime, "hive_launch", None):
+            launch.placement_cache = {}
+            launch.herdr.pass_memo = {}
+
+    def end_placement_pass(self) -> None:
+        if launch := getattr(self.runtime, "hive_launch", None):
+            launch.placement_cache = None
+            launch.herdr.pass_memo = None
+
     def placement_refusal(self, lane: str, task: dict) -> str:
         refused = self._refusal(lane, task)
-        return "" if _to_workstation(lane, refused) else refused
+        return "" if _to_workstation(lane, refused, self._pass_memo()) else refused
+
+    def _pass_memo(self) -> dict | None:
+        launch = getattr(self.runtime, "hive_launch", None)
+        return getattr(launch.herdr, "pass_memo", None) if launch else None
 
     def _refusal(self, lane: str, task: dict, claim: str = "") -> str:
         task = _master_task(lane, task)
@@ -138,45 +153,53 @@ class FencedRuntime:
     def _local_refusal(self, lane: str, task: dict, name: str) -> str:
         if lane == "master":
             return ""
-        from scripts.hive import admission
-        from scripts.hive.placement import LOCAL_FULL
-        from scripts.swarm.commands import hive_id
-
-        machine = hive_id()
-        maximum = local_slots.maximum(self.store, self.slug, self.store.config(self.slug).local_max_agents)
-        taken = (
-            local_slots.claim(self.store, machine, self.slug, task["id"], name, maximum)
-            if name
-            else local_slots.held(self.store, machine, self.slug, task["id"])
-        )
-        if taken >= maximum:
-            self._local_full(machine, taken, maximum)
-            return f"{LOCAL_FULL}{taken} of its {maximum} agents"
-        if name:
-            admission.record(self.store.redis, machine, f"{self.slug}/{name}")
-        return ""
-
-    def _overflow(self, lane: str, task: dict, waited: "Wait", claim: str) -> str:
-        if self.deployment != HYBRID or task.get("hive") or not _workstation_herdr():
-            return waited.reason
-        from scripts.hive import admission, headroom, placement_waits, registry
-        from scripts.hive.placement import LOCAL_FULL, Choice, hosts, overflow
+        from scripts.hive import admission, registry
+        from scripts.hive.placement import LOCAL_FULL, equipped, needs_refusal
         from scripts.swarm.commands import hive_id
 
         machine = hive_id()
         local = registry.show(self.store.redis, machine)
-        if local is not None and not hosts(waited.role, local, (lane,)):
-            return waited.reason
+        if not equipped(task, local):
+            return needs_refusal(task, [local] if local else [])
+        found, held, maximum = self._workstation_room(machine, task)
+        taken = local_slots.claim(self.store, machine, self.slug, task["id"], name, maximum) if name else held
+        if taken >= maximum:
+            self._local_full(machine, taken, maximum)
+            return f"{LOCAL_FULL}{taken} of its {maximum} agents: {found.reason}: {found.detail}"
+        if name:
+            admission.record(self.store.redis, machine, f"{self.slug}/{name}")
+        return ""
+
+    def _workstation_room(self, machine: str, task: dict) -> tuple["Room", int, int]:
+        from scripts.hive import admission, headroom, registry
+
+        hive = registry.show(self.store.redis, machine)
         running = local_slots.running(self.store, self.slug, task["id"])
         held = local_slots.held(self.store, machine, self.slug, task["id"])
         pending = max(0, admission.pending(self.store.redis, machine) - (held - running))
         now = lease.now_ms(self.store)
         found = admission.room(
-            headroom.measure(0, now, previous=headroom.read(self.store.redis, machine, now)), running, pending
+            headroom.measure(0, now, previous=headroom.read(self.store.redis, machine, now)),
+            running,
+            pending,
+            hive["max_agents"] if hive is not None else None,
         )
         maximum = local_slots.maximum(self.store, self.slug, running + found.room)
         found = admission.capped(found, running, maximum)
-        local_max = min(maximum, running + found.room)
+        return found, held, min(maximum, running + found.room)
+
+    def _overflow(self, lane: str, task: dict, waited: "Wait", claim: str) -> str:
+        if self.deployment != HYBRID or task.get("hive") or not _workstation_herdr(self._pass_memo()):
+            return waited.reason
+        from scripts.hive import admission, placement_waits, registry
+        from scripts.hive.placement import LOCAL_FULL, Choice, equipped, hosts, overflow
+        from scripts.swarm.commands import hive_id
+
+        machine = hive_id()
+        local = registry.show(self.store.redis, machine)
+        if (local is not None and not hosts(waited.role, local, (lane,))) or not equipped(task, local):
+            return waited.reason
+        found, held, local_max = self._workstation_room(machine, task)
         refused = f": {found.reason}: {found.detail}"
         chosen = overflow(waited.role, waited, held, local_max)
         if not isinstance(chosen, Choice):
@@ -206,6 +229,10 @@ class FencedRuntime:
             return False
         return self.deployment != LOCAL or self.runtime.has_capacity(config)
 
+    def launch_room(self, config) -> int:
+        room = getattr(self.runtime, "launch_room", None)
+        return room(config) if room else 1
+
     def spawn(self, config, lane, name, task):
         lease.renew(self.store, self.slug, self.held)
         task = _master_task(lane, task)
@@ -221,7 +248,7 @@ class FencedRuntime:
 
     def _spawn(self, config, lane, name, task):
         refused = self._refusal(lane, task, name)
-        workstation = _to_workstation(lane, refused)
+        workstation = _to_workstation(lane, refused, self._pass_memo())
         from scripts.hive.placement import LOCAL_FULL
 
         if LOCAL_FULL in refused:
@@ -230,6 +257,11 @@ class FencedRuntime:
             raise SpawnError(refused, "unavailable")
         if refused and not workstation:
             raise SwarmError(refused)
+        if workstation or self.deployment == LOCAL:
+            from scripts.hive import admission
+            from scripts.swarm.commands import hive_id
+
+            admission.record(self.store.redis, hive_id(), f"{self.slug}/{name}")
         with lease.kept(self.store, self.slug, self.held):
             runtime = self.runtime
             if workstation:
@@ -273,21 +305,26 @@ def _master_seats(store: RedisStore, slug: str) -> frozenset[str]:
     )
 
 
-def _to_workstation(lane: str, refused: str) -> bool:
+def _to_workstation(lane: str, refused: str, memo: dict | None = None) -> bool:
     if refused == OVERFLOW.format(lane=lane):
         return True
     fallback_refusal = refused.startswith(WORKSTATION.format(lane=lane)) or refused == DISABLED.format(backend="hive")
-    return lane == "master" and fallback_refusal and _workstation_herdr()
+    return lane == "master" and fallback_refusal and _workstation_herdr(memo)
 
 
 def _master_task(lane: str, task: dict) -> dict:
     return {"id": "master", **task} if lane == "master" else task
 
 
-def _workstation_herdr() -> bool:
+def _workstation_herdr(memo: dict | None = None) -> bool:
     from scripts import herdr_host
+    from scripts.swarm import timing
 
-    return herdr_host.server_running(dict(os.environ))
+    if memo is None:
+        return timing.call(herdr_host.server_running, dict(os.environ))
+    if "workstation_herdr" not in memo:
+        memo["workstation_herdr"] = timing.call(herdr_host.server_running, dict(os.environ))
+    return memo["workstation_herdr"]
 
 
 def _read(path: str) -> str:

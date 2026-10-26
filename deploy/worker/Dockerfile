@@ -17,26 +17,33 @@ WORKDIR /build
 RUN SETUPTOOLS_SCM_PRETEND_VERSION_FOR_AGENTIHOOKS=0.0.0 pip wheel --no-deps --wheel-dir /wheels . \
     && python -c "import tomllib; dev = tomllib.load(open('pyproject.toml', 'rb'))['project']['optional-dependencies']['dev']; print(*[r for r in dev if r.startswith('ruff==')])" > /wheels/tools.txt
 
-FROM ${WORKER_IMAGE}
-USER root
-COPY --from=node /usr/local/bin/node /usr/local/bin/node
-COPY --from=node /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/npm
-COPY --from=uv /uv /uvx /usr/local/bin/
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends gh \
-    && rm -r /var/lib/apt/lists/* \
-    && ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
-    && ln -s ../lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx
+FROM mirror.gcr.io/library/python:3.12-slim-bookworm AS gh
+RUN apt-get update && apt-get install -y --no-install-recommends gh
+
+FROM mirror.gcr.io/library/python:3.12-slim-bookworm AS overlay
 COPY --from=wheel /wheels /wheels
-RUN pip install --no-cache-dir --no-deps --force-reinstall /wheels/*.whl \
-    && pip install --no-cache-dir -r /wheels/tools.txt \
-    && rm -r /wheels \
-    && python -c 'import profiles; from pathlib import Path; import os; helper = Path(profiles.__file__).parent / "package/skills/worktree/scripts/wt.sh"; helper.chmod(0o755); os.symlink(helper, "/usr/local/bin/wt.sh")' \
-    && usermod -s /bin/bash worker
+WORKDIR /opt/venv
+RUN python -m venv /opt/venv \
+    && bin/pip install --no-cache-dir --no-deps /wheels/*.whl -r /wheels/tools.txt \
+    && rm -rf bin/python* bin/pip* bin/activate* bin/Activate.ps1 pyvenv.cfg include lib64 lib/python3.12/site-packages/pip lib/python3.12/site-packages/pip-*.dist-info \
+    && helper=lib/python3.12/site-packages/profiles/package/skills/worktree/scripts/wt.sh \
+    && chmod 0755 "$helper" \
+    && mkdir /links \
+    && ln -s "/opt/venv/$helper" /links/wt.sh \
+    && ln -s ../lib/node_modules/npm/bin/npm-cli.js /links/npm \
+    && ln -s ../lib/node_modules/npm/bin/npx-cli.js /links/npx
+
+FROM ${WORKER_IMAGE}
+COPY --link=true --from=node /usr/local/bin/node /usr/local/bin/node
+COPY --link=true --from=node /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/npm
+COPY --link=true --from=uv /uv /uvx /usr/local/bin/
+COPY --link=true --from=gh /usr/bin/gh /usr/bin/gh
+COPY --link=true --from=overlay /links/ /usr/local/bin/
+COPY --link=true --from=overlay /opt/venv/ /opt/venv/
 ENV NPM_CONFIG_PREFIX=/home/worker/.local \
     PATH=/home/worker/.local/bin:$PATH
-COPY --chmod=0755 deploy/worker/start.sh /opt/worker-hive/start.sh
-COPY --chmod=0755 deploy/worker/gh /usr/local/bin/gh
+COPY --link=true --chmod=0755 deploy/worker/start.sh /opt/worker-hive/start.sh
+COPY --link=true --chmod=0755 deploy/worker/gh /usr/local/bin/gh
 USER 10001:10001
 ENTRYPOINT ["/usr/bin/tini", "--", "/opt/worker-hive/start.sh"]
 CMD []

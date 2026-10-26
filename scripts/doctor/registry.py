@@ -14,6 +14,7 @@ from threading import Event
 ACTIVE = "working"
 TRACES_LIMIT = 5
 ATTEMPTS = 2
+READERS = 6
 WINDOW_BYTES = 1 << 20
 CORRELATION = "agentihooks.correlation."
 wall = time.time
@@ -28,7 +29,8 @@ REMOTE_FIELDS = {
 
 def failure(exc: BaseException) -> str:
     frame = traceback.extract_tb(exc.__traceback__)[-1]
-    return f"{type(exc).__name__}: {exc} at {frame.filename}:{frame.lineno}"
+    notes = "".join(f"; {note}" for note in getattr(exc, "__notes__", ()))
+    return f"{type(exc).__name__}: {exc} at {frame.filename}:{frame.lineno}{notes}"
 
 
 def read_at() -> str:
@@ -153,8 +155,13 @@ def progress(session_id: str, harness: str) -> dict | None:
     }
 
 
-def _remote_trace(row: dict) -> dict:
-    attributes = (row.get("metadata") or {}).get("attributes") or {}
+def _root(get, trace_id: str) -> dict:
+    rows = get("observations", {"traceId": trace_id, "type": "AGENT", "limit": 1, "page": 1})["data"]
+    return rows[0] if rows else {}
+
+
+def _remote_trace(row: dict, root: dict) -> dict:
+    attributes = (root.get("metadata") or {}).get("attributes") or {}
     return {
         "id": row["id"],
         "session_id": row.get("sessionId") or "",
@@ -175,15 +182,15 @@ def _freshness(get, trace_id: str, mark: dict, page: int) -> dict:
     }
 
 
-def _read_binding(get, slug: str, binding: dict, marks: dict, kept: dict, page: int) -> dict:
+def _read_binding(get, slug: str, binding: dict, marks: dict, kept: dict, page: int, ended: Event) -> dict:
     params = {
         "tags": [f"swarm:{slug}", f"agent:{binding['agent']}"],
-        "fields": "core,io",
+        "fields": "core",
         "orderBy": "timestamp.desc",
         "limit": TRACES_LIMIT,
         "page": 1,
     }
-    found = [_remote_trace(row) for row in get("traces", params)["data"]]
+    found = [_remote_trace(row, _root(get, row["id"])) for row in get("traces", params)["data"]]
     own = binding["session_id"]
     current = next((t for t in found if t["session_id"] == own), None) if own else (found or [None])[0]
     if current is None:
@@ -191,11 +198,17 @@ def _read_binding(get, slug: str, binding: dict, marks: dict, kept: dict, page: 
     mark = _freshness(get, current["id"], marks.get(current["id"], {}), page)
     kept[current["id"]] = mark
     total = get("observations", {"traceId": current["id"], "limit": 1, "page": 1})["meta"].get("totalItems") or 0
+    from scripts.doctor.observation_reconciliation import reconcile
+
+    reconciled = reconcile(get, own or current["session_id"], binding["harness"], current["id"], ended.is_set)
+    remote = {"trace": current["id"], "fresh_ms": mark["fresh_ms"], "observations": int(total)}
+    if reconciled is not None:
+        remote["reconciliation"] = reconciled
     return {
         "read": True,
         "traces": found,
         "session_id": own or current["session_id"],
-        "remote": {"trace": current["id"], "fresh_ms": mark["fresh_ms"], "observations": int(total)},
+        "remote": remote,
     }
 
 
@@ -209,7 +222,7 @@ def _attempts(get, slug: str, binding: dict, marks: dict, page: int, ended: Even
         tries += 1
         kept: dict = {}
         try:
-            remote = _read_binding(get, slug, binding, marks, kept, page)
+            remote = _read_binding(get, slug, binding, marks, kept, page, ended)
             slot.clear()
             return remote, kept
         except Exception as exc:  # noqa: BLE001
@@ -221,7 +234,7 @@ def _read_all(get, slug: str, active: list[dict], marks: dict, page: int, remain
     if remaining <= 0:
         return [(_unread(), {}, None) for _ in active]
     slots: list[dict] = [{} for _ in active]
-    ended, pool = Event(), ThreadPoolExecutor(max_workers=max(len(active), 1))
+    ended, pool = Event(), ThreadPoolExecutor(max_workers=READERS)
     futures = [pool.submit(_attempts, get, slug, b, marks, page, ended, slot) for b, slot in zip(active, slots)]
     wait(futures, timeout=remaining)
     ended.set()

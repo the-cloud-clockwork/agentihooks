@@ -447,3 +447,29 @@ def test_worn_refuses_any_overlay_on_a_chain_without_a_base_role(overlay_profile
     with pytest.raises(ValueError) as refused:
         profile_chain.worn([("eng", tmp_path / "e")], ["a"], resolve)
     assert str(refused.value) == "overlay a needs a chain with a package base role"
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [("", set()), (" headed , ,gpu ", {"headed", "gpu"}), ("headed", {"headed"})],
+)
+def test_hive_capabilities_reads_the_named_setting(value, expected):
+    assert profile_chain.hive_capabilities({profile_chain.HIVE_CAPABILITIES: value, "OTHER": "x"}) == expected
+    assert profile_chain.hive_capabilities({}) == set()
+
+
+def test_require_capabilities_names_each_missing_one(tmp_path):
+    overlay, base = tmp_path / "headed", tmp_path / "engineer"
+    overlay.mkdir()
+    base.mkdir()
+    (overlay / "profile.yml").write_text("kind: overlay\nrequired_capabilities: [headed, gpu]\n")
+    dirs = [("engineer", base), ("headed", overlay)]
+    profile_chain.require_capabilities(dirs, {"headed", "gpu"})
+    with pytest.raises(ValueError, match=r"^overlay headed requires hive capabilities: gpu, headed$"):
+        profile_chain.require_capabilities(dirs, set())
+    for manifest in ("required_capabilities: [' ']\n", "- headed\n"):
+        (overlay / "profile.yml").write_text(manifest)
+        with pytest.raises(
+            ValueError, match=r"^profile headed required_capabilities must be a list of nonempty strings$"
+        ):
+            profile_chain.require_capabilities(dirs, {"headed"})

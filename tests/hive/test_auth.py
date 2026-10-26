@@ -96,6 +96,8 @@ def test_the_member_user_reads_every_root_key_and_writes_only_its_granted_patter
                     f"~{ROOT}:swarm:*:merge-stall-notice",
                     f"~{ROOT}:swarm:*:hive-placement-waits",
                     f"~{ROOT}:swarm:*:dev-red",
+                    f"~{ROOT}:swarm:*:prerequisite-waits",
+                    f"~{ROOT}:swarm:*:stage-covers",
                     f"~{ROOT}:seat:*:recaps",
                     f"~{ROOT}:seat:*:learned",
                     f"~{ROOT}:seat-of:*:exit",
@@ -154,6 +156,8 @@ def test_a_member_writes_its_own_inbox_and_readings_and_no_other_members(suffix,
         ("swarm:proof:merge-stall-notice", True),
         ("swarm:proof:hive-placement-waits", True),
         ("swarm:proof:dev-red", True),
+        ("swarm:proof:prerequisite-waits", True),
+        ("swarm:proof:stage-covers", True),
         ("swarm:proof:execution-publishing", True),
         ("swarm:proof:codex-transport", True),
         ("swarm:proof:codex-endpoints", True),
@@ -312,6 +316,32 @@ def test_the_env_file_is_private_and_holds_both_credentials(tmp_path):
         "AGENTIHOOKS_HIVE_LEDGER_CREDENTIAL=led\n"
         "AGENTIHOOKS_HIVE_REDIS_URL=redis://hive-ab12:pw@h:1/0\n"
     )
+
+
+@pytest.mark.parametrize("bus_url", ["nats://bus.example.test:4222", "tls://other.example.test:4443"])
+def test_joined_settings_select_the_delivered_nats_bus(tmp_path, bus_url):
+    from dotenv import dotenv_values
+
+    from scripts.events.config import BusConfig
+
+    grant = {
+        "id": "worker",
+        "ledger_credential": "fixture",
+        "redis_url": "redis://redis.example.test/0",
+        "nats_credentials": "fixture bus credential",
+        "bus_url": bus_url,
+        "bus_scoped": True,
+        "bus_swarms": ["rig"],
+    }
+    path = auth.write_env(tmp_path, "https://hive.example.test", grant)
+    saved = dotenv_values(path)
+    config = BusConfig.from_environ(saved)
+    assert config.backend == "nats"
+    assert config.url == bus_url
+    assert saved["AGENTIHOOKS_BUS_BIND"] == "1"
+    assert saved["AGENTIHOOKS_BUS_SCOPED"] == "1"
+    assert saved["AGENTIHOOKS_BUS_SWARMS"] == "rig"
+    assert saved["AGENTIHOOKS_BUS_CREDENTIALS"] == str(tmp_path / auth.NATS_CREDS_FILE)
 
 
 def test_rejoining_tightens_an_existing_env_file(tmp_path):
@@ -507,3 +537,55 @@ def test_redis_client_connects_over_tls_for_a_rediss_url(redis_lib, monkeypatch)
 
     assert client.connection_pool.connection_class is redis_lib.connection.SSLConnection
     assert client.connection_pool.connection_kwargs["username"] == "hive-a"
+
+
+def test_a_member_credential_runs_a_checked_wait_and_a_cover_and_no_other_writes(monkeypatch):
+    import fakeredis
+    from redis.exceptions import NoPermissionError
+
+    from scripts.swarm import idle, prerequisite_wait, stage_cover
+
+    server = fakeredis.FakeServer()
+    admin = fakeredis.FakeRedis(server=server, decode_responses=True)
+    admin.acl_setuser(
+        "hive-m1",
+        enabled=True,
+        nopass=True,
+        categories=auth.ACL_CATEGORIES,
+        keys=auth._acl_keys("m1"),
+        channels=auth.ACL_PATTERNS,
+    )
+    reads = {"GET", "HGET", "HGETALL", "HEXISTS", "EXISTS", "SMEMBERS", "SISMEMBER", "MGET", "HKEYS", "TTL", "PTTL"}
+
+    # fakeredis drops %R~ read selectors, so reads the member's %R~ grant allows go through the admin client.
+    class Member(fakeredis.FakeRedis):
+        def execute_command(self, *args, **options):
+            if str(args[0]).upper() in reads:
+                return admin.execute_command(*args, **options)
+            return super().execute_command(*args, **options)
+
+    member = Member(server=server, decode_responses=True, username="hive-m1")
+    member.auth("", username="hive-m1")
+    assert member.acl_whoami() == "hive-m1"
+    assert f"%R~{ROOT}:*" in auth._acl_keys("m1")
+    monkeypatch.setenv("AGENTIHOOKS_DEPLOYMENT", "distributed")
+    monkeypatch.setenv("AGENTIHOOKS_HIVE_ID", "m1")
+    monkeypatch.setenv("AGENTIHOOKS_HIVE_REDIS_URL", "redis://hive.example:6380/2")
+    swarm = store.RedisStore(member)
+    agent = store.AgentRecord(name="engineer@0001-0001", lane="eng", task="t1")
+    held = {"kind": "checks", "target": "https://github.com/o/r/pull/1"}
+    admin.hset(prerequisite_wait.key("proof"), "t1", "{}")
+
+    prerequisite_wait.admit(swarm, "proof", agent, held, None, 1_000, False)
+    idle.declare_wait(member, "proof", agent.name, 61_000, "checks", 1_000, on=held)
+    covered = stage_cover.cover(
+        swarm, "proof", {"phases": [{"id": "p1"}]}, stage_cover.Request("build", "phases/p1", "fix", "d"), 1_000
+    )
+
+    assert not admin.hexists(prerequisite_wait.key("proof"), "t1")
+    assert idle.wait(member, "proof", agent.name)["on"] == held
+    assert admin.exists(f"{ROOT}:hive:m1:swarm:proof:wait:{agent.name}")
+    assert json.loads(admin.hget(swarm.key("proof", stage_cover.KEY), "build")) == covered
+    for forbidden in (f"{ROOT}:hive:m2:swarm:proof:wait:{agent.name}", swarm.key("proof", "config")):
+        with pytest.raises(NoPermissionError):
+            member.set(forbidden, "write")

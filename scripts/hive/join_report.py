@@ -24,6 +24,8 @@ REQUIRED = (
 )
 OPTIONAL = ("brain",)
 HEARTBEAT_MS = 180_000
+LEDGER_RETRY_MS = 30_000
+LEDGER_CHECKS = ("ledger_join", "ledger_write")
 GONE = "agent gone from the swarm"
 ENDED = ("finished", "ended")
 
@@ -34,15 +36,25 @@ def key(hive: str) -> str:
 
 def graded(report: dict) -> dict:
     checks = report["checks"]
-    misses = {name: {"required": name in REQUIRED} for name in (*REQUIRED, *OPTIONAL) if checks.get(name) is not True}
+    errors = checks.get("errors", {})
+    misses = {
+        name: {"required": name in REQUIRED, **({"reason": errors[name]} if name in errors else {})}
+        for name in (*REQUIRED, *OPTIONAL)
+        if checks.get(name) is not True
+    }
     grade = "failed" if any(miss["required"] for miss in misses.values()) else "partial" if misses else "complete"
     return {**report, "grade": grade, "misses": misses}
 
 
+def miss_label(name: str, miss: dict) -> str:
+    kind = "required" if miss["required"] else "optional"
+    if reason := miss.get("reason"):
+        kind += ": " + " ".join(str(part) for part in (reason["error"], reason["status"], reason["message"]) if part)
+    return f"{name} ({kind})"
+
+
 def summary(report: dict) -> str:
-    misses = ", ".join(
-        f"{name} ({'required' if miss['required'] else 'optional'})" for name, miss in report["misses"].items()
-    )
+    misses = ", ".join(miss_label(name, miss) for name, miss in report["misses"].items())
     line = f"{report['agent']}\t{report['grade']}\tmisses={misses or 'none'}\theartbeat={report['heartbeat_at']}"
     if "ended_at" in report:
         line += f"\texit={report['exit_reason']}\tstatus={report['status']}"
@@ -116,6 +128,59 @@ def cheap_checks(redis: "Redis", report: dict) -> dict:
     from scripts.hive.join_checks import cheap
 
     return cheap(redis, report)
+
+
+def claim_ledger_retry(redis: "Redis", agent: "AgentRecord", session: str, at: int) -> dict:
+    from redis.exceptions import WatchError
+
+    with redis.pipeline() as pipe:
+        try:
+            pipe.watch(key(host(agent)))
+            report = read(pipe, agent)
+            if report.get("session_id") != session or report.get("status") != "running":
+                return {}
+            if at - report.get("ledger_checked_at", report["started_at"]) < LEDGER_RETRY_MS:
+                return {}
+            if all(report["checks"].get(name) is True for name in LEDGER_CHECKS):
+                return {}
+            claimed = {**report, "ledger_checked_at": at}
+            pipe.multi()
+            pipe.hset(key(host(agent)), agent.execution_id, json.dumps(claimed))
+            pipe.execute()
+            return claimed
+        except WatchError:
+            return {}
+
+
+def retry_ledger(redis: "Redis", agent: "AgentRecord", session: str, at: int) -> None:
+    from redis.exceptions import WatchError
+
+    from scripts.hive.join_checks import ledger_checks
+
+    report = claim_ledger_retry(redis, agent, session, at)
+    if not report:
+        return
+    checks = ledger_checks(report)
+    with redis.pipeline() as pipe:
+        try:
+            pipe.watch(key(host(agent)))
+            raw = pipe.hget(key(host(agent)), agent.execution_id)
+            current = json.loads(raw) if raw else {}
+            if current.get("session_id") != session or current.get("generation") != agent.generation:
+                return
+            if current.get("status") != "running" or current.get("ledger_checked_at") != at:
+                return
+            errors = checks.get("errors", {})
+            recovered = {name: current["checks"].get(name) is True or checks[name] for name in LEDGER_CHECKS}
+            merged = {name: value for name, value in current["checks"].items() if name != "errors"} | recovered
+            if kept := {name: error for name, error in errors.items() if not recovered[name]}:
+                merged["errors"] = kept
+            updated = graded({**current, "checks": merged, "ledger_checked_at": at})
+            pipe.multi()
+            pipe.hset(key(host(agent)), agent.execution_id, json.dumps(updated))
+            pipe.execute()
+        except WatchError:
+            return
 
 
 def running_executions(redis: "Redis", reports: list[dict]) -> set[tuple[str, str, int]]:

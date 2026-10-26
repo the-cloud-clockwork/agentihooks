@@ -65,3 +65,22 @@ def as_services(server: object) -> Services:
             max_body=getattr(server, "MAX_BODY", 0),
         ),
     )
+
+
+def task_rows(entry_of) -> object:
+    def rows(slug: str, since: tuple | None = None) -> tuple:
+        entry = entry_of()
+        if since is not None and since[0] == entry.generation:
+            return since
+        return entry.generation, entry.state.get("_meta", {}), entry.state.get("tasks") or []
+
+    return rows
+
+
+def serve_document(monkeypatch, repository: object, document: dict) -> None:
+    from scripts.swarm_ledger.api import task_list
+
+    entry = SimpleNamespace(generation=1, state=document, views={})
+    monkeypatch.setattr(repository, "current", lambda slug: entry)
+    monkeypatch.setattr(repository, "task_rows", task_rows(lambda: entry))
+    monkeypatch.setattr(task_list, "HELD", {})

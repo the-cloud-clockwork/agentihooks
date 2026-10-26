@@ -21,6 +21,11 @@ SHALLOW_PREFLIGHT_CHECKOUT = {
 FULL_PREFLIGHT_CHECKOUT = {"fetch-depth": 0}
 PREFLIGHT_FETCH = 'git fetch --no-tags origin "$GITHUB_SHA"'
 SHALLOW_PREFLIGHT_FETCH = 'git fetch --no-tags --depth 1 origin "$GITHUB_SHA"'
+EQUIVALENCE = ("equivalence.yml", "ledger-equivalence")
+EQUIVALENCE_WORDS = ("GRADER", "GITHUB_ENV", "GITHUB_PATH", "equivalence.sh")
+EQUIVALENCE_TUNABLE = ("steps", "timeout-minutes")
+UNUSED_SELECT_OUTPUTS = ("files_1", "files_2", "files_3")
+FROZEN = "tests/registry/FROZEN_GATES.json"
 
 
 def _gates(workflows: dict[str, dict]) -> list[tuple[str, str, dict]]:
@@ -50,7 +55,7 @@ def runners(policy: object = None) -> list[str]:
 
 def reuse_jobs(policy: object = None) -> list[dict]:
     jobs = []
-    for factory in (ci_reuse.reuse_job, ci_reuse.paged_reuse_job):
+    for factory in (ci_reuse.reuse_job, ci_reuse.paged_reuse_job, ci_reuse.retried_reuse_job):
         for runner in runners(policy):
             job = factory()
             if runner != job["runs-on"]:
@@ -89,19 +94,28 @@ def _aggregator_problems(
             and base_id == "gate-required"
             and head_job.get("steps")
             in [
-                finish(
-                    rerun(
-                        shape(
-                            required(
-                                ci_reuse.gate_steps(
-                                    **form,
-                                    summary=summary,
-                                    docs="docs" in ci_wiring.needs_of(head_job),
-                                    watcher_loss=watcher_loss,
+                diagnostic(
+                    forward(
+                        finish(
+                            rerun(
+                                shape(
+                                    required(
+                                        ci_reuse.gate_steps(
+                                            **form,
+                                            summary=summary,
+                                            docs="docs" in ci_wiring.needs_of(head_job),
+                                            watcher_loss=watcher_loss,
+                                        )
+                                    )
                                 )
                             )
                         )
                     )
+                )
+                for diagnostic, forward in (
+                    (list, list),
+                    (ci_reuse.selection_diagnostic, list),
+                    (ci_reuse.selection_diagnostic, ci_reuse.forwarded_stats),
                 )
                 for form in (
                     {},
@@ -142,6 +156,7 @@ def _duration_problems(base: dict, head: dict) -> list[str]:
     previous = base["jobs"].get("durations", base["jobs"].get("select", {}))
     producer = head["jobs"].get("durations", head["jobs"].get("select", {}))
     prefix = ci_reuse.duration_provenance_steps()
+    retried = ci_reuse.retried_duration_provenance_steps()
     problems = []
     if "durations" in base["jobs"] and "durations" not in head["jobs"]:
         selection = base["jobs"].get("select", {})
@@ -151,13 +166,30 @@ def _duration_problems(base: dict, head: dict) -> list[str]:
             "outputs": previous.get("outputs", {}) | selection.get("outputs", {}),
             "timeout-minutes": selection.get("timeout-minutes"),
         }
-    if producer.get("steps", [])[: len(prefix)] != prefix:
+    bounds = {"env": {"GIT_HTTP_LOW_SPEED_LIMIT": "1000", "GIT_HTTP_LOW_SPEED_TIME": "60"}}
+    admitted = [variant for steps in (prefix, retried) for variant in (steps, [steps[0] | bounds, *steps[1:]])]
+    if producer.get("steps", [])[: len(prefix)] not in admitted:
         problems.append("The head skips reuse without protected durations provenance.")
     mutable = {"steps", "if", "runs-on"}
+    selection_permissions = ({"contents": "read"}, {"contents": "read", "actions": "read"})
+    if (
+        "durations" not in head["jobs"]
+        and previous.get("permissions") in selection_permissions
+        and producer.get("permissions") in selection_permissions
+    ):
+        mutable.add("permissions")
+    outputs = previous.get("outputs") or {}
+    trimmed = {key: value for key, value in outputs.items() if key not in UNUSED_SELECT_OUTPUTS}
     problems += [
         f"The head changes the durations provenance context {field}."
         for field in sorted((set(previous) | set(producer)) - mutable)
         if previous.get(field) != producer.get(field)
+        and not (
+            field == "outputs"
+            and producer is head["jobs"].get("select")
+            and set(UNUSED_SELECT_OUTPUTS).issubset(outputs)
+            and producer.get(field) == trimmed
+        )
     ]
     problems += [
         f"The head changes the global provenance context {field}."
@@ -175,6 +207,13 @@ def grade(
     today: date,
     policy: object = None,
 ) -> list[str]:
+    from scripts import ci_gate_queue
+
+    try:
+        base_workflows = ci_gate_queue.normalize(base_workflows)
+        head_workflows = ci_gate_queue.normalize(head_workflows)
+    except ValueError as error:
+        return [str(error)]
     base_gates, head_gates = _gates(base_workflows), _gates(head_workflows)
     if len(base_gates) != 1:
         return [f"The base holds {len(base_gates)} jobs named {GATE}; nothing protected can grade."]
@@ -275,6 +314,59 @@ def _checkout_forms(preflight: dict) -> list[dict]:
     return forms
 
 
+def _equivalence_problems(base_workflows: dict[str, dict], head_workflows: dict[str, dict]) -> list[str]:
+    file, job_id = EQUIVALENCE
+    base, head = base_workflows.get(file) or {}, head_workflows.get(file) or {}
+    base_job, head_job = ((workflow.get("jobs") or {}).get(job_id) or {} for workflow in (base, head))
+    base_steps, head_steps = base_job.get("steps") or [], head_job.get("steps") or []
+    graded = [index for index, step in enumerate(base_steps) if "$GRADER" in str(step.get("run"))]
+    if not graded:
+        return []
+    end = graded[-1] + 1
+    if (
+        head_steps[:end] != base_steps[:end]
+        or any(word in json.dumps(step) for step in head_steps[end:] for word in EQUIVALENCE_WORDS)
+        or {key: value for key, value in head.items() if key != "jobs"}
+        != {key: value for key, value in base.items() if key != "jobs"}
+        or {key: value for key, value in head_job.items() if key not in EQUIVALENCE_TUNABLE}
+        != {key: value for key, value in base_job.items() if key not in EQUIVALENCE_TUNABLE}
+    ):
+        return ["The head changes the ledger equivalence grading; the protected branch grades with its own."]
+    return []
+
+
+def _blob(root: Path, rev: str, path: str) -> str | None:
+    listing = _git(root, "ls-tree", rev, path).split()
+    return listing[2] if listing[1:2] == ["blob"] else None
+
+
+def _frozen_problems(root: Path, merge_base: str, base: str, head: str) -> list[str]:
+    if _blob(root, base, FROZEN) is None:
+        return []
+    registry = json.loads(_git(root, "show", f"{base}:{FROZEN}"))
+
+    def changed(path: str) -> bool:
+        return _blob(root, head, path) not in {_blob(root, merge_base, path), _blob(root, base, path)}
+
+    if changed(FROZEN):
+        kept = json.loads(_git(root, "show", f"{head}:{FROZEN}")) if _blob(root, head, FROZEN) else {}
+        return [
+            f"The head drops the frozen gate file {path} from {FROZEN}; a frozen file stays frozen."
+            for path in sorted(set(registry) - set(kept))
+        ] + [
+            f"The head changes {FROZEN} and the frozen gate file {path} together; "
+            "land the registry by its own pull request first."
+            for path in sorted(registry)
+            if changed(path)
+        ]
+    return [
+        f"The head changes the frozen gate file {path} to content {FROZEN} on the base does not accept; "
+        "announce its blob there by its own pull request first."
+        for path, accepted in sorted(registry.items())
+        if changed(path) and _blob(root, head, path) not in accepted
+    ]
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--root", default=".")
@@ -298,6 +390,8 @@ def main(argv: list[str] | None = None) -> int:
     preflight = _preflight_problems(tip_workflows, head_workflows)
     governed = {"branch-lanes.yml"} if "branch-lanes.yml" in tip_workflows and not preflight else set()
     problems += preflight
+    problems += _equivalence_problems(tip_workflows, head_workflows)
+    problems += _frozen_problems(root, merge_base, args.base, args.head)
     problems += [
         f"{file}: {problem}"
         for file, workflow in head_workflows.items()

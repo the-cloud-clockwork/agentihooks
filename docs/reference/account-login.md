@@ -124,8 +124,15 @@ CAPTCHA, browser failure or a timeout ends the native login attempt and releases
 only the launching process's slot claim. The master then takes normal
 subscription token routing. This fallback has no Remote Control and no forced
 claude.ai login; Remote Control requires a native login. Held slots remain
-untouched. No step sends email. Browser outcomes are recorded in the slot's
-`login-notifications.jsonl` with transport `inbox`, without credentials.
+untouched. After a browser CAPTCHA or failure, or when no slot can take the
+browser login, the token branch sends the operator one email through the
+operator email module. One master agent name is one login attempt: a repeated
+launch of the same master sends no second email, even after a later failure,
+and a respawned master with a new name gets its own email. The current session
+and browser success paths send no email. Browser outcomes are recorded in the
+slot's `login-notifications.jsonl` with transport `inbox`; the email is
+recorded in the master token folder's `login-notifications.jsonl` with
+transport `email` and the agent name. Neither holds credentials.
 
 At 98% of the week or 99% of five hours the quota policy hands the master's seat
 off. The successor runs the same chain, returning to a valid native login when
@@ -136,6 +143,40 @@ at each master launch and Stop where `OPENBAO_URL` and `OPENBAO_TOKEN` are set,
 the latest grant native Claude saved is copied to that slot's record with its
 owner epoch, never replacing a newer copy; a launch whose home has no login
 restores it from there.
+
+## Standalone sessions on a claude ai login
+
+```bash
+agentihooks claude --route claude-ai
+agentihooks init-agent --dir ~/dev/project -- --route claude-ai
+```
+
+Route `claude-ai` launches a normal standalone session, outside any swarm seat,
+on one of the stored master claude ai logins instead of a quota token. It works
+whether or not `AGENTIHOOKS_MASTER_CLAUDE_LOGIN` is on.
+
+- **Choice.** Logins are tried in `AGENTIHOOKS_MASTER_LOGIN_ORDER` (a comma
+  list of emails, for example
+  `nestor.colt@gmail.com,thecloudclockwork@gmail.com`); logins it does not
+  name follow in slot order. A login with 10% or less left on its five hour or
+  week window (the shared drain floor) is skipped, and so is one whose
+  `claude auth status --text` check fails. A slot with only an OpenBao copy is
+  restored into its home first, unless a master holds that slot.
+- **Master slots stay free.** The session never writes the slot's claim, so a
+  master launch takes the same slot as if the session were not there. It runs
+  in its own home, `$AGENTIHOOKS_HOME/claude-ai/<name>/claude`, where `<name>` is
+  the agent name as an account slug (`s-251025` becomes `s_251025`, and
+  `pid_<pid>` with no agent name), built from its rendered profile and carrying
+  the slot's account. `CLAUDE_SECURESTORAGE_CONFIG_DIR` points at the slot
+  home, so the grant is never copied: every session on that login reads and
+  writes one credential store, and a rotated refresh token never leaves a stale
+  second copy behind. Whether native Claude serializes two refreshes that start
+  at the same moment from different config homes is not yet proven live.
+- **Refusal.** With no usable login the launch prints each login's reason and
+  exits 3. It never falls back to a quota token or bare Claude.
+
+The session gets `--settings {"forceLoginMethod":"claudeai"}` and the same
+credential scrubbing and settings refusals as the master route.
 
 ## Codex login
 

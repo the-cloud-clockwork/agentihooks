@@ -10,7 +10,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from hooks.context import account_sessions, broadcast
+from hooks.context import account_sessions, broadcast, profile_chain
 from scripts import claude_quota_balancer as balancer
 from scripts import codex_router, github_app_cli, master_claude_login, session_bands
 from scripts.hive import quota_refresh, registry
@@ -21,6 +21,7 @@ from scripts.swarm.commands import hive_id
 if TYPE_CHECKING:
     from redis import Redis
 
+    from scripts.hive.orders import Consumer
     from scripts.swarm.runtime import HerdrRuntime
     from scripts.swarm_v2.runtime.local import LocalHerdrRuntime
 
@@ -75,8 +76,9 @@ def beat(redis: "Redis", local_id: str) -> None:
     headroom.publish(redis, local_id, beat_ms)
     if not member:
         _refresh_launch_slots(redis, executions)
+    adopt_capabilities(redis, local_id)
     if not fenced:
-        consumer.poll()
+        poll_orders(consumer)
     consumer.poll_commands()
     consumer.sync_workspaces(TTL_SECONDS)
     join_report.heartbeat(redis, local_id, int(time.time() * 1000))
@@ -93,6 +95,31 @@ def beat(redis: "Redis", local_id: str) -> None:
         print(f"hive account slot heartbeat failed ({type(exc).__name__}: {exc}); retrying next beat", file=sys.stderr)
     publish_config(redis, local_id, report["repos"])
     close_dead_tabs(set(hosted["names"]))
+
+
+def poll_orders(consumer: "Consumer") -> None:
+    from scripts.swarm_ledger import authority_context
+
+    member = consumer.hive == os.environ.get("AGENTIHOOKS_HIVE_ID")
+    pending = not member and consumer.store.redis.xlen(consumer.orders.stream(consumer.hive))
+    secret = authority_context.hosted() if pending else None
+    if not secret:
+        consumer.poll()
+        return
+    kept = os.environ.get("SWARM_SECRET")
+    try:
+        with authority_context.bound(secret):
+            consumer.poll()
+    finally:
+        if kept is not None:
+            os.environ["SWARM_SECRET"] = kept
+
+
+def fill_operator_env() -> None:
+    from scripts import operator_env
+
+    if hive_id() != os.environ.get("AGENTIHOOKS_HIVE_ID"):
+        operator_env.fill(os.environ)
 
 
 def _index_hive(redis: "Redis", local_id: str) -> None:
@@ -122,6 +149,13 @@ def _slot_errors() -> tuple[type[Exception], ...]:
     from scripts.hive import account_slots
 
     return NatsError, TimeoutError, account_slots.Unavailable
+
+
+def adopt_capabilities(redis: "Redis", local_id: str) -> None:
+    """Launches inherit the daemon environment, so a render sees the capabilities this hive's record declares."""
+    os.environ.pop(profile_chain.HIVE_CAPABILITIES, None)
+    declared = json.loads(redis.hget(registry.key(local_id), "capabilities") or "[]")
+    os.environ[profile_chain.HIVE_CAPABILITIES] = ",".join(declared)
 
 
 def adopt_caps(redis: "Redis", report: dict) -> None:
@@ -192,7 +226,7 @@ def run(connect: Callable[[], tuple["Redis", "Redis"]]) -> None:
     from redis.exceptions import ConnectionError, TimeoutError
 
     lost = (ConnectionError, TimeoutError)
-    local_id = hive_id()
+    fill_operator_env()
     quota_refresh.refresh(os.environ)
     worker, attempted_at = None, time.time()
     renewed = time.time()
@@ -201,6 +235,7 @@ def run(connect: Callable[[], tuple["Redis", "Redis"]]) -> None:
         stop = threading.Event()
         try:
             redis, waiter = connect()
+            local_id = hive_id()
             threading.Thread(target=publish_headroom, args=(redis, waiter, local_id, stop), daemon=True).start()
             while True:
                 started = time.monotonic()
@@ -346,7 +381,14 @@ def _subscriptions(environ, counts: dict, now: float) -> tuple[list, dict]:
             if result
             else _reading(balancer.QuotaWindow(), balancer.QuotaWindow(), None)
         )
-    pool = codex_router.routed([account for account in codex_router.accounts(environ) if account.signed_in], environ)
+    pool = codex_router.routed(
+        [
+            account
+            for account in codex_router.accounts(environ)
+            if account.signed_in and not codex_router.refusal(account, environ)
+        ],
+        environ,
+    )
     readings = codex_router.quotas(pool, environ)
     for account in pool:
         reading = readings.get(account.name)

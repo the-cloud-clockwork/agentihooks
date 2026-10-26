@@ -46,12 +46,12 @@ def job(name, status="completed", conclusion="success", runner="anton-oss-light-
     }
 
 
-def lost(name="queue-fail-fast", started=None):
+def lost(name="Gate — Required", started=None):
     return job(name, "in_progress", None, "anton-oss-light-gone", started or ago(60))
 
 
 def gate():
-    return job("Gate — Required", "queued", None, None)
+    return job("Queue gate summary", "queued", None, None)
 
 
 def stalled_run():
@@ -123,17 +123,41 @@ def test_a_young_live_unassigned_hosted_or_finished_job_is_not_lost(candidate):
     assert ci_lost_runner.lost_jobs([candidate], RUNNERS, NOW, GRACE) == []
 
 
+def test_a_job_whose_every_step_completed_on_an_absent_runner_is_not_lost():
+    candidate = {**lost("unit (3.12, 2)", stamp(NOW - GRACE)), "steps": [{"status": "completed"}] * 2}
+    assert ci_lost_runner.lost_jobs([candidate], RUNNERS, NOW, GRACE) == []
+
+
+@pytest.mark.parametrize(
+    "steps",
+    [None, [], [{"status": "completed"}, {"status": "in_progress"}], [{"status": "completed"}, {"status": "queued"}]],
+)
+def test_a_job_with_no_steps_or_an_unfinished_step_on_an_absent_runner_is_lost(steps):
+    candidate = lost("unit (3.12, 2)", stamp(NOW - GRACE))
+    if steps is not None:
+        candidate["steps"] = steps
+    assert ci_lost_runner.lost_jobs([candidate], RUNNERS, NOW, GRACE) == [candidate]
+
+
 def test_job_ids_map_base_names_to_workflow_keys():
+    from scripts import ci_gate_queue
+
     ids = ci_lost_runner.job_ids(WORKFLOW)
-    assert ids["Gate — Required"] == "gate-required"
-    assert ids["queue-fail-fast"] == "queue-fail-fast"
+    if WORKFLOW["jobs"]["gate-required"]["name"] == "Gate — Required":
+        assert ids["Gate — Required"] == "gate-required"
+        assert ids["queue-fail-fast"] == "queue-fail-fast"
+    else:
+        assert WORKFLOW["jobs"]["gate-required"]["name"] == ci_gate_queue.SUMMARY_NAME
+        assert WORKFLOW["jobs"]["queue-fail-fast"]["name"] == ci_gate_queue.GATE_NAME
+        assert ids["Gate — Required"] == "queue-fail-fast"
+        assert ids["Queue gate summary"] == "gate-required"
     assert ids["unit"] == "unit"
     assert ids["shard-check"] == "shard-check"
 
 
 def test_a_run_waiting_only_on_its_lost_job_is_stalled():
     jobs = stalled_run()
-    assert ci_lost_runner.stalled(jobs, [jobs[3]], WORKFLOW) == (True, "runner lost on queue-fail-fast")
+    assert ci_lost_runner.stalled(jobs, [jobs[3]], WORKFLOW) == (True, "runner lost on Gate — Required")
 
 
 def test_a_lost_unit_shard_blocks_its_matrix_judges():
@@ -158,7 +182,7 @@ def test_an_unfinished_job_that_does_not_need_the_lost_job_keeps_the_run_going(s
 
 def test_a_lost_job_missing_from_the_workflow_blocks_no_queued_job():
     jobs = [lost("renamed-job"), gate()]
-    assert ci_lost_runner.stalled(jobs, [jobs[0]], WORKFLOW) == (False, "Gate — Required still waits for a runner")
+    assert ci_lost_runner.stalled(jobs, [jobs[0]], WORKFLOW) == (False, "Queue gate summary still waits for a runner")
 
 
 def test_a_first_attempt_that_only_lost_its_runner_is_rerun():
@@ -275,7 +299,7 @@ def test_a_stalled_first_attempt_is_cancelled_then_rerun_once(monkeypatch, no_sl
         "run": 7,
         "attempt": 1,
         "action": "rerun",
-        "reason": "runner lost on queue-fail-fast; first attempt lost its runner",
+        "reason": "runner lost on Gate — Required; first attempt lost its runner",
     }
     assert api.posts() == [post(f"{RUNS}/cancel"), post(f"{RUNS}/rerun-failed-jobs")]
     assert api.calls.count(RUNNER_LIST) == 1
@@ -288,7 +312,7 @@ def test_a_second_loss_is_cancelled_and_files_nothing(monkeypatch, no_sleep):
         "run": 7,
         "attempt": 2,
         "action": "cancel",
-        "reason": "runner lost on queue-fail-fast; attempt 2 lost its runner again",
+        "reason": "runner lost on Gate — Required; attempt 2 lost its runner again",
     }
     assert api.posts() == [post(f"{RUNS}/cancel")]
 
@@ -300,7 +324,7 @@ def test_a_stalled_run_with_a_real_test_failure_is_cancelled_and_never_rerun(mon
         "run": 7,
         "attempt": 1,
         "action": "cancel",
-        "reason": "runner lost on queue-fail-fast; failed on its own: unit (3.12, 4)",
+        "reason": "runner lost on Gate — Required; failed on its own: unit (3.12, 4)",
     }
     assert api.posts() == [post(f"{RUNS}/cancel")]
 
@@ -312,7 +336,7 @@ def test_a_run_that_will_not_end_is_reported_and_not_rerun(monkeypatch, no_sleep
         "run": 7,
         "attempt": 1,
         "action": "cancel",
-        "reason": "runner lost on queue-fail-fast; the run did not end after force cancel",
+        "reason": "runner lost on Gate — Required; the run did not end after force cancel",
     }
     assert api.posts() == [post(f"{RUNS}/cancel"), post(f"{RUNS}/force-cancel")]
 
@@ -476,7 +500,7 @@ def test_main_confirms_every_suspect_after_one_wait_then_acts(monkeypatch, capsy
 
 
 def test_main_leaves_a_loss_that_clears_on_the_second_read(monkeypatch, capsys, no_sleep):
-    named_runs(monkeypatch, [*stalled_run()[:3], job("queue-fail-fast", "in_progress", None), gate()])
+    named_runs(monkeypatch, [*stalled_run()[:3], job("Gate — Required", "in_progress", None), gate()])
     assert ci_lost_runner.main(["--repo", "o/r", "--run-id", "7", "--run-id", "8"]) == 0
     reports = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
     assert reports[1] == {
@@ -680,7 +704,7 @@ def test_a_refused_or_timed_out_cluster_read_is_an_error_never_a_loss(monkeypatc
 def test_main_in_cluster_mode_acts_on_a_fresh_loss_after_a_short_confirmation(monkeypatch, capsys, no_sleep):
     pages = {
         RUNS: [json.dumps(RUN), json.dumps(RUN), json.dumps({**RUN, "status": "completed"})],
-        JOBS: [lines({**CLUSTER["job"], "name": "queue-fail-fast", "started_at": ago(0.1)}, gate())] * 2,
+        JOBS: [lines({**CLUSTER["job"], "name": "Gate — Required", "started_at": ago(0.1)}, gate())] * 2,
     }
     api = Api(pages)
     monkeypatch.setattr(ci_lost_runner, "_api", api)

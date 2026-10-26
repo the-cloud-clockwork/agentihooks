@@ -38,7 +38,10 @@ JOBS = [
 
 
 def _workflow_jobs():
-    return yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())["jobs"]
+    from scripts import ci_gate_queue
+
+    workflow = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())
+    return ci_gate_queue.normalize({"test.yml": workflow})["test.yml"]["jobs"]
 
 
 def test_seconds_reads_github_timestamps_as_utc():
@@ -67,6 +70,19 @@ def test_a_stage_spans_first_job_creation_to_last_job_end():
         "mutation": 600,
         "brand-new": 10,
     }
+
+
+def test_early_queue_gating_excludes_the_watcher_and_budgets_the_diagnostic_summary():
+    jobs = [
+        _job("Gate — Required", "00:00", "05:00"),
+        _job("unit (3.12, 1)", "00:10", "04:59"),
+        _job("Queue gate summary", "05:02", "05:05"),
+    ]
+    assert ci_budget.stage_of("Queue gate summary") == "test-summary"
+    assert ci_budget.stages(jobs) == {"unit": 289.0, "test-summary": 3.0}
+    assert ci_budget.stages(jobs[:2]) == {"gate-required": 300.0, "unit": 289.0}
+    jobs[-1]["name"] = "test-summary"
+    assert ci_budget.stages(jobs)["gate-required"] == 300.0
 
 
 def test_report_orders_stages_slowest_first_then_by_name():

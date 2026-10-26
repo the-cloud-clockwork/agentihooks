@@ -57,11 +57,12 @@ class FileLedger(LedgerClient):
 
 
 @pytest.fixture
-def env(monkeypatch, tmp_path):
+def env(monkeypatch, memory_path):
     import fakeredis
 
-    monkeypatch.setattr(core, "LEDGER_DIR", tmp_path)
-    monkeypatch.setenv("LEDGER_DIR", str(tmp_path))
+    monkeypatch.setattr(core, "LEDGER_DIR", memory_path)
+    monkeypatch.setenv("LEDGER_DIR", str(memory_path))
+    monkeypatch.setenv("AGENTIHOOKS_SWARM_SNAPSHOT_MINUTES", "0")
     content = {"title": "Watched work", "overview": "o", "phases": [{"title": "One", "description": "d"}]}
     assert new_ledger.create(WATCHED, content)
     store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
@@ -71,12 +72,12 @@ def env(monkeypatch, tmp_path):
     monkeypatch.setattr(swarm_cli, "HerdrRuntime", lambda: rt)
     monkeypatch.setattr(swarm_cli.timer, "ensure", lambda binary: True)
     monkeypatch.setattr(swarm_cli.delivery, "HerdrMessenger", lambda: FakeHerdr({}))
-    monkeypatch.setattr(doctor, "linked_bundle", lambda: tmp_path / "bundle")
+    monkeypatch.setattr(doctor, "linked_bundle", lambda: memory_path / "bundle")
     monkeypatch.setattr(doctor.detect, "readers", lambda *args, **kwargs: {})
     monkeypatch.setattr(doctor.loop, "speed", lambda *args: [])
     monkeypatch.setattr("hooks.context.broadcast.session_name", lambda pid: "")
     assert swarm_cli.main([WATCHED, "create", "--repo", "/repo"]) == 0
-    return store, rt, tmp_path
+    return store, rt, memory_path
 
 
 def state(slug):
@@ -670,6 +671,9 @@ def test_the_swarm_tick_reports_a_finding_and_task_turns_its_verdict_into_ledger
     assert set(tasks) == {"troubleshoot", "tune"}
     assert tasks["tune"]["depends_on"] == [tasks["troubleshoot"]["id"]]
     assert f"agentihooks doctor {WATCHED} measure {STALE.id}" in tasks["tune"]["contract"]["check"]
+    assert doctor.main([WATCHED, "task", STALE.id, "--fix", "tune"]) == 1
+    assert "still open" in capsys.readouterr().err
+    assert len(state(DOCTOR)["tasks"]) == 2
     capsys.readouterr()
     assert doctor.main([WATCHED, "measure", STALE.id]) == 0
     assert capsys.readouterr().out == f"{STALE.id} 40\n"
@@ -742,6 +746,7 @@ def test_a_doctor_start_leaves_the_first_telemetry_pass_to_the_scheduled_tick(en
         "master prompt",
         "ci",
         "dev workflow",
+        "feature",
         "trace",
         "runtime storage",
         "scheduled tick",
@@ -968,3 +973,20 @@ def test_other_measures_read_every_detector_at_one_instant(env, monkeypatch, cap
     output = capsys.readouterr()
     assert output.out == f"{STALE.id} {STALE.measure}\n"
     assert output.err == "the inbox detector failed: ZeroDivisionError: division by zero\n"
+
+
+def test_the_task_command_gives_a_returned_finding_a_fresh_pair_once_its_earlier_pair_is_done(env, monkeypatch, capsys):
+    store, rt, _ = env
+    detecting(monkeypatch, STALE)
+    doctor.main([WATCHED, "start"])
+    assert doctor.main([WATCHED, "verdict", STALE.id, "established", "--note", "checked"]) == 0
+    assert doctor.main([WATCHED, "task", STALE.id, "--fix", "tune"]) == 0
+    earlier = [t["id"] for t in state(DOCTOR)["tasks"]]
+    real = FileLedger.tasks
+    monkeypatch.setattr(FileLedger, "tasks", lambda self, slug: [{**t, "done": True} for t in real(self, slug)])
+    capsys.readouterr()
+    assert doctor.main([WATCHED, "task", STALE.id, "--fix", "code"]) == 0
+    minted = json.loads(capsys.readouterr().out)["tasks"]
+    tasks = {t["id"]: t for t in state(DOCTOR)["tasks"]}
+    assert set(tasks) == {*earlier, *minted} and not set(minted) & set(earlier)
+    assert all(task in tasks[minted[0]]["description"] for task in earlier)

@@ -504,6 +504,225 @@ def test_only_the_canonical_reuse_protocol_is_an_allowed_transition(weakened):
     assert bool(problems) == weakened, problems
 
 
+@pytest.mark.parametrize("bounded", [False, True])
+@pytest.mark.parametrize(
+    "change",
+    [
+        {},
+        {"with": {"ref": "untrusted"}},
+        {"with": {"fetch-depth": 1}},
+        {"with": {"filter": "blob:none"}},
+        {"with": {"repository": "untrusted/repository"}},
+        {"env": {"EXTRA": "1"}},
+        {"env": {"GIT_HTTP_LOW_SPEED_LIMIT": "999"}},
+        {"env": {"GIT_HTTP_LOW_SPEED_TIME": "61"}},
+    ],
+)
+def test_protected_provenance_checkout_accepts_only_exact_git_bounds(bounded, change):
+    from scripts import ci_reuse
+
+    base = _workflow()
+    base["jobs"]["reuse"] = {"if": "github.event_name != 'merge_group' && github.event_name != 'pull_request'"}
+    base["jobs"]["select"] = {"steps": ci_reuse.duration_provenance_steps()}
+    base["jobs"]["gate"]["needs"].append("select")
+    head = copy.deepcopy(base)
+    checkout = head["jobs"]["select"]["steps"][0]
+    if bounded:
+        checkout["env"] = {
+            "GIT_HTTP_LOW_SPEED_LIMIT": "1000",
+            "GIT_HTTP_LOW_SPEED_TIME": "60",
+        }
+    for field, values in change.items():
+        checkout[field] = checkout.get(field, {}) | values
+    problems = gate_protected.grade({"test.yml": base}, {}, {"test.yml": head}, {}, _TODAY)
+    assert problems == (["The head skips reuse without protected durations provenance."] if change else [])
+
+
+@pytest.mark.parametrize(
+    "uses",
+    [
+        "./provenance-grader/.github/actions/retry-upload",
+        "./.github/actions/retry-upload",
+        "./provenance-grader/.github/actions/other-upload",
+    ],
+)
+@pytest.mark.parametrize("bounded", [False, True])
+def test_protected_provenance_admits_only_the_retried_evidence_upload(uses, bounded):
+    from scripts import ci_reuse
+
+    base = _workflow()
+    base["jobs"]["reuse"] = {"if": "github.event_name != 'merge_group' && github.event_name != 'pull_request'"}
+    base["jobs"]["select"] = {"steps": ci_reuse.duration_provenance_steps()}
+    base["jobs"]["gate"]["needs"].append("select")
+    head = copy.deepcopy(base)
+    head["jobs"]["select"]["steps"] = ci_reuse.retried_duration_provenance_steps()
+    if bounded:
+        head["jobs"]["select"]["steps"][0]["env"] = {
+            "GIT_HTTP_LOW_SPEED_LIMIT": "1000",
+            "GIT_HTTP_LOW_SPEED_TIME": "60",
+        }
+    head["jobs"]["select"]["steps"][-1]["uses"] = uses
+    problems = gate_protected.grade({"test.yml": base}, {}, {"test.yml": head}, {}, _TODAY)
+    admitted = uses == "./provenance-grader/.github/actions/retry-upload"
+    assert problems == ([] if admitted else ["The head skips reuse without protected durations provenance."])
+
+
+@pytest.mark.parametrize(
+    ("change", "red"),
+    [
+        ({}, False),
+        ({"drop": ("files_1", "files_2", "files_3")}, False),
+        ({"drop": ("files_1",)}, True),
+        ({"drop": ("files_1", "files_2", "files_3", "legs")}, True),
+        ({"drop": ("legs",)}, True),
+        ({"set": {"files_1": "${{ steps.other.outputs.files_1 }}"}}, True),
+        ({"drop": ("files_1", "files_2", "files_3"), "set": {"extra": "1"}}, True),
+        ({"absent": ("files_3",), "drop": ("files_1", "files_2")}, True),
+    ],
+)
+def test_protected_select_outputs_admit_only_dropping_the_unused_file_outputs(change, red):
+    from scripts import ci_reuse
+
+    base = _workflow()
+    base["jobs"]["reuse"] = {"if": "github.event_name != 'merge_group' && github.event_name != 'pull_request'"}
+    base["jobs"]["select"] = {
+        "outputs": {
+            "legs": "${{ steps.select.outputs.legs }}",
+            **{f"files_{leg}": f"${{{{ steps.select.outputs.files_{leg} }}}}" for leg in (1, 2, 3)},
+        },
+        "steps": ci_reuse.duration_provenance_steps(),
+    }
+    for key in change.get("absent", ()):
+        del base["jobs"]["select"]["outputs"][key]
+    base["jobs"]["gate"]["needs"].append("select")
+    head = copy.deepcopy(base)
+    outputs = head["jobs"]["select"]["outputs"]
+    for key in change.get("drop", ()):
+        del outputs[key]
+    outputs.update(change.get("set", {}))
+    problems = gate_protected.grade({"test.yml": base}, {}, {"test.yml": head}, {}, _TODAY)
+    assert problems == (["The head changes the durations provenance context outputs."] if red else [])
+
+
+def test_protected_durations_outputs_may_not_drop_the_unused_select_file_outputs():
+    from scripts import ci_reuse
+
+    base = _workflow()
+    base["jobs"]["reuse"] = {"if": "github.event_name != 'merge_group' && github.event_name != 'pull_request'"}
+    base["jobs"]["select"] = {
+        "outputs": {f"files_{leg}": f"${{{{ steps.select.outputs.files_{leg} }}}}" for leg in (1, 2, 3)},
+        "steps": ci_reuse.duration_provenance_steps(),
+    }
+    base["jobs"]["gate"]["needs"].append("select")
+    head = copy.deepcopy(base)
+    head["jobs"]["durations"] = {"outputs": {}, "steps": ci_reuse.duration_provenance_steps()}
+    head["jobs"]["gate"]["needs"].append("durations")
+    problems = gate_protected.grade({"test.yml": base}, {}, {"test.yml": head}, {}, _TODAY)
+    assert "The head changes the durations provenance context outputs." in problems
+
+
+def _provenance_workflow(job="select", permissions=None):
+    from scripts import ci_reuse
+
+    workflow = _workflow()
+    workflow["jobs"]["reuse"] = {"if": "github.event_name != 'merge_group' && github.event_name != 'pull_request'"}
+    workflow["jobs"][job] = {
+        "permissions": {"contents": "read"} if permissions is None else permissions,
+        "timeout-minutes": 5,
+        "steps": ci_reuse.duration_provenance_steps(),
+    }
+    workflow["jobs"]["gate"]["needs"].append(job)
+    return workflow
+
+
+@pytest.mark.parametrize("previous", [{"contents": "read"}, {"contents": "read", "actions": "read"}])
+@pytest.mark.parametrize("permissions", [{"contents": "read"}, {"contents": "read", "actions": "read"}])
+def test_selection_permissions_accept_the_current_or_compatible_grader(previous, permissions):
+    base = _provenance_workflow(permissions=previous)
+    head = copy.deepcopy(base)
+    head["jobs"]["select"]["permissions"] = permissions
+    problems = gate_protected.grade({"test.yml": base}, {}, {"test.yml": head}, {}, _TODAY)
+    legacy = ["The head changes the durations provenance context permissions."]
+    assert problems in ([[]] if previous == permissions else [[], legacy])
+
+
+@pytest.mark.parametrize("previous", [{"contents": "read"}, {"contents": "read", "actions": "read"}])
+@pytest.mark.parametrize("permissions", [{"contents": "read"}, {"contents": "read", "actions": "read"}])
+def test_selection_provenance_accepts_exactly_both_read_permission_forms(previous, permissions):
+    base = _provenance_workflow(permissions=previous)
+    head = copy.deepcopy(base)
+    head["jobs"]["select"]["permissions"] = permissions
+    assert gate_protected.grade({"test.yml": base}, {}, {"test.yml": head}, {}, _TODAY) == []
+
+
+@pytest.mark.parametrize("previous", [{"contents": "read"}, {"contents": "read", "actions": "read"}])
+@pytest.mark.parametrize(
+    "permissions",
+    [
+        {},
+        {"actions": "read"},
+        {"contents": "write"},
+        {"contents": "read", "actions": "write"},
+        {"contents": "write", "actions": "read"},
+        {"contents": "read", "checks": "read"},
+        {"contents": "read", "actions": "read", "checks": "read"},
+        "read-all",
+        "write-all",
+    ],
+)
+def test_selection_permissions_reject_every_other_form(previous, permissions):
+    base = _provenance_workflow(permissions=previous)
+    head = copy.deepcopy(base)
+    head["jobs"]["select"]["permissions"] = permissions
+    assert gate_protected.grade({"test.yml": base}, {}, {"test.yml": head}, {}, _TODAY) == [
+        "The head changes the durations provenance context permissions."
+    ]
+
+
+@pytest.mark.parametrize("previous", [{}, {"contents": "write"}, {"contents": "read", "checks": "read"}])
+@pytest.mark.parametrize("permissions", [{"contents": "read"}, {"contents": "read", "actions": "read"}])
+def test_selection_permissions_do_not_rewrite_an_unreviewed_base_form(previous, permissions):
+    base = _provenance_workflow(permissions=previous)
+    head = copy.deepcopy(base)
+    head["jobs"]["select"]["permissions"] = permissions
+    assert gate_protected.grade({"test.yml": base}, {}, {"test.yml": head}, {}, _TODAY) == [
+        "The head changes the durations provenance context permissions."
+    ]
+
+
+@pytest.mark.parametrize("job", ["select", "durations"])
+@pytest.mark.parametrize("permissions", [{"contents": "read"}, {"contents": "read", "actions": "read"}])
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("env", {"UNTRUSTED": "1"}),
+        ("defaults", {"run": {"shell": "sh"}}),
+        ("needs", ["unit"]),
+        ("timeout-minutes", 6),
+        ("outputs", {"untrusted": "value"}),
+        ("environment", "untrusted"),
+        ("container", "untrusted"),
+        ("concurrency", "untrusted"),
+    ],
+)
+def test_selection_permission_compatibility_preserves_other_provenance_context(job, permissions, field, value):
+    base = _provenance_workflow(job, permissions)
+    head = copy.deepcopy(base)
+    head["jobs"][job][field] = value
+    assert gate_protected.grade({"test.yml": base}, {}, {"test.yml": head}, {}, _TODAY) == [
+        f"The head changes the durations provenance context {field}."
+    ]
+
+
+def test_selection_permission_compatibility_does_not_expand_the_durations_job():
+    base = _provenance_workflow("durations")
+    head = copy.deepcopy(base)
+    head["jobs"]["durations"]["permissions"] = {"contents": "read", "actions": "read"}
+    assert gate_protected.grade({"test.yml": base}, {}, {"test.yml": head}, {}, _TODAY) == [
+        "The head changes the durations provenance context permissions."
+    ]
+
+
 @pytest.mark.parametrize("weakened", [False, True])
 @pytest.mark.parametrize("anton", [False, True])
 def test_the_protected_grader_admits_only_the_exact_paged_reuse_variant(weakened, anton):
@@ -527,6 +746,28 @@ def test_the_protected_grader_admits_only_the_exact_paged_reuse_variant(weakened
         step["run"] = step["run"].replace("--page-size 5", "--page-size 100")
     problems = gate_protected.grade({"test.yml": base}, {}, {"test.yml": head}, {}, _TODAY, policy)
     assert bool(problems) == weakened, problems
+
+
+@pytest.mark.parametrize("uses", ["./.github/actions/retry-upload", "./.github/actions/other-upload"])
+@pytest.mark.parametrize("anton", [False, True])
+def test_the_protected_grader_admits_only_the_retried_evidence_upload(uses, anton):
+    from scripts import ci_reuse
+
+    base, head = _protected_pair()
+    head["jobs"]["reuse"] = ci_reuse.retried_reuse_job()
+    policy = _POLICY if anton else None
+    if anton:
+        head["jobs"]["reuse"]["runs-on"] = _anton()
+        [install] = [
+            step for step in head["jobs"]["reuse"]["steps"] if step.get("name") == "Install metadata dependencies"
+        ]
+        install["env"] = {"PYTHONNOUSERSITE": "1"}
+    [publish] = [
+        step for step in head["jobs"]["reuse"]["steps"] if step.get("name") == "Publish protected tested tree evidence"
+    ]
+    publish["uses"] = uses
+    problems = gate_protected.grade({"test.yml": base}, {}, {"test.yml": head}, {}, _TODAY, policy)
+    assert bool(problems) == (uses != "./.github/actions/retry-upload"), problems
 
 
 def test_a_head_cannot_replace_the_protected_reuse_decision():
@@ -933,6 +1174,74 @@ def test_a_head_running_the_summary_under_pipefail_bash_is_green(form, shell, pr
     assert "shell" not in ci_reuse.gate_steps(**form, summary=True)[-1]
 
 
+_SELECTION_DIAGNOSTIC = """selection=$(jq -r '.select.result // ""' <<< "$NEEDS")
+if [[ "$selection" == failure || "$selection" == cancelled ]]; then
+  echo "::error::Test selection $selection; fix selection before downstream test and coverage checks."
+  exit 1
+fi
+"""
+
+
+@pytest.mark.parametrize("diagnostic", [False, True])
+def test_selection_diagnostic_preserves_the_current_required_gate(diagnostic):
+    base = ci_wiring.load(_ROOT)
+    legacy = base["test.yml"]["jobs"]["gate-required"]["steps"][0]
+    legacy["run"] = _without_forwarded_stats(legacy["run"])
+    head = copy.deepcopy(base)
+    if diagnostic:
+        step = head["test.yml"]["jobs"]["gate-required"]["steps"][0]
+        step["run"] = _SELECTION_DIAGNOSTIC + step["run"]
+    config = json.loads((_ROOT / ci_wiring.CONFIG).read_text())
+    actors = json.loads((_ROOT / ".github/workflows/trusted-actors.json").read_text())
+    assert gate_protected.grade(base, config, head, config, _TODAY, actors) == []
+
+
+@pytest.mark.parametrize("diagnostic", [False, True])
+@pytest.mark.parametrize(
+    ("before", "after"),
+    [
+        ('then .value.result == "success"', 'then .value.result != "failure"'),
+        ('"semgrep", "sonar"', '"semgrep"'),
+        ("exit 1", "exit 0"),
+    ],
+)
+def test_selection_diagnostic_cannot_weaken_required_success(diagnostic, before, after):
+    base = yaml.safe_load((Path(__file__).resolve().parents[1] / ".github/workflows/test.yml").read_text())
+    head = copy.deepcopy(base)
+    step = head["jobs"]["gate-required"]["steps"][0]
+    assert before in step["run"]
+    step["run"] = step["run"].replace(before, after)
+    if diagnostic:
+        step["run"] = _SELECTION_DIAGNOSTIC + step["run"]
+    assert "The head's Gate — Required changes its steps; the protected branch grades with its own." in _grade(
+        {"test.yml": head}, base={"test.yml": base}
+    )
+
+
+def test_selection_diagnostic_transform_only_prepends_the_reviewed_script():
+    from scripts import ci_reuse
+
+    steps = ci_reuse.gate_steps(queue_tier=True, promotion=True, consolidated=True, summary=True)
+    original = copy.deepcopy(steps)
+    transformed = ci_reuse.selection_diagnostic(steps)
+    assert transformed == [{**original[0], "run": _SELECTION_DIAGNOSTIC + original[0]["run"]}, *original[1:]]
+    assert steps == original
+
+
+@pytest.mark.parametrize("diagnostic", [False, True])
+@pytest.mark.parametrize("form", _FORMS)
+def test_selection_diagnostic_accepts_legacy_canonical_forms(diagnostic, form):
+    from scripts import ci_reuse
+
+    base, head = _aggregators()
+    base["jobs"]["gate-required"]["steps"] = ci_reuse.gate_steps(**form)
+    steps = ci_reuse.gate_steps(**form)
+    if diagnostic:
+        steps[0]["run"] = _SELECTION_DIAGNOSTIC + steps[0]["run"]
+    head["jobs"]["gate-required"]["steps"] = steps
+    assert _grade({"test.yml": head}, base={"test.yml": base}) == []
+
+
 @pytest.mark.parametrize("weaken", ["trusted output", "no skip guard"])
 def test_a_head_weakening_the_inline_mutation_form_is_red(weaken):
     from scripts import ci_reuse
@@ -1198,3 +1507,346 @@ def test_only_the_trusted_preflight_skips_lane_grading(repo, capsys, trusted):
         _commit(repo, {"test.yml": _workflow(), "branch-lanes.yml": preflight}, {}, "trust preflight")
     assert gate_protected.main(["--root", str(repo), "--head", added]) == (0 if trusted else 1)
     assert ("shared hosted lane concurrency group" in capsys.readouterr().out) is not trusted
+
+
+def _equivalence():
+    return yaml.safe_load((_ROOT / ".github/workflows/equivalence.yml").read_text())
+
+
+def _equivalence_steps(workflow):
+    return workflow["jobs"]["ledger-equivalence"]["steps"]
+
+
+def _graded(steps, group):
+    return next(step for step in steps if step.get("run", "").endswith(f'equivalence.sh" {group}'))
+
+
+def _skip_store(workflow):
+    steps = _equivalence_steps(workflow)
+    steps.remove(_graded(steps, "store"))
+
+
+def _pass_store(workflow):
+    _graded(_equivalence_steps(workflow), "store")["run"] = "true"
+
+
+def _pass_page(workflow):
+    _graded(_equivalence_steps(workflow), "page")["run"] = "true"
+
+
+def _grade_from_head(workflow):
+    [pick] = [step for step in _equivalence_steps(workflow) if step.get("name") == "Pick the protected grader"]
+    pick["run"] = 'echo "GRADER=$PWD/head" >> "$GITHUB_ENV"'
+
+
+def _swap_grader(workflow):
+    steps = _equivalence_steps(workflow)
+    steps.insert(
+        steps.index(_graded(steps, "plant")),
+        {"run": "cp head/tests/swarm_ledger/equivalence.sh base/tests/swarm_ledger/equivalence.sh"},
+    )
+
+
+def _copy_into_base(workflow):
+    [install] = [step for step in _equivalence_steps(workflow) if step.get("name") == "Install dependencies"]
+    install["run"] += " && cp -r head/tests/swarm_ledger/. base/tests/swarm_ledger/"
+
+
+def _head_browser(workflow):
+    [browser] = [step for step in _equivalence_steps(workflow) if "browser-cache" in step.get("uses", "")]
+    browser["uses"] = "./head/.github/actions/browser-cache"
+
+
+def _tolerate_failure(workflow):
+    workflow["jobs"]["ledger-equivalence"]["continue-on-error"] = True
+
+
+def _hook_shell(workflow):
+    workflow["jobs"]["ledger-equivalence"]["env"]["BASH_ENV"] = "head/hook.sh"
+
+
+def _container(workflow):
+    workflow["jobs"]["ledger-equivalence"]["container"] = "ghcr.io/head/grader:latest"
+
+
+def _stop_triggering(workflow):
+    workflow[True]["pull_request"]["paths"] = ["docs/**"]
+
+
+def _rename_job(workflow):
+    workflow["jobs"]["renamed"] = workflow["jobs"].pop("ledger-equivalence")
+
+
+def _after_page(text):
+    def plant(workflow):
+        _equivalence_steps(workflow).append({"run": text})
+
+    plant.__name__ = f"after_page_{text.split()[-1]}"
+    return plant
+
+
+def _commit_equivalence(repo, workflow, message):
+    workflows = {"test.yml": _workflow()}
+    if workflow is not None:
+        workflows["equivalence.yml"] = workflow
+    return _commit(repo, workflows, {"outside_gate": {"equivalence.yml/ledger-equivalence": _entry()}}, message)
+
+
+@pytest.mark.parametrize(
+    "fault",
+    [
+        _skip_store,
+        _pass_store,
+        _pass_page,
+        _grade_from_head,
+        _swap_grader,
+        _copy_into_base,
+        _head_browser,
+        _tolerate_failure,
+        _hook_shell,
+        _container,
+        _stop_triggering,
+        _rename_job,
+        _after_page("echo GRADER"),
+        _after_page('echo x >> "$GITHUB_ENV"'),
+        _after_page('echo x >> "$GITHUB_PATH"'),
+        _after_page("bash head/tests/swarm_ledger/equivalence.sh"),
+        pytest.param(None, id="drop_workflow"),
+    ],
+)
+def test_the_required_grader_refuses_a_head_that_rewrites_the_equivalence_grading(repo, capsys, fault):
+    _commit_equivalence(repo, _equivalence(), "base grader")
+    _git(repo, "checkout", "-q", "-b", "pr")
+    head = _equivalence()
+    if fault is not None:
+        fault(head)
+    planted = _commit_equivalence(repo, head if fault is not None else None, "rewrite the grading")
+    _git(repo, "checkout", "-q", "dev")
+    assert gate_protected.main(["--root", str(repo), "--head", planted]) == 1
+    assert (
+        "::error::The head changes the ledger equivalence grading; the protected branch grades with its own."
+        in capsys.readouterr().out.splitlines()
+    )
+
+
+def test_the_required_grader_passes_equivalence_edits_outside_the_grading(repo, capsys):
+    _commit_equivalence(repo, _equivalence(), "base grader")
+    _git(repo, "checkout", "-q", "-b", "pr")
+    head = _equivalence()
+    head["jobs"]["ledger-equivalence"]["timeout-minutes"] = 20
+    steps = _equivalence_steps(head)
+    steps[steps.index(_graded(steps, "page")) + 1]["with"]["retention-days"] = 1
+    steps.append({"run": "ls -la"})
+    changed = _commit_equivalence(repo, head, "tune the job")
+    _git(repo, "checkout", "-q", "dev")
+    assert gate_protected.main(["--root", str(repo), "--head", changed]) == 0
+    assert "ledger equivalence" not in capsys.readouterr().out
+
+
+def test_the_required_grader_leaves_equivalence_alone_before_its_base_grades(repo, capsys):
+    base = _equivalence()
+    steps = _equivalence_steps(base)
+    for step in [step for step in steps if "GRADER" in step.get("run", "")]:
+        steps.remove(step)
+    _commit_equivalence(repo, base, "inline grading")
+    _git(repo, "checkout", "-q", "-b", "pr")
+    added = _commit_equivalence(repo, _equivalence(), "add the base grader")
+    _git(repo, "checkout", "-q", "dev")
+    assert gate_protected.main(["--root", str(repo), "--head", added]) == 0
+    assert "ledger equivalence" not in capsys.readouterr().out
+
+
+_FORWARDED_STATS = """NEEDS=$(jq 'if ."mutation-plan".result == "success" and ."mutation-plan".outputs.forwarded == "true" and ."mutation-stats".result == "skipped" then ."mutation-stats".result = "success" else . end' <<< "$NEEDS")
+"""
+
+
+def _without_forwarded_stats(run):
+    return run.removeprefix(_SELECTION_DIAGNOSTIC).removeprefix(_FORWARDED_STATS)
+
+
+def _with_forwarded_stats(run):
+    assert run.startswith(_SELECTION_DIAGNOSTIC)
+    return _SELECTION_DIAGNOSTIC + _FORWARDED_STATS + _without_forwarded_stats(run)
+
+
+def test_the_current_required_gate_accepts_the_forwarded_statistics_form():
+    base = ci_wiring.load(_ROOT)
+    head = copy.deepcopy(base)
+    step = head["test.yml"]["jobs"]["gate-required"]["steps"][0]
+    step["run"] = _with_forwarded_stats(step["run"])
+    config = json.loads((_ROOT / ci_wiring.CONFIG).read_text())
+    actors = json.loads((_ROOT / ".github/workflows/trusted-actors.json").read_text())
+    assert gate_protected.grade(base, config, head, config, _TODAY, actors) == []
+
+
+@pytest.mark.parametrize(
+    ("before", "after"),
+    [
+        (' and ."mutation-plan".outputs.forwarded == "true"', ""),
+        ('."mutation-plan".result == "success" and ', ""),
+        ('."mutation-stats".result == "skipped"', '."mutation-stats".result != "success"'),
+        ('."mutation-stats".result = "success"', '."mutation".result = "success"'),
+    ],
+)
+def test_a_weakened_forwarded_statistics_form_is_red(before, after):
+    base = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())
+    head = copy.deepcopy(base)
+    step = head["jobs"]["gate-required"]["steps"][0]
+    step["run"] = _with_forwarded_stats(step["run"]).replace(before, after, 1)
+    assert "The head's Gate — Required changes its steps; the protected branch grades with its own." in _grade(
+        {"test.yml": head}, base={"test.yml": base}
+    )
+
+
+@pytest.mark.parametrize("prefix", ["", _SELECTION_DIAGNOSTIC])
+def test_the_forwarded_statistics_line_without_the_selection_diagnostic_is_red(prefix):
+    base = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())
+    head = copy.deepcopy(base)
+    step = head["jobs"]["gate-required"]["steps"][0]
+    step["run"] = _FORWARDED_STATS + prefix + _without_forwarded_stats(step["run"])
+    assert "The head's Gate — Required changes its steps; the protected branch grades with its own." in _grade(
+        {"test.yml": head}, base={"test.yml": base}
+    )
+
+
+def test_the_forwarded_statistics_transform_only_prepends_the_reviewed_line():
+    from scripts import ci_reuse
+
+    steps = ci_reuse.gate_steps(queue_tier=True, promotion=True, consolidated=True, summary=True)
+    original = copy.deepcopy(steps)
+    assert ci_reuse.forwarded_stats(steps) == [
+        {**original[0], "run": _FORWARDED_STATS + original[0]["run"]},
+        *original[1:],
+    ]
+    assert steps == original
+
+
+@pytest.mark.parametrize("plan", ["success", "failure", "skipped"])
+@pytest.mark.parametrize("forwarded", ["true", "false", None])
+@pytest.mark.parametrize("stats", ["success", "failure", "cancelled", "skipped"])
+def test_the_forwarded_statistics_form_passes_only_a_forwarded_skip(plan, forwarded, stats):
+    from scripts import ci_reuse
+
+    [step] = ci_reuse.selection_diagnostic(
+        ci_reuse.forwarded_stats(ci_reuse.gate_steps(queue_tier=True, consolidated=True))
+    )
+    needs = {name: {"result": "success"} for name in ("test-count", "lint", "semgrep", "sonar", "mutation")}
+    needs["select"] = {"result": "success", "outputs": {"scope": "none"}}
+    needs["mutation-plan"] = {"result": plan, "outputs": {} if forwarded is None else {"forwarded": forwarded}}
+    needs["mutation-stats"] = {"result": stats}
+    env = dict(os.environ, NEEDS=json.dumps(needs), MUTATION="true", KIND="false", EVENT="pull_request", REUSED="false")
+    result = subprocess.run(["bash", "-e", "-c", step["run"]], env=env, capture_output=True, text=True)
+    expected = plan == "success" and (stats == "success" or (stats == "skipped" and forwarded == "true"))
+    assert (result.returncode == 0) == expected, result.stdout + result.stderr
+
+
+def _put(repo: Path, files: dict, message: str) -> str:
+    for name, text in files.items():
+        path = repo / name
+        if text is None:
+            path.unlink()
+            continue
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text)
+    _git(repo, "add", "-A")
+    _git(repo, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", message)
+    return _git(repo, "rev-parse", "HEAD")
+
+
+def _hash(text: str) -> str:
+    return subprocess.run(
+        ["git", "hash-object", "--stdin"], input=text, check=True, capture_output=True, text=True
+    ).stdout.strip()
+
+
+def _registry(*accepted: str) -> str:
+    return json.dumps({"scripts/gate.py": list(accepted)})
+
+
+@pytest.fixture
+def frozen(repo):
+    _commit(repo, {"test.yml": _workflow()}, {}, "base")
+    _put(repo, {"scripts/gate.py": "old\n", gate_protected.FROZEN: _registry(_hash("old\n"))}, "freeze")
+    _git(repo, "checkout", "-q", "-b", "pr")
+    return repo
+
+
+def _frozen_grade(repo, head, capsys):
+    _git(repo, "checkout", "-q", "dev")
+    code = gate_protected.main(["--root", str(repo), "--head", head])
+    return code, capsys.readouterr().out
+
+
+def test_a_planted_edit_to_a_frozen_gate_file_is_red(frozen, capsys):
+    head = _put(frozen, {"scripts/gate.py": "planted\n"}, "plant")
+    code, out = _frozen_grade(frozen, head, capsys)
+    assert code == 1
+    assert (
+        f"::error::The head changes the frozen gate file scripts/gate.py to content {gate_protected.FROZEN} "
+        "on the base does not accept; announce its blob there by its own pull request first.\n"
+    ) in out
+
+
+def test_deleting_a_frozen_gate_file_is_red(frozen, capsys):
+    head = _put(frozen, {"scripts/gate.py": None}, "delete")
+    assert _frozen_grade(frozen, head, capsys)[0] == 1
+
+
+def test_announcing_a_blob_alone_is_green(frozen, capsys):
+    head = _put(frozen, {gate_protected.FROZEN: _registry(_hash("old\n"), _hash("new\n"))}, "announce")
+    code, out = _frozen_grade(frozen, head, capsys)
+    assert code == 0
+    assert out.endswith(": 0 protected gate problems\n")
+
+
+def test_landing_an_announced_blob_is_green(frozen, capsys):
+    _git(frozen, "checkout", "-q", "dev")
+    _put(frozen, {gate_protected.FROZEN: _registry(_hash("old\n"), _hash("new\n"))}, "announce")
+    _git(frozen, "checkout", "-q", "-b", "land")
+    head = _put(frozen, {"scripts/gate.py": "new\n"}, "land")
+    assert _frozen_grade(frozen, head, capsys)[0] == 0
+
+
+def test_announcing_and_landing_in_one_pull_request_is_red(frozen, capsys):
+    head = _put(
+        frozen,
+        {"scripts/gate.py": "new\n", gate_protected.FROZEN: _registry(_hash("old\n"), _hash("new\n"))},
+        "both",
+    )
+    code, out = _frozen_grade(frozen, head, capsys)
+    assert code == 1
+    assert (
+        f"::error::The head changes {gate_protected.FROZEN} and the frozen gate file scripts/gate.py together; "
+        "land the registry by its own pull request first.\n"
+    ) in out
+
+
+@pytest.mark.parametrize("registry", ["{}", None])
+def test_dropping_a_path_from_the_registry_is_red(frozen, capsys, registry):
+    head = _put(frozen, {gate_protected.FROZEN: registry}, "unfreeze")
+    code, out = _frozen_grade(frozen, head, capsys)
+    assert code == 1
+    assert "::error::The head drops the frozen gate file scripts/gate.py from" in out
+
+
+def test_a_head_behind_a_landed_frozen_change_is_green(frozen, capsys):
+    head = _put(frozen, {"notes.txt": "unrelated\n"}, "unrelated")
+    _git(frozen, "checkout", "-q", "dev")
+    _put(frozen, {gate_protected.FROZEN: _registry(_hash("old\n"), _hash("new\n"))}, "announce")
+    _put(frozen, {"scripts/gate.py": "new\n"}, "land")
+    assert _frozen_grade(frozen, head, capsys)[0] == 0
+
+
+def test_a_base_without_a_registry_freezes_nothing(repo, capsys):
+    _commit(repo, {"test.yml": _workflow()}, {}, "base")
+    _git(repo, "checkout", "-q", "-b", "pr")
+    head = _put(repo, {"scripts/gate_protected.py": "anything\n"}, "edit")
+    assert _frozen_grade(repo, head, capsys)[0] == 0
+
+
+def test_the_repository_registry_freezes_the_grader_and_rulesets_at_their_current_content():
+    registry = json.loads((_ROOT / gate_protected.FROZEN).read_text())
+    rulesets = {str(path.relative_to(_ROOT)) for path in (_ROOT / ".github/rulesets").glob("*.json")}
+    assert set(registry) == {"scripts/gate_protected.py", ".github/workflows/gate-protected.yml", *rulesets}
+    for path, accepted in registry.items():
+        assert _git(_ROOT, "rev-parse", f"HEAD:{path}") in accepted, path

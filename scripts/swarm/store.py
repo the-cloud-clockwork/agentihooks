@@ -85,6 +85,7 @@ class SwarmConfig:
     hive_placement: bool = False
     local_max_agents: int = DEFAULT_LOCAL_MAX_AGENTS
     engine: str = "legacy"
+    window: dict = field(default_factory=dict)
     watchdog_address: str = ""
 
     def __post_init__(self) -> None:
@@ -233,6 +234,7 @@ class RedisStore:
             raw.get("hive_placement") == "True",
             int(raw.get("local_max_agents") or DEFAULT_LOCAL_MAX_AGENTS),
             raw.get("engine", "legacy"),
+            json.loads(raw.get("window") or "{}"),
             raw.get("watchdog_address", ""),
         )
 
@@ -275,6 +277,10 @@ class RedisStore:
 
     def claimant(self, slug, task):
         return self.redis.get(self.key(slug, "claim", task))
+
+    def claimed(self, slug: str, tasks: list[str]) -> set[str]:
+        found = self.redis.mget([self.key(slug, "claim", task) for task in tasks]) if tasks else []
+        return {task for task, claimant in zip(tasks, found) if claimant is not None}
 
     def claim_generation(self, slug: str, task: str) -> int:
         return int(self.redis.get(f"{self.key(slug, 'claim', task)}:generation") or 0)
@@ -373,6 +379,12 @@ class RedisStore:
 
     def handoff(self, slug, task):
         return self.redis.get(self.key(slug, "handoff", task)) or ""
+
+    def handoff_tasks(self, slug: str, tasks: list[str]) -> set[str]:
+        if not tasks:
+            return set()
+        values = self.redis.mget([self.key(slug, "handoff", task) for task in tasks])
+        return {task for task, value in zip(tasks, values, strict=True) if value}
 
     def handoff_seat(self, slug, task):
         return self.redis.get(self.key(slug, "handoff-seat", task)) or ""
@@ -519,12 +531,24 @@ class RedisStore:
     def reset_claims(self, slug, task):
         self.redis.hset(self.key(slug, "started-lives"), task, 0)
         self.redis.hdel(self.key(slug, "launch-failures"), task)
+        self.clear_failed_harness(slug, task)
 
-    def note_launch_failure(self, slug, task, reason):
+    def note_launch_failure(self, slug, task, reason, harness=""):
         self.redis.hset(self.key(slug, "launch-failures"), task, reason)
+        if harness:
+            self.redis.hset(self.key(slug, "launch-failure-harness"), task, harness)
 
     def launch_failure(self, slug, task):
         return self.redis.hget(self.key(slug, "launch-failures"), task) or ""
+
+    def launch_failures(self, slug: str) -> dict:
+        return self.redis.hgetall(self.key(slug, "launch-failures"))
+
+    def failed_harness(self, slug, task):
+        return self.redis.hget(self.key(slug, "launch-failure-harness"), task) or ""
+
+    def clear_failed_harness(self, slug, task):
+        self.redis.hdel(self.key(slug, "launch-failure-harness"), task)
 
     def record_launch(
         self, slug: str, agent: AgentRecord, state: str, error: str = "", after: str = "", head: str | None = ""
@@ -717,7 +741,7 @@ def _hive_recovered(redis, environ, refused):
             except redis.AuthenticationError:
                 pass
             else:
-                environ["AGENTIHOOKS_HIVE_REDIS_URL"] = saved
+                environ.update(cli.saved_member(environ))
                 return client
         try:
             cli.refresh_env(environ)

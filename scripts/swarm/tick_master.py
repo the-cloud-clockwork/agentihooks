@@ -26,8 +26,8 @@ PROMPT = (
     "2. Fix the causes of the outage right away in code: find where that error is raised and fix it through your own "
     "pull request into dev, never as follow ups. Once it merges and wt.sh done syncs local dev, the next forced "
     "launch runs the fixed code, or start one at once with agentihooks swarm {slug} master up --new. "
-    "3. Throughout, tell the swarm and the operator what failed and what you are doing, with agentihooks swarm "
-    '{slug} say "<text>" and agentihooks swarm {slug} say --to eng "<text>". '
+    "3. Throughout, tell the swarm what failed and what you are doing, with agentihooks swarm "
+    '{slug} say --to eng "<text>"; never write to the operator first. '
     "You do not act as master: never answer chat as master, write tasks or steer the swarm. "
     "The tick ends this promotion when a real master binds and tells you; then return to task {task}."
 )
@@ -92,10 +92,8 @@ def run(slug, config, store, ledger, runtime, now_ms, launch) -> list[str]:
         _save(store, slug, {"since": now_ms})
         return actions
     if forcing:
-        state = {**state, "forced_at": now_ms}
-        if not _starting(store, slug):
-            state["failure"] = "; ".join(launched) or NO_LAUNCH
-    elif _starting(store, slug) and now_ms - state.get("forced_at", now_ms) >= master_start.DEADLINE_MS:
+        state = _forced(store, slug, state, now_ms, launched)
+    elif _hookless(store, slug, state, now_ms):
         state["failure"] = NO_HOOK
     if state.get("failure"):
         state, promoted_actions = _promote(slug, store, ledger, runtime, state, minutes, now_ms)
@@ -122,6 +120,22 @@ def _masters(store, slug):
 
 def _starting(store, slug):
     return bool(_masters(store, slug))
+
+
+def _hookless(store, slug, state, now_ms):
+    leads = _masters(store, slug)
+    if not leads:
+        return False
+    started = state.get("started_at", state.get("forced_at", now_ms))
+    return now_ms - started >= max(map(master_start.deadline_ms, leads))
+
+
+def _forced(store, slug, state, now_ms, launched):
+    """A forced launch still starting keeps its first start, because each later forced tick moves forced_at."""
+    if _starting(store, slug):
+        return {"started_at": now_ms, **state, "forced_at": now_ms}
+    state = {key: value for key, value in state.items() if key != "started_at"}
+    return {**state, "forced_at": now_ms, "failure": "; ".join(launched) or NO_LAUNCH}
 
 
 def _finish_dead(store, slug):

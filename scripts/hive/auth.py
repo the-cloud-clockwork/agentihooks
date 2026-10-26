@@ -44,6 +44,8 @@ WORKER_KEYS = (
     "swarm:*:merge-stall-notice",
     "swarm:*:hive-placement-waits",
     "swarm:*:dev-red",
+    "swarm:*:prerequisite-waits",
+    "swarm:*:stage-covers",
     "seat:*:recaps",
     "seat:*:learned",
     "seat-of:*:exit",
@@ -55,6 +57,7 @@ ENV_FILE = "hive.env"
 NATS_CREDS_FILE = "hive.creds"
 # Below the home, where the hooks' *.env autoload never puts it into other processes.
 CONTROLLER_ENV_FILE = "controller/credential.env"
+SERVICE_TTL_S = 300
 
 
 class HiveError(Exception):
@@ -211,9 +214,22 @@ def issue_controller(redis: "Redis") -> str:
     return credential
 
 
+def issue_service(redis: "Redis", holder: str) -> str:
+    credential = f"{holder}.{secrets.token_urlsafe()}"
+    keep_service(redis, credential)
+    return credential
+
+
+def keep_service(redis: "Redis", credential: str) -> None:
+    redis.set(f"{PREFIX}:controller:{credential.rpartition('.')[0]}", _digest(credential), ex=SERVICE_TTL_S)
+
+
 def controller(redis: "Redis", credential: str) -> bool:
-    expected = redis.get(f"{PREFIX}:controller")
-    return bool(credential and expected) and hmac.compare_digest(expected, _digest(credential))
+    if not credential:
+        return False
+    holder, dot, _ = credential.rpartition(".")
+    expected = redis.get(f"{PREFIX}:controller:{holder}" if dot else f"{PREFIX}:controller")
+    return bool(expected) and hmac.compare_digest(expected, _digest(credential))
 
 
 def revoke(redis: "Redis", member_id: str) -> None:
@@ -253,6 +269,8 @@ def env_text(url: str, grant: dict) -> str:
         if grant.get("bus_credentials")
         else ""
     )
+    if grant.get("bus_url"):
+        bus += f"AGENTIHOOKS_BUS=nats\nAGENTIHOOKS_BUS_URL={grant['bus_url']}\n"
     if grant.get("bus_scoped"):
         bus += "AGENTIHOOKS_BUS_SCOPED=1\n"
     if grant.get("bus_swarms"):

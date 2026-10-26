@@ -1,3 +1,5 @@
+import json
+import os
 from pathlib import Path
 
 import pytest
@@ -46,11 +48,140 @@ def master(tmp_path, monkeypatch):
 
 
 def ask(*questions, tool="AskUserQuestion"):
-    return {"session_id": SID, "tool_name": tool, "tool_input": {"questions": list(questions)}}
+    tool_input = {"questions": list(questions)}
+    transcript = Path(os.environ["AGENTIHOOKS_HOME"]) / "master.jsonl"
+    transcript.parent.mkdir(parents=True, exist_ok=True)
+    transcript.write_text(
+        json.dumps(
+            {
+                "type": "assistant",
+                "sessionId": SID,
+                "isSidechain": False,
+                "message": {
+                    "role": "assistant",
+                    "content": [{"type": "tool_use", "id": "ask-1", "name": tool, "input": tool_input}],
+                },
+            }
+        )
+        + "\n"
+    )
+    return {
+        "session_id": SID,
+        "tool_name": tool,
+        "tool_input": tool_input,
+        "tool_use_id": "ask-1",
+        "transcript_path": str(transcript),
+    }
 
 
 def typed_at(at):
     operator_mode._save(SID, {"on": True, "turn_at": at})
+
+
+@pytest.mark.parametrize(
+    "question",
+    [
+        {
+            "question": "What would you type next?",
+            "options": [{"label": "Status of the hub fix?"}, {"label": "Raise the node cap"}],
+        },
+        {
+            "question": "Want the batch runner after-hour count when it ends?",
+            "options": [{"label": "Run batch after count"}, {"label": "Check hub fix status"}],
+        },
+    ],
+)
+def test_unattributed_suggestions_are_denied_without_ledger_writes(master, monkeypatch, question):
+    from scripts.swarm import ledger_client
+
+    payload = ask(question)
+    Path(payload["transcript_path"]).write_text("")
+    monkeypatch.setattr(ledger_client, "LedgerClient", lambda: master)
+    assert hook_manager._operator_question(payload) == operator_mode.question_block("AskUserQuestion", SID)
+    assert master.questions == []
+
+
+@pytest.mark.parametrize("missing", ["tool_use_id", "transcript_path"])
+def test_missing_question_provenance_never_writes(master, missing):
+    payload = ask(FOCUS)
+    payload.pop(missing)
+    assert master_question.move(payload, master, now=NOW) == ""
+    assert master.questions == []
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("type", "user"),
+        ("sessionId", "other-session"),
+        ("isSidechain", True),
+        ("isSidechain", None),
+        ("message", {"role": "user"}),
+    ],
+)
+def test_only_main_session_assistant_records_authorize_question_writes(master, field, value):
+    payload = ask(FOCUS)
+    path = Path(payload["transcript_path"])
+    record = json.loads(path.read_text())
+    record[field] = value
+    path.write_text(json.dumps(record) + "\n")
+    assert master_question.move(payload, master, now=NOW) == ""
+    assert master.questions == []
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("type", "text"),
+        ("id", "other-call"),
+        ("name", "Bash"),
+        ("input", {"questions": [FREEZE]}),
+    ],
+)
+def test_only_the_exact_recorded_question_call_authorizes_writes(master, field, value):
+    payload = ask(FOCUS)
+    path = Path(payload["transcript_path"])
+    record = json.loads(path.read_text())
+    record["message"]["content"][0][field] = value
+    path.write_text(json.dumps(record) + "\n")
+    assert master_question.move(payload, master, now=NOW) == ""
+    assert master.questions == []
+
+
+@pytest.mark.parametrize("content", ["", "not json\n", "null\n", "{}\n", "[]\n"])
+def test_unusable_transcript_records_never_authorize_writes(master, content):
+    payload = ask(FOCUS)
+    Path(payload["transcript_path"]).write_text(content)
+    assert master_question.move(payload, master, now=NOW) == ""
+    assert master.questions == []
+
+
+def test_unreadable_transcript_never_authorizes_writes(master):
+    payload = ask(FOCUS)
+    Path(payload["transcript_path"]).unlink()
+    assert master_question.move(payload, master, now=NOW) == ""
+    assert master.questions == []
+
+
+def test_unrelated_records_do_not_hide_a_deliberate_question_call(master):
+    payload = ask(FOCUS)
+    path = Path(payload["transcript_path"])
+    path.write_text("null\n{}\n" + path.read_text())
+    assert master_question.move(payload, master, now=NOW) == master_question.MOVED.format(asked=FOCUS["question"])
+    assert len(master.questions) == 1
+
+
+def test_explicit_priority_commands_pass_the_question_hook_without_automatic_questions(master, monkeypatch):
+    from scripts.swarm import ledger_client
+
+    monkeypatch.setattr(ledger_client, "LedgerClient", lambda: master)
+    payload = {
+        "session_id": SID,
+        "tool_name": "Bash",
+        "tool_input": {"command": 'agentihooks ledger --slug sw priority add tasks/t1 "Choose the next phase"'},
+    }
+    assert hook_manager._operator_question(payload) == ""
+    assert master.questions == []
 
 
 def test_a_master_whose_operator_typed_in_the_last_ten_minutes_may_ask(master):
@@ -96,6 +227,22 @@ def test_operator_on_with_no_typing_for_ten_minutes_still_moves_the_question(mas
     assert operator_mode._heard(SID)
     assert master_question.move(ask(FOCUS), master, now=NOW)
     assert len(master.questions) == 1
+
+
+@pytest.mark.parametrize("task", ["master-2", "master-12"])
+def test_a_numbered_master_seat_moves_the_question_too(master, monkeypatch, task):
+    monkeypatch.setenv("AGENTIHOOKS_SWARM_TASK", task)
+    typed_at(NOW - master_question.WINDOW_SEC)
+    assert operator_mode._heard(SID)
+    assert master_question.move(ask(FOCUS), master, now=NOW)
+    assert len(master.questions) == 1
+
+
+@pytest.mark.parametrize("task", ["t12", "master-x", "masters", "remaster-2"])
+def test_a_task_that_only_resembles_a_master_seat_asks_freely(master, monkeypatch, task):
+    monkeypatch.setenv("AGENTIHOOKS_SWARM_TASK", task)
+    typed_at(NOW - master_question.WINDOW_SEC)
+    assert master_question.move(ask(FOCUS), master, now=NOW) == ""
 
 
 def test_a_question_without_options_is_moved_as_asked(master):

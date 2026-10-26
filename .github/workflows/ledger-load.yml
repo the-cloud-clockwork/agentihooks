@@ -37,7 +37,7 @@ jobs:
     timeout-minutes: 15
     services:
       redis:
-        image: public.ecr.aws/docker/library/redis:7-alpine
+        image: mirror.gcr.io/library/redis:7-alpine
         ports:
           - 6379:6379
         options: >-
@@ -45,6 +45,9 @@ jobs:
           --health-interval 2s
           --health-retries 15
     env:
+      GIT_CONFIG_COUNT: "1"
+      GIT_CONFIG_KEY_0: maintenance.auto
+      GIT_CONFIG_VALUE_0: "false"
       REDIS_URL: redis://127.0.0.1:6379/0
       AGENTIHOOKS_SWARM_REDIS_URL: redis://127.0.0.1:6379/0
     steps:
@@ -135,7 +138,7 @@ jobs:
         pair: [1, 2, 3, 4, 5]
     services:
       redis:
-        image: public.ecr.aws/docker/library/redis:7-alpine
+        image: mirror.gcr.io/library/redis:7-alpine
         ports:
           - 6379:6379
         options: >-

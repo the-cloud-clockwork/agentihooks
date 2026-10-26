@@ -352,6 +352,112 @@ def test_the_hub_loop_idles_only_after_a_pass_with_every_reactor_on_standby(monk
     assert slept == [runner.IDLE_S]
 
 
+@pytest.fixture
+def hive(monkeypatch):
+    import fakeredis
+
+    from scripts.swarm import store
+
+    redis = fakeredis.FakeRedis(decode_responses=True)
+    monkeypatch.setattr(store, "redis_client", lambda: redis)
+    monkeypatch.setenv("AGENTIHOOKS_CONTROLLER_CREDENTIAL", "")
+    monkeypatch.setenv("HOSTNAME", "hub-0")
+    monkeypatch.setattr(runner, "open_bus", lambda config: memory.open_bus(BusConfig()))
+    monkeypatch.setattr(runner, "scheduled_wait", lambda seconds: None)
+    return redis
+
+
+def stop_after(passes):
+    def run_once(self):
+        try:
+            return next(passes)
+        except StopIteration:
+            raise Stop from None
+
+    return run_once
+
+
+def test_a_hub_with_a_remote_ledger_writes_as_its_own_service_and_renews_that_credential(monkeypatch, hive):
+    import os
+
+    from scripts.hive import auth
+
+    renewed = []
+    monkeypatch.setenv("AGENTIHOOKS_DEPLOYMENT", "distributed")
+    monkeypatch.setenv("LEDGER_URL", "https://ledger.example")
+    monkeypatch.setattr(runner, "_renewal", lambda redis, credential: renewed.append((redis, credential)))
+    monkeypatch.setattr(runner.HubRunner, "run_once", stop_after(iter([{"page": ["handled"]}])))
+    with pytest.raises(Stop):
+        runner.main(["run"])
+    credential = os.environ["AGENTIHOOKS_CONTROLLER_CREDENTIAL"]
+    assert credential.startswith("hub-hub-0.")
+    assert auth.controller(hive, credential)
+    assert renewed == [(hive, credential)]
+    assert 0 < hive.ttl(f"{auth.PREFIX}:controller:hub-hub-0") <= auth.SERVICE_TTL_S
+
+
+def test_the_renewal_loop_renews_every_keep_interval_past_a_failed_renewal(monkeypatch, hive, capsys):
+    from redis.exceptions import ConnectionError as RedisDown
+
+    from scripts.hive import auth
+
+    credential = auth.issue_service(hive, "hub-a")
+    key = f"{auth.PREFIX}:controller:hub-a"
+    hive.delete(key)
+    keep_service = auth.keep_service
+    calls, waits = [], []
+
+    def flaky(redis, kept):
+        calls.append(kept)
+        if len(calls) == 1:
+            raise RedisDown("down")
+        keep_service(redis, kept)
+
+    def wait(seconds):
+        waits.append(seconds)
+        if len(waits) > 2:
+            raise Stop
+
+    monkeypatch.setattr(auth, "keep_service", flaky)
+    monkeypatch.setattr(runner, "scheduled_wait", wait)
+    with pytest.raises(Stop):
+        runner._renew_forever(hive, credential)
+    assert waits == [runner.KEEP_S] * 3
+    assert calls == [credential, credential]
+    assert auth.controller(hive, credential)
+    assert 0 < hive.ttl(key) <= auth.SERVICE_TTL_S
+    assert capsys.readouterr().err.startswith("hub: service credential renewal failed\nTraceback")
+
+
+def test_the_renewal_runs_on_a_daemon_thread(monkeypatch, hive):
+    import threading
+
+    started = threading.Event()
+
+    def renew(redis, credential):
+        assert (redis, credential) == (hive, "hub-a.t")
+        started.set()
+
+    monkeypatch.setattr(runner, "_renew_forever", renew)
+    thread = runner._renewal(hive, "hub-a.t")
+    assert started.wait(5)
+    assert thread.daemon
+
+
+def test_a_hub_with_a_local_ledger_issues_no_service_credential(monkeypatch, hive):
+    import os
+
+    from scripts.swarm import store
+
+    monkeypatch.setenv("AGENTIHOOKS_DEPLOYMENT", "local")
+    monkeypatch.delenv("LEDGER_URL", raising=False)
+    monkeypatch.setattr(store, "redis_client", lambda: pytest.fail("a local hub touched Redis"))
+    monkeypatch.setattr(runner.HubRunner, "run_once", stop_after(iter([{"page": ["handled"]}])))
+    with pytest.raises(Stop):
+        runner.main(["run"])
+    assert os.environ["AGENTIHOOKS_CONTROLLER_CREDENTIAL"] == ""
+
+
 def test_a_failed_handler_names_its_reactor_and_event_on_stderr(bus, capsys):
     hosted = hub(bus, [registry.Reactor("lifecycle", "swarm.*.task.>", Recorder(fail=1))])
     bus.events.publish(SUBJECT, event("e1", 1))

@@ -142,7 +142,7 @@ def doctor_holds(slug):
         store = swarm_store()
         fix = ports.swarm().freeze.fix_phase(store.config(slug))
         peer = fix and store.peer(slug)
-        records = repository.get_document(peer).get("freezes") or [] if peer and repository.exists(peer) else []
+        records = repository.current(peer).state.get("freezes") or [] if peer and repository.exists(peer) else []
     except (SwarmError, RedisError, ValueError, OSError):
         return NO_DOCTOR
     return fix, any(r.get("verb") == "focus" for r in records)
@@ -811,6 +811,16 @@ def sample_streams():
             sys.stderr.write(f"stream sample {slug}: {exc}\n")
 
 
+def request_caller(headers) -> str:
+    if headers is None:
+        return "-"
+    if headers.get("X-Ledger-Agent"):
+        return headers["X-Ledger-Agent"]
+    if headers.get("X-Ledger-Tick"):
+        return "tick"
+    return "controller" if headers.get("X-Controller-Credential") else "-"
+
+
 class Handshake(Exception):
     pass
 
@@ -861,7 +871,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def log_message(self, fmt, *args):
         if self.path.startswith("/api/v1/"):
-            sys.stderr.write(f"{time.strftime('%H:%M:%S')} {self.command} {self.path.split('?', 1)[0]}\n")
+            caller = request_caller(getattr(self, "headers", None))
+            sys.stderr.write(f"{time.strftime('%H:%M:%S')} {self.command} {self.path.partition('?')[0]} {caller}\n")
             return
         sys.stderr.write("%s %s\n" % (time.strftime("%H:%M:%S"), fmt % args))
 
@@ -1040,6 +1051,14 @@ class Handler(BaseHTTPRequestHandler):
         except ValueError as exc:
             return self.send(400, str(exc), "text/plain")
         return self.send(200, json.dumps(saved), "application/json")
+
+    def send_export(self, data):
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(data)
 
     def send_logo(self):
         try:

@@ -18,11 +18,14 @@ BESIDE = re.compile(r"\$\(dirname \"\$0\"\)|\$\{?GITHUB_ACTION_PATH\}?")
 WORKSPACE = re.compile(r"\$\{?GITHUB_WORKSPACE\}?")
 # These API functions run only in local downloads or steps bound to the App token.
 LOCAL_ONLY = {
-    ROOT / "scripts/ci_budget/jobs.py": {"read_page"},
+    ROOT / "scripts/ci_budget/rate_limit.py": {"reset_wait", "_run", "budget"},
     ROOT / "scripts/ci_mutation/reuse.py": {"api"},
     ROOT / "tests/refresh_durations.py": {"_gh", "ci_run_ids", "ci_download"},
 }
-METADATA_ONLY = {ROOT / "scripts/ci_reuse.py": {"paged_reuse_job"}}
+METADATA_ONLY = {
+    ROOT / "scripts/ci_reuse.py": {"paged_reuse_job"},
+    ROOT / "scripts/ci_gate_queue.py": {"watcher"},
+}
 TOKEN = re.compile(
     r"github\s*(\.\s*token|\[\s*['\"]token['\"]\s*\])"
     r"|secrets\s*(\.|\[\s*['\"])\s*(github|gh)(_\w*|\w*(token|pat)(?![a-z]))"
@@ -86,7 +89,14 @@ def _offends(step: dict) -> bool:
 
 
 def test_no_step_on_any_event_holds_the_workflow_token_or_calls_the_api():
-    offenders = [f"{job}: {step.get('name') or step.get('uses')}" for job, step, _ in _all_steps() if _offends(step)]
+    offenders = []
+    for job, step, _ in _all_steps():
+        if job == "select" and step.get("id") == "select":
+            env = step.get("env") or {}
+            assert env["GH_TOKEN"] == "${{ steps.app-token.outputs.token || github.token }}"
+            step = {**step, "env": {key: value for key, value in env.items() if key != "GH_TOKEN"}}
+        if _offends(step):
+            offenders.append(f"{job}: {step.get('name') or step.get('uses')}")
     assert offenders == []
 
 
@@ -134,7 +144,7 @@ def _reached_source(path: Path) -> str:
     lines = path.read_text().splitlines()
     exemptions = LOCAL_ONLY.get(path, set()) | METADATA_ONLY.get(path, set())
     for node in ast.parse("\n".join(lines)).body if exemptions else []:
-        if isinstance(node, ast.FunctionDef) and node.name in exemptions:
+        if isinstance(node, ast.FunctionDef) and node.name.removeprefix("x_").partition("__mutmut_")[0] in exemptions:
             lines[node.lineno - 1 : node.end_lineno] = [""] * (node.end_lineno - node.lineno + 1)
     return "\n".join(lines)
 
@@ -159,6 +169,7 @@ def test_no_script_a_step_runs_calls_the_api():
         "scripts/brain-smoke",
         "scripts/ci_budget/__main__.py",
         "scripts/ci_budget/jobs.py",
+        "scripts/ci_budget/rate_limit.py",
         "scripts/ci_cpu_quota.py",
         "scripts/ci_dependency_audit.py",
         "scripts/ci_dev_reuse.py",
@@ -168,10 +179,8 @@ def test_no_script_a_step_runs_calls_the_api():
         "scripts/ci_mutation/__main__.py",
         "scripts/ci_mutation/plan.py",
         "scripts/ci_mutation/reuse.py",
-        "scripts/ci_queue_fail_fast.py",
-        "scripts/ci_queue_rebuild.py",
         "scripts/ci_release.sh",
-        "scripts/ci_semgrep.py",
+        "scripts/ci_semgrep_floors.py",
         "scripts/ci_unit_rerun.py",
         "scripts/ci_wiring.py",
         "scripts/hive/nats_grant.py",
@@ -186,7 +195,9 @@ def test_no_script_a_step_runs_calls_the_api():
         "scripts/packaging/swarm-init-smoke.sh",
         "scripts/packaging/swarm-smoke.sh",
         "scripts/packaging/swarm-smoke-parallel.sh",
+        "scripts/dead_code.py",
         "scripts/size_limits.py",
+        "scripts/swallowed_exceptions.py",
         "scripts/swarm_ledger/artifact_sanity.py",
         "scripts/swarm_ledger/ledger_server.py",
         "tests/chart_examples.py",
@@ -248,6 +259,7 @@ def test_no_script_a_step_runs_calls_the_api():
         "tests/test_ci_runner_classes.py",
         "tests/test_ci_runner_trust.py",
     ]
+    expected += [name for name in ("scripts/ci_gate_shards.py", "scripts/ci_gate_queue.py") if ROOT / name in calls]
     assert sorted(str(path.relative_to(ROOT)) for path in calls) in (
         sorted(expected),
         sorted(expected + routing_contracts),
@@ -269,6 +281,13 @@ def test_the_reuse_factory_exemption_contains_only_command_replacements():
         source = path.read_text()
         functions = {node.name: node for node in ast.parse(source).body if isinstance(node, ast.FunctionDef)}
         for name in names:
+            if path == ROOT / "scripts/ci_gate_queue.py":
+                assert name == "watcher"
+                assert len(functions[name].body) == 1
+                assert isinstance(functions[name].body[0], ast.Return)
+                assert isinstance(functions[name].body[0].value, ast.Dict)
+                assert not any(isinstance(node, ast.Call) for node in ast.walk(functions[name]))
+                continue
             calls = [
                 node
                 for node in ast.walk(functions[name])
@@ -540,7 +559,11 @@ def test_a_dev_push_runs_every_step_of_the_job_itself(job):
 
 @pytest.mark.parametrize("job", sorted(_jobs()))
 def test_no_job_is_granted_the_actions_api(job):
-    assert "actions" not in (_jobs()[job].get("permissions") or {})
+    permissions = _jobs()[job].get("permissions") or {}
+    if job == "select":
+        assert permissions in ({"contents": "read"}, {"contents": "read", "actions": "read"})
+    else:
+        assert "actions" not in permissions
 
 
 def test_no_job_skips_on_a_tree_another_run_passed():

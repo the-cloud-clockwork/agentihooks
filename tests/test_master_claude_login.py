@@ -497,6 +497,81 @@ def test_restore_keeps_a_live_login_and_skips_an_empty_copy(tmp_path):
     assert not (empty / login.CREDENTIALS).exists()
 
 
+def test_restore_replaces_a_stale_local_grant_with_a_newer_stored_copy(tmp_path):
+    target = _home(tmp_path)
+    fresh = {**GRANT, "accessToken": "fresh", "expiresAt": 3000}
+    copy = {"grant": json.dumps(fresh), "account": json.dumps(MASTER_ACCOUNT), "generation": "3000"}
+    assert login.restore(copy, target) is True
+    assert json.loads((target / login.CREDENTIALS).read_text()) == {login.GRANT: fresh}
+    older = {"grant": json.dumps({**GRANT, "accessToken": "older"}), "account": "{}", "generation": "1000"}
+    assert login.restore(older, target) is False
+    assert login.restore(older, target, force=True) is True
+    assert json.loads((target / login.CREDENTIALS).read_text())[login.GRANT]["accessToken"] == "older"
+
+
+def test_restore_skips_an_identical_copy_and_one_no_newer_than_the_local_grant(tmp_path):
+    target = _home(tmp_path)
+    same = {"grant": json.dumps(GRANT), "account": json.dumps(MASTER_ACCOUNT), "generation": "9999"}
+    assert login.restore(same, target, force=True) is False
+    equal = {"grant": json.dumps({**GRANT, "accessToken": "other"}), "account": "{}", "generation": "2000"}
+    assert login.restore(equal, target) is False
+    assert json.loads((target / login.CREDENTIALS).read_text()) == {login.GRANT: GRANT}
+
+
+def test_recover_restores_the_slot_that_owns_the_target(ah, monkeypatch):
+    target = login.home(2)
+    target.mkdir(parents=True)
+    (target / login.CONFIG).write_text("{}")
+    _login(target)
+    fresh = {**GRANT, "accessToken": "fresh"}
+    copy = {"grant": json.dumps(fresh), "account": json.dumps(MASTER_ACCOUNT), "generation": "1"}
+    monkeypatch.setattr(openbao_kv, "from_env", lambda environ: "bao")
+    monkeypatch.setattr(login, "stored", lambda bao, number=None: copy if (bao, number) == ("bao", 2) else {})
+    assert login.recover(target, {}) is True
+    assert json.loads((target / login.CREDENTIALS).read_text()) == {login.GRANT: fresh}
+
+
+def test_checked_retries_the_native_check_against_the_recovered_target(tmp_path, monkeypatch):
+    from scripts.routing import native_login
+
+    target = _home(tmp_path)
+    seen = []
+
+    def check(environ, account):
+        seen.append((environ["CLAUDE_CONFIG_DIR"], account))
+        if len(seen) == 1:
+            raise native_login.LoginError(native_login.EXPIRED)
+
+    monkeypatch.setattr(native_login, "check", check)
+    monkeypatch.setattr(login, "recover", lambda found, environ: True)
+    assert login.checked(target, {}, "masteratexample_com") is True
+    assert seen == [(str(target), "masteratexample_com")] * 2
+
+
+def test_restore_reads_a_missing_expiry_and_generation_as_zero(tmp_path):
+    target = _home(tmp_path, grant={"accessToken": "no expiry"})
+    newer = {"grant": json.dumps(GRANT), "account": json.dumps(MASTER_ACCOUNT), "generation": "1"}
+    assert login.restore(newer, target) is True
+    (target / login.CREDENTIALS).write_text(json.dumps({login.GRANT: {**GRANT, "expiresAt": 0}}))
+    unnumbered = {"grant": json.dumps({**GRANT, "accessToken": "other"}), "account": "{}"}
+    assert login.restore(unnumbered, target) is False
+
+
+def test_recover_refuses_a_home_outside_every_slot(ah, tmp_path):
+    assert login.recover(tmp_path / "elsewhere", {}) is False
+
+
+def test_checked_fails_when_the_recovered_login_is_still_refused(tmp_path, monkeypatch):
+    from scripts.routing import native_login
+
+    def check(environ, account):
+        raise native_login.LoginError(native_login.EXPIRED)
+
+    monkeypatch.setattr(native_login, "check", check)
+    monkeypatch.setattr(login, "recover", lambda found, environ: True)
+    assert login.checked(_home(tmp_path), {}, "masteratexample_com") is False
+
+
 def test_stored_reads_the_swarm_copy_and_reports_an_outage(monkeypatch, capsys):
     FakeBao({"epoch": "3"}).install(monkeypatch)
     assert login.stored("bao") == {"epoch": "3"}
@@ -829,15 +904,116 @@ def test_launch_preparation_checks_live_login_then_waits_for_browser(
 
     monkeypatch.setattr(native_login, "check", check)
     monkeypatch.setattr(chain, "authorize", browser, raising=False)
-    monkeypatch.setattr(operator_email, "send", lambda *_: pytest.fail("login must not send email"))
+    sent = []
+    monkeypatch.setattr(operator_email, "send", lambda *args: sent.append(args) or "")
     prepared = login.prepare_launch(_environ(rendered), tmp_path)
+    records = [
+        json.loads(line) for line in (login.home().parent / "login-notifications.jsonl").read_text().splitlines()
+    ]
     if valid or outcome == "success":
         assert prepared == (login.home(), "masteratexample_com")
         assert calls == (["current"] if valid else ["current", "browser", "current"])
+        assert sent == []
+        assert all(record["transport"] != "email" for record in records)
     else:
         assert prepared is None
         assert calls == ["current", "browser"]
         assert login.holders(login.root()) == {}
+        assert sent == [
+            (
+                "Master login fell back to token routing",
+                "master@a-1 runs on subscription token routing without Remote Control: "
+                f"the current claude.ai session failed and the browser authorization ended in {outcome}.",
+                _environ(rendered),
+                str(tmp_path),
+            )
+        ]
+        token_records = (login._token_folder(_environ(rendered)) / "login-notifications.jsonl").read_text()
+        assert [json.loads(line) for line in token_records.splitlines()] == [
+            {"step": "token", "outcome": outcome, "transport": "email", "agent": "master@a-1"}
+        ]
+
+
+def test_launch_preparation_reports_a_refused_operator_email(ah, rendered, tmp_path, monkeypatch, capsys):
+    from scripts import master_login_chain as chain
+    from scripts.routing import native_login
+    from scripts.swarm import operator_email
+
+    _seed(rendered)
+    monkeypatch.setattr(openbao_kv, "from_env", lambda environ: None)
+
+    def check(environ, account):
+        raise native_login.LoginError(native_login.EXPIRED)
+
+    monkeypatch.setattr(native_login, "check", check)
+    monkeypatch.setattr(chain, "authorize", lambda *_: "captcha", raising=False)
+    monkeypatch.setattr(operator_email, "send", lambda *_: "email failed: down")
+    assert login.prepare_launch(_environ(rendered), tmp_path) is None
+    assert capsys.readouterr().err == "[agenti] operator login email refused: email failed: down\n"
+
+
+def test_launch_preparation_recovers_the_stored_login_before_any_browser_step(ah, rendered, tmp_path, monkeypatch):
+    from scripts import master_login_chain as chain
+    from scripts.routing import native_login
+
+    _seed(rendered)
+    fresh = {**GRANT, "accessToken": "fresh"}
+    copy = {"grant": json.dumps(fresh), "account": json.dumps(MASTER_ACCOUNT), "generation": "1"}
+    monkeypatch.setattr(openbao_kv, "from_env", lambda environ: "bao")
+    monkeypatch.setattr(login, "stored", lambda bao, number=None: copy if (bao, number) == ("bao", 1) else {})
+    monkeypatch.setattr(login, "keep", lambda *_: False)
+    calls = []
+
+    def check(environ, account):
+        grant = json.loads((login.home() / login.CREDENTIALS).read_text())[login.GRANT]
+        calls.append(grant["accessToken"])
+        if grant != fresh:
+            raise native_login.LoginError(native_login.EXPIRED)
+        return dict(native_login.PROOF)
+
+    monkeypatch.setattr(native_login, "check", check)
+    monkeypatch.setattr(chain, "authorize", lambda *_: calls.append("browser") or "failure", raising=False)
+    assert login.prepare_launch(_environ(rendered), tmp_path) == (login.home(), "masteratexample_com")
+    assert calls == ["access", "fresh"]
+
+
+def test_launch_preparation_emails_once_when_no_slot_can_take_the_browser(ah, rendered, tmp_path, monkeypatch):
+    from scripts import master_login_chain as chain
+    from scripts.swarm import operator_email
+
+    def refused(*_):
+        raise login.LoginRefused(login.NO_LOGIN)
+
+    def held(*_):
+        raise login.LoginRefused("every stored master claude ai login is held")
+
+    sent = []
+    monkeypatch.setattr(login, "prepare", refused)
+    monkeypatch.setattr(login, "browser_home", held)
+    monkeypatch.setattr(chain, "authorize", lambda *_: pytest.fail("no slot means no browser request"))
+    monkeypatch.setattr(operator_email, "send", lambda *args: sent.append(args) or "")
+    from unittest.mock import Mock, call
+
+    alerted = Mock(wraps=chain.alert)
+    monkeypatch.setattr(chain, "alert", alerted)
+    env = _environ(rendered)
+    assert login.prepare_launch(env, tmp_path) is None
+    assert login.prepare_launch(env, tmp_path) is None
+    assert alerted.call_args_list == [call(env, login._token_folder(env) / "claude", "failure", str(tmp_path))] * 2
+    assert sent == [
+        (
+            "Master login fell back to token routing",
+            "master@a-1 runs on subscription token routing without Remote Control: "
+            "the current claude.ai session failed and the browser authorization ended in failure.",
+            env,
+            str(tmp_path),
+        )
+    ]
+    folder = login._token_folder(env)
+    assert folder.stat().st_mode & 0o777 == 0o700
+    assert [json.loads(line) for line in (folder / "login-notifications.jsonl").read_text().splitlines()] == [
+        {"step": "token", "outcome": "failure", "transport": "email", "agent": "master@a-1"}
+    ]
 
 
 def test_browser_preparation_skips_a_slot_held_by_another_process(ah, rendered, tmp_path, monkeypatch):
@@ -941,6 +1117,7 @@ def test_master_launch_uses_subscription_fallback_without_remote_control(
     from scripts import master_login_chain as chain
     from scripts.hive import account_slots
     from scripts.routing import native_login
+    from scripts.swarm import operator_email
 
     _seed(rendered)
     (rendered / "settings.json").write_text('{"forceLoginMethod":"claudeai","hooks":{"Stop":[]}}')
@@ -964,6 +1141,8 @@ def test_master_launch_uses_subscription_fallback_without_remote_control(
 
     monkeypatch.setattr(native_login, "check", invalid)
     monkeypatch.setattr(chain, "authorize", lambda *_: outcome)
+    sent = []
+    monkeypatch.setattr(operator_email, "send", lambda *args: sent.append(args) or "")
     monkeypatch.setattr(router, "select_credential", select)
     monkeypatch.setattr(account_sessions, "sessions_by_account", lambda: {})
 
@@ -978,6 +1157,7 @@ def test_master_launch_uses_subscription_fallback_without_remote_control(
         ["--remote-control", "master proof", "--remote-control-session-name-prefix", "proof", "--model", "opus"]
     )
     login.launch_claude("/opt/claude", args, env, str(report))
+    assert [subject for subject, *_ in sent] == ["Master login fell back to token routing"]
     assert capsys.readouterr().out == "[agenti] account=workeratexample_com route=token-fallback remote-control=off\n"
     printed.assert_called_once_with(
         "[agenti] account=workeratexample_com route=token-fallback remote-control=off", flush=True
@@ -996,11 +1176,10 @@ def test_master_launch_uses_subscription_fallback_without_remote_control(
     assert environ["CLAUDE_SECURESTORAGE_CONFIG_DIR"] == str(target)
     assert json.loads((target / "settings.json").read_text()) == {"hooks": {"Stop": []}}
     assert not (target / login.CREDENTIALS).exists()
-    assert json.loads((target.parent / "login-notifications.jsonl").read_text()) == {
-        "step": "token",
-        "outcome": "routed",
-        "transport": "none",
-    }
+    assert [json.loads(line) for line in (target.parent / "login-notifications.jsonl").read_text().splitlines()] == [
+        {"step": "token", "outcome": outcome, "transport": "email", "agent": "master@a-1"},
+        {"step": "token", "outcome": "routed", "transport": "none"},
+    ]
     assert login.holders(login.root()) == {}
     assert dict(line.split("=", 1) for line in report.read_text().splitlines()) == {
         "status": "routed",
@@ -1114,7 +1293,7 @@ def test_browser_renewal_keeps_the_slot_epoch_report_and_audit(ah, rendered, tmp
     monkeypatch.setattr(chain, "authorize", browser)
     assert login.prepare_launch(env, tmp_path) == (target, "masteratexample_com")
     assert checks == [(str(target), "masteratexample_com")] * 2
-    assert from_env.call_args_list == [call(env), call(env)]
+    assert from_env.call_args_list == [call(env)] * 3
     assert checked_account.call_args_list == [call(target, env, number=2)] * 2
     assert keep.call_args_list == [call(bao, target, 1, 2)] * 2
     assert rehome.call_args_list == [call(report, target, shared=False), call(report, target)]

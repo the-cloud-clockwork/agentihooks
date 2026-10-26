@@ -6,9 +6,11 @@ import os
 import shutil
 import subprocess
 import sys
+import threading
 import time
 import uuid
 from collections.abc import Callable
+from contextlib import contextmanager
 from dataclasses import replace
 from pathlib import Path
 
@@ -24,6 +26,7 @@ from scripts.swarm import (
     default_models,
     effort_range,
     host_budget,
+    launches,
     live_binding,
     model_pick,
     naming,
@@ -251,6 +254,25 @@ def _pane_process(agent):
     return min(owned, key=lambda process: process.start_time, default=None)
 
 
+def _named_process(agent):
+    from scripts.herdr_host import server_socket
+    from scripts.terminate_agent import agent_environ, resolve, sessions, validate
+
+    items = sessions()
+    try:
+        session = resolve(items, agent.name, agent.harness or "any")
+        validate(session, items)
+    except ValueError:
+        return None
+    keys = ("HERDR_PANE_ID", "HERDR_SOCKET_PATH", "AGENTIHOOKS_SWARM_TASK")
+    pane, socket, task = agent_environ(session.process.pid, keys)
+    if not task or task != agent.task or agent.pane_id and pane != agent.pane_id:
+        return None
+    if socket and server_socket({"HERDR_SOCKET_PATH": socket}) != server_socket(dict(os.environ)):
+        return None
+    return session.process
+
+
 def _launch_timeouts(agent: str, passed: list[str], argv: list[str]) -> tuple[list[str], float]:
     from scripts.master_login_chain import BUDGET
 
@@ -261,11 +283,40 @@ def _launch_timeouts(agent: str, passed: list[str], argv: list[str]) -> tuple[li
     return routed, BUDGET.spawn
 
 
+def _validation(fields: dict, profile: str, agent: str, timeout: float) -> dict:
+    if fields.get("profile_validation") != "pending":
+        return binding.fields(fields, profile, agent)
+    if not fields.get("profile_report"):
+        raise ValueError("pending profile validation names no request")
+    return {
+        "state": "pending",
+        "report": fields["profile_report"],
+        "profile": profile,
+        "harness": agent,
+        "account": fields.get("account", ""),
+        "deadline_ms": int(timeout * 1000),
+    }
+
+
+def _routed(fields: dict) -> bool:
+    """Only a deferred launch reports a pending profile validation, and it returns before its route."""
+    return fields.get("route_status") in STARTED_ROUTES or (
+        fields.get("route_status") == "pending" and fields.get("profile_validation") == "pending"
+    )
+
+
+def deferring(herdr: "HerdrRuntime") -> "HerdrRuntime":
+    herdr.defer_master_canary = True
+    return herdr
+
+
 class HerdrRuntime:
     quota_accounts: Callable[..., list] | None = None
+    pass_memo: dict | None = None
 
-    def __init__(self, home=SWARM_HOME, run=subprocess.run, choose=None, herdr=herdr_call):
+    def __init__(self, home=SWARM_HOME, run=subprocess.run, choose=None, herdr=herdr_call, defer_master_canary=False):
         self.home, self.run, self.herdr = home, run, herdr
+        self.defer_master_canary = defer_master_canary
         self.choose = choose or agent_choice.choose
         self.sleep = time.sleep
         self._binding_pids = {}
@@ -275,6 +326,14 @@ class HerdrRuntime:
         self.end, self.reap = reaper.retire, reaper.reap
         self._quota_previous = {}
         self._host_spent = capacity.no_spawns
+        self._reserving = threading.Lock()
+
+    def launch_room(self, config):
+        if not hasattr(self, "_quota_accounts"):
+            return 1
+        from scripts.swarm.capacity import free_seats
+
+        return sum(free_seats(row) for row in self._quota_open(""))
 
     def has_capacity(self, config):
         environ = dict(os.environ)
@@ -539,8 +598,15 @@ class HerdrRuntime:
             )
         if not decision.bundle_revision:
             kept = _recorded_revision(saved) if saved.get("profile") == decision.profile else ""
-            decision = replace(decision, bundle_revision=kept or overlays.revision())
+            decision = replace(decision, bundle_revision=kept or self._bundle_revision())
         return decision
+
+    def _bundle_revision(self):
+        if self.pass_memo is None:
+            return timing.call(overlays.revision)
+        if "bundle_revision" not in self.pass_memo:
+            self.pass_memo["bundle_revision"] = timing.call(overlays.revision)
+        return self.pass_memo["bundle_revision"]
 
     def planned_account(self, task_id, agent):
         planned = getattr(self, "_quota_tasks", {}).get(task_id)
@@ -564,12 +630,27 @@ class HerdrRuntime:
             row = next(row for row in eligible if row.name == seat.account)
         return row
 
-    def _reserve_account(self, account, lane, agent):
+    def _claim_account(self, agent, preferred, lane):
+        with self._reserving:
+            account = self._quota_account(agent, preferred, None, lane)
+            self._reserve_account(account, lane, agent)
+        return account
+
+    @contextmanager
+    def _seat_returned_on_failure(self, account, lane, agent):
+        try:
+            yield
+        except BaseException:
+            with self._reserving:
+                self._reserve_account(account, lane, agent, -1)
+            raise
+
+    def _reserve_account(self, account, lane, agent, seats=1):
         if account is not None:
             if lane in getattr(self, "_quota_allocations", {}):
-                self._quota_allocations[lane][agent] -= 1
+                self._quota_allocations[lane][agent] -= seats
             self._quota_accounts = [
-                replace(row, sessions=row.sessions + 1)
+                replace(row, sessions=row.sessions + seats)
                 if (row.harness, row.name) == (account.harness, account.name)
                 else row
                 for row in self._quota_accounts
@@ -590,7 +671,26 @@ class HerdrRuntime:
             native_login.check(os.environ, "native", self.run)
         except native_login.LoginError:
             return "subscription"
-        return "interactive"
+        return "subscription" if self._master_account_spent() else "interactive"
+
+    def _master_account_spent(self):
+        from redis.exceptions import RedisError
+
+        from scripts.routing import master_account, reservation
+
+        if not hasattr(self, "_quota_accounts"):
+            return False
+        try:
+            declared = master_account.load(os.environ).get("claude")
+        except (OSError, RedisError):
+            return False
+        own = next(
+            (row for row in self._quota_accounts if declared and (row.harness, row.name) == ("claude", declared.slug)),
+            None,
+        )
+        if own is None or own.week_left is None or 100 - own.week_left < reservation.MASTER_LEAVES:
+            return False
+        return any(row.kind != "api" and row.name != own.name for row in self._quota_eligible("claude", MASTER))
 
     def spawn(self, config, lane, name, task):
         chosen, environ = config.lanes.get(lane, {}), dict(os.environ)
@@ -610,7 +710,7 @@ class HerdrRuntime:
             if saved and quota_transfer and route_kind != "interactive"
             else saved
         )
-        avoid = (task.get("transfer") or {}).get("avoid_harness")
+        avoid = (task.get("transfer") or {}).get("avoid_harness") or task.get("avoid_harness")
         if saved and not quota_transfer and (saved["harness"] != want if want else saved["harness"] == avoid):
             saved = {}
         if route_kind == "interactive" and lane == MASTER:
@@ -648,6 +748,7 @@ class HerdrRuntime:
         timing.call(priming_trace.write, self.home, config.slug, name, task)
         argv = self._argv(config, name, agent, text, f"{name}.md", profile, decision.overlays)
         argv += ["--claim-fence", json.dumps(task["claim_fence"])] if task.get("claim_fence") else []
+        argv += ["--defer-canary"] if lane == MASTER and self.defer_master_canary else []
         argv += _titled(config.slug, lane, task.get("seat", ""))
         argv += codex.arguments(config, agent, task)
         argv += _pinned(decision.overlays, decision.bundle_revision)
@@ -684,31 +785,29 @@ class HerdrRuntime:
         rc = remote_control.decision(lane, agent, route_kind, config.slug, login) if front else {}
         account = None
         if hasattr(self, "_quota_accounts") and route_kind != "interactive":
-            account = self._quota_account(
-                agent, saved.get("account") or self.planned_account(task["id"], agent), None, lane
-            )
+            account = self._claim_account(agent, saved.get("account") or self.planned_account(task["id"], agent), lane)
             route = ["--route", account.name]
-        placed = self._account_launch(
-            config,
-            lane,
-            task,
-            name,
-            [
-                *argv,
-                "--",
-                *route,
-                *remote_control.arguments(rc),
-                *_model_args(
-                    agent,
-                    picked.__dict__,
-                    environ,
-                    effort_range.bounds(config, lane),
-                    preserve=preserves_effort(bool(saved), lane),
-                ),
-                *mode,
-            ],
-        )
-        self._reserve_account(account, lane, agent)
+        with self._seat_returned_on_failure(account, lane, agent):
+            placed = self._account_launch(
+                config,
+                lane,
+                task,
+                name,
+                [
+                    *argv,
+                    "--",
+                    *route,
+                    *remote_control.arguments(rc),
+                    *_model_args(
+                        agent,
+                        picked.__dict__,
+                        environ,
+                        effort_range.bounds(config, lane),
+                        preserve=preserves_effort(bool(saved), lane),
+                    ),
+                    *mode,
+                ],
+            )
         placed = codex.complete(config, name, placed, self._terminate)
         placed_kind = "api" if placed.account == "api" else route_kind
         return replace(
@@ -879,7 +978,10 @@ class HerdrRuntime:
                 proof = native_login.check(os.environ, "native", self.run)
             except native_login.LoginError as exc:
                 raise SpawnError(str(exc), "unavailable") from exc
+        from scripts.swarm.launch_evidence import Attempt
+
         launched_at = int(time.time() * 1000)
+        attempt = Attempt(self.home / config.slug, name, task_id, agent, launched_at)
         load_at_launch = list(os.getloadavg())
         try:
             proc = self.run(
@@ -903,8 +1005,8 @@ class HerdrRuntime:
                 },
             )
         except subprocess.TimeoutExpired as exc:
-            self._terminate(name)
-            raise SpawnError(f"init-agent timed out for {name}", "ambiguous", _opened_pane(name, launched_at)) from exc
+            pane = self._failed_launch(attempt, exc.stdout, exc.stderr, f"init-agent timed out for {name}")
+            raise SpawnError(f"init-agent timed out for {name}", "ambiguous", pane, harness=agent) from exc
         timings = {
             "launched_at": launched_at,
             "returned_at": int(time.time() * 1000),
@@ -915,16 +1017,16 @@ class HerdrRuntime:
         for step in ("launcher_at", "harness_at"):
             if step in fields and fields[step].isdigit():
                 timings[step] = int(fields[step])
-        if proc.returncode or fields.get("status") != "started" or fields.get("route_status") not in STARTED_ROUTES:
-            self._terminate(name)
+        if proc.returncode or fields.get("status") != "started" or not _routed(fields):
             tail = (proc.stderr or proc.stdout).strip().splitlines()
             message = tail[-1] if tail else f"init-agent exit {proc.returncode}"
-            raise SpawnError(message, pane_id=fields.get("pane_id") or _opened_pane(name, launched_at))
+            pane = self._failed_launch(attempt, proc.stdout, proc.stderr, message)
+            raise SpawnError(message, pane_id=pane, harness=agent)
         try:
-            validated = binding.fields(fields, argv[argv.index("--profile") + 1], agent)
+            validated = _validation(fields, argv[argv.index("--profile") + 1], agent, timeout)
         except ValueError as exc:
-            self._terminate(name)
-            raise SpawnError(str(exc), pane_id=fields.get("pane_id", "")) from exc
+            pane = self._failed_launch(attempt, proc.stdout, proc.stderr, str(exc))
+            raise SpawnError(str(exc), pane_id=pane, harness=agent) from exc
         if proof is not None:
             native_login.record(self.home, config.slug, proof)
         return Placed(
@@ -940,6 +1042,16 @@ class HerdrRuntime:
             launch_timings=timings,
             conversation_id=(self.conversations() or {}).get(fields.get("pane_id"), ""),
         )
+
+    def _failed_launch(self, attempt, stdout, stderr, reason):
+        from scripts.swarm import launch_evidence
+
+        output, error = launch_evidence.text(stdout), launch_evidence.text(stderr)
+        fields = parse_fields(output)
+        fields["pane_id"] = fields.get("pane_id") or _opened_pane(attempt.name, attempt.launched_at)
+        launch_evidence.retain(attempt, fields, output, error, self.pane_tail, reason)
+        self._terminate(attempt.name)
+        return fields["pane_id"]
 
     def recover(self, name: str) -> Placed:
         found = self._get(herdr_target(name)) or {}
@@ -1062,6 +1174,8 @@ class HerdrRuntime:
         if live_binding.managed(agent):
             return self._retire_managed(agent)
         pid = agent.profile_decision.get("validation", {}).get("pid") or self._binding_pids.get(agent.name)
+        if not pid and (launch := launches.find(agent.name, self.home)) is not None:
+            return self.retire_process(agent, launch.pid, homes, launch.start_time)
         return self.retire_process(agent, pid, homes)
 
     def retire_pane(self, agent: AgentRecord, homes: tuple = ()) -> bool:
@@ -1084,6 +1198,10 @@ class HerdrRuntime:
                     return self.retire_process(agent, None, homes)
         if found is None and agent.name not in self.live_names():
             return self.retire_process(replace(agent, pane_id=""), None, homes)
+        if found is None:
+            named = launches.find(agent.name, self.home) or _named_process(agent)
+            if named is not None:
+                return self.retire_process(replace(agent, pane_id=""), named.pid, homes, named.start_time)
         self.refusals[agent.name] = {"process": 0, "refusal": "no owned pane for unrecorded process"}
         return False
 

@@ -66,7 +66,7 @@ def record(store, doctor, found, now_ms, cooldown_ms):
     """Keeps every finding with its detail; returns the ones first seen or shown again after a verdict."""
     judgments = verdicts(store, doctor)
     before = {k: json.loads(v) for k, v in store.redis.hgetall(judgments.key).items()}
-    shown = judgments.visible(found, now_ms, cooldown_ms, new_evidence=True)
+    shown = judgments.visible(found, now_ms, cooldown_ms, new_evidence=True, growth=ci_speed.class_growth)
     if found:
         details = {f.id: json.dumps({**f.as_dict(), "id": f.id, "measure": f.measure}) for f in found}
         store.redis.hset(_details_key(store, doctor), mapping=details)
@@ -288,7 +288,20 @@ def run(store, doctor, now_ms, collect, close, environ=None, speed=None):
     return actions
 
 
-def fix_tasks(watched, finding, verdict, fix):
+def _free_stem(finding, base, tasks):
+    """The first pair stem the ledger does not hold, and the done pair before it; an open pair refuses."""
+    done, earlier = {task["id"]: task["done"] for task in tasks}, []
+    for n, _ in enumerate([base, *done], 1):
+        stem = base if n == 1 else f"{base}-{n}"
+        held = [task for task in (f"{stem}-{part}" for part in ("cause", *FIXES)) if task in done]
+        if not held:
+            return stem, earlier
+        if not all(done[task] for task in held):
+            raise SwarmError(f"finding {finding['id']} already has tasks {' and '.join(held)} still open")
+        earlier = held
+
+
+def fix_tasks(watched, finding, verdict, fix, tasks):
     """A troubleshoot task, then a code or tune task naming the number to move and the command that measures it."""
     if not verdict or verdict.get("value") not in JUDGED_REAL:
         value = verdict.get("value") if verdict else "no verdict"
@@ -296,6 +309,8 @@ def fix_tasks(watched, finding, verdict, fix):
     if fix not in FIXES:
         raise SwarmError("a fix task is code or tune")
     stem = "fx-" + hashlib.sha1(finding["id"].encode()).hexdigest()[:8]
+    stem, earlier = _free_stem(finding, stem, tasks)
+    before = f" Earlier pair {' and '.join(earlier)} is done; read its proof first." if earlier else ""
     kind, measure = finding["kind"], f"agentihooks doctor {watched} measure {finding['id']}"
     number = f"the {kind} measure on {finding['subject']}, {finding['measure']} when judged"
     cause = {
@@ -305,7 +320,8 @@ def fix_tasks(watched, finding, verdict, fix):
         "phase": FIX_PHASE,
         "kind": "troubleshoot",
         "description": f"Doctor finding {finding['id']}: {finding['summary']}. Threshold: {finding['threshold']}. "
-        f"Evidence: {'; '.join(finding['evidence'])}. Show the root cause with evidence, then fix it or file it.",
+        f"Evidence: {'; '.join(finding['evidence'])}. Show the root cause with evidence, then fix it or file it."
+        f"{before}",
         "contract": {
             "must": f"the root cause of {finding['summary']} is shown by evidence",
             "check": "the evidence in the task proof",

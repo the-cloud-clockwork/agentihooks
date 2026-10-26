@@ -630,3 +630,35 @@ def test_a_session_start_with_only_a_shared_database_starts_the_local_ledger_ser
     monkeypatch.setenv(postgres.URL, ADDRESS)
     ledger_hook.serve_ledgers()
     assert started == [[str(ledger_hook.HERE / "ledger_server.py"), "--ensure"]]
+
+
+def test_a_stream_reads_through_a_named_server_cursor_two_thousand_rows_at_a_time(monkeypatch):
+    made = []
+
+    class Named:
+        def __init__(self, name):
+            self.name, self.ran, self.fetches = name, None, []
+            self.batches = [[(1,), (2,)], [(3,)], []]
+
+        def execute(self, sql, parameters):
+            self.ran = (sql, parameters)
+
+        def fetchmany(self, size):
+            self.fetches.append(size)
+            return self.batches.pop(0)
+
+    class Streaming(Raw):
+        def cursor(self, name=None):
+            made.append(Named(name))
+            return made[-1]
+
+    monkeypatch.setattr(postgres, "POOLS", {})
+    monkeypatch.setattr(psycopg2, "connect", lambda address, **settings: Streaming())
+    connection = postgres.Connection(ADDRESS)
+    assert list(connection.stream("SELECT path FROM fields WHERE slug=?", ("s",))) == [(1,), (2,), (3,)]
+    assert list(connection.stream("SELECT 1")) == [(1,), (2,), (3,)]
+    first, second = made
+    assert first.fetches == second.fetches == [2000, 2000, 2000]
+    assert first.ran == ("SELECT path FROM fields WHERE slug=%s", ("s",))
+    assert second.ran == ("SELECT 1", ())
+    assert first.name.startswith("stream_") and second.name.startswith("stream_") and first.name != second.name

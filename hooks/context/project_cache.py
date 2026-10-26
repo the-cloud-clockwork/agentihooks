@@ -3,10 +3,17 @@ import json
 import os
 import time
 from dataclasses import asdict, replace
+from datetime import datetime, timezone
 from pathlib import Path
 
 from hooks.context.project_identity import ProjectIdentity, resolve_project
-from hooks.context.project_memory import ProjectMemory, VaultProjectSource
+from hooks.context.project_memory import (
+    BrainSourceUnavailable,
+    KernelProjectSource,
+    ProjectMemory,
+    ScopedFeedRefused,
+    VaultProjectSource,
+)
 from hooks.context.project_render import render_project_block
 from hooks.context.project_sessions import lookup
 from scripts.swarm_v2.keyspace import Namespace, admits, installation, key, stamp, sweep_legacy
@@ -47,19 +54,39 @@ def cache_scope_mismatch_total() -> int:
     return sum(_read(_mismatch_path()).values())
 
 
+FALLBACK = "scoped_feed_fallback_total"
+
+
+def _fallback_path() -> Path:
+    return _state_dir() / f"{FALLBACK}.json"
+
+
+def scoped_feed_fallbacks() -> dict:
+    return _read(_fallback_path())
+
+
+def scoped_feed_fallback_total() -> int:
+    return sum(scoped_feed_fallbacks().values())
+
+
+def _count(path: Path, name: str) -> None:
+    from hooks.context.broadcast import _file_lock
+
+    with _file_lock(path):
+        counts = _read(path)
+        counts[name] = counts.get(name, 0) + 1
+        _write(path, counts)
+
+
 def _scoped(path: Path, scope: Namespace, kind: str) -> dict:
     document = _read(path)
     if admits(document, scope, kind):
         return document
     if "namespace" in document:
         from hooks.common import log
-        from hooks.context.broadcast import _file_lock
 
         log("brain_project: cache scope mismatch", {"kind": kind})
-        with _file_lock(_mismatch_path()):
-            counts = _read(_mismatch_path())
-            counts[kind] = counts.get(kind, 0) + 1
-            _write(_mismatch_path(), counts)
+        _count(_mismatch_path(), kind)
     return {}
 
 
@@ -93,9 +120,42 @@ def _fresh(cached: dict, feed_hash: str) -> bool:
     )
 
 
-def refresh_project_cache(identity: ProjectIdentity, rows: list[dict], feed_hash: str, scope: Namespace) -> None:
+def _project_scope(identity: ProjectIdentity) -> Namespace:
+    return replace(namespace(), project=identity.project_id)
+
+
+def _source(rows: list[dict]) -> KernelProjectSource | VaultProjectSource:
+    from hooks.context.brain_adapter import BrainEntry
+
+    entries = [BrainEntry(**row) for row in rows]
+    if os.getenv("BRAIN_PROJECT_FEED_SOURCE") == "vault":
+        return VaultProjectSource(entries)
+    return KernelProjectSource(entries)
+
+
+def _fetch(
+    identity: ProjectIdentity, rows: list[dict], scope: Namespace, path: Path, cached: dict
+) -> ProjectMemory | None:
     from hooks.common import log
-    from hooks.context.brain_adapter import BrainEntry, BrainSourceUnavailable
+
+    source = _source(rows)
+    try:
+        memory = source.fetch(identity)
+    except ScopedFeedRefused as error:
+        log("brain_project: scoped feed refused", {"error": str(error)})
+        return ProjectMemory(identity.project)
+    except BrainSourceUnavailable as error:
+        log("brain_project: refresh failed", {"error": str(error)})
+        if cached.get("memory"):
+            _write(path, stamp(scope, "project-memory", {**cached, "outage_at": time.time()}))
+            _count(_fallback_path(), "kernel_outage")
+        return None
+    if isinstance(source, KernelProjectSource) and source.fell_back:
+        _count(_fallback_path(), "legacy_endpoint")
+    return memory
+
+
+def refresh_project_cache(identity: ProjectIdentity, rows: list[dict], feed_hash: str, scope: Namespace) -> None:
     from hooks.context.broadcast import _file_lock
 
     brain = replace(scope, project="")
@@ -103,18 +163,29 @@ def refresh_project_cache(identity: ProjectIdentity, rows: list[dict], feed_hash
     with _file_lock(path):
         if _scoped(_feed_path(brain), brain, "feed").get("hash") != feed_hash:
             return
-        if _fresh(_scoped(path, scope, "project-memory"), feed_hash):
+        cached = _scoped(path, scope, "project-memory")
+        if _fresh(cached, feed_hash):
             return
-        try:
-            memory = VaultProjectSource([BrainEntry(**row) for row in rows]).fetch(identity)
-        except BrainSourceUnavailable as error:
-            log("brain_project: refresh failed", {"error": str(error)})
-            return
-        if _scoped(_feed_path(brain), brain, "feed").get("hash") == feed_hash:
+        memory = _fetch(identity, rows, scope, path, cached)
+        if memory is not None and _scoped(_feed_path(brain), brain, "feed").get("hash") == feed_hash:
             _write(
                 path,
                 stamp(scope, "project-memory", {"feed_hash": feed_hash, "at": time.time(), "memory": asdict(memory)}),
             )
+
+
+def _cached_memory(cached: dict, identity: ProjectIdentity) -> tuple[ProjectMemory, str]:
+    if not cached.get("memory"):
+        return ProjectMemory(identity.project), ""
+    if not cached.get("outage_at"):
+        return ProjectMemory(**cached["memory"]), ""
+    if time.time() - cached["at"] > float(os.getenv("BRAIN_PROJECT_MEMORY_STALE_SECONDS", "86400")):
+        return ProjectMemory(identity.project), ""
+    refreshed = datetime.fromtimestamp(cached["at"], timezone.utc).isoformat(timespec="seconds")
+    return (
+        ProjectMemory(**cached["memory"]),
+        f"Stale project memory: the brain is unreachable; last refreshed {refreshed}.",
+    )
 
 
 def _swarm_overview() -> str:
@@ -147,7 +218,7 @@ def project_context(session_id: str, cwd: str | None = None) -> str | None:
     from hooks.config import BRAIN_PAYLOAD_MAX_BYTES
 
     brain = namespace()
-    scope = replace(brain, project=identity.project_id)
+    scope = _project_scope(identity)
     feed = _scoped(_feed_path(brain), brain, "feed")
     cached = _scoped(_cache_path(identity, scope), scope, "project-memory")
     if feed and not _fresh(cached, feed["hash"]):
@@ -160,11 +231,12 @@ def project_context(session_id: str, cwd: str | None = None) -> str | None:
             timeout_sec=180,
             task_name="brain_project",
         )
-    memory = ProjectMemory(**cached["memory"]) if cached.get("memory") else ProjectMemory(identity.project)
+    memory, stale = _cached_memory(cached, identity)
     block = render_project_block(memory, BRAIN_PAYLOAD_MAX_BYTES)
     overview = _swarm_overview()
-    if overview:
-        block = block.replace("\n\n", f"\n\nPlan: {overview}\n", 1)
+    notes = [line for line in (f"Plan: {overview}" if overview else "", stale) if line]
+    if notes:
+        block = block.replace("\n\n", "\n\n" + "\n".join(notes) + "\n", 1)
     return block.encode()[:BRAIN_PAYLOAD_MAX_BYTES].decode(errors="ignore")
 
 

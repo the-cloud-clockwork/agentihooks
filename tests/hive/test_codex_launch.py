@@ -87,3 +87,90 @@ def test_codex_selection_keeps_harness_and_host_pins(setup, pin):
     assert isinstance(unavailable, Wait)
     assert "room" in unavailable.reason
     assert setup.store.execution_registry.records("fixture") == []
+
+
+def _unadvertised_codex(setup):
+    from scripts.swarm.capacity import Account
+
+    setup.herdr._quota_tasks = {"task": "codex"}
+    setup.herdr._quota_accounts.append(Account("codex", "codex-account", "room", 0, None, 80, 6))
+    setup.herdr.planned_account.side_effect = lambda task, harness: "codex-account" if harness == "codex" else None
+
+
+@pytest.mark.parametrize("agent", [None, "auto"])
+def test_auto_lane_falls_back_to_claude_when_no_hive_advertises_the_codex_slot(setup, agent):
+    _unadvertised_codex(setup)
+    lanes = {"eng": {"agent": agent}} if agent else {}
+    config = replace(setup.config, lanes=lanes)
+
+    selected = setup.launcher.select(config, "eng", {"id": "task"})
+
+    assert (selected.account.harness, selected.account.name, selected.hive) == ("claude", "account", "remote")
+
+
+@pytest.mark.parametrize("pin", ["lane", "saved"])
+def test_codex_pinned_task_keeps_waiting_for_an_advertised_codex_slot(setup, pin):
+    from scripts.hive.placement import Wait
+
+    _unadvertised_codex(setup)
+    task, config = {"id": "task"}, setup.config
+    if pin == "lane":
+        config = replace(config, lanes={"eng": {"agent": "codex"}})
+    else:
+        task["launch_assignment"] = {"harness": "codex", "account": "codex-account"}
+
+    selected = setup.launcher.select(config, "eng", task)
+
+    assert isinstance(selected, Wait)
+    assert selected.reason == "no hive for eng advertises the codex slot codex-account"
+
+
+def test_auto_lane_keeps_the_codex_wait_when_claude_has_no_room_either(setup):
+    from scripts.hive.placement import Wait
+
+    _unadvertised_codex(setup)
+    setup.herdr._quota_accounts[0] = replace(setup.herdr._quota_accounts[0], sessions=6)
+
+    selected = setup.launcher.select(setup.config, "eng", {"id": "task"})
+
+    assert isinstance(selected, Wait)
+    assert selected.reason == "no hive for eng advertises the codex slot codex-account"
+
+
+def test_auto_lane_falls_back_to_claude_when_the_planned_codex_account_is_full(setup):
+    _unadvertised_codex(setup)
+    setup.herdr._quota_accounts[1] = replace(setup.herdr._quota_accounts[1], sessions=6)
+    write_hive(
+        setup, slots=[*setup.hive["slots"], {"harness": "codex", "account": "codex-account", "kind": "subscription"}]
+    )
+
+    selected = setup.launcher.select(setup.config, "eng", {"id": "task"})
+
+    assert (selected.account.harness, selected.account.name, selected.hive) == ("claude", "account", "remote")
+
+
+@pytest.mark.parametrize(
+    ("task", "expected"),
+    [({"id": "task", "hive": "remote"}, "the task is pinned to remote"), ({"id": "task"}, "no UI hive live")],
+)
+def test_account_selection_names_the_placement_fallback(setup, monkeypatch, task, expected):
+    from scripts.hive import launch
+    from scripts.hive.placement import Choice
+
+    monkeypatch.setattr(launch.placement, "choose", lambda *args: Choice("remote", "no UI hive live"))
+
+    selected = setup.launcher.select(setup.config, "eng", task)
+
+    assert (selected.hive, selected.fallback) == ("remote", expected)
+
+
+def test_account_selection_tags_a_missing_hive_wait_with_its_role(setup, monkeypatch):
+    from scripts.hive import launch
+    from scripts.hive.placement import Choice, Wait
+
+    monkeypatch.setattr(launch.placement, "choose", lambda *args: Choice("gone"))
+
+    selected = setup.launcher.select(setup.config, "eng", {"id": "task"})
+
+    assert isinstance(selected, Wait)
+    assert (selected.reason.startswith("hive gone is not in the hive listing"), selected.role) == (True, "eng")

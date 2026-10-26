@@ -183,10 +183,7 @@ def test_brain_reader_session_start_dispatch(enabled, brain_dispatch, monkeypatc
     EVENT_HANDLERS["SessionStart"]({"session_id": "session", "cwd": str(tmp_path)})
 
     codex_refresh_kick.assert_called_once_with()
-    if enabled:
-        inject.assert_called_once_with("session", str(tmp_path))
-    else:
-        inject.assert_not_called()
+    inject.assert_called_once_with("session", str(tmp_path))
 
 
 _START_PAYLOADS = {
