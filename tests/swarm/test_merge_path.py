@@ -243,10 +243,46 @@ def test_a_missing_gh_is_a_swarm_error():
         merge_path.read_jobs("/repo", 5, Gh([OSError("no gh")]))
 
 
+def test_a_server_error_is_retried_after_a_pause(monkeypatch):
+    pauses = []
+    monkeypatch.setattr(merge_path.time, "sleep", pauses.append)
+    gh = Gh(
+        [
+            (1, "", "gh: Server Error (HTTP 502)\n"),
+            (1, "", "stream error: stream ID 1; CANCEL; received from peer\n"),
+            (0, '["x"]\n'),
+        ]
+    )
+
+    assert merge_path.read_jobs("/repo", 5, gh) == [["x"]]
+    assert pauses == [10, 20]
+    assert len(gh.calls) == 3
+
+
+def test_a_fifth_server_error_is_a_swarm_error(monkeypatch):
+    pauses = []
+    monkeypatch.setattr(merge_path.time, "sleep", pauses.append)
+    gh = Gh([(1, "", "gh: HTTP 502\n")] * 5)
+
+    with pytest.raises(SwarmError, match="^gh: HTTP 502$"):
+        merge_path.read_jobs("/repo", 5, gh)
+    assert len(gh.calls) == 5
+    assert pauses == [10, 20, 30, 40]
+
+
+def test_a_client_error_is_not_retried(monkeypatch):
+    monkeypatch.setattr(merge_path.time, "sleep", lambda seconds: pytest.fail("slept"))
+    gh = Gh([(1, "", "gh: Not Found (HTTP 404)\n")])
+
+    with pytest.raises(SwarmError, match=r"^gh: Not Found \(HTTP 404\)$"):
+        merge_path.read_jobs("/repo", 5, gh)
+    assert len(gh.calls) == 1
+
+
 def test_jobs_are_read_as_runner_labels():
     gh = Gh([(0, '["anton-oss-queue"]\n["anton-oss-light", "x"]\n')])
     assert merge_path.read_jobs("/repo", 5, gh) == [["anton-oss-queue"], ["anton-oss-light", "x"]]
-    path = "repos/{owner}/{repo}/actions/runs/5/jobs?per_page=100"
+    path = "repos/{owner}/{repo}/actions/runs/5/jobs?per_page=30"
     assert gh.calls == [(["gh", "api", path, "--paginate", "--jq", ".jobs[] | .labels | @json"], GH)]
 
 
@@ -300,8 +336,9 @@ def test_collect_reads_runs_jobs_and_searches_with_these_calls():
     repo, found = merge_path.collect("/repo", WINDOW, gh)
     assert repo == "o/r"
     assert found["merges"] == 2 and found["enqueues"] == 3 and found["open_ready_pull_requests"] == 7
+    assert found["queue_runs_without_jobs"] == 0
     assert found["standard_jobs_per_queue_run"] == 0.5
-    jobs = "repos/{owner}/{repo}/actions/runs/{}/jobs?per_page=100"
+    jobs = "repos/{owner}/{repo}/actions/runs/{}/jobs?per_page=30"
     labels = ["--paginate", "--jq", ".jobs[] | .labels | @json"]
     updated = f"q=repo:o/r is:pr base:dev updated:>={stamp(0)}"
     ready = "q=repo:o/r is:pr is:open draft:false base:dev"
@@ -316,6 +353,64 @@ def test_collect_reads_runs_jobs_and_searches_with_these_calls():
         (["gh", "api", "graphql", "--paginate", *search, "-f", f"query={merge_path.PULLS}", "-f", updated], GH),
         (["gh", "api", "graphql", *search, "-f", f"query={merge_path.OPEN_READY}", "-f", ready], GH),
     ]
+
+
+def test_collect_counts_a_queue_run_whose_jobs_cannot_be_read_and_goes_on(monkeypatch):
+    monkeypatch.setattr(merge_path.time, "sleep", lambda seconds: pytest.fail("slept"))
+    gh = Gh(
+        [
+            (0, "o/r\n"),
+            page(RUNS[:4], 4),
+            page(RUNS[4:6], 2),
+            page(RUNS[8:9], 1),
+            (1, "", "gh: Not Found (HTTP 404)\n"),
+            (0, '["anton-oss-queue"]\n'),
+            searched(PULLS[:2], [PULLS[2], {}]),
+            (0, json.dumps({"issueCount": 7}) + "\n"),
+        ]
+    )
+    repo, found = merge_path.collect("/repo", WINDOW, gh)
+    assert repo == "o/r"
+    assert found["queue_runs_without_jobs"] == 1
+    assert found["standard_jobs_per_queue_run"] == 1.0
+    assert found["open_ready_pull_requests"] == 7
+
+
+def test_collect_counts_every_queue_run_whose_jobs_cannot_be_read(monkeypatch):
+    monkeypatch.setattr(merge_path.time, "sleep", lambda seconds: pytest.fail("slept"))
+    gh = Gh(
+        [
+            (0, "o/r\n"),
+            page(RUNS[:4], 4),
+            page(RUNS[4:6], 2),
+            page(RUNS[8:9], 1),
+            (1, "", "gh: Not Found (HTTP 404)\n"),
+            (1, "", "gh: Not Found (HTTP 404)\n"),
+            searched(PULLS[:2], [PULLS[2], {}]),
+            (0, json.dumps({"issueCount": 7}) + "\n"),
+        ]
+    )
+    _, found = merge_path.collect("/repo", WINDOW, gh)
+    assert found["queue_runs_without_jobs"] == 2
+    assert found["standard_jobs_per_queue_run"] is None
+
+
+def test_collect_without_queue_jobs_reads_no_job_lists():
+    gh = Gh(
+        [
+            (0, "o/r\n"),
+            page(RUNS[:4], 4),
+            page(RUNS[4:6], 2),
+            page(RUNS[8:9], 1),
+            searched(PULLS[:2], [PULLS[2], {}]),
+            (0, json.dumps({"issueCount": 7}) + "\n"),
+        ]
+    )
+    _, found = merge_path.collect("/repo", WINDOW, gh, queue_jobs=False)
+    assert not any("/jobs?" in " ".join(args) for args, _ in gh.calls)
+    assert found["queue_runs_without_jobs"] is None
+    assert found["standard_jobs_per_queue_run"] is None
+    assert found["merges"] == 2 and found["open_ready_pull_requests"] == 7
 
 
 def command(monkeypatch, found, argv):
@@ -360,3 +455,171 @@ def test_the_command_line_reads_the_last_day_by_default(monkeypatch, capsys):
 def test_the_command_line_refuses_an_empty_or_inverted_window(monkeypatch, hours):
     with pytest.raises(SwarmError, match="^merge-path takes hours above zero$"):
         command(monkeypatch, {}, ["--hours", hours])
+
+
+def head(run_id, branch, conclusion, offset_s, sha=None, message="fix"):
+    return run(
+        run_id,
+        "pull_request",
+        conclusion,
+        offset_s=offset_s,
+        head_branch=branch,
+        head_sha=sha or f"sha{run_id}",
+        head_commit={"message": message},
+    )
+
+
+def test_head_pushes_classes_each_head_run_by_the_run_before_it_on_its_branch():
+    runs = [
+        head(1, "a", "failure", -600),
+        head(2, "a", "success", 60),
+        head(3, "a", "failure", 120, message="Merge remote-tracking branch 'origin/dev' into a"),
+        head(4, "a", "cancelled", 180),
+        head(5, "a", "success", 240),
+        head(6, "a", "success", 300, sha="sha5"),
+        head(7, "b", "failure", 90, message="Merge branch 'dev' into b"),
+        head(8, "c", "success", 30),
+        head(9, "c", "failure", 400),
+        head(10, "a", "success", 4 * 3600),
+        run(11, "pull_request", "failure", head_branch="dev", head_sha="x", head_commit=None),
+        run(12, "merge_group", "failure", head_sha="y", head_commit=None),
+    ]
+
+    assert merge_path.head_pushes(runs, WINDOW) == {
+        "dev merge": {"runs": 2, "red": 2},
+        "after red head": {"runs": 2, "red": 0},
+        "after superseded head": {"runs": 1, "red": 0},
+        "same head": {"runs": 1, "red": 0},
+        "first push": {"runs": 1, "red": 0},
+        "review fix": {"runs": 1, "red": 1},
+    }
+    assert [tally["runs"] for tally in merge_path.head_pushes(runs, WINDOW).values()] == [2, 2, 1, 1, 1, 1]
+
+
+def test_head_pushes_orders_runs_created_together_by_id():
+    runs = [head(2, "a", "success", 60, sha="s2"), head(1, "a", "failure", 60, sha="s1")]
+
+    assert merge_path.head_pushes(runs, WINDOW) == {
+        "first push": {"runs": 1, "red": 1},
+        "after red head": {"runs": 1, "red": 0},
+    }
+
+
+def test_head_pushes_reads_a_missing_head_commit_as_no_dev_merge():
+    runs = [run(1, "pull_request", "success", head_sha="s", head_commit=None)]
+
+    assert merge_path.head_pushes(runs, WINDOW) == {"first push": {"runs": 1, "red": 0}}
+
+
+def test_red_head_jobs_counts_each_failed_job_once_per_red_head_run_in_the_window(monkeypatch):
+    monkeypatch.setattr(merge_path.time, "sleep", lambda seconds: pytest.fail("slept"))
+    runs = [
+        head(8, "a", "failure", 360),
+        run(7, "merge_group", "failure"),
+        head(6, "dev", "failure", 300),
+        head(5, "a", "failure", -60),
+        head(4, "b", "success", 240),
+        head(3, "a", "failure", 180),
+        head(2, "a", "failure", 120),
+        head(1, "a", "failure", 60),
+    ]
+    gh = Gh(
+        [
+            (0, ""),
+            (1, "", "gh: Not Found (HTTP 404)\n"),
+            (0, "unit (3.12, 4)\tRun tests\nsonar (3.12)\t\n"),
+            (0, "lint\tDead code\nunit (3.11, 1)\tRun tests\nunit (3.11, 2)\tRun tests\n"),
+        ]
+    )
+
+    found = merge_path.red_head_jobs(runs, WINDOW, "/repo", gh)
+
+    assert list(found.items()) == [
+        ("unit: Run tests", {"runs": 2, "last": 2}),
+        ("no failed job", {"runs": 1, "last": 8}),
+        ("unreadable", {"runs": 1, "last": 3}),
+        ("sonar", {"runs": 1, "last": 2}),
+        ("lint: Dead code", {"runs": 1, "last": 1}),
+    ]
+    query = merge_path.FAILED_STEP
+    assert query == (
+        '.jobs[] | select(.conclusion == "failure") | .name + "\\t" + '
+        '([.steps[]? | select(.conclusion == "failure") | .name][0] // "")'
+    )
+    assert gh.calls == [
+        (
+            [
+                "gh",
+                "api",
+                f"repos/{{owner}}/{{repo}}/actions/runs/{n}/jobs?filter=latest&per_page=100",
+                "--paginate",
+                "--jq",
+                query,
+            ],
+            GH,
+        )
+        for n in (8, 3, 2, 1)
+    ]
+
+
+def test_main_writes_the_merge_path_with_head_pushes_from_a_lookback(monkeypatch, tmp_path, capsys):
+    found = {"tests_runs": {}, "removals": {}, "head_failure_rate": None}
+    seen = []
+    monkeypatch.setattr(
+        merge_path,
+        "collect",
+        lambda repo_dir, window, queue_jobs: (f"o/r{repo_dir}", dict(found, window=window, queue_jobs=queue_jobs)),
+    )
+    monkeypatch.setattr(merge_path, "render", lambda repo, got: f"line {repo} {len(got['head_pushes'])}")
+
+    def listed(repo_dir, event, window, run_fn):
+        seen.append((repo_dir, event, window, run_fn))
+        return [head(1, "a", "success", 60)]
+
+    monkeypatch.setattr(merge_path, "read_runs", listed)
+    monkeypatch.setattr(
+        merge_path,
+        "red_head_jobs",
+        lambda runs, window, repo_dir, run_fn: {
+            "lint": len(runs),
+            "args": [window, repo_dir, run_fn is subprocess.run],
+        },
+    )
+    out = tmp_path / "m.json"
+
+    assert merge_path.main(["--hours", "4", "--until", stamp(4 * 3600), "--out", str(out)]) == 0
+
+    written = json.loads(out.read_text())
+    assert written["repo"] == "o/r."
+    assert written["window"] == [SINCE, UNTIL]
+    assert written["queue_jobs"] is False
+    assert written["head_pushes"] == {"first push": {"runs": 1, "red": 0}}
+    assert seen == [(".", "pull_request", (SINCE - 6 * 3600, UNTIL), subprocess.run)]
+    assert written["red_head_jobs"] == {"lint": 1, "args": [[SINCE, UNTIL], ".", True]}
+    assert capsys.readouterr().out.splitlines() == [
+        "line o/r. 1",
+        '{"first push": {"runs": 1, "red": 0}}',
+        json.dumps(written["red_head_jobs"]),
+    ]
+
+
+def test_main_reads_the_last_day_into_the_ci_minutes_file_by_default(monkeypatch, tmp_path):
+    windows = []
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(
+        merge_path, "collect", lambda repo_dir, window, queue_jobs: windows.append(window) or ("o/r", {})
+    )
+    monkeypatch.setattr(merge_path, "read_runs", lambda *args: [])
+    monkeypatch.setattr(merge_path, "render", lambda repo, got: "line")
+    before = time.time()
+
+    assert merge_path.main([]) == 0
+
+    ((since_s, until_s),) = windows
+    assert before <= until_s <= time.time()
+    assert until_s - since_s == 24 * 3600
+    assert json.loads((tmp_path / "ci-minutes.json").read_text()) == {
+        "repo": "o/r",
+        "head_pushes": {},
+        "red_head_jobs": {},
+    }

@@ -82,6 +82,14 @@ INLINE_SKIP = (
 
 POSTGRES_REQUIRED = ('"semgrep", "sonar"]', '"semgrep", "sonar", "writer-lock"]')
 
+TEST_ONLY_SONAR = (
+    ('"semgrep", "sonar"', '"semgrep"'),
+    (
+        '\n      + (if $scope == "full"',
+        '\n      + (if .select.outputs.sonar == "skip" then [] else ["sonar"] end)\n      + (if $scope == "full"',
+    ),
+)
+
 FORWARDED_STATS = """NEEDS=$(jq 'if ."mutation-plan".result == "success" and ."mutation-plan".outputs.forwarded == "true" and ."mutation-stats".result == "skipped" then ."mutation-stats".result = "success" else . end' <<< "$NEEDS")
 """
 
@@ -188,6 +196,14 @@ def lost_rerun(steps: list[dict]) -> list[dict]:
 def postgres_required(steps: list[dict]) -> list[dict]:
     [aggregation, *rest] = steps
     return [{**aggregation, "run": aggregation["run"].replace(*POSTGRES_REQUIRED)}, *rest]
+
+
+def test_only_sonar(steps: list[dict]) -> list[dict]:
+    [aggregation, *rest] = steps
+    run = aggregation["run"]
+    for old, new in TEST_ONLY_SONAR:
+        run = run.replace(old, new)
+    return [{**aggregation, "run": run}, *rest]
 
 
 def summary_steps() -> list[dict]:

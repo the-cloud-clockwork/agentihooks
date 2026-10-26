@@ -38,6 +38,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 # Only import lightweight common module at startup
 from hooks.common import log
+from hooks.context import tool_end
 from hooks.prompt_budget import PromptBudget
 
 
@@ -2815,7 +2816,7 @@ EVENT_HANDLERS = {
     "SessionStart": on_session_start,
     "SessionEnd": on_session_end,
     "UserPromptSubmit": on_user_prompt_submit,
-    "PreToolUse": on_pre_tool_use,
+    "PreToolUse": lambda payload: tool_end.closing_denied(on_pre_tool_use, payload, BlockAction, _swarm_tool_end),
     "PostToolUse": on_post_tool_use,
     "Stop": on_stop,
     "SubagentStart": on_subagent_start,

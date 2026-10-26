@@ -1,7 +1,8 @@
 """Wake pass run by the swarm tick: prompt idle herdr panes holding pending inbox items, escalate items nobody reads.
 
 Ladder per pending item: up to three wakes one retry window apart, then an inbox item for the swarm master,
-then a follow-up on the ledger page. Every step is appended to the item's history, so the count survives restarts.
+then an alert on the ledger page, closed when the item closes. Every step is appended to the item's history, so the
+count survives restarts.
 """
 
 from dataclasses import dataclass, replace
@@ -10,11 +11,11 @@ from scripts.inbox import addresses, exits
 from scripts.inbox.dispatch import Dispatcher
 from scripts.inbox.seats import is_seat
 from scripts.inbox.seen import SEEN_ON_LEDGER, SeenMarks
-from scripts.inbox.store import Item, redelivery_ms
+from scripts.inbox.store import CLOSED, Item, redelivery_ms
 from scripts.swarm import capabilities, idle, outage
 from scripts.swarm.delivery import READY, post
 from scripts.swarm.store import MASTER, RedisStore, SwarmError
-from scripts.swarm_ledger import ledger_comments
+from scripts.swarm_ledger import ledger_alerts, ledger_comments
 
 MAX_WAKES = 3
 WINDOW_ENV = "AGENTIHOOKS_INBOX_RETRY_WINDOW_S"
@@ -29,6 +30,7 @@ WAKE_TEXT = (
 )
 WOKEN, TO_MASTER, TO_OPERATOR = "woken", "escalated_master", "escalated_operator"
 PASSED, FROZEN = "passed_master", "frozen"
+ALERTED = "alerted"
 
 
 def window_ms(environ):
@@ -118,6 +120,7 @@ def wake_pass(inbox, slug, agents, herdr, ledger, now_ms, window, quiet=DEFAULT_
         for action in _wake_world(
             world, slug, agents, herdr, ledger, _Clock(now_ms, window, quiet), _ladder(world, slug)
         )
+        + clear_alerts(world, slug, ledger)
     ]
 
 
@@ -180,10 +183,12 @@ def _wake_world(inbox, slug, agents, herdr, ledger, clock: _Clock, items):
             inbox.note(item.id, TO_MASTER, BY, raised_note(master, raised.id), now_ms)
             actions.append(f"raised message {item.id} to {master}")
         elif step in (TO_MASTER, TO_OPERATOR):
-            if not post(inbox, item, lambda: ledger.followup(slug, _operator_text(item), needs_operator=True)):
+            notice = item.sender == ledger_alerts.SENDER
+            if not notice and not _alert(inbox, slug, ledger, item):
                 actions.append(f"the ledger page refused message {item.id}, closed it")
                 continue
-            inbox.note(item.id, TO_OPERATOR, BY, "shown to the operator on the ledger page", now_ms)
+            shown = "its alert is already on the ledger page" if notice else "shown to the operator on the ledger page"
+            inbox.note(item.id, TO_OPERATOR, BY, shown, now_ms)
             actions.append(f"raised message {item.id} to the operator")
     return actions
 
@@ -360,3 +365,24 @@ def _operator_text(item):
     plain = f"A message from {item.sender} to {item.address} is still unread after every wake and escalation"
     quoted = f"{plain}: {_gist(item)}"
     return plain + "." if ledger_comments.problems(quoted, "item") else quoted
+
+
+def _alert(inbox, slug, ledger, item):
+    text = f"{_operator_text(item)} (message {item.id})"
+    inbox.redis.sadd(inbox.key(ALERTED, slug), item.id)
+    return post(inbox, item, lambda: ledger.raise_alert(slug, ledger_alerts.INBOX, text, item=item.id))
+
+
+def clear_alerts(inbox, slug, ledger):
+    """Close the ledger alert of each escalated item that has since closed or gone."""
+    key, actions = inbox.key(ALERTED, slug), []
+    for item_id in sorted(inbox.redis.smembers(key)):
+        if inbox.redis.exists(inbox.key("item", item_id)) and inbox.get(item_id).state not in CLOSED:
+            continue
+        try:
+            ledger.close_item_alerts(slug, item_id, "The message was closed.")
+        except SwarmError:
+            continue
+        inbox.redis.srem(key, item_id)
+        actions.append(f"cleared the ledger alert for message {item_id}")
+    return actions
