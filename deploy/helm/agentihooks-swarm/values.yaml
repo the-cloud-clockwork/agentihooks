@@ -208,7 +208,7 @@ hub:
   bus:
     backend: nats
     url: ""
-    scoped: false
+    scoped: true
   affinity:
     nodeAffinity:
       requiredDuringSchedulingIgnoredDuringExecution:

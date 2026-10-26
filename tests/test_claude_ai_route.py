@@ -336,3 +336,56 @@ def test_the_interactive_route_still_launches_under_the_route_lock(tmp_path, mon
     monkeypatch.setattr(interactive, "launch_claude", launch)
     install.cmd_claude(["--route", "interactive", "--version"])
     assert seen == [("/opt/claude", ["--version"], install.os.environ, "")]
+
+
+def _plain_shell(tmp_path, monkeypatch):
+    operator, decoy = tmp_path / "operator", tmp_path / "process-claude"
+    (operator / ".claude").mkdir(parents=True)
+    (operator / ".claude" / "settings.json").write_text("{}")
+    (operator / ".claude" / "CLAUDE.md").write_text("operator persona")
+    (operator / ".claude.json").write_text(json.dumps({"hasCompletedOnboarding": True}))
+    decoy.mkdir()
+    (decoy / "settings.json").write_text('{"apiKeyHelper": "/bin/decoy"}')
+    (decoy / "CLAUDE.md").write_text("process persona")
+    (decoy / ".claude.json").write_text(json.dumps({"decoy": True}))
+    monkeypatch.setenv("HOME", str(operator))
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: operator))
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(decoy))
+    for name in ("CLAUDE_CODE_HOME_DIR", "AGENTIHOOKS_CLAUDE_HOME"):
+        monkeypatch.delenv(name, raising=False)
+    return operator
+
+
+def test_prepare_with_no_claude_config_dir_picks_a_stored_login_from_the_default_home(tmp_path, monkeypatch, checked):
+    operator = _plain_shell(tmp_path, monkeypatch)
+    _slot(1, PREFERRED)
+    monkeypatch.setattr(master_logins, "left", lambda account, now: 50.0)
+    child, found, number = claude_ai.prepare({"HOME": str(operator), "AGENTIHOOKS_AGENT_NAME": "s-251026"}, tmp_path)
+    target = login.root(1).parent / "claude-ai" / "s_251026" / "claude"
+    assert (found, number) == ("nestor_coltatgmail_com", 1)
+    assert child["CLAUDE_CONFIG_DIR"] == str(target)
+    assert child[claude_ai.STORE] == str(login.home(1))
+    assert (target / "CLAUDE.md").read_text() == "operator persona"
+    assert json.loads((target / login.CONFIG).read_text()) == {
+        "hasCompletedOnboarding": True,
+        login.ACCOUNT: PREFERRED,
+    }
+
+
+def test_default_home_settings_that_bring_back_a_credential_refuse(tmp_path, monkeypatch, executed):
+    operator = _plain_shell(tmp_path, monkeypatch)
+    _slot(1, PREFERRED)
+    (operator / ".claude" / "settings.json").write_text('{"apiKeyHelper": "/bin/key"}')
+    with pytest.raises(login.LoginRefused) as refused:
+        claude_ai.prepare({"HOME": str(operator)}, tmp_path)
+    assert str(refused.value) == login.API_HELPER.format(path=operator / ".claude" / "settings.json")
+
+
+def test_the_resume_flag_passes_through_from_a_plain_shell(tmp_path, monkeypatch, checked, executed):
+    from scripts import install
+
+    operator = _plain_shell(tmp_path, monkeypatch)
+    _slot(1, PREFERRED)
+    monkeypatch.setattr(master_logins, "left", lambda account, now: 50.0)
+    claude_ai.launch_claude("/opt/claude", ["-r"], {"HOME": str(operator)}, "")
+    assert executed[0][1] == install._claude_command("/opt/claude", [*login.SETTINGS, "-r"])

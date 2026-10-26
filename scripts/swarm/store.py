@@ -87,6 +87,7 @@ class SwarmConfig:
     engine: str = "legacy"
     window: dict = field(default_factory=dict)
     focus_weight: int = 50
+    watchdog_address: str = ""
 
     def __post_init__(self) -> None:
         if type(self.focus_weight) is not int or not 0 <= self.focus_weight <= 100:
@@ -238,6 +239,7 @@ class RedisStore:
             raw.get("engine", "legacy"),
             json.loads(raw.get("window") or "{}"),
             int(raw.get("focus_weight", 50)),
+            raw.get("watchdog_address", ""),
         )
 
     def update(self, slug, **changes):
