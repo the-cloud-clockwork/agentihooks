@@ -158,7 +158,13 @@ def test_grouped_download_preserves_shard_integrity_without_installed_dependenci
     assert [download["with"] for download in downloads] == [
         {"pattern": "{collected,reused-tests}-${{ matrix.python-version }}", "path": "shard-data"},
         {"pattern": "{durations,flakes}-${{ matrix.python-version }}-*", "path": "shard-reports"},
+        {"pattern": "{durations,flakes}-${{ matrix.python-version }}-*", "path": "shard-reports"},
     ]
+    assert downloads[1]["continue-on-error"] is True
+    assert downloads[2]["if"] == f"steps.{downloads[1]['id']}.outcome == 'failure'"
+    assert "continue-on-error" not in downloads[2]
+    require = next(step for step in steps if step.get("name") == "Require every planned shard report")
+    assert steps.index(downloads[1]) < steps.index(downloads[2]) < steps.index(require)
     assert not any(step.get("name") == "Install grader dependencies" for step in steps)
     prefetch = next(step for step in steps if "python -m scripts.ci_gate_shards" in step.get("run", ""))
     layout = next(step for step in steps if step.get("name") == "Arrange shard verification data")
