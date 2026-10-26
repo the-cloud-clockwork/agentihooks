@@ -144,7 +144,8 @@ def test_model_and_effort_require_native_flags(mounted):
     (root / "cmdline").write_bytes(b"claude\0")
     facts = live_binding.read(agent, 42, proc)
     assert (facts["model"], facts["effort"]) == ("", "")
-    assert set(live_binding.compare(agent, facts)) == {"model", "effort"}
+    assert live_binding.compare(agent, facts) == {}
+    assert live_binding.unobserved(agent, facts) == ["model", "effort"]
 
 
 def test_codex_home_hooks_and_native_effort(mounted):
@@ -278,6 +279,62 @@ def test_flagless_codex_session_reads_model_and_effort_from_its_home(mounted):
     facts = live_binding.read(agent, 42, proc)
     assert (facts["model"], facts["effort"]) == ("gpt-7", "low")
     assert set(live_binding.compare(agent, facts)) == {"model", "effort"}
+
+
+@pytest.fixture
+def hive_codex(mounted):
+    agent, proc, home = mounted
+    agent = replace(
+        agent,
+        harness="codex",
+        lane="ci",
+        model="gpt-6.1-sol",
+        account="default",
+        profile_decision={"validation": {"home": str(home), "model": "gpt-6.1-sol", "effort": "high"}},
+    )
+    root = proc / "42"
+    (root / "comm").write_text("codex")
+    (root / "environ").write_bytes(f"CODEX_HOME={home}\0AGENTIHOOKS_PROFILE=engineer\0".encode())
+    (home / "config.toml").write_text("[features]\nhooks = true\n")
+    wrapper = home / "agentihooks-hook.sh"
+    wrapper.touch()
+    wrapper.chmod(0o700)
+    hooks = {event: [{"hooks": [{"type": "command", "command": str(wrapper)}]}] for event in EVENTS}
+    (home / "hooks.json").write_text(json.dumps({"hooks": hooks}))
+    return agent, proc, root
+
+
+def test_codex_app_server_on_a_hive_reads_its_model_from_the_config_override(hive_codex):
+    agent, proc, root = hive_codex
+    (root / "cmdline").write_bytes(
+        b'codex\0app-server\0--listen\0unix:/run/x.sock\0-c\0model="gpt-6.1-sol"\0-c\0model_reasoning_effort="high"\0'
+    )
+    facts = live_binding.read(agent, 42, proc)
+    assert (facts["model"], facts["effort"]) == ("gpt-6.1-sol", "high")
+    assert live_binding.compare(agent, facts) == {}
+    (root / "cmdline").write_bytes(b'codex\0app-server\0-c\0model="gpt-7"\0-c\0model_reasoning_effort="high"\0')
+    facts = live_binding.read(agent, 42, proc)
+    assert live_binding.compare(agent, facts) == {"model": {"expected": "gpt-6.1-sol", "actual": "gpt-7"}}
+
+
+def test_codex_hive_agent_with_no_model_reading_is_unknown_not_mismatched(hive_codex, ticking):
+    store, _, _ = ticking
+    agent, proc, root = hive_codex
+    (root / "cmdline").write_bytes(b"codex\0app-server\0--listen\0unix:/run/x.sock\0")
+    facts = live_binding.read(agent, 42, proc)
+    assert (facts["model"], facts["effort"]) == ("", "")
+    store.put_agent("sw", agent)
+    assert live_binding.record(store, "sw", agent, facts, 5) == {}
+    report = json.loads(store.redis.hget(store.key("sw", "live-bindings"), agent.name))
+    assert (report["state"], report["unobserved"]) == ("matching", ["model", "effort"])
+    assert [(f.subject, f.summary, f.evidence) for f in live_binding.findings(store, "sw")] == [
+        (
+            f"{agent.name}/{field}",
+            f"{agent.name} has no observed {field}",
+            (f"expected {expected}; the live launch showed none, so it is unknown and never retires the agent",),
+        )
+        for field, expected in (("model", "gpt-6.1-sol"), ("effort", "high"))
+    ]
 
 
 @pytest.mark.parametrize("content", ["broken", "[]"])
