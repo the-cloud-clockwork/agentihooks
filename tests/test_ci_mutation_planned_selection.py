@@ -710,6 +710,8 @@ UNIT_JOBS = {"unit": {"needs": "split", "steps": [{"run": "pytest"}]}, "unit-sel
         ({"jobs": {**UNIT_JOBS, "unit": {**UNIT_JOBS["unit"], "outputs": {"a": "b"}}}}, False),
         ({"jobs": {**UNIT_JOBS, "unit": {**UNIT_JOBS["unit"], "runs-on": "other"}}}, True),
         ({"jobs": {**UNIT_JOBS, "unit-selected": {"steps": []}}}, True),
+        ({"jobs": {**UNIT_JOBS, "mutation-stats": {"steps": [{"run": "collect"}]}}}, True),
+        ({"jobs": {**UNIT_JOBS, "mutation-stats": {"needs": "mutation-plan"}}}, False),
         ({"jobs": {"unit": UNIT_JOBS["unit"]}}, True),
         ({"jobs": {**UNIT_JOBS, "unit": "pytest"}}, True),
         ({"jobs": {"unit-selected": UNIT_JOBS["unit-selected"]}}, True),

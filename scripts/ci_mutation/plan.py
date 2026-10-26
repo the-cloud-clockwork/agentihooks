@@ -37,7 +37,7 @@ MUTANT_SECONDS = 5.6
 WORKERS = 4
 RECORD_RETRY_SECONDS = 10
 TEST_WORKFLOW = ".github/workflows/test.yml"
-COLLECTING_JOBS = ("unit", "unit-selected")
+COLLECTING_JOBS = ("unit", "unit-selected", "mutation-stats")
 SCHEDULING_KEYS = {"needs", "if", "timeout-minutes", "outputs"}
 RECORD_ERRORS = (subprocess.SubprocessError, OSError, ValueError, KeyError, zipfile.BadZipFile)
 
