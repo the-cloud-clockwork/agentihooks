@@ -4,6 +4,11 @@
       "reason": "Reports current run test counts after the test producers settle without grading required results.",
       "owner": "ci-1@rig-grade-swarm-doctor",
       "expires": "2027-04-20"
+    },
+    "test.yml/mutation-self-plant": {
+      "reason": "Plants a sample through the mutation gate only when the gate or its plant changes, so most pull requests skip it; wiring it into Gate Required needs a skip aware aggregator rule.",
+      "owner": "ci-9@rig-grade-swarm",
+      "expires": "2026-11-26"
     }
   },
   "outside_gate": {

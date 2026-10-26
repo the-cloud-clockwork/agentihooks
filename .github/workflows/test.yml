@@ -3263,3 +3263,72 @@ jobs:
           path: ${{ job.status == 'success' && '.mutation-gate/report.json' || '.mutation-gate/' }}
           include-hidden-files: true
           retention-days: 7
+
+  mutation-self-plant:
+    if: ${{ !cancelled() && github.event_name == 'pull_request' }}
+    runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && 'anton-oss' || 'ubuntu-latest' }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [kill, survive]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: head
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          path: base
+          ref: ${{ github.event.pull_request.base.sha }}
+          persist-credentials: false
+      - name: Plant only when the mutation gate or its plant changed
+        id: changed
+        run: |
+          if diff -rq base/scripts/ci_mutation head/scripts/ci_mutation >/dev/null \
+            && diff -rq base/tests/mutation_self_plant head/tests/mutation_self_plant >/dev/null; then
+            echo "plant=false" >> "$GITHUB_OUTPUT"
+            echo "The mutation gate and its plant match the base; nothing to prove."
+          else
+            echo "plant=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Pick the protected grader
+        if: steps.changed.outputs.plant == 'true'
+        run: |
+          if [[ -f base/tests/mutation_self_plant/plant.py ]]; then
+            echo "GRADER=$PWD/base/tests/mutation_self_plant/plant.py" >> "$GITHUB_ENV"
+          else
+            echo "::warning::The base predates the protected self plant grader; the head copy grades this run."
+            echo "GRADER=$PWD/head/tests/mutation_self_plant/plant.py" >> "$GITHUB_ENV"
+          fi
+      - uses: actions/setup-python@v5
+        if: steps.changed.outputs.plant == 'true'
+        with:
+          python-version: '3.12'
+      - uses: astral-sh/setup-uv@v10.2.0
+        if: steps.changed.outputs.plant == 'true'
+        with:
+          version: '0.12.23'
+          checksum: '9167d72b3319674b6303c4cbe071854bba13ebdf3d76b1a7cbdc175471fb66d6'
+          enable-cache: false
+      - name: Install dependencies
+        if: steps.changed.outputs.plant == 'true'
+        working-directory: head
+        run: uv pip install --system --excludes .github/test-excludes.txt -e '.[dev,all]'
+      - name: Grade the sample with the ${{ matrix.mode }} test through the head mutation gate
+        if: steps.changed.outputs.plant == 'true'
+        working-directory: head
+        env:
+          MODE: ${{ matrix.mode }}
+          PYTHONPATH: ${{ github.workspace }}/head
+          PYTEST_DISABLE_PLUGIN_AUTOLOAD: '1'
+        run: python "$GRADER" "$MODE"
+      - uses: actions/upload-artifact@v4
+        if: ${{ always() && steps.changed.outputs.plant == 'true' }}
+        with:
+          name: mutation-self-plant-${{ matrix.mode }}
+          path: |
+            head/.mutation-self-plant/evidence/report.json
+            head/.mutation-self-plant/evidence/*/run.log
+          include-hidden-files: true
+          retention-days: 7
