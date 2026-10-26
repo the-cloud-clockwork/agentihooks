@@ -50,9 +50,11 @@ def test_proof_home_cannot_import_a_shadow_playwright(tmp_path, isolated):
 def test_proof_baked_browser_drift_fails_without_a_download(tmp_path):
     steps = _job()["steps"]
     offline = next(step for step in steps if "use-image.sh" in step.get("run", ""))
-    assert offline["if"] == "inputs.browser && runner.environment == 'self-hosted'"
+    assert offline["if"] == "runner.environment == 'self-hosted'"
     hosted = next(step for step in steps if step.get("uses") == "./.github/actions/browser-cache")
     assert hosted["if"] == "inputs.browser && runner.environment != 'self-hosted'"
+    isolated = next(step for step in steps if "proof-browser" in step.get("run", ""))
+    assert isolated["if"] == "inputs.browser || runner.environment == 'self-hosted'"
     baked = tmp_path / "baked"
     baked.mkdir()
     calls = tmp_path / "calls"
