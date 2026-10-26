@@ -850,6 +850,18 @@ def test_a_superscript_digit_dependency_stays_an_id_and_is_refused_as_unknown():
     assert caught.value.errors == ["phase 1 depends on unknown phase ²"]
 
 
+def test_a_marker_without_inner_spaces_still_marks_its_phase():
+    result = normalize("# Plan\n\n## Only phase\n<!--phase:planning=manual-->\nProse.\n", "tight.md")
+
+    assert result.content["phases"] == [{"title": "Only phase", "planning": "manual", "description": "Prose."}]
+
+
+def test_a_plain_comment_or_phase_word_after_a_heading_is_not_a_marker():
+    text = "# Plan\n\n## Notes\n<!-- reviewed -->\n\n## More\nphase: later -->\n"
+
+    assert normalize(text, "comments.md").kind == "raw"
+
+
 def test_bytes_that_are_not_utf8_are_refused():
     with pytest.raises(PlanError) as caught:
         normalize(b"\xff\xfe plan", "binary.md")

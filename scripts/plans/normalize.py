@@ -10,8 +10,7 @@ from typing import Any
 from scripts.swarm_ledger import ledger_phases, plan_ranges
 from scripts.swarm_ledger.ledger_phases import PLANNING_DEFAULT
 
-PHASE_MARKER = re.compile(r"^<!--\s*phase:\s*(?P<body>.*?)\s*-->$")
-TOKEN = re.compile(r'(\w+)=(?:"(.*?)"|(\S+))')
+TOKEN = re.compile(r'(\w+)=(?:"([^"]*)"|(\S+))')
 PHASE_KEYS = {"id", "depends", "planning", "not_duplicate"}
 DESCRIPTION_LIMIT = 800
 ID_RULE = "id must start with a letter and hold only letters, digits, dots, dashes or underscores"
@@ -114,7 +113,7 @@ def _json_description(entry: dict, where: str, errors: list[str]) -> str:
     if not isinstance(description, str):
         errors.append(f"{where}: description must be a string")
     elif any(
-        level or plan_ranges.ANCHOR.fullmatch(line) or PHASE_MARKER.fullmatch(line.strip())
+        level or plan_ranges.ANCHOR.fullmatch(line) or _is_phase_marker(line)
         for _, level, line in plan_ranges.sections(description)
     ):
         errors.append(f"{where}: description must not hold headings or plan markers")
@@ -202,7 +201,7 @@ def _from_markdown(text: str, name: str, existing: set[str]) -> Normalized:
     for i, j in markers.items():
         title = entries[i][2]
         where = f"phase {title!r}"
-        fields = _marker_fields(entries[j][2].strip(), where, errors)
+        fields = _marker_fields(entries[j][2].strip().removeprefix("<!--").removesuffix("-->"), where, errors)
         phases.append(_marked_phase(title, fields, where, errors))
         ranged.append({"id": str(i), "title": title})
     if errors:
@@ -232,9 +231,15 @@ def _from_markdown(text: str, name: str, existing: set[str]) -> Normalized:
 
 def _marker_at(entries: list, i: int) -> int | None:
     j = next((j for j in range(i + 1, len(entries)) if entries[j][1] or entries[j][2].strip()), None)
-    if j is not None and not entries[j][1] and PHASE_MARKER.fullmatch(entries[j][2].strip()):
+    if j is not None and not entries[j][1] and _is_phase_marker(entries[j][2]):
         return j
     return None
+
+
+def _is_phase_marker(line: str) -> bool:
+    inner = line.strip()
+    body = inner.removeprefix("<!--").removesuffix("-->")
+    return len(body) == len(inner) - 7 and body.strip().startswith("phase:")
 
 
 def _slice_names(entries: list, marked: bool) -> list[str]:
