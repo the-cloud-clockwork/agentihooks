@@ -461,6 +461,15 @@ def _setup(args: argparse.Namespace) -> str:
 
 def main(argv: list[str]) -> int:
     args = _parser().parse_args(argv)
+    if args.command == "create":
+        from scripts.gates.entry import native
+
+        if native("node-caps", "hive-create"):
+            return 2
+    return _run(args)
+
+
+def _run(args: argparse.Namespace) -> int:
     try:
         if args.command == "add":
             from scripts.hive import machine

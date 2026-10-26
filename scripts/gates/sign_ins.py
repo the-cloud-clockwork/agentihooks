@@ -45,9 +45,13 @@ class SignIns:
     default_mode = "observe"
 
     def matches(self, call):
+        if call.tool in ("claude-login", "codex-login", "init-agent-auth"):
+            return True
         kind, _, rest = call.tool.partition("__")
         return kind == "mcp" and PLAYWRIGHT in rest.partition("__")[0]
 
     def decide(self, call, who, state):
+        if call.tool in ("claude-login", "codex-login", "init-agent-auth"):
+            return Decision.deny("sign in: agents never initiate authentication; send the step to the front door master.") if who.name else Decision()
         found = sign_in(call.tool, call.tool_input)
         return Decision.deny(refusal(found)) if found else Decision()

@@ -10,7 +10,7 @@ from tests.test_terminate_agent import session
 
 @pytest.fixture
 def native_gate(monkeypatch, tmp_path):
-    who = Who(name="master@proof", swarm="proof", task="native")
+    who = Who(name="master@123456-0001", swarm="proof", task="native")
     monkeypatch.setattr(entry.Who, "from_env", lambda environ=None: who)
     monkeypatch.setattr(log, "swarm_home", lambda: tmp_path)
     monkeypatch.setattr(entry.modes, "swarm_gates", lambda *args: None)
@@ -87,6 +87,6 @@ def test_only_explicit_auth_launches_run_sign_in_gate(monkeypatch, native_gate, 
     monkeypatch.setattr(init_agent, "_resolve_directory", resolve)
     monkeypatch.setattr(init_agent.operator_env, "fill", lambda env: None)
     args = ["--dry-run", *(["--auth", auth] if auth else [])]
-    assert init_agent.main(args, {}) == 2
+    assert init_agent.main(args, {"AGENTIHOOKS_GATE_SIGN_INS": "enforce"}) == 2
     assert resolve.call_count == (0 if denied else 1)
     assert [row["gate"] for row in log.recent("proof", home=native_gate)] == (["sign-ins"] if denied else [])

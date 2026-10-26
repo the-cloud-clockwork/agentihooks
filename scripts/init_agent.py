@@ -1048,6 +1048,11 @@ def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -
     args = _parser().parse_args(argv)
     launch = LaunchDeadline(_launch_seconds(args))
     active_env = dict(os.environ if environ is None else environ)
+    if args.auth:
+        from scripts.gates.entry import native
+
+        if native("sign-ins", "init-agent-auth", active_env):
+            return 2
     active_env.pop("AGENTIHOOKS_PROFILE_REPORT", None)
     operator_env.fill(active_env)
     try:

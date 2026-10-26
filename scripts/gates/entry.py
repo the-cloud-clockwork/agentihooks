@@ -85,6 +85,10 @@ def evaluate(gate, call, environ=None, home=None):
     return 2
 
 
+def native(name, operation, environ=None):
+    return evaluate(HOST_GATES[name], Call(operation), environ)
+
+
 def _decide(gate, call, who, home, mode="enforce"):
     try:
         state = Verdicts(who.swarm, gate.name, home)
