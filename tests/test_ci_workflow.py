@@ -1832,7 +1832,8 @@ def test_every_pull_request_stats_part_restores_one_merged_cache_saved_once_afte
     assert merged["uses"] == "actions/cache/save@v4"
     assert merged["if"] == f"{first} && hashFiles('.mutation-stats-cache/**') != ''"
     assert merged["with"] == {"path": ".mutation-stats-cache", "key": key}
-    order = [base["name"], download["name"], merged["name"], "Mutate changed Python files"]
+    assert mutation_names.index(base["name"]) == 1
+    order = [base["name"], download["name"], merged["name"], "Install dependencies", "Mutate changed Python files"]
     assert [mutation_names.index(name) for name in order] == sorted(mutation_names.index(name) for name in order)
 
 

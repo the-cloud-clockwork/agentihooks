@@ -3122,6 +3122,31 @@ jobs:
           fetch-depth: 0
           ref: ${{ github.event.pull_request.head.sha }}
 
+      - name: Restore compatible test stats
+        if: strategy.job-index == 0 && needs.mutation-plan.outputs.stats_parts != '[0]' && needs.mutation-plan.outputs.forwarded != 'true'
+        uses: actions/cache/restore@v4
+        env:
+          SEGMENT_DOWNLOAD_TIMEOUT_MINS: "1"
+        with:
+          path: .mutation-stats-cache
+          key: mutation-test-stats-v2-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: mutation-test-stats-v2-${{ runner.os }}-
+
+      - name: Download every part's test stats cache
+        if: strategy.job-index == 0 && needs.mutation-plan.outputs.stats_parts != '[0]' && needs.mutation-plan.outputs.forwarded != 'true'
+        uses: actions/download-artifact@v4
+        with:
+          pattern: mutation-test-stats-cache-*
+          path: .mutation-stats-cache
+          merge-multiple: true
+
+      - name: Save the merged test stats
+        if: strategy.job-index == 0 && needs.mutation-plan.outputs.stats_parts != '[0]' && needs.mutation-plan.outputs.forwarded != 'true' && hashFiles('.mutation-stats-cache/**') != ''
+        uses: actions/cache/save@v4
+        with:
+          path: .mutation-stats-cache
+          key: mutation-test-stats-v2-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}
+
       - uses: actions/setup-python@v5
         if: needs.mutation-plan.outputs.forwarded != 'true'
         with:
@@ -3199,31 +3224,6 @@ jobs:
           pattern: mutation-stats-*
           path: .mutation-stats
           merge-multiple: true
-
-      - name: Restore compatible test stats
-        if: strategy.job-index == 0 && needs.mutation-plan.outputs.stats_parts != '[0]' && needs.mutation-plan.outputs.forwarded != 'true'
-        uses: actions/cache/restore@v4
-        env:
-          SEGMENT_DOWNLOAD_TIMEOUT_MINS: "1"
-        with:
-          path: .mutation-stats-cache
-          key: mutation-test-stats-v2-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}
-          restore-keys: mutation-test-stats-v2-${{ runner.os }}-
-
-      - name: Download every part's test stats cache
-        if: strategy.job-index == 0 && needs.mutation-plan.outputs.stats_parts != '[0]' && needs.mutation-plan.outputs.forwarded != 'true'
-        uses: actions/download-artifact@v4
-        with:
-          pattern: mutation-test-stats-cache-*
-          path: .mutation-stats-cache
-          merge-multiple: true
-
-      - name: Save the merged test stats
-        if: strategy.job-index == 0 && needs.mutation-plan.outputs.stats_parts != '[0]' && needs.mutation-plan.outputs.forwarded != 'true' && hashFiles('.mutation-stats-cache/**') != ''
-        uses: actions/cache/save@v4
-        with:
-          path: .mutation-stats-cache
-          key: mutation-test-stats-v2-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}
 
       - name: Mutate changed Python files
         if: github.event_name == 'pull_request' && needs.mutation-plan.outputs.forwarded != 'true'
