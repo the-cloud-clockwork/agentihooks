@@ -7,12 +7,14 @@ from pathlib import Path
 
 from scripts import aicode_tokens, master_logins, openbao_kv, quota_state
 from scripts import master_claude_login as login
+from scripts.claude_config import claude_home, claude_json
 from scripts.profiles import binding
 from scripts.routing import native_login
 
 ROUTE = "claude-ai"
 STORE = "CLAUDE_SECURESTORAGE_CONFIG_DIR"
 FOLDER = "claude-ai"
+LINKED = ("projects", "sessions")
 EMPTY = "no claude ai login is stored: run agentihooks claude login --master"
 NONE = "no usable claude ai login: {reasons}"
 SPENT = "{account} has {left:.0f}% left"
@@ -36,16 +38,16 @@ def _restored(number: int, copy: Mapping[str, str]) -> None:
 def _home(environ: Mapping[str, str], number: int) -> Path:
     name = aicode_tokens.slug(environ.get("AGENTIHOOKS_AGENT_NAME") or f"pid-{os.getpid()}")
     with login._locked(Path(login.hooks_config.AGENTIHOOKS_HOME) / FOLDER / name) as folder:
-        target = login._rebuild(folder, Path(environ["CLAUDE_CONFIG_DIR"]))
+        target = login._rebuild(folder, claude_home(environ), LINKED)
         account = login._read(login.home(number) / login.CONFIG).get(login.ACCOUNT)
-        login._write(target / login.CONFIG, {**login._read(target / login.CONFIG), login.ACCOUNT: account})
+        login._write(target / login.CONFIG, {**login._read(claude_json(environ)), login.ACCOUNT: account})
     if environ.get(binding.REPORT):
         binding.rehome(Path(environ[binding.REPORT]), target)
     return target
 
 
 def prepare(environ: Mapping[str, str], cwd: Path) -> tuple[dict[str, str], str, int]:
-    refused = login.refusal(Path(environ["CLAUDE_CONFIG_DIR"]), cwd)
+    refused = login.refusal(claude_home(environ), cwd)
     if refused:
         raise login.LoginRefused(refused)
     candidates = _candidates(openbao_kv.from_env(environ))

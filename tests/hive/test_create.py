@@ -301,7 +301,8 @@ def test_the_dry_run_prints_every_step_and_file_and_writes_nothing(world):
     assert not (world.home / ".ssh" / "known_hosts").exists()
     assert not world.run.named("gh", "api", "-X", "POST")
     assert not world.run.named("gh", "pr", "create")
-    assert not [argv for argv in world.run.calls if argv[0] in ("ssh-keygen", "herdr", "ssh")]
+    writes = [argv for argv in world.run.calls if argv != list(machine.LIST)]
+    assert not [argv for argv in writes if argv[0] in ("ssh-keygen", "herdr", "ssh")]
     assert world.published == [True]
     assert (
         f"--- k8s/manifests/{NAME}/ssh-lan.yaml\nport: 2225\nnode: worker-001\nkey: {RECORD}\nip: 10.10.30.207\n"
@@ -394,6 +395,21 @@ def test_a_closed_pull_request_is_not_reused():
     assert listed[listed.index("--jq") + 1] == '[.[] | select(.state != "CLOSED")][0].url // ""'
 
 
+def test_a_file_mapped_to_none_is_deleted_from_the_tree():
+    bodies = []
+
+    def run(argv, **kwargs):
+        bodies.append(kwargs.get("input"))
+        return subprocess.CompletedProcess(argv, 0, "" if argv[1:3] == ["pr", "list"] else "sha", "")
+
+    create_github.open_pr(run, REPO, "dev", NAME, {"gone": None, "a": "b"}, "Remove worker hive")
+    tree = next(json.loads(body) for body in bodies if body and "base_tree" in body)["tree"]
+    assert tree == [
+        {"path": "gone", "mode": "100644", "type": "blob", "sha": None},
+        {"path": "a", "mode": "100644", "type": "blob", "content": "b"},
+    ]
+
+
 def test_a_branch_left_by_an_earlier_run_is_moved_to_the_new_commit():
     run = Run()
 
@@ -466,6 +482,7 @@ def _listing_line(world):
 
 
 def _keep_member(world):
+    world.tools.redis.hset(machine.MACHINES, "worker-001", NAME)
     grant = auth.mint(world.tools.redis, NAME, "redis://127.0.0.1:6379/0")
     world.bao.records[RECORD] = {"credential": auth.env_text("https://hive.example:8770", grant)}
     world.bao.versions[RECORD] = 1
@@ -601,3 +618,51 @@ def test_the_dry_run_of_a_kept_unlisted_member_names_its_listing(world):
         f"hive create {NAME}: invite: kept hive member {member} in OpenBao secret/{RECORD}; "
         f"would list {member} on the hub signer record {SIGNER} for demo and refresh {SYNC}"
     )
+
+
+def test_a_new_node_beside_live_hives_one_and_two_is_named_hive_three(world):
+    redis = world.tools.redis
+    redis.hset(machine.MACHINES, "worker-001", NAME)
+    for name in (NAME, "swarm-hive-002"):
+        member = auth.mint(redis, name, "redis://hive.example:6380/2")["id"]
+        redis.hset(registry.key(member), "heartbeat_at", NOW * 1000)
+    world.run.machines = [
+        {"id": "a1", "label": NAME, "target": "ssh://worker@10.10.30.207:2222"},
+        {"id": "a2", "label": "swarm-hive-002", "target": "ssh://worker@10.10.30.207:2223"},
+    ]
+    world.run.on_merge = lambda: None
+
+    with pytest.raises(
+        auth.HiveError,
+        match=r"^timed out after 0s waiting for hive [0-9a-f]{16} to send a heartbeat; rerun hive create to resume$",
+    ):
+        create.create(world.tools, create.Options(node="worker-002", timeout_s=0))
+
+    assert _state(world)["name"] == "swarm-hive-003"
+    assert redis.hgetall(machine.MACHINES) == {"worker-001": NAME, "worker-002": "swarm-hive-003"}
+
+
+@pytest.mark.parametrize(
+    ("machines", "registered"),
+    [
+        ([{"id": "a2", "label": "swarm-hive-002", "target": "ssh://worker@10.10.30.207:2223"}], "anton-2"),
+        ([], "swarm-hive-002"),
+    ],
+)
+def test_a_name_only_herdr_or_the_registry_holds_is_skipped(world, machines, registered):
+    world.tools.redis.hset(machine.MACHINES, "worker-001", NAME)
+    world.run.machines = machines
+    registry.update(world.tools.redis, "abc", [f"name={registered}"])
+
+    done = create.create(world.tools, create.Options(node="worker-002", dry_run=True))
+
+    assert done == "dry run of hive create swarm-hive-003: nothing written"
+
+
+def test_a_name_only_a_hive_member_holds_is_skipped(world):
+    world.tools.redis.hset(machine.MACHINES, "worker-001", NAME)
+    auth.mint(world.tools.redis, "swarm-hive-002", "redis://hive.example:6380/2")
+
+    done = create.create(world.tools, create.Options(node="worker-002", dry_run=True))
+
+    assert done == "dry run of hive create swarm-hive-003: nothing written"

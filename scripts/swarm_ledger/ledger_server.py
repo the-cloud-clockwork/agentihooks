@@ -50,6 +50,7 @@ import ledger_media  # noqa: E402
 from scripts.gates import talk  # noqa: E402
 from scripts.swarm_ledger import (  # noqa: E402
     composition,
+    ledger_blockers,
     ledger_closed,
     ledger_task_duplicates,
     page_policy,
@@ -313,6 +314,7 @@ CAPS = {
     "max_plan": ("max-plan-agents", 0, MAX_CAP),
     "masters_step": ("masters-step", 0, MAX_CAP),
     "compact_limit": ("compact-limit", MIN_COMPACT, MAX_COMPACT),
+    "focus_weight": ("focus-weight", 0, 100),
 }
 PAGE_LIMITS = {
     "capacity": {key: [low, high] for key, (_, low, high) in CAPS.items()},
@@ -639,7 +641,8 @@ def deliver_alerts(slug, state):
         master = operator_mail.master_address(inbox.redis, slug, agents)
         addresses = {a.name: a.seat or a.name for a in live}
         alerts = [{**a, "target": addresses.get(a["target"], "master")} for a in fresh]
-        sent = ledger_alerts.deliver(inbox, slug, alerts, meta["rev"], master, since=since)
+        render = functools.partial(ledger_alerts.message, tier=ledger_blockers.autonomy(slug), doc=state)
+        sent = ledger_alerts.deliver(inbox, slug, alerts, meta["rev"], master, since=since, render=render)
     except Exception as exc:  # the ledger write stands whatever the inbox does
         sys.stderr.write(f"alert delivery for {slug}: {exc}\n")
         unrelayed_on(ALERTS, slug, meta["rev"])
@@ -745,9 +748,11 @@ def workspace_tails(slug, task_id):
 
 
 def write_gate(slug):
-    """Every op write: masters fenced to the items they own, page chat to the front door, inside the talk budget."""
+    """Every op write: masters fenced to the items they own, page chat to the front door, asks of the operator behind
+    the blocker protocol, inside the talk budget."""
     swarm = ports.swarm()
-    return swarm.master_fence.Fence(slug, swarm.front_door.Door(slug, talk.Budget(slug)))
+    protocol = ledger_blockers.Gate(slug, talk.Budget(slug))
+    return swarm.master_fence.Fence(slug, swarm.front_door.Door(slug, protocol))
 
 
 def api_services():
@@ -811,6 +816,16 @@ def sample_streams():
             sys.stderr.write(f"stream sample {slug}: {exc}\n")
 
 
+def request_caller(headers) -> str:
+    if headers is None:
+        return "-"
+    if headers.get("X-Ledger-Agent"):
+        return headers["X-Ledger-Agent"]
+    if headers.get("X-Ledger-Tick"):
+        return "tick"
+    return "controller" if headers.get("X-Controller-Credential") else "-"
+
+
 class Handshake(Exception):
     pass
 
@@ -861,7 +876,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def log_message(self, fmt, *args):
         if self.path.startswith("/api/v1/"):
-            sys.stderr.write(f"{time.strftime('%H:%M:%S')} {self.command} {self.path.split('?', 1)[0]}\n")
+            caller = request_caller(getattr(self, "headers", None))
+            sys.stderr.write(f"{time.strftime('%H:%M:%S')} {self.command} {self.path.partition('?')[0]} {caller}\n")
             return
         sys.stderr.write("%s %s\n" % (time.strftime("%H:%M:%S"), fmt % args))
 

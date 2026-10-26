@@ -38,9 +38,9 @@ class Terminations:
     default_mode = "observe"
 
     def matches(self, call):
-        return call.tool == "Bash"
+        return call.tool in ("Bash", "terminate-agent")
 
     def decide(self, call, who, state):
-        if naming.lane_of(who.name) != MASTER or not terminates(call.command):
+        if naming.lane_of(who.name) != MASTER or (call.tool == "Bash" and not terminates(call.command)):
             return Decision()
         return Decision.deny(REFUSAL)

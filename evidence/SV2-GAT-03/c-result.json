@@ -1,0 +1,29 @@
+{
+  "case": "T-SV2-GAT-03-C",
+  "evidence_class": "mocked for the fixture cases: hooks run in a temporary agentihooks home with the brain refresh and project retrieval patched to return the fixture packs, through the Claude and Codex target emitters; live: one Claude and one Codex session on a hive worker ran the branch hooks with an isolated agentihooks home",
+  "input_sha256": {
+    "task-context-hooks.json": "af5c49ace45c0caff54d07734c71e396462e7a51deaa0c838e34c14ff1776b8a"
+  },
+  "observed": {
+    "tests": [
+      "test_c_unchanged_packs_are_not_repeated_and_compaction_gets_the_current_pack[claude]",
+      "test_c_unchanged_packs_are_not_repeated_and_compaction_gets_the_current_pack[codex]",
+      "test_c_a_repeated_current_pack_drops_an_older_held_pack",
+      "test_c_a_newer_held_pack_replaces_an_older_one"
+    ],
+    "unchanged_pack_repeats": 0,
+    "context_delivery_outcomes_by_target": {
+      "delivered": 2,
+      "deduplicated": 3
+    },
+    "compaction": "SessionStart with source compact delivers the current pack once; the stale held pack is dropped",
+    "newer_held_pack_wins": true,
+    "restart_clears_receipt_and_held_pack": true,
+    "live": {
+      "second_run": "refreshed on every tool call",
+      "claude_deduplicated": 1
+    },
+    "repeated_current_pack_drops_older_held_pack": true
+  },
+  "state": "passed"
+}

@@ -2,7 +2,7 @@
 
 import json
 import subprocess
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -44,7 +44,7 @@ def hive_name(ordinal: int) -> str:
     return f"{NAME_PREFIX}{ordinal:03d}"
 
 
-def name(redis: "Redis", machine: str, assign: bool = True) -> str:
+def name(redis: "Redis", machine: str, assign: bool = True, taken: Callable[[], Iterable[str]] = tuple) -> str:
     from redis.exceptions import WatchError
 
     with redis.pipeline() as pipe:
@@ -54,11 +54,9 @@ def name(redis: "Redis", machine: str, assign: bool = True) -> str:
                 named = pipe.hgetall(MACHINES)
                 if machine in named:
                     return named[machine]
-                used = sorted(named.values())
-                found = next(
-                    (hive_name(ordinal) for ordinal, held in enumerate(used, 1) if held != hive_name(ordinal)),
-                    hive_name(len(used) + 1),
-                )
+                used = {*named.values(), *taken()}
+                ordinals = (ordinal for ordinal, _ in enumerate([*used, None], 1))
+                found = next(hive_name(ordinal) for ordinal in ordinals if hive_name(ordinal) not in used)
                 if assign:
                     pipe.multi()
                     pipe.hset(MACHINES, machine, found)
@@ -66,6 +64,13 @@ def name(redis: "Redis", machine: str, assign: bool = True) -> str:
                 return found
             except WatchError:
                 continue
+
+
+def held_names(redis: "Redis", run: Callable[..., subprocess.CompletedProcess]) -> set[str]:
+    members = {redis.hget(key, "name") for key in redis.scan_iter(match=f"{auth.PREFIX}:member:*")}
+    hives = {record["name"] for record in registry.hives(redis)}
+    herdr = {saved.get("label") for saved in _listed(run)}
+    return {label for label in members | hives | herdr if label}
 
 
 def host(target: str) -> str:
@@ -90,7 +95,7 @@ def add(
     _ui(redis, local_id)
     listed = _listed(run)
     _one_per_machine(listed, target, label)
-    member = _member(redis, label)
+    member = named_member(redis, label)
     _keep(listed, target, label, run)
     if member:
         return {"id": member, "name": label}
@@ -117,7 +122,7 @@ def _one_per_machine(listed: list[dict], target: str, label: str) -> None:
             )
 
 
-def _member(redis: "Redis", label: str) -> str | None:
+def named_member(redis: "Redis", label: str) -> str | None:
     for key in redis.scan_iter(match=f"{auth.PREFIX}:member:*"):
         if redis.hget(key, "name") == label:
             return key.rsplit(":", 1)[1]
@@ -155,10 +160,12 @@ def _listed(run: Callable[..., subprocess.CompletedProcess]) -> list[dict]:
         raise auth.HiveError(f"herdr machine list answered with output that is not JSON ({exc})") from exc
 
 
-def forget(label: str, known_hosts: Path, run: Callable[..., subprocess.CompletedProcess]) -> list[str]:
+def forget(label: str, known_hosts: Path, run: Callable[..., subprocess.CompletedProcess], dry_run: bool) -> list[str]:
     found = [machine for machine in _listed(run) if machine.get("label") == label]
     if not found:
         return [f"herdr holds no machine {label}"]
+    if dry_run:
+        return [f"would remove herdr machine {label} and the host key of {known_host(m['target'])}" for m in found]
     done = []
     for machine in found:
         run_checked(run, ["herdr", "machine", "remove", machine["id"]], None, HERDR_TIMEOUT_S)

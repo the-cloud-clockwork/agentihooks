@@ -603,10 +603,16 @@ def cmd_plan(args):
     phases = ledger_phase_cli.append_phases(
         plan, [phase["id"] for phase in resource(args.slug, "phases", collection=True)]
     )
-    send(args, "phase_append", phases=phases)
+    state = send(args, "phase_append", phases=phases)
+    repeats = ledger_phase_cli.repeats(state.get("_meta", {}).get("warnings", []), phases)
+    for warning in repeats.values():
+        print(warning, file=sys.stderr)
     print(
         json.dumps(
-            {"appended": [phase["phase"] for phase in phases], "planning": {p["phase"]: p["planning"] for p in phases}}
+            {
+                "appended": [phase["phase"] for phase in phases if phase["phase"] not in repeats],
+                "planning": {p["phase"]: p["planning"] for p in phases if p["phase"] not in repeats},
+            }
         )
     )
 
@@ -892,6 +898,23 @@ def _task_set_fields(values):
     return fields
 
 
+def task_branch_fields(args: argparse.Namespace, fields: dict) -> dict:
+    if "branch" not in fields:
+        return fields
+    swarm = ports.swarm()
+    try:
+        repo = swarm.store.connect().config(args.slug).repo
+    except swarm.store.SwarmError:
+        return fields
+    task = resource(args.slug, f"tasks/{args.id}")
+    branches = {**task.get("repository_branches", {}), **fields.get("repository_branches", {})}
+    if fields["branch"]:
+        branches[repo] = fields["branch"]
+    else:
+        branches.pop(repo, None)
+    return {**fields, "repository_branches": branches}
+
+
 def cmd_task(args):
     refuse_unset_quote(args)
     if args.action == "add":
@@ -908,6 +931,7 @@ def cmd_task(args):
         return
     fields = _task_set_fields(args.values)
     refuse_plain_objects(fields)
+    fields = task_branch_fields(args, fields)
     quote = vars(args).get("quote")
     send(args, "task_update", item=f"tasks/{args.id}", fields=fields, **({"quote": quote} if quote else {}))
     print(json.dumps({"task": args.id, **fields}))
@@ -989,6 +1013,9 @@ def build_parser():
     phase.add_argument("--depends-on", default="")
     phase.add_argument("--planning", choices=["manual", "auto"], default=ledger_phases.PLANNING_DEFAULT)
     phase.add_argument("--release", action="store_true")
+    phase.add_argument(
+        "--not-duplicate", default="", help="why the phase differs from the one it resembles; skips the duplicate check"
+    )
     followup = sub.add_parser("followup")
     followup.add_argument("action", choices=["add", "done", "open", "flag", "unflag"])
     followup.add_argument("value")

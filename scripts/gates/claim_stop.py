@@ -135,6 +135,12 @@ def refusal(owed, slug, task, pull):
     return f"you hold task {task['id']} with no open pull request and no wait. {name_wait}"
 
 
+def dependency_rows(ledger, slug, held):
+    target = held.get("target") if held.get("kind") == "task" else None
+    row = ledger.task(slug, target) if target else None
+    return {target: row} if row else {}
+
+
 class ClaimStop:
     name = "claim-stop"
     default_mode = "enforce"
@@ -149,8 +155,7 @@ class ClaimStop:
         if not (who.pinned and who.task) or lane_of(who.name) not in WORKERS:
             return Decision()
         ledger = self.ledger()
-        rows = {t["id"]: t for t in ledger.tasks(who.swarm)}
-        task = rows.get(who.task)
+        task = ledger.task(who.swarm, who.task)
         if task is None or task.get("state") not in ACTIVE or task.get("claimed_by") != who.name:
             return Decision()
         from scripts.swarm import idle, ready, waits
@@ -174,7 +179,7 @@ class ClaimStop:
             return Decision()
         held = idle.wait(store.redis, who.swarm, who.name)
         live = held if held and held["until"] > now else None
-        task, pull, owed, checks = self.grade(ledger, who, task, live, rows)
+        task, pull, owed, checks = self.grade(ledger, who, task, live)
         held_on = (live or {}).get("on", {})
         run_wait = held_on.get("kind") == "checks" and waits.mutation_wait.RUN_URL.fullmatch(held_on["target"])
         if checks and held_on.get("kind") not in KEPT and not run_wait:
@@ -193,7 +198,7 @@ class ClaimStop:
         log.append(state.slug, log.Row.of(self.name, "blocked", who, call.tool, reason), state.home)
         return Decision()
 
-    def grade(self, ledger, who, task, live, rows):
+    def grade(self, ledger, who, task, live):
         from scripts.swarm import waits
 
         url = task.get("pr_url")
@@ -205,7 +210,8 @@ class ClaimStop:
         if target and not (pull is not None and pull.state == "MERGED"):
             pull = None if waits.mutation_wait.RUN_URL.fullmatch(target) else self.github()(target)
             return {**task, "pr_url": target}, pull, named_ruling(pull), ""
-        dependency = waits.dependency((live or {}).get("on", {}), task, rows, self.github())
+        held = (live or {}).get("on", {})
+        dependency = waits.dependency(held, task, dependency_rows(ledger, who.swarm, held), self.github())
         return task, pull, *ruling(task, pull, live, dependency)
 
     def connect(self):

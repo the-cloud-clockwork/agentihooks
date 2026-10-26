@@ -1,0 +1,15 @@
+{
+  "fixture_inputs": {
+    "interrupted_backfill": "a backfill that stops inside its third batch and resumes after a restart",
+    "mismatched_vector_dimension": "two vectors of dimension four under an index generation registered at dimension three",
+    "new_optional_fields": "trust class and project state per event, written by the new writer and backfilled for older rows",
+    "previous_schema": "a catalog file created without the event provenance table, written by the previous positional writer"
+  },
+  "input_sha256": {
+    "fixture.json": "a4ab15ffac94250a25778103605b06e288b0528fd7cfc767cc866119f632cff2"
+  },
+  "mocked": true,
+  "package": "SV2-RET-03",
+  "run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/40306357083",
+  "tested_commit": "1bc91ea3b488df9cf1b70607abc05c198e544cc6"
+}

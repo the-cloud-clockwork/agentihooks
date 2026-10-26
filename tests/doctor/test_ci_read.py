@@ -8,7 +8,12 @@ from scripts.doctor import ci, ci_read
 from tests.doctor.recorded import load
 
 
-def test_gh_reader_reads_all_pages_and_attempts_and_excludes_other_prs():
+@pytest.fixture(autouse=True)
+def _cache_identity(monkeypatch):
+    monkeypatch.setenv("GH_TOKEN", "doctor-reader-test")
+
+
+def test_gh_reader_reads_all_pages_and_attempts_and_excludes_other_prs(monkeypatch):
     fixture = load("ci")
     run = copy.deepcopy(fixture["runs"][0])
     run["run_attempt"] = 2
@@ -44,7 +49,12 @@ def test_gh_reader_reads_all_pages_and_attempts_and_excludes_other_prs():
     import fakeredis
 
     cache = fakeredis.FakeRedis(decode_responses=True)
+    import time
+
+    clock = [1_000.0]
+    monkeypatch.setattr(time, "time", lambda: clock[0])
     record = ci_read.pull_request("the-cloud-clockwork/agentihooks", 487, run=gh, cache=cache)
+    clock[0] += ci_read.github_reads.RUN_TTL_S
     first_calls = len(calls)
     fixture["checks"][0]["conclusion"] = "failure"
     refreshed = ci_read.pull_request("the-cloud-clockwork/agentihooks", 487, run=gh, cache=cache)
@@ -69,6 +79,41 @@ def test_gh_error_propagates_instead_of_reporting_healthy():
 
     with pytest.raises(subprocess.CalledProcessError):
         ci_read.pull_request("the-cloud-clockwork/agentihooks", 487, run=unavailable)
+
+
+def test_doctor_run_and_check_reads_share_the_cache_and_charge_only_fetches(monkeypatch, tmp_path):
+    import time
+
+    from scripts.swarm import github_reads
+
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
+    clock = [1_000.0]
+    monkeypatch.setattr(time, "time", lambda: clock[0])
+    fixture = load("ci")
+    fixture["runs"][0]["run_attempt"] = 1
+    calls = []
+
+    def gh(argv, **kwargs):
+        assert kwargs == {"capture_output": True, "text": True, "check": True, "timeout": 60}
+        endpoint = argv[2]
+        calls.append(endpoint)
+        if "/pulls/" in endpoint:
+            output = json.dumps(fixture["pr"])
+        else:
+            rows = fixture["checks"] if "/check-runs?" in endpoint else fixture["runs"]
+            output = "\n".join(json.dumps(row) for row in rows)
+        return subprocess.CompletedProcess(argv, 0, output, "")
+
+    first = ci_read.pull_request("o/r", 487, run=gh)
+    fixture["checks"][0]["conclusion"] = "failure"
+    assert ci_read.pull_request("o/r", 487, run=gh) == first
+    assert len(calls) == 4
+    clock[0] += github_reads.RUN_TTL_S
+    assert ci_read.pull_request("o/r", 487, run=gh)["checks"][0]["conclusion"] == "failure"
+    assert len(calls) == 7
+    assert github_reads.counts(0, clock[0] + 1) == {"doctor.ci": 7}
+    rows = [json.loads(line) for line in (github_reads.home() / "charged.jsonl").read_text().splitlines()]
+    assert [row["endpoint"] for row in rows] == calls
 
 
 @pytest.mark.parametrize("current_red", [False, True], ids=["fresh-head-without-checks", "red-current-head"])
@@ -181,7 +226,92 @@ def test_completed_attempts_are_reused_while_new_attempts_are_read():
     assert len(calls) == 6
     cache.flushall()
     assert ci_read._attempts("o/r", [workflow], gh, cache) == third
-    assert len(calls) == 12
+    assert len(calls) == 9
+
+
+def test_job_logs_survive_attempt_cache_loss_and_concurrent_collectors(monkeypatch, tmp_path):
+    import importlib
+    import time
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Barrier
+
+    import fakeredis
+
+    from scripts.swarm import github_reads
+
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
+    clock = [1_000.0]
+    monkeypatch.setattr(time, "time", lambda: clock[0])
+    workflow = {**load("ci")["runs"][0], "run_attempt": 2, "status": "completed"}
+    calls = []
+    starting = Barrier(2)
+
+    def gh(argv, **kwargs):
+        assert kwargs == {"capture_output": True, "text": True, "check": True, "timeout": 60}
+        endpoint = argv[2]
+        calls.append(endpoint)
+        if "/attempts/" in endpoint:
+            number = int(endpoint.split("/attempts/")[1].split("/")[0])
+            output = json.dumps({"id": number, "name": "unit", "status": "completed", "conclusion": "success"})
+            if number == 1 and len([call for call in calls if "/attempts/1/" in call]) <= 2:
+                starting.wait(timeout=10)
+        else:
+            time.sleep(0.02)
+            output = "2026-10-05T00:00:00Z PASSED tests/test_x.py::test_x\n"
+        return subprocess.CompletedProcess(argv, 0, output, "")
+
+    def collect():
+        return ci_read._attempts("o/r", [workflow], gh, fakeredis.FakeRedis(decode_responses=True))
+
+    with ThreadPoolExecutor(max_workers=2) as collectors:
+        first, second = list(collectors.map(lambda _: collect(), range(2)))
+    assert first == second
+    assert len([call for call in calls if call.endswith("/logs")]) == 2
+    assert first[0]["tests"] == [{"job": "unit", "nodeid": "tests/test_x.py::test_x", "outcome": "PASSED"}]
+    clock[0] += 7_200
+    importlib.reload(github_reads)
+    assert collect() == first
+    assert len([call for call in calls if call.endswith("/logs")]) == 2
+    assert github_reads.counts(0, clock[0] + 1)["doctor.ci.job_log"] == 2
+
+
+def test_retained_logs_follow_the_gh_account_without_preference_invalidation(monkeypatch, tmp_path):
+    from scripts.swarm import github_reads
+
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path / "state"))
+    monkeypatch.setenv("GH_CONFIG_DIR", str(tmp_path / "gh"))
+    monkeypatch.delenv("GH_TOKEN", raising=False)
+    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+    account = ["first-user"]
+    host = ["github.com"]
+    monkeypatch.delenv("GH_HOST", raising=False)
+
+    def identity(command, **kwargs):
+        assert command == ["gh", "config", "get", "user", "--host", host[0]]
+        assert kwargs == {"capture_output": True, "text": True, "check": True, "timeout": 5}
+        return subprocess.CompletedProcess(command, 0, account[0], "")
+
+    monkeypatch.setattr(github_reads.subprocess, "run", identity)
+    config = tmp_path / "gh"
+    config.mkdir()
+    preferences = config / "config.yml"
+    preferences.touch()
+    endpoint = "repos/o/r/actions/jobs/1/logs"
+    logs = iter(["first", "second", "enterprise"])
+    assert github_reads.job_log(endpoint, lambda: next(logs)) == "first"
+    preferences.unlink()
+    preferences.touch()
+    assert github_reads.job_log(endpoint, lambda: next(logs)) == "first"
+    account[0] = "second-user"
+    assert github_reads.job_log(endpoint, lambda: next(logs)) == "second"
+    assert github_reads.job_log(endpoint, lambda: next(logs)) == "second"
+
+    host[0] = "github.example"
+    monkeypatch.setenv("GH_HOST", host[0])
+    assert github_reads.job_log(endpoint, lambda: next(logs)) == "enterprise"
+    account[0] = ""
+    with pytest.raises(ValueError, match="^GitHub account identity is unavailable$"):
+        github_reads.job_log(endpoint, lambda: next(logs))
 
 
 def test_attempt_reader_downloads_only_completed_unskipped_jobs():

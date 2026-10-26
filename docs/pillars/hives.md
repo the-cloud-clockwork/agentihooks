@@ -76,17 +76,20 @@ agentihooks hive install          # user service that runs agentihooks hive run
   seconds after any exit. `hive run` publishes sessions, quota, slots and repos every fifteen seconds.
 - `agentihooks hive refresh` mints a new Redis credential; `agentihooks hive revoke <id>` deletes a member's
   ledger credential and Redis user.
-- `agentihooks hive remove <id>` takes a hive out of the fleet in one run. It sets `draining=yes`, so placement
-  puts no new agent or master there, and sends every live agent on the hive one inbox order to hand off. Once none
-  is left it revokes the member and its Redis user, removes the herdr machine saved under the hive's label and that
-  machine's host key from `~/.ssh/known_hosts`, deletes the hive record and every key below it, and deletes the
-  OpenBao record (`k8s/agentihooks-hive-<label>`, or `--path`). With `--antoncore <checkout>` it also stages the
-  removal of the hive's Argo application, manifests folder and values overlay there, for a pull request: the release
-  is the label itself for a `swarm-hive-` name and `agentihooks-hive-<label>` otherwise. The label
-  defaults to the member's name (`--label` overrides; a rerun after the member is revoked needs it). After `--wait` seconds (default 3600) with agents still on
-  the hive it stops with their names and leaves the hive draining; run it again to keep waiting. Every step skips a
-  piece that is already gone, so a rerun finishes an interrupted remove. `OPENBAO_URL` and `OPENBAO_TOKEN` must
-  be set.
+- `agentihooks hive remove <name>` reverses `hive create` in one run; the name may also be the member id. It runs
+  its steps in order and prints each one: drain sets `draining=yes`, so placement puts no new agent or master there,
+  sends every live agent on the hive one inbox order to hand off and reports the agents that did; member revokes the
+  member and its Redis user; herdr removes the machine saved under the hive's label and its host key from
+  `~/.ssh/known_hosts`; registry deletes the hive record and every key below it, releases the hive name of its node and
+  deletes the `hive create` state that names it; manifests opens a pull request into antoncore `dev` (`--repo`,
+  `--base`) deleting the hive's Argo application, manifests folder and values overlay, and asks GitHub to merge it
+  once its checks pass: the release is the label itself for a `swarm-hive-` name and `agentihooks-hive-<label>`
+  otherwise; openbao deletes the OpenBao record (`k8s/agentihooks-hive-<label>`, or `--path`). `--dry-run` prints
+  every step and writes nothing. The label defaults to the member's name (`--label` overrides; a rerun by member id
+  after the member is revoked needs it, a rerun by name does not). After `--wait` seconds (default 3600) with agents
+  still on the hive it stops with their names and leaves the hive draining; run it again to keep waiting. Every step
+  skips a piece that is already gone, so a rerun finishes an interrupted remove and writes nothing after a completed
+  one. `OPENBAO_URL` and `OPENBAO_TOKEN` must be set.
 - `agentihooks hive list` prints one line per hive: id, `name=<name>` when the hive carries a readable name, `live` or `stale`, ui, max agents, excluded (`none` when
   empty) and its [headroom](#headroom) reading.
   `agentihooks hive show <id>` prints the full record as JSON.

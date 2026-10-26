@@ -20,8 +20,8 @@ def _jobs():
     return _semgrep()["jobs"]
 
 
-def test_wrapper_runs_only_the_shared_scan_and_the_chart_guard():
-    assert set(_jobs()) == {"scan", "charts"}
+def test_wrapper_runs_the_shared_scan_feature_tests_and_chart_guard():
+    assert set(_jobs()) == {"scan", "feature-tests", "charts"}
 
 
 def test_scan_calls_the_shared_workflow_on_its_main_branch():
@@ -135,6 +135,9 @@ def test_wrapper_holds_only_read_permission():
     assert _semgrep()["permissions"] == {"contents": "read"}
 
 
-def test_charts_is_the_only_wrapper_job_on_a_runner_class():
+def test_feature_tests_and_charts_have_runner_classes():
     classes = json.loads((_ROOT / ".github/runner-classes.json").read_text())
-    assert {key for key in classes if key.startswith("semgrep.yml/")} == {"semgrep.yml/charts"}
+    assert {key for key in classes if key.startswith("semgrep.yml/")} == {
+        "semgrep.yml/charts",
+        "semgrep.yml/feature-tests",
+    }

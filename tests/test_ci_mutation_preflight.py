@@ -219,6 +219,32 @@ def test_preflight_sizes_its_stats_parts_and_shards_from_the_plan(tmp_path, monk
     )
 
 
+def test_both_mutation_planners_restore_statistics_timings_before_sizing():
+    workflows = [
+        (_workflow(), "plan", "steps.open.outputs.open != 'true' && steps.reuse.outputs.reused != 'true'"),
+        (
+            yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text()),
+            "mutation-plan",
+            "steps.reuse.outputs.reused != 'true'",
+        ),
+    ]
+    for workflow, job, condition in workflows:
+        steps, names = _steps(workflow["jobs"][job])
+        restored = names.index("Restore measured statistics timings")
+        assert restored < names.index("Size mutation shards from stored timings")
+        assert steps[restored] == {
+            "name": "Restore measured statistics timings",
+            "if": condition,
+            "uses": "actions/cache/restore@v4",
+            "env": {"SEGMENT_DOWNLOAD_TIMEOUT_MINS": "1"},
+            "with": {
+                "path": ".mutation-stats-cache",
+                "key": "mutation-test-stats-v2-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}",
+                "restore-keys": "mutation-test-stats-v2-${{ runner.os }}-\nmutation-test-stats-v1-${{ runner.os }}-\n",
+            },
+        }
+
+
 def test_mutation_matrix_and_merge_use_the_plan_refined_after_statistics():
     jobs = _workflow()["jobs"]
     refine = jobs["refine"]
@@ -298,12 +324,15 @@ def test_every_stats_part_restores_one_merged_cache_saved_once_after_all_parts_f
     assert single["uses"] == "actions/cache/save@v4"
     assert single["if"] == "success() && strategy.job-total == 1"
     assert single["with"] == {"path": ".mutation-stats-cache", "key": key}
+    fresh = steps[names.index("Keep only the test stats this part wrote")]
+    assert fresh["if"] == "success() && strategy.job-total != 1"
+    assert fresh["env"] == {"PART": "${{ matrix.part }}"}
     part = steps[names.index("Upload this part's test stats cache")]
     assert part["if"] == "success() && strategy.job-total != 1"
     assert part["uses"] == "actions/upload-artifact@v4"
     assert part["with"] == {
         "name": "mutation-test-stats-cache-${{ matrix.part }}",
-        "path": ".mutation-stats-cache/",
+        "path": ".mutation-stats-fresh/",
         "include-hidden-files": True,
         "if-no-files-found": "ignore",
         "retention-days": 1,
@@ -311,10 +340,12 @@ def test_every_stats_part_restores_one_merged_cache_saved_once_after_all_parts_f
     }
     collect = names.index("Collect one stats part for every mutation shard")
     assert names.index(restore["name"]) < collect < names.index(single["name"])
-    assert collect < names.index(part["name"])
+    assert collect < names.index(fresh["name"]) < names.index(part["name"])
     assert [step for step in steps if step.get("uses", "").startswith("actions/cache/save")] == [single]
     assert not part["with"]["name"].startswith("mutation-stats-")
     refine_steps, refine_names = _steps(jobs["refine"])
+    base = refine_steps[refine_names.index("Restore the merged test stats")]
+    assert base == restore
     download = refine_steps[refine_names.index("Download every part's test stats cache")]
     assert download["uses"] == "actions/download-artifact@v4"
     assert download["with"] == {
@@ -326,8 +357,27 @@ def test_every_stats_part_restores_one_merged_cache_saved_once_after_all_parts_f
     assert merged["uses"] == "actions/cache/save@v4"
     assert merged["if"] == "success() && hashFiles('.mutation-stats-cache/**') != ''"
     assert merged["with"] == {"path": ".mutation-stats-cache", "key": key}
-    assert refine_names.index(download["name"]) < refine_names.index(merged["name"])
+    assert refine_names.index(base["name"]) < refine_names.index(download["name"]) < refine_names.index(merged["name"])
     assert "matrix.part" not in str([restore, single, merged])
+
+
+def test_a_stats_part_uploads_only_the_cache_entries_it_wrote(tmp_path):
+    steps, names = _steps(_workflow()["jobs"]["stats"])
+    fresh = steps[names.index("Keep only the test stats this part wrote")]
+    cache = tmp_path / ".mutation-stats-cache"
+    cache.mkdir()
+    stale = cache / "stale.index"
+    stale.write_text("old")
+    os.utime(stale, (1_000_000_000, 1_000_000_000))
+    marker = tmp_path / ".mutation-stats" / "collected-1"
+    marker.parent.mkdir()
+    marker.touch()
+    os.utime(marker, (1_000_000_100, 1_000_000_100))
+    (cache / "fresh.index").write_text("new")
+    subprocess.run(["bash", "-e", "-c", fresh["run"]], cwd=tmp_path, env={**os.environ, "PART": "1"}, check=True)
+    uploaded = tmp_path / ".mutation-stats-fresh"
+    assert sorted(path.name for path in uploaded.iterdir()) == ["fresh.index"]
+    assert (uploaded / "fresh.index").read_text() == "new"
 
 
 def test_preflight_collects_one_stats_part_per_leg_with_the_pull_request_budget():

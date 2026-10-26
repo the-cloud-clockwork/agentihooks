@@ -1,5 +1,6 @@
 import hashlib
 import signal
+import threading
 
 import pytest
 
@@ -262,6 +263,150 @@ def test_a_singleton_lease_lost_inside_a_batch_hands_the_rest_back(bus, clock):
     assert handler.seen == [("e1", 1), ("e2", 2), ("e3", 3)]
 
 
+def test_two_replicas_keep_one_reconciler_leader_while_their_passes_outlast_the_lease(bus, clock):
+    ran, replicas = [], []
+
+    def slow(guard):
+        for _ in range(3):
+            clock.now += 40
+            for replica in replicas:
+                replica.renew()
+
+    def reactors(holder):
+        def reconcile(guard):
+            if guard():
+                ran.append(holder)
+
+        return [
+            registry.Reactor("slow", "swarm.*.slow.>", lambda _: None, poll=slow),
+            registry.Reactor(
+                "reconciler", "swarm.*.reconcile.requested", lambda _: None, singleton=True, poll=reconcile
+            ),
+        ]
+
+    one, two = hub(bus, reactors("a"), "a", clock), hub(bus, reactors("b"), "b", clock)
+    replicas += [one, two]
+    passes = [replica.run_once(timeout_ms=0) for _ in range(4) for replica in (one, two)]
+    assert clock.now == 1_000 + 8 * 120
+    assert ran == ["a"] * 4
+    assert passes == [{"slow": [], "reconciler": []}, {"slow": [], "reconciler": ["standby"]}] * 4
+    assert lease.read(bus.state(lease.BUCKET), "reactor.reconciler").holder == "a"
+
+
+def test_renewal_extends_only_the_leases_a_replica_holds(bus, clock):
+    reactors = [registry.Reactor("timers", "swarm.*.task.>", Recorder(), singleton=True)]
+    one, two = hub(bus, reactors, "a", clock), hub(bus, reactors, "b", clock)
+    two.renew()
+    assert lease.read(bus.state(lease.BUCKET), "reactor.timers") is None
+    one.run_once(batch=10, timeout_ms=0)
+    clock.now += 90
+    one.renew()
+    two.renew()
+    assert lease.read(bus.state(lease.BUCKET), "reactor.timers") == lease.LeaseState("a", clock.now + 100)
+    one.stop()
+    clock.now += 10
+    one.renew()
+    assert one.run_once(batch=10, timeout_ms=0) == {"timers": ["standby"]}
+    assert lease.read(bus.state(lease.BUCKET), "reactor.timers") == lease.LeaseState("a", 0)
+
+
+def test_lease_changes_name_the_reactor_and_holder(bus, clock, capsys):
+    reactors = [registry.Reactor("timers", "swarm.*.task.>", Recorder(), singleton=True)]
+    one, two = hub(bus, reactors, "a", clock), hub(bus, reactors, "b", clock)
+    one.run_once(batch=10, timeout_ms=0)
+    one.run_once(batch=10, timeout_ms=0)
+    assert capsys.readouterr().out == "timers: lease taken by a\n"
+    clock.now += 100
+    two.run_once(batch=10, timeout_ms=0)
+    one.run_once(batch=10, timeout_ms=0)
+    assert capsys.readouterr().out == "timers: lease taken by b\ntimers: lease lost by a\n"
+    one.run_once(batch=10, timeout_ms=0)
+    assert capsys.readouterr().out == ""
+
+
+def test_a_failed_lease_renewal_is_logged_and_the_next_one_still_runs(bus, clock, capsys):
+    hub_runner = hub(bus, [], "a", clock)
+    calls = []
+
+    def renew():
+        calls.append(len(calls))
+        if len(calls) == 1:
+            raise RuntimeError("bus down")
+
+    hub_runner.renew = renew
+    runner._renew_leases(hub_runner)
+    runner._renew_leases(hub_runner)
+    assert calls == [0, 1]
+    assert capsys.readouterr().err.startswith("hub: reactor lease renewal failed\nTraceback")
+
+
+def test_the_lease_keeper_holds_the_lease_while_the_loop_is_blocked(bus, clock):
+    reactors = [registry.Reactor("reconciler", "swarm.*.reconcile.requested", lambda _: None, singleton=True)]
+    one, two = hub(bus, reactors, "a", clock), hub(bus, reactors, "b", clock)
+    gate, renewed, done = threading.Semaphore(0), threading.Event(), threading.Event()
+
+    def renew():
+        if not done.is_set():
+            gate.acquire()
+        runner._renew_leases(one)
+        renewed.set()
+
+    one.run_once(timeout_ms=0)
+    keeper = runner.Interval(renew, every=0.001)
+    keeper.start()
+    seen = []
+    for _ in range(5):
+        clock.now += 60
+        renewed.clear()
+        gate.release()
+        assert renewed.wait(5)
+        seen.append(two.run_once(timeout_ms=0))
+    one.stop()
+    done.set()
+    gate.release()
+    keeper.close()
+    assert seen == [{"reconciler": ["standby"]}] * 5
+    assert clock.now == 1_300
+
+
+def test_a_running_hub_keeps_its_leases_on_a_scheduled_interval(monkeypatch, hive):
+    kept = []
+
+    class Keeper:
+        def __init__(self, callback, *, every):
+            kept.append(self)
+            self.callback, self.every, self.events = callback, every, []
+
+        def start(self):
+            self.events.append("start")
+
+        def close(self):
+            self.events.append("close")
+
+    monkeypatch.setenv("AGENTIHOOKS_DEPLOYMENT", "local")
+    monkeypatch.delenv("LEDGER_URL", raising=False)
+    monkeypatch.setattr(runner, "Interval", Keeper)
+    monkeypatch.setattr(runner.HubRunner, "run_once", stop_after(iter([{"page": ["handled"]}])))
+    renewed = []
+    monkeypatch.setattr(runner.HubRunner, "renew", lambda self: renewed.append(self))
+    with pytest.raises(Stop):
+        runner.main(["run"])
+    [keeper] = kept
+    assert keeper.every == 5.0
+    assert keeper.events == ["start", "close"]
+    keeper.callback()
+    [renewed_hub] = renewed
+    assert renewed_hub.stopped.is_set()
+
+
+def test_a_single_pass_hub_starts_no_lease_keeper(monkeypatch, hive):
+    monkeypatch.setenv("AGENTIHOOKS_DEPLOYMENT", "local")
+    monkeypatch.delenv("LEDGER_URL", raising=False)
+    monkeypatch.setattr(runner, "Interval", lambda *args, **kwargs: pytest.fail("a single pass started a keeper"))
+    monkeypatch.setattr(runner.HubRunner, "run_once", lambda self: {"page": ["handled"]})
+    assert runner.main(["run", "--once"]) == 0
+
+
 def test_the_hub_command_runs_the_registry_once_on_the_configured_bus(monkeypatch, capsys):
     handler = Recorder()
     declared = registry.Registry([registry.Reactor("lifecycle", "swarm.*.task.>", handler, singleton=True)])
@@ -296,7 +441,7 @@ def test_the_hub_command_runs_the_registry_once_on_the_configured_bus(monkeypatc
     assert runner.main(["run", "--once"]) == 0
     assert provisioned == [opened]
     assert handler.seen == [("e1", 1)]
-    assert capsys.readouterr().out == "lifecycle: handled\n"
+    assert capsys.readouterr().out == "lifecycle: lease taken by hub-0\nlifecycle: handled\n"
     assert lease.read(leases, "reactor.lifecycle") == lease.LeaseState("hub-0", 0)
     assert signal.getsignal(signal.SIGTERM) is previous
 
