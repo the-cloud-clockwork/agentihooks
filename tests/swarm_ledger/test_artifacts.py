@@ -81,6 +81,26 @@ class ArtifactEndpoint(Endpoint):
         except urllib.error.HTTPError as exc:
             return exc.code, exc.read().decode()
 
+    def publish_as_operator(self, filename, data, request=None):
+        headers = {
+            "Host": f"127.0.0.1:{server.PORT}",
+            "Origin": f"http://127.0.0.1:{server.PORT}",
+            "X-Artifact-Name": filename,
+            "X-Ledger-Token": self.token,
+        }
+        metadata = {"task": ""} if request is None else request
+        if isinstance(metadata, dict):
+            metadata = {"title": "Upload", **metadata}
+        headers["X-Artifact-Request"] = json.dumps(metadata)
+        req = urllib.request.Request(
+            f"http://127.0.0.1:{self.port}/api/artifacts/via-media", data=data, headers=headers, method="POST"
+        )
+        try:
+            with urllib.request.urlopen(req) as resp:
+                return resp.status, json.loads(resp.read())
+        except urllib.error.HTTPError as exc:
+            return exc.code, exc.read().decode()
+
     def test_an_unrequested_upload_leaves_the_media_folder_unchanged(self):
         self.put([{"op": "join", "id": "j-refused-upload", "by": "refused-engineer"}])
         old = media.store("via-media", png(101, 101))
@@ -188,6 +208,38 @@ class ArtifactEndpoint(Endpoint):
         assert code == 200
         assert not json.loads(body)["rejected"]
 
+    def test_an_operator_plan_upload_is_accepted_and_a_non_plan_upload_is_still_refused(self):
+        code, file = self.publish_as_operator("plan.md", b"# Operator plan\n", request={"plan": True, "title": "Plan"})
+        assert code == 200, file
+        code, _, body = self.put(
+            [
+                {
+                    "op": "artifact_add",
+                    "id": "a-operator-plan",
+                    "by": "operator",
+                    "task": "",
+                    "title": "Plan",
+                    "file": file,
+                    "plan": True,
+                }
+            ]
+        )
+        assert code == 200
+        assert not json.loads(body)["rejected"]
+        state = server.repository.get_document("via-media")
+        assert state["artifacts"][-1] == {
+            "id": "a-operator-plan",
+            "title": "Plan",
+            "by": "operator",
+            "task": "",
+            "at": state["artifacts"][-1]["at"],
+            "file": file,
+            "plan": True,
+        }
+        code, body = self.publish_as_operator("note.md", b"# Operator note\n", request={"title": "Note"})
+        assert code == 403
+        assert body == "agent must join this ledger before uploading"
+
     def test_an_agent_publishes_markdown_json_and_svg_on_a_task(self):
         self.put([{"op": "join", "id": "j-art", "by": "art-engineer"}])
         task = {
@@ -271,6 +323,7 @@ def test_artifact_op_shape_is_checked():
         "file": {"id": "a" * 64 + ".md"},
     }
     core.check_op(good)
+    core.check_op({**good, "by": "operator", "task": "", "plan": True})
     for bad in (
         {**good, "by": "operator"},
         {**good, "title": ""},
@@ -279,6 +332,30 @@ def test_artifact_op_shape_is_checked():
     ):
         with pytest.raises(ValueError):
             core.check_op(bad)
+
+
+def test_artifact_add_by_validation_names_the_right_fault():
+    good = {"op": "artifact_add", "id": "a", "task": "t1", "title": "Plan", "file": {"id": "a" * 64 + ".md"}}
+    with pytest.raises(ValueError, match="^artifact_add needs `by`, an agent name$"):
+        artifacts.check_add({**good, "by": ""})
+
+
+def test_a_master_lane_upload_by_a_non_member_operator_does_not_crash():
+    from scripts.swarm_ledger import ledger_core
+
+    doc = {}
+    ctx = ledger_core.Context({"rev": 0, "stamps": {}, "members": {}}, 1)
+    op = {
+        "op": "artifact_add",
+        "id": "a-master",
+        "by": "operator",
+        "task": "master",
+        "title": "Plan",
+        "file": {"id": "a" * 64 + ".md"},
+        "plan": True,
+    }
+    assert artifacts.apply(doc, op, ctx)
+    assert doc["artifacts"][0]["task"] == "master"
 
 
 def test_artifact_command_uploads_the_file_and_records_it_on_the_task(tmp_path, capsys, monkeypatch):

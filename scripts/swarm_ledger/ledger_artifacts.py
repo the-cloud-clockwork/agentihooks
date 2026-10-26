@@ -161,7 +161,9 @@ def check_add(op):
         raise ValueError("artifact_add takes id, by, task, title, file and an optional request or plan")
     if "plan" in op and op["plan"] is not True:
         raise ValueError("plan must be true, marking a published plan")
-    if not isinstance(op["by"], str) or not AUTHOR_RE.match(op["by"]) or op["by"] == "operator":
+    if not isinstance(op["by"], str) or not AUTHOR_RE.match(op["by"]):
+        raise ValueError("artifact_add needs `by`, an agent name")
+    if op["by"] == "operator" and op.get("plan") is not True:
         raise ValueError("artifact_add needs `by`, an agent name other than operator")
     if not isinstance(op["task"], str) or not TASK_RE.match(op["task"]):
         raise ValueError("task must be a task id or empty")
@@ -187,6 +189,8 @@ def operator_asked(doc, entry_id):
 def refusal(doc: dict, op: dict, members: dict) -> str:
     lane_of = ports.swarm().naming.lane_of
 
+    if op["by"] == "operator":
+        return "" if op.get("plan") is True else REFUSED
     member = members.get(op["by"], {})
     if op["by"] not in members:
         return "join the ledger first and name a task it holds"
@@ -212,7 +216,7 @@ def _add(doc, op, ctx):
 
     if (
         op["task"] == "master"
-        and ctx.meta["members"][op["by"]].get("role") == "orchestrator"
+        and ctx.meta["members"].get(op["by"], {}).get("role") == "orchestrator"
         and lane_of(op["by"]) == "master"
     ):
         op = {**op, "task": ""}

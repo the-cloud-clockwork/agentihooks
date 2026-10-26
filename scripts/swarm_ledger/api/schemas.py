@@ -98,7 +98,7 @@ FIELDS = {
     "size_set": "by size",
     "source_add": "by source",
     "phase_add": "by phase title description depends_on planning release plan_url plan_ref plan not_duplicate",
-    "plan_add": "by plan title artifact url",
+    "plan_add": "by plan title artifact url source",
     "slice_add": "by phase anchor",
     "phase_update": "by item fields",
     "phase_review": "by item state note override rounds escalated",
@@ -153,7 +153,7 @@ TYPES = {
 }
 KIND_TYPES = {
     "artifact_add": {"plan": {"type": "boolean"}},
-    "plan_add": {"artifact": {"type": "string", "maxLength": 100000}},
+    "plan_add": {"artifact": {"type": "string", "maxLength": 100000}, "source": {"type": "object"}},
     "task_rank": {"if_owned": {"type": "boolean"}},
 }
 for _field in (
