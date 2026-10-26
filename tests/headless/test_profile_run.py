@@ -1,0 +1,243 @@
+import json
+import os
+import sys
+import time
+
+import pytest
+
+from scripts.headless import profile_run
+from scripts.headless.profile_run import ProfileResult, ProfileRun
+
+pytestmark = pytest.mark.unit
+
+SCHEMA = {"type": "object", "properties": {"verdict": {"type": "string"}}, "required": ["verdict"]}
+
+FAKE = """#!{python}
+import json
+import os
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+plan = json.loads(Path(os.environ["FAKE_PLAN"]).read_text())
+Path(os.environ["FAKE_CALL_LOG"]).write_text(
+    json.dumps({{"argv": sys.argv[1:], "env": {{k: os.environ.get(k) for k in plan.get("capture_env", [])}}}})
+)
+if plan.get("grandchild_marker"):
+    subprocess.Popen(
+        [sys.executable, "-c", "import time,sys; time.sleep(3); open(sys.argv[1], 'w').write('done')", plan["grandchild_marker"]]
+    )
+for line in plan.get("stdout_lines", []):
+    print(line)
+if plan.get("write_file"):
+    Path(plan["write_file"]).write_text(plan.get("write_text", ""))
+if plan.get("sleep"):
+    time.sleep(plan["sleep"])
+sys.exit(plan.get("exit_code", 0))
+"""
+
+
+@pytest.fixture
+def fake_agentihooks(tmp_path, monkeypatch):
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
+    path = bin_dir / "agentihooks"
+    path.write_text(FAKE.format(python=sys.executable))
+    path.chmod(0o755)
+    call_log = tmp_path / "call.json"
+    monkeypatch.setenv("FAKE_CALL_LOG", str(call_log))
+
+    def configure(plan: dict) -> None:
+        plan_path = tmp_path / "plan.json"
+        plan_path.write_text(json.dumps(plan))
+        monkeypatch.setenv("FAKE_PLAN", str(plan_path))
+
+    def calls() -> dict:
+        return json.loads(call_log.read_text())
+
+    return configure, calls
+
+
+@pytest.fixture(autouse=True)
+def clean_tiers(monkeypatch):
+    monkeypatch.delenv("AGENTIHOOKS_TARGET", raising=False)
+    for name in ("AGENTIHOOKS_TIER_HIGH_CLAUDE", "AGENTIHOOKS_TIER_LOW_CLAUDE"):
+        monkeypatch.delenv(name, raising=False)
+    for name in ("AGENTIHOOKS_TIER_HIGH_CODEX", "AGENTIHOOKS_TIER_LOW_CODEX"):
+        monkeypatch.delenv(name, raising=False)
+
+
+def make_run(tmp_path, **overrides) -> ProfileRun:
+    fields = {
+        "profile": "package:engineer",
+        "harness": "claude",
+        "input": "hello",
+        "schema": None,
+        "tier": "low",
+        "effort": "low",
+        "timeout": 5.0,
+        "run_dir": tmp_path / "run",
+    }
+    fields.update(overrides)
+    return ProfileRun(**fields)
+
+
+def result_event(verdict: str, session: str = "sess-1") -> str:
+    event = {"type": "result", "result": "", "structured_output": {"verdict": verdict}, "session_id": session}
+    return json.dumps(event)
+
+
+def test_the_claude_argv_without_a_schema(fake_agentihooks, tmp_path):
+    configure, calls = fake_agentihooks
+    configure({"stdout_lines": [result_event("pass")]})
+    profile_run.run_profile(make_run(tmp_path, harness="claude"))
+    assert calls()["argv"] == [
+        "select-profile",
+        "package:engineer",
+        "--agent",
+        "claude",
+        "--model",
+        "sonnet",
+        "--effort",
+        "low",
+        "--",
+        "-p",
+        "hello",
+        "--output-format",
+        "stream-json",
+        "--verbose",
+        "--no-session-persistence",
+        "--permission-mode",
+        "bypassPermissions",
+    ]
+
+
+def test_the_claude_argv_with_a_schema(fake_agentihooks, tmp_path):
+    configure, calls = fake_agentihooks
+    configure({"stdout_lines": [result_event("pass")]})
+    profile_run.run_profile(make_run(tmp_path, harness="claude", schema=SCHEMA))
+    assert calls()["argv"][-2:] == ["--json-schema", json.dumps(SCHEMA)]
+
+
+def test_the_codex_argv_without_a_schema(fake_agentihooks, tmp_path):
+    configure, calls = fake_agentihooks
+    run = make_run(tmp_path, harness="codex")
+    configure({"write_file": str(run.run_dir / "last-message.txt"), "write_text": "hi"})
+    profile_run.run_profile(run)
+    assert calls()["argv"] == [
+        "select-profile",
+        "package:engineer",
+        "--agent",
+        "codex",
+        "--model",
+        "gpt-6-luna",
+        "--effort",
+        "low",
+        "--",
+        "exec",
+        "--json",
+        "-o",
+        str(run.run_dir / "last-message.txt"),
+        "--",
+        "hello",
+    ]
+
+
+def test_the_codex_argv_with_a_schema(fake_agentihooks, tmp_path):
+    configure, calls = fake_agentihooks
+    run = make_run(tmp_path, harness="codex", schema=SCHEMA)
+    configure({"write_file": str(run.run_dir / "last-message.txt"), "write_text": json.dumps({"verdict": "pass"})})
+    profile_run.run_profile(run)
+    argv = calls()["argv"]
+    assert argv[argv.index("--output-schema") + 1] == str(run.run_dir / "output-schema.json")
+    assert json.loads((run.run_dir / "output-schema.json").read_text()) == SCHEMA
+
+
+def test_the_environment_carries_the_worker_run_flags(fake_agentihooks, tmp_path):
+    configure, calls = fake_agentihooks
+    configure(
+        {
+            "stdout_lines": [result_event("pass")],
+            "capture_env": [profile_run.WORKER_RUN, profile_run.WORKER_RUN_ID],
+        }
+    )
+    run = make_run(tmp_path)
+    profile_run.run_profile(run)
+    assert calls()["env"] == {profile_run.WORKER_RUN: "1", profile_run.WORKER_RUN_ID: run.run_dir.name}
+
+
+def test_the_transcript_is_written_to_the_run_dir(fake_agentihooks, tmp_path):
+    configure, _ = fake_agentihooks
+    configure({"stdout_lines": [result_event("pass")]})
+    run = make_run(tmp_path)
+    result = profile_run.run_profile(run)
+    assert result.transcript == run.run_dir / "transcript.jsonl"
+    assert result.transcript.read_text().splitlines() == [result_event("pass")]
+
+
+def test_a_timeout_kills_the_whole_process_group(fake_agentihooks, tmp_path):
+    configure, _ = fake_agentihooks
+    marker = tmp_path / "grandchild-done"
+    configure({"sleep": 30, "grandchild_marker": str(marker)})
+    run = make_run(tmp_path, timeout=0.2)
+    started = time.monotonic()
+    result = profile_run.run_profile(run)
+    assert time.monotonic() - started < 5
+    assert result == ProfileResult("timeout", None, run.run_dir / "transcript.jsonl", None, None)
+    time.sleep(0.5)
+    assert not marker.exists()
+
+
+def test_a_schema_valid_reply_gives_ok(fake_agentihooks, tmp_path):
+    configure, _ = fake_agentihooks
+    configure({"stdout_lines": [result_event("pass")]})
+    result = profile_run.run_profile(make_run(tmp_path, schema=SCHEMA))
+    assert result.status == "ok"
+    assert result.output == {"verdict": "pass"}
+    assert result.session == "sess-1"
+    assert result.exit_code == 0
+
+
+def test_a_schema_invalid_reply_gives_invalid(fake_agentihooks, tmp_path):
+    configure, _ = fake_agentihooks
+    bad = json.dumps({"type": "result", "result": "", "structured_output": {"other": 1}, "session_id": "sess-1"})
+    configure({"stdout_lines": [bad]})
+    result = profile_run.run_profile(make_run(tmp_path, schema=SCHEMA))
+    assert result.status == "invalid"
+    assert result.output == {"other": 1}
+
+
+def test_a_nonzero_exit_gives_failed(fake_agentihooks, tmp_path):
+    configure, _ = fake_agentihooks
+    configure({"stdout_lines": [result_event("pass")], "exit_code": 3})
+    result = profile_run.run_profile(make_run(tmp_path))
+    assert result.status == "failed"
+    assert result.exit_code == 3
+
+
+def test_a_codex_run_resolves_session_and_output_from_the_stream_and_file(fake_agentihooks, tmp_path):
+    configure, _ = fake_agentihooks
+    run = make_run(tmp_path, harness="codex", schema=SCHEMA)
+    configure(
+        {
+            "stdout_lines": [json.dumps({"type": "thread.started", "thread_id": "th-1"})],
+            "write_file": str(run.run_dir / "last-message.txt"),
+            "write_text": json.dumps({"verdict": "pass"}),
+        }
+    )
+    result = profile_run.run_profile(run)
+    assert result.status == "ok"
+    assert result.output == {"verdict": "pass"}
+    assert result.session == "th-1"
+
+
+def test_auto_resolves_through_the_callers_harness(fake_agentihooks, tmp_path, monkeypatch):
+    configure, calls = fake_agentihooks
+    monkeypatch.setenv("AGENTIHOOKS_TARGET", "codex")
+    run = make_run(tmp_path, harness="auto")
+    configure({"write_file": str(run.run_dir / "last-message.txt"), "write_text": "hi"})
+    profile_run.run_profile(run)
+    argv = calls()["argv"]
+    assert argv[argv.index("--agent") + 1] == "codex"
