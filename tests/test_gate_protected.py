@@ -583,7 +583,7 @@ def test_protected_provenance_admits_only_the_retried_evidence_upload(uses, boun
         ({"drop": ("legs",), "set": {"sonar": "${{ steps.select.outputs.sonar }}"}}, True),
     ],
 )
-def test_protected_select_outputs_admit_only_dropping_the_unused_file_outputs(change, red):
+def test_protected_select_outputs_admit_only_dropping_the_unused_file_outputs_or_adding_sonar(change, red):
     from scripts import ci_reuse
 
     base = _workflow()

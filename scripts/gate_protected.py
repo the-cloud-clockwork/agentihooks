@@ -194,7 +194,8 @@ def _duration_problems(base: dict, head: dict) -> list[str]:
             and (
                 set(UNUSED_SELECT_OUTPUTS).issubset(outputs)
                 and producer.get(field) == trimmed
-                or producer.get(field) == outputs | SONAR_SELECT_OUTPUT
+                or "sonar" not in outputs
+                and producer.get(field) == outputs | SONAR_SELECT_OUTPUT
             )
         )
     ]
