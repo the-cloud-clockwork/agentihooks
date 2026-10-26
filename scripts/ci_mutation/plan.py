@@ -3,6 +3,7 @@ import ast
 import json
 import math
 import os
+import re
 import subprocess
 import time
 import zipfile
@@ -10,6 +11,8 @@ from datetime import UTC, datetime
 from difflib import SequenceMatcher
 from functools import cache
 from pathlib import Path
+
+import yaml
 
 from scripts.ci_cpu_quota import worker_count as quota_workers
 from scripts.ci_mutation.browser import needs_browser
@@ -19,6 +22,7 @@ from scripts.ci_test_plan import find_record
 from tests.dep_manifest import (
     GLOBAL_FILES,
     MEASURED,
+    _git,
     _show,
     _spans,
     changed_units,
@@ -32,6 +36,9 @@ from tests.dep_manifest import changes as recorded_changes
 MUTANT_SECONDS = 5.6
 WORKERS = 4
 RECORD_RETRY_SECONDS = 10
+TEST_WORKFLOW = ".github/workflows/test.yml"
+COLLECTING_JOBS = ("unit", "unit-selected")
+SCHEDULING_KEYS = {"needs", "if", "timeout-minutes", "outputs"}
 RECORD_ERRORS = (subprocess.SubprocessError, OSError, ValueError, KeyError, zipfile.BadZipFile)
 
 
@@ -124,16 +131,14 @@ def record_drift(root: Path, manifest: dict) -> tuple[set[str], set[int], set[st
     tests, units, paths = set(), set(), set()
     for path, old, new in recorded_changes(root, manifest["commit"], "HEAD"):
         if path.startswith(".github/workflows/"):
-            if global_input(
-                path, _show(root, manifest["commit"], path), _show(root, "HEAD", path), manifest.get("version")
-            ):
+            if workflow_changed(root, manifest, path):
                 return None
             paths.add(path)
         elif path.startswith("tests/") and path.endswith(".py"):
-            # A changed helper or conftest can move what any test reaches.
-            if not Path(path).name.startswith("test_"):
+            reached = {path} if Path(path).name.startswith("test_") else helper_tests(root, path)
+            if reached is None:
                 return None
-            tests.add(path)
+            tests.update(reached)
         elif path in GLOBAL_FILES or (path.endswith(".py") and not path.startswith(MEASURED)):
             return None
         elif path.endswith(".py"):
@@ -141,6 +146,86 @@ def record_drift(root: Path, manifest: dict) -> tuple[set[str], set[int], set[st
         else:
             paths.add(path)
     return tests, units, paths
+
+
+def workflow_changed(root: Path, manifest: dict, path: str) -> bool:
+    before, after = _show(root, manifest["commit"], path), _show(root, "HEAD", path)
+    if path == TEST_WORKFLOW and manifest.get("version") == 2:
+        return collection_changed(before, after)
+    return global_input(path, before, after, manifest.get("version"))
+
+
+def collection_changed(old: str | None, new: str | None) -> bool:
+    # Only the jobs that run the recorded tests decide what a test reaches; the jobs before them schedule tests.
+    try:
+        before, after = (yaml.safe_load(text) for text in (old, new))
+        if not all(isinstance(workflow["jobs"]["unit"], dict) for workflow in (before, after)):
+            return True
+        if any(before.get(key) != after.get(key) for key in ("env", "defaults")):
+            return True
+        for name in COLLECTING_JOBS:
+            old_job, new_job = (
+                {key: value for key, value in workflow["jobs"].get(name, {}).items() if key not in SCHEDULING_KEYS}
+                for workflow in (before, after)
+            )
+            if old_job != new_job:
+                return True
+        return False
+    except (TypeError, KeyError, AttributeError, yaml.YAMLError):
+        return True
+
+
+def helper_tests(root: Path, path: str) -> set[str] | None:
+    importers = _importers(root)
+    pending, reached = [path], set()
+    while pending:
+        current = pending.pop()
+        if current in reached:
+            continue
+        reached.add(current)
+        module = current.removesuffix(".py").removesuffix("/__init__").replace("/", ".")
+        keys = {module, current}
+        if Path(current).name in ("conftest.py", "__init__.py"):
+            folder = f"{Path(current).parent.as_posix()}/"
+            pending.extend(found for found in importers["*"] if found.startswith(folder))
+        else:
+            keys.update((Path(current).stem, Path(current).name))
+        pending.extend(found for key in keys for found in importers.get(key, ()))
+    if any(not found.startswith("tests/") for found in reached):
+        return None
+    return {found for found in reached if Path(found).name.startswith("test_")}
+
+
+@cache
+def _importers(root: Path) -> dict[str, set[str]]:
+    found = {"*": set()}
+    for path in _git(root, "ls-files", "--", "hooks/*.py", "scripts/*.py", "tests/*.py").splitlines():
+        found["*"].add(path)
+        for key in _reach_keys(path, (root / path).read_text(errors="replace")):
+            found.setdefault(key, set()).add(path)
+    return found
+
+
+def _reach_keys(path: str, source: str) -> set[str]:
+    keys = set(re.findall(r"[\w./-]+\.py\b", source))
+    keys.update(Path(key).name for key in list(keys))
+    names = re.findall(r"\b(?:tests|hooks|scripts)(?:\.\w+)+", source)
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        tree = ast.Module(body=[], type_ignores=[])
+    package = path.removesuffix(".py").replace("/", ".").split(".")
+    for found in ast.walk(tree):
+        if isinstance(found, ast.Import):
+            names.extend(alias.name for alias in found.names)
+        elif isinstance(found, ast.ImportFrom):
+            base = ".".join([*package[: len(package) - found.level], *filter(None, [found.module])])
+            names.append(base)
+            names.extend(f"{base}.{alias.name}" if base else alias.name for alias in found.names)
+    for name in names:
+        parts = name.split(".")
+        keys.update(".".join(parts[:end]) for end in range(1, len(parts) + 1))
+    return keys
 
 
 def changed_recorded_units(root: Path, manifest: dict, changes: dict[str, set[int]]) -> tuple[set[int], set[str]]:

@@ -650,18 +650,21 @@ def test_a_changed_tests_data_file_adds_only_the_tests_that_read_it(tmp_path, mo
 
 
 WORKFLOW = (
-    "env:\n  FLAG: {env}\njobs:\n  split:\n    runs-on: {split}\n  unit:\n    needs: split\n    steps:\n"
-    "      - run: {unit}\n  lint:\n    steps:\n      - run: {lint}\n"
+    "env:\n  FLAG: {env}\njobs:\n  split:\n    runs-on: {split}\n  unit:\n    needs: split\n"
+    "    timeout-minutes: {timeout}\n    steps:\n      - run: {unit}\n  unit-selected:\n    steps:\n"
+    "      - run: {selected}\n  lint:\n    steps:\n      - run: {lint}\n"
 )
-RECORDED_WORKFLOW = {"env": "1", "split": "x", "unit": "pytest", "lint": "ruff"}
+RECORDED_WORKFLOW = {"env": "1", "split": "x", "unit": "pytest", "timeout": 10, "selected": "pytest", "lint": "ruff"}
 
 
 @pytest.mark.parametrize(
     "edit,expected",
     [
         ({"lint": "ruff check"}, sorted([*NARROWED, "tests/test_core.py::test_other"])),
+        ({"split": "y"}, sorted([*NARROWED, "tests/test_core.py::test_other"])),
+        ({"timeout": 20}, sorted([*NARROWED, "tests/test_core.py::test_other"])),
         ({"unit": "pytest -x"}, WHOLE),
-        ({"split": "y"}, WHOLE),
+        ({"selected": "pytest -x"}, WHOLE),
         ({"env": "2"}, WHOLE),
     ],
 )
@@ -693,3 +696,73 @@ def test_a_path_whose_covering_tests_are_gone_keeps_its_selected_files(tmp_path,
     selection = {}
     plan.estimate(tmp_path, {"scripts/core.py": {6}}, selection, manifest)
     assert selection == {"scripts/core.py": WHOLE}
+
+
+UNIT_JOBS = {"unit": {"needs": "split", "steps": [{"run": "pytest"}]}, "unit-selected": {"steps": [{"run": "pytest"}]}}
+
+
+@pytest.mark.parametrize(
+    "edit,expected",
+    [
+        ({"jobs": {**UNIT_JOBS, "split": {"runs-on": "y"}}}, False),
+        ({"jobs": {**UNIT_JOBS, "unit": {**UNIT_JOBS["unit"], "needs": ["split", "count"]}}}, False),
+        ({"jobs": {**UNIT_JOBS, "unit": {**UNIT_JOBS["unit"], "if": "always()"}}}, False),
+        ({"jobs": {**UNIT_JOBS, "unit": {**UNIT_JOBS["unit"], "outputs": {"a": "b"}}}}, False),
+        ({"jobs": {**UNIT_JOBS, "unit": {**UNIT_JOBS["unit"], "runs-on": "other"}}}, True),
+        ({"jobs": {**UNIT_JOBS, "unit-selected": {"steps": []}}}, True),
+        ({"jobs": {"unit": UNIT_JOBS["unit"]}}, True),
+        ({"jobs": {**UNIT_JOBS, "unit": "pytest"}}, True),
+        ({"jobs": {"unit-selected": UNIT_JOBS["unit-selected"]}}, True),
+        ({"jobs": UNIT_JOBS, "defaults": {"run": {"shell": "sh"}}}, True),
+        ({"jobs": UNIT_JOBS, "env": {"FLAG": "1"}}, True),
+        ({"jobs": []}, True),
+    ],
+)
+def test_only_the_jobs_running_recorded_tests_decide_a_collection_change(edit, expected):
+    import yaml
+
+    old = yaml.safe_dump({"jobs": UNIT_JOBS})
+    assert plan.collection_changed(old, yaml.safe_dump(edit)) is expected
+    assert plan.collection_changed(old, old) is False
+    assert plan.collection_changed(old, "jobs: [") is True
+
+
+@pytest.mark.parametrize(
+    "importer,extra,changed,narrowed",
+    [
+        ("from tests.helpers import H\n", {}, "tests/helpers.py", False),
+        ("from tests import helpers\n", {}, "tests/helpers.py", False),
+        ("from .helpers import H\n", {}, "tests/helpers.py", False),
+        ("import helpers\n", {}, "tests/helpers.py", False),
+        ('HELPER = "tests/helpers.py"\n', {}, "tests/helpers.py", False),
+        ("from tests.chain import H\n", {"tests/chain.py": "from tests.helpers import H\n"}, "tests/helpers.py", False),
+        ("", {"scripts/uses.py": "from tests.helpers import H\n"}, "tests/helpers.py", False),
+        ("", {"tests/__init__.py": "X = 1\n"}, "tests/__init__.py", False),
+        ("", {"tests/nested/conftest.py": "X = 1\n"}, "tests/nested/conftest.py", True),
+        ("", {}, "tests/helpers.py", True),
+        ("from tests.helpers_extra import H\n", {"tests/helpers_extra.py": "H = 1\n"}, "tests/helpers.py", True),
+        ("from tests.chain import H\n", {"tests/chain.py": "H = 1\n"}, "tests/helpers.py", True),
+    ],
+)
+def test_a_shared_helper_edit_keeps_whole_only_the_test_files_it_reaches(
+    tmp_path, monkeypatch, importer, extra, changed, narrowed
+):
+    manifest = _recorded_project(tmp_path, monkeypatch)
+    core = tmp_path / "tests/test_core.py"
+    core.write_text(importer + core.read_text())
+    (tmp_path / "tests/helpers.py").write_text("H = 1\n")
+    for path, text in extra.items():
+        (tmp_path / path).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / path).write_text(text)
+    manifest["commit"] = _commit(tmp_path, "recorded helpers")
+    (tmp_path / changed).write_text("H = 2\n")
+    _commit(tmp_path, "helper")
+    selection = {}
+    plan.estimate(tmp_path, {"scripts/core.py": {6}}, selection, manifest)
+    assert selection == {"scripts/core.py": NARROWED if narrowed else WHOLE}
+
+
+def test_an_unparsable_file_still_reaches_the_modules_its_text_names():
+    assert plan._reach_keys("tests/a.py", "from tests.helpers import (\n") == {"tests", "tests.helpers"}
+    assert plan._reach_keys("tests/pkg/__init__.py", "from . import b\n") == {"tests", "tests.pkg", "tests.pkg.b"}
+    assert plan._reach_keys("tests/a.py", 'run("tests/x/y.py")\n') == {"tests/x/y.py", "y.py"}
