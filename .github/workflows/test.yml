@@ -3049,12 +3049,18 @@ jobs:
           path: .mutation-stats-cache
           key: mutation-test-stats-v2-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}
 
+      - name: Keep only the test stats this part wrote
+        if: strategy.job-total != 1 && needs.mutation-plan.outputs.forwarded != 'true'
+        env:
+          PART: ${{ matrix.part }}
+        run: mkdir -p .mutation-stats-fresh && find .mutation-stats-cache -maxdepth 1 -type f -newer ".mutation-stats/collected-$PART" -exec cp -p {} .mutation-stats-fresh/ \;
+
       - name: Upload this part's test stats cache
         if: strategy.job-total != 1 && needs.mutation-plan.outputs.forwarded != 'true'
         uses: actions/upload-artifact@v4
         with:
           name: mutation-test-stats-cache-${{ matrix.part }}
-          path: .mutation-stats-cache/
+          path: .mutation-stats-fresh/
           include-hidden-files: true
           if-no-files-found: ignore
           retention-days: 1
@@ -3194,8 +3200,18 @@ jobs:
           path: .mutation-stats
           merge-multiple: true
 
+      - name: Restore compatible test stats
+        if: strategy.job-index == 0 && needs.mutation-plan.outputs.stats_parts != '[0]' && needs.mutation-plan.outputs.forwarded != 'true'
+        uses: actions/cache/restore@v4
+        env:
+          SEGMENT_DOWNLOAD_TIMEOUT_MINS: "1"
+        with:
+          path: .mutation-stats-cache
+          key: mutation-test-stats-v2-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: mutation-test-stats-v2-${{ runner.os }}-
+
       - name: Download every part's test stats cache
-        if: strategy.job-index == 0 && needs.mutation-plan.outputs.forwarded != 'true'
+        if: strategy.job-index == 0 && needs.mutation-plan.outputs.stats_parts != '[0]' && needs.mutation-plan.outputs.forwarded != 'true'
         uses: actions/download-artifact@v4
         with:
           pattern: mutation-test-stats-cache-*
@@ -3203,7 +3219,7 @@ jobs:
           merge-multiple: true
 
       - name: Save the merged test stats
-        if: strategy.job-index == 0 && needs.mutation-plan.outputs.forwarded != 'true' && hashFiles('.mutation-stats-cache/**') != ''
+        if: strategy.job-index == 0 && needs.mutation-plan.outputs.stats_parts != '[0]' && needs.mutation-plan.outputs.forwarded != 'true' && hashFiles('.mutation-stats-cache/**') != ''
         uses: actions/cache/save@v4
         with:
           path: .mutation-stats-cache
