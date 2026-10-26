@@ -601,3 +601,38 @@ def test_the_dry_run_of_a_kept_unlisted_member_names_its_listing(world):
         f"hive create {NAME}: invite: kept hive member {member} in OpenBao secret/{RECORD}; "
         f"would list {member} on the hub signer record {SIGNER} for demo and refresh {SYNC}"
     )
+
+
+def test_a_new_node_beside_live_hives_one_and_two_is_named_hive_three(world):
+    redis = world.tools.redis
+    redis.hset(machine.MACHINES, "worker-001", NAME)
+    for name in (NAME, "swarm-hive-002"):
+        member = auth.mint(redis, name, "redis://hive.example:6380/2")["id"]
+        redis.hset(registry.key(member), "heartbeat_at", NOW * 1000)
+    world.run.machines = [
+        {"id": "a1", "label": NAME, "target": "ssh://worker@10.10.30.207:2222"},
+        {"id": "a2", "label": "swarm-hive-002", "target": "ssh://worker@10.10.30.207:2223"},
+    ]
+
+    with pytest.raises(auth.HiveError):
+        create.create(world.tools, create.Options(node="worker-002", timeout_s=0))
+
+    assert _state(world)["name"] == "swarm-hive-003"
+    assert redis.hgetall(machine.MACHINES) == {"worker-001": NAME, "worker-002": "swarm-hive-003"}
+
+
+@pytest.mark.parametrize(
+    ("machines", "registered"),
+    [
+        ([{"id": "a2", "label": "swarm-hive-002", "target": "ssh://worker@10.10.30.207:2223"}], "anton-2"),
+        ([], "swarm-hive-002"),
+    ],
+)
+def test_a_name_only_herdr_or_the_registry_holds_is_skipped(world, machines, registered):
+    world.tools.redis.hset(machine.MACHINES, "worker-001", NAME)
+    world.run.machines = machines
+    registry.update(world.tools.redis, "abc", [f"name={registered}"])
+
+    done = create.create(world.tools, create.Options(node="worker-002", dry_run=True))
+
+    assert done == "dry run of hive create swarm-hive-003: nothing written"
