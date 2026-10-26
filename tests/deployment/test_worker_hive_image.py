@@ -101,8 +101,8 @@ def test_hive_layer_only_links_files_onto_the_base_so_the_build_never_unpacks_it
     hive = dockerfile[dockerfile.rindex("\nFROM ${WORKER_IMAGE}\n") + 1 :]
     steps = [line.split()[0] for line in hive.splitlines()[1:] if line and not line.startswith(" ")]
     assert set(steps) == {"COPY", "ENV", "USER", "ENTRYPOINT", "CMD"}
-    assert all(line.startswith("COPY --link ") for line in hive.splitlines() if line.startswith("COPY"))
-    assert "COPY --link --from=overlay /opt/venv/ /opt/venv/\n" in hive
+    assert all(line.startswith("COPY --link=true ") for line in hive.splitlines() if line.startswith("COPY"))
+    assert "COPY --link=true --from=overlay /opt/venv/ /opt/venv/\n" in hive
     overlay = worker_stage("overlay")
     assert "bin/pip install --no-cache-dir --no-deps /wheels/*.whl -r /wheels/tools.txt" in overlay
     assert "lib/python3.12/site-packages/pip " in overlay

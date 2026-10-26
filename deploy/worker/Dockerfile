@@ -34,16 +34,16 @@ RUN python -m venv /opt/venv \
     && ln -s ../lib/node_modules/npm/bin/npx-cli.js /links/npx
 
 FROM ${WORKER_IMAGE}
-COPY --link --from=node /usr/local/bin/node /usr/local/bin/node
-COPY --link --from=node /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/npm
-COPY --link --from=uv /uv /uvx /usr/local/bin/
-COPY --link --from=gh /usr/bin/gh /usr/bin/gh
-COPY --link --from=overlay /links/ /usr/local/bin/
-COPY --link --from=overlay /opt/venv/ /opt/venv/
+COPY --link=true --from=node /usr/local/bin/node /usr/local/bin/node
+COPY --link=true --from=node /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/npm
+COPY --link=true --from=uv /uv /uvx /usr/local/bin/
+COPY --link=true --from=gh /usr/bin/gh /usr/bin/gh
+COPY --link=true --from=overlay /links/ /usr/local/bin/
+COPY --link=true --from=overlay /opt/venv/ /opt/venv/
 ENV NPM_CONFIG_PREFIX=/home/worker/.local \
     PATH=/home/worker/.local/bin:$PATH
-COPY --link --chmod=0755 deploy/worker/start.sh /opt/worker-hive/start.sh
-COPY --link --chmod=0755 deploy/worker/gh /usr/local/bin/gh
+COPY --link=true --chmod=0755 deploy/worker/start.sh /opt/worker-hive/start.sh
+COPY --link=true --chmod=0755 deploy/worker/gh /usr/local/bin/gh
 USER 10001:10001
 ENTRYPOINT ["/usr/bin/tini", "--", "/opt/worker-hive/start.sh"]
 CMD []
