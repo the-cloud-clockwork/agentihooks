@@ -75,7 +75,7 @@ def step_text(slug: str, item: str, rec: dict) -> str:
             f"escalate with the blocker reason and its evidence: agentihooks swarm {slug} resolve escalate {item} "
             f'--reason "<why it is blocked, in plain words>" --evidence "<the command and output that show it>"'
         )
-    return "the protocol is complete and the item waits on the operator"
+    return "leave it for the operator, since its protocol is complete"
 
 
 def notice(slug: str, tier: str, item: str, rec: dict) -> str:
@@ -134,7 +134,7 @@ def _refuse(ctx, item, rec, why):
     return False
 
 
-def _attempt(row, rec, op, ctx):
+def _attempt(rec, op, ctx):
     step = next_step(rec)
     if step == CRITIC:
         return _refuse(ctx, op["item"], rec, "two attempts are recorded before the critic")
@@ -190,7 +190,7 @@ def apply(doc, op, ctx):
         return False
     rec = record(row)
     if op["op"] == "blocker_attempt":
-        done = _attempt(row, rec, op, ctx)
+        done = _attempt(rec, op, ctx)
     elif op["op"] == "blocker_critic":
         done = _critic(row, rec, op, ctx)
     else:

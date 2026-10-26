@@ -215,6 +215,17 @@ def test_a_new_priority_makes_one_master_item_naming_the_item_and_the_ask(store)
     assert texts(store, ENG_SEAT) == []
 
 
+def test_a_new_priority_names_the_step_its_item_record_has_reached(store):
+    run(store, with_priorities())
+    doc = with_priorities(priority("tasks/t1", "Blocked: the deploy key is missing"))
+    doc["tasks"] = [{"id": "t1", "blocker": {"attempts": [{}, {}], "critic": None, "escalation": None}}]
+    run(store, doc)
+    (item,) = InboxStore(store.redis).inbox(MASTER_SEAT)
+    assert item.text.endswith(
+        "the next protocol step is to launch the blind critic: agentihooks swarm sw resolve critic tasks/t1."
+    )
+
+
 def test_a_priority_on_a_follow_up_the_swarm_raised_for_the_operator_sends_the_master_no_notice(store):
     raised = event(11, 100_000, "swarm", "added", "followups/f1", "A message to master@sw is still unread")
     flagged = event(12, 100_000, "sw-eng-1", "added", "followups/f2", "Pick the release date")

@@ -781,6 +781,24 @@ def test_a_blocker_step_is_an_item_write():
     assert schemas.target({"op": "blocker_attempt", "item": "tasks/t1"}) == "tasks/t1"
 
 
+def test_alert_delivery_reads_the_step_from_the_ledger_state(inbox, monkeypatch):
+    from scripts.swarm_ledger import ledger_blockers
+
+    rendered = []
+    monkeypatch.setattr(ledger_blockers, "autonomy", lambda slug: "full")
+    alert = {"id": "al-5-0", "source": "sync", "text": "refused", "item": "tasks/t1", "state": "open", "rev": 5}
+
+    def deliver(inbox, slug, alerts, rev, master, since, render):
+        rendered.append(render(slug, alert))
+        return []
+
+    monkeypatch.setattr(ledger_alerts, "deliver", deliver)
+    blocker = {"attempts": [{}, {}], "critic": None, "escalation": None}
+    state = {"_meta": {"rev": 5}, "alerts": [alert], "tasks": [{"id": "t1", "blocker": blocker}]}
+    ledger_server.deliver_alerts(SLUG, state)
+    assert rendered[0].endswith(f"launch the blind critic: agentihooks swarm {SLUG} resolve critic tasks/t1.")
+
+
 def test_alias_operation_stores_the_canonical_author(monkeypatch):
     from scripts.swarm_ledger import ledger_core
 

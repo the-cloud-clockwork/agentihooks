@@ -218,7 +218,6 @@ CONFIG_KEYS = {
     "engine": "engine",
 }
 GATE_KEYS = {f"{name}-gate": name for name in catalog.defaults()}
-GATE_MODES = modes.MODES
 RETIRES_MASTER = frozenset({"stop now", "close ledger"})
 TICK_LOCK_MS = 10 * 60 * 1000
 TICK_SECONDS = 60

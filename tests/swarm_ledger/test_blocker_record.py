@@ -17,7 +17,7 @@ ESCALATE_STEP = (
     "escalate with the blocker reason and its evidence: agentihooks swarm sw resolve escalate tasks/t1 "
     '--reason "<why it is blocked, in plain words>" --evidence "<the command and output that show it>"'
 )
-DONE_STEP = "the protocol is complete and the item waits on the operator"
+DONE_STEP = "leave it for the operator, since its protocol is complete"
 REASON = "The pool quota is spent."
 
 
@@ -186,10 +186,10 @@ def test_the_critic_digest_carries_the_tier_the_ledger_reads(tier):
 
 def test_below_delegate_an_escalation_needs_no_record(tier):
     tier["tier"] = "assist"
-    doc = ledger()
+    doc = {"tasks": [{"id": "t1", "title": "Deploy the hive"}]}
     done, _ = write(doc, escalate())
     assert done is True
-    assert doc["priorities"][-1]["text"] == f"Blocked: {REASON}"
+    assert [p["text"] for p in doc["priorities"]] == [f"Blocked: {REASON}"]
     assert (
         doc["tasks"][0]["comments"][0]["text"]
         == f"Blocker protocol record.\n\nBlocker reason: {REASON}\nEvidence: quota show"
