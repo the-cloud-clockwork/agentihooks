@@ -47,6 +47,8 @@ BEGIN_IMMEDIATE = "BEGIN IMMEDIATE"
 STORED = "SELECT 1 FROM ledgers WHERE slug=?"
 GENERATION = "SELECT generation FROM ledgers WHERE slug=?"
 TOKEN = "SELECT token FROM ledgers WHERE slug=?"
+TASK_REVISION = "SELECT path, value FROM fields WHERE slug=? AND path IN (?, ?)"
+TASK_REVISION_PATHS = (encode(["_meta", "task_revision"]), encode(["_meta", "rev"]))
 TASKS_PATH = encode(["tasks"])
 TASKS_PREFIX = TASKS_PATH[:-1] + ","
 SUMMARIES = "SELECT summary FROM ledgers ORDER BY touched_at DESC, slug"
@@ -575,7 +577,8 @@ class SQLiteLedgerRepository:
                 raise Missing(slug)
             if since is not None and since[0] == row[0]:
                 return since
-            meta = read_partial(connection, slug, (["_meta", "task_revision"], ["_meta", "rev"])).get("_meta", {})
+            values = dict(connection.execute(TASK_REVISION, (slug, *TASK_REVISION_PATHS)))
+            meta = {json.loads(path)[1]: json.loads(value) for path, value in values.items()}
             paths = None
             if since is not None and since[0] < row[0]:
                 paths = refresh.changed_paths(connection, slug, since[0], row[0], CHANGES_KEPT)
