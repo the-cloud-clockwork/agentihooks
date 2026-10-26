@@ -705,6 +705,22 @@ def test_statistics_timings_keep_maxima_and_normalize_groups_from_each_cache_loc
     }
 
 
+def test_statistics_parts_partition_every_test_when_each_part_restores_a_different_cache(tmp_path, monkeypatch):
+    from scripts.ci_mutation.selection import part_files
+
+    tests = [f"tests/test_sample.py::test_{name}" for name in "abc"]
+    (tmp_path / ".test_durations").write_text(json.dumps(dict(zip(tests, [3, 2, 1]))))
+    caches = [tmp_path / "part-0", tmp_path / "part-1"]
+    for cache in caches:
+        cache.mkdir()
+    (caches[0] / "slow.json").write_text(json.dumps({"status": 0, "durations": {tests[2]: 10}}))
+    parts = []
+    for index, cache in enumerate(caches):
+        monkeypatch.setenv("MUTATION_STATS_CACHE", str(cache))
+        parts.append(part_files(tmp_path, tests, (index, 2)))
+    assert parts == [[tests[0]], tests[1:]]
+
+
 def test_statistics_collection_sets_the_mutmut_mode_and_preserves_runner_options(tmp_path, monkeypatch):
     from scripts.ci_mutation.selection import collect_test_ids
 
