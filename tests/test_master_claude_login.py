@@ -1412,7 +1412,9 @@ def _plain_shell(tmp_path, monkeypatch):
     (operator / ".claude").mkdir(parents=True)
     (operator / ".claude" / "settings.json").write_text('{"forceLoginMethod": "claudeai"}')
     (operator / ".claude" / "CLAUDE.md").write_text("operator persona")
-    (operator / ".claude.json").write_text(json.dumps({"hasCompletedOnboarding": True, login.ACCOUNT: OPERATOR_ACCOUNT}))
+    (operator / ".claude.json").write_text(
+        json.dumps({"hasCompletedOnboarding": True, login.ACCOUNT: OPERATOR_ACCOUNT})
+    )
     monkeypatch.setenv("HOME", str(operator))
     monkeypatch.setattr(Path, "home", classmethod(lambda cls: operator))
     for name in ("CLAUDE_CONFIG_DIR", "CLAUDE_CODE_HOME_DIR", "AGENTIHOOKS_CLAUDE_HOME"):
