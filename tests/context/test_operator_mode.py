@@ -288,14 +288,12 @@ def test_a_failing_mode_store_is_logged_and_never_raises_into_the_hook(monkeypat
 
 
 ASK = (
-    "The operator is not present in this pane, so the question tool is off. Put the question on the ledger with "
-    'agentihooks ledger --slug {slug} --as {name} question add "<the question in plain words>" '
-    "and keep working; the master answers it or raises it to the operator."
+    "The operator is not present in this pane, so the question tool is off. Send the question to the front door "
+    'master by inbox with agentihooks msg send master@{slug} "<the question in plain words>" and keep working.'
 )
 MASTER_ASK = (
-    "The operator is not present in this pane, so the question tool is off. Never write the questions as chat text. "
-    "Say only one short line, type operator on to answer the questions here, or leave them in Priorities with "
-    'agentihooks ledger --slug {slug} --as {name} priority add <item> "<the ask in plain words>".'
+    "The operator is not present in this pane, so the question tool is off. Never write to him first, as chat text "
+    "or anywhere else: hold the question until he writes, then answer what he asks."
 )
 PROMPT_REFUSAL = (
     "Denied {tool}: the operator is not present in this pane, and only his typed operator on opens this prompt. "
@@ -418,7 +416,7 @@ def test_a_mode_file_that_is_not_an_object_holds_the_question_tool_off(tmp_path,
 AWAY = (
     "Operator not present: he never reads this pane. End the turn with no report, summary or ask addressed to him "
     "and skip the response template; any pane text stays within {words} words. "
-    "Put anything he must decide only in Priorities with agentihooks ledger priority add."
+    "Never write to him first; answer only what he writes."
 )
 REMINDER = AWAY.format(words=20)
 
@@ -482,7 +480,7 @@ def test_away_turns_end_without_a_report_to_him_and_only_operator_on_restores_no
     run_prompt(monkeypatch, capsys, "s1", "You are master@a1-1, the master of swarm demo")
     away = run_prompt(monkeypatch, capsys, "s1", delivery.marked("continue"))
     assert "End the turn with no report, summary or ask addressed to him" in away
-    assert "Put anything he must decide only in Priorities" in away
+    assert "Never write to him first; answer only what he writes." in away
     typed = run_prompt(monkeypatch, capsys, "s1", "Explain the result")
     assert "addressed to him" in typed
     present = run_prompt(monkeypatch, capsys, "s1", "operator on")
@@ -490,11 +488,12 @@ def test_away_turns_end_without_a_report_to_him_and_only_operator_on_restores_no
     assert "only in Priorities" not in present
 
 
-def test_an_away_worker_routes_his_decisions_to_a_ledger_question_never_priorities(ledgers):
+def test_an_away_worker_routes_his_decisions_to_the_front_door_inbox_never_the_ledger(ledgers):
     env = {"AGENTIHOOKS_SWARM": "demo", "AGENTIHOOKS_AGENT_NAME": "engineer@a1-2", "LEDGER_DIR": str(ledgers)}
     text = [operator_mode.reminder("w1", env, now=100) for _ in range(2)][1]
     assert "End the turn with no report, summary or ask addressed to him" in text
-    assert "agentihooks ledger question add" in text
+    assert "front door master by inbox with agentihooks msg send" in text
+    assert "question add" not in text
     assert "Priorities" not in text
 
 

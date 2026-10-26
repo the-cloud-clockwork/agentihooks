@@ -13,6 +13,7 @@ from scripts.swarm.health import checks
 from scripts.swarm.ledger_events import PullRequest
 from scripts.swarm.resume import Outcome
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig, SwarmError
+from scripts.swarm_v2 import front_door
 from scripts.swarm_v2.runtime.routed import RoutedRuntime
 from tests.swarm.test_delivery import FakeHerdr
 from tests.swarm.test_tick import FakeLedger, FakeRuntime
@@ -40,7 +41,7 @@ def env(monkeypatch, tmp_path):
     ledger.said = []
     ledger.comments = []
     ledger.say = lambda slug, text, by=None: ledger.said.append((text, by))
-    ledger.relay = lambda slug, text, by, op_id="": ledger.said.append((text, by))
+    ledger.relay = lambda slug, text, by, op_id="", reply_to="": ledger.said.append((text, by))
     ledger.comment = lambda slug, task, text, by: ledger.comments.append((task, text, by))
     rt = FakeRuntime()
     monkeypatch.setattr(cli, "connect", lambda: store)
@@ -484,8 +485,8 @@ def test_say_addresses_and_strangers_are_refused(env, capsys):
     assert ledger.said == []
     [item] = InboxStore(store.redis).inbox("ci@a1b2c3-0001")
     assert (item.sender, item.text, item.state) == ("engineer@a1b2c3-0001", "the docs task is merged", "pending")
-    assert run("sw", "--as", "engineer@a1b2c3-0001", "say", "status for the page only") == 0
-    assert ledger.said[-1] == ("status for the page only", "engineer@a1b2c3-0001")
+    assert run("sw", "--as", "engineer@a1b2c3-0001", "say", "status for the page only") == 1
+    assert ledger.said == [] and "msg send master@sw" in capsys.readouterr().err
     assert [i.text for i in InboxStore(store.redis).inbox("ci@a1b2c3-0001")] == ["the docs task is merged"]
 
     assert run("sw", "--as", "stranger", "say", "hello") == 1
@@ -507,17 +508,17 @@ def test_say_to_an_agent_a_lane_or_everyone_never_posts_to_chat(env, to, capsys)
     assert "engineer@a1b2c3-0001" in json.loads(capsys.readouterr().out)["sent"]
 
 
-def test_say_to_the_operator_posts_to_chat_and_reaches_no_inbox(env, capsys):
+def test_say_to_the_operator_is_refused_naming_the_front_door_inbox(env, capsys):
     store, ledger, _ = env
     run("sw", "create", "--repo", "/repo")
     run("sw", "start")
     ledger.said.clear()
-    ledger.say = lambda slug, text, by=None: ledger.said.append((slug, text, by))
     capsys.readouterr()
-    assert run("sw", "--as", "engineer@a1b2c3-0001", "say", "phase one is done", "--to", "operator") == 0
-    assert ledger.said == [("sw", "phase one is done", "engineer@a1b2c3-0001")]
+    assert run("sw", "--as", "engineer@a1b2c3-0001", "say", "phase one is done", "--to", "operator") == 1
+    err = capsys.readouterr().err
+    assert front_door.say_refusal("sw", "engineer@a1b2c3-0001") in err and 'msg send master@sw "<text>"' in err
+    assert ledger.said == []
     assert InboxStore(store.redis).inbox("ci@a1b2c3-0001") == []
-    assert json.loads(capsys.readouterr().out) == {"posted": True}
 
 
 @pytest.mark.parametrize("flag, env_name", [("engineer@a1b2c3-0001", ""), ("", "engineer@a1b2c3-0001")])
@@ -1592,7 +1593,7 @@ def test_a_tick_with_a_refused_page_post_still_runs_every_other_pass(env, monkey
     run("sw", "create", "--repo", "/repo")
     run("sw", "start")
 
-    def refuse(slug, text, by=None, op_id=""):
+    def refuse(slug, text, by=None, op_id="", reply_to=""):
         raise SwarmError("ledger sw refused: chat refused: clock time '18:45'")
 
     ledger.relay = refuse
@@ -2129,7 +2130,6 @@ def test_master_prompt_runs_the_swarm_and_never_codes():
         f"{led} task add",
         f"{led} time-left",
         f"{led} followup add",
-        "agentihooks swarm sw --as master@a1b2c3-0002 say --to operator",
         "agentihooks msg reply",
         "--fyi",
         "agentihooks swarm sw --as master@a1b2c3-0002 send-message",
@@ -2146,7 +2146,7 @@ def test_master_prompt_runs_the_swarm_and_never_codes():
         "and the operator's environment with him through the agentihooks commands and tools. You never edit code "
         "or config files in a repository, commit, merge or claim a task: engineers do that.\n"
     ) in text
-    assert "wt.sh new" not in text and "done --pr" not in text
+    assert "wt.sh new" not in text and "done --pr" not in text and "say --to operator" not in text
 
 
 def test_the_tick_wakes_an_idle_pane_holding_a_pending_inbox_item(env):
