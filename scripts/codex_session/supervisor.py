@@ -13,6 +13,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
 from pathlib import Path
 
+from hooks.context import profile_chain
 from hooks.observability.trace_flush import start_time
 from scripts.codex_session import protocol
 from scripts.codex_session.binding import CONNECTED, EXITED, FAILED, RECORDS, BindingStore, TransportRecord, decode
@@ -36,7 +37,16 @@ EXECUTION_PREFIX = "exe-"
 ENDPOINT_ID_CHARS = 16
 PRIVATE_MODE = 0o700
 SHARED_ROLLOUTS = ("sessions", "archived_sessions")
-STARTUP_FILES = ("config.toml", "hooks.json", "AGENTS.md", "AGENTS.override.md", "rules", "skills", binding.FILE)
+STARTUP_FILES = (
+    "config.toml",
+    "hooks.json",
+    "AGENTS.md",
+    "AGENTS.override.md",
+    "rules",
+    "skills",
+    binding.FILE,
+    profile_chain.RENDER_STAMP,
+)
 RUNTIME_SUBDIR = "cx"
 HOME_SUBDIR = ".agentihooks"
 CODEX_HOME_KEY = "codexHome"
