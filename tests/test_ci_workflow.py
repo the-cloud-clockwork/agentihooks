@@ -749,7 +749,7 @@ def test_mutation_gate_plants_itself_whenever_its_code_changes():
     assert '! diff -rq "$RUNNER_TEMP/base/$path" "$path"' in changed["run"]
     [grade] = [step for step in steps if "self-plant-$mode" in step.get("run", "")]
     assert grade["run"].startswith('grader="$RUNNER_TEMP/grader/tests/mutation_self_plant/plant.py"\n')
-    assert "for mode in kill survive; do" in grade["run"] and ' &\n' in grade["run"]
+    assert "for mode in kill survive; do" in grade["run"] and " &\n" in grade["run"]
     assert 'exit "$failed"' in grade["run"]
     later = steps[steps.index(changed) + 1 : steps.index(grade) + 1]
     assert all("steps.self-plant.outputs.changed == 'true'" in step["if"] for step in later)
