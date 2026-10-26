@@ -1,0 +1,6 @@
+{
+  "scripts/events/nats_payload.py:scripts.events.nats_payload.x_encode__mutmut_19:49999fada0a12a1a1bc04102296f5639bc96be1240b628824e05b2bac6e2d038": {
+    "reader": "standards_reader",
+    "reason": "Changes only a private deterministic hash separator. Both forms include the complete encoded value and budget, store identical chunks, and embed their chosen token in the self-describing reference used by decode. Historical references remain readable. Evidence: Standards disposition of complete CI report 40201644623."
+  }
+}

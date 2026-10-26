@@ -36,7 +36,7 @@ EXECUTION_PREFIX = "exe-"
 ENDPOINT_ID_CHARS = 16
 PRIVATE_MODE = 0o700
 SHARED_ROLLOUTS = ("sessions", "archived_sessions")
-OMITTED_STATE = (*SHARED_ROLLOUTS, "bin", "history.jsonl", "session_index.jsonl", "log", "tmp", "shell_snapshots")
+STARTUP_FILES = ("config.toml", "hooks.json", "AGENTS.md", "AGENTS.override.md", "rules", "skills", binding.FILE)
 RUNTIME_SUBDIR = "cx"
 HOME_SUBDIR = ".agentihooks"
 CODEX_HOME_KEY = "codexHome"
@@ -371,9 +371,7 @@ def execution_home(spec: Launch, directory: Path) -> Launch:
         source,
         home,
         ignore=lambda directory, names: (
-            tuple(name for name in names if name in OMITTED_STATE or ".sqlite" in name)
-            if Path(directory) == source
-            else ()
+            tuple(name for name in names if name not in STARTUP_FILES) if Path(directory) == source else ()
         ),
         ignore_dangling_symlinks=True,
     )
@@ -381,6 +379,9 @@ def execution_home(spec: Launch, directory: Path) -> Launch:
         canonical = (source / name).resolve()
         canonical.mkdir(parents=True, exist_ok=True)
         (home / name).symlink_to(canonical)
+    auth = source / "auth.json"
+    if auth.is_file():
+        (home / "auth.json").symlink_to(auth.resolve())
     binaries = source / "bin"
     if binaries.exists():
         (home / "bin").symlink_to(binaries.resolve())

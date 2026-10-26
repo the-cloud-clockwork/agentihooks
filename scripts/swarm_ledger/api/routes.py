@@ -1,3 +1,4 @@
+import io
 import json
 import logging
 import os
@@ -175,7 +176,7 @@ def ledger_operation(handler: object, services: Services, slug: str, path: str, 
     if path == "swarm/actions":
         return admin.control(services, slug, principal, payload)
     if path in ("export", "swarm/export"):
-        return export(services, slug, path, payload)
+        return export(handler, services, slug, path, payload)
     if path == "operations":
         return mutations.apply(services, slug, principal, payload)
     if path == "architecture/actions":
@@ -188,23 +189,27 @@ def ledger_operation(handler: object, services: Services, slug: str, path: str, 
 PAGE_WRITES = {"saves": "put_ledger", "swarm/controls": "put_swarm"}
 
 
-def export(services: Services, slug: str, path: str, payload: dict) -> dict | str:
+def export(handler: object, services: Services, slug: str, path: str, payload: dict) -> dict | None:
     if path == "export" and isinstance(payload, dict) and "since" in payload:
         schemas.validate(SINCE_SCHEMA, payload)
-        generation, text = services.repository.export_since(slug, payload["since"], export_body, export_changes)
-        return '{"generation":' + str(generation) + "," + text[1:]
+        generation, body = services.repository.export_since(slug, payload["since"], export_bytes, export_changes)
+        body = body if isinstance(body, bytes) else body.encode()
+        return handler.send_export(b'{"generation":' + str(generation).encode() + b"," + body[1:])
     schemas.validate({"type": "object", "maxProperties": 0}, payload)
     if path == "swarm/export":
         status = services.swarm.status(slug)
         if status is None:
             raise APIError(404, "swarm_missing", "No swarm for this ledger")
         return {"data": status}
-    return services.repository.encoded_view(slug, export_body)
+    return handler.send_export(services.repository.encoded_view(slug, export_bytes))
 
 
-def export_body(state: dict) -> str:
+def export_bytes(state: dict) -> bytes:
     meta = {key: item for key, item in state["_meta"].items() if key not in ("seeds", "api_operations")}
-    return json.dumps({"data": {**state, "_meta": meta}}, ensure_ascii=False)
+    with io.BytesIO() as stream:
+        for chunk in json.JSONEncoder(ensure_ascii=False).iterencode({"data": {**state, "_meta": meta}}):
+            stream.write(chunk.encode())
+        return stream.getvalue()
 
 
 SINCE_SCHEMA = {

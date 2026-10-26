@@ -8,7 +8,7 @@ Usage: ledger.py --slug SLUG --as NAME <command> [args]
   status                              crew, my unhandled operator events
   events                              my unhandled operator events, one line each
   ack [--rev N]                       mark operator events up to N (default: latest) as handled
-  say TEXT [--long]                   chat message (TEXT "-" reads stdin); --long only when the operator asked to expand
+  say TEXT --reply-to ID [--long]     answer an operator chat line by its id (TEXT "-" reads stdin); --long only when he asked to expand
   comment ITEM TEXT [--image PATH]    attach an image (repeatable) to your status on phases/<id>, questions/<id> or followups/<id>; amends your last one
   artifact PATH TITLE [--task ID] [--request ENTRY]
                                       publish a markdown, JSON, SVG or image file the operator asked for; its task
@@ -24,9 +24,9 @@ Usage: ledger.py --slug SLUG --as NAME <command> [args]
                                       review; a taken phase id refuses them all
   phase ID done|open [--status T]     set a phase state, T becomes your status comment
   followup add TEXT | done|open ID    add a follow-up, close one, or reopen one
-  followup add TEXT --needs-operator  add a follow-up that waits on the operator's decision; it shows in Priorities
+  followup add TEXT --needs-operator  operator and swarm only: agents are refused, they never ask the operator first
   followup flag|unflag ID             mark a follow-up as waiting on the operator's decision, or no longer
-  question add TEXT                   ask a question on the ledger; the master answers it or raises it to the operator
+  question add TEXT                   operator and swarm only: agents send questions to master@<slug> by inbox
   scope ITEM in|out [--status T]      mark an item out of scope (or back in); T says why
   retext ITEM TEXT                    rewrite the text of a follow-up or question
   edit chat|ITEM ENTRY TEXT           rewrite an entry (yours; the orchestrator: any agent's)
@@ -38,7 +38,7 @@ Usage: ledger.py --slug SLUG --as NAME <command> [args]
                                       or priorities/<id> (no --as needed)
   tasks [--state S] [--lane L] [--text T]
                                       list open tasks, one line each, by state, lane or title text (no --as needed)
-  priority add ITEM TEXT              ask the operator: only what blocks on his answer, at most 20 words; ITEM may
+  priority add ITEM TEXT              operator and swarm only, at most 20 words; agents are refused; ITEM may
                                       be phases/<id>, questions/<id>, followups/<id> or tasks/<id>. Unanswered
                                       questions, blocked tasks, merge approvals and flagged follow-ups show on their own
   priority clear ID... | --all        clear priorities once answered
@@ -64,6 +64,8 @@ Usage: ledger.py --slug SLUG --as NAME <command> [args]
                                       --artifact marks a file the operator asked for, so the task may publish it;
                                       --workstation keeps a task that acts on the workstation checkout or its
                                       task folders off every remote hive (task set workstation=yes or no);
+                                      --needs CAPS claims it only on a hive declaring every capability in CAPS,
+                                      such as headed (task set needs=CAPS);
                                       R is the queue rank, urgent, high, normal (default) or low, next meaning
                                       urgent: the swarm claims eligible tasks highest rank first, then by
                                       critical path; only the master, a planner or the operator sets it;
@@ -467,6 +469,8 @@ def cmd_say(args):
         "by": args.name,
         "to": "operator",
     }
+    if vars(args).get("reply_to"):
+        op["reply_to"] = args.reply_to
     if args.long:
         op["long"] = True
     posted(call(args.slug, [op]), [op])
@@ -835,6 +839,7 @@ def _task_add_fields(args):
             ("territory", args.territory),
             ("overlays", args.overlays),
             ("repositories", args.repositories),
+            ("needs", args.needs),
         )
         if v
     }
@@ -866,7 +871,7 @@ def _task_set_fields(values):
     fields = dict(value.split("=", 1) for value in values if "=" in value)
     if len(fields) != len(values):
         sys.exit("task set takes FIELD=VALUE pairs")
-    for key in ("depends_on", "territory", "overlays", "repositories", "split_pulls", "doc_items"):
+    for key in ("depends_on", "territory", "overlays", "repositories", "split_pulls", "needs", "doc_items"):
         if key in fields:
             fields[key] = task_list(key, fields[key])
     for key in [key for key in ("artifact", "follow_up", "workstation") if key in fields]:
@@ -956,6 +961,7 @@ def build_parser():
     say = sub.add_parser("say")
     say.add_argument("text")
     say.add_argument("--long", action="store_true")
+    say.add_argument("--reply-to")
     for name, first, second in (("comment", "item", "text"), ("retext", "item", "text")):
         parser_ = sub.add_parser(name)
         parser_.add_argument(first)
@@ -1071,6 +1077,7 @@ def build_parser():
     )
     task.add_argument("--profile")
     task.add_argument("--overlays", help="comma separated overlays this task's agent wears, at most three")
+    task.add_argument("--needs", help="comma separated hive capabilities, such as headed, that its hive must declare")
     task.add_argument(
         "--repositories", help="comma separated absolute local repository paths; defaults to the swarm repository"
     )

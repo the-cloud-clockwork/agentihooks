@@ -42,6 +42,7 @@ PATH_END = "\x7f"
 PER_LEDGER = (*TABLES, "ledgers", "revisions", "seed_base", "seed_deltas", "events", "row_changes")
 GENERATION_SHIFT = 20
 CHANGES_KEPT = 256
+VIEW_BUILD = threading.Lock()
 BEGIN_IMMEDIATE = "BEGIN IMMEDIATE"
 STORED = "SELECT 1 FROM ledgers WHERE slug=?"
 GENERATION = "SELECT generation FROM ledgers WHERE slug=?"
@@ -533,19 +534,22 @@ class SQLiteLedgerRepository:
             connection.execute(BEGIN)
             return self._entry(connection, slug)
 
-    def encoded_view(self, slug: str, view) -> str:
+    def encoded_view(self, slug: str, view) -> str | bytes:
         """view(state) of the stored ledger, built once per generation and keyed by view, so view is a module
-        level function that never changes the state it reads."""
+        level function that never changes the state it reads. Builds run one at a time under VIEW_BUILD, since each
+        holds a whole encoded copy of a ledger, so a view must not call encoded_view."""
         self._adopt(slug)
         with self.connect() as connection, connection:
             connection.execute(BEGIN)
             entry = self._entry(connection, slug)
         if view not in entry.views:
-            entry.views[view] = view(entry.state)
-            heap.release()
+            with VIEW_BUILD:
+                if view not in entry.views:
+                    entry.views[view] = view(entry.state)
+                    heap.release()
         return entry.views[view]
 
-    def export_since(self, slug: str, since: int, view, changes) -> tuple[int, str]:
+    def export_since(self, slug: str, since: int, view, changes) -> tuple[int, str | bytes]:
         """(generation, text) of the stored ledger: changes(state, paths) when the database recorded every row
         change after generation since, else view(state) as encoded_view builds it."""
         self._adopt(slug)
@@ -561,8 +565,10 @@ class SQLiteLedgerRepository:
         if text is not None:
             return entry.generation, text
         if view not in entry.views:
-            entry.views[view] = view(entry.state)
-            heap.release()
+            with VIEW_BUILD:
+                if view not in entry.views:
+                    entry.views[view] = view(entry.state)
+                    heap.release()
         return entry.generation, entry.views[view]
 
     def read(self, slug: str, *keys: str) -> dict:

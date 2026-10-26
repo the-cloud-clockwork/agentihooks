@@ -34,11 +34,20 @@ agentihooks hive add ssh://worker@lab-vm:22 \
 agentihooks hive install          # user service that runs agentihooks hive run
 ```
 
-- `hive add <ssh target> --url <url> [--redis-url URL]` names the machine `swarm-hive-<epoch seconds>` from the
-  clock; a typed label is refused. It refuses unless the local hive record has
-  `ui=yes`, with `hive add refused: hive <id> is headless; only a UI hive adds machines`. On a UI hive it runs
-  `herdr machine add --label swarm-hive-<epoch seconds> --remote-session default <target>` (300 second timeout) unless
-  `herdr machine list --json` already holds that target, so a rerun only redelivers the credential; it mints a hive member
+- `hive add <ssh target> --url <url> [--redis-url URL]` names the hive after its machine, the target's host: the
+  first add of a host gives it the lowest free name `swarm-hive-001`, `swarm-hive-002` and so on, kept in the Redis
+  hash `agentihooks-hive:machines`, and every later add of that host reuses the name. A typed label is refused. It
+  refuses unless the local hive record has `ui=yes`, with
+  `hive add refused: hive <id> is headless; only a UI hive adds machines`. One machine runs one hive: a herdr machine
+  already saved on the same host under another label refuses the add with
+  `<host> already runs hive <label>; one machine runs one hive, so grow it with more max agents`. When a hive member
+  already carries the label, the add keeps that member, saves the herdr entry again if it is gone, and mints and
+  delivers nothing: `--url` and `--redis-url` are ignored, and its `added <target> to herdr as <label>` line means
+  the herdr entry is saved, not that a credential was delivered. `hive remove` is the only way a machine's member is
+  retired, so changing the delivered URLs or repairing a lost `hive.env` is `hive remove <id>` (it drains first), then
+  `hive add`. Otherwise
+  it runs `herdr machine add --label <name> --remote-session default <target>` (300 second timeout) unless
+  `herdr machine list --json` already holds that target or label; it mints a hive member
   named after the label, and delivers it: `ssh -o BatchMode=yes <target>` (60 second timeout) writes the member's
   `hive.env` (mode 0600) into `${AGENTIHOOKS_HOME:-$HOME/.agentihooks}/hive.env` on the remote machine. If delivery
   fails, the minted member is revoked and the command exits 1. On success it prints
@@ -72,7 +81,8 @@ agentihooks hive install          # user service that runs agentihooks hive run
   is left it revokes the member and its Redis user, removes the herdr machine saved under the hive's label and that
   machine's host key from `~/.ssh/known_hosts`, deletes the hive record and every key below it, and deletes the
   OpenBao record (`k8s/agentihooks-hive-<label>`, or `--path`). With `--antoncore <checkout>` it also stages the
-  removal of the hive's Argo application, manifests folder and values overlay there, for a pull request. The label
+  removal of the hive's Argo application, manifests folder and values overlay there, for a pull request: the release
+  is the label itself for a `swarm-hive-` name and `agentihooks-hive-<label>` otherwise. The label
   defaults to the member's name (`--label` overrides; a rerun after the member is revoked needs it). After `--wait` seconds (default 3600) with agents still on
   the hive it stops with their names and leaves the hive draining; run it again to keep waiting. Every step skips a
   piece that is already gone, so a rerun finishes an interrupted remove. `OPENBAO_URL` and `OPENBAO_TOKEN` must
@@ -334,11 +344,28 @@ Set them with `agentihooks hive set <id> key=value ...`, or on the ledger page's
 | `master-swarms` | comma list of swarm slugs | none | Swarms whose masters the hive takes although it excludes `master`. Every other swarm still sees masters excluded. |
 | `prefer` | comma list of `role:rank` | none | Rank 1 is chosen first for that role; unranked hives come after ranked ones. |
 | `max-agents` | whole number, 1 or more | `20` on `ui=no`, `10` on `ui=yes` | Working agents the hive runs at once. Masters do not count against it. |
+| `capabilities` | comma list of names, such as `headed` | none | What the machine offers beyond the defaults. A task with `needs` runs only on a hive that declares every capability it needs. |
 
 Every hive takes every agent type (master, eng, ci, plan, dispatch and any profile) unless the agent's lane role,
 role or profile is in its `excluded` list. `prefer` refuses a role the hive excludes. An unset `excluded` or
 `max-agents` follows the hive's current `ui`. A hive registered with the old `roles` setting drops it, with its
 stored `max-agents`, on its next `hive set` or heartbeat, and reads under the defaults until then.
+
+### Capabilities and task needs
+
+A hive declares what it offers with `capabilities`, and a task names what it requires with `needs`:
+
+```bash
+agentihooks hive set desk capabilities=headed
+agentihooks ledger --slug <slug> --as <name> task add browse "Check the logged in page" --lane eng --needs headed
+agentihooks ledger --slug <slug> --as <name> task set browse needs=headed
+```
+
+Placement keeps only the live hives whose capabilities cover every name in the task's `needs`. When none does, the
+task waits with `the task needs a hive with headed, and no hive declares it`, shown with the other placement waits
+in `swarm status`. Overflow to the local machine and a local swarm take such a task only when the local hive record
+declares the capabilities too, and runtime placement keeps it off a backend that cannot declare them. `swarm status`
+prints each agent's hive in its Hive column, and the ledger page agents table names it under the agent.
 
 ### Excluded and prefer: the operator's layout
 

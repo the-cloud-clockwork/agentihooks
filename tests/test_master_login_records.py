@@ -149,7 +149,7 @@ def test_no_operator_order_ranks_by_room_alone(monkeypatch, rendered, tmp_path):
     assert login.prepare(_environ(rendered), tmp_path)[0] == login.home(2)
 
 
-def test_a_held_first_choice_falls_to_the_next_in_the_operator_order(monkeypatch, rendered, tmp_path):
+def test_a_held_first_choice_stays_first_in_the_operator_order(monkeypatch, rendered, tmp_path):
     monkeypatch.setattr(openbao_kv, "from_env", lambda environ: None)
     _stored(1, {"emailAddress": "one@example.com"})
     _stored(2, TWO)
@@ -157,23 +157,23 @@ def test_a_held_first_choice_falls_to_the_next_in_the_operator_order(monkeypatch
     _room(monkeypatch, oneatexample_com=10.0, twoatexample_com=20.0, threeatexample_com=90.0)
     monkeypatch.setenv(login.ORDER_ENV, "oneatexample_com,two@example.com")
     _held(1, "master@a-1")
-    assert login.prepare(_environ(rendered), tmp_path)[0] == login.home(2)
+    assert login.prepare(_environ(rendered), tmp_path)[0] == login.home(1)
 
 
-def test_every_held_login_names_all_its_holders(monkeypatch, rendered, tmp_path):
+def test_a_front_door_joins_multiple_holders_of_the_preferred_login(monkeypatch, rendered, tmp_path):
     monkeypatch.setattr(openbao_kv, "from_env", lambda environ: None)
     _stored(1, {"emailAddress": "one@example.com"})
     _stored(2, TWO)
     _room(monkeypatch, oneatexample_com=50.0, twoatexample_com=40.0)
     _held(1, "master@a-1", "master@b-1")
     _held(2, "master@c-1")
-    with pytest.raises(login.LoginRefused) as refused:
-        login.prepare(_environ(rendered), tmp_path)
-    assert str(refused.value) == (
-        "every stored master claude ai login is held by a live master "
-        "(oneatexample_com by master@a-1, master@b-1; twoatexample_com by master@c-1): "
-        "add one with agentihooks claude login --master"
-    )
+    assert login.prepare(_environ(rendered), tmp_path)[0] == login.home(1)
+    assert set(login.holders(login.root(1))) == {
+        "master@a-1",
+        "master@b-1",
+        _environ(rendered)["AGENTIHOOKS_AGENT_NAME"],
+    }
+    assert login.holders(login.root(2)) == {"master@c-1": os.getppid()}
 
 
 def test_removing_the_last_slot_clears_only_that_slot(monkeypatch):

@@ -46,6 +46,7 @@ COPY docs/swarm-v2/schemas/ /opt/venv/lib/python3.12/site-packages/docs/swarm-v2
 COPY profiles/ /opt/agentihooks/templates/
 COPY profiles/package/roles/ /opt/agentihooks/templates/
 ARG SOURCE_REVISION=unknown
+LABEL org.opencontainers.image.revision=$SOURCE_REVISION
 RUN python /opt/swarm-node/worker_image.py manifest --architecture "$TARGETARCH" --source-revision "$SOURCE_REVISION" \
     && chmod -R a-w /opt/agentihooks/templates /opt/swarm-node \
     && find /opt/venv \! -type l -perm /222 -exec chmod a-w {} + \

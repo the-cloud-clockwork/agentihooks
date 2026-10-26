@@ -103,13 +103,17 @@ def crew(live):
     return live
 
 
+def first_phase_comments():
+    return ledger.request(SLUG)["phases"][0]["comments"]
+
+
 def tasks(reply):
     return {task["id"] for task in reply["tasks"]}
 
 
 def test_pinned_worker_transport_cannot_create_a_task_as_master(crew):
     with pinned():
-        own = operation("add", by=WORKER, thread="chat", to="operator", text="Worker control")
+        own = operation("add", by=WORKER, thread="phases/p1/comments", text="Worker control")
         assert own["id"] not in ledger.request(SLUG, [own])["rejected"]
         denied = operation("task_add", by=WORKER, task="t1", title="Own author", lane="eng", phase="p1")
         assert denied["id"] in ledger.request(SLUG, [denied])["rejected"]
@@ -180,7 +184,7 @@ def test_a_bound_master_still_adds_tasks(crew):
 def test_an_alias_of_the_bound_name_writes_as_that_agent(crew):
     alias = "engineer-323133-0256"
     with pinned(), patch.object(server.authority, "resolve_name", lambda name: WORKER if name == alias else name):
-        said = operation("add", by=alias, thread="chat", to="operator", text="Alias control")
+        said = operation("add", by=alias, thread="phases/p1/comments", text="Alias control")
         reply = ledger.request(SLUG, [said])
     assert said["id"] not in reply["rejected"]
 
@@ -205,11 +209,11 @@ def test_the_operator_credential_keeps_full_administration(crew):
 
 def test_the_swarm_client_keeps_service_authority_inside_a_pinned_session(crew):
     with pinned():
-        LedgerClient().say(SLUG, "Service control", by="swarm")
+        LedgerClient().comment_phase(SLUG, "p1", "Service control", by="swarm")
         LedgerClient().say(SLUG, "Unsigned control")
-        LedgerClient(service=True).say(SLUG, "Tick relay", by=OTHER)
+        LedgerClient(service=True).comment_phase(SLUG, "p1", "Tick relay", by=OTHER)
         chat = LedgerClient().chat(SLUG)
-    said = [(entry.get("by"), entry["text"]) for entry in chat]
+    said = [(entry.get("by"), entry["text"]) for entry in chat + first_phase_comments()]
     assert ("swarm", "Service control") in said
     assert ("operator", "Unsigned control") in said
     assert (OTHER, "Tick relay") in said
@@ -217,11 +221,10 @@ def test_the_swarm_client_keeps_service_authority_inside_a_pinned_session(crew):
 
 def test_the_swarm_client_binds_agent_authored_writes_to_the_session(crew):
     with pinned():
-        LedgerClient().say(SLUG, "Own swarm line", by=WORKER)
+        LedgerClient().comment_phase(SLUG, "p1", "Own swarm line", by=WORKER)
         with pytest.raises(SwarmError) as refused:
-            LedgerClient().say(SLUG, "Forged swarm line", by=MASTER)
-        chat = LedgerClient().chat(SLUG)
-    said = [(entry.get("by"), entry["text"]) for entry in chat]
+            LedgerClient().comment_phase(SLUG, "p1", "Forged swarm line", by=MASTER)
+    said = [(entry.get("by"), entry["text"]) for entry in first_phase_comments()]
     assert (WORKER, "Own swarm line") in said
     assert "Forged swarm line" not in [text for _, text in said]
     assert str(refused.value).endswith(
