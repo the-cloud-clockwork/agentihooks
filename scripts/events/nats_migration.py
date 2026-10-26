@@ -8,7 +8,6 @@ from typing import TYPE_CHECKING
 from nats.js.errors import APIError, NotFoundError
 
 from .config import QueuePolicy
-from .dead import DEAD_STREAM
 from .envelope import Envelope
 from .nats import ATTEMPT_BASE, MSG_ID, NatsWorkQueue, _attempt
 from .nats_state import IMPORT_PENDING, LAST_SUBJECT_SEQUENCE, REVISION, REVISION_BASE, ScopedStateStore
@@ -158,11 +157,12 @@ def migrate_queue(root: "NatsBus", swarm: str, name: str, policy: QueuePolicy) -
 
 
 async def _copy_dead(root: "NatsBus", swarm: str, target: str) -> None:
-    info = await root._js.stream_info(DEAD_STREAM)
+    source = root._legacy_dead._stream
+    info = await root._js.stream_info(source)
     sequence = info.state.first_seq
     while sequence <= info.state.last_seq:
         try:
-            message = await root._js.get_msg(DEAD_STREAM, seq=sequence)
+            message = await root._js.get_msg(source, seq=sequence)
         except NotFoundError:
             sequence += 1
             continue

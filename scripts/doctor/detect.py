@@ -15,6 +15,7 @@ from scripts.doctor import (
     ci,
     ci_read,
     context_overruns,
+    features,
     handoffs,
     health,
     inbox,
@@ -144,6 +145,7 @@ def readers(store, ledger, slug, now_ms, environ=None, home=SWARM_HOME, telemetr
         "master prompt": lambda: _master_prompts(store, slug, now_ms),
         "ci": lambda: _ci(store, tasks(), now_ms),
         "dev workflow": lambda: ci.red_dev_workflows(ci_read.dev_pushes(store.config(slug).repo)),
+        "feature": lambda: features.findings(),
         "trace": lambda: _traces(store, tasks(), slug, now_ms, env, None if telemetry is True else telemetry),
     }
     return found if telemetry else {name: read for name, read in found.items() if name != "trace"}

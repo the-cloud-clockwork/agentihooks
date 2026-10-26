@@ -46,6 +46,15 @@ def wait_listening(port: int, process: subprocess.Popen, deadline_s: float = 10)
     raise RuntimeError(f"nats-server did not listen on {port}")
 
 
+def wait_logged(log: Path, text: str, deadline_s: float = 10) -> None:
+    stop = time.monotonic() + deadline_s
+    while time.monotonic() < stop:
+        if log.exists() and text in log.read_text():
+            return
+        time.sleep(0.02)
+    raise AssertionError(f"nats-server did not log {text!r} in {log}")
+
+
 def _wait_url(ports: Path, process: subprocess.Popen, deadline_s: float = 10) -> str:
     stop = time.monotonic() + deadline_s
     while time.monotonic() < stop:

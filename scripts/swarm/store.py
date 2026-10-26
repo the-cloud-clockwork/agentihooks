@@ -86,8 +86,12 @@ class SwarmConfig:
     local_max_agents: int = DEFAULT_LOCAL_MAX_AGENTS
     engine: str = "legacy"
     window: dict = field(default_factory=dict)
+    focus_weight: int = 50
+    watchdog_address: str = ""
 
     def __post_init__(self) -> None:
+        if type(self.focus_weight) is not int or not 0 <= self.focus_weight <= 100:
+            raise SwarmError("focus weight must be a whole number from 0 to 100")
         if self.engine not in ("legacy", "events"):
             raise SwarmError("engine must be one of legacy, events")
 
@@ -234,6 +238,8 @@ class RedisStore:
             int(raw.get("local_max_agents") or DEFAULT_LOCAL_MAX_AGENTS),
             raw.get("engine", "legacy"),
             json.loads(raw.get("window") or "{}"),
+            int(raw.get("focus_weight", 50)),
+            raw.get("watchdog_address", ""),
         )
 
     def update(self, slug, **changes):
@@ -275,6 +281,10 @@ class RedisStore:
 
     def claimant(self, slug, task):
         return self.redis.get(self.key(slug, "claim", task))
+
+    def claimed(self, slug: str, tasks: list[str]) -> set[str]:
+        found = self.redis.mget([self.key(slug, "claim", task) for task in tasks]) if tasks else []
+        return {task for task, claimant in zip(tasks, found) if claimant is not None}
 
     def claim_generation(self, slug: str, task: str) -> int:
         return int(self.redis.get(f"{self.key(slug, 'claim', task)}:generation") or 0)
@@ -534,6 +544,9 @@ class RedisStore:
 
     def launch_failure(self, slug, task):
         return self.redis.hget(self.key(slug, "launch-failures"), task) or ""
+
+    def launch_failures(self, slug: str) -> dict:
+        return self.redis.hgetall(self.key(slug, "launch-failures"))
 
     def failed_harness(self, slug, task):
         return self.redis.hget(self.key(slug, "launch-failure-harness"), task) or ""

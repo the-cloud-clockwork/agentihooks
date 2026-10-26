@@ -222,6 +222,12 @@ def duration_provenance_steps() -> list[dict]:
     return yaml.safe_load(Path(__file__).with_name("ci_duration_provenance.yml").read_text())
 
 
+def retried_duration_provenance_steps() -> list[dict]:
+    steps = duration_provenance_steps()
+    steps[-1]["uses"] = "./provenance-grader/.github/actions/retry-upload"
+    return steps
+
+
 def paged_reuse_job() -> dict:
     job = reuse_job()
     [fetch] = [step for step in job["steps"] if step.get("name") == "Fetch the evidence of recent passed runs"]

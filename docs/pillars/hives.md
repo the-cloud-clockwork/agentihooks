@@ -76,17 +76,20 @@ agentihooks hive install          # user service that runs agentihooks hive run
   seconds after any exit. `hive run` publishes sessions, quota, slots and repos every fifteen seconds.
 - `agentihooks hive refresh` mints a new Redis credential; `agentihooks hive revoke <id>` deletes a member's
   ledger credential and Redis user.
-- `agentihooks hive remove <id>` takes a hive out of the fleet in one run. It sets `draining=yes`, so placement
-  puts no new agent or master there, and sends every live agent on the hive one inbox order to hand off. Once none
-  is left it revokes the member and its Redis user, removes the herdr machine saved under the hive's label and that
-  machine's host key from `~/.ssh/known_hosts`, deletes the hive record and every key below it, and deletes the
-  OpenBao record (`k8s/agentihooks-hive-<label>`, or `--path`). With `--antoncore <checkout>` it also stages the
-  removal of the hive's Argo application, manifests folder and values overlay there, for a pull request: the release
-  is the label itself for a `swarm-hive-` name and `agentihooks-hive-<label>` otherwise. The label
-  defaults to the member's name (`--label` overrides; a rerun after the member is revoked needs it). After `--wait` seconds (default 3600) with agents still on
-  the hive it stops with their names and leaves the hive draining; run it again to keep waiting. Every step skips a
-  piece that is already gone, so a rerun finishes an interrupted remove. `OPENBAO_URL` and `OPENBAO_TOKEN` must
-  be set.
+- `agentihooks hive remove <name>` reverses `hive create` in one run; the name may also be the member id. It runs
+  its steps in order and prints each one: drain sets `draining=yes`, so placement puts no new agent or master there,
+  sends every live agent on the hive one inbox order to hand off and reports the agents that did; member revokes the
+  member and its Redis user; herdr removes the machine saved under the hive's label and its host key from
+  `~/.ssh/known_hosts`; registry deletes the hive record and every key below it, releases the hive name of its node and
+  deletes the `hive create` state that names it; manifests opens a pull request into antoncore `dev` (`--repo`,
+  `--base`) deleting the hive's Argo application, manifests folder and values overlay, and asks GitHub to merge it
+  once its checks pass: the release is the label itself for a `swarm-hive-` name and `agentihooks-hive-<label>`
+  otherwise; openbao deletes the OpenBao record (`k8s/agentihooks-hive-<label>`, or `--path`). `--dry-run` prints
+  every step and writes nothing. The label defaults to the member's name (`--label` overrides; a rerun by member id
+  after the member is revoked needs it, a rerun by name does not). After `--wait` seconds (default 3600) with agents
+  still on the hive it stops with their names and leaves the hive draining; run it again to keep waiting. Every step
+  skips a piece that is already gone, so a rerun finishes an interrupted remove and writes nothing after a completed
+  one. `OPENBAO_URL` and `OPENBAO_TOKEN` must be set.
 - `agentihooks hive list` prints one line per hive: id, `name=<name>` when the hive carries a readable name, `live` or `stale`, ui, max agents, excluded (`none` when
   empty) and its [headroom](#headroom) reading.
   `agentihooks hive show <id>` prints the full record as JSON.
@@ -344,11 +347,28 @@ Set them with `agentihooks hive set <id> key=value ...`, or on the ledger page's
 | `master-swarms` | comma list of swarm slugs | none | Swarms whose masters the hive takes although it excludes `master`. Every other swarm still sees masters excluded. |
 | `prefer` | comma list of `role:rank` | none | Rank 1 is chosen first for that role; unranked hives come after ranked ones. |
 | `max-agents` | whole number, 1 or more | `20` on `ui=no`, `10` on `ui=yes` | Working agents the hive runs at once. Masters do not count against it. |
+| `capabilities` | comma list of names, such as `headed` | none | What the machine offers beyond the defaults. A task with `needs` runs only on a hive that declares every capability it needs. |
 
 Every hive takes every agent type (master, eng, ci, plan, dispatch and any profile) unless the agent's lane role,
 role or profile is in its `excluded` list. `prefer` refuses a role the hive excludes. An unset `excluded` or
 `max-agents` follows the hive's current `ui`. A hive registered with the old `roles` setting drops it, with its
 stored `max-agents`, on its next `hive set` or heartbeat, and reads under the defaults until then.
+
+### Capabilities and task needs
+
+A hive declares what it offers with `capabilities`, and a task names what it requires with `needs`:
+
+```bash
+agentihooks hive set desk capabilities=headed
+agentihooks ledger --slug <slug> --as <name> task add browse "Check the logged in page" --lane eng --needs headed
+agentihooks ledger --slug <slug> --as <name> task set browse needs=headed
+```
+
+Placement keeps only the live hives whose capabilities cover every name in the task's `needs`. When none does, the
+task waits with `the task needs a hive with headed, and no hive declares it`, shown with the other placement waits
+in `swarm status`. Overflow to the local machine and a local swarm take such a task only when the local hive record
+declares the capabilities too, and runtime placement keeps it off a backend that cannot declare them. `swarm status`
+prints each agent's hive in its Hive column, and the ledger page agents table names it under the agent.
 
 ### Excluded and prefer: the operator's layout
 

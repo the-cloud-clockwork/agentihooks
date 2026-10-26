@@ -5,6 +5,8 @@ from nats.js.errors import APIError, NotFoundError
 
 from . import nats_payload
 from .bus import StateConflict, StateEntry
+from .nats_names import existing_stream
+from .resource_names import legacy_stream_name
 from .subjects import stream_name, subject
 
 if TYPE_CHECKING:
@@ -14,12 +16,17 @@ REVISION = "AgentiHooks-State-Revision"
 REVISION_BASE = "agentihooks_revision_base"
 IMPORT_PENDING = "agentihooks_import_pending"
 LAST_SUBJECT_SEQUENCE = "Nats-Expected-Last-Subject-Sequence"
+HISTORY = 64
 
 
 class ScopedStateStore:
     def __init__(self, root: "NatsBus", swarm: str, bucket: str, *, importing: bool = False):
         self._root, self._swarm, self._bucket = root, swarm, bucket
-        self._stream = stream_name(swarm, f"STATE_{bucket}")
+        self._stream = root._loop.run(
+            existing_stream(
+                root._js, stream_name(swarm, f"STATE_{bucket}"), legacy_stream_name(swarm, f"STATE_{bucket}")
+            )
+        )
         if root._config.provision:
             root._loop.run(self._provision(importing))
         info = root._loop.run(root._js.stream_info(self._stream))
@@ -41,7 +48,7 @@ class ScopedStateStore:
             await self._root._js.add_stream(
                 name=self._stream,
                 subjects=[f"{subject(self._swarm, 'state', self._bucket)}.>"],
-                max_msgs_per_subject=64,
+                max_msgs_per_subject=HISTORY,
                 metadata={IMPORT_PENDING: "true"} if importing else None,
             )
 
@@ -74,8 +81,27 @@ class ScopedStateStore:
 
     async def _write(self, key: str, value: bytes, last: int) -> int:
         limit = self._root._nc.max_payload - nats_payload.KV_HEADER_BUDGET
-        value = await nats_payload.encode(self._create_chunk, value, limit)
-        return await self._write_raw(key, value, last)
+        value = await nats_payload.encode(self._create_chunk, value, limit, nats_payload.scope(key, last))
+        try:
+            revision = await self._write_raw(key, value, last)
+        except APIError as exc:
+            if exc.err_code == 10071:
+                prefix = f"{subject(self._swarm, 'state', self._bucket)}."
+                await nats_payload.discard(self._root._js, self._stream, prefix, value)
+            raise
+        await self._reclaim(key, revision - self._revision_base)
+        return revision
+
+    async def _reclaim(self, key: str, below: int) -> None:
+        prefix = f"{subject(self._swarm, 'state', self._bucket)}."
+        await nats_payload.reclaim(self._root._js, self._stream, prefix, key, lambda: self._history(key), below)
+
+    async def _history(self, key: str) -> list[bytes]:
+        values, sequence = [], 1
+        while (message := await self._next(key, sequence)) is not None:
+            sequence = message.seq + 1
+            values.append(message.data or b"")
+        return values
 
     async def _write_raw(self, key: str, value: bytes, last: int) -> int:
         ack = await nats_payload.publish(

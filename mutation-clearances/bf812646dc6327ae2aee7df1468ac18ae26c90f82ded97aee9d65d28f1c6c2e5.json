@@ -1,0 +1,6 @@
+{
+  "scripts/headless/codex.py:scripts.headless.codex.x_toml_string__mutmut_6:74a75d582cb3c1a7794ddd64042e4e5159fe309aef6611c07b19d50da26e1916": {
+    "reader": "standards_reader",
+    "reason": "Equivalent: json.dumps tests ensure_ascii only for truth, and None is falsy like False, so it takes the same non ASCII path; outputs matched for ASCII, non ASCII, control, quote and lone surrogate inputs."
+  }
+}

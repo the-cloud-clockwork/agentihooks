@@ -219,6 +219,32 @@ def test_preflight_sizes_its_stats_parts_and_shards_from_the_plan(tmp_path, monk
     )
 
 
+def test_both_mutation_planners_restore_statistics_timings_before_sizing():
+    workflows = [
+        (_workflow(), "plan", "steps.open.outputs.open != 'true' && steps.reuse.outputs.reused != 'true'"),
+        (
+            yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text()),
+            "mutation-plan",
+            "steps.reuse.outputs.reused != 'true'",
+        ),
+    ]
+    for workflow, job, condition in workflows:
+        steps, names = _steps(workflow["jobs"][job])
+        restored = names.index("Restore measured statistics timings")
+        assert restored < names.index("Size mutation shards from stored timings")
+        assert steps[restored] == {
+            "name": "Restore measured statistics timings",
+            "if": condition,
+            "uses": "actions/cache/restore@v4",
+            "env": {"SEGMENT_DOWNLOAD_TIMEOUT_MINS": "1"},
+            "with": {
+                "path": ".mutation-stats-cache",
+                "key": "mutation-test-stats-v2-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}",
+                "restore-keys": "mutation-test-stats-v2-${{ runner.os }}-\nmutation-test-stats-v1-${{ runner.os }}-\n",
+            },
+        }
+
+
 def test_mutation_matrix_and_merge_use_the_plan_refined_after_statistics():
     jobs = _workflow()["jobs"]
     refine = jobs["refine"]

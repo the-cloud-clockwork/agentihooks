@@ -1,0 +1,55 @@
+{
+  "blocked_after_operator_request": [],
+  "case": "B",
+  "destructive_requests": {
+    "engineer_role": "a destructive vector migration needs an operator approval naming it and its index generation",
+    "no_actor": "a destructive vector migration needs an operator approval naming it and its index generation",
+    "other_migration": "a destructive vector migration needs an operator approval naming it and its index generation"
+  },
+  "diagnostics_name_no_scope": true,
+  "early_consumer_requests": {
+    "activate_before_verify": "only a verified migration with no rows remaining can be activated",
+    "provenance_before_activation": "the event provenance projection is not active",
+    "verify_before_backfill": "only a backfilled migration can be verified"
+  },
+  "operator_request": {
+    "dropped": [
+      "c-legacy-1",
+      "c-legacy-2"
+    ],
+    "requeued": [
+      "c-legacy-1",
+      "c-legacy-2"
+    ]
+  },
+  "protected_state_unchanged": true,
+  "requeued_work": [
+    [
+      "c-legacy-1",
+      5000.0
+    ],
+    [
+      "c-legacy-2",
+      5000.0
+    ]
+  ],
+  "startup_again": {
+    "added": [],
+    "blocked": [
+      {
+        "access_domain": "corpus-ret03",
+        "dimension": 3,
+        "index_generation": "idx-v1",
+        "migration_id": "0002-vector-dimension",
+        "mismatched_vectors": 2,
+        "requires": "operator"
+      }
+    ]
+  },
+  "vectors_after_operator_request": [
+    [
+      "c-current",
+      3
+    ]
+  ]
+}

@@ -813,10 +813,16 @@ def test_each_stored_file_keeps_only_its_own_tests_from_every_bucket(tmp_path, c
 
     cache = tmp_path / "cache/nested"
     collect_cached_stats(root, cache, {}, files, [], collect)
-    assert "Mutation stats cache: reused 0 test files; collect 2" in capsys.readouterr().out
+    cold = capsys.readouterr().out
+    assert "Mutation stats cache: reused 0 test files; collect 2" in cold
+    assert 'Mutation stats cache: misses {"no pointer": 2}; changed inputs []\n' in cold
     (root / files[1]).write_text("def test_sample():\n    assert True\n")
     warm = collect_cached_stats(root, cache, {}, files, [], collect)
-    assert "Mutation stats cache: reused 1 test files; collect 1" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert "Mutation stats cache: reused 1 test files; collect 1" in out
+    assert "Mutation stats cache: misses {\"inputs\": 1}; changed inputs [('tests/test_b.py', 1)]\n" in out
+    collect_cached_stats(root, cache, {}, files, [], collect)
+    assert "misses" not in capsys.readouterr().out
     assert calls == [files, ["tests/test_b.py"]]
     assert warm[0] == {"status": 0, "tests": {"m.x_first": [a], "m.x_second": []}, "durations": {a: 1}, "cpu": 3.0}
     stored = [json.loads(path.read_text())["durations"] for path in cache.glob("*.json")]
@@ -928,6 +934,41 @@ def test_stats_cache_recollects_a_record_that_does_not_match_its_current_inputs(
     assert calls == [files, files, files]
 
 
+def test_stats_cache_recollects_a_truncated_record_and_saves_only_valid_records(tmp_path):
+    import json
+
+    from scripts.ci_mutation.stats_cache import collect_cached_stats
+
+    root = tmp_path / "repo"
+    files = ["tests/test_a.py", "tests/test_b.py"]
+    _repository(root, {path: "def test_sample():\n    pass\n" for path in files})
+    calls = []
+
+    def collect(chosen):
+        calls.append(chosen)
+        return [
+            {
+                "status": 0,
+                "tests": {"tests.x_sample": [f"{path}::test_sample" for path in chosen]},
+                "durations": {f"{path}::test_sample": 1 for path in chosen},
+                "cpu": 1,
+            }
+        ]
+
+    cache = tmp_path / "cache"
+    collect_cached_stats(root, cache, {}, files, [], collect)
+    for path in cache.glob("*.json"):
+        path.write_text(path.read_text()[:20])
+    part = collect_cached_stats(root, cache, {}, files[:1], [], collect)
+    assert calls == [files, files[:1]]
+    assert {test for result in part for test in result["durations"]} == {"tests/test_a.py::test_sample"}
+    records = [json.loads(path.read_text()) for path in cache.glob("*.json")]
+    assert len(records) == 1
+    assert records[0]["status"] == 0
+    assert collect_cached_stats(root, cache, {}, files[:1], [], collect) == part
+    assert calls == [files, files[:1]]
+
+
 def test_real_fixture_imports_do_not_invalidate_measured_unrelated_test_stats(tmp_path):
     from scripts.ci_mutation.stats_cache import collect_cached_stats
 
@@ -969,7 +1010,7 @@ def test_real_fixture_imports_do_not_invalidate_measured_unrelated_test_stats(tm
     assert calls == [files, files]
 
 
-@pytest.mark.parametrize("changed", ["module", "scope", "deleted", "stale"])
+@pytest.mark.parametrize("changed", ["module", "scope", "deleted", "stale", "truncated"])
 def test_stored_statistics_validate_record_inputs_and_mutation_scope(tmp_path, changed):
     import hashlib
 
@@ -991,9 +1032,87 @@ def test_stored_statistics_validate_record_inputs_and_mutation_scope(tmp_path, c
         cache.changes = {"module.py": [1, 2]}
     elif changed == "deleted":
         (root / "module.py").unlink()
-    else:
+    elif changed == "stale":
         next(folder.glob("*.json")).write_text('{"key":"stale","status":0,"inputs":{},"scope":{},"measured":true}')
+    else:
+        next(folder.glob("*.json")).write_text('{"key":"')
     assert cache.load("tests/test_module.py") is None
+    assert len(list(folder.glob("*.json"))) == (changed != "truncated")
+    reason = {"module": "inputs", "deleted": "inputs", "scope": "scope", "stale": "identity", "truncated": "no record"}[
+        changed
+    ]
+    assert cache.misses == {reason: 1}
+    assert cache.changed == ({"module.py": 1} if reason == "inputs" else {})
+
+
+def test_stored_statistics_count_a_missing_pointer_and_a_failed_check(tmp_path):
+    from scripts.ci_mutation.stats_dependencies import StoredStats
+
+    root = tmp_path / "repo"
+    folder = tmp_path / "cache"
+    folder.mkdir()
+    _repository(root, {"module.py": "value = 1\n"})
+    cache = StoredStats(root, folder, {"inventory": ["module.py"]}, {})
+    assert cache.load("tests/test_module.py") is None
+    cache.save("tests/test_module.py", {"status": 0, "tests": {}, "durations": {}, "cpu": 1}, {}, False)
+    assert cache.load("tests/test_module.py", lambda inputs, measured, discovery: False) is None
+    assert cache.misses == {"no pointer": 1, "check": 1}
+
+
+def test_cache_miss_report_names_only_the_five_most_changed_inputs(tmp_path, capsys):
+    import ast
+
+    from scripts.ci_mutation.stats_cache import collect_cached_stats
+
+    root = tmp_path / "repo"
+    modules = [f"m{index}" for index in range(6)]
+    tests = [f"tests/test_{index}.py" for index in range(6)]
+    imports = {test: f"import {', '.join(modules[: 6 - index])}\n" for index, test in enumerate(tests)}
+    _repository(root, {f"{name}.py": "value = 1\n" for name in modules} | imports)
+
+    def collect(chosen):
+        return [{"status": 0, "tests": {}, "durations": {f"{test}::test_one": 1}, "cpu": 1} for test in chosen]
+
+    collect_cached_stats(root, tmp_path / "cache", {}, tests, [], collect)
+    for name in modules:
+        (root / f"{name}.py").write_text("value = 2\n")
+    capsys.readouterr()
+    collect_cached_stats(root, tmp_path / "cache", {}, tests, [], collect)
+    line = next(line for line in capsys.readouterr().out.splitlines() if "misses" in line)
+    assert line.startswith('Mutation stats cache: misses {"inputs": 6}; changed inputs ')
+    assert ast.literal_eval(line.partition("changed inputs ")[2]) == [
+        (f"{name}.py", 6 - index) for index, name in enumerate(modules[:5])
+    ]
+
+
+def test_rewritten_test_durations_keep_the_stored_stats_of_files_that_name_them(tmp_path, capsys):
+    from scripts.ci_mutation.stats_cache import collect_cached_stats
+
+    root = tmp_path / "repo"
+    test = "tests/test_a.py"
+    _repository(
+        root,
+        {
+            ".test_durations": "{}\n",
+            "tests/conftest.py": 'DURATIONS = ".test_durations"\n',
+            test: "def test_one():\n    pass\n",
+        },
+    )
+    calls = []
+
+    def collect(chosen):
+        calls.append(chosen)
+        return [{"status": 0, "tests": {}, "durations": {f"{test}::test_one": 1}, "cpu": 1} for _ in chosen]
+
+    collect_cached_stats(root, tmp_path / "cache", {}, [test], [], collect)
+    (root / ".test_durations").write_text('{"tests/test_a.py::test_one": 2}\n')
+    capsys.readouterr()
+    collect_cached_stats(root, tmp_path / "cache", {}, [test], [], collect)
+    assert "Mutation stats cache: reused 1 test files; collect 0" in capsys.readouterr().out
+    assert calls == [[test]]
+    (root / "tests/conftest.py").write_text('DURATIONS = ".test_durations"\nVALUE = 2\n')
+    collect_cached_stats(root, tmp_path / "cache", {}, [test], [], collect)
+    assert calls == [[test], [test]]
 
 
 @pytest.mark.parametrize(

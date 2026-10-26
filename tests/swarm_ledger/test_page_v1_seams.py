@@ -120,7 +120,14 @@ def test_the_streamed_ledger_view_carries_the_marks_and_the_server_limits():
     assert view["marks"]["held"] == []
     cap, compact = [0, ledger_server.MAX_CAP], [ledger_server.MIN_COMPACT, ledger_server.MAX_COMPACT]
     assert view["_meta"]["limits"] == {
-        "capacity": {"max_eng": cap, "max_ci": cap, "max_plan": cap, "masters_step": cap, "compact_limit": compact},
+        "capacity": {
+            "max_eng": cap,
+            "max_ci": cap,
+            "max_plan": cap,
+            "masters_step": cap,
+            "compact_limit": compact,
+            "focus_weight": [0, 100],
+        },
         "efforts": list(ledger_server.EFFORTS),
         "sync_cooldown_ms": ledger_core.SYNC_COOLDOWN_MS,
         "bin_days": ledger_artifacts.KEEP_DAYS,

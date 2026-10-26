@@ -210,10 +210,11 @@ def test_a_follow_up_is_compared_with_follow_ups_and_open_tasks():
     assert ("task", "t1") in kinds and ("task", "t2") not in kinds and ("task", "t3") not in kinds
 
 
-def test_a_done_follow_up_reports_done():
-    match = find(ledger(), "followup", [{"text": "Retire the leak sweep trigger"}], judge=Judge(yes={"f2"}))[0]
+def test_a_done_follow_up_is_not_compared():
+    judge = Judge(yes={"f2"})
 
-    assert (match.state, match.built) == ("done", True)
+    assert find(ledger(), "followup", [{"text": "Retire the leak sweep trigger"}], judge=judge) == [None]
+    assert "f2" not in {e["id"] for asked in judge.asked for e in asked[0]["existing"]}
 
 
 def test_a_phase_is_compared_with_phases():

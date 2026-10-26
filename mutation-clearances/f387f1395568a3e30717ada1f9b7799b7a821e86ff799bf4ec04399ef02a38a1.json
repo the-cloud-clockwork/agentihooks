@@ -1,0 +1,6 @@
+{
+  "scripts/herdr_host.py:scripts.herdr_host.x_agent_name__mutmut_13:82d434b92f3dba48dccd1a54c673739229343c1a5b0d1f4056d8c1d8f4b6b662": {
+    "reader": "standards-reader",
+    "reason": "Lowercasing and substitution exclude uppercase X and underscore. Both strip character sets remove the same possible boundary hyphens, leaving every downstream name identical."
+  }
+}

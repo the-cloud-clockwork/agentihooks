@@ -31,6 +31,7 @@ EVENTS = (
 )
 LAUNCH_KEYS = ("profile", "harness", "model", "effort")
 RECORDED = (*LAUNCH_KEYS, "account")
+OBSERVED = ("model", "effort")
 
 
 def lifecycle_command(command: str) -> bool:
@@ -87,7 +88,9 @@ def read(agent: AgentRecord, pid: int, proc: Path = Path("/proc")) -> dict:
         model, effort, _ = _native_options(harness, argv[1:])
         home = env.get(binding.HOMES[harness])
         config = launch_model.configured(harness, Path(home)) if home else {}
-        model, effort = model or config.get("model", ""), effort or config.get("effort", "")
+        override = launch_model.overridden(argv[1:]) if harness == "codex" else {}
+        model = model or override.get("model") or config.get("model", "")
+        effort = effort or config.get("effort", "")
         return {
             "harness": harness,
             "home": str(Path(home).resolve()) if home else "",
@@ -226,11 +229,16 @@ def unknown(agent: AgentRecord, facts: dict) -> list[str]:
     return [field for field in _unheld(agent) if field in RECORDED and facts.get(field)]
 
 
+def unobserved(agent: AgentRecord, facts: dict) -> dict:
+    expected = assignment(agent)
+    return {field: expected[field] for field in OBSERVED if expected[field] and not facts.get(field)}
+
+
 def compare(agent: AgentRecord, facts: dict) -> dict:
     if facts.get("process") is False:
         return {"process": {"expected": True, "actual": False}}
     expected = {**assignment(agent), "hooks": True}
-    missing = _unheld(agent)
+    missing = [*_unheld(agent), *unobserved(agent, facts)]
     return {
         field: {"expected": value, "actual": facts.get(field)}
         for field, value in expected.items()
@@ -250,6 +258,7 @@ def record(store: RedisStore, slug: str, agent: AgentRecord, facts: dict, now_ms
     }
     if "pane" not in facts and facts.get("process") is not False:
         report["unknown"] = unknown(agent, facts)
+        report["unobserved"] = unobserved(agent, facts)
     store.redis.hset(store.key(slug, "live-bindings"), agent.name, json.dumps(report))
     return differences
 
@@ -288,6 +297,17 @@ def findings(store: RedisStore, slug: str) -> list[Finding]:
                     f"{report['agent']} has no recorded {field}",
                     (f"the record never held {field}, so it is not compared and never retires the agent",),
                     "assigned launch must be recorded",
+                    1,
+                )
+            )
+        for field, expected in report.get("unobserved", {}).items():
+            result.append(
+                Finding(
+                    "live binding",
+                    f"{report['agent']}/{field}",
+                    f"{report['agent']} has no observed {field}",
+                    (f"expected {expected}; observed none, so it is unknown and never retires the agent",),
+                    "assigned launch must be observed",
                     1,
                 )
             )

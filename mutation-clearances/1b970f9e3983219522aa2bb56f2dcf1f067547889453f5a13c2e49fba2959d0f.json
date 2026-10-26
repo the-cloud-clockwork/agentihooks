@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/repository/sqlite.py:scripts.swarm_ledger.repository.sqlite.xǁSQLiteLedgerRepositoryǁtask_rows__mutmut_29:dcc4759bc68d0a745cc91ae4a6cb4a1bc3154e5dd1c2062383dc74725fece078": {
+    "reader": "standards_reader",
+    "reason": "task_rows returns since early when since[0] == row[0], both read from the same GENERATION query in one BEGIN transaction, so the < versus <= guard on the changed paths read is unreachable on equality and every input gives the same result."
+  }
+}

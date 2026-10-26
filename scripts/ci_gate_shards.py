@@ -1,12 +1,7 @@
-import io
 import json
 import os
-import re
 import subprocess
 import time
-import zipfile
-from concurrent.futures import ThreadPoolExecutor
-from pathlib import Path
 
 from scripts.ci_budget import rate_limit
 from scripts.ci_budget.rate_limit import gh_api
@@ -37,15 +32,11 @@ def ready(jobs: list[dict], shards: list[int]) -> bool:
     )
 
 
-def watch(
-    repository: str, run: str, attempt: str, shards: list[int], destination: Path, *, recover: bool = True
-) -> None:
-    downloaded = {}
-    expected = {f"{kind}-3.12-{shard}" for kind in ("durations", "flakes") for shard in shards}
+def watch(repository: str, run: str, attempt: str, shards: list[int], *, recover: bool = True) -> None:
     units = {f"unit (3.12, {shard})" for shard in shards}
+    reruns = {f"unit rerun (3.12, {shard})" for shard in shards}
     deadline = rate_limit.deadline = time.monotonic() + 1200
     while time.monotonic() < deadline:
-        fetch(repository, run, destination, downloaded)
         pages = api(f"repos/{repository}/actions/runs/{run}/attempts/{attempt}/jobs?per_page=100")
         jobs = [job for page in pages for job in page["jobs"]]
         failures = [
@@ -56,53 +47,25 @@ def watch(
         if not recover and failures:
             raise RuntimeError(f"Original shards cannot recover on this event: {failures}")
         if ready(jobs, shards):
-            fetch(repository, run, destination, downloaded)
-            if missing := expected - downloaded.keys():
-                raise RuntimeError(f"Missing shard reports: {sorted(missing)}")
             return
+        if any(job["name"] in units | reruns and job.get("status") == "queued" for job in jobs):
+            deadline = rate_limit.deadline = time.monotonic() + 1200
         time.sleep(POLL_SECONDS)
     raise RuntimeError("Shard verification timed out before every expected shard succeeded")
 
 
-def fetch(repository: str, run: str, destination: Path, downloaded: dict) -> None:
-    pages = api(f"repos/{repository}/actions/runs/{run}/artifacts?per_page=100")
-    available = {
-        artifact["name"]: artifact
-        for page in pages
-        for artifact in page["artifacts"]
-        if re.fullmatch(r"(?:durations|flakes)-3\.12-\d+", artifact["name"]) and not artifact["expired"]
-    }
-    for name in downloaded.keys() - available.keys():
-        del downloaded[name]
-    pending = [artifact for name, artifact in available.items() if downloaded.get(name) != artifact["id"]]
-
-    def download(artifact):
-        payload = api(f"repos/{repository}/actions/artifacts/{artifact['id']}/zip", binary=True)
-        folder = destination / artifact["name"]
-        folder.mkdir(parents=True, exist_ok=True)
-        with zipfile.ZipFile(io.BytesIO(payload)) as archive:
-            for name in ("durations.json", "durations.sha256", "elapsed.json", "flakes.jsonl"):
-                target = folder / name
-                target.unlink(missing_ok=True)
-                if name in archive.namelist():
-                    target.write_bytes(archive.read(name))
-        return artifact["name"], artifact["id"]
-
-    with ThreadPoolExecutor(max_workers=8) as pool:
-        downloaded.update(pool.map(download, pending))
-
-
 def main() -> None:
+    rate_limit.budget("Shard verification", "start")
     try:
         watch(
             os.environ["GITHUB_REPOSITORY"],
             os.environ["GITHUB_RUN_ID"],
             os.environ["GITHUB_RUN_ATTEMPT"],
             json.loads(os.environ["SHARDS"]),
-            Path("shard-reports"),
             recover=os.environ.get("GITHUB_EVENT_NAME") == "merge_group",
         )
     finally:
+        rate_limit.budget("Shard verification", "end")
         rate_limit.report("Shard verification")
 
 

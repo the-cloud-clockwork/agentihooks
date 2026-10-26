@@ -8,6 +8,7 @@ from nats.js.errors import APIError
 
 from .config import BusConfig
 from .nats import DEFAULT_URL, QUEUE_SUBJECT, NatsBus, queue_stream
+from .resource_names import legacy_queue_stream
 
 
 @dataclass
@@ -33,7 +34,8 @@ async def _inventory(bus: NatsBus, swarms: list[str] | None) -> list[ReadyQueue]
             swarm, lane = match.groups()
             if swarms and swarm not in swarms:
                 continue
-            if info.config.name != queue_stream(f"swarm.{swarm}.ready.{lane}"):
+            name = f"swarm.{swarm}.ready.{lane}"
+            if info.config.name not in {queue_stream(name), legacy_queue_stream(name)}:
                 raise ValueError("legacy ready queue ownership differs from its stream name")
             queues.append(
                 ReadyQueue(swarm, lane, info.config.name, info.state.messages, info.state.last_seq, info.state.messages)

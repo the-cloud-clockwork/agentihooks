@@ -98,7 +98,9 @@ def _chain(name: str, overlays: Sequence[str] = ()) -> list[tuple[str, Path]]:
         raise ValueError(f"Profile '{name}' not found")
     always = [name, *declared(name)]
     worn = profile_chain.worn(_resolve_chain(always), list(overlays), _resolve)
-    return _resolve_chain([*always, *worn])
+    dirs = _resolve_chain([*always, *worn])
+    profile_chain.require_capabilities(dirs, profile_chain.hive_capabilities(os.environ))
+    return dirs
 
 
 def _bundle() -> Path | None:

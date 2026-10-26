@@ -1,4 +1,5 @@
 import http.client
+import json
 
 from scripts.swarm_ledger import ledger_server
 from scripts.swarm_ledger.api import routes
@@ -25,8 +26,22 @@ def test_export_sends_the_cached_view_bytes_without_copying_them(live, monkeypat
 
 def test_export_bytes_are_the_utf8_export_body():
     state = {"title": "café", "_meta": {"seeds": [1], "members": ["m"]}}
-    assert routes.export_bytes(state) == routes.export_body(state).encode("utf-8")
+    assert routes.export_bytes(state) == '{"data": {"title": "café", "_meta": {"members": ["m"]}}}'.encode("utf-8")
     assert type(routes.export_bytes(state)) is bytes
+
+
+def test_export_encoding_peak_is_bounded_by_response_size():
+    import tracemalloc
+
+    state = {"title": "🟣", "_meta": {"seeds": [1]}, "notes": ["x" * 4096] * 256}
+    tracemalloc.start()
+    try:
+        data = routes.export_bytes(state)
+        _, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+    assert data == json.dumps({"data": {**state, "_meta": {}}}, ensure_ascii=False).encode("utf-8")
+    assert peak < len(data) * 3
 
 
 def test_export_response_is_never_cached(live):

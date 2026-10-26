@@ -646,3 +646,26 @@ def test_any_other_refused_read_stays_unknown(state, errors):
 def test_a_refused_read_with_unparsable_output_stays_unknown():
     run = lambda *args, **kwargs: SimpleNamespace(returncode=1, stdout="gh: forbidden", stderr="")  # noqa: E731
     assert single_view("https://github.com/o/r/pull/9", run) is None
+
+
+def merged_with_empty_check_entries():
+    raw = resource(state="MERGED")
+    raw["mergedAt"] = "2026-10-21T10:00:00Z"
+    commit = raw["commits"]["nodes"][0]["commit"]
+    commit["statusCheckRollup"] = {
+        "contexts": {"nodes": [None, {"name": "Tests", "conclusion": "SUCCESS"}], "pageInfo": {}}
+    }
+    commit["checkSuites"] = {"nodes": [None], "pageInfo": {}}
+    stdout = json.dumps({"data": {"resource": raw}})
+    return lambda *args, **kwargs: SimpleNamespace(returncode=0, stdout=stdout, stderr="")
+
+
+def test_a_merged_pull_request_with_empty_check_entries_reads_merged():
+    pull = single_view("https://github.com/o/r/pull/9", merged_with_empty_check_entries())
+    assert (pull.state, pull.merged_at, pull.head, pull.red, pull.checks_passed) == (
+        "MERGED",
+        1_792_576_800_000,
+        "h1",
+        False,
+        True,
+    )

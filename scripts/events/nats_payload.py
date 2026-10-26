@@ -1,5 +1,6 @@
 import hashlib
 import json
+import secrets
 import zlib
 from collections.abc import Awaitable, Callable
 
@@ -25,7 +26,15 @@ async def publish(js: JetStreamContext, subject: str, data: bytes, *, stream: st
     return await js.publish(subject, data, stream=stream, headers=headers)
 
 
-async def encode(write: Callable[[str, bytes], Awaitable[None]], value: bytes, limit: int) -> bytes:
+def scope(key: str, base: int) -> str:
+    return f"{_owner(key)}.{base}"
+
+
+def _owner(key: str) -> str:
+    return hashlib.sha256(key.encode()).hexdigest()[:32]
+
+
+async def encode(write: Callable[[str, bytes], Awaitable[None]], value: bytes, limit: int, scope: str) -> bytes:
     if limit < 128:
         raise ValueError("server payload budget is too small for state references")
     if len(value) <= limit and not value.startswith((COMPRESSED, PAGED)):
@@ -33,7 +42,7 @@ async def encode(write: Callable[[str, bytes], Awaitable[None]], value: bytes, l
     value = COMPRESSED + zlib.compress(value)
     if len(value) <= limit:
         return value
-    token = hashlib.sha256(str(limit).encode() + b":" + value).hexdigest()
+    token = f"{scope}.{secrets.token_hex(16)}"
     count = (len(value) + limit - 1) // limit
     for index in range(count):
         key = f"_chunks.{token}.{index}"
@@ -49,3 +58,33 @@ async def decode(read: Callable[[str], Awaitable[bytes]], value: bytes) -> bytes
     if value.startswith(COMPRESSED):
         return zlib.decompress(value[len(COMPRESSED) :])
     return value
+
+
+async def discard(js: JetStreamContext, stream: str, prefix: str, value: bytes) -> None:
+    if value.startswith(PAGED):
+        token, _ = json.loads(value[len(PAGED) :])
+        await js.purge_stream(stream, subject=f"{prefix}_chunks.{token}.>")
+
+
+async def reclaim(
+    js: JetStreamContext,
+    stream: str,
+    prefix: str,
+    key: str,
+    history: Callable[[], Awaitable[list[bytes]]],
+    below: int,
+) -> None:
+    pattern = f"{prefix}_chunks.{_owner(key)}."
+    info = await js.stream_info(stream, subjects_filter=f"{pattern}>")
+    stale: dict[str, list[str]] = {}
+    for name in info.state.subjects or {}:
+        base, nonce, _ = name[len(pattern) :].split(".")
+        if int(base) < below:
+            stale.setdefault(f"{_owner(key)}.{base}.{nonce}", []).append(name)
+    if stale:
+        for value in await history():
+            if value.startswith(PAGED):
+                stale.pop(json.loads(value[len(PAGED) :])[0], None)
+    for names in stale.values():
+        for name in names:
+            await js.purge_stream(stream, subject=name)

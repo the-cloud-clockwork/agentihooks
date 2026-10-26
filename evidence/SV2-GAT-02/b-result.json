@@ -1,0 +1,42 @@
+{
+  "case": "T-SV2-GAT-02-B",
+  "evidence_class": "mocked: an in-process fake brain HTTP surface answering the fixture's scoped, legacy, empty, refused and outage responses stands in for brain-api; hooks run in a temporary home with a fake clock; no network call runs",
+  "input_sha256": {
+    "scoped-feeds.json": "072e77b1454d026189f8322afc471dc4c58e9a831faee6ac558a663bb1931e70"
+  },
+  "observed": {
+    "answer_for_another_project": {
+      "arcs": [],
+      "fleet_warning_in_block": false,
+      "lessons": []
+    },
+    "corrected_after_new_request": {
+      "arcs": [
+        "quiet-cold"
+      ],
+      "fleet_warning_in_block": false,
+      "lessons": [
+        "Quiet lesson."
+      ]
+    },
+    "corrected_before_expiry": {
+      "arcs": [],
+      "fleet_warning_in_block": false,
+      "lessons": []
+    },
+    "empty_project": {
+      "arcs": [],
+      "fleet_warning_in_block": false,
+      "lessons": []
+    },
+    "protected_state_unchanged": true,
+    "refused_after_cached_memory": {
+      "arcs": [],
+      "fleet_warning_in_block": false,
+      "lessons": []
+    },
+    "scoped_feed_fallback_total": {},
+    "vault_requests": 0
+  },
+  "state": "passed"
+}

@@ -260,6 +260,8 @@ jobs:
       TEST_PATHS: ${{ inputs.tests }}
       EXISTING_ONLY: ${{ inputs.existing_only }}
       PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.playwright
+      PYTHONNOUSERSITE: '1'
+      UV_CONSTRAINT: ${{ github.workspace }}/.github/test-constraints.txt
     steps:
       - uses: actions/checkout@v4
         with:
@@ -307,9 +309,24 @@ jobs:
         uses: ./.github/actions/nats-server
 
       - name: Install the browser that page tests drive
-        if: inputs.browser
+        if: inputs.browser && runner.environment != 'self-hosted'
         timeout-minutes: 6
         uses: ./.github/actions/browser-cache
+
+      - name: Verify the baked browser without downloading
+        if: runner.environment == 'self-hosted'
+        timeout-minutes: 1
+        run: bash .github/actions/browser-cache/use-image.sh
+
+      - name: Verify the same Playwright package and browser in an isolated home
+        if: inputs.browser || runner.environment == 'self-hosted'
+        timeout-minutes: 1
+        run: |
+          proof_home=$(mktemp -d "$RUNNER_TEMP/proof-browser.XXXXXX")
+          package=$(python -c 'import playwright; print(playwright.__file__)')
+          isolated_package=$(HOME="$proof_home" python -c 'import playwright; print(playwright.__file__)')
+          [[ "$package" == "$isolated_package" ]] || { echo '::error::Isolated proof HOME imports a different Playwright package.'; exit 1; }
+          HOME="$proof_home" timeout --kill-after=5s 30s bash .github/actions/browser-cache/verify.sh
 
       - name: Run selected tests
         env:
@@ -317,3 +334,12 @@ jobs:
         run: |
           read -r -a paths <<< "$TEST_PATHS"
           workers=$(python -m scripts.ci_cpu_quota) && python -m pytest "${paths[@]}" -v -n "$workers" --dist loadgroup -p tests.flake_ledger --tb=short
+
+      - name: Retain focused browser screenshots
+        if: always() && inputs.browser
+        uses: actions/upload-artifact@v4
+        with:
+          name: focused-browser-screenshots
+          path: test-results/*.png
+          if-no-files-found: ignore
+          retention-days: 7

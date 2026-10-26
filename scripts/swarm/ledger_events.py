@@ -410,8 +410,8 @@ def _view_resource(raw, number, gated=None, run=subprocess.run, required_checks=
         if checks is None or suites is None:
             return None
         raw["commits"] = commits
-        raw["statusCheckRollup"] = checks
-        raw["checkSuites"] = suites
+        raw["statusCheckRollup"] = [check for check in checks if check]
+        raw["checkSuites"] = [suite for suite in suites if suite]
         if required_checks is not None:
             return _required_pull_request(raw, required_checks)
         files = _gate_files(commit.get("file")) if gate_workflows is None else gate_workflows
@@ -810,10 +810,11 @@ def _priorities(mail, doc, raised):
         if item in seen or row.get("by") == SENDER or not _by_agent(mail, row):
             continue
         if not seeding and item not in raised:
-            text = (
-                f"New priority on ledger {mail.slug} for {item}: {row['text']}\n"
-                "Triage it: resolve it if the call is yours, else leave it for the operator."
-            )
+            from scripts.swarm_ledger import ledger_blockers
+
+            rec = ledger_blockers.record(ledger_blockers.find(doc, item))
+            step = ledger_blockers.notice(mail.slug, mail.store.config(mail.slug).autonomy, item, rec)
+            text = f"New priority on ledger {mail.slug} for {item}: {row['text']}\n{step}"
             owner = mail.owner(item)
             mail.inbox.send(SENDER, owner, text, ref=f"{mail.slug}:priority:{item}")
             sent.append(f"told {owner}: priority {item}")

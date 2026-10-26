@@ -19,7 +19,7 @@ def test_legacy_queue_names_share_one_subject_for_publish_and_filter():
         stream=nats.queue_stream("swarm.rig.ready.eng"),
         subject="agentihooks.queue.swarm.rig.ready.eng",
         filter="agentihooks.queue.swarm.rig.ready.eng",
-        durable=nats.queue_stream("swarm.rig.ready.eng").removeprefix("AGENTIHOOKS_QUEUE_"),
+        durable=nats.queue_stream("swarm.rig.ready.eng").removeprefix("AGENTIHOOKS-QUEUE-"),
     )
 
 
