@@ -22,8 +22,8 @@ RESIZE_COMMAND = "a node pool resize command"
 
 def refusal(found):
     return (
-        f"node cap: {', '.join(found)} raises an infrastructure node cap, which only the operator authorizes. Raise "
-        "the ask in Priorities through the master and continue other work."
+        f"node cap: {', '.join(found)} raises an infrastructure node cap, which only the operator authorizes. Send "
+        "the ask to the front door master by inbox and continue other work."
     )
 
 
