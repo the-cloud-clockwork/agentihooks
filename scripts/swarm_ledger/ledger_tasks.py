@@ -557,6 +557,17 @@ def slice_refusal(item: str, plan: dict, doc: dict) -> str:
 def _update_fields(task: dict, fields: dict) -> dict:
     if "contract" in fields:
         fields = {**fields, "contract": {**(task.get("contract") or {}), **fields["contract"]}}
+    if (
+        "branch" in fields
+        and "repository_branches" not in fields
+        and task.get("branch")
+        and task.get("repository_branches")
+    ):
+        branches = {
+            repo: fields["branch"] if branch == task["branch"] else branch
+            for repo, branch in (task.get("repository_branches") or {}).items()
+        }
+        fields = {**fields, "repository_branches": {repo: branch for repo, branch in branches.items() if branch}}
     if ledger_kinds.kind(task) == "plan" and fields.get("kind", "plan") != "plan" and "lane" not in fields:
         return {**fields, "lane": "eng"}
     return fields

@@ -122,16 +122,29 @@ def refusal_branch(repo: Path, task: dict) -> str:
     return task.get("branch", "") if branch is None else branch
 
 
+def recorded_branch(repo: Path, task: dict) -> str:
+    remote = task.get("branch_repo")
+    if remote and stack.repo_key(remote) != stack.repo_key(git(repo, "remote", "get-url", "origin")):
+        return ""
+    if not remote and len(task.get("repositories", [])) > 1:
+        return ""
+    return task.get("branch", "")
+
+
 def repository_task(repo: Path, task: dict) -> dict:
     branch = mapped_branch(repo, task)
     if branch is None:
-        branch = task.get("branch", "")
-        remote = task.get("branch_repo")
-        if remote and stack.repo_key(remote) != stack.repo_key(git(repo, "remote", "get-url", "origin")):
-            branch = ""
-        elif not remote and len(task.get("repositories", [])) > 1:
-            branch = ""
+        branch = recorded_branch(repo, task)
     return {**task, "branch": require_branch(branch) if branch else ""}
+
+
+def continuation_task(repo: Path, task: dict, scoped: dict, branch: str) -> dict:
+    mapped, recorded = scoped.get("branch"), recorded_branch(repo, task)
+    if branch == mapped or not mapped or not recorded or recorded == mapped:
+        return scoped
+    if git(repo, "ls-remote", "origin", f"refs/heads/{mapped}"):
+        return scoped
+    return {**scoped, "branch": require_branch(recorded)}
 
 
 def publishing_root(repo: str, task: dict, agent: AgentRecord) -> tuple[Path | None, Path, dict]:
@@ -153,6 +166,7 @@ def publishing_root(repo: str, task: dict, agent: AgentRecord) -> tuple[Path | N
         if root is None:
             return existing(primary, scoped, agent), primary, scoped
         branch = require_branch(git(root, "branch", "--show-current"))
+        scoped = continuation_task(primary, task, scoped, branch)
         own = re.fullmatch(rf"{re.escape(naming.plain(agent.name))}(?:-\d+)?", branch)
         if not (own or branch == scoped.get("branch")):
             raise SwarmError(f"current worktree {root} does not belong to this task")

@@ -1521,21 +1521,26 @@ def test_prepare_and_publish_keep_the_open_pull_requests_delivery_branch(publica
     assert git(p.repo, "ls-remote", "origin", "refs/heads/engineer-test") == ""
 
 
+@pytest.mark.parametrize("checkout", ["recorded", "own"])
 def test_a_fresh_continuation_on_the_recorded_branch_publishes_past_an_unpushed_predecessor_entry(
-    publication, monkeypatch
+    publication, monkeypatch, checkout
 ):
     from scripts.swarm import publish
 
     p = publication
-    continuation = p.repo.parent / "worktrees" / "repo" / "recorded"
-    git(p.repo, "worktree", "add", "-b", "recorded", str(continuation), "dev")
-    git(continuation, "push", "-u", "origin", "recorded")
-    (continuation / "scripts" / "ci_prepush" / "__main__.py").write_text(
-        (p.root / "scripts" / "ci_prepush" / "__main__.py").read_text()
-    )
-    git(continuation, "add", "scripts/ci_prepush/__main__.py")
-    git(continuation, "commit", "-qm", "Install gate fixture")
-    (continuation / "chosen.txt").write_text("after")
+    continuation = p.root
+    if checkout == "recorded":
+        continuation = p.repo.parent / "worktrees" / "repo" / "recorded"
+        git(p.repo, "worktree", "add", "-b", "recorded", str(continuation), "dev")
+        git(continuation, "push", "-u", "origin", "recorded")
+        (continuation / "scripts" / "ci_prepush" / "__main__.py").write_text(
+            (p.root / "scripts" / "ci_prepush" / "__main__.py").read_text()
+        )
+        git(continuation, "add", "scripts/ci_prepush/__main__.py")
+        git(continuation, "commit", "-qm", "Install gate fixture")
+        (continuation / "chosen.txt").write_text("after")
+    else:
+        git(continuation, "push", "origin", "HEAD:recorded")
     p.task.update(
         branch="recorded",
         repository_branches={str(p.repo): "predecessor"},
