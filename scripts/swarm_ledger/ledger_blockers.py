@@ -226,7 +226,7 @@ class Gate:
         if by is None or by in SERVICE or not ports.swarm().front_door.asks_operator(op):
             return ""
         tier = autonomy(self.slug)
-        if tier not in GATED:
+        if tier in GATED:
             return ""
         item = asked_item(op)
         rec = record(find(doc, item)) if item else record(None)
