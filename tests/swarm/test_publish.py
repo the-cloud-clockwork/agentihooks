@@ -478,13 +478,15 @@ def test_prepare_stacks_on_the_recorded_branch_and_publish_pushes_its_current_br
     ],
 )
 @pytest.mark.parametrize("hint", ["handoff_envelope", "reclaim"])
+@pytest.mark.parametrize("continued", ["predecessor", "kept"])
 def test_prepare_selects_fresh_dev_after_the_recorded_pull_request_merged(
-    repository, tmp_path, monkeypatch, state, deleted, head, hint
+    repository, tmp_path, monkeypatch, state, deleted, head, hint, continued
 ):
     from scripts.swarm import publish, stack
     from scripts.swarm_ledger import ledger_tasks
 
     git(repository, "push", "origin", "HEAD:predecessor")
+    git(repository, "push", "origin", "HEAD:kept")
     old_head = git(repository, "rev-parse", "HEAD")
     fresh = git(repository, "commit-tree", "HEAD^{tree}", "-p", "HEAD", "-m", "New dev")
     git(repository, "push", "origin", f"{fresh}:refs/heads/dev")
@@ -510,7 +512,7 @@ def test_prepare_selects_fresh_dev_after_the_recorded_pull_request_merged(
         "branch": "predecessor",
         "pr_url": pr_url,
         "repository_branches": {str(repository): "predecessor"},
-        hint: {"continue_from": "origin/predecessor", "source": "origin/predecessor"},
+        hint: {"continue_from": f"origin/{continued}", "source": "origin/predecessor"},
     }
     native = publish.execute
     native_git = publish.git
@@ -541,15 +543,16 @@ def test_prepare_selects_fresh_dev_after_the_recorded_pull_request_merged(
     result = publish.prepare("swarm", agent, str(repository), ledger)
 
     retired = state == "MERGED" and head == "predecessor"
-    registered = "predecessor" if state == "OPEN" else "engineer-test"
+    registered = "predecessor" if state == "OPEN" and continued == "predecessor" else "engineer-test"
+    upstream = "origin/dev" if retired else "origin/predecessor"
     assert git(worktree, "rev-parse", "HEAD") == (fresh if retired else old_head)
     assert git(worktree, "rev-parse", "--abbrev-ref", "@{upstream}") == (
-        "origin/dev" if retired else "origin/predecessor"
+        "origin/kept" if continued == "kept" else upstream
     )
     assert result["branch"] == task["branch"] == registered
     assert task["repository_branches"] == {str(repository): registered}
     assert task["pr_url"] == ("" if retired else pr_url)
-    assert task[hint] == {"continue_from": "origin/predecessor", "source": "origin/predecessor"}
+    assert task[hint] == {"continue_from": f"origin/{continued}", "source": "origin/predecessor"}
     assert publish.prepare("swarm", agent, str(repository), ledger) == result
 
 
