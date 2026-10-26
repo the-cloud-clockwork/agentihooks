@@ -1,0 +1,6 @@
+{
+  "hooks/context/operator_words.py:hooks.context.operator_words.x__publish_pending__mutmut_4:b420becaf126af3f51ee3e3636b03fac4f18d4ac73648db3cbb01d3feb750d62": {
+    "reader": "standards-reader",
+    "reason": "SQLite keywords and unquoted identifiers are case insensitive; the mutated SQL retains identical query and write behavior."
+  }
+}

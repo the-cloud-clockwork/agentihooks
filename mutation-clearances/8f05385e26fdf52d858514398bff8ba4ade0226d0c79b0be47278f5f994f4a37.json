@@ -1,0 +1,6 @@
+{
+  "hooks/context/operator_words.py:hooks.context.operator_words.x__shared_forget__mutmut_24:3945d2721cd69a63985d868c1caac1e3bb407ed7ad74c78f0ed0a49d33ccb1ff": {
+    "reader": "standards-reader",
+    "reason": "The shared rows include every legacy duplicate. Removing one occurrence per iteration removes all occurrences; the removal count is unused."
+  }
+}
