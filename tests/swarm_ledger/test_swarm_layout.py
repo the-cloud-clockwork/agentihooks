@@ -51,6 +51,7 @@ def status(**changes):
             "max_ci": 1,
             "max_plan": 1,
             "masters_step": 12,
+            "focus_weight": 50,
             "autonomy": "delegate",
             "effort_min": "medium",
             "effort_max": "high",
@@ -305,6 +306,29 @@ def test_capacity_fields_take_typed_values_and_apply_sends_one_set(open_page):
     assert apply.is_disabled()
 
 
+def test_focus_weight_reads_persisted_value_and_apply_sends_the_change(open_page):
+    payload = status()
+    payload["config"]["focus_weight"] = 30
+    page = open_page(payload)
+    field = page.tab.get_by_role("textbox", name="Focus weight", exact=True)
+    assert field.input_value() == "30"
+    page.tab.set_viewport_size({"width": 1920, "height": 1080})
+    screenshot = Path("test-results/focus-panel-1920.png")
+    screenshot.parent.mkdir(exist_ok=True)
+    page.tab.screenshot(path=str(screenshot))
+    field.fill("50")
+    page.tab.get_by_role("button", name="Apply capacity", exact=True).click()
+    assert page.puts == [{"action": "set", "focus_weight": 50}]
+
+
+def test_an_older_swarm_without_focus_weight_keeps_its_supported_controls(open_page):
+    payload = status()
+    payload["config"].pop("focus_weight")
+    page = open_page(payload)
+    assert page.tab.get_by_role("textbox", name="Focus weight", exact=True).count() == 0
+    assert page.tab.get_by_role("textbox", name="Engineer cap", exact=True).input_value() == "3"
+
+
 def test_the_masters_step_stepper_drafts_and_apply_sends_it(open_page):
     page = open_page()
     field = page.tab.locator("#cap-masters")
@@ -406,8 +430,8 @@ def test_capacity_caps_and_apply_share_one_row_and_gates_start_below(open_page):
           };
         }"""
     )
-    assert len(boxes["row"]) == 11
-    caps, (affinity, apply) = boxes["row"][:7], boxes["row"][9:]
+    assert len(boxes["row"]) == 12
+    caps, (affinity, apply) = boxes["row"][:7], boxes["row"][10:]
     middle = (caps[0][0] + caps[0][1]) / 2
     assert all(top <= middle <= bottom for top, bottom in caps)
     last = (affinity[0] + affinity[1]) / 2
@@ -861,6 +885,7 @@ def test_every_capacity_stepper_puts_minus_before_and_plus_after_its_value(open_
         ["compact limit", ["−", "600k", "+"]],
         ["effort min", ["−", "medium", "+"]],
         ["effort max", ["−", "high", "+"]],
+        ["focus weight", ["−", "50%", "+"]],
     ]
 
 

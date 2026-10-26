@@ -264,6 +264,35 @@ def test_focus_on_an_ancestor_or_a_selector_lifts_its_task_above_ledger_order(ta
     assert dispatcher.ordered(found, "", dispatcher.leverage(found)) == [focused["id"], other["id"], "w"]
 
 
+def test_focus_order_leads_with_focused_tasks_when_no_cap_applies():
+    tasks = [task("a", phase="", kind="hot"), task("b", phase="")]
+    found = doc(tasks, phases=[], freezes=[{"verb": "focus", "target": "kind:hot"}])
+    order = dispatcher._focus_order(found)
+    assert order["a"] < order["b"]
+
+
+def test_focus_weight_caps_focused_claims_at_a_share_of_the_lane_cap():
+    holding = [task(f"r{i}", phase="", state="claimed", kind="hot") for i in range(5)]
+    holding += [task(f"n{i}", phase="", state="claimed", kind="code") for i in range(5)]
+    waiting_focused = task("open-hot", phase="", kind="hot")
+    waiting_plain = task("open-plain", phase="", kind="code")
+    tasks = [*holding, waiting_focused, waiting_plain]
+    found = doc(tasks, phases=[], freezes=[{"verb": "focus", "target": "kind:hot"}])
+    order = dispatcher._focus_order(found, {"eng": 10}, 50)
+    assert order["open-hot"] == order["open-plain"]
+
+
+def test_focus_weight_below_the_cap_still_leads_with_the_focused_task():
+    holding = [task(f"r{i}", phase="", state="claimed", kind="hot") for i in range(4)]
+    holding += [task(f"n{i}", phase="", state="claimed", kind="code") for i in range(6)]
+    waiting_focused = task("open-hot", phase="", kind="hot")
+    waiting_plain = task("open-plain", phase="", kind="code")
+    tasks = [*holding, waiting_focused, waiting_plain]
+    found = doc(tasks, phases=[], freezes=[{"verb": "focus", "target": "kind:hot"}])
+    order = dispatcher._focus_order(found, {"eng": 10}, 50)
+    assert order["open-hot"] < order["open-plain"]
+
+
 def test_below_delegate_a_high_leverage_task_yields_one_master_proposal_and_no_rank(store, home, shipped):
     store.update(SLUG, autonomy="assist")
     ledger, found = Ledger(), doc(ladder())
@@ -732,7 +761,7 @@ def test_the_critical_chain_counts_only_work_no_focus_holds_unless_the_fix_phase
     from scripts.doctor import loop
 
     assert dispatcher.guarded(held_fix_chain(), "") == set()
-    assert dispatcher.guarded(held_fix_chain(FOCUS), "") == {"b"}
+    assert dispatcher.guarded(held_fix_chain(FOCUS), "") == set()
     assert dispatcher.guarded(held_fix_chain(FOCUS), loop.FIX_PHASE) == set()
     tasks = [
         task("a", state="done"),
@@ -745,7 +774,7 @@ def test_the_critical_chain_counts_only_work_no_focus_holds_unless_the_fix_phase
         task("w", depends_on=["c"]),
     ]
     phases = [{"id": "p1", "depends_on": []}, {"id": "p2", "depends_on": []}]
-    assert dispatcher.guarded(doc(tasks, phases=phases, freezes=FOCUS), "") == {"c", "t"}
+    assert dispatcher.guarded(doc(tasks, phases=phases, freezes=FOCUS), "") == {"t"}
 
 
 def test_the_doctor_fix_phase_reaches_the_guard_in_the_claim_key_and_the_chain_report(store, home, shipped):
@@ -754,8 +783,8 @@ def test_the_doctor_fix_phase_reaches_the_guard_in_the_claim_key_and_the_chain_r
     found, ledger = held_fix_chain(FOCUS), Ledger()
     claimed = found["tasks"][1]
     config = store.update(SLUG, autonomy="delegate")
-    assert dispatcher.claim_key(config, found)(claimed)[0] == dispatcher.GUARD
-    assert dispatcher.chain_claimed(SLUG, config, ledger, found, claimed, "eng", NOW) != []
+    assert dispatcher.claim_key(config, found)(claimed)[0] != dispatcher.GUARD
+    assert dispatcher.chain_claimed(SLUG, config, ledger, found, claimed, "eng", NOW) == []
     config = store.update(SLUG, template=priming.TEMPLATE)
     assert dispatcher.claim_key(config, found)(claimed)[0] != dispatcher.GUARD
     assert dispatcher.chain_claimed(SLUG, config, ledger, found, claimed, "eng", NOW) == []
@@ -768,7 +797,7 @@ def test_the_doctor_fix_phase_reaches_the_dispatcher_queue_its_position_and_its_
     found = held_fix_chain(FOCUS)
     found["tasks"] += [task("v", phase=fix, depends_on=["s"]), task("w", depends_on=["b"])]
     claimed = found["tasks"][1]
-    assert dispatcher.queue(found, "")[0] == "b"
+    assert dispatcher.queue(found, "")[0] == "p"
     assert dispatcher.queue(found, fix)[0] == "p"
     config = store.update(SLUG, autonomy="delegate", template=priming.TEMPLATE, max_eng=1)
     key = dispatcher.claim_key(config, found)
