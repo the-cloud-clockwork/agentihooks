@@ -103,7 +103,7 @@ def evaluate(path: str, rows: list[dict], changed: set[int], cleared: dict) -> d
     }
     for row in rows:
         status = row["status"]
-        if status in {"killed", "survived"}:
+        if status == "killed":
             continue
         if status not in {"survived", "no tests"}:
             report["failures"].append(row)
