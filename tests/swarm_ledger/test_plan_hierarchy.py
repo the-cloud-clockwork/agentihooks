@@ -447,6 +447,8 @@ def test_plan_ops_target_their_collections_and_artifacts_keep_a_boolean_plan():
     assert schemas.operation_schema("artifact_add")["properties"]["plan"] == {"type": "boolean"}
     assert schemas.operation_schema("plan_add")["properties"]["plan"]["type"] == "string"
     assert schemas.operation_schema("plan_add")["properties"]["source"] == {"type": "object"}
+    bad_source = {"op": "plan_add", "id": "x", "source": "nope"}
+    assert schemas.mismatched_field(schemas.operation_schema("plan_add"), bad_source) == "source"
 
 
 PLANNED = {
