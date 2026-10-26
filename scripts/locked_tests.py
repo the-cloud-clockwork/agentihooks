@@ -29,15 +29,19 @@ def _named(node: ast.AST) -> str | None:
     return None
 
 
+def _body(function: ast.FunctionDef | ast.AsyncFunctionDef) -> list[ast.AST]:
+    return [node for statement in function.body for node in ast.walk(statement)]
+
+
 def _disables(expression: ast.AST, constants: dict[str, ast.AST]) -> bool:
     nodes = list(ast.walk(expression))
     nodes += [inner for node in nodes if _named(node) in constants for inner in ast.walk(constants[_named(node)])]
     return any(_named(node) in DISABLING_MARKS for node in nodes)
 
 
-def _assertions(function: ast.AST, helpers: frozenset[str] = frozenset()) -> int:
+def _assertions(function: ast.FunctionDef | ast.AsyncFunctionDef, helpers: frozenset[str] = frozenset()) -> int:
     count = 0
-    for node in ast.walk(function):
+    for node in _body(function):
         if isinstance(node, ast.Assert):
             count += 1
         elif isinstance(node, ast.Call) and (name := _named(node.func)):
@@ -45,12 +49,12 @@ def _assertions(function: ast.AST, helpers: frozenset[str] = frozenset()) -> int
     return count
 
 
-def _skips_itself(function: ast.AST) -> bool:
+def _skips_itself(function: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
     return any(
         isinstance(node, ast.Call)
         and _named(node.func) in DISABLING_CALLS
         and (isinstance(node.func, ast.Name) or _named(node.func.value) == "pytest")
-        for node in ast.walk(function)
+        for node in _body(function)
     )
 
 
@@ -125,7 +129,7 @@ def measure(tree: Path) -> dict[str, dict]:
                 continue
             measured[key] = {
                 "assertions": assertions,
-                "calls": sum(isinstance(node, ast.Call) for node in ast.walk(function)),
+                "calls": sum(isinstance(node, ast.Call) for node in _body(function)),
                 "cases": _cases(decorators, constants) if test else 1,
                 "disabled": test
                 and (any(_disables(mark, constants) for mark in decorators) or _skips_itself(function)),
@@ -164,11 +168,10 @@ def grade(base: dict, recorded: dict, head: dict) -> list[str]:
         found = head.get(key)
         if found is None:
             errors.append(f"The locked test {key} is deleted or renamed.")
-            continue
-        if found["disabled"]:
+        elif found["disabled"]:
             errors.append(f"The locked test {key} is skipped or xfailed.")
         for field in FIELDS:
-            if found[field] < floor[field]:
+            if found is not None and found[field] < floor[field]:
                 errors.append(f"The locked test {key} has {found[field]} {field}, the base locks {floor[field]}.")
             if recorded.get(key, {}).get(field, -1) < floor[field]:
                 errors.append(f"The head {MANIFEST} drops or lowers the locked {field} of {key}.")

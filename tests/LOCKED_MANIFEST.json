@@ -161,17 +161,17 @@
  },
  "tests/context/test_branch_guard.py::TestOnlyTheCommandsOwnOperands::test_branch_create_with_protected_word_in_a_comment_allowed": {
   "assertions": 0,
-  "calls": 3,
+  "calls": 2,
   "cases": 2
  },
  "tests/context/test_branch_guard.py::TestOnlyTheCommandsOwnOperands::test_operand_of_the_git_command_blocked": {
   "assertions": 1,
-  "calls": 3,
+  "calls": 2,
   "cases": 9
  },
  "tests/context/test_branch_guard.py::TestOnlyTheCommandsOwnOperands::test_protected_word_in_other_text_allowed": {
   "assertions": 0,
-  "calls": 2,
+  "calls": 1,
   "cases": 10
  },
  "tests/context/test_branch_guard.py::TestPRBaseGuard::_assert_blocked_with_signal": {
@@ -201,12 +201,12 @@
  },
  "tests/context/test_branch_guard.py::TestPRBaseGuard::test_pr_no_signal_blocked": {
   "assertions": 1,
-  "calls": 5,
+  "calls": 4,
   "cases": 4
  },
  "tests/context/test_branch_guard.py::TestPRBaseGuard::test_protected_pr_base_blocked_with_signal": {
   "assertions": 1,
-  "calls": 2,
+  "calls": 1,
   "cases": 3
  },
  "tests/context/test_branch_guard.py::TestPrSignalResetsCounter::test_set_pr_signal_clears_counter": {
@@ -221,7 +221,7 @@
  },
  "tests/context/test_branch_guard.py::TestResolveCwd::test_a_cd_prefix_names_the_directory": {
   "assertions": 1,
-  "calls": 4,
+  "calls": 3,
   "cases": 3
  },
  "tests/context/test_branch_guard.py::TestResolveCwd::test_a_missing_payload_folder_falls_back_to_the_process_folder": {
@@ -246,12 +246,12 @@
  },
  "tests/context/test_prod_lockdown.py::test_executed_substitution_is_still_an_operation": {
   "assertions": 1,
-  "calls": 3,
+  "calls": 2,
   "cases": 5
  },
  "tests/context/test_prod_lockdown.py::test_inert_message_text_passes": {
   "assertions": 0,
-  "calls": 2,
+  "calls": 1,
   "cases": 7
  },
  "tests/context/test_prod_lockdown.py::test_inline_message_cannot_hide_the_following_real_target": {
@@ -266,12 +266,12 @@
  },
  "tests/context/test_prod_lockdown.py::test_message_filter_and_parser_fallback_preserve_real_operations": {
   "assertions": 1,
-  "calls": 3,
+  "calls": 2,
   "cases": 8
  },
  "tests/context/test_prod_lockdown.py::test_operands_of_separate_commands_do_not_join": {
   "assertions": 0,
-  "calls": 4,
+  "calls": 2,
   "cases": 10
  },
  "tests/context/test_prod_lockdown.py::test_parameter_default_hash_does_not_comment_out_a_substitution": {
@@ -281,12 +281,12 @@
  },
  "tests/context/test_prod_lockdown.py::test_parameter_expansion_keeps_executed_commands": {
   "assertions": 1,
-  "calls": 3,
+  "calls": 2,
   "cases": 2
  },
  "tests/context/test_prod_lockdown.py::test_quoted_message_is_not_an_operation": {
   "assertions": 0,
-  "calls": 2,
+  "calls": 1,
   "cases": 6
  },
  "tests/context/test_prod_lockdown.py::test_raw_enqueue_mutation_outside_a_swarm_is_unchanged": {
@@ -296,17 +296,17 @@
  },
  "tests/context/test_prod_lockdown.py::test_real_production_operand_is_blocked": {
   "assertions": 1,
-  "calls": 3,
+  "calls": 2,
   "cases": 4
  },
  "tests/context/test_prod_lockdown.py::test_real_protected_operation_in_same_call_is_blocked": {
   "assertions": 1,
-  "calls": 4,
+  "calls": 2,
   "cases": 15
  },
  "tests/context/test_prod_lockdown.py::test_release_signal_cannot_skip_a_blocked_rule_in_any_order": {
   "assertions": 1,
-  "calls": 6,
+  "calls": 5,
   "cases": 1
  },
  "tests/context/test_prod_lockdown.py::test_shell_script_message_is_not_executed": {
@@ -316,27 +316,27 @@
  },
  "tests/context/test_prod_lockdown.py::test_signal_authorizes_its_own_operation": {
   "assertions": 0,
-  "calls": 3,
+  "calls": 2,
   "cases": 3
  },
  "tests/context/test_prod_lockdown.py::test_signal_does_not_authorize_another_command_in_the_chain": {
   "assertions": 2,
-  "calls": 9,
+  "calls": 6,
   "cases": 80
  },
  "tests/context/test_prod_lockdown.py::test_single_word_merge_message_is_not_a_branch": {
   "assertions": 0,
-  "calls": 2,
+  "calls": 1,
   "cases": 5
  },
  "tests/context/test_prod_lockdown.py::test_swarm_session_cannot_run_the_raw_enqueue_mutation": {
   "assertions": 2,
-  "calls": 7,
+  "calls": 4,
   "cases": 13
  },
  "tests/context/test_prod_lockdown.py::test_swarm_session_keeps_the_swarm_queue_command": {
   "assertions": 0,
-  "calls": 3,
+  "calls": 2,
   "cases": 15
  },
  "tests/test_credential_guard.py::TestEnvironmentNames::test_block_message_gives_the_safe_form": {
@@ -416,27 +416,27 @@
  },
  "tests/test_credential_guard.py::TestProcEnvironReads::test_neighbouring_commands_still_pass": {
   "assertions": 1,
-  "calls": 3,
+  "calls": 2,
   "cases": 9
  },
  "tests/test_credential_guard.py::TestProcEnvironReads::test_read_from_a_proc_working_directory_is_refused": {
   "assertions": 2,
-  "calls": 3,
+  "calls": 2,
   "cases": 4
  },
  "tests/test_credential_guard.py::TestProcEnvironReads::test_read_is_refused_with_the_leak_free_alternative": {
   "assertions": 4,
-  "calls": 4,
+  "calls": 3,
   "cases": 37
  },
  "tests/test_credential_guard.py::TestProcEnvironReads::test_read_tool_on_an_environ_file_elsewhere_passes": {
   "assertions": 1,
-  "calls": 2,
+  "calls": 1,
   "cases": 3
  },
  "tests/test_credential_guard.py::TestProcEnvironReads::test_read_tool_on_proc_environ_is_refused": {
   "assertions": 2,
-  "calls": 2,
+  "calls": 1,
   "cases": 2
  },
  "tests/test_credential_guard.py::TestRecursiveRewrite::test_a_tool_input_naming_the_grant_file_is_near_a_credential": {
@@ -576,7 +576,7 @@
  },
  "tests/test_credential_guard.py::test_guard_decision": {
   "assertions": 1,
-  "calls": 2,
+  "calls": 1,
   "cases": 131
  },
  "tests/test_credential_guard.py::test_guard_never_raises_on_garbage": {
@@ -586,7 +586,7 @@
  },
  "tests/test_kubectl_mutation_guard.py::test_allowed_commands_are_not_blocked": {
   "assertions": 1,
-  "calls": 2,
+  "calls": 1,
   "cases": 62
  },
  "tests/test_kubectl_mutation_guard.py::test_allowlist_without_namespace_logs_an_empty_namespace": {
@@ -611,17 +611,17 @@
  },
  "tests/test_kubectl_mutation_guard.py::test_allowlisted_segment_does_not_hide_a_later_mutation": {
   "assertions": 1,
-  "calls": 3,
+  "calls": 2,
   "cases": 5
  },
  "tests/test_kubectl_mutation_guard.py::test_blocked_commands_are_blocked": {
   "assertions": 3,
-  "calls": 2,
+  "calls": 1,
   "cases": 33
  },
  "tests/test_kubectl_mutation_guard.py::test_boolean_flags_keep_the_target": {
   "assertions": 1,
-  "calls": 2,
+  "calls": 1,
   "cases": 9
  },
  "tests/test_kubectl_mutation_guard.py::test_bypass_lookup_failure_keeps_the_guard": {
@@ -656,7 +656,7 @@
  },
  "tests/test_kubectl_mutation_guard.py::test_cp_dest_target": {
   "assertions": 1,
-  "calls": 2,
+  "calls": 1,
   "cases": 7
  },
  "tests/test_kubectl_mutation_guard.py::test_cp_into_non_allowlisted_pod_still_blocked": {
@@ -671,7 +671,7 @@
  },
  "tests/test_kubectl_mutation_guard.py::test_exec_allowlist_entries": {
   "assertions": 1,
-  "calls": 4,
+  "calls": 3,
   "cases": 4
  },
  "tests/test_kubectl_mutation_guard.py::test_malformed_allowlist_entry_blocks_nothing_extra": {
@@ -686,12 +686,12 @@
  },
  "tests/test_kubectl_mutation_guard.py::test_parse_kubectl_target": {
   "assertions": 1,
-  "calls": 2,
+  "calls": 1,
   "cases": 17
  },
  "tests/test_kubectl_mutation_guard.py::test_target_allowlisted": {
   "assertions": 1,
-  "calls": 3,
+  "calls": 2,
   "cases": 7
  },
  "tests/test_kubectl_mutation_guard.py::test_unknown_value_flag_allowlists_nothing": {
@@ -711,12 +711,12 @@
  },
  "tests/test_secrets.py::TestGenericSecretShape::test_code_is_not_flagged": {
   "assertions": 1,
-  "calls": 3,
+  "calls": 2,
   "cases": 7
  },
  "tests/test_secrets.py::TestGenericSecretShape::test_literal_is_flagged": {
   "assertions": 1,
-  "calls": 2,
+  "calls": 1,
   "cases": 4
  },
  "tests/test_secrets.py::TestGenericSecretShape::test_redact_leaves_code_expressions": {
@@ -881,27 +881,27 @@
  },
  "tests/test_secrets.py::test_a_private_key_with_or_without_an_algorithm_is_redacted_whole": {
   "assertions": 2,
-  "calls": 4,
+  "calls": 3,
   "cases": 7
  },
  "tests/test_secrets.py::test_external_secret_remote_property_references_are_not_credential_values": {
   "assertions": 1,
-  "calls": 2,
+  "calls": 1,
   "cases": 3
  },
  "tests/test_secrets.py::test_memory_mode_detects_short_secret_assignments": {
   "assertions": 2,
-  "calls": 4,
+  "calls": 2,
   "cases": 3
  },
  "tests/test_secrets.py::test_memory_mode_preserves_references_and_safe_text": {
   "assertions": 1,
-  "calls": 2,
+  "calls": 1,
   "cases": 4
  },
  "tests/test_secrets.py::test_scan_redis_connection_credentials": {
   "assertions": 1,
-  "calls": 4,
+  "calls": 1,
   "cases": 8
  },
  "tests/test_secrets.py::test_standard_mode_never_flags_a_keyword_key_holding_an_object": {
@@ -911,7 +911,7 @@
  },
  "tests/test_secrets.py::test_strict_mode_finds_a_keyword_key_holding_an_object": {
   "assertions": 2,
-  "calls": 5,
+  "calls": 3,
   "cases": 30
  },
  "tests/test_secrets.py::test_strict_mode_hides_every_credential_value_of_the_object": {
@@ -921,7 +921,7 @@
  },
  "tests/test_secrets.py::test_strict_mode_leaves_an_object_without_a_credential_literal_under_a_keyword": {
   "assertions": 1,
-  "calls": 3,
+  "calls": 2,
   "cases": 7
  }
 }
