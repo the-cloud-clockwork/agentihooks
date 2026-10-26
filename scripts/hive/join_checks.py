@@ -30,7 +30,7 @@ def failure(probe: Callable[[], object]) -> dict | None:
         return {
             "error": type(exc).__name__,
             "status": int(status[1]) if status else None,
-            "message": redact(str(exc), mode="strict")[:MESSAGE_LIMIT],
+            "message": " ".join(redact(str(exc), mode="strict").split())[:MESSAGE_LIMIT],
         }
     return {"error": "falsy result", "status": None, "message": ""}
 
