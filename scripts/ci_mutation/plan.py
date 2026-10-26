@@ -299,6 +299,27 @@ def _statement(node: ast.stmt) -> str | tuple:
     return ast.dump(node)
 
 
+def _module_key(node: ast.stmt) -> str | tuple:
+    if isinstance(node, ast.ClassDef):
+        heads = [*node.bases, *node.keywords, *node.decorator_list]
+        kept = (
+            item
+            for item in node.body
+            if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+            or isinstance(item, (ast.Assign, ast.AnnAssign))
+            and isinstance(item.value, ast.Dict)
+        )
+        return (node.name, *map(ast.dump, heads), *map(_module_key, kept))
+    return _statement(node)
+
+
+def _module_keys(source: str) -> list:
+    try:
+        return [_module_key(node) for node in ast.parse(source).body]
+    except SyntaxError:
+        return [source]
+
+
 def binds_only_new_names(old: str, new: str) -> bool:
     try:
         before, after = ast.parse(old), ast.parse(new)
@@ -441,7 +462,7 @@ def recorded_lines(
             for line in range(first, body)
         }
         fallback.update(headers[line] for line in affected if line in headers)
-        if not binds_only_new_names(old, new):
+        if not binds_only_new_names(old, new) and _module_keys(old) != _module_keys(new):
             fallback.update(number for unit, number in index.items() if unit.startswith(f"{path}::"))
         extended = extended_tables(old, new)
         tables.update((path, name) for name in extended)
