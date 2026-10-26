@@ -163,22 +163,45 @@ def test_a_free_text_stage_exit_out_of_runs_takes_the_reported_outcome():
     assert state["runs"] == {"scout": 2}
 
 
-def test_a_free_text_workflow_exit_goes_through_the_exit_check():
-    definition = dataclasses.replace(tiny(), exit="the change is done")
+def test_a_free_text_workflow_exit_goes_through_the_exit_check_on_a_pass():
+    definition = dataclasses.replace(simple(), exit="the change is done")
     check = answers(True)
-    state = machine.advance(definition, machine.start(definition), "try", "retry", {"done": True}, check)
+    state = machine.advance(definition, machine.start(definition), "build", "pass", {"done": True}, check)
 
-    assert check.calls == [("the change is done", {"try": {"done": True}})]
+    assert check.calls == [("the change is done", {"build": {"done": True}})]
     assert state["status"] == "passed"
-    assert state["iterations"] == 0
+    assert state["stage"] is None
 
 
-def test_a_free_text_workflow_exit_that_says_no_keeps_running():
-    definition = dataclasses.replace(tiny(), exit="the change is done")
-    state = machine.advance(definition, machine.start(definition), "try", "retry", {}, answers(False))
+def test_a_free_text_workflow_exit_is_not_asked_on_a_retry():
+    definition = dataclasses.replace(simple(), exit="the change is done")
+    state = run(definition, machine.start(definition), ["pass"], answers(False))
+    state = machine.advance(definition, state, "build-verdict", "retry", {}, never)
 
     assert state["status"] == "running"
-    assert state["stage"] == "try"
+    assert state["stage"] == "build"
+    assert state["iterations"] == 1
+
+
+def test_an_exit_edge_passes_the_workflow_when_its_exit_says_no():
+    definition = dataclasses.replace(simple(), exit="the change is done")
+    check = answers(False, False)
+    state = run(definition, machine.start(definition), ["pass", "pass"], check)
+
+    assert len(check.calls) == 2
+    assert state["status"] == "passed"
+    assert state["stage"] is None
+
+
+def test_the_state_keeps_its_own_copy_of_the_outputs():
+    definition = simple()
+    state = machine.advance(definition, machine.start(definition), "build", "pass", {"diff": 1}, never)
+    notes = {"notes": ["misses the case"]}
+    state = machine.advance(definition, state, "build-verdict", "retry", notes, never)
+    notes["notes"].append("changed after")
+
+    assert state["outputs"]["build-verdict"] == {"notes": ["misses the case"]}
+    assert state["notes"]["outputs"] == {"notes": ["misses the case"]}
 
 
 def test_advance_never_changes_the_state_it_was_given():
