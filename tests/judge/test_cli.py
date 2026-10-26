@@ -284,14 +284,16 @@ def test_the_help_names_the_command_its_purpose_and_the_record_default(capsys, m
         cli.parse(["--help"])
     text = capsys.readouterr().out
     assert text.startswith("usage: agentihooks judge ")
-    assert "Judge a case against an evidence set" in text
-    assert "verdict record path, default <case>.verdict.json" in text
+    lines = [line.strip() for line in text.splitlines()]
+    assert "Judge a case against an evidence set" in lines
+    assert any(line.endswith(" verdict record path, default <case>.verdict.json") for line in lines)
 
 
 @pytest.mark.parametrize(
     "argv",
     [
         ["--case", "c.json"],
+        ["--evidence", "e.json"],
         ["--case", "c.json", "--evidence", "e.json", "--tier", "medium"],
         ["--case", "c.json", "--evidence", "e.json", "--harness", "gemini"],
     ],
@@ -325,6 +327,16 @@ def test_the_sent_back_findings_print_as_indented_json(files, fake_runner, filte
     assert cli.main(["--case", str(case_path), "--evidence", str(evidence_path)]) == 3
     expected = json.dumps({"sent_back": True, "findings": ["one", "two"]}, indent=2) + "\n"
     assert capsys.readouterr().out == expected
+
+
+def test_the_verdict_prints_as_indented_json(files, fake_runner, filters, capsys):
+    case_path, evidence_path = files()
+    reply = {"verdict": "enhance", "notes": [{"point": "p", "missing": "m"}]}
+    fake_runner(reply=reply)
+    filters(ALLOW)
+
+    assert cli.main(["--case", str(case_path), "--evidence", str(evidence_path)]) == 0
+    assert capsys.readouterr().out == json.dumps(reply, indent=2) + "\n"
 
 
 def test_the_digest_hashes_compact_sorted_json():
