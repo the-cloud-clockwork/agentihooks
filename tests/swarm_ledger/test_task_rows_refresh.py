@@ -148,6 +148,26 @@ def test_task_rows_reuses_the_untouched_tasks_after_a_task_is_added(tmp_path):
     assert [row is old for row, old in zip(rows, since[2])] == [True, True, True]
 
 
+def test_task_rows_reuses_all_rows_after_an_unrelated_write(tmp_path):
+    from scripts.swarm_ledger.repository.sqlite import BEGIN_IMMEDIATE, SQLiteLedgerRepository
+
+    tasks = [{"id": "t0", "notes": {"a": 1}}]
+    path = stored(tmp_path, tasks)
+    reader = SQLiteLedgerRepository(path)
+    since = reader.task_rows("rows")
+    writer = SQLiteLedgerRepository(path)
+    entry = writer.current("rows")
+    with writer.connect() as connection, connection:
+        connection.execute(BEGIN_IMMEDIATE)
+        writer._write(connection, "rows", entry, {**entry.mutable(), "title": "Renamed"}, [])
+    rows = reader.task_rows("rows", since)
+    assert rows[0] == since[0] + 1
+    assert rows[1]["rev"] == since[1]["rev"] + 1
+    assert rows[1]["task_revision"] == since[1]["task_revision"]
+    assert rows[2] is since[2]
+    assert rows[2] == tasks
+
+
 def test_rebuilt_replaces_one_changed_item_of_an_array_nested_in_a_task(tmp_path):
     import json
 
