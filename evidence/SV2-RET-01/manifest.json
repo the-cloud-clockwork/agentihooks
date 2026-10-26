@@ -1,0 +1,15 @@
+{
+  "fixture_inputs": {
+    "active_restore": "ckpt-restore of active task t-restore under a registered restore hold",
+    "expired_unreferenced_checkpoint": "ckpt-old of finished task t-done, past the swarm native resume age",
+    "held_task_evidence": "evidence-held, raw swarm evidence past its age under an accepted evidence hold",
+    "personal_retention_policy": "personal-retention-1, keeping raw evidence and vectors and expiring previews"
+  },
+  "input_sha256": {
+    "fixture.json": "91e26e702a7746627619b82db4699c11cc8bf11ac24b2e07389122f114001c40"
+  },
+  "mocked": true,
+  "package": "SV2-RET-01",
+  "run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/40258356422",
+  "tested_commit": "74c607ab433bccb686da8f4f625d4497db4d3865"
+}

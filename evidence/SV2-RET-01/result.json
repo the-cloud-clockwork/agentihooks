@@ -1,0 +1,35 @@
+{
+  "cases": ["A", "B", "C"],
+  "evidence_class": "in memory inventory and holds with a fixed clock and a real fsynced file journal",
+  "fixture_inputs": {
+    "active_restore": "ckpt-restore of active task t-restore under a registered restore hold",
+    "expired_unreferenced_checkpoint": "ckpt-old of finished task t-done, past the swarm native resume age",
+    "held_task_evidence": "evidence-held, raw swarm evidence past its age under an accepted evidence hold",
+    "personal_retention_policy": "personal-retention-1, keeping raw evidence and vectors and expiring previews"
+  },
+  "interfaces": [
+    "hooks.memory.retention.Policies.parse",
+    "hooks.memory.retention.Policy.expired",
+    "scripts.swarm_v2.checkpoints.retention.Collector.plan",
+    "scripts.swarm_v2.checkpoints.retention.Collector.collect",
+    "scripts.swarm_v2.checkpoints.retention.Collector.delete",
+    "scripts.swarm_v2.checkpoints.retention.FileJournal",
+    "scripts.swarm_v2.checkpoints.retention.destructive"
+  ],
+  "metrics": "retention_protected_objects counts kept objects by protection reason in each plan",
+  "mocked": true,
+  "outcomes": {
+    "observed": "case outputs in a, b and c result files from the focused proof run",
+    "accepted": "deletion plans journaled before any removal",
+    "committed": "removals journaled deleted one entry per object",
+    "externally_verified": "none; no live store was collected"
+  },
+  "package": "SV2-RET-01",
+  "remaining_limitations": [
+    "No backend adapter over the artifact store or the session catalog implements the Inventory and Holds protocols yet; collection of live stores is unproven.",
+    "The hold check runs immediately before each removal; a backend without a conditional delete leaves the window between that check and the removal."
+  ],
+  "rollback_rehearsal": "B ran collection with destructive collection off: the plan was journaled, nothing was removed, and a later run resumed from that plan",
+  "status": "fixture_verified",
+  "tested_commit": "74c607ab433bccb686da8f4f625d4497db4d3865"
+}
