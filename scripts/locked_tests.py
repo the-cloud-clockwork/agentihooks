@@ -176,7 +176,7 @@ def write(tree: Path) -> None:
         for key, entry in sorted(measure(tree).items())
         if not entry["disabled"]
     }
-    (tree / MANIFEST).write_text(json.dumps(entries, indent=1, sort_keys=True) + "\n")
+    (tree / MANIFEST).write_text(json.dumps(entries, indent=1) + "\n")
 
 
 def unlocking_configs(tree: Path) -> list[str]:
