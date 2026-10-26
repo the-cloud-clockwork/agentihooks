@@ -28,7 +28,7 @@ WAKE_TEXT = (
     "msg reply or the swarm commands, never as text in this terminal, and close the rest."
 )
 WOKEN, TO_MASTER, TO_OPERATOR = "woken", "escalated_master", "escalated_operator"
-PASSED = "passed_master"
+PASSED, FROZEN = "passed_master", "frozen"
 
 
 def window_ms(environ):
@@ -51,10 +51,10 @@ def typed_wake(inbox, agent):
     )
 
 
-def decide(item, pane, history, now_ms, window, slug, since=0, frozen=False):
-    """pane is the receiver's herdr status, None when it sits outside herdr; the window clock skips the swarm's
-    outage time since the item's last step, and starts no earlier than since. since None holds the item. frozen is a
-    receiving master waiting on an input prompt while another master is live."""
+def decide(item, pane, history, now_ms, window, slug, since=0):
+    """pane is the receiver's herdr status, None when it sits outside herdr, FROZEN for a master waiting on an input
+    prompt while another master is live; the window clock skips the swarm's outage time since the item's last step,
+    and starts no earlier than since. since None holds the item."""
     if item.state != "pending" or item.fyi or since is None:
         return None
     steps = [e.get("event") for e in history]
@@ -62,7 +62,7 @@ def decide(item, pane, history, now_ms, window, slug, since=0, frozen=False):
         return None
     last = max(since, *(e["at"] for e in history))
     due = now_ms - last - outage.paused_ms(slug, last, now_ms) >= window
-    if frozen:
+    if pane == FROZEN:
         return PASSED if due else None
     if TO_MASTER in steps:
         return TO_OPERATOR if due else None
@@ -148,9 +148,8 @@ def _wake_world(inbox, slug, agents, herdr, ledger, clock: _Clock, items):
     boss = next((a for a in agents if a.lane == MASTER), None)
     master = (boss.seat or boss.name) if boss else ""
     marks = SeenMarks(inbox.redis)
-    statuses, prompted, spares = {}, set(), {}
-    actions = []
-    reads = _wake_inputs(inbox, slug, items, names, config, marks)
+    statuses, prompted = {}, set()
+    reads, actions = _pass_frozen(inbox, slug, agents, _wake_inputs(inbox, slug, items, names, config, marks), clock)
     doc = None
     for item in reads.items:
         receiver, held = reads.receivers[item.address]
@@ -167,13 +166,8 @@ def _wake_world(inbox, slug, agents, herdr, ledger, clock: _Clock, items):
         if agent and agent.name not in statuses:
             statuses[agent.name] = _pane_state(inbox.redis, slug, herdr, agent, now_ms, quiet)
         since = reads.clocks[item.address]
-        if receiver not in spares:
-            spares[receiver] = _spare_master(inbox, slug, agents, receiver)
-        frozen = bool(spares[receiver])
-        step = decide(item, statuses.get(receiver), reads.histories[item.id], now_ms, window, slug, since, frozen)
-        if step == PASSED:
-            actions += _pass(inbox, item, receiver, spares[receiver])
-        elif step == WOKEN and _still_held(inbox, held) and _wake(herdr, agent, prompted):
+        step = decide(item, statuses.get(receiver), reads.histories[item.id], now_ms, window, slug, since)
+        if step == WOKEN and _still_held(inbox, held) and _wake(herdr, agent, prompted):
             if inbox.note(item.id, WOKEN, BY, f"prompted {receiver} to read its inbox", now_ms, held):
                 actions.append(f"woke {receiver} for message {item.id}")
         elif step == TO_MASTER and master and receiver != boss.name and not _sent_from(inbox, item, boss, master):
@@ -196,6 +190,22 @@ def _spare_master(inbox, slug, agents, receiver):
     from scripts.inbox.pool import live_masters
 
     return next(iter(live_masters(inbox.redis, slug, agents)), "")
+
+
+def _pass_frozen(inbox, slug, agents, reads, clock):
+    """Items whose receiver is a master waiting on an input prompt move to a live master's seat once their window
+    passes; the rest go on to the wake ladder."""
+    actions, kept, spares = [], [], {}
+    for item in reads.items:
+        receiver = reads.receivers[item.address][0]
+        if receiver not in spares:
+            spares[receiver] = _spare_master(inbox, slug, agents, receiver)
+        history, since = reads.histories[item.id], reads.clocks[item.address]
+        if spares[receiver] and decide(item, FROZEN, history, clock.now_ms, clock.window, slug, since) == PASSED:
+            actions += _pass(inbox, item, receiver, spares[receiver])
+        else:
+            kept.append(item)
+    return replace(reads, items=kept), actions
 
 
 def _pass(inbox, item, receiver, seat):

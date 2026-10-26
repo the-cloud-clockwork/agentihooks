@@ -824,6 +824,6 @@ def test_decide_passes_a_frozen_masters_item_only_once_its_window_is_due():
     from scripts.inbox.store import Item
 
     item = Item("i1", "sw-eng-1", "master@sw", "text", "pending", 0, 0)
-    assert wake.decide(item, None, [{"at": 0}], W - 1, W, "sw", frozen=True) is None
-    assert wake.decide(item, None, [{"at": 0}], W, W, "sw", frozen=True) == wake.PASSED
-    assert wake.decide(item, None, [{"at": 0, "event": wake.TO_OPERATOR}], W, W, "sw", frozen=True) is None
+    assert wake.decide(item, wake.FROZEN, [{"at": 0}], W - 1, W, "sw") is None
+    assert wake.decide(item, wake.FROZEN, [{"at": 0}], W, W, "sw") == wake.PASSED
+    assert wake.decide(item, wake.FROZEN, [{"at": 0, "event": wake.TO_OPERATOR}], W, W, "sw") is None
