@@ -57,15 +57,15 @@ def budget(name: str, when: str) -> None:
         done = subprocess.run(
             ["gh", "api", "--include", "rate_limit"], capture_output=True, check=True, timeout=30, text=True
         )
-        headers = dict(
-            (key.strip().lower(), value.strip())
-            for key, _, value in (line.partition(":") for line in done.stdout.split("\n\n")[0].splitlines())
-        )
+        headers = {
+            key.strip().lower(): value.strip()
+            for key, _, value in (line.partition(":") for line in done.stdout.splitlines())
+        }
         reset = datetime.fromtimestamp(int(headers["x-ratelimit-reset"]), UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
         line = (
             f"{headers['x-ratelimit-remaining']} of {headers['x-ratelimit-limit']} App API calls left, resets {reset}"
         )
-    except (subprocess.SubprocessError, KeyError, ValueError):
+    except (OSError, subprocess.SubprocessError, KeyError, OverflowError, ValueError):
         line = "App API budget unreadable"
     print(f"{name} {when}: {line}", file=sys.stderr)
 

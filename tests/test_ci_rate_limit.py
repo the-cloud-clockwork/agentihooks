@@ -237,6 +237,15 @@ def test_budget_prints_the_remaining_calls_and_reset_from_the_headers(monkeypatc
         ("HTTP/2.0 200 OK\nX-Ratelimit-Limit: 5000\nX-Ratelimit-Remaining: 1\nX-Ratelimit-Reset: soon\n\n{}", None),
         ("", subprocess.CalledProcessError(1, ["gh"], stderr="gh: Bad credentials (HTTP 401)")),
         ("", subprocess.TimeoutExpired(["gh"], 30)),
+        ("", FileNotFoundError("gh")),
+        (
+            "HTTP/2.0 200 OK\nX-Ratelimit-Limit: 5000\nX-Ratelimit-Remaining: 1\nX-Ratelimit-Reset: 1000000000000000000000000000000\n",
+            None,
+        ),
+        (
+            "HTTP/2.0 200 OK\nX-Ratelimit-Limit: 5000\nX-Ratelimit-Remaining: 1\nX-Ratelimit-Reset: 999999999999999\n",
+            None,
+        ),
     ],
 )
 def test_an_unreadable_budget_is_named_without_failing_the_gate(monkeypatch, capsys, stdout, error):
