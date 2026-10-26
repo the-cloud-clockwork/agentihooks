@@ -3,6 +3,7 @@
   "checks": {
     "opened_before_revocation": true,
     "page_shows_unavailable": true,
+    "racing_write_loses": true,
     "replayed_revoke_is_idempotent": true,
     "stale_write_cannot_restore": true,
     "unavailable_with_explanation": true

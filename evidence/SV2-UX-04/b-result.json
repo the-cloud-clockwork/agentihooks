@@ -5,6 +5,7 @@
     "foreign_ref_refused": true,
     "nothing_disclosed": true,
     "personal_link_refused": true,
+    "personal_pack_not_recordable": true,
     "state_unchanged": true
   },
   "evidence_class": "mocked: a fakeredis swarm store holding the fixture's delivered pack and its evidence records, read through the ledger page projection and the evidence expand path a ledger API read calls; no ledger HTTP server, browser, brain or cluster runs",

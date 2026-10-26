@@ -42,11 +42,11 @@
   "pull_request": "",
   "rollback": "Hide context inspection panels while preserving core task controls and evidence ids: AGENTIHOOKS_CONTEXT_INSPECTION=off on the ledger server makes the swarm view carry context null, the page hides the Brain context panel and its grip, and the evidence read answers 404; stored packs, evidence and every other panel stay as they were. Rehearsed by test_inspection_off_hides_the_projection_and_refuses_the_read and test_with_inspection_off_the_panel_and_its_grip_are_hidden.",
   "states": {
-    "accepted": "Pending Standards and Spec review on the pull request",
+    "accepted": "Standards and Spec round one findings fixed on 5a7c87597 and 5719a92ec; round two pending",
     "committed": "Case records, manifest and result committed on the task branch; the change reaches dev only when its pull request merges",
     "externally_verified": "Not on Anton: no rollout of this commit has been observed and no delivery path records packs yet, so no real context card has been shown; the evidence is mocked and labelled so",
-    "observed": "Cases A, B and C passed in focused Proofs run 40416510718 on a2718959c (evidence/SV2-UX-04/a-result.json, b-result.json, c-result.json); the same tests failed before the change in Proofs run 40416506868 on the tests commit 9fef5f1ec; the page was checked by eye at 1920 by 1080, screenshots context-1920.png and context-revoked-1920.png on the ledger task vux4 proof"
+    "observed": "Cases A, B and C passed in focused Proofs run 40418348419 on 5719a92ec, 188 other selected tests passed in the same run with only the then uncommitted case records differing (evidence/SV2-UX-04/a-result.json, b-result.json, c-result.json); the same tests failed before the change in Proofs run 40416506868 on the tests commit 9fef5f1ec; the panel was rendered at 1920 by 1080 through the page test harness and critiqued with the impeccable skill, screenshots context-1920.png and context-revoked-1920.png on the ledger task vux4 proof"
   },
   "status": "fixture-qualified: a task's delivered pack shows its selected brain, purpose, receipt freshness and delivery result per adapter; each item carries its trust class, inferred intent and superseded labels; an item expands to its record range or lesson revision; a copied personal brain link and a reference outside the pack are refused without mutating state or disclosing content; a revoked source shows unavailable with its reason after a restart and a replayed write cannot restore it; no Anton rollout of this commit has been observed",
-  "tested_commit": "a2718959c"
+  "tested_commit": "5719a92ec"
 }
