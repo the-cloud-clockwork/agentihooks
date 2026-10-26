@@ -219,9 +219,7 @@ def rejection(root: Path) -> dict:
         "no_actor": world.approval(actor=""),
         "other_migration": world.approval(migration_id=migrations.PROVENANCE),
     }
-    denied = {
-        name: refused(lambda a=a: world.migrator.drop_mismatched_vectors(a, 1.0)) for name, a in approvals.items()
-    }
+    denied = {name: refused(lambda a=a: world.migrator.dimensions.drop(a, 1.0)) for name, a in approvals.items()}
     restart = world.migrator.startup()
     unchanged = world.protected() == protected
     leaked = [
@@ -229,7 +227,7 @@ def rejection(root: Path) -> dict:
         for text in [*early.values(), *denied.values()]
         if world.domain in text or "c-legacy" in text or world.doc["index"]["generation"] in text
     ]
-    corrected = world.migrator.drop_mismatched_vectors(world.approval(), world.doc["clock"]["requeued"])
+    corrected = world.migrator.dimensions.drop(world.approval(), world.doc["clock"]["requeued"])
     return {
         "case": "B",
         "early_consumer_requests": early,
@@ -240,7 +238,7 @@ def rejection(root: Path) -> dict:
         "operator_request": corrected,
         "vectors_after_operator_request": world.vectors(),
         "requeued_work": world.work(),
-        "blocked_after_operator_request": world.migrator.blocked(),
+        "blocked_after_operator_request": world.migrator.dimensions.blocked(),
     }
 
 

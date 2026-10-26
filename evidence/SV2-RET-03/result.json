@@ -1,0 +1,39 @@
+{
+  "cases": [
+    "A",
+    "B",
+    "C"
+  ],
+  "compatibility": "session_event keeps its ten columns, so previous positional writers and readers work unchanged during the window; consumers read provenance only once the migration is active",
+  "evidence_class": "mocked: a SQLite catalog file stands in for the central session database; previous release writers and readers are reproduced by their positional statements; no embedding provider runs, vectors are fixture rows",
+  "fixture_inputs": {
+    "interrupted_backfill": "a backfill that stops inside its third batch and resumes after a restart",
+    "mismatched_vector_dimension": "two vectors of dimension four under an index generation registered at dimension three",
+    "new_optional_fields": "trust class and project state per event, written by the new writer and backfilled for older rows",
+    "previous_schema": "a catalog file created without the event provenance table, written by the previous positional writer"
+  },
+  "interfaces": [
+    "hooks.memory.catalog.Catalog creates session_event_provenance and Catalog.commit writes provenance in the event transaction",
+    "hooks.memory.migrations.Migrator.add, startup, status, backfill, verify, activate, deactivate and provenance",
+    "hooks.memory.migrations.VectorDimensions.blocked and drop with an operator Approval",
+    "python -m scripts.swarm_v2.migrations status|startup|backfill|verify|activate|deactivate|drop-vectors over a catalog file"
+  ],
+  "metrics": "migration_rows_remaining from Migrator.status after startup, during the window, during an interruption and after the backfill",
+  "mocked": true,
+  "outcomes": {
+    "accepted": "each backfill batch and its cursor commit in one transaction under a compare and set revision",
+    "committed": "provenance rows for every event, verified before activation",
+    "externally_verified": "none; no deployed catalog was migrated",
+    "observed": "case outputs in the a, b and c result files from the focused proof run"
+  },
+  "package": "SV2-RET-03",
+  "remaining_limitations": [
+    "No service calls Migrator.startup or runs the backfill on a schedule yet; an operator runs the command line.",
+    "Dropping session_event_provenance or schema_migration needs a reviewed rollback migration that is not written.",
+    "A model with a different dimension still needs its own index generation registered by the index worker."
+  ],
+  "rollback_rehearsal": "C deactivated the active projection: provenance reads were refused, the table kept all nine rows, previous readers saw ten columns and nine rows, and activation succeeded again without a new backfill",
+  "status": "fixture_verified",
+  "supported_versions": "previous release catalogs without session_event_provenance and their positional event writer and readers; this release's writer",
+  "tested_commit": "39eda185f6c5fcd446d6ad89a7b6bc6065249e8b"
+}

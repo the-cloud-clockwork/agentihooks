@@ -1,0 +1,145 @@
+{
+  "activated": "active",
+  "backfill": {
+    "after_rowid": 12,
+    "migration_rows_remaining": 0,
+    "rows_done": 10,
+    "state": "backfilled"
+  },
+  "before": {
+    "events": {
+      "s-attributed": [
+        [
+          "s-attributed-e1",
+          "proj-alpha"
+        ],
+        [
+          "s-attributed-e2",
+          "proj-alpha"
+        ],
+        [
+          "s-attributed-e3",
+          "proj-alpha"
+        ],
+        [
+          "s-attributed-e4",
+          "proj-alpha"
+        ],
+        [
+          "s-attributed-e5",
+          "proj-alpha"
+        ]
+      ],
+      "s-unattributed": [
+        [
+          "s-unattributed-e1",
+          null
+        ],
+        [
+          "s-unattributed-e2",
+          null
+        ],
+        [
+          "s-unattributed-e3",
+          null
+        ],
+        [
+          "s-unattributed-e4",
+          null
+        ]
+      ]
+    },
+    "previous_reader": {
+      "columns": 10,
+      "rows": 9
+    },
+    "vectors": [
+      [
+        "c-current",
+        3
+      ],
+      [
+        "c-legacy-1",
+        4
+      ],
+      [
+        "c-legacy-2",
+        4
+      ]
+    ]
+  },
+  "case": "A",
+  "independent_repeat_matches": true,
+  "previous_events_unchanged": true,
+  "previous_reader_after": {
+    "columns": 10,
+    "rows": 12
+  },
+  "provenance": {
+    "s-attributed": {
+      "project_state": "attributed",
+      "trust_class": "original"
+    },
+    "s-unattributed": {
+      "project_state": "unknown",
+      "trust_class": "original"
+    }
+  },
+  "startup": {
+    "added": [
+      "0001-event-provenance"
+    ],
+    "blocked": [
+      {
+        "access_domain": "corpus-ret03",
+        "dimension": 3,
+        "index_generation": "idx-v1",
+        "migration_id": "0002-vector-dimension",
+        "mismatched_vectors": 2,
+        "requires": "operator"
+      }
+    ],
+    "status": {
+      "after_rowid": 0,
+      "migration_rows_remaining": 9,
+      "rows_done": 0,
+      "state": "added"
+    }
+  },
+  "unattributed_project_ids": [
+    null
+  ],
+  "vectors_after": [
+    [
+      "c-current",
+      3
+    ],
+    [
+      "c-legacy-1",
+      4
+    ],
+    [
+      "c-legacy-2",
+      4
+    ]
+  ],
+  "verification": {
+    "duplicate_event_sequences": 0,
+    "inconsistent_provenance": 0,
+    "migration_rows_remaining": 0,
+    "orphan_provenance": 0,
+    "passed": true,
+    "rows_before": 9,
+    "rows_lost": 0,
+    "rows_now": 12,
+    "unresolved_sources": 0
+  },
+  "window": {
+    "migration_rows_remaining": 10,
+    "new_writer_event_ids": [
+      "s-attributed-e6",
+      "s-attributed-e7"
+    ],
+    "new_writer_state": "committed"
+  }
+}

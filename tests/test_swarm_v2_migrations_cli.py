@@ -1,11 +1,10 @@
 """Tests for the SV2-RET-03 migration command line."""
 
 import json
-from pathlib import Path
 
 import pytest
 
-from hooks.memory.catalog import Conflict
+from hooks.memory.catalog import Catalog, Conflict
 from scripts.swarm_v2 import migrations as cli
 from tests import sv2_ret03_cases as cases
 
@@ -17,6 +16,13 @@ def path(tmp_path):
     world = cases.World(tmp_path)
     world.catalog.close()
     return str(world.path)
+
+
+def work(path: str) -> list:
+    catalog = Catalog(path)
+    rows = catalog.db.execute("SELECT chunk_id, queued_at FROM embedding_work ORDER BY chunk_id").fetchall()
+    catalog.close()
+    return rows
 
 
 def run(capsys, *argv, clock=None) -> dict:
@@ -48,17 +54,23 @@ def test_drop_vectors_uses_the_clock_and_the_named_approval(capsys, path):
     argv = ("--actor", "op", "--role", "operator", "--domain", "corpus-ret03", "--generation", "idx-v1")
     answer = run(capsys, "drop-vectors", path, *argv, clock=lambda: 7.0)
     assert answer == {"dropped": ["c-legacy-1", "c-legacy-2"], "requeued": 2}
-    world = cases.World.__new__(cases.World)
-    world.path = Path(path)
-    world.open()
-    assert world.work() == [["c-legacy-1", 7.0], ["c-legacy-2", 7.0]]
-    world.catalog.close()
+    assert work(path) == [("c-legacy-1", 7.0), ("c-legacy-2", 7.0)]
 
 
-def test_drop_vectors_with_another_role_is_refused(capsys, path):
-    argv = ("--actor", "op", "--role", "engineer", "--domain", "corpus-ret03", "--generation", "idx-v1")
+def test_drop_vectors_defaults_to_the_wall_clock(capsys, path, monkeypatch):
+    monkeypatch.setattr(cli.time, "time", lambda: 11.0)
+    argv = ("--actor", "op", "--role", "operator", "--domain", "corpus-ret03", "--generation", "idx-v1")
+    run(capsys, "drop-vectors", path, *argv)
+    assert work(path) == [("c-legacy-1", 11.0), ("c-legacy-2", 11.0)]
+
+
+@pytest.mark.parametrize(("role", "domain"), [("engineer", "corpus-ret03"), ("operator", "")])
+def test_drop_vectors_without_a_named_operator_approval_changes_nothing(capsys, path, role, domain):
+    argv = ("--actor", "op", "--role", role, "--domain", domain, "--generation", "idx-v1")
     with pytest.raises(Conflict):
         cli.main(["drop-vectors", path, *argv])
+    assert work(path) == []
+    assert run(capsys, "status", path)["blocked"][0]["mismatched_vectors"] == 2
 
 
 @pytest.mark.parametrize(

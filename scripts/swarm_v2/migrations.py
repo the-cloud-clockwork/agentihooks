@@ -13,7 +13,7 @@ STAGED = ("backfill", "verify", "activate", "deactivate")
 
 def _run(migrator: Migrator, args: argparse.Namespace, now: float) -> dict:
     if args.command == "status":
-        return {**migrator.status(), "blocked": migrator.blocked()}
+        return {**migrator.status(), "blocked": migrator.dimensions.blocked()}
     if args.command == "startup":
         return migrator.startup()
     if args.command == "backfill":
@@ -21,7 +21,7 @@ def _run(migrator: Migrator, args: argparse.Namespace, now: float) -> dict:
     if args.command in STAGED:
         return getattr(migrator, args.command)(args.revision)
     approval = Approval(args.actor, args.role, DIMENSION, args.domain, args.generation)
-    return migrator.drop_mismatched_vectors(approval, now)
+    return migrator.dimensions.drop(approval, now)
 
 
 def main(argv: list[str] | None = None, clock: Callable[[], float] | None = None) -> int:
@@ -39,7 +39,8 @@ def main(argv: list[str] | None = None, clock: Callable[[], float] | None = None
     if (args.command in STAGED) != (args.revision is not None):
         parser.error("--revision is given with backfill, verify, activate and deactivate and only with them")
     given = [value is not None for value in (args.actor, args.role, args.domain, args.generation)]
-    if not all(given) if args.command == "drop-vectors" else any(given):
+    misplaced = not all(given) if args.command == "drop-vectors" else any(given)
+    if misplaced:
         parser.error("--actor, --role, --domain and --generation are given with drop-vectors and only with it")
     catalog = Catalog(args.catalog)
     try:

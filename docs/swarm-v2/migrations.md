@@ -45,12 +45,14 @@ and `rows_lost` against the count recorded at add. Every value must be zero.
 
 ## Vector dimension
 
-A vector stored with a dimension other than its index generation's is a mismatch. `startup()` and `blocked()`
-report each affected index generation as `0002-vector-dimension` with its count and never change a vector.
+A vector stored with a dimension other than its index generation's is a mismatch.
+`hooks.memory.migrations.VectorDimensions`, reached as `Migrator.dimensions`, owns this path. `startup()` and
+`VectorDimensions.blocked()` report each affected index generation as `0002-vector-dimension` with its count and
+never change a vector.
 
-`drop_mismatched_vectors(approval, now)` deletes the mismatched vectors of one access domain and index generation
-and queues their chunks for embedding again. It runs only with an `Approval` whose role is `operator`, that names
-an actor and `0002-vector-dimension`. A refusal changes nothing and names no scope. A model with another dimension
+`VectorDimensions.drop(approval, now)` deletes the mismatched vectors of one access domain and index generation
+and queues their chunks for embedding again. It runs only with an `Approval` whose role is `operator` and that
+names an actor, `0002-vector-dimension`, the access domain and the index generation. A refusal changes nothing and names no scope. A model with another dimension
 otherwise gets its own index generation, which leaves the old vectors in place.
 
 ## Command line

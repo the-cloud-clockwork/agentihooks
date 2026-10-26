@@ -251,18 +251,24 @@ def test_startup_without_index_tables_blocks_nothing(tmp_path):
     migrator = migrations.Migrator(catalog)
     assert migrator.startup()["blocked"] == []
     approval = migrations.Approval("op", "operator", migrations.DIMENSION, "d", "g")
-    assert migrator.drop_mismatched_vectors(approval, 1.0) == {"dropped": [], "requeued": 0}
+    assert migrator.dimensions.drop(approval, 1.0) == {"dropped": [], "requeued": 0}
     catalog.close()
 
 
 @pytest.mark.parametrize(
     "fields",
-    [{"role": "engineer"}, {"actor": ""}, {"migration_id": migrations.PROVENANCE}],
+    [
+        {"role": "engineer"},
+        {"actor": ""},
+        {"migration_id": migrations.PROVENANCE},
+        {"access_domain": ""},
+        {"index_generation": ""},
+    ],
 )
 def test_destructive_vector_change_needs_an_operator_approval(world, fields):
     protected = world.protected()
     with pytest.raises(Conflict, match="operator approval"):
-        world.migrator.drop_mismatched_vectors(world.approval(**fields), 1.0)
+        world.migrator.dimensions.drop(world.approval(**fields), 1.0)
     assert world.protected() == protected
 
 
@@ -272,7 +278,7 @@ def test_operator_approval_drops_only_scoped_mismatches_and_requeues_them(world)
         "INSERT INTO chunk_vector SELECT access_domain, 'idx-v2', chunk_id, session_uid, chunker_version, "
         "content_hash, model, dimension, vector FROM chunk_vector WHERE chunk_id = 'c-current'"
     )
-    answer = world.migrator.drop_mismatched_vectors(world.approval(), 42.0)
+    answer = world.migrator.dimensions.drop(world.approval(), 42.0)
     assert answer == {"dropped": ["c-legacy-1", "c-legacy-2"], "requeued": 2}
     assert world.vectors() == [["c-current", 3], ["c-current", 3]]
     assert world.work() == [["c-legacy-1", 42.0], ["c-legacy-2", 42.0]]
@@ -284,7 +290,7 @@ def test_operator_approval_drops_only_scoped_mismatches_and_requeues_them(world)
         ("idx-v1", "s-attributed", "chunker-v1", "hash-c-legacy-1", 0),
         ("idx-v1", "s-unattributed", "chunker-v1", "hash-c-legacy-2", 0),
     ]
-    blocked = world.migrator.blocked()
+    blocked = world.migrator.dimensions.blocked()
     assert [(item["index_generation"], item["mismatched_vectors"]) for item in blocked] == [("idx-v2", 1)]
 
 

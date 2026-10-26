@@ -4,7 +4,7 @@ import json
 from dataclasses import dataclass
 
 from hooks.memory.catalog import ATTRIBUTED, ORIGINAL, UNKNOWN_PROJECT, Catalog, Conflict
-from hooks.memory.index_worker import QUEUE
+from hooks.memory.index_worker import DROP_VECTOR, QUEUE
 
 PROVENANCE = "0001-event-provenance"
 DIMENSION = "0002-vector-dimension"
@@ -75,7 +75,6 @@ MISMATCHED = (
     f"SELECT v.chunk_id, v.session_uid, v.chunker_version, v.content_hash {MISMATCH_JOIN} "
     "AND v.access_domain = ? AND v.index_generation = ? ORDER BY v.chunk_id"
 )
-DROP_VECTOR = "DELETE FROM chunk_vector WHERE access_domain = ? AND index_generation = ? AND chunk_id = ?"
 STALE_CURSOR = "the migration cursor revision is stale; nothing changed"
 NOT_ADDED = "the migration schema has not been added"
 NOT_BACKFILLED = "only a backfilled migration can be verified"
@@ -96,9 +95,39 @@ class Approval:
     index_generation: str
 
 
+class VectorDimensions:
+    def __init__(self, catalog: Catalog) -> None:
+        self.catalog, self.db = catalog, catalog.db
+
+    def _indexed(self) -> bool:
+        return self.db.execute(INDEX_TABLES).fetchone()[0] == 2
+
+    def blocked(self) -> list[dict]:
+        if not self._indexed():
+            return []
+        keys = ("access_domain", "index_generation", "dimension", "mismatched_vectors")
+        rows = self.db.execute(MISMATCHES).fetchall()
+        return [{"migration_id": DIMENSION, **dict(zip(keys, row)), "requires": OPERATOR} for row in rows]
+
+    def drop(self, approval: Approval, now: float) -> dict:
+        named = all((approval.actor, approval.access_domain, approval.index_generation))
+        if approval.role != OPERATOR or approval.migration_id != DIMENSION or not named:
+            raise Conflict(UNAUTHORIZED)
+        index = (approval.access_domain, approval.index_generation)
+        if not self._indexed():
+            return {"dropped": [], "requeued": 0}
+        with self.catalog._transaction():
+            rows = self.db.execute(MISMATCHED, index).fetchall()
+            for chunk_id, session_uid, chunker_version, content_hash in rows:
+                self.db.execute(DROP_VECTOR, (*index, chunk_id))
+                self.db.execute(QUEUE, (*index, chunk_id, session_uid, chunker_version, content_hash, now))
+        return {"dropped": [row[0] for row in rows], "requeued": len(rows)}
+
+
 class Migrator:
     def __init__(self, catalog: Catalog) -> None:
         self.catalog, self.db = catalog, catalog.db
+        self.dimensions = VectorDimensions(catalog)
         self.db.execute(LEDGER)
 
     def _ledger(self) -> dict | None:
@@ -198,25 +227,6 @@ class Migrator:
         row = self.db.execute(PROVENANCE_ROW, (domain, event_id)).fetchone()
         return {"trust_class": row[0], "project_state": row[1]} if row else None
 
-    def blocked(self) -> list[dict]:
-        if self._count(INDEX_TABLES) != 2:
-            return []
-        keys = ("access_domain", "index_generation", "dimension", "mismatched_vectors")
-        rows = self.db.execute(MISMATCHES).fetchall()
-        return [{"migration_id": DIMENSION, **dict(zip(keys, row)), "requires": OPERATOR} for row in rows]
-
     def startup(self) -> dict:
-        return {"added": [PROVENANCE] if self.add() else [], "status": self.status(), "blocked": self.blocked()}
-
-    def drop_mismatched_vectors(self, approval: Approval, now: float) -> dict:
-        if approval.role != OPERATOR or not approval.actor or approval.migration_id != DIMENSION:
-            raise Conflict(UNAUTHORIZED)
-        index = (approval.access_domain, approval.index_generation)
-        if self._count(INDEX_TABLES) != 2:
-            return {"dropped": [], "requeued": 0}
-        with self.catalog._transaction():
-            rows = self.db.execute(MISMATCHED, index).fetchall()
-            for chunk_id, session_uid, chunker_version, content_hash in rows:
-                self.db.execute(DROP_VECTOR, (*index, chunk_id))
-                self.db.execute(QUEUE, (*index, chunk_id, session_uid, chunker_version, content_hash, now))
-        return {"dropped": [row[0] for row in rows], "requeued": len(rows)}
+        added = [PROVENANCE] if self.add() else []
+        return {"added": added, "status": self.status(), "blocked": self.dimensions.blocked()}
