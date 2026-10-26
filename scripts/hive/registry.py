@@ -239,7 +239,7 @@ def live(record: dict, now_ms: int) -> bool:
 
 def touch(redis: "Redis", hive_id: str, now_ms: int) -> None:
     if redis.hexists(key(hive_id), "heartbeat_at"):
-        redis.hset(key(hive_id), "heartbeat_at", str(now_ms))
+        redis.hset(key(hive_id), "heartbeat_at", now_ms)
 
 
 def home(environ: Mapping[str, str] = os.environ) -> Path:
