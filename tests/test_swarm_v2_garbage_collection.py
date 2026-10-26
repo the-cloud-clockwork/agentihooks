@@ -185,7 +185,8 @@ def test_reserve_refuses_a_name_that_is_not_a_digest(world):
 def test_reserve_replays_and_refuses_a_conflicting_reuse_of_an_upload_id(world):
     target = world.uploads["abandoned"]
     expires = world.clock["expired"]
-    assert world.reserve("upload-abandoned", target, "attempt-abandoned", expires)["upload_id"] == "upload-abandoned"
+    replay = world.reserve("upload-abandoned", target, "attempt-abandoned", expires)
+    assert replay == {"upload_id": "upload-abandoned", "object_digest": target, "expires_at": expires}
     conflict = cases.refused(lambda: world.reserve("upload-abandoned", target, "other", expires))
     assert conflict == "this upload id is already reserved for different bytes or another attempt"
 
@@ -319,7 +320,8 @@ def test_main_runs_inventory_collect_and_retire(world, tmp_path, capsys):
     retired = world.doc["generations"]["retired"]
     retire = ["retire", path, world.domain, "--principal", "operator-fixture", "--generation", retired]
     assert gc.main(retire, clock=lambda: 1300.0) == 0
-    assert json.loads(capsys.readouterr().out) == {"index_generation": retired, "retired_at": 1300.0}
+    actor = {"principal": "operator-fixture", "corpus": world.domain, "projects": []}
+    assert json.loads(capsys.readouterr().out) == {"actor": actor, "index_generation": retired, "retired_at": 1300.0}
     assert gc.main(["collect", *args], clock=lambda: world.clock["collect"]) == 0
     collected = json.loads(capsys.readouterr().out)
     assert inventory["mode"] == "inventory" and collected["mode"] == "collect"
@@ -343,6 +345,109 @@ def test_main_refuses_mismatched_flags(argv):
     with pytest.raises(SystemExit) as raised:
         gc.main(argv)
     assert raised.value.code == 2
+
+
+@pytest.mark.parametrize(
+    ("argv", "message"),
+    [
+        (["retire", "c", "d", "--principal", "p"], "--generation is given with retire and only with it"),
+        (
+            ["inventory", "c", "d", "--principal", "p"],
+            "--objects is given with inventory and collect and only with them",
+        ),
+        (
+            ["collect", "c", "d", "--principal", "p", "--objects", "o"],
+            "collect needs --references naming every checkpoint referenced object, even an empty list",
+        ),
+        (["purge", "c", "d", "--principal", "p"], "argument command: invalid choice: 'purge'"),
+    ],
+)
+def test_main_names_the_refused_flag(argv, message, capsys):
+    with pytest.raises(SystemExit):
+        gc.main(argv)
+    assert capsys.readouterr().err.splitlines()[-1].split("error: ", 1)[1].startswith(message)
+
+
+def test_main_defaults_grace_to_one_day(world, tmp_path, capsys):
+    path, objects = str(world.catalog_path), str(world.store.root)
+    world.catalog.close()
+    references = tmp_path / "references.json"
+    references.write_text("[]")
+    args = ["collect", path, world.domain, "--principal", "p", "--objects", objects, "--references", str(references)]
+    assert gc.main(args, clock=lambda: world.clock["expired"] + 86400.5) == 0
+    collected = json.loads(capsys.readouterr().out)
+    assert world.uploads["abandoned"] in collected["reclaimed"]["uploads"]
+    assert gc.main(args, clock=lambda: world.clock["expired"] + 86399.5) == 0
+    assert world.uploads["live"] in json.loads(capsys.readouterr().out)["protected"]["live"]
+    world.catalog = catalog_module.Catalog(path)
+
+
+def test_a_reservation_expiring_exactly_at_its_grace_is_collected(world):
+    plan = world.plan()
+    plan = gc.Plan(plan.grant, plan.references, plan.grace, world.clock["expired"] + world.doc["grace"])
+    report = gc.collect(world.catalog, world.store, plan)
+    assert world.uploads["abandoned"] in report["reclaimed"]["uploads"]
+
+
+def test_a_digest_named_file_in_a_nested_shard_is_unowned(world):
+    data = b"a digest named file one folder too deep\n"
+    name = hashlib.sha256(data).hexdigest()
+    nested = world.store.root / "zz" / name[:2] / name
+    nested.parent.mkdir(parents=True)
+    nested.write_bytes(data)
+    report = world.collect()
+    assert f"zz/{name[:2]}/{name}" in report["protected"]["unowned"]
+    assert name not in report["protected"]["unowned"]
+
+
+def test_a_crashed_claim_rebound_at_the_next_claim_keeps_the_bytes(world):
+    target = world.uploads["abandoned"]
+    world.catalog.db.execute(gc.CLAIM, (gc.COLLECTING, target))
+    intact = gc._intact
+
+    def referencing(path, digest):
+        if digest == target:
+            world.pinned.add(target)
+        return intact(path, digest)
+
+    with mock.patch.object(gc, "_intact", referencing):
+        report = world.collect()
+    assert report["protected"]["rebound"] == [target]
+    assert world.store.get(target) == world.doc["uploads"]["abandoned"].encode()
+    assert world.catalog.db.execute(gc.DIGEST_STATES, (target,)).fetchall() == []
+
+
+def _register(world, generation):
+    model = cases.EmbeddingModel(**world.doc["model"])
+    cases.IndexWorker(world.catalog).register(world.domain, generation, model)
+
+
+def test_a_generation_inside_its_grace_does_not_stop_a_later_one(world):
+    _register(world, "fixture-embed-z")
+    world.retire(at="collect")
+    gc.retire(world.catalog, cases.grant(world.doc), "fixture-embed-z", world.clock["retired"])
+    report = world.collect()
+    assert report["protected"]["live"][-1] == world.doc["generations"]["retired"]
+    assert report["reclaimed"]["index_generations"] == ["fixture-embed-z"]
+
+
+def test_an_active_generation_does_not_stop_a_later_one(world):
+    _register(world, "fixture-embed-z")
+    retired = world.doc["generations"]["retired"]
+    world.retire()
+    gc.retire(world.catalog, cases.grant(world.doc), "fixture-embed-z", world.clock["retired"])
+    world.catalog.db.execute("UPDATE index_cutover SET index_generation = ?", (retired,))
+    report = world.collect()
+    assert report["protected"]["active_index"] == [retired]
+    assert report["reclaimed"]["index_generations"] == ["fixture-embed-z"]
+
+
+def test_a_generation_retired_exactly_its_grace_ago_is_dropped(world):
+    world.retire()
+    plan = world.plan()
+    plan = gc.Plan(plan.grant, plan.references, plan.grace, world.clock["retired"] + world.doc["grace"])
+    report = gc.collect(world.catalog, world.store, plan)
+    assert report["reclaimed"]["index_generations"] == [world.doc["generations"]["retired"]]
 
 
 @pytest.mark.parametrize("case", ["A", "B", "C"])

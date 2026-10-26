@@ -23,6 +23,7 @@ SCHEMA = (
 )
 GC_TABLES = ("upload_reservation", "index_retirement")
 RESERVED, COLLECTING = "reserved", "collecting"
+REJECTED = frozenset({"unowned", "altered", "missing"})
 BYTES = "garbage_collection_bytes"
 REJECTIONS = "unsafe_delete_rejections"
 RESERVATION = (
@@ -90,13 +91,13 @@ class Report:
 
     foreign: int = 0
 
-    def keep(self, reason: str, name: str, rejected: bool = False) -> None:
+    def keep(self, reason: str, name: str) -> None:
         if reason == "foreign":
             self.foreign += 1
             self.rejections += 1
             return
         self.protected[reason].append(name)
-        self.rejections += rejected
+        self.rejections += reason in REJECTED
 
     def as_dict(self) -> dict:
         return {
@@ -214,7 +215,7 @@ def _claim(catalog: Catalog, plan: Plan, digest: str) -> str | None:
 
 def _intact(path: Path, digest: str) -> bool:
     with path.open("rb") as handle:
-        return hashlib.file_digest(handle, "sha256").hexdigest() == digest
+        return hashlib.file_digest(handle, hashlib.sha256).hexdigest() == digest
 
 
 def _settle(catalog: Catalog, digest: str) -> bool:
@@ -226,7 +227,7 @@ def _settle(catalog: Catalog, digest: str) -> bool:
 def _collect_upload(catalog: Catalog, plan: Plan, digest: str, path: Path | None, report: Report) -> None:
     size = path.stat().st_size if path else 0
     if path and not _intact(path, digest):
-        report.keep("altered", digest, rejected=True)
+        report.keep("altered", digest)
         return
     if not plan.destructive:
         report.uploads.append(digest)
@@ -234,11 +235,11 @@ def _collect_upload(catalog: Catalog, plan: Plan, digest: str, path: Path | None
         return
     reason = _claim(catalog, plan, digest)
     if reason is not None:
-        report.keep(reason, digest, rejected=reason == "unowned")
+        report.keep(reason, digest)
         return
     rebound = _referenced(catalog, plan, digest)
     if path and not rebound:
-        path.unlink(missing_ok=True)
+        path.unlink()
     with catalog._transaction():
         catalog.db.execute(DROP_DIGEST, (digest,))
     if rebound:
@@ -251,7 +252,7 @@ def _collect_upload(catalog: Catalog, plan: Plan, digest: str, path: Path | None
 def _uploads(catalog: Catalog, store: archive.ObjectStore, plan: Plan, report: Report) -> None:
     files, foreign = _files(store)
     for name in foreign:
-        report.keep("unowned", name, rejected=True)
+        report.keep("unowned", name)
     archived = {row[0] for row in catalog.db.execute(ALL_ARCHIVED)}
     reserved = {row[0] for row in catalog.db.execute(RESERVED_DIGESTS, (plan.grant.corpus,))}
     pinned = archived | plan.references()
@@ -259,13 +260,13 @@ def _uploads(catalog: Catalog, store: archive.ObjectStore, plan: Plan, report: R
         if name in pinned:
             settled = plan.destructive and _settle(catalog, name)
             if settled and name not in files:
-                report.keep("missing", name, rejected=True)
+                report.keep("missing", name)
             else:
                 report.keep("rebound" if settled else "authoritative", name)
             continue
         reason = _owner(catalog, plan, name)
         if reason is not None:
-            report.keep(reason, name, rejected=reason == "unowned")
+            report.keep(reason, name)
             continue
         _collect_upload(catalog, plan, name, files.get(name), report)
 
@@ -317,7 +318,7 @@ def main(argv: list[str] | None = None, clock: Callable[[], float] | None = None
     parser.add_argument("catalog")
     parser.add_argument("domain")
     parser.add_argument("--principal", required=True)
-    parser.add_argument("--objects", type=Path)
+    parser.add_argument("--objects")
     parser.add_argument("--references", type=Path)
     parser.add_argument("--grace", type=float, default=86400.0)
     parser.add_argument("--generation")
@@ -340,7 +341,8 @@ def main(argv: list[str] | None = None, clock: Callable[[], float] | None = None
             answer = collect(catalog, archive.ObjectStore(args.objects), plan)
     finally:
         catalog.close()
-    print(json.dumps(answer))
+    actor = {"principal": grant.principal, "corpus": grant.corpus, "projects": sorted(grant.projects)}
+    print(json.dumps({"actor": actor, **answer}))
     return 0
 
 
