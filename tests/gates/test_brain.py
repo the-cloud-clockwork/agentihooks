@@ -128,6 +128,7 @@ def test_ordinary_calls_never_match(payload):
     assert not BrainGate().matches(Call.from_payload(payload))
 
 
+@pytest.fixture
 def ledgers(tmp_path, monkeypatch):
     from scripts.swarm_v2.keyspace import Namespace
 
