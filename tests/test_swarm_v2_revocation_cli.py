@@ -31,8 +31,13 @@ def test_cli_registers_derived_material_and_propagates_a_revocation(catalog, pat
     document.write_text(json.dumps({"packs": packs, "lessons": [{"lesson_id": "l1", "text": "t", "support": ["s1"]}]}))
     assert cli.main(["register", path, DOMAIN, "--document", str(document)]) == 0
     assert json.loads(capsys.readouterr().out) == {"packs": 1, "lessons": 1}
-    assert revocation.Propagator(catalog).pack(revocation.Grant("p", DOMAIN, frozenset()), DOMAIN, "p1") == {
-        "previews": ["x"]
+    granted, propagator = revocation.Grant("p", DOMAIN, frozenset()), revocation.Propagator(catalog)
+    assert propagator.pack(granted, DOMAIN, "p1") == {"previews": ["x"]}
+    assert propagator.lesson(granted, DOMAIN, "l1") == {
+        "lesson_id": "l1",
+        "state": "inferred",
+        "text": "t",
+        "support": ["s1"],
     }
     assert cli.main(["exposures", path, DOMAIN, "--session", "s1"]) == 0
     assert json.loads(capsys.readouterr().out) == {"exposures": {"context_pack": 1, "derived_lesson": 1}}

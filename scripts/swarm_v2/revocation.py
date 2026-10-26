@@ -21,7 +21,7 @@ def _register(propagator: Propagator, domain: str, document: dict) -> dict:
 def main(argv: list[str] | None = None, clock: Callable[[], float] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("command", choices=("catch-up", "exposures", "lags", "register"))
-    parser.add_argument("catalog", type=Path)
+    parser.add_argument("catalog")
     parser.add_argument("domain")
     parser.add_argument("--session")
     parser.add_argument("--document", type=Path)
@@ -39,7 +39,7 @@ def main(argv: list[str] | None = None, clock: Callable[[], float] | None = None
     elif args.command == "lags":
         answer = {"lags": propagator.lags(args.domain)}
     else:
-        answer = _register(propagator, args.domain, json.loads(args.document.read_text(encoding="utf-8")))
+        answer = _register(propagator, args.domain, json.loads(args.document.read_bytes()))
     catalog.close()
     print(json.dumps(answer))
     return 0
