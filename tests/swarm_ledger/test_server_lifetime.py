@@ -137,6 +137,7 @@ def test_detached_server_stop_deadline_excludes_startup_after_pid_publication(tm
     assert (tmp_path / "startup-paused").read_text() == "yes"
 
 
+@pytest.mark.wall_clock
 def test_detached_server_stop_deadline_covers_a_request_held_through_the_drain_bound(
     tmp_path, monkeypatch, ledger_port
 ):
