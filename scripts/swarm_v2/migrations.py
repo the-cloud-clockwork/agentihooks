@@ -30,8 +30,9 @@ def _run(migrator: Migrator, args: argparse.Namespace, now: float, who: Who | No
         return migrator.startup()
     if args.command == "backfill":
         return migrator.backfill(args.revision, args.batch_size, args.max_batches)
-    if args.command in STAGED:
-        return getattr(migrator, args.command)(args.revision)
+    stages = {"verify": migrator.verify, "activate": migrator.activate, "deactivate": migrator.deactivate}
+    if args.command in stages:
+        return stages[args.command](args.revision)
     caller = Who.from_env() if who is None else who
     return migrator.dimensions.drop(approval(caller, args.domain, args.generation), now)
 
