@@ -581,6 +581,11 @@ def test_a_module_edit_that_only_binds_new_names_keeps_the_selection_narrow(
         ("H = {'a': f, 'b': g}\n", "H = {'a': f, 'c': h}\n", False),
         ("H = {'a': f}\n", "H = {'a': f, **B}\n", False),
         ("H = {'a': f}\n", "H = {'a': f, 'b': make()}\n", False),
+        ("H = {'a': f}\n", "H = {'a': f, make(): g}\n", False),
+        ("H = {'a': f}\n", "H = {'a': f, K: g}\n", False),
+        ("H = {K: f}\n", "H = {K: f, 'b': g}\n", False),
+        ("H = {1: f}\n", "H = {1: f, True: g}\n", False),
+        ("H = {1: f}\n", "H = {1: f, 2: g, 2.0: h}\n", False),
         ("H = {'a': f}\n", "G = {'a': f, 'b': g}\n", False),
         ("H = {'a': f}\n", "H = ['a', 'b']\n", False),
         ("H: dict = {'a': f}\n", "H: dict = {'a': f, 'b': g}\n", False),
@@ -617,9 +622,11 @@ def test_only_unkeyed_reads_of_a_dict_table_reach_its_new_entries():
         "def find(name):\n    return H.get(name)\n\n\n"
         "def names():\n    return sorted(H)\n\n\n"
         "def first():\n    return L[0]\n\n\n"
-        "def store():\n    H = {}\n    return O\n"
+        "def store():\n    H = {}\n    return O\n\n\n"
+        "def guarded(name):\n    try:\n        return H[name]\n    except KeyError:\n        return None\n\n\n"
+        "def cleanup(name):\n    try:\n        return H[name]\n    finally:\n        pass\n"
     )
-    assert plan.table_reads(ast.parse(source), {"H": True, "L": False}) == {10, 14}
+    assert plan.table_reads(ast.parse(source), {"H": True, "L": False}) == {6, 10, 14, 24}
 
 
 @pytest.mark.parametrize(

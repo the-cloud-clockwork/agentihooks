@@ -162,7 +162,6 @@ def changed_recorded_units(root: Path, manifest: dict, changes: dict[str, set[in
 
 
 def new_functions(old: str | None, tree: ast.Module) -> set[str]:
-    # A name the old source never used is reached only through the module code that names it, which changed too.
     try:
         known = _known_names(ast.parse(old)) if old is not None else None
     except SyntaxError:
@@ -274,9 +273,10 @@ def _adds_entries(old: ast.expr, new: ast.expr) -> bool:
     ):
         return False
     if isinstance(old, ast.Dict):
-        keys = [_entry(entry)[0] for entry in added]
-        return all(keys) and len(set(keys)) == len(keys) and not set(keys) & {key for key, _ in kept}
-    # A sequence keeps every old position only when the new entries come last.
+        if not all(isinstance(key, ast.Constant) for key in [*old.keys, *(key for key, _ in added)]):
+            return False
+        keys = [key.value for key, _ in added]
+        return len(set(keys)) == len(keys) and not set(keys) & {key.value for key in old.keys}
     return isinstance(old, ast.Set) or list(map(_entry, after[: len(kept)])) == kept
 
 
@@ -368,13 +368,17 @@ def extended_tables(old: str, new: str) -> dict[str, bool]:
 
 
 def table_reads(tree: ast.Module, tables: dict[str, bool]) -> set[int]:
-    # A dict lookup by key reaches a new entry only for its new key, which no recorded test passed successfully.
-    keyed = set()
-    for found in ast.walk(tree):
-        if isinstance(found, ast.Subscript):
-            keyed.add(id(found.value))
-        elif isinstance(found, ast.Call) and isinstance(found.func, ast.Attribute) and found.func.attr == "get":
-            keyed.add(id(found.func.value))
+    # A lookup that raises on a missing key reaches a new entry only for a test that passes that new key.
+    guarded = {
+        id(node)
+        for found in ast.walk(tree)
+        if isinstance(found, ast.Try) and found.handlers
+        for statement in found.body
+        for node in ast.walk(statement)
+    }
+    keyed = {
+        id(found.value) for found in ast.walk(tree) if isinstance(found, ast.Subscript) and id(found) not in guarded
+    }
     return {
         found.lineno
         for found in ast.walk(tree)
