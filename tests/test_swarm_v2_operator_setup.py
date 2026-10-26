@@ -1002,11 +1002,10 @@ def test_setup_command_reads_the_hive_redis_address_from_its_environment(tmp_pat
 
 class Ledger:
     def __init__(self) -> None:
-        self.followups = []
+        self.alerts = []
 
-    def followup(self, slug, text, needs_operator=False):
-        self.followups.append((slug, text, needs_operator))
-        return True
+    def raise_alert(self, slug, source, text):
+        self.alerts.append((slug, text, source))
 
 
 class Flaky(Ledger):
@@ -1014,14 +1013,12 @@ class Flaky(Ledger):
         super().__init__()
         self.failed = set()
 
-    def followup(self, slug, text, needs_operator=False):
-        super().followup(slug, text, needs_operator)
-        if slug in self.failed:
-            return True
+    def raise_alert(self, slug, source, text):
+        super().raise_alert(slug, source, text)
+        if slug in self.failed or slug == "hive-c":
+            return
         self.failed.add(slug)
-        if slug == "hive-b":
-            raise SwarmError("the ledger server is gone")
-        return slug != "hive-a"
+        raise SwarmError("the ledger server is gone")
 
 
 def alarm_store(slugs):
@@ -1048,7 +1045,7 @@ def test_a_refused_setup_raises_one_priority_on_each_synced_swarm(tmp_path, monk
     assert run_main(["setup"], environ, Who(), tmp_path / "home") == (1, "", message + "\n")
     assert run_main(["setup"], environ, Who(), tmp_path / "home")[0] == 1
 
-    assert ledger.followups == [("hive-a", message, True), ("hive-b", message, True)]
+    assert ledger.alerts == [("hive-a", message, "setup"), ("hive-b", message, "setup")]
     assert dialled == [environ, environ]
 
 
@@ -1064,8 +1061,8 @@ def test_a_new_refusal_raises_again(tmp_path, monkeypatch):
     monkeypatch.setattr(openbao_kv.urllib.request, "urlopen", Bao(status=500))
     run_main(["setup"], {**environ, "OPENBAO_URL": BAO_URL, "OPENBAO_TOKEN": "fixture-token"}, Who(), tmp_path / "home")
 
-    assert len(ledger.followups) == 2
-    assert ledger.followups[1][1].startswith("operator terminal setup refused: the terminal user CA could not be read")
+    assert len(ledger.alerts) == 2
+    assert ledger.alerts[1][1].startswith("operator terminal setup refused: the terminal user CA could not be read")
 
 
 def test_a_dropped_or_failed_notice_is_raised_again_and_a_delivered_one_is_not(tmp_path, monkeypatch):
@@ -1080,7 +1077,7 @@ def test_a_dropped_or_failed_notice_is_raised_again_and_a_delivered_one_is_not(t
     for _ in range(3):
         assert run_main(["setup"], environ, Who(), tmp_path / "home")[0] == 1
 
-    assert [slug for slug, _, _ in ledger.followups] == ["hive-a", "hive-b", "hive-c", "hive-a", "hive-b"]
+    assert [slug for slug, _, _ in ledger.alerts] == ["hive-a", "hive-b", "hive-c", "hive-a", "hive-b"]
 
 
 def test_a_successful_setup_clears_the_alarm_so_a_recurring_refusal_raises_again(tmp_path, monkeypatch):
@@ -1103,7 +1100,7 @@ def test_a_successful_setup_clears_the_alarm_so_a_recurring_refusal_raises_again
     assert not (tmp_path / "home" / "swarm-terminal" / "alarm").exists()
     assert run_main(["setup"], refused, Who(), tmp_path / "home")[0] == 1
 
-    assert [slug for slug, _, _ in ledger.followups] == ["hive-a", "hive-a"]
+    assert [slug for slug, _, _ in ledger.alerts] == ["hive-a", "hive-a"]
 
 
 def test_a_refused_setup_without_a_transport_only_reaches_the_journal(tmp_path, monkeypatch):
