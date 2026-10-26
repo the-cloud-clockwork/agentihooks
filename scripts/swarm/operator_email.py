@@ -51,7 +51,10 @@ async def _send(url: str, bearer: str, arguments: dict) -> dict:
     text = next((item.text for item in result.content if item.type == "text"), "")
     if result.isError:
         raise RuntimeError(text or "an error")
-    return json.loads(text) if text else {}
+    reply = json.loads(text) if text else {}
+    if not isinstance(reply, dict):
+        raise RuntimeError(f"a reply that is not an object: {text}")
+    return reply
 
 
 def gateway_send(url: str, bearer: str, arguments: dict) -> dict:

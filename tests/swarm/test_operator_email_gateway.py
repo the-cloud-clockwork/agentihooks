@@ -61,3 +61,9 @@ def test_gateway_send_raises_the_tool_error_text(monkeypatch):
     _gateway(monkeypatch, "refused: bad recipient", error=True)
     with pytest.raises(RuntimeError, match="refused: bad recipient"):
         operator_email.gateway_send("https://gw/mcp/", "k", {})
+
+
+def test_gateway_send_raises_on_a_reply_that_is_not_an_object(monkeypatch):
+    _gateway(monkeypatch, '["sent"]')
+    with pytest.raises(RuntimeError, match=r'a reply that is not an object: \["sent"\]'):
+        operator_email.gateway_send("https://gw/mcp/", "k", {})
