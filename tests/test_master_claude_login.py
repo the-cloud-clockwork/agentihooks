@@ -975,7 +975,7 @@ def test_a_forced_fallback_sends_once_through_the_gateway_notifications_tool(ah,
         raise native_login.LoginError(native_login.EXPIRED)
 
     monkeypatch.setattr(native_login, "check", check)
-    monkeypatch.setattr(chain, "authorize", lambda *_: "failure", raising=False)
+    monkeypatch.setattr(chain, "authorize", lambda *_: "failure")
     monkeypatch.setattr(EmailClient, "reachable", lambda self, timeout=3.0: False)
     sent = []
     monkeypatch.setattr(operator_email, "gateway_send", lambda *args: sent.append(args) or {"status": "sent"})
