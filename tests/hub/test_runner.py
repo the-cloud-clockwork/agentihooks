@@ -285,9 +285,10 @@ def test_two_replicas_keep_one_reconciler_leader_while_their_passes_outlast_the_
 
     one, two = hub(bus, reactors("a"), "a", clock), hub(bus, reactors("b"), "b", clock)
     replicas += [one, two]
-    passes = [replica.run_once(timeout_ms=0)["reconciler"] for _ in range(4) for replica in (one, two)]
+    passes = [replica.run_once(timeout_ms=0) for _ in range(4) for replica in (one, two)]
+    assert clock.now == 1_000 + 8 * 120
     assert ran == ["a"] * 4
-    assert passes == [[], ["standby"]] * 4
+    assert passes == [{"slow": [], "reconciler": []}, {"slow": [], "reconciler": ["standby"]}] * 4
     assert lease.read(bus.state(lease.BUCKET), "reactor.reconciler").holder == "a"
 
 
