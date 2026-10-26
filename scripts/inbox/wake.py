@@ -146,7 +146,7 @@ def _wake_world(inbox, slug, agents, herdr, ledger, clock: _Clock, items):
     names, config = {a.name for a in agents}, _swarm_config(inbox, slug)
     panes = {a.name: a for a in agents if typed_wake(inbox, a)}
     boss = next((a for a in agents if a.lane == MASTER), None)
-    master = (boss.seat or boss.name) if boss else ""
+    master = _escalation_seat(inbox, slug, agents, boss)
     marks = SeenMarks(inbox.redis)
     statuses, prompted = {}, set()
     reads, actions = _pass_frozen(inbox, slug, agents, _wake_inputs(inbox, slug, items, names, config, marks), clock)
@@ -170,7 +170,12 @@ def _wake_world(inbox, slug, agents, herdr, ledger, clock: _Clock, items):
         if step == WOKEN and _still_held(inbox, held) and _wake(herdr, agent, prompted):
             if inbox.note(item.id, WOKEN, BY, f"prompted {receiver} to read its inbox", now_ms, held):
                 actions.append(f"woke {receiver} for message {item.id}")
-        elif step == TO_MASTER and master and receiver != boss.name and not _sent_from(inbox, item, boss, master):
+        elif (
+            step == TO_MASTER
+            and master not in ("", item.address)
+            and receiver != boss.name
+            and not _sent_from(inbox, item, boss, master)
+        ):
             raised = inbox.send(BY, master, _master_text(item), ref=f"inbox-escalation:{item.id}")
             inbox.note(item.id, TO_MASTER, BY, raised_note(master, raised.id), now_ms)
             actions.append(f"raised message {item.id} to {master}")
@@ -181,6 +186,13 @@ def _wake_world(inbox, slug, agents, herdr, ledger, clock: _Clock, items):
             inbox.note(item.id, TO_OPERATOR, BY, "shown to the operator on the ledger page", now_ms)
             actions.append(f"raised message {item.id} to the operator")
     return actions
+
+
+def _escalation_seat(inbox, slug, agents, boss):
+    """The lead master's seat, or a live master's while the lead waits on an input prompt."""
+    if boss is None:
+        return ""
+    return _spare_master(inbox, slug, agents, boss.name) or boss.seat or boss.name
 
 
 def _spare_master(inbox, slug, agents, receiver):

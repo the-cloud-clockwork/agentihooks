@@ -820,6 +820,33 @@ def test_a_frozen_backend_master_passes_its_mail_to_the_front_door(inbox):
     assert inbox.get(item.id).address == "master@sw"
 
 
+def test_passed_mail_a_live_master_leaves_unread_goes_to_the_operator_never_back_to_the_frozen_front_door(inbox):
+    inbox.seats.occupy("master@sw", MASTER_NAME, at=1)
+    inbox.seats.occupy("master-2@sw", "sw-master-2", at=1)
+    item = inbox.send("sw-eng-1", "master@sw", "check the plan")
+    herdr, ledger = FakeHerdr({}), FakeLedger()
+    agents = [AGENTS[0], FRONT, BACKEND]
+    run(inbox, herdr, ledger, sent_at(item) + W, agents)
+    actions = run(inbox, herdr, ledger, sent_at(item) + 2 * W, agents)
+    assert actions == [f"raised message {item.id} to the operator"]
+    assert events(inbox, item.id) == ["escalated_operator"] and len(ledger.followups) == 1
+    assert inbox.open_items("master@sw") == []
+
+
+def test_an_agents_unread_mail_escalates_to_a_live_master_while_the_front_door_is_frozen(inbox):
+    inbox.seats.occupy("master@sw", MASTER_NAME, at=1)
+    inbox.seats.occupy("master-2@sw", "sw-master-2", at=1)
+    inbox.seats.occupy("eng-1@sw", "sw-eng-1", at=1)
+    eng = AgentRecord("sw-eng-1", "eng", "t1", pane_id="p1", seat="eng-1@sw")
+    item = inbox.send("sw-eng-4", "eng-1@sw", "rebase please")
+    ledger = FakeLedger()
+    actions = run(inbox, FakeHerdr({"p1": "working"}), ledger, sent_at(item) + W, [eng, FRONT, BACKEND])
+    assert actions == [f"raised message {item.id} to master-2@sw"]
+    assert inbox.open_items("master@sw") == [] and ledger.followups == []
+    [raised] = inbox.open_items("master-2@sw")
+    assert raised.ref == f"inbox-escalation:{item.id}"
+
+
 def test_decide_passes_a_frozen_masters_item_only_once_its_window_is_due():
     from scripts.inbox.store import Item
 

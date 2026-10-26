@@ -17,7 +17,7 @@ MOVED = (
 )
 
 
-def move(payload: dict, ledger=None, environ=None, now: float | None = None, home=None) -> str:
+def move(payload: dict, ledger=None, environ=None, now: float | None = None) -> str:
     """The denial naming the moved questions, or empty when the question tool may open; each decision is a gate log
     row naming the operator's last typed turn it read."""
     session = payload.get("session_id")
@@ -27,11 +27,11 @@ def move(payload: dict, ledger=None, environ=None, now: float | None = None, hom
     slug, name = operator_mode._binding(os.environ if environ is None else environ, session)
     typed = operator_mode._load(session).get("turn_at")
     if typed is not None and now - typed < WINDOW_SEC:
-        _record(slug, name, "count", f"opened: the operator typed {_ago(typed, now)}", now, home)
+        _record(slug, name, "count", f"opened: the operator typed {_ago(typed, now)}", now)
         return ""
     questions = [q for q in (payload.get("tool_input") or {}).get("questions") or [] if q.get("question")]
     if not questions or not _deliberate(payload):
-        _record(slug, name, "count", f"left to the operator presence check: typed {_ago(typed, now)}", now, home)
+        _record(slug, name, "count", f"left to the operator presence check: typed {_ago(typed, now)}", now)
         return ""
     if ledger is None:
         from scripts.swarm.ledger_client import LedgerClient
@@ -40,7 +40,7 @@ def move(payload: dict, ledger=None, environ=None, now: float | None = None, hom
     for question in questions:
         text = _text(question)
         ledger.question(slug, text, name, hashlib.sha256(f"{session}:{typed}:{text}".encode()).hexdigest()[:32])
-    _record(slug, name, "deny", f"moved {len(questions)} questions: the operator typed {_ago(typed, now)}", now, home)
+    _record(slug, name, "deny", f"moved {len(questions)} questions: the operator typed {_ago(typed, now)}", now)
     return MOVED.format(asked=" ".join(q["question"] for q in questions))
 
 
@@ -50,7 +50,7 @@ def _ago(typed: float | None, now: float) -> str:
     return f"at {time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime(typed))}, {int(now - typed)} seconds ago"
 
 
-def _record(slug: str, name: str, kind: str, reason: str, now: float, home=None) -> None:
+def _record(slug: str, name: str, kind: str, reason: str, now: float) -> None:
     from scripts.gates import log
     from scripts.gates.base import Who
 
@@ -58,7 +58,7 @@ def _record(slug: str, name: str, kind: str, reason: str, now: float, home=None)
         row = log.Row.of(
             GATE, kind, Who(name=name, task="master"), operator_mode.QUESTION_TOOL, reason, int(now * 1000)
         )
-        log.append(slug, row, home)
+        log.append(slug, row)
 
 
 def _deliberate(payload: dict) -> bool:

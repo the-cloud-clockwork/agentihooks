@@ -246,7 +246,9 @@ def test_a_session_bound_to_no_swarm_writes_no_gate_row(master, monkeypatch):
     master_coding_seat.write_text(json.dumps({"name": NAME}))
     typed_at(NOW - 1)
     assert master_question.move(ask(FOCUS), master, now=NOW) == ""
-    assert _gate_rows() == []
+    from scripts.gates import log
+
+    assert _gate_rows() == [] and log.recent("<slug>", None) == []
     assert not (Path.home() / ".agentihooks" / "swarm" / "_slug_").exists()
 
 
