@@ -102,6 +102,31 @@ def test_main_pull_requests_skip_mutation_but_still_require_the_other_checks():
     assert result.returncode == 0, result.stdout + result.stderr
 
 
+@pytest.mark.parametrize(
+    "selection,sonar,passes",
+    [
+        ("skip", "skipped", True),
+        ("skip", "success", False),
+        ("", "skipped", False),
+        ("", "success", True),
+    ],
+)
+def test_a_pull_request_skips_sonar_only_when_selection_marks_it_test_only(selection, sonar, passes):
+    needs = {job: {"result": "success"} for job in SELECTED}
+    needs["sonar"]["result"] = sonar
+    needs["select"]["outputs"] = {"scope": "selected", "sonar": selection}
+    [step] = ci_reuse.test_only_sonar(_gate_steps())
+    outcome = subprocess.run(
+        ["bash", "-e", "-c", step["run"]],
+        env=dict(
+            os.environ, EVENT="pull_request", NEEDS=json.dumps(needs), MUTATION="true", KIND="false", REUSED="false"
+        ),
+        capture_output=True,
+        text=True,
+    )
+    assert (outcome.returncode == 0) == passes, outcome.stdout + outcome.stderr
+
+
 def test_duration_provenance_reads_the_base_and_records_the_queue_head():
     checkout, python, install, record, publish = ci_reuse.duration_provenance_steps()
     assert checkout["with"] == {
