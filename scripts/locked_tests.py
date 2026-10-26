@@ -48,20 +48,21 @@ def _assertions(function: ast.AST, helpers: frozenset[str] = frozenset()) -> int
 def _skips_itself(function: ast.AST) -> bool:
     return any(
         isinstance(node, ast.Call)
-        and isinstance(node.func, ast.Attribute)
-        and _named(node.func.value) == "pytest"
-        and node.func.attr in DISABLING_CALLS
+        and _named(node.func) in DISABLING_CALLS
+        and (isinstance(node.func, ast.Name) or _named(node.func.value) == "pytest")
         for node in ast.walk(function)
     )
 
 
-def _length(node: ast.AST | None, constants: dict[str, ast.AST]) -> int | None:
+def _length(node: ast.AST | None, constants: dict[str, ast.AST], seen: frozenset[str] = frozenset()) -> int | None:
     if isinstance(node, ast.Name):
-        node = constants.get(node.id)
+        if node.id in seen:
+            return None
+        seen, node = seen | {node.id}, constants.get(node.id)
     if isinstance(node, (ast.List, ast.Tuple, ast.Set)):
         return len(node.elts)
     if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
-        left, right = _length(node.left, constants), _length(node.right, constants)
+        left, right = _length(node.left, constants, seen), _length(node.right, constants, seen)
         return None if left is None or right is None else left + right
     return None
 
@@ -137,9 +138,15 @@ def load(tree: Path) -> dict[str, dict] | None:
     if not path.is_file():
         return None
     try:
-        return json.loads(path.read_text())
+        data = json.loads(path.read_text())
     except json.JSONDecodeError as exc:
         raise GradeError(f"{MANIFEST} is not valid JSON: {exc}") from exc
+    if not isinstance(data, dict) or not all(
+        isinstance(entry, dict) and all(isinstance(entry.get(field), int) for field in FIELDS)
+        for entry in data.values()
+    ):
+        raise GradeError(f"{MANIFEST} must map each locked test to its {', '.join(FIELDS)} counts")
+    return data
 
 
 def write(tree: Path) -> None:
@@ -195,7 +202,7 @@ def main(argv: list[str] | None = None) -> int:
             # Only the pull request that introduces the manifest meets a base without one.
             print(f"::notice::The base has no {MANIFEST}; the head manifest locks itself.")
             base = recorded
-    except (GradeError, OSError) as exc:
+    except (GradeError, ValueError, OSError) as exc:
         print(f"::error::{exc}")
         return 1
     errors = grade(base, recorded, head)

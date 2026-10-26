@@ -77,8 +77,11 @@ def test_the_manifest_counts_assertions_calls_and_cases(tmp_path):
         GUARD.replace("import pytest\n", "import pytest\n\npytestmark = [pytest.mark.skipif(True, reason='x')]\n"),
         GUARD.replace("    _blocked(command)\n", "    pytest.skip('later')\n    _blocked(command)\n"),
         GUARD.replace('CASES = [("a", 1), ("b", 2)]', 'CASES = [pytest.param("a", 1, marks=pytest.mark.skip)]'),
+        GUARD.replace("import pytest\n", "import pytest\nfrom pytest import xfail\n").replace(
+            "        str(1)\n", "        xfail()\n        str(1)\n"
+        ),
     ],
-    ids=["skip", "xfail", "class mark", "module mark", "skip call", "skipped case"],
+    ids=["skip", "xfail", "class mark", "module mark", "skip call", "skipped case", "imported skip"],
 )
 def test_a_skipped_or_xfailed_locked_test_is_red(tmp_path, capsys, planted):
     base = _tree(tmp_path / "base", GUARD)
@@ -142,14 +145,30 @@ def test_a_head_without_a_manifest_is_red(tmp_path, capsys):
     assert "::error::the head has no" in out
 
 
-@pytest.mark.parametrize("broken", ["manifest", "test"])
-def test_an_unreadable_tree_cannot_be_graded(tmp_path, capsys, broken):
+@pytest.mark.parametrize(
+    "path,text",
+    [
+        (locked_tests.MANIFEST, "{"),
+        (locked_tests.MANIFEST, "[]"),
+        (locked_tests.MANIFEST, '{"t": {"assertions": 1}}'),
+        (Path(LOCKED), "{"),
+        (Path(LOCKED), "def test_x():\n    pass\x00\n"),
+    ],
+    ids=["manifest json", "manifest list", "manifest fields", "test syntax", "test nul"],
+)
+def test_an_unreadable_tree_cannot_be_graded(tmp_path, capsys, path, text):
     base = _tree(tmp_path / "base", GUARD)
     head = _tree(tmp_path / "head", GUARD)
-    (head / (locked_tests.MANIFEST if broken == "manifest" else LOCKED)).write_text("{")
+    (head / path).write_text(text)
     code, out = _grade(base, head, capsys)
     assert code == 1
-    assert "::error::" in out
+    assert out.startswith("::error::")
+
+
+def test_a_self_referencing_case_list_counts_as_one_case(tmp_path):
+    text = GUARD.replace('CASES = [("a", 1), ("b", 2)]', "CASES = []\nCASES = CASES + CASES")
+    _tree(tmp_path, text)
+    assert locked_tests.load(tmp_path)[f"{LOCKED}::test_blocks"]["cases"] == 1
 
 
 def test_grading_without_a_base_is_refused():
