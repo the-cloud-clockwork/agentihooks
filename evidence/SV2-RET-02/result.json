@@ -1,0 +1,42 @@
+{
+  "cases": [
+    "A",
+    "B",
+    "C"
+  ],
+  "evidence_class": "mocked: an in-process caller, a SQLite catalog file, a local content addressed object folder and a deterministic concept embedder stand in for the session service, the central database, the archive bucket and the embedding provider; a fixed clock stamps tombstones and replays",
+  "fixture_inputs": {
+    "cached_pack": "pack-ingest-lock, previews of the recall search results citing lock, beside pack-kernel-feed",
+    "inferred_lesson": "lesson-lock-only supported by lock alone, beside lesson-shared supported by lock, kernel and symbol",
+    "source_in_search_results": "session lock, the top hit of the recall search and the cited source of its records"
+  },
+  "interfaces": [
+    "hooks.memory.catalog.Catalog.set_state writes a session_tombstone row in the state change transaction",
+    "hooks.memory.catalog.Catalog.tombstones",
+    "hooks.memory.revocation.Propagator.replay",
+    "hooks.memory.revocation.Propagator.catch_up",
+    "hooks.memory.revocation.Propagator.exposures",
+    "hooks.memory.revocation.Propagator.lags",
+    "hooks.memory.revocation.Propagator.put_pack and pack",
+    "hooks.memory.revocation.Propagator.put_lesson and lesson"
+  ],
+  "metrics": "revocation_propagation_lag_seconds per consumer and tombstone, recorded when the consumer applies it",
+  "mocked": true,
+  "outcomes": {
+    "observed": "case outputs in the a, b and c result files from the focused proof run",
+    "accepted": "a tombstone committed with each session state change",
+    "committed": "each consumer step removes, drops or redacts and advances its cursor in one transaction",
+    "externally_verified": "none; no live catalog, brain or search service was revoked"
+  },
+  "package": "SV2-RET-02",
+  "remaining_limitations": [
+    "No scheduler calls catch_up; a deployment must run the consumers after each state change or on a timer.",
+    "Context packs and derived lessons live in catalog tables here; the brain service has no adapter that registers its packs and lessons with the propagator yet.",
+    "A project grant narrowed on a caller is enforced at read time and emits no tombstone."
+  ],
+  "compatibility": "search, record range expansion and the compatibility aliases keep their accepted SV2-IDX-05 behaviour of refusing sessions that are not retained; set_state keeps its signature with an optional clock",
+  "pull_request": "",
+  "rollback_rehearsal": "C rewound every consumer cursor and replayed all tombstones after a regrant: reads stayed refused, the dropped pack and redacted lesson stayed so, and nothing already converged changed",
+  "status": "fixture_verified",
+  "tested_commit": "0ebe65cbea48e09110ba15b331d6bf40c32b68fe"
+}

@@ -1,0 +1,14 @@
+{
+  "fixture_inputs": {
+    "cached_pack": "pack-ingest-lock, previews of the recall search results citing lock, beside pack-kernel-feed",
+    "inferred_lesson": "lesson-lock-only supported by lock alone, beside lesson-shared supported by lock, kernel and symbol",
+    "source_in_search_results": "session lock, the top hit of the recall search and the cited source of its records"
+  },
+  "input_sha256": {
+    "fixture.json": "12eae530048fd965488e5e70ff3ee4b65b0dbb46716a11fa7c2b89816d069d71"
+  },
+  "mocked": true,
+  "package": "SV2-RET-02",
+  "run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/40276307482",
+  "tested_commit": "0ebe65cbea48e09110ba15b331d6bf40c32b68fe"
+}
