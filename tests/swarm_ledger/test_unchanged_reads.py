@@ -27,7 +27,7 @@ def served(tmp_path, monkeypatch):
 
 def test_reads_of_an_unchanged_ledger_publish_nothing(served):
     store, hub, views, host = served
-    ledger_read(host, SLUG, "metadata", {})
+    ledger_read(host, SLUG, "tasks", {})
     host.repository.drain(5)
     published = len(views)
     for path in READS * 3:

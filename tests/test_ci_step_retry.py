@@ -214,6 +214,20 @@ def test_the_durations_uploads_retry_in_place(job, name, given):
     assert step["with"] == given
 
 
+def test_the_select_tested_tree_upload_retries_from_the_protected_checkout():
+    steps = _steps("select")
+    [checkout] = [s for s in steps if s.get("with", {}).get("path") == "provenance-grader"]
+    [publish] = [s for s in steps if s.get("name") == "Publish protected tested tree evidence"]
+    assert steps.index(checkout) < steps.index(publish)
+    assert publish["uses"] == f"./{checkout['with']['path']}/{_RETRY_UPLOAD.removeprefix('./')}"
+    assert publish["with"] == {
+        "name": "required-tree-${{ github.run_attempt }}",
+        "path": "${{ runner.temp }}/provenance.json",
+        "if-no-files-found": "error",
+        "retention-days": 7,
+    }
+
+
 def _deploys(workflow, job):
     granted = job.get("permissions", workflow.get("permissions")) or {}
     oidc = granted == "write-all" or (isinstance(granted, dict) and granted.get("id-token") == "write")

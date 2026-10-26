@@ -140,7 +140,7 @@ make, another task first): push the branch, open a draft pull request, then
 When red dev Tests is the blocker, add `--dev-red`: the swarm reopens the task
 once a later dev Tests run passes.
 A question for the master without stopping:
-`agentihooks ledger --slug <slug> --as <name> question add "<text>"`.
+`agentihooks msg send master@<slug> "<text>"`.
 
 ## Handoff
 
