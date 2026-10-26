@@ -373,6 +373,22 @@ def test_outbox_retry_is_bounded_to_thirty_two_messages_per_pass(rig):
     assert rig.inbox.redis.scard(rig.inbox.key("wake-outbox")) == 0
 
 
+def test_outbox_reuses_the_send_of_an_item_readdressed_after_its_first_send(rig):
+    item = rig.inbox.send("sender", "eng-1@sw", "moved request")
+    rig.reactor.flush()
+    sent = rig.bus.events.consumer("moved-proof", "swarm.sw.inbox.*").fetch(10, 0)
+    for delivery in sent:
+        delivery.ack()
+    rig.inbox.redis.hset(rig.inbox.key("item", item.id), "address", "eng-2@sw")
+    rig.inbox.redis.sadd(rig.inbox.key("wake-outbox"), item.id)
+    for now in range(2000, 2005):
+        rig.clock.now = now
+        rig.reactor.flush()
+    assert rig.inbox.redis.scard(rig.inbox.key("wake-outbox")) == 0
+    assert [delivery.event.key for delivery in sent] == ["eng-1@sw"]
+    assert rig.bus.events.consumer("moved-proof", "swarm.sw.inbox.*").fetch(10, 0) == []
+
+
 def test_outbox_keeps_an_invalid_swarm_address_for_a_later_repair(rig):
     item = rig.inbox.send("sender", "eng-1@sw.part@elsewhere", "invalid swarm address")
     with pytest.raises(ValueError, match="invalid event subject token"):
