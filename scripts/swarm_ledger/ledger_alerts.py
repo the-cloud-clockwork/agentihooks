@@ -173,7 +173,7 @@ def message(slug, alert, tier="", doc=None):
     )
 
 
-def deliver(inbox, slug, alerts, rev, master, since=None, tier="", doc=None):
+def deliver(inbox, slug, alerts, rev, master, since=None, render=message):
     """Send each alert raised from since through rev to its target's inbox, once."""
     since = rev if since is None else since
     sent = []
@@ -184,9 +184,7 @@ def deliver(inbox, slug, alerts, rev, master, since=None, tier="", doc=None):
         if inbox.redis.exists(mark):
             continue
         address = master if alert["target"] in ("master", OPERATOR) else alert["target"]
-        notice = outbox.Post(
-            SENDER, address, message(slug, alert, tier, doc), item=outbox.stable_id("alert", slug, alert["id"])
-        )
+        notice = outbox.Post(SENDER, address, render(slug, alert), item=outbox.stable_id("alert", slug, alert["id"]))
         item = outbox.post(inbox, notice)
         inbox.redis.set(mark, 1, ex=SENT_TTL_S)
         sent += [item] if item else []
