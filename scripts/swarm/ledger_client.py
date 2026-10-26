@@ -76,6 +76,22 @@ class LedgerClient:
                 raise replay from None
             return None
 
+    def item(self, slug, path):
+        """One item by its list path, or None when the ledger holds no such item."""
+        name, _, item_id = path.partition("/")
+        try:
+            return self._resource(slug, f"{name}/{quote(item_id, safe='')}")
+        except urllib.error.HTTPError as exc:
+            from scripts.swarm_ledger.api.client import failure
+
+            replay, error = failure(exc)
+            if exc.code != 404 or error.get("code") != "resource_missing":
+                raise replay from None
+            return None
+
+    def blocker(self, slug, kind, by, item, fields):
+        self._call(slug, [_op(kind, by, item=item, **fields)])
+
     def events(self, slug):
         return self._resource(slug, "events", collection=True)
 

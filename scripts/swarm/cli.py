@@ -1529,6 +1529,12 @@ def cmd_issue(store, args):
     print(json.dumps({"task": agent.task, "issue_url": args.url}))
 
 
+def cmd_resolve(store, args):
+    from scripts.swarm import resolve
+
+    resolve.run(store, args, _me(store, args).name, LedgerClient())
+
+
 def cmd_review(store, args):
     agent = _worker(store, args)
     row = LedgerClient().task(args.slug, agent.task) or {}
@@ -1812,8 +1818,13 @@ def cmd_block(store, args):
             waits.settle_notices(InboxStore(store.redis), agent, "a new wait")
             print(json.dumps({"task": agent.task, "state": "claimed", "waits_on": held}))
             return
-    from scripts.swarm import publish
+    from scripts.swarm import publish, resolve
 
+    refused = (
+        "" if args.dev_red else resolve.block_refusal(store.config(args.slug).autonomy, args.slug, rows[agent.task])
+    )
+    if refused:
+        raise SwarmError(refused)
     pushed = publish.pushed_branches(_local_repo(store, args.slug), rows[agent.task], agent)
     red_run = _dev_red_run(store, args.slug) if args.dev_red else None
     if pushed:
@@ -2292,6 +2303,12 @@ def build_parser():
     publish.add_argument("files", nargs="*")
     sub.add_parser("branch")
     sub.add_parser("review")
+    resolve_cmd = sub.add_parser("resolve")
+    resolve_cmd.add_argument("action", choices=("attempt", "critic", "escalate", "status"))
+    resolve_cmd.add_argument("item")
+    for flag in ("--tried", "--output", "--reason", "--evidence"):
+        resolve_cmd.add_argument(flag, default="")
+    resolve_cmd.add_argument("--command", dest="ran", default="")
     done = sub.add_parser("done")
     done.add_argument("--pr", default="")
     for key in ledger_kinds.PROOF_KEYS:
