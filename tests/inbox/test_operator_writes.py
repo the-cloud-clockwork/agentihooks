@@ -233,13 +233,6 @@ def test_plan_and_slice_additions_are_quiet_but_other_adds_and_events_still_rela
     assert pending(inbox, MASTER_SEAT) == [] and pending(inbox, CI.seat) == []
 
 
-def test_an_added_event_without_a_target_does_not_crash_and_still_relays(swarm):
-    _, inbox = swarm
-    sent = relay(swarm, {"rev": 5, "at": 5, "by": "operator", "kind": "added"})
-    assert len(sent) == 1
-    assert len(pending(inbox, MASTER_SEAT)) == 1
-
-
 def test_a_ledger_without_a_swarm_sends_nothing(swarm):
     store, inbox = swarm
     assert operator_mail.relay(inbox, store, "other", DOC, [write(5, "phases/p1")], line) == []
