@@ -208,6 +208,23 @@ def test_the_health_check_answers_over_tls(tls_ledger):
     assert ledger_link.serving(timeout=5, url=tls_ledger["base"]) == str(core.LEDGER_DIR)
 
 
+@pytest.mark.parametrize("path", ["agent-token", "ops"])
+def test_a_refusal_with_an_unread_body_answers_with_its_status_over_tls(tls_ledger, path):
+    request = urllib.request.Request(
+        f"{tls_ledger['base']}/api/v1/ledgers/{SLUG}/{path}",
+        b'{"ops": []}',
+        {"Content-Type": "application/json", "X-Ledger-Agent": "engineer@323133-0256"},
+        method="POST",
+    )
+    context = ssl.create_default_context(cadata=os.environ["LEDGER_CA_PEM"])
+
+    with pytest.raises(urllib.error.HTTPError) as refused:
+        urllib.request.urlopen(request, timeout=5, context=context)
+
+    assert refused.value.code == 403
+    assert b"forbidden" in refused.value.read()
+
+
 def trusted(monkeypatch, cert):
     seen = []
 
