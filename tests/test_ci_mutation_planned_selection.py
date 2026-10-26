@@ -653,20 +653,31 @@ def test_a_changed_tests_data_file_adds_only_the_tests_that_read_it(tmp_path, mo
     }
 
 
-WORKFLOW = "jobs:\n  split:\n    runs-on: x\n  unit:\n    needs: split\n    steps:\n      - run: {unit}\n  lint:\n    steps:\n      - run: {lint}\n"
+WORKFLOW = (
+    "env:\n  FLAG: {env}\njobs:\n  split:\n    runs-on: {split}\n  unit:\n    needs: split\n    steps:\n"
+    "      - run: {unit}\n  lint:\n    steps:\n      - run: {lint}\n"
+)
+RECORDED_WORKFLOW = {"env": "1", "split": "x", "unit": "pytest", "lint": "ruff"}
+READERS = ["tests/test_core.py::TestSpawn::test_child", "tests/test_core.py::test_other"]
 
 
 @pytest.mark.parametrize(
     "edit,expected",
-    [({"unit": "pytest", "lint": "ruff check"}, NARROWED), ({"unit": "pytest -x", "lint": "ruff"}, WHOLE)],
+    [
+        ({"lint": "ruff check"}, sorted([*NARROWED, *READERS])),
+        ({"unit": "pytest -x"}, WHOLE),
+        ({"split": "y"}, WHOLE),
+        ({"env": "2"}, WHOLE),
+    ],
 )
 def test_a_workflow_edit_drops_narrowing_only_when_it_changes_the_test_command(tmp_path, monkeypatch, edit, expected):
     manifest = {**_recorded_project(tmp_path, monkeypatch), "version": 2}
+    manifest["tests"]["tests/test_core.py::test_other"]["files"] = [".github/workflows/test.yml"]
     workflow = tmp_path / ".github/workflows/test.yml"
     workflow.parent.mkdir(parents=True)
-    workflow.write_text(WORKFLOW.format(unit="pytest", lint="ruff"))
+    workflow.write_text(WORKFLOW.format(**RECORDED_WORKFLOW))
     manifest["commit"] = _commit(tmp_path, "recorded workflow")
-    workflow.write_text(WORKFLOW.format(**edit))
+    workflow.write_text(WORKFLOW.format(**{**RECORDED_WORKFLOW, **edit}))
     _commit(tmp_path, "workflow")
     selection = {}
     plan.estimate(tmp_path, {"scripts/core.py": {6}}, selection, manifest)

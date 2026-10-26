@@ -56,8 +56,8 @@ def estimate(
             covering = line_covering_tests(root, manifest, changes, paths)
         else:
             covering = covering_tests(manifest, units | drifted, paths)
-        if any(path.startswith("tests/") for path in paths):
-            # A child process can read a tests data file the tracer never sees.
+        if any(path.startswith(("tests/", ".github/workflows/")) for path in paths):
+            # A child process can read a tests data or workflow file the tracer never sees.
             covering.update(
                 node(test).partition("[")[0] for test, found in manifest["tests"].items() if found["escapes"]
             )
@@ -133,6 +133,7 @@ def record_drift(root: Path, manifest: dict) -> tuple[set[str], set[int], set[st
                 path, _show(root, manifest["commit"], path), _show(root, "HEAD", path), manifest.get("version")
             ):
                 return None
+            paths.add(path)
         elif path.startswith("tests/") and path.endswith(".py"):
             # A changed helper or conftest can move what any test reaches.
             if not Path(path).name.startswith("test_"):
