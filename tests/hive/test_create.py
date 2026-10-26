@@ -642,3 +642,12 @@ def test_a_name_only_herdr_or_the_registry_holds_is_skipped(world, machines, reg
     done = create.create(world.tools, create.Options(node="worker-002", dry_run=True))
 
     assert done == "dry run of hive create swarm-hive-003: nothing written"
+
+
+def test_a_name_only_a_hive_member_holds_is_skipped(world):
+    world.tools.redis.hset(machine.MACHINES, "worker-001", NAME)
+    auth.mint(world.tools.redis, "swarm-hive-002", "redis://hive.example:6380/2")
+
+    done = create.create(world.tools, create.Options(node="worker-002", dry_run=True))
+
+    assert done == "dry run of hive create swarm-hive-003: nothing written"

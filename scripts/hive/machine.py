@@ -4,7 +4,6 @@ import json
 import subprocess
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
-from itertools import count
 from pathlib import Path
 from typing import TYPE_CHECKING
 from urllib.parse import urlsplit
@@ -56,7 +55,8 @@ def name(redis: "Redis", machine: str, assign: bool = True, taken: Callable[[], 
                 if machine in named:
                     return named[machine]
                 used = {*named.values(), *taken()}
-                found = next(hive_name(ordinal) for ordinal in count(1) if hive_name(ordinal) not in used)
+                ordinals = (ordinal for ordinal, _ in enumerate([*used, None], 1))
+                found = next(hive_name(ordinal) for ordinal in ordinals if hive_name(ordinal) not in used)
                 if assign:
                     pipe.multi()
                     pipe.hset(MACHINES, machine, found)
