@@ -581,6 +581,7 @@ def test_protected_provenance_admits_only_the_retried_evidence_upload(uses, boun
         ({"set": {"sonar": "${{ steps.select.outputs.sonar }}"}}, False),
         ({"set": {"sonar": "skip"}}, True),
         ({"drop": ("legs",), "set": {"sonar": "${{ steps.select.outputs.sonar }}"}}, True),
+        ({"base": {"sonar": "skip"}, "set": {"sonar": "${{ steps.select.outputs.sonar }}"}}, True),
     ],
 )
 def test_protected_select_outputs_admit_only_dropping_the_unused_file_outputs_or_adding_sonar(change, red):
@@ -597,6 +598,7 @@ def test_protected_select_outputs_admit_only_dropping_the_unused_file_outputs_or
     }
     for key in change.get("absent", ()):
         del base["jobs"]["select"]["outputs"][key]
+    base["jobs"]["select"]["outputs"].update(change.get("base", {}))
     base["jobs"]["gate"]["needs"].append("select")
     head = copy.deepcopy(base)
     outputs = head["jobs"]["select"]["outputs"]
