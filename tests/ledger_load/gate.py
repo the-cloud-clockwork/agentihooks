@@ -239,7 +239,7 @@ def free_port() -> int:
 def start_server(folder: Path, port: int, log: TextIO) -> subprocess.Popen:
     env = {**os.environ, "LEDGER_DIR": str(folder), "LEDGER_PORT": str(port), "SWARM_RELOAD": "0"}
     server = subprocess.Popen(
-        [sys.executable, ledger_server.__file__, "--serve"],
+        [sys.executable, str(Path(__file__).with_name("yprof.py")), ledger_server.__file__, "--serve"],
         env=env,
         stdout=log,
         stderr=subprocess.PIPE,

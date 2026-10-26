@@ -159,6 +159,8 @@ jobs:
           mkdir load-evidence
           cp head/tests/ledger_load/gate.py base/tests/ledger_load/gate.py
           cp head/tests/ledger_load/memory.py base/tests/ledger_load/memory.py
+          cp head/tests/ledger_load/yprof.py base/tests/ledger_load/yprof.py
+          uv pip install --system yappi
           git -C head fetch --depth=1 origin "$BASE"
         env:
           BASE: ${{ inputs.base || '726353637ab44da81bdbd374ec393db275856e22' }}
@@ -177,6 +179,7 @@ jobs:
             ( cd "$side" && REDIS_URL="redis://127.0.0.1:6379/$database" \
               AGENTIHOOKS_SWARM_REDIS_URL="redis://127.0.0.1:6379/$database" \
               AGENTIHOOKS_HOME="$GITHUB_WORKSPACE/load-home/$side" \
+              YPROF_OUT="$GITHUB_WORKSPACE/load-evidence/$side/yprof.txt" \
               python -m tests.ledger_load.memory \
               --folder "$GITHUB_WORKSPACE/load-evidence/$side" \
               --base "$BASE" 2>&1 | tee "$GITHUB_WORKSPACE/load-evidence/$side.log" ) &
@@ -199,6 +202,7 @@ jobs:
           path: |
             load-evidence/*.log
             load-evidence/*/server.log
+            load-evidence/*/yprof.txt*
           if-no-files-found: error
           retention-days: 7
 
