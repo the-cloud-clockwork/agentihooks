@@ -180,15 +180,27 @@ def _create(args: argparse.Namespace) -> str:
 
 def _remove(args: argparse.Namespace) -> list[str]:
     from scripts import openbao_kv
-    from scripts.hive import invite, remove
+    from scripts.hive import invite, machine, remove
     from scripts.swarm.store import RedisStore
 
     bao = openbao_kv.from_env(os.environ)
-    if bao is None:
+    if bao is None and not args.dry_run:
         raise auth.HiveError(f"{openbao_kv.URL_ENV} and {openbao_kv.TOKEN_ENV} must both be set")
     store = RedisStore(redis_client())
-    label = args.label or remove.label(store.redis, args.id)
-    plan = remove.Plan(args.id, label, args.path or invite.default_path(label), args.antoncore, args.wait, _signer())
+    if args.label:
+        hive, label = machine.named_member(store.redis, args.id) or args.id, args.label
+    else:
+        hive, label = remove.resolve(store.redis, args.id)
+    given = {"repo": args.repo, "base": args.base}
+    plan = remove.Plan(
+        hive,
+        label,
+        args.path or invite.default_path(label),
+        **{key: value for key, value in given.items() if value is not None},
+        wait_s=args.wait,
+        signer=_signer(),
+        dry_run=args.dry_run,
+    )
     return remove.remove(store, bao, plan, remove.Host())
 
 
@@ -294,11 +306,15 @@ def _parser() -> argparse.ArgumentParser:
     removed = sub.add_parser(
         "remove", help="Drain a hive, then delete it from Redis, herdr, known hosts, OpenBao and antoncore"
     )
-    removed.add_argument("id")
+    removed.add_argument("id", metavar="NAME", help="hive name or member id")
     removed.add_argument("--label", help="herdr label and manifest name; defaults to the member's name")
     removed.add_argument("--path", help="OpenBao record under the secret mount; defaults to k8s/agentihooks-hive-LABEL")
-    removed.add_argument("--antoncore", type=Path, help="antoncore checkout to remove the hive's manifests from")
+    removed.add_argument(
+        "--repo", help="repository holding the hive manifests; defaults to the-cloud-clockwork/antoncore"
+    )
+    removed.add_argument("--base", help="branch the removal pull request merges into; defaults to dev")
     removed.add_argument("--wait", type=int, default=3600, help="seconds to wait for its agents to hand off")
+    removed.add_argument("--dry-run", action="store_true", help="Print every step, and write nothing")
     drained = sub.add_parser("drain", help="Take no new agents on this hive and wait until its agents finish")
     drained.add_argument("--wait", type=int, default=3600, help="seconds to wait for its agents to finish")
     sub.add_parser(

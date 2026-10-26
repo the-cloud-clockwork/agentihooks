@@ -95,7 +95,7 @@ def add(
     _ui(redis, local_id)
     listed = _listed(run)
     _one_per_machine(listed, target, label)
-    member = _member(redis, label)
+    member = named_member(redis, label)
     _keep(listed, target, label, run)
     if member:
         return {"id": member, "name": label}
@@ -122,7 +122,7 @@ def _one_per_machine(listed: list[dict], target: str, label: str) -> None:
             )
 
 
-def _member(redis: "Redis", label: str) -> str | None:
+def named_member(redis: "Redis", label: str) -> str | None:
     for key in redis.scan_iter(match=f"{auth.PREFIX}:member:*"):
         if redis.hget(key, "name") == label:
             return key.rsplit(":", 1)[1]
@@ -160,10 +160,12 @@ def _listed(run: Callable[..., subprocess.CompletedProcess]) -> list[dict]:
         raise auth.HiveError(f"herdr machine list answered with output that is not JSON ({exc})") from exc
 
 
-def forget(label: str, known_hosts: Path, run: Callable[..., subprocess.CompletedProcess]) -> list[str]:
+def forget(label: str, known_hosts: Path, run: Callable[..., subprocess.CompletedProcess], dry_run: bool) -> list[str]:
     found = [machine for machine in _listed(run) if machine.get("label") == label]
     if not found:
         return [f"herdr holds no machine {label}"]
+    if dry_run:
+        return [f"would remove herdr machine {label} and the host key of {known_host(m['target'])}" for m in found]
     done = []
     for machine in found:
         run_checked(run, ["herdr", "machine", "remove", machine["id"]], None, HERDR_TIMEOUT_S)

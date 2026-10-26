@@ -193,37 +193,21 @@ def test_cli_add_names_the_hive_after_its_machine_on_every_run(admin, monkeypatc
     )
 
 
-def _antoncore(tmp_path, files):
-    checkout = tmp_path / "antoncore"
-    for name in files:
-        (checkout / name).parent.mkdir(parents=True, exist_ok=True)
-        (checkout / name).write_text("kind: x\n")
-    git = ["git", "-C", str(checkout), "-c", "user.email=t@t", "-c", "user.name=t"]
-    subprocess.run([*git, "init", "-q"], check=True)
-    subprocess.run([*git, "add", "."], check=True)
-    subprocess.run([*git, "commit", "-qm", "seed"], check=True)
-    return checkout
+def test_remove_deletes_the_files_of_a_hive_that_hive_create_named():
+    owned = [
+        "k8s/argocd/apps/swarm-hive-1792865339.yaml",
+        "k8s/manifests/swarm-hive-1792865339/hive.yaml",
+        "k8s/values-overlays/swarm-hive-1792865339/values.yaml",
+    ]
+    tree = "".join(f"{path}\n" for path in [*owned, "k8s/manifests/swarm-hive-001/hive.yaml"])
 
+    def run(argv, **kwargs):
+        return subprocess.CompletedProcess(argv, 0, tree, "")
 
-def test_remove_stages_the_files_of_a_hive_that_hive_create_named(tmp_path):
-    kept = "k8s/manifests/swarm-hive-001/hive.yaml"
-    checkout = _antoncore(
-        tmp_path,
-        [
-            "k8s/argocd/apps/swarm-hive-1792865339.yaml",
-            "k8s/manifests/swarm-hive-1792865339/hive.yaml",
-            "k8s/values-overlays/swarm-hive-1792865339/values.yaml",
-            kept,
-        ],
-    )
+    plan = remove.Plan("m1", "swarm-hive-1792865339", "k8s/x", dry_run=True)
 
-    done = remove.unmanifest(checkout, "swarm-hive-1792865339", subprocess.run)
-
-    staged = subprocess.run(["git", "-C", str(checkout), "ls-files"], capture_output=True, text=True, check=True)
-    assert staged.stdout.splitlines() == [kept]
-    assert done == [
-        "staged the removal of k8s/argocd/apps/swarm-hive-1792865339.yaml, k8s/manifests/swarm-hive-1792865339, "
-        f"k8s/values-overlays/swarm-hive-1792865339 in {checkout}; commit it and open a pull request"
+    assert remove.unmanifest(plan, run) == [
+        f"would open a pull request into the-cloud-clockwork/antoncore dev deleting {', '.join(owned)}"
     ]
 
 

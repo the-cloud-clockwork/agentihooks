@@ -30,7 +30,7 @@ def read(run: Run, repo: str, path: str, ref: str) -> str:
     return gh(run, ["api", "-H", RAW, f"repos/{repo}/contents/{path}?ref={ref}"]) + "\n"
 
 
-def open_pr(run: Run, repo: str, base: str, branch: str, files: Mapping[str, str], message: str) -> str:
+def open_pr(run: Run, repo: str, base: str, branch: str, files: Mapping[str, str | None], message: str) -> str:
     pending = '[.[] | select(.state != "CLOSED")][0].url // ""'
     found = gh(
         run, ["pr", "list", "-R", repo, "--head", branch, "--state", "all", "--json", "url,state", "--jq", pending]
@@ -39,7 +39,10 @@ def open_pr(run: Run, repo: str, base: str, branch: str, files: Mapping[str, str
         return found
     head = gh(run, ["api", f"repos/{repo}/git/ref/heads/{base}", "--jq", ".object.sha"])
     tree = gh(run, ["api", f"repos/{repo}/git/commits/{head}", "--jq", ".tree.sha"])
-    entries = [{"path": path, "mode": "100644", "type": "blob", "content": text} for path, text in files.items()]
+    entries = [
+        {"path": path, "mode": "100644", "type": "blob", **({"sha": None} if text is None else {"content": text})}
+        for path, text in files.items()
+    ]
     tree = _post(run, f"repos/{repo}/git/trees", {"base_tree": tree, "tree": entries})
     commit = _post(run, f"repos/{repo}/git/commits", {"message": message, "tree": tree, "parents": [head]})
     _branch(run, repo, branch, commit)
