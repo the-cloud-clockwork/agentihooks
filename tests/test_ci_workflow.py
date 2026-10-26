@@ -746,7 +746,11 @@ def test_mutation_gate_plants_itself_whenever_its_code_changes():
     [base] = [step for step in steps if step.get("with", {}).get("path") == "base"]
     assert base["with"]["ref"] == "${{ github.event.pull_request.base.sha }}"
     [changed] = [step for step in steps if step.get("id") == "changed"]
-    assert "diff -rq base/scripts/ci_mutation head/scripts/ci_mutation" in changed["run"]
+    listed = changed["run"].split("for path in ", 1)[1].split("; do", 1)[0].replace("\\\n", " ").split()
+    assert {"scripts/ci_mutation", "tests/mutation_self_plant", "hooks/context/conditions.py", "pyproject.toml"} <= set(
+        listed
+    )
+    assert '! diff -rq "base/$path" "head/$path"' in changed["run"]
     [pick] = [step for step in steps if step.get("name") == "Pick the protected grader"]
     assert pick["run"].startswith("if [[ -f base/tests/mutation_self_plant/plant.py ]]; then\n")
     [grade] = [step for step in steps if '"$GRADER"' in step.get("run", "")]

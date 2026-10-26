@@ -3282,18 +3282,18 @@ jobs:
           path: base
           ref: ${{ github.event.pull_request.base.sha }}
           persist-credentials: false
-      - name: Plant only when the mutation gate or its plant changed
+      - name: Plant only when the mutation gate or an input it reads changed
         id: changed
         run: |
-          if diff -rq base/scripts/ci_mutation head/scripts/ci_mutation >/dev/null \
-            && diff -rq base/tests/mutation_self_plant head/tests/mutation_self_plant >/dev/null \
-            && cmp -s base/hooks/context/conditions.py head/hooks/context/conditions.py \
-            && cmp -s base/pyproject.toml head/pyproject.toml; then
-            echo "plant=false" >> "$GITHUB_OUTPUT"
-            echo "The mutation gate and its plant match the base; nothing to prove."
-          else
-            echo "plant=true" >> "$GITHUB_OUTPUT"
-          fi
+          plant=false
+          for path in scripts/ci_mutation tests/mutation_self_plant hooks/context/conditions.py scripts/ci_cpu_quota.py \
+            pyproject.toml pytest.ini setup.cfg tox.ini uv.lock .coveragerc; do
+            if [[ -e "base/$path" || -e "head/$path" ]] && ! diff -rq "base/$path" "head/$path" >/dev/null 2>&1; then
+              echo "Changed: $path"
+              plant=true
+            fi
+          done
+          echo "plant=$plant" >> "$GITHUB_OUTPUT"
       - name: Pick the protected grader
         if: steps.changed.outputs.plant == 'true'
         run: |
