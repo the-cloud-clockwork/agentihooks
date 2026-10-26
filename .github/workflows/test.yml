@@ -1630,10 +1630,23 @@ jobs:
 
       # The artifact service download spends none of the App installation's hourly REST budget.
       - name: Download shard reports
+        id: shard-reports
+        continue-on-error: true
         uses: actions/download-artifact@v4
-        with:
+        with: &shard-reports
           pattern: "{durations,flakes}-${{ matrix.python-version }}-*"
           path: shard-reports
+
+      - name: Name the artifact service outage
+        if: steps.shard-reports.outcome == 'failure'
+        run: |
+          echo "::warning::The artifact service failed the shard report download; retrying it once in 30 seconds."
+          sleep 30
+
+      - name: Download shard reports, attempt 2
+        if: steps.shard-reports.outcome == 'failure'
+        uses: actions/download-artifact@v4
+        with: *shard-reports
 
       - name: Require every planned shard report
         shell: bash

@@ -310,6 +310,7 @@ def test_a_failed_shard_report_download_names_the_outage_and_retries_once_before
     retry = f"steps.{first['id']}.outcome == 'failure'"
     assert notice["if"] == retry and second["if"] == retry
     assert "::warning::" in notice["run"] and "artifact service" in notice["run"]
+    assert "sleep 30" in notice["run"]
     assert "continue-on-error" not in second
     assert second["uses"] == first["uses"] == "actions/download-artifact@v4"
     assert (
