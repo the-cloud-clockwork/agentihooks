@@ -89,13 +89,22 @@ def test_json_markdown_renders_the_full_marker_line_when_every_field_is_set():
     }
 
 
+def test_a_json_phases_list_that_is_empty_is_refused():
+    data = json.dumps({"phases": []})
+
+    with pytest.raises(PlanError) as caught:
+        normalize(data, "empty-phases.json")
+
+    assert caught.value.errors == ["the plan file needs a nonempty phases list"]
+
+
 def test_a_json_phase_entry_that_is_not_an_object_is_refused():
     data = json.dumps({"phases": ["not an object"]})
 
     with pytest.raises(PlanError) as caught:
         normalize(data, "bad.json")
 
-    assert "must be an object" in str(caught.value)
+    assert caught.value.errors == ["phase 1: must be an object"]
 
 
 def test_a_json_phase_with_a_blank_title_is_refused():
@@ -104,7 +113,7 @@ def test_a_json_phase_with_a_blank_title_is_refused():
     with pytest.raises(PlanError) as caught:
         normalize(data, "bad.json")
 
-    assert "needs a title" in str(caught.value)
+    assert caught.value.errors == ["phase 1: needs a title"]
 
 
 def test_a_json_phase_with_a_non_string_description_is_refused():
@@ -113,7 +122,7 @@ def test_a_json_phase_with_a_non_string_description_is_refused():
     with pytest.raises(PlanError) as caught:
         normalize(data, "bad.json")
 
-    assert "description must be a string" in str(caught.value)
+    assert caught.value.errors == ["phase 1: description must be a string"]
 
 
 def test_a_json_phase_with_a_bad_planning_value_is_refused():
@@ -122,7 +131,7 @@ def test_a_json_phase_with_a_bad_planning_value_is_refused():
     with pytest.raises(PlanError) as caught:
         normalize(data, "bad.json")
 
-    assert "planning must be manual or auto" in str(caught.value)
+    assert caught.value.errors == ["phase 1: planning must be manual or auto"]
 
 
 def test_a_json_phase_with_a_non_list_depends_on_is_refused():
@@ -131,7 +140,7 @@ def test_a_json_phase_with_a_non_list_depends_on_is_refused():
     with pytest.raises(PlanError) as caught:
         normalize(data, "bad.json")
 
-    assert "depends_on must be a list" in str(caught.value)
+    assert caught.value.errors == ["phase 1: depends_on must be a list of positions or ids"]
 
 
 def test_a_json_integer_dependency_outside_the_plan_is_refused():
@@ -140,7 +149,7 @@ def test_a_json_integer_dependency_outside_the_plan_is_refused():
     with pytest.raises(PlanError) as caught:
         normalize(data, "bad.json")
 
-    assert "outside the plan" in str(caught.value)
+    assert caught.value.errors == ["phase 1 depends on position 5, outside the plan"]
 
 
 def test_a_json_phase_with_a_non_string_id_is_refused():
@@ -149,7 +158,7 @@ def test_a_json_phase_with_a_non_string_id_is_refused():
     with pytest.raises(PlanError) as caught:
         normalize(data, "bad.json")
 
-    assert "id must be a string" in str(caught.value)
+    assert caught.value.errors == ["phase 1: id must be a string"]
 
 
 def test_a_json_phase_with_a_blank_not_duplicate_is_refused():
@@ -158,7 +167,7 @@ def test_a_json_phase_with_a_blank_not_duplicate_is_refused():
     with pytest.raises(PlanError) as caught:
         normalize(data, "bad.json")
 
-    assert "why the phase differs" in str(caught.value)
+    assert caught.value.errors == ["phase 1: not_duplicate must say in plain words why the phase differs"]
 
 
 MARKED = """# Tiny plan
@@ -204,6 +213,7 @@ def test_marked_markdown_gives_one_phase_per_marker_with_slices_in_order_and_a_p
     assert result.kind == "marked"
     assert result.title == "Tiny plan"
     assert result.markdown == MARKED
+    assert result.content["title"] == "Tiny plan"
     assert result.slices == {"First phase": ["pin1", "pin2"], "Second phase": []}
     titles = {phase["title"]: phase for phase in result.content["phases"]}
     assert titles["First phase"]["id"] == "pin"
@@ -233,6 +243,19 @@ Prose.
     assert result.content["phases"][0]["not_duplicate"] == "it covers a different seam"
 
 
+def test_a_marker_without_a_planning_key_defaults_to_auto():
+    text = """# Plan
+
+## Phase one
+<!-- phase: id=a -->
+Prose.
+"""
+
+    result = normalize(text, "default-planning.md")
+
+    assert result.content["phases"][0]["planning"] == "auto"
+
+
 def test_marked_markdown_without_a_level_one_heading_falls_back_to_the_file_stem():
     text = """## Phase one
 <!-- phase: id=a planning=auto -->
@@ -251,6 +274,36 @@ def test_a_heading_with_nothing_after_it_at_end_of_file_is_not_treated_as_a_phas
     result = normalize(text, "trailing.md")
 
     assert result.kind == "raw"
+
+
+def test_has_marker_checks_only_the_immediately_following_line():
+    text = """# Plan
+
+<!-- phase: id=decoy planning=auto -->
+## Not a phase
+
+<!-- phase: id=sneaky planning=auto -->
+Prose only, no real marker here.
+"""
+
+    result = normalize(text, "neighbors.md")
+
+    assert result.kind == "raw"
+
+
+def test_has_marker_uses_the_markers_own_line_not_the_heading_after_it():
+    text = """# Plan
+
+## First phase
+<!-- phase: id=a planning=auto -->
+## Second phase
+<!-- phase: id=b planning=auto -->
+Prose.
+"""
+
+    result = normalize(text, "adjacent.md")
+
+    assert [phase["title"] for phase in result.content["phases"]] == ["First phase", "Second phase"]
 
 
 def test_a_long_phase_description_is_bound_to_about_800_characters_on_a_word_boundary():
@@ -377,7 +430,7 @@ Prose.
     with pytest.raises(PlanError) as caught:
         normalize(text, "unknown-key.md")
 
-    assert "unknown key bogus" in str(caught.value)
+    assert caught.value.errors == ["phase 'Phase one': unknown key bogus in phase marker"]
 
 
 def test_a_marker_with_a_bad_planning_value_is_refused():
@@ -391,7 +444,7 @@ Prose.
     with pytest.raises(PlanError) as caught:
         normalize(text, "bad-planning.md")
 
-    assert "planning must be manual or auto" in str(caught.value)
+    assert caught.value.errors == ["phase 'Phase one': planning must be manual or auto"]
 
 
 def test_an_unknown_dependency_is_refused():

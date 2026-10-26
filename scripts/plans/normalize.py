@@ -83,7 +83,7 @@ def _json_phase(position: int, entry: Any, errors: list[str]) -> dict:
     where = f"phase {position}"
     if not isinstance(entry, dict):
         errors.append(f"{where}: must be an object")
-        return {"title": "", "description": "", "planning": PLANNING_DEFAULT}
+        return {}
     phase = {
         "title": _json_title(entry, where, errors),
         "description": _json_description(entry, where, errors),
@@ -188,7 +188,7 @@ def _from_markdown(text: str, name: str, existing: set[str]) -> Normalized:
         where = f"phase {title!r}"
         fields = _marker_fields(entries[i + 1][2].strip(), where, errors)
         phases.append(_marked_phase(title, fields, where, errors))
-        ranged.append({"id": phases[-1].get("id") or f"_pos{len(ranged) + 1}", "title": title})
+        ranged.append({"id": str(i), "title": title})
     if errors:
         raise PlanError(errors)
     try:
@@ -236,7 +236,7 @@ def _marked_phase(title: str, fields: dict, where: str, errors: list[str]) -> di
     planning = fields.get("planning", PLANNING_DEFAULT)
     if planning not in ("manual", "auto"):
         errors.append(f"{where}: planning must be manual or auto")
-    phase = {"title": title, "description": "", "planning": planning}
+    phase = {"title": title, "planning": planning}
     if fields.get("depends"):
         phase["depends_on"] = [token.strip() for token in fields["depends"].split(",") if token.strip()]
     if fields.get("id"):
