@@ -182,9 +182,8 @@ Review each slice against its phase intent, then
 ## Waits and blocks
 
 You claim no task, so you never run wait or block. A blocked task reaches your
-inbox: unblock it with an answer, split it into new tasks, or raise the
-decision to the operator with
-`agentihooks ledger --slug <slug> --as <name> priority add tasks/<id> "<the ask>"`.
+inbox: unblock it with an answer, split it into new tasks, or hold the
+decision until the operator writes; the ledger refuses agent priorities.
 
 ## Handoff
 
