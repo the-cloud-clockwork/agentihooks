@@ -986,7 +986,7 @@ def test_shard_verification_starts_from_the_plan_and_prefetches_complete_reports
         "tests.shard_check shard-reports/durations-*/durations.json --collected collected-data/collected.json" in check
     )
     assert "REUSED" in check
-    assert job["timeout-minutes"] == 45
+    assert job["timeout-minutes"] == "${{ github.event_name == 'merge_group' && 42 || 60 }}"
     assert job["permissions"] == {"contents": "read"}
 
 

@@ -357,7 +357,8 @@ def test_the_verifier_deadline_ends_inside_the_queue_check_timeout():
     jobs = yaml.safe_load((root / ".github" / "workflows" / "test.yml").read_text())["jobs"]
     assert ci_gate_queue.DEADLINE_SECONDS < queue["check_response_timeout_minutes"] * 60
     assert ci_gate_queue.DEADLINE_SECONDS < jobs["queue-fail-fast"]["timeout-minutes"] * 60
-    assert ci_gate_queue.DEADLINE_SECONDS < jobs["shard-check"]["timeout-minutes"] * 60
+    shard_check = int(re.search(r"merge_group' && (\d+)", jobs["shard-check"]["timeout-minutes"])[1]) * 60
+    assert ci_gate_queue.DEADLINE_SECONDS < shard_check < queue["check_response_timeout_minutes"] * 60
 
 
 def test_the_early_gate_rejects_a_changed_graded_job_inventory():

@@ -6,7 +6,7 @@ from copy import deepcopy
 
 from scripts.ci_budget import rate_limit
 from scripts.ci_budget.jobs import read_jobs
-from scripts.ci_gate_shards import DEADLINE_SECONDS, POLL_SECONDS, api
+from scripts.ci_gate_shards import POLL_SECONDS, api
 from scripts.ci_queue_fail_fast import logged_loss
 
 GATE_NAME = "${{ github.event_name == 'merge_group' && 'Gate — Required' || 'queue-fail-fast' }}"
@@ -14,6 +14,8 @@ SUMMARY_NAME = "${{ github.event_name == 'merge_group' && 'Queue gate summary' |
 REQUIRED = {"select", "split", "test-count", "shard-check"}
 # Polls spend the App installation's shared hourly quota: one jobs call while an attempt has at most 100 jobs.
 JOB_PAGE = 100
+# Ends before the dev merge queue check timeout (45 minutes) so the run reports its own failure first.
+DEADLINE_SECONDS = 40 * 60
 SKIPPED = {
     "unit-selected",
     "coverage-ratchet",
