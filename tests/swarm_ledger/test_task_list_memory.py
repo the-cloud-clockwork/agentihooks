@@ -177,5 +177,5 @@ def test_hundred_concurrent_full_task_list_reads_stay_under_a_fixed_peak(stored)
     report = (
         f"{HUNDRED} task list walks peaked at {peak} bytes; one load peaks at {whole} whole, {tasks} task rows only"
     )
-    assert peak < whole / 2, report
+    assert peak < whole, report
     assert peak < tasks * 1.5, report

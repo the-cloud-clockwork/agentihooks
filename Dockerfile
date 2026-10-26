@@ -30,6 +30,7 @@ FROM mirror.gcr.io/library/python:3.12-slim-bookworm
 ENV PATH=/opt/venv/bin:$PATH \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
+    MALLOC_ARENA_MAX=2 \
     LEDGER_HOST=0.0.0.0 \
     LEDGER_PORT=8765 \
     LEDGER_DIR=/data \
