@@ -113,8 +113,11 @@ def _json_description(entry: dict, where: str, errors: list[str]) -> str:
     description = entry.get("description", "")
     if not isinstance(description, str):
         errors.append(f"{where}: description must be a string")
-    elif any(level for _, level, _ in plan_ranges.sections(description)):
-        errors.append(f"{where}: description must not hold headings")
+    elif any(
+        level or plan_ranges.ANCHOR.fullmatch(line) or PHASE_MARKER.fullmatch(line.strip())
+        for _, level, line in plan_ranges.sections(description)
+    ):
+        errors.append(f"{where}: description must not hold headings or plan markers")
     return description
 
 
@@ -152,10 +155,14 @@ def _json_not_duplicate(entry: dict, phase: dict, where: str, errors: list[str])
     not_duplicate = entry.get("not_duplicate")
     if not_duplicate is None:
         return
-    if isinstance(not_duplicate, str) and not_duplicate.strip() and not re.search(r'"|-->|\n', not_duplicate):
+    if isinstance(not_duplicate, str) and _plain_reason(not_duplicate):
         phase["not_duplicate"] = not_duplicate
     else:
         errors.append(f"{where}: {NOT_DUPLICATE_RULE}")
+
+
+def _plain_reason(value: str) -> bool:
+    return bool(value.strip()) and not re.search(r'"|-->|\n', value)
 
 
 def _render_markdown(title: str, phases: list[dict]) -> str:
@@ -257,7 +264,7 @@ def _marked_phase(title: str, fields: dict, where: str, errors: list[str]) -> di
     phase = {"title": title, "planning": planning}
     if fields.get("depends"):
         tokens = [token.strip() for token in fields["depends"].split(",") if token.strip()]
-        phase["depends_on"] = [int(token) if token.isdigit() else token for token in tokens]
+        phase["depends_on"] = [int(token) if token.isdecimal() else token for token in tokens]
     if fields.get("id"):
         if ledger_phases.ID_RE.fullmatch(fields["id"]):
             phase["id"] = fields["id"]
@@ -265,7 +272,7 @@ def _marked_phase(title: str, fields: dict, where: str, errors: list[str]) -> di
             errors.append(f"{where}: {ID_RULE}")
     if "not_duplicate" in fields:
         value = fields["not_duplicate"]
-        if not value.strip():
+        if not _plain_reason(value):
             errors.append(f"{where}: {NOT_DUPLICATE_RULE}")
         else:
             phase["not_duplicate"] = value

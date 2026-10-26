@@ -775,7 +775,18 @@ def test_json_position_dependencies_survive_the_canonical_markdown():
     ("phase", "error"),
     [
         ({"title": "A\nB"}, "phase 1: needs a one line title"),
-        ({"title": "A", "description": "Text.\n\n## Sneaky"}, "phase 1: description must not hold headings"),
+        (
+            {"title": "A", "description": "Text.\n\n## Sneaky"},
+            "phase 1: description must not hold headings or plan markers",
+        ),
+        (
+            {"title": "A", "description": "Text.\n<!-- slice: x -->"},
+            "phase 1: description must not hold headings or plan markers",
+        ),
+        (
+            {"title": "A", "description": "<!-- phase: planning=auto -->"},
+            "phase 1: description must not hold headings or plan markers",
+        ),
         (
             {"title": "A", "id": "my phase"},
             "phase 1: id must start with a letter and hold only letters, digits, dots, dashes or underscores",
@@ -819,6 +830,24 @@ def test_a_marker_id_with_an_unclosed_quote_is_refused():
     assert caught.value.errors == [
         "phase 'Phase one': id must start with a letter and hold only letters, digits, dots, dashes or underscores"
     ]
+
+
+def test_a_marker_not_duplicate_with_an_unclosed_quote_is_refused():
+    text = '# Plan\n\n## Phase one\n<!-- phase: planning=auto not_duplicate="abc -->\nProse.\n'
+
+    with pytest.raises(PlanError) as caught:
+        normalize(text, "unclosed-reason.md")
+
+    assert caught.value.errors == ["phase 'Phase one': not_duplicate must say in plain words why the phase differs"]
+
+
+def test_a_superscript_digit_dependency_stays_an_id_and_is_refused_as_unknown():
+    text = "# Plan\n\n## Phase one\n<!-- phase: depends=² planning=auto -->\nProse.\n"
+
+    with pytest.raises(PlanError) as caught:
+        normalize(text, "superscript.md")
+
+    assert caught.value.errors == ["phase 1 depends on unknown phase ²"]
 
 
 def test_bytes_that_are_not_utf8_are_refused():
