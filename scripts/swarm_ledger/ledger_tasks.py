@@ -561,11 +561,11 @@ def _update_fields(task: dict, fields: dict) -> dict:
         "branch" in fields
         and "repository_branches" not in fields
         and task.get("branch")
-        and task.get("repository_branches")
+        and list(task.get("repository_branches", {}).values()).count(task["branch"]) == 1
     ):
         branches = {
             repo: fields["branch"] if branch == task["branch"] else branch
-            for repo, branch in (task.get("repository_branches") or {}).items()
+            for repo, branch in task["repository_branches"].items()
         }
         fields = {**fields, "repository_branches": {repo: branch for repo, branch in branches.items() if branch}}
     if ledger_kinds.kind(task) == "plan" and fields.get("kind", "plan") != "plan" and "lane" not in fields:
