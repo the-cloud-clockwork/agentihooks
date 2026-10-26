@@ -216,3 +216,4 @@ def test_secret_detection_includes_all_tracked_text_and_hidden_configuration():
     assert properties["sonar.scanner.excludeHiddenFiles"] == "false"
     assert properties["sonar.sources"] == "."
     assert "tests/**" in properties["sonar.exclusions"].split(",")
+    assert ".git/**" in properties["sonar.exclusions"].split(",")
