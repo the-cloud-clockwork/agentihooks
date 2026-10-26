@@ -65,6 +65,8 @@ newer unverified, partial or failed set stops destructive retention until covera
 
 - The grant's corpus gates a restore and its projects gate the query and the rebuild; its principal is not checked
   against an operator role, because no stored grant exists for backup sets yet.
+- The historical query is chosen by whoever captures the set; `query_sha256` binds the restored answer to the
+  answer at capture, so it catches drift and loss after capture, not a wrong query chosen at capture.
 - Encryption happens in the storage layer; this module records key ids and checks them against a keyring.
 - The evidence is fixture-only: local folders and a SQLite file stand in for the buckets, the central database, the
   hosted ledger, Redis and the brain export. No deployed backup has been restored.

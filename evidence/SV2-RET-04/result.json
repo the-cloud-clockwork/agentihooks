@@ -36,6 +36,7 @@
     "Ledger, coordination and brain components are opaque bytes from their exporters; no live exporter is wired in.",
     "A partial set stays accepted with its irrecoverable objects listed, and retention stays stopped until a fully verified set exists.",
     "The grant corpus gates a restore and its projects gate the query and rebuild; the grant principal is not checked against an operator role because no stored grant exists for backup sets.",
+    "The capturer chooses the historical query; query_sha256 binds the restored answer to the answer at capture, so it detects drift and loss after capture, not a wrong query chosen at capture.",
     "No deletion path exists; a retention collector must consult Registry.retention_allowed and Registry.preserved.",
     "Capture records the exports it is given under one capture time; taking them under one fence is the caller's job."
   ],
