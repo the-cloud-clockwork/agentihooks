@@ -2,6 +2,7 @@ import json
 
 from scripts.swarm import cli
 from tests.swarm.test_cli import env, run  # noqa: F401
+from tests.swarm.test_pull_views import merged_with_empty_check_entries
 
 
 def test_done_on_a_merged_pull_request_read_without_its_rollup_names_the_fallback(env, monkeypatch, capsys):  # noqa: F811
@@ -36,3 +37,16 @@ def test_done_on_a_fully_read_pull_request_prints_no_fallback(env, monkeypatch, 
         "state": "done",
         "next": "stop now; the swarm closes this session",
     }
+
+
+def test_done_closes_a_task_whose_merged_pull_request_has_empty_check_entries(env, monkeypatch, capsys):  # noqa: F811
+    _, ledger, _ = env
+    run("sw", "create", "--repo", "/repo")
+    run("sw", "start")
+    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "engineer@a1b2c3-0001")
+    read, github = cli.ledger_events.view, merged_with_empty_check_entries()
+    monkeypatch.setattr(cli.ledger_events, "view", lambda url: read(url, run=github))
+    capsys.readouterr()
+    assert run("sw", "done", "--pr", "https://github.com/o/r/pull/9") == 0
+    assert json.loads(capsys.readouterr().out.splitlines()[-1])["state"] == "done"
+    assert ledger.rows["t1"]["state"] == "done"
