@@ -164,6 +164,23 @@ def test_a_free_text_stage_exit_out_of_runs_takes_the_reported_outcome():
     assert state["runs"] == {"scout": 2}
 
 
+def test_a_stage_pass_workflow_exit_ends_it_before_the_pass_edge():
+    definition = schema.validate(
+        {
+            "workflow": {"name": "early", "intent": "Stop early.", "head": "try", "exit": "try.pass"},
+            "stages": {
+                "try": {"profile": "engineer", "next": {"pass": "more"}},
+                "more": {"profile": "judge", "next": {"pass": "exit"}},
+            },
+        }
+    )
+    state = machine.advance(definition, machine.start(definition), "try", "pass", {}, never)
+
+    assert state["status"] == "passed"
+    assert state["stage"] is None
+    assert state["runs"] == {"try": 1}
+
+
 def test_a_free_text_workflow_exit_goes_through_the_exit_check_on_a_pass():
     definition = dataclasses.replace(simple(), exit="the change is done")
     check = answers(True)
