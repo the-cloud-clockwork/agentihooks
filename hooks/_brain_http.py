@@ -136,8 +136,8 @@ def _request(
         return None
 
 
-def get(path: str, params: dict[str, Any] | None = None) -> dict[str, Any] | None:
-    return _request("GET", path, params=params)
+def get(path: str, params: dict[str, Any] | None = None, *, surface_http_errors: bool = False) -> dict[str, Any] | None:
+    return _request("GET", path, params=params, surface_http_errors=surface_http_errors)
 
 
 def post(

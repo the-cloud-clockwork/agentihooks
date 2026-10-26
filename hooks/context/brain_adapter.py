@@ -610,7 +610,7 @@ def get_status() -> dict:
     except ImportError:
         return {"enabled": False, "error": "config not loaded"}
     from hooks.context import brain_routes
-    from hooks.context.project_cache import cache_scope_mismatch_total
+    from hooks.context.project_cache import FALLBACK, cache_scope_mismatch_total, scoped_feed_fallback_total
 
     source = _get_source()
     entry_count = 0
@@ -666,6 +666,7 @@ def get_status() -> dict:
         "active_broadcasts": active_broadcasts,
         "content_hash": _content_hash or _load_persisted_hash(),
         "cache_scope_mismatch_total": cache_scope_mismatch_total(),
+        FALLBACK: scoped_feed_fallback_total(),
         brain_routes.FAILURES: brain_routes.failures(os.environ),
         "warnings": warnings,
     }
