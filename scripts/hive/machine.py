@@ -2,8 +2,9 @@
 
 import json
 import subprocess
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
+from itertools import count
 from pathlib import Path
 from typing import TYPE_CHECKING
 from urllib.parse import urlsplit
@@ -44,7 +45,7 @@ def hive_name(ordinal: int) -> str:
     return f"{NAME_PREFIX}{ordinal:03d}"
 
 
-def name(redis: "Redis", machine: str, assign: bool = True) -> str:
+def name(redis: "Redis", machine: str, assign: bool = True, taken: Iterable[str] = ()) -> str:
     from redis.exceptions import WatchError
 
     with redis.pipeline() as pipe:
@@ -54,11 +55,8 @@ def name(redis: "Redis", machine: str, assign: bool = True) -> str:
                 named = pipe.hgetall(MACHINES)
                 if machine in named:
                     return named[machine]
-                used = sorted(named.values())
-                found = next(
-                    (hive_name(ordinal) for ordinal, held in enumerate(used, 1) if held != hive_name(ordinal)),
-                    hive_name(len(used) + 1),
-                )
+                used = {*named.values(), *taken}
+                found = next(hive_name(ordinal) for ordinal in count(1) if hive_name(ordinal) not in used)
                 if assign:
                     pipe.multi()
                     pipe.hset(MACHINES, machine, found)

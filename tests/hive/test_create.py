@@ -301,7 +301,8 @@ def test_the_dry_run_prints_every_step_and_file_and_writes_nothing(world):
     assert not (world.home / ".ssh" / "known_hosts").exists()
     assert not world.run.named("gh", "api", "-X", "POST")
     assert not world.run.named("gh", "pr", "create")
-    assert not [argv for argv in world.run.calls if argv[0] in ("ssh-keygen", "herdr", "ssh")]
+    writes = [argv for argv in world.run.calls if argv != list(machine.LIST)]
+    assert not [argv for argv in writes if argv[0] in ("ssh-keygen", "herdr", "ssh")]
     assert world.published == [True]
     assert (
         f"--- k8s/manifests/{NAME}/ssh-lan.yaml\nport: 2225\nnode: worker-001\nkey: {RECORD}\nip: 10.10.30.207\n"
@@ -613,8 +614,9 @@ def test_a_new_node_beside_live_hives_one_and_two_is_named_hive_three(world):
         {"id": "a1", "label": NAME, "target": "ssh://worker@10.10.30.207:2222"},
         {"id": "a2", "label": "swarm-hive-002", "target": "ssh://worker@10.10.30.207:2223"},
     ]
+    world.run.on_merge = lambda: None
 
-    with pytest.raises(auth.HiveError):
+    with pytest.raises(auth.HiveError, match="heartbeat"):
         create.create(world.tools, create.Options(node="worker-002", timeout_s=0))
 
     assert _state(world)["name"] == "swarm-hive-003"
