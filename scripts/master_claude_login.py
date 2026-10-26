@@ -230,16 +230,26 @@ def build(rendered: Path, report: str | None = None) -> Path:
     return target
 
 
-def _rebuild(folder: Path, rendered: Path, config: Path | None = None) -> Path:
+def _rebuild(folder: Path, rendered: Path, linked: tuple[str, ...] = (), config: Path | None = None) -> Path:
     target, staging = folder / "claude", folder / "staging"
     kept = _private(target)
     grant = kept.read_bytes() if kept else None
     account = _read(target / CONFIG).get(ACCOUNT)
     shutil.rmtree(staging, ignore_errors=True)
     shutil.copytree(
-        rendered, staging, symlinks=True, ignore=lambda found, _: [CREDENTIALS] if Path(found) == rendered else []
+        rendered,
+        staging,
+        symlinks=True,
+        ignore=lambda found, _: [CREDENTIALS, *linked] if Path(found) == rendered else [],
     )
     staging.chmod(PRIVATE_DIR)
+    for name in linked:
+        shared = (rendered / name).resolve()
+        shared.mkdir(parents=True, exist_ok=True)
+        (staging / name).symlink_to(shared)
+        copied = target / name
+        if copied.is_dir() and not copied.is_symlink():
+            shutil.copytree(copied, shared, ignore=_links, dirs_exist_ok=True, copy_function=_copy_newer)
     if grant is not None:
         (staging / CREDENTIALS).write_bytes(grant)
         (staging / CREDENTIALS).chmod(PRIVATE_FILE)
@@ -253,6 +263,16 @@ def _rebuild(folder: Path, rendered: Path, config: Path | None = None) -> Path:
     shutil.rmtree(target, ignore_errors=True)
     staging.rename(target)
     return target
+
+
+def _copy_newer(source: str, destination: str) -> None:
+    found = Path(destination)
+    if not found.exists() or Path(source).stat().st_mtime > found.stat().st_mtime:
+        shutil.copy2(source, destination)
+
+
+def _links(folder: str, names: list[str]) -> list[str]:
+    return [name for name in names if (Path(folder) / name).is_symlink()]
 
 
 def _adopt() -> None:
@@ -496,7 +516,7 @@ def prepare(environ: Mapping[str, str], cwd: Path) -> tuple[Path, str]:
         target = home(number)
         shared = any(owner != name for owner in holders(folder)) and (target / binding.FILE).is_file()
         if not shared:
-            target = _rebuild(folder, rendered, claude_json(environ))
+            target = _rebuild(folder, rendered, config=claude_json(environ))
         if environ.get(binding.REPORT):
             binding.rehome(Path(environ[binding.REPORT]), target, shared=shared)
         if not shared:
@@ -512,7 +532,7 @@ def browser_home(environ: Mapping[str, str]) -> Path:
             if _private(home(number)) or holders(folder):
                 continue
             _claim(folder, environ["AGENTIHOOKS_AGENT_NAME"], os.getpid(), _alive, 0, True)
-            return _rebuild(folder, claude_home(environ), claude_json(environ))
+            return _rebuild(folder, claude_home(environ), config=claude_json(environ))
     raise LoginRefused(FULL.format(cap=MAX_SLOTS))
 
 
@@ -601,7 +621,7 @@ def _token_folder(environ: Mapping[str, str]) -> Path:
 def token_home(environ: Mapping[str, str]) -> Path:
     folder = _token_folder(environ)
     with _locked(folder):
-        target = _rebuild(folder, claude_home(environ), claude_json(environ))
+        target = _rebuild(folder, claude_home(environ), config=claude_json(environ))
         (target / CREDENTIALS).unlink(missing_ok=True)
         path = target / "settings.json"
         settings = _read(path)
