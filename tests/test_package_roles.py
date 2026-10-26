@@ -22,7 +22,6 @@ GATES = {
     "pre-bash.gh+bash.agentihooks-intent_gate.py",
     "pre-bash.gh-rerun_budget.py",
     "pre-edit+write+multiedit+notebookedit+mcp__serena+bash.git-build_gate.py",
-    "pre-edit+write+multiedit+notebookedit+mcp__serena-brain_gate.py",
     "pre-monitor+taskoutput+bashoutput+bash.gh+bash.sleep+bash.agentihooks-watch_budget.py",
     "stop-claim_stop.py",
     "stop-push_stop.py",

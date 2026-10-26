@@ -55,6 +55,7 @@ def cache_scope_mismatch_total() -> int:
 
 
 FALLBACK = "scoped_feed_fallback_total"
+UNREACHABLE = "the brain is unreachable"
 
 
 def _fallback_path() -> Path:
@@ -184,7 +185,7 @@ def _cached_memory(cached: dict, identity: ProjectIdentity) -> tuple[ProjectMemo
     refreshed = datetime.fromtimestamp(cached["at"], timezone.utc).isoformat(timespec="seconds")
     return (
         ProjectMemory(**cached["memory"]),
-        f"Stale project memory: the brain is unreachable; last refreshed {refreshed}.",
+        f"Stale project memory: {UNREACHABLE}; last refreshed {refreshed}.",
     )
 
 
