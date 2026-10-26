@@ -1,3 +1,6 @@
+import socket
+import time
+
 CHUNK = 1 << 16
 
 
@@ -6,21 +9,27 @@ class Body:
         self.raw, self.left = raw, length
 
     def read(self, size: int | None = -1) -> bytes:
-        left = self.left or 0
-        size = left if size is None or size < 0 else min(size, left)
+        if self.left is None:
+            return self.raw.read(size)
+        size = self.left if size is None or size < 0 else min(size, self.left)
         data = self.raw.read(size) if size else b""
-        if self.left is not None:
-            self.left -= len(data)
+        self.left -= len(data)
         return data
 
-    def drain(self, limit: int, connection, seconds: float) -> bool:
+    def drain(self, limit: int, connection, seconds: float, clock=time.monotonic) -> bool:
         if self.left is None or self.left > limit:
             return False
-        connection.settimeout(seconds)
+        deadline = clock() + seconds
         try:
             while self.left:
-                if not self.read(CHUNK):
+                remaining = deadline - clock()
+                if remaining <= 0:
                     return False
+                connection.settimeout(remaining)
+                data = self.raw.read1(min(CHUNK, self.left))
+                if not data:
+                    return False
+                self.left -= len(data)
         except OSError:
             return False
         finally:
@@ -39,3 +48,15 @@ def length(headers) -> int | None:
     except ValueError:
         return None
     return found if found >= 0 else None
+
+
+def linger(connection, seconds: float, clock=time.monotonic) -> None:
+    deadline = clock() + seconds
+    try:
+        connection.shutdown(socket.SHUT_WR)
+        while (remaining := deadline - clock()) > 0:
+            connection.settimeout(remaining)
+            if not connection.recv(CHUNK):
+                return
+    except OSError:
+        return

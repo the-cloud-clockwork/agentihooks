@@ -904,6 +904,11 @@ class Handler(BaseHTTPRequestHandler):
         if unread:
             self.send_header("Connection", "close")
 
+    def finish(self):
+        super().finish()
+        if isinstance(getattr(self, "rfile", None), request_body.Body) and self.rfile.left != 0:
+            request_body.linger(self.connection, DRAIN_S)
+
     def send(self, code, body, ctype):
         if self.path.startswith("/api/v1/") and code >= 400 and ctype != "application/json":
             body = json.dumps({"error": {"code": "forbidden" if code == 403 else "request_refused", "message": body}})
