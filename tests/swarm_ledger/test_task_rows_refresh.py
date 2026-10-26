@@ -100,3 +100,57 @@ def test_task_rows_adopts_only_the_legacy_ledger_it_reads(tmp_path):
     repository = SQLiteLedgerRepository(tmp_path / "ledgers.sqlite3")
     assert [row["title"] for row in repository.task_rows("alpha")[2]] == ["alpha"]
     assert (tmp_path / "beta.json").exists() and not (tmp_path / "alpha.json").exists()
+
+
+def test_task_rows_names_the_missing_ledger(tmp_path):
+    from scripts.swarm_ledger.repository.sqlite import Missing, SQLiteLedgerRepository
+
+    path = stored(tmp_path, [])
+    with pytest.raises(Missing) as missing:
+        SQLiteLedgerRepository(path).task_rows("absent")
+    assert missing.value.args == ("absent",)
+
+
+def test_task_rows_reads_every_task_row_when_the_earlier_rows_do_not_match_storage(tmp_path):
+    from scripts.swarm_ledger.repository.sqlite import SQLiteLedgerRepository
+
+    tasks = [{"id": f"t{n}", "title": f"T{n}"} for n in range(3)]
+    path = stored(tmp_path, tasks)
+    reader = SQLiteLedgerRepository(path)
+    since = reader.task_rows("rows")
+    changed = [*tasks[:2], {**tasks[2], "title": "Changed"}]
+    write_tasks(path, changed)
+    assert reader.task_rows("rows", (since[0], since[1], []))[2] == changed
+
+
+def test_task_rows_reuses_the_untouched_tasks_after_a_task_is_added(tmp_path):
+    from scripts.swarm_ledger.repository.sqlite import SQLiteLedgerRepository
+
+    tasks = [{"id": f"t{n}", "notes": {"a": n}} for n in range(3)]
+    path = stored(tmp_path, tasks)
+    reader = SQLiteLedgerRepository(path)
+    since = reader.task_rows("rows")
+    added = [*tasks, {"id": "t3", "notes": {}}]
+    write_tasks(path, added)
+    rows = reader.task_rows("rows", since)[2]
+    assert rows == added
+    assert [row is old for row, old in zip(rows, since[2])] == [True, True, True]
+
+
+def test_rebuilt_replaces_one_changed_item_of_an_array_nested_in_a_task(tmp_path):
+    import json
+
+    from scripts.swarm_ledger.repository import refresh
+    from scripts.swarm_ledger.repository.rows import encode
+    from scripts.swarm_ledger.repository.sqlite import SQLiteLedgerRepository
+
+    items = [{"id": f"i{n}", "text": f"I{n}"} for n in range(3)]
+    path = stored(tmp_path, [{"id": "t0", "items": items}])
+    since = SQLiteLedgerRepository(path).task_rows("rows")
+    changed = [items[0], {**items[1], "text": "Changed"}, items[2]]
+    write_tasks(path, [{"id": "t0", "items": changed}])
+    parts = ["tasks", ["id", "t0", 0], "items"]
+    with SQLiteLedgerRepository(path).connect() as connection:
+        paths = refresh.changed_paths(connection, "rows", since[0], since[0] + 1, 256)
+        inside = {changed_path for changed_path in paths if json.loads(changed_path)[:3] == parts}
+        assert inside and refresh.rebuilt(connection, "rows", encode(parts), items, inside) == changed

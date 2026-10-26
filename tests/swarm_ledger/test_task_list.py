@@ -29,6 +29,18 @@ def test_closed_task_queries_read_the_stored_entry(query):
         assert routes.ledger_read(host, "closed", "tasks", query) == expected
 
 
+def test_a_task_list_page_is_sent_as_json(monkeypatch):
+    from types import SimpleNamespace
+
+    from scripts.swarm_ledger.api import routes, task_list
+
+    sent = []
+    page = task_list.Page({"data": []})
+    monkeypatch.setattr(routes, "dispatch", lambda handler, services: page)
+    routes.handle(SimpleNamespace(send=lambda *reply: sent.append(reply)), None)
+    assert sent == [(200, page.text(), "application/json")]
+
+
 def test_a_task_list_read_after_a_replace_returns_the_new_tasks(tmp_path):
     from types import SimpleNamespace
 
