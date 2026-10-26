@@ -1790,7 +1790,7 @@ def test_every_pull_request_stats_part_restores_one_merged_cache_saved_once_afte
     assert fresh["if"] == f"strategy.job-total != 1 && {skipped}"
     assert fresh["env"] == {"PART": "${{ matrix.part }}"}
     assert fresh["run"] == (
-        "mkdir -p .mutation-stats-fresh && find .mutation-stats-cache -maxdepth 1 -type f"
+        "mkdir -p .mutation-stats-cache .mutation-stats-fresh && find .mutation-stats-cache -maxdepth 1 -type f"
         ' -newer ".mutation-stats/collected-$PART" -exec cp -p {} .mutation-stats-fresh/ \\;'
     )
     part = steps[names.index("Upload this part's test stats cache")]

@@ -3053,7 +3053,7 @@ jobs:
         if: strategy.job-total != 1 && needs.mutation-plan.outputs.forwarded != 'true'
         env:
           PART: ${{ matrix.part }}
-        run: mkdir -p .mutation-stats-fresh && find .mutation-stats-cache -maxdepth 1 -type f -newer ".mutation-stats/collected-$PART" -exec cp -p {} .mutation-stats-fresh/ \;
+        run: mkdir -p .mutation-stats-cache .mutation-stats-fresh && find .mutation-stats-cache -maxdepth 1 -type f -newer ".mutation-stats/collected-$PART" -exec cp -p {} .mutation-stats-fresh/ \;
 
       - name: Upload this part's test stats cache
         if: strategy.job-total != 1 && needs.mutation-plan.outputs.forwarded != 'true'
