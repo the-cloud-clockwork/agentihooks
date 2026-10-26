@@ -1,7 +1,9 @@
 """Checkpoint and corpus collection: the plan is journaled before any delete and every delete re-decides its object."""
 
+import argparse
 import json
 import os
+import time
 from collections import Counter
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
@@ -79,7 +81,7 @@ class FileJournal:
         if not self.path.exists():
             return []
         found = []
-        for line in self.path.read_text(encoding="utf-8").splitlines():
+        for line in self.path.read_bytes().splitlines():
             try:
                 entry = json.loads(line)
             except ValueError:
@@ -90,14 +92,15 @@ class FileJournal:
 
     def append(self, run_id: str, entry: dict) -> None:
         torn = self.path.exists() and self.path.read_bytes()[-1:] not in (b"", b"\n")
-        with self.path.open("a", encoding="utf-8") as handle:
-            handle.write(("\n" if torn else "") + json.dumps({**entry, "run_id": run_id}, sort_keys=True) + "\n")
+        line = json.dumps({**entry, "run_id": run_id}, sort_keys=True).encode() + b"\n"
+        with self.path.open("ab") as handle:
+            handle.write(b"\n" + line if torn else line)
             handle.flush()
             os.fsync(handle.fileno())
 
 
 def destructive_enabled(env: Mapping[str, str] = os.environ) -> bool:
-    return env.get(SWITCH, "on") != "off"
+    return env.get(SWITCH) != "off"
 
 
 def _latest(checkpoints: list[Checkpoint], active: frozenset[str]) -> set[str]:
@@ -167,9 +170,9 @@ class Collector:
         self.inventory.remove(object_id)
 
     def collect(self, run_id: str) -> Report:
+        report = self.plan(run_id)
         entries = self.journal.entries(run_id)
         if not entries:
-            report = self.plan(run_id)
             planned = _ordered(report.eligible(), self.inventory.checkpoints())
             self.journal.append(
                 run_id,
@@ -183,7 +186,7 @@ class Collector:
             )
             entries = self.journal.entries(run_id)
         if not self.destructive:
-            return Report(run_id, self.plan(run_id).decisions, False)
+            return report
         return self._execute(run_id, entries)
 
     def _execute(self, run_id: str, entries: list[dict]) -> Report:
@@ -211,7 +214,7 @@ class Collector:
         evidence = self.holds.evidence()
         decisions = {item.object_id: self._own(item, now, pinned, evidence) for item in objects}
         for checkpoint in checkpoints:
-            if decisions.get(checkpoint.checkpoint_id, ELIGIBLE) == ELIGIBLE:
+            if decisions.get(checkpoint.checkpoint_id) in (None, ELIGIBLE):
                 continue
             for object_id in checkpoint.objects:
                 if decisions.get(object_id) == ELIGIBLE:
@@ -237,3 +240,62 @@ def _ordered(eligible: list[str], checkpoints: list[Checkpoint]) -> list[str]:
     """Manifests are deleted before the objects they name."""
     manifests = {checkpoint.checkpoint_id for checkpoint in checkpoints}
     return sorted(eligible, key=lambda object_id: (object_id not in manifests, object_id))
+
+
+class DocumentInventory:
+    """One JSON document holding policies, objects, checkpoints and holds; each removal rewrites it."""
+
+    def __init__(self, path: Path) -> None:
+        self.path = path
+
+    def _doc(self) -> dict:
+        return json.loads(self.path.read_bytes())
+
+    def policies(self) -> Policies:
+        return Policies.parse(self._doc()["policies"])
+
+    def objects(self) -> list[StoredObject]:
+        return [StoredObject(**item) for item in self._doc()["objects"]]
+
+    def checkpoints(self) -> list[Checkpoint]:
+        return [Checkpoint(**{**item, "objects": tuple(item["objects"])}) for item in self._doc()["checkpoints"]]
+
+    def remove(self, object_id: str) -> None:
+        doc = self._doc()
+        doc["objects"] = [item for item in doc["objects"] if item["object_id"] != object_id]
+        self.path.write_bytes(json.dumps(doc).encode())
+
+    def restoring(self) -> frozenset[str]:
+        return frozenset(self._doc()["holds"]["restoring"])
+
+    def evidence(self) -> frozenset[str]:
+        return frozenset(self._doc()["holds"]["evidence"])
+
+    def active_tasks(self) -> frozenset[str]:
+        return frozenset(self._doc()["holds"]["active_tasks"])
+
+
+def main(argv: list[str] | None = None, clock: Callable[[], float] = time.time) -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("command", choices=("plan", "collect"))
+    parser.add_argument("document", type=Path)
+    parser.add_argument("--journal", type=Path, required=True)
+    parser.add_argument("--run-id", default="")
+    args = parser.parse_args(argv)
+    store = DocumentInventory(args.document)
+    collector = Collector(store, store, store.policies(), FileJournal(args.journal), clock)
+    report = collector.plan(args.run_id) if args.command == "plan" else collector.collect(args.run_id)
+    summary = {
+        "run_id": report.run_id,
+        "destructive": report.destructive,
+        "decisions": report.decisions,
+        "deleted": list(report.deleted),
+        "skipped": report.skipped,
+        **report.metrics(),
+    }
+    print(json.dumps(summary))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

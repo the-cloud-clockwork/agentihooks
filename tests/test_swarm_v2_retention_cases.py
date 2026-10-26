@@ -323,10 +323,103 @@ def test_policy_expiry_boundary_and_retain_until_deleted():
     parsed = policy.Policies.parse(cases.fixture()["policies"]).get("swarm")
     assert parsed.expired("preview", 0.0, 604800.0) is True
     assert parsed.expired("preview", 0.0, 604799.0) is False
-    assert parsed.expired("preview", 0.0, 10**9, policy.UNTIL_DELETED) is False
+    assert parsed.expired("preview", 0.0, 10**9, "retain-until-deleted") is False
     personal = policy.Policies.parse(cases.fixture()["policies"]).get("personal")
     assert personal.expired("raw_evidence", 0.0, 10**12) is False
     assert policy.Policies.parse([]).get("swarm") is None
+
+
+def test_file_journal_writes_sorted_keys_one_entry_per_line(tmp_path):
+    path = tmp_path / "journal.jsonl"
+    journal = retention.FileJournal(path)
+    journal.append("r", {"op": "deleted", "object_id": "x"})
+    journal.append("r", {"op": "deleted", "object_id": "y"})
+    assert path.read_bytes() == (
+        b'{"object_id": "x", "op": "deleted", "run_id": "r"}\n{"object_id": "y", "op": "deleted", "run_id": "r"}\n'
+    )
+
+
+def test_reports_carry_their_run_and_mode(tmp_path):
+    _, _, collector = _collector(tmp_path)
+    assert (collector.plan().run_id, collector.plan().destructive) == ("", False)
+    assert collector.plan("r").run_id == "r"
+    report = collector.collect("run")
+    assert (report.run_id, report.destructive) == ("run", True)
+    (tmp_path / "dry").mkdir()
+    _, _, dry = _collector(tmp_path / "dry", destructive=False)
+    dry_report = dry.collect("dry")
+    assert (dry_report.run_id, dry_report.destructive) == ("dry", False)
+
+
+def test_delete_refuses_an_unknown_object_as_absent(tmp_path):
+    _, _, collector = _collector(tmp_path)
+    with pytest.raises(retention.RetentionRefused) as raised:
+        collector.delete("nope")
+    assert str(raised.value) == "object nope is not eligible for deletion: absent"
+
+
+def test_objects_of_a_checkpoint_whose_manifest_is_gone_are_not_referenced(tmp_path):
+    inventory, _, collector = _collector(tmp_path)
+    del inventory.stored["ckpt-old"]
+    inventory.checkpoints = lambda: list(inventory.manifests)
+    decisions = collector.plan().decisions
+    assert (decisions["old-native"], decisions["old-transcript"]) == ("eligible", "eligible")
+
+
+def test_manifests_order_before_other_objects():
+    checkpoints = [retention.Checkpoint("m", "t", 1, True)]
+    assert retention._ordered(["b", "a", "m"], checkpoints) == ["m", "a", "b"]
+
+
+def test_latest_keeps_the_first_of_equal_sequences():
+    checkpoints = [retention.Checkpoint("x", "a", 1, True), retention.Checkpoint("y", "a", 1, True)]
+    assert retention._latest(checkpoints, frozenset({"a"})) == {"x"}
+
+
+def _document(path):
+    doc = cases.fixture()
+    for item in doc["objects"]:
+        item["created_at"] = doc["now"] - item.pop("age_days") * cases.DAY
+    path.write_text(json.dumps({key: doc[key] for key in ("policies", "objects", "checkpoints", "holds")}))
+    return float(doc["now"])
+
+
+def test_cli_plan_reports_without_deleting(tmp_path, capsys):
+    path = tmp_path / "store.json"
+    now = _document(path)
+    before = path.read_bytes()
+    code = retention.main(["plan", str(path), "--journal", str(tmp_path / "j")], clock=lambda: now)
+    summary = json.loads(capsys.readouterr().out)
+    assert code == 0
+    assert path.read_bytes() == before
+    assert not (tmp_path / "j").exists()
+    assert (summary["run_id"], summary["destructive"], summary["deleted"]) == ("", False, [])
+    assert sorted(k for k, v in summary["decisions"].items() if v == "eligible") == ELIGIBLE
+    assert summary["retention_protected_objects"] == PROTECTED
+
+
+def test_cli_collect_removes_eligible_objects_from_the_document(tmp_path, capsys, monkeypatch):
+    monkeypatch.delenv("SWARM_RETENTION_DESTRUCTIVE", raising=False)
+    path = tmp_path / "store.json"
+    now = _document(path)
+    argv = ["collect", str(path), "--journal", str(tmp_path / "j"), "--run-id", "r1"]
+    assert retention.main(argv, clock=lambda: now) == 0
+    summary = json.loads(capsys.readouterr().out)
+    remaining = {item["object_id"] for item in json.loads(path.read_bytes())["objects"]}
+    assert (summary["run_id"], summary["destructive"], summary["skipped"]) == ("r1", True, {})
+    assert sorted(summary["deleted"]) == ELIGIBLE
+    assert remaining.isdisjoint(ELIGIBLE)
+    assert len(remaining) == 13
+    store = retention.DocumentInventory(path)
+    assert store.restoring() == frozenset({"ckpt-restore"})
+    assert store.evidence() == frozenset({"evidence-held"})
+    assert store.active_tasks() == frozenset({"t-live", "t-restore"})
+
+
+def test_cli_requires_a_journal(tmp_path, capsys):
+    with pytest.raises(SystemExit) as raised:
+        retention.main(["plan", str(tmp_path / "store.json")])
+    assert raised.value.code == 2
 
 
 @pytest.mark.parametrize("case", ["A", "B", "C"])

@@ -4,7 +4,6 @@ from dataclasses import dataclass
 
 CLASSES = ("raw_evidence", "native_resume", "preview", "vector", "operational_log")
 CORPORA = ("personal", "swarm")
-UNTIL_DELETED = "retain-until-deleted"
 UNTIL_EXPIRY = "retain-until-expiry"
 FIELDS = frozenset({"corpus", "version", "max_age_seconds"})
 
