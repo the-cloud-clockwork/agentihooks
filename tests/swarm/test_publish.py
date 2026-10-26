@@ -481,6 +481,7 @@ def test_prepare_selects_fresh_dev_after_the_recorded_pull_request_merged(
     repository, tmp_path, monkeypatch, state, deleted, head
 ):
     from scripts.swarm import publish, stack
+    from scripts.swarm_ledger import ledger_tasks
 
     git(repository, "push", "origin", "HEAD:predecessor")
     old_head = git(repository, "rev-parse", "HEAD")
@@ -527,9 +528,12 @@ def test_prepare_selects_fresh_dev_after_the_recorded_pull_request_merged(
         return native(command, root)
 
     monkeypatch.setattr(publish, "execute", execute)
-    ledger = SimpleNamespace(
-        tasks=lambda slug: [task], update_task=lambda slug, task_id, fields, by: task.update(fields)
-    )
+
+    def update_task(slug, task_id, fields, by):
+        ledger_tasks.check({"op": "task_update", "item": f"tasks/{task_id}", "fields": fields, "by": by})
+        task.update(fields)
+
+    ledger = SimpleNamespace(tasks=lambda slug: [task], update_task=update_task)
     agent = AgentRecord("engineer@test", "ci", "t1")
 
     result = publish.prepare("swarm", agent, str(repository), ledger)
@@ -542,11 +546,7 @@ def test_prepare_selects_fresh_dev_after_the_recorded_pull_request_merged(
     assert result["branch"] == task["branch"] == "engineer-test"
     assert task["repository_branches"] == {str(repository): "engineer-test"}
     assert task["pr_url"] == ("" if retired else pr_url)
-    assert task["handoff_envelope"] == (
-        {"source": "origin/predecessor"}
-        if retired
-        else {"continue_from": "origin/predecessor", "source": "origin/predecessor"}
-    )
+    assert task["handoff_envelope"] == {"continue_from": "origin/predecessor", "source": "origin/predecessor"}
     assert publish.prepare("swarm", agent, str(repository), ledger) == result
 
 
