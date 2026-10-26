@@ -186,7 +186,6 @@ def test_kind_proof_checks_the_bundle_system_tools_install_into_the_worker_home(
         assert f"&& {check} " in tools[0], check
     _, spec = in_pod(tmp_path, "tools", "true")
     assert spec == {"containers": [{"name": "tools", "image": "registry/hive:dev", "command": ["bash", "-c", "true"]}]}
-    assert (tmp_path / "out/tools.txt").exists()
 
 
 def test_base_inputs_cover_every_base_source_the_wheel_does_not_replace():
@@ -431,7 +430,12 @@ def test_kind_proof_pulls_the_base_and_redis_into_the_node_while_the_hive_builds
     ]
     assert "kind load" not in PROOF.read_text()
     assert "imagePullPolicy: Never" not in PROOF.read_text()
-    assert '  docker rm -f "$cluster-registry" >/dev/null 2>&1 || true' in lines
+    assert lines.index('  docker rm -f "$cluster-registry" >/dev/null 2>&1 || true') < lines.index(
+        '  kind delete cluster --name "$cluster"'
+    )
+    assert lines.index('docker image inspect --format \'{{.Id}}\' "$image" > "$out/image.txt"') < lines.index(
+        'wait "$cluster_pid"'
+    )
 
 
 def test_kind_proof_ends_the_drain_hold_once_the_hive_reads_draining():

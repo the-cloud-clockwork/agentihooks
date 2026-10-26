@@ -2238,7 +2238,7 @@ Change these together in one pull request; `tests/deployment/test_worker_hive_im
 
 Limits: the check reads and compares only the `linux/amd64` base of a published image index, the kind node is pinned to `mirror.gcr.io/kindest/node:v1.37.0`, and the script needs `docker`, `git`, `python3`, `kind`, `kubectl`, `helm` and `openssl` on the runner and writes its output under `$HOME/scratchpad/worker-hive-proof`.
 
-The init and tool checks run as Pods in the cluster rather than with `docker run`, so Docker never unpacks the image. The rest of the proof is unchanged: the same smoke check inside the image (`claude`, `codex`, `herdr` and `git --version`, `wt.sh root` and `agentihooks hive --help`), Pod registration and order acknowledgement, and on a `dev` push the `kind` job, which starts only after the `contracts` job passes, publishes the image it proved straight from its own Docker daemon, which keeps the pushed image under its registry name.
+The init and tool checks run as Pods in the cluster rather than with `docker run`, so Docker never unpacks the image; the init check's fresh home is an `emptyDir` with `fsGroup` 10001, as in the chart's worker Pod. The rest of the proof is unchanged: the same smoke check inside the image (`claude`, `codex`, `herdr` and `git --version`, `wt.sh root` and `agentihooks hive --help`), Pod registration and order acknowledgement, and on a `dev` push the `kind` job, which starts only after the `contracts` job passes, publishes the image it proved straight from its own Docker daemon, which keeps the pushed image under its registry name; the proof records that image id in `image.txt`.
 
 ### Reading the result
 

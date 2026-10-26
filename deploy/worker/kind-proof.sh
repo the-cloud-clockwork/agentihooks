@@ -14,8 +14,9 @@ cleanup() {
     kubectl logs deployment/hive-join --tail=100 > "$out/join.txt" 2>&1 || true
     kubectl logs deployment/hive-join --previous --tail=100 > "$out/previous-join.txt" 2>&1 || true
   fi
-  kind delete cluster --name "$cluster"
+  kill ${init_pid:-} ${tools_pid:-} 2>/dev/null || true
   docker rm -f "$cluster-registry" >/dev/null 2>&1 || true
+  kind delete cluster --name "$cluster"
 }
 trap cleanup EXIT
 docker run -d --name "$cluster-registry" -p 127.0.0.1:5001:5000 mirror.gcr.io/library/registry:2 >/dev/null
@@ -39,6 +40,7 @@ else
   docker build -f docker/swarm-node/Dockerfile -t "$worker_image" .
 fi
 docker build -f deploy/worker/Dockerfile --build-arg WORKER_IMAGE="$worker_image" --build-arg AGENTIHOOKS_REF="${AGENTIHOOKS_REF:-dev}" --output "type=image,name=$image,push=true,unpack=false" .
+docker image inspect --format '{{.Id}}' "$image" > "$out/image.txt"
 printf 'worker_hive_image_build_seconds=%s\nworker_base=%s\n' "$((SECONDS - build_started))" "$worker_base" | tee "$out/build.txt"
 wait "$cluster_pid"
 in_pod() {
