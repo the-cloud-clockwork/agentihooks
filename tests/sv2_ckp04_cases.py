@@ -1,8 +1,5 @@
 import hashlib
 import json
-import tempfile
-from collections.abc import Iterator
-from contextlib import contextmanager
 from pathlib import Path
 
 from scripts.swarm_v2 import contracts
@@ -17,13 +14,8 @@ EVIDENCE_CLASS = (
     "backend wrapper that loses acknowledgements and a fake clock; no object store, worker Pod or harness was used"
 )
 
-MEMORY = Path("/dev/shm")
-
-
-@contextmanager
-def scratch() -> Iterator[tuple[Path, Path]]:
-    with tempfile.TemporaryDirectory(dir=MEMORY) as one, tempfile.TemporaryDirectory(dir=MEMORY) as two:
-        yield Path(one), Path(two)
+MEMORY = ckp02.MEMORY
+scratch = ckp02.scratch
 
 
 class LostAck:
