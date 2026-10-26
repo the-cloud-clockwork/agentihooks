@@ -53,8 +53,6 @@ for compliance.
 
 Use channels for live coordination. Put durable knowledge in brain markers or
 `brain_ingest`.
-A seat's memory for its later occupants lives in its learned notes and its
-handoff, never in harness project memory.
 
 ## Built-in skills
 
