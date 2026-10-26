@@ -171,11 +171,15 @@ class LedgerClient:
         author = who.name if ledger_link.remote(slug=slug) and who.pinned and lane_of(who.name) == "master" else "swarm"
         self._call(slug, [_op("notice", author, text=text)])
 
-    def raise_alert(self, slug, source, text):
-        self._call(slug, [_op("alert_raise", "swarm", source=source, text=text)])
+    def raise_alert(self, slug, source, text, item=None):
+        fields = {"item": item} if item else {}
+        self._call(slug, [_op("alert_raise", "swarm", source=source, text=text, **fields)])
 
     def close_alert(self, slug, alert_id, outcome):
         self._call(slug, [_op("alert_close", "swarm", target=alert_id, outcome=outcome)])
+
+    def close_item_alerts(self, slug, item, outcome):
+        self._call(slug, [_op("alert_close", "swarm", item=item, outcome=outcome)])
 
     def followup(self, slug, text, needs_operator=False, by="swarm"):
         flag = {"needs_operator": True} if needs_operator else {}

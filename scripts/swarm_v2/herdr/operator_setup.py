@@ -23,6 +23,7 @@ from scripts.scheduler import Scheduler
 from scripts.scheduler.service import ensure_running
 from scripts.swarm.ledger_client import LedgerClient
 from scripts.swarm.store import RedisStore, SwarmError, redis_client
+from scripts.swarm_ledger import ledger_alerts
 from scripts.swarm_v2.deployed import POLICY_ENV, pod_policy
 from scripts.swarm_v2.herdr import publications
 from scripts.swarm_v2.herdr.attach import ClientHome, Run
@@ -240,10 +241,10 @@ def alarm(root: Path, environ: Mapping[str, str], message: str) -> None:
     ledger = LedgerClient()
     for slug in sorted(set(slugs) - raised):
         try:
-            if ledger.followup(slug, message, needs_operator=True):
-                raised.add(slug)
+            ledger.raise_alert(slug, ledger_alerts.SETUP, message)
         except SwarmError:
             continue
+        raised.add(slug)
     entry = {"message": message, "raised": sorted(raised)}
     _stage(placement.alarm, json.dumps(entry).encode()).replace(placement.alarm)
 

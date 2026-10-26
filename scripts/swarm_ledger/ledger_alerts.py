@@ -6,6 +6,7 @@ from scripts.inbox import outbox
 OPS = ("alert_claim", "alert_close", "alert_raise")
 SIZE, SYNC, PROMOTION, RELEASE = "size", "sync", "promotion", "release"
 SEAT, SPAWN, MERGE = "seat", "spawn", "merge"
+INBOX, SETUP = "inbox", "setup"
 WRITER = "writer"
 TARGETS = {
     WRITER: "master",
@@ -16,8 +17,10 @@ TARGETS = {
     SEAT: "master",
     SPAWN: "master",
     MERGE: "master",
+    INBOX: "master",
+    SETUP: "master",
 }
-RAISED = (PROMOTION, RELEASE, SEAT, SPAWN, MERGE)
+RAISED = (PROMOTION, RELEASE, SEAT, SPAWN, MERGE, INBOX, SETUP)
 OPEN, CLAIMED, DONE = "open", "claimed", "done"
 OPERATOR = "operator"
 SENDER = "ledger"
@@ -27,34 +30,46 @@ SENT_TTL_S = 30 * 24 * 3600
 
 
 def check_raise(op):
-    by, text = op.get("by"), op.get("text")
+    by, text, item = op.get("by"), op.get("text"), op.get("item", "")
     if (
-        set(op) != {"op", "id", "by", "source", "text"}
+        set(op) - {"item"} != {"op", "id", "by", "source", "text"}
         or op["source"] not in RAISED
         or not isinstance(by, str)
         or not by.strip()
         or not isinstance(text, str)
         or not text.strip()
         or len(text) > MAX_OUTCOME
+        or not isinstance(item, str)
+        or ("item" in op and (op["source"] != INBOX or not item))
     ):
-        raise ValueError(f"alert_raise takes by, a source among {RAISED} and a text of up to {MAX_OUTCOME} characters")
+        raise ValueError(
+            f"alert_raise takes by, a source among {RAISED}, a text of up to {MAX_OUTCOME} characters "
+            f"and, for {INBOX}, an item"
+        )
 
 
-def raise_source(doc, ctx, source, text):
-    if not any(a["source"] == source and a["state"] != DONE for a in doc.setdefault("alerts", [])):
+def raise_source(doc, ctx, source, text, item=None):
+    rows = doc.setdefault("alerts", [])
+    if not any(a["source"] == source and a.get("item") == item and a["state"] != DONE for a in rows):
+        count = len(rows)
         raise_warning(doc, ctx, (source, text), [])
+        if item and len(rows) > count:
+            rows[-1]["item"] = item
     return True
 
 
 def check(op):
     if op["op"] == "alert_raise":
         return check_raise(op)
-    allowed = {"op", "id", "target", "by", *(("outcome",) if op["op"] == "alert_close" else ())}
-    if set(op) - allowed or not isinstance(op.get("target"), str) or not op["target"]:
-        raise ValueError(f"{op['op']} takes target, an alert id, and an optional by")
+    closing = op["op"] == "alert_close"
+    allowed = {"op", "id", "target", "by", *(("outcome", "item") if closing else ())}
+    keys = [key for key in ("target", "item") if key in op]
+    if set(op) - allowed or len(keys) != 1 or not isinstance(op[keys[0]], str) or not op[keys[0]]:
+        instead = ", or an inbox item instead of target" if closing else ""
+        raise ValueError(f"{op['op']} takes target, an alert id, and an optional by{instead}")
     if "by" in op and (not isinstance(op["by"], str) or not op["by"].strip()):
         raise ValueError(f"{op['op']} by must be a name")
-    if op["op"] == "alert_close":
+    if closing:
         outcome = op.get("outcome")
         if not isinstance(outcome, str) or not outcome.strip() or len(outcome) > MAX_OUTCOME:
             raise ValueError(f"alert_close needs an outcome of up to {MAX_OUTCOME} characters")
@@ -62,7 +77,9 @@ def check(op):
 
 def apply(doc, op, ctx):
     if op["op"] == "alert_raise":
-        return raise_source(doc, ctx, op["source"], op["text"].strip())
+        return raise_source(doc, ctx, op["source"], op["text"].strip(), op.get("item"))
+    if "item" in op:
+        return close_item(doc, op, ctx)
     alert = next((a for a in doc.setdefault("alerts", []) if a["id"] == op["target"]), None)
     if alert is None or alert["state"] == DONE:
         return False
@@ -76,6 +93,15 @@ def apply(doc, op, ctx):
     outcome = op["outcome"].strip()
     alert.update(state=DONE, closed_by=who, closed_at=ctx.at, outcome=outcome)
     ctx.record(who, "alert closed", target, text=outcome)
+    return True
+
+
+def close_item(doc, op, ctx):
+    who, outcome = op.get("by", OPERATOR), op["outcome"].strip()
+    for alert in doc.setdefault("alerts", []):
+        if alert["source"] == INBOX and alert.get("item") == op["item"] and alert["state"] != DONE:
+            alert.update(state=DONE, closed_by=who, closed_at=ctx.at, outcome=outcome)
+            ctx.record(who, "alert closed", f"alerts/{alert['id']}", text=outcome)
     return True
 
 
