@@ -1004,7 +1004,7 @@ def test_real_fixture_imports_do_not_invalidate_measured_unrelated_test_stats(tm
     assert calls == [files, files]
 
 
-@pytest.mark.parametrize("changed", ["module", "scope", "deleted", "stale"])
+@pytest.mark.parametrize("changed", ["module", "scope", "deleted", "stale", "truncated"])
 def test_stored_statistics_validate_record_inputs_and_mutation_scope(tmp_path, changed):
     import hashlib
 
@@ -1026,9 +1026,12 @@ def test_stored_statistics_validate_record_inputs_and_mutation_scope(tmp_path, c
         cache.changes = {"module.py": [1, 2]}
     elif changed == "deleted":
         (root / "module.py").unlink()
-    else:
+    elif changed == "stale":
         next(folder.glob("*.json")).write_text('{"key":"stale","status":0,"inputs":{},"scope":{},"measured":true}')
+    else:
+        next(folder.glob("*.json")).write_text('{"key":"')
     assert cache.load("tests/test_module.py") is None
+    assert len(list(folder.glob("*.json"))) == (changed != "truncated")
 
 
 @pytest.mark.parametrize(
