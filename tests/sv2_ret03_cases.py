@@ -53,6 +53,7 @@ class World:
     def __init__(self, root: Path):
         self.doc, self.path = fixture(), root / "catalog.sqlite3"
         self.domain = self.doc["domain"]
+        root.mkdir(parents=True, exist_ok=True)
         self.projects = {item["session_uid"]: item["project_id"] for item in self.doc["sessions"]}
         previous = sqlite3.connect(self.path)
         for statement in catalog_module.SCHEMA:
