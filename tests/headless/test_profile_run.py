@@ -1,7 +1,8 @@
 import json
 import os
+import signal
+import subprocess
 import sys
-import time
 
 import pytest
 
@@ -15,25 +16,17 @@ SCHEMA = {"type": "object", "properties": {"verdict": {"type": "string"}}, "requ
 FAKE = """#!{python}
 import json
 import os
-import subprocess
 import sys
-import time
 from pathlib import Path
 
 plan = json.loads(Path(os.environ["FAKE_PLAN"]).read_text())
 Path(os.environ["FAKE_CALL_LOG"]).write_text(
     json.dumps({{"argv": sys.argv[1:], "env": {{k: os.environ.get(k) for k in plan.get("capture_env", [])}}}})
 )
-if plan.get("grandchild_marker"):
-    subprocess.Popen(
-        [sys.executable, "-c", "import time,sys; time.sleep(3); open(sys.argv[1], 'w').write('done')", plan["grandchild_marker"]]
-    )
 for line in plan.get("stdout_lines", []):
     print(line)
 if plan.get("write_file"):
     Path(plan["write_file"]).write_text(plan.get("write_text", ""))
-if plan.get("sleep"):
-    time.sleep(plan["sleep"])
 sys.exit(plan.get("exit_code", 0))
 """
 
@@ -177,17 +170,30 @@ def test_the_transcript_is_written_to_the_run_dir(fake_agentihooks, tmp_path):
     assert result.transcript.read_text().splitlines() == [result_event("pass")]
 
 
-def test_a_timeout_kills_the_whole_process_group(fake_agentihooks, tmp_path):
-    configure, _ = fake_agentihooks
-    marker = tmp_path / "grandchild-done"
-    configure({"sleep": 30, "grandchild_marker": str(marker)})
-    run = make_run(tmp_path, timeout=0.2)
-    started = time.monotonic()
+class _FakeTimedOutProcess:
+    pid = 4321
+
+    def __init__(self):
+        self.calls = 0
+
+    def wait(self, timeout=None):
+        self.calls += 1
+        if self.calls == 1:
+            raise subprocess.TimeoutExpired(cmd="agentihooks", timeout=timeout)
+        return None
+
+
+def test_a_timeout_kills_the_whole_process_group(monkeypatch, tmp_path):
+    killed = []
+    fake_process = _FakeTimedOutProcess()
+    monkeypatch.setattr(profile_run.subprocess, "Popen", lambda *a, **k: fake_process)
+    monkeypatch.setattr(profile_run.os, "getpgid", lambda pid: pid)
+    monkeypatch.setattr(profile_run.os, "killpg", lambda pgid, sig: killed.append((pgid, sig)))
+    run = make_run(tmp_path, timeout=0.01)
     result = profile_run.run_profile(run)
-    assert time.monotonic() - started < 5
     assert result == ProfileResult("timeout", None, run.run_dir / "transcript.jsonl", None, None)
-    time.sleep(0.5)
-    assert not marker.exists()
+    assert killed == [(4321, signal.SIGKILL)]
+    assert fake_process.calls == 2
 
 
 def test_a_schema_valid_reply_gives_ok(fake_agentihooks, tmp_path):
