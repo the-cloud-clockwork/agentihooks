@@ -39,8 +39,6 @@ class Tasks:
             known = {} if self.stored is None else dict(zip(map(id, self.stored[2]), self.revisions))
             self.revisions = [known.get(id(row)) or row_revision(row) for row in rows]
             self.pages = {}
-        if revision != self.revision:
-            self.pages = {}
         self.stored, self.revision = stored, revision
 
     def page(self, query: dict) -> Page:
