@@ -1,6 +1,7 @@
 import json
 import os
 import signal
+import socket
 import subprocess
 import sys
 import time
@@ -41,6 +42,8 @@ def test_running_reads_a_zombie_or_a_process_being_reaped_as_gone(monkeypatch, s
 @pytest.mark.parametrize("explicit_owner", [True, False])
 @pytest.mark.parametrize("mode", ["--ensure", "--serve"])
 def test_detached_server_stops_when_its_run_ends(tmp_path, ending, explicit_owner, mode, ledger_port):
+    from scripts.swarm_ledger import ledger_server
+
     port = ledger_port
     env = {
         **os.environ,
@@ -78,7 +81,7 @@ def test_detached_server_stops_when_its_run_ends(tmp_path, ending, explicit_owne
         else:
             getattr(run, ending)()
         run.wait(timeout=5)
-        deadline = time.monotonic() + 3
+        deadline = time.monotonic() + ledger_server.DRAIN_S + 5
         while running(pid) and time.monotonic() < deadline:
             time.sleep(0.02)
         assert not running(pid), f"ledger server {pid} on port {port} survived its ended run"
@@ -132,6 +135,33 @@ def test_detached_server_stop_deadline_excludes_startup_after_pid_publication(tm
     monkeypatch.setattr(subprocess, "Popen", start)
     test_detached_server_stops_when_its_run_ends(tmp_path, "kill", True, "--ensure", ledger_port)
     assert (tmp_path / "startup-paused").read_text() == "yes"
+
+
+@pytest.mark.wall_clock
+def test_detached_server_stop_deadline_covers_a_request_held_through_the_drain_bound(
+    tmp_path, monkeypatch, ledger_port
+):
+    held, held_at = [], []
+    serving = ledger_link.serving
+
+    def hold(**kwargs):
+        found = serving(**kwargs)
+        if found == str(tmp_path) and not held:
+            held.append(socket.create_connection(("127.0.0.1", ledger_port)))
+            held[0].sendall(b"GET / HTTP/1.1\r\n")
+            held_at.append(time.monotonic())
+        return found
+
+    monkeypatch.setattr(ledger_link, "serving", hold)
+    try:
+        test_detached_server_stops_when_its_run_ends(tmp_path, "exit", True, "--ensure", ledger_port)
+        stopped = time.monotonic()
+    finally:
+        for connection in held:
+            connection.close()
+    from scripts.swarm_ledger import ledger_server
+
+    assert stopped - held_at[0] >= ledger_server.DRAIN_S
 
 
 def fake_process(proc, pid=7, ppid=1, start=99, state="S", comm="python", argv=(b"python",)):

@@ -339,6 +339,7 @@ def collect_cached_stats(
                 resources.setdefault(str(parent) + "/", set()).add(path)
     inputs = StatsInputs(root, modules, resources, changes)
     stored = StoredStats(root, folder, context, changes)
+    stored.prune()
     compatible = {
         path: record
         for path in files
