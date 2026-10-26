@@ -53,7 +53,7 @@ class Policy:
 POLICIES = {
     "feed_only": Policy("feed_only", feed=True, current_only=False),
     "scoped": Policy("scoped"),
-    "graph": Policy("graph", hops=1),
+    "graph": Policy("graph", hops=0),
     "graph_wide": Policy(
         "graph_wide",
         hops=2,
