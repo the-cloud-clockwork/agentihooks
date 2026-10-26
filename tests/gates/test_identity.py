@@ -248,6 +248,7 @@ class TestEntry:
 
     def test_registry_names_each_gate(self):
         assert sorted(entry.GATES) == [
+            "brain",
             "build",
             "claim-stop",
             "identity",
