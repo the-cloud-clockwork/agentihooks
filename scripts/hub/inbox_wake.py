@@ -1,4 +1,3 @@
-import contextlib
 import hashlib
 import os
 from dataclasses import replace
@@ -6,6 +5,7 @@ from dataclasses import replace
 from scripts.events import deadlines
 from scripts.events.bus import Bus
 from scripts.events.envelope import Envelope
+from scripts.events.subjects import subject
 from scripts.hub import lease
 from scripts.hub.registry import Reactor
 from scripts.inbox import wake
@@ -63,10 +63,26 @@ class InboxWake:
                 swarm = item.address.partition("@")[2] if is_seat(item.address) else inbox.names.slug_of(item.address)
                 if swarm:
                     message = Message(item.id, item.sender, item.text, item.ref, item.fyi, item.task)
-                    # A readdressed item keeps its id; its first send already scheduled the timer, which follows the id.
-                    with contextlib.suppress(SentElsewhere):
+                    try:
                         SeatInbox(self.bus, swarm).send(item.address, message)
+                    except SentElsewhere:
+                        # A readdressed item keeps its id, so only its wake is published for the new address.
+                        self._wake(swarm, item)
                 inbox.redis.srem(key, item_id)
+
+    def _wake(self, swarm: str, item) -> None:
+        request = Envelope(
+            id=f"wake-{item.id}",
+            type="inbox.wake",
+            swarm=swarm,
+            entity="inbox-wake",
+            key=item.id,
+            version=1,
+            time=self.clock(),
+            author=item.sender,
+            data={"address": item.address},
+        )
+        self.bus.events.publish(subject(swarm, "inbox-wake", "requested"), request)
 
     def _mail(self, item_id):
         inbox = InboxStore(self.store.redis)

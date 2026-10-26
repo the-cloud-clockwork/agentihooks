@@ -29,7 +29,7 @@ IDLE_S = 5.0
 BATCH = 32
 FETCH_TIMEOUT_MS = 500
 LEASE_TTL_MS = 15_000
-LEASE_RENEW_S = LEASE_TTL_MS / 3000
+LEASE_RENEW_S = LEASE_TTL_MS / 1000 / 3
 CREDENTIAL_ENV = "AGENTIHOOKS_CONTROLLER_CREDENTIAL"
 KEEP_S = auth.SERVICE_TTL_S / 3
 
@@ -56,7 +56,7 @@ def record(store: StateStore, key: str, version: int) -> None:
         record(store, key, version)
 
 
-# The lease keeper renews held singleton leases while the process lives, so a hung handler keeps its singleton.
+# A hung handler keeps its singleton lease until the process stops, because a thread renews held leases.
 class HubRunner:
     def __init__(
         self,
@@ -101,6 +101,8 @@ class HubRunner:
 
     def _hold(self, name: str) -> bool:
         with self._lock:
+            if self.stopped.is_set():
+                return False
             held = self._leases[name].acquire()
             if held != (name in self._holding):
                 print(f"{name}: lease {'taken' if held else 'lost'} by {self._leases[name].holder}")

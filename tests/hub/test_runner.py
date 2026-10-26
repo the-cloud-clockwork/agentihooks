@@ -1,5 +1,6 @@
 import hashlib
 import signal
+import threading
 
 import pytest
 
@@ -305,6 +306,7 @@ def test_renewal_extends_only_the_leases_a_replica_holds(bus, clock):
     one.stop()
     clock.now += 10
     one.renew()
+    assert one.run_once(batch=10, timeout_ms=0) == {"timers": ["standby"]}
     assert lease.read(bus.state(lease.BUCKET), "reactor.timers") == lease.LeaseState("a", 0)
 
 
@@ -334,19 +336,47 @@ def test_the_lease_keeper_renews_each_interval_past_a_failure_until_the_hub_stop
     monkeypatch.setattr(hub_runner, "renew", renew)
     monkeypatch.setattr(runner, "scheduled_wait", waits.append)
     runner._keep_leases(hub_runner)
-    assert waits == [runner.LEASE_RENEW_S] * 3
+    assert waits == [5.0] * 3
     assert calls == [1, 2, 3]
     assert capsys.readouterr().err.startswith("hub: reactor lease renewal failed\nTraceback")
 
 
-def test_a_running_hub_keeps_its_leases_on_a_daemon_thread(monkeypatch, hive):
-    import threading
+def test_the_lease_keeper_thread_holds_the_lease_while_the_loop_is_blocked(monkeypatch, bus, clock):
+    reactors = [registry.Reactor("reconciler", "swarm.*.reconcile.requested", lambda _: None, singleton=True)]
+    one, two = hub(bus, reactors, "a", clock), hub(bus, reactors, "b", clock)
+    gate, renewed = threading.Semaphore(0), threading.Event()
+    renew = one.renew
 
+    def counted():
+        renew()
+        renewed.set()
+
+    monkeypatch.setattr(one, "renew", counted)
+    monkeypatch.setattr(runner, "scheduled_wait", lambda seconds: gate.acquire())
+    one.run_once(timeout_ms=0)
+    keeper = threading.Thread(target=runner._keep_leases, args=(one,), daemon=True)
+    keeper.start()
+    seen = []
+    for _ in range(5):
+        clock.now += 60
+        renewed.clear()
+        gate.release()
+        assert renewed.wait(5)
+        seen.append(two.run_once(timeout_ms=0))
+    one.stop()
+    gate.release()
+    keeper.join(5)
+    assert not keeper.is_alive()
+    assert seen == [{"reconciler": ["standby"]}] * 5
+    assert clock.now == 1_300
+
+
+def test_a_running_hub_keeps_its_leases_on_a_daemon_thread(monkeypatch, hive):
     started = threading.Event()
     kept = []
 
     def keep(hub_runner):
-        kept.append(hub_runner)
+        kept.append((hub_runner, threading.current_thread().daemon))
         started.set()
 
     monkeypatch.setenv("AGENTIHOOKS_DEPLOYMENT", "local")
@@ -356,8 +386,10 @@ def test_a_running_hub_keeps_its_leases_on_a_daemon_thread(monkeypatch, hive):
     with pytest.raises(Stop):
         runner.main(["run"])
     assert started.wait(5)
-    assert isinstance(kept[0], runner.HubRunner)
-    assert kept[0].stopped.is_set()
+    [(kept_hub, daemon)] = kept
+    assert isinstance(kept_hub, runner.HubRunner)
+    assert daemon
+    assert kept_hub.stopped.is_set()
 
 
 def test_the_hub_command_runs_the_registry_once_on_the_configured_bus(monkeypatch, capsys):
