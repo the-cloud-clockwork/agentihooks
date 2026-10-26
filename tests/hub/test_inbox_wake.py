@@ -86,10 +86,10 @@ def test_timer_retries_three_wakes_then_escalates_to_master_and_operator_without
     advance(rig, 1000 + 3 * W)
     assert steps(rig, item) == ["woken", "woken", "woken", "escalated_master"]
     assert len(rig.inbox.inbox("master@sw")) == 1
-    assert rig.ledger.followups == []
+    assert rig.ledger.alerts == [] and rig.ledger.followups == []
     advance(rig, 1000 + 4 * W)
     assert steps(rig, item)[-1] == "escalated_operator"
-    assert rig.ledger.flagged == [True]
+    assert rig.ledger.alert_keys[0][0] == "inbox"
 
 
 def test_busy_pane_escalates_on_timer_and_never_receives_typed_input(rig):
@@ -106,7 +106,7 @@ def test_master_mail_uses_timer_to_escalate_straight_to_operator(rig):
     advance(rig, 1000 + W)
     assert rig.herdr.prompts == []
     assert steps(rig, item) == ["escalated_operator"]
-    assert rig.ledger.flagged == [True]
+    assert rig.ledger.alert_keys[0][0] == "inbox"
 
 
 def test_timer_restart_and_duplicate_arrival_do_not_repeat_wakes(rig):
@@ -132,7 +132,7 @@ def test_closed_item_and_unrelated_deadline_never_advance_ladder(rig):
     advance(rig, 1000 + W)
     rig.reactor.handle(replace(event, type="execution.changed"))
     assert rig.herdr.prompts == []
-    assert rig.ledger.followups == []
+    assert rig.ledger.alerts == [] and rig.ledger.followups == []
     assert steps(rig, item) == []
 
 
@@ -303,7 +303,7 @@ def test_pooled_master_arrival_is_recovered_by_the_outbox_and_escalates(rig):
     pump(rig)
     advance(rig, 1000 + W)
     assert steps(rig, item) == ["escalated_operator"]
-    assert rig.ledger.flagged == [True]
+    assert rig.ledger.alert_keys[0][0] == "inbox"
 
 
 def test_configured_hub_routes_arrivals_and_expiry_using_its_clock(rig, monkeypatch):
@@ -407,7 +407,7 @@ def test_settled_or_information_items_cancel_their_timer(rig, state):
     [cancelled] = rig.bus.events.consumer("cancel-proof", "swarm.*.deadline.cancelled").fetch(10, 0)
     assert cancelled.event.data["entity"] == "inbox-wake"
     assert rig.herdr.prompts == []
-    assert rig.ledger.followups == []
+    assert rig.ledger.alerts == [] and rig.ledger.followups == []
 
 
 def test_a_missing_message_cancels_cleanly(rig):
@@ -521,7 +521,7 @@ def test_stopped_swarm_seat_mail_does_not_wait_for_an_unavailable_successor(rig)
     item, _ = send(rig, "eng-1@sw")
     advance(rig, 1000 + W // 2)
     advance(rig, 1000 + W)
-    assert rig.ledger.flagged == [True]
+    assert rig.ledger.alert_keys[0][0] == "inbox"
 
 
 def test_inbox_maintenance_keeps_redelivery_actions_from_each_world(rig, monkeypatch):
