@@ -1057,6 +1057,29 @@ def test_stored_statistics_count_a_missing_pointer_and_a_failed_check(tmp_path):
     assert cache.misses == {"no pointer": 1, "check": 1}
 
 
+def test_cache_miss_report_names_only_the_five_most_changed_inputs(tmp_path, capsys):
+    import ast
+
+    from scripts.ci_mutation.stats_cache import collect_cached_stats
+
+    root = tmp_path / "repo"
+    modules = [f"m{index}" for index in range(6)]
+    test = "tests/test_a.py"
+    _repository(root, {f"{name}.py": "value = 1\n" for name in modules} | {test: f"import {', '.join(modules)}\n"})
+
+    def collect(chosen):
+        return [{"status": 0, "tests": {}, "durations": {f"{test}::test_one": 1}, "cpu": 1}]
+
+    collect_cached_stats(root, tmp_path / "cache", {}, [test], [], collect)
+    for name in modules:
+        (root / f"{name}.py").write_text("value = 2\n")
+    capsys.readouterr()
+    collect_cached_stats(root, tmp_path / "cache", {}, [test], [], collect)
+    line = next(line for line in capsys.readouterr().out.splitlines() if "misses" in line)
+    assert line.startswith('Mutation stats cache: misses {"inputs": 1}; changed inputs ')
+    assert ast.literal_eval(line.partition("changed inputs ")[2]) == [(f"{name}.py", 1) for name in modules[:5]]
+
+
 @pytest.mark.parametrize(
     "evidence", [{}, {"tests/test_a.py::test_one": []}, {"tests/test_a.py::test_one": ["module.py"]}]
 )
