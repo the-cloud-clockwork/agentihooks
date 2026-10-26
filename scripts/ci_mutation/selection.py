@@ -87,11 +87,11 @@ def keep_selected_tests(stats: dict[str, set[str]], tests_by_prefix: dict[str, s
     return kept
 
 
-def recorded_seconds(root: Path) -> dict[str, float]:
+def recorded_seconds(root: Path, *, traced: bool = True) -> dict[str, float]:
     path = root / ".test_durations"
     recorded = [json.loads(path.read_text())] if path.exists() else []
     folder = Path(os.environ.get("MUTATION_STATS_CACHE", root / ".mutation-stats-cache"))
-    for path in folder.glob("*.json"):
+    for path in folder.glob("*.json") if traced else ():
         record = json.loads(path.read_text())
         if record["status"] == 0:
             recorded.append(record["durations"])
@@ -103,8 +103,8 @@ def recorded_seconds(root: Path) -> dict[str, float]:
     return durations
 
 
-def file_seconds(root: Path, files: list[str], *, split: bool = False) -> dict[str, float]:
-    durations = recorded_seconds(root)
+def file_seconds(root: Path, files: list[str], *, split: bool = False, traced: bool = True) -> dict[str, float]:
+    durations = recorded_seconds(root, traced=traced)
     seconds = {} if split else dict.fromkeys(files, 0.01)
     by_file = {}
     for entry in files:
@@ -154,7 +154,8 @@ def collect_test_ids(test_runner, files: list[str], work: Path) -> list[str]:
 
 
 def part_files(root: Path, files: list[str], part: tuple[int, int]) -> list[str]:
-    return split_parts(files, file_seconds(root, files), part)
+    # Every part must split identically, and each restores its own traced cache.
+    return split_parts(files, file_seconds(root, files, traced=False), part)
 
 
 def split_parts(files: list[str], seconds: dict[str, float], part: tuple[int, int]) -> list[str]:
