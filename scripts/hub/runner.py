@@ -17,6 +17,7 @@ from scripts.events.factory import open_bus
 from scripts.hive import auth, buckets
 from scripts.hub import lease, registry, slots
 from scripts.hub.registry import Reactor, Registry
+from scripts.scheduler.process_interval import Interval
 from scripts.scheduler.process_timer import wait as scheduled_wait
 from scripts.swarm import store
 from scripts.swarm_ledger import ledger_link
@@ -203,13 +204,12 @@ def _renewal(redis: "Redis", credential: str) -> threading.Thread:
     return thread
 
 
-def _keep_leases(hub: HubRunner) -> None:
-    while not hub.stopped.wait(LEASE_RENEW_S):
-        try:
-            hub.renew()
-        except Exception:
-            print("hub: reactor lease renewal failed", file=sys.stderr)
-            traceback.print_exc()
+def _renew_leases(hub: HubRunner) -> None:
+    try:
+        hub.renew()
+    except Exception:
+        print("hub: reactor lease renewal failed", file=sys.stderr)
+        traceback.print_exc()
 
 
 def main(argv: list[str]) -> int:
@@ -227,12 +227,15 @@ def main(argv: list[str]) -> int:
     buckets.provision(bus)
     slots.serve(bus)
     hub = HubRunner(bus, registry.configured(bus), holder)
-    if not args.once:
-        threading.Thread(target=_keep_leases, args=(hub,), daemon=True).start()
+    keeper = None if args.once else Interval(functools.partial(_renew_leases, hub), every=LEASE_RENEW_S)
+    if keeper is not None:
+        keeper.start()
     previous = signal.signal(signal.SIGTERM, lambda *_: sys.exit(143))
     try:
         return {"run": _run}[args.action](hub, args.once)
     finally:
         hub.stop()
+        if keeper is not None:
+            keeper.close()
         bus.close()
         signal.signal(signal.SIGTERM, previous)

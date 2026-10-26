@@ -324,49 +324,35 @@ def test_lease_changes_name_the_reactor_and_holder(bus, clock, capsys):
     assert capsys.readouterr().out == ""
 
 
-class Stopping(threading.Event):
-    def __init__(self, wait):
-        super().__init__()
-        self._wait = wait
-
-    def wait(self, timeout=None):
-        self._wait(timeout)
-        return self.is_set()
-
-
-def test_the_lease_keeper_renews_each_interval_past_a_failure_until_the_hub_stops(monkeypatch, bus, clock, capsys):
+def test_a_failed_lease_renewal_is_logged_and_the_next_one_still_runs(bus, clock, capsys):
     hub_runner = hub(bus, [], "a", clock)
-    calls, waits = [], []
+    calls = []
 
     def renew():
-        calls.append(len(waits))
+        calls.append(len(calls))
         if len(calls) == 1:
             raise RuntimeError("bus down")
-        if len(calls) == 3:
-            hub_runner.stop()
 
-    monkeypatch.setattr(hub_runner, "renew", renew)
-    hub_runner.stopped = Stopping(waits.append)
-    runner._keep_leases(hub_runner)
-    assert waits == [5.0] * 4
-    assert calls == [1, 2, 3]
+    hub_runner.renew = renew
+    runner._renew_leases(hub_runner)
+    runner._renew_leases(hub_runner)
+    assert calls == [0, 1]
     assert capsys.readouterr().err.startswith("hub: reactor lease renewal failed\nTraceback")
 
 
-def test_the_lease_keeper_thread_holds_the_lease_while_the_loop_is_blocked(monkeypatch, bus, clock):
+def test_the_lease_keeper_holds_the_lease_while_the_loop_is_blocked(bus, clock):
     reactors = [registry.Reactor("reconciler", "swarm.*.reconcile.requested", lambda _: None, singleton=True)]
     one, two = hub(bus, reactors, "a", clock), hub(bus, reactors, "b", clock)
-    gate, renewed = threading.Semaphore(0), threading.Event()
-    renew = one.renew
+    gate, renewed, done = threading.Semaphore(0), threading.Event(), threading.Event()
 
-    def counted():
-        renew()
+    def renew():
+        if not done.is_set():
+            gate.acquire()
+        runner._renew_leases(one)
         renewed.set()
 
-    monkeypatch.setattr(one, "renew", counted)
-    one.stopped = Stopping(lambda seconds: gate.acquire())
     one.run_once(timeout_ms=0)
-    keeper = threading.Thread(target=runner._keep_leases, args=(one,), daemon=True)
+    keeper = runner.Interval(renew, every=0.001)
     keeper.start()
     seen = []
     for _ in range(5):
@@ -376,32 +362,49 @@ def test_the_lease_keeper_thread_holds_the_lease_while_the_loop_is_blocked(monke
         assert renewed.wait(5)
         seen.append(two.run_once(timeout_ms=0))
     one.stop()
+    done.set()
     gate.release()
-    keeper.join(5)
-    assert not keeper.is_alive()
+    keeper.close()
     assert seen == [{"reconciler": ["standby"]}] * 5
     assert clock.now == 1_300
 
 
-def test_a_running_hub_keeps_its_leases_on_a_daemon_thread(monkeypatch, hive):
-    started = threading.Event()
+def test_a_running_hub_keeps_its_leases_on_a_scheduled_interval(monkeypatch, hive):
     kept = []
 
-    def keep(hub_runner):
-        kept.append((hub_runner, threading.current_thread().daemon))
-        started.set()
+    class Keeper:
+        def __init__(self, callback, *, every):
+            kept.append(self)
+            self.callback, self.every, self.events = callback, every, []
+
+        def start(self):
+            self.events.append("start")
+
+        def close(self):
+            self.events.append("close")
 
     monkeypatch.setenv("AGENTIHOOKS_DEPLOYMENT", "local")
     monkeypatch.delenv("LEDGER_URL", raising=False)
-    monkeypatch.setattr(runner, "_keep_leases", keep)
+    monkeypatch.setattr(runner, "Interval", Keeper)
     monkeypatch.setattr(runner.HubRunner, "run_once", stop_after(iter([{"page": ["handled"]}])))
+    renewed = []
+    monkeypatch.setattr(runner.HubRunner, "renew", lambda self: renewed.append(self))
     with pytest.raises(Stop):
         runner.main(["run"])
-    assert started.wait(5)
-    [(kept_hub, daemon)] = kept
-    assert isinstance(kept_hub, runner.HubRunner)
-    assert daemon
-    assert kept_hub.stopped.is_set()
+    [keeper] = kept
+    assert keeper.every == 5.0
+    assert keeper.events == ["start", "close"]
+    keeper.callback()
+    [renewed_hub] = renewed
+    assert renewed_hub.stopped.is_set()
+
+
+def test_a_single_pass_hub_starts_no_lease_keeper(monkeypatch, hive):
+    monkeypatch.setenv("AGENTIHOOKS_DEPLOYMENT", "local")
+    monkeypatch.delenv("LEDGER_URL", raising=False)
+    monkeypatch.setattr(runner, "Interval", lambda *args, **kwargs: pytest.fail("a single pass started a keeper"))
+    monkeypatch.setattr(runner.HubRunner, "run_once", lambda self: {"page": ["handled"]})
+    assert runner.main(["run", "--once"]) == 0
 
 
 def test_the_hub_command_runs_the_registry_once_on_the_configured_bus(monkeypatch, capsys):
