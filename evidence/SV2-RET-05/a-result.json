@@ -10,6 +10,7 @@
     ],
     "report": {
       "committed": true,
+      "foreign_domain_objects": 1,
       "garbage_collection_bytes": 150,
       "mode": "collect",
       "protected": {
@@ -29,7 +30,6 @@
         "rebound": [],
         "unowned": [
           "a18ef8bbb2629d5cae59bfa37da2084923eec61d16a6b5d4773c96cae4582aab",
-          "d2636e7541f082d370e2b643d33484f258f96fc22c02d0497194c91a97d333b0",
           "stray.tmp"
         ]
       },
@@ -46,6 +46,7 @@
     },
     "rerun": {
       "committed": true,
+      "foreign_domain_objects": 1,
       "garbage_collection_bytes": 0,
       "mode": "collect",
       "protected": {
@@ -65,7 +66,6 @@
         "rebound": [],
         "unowned": [
           "a18ef8bbb2629d5cae59bfa37da2084923eec61d16a6b5d4773c96cae4582aab",
-          "d2636e7541f082d370e2b643d33484f258f96fc22c02d0497194c91a97d333b0",
           "stray.tmp"
         ]
       },

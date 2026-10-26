@@ -47,5 +47,5 @@
   },
   "status": "fixture_verified",
   "supported_versions": "session catalog schema with archive_manifest and the index worker tables; upload_reservation and index_retirement tables are created on first use",
-  "tested_commit": "b59d2e5d2b782e49297950716bb02a741cb0b085"
+  "tested_commit": "a9dfc6c0046aa7349e1efaaa131c6c27943d3271"
 }
