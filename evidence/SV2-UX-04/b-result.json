@@ -1,0 +1,35 @@
+{
+  "case": "T-SV2-UX-04-B",
+  "checks": {
+    "a_new_valid_request_succeeds": true,
+    "foreign_ref_refused": true,
+    "nothing_disclosed": true,
+    "personal_link_refused": true,
+    "state_unchanged": true
+  },
+  "evidence_class": "mocked: a fakeredis swarm store holding the fixture's delivered pack and its evidence records, read through the ledger page projection and the evidence expand path a ledger API read calls; no ledger HTTP server, browser, brain or cluster runs",
+  "input_sha256": {
+    "context-evidence.json": "94f47557b84005cbf5bc5b98019dba4cc7467464b76b4de955a738eebf134a45"
+  },
+  "observed": {
+    "ledger_evidence_expand_failures": {
+      "forbidden_scope": 1,
+      "not_in_pack": 1
+    },
+    "refused": {
+      "arc:elsewhere": {
+        "reason": "not_in_pack",
+        "state": "refused",
+        "status": 404,
+        "text": "this reference is not part of the task's context pack"
+      },
+      "session:p-7": {
+        "reason": "forbidden_scope",
+        "state": "refused",
+        "status": 403,
+        "text": "private to another brain, outside this viewer's scope"
+      }
+    }
+  },
+  "state": "passed"
+}

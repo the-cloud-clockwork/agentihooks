@@ -668,6 +668,8 @@ body.resizing-x { cursor: col-resize; user-select: none; }
 #context-table td { vertical-align: top; }
 .ctx-items { display: flex; flex-direction: column; gap: 6px; max-width: 72ch; }
 .ctx-item { display: flex; flex-direction: column; gap: 2px; }
+.ctx-tags { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.ctx-tags .sw-btn { min-height: 28px; padding: 2px 8px; }
 .ctx-text { color: var(--text-2); overflow: hidden; text-overflow: ellipsis; }
 .ctx-text.unavailable { color: var(--destructive); }
 .ctx-evidence { max-width: 72ch; padding-left: 12px; }

@@ -1,0 +1,53 @@
+{
+  "authoritative_objects": "The stored packs and evidence records are authoritative for the ledger; the swarm view cards and any evidence the page opened are projections recomputed on each read. Rollback deletes none of them.",
+  "authority": "The viewer's scope is the task's own brain, taken from the stored pack and the stored evidence, never from a display label. The ledger credential check in the v1 API admits the reader; the page grants nothing and every expansion reads the store again.",
+  "cases": {
+    "a": "evidence/SV2-UX-04/a-result.json",
+    "b": "evidence/SV2-UX-04/b-result.json",
+    "c": "evidence/SV2-UX-04/c-result.json"
+  },
+  "compatibility": "Additive: the swarm view gains a context key, the v1 API gains one read path, and the page gains one panel; no earlier response or refusal text changed",
+  "dependencies": {
+    "SV2-CTX-05": "merged into agentibrain-kernel dev (agentibrain-kernel#180)",
+    "SV2-UX-03": "merged into dev (#6657)"
+  },
+  "evidence_class": "mocked: a fakeredis swarm store holding the fixture's delivered pack and its evidence records, read through the ledger page projection and the evidence expand path a ledger API read calls; no ledger HTTP server, browser, brain or cluster runs",
+  "integration_gate": "G10",
+  "interfaces": [
+    "scripts.swarm.context_view.record(store, slug, task, pack) stores the delivered pack per task; put_evidence(store, slug, ref, evidence) stores one source's record range or lesson revision and refuses to overwrite a revocation; revoke(store, slug, ref, reason) replaces the source with a tombstone naming only ref, brain, kind and reason",
+    "context_view.view(store, slug, now_ms) projects one card per task with brain, purpose, receipt id and freshness (fresh, expired, no receipt), delivery per adapter, omitted references and items labelled transcript evidence, brain synthesis or inferred intent and superseded by their successor; an item from another brain shows no reference or summary; a revoked or missing source shows unavailable with its reason; it carries ledger_evidence_expand_failures by reason",
+    "context_view.expand(store, slug, task, ref) returns the supporting evidence for a reference in the task's pack only when both the item and the stored evidence belong to the task's brain; it refuses not_in_pack (404), forbidden_scope (403), unavailable (410) and revoked (410) and counts each refusal",
+    "GET /api/v1/ledgers/<slug>/swarm/context/<task>/<ref> serves expand behind the ledger credential check with Cache-Control no-store; the swarm view carries context; the ledger page renders a foldable, resizable Brain context panel in the Swarm tab after Recovery whose evidence buttons open the evidence inline"
+  ],
+  "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/7622",
+  "limitations": [
+    "Nothing records packs or evidence in production yet: the consultation gate that consumes brain receipts must call context_view.record and put_evidence when it delivers a pack",
+    "A personal brain item is never expandable on the ledger; there is no grant path for a personal brain viewer on the swarm ledger",
+    "The revocation tombstone write is check then set, not atomic with a concurrent put_evidence"
+  ],
+  "measurements": {
+    "ledger_evidence_expand_failures": {
+      "a": {},
+      "b": {
+        "forbidden_scope": 1,
+        "not_in_pack": 1
+      },
+      "c": {
+        "revoked": 1
+      },
+      "note": "fixture-local counters by refusal reason"
+    }
+  },
+  "package": "SV2-UX-04",
+  "package_complete": false,
+  "pull_request": "",
+  "rollback": "Hide context inspection panels while preserving core task controls and evidence ids: removing the Brain context panel and the swarm view's context key leaves every task control and the stored packs and evidence untouched. Rehearsed by test_without_context_the_table_says_so, which renders the page with no context and keeps the other panels.",
+  "states": {
+    "accepted": "Pending Standards and Spec review on the pull request",
+    "committed": "Case records, manifest and result committed on the task branch; the change reaches dev only when its pull request merges",
+    "externally_verified": "Not on Anton: no rollout of this commit has been observed and no delivery path records packs yet, so no real context card has been shown; the evidence is mocked and labelled so",
+    "observed": "Cases A, B and C passed in focused Proofs run 40416510718 on a2718959c (evidence/SV2-UX-04/a-result.json, b-result.json, c-result.json); the same tests failed before the change in Proofs run 40416506868 on the tests commit 9fef5f1ec; the page was checked by eye at 1920 by 1080, screenshots context-1920.png and context-revoked-1920.png on the ledger task vux4 proof"
+  },
+  "status": "fixture-qualified: a task's delivered pack shows its selected brain, purpose, receipt freshness and delivery result per adapter; each item carries its trust class, inferred intent and superseded labels; an item expands to its record range or lesson revision; a copied personal brain link and a reference outside the pack are refused without mutating state or disclosing content; a revoked source shows unavailable with its reason after a restart and a replayed write cannot restore it; no Anton rollout of this commit has been observed",
+  "tested_commit": "a2718959c"
+}

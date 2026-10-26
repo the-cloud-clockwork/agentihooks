@@ -35,12 +35,12 @@ function itemLine(card, item, sw) {
   const text = item.unavailable ? `unavailable: ${item.unavailable}` : item.summary;
   const open = item.ref && !item.unavailable && h("button", { class: "sw-btn", type: "button", "data-context-ref": item.ref,
     "aria-label": `Show the evidence behind ${item.ref}`, text: opened.has(key) ? "refresh" : "evidence", on: { click: () => expand(card, item, sw) } });
-  return h("div", { class: "ctx-item" }, h("span", { class: "sw-acts" }, label(item.kind, "kind"), ...tags, open),
+  return h("div", { class: "ctx-item" }, h("span", { class: "ctx-tags" }, label(item.kind, "kind"), ...tags, open),
     h("span", { class: item.unavailable ? "ctx-text unavailable" : "ctx-text", text, title: text }), evidence(key));
 }
 
 function receipt(card) {
-  return h("span", { class: "sw-acts", title: card.receipt || card.receipt_state }, label(card.receipt_state));
+  return h("span", { class: "ctx-tags", title: card.receipt || card.receipt_state }, label(card.receipt_state));
 }
 
 export function renderContext(sw) {

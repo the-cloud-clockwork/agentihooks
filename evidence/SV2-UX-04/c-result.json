@@ -1,0 +1,35 @@
+{
+  "case": "T-SV2-UX-04-C",
+  "checks": {
+    "opened_before_revocation": true,
+    "page_shows_unavailable": true,
+    "replayed_revoke_is_idempotent": true,
+    "stale_write_cannot_restore": true,
+    "unavailable_with_explanation": true
+  },
+  "evidence_class": "mocked: a fakeredis swarm store holding the fixture's delivered pack and its evidence records, read through the ledger page projection and the evidence expand path a ledger API read calls; no ledger HTTP server, browser, brain or cluster runs",
+  "input_sha256": {
+    "context-evidence.json": "94f47557b84005cbf5bc5b98019dba4cc7467464b76b4de955a738eebf134a45"
+  },
+  "observed": {
+    "after": {
+      "reason": "revoked",
+      "state": "refused",
+      "status": 410,
+      "text": "the session was deleted by its owner"
+    },
+    "item": {
+      "kind": "session",
+      "labels": [
+        "transcript evidence"
+      ],
+      "ref": "session:s-41",
+      "summary": "",
+      "unavailable": "the session was deleted by its owner"
+    },
+    "ledger_evidence_expand_failures": {
+      "revoked": 1
+    }
+  },
+  "state": "passed"
+}
