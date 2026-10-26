@@ -97,13 +97,23 @@ def test_a_transient_github_failure_is_retried_with_backoff(binary):
 
 def test_wait_times_out_red_when_a_planned_shard_never_finishes(tmp_path):
     with (
-        patch.object(ci_gate_shards.time, "monotonic", side_effect=[0, 0, 1200]),
+        patch.object(ci_gate_shards.time, "monotonic", side_effect=[0, 0, ci_gate_shards.DEADLINE_SECONDS]),
         patch.object(ci_gate_shards.time, "sleep") as sleep,
         patch.object(ci_gate_shards, "api", return_value=[{"jobs": []}]),
         pytest.raises(RuntimeError, match="timed out"),
     ):
         ci_gate_shards.watch("org/repo", "123", "2", [1])
     sleep.assert_called_once_with(15)
+
+
+def test_shards_still_waiting_for_runners_at_twenty_minutes_keep_verification_alive():
+    passed = {"name": "unit (3.12, 1)", "status": "completed", "conclusion": "success"}
+    with (
+        patch.object(ci_gate_shards.time, "monotonic", side_effect=[0, 0, 1200]),
+        patch.object(ci_gate_shards.time, "sleep"),
+        patch.object(ci_gate_shards, "api", side_effect=[[{"jobs": []}], [{"jobs": [passed]}]]),
+    ):
+        ci_gate_shards.watch("org/repo", "123", "2", [1])
 
 
 @pytest.mark.parametrize("conclusion", ["failure", "cancelled", "timed_out", "skipped"])

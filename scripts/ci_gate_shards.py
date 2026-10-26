@@ -8,6 +8,8 @@ from scripts.ci_budget.rate_limit import gh_api
 
 RETRY_DELAYS = (5, 10, 20, None)
 POLL_SECONDS = 15
+# Ends before the dev merge queue check timeout (45 minutes) so the run reports its own failure first.
+DEADLINE_SECONDS = 40 * 60
 
 
 def api(endpoint: str, *, binary: bool = False) -> list | bytes:
@@ -34,7 +36,7 @@ def ready(jobs: list[dict], shards: list[int]) -> bool:
 
 def watch(repository: str, run: str, attempt: str, shards: list[int], *, recover: bool = True) -> None:
     units = {f"unit (3.12, {shard})" for shard in shards}
-    deadline = rate_limit.deadline = time.monotonic() + 1200
+    deadline = rate_limit.deadline = time.monotonic() + DEADLINE_SECONDS
     while time.monotonic() < deadline:
         pages = api(f"repos/{repository}/actions/runs/{run}/attempts/{attempt}/jobs?per_page=100")
         jobs = [job for page in pages for job in page["jobs"]]

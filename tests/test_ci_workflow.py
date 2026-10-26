@@ -986,7 +986,7 @@ def test_shard_verification_starts_from_the_plan_and_prefetches_complete_reports
         "tests.shard_check shard-reports/durations-*/durations.json --collected collected-data/collected.json" in check
     )
     assert "REUSED" in check
-    assert job["timeout-minutes"] == 25
+    assert job["timeout-minutes"] == 45
     assert job["permissions"] == {"contents": "read"}
 
 
