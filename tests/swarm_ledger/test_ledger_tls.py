@@ -209,7 +209,7 @@ def test_the_health_check_answers_over_tls(tls_ledger):
     assert ledger_link.serving(timeout=5, url=tls_ledger["base"]) == str(core.LEDGER_DIR)
 
 
-@pytest.mark.parametrize("body", [b'{"ops": []}', b" " * (ledger_server.MAX_BODY + 1)])
+@pytest.mark.parametrize("body", [b'{"ops": []}', b"{}" + b" " * (ledger_server.MAX_BODY - 2)])
 @pytest.mark.parametrize("path", ["agent-token", "ops"])
 def test_a_refusal_with_an_unread_body_answers_with_its_status_over_tls(tls_ledger, path, body):
     request = urllib.request.Request(

@@ -13,13 +13,16 @@ class Body:
             self.left -= len(data)
         return data
 
-    def drain(self) -> bool:
-        if self.left is None:
+    def drain(self, limit: int) -> bool:
+        if self.left is None or self.left > limit:
             return False
         while self.left:
             if not self.read(CHUNK):
                 return False
         return True
+
+    def close(self) -> None:
+        self.raw.close()
 
 
 def length(headers) -> int | None:

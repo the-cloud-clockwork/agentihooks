@@ -896,7 +896,7 @@ class Handler(BaseHTTPRequestHandler):
         return parsed
 
     def send_response(self, code, message=None):
-        unread = isinstance(getattr(self, "rfile", None), request_body.Body) and not self.rfile.drain()
+        unread = isinstance(getattr(self, "rfile", None), request_body.Body) and not self.rfile.drain(MAX_BODY)
         super().send_response(code, message)
         if unread:
             self.close_connection = True
