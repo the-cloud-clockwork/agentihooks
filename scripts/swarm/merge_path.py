@@ -227,12 +227,14 @@ def read_pulls(repo_dir: str, repo: str, since_s: float, run: Callable) -> list[
     return pulls
 
 
-def collect(repo_dir: str, window: tuple[float, float], run: Callable = subprocess.run) -> tuple[str, dict]:
+def collect(
+    repo_dir: str, window: tuple[float, float], run: Callable = subprocess.run, queue_jobs: bool = True
+) -> tuple[str, dict]:
     repo = _gh(["api", "repos/{owner}/{repo}", "--jq", ".full_name"], repo_dir, run).strip()
     runs = [found for event in EVENTS for found in read_runs(repo_dir, event, window, run)]
     jobs, unread = {}, 0
     for found in runs:
-        if found["event"] != "merge_group":
+        if not queue_jobs or found["event"] != "merge_group":
             continue
         try:
             jobs[found["id"]] = read_jobs(repo_dir, found["id"], run)
@@ -279,7 +281,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     until_s = _seconds(args.until) if args.until else time.time()
     window = (until_s - args.hours * 3600, until_s)
-    repo, found = collect(".", window)
+    repo, found = collect(".", window, queue_jobs=False)
     history = read_runs(".", "pull_request", (window[0] - LOOKBACK_S, until_s), subprocess.run)
     found["head_pushes"] = head_pushes(history, window)
     args.out.write_text(json.dumps({"repo": repo, **found}))

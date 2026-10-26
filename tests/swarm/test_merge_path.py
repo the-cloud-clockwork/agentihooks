@@ -375,6 +375,42 @@ def test_collect_counts_a_queue_run_whose_jobs_cannot_be_read_and_goes_on():
     assert found["open_ready_pull_requests"] == 7
 
 
+def test_collect_counts_every_queue_run_whose_jobs_cannot_be_read():
+    gh = Gh(
+        [
+            (0, "o/r\n"),
+            page(RUNS[:4], 4),
+            page(RUNS[4:6], 2),
+            page(RUNS[8:9], 1),
+            (1, "", "gh: Not Found (HTTP 404)\n"),
+            (1, "", "gh: Not Found (HTTP 404)\n"),
+            searched(PULLS[:2], [PULLS[2], {}]),
+            (0, json.dumps({"issueCount": 7}) + "\n"),
+        ]
+    )
+    _, found = merge_path.collect("/repo", WINDOW, gh)
+    assert found["queue_runs_without_jobs"] == 2
+    assert found["standard_jobs_per_queue_run"] is None
+
+
+def test_collect_without_queue_jobs_reads_no_job_lists():
+    gh = Gh(
+        [
+            (0, "o/r\n"),
+            page(RUNS[:4], 4),
+            page(RUNS[4:6], 2),
+            page(RUNS[8:9], 1),
+            searched(PULLS[:2], [PULLS[2], {}]),
+            (0, json.dumps({"issueCount": 7}) + "\n"),
+        ]
+    )
+    _, found = merge_path.collect("/repo", WINDOW, gh, queue_jobs=False)
+    assert not any("/jobs?" in " ".join(args) for args, _ in gh.calls)
+    assert found["queue_runs_without_jobs"] == 0
+    assert found["standard_jobs_per_queue_run"] is None
+    assert found["merges"] == 2 and found["open_ready_pull_requests"] == 7
+
+
 def command(monkeypatch, found, argv):
     calls = SimpleNamespace(windows=[], posts=[], slugs=[])
 
@@ -476,7 +512,11 @@ def test_head_pushes_reads_a_missing_head_commit_as_no_dev_merge():
 def test_main_writes_the_merge_path_with_head_pushes_from_a_lookback(monkeypatch, tmp_path, capsys):
     found = {"tests_runs": {}, "removals": {}, "head_failure_rate": None}
     seen = []
-    monkeypatch.setattr(merge_path, "collect", lambda repo_dir, window: (f"o/r{repo_dir}", dict(found, window=window)))
+    monkeypatch.setattr(
+        merge_path,
+        "collect",
+        lambda repo_dir, window, queue_jobs: (f"o/r{repo_dir}", dict(found, window=window, queue_jobs=queue_jobs)),
+    )
     monkeypatch.setattr(merge_path, "render", lambda repo, got: f"line {repo} {len(got['head_pushes'])}")
 
     def listed(repo_dir, event, window, run_fn):
@@ -491,6 +531,7 @@ def test_main_writes_the_merge_path_with_head_pushes_from_a_lookback(monkeypatch
     written = json.loads(out.read_text())
     assert written["repo"] == "o/r."
     assert written["window"] == [SINCE, UNTIL]
+    assert written["queue_jobs"] is False
     assert written["head_pushes"] == {"first push": {"runs": 1, "red": 0}}
     assert seen == [(".", "pull_request", (SINCE - 6 * 3600, UNTIL), subprocess.run)]
     assert capsys.readouterr().out.splitlines() == ["line o/r. 1", '{"first push": {"runs": 1, "red": 0}}']
@@ -499,7 +540,9 @@ def test_main_writes_the_merge_path_with_head_pushes_from_a_lookback(monkeypatch
 def test_main_reads_the_last_day_into_the_ci_minutes_file_by_default(monkeypatch, tmp_path):
     windows = []
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(merge_path, "collect", lambda repo_dir, window: windows.append(window) or ("o/r", {}))
+    monkeypatch.setattr(
+        merge_path, "collect", lambda repo_dir, window, queue_jobs: windows.append(window) or ("o/r", {})
+    )
     monkeypatch.setattr(merge_path, "read_runs", lambda *args: [])
     monkeypatch.setattr(merge_path, "render", lambda repo, got: "line")
     before = time.time()
