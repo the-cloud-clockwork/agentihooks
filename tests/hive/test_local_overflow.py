@@ -489,3 +489,60 @@ def test_the_machine_count_leaves_out_the_task_itself_and_holds_other_swarms_pen
     assert fenced.placement_refusal("eng", {"id": "task"}) == ""
     assert fenced.spawn(setup.config, "eng", "eng name", {"id": "task"}) == "placed on the workstation"
     assert fenced.placement_refusal("eng", {"id": "next"}) == capped(3, 2, 1, cpus=3)
+
+
+def pinned_wait(setup, slug, task, seen_at=None):
+    from scripts.hive import placement_waits
+    from scripts.swarm import lease
+
+    now = lease.now_ms(setup.store) if seen_at is None else seen_at
+    row = {"lane": "eng", "reason": FULL, "started_at": now, "seen_at": now, "workstation": True}
+    setup.store.redis.hset(setup.store.key(slug, placement_waits.WAITS), task, json.dumps(row))
+
+
+def test_a_waiting_workstation_task_keeps_its_seat_from_overflow_work(setup, monkeypatch):
+    fenced = hybrid(setup, monkeypatch)
+    fill_anton(setup)
+    local_agents(setup, 7)
+    setup.store.update(setup.config.slug, local_max_agents=7)
+    pinned = {"id": "pinned", "workstation": True}
+    assert "local machine runs 7 of its 7 agents" in fenced.placement_refusal("eng", pinned)
+    setup.store.update(setup.config.slug, local_max_agents=8)
+    assert "local machine runs 7 of its 8 agents" in fenced.placement_refusal("eng", {"id": "task"})
+    with pytest.raises(SpawnError, match="local machine runs 7 of its 8 agents"):
+        fenced.spawn(setup.config, "eng", "eng name", {"id": "task"})
+    assert fenced.spawn(setup.config, "eng", "eng pinned", pinned) == "placed on the workstation"
+    assert setup.herdr.spawn.call_count == 1
+
+
+def test_a_waiting_workstation_task_of_another_swarm_keeps_its_seat(setup, monkeypatch):
+    from scripts.hive import placement_waits
+    from scripts.swarm.store import SwarmConfig
+
+    fenced = hybrid(setup, monkeypatch)
+    fill_anton(setup)
+    setup.store.create(SwarmConfig("watched", "agentihooks", 1, 1))
+    local_agents(setup, 6)
+    pinned_wait(setup, "watched", "first")
+    pinned_wait(setup, "watched", "second")
+    assert "local machine runs 6 of its 8 agents" in fenced.placement_refusal("eng", {"id": "task"})
+    setup.store.redis.hdel(setup.store.key("watched", placement_waits.WAITS), "second")
+    assert fenced.placement_refusal("eng", {"id": "task"}) == ""
+
+
+def test_a_stale_workstation_wait_reserves_nothing(setup, monkeypatch):
+    from scripts.swarm.store import SwarmConfig
+
+    fenced = hybrid(setup, monkeypatch)
+    fill_anton(setup)
+    setup.store.create(SwarmConfig("watched", "agentihooks", 1, 1))
+    local_agents(setup, 7)
+    pinned_wait(setup, "watched", "gone", seen_at=1)
+    assert fenced.placement_refusal("eng", {"id": "task"}) == ""
+
+
+def test_overflow_counts_reserved_seats_against_the_cap():
+    assert overflow("engineer", Wait(FULL), 6, 8, 1) == Choice(LOCAL_MACHINE, FULL)
+    assert overflow("engineer", Wait(FULL), 7, 8, 1) == Wait(
+        f"{FULL}, and the local machine runs 7 of its 8 agents with 1 kept for waiting workstation tasks"
+    )
