@@ -37,6 +37,17 @@ def test_an_inbox_alert_is_raised_once_per_item_and_carries_the_item():
     ]
 
 
+def test_two_items_with_the_same_text_each_get_their_own_alert():
+    doc, ctx = {}, Ctx(rev=9, at=70)
+    apply(doc, raise_op("m1", "same"), ctx)
+    apply(doc, raise_op("m2", "same"), ctx)
+    assert [(a["id"], a["item"], a["at"], a["rev"]) for a in doc["alerts"]] == [
+        ("al-9-0", "m1", 70, 9),
+        ("al-9-1", "m2", 70, 9),
+    ]
+    assert ctx.dirty is True
+
+
 def test_closing_by_item_closes_only_that_items_open_alert():
     doc = {}
     apply(doc, raise_op("m1", "unread one"))
@@ -84,6 +95,7 @@ CLOSE_REFUSED = "alert_close takes target, an alert id, and an optional by, or a
         ({**raise_op("m1"), "source": "promotion"}, INBOX_REFUSED),
         (raise_op(""), INBOX_REFUSED),
         (raise_op(7), INBOX_REFUSED),
+        ({k: v for k, v in raise_op("m1").items() if k != "item"}, INBOX_REFUSED),
         ({**close_op("m1"), "target": "al-1-0"}, CLOSE_REFUSED),
         ({k: v for k, v in close_op("m1").items() if k != "item"}, CLOSE_REFUSED),
         (close_op(""), CLOSE_REFUSED),

@@ -40,7 +40,8 @@ def check_raise(op):
         or not text.strip()
         or len(text) > MAX_OUTCOME
         or not isinstance(item, str)
-        or ("item" in op and (op["source"] != INBOX or not item))
+        or ("item" in op or op["source"] == INBOX)
+        and not (op["source"] == INBOX and item)
     ):
         raise ValueError(
             f"alert_raise takes by, a source among {RAISED}, a text of up to {MAX_OUTCOME} characters "
@@ -50,11 +51,12 @@ def check_raise(op):
 
 def raise_source(doc, ctx, source, text, item=None):
     rows = doc.setdefault("alerts", [])
-    if not any(a["source"] == source and a.get("item") == item and a["state"] != DONE for a in rows):
-        count = len(rows)
+    if any(a["source"] == source and a.get("item") == item and a["state"] != DONE for a in rows):
+        return True
+    if item:
+        new_alert(doc, ctx, source, text, TARGETS[source])["item"] = item
+    else:
         raise_warning(doc, ctx, (source, text), [])
-        if item and len(rows) > count:
-            rows[-1]["item"] = item
     return True
 
 
@@ -158,19 +160,25 @@ def raise_warning(doc: dict, ctx: object, warning: tuple, before: list) -> None:
         return
     if matching and text in before and not owner:
         return
+    alert = new_alert(doc, ctx, source, text, writer if writer and writer != OPERATOR else TARGETS[source])
+    if source == SYNC:
+        alert.update(writer=writer, item=target_item, last_refused_at=ctx.at)
+
+
+def new_alert(doc, ctx, source, text, target):
+    rows = doc["alerts"]
     alert = {
         "id": f"al-{ctx.rev}-{len(rows)}",
         "text": text,
         "source": source,
-        "target": writer if writer and writer != OPERATOR else TARGETS[source],
+        "target": target,
         "state": OPEN,
         "at": ctx.at,
         "rev": ctx.rev,
     }
-    if source == SYNC:
-        alert.update(writer=writer, item=target_item, last_refused_at=ctx.at)
     rows.append(alert)
     ctx.dirty = True
+    return alert
 
 
 def derive(doc, ctx, raised, before):
