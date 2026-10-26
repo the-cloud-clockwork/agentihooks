@@ -86,7 +86,8 @@ def test_full_selection_reads_the_same_repository_inputs(tmp_path, stage, group)
         text=True,
         env={**os.environ, "PYTEST_ADDOPTS": ""},
     )
-    assert result.returncode == 0, nested_report(result, junit)
+    returncode = result.returncode
+    assert returncode == 0, nested_report(result, junit)
 
 
 def test_statistics_keep_declared_inputs_and_the_trusted_published_map(tmp_path, monkeypatch):
