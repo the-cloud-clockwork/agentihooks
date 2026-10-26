@@ -415,6 +415,8 @@ def test_the_route_home_links_a_rendered_home_folder_to_where_it_points(
 ):
     shared = tmp_path / "operator-claude" / "projects"
     (rendered / "projects").symlink_to(shared)
+    (rendered / "plugins" / "kit" / "sessions").mkdir(parents=True)
+    (rendered / "plugins" / "kit" / "sessions" / "notes.json").write_text("{}")
     _slot(1, PREFERRED)
     monkeypatch.setattr(master_logins, "left", lambda account, now: 50.0)
     claude_ai.launch_claude("/opt/claude", [], _environ(rendered), "")
@@ -423,3 +425,31 @@ def test_the_route_home_links_a_rendered_home_folder_to_where_it_points(
     assert shared.is_dir()
     assert (target / "sessions").readlink() == rendered / "sessions"
     assert (rendered / "sessions").is_dir()
+    assert (target / "plugins" / "kit" / "sessions").is_dir()
+    assert not (target / "plugins" / "kit" / "sessions").is_symlink()
+    assert (target / "plugins" / "kit" / "sessions" / "notes.json").read_text() == "{}"
+
+
+def test_conversations_copied_into_an_older_route_home_move_to_the_default_folder(
+    tmp_path, monkeypatch, checked, executed
+):
+    operator = _plain_shell(tmp_path, monkeypatch)
+    _slot(1, PREFERRED)
+    monkeypatch.setattr(master_logins, "left", lambda account, now: 50.0)
+    shared = operator / ".claude" / "projects" / "repo"
+    shared.mkdir(parents=True)
+    (shared / "kept.jsonl").write_text("operator\n")
+    folder = login.root(1).parent / "claude-ai" / "s_251026"
+    older = login._rebuild(folder, operator / ".claude")
+    assert not (older / "projects").is_symlink()
+    (older / "projects" / "repo" / "kept.jsonl").write_text("stale\n")
+    (older / "projects" / "repo" / "resumed.jsonl").write_text("resumed\n")
+    (older / "sessions").mkdir()
+    (older / "sessions" / "1.json").write_text("{}")
+    claude_ai.launch_claude("/opt/claude", [], {"HOME": str(operator), "AGENTIHOOKS_AGENT_NAME": "s-251026"}, "")
+    target = Path(executed[0][2]["CLAUDE_CONFIG_DIR"])
+    assert target == older
+    assert (target / "projects").readlink() == operator / ".claude" / "projects"
+    assert (shared / "kept.jsonl").read_text() == "operator\n"
+    assert (shared / "resumed.jsonl").read_text() == "resumed\n"
+    assert (operator / ".claude" / "sessions" / "1.json").read_text() == "{}"

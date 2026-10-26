@@ -246,6 +246,9 @@ def _rebuild(folder: Path, rendered: Path, linked: tuple[str, ...] = ()) -> Path
         shared = (rendered / name).resolve()
         shared.mkdir(parents=True, exist_ok=True)
         (staging / name).symlink_to(shared)
+        copied = target / name
+        if copied.is_dir() and not copied.is_symlink():
+            shutil.copytree(copied, shared, dirs_exist_ok=True, copy_function=_copy_absent)
     if grant is not None:
         (staging / CREDENTIALS).write_bytes(grant)
         (staging / CREDENTIALS).chmod(PRIVATE_FILE)
@@ -259,6 +262,11 @@ def _rebuild(folder: Path, rendered: Path, linked: tuple[str, ...] = ()) -> Path
     shutil.rmtree(target, ignore_errors=True)
     staging.rename(target)
     return target
+
+
+def _copy_absent(source: str, destination: str) -> None:
+    if not Path(destination).exists():
+        shutil.copy2(source, destination)
 
 
 def _adopt() -> None:
