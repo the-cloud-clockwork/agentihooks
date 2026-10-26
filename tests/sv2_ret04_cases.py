@@ -127,7 +127,14 @@ class World:
         files = {name: text.encode() for name, text in self.doc["files"].items()}
         checkpoints = {self.doc["checkpoint"]["task_id"]: self.checkpoint}
         return backup.Sources(
-            self.domain, self.catalog_path, self.objects, files, checkpoints, self.doc["versions"], self.doc["key_ids"]
+            self.domain,
+            self.catalog_path,
+            self.objects,
+            files,
+            checkpoints,
+            self.doc["versions"],
+            self.doc["key_ids"],
+            self.query,
         )
 
     def capture(self, at="captured") -> str:

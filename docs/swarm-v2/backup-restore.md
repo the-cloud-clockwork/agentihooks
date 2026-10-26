@@ -17,7 +17,8 @@ backup store and returns its set id, the sha256 of its manifest:
 | objects | every archive object the catalog manifest names, plus every checkpoint object | each digest is `present` or carries the read error |
 
 Each component records its digest, byte size, `version` and encryption `key_id`. The manifest records `format`
-(`1.0`), the `corpus` the set belongs to, `captured_at`, the object inventory, the checkpoint object lists per task and `omitted_projections`.
+(`1.0`), the `corpus` the set belongs to, `captured_at`, `query_sha256` (the digest of the agreed historical
+query's answer on the source), the object inventory, the checkpoint object lists per task and `omitted_projections`.
 A source object that is missing or altered is recorded with its error and never copied or replaced.
 
 ## Restore
@@ -36,7 +37,8 @@ from the restored events.
 ## Drill
 
 `drill(backup_store, set_id, Drill(root, access, projections, query, task_id, clock))` restores, rebuilds, runs the
-agreed historical query against the restored catalog and objects, and reads every object of the designated task
+agreed historical query against the restored catalog and objects, counts it answered only when its answer matches
+`query_sha256`, and reads every object of the designated task
 checkpoint. Its report names its `set_id` and carries `backup_restore_verification_status`:
 
 | Status | Meaning |

@@ -165,6 +165,33 @@ def test_drill_fails_when_the_query_cannot_be_answered(world):
     assert report["query_answered"] is False
 
 
+def test_capture_binds_the_source_answer_to_the_manifest(world):
+    found = manifest(world, world.capture())
+    catalog = cases.Catalog(world.catalog_path)
+    try:
+        answer = world.query(catalog, world.objects)
+    finally:
+        catalog.close()
+    assert found["query_sha256"] == hashlib.sha256(backup._encoded(answer)).hexdigest()
+    assert answer["complete"] is True and answer["events"] == 4
+
+
+@pytest.mark.parametrize("stub", [{}, {"complete": True, "events": 4, "first_record": "invented"}])
+def test_a_query_whose_answer_differs_from_capture_fails_the_drill(world, stub):
+    set_id = world.capture()
+    entry = world.registry.drill(world.backup, set_id, 1, world.plan(query=lambda catalog, store: stub))
+    assert entry["status"] == backup.FAILED
+    assert world.registry.accepted(set_id) is False
+
+
+def test_restore_refuses_a_target_that_is_a_file(world):
+    set_id, target = world.capture(), world.root / "file-target"
+    target.write_text("kept")
+    with pytest.raises(backup.Refused, match="empty folder"):
+        backup.restore(world.backup, set_id, target, world.access())
+    assert target.read_text() == "kept"
+
+
 def test_drill_fails_when_the_designated_checkpoint_is_unknown(world):
     report = backup.drill(world.backup, world.capture(), world.plan(task_id="other-task"))
     assert report[backup.METRIC] == backup.FAILED
@@ -234,9 +261,9 @@ def test_a_registry_drill_records_the_report_it_ran(world):
 def test_acceptance_and_retention_follow_the_drill_status(world, prepare, status, accepted, retention):
     if prepare == "heal":
         world.heal()
+    set_id = world.capture()
     if prepare == "lose":
         world.doc["query_session"] = cases.lost_session(world.doc)["session_uid"]
-    set_id = world.capture()
     assert world.registry.drill(world.backup, set_id, 1, world.plan())["status"] == status
     assert world.registry.accepted(set_id) is accepted
     assert world.registry.retention_allowed() is retention

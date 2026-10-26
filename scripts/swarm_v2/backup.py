@@ -53,6 +53,7 @@ class Sources:
     checkpoints: dict[str, tuple[str, ...]]
     versions: dict[str, str]
     key_ids: dict[str, str]
+    query: Callable[[Catalog, archive.ObjectStore], dict]
 
 
 @dataclass(frozen=True)
@@ -133,6 +134,18 @@ def _component(backup: archive.ObjectStore, sources: Sources, name: str, data: b
     return {"digest": digest, "bytes": len(data), "version": sources.versions[name], "key_id": sources.key_ids[name]}
 
 
+def _digest(doc: dict) -> str:
+    return hashlib.sha256(_encoded(doc)).hexdigest()
+
+
+def _source_answer(sources: Sources) -> dict:
+    catalog = Catalog(sources.catalog)
+    try:
+        return sources.query(catalog, sources.objects)
+    finally:
+        catalog.close()
+
+
 def capture(sources: Sources, backup: archive.ObjectStore, now: float) -> str:
     """Copies every source into the backup store and returns the set id, the digest of its manifest."""
     catalog, archived = _catalog_copy(sources.catalog)
@@ -147,6 +160,7 @@ def capture(sources: Sources, backup: archive.ObjectStore, now: float) -> str:
         "components": components,
         "objects": {digest: _copied(sources.objects, backup, digest) for digest in sorted(inventory)},
         "checkpoints": {task: list(digests) for task, digests in sorted(sources.checkpoints.items())},
+        "query_sha256": _digest(_source_answer(sources)),
         "omitted_projections": list(PROJECTIONS),
     }
     return backup.put(_encoded(manifest))
@@ -166,6 +180,8 @@ def _admit(manifest: dict, access: Access) -> None:
 
 def _claim(root: Path, set_id: str) -> None:
     marker = root / MARKER
+    if root.exists() and not root.is_dir():
+        raise Refused(NOT_ISOLATED)
     held = [path for path in root.iterdir() if not path.name.startswith(PARTIAL_WRITE)] if root.exists() else []
     if held:
         if not marker.exists() or json.loads(marker.read_text())["set_id"] != set_id:
@@ -243,6 +259,8 @@ def drill(backup: archive.ObjectStore, set_id: str, plan: Drill) -> dict:
             answer = plan.query(restored.catalog, restored.store)
         except (archive.EvidenceIntegrityError, archive.EvidenceRefused):
             answer = None
+        if answer is not None and _digest(answer) != restored.manifest["query_sha256"]:
+            answer = None
         checkpoint = _checkpoint(restored, plan.task_id)
     finally:
         restored.catalog.close()
@@ -291,7 +309,7 @@ class Registry:
         """Runs a drill under an attempt number and records its status; a same attempt rerun changes nothing."""
         entry = self._entry(set_id, attempt)
         report = drill(backup, set_id, plan)
-        digest = hashlib.sha256(_encoded(report)).hexdigest()
+        digest = _digest(report)
         if attempt == entry["attempt"] and digest == entry["report"]:
             return entry
         if attempt == entry["attempt"]:
