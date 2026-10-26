@@ -14,7 +14,8 @@
     "scripts.swarm_v2.checkpoints.retention.Collector.collect",
     "scripts.swarm_v2.checkpoints.retention.Collector.delete",
     "scripts.swarm_v2.checkpoints.retention.FileJournal",
-    "scripts.swarm_v2.checkpoints.retention.destructive_enabled"
+    "scripts.swarm_v2.checkpoints.retention.destructive_enabled",
+    "python -m scripts.swarm_v2.checkpoints.retention plan|collect over a DocumentInventory"
   ],
   "metrics": "retention_protected_objects counts kept objects by protection reason in each plan",
   "mocked": true,
@@ -38,5 +39,5 @@
   "pull_request": "https://github.com/the-cloud-clockwork/agentihooks/pull/7418",
   "rollback_rehearsal": "B ran collection with destructive collection off: the plan was journaled, nothing was removed, and a later run resumed from that plan",
   "status": "fixture_verified",
-  "tested_commit": "6ceffbf10d3200a6f84faf02cb920cbe72c817e7"
+  "tested_commit": "c1554e1a3e4f5c832d5af6a8cdf5ccd0786e6c9d"
 }

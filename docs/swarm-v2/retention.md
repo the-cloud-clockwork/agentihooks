@@ -53,6 +53,9 @@ A restore registers its checkpoint with the holds before it reads the manifest a
   nothing.
 
 The collector reads stores through the `Inventory`, `Holds` and `Journal` protocols; a backend adapter implements them.
+`DocumentInventory` is the one shipped adapter: a JSON document with `policies`, `objects`, `checkpoints` and `holds`,
+driven by `python -m scripts.swarm_v2.checkpoints.retention plan|collect <document> --journal <file> [--run-id <id>]`,
+which prints the report as JSON.
 It takes no grant: the caller, the store owner's process, holds the delete authority and the scope of the inventory it
 passes in. The decision before each removal is the guard for a restore already reading; a backend that offers a
 conditional delete closes the remaining window between that decision and the removal.
