@@ -18,7 +18,7 @@ import yaml
 from scripts.ci_cpu_quota import worker_count as quota_workers
 from scripts.ci_mutation.browser import needs_browser
 from scripts.ci_mutation.scope import discover_changes, graded_green, own_bases, select_tests, test_file
-from scripts.ci_mutation.selection import changed_mutations, file_seconds, split_parts, stats_shards
+from scripts.ci_mutation.selection import changed_mutations, file_seconds, partition, stats_shards
 from scripts.ci_test_plan import find_record
 from tests.dep_manifest import (
     GLOBAL_FILES,
@@ -554,8 +554,8 @@ def slowest_bucket(root: Path, tests: list[str], parts: int, seconds: dict[str, 
         seconds = file_seconds(root, tests)
     buckets = [
         bucket
-        for index in range(parts)
-        for bucket in stats_shards(root, split_parts(tests, seconds, (index, parts)), shard_workers(), seconds)
+        for chosen in partition(tests, seconds, parts)
+        for bucket in stats_shards(root, chosen, shard_workers(), seconds)
     ]
     return max(sum(seconds[path] for path in bucket) for bucket in buckets)
 
