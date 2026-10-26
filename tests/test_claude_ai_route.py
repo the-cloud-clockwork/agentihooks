@@ -451,6 +451,10 @@ def test_conversations_copied_into_an_older_route_home_move_to_the_default_folde
     os.utime(older / "projects" / "repo" / "appended.jsonl", (3000, 3000))
     (older / "projects" / "repo" / "resumed.jsonl").write_text("resumed\n")
     (older / "projects" / "repo" / "link.jsonl").symlink_to(tmp_path / "gone.jsonl")
+    (tmp_path / "outside.jsonl").write_text("outside\n")
+    (older / "projects" / "repo" / "outside.jsonl").symlink_to(tmp_path / "outside.jsonl")
+    (older / "projects" / "repo" / "kept-link.jsonl").symlink_to(tmp_path / "outside.jsonl")
+    (shared / "kept-link.jsonl").write_text("operator\n")
     (older / "sessions").mkdir()
     (older / "sessions" / "1.json").write_text("{}")
     claude_ai.launch_claude("/opt/claude", [], {"HOME": str(operator), "AGENTIHOOKS_AGENT_NAME": "s-251026"}, "")
@@ -461,5 +465,7 @@ def test_conversations_copied_into_an_older_route_home_move_to_the_default_folde
     assert (shared / "kept.jsonl").stat().st_mtime == 2000
     assert (shared / "resumed.jsonl").read_text() == "resumed\n"
     assert (shared / "appended.jsonl").read_text() == "operator\nresumed\n"
-    assert (shared / "link.jsonl").readlink() == tmp_path / "gone.jsonl"
+    assert not (shared / "link.jsonl").is_symlink()
+    assert not (shared / "outside.jsonl").exists()
+    assert (shared / "kept-link.jsonl").read_text() == "operator\n"
     assert (operator / ".claude" / "sessions" / "1.json").read_text() == "{}"
