@@ -155,9 +155,7 @@ def measure(tree: Path) -> dict[str, dict]:
                 "cases": cases,
                 "disabled": test
                 and (
-                    not cases
-                    or _disables([*bodies[key], *_nodes(context)], skippers)
-                    or _returns_early(function.body)
+                    not cases or _disables([*bodies[key], *_nodes(context)], skippers) or _returns_early(function.body)
                 ),
             }
     return measured
