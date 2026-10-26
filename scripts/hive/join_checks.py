@@ -1,11 +1,17 @@
 import os
+import re
 import subprocess
 from pathlib import Path
 from tempfile import TemporaryFile
 from typing import TYPE_CHECKING, Callable
 
+from hooks.secrets import redact
+
 if TYPE_CHECKING:
     from redis import Redis
+
+MESSAGE_LIMIT = 200
+STATUS = re.compile(r"server refused: (\d{3})")
 
 
 def checked(probe: Callable[[], object]) -> bool:
@@ -13,6 +19,20 @@ def checked(probe: Callable[[], object]) -> bool:
         return bool(probe())
     except Exception:
         return False
+
+
+def failure(probe: Callable[[], object]) -> dict | None:
+    try:
+        if probe():
+            return None
+    except Exception as exc:
+        status = STATUS.search(str(exc))
+        return {
+            "error": type(exc).__name__,
+            "status": int(status[1]) if status else None,
+            "message": redact(str(exc), mode="strict")[:MESSAGE_LIMIT],
+        }
+    return {"error": "falsy result", "status": None, "message": ""}
 
 
 def github_ready() -> bool:
@@ -107,11 +127,15 @@ def ledger_checks(report: dict) -> dict:
     ledger = LedgerClient()
     checks = report.get("checks", {})
     slug, name = report["slug"], report["agent"]
-    return {
-        "ledger_join": checks.get("ledger_join") is True or checked(lambda: ledger.join(slug, name, "member") is None),
-        "ledger_write": checks.get("ledger_write") is True
-        or checked(lambda: ledger._call(slug, [_op("ack", name, rev=0)])),
+    probes = {
+        "ledger_join": lambda: ledger.join(slug, name, "member") is None,
+        "ledger_write": lambda: ledger._call(slug, [_op("ack", name, rev=0)]),
     }
+    errors = {
+        check: error for check, probe in probes.items() if checks.get(check) is not True and (error := failure(probe))
+    }
+    passed = {check: check not in errors for check in probes}
+    return {**passed, "errors": errors} if errors else passed
 
 
 def startup(redis: "Redis", report: dict) -> dict:
