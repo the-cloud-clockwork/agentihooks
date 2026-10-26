@@ -58,6 +58,7 @@ def offer(session_id: str, event: str, pack: str | None, injectable: bool | None
     if _disabled(target):
         _record(target, "disabled")
         return None
+    project_cache.take_project_context(session_id)
     if receipt(session_id).get("digest") == digest(pack):
         _record(target, "deduplicated")
         return None
@@ -65,7 +66,6 @@ def offer(session_id: str, event: str, pack: str | None, injectable: bool | None
         hold(session_id, pack)
         _record(target, "unsupported_event")
         return None
-    project_cache.take_project_context(session_id)
     project_cache._write(
         _receipt_path(session_id),
         stamp(

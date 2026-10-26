@@ -8,6 +8,7 @@
     "tests": [
       "test_c_unchanged_packs_are_not_repeated_and_compaction_gets_the_current_pack[claude]",
       "test_c_unchanged_packs_are_not_repeated_and_compaction_gets_the_current_pack[codex]",
+      "test_c_a_repeated_current_pack_drops_an_older_held_pack",
       "test_c_a_newer_held_pack_replaces_an_older_one"
     ],
     "unchanged_pack_repeats": 0,
@@ -21,7 +22,8 @@
     "live": {
       "second_run": "refreshed on every tool call",
       "claude_deduplicated": 1
-    }
+    },
+    "repeated_current_pack_drops_older_held_pack": true
   },
   "state": "passed"
 }

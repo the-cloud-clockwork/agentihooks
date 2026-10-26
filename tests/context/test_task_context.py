@@ -181,6 +181,16 @@ def test_c_a_newer_held_pack_replaces_an_older_one(home, monkeypatch):
     assert task_context.receipt("pre") == {}
 
 
+def test_c_a_repeated_current_pack_drops_an_older_held_pack(home, monkeypatch):
+    _target(monkeypatch, "codex")
+    assert task_context.offer("back", "PostToolUse", PACKS["first"]) == PACKS["first"]
+    assert task_context.offer("back", "PreToolUse", PACKS["second"]) is None
+    assert task_context.offer("back", "PreToolUse", PACKS["first"]) is None
+    assert task_context.deliver_pending("back", "PostToolUse") is None
+    assert task_context.receipt("back")["digest"] == task_context.digest(PACKS["first"])
+    assert task_context.outcomes()["codex"] == {"delivered": 1, "unsupported_event": 1, "deduplicated": 1}
+
+
 def test_codex_post_tool_use_delivers_the_held_pack(home, monkeypatch):
     import hooks.common as common
     import hooks.context.broadcast as broadcast
