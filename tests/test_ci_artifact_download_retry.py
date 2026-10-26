@@ -21,7 +21,9 @@ def _first_attempts():
     for job, spec in _jobs().items():
         steps = spec.get("steps") or []
         for index, step in enumerate(steps):
-            if step.get("uses", "").startswith("actions/download-artifact@") and not step["name"].endswith(", attempt 2"):
+            if step.get("uses", "").startswith("actions/download-artifact@") and not step["name"].endswith(
+                ", attempt 2"
+            ):
                 yield job, steps, index
 
 
