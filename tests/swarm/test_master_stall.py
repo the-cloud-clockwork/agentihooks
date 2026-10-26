@@ -315,6 +315,25 @@ def test_allowed_tool_call_stays_open_after_its_pre_tool_hook(tmp_path, monkeypa
     assert activity.finished_events("sw") == {}
 
 
+def test_call_the_recycle_gate_denies_after_recording_it_is_ended(tmp_path, monkeypatch):
+    from hooks import hook_manager
+    from hooks.context import conditions, context_recycle, quota_policy
+
+    monkeypatch.setattr(activity, "default_root", lambda: tmp_path)
+    monkeypatch.setattr(quota_policy, "pretool", lambda *args: (None, None))
+    monkeypatch.setenv("AGENTIHOOKS_SWARM", "sw")
+    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "master@sw-1")
+    monkeypatch.setattr(conditions, "write_guard", lambda *args: None)
+    monkeypatch.setattr(conditions, "pre_effect", lambda payload: None)
+    monkeypatch.setattr(hook_manager, "_operator_question", lambda payload: "")
+    monkeypatch.setattr(context_recycle, "gate", lambda *args: "recycle now")
+    payload = {"tool_name": "Bash", "tool_input": {"command": "ls"}, "tool_use_id": "toolu_gate", "session_id": "s"}
+    with pytest.raises(hook_manager.BlockAction, match="recycle now"):
+        hook_manager.EVENT_HANDLERS["PreToolUse"](payload)
+    assert activity.open_calls("sw", "master@sw-1") == []
+    assert list(activity.finished_events("sw")) == ["master@sw-1"]
+
+
 def test_turn_end_drops_calls_a_denied_call_left_open(tmp_path, monkeypatch):
     import fakeredis
 
