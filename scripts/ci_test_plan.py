@@ -30,17 +30,6 @@ SERVER_ATTEMPTS = 3
 SERVER_BACKOFF = 5
 
 
-deadline: float | None = None  # read by _api for its own timeout; find_record sets it for one search.
-
-
-def _expired() -> bool:
-    return deadline is not None and time.monotonic() >= deadline
-
-
-def _timeout() -> float:
-    return 60 if deadline is None else max(0.0, min(60, deadline - time.monotonic()))
-
-
 class UnusableRecord(ValueError):
     pass
 
@@ -48,7 +37,7 @@ class UnusableRecord(ValueError):
 def _api(endpoint: str) -> bytes:
     for attempt in range(SERVER_ATTEMPTS):
         try:
-            return gh_api([endpoint], timeout=_timeout()).stdout
+            return gh_api([endpoint], timeout=60).stdout
         except subprocess.CalledProcessError as error:
             stderr = error.stderr.decode()
             print(stderr, file=sys.stderr)
@@ -112,8 +101,6 @@ def _usable(pool: ThreadPoolExecutor, actions: str, runs: list[dict], tally: Cou
     listings = [pool.submit(_api, f"{actions}/runs/{run['id']}/artifacts?per_page=100") for run in runs]
     tally["requests"] += len(runs)
     for run, listing in zip(runs, listings):
-        if _expired():
-            break
         tally["searched"] += 1
         artifacts = json.loads(listing.result())["artifacts"]
         kept = [item for item in artifacts if item["name"] == "dep-manifest" and not item["expired"]]
@@ -139,49 +126,38 @@ def _usable(pool: ThreadPoolExecutor, actions: str, runs: list[dict], tally: Cou
     return None
 
 
-def find_record(repository: str, before: str, record_deadline: float | None = None) -> tuple[dict, dict] | None:
-    global deadline
-    deadline = record_deadline
-    try:
-        actions = f"repos/{repository}/actions"
-        tally, seen = Counter(), set()
-        reason = "request budget exhausted"
-        with ThreadPoolExecutor(max_workers=CANDIDATES) as pool:
-            for page in itertools.count(1):
-                if _expired():
-                    reason = "time budget exhausted"
-                    break
-                if tally["requests"] + PAGE_REQUESTS > REQUESTS:
-                    break
-                listed = json.loads(
-                    _api(
-                        f"{actions}/workflows/test.yml/runs?branch=dev&event=push&status=completed"
-                        f"&per_page={CANDIDATES}&page={page}"
-                    )
-                )["workflow_runs"]
-                tally["requests"] += 1
-                runs = [
-                    run
-                    for run in listed
-                    if run["id"] not in seen and _recorded(run, repository) and run["updated_at"] <= before
-                ]
-                seen.update(run["id"] for run in listed)
-                if found := _usable(pool, actions, runs, tally):
-                    return found
-                if _expired():
-                    reason = "time budget exhausted"
-                    break
-                if len(listed) < CANDIDATES:
-                    reason = "no older dev push runs"
-                    break
-        print(
-            f"Searched {tally['searched']} dev push runs in {tally['requests']} of {REQUESTS} GitHub requests, {reason}:"
-            f" {tally['unavailable']} kept no manifest or shard coverage, {tally['failed']} failed unit shards,"
-            f" {tally['incompatible']} recorded another commit"
-        )
-        return None
-    finally:
-        deadline = None
+def find_record(repository: str, before: str) -> tuple[dict, dict] | None:
+    actions = f"repos/{repository}/actions"
+    tally, seen = Counter(), set()
+    reason = "request budget exhausted"
+    with ThreadPoolExecutor(max_workers=CANDIDATES) as pool:
+        for page in itertools.count(1):
+            if tally["requests"] + PAGE_REQUESTS > REQUESTS:
+                break
+            listed = json.loads(
+                _api(
+                    f"{actions}/workflows/test.yml/runs?branch=dev&event=push&status=completed"
+                    f"&per_page={CANDIDATES}&page={page}"
+                )
+            )["workflow_runs"]
+            tally["requests"] += 1
+            runs = [
+                run
+                for run in listed
+                if run["id"] not in seen and _recorded(run, repository) and run["updated_at"] <= before
+            ]
+            seen.update(run["id"] for run in listed)
+            if found := _usable(pool, actions, runs, tally):
+                return found
+            if len(listed) < CANDIDATES:
+                reason = "no older dev push runs"
+                break
+    print(
+        f"Searched {tally['searched']} dev push runs in {tally['requests']} of {REQUESTS} GitHub requests, {reason}:"
+        f" {tally['unavailable']} kept no manifest or shard coverage, {tally['failed']} failed unit shards,"
+        f" {tally['incompatible']} recorded another commit"
+    )
+    return None
 
 
 def main(argv: list[str] | None = None) -> int:
