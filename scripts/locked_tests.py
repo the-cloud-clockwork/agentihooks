@@ -3,12 +3,15 @@ import ast
 import json
 from pathlib import Path
 
-LOCKED = (
-    "tests/test_secrets.py",
-    "tests/context/test_branch_guard.py",
-    "tests/context/test_prod_lockdown.py",
-    "tests/test_kubectl_mutation_guard.py",
-    "tests/test_credential_guard.py",
+LOCKED = tuple(
+    "/".join(parts)
+    for parts in (
+        ("tests", "test_secrets.py"),
+        ("tests", "context", "test_branch_guard.py"),
+        ("tests", "context", "test_prod_lockdown.py"),
+        ("tests", "test_kubectl_mutation_guard.py"),
+        ("tests", "test_credential_guard.py"),
+    )
 )
 MANIFEST = Path("tests/LOCKED_MANIFEST.json")
 FIELDS = ("assertions", "calls", "cases")
