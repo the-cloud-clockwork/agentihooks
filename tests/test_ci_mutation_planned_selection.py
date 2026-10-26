@@ -632,6 +632,10 @@ def test_only_statements_binding_unknown_names_count_as_new(old, new, expected):
         ("class A:\n    def m(self):\n        pass\n", "class A:\n    @cache\n    def m(self):\n        pass\n", False),
         ("X = 1\n", "X = 2\n", False),
         ("def f(:\n", "def f(:\n", True),
+        ("def f():\n    pass\n", "def f(:\n", False),
+        ("class A:\n    X: int = 1\n", "class A:\n    X: int = 2\n", True),
+        ("class A:\n    H = {'a': f}\n", "class A:\n    H = {'a': f, 'b': g}\n", False),
+        ("class A:\n    H: dict = {'a': f}\n", "class A:\n    H: dict = {'a': f, 'b': g}\n", False),
     ],
 )
 def test_only_top_level_statement_edits_change_the_module_keys(old, new, expected):

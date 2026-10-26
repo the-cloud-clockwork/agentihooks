@@ -205,7 +205,13 @@ def _statement(node: ast.stmt) -> str | tuple:
 def _module_key(node: ast.stmt) -> str | tuple:
     if isinstance(node, ast.ClassDef):
         heads = [*node.bases, *node.keywords, *node.decorator_list]
-        kept = (item for item in node.body if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)))
+        kept = (
+            item
+            for item in node.body
+            if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+            or isinstance(item, (ast.Assign, ast.AnnAssign))
+            and isinstance(item.value, ast.Dict)
+        )
         return (node.name, *map(ast.dump, heads), *map(_module_key, kept))
     return _statement(node)
 
