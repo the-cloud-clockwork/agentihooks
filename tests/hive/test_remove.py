@@ -595,3 +595,5 @@ def test_a_label_another_hive_member_holds_is_refused_as_the_default(store):
         f"hive {duplicate} is named swarm-hive-002, a name hive {live} also holds, so its herdr machine "
         "could be the other hive's; pass --label"
     )
+    with pytest.raises(auth.HiveError, match="a name hive .* also holds"):
+        remove.resolve(store.redis, "swarm-hive-002")
