@@ -552,7 +552,7 @@ class SwarmPanel(unittest.TestCase):
         )
 
     def test_step_buttons_at_a_bound_are_disabled(self):
-        low = {"max_eng": 0, "max_ci": 50, "max_plan": 1, "masters_step": 12, "compact_limit": 100}
+        low = {"max_eng": 0, "max_ci": 50, "max_plan": 1, "masters_step": 12, "compact_limit": 100, "focus_weight": 0}
         out = self.run_js(["capBounds"], f"capBounds({json.dumps(low)}, LIMITS)")
         self.assertEqual(
             out,
@@ -567,6 +567,8 @@ class SwarmPanel(unittest.TestCase):
                 "masters_up": False,
                 "compact_down": True,
                 "compact_up": False,
+                "focus_down": True,
+                "focus_up": False,
                 "effort_min_down": True,
                 "effort_min_up": True,
                 "effort_max_down": True,

@@ -8,7 +8,7 @@ import { meta } from "./sync.js";
 
 const GATE_MODES = ["enforce", "observe", "off"];
 const GATE_LABELS = { enforce: "deny", observe: "log only", off: "skip" };
-const STEPS = { eng: ["max_eng", 1], ci: ["max_ci", 1], plan: ["max_plan", 1], masters: ["masters_step", 1, "masters step"], compact: ["compact_limit", 50, "compact limit"] };
+const STEPS = { eng: ["max_eng", 1], ci: ["max_ci", 1], plan: ["max_plan", 1], masters: ["masters_step", 1, "masters step"], compact: ["compact_limit", 50, "compact limit"], focus: ["focus_weight", 1, "focus weight"] };
 const EFFORT_CAPS = { effort_min: "effort floor", effort_max: "effort ceiling" };
 const MASTER_AGENTS = ["claude", "codex"];
 
@@ -61,7 +61,7 @@ function affinityNote(sw) {
 }
 
 function capValues(sw) {
-  return { ...sw.config, compact_limit: sw.compact_limit, master_agent: affinityValue(sw) };
+  return { ...sw.config, focus_weight: sw.config.focus_weight ?? 50, compact_limit: sw.compact_limit, master_agent: affinityValue(sw) };
 }
 
 function pageLimits() {

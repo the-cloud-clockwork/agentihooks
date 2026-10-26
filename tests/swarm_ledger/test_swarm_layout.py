@@ -870,6 +870,7 @@ def test_every_capacity_stepper_puts_minus_before_and_plus_after_its_value(open_
         ["plan", ["−", "1", "+"]],
         ["masters step", ["−", "12", "+"]],
         ["compact limit", ["−", "600k", "+"]],
+        ["focus weight", ["−", "50%", "+"]],
         ["effort min", ["−", "medium", "+"]],
         ["effort max", ["−", "high", "+"]],
     ]

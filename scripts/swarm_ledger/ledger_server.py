@@ -313,6 +313,7 @@ CAPS = {
     "max_plan": ("max-plan-agents", 0, MAX_CAP),
     "masters_step": ("masters-step", 0, MAX_CAP),
     "compact_limit": ("compact-limit", MIN_COMPACT, MAX_COMPACT),
+    "focus_weight": ("focus-weight", 0, 100),
 }
 PAGE_LIMITS = {
     "capacity": {key: [low, high] for key, (_, low, high) in CAPS.items()},
