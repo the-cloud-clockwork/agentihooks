@@ -7,6 +7,7 @@ import re
 import subprocess
 import time
 import zipfile
+from contextlib import contextmanager
 from datetime import UTC, datetime
 from difflib import SequenceMatcher
 from functools import cache
@@ -36,6 +37,7 @@ from tests.dep_manifest import changes as recorded_changes
 MUTANT_SECONDS = 5.6
 WORKERS = 4
 RECORD_RETRY_SECONDS = 10
+RECORD_BUDGET_SECONDS = float(os.environ.get("AGENTIHOOKS_RECORD_BUDGET_SECONDS", 120))
 TEST_WORKFLOW = ".github/workflows/test.yml"
 COLLECTING_JOBS = {
     TEST_WORKFLOW: ("unit", "unit-selected", "mutation-stats"),
@@ -108,14 +110,18 @@ def record_failure(error: Exception) -> str:
 
 def read_record(repository: str) -> tuple[tuple[dict, dict] | None, str]:
     before = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+    record_deadline = time.monotonic() + RECORD_BUDGET_SECONDS
     for attempt in (1, 2):
         try:
-            return find_record(repository, before), ""
+            return find_record(repository, before, record_deadline), ""
         except RECORD_ERRORS as error:
             reason = record_failure(error)
             print(f"Reading the recorded dev coverage failed on attempt {attempt}: {reason}")
-        if attempt == 1:
-            time.sleep(RECORD_RETRY_SECONDS)
+        remaining = record_deadline - time.monotonic()
+        if attempt == 1 and remaining > 0:
+            time.sleep(min(RECORD_RETRY_SECONDS, remaining))
+        elif attempt == 1:
+            break
     return None, reason
 
 
@@ -581,6 +587,16 @@ def validate_tests(root: Path, tests: list[str]) -> None:
             raise SystemExit(f"{test}: loads the MCP SDK without the mcp-sdk worker group")
 
 
+@contextmanager
+def _stage(name: str):
+    print(f"stage {name} started", flush=True)
+    started = time.monotonic()
+    try:
+        yield
+    finally:
+        print(f"stage {name} finished in {time.monotonic() - started:.0f}s", flush=True)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--base", default="origin/dev")
@@ -598,7 +614,8 @@ def main() -> int:
     if args.repository and not changes:
         print("No change remains to mutate, so the recorded dev coverage is not read.")
     elif args.repository:
-        found, failure = read_record(args.repository)
+        with _stage("record search"):
+            found, failure = read_record(args.repository)
         if failure:
             print(
                 "::warning title=Mutation selection fallback::The recorded dev coverage could not be read, so every"
@@ -610,12 +627,13 @@ def main() -> int:
             run, manifest = found
             print(f"Recorded coverage from dev run {run['id']} adds the tests that executed a changed function.")
     selection = {}
-    seconds, mutants, tests = estimate(root, changes, selection, manifest, bool(failure))
-    validate_tests(root, tests)
-    browser = str(needs_browser(root, sorted({test_file(test) for test in tests}))).lower()
-    (root / ".mutation-selection.json").write_text(json.dumps(selection) + "\n")
-    count = shard_count(seconds, mutants, args.target, args.limit)
-    parts, stats = stats_part_count(root, tests, args.stats_target, args.limit)
+    with _stage("shard sizing"):
+        seconds, mutants, tests = estimate(root, changes, selection, manifest, bool(failure))
+        validate_tests(root, tests)
+        browser = str(needs_browser(root, sorted({test_file(test) for test in tests}))).lower()
+        (root / ".mutation-selection.json").write_text(json.dumps(selection) + "\n")
+        count = shard_count(seconds, mutants, args.target, args.limit)
+        parts, stats = stats_part_count(root, tests, args.stats_target, args.limit)
     print(
         f"Changed line mutants: {mutants}\nEstimated mutation seconds: {seconds:.0f}, slowest stats bucket: {stats:.0f}"
     )
