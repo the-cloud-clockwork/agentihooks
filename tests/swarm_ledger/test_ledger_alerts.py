@@ -728,8 +728,8 @@ def test_a_raised_release_alert_opens_one_alert_for_the_master():
 
 
 RAISE_REFUSED = (
-    "alert_raise takes by, a source among ('promotion', 'release', 'seat', 'spawn', 'merge') and a text of up to "
-    "2000 characters"
+    "alert_raise takes by, a source among ('promotion', 'release', 'seat', 'spawn', 'merge', 'inbox', 'setup'), "
+    "a text of up to 2000 characters and, for inbox and setup, an item"
 )
 
 

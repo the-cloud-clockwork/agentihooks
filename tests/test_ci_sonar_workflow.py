@@ -38,6 +38,13 @@ def test_sonar_remains_required_during_promotion_trigger_rollout():
     assert jobs["unit"]["needs"] == ["split", "select", "reuse", "admission"]
 
 
+def test_sonar_gives_dev_push_runs_thirty_minutes_and_keeps_fifteen_elsewhere():
+    assert (
+        _workflow()["jobs"]["sonar"]["timeout-minutes"]
+        == "${{ github.event_name == 'push' && github.ref == 'refs/heads/dev' && 30 || 15 }}"
+    )
+
+
 def test_sonar_restores_no_cache_since_the_runner_image_carries_the_downloads():
     steps = _workflow()["jobs"]["sonar"]["steps"]
     assert not any(step.get("uses", "").startswith("actions/cache") for step in steps)

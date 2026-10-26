@@ -1,4 +1,5 @@
 import json
+import types
 
 import pytest
 
@@ -201,6 +202,7 @@ def test_retry_batch_processes_exactly_three_eligible_requests_even_when_current
         path.write_text(json.dumps({"swarm": swarm, "status": status}))
         os.utime(path, (1.5, 1.5))
     calls = []
-    monkeypatch.setattr(session, "process", calls.append)
+    monkeypatch.setattr(session, "time", types.SimpleNamespace(time=lambda: 50.0))
+    monkeypatch.setattr(session, "process", lambda path, now=None: calls.append((path, now)))
     session.process_pending(current)
-    assert calls == [current, *expected[:3]]
+    assert calls == [(current, None), *((path, 50.0) for path in expected[:3])]
