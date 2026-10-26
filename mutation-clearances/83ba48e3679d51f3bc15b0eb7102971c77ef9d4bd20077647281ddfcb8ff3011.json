@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/repository/sqlite.py:scripts.swarm_ledger.repository.sqlite.xǁSQLiteLedgerRepositoryǁexport_since__mutmut_20:3d766c5d11cef7f24f5c743d7a1dc18748deaa26093edb786b7d373e2b62695e": {
+    "reader": "standards_reader",
+    "reason": "Admits since 0 to the change path. since 0 means the reader holds no kept export; a change set from generation 0 covers every recorded row, so the reader ends with the same ledger as the full export it gets without the mutant. Observable result is identical."
+  }
+}
