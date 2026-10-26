@@ -47,6 +47,8 @@ def watch(repository: str, run: str, attempt: str, shards: list[int], *, recover
             raise RuntimeError(f"Original shards cannot recover on this event: {failures}")
         if ready(jobs, shards):
             return
+        if any(job["name"] in units and job.get("status") == "queued" for job in jobs):
+            deadline = rate_limit.deadline = time.monotonic() + 1200
         time.sleep(POLL_SECONDS)
     raise RuntimeError("Shard verification timed out before every expected shard succeeded")
 
