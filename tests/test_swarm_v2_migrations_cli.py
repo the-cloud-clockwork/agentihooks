@@ -101,15 +101,25 @@ def test_the_approval_comes_from_the_session_identity(who, expected):
 
 
 @pytest.mark.parametrize(
-    "argv",
+    ("argv", "message"),
     [
-        ["verify"],
-        ["status", "--revision", "1"],
-        ["drop-vectors", "--domain", "d"],
-        ["status", "--generation", "g"],
+        (["verify"], cli.REVISION_MISPLACED),
+        (["status", "--revision", "1"], cli.REVISION_MISPLACED),
+        (["drop-vectors", "--domain", "d"], cli.SCOPE_MISPLACED),
+        (["status", "--generation", "g"], cli.SCOPE_MISPLACED),
+        (["rebuild"], "invalid choice"),
     ],
 )
-def test_arguments_belong_to_their_command(capsys, path, argv):
+def test_arguments_belong_to_their_command(capsys, path, argv, message):
+    capsys.readouterr()
     with pytest.raises(SystemExit) as raised:
         cli.main([argv[0], path, *argv[1:]], who=OPERATOR)
     assert raised.value.code == 2
+    assert message in capsys.readouterr().err
+
+
+def test_backfill_defaults_to_the_documented_batch_limits(capsys, path, monkeypatch):
+    calls = []
+    monkeypatch.setattr(cli.Migrator, "backfill", lambda self, *args: calls.append(args) or {})
+    run(capsys, "backfill", path, "--revision", "3")
+    assert calls == [(3, 500, 20)]

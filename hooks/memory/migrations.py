@@ -156,9 +156,8 @@ class Migrator:
         return found
 
     def _set(self, state: str, revision: int, report: dict | None) -> None:
-        encoded = None if report is None else json.dumps(report, sort_keys=True)
-        if self.db.execute(SET_STATE, (state, encoded, PROVENANCE, revision)).rowcount != 1:
-            raise Conflict(STALE_CURSOR)
+        encoded = None if report is None else json.dumps(report)
+        self.db.execute(SET_STATE, (state, encoded, PROVENANCE, revision))
 
     def add(self) -> bool:
         with self.catalog._transaction():
@@ -180,7 +179,7 @@ class Migrator:
     def _fill(self, after: int, through: int) -> int:
         return self.db.execute(FILL, (ORIGINAL, UNKNOWN_PROJECT, ATTRIBUTED, after, through)).rowcount
 
-    def _step(self, revision: int, batch_size: int) -> tuple[int, bool]:
+    def _step(self, revision: int, batch_size: int) -> bool:
         with self.catalog._transaction():
             found = self._require(revision, (ADDED, BACKFILLED, VERIFIED), ACTIVE_BACKFILL)
             after = found["after_rowid"]
@@ -188,20 +187,18 @@ class Migrator:
             if through is None:
                 if self._count(REMAINING) == 0:
                     self._set(BACKFILLED, revision, None)
-                    return revision + 1, True
+                    return True
                 through, filled = 0, 0
             else:
                 filled = self._fill(after, through)
-            if self.db.execute(ADVANCE, (through, filled, ADDED, PROVENANCE, revision)).rowcount != 1:
-                raise Conflict(STALE_CURSOR)
-            return revision + 1, False
+            self.db.execute(ADVANCE, (through, filled, ADDED, PROVENANCE, revision))
+            return False
 
     def backfill(self, revision: int, batch_size: int, max_batches: int) -> dict:
         if min(batch_size, max_batches) < 1:
             raise ValueError(BAD_BATCH)
-        for _ in range(max_batches):
-            revision, finished = self._step(revision, batch_size)
-            if finished:
+        for step in range(max_batches):
+            if self._step(revision + step, batch_size):
                 break
         return self.status()
 

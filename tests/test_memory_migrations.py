@@ -58,6 +58,7 @@ def test_backfill_writes_unknown_for_unattributed_events_and_keeps_project_ids(w
     status = world.backfill()
     assert status["state"] == migrations.BACKFILLED
     assert status["rows_done"] == 9
+    assert (status["revision"], status["after_rowid"]) == (6, 9)
     assert status["migration_rows_remaining"] == 0
     states = dict(world.catalog.db.execute("SELECT event_id, project_state FROM session_event_provenance").fetchall())
     assert states["s-unattributed-e1"] == "unknown"
@@ -109,7 +110,7 @@ def test_backfill_before_add_and_while_active_is_refused(world):
 @pytest.mark.parametrize(("size", "batches"), [(0, 1), (1, 0)])
 def test_backfill_needs_positive_limits(world, size, batches):
     world.migrator.add()
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="positive batch size"):
         world.migrator.backfill(0, size, batches)
     assert world.migrator.status()["revision"] == 0
 

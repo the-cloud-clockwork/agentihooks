@@ -10,6 +10,10 @@ from hooks.memory.migrations import DIMENSION, OPERATOR, Approval, Migrator
 from scripts.gates.base import Who
 
 STAGED = ("backfill", "verify", "activate", "deactivate")
+COMMANDS = ("status", "startup", *STAGED, "drop-vectors")
+BATCH_SIZE, MAX_BATCHES = 500, 20
+REVISION_MISPLACED = "--revision is given with backfill, verify, activate and deactivate and only with them"
+SCOPE_MISPLACED = "--domain and --generation are given with drop-vectors and only with it"
 AGENT = "agent"
 
 
@@ -34,26 +38,26 @@ def _run(migrator: Migrator, args: argparse.Namespace, now: float, who: Who | No
 
 def main(argv: list[str] | None = None, clock: Callable[[], float] | None = None, who: Who | None = None) -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("command", choices=("status", "startup", *STAGED, "drop-vectors"))
+    parser.add_argument("command", choices=COMMANDS)
     parser.add_argument("catalog")
     parser.add_argument("--revision", type=int)
-    parser.add_argument("--batch-size", type=int, default=500)
-    parser.add_argument("--max-batches", type=int, default=20)
+    parser.add_argument("--batch-size", type=int, default=BATCH_SIZE)
+    parser.add_argument("--max-batches", type=int, default=MAX_BATCHES)
     parser.add_argument("--domain")
     parser.add_argument("--generation")
     args = parser.parse_args(argv)
     if (args.command in STAGED) != (args.revision is not None):
-        parser.error("--revision is given with backfill, verify, activate and deactivate and only with them")
+        parser.error(REVISION_MISPLACED)
     given = [value is not None for value in (args.domain, args.generation)]
     misplaced = not all(given) if args.command == "drop-vectors" else any(given)
     if misplaced:
-        parser.error("--domain and --generation are given with drop-vectors and only with it")
+        parser.error(SCOPE_MISPLACED)
     catalog = Catalog(args.catalog)
     try:
         answer = _run(Migrator(catalog), args, time.time() if clock is None else clock(), who)
     finally:
         catalog.close()
-    print(json.dumps(answer, sort_keys=True))
+    print(json.dumps(answer))
     return 0
 
 
