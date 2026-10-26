@@ -47,7 +47,7 @@ def test_the_hives_table_and_the_quota_table_list_the_same_deduplicated_codex_ac
     assert sorted(key for key in quota if key.startswith("codex:")) == ["codex:gamma", f"codex:{KEPT}"]
 
 
-def test_the_page_quota_table_drops_a_duplicate_a_live_session_still_runs_on(tmp_path, monkeypatch):
+def test_the_page_quota_table_shows_a_duplicate_as_its_own_row_with_a_duplicate_state(tmp_path, monkeypatch):
     from hooks.context import account_sessions
 
     for name, value in _environ(tmp_path).items():
@@ -59,7 +59,14 @@ def test_the_page_quota_table_drops_a_duplicate_a_live_session_still_runs_on(tmp
     monkeypatch.setattr(account_sessions, "codex_sessions_by_account", lambda **kw: {"alpha": 2})
     monkeypatch.setattr(codex_router, "quotas", lambda pool, environ: {})
     rows = agents_quota.page_quota(now=100.0)["rows"]
-    assert [row["account"] for row in rows if row["agent"] == "codex" and row["kind"] != "api"] == ["gamma", KEPT]
+    codex = [row for row in rows if row["agent"] == "codex" and row["kind"] != "api"]
+    assert [row["account"] for row in codex] == ["gamma", KEPT, "alpha"]
+    assert [row["state"] == agents_quota.DUPLICATE for row in codex] == [False, False, True]
+    duplicate = codex[-1]
+    assert duplicate["sessions"] == 2
+    assert duplicate["source"] == f"same ChatGPT account as {KEPT}"
+    assert (duplicate["cap"], duplicate["routing_left"], duplicate["kind"]) == (None, None, "subscription")
+    assert duplicate["identity"] == codex_router.fingerprint("acct-1")
     assert codex_router.routed_live([], {"alpha": 2, "other": 1}, dict(_environ(tmp_path))) == [
         codex_router.CodexAccount("other", "AH_CX_TOKEN_other")
     ]
