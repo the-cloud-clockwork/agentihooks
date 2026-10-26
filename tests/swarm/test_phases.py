@@ -13,11 +13,14 @@ MASTER_SEAT = f"master@{SLUG}"
 
 
 @pytest.fixture
-def env(monkeypatch, tmp_path):
+def env(monkeypatch, memory_path):
     import fakeredis
+
+    tmp_path = memory_path
 
     monkeypatch.setattr(core, "LEDGER_DIR", tmp_path)
     monkeypatch.setenv("LEDGER_DIR", str(tmp_path))
+    monkeypatch.setenv("AGENTIHOOKS_SWARM_SNAPSHOT_MINUTES", "0")
     content = {
         "title": "Phased work",
         "overview": "o",

@@ -197,7 +197,7 @@ def fake_runtime():
 
 
 @pytest.fixture
-def drill(tmp_path, monkeypatch):
+def drill(memory_path, monkeypatch):
     import fakeredis
 
     from scripts.inbox import cli as inbox_cli
@@ -208,6 +208,7 @@ def drill(tmp_path, monkeypatch):
     from scripts.swarm.store import RedisStore, SwarmConfig
     from scripts.swarm_ledger import ledger_link, ledger_server, storage
 
+    tmp_path = memory_path
     server = fakeredis.FakeServer()
     redis = fakeredis.FakeRedis(server=server, decode_responses=True)
     store = RedisStore(redis)
