@@ -219,7 +219,6 @@ CONFIG_KEYS = {
     "watchdog-address": "watchdog_address",
 }
 GATE_KEYS = {f"{name}-gate": name for name in catalog.defaults()}
-GATE_MODES = modes.MODES
 RETIRES_MASTER = frozenset({"stop now", "close ledger"})
 TICK_LOCK_MS = 10 * 60 * 1000
 TICK_SECONDS = 60
@@ -1532,6 +1531,12 @@ def cmd_issue(store, args):
     print(json.dumps({"task": agent.task, "issue_url": args.url}))
 
 
+def cmd_resolve(store, args):
+    from scripts.swarm import resolve
+
+    resolve.run(store, args, _me(store, args).name, LedgerClient())
+
+
 def cmd_review(store, args):
     agent = _worker(store, args)
     row = LedgerClient().task(args.slug, agent.task) or {}
@@ -1819,6 +1824,9 @@ def cmd_block(store, args):
             return
     from scripts.swarm import publish
 
+    refused = "" if args.dev_red else _block_refusal(store, args.slug, rows[agent.task])
+    if refused:
+        raise SwarmError(refused)
     pushed = publish.pushed_branches(_local_repo(store, args.slug), rows[agent.task], agent)
     red_run = _dev_red_run(store, args.slug) if args.dev_red else None
     if pushed:
@@ -1828,6 +1836,12 @@ def cmd_block(store, args):
     print(
         json.dumps({"task": agent.task, "state": "blocked", **cause, "next": "stop now; the swarm closes this session"})
     )
+
+
+def _block_refusal(store, slug, task):
+    from scripts.swarm import resolve
+
+    return resolve.block_refusal(store.config(slug).autonomy, slug, task)
 
 
 def _dev_red_run(store, slug):
@@ -2297,6 +2311,12 @@ def build_parser():
     publish.add_argument("files", nargs="*")
     sub.add_parser("branch")
     sub.add_parser("review")
+    resolve_cmd = sub.add_parser("resolve")
+    resolve_cmd.add_argument("action", choices=("attempt", "critic", "escalate", "status"))
+    resolve_cmd.add_argument("item")
+    for flag in ("--tried", "--output", "--reason", "--evidence"):
+        resolve_cmd.add_argument(flag, default="")
+    resolve_cmd.add_argument("--command", dest="ran", default="")
     done = sub.add_parser("done")
     done.add_argument("--pr", default="")
     for key in ledger_kinds.PROOF_KEYS:

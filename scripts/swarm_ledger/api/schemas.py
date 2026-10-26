@@ -117,6 +117,9 @@ FIELDS = {
     "freeze_set": "by verb target reason quote",
     "freeze_clear": "by target reason quote",
     "events_ack": "by rev",
+    "blocker_attempt": "by item text command output",
+    "blocker_critic": "by item run digest resolution",
+    "blocker_escalate": "by item reason evidence",
 }
 TYPES = {
     "long": {"type": "boolean"},
@@ -258,7 +261,7 @@ def target(op: dict) -> str:
         return "notifications"
     if kind.startswith("artifact_"):
         return "artifacts"
-    if kind in ("claim", "retext", "relay", "answer", "verdict"):
+    if kind in ("claim", "retext", "relay", "answer", "verdict") or kind.startswith("blocker_"):
         return op["item"]
     return {
         "alert_claim": "alerts",

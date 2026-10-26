@@ -293,7 +293,25 @@ def test_the_alert_message_names_the_alert_and_how_to_claim_and_close_it():
     assert ledger_alerts.message("demo", alert) == (
         "On ledger demo: alert al-4-0 (size): phase p1 description has 120 words, limit 100. Claim it with "
         "agentihooks ledger --slug demo --as <you> alert claim al-4-0, then close it with alert close "
-        'al-4-0 "<outcome>".'
+        'al-4-0 "<outcome>". Autonomy unknown. Triage it: resolve it if the call is yours, else leave it for the operator.'
+    )
+
+
+def test_the_alert_message_at_full_autonomy_names_the_next_protocol_step():
+    alert = {"id": "al-4-0", "source": "sync", "text": "refused", "item": "tasks/t1"}
+    assert ledger_alerts.message("demo", alert, "full").endswith(
+        "Autonomy full: take the decision yourself, with no question to the operator. On a blocker, the next protocol "
+        'step is to attempt 1 of 2: agentihooks swarm demo resolve attempt tasks/t1 --tried "<what you tried>" '
+        '--command "<the command run>" --output "<its output>".'
+    )
+
+
+def test_the_alert_message_reads_the_step_from_the_item_record():
+    alert = {"id": "al-4-0", "source": "sync", "text": "refused", "item": "tasks/t1"}
+    blocker = {"attempts": [{"after_critic": False}] * 2, "critic": None, "escalation": None}
+    doc = {"tasks": [{"id": "t1", "blocker": blocker}]}
+    assert ledger_alerts.message("demo", alert, "full", doc).endswith(
+        "launch the blind critic: agentihooks swarm demo resolve critic tasks/t1."
     )
 
 
@@ -737,7 +755,10 @@ def test_a_raise_of_the_full_text_length_is_accepted():
     ledger_alerts.check({"op": "alert_raise", "id": "z", "by": "swarm", "source": "promotion", "text": "x" * 2000})
 
 
-def test_a_raised_promotion_alert_reaches_the_master_inbox(inbox):
+def test_a_raised_promotion_alert_reaches_the_master_inbox(inbox, monkeypatch):
+    from scripts.swarm_ledger import ledger_blockers
+
+    monkeypatch.setattr(ledger_blockers, "autonomy", lambda slug: "full" if slug == SLUG else "")
     make_ledger()
     handler = ledger_server.Handler.__new__(ledger_server.Handler)
     handler.path = f"/api/{SLUG}?view=agent"
@@ -748,8 +769,35 @@ def test_a_raised_promotion_alert_reaches_the_master_inbox(inbox):
     assert item.text == (
         f"On ledger {SLUG}: alert {alert['id']} (promotion): Dev promotion is red. Claim it with agentihooks "
         f"ledger --slug {SLUG} --as <you> alert claim {alert['id']}, then close it with alert close "
-        f'{alert["id"]} "<outcome>".'
+        f'{alert["id"]} "<outcome>". Autonomy full: take the decision yourself, with no question to the operator. '
+        f"On a blocker, the next protocol step is to attempt 1 of 2: agentihooks swarm {SLUG} resolve attempt "
+        '<the item it concerns> --tried "<what you tried>" --command "<the command run>" --output "<its output>".'
     )
+
+
+def test_a_blocker_step_is_an_item_write():
+    from scripts.swarm_ledger.api import schemas
+
+    assert schemas.target({"op": "blocker_attempt", "item": "tasks/t1"}) == "tasks/t1"
+
+
+def test_alert_delivery_reads_the_step_from_the_ledger_state(inbox, monkeypatch):
+    from scripts.swarm_ledger import ledger_blockers
+
+    rendered = []
+    monkeypatch.setattr(ledger_blockers, "autonomy", lambda slug: "full")
+    alert = {"id": "al-5-0", "source": "sync", "text": "refused", "item": "tasks/t1", "state": "open", "rev": 5}
+    alert["target"] = "master"
+
+    def deliver(inbox, slug, alerts, rev, master, since, render):
+        rendered.append(render(slug, alert))
+        return []
+
+    monkeypatch.setattr(ledger_alerts, "deliver", deliver)
+    blocker = {"attempts": [{}, {}], "critic": None, "escalation": None}
+    state = {"_meta": {"rev": 5}, "alerts": [alert], "tasks": [{"id": "t1", "blocker": blocker}]}
+    ledger_server.deliver_alerts(SLUG, state)
+    assert rendered[0].endswith(f"launch the blind critic: agentihooks swarm {SLUG} resolve critic tasks/t1.")
 
 
 def test_alias_operation_stores_the_canonical_author(monkeypatch):
