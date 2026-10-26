@@ -7,9 +7,9 @@
   },
   "input_sha256": {
     "fixture.json": "9b59056aa01454ad8791a8f2308a87599f5c1f2986d789dd0eadd0c5d383c935",
-    "sv2_ret04_cases.py": "f11575b07d915d694e03418e7a5be2c49c35696f3735f1436317e337a022ccfe"
+    "sv2_ret04_cases.py": "ef12992ceac275700f310b0a9dc3303c93e23dc86c1a7d54d9a03ba496e53735"
   },
   "mocked": true,
   "package": "SV2-RET-04",
-  "tested_commit": "54354b2522c582d44f4a89e088da528802036610"
+  "tested_commit": "af68b9ea5fd29a66ff49e52688f626318d629fa4"
 }

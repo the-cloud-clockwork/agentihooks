@@ -41,5 +41,5 @@
   "rollback_rehearsal": "C recorded a newer set as uploaded only, so retention_allowed turned false and preserved named the drilled set; a re-drill after damaging its brain component failed, the set lost acceptance and preserved still named it",
   "status": "fixture_partial",
   "supported_versions": "backup format 1.x; component versions the caller lists in Access.versions",
-  "tested_commit": "54354b2522c582d44f4a89e088da528802036610"
+  "tested_commit": "af68b9ea5fd29a66ff49e52688f626318d629fa4"
 }
