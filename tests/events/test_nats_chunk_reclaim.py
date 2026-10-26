@@ -246,29 +246,35 @@ def test_a_crashed_writer_on_an_idle_key_leaves_no_chunks_after_the_idle_time(bu
 def test_sweep_purges_only_idle_unreferenced_chunk_groups():
     now = datetime.datetime(2026, 10, 25, tzinfo=datetime.UTC)
     owner, gone = nats_payload.scope("held", 0).split(".")[0], nats_payload.scope("gone", 0).split(".")[0]
-    names = ["held", f"_chunks.{owner}.1.kept.0", f"_chunks.{owner}.1.old.0", f"_chunks.{owner}.1.old.10"]
-    names += [f"_chunks.{owner}.1.old.9", f"_chunks.{owner}.2.young.0", f"_chunks.{gone}.0.lost.0"]
-    ages = {"kept.0": 60, "old.10": 16, "young.0": 14, "lost.0": 15}
+    kept, old, young, lost, vanished = (f"{index:032x}" for index in range(5))
+    names = ["held", f"_chunks.{owner}.1.{kept}.0", f"_chunks.{owner}.1.{old}.0", f"_chunks.{owner}.1.{old}.10"]
+    names += [f"_chunks.{owner}.1.{old}.9", f"_chunks.{owner}.2.{young}.0", f"_chunks.{gone}.0.{lost}.0"]
+    names += ["_chunks.user.7", f"_chunks.{owner}.1.{vanished}.0"]
+    ages = {kept: 60, old: 16, young: 14, lost: 15}
+
+    def last(stream, name):
+        nonce = name.split(".")[-2]
+        if nonce == vanished:
+            raise nats_payload.NotFoundError
+        return SimpleNamespace(time=now - datetime.timedelta(minutes=ages[nonce]))
+
     js = SimpleNamespace(
         stream_info=mock.AsyncMock(
             return_value=SimpleNamespace(state=SimpleNamespace(subjects={f"p.{name}": 1 for name in names}))
         ),
-        get_last_msg=mock.AsyncMock(
-            side_effect=lambda stream, name: SimpleNamespace(
-                time=now - datetime.timedelta(minutes=ages[".".join(name.split(".")[-2:])])
-            )
-        ),
+        get_last_msg=mock.AsyncMock(side_effect=last),
         purge_stream=mock.AsyncMock(),
     )
-    referenced = nats_payload.PAGED + json.dumps([f"{owner}.1.kept", 1]).encode()
+    referenced = nats_payload.PAGED + json.dumps([f"{owner}.1.{kept}", 1]).encode()
     history = mock.AsyncMock(return_value=[b"plain", referenced, referenced])
     asyncio.run(nats_payload.sweep(js, "s", "p.", history, now))
     js.stream_info.assert_awaited_once_with("s", subjects_filter="p.>")
     history.assert_awaited_once_with("held")
     assert sorted(call.kwargs["subject"] for call in js.purge_stream.await_args_list) == sorted(
-        f"p.{name}" for name in names[2:5] + names[6:]
+        f"p.{name}" for name in names[2:5] + names[6:7]
     )
     assert all(call.args == ("s",) for call in js.purge_stream.await_args_list)
+    assert "p._chunks.user.7" not in {call.args[1] for call in js.get_last_msg.await_args_list}
     js.stream_info.return_value.state.subjects = None
     js.purge_stream.reset_mock()
     asyncio.run(nats_payload.sweep(js, "s", "p.", history, now))
