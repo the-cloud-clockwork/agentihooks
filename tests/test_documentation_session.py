@@ -394,7 +394,6 @@ def test_an_abandoned_request_is_not_dispatched_again_at_session_end(world, monk
     _, payload, _, jobs = world
     documentation_session.end(payload)
     assert jobs == []
-    assert "abandoned" in documentation_session.TERMINAL
 
 
 def test_a_failed_worker_records_the_error_as_the_retry_reason(world, monkeypatch):
@@ -419,6 +418,15 @@ def test_a_session_end_leaves_its_own_worker_the_first_attempt(world, monkeypatc
     documentation_session.retry()
     assert len(ledger.added) == 1
     assert jobs[0][0] is documentation_session.process_pending
+
+
+def test_a_session_end_leaves_an_already_pending_request_to_the_timer(world, monkeypatch):
+    path, _, _ = failed_request(world, monkeypatch, unavailable)
+    _, payload, _, jobs = world
+    before = json.loads(path.read_text())
+    documentation_session.end(payload)
+    assert jobs == []
+    assert json.loads(path.read_text()) == before
 
 
 def test_a_retry_pass_is_skipped_while_another_holds_the_retry_lock(world, monkeypatch):

@@ -13,9 +13,6 @@ from hooks.context import documentation, documentation_evidence
 from scripts.swarm.ledger_client import LedgerClient
 from scripts.swarm_ledger import ledger_rank
 
-TERMINAL = {"queued", "complete", "abandoned"}
-
-
 WORKER_OPTIONS = {"timeout_sec": 180, "task_name": "documentation-session-end"}
 RETRY_OPTIONS = {"timeout_sec": 180, "task_name": "documentation-retry"}
 RETRY_DELAYS_S = (300, 900, 1800, 3600, 7200)
@@ -112,11 +109,10 @@ def end(payload: dict) -> None:
             except BlockingIOError:
                 return
             row = json.loads(path.read_text())
-            if row["status"] in TERMINAL:
+            if row["status"] != "active":
                 return
-            if row["status"] == "active":
-                row.update(status="pending", retry_at=time.time() + WORKER_OPTIONS["timeout_sec"])
-                _write(path, row)
+            row.update(status="pending", retry_at=time.time() + WORKER_OPTIONS["timeout_sec"])
+            _write(path, row)
         fork_and_call(process_pending, path, **WORKER_OPTIONS)
     except (OSError, ValueError) as exc:
         log("documentation dispatch unavailable", {"error": type(exc).__name__})
