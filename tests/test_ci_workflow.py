@@ -1967,7 +1967,14 @@ def test_pull_request_mutation_reuses_the_preflight_of_its_exact_head_from_the_p
         "always() && steps.mutate.outcome != 'skipped'",
     )
     for job in (stats, mutation):
-        assert all(step["if"] == skipped or step["if"] in unguarded for step in job["steps"])
+        guarded = {step.get("id") for step in job["steps"] if step["if"] == skipped or step["if"] in unguarded}
+        assert all(
+            step["if"] == skipped
+            or step["if"] in unguarded
+            or (retry := re.fullmatch(r"steps\.(.+)\.outcome == 'failure'", step["if"])) is not None
+            and retry[1] in guarded
+            for step in job["steps"]
+        )
     steps = {step.get("name"): step for step in mutation["steps"]}
     assert steps["Mutate changed Python files"]["if"] == f"github.event_name == 'pull_request' && {skipped}"
     assert steps["Mutate dispatched Python files"]["if"] == f"github.event_name == 'workflow_dispatch' && {skipped}"

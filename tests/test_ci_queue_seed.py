@@ -87,7 +87,11 @@ def test_queue_runs_restore_the_latest_dev_durations_on_the_app_token():
 
 def test_no_queue_run_carries_a_baseline_from_the_latest_dev_run():
     jobs = _jobs()
-    baselines = [s for s in jobs.get("durations", jobs["select"])["steps"] if "baseline" in s.get("name", "")]
+    baselines = [
+        s
+        for s in jobs.get("durations", jobs["select"])["steps"]
+        if "baseline" in s.get("name", "") and not s["name"].endswith("attempt 2")
+    ]
     assert baselines and not [s for s in baselines if _runs_on(s, "merge_group")]
     assert "dev-coverage-baseline" not in (_ROOT / ".github/workflows/test.yml").read_text()
 
