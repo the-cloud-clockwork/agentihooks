@@ -1,11 +1,13 @@
+import json
 import os
 import subprocess
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 import yaml
 
-from tests.mutation_sandbox_input_proof import REPORT_ARTIFACT, nested_report
+from tests.mutation_sandbox_input_proof import REPORT_ARTIFACT, SPLIT_ALGORITHM, nested_report
 
 _ROOT = Path(__file__).resolve().parents[1]
 
@@ -230,3 +232,16 @@ def test_focused_proofs_upload_every_nested_report():
     assert upload["uses"] == "actions/upload-artifact@v4"
     assert upload["with"]["name"] == REPORT_ARTIFACT
     assert upload["with"]["path"] == run["env"]["PROOF_REPORT_DIR"]
+
+
+def test_the_sandbox_proof_groups_share_the_suite_evenly():
+    from pytest_split.algorithms import Algorithms
+
+    durations = json.loads((_ROOT / ".test_durations").read_text())
+    untimed = [f"tests/test_untimed.py::test_{index}" for index in range(len(durations) // 20)]
+    items = [SimpleNamespace(nodeid=nodeid) for nodeid in [*durations, *untimed]]
+    groups = Algorithms[SPLIT_ALGORITHM].value(8, items, durations)
+    counts = [len(group.selected) for group in groups]
+    seconds = [group.duration for group in groups]
+    assert max(counts) <= 1.5 * min(counts), counts
+    assert max(seconds) <= 1.1 * sum(seconds) / len(seconds), seconds
