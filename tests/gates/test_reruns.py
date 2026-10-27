@@ -74,6 +74,8 @@ def test_targets_read_rest_rerun_requests_sent_through_gh_api():
     ) == [Target(run="11", repo="o/r"), Target(run="12", repo="{owner}/{repo}"), Target(job="22", repo="o/r")]
     assert list(targets("gh api repos/o/r/actions/runs/11/jobs; gh api repos/o/r/actions/runs/11")) == []
     assert list(targets("gh api -X POST repos/o/r/actions/jobs/22/rerun-failed-jobs")) == []
+    assert list(targets("gh api repos/o/r/actions/runs/13/rerun --method POST")) == [Target(run="13", repo="o/r")]
+    assert list(targets("hub api repos/o/r/actions/runs/14/rerun; hub run rerun 15")) == []
 
 
 def test_rest_reruns_spend_the_same_head_budget_and_are_refused_at_the_cap(tmp_path):
