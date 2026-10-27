@@ -72,6 +72,7 @@ def test_required_check_rules_are_read_once_per_interval_across_pull_requests(gi
 
 def test_the_sampler_counts_used_calls_across_a_window_reset():
     assert github_sampler.spent([(100, 1), (160, 1), (40, 2), (90, 2)]) == 60 + 40 + 50
+    assert github_sampler.spent([(5, 1), (5, 1)]) == 0
 
 
 def test_the_sampler_reports_calls_an_hour_and_the_spend_outside_the_doctor(github, monkeypatch):
@@ -80,6 +81,7 @@ def test_the_sampler_reports_calls_an_hour_and_the_spend_outside_the_doctor(gith
 
     def rate_limit(args, **kwargs):
         assert args == ["gh", "api", "rate_limit"]
+        assert kwargs == {"capture_output": True, "text": True, "check": True, "timeout": 30}
         body = {"resources": {"core": {"used": next(used), "reset": 5}}}
         return subprocess.CompletedProcess(args, 0, json.dumps(body), "")
 
@@ -94,4 +96,15 @@ def test_the_sampler_reports_calls_an_hour_and_the_spend_outside_the_doctor(gith
     assert found["per_hour"] == 600
     assert found["outside_doctor_per_hour"] == 599
     assert found["unattributed_per_hour"] == 598
-    assert found["callers"] == {"doctor.ci": 2, "swarm.head": 1}
+    assert list(found["callers"].items()) == [("doctor.ci", 2), ("swarm.head", 1)]
+
+
+def test_the_sampler_command_samples_the_window_it_is_given(monkeypatch, capsys):
+    monkeypatch.setattr(github_sampler, "sample", lambda minutes, interval: {"minutes": minutes, "interval": interval})
+    assert github_sampler.main(["--minutes", "5", "--interval", "30"]) == 0
+    assert json.loads(capsys.readouterr().out) == {"minutes": 5, "interval": 30}
+    assert github_sampler.main([]) == 0
+    assert json.loads(capsys.readouterr().out) == {"minutes": 60, "interval": 60}
+    with pytest.raises(SystemExit):
+        github_sampler.main(["--help"])
+    assert capsys.readouterr().out.startswith("usage: python -m scripts.swarm.github_sampler ")
