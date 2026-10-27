@@ -166,18 +166,62 @@ def test_a_master_successor_leaves_the_spent_reserved_account_for_an_open_one(
     assert placed.route_kind == ("interactive" if route == "interactive" else "subscription")
 
 
+@pytest.mark.parametrize("handoff", [False, True])
+def test_a_front_door_master_successor_leaves_the_closed_reserved_login_account_for_an_open_one(
+    tmp_path, monkeypatch, handoff
+):
+    from scripts import master_claude_login
+    from scripts.routing import master_account
+    from scripts.swarm.capacity import Account
+
+    seen = []
+
+    def run(argv, **kwargs):
+        seen.append(argv)
+        return SimpleNamespace(returncode=0, stdout=validated(argv, "status=started\nroute_status=routed\n"), stderr="")
+
+    monkeypatch.setattr(master_claude_login, "enabled", lambda *_: True)
+    declared = {"claude": master_account.MasterAccount("claude", "main")}
+    monkeypatch.setattr(master_account, "load", lambda environ: declared)
+    runtime = HerdrRuntime(home=tmp_path, run=run, choose=lambda *_: ("claude", "requested"))
+    runtime._quota_accounts = [
+        Account("claude", "main", "OPEN", 0, 96.0, 5.0, 6, reserved="workers", unreserved_cap=6),
+        Account("claude", "open", "OPEN", 0, 95.0, 78.0, 6),
+    ]
+    config = SimpleNamespace(
+        slug="proof",
+        repo=str(tmp_path),
+        code="a1b2c3",
+        compact_limit=0,
+        lanes={"master": {"agent": "claude"}},
+        autonomy="delegate",
+    )
+    task = {"id": "master", "title": "proof", "seat": "master@proof"}
+    if handoff:
+        task["handoff"] = "Continue the master task after the quota handoff."
+        task["handoff_envelope"] = {
+            "reason": "quota",
+            "launch": {"profile": "master", "harness": "claude", "account": "main", "model": "opus", "effort": "high"},
+        }
+    placed = runtime.spawn(config, "master", "agent", task)
+    passed = _passed(seen[0])
+    assert passed[passed.index("--route") + 1] == "open"
+    assert placed.route_kind == "subscription"
+
+
 @pytest.mark.parametrize(
     "rows,spent",
     [
         ([("main", 5.0, 6, "", None, "subscription"), ("open", 60.0, 6, "", None, "subscription")], True),
-        ([("main", 5.5, 6, "", None, "subscription"), ("open", 60.0, 6, "", None, "subscription")], False),
+        ([("main", 5.5, 6, "", None, "subscription"), ("open", 60.0, 6, "", None, "subscription")], True),
+        ([("main", 10.5, 6, "", None, "subscription"), ("open", 60.0, 6, "", None, "subscription")], False),
         ([("main", 3.0, 6, "", None, "subscription"), ("api", None, 4, "", None, "api")], False),
         ([("main", 3.0, 6, "", None, "subscription"), ("open", 60.0, 0, "workers", 6, "subscription")], True),
         ([("main", 3.0, 6, "", None, "subscription")], False),
         ([("open", 60.0, 6, "", None, "subscription")], False),
     ],
 )
-def test_the_declared_master_account_is_spent_only_at_the_week_floor_with_another_open_account(
+def test_the_declared_master_account_is_spent_at_the_handoff_warning_with_another_open_account(
     tmp_path, monkeypatch, rows, spent
 ):
     from scripts.routing import master_account
