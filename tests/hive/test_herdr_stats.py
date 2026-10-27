@@ -3,7 +3,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from scripts.hive import herdr_stats
+from scripts.hive import herdr_stats, registry
 
 pytestmark = pytest.mark.unit
 
@@ -93,20 +93,25 @@ def test_a_client_without_saved_machines_counts_itself(herdr):
 
 def test_publish_stores_the_reading_until_it_is_thirty_seconds_old(redis, herdr):
     herdr({("machine", "list", "--json"): [], ("pane", "list"): listing("claude")})
-    herdr_stats.publish(redis, 5_000, "/bin/herdr")
-    assert herdr_stats.read(redis, 35_000) == {
+    herdr_stats.publish(redis, "root", 5_000, "/bin/herdr")
+    assert herdr_stats.read(redis, "root", 35_000) == {
         "machines": {"master": {"claude": 1, "codex": 0}},
         "silent": [],
         "measured_at": 5_000,
     }
-    assert herdr_stats.read(redis, 35_001) is None
-    assert 29_000 < redis.pttl(herdr_stats.KEY) <= 30_000
+    assert herdr_stats.read(redis, "root", 35_001) is None
+    assert herdr_stats.read(redis, "other", 5_000) is None
+    assert 29_000 < redis.pttl(herdr_stats.key("root")) <= 30_000
+
+
+def test_the_reading_sits_under_the_publishing_hives_record():
+    assert herdr_stats.key("root") == f"{registry.key('root')}:herdr"
 
 
 def test_publish_writes_nothing_where_herdr_is_not_installed(redis, monkeypatch):
     monkeypatch.setattr(herdr_stats.shutil, "which", lambda name: None)
-    herdr_stats.publish(redis, 5_000)
-    assert redis.get(herdr_stats.KEY) is None
+    herdr_stats.publish(redis, "root", 5_000)
+    assert redis.get(herdr_stats.key("root")) is None
 
 
 def test_publish_finds_the_herdr_binary_by_its_name(redis, monkeypatch):
@@ -119,8 +124,8 @@ def test_publish_finds_the_herdr_binary_by_its_name(redis, monkeypatch):
 
     monkeypatch.setattr(herdr_stats.subprocess, "run", run)
     monkeypatch.setattr(herdr_stats.shutil, "which", lambda name: "/opt/herdr" if name == "herdr" else None)
-    herdr_stats.publish(redis, 5_000)
-    assert herdr_stats.read(redis, 5_000)["machines"] == {"master": {"claude": 0, "codex": 1}}
+    herdr_stats.publish(redis, "root", 5_000)
+    assert herdr_stats.read(redis, "root", 5_000)["machines"] == {"master": {"claude": 0, "codex": 1}}
     assert binaries == ["/opt/herdr", "/opt/herdr"]
 
 
