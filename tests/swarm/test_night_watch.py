@@ -374,6 +374,26 @@ def test_a_free_seat_with_no_logged_wait_still_raises_no_named_hold(store, monke
     assert finding.evidence == ("Hold: no named hold", "Evidence: eng is placed")
 
 
+def test_fresh_waits_naming_no_agent_limit_still_raise_no_named_hold(store, monkeypatch):
+    rig = placed(store, monkeypatch)
+    logged(store, rig, {"t0": "no hive is equipped for eng", "t1": "no hive is equipped for eng"})
+    (finding,) = night_watch.findings(store, SLUG)
+    assert finding.evidence == ("Hold: no named hold", "Evidence: eng is placed")
+
+
+def test_an_agent_limit_covering_every_ready_task_closes_a_raised_spawn_alert(store, monkeypatch):
+    rig = placed(store, monkeypatch)
+    plant(store, spawn=RAISED)
+    waits(store, NOW, {"t0": LOCAL_LIMIT, "t1": LOCAL_LIMIT})
+    spawn_stall.refuse_local(store, SLUG, "box", 6, 6, NOW)
+    actions = run(store, rig, NOW, open_alert("spawn"))
+    ((alert, outcome),) = rig.ledger.closed
+    assert alert == "a1" and actions == [f"closed the spawn alert: {outcome}"]
+    assert outcome.startswith(night_watch.CLEARED.format(what="every ready task waits on an agent limit: "))
+    assert "local cap on box (6 of 6 agents)" in outcome
+    assert night_watch.read(store, SLUG).get("spawn") is None
+
+
 def test_a_quota_hold_without_a_reason_says_no_lane_is_placed(store, monkeypatch):
     rig = Rig()
     held_master(store, rig.runtime)

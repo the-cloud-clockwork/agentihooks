@@ -3,7 +3,7 @@ from types import SimpleNamespace
 import pytest
 
 from scripts.hive.placement import Wait
-from scripts.swarm import commands
+from scripts.swarm import commands, lease
 from scripts.swarm.tick import SpawnError
 from tests.hive.test_controller_launch import setup as setup
 from tests.hive.test_controller_launch import write_hive
@@ -61,10 +61,12 @@ def test_local_deployment_logs_the_workstation_cap_as_the_task_wait(setup):
 
     fenced = FencedRuntime(setup.store, setup.config.slug, setup.held, setup.herdr, "local")
     local_agents(setup, 8)
+    before = lease.now_ms(setup.store)
     refused = fenced.placement_refusal("ci", {"id": "task"})
     row = placement_waits.read(setup.store, setup.config.slug)["task"]
     assert LOCAL_FULL in refused
     assert (row["lane"], row["reason"]) == ("ci", refused)
+    assert before <= row["started_at"] == row["seen_at"] <= lease.now_ms(setup.store)
 
 
 def test_failed_root_publication_releases_the_shared_local_reservation(setup, monkeypatch):

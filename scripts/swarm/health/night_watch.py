@@ -193,8 +193,7 @@ def _agent_limit(watch, ready) -> str:
     waits = {
         task: row
         for task, row in placement_waits.read(watch.store, watch.slug).items()
-        if row.get("seen_at", row["started_at"]) >= since
-        and (f" {HAS_ROOM}" in row["reason"] or LOCAL_FULL in row["reason"])
+        if row["seen_at"] >= since and (f" {HAS_ROOM}" in row["reason"] or LOCAL_FULL in row["reason"])
     }
     covered = {(row["lane"], task) for task, row in waits.items()}
     if any((lane, task["id"]) not in covered for lane, tasks in ready.items() for task in tasks):
