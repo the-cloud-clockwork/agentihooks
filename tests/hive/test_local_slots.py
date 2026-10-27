@@ -114,3 +114,20 @@ def test_root_hive_room_includes_pending_claims_before_any_process_exists(setup,
     assert hives["workstation"]["agents"] == 0
     assert hives["workstation"]["room"] == 0
     assert hives["remote"]["room"] == 3
+
+
+def test_each_claim_journals_the_agent_names_it_counted(setup, monkeypatch, capsys):
+    from scripts.swarm import lease
+
+    rows = [session("engineer@bbbbbb-0001", "codex"), session("ci@cccccc-0001")]
+    monkeypatch.setattr(terminate_agent, "sessions", lambda: rows)
+    setup.store.redis.hset(local_slots.key("workstation"), "doctor/pending", lease.now_ms(setup.store))
+    slug = setup.config.slug
+    assert local_slots.claim(setup.store, "workstation", slug, "task", "new", 6) == 3
+    assert local_slots.claim(setup.store, "workstation", slug, "other", "late", 3) == 4
+    assert capsys.readouterr().out.splitlines() == [
+        f"{slug}: local slot claim new for task on workstation counted 3 of 6: "
+        "ci@cccccc-0001, doctor/pending, engineer@bbbbbb-0001",
+        f"{slug}: local slot claim late for other on workstation counted 4 of 3: "
+        f"ci@cccccc-0001, doctor/pending, engineer@bbbbbb-0001, {slug}/new",
+    ]
