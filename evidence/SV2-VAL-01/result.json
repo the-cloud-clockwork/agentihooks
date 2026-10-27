@@ -1,0 +1,52 @@
+{
+  "package": "SV2-VAL-01",
+  "integration_gate": "G12",
+  "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/7713",
+  "pull_request": "pending: opened by the engineer who finishes the task after SV2-GAT-05 merges",
+  "tested_commit": "b39463c54a831c0b719aff962c8ba6ceb2c44701",
+  "dependencies": ["SV2-KUB-05", "SV2-CKP-05", "SV2-IDX-05", "SV2-GAT-05", "SV2-MUL-05"],
+  "evidence_class": "CI focused proof runs on isolated temporary stores; mocked, no live service read or mutated",
+  "states": {
+    "observed": "the agentihooks admission target answered all 109 matrix cases as the shared contracts require, twice from independent stores",
+    "accepted": "current, previous-minor, newer-minor, extension and newer-generation records admitted with every unknown optional field kept; invalid, unknown-authority, future-major, missing-authority, reused-operation, older-generation, held-generation and outside-grant records refused with the expected error class and retry and no stored change",
+    "committed": "runner, matrix, agentihooks target, admission grant check and tests at the tested commit",
+    "externally_verified": "not yet: agentibrain-kernel and antoncore have not run the vendored runner against their owned endpoints"
+  },
+  "observed": {
+    "red_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/40489190507",
+    "red_commit": "45b0c64e63a5",
+    "red_result": "19 failed, 4 passed: admit had no grant seam",
+    "green_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/40491006331",
+    "green_result": "128 passed in tests/contracts/swarm_v2"
+  },
+  "interfaces": [
+    "tests/contracts/swarm_v2/conformance.py: build_matrix, run, publish, digest, main (jsonschema and referencing only)",
+    "tests/contracts/swarm_v2/fixtures/matrix.json: 109 cases over the eight shared contracts",
+    "tests/contracts/swarm_v2/agentihooks_target.py: the agentihooks admission target with HTTP status mapping",
+    "scripts.swarm_v2.contracts.admit(contracts, store, name, doc, grant=None): forbidden_scope, reason outside_grant, retry new_request, before any write",
+    "docs/swarm-v2/conformance.md"
+  ],
+  "supported_versions": {
+    "major": 2,
+    "readable_minors": ">= 2.0, newer minors additive",
+    "write_minors": "2.1, checkpoint 2.2"
+  },
+  "measurements": {
+    "contract_cases_passed": 109,
+    "contract_cases_failed": 0,
+    "compatibility_results": "evidence/SV2-VAL-01/compatibility-results.json"
+  },
+  "test_results": {
+    "a": "evidence/SV2-VAL-01/a-result.json",
+    "b": "evidence/SV2-VAL-01/b-result.json",
+    "c": "evidence/SV2-VAL-01/c-result.json",
+    "manifest": "evidence/SV2-VAL-01/manifest.json"
+  },
+  "rollback": "Keep the previous compatible schema active until all required consumers qualify by lowering write_minor in compatibility.json; reverting the pull request removes the runner, matrix and grant check and leaves stored admission records untouched",
+  "rollback_rehearsal": "pending: recorded by the engineer who finishes the task after the restack onto dev",
+  "limitations": [
+    "Only the agentihooks target runs here; agentibrain-kernel owns the context pack and receipt endpoints and must vendor the runner, matrix and schemas and publish its own result.",
+    "The grant check covers project_id, brain_id and swarm_id carried in the record authority; contracts without those keys have no scope case.",
+    "The error contract has no admission endpoint, so its cases validate records only."
+  ]
+}

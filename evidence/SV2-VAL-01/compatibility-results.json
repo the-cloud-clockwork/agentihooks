@@ -1,0 +1,557 @@
+{
+  "schema": "swarm-v2-conformance-results/1",
+  "package": "SV2-VAL-01",
+  "repository": "agentihooks",
+  "commit": "b39463c54a831c0b719aff962c8ba6ceb2c44701",
+  "schemas_sha256": "1dc307da04e48fae128a2b068dbe865c328694e3f2bdb9ce94fcf26f60ff9b05",
+  "matrix_sha256": "c5a9e527108475fad066c320d36424ce9b4d4ac883717924c6da0dea00e49fae",
+  "contract_cases_passed": 109,
+  "contract_cases_failed": 0,
+  "results": [
+    {
+      "case": "launch/current",
+      "passed": true,
+      "failures": []
+    },
+    {
+      "case": "launch/previous-minor",
+      "passed": true,
+      "failures": []
+    },
+    {
+      "case": "launch/newer-minor",
+      "passed": true,
+      "failures": []
+    },
+    {
+      "case": "launch/future-major",
+      "passed": true,
+      "failures": []
+    },
+    {
+      "case": "launch/missing-authority",
+      "passed": true,
+      "failures": []
+    },
+    {
+      "case": "launch/previous-minor-missing-authority",
+      "passed": true,
+      "failures": []
+    },
+    {
+      "case": "launch/extension",
+      "passed": true,
+      "failures": []
+    },
+    {
+      "case": "launch/invalid",
+      "passed": true,
+      "failures": []
+    },
+    {
+      "case": "launch/unknown-authority",
+      "passed": true,
+      "failures": []
+    },
+    {
+      "case": "launch/replay",
+      "passed": true,
+      "failures": []
+    },
+    {
+      "case": "launch/reused-operation",
+      "passed": true,
+      "failures": []
+    },
+    {
+      "case": "launch/older-generation",
+      "passed": true,
+      "failures": []
+    },
+    {
+      "case": "launch/held-generation",
+      "passed": true,
+      "failures": []
+    },
+    {
+      "case": "launch/newer-generation",
+      "passed": true,
+      "failures": []
+    },
+    {
+      "case": "launch/outside-grant",
+      "passed": true,
+      "failures": []
+    },
+    {
+      "case": "heartbeat/current",
+      "passed": true,
+      "failures": []
+    },
+    {
+      "case": "heartbeat/previous-minor",
+      "passed": true,
+      "failures": []
+    },
+    {
+      "case": "heartbeat/newer-minor",
+      "passed": true,
+      "failures": []
+    },
+    {
+      "case": "heartbeat/future-major",
+      "passed": true,
+      "failures": []
+    },
+    {
+      "case": "heartbeat/missing-authority",
+      "passed": true,
+      "failures": []
+    },
+    {
+      "case": "heartbeat/previous-minor-missing-authority",
+      "passed": true,
+      "failures": []
+    },
+    {
+      "case": "heartbeat/extension",
+      "passed": true,
+      "failures": []
+    },
+    {
+      "case": "heartbeat/invalid",
+      "passed": true,
+      "failures": []
+    },
+    {
+      "case": "heartbeat/unknown-authority",
+      "passed": true,
+      "failures": []
+    },
+    {
+      "case": "heartbeat/replay",
+      "passed": true,
+      "failures": []
+    },
+    {
+      "case": "heartbeat/reused-operation",
+      "passed": true,
+      "failures": []
+    },
+    {
+      "case": "heartbeat/older-generation",
+      "passed": true,
+      "failures": []
+    },
+    {
+      "case": "heartbeat/held-generation",
+      "passed": true,
+      "failures": []
+    },
+    {
+      "case": "heartbeat/newer-generation",
+      "passed": true,
+      "failures": []
+    },
+    {
+      "case": "command/current",
+      "passed": true,
+      "failures": []
+    },
+    {
+      "case": "command/previous-minor",
+      "passed": true,
+      "failures": []
+    },
+    {
+      "case": "command/newer-minor",
+      "passed": true,
+      "failures": []
+    },
+    {
+      "case": "command/future-major",
+      "passed": true,
+      "failures": []
+    },
+    {
+      "case": "command/missing-authority",
+      "passed": true,
+      "failures": []
+    },
+    {
+      "case": "command/previous-minor-missing-authority",
+      "passed": true,
+      "failures": []
+    },
+    {
+      "case": "command/extension",
+      "passed": true,
+      "failures": []
+    },
+    {
+      "case": "command/invalid",
+      "passed": true,
+      "failures": []
+    },
+    {
+      "case": "command/unknown-authority",
+      "passed": true,
+      "failures": []
+    },
+    {
+      "case": "command/replay",
+      "passed": true,
+      "failures": []
+    },
+    {
+      "case": "command/reused-operation",
+      "passed": true,
+      "failures": []
+    },
+    {
+      "case": "command/older-generation",
+      "passed": true,
+      "failures": []
+    },
+    {
+      "case": "command/held-generation",
+      "passed": true,
+      "failures": []
+    },
+    {
+      "case": "command/newer-generation",
+      "passed": true,
+      "failures": []
+    },
+    {
+      "case": "checkpoint/current",
+      "passed": true,
+      "failures": []
+    },
+    {
+      "case": "checkpoint/previous-minor",
+      "passed": true,
+      "failures": []
+    },
+    {
+      "case": "checkpoint/newer-minor",
+      "passed": true,
+      "failures": []
+    },
+    {
+      "case": "checkpoint/future-major",
+      "passed": true,
+      "failures": []
+    },
+    {
+      "case": "checkpoint/missing-authority",
+      "passed": true,
+      "failures": []
+    },
+    {
+      "case": "checkpoint/previous-minor-missing-authority",
+      "passed": true,
+      "failures": []
+    },
+    {
+      "case": "checkpoint/extension",
+      "passed": true,
+      "failures": []
+    },
+    {
+      "case": "checkpoint/invalid",
+      "passed": true,
+      "failures": []
+    },
+    {
+      "case": "checkpoint/unknown-authority",
+      "passed": true,
+      "failures": []
+    },
+    {
+      "case": "checkpoint/replay",
+      "passed": true,
+      "failures": []
+    },
+    {
+      "case": "checkpoint/reused-operation",
+      "passed": true,
+      "failures": []
+    },
+    {
+      "case": "checkpoint/older-generation",
+      "passed": true,
+      "failures": []
+    },
+    {
+      "case": "checkpoint/held-generation",
+      "passed": true,
+      "failures": []
+    },
+    {
+      "case": "checkpoint/newer-generation",
+      "passed": true,
+      "failures": []
+    },
+    {
+      "case": "checkpoint/outside-grant",
+      "passed": true,
+      "failures": []
+    },
+    {
+      "case": "session_event/current",
+      "passed": true,
+      "failures": []
+    },
+    {
+      "case": "session_event/previous-minor",
+      "passed": true,
+      "failures": []
+    },
+    {
+      "case": "session_event/newer-minor",
+      "passed": true,
+      "failures": []
+    },
+    {
+      "case": "session_event/future-major",
+      "passed": true,
+      "failures": []
+    },
+    {
+      "case": "session_event/missing-authority",
+      "passed": true,
+      "failures": []
+    },
+    {
+      "case": "session_event/previous-minor-missing-authority",
+      "passed": true,
+      "failures": []
+    },
+    {
+      "case": "session_event/extension",
+      "passed": true,
+      "failures": []
+    },
+    {
+      "case": "session_event/invalid",
+      "passed": true,
+      "failures": []
+    },
+    {
+      "case": "session_event/unknown-authority",
+      "passed": true,
+      "failures": []
+    },
+    {
+      "case": "session_event/replay",
+      "passed": true,
+      "failures": []
+    },
+    {
+      "case": "session_event/reused-operation",
+      "passed": true,
+      "failures": []
+    },
+    {
+      "case": "session_event/older-generation",
+      "passed": true,
+      "failures": []
+    },
+    {
+      "case": "session_event/held-generation",
+      "passed": true,
+      "failures": []
+    },
+    {
+      "case": "session_event/newer-generation",
+      "passed": true,
+      "failures": []
+    },
+    {
+      "case": "session_event/outside-grant",
+      "passed": true,
+      "failures": []
+    },
+    {
+      "case": "context_pack/current",
+      "passed": true,
+      "failures": []
+    },
+    {
+      "case": "context_pack/previous-minor",
+      "passed": true,
+      "failures": []
+    },
+    {
+      "case": "context_pack/newer-minor",
+      "passed": true,
+      "failures": []
+    },
+    {
+      "case": "context_pack/future-major",
+      "passed": true,
+      "failures": []
+    },
+    {
+      "case": "context_pack/missing-authority",
+      "passed": true,
+      "failures": []
+    },
+    {
+      "case": "context_pack/previous-minor-missing-authority",
+      "passed": true,
+      "failures": []
+    },
+    {
+      "case": "context_pack/extension",
+      "passed": true,
+      "failures": []
+    },
+    {
+      "case": "context_pack/invalid",
+      "passed": true,
+      "failures": []
+    },
+    {
+      "case": "context_pack/unknown-authority",
+      "passed": true,
+      "failures": []
+    },
+    {
+      "case": "context_pack/replay",
+      "passed": true,
+      "failures": []
+    },
+    {
+      "case": "context_pack/reused-operation",
+      "passed": true,
+      "failures": []
+    },
+    {
+      "case": "context_pack/older-generation",
+      "passed": true,
+      "failures": []
+    },
+    {
+      "case": "context_pack/held-generation",
+      "passed": true,
+      "failures": []
+    },
+    {
+      "case": "context_pack/newer-generation",
+      "passed": true,
+      "failures": []
+    },
+    {
+      "case": "context_pack/outside-grant",
+      "passed": true,
+      "failures": []
+    },
+    {
+      "case": "receipt/current",
+      "passed": true,
+      "failures": []
+    },
+    {
+      "case": "receipt/previous-minor",
+      "passed": true,
+      "failures": []
+    },
+    {
+      "case": "receipt/newer-minor",
+      "passed": true,
+      "failures": []
+    },
+    {
+      "case": "receipt/future-major",
+      "passed": true,
+      "failures": []
+    },
+    {
+      "case": "receipt/missing-authority",
+      "passed": true,
+      "failures": []
+    },
+    {
+      "case": "receipt/previous-minor-missing-authority",
+      "passed": true,
+      "failures": []
+    },
+    {
+      "case": "receipt/extension",
+      "passed": true,
+      "failures": []
+    },
+    {
+      "case": "receipt/invalid",
+      "passed": true,
+      "failures": []
+    },
+    {
+      "case": "receipt/unknown-authority",
+      "passed": true,
+      "failures": []
+    },
+    {
+      "case": "receipt/replay",
+      "passed": true,
+      "failures": []
+    },
+    {
+      "case": "receipt/reused-operation",
+      "passed": true,
+      "failures": []
+    },
+    {
+      "case": "receipt/older-generation",
+      "passed": true,
+      "failures": []
+    },
+    {
+      "case": "receipt/held-generation",
+      "passed": true,
+      "failures": []
+    },
+    {
+      "case": "receipt/newer-generation",
+      "passed": true,
+      "failures": []
+    },
+    {
+      "case": "receipt/outside-grant",
+      "passed": true,
+      "failures": []
+    },
+    {
+      "case": "error/current",
+      "passed": true,
+      "failures": []
+    },
+    {
+      "case": "error/previous-minor",
+      "passed": true,
+      "failures": []
+    },
+    {
+      "case": "error/future-major",
+      "passed": true,
+      "failures": []
+    },
+    {
+      "case": "error/newer-minor",
+      "passed": true,
+      "failures": []
+    },
+    {
+      "case": "error/extension",
+      "passed": true,
+      "failures": []
+    },
+    {
+      "case": "error/invalid",
+      "passed": true,
+      "failures": []
+    }
+  ]
+}

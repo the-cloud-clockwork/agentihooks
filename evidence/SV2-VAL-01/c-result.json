@@ -1,0 +1,31 @@
+{
+  "case": "T-SV2-VAL-01-C",
+  "tested_commit": "b39463c54a831c0b719aff962c8ba6ceb2c44701",
+  "ci_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/40491006331",
+  "contract_cases_passed": 109,
+  "contract_cases_failed": 0,
+  "passed": 5,
+  "failed": 0,
+  "tests": [
+    {
+      "test": "tests/contracts/swarm_v2/test_conformance.py::test_c_a_replay_with_the_same_operation_creates_no_duplicate",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/contracts/swarm_v2/test_conformance.py::test_c_a_target_that_strips_extensions_fails_the_older_reader_case",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/contracts/swarm_v2/test_conformance.py::test_c_an_extension_keeps_its_provenance_in_the_stored_record",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/contracts/swarm_v2/test_conformance.py::test_c_an_older_generation_cannot_overwrite_a_newer_accepted_record",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/contracts/swarm_v2/test_conformance.py::test_c_unknown_optional_fields_pass_while_missing_authority_fails",
+      "outcome": "passed"
+    }
+  ]
+}

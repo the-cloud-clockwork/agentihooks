@@ -16,14 +16,14 @@ INPUTS = (
     "tests/contracts/swarm_v2/test_conformance.py",
     "scripts/swarm_v2/contracts.py",
 )
-LINE = re.compile(r"(tests/contracts/swarm_v2/test_conformance\.py::test_([abc])_\S+) (PASSED|FAILED|ERROR|SKIPPED)")
+LINE = re.compile(r"(PASSED|FAILED|ERROR|SKIPPED) (tests/contracts/swarm_v2/test_conformance\.py::test_([abc])_\S+)")
 
 
 def main(log: str, report: str, commit: str, run: str) -> None:
     out = Path("evidence/SV2-VAL-01")
     tests = {key: {} for key in CASES}
     for match in LINE.finditer(Path(log).read_text()):
-        tests[match[2]][match[1]] = match[3].lower()
+        tests[match[3]][match[2]] = match[1].lower()
     conformance = json.loads(Path(report).read_text())
     (out / "compatibility-results.json").write_text(json.dumps(conformance, indent=2) + "\n")
     manifest = {

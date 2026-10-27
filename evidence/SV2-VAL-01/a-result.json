@@ -1,0 +1,35 @@
+{
+  "case": "T-SV2-VAL-01-A",
+  "tested_commit": "b39463c54a831c0b719aff962c8ba6ceb2c44701",
+  "ci_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/40491006331",
+  "contract_cases_passed": 109,
+  "contract_cases_failed": 0,
+  "passed": 6,
+  "failed": 0,
+  "tests": [
+    {
+      "test": "tests/contracts/swarm_v2/test_conformance.py::test_a_committed_matrix_matches_its_generator",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/contracts/swarm_v2/test_conformance.py::test_a_matrix_covers_every_family_for_every_shared_contract",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/contracts/swarm_v2/test_conformance.py::test_a_published_result_names_the_repository_commit_and_inputs",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/contracts/swarm_v2/test_conformance.py::test_a_second_independent_run_reaches_the_same_verdicts",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/contracts/swarm_v2/test_conformance.py::test_a_the_agentihooks_target_passes_every_conformance_case",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/contracts/swarm_v2/test_conformance.py::test_a_vendored_runner_judges_a_target_without_the_producer_runtime",
+      "outcome": "passed"
+    }
+  ]
+}

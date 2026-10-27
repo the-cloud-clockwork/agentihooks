@@ -1,0 +1,63 @@
+{
+  "case": "T-SV2-VAL-01-B",
+  "tested_commit": "b39463c54a831c0b719aff962c8ba6ceb2c44701",
+  "ci_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/40491006331",
+  "contract_cases_passed": 109,
+  "contract_cases_failed": 0,
+  "passed": 13,
+  "failed": 0,
+  "tests": [
+    {
+      "test": "tests/contracts/swarm_v2/test_conformance.py::test_b_a_corrected_record_needs_a_new_request_under_the_right_grant",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/contracts/swarm_v2/test_conformance.py::test_b_a_grant_without_shared_scope_keys_admits_the_record",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/contracts/swarm_v2/test_conformance.py::test_b_a_launch_for_another_swarm_is_refused",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/contracts/swarm_v2/test_conformance.py::test_b_a_record_outside_the_grant_is_refused_before_any_write[checkpoint]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/contracts/swarm_v2/test_conformance.py::test_b_a_record_outside_the_grant_is_refused_before_any_write[context_pack]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/contracts/swarm_v2/test_conformance.py::test_b_a_record_outside_the_grant_is_refused_before_any_write[launch]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/contracts/swarm_v2/test_conformance.py::test_b_a_record_outside_the_grant_is_refused_before_any_write[receipt]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/contracts/swarm_v2/test_conformance.py::test_b_a_record_outside_the_grant_is_refused_before_any_write[session_event]",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/contracts/swarm_v2/test_conformance.py::test_b_a_refusal_that_mutates_stored_state_fails",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/contracts/swarm_v2/test_conformance.py::test_b_a_target_that_discloses_the_caller_bearer_fails",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/contracts/swarm_v2/test_conformance.py::test_b_a_target_that_ignores_project_scope_fails_conformance",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/contracts/swarm_v2/test_conformance.py::test_b_a_target_that_ignores_task_generation_fails_conformance",
+      "outcome": "passed"
+    },
+    {
+      "test": "tests/contracts/swarm_v2/test_conformance.py::test_b_an_http_success_does_not_excuse_a_refusal",
+      "outcome": "passed"
+    }
+  ]
+}

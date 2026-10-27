@@ -1,0 +1,18 @@
+{
+  "package": "SV2-VAL-01",
+  "tested_commit": "b39463c54a831c0b719aff962c8ba6ceb2c44701",
+  "ci_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/40491006331",
+  "inputs": {
+    "docs/swarm-v2/schemas/compatibility.json": "59b838d8c4649c88a136656ba667c33948c8c64b90835b443151aff82d4a725c",
+    "docs/swarm-v2/schemas/common.json": "7785117b319b616792e20a2fb1ee62d48735175ed0a46c55ab348f969a94b5da",
+    "docs/swarm-v2/schemas/error.json": "addd788f26e733e5d92f5ad7259c5402c44e2cc2374895de3bc5c535e55ef848",
+    "tests/contracts/swarm_v2/fixtures/index.json": "2a041f199a412f332e5da33375995ad5df8d39186035d42f94efb41159680102",
+    "tests/contracts/swarm_v2/fixtures/matrix.json": "24f40f59852c35d9995d6e68e62e36c77de98ed6aacec335ca5a91a43f53ed74",
+    "tests/contracts/swarm_v2/conformance.py": "85a98a451c9fe5c3bd02a000c5581d22f40c60cc72415e010644035ba357cd68",
+    "tests/contracts/swarm_v2/agentihooks_target.py": "7b97c478de4eafbe775a439157730c147e74a16301bb2588ce96f1cccd357af1",
+    "tests/contracts/swarm_v2/test_conformance.py": "e81bf93f3ee08fb7bed634bcd6285c5303ae1486d405aa6afdef1375eee036ee",
+    "scripts/swarm_v2/contracts.py": "abd47f9dfcdba469b2e69db7f8fa14b617903712c45c95a8d0bcbc0e7022236f"
+  },
+  "mocked": true,
+  "generated_by": "Proofs workflow tests proof on tests/contracts/swarm_v2, then python evidence/SV2-VAL-01/generate_case_results.py <run log> <proof report> <commit> <run url>"
+}
