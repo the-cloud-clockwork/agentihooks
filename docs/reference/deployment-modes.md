@@ -399,8 +399,9 @@ over the bundle's, an empty one keeps the bundle's, a changed address rerenders 
 bundle address refuses connections joins and acknowledges the ledger through its configured route.
 
 Limitation: an agent the Kubernetes runtime launches in its own worker pod builds its home through the worker home
-bootstrap. It receives the address as a launch endpoint, not in the rendering process's environment, and the rendered profile `env` takes precedence over
-launch endpoints there. Keep a bundle `AGENTIHOOKS_HOSTED_LEDGER_URL` reachable from such pods, or leave it unset.
+bootstrap. It receives the address as a launch endpoint, not in the rendering process's environment, and the
+rendered profile `env` takes precedence over launch endpoints there. Keep a bundle `AGENTIHOOKS_HOSTED_LEDGER_URL`
+reachable from such pods, or leave it unset.
 
 ### Credentials a remote client sends
 
