@@ -152,9 +152,9 @@ def registry_errors(head: Path, allowlists=SHRINK_ONLY, graded=GRADED_BY) -> lis
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Fail when a threshold, floor or allowlist loosens against the base.")
+    parser = argparse.ArgumentParser()
     parser.add_argument("--base", type=Path, required=True)
-    parser.add_argument("--head", type=Path, default=Path.cwd())
+    parser.add_argument("--head", type=Path, required=True)
     args = parser.parse_args(argv)
     try:
         pinned, pins = pin_errors(args.base, args.head)

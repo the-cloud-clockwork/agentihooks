@@ -31,6 +31,7 @@ def _tree(root: Path, files: dict[str, str]) -> Path:
 def test_an_unchanged_or_tightened_gate_holds(tmp_path):
     base = _tree(tmp_path / "base", {"scripts/gate.py": GATE})
     tighter = GATE.replace("LINES = 300", "LINES = 250").replace('"hooks/", ', '"hooks/", "tests/", ')
+    tighter += "def other():\n    global OTHER\n"
     head = _tree(tmp_path / "head", {"scripts/gate.py": tighter})
     assert threshold_pins.pin_errors(base, base, PINS) == ([], 3)
     assert threshold_pins.pin_errors(base, head, PINS) == ([], 3)
@@ -93,6 +94,68 @@ def test_a_pin_the_base_lacks_grades_nothing(tmp_path):
     assert threshold_pins.pin_errors(base, head, PINS) == ([], 0)
 
 
+def test_a_pin_the_base_lacks_does_not_stop_the_next_pin(tmp_path):
+    base = _tree(tmp_path / "base", {"scripts/gate.py": GATE})
+    head = _tree(tmp_path / "head", {"scripts/gate.py": GATE.replace("LINES = 300", "LINES = 400")})
+    pins = (("scripts/absent.py", "LINES", "at most"), *PINS)
+    errors, compared = threshold_pins.pin_errors(base, head, pins)
+    assert compared == 3
+    assert len(errors) == 1
+    assert "LINES rose from 300 to 400" in errors[0]
+
+
+def test_every_allowlist_is_graded_after_an_absent_or_gone_one(tmp_path):
+    other = "tests/Y_ALLOWLIST.json"
+    base = _tree(tmp_path / "base", {ALLOWLIST: "{}", other: json.dumps({"a.py": 1})})
+    head = _tree(tmp_path / "head", {other: json.dumps({"a.py": 2})})
+    assert threshold_pins.allowlist_errors(base, head, ("tests/ABSENT_ALLOWLIST.json", ALLOWLIST, other)) == (
+        [
+            f"{ALLOWLIST} is gone, so its gate grades nothing",
+            f"{other}: a.py rose from 1 to 2; allowlists only shrink",
+        ],
+        2,
+    )
+
+
+@pytest.mark.parametrize(
+    ("base", "head", "errors"),
+    [
+        ({"a.py": 1}, 3, ["changed from {'a.py': 1} to 3"]),
+        (3, "3", ["changed from 3 to '3'"]),
+        (["x"], ["x"], []),
+        ("x", "y", ["changed from 'x' to 'y'"]),
+        (2, 1, []),
+    ],
+)
+def test_a_changed_allowlist_entry_shape_is_red(base, head, errors):
+    assert threshold_pins.shrunk(base, head, "") == errors
+
+
+def test_tracked_outside_a_repository_is_red(tmp_path):
+    with pytest.raises(threshold_pins.PinError, match="git ls-files failed in"):
+        threshold_pins.tracked(tmp_path)
+
+
+def test_the_check_requires_both_trees():
+    with pytest.raises(SystemExit):
+        threshold_pins.main(["--head", str(_ROOT)])
+    with pytest.raises(SystemExit):
+        threshold_pins.main(["--base", str(_ROOT)])
+
+
+def test_an_unchanged_repository_is_green(capsys):
+    assert threshold_pins.main(["--base", str(_ROOT), "--head", str(_ROOT)]) == 0
+    pins, allowlists = len(threshold_pins.PINS), len(threshold_pins.SHRINK_ONLY)
+    assert f"{pins} thresholds compared, {allowlists} allowlists compared, 0 errors" in capsys.readouterr().out
+
+
+def test_a_rebound_pin_fails_the_check(tmp_path, capsys):
+    rebound = (_ROOT / "scripts/size_limits.py").read_text() + "FUNCTION_LINES = 400\n"
+    head = _tree(tmp_path / "head", {"scripts/size_limits.py": rebound})
+    assert threshold_pins.main(["--base", str(_ROOT), "--head", str(head)]) == 1
+    assert "::error::scripts/size_limits.py must bind FUNCTION_LINES once" in capsys.readouterr().out
+
+
 def test_an_allowlist_only_shrinks(tmp_path):
     counts = {"a.py": {"C901": 14}, "b.py": 3}
     base = _tree(tmp_path / "base", {ALLOWLIST: json.dumps(counts)})
@@ -121,6 +184,7 @@ def test_an_unregistered_floor_or_allowlist_is_red(tmp_path):
             "tests/NEW_ALLOWLIST.json": "{}",
             "x/floors.json": "{}",
             "tests/fixtures/A_ALLOWLIST.json": "",
+            "evidence/E_ALLOWLIST.json": "",
         },
     )
     errors = threshold_pins.registry_errors(head, (ALLOWLIST,), ())
