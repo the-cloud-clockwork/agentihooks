@@ -150,6 +150,10 @@ def collect(run) -> list[str]:
             error = exc if isinstance(exc, SpawnError) else SpawnError(str(exc), harness=picked.harness)
             if not error.harness:
                 error.harness = picked.harness
+            if not error.pane_id:
+                from scripts.swarm.runtime import _opened_pane
+
+                error.pane_id = _opened_pane(name, picked.launch_job["started_at"])
             run.runtime.reap_name(name)
             actions += engine._spawn_failed(
                 run.slug, run.store, run.ledger, run.runtime, run.rows, engine.Failed(agent, task, error), run.now_ms

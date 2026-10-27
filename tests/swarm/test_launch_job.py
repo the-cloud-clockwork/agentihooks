@@ -214,6 +214,9 @@ def test_completed_job_records_the_existing_placed_fields(store, tmp_path, monke
 )
 def test_failed_and_expired_jobs_use_spawn_failure_accounting(store, tmp_path, result, now, monkeypatch):
     monkeypatch.setattr(launch_job, "spawn", lambda job: None)
+    from scripts.swarm import runtime as runtime_module
+
+    monkeypatch.setattr(runtime_module, "_opened_pane", lambda name, at: "w:p3")
     ledger, runtime = tasks(("t1", "eng")), DetachedRuntime(tmp_path)
     tick("sw", store, ledger, runtime, now_ms=1000)
     name = runtime.jobs[0]
@@ -229,10 +232,10 @@ def test_failed_and_expired_jobs_use_spawn_failure_accounting(store, tmp_path, r
 
     previous = {"task": "t1", "state": "started", "at": 0}
     assert claims.launch_failure(1, [previous, *store.launches("sw")], "t1") != "none"
-    if result:
-        from scripts.swarm import failed_panes
+    from scripts.swarm import failed_panes
 
-        assert "w:p2" in store.redis.hgetall(store.key("sw", failed_panes.HELD))
+    assert ("w:p2" if result else "w:p3") in store.redis.hgetall(store.key("sw", failed_panes.HELD))
+    assert name in runtime.reaped
     assert not store.redis.hgetall(store.key("sw", "launch-jobs"))
 
 
