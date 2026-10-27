@@ -451,17 +451,18 @@ printf '%s\\n' "$*" >> "$PULL_LOG"
 def test_kind_scripts_create_the_cluster_from_the_retried_node_pull(script, pull):
     text = (ROOT / "deploy/helm/agentihooks-swarm/ci" / script).read_text()
     creates = [line for line in text.splitlines() if "kind create cluster" in line]
-    assert creates and all('--image "$node"' in line and pull in line for line in creates)
+    assert creates and all(f"{pull} && kind create cluster" in line for line in creates)
+    assert all('--image "$node"' in line for line in creates)
 
 
 def test_startup_stages_creates_the_cluster_from_the_retried_node_pull():
     workflow = yaml.safe_load((ROOT / ".github/workflows/startup-stages.yml").read_text())
     runs = [step.get("run", "") for step in workflow["jobs"]["measure"]["steps"]]
     create = next(run for run in runs if "kind create cluster" in run)
-    pull = 'node="$(bash deploy/helm/agentihooks-swarm/ci/pull-kind-node.sh)"'
-    assert pull in create
+    pull = 'node_image="$(bash deploy/helm/agentihooks-swarm/ci/pull-kind-node.sh)"'
+    assert f"\n{pull}\n" in f"\n{create}"
     assert create.index(pull) < create.index("kind create cluster")
-    assert '--image "$node"' in create
+    assert '--image "$node_image"' in create
     assert '--image "$KIND_NODE_IMAGE"' not in create
 
 
