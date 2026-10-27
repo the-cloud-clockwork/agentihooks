@@ -4,6 +4,7 @@ import os
 
 import pytest
 
+from hooks.classifier import settings as classifier_settings
 from hooks.classifier.errors import ClassifierUnavailable
 from hooks.classifier.result import Answer, DecisionResult
 from hooks.context import documentation, documentation_session
@@ -578,4 +579,7 @@ def test_the_tick_sweep_starts_no_request_once_its_budget_is_spent(tmp_path, mon
     due_requests(tmp_path, monkeypatch, clock, 3, slow)
     documentation_session.retry()
     assert processed == ["0.json"]
-    assert documentation_session.RETRY_BUDGET_S < documentation_session.RETRY_OPTIONS["timeout_sec"]
+    slowest_request_s = classifier_settings.MAX_TIMEOUT_S + 60
+    assert (
+        documentation_session.RETRY_BUDGET_S + slowest_request_s <= documentation_session.RETRY_OPTIONS["timeout_sec"]
+    )

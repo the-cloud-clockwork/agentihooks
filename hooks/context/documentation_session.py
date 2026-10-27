@@ -37,7 +37,7 @@ NOTICE_COMMAND = "Start it here: agentihooks init-agent --profile documentation"
 NOTICE_SUBJECT_LENGTH = 160
 TASK_HASH_LENGTH = 16
 RETRY_LIMIT = 3
-RETRY_BUDGET_S = 150
+RETRY_BUDGET_S = 90
 LOCK_SUFFIX = ".lock"
 WRITE_SUFFIX = ".next"
 
