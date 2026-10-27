@@ -99,10 +99,11 @@ def main(argv: list[str] | None = None) -> int:
     written = sum(harvest(number, args.folder) for number in pulls)
     before = size(args.folder)
     kept = prune(args.folder)
+    after = size(args.folder)
     (args.folder / SEEDED).write_text(f"{args.head}\n")
     print(
         f"Mutation stats seed: {written} files from pull requests {pulls}; kept {kept} records; "
-        f"{before} bytes before the prune, {size(args.folder)} after"
+        f"{before} bytes before the prune, {after} after"
     )
     return 0
 

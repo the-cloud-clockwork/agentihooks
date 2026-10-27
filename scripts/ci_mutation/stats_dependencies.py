@@ -151,3 +151,4 @@ class StoredStats:
         }
         (self.folder / f"{key}.json").write_text(json.dumps(record))
         self.pointer(path).write_text(key)
+        (self.folder / CONTEXT).write_text(record["context"])

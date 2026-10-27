@@ -318,7 +318,7 @@ def collect_cached_stats(
     options: list[str],
     collect: Callable[[list[str]], list[dict]],
 ) -> list[dict]:
-    from scripts.ci_mutation.stats_dependencies import CONTEXT, StoredStats
+    from scripts.ci_mutation.stats_dependencies import StoredStats
 
     tracked = subprocess.check_output(TRACKED, cwd=root, text=True).split("\0")
     sources = {
@@ -342,7 +342,6 @@ def collect_cached_stats(
     inputs = StatsInputs(root, modules, resources, changes)
     stored = StoredStats(root, folder, context, changes)
     stored.prune()
-    (folder / CONTEXT).write_text(stored.context_digest())
     compatible = {
         path: record
         for path in files
