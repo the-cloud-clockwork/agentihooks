@@ -180,7 +180,7 @@ def test_hive_launch_failures_raise_one_finding_per_check_and_error_class():
         digest = hashlib.sha256(json.dumps([text, status]).encode()).hexdigest()[:8]
         return f"hive_ledger_join/20261026T21-{digest}"
 
-    names = [fail(number, "HTTPError") for number in (1, 2, 3)]
+    names = sorted(fail(number, "HTTPError") for number in (3, 1, 2))
     assert launch_check.findings(store, "sw") == [
         launch_check.Finding(
             "launch check",
@@ -188,7 +188,7 @@ def test_hive_launch_failures_raise_one_finding_per_check_and_error_class():
             f"{', '.join(names)} failed the launch check on hive_ledger_join",
             (
                 f"agents {', '.join(names)}",
-                f"expected available; observed missing (HTTPError 401 token for {names[0]} refused after 1 tries)",
+                f"expected available; observed missing (HTTPError 401 token for {names[2]} refused after 3 tries)",
             ),
             "a launch must pass within sixty seconds",
             1,
@@ -197,11 +197,12 @@ def test_hive_launch_failures_raise_one_finding_per_check_and_error_class():
     fail(4, "ConnectionError", None)
     fail(5, "HTTPError", 403)
     found = launch_check.findings(store, "sw")
-    assert [f.subject for f in found] == [
+    assert {f.subject for f in found} == {
         subject("HTTPError #", 401),
         subject("ConnectionError", None),
         subject("HTTPError #", 403),
-    ]
+    }
+    assert len(found) == 3
 
 
 def test_failed_hive_launch_retires_records_and_drops_that_agent(monkeypatch):

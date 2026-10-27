@@ -269,9 +269,12 @@ def findings(store: RedisStore, slug: str) -> list[Finding]:
             if field in REPORT_ONLY:
                 continue
             observed = _observed(values)
-            error = [re.sub(r"\d+", "#", observed.replace(found["agent"], "")), values.get("reason", {}).get("status")]
+            error_key = [
+                re.sub(r"\d+", "#", observed.replace(found["agent"], "")),
+                values.get("reason", {}).get("status"),
+            ]
             hour = time.strftime("%Y%m%dT%H", time.gmtime(found["at"] // 1000))
-            subject = f"{field}/{hour}-{hashlib.sha256(json.dumps(error).encode()).hexdigest()[:8]}"
+            subject = f"{field}/{hour}-{hashlib.sha256(json.dumps(error_key).encode()).hexdigest()[:8]}"
             group = groups.setdefault(subject, {"field": field, "observed": observed, "agents": []})
             group["agents"].append(found["agent"])
     return [
