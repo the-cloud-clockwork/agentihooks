@@ -929,7 +929,7 @@ The Swarm panel's controls (`start`, `pause`, `stop`, `stop --now`, `close`, `re
 | `agentihooks swarm <id> set talk-gate=deny\|log only\|skip` | Operator or master only. The ledger server counts each eng and ci agent's talk writes (comments, chat lines, follow-ups) since its last outcome: a pushed commit, an opened pull request, resolved checks, a task state, pull request or proof change. Past 10, `deny` refuses the write and `log only` (the default) logs the would-be deny in the gate log. Talk owed to the operator and a typed `lift the talk gate` pass. The ledger hook's nudge and Stop gate also restart on an outcome and skip tool calls made inside sub-agents. |
 | `agentihooks swarm <id> set intent-gate=deny\|log only\|skip` | Operator or master only. `swarm pr` writes the parent intent (project overview, phase, task) into the pull request body and arms the task's intent check. On the next tick the classifier reads that intent with the pull request title, body, changed files, the task proof and the task's plan slice, resolved the way `agentihooks plan read` resolves it (phase range, plan artifact or Swarm v2 package, without the shared sections), and judges whether the phase can use the change as delivered and whether it weakens anything the phase builds; under 0.3, or a weakening at 0.5 or more, the verdict is fail, with reasons. It also asks phase fit on its own, so a fail names its criterion: a change that fits the phase but is not usable yet fails on delivery, never as a phase mismatch. Each verdict records its stage, criterion, model and definition digest. `python -m scripts.gates.intent_calibration` measures the check on its corpus of retained and control inputs. `deny` returns a failed task to its agent (claimed again, a ledger comment and an inbox item); `log only` (the default) logs the fail in the gate log; `skip` skips the check. The `intent` gate (`python -m scripts.gates intent`) refuses `gh pr merge` and `swarm done` while the verdict is fail, or pending for under two minutes; a check still pending after two minutes passes unchecked and is counted. A pass names the plan lines it judged. A task whose plan passed intent at `swarm trace-plan` opens its pull request on that pass, with no pending hold, and the tick still judges the pull request and replaces the plan verdict. Running `swarm pr` again starts a new check. A split task's halves are judged and merged one by one; see [Intent grading of each half](#intent-grading-of-each-half). |
 | `agentihooks swarm <id> master move --to HIVE` | Orders the live master to hand off so its successor starts on that hive. It refuses the hive the master already runs on, a hive that is not live, and a hive hive placement would not give the master. One durable inbox order reaches the master seat; after the master's Handoff v2 the tick starts the successor through hive launch on the named hive. A master that leaves without handing off gets no pin. Walkthrough: [Master failover and master move](hives.md#master-failover-and-master-move). |
-| `agentihooks swarm <id> set local-max-agents=N` | With hive placement on, an eng, ci, plan or dispatch spawn no hive takes runs in the local machine's herdr panes while the machine runs fewer than N worker agents across every swarm. Default 8. See [Hive placement for one swarm on a local machine](hives.md#hive-placement-for-one-swarm-on-a-local-machine). A spawn held at this cap does not raise a spawn stall finding; see [The local agent cap hold](#the-local-agent-cap-hold). |
+| `agentihooks swarm <id> set local-max-agents=N` | With hive placement on, an eng, ci, plan or dispatch spawn no hive takes runs in the local machine's herdr panes while the machine runs fewer than N worker agents across every swarm. Default 8. See [Hive placement for one swarm on a local machine](hives.md#hive-placement-for-one-swarm-on-a-local-machine). While this cap holds the lane, the spawn stall finding stays clear; see [The local agent cap hold](#the-local-agent-cap-hold). |
 | `agentihooks swarm <id> set master-move-grace=SECONDS` | How long the hive running the master may stay without a heartbeat before the tick moves the master. Default 300. Past it, and while the runtime does not see the master live, the tick records a recovery handoff that names its unknowns, bumps the master seat generation, fences the old execution on that hive and starts the successor on a live hive chosen by hive placement, or unpinned when no hive qualifies. A hive that never beat, or whose record is gone, never moves its master. A returning hive terminates each fenced execution by its recorded process group before it writes its heartbeat, and takes no launch orders while one still runs. See [Automatic failover](hives.md#automatic-failover). |
 | `agentihooks swarm <id> set snapshot-minutes=N` | While the swarm runs, a background job the tick starts writes an automatic snapshot every N minutes to `~/.agentihooks/swarm/<id>/snapshots/auto-<ms>.json` and removes the oldest past ten. Default 30; a swarm without the setting takes `AGENTIHOOKS_SWARM_SNAPSHOT_MINUTES`; 0 turns automatic snapshots off. `snapshot.json` from `snapshot` and `stop` is separate and never pruned. |
 | `agentihooks swarm <id> shutdown` | Before a planned workstation shutdown: takes `snapshot.json`, writes `reboot.json` beside it naming every local agent of this machine with its seat, task, conversation, profile, overlays, harness, model, effort and account, and asks each master to save its Handoff v2 to `master-shutdown-handoff.md` without stopping. The first tick of the next boot (a new kernel boot id for this swarm and hive) starts the herdr server and reopens each agent named by the newest of `reboot.json` and the automatic snapshots in its own conversation and seat, on its account when the last quota reading shows room (a reading past the freshness window counts until one of its windows resets), else on the account the router picks. An agent whose own conversation does not reopen awaits a resume or fresh decision (`restore-decision`). Hive agents are never relaunched. An unplanned power loss recovers the same way from the newest automatic snapshot. |
@@ -5115,19 +5115,23 @@ A pass treats the lane as held by the cap, and clears the stall clock, when both
 
 1. The latest local cap refusal was recorded at or after the previous pass's observation, so the cap refused a spawn
    during this pass.
-2. That machine's local slots still read at or above the recorded maximum. The count is the worker agents of every
-   swarm on the machine plus local slot claims made in the last five minutes whose agent has not yet appeared.
+2. That machine's local slots still read at or above the recorded maximum. The count is the union of the local worker
+   agents recorded by every swarm for this machine's hive (not masters, and not those still starting or ended) and
+   every named Claude or Codex session running on the machine that is not a master, plus local slot claims made in
+   the last five minutes whose agent has not yet appeared.
 
 With one local slot free the hold does not apply, and the clock keeps running; ten minutes of that still raise the
 finding. A refusal from an earlier pass, or one recorded for another machine whose slots have since freed, holds
-nothing. The fix shipped in [pull request 6322](https://github.com/the-cloud-clockwork/agentihooks/pull/6322). Before
+nothing. The swarm keeps only its latest local cap refusal, so each new refusal replaces the one before. On a swarm's
+first observation there is no previous pass, and any stored refusal counts. The fix shipped in [pull request 6322](https://github.com/the-cloud-clockwork/agentihooks/pull/6322). Before
 it, a full cap shared by two swarms on the operator's machine raised spawn stall on each of them, and masters closed
 the finding by hand.
 
-Measured with the same inbox census over two equal 24 hour windows: 14 spawn stall items on `rig-grade-swarm` and 10
-on `rig-grade-swarm-doctor` in the day ending 12:30 UTC on 23 October, against 0 and 0 in the day from 13:35:49 UTC
-on 23 October, when the merged fix loaded. The cap stayed in play through the after window, with 116 local cap
-observations in one hour of it.
+The Doctor measured the fix by counting spawn stall items in each master's inbox, with the same census script over two
+equal 24 hour windows: 14 items on `rig-grade-swarm` and 10 on `rig-grade-swarm-doctor` in the day ending about 12:30
+UTC on 23 October, against 0 and 0 in the day from 13:35:49 UTC on 23 October, when the ledger server code stamp
+showed the merged fix loaded. Run with the earlier end time, the same script still read 14 and 10. The cap stayed in
+play through the after window, with 116 local cap observations between 09:34 and 10:34 UTC on 24 October.
 
 #### The finding and its delivery
 
@@ -5152,10 +5156,11 @@ agentihooks hive list
 ```
 
 1. Read the `Admission refusals` evidence line. A `local cap on <machine> (8 of 8 agents)` entry with a raised finding
-   means the cap refused at some point in the stall but did not hold at the last pass: a slot was free then, or the
-   refusal predates that pass.
-2. Count the worker agents on the named machine across every swarm, from each swarm's `status`. A count under
-   `local-max-agents` with no launch means the spawn waited on something else; the other refusal reasons name it.
+   means the cap refused at some point in the stall but did not hold at the last pass: a slot was free at that pass,
+   or the refusal was recorded before it.
+2. Count what the cap counts on the named machine: the local worker agents in each swarm's `status`, plus any other
+   named Claude or Codex session running there that is not a master. A count under `local-max-agents` with no launch
+   means the spawn waited on something else; the other refusal reasons name it.
 3. A finding with no refusal line and no failed step carries no recorded hold. Compare the lane caps, scaling mode and
    agents in `status` with the conditions above, then judge the finding with `verdict`.
 
