@@ -1231,7 +1231,7 @@ def test_mutmut_wait_skips_a_child_a_test_left_and_returns_the_forked_mutant(mon
 
     forks = [12, 0]
     exits = [(11, 0), (12, 7 << 8)]
-    real = SimpleNamespace(environ=os.environ, fork=forks.pop, wait=lambda: exits.pop(0))
+    real = SimpleNamespace(__name__="os", environ=os.environ, fork=forks.pop, wait=lambda: exits.pop(0))
     monkeypatch.setattr(selection, "os", real)
     children = selection.forked_children()
     assert children.environ is os.environ
