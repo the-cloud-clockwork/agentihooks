@@ -373,7 +373,7 @@ class HiveLaunch:
         selected = self.select(request.config, request.lane, request.task)
         if isinstance(selected, placement.Wait):
             return Outcome("spawn", Status.UNAVAILABLE, HIVE, detail=selected.reason)
-        if refused := self.queue_full(request, selected):
+        if refused := self.queue_refusal(request, selected, self.store.redis.xlen(self.orders.stream(selected.hive))):
             self._record_wait(request.lane, request.task, placement.Wait(refused))
             return Outcome("spawn", Status.UNAVAILABLE, HIVE, detail=refused)
         named = replace(
@@ -402,9 +402,8 @@ class HiveLaunch:
             local_slots.release(self.store, selected.hive, self.slug, request.name)
             raise
 
-    def queue_full(self, request: SpawnRequest, selected: Selection) -> str:
-        queued = self.store.redis.xlen(self.orders.stream(selected.hive))
-        if queued < QUEUED:
+    def queue_refusal(self, request: SpawnRequest, selected: Selection, queued: int) -> str:
+        if queued < QUEUED or selected.route_kind == placement.MASTER_LOGIN:
             return ""
         return (
             f"no hive for {request.lane} {placement.HAS_ROOM}: {selected.hive} holds {queued} queued launches, "
@@ -445,12 +444,29 @@ class HiveLaunch:
             lease.now_ms(self.store) + ttl,
             selected.hive,
         )
-        with self.store.redis.pipeline() as pipe:
-            pipe.set(prompt_ref, json.dumps(task), px=ttl)
-            pipe.hset(self.store.key(self.slug, ORDERS), request.task["id"], json.dumps(order.__dict__))
-            Orders(pipe).send(selected.hive, order)
-            pipe.execute()
+        if refused := self.publish(request, selected, task, order, ttl):
+            self.end(admitted, refused)
+            return Outcome("spawn", Status.UNAVAILABLE, HIVE, detail=refused)
         return self.answer(request, order)
+
+    def publish(self, request: SpawnRequest, selected: Selection, task: dict, order: LaunchOrder, ttl: int) -> str:
+        from redis.exceptions import WatchError
+
+        stream = self.orders.stream(selected.hive)
+        with self.store.redis.pipeline() as pipe:
+            while True:
+                try:
+                    pipe.watch(stream)
+                    if refused := self.queue_refusal(request, selected, pipe.xlen(stream)):
+                        return refused
+                    pipe.multi()
+                    pipe.set(order.prompt_ref, json.dumps(task), px=ttl)
+                    pipe.hset(self.store.key(self.slug, ORDERS), request.task["id"], json.dumps(order.__dict__))
+                    Orders(pipe).send(selected.hive, order)
+                    pipe.execute()
+                    return ""
+                except WatchError:
+                    continue
 
     def collect(self, request: SpawnRequest) -> Outcome:
         order = self.orders_for(request.task["id"])

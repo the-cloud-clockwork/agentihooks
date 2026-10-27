@@ -169,10 +169,10 @@ def test_publishes_fenced_order_after_host_admission(setup, monkeypatch):
 
 
 def test_refuses_an_order_the_hive_queue_cannot_serve_before_its_deadline(setup):
-    from scripts.hive import admission
+    from scripts.hive import admission, launch, placement_waits
     from scripts.hive.orders import Orders
     from scripts.swarm.store import AgentRecord
-    from scripts.swarm_v2.runtime.base import SpawnRequest, Status
+    from scripts.swarm_v2.runtime.base import Outcome, SpawnRequest, Status
 
     store, slug = setup.store, setup.config.slug
     name = store.next_name(slug, "eng")
@@ -184,17 +184,19 @@ def test_refuses_an_order_the_hive_queue_cannot_serve_before_its_deadline(setup)
         store.redis.xadd(stream, {"order": "{}"})
     task = {"id": "task", "seat": record.seat, "controller_epoch": setup.held.epoch}
     outcome = setup.launcher.spawn(SpawnRequest(setup.config, "eng", name, task))
-    assert outcome.status is Status.UNAVAILABLE
-    assert outcome.detail == (
+    refused = (
         "no hive for eng has room: remote holds 4 queued launches, "
         "the most its 300 second launch deadline serves at 75 seconds each"
     )
+    assert outcome == Outcome("spawn", Status.UNAVAILABLE, launch.HIVE, detail=refused)
+    row = placement_waits.read(store, slug)["task"]
+    assert (row["lane"], row["reason"]) == ("eng", refused)
     assert store.redis.xlen(stream) == 4
     assert setup.launcher.orders_for("task") is None
     assert admission.reserve(store.redis, "remote", f"{slug}/{name}", 1) == (True, 0)
 
 
-def test_queues_an_order_the_hive_serves_before_its_deadline(setup):
+def test_a_queue_below_the_deadline_budget_is_not_refused(setup):
     from scripts.hive.orders import Orders
     from scripts.swarm_v2.runtime.base import SpawnRequest
 
@@ -203,7 +205,56 @@ def test_queues_an_order_the_hive_serves_before_its_deadline(setup):
         setup.store.redis.xadd(stream, {"order": "{}"})
     selected = setup.launcher.select(setup.config, "eng", {"id": "task"})
     request = SpawnRequest(setup.config, "eng", "eng-name", {"id": "task"})
-    assert setup.launcher.queue_full(request, selected) == ""
+    assert setup.launcher.queue_refusal(request, selected) == ""
+
+
+def test_a_master_login_order_is_not_held_to_the_launch_queue_budget(setup):
+    from scripts.hive import placement
+    from scripts.swarm_v2.runtime.base import SpawnRequest
+
+    selected = replace(setup.launcher.select(setup.config, "eng", {"id": "task"}), route_kind=placement.MASTER_LOGIN)
+    request = SpawnRequest(setup.config, "master", "master-name", {"id": "task"})
+    assert setup.launcher.queue_refusal(request, selected, 4) == ""
+
+
+def test_an_order_racing_another_controller_into_a_full_queue_is_refused(setup):
+    from scripts.hive import launch
+    from scripts.hive.orders import Orders
+    from scripts.swarm.store import AgentRecord
+    from scripts.swarm_v2.runtime.base import Outcome, SpawnRequest, Status
+
+    store, slug = setup.store, setup.config.slug
+    name = store.next_name(slug, "eng")
+    record = AgentRecord(name, "eng", "task", seat=f"eng-1@{slug}", state="starting")
+    store.put_agent(slug, record)
+    store.seats.occupy(record.seat, name, 0)
+    stream = Orders(store.redis).stream("remote")
+    for _ in range(3):
+        store.redis.xadd(stream, {"order": "{}"})
+    checked = setup.launcher.queue_refusal
+    calls = []
+
+    def racing(request, selected, queued):
+        calls.append(queued)
+        if len(calls) == 2:
+            store.redis.xadd(stream, {"order": "{}"})
+        return checked(request, selected, queued)
+
+    setup.launcher.queue_refusal = racing
+    task = {"id": "task", "seat": record.seat, "controller_epoch": setup.held.epoch}
+    outcome = setup.launcher.spawn(SpawnRequest(setup.config, "eng", name, task))
+    assert outcome == Outcome(
+        "spawn",
+        Status.UNAVAILABLE,
+        launch.HIVE,
+        detail="no hive for eng has room: remote holds 4 queued launches, "
+        "the most its 300 second launch deadline serves at 75 seconds each",
+    )
+    assert calls == [3, 3, 4]
+    assert store.redis.xlen(stream) == 4
+    assert setup.launcher.orders_for("task") is None
+    endings = [json.loads(raw)["reason"] for raw in store.redis.hvals(store.key(slug, launch.ENDINGS))]
+    assert endings == [outcome.detail]
 
 
 def test_local_mode_keeps_the_original_spawn_call(setup):
