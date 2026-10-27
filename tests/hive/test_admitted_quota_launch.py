@@ -1,4 +1,5 @@
 import json
+import os
 from types import SimpleNamespace
 from unittest.mock import Mock
 
@@ -30,7 +31,13 @@ def hive(monkeypatch, tmp_path):
     held = lease.acquire(store, "fixture", "controller")
     rows = [_account("old", state="DRAIN", cap=0), _account("admitted"), _account("spare")]
     herdr = runtime.HerdrRuntime(home=tmp_path)
-    herdr.quota_accounts = lambda environ, now, *, refresh: list(rows)
+    reads = []
+
+    def quota_accounts(environ, now, *, refresh):
+        reads.append((environ, now, refresh))
+        return list(rows)
+
+    herdr.quota_accounts = quota_accounts
     launched = []
 
     def launch(config, lane, task, name, argv, **kwargs):
@@ -56,6 +63,8 @@ def hive(monkeypatch, tmp_path):
         store=store,
         held=held,
         rows=rows,
+        reads=reads,
+        herdr=herdr,
         launched=launched,
         adapter=adapter,
         orders=Orders(redis),
@@ -123,6 +132,11 @@ def test_an_admitted_quota_successor_launches_on_exactly_its_admitted_account(hi
     assert [(ack.status, ack.failure) for ack in acks] == [("live", "")] * len(orders)
     assert hive.launched == ["admitted"] * len(orders)
     hive.adapter.terminate.assert_not_called()
+    assert len(hive.reads) == reasons.count("quota")
+    assert all(
+        environ == dict(os.environ) and isinstance(now, float) and refresh is False
+        for environ, now, refresh in hive.reads
+    )
 
 
 @pytest.mark.parametrize(
@@ -142,3 +156,19 @@ def test_an_unusable_admitted_account_is_refused_for_readmission_without_a_launc
     assert "admitted" in ack.failure
     assert hive.launched == []
     hive.adapter.terminate.assert_not_called()
+
+
+@pytest.mark.parametrize("lane, routed", [("master", True), ("eng", False)])
+def test_an_admitted_master_launch_alone_counts_the_seat_reserved_for_masters(hive, lane, routed):
+    from dataclasses import replace
+
+    from scripts.swarm.runtime import SpawnError
+
+    hive.rows[1] = replace(_account("admitted", sessions=3), reserved="master", unreserved_cap=4)
+    saved = {"harness": "claude", "account": "admitted"}
+    if routed:
+        account, row = hive.herdr._route_account("claude", saved, "task", lane, True)
+        assert (account, row.name, row.cap, row.reserved) == (None, "admitted", 4, "")
+    else:
+        with pytest.raises(SpawnError, match="admitted account admitted has no claude seat"):
+            hive.herdr._route_account("claude", saved, "task", lane, True)
