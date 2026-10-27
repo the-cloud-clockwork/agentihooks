@@ -64,6 +64,30 @@ def test_targets_read_the_run_the_job_and_the_repo_of_every_rerun():
     assert list(targets("gh run view 1; gh pr checks 2; echo gh run rerun")) == []
 
 
+def test_targets_read_rest_rerun_requests_sent_through_gh_api():
+    assert list(
+        targets(
+            "gh api -X POST repos/o/r/actions/runs/11/rerun-failed-jobs && "
+            "gh api --method POST /repos/{owner}/{repo}/actions/runs/12/rerun; "
+            "/usr/bin/gh api --method=POST repos/o/r/actions/jobs/22/rerun"
+        )
+    ) == [Target(run="11", repo="o/r"), Target(run="12", repo="{owner}/{repo}"), Target(job="22", repo="o/r")]
+    assert list(targets("gh api repos/o/r/actions/runs/11/jobs; gh api repos/o/r/actions/runs/11")) == []
+
+
+def test_rest_reruns_spend_the_same_head_budget_and_are_refused_at_the_cap(tmp_path):
+    gate = gate_over({"1": FAILED, "2": FAILED, "3": FAILED})
+    commands = [
+        "gh run rerun 1 --failed",
+        "gh api -X POST repos/o/r/actions/runs/2/rerun-failed-jobs",
+        "gh api -X POST repos/o/r/actions/runs/3/rerun",
+    ]
+    decisions = [gate.decide(bash(command), ME, state(tmp_path)) for command in commands]
+    assert [d.allowed for d in decisions] == [True, True, False]
+    assert decisions[2].reason == refusal("demo", HEAD, 2)
+    assert Budget("demo", "reruns", tmp_path).spent(HEAD, "reruns") == 2
+
+
 def test_a_third_rerun_on_one_head_is_refused_and_the_second_allowed(tmp_path):
     gate = gate_over({"1": FAILED, "2": FAILED, "3": FAILED})
     decisions = [gate.decide(bash(f"gh run rerun {run} --failed"), ME, state(tmp_path)) for run in "123"]
