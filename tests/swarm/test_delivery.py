@@ -194,7 +194,8 @@ class EntryLedger(PageLedger):
 
 
 def test_a_refused_answer_on_an_entry_keeps_the_operator_item_open_for_a_resend(store):
-    store.put_agent("sw", AgentRecord("sw-master-1", "master", "master", pane_id="pm"))
+    store.put_agent("sw", AgentRecord("sw-master-1", "master", "master", pane_id="pm", seat="master@sw"))
+    store.seats.occupy("master@sw", "sw-master-1", 1)
     box = InboxStore(store.redis)
     box.about("op-1", "phases/p1")
     asked = box.send("operator", "sw-master-1", "is the phase done", item_id="op-1")
@@ -218,6 +219,7 @@ def test_a_refused_answer_on_an_entry_keeps_the_operator_item_open_for_a_resend(
 
 
 def test_a_refused_message_without_an_entry_reopens_nothing(store):
+    store.seats.occupy("master@sw", "sw-master-1", 1)
     box = InboxStore(store.redis)
     asked = box.send("operator", "sw-master-1", "how is it going")
     answer = box.reply(asked.id, "sw-master-1", "done at 18:45")
@@ -228,6 +230,7 @@ def test_a_refused_message_without_an_entry_reopens_nothing(store):
 def test_a_contended_reopen_leaves_the_answer_pending_until_a_later_pass_reopens_the_item(store, monkeypatch):
     from scripts.inbox.store import Contended
 
+    store.seats.occupy("master@sw", "sw-master-1", 1)
     box = InboxStore(store.redis)
     box.about("op-1", "phases/p1")
     asked = box.send("operator", "sw-master-1", "is the phase done", item_id="op-1")

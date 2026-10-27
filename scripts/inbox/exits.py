@@ -149,7 +149,7 @@ def notice_address(inbox: "InboxStore", sender: str, receiver: str) -> str:
 
     store = RedisStore(inbox.redis)
     if sender == OPERATOR:
-        return master_of(inbox.names.resolve(receiver), store.names) or sender
+        return master_of(inbox.names.resolve(receiver), store.names) or receiver
     master = master_of(sender, store.names)
     if not master or is_seat(sender):
         return sender

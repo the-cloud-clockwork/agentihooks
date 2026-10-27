@@ -646,14 +646,10 @@ class InboxStore:
     def front_door_of(self, sender: str) -> tuple[str, bool]:
         """The front door master seat of sender's swarm, '' outside a swarm, and whether sender holds it: only its
         holder writes to the operator."""
-        from scripts.swarm.naming import lane_of
-        from scripts.swarm.store import MASTER
-
         sender = self.names.resolve(sender)
         door = master_of(sender, self.names)
         held = sender if is_seat(sender) else self.seats.seat_of(sender)
-        unseated = not held and lane_of(sender) == MASTER
-        return door, bool(door) and (held == door or (unseated and self.seats.occupant(door).occupant in ("", sender)))
+        return door, bool(door) and held == door
 
     def _refer(self, item: "Item", replier: str, door: str, text: str, fyi: bool, answer_id: str) -> "Item":
         """Only the front door answers the operator: another agent's answer and his item go to it."""
