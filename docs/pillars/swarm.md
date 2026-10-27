@@ -3216,6 +3216,15 @@ began, and the agent. Its number is the minutes waited rounded down to fifteen m
 returns only when the wait grows by another fifteen minutes. The Doctor never types into the master pane; the
 operator answers the prompt.
 
+### Doctor missing headroom detector
+
+The tick admits a launch onto a worker hive only on that hive's fresh headroom reading, so a live hive whose reading
+lapsed refuses every launch with `missing telemetry: no fresh headroom reading` and the Doctor otherwise sees it only
+as a failed spawn. The `headroom` detector reads every registered hive at the pass time and raises
+`missing-headroom/<hive id>` for each live hive, other than the interface hive, with no headroom reading inside its
+expiry. Its evidence names the hive, its last heartbeat and its version; its number is 1. The workstation measures its
+own room at each launch, so the interface hive is left out.
+
 ### Doctor handoff detectors
 
 The Doctor's handoff detectors (`scripts.doctor.handoffs`) run with the other detectors on every Doctor detection
@@ -4807,7 +4816,7 @@ A detection pass reads:
 - **The watched tasks, once.** The CI detector and the trace detector share one read of the watched ledger's tasks.
 - **Every detector side by side.** Each detector runs in its own thread and is still timed as its own
   `doctor.<name>` step: `runtime storage`, `scheduled tick`, `health`, `inbox`, `handoff`, `spawn`,
-  `master launch`, `startup`, `context overrun`, `master prompt`, `ci`, `dev workflow`,
+  `master launch`, `startup`, `headroom`, `context overrun`, `master prompt`, `ci`, `dev workflow`,
   [`feature`](../reference/feature-live-checks.md) and, with telemetry on, `trace`. A detector that raises is reported as `the <name> detector failed: <error type>: <message>` while the
   others still report.
 - **Pull requests side by side.** The CI detector reads each open pull request of the watched tasks in a thread pool.
