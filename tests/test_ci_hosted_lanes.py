@@ -41,7 +41,6 @@ LANE_USERS = {
     "swarm-node-image.yml",
     "hive-worker.yml",
     "lost-runner.yml",
-    "chart-release.yml",
     *DIRECT,
 }
 LEGS = {"mutation-preflight.yml:stats": "stats", "mutation-preflight.yml:mutation-shard": "shard"}
@@ -197,6 +196,8 @@ def test_a_run_on_a_lane_queues_and_is_never_cancelled():
                 seen.add(where)
                 assert resolved["queue"] == "max", (where, github)
                 assert not resolved["cancel-in-progress"], (where, github)
+            elif where == "chart-release.yml":
+                assert resolved == {"group": "chart-release", "queue": "max", "cancel-in-progress": False}
             else:
                 assert resolved["queue"] in (None, "single"), (where, github)
     assert seen == LANE_USERS
