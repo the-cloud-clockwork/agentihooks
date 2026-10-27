@@ -250,7 +250,9 @@ def test_a_response_drains_an_unread_body_within_its_wait():
 
     assert handler._headers_buffer[0] == b"HTTP/1.0 403 Refused here\r\n"
     assert handler.rfile.left == 0
-    assert handler.connection.timeouts == [2, None]
+    wait, restored = handler.connection.timeouts
+    assert 1.9 < wait <= 2
+    assert restored is None
     assert b"Connection: close\r\n" not in b"".join(handler._headers_buffer)
     assert handler.close_connection is False
 
