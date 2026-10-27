@@ -170,6 +170,47 @@ def test_tests_workflow_cache_restores_bound_download_timeout():
         assert step.get("env", {}).get("SEGMENT_DOWNLOAD_TIMEOUT_MINS") == "1", step.get("name", step["with"]["path"])
 
 
+def test_every_delivery_upload_uses_the_bounded_retry_action():
+    action = yaml.safe_load((_ROOT / ".github/actions/retry-upload/action.yml").read_text())
+    default = int(action["inputs"]["attempt-seconds"]["default"])
+    assert 0 < default <= 120
+    pending = []
+    for path in (_ROOT / ".github/workflows").glob("*.y*ml"):
+        workflow = yaml.safe_load(path.read_text())
+        triggers = workflow.get("on", workflow.get(True, {}))
+        push = triggers.get("push") or {}
+        dev_push = (
+            "push" in triggers
+            and any(Path("dev").match(pattern) for pattern in push.get("branches", ["dev"]))
+            and not any(Path("dev").match(pattern) for pattern in push.get("branches-ignore", []))
+        )
+        if any(event in triggers for event in ("pull_request", "pull_request_target", "merge_group")) or dev_push:
+            pending.append(path)
+    seen = set()
+    plain = []
+    uploads = []
+    while pending:
+        path = pending.pop()
+        if path in seen:
+            continue
+        seen.add(path)
+        workflow = yaml.safe_load(path.read_text())
+        for name, job in workflow["jobs"].items():
+            uses = job.get("uses", "")
+            if uses.startswith("./.github/workflows/"):
+                pending.append(_ROOT / uses)
+            for step in job.get("steps", []):
+                uses = step.get("uses", "")
+                if uses.lower().startswith("actions/upload-artifact@"):
+                    plain.append((path.name, name, step.get("name")))
+                if uses.endswith("/.github/actions/retry-upload"):
+                    uploads.append(step)
+    assert not plain, plain
+    assert uploads
+    for step in uploads:
+        assert 0 < int(step.get("with", {}).get("attempt-seconds", default)) <= 120
+
+
 def test_nats_server_download_retries_fit_inside_every_step_timeout():
     action = yaml.safe_load((_ROOT / ".github/actions/nats-server/action.yml").read_text())
     lines = [line for step in action["runs"]["steps"] for line in step.get("run", "").splitlines()]
@@ -1803,7 +1844,7 @@ def test_mutation_job_runs_independently_and_keeps_its_evidence():
         == 'python -m scripts.ci_mutation --bases "$BASES" --budget 1080 --shard "$SHARD" --shards "$SHARDS"'
         + " --stats .mutation-stats"
     )
-    artifact = next(step for step in steps if step.get("uses", "").startswith("actions/upload-artifact"))
+    artifact = next(step for step in steps if step.get("name") == "Upload complete mutation evidence")
     assert artifact["if"] == "always() && needs.mutation-plan.outputs.forwarded != 'true'"
     assert artifact["with"]["include-hidden-files"] is True
     assert artifact["with"]["name"] == "mutation-report-${{ matrix.shard }}"
@@ -1938,7 +1979,7 @@ def test_mutation_shards_reuse_stats_collected_once_in_planned_parts():
     evidence = stats_steps[len(setup) + 2]
     assert evidence["if"] == "failure()"
     assert evidence["with"]["name"] == "mutation-evidence-stats-${{ matrix.part }}"
-    assert evidence["with"]["overwrite"] is True
+    assert evidence["uses"] == "./.workflow-revision/.github/actions/retry-upload"
     names = [step.get("name") for step in mutation["steps"]]
     download = mutation["steps"][names.index("Download the shared mutation stats")]
     assert names.index("Download the shared mutation stats") < names.index("Mutate changed Python files")
@@ -2207,8 +2248,16 @@ def test_jobs_on_the_pull_request_head_run_local_actions_from_the_workflow_revis
         for name, job in jobs.items()
         if name.startswith("mutation") and any(s.get("with", {}).get("ref") == head for s in job.get("steps", []))
     }
-    assert {"mutation-stats", "mutation"} <= set(local)
-    assert all(not steps for name, steps in local.items() if name not in {"mutation-stats", "mutation"})
+    assert {"mutation-plan", "mutation-stats", "mutation"} == set(local)
+    plan = jobs["mutation-plan"]["steps"]
+    take = next(step for step in plan if step.get("name") == "Take the upload action from the workflow revision")
+    assert take["run"].splitlines() == [
+        'git fetch --no-tags origin "$GITHUB_SHA"',
+        "mkdir -p .workflow-revision",
+        'git archive "$GITHUB_SHA" .github/actions/retry-upload | tar -x -C .workflow-revision',
+    ]
+    assert {step["uses"] for step in local["mutation-plan"]} == {"./.workflow-revision/.github/actions/retry-upload"}
+    assert all(plan.index(take) < plan.index(step) for step in local["mutation-plan"])
     for name in ("mutation-stats", "mutation"):
         steps = jobs[name]["steps"]
         names = [step.get("name") for step in steps]
@@ -2222,7 +2271,8 @@ def test_jobs_on_the_pull_request_head_run_local_actions_from_the_workflow_revis
         assert {step["uses"] for step in local[name]} == {
             "./.workflow-revision/.github/actions/nats-server",
             "./.workflow-revision/.github/actions/browser-cache",
-        } | ({"./.workflow-revision/.github/actions/retry-upload"} if name == "mutation-stats" else set())
+            "./.workflow-revision/.github/actions/retry-upload",
+        }
         assert all(steps.index(take) < steps.index(step) for step in local[name])
         assert all("hashFiles" not in step.get("if", "") for step in local[name])
 

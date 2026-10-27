@@ -1360,7 +1360,7 @@ def _not_launched(slug, store, ledger, runtime, rows, failed, now_ms):
     if _acknowledging_error(failed.error):
         store.record_launch(slug, record, ACKNOWLEDGING)
         return [f"{record.name} waits for the hive acknowledgement of {task['id']}"]
-    if refused := _failed_room_wait(runtime, record.lane, task):
+    if refused := _failed_room_wait(runtime, record.lane, task) or _refused_reservation(task, failed.error):
         return [_room_refused(slug, store, ledger, runtime, rows, failed, refused)]
     return _spawn_failed(slug, store, ledger, runtime, rows, failed, now_ms)
 
@@ -1370,6 +1370,10 @@ def _failed_room_wait(runtime, lane, task):
         return _room_wait(runtime, lane, task)
     except SpawnError:
         return False
+
+
+def _refused_reservation(task, exc):
+    return f"task {task['id']} waits: {exc}" if seat_spawn.room_refused(exc) else ""
 
 
 def _room_refused(slug, store, ledger, runtime, rows, failed, refused):
@@ -1727,8 +1731,12 @@ def _master(slug, config, store, runtime, now_ms, past_host=False):
         record, placed = seat_spawn.place(slug, config, store, runtime, MASTER, now_ms, prepare)
     except seat_spawn.SeatFailed as spawn_failure:
         exc, record = spawn_failure.error, spawn_failure.record
-        transfers.failed(store, slug, record)
         store.drop_agent(slug, record.name)
+        if seat_spawn.room_refused(exc):
+            transfers.detach(store, slug, record)
+            master_start.withdraw(store, slug, pending)
+            return [f"the master waits: {exc}"]
+        transfers.failed(store, slug, record)
         affinity.failed(store, slug, str(exc))
         return master_start.failed(store, slug, f"master spawn failed: {exc}", now_ms)
     affinity.placed(store, slug, placed.harness)

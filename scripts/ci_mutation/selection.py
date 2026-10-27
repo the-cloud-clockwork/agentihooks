@@ -456,6 +456,34 @@ def run_unit(
     return run_tests(runner, mutant_name=mutant_name, tests=memory.prepare(mutant_name, chosen))
 
 
+def forked_children():
+    # Defined inside a function: a mutated copy trampolines top level methods,
+    # and mutmut reads os.environ in its forced fail.
+    class ForkedChildren(ModuleType):
+        # mutmut reaps with os.wait() and raises KeyError on a child a test left behind in its own process.
+        def __init__(self):
+            super().__init__(os.__name__)
+            self.pids = set()
+
+        def __getattr__(self, name):
+            return getattr(os, name)
+
+        def fork(self):
+            pid = os.fork()
+            if pid:
+                self.pids.add(pid)
+            return pid
+
+        def wait(self):
+            while True:
+                pid, status = os.wait()
+                if pid in self.pids:
+                    self.pids.discard(pid)
+                    return pid, status
+
+    return ForkedChildren()
+
+
 def run_selected(selection: Path, shard: tuple[int, int], mode: str = "", *stats: str) -> None:
     from mutmut import __main__ as runner
 
@@ -536,6 +564,7 @@ def run_selected(selection: Path, shard: tuple[int, int], mode: str = "", *stats
     runner.PytestRunner.execute_pytest = memory.wrap(runner.PytestRunner.execute_pytest)
     # mutmut 3.6.0 writes one copy of a whole function per selected mutant.
     runner.write_all_mutants_to_file = write_selected
+    runner.os = forked_children()
     for name in [name for name in sys.modules if name == "scripts" or name.startswith("scripts.")]:
         sys.modules.pop(name)
     runner.cli(["run", "--max-children", str(worker_count(os.cpu_count()))])

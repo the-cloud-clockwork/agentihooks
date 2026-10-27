@@ -39,6 +39,13 @@ def begin(store: RedisStore, slug: str, name: str, task: dict, at: int) -> None:
     save(store, slug, state)
 
 
+def withdraw(store: RedisStore, slug: str, pending: dict) -> None:
+    if pending:
+        save(store, slug, pending)
+    else:
+        store.redis.delete(store.key(slug, "master-start"))
+
+
 def blocked(pending: dict, at: int) -> bool:
     if pending.get("alerted"):
         return at - pending["at"] < RETRY_MS

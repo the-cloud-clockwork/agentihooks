@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from hooks.context import account_sessions
 from scripts.hive import registry
 from scripts.swarm import host_budget
 
@@ -39,6 +40,7 @@ def measure(pending: int, now_ms: int, proc: Path = Path("/proc"), previous: dic
         "total_mb": total_mb,
         **pod,
         "pending": pending,
+        "agents": {harness: len(pids) for harness, pids in account_sessions.local_processes().items()},
         "measured_at": now_ms,
     }
 
