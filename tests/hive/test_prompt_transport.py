@@ -149,10 +149,19 @@ def test_the_hive_materializes_the_seeds_below_its_own_home(setup, homes):
 def test_the_hive_keeps_its_own_progress_on_relaunch(homes):
     with at(homes.hive):
         folder = ledger_workspace.materialize("fixture", "task", {"progress.md": "seed\n", "steering.md": "old\n"})
-        (folder / "progress.md").write_text("hive step\n", encoding="utf-8")
+        (folder / "progress.md").write_text("seed\nhive step\n", encoding="utf-8")
         ledger_workspace.materialize("fixture", "task", {"progress.md": "seed\n", "steering.md": "new\n"})
-    assert (folder / "progress.md").read_text(encoding="utf-8") == "hive step\n"
+    assert (folder / "progress.md").read_text(encoding="utf-8") == "seed\nhive step\n"
     assert (folder / "steering.md").read_text(encoding="utf-8") == "new\n"
+
+
+def test_a_hive_holding_an_older_folder_takes_the_newer_copy(homes):
+    with at(homes.hive):
+        folder = ledger_workspace.materialize("fixture", "task", {"progress.md": "old step\n", "measure.sh": "v1\n"})
+        sent = {"progress.md": "old step\nnewer step\n", "measure.sh": "v2\n"}
+        ledger_workspace.materialize("fixture", "task", sent)
+    assert (folder / "progress.md").read_text(encoding="utf-8") == "old step\nnewer step\n"
+    assert (folder / "measure.sh").read_text(encoding="utf-8") == "v2\n"
 
 
 @pytest.mark.parametrize("change", ["opening", "digest", "no opening", "no digest"])

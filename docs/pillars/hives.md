@@ -716,7 +716,8 @@ expiring after a day so a hive that died still hands its last copy over. It hold
 `progress.md` and `proof.md` and up to 32 other plain UTF-8 files directly in the folder of at most 65,536 bytes
 each, by name; steering, subfolders, symbolic links, hidden names and binary files stay behind. On each status publish the
 controller writes each task's copy, from the hive running its latest execution, into its own folder. A launch
-carries the controller's folder to the next hive, added files included, so a successor on any host reads what its
+carries the controller's folder to the next hive, added files included, and a file the hive already holds is replaced
+unless it already contains what was sent, so a successor on any host reads what its
 predecessor wrote.
 
 ### Resume and recovery prompts

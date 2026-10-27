@@ -128,21 +128,23 @@ def _files(path):
 
 
 def materialize(slug, task_id, sent):
-    """Steering follows the controller; progress and proof the hive already holds stay its own."""
+    """Steering follows the controller; a file the hive holds stays its own only while it already holds what was sent."""
     path = folder(slug, task_id)
     path.mkdir(parents=True, exist_ok=True)
     for name, text in sent.items():
-        if not PART_RE.fullmatch(name):
+        if not PART_RE.fullmatch(name) or (path / name).is_symlink():
             continue
-        if name == "steering.md":
-            (path / name).write_text(text, encoding="utf-8")
+        if name != "steering.md" and _holds(path / name, text):
             continue
-        try:
-            with (path / name).open("x", encoding="utf-8") as fh:
-                fh.write(text)
-        except FileExistsError:
-            pass
+        (path / name).write_text(text, encoding="utf-8")
     return path
+
+
+def _holds(path, text):
+    try:
+        return text in path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return False
 
 
 def synced_key(hive):
