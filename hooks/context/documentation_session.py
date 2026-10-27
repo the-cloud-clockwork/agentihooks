@@ -37,6 +37,7 @@ NOTICE_COMMAND = "Start it here: agentihooks init-agent --profile documentation"
 NOTICE_SUBJECT_LENGTH = 160
 TASK_HASH_LENGTH = 16
 RETRY_LIMIT = 3
+RETRY_BUDGET_S = 150
 LOCK_SUFFIX = ".lock"
 WRITE_SUFFIX = ".next"
 
@@ -215,7 +216,9 @@ def process_pending(path: Path) -> None:
     retry_pending(json.loads(path.read_text())["swarm"], path)
 
 
-def retry_pending(swarm: str | None = None, skip: Path | None = None) -> None:
+def retry_pending(
+    swarm: str | None = None, skip: Path | None = None, limit: int | None = RETRY_LIMIT, until: float | None = None
+) -> None:
     now = time.time()
     retried = 0
     for pending in sorted(
@@ -225,9 +228,11 @@ def retry_pending(swarm: str | None = None, skip: Path | None = None) -> None:
             continue
         row = json.loads(pending.read_text())
         if row["status"] == "pending" and swarm in (None, row["swarm"]) and row.get("retry_at", 0) <= now:
+            if until is not None and time.time() >= until:
+                break
             process(pending, now)
             retried += 1
-            if retried == RETRY_LIMIT:
+            if retried == limit:
                 break
 
 
@@ -237,7 +242,7 @@ def retry() -> None:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
             return
-        retry_pending()
+        retry_pending(limit=None, until=time.time() + RETRY_BUDGET_S)
 
 
 def schedule_retry() -> None:
