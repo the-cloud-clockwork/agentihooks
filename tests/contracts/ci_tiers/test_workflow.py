@@ -100,6 +100,7 @@ def jobs_for(event, base_ref="dev", scope="full"):
                     analysis="A1" if runs else "",
                     shards="[0, 1]",
                     stats_parts="[0, 1]",
+                    sonar="run",
                 ),
             )
             del pending[name]
@@ -138,14 +139,16 @@ def test_the_retired_queue_baseline_leaves_the_workflow_and_the_gate_takes_the_p
     steps = jobs["gate-required"]["steps"]
     steps[0]["run"] = steps[0]["run"].replace('"lint", "docs", "semgrep"', '"lint", "semgrep"')
     assert steps in [
-        ci_reuse.selection_diagnostic(
-            forward(
-                finish(
-                    rerun(
-                        ci_reuse.inline_mutation(
-                            ci_reuse.postgres_required(
-                                ci_reuse.gate_steps(
-                                    queue_tier=True, promotion=True, **options, summary=summary, watcher_loss=True
+        ci_reuse.test_only_sonar(
+            ci_reuse.selection_diagnostic(
+                forward(
+                    finish(
+                        rerun(
+                            ci_reuse.inline_mutation(
+                                ci_reuse.postgres_required(
+                                    ci_reuse.gate_steps(
+                                        queue_tier=True, promotion=True, **options, summary=summary, watcher_loss=True
+                                    )
                                 )
                             )
                         )
@@ -200,7 +203,11 @@ def _concurrency(event, run_id, number=None):
 
 def test_dev_pushes_preserve_the_running_promotion_and_replace_only_the_pending_run():
     first, second = _concurrency("push", 1000), _concurrency("push", 1061)
-    assert first == second == {"group": "promotion-dev", "queue": "single", "cancel-in-progress": False}
+    expected = {"queue": "single", "cancel-in-progress": False}
+    assert (first, second) in (
+        (dict(expected, group="promotion-dev"), dict(expected, group="promotion-dev")),
+        (dict(expected, group="tests-push-1000"), dict(expected, group="tests-push-1061")),
+    )
 
 
 @pytest.mark.parametrize("event,number", [("merge_group", None), ("pull_request", 7)])

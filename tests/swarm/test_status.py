@@ -102,7 +102,8 @@ def test_busy_tool_stall_is_reported_until_a_new_tool_call_or_named_wait(monkeyp
     activity.record("Read", {}, env, tmp_path, now_ms=at - 10 * 60_000)
     from scripts.swarm.tick import _watch_idle
 
-    _watch_idle("sw", store, ledger, runtime, ledger.tasks("sw"), store.agents("sw")[0], at)
+    rows = {t["id"]: t for t in ledger.tasks("sw")}
+    _watch_idle("sw", store, ledger, runtime, rows, store.agents("sw")[0], at)
     assert store.redis.get(store.key("sw", "pane-state", name)) == "working"
     assert 0 < store.redis.ttl(store.key("sw", "pane-state", name)) <= idle.BEAT_TTL_S
     found = findings(store, "sw", config, ledger.tasks("sw"), [])

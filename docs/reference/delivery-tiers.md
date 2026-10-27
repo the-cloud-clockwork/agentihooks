@@ -398,6 +398,72 @@ agentihooks doctor rig-grade-swarm measure "ci-tier-wall-time/<run id>-<attempt>
 
 It prints `<finding> <seconds>`, for example `ci-tier-wall-time/39269601765-1 573`. A finding fires when the tier wall time passes 15 minutes, 900 s. A run with no recorded tier wall time is refused with `has no tier wall time`.
 
+### Python 3.12 timing after the version removal
+
+The read only research in [issue 5449](https://github.com/the-cloud-clockwork/agentihooks/issues/5449) measured the last twenty merge group Tests runs available in its 21 October window, after [5289](https://github.com/the-cloud-clockwork/agentihooks/pull/5289) made queue unit shards Python 3.12 only. GitHub records that merge at 2026-10-20T16:52:04Z. The measured runs were created from 2026-10-21 00:45 to 05:01 UTC and all succeeded. This is a dated baseline; the [current planner settings](#how-the-plan-is-built) have changed since it was measured.
+
+For every completed `unit (3.12, n)` job, the research read the `Run tests` step duration, job duration and runner wait (`started_at` minus `created_at`). The split log supplied the shard count and predicted slowest step. At that time the planner started at twelve shards and added shards until its prediction was below 360 seconds, half the 720-second `Run tests` timeout. Its model used `SLOWDOWN = 1.5` and `STARTUP_SECONDS = 30`. These were workflow and planner settings, not command options or environment overrides for the measurement.
+
+All times below are seconds. Margin is `720 - slowest step`; actual/predicted compares the slowest measured test step with the split log prediction. Runner wait is separate from test step time.
+
+| Run | Shards | Slowest shard | Slowest step | Budget margin | Predicted slowest | Actual/predicted | Max wait | Median wait |
+|---|---|---|---|---|---|---|---|---|
+| [39547261885](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39547261885) | 15 | unit (3.12, 4) | 298 | 422 | 354.3 | 0.84 | 59 | 13 |
+| [39546281646](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39546281646) | 15 | unit (3.12, 4) | 280 | 440 | 346.1 | 0.81 | 154 | 13 |
+| [39545438351](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39545438351) | 15 | unit (3.12, 2) | 298 | 422 | 346.4 | 0.86 | 60 | 12 |
+| [39544361559](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39544361559) | 15 | unit (3.12, 5) | 270 | 450 | 346.1 | 0.78 | 661 | 402 |
+| [39543773254](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39543773254) | 13 | unit (3.12, 6) | 299 | 421 | 359.0 | 0.83 | 52 | 14 |
+| [39543667755](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39543667755) | 13 | unit (3.12, 5) | 305 | 415 | 358.8 | 0.85 | 48 | 13 |
+| [39539702444](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39539702444) | 15 | unit (3.12, 15) | 292 | 428 | 356.9 | 0.82 | 153 | 11 |
+| [39539254367](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39539254367) | 15 | unit (3.12, 15) | 290 | 430 | 356.9 | 0.81 | 128 | 25 |
+| [39538738982](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39538738982) | 15 | unit (3.12, 15) | 263 | 457 | 356.9 | 0.74 | 234 | 146 |
+| [39535809203](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39535809203) | 16 | unit (3.12, 14) | 251 | 469 | 343.8 | 0.73 | 271 | 153 |
+| [39535003559](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39535003559) | 16 | unit (3.12, 14) | 262 | 458 | 343.9 | 0.76 | 152 | 149 |
+| [39530900324](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39530900324) | 15 | unit (3.12, 9) | 298 | 422 | 347.7 | 0.86 | 59 | 14 |
+| [39529159214](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39529159214) | 15 | unit (3.12, 13) | 270 | 450 | 359.9 | 0.75 | 59 | 12 |
+| [39528716304](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39528716304) | 16 | unit (3.12, 5) | 274 | 446 | 356.5 | 0.77 | 527 | 244 |
+| [39528560896](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39528560896) | 16 | unit (3.12, 1) | 271 | 449 | 356.3 | 0.76 | 72 | 35 |
+| [39526766219](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39526766219) | 17 | unit (3.12, 16) | 251 | 469 | 343.9 | 0.73 | 801 | 572 |
+| [39526500365](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39526500365) | 17 | unit (3.12, 1) | 245 | 475 | 343.9 | 0.71 | 75 | 13 |
+| [39526251616](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39526251616) | 17 | unit (3.12, 9) | 290 | 430 | 343.8 | 0.84 | 43 | 14 |
+| [39523801715](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39523801715) | 16 | unit (3.12, 7) | 252 | 468 | 357.7 | 0.70 | 178 | 129 |
+| [39523208346](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39523208346) | 16 | unit (3.12, 11) | 293 | 427 | 357.8 | 0.82 | 666 | 606 |
+
+Across all 308 shards, test step time was median 243 seconds, p95 290 seconds and maximum 305 seconds. The slowest was `unit (3.12, 5)` in run 39543667755 at thirteen shards: 415 seconds, about 58 percent, below the step budget and 55 seconds below the planner target. Runner wait was median 19 seconds and maximum 801 seconds; eight of the twenty runs had median waits above 100 seconds. A large step margin therefore does not establish a short queue tier.
+
+**Ruling:** lowering the twelve shard floor would not reduce runners in this sample. Every plan grew to thirteen through seventeen shards because its prediction at twelve exceeded 360 seconds. No CI task was filed to lower the floor. Actual slowest time was 0.70 to 0.86 of predicted, mean 0.79; the research proposed calibration of the prediction model as a follow up. Later calibration is recorded in pull request [5659](https://github.com/the-cloud-clockwork/agentihooks/pull/5659) and the [current planner settings](#how-the-plan-is-built). The historical sample alone does not justify changing today's settings.
+
+#### Repeat the measurement without dispatching runs
+
+Use authenticated `gh` with read access to repository Actions. Select the Tests merge group runs after the relevant merge, fixing an upper cutoff so later runs do not change the sample. This example reconstructs the research window; for a new measurement replace both timestamps and record the cutoff with its run list:
+
+```bash
+gh api --method GET repos/the-cloud-clockwork/agentihooks/actions/workflows/test.yml/runs \
+  -f event=merge_group -f created='2026-10-20T16:52:04Z..2026-10-21T05:02:00Z' \
+  -F per_page=20 --jq '.workflow_runs[] | {id, run_attempt, created_at, conclusion, html_url}'
+```
+
+For each returned run, record its attempt and read every jobs page. The following prints the shard, test step seconds, job seconds and runner wait seconds:
+
+```bash
+run="39543667755"
+attempt="1"
+gh api "repos/the-cloud-clockwork/agentihooks/actions/runs/$run/attempts/$attempt/jobs?per_page=100" --paginate \
+  --jq '.jobs[] | select(.name | startswith("unit (3.12,")) |
+    select(.status == "completed") |
+    . as $job | .steps[] | select(.name == "Run tests") |
+    select(.started_at != null and .completed_at != null) |
+    [$job.name,
+     ((.completed_at | fromdateiso8601) - (.started_at | fromdateiso8601)),
+     (($job.completed_at | fromdateiso8601) - ($job.started_at | fromdateiso8601)),
+     (($job.started_at | fromdateiso8601) - ($job.created_at | fromdateiso8601))] | @tsv'
+split_job="<split job id>"
+gh api "repos/the-cloud-clockwork/agentihooks/actions/jobs/$split_job/logs" \
+  | rg 'Python 3\.12:'
+```
+
+Take the split job ID from the same jobs response and read its `Python 3.12: N queue shards, predicted slowest Xs of 360s` line; later planners may print a different target. For each run retain the shard count, slowest shard, median step, prediction, maximum and median wait, and subtract the slowest step from the workflow's timeout at that run's commit. Use one recorded attempt consistently; a rerun is a separate observation. Report missing steps, incomplete runs or expired logs as evidence gaps rather than zero durations. If fewer than twenty runs exist after the merge, report that sample size. These commands list runs, jobs and logs; they dispatch and rerun nothing.
+
 ### Concurrent merge groups on one pool
 
 The shard cap keeps one merge group inside one wave, but the queue then built up to three entries at a time (`max_entries_to_build` 3; `.github/rulesets/dev-no-delete.json` now sets 5) and every group sent its shards to the same `anton-oss-queue` pool. Two groups that reach their unit stage together ask for up to 60 runners, so the later group's shards wait for the earlier group's shards to finish. That wait, not the shard plan, is what pushed merge group tiers over 15 minutes on the night of 19 to 20 October.

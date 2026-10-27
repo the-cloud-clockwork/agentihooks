@@ -9,6 +9,7 @@ import pytest
 import yaml
 
 from scripts import ci_stats_seed as seed
+from scripts.ci_mutation.stats_dependencies import CONTEXT
 
 pytestmark = pytest.mark.unit
 
@@ -23,9 +24,9 @@ def _archive(files):
     return data.getvalue()
 
 
-def _record(folder, pointer, key, scope):
+def _record(folder, pointer, key, scope, context=None):
     (folder / f"{pointer}.index").write_text(key)
-    (folder / f"{key}.json").write_text(json.dumps({"key": key, "scope": scope}))
+    (folder / f"{key}.json").write_text(json.dumps({"key": key, "scope": scope, "context": context}))
 
 
 def _repo(tmp_path, subjects):
@@ -56,6 +57,33 @@ def test_prune_keeps_only_unscoped_records_a_pointer_names(folder):
     assert seed.prune(folder) == 1
 
     assert sorted(path.name for path in folder.iterdir()) == [f"{KEEP}.json", "p1.index"]
+
+
+def test_prune_drops_records_made_under_another_lock_file_or_mutation_scripts(folder):
+    _record(folder, "p1", KEEP, {}, "new")
+    _record(folder, "p2", SCOPED, {}, "old")
+    _record(folder, "p3", STALE, {})
+    (folder / CONTEXT).write_text("new\n")
+
+    assert seed.prune(folder) == 1
+
+    assert sorted(path.name for path in folder.iterdir()) == [f"{KEEP}.json", CONTEXT, "p1.index"]
+
+
+def test_stats_runs_mark_their_context_and_the_seed_prunes_by_it(folder):
+    from scripts.ci_mutation.stats_dependencies import StoredStats
+
+    old = StoredStats(folder, folder, {"sources": {"uv.lock": "1"}, "inventory": []}, {})
+    new = StoredStats(folder, folder, {"sources": {"uv.lock": "2"}, "inventory": ["x"]}, {})
+    old.save("tests/test_a.py", {"status": 0}, {}, False)
+    new.save("tests/test_a.py", {"status": 0}, {}, False)
+    new.save("tests/test_b.py", {"status": 0}, {}, False)
+    (folder / CONTEXT).write_text(new.context_digest())
+
+    assert seed.prune(folder) == 2
+
+    assert old.load("tests/test_a.py") is None
+    assert new.load("tests/test_a.py") == {"status": 0}
 
 
 def test_prune_drops_a_pointer_to_an_unreadable_record(folder):
@@ -132,7 +160,7 @@ def test_api_fails_when_gh_fails(tmp_path, monkeypatch):
 def test_harvest_copies_records_from_the_newest_run_with_stats_artifacts(folder, monkeypatch):
     archives = {
         5: _archive({"x.index": "old", "x.json": "{}"}),
-        6: _archive({"x.index": "new", f"{KEEP}.json": "{}", "collected-0": ""}),
+        6: _archive({"x.index": "new", f"{KEEP}.json": "{}", "collected-0": "", CONTEXT: "c"}),
     }
     responses = {
         "pulls/7": {"head": {"sha": "abc"}},
@@ -152,9 +180,9 @@ def test_harvest_copies_records_from_the_newest_run_with_stats_artifacts(folder,
         seed, "api", lambda path, binary=False: archives[int(path.split("/")[2])] if binary else responses[path]
     )
 
-    assert seed.harvest(7, folder) == 4
+    assert seed.harvest(7, folder) == 5
     assert (folder / "x.index").read_text() == "new"
-    assert sorted(path.name for path in folder.iterdir()) == [f"{KEEP}.json", "x.index", "x.json"]
+    assert sorted(path.name for path in folder.iterdir()) == [f"{KEEP}.json", CONTEXT, "x.index", "x.json"]
 
 
 def test_harvest_skips_a_number_that_is_not_a_pull_request(tmp_path, monkeypatch, capsys):
@@ -205,7 +233,15 @@ def test_main_seeds_prunes_and_records_the_head(tmp_path, monkeypatch, capsys):
 
     assert (folder / seed.SEEDED).read_text() == "h\n"
     assert sorted(path.name for path in folder.iterdir()) == [f"{KEEP}.json", "p1.index", seed.SEEDED]
-    assert capsys.readouterr().out == "Mutation stats seed: 4 files from pull requests [3]; kept 1 records\n"
+    before = sum(len(text) for text in (KEEP, SCOPED)) + len(
+        json.dumps({"key": KEEP, "scope": {}, "context": None})
+        + json.dumps({"key": SCOPED, "scope": {"hooks/a.py": [1]}, "context": None})
+    )
+    after = len(KEEP) + len(json.dumps({"key": KEEP, "scope": {}, "context": None}))
+    assert capsys.readouterr().out == (
+        f"Mutation stats seed: 4 files from pull requests [3]; kept 1 records; "
+        f"{before} bytes before the prune, {after} after\n"
+    )
 
 
 def test_main_reuses_an_existing_folder(folder, monkeypatch):
