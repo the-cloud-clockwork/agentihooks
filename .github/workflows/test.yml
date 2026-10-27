@@ -2384,20 +2384,33 @@ jobs:
       - name: Check out the antoncore dashboard column checker
         id: antoncore-checkout
         if: ${{ !cancelled() && steps.antoncore-token.outcome == 'success' }}
-        uses: ./.github/actions/rest-checkout
-        with:
-          repository: the-cloud-clockwork/antoncore
-          ref: dev
-          path: .antoncore
-          token: ${{ steps.antoncore-token.outputs.token }}
-          persist-credentials: false
-          sparse-checkout-cone-mode: false
-          sparse-checkout: |
+        env:
+          GH_TOKEN: ${{ steps.antoncore-token.outputs.token }}
+          REPOSITORY: the-cloud-clockwork/antoncore
+          REF: dev
+          DESTINATION: .antoncore
+          SELECTED_PATHS: |
             scripts/swarm_dashboard_columns.py
             stacks/observability/provisioning/dashboards/Swarm/
             k8s/values-overlays/agentihooks-swarm-nats/values.yaml
             k8s/values-overlays/agentihooks-swarm-nats/users.yaml
             k8s/values-overlays/agentihooks-swarm-nats/trust.yaml
+        run: |
+          set -euo pipefail
+          revision=$(gh api "repos/$REPOSITORY/commits/$REF" --jq .sha)
+          patterns=()
+          while IFS= read -r selected; do
+            [[ -n "$selected" ]] || continue
+            if [[ "$selected" == */ ]]; then
+              patterns+=("*/$selected*")
+            else
+              patterns+=("*/$selected")
+            fi
+          done <<< "$SELECTED_PATHS"
+          [[ ${#patterns[@]} -gt 0 ]]
+          mkdir -p "$DESTINATION"
+          gh api "repos/$REPOSITORY/tarball/$revision" | tar -xz --strip-components=1 --wildcards -C "$DESTINATION" "${patterns[@]}"
+          echo "revision=$revision" >> "$GITHUB_OUTPUT"
 
       - name: Run every Swarm Ledger dashboard query against this head's metrics tables
         if: ${{ !cancelled() }}

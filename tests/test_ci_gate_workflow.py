@@ -172,14 +172,15 @@ def test_lint_grades_dashboard_columns_with_the_antoncore_dev_checker():
     assert token is not None
     assert token["with"]["repositories"] == "antoncore"
     assert token["with"]["permission-contents"] == "read"
-    checkout = next((s for s in steps if s.get("with", {}).get("repository") == "the-cloud-clockwork/antoncore"), None)
+    checkout = next((s for s in steps if s.get("env", {}).get("REPOSITORY") == "the-cloud-clockwork/antoncore"), None)
     assert checkout is not None
     assert checkout["if"] == "${{ !cancelled() && steps.antoncore-token.outcome == 'success' }}"
-    assert checkout["with"]["token"] == "${{ steps.antoncore-token.outputs.token }}"
-    assert checkout["with"]["ref"] == "dev"
-    assert checkout["with"]["persist-credentials"] is False
-    assert checkout["uses"] == "./.github/actions/rest-checkout"
-    assert "scripts/swarm_dashboard_columns.py" in checkout["with"]["sparse-checkout"]
+    assert checkout["env"]["GH_TOKEN"] == "${{ steps.antoncore-token.outputs.token }}"
+    assert checkout["env"]["REF"] == "dev"
+    assert checkout["env"]["DESTINATION"] == ".antoncore"
+    assert "uses" not in checkout
+    assert "git " not in checkout["run"]
+    assert "scripts/swarm_dashboard_columns.py" in checkout["env"]["SELECTED_PATHS"]
     check = next((s for s in steps if "swarm_dashboard_columns.py check" in s.get("run", "")), None)
     assert check is not None
     assert steps.index(token) < steps.index(checkout) < steps.index(check)
@@ -193,8 +194,9 @@ def test_rest_checkout_reads_selected_files_from_one_revision_and_fails_closed(t
     import os
     import tarfile
 
-    action = yaml.safe_load((_ROOT / ".github/actions/rest-checkout/action.yml").read_text())
-    script = action["runs"]["steps"][0]["run"]
+    script = next(step for step in _workflow()["jobs"]["lint"]["steps"] if step.get("id") == "antoncore-checkout")[
+        "run"
+    ]
     archive = tmp_path / "source.tar.gz"
     with tarfile.open(archive, "w:gz") as bundle:
         for name in ("checker.py", "dashboards/one.json", "unselected.txt"):
@@ -229,8 +231,6 @@ def test_rest_checkout_reads_selected_files_from_one_revision_and_fails_closed(t
             "REF": "dev",
             "DESTINATION": str(destination),
             "SELECTED_PATHS": "checker.py\ndashboards/",
-            "PERSIST_CREDENTIALS": "false",
-            "CONE_MODE": "false",
             "GITHUB_OUTPUT": str(output),
             "ARCHIVE": str(archive),
             "FAILURE": failure,
