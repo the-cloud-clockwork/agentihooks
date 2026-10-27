@@ -234,6 +234,7 @@ def _find(tmp_path, paths, mode="error", hidden="false"):
         ("warn", 0, "::warning title=Retried upload::No files match the path of coverage-3.12-5"),
         ("ignore", 0, "No files match the path of coverage-3.12-5; nothing uploaded."),
     ],
+    ids=["error", "warn", "ignore"],
 )
 def test_a_path_matching_nothing_ends_before_any_attempt(tmp_path, mode, code, said):
     done, output = _find(tmp_path, ".coverage\njs-coverage/\n", mode)
