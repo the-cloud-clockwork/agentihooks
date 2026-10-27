@@ -2,6 +2,7 @@ from dataclasses import replace
 
 import pytest
 
+LAUNCH_CHECKED = True
 REFUSED_JOIN = (
     "ledger sw: ledger server not answering on https://ledger:8765: <urlopen error [Errno 111] Connection refused>"
 )
