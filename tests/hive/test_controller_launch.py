@@ -1029,6 +1029,16 @@ def test_acknowledgement_preserves_the_complete_launch_metadata(setup, route):
     assert (live.launched_at, live.overlays, live.launch_timings) == (1234, ["tuner"], {"harness_at": 1300})
 
 
+def test_a_live_acknowledgement_marks_its_admission_reservation_joined(setup):
+    from scripts.hive import admission
+
+    _, order, ack = live_order(setup)
+    name = setup.store.execution_registry.get("fixture", order.execution_id).name
+    admission.record(setup.store.redis, order.hive, f"fixture/{name}")
+    assert setup.launcher.complete(order, ack).ok
+    assert setup.store.redis.zrange(admission.key(order.hive), 0, -1) == [f"fixture/{name}{admission.JOINED}"]
+
+
 @pytest.mark.parametrize(
     "bad", ["target", "pane", "host", "generation", "state", "missing occupant", "replaced occupant"]
 )

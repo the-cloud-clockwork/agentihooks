@@ -396,3 +396,61 @@ def test_the_max_agents_cap_binds_only_when_tighter_than_the_headroom():
 def test_a_max_agents_refusal_falls_in_its_own_reason():
     assert admission.category("no hive for eng has room: remote max agents: 3 of 3 agents") == admission.MAX_AGENTS
     assert admission.MAX_AGENTS in admission.REASONS
+
+
+def launched_ago(redis, machine, member, ago_ms):
+    seconds, micros = redis.time()
+    now = int(seconds) * 1000 + int(micros) // 1000
+    redis.zadd(admission.key(machine), {member: now - ago_ms + admission.PENDING_MS})
+    return now
+
+
+def test_a_joined_agent_older_than_one_load_window_no_longer_uses_room_while_an_unjoined_launch_does(redis):
+    measured = reading(cpus=8, load5=3.65)
+    launched_ago(redis, "hive-two", "s/joined", admission.LOAD_WINDOW_MS + 1000)
+    launched_ago(redis, "hive-two", "s/unjoined", admission.LOAD_WINDOW_MS + 1000)
+    assert admission.room(measured, pending=admission.pending(redis, "hive-two")).room == 3
+    admission.joined(redis, "hive-two", "s/joined")
+    assert admission.pending(redis, "hive-two") == 1
+    assert admission.room(measured, pending=admission.pending(redis, "hive-two")) == admission.Room(
+        4,
+        admission.CPU,
+        "five minute load 3.65 on 8 CPUs, 0.5 CPU per agent with 1 pending launches, "
+        "fits 4 more under the 80 percent line",
+    )
+    assert admission.HOST_PERCENT == 80
+
+
+def test_a_joined_agent_still_uses_room_until_one_load_window_after_its_launch(redis):
+    now = launched_ago(redis, "anton", "s/one", 60_000)
+    admission.joined(redis, "anton", "s/one")
+    assert admission.pending(redis, "anton") == 1
+    assert redis.zscore(admission.key("anton"), "s/one") is None
+    expiry = redis.zscore(admission.key("anton"), "s/one" + admission.JOINED) - now
+    assert expiry == admission.LOAD_WINDOW_MS - 60_000
+
+
+def test_joining_twice_keeps_the_first_join_window(redis):
+    now = launched_ago(redis, "anton", "s/one", 60_000)
+    admission.joined(redis, "anton", "s/one")
+    admission.joined(redis, "anton", "s/one")
+    assert redis.zrange(admission.key("anton"), 0, -1, withscores=True) == [
+        ("s/one" + admission.JOINED, now + admission.LOAD_WINDOW_MS - 60_000)
+    ]
+
+
+def test_joining_a_launch_without_a_reservation_adds_none(redis):
+    admission.joined(redis, "anton", "s/none")
+    assert redis.exists(admission.key("anton")) == 0
+
+
+def test_a_release_frees_a_joined_reservation(redis):
+    admission.reserve(redis, "anton", "s/one", 2)
+    admission.reserve(redis, "anton", "s/two", 2)
+    admission.joined(redis, "anton", "s/one")
+    admission.release(redis, "anton", "s/one")
+    assert redis.zrange(admission.key("anton"), 0, -1) == ["s/two"]
+
+
+def test_the_load_window_is_five_minutes():
+    assert (admission.LOAD_WINDOW_MS, admission.JOINED) == (300_000, "#joined")
