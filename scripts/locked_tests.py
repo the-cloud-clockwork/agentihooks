@@ -161,6 +161,8 @@ def measure(tree: Path, modules: tuple[str, ...] = LOCKED) -> dict[str, dict]:
     measured = {}
     for name in modules:
         path = tree / name
+        if not path.resolve().is_relative_to(tree.resolve()):
+            raise GradeError(f"{name} is outside the checkout")
         if not path.is_file():
             continue
         try:

@@ -455,6 +455,16 @@ def test_a_module_only_the_base_manifest_names_is_still_measured(tmp_path, capsy
     )
 
 
+@pytest.mark.parametrize("module", ["../outside.py", "/etc/outside.py"])
+def test_a_manifest_module_outside_the_checkout_is_refused(tmp_path, capsys, module):
+    base = _tree(tmp_path / "base", GUARD)
+    head = _tree(tmp_path / "head", GUARD)
+    manifest = json.loads((head / locked_tests.MANIFEST).read_text())
+    manifest[f"{module}::test_x"] = {"assertions": 0, "calls": 0, "cases": 1, "texts": []}
+    (head / locked_tests.MANIFEST).write_text(json.dumps(manifest))
+    assert _grade(base, head, capsys) == (1, f"::error::{module} is outside the checkout\n")
+
+
 @pytest.mark.parametrize(
     "config",
     [
