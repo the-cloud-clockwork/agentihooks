@@ -194,6 +194,18 @@ def test_refuses_an_order_the_hive_queue_cannot_serve_before_its_deadline(setup)
     assert admission.reserve(store.redis, "remote", f"{slug}/{name}", 1) == (True, 0)
 
 
+def test_queues_an_order_the_hive_serves_before_its_deadline(setup):
+    from scripts.hive.orders import Orders
+    from scripts.swarm_v2.runtime.base import SpawnRequest
+
+    stream = Orders(setup.store.redis).stream("remote")
+    for _ in range(3):
+        setup.store.redis.xadd(stream, {"order": "{}"})
+    selected = setup.launcher.select(setup.config, "eng", {"id": "task"})
+    request = SpawnRequest(setup.config, "eng", "eng-name", {"id": "task"})
+    assert setup.launcher.queue_full(request, selected) == ""
+
+
 def test_local_mode_keeps_the_original_spawn_call(setup):
     from scripts.swarm.controller import FencedRuntime
 

@@ -17,6 +17,8 @@ from scripts.swarm_v2.runtime.base import Capability, Outcome, SpawnRequest, Sta
 HIVE = "hive"
 ROLE_PROFILES = {"engineer": "eng", "cicd": "ci", "planner": "plan", "dispatcher": "dispatch"}
 TTL_MS = 300000
+LAUNCH_MS = 75000
+QUEUED = TTL_MS // LAUNCH_MS
 ORDERS = "controller-launch-orders"
 ENDINGS = "launch-endings"
 PENDING = "hive launch ordered, waiting for its acknowledgement"
@@ -371,6 +373,9 @@ class HiveLaunch:
         selected = self.select(request.config, request.lane, request.task)
         if isinstance(selected, placement.Wait):
             return Outcome("spawn", Status.UNAVAILABLE, HIVE, detail=selected.reason)
+        if refused := self.queue_full(request, selected):
+            self._record_wait(request.lane, request.task, placement.Wait(refused))
+            return Outcome("spawn", Status.UNAVAILABLE, HIVE, detail=refused)
         named = replace(
             request,
             config=replace(request.config, repo=selected.origin) if selected.origin else request.config,
@@ -396,6 +401,15 @@ class HiveLaunch:
             admission.release(self.store.redis, selected.hive, f"{self.slug}/{request.name}")
             local_slots.release(self.store, selected.hive, self.slug, request.name)
             raise
+
+    def queue_full(self, request: SpawnRequest, selected: Selection) -> str:
+        queued = self.store.redis.xlen(self.orders.stream(selected.hive))
+        if queued < QUEUED:
+            return ""
+        return (
+            f"no hive for {request.lane} {placement.HAS_ROOM}: {selected.hive} holds {queued} queued launches, "
+            f"the most its {TTL_MS // 1000} second launch deadline serves at {LAUNCH_MS // 1000} seconds each"
+        )
 
     def send_order(self, request: SpawnRequest, selected: Selection, task: dict) -> Outcome:
         from scripts.master_login_chain import BUDGET
