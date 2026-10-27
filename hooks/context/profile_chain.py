@@ -110,6 +110,22 @@ def require_capabilities(profile_dirs: list[tuple[str, Path]], available: set[st
             raise ValueError(f"overlay {name} requires hive capabilities: {', '.join(missing)}")
 
 
+def card(name: str, path: Path) -> dict:
+    """The agent card a profile declares: its description and its capabilities, each capability once."""
+    data = _manifest(path)
+    if not isinstance(data, dict):
+        raise ValueError(f"profile {name} profile.yml must be a mapping")
+    description = data.get("description", "")
+    if not isinstance(description, str):
+        raise ValueError(f"profile {name} description must be a string")
+    capabilities = data.get("capabilities", [])
+    if not isinstance(capabilities, list) or any(
+        not isinstance(item, str) or not item.strip() for item in capabilities
+    ):
+        raise ValueError(f"profile {name} capabilities must be a list of nonempty strings")
+    return {"name": name, "description": description, "capabilities": list(dict.fromkeys(capabilities))}
+
+
 def role(profile_dirs: list[tuple[str, Path]]) -> str | None:
     return next((path.name for _, path in profile_dirs if path.parent == PACKAGE_ROLES), None)
 

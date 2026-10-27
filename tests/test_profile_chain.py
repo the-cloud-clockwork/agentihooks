@@ -473,3 +473,38 @@ def test_require_capabilities_names_each_missing_one(tmp_path):
             ValueError, match=r"^profile headed required_capabilities must be a list of nonempty strings$"
         ):
             profile_chain.require_capabilities(dirs, {"headed"})
+
+
+def test_card_reads_description_and_capabilities_once_each(tmp_path):
+    (tmp_path / "profile.yml").write_text(
+        "description: Reviews pull requests\ncapabilities: [review, python, review]\nrequired_capabilities: [headed]\n"
+    )
+    assert profile_chain.card("reviewer", tmp_path) == {
+        "name": "reviewer",
+        "description": "Reviews pull requests",
+        "capabilities": ["review", "python"],
+    }
+
+
+@pytest.mark.parametrize("manifest", [None, "", "extends: [engineer]\n"])
+def test_card_of_a_profile_without_card_fields_is_empty(tmp_path, manifest):
+    if manifest is not None:
+        (tmp_path / "profile.yml").write_text(manifest)
+    assert profile_chain.card("plain", tmp_path) == {"name": "plain", "description": "", "capabilities": []}
+
+
+@pytest.mark.parametrize(
+    ("manifest", "message"),
+    [
+        ("description: [a]\n", r"^profile odd description must be a string$"),
+        ("description: 3\n", r"^profile odd description must be a string$"),
+        ("capabilities: review\n", r"^profile odd capabilities must be a list of nonempty strings$"),
+        ("capabilities: [' ']\n", r"^profile odd capabilities must be a list of nonempty strings$"),
+        ("capabilities: [1]\n", r"^profile odd capabilities must be a list of nonempty strings$"),
+        ("- review\n", r"^profile odd profile\.yml must be a mapping$"),
+    ],
+)
+def test_card_refuses_a_malformed_field(tmp_path, manifest, message):
+    (tmp_path / "profile.yml").write_text(manifest)
+    with pytest.raises(ValueError, match=message):
+        profile_chain.card("odd", tmp_path)
