@@ -1,5 +1,6 @@
 import json
 import re
+import time
 from pathlib import Path
 
 import pytest
@@ -81,6 +82,13 @@ def test_run_defaults_harness_tier_effort_timeout_schema_and_a_named_run_folder(
     assert (run.tier, run.effort, run.timeout) == ("high", "medium", 1800.0)
     assert run.run_dir.parent == tmp_path / "home" / "headless"
     assert re.fullmatch(r"\d{8}T\d{6}Z-[0-9a-f]{8}", run.run_dir.name)
+
+
+def test_the_run_folder_is_stamped_in_utc(monkeypatch):
+    fixed = time.struct_time((2026, 1, 2, 3, 4, 5, 4, 2, 0))
+    monkeypatch.setattr(cli.time, "gmtime", lambda: fixed)
+
+    assert cli.default_run_dir({"AGENTIHOOKS_HOME": "/h"}).name.startswith("20260102T030405Z-")
 
 
 def test_two_runs_get_different_folders(captured):
