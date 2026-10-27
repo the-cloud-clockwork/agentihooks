@@ -485,7 +485,7 @@ def launch(store: RedisStore, spec: Launch, deps: Deps) -> Started:
             try:
                 if process is not None:
                     stop(process)
-                    _release_slot(spec.environ.get("AGENTIHOOKS_SLOT_HIVE", ""), agent)
+                    _release_slot(spec.environ.get("AGENTIHOOKS_SLOT_HIVE") or "", agent)
             finally:
                 try:
                     if record is not None:
