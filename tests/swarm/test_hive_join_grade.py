@@ -150,6 +150,39 @@ def test_every_optional_hive_check_is_report_only():
     assert "hive_brain" in launch_check.REPORT_ONLY
 
 
+def test_hive_launch_failures_raise_one_finding_per_check_and_error_class():
+    from fakeredis import FakeRedis
+
+    from scripts.hive import join_report
+    from scripts.swarm import launch_check
+    from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
+
+    store = RedisStore(FakeRedis(decode_responses=True))
+    store.create(SwarmConfig("sw", "/repo", max_eng=4, max_ci=0, state="running"))
+    code = store.ensure_code("sw").code
+    token = {"error": "HTTPError", "status": 401, "message": "ledger token refused"}
+    refused = {"error": "ConnectionError", "status": None, "message": "connection refused"}
+
+    def fail(number, error):
+        agent = AgentRecord(f"engineer@{code}-000{number}", "eng", f"t{number}", execution_id=f"x{number}", hive="w")
+        checks = dict.fromkeys((*join_report.REQUIRED, *join_report.OPTIONAL), True)
+        checks.update(ledger_join=False, errors={"ledger_join": error})
+        join_report.start(store.redis, "sw", agent, "session", checks, {}, 1000)
+        found = launch_check.misses(store, "sw", agent, {}, {}, True, [])
+        launch_check.record(store, "sw", agent, found, 1_000_000 + number * 60_000, 60_000)
+        return agent.name
+
+    names = [fail(number, token) for number in (1, 2, 3)]
+    (finding,) = launch_check.findings(store, "sw")
+    assert finding.id.startswith("launch-check/hive_ledger_join/")
+    assert all(name in " ".join(finding.evidence) for name in names)
+    assert "ledger token refused" in " ".join(finding.evidence)
+    fail(4, refused)
+    found = launch_check.findings(store, "sw")
+    assert len(found) == 2
+    assert finding.id in [f.id for f in found]
+
+
 def test_failed_hive_launch_retires_records_and_drops_that_agent(monkeypatch):
     import importlib
     from types import SimpleNamespace
