@@ -231,7 +231,10 @@ def speed(store: RedisStore, doctor: str, watched: str, now_ms: int) -> list[str
         groups, run_ids = ci_speed.fresh_groups(state["groups"], eligible, store.redis.smembers(run_notified))
         fresh.update({finding.id: finding for finding in ci_speed.grouped(groups)})
         if fresh:
-            shown = [{"id": f.id, **f.as_dict(), "verdict": eligible.get(f.id)} for f in fresh.values()]
+            shown = [
+                {"id": finding.id, **finding.as_dict(), "verdict": eligible.get(finding.id)}
+                for finding in fresh.values()
+            ]
             mail.send(SENDER, seat_address(slug, MASTER), news(watched, shown))
             store.redis.sadd(notified, *fresh)
             if run_ids:

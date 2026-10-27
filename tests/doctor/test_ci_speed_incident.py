@@ -262,6 +262,7 @@ def test_judged_group_stays_silent_for_new_finished_runs_inside_its_range(store,
     loop.speed(store, DOCTOR, WATCHED, AFTER + 180000)
     for texts in items(store).values():
         assert len(texts) == 1
+        assert "run 1," in texts[0]
 
 
 def test_a_status_page_read_failure_never_holds_findings(store, monkeypatch):  # noqa: F811
