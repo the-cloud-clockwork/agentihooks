@@ -619,8 +619,8 @@ def _prepare_profile(args: argparse.Namespace, agent: str, flags: list[str], env
         flags = binding.continuation(flags, agent, environ)
     environ[BUNDLE_REVISION] = args.bundle_revision
     environ.pop(RECORDED_HOME, None)
-    pushed = {PUSH: "1"} if agent == "codex" and args.codex_transport == APP_SERVER else {}
-    profile_env, flags = prepare(args.profile, agent, "", "", flags, {**environ, **pushed}, args.overlay)
+    pushed = {**environ, PUSH: "1"} if agent == "codex" and args.codex_transport == APP_SERVER else environ
+    profile_env, flags = prepare(args.profile, agent, "", "", flags, pushed, args.overlay)
     environ.update(profile_env)
     return flags
 
