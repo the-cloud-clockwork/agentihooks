@@ -1,0 +1,57 @@
+name: fixture
+on: push
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - id: app-token
+        uses: actions/create-github-app-token@v3.2.0
+        with:
+          client-id: id
+          private-key: key
+
+      - name: Check out the trusted files with the App token
+        if: always()
+        uses: actions/checkout@v4
+        with:
+          repository: the-cloud-clockwork/antoncore
+          # ruleid: app-token-git-https
+          token: ${{ steps.app-token.outputs.token }}
+          persist-credentials: false
+
+      - name: Push the tag over Git
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        # ruleid: app-token-git-https
+        run: git push "https://github.com/$GITHUB_REPOSITORY" "refs/tags/v$NEXT"
+
+      - name: Clone through gh with the App identity
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        # ruleid: app-token-git-https
+        run: gh repo clone the-cloud-clockwork/antoncore
+
+      - name: Read a pull request head over the persisted job credential
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        # ok: app-token-git-https
+        run: git ls-remote origin "refs/pull/$PULL/head"
+
+      - name: Clone with the App identity
+        # ruleid: app-token-git-https
+        run: git clone "https://x-access-token:$TOKEN@github.com/the-cloud-clockwork/antoncore.git"
+
+      - uses: actions/checkout@v4
+        with:
+          # ok: app-token-git-https
+          token: ${{ github.token }}
+
+      - name: Tag through REST
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        # ok: app-token-git-https
+        run: gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs" -f "ref=refs/tags/v$NEXT" -f "sha=$SHA"
+
+      - name: Fetch with the job token
+        # ok: app-token-git-https
+        run: git fetch --no-tags origin "$GITHUB_SHA"
