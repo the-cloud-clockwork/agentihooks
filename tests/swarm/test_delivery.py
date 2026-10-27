@@ -194,32 +194,33 @@ class EntryLedger(PageLedger):
 
 
 def test_a_refused_answer_on_an_entry_keeps_the_operator_item_open_for_a_resend(store):
+    store.put_agent("sw", AgentRecord("sw-master-1", "master", "master", pane_id="pm"))
     box = InboxStore(store.redis)
     box.about("op-1", "phases/p1")
-    asked = box.send("operator", "sw-eng-1", "is the phase done", item_id="op-1")
-    first = box.reply(asked.id, "sw-eng-1", "done at 18:45")
+    asked = box.send("operator", "sw-master-1", "is the phase done", item_id="op-1")
+    first = box.reply(asked.id, "sw-master-1", "done at 18:45")
     assert box.get(asked.id).state == "done"
     assert delivery.relay_to_page(box, "sw", store.agents("sw"), EntryLedger(refuse=True)) == 0
     assert box.get(first.id).state == "cancelled"
     reopened = box.get(asked.id)
-    assert reopened.state == "read" and asked.id in [item.id for item in box.open_items("sw-eng-1")]
+    assert reopened.state == "read" and asked.id in [item.id for item in box.open_items("sw-master-1")]
     reason = (
         "reopened: the answer was refused by the ledger page: ledger sw refused: comment refused: clock time '18:45'"
     )
     assert reopened.reason == reason
     assert box.history(asked.id)[-1] == {"state": "read", "by": "swarm", "reason": reason, "at": reopened.updated_at}
-    second = box.reply(asked.id, "sw-eng-1", "the phase is done")
+    second = box.reply(asked.id, "sw-master-1", "the phase is done")
     assert second.id != first.id and box.entry_of(second.id) == "phases/p1"
     ledger = EntryLedger(refuse=False)
     assert delivery.relay_to_page(box, "sw", store.agents("sw"), ledger) == 1
-    assert ledger.commented == [("phases/p1", "the phase is done", "sw-eng-1")]
+    assert ledger.commented == [("phases/p1", "the phase is done", "sw-master-1")]
     assert box.get(asked.id).state == "done"
 
 
 def test_a_refused_message_without_an_entry_reopens_nothing(store):
     box = InboxStore(store.redis)
-    asked = box.send("operator", "sw-eng-1", "how is it going")
-    answer = box.reply(asked.id, "sw-eng-1", "done at 18:45")
+    asked = box.send("operator", "sw-master-1", "how is it going")
+    answer = box.reply(asked.id, "sw-master-1", "done at 18:45")
     assert delivery.post(box, box.get(answer.id), lambda: False) is False
     assert box.get(asked.id).state == "done"
 
@@ -229,8 +230,8 @@ def test_a_contended_reopen_leaves_the_answer_pending_until_a_later_pass_reopens
 
     box = InboxStore(store.redis)
     box.about("op-1", "phases/p1")
-    asked = box.send("operator", "sw-eng-1", "is the phase done", item_id="op-1")
-    answer = box.reply(asked.id, "sw-eng-1", "done at 18:45")
+    asked = box.send("operator", "sw-master-1", "is the phase done", item_id="op-1")
+    answer = box.reply(asked.id, "sw-master-1", "done at 18:45")
     reopen = box.reopen
 
     def contended(*args):
@@ -239,11 +240,11 @@ def test_a_contended_reopen_leaves_the_answer_pending_until_a_later_pass_reopens
     monkeypatch.setattr(box, "reopen", contended)
     assert delivery.post(box, box.get(answer.id), lambda: False) is False
     assert (box.get(answer.id).state, box.get(asked.id).state) == ("pending", "done")
-    assert box.pending_items("sw-eng-1") == []
+    assert box.pending_items("sw-master-1") == []
     monkeypatch.setattr(box, "reopen", reopen)
     assert delivery.post(box, box.get(answer.id), lambda: False) is False
     assert (box.get(answer.id).state, box.get(asked.id).state) == ("cancelled", "read")
-    [notice] = box.pending_items("sw-eng-1")
+    [notice] = box.pending_items("sw-master-1")
     assert notice.text == delivery.REFUSED.format(id=answer.id, reason="the swarm notice was dropped")
 
 
