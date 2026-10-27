@@ -6510,11 +6510,13 @@ For a remote agent the heartbeat decides:
 | `working`, 20 minutes old or more | Sent: a stale working beat counts as idle |
 | None recorded | None: a missing heartbeat counts as working |
 
-The tick sends the order only while the hive's execution report exists. A hive
+The tick sends the order only while the hive's report exists. A hive
 that stopped reporting gets no order, the item records no `woken` event and the
 next pass tries again. The hive applies the order only to the execution and
 generation it names, so a replaced agent's pane is never typed into. Each order
-id starts with `wake:<execution id>:<generation>:`.
+id starts with `wake:<execution id>:<generation>:`. The tick records the `woken`
+event when it queues the order and does not wait for the hive's answer, so a
+refused order still uses one of the item's three wakes.
 
 Both wake paths use this route. The tick's wake pass covers every pending work
 item. The immediate wake when mail lands for a Codex agent (`wake_now`) also
@@ -6525,11 +6527,18 @@ unchanged.
 
 #### Usage
 
-Nothing turns this on. Both machines need code that contains pull request 7802:
-the checkout the tick runs from, which sends the order, and the hive's
-`agentihooks-hive` user service (`agentihooks hive run`), which applies it. The settings under
+Nothing turns this on. Pull request 7802 changed only the sending side, so the
+checkout the tick runs from needs it. Three processes take part:
+
+| Process | Role |
+|---|---|
+| The swarm tick | Sends wake orders on its minute pass |
+| `agentihooks-inbox-waker` user service (`agentihooks swarm waker`) | Sends the immediate wake when mail lands; without it, wakes wait for the next tick |
+| `agentihooks-hive` user service (`agentihooks hive run`) on the agent's hive | Applies the `nudge` order and types the wake text |
+
+The settings under
 [Inbox escalation sender exclusion](#inbox-escalation-sender-exclusion) apply on
-the tick's process:
+the tick's and the waker's processes:
 
 | Setting | Default | Effect on a hive wake |
 |---|---|---|
@@ -6546,9 +6555,10 @@ agentihooks msg inbox --of <seat>@<slug>
 agentihooks msg read <message-id>
 ```
 
-A delivered wake shows a `woken` event by `swarm` with the reason
-`prompted <agent> to read its inbox`. The hive's pane then shows the line that
-begins `You have unread inbox messages: run agentihooks msg inbox`.
+A queued wake shows a `woken` event by `swarm` with the reason
+`prompted <agent> to read its inbox`. Once the hive applies the order, its pane
+shows the line that begins
+`[swarm delivery] You have unread inbox messages: run agentihooks msg inbox`.
 
 To confirm the hive is reporting, so orders can be sent:
 
@@ -6562,7 +6572,8 @@ agentihooks hive list
 |---|---|---|
 | An idle Codex agent on a hive has unread work and no `woken` event | Its heartbeat says `working` and is less than 20 minutes old, or no heartbeat exists | Expected: the item escalates to the master after the retry window. Check the agent's hooks are installed on the hive if it never writes a heartbeat |
 | No `woken` event and the agent's heartbeat is idle | The hive stopped reporting, so no order was sent | Check `agentihooks hive list`; on the hive, `systemctl --user restart agentihooks-hive`. The tick retries on every pass |
-| A `woken` event exists but the pane shows no wake text | The hive service runs code older than pull request 7802, or the agent was replaced and the order named the old generation | Pull `dev` on the hive and restart `agentihooks-hive`; a replaced agent's successor gets its own wake |
+| A `woken` event exists but the pane shows no wake text | The hive refused the order: the agent was replaced and the order named the old generation, or its runtime could not type into the pane. The wake still counts toward the item's three | Check `agentihooks-hive` is running on the hive; a replaced agent's successor gets its own wake, and the item escalates after its wakes run out |
+| Wakes arrive only on the minute, never when mail lands | `agentihooks-inbox-waker` is not running on the tick's machine | `systemctl --user status agentihooks-inbox-waker`, then start it |
 | An `app_server` Codex agent on a hive gets no wake | Expected: its push pump delivers the item | See [Codex inbox transport](../reference/codex-inbox-transport.md) |
 
 The tick does not escalate an item while it keeps choosing a wake for it: if a
@@ -6572,7 +6583,7 @@ waits for the hive to come back or for the agent to read its inbox.
 #### Delivery evidence
 
 [Pull request 7802](https://github.com/the-cloud-clockwork/agentihooks/pull/7802)
-merged into `dev` on 27 October 2026 at 18:33 UTC and closed issue 7794. Its
+merged into `dev` on 27 October 2026 at 18:33 UTC for issue 7794. Its
 final head passed the
 [Tests run](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/40549044022)
 and the
@@ -6585,10 +6596,10 @@ gets no order; that a stale working beat gets one; that a hive with no report
 gets no order and no `woken` event; and that an `app_server` agent gets no
 order.
 
-The source finding came from the Doctor swarm on 27 October 2026: two Codex
-agents on one hive left a wait outcome, stale nudges and a master message
-unread for over fifteen minutes each, at least four items past one wake window
-that day.
+The source finding is Doctor ledger task t931 on the `rig-grade-swarm-doctor`
+ledger, 27 October 2026: two Codex agents on one hive left a wait outcome, stale
+nudges and a master message unread for over fifteen minutes, at least four
+items past one wake window that day.
 
 ### Agents panel cells that overflow
 
