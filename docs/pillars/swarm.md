@@ -159,7 +159,8 @@ Each tick checks the live master of a running swarm. A master whose pane reads `
 call for `AGENTIHOOKS_HEALTH_STALLED_MINUTES` (default **10**) is stalled: the tick sends it an inbox item asking
 for a Handoff v2, waits up to `AGENTIHOOKS_MASTER_RETIRE_HANDOFF_MINUTES` (default 5), then recycles it in its seat
 with a recovery handoff and the reason `busy with no tool call for <n> minutes`. A master that resumes tool calls
-before the deadline has its request withdrawn with `the master resumed work`. A stalled master of a proof swarm whose
+once the stall no longer holds (it makes a tool call, its pane leaves `working` or it declares a wait) has its
+request withdrawn with `the master resumed work`. A stalled master of a proof swarm whose
 parent task is blocked stops the proof swarm instead.
 
 The quiet time counts from the master's last finished tool call, or from its session start when that is later.
@@ -168,13 +169,14 @@ The check does not count while:
 | Condition | Why |
 |---|---|
 | The pane is not `working` | An idle master is waiting for input, not stalled. |
-| The master declared a wait | `swarm <id> wait` names what it waits on. |
+| The master declared a wait | `swarm <slug> wait` names what it waits on. |
 | It started under six minutes ago | Startup grace. |
 | It has no recorded tool call, or none has finished since the last one began | It is inside a tool call. |
 | A tool call is still open | A long command or a subagent's `Agent` call is running. |
 
-The PreToolUse hook records each call as open under its tool use id and the hook that ends a call closes it and
-writes the finished time. Three events end a call:
+The PreToolUse hook records each call as open under its tool use id, and the hook that ends a call closes it and
+writes the finished time. A call denied by an early PreToolUse guard, before the call is recorded, only gets its
+finished time. Three events end a call:
 
 | Event | What happened to the call |
 |---|---|
@@ -187,10 +189,10 @@ stalls right after one is recycled on time. Before
 [pull request 7569](https://github.com/the-cloud-clockwork/agentihooks/pull/7569), a call denied by the PreToolUse
 hook stayed open, so a master that stalled right after one read as mid tool and was never recycled. Only a hook
 block ends the call there: an error inside the hook itself leaves it open. A call refused at the permission prompt
-carries no tool use id; the session's turn end clears every open call it left.
+carries no tool use id; the session's turn end, an unblocked Stop, clears every open call it left.
 
-The records live under `$AGENTIHOOKS_HOME/swarm-activity/<slug>/` (default `~/.agentihooks/swarm-activity`): `<name>.last`
-holds the time the last call began, `<name>.done` the time the last call ended, and `<name>.open/` one entry per call
+The records live under `$AGENTIHOOKS_HOME/swarm-activity/<slug>/` (default `~/.agentihooks/swarm-activity`):
+`<name>.last` holds the time the last call began, `<name>.done` the time the last call ended, and `<name>.open/` one entry per call
 still running. To see why a master is or is not counted as stalled:
 
 ```bash
@@ -202,8 +204,9 @@ agentihooks swarm <slug> status --json                        # the stalled find
 
 An entry left in `.open/` while the master sits stalled names the call that never ended; compare it with the
 master's last tool call before raising a finding. Change the threshold through the environment of the process that
-runs the tick, as described in [Configure the threshold](#configure-the-threshold); the same variable sets the
-`stalled` health finding.
+runs the tick, as described in [Configure the threshold](#configure-the-threshold). The same variable sets the
+`stalled` health finding, which counts from the last call start and ignores open calls, so a master inside a long
+call can show the finding while the recycle does not fire.
 
 ### Adopting a live master with no agent record
 
