@@ -36,12 +36,14 @@ function paint(box, d) {
   set("agents", String(d.agents.total));
   set("claude", String(d.agents.claude));
   set("codex", String(d.agents.codex));
-  const silent = d.hives.live - d.hives.reporting;
-  set("hives", silent ? `${d.hives.reporting} of ${d.hives.live}` : String(d.hives.live));
-  cell("hives").dataset.silent = cell("agents").dataset.silent = silent ? "yes" : "no";
-  cell("hives").title = cell("agents").title = silent
-    ? `${silent} live hive${silent === 1 ? " has" : "s have"} not reported its agents in 30 seconds; ${silent === 1 ? "its" : "their"} agents are not counted`
-    : "Agent processes each live hive read from its process table, this host's read now";
+  set("hives", String(d.hives.live));
+  const silent = d.agents.of - d.agents.reporting, where = d.agents.source === "herdr" ? "herdr machine" : "live hive";
+  cell("agents").dataset.silent = silent ? "yes" : "no";
+  cell("agents").title = silent
+    ? `${silent} of ${d.agents.of} ${where}s did not answer; their agents are not counted`
+    : d.agents.source === "herdr"
+      ? `Agent panes on the main herdr server and its ${d.agents.of - 1} plugged machine${d.agents.of === 2 ? "" : "s"}`
+      : `Agent processes on ${d.agents.of} live hive${d.agents.of === 1 ? "" : "s"}`;
   set("swarms", `${d.swarms.running} running`);
   cell("swarms").dataset.on = d.swarms.running ? "yes" : "no";
   gauge(cell("cpu"), `${d.cpu.used.toFixed(1)} of ${d.cpu.cores} cores`, share(d.cpu.used, d.cpu.cores));
