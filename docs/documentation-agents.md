@@ -62,7 +62,7 @@ baseline; SessionEnd gathers delivered change evidence and uses the named
 | Already covered | Existing documentation sufficiently explains the new behavior and its configuration. |
 | Change size | The impact is none, small, medium or large. |
 
-Evidence includes bounded Git changes, source task requirements, discovered
+Evidence includes bounded delivered changes, source task requirements, discovered
 documentation sources and case-insensitive regex matches for changed terms.
 Documentation mentions are retrieval evidence, rather than proof of adequate
 coverage. Credential files and linked documentation files are excluded, and
@@ -118,10 +118,65 @@ reaches the ledger, so the ledger raises no refused-add sync alert. A bound
 session with an empty `AGENTIHOOKS_SWARM_TASK` still classifies its changes and
 queues a task with no dependency.
 
-Change evidence is the diff from an evidence base to the head: the source task's
-`branch` when the task records one that resolves, otherwise the checkout's HEAD.
-The checkout is the session's worktree, or the primary repository checkout when
-that worktree no longer exists. The evidence base starts at the merge base of
+## Delivered change evidence
+
+Where the change evidence comes from depends on whether the session has a source
+task on the ledger.
+
+| Session | Change evidence |
+| --- | --- |
+| Bound to a source task whose record has `pr_url` | The diff of that pull request, read with `gh pr diff <pr_url> --color never` |
+| Bound to a source task whose record has no `pr_url` | None: no changed files and no diff |
+| No source task, such as a standalone session or an empty `AGENTIHOOKS_SWARM_TASK` | The local git range described under [Local git evidence](#local-git-evidence) |
+
+### Pull request evidence
+
+A source task's documentation task carries only the diff of the pull request
+recorded on that task. The checkout's history after the session started plays
+no part, so merges that reached `dev` from other tasks, or a primary checkout
+used after the task worktree was removed, never add their changes to it.
+
+The pull request diff is split into one section per file. Each file passes the
+same filter as local evidence: code and documentation file types only, with
+credential files dropped. The first 80 kept files form the attached diff, which
+is redacted and capped at 24,000 characters like local evidence. Documentation
+matches are searched for terms from that diff.
+
+The queued task description names the pull request on its second line:
+
+```text
+Document the delivered behavior of Add retry policy.
+Source task: t1. Delivered pull request: https://github.com/example/repo/pull/7.
+```
+
+When the source task records no pull request, the classifier still runs on the
+source task's requirements. Documentation matches are searched for terms from
+its description, or its title when it has none. If a documentation task is
+queued, its description says why no diff follows and its delivered change
+evidence is empty:
+
+```text
+Source task: t1. Delivered pull request: none recorded on the source task, so no delivered diff is attached.
+```
+
+Record the pull request on the source task before it closes so its
+documentation task carries the delivered diff:
+
+```bash
+agentihooks swarm <slug> pr https://github.com/<owner>/<repo>/pull/<number>
+```
+
+The `gh` call runs as the hook worker's user with a 60 second timeout. When it
+fails or times out, the request stays pending with the error name, such as
+`CalledProcessError` or `TimeoutExpired`, and later session completions in the
+same swarm retry it.
+
+### Local git evidence
+
+A session with no source task uses the local git range. Change evidence is the
+diff from an evidence base to the head, the checkout's HEAD. The checkout is the
+session's worktree, or the primary repository checkout when that worktree no
+longer exists. The evidence base starts at the merge base of
 the SessionStart baseline and the head, then moves past `origin/dev` commits
 that reached the checkout by a pull or fast forward. The first matching row
 applies:
@@ -142,10 +197,13 @@ commits included. Commits on the head that are not on `origin/dev` always count.
 A session with no source task and no changed code or documentation files left
 after this records the `no changes` verdict without a model call.
 
-### Troubleshooting
+## Troubleshooting
 
 | Symptom | Cause and check |
 | --- | --- |
+| A documentation task says `none recorded on the source task, so no delivered diff is attached` | The source task held no `pr_url` when the request was processed. Check with `agentihooks ledger --slug <slug> get tasks/<source task>`. Record the pull request with `agentihooks swarm <slug> pr <url>` or `swarm <slug> done --pr <url>`. A task already queued keeps its description, because a repeated completion finds the existing documentation task and adds nothing. |
+| A documentation task's diff shows files its source task never touched | Compare the files in the description with `gh pr diff <pr_url> --name-only` for the pull request named on its second line. They match for any task queued since pull request evidence shipped. If the source task records the wrong pull request, correct `pr_url` on the source task. |
+| A request stays pending with error `CalledProcessError` or `TimeoutExpired` | `gh pr diff` failed or exceeded 60 seconds for the source task's pull request. Run `gh pr diff <pr_url> --color never` as the same user to see the cause, such as missing `gh` authentication or an unreachable host. Later session completions in the swarm retry the request. |
 | A master or seat session left no documentation task | Expected when `AGENTIHOOKS_SWARM_TASK` is set to an id the ledger does not hold. Its request record under `~/.agentihooks/documentation/`, named by the SHA-256 of the session id, has status `complete` and verdict source `no ledger task`. With an empty value the session is classified and can queue a task with no dependency. |
 | A session that only pulled `dev` reported no changes | Expected. No pulled `origin/dev` commit has a `commit` entry in the checkout's HEAD reflog, so the evidence base moved to the merge base with `origin/dev`. |
 | Delivered commits were missed | The commits were created outside this checkout, for example in another worktree, so this checkout's reflog holds no `commit` entry for them. Document the change from its own task. |
