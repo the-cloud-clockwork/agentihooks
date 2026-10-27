@@ -24,8 +24,11 @@ SCOPED = {"launch", "checkpoint", "session_event", "context_pack", "receipt"}
 
 class IgnoresGeneration(Target):
     def submit(self, contract, doc, grant):
-        (self.root / "generations.json").unlink(missing_ok=True)
-        return super().submit(contract, doc, grant)
+        status, body = super().submit(contract, doc, grant)
+        if body.get("error") != "stale_generation":
+            return status, body
+        (self.root / contract / f"{doc['operation_id']}.json").write_text(json.dumps(doc))
+        return 200, {"state": "accepted", "operation_id": doc["operation_id"]}
 
 
 class IgnoresScope(Target):
@@ -55,6 +58,7 @@ class WritesBeforeRefusing(Target):
     def submit(self, contract, doc, grant):
         status, body = super().submit(contract, doc, grant)
         if "error" in body:
+            self.root.mkdir(parents=True, exist_ok=True)
             (self.root / "refused.json").write_text(json.dumps(doc))
         return status, body
 
