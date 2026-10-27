@@ -36,7 +36,7 @@ def front_doors(store: "RedisStore") -> list[FrontDoor]:
     return [
         FrontDoor(slug, agent.name, held.get(agent.name, ""), agent.account)
         for slug in store.slugs()
-        if store.config(slug).state == "running"
+        if store.config(slug).state != "stopped"
         for agent in store.agents(slug)
         if agent.lane == login.LANE
         and agent.state == "working"

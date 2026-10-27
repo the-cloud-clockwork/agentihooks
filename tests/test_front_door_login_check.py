@@ -123,13 +123,13 @@ def test_live_routes_keep_the_swarm_front_door_and_account(monkeypatch):
     ]
 
 
-@pytest.mark.parametrize("state", ["stopped", "paused"])
-def test_front_doors_excludes_swarms_that_are_not_running(state, monkeypatch):
+@pytest.mark.parametrize(("state", "judged"), [("stopped", False), ("paused", True), ("running", True)])
+def test_front_doors_excludes_only_stopped_swarms(state, judged, monkeypatch):
     _stored(1, "one@example.com")
     _room(monkeypatch, oneatexample_com=60)
     current = Store({"rig": [_agent("master@rig-1", account="token")]}, state=state)
-    assert check.front_doors(current) == []
-    assert check.main(current) == 0
+    assert [door.name for door in check.front_doors(current)] == ["master@rig-1"] * judged
+    assert check.main(current) == int(judged)
 
 
 def test_front_doors_excludes_a_working_master_whose_session_is_gone(monkeypatch):
