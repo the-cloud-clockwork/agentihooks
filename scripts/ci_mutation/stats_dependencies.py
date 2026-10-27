@@ -121,8 +121,7 @@ class StoredStats:
             self.misses["no record"] += 1
             return None
         inputs, scope, measured = self.unshare(record["inputs"]), record["scope"], record["measured"]
-        dependencies = {test: self.unshare(ref) for test, ref in record.get("dependencies", {}).items()}
-        if inputs is None or None in dependencies.values():
+        if inputs is None:
             self.misses["no inputs"] += 1
             return None
         discovery = record.get("discovery", "")
@@ -155,7 +154,10 @@ class StoredStats:
             if name not in {"key", "inputs", "scope", "measured", "discovery", "context"}
         }
         if "dependencies" in result:
-            result["dependencies"] = dependencies
+            result["dependencies"] = {test: self.unshare(ref) for test, ref in result["dependencies"].items()}
+            if None in result["dependencies"].values():
+                self.misses["no inputs"] += 1
+                return None
         return {**result, "reused": True} if measured else result
 
     def save(self, path: str, result: dict, inputs: dict, measured: bool, discovery: str = "") -> None:
