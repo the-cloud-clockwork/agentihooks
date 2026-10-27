@@ -301,3 +301,27 @@ def test_a_selection_in_one_pass_takes_its_hive_room_from_later_tasks(setup, in_
         assert [hive["room"] for hive in launch.hives() if hive["id"] == "remote"] == [0]
     else:
         assert isinstance(second, Selection)
+
+
+@pytest.mark.parametrize("in_pass", [False, True])
+def test_a_refused_hive_reservation_turns_the_placement_into_a_wait(setup, in_pass):  # noqa: F811
+    from scripts.hive import admission
+    from scripts.hive.placement import Wait
+    from scripts.swarm_v2.runtime.base import Status
+    from tests.hive.test_controller_launch import publish_room
+
+    publish_room(setup.store, "remote", 1)
+    launch = setup.launcher
+    launch.placement_cache = {} if in_pass else None
+    request = request_for(setup)
+    assert isinstance(launch.select(setup.config, "eng", request.task), Selection)
+    assert admission.reserve(setup.store.redis, "remote", "other/engineer-1", 1)[0]
+    result = launch.spawn(request)
+    assert result.status is Status.UNAVAILABLE
+    assert "no hive for eng has room: remote" in result.detail
+    waited = launch.select(setup.config, "eng", request.task)
+    assert isinstance(waited, Wait)
+    assert isinstance(launch.select(setup.config, "eng", {"id": "later"}), Wait)
+    if in_pass:
+        assert waited.reason == result.detail
+        assert [hive["room"] for hive in launch.hives() if hive["id"] == "remote"] == [0]
