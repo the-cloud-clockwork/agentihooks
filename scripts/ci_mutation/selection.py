@@ -27,11 +27,10 @@ GROUP = re.compile(r"xdist_group\(\s*(?:name\s*=\s*)?[\"']([^\"']+)[\"']")
 IMPORT_GROUPS = {"fakeredis"}
 
 
-def changed_mutations(filename: str, source: str, changed: set[int]) -> tuple[object, list]:
+def changed_mutations(filename: str, source: str, changed: set[int], *, decorated: bool = False) -> tuple[object, list]:
     from libcst.metadata import MetadataWrapper, WhitespaceInclusivePositionProvider
-    from mutmut.mutation.file_mutation import create_mutations
 
-    module, mutations, _, _ = create_mutations(filename, source)
+    module, mutations = created_mutations(filename, source, decorated)
     positions = MetadataWrapper(module, unsafe_skip_copy=True).resolve(WhitespaceInclusivePositionProvider)
     selected = []
     for mutation in mutations:
@@ -46,6 +45,54 @@ def changed_mutations(filename: str, source: str, changed: set[int]) -> tuple[ob
         if changed.intersection(lines):
             selected.append(mutation)
     return module, selected
+
+
+def created_mutations(filename: str, source: str, decorated: bool) -> tuple[object, list]:
+    import libcst as cst
+    from libcst.metadata import MetadataWrapper, PositionProvider
+    from mutmut.mutation.file_mutation import NEVER_MUTATE_FUNCTION_NAMES, MutationVisitor
+    from mutmut.mutation.mutators import mutation_operators
+    from mutmut.mutation.pragma_handling import get_ignored_lines
+
+    class Visitor(MutationVisitor):
+        # mutmut 3.6.0 skips every decorated class, yet a dataclass keeps its methods, so their trampolines work.
+        def _skip_node_and_children(self, node: cst.CSTNode) -> bool:
+            skipped = super()._skip_node_and_children(node)
+            if not skipped or not isinstance(node, cst.FunctionDef | cst.ClassDef) or not node.decorators:
+                return skipped
+            if not decorated and not (isinstance(node, cst.ClassDef) and all(map(is_dataclass, node.decorators))):
+                return True
+            position = self.get_metadata(PositionProvider, node, None)
+            if position is not None and position.start.line in self._ignored_node_lines:
+                return True
+            return isinstance(node, cst.FunctionDef) and node.name.value in NEVER_MUTATE_FUNCTION_NAMES
+
+    wrapper = MetadataWrapper(cst.parse_module(source))
+    visitor = Visitor(mutation_operators, get_ignored_lines(filename, source, wrapper))
+    return wrapper.visit(visitor), visitor.mutations
+
+
+def is_dataclass(decorator) -> bool:
+    import libcst as cst
+
+    target = decorator.decorator.func if isinstance(decorator.decorator, cst.Call) else decorator.decorator
+    name = target.attr if isinstance(target, cst.Attribute) else target
+    return isinstance(name, cst.Name) and name.value == "dataclass"
+
+
+def hidden_mutations(filename: str, source: str, changed: set[int]) -> int:
+    from libcst.metadata import MetadataWrapper, PositionProvider
+
+    if any(mutation.contained_by_top_level_function for mutation in changed_mutations(filename, source, changed)[1]):
+        return 0
+    module, possible = changed_mutations(filename, source, changed, decorated=True)
+    positions = MetadataWrapper(module, unsafe_skip_copy=True).resolve(PositionProvider)
+    return sum(
+        positions[mutation.original_node].start.line
+        >= positions[mutation.contained_by_top_level_function.body.body[0]].start.line
+        for mutation in possible
+        if mutation.contained_by_top_level_function
+    )
 
 
 def selected_mutants(filename: str, source: str, changed: set[int]) -> tuple[str, list[str]]:

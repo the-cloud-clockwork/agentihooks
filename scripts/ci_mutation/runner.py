@@ -15,6 +15,7 @@ from scripts.ci_mutation.clearances import load_clearances
 from scripts.ci_mutation.mutant_shards import holds, split_names, unit_cost
 from scripts.ci_mutation.report import evaluate, survivor_text
 from scripts.ci_mutation.scope import select_tests
+from scripts.ci_mutation.selection import hidden_mutations
 from scripts.ci_mutation.stats import SharedStats, load_parts, stats_key
 
 IDENTITY = "scripts/ci_mutation/identity.py"
@@ -426,6 +427,12 @@ def run_gate(
             rows[path] = []
         elif time.monotonic() >= deadline:
             reasons[path] = "over budget"
+        elif (
+            source.is_file()
+            and (stats is None or stats.part is None)
+            and hidden_mutations(path, source.read_text(), lines)
+        ):
+            reasons[path] = "changed function lines produce no mutants"
         elif tests := (selection[path] if selection is not None else select_tests(root, Path(path))):
             selected[path] = (lines, tests)
         else:

@@ -471,6 +471,40 @@ def test_multiline_operator_on_changed_line_is_mutated_and_unchanged_tokens_are_
         selected_mutants("scripts/sample.py", "# pragma: no mutate end\n", {1})
 
 
+def test_dataclass_methods_are_mutated_and_other_decorated_function_bodies_count_as_hidden(monkeypatch):
+    from mutmut.configuration import Config
+
+    from scripts.ci_mutation.selection import hidden_mutations, selected_mutants
+
+    monkeypatch.setattr(
+        Config, "get", lambda: SimpleNamespace(do_not_mutate_patterns=[], source_paths=[], max_stack_depth=-1)
+    )
+    source = (
+        "import dataclasses\n"
+        "import functools\n"
+        "\n"
+        "@dataclasses.dataclass(frozen=True)\n"
+        "class Launcher:\n"
+        "    count: int = 1\n"
+        "\n"
+        "    def launch(self):\n"
+        "        return self.count + 1\n"
+        "\n"
+        "@functools.lru_cache(maxsize=2)\n"
+        "def cached(value):\n"
+        "    return value - 1\n"
+    )
+    generated, names = selected_mutants("scripts/sample.py", source, {9})
+    assert len(names) == 2
+    assert all(name.startswith("xǁLauncherǁlaunch__mutmut_") for name in names)
+    assert "self.count - 1" in generated
+    compile(generated, "scripts/sample.py", "exec")
+    assert hidden_mutations("scripts/sample.py", source, {9}) == 0
+    assert selected_mutants("scripts/sample.py", source, {13})[1] == []
+    assert hidden_mutations("scripts/sample.py", source, {13}) == 2
+    assert hidden_mutations("scripts/sample.py", source, {4, 11}) == 0
+
+
 @pytest.mark.parametrize("total", [1, 2, 3, 7])
 def test_shards_split_every_mutant_name_exactly_once_and_evenly(total):
     from scripts.ci_mutation.mutant_shards import shard_names
