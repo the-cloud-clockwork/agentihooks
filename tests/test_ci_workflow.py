@@ -1833,7 +1833,7 @@ def test_mutation_job_runs_independently_and_keeps_its_evidence():
         == 'python -m scripts.ci_mutation --bases "$BASES" --budget 1080 --shard "$SHARD" --shards "$SHARDS"'
         + " --stats .mutation-stats"
     )
-    artifact = next(step for step in steps if step.get("uses", "").startswith("actions/upload-artifact"))
+    artifact = next(step for step in steps if step.get("name") == "Upload complete mutation evidence")
     assert artifact["if"] == "always() && needs.mutation-plan.outputs.forwarded != 'true'"
     assert artifact["with"]["include-hidden-files"] is True
     assert artifact["with"]["name"] == "mutation-report-${{ matrix.shard }}"
@@ -2223,8 +2223,16 @@ def test_jobs_on_the_pull_request_head_run_local_actions_from_the_workflow_revis
         for name, job in jobs.items()
         if name.startswith("mutation") and any(s.get("with", {}).get("ref") == head for s in job.get("steps", []))
     }
-    assert {"mutation-stats", "mutation"} <= set(local)
-    assert all(not steps for name, steps in local.items() if name not in {"mutation-stats", "mutation"})
+    assert {"mutation-plan", "mutation-stats", "mutation"} == set(local)
+    plan = jobs["mutation-plan"]["steps"]
+    take = next(step for step in plan if step.get("name") == "Take the upload action from the workflow revision")
+    assert take["run"].splitlines() == [
+        'git fetch --no-tags origin "$GITHUB_SHA"',
+        "mkdir -p .workflow-revision",
+        'git archive "$GITHUB_SHA" .github/actions/retry-upload | tar -x -C .workflow-revision',
+    ]
+    assert {step["uses"] for step in local["mutation-plan"]} == {"./.workflow-revision/.github/actions/retry-upload"}
+    assert all(plan.index(take) < plan.index(step) for step in local["mutation-plan"])
     for name in ("mutation-stats", "mutation"):
         steps = jobs[name]["steps"]
         names = [step.get("name") for step in steps]
@@ -2238,7 +2246,8 @@ def test_jobs_on_the_pull_request_head_run_local_actions_from_the_workflow_revis
         assert {step["uses"] for step in local[name]} == {
             "./.workflow-revision/.github/actions/nats-server",
             "./.workflow-revision/.github/actions/browser-cache",
-        } | ({"./.workflow-revision/.github/actions/retry-upload"} if name == "mutation-stats" else set())
+            "./.workflow-revision/.github/actions/retry-upload",
+        }
         assert all(steps.index(take) < steps.index(step) for step in local[name])
         assert all("hashFiles" not in step.get("if", "") for step in local[name])
 
