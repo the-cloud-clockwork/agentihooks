@@ -139,6 +139,7 @@ controller:
   # lives here: approved accounts come from the shared account secret.
   workers:
     apiUrl: ""
+    kubernetesProofSwarm: ""
     imageTag: dev
     profile: ""
     cap: 1
