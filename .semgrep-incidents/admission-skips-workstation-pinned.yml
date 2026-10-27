@@ -14,18 +14,18 @@ rules:
           metavariable: $COUNT
           regex: .*(room|admi|running|occupan|held|count|capacity|slots|_full).*
       - pattern-either:
-          - pattern: '[... for $AGENT in $AGENTS if <... $AGENT.get("workstation") ...>]'
-          - pattern: '[... for $AGENT in $AGENTS if <... $AGENT["workstation"] ...>]'
-          - pattern: '[... for $AGENT in $AGENTS if <... $AGENT.workstation ...>]'
-          - pattern: '($X for $AGENT in $AGENTS if <... $AGENT.get("workstation") ...>)'
-          - pattern: '($X for $AGENT in $AGENTS if <... $AGENT["workstation"] ...>)'
-          - pattern: '($X for $AGENT in $AGENTS if <... $AGENT.workstation ...>)'
+          - pattern: '[... for $AGENT in $AGENTS if <... not $AGENT.get("workstation") ...>]'
+          - pattern: '[... for $AGENT in $AGENTS if <... not $AGENT["workstation"] ...>]'
+          - pattern: '[... for $AGENT in $AGENTS if <... not $AGENT.workstation ...>]'
+          - pattern: '($X for $AGENT in $AGENTS if <... not $AGENT.get("workstation") ...>)'
+          - pattern: '($X for $AGENT in $AGENTS if <... not $AGENT["workstation"] ...>)'
+          - pattern: '($X for $AGENT in $AGENTS if <... not $AGENT.workstation ...>)'
           - pattern: |
-              if <... $AGENT.get("workstation") ...>:
+              if $AGENT.get("workstation"):
                   continue
           - pattern: |
-              if <... $AGENT["workstation"] ...>:
+              if $AGENT["workstation"]:
                   continue
           - pattern: |
-              if <... $AGENT.workstation ...>:
+              if $AGENT.workstation:
                   continue

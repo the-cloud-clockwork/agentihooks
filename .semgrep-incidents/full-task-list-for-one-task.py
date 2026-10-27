@@ -66,3 +66,9 @@ def read_once(ledger, slug, agents):
     rows = {task["id"]: task for task in ledger.tasks(slug)}
     for agent in agents:
         print(rows.get(agent.task))
+
+
+def every_ledger(ledger, slugs):
+    for slug in slugs:
+        # ok: full-task-list-for-one-task
+        print(slug, len(ledger.tasks(slug)))

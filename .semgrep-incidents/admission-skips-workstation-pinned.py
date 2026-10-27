@@ -26,3 +26,8 @@ def running_on_hive(records, machine):
 def waiting_for_workstation(rows, machine):
     # ok: admission-skips-workstation-pinned
     return [row for row in rows if row.get("workstation") == machine]
+
+
+def running_pinned_to(records, machine):
+    # ok: admission-skips-workstation-pinned
+    return sum(1 for row in records if row.get("workstation") == machine)

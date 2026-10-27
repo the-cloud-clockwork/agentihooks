@@ -5,7 +5,8 @@ rules:
     message: >-
       A workflow hands a GitHub App token to Git over HTTPS. On 27 October GitHub refused Git over HTTPS for the App
       while its REST API kept working, and promotion tags failed. Use the REST API through gh api instead: git/refs to
-      create a ref, tarball to read another repository's files.
+      create a ref, tarball to read another repository's files instead of a checkout or clone. An x-access-token URL
+      puts a token into Git over HTTPS the same way, whichever token it carries.
     pattern-either:
       - patterns:
           - pattern: |

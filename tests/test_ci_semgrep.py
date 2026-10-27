@@ -40,11 +40,11 @@ def test_scan_grades_new_findings_against_the_caller_base():
     assert _jobs()["scan"]["with"]["base"] == "${{ inputs.base }}"
 
 
-def test_scan_runs_the_registry_packs_for_ci_secrets_and_python():
+def test_scan_runs_the_registry_packs_and_the_outage_rules():
     assert set(_jobs()["scan"]["with"]["configs"].split()) == {"p/ci", "p/secrets", "p/python", ".semgrep-incidents"}
 
 
-def test_outage_rules_fail_only_new_instances_and_test_their_fixtures():
+def test_outage_rules_reach_the_base_graded_scan_and_the_fixture_step():
     assert ".semgrep-incidents" in _jobs()["scan"]["with"]["configs"].split()
     assert any(_ROOT.glob(".semgrep-incidents/*.yml"))
     runs = [step.get("run") for step in _jobs()["feature-tests"]["steps"]]
