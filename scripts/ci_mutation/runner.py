@@ -401,6 +401,23 @@ def split_plan_names(stats: SharedStats | None) -> set[str]:
     return split_names(json.loads((stats.folder / "plan.json").read_text()))
 
 
+def triage(
+    root: Path, path: str, lines: set[int], deadline: float, selection: dict | None, stats: SharedStats | None
+) -> tuple[str, list[str]]:
+    source = root / path
+    if source.is_file() and not any(
+        isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) for node in ast.walk(ast.parse(source.read_text()))
+    ):
+        return "", []
+    if time.monotonic() >= deadline:
+        return "over budget", []
+    if source.is_file() and (stats is None or stats.part is None) and hidden_mutations(path, source.read_text(), lines):
+        return "changed function lines produce no mutants", []
+    if tests := (selection[path] if selection is not None else select_tests(root, Path(path))):
+        return "", tests
+    return "no matching or importing test modules", []
+
+
 def run_gate(
     root: Path,
     changes: dict[str, set[int]],
@@ -419,24 +436,13 @@ def run_gate(
     report = {"files": [], "not_mutated": [], "failed": False}
     rows, reasons, selected, failing = {}, {}, {}, []
     for path, lines in changes.items():
-        source = root / path
-        if source.is_file() and not any(
-            isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
-            for node in ast.walk(ast.parse(source.read_text()))
-        ):
-            rows[path] = []
-        elif time.monotonic() >= deadline:
-            reasons[path] = "over budget"
-        elif (
-            source.is_file()
-            and (stats is None or stats.part is None)
-            and hidden_mutations(path, source.read_text(), lines)
-        ):
-            reasons[path] = "changed function lines produce no mutants"
-        elif tests := (selection[path] if selection is not None else select_tests(root, Path(path))):
+        reason, tests = triage(root, path, lines, deadline, selection, stats)
+        if reason:
+            reasons[path] = reason
+        elif tests:
             selected[path] = (lines, tests)
         else:
-            reasons[path] = "no matching or importing test modules"
+            rows[path] = []
     groups = [[path for path in selected if path != IDENTITY], [path for path in selected if path == IDENTITY]]
     for index, group in enumerate(group for group in groups if group):
         if time.monotonic() >= deadline:
