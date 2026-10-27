@@ -15,7 +15,11 @@ def test_optional_refinement_cache_retries_fit_inside_the_job_budget():
     assert retry["with"] == first["with"]
     assert retry["if"] == f"!cancelled() && steps.{first['id']}.outcome == 'failure'"
     assert "success()" in first["if"]
-    assert "hashFiles('.mutation-stats-cache/**') != ''" in first["if"]
+    assert first["if"] == "success() && steps.merged-stats.outputs.found == 'true'"
+    assert not any("hashFiles" in step.get("if", "") for step in saves)
+    check = next(step for step in steps if step.get("id") == "merged-stats")
+    assert check["timeout-minutes"] == 1
+    assert steps.index(check) < steps.index(first)
     upload = next(step for step in steps if step.get("name") == "Upload the measured mutation plan")
     assert steps.index(upload) < steps.index(first) < steps.index(retry)
     assert not upload.get("continue-on-error", False)
