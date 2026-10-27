@@ -78,12 +78,16 @@ def test_two_executions_cannot_share_one_endpoint(bindings):
 def test_a_concurrent_change_refuses_the_reservation(bindings, monkeypatch):
     from redis.exceptions import WatchError
 
+    attempts = []
+
     def interrupted(self):
+        attempts.append(self)
         raise WatchError("changed")
 
     monkeypatch.setattr(type(bindings.redis.pipeline()), "execute", interrupted)
     with pytest.raises(BindingError, match=EXACT["concurrent launch"]):
         bindings.reserve(SLUG, record())
+    assert len(attempts) == 5
 
 
 @pytest.mark.parametrize("watched", [RECORDS, ENDPOINTS])
