@@ -1,5 +1,6 @@
 """Spawn one named seat of a swarm, the master or the dispatcher, behind the session slot and host checks."""
 
+import re
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 
@@ -28,6 +29,14 @@ def host_hold(slug: str, store, now_ms: int, what: str) -> str:
 
     host = tick._host_full(slug, store, now_ms)
     return tick._hold(slug, store, f"holding the {what} spawn: {host}") if host else ""
+
+
+def room_refused(error) -> bool:
+    from scripts.hive.placement import HAS_ROOM, LOCAL_FULL
+    from scripts.swarm.tick import SpawnError
+
+    marks = rf"no hive (?:for \S+ {HAS_ROOM}: |{HAS_ROOM}{re.escape(LOCAL_FULL)})"
+    return isinstance(error, SpawnError) and re.match(marks, str(error)) is not None
 
 
 def place(slug: str, config, store, runtime, lane: str, now_ms: int, prepare: Callable[[AgentRecord], dict]):

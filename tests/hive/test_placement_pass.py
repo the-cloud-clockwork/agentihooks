@@ -349,5 +349,6 @@ def test_a_refused_hive_reservation_waits_when_placement_no_longer_reports_it(re
     assert not [action for action in actions if "spawn failed" in action]
     assert f"task t1 waits: {refused}" in actions
     assert f"the master waits: {refused}" in actions
+    assert store.redis.get(store.key("sw", "master-start")) is None
     assert ledger.rows["t1"]["state"] == "open"
     assert [row["state"] for row in store.launches("sw")] == ["waiting"]
