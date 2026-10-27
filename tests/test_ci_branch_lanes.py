@@ -736,6 +736,7 @@ def test_only_the_trusted_chart_release_may_leave_the_shared_proof_lane(change):
     import copy
 
     baseline = yaml.safe_load((ROOT / lanes.WORKFLOWS / "chart-release.yml").read_text())
+    baseline["concurrency"] = {"group": lanes.GROUP, "queue": "max", "cancel-in-progress": False}
     updated = copy.deepcopy(baseline)
     updated["concurrency"] = {"group": "chart-release", "queue": "max", "cancel-in-progress": False}
     if change == "group":
