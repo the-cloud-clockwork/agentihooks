@@ -2053,7 +2053,7 @@ def test_a_head_that_predates_the_local_actions_gets_them_from_the_workflow_revi
     git("add", ".")
     git("commit", "-qm", "head without the actions")
     head = git("rev-parse", "HEAD").strip()
-    for action in ("nats-server", "browser-cache"):
+    for action in ("nats-server", "browser-cache", "retry-upload"):
         (tmp_path / ".github/actions" / action).mkdir(parents=True)
         (tmp_path / ".github/actions" / action / "action.yml").write_text(f"name: {action}\n")
     git("add", ".")
