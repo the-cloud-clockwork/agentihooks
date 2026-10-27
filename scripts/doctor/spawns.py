@@ -4,7 +4,7 @@ import re
 from scripts.swarm.health.findings import Finding
 
 TICK_MS = 60_000
-FAILURE = re.compile(r"^(?:spawn failed for ([^\s,:]+).*?|master spawn failed): (.+)$")
+FAILURE = re.compile(r"^(?:spawn failed for ([^\s,:]+)(?:, task [^\s,:]+ reopened)?|master spawn failed): (.+)$")
 
 
 def _reservation_room(snapshot: dict) -> bool:
