@@ -2063,7 +2063,8 @@ def test_a_head_that_predates_the_local_actions_gets_them_from_the_workflow_revi
 
 
 @pytest.mark.parametrize("failure", ["", "revision", "archive"])
-def test_antoncore_archive_fallback_retains_checker_inputs_and_fails_closed(tmp_path, failure):
+def test_antoncore_app_rest_retains_all_checker_inputs_when_git_is_refused(tmp_path, failure):
+    step = next(s for s in _workflow()["jobs"]["lint"]["steps"] if s.get("id") == "antoncore-checkout")
     source = tmp_path / "source"
     inputs = {
         "scripts/swarm_dashboard_columns.py": "checker",
@@ -2072,7 +2073,7 @@ def test_antoncore_archive_fallback_retains_checker_inputs_and_fails_closed(tmp_
         "k8s/values-overlays/agentihooks-swarm-nats/users.yaml": "users",
         "k8s/values-overlays/agentihooks-swarm-nats/trust.yaml": "trust",
     }
-    for path, value in inputs.items():
+    for path, value in {**inputs, "unselected.txt": "excluded"}.items():
         target = source / path
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(value)
@@ -2081,27 +2082,32 @@ def test_antoncore_archive_fallback_retains_checker_inputs_and_fails_closed(tmp_
         tar.add(source, arcname="antoncore-revision")
     tools = tmp_path / "bin"
     tools.mkdir()
-    gh = tools / "gh"
-    gh.write_text(
-        "#!/usr/bin/env bash\nset -euo pipefail\n"
-        '[[ "$GH_TOKEN" == fixture-app ]]\n'
-        'echo "$*" >> "$CALLS"\n'
-        'case "$*" in\n'
-        '  *commits/dev*) [[ "$FAILURE" != revision ]]; echo trusted-revision ;;\n'
-        '  *tarball/trusted-revision*) [[ "$FAILURE" != archive ]]; cat "$ARCHIVE" ;;\n'
-        "  *) exit 1 ;;\n"
-        "esac\n"
-    )
-    gh.chmod(0o755)
+    for name, body in {
+        "git": 'echo "git refused" >> "$CALLS"; exit 128\n',
+        "gh": (
+            '[[ "$GH_TOKEN" == fixture-app ]]\n'
+            'echo "$*" >> "$CALLS"\n'
+            'case "$*" in\n'
+            '  *commits/dev*) [[ "$FAILURE" != revision ]]; echo trusted-revision ;;\n'
+            '  *tarball/trusted-revision*) [[ "$FAILURE" != archive ]]; cat "$ARCHIVE" ;;\n'
+            "  *) exit 1 ;;\n"
+            "esac\n"
+        ),
+    }.items():
+        tool = tools / name
+        tool.write_text("#!/usr/bin/env bash\nset -euo pipefail\n" + body)
+        tool.chmod(0o755)
     calls = tmp_path / "calls"
+    output = tmp_path / "output"
     result = subprocess.run(
-        ["bash", str(_ROOT / ".github/scripts/antoncore-read.sh")],
+        ["bash", "-c", step["run"]],
         cwd=tmp_path,
         env={
             **os.environ,
+            **{key: value for key, value in step["env"].items() if key != "GH_TOKEN"},
             "PATH": f"{tools}:{os.environ['PATH']}",
             "GH_TOKEN": "fixture-app",
-            "RUNNER_TEMP": str(tmp_path),
+            "GITHUB_OUTPUT": str(output),
             "CALLS": str(calls),
             "ARCHIVE": str(archive),
             "FAILURE": failure,
@@ -2110,25 +2116,27 @@ def test_antoncore_archive_fallback_retains_checker_inputs_and_fails_closed(tmp_
         text=True,
     )
     assert (result.returncode == 0) == (not failure), result.stderr
-    if not failure:
+    if failure:
+        assert not output.exists()
+    else:
         for path, value in inputs.items():
             assert (tmp_path / ".antoncore" / path).read_text() == value
-        assert (tmp_path / ".antoncore/.archive-revision").read_text() == "trusted-revision\n"
-        assert calls.read_text().splitlines() == [
-            "api repos/the-cloud-clockwork/antoncore/commits/dev --jq .sha",
-            "api repos/the-cloud-clockwork/antoncore/tarball/trusted-revision",
-        ]
-    assert not list(tmp_path.glob("antoncore.*.tar.gz"))
+        assert not (tmp_path / ".antoncore/unselected.txt").exists()
+        assert output.read_text() == "revision=trusted-revision\n"
+    assert calls.read_text().splitlines() == (
+        ["api repos/the-cloud-clockwork/antoncore/commits/dev --jq .sha"]
+        + ([] if failure == "revision" else ["api repos/the-cloud-clockwork/antoncore/tarball/trusted-revision"])
+    )
 
 
-def test_lint_falls_back_only_after_git_refusal_with_the_same_antoncore_app():
+def test_lint_keeps_the_pinned_archive_on_the_same_antoncore_app():
     steps = _workflow()["jobs"]["lint"]["steps"]
-    checkout = next(s for s in steps if s.get("name") == "Check out the antoncore dashboard column checker")
-    assert checkout["continue-on-error"] is True
-    assert checkout["id"] == "antoncore-checkout"
-    fallback = next(s for s in steps if s.get("name") == "Read antoncore through the REST archive after Git refusal")
-    assert "steps.antoncore-checkout.outcome == 'failure'" in fallback["if"]
-    assert "steps.antoncore-token.outputs.token" in fallback["env"]["GH_TOKEN"]
-    assert fallback["run"] == "bash .github/scripts/antoncore-read.sh"
+    checkout = next(s for s in steps if s.get("id") == "antoncore-checkout")
+    assert "steps.app-token.outcome == 'success'" in checkout["if"]
+    assert checkout["env"]["GH_TOKEN"] == "${{ steps.app-token.outputs.token }}"
+    assert checkout["env"]["REPOSITORY"] == "the-cloud-clockwork/antoncore"
+    assert checkout["env"]["REF"] == "dev"
+    assert "git " not in checkout["run"]
     check = next(s for s in steps if s.get("name", "").startswith("Run every Swarm Ledger dashboard query"))
-    assert ".archive-revision" in check["run"]
+    assert check["env"]["ANTONCORE_REVISION"] == "${{ steps.antoncore-checkout.outputs.revision }}"
+    assert 'echo "$ANTONCORE_REVISION"' in check["run"]

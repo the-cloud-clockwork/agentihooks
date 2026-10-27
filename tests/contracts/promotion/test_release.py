@@ -3,6 +3,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
+import yaml
 
 ROOT = Path(__file__).resolve().parents[3]
 
@@ -105,57 +106,43 @@ def test_release_notes_assemble_every_fragment_added_since_the_previous_tag(tmp_
     assert _notes(repo, "1.0.2") == ""
 
 
-@pytest.mark.parametrize("git_failures,api_status", [(0, 0), (1, 0), (3, 0), (3, 1)])
-def test_tag_push_retries_then_uses_the_same_app_for_the_exact_release_ref(tmp_path, git_failures, api_status):
+@pytest.mark.parametrize("api_status", [0, 1])
+def test_verified_tag_publication_uses_app_rest_when_git_is_refused(tmp_path, api_status):
+    step = next(
+        step
+        for step in yaml.safe_load((ROOT / ".github/workflows/promote.yml").read_text())["jobs"]["promote"]["steps"]
+        if step.get("name") == "Tag and verify the promoted package"
+    )
+    assert step["env"]["GH_TOKEN"] == "${{ steps.app-token.outputs.token }}"
     tools = tmp_path / "bin"
     tools.mkdir()
     calls = tmp_path / "calls"
     for name, body in {
-        "git": (
-            'if [[ "$1" == rev-parse ]]; then echo release-commit; exit 0; fi\n'
-            'echo "git $*" >> "$CALLS"\n'
-            'count=$(cat "$COUNT" 2>/dev/null || echo 0)\n'
-            'echo "$((count + 1))" > "$COUNT"\n'
-            '[[ "$count" -ge "$GIT_FAILURES" ]]\n'
-        ),
-        "sleep": 'echo "sleep $*" >> "$CALLS"\n',
+        "git": 'echo "git refused" >> "$CALLS"; exit 128\n',
+        "bash": 'echo "bash $*" >> "$CALLS"\n',
         "gh": ('[[ "$GH_TOKEN" == fixture-app ]]\necho "gh $*" >> "$CALLS"\nexit "$API_STATUS"\n'),
     }.items():
         tool = tools / name
-        tool.write_text("#!/usr/bin/env bash\nset -euo pipefail\n" + body)
+        tool.write_text("#!/bin/bash\nset -euo pipefail\n" + body)
         tool.chmod(0o755)
     result = subprocess.run(
-        ["bash", str(ROOT / "scripts/ci_release.sh"), "push", "release-commit", "2.17.1"],
+        ["/bin/bash", "-euo", "pipefail", "-c", step["run"]],
         env={
             **os.environ,
             "PATH": f"{tools}:{os.environ['PATH']}",
             "CALLS": str(calls),
-            "COUNT": str(tmp_path / "count"),
-            "GIT_FAILURES": str(git_failures),
             "API_STATUS": str(api_status),
             "GH_TOKEN": "fixture-app",
             "GITHUB_REPOSITORY": "the-cloud-clockwork/agentihooks",
+            "RELEASE_SHA": "release-commit",
+            "NEXT": "2.17.1",
         },
         capture_output=True,
         text=True,
     )
     assert (result.returncode == 0) == (api_status == 0), result.stderr
-    events = calls.read_text().splitlines()
-    attempts = min(git_failures + 1, 3)
-    assert events[: attempts * 2 - 1] == [
-        item
-        for attempt in range(attempts)
-        for item in (
-            ["git push origin refs/tags/v2.17.1", "sleep 5"]
-            if attempt < attempts - 1
-            else ["git push origin refs/tags/v2.17.1"]
-        )
+    assert calls.read_text().splitlines() == [
+        "bash scripts/ci_release.sh tag release-commit 2.17.1",
+        "bash scripts/ci_release.sh verify release-commit 2.17.1",
+        "gh api --method POST repos/the-cloud-clockwork/agentihooks/git/refs -f ref=refs/tags/v2.17.1 -f sha=release-commit",
     ]
-    rest = events[attempts * 2 - 1 :]
-    assert rest == (
-        [
-            "gh api --method POST repos/the-cloud-clockwork/agentihooks/git/refs -f ref=refs/tags/v2.17.1 -f sha=release-commit"
-        ]
-        if git_failures == 3
-        else []
-    )
