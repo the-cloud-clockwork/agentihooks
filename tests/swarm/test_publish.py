@@ -1525,7 +1525,9 @@ def test_prepare_registers_the_open_pull_requests_head_over_the_successor_branch
     from scripts.swarm import publish
 
     p = publication
+    git(p.root, "config", "remote.origin.fetch", "+refs/heads/dev:refs/remotes/origin/dev")
     git(p.root, "push", "origin", "HEAD:pull-head")
+    assert git(p.root, "branch", "--remotes", "--list", "origin/pull-head") == ""
     p.task.update(pr_url="https://github.com/example/repo/pull/7", state="pr")
     monkeypatch.setattr(publish.publish_queue, "open_head", lambda remote, url: "pull-head" if url else "")
 
