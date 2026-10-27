@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from hooks.memory import metrics, progress, search, spool
-from hooks.memory.api.ingest import Grant
+from hooks.memory.api.ingest import SCHEMA_VERSION, Grant
 from hooks.memory.archive import EvidenceRefused
 from hooks.memory.catalog import BatchCommit, Catalog, Conflict, SessionSource, StoredEvent
 
@@ -256,7 +256,7 @@ def test_session_inspection_displays_partial_coverage_without_changing_summary(c
     advance(meter, scope, "local_spool", 2, 100.0)
     tools = SessionTools(catalog, ObjectStore(tmp_path / "objects"))
     answer = tools.session_get(
-        GRANT, {"schema_version": "1.0", "access_domain": GRANT.corpus, "session_uid": scope.session_uid}, 200.0
+        GRANT, {"schema_version": SCHEMA_VERSION, "access_domain": GRANT.corpus, "session_uid": scope.session_uid}, 200.0
     )
     assert answer["session"]["session_uid"] == scope.session_uid
     assert answer["coverage"][0]["coverage"] == "partial"
