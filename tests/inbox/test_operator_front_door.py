@@ -1,7 +1,7 @@
 import pytest
 
 from scripts.inbox import channel, cli, exits
-from scripts.inbox.store import InboxStore
+from scripts.inbox.store import InboxError, InboxStore
 from scripts.swarm.store import MASTER, AgentRecord, RedisStore, SwarmConfig
 
 pytestmark = pytest.mark.unit
@@ -94,3 +94,24 @@ def test_a_close_notice_for_an_operator_item_goes_to_the_front_door(inbox):
     assert inbox.get(asked.id).state == "cancelled"
     assert inbox.inbox("operator") == []
     assert any(asked.id in item.text and item.sender == exits.BY for item in inbox.open_mail(DOOR))
+
+
+def test_a_referred_answer_keeps_its_id_flag_and_replier(inbox):
+    asked = inbox.send("operator", ENG.name, "is the fix merged")
+    answer = inbox.reply(asked.id, ENG.name, "merged", fyi=True, answer_id="a1")
+    assert (answer.id, answer.fyi, answer.address) == ("a1", True, DOOR)
+    assert inbox.history(asked.id)[-1]["by"] == ENG.name
+
+
+def test_a_referred_answer_retry_returns_the_first_answer(inbox):
+    asked = inbox.send("operator", ENG.name, "is the fix merged")
+    inbox.send(ENG.name, DOOR, "merged", ref=asked.id, item_id="a1")
+    answer = inbox.reply(asked.id, ENG.name, "merged", answer_id="a1")
+    assert (answer.id, answer.text, answer.ref) == ("a1", "merged", asked.id)
+
+
+def test_a_lane_agent_reply_to_a_closed_operator_item_is_refused(inbox):
+    asked = inbox.send("operator", ENG.name, "is the fix merged")
+    inbox.close(asked.id, ENG.name, "done")
+    with pytest.raises(InboxError, match=f"message {asked.id} is closed"):
+        inbox.reply(asked.id, ENG.name, "merged")
