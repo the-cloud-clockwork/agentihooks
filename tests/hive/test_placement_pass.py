@@ -303,18 +303,19 @@ def test_a_selection_in_one_pass_takes_its_hive_room_from_later_tasks(setup, in_
         assert isinstance(second, Selection)
 
 
-@pytest.mark.parametrize("profile, role", [("engineer", "eng"), ("qa", "qa")])
+@pytest.mark.parametrize("role", ["eng", "engineer"])
 @pytest.mark.parametrize("in_pass", [False, True])
-def test_a_refused_hive_reservation_turns_the_placement_into_a_wait(setup, in_pass, profile, role):  # noqa: F811
-    from scripts.hive import admission
+def test_a_refused_hive_reservation_turns_the_placement_into_a_wait(setup, monkeypatch, in_pass, role):  # noqa: F811
+    from scripts.hive import admission, launch
     from scripts.hive.placement import Wait
     from scripts.swarm import seat_spawn
-    from scripts.swarm.profile_choice import ProfileDecision
     from scripts.swarm_v2.runtime.base import Status
     from tests.hive.test_controller_launch import publish_room
 
-    setup.herdr._profile_decision.return_value = ProfileDecision(profile, "task", profile)
-    write_hive(setup, id="spare", slots=[])
+    if role == "engineer":
+        monkeypatch.delitem(launch.ROLE_PROFILES, "engineer")
+    if in_pass:
+        write_hive(setup, id="spare", slots=[])
     publish_room(setup.store, "remote", 2)
     launch = setup.launcher
     launch.placement_cache = {} if in_pass else None
