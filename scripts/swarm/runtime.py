@@ -636,6 +636,20 @@ class HerdrRuntime:
             self._reserve_account(account, lane, agent)
         return account
 
+    def _admitted_account(self, agent, name, lane, environ):
+        from scripts.swarm import capacity
+
+        read = self.quota_accounts or capacity.accounts
+        rows = read(environ, time.time(), refresh=False)
+        rows = capacity.unreserved(rows) if lane == MASTER else rows
+        row = next((row for row in rows if (row.harness, row.name) == (agent, name)), None)
+        if row is None or not capacity.free_seats(row):
+            raise SpawnError(
+                f"admitted account {name} has no {agent} seat on this hive; returned for controller readmission",
+                "unavailable",
+            )
+        return row
+
     @contextmanager
     def _seat_returned_on_failure(self, account, lane, agent):
         try:
@@ -705,9 +719,10 @@ class HerdrRuntime:
             raise SpawnError(f"{kind} {want} cannot mount the claude only profile {profile}", "unsupported")
         route_kind = self._route_kind(lane, want or requested or saved.get("harness", ""), task, config.slug)
         quota_transfer = (task.get("handoff_envelope") or {}).get("reason") == "quota"
+        admitted = bool(relaunch and relaunch.get("account") and task.get("admitted_execution_id"))
         saved = (
             self._quota_transfer(saved, profile, environ, lane, want, self._planned_slot(task["id"]))
-            if saved and quota_transfer and route_kind != "interactive"
+            if saved and quota_transfer and route_kind != "interactive" and not admitted
             else saved
         )
         avoid = (task.get("transfer") or {}).get("avoid_harness") or task.get("avoid_harness")
@@ -784,7 +799,9 @@ class HerdrRuntime:
         )
         rc = remote_control.decision(lane, agent, route_kind, config.slug, login) if front else {}
         account = None
-        if hasattr(self, "_quota_accounts") and route_kind != "interactive":
+        if admitted and route_kind != "interactive" and (quota_transfer or hasattr(self, "_quota_accounts")):
+            route = ["--route", self._admitted_account(agent, saved["account"], lane, environ).name]
+        elif hasattr(self, "_quota_accounts") and route_kind != "interactive":
             account = self._claim_account(agent, saved.get("account") or self.planned_account(task["id"], agent), lane)
             route = ["--route", account.name]
         with self._seat_returned_on_failure(account, lane, agent):
