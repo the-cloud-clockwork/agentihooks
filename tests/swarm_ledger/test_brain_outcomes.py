@@ -227,6 +227,9 @@ def test_gat05_repository_reloads_outcomes_and_audit_without_replaying_effects(f
     )
     seed = repo.get_document("fixture")
     seed["tasks"] = [{**seed["tasks"][0], **task}]
+    from scripts.gates.brain import bind
+
+    scope = bind("work", seed["tasks"][0], "swarm-brain")
     assert repo.create_document("fixture", {k: v for k, v in seed.items() if k != "_meta"}, seed["_meta"], replace=True)
     learning = operation(
         "brain_learning",
