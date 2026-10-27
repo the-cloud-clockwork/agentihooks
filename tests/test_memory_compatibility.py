@@ -227,7 +227,18 @@ def test_loads_restores_dumps_without_sharing_state():
     inventory = compat.Inventory(state)
     inventory.add({**SEARCH, "consumer": "other"}, 2)
     assert state["revision"] == 1
+    assert list(state["items"]) == ["search caller"]
     assert compat.Inventory.loads(inventory.dumps()).state == inventory.state
+
+
+def test_dumps_writes_sorted_keys():
+    assert compat.Inventory().dumps() == '{"items": {}, "revision": 0}'
+
+
+def test_an_unknown_component_names_what_may_be_extracted():
+    with pytest.raises(Rejected) as error:
+        compat.extract("ui", "module")
+    assert error.value.detail == "only turn chunking, vector storage and semantic search may be extracted"
 
 
 @pytest.mark.parametrize("case", ["A", "B", "C"])
