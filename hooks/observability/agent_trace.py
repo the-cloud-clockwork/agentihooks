@@ -658,6 +658,7 @@ def _resume_point(state: dict, transcript_path: str) -> dict:
     point = paged.get("source") or {}
     if (point.get("device"), point.get("inode")) != (stat.st_dev, stat.st_ino) or not _still_at(transcript_path, point):
         point = {"device": stat.st_dev, "inode": stat.st_ino, **start}
+        state["source_points"] = {}
     if point.get("boundary") != paged["boundary"]:
         point = _scan_to(transcript_path, point, paged["boundary"])
     paged["source"] = point
