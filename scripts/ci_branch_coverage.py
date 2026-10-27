@@ -1,5 +1,6 @@
 import argparse
 import io
+import itertools
 import json
 import re
 import shutil
@@ -9,19 +10,17 @@ import tempfile
 import zipfile
 import zlib
 from concurrent.futures import Future, ThreadPoolExecutor
-from contextlib import closing
 from pathlib import Path
 
 from scripts.ci_branch_plan import COMMIT, LEG
 from scripts.ci_budget import rate_limit
 from scripts.ci_test_plan import _api, _strings
 from tests import coverage_check, reused_coverage
-from tests.dep_manifest import node
 
 ARTIFACT = re.compile(rf"branch-coverage-3\.12-({LEG.pattern})-(\d+)", re.ASCII)
 PAGE = 100
-PAGES = 5
-WORKERS = 8
+# Each download holds a shard's coverage database, about 50 MB, in memory.
+WORKERS = 4
 ERRORS = (OSError, ValueError, KeyError, TypeError, sqlite3.Error, subprocess.SubprocessError)
 
 
@@ -49,7 +48,7 @@ def contributions(plan: object, deselected: object) -> dict[tuple[int, int], tup
     runs: dict[tuple[int, int], tuple[str, set[str]]] = {}
     for entry in plan["runs"]:
         if not _run_entry(entry):
-            raise Unusable(f"the branch plan holds a malformed run {json.dumps(entry)[:200]}")
+            raise Unusable("the branch plan holds a malformed run")
         commit, tests = runs.setdefault((entry["run"], entry["attempt"]), (entry["commit"], set()))
         if commit != entry["commit"]:
             raise Unusable(f"pull request run {entry['run']} names two commits")
@@ -59,68 +58,45 @@ def contributions(plan: object, deselected: object) -> dict[tuple[int, int], tup
 
 def artifacts(repository: str, run: int, attempt: int) -> list[dict]:
     found = []
-    for page in range(1, PAGES + 1):
-        endpoint = f"repos/{repository}/actions/runs/{run}/artifacts?per_page={PAGE}&page={page}"
-        listed = json.loads(_api(endpoint))["artifacts"]
-        for item in listed:
+    for page in itertools.count(1):
+        listed = json.loads(_api(f"repos/{repository}/actions/runs/{run}/artifacts?per_page={PAGE}&page={page}"))
+        for item in listed["artifacts"]:
             named = ARTIFACT.fullmatch(item["name"])
             if named and int(named[2]) == attempt and not item["expired"]:
                 found.append(item)
-        if len(listed) < PAGE:
-            break
-    return found
+        if len(listed["artifacts"]) < PAGE:
+            return found
 
 
-def _tests(database: Path) -> set[str]:
-    with closing(sqlite3.connect(database)) as db:
-        contexts = db.execute("select context from context").fetchall()
-    return {node(context.rsplit("|", 1)[0]) for (context,) in contexts if context}
-
-
-def carry(
-    repository: str, artifact: dict, tests: set[str], moved: dict[str, dict[int, int] | None], out: Path
-) -> tuple[set[str], int]:
+def carry(repository: str, artifact: dict, tests: set[str], moved: dict[str, dict[int, int] | None], out: Path) -> int:
     data = _api(f"repos/{repository}/actions/artifacts/{artifact['id']}/zip")
-    with tempfile.TemporaryDirectory() as work:
-        source, staged = Path(work) / "source", Path(work) / "staged"
+    with tempfile.TemporaryDirectory() as source, tempfile.TemporaryDirectory() as staged:
         try:
             with zipfile.ZipFile(io.BytesIO(data)) as archive:
                 archive.extractall(source)
         except (zipfile.BadZipFile, zlib.error) as error:
             raise Unusable(f"not a readable archive ({error})") from error
-        databases = sorted(path for path in source.glob(".coverage*") if path.is_file())
+        databases = sorted(Path(source).glob(".coverage*"))
         if not databases:
             raise Unusable("no coverage data")
         for database in databases:
             if problem := coverage_check.problem(database):
                 raise Unusable(f"{database.name} is unusable ({problem})")
-        kept: set[str] = set()
         for database in databases:
-            reused_coverage.keep(database, staged / database.name, tests, moved)
-            kept |= _tests(staged / database.name)
-        captures = reused_coverage.keep_captures(source / "js-coverage", staged / "js-coverage", tests)
-        shutil.copytree(staged, out, dirs_exist_ok=True)
-    return kept, captures
+            reused_coverage.keep(database, Path(staged) / database.name, tests, moved)
+        captures = reused_coverage.keep_captures(Path(source) / "js-coverage", Path(staged) / "js-coverage", tests)
+        shutil.copytree(staged, out)
+    return captures
 
 
-def _moved(repo: Path, commit: str, head: str) -> dict[str, dict[int, int] | None]:
-    present = subprocess.run(["git", "-C", str(repo), "cat-file", "-e", f"{commit}^{{commit}}"], capture_output=True)
-    if present.returncode:
-        fetch = ["git", "-C", str(repo), "fetch", "--no-tags", "--quiet", "origin", commit]
-        subprocess.run(fetch, check=True, capture_output=True, text=True, timeout=300)
-    return reused_coverage.moved_lines(repo, commit, head)
+def _moved(repo: str, commit: str) -> dict[str, dict[int, int] | None]:
+    subprocess.run(["git", "-C", repo, "fetch", "--no-tags", "--quiet", "origin", commit], check=True)
+    return reused_coverage.moved_lines(Path(repo), commit, "HEAD")
 
 
-def _reason(error: Exception) -> str:
-    stderr = getattr(error, "stderr", None)
-    detail = stderr.decode("utf-8", "replace") if isinstance(stderr, bytes) else stderr or ""
-    return f"{error} {detail.strip()}".strip()
-
-
-def _warn(key: tuple[int, int], reason: str) -> None:
-    run, attempt = key
+def _warn(key: tuple[int, int], reason: object) -> None:
     print(
-        f"::warning title=Unusable branch coverage::Pull request run {run} attempt {attempt}: {reason};"
+        f"::warning title=Unusable branch coverage::Pull request run {key[0]} attempt {key[1]}: {reason};"
         " that coverage is not carried."
     )
 
@@ -130,57 +106,55 @@ def _start(
 ) -> tuple[dict, list[tuple[str, Future]]] | None:
     run, attempt = key
     try:
-        moved = _moved(args.repo, commit, args.head)
+        moved = _moved(args.repo, commit)
         listed = artifacts(args.repository, run, attempt)
     except ERRORS as error:
-        _warn(key, _reason(error))
+        _warn(key, error)
         return None
     if not listed:
         _warn(key, "it kept no unexpired branch-coverage-3.12 artifact")
         return None
     started = []
     for item in listed:
-        leg, _ = ARTIFACT.fullmatch(item["name"]).groups()
-        out = args.out / f"branch-{run}" / f"{leg}-{attempt}"
+        out = args.out / f"branch-{run}" / f"{ARTIFACT.fullmatch(item['name'])[1]}-{attempt}"
         started.append((item["name"], pool.submit(carry, args.repository, item, tests, moved, out)))
     return moved, started
 
 
 def _finish(key: tuple[int, int], commit: str, tests: set[str], moved: dict, started: list[tuple[str, Future]]) -> None:
-    kept: set[str] = set()
     captures = used = 0
     for name, future in started:
         try:
-            found, count = future.result()
+            captures += future.result()
         except ERRORS as error:
-            _warn(key, f"{name}: {_reason(error)}")
+            _warn(key, f"{name}: {error}")
             continue
-        kept |= found
-        captures += count
         used += 1
     print(
-        f"Pull request run {key[0]} attempt {key[1]} on {commit}: kept the coverage of {len(kept)} of {len(tests)}"
-        f" reused tests and {captures} page captures from {used} of {len(started)} artifacts;"
-        f" {len(moved)} changed files remapped"
+        f"Pull request run {key[0]} attempt {key[1]} on {commit}: {len(tests)} reused tests, {captures} page captures"
+        f" carried from {used} of {len(started)} artifacts; {len(moved)} changed files remapped"
     )
 
 
+def _runs(plan: Path, deselected: Path) -> dict[tuple[int, int], tuple[str, set[str]]]:
+    if not plan.is_file() or not deselected.is_file():
+        return {}
+    return contributions(json.loads(plan.read_text()), json.loads(deselected.read_text()))
+
+
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="carry the coverage earlier runs of this pull request measured")
+    parser = argparse.ArgumentParser()
     parser.add_argument("--repository", required=True)
-    parser.add_argument("--plan", type=Path, required=True, help="reused-branch.json from the branch planner")
-    parser.add_argument("--deselected", type=Path, required=True, help="the deselect output this run skipped by")
-    parser.add_argument("--repo", type=Path, default=Path.cwd())
-    parser.add_argument("--head", default="HEAD")
-    parser.add_argument("--out", type=Path, required=True, help="the folder the shard coverage is merged from")
+    parser.add_argument("--plan", type=Path, required=True)
+    parser.add_argument("--deselected", type=Path, required=True)
+    parser.add_argument("--repo", required=True)
+    parser.add_argument("--out", type=Path, required=True)
     args = parser.parse_args(argv)
-    runs = {}
-    if args.plan.is_file() and args.deselected.is_file():
-        try:
-            runs = contributions(json.loads(args.plan.read_text()), json.loads(args.deselected.read_text()))
-        except (OSError, ValueError) as error:
-            print(f"::warning title=Unusable branch plan::{error}; no coverage is carried from pull request runs.")
-            return 0
+    try:
+        runs = _runs(args.plan, args.deselected)
+    except (OSError, ValueError) as error:
+        print(f"::warning title=Unusable branch plan::{error}; no coverage is carried from pull request runs.")
+        return 0
     if not runs:
         print("No tests reused from pull request runs; no coverage to carry.")
         return 0

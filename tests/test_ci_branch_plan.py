@@ -1,5 +1,6 @@
 import io
 import json
+import re
 import subprocess
 import zipfile
 
@@ -247,11 +248,30 @@ def test_each_reused_test_is_attributed_to_the_newest_run_that_passed_it(tmp_pat
     assert [entry["run"] for entry in plan["runs"]] == [102]
     assert plan["tests"] == _ids("test_h")
     assert output.read_text() == "branch=1\nbranch_runs=102\n"
-    lines = capsys.readouterr().out.splitlines()
-    assert lines == [
+    captured = capsys.readouterr()
+    assert captured.out.splitlines() == [
         f"Pull request run 102 on {commits['record']}: 1 reused",
         f"Pull request run 101 on {commits['record']}: 0 reused",
     ]
+    assert re.fullmatch(r"The branch planner made \d+ GitHub API calls\n", captured.err)
+
+
+def test_a_test_claimed_by_a_newer_run_is_never_claimed_again(tmp_path, monkeypatch, repo):
+    root, commits = repo
+    runs = [_run(103), _run(102), _run(101)]
+    depends = {**DEPENDS, "test_x": []}
+    records = {
+        103: [_record(runs[0], commits["record"], passed=["test_h"])],
+        102: [_record(runs[1], commits["record"], passed=["test_x"], depends=depends)],
+        101: [_record(runs[2], commits["record"], passed=["test_h", "test_x"], depends=depends)],
+    }
+    _github(monkeypatch, runs, records)
+    output = tmp_path / "output"
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output))
+    plan = _plan(tmp_path, root)
+    assert [(entry["run"], entry["tests"]) for entry in plan["runs"]] == [(103, _ids("test_h")), (102, _ids("test_x"))]
+    assert plan["tests"] == _ids("test_h", "test_x")
+    assert output.read_text() == "branch=2\nbranch_runs=103,102\n"
 
 
 def test_a_run_whose_attempts_both_contribute_is_named_once(tmp_path, monkeypatch, repo):
@@ -293,12 +313,13 @@ def test_records_of_several_legs_join_one_entry_per_run_attempt(tmp_path, monkey
 def test_tests_the_dev_plan_reuses_stay_attributed_to_dev(tmp_path, monkeypatch, repo, present):
     root, commits = repo
     run = _run(101)
-    _github(monkeypatch, [run], {101: [_record(run, commits["record"], passed=["test_h"])]})
+    record = _record(run, commits["record"], passed=["test_h", "test_x"], depends={**DEPENDS, "test_x": []})
+    _github(monkeypatch, [run], {101: [record]})
     dev = tmp_path / "reused-tests.json"
     if present:
         dev.write_text(json.dumps({"run": "5", "commit": commits["dev"], "global": None, "tests": _ids("test_h")}))
     plan = _plan(tmp_path, root, "--dev-plan", str(dev))
-    assert plan["tests"] == ([] if present else _ids("test_h"))
+    assert plan["tests"] == (_ids("test_x") if present else _ids("test_h", "test_x"))
 
 
 @pytest.mark.parametrize("event", ["merge_group", "push", "workflow_dispatch", ""])
@@ -314,13 +335,16 @@ def test_only_a_pull_request_run_reads_branch_records(tmp_path, monkeypatch, rep
     )
 
 
-@pytest.mark.parametrize(("event", "reused"), [("merge_group", []), ("pull_request", _ids("test_h"))])
-def test_the_event_defaults_to_the_workflow_event(tmp_path, monkeypatch, repo, event, reused):
+@pytest.mark.parametrize(("event", "reused"), [(None, []), ("merge_group", []), ("pull_request", _ids("test_h"))])
+def test_the_event_defaults_to_the_workflow_event(tmp_path, monkeypatch, repo, capsys, event, reused):
     root, commits = repo
     run = _run(101)
     _github(monkeypatch, [run], {101: [_record(run, commits["record"], passed=["test_h"])]})
-    monkeypatch.setenv("GITHUB_EVENT_NAME", event)
+    if event:
+        monkeypatch.setenv("GITHUB_EVENT_NAME", event)
     assert _plan(tmp_path, root, event=None)["tests"] == reused
+    refusal = f"::notice title=No branch record::A {event or 'unnamed'} run reuses no earlier pull request run.\n"
+    assert (capsys.readouterr().out == refusal) == (not reused)
 
 
 @pytest.mark.parametrize(
@@ -406,27 +430,39 @@ def test_a_record_naming_an_option_as_its_commit_never_reaches_git(tmp_path, mon
 
 
 @pytest.mark.parametrize(
-    "payload",
+    ("payload", "reason"),
     [
-        b"not a zip",
-        _zip("{}", name="other.json"),
-        _zip("{"),
-        _zip("[]"),
-        _zip(json.dumps({"manifest": {"units": [], "tests": {"t": {"units": [3], "files": [], "escapes": False}}}})),
+        (b"not a zip", "File is not a zip file"),
+        (_zip("{}", name="other.json"), str(KeyError("There is no item named 'record.json' in the archive"))),
+        (_zip("{"), "Expecting property name enclosed in double quotes: line 1 column 2 (char 1)"),
+        (_zip("[]"), "the record schema is invalid"),
+        (
+            _zip(
+                json.dumps({"manifest": {"units": [], "tests": {"t": {"units": [3], "files": [], "escapes": False}}}})
+            ),
+            "the record schema is invalid",
+        ),
     ],
     ids=["corrupt-zip", "missing-record", "corrupt-json", "non-object", "invalid-schema"],
 )
-def test_an_unusable_download_is_warned_about_and_exits_zero(tmp_path, monkeypatch, repo, capsys, payload):
+def test_an_unusable_download_is_warned_about_and_exits_zero(tmp_path, monkeypatch, repo, capsys, payload, reason):
     root, _ = repo
     _github(monkeypatch, [_run(101)], {101: [("branch-record-3.12-1-1", payload)]})
     assert _plan(tmp_path, root) == EMPTY
-    out = capsys.readouterr().out
-    assert "::warning title=Unusable branch record::Pull request run 101: branch-record-3.12-1-1: " in out
-    assert "::notice title=No branch record::" in out
+    assert capsys.readouterr().out == (
+        f"::warning title=Unusable branch record::Pull request run 101: branch-record-3.12-1-1: {reason}; neither it"
+        " nor any older run is reused.\n"
+        f"::notice title=No branch record::No earlier Tests run of pull request {PULL} left a usable branch record;"
+        " no test is reused from one.\n"
+    )
 
 
 def _raise(error):
     raise error
+
+
+def _gh_error(endpoint):
+    return subprocess.CalledProcessError(1, ["gh", "api", endpoint])
 
 
 def _break(monkeypatch, cause, broken, artifacts, commit):
@@ -435,7 +471,7 @@ def _break(monkeypatch, cause, broken, artifacts, commit):
 
     def fetch(endpoint):
         if failing and endpoint.startswith(failing):
-            raise subprocess.CalledProcessError(1, ["gh", "api", endpoint])
+            raise _gh_error(endpoint)
         return api(endpoint)
 
     monkeypatch.setattr(ci_branch_plan, "_api", fetch)
@@ -476,7 +512,20 @@ def test_a_run_that_cannot_be_fully_read_hides_itself_and_every_older_run(
     plan = _plan(tmp_path, root)
     assert [entry["run"] for entry in plan["runs"]] == ([] if broken == 102 else [102])
     assert plan["tests"] == ([] if broken == 102 else _ids("test_h"))
-    assert f"::warning title=Unusable branch record::Pull request run {broken}: " in capsys.readouterr().out
+    reason = {
+        "unreadable": "branch-record-3.12-1-1: File is not a zip file",
+        "invalid": "branch-record-3.12-1-1: head differed from its run",
+        "download": f"branch-record-3.12-1-1: {_gh_error(f'{ACTIONS}/artifacts/1/zip')}",
+        "listing": f"CalledProcessError: {_gh_error(f'{ACTIONS}/runs/{broken}/artifacts?per_page=100&page=1')}",
+        "pages": "it lists more than 5 pages of artifacts",
+        "unfetchable": f"commit {'e' * 40} could not be fetched",
+        "diff": f"CalledProcessError: {subprocess.CalledProcessError(128, ['git', 'diff'])}",
+        "invalidated": "KeyError: 9",
+    }[cause]
+    assert (
+        f"::warning title=Unusable branch record::Pull request run {broken}: {reason}; neither it nor any older run"
+        " is reused.\n"
+    ) in capsys.readouterr().out
 
 
 @pytest.mark.parametrize("outcome", ["failed", "flaky"])
@@ -485,7 +534,7 @@ def test_a_run_whose_commit_cannot_be_fetched_still_vetoes_its_failures(tmp_path
     newer, unfetched = _run(103), _run(102)
     records = {
         103: [_record(newer, commits["record"], passed=["test_h"])],
-        102: [_record(unfetched, "e" * 40, **{outcome: ["test_h"]})],
+        102: [_record(unfetched, "e" * 40, **{outcome: ["test_h"]}), _record(unfetched, "e" * 40, leg="2")],
     }
     _github(monkeypatch, [newer, unfetched], records)
     assert _plan(tmp_path, root) == EMPTY
@@ -518,7 +567,7 @@ def test_an_api_failure_still_exits_zero_with_an_empty_plan(tmp_path, monkeypatc
 
     def fail(endpoint):
         if failing in endpoint:
-            raise subprocess.CalledProcessError(1, ["gh", "api", endpoint])
+            raise _gh_error(endpoint)
         return api(endpoint)
 
     monkeypatch.setattr(ci_branch_plan, "_api", fail)
@@ -526,9 +575,15 @@ def test_an_api_failure_still_exits_zero_with_an_empty_plan(tmp_path, monkeypatc
     monkeypatch.setenv("GITHUB_OUTPUT", str(output))
     assert _plan(tmp_path, root) == EMPTY
     assert output.read_text() == "branch=0\nbranch_runs=\n"
-    out = capsys.readouterr().out
-    assert "::warning title=Unusable branch record::" in out
-    assert "returned non-zero exit status 1" in out
+    expected = {
+        "/workflows/test.yml/runs?": f"CalledProcessError: {_gh_error(LISTING)}; no test is reused from an earlier"
+        " pull request run.",
+        "/artifacts?per_page": f"Pull request run 101: CalledProcessError: {_gh_error(f'{ACTIONS}/runs/101/artifacts?per_page=100&page=1')};"
+        " neither it nor any older run is reused.",
+        "/zip": f"Pull request run 101: branch-record-3.12-1-1: {_gh_error(f'{ACTIONS}/artifacts/1/zip')}; neither it"
+        " nor any older run is reused.",
+    }[failing]
+    assert f"::warning title=Unusable branch record::{expected}\n" in capsys.readouterr().out
 
 
 @pytest.mark.parametrize(
@@ -592,10 +647,13 @@ def test_only_unexpired_branch_records_of_the_graded_interpreter_are_downloaded(
 def test_records_listed_past_the_first_artifact_page_are_read(tmp_path, monkeypatch, repo):
     root, commits = repo
     run = _run(101)
-    calls, artifacts = _github(monkeypatch, [run], {101: [_record(run, commits["record"], passed=["test_h"])]})
-    others = [{"id": 1000 + n, "name": f"durations-3.12-{n}", "expired": False} for n in range(100)]
-    artifacts[101][:0] = others
-    assert _plan(tmp_path, root)["tests"] == _ids("test_h")
+    records = [
+        _record(run, commits["record"], passed=["test_h"]),
+        _record(run, commits["record"], passed=["test_x"], leg="2", depends={"test_x": []}),
+    ]
+    calls, artifacts = _github(monkeypatch, [run], {101: records})
+    artifacts[101][1:1] = [{"id": 1000 + n, "name": f"durations-3.12-{n}", "expired": False} for n in range(100)]
+    assert _plan(tmp_path, root)["tests"] == _ids("test_h", "test_x")
     assert f"{ACTIONS}/runs/101/artifacts?per_page=100&page=2" in calls
 
 

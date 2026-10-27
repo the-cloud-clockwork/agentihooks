@@ -8,7 +8,7 @@ import zipfile
 import zlib
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from urllib.parse import quote
+from urllib.parse import urlencode
 
 from scripts.ci_budget import rate_limit
 from scripts.ci_test_plan import UnusableRecord, _api, _strings, _valid_test
@@ -37,17 +37,16 @@ def _earlier(run: dict, args: argparse.Namespace) -> bool:
         and run["event"] == "pull_request"
         and run["path"] == ".github/workflows/test.yml"
         and run["head_branch"] == args.head_ref
-        and (run["head_repository"] or {}).get("full_name", "").lower() == args.head_repo.lower()
+        and run["head_repository"]
+        and run["head_repository"]["full_name"].lower() == args.head_repo.lower()
         and any(pull.get("number") == args.pull for pull in run["pull_requests"])
         and run["created_at"] < args.created
     )
 
 
 def _runs(actions: str, args: argparse.Namespace) -> list[dict]:
-    branch = quote(args.head_ref, safe="")
-    listed = json.loads(
-        _api(f"{actions}/workflows/test.yml/runs?branch={branch}&event=pull_request&per_page={LISTED}")
-    )["workflow_runs"]
+    query = urlencode({"branch": args.head_ref, "event": "pull_request", "per_page": LISTED})
+    listed = json.loads(_api(f"{actions}/workflows/test.yml/runs?{query}"))["workflow_runs"]
     return [run for run in listed if _earlier(run, args)][:RUNS]
 
 
@@ -106,10 +105,7 @@ def _record(data: bytes, name: str, run: dict, args: argparse.Namespace) -> dict
 
 
 def _present(root: Path, commit: str) -> bool:
-    for command in (["cat-file", "-e", f"{commit}^{{commit}}"], ["fetch", "--no-tags", "origin", commit]):
-        if subprocess.run(["git", "-C", str(root), *command], capture_output=True).returncode == 0:
-            return True
-    return False
+    return subprocess.run(["git", "-C", str(root), "fetch", "--no-tags", "origin", commit]).returncode == 0
 
 
 def _changes(root: Path, commit: str, cache: dict) -> list | None:
@@ -169,7 +165,7 @@ def _warn(run: dict, reason: object) -> None:
 def considered(args: argparse.Namespace) -> tuple[list[tuple[dict, set[str], set[str]]], set[str]]:
     actions = f"repos/{args.repository}/actions"
     found, cache = [], {}
-    with ThreadPoolExecutor(max_workers=RUNS) as pool:
+    with ThreadPoolExecutor() as pool:
         runs = _runs(actions, args)
         listings = [pool.submit(_artifacts, actions, run) for run in runs]
         requests = 1 + sum(listing.result()[1] for listing in listings if listing.exception() is None)
@@ -246,7 +242,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--run", type=int, required=True)
     parser.add_argument("--created", required=True)
     parser.add_argument("--environment", required=True)
-    parser.add_argument("--event", default=os.environ.get("GITHUB_EVENT_NAME", ""))
+    parser.add_argument("--event", default=os.environ.get("GITHUB_EVENT_NAME"))
     parser.add_argument("--dev-plan", type=Path)
     parser.add_argument("--root", type=Path, required=True)
     parser.add_argument("--out", type=Path, required=True)
