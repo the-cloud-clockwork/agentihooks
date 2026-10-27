@@ -43,6 +43,12 @@ def test_other_launches_keep_their_route(profile, name):
     assert front_door_route.check(profile, name, flags) == flags
 
 
+def test_codex_keeps_its_route_under_a_master_profile():
+    from scripts import front_door_route
+
+    assert front_door_route.check("master", "master 1 · rig", ["--route", "worker"], "codex") == ["--route", "worker"]
+
+
 @pytest.fixture
 def shared_login(tmp_path, monkeypatch):
     monkeypatch.setattr(login.hooks_config, "AGENTIHOOKS_HOME", tmp_path / "ah")

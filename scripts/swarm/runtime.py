@@ -728,7 +728,12 @@ class HerdrRuntime:
             kind = "master affinity" if lane == MASTER else "lane harness"
             raise SpawnError(f"{kind} {want} cannot mount the claude only profile {profile}", "unsupported")
         title = _titled(config.slug, lane, task.get("seat", ""))
-        forced = front_door_route.check(profile, masters.title(config.slug, task.get("seat", "")), [])
+        forced = front_door_route.check(
+            profile,
+            masters.title(config.slug, task.get("seat", "")),
+            [],
+            want or requested or saved.get("harness") or "claude",
+        )
         route_kind = self._route_kind(lane, want or requested or saved.get("harness", ""), task, config.slug, forced)
         quota_transfer = (task.get("handoff_envelope") or {}).get("reason") == "quota"
         admitted = bool(relaunch and relaunch.get("account") and task.get("admitted_execution_id"))
@@ -882,7 +887,7 @@ class HerdrRuntime:
         )
         argv += _pinned(agent.overlays, agent.profile_decision.get("bundle_revision"))
         title = _titled(config.slug, agent.lane, agent.seat)
-        forced = front_door_route.check(agent.profile, masters.title(config.slug, agent.seat), [])
+        forced = front_door_route.check(agent.profile, masters.title(config.slug, agent.seat), [], agent.harness)
         argv += title
         defaults = _lane_default(agent.lane, agent.harness, config.lanes.get(agent.lane, {}), config)
         picked = model_pick.ModelPick(
