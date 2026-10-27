@@ -185,7 +185,7 @@ def test_a_front_door_master_successor_leaves_the_closed_reserved_login_account_
     monkeypatch.setattr(master_account, "load", lambda environ: declared)
     runtime = HerdrRuntime(home=tmp_path, run=run, choose=lambda *_: ("claude", "requested"))
     runtime._quota_accounts = [
-        Account("claude", "main", "OPEN", 0, 96.0, 5.0, 6, reserved="workers", unreserved_cap=6),
+        Account("claude", "main", "CLOSED", 0, 96.0, 5.0, 6, reserved="workers", unreserved_cap=6),
         Account("claude", "open", "OPEN", 0, 95.0, 78.0, 6),
     ]
     config = SimpleNamespace(
@@ -212,6 +212,11 @@ def test_a_front_door_master_successor_leaves_the_closed_reserved_login_account_
 @pytest.mark.parametrize(
     "rows,spent",
     [
+        (
+            [("main", 50.0, 6, "", None, "subscription", 90.0, "CLOSED"), ("open", 60.0, 6, "", None, "subscription")],
+            True,
+        ),
+        ([("main", 60.0, 6, "", None, "subscription", 4.0), ("open", 60.0, 6, "", None, "subscription")], True),
         ([("main", 5.0, 6, "", None, "subscription"), ("open", 60.0, 6, "", None, "subscription")], True),
         ([("main", 5.5, 6, "", None, "subscription"), ("open", 60.0, 6, "", None, "subscription")], True),
         ([("main", 10.5, 6, "", None, "subscription"), ("open", 60.0, 6, "", None, "subscription")], False),
@@ -232,8 +237,10 @@ def test_the_declared_master_account_is_spent_at_the_handoff_warning_with_anothe
     )
     runtime = HerdrRuntime(home=tmp_path, run=lambda *a, **k: None, choose=lambda *_: ("claude", "requested"))
     runtime._quota_accounts = [
-        Account("claude", name, "OPEN", 0, 90.0, week, cap, kind=kind, reserved=reserved, unreserved_cap=unreserved)
-        for name, week, cap, reserved, unreserved, kind in rows
+        Account("claude", name, state, 0, five, week, cap, kind=kind, reserved=reserved, unreserved_cap=unreserved)
+        for name, week, cap, reserved, unreserved, kind, five, state in (
+            row + (90.0, "OPEN")[len(row) - 6 :] for row in rows
+        )
     ]
     assert runtime._master_account_spent() is spent
 

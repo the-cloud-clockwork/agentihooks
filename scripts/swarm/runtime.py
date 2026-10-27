@@ -710,7 +710,7 @@ class HerdrRuntime:
             None,
         )
         thresholds = quota_handoff.Thresholds.from_env(dict(os.environ))
-        if own is None or not quota_handoff.trigger(replace(own, reserved=""), thresholds):
+        if own is None or (own.state != "CLOSED" and not quota_handoff.trigger(replace(own, reserved=""), thresholds)):
             return False
         return any(row.kind != "api" and row.name != own.name for row in self._quota_eligible("claude", MASTER))
 
