@@ -554,16 +554,18 @@ def test_the_tick_sweep_runs_every_due_request_past_the_session_end_bound(tmp_pa
     processed = []
     count = documentation_session.RETRY_LIMIT + 2
     due_requests(tmp_path, monkeypatch, Clock(0.0), count, lambda path, now: processed.append(path.name))
+    os.utime(stored(tmp_path / "documentation" / "other.json", swarm="other"), ns=(0, 0))
     documentation_session.retry()
-    assert processed == [f"{index}.json" for index in range(count)]
+    assert processed == ["other.json", *(f"{index}.json" for index in range(count))]
 
 
-def test_the_session_end_sweep_keeps_its_bound(tmp_path, monkeypatch):
+def test_the_session_end_sweep_keeps_its_bound_and_swarm(tmp_path, monkeypatch):
     processed = []
     count = documentation_session.RETRY_LIMIT + 2
-    due_requests(tmp_path, monkeypatch, Clock(0.0), count, lambda path, now: processed.append(path.name))
-    documentation_session.retry_pending("fixture")
-    assert len(processed) == documentation_session.RETRY_LIMIT
+    due_requests(tmp_path, monkeypatch, Clock(0.0), count, lambda path, now=None: processed.append(path.name))
+    os.utime(stored(tmp_path / "documentation" / "other.json", swarm="other"), ns=(0, 0))
+    documentation_session.process_pending(tmp_path / "documentation" / "0.json")
+    assert processed == [f"{index}.json" for index in range(documentation_session.RETRY_LIMIT + 1)]
 
 
 def test_the_tick_sweep_starts_no_request_once_its_budget_is_spent(tmp_path, monkeypatch):
