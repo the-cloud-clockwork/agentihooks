@@ -1,5 +1,8 @@
 import hashlib
 import json
+import os
+import subprocess
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
@@ -342,6 +345,30 @@ def test_the_mirror_fills_every_hive_task_into_a_fresh_home(homes):
     assert (folder / "second" / "progress.md").read_text(encoding="utf-8") == "hive step\n"
     assert sorted(path.name for path in folder.iterdir()) == ["second"]
     assert sorted(path.name for path in (folder / "second").iterdir()) == ["progress.md"]
+
+
+def test_the_mirror_writes_utf8_under_an_ascii_locale(homes):
+    script = (
+        "import sys\n"
+        "from pathlib import Path\n"
+        "from unittest.mock import patch\n"
+        "from scripts.swarm_ledger import ledger_workspace\n"
+        "copies = {'task': {'progress.md': 'caf\\u00e9\\n'}}\n"
+        "with patch.object(Path, 'home', return_value=Path(sys.argv[1])):\n"
+        "    with patch.object(ledger_workspace, '_synced', return_value=copies):\n"
+        "        ledger_workspace.mirror(None, 'fixture', {})\n"
+    )
+    ascii_locale = {"LC_ALL": "C", "LANG": "C", "PYTHONUTF8": "0", "PYTHONCOERCECLOCALE": "0"}
+    done = subprocess.run(
+        [sys.executable, "-c", script, str(homes.controller)],
+        env={**os.environ, **ascii_locale},
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert done.returncode == 0, done.stderr
+    progress = homes.controller / ".agentihooks" / "swarm" / "fixture" / "tasks" / "task" / "progress.md"
+    assert progress.read_bytes() == "café\n".encode()
 
 
 def test_the_latest_execution_of_a_task_wins(setup):
