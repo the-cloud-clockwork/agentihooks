@@ -17,7 +17,7 @@ def ah(tmp_path, monkeypatch):
     monkeypatch.setattr(
         terminate_agent,
         "sessions",
-        lambda: [SimpleNamespace(name=name) for name in ("master@rig-1", "master@doctor-1", "master@token")],
+        lambda: [SimpleNamespace(name=name) for name in ("master@rig-1", "master@doctor-1", "master@token", "master@unknown")],
     )
     return tmp_path / "ah"
 
