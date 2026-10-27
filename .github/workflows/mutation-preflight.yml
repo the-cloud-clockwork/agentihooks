@@ -113,7 +113,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: mutation-selection
-          path: .mutation-selection.json
+          path: |
+            .mutation-selection.json
+            .mutation-tracing.json
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 1

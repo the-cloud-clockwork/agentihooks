@@ -109,7 +109,12 @@ def recorded_seconds(records: list[dict[str, float]]) -> dict[str, float]:
 
 
 def file_seconds(root: Path, files: list[str], *, split: bool = False) -> dict[str, float]:
-    durations = recorded_seconds([*unit_records(root), *traced_records(root)])
+    snapshot = root / ".mutation-tracing.json"
+    durations = (
+        json.loads(snapshot.read_text())
+        if snapshot.is_file()
+        else recorded_seconds([*unit_records(root), *traced_records(root)])
+    )
     return entry_seconds(durations, files, split=split)
 
 
@@ -168,8 +173,11 @@ def collect_test_ids(test_runner, files: list[str]) -> list[str]:
 
 
 def part_files(root: Path, files: list[str], part: tuple[int, int]) -> list[str]:
-    # Every part must split identically, and each restores its own traced cache.
-    return split_parts(files, entry_seconds(recorded_seconds(unit_records(root)), files), part)
+    if (root / ".mutation-tracing.json").is_file():
+        seconds = file_seconds(root, files)
+    else:
+        seconds = entry_seconds(recorded_seconds(unit_records(root)), files)
+    return split_parts(files, seconds, part)
 
 
 def split_parts(files: list[str], seconds: dict[str, float], part: tuple[int, int]) -> list[str]:

@@ -247,7 +247,7 @@ def prepare_workspace(root: Path, work: Path, paths: list[str], tests: list[str]
         if path.is_file()
         and not path.is_symlink()
         and path.name != "pyproject.toml"
-        and (path.name == ".test_durations" or not path.name.startswith("."))
+        and (path.name in {".test_durations", ".mutation-tracing.json"} or not path.name.startswith("."))
     )
     for name in root_files:
         shutil.copy(root / name, work / name)
