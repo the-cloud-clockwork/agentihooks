@@ -244,7 +244,6 @@ def _imported(path: str, source: str) -> list[str]:
 
 
 def _import_statements(statements: list) -> Iterator[ast.Import | ast.ImportFrom]:
-    # An import is a statement, so only statement bodies can hold one; skipping expressions skips most nodes.
     for statement in statements:
         if isinstance(statement, ast.Import | ast.ImportFrom):
             yield statement
