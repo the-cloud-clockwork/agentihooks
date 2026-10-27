@@ -208,13 +208,15 @@ def test_index_cursor_boundaries_and_replay(captured, monkeypatch):
 def test_archive_acknowledgements_advance_only_the_contiguous_prefix(captured):
     catalog, meter, scope = captured
     recorder = progress.Recorder(catalog, GRANT, scope, "agentihooks", clock=lambda: 150.0)
+    for stage in metrics.STAGES:
+        meter._advance(scope, stage, 0, 0.0)
     entries = [spool.Entry(i, str(i), 100.0, [{}], 10) for i in range(1, 4)]
     for entry in entries:
         recorder.buffered(entry)
     recorder.archived(entries[1])
     assert meter.status(GRANT, scope, 150.0)["stages"]["archive"]["through"] == 0
     recorder.archived(entries[0])
-    assert meter.status(GRANT, scope, 150.0)["stages"]["archive"]["through"] == 3
+    assert meter.status(GRANT, scope, 150.0)["stages"]["archive"]["through"] == 2
     assert meter.status(GRANT, scope, 150.0)["stages"]["archive"]["backlog"] == 1
 
 
