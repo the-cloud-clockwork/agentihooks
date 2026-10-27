@@ -1014,7 +1014,10 @@ def test_queue_gate_is_the_early_verifier_and_the_standard_gate_summarizes_queue
     jobs = workflow["jobs"]
     summary = jobs["gate-required"]
     assert summary["name"] == ci_gate_queue.SUMMARY_NAME
-    assert jobs["queue-fail-fast"] == ci_gate_queue.watcher(summary["runs-on"])
+    assert jobs["queue-fail-fast"] in (
+        ci_gate_queue.watcher(summary["runs-on"]),
+        ci_gate_queue.watcher(summary["runs-on"], deferred=True),
+    )
     normalized = ci_gate_queue.normalize({"test.yml": workflow})["test.yml"]["jobs"]
     assert normalized["gate-required"]["name"] == "Gate — Required"
     assert normalized["queue-fail-fast"]["name"] == "queue-fail-fast"
@@ -1756,12 +1759,11 @@ def test_mutation_shards_reuse_stats_collected_once_in_planned_parts():
         ' --bases "$BASES" --budget 1080 --stats .mutation-stats --stats-part "$PART" --stats-parts "$PARTS"'
     )
     upload = stats_steps[len(setup) + 1]
-    assert upload["uses"] == "actions/upload-artifact@v4"
+    assert upload["uses"] == "./.workflow-revision/.github/actions/retry-upload"
     assert upload["with"]["name"] == "mutation-stats-${{ matrix.part }}"
     assert upload["with"]["path"] == ".mutation-stats/"
     assert upload["with"]["include-hidden-files"] is True
     assert upload["with"]["if-no-files-found"] == "error"
-    assert upload["with"]["overwrite"] is True
     evidence = stats_steps[len(setup) + 2]
     assert evidence["if"] == "failure()"
     assert evidence["with"]["name"] == "mutation-evidence-stats-${{ matrix.part }}"
@@ -1828,15 +1830,27 @@ def test_every_pull_request_stats_part_restores_one_merged_cache_saved_once_afte
     )
     part = steps[names.index("Upload this part's test stats cache")]
     assert part["if"] == f"strategy.job-total != 1 && {skipped}"
-    assert part["uses"] == "actions/upload-artifact@v4"
+    assert part["uses"] == "./.workflow-revision/.github/actions/retry-upload"
     assert part["with"] == {
         "name": "mutation-test-stats-cache-${{ matrix.part }}",
         "path": ".mutation-stats-fresh/",
         "include-hidden-files": True,
         "if-no-files-found": "ignore",
         "retention-days": 1,
-        "overwrite": True,
     }
+    stats_part = steps[names.index("Upload mutation stats part")]
+    assert stats_part["if"] == skipped
+    assert stats_part["uses"] == part["uses"]
+    assert stats_part["with"] == {
+        "name": "mutation-stats-${{ matrix.part }}",
+        "path": ".mutation-stats/",
+        "include-hidden-files": True,
+        "if-no-files-found": "error",
+        "retention-days": 1,
+    }
+    actions = steps[names.index("Take the local actions from the workflow revision")]
+    assert actions["if"] == skipped
+    assert names.index(actions["name"]) < names.index(stats_part["name"])
     order = [
         restore["name"],
         "Collect one stats part for every mutation shard",
@@ -2024,7 +2038,7 @@ def test_jobs_on_the_pull_request_head_run_local_actions_from_the_workflow_revis
         assert {step["uses"] for step in local[name]} == {
             "./.workflow-revision/.github/actions/nats-server",
             "./.workflow-revision/.github/actions/browser-cache",
-        }
+        } | ({"./.workflow-revision/.github/actions/retry-upload"} if name == "mutation-stats" else set())
         assert all(steps.index(take) < steps.index(step) for step in local[name])
         assert all("hashFiles" not in step.get("if", "") for step in local[name])
 
@@ -2042,7 +2056,7 @@ def test_a_head_that_predates_the_local_actions_gets_them_from_the_workflow_revi
     git("add", ".")
     git("commit", "-qm", "head without the actions")
     head = git("rev-parse", "HEAD").strip()
-    for action in ("nats-server", "browser-cache"):
+    for action in ("nats-server", "browser-cache", "retry-upload"):
         (tmp_path / ".github/actions" / action).mkdir(parents=True)
         (tmp_path / ".github/actions" / action / "action.yml").write_text(f"name: {action}\n")
     git("add", ".")
@@ -2060,3 +2074,83 @@ def test_a_head_that_predates_the_local_actions_gets_them_from_the_workflow_revi
         if step.get("uses", "").startswith("./."):
             assert (tmp_path / step["uses"] / "action.yml").read_text() == f"name: {Path(step['uses']).name}\n"
     assert git("status", "--porcelain", "--", ".github") == ""
+
+
+@pytest.mark.parametrize("failure", ["", "revision", "archive"])
+def test_antoncore_app_rest_retains_all_checker_inputs_when_git_is_refused(tmp_path, failure):
+    step = next(s for s in _workflow()["jobs"]["lint"]["steps"] if s.get("id") == "antoncore-checkout")
+    source = tmp_path / "source"
+    inputs = {
+        "scripts/swarm_dashboard_columns.py": "checker",
+        "stacks/observability/provisioning/dashboards/Swarm/dashboard.json": "dashboard",
+        "k8s/values-overlays/agentihooks-swarm-nats/values.yaml": "values",
+        "k8s/values-overlays/agentihooks-swarm-nats/users.yaml": "users",
+        "k8s/values-overlays/agentihooks-swarm-nats/trust.yaml": "trust",
+    }
+    for path, value in {**inputs, "unselected.txt": "excluded"}.items():
+        target = source / path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(value)
+    archive = tmp_path / "source.tar.gz"
+    with tarfile.open(archive, "w:gz") as tar:
+        tar.add(source, arcname="antoncore-revision")
+    tools = tmp_path / "bin"
+    tools.mkdir()
+    for name, body in {
+        "git": 'echo "git refused" >> "$CALLS"; exit 128\n',
+        "gh": (
+            '[[ "$GH_TOKEN" == fixture-app ]]\n'
+            'echo "$*" >> "$CALLS"\n'
+            'case "$*" in\n'
+            '  *commits/dev*) [[ "$FAILURE" != revision ]]; echo trusted-revision ;;\n'
+            '  *tarball/trusted-revision*) [[ "$FAILURE" != archive ]]; cat "$ARCHIVE" ;;\n'
+            "  *) exit 1 ;;\n"
+            "esac\n"
+        ),
+    }.items():
+        tool = tools / name
+        tool.write_text("#!/usr/bin/env bash\nset -euo pipefail\n" + body)
+        tool.chmod(0o755)
+    calls = tmp_path / "calls"
+    output = tmp_path / "output"
+    result = subprocess.run(
+        ["bash", "-c", step["run"]],
+        cwd=tmp_path,
+        env={
+            **os.environ,
+            **{key: value for key, value in step["env"].items() if key != "GH_TOKEN"},
+            "PATH": f"{tools}:{os.environ['PATH']}",
+            "GH_TOKEN": "fixture-app",
+            "GITHUB_OUTPUT": str(output),
+            "CALLS": str(calls),
+            "ARCHIVE": str(archive),
+            "FAILURE": failure,
+        },
+        capture_output=True,
+        text=True,
+    )
+    assert (result.returncode == 0) == (not failure), result.stderr
+    if failure:
+        assert not output.exists()
+    else:
+        for path, value in inputs.items():
+            assert (tmp_path / ".antoncore" / path).read_text() == value
+        assert not (tmp_path / ".antoncore/unselected.txt").exists()
+        assert output.read_text() == "revision=trusted-revision\n"
+    assert calls.read_text().splitlines() == (
+        ["api repos/the-cloud-clockwork/antoncore/commits/dev --jq .sha"]
+        + ([] if failure == "revision" else ["api repos/the-cloud-clockwork/antoncore/tarball/trusted-revision"])
+    )
+
+
+def test_lint_keeps_the_pinned_archive_on_the_same_antoncore_app():
+    steps = _workflow()["jobs"]["lint"]["steps"]
+    checkout = next(s for s in steps if s.get("id") == "antoncore-checkout")
+    assert "steps.app-token.outcome == 'success'" in checkout["if"]
+    assert checkout["env"]["GH_TOKEN"] == "${{ steps.app-token.outputs.token }}"
+    assert checkout["env"]["REPOSITORY"] == "the-cloud-clockwork/antoncore"
+    assert checkout["env"]["REF"] == "dev"
+    assert "git " not in checkout["run"]
+    check = next(s for s in steps if s.get("name", "").startswith("Run every Swarm Ledger dashboard query"))
+    assert check["env"]["ANTONCORE_REVISION"] == "${{ steps.antoncore-checkout.outputs.revision }}"
+    assert 'echo "$ANTONCORE_REVISION"' in check["run"]

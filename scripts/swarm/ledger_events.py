@@ -129,6 +129,7 @@ def pull_request(raw):
     started = any(
         suite.get("workflowRun")
         and suite.get("status") != "COMPLETED"
+        and suite.get("conclusion") != "CANCELLED"
         and not _superseded(suite, newest)
         and (not raw.get("gated") or not required_runs or _run_key(suite) in required_runs)
         for suite in suites
