@@ -469,7 +469,13 @@ def test_gh_and_the_clone_run_with_their_folder_and_timeout(tmp_path):
     folder = str(tmp_path)
     assert create_github.clone(run, REPO, folder) == folder
     assert create_github.gh(run, ["api", "x"], {"a": 1}, folder) == "out"
-    common = {"input": None, "capture_output": True, "text": True, "timeout": create_github.GH_TIMEOUT_S, "check": False}
+    common = {
+        "input": None,
+        "capture_output": True,
+        "text": True,
+        "timeout": create_github.GH_TIMEOUT_S,
+        "check": False,
+    }
     origin = ["git", "-C", folder, "remote", "add", "origin", f"https://github.com/{REPO}.git"]
     assert seen == [
         (["git", "init", "-q", folder], common),
