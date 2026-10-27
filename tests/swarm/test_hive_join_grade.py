@@ -151,6 +151,9 @@ def test_every_optional_hive_check_is_report_only():
 
 
 def test_hive_launch_failures_raise_one_finding_per_check_and_error_class():
+    import hashlib
+    import json
+
     from fakeredis import FakeRedis
 
     from scripts.hive import join_report
@@ -160,29 +163,45 @@ def test_hive_launch_failures_raise_one_finding_per_check_and_error_class():
     store = RedisStore(FakeRedis(decode_responses=True))
     store.create(SwarmConfig("sw", "/repo", max_eng=4, max_ci=0, state="running"))
     code = store.ensure_code("sw").code
-    token = {"error": "HTTPError", "status": 401, "message": "ledger token refused"}
-    refused = {"error": "ConnectionError", "status": None, "message": "connection refused"}
 
-    def fail(number, error):
-        agent = AgentRecord(f"engineer@{code}-000{number}", "eng", f"t{number}", execution_id=f"x{number}", hive="w")
+    def fail(number, error, status=401):
+        name = f"engineer@{code}-000{number}"
+        agent = AgentRecord(name, "eng", f"t{number}", execution_id=f"x{number}", hive="w")
+        reason = {"error": error, "status": status, "message": f"token for {name} refused after {number} tries"}
         checks = dict.fromkeys((*join_report.REQUIRED, *join_report.OPTIONAL), True)
-        checks.update(ledger_join=False, errors={"ledger_join": error})
+        checks.update(ledger_join=False, errors={"ledger_join": reason})
         join_report.start(store.redis, "sw", agent, "session", checks, {}, 1000)
         found = launch_check.misses(store, "sw", agent, {}, {}, True, [])
-        launch_check.record(store, "sw", agent, found, 1_000_000 + number * 60_000, 60_000)
-        return agent.name
+        launch_check.record(store, "sw", agent, found, 1793048400000 + number * 60_000, 60_000)
+        return name
 
-    names = [fail(number, token) for number in (1, 2, 3)]
-    (finding,) = launch_check.findings(store, "sw")
-    assert finding.id.startswith("launch-check/hive_ledger_join/")
-    assert all(name in " ".join(finding.evidence) for name in names)
-    assert "ledger token refused" in " ".join(finding.evidence)
-    fail(4, refused)
+    def subject(error, status):
+        text = f"expected available; observed missing ({error} token for  refused after # tries)"
+        digest = hashlib.sha256(json.dumps([text, status]).encode()).hexdigest()[:8]
+        return f"hive_ledger_join/20261026T21-{digest}"
+
+    names = [fail(number, "HTTPError") for number in (1, 2, 3)]
+    assert launch_check.findings(store, "sw") == [
+        launch_check.Finding(
+            "launch check",
+            subject("HTTPError #", 401),
+            f"{', '.join(names)} failed the launch check on hive_ledger_join",
+            (
+                f"agents {', '.join(names)}",
+                f"expected available; observed missing (HTTPError 401 token for {names[0]} refused after 1 tries)",
+            ),
+            "a launch must pass within sixty seconds",
+            1,
+        )
+    ]
+    fail(4, "ConnectionError", None)
+    fail(5, "HTTPError", 403)
     found = launch_check.findings(store, "sw")
-    assert len(found) == 2
-    assert finding.id in [f.id for f in found]
-    fail(5, {**token, "status": 403})
-    assert len(launch_check.findings(store, "sw")) == 3
+    assert [f.subject for f in found] == [
+        subject("HTTPError #", 401),
+        subject("ConnectionError", None),
+        subject("HTTPError #", 403),
+    ]
 
 
 def test_failed_hive_launch_retires_records_and_drops_that_agent(monkeypatch):

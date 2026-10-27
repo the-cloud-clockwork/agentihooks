@@ -18,7 +18,6 @@ from scripts.swarm.health.findings import Finding
 from scripts.swarm.store import AgentRecord, RedisStore
 
 DEADLINE_MS = 60 * 1000
-WINDOW_MS = 60 * 60 * 1000
 STAMP = ".agentihooks-render.json"
 HOST_OVERLAYS = "host_overlays"
 SETTINGS = ("hooks", "model", "effort")
@@ -270,16 +269,16 @@ def findings(store: RedisStore, slug: str) -> list[Finding]:
             if field in REPORT_ONLY:
                 continue
             observed = _observed(values)
-            error = _error_class(values, found)
-            window = time.strftime("%Y%m%dT%H", time.gmtime(found["at"] // WINDOW_MS * WINDOW_MS / 1000))
-            subject = f"{field}/{window}-{hashlib.sha1(error.encode()).hexdigest()[:8]}"
+            error = [re.sub(r"\d+", "#", observed.replace(found["agent"], "")), values.get("reason", {}).get("status")]
+            hour = time.strftime("%Y%m%dT%H", time.gmtime(found["at"] // 1000))
+            subject = f"{field}/{hour}-{hashlib.sha256(json.dumps(error).encode()).hexdigest()[:8]}"
             group = groups.setdefault(subject, {"field": field, "observed": observed, "agents": []})
             group["agents"].append(found["agent"])
     return [
         Finding(
             "launch check",
             subject,
-            f"{', '.join(group['agents'])} failed the launch check on {group['field']}",
+            f"{', '.join(sorted(group['agents']))} failed the launch check on {group['field']}",
             (f"agents {', '.join(sorted(group['agents']))}", group["observed"]),
             "a launch must pass within sixty seconds",
             1,
@@ -291,14 +290,5 @@ def findings(store: RedisStore, slug: str) -> list[Finding]:
 def _observed(values: dict) -> str:
     observed = f"expected {values['expected']}; observed {values['actual']}"
     if reason := values.get("reason"):
-        observed += (
-            " (" + " ".join(str(part) for part in (reason["error"], reason["status"], reason["message"]) if part) + ")"
-        )
+        return f"{observed} ({' '.join(str(part) for part in reason.values() if part)})"
     return observed
-
-
-def _error_class(values: dict, found: dict) -> str:
-    reason = values.get("reason", {})
-    text = _observed({key: value for key, value in values.items() if key != "reason"})
-    text += f" {reason.get('error')} {reason.get('message')}" if reason else ""
-    return re.sub(r"\d+", "#", text.replace(found["agent"], "<agent>")) + f" status {reason.get('status')}"
