@@ -1,3 +1,4 @@
+import argparse
 import json
 import subprocess
 from pathlib import Path
@@ -873,3 +874,32 @@ def test_cli_create_passes_its_name(monkeypatch, capsys):
     monkeypatch.setattr(create, "create", lambda tools, options: seen.update(options=options) or "created")
     assert cli.main(["create", "--name", "swarm-hive-009"]) == 0
     assert seen["options"] == create.Options(name="swarm-hive-009")
+
+
+def test_cli_create_names_its_name_option():
+    parser = cli._parser()
+    (commands,) = [action for action in parser._actions if isinstance(action, argparse._SubParsersAction)]
+    (option,) = [action for action in commands.choices["create"]._actions if action.dest == "name"]
+    assert option.option_strings == ["--name"]
+    assert option.help == "hive name to create; defaults to the next unused swarm-hive name"
+
+
+def test_no_unused_hive_name_below_the_limit_is_a_refusal(world, monkeypatch):
+    monkeypatch.setattr(create, "NAME_LIMIT", 3)
+    world.run.tree = [f"k8s/manifests/{NAME}/ssh-lan.yaml"]
+    world.run.open_heads = ["swarm-hive-002"]
+
+    with pytest.raises(auth.HiveError) as refused:
+        create.create(world.tools, create.Options(dry_run=True))
+
+    assert str(refused.value) == "hive create found no unused hive name below swarm-hive-003"
+    assert not world.run.named("kubectl")
+
+
+def test_the_last_name_below_the_limit_is_taken(world, monkeypatch):
+    monkeypatch.setattr(create, "NAME_LIMIT", 3)
+    world.run.tree = [f"k8s/manifests/{NAME}/ssh-lan.yaml"]
+
+    assert create.create(world.tools, create.Options(dry_run=True)) == (
+        "dry run of hive create swarm-hive-002: nothing written"
+    )

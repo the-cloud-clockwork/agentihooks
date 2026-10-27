@@ -1,6 +1,5 @@
 """agentihooks hive create: one workstation command brings a new Kubernetes hive live in herdr."""
 
-import itertools
 import json
 import re
 import subprocess
@@ -28,6 +27,7 @@ SIGNER_NAMESPACE = "agentihooks-swarm"
 SIGNER_SYNC = "agentihooks-swarm-nats-signer"
 POLL_S = 15
 COMMAND_TIMEOUT_S = 60
+NAME_LIMIT = 1000
 NAME_SHAPE = re.compile(r"[a-z0-9]([-a-z0-9]*[a-z0-9])?")
 
 
@@ -126,9 +126,10 @@ def _named(tools: Tools, options: Options) -> str:
         found += [f"an open {options.repo} pull request"] if name in opened else []
         return found
 
-    name = options.name or next(
-        machine.hive_name(ordinal) for ordinal in itertools.count(1) if not holders(machine.hive_name(ordinal))
-    )
+    unused = (name for name in map(machine.hive_name, range(1, NAME_LIMIT)) if not holders(name))
+    name = options.name or next(unused, None)
+    if name is None:
+        raise auth.HiveError(f"hive create found no unused hive name below {machine.hive_name(NAME_LIMIT)}")
     found = holders(name)
     if found:
         raise auth.HiveError(
