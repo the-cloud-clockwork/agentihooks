@@ -66,7 +66,7 @@ def renew(last: float, now: float) -> float:
     path = token_file()
     staged = path.with_name(f"{path.name}.next")
     try:
-        staged.write_text(f"{token()}\n")
+        staged.write_text(f"{GitHubAppAuth().get_token()}\n")
         staged.chmod(0o600)
         staged.replace(path)
     except (OSError, GitAuthRefused, jwt.PyJWTError, requests.RequestException):
