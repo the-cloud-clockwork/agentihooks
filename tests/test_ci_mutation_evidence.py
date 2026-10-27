@@ -128,5 +128,9 @@ def test_shard_workflow_uploads_only_the_staged_bundle():
     assert stage["if"] == "always()"
     assert "scripts.ci_mutation.evidence stage" in stage["run"]
     upload = steps["Upload shard mutation evidence"]
-    assert upload["with"]["path"] == ".mutation-evidence/"
+    assert "--output .mutation-workspaces --bundle .mutation-gate" in stage["run"]
+    assert "mv .mutation-gate .mutation-workspaces" in stage["run"]
+    assert upload["with"]["path"] == (
+        "${{ job.status == 'success' && '.mutation-gate/report.json' || '.mutation-gate/' }}"
+    )
     assert list(steps).index(stage["name"]) < list(steps).index(upload["name"])
