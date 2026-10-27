@@ -175,6 +175,19 @@ def test_a_failed_spawn_leaves_no_seat_record():
     assert seats(store) == []
 
 
+@pytest.mark.parametrize(
+    "refused",
+    [
+        "no hive for dispatch has room: remote cpu: five minute load 1.17 on 8 CPUs, fits 0 more",
+        "no hive has room, and the local machine runs 4 of its 4 agents",
+    ],
+)
+def test_a_refused_hive_reservation_waits_instead_of_failing_the_spawn(refused):
+    store, runtime = swarm(), FakeRuntime(crash=tick_module.SpawnError(refused, "unavailable"))
+    assert run(store, runtime, doc(priority())) == [f"the dispatcher waits: {refused}"]
+    assert seats(store) == []
+
+
 class PriorityLedger(FakeLedger):
     def state(self, slug):
         return {**super().state(slug), "priorities": [priority()]}
