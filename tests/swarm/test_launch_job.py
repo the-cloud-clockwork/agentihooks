@@ -11,6 +11,7 @@ from scripts.swarm.runtime import SPAWN_TIMEOUT_S, HerdrRuntime
 from scripts.swarm.store import SwarmConfig
 from scripts.swarm.tick import Placed, tick
 from tests.swarm.test_tick import FakeRuntime, tasks
+from tests.swarm.test_tick import store as store
 
 
 class DetachedRuntime(FakeRuntime):
@@ -20,6 +21,8 @@ class DetachedRuntime(FakeRuntime):
         self.jobs = []
 
     def spawn(self, config, lane, name, task):
+        if lane == "master":
+            return super().spawn(config, lane, name, task)
         assert task["detached_launch"]
         self.jobs.append(name)
         return Placed(
@@ -66,7 +69,7 @@ def test_completed_job_records_the_existing_placed_fields(store, tmp_path):
     (tmp_path / f"{name}.json").write_text(json.dumps({"placed": asdict(result)}))
     runtime.live.add(name)
     tick("sw", store, ledger, runtime, now_ms=2000)
-    agent = store.agents("sw")[0]
+    agent = next(agent for agent in store.agents("sw") if agent.task == "t1")
     assert (agent.pane_id, agent.harness, agent.account, agent.model, agent.profile) == (
         "w:p1",
         "claude",
@@ -140,6 +143,7 @@ def test_job_starts_a_detached_process_and_returns_without_waiting(tmp_path, mon
 def test_ordered_launches_remain_synchronous(tmp_path, monkeypatch, lane, task, route):
     runtime = HerdrRuntime(home=tmp_path)
     runtime._launch = Mock(return_value=Placed("w:p1", "claude"))
+    runtime._launch.__qualname__ = "_launch"
     detached = Mock()
     monkeypatch.setattr(launch_job, "start", detached)
     config = SwarmConfig("sw", "/repo", 1, 1)
