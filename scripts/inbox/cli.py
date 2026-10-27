@@ -142,9 +142,9 @@ def _apply_send(store, me, record):
 def _operator_door(store, me):
     """Only the front door master writes to the operator, and never first: any other agent's message goes to it."""
     door, holds = store.front_door_of(me)
-    if holds:
+    if holds or not door:
         raise InboxError(f"no agent writes to the operator first, so {me} cannot send to him; answer his item instead")
-    return door or OPERATOR
+    return door
 
 
 def _apply_reply(store, me, record):

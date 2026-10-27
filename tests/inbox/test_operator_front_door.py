@@ -52,6 +52,18 @@ def test_the_front_door_never_writes_to_the_operator_first(inbox, monkeypatch, c
     assert "first" in capsys.readouterr().err and inbox.inbox("operator") == []
 
 
+def test_a_session_outside_any_swarm_never_writes_to_the_operator_first(inbox, monkeypatch, capsys):
+    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "alice")
+    assert cli.main(["send", "operator", "the build is green"]) == 1
+    assert "first" in capsys.readouterr().err and inbox.inbox("operator") == []
+
+
+def test_an_unseated_master_answers_the_operator_through_the_front_door(inbox):
+    asked = inbox.send("operator", "sw-master-3", "status")
+    answer = inbox.reply(asked.id, "sw-master-3", "two tasks left")
+    assert answer.address == DOOR and inbox.inbox("operator") == []
+
+
 def test_a_lane_agent_reply_to_an_operator_item_goes_to_its_front_door_with_his_item(inbox, monkeypatch):
     asked = inbox.send("operator", ENG.name, "is the fix merged")
     assert run_as(monkeypatch, ENG, "reply", asked.id, "handed", "off", "to", "my", "seat") == 0
