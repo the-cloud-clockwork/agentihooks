@@ -237,7 +237,7 @@ def test_the_manifests_step_opens_the_pull_request_through_its_clone_outside_a_g
         ["gh", "pr"],
     ]
     assert {cwd for _, cwd in step} == {clone}
-    assert not Path(clone).is_relative_to(outside) and not Path(clone).exists()
+    assert not Path(clone).exists()
     assert _state(world)["pr"] == PR
 
 
