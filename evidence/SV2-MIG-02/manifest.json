@@ -1,0 +1,17 @@
+{
+  "fixture_inputs": {
+    "capped_redis_preview": "beta, a legacy Redis entry preview with one entry at the 500 character cap",
+    "complete_jsonl": "alpha, a surviving raw transcript with its legacy preview and vector rows",
+    "missing_source": "delta, a session the legacy index named with no surviving material",
+    "vector_only_record": "gamma, legacy vector rows with no raw transcript and no preview"
+  },
+  "input_sha256": {
+    "alpha.jsonl": "c10e017688020ea4a06425c1f2383dc64362ac482ba81d127238801a63abd8d4",
+    "beta.jsonl": "f8db45b0cbb54d2a65d4cf95d1e9fcbb5253b3f94ac6e813e9c9eb0e590d498c",
+    "fixture.json": "90cc702885900a1079c70827b218ef929b89f04a540f49098b9dddfd40ea1909",
+    "sv2_mig02_cases.py": "ff39399fb54a2b5fbaf2f7ddea0f5f76c28b4b70b7f89286f17375aab3110262"
+  },
+  "mocked": true,
+  "package": "SV2-MIG-02",
+  "tested_commit": "c2230ff7f0e005552687092859a953be12e4f7f2"
+}

@@ -6,6 +6,8 @@ import subprocess
 import zipfile
 from pathlib import Path
 
+from scripts.ci_mutation.stats_dependencies import CONTEXT
+
 ARTIFACT = "mutation-test-stats-cache-"
 TESTS = "actions/workflows/test.yml/runs"
 SEEDED = "seeded.sha"
@@ -47,7 +49,7 @@ def harvest(number: int, folder: Path) -> int:
         for item in sorted(found, key=lambda item: item["id"]):
             with zipfile.ZipFile(io.BytesIO(api(f"actions/artifacts/{item['id']}/zip", binary=True))) as zipped:
                 for name in zipped.namelist():
-                    if Path(name).suffix in (".json", ".index"):
+                    if Path(name).suffix in (".json", ".index") or Path(name).name == CONTEXT:
                         (folder / Path(name).name).write_bytes(zipped.read(name))
                         written += 1
         if found:
@@ -55,21 +57,28 @@ def harvest(number: int, folder: Path) -> int:
     return 0
 
 
-def usable(folder: Path, pointer: Path) -> Path | None:
+def usable(folder: Path, pointer: Path, context: str | None) -> Path | None:
     key = pointer.read_text()
     record = folder / f"{key}.json"
     if not KEY.fullmatch(key) or not record.is_file():
         return None
     try:
-        return record if json.loads(record.read_text()).get("scope") == {} else None
+        stored = json.loads(record.read_text())
     except ValueError:
         return None
+    return record if stored.get("scope") == {} and context in (None, stored.get("context")) else None
+
+
+def size(folder: Path) -> int:
+    return sum(path.stat().st_size for path in folder.iterdir() if path.is_file())
 
 
 def prune(folder: Path) -> int:
+    marker = folder / CONTEXT
+    context = marker.read_text().strip() if marker.is_file() else None
     kept = set()
     for pointer in folder.glob("*.index"):
-        if record := usable(folder, pointer):
+        if record := usable(folder, pointer, context):
             kept.add(record.name)
         else:
             pointer.unlink()
@@ -88,9 +97,14 @@ def main(argv: list[str] | None = None) -> int:
     args.folder.mkdir(parents=True, exist_ok=True)
     pulls = merged_pulls(args.folder, args.head, args.before)
     written = sum(harvest(number, args.folder) for number in pulls)
+    before = size(args.folder)
     kept = prune(args.folder)
+    after = size(args.folder)
     (args.folder / SEEDED).write_text(f"{args.head}\n")
-    print(f"Mutation stats seed: {written} files from pull requests {pulls}; kept {kept} records")
+    print(
+        f"Mutation stats seed: {written} files from pull requests {pulls}; kept {kept} records; "
+        f"{before} bytes before the prune, {after} after"
+    )
     return 0
 
 

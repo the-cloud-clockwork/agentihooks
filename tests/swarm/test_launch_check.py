@@ -122,8 +122,11 @@ def test_unavailable_process_reports_an_observation_without_configuration_mismat
     assert found == {"observation": {"expected": "available process observation", "actual": "unavailable"}}
     launch_check.record(store, "sw", agent, found, LAUNCH_CHECKED, launch_check.DEADLINE_MS)
     findings = launch_check.findings(store, "sw")
-    assert [finding.id for finding in findings] == [f"launch-check/{agent.name}/observation"]
-    assert findings[0].evidence == ("expected available process observation; observed unavailable",)
+    assert [finding.subject.split("/")[0] for finding in findings] == ["observation"]
+    assert findings[0].evidence == (
+        f"agents {agent.name}",
+        "expected available process observation; observed unavailable",
+    )
 
 
 @pytest.mark.parametrize(
@@ -398,7 +401,7 @@ def test_tick_retires_and_relaunches_a_failed_launch_once(store, monkeypatch, sc
     assert (failed["at"], failed["elapsed_ms"], failed["held"]) == (LAUNCH + 60_000, 60_000, False)
     assert runtime.tasks[1]["launch_assignment"]["profile"] == "engineer"
     (finding,) = launch_check.findings(store, "sw")
-    assert finding.id == f"launch-check/{first}/profile"
+    assert (finding.subject.split("/")[0], finding.evidence[0]) == ("profile", f"agents {first}")
     second = runtime.spawned[1][1]
     assert runtime.spawned[1][2] == "t1"
     joined(ledger, runtime, LAUNCH + launch_check.DEADLINE_MS + 1)
@@ -407,7 +410,7 @@ def test_tick_retires_and_relaunches_a_failed_launch_once(store, monkeypatch, sc
     assert f"{second} failed its launch check on profile; its one relaunch is spent" in actions
     assert second not in runtime.killed
     assert len(runtime.spawned) == 2
-    assert [f.id for f in launch_check.findings(store, "sw")] == [f"launch-check/{second}/profile"]
+    assert [f.evidence[0] for f in launch_check.findings(store, "sw")] == [f"agents {second}"]
 
 
 def test_master_failure_is_posted_to_the_operator_chat_and_relaunched(store, monkeypatch):
@@ -457,10 +460,7 @@ def test_master_notification_names_every_miss(store, monkeypatch, tmp_path):
         "The master failed its launch check within a minute on joining the ledger and holding its seat, "
         "its role on the package base role. It is being retired and relaunched once."
     ]
-    assert [f.id for f in launch_check.findings(store, "sw")] == [
-        f"launch-check/{first}/joined",
-        f"launch-check/{first}/base",
-    ]
+    assert [f.subject.split("/")[0] for f in launch_check.findings(store, "sw")] == ["joined", "base"]
     assert list(launch_check.report(store, "sw", "master")["misses"]) == ["joined", "base"]
 
 
@@ -477,9 +477,7 @@ def test_a_wrong_base_retires_and_relaunches_the_launch(store, monkeypatch, tmp_
     actions = tick("sw", store, ledger, runtime, LAUNCH + launch_check.DEADLINE_MS)
     assert any(a.startswith(f"retired {first} after its launch check failed on base") for a in actions)
     assert first in runtime.killed
-    assert [f.id for f in launch_check.findings(store, "sw") if f.subject.startswith(first)] == [
-        f"launch-check/{first}/base"
-    ]
+    assert [f.subject.split("/")[0] for f in launch_check.findings(store, "sw") if first in f.evidence[0]] == ["base"]
     assert list(launch_check.report(store, "sw", "t1")["misses"]) == ["base"]
     assert launch_check.relaunched(store, "sw", "t1") is True
 
@@ -708,9 +706,10 @@ def test_captured_missing_process_cases_have_no_unsupported_configuration_findin
         found = misses(store, agent, facts, doc, declared=expected["overlay"]["expected"])
         launch_check.record(store, "sw", agent, found, case["at"], case["elapsed_ms"])
     findings = launch_check.findings(store, "sw")
-    after = sum(finding.id.rsplit("/", 1)[-1] in configuration for finding in findings)
-    observations = sum(finding.id.endswith("/observation") for finding in findings)
-    joins = sum(finding.id.endswith("/joined") for finding in findings)
+    named = [(f.subject.split("/")[0], len(f.evidence[0].split(", "))) for f in findings]
+    after = sum(field in configuration for field, _ in named)
+    observations = sum(count for field, count in named if field == "observation")
+    joins = sum(count for field, count in named if field == "joined")
     print(
         f"captured cases=3 unsupported configuration before={before} after={after} unavailable={observations} joined={joins}"
     )
@@ -807,12 +806,14 @@ def test_findings_carry_the_field_evidence_and_threshold(store, launched):
 
     agent, _, _ = launched
     launch_check.record(store, "sw", agent, {"name": {"expected": "a", "actual": "b"}}, LAUNCH, 0)
+    (finding,) = launch_check.findings(store, "sw")
+    assert finding.subject.startswith("name/")
     assert launch_check.findings(store, "sw") == [
         Finding(
             "launch check",
-            f"{agent.name}/name",
-            f"{agent.name} failed its launch check on name",
-            ("expected a; observed b",),
+            finding.subject,
+            f"{agent.name} failed the launch check on name",
+            (f"agents {agent.name}", "expected a; observed b"),
             "a launch must pass within sixty seconds",
             1,
         )
@@ -828,10 +829,10 @@ def test_only_enforced_misses_raise_findings(store, launched, monkeypatch, repor
         "name": {"expected": "a", "actual": "b"},
     }
     launch_check.record(store, "sw", agent, found, LAUNCH, 0)
-    expected = [f"launch-check/{agent.name}/name"]
+    expected = ["name"]
     if not report_only:
-        expected.insert(0, f"launch-check/{agent.name}/overlay")
-    assert [f.id for f in launch_check.findings(store, "sw")] == expected
+        expected.insert(0, "overlay")
+    assert [f.subject.split("/")[0] for f in launch_check.findings(store, "sw")] == expected
     assert launch_check.report(store, "sw", "t1")["misses"] == found
 
 

@@ -350,8 +350,58 @@ The launch settings carry the address and the credential:
 - On the workstation, set `AGENTIHOOKS_HOSTED_LEDGER_URL` in the env file the tick loads. The tick then reads the
   hosted server secret (`SWARM_SECRET`, else OpenBao) and hands each spawned agent its
   `AGENTIHOOKS_LEDGER_AGENT_TOKEN`; without the secret the tick still runs and its agents keep the workstation server.
-- On a hive, set `AGENTIHOOKS_HOSTED_LEDGER_URL` in the controller's `controller.env`. Every launch hands it to the
+- On a hive, set `AGENTIHOOKS_HOSTED_LEDGER_URL` in the hive's `hive.env`. Every launch hands it to the
   worker home beside `AGENTIHOOKS_SWARM_API_URL`.
+
+### The launch route wins over a profile setting
+
+An agent starts with the `env` block of its rendered Claude profile home. A bundle or profile may set
+`AGENTIHOOKS_HOSTED_LEDGER_URL` in its `settings.overrides.json` as a default. When the process that renders the
+profile has the variable set, that value replaces the profile's in the rendered `settings.json`; a profile value
+applies only when the rendering process has none. A hive that runs agents as herdr panes spawns each one through
+`init-agent`, whose `select-profile` step renders the profile with the controller's environment, so the address in
+the hive's `hive.env`, or in a worker hive pod's environment, reaches its agents.
+
+The rendered home's stamp records the address it was rendered with. A render whose address differs builds a fresh
+home instead of reusing the cached one, so a changed address reaches the next agent without a manual rerender. An
+unchanged address keeps the cached home. The hive's systemd unit loads `hive.env` as its environment file when the
+controller starts, so restart the controller after changing the file.
+
+In this example a worker hive reaches the hosted ledger over its internal name while the bundle names the public
+address. In the hive's environment:
+
+```bash
+AGENTIHOOKS_HOSTED_LEDGER_URL=https://swarm-internal.homeofanton.com:8765
+```
+
+In the bundle's `profiles/<profile>/.claude/settings.overrides.json`:
+
+```json
+{"env": {"AGENTIHOOKS_HOSTED_LEDGER_URL": "https://swarm.homeofanton.com"}}
+```
+
+Agents launched on that hive start with the internal address. A workstation tick whose env file leaves the variable
+unset launches agents with the public address from the bundle.
+
+To check which address an agent received, read the key from its rendered home (never print the whole file, which
+holds other settings):
+
+```bash
+python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["env"].get("AGENTIHOOKS_HOSTED_LEDGER_URL"))' \
+  <agent home>/claude/settings.json
+```
+
+Then confirm the launch passed with `agentihooks swarm <slug> status --json`: under `agents`, that agent's
+`hive_join` checks `ledger_join` and `ledger_write` are both `true`.
+
+`tests/test_profile_ledger_route.py` covers the rule on a profile rendered in process: a configured address wins
+over the bundle's, an empty one keeps the bundle's, a changed address rerenders the cached home, and an agent whose
+bundle address refuses connections joins and acknowledges the ledger through its configured route.
+
+Limitation: an agent the Kubernetes runtime launches in its own worker pod builds its home through the worker home
+bootstrap. It receives the address as a launch endpoint, not in the rendering process's environment, and the
+rendered profile `env` takes precedence over launch endpoints there. Keep a bundle `AGENTIHOOKS_HOSTED_LEDGER_URL`
+reachable from such pods, or leave it unset.
 
 ### Credentials a remote client sends
 
@@ -422,6 +472,7 @@ python -c 'from scripts.swarm_ledger import ledger_link; print(ledger_link.remot
 | `forbidden` (403) on every hub ledger write after `hub: service credential renewal failed` | The renewal thread could not renew `agentihooks-hive:controller:hub-<hostname>` and the key expired | Fix the logged Redis error; the next renewal writes the key again |
 | `agentihooks hub run` exits at startup with a Redis `NoPermissionError` (no permissions to access a key) | The hub's Redis user cannot set `agentihooks-hive:controller:*` | Grant GET and SET on it to the hub's Redis user |
 | A workstation stops starting its local ledger server after `LEDGER_URL` was added to its env | Rule 3: a hub address with no mode is remote | Set `AGENTIHOOKS_DEPLOYMENT=local`, or remove `LEDGER_URL` |
+| Hive agents fail `ledger_join` and `ledger_write` launch checks while the hive controller reaches the hosted ledger | The agent's rendered `settings.json` holds a different `AGENTIHOOKS_HOSTED_LEDGER_URL` than the hive's environment: the hive runs a release before v2.17.330, or the controller process lacks the variable | Set the variable in `hive.env` or the worker pod's environment, run agentihooks v2.17.330 or later (the first release with the rule) on the hive, and restart the controller; the next launch rerenders the home |
 | A process with `AGENTIHOOKS_DEPLOYMENT=local` still talks to the hosted ledger | `SWARM_URL` is set for this swarm and wins over the mode | Unset `SWARM_URL` in that process |
 
 ## Regulated site recipe

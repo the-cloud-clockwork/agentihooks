@@ -340,7 +340,7 @@ Set them with `agentihooks hive set <id> key=value ...`, or on the ledger page's
 
 | Setting | Values | Default | Meaning |
 |---|---|---|---|
-| `name` | text | the hive id | Display name. |
+| `name` | text | the hive id | Display name. A hive with `ui=yes`, where the masters run, is always named `swarm-master`. |
 | `ui` | `yes`, `no` | `no` | The machine has a screen and a person at it. |
 | `ephemeral` | `yes`, `no` | `no` | The machine can disappear, such as a pod. Placement prefers lasting hives on a tie. |
 | `excluded` | comma list of lane roles or profiles, such as `master,frontend,qa` | `master` on `ui=no`, none on `ui=yes` | Work the hive never takes. An empty value excludes nothing. |
@@ -877,6 +877,48 @@ failed with "hive launch failed: `<cause>`".
 | `expired` | The order expired before the hive took it, or the agent started after the expiry; the hive stops such an agent. |
 | `ambiguous` | The agent may have started but its process could not be identified, or the order was taken 300 seconds ago with no result. |
 | `<status>: <detail>` | The local runtime refused the spawn, such as `refused: <why>` or `unavailable: <why>`, with the runtime's own reason. |
+
+### A worker that finishes before the tick collects its acknowledgement
+
+Until the tick collects a hive launch's `live` acknowledgement, the execution record names only the hive in its
+runtime target (`host_id`). The process identity a retire needs (`process_namespace`, `pid`, `pid_start`), the
+pane, the launch time and the launch timings arrive with the acknowledgement.
+
+A short task can finish between the hive's acknowledgement and the next tick. The tick then collects the
+acknowledgement of an execution already marked `finished`. It checks that the controller epoch, claimant, seat,
+generation and acknowledging hive match the order, and copies the acknowledged runtime target, pane, launch time
+and timings into the execution record. The record stays `finished`, the agent is not revived, the launch is
+recorded as started, and the tick reports the action:
+
+```text
+<agent> finished <task> before the tick collected its hive acknowledgement
+```
+
+When the record already carries the acknowledged target, the tick leaves it unchanged. An acknowledgement that is
+missing or not `live` refuses the collection as gone.
+
+With the process identity recorded, the retire order the tick sends for that agent reaches the hive with a process
+it can stop or find already gone, and the retire ends.
+
+Before this, the record kept only `host_id`. Every tick sent a retire order that the hive refused because it could
+not identify a process, the per agent retire count grew each tick, and from the third failing tick
+`agentihooks swarm <id> status` listed a `retire failed` finding with this evidence:
+
+```text
+<agent> is still running after <n> retire attempts
+process 0
+refusal: hive <host> refused retire: runtime target names no process
+```
+
+On the Doctor swarm the finding for one ci agent reached 25 failing ticks and came back after a resolved verdict
+because the count kept growing.
+
+### Troubleshooting
+
+| Symptom | Check | Fix |
+|---|---|---|
+| A `retire failed` finding shows `refusal: hive <host> refused retire: runtime target names no process` | The agent's execution record: does its runtime target carry `process_namespace`, `pid` and `pid_start`, or only `host_id`? | A record collected by a current controller carries the identity, and its retire ends. A record left with only `host_id` by an older controller keeps failing until the tick drops the agent from the swarm, which clears its retire count and the finding. |
+| The tick printed "finished … before the tick collected its hive acknowledgement" | The execution record's state | Expected for a task that finished within one tick; the record stays `finished` and the launch is counted as started. |
 
 ## Hive placement for one swarm on a local machine
 
