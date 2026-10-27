@@ -2194,6 +2194,73 @@ A shard listed with `success` stalled once and recovered; one listed with `failu
 | A checkout step runs for minutes with no abort | the low speed settings were removed from that step | restore the `env` block; `tests/test_ci_workflow.py` fails without it |
 | A checkout fails within seconds on both attempts | the error is not a stall: a bad ref, permissions or a missing commit | read the first error in the step log; a retry does not fix it |
 
+## Protected provenance checkout
+
+On `pull_request` and `merge_group` events the first step of the Tests workflow's `select` job checks out the protected base commit into `provenance-grader`, so the grader that judges the pull request comes from the protected branch, never from the head under test. The step keeps full provenance history and never stores the token in the checkout:
+
+```yaml
+- uses: actions/checkout@v4
+  if: github.event_name == 'merge_group' || github.event_name == 'pull_request'
+  with:
+    ref: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
+    path: provenance-grader
+    fetch-depth: 0
+    persist-credentials: false
+  env:
+    GIT_HTTP_LOW_SPEED_LIMIT: "1000"
+    GIT_HTTP_LOW_SPEED_TIME: "60"
+```
+
+The `env` block is the same low speed bound the [unit checkout](#unit-checkout) uses: Git aborts any HTTP transfer that stays below 1000 bytes per second for 60 seconds. `actions/checkout` already retries a failed `git fetch` up to three attempts, waiting 10 to 20 seconds between them, so a stalled fetch now fails in about a minute and the next attempt starts on the same runner. No second checkout step is needed here, because this checkout has no blob filter: every object arrives in the retried `git fetch`, and nothing is fetched later by the unretried `git checkout`.
+
+`select` has a five minute job timeout. Before the change a stalled fetch had no bound below that timeout. In the census over 453 pull request runs from 15:10 UTC on 23 October to 15:10 UTC on 24 October 2026 (issue #6757), the protected checkout took a median of 10 seconds and a 90th percentile of 15 seconds over 431 measured runs. One run, Tests run 40100096746 on an `anton-oss-light` runner, sat 290 seconds in fetch with almost no bytes transferred until the job was cancelled. A peer job on the same node fetched normally, and repository size, fetch depth and node network were ruled out; the cause of the stall itself is not known. With the bound, one stalled attempt costs about 60 seconds plus the retry wait. Three stalled attempts take about three and a half minutes and fail the step inside the job timeout, so a persistent stall shows as a failed checkout with `Operation too slow` in its log rather than a cancelled job.
+
+### What guards it
+
+| Guard | Fails when |
+|---|---|
+| `tests/test_ci_provenance_checkout.py` (unit) | the first `select` step is not `actions/checkout@v4`, its `env` is not exactly the two values above, its `with` block or `if` changes, or it gains `continue-on-error` |
+| The protected gate's durations provenance check (`scripts.gate_protected`) | the head's `select` steps do not start with the protected provenance prefix; it admits that prefix with or without exactly this `env` block, so the bound passes the gate but any other value is refused |
+| `tests/ci_provenance_checkout_probe.py` (`wall_clock`) | a real run of the installed `actions/checkout` v4 against a local HTTP remote misses its budget; it needs an Actions runner and runs only through the Proofs workflow |
+
+Both pinned values are literals in the unit test and the gate, so a change to either value changes all three files together.
+
+### Proof
+
+The probe serves a bare repository over local HTTP and runs the cached `actions/checkout` v4 with the `with` and `env` blocks read from the workflow. The `normal` case serves every request; the `stalled-once` case holds the first ref advertisement silent.
+
+| Run | Result |
+|---|---|
+| Proofs 40106870333, before the bound | `normal` passed; `stalled-once` exceeded the probe's 100 second limit |
+| Proofs 40170949592, with the bound | 3 passed in 76.47 seconds: the normal fetch under 10 seconds, the stalled transfer aborted about 60 seconds in with `Operation too slow`, the retry finished under 95 seconds, the protected commit checked out with full history and no stored credential |
+| Tests 40170910619 and protected grading 40170909045 on the pull request head | passed |
+
+Pull request #6769 merged into `dev` at 07:16 UTC on 25 October 2026. Its target is zero selection runs whose protected checkout exceeds four minutes over the 24 hours after the merge, against one in the census day before. That after count is not yet recorded on the source task.
+
+Repeat the probe with a focused Proofs dispatch:
+
+```bash
+gh workflow run proofs.yml --ref dev -f proof=tests -f tests=tests/ci_provenance_checkout_probe.py
+```
+
+### Checking a run
+
+Step 2 of `select` is the protected checkout (step 1 is `Set up job`). Print its time and result for a run:
+
+```bash
+gh api "repos/the-cloud-clockwork/agentihooks/actions/runs/<run id>/jobs?per_page=100" \
+  --jq '.jobs[] | select(.name == "select") | .steps[] | select(.number == 2) | {name, conclusion, started_at, completed_at}'
+```
+
+A healthy step is named `Run actions/checkout@v4` and completes in about 10 to 15 seconds. A recovered stall shows `RPC failed; curl 28 Operation too slow. Less than 1000 bytes/sec transferred the last 60 seconds` in the step log, then `Waiting <n> seconds before trying again`, and the step still succeeds.
+
+| Symptom | Cause | Action |
+|---|---|---|
+| The step took about 70 to 100 seconds and succeeded | one stalled fetch, recovered by the retry | none; selection and its tests stand |
+| The step failed after about three and a half minutes with `Operation too slow` on every attempt | the stall or a GitHub outage persisted through all three attempts | rerun the failed jobs once GitHub serves fetches again |
+| The step runs until the `select` job is cancelled at five minutes | the `env` block was removed or changed | restore it; `tests/test_ci_provenance_checkout.py` fails without it |
+| The step fails within seconds | the error is not a stall: a missing base commit, permissions or a bad ref | read the first error in the step log; a retry does not fix it |
+
 ## Worker hive pod image build
 
 The Worker hive pod workflow (`hive-worker.yml`) runs `deploy/worker/kind-proof.sh` in its `kind` job. The script builds the image `localhost:5001/agentihooks-hive-worker:dev` while a kind cluster starts and pushes it, without unpacking it into Docker, to a registry container the kind node pulls from; the node already holds the base layers it pre-pulled, so it fetches only the hive layers. The script then proves that a worker Pod registers with the hive and acknowledges an order. The image has two parts:
