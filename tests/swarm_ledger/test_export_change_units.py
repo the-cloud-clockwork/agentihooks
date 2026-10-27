@@ -213,8 +213,21 @@ def test_a_refused_store_leaves_no_partial_file(monkeypatch, tmp_path):
         raise OSError("full")
 
     monkeypatch.setattr(api.os, "replace", full)
-    api.store_export(tmp_path / "e.json", 1, {})
-    assert list(tmp_path.iterdir()) == []
+    api.store_export(tmp_path / "exports" / "e.json", 1, {})
+    assert list((tmp_path / "exports").iterdir()) == []
+
+
+def test_a_home_that_refuses_writes_still_reads_the_export(monkeypatch, tmp_path):
+    def refused(*args, **kwargs):
+        raise PermissionError("read only")
+
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(home))
+    monkeypatch.setattr(api.Path, "mkdir", refused)
+    client, _ = reader(monkeypatch, {"generation": 5, "data": {"chat": []}})
+    assert client.stored_export("s") == {"chat": []}
+    assert list(home.iterdir()) == []
 
 
 def test_a_snapshot_outside_kept_exports_reads_the_stored_export(monkeypatch, tmp_path):

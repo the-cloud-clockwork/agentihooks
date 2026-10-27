@@ -50,9 +50,9 @@ def stored_export(path: Path) -> tuple | None:
 
 
 def store_export(path: Path, generation: int, state: dict) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
     partial = path.with_name(f"{path.name}.{uuid.uuid4().hex}")
     try:
+        path.parent.mkdir(parents=True, exist_ok=True)
         with os.fdopen(os.open(partial, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), "wb") as stream:
             stream.write(orjson.dumps({"generation": generation, "state": state}))
         os.replace(partial, path)
