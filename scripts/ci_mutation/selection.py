@@ -96,7 +96,13 @@ def unit_records(root: Path) -> list[dict[str, float]]:
 def traced_records(root: Path) -> list[dict[str, float]]:
     folder = Path(os.environ.get("MUTATION_STATS_CACHE", root / ".mutation-stats-cache"))
     records = [json.loads(path.read_text()) for path in folder.glob("*.json")]
-    return [record["durations"] for record in records if record["status"] == 0]
+    records = [record for record in records if record["status"] == 0]
+    durations = recorded_seconds([record["durations"] for record in records])
+    for record in sorted(
+        (record for record in records if "observed_at" in record), key=lambda record: record["observed_at"]
+    ):
+        durations.update(recorded_seconds([record["durations"]]))
+    return [durations]
 
 
 def recorded_seconds(records: list[dict[str, float]]) -> dict[str, float]:

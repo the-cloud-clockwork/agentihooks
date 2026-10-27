@@ -133,11 +133,13 @@ class StoredStats:
         result = {
             name: value
             for name, value in record.items()
-            if name not in {"key", "inputs", "scope", "measured", "discovery", "context"}
+            if name not in {"key", "inputs", "scope", "measured", "discovery", "context", "observed_at"}
         }
         return {**result, "reused": True} if measured else result
 
     def save(self, path: str, result: dict, inputs: dict, measured: bool, discovery: str = "") -> None:
+        from time import time_ns
+
         scope = self.scope(inputs)
         key = self.identity(path, inputs, scope, measured, discovery)
         record = {
@@ -148,6 +150,7 @@ class StoredStats:
             "measured": measured,
             "discovery": discovery,
             "context": self.context_digest(),
+            "observed_at": time_ns(),
         }
         (self.folder / f"{key}.json").write_text(json.dumps(record))
         self.pointer(path).write_text(key)
