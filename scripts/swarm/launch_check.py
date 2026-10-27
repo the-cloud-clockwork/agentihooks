@@ -273,7 +273,7 @@ def findings(store: RedisStore, slug: str) -> list[Finding]:
                 re.sub(r"\d+", "#", observed.replace(found["agent"], "")),
                 values.get("reason", {}).get("status"),
             ]
-            hour = time.strftime("%Y%m%dT%H", time.gmtime(found["at"] // 1000))
+            hour = time.strftime("%Y%m%dT%H", time.gmtime(found["at"] / 1000))
             subject = f"{field}/{hour}-{hashlib.sha256(json.dumps(error_key).encode()).hexdigest()[:8]}"
             group = groups.setdefault(subject, {"field": field, "observed": observed, "agents": []})
             group["agents"].append(found["agent"])
