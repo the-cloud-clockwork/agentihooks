@@ -790,13 +790,33 @@ def test_main_reads_the_recorded_coverage_only_when_a_module_changed(tmp_path, m
         return None, ""
 
     monkeypatch.setattr(plan, "read_record", record)
+    monkeypatch.setattr(plan, "touches_code", lambda *args: calls.append(("touches", *args)) or bool(changed))
     monkeypatch.setattr(plan, "own_bases", lambda *args: ["base"])
     monkeypatch.setattr(plan, "discover_changes", discover)
     assert plan.main() == 0
-    assert calls == [("discover", tmp_path, ["base"], "HEAD"), *[("record", "owner/repo")] * bool(changed)]
+    assert calls == [
+        ("touches", tmp_path, "base", "HEAD"),
+        *[("record", "owner/repo")] * bool(changed),
+        ("discover", tmp_path, ["base"], "HEAD"),
+    ]
     assert f"changed={len(changed)}\n" in (tmp_path / "github-output").read_text()
     if not changed:
         assert "No change remains to mutate, so the recorded dev coverage is not read.\n" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    "changed, touched",
+    [("scripts/sample.py", True), ("hooks/sample.py", True), ("scripts/notes.txt", False), ("tests/test_x.py", False)],
+)
+def test_the_record_read_starts_early_only_when_a_mutated_module_changed(tmp_path, changed, touched):
+    _git(tmp_path, "init", "-q")
+    _git(tmp_path, "commit", "-q", "--allow-empty", "-m", "base")
+    _git(tmp_path, "branch", "base")
+    (tmp_path / changed).parent.mkdir(parents=True, exist_ok=True)
+    (tmp_path / changed).write_text("VALUE = 1\n")
+    _git(tmp_path, "add", changed)
+    _git(tmp_path, "commit", "-qm", "change")
+    assert plan.touches_code(tmp_path, "base", "HEAD") is touched
 
 
 @pytest.mark.parametrize("source, matched", [("sample", False), ("sample", True), ("plain", False)])
@@ -856,6 +876,22 @@ def test_planning_checks_selected_test_collection_and_worker_contracts(
     else:
         assert plan.main() == 0
         assert "stats_parts=" in output.read_text()
+
+
+def test_a_grouped_sdk_walk_leaves_no_module_marked_clean_for_a_later_test(tmp_path, monkeypatch):
+    from tests import test_collection_imports as contracts
+
+    monkeypatch.setattr(contracts, "_ROOT", tmp_path)
+    monkeypatch.setattr(contracts, "_module_file", contracts._module_file.__wrapped__)
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "scripts/lazy.py").write_text("def load():\n    import mcp\n")
+    group = 'pytestmark = pytest.mark.xdist_group("mcp-sdk")\n'
+    (tmp_path / "tests/test_a.py").write_text("from scripts.lazy import load\n" + group)
+    (tmp_path / "tests/test_b.py").write_text("from scripts.lazy import load\n")
+    plan.validate_tests(tmp_path, ["tests/test_a.py::test_one"])
+    with pytest.raises(SystemExit, match="tests/test_b.py: loads the MCP SDK without the mcp-sdk worker group"):
+        plan.validate_tests(tmp_path, ["tests/test_a.py::test_one", "tests/test_b.py::test_two"])
 
 
 def test_planning_follows_selected_test_package_imports(tmp_path, monkeypatch):
