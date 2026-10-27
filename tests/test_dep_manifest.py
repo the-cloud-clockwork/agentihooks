@@ -62,7 +62,13 @@ def _deselect_in_test_count(tmp_path, head_manifest):
         (checkout / "tests" / "dep_manifest.py").write_text(manifest)
     (workspace / "reused-tests.json").write_text(json.dumps({"tests": reused}))
     (runner / "collected.json").write_text(json.dumps(collected))
-    env = {**os.environ, "RUNNER_TEMP": str(runner), "GITHUB_WORKSPACE": str(workspace), "PYTHON_PATH": sys.executable}
+    env = {
+        **os.environ,
+        "RUNNER_TEMP": str(runner),
+        "GITHUB_WORKSPACE": str(workspace),
+        "PYTHON_PATH": sys.executable,
+        "DEV_PLAN": str(workspace / "reused-tests.json"),
+    }
     run = _step("test-count", "Deselect the reused tests")["run"]
     subprocess.run(["bash", "-eo", "pipefail", "-c", run], cwd=workspace, env=env, check=True)
     return json.loads((runner / "reused.json").read_text()), dep_manifest.deselect(reused, collected)
