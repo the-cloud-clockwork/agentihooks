@@ -753,7 +753,7 @@ class HerdrRuntime:
         agent, reason = (
             (agent, reason)
             if route_kind == "interactive"
-            else self._quota_choice(agent, reason, bool(requested or quota_transfer or want), lane)
+            else self._quota_choice(agent, reason, bool(requested or quota_transfer or want or admitted), lane)
         )
         if saved and agent != saved["harness"]:
             saved = {key: value for key, value in saved.items() if key not in ("model", "account")}
