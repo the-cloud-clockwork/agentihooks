@@ -169,7 +169,7 @@ def _wake_world(inbox, slug, agents, herdr, ledger, clock: _Clock, items):
             statuses[agent.name] = _pane_state(inbox.redis, slug, herdr, agent, now_ms, quiet)
         since = reads.clocks[item.address]
         step = decide(item, statuses.get(receiver), reads.histories[item.id], now_ms, window, slug, since)
-        if step == WOKEN and _still_held(inbox, held) and _wake(inbox.redis, herdr, agent, prompted):
+        if step == WOKEN and _still_held(inbox, held) and _wake(inbox.redis, slug, herdr, agent, prompted):
             if inbox.note(item.id, WOKEN, BY, f"prompted {receiver} to read its inbox", now_ms, held):
                 actions.append(f"woke {receiver} for message {item.id}")
         elif (
@@ -243,7 +243,7 @@ def wake_now(inbox, slug, agents, herdr, now_ms, window, quiet=DEFAULT_QUIET_S *
             continue
         state = _pane_state(inbox.redis, slug, herdr, agent, now_ms, quiet)
         due = [(w, i) for w, i in mail if _wake_due(w, i, state, (names, config), (now_ms, window, slug))]
-        if not due or not _wake(inbox.redis, herdr, agent, set()):
+        if not due or not _wake(inbox.redis, slug, herdr, agent, set()):
             continue
         for world, item in due:
             world.note(item.id, WOKEN, BY, f"prompted {agent.name} to read its inbox", now_ms)
@@ -344,12 +344,12 @@ def _typing(herdr, agent):
         return ""
 
 
-def _wake(redis, herdr, agent, prompted):
+def _wake(redis, slug, herdr, agent, prompted):
     if agent.name in prompted:
         return True
     try:
         if host := reports.host(agent):
-            _hive_wake(redis, host, agent)
+            _hive_wake(redis, host, slug, agent)
         else:
             herdr.prompt(agent, WAKE_TEXT)
     except Exception:
@@ -358,11 +358,10 @@ def _wake(redis, herdr, agent, prompted):
     return True
 
 
-def _hive_wake(redis, host, agent):
+def _hive_wake(redis, host, slug, agent):
     from scripts.hive.orders import CommandOrder, Orders
 
     order_id = f"wake:{agent.execution_id}:{agent.generation}:{uuid.uuid4().hex}"
-    slug = agent.seat.split("@")[-1]
     order = CommandOrder(order_id, "nudge", slug, agent.name, agent.execution_id, agent.generation, WAKE_TEXT)
     Orders(redis).command(host, order)
 
