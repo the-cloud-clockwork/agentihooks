@@ -407,13 +407,7 @@ def test_kind_proof_pulls_every_dockerfile_base_through_the_bounded_pull_before_
         (3, ""),
     ],
 )
-def test_kind_proof_retries_the_node_image_pull_before_creating_the_cluster(tmp_path, failures, source):
-    script = (ROOT / "deploy/helm/agentihooks-swarm/ci/kind-smoke.sh").read_text()
-    start = script.index("pull_node() {")
-    function = script[start : script.index("\n}\n", start) + 3]
-    create = '{ node="$(pull_node)" && kind create cluster --name "$cluster" --image "$node"; } &'
-    assert create in script
-    assert script.index(function) < script.index(create)
+def test_kind_node_pull_retries_and_prints_the_pulled_source(tmp_path, failures, source):
     tools = tools_with(
         tmp_path,
         """#!/usr/bin/env bash
@@ -424,7 +418,7 @@ printf '%s\\n' "$*" >> "$PULL_LOG"
     )
     log, waits = tmp_path / "docker.log", tmp_path / "waits.log"
     result = subprocess.run(
-        ["bash", "-c", f"{function}pull_node"],
+        ["bash", str(ROOT / "deploy/helm/agentihooks-swarm/ci/pull-kind-node.sh")],
         env={
             **os.environ,
             "PATH": f"{tools}:{os.environ['PATH']}",
@@ -445,6 +439,33 @@ printf '%s\\n' "$*" >> "$PULL_LOG"
     assert all(pull.startswith("pull -q ") for pull in pulls)
     assert result.stderr.count("failed on attempt") == failures
     assert (waits.read_text().splitlines() if waits.exists() else []) == ["10"] * min(failures, 2)
+
+
+def test_kind_smoke_creates_the_cluster_from_the_retried_node_pull():
+    text = (ROOT / "deploy/helm/agentihooks-swarm/ci/kind-smoke.sh").read_text()
+    creates = [line for line in text.splitlines() if "kind create cluster" in line]
+    pull = 'node="$(bash "$chart/ci/pull-kind-node.sh")"'
+    assert creates == [f'{{ {pull} && kind create cluster --name "$cluster" --image "$node"; }} &']
+
+
+def test_kind_published_pulls_the_node_before_waiting_for_the_release_image():
+    lines = (ROOT / "deploy/helm/agentihooks-swarm/ci/kind-published.sh").read_text().splitlines()
+    pull = lines.index('node="$(bash "$(dirname "$0")/pull-kind-node.sh")"')
+    create = lines.index('kind create cluster --name "$cluster" --image "$node" &')
+    wait = lines.index('until docker pull -q "$image"; do')
+    assert pull < create < wait
+    assert [line for line in lines if "kind create cluster" in line] == [lines[create]]
+
+
+def test_startup_stages_creates_the_cluster_from_the_retried_node_pull():
+    workflow = yaml.safe_load((ROOT / ".github/workflows/startup-stages.yml").read_text())
+    runs = [step.get("run", "") for step in workflow["jobs"]["measure"]["steps"]]
+    create = next(run for run in runs if "kind create cluster" in run)
+    pull = 'node_image="$(bash deploy/helm/agentihooks-swarm/ci/pull-kind-node.sh)"'
+    assert f"\n{pull}\n" in f"\n{create}"
+    assert create.index(pull) < create.index("kind create cluster")
+    assert '--image "$node_image"' in create
+    assert '--image "$KIND_NODE_IMAGE"' not in create
 
 
 def test_hive_join_pulls_its_images_through_the_bounded_pull_before_starting_them():
