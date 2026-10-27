@@ -6,6 +6,7 @@ import pytest
 
 from scripts import claude_login, master_logins, openbao_kv, openbao_step
 from scripts import master_claude_login as login
+from scripts.routing import reservation
 from scripts.routing.settings import FileSettings
 
 GRANT = {"refreshToken": "slot two", "expiresAt": 7}
@@ -138,6 +139,54 @@ def test_the_operator_order_outranks_room(monkeypatch, rendered, tmp_path):
     _room(monkeypatch, oneatexample_com=10.0, twoatexample_com=80.0)
     monkeypatch.setenv(login.ORDER_ENV, " , one@example.com,twoatexample_com")
     assert login.prepare(_environ(rendered), tmp_path)[0] == login.home(1)
+
+
+def _week(monkeypatch, **used):
+    monkeypatch.setattr(master_logins, "usage", lambda account, now: (0.0, used[account] + 0 * now, 0.0))
+
+
+@pytest.mark.parametrize("spent", [reservation.MASTER_LEAVES, 96.0])
+def test_a_login_past_the_master_limit_yields_to_the_next_in_order(monkeypatch, rendered, tmp_path, spent):
+    monkeypatch.setattr(openbao_kv, "from_env", lambda environ: None)
+    _stored(1, {"emailAddress": "one@example.com"})
+    _stored(2, TWO)
+    _room(monkeypatch, oneatexample_com=80.0, twoatexample_com=10.0)
+    _week(monkeypatch, oneatexample_com=spent, twoatexample_com=25.0)
+    monkeypatch.setenv(login.ORDER_ENV, "oneatexample_com,twoatexample_com")
+    assert login.prepare(_environ(rendered), tmp_path)[0] == login.home(2)
+
+
+def test_the_operator_order_holds_while_both_logins_are_under_the_master_limit(monkeypatch, rendered, tmp_path):
+    monkeypatch.setattr(openbao_kv, "from_env", lambda environ: None)
+    _stored(1, {"emailAddress": "one@example.com"})
+    _stored(2, TWO)
+    _room(monkeypatch, oneatexample_com=10.0, twoatexample_com=80.0)
+    _week(monkeypatch, oneatexample_com=90.0, twoatexample_com=20.0)
+    monkeypatch.setenv(login.ORDER_ENV, "oneatexample_com,twoatexample_com")
+    assert login.prepare(_environ(rendered), tmp_path)[0] == login.home(1)
+
+
+def test_the_operator_order_holds_when_every_login_is_past_the_master_limit(monkeypatch, rendered, tmp_path):
+    monkeypatch.setattr(openbao_kv, "from_env", lambda environ: None)
+    _stored(1, {"emailAddress": "one@example.com"})
+    _stored(2, TWO)
+    _room(monkeypatch, oneatexample_com=1.0, twoatexample_com=4.0)
+    _week(monkeypatch, oneatexample_com=99.0, twoatexample_com=96.0)
+    monkeypatch.setenv(login.ORDER_ENV, "oneatexample_com,twoatexample_com")
+    assert login.prepare(_environ(rendered), tmp_path)[0] == login.home(1)
+
+
+def test_a_held_first_login_passes_to_the_next_ordered_login_under_the_master_limit(monkeypatch, rendered, tmp_path):
+    monkeypatch.setattr(openbao_kv, "from_env", lambda environ: None)
+    _stored(1, {"emailAddress": "one@example.com"})
+    _stored(2, TWO)
+    _stored(3, {"emailAddress": "three@example.com"})
+    _room(monkeypatch, oneatexample_com=50.0, twoatexample_com=90.0, threeatexample_com=10.0)
+    _week(monkeypatch, oneatexample_com=20.0, twoatexample_com=97.0, threeatexample_com=30.0)
+    monkeypatch.setenv(login.ORDER_ENV, "oneatexample_com,twoatexample_com,threeatexample_com")
+    environ = _environ(rendered)
+    _held(1, environ["AGENTIHOOKS_AGENT_NAME"])
+    assert login.prepare(environ, tmp_path)[0] == login.home(3)
 
 
 def test_no_operator_order_ranks_by_room_alone(monkeypatch, rendered, tmp_path):
