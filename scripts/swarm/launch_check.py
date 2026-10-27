@@ -62,12 +62,7 @@ def forget(store: RedisStore, slug: str, name: str) -> None:
 
 
 def chain(home) -> list[str]:
-    try:
-        stamp = json.loads((Path(home) / STAMP).read_text())
-        rendered = stamp["render"] if "render" in stamp else stamp
-        return [str(name) for name in rendered["chain"]]
-    except (OSError, ValueError, KeyError, TypeError):
-        return []
+    return profile_chain.rendered_field(Path(home), "chain")
 
 
 def bundled(profile: str) -> bool:
@@ -176,7 +171,10 @@ def misses(
         }
     found = _joined(store, agent, doc, session_started_at(agent))
     if not facts or facts.get("process", True) is not True:
-        found["observation"] = {"expected": "available process observation", "actual": "unavailable"}
+        found["observation"] = {
+            "expected": "available process observation",
+            "actual": facts.get("stamp", "unavailable"),
+        }
     else:
         found.update({**_process(agent, facts), **_base(agent, facts, on_bundle), **_overlays(facts, declared)})
     return {**found, **_name(store, slug, agent)}

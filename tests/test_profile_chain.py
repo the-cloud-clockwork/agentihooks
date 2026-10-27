@@ -307,6 +307,24 @@ def test_enforcements_and_conditions_load_from_package_role(tmp_path, monkeypatc
     assert ("profile:engineer", role / ".claude" / "conditions") in layers
 
 
+def test_malformed_render_stamp_keeps_profile_enforcements_loading(tmp_path, monkeypatch, package_roles):
+    from hooks.context import enforcement
+
+    role = package_roles("engineer")
+    entry = {"id": "pkg-1", "message": "package rule", "cadence": 3}
+    (role / "enforcements.json").write_text(json.dumps({"enforcements": [entry]}))
+    home = tmp_path / "home"
+    home.mkdir()
+    (home / profile_chain.RENDER_STAMP).write_text(json.dumps({"render": ["brain"]}))
+    monkeypatch.setattr(profile_chain, "BUILT_IN_PROFILES", tmp_path / "builtin")
+    monkeypatch.setattr(enforcement, "claude_home", lambda: home)
+    monkeypatch.setattr(enforcement, "current_target", lambda: "claude")
+    monkeypatch.setattr(enforcement, "_get_bundle_path", lambda: None)
+    monkeypatch.setattr(enforcement, "_get_active_profile", lambda: "engineer")
+    monkeypatch.setattr(enforcement, "_get_linked_profiles", lambda: {})
+    assert [e["id"] for e in enforcement._load_profile_enforcements()] == ["pkg-1"]
+
+
 @pytest.mark.parametrize(
     ("manifest", "expected"),
     [(None, []), ("", []), ("name: x\n", []), ("name: x\nallowedOverlays: [router, brain]\n", ["router", "brain"])],
@@ -325,19 +343,39 @@ def test_rendered_overlays_read_the_home_stamp(tmp_path, wrapped):
     data = {"chain": ["a", "brain"], "overlays": ["brain"]}
     stamp.write_text(json.dumps({"render": data, "operator": "digest"} if wrapped else data))
     assert profile_chain.rendered_overlays(tmp_path) == ["brain"]
-    for data in (
-        {"chain": ["a", "brain"]},
-        {"overlays": None},
-        [],
-        None,
-        {"render": {}},
-        {"render": None},
-        {"render": []},
-    ):
+    for data in ({"chain": ["a", "brain"]}, {"render": {}}):
         stamp.write_text(json.dumps(data))
         assert profile_chain.rendered_overlays(tmp_path) == []
     stamp.write_text("{")
     assert profile_chain.rendered_overlays(tmp_path) == []
+
+
+@pytest.mark.parametrize(
+    ("data", "message"),
+    [
+        ([], "render stamp is a list, expected an object"),
+        (None, "render stamp is null, expected an object"),
+        ({"render": []}, "render stamp field render is a list, expected an object"),
+        ({"render": None}, "render stamp field render is null, expected an object"),
+        ({"render": "x"}, "render stamp field render is a string, expected an object"),
+        ({"overlays": {"brain": True}}, "render stamp field overlays is an object, expected a list of strings"),
+        ({"render": {"overlays": "brain"}}, "render stamp field overlays is a string, expected a list of strings"),
+        (
+            {"overlays": ["brain", {}]},
+            "render stamp field overlays is a list holding an object, expected a list of strings",
+        ),
+        ({"overlays": [1]}, "render stamp field overlays is a list holding a number, expected a list of strings"),
+        ({"overlays": [True]}, "render stamp field overlays is a list holding a boolean, expected a list of strings"),
+        ({"overlays": None}, "render stamp field overlays is null, expected a list of strings"),
+        ({"render": {"overlays": None}}, "render stamp field overlays is null, expected a list of strings"),
+    ],
+)
+def test_rendered_overlays_refuse_a_malformed_stamp_by_name(tmp_path, data, message):
+    (tmp_path / profile_chain.RENDER_STAMP).write_text(json.dumps(data))
+    with pytest.raises(profile_chain.MalformedRenderStamp) as raised:
+        profile_chain.rendered_overlays(tmp_path)
+    assert str(raised.value) == message
+    assert isinstance(raised.value, ValueError)
 
 
 def test_rendered_dirs_adds_the_overlays_the_chain_declares(tmp_path, monkeypatch):

@@ -102,6 +102,8 @@ def read(agent: AgentRecord, pid: int, proc: Path = Path("/proc")) -> dict:
             "chain": launch_check.chain(home) if home else [],
             "overlays": profile_chain.rendered_overlays(home) if home else [],
         }
+    except profile_chain.MalformedRenderStamp as exc:
+        return {"process": False, "stamp": str(exc)}
     except (OSError, ValueError, StopIteration):
         return {"process": False}
 

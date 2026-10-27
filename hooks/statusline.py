@@ -163,6 +163,16 @@ def _account_slug() -> str:
 # ---------------------------------------------------------------------------
 
 
+def _overlay_display(home: Path) -> str:
+    from hooks.context.profile_chain import MalformedRenderStamp, rendered_overlays
+
+    try:
+        overlays = rendered_overlays(home)
+    except MalformedRenderStamp:
+        return f"{_RED}malformed stamp{_RESET}"
+    return f"{_CYAN}{','.join(overlays)}{_RESET}" if overlays else f"{_DIM}none{_RESET}"
+
+
 def main() -> None:
     try:
         payload = json.load(sys.stdin)
@@ -331,11 +341,8 @@ def main() -> None:
             _ch_str = ",".join(_l_channels)
             _ch_display = f"{_DIM}{_ch_str}{_RESET}"
 
-            from hooks.context.profile_chain import rendered_overlays as _rendered_overlays
-
             _home = os.environ.get("CLAUDE_CONFIG_DIR") or Path.home() / ".claude"
-            _overlays = _rendered_overlays(Path(_home))
-            _ovl_display = f"{_CYAN}{','.join(_overlays)}{_RESET}" if _overlays else f"{_DIM}none{_RESET}"
+            _ovl_display = _overlay_display(Path(_home))
 
             _voice_str = ""
             _voice_sid = payload.get("session_id", "")

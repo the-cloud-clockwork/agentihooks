@@ -197,7 +197,11 @@ def _load_profile_enforcements() -> list[dict]:
     if not profile:
         return []
     home = {"claude": claude_home, "codex": codex_home, "copilot": copilot_home}[current_target()]()
-    profile = ",".join([profile, *profile_chain.rendered_overlays(home)])
+    try:
+        overlays = profile_chain.rendered_overlays(home)
+    except profile_chain.MalformedRenderStamp:
+        overlays = []
+    profile = ",".join([profile, *overlays])
     entries = []
     for _name, profile_dir in profile_chain.rendered_dirs(_get_bundle_path(), profile, _get_linked_profiles()):
         entries.extend(_load_json_enforcements(profile_dir / "enforcements.json", "profile"))

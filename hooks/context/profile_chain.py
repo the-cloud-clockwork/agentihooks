@@ -147,12 +147,44 @@ def worn(profile_dirs: list[tuple[str, Path]], chosen: list[str], resolve: Calla
 
 
 def rendered_overlays(home: Path) -> list[str]:
+    return rendered_field(home, "overlays")
+
+
+class MalformedRenderStamp(ValueError):
+    pass
+
+
+def _shape(value) -> str:
+    if value is None:
+        return "null"
+    if isinstance(value, bool):
+        return "a boolean"
+    if isinstance(value, int | float):
+        return "a number"
+    return {dict: "an object", list: "a list", str: "a string"}[type(value)]
+
+
+def rendered_field(home: Path, field: str) -> list[str]:
     try:
         stamp = json.loads((Path(home) / RENDER_STAMP).read_text())
-        rendered = stamp["render"] if "render" in stamp else stamp
-        return [str(name) for name in rendered["overlays"]]
-    except (OSError, ValueError, KeyError, TypeError):
+    except (OSError, ValueError):
         return []
+    if not isinstance(stamp, dict):
+        raise MalformedRenderStamp(f"render stamp is {_shape(stamp)}, expected an object")
+    rendered = stamp["render"] if "render" in stamp else stamp
+    if not isinstance(rendered, dict):
+        raise MalformedRenderStamp(f"render stamp field render is {_shape(rendered)}, expected an object")
+    if field not in rendered:
+        return []
+    names = rendered[field]
+    if not isinstance(names, list):
+        raise MalformedRenderStamp(f"render stamp field {field} is {_shape(names)}, expected a list of strings")
+    for name in names:
+        if not isinstance(name, str):
+            raise MalformedRenderStamp(
+                f"render stamp field {field} is a list holding {_shape(name)}, expected a list of strings"
+            )
+    return names
 
 
 def inherited(profile_dirs: list[tuple[str, Path]]) -> set[str]:

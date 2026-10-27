@@ -159,11 +159,34 @@ def test_chain_reads_the_rendered_stamp(tmp_path, wrapped):
     data = {"chain": ["a", "b"]}
     stamp.write_text(json.dumps({"render": data, "operator": "digest"} if wrapped else data))
     assert launch_check.chain(tmp_path) == ["a", "b"]
-    for data in ({}, {"chain": None}, [], None, {"render": {}}, {"render": None}, {"render": []}):
+    for data in ({}, {"render": {}}):
         stamp.write_text(json.dumps(data))
         assert launch_check.chain(tmp_path) == []
     stamp.write_text("{")
     assert launch_check.chain(tmp_path) == []
+
+
+@pytest.mark.parametrize(
+    ("data", "message"),
+    [
+        ([], "render stamp is a list, expected an object"),
+        ({"render": ["a", "b"]}, "render stamp field render is a list, expected an object"),
+        ({"chain": "ab"}, "render stamp field chain is a string, expected a list of strings"),
+        ({"chain": None}, "render stamp field chain is null, expected a list of strings"),
+        ({"render": {"chain": {"a": 1}}}, "render stamp field chain is an object, expected a list of strings"),
+    ],
+)
+def test_chain_refuses_a_malformed_stamp_by_name(tmp_path, data, message):
+    (tmp_path / ".agentihooks-render.json").write_text(json.dumps(data))
+    with pytest.raises(profile_chain.MalformedRenderStamp, match=f"^{message}$"):
+        launch_check.chain(tmp_path)
+
+
+def test_malformed_stamp_is_the_observation_the_launch_check_names(store, launched):
+    agent, _, doc = launched
+    error = "render stamp field render is a list, expected an object"
+    found = misses(store, agent, {"process": False, "stamp": error}, doc, declared=["brain"])
+    assert found == {"observation": {"expected": "available process observation", "actual": error}}
 
 
 def test_a_launch_with_every_declared_overlay_passes(store, launched):
