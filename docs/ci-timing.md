@@ -898,19 +898,21 @@ the next window raises.
 
 A verdict of any value (`false-positive`, `early-real`, `established`,
 `insufficient-evidence` or `resolved`) covers every finding of the same class
-and label set or tier. The comparison drops a leading window start, so a verdict recorded on an id such as
-`ci-runner-wait/1792617600000-["anton-oss"]`, sent before pull request 5715,
-still covers `ci-runner-wait/["anton-oss"]`. It does not cover another tier or
-another label set: a verdict on `ci-tier-wall-time/merge_group` leaves
-`ci-tier-wall-time/pull_request` unjudged, and a verdict on `["a"]` leaves
-`["a", "b"]` unjudged.
+and label set or tier. The comparison drops a leading window start, so a
+verdict recorded on an id such as `ci-runner-wait/1792617600000-["anton-oss"]`,
+sent before pull request 5715, still covers `ci-runner-wait/["anton-oss"]`. It
+does not cover another tier or another label set: a verdict on
+`ci-tier-wall-time/merge_group` leaves `ci-tier-wall-time/pull_request`
+unjudged, and a verdict on `["a"]` leaves `["a", "b"]` unjudged.
 
-Within the verdict cooldown, a covered finding is not recorded again as
-unjudged while its worst settled measure stays at or under the judged worst
-plus the growth margin. The judged worst is the largest measure among the
-verdicts of any value on the same scope given no earlier than 24 hours before
-this verdict (`JUDGED_SPAN_MS` in the CI speed detector), later verdicts and
-old window ids included. Members count as settled or open:
+Within the verdict cooldown, a covered finding is dropped from the pass's
+recorded findings and keyed notices while its worst settled measure stays at or
+under the judged worst plus the growth margin. The judged worst is the largest
+measure among the verdicts of any value on the same scope given no earlier than
+24 hours before this verdict (`JUDGED_SPAN_MS` in the CI speed detector), later
+verdicts and old window ids included. After a verdict of `established` on a
+runner wait or tier wall time finding, a pass whose median rises past the
+judged median also raises it again. Members count as settled or open:
 
 | Member | State | Counts toward the settled worst |
 |---|---|---|
@@ -931,8 +933,8 @@ Notices follow two paths:
 
 | Class | What is sent to each master |
 |---|---|
-| `ci-runner-wait`, `ci-tier-wall-time` | Once per run: each pass sends the groups raised this pass, naming only the runs not sent to that master before. A finished run that joins a judged group is still sent, alone in its notice. A run already sent is never sent again, however its measure grows. |
-| `ci-queue-age-unconfirmed` and the other Doctor CI speed findings | Once per notice key. Without a verdict on the exact id the key is the id; with one it is the id and the verdict's time, so a new verdict opens a new key. A verdict on an older window id never keys the stable id. |
+| `ci-runner-wait`, `ci-tier-wall-time` | Once per run: each pass sends the groups raised this pass, naming only the runs not sent to that master before. A run whose crossing joins a judged group is still sent, alone in its notice. A run already sent is never sent again, however its measure grows. |
+| `ci-queue-age-unconfirmed` and the other Doctor CI speed findings | Once per notice key. Without a verdict on the exact id the key is the id; with one it is the id and the verdict's time, so a new verdict opens a new key. A verdict on an older window id still covers the stable id, but never keys its notice, because the key reads the verdict on the exact id. |
 
 A corrected read that removes every run from a group, followed by a new
 crossing that refills the group in the same pass, leaves the finding standing:
@@ -1015,23 +1017,23 @@ window out of the finding id, so a group keeps its id from one window to the
 next, and [5707](https://github.com/the-cloud-clockwork/agentihooks/pull/5707)
 sent the hold notice as an FYI notice.
 
-Pull request 5715 merged on 22 October 2026 for
-[issue 5710](https://github.com/the-cloud-clockwork/agentihooks/issues/5710).
-Before it, each ten minute window minted a new runner wait or tier wall time
-id, so a verdict never held into the next window and the watched master
-received the same evidence two or three times in thirty minutes. The
-[red Proofs run 39715758369](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39715758369)
-ran the new id tests on branch `wip/t648-red`, without the fix, and failed 11
-tests and 4 collections; the
-[green Proofs run 39717401266](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39717401266)
-on the pull request branch `engineer-d44a5a-0854` passed them. The tests assert that two windows with the same tier and label
-set yield one id, and run detector emitted ids, stable and window prefixed,
-through the measure entry point.
+Pull request 5715 merged on 22 October 2026 for [issue
+5710](https://github.com/the-cloud-clockwork/agentihooks/issues/5710). Before
+it, each ten minute window minted a new runner wait or tier wall time id, so a
+verdict never held into the next window and the watched master received the
+same evidence two or three times in thirty minutes. The [red Proofs run
+39715758369](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39715758369)
+ran the new id tests on a test only branch without the fix and failed 11 tests
+and 4 collections; the [green Proofs run
+39717401266](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39717401266)
+ran them on the pull request's branch and passed. The tests assert that two
+windows with the same tier and label set yield one id, and run detector emitted
+ids, stable and window prefixed, through the measure entry point.
 
 The source task's recorded proof counted distinct runner wait and tier wall
-time ids in Doctor timer notices to the masters over equal six hour windows. The after window ran
-from 06:39:52 to 12:39:52 UTC on 22 October, starting with the first tick after
-the watched master applied the change at 06:39:51 UTC:
+time ids in Doctor timer notices to the masters over equal six hour windows.
+The after window ran from 06:39:52 to 12:39:52 UTC on 22 October, starting with
+the first tick after the watched master applied the change at 06:39:51 UTC:
 
 | Window | Notice items | Distinct ids | Ids per hour |
 |---|---|---|---|
