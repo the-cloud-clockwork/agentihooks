@@ -81,6 +81,14 @@ def _texts(checks: list[ast.AST]) -> list[str]:
     return sorted(hashlib.sha256(ast.dump(node).encode()).hexdigest()[:16] for node in checks)
 
 
+def _loop_checks(statements: list[ast.stmt], helpers: frozenset[str]) -> list[ast.AST]:
+    nodes: list[ast.AST] = list(statements)
+    for node in nodes:
+        if not isinstance(node, (*DEFINITIONS, ast.Lambda)):
+            nodes.extend(ast.iter_child_nodes(node))
+    return _checks(nodes, helpers)
+
+
 def _returns_early(
     statements: list[ast.stmt],
     before: tuple[int, int] | None = None,
@@ -89,18 +97,26 @@ def _returns_early(
     pending = [(node, ()) for node in statements]
     while pending:
         node, loops = pending.pop()
-        end = (node.end_lineno, node.end_col_offset) if isinstance(node, ast.stmt) else (0, 0)
-        if isinstance(node, ast.Return) and (before is None or end < before or any(loops)):
+        if isinstance(node, ast.Return) and (
+            before is None or (node.end_lineno, node.end_col_offset) < before or any(any(loop) for loop in loops)
+        ):
             return True
-        if loops and loops[-1]:
-            if isinstance(node, ast.Break) or (isinstance(node, ast.Continue) and end < loops[-1]):
-                return True
+        if loops and (
+            (isinstance(node, ast.Break) and any(loops[-1]))
+            or (
+                isinstance(node, ast.Continue)
+                and loops[-1][0]
+                and (node.end_lineno, node.end_col_offset) < loops[-1][0]
+            )
+        ):
+            return True
         if isinstance(node, (ast.For, ast.AsyncFor, ast.While)):
             last = max(
-                ((check.lineno, check.col_offset) for check in _checks(_nodes(node.body), helpers)),
+                ((check.lineno, check.col_offset) for check in _loop_checks(node.body, helpers)),
                 default=None,
             )
-            pending.extend((child, (*loops, last)) for child in node.body)
+            context = (last, bool(_loop_checks(node.orelse, helpers)))
+            pending.extend((child, (*loops, context)) for child in node.body)
             pending.extend((child, loops) for child in node.orelse)
         elif not isinstance(node, (*DEFINITIONS, ast.Lambda)):
             pending.extend((child, loops) for child in ast.iter_child_nodes(node))
