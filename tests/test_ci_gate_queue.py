@@ -104,8 +104,9 @@ def test_recovery_requires_the_matching_successful_rerun_and_confirmed_loss(orig
             ci_gate_queue.verify(jobs + [dict(rerun, conclusion=result)], [2, 7], lost=lambda job: True)
 
 
-def test_only_the_reviewed_pair_of_event_names_and_canonical_watcher_normalizes():
-    watcher = ci_gate_queue.watcher("runner")
+@pytest.mark.parametrize("deferred", [False, True])
+def test_only_the_reviewed_pair_of_event_names_and_canonical_watcher_normalizes(deferred):
+    watcher = ci_gate_queue.watcher("runner", deferred=deferred)
     workflow = {
         "test.yml": {
             "jobs": {
@@ -161,14 +162,15 @@ def test_only_the_reviewed_pair_of_event_names_and_canonical_watcher_normalizes(
         ci_gate_queue.normalize(changed)
 
 
-def test_the_early_watcher_binds_the_plan_and_uses_protected_code_and_app_quota():
-    job = ci_gate_queue.watcher("runner")
+@pytest.mark.parametrize("deferred", [False, True])
+def test_the_early_watcher_binds_the_plan_and_uses_protected_code_and_app_quota(deferred):
+    job = ci_gate_queue.watcher("runner", deferred=deferred)
     assert job["name"] == "${{ github.event_name == 'merge_group' && 'Gate — Required' || 'queue-fail-fast' }}"
     assert (
         ci_gate_queue.SUMMARY_NAME
         == "${{ github.event_name == 'merge_group' && 'Queue gate summary' || 'Gate — Required' }}"
     )
-    assert job["needs"] == ["split", "select", "reuse", "admission"]
+    assert job["needs"] == ["split", "select", "reuse", "admission"] + (["shard-check"] if deferred else [])
     assert job["runs-on"] == "runner"
     assert job["timeout-minutes"] == 60
     assert job["outputs"] == {"failed": "${{ steps.watch.outputs.failed }}"}

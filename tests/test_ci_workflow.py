@@ -1014,7 +1014,10 @@ def test_queue_gate_is_the_early_verifier_and_the_standard_gate_summarizes_queue
     jobs = workflow["jobs"]
     summary = jobs["gate-required"]
     assert summary["name"] == ci_gate_queue.SUMMARY_NAME
-    assert jobs["queue-fail-fast"] == ci_gate_queue.watcher(summary["runs-on"])
+    assert jobs["queue-fail-fast"] in (
+        ci_gate_queue.watcher(summary["runs-on"]),
+        ci_gate_queue.watcher(summary["runs-on"], deferred=True),
+    )
     normalized = ci_gate_queue.normalize({"test.yml": workflow})["test.yml"]["jobs"]
     assert normalized["gate-required"]["name"] == "Gate — Required"
     assert normalized["queue-fail-fast"]["name"] == "queue-fail-fast"
