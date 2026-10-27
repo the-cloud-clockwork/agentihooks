@@ -4,6 +4,7 @@ import os
 import shutil
 import subprocess
 import sys
+import time
 import tomllib
 from pathlib import Path
 from types import SimpleNamespace
@@ -1235,7 +1236,12 @@ def test_mutmut_wait_skips_a_child_a_test_left_and_returns_the_forked_mutant():
     os.waitid(os.P_PID, stray.pid, os.WEXITED | os.WNOWAIT)
     pid = children.fork()
     if pid == 0:
-        os._exit(7)
+        # Exit only once the parent's wait has reaped the stray, so the stray is always returned first.
+        for _ in range(1000):
+            if not Path(f"/proc/{stray.pid}").exists():
+                os._exit(7)
+            time.sleep(0.01)
+        os._exit(9)
     assert children.pids == {pid}
     waited, status = children.wait()
     assert (waited, os.waitstatus_to_exitcode(status)) == (pid, 7)
