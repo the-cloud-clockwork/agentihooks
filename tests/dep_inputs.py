@@ -30,6 +30,10 @@ class DepInputs:
         self.escaping = set()
         self.children = folder / "children"
         self.logs = {}
+        self.finished = folder / "finished" / f"{os.getpid()}.jsonl"
+        self.own = str(folder) + os.sep
+        self.shared_key = None
+        self.shared_files = {}
 
     def site_file(self) -> Path:
         name = hashlib.sha256(str(self.children).encode()).hexdigest()[:16]
@@ -69,9 +73,11 @@ class DepInputs:
                 path = os.fspath(path)
             if isinstance(path, (str, bytes)) and (mode is None or not set(str(mode)) & set("wax")):
                 try:
-                    test[0].add(os.path.abspath(os.fsdecode(path)))
+                    opened = os.path.abspath(os.fsdecode(path))
                 except OSError:
-                    pass
+                    return
+                if not opened.startswith(self.own):
+                    test[0].add(opened)
         elif event in ESCAPES and test is not self.shared:
             test[1] = True
             self.escaping.update(self.setting_up)
@@ -143,38 +149,54 @@ class DepInputs:
         finally:
             self.register(self.children / f"{os.getpid()}-shared")
             self.current = self.shared
+            self.finish(item.nodeid)
 
-    def relative(self, opened: set[str]) -> list[str]:
-        kept = set()
+    def kept(self, opened: set[str]) -> dict[str, str]:
+        kept = {}
         for full in opened:
             if not full.startswith(self.root):
                 continue
             relative = full[len(self.root) :]
             if relative.endswith((".py", ".pyc")) or relative.startswith(SKIPPED) or "__pycache__" in relative:
                 continue
-            if Path(full).is_relative_to(self.folder):
-                continue
-            if os.path.isfile(full):
-                kept.add(relative)
-        return sorted(kept)
+            if not Path(full).is_relative_to(self.folder):
+                kept[full] = relative
+        return kept
+
+    def relative(self, opened: set[str]) -> list[str]:
+        return sorted({relative for full, relative in self.kept(opened).items() if os.path.isfile(full)})
+
+    def line(self, test: str, shared: set[str]) -> str:
+        opened, escapes = self.tests[test]
+        escapes = escapes or bool(self.fixtures[test] & self.escaping)
+        return json.dumps({"test": test, "files": sorted(shared.union(self.relative(opened))), "escapes": escapes})
+
+    def shared_relative(self) -> set[str]:
+        log = self.children / f"{os.getpid()}-shared"
+        try:
+            size = log.stat().st_size
+        except FileNotFoundError:
+            size = 0
+        if (len(self.shared[0]), size) != self.shared_key:
+            self.shared_key = (len(self.shared[0]), size)
+            self.shared_files = self.kept(self.shared[0] | self.child_reads(log))
+        # A shared path read before its file existed counts once the file appears, as it does at session end.
+        return {relative for full, relative in self.shared_files.items() if os.path.isfile(full)}
+
+    def finish(self, test: str) -> None:
+        self.tests[test][0].update(self.child_reads(self.logs[test]))
+        self.finished.parent.mkdir(parents=True, exist_ok=True)
+        with self.finished.open("a") as finished:
+            finished.write(self.line(test, self.shared_relative()) + "\n")
 
     def pytest_sessionfinish(self, session):
         if not self.tests:
             return
         self.folder.mkdir(parents=True, exist_ok=True)
-        shared = self.shared[0] | self.child_reads(self.children / f"{os.getpid()}-shared")
+        shared = set(self.relative(self.shared[0] | self.child_reads(self.children / f"{os.getpid()}-shared")))
         for test, log in self.logs.items():
             self.tests[test][0].update(self.child_reads(log))
-        lines = [
-            json.dumps(
-                {
-                    "test": test,
-                    "files": self.relative(opened | shared),
-                    "escapes": escapes or bool(self.fixtures[test] & self.escaping),
-                }
-            )
-            for test, (opened, escapes) in self.tests.items()
-        ]
+        lines = [self.line(test, shared) for test in self.tests]
         (self.folder / f"{uuid.uuid4().hex}.jsonl").write_text("".join(line + "\n" for line in lines))
 
 

@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from scripts import ci_test_plan
+from tests import dep_manifest
 
 REPOSITORY = "the-cloud-clockwork/agentihooks"
 HEAD = "a" * 40
@@ -604,3 +605,52 @@ def test_the_before_flag_reaches_the_record_lookup(monkeypatch, tmp_path):
     args = ["--repository", REPOSITORY, "--head", HEAD, "--before", "2026-10-16T22:02:00Z", "--out", str(out)]
     assert ci_test_plan.main(args) == 0
     assert json.loads(out.read_text())["run"] == "1"
+
+
+def _packed_zip(manifest):
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        archive.writestr(ci_test_plan.PACKED_FILE, json.dumps(dep_manifest.pack(manifest)))
+    return buffer.getvalue()
+
+
+def test_a_run_that_kept_the_packed_manifest_is_read_from_it(monkeypatch):
+    full = {**_manifest(1), "lines": {"tests/test_a.py::test_a": {"hooks/a.py": [1, 2]}}}
+    downloads = []
+
+    def api(endpoint):
+        if endpoint.endswith("/artifacts?per_page=100"):
+            names = ["dep-manifest", ci_test_plan.PACKED, *sorted(ci_test_plan.COVERAGE)]
+            listed = [{"id": number, "name": name, "expired": False} for number, name in enumerate(names)]
+            return json.dumps({"artifacts": listed}).encode()
+        if endpoint.endswith("/zip"):
+            downloads.append(endpoint)
+            return _packed_zip(full) if endpoint.endswith("/artifacts/1/zip") else _zip({})
+        return json.dumps({"workflow_runs": [_run(1)]}).encode()
+
+    def jobs(endpoint, size=None):
+        return [{"name": name, "conclusion": "success"} for name in sorted(ci_test_plan.UNIT_JOBS)]
+
+    monkeypatch.setattr(ci_test_plan, "_api", api)
+    monkeypatch.setattr(ci_test_plan, "read_jobs", jobs)
+    run, manifest = ci_test_plan.find_record(REPOSITORY, LATER)
+    assert run["id"] == 1
+    assert downloads == [f"{ACTIONS}/artifacts/1/zip"]
+    assert manifest == full
+
+
+@pytest.mark.parametrize(
+    "packed",
+    [
+        {"files": [], "spans": [], "tests": {"t": [[0], 3, False]}},
+        {"files": [[]], "tests": {}},
+        {"files": [[]], "spans": [], "tests": {"t": 1}},
+        {"files": [[]], "spans": [], "tests": {"t": [[0], 0, False]}, "lines": {"t": [2]}},
+    ],
+)
+def test_a_malformed_packed_manifest_is_unusable(packed):
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        archive.writestr(ci_test_plan.PACKED_FILE, json.dumps({"commit": "c", "units": ["u"], **packed}))
+    with pytest.raises(ci_test_plan.UnusableRecord):
+        ci_test_plan._manifest(buffer.getvalue())

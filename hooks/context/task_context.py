@@ -4,11 +4,13 @@ import time
 from pathlib import Path
 
 from hooks.context import project_cache
+from hooks.context.project_render import NO_MEMORY
 from hooks.targets import current_target
 from hooks.targets.capabilities import can_inject_context
 from scripts.swarm_v2.keyspace import key, stamp
 
 OUTCOMES = "context_delivery_outcomes_by_target"
+RECEIPT_TTL = 14400
 
 
 def digest(pack: str) -> str:
@@ -51,6 +53,51 @@ def hold(session_id: str, pack: str) -> None:
     project_cache.defer_project_context(session_id, pack)
 
 
+def binding(swarm: str | None, task: str | None, environ=None) -> dict:
+    if not (swarm and task):
+        return {}
+    from scripts.gates.brain import bind, task_row
+    from scripts.swarm_ledger.repository.folder import ledger_folder
+
+    row = task_row(ledger_folder(os.environ if environ is None else environ), swarm, task)
+    return bind(task, row, project_cache.namespace().brain) if row else {}
+
+
+def _consultation_path(session_id: str) -> Path:
+    return project_cache._state_dir() / f"{key(project_cache.namespace(), 'consultation', session_id)}.json"
+
+
+def consultation(session_id: str) -> dict:
+    return project_cache._scoped(_consultation_path(session_id), project_cache.namespace(), "consultation")
+
+
+def classify(pack: str) -> str:
+    from scripts.gates.brain import DELIVERED, EMPTY, FAILED
+
+    lines = pack.splitlines()
+    if any(line.startswith(project_cache.UNREACHABLE) for line in lines):
+        return FAILED
+    return EMPTY if NO_MEMORY in lines else DELIVERED
+
+
+def _consulted(session_id: str, bound: dict) -> bool:
+    from scripts.gates.brain import check
+
+    return not bound or not check(consultation(session_id), bound, time.time())
+
+
+def _consult(session_id: str, bound: dict, pack: str, now: float) -> None:
+    ttl = float(os.environ.get("AGENTIHOOKS_BRAIN_RECEIPT_TTL") or RECEIPT_TTL)
+    project_cache._write(
+        _consultation_path(session_id),
+        stamp(
+            project_cache.namespace(),
+            "consultation",
+            {**bound, "result": classify(pack), "digest": digest(pack), "at": now, "expires": now + ttl},
+        ),
+    )
+
+
 def offer(session_id: str, event: str, pack: str | None, injectable: bool | None = None) -> str | None:
     if not pack:
         return None
@@ -59,21 +106,25 @@ def offer(session_id: str, event: str, pack: str | None, injectable: bool | None
     if _disabled(target):
         _record(target, "disabled")
         return None
-    if receipt(session_id).get("digest") == digest(pack):
+    bound = binding(os.environ.get("AGENTIHOOKS_SWARM"), os.environ.get("AGENTIHOOKS_SWARM_TASK"))
+    if receipt(session_id).get("digest") == digest(pack) and _consulted(session_id, bound):
         _record(target, "deduplicated")
         return None
     if not (can_inject_context(event) if injectable is None else injectable):
         hold(session_id, pack)
         _record(target, "unsupported_event")
         return None
+    now = time.time()
     project_cache._write(
         _receipt_path(session_id),
         stamp(
             project_cache.namespace(),
             "receipt",
-            {"digest": digest(pack), "event": event, "target": target, "at": time.time()},
+            {"digest": digest(pack), "event": event, "target": target, "at": now},
         ),
     )
+    if bound:
+        _consult(session_id, bound, pack, now)
     _record(target, "delivered")
     return pack
 

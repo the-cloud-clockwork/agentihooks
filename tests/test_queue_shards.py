@@ -570,6 +570,7 @@ def test_the_reused_tests_step_deselects_against_the_single_collection(tmp_path)
         "GITHUB_WORKSPACE": str(workspace),
         "PYTHON_PATH": sys.executable,
         "PYTHONPATH": str(root),
+        "DEV_PLAN": str(workspace / "reused-tests.json"),
     }
     result = subprocess.run(
         ["bash", "-e", "-c", step["run"]],
