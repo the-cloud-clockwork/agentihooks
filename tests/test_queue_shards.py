@@ -35,7 +35,7 @@ def test_the_planner_step_timeout_is_the_unit_run_tests_step_timeout():
     assert int(result.stdout) == minutes * 60
 
 
-def test_a_merge_group_asks_for_at_most_sixteen_unit_shards_of_the_shared_queue_pool(tmp_path):
+def test_a_merge_group_over_the_target_asks_for_sixteen_unit_shards_of_the_shared_queue_pool(tmp_path):
     tests = tmp_path / "tests"
     tests.mkdir()
     (tests / "test_parallel.py").write_text("")
