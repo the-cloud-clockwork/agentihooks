@@ -326,3 +326,21 @@ def test_a_refused_hive_reservation_turns_the_placement_into_a_wait(setup, in_pa
     if in_pass:
         assert waited.reason == result.detail
         assert [hive["room"] for hive in launch.hives() if hive["id"] == "remote"] == [0]
+
+
+def test_a_refused_hive_reservation_waits_when_placement_no_longer_reports_it():
+    import fakeredis
+
+    from scripts.swarm.store import RedisStore, SwarmConfig
+    from scripts.swarm.tick import tick
+    from tests.swarm.test_tick import FakeRuntime
+
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    store.create(SwarmConfig("sw", "/repo", max_eng=1, max_ci=1))
+    refused = "no hive for eng has room: remote cpu: five minute load 1.17 on 8 CPUs, fits 0 more"
+    ledger = FakeLedger([{"id": "t1", "lane": "eng"}])
+    actions = tick("sw", store, ledger, FakeRuntime(crash=SpawnError(refused, "unavailable")), now_ms=1_000)
+    assert not [action for action in actions if "spawn failed" in action]
+    assert f"task t1 waits: {refused}" in actions
+    assert ledger.rows["t1"]["state"] == "open"
+    assert [row["state"] for row in store.launches("sw")] == ["waiting"]
