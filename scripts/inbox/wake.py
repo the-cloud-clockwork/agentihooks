@@ -242,7 +242,11 @@ def wake_now(inbox, slug, agents, herdr, now_ms, window, quiet=DEFAULT_QUIET_S *
         if not mail:
             continue
         state = _pane_state(inbox.redis, slug, herdr, agent, now_ms, quiet)
-        due = [(w, i) for w, i in mail if _wake_due(w, i, state, (names, config), (now_ms, window, slug))]
+        due = [
+            (world, item)
+            for world, item in mail
+            if _wake_due(world, item, state, (names, config), (now_ms, window, slug))
+        ]
         if not due or not _wake(inbox.redis, slug, herdr, agent, set()):
             continue
         for world, item in due:
@@ -321,7 +325,7 @@ def _status(herdr, agent):
 
 def _pane_state(redis, slug, herdr, agent, now_ms, quiet):
     """A ready pane counts as in use while the operator prompted it inside the quiet window or its input line holds text.
-    A pane on another host is read from its hook heartbeat, since the local herdr cannot see it."""
+    A remote pane is read from its hook heartbeat; the local herdr cannot see it."""
     remote = reports.host(agent)
     state = _beat_state(redis, slug, agent) if remote else _status(herdr, agent)
     if state not in READY:
