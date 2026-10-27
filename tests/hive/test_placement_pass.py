@@ -303,14 +303,18 @@ def test_a_selection_in_one_pass_takes_its_hive_room_from_later_tasks(setup, in_
         assert isinstance(second, Selection)
 
 
+@pytest.mark.parametrize("profile, role", [("engineer", "eng"), ("qa", "qa")])
 @pytest.mark.parametrize("in_pass", [False, True])
-def test_a_refused_hive_reservation_turns_the_placement_into_a_wait(setup, in_pass):  # noqa: F811
+def test_a_refused_hive_reservation_turns_the_placement_into_a_wait(setup, in_pass, profile, role):  # noqa: F811
     from scripts.hive import admission
     from scripts.hive.placement import Wait
     from scripts.swarm import seat_spawn
+    from scripts.swarm.profile_choice import ProfileDecision
     from scripts.swarm_v2.runtime.base import Status
     from tests.hive.test_controller_launch import publish_room
 
+    setup.herdr._profile_decision.return_value = ProfileDecision(profile, "task", profile)
+    write_hive(setup, id="spare", slots=[])
     publish_room(setup.store, "remote", 2)
     launch = setup.launcher
     launch.placement_cache = {} if in_pass else None
@@ -326,8 +330,10 @@ def test_a_refused_hive_reservation_turns_the_placement_into_a_wait(setup, in_pa
     assert isinstance(waited, Wait)
     assert isinstance(launch.select(setup.config, "eng", {"id": "later"}), Wait)
     if in_pass:
-        assert waited.reason == result.detail
-        assert [hive["room"] for hive in launch.hives() if hive["id"] == "remote"] == [0]
+        assert (waited.reason, waited.role) == (result.detail, role)
+        rooms = {hive["id"]: hive["room"] for hive in launch.hives()}
+        assert rooms["remote"] == 0
+        assert rooms["spare"] > 0
 
 
 @pytest.mark.parametrize(
