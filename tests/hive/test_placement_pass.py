@@ -280,6 +280,8 @@ def test_master_placement_and_spawn_hand_the_pass_memo_to_the_workstation_check(
 
 @pytest.mark.parametrize("in_pass", [False, True])
 def test_a_selection_in_one_pass_takes_its_hive_room_from_later_tasks(setup, in_pass):  # noqa: F811
+    from dataclasses import replace
+
     from scripts.hive.placement import Wait
     from tests.hive.test_controller_launch import publish_room
 
@@ -293,6 +295,9 @@ def test_a_selection_in_one_pass_takes_its_hive_room_from_later_tasks(setup, in_
     if in_pass:
         assert isinstance(second, Wait)
         assert launch.select(setup.config, "eng", {"id": "one"}) is first
+        assert [hive["room"] for hive in launch.hives() if hive["id"] == "remote"] == [0]
+        master = replace(first, master_placement=Mock())
+        assert launch._spend(master) is master
         assert [hive["room"] for hive in launch.hives() if hive["id"] == "remote"] == [0]
     else:
         assert isinstance(second, Selection)
