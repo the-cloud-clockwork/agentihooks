@@ -84,7 +84,7 @@ def test_retry_cannot_reset_oldest_backlog_age_and_restart_keeps_watermarks(capt
 def test_a_stage_cannot_acknowledge_beyond_its_own_upstream(captured, stage):
     catalog, meter, scope = captured
     before = meter.snapshot()
-    with pytest.raises(Conflict, match="upstream"):
+    with pytest.raises(Conflict, match="^stage acknowledgement exceeds observed upstream$"):
         advance(meter, scope, stage, 1, 100.0)
     assert meter.snapshot() == before
     assert catalog.watermark(*scope.key()) == 1
@@ -95,7 +95,7 @@ def test_stale_progress_and_clock_rewind_do_not_mutate_state(captured):
     advance(meter, scope, "local_spool", 3, 100.0)
     before = meter.snapshot()
     for through, now in [(2, 110.0), (4, 99.0)]:
-        with pytest.raises(Conflict, match="stale"):
+        with pytest.raises(Conflict, match="^stale stage observation$"):
             advance(meter, scope, "local_spool", through, now)
         assert meter.snapshot() == before
 
@@ -206,7 +206,7 @@ def test_real_capture_archive_and_embedding_boundaries(captured, tmp_path, run):
 @pytest.mark.parametrize("threshold", [0.0, -1.0, float("inf"), float("nan")])
 def test_invalid_stale_thresholds_are_refused(captured, threshold):
     _, meter, scope = captured
-    with pytest.raises(ValueError, match="threshold"):
+    with pytest.raises(ValueError, match="^stale threshold must be positive and finite$"):
         meter.status(GRANT, scope, 200.0, stale_after=threshold)
 
 
@@ -284,7 +284,7 @@ def test_extraction_requires_a_durable_matching_receipt(captured, receipt):
     advance(meter, scope, "archive", 2, 120.0)
     recorder = progress.Recorder(catalog, GRANT, scope, "agentihooks", clock=lambda: 200.0)
     before = meter.snapshot()
-    with pytest.raises(Conflict, match="acknowledge"):
+    with pytest.raises(Conflict, match="^extraction did not acknowledge the requested durable cursor$"):
         recorder.consume(2, lambda source, through: receipt)
     assert meter.snapshot() == before
 
@@ -297,7 +297,7 @@ def test_extraction_replay_and_bad_cursors_never_call_the_extractor(captured):
     calls = []
     assert recorder.consume(1, lambda *args: calls.append(args)) == {"state": "replayed", "through": 1}
     for through in [0, 2, True]:
-        with pytest.raises(Conflict, match="cursor"):
+        with pytest.raises(Conflict, match="^extraction cursor is stale or exceeds archive$"):
             recorder.consume(through, lambda *args: calls.append(args))
     assert calls == []
 
@@ -327,7 +327,7 @@ def test_binding_cannot_expand_or_relabel_a_source(captured):
     meter.bind(GRANT, scope, "agentihooks")
     before = meter.snapshot()
     broad = Grant(GRANT.principal, GRANT.corpus, frozenset({"agentihooks", "other-project"}))
-    with pytest.raises(Conflict, match="immutable"):
+    with pytest.raises(Conflict, match="^source progress scope is immutable$"):
         meter.bind(broad, scope, "other-project")
     assert meter.snapshot() == before
 
@@ -335,7 +335,7 @@ def test_binding_cannot_expand_or_relabel_a_source(captured):
 def test_archive_acknowledgement_requires_a_captured_batch(captured):
     catalog, _, scope = captured
     recorder = progress.Recorder(catalog, GRANT, scope, "agentihooks", clock=lambda: 200.0)
-    with pytest.raises(Conflict, match="captured batch"):
+    with pytest.raises(Conflict, match="^archive acknowledgement has no captured batch$"):
         recorder.archived(spool.Entry(1, "not-captured", 100.0, [{}], 10))
 
 
