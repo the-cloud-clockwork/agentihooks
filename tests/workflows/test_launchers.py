@@ -3,9 +3,9 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
+from scripts.workflows.launchers import HeadlessProfile
 
 from scripts.headless.profile_run import ProfileResult
-from scripts.workflows.launchers import HeadlessProfile
 from scripts.workflows.runner import StageResult
 from scripts.workflows.schema import Stage
 
