@@ -318,6 +318,7 @@ def test_overlays_reads_the_declared_overlays(tmp_path, manifest, expected):
     assert profile_chain.overlays(tmp_path) == expected
 
 
+@pytest.mark.parametrize("wrapped", [False, True])
 def test_rendered_overlays_read_the_home_stamp(tmp_path, wrapped):
     stamp = tmp_path / profile_chain.RENDER_STAMP
     assert profile_chain.rendered_overlays(tmp_path) == []
