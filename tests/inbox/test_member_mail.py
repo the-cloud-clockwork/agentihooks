@@ -104,7 +104,7 @@ def test_the_waker_orders_the_hive_the_moment_mail_lands_for_its_idle_legacy_cod
     remote = remote_codex(redis, agent)
     idle.beat(redis, "sw", remote.name, idle.IDLE, item.created_at)
     wake.wake_now(InboxStore(redis), "sw", [remote], FakeHerdr({}), item.created_at + 1, 300_000)
-    assert [order.action for order in hive_wakes(redis)] == ["nudge"]
+    assert [(order.action, order.slug) for order in hive_wakes(redis)] == [("nudge", "sw")]
 
 
 def test_a_working_hive_codex_pane_gets_no_wake_and_escalates_as_before(redis, agent, mail):

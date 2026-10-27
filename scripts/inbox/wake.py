@@ -338,7 +338,7 @@ def _pane_state(redis, slug, herdr, agent, now_ms, quiet):
 
 def _beat_state(redis, slug, agent, now_ms):
     beat = idle.heartbeat(redis, slug, agent.name) or {"state": idle.WORKING, "at": now_ms}
-    busy = beat.get("state") == idle.WORKING and now_ms - beat.get("at", 0) < idle.STALE_MS
+    busy = beat.get("state") == idle.WORKING and now_ms - beat["at"] < idle.STALE_MS
     return idle.WORKING if busy else idle.IDLE
 
 
