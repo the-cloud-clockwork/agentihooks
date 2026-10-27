@@ -288,6 +288,49 @@ def test_swarm_set_refuses_another_hive_placement_value(store):
     assert store.config("sw").hive_placement is False
 
 
+def test_placement_mode_is_anton_first_with_no_node_limit_by_default(store):
+    config = store.config("sw")
+    assert (config.placement_mode, config.placement_nodes) == ("anton-first", 0)
+    store.update("sw", placement_mode="round-robin", placement_nodes=3)
+    config = store.config("sw")
+    assert (config.placement_mode, config.placement_nodes) == ("round-robin", 3)
+
+
+def test_swarm_set_selects_round_robin_placement_and_its_node_limit(store, capsys):
+    import argparse
+    import json
+
+    from scripts.swarm import cli
+
+    store.update("sw", state="paused")
+    cli.cmd_set(store, argparse.Namespace(slug="sw", pairs=["placement-mode=round-robin", "placement-nodes=4"]))
+    config = store.config("sw")
+    assert (config.placement_mode, config.placement_nodes) == ("round-robin", 4)
+    shown = json.loads(capsys.readouterr().out)
+    assert (shown["placement_mode"], shown["placement_nodes"]) == ("round-robin", 4)
+
+
+@pytest.mark.parametrize(
+    ("pair", "refusal"),
+    [
+        ("placement-mode=spread", "^placement mode must be one of anton-first, round-robin$"),
+        ("placement-nodes=two", "^placement-nodes takes a whole number of hives, 0 for no limit$"),
+        ("placement-nodes=-1", "^placement-nodes takes a whole number of hives, 0 for no limit$"),
+    ],
+)
+def test_swarm_set_refuses_an_unknown_placement_mode_or_node_limit(store, pair, refusal):
+    import argparse
+
+    from scripts.swarm import cli
+    from scripts.swarm.store import SwarmError
+
+    store.update("sw", state="paused")
+    with pytest.raises(SwarmError, match=refusal):
+        cli.cmd_set(store, argparse.Namespace(slug="sw", pairs=[pair]))
+    config = store.config("sw")
+    assert (config.placement_mode, config.placement_nodes) == ("anton-first", 0)
+
+
 def test_the_tick_of_a_local_machine_swarm_with_hive_placement_runs_hybrid(store, monkeypatch):
     from scripts.swarm import controller
     from tests.swarm.test_tick import FakeLedger
