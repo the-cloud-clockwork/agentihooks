@@ -391,10 +391,15 @@ def test_a_base_without_a_manifest_locks_the_head(tmp_path, capsys):
             '{"t": {"assertions": 1, "calls": 1}}',
             f"::error::{locked_tests.MANIFEST} must map each locked test to its assertions, calls and cases\n",
         ),
+        (
+            locked_tests.MANIFEST,
+            '{"t": {"assertions": 1, "calls": 1, "cases": 1, "texts": [1]}}',
+            f"::error::{locked_tests.MANIFEST} must map each locked test to its assertions, calls and cases\n",
+        ),
         (Path(LOCKED), "{", f"::error::{LOCKED} does not parse: "),
         (Path(LOCKED), "def test_x():\n    pass\x00\n", "::error::"),
     ],
-    ids=["no manifest", "manifest json", "manifest list", "manifest fields", "test syntax", "test nul"],
+    ids=["no manifest", "manifest json", "manifest list", "manifest fields", "manifest texts", "test syntax", "test nul"],
 )
 def test_an_unreadable_tree_cannot_be_graded(tmp_path, capsys, path, text, message):
     base = _tree(tmp_path / "base", GUARD)

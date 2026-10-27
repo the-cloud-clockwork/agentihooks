@@ -232,14 +232,14 @@ def grade(base: dict, recorded: dict, head: dict) -> list[str]:
         if TEXTS in floor:
             if found is not None and Counter(floor[TEXTS]) - Counter(found[TEXTS]):
                 errors.append(f"The locked test {key} changes or drops an assertion the base locks.")
-            if key not in recorded or Counter(floor[TEXTS]) - Counter(recorded[key].get(TEXTS, [])):
+            if key not in recorded or Counter(floor[TEXTS]) - Counter(recorded[key].get(TEXTS)):
                 errors.append(f"The head {MANIFEST} drops or changes the locked assertion texts of {key}.")
     for key, entry in sorted(recorded.items()):
         found = head.get(key)
         if (
             found is None
             or any(entry[field] > found[field] for field in FIELDS)
-            or Counter(entry.get(TEXTS, [])) - Counter(found[TEXTS])
+            or Counter(entry.get(TEXTS)) - Counter(found[TEXTS])
         ):
             errors.append(
                 f"The head {MANIFEST} records more than {key} measures; run python -m scripts.locked_tests --write."
