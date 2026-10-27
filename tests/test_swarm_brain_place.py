@@ -105,6 +105,19 @@ def test_place_never_prints_a_credential(home, capsys):
     assert API_FIXTURE not in printed and MCP_FIXTURE not in printed
 
 
+def test_place_never_prints_a_password_held_in_a_binding_origin(home):
+    doc = json.loads(json.dumps(BINDING))
+    doc["origins"]["lan"]["api"] = "https://svc:fxpw-place@swarm-brain-api-internal.example.test"
+    store = StubStore({RECORD: {"BRAIN_HTTP_TOKEN": API_FIXTURE, "MCP_API_KEY": MCP_FIXTURE}})
+    out = io.StringIO()
+
+    assert brain_place.place(_environ(home), _bao(store), json.dumps(doc), out) == 1
+
+    expected = "endpoint https://swarm-brain-api-internal.example.test is not a plain origin"
+    assert out.getvalue().endswith(f"brain binding refused: {expected}\n")
+    assert "fxpw-place" not in out.getvalue()
+
+
 def test_place_honours_the_binding_variable_names_and_quotes_values(home):
     doc = json.loads(json.dumps(BINDING))
     doc["credentials"]["api"]["env"] = "SWARM_BRAIN_OTHER_TOKEN"

@@ -48,7 +48,7 @@ def site(environ: Mapping[str, str]) -> str:
 
 def origin(url: str) -> str:
     parts = urlsplit(url)
-    return f"{parts.scheme}://{parts.netloc}".lower()
+    return f"{parts.scheme}://{parts.netloc.rpartition('@')[2]}".lower()
 
 
 def _authorized(url: object, where: str) -> str:
