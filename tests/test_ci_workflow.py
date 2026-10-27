@@ -1836,7 +1836,7 @@ def test_every_pull_request_stats_part_restores_one_merged_cache_saved_once_afte
         "path": ".mutation-stats-fresh/",
         "include-hidden-files": True,
         "if-no-files-found": "ignore",
-        "retention-days": 1,
+        "retention-days": 7,
     }
     stats_part = steps[names.index("Upload mutation stats part")]
     assert stats_part["if"] == skipped

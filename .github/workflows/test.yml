@@ -3705,7 +3705,7 @@ jobs:
           path: .mutation-stats-fresh/
           include-hidden-files: true
           if-no-files-found: ignore
-          retention-days: 1
+          retention-days: 7
 
       - name: Mutate the only shard in the statistics job
         id: mutate

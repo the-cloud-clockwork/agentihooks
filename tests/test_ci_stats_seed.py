@@ -110,6 +110,16 @@ def test_harvest_copies_records_from_the_newest_run_with_stats_artifacts(tmp_pat
     assert sorted(path.name for path in tmp_path.iterdir()) == [f"{KEEP}.json", "x.index", "x.json"]
 
 
+def test_harvest_skips_a_number_that_is_not_a_pull_request(tmp_path, monkeypatch, capsys):
+    def missing(path, binary=False):
+        raise subprocess.CalledProcessError(1, ["gh", "api", path])
+
+    monkeypatch.setattr(seed, "api", missing)
+
+    assert seed.harvest(7, tmp_path) == 0
+    assert capsys.readouterr().out == "Mutation stats seed: #7 is not a readable pull request\n"
+
+
 def test_harvest_without_stats_artifacts_writes_nothing(tmp_path, monkeypatch):
     responses = {
         "pulls/7": {"head": {"sha": "abc"}},

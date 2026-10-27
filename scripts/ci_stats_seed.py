@@ -33,7 +33,11 @@ def merged_pulls(folder: Path, head: str, before: str) -> list[int]:
 
 
 def harvest(number: int, folder: Path) -> int:
-    sha = api(f"pulls/{number}")["head"]["sha"]
+    try:
+        sha = api(f"pulls/{number}")["head"]["sha"]
+    except subprocess.CalledProcessError:
+        print(f"Mutation stats seed: #{number} is not a readable pull request")
+        return 0
     for row in api(f"{TESTS}?event=pull_request&head_sha={sha}&per_page=10")["workflow_runs"]:
         artifacts = api(f"actions/runs/{row['id']}/artifacts?per_page=100")["artifacts"]
         found = [item for item in artifacts if item["name"].startswith(ARTIFACT) and not item["expired"]]
