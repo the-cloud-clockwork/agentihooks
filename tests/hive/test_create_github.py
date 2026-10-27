@@ -113,3 +113,44 @@ def test_squash_merges_without_auto():
     run = _run([])
     create_github.squash(run, PR)
     assert run.calls == [["gh", "pr", "merge", PR, "--squash"]]
+
+
+def _tree_run(answer):
+    calls = []
+
+    def run(argv, **kwargs):
+        calls.append(argv)
+        return subprocess.CompletedProcess(argv, 0, answer, "")
+
+    run.calls = calls
+    return run
+
+
+def test_tree_lists_every_path_of_the_base():
+    run = _tree_run("truncated.md\nk8s/a.yaml\nk8s/b/c.yaml\n")
+    assert create_github.tree(run, "o/r", "dev") == {"truncated.md", "k8s/a.yaml", "k8s/b/c.yaml"}
+    assert run.calls == [["gh", "api", "repos/o/r/git/trees/dev?recursive=1", "--jq", create_github.TREE]]
+    assert create_github.TREE == 'if .truncated then "truncated" else .tree[].path end'
+
+
+def test_a_truncated_tree_is_a_refusal():
+    with pytest.raises(auth.HiveError) as refused:
+        create_github.tree(_tree_run("truncated\n"), "o/r", "dev")
+    assert str(refused.value) == "the o/r dev tree is too large to list, so hive create cannot see its hive files"
+
+
+def test_open_heads_lists_the_branch_of_every_open_pull_request():
+    run = _tree_run("swarm-hive-002\nengineer-1\n")
+    assert create_github.open_heads(run, "o/r") == {"swarm-hive-002", "engineer-1"}
+    assert run.calls == [
+        ["gh", "pr", "list", "-R", "o/r", "--state", "open", "--limit", "1000", "--json", "headRefName"]
+        + ["--jq", ".[].headRefName"]
+    ]
+
+
+def test_open_heads_at_the_limit_is_a_refusal_and_one_below_is_read():
+    below = [f"b{index}" for index in range(create_github.OPEN_LIMIT - 1)]
+    assert len(create_github.open_heads(_tree_run("\n".join(below)), "o/r")) == create_github.OPEN_LIMIT - 1
+    with pytest.raises(auth.HiveError) as refused:
+        create_github.open_heads(_tree_run("\n".join([*below, "last"])), "o/r")
+    assert str(refused.value) == "o/r has 1000 or more open pull requests, so hive create cannot see them all"
