@@ -51,7 +51,7 @@ def test_pull_request_heads_are_read_once_per_interval_across_readers(github):
     assert ledger_events.head(PR, api) == "first"
     assert ledger_events.head(PR, api) == "first"
     assert asked == [PULL]
-    assert [row["caller"] for row in charged()] == ["swarm.head"]
+    assert [row["caller"] for row in charged()] == ["scripts.swarm.ledger_events"]
 
 
 def test_required_check_rules_are_read_once_per_interval_across_pull_requests(github, monkeypatch):
@@ -64,7 +64,7 @@ def test_required_check_rules_are_read_once_per_interval_across_pull_requests(gi
     merge_queue.required_view("https://github.com/org/repo/pull/8", api)
     assert asked == [RULES]
     assert seen == [{"Gate": None}, {"Gate": None}]
-    assert [row["caller"] for row in charged()] == ["swarm.checks.rules"]
+    assert [row["caller"] for row in charged()] == ["scripts.swarm.merge_queue"]
 
 
 def test_the_sampler_counts_used_calls_across_a_window_reset():

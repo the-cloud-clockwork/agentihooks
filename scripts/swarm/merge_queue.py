@@ -81,7 +81,7 @@ def required_view(url: str, run) -> "ledger_events.PullRequest | None":
     resource = graphql(FRESHNESS, {"url": url}, run)["resource"]
     repo = resource["repository"]["nameWithOwner"]
     path = f"repos/{repo}/rules/branches/{resource['baseRefName']}"
-    rules = github_reads.snapshot(path, time.time(), lambda: {"rules": rest(path, run, "swarm.checks.rules")})["rules"]
+    rules = github_reads.snapshot(path, time.time(), lambda: {"rules": rest(path, run)})["rules"]
     protection = (resource.get("baseRef") or {}).get("branchProtectionRule") or {}
     expected = dict.fromkeys(protection.get("requiredStatusCheckContexts") or [])
     expected.update(
