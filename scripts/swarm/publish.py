@@ -205,7 +205,7 @@ def open_pull_head(root: Path, task: dict, branch: str, remote: str) -> str:
     url = task.get("pr_url", "")
     head = publish_queue.open_head(remote, url)
     if head and head != branch:
-        git(root, "fetch", "origin", f"+refs/heads/{head}:refs/remotes/origin/{head}")
+        git(root, "fetch", "origin", head)
         if not descends(root, head):
             raise SwarmError(
                 f"open pull request {url} delivers branch {head}, but worktree {root} on branch {branch} "
