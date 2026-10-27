@@ -406,6 +406,55 @@ def test_every_locked_file_is_measured_when_one_is_missing(tmp_path):
     assert list(locked_tests.measure(tmp_path)) == [f"{locked_tests.LOCKED[1]}::test_a"]
 
 
+EXTRA = "tests/extra/test_new.py"
+
+
+def _lock_extra(root: Path, text: str = "def test_new():\n    assert 1\n") -> Path:
+    (root / EXTRA).parent.mkdir(parents=True, exist_ok=True)
+    (root / EXTRA).write_text("def test_new():\n    assert 1\n")
+    manifest = json.loads((root / locked_tests.MANIFEST).read_text())
+    for key, entry in locked_tests.measure(root, (EXTRA,)).items():
+        manifest[key] = {field: entry[field] for field in (*locked_tests.FIELDS, locked_tests.TEXTS)}
+    (root / locked_tests.MANIFEST).write_text(json.dumps(manifest))
+    (root / EXTRA).write_text(text)
+    return root
+
+
+def test_the_modules_named_are_the_locked_list_then_each_manifest_module_once():
+    found = locked_tests.named({"a.py::t": {}, f"{LOCKED}::x": {}}, {"a.py::u": {}, "b.py::v": {}})
+    assert found == (*locked_tests.LOCKED, "a.py", "b.py")
+
+
+def test_a_module_the_head_manifest_names_is_measured_and_held(tmp_path, capsys):
+    base = _tree(tmp_path / "base", GUARD)
+    code, out = _grade(base, _lock_extra(_tree(tmp_path / "head", GUARD)), capsys)
+    assert (code, out) == (0, "4 locked tests on the base, 5 measured on the head, 0 errors\n")
+    skipped = "import pytest\n\n\n@pytest.mark.skip\ndef test_new():\n    assert 1\n"
+    code, out = _grade(base, _lock_extra(_tree(tmp_path / "skipped", GUARD), skipped), capsys)
+    assert (code, out) == (
+        1,
+        "4 locked tests on the base, 5 measured on the head, 1 errors\n"
+        f"::error::The locked test {EXTRA}::test_new is skipped, xfailed or returns early.\n",
+    )
+
+
+def test_a_module_only_the_base_manifest_names_is_still_measured(tmp_path, capsys):
+    base = _lock_extra(_tree(tmp_path / "base", GUARD))
+    head = _tree(tmp_path / "head", GUARD)
+    (head / EXTRA).parent.mkdir(parents=True)
+    (head / EXTRA).write_text("def test_new():\n    assert 1\n")
+    code, out = _grade(base, head, capsys)
+    key = f"{EXTRA}::test_new"
+    assert (code, out) == (
+        1,
+        f"5 locked tests on the base, 5 measured on the head, 4 errors\n"
+        f"::error::The head {locked_tests.MANIFEST} drops or lowers the locked assertions of {key}.\n"
+        f"::error::The head {locked_tests.MANIFEST} drops or lowers the locked calls of {key}.\n"
+        f"::error::The head {locked_tests.MANIFEST} drops or lowers the locked cases of {key}.\n"
+        f"::error::The head {locked_tests.MANIFEST} drops or changes the locked assertion texts of {key}.\n",
+    )
+
+
 @pytest.mark.parametrize(
     "config",
     [
