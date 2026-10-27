@@ -24,7 +24,7 @@ from scripts.gates import claims as claim_cap
 from scripts.gates import log as gate_log
 from scripts.handoff import transfers
 from scripts.handoff.envelope import reclaim, remote_heads
-from scripts.hive import reports
+from scripts.hive import registry, reports
 from scripts.inbox import exits, wake
 from scripts.inbox.seats import seat_address
 from scripts.inbox.store import CLOSED, InboxStore
@@ -610,7 +610,9 @@ def _remote_gone_reason(slug, store, runtime, agent, now_ms):
 
 
 def _hive_lost(slug, store, agent, now_ms):
-    if not reports.Reports(store.redis).lost(agent, now_ms):
+    if agent.state == "finished":
+        return reports.Reports(store.redis).lost(agent, now_ms, registry.LIVE_MS)
+    if not reports.Reports(store.redis).lost(agent, now_ms, reports.LOST_MS):
         return False
     beat = idle_state.heartbeat(store.redis, slug, agent.name)
     wait = idle_state.wait(store.redis, slug, agent.name)
