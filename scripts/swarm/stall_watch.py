@@ -15,6 +15,7 @@ from dataclasses import dataclass, fields
 
 from scripts.gates.base import Who
 from scripts.gates.enforcement import STALL_WATCH
+from scripts.hive import join_report
 from scripts.inbox import exits
 from scripts.inbox.store import CLOSED, InboxError, InboxStore
 from scripts.swarm import capacity, idle, outage, ready, waits
@@ -186,8 +187,6 @@ def _stall(watch, task, pull, marks, seen, agent):
 
 
 def _hive_live(watch, agent):
-    from scripts.hive import join_report
-
     report = join_report.read(watch.store.redis, agent) if agent is not None else {}
     beat = report.get("heartbeat_at") if report.get("status") == "running" else None
     return beat is not None and watch.now_ms - beat <= 2 * join_report.HEARTBEAT_MS
