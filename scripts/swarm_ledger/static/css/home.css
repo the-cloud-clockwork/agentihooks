@@ -4,7 +4,7 @@ body{margin:0;min-height:100vh;color:var(--text);font:13px/1.6 ui-monospace,'Jet
 ::selection{background:var(--selection);color:var(--text)}
 main{position:relative;z-index:1;padding:32px clamp(16px,3vw,48px) 96px}
 main.home{padding-inline:192px}
-@media (max-width:1439px){main.home{padding-inline:clamp(16px,3vw,48px)}}
+@media (max-width:1679px){main.home{padding-inline:clamp(16px,3vw,48px)}}
 .home .panel,.bin .panel{margin-top:16px;padding:4px 8px 8px;outline:1px solid transparent;outline-offset:-1px;border-radius:12px;background:var(--surface-1);transition:outline-color .15s cubic-bezier(.4,0,.2,1),box-shadow .15s cubic-bezier(.4,0,.2,1)}
 .home .panel:hover,.bin .panel:hover{outline-color:var(--panel-edge);box-shadow:var(--panel-lift)}
 header{display:flex;align-items:center;gap:16px;padding:0 12px 12px;border-bottom:1px solid var(--signal-soft)}

@@ -8,6 +8,7 @@ from scripts.swarm_ledger import ports
 
 from . import resources
 from .errors import APIError
+from .services import Services
 
 SwarmError = ports.swarm().store.SwarmError
 HARNESSES = ("claude", "codex")
@@ -49,7 +50,7 @@ def view(store: object, now_ms: int) -> dict:
     }
 
 
-def route(services: object) -> dict:
+def route(services: Services) -> dict:
     try:
         data = view(services.swarm.store(), int(time.time() * 1000))
     except SwarmError as exc:
