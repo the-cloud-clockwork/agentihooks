@@ -329,14 +329,23 @@ def test_every_stats_part_restores_one_merged_cache_saved_once_after_all_parts_f
     assert fresh["env"] == {"PART": "${{ matrix.part }}"}
     part = steps[names.index("Upload this part's test stats cache")]
     assert part["if"] == "success() && strategy.job-total != 1"
-    assert part["uses"] == "actions/upload-artifact@v4"
+    assert part["uses"] == "./.github/actions/retry-upload"
     assert part["with"] == {
         "name": "mutation-test-stats-cache-${{ matrix.part }}",
         "path": ".mutation-stats-fresh/",
         "include-hidden-files": True,
         "if-no-files-found": "ignore",
         "retention-days": 1,
-        "overwrite": True,
+    }
+    stats_part = steps[names.index("Upload mutation stats part")]
+    assert "if" not in stats_part
+    assert stats_part["uses"] == part["uses"]
+    assert stats_part["with"] == {
+        "name": "mutation-stats-${{ matrix.part }}",
+        "path": ".mutation-stats/",
+        "include-hidden-files": True,
+        "if-no-files-found": "error",
+        "retention-days": 1,
     }
     collect = names.index("Collect one stats part for every mutation shard")
     assert names.index(restore["name"]) < collect < names.index(single["name"])
