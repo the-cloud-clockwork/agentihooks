@@ -469,6 +469,30 @@ def test_weakened_tests_name_every_test_change_beyond_added_tests(tmp_path):
     assert weakened_tests(tmp_path, base, "HEAD") == {"tests/test_skip.py", "tests/test_moved.py"}
 
 
+def test_discovery_fetches_each_base_diff_in_one_request_before_reading_files(tmp_path, monkeypatch):
+    from scripts.ci_mutation import scope
+
+    git, commit = _repo(tmp_path)
+    first = commit("own.py", "a = 1\n")
+    second = commit("own.py", "a = 2\n")
+    commit("own.py", "a = 3\n")
+    calls = []
+    check_output = scope.subprocess.check_output
+
+    def recorded(command, **kwargs):
+        calls.append(command)
+        return check_output(command, **kwargs)
+
+    monkeypatch.setattr(scope.subprocess, "check_output", recorded)
+    monkeypatch.setattr(scope, "select_tests", lambda root, path: [])
+    scope.discover_changes(tmp_path, [first, second], "HEAD")
+    paths = ["--", "hooks/", "scripts/", "tests"]
+    assert calls[:2] == [
+        ["git", "diff", "--no-renames", "--numstat", first, "HEAD", *paths],
+        ["git", "diff", "--no-renames", "--numstat", second, "HEAD", *paths],
+    ]
+
+
 @pytest.mark.parametrize(
     ("edit", "regraded"),
     [
