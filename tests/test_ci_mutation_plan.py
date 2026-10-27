@@ -158,7 +158,9 @@ def test_split_mutant_measurements_balance_slices_and_match_reported_costs(tmp_p
             assert memory.wrap(lambda *args, **kwargs: 0)(object(), tests) == 0
         assert memory.cost(name, ["left", "fast"]) == 9.0
         assert memory.cost(name, ["fast", "right"]) == 1.0
-    results = [{"tests": {function: ["fast", "left", "right"]}, "durations": {"fast": 1.0, "left": 100.0, "right": 100.0}}]
+    results = [
+        {"tests": {function: ["fast", "left", "right"]}, "durations": {"fast": 1.0, "left": 100.0, "right": 100.0}}
+    ]
     plan = measured.measured_plan([(names, results)], memory, limit=2)
     assert plan["shards"] == 2
     assert unit_count(plan) == 6
