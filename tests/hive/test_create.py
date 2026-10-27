@@ -50,6 +50,7 @@ RESYNC = [
 class Run:
     def __init__(self):
         self.calls = []
+        self.cwds = []
         self.state = "OPEN"
         self.prs = []
         self.on_merge = lambda: None
@@ -58,6 +59,7 @@ class Run:
 
     def __call__(self, argv, **kwargs):
         self.calls.append(argv)
+        self.cwds.append(kwargs.get("cwd"))
         answer = self._answer(argv, kwargs.get("input"))
         if isinstance(answer, subprocess.CompletedProcess):
             return answer
@@ -206,6 +208,45 @@ def test_create_brings_a_named_hive_from_nothing_to_an_engineer_in_herdr(world):
     titles = [line.split(": ")[1] for line in world.lines]
     assert titles == [title for title, _ in create.STEPS]
     assert world.lines[-1] == f"hive create {NAME}: engineer: engineer@{member} in demo works on the hive"
+
+
+def test_the_manifests_step_opens_the_pull_request_through_its_clone_outside_a_git_checkout(world, monkeypatch):
+    outside = world.home / "outside"
+    outside.mkdir()
+    monkeypatch.chdir(outside)
+
+    create.create(world.tools, create.Options(timeout_s=60))
+
+    (init,) = world.run.named("git", "init")
+    clone = init[-1]
+    assert init == ["git", "init", "-q", clone]
+    origin = ["git", "-C", clone, "remote", "add", "origin", f"https://github.com/{REPO}.git"]
+    assert world.run.named("git", "-C") == [origin]
+    calls = list(zip(world.run.calls, world.run.cwds))
+    first = world.run.calls.index(init)
+    last = world.run.calls.index(world.run.named("gh", "pr", "create")[0])
+    step = calls[first + 2 : last + 1]
+    assert [argv[:2] for argv, _ in step] == [
+        ["gh", "api"],
+        ["gh", "pr"],
+        ["gh", "api"],
+        ["gh", "api"],
+        ["gh", "api"],
+        ["gh", "api"],
+        ["gh", "api"],
+        ["gh", "pr"],
+    ]
+    assert {cwd for _, cwd in step} == {clone}
+    assert not Path(clone).exists()
+    assert _state(world)["pr"] == PR
+
+
+def test_the_dry_run_lists_every_manifest_file(world, monkeypatch):
+    monkeypatch.setattr(create, "_files", lambda tools, options, cwd: {"a.yaml": "a", "b.yaml": "b"})
+    create.create(world.tools, create.Options(dry_run=True))
+    assert (
+        f"hive create {NAME}: manifests: would open a pull request into {REPO} dev with a.yaml, b.yaml" in world.lines
+    )
 
 
 def test_a_rerun_resumes_the_unfinished_create_and_repeats_no_finished_step(world):
@@ -418,10 +459,36 @@ def test_a_branch_left_by_an_earlier_run_is_moved_to_the_new_commit():
             return subprocess.CompletedProcess(argv, 1, "", "gh: Reference already exists (HTTP 422)")
         return run(argv, **kwargs)
 
-    assert create_github.open_pr(answer, REPO, "dev", NAME, {"a": "b"}, "Add worker hive") == PR
+    assert create_github.open_pr(answer, REPO, "dev", NAME, {"a": "b"}, "Add worker hive", "clone") == PR
     patched = run.named("gh", "api", "-X", "PATCH")
     assert patched == [
         ["gh", "api", "-X", "PATCH", f"repos/{REPO}/git/refs/heads/{NAME}", "--input", "-", "--jq", ".object.sha"]
+    ]
+    assert set(run.cwds) == {"clone"}
+
+
+def test_gh_and_the_clone_run_with_their_folder_and_timeout(tmp_path):
+    seen = []
+
+    def run(argv, **kwargs):
+        seen.append((argv, kwargs))
+        return subprocess.CompletedProcess(argv, 0, "out\n", "")
+
+    folder = str(tmp_path)
+    assert create_github.clone(run, REPO, folder) == folder
+    assert create_github.gh(run, ["api", "x"], {"a": 1}, folder) == "out"
+    common = {
+        "input": None,
+        "capture_output": True,
+        "text": True,
+        "timeout": create_github.GH_TIMEOUT_S,
+        "check": False,
+    }
+    origin = ["git", "-C", folder, "remote", "add", "origin", f"https://github.com/{REPO}.git"]
+    assert seen == [
+        (["git", "init", "-q", folder], common),
+        (origin, common),
+        (["gh", "api", "x"], {**common, "input": '{"a": 1}', "cwd": folder}),
     ]
 
 
