@@ -57,10 +57,11 @@ def test_target_detects_claude_and_codex():
 
 def _names_a_process(node):
     return any(
-        isinstance(part, ast.Constant)
-        and isinstance(part.value, str)
-        and part.value.startswith("/proc/")
-        and not part.value.startswith("/proc/self")
+        isinstance(part, ast.JoinedStr)
+        and len(part.values) > 1
+        and isinstance(part.values[0], ast.Constant)
+        and part.values[0].value == "/proc/"
+        and isinstance(part.values[1], ast.FormattedValue)
         for part in ast.walk(node)
     )
 
@@ -71,7 +72,11 @@ def _process_table_reads(check, process_paths):
         if not isinstance(call, ast.Call):
             continue
         func = call.func
-        if getattr(func, "id", getattr(func, "attr", None)) in {"processes", "_process"}:
+        if isinstance(func, ast.Name):
+            count += func.id in {"processes", "_process"} or (
+                func.id == "open" and bool(call.args) and _names_a_process(call.args[0])
+            )
+        elif isinstance(func, ast.Attribute) and func.attr in {"processes", "_process"}:
             count += 1
         elif isinstance(func, ast.Attribute) and func.attr in {"exists", "is_file", "read_text", "read_bytes", "open"}:
             receiver = func.value
