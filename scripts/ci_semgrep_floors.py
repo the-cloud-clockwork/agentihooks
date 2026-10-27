@@ -150,10 +150,8 @@ def floor_errors(
                 f"{name}: floor rose from {was} to {floors[name]}; "
                 "a floor rises only with a rule change that adds red fixture cases"
             )
-        elif floors[name] - was > grown.get(name, 0):
-            errors.append(
-                f"{name}: floor rose by {floors[name] - was} but added only {grown.get(name, 0)} red fixture cases"
-            )
+        elif floors[name] > was and floors[name] - was > grown[name]:
+            errors.append(f"{name}: floor rose by {floors[name] - was} but added only {grown[name]} red fixture cases")
         if floors[name] < was and name in changed:
             errors.append(
                 f"{name}: floor dropped from {was} to {floors[name]} with a rule change; "
