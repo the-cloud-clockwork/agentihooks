@@ -5132,7 +5132,8 @@ the finding by hand.
 The Doctor measured the fix by counting spawn stall items in each master's inbox, with the same census script over two
 equal 24 hour windows: 14 items on `rig-grade-swarm` and 10 on `rig-grade-swarm-doctor` in the day ending about 12:30
 UTC on 23 October, against 0 and 0 in the day from 13:35:49 UTC on 23 October, when the ledger server code stamp
-showed the merged fix loaded. Run with the earlier end time, the same script still read 14 and 10. The cap stayed in
+showed the merged fix loaded. Run again with the end time 12:30 UTC on 23 October, the same script still
+read 14 and 10. The cap stayed in
 play through the after window, with 116 local cap observations between 09:34 and 10:34 UTC on 24 October.
 
 #### The finding and its delivery
