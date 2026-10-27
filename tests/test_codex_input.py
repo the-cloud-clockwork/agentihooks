@@ -272,7 +272,7 @@ def test_signal_interrupt_reaches_the_child_and_restores_the_terminal(inherited)
     with _relay(child, launcher) as (process, master, slave, saved):
         _read_until(master, b"READY")
         os.kill(process.pid, signal.SIGINT)
-        assert process.wait(timeout=10) == 130
+        assert process.wait(timeout=5) == 130
         assert termios.tcgetattr(slave) == saved
 
 
@@ -422,7 +422,11 @@ def test_terminal_relay_restores_state_and_forwards_controls(monkeypatch, status
     monkeypatch.setattr(codex_input.os, "close", close)
     monkeypatch.setattr(codex_input.os, "killpg", kill)
     monkeypatch.setattr(codex_input.os, "waitpid", wait)
+    mask = Mock()
+    monkeypatch.setattr(codex_input.signal, "pthread_sigmask", mask)
     assert codex_input.run(["codex", "resume", "conversation"]) == expected
+    forwarded = (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)
+    assert mask.call_args_list == [call(signal.SIG_BLOCK, forwarded), call(signal.SIG_UNBLOCK, forwarded)]
     tty_check.assert_called_once_with(0)
     getattrs.assert_called_once_with(0)
     assert getsize.call_args_list == [call(0), call(0)]
@@ -454,6 +458,8 @@ def test_exec_preserves_the_routed_argument_vector(monkeypatch, terminal):
     monkeypatch.setattr(codex_input.termios, "tcsetattr", setattrs)
     monkeypatch.setattr(codex_input.termios, "tcsetwinsize", setsize)
     monkeypatch.setattr(codex_input.pty, "fork", lambda: (0, 9))
+    monkeypatch.setattr(codex_input.signal, "signal", Mock())
+    monkeypatch.setattr(codex_input.signal, "pthread_sigmask", Mock())
     with pytest.raises(Executed):
         codex_input.run(argv)
     execvp.assert_called_once_with("codex", argv)
