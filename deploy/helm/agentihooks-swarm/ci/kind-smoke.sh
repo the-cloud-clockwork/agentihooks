@@ -105,7 +105,7 @@ keep_layers() {
   keep_layers swarm terminal
 ) &
 build=$!
-kind create cluster --name "$cluster" --image "$KIND_NODE_IMAGE" &
+{ node="$(bash "$chart/ci/pull-kind-node.sh")" && kind create cluster --name "$cluster" --image "$node"; } &
 cluster_setup=$!
 load_lock="$(mktemp)"
 trap finish EXIT

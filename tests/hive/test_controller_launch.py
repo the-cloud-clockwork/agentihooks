@@ -896,6 +896,17 @@ def test_finished_receipt_collection_returns_the_exact_outcome_whatever_the_task
     assert setup.launcher.collect(request) == Outcome("spawn", Status.OK, "hive")
 
 
+def test_a_finished_receipt_marks_its_admission_reservation_joined(setup):
+    from scripts.hive import admission
+
+    request, order, _ = live_order(setup)
+    worker = setup.store.execution_registry.get("fixture", order.execution_id)
+    admission.record(setup.store.redis, order.hive, f"fixture/{worker.name}")
+    setup.store.put_agent("fixture", replace(worker, state="finished"))
+    assert setup.launcher.collect(request).ok
+    assert setup.store.redis.zrange(admission.key(order.hive), 0, -1) == [f"fixture/{worker.name}{admission.JOINED}"]
+
+
 def test_an_ended_worker_receipt_is_still_refused(setup):
     from scripts.hive.launch import GONE
     from scripts.swarm_v2.runtime.base import Outcome, Status
@@ -1027,6 +1038,16 @@ def test_acknowledgement_preserves_the_complete_launch_metadata(setup, route):
         ),
     )
     assert (live.launched_at, live.overlays, live.launch_timings) == (1234, ["tuner"], {"harness_at": 1300})
+
+
+def test_a_live_acknowledgement_marks_its_admission_reservation_joined(setup):
+    from scripts.hive import admission
+
+    _, order, ack = live_order(setup)
+    name = setup.store.execution_registry.get("fixture", order.execution_id).name
+    admission.record(setup.store.redis, order.hive, f"fixture/{name}")
+    assert setup.launcher.complete(order, ack).ok
+    assert setup.store.redis.zrange(admission.key(order.hive), 0, -1) == [f"fixture/{name}{admission.JOINED}"]
 
 
 @pytest.mark.parametrize(

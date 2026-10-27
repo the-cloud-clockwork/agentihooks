@@ -51,7 +51,7 @@ def environment() -> dict[str, str]:
     env = {**os.environ, "GH_TOKEN": value, "GITHUB_TOKEN": value, "AGENTIHOOKS_GITHUB_AUTH_READY": "1"}
     env["GIT_TERMINAL_PROMPT"] = "0"
     index = int(env.get("GIT_CONFIG_COUNT", "0"))
-    for offset, value in enumerate(("", f"!{sys.executable} -m scripts.github_app_cli credential")):
+    for offset, value in enumerate(("", f"!{sys.executable} -P -m scripts.github_app_cli credential")):
         env[f"GIT_CONFIG_KEY_{index + offset}"] = "credential.https://github.com.helper"
         env[f"GIT_CONFIG_VALUE_{index + offset}"] = value
     env["GIT_CONFIG_COUNT"] = str(index + 2)
@@ -66,7 +66,7 @@ def renew(last: float, now: float) -> float:
     path = token_file()
     staged = path.with_name(f"{path.name}.next")
     try:
-        staged.write_text(f"{token()}\n")
+        staged.write_text(f"{GitHubAppAuth().get_token()}\n")
         staged.chmod(0o600)
         staged.replace(path)
     except (OSError, GitAuthRefused, jwt.PyJWTError, requests.RequestException):
