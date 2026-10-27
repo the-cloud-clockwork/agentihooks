@@ -302,6 +302,33 @@ def test_the_file_cap_counts_only_added_files_that_travel(homes):
     ]
 
 
+def test_an_added_file_at_the_size_limit_still_travels(homes):
+    with at(homes.hive):
+        folder = ledger_workspace.materialize("fixture", "task", {"progress.md": "step\n"})
+        (folder / "edge.log").write_text("x" * ledger_workspace.SEED_CHARS, encoding="utf-8")
+        assert len(ledger_workspace.seeds("fixture", "task")["edge.log"]) == ledger_workspace.SEED_CHARS
+
+
+def test_the_controller_steering_replaces_a_hive_steering_that_only_contains_it(homes):
+    with at(homes.hive):
+        folder = ledger_workspace.materialize("fixture", "task", {"steering.md": "new\nhive extra\n"})
+        ledger_workspace.materialize("fixture", "task", {"steering.md": "new\n"})
+    assert (folder / "steering.md").read_text(encoding="utf-8") == "new\n"
+
+
+def test_the_mirror_fills_every_hive_task_into_a_fresh_home(homes):
+    copies = {
+        "first": {},
+        "second": {"progress.md": "hive step\n", "steering.md": "hive steering\n", "../escape": "x"},
+    }
+    with at(homes.controller), patch.object(ledger_workspace, "_synced", return_value=copies):
+        ledger_workspace.mirror(None, "fixture", {})
+    folder = homes.controller / ".agentihooks" / "swarm" / "fixture" / "tasks"
+    assert (folder / "second" / "progress.md").read_text(encoding="utf-8") == "hive step\n"
+    assert sorted(path.name for path in folder.iterdir()) == ["second"]
+    assert sorted(path.name for path in (folder / "second").iterdir()) == ["progress.md"]
+
+
 def test_the_latest_execution_of_a_task_wins(setup):
     from dataclasses import replace
 
