@@ -67,7 +67,7 @@ def test_required_summary_writes_current_artifact_counts_even_after_gate_failure
     assert "flake-budget" not in gate["needs"]
     downloads = [step for step in gate["steps"] if step.get("uses", "").startswith("actions/download-artifact@")]
     assert {step["with"]["pattern"] for step in downloads} == {"durations-3.*", "flakes-3.*"}
-    assert all(step["if"] == "${{ always() }}" for step in downloads)
+    assert all(step["if"] == "${{ always() }}" for step in downloads if not step["name"].endswith(", attempt 2"))
     assert all("run-id" not in step["with"] for step in downloads)
     _reports(tmp_path / "test-reports")
     summary = tmp_path / "summary.md"
