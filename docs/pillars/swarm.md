@@ -419,9 +419,9 @@ backend masters over the masters channel. While the lead seat is empty the lowes
 
 `master up --new`, and the new master offered when `master up` cannot resume the last one, never seat a master
 beyond the master seat count while the front door master is still coming up. The front door is coming up when a
-master record on `master@<id>` is in state `starting` or `suspect`, live or not. The launcher then takes the lowest
-free master seat, `master-2@<id>` and up; a seat is held by any master record that is not `finished`, or a
-`finished` one whose session still runs. When that seat number is above the count from `set masters=N` (default 1),
+master record holding the lead seat (`master@<id>`, or no seat recorded) is in state `starting` or `suspect`, live
+or not. The launcher then takes the lowest free master seat, `master-2@<id>` and up; a seat is held by any agent
+record on it that is not `finished`, or a `finished` one whose session still runs. When that seat number is above the count from `set masters=N` (default 1),
 nothing starts and the command exits non zero with:
 
 ```text
@@ -429,10 +429,10 @@ the front door master <name> is starting and every master seat is held (master s
 ```
 
 When the free seat is within the count, the new master takes it beside the starting front door, as for a live
-front door. `--replace` skips the check: it retires a live front door first and the new master takes
-`master@<id>`. A one seat pool therefore keeps exactly one master: on 25 October a pool with count 1 ran two
-live masters, the second on `master-2@<id>` launched about three minutes after the first, and that seat could
-neither write page chat nor read the masters channel.
+front door. A front door that is live and past `starting` and `suspect` does not apply the count: the new master
+takes the next free seat beside it. `--replace` skips the check: it retires a live front door first and the new
+master takes `master@<id>`. With the default count of 1, a second master started while the front door comes up
+would hold a backend seat that owns no phase.
 
 ```bash
 # Who holds each master seat and in what state
