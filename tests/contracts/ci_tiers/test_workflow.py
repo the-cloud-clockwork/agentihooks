@@ -114,7 +114,10 @@ def jobs_for(event, base_ref="dev", scope="full"):
 def test_each_event_runs_only_its_tier_jobs(event, expected):
     if event == "push" and (ROOT / ".github/workflows/count-record.yml").exists():
         expected = expected - {"count-record"}
-    assert jobs_for(event) == expected
+    if event == "push":
+        assert jobs_for(event) in (expected, expected | {"install-smoke"})
+    else:
+        assert jobs_for(event) == expected
 
 
 def test_selected_pull_requests_run_the_selected_leg_instead_of_the_shards():

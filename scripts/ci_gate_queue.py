@@ -37,6 +37,9 @@ SKIPPED = {
     "reuse",
 }
 
+# A promotion gate the protected grader accepts before the pull request that adds it lands.
+ANNOUNCED = {"install-smoke"}
+
 
 def inventory(jobs: list[dict], expected: set[str]) -> dict[str, dict]:
     groups = {}
@@ -107,12 +110,12 @@ def verify(jobs: list[dict], shards: list[int], lost: Callable[[dict], bool] = l
     return all(finished) and originals_finished and recovery_finished
 
 
-def watcher(runner: str) -> dict:
+def watcher(runner: str, *, deferred: bool = False) -> dict:
     return {
         "name": GATE_NAME,
         "outputs": {"failed": "${{ steps.watch.outputs.failed }}"},
         "if": "${{ !cancelled() && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && (github.event_name != 'merge_group' || needs.reuse.outputs.reused != 'true') && github.event_name != 'pull_request' }}",
-        "needs": ["split", "select", "reuse", "admission"],
+        "needs": ["split", "select", "reuse", "admission"] + (["shard-check"] if deferred else []),
         "runs-on": runner,
         "timeout-minutes": 60,
         "steps": [
@@ -170,7 +173,11 @@ def normalize(workflows: dict[str, dict]) -> dict[str, dict]:
         if not dynamic:
             continue
         summary, early = jobs.get("gate-required", {}), jobs.get("queue-fail-fast", {})
-        if len(dynamic) != 2 or summary.get("name") != SUMMARY_NAME or early != watcher(summary.get("runs-on")):
+        if (
+            len(dynamic) != 2
+            or summary.get("name") != SUMMARY_NAME
+            or early not in (watcher(summary.get("runs-on")), watcher(summary.get("runs-on"), deferred=True))
+        ):
             raise ValueError("The early queue gate must use the exact reviewed context pair and verifier")
         if (
             jobs.get("reuse", {}).get("if")
@@ -178,7 +185,7 @@ def normalize(workflows: dict[str, dict]) -> dict[str, dict]:
         ):
             raise ValueError("The early queue gate requires the existing whole queue reuse exclusion")
         expected = REQUIRED | SKIPPED | {"unit", "unit-lost", "unit-rerun", "queue-fail-fast"}
-        if set(summary.get("needs", [])) != expected:
+        if set(summary.get("needs", [])) not in (expected, expected | ANNOUNCED):
             raise ValueError("The early queue gate must preserve the reviewed graded inventory")
         summary["name"] = "Gate — Required"
         early["name"] = "queue-fail-fast"

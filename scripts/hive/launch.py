@@ -215,7 +215,10 @@ class HiveLaunch:
 
     def _record_wait(self, lane: str, task: dict, selected: Selection | placement.Wait) -> Selection | placement.Wait:
         reason = selected.reason if isinstance(selected, placement.Wait) else ""
-        placement_waits.observe(self.store, self.slug, lane, task["id"], reason, lease.now_ms(self.store))
+        from scripts.swarm.commands import hive_id
+
+        machine = hive_id() if task.get("workstation") else ""
+        placement_waits.observe(self.store, self.slug, lane, task["id"], reason, lease.now_ms(self.store), machine)
         return selected
 
     def select(self, config: SwarmConfig, lane: str, task: dict) -> Selection | placement.Wait:
@@ -499,7 +502,7 @@ class HiveLaunch:
         if local:
             local_slots.release(self.store, selected.hive, self.slug, request.name)
         refused = admission.refusal(admission.room(reading, pending=held))
-        return f"no hive for {request.lane} has room: {selected.hive} {refused}"
+        return f"no hive for {request.lane} {placement.HAS_ROOM}: {selected.hive} {refused}"
 
     def admit(self, request: SpawnRequest, selected: Selection) -> AgentRecord:
         from scripts.swarm_v2.runtime import codex

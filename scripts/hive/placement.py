@@ -16,6 +16,7 @@ HEADLESS = "headless hive"
 UI_HIVE = "UI hive"
 LOCAL_MACHINE = "local machine"
 LOCAL_FULL = ", and the local machine runs "
+HAS_ROOM = "has room"
 NEEDS_WORKSTATION = "the task needs the workstation, so no remote hive takes it"
 NEEDS_CAPABILITY = "the task needs a hive with {needs}, and no hive declares it"
 NEEDS_TOGETHER = "the task needs a hive with {needs}, and no single hive declares all of them"
@@ -81,7 +82,7 @@ def _checks(
     role: str, harness: str, slot: str, route_kind: str, repo: str, kind: str = HIVE
 ) -> list[tuple[Callable[[dict], bool], str]]:
     return [
-        (lambda hive: role == MASTER or _room(hive) > 0, f"no {kind} for {role} has room"),
+        (lambda hive: role == MASTER or _room(hive) > 0, f"no {kind} for {role} {HAS_ROOM}"),
         (
             lambda hive: any(item["harness"] == harness and item["account"] == slot for item in hive["slots"]),
             f"no {kind} for {role} advertises the {harness} slot {slot}",
@@ -146,12 +147,17 @@ def place(role: str, harness: str, slot: str, route_kind: str, repo: str, hives:
     return chosen.hive if isinstance(chosen, Choice) else chosen
 
 
-def overflow(role: str, waited: Wait, local_agents: int, local_max: int) -> Choice | Wait:
+def overflow(role: str, waited: Wait, local_agents: int, local_max: int, reserved: int = 0) -> Choice | Wait:
     if role in UI_ROLES:
         return waited
-    if local_agents >= local_max:
-        return Wait(f"{waited.reason}{LOCAL_FULL}{local_agents} of its {local_max} agents")
+    if local_agents + reserved >= local_max:
+        return local_full(waited, local_agents, local_max, reserved)
     return Choice(LOCAL_MACHINE, waited.reason)
+
+
+def local_full(waited: Wait, local_agents: int, local_max: int, reserved: int) -> Wait:
+    kept = f" with {reserved} kept for waiting workstation tasks" if reserved else ""
+    return Wait(f"{waited.reason}{LOCAL_FULL}{local_agents} of its {local_max} agents{kept}")
 
 
 def _private_master(hive: dict, harness: str, front: bool) -> bool:

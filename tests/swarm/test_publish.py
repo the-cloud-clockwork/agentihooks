@@ -1521,6 +1521,55 @@ def test_prepare_and_publish_keep_the_open_pull_requests_delivery_branch(publica
     assert git(p.repo, "ls-remote", "origin", "refs/heads/engineer-test") == ""
 
 
+@pytest.mark.parametrize("checkout", ["recorded", "own"])
+def test_a_fresh_continuation_on_the_recorded_branch_publishes_past_an_unpushed_predecessor_entry(
+    publication, monkeypatch, checkout
+):
+    from scripts.swarm import publish
+
+    p = publication
+    continuation = p.root
+    if checkout == "recorded":
+        continuation = p.repo.parent / "worktrees" / "repo" / "recorded"
+        git(p.repo, "worktree", "add", "-b", "recorded", str(continuation), "dev")
+        git(continuation, "push", "-u", "origin", "recorded")
+        (continuation / "scripts" / "ci_prepush" / "__main__.py").write_text(
+            (p.root / "scripts" / "ci_prepush" / "__main__.py").read_text()
+        )
+        git(continuation, "add", "scripts/ci_prepush/__main__.py")
+        git(continuation, "commit", "-qm", "Install gate fixture")
+        (continuation / "chosen.txt").write_text("after")
+    else:
+        git(continuation, "push", "origin", "HEAD:recorded")
+    p.task.update(
+        branch="recorded",
+        repository_branches={str(p.repo): "predecessor"},
+        pr_url="https://github.com/example/repo/pull/7",
+    )
+    monkeypatch.setattr(publish.publish_queue, "open_head", lambda remote, url: "recorded")
+    monkeypatch.chdir(continuation)
+    published = publish.publish("swarm", p.agent, str(p.repo), p.ledger, "Continue pull request", ["chosen.txt"])
+    assert published["branch"] == p.task["branch"] == "recorded"
+    assert p.task["repository_branches"] == {str(p.repo): "recorded"}
+    assert git(p.repo, "ls-remote", "origin", "refs/heads/recorded").split()[0] == published["head"]
+    assert git(p.repo, "ls-remote", "origin", "refs/heads/predecessor") == ""
+
+
+@pytest.mark.parametrize(
+    "pushed,expected", [((), "predecessor"), (("recorded",), "recorded"), (("predecessor", "recorded"), "predecessor")]
+)
+def test_continuation_takes_the_recorded_branch_only_over_an_unpushed_entry(publication, pushed, expected):
+    from scripts.swarm import publish
+
+    p = publication
+    for name in pushed:
+        git(p.root, "push", "origin", f"HEAD:{name}")
+    task = {**p.task, "branch": "recorded", "branch_repo": str(p.repo.parent / "remote.git")}
+    scoped = {**task, "branch": "predecessor"}
+    assert publish.continuation_task(p.repo, task, scoped, "engineer-test")["branch"] == expected
+    assert publish.continuation_task(p.repo, task, scoped, "predecessor") == scoped
+
+
 @pytest.mark.parametrize("open_branch,diverged", [("", False), ("another-task", False), ("predecessor", True)])
 def test_publish_refuses_unverified_or_diverged_retained_delivery(publication, monkeypatch, open_branch, diverged):
     from scripts.swarm import publish
