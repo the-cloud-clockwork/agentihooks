@@ -35,7 +35,7 @@ def _repo(tmp_path, subjects):
     run("-c", "user.email=a@b", "-c", "user.name=a", "commit", "-q", "--allow-empty", "-m", "start")
     for subject in subjects:
         run("-c", "user.email=a@b", "-c", "user.name=a", "commit", "-q", "--allow-empty", "-m", subject)
-    return [line for line in run("log", "--format=%H").stdout.split()]
+    return run("log", "--format=%H").stdout.split()
 
 
 def test_prune_keeps_only_unscoped_records_a_pointer_names(tmp_path):
