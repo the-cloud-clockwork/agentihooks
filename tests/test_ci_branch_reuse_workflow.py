@@ -219,7 +219,9 @@ def _planner_repo(tmp_path: Path, branch_planner: bool) -> Path:
     return workspace
 
 
-def _plan(tmp_path: Path, event: str, reused: str = "0", branch_planner: bool = True) -> tuple[Path, str]:
+def _plan(
+    tmp_path: Path, event: str, reused: str = "0", branch_planner: bool = True, bash_env: str = ""
+) -> tuple[Path, str]:
     workspace = _planner_repo(tmp_path, branch_planner)
     runner, marks = tmp_path / "runner", tmp_path / "marks"
     runner.mkdir()
@@ -242,6 +244,9 @@ def _plan(tmp_path: Path, event: str, reused: str = "0", branch_planner: bool = 
         "FAKE_REUSED": reused,
         "MARKS": str(marks),
     }
+    if bash_env:
+        (tmp_path / "bash_env").write_text(bash_env)
+        env["BASH_ENV"] = str(tmp_path / "bash_env")
     run = _step("test-count", "Plan the tests whose inputs did not change")["run"]
     subprocess.run(["bash", "-e", "-c", run], cwd=workspace, env=env, check=True, capture_output=True)
     deadline = time.monotonic() + 30
@@ -284,6 +289,11 @@ def test_a_grader_without_the_branch_planner_reuses_nothing_from_earlier_runs(tm
     called, outputs = _plan(tmp_path, "pull_request", branch_planner=False)
     assert not called.exists()
     assert "The grader has no branch planner" in outputs
+
+
+def test_a_reader_never_sees_the_plan_status_before_its_writer_finishes(tmp_path):
+    slow_echo = 'echo() { [[ "${1:-}" =~ ^[0-9]+$ ]] && sleep 1; builtin echo "$@"; }\n'
+    _plan(tmp_path, "pull_request", bash_env=slow_echo)
 
 
 @pytest.mark.parametrize(

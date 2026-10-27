@@ -76,6 +76,8 @@ def test_full_selection_reads_the_same_repository_inputs(tmp_path, stage, group)
             "8",
             "--splitting-algorithm",
             SPLIT_ALGORITHM,
+            "-p",
+            "tests.split_fallback",
             "--group",
             str(group),
             "--dist",
