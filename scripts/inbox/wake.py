@@ -5,8 +5,10 @@ then an alert on the ledger page, closed when the item closes. Every step is app
 count survives restarts.
 """
 
+import uuid
 from dataclasses import dataclass, replace
 
+from scripts.hive import reports
 from scripts.inbox import addresses, exits
 from scripts.inbox.dispatch import Dispatcher
 from scripts.inbox.seats import is_seat
@@ -42,11 +44,8 @@ def quiet_ms(environ):
 
 
 def typed_wake(inbox, agent):
-    from scripts.hive import reports
-
     return (
         bool(agent.pane_id)
-        and not reports.host(agent)
         and agent.lane != MASTER
         and not capabilities.of_agent(agent).push_inbox
         and not Dispatcher(inbox).owner(agent.name)
@@ -170,7 +169,7 @@ def _wake_world(inbox, slug, agents, herdr, ledger, clock: _Clock, items):
             statuses[agent.name] = _pane_state(inbox.redis, slug, herdr, agent, now_ms, quiet)
         since = reads.clocks[item.address]
         step = decide(item, statuses.get(receiver), reads.histories[item.id], now_ms, window, slug, since)
-        if step == WOKEN and _still_held(inbox, held) and _wake(herdr, agent, prompted):
+        if step == WOKEN and _still_held(inbox, held) and _wake(inbox.redis, slug, herdr, agent, prompted):
             if inbox.note(item.id, WOKEN, BY, f"prompted {receiver} to read its inbox", now_ms, held):
                 actions.append(f"woke {receiver} for message {item.id}")
         elif (
@@ -239,15 +238,19 @@ def wake_now(inbox, slug, agents, herdr, now_ms, window, quiet=DEFAULT_QUIET_S *
     for agent in agents:
         if agent.harness != "codex" or not typed_wake(inbox, agent) or outage.open_records(slug):
             continue
-        mail = inbox.pending_mail(agent.name)
+        mail = [(world, item) for world in inbox.worlds() for item in world.pending_mail(agent.name)]
         if not mail:
             continue
         state = _pane_state(inbox.redis, slug, herdr, agent, now_ms, quiet)
-        due = [item for item in mail if _wake_due(inbox, item, state, (names, config), (now_ms, window, slug))]
-        if not due or not _wake(herdr, agent, set()):
+        due = [
+            (world, item)
+            for world, item in mail
+            if _wake_due(world, item, state, (names, config), (now_ms, window, slug))
+        ]
+        if not due or not _wake(inbox.redis, slug, herdr, agent, set()):
             continue
-        for item in due:
-            inbox.note(item.id, WOKEN, BY, f"prompted {agent.name} to read its inbox", now_ms)
+        for world, item in due:
+            world.note(item.id, WOKEN, BY, f"prompted {agent.name} to read its inbox", now_ms)
             actions.append(f"woke {agent.name} for message {item.id}")
     return actions
 
@@ -321,14 +324,22 @@ def _status(herdr, agent):
 
 
 def _pane_state(redis, slug, herdr, agent, now_ms, quiet):
-    """A ready pane counts as in use while the operator prompted it inside the quiet window or its input line holds text."""
-    state = _status(herdr, agent)
+    """A ready pane counts as in use while the operator prompted it inside the quiet window or its input line holds text.
+    A remote pane is read from its hook heartbeat; the local herdr cannot see it."""
+    remote = reports.host(agent)
+    state = _beat_state(redis, slug, agent, now_ms) if remote else _status(herdr, agent)
     if state not in READY:
         return state
     last = idle.last_prompt(redis, slug, agent.name)
     if last is not None and now_ms - last < quiet:
         return IN_USE
-    return IN_USE if _typing(herdr, agent) else state
+    return IN_USE if not remote and _typing(herdr, agent) else state
+
+
+def _beat_state(redis, slug, agent, now_ms):
+    beat = idle.heartbeat(redis, slug, agent.name) or {"state": idle.WORKING, "at": now_ms}
+    busy = beat.get("state") == idle.WORKING and now_ms - beat["at"] < idle.STALE_MS
+    return idle.WORKING if busy else idle.IDLE
 
 
 def _typing(herdr, agent):
@@ -338,15 +349,28 @@ def _typing(herdr, agent):
         return ""
 
 
-def _wake(herdr, agent, prompted):
+def _wake(redis, slug, herdr, agent, prompted):
     if agent.name in prompted:
         return True
     try:
-        herdr.prompt(agent, WAKE_TEXT)
+        if host := reports.host(agent):
+            if reports.Reports(redis).read(host) is None:
+                return False
+            _hive_wake(redis, host, slug, agent)
+        else:
+            herdr.prompt(agent, WAKE_TEXT)
     except Exception:
         return False
     prompted.add(agent.name)
     return True
+
+
+def _hive_wake(redis, host, slug, agent):
+    from scripts.hive.orders import CommandOrder, Orders
+
+    order_id = f"wake:{agent.execution_id}:{agent.generation}:{uuid.uuid4().hex}"
+    order = CommandOrder(order_id, "nudge", slug, agent.name, agent.execution_id, agent.generation, WAKE_TEXT)
+    Orders(redis).command(host, order)
 
 
 def _gist(item):
