@@ -208,6 +208,7 @@ def test_a_dev_run_without_a_baseline_still_restores_its_durations(lookup):
         "swarm-image",
         "brain-smoke",
         "writer-lock",
+        "install-smoke",
         "ledger-load",
         "kind-due",
         "coverage-ratchet",
