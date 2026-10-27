@@ -770,6 +770,10 @@ jobs:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           GRADER: ${{ github.event.merge_group.base_sha || github.event_name == 'pull_request' && 'origin/dev' || github.sha }}
           PYTHON_PATH: ${{ steps.python.outputs.python-path }}
+          PULL: ${{ github.event.pull_request.number }}
+          HEAD_REF: ${{ github.head_ref }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          ENVIRONMENT: ${{ steps.venv.outputs.cache-primary-key }}
         run: |
           git worktree add --detach "$RUNNER_TEMP/planner" "$GRADER"
           export GITHUB_OUTPUT="$RUNNER_TEMP/plan-outputs.txt"
@@ -794,6 +798,20 @@ jobs:
             fi
             "$PYTHON_PATH" -m scripts.ci_test_plan --repository "$GITHUB_REPOSITORY" --head "$GITHUB_SHA" \
               --repo "$GITHUB_WORKSPACE" --before "$before" --out "$GITHUB_WORKSPACE/reused-tests.json"
+            if [[ "$GITHUB_EVENT_NAME" != pull_request ]]; then
+              return 0
+            fi
+            if [[ ! -f "$RUNNER_TEMP/planner/scripts/ci_branch_plan.py" ]]; then
+              echo "The grader has no branch planner; no test is reused from an earlier run of this pull request."
+              return 0
+            fi
+            dev_plan=()
+            if grep -qx 'reused=[1-9][0-9]*' "$GITHUB_OUTPUT"; then
+              dev_plan=(--dev-plan "$GITHUB_WORKSPACE/reused-tests.json")
+            fi
+            "$PYTHON_PATH" -m scripts.ci_branch_plan --repository "$GITHUB_REPOSITORY" --pull "$PULL" --head-ref "$HEAD_REF" \
+              --head-repo "$HEAD_REPO" --run "$GITHUB_RUN_ID" --created "$before" --environment "$ENVIRONMENT" \
+              "${dev_plan[@]}" --root "$GITHUB_WORKSPACE" --out "$RUNNER_TEMP/reused-branch.json"
           }
           ( (set -e; plan); echo "$?" > "$RUNNER_TEMP/plan.status" ) > "$RUNNER_TEMP/plan.log" 2>&1 &
           echo "$!" > "$RUNNER_TEMP/plan.pid"
@@ -842,18 +860,30 @@ jobs:
           retention-days: 7
           overwrite: true
 
+      - name: Upload the pull request runs' test plan
+        if: github.event_name == 'pull_request' && steps.plan.outputs.branch != '' && steps.plan.outputs.branch != '0'
+        uses: actions/upload-artifact@v4
+        with:
+          name: reused-branch-${{ matrix.python-version }}
+          path: ${{ runner.temp }}/reused-branch.json
+          if-no-files-found: error
+          retention-days: 7
+          overwrite: true
+
       # The grader's manifest code picks what is skipped; the head supplies only the plan and its collection.
       - name: Deselect the reused tests
-        if: steps.plan.outputs.reused != '' && steps.plan.outputs.reused != '0'
+        if: &deselect (steps.plan.outputs.reused != '' && steps.plan.outputs.reused != '0') || (steps.plan.outputs.branch != '' && steps.plan.outputs.branch != '0')
         env:
           PYTHON_PATH: ${{ steps.python.outputs.python-path }}
+          DEV_PLAN: ${{ steps.plan.outputs.reused != '' && steps.plan.outputs.reused != '0' && format('{0}/reused-tests.json', github.workspace) || '' }}
+          BRANCH_PLAN: ${{ steps.plan.outputs.branch != '' && steps.plan.outputs.branch != '0' && format('{0}/reused-branch.json', runner.temp) || '' }}
         run: |
           cd "$RUNNER_TEMP/planner"
-          "$PYTHON_PATH" -m tests.dep_manifest deselect --plan "$GITHUB_WORKSPACE/reused-tests.json" \
+          "$PYTHON_PATH" -m tests.dep_manifest deselect ${DEV_PLAN:+--plan "$DEV_PLAN"} ${BRANCH_PLAN:+--plan "$BRANCH_PLAN"} \
             --collected "$RUNNER_TEMP/collected.json" --out "$RUNNER_TEMP/reused.json"
 
       - name: Upload the deselected tests
-        if: steps.plan.outputs.reused != '' && steps.plan.outputs.reused != '0'
+        if: *deselect
         uses: actions/upload-artifact@v4
         with:
           name: reused-${{ matrix.python-version }}
@@ -920,6 +950,7 @@ jobs:
     outputs:
       source: ${{ needs.select.outputs.source }}
       reused: ${{ steps.plan.outputs.reused }}
+      branch: ${{ steps.plan.outputs.branch }}
       run: ${{ steps.plan.outputs.run }}
       commit: ${{ steps.plan.outputs.commit }}
       queue_312: ${{ steps.queue-size.outputs.queue_312 }}
@@ -1154,6 +1185,7 @@ jobs:
       CODEX_RELEASE: rust-v0.160.0
       UNIT_SOURCE: ${{ needs.split.outputs.source }}
       UV_CONSTRAINT: ${{ github.workspace }}/.github/test-constraints.txt
+      LEG: ${{ matrix.shard }}
     strategy:
       fail-fast: false
       matrix:
@@ -1246,7 +1278,7 @@ jobs:
           private-key: ${{ secrets.TCC_CI_APP_PRIVATE_KEY }}
 
       - name: Download the tests this run reuses
-        if: needs.split.outputs.source == '' && needs.split.outputs.reused != '' && needs.split.outputs.reused != '0'
+        if: needs.split.outputs.source == '' && ((needs.split.outputs.reused != '' && needs.split.outputs.reused != '0') || (needs.split.outputs.branch != '' && needs.split.outputs.branch != '0'))
         uses: ./.github/actions/retry-download
         with:
           name: reused-${{ matrix.python-version }}
@@ -1323,6 +1355,7 @@ jobs:
       # including every ownership-scope test guarding what uninstall and prune
       # are allowed to delete — never ran in CI at all.
       - name: Run tests
+        id: tests
         if: needs.split.outputs.source == ''
         timeout-minutes: 12
         env:
@@ -1335,8 +1368,9 @@ jobs:
           NODE_OPTIONS: ${{ matrix.python-version == '3.12' && format('--require {0}/tests/node_capture.cjs', github.workspace) || '' }}
           CI_FLAKES: ${{ github.workspace }}/flakes.jsonl
           CI_REUSED: ${{ github.workspace }}/reused.json
+          CI_RESULTS: &ci-results ${{ matrix.python-version == '3.12' && github.event_name == 'pull_request' && github.base_ref == 'dev' && github.event.pull_request.head.repo.full_name == github.repository && format('{0}/ci-results', github.workspace) || '' }}
           JS_COVERAGE_DIR: ${{ matrix.python-version == '3.12' && format('{0}/js-coverage', github.workspace) || '' }}
-        run: if [[ -n "${QUEUE_SHARDS:-}" ]]; then SHARD="${SHARD%/*}/$QUEUE_SHARDS"; fi; start=$SECONDS && status=0 && workers=$(python -m scripts.ci_cpu_quota) && python -c 'import os, shlex, sys, pytest; sys.exit(pytest.main(shlex.split(os.environ.pop("PYTEST_ADDOPTS", "")) + sys.argv[1:]))' tests/ -v -n "$workers" --dist loadgroup --shard "$SHARD" -p tests.flake_ledger --reruns 2 --tb=short --timeout=60 --timeout-method=thread -o faulthandler_timeout=45 --store-durations --durations-path durations.json -p no:anyio -p no:xdist.looponfail -p no:legacypath -p no:doctest -p no:pastebin -p no:junitxml || status=$?; echo "{\"seconds\":$((SECONDS - start))}" > elapsed.json; exit "$status"
+        run: if [[ -n "${QUEUE_SHARDS:-}" ]]; then SHARD="${SHARD%/*}/$QUEUE_SHARDS"; fi; start=$SECONDS && status=0 && workers=$(python -m scripts.ci_cpu_quota) && python -c 'import os, shlex, sys, pytest; sys.exit(pytest.main(shlex.split(os.environ.pop("PYTEST_ADDOPTS", "")) + sys.argv[1:]))' tests/ -v -n "$workers" --dist loadgroup --shard "$SHARD" -p tests.pass_record -p tests.flake_ledger --reruns 2 --tb=short --timeout=60 --timeout-method=thread -o faulthandler_timeout=45 --store-durations --durations-path durations.json -p no:anyio -p no:xdist.looponfail -p no:legacypath -p no:doctest -p no:pastebin -p no:junitxml || status=$?; echo "{\"seconds\":$((SECONDS - start))}" > elapsed.json; exit "$status"
 
       - name: Mint the token that restores queue unit artifacts
         id: unit-token
@@ -1425,6 +1459,46 @@ jobs:
             durations.sha256
             elapsed.json
           retention-days: 14
+
+      - &record-leg
+        name: Record this leg's passed tests
+        if: always() && (steps.tests.outcome == 'success' || steps.tests.outcome == 'failure' || steps.tests.outcome == 'cancelled') && github.event_name == 'pull_request' && github.base_ref == 'dev' && github.event.pull_request.head.repo.full_name == github.repository
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PULL: ${{ github.event.pull_request.number }}
+          ENVIRONMENT: ${{ steps.venv.outputs.cache-primary-key }}
+        run: |
+          python -m tests.branch_record --coverage-dir . --inputs dep-inputs --results ci-results --flakes flakes.jsonl --root . \
+            --commit "$GITHUB_SHA" --head "$HEAD_SHA" --pull "$PULL" --run "$GITHUB_RUN_ID" --attempt "$GITHUB_RUN_ATTEMPT" \
+            --leg "$LEG" --environment "$ENVIRONMENT" --out branch-record/record.json
+
+      # The upload action itself, not retry-upload: a composite's inner steps skip once the job is cancelled.
+      - &upload-branch-coverage
+        name: Upload this leg's branch coverage
+        if: always() && github.event_name == 'pull_request' && github.base_ref == 'dev' && github.event.pull_request.head.repo.full_name == github.repository && hashFiles('branch-record/record.json') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: branch-coverage-${{ matrix.python-version }}-${{ env.LEG }}-${{ github.run_attempt }}
+          path: |
+            .coverage
+            .coverage.*
+            elapsed.json
+            js-coverage/
+          include-hidden-files: true
+          if-no-files-found: ignore
+          retention-days: 7
+          overwrite: true
+
+      - &upload-record
+        name: Upload this leg's branch record
+        if: always() && github.event_name == 'pull_request' && github.base_ref == 'dev' && github.event.pull_request.head.repo.full_name == github.repository && hashFiles('branch-record/record.json') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: branch-record-${{ matrix.python-version }}-${{ env.LEG }}-${{ github.run_attempt }}
+          path: branch-record/record.json
+          if-no-files-found: error
+          retention-days: 7
+          overwrite: true
 
       - name: Record flaky tests
         if: ${{ !cancelled() }}
@@ -1521,6 +1595,9 @@ jobs:
     permissions:
       contents: read
     env:
+      GIT_CONFIG_COUNT: "1"
+      GIT_CONFIG_KEY_0: maintenance.auto
+      GIT_CONFIG_VALUE_0: "false"
       CODEX_RELEASE: rust-v0.160.0
       UV_CONSTRAINT: ${{ github.workspace }}/.github/test-constraints.txt
       UNIT_SOURCE: ""
@@ -1632,7 +1709,40 @@ jobs:
         timeout-minutes: 6
         uses: ./.github/actions/browser-cache
 
+      - name: Wait for the early collection
+        id: collection
+        if: &leg-reuse matrix.python-version == '3.12' && github.base_ref == 'dev' && github.event.pull_request.head.repo.full_name == github.repository
+        continue-on-error: true
+        timeout-minutes: 4
+        uses: ./.github/actions/await-download
+        with:
+          name: early-collected-${{ matrix.python-version }}
+
+      # Grader code decides and grades the reuse, but head code shares this runner, so a hostile head can still forge it.
+      - name: Adopt the reused tests from the protected grader
+        id: reuse
+        if: *leg-reuse
+        env:
+          COLLECTION: ${{ steps.collection.outcome }}
+        run: |
+          if [[ "$COLLECTION" != success ]]; then
+            echo "::notice title=No reuse on a selected leg::The early collection never landed; every selected test runs and the leg is not graded."
+            exit 0
+          fi
+          git worktree add --detach "$RUNNER_TEMP/grader" origin/dev
+          if [[ ! -f "$RUNNER_TEMP/grader/scripts/ci_branch_plan.py" ]]; then
+            echo "::notice title=No reuse on a selected leg::The grader cannot grade reused tests on a selected leg; every selected test runs."
+            exit 0
+          fi
+          echo "graded=true" >> "$GITHUB_OUTPUT"
+          reused=$(sed -n 's/^reused=//p' plan-outputs.txt)
+          branch=$(sed -n 's/^branch=//p' plan-outputs.txt)
+          if [[ "${reused:-0}" != 0 || "${branch:-0}" != 0 ]]; then
+            echo "reused=$GITHUB_WORKSPACE/reused.json" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Run the selected tests
+        id: tests
         timeout-minutes: 7
         env:
           PYTHONUNBUFFERED: "1"
@@ -1641,13 +1751,22 @@ jobs:
           NODE_OPTIONS: ${{ matrix.python-version == '3.12' && format('--require {0}/tests/node_capture.cjs', github.workspace) || '' }}
           CI_FLAKES: ${{ github.workspace }}/flakes.jsonl
           JS_COVERAGE_DIR: ${{ matrix.python-version == '3.12' && format('{0}/js-coverage', github.workspace) || '' }}
+          DEP_INPUTS_DIR: ${{ matrix.python-version == '3.12' && format('{0}/dep-inputs', github.workspace) || '' }}
+          CI_RESULTS: *ci-results
+          CI_REUSED: ${{ steps.reuse.outputs.reused }}
         run: |
           read -ra files <<< "$FILES"
           start=$SECONDS
           status=0
-          python -c 'import os, shlex, sys, pytest; sys.exit(pytest.main(shlex.split(os.environ.pop("PYTEST_ADDOPTS", "")) + sys.argv[1:]))' "${files[@]}" -v -n auto --dist loadgroup -p tests.flake_ledger --reruns 2 --tb=short --timeout=60 --timeout-method=thread -o faulthandler_timeout=45 --store-durations --durations-path durations.json -p no:anyio -p no:xdist.looponfail -p no:legacypath -p no:doctest -p no:pastebin -p no:junitxml || status=$?
+          python -c 'import os, shlex, sys, pytest; sys.exit(pytest.main(shlex.split(os.environ.pop("PYTEST_ADDOPTS", "")) + sys.argv[1:]))' "${files[@]}" --cov-context=test -p tests.dep_inputs -p tests.pass_record -v -n auto --dist loadgroup -p tests.flake_ledger --reruns 2 --tb=short --timeout=60 --timeout-method=thread -o faulthandler_timeout=45 --store-durations --durations-path durations.json -p no:anyio -p no:xdist.looponfail -p no:legacypath -p no:doctest -p no:pastebin -p no:junitxml || status=$?
           echo "{\"seconds\":$((SECONDS - start)),\"job\":\"$GITHUB_JOB\"}" > elapsed.json
           exit "$status"
+
+      - *record-leg
+
+      - *upload-branch-coverage
+
+      - *upload-record
 
       - name: Record flaky tests
         if: ${{ !cancelled() }}
@@ -1692,6 +1811,20 @@ jobs:
           if-no-files-found: error
           retention-days: 14
           overwrite: true
+
+      - name: Check every selected test ran once or was reused
+        if: steps.reuse.outputs.graded == 'true'
+        env:
+          REUSED: ${{ steps.reuse.outputs.reused }}
+        run: |
+          read -ra files <<< "$FILES"
+          reused=()
+          if [[ -n "$REUSED" ]]; then
+            reused=(--reused "$REUSED")
+          fi
+          cd "$RUNNER_TEMP/grader"
+          python -m tests.shard_check "$GITHUB_WORKSPACE/durations.json" --within "${files[@]}" \
+            --collected "$GITHUB_WORKSPACE/collected.json" "${reused[@]}" --leg "$LEG"
 
   shard-check:
     if: ${{ !cancelled() && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && (github.event_name != 'pull_request' || needs.select.outputs.scope == 'full') }}
@@ -1804,9 +1937,30 @@ jobs:
             exit 1
           fi
 
+      - name: Download the pull request runs' test plan
+        id: branch-plan
+        if: needs.split.outputs.branch != '' && needs.split.outputs.branch != '0'
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with: &shard-check-download-the-pull-request-runs-test-plan
+          name: reused-branch-${{ matrix.python-version }}
+          path: branch-plan
+
+      - name: Download the pull request runs' test plan, wait before attempt 2
+        if: steps.branch-plan.outcome == 'failure'
+        shell: bash
+        run: |
+          echo "::warning::Download the pull request runs' test plan failed, as an artifact service outage does; retrying it once in 30 seconds."
+          sleep 30
+
+      - name: Download the pull request runs' test plan, attempt 2
+        if: steps.branch-plan.outcome == 'failure'
+        uses: actions/download-artifact@v4
+        with: *shard-check-download-the-pull-request-runs-test-plan
+
       - name: Check every collected test ran in exactly one shard
         env:
-          REUSED: ${{ hashFiles('reused-plan/reused-tests.json') != '' && '--reused reused-plan/reused-tests.json' || '' }}
+          REUSED: ${{ format('{0}{1}', hashFiles('reused-plan/reused-tests.json') != '' && '--reused reused-plan/reused-tests.json' || '', hashFiles('branch-plan/reused-branch.json') != '' && ' --reused branch-plan/reused-branch.json' || '') }}
         run: python3 -m tests.shard_check shard-reports/durations-*/durations.json --collected collected-data/collected.json $REUSED
 
       - name: Summarize reused, ran and flaky tests
@@ -1815,9 +1969,10 @@ jobs:
         env:
           PYTHON_VERSION: ${{ matrix.python-version }}
           PLAN: reused-plan/reused-tests.json
+          BRANCH_PLAN: ${{ hashFiles('branch-plan/reused-branch.json') != '' && '--branch-plan branch-plan/reused-branch.json' || '' }}
         run: |
           python3 -m tests.shard_summary --version "$PYTHON_VERSION" --durations shard-reports/durations-*/durations.json \
-            --collected collected-data/collected.json --plan "$PLAN" --flakes shard-reports/flakes-*/flakes.jsonl | tee -a "$GITHUB_STEP_SUMMARY"
+            --collected collected-data/collected.json --plan "$PLAN" --flakes shard-reports/flakes-*/flakes.jsonl $BRANCH_PLAN | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: Check every shard's test time fits the Run tests deadline
         if: github.event_name != 'merge_group'
@@ -1834,6 +1989,9 @@ jobs:
     outputs:
       analysis: ${{ steps.gate.outputs.analysis }}
     env:
+      GIT_CONFIG_COUNT: "1"
+      GIT_CONFIG_KEY_0: maintenance.auto
+      GIT_CONFIG_VALUE_0: "false"
       SONAR_SCANNER_VERSION: 7.2.0.5079
       SONAR_SCANNER_SHA256: da9f4e64a3d555f08ce38b5469ebd91fe2b311af473f7001a5ee5c1fd58b004b
     permissions:
@@ -1896,6 +2054,55 @@ jobs:
         if: steps.download-shard-coverage.outcome == 'failure'
         uses: actions/download-artifact@v4
         with: *sonar-download-shard-coverage
+
+      - name: Mint the token that reads the pull request runs' coverage
+        id: app-token
+        if: &branch-carry github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && needs.select.outputs.scope != 'none' && steps.source.outputs.test_only != 'true'
+        uses: actions/create-github-app-token@v3.2.0
+        with:
+          client-id: ${{ secrets.TCC_CI_CLIENT_ID }}
+          private-key: ${{ secrets.TCC_CI_APP_PRIVATE_KEY }}
+          repositories: ${{ github.event.repository.name }}
+          permission-actions: read
+
+      - name: Download the pull request runs' test plan
+        id: download-the-pull-request-runs-test-plan
+        if: *branch-carry
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with: &sonar-download-the-pull-request-runs-test-plan
+          pattern: "{reused-branch,reused}-3.12"
+          path: ${{ runner.temp }}/branch-plan
+
+      - name: Download the pull request runs' test plan, wait before attempt 2
+        if: steps.download-the-pull-request-runs-test-plan.outcome == 'failure'
+        shell: bash
+        run: |
+          echo "::warning::Download the pull request runs' test plan failed, as an artifact service outage does; retrying it once in 30 seconds."
+          sleep 30
+
+      - name: Download the pull request runs' test plan, attempt 2
+        if: steps.download-the-pull-request-runs-test-plan.outcome == 'failure'
+        uses: actions/download-artifact@v4
+        with: *sonar-download-the-pull-request-runs-test-plan
+
+      # The protected base's code filters the earlier runs' coverage, so a change cannot move it onto its own lines.
+      - name: Carry the pull request runs' coverage of the reused tests
+        if: *branch-carry
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          GRADER: ${{ github.event.pull_request.base.sha }}
+        run: |
+          git worktree add --detach "$RUNNER_TEMP/grader" "$GRADER"
+          cd "$RUNNER_TEMP/grader"
+          if [[ ! -f scripts/ci_branch_coverage.py ]]; then
+            echo "The grader cannot carry the pull request runs' coverage."
+            exit 0
+          fi
+          python -m scripts.ci_branch_coverage --repository "$GITHUB_REPOSITORY" \
+            --plan "$RUNNER_TEMP/branch-plan/reused-branch-3.12/reused-branch.json" \
+            --deselected "$RUNNER_TEMP/branch-plan/reused-3.12/reused.json" \
+            --repo "$GITHUB_WORKSPACE" --out "$GITHUB_WORKSPACE/.coverage-shards"
 
       # The merge runs while the proxy starts; the scan waits for it below.
       - name: Merge shard coverage
@@ -2383,7 +2590,7 @@ jobs:
 
       - name: Mint the antoncore read token
         if: ${{ !cancelled() }}
-        id: antoncore-token
+        id: app-token
         uses: actions/create-github-app-token@v3.2.0
         with:
           client-id: ${{ secrets.TCC_CI_CLIENT_ID }}
@@ -2393,31 +2600,46 @@ jobs:
 
       # antoncore dev owns the dashboard, its checker and the swarm NATS users, so the pull request head is only the data they grade.
       - name: Check out the antoncore dashboard column checker
-        if: ${{ !cancelled() && steps.antoncore-token.outcome == 'success' }}
-        uses: actions/checkout@v4
-        with:
-          repository: the-cloud-clockwork/antoncore
-          ref: dev
-          path: .antoncore
-          token: ${{ steps.antoncore-token.outputs.token }}
-          persist-credentials: false
-          sparse-checkout-cone-mode: false
-          sparse-checkout: |
+        id: antoncore-checkout
+        if: ${{ !cancelled() && steps.app-token.outcome == 'success' }}
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          REPOSITORY: the-cloud-clockwork/antoncore
+          REF: dev
+          DESTINATION: .antoncore
+          SELECTED_PATHS: |
             scripts/swarm_dashboard_columns.py
             stacks/observability/provisioning/dashboards/Swarm/
             k8s/values-overlays/agentihooks-swarm-nats/values.yaml
             k8s/values-overlays/agentihooks-swarm-nats/users.yaml
             k8s/values-overlays/agentihooks-swarm-nats/trust.yaml
+        run: |
+          set -euo pipefail
+          revision=$(gh api "repos/$REPOSITORY/commits/$REF" --jq .sha)
+          patterns=()
+          while IFS= read -r selected; do
+            [[ -n "$selected" ]] || continue
+            if [[ "$selected" == */ ]]; then
+              patterns+=("*/$selected*")
+            else
+              patterns+=("*/$selected")
+            fi
+          done <<< "$SELECTED_PATHS"
+          [[ ${#patterns[@]} -gt 0 ]]
+          mkdir -p "$DESTINATION"
+          gh api "repos/$REPOSITORY/tarball/$revision" | tar -xz --strip-components=1 --wildcards -C "$DESTINATION" "${patterns[@]}"
+          echo "revision=$revision" >> "$GITHUB_OUTPUT"
 
       - name: Run every Swarm Ledger dashboard query against this head's metrics tables
         if: ${{ !cancelled() }}
         env:
           CLICKHOUSE: swarm-columns-${{ github.run_id }}-${{ github.run_attempt }}
+          ANTONCORE_REVISION: ${{ steps.antoncore-checkout.outputs.revision }}
         run: |
           set -euo pipefail
           trap 'docker rm -f "$CLICKHOUSE" >/dev/null 2>&1 || true' EXIT
           [[ -f .antoncore/scripts/swarm_dashboard_columns.py ]] || { echo "::error::The antoncore dashboard column checker could not be checked out."; exit 1; }
-          git -C .antoncore rev-parse HEAD
+          echo "$ANTONCORE_REVISION"
           for _ in $(seq 180); do
             [[ -s "$RUNNER_TEMP/columns-venv.status" && -s "$RUNNER_TEMP/clickhouse.status" ]] && break
             sleep 1

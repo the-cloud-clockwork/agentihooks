@@ -30,6 +30,8 @@ HARNESS = frozenset(
         "tests/__init__.py",
         "tests/shards.py",
         "tests/flake_ledger.py",
+        "tests/pass_record.py",
+        "tests/dep_inputs.py",
         "tests/browser_coverage.py",
         "tests/node_capture.cjs",
     }
