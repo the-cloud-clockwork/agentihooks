@@ -83,6 +83,7 @@ def preflight(monkeypatch):
             {"id": 9, "name": "other-report", "expired": False, "created_at": report_at},
             {"id": 8, "name": "mutation-preflight-report", "expired": True, "created_at": report_at},
         ],
+        archives={},
         jobs=[],
         pr_runs=[],
         requests=[],
@@ -95,7 +96,8 @@ def preflight(monkeypatch):
         if args[-1].endswith("/zip"):
             data = io.BytesIO()
             with zipfile.ZipFile(data, "w") as zipped:
-                zipped.writestr(state.report_name, json.dumps(state.report))
+                report = state.archives.get(int(args[-1].split("/")[-2]), state.report)
+                zipped.writestr(state.report_name, json.dumps(report))
                 if state.scope is not None:
                     zipped.writestr(state.scope_name, json.dumps(state.scope))
             output = data.getvalue()
@@ -247,6 +249,66 @@ def test_a_successful_run_without_a_mutation_report_ends_red_after_the_retries(p
     held = {**waits.on("mutation", URL), "head": "first"}
     assert "now red; complete mutation report unavailable" in waits.resolution(held, {}, None, None, None, False)
     assert pauses == list(mutation_wait.BACKOFF)
+
+
+def _shards(preflight, *reports):
+    at = "2026-10-09T10:01:00Z"
+    preflight.run["conclusion"] = "failure"
+    preflight.artifacts = [
+        {"id": 20 + index, "name": f"mutation-preflight-shard-{index}", "expired": False, "created_at": at}
+        for index in range(len(reports))
+    ] + [{"id": 30, "name": "mutation-killers-0", "expired": False, "created_at": at}]
+    preflight.archives = {20 + index: report for index, report in enumerate(reports)}
+
+
+def _shard(index, total, complete=True, failures=()):
+    return {
+        "files": [
+            {
+                "path": f"scripts/s{index}.py",
+                "counts": {"killed": 3},
+                "failures": list(failures),
+                "untouched_survivors": [],
+                "cleared": [],
+            }
+        ],
+        "not_mutated": [],
+        "failed": bool(failures),
+        "shard": {"index": index, "total": total, "complete": complete},
+    }
+
+
+def test_complete_shard_reports_grade_a_run_whose_summary_was_cancelled(preflight):
+    _shards(preflight, _shard(0, 2), _shard(1, 2))
+    held = {**waits.on("mutation", URL), "head": "first"}
+    assert waits.resolution(held, {}, None, None, None, False) == (
+        f"mutation preflight {URL}, now green; no failing mutants"
+    )
+    assert "repos/org/repo/actions/artifacts/30/zip" not in preflight.requests
+
+
+def test_complete_shard_reports_name_their_survivors_when_the_summary_was_cancelled(preflight):
+    survivor = {"name": "f__mutmut_1", "fingerprint": "abc", "status": "survived"}
+    _shards(preflight, _shard(0, 2), _shard(1, 2, failures=[survivor]))
+    held = {**waits.on("mutation", URL), "head": "first"}
+    assert waits.resolution(held, {}, None, None, None, False) == (
+        f"mutation preflight {URL}, now red; scripts/s1.py:f__mutmut_1:abc (survived)"
+    )
+
+
+@pytest.mark.parametrize(
+    "reports",
+    [
+        (_shard(0, 2),),
+        (_shard(0, 2), _shard(1, 2, complete=False)),
+        (_shard(0, 1), _shard(1, 2)),
+        ({"files": [], "not_mutated": [], "failed": False},),
+    ],
+)
+def test_missing_or_incomplete_shard_reports_cannot_pass(preflight, reports):
+    _shards(preflight, *reports)
+    held = {**waits.on("mutation", URL), "head": "first"}
+    assert "now red; complete mutation report unavailable" in waits.resolution(held, {}, None, None, None, False)
 
 
 @pytest.mark.parametrize("conclusion", ["cancelled", "timed_out", "skipped"])

@@ -8,11 +8,13 @@ import zipfile
 import zlib
 from datetime import datetime, timezone
 
+from scripts.ci_mutation.merge import merge_reports
 from scripts.swarm import github_reads
 from scripts.swarm.lost_runner import home as _backoff_home
 from scripts.swarm.store import SwarmError
 
 RUN_URL = re.compile(r"https://github\.com/([^/]+/[^/]+)/actions/runs/([0-9]+)")
+SHARD_REPORT = re.compile(r"mutation-preflight-shard-([0-9]+)")
 WORKFLOW = ".github/workflows/mutation-preflight.yml"
 PROOFS = ".github/workflows/proofs.yml"
 EVENTS = {WORKFLOW: "push", PROOFS: "workflow_dispatch"}
@@ -214,22 +216,41 @@ def _branch_scope(repo, ref, run):
 def _report(target, started_at):
     repo, number = RUN_URL.fullmatch(target).groups()
     since = datetime.fromisoformat(started_at)
-    artifacts = _api(f"repos/{repo}/actions/runs/{number}/artifacts?per_page=100")
-    matching = [
+    artifacts = [
         artifact
-        for artifact in artifacts["artifacts"]
-        if artifact["name"] == "mutation-preflight-report"
-        and not artifact["expired"]
-        and datetime.fromisoformat(artifact["created_at"]) >= since
+        for artifact in _api(f"repos/{repo}/actions/runs/{number}/artifacts?per_page=100")["artifacts"]
+        if not artifact["expired"] and datetime.fromisoformat(artifact["created_at"]) >= since
     ]
+    matching = [artifact for artifact in artifacts if artifact["name"] == "mutation-preflight-report"]
     if not matching:
-        raise Missing
-    artifact = max(matching, key=lambda row: row["id"])
+        return _shard_reports(repo, artifacts), None, True
+    return (*_archive(repo, max(matching, key=lambda row: row["id"])), False)
+
+
+def _archive(repo, artifact):
     archive = _api(f"repos/{repo}/actions/artifacts/{artifact['id']}/zip", binary=True)
     with zipfile.ZipFile(io.BytesIO(archive)) as zipped:
         name = next(name for name in zipped.namelist() if name == "report.json" or name.endswith("/report.json"))
         scope = json.loads(zipped.read("scope.json")) if "scope.json" in zipped.namelist() else None
         return json.loads(zipped.read(name)), scope
+
+
+def _shard_reports(repo, artifacts):
+    shards = {}
+    for artifact in artifacts:
+        if match := SHARD_REPORT.fullmatch(artifact["name"]):
+            index = int(match.group(1))
+            if index not in shards or artifact["id"] > shards[index]["id"]:
+                shards[index] = artifact
+    if not shards:
+        raise Missing
+    reports = [_archive(repo, artifact)[0] for _, artifact in sorted(shards.items())]
+    measured = [report.get("shard") or {} for report in reports]
+    if [shard.get("index") for shard in measured] != list(range(len(reports))) or not all(
+        shard.get("total") == len(reports) and shard.get("complete") for shard in measured
+    ):
+        raise Missing
+    return merge_reports(reports)
 
 
 def _skip(target, run):
@@ -329,7 +350,7 @@ def _resolve(held, branches):
     if run.get("conclusion") != "success" and run.get("conclusion") != "failure":
         return f"{outcome}, now red; run {run.get('conclusion')}"
     try:
-        report, scope = _fetch(target, run)
+        report, scope, sharded = _fetch(target, run)
         covered = _covers(target, run, scope, branches)
         failures = [
             f"{file['path']}:{failure['name']}:{failure['fingerprint']} ({failure['status']})"
@@ -346,7 +367,7 @@ def _resolve(held, branches):
         return f"{outcome}, now red; complete mutation report unavailable; mutation may have been skipped"
     if not covered:
         return f"{outcome}, now red; the mutation report does not grade the branch head from its dev merge base"
-    if run["conclusion"] == "success" and not failed and not failures:
+    if (run["conclusion"] == "success" or sharded) and not failed and not failures:
         return f"{outcome}, now green; no failing mutants"
     detail = "; ".join(failures) or "mutation failed without a named survivor"
     return f"{outcome}, now red; {detail}"
