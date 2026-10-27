@@ -813,7 +813,7 @@ jobs:
               --head-repo "$HEAD_REPO" --run "$GITHUB_RUN_ID" --created "$before" --environment "$ENVIRONMENT" \
               "${dev_plan[@]}" --root "$GITHUB_WORKSPACE" --out "$RUNNER_TEMP/reused-branch.json"
           }
-          ( (set -e; plan); echo "$?" > "$RUNNER_TEMP/plan.status" ) > "$RUNNER_TEMP/plan.log" 2>&1 &
+          ( (set -e; plan); echo "$?" > "$RUNNER_TEMP/plan.status.tmp"; mv "$RUNNER_TEMP/plan.status.tmp" "$RUNNER_TEMP/plan.status" ) > "$RUNNER_TEMP/plan.log" 2>&1 &
           echo "$!" > "$RUNNER_TEMP/plan.pid"
 
       # The base revision's copy grades, so a pull request cannot loosen its own floor.
