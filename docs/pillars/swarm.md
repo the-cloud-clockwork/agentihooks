@@ -4572,8 +4572,8 @@ A detection pass reads:
 - **The watched tasks, once.** The CI detector and the trace detector share one read of the watched ledger's tasks.
 - **Every detector side by side.** Each detector runs in its own thread and is still timed as its own
   `doctor.<name>` step: `runtime storage`, `scheduled tick`, `health`, `inbox`, `handoff`, `spawn`,
-  `master launch`, `startup`, `context overrun`, `master prompt`, `ci`, `dev workflow` and, with telemetry on,
-  `trace`. A detector that raises is reported as `the <name> detector failed: <error type>: <message>` while the
+  `master launch`, `startup`, `context overrun`, `master prompt`, `ci`, `dev workflow`,
+  [`feature`](../reference/feature-live-checks.md) and, with telemetry on, `trace`. A detector that raises is reported as `the <name> detector failed: <error type>: <message>` while the
   others still report.
 - **Pull requests side by side.** The CI detector reads each open pull request of the watched tasks in a thread pool.
 - **Traces inside their budgets.** The trace detector reads active bindings and the historical backfill side by side,
