@@ -97,6 +97,8 @@ def test_statusline_names_selected_run_profile(monkeypatch, capsys):
         ({"chain": ["anton", "brain", "router"], "overlays": ["brain", "router"]}, "overlay:brain,router"),
         ({"chain": ["engineer"], "overlays": []}, "overlay:none"),
         ({"chain": ["engineer", "brain"]}, "overlay:none"),
+        ({"render": []}, "overlay:malformed stamp"),
+        ({"overlays": "brain"}, "overlay:malformed stamp"),
         (None, "overlay:none"),
     ],
 )

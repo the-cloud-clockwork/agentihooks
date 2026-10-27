@@ -136,6 +136,22 @@ def test_missing_process_is_a_named_failure(mounted):
     assert live_binding.compare(agent, {"process": False}) == {"process": {"expected": True, "actual": False}}
 
 
+@pytest.mark.parametrize(
+    ("data", "error"),
+    [
+        ({"render": []}, "render stamp field render is a list, expected an object"),
+        (
+            {"chain": ["engineer"], "overlays": "brain"},
+            "render stamp field overlays is a string, expected a list of strings",
+        ),
+    ],
+)
+def test_malformed_render_stamp_is_a_named_failure(mounted, data, error):
+    agent, proc, home = mounted
+    (home / ".agentihooks-render.json").write_text(json.dumps(data))
+    assert live_binding.read(agent, 42, proc) == {"process": False, "stamp": error}
+
+
 def test_model_and_effort_require_native_flags(mounted):
     agent, proc, _ = mounted
     root = proc / "42"
