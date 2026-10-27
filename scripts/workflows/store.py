@@ -19,7 +19,7 @@ def default_root() -> Path:
 
 
 def create(folder: Path, definition: Workflow, case_text: str) -> dict:
-    folder.mkdir(parents=True, exist_ok=False)
+    folder.mkdir(parents=True)
     (folder / OUTPUTS_DIR).mkdir()
     state = {**machine.start(definition), "workflow": definition.name, "run": folder.name, "case": case_text}
     save(folder, state)
