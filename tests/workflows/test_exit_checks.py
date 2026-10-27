@@ -100,5 +100,5 @@ def test_check_falls_back_to_the_default_classifier_when_none_is_given(monkeypat
 
 @pytest.mark.parametrize("expression", ["", "   "])
 def test_an_empty_expression_is_refused(expression):
-    with pytest.raises(WorkflowError, match="must not be empty"):
+    with pytest.raises(WorkflowError, match="^an exit expression must not be empty$"):
         exit_checks.check(expression, {}, recorder())
