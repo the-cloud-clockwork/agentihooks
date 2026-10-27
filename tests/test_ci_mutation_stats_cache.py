@@ -1480,7 +1480,7 @@ def test_cap_keeps_the_newest_records_up_to_the_byte_limit_and_drops_the_rest(tm
     monkeypatch.setattr(stats_dependencies, "CACHE_BYTES", 30)
     cache = tmp_path / "cache"
     cache.mkdir()
-    for age, name in enumerate(["new", "middle", "old", "older"]):
+    for age, name in reversed(list(enumerate(["new", "middle", "old", "older"]))):
         path = cache / f"{name}.json"
         path.write_text("x" * 10)
         os.utime(path, (1000 - age, 1000 - age))
