@@ -704,6 +704,45 @@ def test_a_pending_recovery_stops_once_its_attempts_are_spent(store, tmp_path, m
     assert not resume.recovery_pending(store, "sw", agents[0])
 
 
+@pytest.mark.parametrize("outage_state", ["closed", "open"])
+def test_a_pending_recovery_after_its_outage_closes_retires_an_idle_holder_while_paused(
+    store, tmp_path, monkeypatch, outage_state
+):
+    from scripts.swarm.tick import IDLE_KILL_TICKS
+
+    ledger, runtime, agents = pending_owners(store, tmp_path, monkeypatch)
+    monkeypatch.setattr(resume, "recover_outages", lambda *args: [])
+    holder = agents[0]
+    store.put_agent("sw", replace(holder, idle_ticks=IDLE_KILL_TICKS - 1))
+    for agent in agents[1:]:
+        runtime.statuses[agent.name] = "working"
+    if outage_state == "open":
+        outage.observe("sw", "provider", ["provider unavailable"], 10 * MINUTE)
+    assert store.config("sw").state == "paused"
+    assert resume.recovery_pending(store, "sw", holder)
+    actions = tick("sw", store, ledger, runtime, 40 * MINUTE)
+    if outage_state == "open":
+        assert holder.name not in runtime.killed
+        assert store.claimant("sw", holder.task) == holder.name
+        return
+    assert runtime.killed == [holder.name]
+    assert (ledger.rows[holder.task]["state"], ledger.rows[holder.task]["claimed_by"]) == ("open", "")
+    stalled = [action for action in actions if action.startswith(f"stalled {holder.name}")]
+    assert stalled and "outage recovery could not proceed" in stalled[0], actions
+
+
+def test_a_pending_recovery_still_holds_an_idle_holder_just_after_its_outage_closes(store, tmp_path, monkeypatch):
+    from scripts.swarm.tick import IDLE_KILL_TICKS
+
+    ledger, runtime, agents = pending_owners(store, tmp_path, monkeypatch)
+    monkeypatch.setattr(resume, "recover_outages", lambda *args: [])
+    holder = agents[0]
+    store.put_agent("sw", replace(holder, idle_ticks=IDLE_KILL_TICKS - 1))
+    tick("sw", store, ledger, runtime, 10 * MINUTE)
+    assert holder.name not in runtime.killed
+    assert store.claimant("sw", holder.task) == holder.name
+
+
 def test_an_owner_holding_its_task_authority_is_recovered(store, tmp_path, monkeypatch):
     ledger, runtime, agents = pending_owners(store, tmp_path, monkeypatch)
     agent = agents[0]
