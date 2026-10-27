@@ -44,6 +44,25 @@ class PinError(Exception):
     pass
 
 
+def _writes(node: ast.Subscript | ast.Attribute, name: str) -> bool:
+    if isinstance(node, ast.Attribute) and node.attr == "__dict__":
+        return True
+    if not isinstance(node.ctx, (ast.Store, ast.Del)):
+        return False
+    named = node.attr if isinstance(node, ast.Attribute) else getattr(node.slice, "value", None)
+    return named == name or isinstance(node.value, ast.Name) and node.value.id == name
+
+
+def _calls(node: ast.Call, name: str) -> bool:
+    if isinstance(node.func, ast.Name):
+        return node.func.id in ("globals", "vars", "locals", "setattr", "exec", "eval", "compile")
+    if not isinstance(node.func, ast.Attribute):
+        return False
+    if node.func.attr == "__setattr__":
+        return True
+    return isinstance(node.func.value, ast.Name) and node.func.value.id == name and node.func.attr in MUTATORS
+
+
 def _rebinds(node: ast.AST, name: str) -> bool:
     if isinstance(node, (ast.AugAssign, ast.AnnAssign)):
         return isinstance(node.target, ast.Name) and node.target.id == name
@@ -58,19 +77,8 @@ def _rebinds(node: ast.AST, name: str) -> bool:
     if isinstance(node, ast.Name):
         return isinstance(node.ctx, ast.Del) and node.id == name
     if isinstance(node, (ast.Subscript, ast.Attribute)):
-        if isinstance(node, ast.Attribute) and node.attr == "__dict__":
-            return True
-        if not isinstance(node.ctx, (ast.Store, ast.Del)):
-            return False
-        named = node.attr if isinstance(node, ast.Attribute) else getattr(node.slice, "value", None)
-        return named == name or isinstance(node.value, ast.Name) and node.value.id == name
-    if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
-        return node.func.id in ("globals", "vars", "locals", "setattr", "exec", "eval", "compile")
-    if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
-        if node.func.attr == "__setattr__":
-            return True
-        return isinstance(node.func.value, ast.Name) and node.func.value.id == name and node.func.attr in MUTATORS
-    return False
+        return _writes(node, name)
+    return isinstance(node, ast.Call) and _calls(node, name)
 
 
 def constant(tree: Path, path: str, name: str):
