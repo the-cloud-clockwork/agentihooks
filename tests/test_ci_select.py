@@ -415,10 +415,23 @@ def test_a_selection_at_its_leg_budget_still_runs_selected(heavy):
     assert len(legs) == 3
 
 
-def test_a_selection_over_its_leg_budget_runs_the_full_suite(heavy):
+def test_a_selection_over_its_leg_budget_stays_selected_within_its_leg_limit(heavy):
     budget = ci_select.LEG_SECONDS
     durations = seconds(test_sample=1.0, test_heavy1=budget, test_heavy2=budget, test_heavy3=budget - 0.5)
-    assert decide(heavy, ["hooks/sample.py"], durations) == ("full", [])
+    scope, legs = decide(heavy, ["hooks/sample.py"], durations)
+    assert scope == "selected"
+    assert len(legs) == 3
+    assert sorted(file for leg in legs for file in leg) == [
+        "tests/test_heavy1.py",
+        "tests/test_heavy2.py",
+        "tests/test_heavy3.py",
+        "tests/test_sample.py",
+    ]
+
+
+def test_a_harness_change_runs_the_full_suite_however_large_the_selection(heavy):
+    durations = seconds(test_sample=1.0, **{f"test_heavy{index}": 10 * ci_select.LEG_SECONDS for index in range(1, 4)})
+    assert decide(heavy, ["hooks/sample.py", "pyproject.toml"], durations) == ("full", [])
 
 
 @pytest.mark.parametrize(("total", "count"), [(1.0, 1), (180.0, 1), (180.5, 2), (360.0, 2), (360.5, 3)])
@@ -693,6 +706,17 @@ def test_the_workflow_selects_nine_legs_for_a_large_change(repo):
     scope, legs = decide(repo, ["hooks/sample.py"], durations, workflow_legs())
     assert scope == "selected"
     assert len(legs) == 9
+
+
+def test_the_workflow_splits_a_selection_over_twelve_legs_within_the_full_suite_runners(repo):
+    write(repo, {f"tests/test_tick{index}.py": "from hooks import sample\n" for index in range(1, 31)})
+    durations = seconds(test_sample=15.0, **{f"test_tick{index}": ci_select.LEG_SECONDS for index in range(1, 31)})
+    scope, legs = decide(repo, ["hooks/sample.py"], durations, workflow_legs())
+    assert scope == "selected"
+    assert len(legs) == workflow_legs() == len(jobs()["unit"]["strategy"]["matrix"]["shard"])
+    assert sorted(file for leg in legs for file in leg) == sorted(
+        ["tests/test_sample.py", *(f"tests/test_tick{index}.py" for index in range(1, 31))]
+    )
 
 
 def test_the_workflow_hands_every_leg_its_files(repo, monkeypatch, tmp_path, capsys):
