@@ -227,3 +227,86 @@ def test_status_text_prints_each_hive_agent_join_grade(monkeypatch, capsys):
     cli.cmd_status(store, SimpleNamespace(slug="sw", json=False))
     line = f"hive join  {agent.name}\tpartial\tmisses=brain (optional)\theartbeat=1000"
     assert line in capsys.readouterr().out.splitlines()
+
+
+REFUSED = "ledger sw: <urlopen error [Errno 111] Connection refused>"
+
+
+def _ledger_refused_launch(monkeypatch, tmp_path, message):
+    import importlib
+    from types import SimpleNamespace
+
+    from fakeredis import FakeRedis
+
+    from scripts.hive import join_report
+    from scripts.swarm import commands, launch_check, outage
+    from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
+
+    controller = importlib.import_module("scripts.swarm.tick")
+    monkeypatch.setattr(outage, "HOME", tmp_path)
+    monkeypatch.setattr(commands, "hive_id", lambda: "root")
+    monkeypatch.setattr(launch_check, "bundled", lambda profile: False)
+    monkeypatch.setattr(launch_check, "expected", lambda agent: [])
+    monkeypatch.setattr(controller, "_settle_admission", lambda *args: None)
+    monkeypatch.setattr(controller, "_drop", lambda *args: " dropped")
+    retired = []
+    monkeypatch.setattr(
+        controller, "_retire_launch", lambda slug, store, runtime, agent, now: retired.append(now) or True
+    )
+    store = RedisStore(FakeRedis(decode_responses=True))
+    store.create(SwarmConfig("sw", "/repo", max_eng=1, max_ci=0, state="running"))
+    record = AgentRecord(store.next_name("sw", "eng", 1001), "eng", "task", hive="worker", started_at=1000)
+    agent = store.start_execution("sw", record)
+    start = launch_check.session_started_at(agent)
+    checks = dict.fromkeys((*join_report.REQUIRED, *join_report.OPTIONAL), True)
+    checks["ledger_join"] = False
+    checks["errors"] = {"ledger_join": {"error": "SwarmError", "status": None, "message": message}}
+    join_report.start(store.redis, "sw", agent, "session", checks, {}, start)
+    launch_check.begin(store, "sw", agent, start, relaunch=False)
+    runtime = SimpleNamespace(bindings=lambda agents: {}, live_names=lambda: {agent.name})
+
+    def tick(at):
+        return controller._launch_checks("sw", store, SimpleNamespace(), runtime, {}, {}, at)
+
+    return SimpleNamespace(store=store, agent=agent, start=start, retired=retired, tick=tick, checks=checks)
+
+
+def test_a_join_refused_during_a_ledger_outage_holds_and_passes_once_the_outage_ends(monkeypatch, tmp_path):
+    from scripts.hive import join_report
+    from scripts.swarm import launch_check, outage
+
+    launch = _ledger_refused_launch(monkeypatch, tmp_path, REFUSED)
+    outage.observe("sw", "ledger", ["Ledger health probe failed"], launch.start + 5_000)
+    outage.observe("sw", "ledger", [], launch.start + 50_000)
+    due = launch.start + launch_check.DEADLINE_MS + 10_000
+    assert launch.tick(due) == [f"{launch.agent.name} launch check held: the ledger refused its join"]
+    assert launch.retired == []
+    assert launch.agent.name in launch_check.pending(launch.store, "sw")
+    recovered = {**launch.checks, "ledger_join": True}
+    recovered.pop("errors")
+    join_report.start(launch.store.redis, "sw", launch.agent, "retried", recovered, {}, due)
+    assert launch.tick(due + 30_000)[0].startswith(f"{launch.agent.name} passed its launch check")
+    assert launch.retired == []
+    assert launch_check.report(launch.store, "sw", "task")["state"] == "passed"
+
+
+def test_a_refused_join_that_persists_past_the_regrade_retires(monkeypatch, tmp_path):
+    from scripts.swarm import launch_check
+
+    launch = _ledger_refused_launch(monkeypatch, tmp_path, REFUSED)
+    due = launch.start + launch_check.DEADLINE_MS + 10_000
+    launch.tick(due)
+    launch.tick(due + launch_check.DEADLINE_MS - 1)
+    assert launch.retired == []
+    action = launch.tick(due + launch_check.DEADLINE_MS)
+    assert action == [f"retired {launch.agent.name} after its hive join failed dropped"]
+    assert launch.retired == [due + launch_check.DEADLINE_MS]
+
+
+def test_a_ledger_join_denied_by_the_server_retires_without_a_hold(monkeypatch, tmp_path):
+    from scripts.swarm import launch_check
+
+    launch = _ledger_refused_launch(monkeypatch, tmp_path, "ledger sw: server refused: 403 forbidden")
+    due = launch.start + launch_check.DEADLINE_MS
+    assert launch.tick(due) == [f"retired {launch.agent.name} after its hive join failed dropped"]
+    assert launch.retired == [due]
