@@ -1192,6 +1192,27 @@ def test_a_pull_request_reports_whether_checks_still_run(rollup, suites, running
 
 
 @pytest.mark.parametrize(
+    ("status", "conclusion", "running"),
+    [
+        ("COMPLETED", "CANCELLED", False),
+        ("QUEUED", "CANCELLED", False),
+        ("IN_PROGRESS", "CANCELLED", False),
+        ("QUEUED", None, True),
+        ("IN_PROGRESS", None, True),
+    ],
+)
+def test_cancelled_suite_conclusions_end_running_state(status, conclusion, running):
+    raw = {
+        "state": "OPEN",
+        "statusCheckRollup": [{"name": "unit", "status": "COMPLETED", "conclusion": "CANCELLED"}],
+        "checkSuites": [{"status": status, "conclusion": conclusion, "workflowRun": {"databaseId": 1}}],
+    }
+    found = ledger_events.pull_request(raw)
+    assert found.running is running
+    assert found.started is running
+
+
+@pytest.mark.parametrize(
     ("rollup", "suites", "started"),
     [
         ([], [QUEUED_TESTS], True),
