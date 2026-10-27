@@ -186,6 +186,78 @@ def test_returns_inside_nested_definitions_do_not_disable_a_test(tmp_path):
     assert not any(entry["disabled"] for entry in measured.values())
 
 
+@pytest.mark.parametrize(
+    "body,exit",
+    [
+        ("    for item in command:\n        assert item\n", "        continue\n        assert item\n"),
+        ("    for item in command:\n        assert item\n", "        break\n        assert item\n"),
+        ("    for item in command:\n        assert item\n", "        assert item\n        return\n"),
+        ("    for item in command:\n        assert item\n", "        assert item\n        break\n"),
+        ("    while command:\n        assert command\n", "        assert command\n        return\n"),
+        (
+            "    for item in command:\n        pass\n    else:\n        assert command\n",
+            "        break\n    else:\n        assert command\n",
+        ),
+    ],
+    ids=["continue", "break", "late return", "late break", "while return", "break skips else"],
+)
+def test_loop_exits_that_skip_locked_assertions_are_red(tmp_path, capsys, body, exit):
+    clean = GUARD.replace("    assert command\n", body)
+    planted = clean.replace(body, body.splitlines(keepends=True)[0] + exit)
+    base = _tree(tmp_path / "base", clean)
+    head = _tree(tmp_path / "head", planted, record=clean)
+    code, out = _grade(base, head, capsys)
+    assert code == 1
+    assert f"The locked test {LOCKED}::_blocked is skipped, xfailed or returns early.\n" in out
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        "    for item in command:\n        assert item\n        continue\n",
+        "    for item in command:\n        assert item\n    return command\n",
+        "    assert command\n    for item in command:\n        break\n",
+        "    for item in command:\n        for other in item:\n            break\n        assert item\n",
+        "    for item in command:\n        assert item\n    else:\n        return command\n",
+        "    for item in command:\n        continue\n    else:\n        assert command\n",
+        "    assert command\n    for item in command:\n        def unused():\n            assert item\n        break\n",
+        "    assert command\n    for item in command:\n        def unused():\n            assert item\n        return command\n",
+    ],
+    ids=[
+        "completed iteration",
+        "completed loop",
+        "completed assertion",
+        "inner break",
+        "loop else",
+        "continue reaches else",
+        "nested checking function break",
+        "nested checking function return",
+    ],
+)
+def test_loop_exits_after_all_locked_assertions_stay_green(tmp_path, body):
+    text = GUARD.replace("    assert command\n", body)
+    assert not _measured(tmp_path, text)["_blocked"]["disabled"]
+
+
+@pytest.mark.parametrize("name", ["_loop_helper", "test_loop"])
+@pytest.mark.parametrize("exit", ["continue", "break"])
+def test_loop_exits_before_asserting_helper_calls_are_disabled(tmp_path, name, exit):
+    text = GUARD + (
+        "\n\ndef _checked(value):\n    assert value\n"
+        f"\n\ndef {name}(values):\n    for value in values:\n        {exit}\n        _checked(value)\n"
+    )
+    assert _measured(tmp_path, text)[name]["disabled"]
+
+
+@pytest.mark.parametrize("name", ["_loop_helper", "test_loop"])
+def test_break_skipping_an_asserting_helper_in_loop_else_is_disabled(tmp_path, name):
+    text = GUARD + (
+        "\n\ndef _checked(value):\n    assert value\n"
+        f"\n\ndef {name}(values):\n    for value in values:\n        break\n    else:\n        _checked(values)\n"
+    )
+    assert _measured(tmp_path, text)[name]["disabled"]
+
+
 @pytest.mark.parametrize("decorator", ["@pytest.mark.skip", "@pytest.mark.parametrize('x', [])"])
 def test_a_new_skipped_test_in_a_locked_file_is_red(tmp_path, capsys, decorator):
     base = _tree(tmp_path / "base", GUARD)
@@ -332,6 +404,82 @@ def test_every_locked_file_is_measured_when_one_is_missing(tmp_path):
     (tmp_path / locked_tests.LOCKED[1]).parent.mkdir(parents=True)
     (tmp_path / locked_tests.LOCKED[1]).write_text("def test_a():\n    assert 1\n")
     assert list(locked_tests.measure(tmp_path)) == [f"{locked_tests.LOCKED[1]}::test_a"]
+
+
+EXTRA = "tests/extra/test_new.py"
+
+
+def _lock_extra(root: Path, text: str = "def test_new():\n    assert 1\n") -> Path:
+    (root / EXTRA).parent.mkdir(parents=True, exist_ok=True)
+    (root / EXTRA).write_text("def test_new():\n    assert 1\n")
+    manifest = json.loads((root / locked_tests.MANIFEST).read_text())
+    for key, entry in locked_tests.measure(root, (EXTRA,)).items():
+        manifest[key] = {field: entry[field] for field in (*locked_tests.FIELDS, locked_tests.TEXTS)}
+    (root / locked_tests.MANIFEST).write_text(json.dumps(manifest))
+    (root / EXTRA).write_text(text)
+    return root
+
+
+def test_the_modules_named_are_the_locked_list_then_each_manifest_module_once():
+    found = locked_tests.named({"a.py::t": {}, f"{LOCKED}::x": {}}, {"a.py::u": {}, "b.py::v": {}})
+    assert found == (*locked_tests.LOCKED, "a.py", "b.py")
+
+
+def test_a_module_the_head_manifest_names_is_measured_and_held(tmp_path, capsys):
+    base = _tree(tmp_path / "base", GUARD)
+    code, out = _grade(base, _lock_extra(_tree(tmp_path / "head", GUARD)), capsys)
+    assert (code, out) == (0, "4 locked tests on the base, 5 measured on the head, 0 errors\n")
+    skipped = "import pytest\n\n\n@pytest.mark.skip\ndef test_new():\n    assert 1\n"
+    code, out = _grade(base, _lock_extra(_tree(tmp_path / "skipped", GUARD), skipped), capsys)
+    assert (code, out) == (
+        1,
+        "4 locked tests on the base, 5 measured on the head, 1 errors\n"
+        f"::error::The locked test {EXTRA}::test_new is skipped, xfailed or returns early.\n",
+    )
+
+
+def test_a_module_only_the_base_manifest_names_is_still_measured(tmp_path, capsys):
+    base = _lock_extra(_tree(tmp_path / "base", GUARD))
+    head = _tree(tmp_path / "head", GUARD)
+    (head / EXTRA).parent.mkdir(parents=True)
+    (head / EXTRA).write_text("def test_new():\n    assert 1\n")
+    code, out = _grade(base, head, capsys)
+    key = f"{EXTRA}::test_new"
+    assert (code, out) == (
+        1,
+        f"5 locked tests on the base, 5 measured on the head, 4 errors\n"
+        f"::error::The head {locked_tests.MANIFEST} drops or lowers the locked assertions of {key}.\n"
+        f"::error::The head {locked_tests.MANIFEST} drops or lowers the locked calls of {key}.\n"
+        f"::error::The head {locked_tests.MANIFEST} drops or lowers the locked cases of {key}.\n"
+        f"::error::The head {locked_tests.MANIFEST} drops or changes the locked assertion texts of {key}.\n",
+    )
+
+
+def test_writing_the_manifest_keeps_the_modules_it_names(tmp_path):
+    root = _lock_extra(_tree(tmp_path, GUARD))
+    assert locked_tests.main(["--write", "--head", str(root)]) == 0
+    assert f"{EXTRA}::test_new" in json.loads((root / locked_tests.MANIFEST).read_text())
+
+
+def test_a_config_ignoring_a_module_the_manifest_names_is_refused(tmp_path, capsys):
+    base = _tree(tmp_path / "base", GUARD)
+    head = _lock_extra(_tree(tmp_path / "head", GUARD))
+    (head / "conftest.py").write_text('collect_ignore = ["tests/extra/test_new.py"]\n')
+    assert _grade(base, head, capsys) == (
+        1,
+        "4 locked tests on the base, 5 measured on the head, 1 errors\n"
+        "::error::conftest.py names the locked module test_new; a locked test cannot be ignored or deselected.\n",
+    )
+
+
+@pytest.mark.parametrize("module", ["../outside.py", "/etc/outside.py"])
+def test_a_manifest_module_outside_the_checkout_is_refused(tmp_path, capsys, module):
+    base = _tree(tmp_path / "base", GUARD)
+    head = _tree(tmp_path / "head", GUARD)
+    manifest = json.loads((head / locked_tests.MANIFEST).read_text())
+    manifest[f"{module}::test_x"] = {"assertions": 0, "calls": 0, "cases": 1, "texts": []}
+    (head / locked_tests.MANIFEST).write_text(json.dumps(manifest))
+    assert _grade(base, head, capsys) == (1, f"::error::{module} is outside the checkout\n")
 
 
 @pytest.mark.parametrize(

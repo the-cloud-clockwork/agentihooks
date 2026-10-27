@@ -20,11 +20,17 @@ from dataclasses import asdict
 from hooks.context.conditions import INBOX_SEND
 from hooks.filters import check as filters
 from scripts.inbox import links, outbox
-from scripts.inbox.store import DuplicateItem, InboxError, InboxStore, Unreachable, close_reason, connect
+from scripts.inbox.store import (
+    OPERATOR,
+    DuplicateItem,
+    InboxError,
+    InboxStore,
+    Unreachable,
+    close_reason,
+    connect,
+)
 from scripts.swarm_ledger import ledger_comments
 from scripts.swarm_v2 import master_fence
-
-OPERATOR = "operator"
 
 SWARM = "swarm"
 
@@ -120,16 +126,25 @@ def _apply_send(store, me, record):
     from scripts.inbox.recipient import empty_seat
 
     args = record["args"]
-    check_address(store, me, args["address"])
-    links.check_send(store, me, args["address"])
-    status = dispatcher_status(store, args["address"]) if not args["fyi"] else {}
-    address = status.get("dispatch", {}).get("owner", args["address"])
+    address = _operator_door(store, me) if store.names.resolve(args["address"]) == OPERATOR else args["address"]
+    check_address(store, me, address)
+    links.check_send(store, me, address)
+    status = dispatcher_status(store, address) if not args["fyi"] else {}
+    address = status.get("dispatch", {}).get("owner", address)
     master_fence.check_send(store, me, address)
     hint = empty_seat(store, me, address)
     task = store.receiver_task(address)
     item = store.send(me, address, args["text"], fyi=args["fyi"], task=task, item_id=record["item"])
     result = {"id": item.id, "from": item.sender, "to": item.address, "state": item.state}
     return result | status | hint
+
+
+def _operator_door(store, me):
+    """Only the front door master writes to the operator, and never first: any other agent's message goes to it."""
+    door, holds = store.front_door_of(me)
+    if holds or not door:
+        raise InboxError(f"no agent writes to the operator first, so {me} cannot send to him; answer his item instead")
+    return door
 
 
 def _apply_reply(store, me, record):

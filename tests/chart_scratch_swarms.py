@@ -37,11 +37,46 @@ def env(rendered: str, suffix: str, container: str) -> dict:
     return {item["name"]: item.get("value") for item in found.get("env", [])}
 
 
+def proof_placement_problems(chart: str) -> list[str]:
+    values = yaml.safe_load((Path(chart) / "ci" / "kind-workers.yaml").read_text())
+    controller = values["controller"]
+    selected = SCRATCH["swarm"]
+    controller["api"] = {
+        "enabled": True,
+        "swarm": selected,
+        "signingKey": {"keyId": "fixture", "secretName": "fixture"},
+    }
+    controller["workers"]["kubernetesProofSwarm"] = selected
+    rendered = render(chart, values)
+    if rendered.returncode:
+        return [f"the Kubernetes proof swarm fails to render: {rendered.stderr.strip()}"]
+    found = []
+    if env(rendered.stdout, "-controller", "controller").get("AGENTIHOOKS_CONTROL_KUBERNETES_PROOF") != selected:
+        found.append("the Kubernetes proof swarm selector does not reach the controller")
+    for selector in ("rig-grade-swarm", selected + "x"):
+        controller["workers"]["kubernetesProofSwarm"] = selector
+        refused = render(chart, values)
+        if refused.returncode == 0 or "controller.workers.kubernetesProofSwarm must name" not in refused.stderr:
+            found.append(f"the chart accepts an invalid Kubernetes proof swarm {selector!r}")
+    controller["workers"]["kubernetesProofSwarm"] = selected
+    for field, key in (("api", "enabled"), ("workers", "apiUrl")):
+        original = controller[field][key]
+        controller[field][key] = False if key == "enabled" else ""
+        refused = render(chart, values)
+        if refused.returncode == 0 or "controller.workers.kubernetesProofSwarm must name" not in refused.stderr:
+            found.append(f"the chart accepts a Kubernetes proof swarm without {field}.{key}")
+        controller[field][key] = original
+    return found
+
+
 def problems(chart: str) -> list[str]:
     found = []
     default = render(chart, {})
     if default.returncode:
         return [f"the default release fails to render: {default.stderr.strip()}"]
+    found.extend(proof_placement_problems(chart))
+    if "AGENTIHOOKS_CONTROL_KUBERNETES_PROOF" in env(default.stdout, "-controller", "controller"):
+        found.append("the default release routes proof engineers to Kubernetes")
     if "AGENTIHOOKS_CONTROL_SCRATCH_SWARMS" in env(default.stdout, "-controller", "controller"):
         found.append("the default release sets scratch swarms on the controller")
     if env(default.stdout, "-worker-hive", "worker-hive").get("HIVE_MASTER_SWARMS") != "":

@@ -547,11 +547,11 @@ def test_prepare_selects_fresh_dev_after_the_recorded_pull_request_merged(
     result = publish.prepare("swarm", agent, str(repository), ledger)
 
     retired = state == "MERGED" and head == "predecessor"
-    registered = "predecessor" if state == "OPEN" and continued == "predecessor" else "engineer-test"
+    registered = "predecessor" if state == "OPEN" else "engineer-test"
     upstream = "origin/dev" if retired else "origin/predecessor"
     assert git(worktree, "rev-parse", "HEAD") == (fresh if retired else old_head)
     assert git(worktree, "rev-parse", "--abbrev-ref", "@{upstream}") == (
-        "origin/kept" if continued == "kept" else upstream
+        "origin/kept" if continued == "kept" and state != "OPEN" else upstream
     )
     assert result["branch"] == task["branch"] == registered
     assert task["repository_branches"] == {str(repository): registered}
@@ -1519,6 +1519,36 @@ def test_prepare_and_publish_keep_the_open_pull_requests_delivery_branch(publica
     assert published["branch"] == p.task["branch"] == "predecessor"
     assert git(p.repo, "ls-remote", "origin", "refs/heads/predecessor").split()[0] == published["head"]
     assert git(p.repo, "ls-remote", "origin", "refs/heads/engineer-test") == ""
+
+
+def test_prepare_registers_the_open_pull_requests_head_over_the_successor_branch(publication, monkeypatch):
+    from scripts.swarm import publish
+
+    p = publication
+    git(p.root, "push", "origin", "HEAD:pull-head")
+    p.task.update(pr_url="https://github.com/example/repo/pull/7", state="pr")
+    monkeypatch.setattr(publish.publish_queue, "open_head", lambda remote, url: "pull-head" if url else "")
+
+    result = publish.prepare("swarm", p.agent, str(p.repo), p.ledger)
+
+    assert result["branch"] == p.task["branch"] == "pull-head"
+    assert p.task["repository_branches"] == {str(p.repo): "pull-head"}
+    assert git(p.root, "rev-parse", "--abbrev-ref", "@{upstream}") == "origin/pull-head"
+
+
+def test_prepare_refuses_an_open_pull_request_head_the_worktree_does_not_descend_from(publication, monkeypatch):
+    from scripts.swarm import publish
+
+    p = publication
+    diverged = git(p.root, "commit-tree", "HEAD^{tree}", "-p", "origin/dev", "-m", "Unrelated pull request work")
+    git(p.root, "push", "origin", f"{diverged}:refs/heads/pull-head")
+    p.task.update(pr_url="https://github.com/example/repo/pull/7", state="pr")
+    monkeypatch.setattr(publish.publish_queue, "open_head", lambda remote, url: "pull-head" if url else "")
+
+    with pytest.raises(publish.SwarmError, match="delivers branch pull-head.*on branch engineer-test"):
+        publish.prepare("swarm", p.agent, str(p.repo), p.ledger)
+    assert p.task["branch"] == "engineer-test"
+    assert p.updates == []
 
 
 @pytest.mark.parametrize("checkout", ["recorded", "own"])

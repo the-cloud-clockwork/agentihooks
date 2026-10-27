@@ -1,6 +1,7 @@
 /.github/ @nestorcolt
 /.semgrep/ @nestorcolt
 /.semgrep-guards/ @nestorcolt
+/.semgrep-incidents/ @nestorcolt
 /scripts/ci_mutation/ @nestorcolt
 /scripts/ci_budget/rate_limit.py @nestorcolt
 /scripts/ci_*.py @nestorcolt

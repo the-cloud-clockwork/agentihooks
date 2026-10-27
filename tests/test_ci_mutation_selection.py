@@ -1259,6 +1259,7 @@ def test_local_selection_caps_mutation_and_stats_workers(tmp_path, monkeypatch, 
 
     def cli(args):
         assert args == ["run", "--max-children", str(expected)]
+        assert (runner.os.pids, runner.os.environ) == (set(), os.environ)
         runner.collect_or_load_stats(object())
 
     runner.cli = cli
@@ -1271,3 +1272,20 @@ def test_local_selection_caps_mutation_and_stats_workers(tmp_path, monkeypatch, 
     assert counts == [expected]
     output = capsys.readouterr().out
     assert output == ("" if ci else "Local mutation worker cap: 2 (mutation and stats)\n")
+
+
+def test_mutmut_wait_skips_a_child_a_test_left_and_returns_the_forked_mutant(monkeypatch):
+    from scripts.ci_mutation import selection
+
+    forks = [12, 0]
+    exits = [(11, 0), (12, 7 << 8)]
+    real = SimpleNamespace(__name__="os", environ=os.environ, fork=forks.pop, wait=lambda: exits.pop(0))
+    monkeypatch.setattr(selection, "os", real)
+    children = selection.forked_children()
+    assert children.environ is os.environ
+    assert children.fork() == 0
+    assert children.pids == set()
+    assert children.fork() == 12
+    assert children.pids == {12}
+    assert children.wait() == (12, 7 << 8)
+    assert (children.pids, exits) == (set(), [])

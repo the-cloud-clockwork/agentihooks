@@ -81,14 +81,45 @@ def _texts(checks: list[ast.AST]) -> list[str]:
     return sorted(hashlib.sha256(ast.dump(node).encode()).hexdigest()[:16] for node in checks)
 
 
-def _returns_early(statements: list[ast.stmt], before: tuple[int, int] | None = None) -> bool:
-    pending: list[ast.AST] = list(statements)
-    while pending:
-        node = pending.pop()
-        if isinstance(node, ast.Return) and (before is None or (node.end_lineno, node.end_col_offset) < before):
-            return True
+def _loop_checks(statements: list[ast.stmt], helpers: frozenset[str]) -> list[ast.AST]:
+    nodes: list[ast.AST] = list(statements)
+    for node in nodes:
         if not isinstance(node, (*DEFINITIONS, ast.Lambda)):
-            pending.extend(ast.iter_child_nodes(node))
+            nodes.extend(ast.iter_child_nodes(node))
+    return _checks(nodes, helpers)
+
+
+def _returns_early(
+    statements: list[ast.stmt],
+    before: tuple[int, int] | None = None,
+    helpers: frozenset[str] = frozenset(),
+) -> bool:
+    pending = [(node, ()) for node in statements]
+    while pending:
+        node, loops = pending.pop()
+        if isinstance(node, ast.Return) and (
+            before is None or (node.end_lineno, node.end_col_offset) < before or any(any(loop) for loop in loops)
+        ):
+            return True
+        if loops and (
+            (isinstance(node, ast.Break) and any(loops[-1]))
+            or (
+                isinstance(node, ast.Continue)
+                and loops[-1][0]
+                and (node.end_lineno, node.end_col_offset) < loops[-1][0]
+            )
+        ):
+            return True
+        if isinstance(node, (ast.For, ast.AsyncFor, ast.While)):
+            last = max(
+                ((check.lineno, check.col_offset) for check in _loop_checks(node.body, helpers)),
+                default=None,
+            )
+            context = (last, bool(_loop_checks(node.orelse, helpers)))
+            pending.extend((child, (*loops, context)) for child in node.body)
+            pending.extend((child, loops) for child in node.orelse)
+        elif not isinstance(node, (*DEFINITIONS, ast.Lambda)):
+            pending.extend((child, loops) for child in ast.iter_child_nodes(node))
     return False
 
 
@@ -126,10 +157,12 @@ def _functions(body: list[ast.stmt], prefix: str, inherited: list[ast.AST]):
             yield from _functions(node.body, f"{prefix}{node.name}::", [*context, *node.decorator_list])
 
 
-def measure(tree: Path) -> dict[str, dict]:
+def measure(tree: Path, modules: tuple[str, ...] = LOCKED) -> dict[str, dict]:
     measured = {}
-    for name in LOCKED:
+    for name in modules:
         path = tree / name
+        if not path.resolve().is_relative_to(tree.resolve()):
+            raise GradeError(f"{name} is outside the checkout")
         if not path.is_file():
             continue
         try:
@@ -167,12 +200,18 @@ def measure(tree: Path) -> dict[str, dict]:
                 "cases": cases,
                 TEXTS: _texts(checks),
                 "disabled": (
-                    not cases or _disables([*bodies[key], *_nodes(context)], skippers) or _returns_early(function.body)
+                    not cases
+                    or _disables([*bodies[key], *_nodes(context)], skippers)
+                    or _returns_early(function.body, helpers=helpers)
                 )
                 if test
-                else _returns_early(function.body, max((node.lineno, node.col_offset) for node in checks)),
+                else _returns_early(function.body, max((node.lineno, node.col_offset) for node in checks), helpers),
             }
     return measured
+
+
+def named(*manifests: dict) -> tuple[str, ...]:
+    return tuple(dict.fromkeys([*LOCKED, *(key.split("::")[0] for manifest in manifests for key in manifest)]))
 
 
 def load(tree: Path) -> dict[str, dict] | None:
@@ -197,18 +236,18 @@ def load(tree: Path) -> dict[str, dict] | None:
 def write(tree: Path) -> None:
     entries = {
         key: {field: entry[field] for field in (*FIELDS, TEXTS)}
-        for key, entry in sorted(measure(tree).items())
+        for key, entry in sorted(measure(tree, named(load(tree) or {})).items())
         if not entry["disabled"]
     }
     (tree / MANIFEST).write_text(json.dumps(entries, indent=1) + "\n")
 
 
-def unlocking_configs(tree: Path) -> list[str]:
+def unlocking_configs(tree: Path, modules: tuple[str, ...] = LOCKED) -> list[str]:
     paths = sorted({path for pattern in CONFIGS for path in tree.glob(pattern) if path.is_file()})
     return [
         f"{path.relative_to(tree)} names the locked module {stem}; a locked test cannot be ignored or deselected."
         for path in paths
-        for stem in (Path(name).stem for name in LOCKED)
+        for stem in (Path(name).stem for name in modules)
         if stem in path.read_text()
     ]
 
@@ -259,8 +298,6 @@ def main(argv: list[str] | None = None) -> int:
         if args.write:
             write(args.head)
             return 0
-        head = measure(args.head)
-        configs = unlocking_configs(args.head)
         recorded = load(args.head)
         if recorded is None:
             raise GradeError(f"the head has no {MANIFEST}")
@@ -269,6 +306,9 @@ def main(argv: list[str] | None = None) -> int:
             # Only the pull request that introduces the manifest meets a base without one.
             print(f"::notice::The base has no {MANIFEST}; the head manifest locks itself.")
             base = recorded
+        modules = named(base, recorded)
+        head = measure(args.head, modules)
+        configs = unlocking_configs(args.head, modules)
     except (GradeError, ValueError, OSError) as exc:
         print(f"::error::{exc}")
         return 1

@@ -1,6 +1,7 @@
 """agentihooks hive create: one workstation command brings a new Kubernetes hive live in herdr."""
 
 import json
+import re
 import subprocess
 import tempfile
 import time
@@ -26,6 +27,8 @@ SIGNER_NAMESPACE = "agentihooks-swarm"
 SIGNER_SYNC = "agentihooks-swarm-nats-signer"
 POLL_S = 15
 COMMAND_TIMEOUT_S = 60
+NAME_LIMIT = 1000
+NAME_SHAPE = re.compile(r"[a-z0-9]([-a-z0-9]*[a-z0-9])?")
 
 
 @dataclass(frozen=True)
@@ -36,6 +39,7 @@ class Options:
     node: str = "worker-001"
     timeout_s: int = 1800
     dry_run: bool = False
+    name: str | None = None
 
 
 @dataclass
@@ -93,18 +97,46 @@ def _start(tools: Tools, options: Options) -> dict:
     except (OSError, ValueError):
         saved = {}
     if saved.get("name") and not saved.get("finished"):
+        if options.name not in (None, saved["name"]):
+            raise auth.HiveError(
+                f"an unfinished hive create of {saved['name']} is saved; rerun hive create without --name to finish it"
+            )
         tools.out(f"hive create {saved['name']}: resuming the unfinished create")
         return saved
-    name = machine.name(
-        tools.redis, options.node, assign=not options.dry_run, taken=lambda: machine.held_names(tools.redis, tools.run)
-    )
-    if saved.get("name") == name:
-        tools.out(f"hive create {name}: redeploying the hive of node {options.node}")
-        return {**saved, "finished": False}
+    name = _named(tools, options)
     services = json.loads(_kubectl(tools, ["get", "service", "-A", "-o", "json"]))["items"]
     lan_ip = create_render.lan_address(services)
     port = create_render.kept_port(services, name) or create_render.next_port(services, lan_ip)
     return {"name": name, "record": invite.default_path(name), "ssh_port": port, "lan_ip": lan_ip, "node": options.node}
+
+
+def _named(tools: Tools, options: Options) -> str:
+    if options.name is not None and not NAME_SHAPE.fullmatch(options.name):
+        raise auth.HiveError(
+            f"hive create refuses the name {options.name!r}: a hive name is lowercase letters, digits and dashes"
+        )
+    held = machine.held_names(tools.redis, tools.run) | set(tools.redis.hvals(machine.MACHINES))
+    template = create_github.read(tools.run, options.repo, create_render.TEMPLATE_PATH, options.base)
+    present = create_github.tree(tools.run, options.repo, options.base)
+    opened = create_github.open_heads(tools.run, options.repo)
+
+    def holders(name: str) -> list[str]:
+        found = ["a hive"] if name in held else []
+        found += [f"the {options.repo} file {path}" for path in sorted(create_render.paths(template, name) & present)]
+        found += [f"an open {options.repo} pull request"] if name in opened else []
+        return found
+
+    unused = (name for name in map(machine.hive_name, range(1, NAME_LIMIT)) if not holders(name))
+    name = options.name or next(unused, None)
+    if name is None:
+        raise auth.HiveError(f"hive create found no unused hive name below {machine.hive_name(NAME_LIMIT)}")
+    found = holders(name)
+    if found:
+        raise auth.HiveError(
+            f"hive create refuses {name}: it is already held by {' and '.join(found)}; "
+            "pass --name with an unused hive name, or leave it out to take the next one"
+        )
+    return name
 
 
 def _save(tools: Tools) -> None:

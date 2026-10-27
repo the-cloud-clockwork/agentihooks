@@ -1054,18 +1054,38 @@ def test_the_tests_gate_may_start_requiring_the_postgres_scenario_on_pull_reques
 def test_the_tests_gate_may_skip_sonar_when_selection_marks_the_pull_request_test_only(weakened):
     from scripts import ci_reuse
 
-    base = {path.name: yaml.safe_load(path.read_text()) for path in (_ROOT / ".github/workflows").glob("*.yml")}
-    head = copy.deepcopy(base)
-    head["test.yml"]["jobs"]["select"]["outputs"]["sonar"] = "${{ steps.select.outputs.sonar }}"
+    head = {path.name: yaml.safe_load(path.read_text()) for path in (_ROOT / ".github/workflows").glob("*.yml")}
+    base = copy.deepcopy(head)
+    del base["test.yml"]["jobs"]["select"]["outputs"]["sonar"]
+    step = base["test.yml"]["jobs"]["gate-required"]["steps"][0]
+    for old, new in reversed(ci_reuse.TEST_ONLY_SONAR):
+        step["run"] = step["run"].replace(new, old)
     gate = head["test.yml"]["jobs"]["gate-required"]
-    gate["steps"] = ci_reuse.test_only_sonar(gate["steps"])
-    assert '(if .select.outputs.sonar == "skip" then [] else ["sonar"] end)' in gate["steps"][0]["run"]
+    assert ci_reuse.test_only_sonar(base["test.yml"]["jobs"]["gate-required"]["steps"]) == gate["steps"]
+    assert '- (if .select.outputs.sonar == "skip" then ["sonar"] else [] end)' in gate["steps"][0]["run"]
     if weakened:
         gate["steps"][0]["run"] = gate["steps"][0]["run"].replace('"skip"', '"skip" or true')
     config = json.loads((_ROOT / ".github/gate-wiring.json").read_text())
     policy = json.loads((_ROOT / ".github/workflows/trusted-actors.json").read_text())
     problems = gate_protected.grade(base, config, head, config, _TODAY, policy)
     assert bool(problems) == weakened, problems
+
+
+def test_a_base_skipping_sonar_on_test_only_changes_still_refuses_a_head_that_drops_the_writer_lock():
+    from scripts import ci_reuse
+
+    base = {path.name: yaml.safe_load(path.read_text()) for path in (_ROOT / ".github/workflows").glob("*.yml")}
+    gate = base["test.yml"]["jobs"]["gate-required"]
+    assert ci_reuse.TEST_ONLY_SONAR[0][1] in gate["steps"][0]["run"]
+    assert ci_reuse.POSTGRES_REQUIRED[1] in gate["steps"][0]["run"]
+    head = copy.deepcopy(base)
+    step = head["test.yml"]["jobs"]["gate-required"]["steps"][0]
+    step["run"] = step["run"].replace(ci_reuse.POSTGRES_REQUIRED[1], ci_reuse.POSTGRES_REQUIRED[0])
+    config = json.loads((_ROOT / ".github/gate-wiring.json").read_text())
+    policy = json.loads((_ROOT / ".github/workflows/trusted-actors.json").read_text())
+    assert gate_protected.grade(base, config, base, config, _TODAY, policy) == []
+    problems = gate_protected.grade(base, config, head, config, _TODAY, policy)
+    assert any("changes its steps" in problem for problem in problems), problems
 
 
 @pytest.mark.parametrize("existing", [False, True])
@@ -1225,6 +1245,8 @@ def test_selection_diagnostic_preserves_the_current_required_gate(diagnostic):
     [
         ('then .value.result == "success"', 'then .value.result != "failure"'),
         ('"semgrep", "sonar"', '"semgrep"'),
+        ('"sonar", "writer-lock"]', '"sonar"]'),
+        ('then ["sonar"] else [] end', 'then ["sonar"] else ["sonar"] end'),
         ("exit 1", "exit 0"),
     ],
 )
@@ -1362,6 +1384,83 @@ def test_the_separate_summary_accepts_only_the_reviewed_shell(shell, declared_on
         assert problems == []
     else:
         assert "The test summary must use the reviewed reporting job." in problems
+
+
+def _separate_summary(head, steps):
+    head["jobs"]["test-summary"] = {
+        "needs": ["unit", "unit-selected"],
+        "if": "${{ always() }}",
+        "runs-on": "ubuntu-latest",
+        "timeout-minutes": 5,
+        "steps": steps,
+    }
+    head["jobs"]["unit-selected"] = {"runs-on": "ubuntu-latest"}
+    head["jobs"]["gate-required"]["needs"].append("unit-selected")
+    return {"not_gates": {"test.yml/test-summary": _entry()}}
+
+
+@pytest.mark.parametrize("pipefail", [False, True])
+def test_the_separate_summary_may_retry_each_download_once(pipefail):
+    from scripts import ci_reuse
+
+    base, head = _aggregators()
+    steps = ci_reuse.retried_summary(ci_reuse.summary_steps())
+    if pipefail:
+        steps = ci_reuse.pipefail_summary(steps)
+    config = _separate_summary(head, steps)
+    assert gate_protected.grade({"test.yml": base}, config, {"test.yml": head}, config, _TODAY, _POLICY) == []
+
+
+def test_the_retried_summary_waits_and_downloads_each_report_once_more():
+    from scripts import ci_reuse
+
+    checkout, durations, flakes, summarize = ci_reuse.summary_steps()
+    steps = ci_reuse.retried_summary([checkout, durations, flakes, summarize])
+    assert [step.get("name") for step in steps] == [
+        None,
+        "Download this run's test durations",
+        "Download this run's test durations, wait before attempt 2",
+        "Download this run's test durations, attempt 2",
+        "Download this run's test flakes",
+        "Download this run's test flakes, wait before attempt 2",
+        "Download this run's test flakes, attempt 2",
+        "Summarize this run's tests",
+    ]
+    assert steps[0] == checkout and steps[-1] == summarize
+    assert steps[1] == {**durations, "id": "download-this-runs-test-durations", "continue-on-error": True}
+    assert steps[4] == {**flakes, "id": "download-this-runs-test-flakes", "continue-on-error": True}
+    for first, wait, second in (steps[1:4], steps[4:7]):
+        retry = f"steps.{first['id']}.outcome == 'failure'"
+        assert wait == {
+            "name": f"{first['name']}, wait before attempt 2",
+            "if": retry,
+            "shell": "bash",
+            "run": f'echo "::warning::{first["name"]} failed, as an artifact service outage does; '
+            'retrying it once in 30 seconds."\nsleep 30\n',
+        }
+        assert second == {
+            "name": f"{first['name']}, attempt 2",
+            "if": retry,
+            "uses": first["uses"],
+            "with": first["with"],
+        }
+
+
+@pytest.mark.parametrize("change", ["second continues", "no wait", "first fails the job"])
+def test_a_separate_summary_cannot_weaken_its_download_retry(change):
+    from scripts import ci_reuse
+
+    base, head = _aggregators()
+    steps = ci_reuse.retried_summary(ci_reuse.summary_steps())
+    if change == "second continues":
+        steps[3] = {**steps[3], "continue-on-error": True}
+    elif change == "no wait":
+        del steps[2]
+    else:
+        steps[1] = {key: value for key, value in steps[1].items() if key != "continue-on-error"}
+    config = _separate_summary(head, steps)
+    problems = gate_protected.grade({"test.yml": base}, config, {"test.yml": head}, config, _TODAY, _POLICY)
+    assert "The test summary must use the reviewed reporting job." in problems
 
 
 @pytest.mark.parametrize("change", ["steps", "needs", "if", "runs-on", "timeout-minutes", "env"])
@@ -1664,6 +1763,123 @@ def test_the_required_grader_passes_equivalence_edits_outside_the_grading(repo, 
     _git(repo, "checkout", "-q", "dev")
     assert gate_protected.main(["--root", str(repo), "--head", changed]) == 0
     assert "ledger equivalence" not in capsys.readouterr().out
+
+
+def _event_base(workflow):
+    steps = _equivalence_steps(workflow)
+    steps[:] = [step for step in steps if step.get("id") != "comparison-base"]
+    steps[0]["with"].pop("fetch-depth", None)
+    steps[1]["with"]["ref"] = "${{ github.event.pull_request.base.sha }}"
+    return workflow
+
+
+def _dev_parent(workflow):
+    steps = _equivalence_steps(_event_base(workflow))
+    steps[0]["with"]["fetch-depth"] = 2
+    steps.insert(
+        1,
+        {
+            "name": "Select the dev parent of the tested merge",
+            "id": "comparison-base",
+            "run": 'echo "sha=$(git -C head rev-parse HEAD^1)" >> "$GITHUB_OUTPUT"',
+        },
+    )
+    steps[2]["with"]["ref"] = "${{ steps.comparison-base.outputs.sha }}"
+    return workflow
+
+
+def _grade_equivalence(repo, base, head):
+    _commit_equivalence(repo, base, "base grader")
+    _git(repo, "checkout", "-q", "-b", "pr")
+    changed = _commit_equivalence(repo, head, "select the dev parent")
+    _git(repo, "checkout", "-q", "dev")
+    return gate_protected.main(["--root", str(repo), "--head", changed])
+
+
+def test_the_required_grader_accepts_the_dev_parent_base_selection(repo, capsys):
+    assert _grade_equivalence(repo, _event_base(_equivalence()), _dev_parent(_equivalence())) == 0
+    assert "0 protected gate problems" in capsys.readouterr().out
+
+
+def test_the_required_grader_keeps_accepting_the_dev_parent_form_once_dev_carries_it(repo):
+    head = _dev_parent(_equivalence())
+    head["jobs"]["ledger-equivalence"]["timeout-minutes"] = 20
+    assert _grade_equivalence(repo, _dev_parent(_equivalence()), head) == 0
+
+
+def _duplicate_selector(workflow):
+    steps = _equivalence_steps(_dev_parent(workflow))
+    steps.insert(1, copy.deepcopy(steps[1]))
+    return workflow
+
+
+@pytest.mark.parametrize("head", [_duplicate_selector, _event_base])
+def test_a_dev_carrying_the_dev_parent_form_refuses_any_other_selection(repo, capsys, head):
+    assert _grade_equivalence(repo, _dev_parent(_equivalence()), head(_equivalence())) == 1
+    assert (
+        "::error::The head changes the ledger equivalence grading; the protected branch grades with its own."
+        in capsys.readouterr().out.splitlines()
+    )
+
+
+def _full_history(steps):
+    steps[0]["with"]["fetch-depth"] = 0
+
+
+def _second_parent(steps):
+    steps[1]["run"] = steps[1]["run"].replace("HEAD^1", "HEAD^2")
+
+
+def _selector_writes_env(steps):
+    steps[1]["run"] = 'echo "GRADER=$PWD/head" >> "$GITHUB_ENV"'
+
+
+def _head_ref(steps):
+    steps[2]["with"]["ref"] = "${{ github.event.pull_request.head.sha }}"
+
+
+def _event_ref(steps):
+    steps[2]["with"]["ref"] = "${{ github.event.pull_request.base.sha }}"
+
+
+def _selector_after_base(steps):
+    steps[1], steps[2] = steps[2], steps[1]
+
+
+def _selector_without_id(steps):
+    del steps[1]["id"]
+
+
+def _fetch_before_base(steps):
+    steps.insert(2, {"run": "git -C head fetch origin dev"})
+
+
+def _grader_word_after_page(steps):
+    steps.append({"run": "echo GRADER"})
+
+
+@pytest.mark.parametrize(
+    "fault",
+    [
+        _full_history,
+        _second_parent,
+        _selector_writes_env,
+        _head_ref,
+        _event_ref,
+        _selector_after_base,
+        _selector_without_id,
+        _fetch_before_base,
+        _grader_word_after_page,
+    ],
+)
+def test_the_required_grader_refuses_any_other_dev_parent_selection(repo, capsys, fault):
+    head = _dev_parent(_equivalence())
+    fault(_equivalence_steps(head))
+    assert _grade_equivalence(repo, _event_base(_equivalence()), head) == 1
+    assert (
+        "::error::The head changes the ledger equivalence grading; the protected branch grades with its own."
+        in capsys.readouterr().out.splitlines()
+    )
 
 
 def test_the_required_grader_leaves_equivalence_alone_before_its_base_grades(repo, capsys):
