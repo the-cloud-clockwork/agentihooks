@@ -1,5 +1,5 @@
 """Admit each launch by the measured headroom of the machine it lands on; a pending reservation counts against the room
-for fifteen minutes, three five minute load windows."""
+for fifteen minutes, three five minute load windows, and for two minutes after the hive reports the launch live."""
 
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
@@ -18,6 +18,7 @@ SWARM_PERCENT = 40
 AGENT_CPU = 0.5
 AGENT_MB = MEMORY_PER_AGENT_MB
 PENDING_MS = 900_000
+SETTLE_MS = 120_000
 NO_READING = "no fresh headroom reading"
 # cpus/load5 shipped with the first headroom reading; a hive daemon still on an older image before total_mb
 # joined the schema still publishes them, so a reading missing only the RAM fields is read, not refused.
@@ -51,6 +52,13 @@ local now = redis.call('TIME')
 local millis = tonumber(now[1]) * 1000 + math.floor(tonumber(now[2]) / 1000)
 redis.call('ZADD', KEYS[1], millis + tonumber(ARGV[2]), ARGV[1])
 redis.call('PEXPIRE', KEYS[1], ARGV[2])
+"""
+
+_SETTLE = """
+local now = redis.call('TIME')
+local settled = tonumber(now[1]) * 1000 + math.floor(tonumber(now[2]) / 1000) + tonumber(ARGV[2])
+local held = redis.call('ZSCORE', KEYS[1], ARGV[1])
+if held and tonumber(held) > settled then redis.call('ZADD', KEYS[1], settled, ARGV[1]) end
 """
 
 
@@ -169,6 +177,10 @@ def reserve(redis: "Redis", machine: str, member: str, limit: int, ttl_ms: int =
 
 def record(redis: "Redis", machine: str, member: str) -> None:
     redis.eval(_RECORD, 1, key(machine), member, PENDING_MS)
+
+
+def settle(redis: "Redis", machine: str, member: str) -> None:
+    redis.eval(_SETTLE, 1, key(machine), member, SETTLE_MS)
 
 
 def pending(redis: "Redis", machine: str) -> int:

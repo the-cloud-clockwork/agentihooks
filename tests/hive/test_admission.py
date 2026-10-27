@@ -180,6 +180,20 @@ def test_a_reservation_expires_after_its_lifetime(redis):
     assert admission.reserve(redis, "anton", "s/two", 1) == (True, 0)
 
 
+def test_settling_a_reservation_only_shortens_one_that_is_held(redis):
+    import time
+
+    admission.reserve(redis, "anton", "s/one", 2)
+    admission.reserve(redis, "anton", "s/two", 2, ttl_ms=1000)
+    admission.settle(redis, "anton", "s/one")
+    admission.settle(redis, "anton", "s/two")
+    admission.settle(redis, "anton", "s/absent")
+    now = time.time() * 1000
+    assert now < redis.zscore(admission.key("anton"), "s/one") <= now + admission.SETTLE_MS
+    assert redis.zscore(admission.key("anton"), "s/two") <= now + 1000
+    assert redis.zscore(admission.key("anton"), "s/absent") is None
+
+
 def test_a_reservation_key_lives_in_the_swarm_keyspace():
     from scripts.swarm.keyspace import ROOT
 
