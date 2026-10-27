@@ -889,6 +889,24 @@ def test_the_request_budget_drops_whole_runs_it_cannot_read(tmp_path, monkeypatc
     assert "Stopped at pull request run 101: its records would pass 7 GitHub requests" in capsys.readouterr().out
 
 
+def test_a_graded_record_keeps_only_what_the_choice_reads(tmp_path, monkeypatch, repo):
+    root, commits = repo
+    newer, older = _run(102), _run(101)
+    _github(
+        monkeypatch,
+        [newer, older],
+        {
+            102: [_record(newer, commits["record"], passed=["test_h"], leg=leg) for leg in ("1", "2")],
+            101: [_record(older, commits["record"], passed=["test_g"], leg=leg) for leg in ("1", "2")],
+        },
+    )
+    kept, choose = [], ci_branch_plan.choose
+    monkeypatch.setattr(ci_branch_plan, "choose", lambda found, *rest: kept.extend(found) or choose(found, *rest))
+    assert _plan(tmp_path, root)["tests"] == _ids("test_h")
+    assert len(kept) == 4
+    assert all(set(record) == {"run", "attempt", "commit", "head"} for record, _, _ in kept)
+
+
 @pytest.mark.parametrize(
     "missing",
     ["--repository", "--pull", "--head-ref", "--head-repo", "--run", "--created", "--environment", "--root", "--out"],
