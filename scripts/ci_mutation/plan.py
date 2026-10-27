@@ -8,6 +8,7 @@ import subprocess
 import time
 import zipfile
 from collections.abc import Iterator
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from difflib import SequenceMatcher
 from functools import cache
@@ -18,7 +19,7 @@ import yaml
 
 from scripts.ci_cpu_quota import worker_count as quota_workers
 from scripts.ci_mutation.browser import needs_browser
-from scripts.ci_mutation.scope import discover_changes, graded_green, own_bases, select_tests, test_file
+from scripts.ci_mutation.scope import discover_changes, graded_green, module_facts, own_bases, select_tests, test_file
 from scripts.ci_mutation.selection import changed_mutations, file_seconds, partition, stats_shards
 from scripts.ci_test_plan import find_record
 from tests.dep_manifest import (
@@ -537,21 +538,22 @@ def file_text(path: Path) -> str:
     return path.read_text() if path.is_file() else ""
 
 
-@cache
 def defined_tests(path: Path) -> set[str]:
-    return {name for _, _, _, name in _spans(ast.parse(path.read_text())) if name.rpartition(".")[2].startswith("test")}
+    return {name for name in module_facts(path.read_text())[1] if name.rpartition(".")[2].startswith("test")}
 
 
 def narrow(
     root: Path, chosen: list[str], covering: set[str], recorded: dict[str, set[str]], stale: set[str]
 ) -> list[str]:
-    kept = set()
+    kept, by_file = set(), {}
+    for test in covering:
+        by_file.setdefault(test_file(test), set()).add(test)
     for path in chosen:
         defined = {name.replace(".", "::") for name in defined_tests(root / path)}
         if path in stale or not defined <= recorded.get(path, set()):
             kept.add(path)
         else:
-            kept.update(test for test in covering if test_file(test) == path)
+            kept.update(by_file.get(path, ()))
     return sorted(kept) or chosen
 
 
@@ -608,7 +610,12 @@ def main() -> int:
     if args.repository and not changes:
         print("No change remains to mutate, so the recorded dev coverage is not read.")
     elif args.repository:
-        found, failure = read_record(args.repository)
+        with ThreadPoolExecutor() as pool:
+            record = pool.submit(read_record, args.repository)
+            # The import scan parses every test module once, while the record downloads.
+            for path in changes:
+                select_tests(root, Path(path))
+            found, failure = record.result()
         if failure:
             print(
                 "::warning title=Mutation selection fallback::The recorded dev coverage could not be read, so every"
