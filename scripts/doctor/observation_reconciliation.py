@@ -2,6 +2,7 @@ from collections.abc import Callable
 
 PAGE = 100
 MAX_PAGES = 100
+ATTEMPTS = 3
 
 
 def _accepted(session_id, harness, cancelled):
@@ -39,7 +40,7 @@ def _accepted(session_id, harness, cancelled):
     return ids, aggregate
 
 
-def _remote_ids(get, trace_id, cancelled):
+def _remote_pass(get, trace_id, cancelled):
     ids = set()
     for page in range(1, MAX_PAGES + 1):
         if cancelled():
@@ -49,10 +50,18 @@ def _remote_ids(get, trace_id, cancelled):
         ids.update(row["id"] for row in body["data"])
         total = body["meta"]["totalItems"]
         if len(ids) != previous_count + len(body["data"]) or (len(body["data"]) < PAGE and page * PAGE < total):
-            raise ValueError("observation identity listing is incomplete")
+            return None
         if len(body["data"]) < PAGE or page * PAGE >= total:
             return ids
     raise ValueError("observation identity page budget exhausted")
+
+
+def _remote_ids(get, trace_id, cancelled):
+    for _ in range(ATTEMPTS):
+        ids = _remote_pass(get, trace_id, cancelled)
+        if ids is not None:
+            return ids
+    raise ValueError("observation identity listing is incomplete")
 
 
 def reconcile(
