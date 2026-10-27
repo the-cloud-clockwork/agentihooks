@@ -534,6 +534,7 @@ jobs:
           retention-days: 7
           overwrite: true
 
+      # No checkout precedes this on workflow_dispatch, so the local retry-upload action cannot load here.
       - name: Republish the dispatched base's coverage baseline
         if: github.event_name == 'workflow_dispatch'
         uses: actions/upload-artifact@v4
@@ -813,7 +814,7 @@ jobs:
               --head-repo "$HEAD_REPO" --run "$GITHUB_RUN_ID" --created "$before" --environment "$ENVIRONMENT" \
               "${dev_plan[@]}" --root "$GITHUB_WORKSPACE" --out "$RUNNER_TEMP/reused-branch.json"
           }
-          ( (set -e; plan); echo "$?" > "$RUNNER_TEMP/plan.status" ) > "$RUNNER_TEMP/plan.log" 2>&1 &
+          ( (set -e; plan); echo "$?" > "$RUNNER_TEMP/plan.status.tmp"; mv "$RUNNER_TEMP/plan.status.tmp" "$RUNNER_TEMP/plan.status" ) > "$RUNNER_TEMP/plan.log" 2>&1 &
           echo "$!" > "$RUNNER_TEMP/plan.pid"
 
       # The base revision's copy grades, so a pull request cannot loosen its own floor.
@@ -1472,11 +1473,10 @@ jobs:
             --commit "$GITHUB_SHA" --head "$HEAD_SHA" --pull "$PULL" --run "$GITHUB_RUN_ID" --attempt "$GITHUB_RUN_ATTEMPT" \
             --leg "$LEG" --environment "$ENVIRONMENT" --out branch-record/record.json
 
-      # The upload action itself, not retry-upload: a composite's inner steps skip once the job is cancelled.
       - &upload-branch-coverage
         name: Upload this leg's branch coverage
         if: always() && github.event_name == 'pull_request' && github.base_ref == 'dev' && github.event.pull_request.head.repo.full_name == github.repository && hashFiles('branch-record/record.json') != ''
-        uses: actions/upload-artifact@v4
+        uses: ./.github/actions/retry-upload
         with:
           name: branch-coverage-${{ matrix.python-version }}-${{ env.LEG }}-${{ github.run_attempt }}
           path: |
@@ -1487,18 +1487,18 @@ jobs:
           include-hidden-files: true
           if-no-files-found: ignore
           retention-days: 7
-          overwrite: true
+          after-cancel: true
 
       - &upload-record
         name: Upload this leg's branch record
         if: always() && github.event_name == 'pull_request' && github.base_ref == 'dev' && github.event.pull_request.head.repo.full_name == github.repository && hashFiles('branch-record/record.json') != ''
-        uses: actions/upload-artifact@v4
+        uses: ./.github/actions/retry-upload
         with:
           name: branch-record-${{ matrix.python-version }}-${{ env.LEG }}-${{ github.run_attempt }}
           path: branch-record/record.json
           if-no-files-found: error
           retention-days: 7
-          overwrite: true
+          after-cancel: true
 
       - name: Record flaky tests
         if: ${{ !cancelled() }}
@@ -1821,7 +1821,7 @@ jobs:
 
       - name: Upload coverage
         if: matrix.python-version == '3.12'
-        uses: actions/upload-artifact@v4
+        uses: ./.github/actions/retry-upload
         with:
           name: coverage-${{ matrix.python-version }}-${{ matrix.leg }}
           path: |
@@ -1830,7 +1830,6 @@ jobs:
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
-          overwrite: true
 
       - name: Upload selected test durations
         if: ${{ !cancelled() && hashFiles('durations.json') != '' }}
@@ -2320,7 +2319,7 @@ jobs:
 
       - name: Upload coverage and analysis evidence
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: ./.github/actions/retry-upload
         with:
           name: sonar-report
           path: |
@@ -2331,7 +2330,7 @@ jobs:
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
-          overwrite: true
+          after-cancel: true
 
       # Sonar refuses an analysis dated before the dev branch's latest one; that revision ends superseded, ungraded and never promoted.
       - name: SonarQube Quality Gate
@@ -2970,12 +2969,12 @@ jobs:
 
       - name: Upload the coverage ratchet report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: ./.github/actions/retry-upload
         with:
           name: coverage-ratchet
           path: coverage-ratchet/report.txt
           retention-days: 7
-          overwrite: true
+          after-cancel: true
 
   # Reports only: it fails when it cannot read the run, never because a stage ran slow.
   stage-budget:
@@ -3352,13 +3351,12 @@ jobs:
           key: coverage-baseline-${{ steps.tree.outputs.tree }}
 
       - name: Publish the passed dev coverage baseline
-        uses: actions/upload-artifact@v4
+        uses: ./.github/actions/retry-upload
         with:
           name: coverage-baseline
           path: ~/coverage-baseline
           if-no-files-found: error
           retention-days: 90
-          overwrite: true
 
       - name: Download the test dependency manifest
         if: needs.gate-required.result == 'success'

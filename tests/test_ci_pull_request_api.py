@@ -154,6 +154,8 @@ def test_no_script_a_step_runs_calls_the_api():
     expected = [
         ".github/actions/browser-cache/select-artifacts.sh",
         ".github/actions/browser-cache/verify.sh",
+        ".github/actions/retry-upload/find.sh",
+        ".github/actions/retry-upload/watchdog.sh",
         ".github/coverage/combine.sh",
         ".github/coverage/flatten.py",
         ".github/coverage/proxy.py",

@@ -1,0 +1,6 @@
+{
+  "scripts/locked_tests.py:scripts.locked_tests.x__returns_early__mutmut_7:c54c6b6a1000898c3c9f7a0f21d4d83687878ea23a6b9f5b3d0b4c05f3e57fb9": {
+    "reader": "standards-reader",
+    "reason": "On ast.parse source a Return end cannot equal a distinct assertion or check start. Calls in its expression start strictly before its end; following statements require intervening syntax. Replacing < before with <= before changes no reachable result. Reviewed against CI run 40498418691 shard 122171203895."
+  }
+}

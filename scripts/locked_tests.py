@@ -81,14 +81,45 @@ def _texts(checks: list[ast.AST]) -> list[str]:
     return sorted(hashlib.sha256(ast.dump(node).encode()).hexdigest()[:16] for node in checks)
 
 
-def _returns_early(statements: list[ast.stmt], before: tuple[int, int] | None = None) -> bool:
-    pending: list[ast.AST] = list(statements)
-    while pending:
-        node = pending.pop()
-        if isinstance(node, ast.Return) and (before is None or (node.end_lineno, node.end_col_offset) < before):
-            return True
+def _loop_checks(statements: list[ast.stmt], helpers: frozenset[str]) -> list[ast.AST]:
+    nodes: list[ast.AST] = list(statements)
+    for node in nodes:
         if not isinstance(node, (*DEFINITIONS, ast.Lambda)):
-            pending.extend(ast.iter_child_nodes(node))
+            nodes.extend(ast.iter_child_nodes(node))
+    return _checks(nodes, helpers)
+
+
+def _returns_early(
+    statements: list[ast.stmt],
+    before: tuple[int, int] | None = None,
+    helpers: frozenset[str] = frozenset(),
+) -> bool:
+    pending = [(node, ()) for node in statements]
+    while pending:
+        node, loops = pending.pop()
+        if isinstance(node, ast.Return) and (
+            before is None or (node.end_lineno, node.end_col_offset) < before or any(any(loop) for loop in loops)
+        ):
+            return True
+        if loops and (
+            (isinstance(node, ast.Break) and any(loops[-1]))
+            or (
+                isinstance(node, ast.Continue)
+                and loops[-1][0]
+                and (node.end_lineno, node.end_col_offset) < loops[-1][0]
+            )
+        ):
+            return True
+        if isinstance(node, (ast.For, ast.AsyncFor, ast.While)):
+            last = max(
+                ((check.lineno, check.col_offset) for check in _loop_checks(node.body, helpers)),
+                default=None,
+            )
+            context = (last, bool(_loop_checks(node.orelse, helpers)))
+            pending.extend((child, (*loops, context)) for child in node.body)
+            pending.extend((child, loops) for child in node.orelse)
+        elif not isinstance(node, (*DEFINITIONS, ast.Lambda)):
+            pending.extend((child, loops) for child in ast.iter_child_nodes(node))
     return False
 
 
@@ -167,10 +198,12 @@ def measure(tree: Path) -> dict[str, dict]:
                 "cases": cases,
                 TEXTS: _texts(checks),
                 "disabled": (
-                    not cases or _disables([*bodies[key], *_nodes(context)], skippers) or _returns_early(function.body)
+                    not cases
+                    or _disables([*bodies[key], *_nodes(context)], skippers)
+                    or _returns_early(function.body, helpers=helpers)
                 )
                 if test
-                else _returns_early(function.body, max((node.lineno, node.col_offset) for node in checks)),
+                else _returns_early(function.body, max((node.lineno, node.col_offset) for node in checks), helpers),
             }
     return measured
 
