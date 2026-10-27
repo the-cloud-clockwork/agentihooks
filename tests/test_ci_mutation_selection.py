@@ -13,14 +13,6 @@ import pytest
 from scripts.ci_mutation.runner import run_gate
 
 
-@pytest.fixture(autouse=True)
-def _restore_item_node_id():
-    added = "_nodeid" not in vars(pytest.Item)
-    yield
-    if added and "_nodeid" in vars(pytest.Item):
-        del pytest.Item._nodeid
-
-
 def _no_pytest(self, params, **kwargs):
     return 0
 
