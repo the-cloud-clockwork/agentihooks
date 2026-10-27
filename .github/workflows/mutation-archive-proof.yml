@@ -54,6 +54,8 @@ jobs:
           python - <<'PY'
           import json
           import os
+          import subprocess
+          import sys
           from pathlib import Path
           from scripts.ci_mutation.evidence import replay
 
@@ -74,6 +76,15 @@ jobs:
               reproduced = []
               for (path, name), expected in survivors.items():
                   row = next(row for row in actual[path] if row['name'] == name)
+                  if row['status'] != 'survived':
+                      selection = json.loads((bundle / group['name'] / 'changed-lines.json').read_text())
+                      tests = sorted({test for change in selection.values() for test in change['tests']})
+                      subprocess.run(
+                          [sys.executable, '-m', 'pytest', *tests, '-x', '-vv', '-o', 'addopts='],
+                          cwd=work / 'mutants',
+                          env=os.environ | manifest['env'] | {'MUTANT_UNDER_TEST': name},
+                          check=True,
+                      )
                   assert row['status'] == 'survived', row
                   assert row['fingerprint'] == expected['fingerprint'], row
                   assert row['diff'] == expected['diff'], row

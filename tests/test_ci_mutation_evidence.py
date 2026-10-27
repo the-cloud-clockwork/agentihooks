@@ -191,8 +191,9 @@ def test_cli_help_explains_replay_prerequisites(capsys):
     with pytest.raises(SystemExit) as error:
         main(["replay", "--help"])
     assert error.value.code == 0
-    assert "Check out replay.json's head and install its dependencies before replaying a group." in " ".join(
-        capsys.readouterr().out.split()
+    description = capsys.readouterr().out.split("\n\n")[1]
+    assert " ".join(description.split()) == (
+        "Check out replay.json's head and install its dependencies before replaying a group."
     )
 
 
