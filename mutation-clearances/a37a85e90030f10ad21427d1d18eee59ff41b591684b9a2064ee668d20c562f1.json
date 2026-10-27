@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/publish.py:scripts.swarm.publish.x_continuation_task__mutmut_11:846fc22c92a5ff2d9236471b7e681e7e8e03a40426e6f70c2fcace17c1e02eec": {
+    "reader": "Standards standards-reader",
+    "reason": "With an empty recorded branch the mutant only adds a lookup of refs/heads/, which matches no ref, so the empty name never enters heads and the recorded not in heads guard returns the same scoped task."
+  }
+}
