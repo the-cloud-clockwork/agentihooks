@@ -593,6 +593,17 @@ def _pending_bytes(state: dict, records: dict, pending: list) -> int:
     return len(json.dumps({"records": _waiting(state, records), "pending": pending}, ensure_ascii=False).encode())
 
 
+def _digest(value: object) -> str:
+    return hashlib.sha256(str(value).encode()).hexdigest()[:16]
+
+
+def _paged_out(paged: Mapping, key: str, record: dict) -> bool:
+    message = _message_id(record)
+    return _digest(key) in paged.get("keys", ()) or (
+        message is not None and _digest(message) in paged.get("messages", ())
+    )
+
+
 def _stage_source(state: dict, transcript_path: str) -> None:
     from hooks.observability.transcript import iter_complete_records, mask_value, record_id
 
@@ -602,6 +613,7 @@ def _stage_source(state: dict, transcript_path: str) -> None:
     position, count, unsupported = point["offset"], point["records"], point["unsupported"]
     revisions = state.setdefault("source_revisions", {})
     points = state.setdefault("source_points", {})
+    paged = {name: set((state.get("paged") or {}).get(name, ())) for name in ("keys", "messages")}
     staged_bytes = 0
     state.pop("deferred_source", None)
     size = _pending_bytes(state, merged, state["pending"])
@@ -616,6 +628,9 @@ def _stage_source(state: dict, transcript_path: str) -> None:
         revision = _record_revisions({key: record})[key]
         if key in merged and revisions.get(key) == revision:
             points[key] = [position, end, count + 1, unsupported]
+            position, count = end, count + 1
+            continue
+        if key not in merged and _paged_out(paged, key, record):
             position, count = end, count + 1
             continue
         if staged_bytes >= 256 * 1024:
@@ -941,6 +956,15 @@ def _paged_point(state: dict, keys: list, dropped: list[int], earlier: dict | No
     return last, {**point, "records": records, "unsupported": unsupported, "boundary": last}
 
 
+def _paged_ids(paged: Mapping, keys: list, values: list[dict], dropped: list[int], kept: list[int]) -> dict:
+    open_messages = {_message_id(values[index]) for index in kept}
+    messages = {_message_id(values[index]) for index in dropped} - open_messages - {None}
+    return {
+        "keys": sorted({*paged.get("keys", ()), *(_digest(keys[index]) for index in dropped)}),
+        "messages": sorted({*paged.get("messages", ()), *map(_digest, messages)}),
+    }
+
+
 def _page_accepted(session_id: str, state: dict) -> None:
     """Drop accepted records whose observations can no longer change, carrying what the root still needs."""
     records = state["records"]
@@ -982,6 +1006,7 @@ def _page_accepted(session_id: str, state: dict) -> None:
         start_ns=full["start_ns"],
     )
     target["boundary"], target["source"] = _paged_point(state, keys, dropped, paged.get("source"))
+    target.update(_paged_ids(paged, keys, values, dropped, kept))
     for span_id in full["spans"] - rest["spans"]:
         del state["accepted"][f"{span_id:016x}"]
     state["records"] = {keys[index]: values[index] for index in kept}
