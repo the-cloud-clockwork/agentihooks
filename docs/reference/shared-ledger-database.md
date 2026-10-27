@@ -10,7 +10,8 @@ nav_order: 48
 When `AGENTIHOOKS_SWARM_DATABASE_URL` is set, every ledger server and swarm process stores its ledgers in one shared
 Postgres database through `PostgresLedgerRepository`. Writers take turns through one writer lock. Every connection
 asks the server to end a session that stalls, so a client that dies or gives up while it holds or waits for that lock
-cannot stop ledger writes for every swarm on the database.
+cannot stop ledger writes for every swarm on the database. The database also stores the oldest writer version it
+allows, and refuses writes from ledger servers on code older than that.
 
 1. TOC
 {:toc}
@@ -139,10 +140,120 @@ done | tee -a writer-lock-idle.log
 Each printed line is one sample with a stuck holder; at a 30 second interval, lines divided by two give the
 minutes.
 
+## The writer floor
+
+Every write to a ledger on the shared database raises that ledger's `generation`. A current writer also records the
+rows it changed in `row_changes` under the new generation, and every other ledger server reading the same database
+(a replica) refreshes only those rows. A writer that bumps the generation without recording changed rows makes every
+replica rebuild the whole ledger after each of its writes. On 22 October one workstation ledger server on old code did
+this, and every hosted replica rebuilt the 26 MB ledger after each write it made. Nothing reported it; reads only
+slowed down.
+
+The writer floor stops such a writer at the database, names it, and raises a ledger alert.
+
+### How it works
+
+| Part | What it does |
+|---|---|
+| `writer_floor` table | One row, `name = 'ledger'`, holding the oldest writer version the database allows. |
+| Floor setup | The once per address schema setup runs `INSERT INTO writer_floor VALUES ('ledger', REQUIRED)` with `ON CONFLICT ... GREATEST(...)`, so a writer can raise the stored version but never lower it. |
+| Writer version | Each connection sends `-c agentihooks.ledger_writer_version=VERSION` (see [Settings every connection sends](#settings-every-connection-sends)). Code from before the floor sends nothing and counts as version 0. |
+| Check in the writer | `PostgresLedgerRepository._write` reads the stored version inside the write transaction, under the writer lock, before it changes anything. Below it, the write is refused and nothing is written. |
+| `ledger_writer_floor` trigger | Runs `BEFORE UPDATE ON ledgers` for each row whose `generation` changes. It refuses the update when the session's writer version is below the stored version and no `row_changes` row exists for that ledger and the new generation. This catches code that has no check of its own. |
+
+`VERSION` (what this code writes as) and `REQUIRED` (the floor this code stores) are constants in the Postgres
+repository module. Both are `1`: version 1 is the first writer that records changed rows.
+
+An old writer that still records its changed rows passes the trigger, because replicas can refresh from those rows.
+Only an unrecorded generation bump is refused.
+
+### The refusal
+
+The writer sees:
+
+```
+ledger writer version 0 is below version 1, the oldest the shared database allows; update its code and restart it
+```
+
+The first number is the refused writer's version, the second the stored floor. The trigger raises it with SQLSTATE
+`LW001`. In current code the error reaches the caller as `postgres.Refused`, a subclass of `sqlite3.DatabaseError`, so
+existing handlers of database errors still catch it. Code older than the floor sees the same text in its own database
+error.
+
+The refused transaction rolls back: the ledger's generation, rows and events stay as they were, and no replica
+rebuilds anything because of it.
+
+### The ledger alert
+
+A refused transaction cannot write an alert, since it rolls back. Before raising the error, the refused session takes
+a session advisory lock that outlives the rollback and lasts until that connection closes. The lock key carries the
+refusal: class id `0x4C574652` (`1280788050`), object id `writer version * 65536 + floor`, sub id 2.
+
+Each allowed write then lists those locks, with the client address of each refused session, and raises one open
+`writer` alert per refused writer on the ledger it is writing, targeted at the master:
+
+```
+The ledger writer at 10.0.0.5 was refused: ledger writer version 0 is below version 1, the oldest the shared database allows; update its code and restart it
+```
+
+A session with no client address, such as one on a local socket, shows as `an unseen client`.
+
+- The alert lands on the next ledger written by an allowed writer, which may be a different ledger from the one the
+  refused writer tried to change. Each ledger written while the refused session stays connected gets its own alert.
+- An open alert with the same text is not raised twice. A closed one is not raised again on that ledger while the
+  same text still applies; a different address, version or floor makes a new alert.
+- Once the refused writer's connection closes, its advisory lock is released and no further alert is raised.
+
+### Inspect the floor and refused writers
+
+Read the stored floor:
+
+```bash
+psql "$AGENTIHOOKS_SWARM_DATABASE_URL" -At -c "SELECT version FROM writer_floor WHERE name = 'ledger'"
+```
+
+On current code this prints `1`. No row means no writer on floor code has set the database up yet.
+
+List refused writers still connected, with the version each sent and the floor it hit:
+
+```bash
+psql "$AGENTIHOOKS_SWARM_DATABASE_URL" -c "
+SELECT DISTINCT COALESCE(host(a.client_addr), 'an unseen client') AS writer, a.pid,
+       l.objid::BIGINT / 65536 AS version, l.objid::BIGINT % 65536 AS floor
+FROM pg_locks l JOIN pg_stat_activity a ON a.pid = l.pid
+WHERE l.locktype = 'advisory' AND l.classid = 1280788050 AND l.objsubid = 2
+  AND l.database = (SELECT oid FROM pg_database WHERE datname = current_database())"
+```
+
+No rows means no refused writer is connected.
+
+Count unrecorded generation bumps, the figure the floor keeps at zero. A bump is unrecorded when a ledger's
+`generation` advances and `row_changes` holds no row for that ledger and generation. On 23 October, sampling the
+hosted database for one hour before and one hour after the floor reached it gave 286 and 344 bumps, none
+unrecorded. The old workstation writer had already been replaced on 22 October, so the floor guards against its
+return rather than moving a live count.
+
+### Raise the floor
+
+When a change makes an older writer harmful to replicas:
+
+1. In the Postgres repository module, raise `VERSION` and `REQUIRED` together to the new number and say what the
+   version adds in the comment above them.
+2. Merge it to `dev`. The first process on the new code to set up the schema raises the stored floor; from then on
+   every writer below it is refused.
+3. Restart or update every ledger server on the shared database, workstation servers included. Watch for `writer`
+   alerts on the ledgers and run the refused writers query above.
+
+Never raise `REQUIRED` above `VERSION`: that code would refuse its own writes.
+
+The floor is never lowered by code. Rolling back to a release below the stored floor stops that release from writing.
+Lowering it is a manual statement on the database, `UPDATE writer_floor SET version = <n> WHERE name = 'ledger'`, and
+only makes sense after the newer writers are gone.
+
 ## Configuration
 
-The values are constants in the Postgres repository module (`LOCK_WAIT`, `LOCK_TRIES`, `SESSION`) and change only
-through a pull request. No environment variable overrides them. The only setting is the database address,
+The values are constants in the Postgres repository module (`LOCK_WAIT`, `LOCK_TRIES`, `SESSION`, `VERSION`,
+`REQUIRED`) and change only through a pull request. No environment variable overrides them. The only setting is the database address,
 `AGENTIHOOKS_SWARM_DATABASE_URL`; without it the ledger uses SQLite in `LEDGER_DIR` and none of this applies. See the
 [Docker Compose quick start](../getting-started/compose-quick-start.md) for where the address is set.
 
@@ -159,6 +270,10 @@ through a pull request. No environment variable overrides them. The only setting
   command above after putting anything in between.
 - A process that already holds a connection opened before an upgrade keeps that connection's settings until it is
   replaced; restart ledger servers after deploying a change to these values.
+- The writer floor trigger guards only generation changes on the `ledgers` table. Code older than the floor that writes
+  other tables without bumping the generation is not refused by the database.
+- A refused writer is named by its client address only while its connection stays open. A writer that exits after its
+  refusal leaves no alert if no allowed write happens before it disconnects; its own error is then the only record.
 
 ## Troubleshooting
 
@@ -169,6 +284,10 @@ through a pull request. No environment variable overrides them. The only setting
 | A holder shows `idle in transaction` for minutes | The session did not receive the settings, for example through a pooler that drops startup options, or the process predates this change | Run the `SHOW` check; restart the ledger server on current code; end the backend with `SELECT pg_terminate_backend(<pid>)` only as a stopgap |
 | `canceling statement due to statement timeout` in the server log | One statement ran past 60 seconds | Find the statement in `pg_stat_activity.query` while it runs and fix the query or its index in code |
 | Errors containing `terminating connection due to idle-in-transaction timeout` on a client | That client held a transaction open for 15 idle seconds | Look for work between statements in its transaction (file I/O, network calls) and move it outside |
+| Writes fail with `ledger writer version N is below version M, the oldest the shared database allows` | That ledger server runs code older than the stored writer floor | Pull current code on that host and restart its ledger server; confirm with the refused writers query |
+| A `writer` alert names `The ledger writer at <address> was refused` | A ledger server at that address tried to write on old code and is still connected | Update and restart the ledger server at that address, then close the alert |
+| Every write fails with the floor refusal right after a rollback | The release rolled back to is older than the floor a newer release stored | Roll forward to a release at or above the stored floor; lower it by hand only after every newer writer is gone |
+| Hosted ledger reads slow down after writes from one host, with no refusal | A writer bumps generations with no changed rows while the floor is not set, for example before the schema setup ran | Read the stored floor; restart any ledger server on floor code so its setup stores it |
 
 ## Verification in CI
 
@@ -181,6 +300,20 @@ journal must round trip. The Tests workflow calls it on every pull request push,
 dispatch, `Gate — Required` needs it on pull requests, and its step fails unless all fourteen writer lock, outbox,
 writer floor and repository scenarios ran. Unit tests in `tests/swarm_ledger/test_postgres.py` pin the connection settings and the
 three-wait retry.
+
+`tests/swarm_ledger/test_postgres_writer_floor.py` runs the writer floor in the same workflow against real Postgres:
+
+- A current writer stores floor version 1 and writes.
+- With the stored floor raised above the writer's version, the write is refused with the message above, the
+  generation does not move, and the next allowed write raises one open `writer` alert for the master.
+- A plain connection with no writer version that bumps a generation without changed rows is refused with
+  `ledger writer version 0 is below version 1`, and a replica reading the ledger afterwards serves it without a full
+  rebuild.
+- The same old connection passes when it records its changed rows first.
+
+`tests/swarm_ledger/test_postgres_floor.py` covers the refusal text, the mapping of `LW001` to `Refused`, the
+statements the check runs, and the alert rules without a database. Pull request
+[#6106](https://github.com/the-cloud-clockwork/agentihooks/pull/6106) delivered the floor.
 
 Delivery evidence for pull request
 [#5165](https://github.com/the-cloud-clockwork/agentihooks/pull/5165):
