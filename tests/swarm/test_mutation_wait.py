@@ -327,6 +327,7 @@ def test_a_cancelled_run_whose_shard_reports_cannot_be_fetched_ends_red_as_cance
 def test_complete_shard_reports_name_their_survivors_when_the_summary_was_cancelled(preflight):
     survivor = {"name": "f__mutmut_1", "fingerprint": "abc", "status": "survived"}
     _shards(preflight, _shard(0, 2), _shard(1, 2, failures=[survivor]))
+    preflight.jobs.insert(3, {"name": "mutation-shard (1)", "conclusion": "failure", "steps": []})
     held = {**waits.on("mutation", URL), "head": "first"}
     assert waits.resolution(held, {}, None, None, None, False) == (
         f"mutation preflight {URL}, now red; scripts/s1.py:f__mutmut_1:abc (survived)"

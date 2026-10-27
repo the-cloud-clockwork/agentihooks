@@ -246,7 +246,11 @@ def _shard_reports(repo, number, artifacts):
     if not shards:
         raise Missing
     jobs = _api(f"repos/{repo}/actions/runs/{number}/jobs?per_page=100")["jobs"]
-    if any(job["name"] != "mutation" and job["conclusion"] not in ("success", "skipped") for job in jobs):
+    if any(
+        job["name"].partition(" ")[0] not in ("mutation", "mutation-shard")
+        and job["conclusion"] not in ("success", "skipped")
+        for job in jobs
+    ):
         raise Missing
     reports = [_archive(repo, artifact)[0] for _, artifact in sorted(shards.items())]
     measured = [report.get("shard") or {} for report in reports]
