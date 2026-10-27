@@ -44,6 +44,8 @@ FAKEREDIS = "fakeredis"
 TREE_CHECKS = (f"{TESTS}/test_codeowners.py", f"{TESTS}/test_ci_pull_request_api.py")
 # Stored test seconds one leg runs inside the unit step timeout; a full shard holds about 157 and runs in 217.
 LEG_SECONDS = 180.0
+# A selected leg may hold one full unit shard's share of the stored suite, which that shard runs inside its timeout.
+FULL_SHARDS = 20
 UNKNOWN_SECONDS = 10.0
 
 
@@ -132,7 +134,7 @@ def file_seconds(durations: dict[str, float], files: set[str]) -> dict[str, floa
 def legs_for(root: Path, tests: set[str], durations: dict[str, float], limit: int) -> list[list[str]] | None:
     seconds = file_seconds(durations, tests)
     total = sum(seconds.values())
-    if total > LEG_SECONDS * limit:
+    if total > max(LEG_SECONDS, sum(durations.values()) / FULL_SHARDS) * limit:
         return None
     count = min(limit, max(1, math.ceil(total / LEG_SECONDS)))
     files = sorted(tests - FIRST_SHARD_FILES)
