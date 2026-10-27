@@ -27,6 +27,7 @@ class KillMemory:
         return path.read_text() if path.is_file() else None
 
     def cost(self, mutant: str, tests: Iterable[str]) -> float | None:
+        tests = sorted(set(tests))
         path = self._cost_path(mutant, tests)
         if not path.is_file():
             return None
