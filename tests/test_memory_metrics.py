@@ -427,3 +427,70 @@ def test_inactive_replacement_cannot_clear_active_index_lag(tmp_path):
     index.worker.activate(index.domain, replacement, 1, now=160.0)
     assert recorder.meter.status(caller, scope, 170.0)["embedding_lag_seconds"] == 0.0
     index.session.catalog.close()
+
+
+def test_existing_archive_reconciles_before_new_spool_batches_and_survives_restart(tmp_path):
+    from tests.sv2_idx02_cases import grant, records
+    from tests.sv2_idx03_cases import Index
+    from tests.sv2_obs02_cases import FIXTURE
+
+    inputs = json.loads(FIXTURE.read_text())
+    index = Index(inputs, tmp_path)
+    index.session.append(inputs["turns"][:1])
+    scope = metrics.Scope(index.domain, inputs["session_uid"], index.session.generation)
+    caller = grant(inputs)
+    clock = [100.0]
+    recorder = progress.Recorder(
+        index.session.catalog, caller, scope, inputs["grant"]["projects"][0], clock=lambda: clock[0]
+    )
+    baseline = index.session.sequence
+    assert recorder.reconcile(index.session.store) == baseline
+    initial = recorder.meter.status(caller, scope, 100.0)
+    assert initial["stages"]["archive"]["through"] == baseline
+    assert initial["stages"]["indexed_chunk"]["through"] == 0
+    assert initial["stages"]["brain_consumed"]["through"] == 0
+    queue = spool.Spool(
+        spool.SpoolConfig(tmp_path / "spool", 1000000, 800000), clock=lambda: clock[0], progress=recorder
+    )
+    clock[0] = 110.0
+    queue.append("new-tail", records(inputs["turns"][1:3]))
+    queue.flush(lambda entry: index.session.append([entry.records]))
+    assert recorder.meter.status(caller, scope, 150.0)["archive_lag_seconds"] == 0.0
+    snapshot = recorder.meter.snapshot()
+    assert recorder.reconcile(index.session.store) == index.session.sequence
+    assert recorder.meter.snapshot() == snapshot
+    index.restart()
+    restored = progress.Recorder(index.session.catalog, caller, scope, inputs["grant"]["projects"][0])
+    assert restored.meter.status(caller, scope, 200.0)["stages"]["archive"]["through"] == index.session.sequence
+    index.session.catalog.close()
+
+
+@pytest.mark.parametrize("damage", ["missing", "corrupt", "ungranted"])
+def test_archive_reconciliation_refusal_changes_no_progress(tmp_path, damage):
+    from tests.sv2_idx02_cases import grant
+    from tests.sv2_idx03_cases import Index
+    from tests.sv2_obs02_cases import FIXTURE
+
+    inputs = json.loads(FIXTURE.read_text())
+    index = Index(inputs, tmp_path)
+    index.session.append(inputs["turns"][:1])
+    scope = metrics.Scope(index.domain, inputs["session_uid"], index.session.generation)
+    recorder = progress.Recorder(index.session.catalog, grant(inputs), scope, inputs["grant"]["projects"][0])
+    before = recorder.meter.snapshot()
+    if damage == "ungranted":
+        recorder.grant = Grant("other", "other-corpus", frozenset())
+        error = EvidenceRefused
+    else:
+        manifest = index.session.catalog.manifest(*scope.key())
+        path = index.session.store._path(manifest[0]["object_digest"])
+        if damage == "missing":
+            path.unlink()
+        else:
+            path.write_bytes(b"corrupt")
+        from hooks.memory.archive import EvidenceIntegrityError
+
+        error = EvidenceIntegrityError
+    with pytest.raises(error):
+        recorder.reconcile(index.session.store)
+    assert recorder.meter.snapshot() == before
+    index.session.catalog.close()

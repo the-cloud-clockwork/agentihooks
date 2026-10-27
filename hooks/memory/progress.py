@@ -3,6 +3,7 @@ import json
 import time
 from collections.abc import Callable
 
+from hooks.memory import archive
 from hooks.memory.api.ingest import Grant
 from hooks.memory.catalog import Catalog, Conflict
 from hooks.memory.metrics import KEY, STAGES, Metrics, Scope
@@ -28,6 +29,38 @@ class Recorder:
     ) -> None:
         self.meter, self.grant, self.scope, self.clock = Metrics(catalog), grant, scope, clock
         self.meter.bind(grant, scope, project)
+
+    def reconcile(self, store: archive.ObjectStore) -> int:
+        self.meter._authorize(self.grant, self.scope)
+        durable = self.meter.catalog.watermark(*self.scope.key())
+        evidence = archive.evidence(
+            self.meter.catalog, store, self.grant, self.scope.access_domain, self.scope.session_uid
+        )
+        source = next(item for item in evidence["sources"] if item["source_generation"] == self.scope.source_generation)
+        through = 0
+        for event in source["events"]:
+            if event["sequence"] != through + 1:
+                break
+            through += 1
+        through = min(through, durable)
+        with self.meter.catalog._transaction():
+            self.meter._authorize(self.grant, self.scope)
+            first = self.meter.catalog.db.execute(
+                f"SELECT MIN(previous_through) FROM memory_progress_batch WHERE {KEY}", self.scope.key()
+            ).fetchone()[0]
+            if first is not None:
+                through = min(through, first)
+            points = self.meter._points(self.scope)
+            now = self.clock()
+            if not points:
+                self.meter._advance(self.scope, "local_spool", durable, now)
+                self.meter._advance(self.scope, "archive", 0, 0.0)
+                self.meter._advance(self.scope, "indexed_chunk", 0, 0.0)
+                self.meter._advance(self.scope, "brain_consumed", 0, 0.0)
+            current = self.meter._points(self.scope)["archive"][-1][0]
+            if through > current:
+                self.meter._advance(self.scope, "archive", through, now)
+            return max(current, through)
 
     def buffered(self, entry: Entry) -> None:
         self.meter._authorize(self.grant, self.scope)
