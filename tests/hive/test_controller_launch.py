@@ -724,6 +724,20 @@ def test_an_ended_launch_releases_its_admission_reservation(setup):
     assert admission.pending(setup.store.redis, "remote") == 0
 
 
+def test_a_live_acknowledgement_keeps_its_admission_reservation_only_for_the_settle_window(setup):
+    import time
+
+    from scripts.hive import admission
+
+    _, order, ack = live_order(setup)
+    member = f"fixture/{setup.store.execution_registry.get('fixture', order.execution_id).name}"
+    assert admission.reserve(setup.store.redis, order.hive, member, 1) == (True, 0)
+    assert setup.launcher.complete(order, ack).ok
+    expires = setup.store.redis.zscore(admission.key(order.hive), member)
+    assert expires <= time.time() * 1000 + admission.SETTLE_MS
+    assert admission.pending(setup.store.redis, order.hive) == 1
+
+
 def test_an_expired_acknowledgement_releases_its_admission_and_launch_slot(setup):
     from scripts.hive import admission, launch
 
