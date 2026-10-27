@@ -315,6 +315,21 @@ def test_the_queue_defaults_to_half_of_the_lane_cap_for_focus():
     assert dispatcher.queue(focus_split(49), "", {"eng": 99})[0] == "a"
 
 
+def test_focus_order_defaults_to_half_of_an_odd_lane_cap():
+    order = dispatcher._focus_order(focus_split(49), {"eng": 99})
+    assert order["h"] == order["a"] == 1
+
+
+def test_ordered_defaults_to_half_of_an_odd_lane_cap():
+    found = focus_split(49)
+    assert dispatcher.ordered(found, "", dispatcher.leverage(found), {"eng": 99})[0] == "a"
+
+
+def test_a_lane_without_focus_holders_keeps_its_first_focus_slot():
+    order = dispatcher._focus_order(focus_split(0), {"eng": 2}, 50)
+    assert order["h"] < order["a"]
+
+
 def test_lane_caps_name_each_lane_with_its_own_cap():
     config = SwarmConfig(SLUG, "/repo", max_eng=1, max_ci=2, max_plan=3)
     assert dispatcher.lane_caps(config) == {"eng": 1, "ci": 2, "plan": 3}
@@ -326,6 +341,14 @@ def test_the_claim_key_orders_focus_by_the_swarm_focus_weight(store):
     key = dispatcher.claim_key(config, found)
     known = {t["id"]: t for t in found["tasks"]}
     assert key(known["h"]) < key(known["a"])
+
+
+def test_the_claim_key_yields_focus_when_the_lane_share_is_full(store):
+    config = store.update(SLUG, autonomy="delegate", max_eng=2, focus_weight=50)
+    found = focus_split()
+    key = dispatcher.claim_key(config, found)
+    known = {t["id"]: t for t in found["tasks"]}
+    assert key(known["a"]) < key(known["h"])
 
 
 @pytest.mark.parametrize("weight,head", [(50, ["a", "h"]), (100, ["h", "a"])])
@@ -340,6 +363,12 @@ def test_below_delegate_proposals_follow_the_swarm_focus_weight(store, home, shi
     config = store.update(SLUG, autonomy="assist", max_eng=2, focus_weight=100)
     proposals = dispatcher.rank_pass(SLUG, config, store, Ledger(), focus_split(), NOW)
     assert proposed(proposals) == ["h", "a"]
+
+
+def test_below_delegate_proposals_yield_focus_when_the_lane_share_is_full(store, home, shipped):
+    config = store.update(SLUG, autonomy="assist", max_eng=2, focus_weight=50)
+    proposals = dispatcher.rank_pass(SLUG, config, store, Ledger(), focus_split(), NOW)
+    assert proposed(proposals) == ["a", "h"]
 
 
 def test_below_delegate_a_high_leverage_task_yields_one_master_proposal_and_no_rank(store, home, shipped):
@@ -885,6 +914,16 @@ def test_the_doctor_fix_phase_reaches_the_rank_pass_queue_under_a_watched_focus(
     ledger = Ledger()
     dispatcher.rank_pass(SLUG, config, store, ledger, watched_fix_chain(), NOW)
     assert [comment[0] for comment in ledger.comments] == ["g"]
+
+
+def test_the_claim_key_positions_the_doctor_fix_chain_before_watched_work(store):
+    from scripts.doctor import priming
+
+    config = store.update(SLUG, autonomy="delegate", template=priming.TEMPLATE)
+    found = watched_fix_chain()
+    key = dispatcher.claim_key(config, found)
+    known = {t["id"]: t for t in found["tasks"]}
+    assert key(known["g"])[1] < key(known["b"])[1]
 
 
 def test_a_chain_claim_reports_the_seconds_from_the_merge_on_the_task_and_logs_it(store, home, shipped):

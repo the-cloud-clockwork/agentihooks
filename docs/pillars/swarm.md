@@ -5738,6 +5738,8 @@ The special measurement rule applies only to `tune` tasks measuring `code` or
 `ci` dependencies. Dependencies of other kinds follow the usual dependency
 rules. There is no separate enable flag or measurement delay setting.
 
+To count Doctor verdicts over a window, including repeated judgments of one finding, use `agentihooks doctor <slug> verdict-log`; see [Doctor verdict history](../reference/doctor-verdicts.md).
+
 ### Configure and inspect a measurement task
 
 For example, a master can create an after window task for an existing fix
