@@ -307,6 +307,7 @@ def test_a_selection_in_one_pass_takes_its_hive_room_from_later_tasks(setup, in_
 def test_a_refused_hive_reservation_turns_the_placement_into_a_wait(setup, in_pass):  # noqa: F811
     from scripts.hive import admission
     from scripts.hive.placement import Wait
+    from scripts.swarm import seat_spawn
     from scripts.swarm_v2.runtime.base import Status
     from tests.hive.test_controller_launch import publish_room
 
@@ -320,6 +321,7 @@ def test_a_refused_hive_reservation_turns_the_placement_into_a_wait(setup, in_pa
     result = launch.spawn(request)
     assert result.status is Status.UNAVAILABLE
     assert "no hive for eng has room: remote" in result.detail
+    assert seat_spawn.room_refused(SpawnError(result.detail, "unavailable"))
     waited = launch.select(setup.config, "eng", request.task)
     assert isinstance(waited, Wait)
     assert isinstance(launch.select(setup.config, "eng", {"id": "later"}), Wait)

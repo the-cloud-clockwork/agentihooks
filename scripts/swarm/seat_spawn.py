@@ -31,7 +31,7 @@ def host_hold(slug: str, store, now_ms: int, what: str) -> str:
     return tick._hold(slug, store, f"holding the {what} spawn: {host}") if host else ""
 
 
-def room_refused(error) -> bool:
+def room_refused(error: BaseException) -> bool:
     from scripts.hive.placement import HAS_ROOM, LOCAL_FULL
     from scripts.swarm.tick import SpawnError
 
