@@ -5,7 +5,7 @@ run=(/usr/bin/gh)
 if [[ -n "${HIVE_GITHUB_AUTH_MODE:-}" || -s "${AGENTIHOOKS_HOME:-$HOME/.agentihooks}/github-token" ]]; then
   run=(/opt/venv/bin/python3 -m scripts.github_app_cli exec /usr/bin/gh)
 fi
-if [[ " $* " == *" auth status "* ]]; then
+if [[ " ${*:1:4} " == *" auth status "* ]]; then
   "${run[@]}" "$@" 2>&1 | sed -E -e 's/(gh[opsur]_|github_pat_)[A-Za-z0-9_*]+/<hidden>/g' -e 's/(Token: ).*/\1<hidden>/'
   exit 0
 fi

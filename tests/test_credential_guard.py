@@ -368,6 +368,8 @@ GH_LEAK_FREE = [
     "gh auth login --with-token < /dev/null",
     "gh auth setup-git",
     "gh pr view 7843",
+    "gh pr list --search auth token",
+    'gh issue comment 1 --body "auth status"',
     "gh api rate_limit --jq .rate.remaining",
     'test -n "${GH_TOKEN:-}" && echo set || echo unset',
     "grep -rn 'gh auth status' docs",
