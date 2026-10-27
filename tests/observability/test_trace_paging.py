@@ -207,6 +207,25 @@ def test_repeated_streamed_generations_page_without_lost_or_doubled_observations
     assert len(state["records"]) < len(records) / 4
 
 
+@pytest.mark.parametrize("chunk", [3, 7])
+def test_repeated_metadata_records_resume_paging_past_the_paged_records(tmp_path, monkeypatch, quiet, chunk):
+    monkeypatch.setattr("hooks.config.LANGFUSE_FIELD_MAX_CHARS", 500)
+    metadata = [{"type": "custom-title", "customTitle": "rig"}, {"type": "agent-name", "agentName": "master"}]
+    records = list(metadata)
+    for turn in _claude(12, 3):
+        records.append(turn)
+        if turn["uuid"].startswith("e"):
+            records.extend(metadata)
+    reference, _, _ = _run(tmp_path, monkeypatch, "reference", 10**9, records, len(records))
+    paged, _, path = _run(tmp_path, monkeypatch, "paged", CAP, records, chunk)
+    state = agent_trace._cursor("session")
+    assert state["paged"]["turns"] > 0
+    assert _observed(paged) == _observed(reference)
+    assert len(state["accepted"]) + state["paged"]["spans"] == len(paged.observations)
+    assert state["source"]["records"] == len(records)
+    assert state["source"]["accepted_bytes"] == path.stat().st_size
+
+
 @pytest.mark.parametrize("chunk", [1, 3])
 def test_streamed_generation_keeps_its_accepted_identity_after_tool_results(tmp_path, monkeypatch, quiet, chunk):
     records = _claude(1, 2)
