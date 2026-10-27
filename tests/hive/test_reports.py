@@ -166,8 +166,6 @@ def test_a_lost_hive_marks_its_executions_unknown_not_dead(remote):
 
 
 LOST = 10 * 60_000
-LIVE = 90_000
-SUSPECT_STATE = "suspect"
 NOW = 10**9
 
 
@@ -257,34 +255,41 @@ def test_tick_retires_workers_of_a_hive_that_stopped_reporting(remote, age, beat
 
 
 @pytest.mark.parametrize(
-    ("state", "age", "retired"),
+    ("finished", "past_live", "beat_age", "action"),
     [
-        ("finished", LIVE + 1, True),
-        ("finished", LIVE, False),
-        ("finished", None, False),
-        (SUSPECT_STATE, LIVE + 1, False),
+        (True, 1, LOST + 1, "retired"),
+        (True, 1, 0, "retired"),
+        (True, 0, LOST + 1, "retry"),
+        (True, None, LOST + 1, "retry"),
+        (False, 1, LOST + 1, "held"),
     ],
 )
-def test_tick_drops_a_finished_worker_once_its_hive_misses_the_live_window(remote, state, age, retired):
+def test_tick_drops_a_finished_worker_once_its_hive_misses_the_live_window(
+    remote, finished, past_live, beat_age, action
+):
+    from scripts.hive import registry
     from scripts.swarm import idle, tick
+    from scripts.swarm.tick import SUSPECT
 
-    remote.agent = replace(remote.agent, state=state)
+    remote.agent = replace(remote.agent, state="finished" if finished else SUSPECT)
     remote.store.put_agent("fixture", remote.agent)
-    _beat_hive(remote, age)
-    idle.beat(remote.redis, "fixture", remote.agent.name, idle.WORKING, NOW - LIVE - 1)
+    _beat_hive(remote, None if past_live is None else registry.LIVE_MS + past_live)
+    idle.beat(remote.redis, "fixture", remote.agent.name, idle.WORKING, NOW - beat_age)
     remote.store.claim("fixture", "task", remote.agent.name, 60000)
-    rows = {"task": {"state": "done", "claimed_by": remote.agent.name}}
+    rows = {"task": {"state": "done" if finished else "claimed", "claimed_by": remote.agent.name}}
     remote.runtime.retire = Mock(return_value=False)
 
     actions = tick._reap("fixture", remote.store, Mock(), remote.runtime, rows, NOW)
 
-    if retired:
-        remote.runtime.retire.assert_not_called()
-        assert actions == [f"retired {remote.agent.name}: its hive stopped reporting"]
-        assert remote.store.agents("fixture") == []
-    else:
-        assert [a.name for a in remote.store.agents("fixture")] == [remote.agent.name]
-        assert actions in ([f"could not retire {remote.agent.name}, retrying next tick"], [])
+    expected = {
+        "retired": [f"retired {remote.agent.name}: its hive stopped reporting"],
+        "retry": [f"could not retire {remote.agent.name}, retrying next tick"],
+        "held": [],
+    }[action]
+    assert actions == expected
+    assert remote.runtime.retire.call_count == (1 if action == "retry" else 0)
+    kept = [a.name for a in remote.store.agents("fixture")]
+    assert kept == ([] if action == "retired" else [remote.agent.name])
 
 
 def test_lost_hive_worker_leaves_a_task_awaiting_merge_in_pull_request(remote):
