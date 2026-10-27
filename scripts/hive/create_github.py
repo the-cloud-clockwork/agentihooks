@@ -51,7 +51,10 @@ def tree(run: Run, repo: str, ref: str) -> set[str]:
 
 def open_heads(run: Run, repo: str) -> set[str]:
     argv = ["pr", "list", "-R", repo, "--state", "open", "--limit", str(OPEN_LIMIT), "--json", "headRefName"]
-    return set(gh(run, [*argv, "--jq", ".[].headRefName"]).splitlines())
+    heads = gh(run, [*argv, "--jq", ".[].headRefName"]).splitlines()
+    if len(heads) >= OPEN_LIMIT:
+        raise auth.HiveError(f"{repo} has {OPEN_LIMIT} or more open pull requests, so hive create cannot see them all")
+    return set(heads)
 
 
 def open_pr(

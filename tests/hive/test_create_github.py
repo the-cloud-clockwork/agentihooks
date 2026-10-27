@@ -146,3 +146,11 @@ def test_open_heads_lists_the_branch_of_every_open_pull_request():
         ["gh", "pr", "list", "-R", "o/r", "--state", "open", "--limit", "1000", "--json", "headRefName"]
         + ["--jq", ".[].headRefName"]
     ]
+
+
+def test_open_heads_at_the_limit_is_a_refusal_and_one_below_is_read():
+    below = [f"b{index}" for index in range(create_github.OPEN_LIMIT - 1)]
+    assert len(create_github.open_heads(_tree_run("\n".join(below)), "o/r")) == create_github.OPEN_LIMIT - 1
+    with pytest.raises(auth.HiveError) as refused:
+        create_github.open_heads(_tree_run("\n".join([*below, "last"])), "o/r")
+    assert str(refused.value) == "o/r has 1000 or more open pull requests, so hive create cannot see them all"
