@@ -6,6 +6,7 @@ from collections.abc import Callable
 from dataclasses import asdict
 from typing import TYPE_CHECKING
 
+from scripts.doctor.slot_census import CLAIM
 from scripts.handoff import transfers
 from scripts.swarm.store import MASTER, SwarmError
 
@@ -99,8 +100,6 @@ def slot_claims(
     *,
     until: str | None = None,
 ) -> dict:
-    from scripts.doctor.slot_census import CLAIM
-
     entries, error = _grep(CLAIM, since, until, run)
     lives = [
         {**row, "slug": swarm}

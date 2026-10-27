@@ -9,7 +9,7 @@ from scripts.swarm.store import SwarmError
 KIND = "local slot census"
 CLAIM = "local slot claim"
 LINE = re.compile(
-    r"local slot claim (?P<name>\S+) for (?P<task>\S+) on (?P<machine>\S+) counted (?P<count>\d+) of (?P<max>\d+): "
+    r"local slot claim (?P<name>\S+) for (?P<task>\S+) on (?P<machine>\S+) counted \d+ of \d+: "
     r"(?P<names>.*)",
     re.S,
 )
