@@ -1059,13 +1059,31 @@ def test_the_tests_gate_may_skip_sonar_when_selection_marks_the_pull_request_tes
     head["test.yml"]["jobs"]["select"]["outputs"]["sonar"] = "${{ steps.select.outputs.sonar }}"
     gate = head["test.yml"]["jobs"]["gate-required"]
     gate["steps"] = ci_reuse.test_only_sonar(gate["steps"])
-    assert '(if .select.outputs.sonar == "skip" then [] else ["sonar"] end)' in gate["steps"][0]["run"]
+    assert '- (if .select.outputs.sonar == "skip" then ["sonar"] else [] end)' in gate["steps"][0]["run"]
     if weakened:
         gate["steps"][0]["run"] = gate["steps"][0]["run"].replace('"skip"', '"skip" or true')
     config = json.loads((_ROOT / ".github/gate-wiring.json").read_text())
     policy = json.loads((_ROOT / ".github/workflows/trusted-actors.json").read_text())
     problems = gate_protected.grade(base, config, head, config, _TODAY, policy)
     assert bool(problems) == weakened, problems
+
+
+def test_a_base_skipping_sonar_on_test_only_changes_still_refuses_a_head_that_drops_the_writer_lock():
+    from scripts import ci_reuse
+
+    base = {path.name: yaml.safe_load(path.read_text()) for path in (_ROOT / ".github/workflows").glob("*.yml")}
+    base["test.yml"]["jobs"]["select"]["outputs"]["sonar"] = "${{ steps.select.outputs.sonar }}"
+    gate = base["test.yml"]["jobs"]["gate-required"]
+    gate["steps"] = ci_reuse.test_only_sonar(gate["steps"])
+    assert ci_reuse.POSTGRES_REQUIRED[1] in gate["steps"][0]["run"]
+    head = copy.deepcopy(base)
+    step = head["test.yml"]["jobs"]["gate-required"]["steps"][0]
+    step["run"] = step["run"].replace(ci_reuse.POSTGRES_REQUIRED[1], ci_reuse.POSTGRES_REQUIRED[0])
+    config = json.loads((_ROOT / ".github/gate-wiring.json").read_text())
+    policy = json.loads((_ROOT / ".github/workflows/trusted-actors.json").read_text())
+    assert gate_protected.grade(base, config, base, config, _TODAY, policy) == []
+    problems = gate_protected.grade(base, config, head, config, _TODAY, policy)
+    assert any("changes its steps" in problem for problem in problems), problems
 
 
 @pytest.mark.parametrize("existing", [False, True])
