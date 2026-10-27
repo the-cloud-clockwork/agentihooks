@@ -5624,7 +5624,7 @@ writers above or `task set`.
 
 ## Stability probes
 
-`agentihooks swarm <slug> probe` reads the live swarm and prints one tab separated line per invariant: `pass` or
+`agentihooks swarm <id> probe` reads the live swarm and prints one tab separated line per invariant: `pass` or
 `fail`, the invariant and its measured number.
 
 | Invariant | Pass when |
