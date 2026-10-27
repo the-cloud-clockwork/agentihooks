@@ -153,8 +153,10 @@ def _pinned(hives: list[dict], task: dict, role: str) -> tuple[list[dict], place
     return kept, None if kept else placement.Wait(placement.NEEDS_WORKSTATION, role)
 
 
-def _by_mode(config: SwarmConfig, hives: list[dict], now: int) -> list[dict]:
-    return placement.round_robin(hives, config.placement_nodes, now) if config.placement_mode == ROUND_ROBIN else hives
+def _by_mode(config: SwarmConfig, hives: list[dict], role: str, now: int) -> list[dict]:
+    if config.placement_mode != ROUND_ROBIN or role in registry.UI_ROLES:
+        return hives
+    return placement.round_robin(hives, config.placement_nodes, config.repo, now)
 
 
 def _matched_origin(hives: list[dict], hive: str, repo: str) -> str | placement.Wait:
@@ -239,7 +241,7 @@ class HiveLaunch:
             for hive in self._pass_hives[1]:
                 if hive["id"] == selected.hive:
                     hive["room"] -= 1
-                    hive["agents"] += 1
+                    hive[placement.PLACED] = hive.get(placement.PLACED, 0) + 1
         return selected
 
     def _select(self, config: SwarmConfig, lane: str, task: dict) -> Selection | placement.Wait:
@@ -270,7 +272,7 @@ class HiveLaunch:
         from scripts.swarm import local_slots
         from scripts.swarm.commands import hive_id
 
-        hives = _by_mode(config, hives, now)
+        hives = _by_mode(config, hives, role, now)
         if lane != placement.MASTER:
             for index, hive in enumerate(hives):
                 if hive["id"] == hive_id():
