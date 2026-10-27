@@ -3295,6 +3295,44 @@ test only head failed on the empty subject; the green
 [Tests run 39373777928](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39373777928) passed with
 the fix.
 
+### Doctor failed spawn detector
+
+The Doctor's `failed spawn` detector (`scripts.doctor.spawns.failed`) reads the watched swarm's tick actions, the
+lines the swarm timer journal prints with the swarm's slug in front. It counts these three shapes:
+
+```text
+<slug>: spawn failed for <task>: <reason>
+<slug>: spawn failed for <task>, task <task> reopened: <reason>
+<slug>: master spawn failed: <reason>
+```
+
+Each failed task raises `failed-spawn/<task>`, and a failed master `failed-spawn/master`. The evidence lists every
+reason in journal order, the number is the count of failures, and the threshold is at least one failed spawn.
+
+The task id stops at the first space, comma or colon, and everything after the next `: ` is the reason, colons
+included. A reason from a hive or from `init-agent` usually holds several colons:
+
+```text
+<slug>: spawn failed for dt2: hive launch failed: refused: agentihooks init-agent: canary timeout
+  id        failed-spawn/dt2
+  evidence  hive launch failed: refused: agentihooks init-agent: canary timeout
+```
+
+A failure whose reason says `account reservation is full` is skipped unless the last `spawn capacity for <task>`
+line the tick printed for that task shows an open account of the same harness with fewer sessions than its cap.
+
+Measure one finding the same way before and after a fix. The reading counts the spawn journal over the window, so 0
+is a real reading for a task on the watched ledger or for the master:
+
+```bash
+agentihooks doctor rig-grade-swarm measure failed-spawn/t-runners-doc-worker001
+```
+
+| Symptom | Check | Cause and action |
+|---|---|---|
+| A finding id ends in `:`, such as `failed-spawn/dt2:`, and its reason is cut short | `git -C <agentihooks checkout> log -1 --oneline --grep '(#8039)'` prints nothing | The Doctor runs code from before [pull request #8039](https://github.com/the-cloud-clockwork/agentihooks/pull/8039), whose task id match kept the colon of a reason that held colons. Apply it with `agentihooks doctor <watched slug> intervene pull-dev`. |
+| The reason reads `the hive launch order ended before its acknowledgement` | The hive acknowledgement, see [A worker that finishes before the tick collects its acknowledgement](hives.md#a-worker-that-finishes-before-the-tick-collects-its-acknowledgement) | Since pull request #8039 this reason means the hive never acknowledged the order. A hive that acknowledged a failure is reported as `hive launch failed: <cause>`. |
+
 ## One task per agent life
 
 An agent is spawned for one task, told that task in its opening prompt, and ends when the task is done or
