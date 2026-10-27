@@ -3124,6 +3124,45 @@ seen merged is not read again.
 `--must`, `--check` and `--judge` on `task add` store a proof contract (what must be true, how it is
 checked, who judges it) that the agent's prompt carries.
 
+### Changing the kind of an existing task
+
+The master or the Doctor changes a task's kind when the proof the work needs turns out different from the
+one it was filed with, for example a `code` repair whose real proof is a measurement:
+
+```bash
+agentihooks ledger --slug <id> --as <name> task set <task> kind=tune
+```
+
+`task set` sends one `task_update` operation to the ledger API. A valid kind is stored on the same task and
+nothing else moves: its id, state, claimant, proof contract and comments stay as they were, so a claimed task
+stays with its owner. The next `done` then needs the new kind's proof from the table above. A `plan` task
+changed to another kind moves to the `eng` lane, because the plan lane accepts only plan tasks.
+
+A kind change also rewrites `steering.md` in the task's work folder so it shows the new kind. On a hosted ledger
+the work folder lives on the agent's host, not the ledger server; when the folder is absent on the server the
+rewrite is skipped and the kind still changes. The next spawn writes the steering notes on the host that runs
+the task.
+
+An unknown kind is refused before anything is stored. The API answers `400` with code `schema_invalid` and a
+message naming the accepted kinds, and the task reads exactly as it did before:
+
+```json
+{"error": {"code": "schema_invalid", "message": "Operation does not match its domain schema: kind must be one of ('code', 'ci', 'ops', 'troubleshoot', 'tune', 'research', 'plan', 'workflow')"}}
+```
+
+| Symptom | Cause and action |
+|---|---|
+| `task set <task> kind=<kind>` answers `500 storage_error` `Resource could not be read or written`, while other fields on the same task update | The hosted ledger runs a release from before pull request [#5696](https://github.com/the-cloud-clockwork/agentihooks/pull/5696), which wrote `steering.md` even when the work folder was absent on the server. Wait for the promotion that carries #5696 to reach the hosted ledger, then run the same `task set` again. |
+| `schema_invalid` with `kind must be one of` | The kind is misspelt or unknown. Use one of the listed kinds; the task was not changed. |
+| `500 storage_error` on a kind change on a release that carries #5696 | The work folder exists on the server but cannot be written, a permission or disk fault. Read the ledger server log line `Ledger API storage failure` for the cause. |
+
+`test_an_owned_task_changes_kind_over_http_and_an_invalid_kind_changes_nothing` in
+`tests/swarm_ledger/test_api_v1.py` pins this over the live HTTP API, added by pull request
+[#5719](https://github.com/the-cloud-clockwork/agentihooks/pull/5719). It failed against the rewrite from before
+#5696 in [run 39719415326](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39719415326) with the
+hosted `500` and passed with the fix in
+[run 39719418457](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39719418457).
+
 ### Shared areas in the opening prompt
 
 When the tick claims a task, it compares the task's territory with the territory of every other task in `claimed`
