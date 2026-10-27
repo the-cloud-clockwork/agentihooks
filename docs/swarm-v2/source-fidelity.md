@@ -30,8 +30,9 @@ Read from the retired service's store, collector and embedding code:
 | Incremental collector | entries written after the last collection | `uncollected_tail` range |
 | Vector rows | text preview cut to 1000 characters | rows compared at that cap |
 | Vector rows | `chunk_idx` numbered over the trimmed preview, upserted in place | `renumbered` rows and `orphans` |
+| Any of the above | no preview entry matches the raw transcript, so a range has no anchor | `unplaced` range |
 
-When no preview entry matches the raw transcript, its ranges are `unplaced`. Missing ranges are entry index ranges in the raw transcript, so they exist only for `full_raw` sources. A
+Missing ranges are entry index ranges in the raw transcript, so they exist only for `full_raw` sources. A
 preview-only source reports `missing_ranges: "unknown"`; the audit never fills absent text from a preview or a
 vector row. Limits are `LegacyLimits` (500, 500, 1000 by default).
 
@@ -45,5 +46,6 @@ which every source replays is accepted as a no op. A run naming one source twice
 
 ## Rollback
 
-Revert by deleting the classification record, the projection, while keeping the source hashes in the package evidence.
-The raw files, Redis previews and vector rows are authoritative and are never deleted by the audit.
+The classification record is a projection of the sources. To roll back, delete that record and keep the package
+evidence files, which hold every source hash and case output. The raw files, Redis previews and vector rows are
+authoritative and are never deleted by the audit.
