@@ -74,21 +74,18 @@ export function monitor() {
     if (kind === "gauge") row.append(h("span", { class: "detail" }, "—"), h("span", { class: "bar", role: "meter", "aria-label": `${label} in use`, "aria-valuemin": "0", "aria-valuemax": "100" }));
     list.append(row);
   }
-  const state = h("span", { class: "monitor-state", "data-state": "wait" }, "reading");
   const box = h("aside", { class: "monitor", "aria-labelledby": "monitor-title" },
-    h("div", { class: "monitor-head" }, h("h2", { id: "monitor-title" }, "Resource Monitor"), state), list);
+    h("div", { class: "monitor-head" }, h("h2", { id: "monitor-title" }, "Resource Monitor")), list);
   const read = async () => {
     try {
       const resp = await readMonitor();
       if (!resp.ok) throw new Error(String(resp.status));
       paint(box, (await resp.json()).data);
-      state.dataset.state = "live";
-      state.textContent = "live";
-      state.title = `Read ${new Date().toLocaleTimeString()}`;
+      box.dataset.stale = "no";
+      box.removeAttribute("title");
     } catch (error) {
-      state.dataset.state = "lost";
-      state.textContent = "offline";
-      state.title = `The resources could not be read (${error.message}); the figures are the last ones read`;
+      box.dataset.stale = "yes";
+      box.title = `The resources could not be read (${error.message}); the figures are the last ones read`;
     }
   };
   read();

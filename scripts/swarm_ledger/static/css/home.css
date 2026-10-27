@@ -78,11 +78,8 @@ li.row:hover,li.row:focus-within{background:var(--hover)}
 .monitor-head{display:flex;align-items:center;justify-content:space-between;gap:8px;padding-bottom:8px;border-bottom:1px solid var(--rule)}
 .monitor h2{display:flex;align-items:center;gap:8px;margin:0;font-size:11px;font-weight:700;letter-spacing:.16em;text-transform:uppercase;color:var(--text)}
 .monitor h2::before{content:'';width:2px;height:12px;background:var(--signal)}
-.monitor-state{display:flex;align-items:center;gap:6px;font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--dim)}
-.monitor-state::before{content:'';width:6px;height:6px;border-radius:50%;background:currentColor}
-.monitor-state[data-state=live]{color:var(--positive)}
-.monitor-state[data-state=lost]{color:var(--signal)}
 .monitor dl{margin:0}
+.monitor[data-stale=yes] dd,.monitor[data-stale=yes] .detail{opacity:.45}
 .fm{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:baseline;gap:8px;padding:7px 0;border-bottom:1px solid var(--rule)}
 .fm:last-child{border-bottom:0}
 .fm dt{font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}
