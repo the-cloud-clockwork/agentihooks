@@ -113,7 +113,8 @@ def main(argv: list[str] | None = None) -> int:
         artifact = os.environ.get("ARTIFACT", str(args.coverage))
         print(f"::error::The dev coverage {artifact} from {args.commit} is unusable ({unusable})")
         return 1
-    tests = set(json.loads(args.reused.read_text())["tests"])
+    deselected = json.loads(args.reused.read_text())
+    tests = set(deselected["tests"]) - set(deselected.get("branch", []))
     moved = moved_lines(args.repo, args.commit, args.head)
     count = keep(args.coverage, args.out, tests, moved)
     captures = keep_captures(args.captures, args.captures_out, tests)

@@ -30,6 +30,7 @@ class DepInputs:
         self.escaping = set()
         self.children = folder / "children"
         self.logs = {}
+        self.finished = folder / "finished" / f"{os.getpid()}.jsonl"
 
     def site_file(self) -> Path:
         name = hashlib.sha256(str(self.children).encode()).hexdigest()[:16]
@@ -143,6 +144,7 @@ class DepInputs:
         finally:
             self.register(self.children / f"{os.getpid()}-shared")
             self.current = self.shared
+            self.finish(item.nodeid)
 
     def relative(self, opened: set[str]) -> list[str]:
         kept = set()
@@ -158,6 +160,18 @@ class DepInputs:
                 kept.add(relative)
         return sorted(kept)
 
+    def line(self, test: str, shared: set[str]) -> str:
+        opened, escapes = self.tests[test]
+        escapes = escapes or bool(self.fixtures[test] & self.escaping)
+        return json.dumps({"test": test, "files": self.relative(opened | shared), "escapes": escapes})
+
+    def finish(self, test: str) -> None:
+        self.tests[test][0].update(self.child_reads(self.logs[test]))
+        shared = self.shared[0] | self.child_reads(self.children / f"{os.getpid()}-shared")
+        self.finished.parent.mkdir(parents=True, exist_ok=True)
+        with self.finished.open("a") as finished:
+            finished.write(self.line(test, shared) + "\n")
+
     def pytest_sessionfinish(self, session):
         if not self.tests:
             return
@@ -165,16 +179,7 @@ class DepInputs:
         shared = self.shared[0] | self.child_reads(self.children / f"{os.getpid()}-shared")
         for test, log in self.logs.items():
             self.tests[test][0].update(self.child_reads(log))
-        lines = [
-            json.dumps(
-                {
-                    "test": test,
-                    "files": self.relative(opened | shared),
-                    "escapes": escapes or bool(self.fixtures[test] & self.escaping),
-                }
-            )
-            for test, (opened, escapes) in self.tests.items()
-        ]
+        lines = [self.line(test, shared) for test in self.tests]
         (self.folder / f"{uuid.uuid4().hex}.jsonl").write_text("".join(line + "\n" for line in lines))
 
 
