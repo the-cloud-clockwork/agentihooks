@@ -73,12 +73,13 @@ jobs:
       - name: Tag and verify the promoted package
         if: steps.promote.outputs.main != '' && steps.version.outputs.existing != 'true'
         env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
           RELEASE_SHA: ${{ steps.promote.outputs.main }}
           NEXT: ${{ steps.version.outputs.next }}
         run: |
           bash scripts/ci_release.sh tag "$RELEASE_SHA" "$NEXT"
           bash scripts/ci_release.sh verify "$RELEASE_SHA" "$NEXT"
-          git push origin "refs/tags/v$NEXT"
+          gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs" -f "ref=refs/tags/v$NEXT" -f "sha=$RELEASE_SHA"
 
       - name: Create the release with generated notes
         if: steps.promote.outputs.main != ''
