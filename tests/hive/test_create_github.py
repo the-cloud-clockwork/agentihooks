@@ -113,3 +113,27 @@ def test_squash_merges_without_auto():
     run = _run([])
     create_github.squash(run, PR)
     assert run.calls == [["gh", "pr", "merge", PR, "--squash"]]
+
+
+def _tree_run(answer):
+    calls = []
+
+    def run(argv, **kwargs):
+        calls.append(argv)
+        return subprocess.CompletedProcess(argv, 0, answer, "")
+
+    run.calls = calls
+    return run
+
+
+def test_tree_lists_every_path_of_the_base():
+    run = _tree_run("k8s/a.yaml\nk8s/b/c.yaml\n")
+    assert create_github.tree(run, "o/r", "dev") == {"k8s/a.yaml", "k8s/b/c.yaml"}
+    assert run.calls == [["gh", "api", "repos/o/r/git/trees/dev?recursive=1", "--jq", create_github.TREE]]
+    assert create_github.TREE == 'if .truncated then "truncated" else .tree[].path end'
+
+
+def test_a_truncated_tree_is_a_refusal():
+    with pytest.raises(auth.HiveError) as refused:
+        create_github.tree(_tree_run("truncated\n"), "o/r", "dev")
+    assert str(refused.value) == "the o/r dev tree is too large to list, so hive create cannot see its hive files"
