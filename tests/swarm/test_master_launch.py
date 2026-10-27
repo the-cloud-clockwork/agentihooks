@@ -114,6 +114,12 @@ def printed(capsys):
     return json.loads(capsys.readouterr().out.strip().splitlines()[-1])
 
 
+def counted(store, count):
+    from scripts.swarm_v2 import masters as master_seats
+
+    master_seats.MasterSeats(store.redis).set_count("sw", count)
+
+
 def test_the_prompt_shows_the_last_master_and_asks_last_or_new(up, monkeypatch, capsys):
     store, _, rt = up
     name = gone_master(store, harness="codex")
@@ -314,6 +320,7 @@ def test_a_last_master_is_never_resumed_onto_a_live_front_door_and_the_new_one_t
     store.put_agent("sw", front)
     rt.live.add(front.name)
     gone_master(store, conversation="conv-new")
+    counted(store, 2)
     asked = answers(monkeypatch, "1", "y")
     assert run("sw", "master", "up") == 0
     out = capsys.readouterr().out
@@ -366,6 +373,7 @@ def test_a_new_master_beside_a_live_front_door_takes_its_own_seat_and_title(up, 
     live = AgentRecord("master@a1b2c3-0005", MASTER, MASTER, harness="claude", seat="master@sw", started_at=5)
     store.put_agent("sw", live)
     rt.live.add(live.name)
+    counted(store, 2)
     answers(monkeypatch)
     assert run("sw", "master", "up", "--new") == 0
     launched = printed(capsys)
@@ -384,6 +392,7 @@ def test_a_new_master_skips_every_master_seat_already_held(up, monkeypatch, caps
     for name, seat in (("master@a1b2c3-0005", "master@sw"), ("master@a1b2c3-0006", "master-2@sw")):
         store.put_agent("sw", AgentRecord(name, MASTER, MASTER, harness="claude", seat=seat, started_at=5))
         rt.live.add(name)
+    counted(store, 3)
     answers(monkeypatch)
     assert run("sw", "master", "up", "--new") == 0
     assert printed(capsys)["seat"] == "master-3@sw"
@@ -418,6 +427,7 @@ def test_a_finished_front_door_still_running_keeps_its_seat(up, monkeypatch, cap
     live = AgentRecord("master@a1b2c3-0005", MASTER, MASTER, state="finished", seat="master@sw", started_at=5)
     store.put_agent("sw", live)
     rt.live.add(live.name)
+    counted(store, 2)
     answers(monkeypatch)
     assert run("sw", "master", "up", "--new") == 0
     assert printed(capsys)["seat"] == "master-2@sw"
@@ -489,6 +499,7 @@ def test_a_failed_launch_beside_the_front_door_says_why_and_leaves_no_record(up,
     live = AgentRecord("master@a1b2c3-0005", MASTER, MASTER, harness="claude", seat="master@sw", started_at=5)
     store.put_agent("sw", live)
     rt.live.add(live.name)
+    counted(store, 2)
     rt.fail = True
     answers(monkeypatch)
     assert run("sw", "master", "up", "--new") == 1
