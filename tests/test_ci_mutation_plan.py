@@ -171,6 +171,9 @@ def test_split_mutant_measurements_balance_slices_and_match_reported_costs(tmp_p
         for position, index in enumerate(assignment):
             assert unit_cost(plan, name, index) == plan["unit_costs"][name][position]
     assert measured.measured_plan([(list(reversed(names)), results)], memory, limit=2) == plan
+    mixed = measured.measured_plan([(["scripts.sample.x_plain__mutmut_1", *names], results)], memory, limit=2)
+    assert mixed["unit_costs"] == plan["unit_costs"]
+    assert "scripts.sample.x_plain__mutmut_1" in mixed["assignments"]
 
 
 def test_a_mutant_with_a_recorded_killer_costs_that_test_and_one_without_keeps_its_traced_sum(tmp_path):
