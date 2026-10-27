@@ -1,0 +1,48 @@
+{
+  "cases": [
+    "A",
+    "B",
+    "C"
+  ],
+  "compatibility": "the five legacy tool names already aliased by the session tools keep their alias, read from hooks.memory.api.records.ALIASES, still gated by AGENTIHOOKS_SESSION_ALIASES and expiring on 2027-01-31; every other legacy capability is replaced by a named agentihooks interface or removed with its retired feature; alias termination in the session tools, expiry refusal and the label check are covered by the SV2-IDX-05 session tool tests (aliases terminate in their targets and are counted, an alias past its expiry is refused, alias expiry matches its label)",
+  "evidence_class": "mocked: the consumer inventory is a fixture and a JSON file stands in for the authoritative migration record; the known consumer list was read from antoncore and agentibrain-kernel source, and no legacy service, gateway or dashboard was called",
+  "fixture_inputs": {
+    "dashboard_metric_reader": "the landing sessions indexed figure read from the legacy sessions endpoint",
+    "obsolete_dispatcher": "a workforce caller of the legacy task dispatch tool",
+    "search_caller": "an agent memory call to the legacy semantic search tool"
+  },
+  "interfaces": [
+    "hooks.memory.compatibility.classify gives a consumer entry alias with its session tool, replace with its agentihooks target or remove with its retired feature; an unknown capability stays unmapped and a malformed entry is refused without echoing it",
+    "hooks.memory.compatibility.extract names the agentihooks module for turn chunking, vector storage and semantic search with the MIT source license and copied false; it refuses dispatcher, registry, daemon and every other retired feature even when they share a source module",
+    "hooks.memory.compatibility.Inventory.add records a consumer at a newer revision, replays an identical entry without change and refuses a different entry at a stale revision; report counts migration_unmapped_consumers",
+    "hooks.memory.compatibility.CONSUMERS holds the known consumers across tools, dashboards, deployment, ingestion and brain extraction, with zero unmapped"
+  ],
+  "metrics": "migration_unmapped_consumers counts inventory items whose capability has neither a target nor a removal decision",
+  "mocked": true,
+  "outcomes": {
+    "accepted": "items held in the inventory record at its revision",
+    "committed": "the inventory record written to the fixture JSON file and read back",
+    "externally_verified": "none; no consumer was migrated or removed in antoncore or agentibrain-kernel",
+    "observed": "case outputs in the a, b and c result files from the focused fixture run"
+  },
+  "package": "SV2-MIG-01",
+  "pull_request": "https://github.com/the-cloud-clockwork/agentihooks/pull/7695",
+  "remaining_limitations": [
+    "The inventory is a static list read from source on 2026-10-27; a consumer outside antoncore, agentibrain-kernel and this repository was not searched for.",
+    "The antoncore and agentibrain-kernel changes the inventory calls for are not made here; each is its own pull request in that repository, antoncore through GitOps.",
+    "The landing sessions indexed figure has no HTTP replacement endpoint yet; session_list over the catalog is its target, and the dashboard needs an endpoint or an MCP call before it can move.",
+    "Inventory has no lock; one writer updates the record at a time."
+  ],
+  "rollback_rehearsal": "B registered the session MCP tools three times against the fixture catalog: with AGENTIHOOKS_SESSION_ALIASES unset only the four session tools registered, with it set to 1 the five aliases joined them, and unset again removed them; the inventory record was byte identical after every refusal",
+  "spec_mapping": {
+    "attribution": "no legacy source was copied; the extractable components already exist in hooks.memory, so extract records the source license and copied false instead of a copied notice",
+    "authoritative_record": "the inventory JSON file written by case A and C is the authoritative migration record in this mocked fixture; case A compares the record read back from disk with a second independent fixture",
+    "authority": "Inventory is an operator side writer of a local migration record and takes no grant; it reads and changes no session data, and classification never widens a caller's access",
+    "historical_data": "the backup of the legacy session databases is replaced by hooks.memory.importer; the databases stay read only until imported",
+    "license": "the legacy repository declares MIT in its LICENSE file (GitHub license API, LICENSE blob 9f777e89f07c26b611bea6df6fae97795af2d0c2 at dbcd41f6c760a074f67d7298c3b38f1f63d19e05)",
+    "owned_paths": "hooks/memory/compatibility.py and docs/swarm-v2/search-migration.md"
+  },
+  "status": "fixture_verified",
+  "supported_versions": "session tools and alias table of SV2-IDX-05",
+  "tested_commit": "ae58d723f5500e1edd5111b57512aa0b8cd5d06e"
+}

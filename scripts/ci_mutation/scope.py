@@ -169,22 +169,38 @@ def module_name(path: Path) -> str:
 @cache
 def imported_names(text: str, package: tuple[str, ...]) -> frozenset[str]:
     names = set()
-    pending = [ast.parse(text)]
+    for level, module, aliases in module_facts(text)[0]:
+        if level is None:
+            names.update(aliases)
+            continue
+        base = package[: len(package) - level + 1] if level else ()
+        module = ".".join([*base, *([module] if module else [])])
+        names.add(module)
+        names.update(f"{module}.{alias}" for alias in aliases)
+    return frozenset(names)
+
+
+@cache
+def module_facts(text: str) -> tuple[tuple[tuple[int | None, str | None, tuple[str, ...]], ...], frozenset[str]]:
+    imports, functions = [], set()
+    pending = [(ast.parse(text), "")]
     while pending:
-        node = pending.pop()
+        node, prefix = pending.pop()
         if isinstance(node, ast.Import):
-            names.update(alias.name for alias in node.names)
+            imports.append((None, None, tuple(alias.name for alias in node.names)))
         elif isinstance(node, ast.ImportFrom):
-            base = package[: len(package) - node.level + 1] if node.level else ()
-            module = ".".join([*base, *([node.module] if node.module else [])])
-            names.add(module)
-            names.update(f"{module}.{alias.name}" for alias in node.names)
+            imports.append((node.level, node.module, tuple(alias.name for alias in node.names)))
+        elif isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+            functions.add(prefix + node.name)
+            prefix += node.name + "."
+        elif isinstance(node, ast.ClassDef):
+            prefix += node.name + "."
         pending.extend(
-            child
+            (child, prefix)
             for child in ast.iter_child_nodes(node)
             if isinstance(child, ast.stmt | ast.excepthandler | ast.match_case)
         )
-    return frozenset(names)
+    return tuple(imports), frozenset(functions)
 
 
 @cache
@@ -193,9 +209,9 @@ def mentions(text: str) -> tuple[bool, frozenset[str]]:
     return re.search(r"\bfrom\W*\.", normalized) is not None, frozenset(re.findall(r"\w+", normalized))
 
 
-def mentioned(text: str, words: set[str]) -> bool:
+def mentioned(text: str, words: list[frozenset[str]]) -> bool:
     relative, tokens = mentions(text)
-    return relative or not words.isdisjoint(tokens)
+    return relative or any(parts <= tokens for parts in words)
 
 
 def select_tests(root: Path, source: Path) -> list[str]:
@@ -204,8 +220,8 @@ def select_tests(root: Path, source: Path) -> list[str]:
     texts = {path: path.read_text() for path in sorted((root / "tests").rglob("*.py")) if path.is_file()}
 
     def importing(modules: set[str]) -> set[Path]:
-        # Every import of a module names its last part or is relative, so other files are never parsed.
-        words = {name.rpartition(".")[2] for name in modules}
+        # Every import of a module names each of its parts or is relative, so other files are never parsed.
+        words = [frozenset(name.split(".")) for name in modules]
         return {
             path
             for path, text in texts.items()

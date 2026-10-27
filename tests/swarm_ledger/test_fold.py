@@ -77,6 +77,7 @@ SWARM_PANELS = {
     "agents-fold",
     "handoff-fold",
     "recovery-fold",
+    "context-fold",
     "freeze-fold",
     "architecture-fold",
 }

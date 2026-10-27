@@ -83,10 +83,9 @@ INLINE_SKIP = (
 POSTGRES_REQUIRED = ('"semgrep", "sonar"]', '"semgrep", "sonar", "writer-lock"]')
 
 TEST_ONLY_SONAR = (
-    ('"semgrep", "sonar"', '"semgrep"'),
     (
         '\n      + (if $scope == "full"',
-        '\n      + (if .select.outputs.sonar == "skip" then [] else ["sonar"] end)\n      + (if $scope == "full"',
+        '\n      - (if .select.outputs.sonar == "skip" then ["sonar"] else [] end)\n      + (if $scope == "full"',
     ),
 )
 
