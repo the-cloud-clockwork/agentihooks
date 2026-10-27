@@ -91,6 +91,64 @@ def test_capacity_evidence_is_consumed_by_one_failure_and_other_errors_remain():
     assert found["master"].evidence == ("boom",)
 
 
+@pytest.mark.parametrize("kind", ["hive", "headless hive", "UI hive"])
+@pytest.mark.parametrize(
+    "limits",
+    [
+        ["a cpu: five minute load 8.00 on 10 CPUs, 0.5 CPU per agent, fits 0 more under the 80 percent line"],
+        ["a ram: 20000 of 100000 MB available, 700 MB per agent, fits 0 more under the 80 percent line"],
+        [
+            "a cpu: five minute load 8.00 on 10 CPUs, 0.5 CPU per agent, fits 0 more under the 80 percent line",
+            "b ram: 20700 of 100000 MB available, 700 MB per agent with 1 pending launches, "
+            "fits 0 more under the 80 percent line",
+        ],
+    ],
+)
+@pytest.mark.parametrize("local", ["", ", and the local machine runs 8 of its 8 agents"])
+def test_host_room_refusals_are_not_failed_spawns(kind, limits, local):
+    record = load("spawns")
+    record["actions"] = [
+        f"{record['slug']}: spawn failed for dt2: no {kind} for eng has room: {'; '.join(limits)}{local}"
+    ]
+    assert spawns.failed(record) == []
+
+
+@pytest.mark.parametrize(
+    "reason",
+    [
+        "init-agent timed out on a hive with room",
+        "hive launch failed: a cpu: process exited with code 1",
+        "no hive for eng has room: a missing telemetry: hive reading unavailable",
+        "no hive for eng has room: a max agents: 3 of 3 agents on the hive, fits 0 more",
+        "no hive for eng has room: a cpu: fits 0 more under the 80 percent line; "
+        "b missing telemetry: hive reading unavailable",
+    ],
+)
+def test_host_room_filter_keeps_other_launch_faults(reason):
+    record = load("spawns")
+    record["actions"] = [
+        f"{record['slug']}: spawn failed for dt2: no hive for eng has room: "
+        "a ram: 20000 of 100000 MB available, 700 MB per agent, fits 0 more under the 80 percent line",
+        f"{record['slug']}: spawn failed for dt2: {reason}",
+    ]
+    [found] = spawns.failed(record)
+    assert found.id == "failed-spawn/dt2"
+    assert found.measure == 1
+    assert found.evidence == (reason,)
+
+
+def test_reopened_suffix_keeps_the_subject_and_the_whole_reason():
+    record = load("spawns")
+    record["actions"] = [
+        f"{record['slug']}: spawn failed for dt2, task dt2 reopened: hive launch failed: a cpu: exited 1",
+        f"{record['slug']}: spawn failed for dt2, task dt2 reopened: no hive for eng has room: "
+        "a ram: 20000 of 100000 MB available, 700 MB per agent, fits 0 more under the 80 percent line",
+    ]
+    [found] = spawns.failed(record)
+    assert found.id == "failed-spawn/dt2"
+    assert found.evidence == ("hive launch failed: a cpu: exited 1",)
+
+
 def test_runtime_records_the_launcher_overflow_placement(tmp_path):
     import os
     import subprocess

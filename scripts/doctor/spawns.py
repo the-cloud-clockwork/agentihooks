@@ -1,10 +1,22 @@
 import json
 import re
 
+from scripts.hive import admission, placement
 from scripts.swarm.health.findings import Finding
 
 TICK_MS = 60_000
-FAILURE = re.compile(r"^(?:spawn failed for ([^\s,]+).*?|master spawn failed): (.+)$")
+FAILURE = re.compile(r"(?:spawn failed for ([^\s,:]+)(?:[\s,][^:]*)?|master spawn failed): (.+)")
+HOST_ROOM = re.compile(
+    rf"no (?:{placement.HIVE}|{placement.HEADLESS}|{placement.UI_HIVE}) for \S+ {placement.HAS_ROOM}: (.+)"
+)
+
+
+def _host_room_refusal(reason: str) -> bool:
+    match = HOST_ROOM.fullmatch(reason.partition(placement.LOCAL_FULL)[0])
+    return bool(match) and all(
+        admission.category(part) in (admission.CPU, admission.RAM) and admission.LINE in part
+        for part in match[1].split("; ")
+    )
 
 
 def _reservation_room(snapshot: dict) -> bool:
@@ -34,6 +46,8 @@ def failed(record: dict) -> list[Finding]:
             subject = match[1] or "master"
             snapshot = capacity.pop(subject, {})
             if "account reservation is full" in match[2] and not _reservation_room(snapshot):
+                continue
+            if _host_room_refusal(match[2]):
                 continue
             failures.setdefault(subject, []).append(match[2])
     return [
