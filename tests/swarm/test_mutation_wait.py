@@ -251,9 +251,15 @@ def test_a_successful_run_without_a_mutation_report_ends_red_after_the_retries(p
     assert pauses == list(mutation_wait.BACKOFF)
 
 
-def _shards(preflight, *reports):
+def _shards(preflight, *reports, conclusion="failure", summary="cancelled"):
     at = "2026-10-09T10:01:00Z"
-    preflight.run["conclusion"] = "failure"
+    preflight.run["conclusion"] = conclusion
+    preflight.jobs = [
+        {"name": "plan", "conclusion": "success", "steps": []},
+        {"name": "touched-tests", "conclusion": "success", "steps": []},
+        {"name": "mutation-shard (0)", "conclusion": "success", "steps": []},
+        {"name": "mutation", "conclusion": summary, "steps": []},
+    ]
     preflight.artifacts = [
         {"id": 20 + index, "name": f"mutation-preflight-shard-{index}", "expired": False, "created_at": at}
         for index in range(len(reports))
@@ -278,8 +284,9 @@ def _shard(index, total, complete=True, failures=()):
     }
 
 
-def test_complete_shard_reports_grade_a_run_whose_summary_was_cancelled(preflight):
-    _shards(preflight, _shard(0, 2), _shard(1, 2))
+@pytest.mark.parametrize("conclusion", ["failure", "cancelled"])
+def test_complete_shard_reports_grade_a_run_whose_summary_was_cancelled(preflight, conclusion):
+    _shards(preflight, _shard(0, 2), _shard(1, 2), conclusion=conclusion)
     held = {**waits.on("mutation", URL), "head": "first"}
     assert waits.resolution(held, {}, None, None, None, False) == (
         f"mutation preflight {URL}, now green; no failing mutants"
@@ -311,7 +318,39 @@ def test_missing_or_incomplete_shard_reports_cannot_pass(preflight, reports):
     assert "now red; complete mutation report unavailable" in waits.resolution(held, {}, None, None, None, False)
 
 
-@pytest.mark.parametrize("conclusion", ["cancelled", "timed_out", "skipped"])
+def test_shard_reports_cannot_pass_a_run_with_another_failed_job(preflight):
+    _shards(preflight, _shard(0, 1))
+    preflight.jobs[1]["conclusion"] = "failure"
+    held = {**waits.on("mutation", URL), "head": "first"}
+    assert "now red; complete mutation report unavailable" in waits.resolution(held, {}, None, None, None, False)
+
+
+def test_split_unit_shard_reports_cannot_pass_without_their_clearances(preflight):
+    _shards(preflight, {**_shard(0, 1), "units": [{"path": "scripts/s0.py", "lines": [1], "rows": []}]})
+    held = {**waits.on("mutation", URL), "head": "first"}
+    assert "now red; complete mutation report unavailable" in waits.resolution(held, {}, None, None, None, False)
+
+
+def test_a_cancelled_run_without_complete_evidence_ends_red_as_cancelled(preflight):
+    _shards(preflight, _shard(0, 2), conclusion="cancelled")
+    held = {**waits.on("mutation", URL), "head": "first"}
+    assert waits.resolution(held, {}, None, None, None, False) == f"mutation preflight {URL}, now red; run cancelled"
+
+
+def test_a_cancelled_run_with_its_summary_report_ends_red_as_cancelled(preflight):
+    preflight.run["conclusion"] = "cancelled"
+    held = {**waits.on("mutation", URL), "head": "first"}
+    assert waits.resolution(held, {}, None, None, None, False) == f"mutation preflight {URL}, now red; run cancelled"
+
+
+def test_a_focused_proof_cannot_pass_from_shard_reports(preflight):
+    _shards(preflight, _shard(0, 1))
+    preflight.run.update({"path": ".github/workflows/proofs.yml", "event": "workflow_dispatch"})
+    held = {**waits.on("mutation", URL), "head": "first"}
+    assert "now red; complete mutation report unavailable" in waits.resolution(held, {}, None, None, None, False)
+
+
+@pytest.mark.parametrize("conclusion", ["timed_out", "skipped"])
 def test_an_incomplete_run_ends_red_without_claiming_a_pass(preflight, conclusion):
     preflight.run["conclusion"] = conclusion
     held = {**waits.on("mutation", URL), "head": "first"}

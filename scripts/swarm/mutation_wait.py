@@ -213,9 +213,9 @@ def _branch_scope(repo, ref, run):
         return None
 
 
-def _report(target, started_at):
+def _report(target, run):
     repo, number = RUN_URL.fullmatch(target).groups()
-    since = datetime.fromisoformat(started_at)
+    since = datetime.fromisoformat(run["run_started_at"])
     artifacts = [
         artifact
         for artifact in _api(f"repos/{repo}/actions/runs/{number}/artifacts?per_page=100")["artifacts"]
@@ -223,7 +223,9 @@ def _report(target, started_at):
     ]
     matching = [artifact for artifact in artifacts if artifact["name"] == "mutation-preflight-report"]
     if not matching:
-        return _shard_reports(repo, artifacts), None, True
+        if run["path"] != WORKFLOW:
+            raise Missing
+        return _shard_reports(repo, number, artifacts), None, True
     return (*_archive(repo, max(matching, key=lambda row: row["id"])), False)
 
 
@@ -235,7 +237,7 @@ def _archive(repo, artifact):
         return json.loads(zipped.read(name)), scope
 
 
-def _shard_reports(repo, artifacts):
+def _shard_reports(repo, number, artifacts):
     shards = {}
     for artifact in artifacts:
         if match := SHARD_REPORT.fullmatch(artifact["name"]):
@@ -244,10 +246,15 @@ def _shard_reports(repo, artifacts):
                 shards[index] = artifact
     if not shards:
         raise Missing
+    jobs = _api(f"repos/{repo}/actions/runs/{number}/jobs?per_page=100")["jobs"]
+    if any(job["name"] != "mutation" and job["conclusion"] not in ("success", "skipped") for job in jobs):
+        raise Missing
     reports = [_archive(repo, artifact)[0] for _, artifact in sorted(shards.items())]
     measured = [report.get("shard") or {} for report in reports]
-    if [shard.get("index") for shard in measured] != list(range(len(reports))) or not all(
-        shard.get("total") == len(reports) and shard.get("complete") for shard in measured
+    if (
+        [shard.get("index") for shard in measured] != list(range(len(reports)))
+        or not all(shard.get("total") == len(reports) and shard.get("complete") for shard in measured)
+        or any(report.get("units") for report in reports)
     ):
         raise Missing
     return merge_reports(reports)
@@ -283,7 +290,7 @@ def _skip(target, run):
 def _fetch(target, run):
     for pause in (*BACKOFF, None):
         try:
-            return _report(target, run["run_started_at"])
+            return _report(target, run)
         except RateLimited:
             raise
         except (Unreachable, zipfile.BadZipFile, zlib.error, EOFError) as error:
@@ -347,8 +354,10 @@ def _resolve(held, branches):
     outcome = f"mutation preflight {target}"
     if moved := _moved(target, run, outcome):
         return moved
-    if run.get("conclusion") != "success" and run.get("conclusion") != "failure":
-        return f"{outcome}, now red; run {run.get('conclusion')}"
+    conclusion = run.get("conclusion")
+    ended = f"{outcome}, now red; run {conclusion}"
+    if conclusion not in ("success", "failure") and not (conclusion == "cancelled" and run["path"] == WORKFLOW):
+        return ended
     try:
         report, scope, sharded = _fetch(target, run)
         covered = _covers(target, run, scope, branches)
@@ -360,14 +369,18 @@ def _resolve(held, branches):
         failures.extend(f"{row['path']}: {row['reason']}" for row in report["not_mutated"])
         failed = report["failed"]
     except (Skipped, FetchFailed) as error:
-        return _unfetched(outcome, run["conclusion"], error)
+        return ended if conclusion == "cancelled" else _unfetched(outcome, conclusion, error)
     except Unreachable:
         return ""
     except (*UNREADABLE, StopIteration, zipfile.BadZipFile):
+        if conclusion == "cancelled":
+            return ended
         return f"{outcome}, now red; complete mutation report unavailable; mutation may have been skipped"
+    if conclusion == "cancelled" and not sharded:
+        return ended
     if not covered:
         return f"{outcome}, now red; the mutation report does not grade the branch head from its dev merge base"
-    if (run["conclusion"] == "success" or sharded) and not failed and not failures:
+    if (conclusion == "success" or sharded) and not failed and not failures:
         return f"{outcome}, now green; no failing mutants"
     detail = "; ".join(failures) or "mutation failed without a named survivor"
     return f"{outcome}, now red; {detail}"
