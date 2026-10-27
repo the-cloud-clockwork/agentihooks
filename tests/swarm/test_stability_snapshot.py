@@ -24,7 +24,10 @@ def test_the_snapshot_is_version_one_of_rig_grade_swarm():
     assert SNAPSHOT["version"] == 1
     assert SNAPSHOT["swarm"] == "rig-grade-swarm"
     assert list(SNAPSHOT) == ["version", "swarm", "taken", "intent", "caps", "hives", "thresholds", "probes"]
-    assert SNAPSHOT["intent"].startswith("Scale and ship in priority order to gradually unblock more and more load")
+    assert (
+        SNAPSHOT["intent"]
+        == "Scale and ship in priority order to gradually unblock more and more load: first what stops agents running, then what lets more run at once, then the build that rests on it. Every hive live, every hive agent joins and writes the ledger, launches start, the hosted ledger answers, the workstation stays under its root cap, merge queue groups move and releases stay fresh."
+    )
 
 
 def test_probe_thresholds_match_the_snapshot():
@@ -96,16 +99,27 @@ def test_swarm_caps_are_the_desired_state_and_name_swarm_settings():
 
 
 def test_hive_settings_are_the_desired_state_and_name_hive_settings():
-    worker = {"ui": "no", "ephemeral": "yes", "excluded": ["master"], "max_agents": 24, "pod_limit_mb": 16800}
     assert SNAPSHOT["hives"] == {
         "root": {"ui": "yes", "ephemeral": "no", "excluded": [], "max_agents": 6},
-        "6ebe8950387c4e6a": worker,
-        "be7b18c10eb79574": worker,
+        "6ebe8950387c4e6a": {
+            "ui": "no",
+            "ephemeral": "yes",
+            "excluded": ["master"],
+            "max_agents": 24,
+            "pod_limit_mb": 16800,
+        },
+        "be7b18c10eb79574": {
+            "ui": "no",
+            "ephemeral": "yes",
+            "excluded": ["master"],
+            "max_agents": 24,
+            "pod_limit_mb": 16800,
+        },
     }
     assert {"ui", "ephemeral", "excluded", "max_agents"} <= set(registry._default("hive"))
 
 
-def test_the_probe_command_reports_the_snapshot_invariants():
+def test_the_probe_command_reports_the_snapshot_invariants(monkeypatch):
     limits = probe.THRESHOLDS
     ticks = iter([0.0, 60.0])
     found = [
@@ -117,19 +131,45 @@ def test_the_probe_command_reports_the_snapshot_invariants():
         probe.merge_queue({"queue": 0}, limits),
         probe.release(0, 0, limits),
     ]
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(probe, "guarded", lambda name, read: [probe.Probe(name, True, "")])
+    store = SimpleNamespace(config=lambda slug: None)
+    assert [item.name for item in probe.run(store, SNAPSHOT["swarm"], None, 0)] == PROBES
     assert [item.name for item in found] == PROBES
     assert list(SNAPSHOT["probes"]["invariants"]) == PROBES
 
 
 def test_the_window_baseline_is_seven_samples_with_each_invariant_pass_count():
-    window = SNAPSHOT["probes"]["window"]
-    assert (window["start"], window["end"], window["samples"]) == ("2026-10-27T16:33:06Z", "2026-10-27T17:45:38Z", 7)
-    assert {name: found["passed"] for name, found in SNAPSHOT["probes"]["invariants"].items()} == {
-        "every hive live": 7,
-        "every hive agent joins and writes the ledger": 0,
-        "launch success": 0,
-        "full task list reads per minute": 0,
-        "workstation agents at or under the root cap": 0,
-        "merge queue groups moving": 7,
-        "release age": 7,
+    assert SNAPSHOT["probes"] == {
+        "window": {
+            "start": "2026-10-27T16:33:06Z",
+            "end": "2026-10-27T17:45:38Z",
+            "samples": 7,
+            "host": "be7b18c10eb79574",
+            "taken": "after the worker one memory upgrade, Ready at 14:39 UTC",
+        },
+        "invariants": {
+            "every hive live": {"passed": 7, "measured": "3 of 3 live in every sample"},
+            "every hive agent joins and writes the ledger": {
+                "passed": 0,
+                "measured": "12 to 15 of 14 to 16 passed; one ci agent failed in every sample, a second in the last",
+            },
+            "launch success": {
+                "passed": 0,
+                "measured": "every hive and root group 100%; workstation claude 100%, "
+                "workstation codex 83 to 85%, workstation unknown harness 0 "
+                "of 4",
+            },
+            "full task list reads per minute": {"passed": 0, "measured": "1.1 to 5.3 per minute over 3 reads"},
+            "workstation agents at or under the root cap": {
+                "passed": 0,
+                "measured": "unread: counted only on the root hive, the window ran on a worker hive",
+            },
+            "merge queue groups moving": {
+                "passed": 7,
+                "measured": "5 to 10 queued, last merge at most 20 minutes before",
+            },
+            "release age": {"passed": 7, "measured": "0.1 to 0.8 hours"},
+        },
     }

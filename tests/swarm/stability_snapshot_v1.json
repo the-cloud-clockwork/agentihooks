@@ -1,5 +1,5 @@
 {
- "version": 1,
+ "version": 2,
  "swarm": "rig-grade-swarm",
  "taken": "2026-10-27",
  "intent": "Scale and ship in priority order to gradually unblock more and more load: first what stops agents running, then what lets more run at once, then the build that rests on it. Every hive live, every hive agent joins and writes the ledger, launches start, the hosted ledger answers, the workstation stays under its root cap, merge queue groups move and releases stay fresh.",

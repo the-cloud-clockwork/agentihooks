@@ -493,8 +493,8 @@
   "calls": 2,
   "cases": 1,
   "texts": [
-   "2d891e6a03ec763d",
-   "9af93b6303a3ea75"
+   "29f1a1cad0e0f90d",
+   "2d891e6a03ec763d"
   ]
  },
  "tests/swarm/test_stability_snapshot.py::test_probe_thresholds_match_the_snapshot": {
@@ -529,32 +529,32 @@
   ]
  },
  "tests/swarm/test_stability_snapshot.py::test_the_probe_command_reports_the_snapshot_invariants": {
-  "assertions": 2,
-  "calls": 10,
+  "assertions": 3,
+  "calls": 14,
   "cases": 1,
   "texts": [
+   "379bcedccef49941",
    "4045ba49abe2c91e",
    "7ab7ef4579532a40"
   ]
  },
  "tests/swarm/test_stability_snapshot.py::test_the_snapshot_is_version_one_of_rig_grade_swarm": {
   "assertions": 4,
-  "calls": 2,
+  "calls": 1,
   "cases": 1,
   "texts": [
    "173c709b4a92150c",
-   "2f018a94e90230a1",
    "4b2d57a489225974",
+   "79539b0f2c4513ae",
    "d285924461e7dadf"
   ]
  },
  "tests/swarm/test_stability_snapshot.py::test_the_window_baseline_is_seven_samples_with_each_invariant_pass_count": {
-  "assertions": 2,
-  "calls": 1,
+  "assertions": 1,
+  "calls": 0,
   "cases": 1,
   "texts": [
-   "a6bb874fefb86c6d",
-   "b405f8602f678baf"
+   "5536f96e7796a79a"
   ]
  },
  "tests/test_credential_guard.py::TestEnvironmentNames::test_block_message_gives_the_safe_form": {
