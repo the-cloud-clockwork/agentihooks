@@ -337,32 +337,39 @@ def logged(store, rig, rows, local=None):
     return actions
 
 
-def test_ready_work_all_waiting_on_the_local_agent_limit_raises_no_held_spawn(store, monkeypatch):
-    enforce(store)
+def placed(store, monkeypatch):
     rig = Rig()
     held_master(store, rig.runtime)
     ready(monkeypatch, 2)
     decide(store, configured={"eng": 2, "ci": 0, "plan": 0}, placements={"eng": ["acct"]}, reason="eng is placed")
+    return rig
+
+
+def test_ready_work_all_waiting_on_the_local_agent_limit_raises_no_held_spawn(store, monkeypatch):
+    enforce(store)
+    rig = placed(store, monkeypatch)
     logged(store, rig, {"t0": LOCAL_LIMIT, "t1": LOCAL_LIMIT})
     assert kinds(store) == []
     assert rig.ledger.alerts == []
 
 
-def test_a_local_machine_at_its_agent_limit_raises_no_held_spawn(store, monkeypatch):
-    rig = Rig()
-    held_master(store, rig.runtime)
-    ready(monkeypatch, 2)
-    decide(store, configured={"eng": 2, "ci": 0, "plan": 0}, placements={"eng": ["acct"]}, reason="eng is placed")
-    logged(store, rig, {}, local=(6, 6))
+def test_ready_work_waiting_on_the_local_deployment_cap_raises_no_held_spawn(store, monkeypatch):
+    rig = placed(store, monkeypatch)
+    reason = ", and the local machine runs 6 of its 6 agents: max agents: 6 of 6"
+    logged(store, rig, {"t0": reason, "t1": reason}, local=(6, 6))
     assert kinds(store) == []
 
 
-def test_a_ready_task_with_no_logged_wait_still_raises_no_named_hold(store, monkeypatch):
-    rig = Rig()
-    held_master(store, rig.runtime)
-    ready(monkeypatch, 2)
-    decide(store, configured={"eng": 2, "ci": 0, "plan": 0}, placements={"eng": ["acct"]}, reason="eng is placed")
-    logged(store, rig, {"t0": LOCAL_LIMIT}, local=(5, 6))
+def test_a_full_local_machine_does_not_cover_a_ready_task_with_no_logged_wait(store, monkeypatch):
+    rig = placed(store, monkeypatch)
+    logged(store, rig, {"t0": LOCAL_LIMIT}, local=(6, 6))
+    (finding,) = night_watch.findings(store, SLUG)
+    assert finding.evidence == ("Hold: no named hold", "Evidence: eng is placed")
+
+
+def test_a_free_seat_with_no_logged_wait_still_raises_no_named_hold(store, monkeypatch):
+    rig = placed(store, monkeypatch)
+    logged(store, rig, {})
     (finding,) = night_watch.findings(store, SLUG)
     assert finding.evidence == ("Hold: no named hold", "Evidence: eng is placed")
 

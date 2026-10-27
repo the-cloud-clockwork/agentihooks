@@ -196,12 +196,10 @@ def _agent_limit(watch, ready) -> str:
         if row.get("seen_at", row["started_at"]) >= since
         and (f" {HAS_ROOM}" in row["reason"] or LOCAL_FULL in row["reason"])
     }
-    local = json.loads(watch.store.redis.get(watch.store.key(watch.slug, spawn_stall.LOCAL_REFUSAL)) or "{}")
-    full = bool(local) and local["at"] >= since and local["taken"] >= local["maximum"]
     covered = {(row["lane"], task) for task, row in waits.items()}
-    if not full and any((lane, task["id"]) not in covered for lane, tasks in ready.items() for task in tasks):
+    if any((lane, task["id"]) not in covered for lane, tasks in ready.items() for task in tasks):
         return ""
-    return spawn_stall.refusals(waits, local if full else {}, since)
+    return spawn_stall.refusals(waits, {}, since)
 
 
 def _spawn(watch, state):

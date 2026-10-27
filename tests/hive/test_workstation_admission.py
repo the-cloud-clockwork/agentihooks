@@ -54,6 +54,19 @@ def test_local_deployment_obeys_the_workstation_cap(setup, monkeypatch):
         fenced.spawn(setup.config, "ci", "next", {"id": "task"})
 
 
+def test_local_deployment_logs_the_workstation_cap_as_the_task_wait(setup):
+    from scripts.hive import placement_waits
+    from scripts.hive.placement import LOCAL_FULL
+    from scripts.swarm.controller import FencedRuntime
+
+    fenced = FencedRuntime(setup.store, setup.config.slug, setup.held, setup.herdr, "local")
+    local_agents(setup, 8)
+    refused = fenced.placement_refusal("ci", {"id": "task"})
+    row = placement_waits.read(setup.store, setup.config.slug)["task"]
+    assert LOCAL_FULL in refused
+    assert (row["lane"], row["reason"]) == ("ci", refused)
+
+
 def test_failed_root_publication_releases_the_shared_local_reservation(setup, monkeypatch):
     from scripts.hive import launch
     from scripts.swarm import local_slots
