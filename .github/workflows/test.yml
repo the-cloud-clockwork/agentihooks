@@ -3080,17 +3080,45 @@ jobs:
 
       - name: Download this run's test durations
         if: ${{ always() }}
+        id: download-this-runs-test-durations
+        continue-on-error: true
         uses: actions/download-artifact@v4
-        with:
+        with: &summary-download-this-runs-test-durations
           pattern: durations-3.*
           path: test-reports
 
+      - name: Download this run's test durations, wait before attempt 2
+        if: steps.download-this-runs-test-durations.outcome == 'failure'
+        shell: bash
+        run: |
+          echo "::warning::Download this run's test durations failed, as an artifact service outage does; retrying it once in 30 seconds."
+          sleep 30
+
+      - name: Download this run's test durations, attempt 2
+        if: steps.download-this-runs-test-durations.outcome == 'failure'
+        uses: actions/download-artifact@v4
+        with: *summary-download-this-runs-test-durations
+
       - name: Download this run's test flakes
         if: ${{ always() }}
+        id: download-this-runs-test-flakes
+        continue-on-error: true
         uses: actions/download-artifact@v4
-        with:
+        with: &summary-download-this-runs-test-flakes
           pattern: flakes-3.*
           path: test-reports
+
+      - name: Download this run's test flakes, wait before attempt 2
+        if: steps.download-this-runs-test-flakes.outcome == 'failure'
+        shell: bash
+        run: |
+          echo "::warning::Download this run's test flakes failed, as an artifact service outage does; retrying it once in 30 seconds."
+          sleep 30
+
+      - name: Download this run's test flakes, attempt 2
+        if: steps.download-this-runs-test-flakes.outcome == 'failure'
+        uses: actions/download-artifact@v4
+        with: *summary-download-this-runs-test-flakes
 
       - name: Summarize this run's tests
         if: ${{ always() }}
