@@ -24,6 +24,12 @@ class Hive:
         return reports
 
     @property
+    def herdr_stats(self):
+        from scripts.hive import herdr_stats
+
+        return herdr_stats
+
+    @property
     def headroom(self):
         from scripts.hive import headroom
 

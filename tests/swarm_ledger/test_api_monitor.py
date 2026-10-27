@@ -23,12 +23,6 @@ POD = {
 }
 
 
-@pytest.fixture(autouse=True)
-def no_herdr(monkeypatch):
-    monkeypatch.setattr(monitor.shutil, "which", lambda name: None)
-    monitor._panes.clear()
-
-
 class Redis:
     def __init__(self, sessions):
         self.sessions = sessions
@@ -50,15 +44,20 @@ class Store:
         return SimpleNamespace(state=self.swarms[slug])
 
 
-def ports_for(hives, readings, here="", local=None):
+def ports_for(hives, readings, here="", local=None, published=None):
     registry = SimpleNamespace(
         hives=lambda redis: hives, live=lambda hive, now: hive["live"], key=lambda hive: f"hive:{hive}"
     )
     headroom = SimpleNamespace(read=lambda redis, hive, now: readings.get(hive))
+    herdr_stats = SimpleNamespace(read=lambda redis, now: published)
     hooks = SimpleNamespace(account_sessions=SimpleNamespace(local_processes=lambda: local or {}))
     swarm = SimpleNamespace(commands=SimpleNamespace(hive_id=lambda: here))
     return (
-        mock.patch.object(monitor.ports, "hive", return_value=SimpleNamespace(registry=registry, headroom=headroom)),
+        mock.patch.object(
+            monitor.ports,
+            "hive",
+            return_value=SimpleNamespace(registry=registry, headroom=headroom, herdr_stats=herdr_stats),
+        ),
         mock.patch.object(monitor.ports, "hooks", return_value=hooks),
         mock.patch.object(monitor.ports, "swarm", return_value=swarm),
     )
@@ -124,76 +123,12 @@ def test_an_unreachable_store_answers_503():
     assert caught.value.status == 503
 
 
-def listing(*agents):
-    return {"result": {"panes": [{"agent": agent} if agent else {"pane_id": "shell"} for agent in agents]}}
-
-
-class Herdr:
-    def __init__(self, answers):
-        self.answers, self.calls = answers, []
-
-    def __call__(self, argv, **kwargs):
-        self.calls.append(argv[1:])
-        answer = self.answers.get(tuple(argv[1:]))
-        if isinstance(answer, Exception):
-            raise answer
-        out = "" if answer is None else json.dumps(answer)
-        return SimpleNamespace(returncode=0 if answer is not None else 1, stdout=out)
-
-
-MACHINES = [
-    {"label": "hive-1", "enabled": True},
-    {"label": "hive-2", "enabled": True},
-    {"label": "off", "enabled": False},
-]
-
-
-@pytest.fixture
-def herdr(monkeypatch):
-    def install(answers):
-        fake = Herdr(answers)
-        monkeypatch.setattr(monitor.shutil, "which", lambda name: "/bin/herdr")
-        monkeypatch.setattr(monitor.subprocess, "run", fake)
-        return fake
-
-    return install
-
-
-def test_agents_are_the_agent_panes_on_the_main_herdr_server_and_each_enabled_machine(herdr):
-    fake = herdr(
-        {
-            ("machine", "list", "--json"): MACHINES,
-            ("pane", "list"): listing("claude", "claude", "codex", None),
-            ("--machine", "hive-1", "pane", "list"): listing("claude", "codex", "codex"),
-            ("--machine", "hive-2", "pane", "list"): listing("claude", "other"),
-        }
-    )
-    assert monitor.panes(100.0) == {"source": "herdr", "reporting": 3, "of": 3, "claude": 4, "codex": 3}
-    assert ("--machine", "off", "pane", "list") not in {tuple(call) for call in fake.calls}
-
-
-def test_a_machine_that_does_not_answer_is_left_out_and_named_as_missing(herdr):
-    herdr(
-        {
-            ("machine", "list", "--json"): MACHINES,
-            ("pane", "list"): listing("claude"),
-            ("--machine", "hive-1", "pane", "list"): monitor.subprocess.TimeoutExpired("herdr", 8),
-            ("--machine", "hive-2", "pane", "list"): None,
-        }
-    )
-    assert monitor.panes(100.0) == {"source": "herdr", "reporting": 1, "of": 3, "claude": 1, "codex": 0}
-
-
-def test_panes_are_reread_only_after_ten_seconds(herdr):
-    fake = herdr({("machine", "list", "--json"): [], ("pane", "list"): listing("claude")})
-    monitor.panes(100.0)
-    monitor.panes(109.9)
-    assert len(fake.calls) == 2
-    monitor.panes(110.0)
-    assert len(fake.calls) == 4
-
-
-def test_the_view_counts_herdr_panes_when_herdr_answers(herdr):
-    herdr({("machine", "list", "--json"): [], ("pane", "list"): listing("codex", "claude")})
-    data = viewed(Store({}), *ports_for([], {}))
-    assert data["agents"] == {"total": 2, "source": "herdr", "reporting": 1, "of": 1, "claude": 1, "codex": 1}
+def test_agents_are_the_panes_the_master_herdr_client_published_for_itself_and_its_machines():
+    published = {
+        "machines": {"master": {"claude": 11, "codex": 2}, "hive-1": {"claude": 10, "codex": 4}},
+        "silent": ["hive-2"],
+        "measured_at": NOW,
+    }
+    hives = [{"id": "root", "live": True}]
+    data = viewed(Store({}), *ports_for(hives, {"root": {**HOST, "agents": {"claude": 1}}}, published=published))
+    assert data["agents"] == {"total": 27, "source": "herdr", "reporting": 2, "of": 3, "claude": 21, "codex": 6}

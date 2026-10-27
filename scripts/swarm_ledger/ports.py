@@ -43,6 +43,7 @@ class Hive(Protocol):
     launch: Any
     reports: Any
     headroom: Any
+    herdr_stats: Any
 
 
 @runtime_checkable

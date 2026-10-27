@@ -1,12 +1,8 @@
-"""The HOME resource monitor: agent panes from the main herdr server and every machine plugged into it, CPU and memory
+"""The HOME resource monitor: agent panes the master herdr client publishes for itself and its machines, CPU and memory
 from each live hive's headroom reading, and running swarms."""
 
 import json
-import shutil
-import subprocess
-import threading
 import time
-from concurrent.futures import ThreadPoolExecutor
 
 from redis import RedisError
 
@@ -18,10 +14,6 @@ from .services import Services
 
 SwarmError = ports.swarm().store.SwarmError
 HARNESSES = ("claude", "codex")
-HERDR_TIMEOUT_S = 8
-PANES_FRESH_S = 10
-_panes: dict = {}
-_panes_lock = threading.Lock()
 
 
 def capacity(measured: dict) -> tuple[float, float, int, int]:
@@ -56,43 +48,13 @@ def processes(store: object, hive: str, measured: dict | None) -> dict[str, int]
     return {harness: int(found.get(harness, 0)) for harness in HARNESSES}
 
 
-def herdr(binary: str, *args: str) -> object | None:
-    try:
-        done = subprocess.run([binary, *args], capture_output=True, text=True, timeout=HERDR_TIMEOUT_S, check=False)
-        return json.loads(done.stdout) if done.returncode == 0 else None
-    except (subprocess.TimeoutExpired, OSError, ValueError):
+def herdr_agents(redis: object, now_ms: int) -> dict | None:
+    published = ports.hive().herdr_stats.read(redis, now_ms)
+    if published is None:
         return None
-
-
-def agent_panes(listing: object) -> dict[str, int] | None:
-    if not isinstance(listing, dict) or "result" not in listing:
-        return None
-    counts = dict.fromkeys(HARNESSES, 0)
-    for pane in listing["result"].get("panes", []):
-        if pane.get("agent") in counts:
-            counts[pane["agent"]] += 1
-    return counts
-
-
-def panes(now_s: float) -> dict | None:
-    """Agent panes by harness on the main herdr server and each enabled machine saved on it, reread at most every
-    PANES_FRESH_S; None where herdr is not installed."""
-    binary = shutil.which("herdr")
-    if binary is None:
-        return None
-    with _panes_lock:
-        if _panes and now_s - _panes["at"] < PANES_FRESH_S:
-            return _panes["data"]
-        saved = herdr(binary, "machine", "list", "--json")
-        machines = [m["label"] for m in saved if m.get("enabled")] if isinstance(saved, list) else []
-        targets = [(), *(("--machine", label) for label in machines)]
-        with ThreadPoolExecutor(max_workers=len(targets)) as pool:
-            counted = list(pool.map(lambda target: agent_panes(herdr(binary, *target, "pane", "list")), targets))
-        found = [counts for counts in counted if counts is not None]
-        agents = {harness: sum(counts[harness] for counts in found) for harness in HARNESSES}
-        data = {"source": "herdr", "reporting": len(found), "of": len(targets), **agents}
-        _panes.update(at=now_s, data=data)
-        return data
+    machines = published["machines"].values()
+    totals = {harness: sum(counts.get(harness, 0) for counts in machines) for harness in HARNESSES}
+    return {"source": "herdr", "reporting": len(machines), "of": len(machines) + len(published["silent"]), **totals}
 
 
 def hive_agents(store: object, readings: dict) -> dict:
@@ -113,7 +75,7 @@ def view(store: object, now_ms: int) -> dict:
     live = [hive for hive in registry.hives(store.redis) if registry.live(hive, now_ms)]
     readings = {hive["id"]: headroom.read(store.redis, hive["id"], now_ms) for hive in live}
     measured = [reading for reading in readings.values() if reading is not None]
-    agents = panes(now_ms / 1000) or hive_agents(store, readings)
+    agents = herdr_agents(store.redis, now_ms) or hive_agents(store, readings)
     used, cores, used_mb, total_mb = (
         (sum(column) for column in zip(*map(capacity, measured))) if measured else (0, 0, 0, 0)
     )

@@ -512,7 +512,7 @@ def test_run_publishes_headroom_beside_each_connection_and_stops_it_on_reconnect
     monkeypatch.setattr(daemon, "hive_id", lambda: "local")
     backed_off = []
     monkeypatch.setattr(
-        daemon, "_back_off", lambda exc, failures: backed_off.append([t.args[3].is_set() for t in threads])
+        daemon, "_back_off", lambda exc, failures: backed_off.append([t.args[-1].is_set() for t in threads])
     )
     first, second, first_waiter, second_waiter = object(), object(), object(), object()
     threads = []
@@ -522,7 +522,7 @@ def test_run_publishes_headroom_beside_each_connection_and_stops_it_on_reconnect
             self.target, self.args, self.daemon = target, args, daemon
 
         def start(self):
-            assert all(thread.args[3].is_set() for thread in threads)
+            assert all(thread.args[-1].is_set() for thread in threads)
             threads.append(self)
 
     beats = []
@@ -538,12 +538,51 @@ def test_run_publishes_headroom_beside_each_connection_and_stops_it_on_reconnect
     with pytest.raises(KeyboardInterrupt):
         daemon.run(Mock(side_effect=[(first, first_waiter), (second, second_waiter)]))
     assert beats == [first, second]
-    assert [(thread.target, thread.args[:3], thread.daemon) for thread in threads] == [
+    assert [(thread.target, thread.args[:-1], thread.daemon) for thread in threads] == [
         (daemon.publish_headroom, (first, first_waiter, "local"), True),
+        (daemon.publish_herdr_stats, (first, "local"), True),
         (daemon.publish_headroom, (second, second_waiter, "local"), True),
+        (daemon.publish_herdr_stats, (second, "local"), True),
     ]
-    assert backed_off == [[True]]
-    assert threads[1].args[3].is_set()
+    assert backed_off == [[True, True]]
+    assert threads[2].args[-1].is_set() and threads[3].args[-1].is_set()
+
+
+class Stop:
+    def __init__(self, ticks):
+        self.ticks, self.waits = ticks, []
+
+    def wait(self, seconds):
+        self.waits.append(seconds)
+        self.ticks -= 1
+        return self.ticks < 0
+
+
+@pytest.mark.parametrize(("ui", "published"), [("yes", 2), ("no", 0)])
+def test_herdr_stats_publish_every_ten_seconds_from_the_interface_hive_only(redis, monkeypatch, ui, published):
+    from scripts.hive import herdr_stats
+
+    redis.hset(registry.key("machine"), mapping={"name": "machine", "ui": ui, "heartbeat_at": "1"})
+    redis.sadd(registry.INDEX, "machine")
+    calls = []
+    monkeypatch.setattr(herdr_stats, "publish", lambda redis, now_ms: calls.append(now_ms))
+    stop = Stop(2)
+    daemon.publish_herdr_stats(redis, "machine", stop)
+    assert stop.waits == [herdr_stats.EVERY_S] * 3
+    assert len(calls) == published
+
+
+def test_herdr_stats_keep_their_cadence_through_a_failed_publish(redis, monkeypatch, capsys):
+    from redis.exceptions import RedisError
+
+    from scripts.hive import herdr_stats
+
+    redis.hset(registry.key("machine"), mapping={"name": "machine", "ui": "yes", "heartbeat_at": "1"})
+    monkeypatch.setattr(herdr_stats, "publish", Mock(side_effect=RedisError("down")))
+    stop = Stop(2)
+    daemon.publish_herdr_stats(redis, "machine", stop)
+    assert len(stop.waits) == 3
+    assert capsys.readouterr().err.count("hive herdr stats publish failed (RedisError: down)") == 2
 
 
 def test_install_writes_the_service_and_enables_it(tmp_path):
