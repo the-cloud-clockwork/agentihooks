@@ -185,6 +185,7 @@ def test_returns_inside_nested_definitions_do_not_disable_a_test(tmp_path):
     measured = _measured(tmp_path, text)
     assert not any(entry["disabled"] for entry in measured.values())
 
+
 @pytest.mark.parametrize(
     "body,exit",
     [
