@@ -376,7 +376,7 @@ def test_runs_that_are_not_earlier_tests_runs_of_this_pull_request_are_never_rea
 def test_a_record_that_disagrees_with_its_run_is_unusable(tmp_path, monkeypatch, repo, capsys, changes, name, reason):
     root, commits = repo
     run = _run(101)
-    record = _record(run, commits["record"], passed=["test_h"], **changes)
+    record = {**_record(run, commits["record"], passed=["test_h"]), **changes}
     name = name or f"branch-record-3.12-{record['leg']}-{record['attempt']}"
     _github(monkeypatch, [run], {101: [(name, record)]})
     assert _plan(tmp_path, root) == EMPTY
