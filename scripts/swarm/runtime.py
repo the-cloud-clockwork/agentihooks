@@ -652,7 +652,7 @@ class HerdrRuntime:
 
     def _route_account(self, agent, saved, task_id, lane, admitted):
         if admitted:
-            return None, self._admitted_account(agent, saved["account"], lane, dict(os.environ))
+            return None, self._admitted_account(agent, saved.get("account"), lane, dict(os.environ))
         account = self._claim_account(agent, saved.get("account") or self.planned_account(task_id, agent), lane)
         return account, account
 
@@ -732,7 +732,12 @@ class HerdrRuntime:
             else saved
         )
         avoid = (task.get("transfer") or {}).get("avoid_harness") or task.get("avoid_harness")
-        if saved and not quota_transfer and (saved["harness"] != want if want else saved["harness"] == avoid):
+        if (
+            saved
+            and not quota_transfer
+            and not admitted
+            and (saved["harness"] != want if want else saved["harness"] == avoid)
+        ):
             saved = {}
         if route_kind == "interactive" and lane == MASTER:
             agent, reason = want or requested or saved.get("harness") or "claude", "interactive login"

@@ -125,8 +125,13 @@ def test_an_admitted_quota_successor_launches_on_exactly_its_admitted_account(hi
     hive.adapter.terminate.assert_not_called()
 
 
-def test_an_unusable_admitted_account_is_refused_for_readmission_without_a_launch(hive):
-    hive.rows[1] = _account("admitted", sessions=3)
+@pytest.mark.parametrize(
+    "unusable",
+    [[_account("admitted", sessions=3)], [_account("admitted", state="DRAIN", cap=0)], []],
+    ids=["full", "draining", "unobserved"],
+)
+def test_an_unusable_admitted_account_is_refused_for_readmission_without_a_launch(hive, unusable):
+    hive.rows[1:2] = unusable
     order = _order(hive, 0, "quota")
     hive.orders.send("host", order)
     hive.consumer.poll()
