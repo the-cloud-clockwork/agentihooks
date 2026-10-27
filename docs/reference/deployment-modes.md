@@ -353,6 +353,54 @@ The launch settings carry the address and the credential:
 - On a hive, set `AGENTIHOOKS_HOSTED_LEDGER_URL` in the controller's `controller.env`. Every launch hands it to the
   worker home beside `AGENTIHOOKS_SWARM_API_URL`.
 
+#### The launch route wins over a profile setting
+
+A launch renders the agent's Claude profile into a mounted home, and that home's `settings.json` `env` block is what
+the agent starts with. A bundle or profile may set `AGENTIHOOKS_HOSTED_LEDGER_URL` in its
+`settings.overrides.json` as a default. When the process that renders the profile has the variable set, such as a
+hive launch carrying the controller's `controller.env` value, that value replaces the profile's in the rendered
+`settings.json`. A profile value applies only when the rendering process has none.
+
+The rendered home's stamp records the address it was rendered with. A later launch whose address differs renders a
+fresh home instead of reusing the cached one, so a changed `controller.env` reaches the next agent without a manual
+rerender. An unchanged address keeps the cached home.
+
+Before this rule, the bundle's public address replaced the internal address a worker hive was configured with. On
+anton two the public address did not serve the ledger to worker pods, so agents there failed their `ledger_join`
+and `ledger_write` launch checks while the controller itself held the working internal address. The first anton two
+agent launched on a release carrying the rule passed both checks.
+
+A worker hive reaching the hosted ledger over its internal name, with a bundle that names the public address:
+
+```bash
+# controller.env on the hive
+AGENTIHOOKS_HOSTED_LEDGER_URL=https://swarm-internal.homeofanton.com:8765
+```
+
+In the bundle's `profiles/<profile>/.claude/settings.overrides.json`:
+
+```json
+{"env": {"AGENTIHOOKS_HOSTED_LEDGER_URL": "https://swarm.homeofanton.com"}}
+```
+
+Agents launched on that hive start with the internal address. A workstation tick whose env file leaves the variable
+unset launches agents with the public address from the bundle.
+
+To check which address an agent received, read the key from its mounted home (never print the whole file, which
+holds other settings):
+
+```bash
+python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["env"].get("AGENTIHOOKS_HOSTED_LEDGER_URL"))' \
+  <agent home>/claude/settings.json
+```
+
+Then confirm the launch passed with `agentihooks swarm <slug> status --json`: under `agents`, that agent's
+`hive_join.checks.ledger_join` and `hive_join.checks.ledger_write` are both `true`.
+
+`tests/test_profile_ledger_route.py` covers the rule: a configured address wins over the bundle's, an empty one
+keeps the bundle's, a changed address rerenders the cached home, and a worker rendered with a bundle address that
+refuses connections joins and acknowledges the ledger through its configured route.
+
 ### Credentials a remote client sends
 
 A remote client picks the first credential that applies and never reads the ledger's page token:
@@ -422,6 +470,7 @@ python -c 'from scripts.swarm_ledger import ledger_link; print(ledger_link.remot
 | `forbidden` (403) on every hub ledger write after `hub: service credential renewal failed` | The renewal thread could not renew `agentihooks-hive:controller:hub-<hostname>` and the key expired | Fix the logged Redis error; the next renewal writes the key again |
 | `agentihooks hub run` exits at startup with a Redis `NoPermissionError` (no permissions to access a key) | The hub's Redis user cannot set `agentihooks-hive:controller:*` | Grant GET and SET on it to the hub's Redis user |
 | A workstation stops starting its local ledger server after `LEDGER_URL` was added to its env | Rule 3: a hub address with no mode is remote | Set `AGENTIHOOKS_DEPLOYMENT=local`, or remove `LEDGER_URL` |
+| Hive agents fail `ledger_join` and `ledger_write` launch checks while the hive controller reaches the hosted ledger | The agent's mounted `settings.json` holds a different `AGENTIHOOKS_HOSTED_LEDGER_URL` than `controller.env`: the release predates the launch route rule, or the controller process lacks the variable | Set the variable in `controller.env`, restart the controller, and run a release that keeps the launch route; the next launch rerenders the home |
 | A process with `AGENTIHOOKS_DEPLOYMENT=local` still talks to the hosted ledger | `SWARM_URL` is set for this swarm and wins over the mode | Unset `SWARM_URL` in that process |
 
 ## Regulated site recipe
