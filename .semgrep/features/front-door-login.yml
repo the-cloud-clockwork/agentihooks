@@ -45,7 +45,7 @@ rules:
               - pattern: $TOKEN
               - metavariable-regex:
                   metavariable: $TOKEN
-                  regex: ^["']NEVER_A_CLAUDE_TOKEN["']$
+                  regex: ^["'](?:AH_CC_TOKEN.*|CLAUDE_CODE_OAUTH_TOKEN|ANTHROPIC_API_KEY)["']$
     paths:
       include:
         - scripts/init_agent.py
