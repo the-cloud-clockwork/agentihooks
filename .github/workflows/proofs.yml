@@ -39,6 +39,10 @@ permissions:
   actions: read
 
 jobs:
+  launcher-pool-proof:
+    if: inputs.proof == 'mutation'
+    uses: ./.github/workflows/launcher-pool-proof.yml
+
   mutation-deadlines:
     if: inputs.proof == 'mutation-deadlines'
     uses: ./.github/workflows/mutation-deadline-proof.yml
