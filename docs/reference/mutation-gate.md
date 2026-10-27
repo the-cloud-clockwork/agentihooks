@@ -19,26 +19,29 @@ gh workflow run proofs.yml \
 
 For a stacked branch, set `base` to its dependency branch. Branch pushes run Mutation preflight before the first draft pull request; wait for its current head to pass. Once a branch has an open pull request into `dev`, the push preflight skips it and the pull request checks own mutation. Tests and mutation runs execute in CI only.
 
-## Required gate proof (T9)
+## Required gate proof
 
 `mutation-plan`, `mutation-stats` and `mutation` are needs of `Gate — Required`
 in Tests, and `Gate — Required` is the required status check of both dev
 rulesets (`.github/rulesets/dev-history.json`, `dev-no-delete.json`). On a pull
-request into dev the gate requires all three to succeed; `mutation` may skip
-only when the plan grades inline in `mutation-stats`.
+request into dev `mutation-plan` must succeed; `mutation-stats` must succeed
+unless a reused plan forwards its result; `mutation` must succeed unless the
+plan grades inline in `mutation-stats`.
 
-Both-ways proof, full Tests dispatches with `gate_plant=true` on `diffcheck/`
-branches. Both add `bright()` to `scripts/term_colors.py`; they differ only in
-the assertion of `test_bright_shifts_a_colour_to_its_bright_code`:
+The both-ways proof is two full Tests dispatches with `gate_plant=true` on the
+plant branches `diffcheck/ci-323133-2650-t9-green` and
+`diffcheck/ci-323133-2650-t9-red`. Both plant branches add `bright()` to
+`scripts/term_colors.py`; they differ only in the assertion of
+`test_bright_shifts_a_colour_to_its_bright_code`:
 
 | Run | Assertion | Mutation result | Gate — Required |
 |---|---|---|---|
 | [Green 40460927967](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/40460927967), head `461504b` | `colors.bright("31") == "91"` | 4 killed | success |
 | [Red 40460931731](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/40460931731), head `a4a1bb2` | `colors.bright("31")` (truthiness only) | 3 survived, 1 killed on the changed line | failure, `mutation-stats` the only red need |
 
-### Red rate split
+## Red rate in pull request runs
 
-Seventy completed, non cancelled Tests pull request runs between
+70 completed, non cancelled Tests pull request runs between
 2026-10-26 15:22Z and 23:03Z carried 17 red mutation jobs:
 
 | Cause | Runs | Kind |
@@ -49,7 +52,9 @@ Seventy completed, non cancelled Tests pull request runs between
 | Shard ran the full 1080 second budget on eight large swarm files | 1 | Tool: budget |
 
 The audit's 38% (15 of 40) predates mutation moving into Tests. Excluding
-Dependabot runs, one of 64 runs (1.6%) was a mutation tool failure.
+Dependabot runs, one of 64 runs (1.6%) was a mutation tool failure. Cancelled
+runs are outside the count, including the planner killed for memory (exit 137)
+between 23:45Z and 00:22Z.
 
 ## Covering tests through production helpers
 
