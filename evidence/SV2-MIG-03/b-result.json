@@ -1,0 +1,108 @@
+{
+  "case": "B",
+  "protected_event_kept": [
+    "a different earlier write"
+  ],
+  "quarantine_disclose_content": false,
+  "refusals": {
+    "alias_outside_grant": {
+      "report": {
+        "error": {
+          "class": "forbidden_scope",
+          "detail": "an alias names a project outside the grant"
+        },
+        "state": "rejected"
+      },
+      "unchanged": true
+    },
+    "changed_sources_under_one_run": {
+      "report": {
+        "error": {
+          "class": "plan_mismatch",
+          "detail": "this run was opened for different sources; start a new run id"
+        },
+        "state": "rejected"
+      },
+      "unchanged": true
+    },
+    "corpus_outside_grant": {
+      "report": {
+        "error": {
+          "class": "forbidden_scope",
+          "detail": "the plan is not approved for the granted corpus; nothing was imported"
+        },
+        "state": "rejected"
+      },
+      "unchanged": true
+    }
+  },
+  "refusals_disclose_content": false,
+  "report": {
+    "batches": {
+      "done": 4,
+      "total": 4
+    },
+    "legacy_import_remaining_records": 2,
+    "missing": [
+      "engineering:claude:laptop:s-missing"
+    ],
+    "quarantined": [
+      {
+        "detail": "273b222222d96e8a608eb48be443685b154aa05faaa360dc11565cb200300899",
+        "reason": "conflicting_source_content",
+        "session_uid": "engineering:claude:laptop:s-conflict"
+      },
+      {
+        "detail": "7f94c59e066492ceba295d788ff1d275b70f68f905b249780f2b4712de75aba1",
+        "reason": "conflicting_source_content",
+        "session_uid": "engineering:claude:laptop:s-conflict"
+      },
+      {
+        "detail": "laptop-copy-a/s-forged.jsonl: raw_hash_mismatch",
+        "reason": "refused_source",
+        "session_uid": "engineering:claude:laptop:s-forged"
+      },
+      {
+        "detail": "legacy:bd907d66e6cabbe3b91c42162cb987a2cb6996f7c4f1ec41e5dcf2528d57e051",
+        "reason": "event_identity_conflict",
+        "session_uid": "engineering:claude:laptop:s-preview"
+      }
+    ],
+    "remaining_sessions": [
+      "engineering:claude:laptop:s-preview"
+    ],
+    "sessions": [
+      {
+        "outcome": "committed",
+        "session_uid": "engineering:claude:desktop:s-shared"
+      },
+      {
+        "outcome": "quarantined",
+        "session_uid": "engineering:claude:laptop:s-conflict"
+      },
+      {
+        "outcome": "quarantined",
+        "session_uid": "engineering:claude:laptop:s-forged"
+      },
+      {
+        "outcome": "missing",
+        "session_uid": "engineering:claude:laptop:s-missing"
+      },
+      {
+        "outcome": "quarantined",
+        "session_uid": "engineering:claude:laptop:s-preview"
+      },
+      {
+        "outcome": "committed",
+        "session_uid": "engineering:claude:laptop:s-shared"
+      },
+      {
+        "outcome": "committed",
+        "session_uid": "engineering:claude:laptop:s-vector"
+      }
+    ],
+    "state": "completed",
+    "unknown_attribution_events": 6,
+    "verified_alias_events": 3
+  }
+}

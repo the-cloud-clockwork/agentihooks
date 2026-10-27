@@ -1,0 +1,54 @@
+{
+  "cases": [
+    "A",
+    "B",
+    "C"
+  ],
+  "compatibility": "hooks.memory.importer is unchanged; the backfill reuses its transcript reader and its raw source generation, so a raw session imported earlier by the importer is replayed by the catalog with the same events and recorded once, and ingest validation, grant checks and catalog conflicts are the accepted SV2-IDX ingest behavior",
+  "dependencies": "SV2-MIG-02: the backfill selects each session's source by the audit fidelity class and refuses a raw source whose bytes do not match its recorded digest with the audit's own raw_hash_mismatch check",
+  "evidence_class": "mocked: the legacy previews, vector rows and transcript folders are fixture data shaped like the retired transcript service's stores, and temporary SQLite files stand in for the session catalog and backfill ledger; no live corpus, legacy Redis or workstation folder was read or written",
+  "fixture_inputs": {
+    "conflicts": "s-conflict held in two folders with different bytes, s-forged whose bytes do not match its recorded digest, and a catalog already holding a different event at a backfill event identity",
+    "duplicate_source_directories": "the laptop s-shared transcript copied byte for byte into two folders, beside a lower fidelity legacy preview of the same session",
+    "equal_native_ids_from_different_machines": "s-shared on the laptop and s-shared on the desktop with different content, kept apart by the installation namespace",
+    "fidelity": "s-preview survives only as a legacy preview, s-vector only as vector rows, s-missing as nothing",
+    "mid_batch_interruption": "a run stopped after three sessions inside its second batch of two, and a run stopped by a catalog outage, both resumed at the durable batch checkpoint"
+  },
+  "interfaces": [
+    "hooks.memory.legacy_backfill.backfill groups legacy sources by provider, installation and native session id and imports each session once from its highest fidelity source as classified by hooks.memory.source_audit.audit_source: full_raw through hooks.memory.importer.read_source, preview_only and vector_only as lossy and fragment records with their original timestamps",
+    "session_uid is corpus:provider:installation:native_session_id, so equal native ids from different machines stay separate sessions; a raw source uses the importer's source_generation and batch_id import:<raw sha256>, so a session the importer already committed replays without a second copy",
+    "every imported session is recorded in BackfillLedger with its migration run, importer version, source digest, all source references holding that content, fidelity, first and last event time, verified alias projects and unknown attribution events",
+    "BackfillLedger.open binds a run id to a digest of its planned work; BackfillLedger.advance moves the batch checkpoint only from the expected batch; BackfillLedger.deactivate hides one run's projections without deleting catalog events or source files",
+    "the report counts legacy_import_remaining_records, lists remaining, missing and quarantined sessions, and counts verified alias events apart from unknown attribution events",
+    "python -m hooks.memory.legacy_backfill run, report and deactivate"
+  ],
+  "metrics": "legacy_import_remaining_records counts the records of planned imports not yet recorded in the backfill ledger, reported after every run, including partial and interrupted ones",
+  "mocked": true,
+  "outcomes": {
+    "accepted": "sessions recorded in the backfill ledger and the batch checkpoint of each run",
+    "committed": "events committed in the fixture session catalog through central ingestion",
+    "externally_verified": "none; no live corpus, legacy Redis or workstation transcript folder was imported",
+    "observed": "case outputs in the a, b and c result files"
+  },
+  "package": "SV2-MIG-03",
+  "pull_request": "",
+  "remaining_limitations": [
+    "The backfill reads sources the operator lists in a plan file; discovering legacy Redis previews and vector rows and exporting them into that plan is a separate read only step that is not part of this package.",
+    "Two copies of a session at the same fidelity with different content are quarantined rather than merged, even when one is a prefix of the other; the operator resolves them by choosing one copy in a new plan under a new run id.",
+    "Preview and vector records carry no byte range in the transcript, so their events use byte range zero and are labelled lossy or fragment through the session provenance."
+  ],
+  "rollback_rehearsal": "case C deactivated the completed run's four session projections with BackfillLedger.deactivate; all catalog events and every fixture source file were kept",
+  "rollout_safety": "the backfill is a standalone module run by the operator; no hook, collector, importer or search path calls it, so disabling it means not running it",
+  "spec_mapping": {
+    "authority": "actor and scope come from the ingest Grant: the plan corpus must equal the granted corpus and every alias project must be granted, or nothing is written; the command line builds the grant from the operator's corpus and project flags",
+    "boundary": "the backfill reads legacy transcripts, previews and vector rows as data and writes only the session catalog and its own ledger; it does not rebuild the legacy collector, store or service",
+    "owned_paths": "hooks/memory/legacy_backfill.py and docs/swarm-v2/legacy-backfill.md; the planned hooks/memory/migrations package would shadow the existing hooks.memory.migrations module, so the backfill is a sibling module, and the backfill ledger is a SQLite file next to the catalog instead of a migrations folder",
+    "recovery": "a run stopped by its limit or by a catalog outage reports its remaining records and resumes at the stored batch checkpoint; a runner holding an older checkpoint is refused with stale_checkpoint",
+    "rejection": "two copies of one session with different bytes are quarantined with both digests, a raw source whose bytes do not match its recorded digest is quarantined as refused_source, and a catalog event already held at a backfill event identity with other content quarantines the session as event_identity_conflict while the held event stays unchanged",
+    "repeat": "case A runs the full fixture twice into two separate folders with no shared state and compares the results",
+    "replay": "a second run over the same sources records already_imported for every session and changes no catalog event; a completed run replays as a no op; a source committed before its mark replays through the catalog batch"
+  },
+  "status": "fixture_verified",
+  "tested_commit": "pending",
+  "timing_and_cleanup": "the backfill reads no clock and holds no lease, so no fake clock applies; each case writes only under its own temporary folder, and no fixture source file is changed"
+}

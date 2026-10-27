@@ -1,0 +1,292 @@
+{
+  "case": "A",
+  "duplicate_events_total": 2,
+  "earlier_importer": {
+    "outcomes": [
+      "committed"
+    ],
+    "state": "completed"
+  },
+  "events": [
+    [
+      "engineering:claude:desktop:s-shared",
+      "import:ae184fac76d8f540c552b61770ccd1ad04cbca77fd0a3f786087d909a0449ad9",
+      1,
+      "2026-01-15T14:20:00Z"
+    ],
+    [
+      "engineering:claude:desktop:s-shared",
+      "import:ae184fac76d8f540c552b61770ccd1ad04cbca77fd0a3f786087d909a0449ad9",
+      2,
+      "2026-01-15T14:20:09Z"
+    ],
+    [
+      "engineering:claude:laptop:s-preview",
+      "legacy:bd907d66e6cabbe3b91c42162cb987a2cb6996f7c4f1ec41e5dcf2528d57e051",
+      1,
+      "2025-11-20T07:30:00Z"
+    ],
+    [
+      "engineering:claude:laptop:s-preview",
+      "legacy:bd907d66e6cabbe3b91c42162cb987a2cb6996f7c4f1ec41e5dcf2528d57e051",
+      2,
+      "2025-11-20T07:30:04Z"
+    ],
+    [
+      "engineering:claude:laptop:s-shared",
+      "import:b9e0df8c6a531eb3caeb3799737baeb7bab970227341f2fdc44ad3cfdff30614",
+      1,
+      "2026-03-02T09:00:00Z"
+    ],
+    [
+      "engineering:claude:laptop:s-shared",
+      "import:b9e0df8c6a531eb3caeb3799737baeb7bab970227341f2fdc44ad3cfdff30614",
+      2,
+      "2026-03-02T09:00:05Z"
+    ],
+    [
+      "engineering:claude:laptop:s-shared",
+      "import:b9e0df8c6a531eb3caeb3799737baeb7bab970227341f2fdc44ad3cfdff30614",
+      3,
+      "2026-03-02T09:01:00Z"
+    ],
+    [
+      "engineering:claude:laptop:s-vector",
+      "legacy:8da9bcf80285a6b2ae406342d0bbbc6aaaf23e65a10cc1aa9d9535cd19c5284d",
+      1,
+      "2025-10-02T12:00:00Z"
+    ],
+    [
+      "engineering:claude:laptop:s-vector",
+      "legacy:8da9bcf80285a6b2ae406342d0bbbc6aaaf23e65a10cc1aa9d9535cd19c5284d",
+      2,
+      "2025-10-02T12:00:09Z"
+    ]
+  ],
+  "first": {
+    "batches": {
+      "done": 4,
+      "total": 4
+    },
+    "legacy_import_remaining_records": 0,
+    "missing": [
+      "engineering:claude:laptop:s-missing"
+    ],
+    "quarantined": [
+      {
+        "detail": "273b222222d96e8a608eb48be443685b154aa05faaa360dc11565cb200300899",
+        "reason": "conflicting_source_content",
+        "session_uid": "engineering:claude:laptop:s-conflict"
+      },
+      {
+        "detail": "7f94c59e066492ceba295d788ff1d275b70f68f905b249780f2b4712de75aba1",
+        "reason": "conflicting_source_content",
+        "session_uid": "engineering:claude:laptop:s-conflict"
+      },
+      {
+        "detail": "laptop-copy-a/s-forged.jsonl: raw_hash_mismatch",
+        "reason": "refused_source",
+        "session_uid": "engineering:claude:laptop:s-forged"
+      }
+    ],
+    "remaining_sessions": [],
+    "sessions": [
+      {
+        "outcome": "replayed",
+        "session_uid": "engineering:claude:desktop:s-shared"
+      },
+      {
+        "outcome": "quarantined",
+        "session_uid": "engineering:claude:laptop:s-conflict"
+      },
+      {
+        "outcome": "quarantined",
+        "session_uid": "engineering:claude:laptop:s-forged"
+      },
+      {
+        "outcome": "missing",
+        "session_uid": "engineering:claude:laptop:s-missing"
+      },
+      {
+        "outcome": "committed",
+        "session_uid": "engineering:claude:laptop:s-preview"
+      },
+      {
+        "outcome": "committed",
+        "session_uid": "engineering:claude:laptop:s-shared"
+      },
+      {
+        "outcome": "committed",
+        "session_uid": "engineering:claude:laptop:s-vector"
+      }
+    ],
+    "state": "completed",
+    "unknown_attribution_events": 6,
+    "verified_alias_events": 3
+  },
+  "projections": [
+    {
+      "active": true,
+      "provenance": {
+        "confidence": "lossless",
+        "fidelity": "full_raw",
+        "first_event_time": "2026-01-15T14:20:00Z",
+        "importer_version": "1",
+        "installation": "desktop",
+        "last_event_time": "2026-01-15T14:20:09Z",
+        "migration_run": "migration-1",
+        "native_session_id": "s-shared",
+        "provider": "claude",
+        "source_digest": "ae184fac76d8f540c552b61770ccd1ad04cbca77fd0a3f786087d909a0449ad9",
+        "source_references": [
+          "desktop/s-shared.jsonl"
+        ],
+        "unknown_attribution_events": 2,
+        "verified_projects": []
+      },
+      "records": 2,
+      "run_id": "migration-1",
+      "session_uid": "engineering:claude:desktop:s-shared",
+      "source_generation": "import:ae184fac76d8f540c552b61770ccd1ad04cbca77fd0a3f786087d909a0449ad9"
+    },
+    {
+      "active": true,
+      "provenance": {
+        "confidence": "lossy",
+        "fidelity": "preview_only",
+        "first_event_time": "2025-11-20T07:30:00Z",
+        "importer_version": "1",
+        "installation": "laptop",
+        "last_event_time": "2025-11-20T07:30:04Z",
+        "migration_run": "migration-1",
+        "native_session_id": "s-preview",
+        "provider": "claude",
+        "source_digest": "bd907d66e6cabbe3b91c42162cb987a2cb6996f7c4f1ec41e5dcf2528d57e051",
+        "source_references": [
+          "legacy-redis/laptop/s-preview"
+        ],
+        "unknown_attribution_events": 2,
+        "verified_projects": []
+      },
+      "records": 2,
+      "run_id": "migration-1",
+      "session_uid": "engineering:claude:laptop:s-preview",
+      "source_generation": "legacy:bd907d66e6cabbe3b91c42162cb987a2cb6996f7c4f1ec41e5dcf2528d57e051"
+    },
+    {
+      "active": true,
+      "provenance": {
+        "confidence": "lossless",
+        "fidelity": "full_raw",
+        "first_event_time": "2026-03-02T09:00:00Z",
+        "importer_version": "1",
+        "installation": "laptop",
+        "last_event_time": "2026-03-02T09:01:00Z",
+        "migration_run": "migration-1",
+        "native_session_id": "s-shared",
+        "provider": "claude",
+        "source_digest": "b9e0df8c6a531eb3caeb3799737baeb7bab970227341f2fdc44ad3cfdff30614",
+        "source_references": [
+          "laptop-copy-a/s-shared.jsonl",
+          "laptop-copy-b/s-shared.jsonl"
+        ],
+        "unknown_attribution_events": 0,
+        "verified_projects": [
+          "agentihooks"
+        ]
+      },
+      "records": 3,
+      "run_id": "migration-1",
+      "session_uid": "engineering:claude:laptop:s-shared",
+      "source_generation": "import:b9e0df8c6a531eb3caeb3799737baeb7bab970227341f2fdc44ad3cfdff30614"
+    },
+    {
+      "active": true,
+      "provenance": {
+        "confidence": "fragment",
+        "fidelity": "vector_only",
+        "first_event_time": "2025-10-02T12:00:00Z",
+        "importer_version": "1",
+        "installation": "laptop",
+        "last_event_time": "2025-10-02T12:00:09Z",
+        "migration_run": "migration-1",
+        "native_session_id": "s-vector",
+        "provider": "claude",
+        "source_digest": "8da9bcf80285a6b2ae406342d0bbbc6aaaf23e65a10cc1aa9d9535cd19c5284d",
+        "source_references": [
+          "legacy-vectors/laptop/s-vector"
+        ],
+        "unknown_attribution_events": 2,
+        "verified_projects": []
+      },
+      "records": 2,
+      "run_id": "migration-1",
+      "session_uid": "engineering:claude:laptop:s-vector",
+      "source_generation": "legacy:8da9bcf80285a6b2ae406342d0bbbc6aaaf23e65a10cc1aa9d9535cd19c5284d"
+    }
+  ],
+  "repeat_matches": true,
+  "second": {
+    "batches": {
+      "done": 4,
+      "total": 4
+    },
+    "legacy_import_remaining_records": 0,
+    "missing": [
+      "engineering:claude:laptop:s-missing"
+    ],
+    "quarantined": [
+      {
+        "detail": "273b222222d96e8a608eb48be443685b154aa05faaa360dc11565cb200300899",
+        "reason": "conflicting_source_content",
+        "session_uid": "engineering:claude:laptop:s-conflict"
+      },
+      {
+        "detail": "7f94c59e066492ceba295d788ff1d275b70f68f905b249780f2b4712de75aba1",
+        "reason": "conflicting_source_content",
+        "session_uid": "engineering:claude:laptop:s-conflict"
+      },
+      {
+        "detail": "laptop-copy-a/s-forged.jsonl: raw_hash_mismatch",
+        "reason": "refused_source",
+        "session_uid": "engineering:claude:laptop:s-forged"
+      }
+    ],
+    "remaining_sessions": [],
+    "sessions": [
+      {
+        "outcome": "already_imported",
+        "session_uid": "engineering:claude:desktop:s-shared"
+      },
+      {
+        "outcome": "quarantined",
+        "session_uid": "engineering:claude:laptop:s-conflict"
+      },
+      {
+        "outcome": "quarantined",
+        "session_uid": "engineering:claude:laptop:s-forged"
+      },
+      {
+        "outcome": "missing",
+        "session_uid": "engineering:claude:laptop:s-missing"
+      },
+      {
+        "outcome": "already_imported",
+        "session_uid": "engineering:claude:laptop:s-preview"
+      },
+      {
+        "outcome": "already_imported",
+        "session_uid": "engineering:claude:laptop:s-shared"
+      },
+      {
+        "outcome": "already_imported",
+        "session_uid": "engineering:claude:laptop:s-vector"
+      }
+    ],
+    "state": "completed",
+    "unknown_attribution_events": 6,
+    "verified_alias_events": 3
+  },
+  "second_pass_changed_events": false,
+  "second_run_projections": []
+}

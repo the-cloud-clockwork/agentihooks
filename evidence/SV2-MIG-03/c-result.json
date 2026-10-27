@@ -1,0 +1,252 @@
+{
+  "case": "C",
+  "duplicate_events_total": 0,
+  "events": [
+    [
+      "engineering:claude:desktop:s-shared",
+      "import:ae184fac76d8f540c552b61770ccd1ad04cbca77fd0a3f786087d909a0449ad9",
+      1,
+      "2026-01-15T14:20:00Z"
+    ],
+    [
+      "engineering:claude:desktop:s-shared",
+      "import:ae184fac76d8f540c552b61770ccd1ad04cbca77fd0a3f786087d909a0449ad9",
+      2,
+      "2026-01-15T14:20:09Z"
+    ],
+    [
+      "engineering:claude:laptop:s-preview",
+      "legacy:bd907d66e6cabbe3b91c42162cb987a2cb6996f7c4f1ec41e5dcf2528d57e051",
+      1,
+      "2025-11-20T07:30:00Z"
+    ],
+    [
+      "engineering:claude:laptop:s-preview",
+      "legacy:bd907d66e6cabbe3b91c42162cb987a2cb6996f7c4f1ec41e5dcf2528d57e051",
+      2,
+      "2025-11-20T07:30:04Z"
+    ],
+    [
+      "engineering:claude:laptop:s-shared",
+      "import:b9e0df8c6a531eb3caeb3799737baeb7bab970227341f2fdc44ad3cfdff30614",
+      1,
+      "2026-03-02T09:00:00Z"
+    ],
+    [
+      "engineering:claude:laptop:s-shared",
+      "import:b9e0df8c6a531eb3caeb3799737baeb7bab970227341f2fdc44ad3cfdff30614",
+      2,
+      "2026-03-02T09:00:05Z"
+    ],
+    [
+      "engineering:claude:laptop:s-shared",
+      "import:b9e0df8c6a531eb3caeb3799737baeb7bab970227341f2fdc44ad3cfdff30614",
+      3,
+      "2026-03-02T09:01:00Z"
+    ],
+    [
+      "engineering:claude:laptop:s-vector",
+      "legacy:8da9bcf80285a6b2ae406342d0bbbc6aaaf23e65a10cc1aa9d9535cd19c5284d",
+      1,
+      "2025-10-02T12:00:00Z"
+    ],
+    [
+      "engineering:claude:laptop:s-vector",
+      "legacy:8da9bcf80285a6b2ae406342d0bbbc6aaaf23e65a10cc1aa9d9535cd19c5284d",
+      2,
+      "2025-10-02T12:00:09Z"
+    ]
+  ],
+  "interrupted_by_outage": {
+    "batches": {
+      "done": 2,
+      "total": 4
+    },
+    "legacy_import_remaining_records": 7,
+    "missing": [
+      "engineering:claude:laptop:s-missing"
+    ],
+    "quarantined": [
+      {
+        "detail": "273b222222d96e8a608eb48be443685b154aa05faaa360dc11565cb200300899",
+        "reason": "conflicting_source_content",
+        "session_uid": "engineering:claude:laptop:s-conflict"
+      },
+      {
+        "detail": "7f94c59e066492ceba295d788ff1d275b70f68f905b249780f2b4712de75aba1",
+        "reason": "conflicting_source_content",
+        "session_uid": "engineering:claude:laptop:s-conflict"
+      },
+      {
+        "detail": "laptop-copy-a/s-forged.jsonl: raw_hash_mismatch",
+        "reason": "refused_source",
+        "session_uid": "engineering:claude:laptop:s-forged"
+      }
+    ],
+    "remaining_sessions": [
+      "engineering:claude:laptop:s-preview",
+      "engineering:claude:laptop:s-shared",
+      "engineering:claude:laptop:s-vector"
+    ],
+    "sessions": [
+      {
+        "outcome": "quarantined",
+        "session_uid": "engineering:claude:laptop:s-forged"
+      },
+      {
+        "outcome": "missing",
+        "session_uid": "engineering:claude:laptop:s-missing"
+      }
+    ],
+    "state": "interrupted",
+    "unknown_attribution_events": 6,
+    "verified_alias_events": 3
+  },
+  "replay_of_completed_run": {
+    "batches": {
+      "done": 4,
+      "total": 4
+    },
+    "legacy_import_remaining_records": 0,
+    "missing": [
+      "engineering:claude:laptop:s-missing"
+    ],
+    "quarantined": [
+      {
+        "detail": "273b222222d96e8a608eb48be443685b154aa05faaa360dc11565cb200300899",
+        "reason": "conflicting_source_content",
+        "session_uid": "engineering:claude:laptop:s-conflict"
+      },
+      {
+        "detail": "7f94c59e066492ceba295d788ff1d275b70f68f905b249780f2b4712de75aba1",
+        "reason": "conflicting_source_content",
+        "session_uid": "engineering:claude:laptop:s-conflict"
+      },
+      {
+        "detail": "laptop-copy-a/s-forged.jsonl: raw_hash_mismatch",
+        "reason": "refused_source",
+        "session_uid": "engineering:claude:laptop:s-forged"
+      }
+    ],
+    "remaining_sessions": [],
+    "sessions": [],
+    "state": "completed",
+    "unknown_attribution_events": 6,
+    "verified_alias_events": 3
+  },
+  "resumed": {
+    "batches": {
+      "done": 4,
+      "total": 4
+    },
+    "legacy_import_remaining_records": 0,
+    "missing": [
+      "engineering:claude:laptop:s-missing"
+    ],
+    "quarantined": [
+      {
+        "detail": "273b222222d96e8a608eb48be443685b154aa05faaa360dc11565cb200300899",
+        "reason": "conflicting_source_content",
+        "session_uid": "engineering:claude:laptop:s-conflict"
+      },
+      {
+        "detail": "7f94c59e066492ceba295d788ff1d275b70f68f905b249780f2b4712de75aba1",
+        "reason": "conflicting_source_content",
+        "session_uid": "engineering:claude:laptop:s-conflict"
+      },
+      {
+        "detail": "laptop-copy-a/s-forged.jsonl: raw_hash_mismatch",
+        "reason": "refused_source",
+        "session_uid": "engineering:claude:laptop:s-forged"
+      }
+    ],
+    "remaining_sessions": [],
+    "sessions": [
+      {
+        "outcome": "committed",
+        "session_uid": "engineering:claude:laptop:s-preview"
+      },
+      {
+        "outcome": "committed",
+        "session_uid": "engineering:claude:laptop:s-shared"
+      },
+      {
+        "outcome": "committed",
+        "session_uid": "engineering:claude:laptop:s-vector"
+      }
+    ],
+    "state": "completed",
+    "unknown_attribution_events": 6,
+    "verified_alias_events": 3
+  },
+  "rollback": {
+    "active_after": [
+      false,
+      false,
+      false,
+      false
+    ],
+    "catalog_events_kept": 9,
+    "deactivated": 4,
+    "sources_kept": true
+  },
+  "stale_runner_advance": "stale_checkpoint",
+  "stale_runner_checkpoint": 1,
+  "stopped": {
+    "batches": {
+      "done": 1,
+      "total": 4
+    },
+    "legacy_import_remaining_records": 7,
+    "missing": [
+      "engineering:claude:laptop:s-missing"
+    ],
+    "quarantined": [
+      {
+        "detail": "273b222222d96e8a608eb48be443685b154aa05faaa360dc11565cb200300899",
+        "reason": "conflicting_source_content",
+        "session_uid": "engineering:claude:laptop:s-conflict"
+      },
+      {
+        "detail": "7f94c59e066492ceba295d788ff1d275b70f68f905b249780f2b4712de75aba1",
+        "reason": "conflicting_source_content",
+        "session_uid": "engineering:claude:laptop:s-conflict"
+      },
+      {
+        "detail": "laptop-copy-a/s-forged.jsonl: raw_hash_mismatch",
+        "reason": "refused_source",
+        "session_uid": "engineering:claude:laptop:s-forged"
+      }
+    ],
+    "remaining_sessions": [
+      "engineering:claude:laptop:s-preview",
+      "engineering:claude:laptop:s-shared",
+      "engineering:claude:laptop:s-vector"
+    ],
+    "sessions": [
+      {
+        "outcome": "committed",
+        "session_uid": "engineering:claude:desktop:s-shared"
+      },
+      {
+        "outcome": "quarantined",
+        "session_uid": "engineering:claude:laptop:s-conflict"
+      },
+      {
+        "outcome": "quarantined",
+        "session_uid": "engineering:claude:laptop:s-forged"
+      }
+    ],
+    "state": "partial",
+    "unknown_attribution_events": 6,
+    "verified_alias_events": 3
+  },
+  "survived_restart": {
+    "legacy_backfill_quarantine": 3,
+    "legacy_backfill_run": 1,
+    "legacy_backfill_session": 1,
+    "session_event": 2,
+    "session_ingest_batch": 1,
+    "session_quarantine": 0
+  }
+}

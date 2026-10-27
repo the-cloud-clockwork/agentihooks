@@ -1,0 +1,22 @@
+{
+  "fixture_inputs": {
+    "conflicts": "s-conflict held in two folders with different bytes, s-forged whose bytes do not match its recorded digest, and a catalog already holding a different event at a backfill event identity",
+    "duplicate_source_directories": "the laptop s-shared transcript copied byte for byte into two folders, beside a lower fidelity legacy preview of the same session",
+    "equal_native_ids_from_different_machines": "s-shared on the laptop and s-shared on the desktop with different content, kept apart by the installation namespace",
+    "fidelity": "s-preview survives only as a legacy preview, s-vector only as vector rows, s-missing as nothing",
+    "mid_batch_interruption": "a run stopped after three sessions inside its second batch of two, and a run stopped by a catalog outage, both resumed at the durable batch checkpoint"
+  },
+  "input_sha256": {
+    "fixtures/sv2_mig03/desktop/s-shared.jsonl": "ae184fac76d8f540c552b61770ccd1ad04cbca77fd0a3f786087d909a0449ad9",
+    "fixtures/sv2_mig03/fixture.json": "833d62410e7e62d93783046941d5c923ed8480531539e66cc82d9d16a345e08c",
+    "fixtures/sv2_mig03/laptop-copy-a/s-conflict.jsonl": "273b222222d96e8a608eb48be443685b154aa05faaa360dc11565cb200300899",
+    "fixtures/sv2_mig03/laptop-copy-a/s-forged.jsonl": "9e58d03ad06abc41ef04d09963a0524010cef50a75e7300a446edf2c3365b359",
+    "fixtures/sv2_mig03/laptop-copy-a/s-shared.jsonl": "b9e0df8c6a531eb3caeb3799737baeb7bab970227341f2fdc44ad3cfdff30614",
+    "fixtures/sv2_mig03/laptop-copy-b/s-conflict.jsonl": "7f94c59e066492ceba295d788ff1d275b70f68f905b249780f2b4712de75aba1",
+    "fixtures/sv2_mig03/laptop-copy-b/s-shared.jsonl": "b9e0df8c6a531eb3caeb3799737baeb7bab970227341f2fdc44ad3cfdff30614",
+    "sv2_mig03_cases.py": "ec7a54423c7cbd6afc5de312abd55067b5d82f5d3f145253b88d9f5e64261129"
+  },
+  "mocked": true,
+  "package": "SV2-MIG-03",
+  "tested_commit": "pending"
+}
