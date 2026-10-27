@@ -148,17 +148,16 @@ gave up after 5 attempts: unknown
 ```
 
 `classifier undecided` means neither the yes nor the no rule reached its
-threshold; an exception
-class name means the worker raised it; `unknown` means no reason was recorded.
-The hook log records `documentation request abandoned` with the outcome and
-session. An abandoned request is never retried or dispatched again.
+threshold; an exception class name means the worker raised it; `unknown` means
+no reason was recorded. The hook log records `documentation request abandoned`
+with the outcome and session. An abandoned request is never retried or
+dispatched again.
 
 A successful retry finishes the request as `queued`, with exactly one
 documentation task added, or `complete` when no documentation is needed. A
 standalone request that needs documentation ends `complete` with a repository
-notice. The
-stable documentation task identifier keeps a repeated retry from adding a
-second task.
+notice. The stable documentation task identifier keeps a repeated retry from
+adding a second task.
 
 Request records live in `~/.agentihooks/documentation/`, one JSON file per
 session named by the SHA-256 of the session id. List requests still pending
