@@ -13,6 +13,8 @@ TAIL_LINES = 3
 TAIL_BYTES = 4096
 SEEDS = ("steering.md", "progress.md", "proof.md")
 SEED_CHARS = 65536
+FILES = 32
+FILES_SECONDS = 86400
 ENDED = ("ended", "finished")
 
 
@@ -92,24 +94,47 @@ def named(slug, agent, recorded=""):
 
 
 def seeds(slug, task_id):
-    path = folder(slug, task_id)
-    sent = {name: (path / name).read_text(encoding="utf-8") for name in SEEDS if (path / name).is_file()}
-    return {name: text if name == "steering.md" else text[-SEED_CHARS:] for name, text in sent.items()}
+    steering = folder(slug, task_id) / "steering.md"
+    sent = {"steering.md": steering.read_text(encoding="utf-8")} if steering.is_file() else {}
+    return {**sent, **contents(slug, task_id)}
+
+
+def contents(slug, task_id):
+    """Progress and proof keep their latest text; any other plain text file the agent added travels whole or not at all."""
+    found = {}
+    for file in _files(folder(slug, task_id)):
+        try:
+            if file.name not in SEEDS and file.stat().st_size > SEED_CHARS:
+                continue
+            text = file.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+        found[file.name] = text[-SEED_CHARS:]
+    return found
+
+
+def _files(path):
+    try:
+        listed = sorted(path.iterdir())
+    except OSError:
+        return []
+    kept = [file for file in listed if file.name != "steering.md" and PART_RE.fullmatch(file.name)]
+    return [file for file in kept if file.is_file() and not file.is_symlink()][:FILES]
 
 
 def materialize(slug, task_id, sent):
     """Steering follows the controller; progress and proof the hive already holds stay its own."""
     path = folder(slug, task_id)
     path.mkdir(parents=True, exist_ok=True)
-    for name in SEEDS:
-        if name not in sent:
+    for name, text in sent.items():
+        if not PART_RE.fullmatch(name):
             continue
         if name == "steering.md":
-            (path / name).write_text(sent[name], encoding="utf-8")
+            (path / name).write_text(text, encoding="utf-8")
             continue
         try:
             with (path / name).open("x", encoding="utf-8") as fh:
-                fh.write(sent[name])
+                fh.write(text)
         except FileExistsError:
             pass
     return path
@@ -119,11 +144,17 @@ def synced_key(hive):
     return f"{ports.hive().registry.key(hive)}:workspaces"
 
 
+def files_key(hive):
+    return f"{synced_key(hive)}:files"
+
+
 def sync(redis, hive, hosted, ttl):
-    copy = {}
+    copy, files = {}, {}
     for slug, task_id in hosted:
         copy.setdefault(slug, {})[task_id] = tails(slug, task_id)
+        files.setdefault(slug, {})[task_id] = contents(slug, task_id)
     redis.set(synced_key(hive), json.dumps(copy), ex=ttl)
+    redis.set(files_key(hive), json.dumps(files), ex=FILES_SECONDS)
 
 
 def latest(agents):
@@ -134,6 +165,24 @@ def latest(agents):
 
 def published(store, slug, ledger):
     """Each task's latest work folder lines: the synced copy of the hive that runs, or last ran, its execution."""
+    synced = _synced(store, slug, ledger, synced_key)
+    return {task_id: tails(slug, task_id) if copy is None else copy for task_id, copy in synced.items()}
+
+
+def mirror(store, slug, ledger):
+    """A task run on a hive takes that hive's folder files here, so a successor on any host reads them."""
+    for task_id, copy in _synced(store, slug, ledger, files_key).items():
+        if not copy:
+            continue
+        path = folder(slug, task_id)
+        path.mkdir(parents=True, exist_ok=True)
+        for name, text in copy.items():
+            if name != "steering.md" and PART_RE.fullmatch(name):
+                (path / name).write_text(text, encoding="utf-8")
+
+
+def _synced(store, slug, ledger, key):
+    """Each work folder task's copy from the hive that runs, or last ran, its execution; None for one run here."""
     ran = latest(store.agents(slug))
     copies = {}
     found = {}
@@ -142,9 +191,9 @@ def published(store, slug, ledger):
             continue
         host = ports.hive().reports.host(ran[task["id"]]) if task["id"] in ran else ""
         if not host:
-            found[task["id"]] = tails(slug, task["id"])
+            found[task["id"]] = None
             continue
         if host not in copies:
-            copies[host] = json.loads(store.redis.get(synced_key(host)) or "{}")
+            copies[host] = json.loads(store.redis.get(key(host)) or "{}")
         found[task["id"]] = copies[host].get(slug, {}).get(task["id"], {})
     return found

@@ -709,6 +709,16 @@ When the controller publishes swarm status, each task with a work folder takes i
 or last ran, its latest execution. A task whose latest execution ran on the controller's own machine is read from
 the local folder. These lines are what the ledger page shows in the task's Contract and proof fold.
 
+### Work folder files on any host
+
+On the same heartbeat each hive writes the files of those folders to `<root>:hive:<hive id>:workspaces:files`,
+expiring after a day so a hive that died still hands its last copy over. It holds the last 65,536 characters of
+`progress.md` and `proof.md` and every other plain UTF-8 file directly in the folder of at most 65,536 bytes, up to
+32 files; steering, subfolders, symbolic links, hidden names and binary files stay behind. On each status publish the
+controller writes each task's copy, from the hive running its latest execution, into its own folder. A launch
+carries the controller's folder to the next hive, added files included, so a successor on any host reads what its
+predecessor wrote.
+
 ### Resume and recovery prompts
 
 The restore prompt after a reboot and the resume prompt after an outage tell the agent to re-read its task folder.
