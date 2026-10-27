@@ -471,6 +471,7 @@ def _preferred() -> dict[str, int]:
 
 def _take(name: str, bao: openbao_kv.OpenBao | None) -> tuple[int, int, dict[str, str]]:
     from scripts import master_logins
+    from scripts.routing import reservation
 
     offered = _offered(bao)
     if not offered:
@@ -487,6 +488,7 @@ def _take(name: str, bao: openbao_kv.OpenBao | None) -> tuple[int, int, dict[str
         ranks = _preferred()
         order.sort(
             key=lambda number: (
+                master_logins.usage(named[number], now)[1] >= reservation.MASTER_LEAVES,
                 ranks.get(named[number], len(ranks)),
                 -master_logins.left(named[number], now),
                 number != slot(),
