@@ -174,9 +174,9 @@ def rendered_field(home: Path, field: str) -> list[str]:
     rendered = stamp["render"] if "render" in stamp else stamp
     if not isinstance(rendered, dict):
         raise MalformedRenderStamp(f"render stamp field render is {_shape(rendered)}, expected an object")
-    names = rendered.get(field)
-    if names is None:
+    if field not in rendered:
         return []
+    names = rendered[field]
     if not isinstance(names, list):
         raise MalformedRenderStamp(f"render stamp field {field} is {_shape(names)}, expected a list of strings")
     for name in names:

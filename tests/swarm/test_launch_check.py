@@ -159,7 +159,7 @@ def test_chain_reads_the_rendered_stamp(tmp_path, wrapped):
     data = {"chain": ["a", "b"]}
     stamp.write_text(json.dumps({"render": data, "operator": "digest"} if wrapped else data))
     assert launch_check.chain(tmp_path) == ["a", "b"]
-    for data in ({}, {"chain": None}, {"render": {}}):
+    for data in ({}, {"render": {}}):
         stamp.write_text(json.dumps(data))
         assert launch_check.chain(tmp_path) == []
     stamp.write_text("{")
@@ -172,6 +172,7 @@ def test_chain_reads_the_rendered_stamp(tmp_path, wrapped):
         ([], "render stamp is a list, expected an object"),
         ({"render": ["a", "b"]}, "render stamp field render is a list, expected an object"),
         ({"chain": "ab"}, "render stamp field chain is a string, expected a list of strings"),
+        ({"chain": None}, "render stamp field chain is null, expected a list of strings"),
         ({"render": {"chain": {"a": 1}}}, "render stamp field chain is an object, expected a list of strings"),
     ],
 )

@@ -343,7 +343,7 @@ def test_rendered_overlays_read_the_home_stamp(tmp_path, wrapped):
     data = {"chain": ["a", "brain"], "overlays": ["brain"]}
     stamp.write_text(json.dumps({"render": data, "operator": "digest"} if wrapped else data))
     assert profile_chain.rendered_overlays(tmp_path) == ["brain"]
-    for data in ({"chain": ["a", "brain"]}, {"overlays": None}, {"render": {}}, {"render": {"overlays": None}}):
+    for data in ({"chain": ["a", "brain"]}, {"render": {}}):
         stamp.write_text(json.dumps(data))
         assert profile_chain.rendered_overlays(tmp_path) == []
     stamp.write_text("{")
@@ -365,6 +365,8 @@ def test_rendered_overlays_read_the_home_stamp(tmp_path, wrapped):
             "render stamp field overlays is a list holding an object, expected a list of strings",
         ),
         ({"overlays": [1]}, "render stamp field overlays is a list holding a number, expected a list of strings"),
+        ({"overlays": None}, "render stamp field overlays is null, expected a list of strings"),
+        ({"render": {"overlays": None}}, "render stamp field overlays is null, expected a list of strings"),
     ],
 )
 def test_rendered_overlays_refuse_a_malformed_stamp_by_name(tmp_path, data, message):
