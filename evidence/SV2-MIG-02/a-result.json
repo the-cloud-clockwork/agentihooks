@@ -1,0 +1,125 @@
+{
+  "case": "A",
+  "first": {
+    "matches_memory": true,
+    "report": {
+      "full_raw": [
+        "alpha"
+      ],
+      "missing": [
+        "delta"
+      ],
+      "preview_only": [
+        "beta"
+      ],
+      "revision": 1,
+      "source_fidelity_classes": {
+        "full_raw": 1,
+        "missing": 1,
+        "preview_only": 1,
+        "vector_only": 1
+      },
+      "sources": [
+        {
+          "class": "full_raw",
+          "confidence": "lossless",
+          "preview": {
+            "capped": 1,
+            "diverged": 0,
+            "missing_ranges": [
+              {
+                "cause": "incremental_offset_gap",
+                "end": 3,
+                "start": 3
+              },
+              {
+                "cause": "uncollected_tail",
+                "end": 5,
+                "start": 5
+              }
+            ],
+            "preview_entries": 4
+          },
+          "preview_sha256": "ffeef96a916f098a8fe24ecb21771454039aae9a62eb066c8674153fb8a58b99",
+          "raw": {
+            "entries": 6,
+            "turns": 3,
+            "unparsed_lines": 0
+          },
+          "raw_sha256": "c10e017688020ea4a06425c1f2383dc64362ac482ba81d127238801a63abd8d4",
+          "source": "alpha",
+          "vectors": {
+            "orphans": 1,
+            "renumbered": [
+              {
+                "chunk_idx": 1,
+                "turn": 2
+              }
+            ],
+            "turns_without_vector": 1,
+            "vector_rows": 3
+          },
+          "vectors_sha256": "d0e7b1aa705f70712c0bc65290d92261c6c049da48a6741fa84d45ef082cdbf7"
+        },
+        {
+          "class": "preview_only",
+          "confidence": "lossy",
+          "preview": {
+            "missing_ranges": "unknown",
+            "possibly_capped": 1,
+            "possibly_trimmed": false,
+            "preview_entries": 4
+          },
+          "preview_sha256": "bb131daeccd1b9f072eeb4e163be89b3cf549178113d9db28536c7662c2d9f1f",
+          "raw_sha256": null,
+          "source": "beta",
+          "vectors": {
+            "preview_chars": 1000,
+            "vector_rows": 0
+          },
+          "vectors_sha256": null
+        },
+        {
+          "class": "missing",
+          "confidence": "none",
+          "preview": {
+            "missing_ranges": "unknown",
+            "possibly_capped": 0,
+            "possibly_trimmed": false,
+            "preview_entries": 0
+          },
+          "preview_sha256": null,
+          "raw_sha256": null,
+          "source": "delta",
+          "vectors": {
+            "preview_chars": 1000,
+            "vector_rows": 0
+          },
+          "vectors_sha256": null
+        },
+        {
+          "class": "vector_only",
+          "confidence": "fragment",
+          "preview": {
+            "missing_ranges": "unknown",
+            "possibly_capped": 0,
+            "possibly_trimmed": false,
+            "preview_entries": 0
+          },
+          "preview_sha256": null,
+          "raw_sha256": null,
+          "source": "gamma",
+          "vectors": {
+            "preview_chars": 1000,
+            "vector_rows": 2
+          },
+          "vectors_sha256": "ad901b30f1a66a0896d91d51e2e721d2648b83e224afbbe1bcc0e480ec3ada9c"
+        }
+      ],
+      "vector_only": [
+        "gamma"
+      ]
+    }
+  },
+  "repeat_matches": true
+}
