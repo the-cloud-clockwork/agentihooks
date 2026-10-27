@@ -110,6 +110,10 @@ def test_runtime_records_the_launcher_overflow_placement(tmp_path, monkeypatch):
     launched, live = [], set()
 
     def run(argv, **kwargs):
+        from scripts.routing import native_login
+
+        if argv[1:] == list(native_login.COMMAND):
+            return subprocess.CompletedProcess(argv, 1, "", "")
         launched.append(argv)
         live.add(argv[argv.index("--name") + 1])
         return subprocess.CompletedProcess(
