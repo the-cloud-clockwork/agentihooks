@@ -215,8 +215,9 @@ def test_stage_skips_unrelated_entries_and_reports_complete_size(tmp_path, monke
         "PYTHONDONTWRITEBYTECODE": "1",
     }
     monkeypatch.setenv("PYTHONDONTWRITEBYTECODE", "0")
+    monkeypatch.setenv("PYTEST_DISABLE_PLUGIN_AUTOLOAD", "0")
     for key, value in values.items():
-        if key != "PYTHONDONTWRITEBYTECODE":
+        if key not in {"PYTHONDONTWRITEBYTECODE", "PYTEST_DISABLE_PLUGIN_AUTOLOAD"}:
             monkeypatch.setenv(key, value)
     with patch("scripts.ci_mutation.evidence.subprocess.check_output", return_value="revision\n") as git:
         manifest = stage(tmp_path, output, bundle, (1, 3))
@@ -257,7 +258,7 @@ def test_replay_preserves_environment_and_stops_on_command_failure(tmp_path, mon
     run.assert_called_once_with(
         [sys.executable, *manifest["groups"][0]["commands"][0][1:]],
         cwd=work,
-        env=os.environ | {"CI": "recorded", "PYTHONDONTWRITEBYTECODE": "1"},
+        env=os.environ | {"CI": "recorded", "PYTHONDONTWRITEBYTECODE": "1", "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1"},
         check=True,
     )
     assert (work / "results.json").read_text() == "{}"

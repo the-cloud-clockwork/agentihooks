@@ -54,12 +54,8 @@ def stage(root: Path, output: Path, bundle: Path, shard: tuple[int, int]) -> dic
         )
     manifest = {
         "head": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=root, text=True).strip(),
-        "env": {
-            key: os.environ[key]
-            for key in ("CI", "PYTEST_DISABLE_PLUGIN_AUTOLOAD", "PYTHONUNBUFFERED")
-            if key in os.environ
-        }
-        | {"PYTHONDONTWRITEBYTECODE": "1"},
+        "env": {key: os.environ[key] for key in ("CI", "PYTHONUNBUFFERED") if key in os.environ}
+        | {"PYTHONDONTWRITEBYTECODE": "1", "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1"},
         "groups": groups,
     }
     (bundle / "replay.json").write_text(json.dumps(manifest) + "\n")
