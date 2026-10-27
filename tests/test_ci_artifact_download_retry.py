@@ -8,8 +8,6 @@ import yaml
 pytestmark = pytest.mark.unit
 
 ROOT = Path(__file__).resolve().parents[1]
-# The protected grader compares test-summary with its reviewed form from the base branch.
-EXEMPT = {"test-summary"}
 
 
 def _jobs():
@@ -42,12 +40,13 @@ def test_every_tests_job_downloading_artifacts_is_covered():
         "mutation-stats",
         "mutation",
         "shard-check",
-    } <= jobs - EXEMPT
+        "test-summary",
+    } <= jobs
 
 
 @pytest.mark.parametrize(
     "job, index",
-    [(job, index) for job, _, index in _first_attempts() if job not in EXEMPT],
+    [(job, index) for job, _, index in _first_attempts()],
 )
 def test_a_failed_download_names_the_outage_waits_and_downloads_once_more(job, index, tmp_path):
     steps = _jobs()[job]["steps"]
