@@ -264,6 +264,83 @@ def test_focus_on_an_ancestor_or_a_selector_lifts_its_task_above_ledger_order(ta
     assert dispatcher.ordered(found, "", dispatcher.leverage(found)) == [focused["id"], other["id"], "w"]
 
 
+def test_focus_order_leads_with_focused_tasks_when_no_cap_applies():
+    tasks = [task("a", phase="", kind="hot"), task("b", phase="")]
+    found = doc(tasks, phases=[], freezes=[{"verb": "focus", "target": "kind:hot"}])
+    order = dispatcher._focus_order(found)
+    assert order["a"] < order["b"]
+
+
+def test_focus_weight_caps_focused_claims_at_a_share_of_the_lane_cap():
+    holding = [task(f"r{i}", phase="", state="claimed", kind="hot") for i in range(5)]
+    holding += [task(f"n{i}", phase="", state="claimed", kind="code") for i in range(5)]
+    waiting_focused = task("open-hot", phase="", kind="hot")
+    waiting_plain = task("open-plain", phase="", kind="code")
+    tasks = [*holding, waiting_focused, waiting_plain]
+    found = doc(tasks, phases=[], freezes=[{"verb": "focus", "target": "kind:hot"}])
+    order = dispatcher._focus_order(found, {"eng": 10}, 50)
+    assert order["open-hot"] == order["open-plain"]
+
+
+def test_focus_weight_below_the_cap_still_leads_with_the_focused_task():
+    holding = [task(f"r{i}", phase="", state="claimed", kind="hot") for i in range(4)]
+    holding += [task(f"n{i}", phase="", state="claimed", kind="code") for i in range(6)]
+    waiting_focused = task("open-hot", phase="", kind="hot")
+    waiting_plain = task("open-plain", phase="", kind="code")
+    tasks = [*holding, waiting_focused, waiting_plain]
+    found = doc(tasks, phases=[], freezes=[{"verb": "focus", "target": "kind:hot"}])
+    order = dispatcher._focus_order(found, {"eng": 10}, 50)
+    assert order["open-hot"] < order["open-plain"]
+
+
+def focus_split(holders=1):
+    tasks = [task(f"c{i}", phase="", state="claimed", kind="hot") for i in range(holders)]
+    tasks += [task("a", phase=""), task("h", phase="", kind="hot")]
+    tasks += [task("a2", phase="", depends_on=["a"]), task("h2", phase="", depends_on=["h"])]
+    return doc(tasks, phases=[], freezes=[{"verb": "focus", "target": "kind:hot"}])
+
+
+def test_focus_cap_rounds_a_fractional_share_down():
+    order = dispatcher._focus_order(focus_split(), {"eng": 3}, 50)
+    assert order["h"] == order["a"]
+
+
+@pytest.mark.parametrize("weight,first", [(50, "a"), (100, "h")])
+def test_the_lane_cap_and_focus_weight_reach_the_focus_order(weight, first):
+    found = focus_split()
+    assert dispatcher.ordered(found, "", dispatcher.leverage(found), {"eng": 2}, weight)[0] == first
+
+
+def test_the_queue_defaults_to_half_of_the_lane_cap_for_focus():
+    assert dispatcher.queue(focus_split(49), "", {"eng": 99})[0] == "a"
+
+
+def test_lane_caps_name_each_lane_with_its_own_cap():
+    config = SwarmConfig(SLUG, "/repo", max_eng=1, max_ci=2, max_plan=3)
+    assert dispatcher.lane_caps(config) == {"eng": 1, "ci": 2, "plan": 3}
+
+
+def test_the_claim_key_orders_focus_by_the_swarm_focus_weight(store):
+    config = store.update(SLUG, autonomy="delegate", max_eng=2, focus_weight=100)
+    found = focus_split()
+    key, known = dispatcher.claim_key(config, found), {t["id"]: t for t in found["tasks"]}
+    assert key(known["h"]) < key(known["a"])
+
+
+@pytest.mark.parametrize("weight,head", [(50, ["a", "h"]), (100, ["h", "a"])])
+def test_at_delegate_the_queue_head_follows_the_lane_cap_and_focus_weight(store, home, shipped, weight, head):
+    config = store.update(SLUG, autonomy="delegate", max_eng=2, focus_weight=weight)
+    ledger = Ledger()
+    dispatcher.rank_pass(SLUG, config, store, ledger, focus_split(), NOW)
+    assert [comment[0] for comment in ledger.comments] == head
+
+
+def test_below_delegate_proposals_follow_the_swarm_focus_weight(store, home, shipped):
+    config = store.update(SLUG, autonomy="assist", max_eng=2, focus_weight=100)
+    proposals = dispatcher.rank_pass(SLUG, config, store, Ledger(), focus_split(), NOW)
+    assert [line.split(" for task ")[1].split(" ")[0] for line in proposals] == ["h", "a"]
+
+
 def test_below_delegate_a_high_leverage_task_yields_one_master_proposal_and_no_rank(store, home, shipped):
     store.update(SLUG, autonomy="assist")
     ledger, found = Ledger(), doc(ladder())
@@ -732,7 +809,7 @@ def test_the_critical_chain_counts_only_work_no_focus_holds_unless_the_fix_phase
     from scripts.doctor import loop
 
     assert dispatcher.guarded(held_fix_chain(), "") == set()
-    assert dispatcher.guarded(held_fix_chain(FOCUS), "") == {"b"}
+    assert dispatcher.guarded(held_fix_chain(FOCUS), "") == set()
     assert dispatcher.guarded(held_fix_chain(FOCUS), loop.FIX_PHASE) == set()
     tasks = [
         task("a", state="done"),
@@ -745,7 +822,7 @@ def test_the_critical_chain_counts_only_work_no_focus_holds_unless_the_fix_phase
         task("w", depends_on=["c"]),
     ]
     phases = [{"id": "p1", "depends_on": []}, {"id": "p2", "depends_on": []}]
-    assert dispatcher.guarded(doc(tasks, phases=phases, freezes=FOCUS), "") == {"c", "t"}
+    assert dispatcher.guarded(doc(tasks, phases=phases, freezes=FOCUS), "") == {"t"}
 
 
 def test_the_doctor_fix_phase_reaches_the_guard_in_the_claim_key_and_the_chain_report(store, home, shipped):
@@ -754,8 +831,8 @@ def test_the_doctor_fix_phase_reaches_the_guard_in_the_claim_key_and_the_chain_r
     found, ledger = held_fix_chain(FOCUS), Ledger()
     claimed = found["tasks"][1]
     config = store.update(SLUG, autonomy="delegate")
-    assert dispatcher.claim_key(config, found)(claimed)[0] == dispatcher.GUARD
-    assert dispatcher.chain_claimed(SLUG, config, ledger, found, claimed, "eng", NOW) != []
+    assert dispatcher.claim_key(config, found)(claimed)[0] != dispatcher.GUARD
+    assert dispatcher.chain_claimed(SLUG, config, ledger, found, claimed, "eng", NOW) == []
     config = store.update(SLUG, template=priming.TEMPLATE)
     assert dispatcher.claim_key(config, found)(claimed)[0] != dispatcher.GUARD
     assert dispatcher.chain_claimed(SLUG, config, ledger, found, claimed, "eng", NOW) == []
@@ -768,7 +845,7 @@ def test_the_doctor_fix_phase_reaches_the_dispatcher_queue_its_position_and_its_
     found = held_fix_chain(FOCUS)
     found["tasks"] += [task("v", phase=fix, depends_on=["s"]), task("w", depends_on=["b"])]
     claimed = found["tasks"][1]
-    assert dispatcher.queue(found, "")[0] == "b"
+    assert dispatcher.queue(found, "")[0] == "p"
     assert dispatcher.queue(found, fix)[0] == "p"
     config = store.update(SLUG, autonomy="delegate", template=priming.TEMPLATE, max_eng=1)
     key = dispatcher.claim_key(config, found)
@@ -777,6 +854,36 @@ def test_the_doctor_fix_phase_reaches_the_dispatcher_queue_its_position_and_its_
     ledger = Ledger()
     dispatcher.rank_pass(SLUG, config, store, ledger, found, NOW)
     assert [comment[0] for comment in ledger.comments] == ["p"]
+
+
+def watched_fix_chain():
+    from scripts.doctor import loop
+    from scripts.swarm import freeze
+
+    fix = loop.FIX_PHASE
+    tasks = [task("a", state="done"), task("b", depends_on=["a"])]
+    tasks += [task("b2", depends_on=["b"]), task("b3", depends_on=["b2"]), task("b4", depends_on=["b3"])]
+    tasks += [task("f", phase=fix, state="done"), task("k", phase=fix)]
+    tasks += [task("k2", phase=fix, depends_on=["k"]), task("k3", phase=fix, depends_on=["k2"])]
+    tasks += [task("g", phase=fix, depends_on=["f"]), task("h", phase=fix, depends_on=["g"])]
+    phases = [{"id": "p1", "depends_on": []}, {"id": fix, "depends_on": []}]
+    return doc(tasks, phases=phases, **{freeze.WATCHED: ["the focus on p1 in the watched swarm"]})
+
+
+def test_a_watched_focus_drops_its_held_chain_from_the_critical_chain_guard():
+    from scripts.doctor import loop
+
+    assert dispatcher.guarded(watched_fix_chain(), loop.FIX_PHASE) == {"g"}
+    assert dispatcher.guarded(watched_fix_chain(), "") == set()
+
+
+def test_the_doctor_fix_phase_reaches_the_rank_pass_queue_under_a_watched_focus(store, home, shipped):
+    from scripts.doctor import priming
+
+    config = store.update(SLUG, autonomy="delegate", template=priming.TEMPLATE, max_eng=1)
+    ledger = Ledger()
+    dispatcher.rank_pass(SLUG, config, store, ledger, watched_fix_chain(), NOW)
+    assert [comment[0] for comment in ledger.comments] == ["g"]
 
 
 def test_a_chain_claim_reports_the_seconds_from_the_merge_on_the_task_and_logs_it(store, home, shipped):

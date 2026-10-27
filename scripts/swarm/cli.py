@@ -192,6 +192,7 @@ SETTABLE = {
     "snapshot-minutes": "snapshot_minutes",
     "master-move-grace": "master_move_grace",
     "local-max-agents": "local_max_agents",
+    "focus-weight": "focus_weight",
 }
 LANE_KEYS = {f"{lane}-{key}": (lane, key) for lane in templates.LANES for key in templates.LANE_FIELDS}
 EFFORT_KEYS = {"effort-min": "effort_min", "effort-max": "effort_max"}
@@ -1131,6 +1132,7 @@ def cmd_set(store, args):
                 "max_plan": config.max_plan,
                 "masters_step": config.masters_step,
                 "compact_limit": config.compact_limit,
+                "focus_weight": config.focus_weight,
                 "autonomy": config.autonomy,
                 "snapshot_minutes": config.snapshot_minutes,
                 "effort_min": config.effort_min,
@@ -1248,7 +1250,7 @@ def cmd_status(store, args):
     counts = task_counts(tasks)
     found = findings(store, args.slug, config, tasks, ledger.events(args.slug))
     print(
-        f"{naming.swarm_name(config.code) or '-'}  {config.slug}  {config.state}  eng {config.max_eng}  ci {config.max_ci}  plan {config.max_plan}  masters step {config.masters_step}  scaling {config.scaling}  effort {config.effort_min} to {config.effort_max}  repo {config.repo}"
+        f"{naming.swarm_name(config.code) or '-'}  {config.slug}  {config.state}  eng {config.max_eng}  ci {config.max_ci}  plan {config.max_plan}  masters step {config.masters_step}  scaling {config.scaling}  focus weight {config.focus_weight}  effort {config.effort_min} to {config.effort_max}  repo {config.repo}"
     )
     print(
         "gate modes  "

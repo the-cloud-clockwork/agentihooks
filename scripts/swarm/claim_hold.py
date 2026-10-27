@@ -73,7 +73,7 @@ def phased(task: dict, doc: dict) -> str:
 
 
 def frozen(task: dict, doc: dict, graph: dict, fix: str) -> str:
-    if not freeze.held(task, doc, graph, fix):
+    if not freeze.claim_gate(task, doc, graph, fix):
         return ""
     return freezes(task, doc, graph) or FOCUS
 
