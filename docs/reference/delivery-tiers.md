@@ -835,7 +835,7 @@ A merge group unit shard that loses its runner gets one recovery inside the same
 | `unit-rerun` | `unit rerun (<python>, <shard>)` | Runs each lost leg once using the original unit steps and queue plan |
 | `gate-required` | `Queue gate summary` | Later dependency summary; it does not own the required check name on this event |
 
-1. The early verifier reads this attempt's jobs with the App token. An original `unit (3.12, <shard>)` must succeed or end `failure` or `cancelled` with a log classified as runner loss. A nonzero process exit proving a real failure, without a runner loss signature, rejects the original; a timed out original also rejects it. Missing logs alone do not prove a test failure.
+1. The early verifier reads this attempt's jobs with the App token. An original `unit (3.12, <shard>)` must succeed or end `failure` or `cancelled` with a log classified as runner loss. A nonzero process exit proving a real failure, without a runner loss signature, rejects the original; a timed out original also rejects it. Missing logs alone do not prove a test failure. [The shared runner loss reader](#the-shared-runner-loss-reader) gives the full rule.
 2. `unit-lost` runs `Name the unit shards that lost their runner`, invoking `python3 -m scripts.ci_unit_rerun` against the attempt's jobs and the queue plan. A real failure, timed out original or lost leg outside that plan fails classification.
 3. `unit rerun (3.12, <shard>)` replaces each lost original once and overwrites its durations, flake and coverage artifacts. `shard-check (3.12)` grades completeness using the recovered results.
 4. With no lost originals, `unit-lost` and the unexpanded `unit rerun` matrix must be skipped. With lost originals, classification and every matching recovery must succeed. Duplicate, unplanned or extra recovery jobs reject the run; an incomplete inventory waits rather than passing. A failed recovery, including a second runner loss, rejects it. Queue retry refuses a failed `unit rerun` with `failed again on its in-run rerun`.
@@ -864,17 +864,17 @@ The old `Watch for the first failed graded job` step, fifteen second poll, ten r
 
 ### The shared runner loss reader
 
-`scripts.ci_queue_fail_fast` is no longer a job step. Since [pull request 7136](https://github.com/the-cloud-clockwork/agentihooks/pull/7136) it keeps only what the early verifier and the rerun classifier share:
+`scripts.ci_queue_fail_fast` is no longer a job step. Since [pull request 7136](https://github.com/the-cloud-clockwork/agentihooks/pull/7136) it keeps `logged_loss`, which the early verifier and the rerun classifier share, plus two names that the module and the tests use:
 
 | Name | Use |
 |---|---|
 | `SELF` | The workflow job key `queue-fail-fast`. Contract tests pin `scripts.ci_reuse.WATCHER` and the tiers workflow to it |
-| `EXITED` | The step exit rule below, matched only on a `##[error]` log line |
+| `EXITED` | The pattern `##[error]Process completed with exit code <1 to 127>.` or a `##[error]` step timeout line, used only inside `logged_loss` |
 | `logged_loss(repo, job, seen)` | Answers whether a failed or cancelled job lost its runner |
 
-`scripts.ci_gate_queue` calls `logged_loss` on every poll for each original unit shard that did not succeed; `scripts.ci_unit_rerun` calls it once per failed shard in `unit-lost`. Both pass one `seen` dictionary for the whole run.
+`scripts.ci_gate_queue` calls `logged_loss` on every poll for each completed original unit shard that concluded `failure` or `cancelled`; a `timed_out` original is rejected before any read. `scripts.ci_unit_rerun` calls it in `unit-lost` for each `failure` or `cancelled` unit shard, never for a `timed_out` one. Each caller passes one `seen` dictionary for its whole run.
 
-`logged_loss` reads the job's log and keeps only `##[error]` lines and pytest result lines. The job lost its runner when that text carries a runner loss signature without a failed pytest result or a step timeout, or when it carries no failed pytest result and no `##[error]Process completed with exit code <1 to 127>.` or step timeout line. The runner loss signatures are `The runner has received a shutdown signal`, `lost communication with the server`, `The job was not acquired by Runner` and `The job log could not be read`. Exit codes 128 and above, such as 137 or 143 from a killed process, prove nothing alone.
+`logged_loss` reads the job's log and keeps only `##[error]` lines and pytest result lines. The job lost its runner when that text carries a runner loss signature with no failed pytest result and no step timeout. It also lost its runner when the text carries no failed pytest result and no `EXITED` line. The runner loss signatures are `The runner has received a shutdown signal`, `lost communication with the server`, `The job was not acquired by Runner` and `The job log could not be read`. Exit codes 128 and above, such as 137 or 143 from a killed process, prove nothing alone.
 
 | Log read | Annotations read | Answer | Cached in `seen` |
 |---|---|---|---|
@@ -882,13 +882,13 @@ The old `Watch for the first failed graded job` step, fifteen second poll, ten r
 | fails | succeeds | the same rule on the annotations, with the exit line matched anywhere in a message | no, read again on the next poll |
 | fails | fails | lost | no |
 
-A lost answer is not a pass: the verifier still requires a successful `unit rerun` for that shard, as [Lost unit shard rerun](#lost-unit-shard-rerun) describes. The module's old `failed`, `settled`, `verdict` and `main` are gone, so `python -m scripts.ci_queue_fail_fast` judges nothing and no workflow calls it. List the callers that remain:
+A lost answer is not a pass: the verifier still requires a successful `unit rerun` for that shard, as [Lost unit shard rerun](#lost-unit-shard-rerun) describes. The module's old `failed`, `settled`, `verdict` and `main` are gone and it has no `__main__` block, so `python -m scripts.ci_queue_fail_fast` judges nothing and no workflow calls it. List the callers that remain:
 
 ```bash
-git grep -n "ci_queue_fail_fast" -- scripts .github tests/contracts tests/test_ci_reuse.py
+git grep -n "ci_queue_fail_fast" -- '*.py' .github
 ```
 
-The expected output is the `logged_loss` imports in `scripts/ci_gate_queue.py` and `scripts/ci_unit_rerun.py` and the `SELF` imports in the two contract tests. A hit under `.github` means a workflow runs the removed entry point again.
+The expected output is the `logged_loss` imports in `scripts/ci_gate_queue.py` and `scripts/ci_unit_rerun.py`, the module import in `tests/test_ci_queue_fail_fast.py`, the `SELF` import in `tests/contracts/ci_tiers/test_workflow.py`, and the module import, `ci_queue_fail_fast.SELF` comparison and `SELF` import in `tests/test_ci_reuse.py`. A hit under `.github` means a workflow runs the removed entry point again.
 
 ### Checking a watcher run
 
