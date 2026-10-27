@@ -1,9 +1,11 @@
 import ast
 import json
 import os
+import queue
 import re
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -296,6 +298,36 @@ def test_a_grader_without_the_branch_planner_reuses_nothing_from_earlier_runs(tm
 def test_a_reader_never_sees_the_plan_status_before_its_writer_finishes(tmp_path):
     slow_echo = 'echo() { [[ "${1:-}" =~ ^[0-9]+$ ]] && sleep 1; builtin echo "$@"; }\n'
     _plan(tmp_path, "pull_request", bash_env=slow_echo)
+
+
+def test_the_planners_run_unbuffered_so_their_lines_reach_the_log_as_written():
+    assert _step("test-count", "Plan the tests whose inputs did not change")["env"]["PYTHONUNBUFFERED"] == "1"
+
+
+@pytest.mark.wall_clock
+@pytest.mark.parametrize("status", ["0", "3"])
+def test_the_wait_prints_each_planner_line_while_the_planner_still_runs(tmp_path, status):
+    runner, release = tmp_path / "runner", tmp_path / "release"
+    runner.mkdir()
+    (runner / "plan-outputs.txt").write_text("reused=0\n")
+    script = f'echo planning; until [[ -f "{release}" ]]; do sleep 0.1; done; echo planned; echo {status} > "{runner}/plan.status"'
+    with (runner / "plan.log").open("w") as log:
+        planner = subprocess.Popen(["bash", "-c", script], stdout=log, stderr=subprocess.STDOUT)
+    (runner / "plan.pid").write_text(str(planner.pid))
+    env = {**os.environ, "RUNNER_TEMP": str(runner), "GITHUB_OUTPUT": str(tmp_path / "outputs")}
+    run = _step("test-count", "Wait for the test plan")["run"]
+    wait = subprocess.Popen(["bash", "-e", "-c", run], env=env, stdout=subprocess.PIPE, text=True)
+    lines: queue.Queue[str] = queue.Queue()
+    threading.Thread(target=lambda: [lines.put(line) for line in wait.stdout], daemon=True).start()
+    try:
+        assert lines.get(timeout=20) == "planning\n"
+        assert wait.poll() is None
+    finally:
+        release.touch()
+    assert wait.wait(timeout=30) == int(status)
+    planner.wait()
+    assert lines.get(timeout=10) == "planned\n"
+    assert (tmp_path / "outputs").read_text() == "reused=0\n"
 
 
 @pytest.mark.parametrize(

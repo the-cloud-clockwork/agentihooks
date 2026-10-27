@@ -5948,6 +5948,26 @@ writers above or `task set`.
 - **No label appears.** Check the task's `state`: a `done` task never shows one. Otherwise set the field with
   `task set`, never by writing the ledger database.
 
+## Stability probes
+
+`agentihooks swarm <id> probe` reads the live swarm and prints one tab separated line per invariant: `pass` or
+`fail`, the invariant and its measured number.
+
+| Invariant | Pass when |
+|---|---|
+| every hive live | at least one hive is registered and every registered hive heartbeat is fresh |
+| every hive agent joins and writes the ledger | each running agent of the swarm placed on a hive other than `root` has a join report that passed ledger join and ledger write |
+| launch success hive H harness N | started launches over started and failed ones in the window reach the minimum rate; a window with no launches passes as `launch success` and says so |
+| full task list reads per minute | timed full task list reads from the swarm's ledger reach the minimum rate |
+| workstation agents at or under the root cap | the tick's whole machine worker count fits the `root` hive's max agents; the swarm local limit is shown beside it. Counted only when the probe runs on `root` |
+| merge queue groups moving | the dev merge queue is empty or merged inside the stall window; a queue with no merge observed fails |
+| release age | the latest GitHub release is no older than the maximum |
+
+Thresholds live in `scripts.swarm.probe.Thresholds`. A reader that fails prints `fail` with `unread:` and the
+error. Run off `root`, the root cap line prints `fail` with `unread: SwarmError: counted only on the root hive`
+because the tick's count scans the processes of the host it runs on; that line is not an over cap result. The
+command exits zero whatever the lines say.
+
 ## Agent status comments
 
 Every agent, the master and the tick's own `swarm` author keep one status comment per ledger item. A new status
