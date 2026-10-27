@@ -343,6 +343,7 @@ def test_proof_engineer_worker_launch_records_a_real_checkpoint(proof_controller
     environ["CLAUDE_CONFIG_DIR"] = str(home)
     newest = home / newest_relative
     spec.pop("checkout", None)
+    (attempt / "registration.json").write_text(json.dumps(spec["authority"]))
     (attempt / "launch.json").write_text(json.dumps(spec))
     record = json.loads((attempt / "execution.json").read_text())
     record["attempt"] = execution

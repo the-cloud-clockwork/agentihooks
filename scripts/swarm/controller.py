@@ -298,7 +298,7 @@ class FencedRuntime:
             return self.runtime.hive_launch.expire(request)
 
 
-def _hive_lane(lane: str, task: dict, kubernetes_proof: bool = False) -> bool:
+def _hive_lane(lane: str, task: dict, kubernetes_proof: bool) -> bool:
     if kubernetes_proof and lane == "eng":
         return False
     return lane in HIVE_LANES or lane == "master" or bool(task.get("hive"))
