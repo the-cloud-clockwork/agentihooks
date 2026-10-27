@@ -630,6 +630,10 @@ def main() -> int:
     seconds, mutants, tests = estimate(root, changes, selection, manifest, bool(failure))
     validate_tests(root, tests)
     browser = str(needs_browser(root, sorted({test_file(test) for test in tests}))).lower()
+    from scripts.ci_mutation.selection import recorded_seconds, traced_records, unit_records
+
+    tracing = recorded_seconds(unit_records(root)) | recorded_seconds(traced_records(root))
+    (root / ".mutation-tracing.json").write_text(json.dumps(tracing) + "\n")
     (root / ".mutation-selection.json").write_text(json.dumps(selection) + "\n")
     count = shard_count(seconds, mutants, args.target, args.limit)
     parts, stats = stats_part_count(root, tests, args.stats_target, args.limit)
