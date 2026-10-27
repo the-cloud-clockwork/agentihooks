@@ -50,6 +50,7 @@ RESYNC = [
 class Run:
     def __init__(self):
         self.calls = []
+        self.cwds = []
         self.state = "OPEN"
         self.prs = []
         self.on_merge = lambda: None
@@ -58,6 +59,7 @@ class Run:
 
     def __call__(self, argv, **kwargs):
         self.calls.append(argv)
+        self.cwds.append(kwargs.get("cwd"))
         answer = self._answer(argv, kwargs.get("input"))
         if isinstance(answer, subprocess.CompletedProcess):
             return answer
@@ -206,6 +208,37 @@ def test_create_brings_a_named_hive_from_nothing_to_an_engineer_in_herdr(world):
     titles = [line.split(": ")[1] for line in world.lines]
     assert titles == [title for title, _ in create.STEPS]
     assert world.lines[-1] == f"hive create {NAME}: engineer: engineer@{member} in demo works on the hive"
+
+
+def test_the_manifests_step_opens_the_pull_request_through_its_clone_outside_a_git_checkout(world, monkeypatch):
+    outside = world.home / "outside"
+    outside.mkdir()
+    monkeypatch.chdir(outside)
+
+    create.create(world.tools, create.Options(timeout_s=60))
+
+    (init,) = world.run.named("git", "init")
+    clone = init[-1]
+    assert init == ["git", "init", "-q", clone]
+    origin = ["git", "-C", clone, "remote", "add", "origin", f"https://github.com/{REPO}.git"]
+    assert world.run.named("git", "-C") == [origin]
+    calls = list(zip(world.run.calls, world.run.cwds))
+    first = world.run.calls.index(init)
+    last = world.run.calls.index(world.run.named("gh", "pr", "create")[0])
+    step = calls[first + 2 : last + 1]
+    assert [argv[:2] for argv, _ in step] == [
+        ["gh", "api"],
+        ["gh", "pr"],
+        ["gh", "api"],
+        ["gh", "api"],
+        ["gh", "api"],
+        ["gh", "api"],
+        ["gh", "api"],
+        ["gh", "pr"],
+    ]
+    assert {cwd for _, cwd in step} == {clone}
+    assert not Path(clone).is_relative_to(outside) and not Path(clone).exists()
+    assert _state(world)["pr"] == PR
 
 
 def test_a_rerun_resumes_the_unfinished_create_and_repeats_no_finished_step(world):
