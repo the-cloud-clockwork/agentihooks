@@ -348,6 +348,7 @@ GH_TOKEN_RENDERERS = [
     "gh auth status --show-token",
     "gh auth status -t",
     "gh auth status -h github.com",
+    "gh --hostname github.com auth status",
     "gh auth token",
     "/usr/bin/gh auth status",
     "sudo gh auth status",

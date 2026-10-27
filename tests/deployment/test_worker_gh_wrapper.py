@@ -26,12 +26,13 @@ def run(wrapper, tmp_path, *args):
 
 
 @pytest.mark.parametrize("status", [0, 1])
-def test_auth_status_hides_the_token_and_keeps_the_exit_status(tmp_path, status):
-    result = run(wrapper_with_fake_gh(tmp_path, status), tmp_path, "auth", "status")
+@pytest.mark.parametrize("args", [("auth", "status"), ("--hostname", "github.com", "auth", "status", "-t")])
+def test_auth_status_hides_the_token_and_keeps_the_exit_status(tmp_path, status, args):
+    result = run(wrapper_with_fake_gh(tmp_path, status), tmp_path, *args)
 
     assert BODY not in result.stdout + result.stderr
     assert "Token: " in result.stdout + result.stderr
-    assert "args: auth status" in result.stdout
+    assert "args: " + " ".join(args) in result.stdout
     assert result.returncode == status
 
 

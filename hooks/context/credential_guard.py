@@ -153,6 +153,7 @@ INTERPRETERS = {"python", "python2", "python3", "node", "ruby", "perl", "php", "
 GREP_FAMILY = {"grep", "egrep", "fgrep", "rg", "ack"}
 PAGERS = {"cat", "head", "tail", "less", "more", "bat", "tac", "nl"}
 WRAPPERS = {"docker", "podman", "nerdctl", "kubectl", "ssh"}
+GH_TOKEN_SUBCOMMANDS = {"status", "token"}
 GIT_READ_SUBCOMMANDS = {"diff", "show", "grep", "log", "blame", "cat-file", "difftool"}
 PATTERN_FLAGS = {"-e", "--regexp"}
 FIND_NAME_FLAGS = {
@@ -538,16 +539,15 @@ def renderer_verdict(command):
     return None
 
 
-GH_TOKEN_SUBCOMMANDS = {"status", "token"}
-
-
 def prints_gh_token(toks):
+    wrapped = verb_of(toks) in WRAPPERS
     for i, tok in enumerate(toks):
-        if " " in tok and (toks[i - 1 : i] == ["-c"] or verb_of(toks) in WRAPPERS) and prints_gh_token(tokens_of(tok)):
+        nested = " " in tok and (wrapped or toks[i - 1 : i] == ["-c"])
+        if nested and prints_gh_token(tokens_of(tok)):
             return True
         if tok.split("/")[-1] == "gh":
             args = [t for t in toks[i + 1 :] if not t.startswith("-")]
-            if args[:1] == ["auth"] and args[1:2] and args[1] in GH_TOKEN_SUBCOMMANDS:
+            if any(a == "auth" and b in GH_TOKEN_SUBCOMMANDS for a, b in zip(args, args[1:])):
                 return True
     return False
 
