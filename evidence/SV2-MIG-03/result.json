@@ -28,10 +28,10 @@
     "accepted": "sessions recorded in the backfill ledger and the batch checkpoint of each run",
     "committed": "events committed in the fixture session catalog through central ingestion",
     "externally_verified": "none; no live corpus, legacy Redis or workstation transcript folder was imported",
-    "observed": "case outputs in the a, b and c result files"
+    "observed": "case outputs in the a, b and c result files; touched tests and changed line mutation green on Mutation preflight 40551701994 at the tested commit; red seen on Proofs tests run 40542340096 before the module existed"
   },
   "package": "SV2-MIG-03",
-  "pull_request": "",
+  "pull_request": "https://github.com/the-cloud-clockwork/agentihooks/pull/7904",
   "remaining_limitations": [
     "The backfill reads sources the operator lists in a plan file; discovering legacy Redis previews and vector rows and exporting them into that plan is a separate read only step that is not part of this package.",
     "Two copies of a session at the same fidelity with different content are quarantined rather than merged, even when one is a prefix of the other; the operator resolves them by choosing one copy in a new plan under a new run id.",
@@ -51,6 +51,6 @@
     "replay": "a second run over the same sources records already_imported for every session and changes no catalog event; a completed run replays as a no op; a source committed before its mark replays through the catalog batch"
   },
   "status": "fixture_verified",
-  "tested_commit": "pending",
+  "tested_commit": "183df0a5c83bea32738c405593f56df726f81755",
   "timing_and_cleanup": "the backfill reads no clock and holds no lease, so no fake clock applies; each case writes only under its own temporary folder, and no fixture source file is changed"
 }
