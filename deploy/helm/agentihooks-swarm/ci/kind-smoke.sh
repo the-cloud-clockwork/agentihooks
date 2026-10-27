@@ -106,6 +106,7 @@ keep_layers() {
 ) &
 build=$!
 pull_node() {
+  local attempt node_source
   for attempt in 1 2 3; do
     node_source="$KIND_NODE_IMAGE"
     if (( attempt == 2 )); then node_source="docker.io/${KIND_NODE_IMAGE#mirror.gcr.io/}"; fi
