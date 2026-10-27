@@ -354,7 +354,11 @@ def _merged_without_rollup(result):
 def head(url, run=subprocess.run):
     try:
         owner, repo, _, number = url.split("/")[-4:]
-        return merge_queue.rest(f"repos/{owner}/{repo}/pulls/{number}", run)["head"]["sha"]
+        path = f"repos/{owner}/{repo}/pulls/{number}"
+        read = github_reads.snapshot(
+            f"head {path}", time.time(), lambda: {"sha": merge_queue.rest(path, run, "swarm.head")["head"]["sha"]}
+        )
+        return read["sha"]
     except SwarmError as error:
         return None if mutation_wait.rate_limited(str(error)) else ""
     except (ValueError, KeyError, TypeError):

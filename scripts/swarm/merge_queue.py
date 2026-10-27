@@ -1,9 +1,10 @@
 import json
 import subprocess
+import sys
 import time
 from collections.abc import Callable
 
-from scripts.swarm import ledger_events, mutation_wait, staged_compatibility
+from scripts.swarm import github_reads, ledger_events, mutation_wait, staged_compatibility
 from scripts.swarm.store import SwarmError
 
 FRESHNESS = """query($url: URI!) { resource(url: $url) { ... on PullRequest {
@@ -50,12 +51,14 @@ def graphql(query: str, variables: dict, run=subprocess.run) -> dict:
         raise SwarmError(f"GitHub API: {exc}") from exc
 
 
-def rest(path: str, run) -> dict | list | str:
+def rest(path: str, run, caller: str | None = None) -> dict | list | str:
     if mutation_wait.backing_off():
         raise SwarmError(f"GitHub API rate limit backoff holds {path}")
+    caller = caller or sys._getframe(1).f_globals["__name__"]
     command = ["gh", "api", path]
     try:
         done = run(command, capture_output=True, text=True, timeout=20)
+        github_reads.charge(caller, path, time.time())
         if done.returncode:
             if mutation_wait.rate_limited(done.stderr):
                 mutation_wait.hold(path)
@@ -77,7 +80,8 @@ def required_view(url: str, run) -> "ledger_events.PullRequest | None":
 
     resource = graphql(FRESHNESS, {"url": url}, run)["resource"]
     repo = resource["repository"]["nameWithOwner"]
-    rules = rest(f"repos/{repo}/rules/branches/{resource['baseRefName']}", run)
+    path = f"repos/{repo}/rules/branches/{resource['baseRefName']}"
+    rules = github_reads.snapshot(path, time.time(), lambda: {"rules": rest(path, run, "swarm.checks.rules")})["rules"]
     protection = (resource.get("baseRef") or {}).get("branchProtectionRule") or {}
     expected = dict.fromkeys(protection.get("requiredStatusCheckContexts") or [])
     expected.update(
