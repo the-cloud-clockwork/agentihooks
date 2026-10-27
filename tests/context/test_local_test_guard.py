@@ -391,6 +391,61 @@ def test_unrelated_script_paths_pass(command, monkeypatch):
     check_local_tests({"tool_name": "Bash", "tool_input": {"command": command}})
 
 
+PLANNER_WRAPPER = (
+    "from pathlib import Path\nimport sys\nsys.path.insert(0, str(Path.cwd()))\n"
+    "from scripts.ci_mutation import plan\nraise SystemExit(plan.main())\n"
+)
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        f"S=~/scratchpad/x; cat > \"$S/run_main.py\" <<'EOF'\n{PLANNER_WRAPPER}EOF\n"
+        'cd /w && timeout 400 ~/.venv/bin/python "$S/run_main.py" --base abc > "$S/log" 2>&1',
+        f"cat <<'EOF' > probe.py\n{PLANNER_WRAPPER}EOF\npython3 -X faulthandler probe.py",
+        "tee profile2.py >/dev/null <<EOF\nimport pytest\npytest.main()\nEOF\npython profile2.py",
+    ],
+)
+def test_a_wrapper_script_written_by_a_heredoc_is_judged_by_its_source(command, monkeypatch):
+    from hooks.context.local_test_guard import check_local_tests
+
+    monkeypatch.delenv("AGENTIHOOKS_ALLOW_LOCAL_TEST_RUN", raising=False)
+    with pytest.raises(BlockAction, match="draft pull request"):
+        check_local_tests({"tool_name": "Bash", "tool_input": {"command": command}})
+
+
+def test_a_wrapper_script_on_disk_is_judged_by_its_source(tmp_path, monkeypatch):
+    from hooks.context.local_test_guard import check_local_tests
+
+    monkeypatch.delenv("AGENTIHOOKS_ALLOW_LOCAL_TEST_RUN", raising=False)
+    monkeypatch.setenv("PROBE_DIR", str(tmp_path))
+    (tmp_path / "profile2.py").write_text(PLANNER_WRAPPER)
+    (tmp_path / "report.py").write_text("print('scripts are fine')\n")
+    for command in [
+        f"python {tmp_path}/profile2.py",
+        "python $PROBE_DIR/profile2.py",
+        f"cd {tmp_path} && python profile2.py",
+    ]:
+        with pytest.raises(BlockAction, match="draft pull request"):
+            check_local_tests({"tool_name": "Bash", "tool_input": {"command": command}})
+    check_local_tests({"tool_name": "Bash", "tool_input": {"command": f"python {tmp_path}/report.py"}})
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        'cat > "$S/report.py" <<\'EOF\'\nimport json\nprint(json.dumps({}))\nEOF\npython "$S/report.py"',
+        f"cat > notes.md <<'EOF'\n{PLANNER_WRAPPER}EOF\npython report.py",
+        "python missing_script.py",
+    ],
+)
+def test_wrapper_scripts_that_run_no_tests_pass(command, monkeypatch):
+    from hooks.context.local_test_guard import check_local_tests
+
+    monkeypatch.delenv("AGENTIHOOKS_ALLOW_LOCAL_TEST_RUN", raising=False)
+    check_local_tests({"tool_name": "Bash", "tool_input": {"command": command}})
+
+
 def test_later_commands_and_substitutions_are_checked(monkeypatch):
     from hooks.context.local_test_guard import check_local_tests
 
