@@ -47,3 +47,7 @@ def __getattr__(name: str):
         globals()[name] = main
         return main
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+if "/site-packages/" in __file__:
+    raise ImportError("gc5 installed wheel import plant")
