@@ -38,24 +38,31 @@ def _repo(tmp_path, subjects):
     return run("log", "--format=%H").stdout.split()
 
 
-def test_prune_keeps_only_unscoped_records_a_pointer_names(tmp_path):
-    _record(tmp_path, "p1", KEEP, {})
-    _record(tmp_path, "p2", SCOPED, {"hooks/a.py": [3]})
-    (tmp_path / f"{STALE}.json").write_text(json.dumps({"key": STALE, "scope": {}}))
-    (tmp_path / "p3.index").write_text("d" * 64)
-    (tmp_path / "p4.index").write_text("not a key")
-
-    assert seed.prune(tmp_path) == 1
-
-    assert sorted(path.name for path in tmp_path.iterdir()) == [f"{KEEP}.json", "p1.index"]
+@pytest.fixture
+def folder(tmp_path):
+    path = tmp_path / "cache"
+    path.mkdir()
+    return path
 
 
-def test_prune_drops_a_pointer_to_an_unreadable_record(tmp_path):
-    (tmp_path / "p1.index").write_text(KEEP)
-    (tmp_path / f"{KEEP}.json").write_text("{")
+def test_prune_keeps_only_unscoped_records_a_pointer_names(folder):
+    _record(folder, "p1", KEEP, {})
+    _record(folder, "p2", SCOPED, {"hooks/a.py": [3]})
+    (folder / f"{STALE}.json").write_text(json.dumps({"key": STALE, "scope": {}}))
+    (folder / "p3.index").write_text("d" * 64)
+    (folder / "p4.index").write_text("not a key")
 
-    assert seed.prune(tmp_path) == 0
-    assert list(tmp_path.iterdir()) == []
+    assert seed.prune(folder) == 1
+
+    assert sorted(path.name for path in folder.iterdir()) == [f"{KEEP}.json", "p1.index"]
+
+
+def test_prune_drops_a_pointer_to_an_unreadable_record(folder):
+    (folder / "p1.index").write_text(KEEP)
+    (folder / f"{KEEP}.json").write_text("{")
+
+    assert seed.prune(folder) == 0
+    assert list(folder.iterdir()) == []
 
 
 def test_merged_pulls_reads_squash_subjects_since_the_seeded_head(tmp_path, monkeypatch):
@@ -82,7 +89,7 @@ def test_merged_pulls_takes_only_the_head_when_the_start_is_unknown(tmp_path, mo
     assert seed.merged_pulls(tmp_path, shas[0], "0" * 40) == [11]
 
 
-def test_harvest_copies_records_from_the_newest_run_with_stats_artifacts(tmp_path, monkeypatch):
+def test_harvest_copies_records_from_the_newest_run_with_stats_artifacts(folder, monkeypatch):
     archives = {
         5: _archive({"x.index": "old", "x.json": "{}"}),
         6: _archive({"x.index": "new", f"{KEEP}.json": "{}", "collected-0": ""}),
@@ -105,9 +112,9 @@ def test_harvest_copies_records_from_the_newest_run_with_stats_artifacts(tmp_pat
         seed, "api", lambda path, binary=False: archives[int(path.split("/")[2])] if binary else responses[path]
     )
 
-    assert seed.harvest(7, tmp_path) == 4
-    assert (tmp_path / "x.index").read_text() == "new"
-    assert sorted(path.name for path in tmp_path.iterdir()) == [f"{KEEP}.json", "x.index", "x.json"]
+    assert seed.harvest(7, folder) == 4
+    assert (folder / "x.index").read_text() == "new"
+    assert sorted(path.name for path in folder.iterdir()) == [f"{KEEP}.json", "x.index", "x.json"]
 
 
 def test_harvest_skips_a_number_that_is_not_a_pull_request(tmp_path, monkeypatch, capsys):
@@ -165,7 +172,11 @@ def test_dev_pushes_save_the_stats_cache_pull_request_runs_restore():
     job = jobs["mutation-stats-seed"]
     steps = {step.get("name"): step for step in job["steps"]}
     assert job["if"] == "${{ !cancelled() && github.event_name == 'push' }}"
-    assert job["permissions"] == {"contents": "read", "actions": "read", "pull-requests": "read"}
+    assert job["permissions"] == {"contents": "read"}
+    mint = next(step for step in job["steps"] if step.get("id") == "app-token")
+    assert mint["with"]["permission-actions"] == mint["with"]["permission-pull-requests"] == "read"
+    seeding = steps["Add the merged pull requests' test stats"]
+    assert seeding["env"]["GH_TOKEN"] == "${{ steps.app-token.outputs.token }}"
     assert steps["Restore the dev test stats"]["with"] == restored["with"]
     assert steps["Save the dev test stats"]["uses"] == "actions/cache/save@v4"
     assert steps["Save the dev test stats"]["with"] == {"path": ".mutation-stats-cache", "key": key}

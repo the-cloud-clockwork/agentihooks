@@ -3185,8 +3185,6 @@ jobs:
     timeout-minutes: 10
     permissions:
       contents: read
-      actions: read
-      pull-requests: read
     steps:
       - uses: actions/checkout@v4
         with:
@@ -3206,9 +3204,19 @@ jobs:
           key: mutation-test-stats-v2-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: mutation-test-stats-v2-${{ runner.os }}-
 
+      - name: Mint the token that reads the merged pull requests' test stats
+        id: app-token
+        uses: actions/create-github-app-token@v3.2.0
+        with:
+          client-id: ${{ secrets.TCC_CI_CLIENT_ID }}
+          private-key: ${{ secrets.TCC_CI_APP_PRIVATE_KEY }}
+          repositories: ${{ github.event.repository.name }}
+          permission-actions: read
+          permission-pull-requests: read
+
       - name: Add the merged pull requests' test stats
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
           BEFORE: ${{ github.event.before }}
         run: python -m scripts.ci_stats_seed .mutation-stats-cache --head "$GITHUB_SHA" --before "$BEFORE"
 
