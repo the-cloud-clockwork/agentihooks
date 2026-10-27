@@ -2372,7 +2372,7 @@ jobs:
 
       - name: Mint the antoncore read token
         if: ${{ !cancelled() }}
-        id: antoncore-token
+        id: app-token
         uses: actions/create-github-app-token@v3.2.0
         with:
           client-id: ${{ secrets.TCC_CI_CLIENT_ID }}
@@ -2383,9 +2383,9 @@ jobs:
       # antoncore dev owns the dashboard, its checker and the swarm NATS users, so the pull request head is only the data they grade.
       - name: Check out the antoncore dashboard column checker
         id: antoncore-checkout
-        if: ${{ !cancelled() && steps.antoncore-token.outcome == 'success' }}
+        if: ${{ !cancelled() && steps.app-token.outcome == 'success' }}
         env:
-          GH_TOKEN: ${{ steps.antoncore-token.outputs.token }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
           REPOSITORY: the-cloud-clockwork/antoncore
           REF: dev
           DESTINATION: .antoncore

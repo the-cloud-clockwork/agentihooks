@@ -168,14 +168,14 @@ def test_each_cheap_gate_grades_in_lint_after_its_setup_even_after_an_earlier_re
 
 def test_lint_grades_dashboard_columns_with_the_antoncore_dev_checker():
     steps = _workflow()["jobs"]["lint"]["steps"]
-    token = next((s for s in steps if s.get("id") == "antoncore-token"), None)
+    token = next((s for s in steps if s.get("id") == "app-token"), None)
     assert token is not None
     assert token["with"]["repositories"] == "antoncore"
     assert token["with"]["permission-contents"] == "read"
     checkout = next((s for s in steps if s.get("env", {}).get("REPOSITORY") == "the-cloud-clockwork/antoncore"), None)
     assert checkout is not None
-    assert checkout["if"] == "${{ !cancelled() && steps.antoncore-token.outcome == 'success' }}"
-    assert checkout["env"]["GH_TOKEN"] == "${{ steps.antoncore-token.outputs.token }}"
+    assert checkout["if"] == "${{ !cancelled() && steps.app-token.outcome == 'success' }}"
+    assert checkout["env"]["GH_TOKEN"] == "${{ steps.app-token.outputs.token }}"
     assert checkout["env"]["REF"] == "dev"
     assert checkout["env"]["DESTINATION"] == ".antoncore"
     assert "uses" not in checkout
