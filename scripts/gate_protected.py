@@ -79,14 +79,7 @@ def _aggregator_problems(
         for need in sorted(ci_wiring.needs_of(base_job) - ci_wiring.needs_of(head_job) - retired)
     ]
     fields = sorted((set(base_job) | set(head_job)) - {"needs"})
-    postgres = any(
-        marker in str(step.get("run"))
-        for step in base_job.get("steps") or []
-        for marker in (
-            ci_reuse.POSTGRES_REQUIRED[1],
-            ci_reuse.POSTGRES_REQUIRED[1].replace(*ci_reuse.TEST_ONLY_SONAR[0]),
-        )
-    )
+    postgres = any(ci_reuse.POSTGRES_REQUIRED[1] in str(step.get("run")) for step in base_job.get("steps") or [])
     requirements = (ci_reuse.postgres_required,) if postgres else (list, ci_reuse.postgres_required)
     return problems + [
         f"The head's {GATE} changes its {field}; the protected branch grades with its own."
