@@ -76,7 +76,7 @@ def test_spawn_reader_refuses_when_the_tick_journal_cannot_be_read(failure):
     def journal(argv, **kwargs):
         raise failure
 
-    with pytest.raises(SwarmError, match="tick journal unavailable"):
+    with pytest.raises(SwarmError, match=f"^tick journal unavailable: {type(failure).__name__}: "):
         spawn_read.records(store, "fixture", 5, run=journal)
 
 
