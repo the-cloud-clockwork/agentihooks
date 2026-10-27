@@ -24,6 +24,7 @@ ROUTE_FLAG = "--route"
 ROUTE_PREFIX = f"{ROUTE_FLAG}="
 EFFORT_PREFIX = "model_reasoning_effort="
 QUOTE = '"'
+NO_HOME = "the app-server transport serves only the home init agent rendered; launch refused without --home"
 PUMP_EXITED = "agentihooks codex-session: inbox pump exited with status {}; stopping the app server"
 
 
@@ -111,6 +112,8 @@ def prepare(args: argparse.Namespace, agent_args: list[str], environ: dict[str, 
     missing = [name for name in IDENTITY_ENV if not environ.get(name)]
     if missing:
         raise ValueError(f"the app-server transport runs only inside a swarm execution; missing {missing}")
+    if not args.home:
+        raise ValueError(NO_HOME)
     slug, lane, task, name = (environ[name] for name in IDENTITY_ENV)
     route, agent_args = take_route(agent_args)
     environ = {**environ, select_profile.BUNDLE_REVISION: args.bundle_revision}

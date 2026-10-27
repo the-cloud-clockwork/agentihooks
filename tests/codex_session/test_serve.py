@@ -86,6 +86,19 @@ def test_serve_refuses_outside_a_swarm_execution_and_reports_the_failure(tmp_pat
     assert report.read_text() == f"status=failed\nerror={reason}\n"
 
 
+def test_serve_refuses_a_launch_without_a_recorded_home_and_never_renders(tmp_path, monkeypatch, capsys):
+    def render(*args):
+        raise AssertionError("serve rendered a profile without the home init agent recorded")
+
+    monkeypatch.setattr(serve.select_profile, "prepare", render)
+    report = tmp_path / "route"
+    argv = ["serve", "--cwd", str(tmp_path), "--profile", "engineer", "--seat", "eng-1@sw", "--report", str(report)]
+    assert serve.main(argv, dict(SWARM_ENV)) == 2
+    assert capsys.readouterr().err == f"agentihooks codex-session: {serve.NO_HOME}\n"
+    assert report.read_text() == f"status=failed\nerror={serve.NO_HOME}\n"
+    assert "--home" in serve.NO_HOME
+
+
 def test_the_serve_parser_reads_every_option_and_its_defaults(capsys):
     parser = serve._parser()
     assert parser.prog == "python -m scripts.codex_session"
@@ -194,6 +207,7 @@ def test_prepare_routes_renders_and_builds_the_launch(tmp_path, monkeypatch):
         "eng-1@sw",
         "--overlay=frontend",
         "--bundle-revision=abc",
+        f"--home={home}",
         "--exclude",
         "old",
         "--report",
@@ -281,8 +295,8 @@ def test_prepare_checks_the_login_of_an_interactive_route_and_opens_nothing_with
 
     monkeypatch.setattr(serve.select_profile, "prepare", prepare)
     monkeypatch.setattr(serve, "route_account", route)
-    args = serve._parser().parse_args(["serve", "--cwd", str(tmp_path), "--profile", "engineer", "--seat", "eng-1@sw"])
-    spec = serve.prepare(args, ["--route", serve.INTERACTIVE], dict(SWARM_ENV))
+    argv = ["serve", "--cwd", str(tmp_path), "--profile", "engineer", "--seat", "eng-1@sw", f"--home={tmp_path}"]
+    spec = serve.prepare(serve._parser().parse_args(argv), ["--route", serve.INTERACTIVE], dict(SWARM_ENV))
     assert (spec.account_type, spec.opening, spec.agent.effort) == ("chatgpt", "", "")
 
 
@@ -290,8 +304,8 @@ def _serve_with(tmp_path, monkeypatch, inherited):
     monkeypatch.setattr(serve.select_profile, "prepare", lambda *_: ({"CODEX_HOME": str(tmp_path)}, []))
     account = codex_router.CodexAccount("t", "AH_CX_TOKEN_t")
     monkeypatch.setattr(serve, "route_account", lambda environ, route, exclude: (account, "open", dict(environ)))
-    args = serve._parser().parse_args(["serve", "--cwd", str(tmp_path), "--profile", "engineer", "--seat", "eng-1@sw"])
-    return serve.prepare(args, [], {**SWARM_ENV, **inherited})
+    argv = ["serve", "--cwd", str(tmp_path), "--profile", "engineer", "--seat", "eng-1@sw", f"--home={tmp_path}"]
+    return serve.prepare(serve._parser().parse_args(argv), [], {**SWARM_ENV, **inherited})
 
 
 def test_prepare_pins_the_agentihooks_langfuse_keys_over_inherited_ones(tmp_path, monkeypatch):
