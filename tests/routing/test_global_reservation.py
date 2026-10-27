@@ -59,6 +59,22 @@ def test_expiry_and_exit_release_capacity(redis, clock):
     assert slots.reserve("claude:one", "third", 1, 1000)
 
 
+def test_a_live_hive_keeps_its_session_report_counted_until_its_heartbeat_goes_stale(redis, clock):
+    import json
+
+    from scripts.hive import registry
+
+    redis.sadd(registry.INDEX, "h1")
+    redis.hset(registry.key("h1"), "heartbeat_at", int(clock[0] * 1000))
+    redis.set(f"{registry.key('h1')}:sessions", json.dumps({"codex:one": 6}), ex=45)
+    slots = reservation.LaunchSlots(redis)
+    clock[0] += 50
+    registry.touch(redis, "h1", int(clock[0] * 1000))
+    assert slots.reserve_reading("codex:one", "late", 6, 1000) == reservation.SlotReading(False, 6)
+    clock[0] += registry.LIVE_MS / 1000 + 1
+    assert slots.reserve_reading("codex:one", "late", 6, 1000) == reservation.SlotReading(True, 0)
+
+
 @pytest.mark.parametrize("cap,ttl", [(-1, 1), (True, 1), (1, 0), (1, 300001), (1, True), (1.0, 1), (1, 1.0)])
 def test_invalid_launch_bounds_are_refused(redis, cap, ttl):
     with pytest.raises(ValueError, match="invalid launch slot cap or lifetime"):
