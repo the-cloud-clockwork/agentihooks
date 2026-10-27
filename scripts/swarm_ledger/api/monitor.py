@@ -49,10 +49,12 @@ def processes(store: object, hive: str, measured: dict | None) -> dict[str, int]
     return {harness: int(found.get(harness, 0)) for harness in HARNESSES}
 
 
-def herdr_machines(redis: object, now_ms: int) -> list[tuple[str, dict | None]] | None:
-    """Each machine the master herdr client last counted, by name, with None for one that did not answer."""
+def herdr_machines(redis: object, live: list[dict], now_ms: int) -> list[tuple[str, dict | None]] | None:
+    """Each machine the master herdr client on a live interface hive last counted, by name, with None for one that
+    did not answer."""
     stats = ports.hive().herdr_stats
-    published = stats.read(redis, now_ms)
+    readings = (stats.read(redis, hive["id"], now_ms) for hive in live if hive.get("ui") == "yes")
+    published = next((reading for reading in readings if reading is not None), None)
     if published is None:
         return None
     counted = [(LOCAL if name == stats.MASTER else name, counts) for name, counts in published["machines"].items()]
@@ -84,7 +86,7 @@ def view(store: object, now_ms: int) -> dict:
     live = [hive for hive in registry.hives(store.redis) if registry.live(hive, now_ms)]
     readings = {hive["id"]: headroom.read(store.redis, hive["id"], now_ms) for hive in live}
     measured = [reading for reading in readings.values() if reading is not None]
-    machines = herdr_machines(store.redis, now_ms)
+    machines = herdr_machines(store.redis, live, now_ms)
     if machines is None:
         agents, rows = tally("hives", hive_machines(store, live, readings))
     else:
