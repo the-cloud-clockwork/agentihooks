@@ -451,10 +451,30 @@ def test_a_branch_left_by_an_earlier_run_is_moved_to_the_new_commit():
             return subprocess.CompletedProcess(argv, 1, "", "gh: Reference already exists (HTTP 422)")
         return run(argv, **kwargs)
 
-    assert create_github.open_pr(answer, REPO, "dev", NAME, {"a": "b"}, "Add worker hive") == PR
+    assert create_github.open_pr(answer, REPO, "dev", NAME, {"a": "b"}, "Add worker hive", "clone") == PR
     patched = run.named("gh", "api", "-X", "PATCH")
     assert patched == [
         ["gh", "api", "-X", "PATCH", f"repos/{REPO}/git/refs/heads/{NAME}", "--input", "-", "--jq", ".object.sha"]
+    ]
+    assert set(run.cwds) == {"clone"}
+
+
+def test_gh_and_the_clone_run_with_their_folder_and_timeout(tmp_path):
+    seen = []
+
+    def run(argv, **kwargs):
+        seen.append((argv, kwargs))
+        return subprocess.CompletedProcess(argv, 0, "out\n", "")
+
+    folder = str(tmp_path)
+    assert create_github.clone(run, REPO, folder) == folder
+    assert create_github.gh(run, ["api", "x"], {"a": 1}, folder) == "out"
+    common = {"input": None, "capture_output": True, "text": True, "timeout": create_github.GH_TIMEOUT_S, "check": False}
+    origin = ["git", "-C", folder, "remote", "add", "origin", f"https://github.com/{REPO}.git"]
+    assert seen == [
+        (["git", "init", "-q", folder], common),
+        (origin, common),
+        (["gh", "api", "x"], {**common, "input": '{"a": 1}', "cwd": folder}),
     ]
 
 
