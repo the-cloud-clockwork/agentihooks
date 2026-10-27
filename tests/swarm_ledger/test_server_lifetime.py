@@ -122,7 +122,7 @@ def test_detached_server_stop_deadline_excludes_startup_after_pid_publication(tm
         "    result = write_text(self, *args, **kwargs)\n"
         "    if self.name == '.server.pid':\n"
         "        write_text(self.parent / 'startup-paused', 'yes')\n"
-        "        time.sleep(4)\n"
+        "        time.sleep(5)\n"
         "    return result\n"
         "Path.write_text = publish\n"
     )
