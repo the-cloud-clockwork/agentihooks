@@ -310,12 +310,13 @@ def test_a_refused_hive_reservation_turns_the_placement_into_a_wait(setup, in_pa
     from scripts.swarm_v2.runtime.base import Status
     from tests.hive.test_controller_launch import publish_room
 
-    publish_room(setup.store, "remote", 1)
+    publish_room(setup.store, "remote", 2)
     launch = setup.launcher
     launch.placement_cache = {} if in_pass else None
     request = request_for(setup)
     assert isinstance(launch.select(setup.config, "eng", request.task), Selection)
-    assert admission.reserve(setup.store.redis, "remote", "other/engineer-1", 1)[0]
+    for member in ("other/engineer-1", "other/engineer-2"):
+        assert admission.reserve(setup.store.redis, "remote", member, 2)[0]
     result = launch.spawn(request)
     assert result.status is Status.UNAVAILABLE
     assert "no hive for eng has room: remote" in result.detail

@@ -241,7 +241,7 @@ class HiveLaunch:
         if self.placement_cache is not None:
             self.placement_cache[(request.lane, request.task["id"])] = waited
             for hive in self.hives():
-                if hive["id"] == selected.hive:
+                if hive["id"] == selected.hive and placement.LOCAL_FULL not in refused:
                     hive["room"] = 0
         return waited
 
