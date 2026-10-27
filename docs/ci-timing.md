@@ -910,9 +910,7 @@ recorded findings and keyed notices while its worst settled measure stays at or
 under the judged worst plus the growth margin. The judged worst is the largest
 measure among the verdicts of any value on the same scope given no earlier than
 24 hours before this verdict (`JUDGED_SPAN_MS` in the CI speed detector), later
-verdicts and old window ids included. After a verdict of `established` on a
-runner wait or tier wall time finding, a pass whose median rises past the
-judged median also raises it again. Members count as settled or open:
+verdicts and old window ids included. Members count as settled or open:
 
 | Member | State | Counts toward the settled worst |
 |---|---|---|
