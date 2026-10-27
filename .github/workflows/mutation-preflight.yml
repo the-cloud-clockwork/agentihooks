@@ -394,8 +394,12 @@ jobs:
           path: .mutation-stats-cache
           merge-multiple: true
 
+      - name: Check for merged test stats
+        id: merged-stats
+        run: if [[ -n "$(find .mutation-stats-cache -type f -print -quit 2>/dev/null)" ]]; then echo found=true >> "$GITHUB_OUTPUT"; fi
+
       - name: Save the merged test stats
-        if: success() && hashFiles('.mutation-stats-cache/**') != ''
+        if: success() && steps.merged-stats.outputs.found == 'true'
         uses: actions/cache/save@v4
         with:
           path: .mutation-stats-cache
