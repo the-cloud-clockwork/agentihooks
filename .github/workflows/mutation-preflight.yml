@@ -130,6 +130,9 @@ jobs:
                   timed(plan, name)
           for name in ("_api", "_manifest", "_valid_manifest", "find_record"):
               timed(ci_test_plan, name)
+          from scripts.ci_mutation import scope
+          for name in ("changes_since", "weakened_tests", "adds_only_tests", "select_tests", "oracle_changed", "blob"):
+              timed(scope, name)
           code = plan.main()
           print(f"PHASE total {time.perf_counter() - t0:.2f}", flush=True)
           sys.exit(code)
