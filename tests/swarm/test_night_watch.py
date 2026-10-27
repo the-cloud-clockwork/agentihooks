@@ -4,9 +4,10 @@ import subprocess
 import pytest
 
 from scripts.gates import catalog
+from scripts.hive import placement_waits
 from scripts.gates import log as gate_log
 from scripts.swarm import capacity, operator_email, status, tick
-from scripts.swarm.health import merge_stall, night_watch
+from scripts.swarm.health import merge_stall, night_watch, spawn_stall
 from scripts.swarm.health.findings import Finding
 from scripts.swarm.store import MANUAL_SCALING, AgentRecord, RedisStore, SwarmConfig
 from tests.swarm.test_cli import env as env
@@ -314,6 +315,56 @@ def test_ready_work_held_by_the_tick_spawn_hold_names_that_hold(store, monkeypat
     until(store, rig, NOW, NOW + 30 * MINUTE)
     (finding,) = night_watch.findings(store, SLUG)
     assert finding.evidence == ("Hold: tick", "Evidence: holding spawns: panes are full")
+
+
+LOCAL_LIMIT = "no hive has room, and the local machine runs 6 of its 6 agents"
+
+
+def waits(store, at, rows):
+    for task, reason in rows.items():
+        row = {"lane": "eng", "reason": reason, "started_at": NOW, "seen_at": at}
+        store.redis.hset(store.key(SLUG, placement_waits.WAITS), task, json.dumps(row))
+
+
+def logged(store, rig, rows, local=None):
+    actions, at = [], NOW
+    while at <= NOW + 40 * MINUTE:
+        waits(store, at, rows)
+        if local is not None:
+            spawn_stall.refuse_local(store, SLUG, "box", *local, at)
+        actions += run(store, rig, at)
+        at += STEP
+    return actions
+
+
+def test_ready_work_all_waiting_on_the_local_agent_limit_raises_no_held_spawn(store, monkeypatch):
+    enforce(store)
+    rig = Rig()
+    held_master(store, rig.runtime)
+    ready(monkeypatch, 2)
+    decide(store, configured={"eng": 2, "ci": 0, "plan": 0}, placements={"eng": ["acct"]}, reason="eng is placed")
+    logged(store, rig, {"t0": LOCAL_LIMIT, "t1": LOCAL_LIMIT})
+    assert kinds(store) == []
+    assert rig.ledger.alerts == []
+
+
+def test_a_local_machine_at_its_agent_limit_raises_no_held_spawn(store, monkeypatch):
+    rig = Rig()
+    held_master(store, rig.runtime)
+    ready(monkeypatch, 2)
+    decide(store, configured={"eng": 2, "ci": 0, "plan": 0}, placements={"eng": ["acct"]}, reason="eng is placed")
+    logged(store, rig, {}, local=(6, 6))
+    assert kinds(store) == []
+
+
+def test_a_ready_task_with_no_logged_wait_still_raises_no_named_hold(store, monkeypatch):
+    rig = Rig()
+    held_master(store, rig.runtime)
+    ready(monkeypatch, 2)
+    decide(store, configured={"eng": 2, "ci": 0, "plan": 0}, placements={"eng": ["acct"]}, reason="eng is placed")
+    logged(store, rig, {"t0": LOCAL_LIMIT}, local=(5, 6))
+    (finding,) = night_watch.findings(store, SLUG)
+    assert finding.evidence == ("Hold: no named hold", "Evidence: eng is placed")
 
 
 def test_a_quota_hold_without_a_reason_says_no_lane_is_placed(store, monkeypatch):
