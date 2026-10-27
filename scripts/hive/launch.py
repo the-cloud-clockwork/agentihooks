@@ -18,7 +18,6 @@ HIVE = "hive"
 ROLE_PROFILES = {"engineer": "eng", "cicd": "ci", "planner": "plan", "dispatcher": "dispatch"}
 TTL_MS = 300000
 LAUNCH_MS = 75000
-QUEUED = TTL_MS // LAUNCH_MS
 ORDERS = "controller-launch-orders"
 ENDINGS = "launch-endings"
 PENDING = "hive launch ordered, waiting for its acknowledgement"
@@ -403,11 +402,14 @@ class HiveLaunch:
             raise
 
     def queue_refusal(self, request: SpawnRequest, selected: Selection, queued: int) -> str:
-        if queued < QUEUED or selected.route_kind == placement.MASTER_LOGIN:
+        from scripts.master_login_chain import BUDGET
+
+        ttl = BUDGET.order_ttl_ms if selected.route_kind == placement.MASTER_LOGIN else TTL_MS
+        if queued < ttl // LAUNCH_MS:
             return ""
         return (
             f"no hive for {request.lane} {placement.HAS_ROOM}: {selected.hive} holds {queued} queued launches, "
-            f"the most its {TTL_MS // 1000} second launch deadline serves at {LAUNCH_MS // 1000} seconds each"
+            f"the most its {ttl // 1000} second launch deadline serves at {LAUNCH_MS // 1000} seconds each"
         )
 
     def send_order(self, request: SpawnRequest, selected: Selection, task: dict) -> Outcome:
@@ -445,6 +447,7 @@ class HiveLaunch:
             selected.hive,
         )
         if refused := self.publish(request, selected, task, order, ttl):
+            self._record_wait(request.lane, request.task, placement.Wait(refused))
             self.end(admitted, refused)
             return Outcome("spawn", Status.UNAVAILABLE, HIVE, detail=refused)
         return self.answer(request, order)
@@ -457,14 +460,14 @@ class HiveLaunch:
             while True:
                 try:
                     pipe.watch(stream)
-                    if refused := self.queue_refusal(request, selected, pipe.xlen(stream)):
-                        return refused
-                    pipe.multi()
-                    pipe.set(order.prompt_ref, json.dumps(task), px=ttl)
-                    pipe.hset(self.store.key(self.slug, ORDERS), request.task["id"], json.dumps(order.__dict__))
-                    Orders(pipe).send(selected.hive, order)
-                    pipe.execute()
-                    return ""
+                    refused = self.queue_refusal(request, selected, pipe.xlen(stream))
+                    if not refused:
+                        pipe.multi()
+                        pipe.set(order.prompt_ref, json.dumps(task), px=ttl)
+                        pipe.hset(self.store.key(self.slug, ORDERS), request.task["id"], json.dumps(order.__dict__))
+                        Orders(pipe).send(selected.hive, order)
+                        pipe.execute()
+                    return refused
                 except WatchError:
                     continue
 

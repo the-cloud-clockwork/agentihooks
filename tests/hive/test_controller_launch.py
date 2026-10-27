@@ -205,20 +205,27 @@ def test_a_queue_below_the_deadline_budget_is_not_refused(setup):
         setup.store.redis.xadd(stream, {"order": "{}"})
     selected = setup.launcher.select(setup.config, "eng", {"id": "task"})
     request = SpawnRequest(setup.config, "eng", "eng-name", {"id": "task"})
-    assert setup.launcher.queue_refusal(request, selected) == ""
+    assert setup.launcher.queue_refusal(request, selected, 3) == ""
 
 
-def test_a_master_login_order_is_not_held_to_the_launch_queue_budget(setup):
+def test_a_master_login_order_is_held_to_its_own_launch_deadline(setup):
     from scripts.hive import placement
+    from scripts.master_login_chain import BUDGET
     from scripts.swarm_v2.runtime.base import SpawnRequest
 
     selected = replace(setup.launcher.select(setup.config, "eng", {"id": "task"}), route_kind=placement.MASTER_LOGIN)
     request = SpawnRequest(setup.config, "master", "master-name", {"id": "task"})
-    assert setup.launcher.queue_refusal(request, selected, 4) == ""
+    fits = BUDGET.order_ttl_ms // 75000
+    assert fits > 4
+    assert setup.launcher.queue_refusal(request, selected, fits - 1) == ""
+    assert setup.launcher.queue_refusal(request, selected, fits) == (
+        f"no hive for master has room: remote holds {fits} queued launches, "
+        f"the most its {BUDGET.order_ttl_ms // 1000} second launch deadline serves at 75 seconds each"
+    )
 
 
 def test_an_order_racing_another_controller_into_a_full_queue_is_refused(setup):
-    from scripts.hive import launch
+    from scripts.hive import launch, placement_waits
     from scripts.hive.orders import Orders
     from scripts.swarm.store import AgentRecord
     from scripts.swarm_v2.runtime.base import Outcome, SpawnRequest, Status
@@ -251,6 +258,8 @@ def test_an_order_racing_another_controller_into_a_full_queue_is_refused(setup):
         "the most its 300 second launch deadline serves at 75 seconds each",
     )
     assert calls == [3, 3, 4]
+    row = placement_waits.read(store, slug)["task"]
+    assert (row["lane"], row["reason"]) == ("eng", outcome.detail)
     assert store.redis.xlen(stream) == 4
     assert setup.launcher.orders_for("task") is None
     endings = [json.loads(raw)["reason"] for raw in store.redis.hvals(store.key(slug, launch.ENDINGS))]
