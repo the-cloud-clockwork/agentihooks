@@ -1038,7 +1038,9 @@ def test_stored_statistics_validate_record_inputs_and_mutation_scope(tmp_path, c
     elif changed == "deleted":
         (root / "module.py").unlink()
     elif changed == "stale":
-        next(folder.glob("*.json")).write_text('{"key":"stale","status":0,"inputs":{},"scope":{},"measured":true}')
+        next(folder.glob("*.json")).write_text(
+            f'{{"key":"stale","status":0,"inputs":"{cache.share(inputs)}","scope":{{}},"measured":true}}'
+        )
     else:
         next(folder.glob("*.json")).write_text('{"key":"')
     assert cache.load("tests/test_module.py") is None
@@ -1062,6 +1064,35 @@ def test_stored_statistics_count_a_missing_pointer_and_a_failed_check(tmp_path):
     cache.save("tests/test_module.py", {"status": 0, "tests": {}, "durations": {}, "cpu": 1}, {}, False)
     assert cache.load("tests/test_module.py", lambda inputs, measured, discovery: False) is None
     assert cache.misses == {"no pointer": 1, "check": 1}
+
+
+def test_stored_statistics_keep_each_input_map_and_dependency_list_once(tmp_path):
+    import hashlib
+    import json
+
+    from scripts.ci_mutation.stats_dependencies import SHARED, StoredStats
+
+    root = tmp_path / "repo"
+    folder = tmp_path / "cache"
+    folder.mkdir()
+    _repository(root, {"module.py": "value = 1\n"})
+    inputs = {"module.py": hashlib.sha256((root / "module.py").read_bytes()).hexdigest()}
+    cache = StoredStats(root, folder, {"inventory": ["module.py"]}, {})
+    paths = [f"tests/test_{index}.py" for index in range(3)]
+    for path in paths:
+        result = {"status": 0, "tests": {}, "durations": {path: 1}, "cpu": 1, "dependencies": {path: ["module.py"]}}
+        cache.save(path, result, inputs, True)
+    stored = [json.loads(record.read_text()) for record in folder.glob("*.json")]
+    assert len(stored) == 3
+    assert sorted(path.read_text() for path in folder.glob(f"*{SHARED}")) == sorted(
+        [json.dumps(["module.py"]), json.dumps(inputs)]
+    )
+    assert all("module.py" not in json.dumps(record) for record in stored)
+    reader = StoredStats(root, folder, {"inventory": ["module.py"]}, {})
+    assert reader.load(paths[0])["dependencies"] == {paths[0]: ["module.py"]}
+    next(folder.glob(f"*{SHARED}")).unlink()
+    assert reader.load(paths[1]) is None
+    assert reader.misses == {"no inputs": 1}
 
 
 def test_cache_miss_report_names_only_the_five_most_changed_inputs(tmp_path, capsys):
