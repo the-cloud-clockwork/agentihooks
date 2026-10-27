@@ -5,7 +5,10 @@ import pytest
 
 
 def test_unchanged_test_stats_are_reused_and_only_the_changed_file_is_collected(tmp_path):
+    import json
+
     from scripts.ci_mutation.stats_cache import collect_cached_stats
+    from scripts.ci_mutation.stats_dependencies import CONTEXT
 
     root = tmp_path / "repo"
     root.mkdir()
@@ -34,6 +37,8 @@ def test_unchanged_test_stats_are_reused_and_only_the_changed_file_is_collected(
     changes = {"scripts/sample.py": {"lines": [2]}}
     first = collect_cached_stats(root, cache, changes, files, ["-q"], collect)
     assert calls == [files]
+    marker = (cache / CONTEXT).read_text()
+    assert [json.loads(record.read_text())["context"] for record in cache.glob("*.json")] == [marker, marker]
     warm = collect_cached_stats(root, cache, changes, files, ["-q"], collect)
     assert calls == [files]
     assert sum(result["cpu"] for result in warm) == sum(result["cpu"] for result in first)
