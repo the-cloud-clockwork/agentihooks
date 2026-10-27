@@ -1,9 +1,12 @@
 """Source fidelity audit of legacy transcript service history before it is imported into the session corpus."""
 
+import argparse
 import copy
 import hashlib
 import json
+import sys
 from dataclasses import dataclass
+from pathlib import Path
 
 from hooks.memory.api.ingest import Rejected, digest
 
@@ -255,3 +258,45 @@ class SourceAudit:
     @classmethod
     def loads(cls, text: str, limits: LegacyLimits = LegacyLimits()) -> "SourceAudit":
         return cls(json.loads(text), limits)
+
+
+def _observations(path: Path) -> list:
+    rows = json.loads(path.read_bytes())
+    return [
+        {**row, "raw": (path.parent / row["raw"]).read_bytes()}
+        if isinstance(row, dict) and isinstance(row.get("raw"), str)
+        else row
+        for row in rows
+    ]
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser()
+    commands = parser.add_subparsers(dest="command", required=True)
+    run = commands.add_parser("run")
+    run.add_argument("state", type=Path)
+    run.add_argument("observations", type=Path)
+    run.add_argument("revision", type=int)
+    certify = commands.add_parser("certify")
+    certify.add_argument("state", type=Path)
+    certify.add_argument("source")
+    commands.add_parser("report").add_argument("state", type=Path)
+    args = parser.parse_args(argv)
+    held = SourceAudit(json.loads(args.state.read_bytes())) if args.state.exists() else SourceAudit()
+    try:
+        if args.command == "run":
+            result = held.run(_observations(args.observations), args.revision)
+            args.state.write_bytes(held.dumps().encode())
+        elif args.command == "certify":
+            result = held.certify(args.source)
+        else:
+            result = held.report()
+    except Rejected as error:
+        print(json.dumps({"error_class": error.error_class, "detail": error.detail}), file=sys.stderr)
+        return 1
+    print(json.dumps(result, sort_keys=True))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

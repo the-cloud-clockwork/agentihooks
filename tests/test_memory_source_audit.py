@@ -355,3 +355,42 @@ def test_package_record_and_manifest_match_the_fixture_inputs():
     assert found["fixture_inputs"] == record["fixture_inputs"] == cases.FIXTURE_INPUTS
     assert found["tested_commit"] == record["tested_commit"]
     assert record["evidence_class"] == cases.EVIDENCE_CLASS
+
+
+def cli(capsys, *argv) -> tuple[int, str, str]:
+    code = audit.main([str(arg) for arg in argv])
+    out = capsys.readouterr()
+    return code, out.out, out.err
+
+
+def printed(value: dict) -> str:
+    return json.dumps(value, sort_keys=True) + "\n"
+
+
+def test_the_command_line_runs_certifies_and_reports_from_a_state_file(tmp_path, capsys):
+    data = raw(user("u1", "hello"))
+    (tmp_path / "zeta.jsonl").write_bytes(data)
+    rows = [{"source": "zeta", "raw": "zeta.jsonl"}, {"source": "alpha", "raw": None, "preview": [preview("u1", "hi")]}]
+    (tmp_path / "found.json").write_text(json.dumps(rows))
+    state = tmp_path / "audit.json"
+    held = audit.SourceAudit()
+    expected = held.run([{**rows[0], "raw": data}, rows[1]], 1)
+
+    assert cli(capsys, "run", state, tmp_path / "found.json", 1) == (0, printed(expected), "")
+    assert state.read_text() == held.dumps()
+    assert cli(capsys, "certify", state, "zeta") == (0, printed(held.certify("zeta")), "")
+    assert cli(capsys, "report", state) == (0, printed(held.report()), "")
+    refusal = {"error_class": "not_lossless", "detail": audit.NOT_LOSSLESS}
+    assert cli(capsys, "certify", state, "alpha") == (1, "", json.dumps(refusal) + "\n")
+
+
+def test_the_command_line_reports_an_empty_audit_and_refuses_bad_rows(tmp_path, capsys):
+    (tmp_path / "found.json").write_text(json.dumps(["x"]))
+    state = tmp_path / "audit.json"
+
+    assert cli(capsys, "report", state) == (0, printed(audit.SourceAudit().report()), "")
+    refusal = {"error_class": "bad_source", "detail": audit.BAD_SOURCE}
+    assert cli(capsys, "run", state, tmp_path / "found.json", 1) == (1, "", json.dumps(refusal) + "\n")
+    assert not state.exists()
+    with pytest.raises(SystemExit):
+        audit.main([])

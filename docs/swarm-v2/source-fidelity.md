@@ -18,6 +18,10 @@ service, its collector or its stores.
 missing source is refused with `not_lossless`. `SourceAudit.report` lists the four classes separately and counts
 them in `source_fidelity_classes`.
 
+From a shell, `python -m hooks.memory.source_audit run STATE OBSERVATIONS REVISION` audits a JSON list of
+observations, each `raw` naming a transcript file beside the list, and saves the record in `STATE`;
+`certify STATE SOURCE` and `report STATE` read it. A refusal prints its error class and detail on stderr and exits 1.
+
 ## Legacy truncation measured
 
 Read from the retired service's store, collector and embedding code:
