@@ -35,7 +35,8 @@ def job_name(name: str) -> str:
 def seconds(job: dict) -> float:
     if not job.get("started_at") or not job.get("completed_at"):
         return 0.0
-    return (datetime.fromisoformat(job["completed_at"]) - datetime.fromisoformat(job["started_at"])).total_seconds()
+    spent = (datetime.fromisoformat(job["completed_at"]) - datetime.fromisoformat(job["started_at"])).total_seconds()
+    return max(spent, 0.0)
 
 
 def on_anton(job: dict) -> bool:
