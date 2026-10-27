@@ -12,9 +12,10 @@ from scripts.swarm import capacity, cli, linked_issues, merge_queue, ready, stac
 from scripts.swarm.ledger_events import PullRequest
 from scripts.swarm.ledger_events import view as read_pull
 from scripts.swarm.store import RedisStore, SwarmError
+from tests.swarm.memory_fixture import tmp_path
 from tests.swarm.test_cli import HANDOFF, env
 
-_fixture = env
+_fixture = env, tmp_path
 AGENT = "engineer@a1b2c3-0001"
 URL = "https://github.com/o/r/pull/7"
 HEAD = "a" * 40

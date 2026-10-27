@@ -477,23 +477,51 @@ jobs:
 
       - name: Download the dev durations
         if: github.event_name == 'merge_group' || github.event_name == 'workflow_dispatch'
+        id: download-the-dev-durations
+        continue-on-error: true
         uses: actions/download-artifact@v4
-        with:
+        with: &select-download-the-dev-durations
           name: durations-merged
           path: ~/dev-durations
           run-id: ${{ steps.dev-run.outputs.id || steps.base-run.outputs.id }}
           repository: ${{ github.repository }}
           github-token: ${{ steps.app-token.outputs.token }}
 
+      - name: Download the dev durations, wait before attempt 2
+        if: steps.download-the-dev-durations.outcome == 'failure'
+        shell: bash
+        run: |
+          echo "::warning::Download the dev durations failed, as an artifact service outage does; retrying it once in 30 seconds."
+          sleep 30
+
+      - name: Download the dev durations, attempt 2
+        if: steps.download-the-dev-durations.outcome == 'failure'
+        uses: actions/download-artifact@v4
+        with: *select-download-the-dev-durations
+
       - name: Download the dispatched base's coverage baseline
         if: github.event_name == 'workflow_dispatch'
+        id: download-the-dispatched-bases-coverage-baseline
+        continue-on-error: true
         uses: actions/download-artifact@v4
-        with:
+        with: &select-download-the-dispatched-bases-coverage-baseline
           name: coverage-baseline
           path: ~/coverage-baseline
           run-id: ${{ steps.base-run.outputs.id }}
           repository: ${{ github.repository }}
           github-token: ${{ steps.app-token.outputs.token }}
+
+      - name: Download the dispatched base's coverage baseline, wait before attempt 2
+        if: steps.download-the-dispatched-bases-coverage-baseline.outcome == 'failure'
+        shell: bash
+        run: |
+          echo "::warning::Download the dispatched base's coverage baseline failed, as an artifact service outage does; retrying it once in 30 seconds."
+          sleep 30
+
+      - name: Download the dispatched base's coverage baseline, attempt 2
+        if: steps.download-the-dispatched-bases-coverage-baseline.outcome == 'failure'
+        uses: actions/download-artifact@v4
+        with: *select-download-the-dispatched-bases-coverage-baseline
 
       - name: Republish the dev durations
         if: github.event_name == 'merge_group' || github.event_name == 'workflow_dispatch'
@@ -1047,19 +1075,47 @@ jobs:
 
       - name: Restore the queue split inputs
         if: needs.select.outputs.source != ''
+        id: restore-the-queue-split-inputs
+        continue-on-error: true
         uses: actions/download-artifact@v4
-        with:
+        with: &split-restore-the-queue-split-inputs
           name: split-${{ matrix.python-version }}
           run-id: ${{ needs.select.outputs.source }}
           github-token: ${{ steps.unit-token.outputs.token }}
 
+      - name: Restore the queue split inputs, wait before attempt 2
+        if: steps.restore-the-queue-split-inputs.outcome == 'failure'
+        shell: bash
+        run: |
+          echo "::warning::Restore the queue split inputs failed, as an artifact service outage does; retrying it once in 30 seconds."
+          sleep 30
+
+      - name: Restore the queue split inputs, attempt 2
+        if: steps.restore-the-queue-split-inputs.outcome == 'failure'
+        uses: actions/download-artifact@v4
+        with: *split-restore-the-queue-split-inputs
+
       - name: Restore the queue collected tests
         if: needs.select.outputs.source != ''
+        id: restore-the-queue-collected-tests
+        continue-on-error: true
         uses: actions/download-artifact@v4
-        with:
+        with: &split-restore-the-queue-collected-tests
           name: collected-${{ matrix.python-version }}
           run-id: ${{ needs.select.outputs.source }}
           github-token: ${{ steps.unit-token.outputs.token }}
+
+      - name: Restore the queue collected tests, wait before attempt 2
+        if: steps.restore-the-queue-collected-tests.outcome == 'failure'
+        shell: bash
+        run: |
+          echo "::warning::Restore the queue collected tests failed, as an artifact service outage does; retrying it once in 30 seconds."
+          sleep 30
+
+      - name: Restore the queue collected tests, attempt 2
+        if: steps.restore-the-queue-collected-tests.outcome == 'failure'
+        uses: actions/download-artifact@v4
+        with: *split-restore-the-queue-collected-tests
 
       - name: Upload the chosen durations
         uses: ./.github/actions/retry-upload
@@ -1209,12 +1265,26 @@ jobs:
 
       - name: Download this shard's dev coverage
         if: *reused-coverage
+        id: download-this-shards-dev-coverage
+        continue-on-error: true
         uses: actions/download-artifact@v4
-        with:
+        with: &unit-download-this-shards-dev-coverage
           name: coverage-${{ matrix.python-version }}-${{ matrix.shard }}
           run-id: ${{ needs.split.outputs.run }}
           github-token: ${{ steps.dev-token.outputs.token }}
           path: ${{ runner.temp }}/dev-coverage
+
+      - name: Download this shard's dev coverage, wait before attempt 2
+        if: steps.download-this-shards-dev-coverage.outcome == 'failure'
+        shell: bash
+        run: |
+          echo "::warning::Download this shard's dev coverage failed, as an artifact service outage does; retrying it once in 30 seconds."
+          sleep 30
+
+      - name: Download this shard's dev coverage, attempt 2
+        if: steps.download-this-shards-dev-coverage.outcome == 'failure'
+        uses: actions/download-artifact@v4
+        with: *unit-download-this-shards-dev-coverage
 
       # Sonar and the ratchet grade the whole suite, so the reused tests carry their dev coverage and page captures.
       # The grader that planned the reuse filters it, so a change cannot move dev coverage onto its own lines.
@@ -1280,27 +1350,69 @@ jobs:
 
       - name: Restore queue shard durations
         if: needs.split.outputs.source != ''
+        id: restore-queue-shard-durations
+        continue-on-error: true
         uses: actions/download-artifact@v4
-        with:
+        with: &unit-restore-queue-shard-durations
           name: durations-${{ matrix.python-version }}-${{ matrix.shard }}
           run-id: ${{ needs.split.outputs.source }}
           github-token: ${{ steps.unit-token.outputs.token }}
 
+      - name: Restore queue shard durations, wait before attempt 2
+        if: steps.restore-queue-shard-durations.outcome == 'failure'
+        shell: bash
+        run: |
+          echo "::warning::Restore queue shard durations failed, as an artifact service outage does; retrying it once in 30 seconds."
+          sleep 30
+
+      - name: Restore queue shard durations, attempt 2
+        if: steps.restore-queue-shard-durations.outcome == 'failure'
+        uses: actions/download-artifact@v4
+        with: *unit-restore-queue-shard-durations
+
       - name: Restore queue shard flakes
         if: needs.split.outputs.source != ''
+        id: restore-queue-shard-flakes
+        continue-on-error: true
         uses: actions/download-artifact@v4
-        with:
+        with: &unit-restore-queue-shard-flakes
           name: flakes-${{ matrix.python-version }}-${{ matrix.shard }}
           run-id: ${{ needs.split.outputs.source }}
           github-token: ${{ steps.unit-token.outputs.token }}
 
+      - name: Restore queue shard flakes, wait before attempt 2
+        if: steps.restore-queue-shard-flakes.outcome == 'failure'
+        shell: bash
+        run: |
+          echo "::warning::Restore queue shard flakes failed, as an artifact service outage does; retrying it once in 30 seconds."
+          sleep 30
+
+      - name: Restore queue shard flakes, attempt 2
+        if: steps.restore-queue-shard-flakes.outcome == 'failure'
+        uses: actions/download-artifact@v4
+        with: *unit-restore-queue-shard-flakes
+
       - name: Restore queue shard coverage
         if: needs.split.outputs.source != '' && matrix.python-version == '3.12'
+        id: restore-queue-shard-coverage
+        continue-on-error: true
         uses: actions/download-artifact@v4
-        with:
+        with: &unit-restore-queue-shard-coverage
           name: coverage-${{ matrix.python-version }}-${{ matrix.shard }}
           run-id: ${{ needs.split.outputs.source }}
           github-token: ${{ steps.unit-token.outputs.token }}
+
+      - name: Restore queue shard coverage, wait before attempt 2
+        if: steps.restore-queue-shard-coverage.outcome == 'failure'
+        shell: bash
+        run: |
+          echo "::warning::Restore queue shard coverage failed, as an artifact service outage does; retrying it once in 30 seconds."
+          sleep 30
+
+      - name: Restore queue shard coverage, attempt 2
+        if: steps.restore-queue-shard-coverage.outcome == 'failure'
+        uses: actions/download-artifact@v4
+        with: *unit-restore-queue-shard-coverage
 
       # Shards balance on these: per-test times here differ from a local run.
       - name: Upload durations
@@ -1426,10 +1538,24 @@ jobs:
           filter: blob:none
 
       - name: Download the selected legs
+        id: download-the-selected-legs
+        continue-on-error: true
         uses: actions/download-artifact@v4
-        with:
+        with: &unit-selected-download-the-selected-legs
           name: selection
           path: ${{ runner.temp }}/selection
+
+      - name: Download the selected legs, wait before attempt 2
+        if: steps.download-the-selected-legs.outcome == 'failure'
+        shell: bash
+        run: |
+          echo "::warning::Download the selected legs failed, as an artifact service outage does; retrying it once in 30 seconds."
+          sleep 30
+
+      - name: Download the selected legs, attempt 2
+        if: steps.download-the-selected-legs.outcome == 'failure'
+        uses: actions/download-artifact@v4
+        with: *unit-selected-download-the-selected-legs
 
       - name: Read this leg's test paths
         run: echo "FILES=$(sed -n "s/^files_${LEG}=//p" "$RUNNER_TEMP/selection/selection.txt")" >> "$GITHUB_ENV"
@@ -1587,10 +1713,24 @@ jobs:
       - *python
 
       - name: Download collected tests
+        id: shard-data
+        continue-on-error: true
         uses: actions/download-artifact@v4
-        with:
+        with: &shard-check-download-collected-tests
           pattern: "{collected,reused-tests}-${{ matrix.python-version }}"
           path: shard-data
+
+      - name: Download collected tests, wait before attempt 2
+        if: steps.shard-data.outcome == 'failure'
+        shell: bash
+        run: |
+          echo "::warning::Download collected tests failed, as an artifact service outage does; retrying it once in 30 seconds."
+          sleep 30
+
+      - name: Download collected tests, attempt 2
+        if: steps.shard-data.outcome == 'failure'
+        uses: actions/download-artifact@v4
+        with: *shard-check-download-collected-tests
 
       - name: Arrange shard verification data
         shell: bash
@@ -1630,10 +1770,24 @@ jobs:
 
       # The artifact service download spends none of the App installation's hourly REST budget.
       - name: Download shard reports
+        id: shard-reports
+        continue-on-error: true
         uses: actions/download-artifact@v4
-        with:
+        with: &shard-check-download-shard-reports
           pattern: "{durations,flakes}-${{ matrix.python-version }}-*"
           path: shard-reports
+
+      - name: Download shard reports, wait before attempt 2
+        if: steps.shard-reports.outcome == 'failure'
+        shell: bash
+        run: |
+          echo "::warning::Download shard reports failed, as an artifact service outage does; retrying it once in 30 seconds."
+          sleep 30
+
+      - name: Download shard reports, attempt 2
+        if: steps.shard-reports.outcome == 'failure'
+        uses: actions/download-artifact@v4
+        with: *shard-check-download-shard-reports
 
       - name: Require every planned shard report
         shell: bash
@@ -1724,10 +1878,24 @@ jobs:
 
       - name: Download shard coverage
         if: needs.select.outputs.scope != 'none'
+        id: download-shard-coverage
+        continue-on-error: true
         uses: actions/download-artifact@v4
-        with:
+        with: &sonar-download-shard-coverage
           pattern: coverage-3.12-*
           path: .coverage-shards
+
+      - name: Download shard coverage, wait before attempt 2
+        if: steps.download-shard-coverage.outcome == 'failure'
+        shell: bash
+        run: |
+          echo "::warning::Download shard coverage failed, as an artifact service outage does; retrying it once in 30 seconds."
+          sleep 30
+
+      - name: Download shard coverage, attempt 2
+        if: steps.download-shard-coverage.outcome == 'failure'
+        uses: actions/download-artifact@v4
+        with: *sonar-download-shard-coverage
 
       # The merge runs while the proxy starts; the scan waits for it below.
       - name: Merge shard coverage
@@ -1746,7 +1914,7 @@ jobs:
           ) < /dev/null > "$RUNNER_TEMP/combine.log" 2>&1 &
           echo "pid=$!" >> "$GITHUB_OUTPUT"
 
-      # Builds beside the scan, outside the scanned tree; the wait after the scan holds its result.
+      # Builds beside the proxy start, outside the scanned tree; the wait before the scan holds its result.
       - name: Build the test dependency manifest
         id: manifest
         if: steps.source.outputs.test_only != 'true' && needs.select.outputs.scope == 'full'
@@ -1839,6 +2007,23 @@ jobs:
           cat "$RUNNER_TEMP/combine.log"
           exit "$(< "$RUNNER_TEMP/combine.status")"
 
+      - name: Wait for the test dependency manifest
+        if: steps.source.outputs.test_only != 'true' && needs.select.outputs.scope == 'full'
+        timeout-minutes: 10
+        env:
+          MANIFEST_PID: ${{ steps.manifest.outputs.pid }}
+        run: |
+          until [[ -s "$RUNNER_TEMP/manifest.status" ]]; do
+            if ! kill -0 "$MANIFEST_PID" 2> /dev/null && [[ ! -s "$RUNNER_TEMP/manifest.status" ]]; then
+              echo "::error::The test dependency manifest build ended without a status."
+              cat "$RUNNER_TEMP/manifest.log" 2> /dev/null || true
+              exit 1
+            fi
+            sleep 0.2
+          done
+          cat "$RUNNER_TEMP/manifest.log"
+          exit "$(< "$RUNNER_TEMP/manifest.status")"
+
       # Runs the CLI directly: sonarqube-scan-action never finds its tool cache entry, since a four part version is not semver.
       - name: SonarQube Scan
         env:
@@ -1863,23 +2048,6 @@ jobs:
           threads=$(python "$GITHUB_WORKSPACE/scripts/ci_cpu_quota.py")
           bash "$GITHUB_WORKSPACE/.github/coverage/sonar-retry.sh" --unless .scannerwork/report-task.txt "SonarQube Scan" -- "$scanner/bin/sonar-scanner" -Dsonar.projectBaseDir=. -Dsonar.python.analysis.threads="$threads" "${extra[@]}"
           [[ ! -s "$RUNNER_TEMP/sonar-gc.log" ]] || awk '/Pause/ { n++; sub(/ms$/, "", $NF); t += $NF } END { printf "GC pauses %d, %.0f ms\n", n, t }' "$RUNNER_TEMP/sonar-gc.log"
-
-      - name: Wait for the test dependency manifest
-        if: steps.source.outputs.test_only != 'true' && needs.select.outputs.scope == 'full'
-        timeout-minutes: 5
-        env:
-          MANIFEST_PID: ${{ steps.manifest.outputs.pid }}
-        run: |
-          until [[ -s "$RUNNER_TEMP/manifest.status" ]]; do
-            if ! kill -0 "$MANIFEST_PID" 2> /dev/null && [[ ! -s "$RUNNER_TEMP/manifest.status" ]]; then
-              echo "::error::The test dependency manifest build ended without a status."
-              cat "$RUNNER_TEMP/manifest.log" 2> /dev/null || true
-              exit 1
-            fi
-            sleep 0.2
-          done
-          cat "$RUNNER_TEMP/manifest.log"
-          exit "$(< "$RUNNER_TEMP/manifest.status")"
 
       - name: Upload the test dependency manifest
         if: steps.source.outputs.test_only != 'true' && needs.select.outputs.scope == 'full'
@@ -2178,6 +2346,19 @@ jobs:
           fi
           python -m scripts.dead_code --base "$RUNNER_TEMP/base" --head "$GITHUB_WORKSPACE"
 
+      # dev's copy grades the head against the base's manifest, so a pull request cannot unlock its own guard test.
+      # Only the pull request that introduces the gate meets a base without a manifest; its own copy grades.
+      - name: Hold the locked guard tests
+        if: ${{ !cancelled() }}
+        run: |
+          if [[ -f "$RUNNER_TEMP/grader/scripts/locked_tests.py" ]]; then
+            cd "$RUNNER_TEMP/grader"
+          elif [[ -f "$RUNNER_TEMP/base/tests/LOCKED_MANIFEST.json" ]]; then
+            echo "::error::The base locks guard tests but dev carries no scripts/locked_tests.py, so nothing trusted can grade."
+            exit 1
+          fi
+          python -m scripts.locked_tests --base "$RUNNER_TEMP/base" --head "$GITHUB_WORKSPACE"
+
       # The base revision's copy grades, so a pull request cannot loosen its own audit.
       - name: Fail on known vulnerabilities new against the base
         if: ${{ !cancelled() }}
@@ -2278,6 +2459,50 @@ jobs:
         if: ${{ !cancelled() && steps.artifacts.outputs.browser == 'true' }}
         run: python -m scripts.swarm_ledger.artifact_sanity tests/fixtures/artifacts/*
 
+      - name: Plant only when the mutation gate or an input it reads changed
+        if: ${{ !cancelled() && github.event_name == 'pull_request' }}
+        id: self-plant
+        run: |
+          changed=false
+          for path in scripts/ci_mutation tests/mutation_self_plant hooks/context/conditions.py scripts/ci_cpu_quota.py \
+            pyproject.toml pytest.ini setup.cfg tox.ini uv.lock .coveragerc; do
+            if [[ -e "$RUNNER_TEMP/base/$path" || -e "$path" ]] && ! diff -rq "$RUNNER_TEMP/base/$path" "$path" >/dev/null 2>&1; then
+              echo "Changed: $path"
+              changed=true
+            fi
+          done
+          echo "changed=$changed" >> "$GITHUB_OUTPUT"
+
+      - name: Install the mutation gate for its self plant
+        if: ${{ !cancelled() && steps.self-plant.outputs.changed == 'true' }}
+        run: uv pip install --system --excludes .github/test-excludes.txt -e '.[dev,all]'
+
+      - name: Prove the mutation gate kills with the real test and fails with a weakened one
+        if: ${{ !cancelled() && steps.self-plant.outputs.changed == 'true' }}
+        env:
+          PYTEST_DISABLE_PLUGIN_AUTOLOAD: '1'
+        run: |
+          grader="$RUNNER_TEMP/grader/tests/mutation_self_plant/plant.py"
+          if [[ ! -f "$grader" ]]; then
+            echo "::warning::The protected grader predates the self plant; the head copy grades this run."
+            grader=tests/mutation_self_plant/plant.py
+          fi
+          for mode in kill survive; do
+            PYTHONPATH="$GITHUB_WORKSPACE" python "$grader" "$mode" "$RUNNER_TEMP/self-plant-$mode" > "$RUNNER_TEMP/self-plant-$mode.log" 2>&1 &
+            echo "$!" > "$RUNNER_TEMP/self-plant-$mode.pid"
+          done
+          failed=0
+          for mode in kill survive; do
+            if wait "$(cat "$RUNNER_TEMP/self-plant-$mode.pid")"; then
+              echo "The $mode self plant passed."
+            else
+              failed=1
+              cat "$RUNNER_TEMP/self-plant-$mode.log"
+              echo "::error::The mutation gate self plant failed in $mode mode."
+            fi
+          done
+          exit "$failed"
+
   coverage-ratchet:
     needs: [select, unit, reuse]
     if: ${{ !cancelled() && needs.unit.result == 'success' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') }}
@@ -2303,10 +2528,24 @@ jobs:
         run: python -m pip install "coverage>=7.4"
 
       - name: Download shard coverage
+        id: download-shard-coverage
+        continue-on-error: true
         uses: actions/download-artifact@v4
-        with:
+        with: &coverage-ratchet-download-shard-coverage
           pattern: coverage-3.12-*
           path: head-coverage
+
+      - name: Download shard coverage, wait before attempt 2
+        if: steps.download-shard-coverage.outcome == 'failure'
+        shell: bash
+        run: |
+          echo "::warning::Download shard coverage failed, as an artifact service outage does; retrying it once in 30 seconds."
+          sleep 30
+
+      - name: Download shard coverage, attempt 2
+        if: steps.download-shard-coverage.outcome == 'failure'
+        uses: actions/download-artifact@v4
+        with: *coverage-ratchet-download-shard-coverage
 
       - name: Resolve the measured base tree
         id: base
@@ -2397,20 +2636,48 @@ jobs:
 
       - name: Download the base baseline its run published
         if: steps.base-run.outcome == 'success'
+        id: download-the-base-baseline-its-run-published
+        continue-on-error: true
         uses: actions/download-artifact@v4
-        with:
+        with: &coverage-ratchet-download-the-base-baseline-its-run-published
           name: coverage-baseline
           path: ~/coverage-baseline
           run-id: ${{ steps.base-run.outputs.id }}
           repository: ${{ github.repository }}
           github-token: ${{ steps.app-token.outputs.token }}
 
+      - name: Download the base baseline its run published, wait before attempt 2
+        if: steps.download-the-base-baseline-its-run-published.outcome == 'failure'
+        shell: bash
+        run: |
+          echo "::warning::Download the base baseline its run published failed, as an artifact service outage does; retrying it once in 30 seconds."
+          sleep 30
+
+      - name: Download the base baseline its run published, attempt 2
+        if: steps.download-the-base-baseline-its-run-published.outcome == 'failure'
+        uses: actions/download-artifact@v4
+        with: *coverage-ratchet-download-the-base-baseline-its-run-published
+
       - name: Download the queue base coverage baseline
         if: github.event_name == 'workflow_dispatch'
+        id: download-the-queue-base-coverage-baseline
+        continue-on-error: true
         uses: actions/download-artifact@v4
-        with:
+        with: &coverage-ratchet-download-the-queue-base-coverage-baseline
           name: queue-coverage-baseline
           path: ~/coverage-baseline
+
+      - name: Download the queue base coverage baseline, wait before attempt 2
+        if: steps.download-the-queue-base-coverage-baseline.outcome == 'failure'
+        shell: bash
+        run: |
+          echo "::warning::Download the queue base coverage baseline failed, as an artifact service outage does; retrying it once in 30 seconds."
+          sleep 30
+
+      - name: Download the queue base coverage baseline, attempt 2
+        if: steps.download-the-queue-base-coverage-baseline.outcome == 'failure'
+        uses: actions/download-artifact@v4
+        with: *coverage-ratchet-download-the-queue-base-coverage-baseline
 
       - name: Hold every line the base ran
         env:
@@ -2631,10 +2898,24 @@ jobs:
           restore-keys: durations-samples-
 
       - name: Download this run's shard durations
+        id: download-this-runs-shard-durations
+        continue-on-error: true
         uses: actions/download-artifact@v4
-        with:
+        with: &refresh-durations-download-this-runs-shard-durations
           pattern: durations-3.*
           path: ~/durations-samples/${{ github.run_id }}
+
+      - name: Download this run's shard durations, wait before attempt 2
+        if: steps.download-this-runs-shard-durations.outcome == 'failure'
+        shell: bash
+        run: |
+          echo "::warning::Download this run's shard durations failed, as an artifact service outage does; retrying it once in 30 seconds."
+          sleep 30
+
+      - name: Download this run's shard durations, attempt 2
+        if: steps.download-this-runs-shard-durations.outcome == 'failure'
+        uses: actions/download-artifact@v4
+        with: *refresh-durations-download-this-runs-shard-durations
 
       - name: Refresh measured durations
         run: |
@@ -2690,10 +2971,24 @@ jobs:
           restore-keys: flake-history-
 
       - name: Download this run's flake reports
+        id: download-this-runs-flake-reports
+        continue-on-error: true
         uses: actions/download-artifact@v4
-        with:
+        with: &flake-budget-download-this-runs-flake-reports
           pattern: flakes-3.*
           path: ~/flake-reports
+
+      - name: Download this run's flake reports, wait before attempt 2
+        if: steps.download-this-runs-flake-reports.outcome == 'failure'
+        shell: bash
+        run: |
+          echo "::warning::Download this run's flake reports failed, as an artifact service outage does; retrying it once in 30 seconds."
+          sleep 30
+
+      - name: Download this run's flake reports, attempt 2
+        if: steps.download-this-runs-flake-reports.outcome == 'failure'
+        uses: actions/download-artifact@v4
+        with: *flake-budget-download-this-runs-flake-reports
 
       - name: Count flaky tests over seven days
         shell: bash
@@ -2750,10 +3045,24 @@ jobs:
           restore-keys: coverage-baseline-
 
       - name: Download this run's measured coverage
+        id: download-this-runs-measured-coverage
+        continue-on-error: true
         uses: actions/download-artifact@v4
-        with:
+        with: &coverage-baseline-download-this-runs-measured-coverage
           pattern: coverage-3.12-*
           path: baseline-coverage
+
+      - name: Download this run's measured coverage, wait before attempt 2
+        if: steps.download-this-runs-measured-coverage.outcome == 'failure'
+        shell: bash
+        run: |
+          echo "::warning::Download this run's measured coverage failed, as an artifact service outage does; retrying it once in 30 seconds."
+          sleep 30
+
+      - name: Download this run's measured coverage, attempt 2
+        if: steps.download-this-runs-measured-coverage.outcome == 'failure'
+        uses: actions/download-artifact@v4
+        with: *coverage-baseline-download-this-runs-measured-coverage
 
       - name: Compute the coverage baseline
         run: |
@@ -2779,10 +3088,24 @@ jobs:
 
       - name: Download the test dependency manifest
         if: needs.gate-required.result == 'success'
+        id: download-the-test-dependency-manifest
+        continue-on-error: true
         uses: actions/download-artifact@v4
-        with:
+        with: &coverage-baseline-download-the-test-dependency-manifest
           name: dep-manifest
           path: dep-manifest
+
+      - name: Download the test dependency manifest, wait before attempt 2
+        if: steps.download-the-test-dependency-manifest.outcome == 'failure'
+        shell: bash
+        run: |
+          echo "::warning::Download the test dependency manifest failed, as an artifact service outage does; retrying it once in 30 seconds."
+          sleep 30
+
+      - name: Download the test dependency manifest, attempt 2
+        if: steps.download-the-test-dependency-manifest.outcome == 'failure'
+        uses: actions/download-artifact@v4
+        with: *coverage-baseline-download-the-test-dependency-manifest
 
       - name: Save the dev test dependency manifest
         if: needs.gate-required.result == 'success'
@@ -2996,9 +3319,23 @@ jobs:
 
       - name: Download planned mutation test selection
         if: needs.mutation-plan.outputs.forwarded != 'true' && needs.mutation-plan.outputs.selection == 'true'
+        id: download-planned-mutation-test-selection
+        continue-on-error: true
         uses: actions/download-artifact@v4
-        with:
+        with: &mutation-stats-download-planned-mutation-test-selection
           name: mutation-selection
+
+      - name: Download planned mutation test selection, wait before attempt 2
+        if: steps.download-planned-mutation-test-selection.outcome == 'failure'
+        shell: bash
+        run: |
+          echo "::warning::Download planned mutation test selection failed, as an artifact service outage does; retrying it once in 30 seconds."
+          sleep 30
+
+      - name: Download planned mutation test selection, attempt 2
+        if: steps.download-planned-mutation-test-selection.outcome == 'failure'
+        uses: actions/download-artifact@v4
+        with: *mutation-stats-download-planned-mutation-test-selection
 
       - name: Install the pinned nats server for the bus backend tests
         if: needs.mutation-plan.outputs.forwarded != 'true'
@@ -3146,11 +3483,25 @@ jobs:
 
       - name: Download every part's test stats cache
         if: strategy.job-index == 0 && needs.mutation-plan.outputs.stats_parts != '[0]' && needs.mutation-plan.outputs.forwarded != 'true'
+        id: download-every-parts-test-stats-cache
+        continue-on-error: true
         uses: actions/download-artifact@v4
-        with:
+        with: &mutation-download-every-parts-test-stats-cache
           pattern: mutation-test-stats-cache-*
           path: .mutation-stats-cache
           merge-multiple: true
+
+      - name: Download every part's test stats cache, wait before attempt 2
+        if: steps.download-every-parts-test-stats-cache.outcome == 'failure'
+        shell: bash
+        run: |
+          echo "::warning::Download every part's test stats cache failed, as an artifact service outage does; retrying it once in 30 seconds."
+          sleep 30
+
+      - name: Download every part's test stats cache, attempt 2
+        if: steps.download-every-parts-test-stats-cache.outcome == 'failure'
+        uses: actions/download-artifact@v4
+        with: *mutation-download-every-parts-test-stats-cache
 
       - name: Save the merged test stats
         if: strategy.job-index == 0 && needs.mutation-plan.outputs.stats_parts != '[0]' && needs.mutation-plan.outputs.forwarded != 'true' && hashFiles('.mutation-stats-cache/**') != ''
@@ -3190,9 +3541,23 @@ jobs:
 
       - name: Download planned mutation test selection
         if: needs.mutation-plan.outputs.forwarded != 'true' && needs.mutation-plan.outputs.selection == 'true'
+        id: download-planned-mutation-test-selection
+        continue-on-error: true
         uses: actions/download-artifact@v4
-        with:
+        with: &mutation-download-planned-mutation-test-selection
           name: mutation-selection
+
+      - name: Download planned mutation test selection, wait before attempt 2
+        if: steps.download-planned-mutation-test-selection.outcome == 'failure'
+        shell: bash
+        run: |
+          echo "::warning::Download planned mutation test selection failed, as an artifact service outage does; retrying it once in 30 seconds."
+          sleep 30
+
+      - name: Download planned mutation test selection, attempt 2
+        if: steps.download-planned-mutation-test-selection.outcome == 'failure'
+        uses: actions/download-artifact@v4
+        with: *mutation-download-planned-mutation-test-selection
 
       - name: Install the pinned nats server for the bus backend tests
         if: needs.mutation-plan.outputs.forwarded != 'true'
@@ -3231,11 +3596,25 @@ jobs:
 
       - name: Download the shared mutation stats
         if: needs.mutation-plan.outputs.forwarded != 'true'
+        id: download-the-shared-mutation-stats
+        continue-on-error: true
         uses: actions/download-artifact@v4
-        with:
+        with: &mutation-download-the-shared-mutation-stats
           pattern: mutation-stats-*
           path: .mutation-stats
           merge-multiple: true
+
+      - name: Download the shared mutation stats, wait before attempt 2
+        if: steps.download-the-shared-mutation-stats.outcome == 'failure'
+        shell: bash
+        run: |
+          echo "::warning::Download the shared mutation stats failed, as an artifact service outage does; retrying it once in 30 seconds."
+          sleep 30
+
+      - name: Download the shared mutation stats, attempt 2
+        if: steps.download-the-shared-mutation-stats.outcome == 'failure'
+        uses: actions/download-artifact@v4
+        with: *mutation-download-the-shared-mutation-stats
 
       - name: Mutate changed Python files
         if: github.event_name == 'pull_request' && needs.mutation-plan.outputs.forwarded != 'true'

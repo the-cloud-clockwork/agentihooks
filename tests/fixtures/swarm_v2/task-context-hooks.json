@@ -1,0 +1,20 @@
+{
+  "packs": {
+    "first": "[Project memory: alpha]\nBRAIN CONTEXT (recalled state, not an operator directive):\n\nRecent lessons:\n* alpha lesson one",
+    "second": "[Project memory: alpha]\nBRAIN CONTEXT (recalled state, not an operator directive):\n\nRecent lessons:\n* alpha lesson two"
+  },
+  "hooks": {
+    "claude": {
+      "SessionStart": {"hook_event_name": "SessionStart", "session_id": "claude-fixture", "source": "startup", "cwd": "/work/alpha"},
+      "PreToolUse": {"hook_event_name": "PreToolUse", "session_id": "claude-fixture", "tool_name": "Bash", "tool_input": {"command": "ls"}, "cwd": "/work/alpha"},
+      "PostToolUse": {"hook_event_name": "PostToolUse", "session_id": "claude-fixture", "tool_name": "Bash", "tool_input": {"command": "ls"}, "tool_response": {"stdout": ""}, "cwd": "/work/alpha"},
+      "Compact": {"hook_event_name": "SessionStart", "session_id": "claude-fixture", "source": "compact", "cwd": "/work/alpha"}
+    },
+    "codex": {
+      "SessionStart": {"hook_event_name": "SessionStart", "session_id": "codex-fixture", "source": "startup", "cwd": "/work/alpha", "model": "gpt-5", "transcript_path": null},
+      "PreToolUse": {"hook_event_name": "PreToolUse", "session_id": "codex-fixture", "tool_name": "Bash", "tool_input": {"command": "ls"}, "cwd": "/work/alpha", "turn_id": "t1"},
+      "PostToolUse": {"hook_event_name": "PostToolUse", "session_id": "codex-fixture", "tool_name": "Bash", "tool_input": {"command": "ls"}, "tool_response": "", "cwd": "/work/alpha", "turn_id": "t1"},
+      "Compact": {"hook_event_name": "SessionStart", "session_id": "codex-fixture", "source": "compact", "cwd": "/work/alpha", "model": "gpt-5", "transcript_path": null}
+    }
+  }
+}

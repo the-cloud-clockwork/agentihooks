@@ -108,11 +108,59 @@ def test_a_failed_record_download_names_the_github_error_and_stays_red(monkeypat
 
     monkeypatch.setattr(ci_test_plan, "_api", fetch)
     monkeypatch.setattr(ci_test_plan.subprocess, "run", fail)
+    monkeypatch.setattr(ci_test_plan.time, "sleep", lambda seconds: None)
     out = tmp_path / "reused-tests.json"
     with pytest.raises(subprocess.CalledProcessError):
         ci_test_plan.main(["--repository", REPOSITORY, "--head", HEAD, "--before", LATER, "--out", str(out)])
     assert message in capsys.readouterr().err
     assert not out.exists()
+
+
+_real_api = ci_test_plan._api
+
+
+def _flaky_gh(monkeypatch, failures, message="gh: Bad Gateway (HTTP 502)"):
+    fake, calls, waits = ci_test_plan._api, [], []
+
+    def run(command, **kwargs):
+        calls.append(command[2])
+        if len(calls) <= failures:
+            raise subprocess.CalledProcessError(1, command, stderr=message.encode())
+        return subprocess.CompletedProcess(command, 0, stdout=fake(command[2]))
+
+    monkeypatch.setattr(ci_test_plan, "_api", _real_api)
+    monkeypatch.setattr(ci_test_plan.subprocess, "run", run)
+    monkeypatch.setattr(ci_test_plan.time, "sleep", waits.append)
+    return calls, waits
+
+
+def test_a_server_error_listing_dev_push_runs_is_retried_and_the_planner_finishes(monkeypatch, capsys):
+    _github(monkeypatch, [_run(1)], manifests={1: _manifest(1)})
+    calls, waits = _flaky_gh(monkeypatch, 1)
+    run, _ = ci_test_plan.find_record(REPOSITORY, LATER)
+    assert run["id"] == 1
+    assert calls[0] == calls[1] and "/workflows/test.yml/runs?" in calls[0]
+    assert waits == [ci_test_plan.SERVER_BACKOFF]
+    assert "HTTP 502" in capsys.readouterr().err
+
+
+def test_server_errors_back_off_longer_each_attempt_and_stay_red_when_retries_run_out(monkeypatch):
+    _github(monkeypatch, [_run(1)], manifests={1: _manifest(1)})
+    calls, waits = _flaky_gh(monkeypatch, ci_test_plan.SERVER_ATTEMPTS)
+    with pytest.raises(subprocess.CalledProcessError):
+        ci_test_plan.find_record(REPOSITORY, LATER)
+    assert len(calls) == ci_test_plan.SERVER_ATTEMPTS
+    assert waits == [ci_test_plan.SERVER_BACKOFF * 2**attempt for attempt in range(ci_test_plan.SERVER_ATTEMPTS - 1)]
+
+
+@pytest.mark.parametrize("message", ["gh: Not Found (HTTP 404)", "gh: Resource not accessible (HTTP 403)"])
+def test_a_client_error_is_not_retried(monkeypatch, message):
+    _github(monkeypatch, [_run(1)], manifests={1: _manifest(1)})
+    calls, waits = _flaky_gh(monkeypatch, 1, message)
+    with pytest.raises(subprocess.CalledProcessError):
+        ci_test_plan.find_record(REPOSITORY, LATER)
+    assert len(calls) == 1
+    assert waits == []
 
 
 def test_the_newest_dev_run_whose_unit_shards_passed_and_kept_a_manifest_is_the_record(monkeypatch):

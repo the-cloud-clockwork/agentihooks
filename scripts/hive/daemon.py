@@ -27,7 +27,8 @@ if TYPE_CHECKING:
 
 BEAT_SECONDS = 15
 TTL_SECONDS = BEAT_SECONDS * 3
-# A launch inside a beat can run for minutes, so headroom publishes on its own thread well inside its stale window.
+# A launch inside a beat can run for minutes, so headroom and the heartbeat publish on their own thread well
+# inside their stale windows.
 HEADROOM_SECONDS = 10
 RETRY_SECONDS = (1, 2, 4, 8, 16, 30)
 CONNECT_TIMEOUT_S = 3
@@ -216,7 +217,9 @@ def publish_headroom(redis: "Redis", waiter: "Redis", local_id: str, stop: threa
         if stop.is_set():
             return
         try:
-            headroom.publish(redis, local_id, int(time.time() * 1000))
+            now_ms = int(time.time() * 1000)
+            headroom.publish(redis, local_id, now_ms)
+            registry.touch(redis, local_id, now_ms)
             orders.alive(redis, local_id)
         except (RedisError, ValueError, KeyError) as exc:
             print(f"hive headroom publish failed ({type(exc).__name__}: {exc})", file=sys.stderr)

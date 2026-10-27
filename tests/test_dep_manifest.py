@@ -282,8 +282,8 @@ def test_sonar_builds_the_manifest_and_only_dev_pushes_save_it():
     assert build["run"].index(contexts) < build["run"].index("python -m tests.dep_manifest build")
     assert (
         steps.index("Build the test dependency manifest")
-        < steps.index("SonarQube Scan")
         < steps.index("Wait for the test dependency manifest")
+        < steps.index("SonarQube Scan")
         < steps.index("Upload the test dependency manifest")
     )
     wait = _step("sonar", "Wait for the test dependency manifest")
