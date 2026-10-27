@@ -16,6 +16,7 @@ ORDER = [
     "push-stop",
     "quiet",
     "one-push",
+    "brain",
     "claims",
     "trace-plan",
     "window",
