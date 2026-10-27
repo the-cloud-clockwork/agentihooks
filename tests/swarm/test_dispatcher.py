@@ -323,7 +323,8 @@ def test_lane_caps_name_each_lane_with_its_own_cap():
 def test_the_claim_key_orders_focus_by_the_swarm_focus_weight(store):
     config = store.update(SLUG, autonomy="delegate", max_eng=2, focus_weight=100)
     found = focus_split()
-    key, known = dispatcher.claim_key(config, found), {t["id"]: t for t in found["tasks"]}
+    key = dispatcher.claim_key(config, found)
+    known = {t["id"]: t for t in found["tasks"]}
     assert key(known["h"]) < key(known["a"])
 
 
@@ -338,7 +339,7 @@ def test_at_delegate_the_queue_head_follows_the_lane_cap_and_focus_weight(store,
 def test_below_delegate_proposals_follow_the_swarm_focus_weight(store, home, shipped):
     config = store.update(SLUG, autonomy="assist", max_eng=2, focus_weight=100)
     proposals = dispatcher.rank_pass(SLUG, config, store, Ledger(), focus_split(), NOW)
-    assert [line.split(" for task ")[1].split(" ")[0] for line in proposals] == ["h", "a"]
+    assert proposed(proposals) == ["h", "a"]
 
 
 def test_below_delegate_a_high_leverage_task_yields_one_master_proposal_and_no_rank(store, home, shipped):

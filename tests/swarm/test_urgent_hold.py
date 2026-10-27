@@ -46,7 +46,7 @@ def test_a_claimable_task_has_no_hold():
     assert hold(doc([task("a")]), "a") == ""
 
 
-def test_focus_weight_defaults_to_fifty_and_is_settable(env, capsys):
+def test_focus_weight_defaults_to_fifty_and_set_reports_the_new_value(env, capsys):
     store, _, _ = env
     run(SLUG, "create", "--repo", "/repo")
     assert store.config(SLUG).focus_weight == 50
