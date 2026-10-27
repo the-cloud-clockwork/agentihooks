@@ -21,6 +21,7 @@ ARTIFACT = re.compile(rf"branch-coverage-3\.12-({LEG.pattern})-(\d+)", re.ASCII)
 PAGE = 100
 # Each download holds a shard's coverage database, about 50 MB, in memory.
 WORKERS = 4
+TIMEOUT = 300
 ERRORS = (OSError, ValueError, KeyError, TypeError, sqlite3.Error, subprocess.SubprocessError)
 
 
@@ -69,7 +70,7 @@ def artifacts(repository: str, run: int, attempt: int) -> list[dict]:
 
 
 def carry(repository: str, artifact: dict, tests: set[str], moved: dict[str, dict[int, int] | None], out: Path) -> int:
-    data = _api(f"repos/{repository}/actions/artifacts/{artifact['id']}/zip")
+    data = _api(f"repos/{repository}/actions/artifacts/{artifact['id']}/zip", timeout=TIMEOUT)
     with tempfile.TemporaryDirectory() as source, tempfile.TemporaryDirectory() as staged:
         try:
             with zipfile.ZipFile(io.BytesIO(data)) as archive:
@@ -90,7 +91,7 @@ def carry(repository: str, artifact: dict, tests: set[str], moved: dict[str, dic
 
 
 def _moved(repo: str, commit: str) -> dict[str, dict[int, int] | None]:
-    subprocess.run(["git", "-C", repo, "fetch", "--no-tags", "--quiet", "origin", commit], check=True)
+    subprocess.run(["git", "-C", repo, "fetch", "--no-tags", "--quiet", "origin", commit], check=True, timeout=TIMEOUT)
     return reused_coverage.moved_lines(Path(repo), commit, "HEAD")
 
 

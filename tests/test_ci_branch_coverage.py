@@ -82,13 +82,17 @@ def _item(ident, name, expired=False):
 
 
 def _github(monkeypatch, pages, archives):
-    def api(endpoint):
+    calls = []
+
+    def api(endpoint, **options):
+        calls.append((endpoint, options))
         if endpoint.startswith(LISTING):
             return json.dumps({"artifacts": pages.get(int(endpoint.removeprefix(LISTING)), [])}).encode()
         assert endpoint.startswith(DOWNLOAD) and endpoint.endswith("/zip"), endpoint
         return archives[int(endpoint.removeprefix(DOWNLOAD).removesuffix("/zip"))]
 
     monkeypatch.setattr(ci_branch_coverage, "_api", api)
+    return calls
 
 
 def _carry(tmp_path, repo, commit, attempt=1, tests=(REUSED, OTHER), branch=(REUSED, OTHER)):
@@ -170,10 +174,11 @@ def test_the_carry_reads_github_through_the_planner_helper_that_retries_server_e
 def test_the_reused_tests_coverage_and_captures_are_carried_onto_this_heads_lines(tmp_path, monkeypatch, capsys):
     repo, commit = _repo(tmp_path)
     archive = _archive({".coverage": _database(tmp_path), **_captured(REUSED, RAN)})
-    _github(monkeypatch, {1: [_item(11, "branch-coverage-3.12-2-1")]}, {11: archive})
+    calls = _github(monkeypatch, {1: [_item(11, "branch-coverage-3.12-2-1")]}, {11: archive})
     status, out = _carry(tmp_path, repo, commit)
     output = capsys.readouterr()
     assert status == 0
+    assert calls == [(f"{LISTING}1", {}), (f"{DOWNLOAD}11/zip", {"timeout": 300})]
     carried = out / "branch-5" / "2-1"
     assert _arcs(carried / ".coverage") == CARRIED
     assert sorted(path.name for path in (carried / "js-coverage").glob("capture-*.json")) == ["capture-browser-1.json"]
@@ -273,13 +278,39 @@ def test_a_commit_that_cannot_be_fetched_skips_its_run(tmp_path, monkeypatch, ca
     assert capsys.readouterr().out == f"{WARNING}Command '{fetch}' returned non-zero exit status 128.{NOT_CARRIED}\n"
 
 
+def test_a_fetch_that_hangs_is_stopped_after_five_minutes_and_skips_its_run(tmp_path, monkeypatch, capsys):
+    def run(command, **options):
+        raise subprocess.TimeoutExpired(command, options.get("timeout"))
+
+    monkeypatch.setattr(ci_branch_coverage.subprocess, "run", run)
+    monkeypatch.setattr(ci_branch_coverage, "_api", lambda endpoint, **options: pytest.fail(endpoint))
+    status, out = _carry(tmp_path, str(tmp_path), "a" * 40)
+    fetch = ["git", "-C", str(tmp_path), "fetch", "--no-tags", "--quiet", "origin", "a" * 40]
+    assert status == 0
+    assert not out.exists()
+    assert capsys.readouterr().out == f"{WARNING}Command '{fetch}' timed out after 300 seconds{NOT_CARRIED}\n"
+
+
+def test_the_planner_helper_waits_sixty_seconds_unless_given_longer(monkeypatch):
+    calls = []
+
+    def gh_api(args, *, timeout):
+        calls.append((args, timeout))
+        return subprocess.CompletedProcess(args, 0, b"{}")
+
+    monkeypatch.setattr(ci_test_plan, "gh_api", gh_api)
+    assert ci_test_plan._api("repos/x") == b"{}"
+    assert ci_test_plan._api("repos/y", timeout=300) == b"{}"
+    assert calls == [(["repos/x"], 60), (["repos/y"], 300)]
+
+
 def test_no_more_than_four_downloads_run_at_once(tmp_path, monkeypatch):
     repo, commit = _repo(tmp_path)
     archive = _archive({".coverage": _database(tmp_path)})
     items = [_item(leg, f"branch-coverage-3.12-{leg}-1") for leg in range(1, 7)]
     lock, crowded, active, peak = threading.Lock(), threading.Event(), [0], [0]
 
-    def api(endpoint):
+    def api(endpoint, **options):
         if endpoint.startswith(LISTING):
             return json.dumps({"artifacts": items}).encode()
         with lock:

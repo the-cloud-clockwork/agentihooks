@@ -116,7 +116,18 @@ def _zip(content, name="record.json"):
     return buffer.getvalue()
 
 
-def _github(monkeypatch, runs, records):
+def _job(leg, attempt=1, status="completed", conclusion="success", kind="unit-selected", step="Run the selected tests"):
+    steps = [{"name": "Set up job", "status": "completed", "conclusion": "success"}]
+    steps.append({"name": step, "status": status, "conclusion": conclusion})
+    return {"name": f"{kind} (3.12, {leg})", "run_attempt": attempt, "steps": steps}
+
+
+def _leg_job(name):
+    leg, attempt = re.fullmatch(r"branch-record-3\.12-(.*)-(\d+)", name).groups()
+    return _job(leg, int(attempt))
+
+
+def _github(monkeypatch, runs, records, jobs=None):
     artifacts, payloads, calls = {}, {}, []
     for run_id, items in records.items():
         for item in items:
@@ -124,6 +135,7 @@ def _github(monkeypatch, runs, records):
             name = name or f"branch-record-3.12-{payload['leg']}-{payload['attempt']}"
             payloads[len(payloads) + 1] = payload if isinstance(payload, bytes) else _zip(payload)
             artifacts.setdefault(run_id, []).append({"id": len(payloads), "name": name, "expired": False})
+    legs = {run_id: [_leg_job(item["name"]) for item in items] for run_id, items in artifacts.items()} | (jobs or {})
 
     def api(endpoint):
         calls.append(endpoint)
@@ -133,6 +145,12 @@ def _github(monkeypatch, runs, records):
             return payloads[int(endpoint.split("/artifacts/")[1].split("/")[0])]
         run_id = int(endpoint.split("/runs/")[1].split("/")[0])
         page = int(endpoint.rpartition("&page=")[2])
+        if "/attempts/" in endpoint:
+            attempt = int(endpoint.split("/attempts/")[1].split("/")[0])
+            assert endpoint == f"{ACTIONS}/runs/{run_id}/attempts/{attempt}/jobs?per_page=100&page={page}"
+            found = legs.get(run_id, [])
+            found = found.get(attempt, []) if isinstance(found, dict) else found
+            return json.dumps({"jobs": found[(page - 1) * 100 : page * 100]}).encode()
         assert endpoint == f"{ACTIONS}/runs/{run_id}/artifacts?per_page=100&page={page}"
         return json.dumps({"artifacts": artifacts.get(run_id, [])[(page - 1) * 100 : page * 100]}).encode()
 
@@ -388,12 +406,10 @@ def test_runs_that_are_not_earlier_tests_runs_of_this_pull_request_are_never_rea
         ({"attempt": 2}, None, "its leg and attempt do not match the artifact"),
         ({"leg": "2"}, "branch-record-3.12-1-1", "its leg and attempt do not match the artifact"),
         ({"attempt": 0}, "branch-record-3.12-1-0", "its leg and attempt do not match the artifact"),
-        ({"leg": "x"}, None, "its leg and attempt do not match the artifact"),
-        ({"leg": "١"}, None, "its leg and attempt do not match the artifact"),
         ({"version": 2}, None, "the record schema is invalid"),
         ({"version": True}, None, "the record schema is invalid"),
         ({"run": "101"}, None, "the record schema is invalid"),
-        ({"leg": ""}, "branch-record-3.12--1", "the record schema is invalid"),
+        ({"leg": ""}, "branch-record-3.12-1-1", "the record schema is invalid"),
         ({"passed": "tests/test_mod.py::test_h"}, None, "the record schema is invalid"),
         ({"manifest": []}, None, "the record schema is invalid"),
         ({"commit": "HEAD"}, None, "its manifest does not describe its commit"),
@@ -540,6 +556,93 @@ def test_a_run_whose_commit_cannot_be_fetched_still_vetoes_its_failures(tmp_path
     assert _plan(tmp_path, root) == EMPTY
 
 
+@pytest.mark.parametrize(
+    ("job", "barrier"),
+    [
+        (_job("2"), True),
+        (_job("2", kind="unit", step="Run tests"), True),
+        (_job("2", status="in_progress", conclusion=None), True),
+        (_job("2", conclusion="failure"), True),
+        (_job("2", conclusion="cancelled"), True),
+        (_job("2", status="queued", conclusion=None), False),
+        (_job("2", conclusion="skipped"), False),
+        (_job("2", step="Upload the coverage"), False),
+        ({**_job("2"), "name": "unit (3.11, 2)"}, False),
+        ({**_job("2"), "name": "unit-selected (3.12, ٢)"}, False),
+    ],
+    ids=[
+        "passed",
+        "full-scope-shard",
+        "running",
+        "failed",
+        "cancelled",
+        "queued",
+        "skipped",
+        "other-step",
+        "other-interpreter",
+        "non-ascii-leg",
+    ],
+)
+def test_a_started_test_leg_without_its_record_hides_its_run_and_every_older_run(
+    tmp_path, monkeypatch, repo, capsys, job, barrier
+):
+    root, commits = repo
+    newer, older = _run(102), _run(101)
+    records = {
+        102: [_record(newer, commits["record"], passed=["test_x"], depends={**DEPENDS, "test_x": []})],
+        101: [_record(older, commits["record"], passed=["test_h"])],
+    }
+    _github(monkeypatch, [newer, older], records, jobs={102: [_job("1"), job]})
+    assert _plan(tmp_path, root)["tests"] == ([] if barrier else _ids("test_h", "test_x"))
+    warning = (
+        "::warning title=Unusable branch record::Pull request run 102: started test legs left no"
+        " branch-record-3.12-2-1; neither it nor any older run is reused.\n"
+    )
+    assert (warning in capsys.readouterr().out) == barrier
+
+
+def test_an_expired_record_of_a_started_leg_counts_as_missing(tmp_path, monkeypatch, repo, capsys):
+    root, commits = repo
+    run = _run(101)
+    calls, artifacts = _github(monkeypatch, [run], {101: [_record(run, commits["record"], passed=["test_h"])]})
+    artifacts[101][0]["expired"] = True
+    assert _plan(tmp_path, root) == EMPTY
+    assert _downloads(calls) == []
+    assert "Pull request run 101: started test legs left no branch-record-3.12-1-1;" in capsys.readouterr().out
+
+
+def test_a_run_without_test_leg_jobs_contributes_nothing_and_hides_nothing(tmp_path, monkeypatch, repo, capsys):
+    root, commits = repo
+    newer, older = _run(102), _run(101)
+    records = {
+        102: [_record(newer, commits["record"], passed=["test_x"], depends={**DEPENDS, "test_x": []})],
+        101: [_record(older, commits["record"], passed=["test_h"])],
+    }
+    _github(monkeypatch, [newer, older], records, jobs={102: []})
+    plan = _plan(tmp_path, root)
+    assert [(entry["run"], entry["tests"]) for entry in plan["runs"]] == [(101, _ids("test_h"))]
+    assert "::warning" not in capsys.readouterr().out
+
+
+def test_a_job_carried_into_a_later_attempt_needs_only_its_own_attempts_record(tmp_path, monkeypatch, repo):
+    root, commits = repo
+    run = _run(101, run_attempt=2)
+    record = _record(run, commits["record"], passed=["test_h"])
+    _github(monkeypatch, [run], {101: [record]}, jobs={101: {1: [_job("1")], 2: [_job("1")]}})
+    assert _plan(tmp_path, root)["tests"] == _ids("test_h")
+
+
+def test_a_leg_started_only_in_a_later_attempt_still_needs_its_record(tmp_path, monkeypatch, repo):
+    root, commits = repo
+    newer, older = _run(102, run_attempt=2), _run(101)
+    records = {
+        102: [_record(newer, commits["record"], passed=["test_x"], depends={**DEPENDS, "test_x": []})],
+        101: [_record(older, commits["record"], passed=["test_h"])],
+    }
+    _github(monkeypatch, [newer, older], records, jobs={102: {1: [_job("1")], 2: [_job("2", attempt=2)]}})
+    assert _plan(tmp_path, root) == EMPTY
+
+
 @pytest.mark.parametrize(("head_repo", "reused"), [("someone/agentihooks", []), (REPOSITORY.upper(), _ids("test_h"))])
 def test_only_a_pull_request_from_this_repository_reuses_its_earlier_runs(
     tmp_path, monkeypatch, repo, capsys, head_repo, reused
@@ -676,14 +779,14 @@ def test_only_the_newest_eight_earlier_runs_are_read(tmp_path, monkeypatch, repo
     assert sorted(listed, reverse=True) == list(range(112, 104, -1))
 
 
-@pytest.mark.parametrize(("legs", "reused"), [(98, _ids("test_h")), (99, [])])
+@pytest.mark.parametrize(("legs", "reused"), [(97, _ids("test_h")), (98, [])])
 def test_a_run_is_read_only_when_its_records_fit_a_hundred_requests(tmp_path, monkeypatch, repo, capsys, legs, reused):
     root, commits = repo
     run = _run(101)
     records = [_record(run, commits["record"], passed=["test_h"], leg=str(leg)) for leg in range(legs)]
     calls, _ = _github(monkeypatch, [run], {101: records})
     assert _plan(tmp_path, root)["tests"] == reused
-    assert len(calls) == (2 + legs if reused else 2)
+    assert len(calls) == (3 + legs if reused else 3)
     assert (
         "Stopped at pull request run 101: its records would pass 100 GitHub requests" in capsys.readouterr().out
     ) == (not reused)
@@ -700,11 +803,11 @@ def test_the_request_budget_drops_whole_runs_it_cannot_read(tmp_path, monkeypatc
             101: [_record(older, commits["record"], failed=["test_h"], leg=leg) for leg in ("1", "2")],
         },
     )
-    monkeypatch.setattr(ci_branch_plan, "REQUESTS", 5)
+    monkeypatch.setattr(ci_branch_plan, "REQUESTS", 7)
     plan = _plan(tmp_path, root)
     assert [entry["run"] for entry in plan["runs"]] == [102]
     assert sorted(_downloads(calls)) == [f"{ACTIONS}/artifacts/{n}/zip" for n in (1, 2)]
-    assert "Stopped at pull request run 101: its records would pass 5 GitHub requests" in capsys.readouterr().out
+    assert "Stopped at pull request run 101: its records would pass 7 GitHub requests" in capsys.readouterr().out
 
 
 @pytest.mark.parametrize(
