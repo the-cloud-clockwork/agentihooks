@@ -241,6 +241,46 @@ def test_an_owner_not_live_past_its_limit_reopens_and_nothing_is_retired():
     assert "owner not live for 10 minutes" in swarm.inbox()[0].text
 
 
+def _hive_owner():
+    from scripts.hive import join_report
+
+    swarm = Swarm(RUNNING, live=False)
+    swarm.store.drop_agent(SLUG, OWNER)
+    name = swarm.store.next_name(SLUG, "eng")
+    hive_agent = swarm.store.execution_registry.start(
+        SLUG, AgentRecord(name, "eng", "t1", seat="eng-1@sw", hive="hive-one"), ""
+    )
+    swarm.ledger.rows["t1"]["claimed_by"] = name
+    report = {"agent": name, "slug": SLUG, "execution_id": hive_agent.execution_id, "status": "running"}
+
+    def beat(at):
+        row = {**report, "generation": hive_agent.generation, "heartbeat_at": at}
+        swarm.store.redis.hset(join_report.key("hive-one"), hive_agent.execution_id, json.dumps(row))
+
+    return swarm, beat
+
+
+WINDOW = 6 * MINUTE
+
+
+def test_a_hive_owner_with_a_fresh_join_heartbeat_is_live():
+    swarm, beat = _hive_owner()
+    beat(START - 60 * MINUTE)
+    swarm.tick(START)
+    beat(START + 10 * MINUTE - WINDOW)
+    assert swarm.tick(START + 10 * MINUTE) == [] and not _reopened(swarm)
+
+
+def test_a_hive_owner_with_a_stale_join_heartbeat_is_not_live():
+    swarm, beat = _hive_owner()
+    beat(START - 60 * MINUTE)
+    swarm.tick(START)
+    beat(START + 10 * MINUTE - WINDOW - 1)
+    swarm.tick(START + 10 * MINUTE)
+    assert _reopened(swarm)
+    assert "owner not live for 10 minutes" in swarm.inbox()[0].text
+
+
 def test_a_task_awaiting_the_merge_pass_has_no_owner_to_lose():
     swarm = Swarm(RUNNING, task={"awaiting": ready.AWAITING}, live=False)
     swarm.tick(START)

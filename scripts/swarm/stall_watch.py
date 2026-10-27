@@ -180,9 +180,17 @@ def _stall(watch, task, pull, marks, seen, agent):
         return None, None
     if pull.resolved and not pull.red and not pull.queued and not pull.draft:
         return "green", _since(watch, marks, seen, f"{tid}:green")
-    if task.get("claimed_by") not in watch.live:
+    if task.get("claimed_by") not in watch.live and not _hive_live(watch, agent):
         return "owner", _since(watch, marks, seen, f"{tid}:owner")
     return None, None
+
+
+def _hive_live(watch, agent):
+    from scripts.hive import join_report
+
+    report = join_report.read(watch.store.redis, agent) if agent is not None else {}
+    beat = report.get("heartbeat_at") if report.get("status") == "running" else None
+    return beat is not None and watch.now_ms - beat <= 2 * join_report.HEARTBEAT_MS
 
 
 def _pull_request(watch, mail, task, limit, marks, seen):
