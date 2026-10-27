@@ -901,7 +901,12 @@ def test_a_graded_record_keeps_only_what_the_choice_reads(tmp_path, monkeypatch,
         },
     )
     kept, choose = [], ci_branch_plan.choose
-    monkeypatch.setattr(ci_branch_plan, "choose", lambda found, *rest: kept.extend(found) or choose(found, *rest))
+
+    def recorded(found, *rest):
+        kept.extend(found)
+        return choose(found, *rest)
+
+    monkeypatch.setattr(ci_branch_plan, "choose", recorded)
     assert _plan(tmp_path, root)["tests"] == _ids("test_h")
     assert len(kept) == 4
     assert all(set(record) == {"run", "attempt", "commit", "head"} for record, _, _ in kept)
