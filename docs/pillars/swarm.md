@@ -2833,6 +2833,98 @@ reads `timed out`, `gave no answer` or `answered with a server error`) and one
 `heartbeat_age_s`, -1 when the hive never beat). A hive recovery is a
 `hive_samples` row with `live` 1 after one with `live` 0 for the same hive.
 
+### Spawn holds in the stage report
+
+A host sample with held spawns records who holds them. The stage report and
+the bottleneck remedy read that record.
+
+**Who holds the spawns.** Each collector pass picks the first match:
+
+| Condition | `held_by` | `held_harness` | `reason` |
+|---|---|---|---|
+| The tick holds spawns for host room | `host` | empty | The tick's hold, for example `host memory room 0` |
+| A lane with held spawns has an open hive placement wait | `host` | empty | `hive placement: <wait reason>`, for example `hive placement: no hive for eng has room` |
+| Neither | `quota` | The harness every held lane is pinned to, else empty | The capacity reason, then one note per held lane pinned to a harness |
+
+A pin note reads `<count> <lane> spawn held on the <lane> lane pinned to
+<harness>`, plural `spawns` above one, in lane name order and joined with
+`; `. A lane set to `auto` gets no note. Example:
+
+```text
+accounts have quota; 2 eng spawns held on the eng lane pinned to codex
+```
+
+That reason says accounts have quota and the lane pin holds the spawns. A
+`host` reason says host or hive room holds them, so no harness change helps.
+
+**How a hold is charged.** The `top stages` line charges each second of a
+hold span to at most as many waiting tasks as the sample held spawns. The
+tasks that became ready earliest are charged first. Their other claim wait
+seconds, and every second of the remaining waiting tasks, stay claim wait and
+are reported as seat wait or queue wait. Two held spawns over one wall hour
+therefore read at most 2.0 task hours of `quota hold`, however many tasks
+wait. The hold count is one total per sample across lanes, so a hold can be
+charged to a waiting task on a lane that held nothing.
+
+**When the remedy moves a pinned lane.** A standing `quota_hold` or
+`launch_failure` finding over its threshold runs the bottleneck remedy at
+autonomy `delegate` or `full`, once per stage per window:
+
+1. The stuck harness is the one the finding names. A `quota_hold` finding
+   that names both harnesses resolves to the one an `eng` or `ci` lane is
+   pinned to; with both or neither pinned, the remedy proposes a task with
+   `the finding names no single stuck harness`.
+2. No `eng` or `ci` lane pinned to that harness: `no lane is pinned to
+   <harness>`.
+3. For `quota_hold`, accounts of the stuck harness with placeable room keep
+   the pin: `<harness> accounts still have room`.
+4. Under hive placement, a move to Claude needs a live hive that hosts the
+   lane's role and profiles (neither excluded), is not draining and reports room above 0. Without one, or
+   for any move to Codex, the workstation must run the hybrid deployment with
+   a herdr server, host the lane and fit the lane cap within
+   `local-max-agents`. Otherwise the remedy proposes a task with `no eligible
+   host places <target> for the <lane> lane`. Free Claude quota seats alone
+   never move the lane.
+5. The lane moves to the other harness with model `auto`, and the remedy
+   records `Moved the <lane> lane from <source> to <target> after <stage> at
+   <value> <unit>, over its <threshold> threshold.`
+
+Without hive placement the room check passes. Below autonomy `delegate`, every
+step is replaced by a proposal to the master.
+
+**Inspect.** Read the two lines from the status command, and the recorded
+holds from the ClickHouse `swarm.host_samples` table:
+
+```bash
+agentihooks swarm example-swarm status | grep -E "bottleneck|top stages"
+```
+
+```sql
+SELECT ts_ms, held_spawns, held_by, held_harness, reason
+FROM swarm.host_samples
+WHERE ledger = 'example-swarm' AND held_spawns > 0
+ORDER BY ts_ms DESC LIMIT 20
+```
+
+The bottleneck line reports `host held spawns` and `quota held spawns` as
+percent shares. The remedy's last action shows on the status line that starts
+`Top bottleneck`.
+
+**Measured effect.** Delivered by pull request
+[6030](https://github.com/the-cloud-clockwork/agentihooks/pull/6030) for issue
+[6026](https://github.com/the-cloud-clockwork/agentihooks/issues/6026). On the
+`rig-grade-swarm` swarm, `quota hold on codex` read 71.2 task hours over four
+hours before the fix (21:46 UTC, 22 October 2026) and 114.3 when the fix
+landed with quota held spawns at 26 percent. At 04:50 UTC on 23 October, with
+the whole window after the fix, it was below the third top stage at 13.5 task
+hours and quota held spawns read 0 percent.
+
+| Symptom | Cause and action |
+|---|---|
+| `quota hold on codex` leads while Claude accounts have quota | Read `reason` on the held samples. A pin note means the lane pin holds the spawns; the remedy moves the lane once a hive or the workstation has room for Claude. |
+| Remedy proposes `no eligible host places claude for the eng lane` | No live hive hosting the lane has room and the workstation cannot take the lane. Free hive room or end idle agents; the remedy retries in the next window. |
+| A hold reads `hive placement: …` | Hive room, not account quota, holds the spawns. Read the hive placement waits and the hive room before changing lane pins. |
+
 ### Troubleshooting
 
 | Symptom | Cause and action |
