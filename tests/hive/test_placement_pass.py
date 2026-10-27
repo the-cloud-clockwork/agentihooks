@@ -339,19 +339,25 @@ def test_a_refused_hive_reservation_turns_the_placement_into_a_wait(setup, in_pa
     ],
 )
 def test_a_refused_hive_reservation_waits_when_placement_no_longer_reports_it(refused):
+    from types import SimpleNamespace
+
     import fakeredis
 
-    from scripts.swarm.store import RedisStore, SwarmConfig
+    from scripts.handoff import transfers
+    from scripts.swarm.store import MASTER, RedisStore, SwarmConfig
     from scripts.swarm.tick import tick
     from tests.swarm.test_tick import FakeRuntime
 
     store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
     store.create(SwarmConfig("sw", "/repo", max_eng=1, max_ci=1))
     ledger = FakeLedger([{"id": "t1", "lane": "eng"}])
+    transfers.record(store, "sw", SimpleNamespace(name="old", seat="master@sw", task=MASTER), "recycle", "", 500)
     actions = tick("sw", store, ledger, FakeRuntime(crash=SpawnError(refused, "unavailable")), now_ms=1_000)
     assert not [action for action in actions if "spawn failed" in action]
     assert f"task t1 waits: {refused}" in actions
     assert f"the master waits: {refused}" in actions
     assert store.redis.get(store.key("sw", "master-start")) is None
+    [transfer] = transfers.list_transfers(store, "sw")
+    assert (transfer["successor"], transfer["binding"]) == ("", {"state": "pending"})
     assert ledger.rows["t1"]["state"] == "open"
     assert [row["state"] for row in store.launches("sw")] == ["waiting"]
