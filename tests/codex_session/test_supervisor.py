@@ -225,6 +225,22 @@ def test_failed_hive_app_server_start_returns_the_canonical_account_slot(
     assert released == [("hive-a", only_record(store).execution_id, "codex", "default")]
 
 
+def test_a_failed_cleanup_keeps_the_launch_failure(store, server, clock, root, tmp_path, monkeypatch):
+    from redis.exceptions import NoPermissionError
+
+    def failed(*args):
+        raise RuntimeError("startup failed")
+
+    def denied(*args, **kwargs):
+        raise NoPermissionError("No permissions to access a key")
+
+    monkeypatch.setattr(supervisor, "_connect_bound", failed)
+    monkeypatch.setattr(store, "drop_agent", denied)
+    with pytest.raises(RuntimeError, match="^startup failed$"):
+        supervisor.launch(store, launch_spec(store, server, tmp_path), deps(server, clock, root))
+    assert only_record(store).state == FAILED
+
+
 def test_unmanaged_app_server_failure_never_releases_a_hive_slot(store, server, clock, root, tmp_path, monkeypatch):
     from scripts.hive import account_slots
 

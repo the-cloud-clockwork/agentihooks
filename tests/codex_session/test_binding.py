@@ -101,6 +101,23 @@ def test_a_change_to_either_watched_key_during_the_reservation_refuses_it(bindin
     assert bindings.redis.hget(bindings.store.key(SLUG, RECORDS), "exe-one") is None
 
 
+def test_a_change_on_one_attempt_is_retried_and_reserves(bindings, monkeypatch):
+    pipeline = type(bindings.redis.pipeline())
+    checked = pipeline.hget
+    changes = []
+
+    def changed_once(self, name, key):
+        if not changes:
+            changes.append(key)
+            bindings.redis.hset(bindings.store.key(SLUG, RECORDS), "intruder", "exe-other")
+        return checked(self, name, key)
+
+    monkeypatch.setattr(pipeline, "hget", changed_once)
+    reserved = bindings.reserve(SLUG, record())
+    assert bindings.get(SLUG, "exe-one") == reserved
+    assert bindings.redis.hget(bindings.store.key(SLUG, ENDPOINTS), reserved.endpoint_ref) == "exe-one"
+
+
 def test_updates_keep_the_record_identity(bindings):
     bindings.reserve(SLUG, record())
     bindings.put(SLUG, record(state=CONNECTED, thread_id="thread-1"))
