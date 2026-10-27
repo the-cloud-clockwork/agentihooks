@@ -64,6 +64,18 @@ def test_free_text_outputs_that_do_not_serialize_fall_back_to_str():
     assert classify.calls == [("whatever this means", json.dumps({"thing": "odd"}, sort_keys=True))]
 
 
+def test_the_classifier_is_a_sealed_yes_no_judge():
+    assert exit_checks.CLASSIFIER_PROFILE == (
+        "You judge whether the given outputs satisfy the condition, and answer only through the schema."
+    )
+    assert exit_checks.CLASSIFIER_SCHEMA == {
+        "type": "object",
+        "properties": {"satisfied": {"type": "boolean"}},
+        "required": ["satisfied"],
+        "additionalProperties": False,
+    }
+
+
 def test_classify_with_headless_builds_the_exact_runner_call(monkeypatch):
     calls = []
     monkeypatch.setattr(runner, "run", lambda *a: calls.append(a) or {"satisfied": False})
