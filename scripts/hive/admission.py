@@ -38,6 +38,7 @@ redis.call('ZREMRANGEBYSCORE', KEYS[1], '-inf', millis)
 local held = redis.call('ZCARD', KEYS[1])
 if redis.call('ZSCORE', KEYS[1], ARGV[1]) then return {1, held} end
 if held >= tonumber(ARGV[2]) then return {0, held} end
+redis.call('ZREM', KEYS[1], ARGV[1] .. ARGV[4])
 redis.call('ZADD', KEYS[1], millis + tonumber(ARGV[3]), ARGV[1])
 redis.call('PEXPIRE', KEYS[1], ARGV[3])
 return {1, held}
@@ -174,7 +175,7 @@ def key(machine: str) -> str:
 
 
 def reserve(redis: "Redis", machine: str, member: str, limit: int, ttl_ms: int = PENDING_MS) -> tuple[bool, int]:
-    admitted, held = redis.eval(_RESERVE, 1, key(machine), member, limit, ttl_ms)
+    admitted, held = redis.eval(_RESERVE, 1, key(machine), member, limit, ttl_ms, JOINED)
     return bool(admitted), int(held)
 
 
