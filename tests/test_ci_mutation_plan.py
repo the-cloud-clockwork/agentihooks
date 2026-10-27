@@ -727,6 +727,27 @@ def test_estimate_names_the_file_whose_pragma_is_broken(tmp_path, monkeypatch):
         plan.estimate(tmp_path, {"scripts/broken.py": {3}})
 
 
+@pytest.mark.parametrize(
+    "decorator, refused", [("@functools.cache\n", True), ("@dataclasses.dataclass\nclass Box:\n", False)]
+)
+def test_estimate_refuses_changed_function_lines_that_produce_no_mutant(tmp_path, monkeypatch, decorator, refused):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("mutmut.configuration._config", None)
+    _project(tmp_path, {})
+    indent = "    " * decorator.endswith(":\n")
+    body = f"{indent}def doubled(value):\n{indent}    return value * 2\n"
+    (tmp_path / "scripts/cached.py").write_text(f"import dataclasses\nimport functools\n\n{decorator}{body}")
+    (tmp_path / "tests/test_cached.py").write_text("from scripts.cached import doubled\n")
+    line = 6 + (not refused)
+    if refused:
+        with pytest.raises(SystemExit) as refusal:
+            plan.estimate(tmp_path, {"scripts/cached.py": {line}})
+        assert str(refusal.value) == "scripts/cached.py: not mutated, changed function lines produce no mutants"
+    else:
+        assert plan.estimate(tmp_path, {"scripts/cached.py": {line}})[1] == 2
+    assert plan.estimate(tmp_path, {"scripts/cached.py": {1}})[1] == 0
+
+
 def _budget_project(tmp_path, monkeypatch, seconds, timed):
     _project(tmp_path, {})
     tests = _timed_tests(tmp_path, timed)

@@ -20,7 +20,7 @@ import yaml
 from scripts.ci_cpu_quota import worker_count as quota_workers
 from scripts.ci_mutation.browser import needs_browser
 from scripts.ci_mutation.scope import discover_changes, graded_green, module_facts, own_bases, select_tests, test_file
-from scripts.ci_mutation.selection import changed_mutations, file_seconds, partition, stats_shards
+from scripts.ci_mutation.selection import body_mutations, changed_mutations, file_seconds, partition, stats_shards
 from scripts.ci_test_plan import find_record
 from tests.dep_manifest import (
     GLOBAL_FILES,
@@ -92,9 +92,13 @@ def estimate(
                 raise SystemExit(f"{path}: not mutated, no matching or importing test modules")
             continue
         tests.update(chosen)
-        _, mutations = changed_mutations(path, (root / path).read_text(), lines)
+        source = (root / path).read_text()
+        _, mutations = changed_mutations(path, source, lines)
         # mutmut emits only mutants inside a function or method.
-        mutants += sum(1 for mutation in mutations if mutation.contained_by_top_level_function)
+        found = sum(1 for mutation in mutations if mutation.contained_by_top_level_function)
+        if not found and body_mutations(path, source, lines):
+            raise SystemExit(f"{path}: not mutated, changed function lines produce no mutants")
+        mutants += found
     return mutants * MUTANT_SECONDS, mutants, sorted(tests)
 
 

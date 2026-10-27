@@ -180,23 +180,6 @@ def test_module_without_functions_is_reported_and_passes(tmp_path, capsys):
     assert "hooks/__init__.py: no mutable functions" in capsys.readouterr().out
 
 
-@pytest.mark.parametrize("part", [None, (0, 2)])
-def test_changed_function_lines_without_a_generated_mutant_fail_before_mutating(tmp_path, monkeypatch, capsys, part):
-    from scripts.ci_mutation.stats import SharedStats
-
-    (tmp_path / "scripts").mkdir()
-    (tmp_path / "scripts/sample.py").write_text(
-        "import functools\n\n@functools.cache\ndef cached(value):\n    return value - 1\n"
-    )
-    monkeypatch.setattr(runner, "mutate_files", lambda *args: pytest.fail("mutated"))
-    stats = part and SharedStats(tmp_path / "stats", "abc", part)
-    report = run_gate(tmp_path, {"scripts/sample.py": {5}}, tmp_path / "output", 60, stats=stats)
-    reason = "no matching or importing test modules" if part else "changed function lines produce no mutants"
-    assert report["failed"]
-    assert report["not_mutated"] == [{"path": "scripts/sample.py", "reason": reason}]
-    assert f"scripts/sample.py: not mutated, {reason}" in capsys.readouterr().out
-
-
 def test_existing_nested_output_folder_and_multiple_empty_modules_pass(tmp_path):
     (tmp_path / "hooks").mkdir()
     (tmp_path / "hooks/one.py").write_text("")

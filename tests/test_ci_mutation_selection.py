@@ -471,10 +471,10 @@ def test_multiline_operator_on_changed_line_is_mutated_and_unchanged_tokens_are_
         selected_mutants("scripts/sample.py", "# pragma: no mutate end\n", {1})
 
 
-def test_dataclass_methods_are_mutated_and_other_decorated_function_bodies_count_as_hidden(monkeypatch):
+def test_dataclass_methods_are_mutated_and_other_decorated_function_bodies_count_without_mutants(monkeypatch):
     from mutmut.configuration import Config
 
-    from scripts.ci_mutation.selection import hidden_mutations, selected_mutants
+    from scripts.ci_mutation.selection import body_mutations, selected_mutants
 
     monkeypatch.setattr(
         Config, "get", lambda: SimpleNamespace(do_not_mutate_patterns=[], source_paths=[], max_stack_depth=-1)
@@ -499,10 +499,10 @@ def test_dataclass_methods_are_mutated_and_other_decorated_function_bodies_count
     assert all(name.startswith("xǁLauncherǁlaunch__mutmut_") for name in names)
     assert "self.count - 1" in generated
     compile(generated, "scripts/sample.py", "exec")
-    assert hidden_mutations("scripts/sample.py", source, {9}) == 0
+    assert body_mutations("scripts/sample.py", source, {9}) == 2
     assert selected_mutants("scripts/sample.py", source, {13})[1] == []
-    assert hidden_mutations("scripts/sample.py", source, {13}) == 2
-    assert hidden_mutations("scripts/sample.py", source, {4, 11}) == 0
+    assert body_mutations("scripts/sample.py", source, {13}) == 2
+    assert body_mutations("scripts/sample.py", source, {4, 11}) == 0
 
 
 @pytest.mark.parametrize("total", [1, 2, 3, 7])

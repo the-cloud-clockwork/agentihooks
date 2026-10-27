@@ -80,11 +80,9 @@ def is_dataclass(decorator) -> bool:
     return isinstance(name, cst.Name) and name.value == "dataclass"
 
 
-def hidden_mutations(filename: str, source: str, changed: set[int]) -> int:
+def body_mutations(filename: str, source: str, changed: set[int]) -> int:
     from libcst.metadata import MetadataWrapper, PositionProvider
 
-    if any(mutation.contained_by_top_level_function for mutation in changed_mutations(filename, source, changed)[1]):
-        return 0
     module, possible = changed_mutations(filename, source, changed, decorated=True)
     positions = MetadataWrapper(module, unsafe_skip_copy=True).resolve(PositionProvider)
     return sum(
