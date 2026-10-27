@@ -111,6 +111,10 @@ def test_a_full_create_makes_exactly_these_calls(world):
     member = invite._env(world.bao.records[RECORD]["credential"])[invite.HIVE_ID]
     assert world.run.plain() == [
         list(machine.LIST),
+        ["gh", "api", "-H", create_github.RAW, f"repos/{REPO}/contents/{create_render.TEMPLATE_PATH}?ref=dev"],
+        ["gh", "api", f"repos/{REPO}/git/trees/dev?recursive=1", "--jq", create_github.TREE],
+        ["gh", "pr", "list", "-R", REPO, "--state", "open", "--limit", "1000", "--json", "headRefName", "--jq"]
+        + [".[].headRefName"],
         ["kubectl", "get", "service", "-A", "-o", "json"],
         RESYNC,
         ["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-C", NAME, "-f", "host_key"],

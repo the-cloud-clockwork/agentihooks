@@ -173,7 +173,14 @@ def _create(args: argparse.Namespace) -> str:
     if bao is None:
         raise auth.HiveError(f"{openbao_kv.URL_ENV} and {openbao_kv.TOKEN_ENV} must both be set")
     tools = create.Tools(redis_client(), bao, os.environ, hive_id(), redis_url(os.environ), ledger_ca.served())
-    given = {"repo": args.repo, "base": args.base, "like": args.like, "node": args.node, "timeout_s": args.timeout}
+    given = {
+        "repo": args.repo,
+        "base": args.base,
+        "like": args.like,
+        "node": args.node,
+        "timeout_s": args.timeout,
+        "name": args.name,
+    }
     options = create.Options(**{key: value for key, value in given.items() if value is not None}, dry_run=args.dry_run)
     return create.create(tools, options)
 
@@ -297,6 +304,7 @@ def _parser() -> argparse.ArgumentParser:
     created.add_argument("--base", help="branch the hive pull request merges into; defaults to dev")
     created.add_argument("--like", help="OpenBao record to copy; defaults to the workstation hive's")
     created.add_argument("--node", help="node the hive pod runs on; defaults to worker-001")
+    created.add_argument("--name", help="hive name to create; defaults to the next unused swarm-hive name")
     created.add_argument("--timeout", type=int, help="seconds each wait may take; defaults to 1800")
     created.add_argument("--dry-run", action="store_true", help="Print every step and file, and write nothing")
     joined = sub.add_parser("join", help="Join this host with one invite file from hive invite")
