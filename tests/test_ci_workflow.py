@@ -1836,6 +1836,7 @@ def test_mutation_shards_come_from_a_plan_sized_on_stored_timings():
         "BASE": "${{ inputs.base || 'origin/dev' }}",
         "GH_TOKEN": "${{ steps.app-token.outputs.token }}",
         "MUTATION_SHARD_CPU_QUOTA": "3",
+        "PYTHONUNBUFFERED": "1",
     }
     names = [item.get("id") for item in plan["steps"]]
     mint = plan["steps"][names.index("app-token")]
