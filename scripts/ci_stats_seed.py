@@ -6,7 +6,7 @@ import subprocess
 import zipfile
 from pathlib import Path
 
-from scripts.ci_mutation.stats_dependencies import CONTEXT
+from scripts.ci_mutation.stats_dependencies import CONTEXT, SHARED
 
 ARTIFACT = "mutation-test-stats-cache-"
 TESTS = "actions/workflows/test.yml/runs"
@@ -49,7 +49,7 @@ def harvest(number: int, folder: Path) -> int:
         for item in sorted(found, key=lambda item: item["id"]):
             with zipfile.ZipFile(io.BytesIO(api(f"actions/artifacts/{item['id']}/zip", binary=True))) as zipped:
                 for name in zipped.namelist():
-                    if Path(name).suffix in (".json", ".index") or Path(name).name == CONTEXT:
+                    if Path(name).suffix in (".json", ".index", SHARED) or Path(name).name == CONTEXT:
                         (folder / Path(name).name).write_bytes(zipped.read(name))
                         written += 1
         if found:
@@ -85,6 +85,13 @@ def prune(folder: Path) -> int:
     for record in folder.glob("*.json"):
         if record.name not in kept:
             record.unlink()
+    shared = set()
+    for name in kept:
+        stored = json.loads((folder / name).read_text())
+        shared.update(f"{ref}{SHARED}" for ref in [stored.get("inputs"), *stored.get("dependencies", {}).values()])
+    for path in folder.glob(f"*{SHARED}"):
+        if path.name not in shared:
+            path.unlink()
     return len(kept)
 
 
