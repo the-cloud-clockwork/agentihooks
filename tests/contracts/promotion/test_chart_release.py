@@ -43,6 +43,14 @@ def test_the_promotion_release_event_publishes_the_chart_independently_of_images
     assert release["env"]["GH_TOKEN"] == "${{ steps.app-token.outputs.token }}"
 
 
+def test_chart_releases_serialize_without_holding_a_hosted_proof_lane():
+    assert _workflow()["concurrency"] == {
+        "group": "chart-release",
+        "queue": "max",
+        "cancel-in-progress": False,
+    }
+
+
 def test_the_chart_just_published_installs_on_kind_after_publication():
     job = _workflow()["jobs"]["kind"]
     assert job["needs"] == "publish"
