@@ -187,6 +187,7 @@ def test_preflight_sizes_its_stats_parts_and_shards_from_the_plan(tmp_path, monk
         return None
 
     monkeypatch.setattr(planner, "own_bases", bases)
+    monkeypatch.setattr(planner, "touches_code", lambda *args: True)
     monkeypatch.setattr(planner, "find_record", record)
     monkeypatch.setattr(planner, "discover_changes", lambda *args: {"scripts/sample.py": {2}})
     output = tmp_path / "output"
