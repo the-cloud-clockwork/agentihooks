@@ -267,6 +267,53 @@ def test_signal_interrupt_reaches_the_child_and_restores_the_terminal():
         assert termios.tcgetattr(slave) == saved
 
 
+def _probe_state(pid):
+    lines = []
+    pending = [pid]
+    while pending:
+        current = pending.pop()
+        try:
+            status = open(f"/proc/{current}/status").read()
+            wchan = open(f"/proc/{current}/wchan").read()
+            children = []
+            for task in os.listdir(f"/proc/{current}/task"):
+                children += open(f"/proc/{current}/task/{task}/children").read().split()
+        except OSError as exc:
+            lines.append(f"{current}: {exc}")
+            continue
+        keep = [
+            line
+            for line in status.splitlines()
+            if line.split(":")[0]
+            in {"Name", "State", "SigQ", "SigPnd", "ShdPnd", "SigBlk", "SigIgn", "SigCgt", "PPid", "NSpgid"}
+        ]
+        lines.append(f"{current} wchan={wchan} " + " | ".join(keep))
+        pending += [int(child) for child in children]
+    return "\n".join(lines)
+
+
+@pytest.mark.parametrize("attempt", range(400))
+def test_probe_signal_interrupt(attempt):
+    lines = [
+        f"worker SigIgn/SigBlk: {[line for line in open('/proc/self/status').read().splitlines() if line.startswith(('SigIgn', 'SigBlk'))]}"
+    ]
+    child = "import time; print('READY',flush=True); time.sleep(5)"
+    with _relay(child) as (process, master, slave, saved):
+        _read_until(master, b"READY")
+        lines.append("before kill:\n" + _probe_state(process.pid))
+        os.kill(process.pid, signal.SIGINT)
+        try:
+            code = process.wait(timeout=2)
+        except subprocess.TimeoutExpired:
+            lines.append("after 2s:\n" + _probe_state(process.pid))
+            output = b""
+            while select.select([master], [], [], 0.1)[0]:
+                output += os.read(master, 65536)
+            lines.append(f"output: {output!r}")
+            pytest.fail("\n".join(lines))
+        assert code == 130, "\n".join(lines)
+
+
 def test_nonterminal_launch_preserves_stdin_and_exit_status():
     result = subprocess.run(
         [
