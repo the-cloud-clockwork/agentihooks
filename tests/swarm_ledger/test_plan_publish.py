@@ -684,6 +684,27 @@ def test_publish_plan_creates_one_plan_its_phase_parents_and_a_slice_per_marker(
     assert state["tasks"] == []
 
 
+def test_repoint_published_plan_moves_all_phase_references_without_another_issue(
+    plan_ledger, tmp_path, monkeypatch, capsys
+):
+    file, plan_id = published(plan_ledger, tmp_path, monkeypatch)
+    before = core.sync(plan_ledger)[0]
+    monkeypatch.setattr(ledger, "base", lambda: "https://ledger.example")
+    monkeypatch.setattr(
+        ledger.ledger_publish, "publish", lambda *a, **kw: (_ for _ in ()).throw(AssertionError("new publication"))
+    )
+    cli(monkeypatch, plan_ledger, "publish-plan", str(tmp_path / "plan.md"), "--phase", "p1", "--repoint")
+    state = core.sync(plan_ledger)[0]
+    target = f"https://ledger.example/artifacts/{plan_ledger}/{file['id']}"
+    assert state["plans"] == [{"id": plan_id, "title": "Rollout", "artifact": target, "url": PLAN}]
+    assert [phase["plan_ref"] for phase in state["phases"]] == [
+        {**phase["plan_ref"], "artifact": target} for phase in before["phases"]
+    ]
+    assert state["slices"] == before["slices"]
+    assert state["tasks"] == before["tasks"]
+    assert json.loads(capsys.readouterr().out.splitlines()[-1])["phases"] == ["p1", "p2"]
+
+
 def test_publishing_the_same_plan_again_keeps_one_plan_and_its_slices(plan_ledger, tmp_path, monkeypatch):
     published(plan_ledger, tmp_path, monkeypatch)
     before = core.sync(plan_ledger)[0]
