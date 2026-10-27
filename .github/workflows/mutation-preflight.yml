@@ -106,10 +106,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           MUTATION_SHARD_CPU_QUOTA: "3"
-        run: >-
-          python -u -c "import faulthandler, runpy, sys; faulthandler.dump_traceback_later(3, repeat=True);
-          sys.argv = ['plan', '--base', sys.argv[1], '--repository', sys.argv[2]];
-          runpy.run_module('scripts.ci_mutation.plan', run_name='__main__')" "$BASE" "$GITHUB_REPOSITORY"
+        run: GIT_TRACE_PERFORMANCE=1 python -u -m scripts.ci_mutation.plan --base "$BASE" --repository "$GITHUB_REPOSITORY"
 
       - name: Upload planned mutation test selection
         if: steps.open.outputs.open != 'true' && steps.reuse.outputs.reused != 'true'
