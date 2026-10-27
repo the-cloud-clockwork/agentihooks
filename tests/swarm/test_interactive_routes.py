@@ -220,6 +220,7 @@ def test_a_front_door_master_successor_leaves_the_closed_reserved_login_account_
         ([("main", 5.0, 6, "", None, "subscription"), ("open", 60.0, 6, "", None, "subscription")], True),
         ([("main", 5.5, 6, "", None, "subscription"), ("open", 60.0, 6, "", None, "subscription")], True),
         ([("main", 10.5, 6, "", None, "subscription"), ("open", 60.0, 6, "", None, "subscription")], False),
+        ([("main", 50.0, 6, "workers", 6, "subscription"), ("open", 60.0, 6, "", None, "subscription")], False),
         ([("main", 3.0, 6, "", None, "subscription"), ("api", None, 4, "", None, "api")], False),
         ([("main", 3.0, 6, "", None, "subscription"), ("open", 60.0, 0, "workers", 6, "subscription")], True),
         ([("main", 3.0, 6, "", None, "subscription")], False),
