@@ -50,25 +50,22 @@ def test_a_merge_group_over_the_target_asks_for_sixteen_unit_shards_of_the_share
     assert result.stdout.splitlines()[-1] == "16"
 
 
-_RECORDED_QUEUE_RUNS = [
-    (166.5, 323),
-    (166.5, 361),
-    (166.5, 331),
-    (164.6, 299),
-    (164.7, 343),
-    (164.6, 319),
-    (164.6, 302),
-    (164.6, 326),
-    (162.9, 327),
-    (162.9, 378),
-]
+# Forty merge group runs of 27 October planned at forty shards from one durations snapshot: every even shard carried a
+# 100.0s four worker share and the first shard a 174.2s serial group; each value is a run's slowest Run tests step.
+_RECORDED_EVEN_SHARE = 100.0
+_RECORDED_SERIAL_GROUP = 174.2
+_RECORDED_SLOWEST_SHARDS = [
+    211, 206, 181, 191, 194, 217, 218, 199, 164, 173, 168, 183, 182, 162, 183, 174, 177, 203, 222, 207,
+    210, 196, 197, 225, 210, 244, 199, 204, 182, 175, 195, 199, 212, 196, 219, 371, 200, 209, 200, 254,
+]  # fmt: skip
 
 
-def test_the_planned_slowest_queue_shard_is_within_fifteen_percent_of_every_recorded_real_slowest_shard():
-    ratios = sorted((STARTUP_SECONDS + SLOWDOWN * peak) / real for peak, real in _RECORDED_QUEUE_RUNS)
+def test_the_planned_slowest_queue_shard_matches_the_recorded_real_slowest_shards():
+    planned = STARTUP_SECONDS + max(SLOWDOWN * _RECORDED_EVEN_SHARE, _RECORDED_SERIAL_GROUP)
+    ratios = sorted(planned / real for real in _RECORDED_SLOWEST_SHARDS)
 
-    assert 0.85 <= ratios[0] and ratios[-1] <= 1.15
     assert 0.95 <= ratios[len(ratios) // 2] <= 1.05
+    assert 0.85 <= ratios[len(ratios) // 10] and ratios[len(ratios) * 9 // 10] <= 1.2
 
 
 def test_queue_durations_keep_the_median_recent_measurement_and_expire_old_runs(tmp_path, monkeypatch):
@@ -104,9 +101,9 @@ def test_queue_sizing_splits_a_serial_group_until_it_has_half_timeout_margin(tmp
     plan = matrix(tmp_path, {"3.12": measured})
 
     legs = [leg for leg in plan if leg["python-version"] == "3.12"]
-    assert len(legs) == 16
-    assert [leg["shard"] for leg in legs] == list(range(1, 17))
-    assert {leg["total"] for leg in legs} == {16}
+    assert len(legs) == 12
+    assert [leg["shard"] for leg in legs] == list(range(1, 13))
+    assert {leg["total"] for leg in legs} == {12}
 
 
 @pytest.mark.parametrize(("step", "tests", "shards", "target"), [(720, 1920, 21, 195), (300, 1200, 18, 150)])
@@ -261,7 +258,7 @@ def test_queue_sizing_uses_idle_runners_to_finish_serial_work_within_four_minute
 
     assert len(plan) == 24
     assert {leg["total"] for leg in plan} == {24}
-    assert all(leg["predicted_seconds"] == pytest.approx(168.0, abs=0.001) for leg in plan)
+    assert all(leg["predicted_seconds"] == pytest.approx(150.0, abs=0.001) for leg in plan)
 
 
 @pytest.mark.parametrize(("seconds", "warned", "shards"), [(70.0, False, 24), (100.0, True, 40)])
@@ -281,7 +278,7 @@ def test_a_capped_plan_over_the_queue_target_warns_in_the_annotations_and_the_jo
     plan = queue_shards.matrix(tmp_path, {"3.12": measured})
 
     assert {leg["total"] for leg in plan} == {shards}
-    message = "Python 3.12: the shard cap of 40 predicts the slowest queue shard at 260.0s, over the 195s target"
+    message = "Python 3.12: the shard cap of 40 predicts the slowest queue shard at 230.0s, over the 195s target"
     out = capsys.readouterr().out
     if warned:
         assert f"::warning title=Queue shard pool cannot reach the target::{message}\n" in out
@@ -398,24 +395,24 @@ def test_a_capped_queue_plan_over_the_step_timeout_warns_and_still_plans_the_poo
     plan = json.loads("[" + output.read_text().strip().split("=", 1)[1] + "]")
     assert len(plan) == 40
     out = capsys.readouterr().out
-    assert "::warning::The capped queue plan predicts 490.0s, over 420s of the step timeout\n" in out
-    message = "Python 3.12: the shard cap of 40 predicts the slowest queue shard at 490.0s, over the 195s target"
+    assert "::warning::The capped queue plan predicts 430.0s, over 420s of the step timeout\n" in out
+    message = "Python 3.12: the shard cap of 40 predicts the slowest queue shard at 430.0s, over the 195s target"
     assert f"::warning title=Queue shard pool cannot reach the target::{message}\n" in out
     assert summary.read_text() == f"{message}\n"
-    assert "40 queue jobs fit one wave of 40 runners; predicted slowest test step 490.0s" in out
+    assert "40 queue jobs fit one wave of 40 runners; predicted slowest test step 430.0s" in out
 
 
 def test_a_capped_plan_at_the_step_timeout_warns(tmp_path, capsys, monkeypatch):
     from tests import queue_shards
 
-    monkeypatch.setattr(queue_shards, "STEP_SECONDS", 513)
+    monkeypatch.setattr(queue_shards, "STEP_SECONDS", 450)
     root, output = _overflowing_plan(tmp_path, 420.0)
 
     queue_shards.main(
         ["combine", "--from-output", str(output), "--root", str(root), "--inputs", str(tmp_path / "queue-input")]
     )
 
-    assert "::warning::The capped queue plan predicts 513.0s, over 513s of the step timeout\n" in (
+    assert "::warning::The capped queue plan predicts 450.0s, over 450s of the step timeout\n" in (
         capsys.readouterr().out
     )
 

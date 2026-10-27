@@ -19,7 +19,7 @@ from tests.shards import (
 WORKERS = 4
 STEP_SECONDS = step_seconds("unit")
 STARTUP_SECONDS = 30
-SLOWDOWN = 1.85
+SLOWDOWN = 1.69
 TARGET_SECONDS = 195
 # Five merge groups share the 36 runner queue pool, so each shard's fixed setup costs queue wait for every group.
 MAX_SHARDS = 16
@@ -75,7 +75,7 @@ def _predicted(durations: dict[str, float], count: int, grouped: dict[str, str],
     parts = assign_nodes(measured, count, grouped, WORKERS, sizes=sizes)
     parts[0].extend(pinned)
     peak = max(_seconds(part, {**measured, **pinned}, grouped, sizes) for part in parts)
-    return STARTUP_SECONDS + SLOWDOWN * peak
+    return STARTUP_SECONDS + peak
 
 
 def _seconds(part: list[str], durations: dict[str, float], grouped: dict[str, str], sizes: dict[str, int]) -> float:
@@ -84,8 +84,10 @@ def _seconds(part: list[str], durations: dict[str, float], grouped: dict[str, st
     for node in part:
         if group := grouped.get(node.split("::", 1)[0]):
             serial[group] = serial.get(group, 0.0) + durations[node]
+    # Merge group shards measured the slowdown on the shared four worker share; a serial group or a single test ran
+    # faster than its stored time, so it keeps that time.
     return max(
-        sum(durations[node] for node in part) / WORKERS,
+        SLOWDOWN * sum(durations[node] for node in part) / WORKERS,
         max((durations[node] for node in part), default=0.0),
         max(serial.values(), default=0.0),
     ) + sum(sizes[path] * SECONDS_PER_SOURCE_BYTE for path in files)
