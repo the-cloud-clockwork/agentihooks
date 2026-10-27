@@ -62,6 +62,7 @@ def estimate(
 ) -> tuple[float, int, list[str]]:
     mutants, tests = 0, set()
     drift = record_drift(root, manifest) if manifest is not None else None
+    print(f"PHASE drift {time.monotonic():.2f}")
     if drift is not None:
         stale, drifted, paths = drift
         units, unrecorded = changed_recorded_units(root, manifest, changes)
@@ -603,19 +604,25 @@ def main() -> int:
     parser.add_argument("--repository")
     args = parser.parse_args()
     root = Path.cwd()
+    print(f"PHASE start {time.monotonic():.2f}")
     bases = own_bases(root, args.base, args.head, graded_green)
     print(f"Mutation bases: {' '.join(bases)}")
+    print(f"PHASE bases {time.monotonic():.2f}")
     changes = discover_changes(root, bases, args.head)
+    print(f"PHASE discover {time.monotonic():.2f}")
     manifest, failure = None, ""
     if args.repository and not changes:
         print("No change remains to mutate, so the recorded dev coverage is not read.")
     elif args.repository:
         with ThreadPoolExecutor() as pool:
             record = pool.submit(read_record, args.repository)
+            print(f"PHASE submitted {time.monotonic():.2f}")
             # The import scan parses every test module once, while the record downloads.
             for path in changes:
                 select_tests(root, Path(path))
+            print(f"PHASE scan {time.monotonic():.2f}")
             found, failure = record.result()
+            print(f"PHASE record {time.monotonic():.2f}")
         if failure:
             print(
                 "::warning title=Mutation selection fallback::The recorded dev coverage could not be read, so every"
@@ -628,11 +635,15 @@ def main() -> int:
             print(f"Recorded coverage from dev run {run['id']} adds the tests that executed a changed function.")
     selection = {}
     seconds, mutants, tests = estimate(root, changes, selection, manifest, bool(failure))
+    print(f"PHASE estimate {time.monotonic():.2f}")
     validate_tests(root, tests)
+    print(f"PHASE validate {time.monotonic():.2f}")
     browser = str(needs_browser(root, sorted({test_file(test) for test in tests}))).lower()
     (root / ".mutation-selection.json").write_text(json.dumps(selection) + "\n")
     count = shard_count(seconds, mutants, args.target, args.limit)
+    print(f"PHASE browser {time.monotonic():.2f}")
     parts, stats = stats_part_count(root, tests, args.stats_target, args.limit)
+    print(f"PHASE parts {time.monotonic():.2f}")
     print(
         f"Changed line mutants: {mutants}\nEstimated mutation seconds: {seconds:.0f}, slowest stats bucket: {stats:.0f}"
     )
