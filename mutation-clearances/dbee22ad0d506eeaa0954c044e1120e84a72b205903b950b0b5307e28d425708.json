@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/ledger_workspace.py:scripts.swarm_ledger.ledger_workspace.x_mirror__mutmut_33:e12b1705f680821c6558e0388252b7a31e94ba606a712f3fdbbcc48d5fa60f08": {
+    "reader": "Standards reader for t945",
+    "reason": "Mirror write without an explicit encoding, whose Path.write_text default is the locale preferred encoding. The controller and the CI runners run under a UTF-8 locale, so the default names the same codec as the explicit utf-8; no test can tell them apart without restarting the interpreter under another locale."
+  }
+}

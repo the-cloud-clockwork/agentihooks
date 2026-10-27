@@ -309,6 +309,21 @@ def test_an_added_file_at_the_size_limit_still_travels(homes):
         assert len(ledger_workspace.seeds("fixture", "task")["edge.log"]) == ledger_workspace.SEED_CHARS
 
 
+def test_an_unreadable_or_linked_file_never_stops_the_files_after_it(homes):
+    with at(homes.hive):
+        folder = ledger_workspace.materialize("fixture", "task", {"progress.md": "step\n"})
+        (folder / "a.bin").write_bytes(b"\xff\xfe\x00")
+        (homes.controller / "outside.txt").write_text("outside\n", encoding="utf-8")
+        (folder / "b.txt").symlink_to(homes.controller / "outside.txt")
+        (folder / "c.txt").write_text("kept\n", encoding="utf-8")
+        assert ledger_workspace.seeds("fixture", "task") == {"progress.md": "step\n", "c.txt": "kept\n"}
+
+
+def test_each_hive_keeps_its_own_folder_files_key():
+    assert ledger_workspace.files_key("one") != ledger_workspace.files_key("two")
+    assert ledger_workspace.files_key("one").startswith(ledger_workspace.synced_key("one"))
+
+
 def test_the_controller_steering_replaces_a_hive_steering_that_only_contains_it(homes):
     with at(homes.hive):
         folder = ledger_workspace.materialize("fixture", "task", {"steering.md": "new\nhive extra\n"})

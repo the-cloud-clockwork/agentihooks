@@ -288,6 +288,7 @@ def test_selection_passes_exact_lines_before_generation_and_reloads_source_packa
         assert engine_config.Config.get().source_paths == [Path("scripts/")]
         assert Path.cwd() == cwd
         assert calls == [("scripts/sample.py", "source", {2, 5})]
+        assert runner.os.forked == set() and runner.os.getpid() == os.getpid()
         assert runner.PytestRunner().run_tests(mutant_name=None, tests=[]) == 9
         assert runner.collect_or_load_stats(test_runner) is None
         assert collected == [True]
