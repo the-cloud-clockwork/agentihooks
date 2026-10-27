@@ -206,7 +206,7 @@ def stats_shards(root: Path, files: list[str], count: int, seconds: dict[str, fl
         units[number] = (keys, members)
         owners.update(dict.fromkeys(keys, number))
     shards = [[] for _ in range(max(1, min(count, len(units))))]
-    loads = [0.0] * len(shards)
+    loads = Counter()
     for _, members in sorted(units.values(), key=lambda unit: (-sum(seconds[path] for path in unit[1]), unit[1])):
         chosen = min(range(len(shards)), key=loads.__getitem__)
         shards[chosen].extend(members)
