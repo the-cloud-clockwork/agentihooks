@@ -143,6 +143,35 @@ def test_a_ledger_outage_during_the_claim_releases_the_claim_and_the_agent(rig):
     assert rig.store.agents(SLUG) == []
 
 
+def test_a_seat_whose_earlier_execution_ended_is_admitted_at_the_next_generation(rig):
+    first = rig.admitter.admit(SLUG, ask())
+    earlier = rig.store.execution(SLUG, first["task"]["execution_id"])
+    assert rig.admitter.reopen(SLUG, ask()) is True
+
+    admitted = rig.admitter.admit(SLUG, ask(generation=rig.rows["t1"]["claim_generation"]))
+
+    [agent] = rig.store.agents(SLUG)
+    assert (agent.name, agent.seat) == (admitted["name"], "eng-1@sw")
+    assert agent.generation == earlier.generation + 1 == 2
+    assert agent.execution_id != earlier.execution_id
+    assert rig.store.execution_occupants(SLUG)["eng-1@sw"].execution_id == agent.execution_id
+    assert (admitted["task"]["execution_id"], admitted["task"]["execution_generation"]) == (agent.execution_id, 2)
+
+
+def test_a_refused_execution_start_releases_the_claim_and_the_agent(rig, monkeypatch):
+    from scripts.swarm.store import SwarmError
+
+    def refuse(slug, agent, previous_execution_id=""):
+        raise SwarmError("refused start")
+
+    monkeypatch.setattr(rig.store, "start_execution", refuse)
+    with pytest.raises(SwarmError, match="^refused start$"):
+        rig.admitter.admit(SLUG, ask())
+    assert rig.store.claimant(SLUG, "t1") is None
+    assert rig.store.agents(SLUG) == []
+    assert rig.ledger.writes == []
+
+
 def test_reopen_returns_an_admitted_task_to_open_and_forgets_its_admission(rig):
     name = rig.admitter.admit(SLUG, ask())["name"]
 
