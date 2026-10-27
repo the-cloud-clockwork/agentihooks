@@ -7,6 +7,8 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
+CONTEXT = "context.sha"
+
 
 def source_path(filename: str, work: Path, root: Path, tracked: set[str] | None = None) -> str | None:
     path = Path(filename).resolve()
@@ -59,6 +61,9 @@ class StoredStats:
     def pointer(self, path: str) -> Path:
         context = {name: value for name, value in self.context.items() if name != "inventory"}
         return self.folder / f"{digest({'context': context, 'path': path})}.index"
+
+    def context_digest(self) -> str:
+        return digest({name: value for name, value in self.context.items() if name != "inventory"})
 
     def scope(self, inputs: dict) -> dict:
         return {source: lines for source, lines in self.changes.items() if source in inputs}
@@ -128,13 +133,21 @@ class StoredStats:
         result = {
             name: value
             for name, value in record.items()
-            if name not in {"key", "inputs", "scope", "measured", "discovery"}
+            if name not in {"key", "inputs", "scope", "measured", "discovery", "context"}
         }
         return {**result, "reused": True} if measured else result
 
     def save(self, path: str, result: dict, inputs: dict, measured: bool, discovery: str = "") -> None:
         scope = self.scope(inputs)
         key = self.identity(path, inputs, scope, measured, discovery)
-        record = {**result, "key": key, "inputs": inputs, "scope": scope, "measured": measured, "discovery": discovery}
+        record = {
+            **result,
+            "key": key,
+            "inputs": inputs,
+            "scope": scope,
+            "measured": measured,
+            "discovery": discovery,
+            "context": self.context_digest(),
+        }
         (self.folder / f"{key}.json").write_text(json.dumps(record))
         self.pointer(path).write_text(key)
