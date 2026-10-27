@@ -184,11 +184,12 @@ def test_run_uses_the_exit_check_for_workflow_verdicts(setup_run, monkeypatch, c
 
 def test_exhausted_run_returns_failure_with_saved_json(setup_run, monkeypatch, capsys):
     root, case, launch = setup_run
-    launch.return_value = StageResult("fail", [])
+    launch.return_value = StageResult("retry", [])
     document = {
         **DOCUMENT,
+        "workflow": {**DOCUMENT["workflow"], "max_iterations": 1},
         "stages": {
-            "build": {"profile": "engineer", "next": {"pass": "check", "fail": "exit"}},
+            "build": {"profile": "engineer", "next": {"pass": "check", "retry": "build"}},
             "check": DOCUMENT["stages"]["check"],
         },
     }
