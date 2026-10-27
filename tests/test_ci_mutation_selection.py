@@ -750,6 +750,29 @@ def test_statistics_parts_partition_every_test_when_each_part_restores_a_differe
     assert parts == [[tests[0]], tests[1:]]
 
 
+@pytest.mark.parametrize("cached", [False, True])
+def test_statistics_parts_and_workers_use_the_same_observed_tracing_snapshot(tmp_path, monkeypatch, cached):
+    from scripts.ci_mutation.selection import file_seconds, part_files, stats_shards
+
+    tests = [f"tests/test_{name}.py::test_value" for name in "abcd"]
+    (tmp_path / "tests").mkdir()
+    for test in tests:
+        (tmp_path / test.split("::")[0]).write_text("def test_value(): pass\n")
+    (tmp_path / ".test_durations").write_text(json.dumps(dict(zip(tests, [100, 2, 3, 4]))))
+    snapshot = dict(zip(tests, [1, 8, 7, 6]))
+    (tmp_path / ".mutation-tracing.json").write_text(json.dumps(snapshot))
+    cache = tmp_path / "cache"
+    cache.mkdir()
+    if cached:
+        (cache / "different.json").write_text(json.dumps({"status": 0, "durations": {tests[0]: 999}}))
+    monkeypatch.setenv("MUTATION_STATS_CACHE", str(cache))
+    parts = [part_files(tmp_path, list(reversed(tests)), (index, 2)) for index in range(2)]
+    assert parts == [[tests[0], tests[1]], [tests[2], tests[3]]]
+    assert sorted(test for part in parts for test in part) == tests
+    assert file_seconds(tmp_path, tests) == {test: value + 0.01 for test, value in snapshot.items()}
+    assert stats_shards(tmp_path, tests, 2) == parts
+
+
 def test_statistics_collection_sets_the_mutmut_mode_and_preserves_runner_options(tmp_path, monkeypatch):
     from scripts.ci_mutation.selection import collect_test_ids
 

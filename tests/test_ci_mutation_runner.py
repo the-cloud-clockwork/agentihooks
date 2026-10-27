@@ -288,7 +288,15 @@ def test_workspace_carries_the_repository_root_files_into_the_mutants_copy(tmp_p
     root = tmp_path / "repo"
     (root / "tests").mkdir(parents=True)
     (root / "pyproject.toml").write_text('[project]\nreadme = "README.md"\n\n[tool.pytest.ini_options]\n')
-    copied = ("README.md", "LICENSE", "index.md", "compose.yaml", "sonar-project.properties", ".test_durations")
+    copied = (
+        "README.md",
+        "LICENSE",
+        "index.md",
+        "compose.yaml",
+        "sonar-project.properties",
+        ".test_durations",
+        ".mutation-tracing.json",
+    )
     for name in (*copied, ".env", ".env.example"):
         (root / name).write_text(name)
     subprocess.run(["git", "init", "-q", str(root)], check=True)

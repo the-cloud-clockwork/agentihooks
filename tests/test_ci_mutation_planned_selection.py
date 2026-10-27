@@ -26,6 +26,13 @@ def test_plan_publishes_each_file_selection_and_browser_requirement_once(tmp_pat
     monkeypatch.setattr(plan, "own_bases", lambda *args: ["base"])
     monkeypatch.setattr(plan, "discover_changes", lambda *args: {"scripts/sample.py": {2}})
     calls = []
+    (tmp_path / ".test_durations").write_text(
+        json.dumps({"tests/test_sample.py::test_value@port": 9, "tests/test_new.py::test_new": 4})
+    )
+    cache = tmp_path / ".mutation-stats-cache"
+    cache.mkdir()
+    (cache / "traced.json").write_text(json.dumps({"status": 0, "durations": {"tests/test_sample.py::test_value": 2}}))
+    monkeypatch.setenv("MUTATION_STATS_CACHE", str(cache))
 
     def select(root, path):
         calls.append((root, path))
@@ -37,6 +44,10 @@ def test_plan_publishes_each_file_selection_and_browser_requirement_once(tmp_pat
     assert json.loads((tmp_path / ".mutation-selection.json").read_text()) == {"scripts/sample.py": tests}
     assert values["browser"] == browser
     assert calls == [(tmp_path, Path("scripts/sample.py"))]
+    assert json.loads((tmp_path / ".mutation-tracing.json").read_text()) == {
+        "tests/test_sample.py::test_value": 2,
+        "tests/test_new.py::test_new": 4,
+    }
 
 
 @pytest.mark.parametrize("tests", [["tests/test_sample.py"], []])
