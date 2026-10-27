@@ -50,6 +50,7 @@ jobs:
         working-directory: source
         env:
           ARCHIVE_RUN: ${{ inputs.run }}
+          PYTHONDONTWRITEBYTECODE: '1'
         run: |
           python - <<'PY'
           import json

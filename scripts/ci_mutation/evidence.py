@@ -58,7 +58,8 @@ def stage(root: Path, output: Path, bundle: Path, shard: tuple[int, int]) -> dic
             key: os.environ[key]
             for key in ("CI", "PYTEST_DISABLE_PLUGIN_AUTOLOAD", "PYTHONUNBUFFERED")
             if key in os.environ
-        },
+        }
+        | {"PYTHONDONTWRITEBYTECODE": "1"},
         "groups": groups,
     }
     (bundle / "replay.json").write_text(json.dumps(manifest) + "\n")
