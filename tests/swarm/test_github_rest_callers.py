@@ -130,6 +130,14 @@ def test_the_sampler_reads_once_a_minute_and_reports_an_idle_window_as_zero(gith
     assert found["outside_doctor_per_hour"] == found["unattributed_per_hour"] == 0
 
 
+def test_an_hour_window_reports_its_calls_as_the_hourly_rate(github):
+    clock = iter([0.0, 3600.0])
+    found = github_sampler.sample(
+        1, run=rate_limit(iter([0, 7200])), sleep=lambda pause: None, clock=lambda: next(clock)
+    )
+    assert found["per_hour"] == 7200
+
+
 def test_a_window_too_short_to_time_counts_its_calls_as_one_hour(github):
     found = github_sampler.sample(1, run=rate_limit(iter([7, 9])), sleep=lambda pause: None, clock=lambda: 500.0)
     assert found["calls"] == found["per_hour"] == 2
