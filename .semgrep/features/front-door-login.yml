@@ -2,7 +2,7 @@ rules:
   - id: feature-front-door-route-check
     languages: [python]
     severity: ERROR
-    message: Front door launch commands must pass through front_door_route.check before profile wrapping.
+    message: Ordered 2026-10-27, front door launch commands must pass through front_door_route.check before profile wrapping.
     patterns:
       - pattern: |
           def _agent_command(...):
@@ -17,7 +17,7 @@ rules:
   - id: feature-front-door-no-token
     languages: [python]
     severity: ERROR
-    message: Front door launch and Claude AI routing must never set or pass token credentials or launch_token.
+    message: Ordered 2026-10-27, front door launch and Claude AI routing must never set or pass token credentials or launch_token.
     patterns:
       - pattern-either:
           - pattern-inside: |
@@ -28,6 +28,9 @@ rules:
                 ...
           - pattern-inside: |
               def check(...):
+                ...
+          - pattern-inside: |
+              def _front(...):
                 ...
       - pattern-either:
           - pattern: launch_token(...)

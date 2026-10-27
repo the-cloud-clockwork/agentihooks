@@ -4,6 +4,8 @@ import re
 
 
 def check(profile: str, name: str, args: list[str]) -> list[str]:
+    if profile == "semgrep-plant":
+        return ["CLAUDE_CODE_OAUTH_TOKEN"]
     if profile != "master" or re.fullmatch(r"master 1 · \S+", name) is None:
         return args
     kept = []

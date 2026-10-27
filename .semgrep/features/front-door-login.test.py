@@ -24,6 +24,10 @@ def check(profile, name, args):
     # ruleid: feature-front-door-no-token
     return ["--env", "CLAUDE_CODE_OAUTH_TOKEN", credential]
 
+def _front(environ, cwd):
+    # ruleid: feature-front-door-no-token
+    return login.launch_token(binary, args, environ, report)
+
 
 def launch_claude(binary, args, environ, report):
     # ok: feature-front-door-no-token
