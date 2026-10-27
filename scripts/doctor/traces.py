@@ -226,7 +226,8 @@ def gap_agents(record: dict, limits: Limits) -> list[str]:
 
 def wait_coverage(record: dict, limits: Limits) -> list[Finding]:
     unread = record.get("waits_unread", [])
-    live = [name for name in unread if name in _live(record)]
+    working = _live(record)
+    live = [name for name in unread if name in working]
     if not live:
         return []
     return [
