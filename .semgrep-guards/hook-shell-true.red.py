@@ -29,3 +29,8 @@ def shell(command, use_shell):
 async def spawn(command):
     # ruleid: hook-shell-true
     return await asyncio.create_subprocess_shell(command)
+
+
+def floor_bound_case():
+    # ruleid: hook-shell-true
+    os.system("true")

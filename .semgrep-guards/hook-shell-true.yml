@@ -4,7 +4,7 @@ rules:
     languages: [python]
     severity: ERROR
     message: >-
-      A hook runs a command through a shell, so quoting in a tool input can change what runs. Pass an argument list
+      A hook runs a command through a shell, so quoting in a tool input can change what runs. Always pass an argument list
       to subprocess without shell=True.
     pattern-either:
       - patterns:
