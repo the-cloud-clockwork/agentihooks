@@ -712,7 +712,7 @@ def test_tests_dispatch_concurrency_keeps_the_hosted_lane(change):
     elif change == "name":
         updated["name"] = "Other"
     elif change == "events":
-        updated["on"]["schedule"] = [{"cron": "0 * * * *"}]
+        updated.setdefault("on", updated.get(True, {}))["schedule"] = [{"cron": "0 * * * *"}]
     elif change == "untrusted":
         baseline = None
     assert bool(lanes.problems(updated, baseline)) == (change is not None)
