@@ -379,7 +379,7 @@ def test_a_hub_record_that_cannot_be_read_is_a_refusal_naming_it(world):
 
 def test_gh_keeps_leading_space_and_trims_only_trailing_newlines():
     def run(argv, **kwargs):
-        assert kwargs == {"input": '{"a": 1}', **GH}
+        assert kwargs == {"input": '{"a": 1}', **GH, "cwd": None}
         return subprocess.CompletedProcess(argv, 0, "  text X\n\n", "")
 
     assert create_github.gh(run, ["api", "x"], {"a": 1}) == "  text X"
