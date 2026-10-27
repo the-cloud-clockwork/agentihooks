@@ -249,6 +249,15 @@ def test_loop_exits_before_asserting_helper_calls_are_disabled(tmp_path, name, e
     assert _measured(tmp_path, text)[name]["disabled"]
 
 
+@pytest.mark.parametrize("name", ["_loop_helper", "test_loop"])
+def test_break_skipping_an_asserting_helper_in_loop_else_is_disabled(tmp_path, name):
+    text = GUARD + (
+        "\n\ndef _checked(value):\n    assert value\n"
+        f"\n\ndef {name}(values):\n    for value in values:\n        break\n    else:\n        _checked(values)\n"
+    )
+    assert _measured(tmp_path, text)[name]["disabled"]
+
+
 @pytest.mark.parametrize("decorator", ["@pytest.mark.skip", "@pytest.mark.parametrize('x', [])"])
 def test_a_new_skipped_test_in_a_locked_file_is_red(tmp_path, capsys, decorator):
     base = _tree(tmp_path / "base", GUARD)
