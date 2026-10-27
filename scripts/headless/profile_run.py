@@ -7,9 +7,10 @@ from pathlib import Path
 
 import jsonschema
 
+from hooks.context import worker_mode
 from scripts.headless import runner, tiers
 
-WORKER_RUN = "AGENTIHOOKS_WORKER_RUN"
+WORKER_RUN = worker_mode.FLAG
 WORKER_RUN_ID = "AGENTIHOOKS_WORKER_RUN_ID"
 TRANSCRIPT = "transcript.jsonl"
 STDERR = "stderr.txt"

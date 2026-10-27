@@ -62,7 +62,7 @@ from hooks.config import (
     BROADCAST_MIN_INTERVAL_SEC,
     BROADCAST_PERSISTENT_THROTTLE,
 )
-from hooks.context import injection_trace, quarantine
+from hooks.context import injection_trace, quarantine, worker_mode
 
 _SEVERITY_RANK = {"nuclear": 0, "critical": 1, "alert": 2, "warning": 3, "info": 4, "resolved": 5}
 
@@ -1150,7 +1150,7 @@ def format_critical_context(msgs: list[dict], session_id: str = "") -> str:
 
 
 def check_and_inject_broadcasts(session_id: str) -> None:
-    if not BROADCAST_ENABLED:
+    if not BROADCAST_ENABLED or worker_mode.active():
         return
 
     try:
@@ -1213,7 +1213,7 @@ def context_kind(context: str) -> str:
 def get_pretool_context(session_id: str, *, claim_unseen: bool = True) -> str | None:
     # get_pretool_broadcasts owns the BROADCAST_CRITICAL_ON_PRETOOL gate; this
     # layer only checks whether broadcasts are enabled at all.
-    if not BROADCAST_ENABLED:
+    if not BROADCAST_ENABLED or worker_mode.active():
         return None
 
     try:
@@ -1236,7 +1236,7 @@ def get_posttool_context(session_id: str) -> str | None:
 
 def get_broadcast_context(session_id: str, message_ids: list[str]) -> str | None:
     wanted = set(message_ids)
-    if not wanted:
+    if not wanted or worker_mode.active():
         return None
     pending = [message for message in get_pending_broadcasts(session_id) if message.get("id") in wanted]
     pending.sort(key=lambda message: _SEVERITY_RANK.get(message.get("severity", "info"), 9))

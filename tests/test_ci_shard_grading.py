@@ -84,7 +84,7 @@ def test_shard_grading_keeps_head_data_separate_from_base_modules():
     assert commands == [
         "python -m tests.shard_check shard-durations/*/durations.json --collected collected-data/collected.json $REUSED",
         'python -m tests.shard_summary --version "$PYTHON_VERSION" --durations shard-durations/*/durations.json \\\n'
-        '  --collected collected-data/collected.json --plan "$PLAN" --flakes shard-flakes/*/flakes.jsonl'
+        '  --collected collected-data/collected.json --plan "$PLAN" --flakes shard-flakes/*/flakes.jsonl $BRANCH_PLAN'
         ' | tee -a "$GITHUB_STEP_SUMMARY"\n',
         "python -m tests.shard_budget $REPORT shard-durations/*/durations.json",
     ]
@@ -157,12 +157,30 @@ def test_grouped_download_preserves_shard_integrity_without_installed_dependenci
     downloads = [step for step in steps if step.get("uses", "").startswith("actions/download-artifact@")]
     assert [download["with"] for download in downloads] == [
         {"pattern": "{collected,reused-tests}-${{ matrix.python-version }}", "path": "shard-data"},
+        {"pattern": "{collected,reused-tests}-${{ matrix.python-version }}", "path": "shard-data"},
         {"pattern": "{durations,flakes}-${{ matrix.python-version }}-*", "path": "shard-reports"},
+        {"pattern": "{durations,flakes}-${{ matrix.python-version }}-*", "path": "shard-reports"},
+        {"name": "reused-branch-${{ matrix.python-version }}", "path": "branch-plan"},
+        {"name": "reused-branch-${{ matrix.python-version }}", "path": "branch-plan"},
     ]
+    branch, branch_retry = downloads[4], downloads[5]
+    assert branch["if"] == "needs.split.outputs.branch != '' && needs.split.outputs.branch != '0'"
+    assert branch["continue-on-error"] is True
+    assert branch_retry["if"] == steps[steps.index(branch_retry) - 1]["if"] == "steps.branch-plan.outcome == 'failure'"
+    for first, retry in ((downloads[0], downloads[1]), (downloads[2], downloads[3])):
+        assert first["continue-on-error"] is True
+        assert retry["if"] == f"steps.{first['id']}.outcome == 'failure'"
+        assert "continue-on-error" not in retry
+        assert "if" not in first
+        wait = steps[steps.index(retry) - 1]
+        assert wait["if"] == retry["if"]
+        assert wait["run"].splitlines()[-1] == "sleep 30"
+    require = next(step for step in steps if step.get("name") == "Require every planned shard report")
+    assert steps.index(downloads[2]) < steps.index(downloads[3]) < steps.index(require)
     assert not any(step.get("name") == "Install grader dependencies" for step in steps)
     prefetch = next(step for step in steps if "python -m scripts.ci_gate_shards" in step.get("run", ""))
     layout = next(step for step in steps if step.get("name") == "Arrange shard verification data")
-    assert steps.index(layout) < steps.index(prefetch) < steps.index(downloads[1])
+    assert steps.index(layout) < steps.index(prefetch) < steps.index(downloads[2])
     root = tmp_path / "shard-data"
     reports = tmp_path / "shard-reports"
     for index, nodeids in enumerate(
@@ -293,32 +311,3 @@ def test_a_downloaded_report_that_is_a_file_is_still_missing(tmp_path):
     )
     assert result.returncode == 1
     assert "Missing shard reports: flakes-3.12-4" in result.stdout
-
-
-def test_a_failed_shard_report_download_names_the_outage_and_retries_once_before_the_reports_are_required():
-    steps = _jobs()["shard-check"]["steps"]
-    names = [step.get("name") for step in steps]
-    first = steps[names.index("Download shard reports")]
-    notice = steps[names.index("Name the artifact service outage")]
-    second = steps[names.index("Download shard reports, attempt 2")]
-    required = names.index("Require every planned shard report")
-    assert names.index("Download shard reports") + 1 == names.index("Name the artifact service outage")
-    assert names.index("Name the artifact service outage") + 1 == names.index("Download shard reports, attempt 2")
-    assert names.index("Download shard reports, attempt 2") + 1 == required
-    assert first["continue-on-error"] is True
-    assert "if" not in first
-    retry = f"steps.{first['id']}.outcome == 'failure'"
-    assert notice["if"] == retry and second["if"] == retry
-    assert "::warning::" in notice["run"] and "artifact service" in notice["run"]
-    assert "sleep 30" in notice["run"]
-    assert "continue-on-error" not in second
-    assert second["uses"] == first["uses"] == "actions/download-artifact@v4"
-    assert (
-        second["with"]
-        == first["with"]
-        == {
-            "pattern": "{durations,flakes}-${{ matrix.python-version }}-*",
-            "path": "shard-reports",
-        }
-    )
-    assert "if" not in steps[required]

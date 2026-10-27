@@ -1,0 +1,30 @@
+{
+  "case": "T-SV2-GAT-04-A",
+  "evidence_class": "mocked",
+  "input_sha256": {
+    "consultation-gates.json": "c6d1d560a5bc254786323168b8bddc662b7bae991051412fc4666cef3c0c2c05"
+  },
+  "observed": {
+    "tests": [
+      "test_a_first_write_needs_a_receipt_and_repeated_calls_search_nothing_more[t-alpha]",
+      "test_a_first_write_needs_a_receipt_and_repeated_calls_search_nothing_more[t-beta]",
+      "test_a_valid_empty_result_counts_as_consultation",
+      "test_recalled_text_quoting_the_markers_is_still_a_delivered_pack"
+    ],
+    "first_write_without_receipt": "refused: no task context was delivered to this session",
+    "after_one_delivery": {
+      "consultation_result": "delivered",
+      "expiry_seconds": 14400,
+      "ordinary_calls_matched": 0,
+      "repeated_writes_refused": 0,
+      "context_delivery_outcomes_by_target": {
+        "delivered": 1,
+        "deduplicated": 4
+      }
+    },
+    "second_independent_fixture": "the same case passed for task t-beta in its own home and ledger",
+    "valid_empty_result": "consultation result empty; the covered write passes",
+    "brain_gate_false_block_rate": 0.0
+  },
+  "state": "passed"
+}
