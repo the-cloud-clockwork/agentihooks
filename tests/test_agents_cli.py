@@ -119,18 +119,22 @@ def test_help_names_the_commands(capsys):
 
 
 def test_missing_and_malformed_cards_are_errors(catalogue, capsys):
-    with pytest.raises(ValueError, match="^Unknown agent profile: absent$"):
+    with pytest.raises(ValueError) as error:
         cli().show_card("absent")
+    assert str(error.value) == "Unknown agent profile: absent"
     with pytest.raises(SystemExit) as exc:
         cli().main(["show", "absent"])
     assert exc.value.code == 2
-    assert capsys.readouterr().err.endswith("error: Unknown agent profile: absent\n")
+    assert capsys.readouterr().err.splitlines()[-1] == "agentihooks agents: error: Unknown agent profile: absent"
     path = catalogue("bundle", "broken")
     (path / "profile.yml").write_text("description: 3\n")
     with pytest.raises(SystemExit) as exc:
         cli().main(["list"])
     assert exc.value.code == 2
-    assert capsys.readouterr().err.endswith("error: profile broken description must be a string\n")
+    assert (
+        capsys.readouterr().err.splitlines()[-1]
+        == "agentihooks agents: error: profile broken description must be a string"
+    )
 
 
 @pytest.mark.parametrize("args", [[], ["unknown"], ["show"], ["list", "--capability"]])
