@@ -169,7 +169,10 @@ def test_an_agent_skipped_first_does_not_hide_a_later_one(skip):
     assert [f.subject for f in found] == ["engineer@abc-0001"]
 
 
-@pytest.mark.parametrize("reserved,subjects", [("held for 2 live masters", ["engineer@abc-0001"]), ("", None)])
+@pytest.mark.parametrize(
+    "reserved,subjects",
+    [("held for 2 live masters", ["engineer@abc-0001"]), ("", ["director@abc-0000", "engineer@abc-0001"])],
+)
 def test_a_master_on_a_master_reserved_account_is_skipped_while_a_worker_there_still_fires(reserved, subjects):
     store = _drain_swarm()
     decision = json.loads(store.redis.get(store.key(SLUG, "quota-capacity")))
@@ -182,7 +185,7 @@ def test_a_master_on_a_master_reserved_account_is_skipped_while_a_worker_there_s
     store.redis.hset(inbox.key("item", item.id), "created_at", 1_000_000)
     store.redis.hset(store.key(SLUG, "quota-warnings"), master.name, item.id)
     found = drain_watch.findings(store, SLUG, Limits(), 1_000_000 + 12 * MINUTE)
-    assert [f.subject for f in found] == (subjects or [master.name, "engineer@abc-0001"])
+    assert [f.subject for f in found] == subjects
 
 
 def test_the_grace_follows_its_health_setting():
