@@ -1,0 +1,103 @@
+{
+  "case": "B",
+  "dispatcher": {
+    "consumer": "workforce task dispatcher",
+    "decision": "remove",
+    "kind": "tool",
+    "retired": "dispatcher",
+    "uses": "dispatch_task"
+  },
+  "refusals": {
+    "bad_entries": [
+      {
+        "detail": "a consumer entry needs exactly a consumer name, a known kind and the legacy capability it uses",
+        "error_class": "bad_consumer"
+      },
+      {
+        "detail": "a consumer entry needs exactly a consumer name, a known kind and the legacy capability it uses",
+        "error_class": "bad_consumer"
+      },
+      {
+        "detail": "a consumer entry needs exactly a consumer name, a known kind and the legacy capability it uses",
+        "error_class": "bad_consumer"
+      }
+    ],
+    "extract": {
+      "agent_registry": {
+        "detail": "this legacy feature is retired; it is not copied even where it shares a module with search code",
+        "error_class": "retired_feature"
+      },
+      "daemon_installer": {
+        "detail": "this legacy feature is retired; it is not copied even where it shares a module with search code",
+        "error_class": "retired_feature"
+      },
+      "dispatch_task": {
+        "detail": "this legacy feature is retired; it is not copied even where it shares a module with search code",
+        "error_class": "retired_feature"
+      },
+      "dispatcher": {
+        "detail": "this legacy feature is retired; it is not copied even where it shares a module with search code",
+        "error_class": "retired_feature"
+      },
+      "register_agent": {
+        "detail": "this legacy feature is retired; it is not copied even where it shares a module with search code",
+        "error_class": "retired_feature"
+      },
+      "standalone_daemon": {
+        "detail": "this legacy feature is retired; it is not copied even where it shares a module with search code",
+        "error_class": "retired_feature"
+      }
+    },
+    "stale_reclassify": {
+      "detail": "the inventory moved past this revision; read it again and resubmit the consumer",
+      "error_class": "stale_revision"
+    }
+  },
+  "refusals_disclose_the_entry": false,
+  "refusals_left_state_unchanged": true,
+  "report": {
+    "items": [
+      {
+        "consumer": "agent memory semantic search call",
+        "decision": "alias",
+        "kind": "tool",
+        "target": "session_search",
+        "uses": "search_semantic"
+      },
+      {
+        "consumer": "landing sessions indexed figure",
+        "decision": "replace",
+        "kind": "dashboard",
+        "target": "session_list",
+        "uses": "/sessions"
+      },
+      {
+        "consumer": "unlisted session export job",
+        "decision": null,
+        "kind": "ingestion",
+        "uses": "export_sessions"
+      },
+      {
+        "consumer": "workforce task dispatcher",
+        "decision": "remove",
+        "kind": "tool",
+        "retired": "dispatcher",
+        "uses": "dispatch_task"
+      }
+    ],
+    "migration_unmapped_consumers": 1,
+    "revision": 4,
+    "unmapped": [
+      "unlisted session export job"
+    ]
+  },
+  "unknown": {
+    "item": {
+      "consumer": "unlisted session export job",
+      "decision": null,
+      "kind": "ingestion",
+      "uses": "export_sessions"
+    },
+    "replayed": false
+  }
+}
