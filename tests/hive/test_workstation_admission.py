@@ -295,3 +295,25 @@ def test_a_hybrid_master_falling_back_to_the_workstation_counts_against_it(setup
     monkeypatch.setattr(commands, "hive_id", lambda: "workstation")
     assert fenced.spawn(setup.config, "master", "master-new", {"id": "master"}) == "placed on the workstation"
     assert admission.pending(setup.store.redis, "workstation") == 1
+
+
+def test_a_mixed_batch_counts_launched_agents_still_starting_after_their_claim_window(setup, monkeypatch):
+    from scripts import terminate_agent
+
+    fenced = hybrid(setup, monkeypatch)
+    fill_anton(setup)
+    monkeypatch.setattr(commands, "hive_id", lambda: "workstation")
+    monkeypatch.setattr(terminate_agent, "sessions", lambda: [])
+    write_hive(setup, id="workstation", ui="yes", excluded=[], max_agents=6)
+    local_agents(setup, 3, state="starting", pane_id="w:p")
+    selected = SimpleNamespace(hive="workstation", master_placement=None)
+    for name in ("root-1", "root-2"):
+        assert setup.launcher.reserve_room(SimpleNamespace(name=name, lane="eng", task={"id": name}), selected) == ""
+    setup.herdr._quota_accounts = []
+    assert fenced.spawn(setup.config, "eng", "over-1", {"id": "over-1", "seat": "eng-1@fixture"}) == (
+        "placed on the workstation"
+    )
+    with pytest.raises(SpawnError, match="the local machine runs 6 of its 6 agents"):
+        fenced.spawn(setup.config, "eng", "over-2", {"id": "over-2", "seat": "eng-2@fixture"})
+    third = SimpleNamespace(name="root-3", lane="eng", task={"id": "root-3"})
+    assert "runs 6 of its 6 agents" in setup.launcher.reserve_room(third, selected)
