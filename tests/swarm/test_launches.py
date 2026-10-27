@@ -109,7 +109,7 @@ def test_retire_pane_ends_the_recorded_launch_of_an_agent_with_no_pid_or_pane(tm
             if ended is None or ended.state == "Z":
                 break
             time.sleep(0.05)
-        assert harness not in processes() or processes()[harness].state == "Z"
+        assert ended is None or ended.state == "Z"
         assert not any(call[:2] == ["pane", "close"] for call in calls)
     finally:
         if child.poll() is None:
