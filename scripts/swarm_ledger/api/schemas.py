@@ -79,6 +79,9 @@ FIELDS = {
     "retext": "by item text",
     "gate_bypass": "by unhandled",
     "gate_lift": "by gate",
+    "brain_policy": "item mode brain",
+    "brain_learning": "by item binding learning proof",
+    "brain_emergency": "item binding expires reason",
     "priority": "by item text",
     "priority_clear": "by target reason",
     "notification_clear": "target",
@@ -152,6 +155,8 @@ TYPES = {
     "attachments": {"type": "array", "maxItems": 100, "items": {"type": "object"}},
 }
 KIND_TYPES = {
+    "brain_learning": {"binding": {"type": "object"}, "learning": {"type": "object"}},
+    "brain_emergency": {"binding": {"type": "object"}, "expires": {"type": "number"}},
     "artifact_add": {"plan": {"type": "boolean"}},
     "plan_add": {"artifact": {"type": "string", "maxLength": 100000}},
     "task_rank": {"if_owned": {"type": "boolean"}},
@@ -251,6 +256,8 @@ def target(op: dict) -> str:
         return op["path"].rsplit("/", 1)[0] if "/" in op["path"] else "metadata"
     if kind == "add_item":
         return op["list"]
+    if kind.startswith("brain_"):
+        return op["item"]
     if kind.startswith("task_"):
         return op.get("item", "tasks")
     if kind.startswith("phase_"):

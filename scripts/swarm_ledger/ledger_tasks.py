@@ -602,7 +602,9 @@ def _done_refusal(doc, op, after):
         return f"{op['item']} cannot be done without its proof: {', '.join(ledger_kinds.unmet(after))}"
     if ledger_kinds.kind(after) == "plan":
         return slice_refusal(op["item"], after, doc)
-    return None
+    from scripts.swarm_ledger import ledger_brain
+
+    return ledger_brain.completion(after)
 
 
 def _apply_update(task, after, changed, op, ctx):

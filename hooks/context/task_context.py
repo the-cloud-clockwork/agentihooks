@@ -60,7 +60,12 @@ def binding(swarm: str | None, task: str | None, environ=None) -> dict:
     from scripts.swarm_ledger.repository.folder import ledger_folder
 
     row = task_row(ledger_folder(os.environ if environ is None else environ), swarm, task)
-    return bind(task, row, project_cache.namespace().brain) if row else {}
+    if not row:
+        return {}
+    current = bind(task, row, project_cache.namespace().brain)
+    if row.get("brain_bypass"):
+        current["bypass"] = row["brain_bypass"]
+    return current
 
 
 def _consultation_path(session_id: str) -> Path:

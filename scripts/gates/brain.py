@@ -85,6 +85,10 @@ class BrainGate:
         from hooks.context import task_context
 
         current = task_context.binding(who.swarm, who.task, os.environ if self.environ is None else self.environ)
+        from scripts.swarm_ledger.ledger_brain import bypassed
+
+        if current and bypassed(current.get("bypass"), current, self.clock()):
+            return Decision()
         receipt = (self.receipts or task_context.consultation)(call.session)
         reason = check(receipt, current, self.clock()) if current else UNREADABLE
         return Decision.deny(REFUSAL.format(reason=reason, task=who.task)) if reason else Decision()

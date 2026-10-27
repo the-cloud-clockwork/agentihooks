@@ -170,3 +170,43 @@ def test_gat05_hook_bypasses_only_the_authenticated_current_record(fixture, monk
     gate.clock = lambda: 160
     assert not gate.decide(call, who, None).allowed
     assert not gate.matches(SimpleNamespace(tool="Read"))
+
+
+@pytest.mark.parametrize("principal", ["engineer", "operator", "master"])
+def test_gat05_authenticated_api_refuses_emergency_without_touching_repository(fixture, principal):
+    from scripts.swarm_ledger import ledger_authority, ledger_core
+    from scripts.swarm_ledger.api import mutations
+    from scripts.swarm_ledger.api.errors import APIError
+
+    doc, _, _, scope, _ = fixture
+    doc["_meta"]["warnings"] = []
+    before = copy.deepcopy(doc)
+    services = SimpleNamespace(
+        repository=SimpleNamespace(current=lambda _: SimpleNamespace(state=doc)),
+        ledger=SimpleNamespace(core=ledger_core, authority=ledger_authority),
+    )
+    op = operation("brain_emergency", scope, expires=160, reason="The operator approved bypass")
+    with pytest.raises(APIError):
+        mutations.apply(services, "swarm", principal, {"operation_id": "batch", "guards": {}, "ops": [op]})
+    assert doc == before
+
+
+def test_gat05_api_schema_and_domain_register_each_operation(fixture):
+    from scripts.swarm_ledger import ledger_core
+    from scripts.swarm_ledger.api import schemas
+
+    _, task, _, scope, _ = fixture
+    operations = [
+        {"op": "brain_policy", "id": "policy", "item": "tasks/work", "mode": "required", "brain": "swarm-brain"},
+        operation(
+            "brain_learning",
+            scope,
+            by="engineer",
+            proof=task["proof"],
+            learning={"kind": "no_new_learning", "content": "No novel lesson", "sources": []},
+        ),
+        {**operation("brain_emergency", scope, expires=160, reason="outage"), "id": "emergency"},
+    ]
+    payload = {"operation_id": "batch", "guards": {}, "ops": operations}
+    assert schemas.check_operations(payload, ledger_core, ("work",)) == operations
+    assert all(schemas.target(op) == "tasks/work" for op in operations)
