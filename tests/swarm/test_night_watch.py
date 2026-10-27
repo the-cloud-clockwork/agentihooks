@@ -353,6 +353,14 @@ def test_ready_work_all_waiting_on_the_local_agent_limit_raises_no_held_spawn(st
     assert rig.ledger.alerts == []
 
 
+def test_ready_work_all_waiting_on_hive_room_raises_no_held_spawn(store, monkeypatch):
+    rig = placed(store, monkeypatch)
+    reason = "no hive for eng has room: h1 max agents: 4 of 4"
+    logged(store, rig, {"t0": reason, "t1": reason})
+    assert kinds(store) == []
+    assert rig.ledger.alerts == []
+
+
 def test_ready_work_waiting_on_the_local_deployment_cap_raises_no_held_spawn(store, monkeypatch):
     rig = placed(store, monkeypatch)
     reason = ", and the local machine runs 6 of its 6 agents: max agents: 6 of 6"
