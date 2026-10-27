@@ -44,12 +44,19 @@ class Store:
         return SimpleNamespace(state=self.swarms[slug])
 
 
-def ports_for(hives, readings, here="", local=None, published=None):
+def ports_for(hives, readings, here="", local=None, published=None, reads=None):
     registry = SimpleNamespace(
-        hives=lambda redis: hives, live=lambda hive, now: hive["live"], key=lambda hive: f"hive:{hive}"
+        hives=lambda redis: hives if isinstance(redis, Redis) else [],
+        live=lambda hive, now: hive["live"],
+        key=lambda hive: f"hive:{hive}",
     )
-    headroom = SimpleNamespace(read=lambda redis, hive, now: readings.get(hive))
-    herdr_stats = SimpleNamespace(read=lambda redis, now: published, MASTER="master")
+    headroom = SimpleNamespace(read=lambda redis, hive, now: readings.get(hive) if isinstance(redis, Redis) else None)
+
+    def read(redis, now):
+        (reads if reads is not None else []).append((redis, now))
+        return published if isinstance(redis, Redis) else None
+
+    herdr_stats = SimpleNamespace(read=read, MASTER="master")
     hooks = SimpleNamespace(account_sessions=SimpleNamespace(local_processes=lambda: local or {}))
     swarm = SimpleNamespace(commands=SimpleNamespace(hive_id=lambda: here))
     return (
@@ -78,6 +85,38 @@ def test_a_pod_is_held_to_its_own_cpu_and_memory_limits():
 
 def test_load_over_the_core_count_reads_as_every_core_busy():
     assert monitor.capacity({**HOST, "load5": 40.0})[0] == 16
+
+
+def test_a_pod_without_a_load_reading_keeps_the_node_load_under_its_core_limit():
+    assert monitor.capacity({**HOST, "load5": 2.0, "pod_cpus": 4.0})[:2] == (2.0, 4.0)
+
+
+def test_a_pod_memory_limit_without_its_available_figure_keeps_the_node_memory():
+    assert monitor.capacity({**HOST, "pod_total_mb": 1000}) == (6.0, 16, 16000, 36000)
+
+
+def test_the_monitor_route_answers_get_with_the_services_it_was_given(monkeypatch):
+    from scripts.swarm_ledger.api import routes
+
+    services = object()
+    monkeypatch.setattr(monitor, "route", lambda given: {"data": given})
+    handler = SimpleNamespace(command="GET", path="/api/v1/monitor")
+    assert routes.global_resource(handler, services, ["monitor"]) == {"data": services}
+
+
+def test_more_memory_available_than_the_total_reads_as_none_in_use():
+    assert monitor.capacity({**HOST, "available_mb": 40000})[2] == 0
+
+
+def test_no_reading_gives_zero_cpu_and_memory():
+    data = viewed(Store({}), *ports_for([], {}))
+    assert (data["cpu"], data["memory"]) == ({"used": 0, "cores": 0}, {"used_mb": 0, "total_mb": 0})
+
+
+def test_cpu_figures_are_rounded_to_one_decimal():
+    reading = {**POD, "pod_cpus": 4.25, "pod_load": 1.234}
+    data = viewed(Store({}), *ports_for([POD_HIVE], {"pod": reading}))
+    assert data["cpu"] == {"used": 1.2, "cores": 4.2}
 
 
 ROOT = {"id": "root", "name": "root", "ui": "yes", "live": True}
@@ -116,10 +155,18 @@ def test_a_hive_without_a_fresh_reading_is_left_out_never_counted_as_zero():
 
 
 def test_a_hive_that_predates_the_agent_reading_falls_back_to_its_session_report():
-    sessions = {"pod": {"claude:a": 3, "codex:b": 1, "interactive:claude:a": 1, "_executions": {"codex:b": ["x"]}}}
+    sessions = {
+        "pod": {
+            "claude:a": 3,
+            "claude:b": 2,
+            "codex:b": 1,
+            "interactive:claude:a": 1,
+            "_executions": {"codex:b": ["x"]},
+        }
+    }
     data = viewed(Store({}, sessions), *ports_for([POD_HIVE], {"pod": HOST}))
-    assert data["agents"] == {"total": 4, "source": "hives", "reporting": 1, "of": 1, "claude": 3, "codex": 1}
-    assert data["hives"] == {"live": 1, "measured": 1, "rows": [{"name": "swarm-hive-001", "agents": 4}]}
+    assert data["agents"] == {"total": 6, "source": "hives", "reporting": 1, "of": 1, "claude": 5, "codex": 1}
+    assert data["hives"] == {"live": 1, "measured": 1, "rows": [{"name": "swarm-hive-001", "agents": 6}]}
 
 
 def test_an_unreachable_store_answers_503():
@@ -128,7 +175,11 @@ def test_an_unreachable_store_answers_503():
     services = SimpleNamespace(swarm=SimpleNamespace(store=mock.Mock(side_effect=RedisError("down"))))
     with pytest.raises(APIError) as caught:
         monitor.route(services)
-    assert caught.value.status == 503
+    assert (caught.value.status, caught.value.code, str(caught.value)) == (
+        503,
+        "storage_error",
+        "The swarm store is unreachable",
+    )
 
 
 def test_agents_are_the_panes_the_master_herdr_client_published_for_itself_and_its_machines():
@@ -145,3 +196,37 @@ def test_agents_are_the_panes_the_master_herdr_client_published_for_itself_and_i
         {"name": "hive-1", "agents": 14},
         {"name": "hive-2", "agents": None},
     ]
+
+
+def test_a_hive_reading_without_a_harness_counts_it_as_zero():
+    data = viewed(Store({}), *ports_for([POD_HIVE], {"pod": {**POD, "agents": {"claude": 4}}}))
+    assert data["agents"] == {"total": 4, "source": "hives", "reporting": 1, "of": 1, "claude": 4, "codex": 0}
+    assert data["hives"]["rows"] == [{"name": "swarm-hive-001", "agents": 4}]
+
+
+def test_a_published_machine_without_a_harness_counts_it_as_zero():
+    published = {"machines": {"master": {"claude": 2}}, "silent": [], "measured_at": NOW}
+    data = viewed(Store({}), *ports_for([], {}, published=published))
+    assert data["agents"] == {"total": 2, "source": "herdr", "reporting": 1, "of": 1, "claude": 2, "codex": 0}
+
+
+def test_the_bridge_is_read_from_the_store_redis_at_the_request_time():
+    store, reads = Store({}), []
+    viewed(store, *ports_for([], {}, reads=reads))
+    assert reads == [(store.redis, NOW)]
+
+
+def test_route_reads_the_view_at_the_current_millisecond(monkeypatch):
+    seen = []
+    monkeypatch.setattr(monitor.time, "time", lambda: 1234.5)
+    monkeypatch.setattr(monitor, "view", lambda store, now_ms: seen.append((store, now_ms)) or {"agents": 1})
+    reply = monitor.route(SimpleNamespace(swarm=SimpleNamespace(store=lambda: "store")))
+    assert seen == [("store", 1_234_500)]
+    assert reply == {"data": {"agents": 1}, "revision": monitor.resources.revision({"agents": 1})}
+
+
+def test_a_swarm_store_error_answers_503_storage_error():
+    services = SimpleNamespace(swarm=SimpleNamespace(store=mock.Mock(side_effect=monitor.SwarmError("no store"))))
+    with pytest.raises(APIError) as caught:
+        monitor.route(services)
+    assert (caught.value.status, caught.value.code, str(caught.value)) == (503, "storage_error", "no store")

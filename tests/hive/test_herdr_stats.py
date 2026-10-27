@@ -82,6 +82,10 @@ def test_a_machine_that_does_not_answer_is_named_silent_never_counted_as_zero(he
     assert measured == {"machines": {"master": {"claude": 1, "codex": 0}}, "silent": ["hive-1", "hive-2"]}
 
 
+def test_a_listing_without_panes_counts_no_agents():
+    assert herdr_stats.agent_panes({"result": {}}) == {"claude": 0, "codex": 0}
+
+
 def test_a_client_without_saved_machines_counts_itself(herdr):
     herdr({("machine", "list", "--json"): None, ("pane", "list"): listing("codex")})
     assert herdr_stats.measure("/bin/herdr") == {"machines": {"master": {"claude": 0, "codex": 1}}, "silent": []}
@@ -103,3 +107,30 @@ def test_publish_writes_nothing_where_herdr_is_not_installed(redis, monkeypatch)
     monkeypatch.setattr(herdr_stats.shutil, "which", lambda name: None)
     herdr_stats.publish(redis, 5_000)
     assert redis.get(herdr_stats.KEY) is None
+
+
+def test_publish_finds_the_herdr_binary_by_its_name(redis, monkeypatch):
+    binaries = []
+
+    def run(argv, **kwargs):
+        binaries.append(argv[0])
+        answer = [] if argv[1:] == ["machine", "list", "--json"] else listing("codex")
+        return SimpleNamespace(returncode=0, stdout=json.dumps(answer))
+
+    monkeypatch.setattr(herdr_stats.subprocess, "run", run)
+    monkeypatch.setattr(herdr_stats.shutil, "which", lambda name: "/opt/herdr" if name == "herdr" else None)
+    herdr_stats.publish(redis, 5_000)
+    assert herdr_stats.read(redis, 5_000)["machines"] == {"master": {"claude": 0, "codex": 1}}
+    assert binaries == ["/opt/herdr", "/opt/herdr"]
+
+
+def test_herdr_runs_with_its_output_captured_as_text_inside_the_timeout(monkeypatch):
+    seen = {}
+
+    def run(argv, **kwargs):
+        seen.update(kwargs)
+        return SimpleNamespace(returncode=0, stdout="[]")
+
+    monkeypatch.setattr(herdr_stats.subprocess, "run", run)
+    assert herdr_stats.herdr("/bin/herdr", "machine", "list", "--json") == []
+    assert seen == {"capture_output": True, "text": True, "timeout": herdr_stats.TIMEOUT_S, "check": False}

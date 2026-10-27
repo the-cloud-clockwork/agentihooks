@@ -42,7 +42,7 @@ def measure(binary: str) -> dict:
     saved = herdr(binary, "machine", "list", "--json")
     labels = [machine["label"] for machine in saved if machine.get("enabled")] if isinstance(saved, list) else []
     targets = [(MASTER, ()), *((label, ("--machine", label)) for label in labels)]
-    with ThreadPoolExecutor(max_workers=len(targets)) as pool:
+    with ThreadPoolExecutor() as pool:
         counted = list(pool.map(lambda target: agent_panes(herdr(binary, *target[1], "pane", "list")), targets))
     machines = {name: counts for (name, _), counts in zip(targets, counted) if counts is not None}
     return {"machines": machines, "silent": [name for (name, _), counts in zip(targets, counted) if counts is None]}
