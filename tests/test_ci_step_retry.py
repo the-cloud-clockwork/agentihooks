@@ -255,7 +255,9 @@ def test_a_path_matching_nothing_ends_before_any_attempt(tmp_path, mode, code, s
         ({"work/empty/": None}, "empty/\n", "true", False),
         ({"coverage-baseline/baseline.json": "x"}, "~/coverage-baseline\n", "false", True),
         ({"work/reports/deep/report.txt": "x"}, "reports/**/*.txt\n", "false", True),
-        ({"work/cov/skip.txt": "x"}, "cov/*\n!cov/skip.txt\n", "false", True),
+        ({"work/cov/skip.txt": "x"}, "cov/*\n!cov/skip.txt\n", "false", False),
+        ({"work/cov/skip.txt": "x", "work/cov/kept.txt": "x"}, "cov/*\n!cov/skip.txt\n", "false", True),
+        ({}, "nope/*\n!nope/skip.txt\n", "false", False),
         ({"work/empty/": None}, "empty/*\n", "true", False),
     ],
     ids=[
@@ -268,6 +270,8 @@ def test_a_path_matching_nothing_ends_before_any_attempt(tmp_path, mode, code, s
         "home",
         "deep",
         "exclusion",
+        "exclusion-partial",
+        "exclusion-nothing",
         "dot-entries",
     ],
 )
