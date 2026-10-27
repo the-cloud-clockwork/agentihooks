@@ -23,17 +23,7 @@ UNIT = {DURATION_JOB, "split", "unit", "shard-check", "test-count", "gate-requir
 QUEUE = UNIT | {"queue-fail-fast"}
 PULL_REQUEST = (
     UNIT
-    | {
-        "select",
-        "lint",
-        "semgrep",
-        "sonar",
-        "mutation-plan",
-        "mutation-stats",
-        "mutation",
-        "writer-lock",
-        "install-smoke",
-    }
+    | {"select", "lint", "semgrep", "sonar", "mutation-plan", "mutation-stats", "mutation", "writer-lock"}
     | ({"docs"} if "docs" in yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())["jobs"] else set())
 )
 SELECTED = PULL_REQUEST - {"split", "unit", "shard-check"} | {"unit-selected"}

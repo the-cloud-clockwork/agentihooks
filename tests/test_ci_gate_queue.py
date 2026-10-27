@@ -27,7 +27,6 @@ def complete():
         "worker-image",
         "brain-smoke",
         "writer-lock",
-        "install-smoke",
         "kind-due",
         "helm-kind",
         "semgrep",
@@ -160,6 +159,12 @@ def test_only_the_reviewed_pair_of_event_names_and_canonical_watcher_normalizes(
     changed["test.yml"]["jobs"]["gate-required"]["name"] = "other"
     with pytest.raises(ValueError):
         ci_gate_queue.normalize(changed)
+    announced = copy.deepcopy(workflow)
+    announced["test.yml"]["jobs"]["gate-required"]["needs"].append("install-smoke")
+    ci_gate_queue.normalize(announced)
+    announced["test.yml"]["jobs"]["gate-required"]["needs"].append("unannounced")
+    with pytest.raises(ValueError):
+        ci_gate_queue.normalize(announced)
 
 
 def test_the_early_watcher_binds_the_plan_and_uses_protected_code_and_app_quota():

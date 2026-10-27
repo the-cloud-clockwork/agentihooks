@@ -29,7 +29,6 @@ PULL_REQUEST = UNIT | {
     "mutation-stats",
     "mutation",
     "writer-lock",
-    "install-smoke",
 }
 SELECTED = PULL_REQUEST - {"split", "unit", "shard-check"} | {"unit-selected"}
 UNSELECTED = PULL_REQUEST - {"split", "unit", "shard-check"}

@@ -66,7 +66,6 @@
   "test.yml/docs": "standard",
   "test.yml/flake-budget": "light",
   "test.yml/gate-required": "light",
-  "test.yml/install-smoke": "light",
   "test.yml/kind-due": "standard",
   "test.yml/lint": "standard",
   "test.yml/mutation": "batch",
