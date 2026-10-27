@@ -114,22 +114,3 @@ def test_root_hive_room_includes_pending_claims_before_any_process_exists(setup,
     assert hives["workstation"]["agents"] == 0
     assert hives["workstation"]["room"] == 0
     assert hives["remote"]["room"] == 3
-
-
-def test_stored_workers_count_local_agents_recorded_on_the_named_machine_from_another_host(monkeypatch):
-    from scripts.swarm import commands
-
-    monkeypatch.setattr(commands, "hive_id", lambda: "hive-a")
-    rows = [
-        AgentRecord("unhived", "eng", "t"),
-        AgentRecord("root", "ci", "t", hive="root"),
-        AgentRecord("here", "eng", "t", hive="hive-a"),
-        AgentRecord("master", "master", "t"),
-        AgentRecord("starting", "eng", "t", state="starting"),
-        AgentRecord("finished", "eng", "t", state="finished"),
-        AgentRecord("ended", "eng", "t", state="ended"),
-        AgentRecord("pod", "eng", "t", runtime_backend="kubernetes"),
-    ]
-    store = SimpleNamespace(slugs=lambda: ["s"], agents=lambda slug: rows if slug == "s" else [])
-    assert local_slots.stored(store, "root") == 2
-    assert local_slots.stored(store, "hive-a") == 2

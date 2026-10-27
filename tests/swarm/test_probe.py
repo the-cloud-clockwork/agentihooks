@@ -5,6 +5,7 @@ import pytest
 
 from scripts.swarm import probe
 from scripts.swarm.probe import HOUR_MS, MINUTE_MS, Probe, Thresholds
+from scripts.swarm.store import AgentRecord
 
 NOW = 100 * HOUR_MS
 LIMITS = Thresholds()
@@ -12,7 +13,6 @@ LIMITS = Thresholds()
 
 def test_thresholds_live_in_one_typed_config():
     assert probe.THRESHOLDS == Thresholds(6 * HOUR_MS, 0.9, 3, 12.0, HOUR_MS, 24 * HOUR_MS)
-    assert (HOUR_MS, MINUTE_MS) == (3_600_000, 60_000)
 
 
 def test_a_probe_line_says_pass_or_fail_then_its_name_and_number():
@@ -20,26 +20,28 @@ def test_a_probe_line_says_pass_or_fail_then_its_name_and_number():
     assert Probe("release age", False, "30.0 hours").line() == "fail\trelease age\t30.0 hours"
 
 
-def test_every_hive_live_names_the_stale_hives():
+def test_every_hive_live_names_the_stale_hives_and_fails_with_none_registered():
     fresh = {"id": "root", "heartbeat_at": NOW - 1000}
     stale = {"id": "pod", "heartbeat_at": NOW - 90_001}
     never = {"id": "new", "heartbeat_at": 0}
     assert probe.hives([fresh], NOW) == Probe("every hive live", True, "1 of 1 live")
     assert probe.hives([fresh, stale, never], NOW) == Probe("every hive live", False, "1 of 3 live: pod, new")
-    assert probe.hives([], NOW) == Probe("every hive live", True, "0 of 0 live")
+    assert probe.hives([], NOW) == Probe("every hive live", False, "0 of 0 live")
 
 
-def report(agent, **checks):
-    return {"agent": agent, "checks": {"ledger_join": True, "ledger_write": True, **checks}}
+def report(**checks):
+    return {"checks": {"ledger_join": True, "ledger_write": True, **checks}}
 
 
 def test_every_hive_agent_must_pass_ledger_join_and_ledger_write():
     name = "every hive agent joins and writes the ledger"
-    assert probe.hive_joins([report("a"), report("b")]) == Probe(name, True, "2 of 2 passed")
-    found = probe.hive_joins([report("a"), report("b", ledger_join=False), report("c", ledger_write="yes")])
+    assert probe.hive_joins({"a": report(), "b": report()}) == Probe(name, True, "2 of 2 passed")
+    found = probe.hive_joins({"a": report(), "b": report(ledger_join=False), "c": report(ledger_write="yes")})
     assert found == Probe(name, False, "1 of 3 passed: b, c")
-    assert probe.hive_joins([{"agent": "d", "checks": {"ledger_join": True}}]) == Probe(name, False, "0 of 1 passed: d")
-    assert probe.hive_joins([]) == Probe(name, True, "0 of 0 passed")
+    assert probe.hive_joins({"d": {"checks": {"ledger_join": True}}, "e": {}}) == Probe(
+        name, False, "0 of 2 passed: d, e"
+    )
+    assert probe.hive_joins({}) == Probe(name, True, "0 of 0 passed")
 
 
 def test_placements_name_each_agent_hive_and_harness():
@@ -111,6 +113,8 @@ def test_merge_queue_groups_move_when_dev_merged_inside_the_stall_window():
     assert probe.merge_queue(moving, LIMITS) == Probe(name, True, "3 queued, last merge 59 minutes ago")
     stuck = {"queue": 2, "merged": NOW - HOUR_MS, "at": NOW}
     assert probe.merge_queue(stuck, LIMITS) == Probe(name, False, "2 queued, last merge 60 minutes ago")
+    unseen = {"queue": 4, "merged": 0, "at": NOW}
+    assert probe.merge_queue(unseen, LIMITS) == Probe(name, False, "4 queued, no merge observed")
 
 
 def test_release_age_passes_at_or_under_the_maximum():
@@ -144,9 +148,17 @@ class Store:
         return f"{slug}:{name}"
 
     def agents(self, slug):
-        from scripts.swarm.store import AgentRecord
-
-        return [AgentRecord("new", "eng", "t", harness="claude", hive="root")] if slug == "s" else []
+        rows = [
+            AgentRecord("new", "eng", "t", harness="claude", hive="root"),
+            AgentRecord("here", "eng", "t"),
+            AgentRecord("h1", "eng", "t", hive="pod"),
+            AgentRecord("h2", "eng", "t", hive="pod"),
+            AgentRecord("h3", "ci", "t", hive="pod"),
+            AgentRecord("h4", "eng", "t", hive="pod", state="starting"),
+            AgentRecord("h5", "eng", "t", hive="pod", state="ended"),
+            AgentRecord("h6", "eng", "t", hive="pod", state="finished"),
+        ]
+        return rows if slug == "s" else []
 
     def launches(self, slug):
         return [launch("old", "failed"), launch("new", "started")] if slug == "s" else []
@@ -163,18 +175,13 @@ def live(monkeypatch):
         {"id": "pod", "heartbeat_at": NOW},
         {"id": "gone", "heartbeat_at": 0},
     ]
-    reports = {
-        "root": [{**report("a"), "slug": "s"}, {**report("b", ledger_write=False), "slug": "other"}],
-        "pod": [{**report("c", ledger_join=False), "slug": "s"}],
-        "gone": [{**report("d", ledger_join=False), "slug": "s"}],
-    }
+    reports = {"h1": report(), "h2": report(ledger_join=False), "new": report(), "here": report()}
     ticks = iter([0.0, 10.0])
     monkeypatch.setattr(registry, "hives", lambda redis: records)
     monkeypatch.setattr(registry, "show", lambda redis, hive: {"max_agents": 6} if hive == "root" else None)
-    monkeypatch.setattr(join_report, "live", lambda redis, hive: reports[hive])
-    monkeypatch.setattr(commands, "hive_id", lambda: "pod")
-    monkeypatch.setattr(local_slots, "stored", lambda store, machine: {"root": 5}[machine])
-    monkeypatch.setattr(local_slots, "occupancy", lambda store, machine: ({"root": 7}[machine], 0))
+    monkeypatch.setattr(join_report, "read", lambda redis, agent: reports.get(agent.name, {}))
+    monkeypatch.setattr(commands, "hive_id", lambda: "root")
+    monkeypatch.setattr(local_slots, "occupancy", lambda store, machine: ({"root": 5}[machine], 0))
     monkeypatch.setattr(publish, "local_repository", lambda value, repo: f"/here/{value == repo}")
     monkeypatch.setattr(
         merge_stall,
@@ -195,7 +202,7 @@ def live(monkeypatch):
 def test_run_reads_the_live_swarm_into_one_line_per_invariant(live):
     assert [found.line() for found in probe.run(Store(), "s", live, NOW)] == [
         "fail\tevery hive live\t2 of 3 live: gone",
-        "fail\tevery hive agent joins and writes the ledger\t1 of 2 passed: c",
+        "fail\tevery hive agent joins and writes the ledger\t1 of 3 passed: h2, h3",
         "fail\tlaunch success hive pod harness codex\t0%, 0 of 1 started in the last 6 hours",
         "pass\tlaunch success hive root harness claude\t100%, 1 of 1 started in the last 6 hours",
         "pass\tfull task list reads per minute\t18.0 per minute over 3 reads",
@@ -205,20 +212,26 @@ def test_run_reads_the_live_swarm_into_one_line_per_invariant(live):
     ]
 
 
-def test_run_on_the_root_hive_counts_with_the_tick_occupancy(live, monkeypatch):
-    from scripts.swarm import commands
+def test_run_counts_root_agents_only_on_the_root_hive(live, monkeypatch):
+    from scripts.swarm import commands, local_slots
 
-    monkeypatch.setattr(commands, "hive_id", lambda: "root")
+    monkeypatch.setattr(local_slots, "occupancy", lambda store, machine: ({"root": 7}[machine], 0))
     found = probe.run(Store(), "s", live, NOW, Thresholds(task_list_reads_min=20.0))
     assert found[4] == Probe("full task list reads per minute", False, "18.0 per minute over 3 reads")
     assert found[5] == Probe(
         "workstation agents at or under the root cap", False, "7 running, root cap 6, swarm local limit 20"
     )
+    monkeypatch.setattr(commands, "hive_id", lambda: "pod")
+    assert probe.run(Store(), "s", live, NOW)[5] == Probe(
+        "workstation agents at or under the root cap",
+        False,
+        "unread: SwarmError: counted only on the root hive, this host is pod",
+    )
 
 
 def test_run_reports_each_unreadable_invariant_as_a_fail(monkeypatch):
     from scripts.hive import registry
-    from scripts.swarm import publish
+    from scripts.swarm import commands, publish
 
     def refused(*_args):
         raise RuntimeError("down")
@@ -226,10 +239,12 @@ def test_run_reports_each_unreadable_invariant_as_a_fail(monkeypatch):
     monkeypatch.setattr(registry, "hives", refused)
     monkeypatch.setattr(registry, "show", refused)
     monkeypatch.setattr(publish, "local_repository", refused)
+    monkeypatch.setattr(commands, "hive_id", lambda: "root")
     store = SimpleNamespace(
         config=lambda slug: SimpleNamespace(repo="r", local_max_agents=1),
         redis=SimpleNamespace(lrange=refused),
         key=lambda slug, name: name,
+        agents=refused,
     )
     ledger = SimpleNamespace(tasks=refused)
     assert [found.line() for found in probe.run(store, "s", ledger, NOW)] == [

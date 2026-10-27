@@ -5629,16 +5629,16 @@ writers above or `task set`.
 
 | Invariant | Pass when |
 |---|---|
-| every hive live | every registered hive heartbeat is fresh |
-| every hive agent joins and writes the ledger | each live hive agent's join report passed ledger join and ledger write |
-| launch success hive H harness N | started launches over started and failed ones in the window reach the minimum rate |
+| every hive live | at least one hive is registered and every registered hive heartbeat is fresh |
+| every hive agent joins and writes the ledger | each running agent of the swarm placed on a hive other than `root` has a join report that passed ledger join and ledger write |
+| launch success hive H harness N | started launches over started and failed ones in the window reach the minimum rate; a window with no launches passes as `launch success` and says so |
 | full task list reads per minute | timed full task list reads from the swarm's ledger reach the minimum rate |
-| workstation agents at or under the root cap | running workstation workers fit the `root` hive's max agents; the swarm local limit is shown beside it |
-| merge queue groups moving | the dev merge queue is empty or merged inside the stall window |
+| workstation agents at or under the root cap | the tick's whole machine worker count fits the `root` hive's max agents; the swarm local limit is shown beside it. Counted only when the probe runs on `root` |
+| merge queue groups moving | the dev merge queue is empty or merged inside the stall window; a queue with no merge observed fails |
 | release age | the latest GitHub release is no older than the maximum |
 
 Thresholds live in `scripts.swarm.probe.Thresholds`. A reader that fails prints `fail` with `unread:` and the
-error.
+error. The command exits zero whatever the lines say.
 
 ## Agent status comments
 

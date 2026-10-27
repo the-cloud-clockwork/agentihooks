@@ -24,10 +24,6 @@ def occupancy(store: RedisStore, machine: str) -> tuple[int, int]:
     return running, len(held)
 
 
-def stored(store: RedisStore, machine: str) -> int:
-    return sum(_local_worker(agent, machine) for _, agent in _records(store).values())
-
-
 def maximum(store: RedisStore, slug: str, ceiling: int) -> int:
     from scripts.hive import registry
     from scripts.swarm.commands import hive_id
@@ -97,12 +93,12 @@ def _pending(record, own: str | None, age: int) -> bool:
     return age < PENDING_MS and (record is None or (record[0] != own and record[1].state == STARTING))
 
 
-def _local_worker(agent, machine: str = "") -> bool:
+def _local_worker(agent) -> bool:
     from scripts.swarm.commands import hive_id
 
     return (
         agent.runtime_backend == LOCAL
-        and agent.hive in ("", machine or hive_id())
+        and agent.hive in ("", hive_id())
         and agent.lane != "master"
         and agent.state not in (STARTING, "finished", "ended")
     )

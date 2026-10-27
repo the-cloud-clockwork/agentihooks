@@ -3,6 +3,13 @@ import time
 from collections import Counter
 from collections.abc import Callable
 from dataclasses import asdict, dataclass
+from typing import TYPE_CHECKING
+
+from scripts.swarm.store import SwarmError
+
+if TYPE_CHECKING:
+    from scripts.swarm.ledger_client import LedgerClient
+    from scripts.swarm.store import RedisStore
 
 HOUR_MS = 3_600_000
 MINUTE_MS = 60_000
@@ -45,12 +52,18 @@ def hives(records: list[dict], now_ms: int) -> Probe:
     from scripts.hive import registry
 
     stale = [record["id"] for record in records if not registry.live(record, now_ms)]
-    return Probe("every hive live", not stale, f"{len(records) - len(stale)} of {len(records)} live{_named(stale)}")
+    return Probe(
+        "every hive live",
+        bool(records) and not stale,
+        f"{len(records) - len(stale)} of {len(records)} live{_named(stale)}",
+    )
 
 
-def hive_joins(reports: list[dict]) -> Probe:
+def hive_joins(reports: dict[str, dict]) -> Probe:
     failed = [
-        report["agent"] for report in reports if not all(report["checks"].get(check) is True for check in LEDGER_CHECKS)
+        agent
+        for agent, report in reports.items()
+        if not all(report.get("checks", {}).get(check) is True for check in LEDGER_CHECKS)
     ]
     passed = len(reports) - len(failed)
     return Probe(
@@ -112,6 +125,8 @@ def workstation(running: int, cap: int, local: int) -> Probe:
 def merge_queue(observed: dict, limits: Thresholds) -> Probe:
     if not observed["queue"]:
         return Probe("merge queue groups moving", True, "queue empty")
+    if not observed["merged"]:
+        return Probe("merge queue groups moving", False, f"{observed['queue']} queued, no merge observed")
     idle = observed["at"] - observed["merged"]
     return Probe(
         "merge queue groups moving",
@@ -132,7 +147,9 @@ def guarded(name: str, read: Callable[[], list[Probe]]) -> list[Probe]:
         return [Probe(name, False, f"unread: {type(exc).__name__}: {exc}")]
 
 
-def run(store, slug: str, ledger, now_ms: int, limits: Thresholds = THRESHOLDS) -> list[Probe]:
+def run(
+    store: "RedisStore", slug: str, ledger: "LedgerClient", now_ms: int, limits: Thresholds = THRESHOLDS
+) -> list[Probe]:
     from scripts.hive import join_report, registry
     from scripts.swarm import local_slots
     from scripts.swarm.commands import hive_id
@@ -145,9 +162,12 @@ def run(store, slug: str, ledger, now_ms: int, limits: Thresholds = THRESHOLDS) 
         return local_repository(config.repo, config.repo)
 
     def joined() -> list[Probe]:
-        live = [record["id"] for record in registry.hives(store.redis) if registry.live(record, now_ms)]
-        reports = [report for hive in live for report in join_report.live(store.redis, hive)]
-        return [hive_joins([report for report in reports if report["slug"] == slug])]
+        placed = [
+            agent
+            for agent in store.agents(slug)
+            if agent.hive not in ("", ROOT) and agent.state not in (*join_report.ENDED, local_slots.STARTING)
+        ]
+        return [hive_joins({agent.name: join_report.read(store.redis, agent) for agent in placed})]
 
     def launched() -> list[Probe]:
         history = [json.loads(raw) for raw in store.redis.lrange(store.key(slug, "history"), 0, -1)]
@@ -155,9 +175,11 @@ def run(store, slug: str, ledger, now_ms: int, limits: Thresholds = THRESHOLDS) 
         return launches(store.launches(slug), placements(agents), now_ms, limits)
 
     def room() -> list[Probe]:
+        here = hive_id()
+        if here != ROOT:
+            raise SwarmError(f"counted only on the {ROOT} hive, this host is {here}")
         cap = registry.show(store.redis, ROOT)["max_agents"]
-        running = local_slots.occupancy(store, ROOT)[0] if hive_id() == ROOT else local_slots.stored(store, ROOT)
-        return [workstation(running, cap, config.local_max_agents)]
+        return [workstation(local_slots.occupancy(store, ROOT)[0], cap, config.local_max_agents)]
 
     def released() -> list[Probe]:
         latest = merge_stall.request(str(repo()), RELEASE)
