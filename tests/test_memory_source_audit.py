@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from hooks.memory import source_audit as audit
-from hooks.memory.api.ingest import Rejected
+from hooks.memory.api.ingest import Rejected, digest
 from tests import sv2_mig02_cases as cases
 
 pytestmark = pytest.mark.unit
@@ -177,6 +177,62 @@ def test_vectors_match_the_first_turn_with_a_shared_prefix_and_report_in_chunk_o
     assert found["vectors"]["turns_without_vector"] == 1
 
 
+def test_raw_entries_join_text_blocks_count_every_torn_line_and_read_past_it():
+    data = (
+        b"{torn\n"
+        + raw(
+            {
+                "type": "assistant",
+                "uuid": "a",
+                "message": {"content": [{"type": "text", "text": "a"}, {"type": "text", "text": "b"}]},
+            }
+        )
+        + b"{torn again\n"
+    )
+    entries, unparsed = audit.raw_entries(data)
+    assert [entry["content"] for entry in entries] == ["a\nb"]
+    assert unparsed == 2
+
+
+def test_turns_list_every_tool_name():
+    entries, _ = audit.raw_entries(raw(user("u", "a"), assistant("a", "b", "Read", "Bash")))
+    assert audit.turns(entries) == ["User: a\nAssistant: b\nTools used: Read, Bash\n"]
+
+
+def test_preview_and_vector_counts_read_past_unmatched_rows_and_add_up():
+    lines = [user("u0", "123456"), user("u1", "abcdef"), user("u2", "zzzzzz")]
+    items = [preview("zz", "other"), preview("u0", "xxxxx"), preview("u1", "yyyyy"), preview("u2", "zzzzz")]
+    rows = [vector(0, "User: gone\n"), vector(1, "User: lost\n"), vector(2, "User: zzzzzz")]
+    found = audit.audit_source({"source": "s", "raw": raw(*lines), "preview": items, "vectors": rows}, SMALL)
+    assert (found["preview"]["capped"], found["preview"]["diverged"]) == (1, 2)
+    assert found["vectors"]["orphans"] == 2
+    assert found["vectors"]["turns_without_vector"] == 2
+
+
+def test_an_observation_may_carry_every_field():
+    data = raw(user("u", "x"))
+    full = {
+        "source": "s",
+        "raw": data,
+        "raw_sha256": hashlib.sha256(data).hexdigest(),
+        "preview": [preview("u", "x")],
+        "vectors": [vector(0, "User: x\n")],
+    }
+    assert audit.audit_source(full)["class"] == audit.FULL_RAW
+
+
+def test_source_hashes_use_the_canonical_digest():
+    items, rows = [preview("u", "café")], [vector(0, "x")]
+    found = audit.audit_source({"source": "s", "preview": items, "vectors": rows})
+    assert (found["preview_sha256"], found["vectors_sha256"]) == (digest(items), digest(rows))
+
+
+def test_an_audit_uses_its_own_limits():
+    held = audit.SourceAudit(limits=SMALL)
+    held.run([{"source": "p", "preview": [preview("u", "12345")]}], 1)
+    assert held.state["sources"]["p"]["preview"]["possibly_capped"] == 1
+
+
 def test_legacy_limits_default_to_the_retired_service_caps():
     assert audit.LegacyLimits() == audit.LegacyLimits(preview_chars=500, preview_entries=500, vector_chars=1000)
 
@@ -246,7 +302,7 @@ def test_a_stale_revision_is_refused_before_any_write():
     assert rejected(lambda: held.run(late, 4)).error_class == "stale_revision"
     assert held.dumps() == before
     assert held.run(late, 5)["p"]["outcome"] == "updated"
-    assert held.state["sources"]["p"]["preview_sha256"] == audit._json_sha([preview("u", "d")])
+    assert held.state["sources"]["p"]["preview_sha256"] == digest([preview("u", "d")])
     assert held.state["revision"] == 5
 
 

@@ -5,7 +5,7 @@ import hashlib
 import json
 from dataclasses import dataclass
 
-from hooks.memory.api.ingest import Rejected
+from hooks.memory.api.ingest import Rejected, digest
 
 FULL_RAW, PREVIEW_ONLY, VECTOR_ONLY, MISSING = "full_raw", "preview_only", "vector_only", "missing"
 CLASSES = (MISSING, VECTOR_ONLY, PREVIEW_ONLY, FULL_RAW)
@@ -33,10 +33,6 @@ class LegacyLimits:
 
 def _sha(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
-
-
-def _json_sha(value: object) -> str:
-    return _sha(json.dumps(value, sort_keys=True, ensure_ascii=False).encode())
 
 
 def _content(entry: dict) -> tuple[str, list[str]]:
@@ -104,7 +100,7 @@ def _gaps(entries: list[dict], preview: list[dict], limits: LegacyLimits) -> lis
     head = "trimmed_head" if len(preview) >= limits.preview_entries else "missing_head"
     found = []
     for start, end in _ranges(absent):
-        cause = head if end < first else "uncollected_tail" if start > last else "incremental_offset_gap"
+        cause = head if end + 1 == first else "uncollected_tail" if start - 1 == last else "incremental_offset_gap"
         found.append({"start": start, "end": end, "cause": cause})
     return found
 
@@ -183,8 +179,8 @@ def audit_source(observation: object, limits: LegacyLimits = LegacyLimits()) -> 
         "class": found,
         "confidence": CONFIDENCE[found],
         "raw_sha256": _sha(raw) if raw is not None else None,
-        "preview_sha256": _json_sha(preview) if preview else None,
-        "vectors_sha256": _json_sha(vectors) if vectors else None,
+        "preview_sha256": digest(preview) if preview else None,
+        "vectors_sha256": digest(vectors) if vectors else None,
     }
     if raw is None:
         result["preview"] = _unanchored_preview(preview or [], limits)

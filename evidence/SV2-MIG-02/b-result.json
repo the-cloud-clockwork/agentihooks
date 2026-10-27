@@ -91,7 +91,7 @@
           ],
           "preview_entries": 4
         },
-        "preview_sha256": "ffeef96a916f098a8fe24ecb21771454039aae9a62eb066c8674153fb8a58b99",
+        "preview_sha256": "9bbed3c4aee3113fc8707051b75e71281b6ee336abad83064c45b5928db3cf7a",
         "raw": {
           "entries": 6,
           "turns": 3,
@@ -110,7 +110,7 @@
           "turns_without_vector": 1,
           "vector_rows": 3
         },
-        "vectors_sha256": "d0e7b1aa705f70712c0bc65290d92261c6c049da48a6741fa84d45ef082cdbf7"
+        "vectors_sha256": "5a83b712907ab1259b105f66a24213599ca14b95721c3ccd0e657d9c106f6939"
       },
       {
         "class": "preview_only",
@@ -121,7 +121,7 @@
           "possibly_trimmed": false,
           "preview_entries": 4
         },
-        "preview_sha256": "bb131daeccd1b9f072eeb4e163be89b3cf549178113d9db28536c7662c2d9f1f",
+        "preview_sha256": "18b917fc2ce6b0ecc7065944837e86c61e4301aa0c3347878914d9cc2b99c389",
         "raw_sha256": null,
         "source": "beta",
         "vectors": {
@@ -164,7 +164,7 @@
           "preview_chars": 1000,
           "vector_rows": 2
         },
-        "vectors_sha256": "ad901b30f1a66a0896d91d51e2e721d2648b83e224afbbe1bcc0e480ec3ada9c"
+        "vectors_sha256": "9c666bfd728e32c23ee51871b69aac45f46c82cb4b8fde23e71f8edd28c8fca3"
       }
     ],
     "vector_only": [
