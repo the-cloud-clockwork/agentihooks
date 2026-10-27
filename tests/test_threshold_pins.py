@@ -95,6 +95,8 @@ def test_a_removed_gate_or_constant_is_red(tmp_path):
         'import sys\nsys.modules[__name__].__setattr__("LINES", 400)\n',
         "match 400:\n    case LINES:\n        pass\n",
         "match [400]:\n    case [*LINES]:\n        pass\n",
+        'match {"a": 1}:\n    case {**LINES}:\n        pass\n',
+        "import sys\nsys.modules[__name__].__dict__.update(LINES=400)\n",
     ],
 )
 def test_a_second_binding_or_mutation_of_a_pinned_name_is_red(tmp_path, rebinding):

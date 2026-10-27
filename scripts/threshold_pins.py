@@ -51,11 +51,15 @@ def _rebinds(node: ast.AST, name: str) -> bool:
         return name in node.names
     if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.MatchAs, ast.MatchStar)):
         return node.name == name
+    if isinstance(node, ast.MatchMapping):
+        return node.rest == name
     if isinstance(node, ast.alias):
         return (node.asname or node.name) == name
     if isinstance(node, ast.Name):
         return isinstance(node.ctx, ast.Del) and node.id == name
     if isinstance(node, (ast.Subscript, ast.Attribute)):
+        if isinstance(node, ast.Attribute) and node.attr == "__dict__":
+            return True
         if not isinstance(node.ctx, (ast.Store, ast.Del)):
             return False
         named = node.attr if isinstance(node, ast.Attribute) else getattr(node.slice, "value", None)
