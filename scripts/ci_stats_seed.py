@@ -1,8 +1,10 @@
 import argparse
 import io
 import json
+import math
 import re
 import subprocess
+import time
 import zipfile
 from pathlib import Path
 
@@ -14,10 +16,14 @@ SEEDED = "seeded.sha"
 KEY = re.compile(r"[0-9a-f]{64}")
 MERGED = re.compile(r"\(#(\d+)\)$")
 DEPTH = 50
+BUDGET = 300.0
+TIMEOUT = 120
 
 
 def api(path: str, binary: bool = False):
-    done = subprocess.run(["gh", "api", f"repos/{{owner}}/{{repo}}/{path}"], capture_output=True, check=True)
+    done = subprocess.run(
+        ["gh", "api", f"repos/{{owner}}/{{repo}}/{path}"], capture_output=True, check=True, timeout=TIMEOUT
+    )
     return done.stdout if binary else json.loads(done.stdout)
 
 
@@ -34,7 +40,8 @@ def merged_pulls(folder: Path, head: str, before: str) -> list[int]:
     return [int(match.group(1)) for subject in subjects if (match := MERGED.search(subject))]
 
 
-def harvest(number: int, folder: Path) -> int:
+def harvest(number: int, folder: Path, taken: set[str] | None = None, deadline: float = math.inf) -> int:
+    taken = set() if taken is None else taken
     try:
         sha = api(f"pulls/{number}")["head"]["sha"]
     except subprocess.CalledProcessError as error:
@@ -45,13 +52,21 @@ def harvest(number: int, folder: Path) -> int:
     for row in api(f"{TESTS}?event=pull_request&head_sha={sha}&per_page=10")["workflow_runs"]:
         artifacts = api(f"actions/runs/{row['id']}/artifacts?per_page=100")["artifacts"]
         found = [item for item in artifacts if item["name"].startswith(ARTIFACT) and not item["expired"]]
-        written = 0
+        written, pointers = 0, set()
         for item in sorted(found, key=lambda item: item["id"]):
+            if time.monotonic() >= deadline:
+                break
             with zipfile.ZipFile(io.BytesIO(api(f"actions/artifacts/{item['id']}/zip", binary=True))) as zipped:
                 for name in zipped.namelist():
-                    if Path(name).suffix in (".json", ".index") or Path(name).name == CONTEXT:
-                        (folder / Path(name).name).write_bytes(zipped.read(name))
+                    base = Path(name).name
+                    if base in taken:
+                        continue
+                    if Path(name).suffix in (".json", ".index") or base == CONTEXT:
+                        (folder / base).write_bytes(zipped.read(name))
                         written += 1
+                        if Path(name).suffix == ".index":
+                            pointers.add(base)
+        taken.update(pointers)
         if found:
             return written
     return 0
@@ -66,7 +81,7 @@ def usable(folder: Path, pointer: Path, context: str | None) -> Path | None:
         stored = json.loads(record.read_text())
     except ValueError:
         return None
-    return record if stored.get("scope") == {} and context in (None, stored.get("context")) else None
+    return record if context in (None, stored.get("context")) else None
 
 
 def size(folder: Path) -> int:
@@ -95,14 +110,25 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--before", required=True)
     args = parser.parse_args(argv)
     args.folder.mkdir(parents=True, exist_ok=True)
+    deadline = time.monotonic() + BUDGET
     pulls = merged_pulls(args.folder, args.head, args.before)
-    written = sum(harvest(number, args.folder) for number in pulls)
+    taken: set[str] = set()
+    written, skipped = 0, []
+    for number in reversed(pulls):
+        if time.monotonic() >= deadline:
+            skipped.insert(0, number)
+            continue
+        try:
+            written += harvest(number, args.folder, taken, deadline)
+        except subprocess.TimeoutExpired:
+            skipped.insert(0, number)
     before = size(args.folder)
     kept = prune(args.folder)
     after = size(args.folder)
     (args.folder / SEEDED).write_text(f"{args.head}\n")
     print(
-        f"Mutation stats seed: {written} files from pull requests {pulls}; kept {kept} records; "
+        f"Mutation stats seed: {written} files from pull requests {pulls}, "
+        f"{f'skipped {skipped} past the budget' if skipped else 'none skipped'}; kept {kept} records; "
         f"{before} bytes before the prune, {after} after"
     )
     return 0
