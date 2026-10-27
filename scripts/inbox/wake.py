@@ -327,7 +327,7 @@ def _pane_state(redis, slug, herdr, agent, now_ms, quiet):
     """A ready pane counts as in use while the operator prompted it inside the quiet window or its input line holds text.
     A remote pane is read from its hook heartbeat; the local herdr cannot see it."""
     remote = reports.host(agent)
-    state = _beat_state(redis, slug, agent) if remote else _status(herdr, agent)
+    state = _beat_state(redis, slug, agent, now_ms) if remote else _status(herdr, agent)
     if state not in READY:
         return state
     last = idle.last_prompt(redis, slug, agent.name)
@@ -336,9 +336,10 @@ def _pane_state(redis, slug, herdr, agent, now_ms, quiet):
     return IN_USE if not remote and _typing(herdr, agent) else state
 
 
-def _beat_state(redis, slug, agent):
-    beat = idle.heartbeat(redis, slug, agent.name)
-    return idle.IDLE if beat and beat.get("state") != idle.WORKING else idle.WORKING
+def _beat_state(redis, slug, agent, now_ms):
+    beat = idle.heartbeat(redis, slug, agent.name) or {"state": idle.WORKING, "at": now_ms}
+    busy = beat.get("state") == idle.WORKING and now_ms - beat.get("at", 0) < idle.STALE_MS
+    return idle.WORKING if busy else idle.IDLE
 
 
 def _typing(herdr, agent):
@@ -353,6 +354,8 @@ def _wake(redis, slug, herdr, agent, prompted):
         return True
     try:
         if host := reports.host(agent):
+            if reports.Reports(redis).read(host) is None:
+                return False
             _hive_wake(redis, host, slug, agent)
         else:
             herdr.prompt(agent, WAKE_TEXT)
