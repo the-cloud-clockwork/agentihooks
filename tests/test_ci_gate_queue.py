@@ -45,11 +45,13 @@ def complete():
 def test_complete_queue_waits_for_the_shard_judge_and_every_inventory_row():
     jobs = complete()
     assert ci_gate_queue.verify(jobs, [2, 7])
-    for index in range(len(jobs)):
-        assert ci_gate_queue.verify(jobs[:index] + jobs[index + 1 :], [2, 7]) is False
+    queue_only = ci_gate_queue.verify([job for job in jobs if job["name"] not in ci_gate_queue.SKIPPED], [2, 7])
+    for index, job in enumerate(jobs):
+        expected = queue_only if job["name"] in ci_gate_queue.SKIPPED else False
+        assert ci_gate_queue.verify(jobs[:index] + jobs[index + 1 :], [2, 7]) is expected
         pending = copy.deepcopy(jobs)
         pending[index].update(status="in_progress", conclusion=None)
-        assert ci_gate_queue.verify(pending, [2, 7]) is False
+        assert ci_gate_queue.verify(pending, [2, 7]) is expected
 
 
 @pytest.mark.parametrize("conclusion", ["failure", "cancelled", "timed_out", "neutral", "skipped", None])
@@ -63,12 +65,17 @@ def test_a_failed_or_skipped_required_job_never_passes(name, conclusion):
 
 
 @pytest.mark.parametrize("name", ["lint", "reuse", "sonar", "unit-selected", "mutation", "helm-kind"])
-def test_an_unexpected_running_promotion_or_pull_request_gate_never_passes(name):
+@pytest.mark.parametrize("conclusion", ["success", "failure", "cancelled", "timed_out"])
+def test_an_unexpected_running_promotion_or_pull_request_gate_never_passes(name, conclusion):
     jobs = complete()
-    next(job for job in jobs if job["name"] == name)["conclusion"] = "success"
-    with pytest.raises(ValueError) as failure:
-        ci_gate_queue.verify(jobs, [2, 7])
-    assert name in str(failure.value)
+    queue_only = ci_gate_queue.verify([job for job in jobs if job["name"] not in ci_gate_queue.SKIPPED], [2, 7])
+    next(job for job in jobs if job["name"] == name)["conclusion"] = conclusion
+    if queue_only:
+        assert ci_gate_queue.verify(jobs, [2, 7])
+    else:
+        with pytest.raises(ValueError) as failure:
+            ci_gate_queue.verify(jobs, [2, 7])
+        assert name in str(failure.value)
 
 
 @pytest.mark.parametrize("name", ["select", "unit (3.12, 2)", "shard-check (3.12)"])
