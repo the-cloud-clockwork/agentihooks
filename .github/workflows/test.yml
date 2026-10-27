@@ -534,6 +534,7 @@ jobs:
           retention-days: 7
           overwrite: true
 
+      # No checkout precedes this on workflow_dispatch, so the local retry-upload action cannot load here.
       - name: Republish the dispatched base's coverage baseline
         if: github.event_name == 'workflow_dispatch'
         uses: actions/upload-artifact@v4
@@ -1472,11 +1473,10 @@ jobs:
             --commit "$GITHUB_SHA" --head "$HEAD_SHA" --pull "$PULL" --run "$GITHUB_RUN_ID" --attempt "$GITHUB_RUN_ATTEMPT" \
             --leg "$LEG" --environment "$ENVIRONMENT" --out branch-record/record.json
 
-      # The upload action itself, not retry-upload: a composite's inner steps skip once the job is cancelled.
       - &upload-branch-coverage
         name: Upload this leg's branch coverage
         if: always() && github.event_name == 'pull_request' && github.base_ref == 'dev' && github.event.pull_request.head.repo.full_name == github.repository && hashFiles('branch-record/record.json') != ''
-        uses: actions/upload-artifact@v4
+        uses: ./.github/actions/retry-upload
         with:
           name: branch-coverage-${{ matrix.python-version }}-${{ env.LEG }}-${{ github.run_attempt }}
           path: |
@@ -1487,18 +1487,18 @@ jobs:
           include-hidden-files: true
           if-no-files-found: ignore
           retention-days: 7
-          overwrite: true
+          after-cancel: true
 
       - &upload-record
         name: Upload this leg's branch record
         if: always() && github.event_name == 'pull_request' && github.base_ref == 'dev' && github.event.pull_request.head.repo.full_name == github.repository && hashFiles('branch-record/record.json') != ''
-        uses: actions/upload-artifact@v4
+        uses: ./.github/actions/retry-upload
         with:
           name: branch-record-${{ matrix.python-version }}-${{ env.LEG }}-${{ github.run_attempt }}
           path: branch-record/record.json
           if-no-files-found: error
           retention-days: 7
-          overwrite: true
+          after-cancel: true
 
       - name: Record flaky tests
         if: ${{ !cancelled() }}
@@ -1821,7 +1821,7 @@ jobs:
 
       - name: Upload coverage
         if: matrix.python-version == '3.12'
-        uses: actions/upload-artifact@v4
+        uses: ./.github/actions/retry-upload
         with:
           name: coverage-${{ matrix.python-version }}-${{ matrix.leg }}
           path: |
@@ -1830,7 +1830,6 @@ jobs:
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
-          overwrite: true
 
       - name: Upload selected test durations
         if: ${{ !cancelled() && hashFiles('durations.json') != '' }}
@@ -2320,7 +2319,7 @@ jobs:
 
       - name: Upload coverage and analysis evidence
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: ./.github/actions/retry-upload
         with:
           name: sonar-report
           path: |
@@ -2331,7 +2330,7 @@ jobs:
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
-          overwrite: true
+          after-cancel: true
 
       # Sonar refuses an analysis dated before the dev branch's latest one; that revision ends superseded, ungraded and never promoted.
       - name: SonarQube Quality Gate
@@ -2970,12 +2969,12 @@ jobs:
 
       - name: Upload the coverage ratchet report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: ./.github/actions/retry-upload
         with:
           name: coverage-ratchet
           path: coverage-ratchet/report.txt
           retention-days: 7
-          overwrite: true
+          after-cancel: true
 
   # Reports only: it fails when it cannot read the run, never because a stage ran slow.
   stage-budget:
@@ -3219,6 +3218,54 @@ jobs:
           path: ~/durations-samples
           key: durations-samples-${{ github.sha }}
 
+  # Pull request caches stay on their own ref, so dev carries the merged pull requests' records for first runs to restore.
+  mutation-stats-seed:
+    if: ${{ !cancelled() && github.event_name == 'push' }}
+    runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && 'anton-oss-light' || 'ubuntu-latest' }}
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.sha }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Restore the dev test stats
+        uses: actions/cache/restore@v4
+        env:
+          SEGMENT_DOWNLOAD_TIMEOUT_MINS: "1"
+        with:
+          path: .mutation-stats-cache
+          key: mutation-test-stats-v2-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: mutation-test-stats-v2-${{ runner.os }}-
+
+      - name: Mint the token that reads the merged pull requests' test stats
+        id: app-token
+        uses: actions/create-github-app-token@v3.2.0
+        with:
+          client-id: ${{ secrets.TCC_CI_CLIENT_ID }}
+          private-key: ${{ secrets.TCC_CI_APP_PRIVATE_KEY }}
+          repositories: ${{ github.event.repository.name }}
+          permission-actions: read
+          permission-pull-requests: read
+
+      - name: Add the merged pull requests' test stats
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          BEFORE: ${{ github.event.before }}
+        run: python -m scripts.ci_stats_seed .mutation-stats-cache --head "$GITHUB_SHA" --before "$BEFORE"
+
+      - name: Save the dev test stats
+        uses: actions/cache/save@v4
+        with:
+          path: .mutation-stats-cache
+          key: mutation-test-stats-v2-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}
+
   flake-budget:
     needs: [unit]
     if: ${{ !cancelled() && github.event_name == 'push' }}
@@ -3352,13 +3399,12 @@ jobs:
           key: coverage-baseline-${{ steps.tree.outputs.tree }}
 
       - name: Publish the passed dev coverage baseline
-        uses: actions/upload-artifact@v4
+        uses: ./.github/actions/retry-upload
         with:
           name: coverage-baseline
           path: ~/coverage-baseline
           if-no-files-found: error
           retention-days: 90
-          overwrite: true
 
       - name: Download the test dependency manifest
         if: needs.gate-required.result == 'success'
@@ -3693,20 +3739,20 @@ jobs:
           overwrite: true
 
       - name: Keep only the test stats this part wrote
-        if: strategy.job-total != 1 && needs.mutation-plan.outputs.forwarded != 'true'
+        if: needs.mutation-plan.outputs.forwarded != 'true'
         env:
           PART: ${{ matrix.part }}
         run: mkdir -p .mutation-stats-cache .mutation-stats-fresh && find .mutation-stats-cache -maxdepth 1 -type f -newer ".mutation-stats/collected-$PART" -exec cp -p {} .mutation-stats-fresh/ \;
 
       - name: Upload this part's test stats cache
-        if: strategy.job-total != 1 && needs.mutation-plan.outputs.forwarded != 'true'
+        if: needs.mutation-plan.outputs.forwarded != 'true'
         uses: ./.workflow-revision/.github/actions/retry-upload
         with:
           name: mutation-test-stats-cache-${{ matrix.part }}
           path: .mutation-stats-fresh/
           include-hidden-files: true
           if-no-files-found: ignore
-          retention-days: 1
+          retention-days: 7
 
       - name: Mutate the only shard in the statistics job
         id: mutate

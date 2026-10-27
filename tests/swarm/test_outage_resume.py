@@ -616,6 +616,56 @@ def test_an_owner_with_pending_input_is_not_prompted(store, tmp_path, monkeypatc
     assert resume.recovery_pending(store, "sw", agents[0])
 
 
+def test_a_recovery_held_by_pane_input_names_why_until_the_input_clears(store, tmp_path, monkeypatch):
+    ledger, runtime, agents = pending_owners(store, tmp_path, monkeypatch)
+    holder = agents[0]
+    runtime.inputs[holder.name] = "half typed reply"
+    resume.recover_outages("sw", store, ledger, runtime, rows_of(ledger), 9 * MINUTE)
+    assert resume.recovery_blocker(store, "sw", holder) == "its pane holds input"
+    runtime.inputs.pop(holder.name)
+    runtime.nudge_refusals[holder.name] = "pane busy"
+    resume.recover_outages("sw", store, ledger, runtime, rows_of(ledger), 10 * MINUTE)
+    assert resume.recovery_blocker(store, "sw", holder) == f"1 of {resume.RECOVERY_ATTEMPTS} resume attempts made"
+
+
+def test_a_recovery_whose_task_moved_since_the_tick_read_names_the_ownership_change(store, tmp_path, monkeypatch):
+    ledger, runtime, agents = pending_owners(store, tmp_path, monkeypatch)
+    holder = agents[0]
+    rows = {task: dict(row) for task, row in rows_of(ledger).items()}
+    ledger.rows[holder.task]["claimed_by"] = "successor"
+    resume.recover_outages("sw", store, ledger, runtime, rows, 9 * MINUTE)
+    assert holder.name not in runtime.nudged
+    assert resume.recovery_blocker(store, "sw", holder) == "its task ownership changed"
+
+
+def test_a_working_owner_with_typed_text_completes_its_recovery(store, tmp_path, monkeypatch):
+    ledger, runtime, agents = pending_owners(store, tmp_path, monkeypatch)
+    runtime.statuses[agents[0].name] = "working"
+    runtime.inputs[agents[0].name] = "half typed reply"
+    resume.recover_outages("sw", store, ledger, runtime, rows_of(ledger), 9 * MINUTE)
+    assert agents[0].name not in runtime.nudged
+    assert recovery_state(store, agents[0].name) == "done"
+
+
+def test_a_dead_owner_whose_pane_reads_unknown_is_still_resumed(store, tmp_path, monkeypatch):
+    ledger, runtime, agents = pending_owners(store, tmp_path, monkeypatch)
+    dead = agents[2]
+    runtime.live.remove(dead.name)
+    runtime.statuses[dead.name] = "unknown"
+    resume.recover_outages("sw", store, ledger, runtime, rows_of(ledger), 9 * MINUTE)
+    assert [name for name, _, _ in runtime.resumed] == [dead.name]
+
+
+def test_a_pending_recovery_holds_while_an_outage_is_open_and_its_window_after_closure(store, tmp_path, monkeypatch):
+    _, _, agents = pending_owners(store, tmp_path, monkeypatch)
+    holder = agents[0]
+    outage.observe("sw", "provider", ["provider unavailable"], 10 * MINUTE)
+    assert resume.recovery_holds(store, "sw", holder, 10 * MINUTE + 2 * resume.RECOVERY_HOLD_MS)
+    outage.observe("sw", "provider", [], 11 * MINUTE)
+    assert resume.recovery_holds(store, "sw", holder, 11 * MINUTE + resume.RECOVERY_HOLD_MS - 1)
+    assert not resume.recovery_holds(store, "sw", holder, 11 * MINUTE + resume.RECOVERY_HOLD_MS)
+
+
 def test_a_reopened_conversation_records_the_placement_it_reports(store, tmp_path, monkeypatch):
     ledger, runtime, agents = pending_owners(store, tmp_path, monkeypatch)
     dead = agents[2]
@@ -702,6 +752,55 @@ def test_a_pending_recovery_stops_once_its_attempts_are_spent(store, tmp_path, m
     record["attempts"] = resume.RECOVERY_ATTEMPTS
     store.redis.hset(key, agents[0].name, json.dumps(record))
     assert not resume.recovery_pending(store, "sw", agents[0])
+
+
+@pytest.mark.parametrize("control", ["closed", "open", "typed", "wait"])
+def test_a_pending_recovery_after_its_outage_closes_retires_an_idle_holder_while_paused_unless_a_control_holds_it(
+    store, tmp_path, monkeypatch, control
+):
+    from scripts.swarm.tick import IDLE_KILL_TICKS
+
+    ledger, runtime, agents = pending_owners(store, tmp_path, monkeypatch)
+    monkeypatch.setattr(resume, "recover_outages", lambda *args: [])
+    holder = agents[0]
+    store.put_agent("sw", replace(holder, idle_ticks=IDLE_KILL_TICKS - 1))
+    for agent in agents[1:]:
+        runtime.statuses[agent.name] = "working"
+    if control == "open":
+        outage.observe("sw", "provider", ["provider unavailable"], 10 * MINUTE)
+    elif control == "typed":
+        runtime.inputs[holder.name] = "half typed reply"
+    elif control == "wait":
+        idle.declare_wait(store.redis, "sw", holder.name, 60 * MINUTE, "checks", 10 * MINUTE)
+    assert store.config("sw").state == "paused"
+    assert resume.recovery_pending(store, "sw", holder)
+    actions = tick("sw", store, ledger, runtime, 40 * MINUTE)
+    if control != "closed":
+        assert holder.name not in runtime.killed
+        assert store.claimant("sw", holder.task) == holder.name
+        return
+    assert runtime.killed == [holder.name]
+    assert (ledger.rows[holder.task]["state"], ledger.rows[holder.task]["claimed_by"]) == ("open", "")
+    stalled = [action for action in actions if action.startswith(f"stalled {holder.name}")]
+    assert stalled and "outage recovery could not proceed" in stalled[0], actions
+
+
+def test_a_pending_recovery_holds_an_idle_holder_only_until_its_window_after_closure_ends(store, tmp_path, monkeypatch):
+    from scripts.swarm.tick import IDLE_KILL_TICKS
+
+    ledger, runtime, agents = pending_owners(store, tmp_path, monkeypatch)
+    monkeypatch.setattr(resume, "recover_outages", lambda *args: [])
+    holder = agents[0]
+    store.put_agent("sw", replace(holder, idle_ticks=IDLE_KILL_TICKS - 1))
+    closed = 9 * MINUTE
+    tick("sw", store, ledger, runtime, closed + resume.RECOVERY_HOLD_MS - MINUTE)
+    assert holder.name not in runtime.killed
+    assert store.claimant("sw", holder.task) == holder.name
+    actions = tick("sw", store, ledger, runtime, closed + resume.RECOVERY_HOLD_MS)
+    assert holder.name in runtime.killed
+    assert ledger.rows[holder.task]["state"] == "open"
+    stalled = [action for action in actions if action.startswith(f"stalled {holder.name}")]
+    assert stalled and stalled[0].endswith(f"0 of {resume.RECOVERY_ATTEMPTS} resume attempts made"), actions
 
 
 def test_an_owner_holding_its_task_authority_is_recovered(store, tmp_path, monkeypatch):

@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from scripts import master_claude_login as login
-from scripts import master_logins, quota_state
+from scripts import master_logins, quota_state, terminate_agent
 from scripts.swarm_v2 import front_door
 
 if TYPE_CHECKING:
@@ -33,13 +33,16 @@ def _held() -> dict[str, str]:
 
 def front_doors(store: "RedisStore") -> list[FrontDoor]:
     held = _held()
+    live = {session.name for session in terminate_agent.sessions()}
     return [
         FrontDoor(slug, agent.name, held.get(agent.name, ""), agent.account)
         for slug in store.slugs()
+        if store.config(slug).state != "stopped"
         for agent in store.agents(slug)
         if agent.lane == login.LANE
         and agent.state == "working"
         and agent.harness == "claude"
+        and agent.name in live
         and front_door.holds(slug, agent.seat)
     ]
 

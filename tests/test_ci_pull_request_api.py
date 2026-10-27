@@ -20,6 +20,7 @@ WORKSPACE = re.compile(r"\$\{?GITHUB_WORKSPACE\}?")
 LOCAL_ONLY = {
     ROOT / "scripts/ci_budget/rate_limit.py": {"reset_wait", "_run", "budget"},
     ROOT / "scripts/ci_mutation/reuse.py": {"api"},
+    ROOT / "scripts/ci_stats_seed.py": {"api"},
     ROOT / "tests/refresh_durations.py": {"_gh", "ci_run_ids", "ci_download"},
 }
 METADATA_ONLY = {
@@ -154,6 +155,8 @@ def test_no_script_a_step_runs_calls_the_api():
     expected = [
         ".github/actions/browser-cache/select-artifacts.sh",
         ".github/actions/browser-cache/verify.sh",
+        ".github/actions/retry-upload/find.sh",
+        ".github/actions/retry-upload/watchdog.sh",
         ".github/coverage/combine.sh",
         ".github/coverage/flatten.py",
         ".github/coverage/proxy.py",
@@ -183,6 +186,7 @@ def test_no_script_a_step_runs_calls_the_api():
         "scripts/ci_mutation/reuse.py",
         "scripts/ci_release.sh",
         "scripts/ci_semgrep_floors.py",
+        "scripts/ci_stats_seed.py",
         "scripts/ci_unit_rerun.py",
         "scripts/ci_wiring.py",
         "scripts/hive/nats_grant.py",

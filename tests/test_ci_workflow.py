@@ -1992,21 +1992,21 @@ def test_every_pull_request_stats_part_restores_one_merged_cache_saved_once_afte
     assert single["if"] == f"strategy.job-total == 1 && {skipped}"
     assert single["with"] == {"path": ".mutation-stats-cache", "key": key}
     fresh = steps[names.index("Keep only the test stats this part wrote")]
-    assert fresh["if"] == f"strategy.job-total != 1 && {skipped}"
+    assert fresh["if"] == skipped
     assert fresh["env"] == {"PART": "${{ matrix.part }}"}
     assert fresh["run"] == (
         "mkdir -p .mutation-stats-cache .mutation-stats-fresh && find .mutation-stats-cache -maxdepth 1 -type f"
         ' -newer ".mutation-stats/collected-$PART" -exec cp -p {} .mutation-stats-fresh/ \\;'
     )
     part = steps[names.index("Upload this part's test stats cache")]
-    assert part["if"] == f"strategy.job-total != 1 && {skipped}"
+    assert part["if"] == skipped
     assert part["uses"] == "./.workflow-revision/.github/actions/retry-upload"
     assert part["with"] == {
         "name": "mutation-test-stats-cache-${{ matrix.part }}",
         "path": ".mutation-stats-fresh/",
         "include-hidden-files": True,
         "if-no-files-found": "ignore",
-        "retention-days": 1,
+        "retention-days": 7,
     }
     stats_part = steps[names.index("Upload mutation stats part")]
     assert stats_part["if"] == skipped

@@ -35,7 +35,7 @@ def test_publisher_uploads_the_passed_dev_baseline_for_queue_runs():
     job = _jobs()["coverage-baseline"]
     save = _step(job["steps"], "Save the passed dev coverage baseline")
     upload = _step(job["steps"], "Publish the passed dev coverage baseline")
-    assert upload["uses"] == "actions/upload-artifact@v4"
+    assert upload["uses"] == "./.github/actions/retry-upload"
     assert upload["with"]["name"] == "coverage-baseline"
     assert upload["with"]["path"] == save["with"]["path"] == "~/coverage-baseline"
     assert upload["with"]["if-no-files-found"] == "error"
