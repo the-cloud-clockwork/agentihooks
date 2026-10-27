@@ -56,3 +56,30 @@ def test_sibling_writes_wait_for_an_admission_in_flight(store, monkeypatch, oper
     assert blocked
     assert not first.is_alive() and not second.is_alive()
     assert [agent.generation for agent in admitted] == [1]
+
+
+def test_another_swarm_writes_while_an_admission_is_in_flight(store, monkeypatch):
+    store.create(SwarmConfig("other", "agentihooks", 1, 0))
+    entered, release = threading.Event(), threading.Event()
+    check_uid = execution.ExecutionRegistry.check_uid
+
+    def held(self, slug, agent, reader):
+        if slug == "fixture":
+            entered.set()
+            assert release.wait(5)
+        return check_uid(self, slug, agent, reader)
+
+    monkeypatch.setattr(execution.ExecutionRegistry, "check_uid", held)
+    first = threading.Thread(target=lambda: store.start_execution("fixture", sibling(store, "eng-1@fixture")))
+    other = AgentRecord(store.next_name("other", "eng"), "eng", "task", seat="eng-1@other", started_at=123)
+    admitted = []
+    second = threading.Thread(target=lambda: admitted.append(store.start_execution("other", other)))
+    first.start()
+    assert entered.wait(5)
+    second.start()
+    second.join(5)
+    finished = not second.is_alive()
+    release.set()
+    first.join(5)
+    assert finished
+    assert [agent.seat for agent in admitted] == ["eng-1@other"]

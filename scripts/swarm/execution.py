@@ -15,14 +15,14 @@ WRITE_ATTEMPTS = 5
 EXECUTION_FIELDS = ("execution_id", "generation", "runtime_backend", "runtime_target")
 PROJECTION_OMITTED = (*EXECUTION_FIELDS, "hive", "transport", "remote_control", "desired_route_kind")
 ARCHIVE = "executions-archive"
-WRITES = threading.RLock()
+WRITES: dict[str, threading.RLock] = {}
 
 
 def _serialized(method):
     @functools.wraps(method)
-    def locked(*args, **kwargs):
-        with WRITES:
-            return method(*args, **kwargs)
+    def locked(self, slug, *args, **kwargs):
+        with WRITES.setdefault(slug, threading.RLock()):
+            return method(self, slug, *args, **kwargs)
 
     return locked
 
