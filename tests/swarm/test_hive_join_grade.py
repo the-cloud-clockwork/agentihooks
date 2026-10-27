@@ -321,6 +321,21 @@ def test_a_join_timeout_during_an_open_ledger_outage_holds_until_the_outage_limi
     ]
 
 
+def test_the_regrade_window_starts_when_a_held_outage_closes(monkeypatch, tmp_path):
+    from scripts.swarm import launch_check, outage
+
+    launch = _ledger_refused_launch(monkeypatch, tmp_path, REFUSED)
+    outage.observe("sw", "ledger", ["Ledger health probe failed"], launch.start + 5_000)
+    due = launch.start + launch_check.DEADLINE_MS
+    launch.tick(due)
+    closed = due + 180_000
+    outage.observe("sw", "ledger", [], closed)
+    launch.tick(closed + launch_check.DEADLINE_MS - 1)
+    assert launch.retired == []
+    launch.tick(closed + launch_check.DEADLINE_MS)
+    assert launch.retired == [closed + launch_check.DEADLINE_MS]
+
+
 def test_a_ledger_join_denied_by_the_server_retires_without_a_hold(monkeypatch, tmp_path):
     from scripts.swarm import launch_check
 
