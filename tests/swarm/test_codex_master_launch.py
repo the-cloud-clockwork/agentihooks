@@ -74,3 +74,80 @@ def test_tick_codex_master_records_staged_home_before_completing_launch(tmp_path
     )
     if transport == "app_server":
         assert placed.execution == execution
+
+
+def test_front_door_claude_master_keeps_deferred_login_route_and_staged_binding(tmp_path, monkeypatch):
+    from hooks import config as hooks_config
+    from scripts import master_claude_login
+    from scripts.profiles import binding
+    from scripts.routing import native_login
+    from scripts.swarm import launch_check
+
+    monkeypatch.setattr(hooks_config, "MASTER_CLAUDE_LOGIN", True)
+    home = str(tmp_path / "master-claude-login" / "1" / "claude")
+    report = str(tmp_path / "report.json")
+    seen, saved = [], []
+
+    def run_init(argv, **kwargs):
+        if argv[1:] == list(native_login.COMMAND):
+            return SimpleNamespace(returncode=0, stdout=native_login.STATUS, stderr="")
+        if "init-agent" in argv:
+            seen.append(argv)
+        output = (
+            "status=started\nroute_status=routed\naccount=login\nmodel=opus\neffort=high\n"
+            f"profile_validation=pending\nprofile_report={report}\n"
+        )
+        return SimpleNamespace(returncode=0, stdout=output, stderr="")
+
+    runtime = HerdrRuntime(home=tmp_path, run=run_init, defer_master_canary=True)
+    monkeypatch.setattr(runtime, "conversations", lambda: {})
+    config = SimpleNamespace(
+        slug="sw",
+        repo=str(tmp_path),
+        code="a1b2c3",
+        compact_limit=0,
+        lanes={"master": {}},
+        autonomy="delegate",
+    )
+    name = "master@a1b2c3-0002"
+    placed = runtime.spawn(config, MASTER, name, {"id": MASTER, "seat": "master@sw"})
+    assert (placed.harness, placed.route_kind) == ("claude", "interactive")
+    command = seen[0]
+    assert "--defer-canary" in command
+    assert command[command.index("--route") + 1] == master_claude_login.ROUTE
+    record = placed_record(AgentRecord(name, MASTER, MASTER, seat="master@sw"), placed)
+    assert record.profile_decision["validation"]["state"] == "pending"
+    result = {
+        "state": "validated",
+        "profile": "master",
+        "harness": "claude",
+        "home": home,
+        "pid": 123,
+        "account": "login",
+        "model": "opus",
+        "effort": "high",
+        "validated_at": 1,
+    }
+    monkeypatch.setattr(binding, "confirm", lambda *args: result)
+    confirmed, failures = launch_check.canary(
+        SimpleNamespace(put_agent=lambda slug, agent: saved.append(agent)), "sw", record
+    )
+    assert failures == {}
+    assert saved == [confirmed]
+    assert confirmed.profile_decision["validation"] == result
+    assert live_binding.assignment(confirmed)["home"] == home
+    assert (
+        live_binding.compare(
+            confirmed,
+            {
+                "harness": "claude",
+                "home": home,
+                "profile": "master",
+                "model": "opus",
+                "effort": "high",
+                "account": "login",
+                "hooks": True,
+            },
+        )
+        == {}
+    )
