@@ -10,7 +10,6 @@ on:
       - scripts/swarm_v2/startup_*.py
       - scripts/swarm_v2/resource_profiles.py
       - scripts/swarm_v2/kubernetes/failures.py
-      - deploy/helm/agentihooks-swarm/ci/pull-kind-node.sh
       - .github/workflows/startup-stages.yml
 
 permissions:
