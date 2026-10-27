@@ -9,7 +9,6 @@ from scripts.headless.request import TIMEOUT_S
 from scripts.workflows.runner import StageResult
 from scripts.workflows.schema import Stage
 
-
 __all__ = ["HeadlessProfile"]
 
 
