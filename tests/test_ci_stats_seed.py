@@ -112,12 +112,22 @@ def test_harvest_copies_records_from_the_newest_run_with_stats_artifacts(tmp_pat
 
 def test_harvest_skips_a_number_that_is_not_a_pull_request(tmp_path, monkeypatch, capsys):
     def missing(path, binary=False):
-        raise subprocess.CalledProcessError(1, ["gh", "api", path])
+        raise subprocess.CalledProcessError(1, ["gh", "api", path], stderr=b"gh: Not Found (HTTP 404)\n")
 
     monkeypatch.setattr(seed, "api", missing)
 
     assert seed.harvest(7, tmp_path) == 0
     assert capsys.readouterr().out == "Mutation stats seed: #7 is not a readable pull request\n"
+
+
+def test_harvest_fails_when_github_cannot_answer(tmp_path, monkeypatch):
+    def unavailable(path, binary=False):
+        raise subprocess.CalledProcessError(1, ["gh", "api", path], stderr=b"gh: Service Unavailable (HTTP 503)\n")
+
+    monkeypatch.setattr(seed, "api", unavailable)
+
+    with pytest.raises(subprocess.CalledProcessError):
+        seed.harvest(7, tmp_path)
 
 
 def test_harvest_without_stats_artifacts_writes_nothing(tmp_path, monkeypatch):

@@ -35,7 +35,9 @@ def merged_pulls(folder: Path, head: str, before: str) -> list[int]:
 def harvest(number: int, folder: Path) -> int:
     try:
         sha = api(f"pulls/{number}")["head"]["sha"]
-    except subprocess.CalledProcessError:
+    except subprocess.CalledProcessError as error:
+        if b"HTTP 404" not in (error.stderr or b""):
+            raise
         print(f"Mutation stats seed: #{number} is not a readable pull request")
         return 0
     for row in api(f"{TESTS}?event=pull_request&head_sha={sha}&per_page=10")["workflow_runs"]:
