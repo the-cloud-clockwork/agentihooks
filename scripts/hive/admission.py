@@ -35,10 +35,10 @@ _RESERVE = """
 local now = redis.call('TIME')
 local millis = tonumber(now[1]) * 1000 + math.floor(tonumber(now[2]) / 1000)
 redis.call('ZREMRANGEBYSCORE', KEYS[1], '-inf', millis)
-local held = redis.call('ZCARD', KEYS[1])
-if redis.call('ZSCORE', KEYS[1], ARGV[1]) then return {1, held} end
-if held >= tonumber(ARGV[2]) then return {0, held} end
+if redis.call('ZSCORE', KEYS[1], ARGV[1]) then return {1, redis.call('ZCARD', KEYS[1])} end
 redis.call('ZREM', KEYS[1], ARGV[1] .. ARGV[4])
+local held = redis.call('ZCARD', KEYS[1])
+if held >= tonumber(ARGV[2]) then return {0, held} end
 redis.call('ZADD', KEYS[1], millis + tonumber(ARGV[3]), ARGV[1])
 redis.call('PEXPIRE', KEYS[1], ARGV[3])
 return {1, held}

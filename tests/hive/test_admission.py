@@ -455,7 +455,7 @@ def test_a_release_frees_a_joined_reservation(redis):
 def test_a_new_launch_of_a_joined_name_replaces_its_joined_reservation(redis):
     launched_ago(redis, "anton", "s/one", 60_000)
     admission.joined(redis, "anton", "s/one")
-    assert admission.reserve(redis, "anton", "s/one", 2) == (True, 1)
+    assert admission.reserve(redis, "anton", "s/one", 1) == (True, 0)
     assert redis.zrange(admission.key("anton"), 0, -1) == ["s/one"]
     assert admission.pending(redis, "anton") == 1
 
