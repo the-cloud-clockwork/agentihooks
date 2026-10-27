@@ -32,7 +32,8 @@ def _held() -> dict[str, str]:
 
 
 def front_doors(store: "RedisStore") -> list[FrontDoor]:
-    held, live = _held(), {session.name for session in terminate_agent.sessions()}
+    held = _held()
+    live = {session.name for session in terminate_agent.sessions()}
     return [
         FrontDoor(slug, agent.name, held.get(agent.name, ""), agent.account)
         for slug in store.slugs()
