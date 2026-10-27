@@ -16,7 +16,7 @@ jobs:
     uses: The-Cloud-Clockwork/.github/.github/workflows/semgrep-reusable.yml@main
     with:
       base: ${{ inputs.base }}
-      configs: p/ci p/secrets p/python
+      configs: p/ci p/secrets p/python .semgrep-incidents
       # Actions are pinned to release tags by fleet policy, so the mutable tag rule only repeats it.
       exclude_rules: yaml.github-actions.security.github-actions-mutable-action-tag.github-actions-mutable-action-tag
       rules_dir: .semgrep
@@ -42,6 +42,10 @@ jobs:
 
       - name: Operator feature regressions and passing fixtures
         run: semgrep --metrics off --test .semgrep/features
+
+      # Each rule matches a pattern behind an outage; the scan job fails only instances new against the base.
+      - name: Outage rules fire on their planted faults and pass their clean cases
+        run: semgrep --metrics off --test .semgrep-incidents
 
   charts:
     concurrency:
