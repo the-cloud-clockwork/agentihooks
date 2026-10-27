@@ -324,11 +324,15 @@ def storage_problems(found_docs: dict) -> list[str]:
         found.append(f"a hive on data-node is placed by {spec.get('nodeSelector')}")
     if found_docs["Deployment"]["spec"].get("strategy", {}).get("type") != "Recreate":
         found.append("a hive with node storage does not roll out by Recreate")
-    job = found_docs.get("Job")
+    return found + folder_job_problems(found_docs.get("Job")) + home_folders_problems(found_docs.get("DaemonSet"))
+
+
+def folder_job_problems(job: dict | None) -> list[str]:
     if job is None:
-        return [*found, "a hive with node storage renders no folder Job"]
+        return ["a hive with node storage renders no folder Job"]
     pod = job["spec"]["template"]["spec"]
     script = pod["containers"][0]["command"][-1]
+    found = []
     if job["metadata"]["annotations"].get("helm.sh/hook") != "pre-install,pre-upgrade":
         found.append("the folder Job does not run before the hive installs or upgrades")
     if pod.get("nodeSelector") != {"kubernetes.io/hostname": "data-node"}:
@@ -339,11 +343,15 @@ def storage_problems(found_docs: dict) -> list[str]:
         found.append("the folder Job does not refuse when the data filesystem is not mounted")
     if "/storage/hive/homes/fixture /storage/hive/tmp/fixture" not in script:
         found.append("the folder Job does not make the hive home and tmp folders")
-    folders = found_docs.get("DaemonSet")
+    return found
+
+
+def home_folders_problems(folders: dict | None) -> list[str]:
     if folders is None:
-        return [*found, "hiveStorage.homeFolders.hives renders no DaemonSet"]
+        return ["hiveStorage.homeFolders.hives renders no DaemonSet"]
     pod = folders["spec"]["template"]["spec"]
     excluded = pod.get("affinity", {}).get("nodeAffinity", {}).get("requiredDuringSchedulingIgnoredDuringExecution")
+    found = []
     if excluded != {
         "nodeSelectorTerms": [
             {"matchExpressions": [{"key": "kubernetes.io/hostname", "operator": "NotIn", "values": ["data-node"]}]}
