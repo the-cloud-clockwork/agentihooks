@@ -43,7 +43,7 @@ def inventory(jobs: list[dict], expected: set[str]) -> dict[str, dict]:
     for job in jobs:
         name = job["name"]
         base = name.split(" (", 1)[0]
-        if base not in REQUIRED | SKIPPED | {"unit", "unit rerun", "unit-lost"}:
+        if base not in REQUIRED | SKIPPED | {"unit", "unit rerun", "unit-lost", "queue-split"}:
             continue
         key = name if base in {"unit", "unit rerun"} and "${{" not in name else base
         if key in groups:
@@ -101,18 +101,22 @@ def verify(jobs: list[dict], shards: list[int], lost: Callable[[dict], bool] = l
         raise ValueError("The queue needs a nonempty unique positive shard plan")
     expected = {f"unit (3.12, {shard})" for shard in shards}
     groups = inventory(jobs, expected)
-    finished = [checked(groups.get(name), "success" if name in REQUIRED else "skipped") for name in REQUIRED | SKIPPED]
+    required, skipped = REQUIRED, SKIPPED
+    if "queue-split" in groups:
+        required = REQUIRED - {"split"} | {"queue-split"}
+        skipped = SKIPPED | {"split"}
+    finished = [checked(groups.get(name), "success" if name in required else "skipped") for name in required | skipped]
     recovered, originals_finished = originals(groups, expected, lost)
     recovery_finished = recovery(groups, recovered) if originals_finished else False
     return all(finished) and originals_finished and recovery_finished
 
 
-def watcher(runner: str) -> dict:
+def watcher(runner: str, parallel: bool = False) -> dict:
     return {
         "name": GATE_NAME,
         "outputs": {"failed": "${{ steps.watch.outputs.failed }}"},
         "if": "${{ !cancelled() && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && (github.event_name != 'merge_group' || needs.reuse.outputs.reused != 'true') && github.event_name != 'pull_request' }}",
-        "needs": ["split", "select", "reuse", "admission"],
+        "needs": ["queue-split" if parallel else "split", "select", "reuse", "admission"],
         "runs-on": runner,
         "timeout-minutes": 60,
         "steps": [
@@ -144,7 +148,9 @@ def watcher(runner: str) -> dict:
                 "if": "github.event_name == 'merge_group'",
                 "env": {
                     "GH_TOKEN": "${{ steps.app-token.outputs.token }}",
-                    "QUEUE_PLAN": "${{ format('[{0}]', needs.split.outputs.queue_312) }}",
+                    "QUEUE_PLAN": "${{ format('[{0}]', needs.queue-split.outputs.queue_312) }}"
+                    if parallel
+                    else "${{ format('[{0}]', needs.split.outputs.queue_312) }}",
                 },
                 "run": 'python3 -m scripts.ci_gate_queue || { echo "failed=queue verification" >> "$GITHUB_OUTPUT"; exit 1; }',
             },
@@ -170,7 +176,12 @@ def normalize(workflows: dict[str, dict]) -> dict[str, dict]:
         if not dynamic:
             continue
         summary, early = jobs.get("gate-required", {}), jobs.get("queue-fail-fast", {})
-        if len(dynamic) != 2 or summary.get("name") != SUMMARY_NAME or early != watcher(summary.get("runs-on")):
+        parallel = "queue-split" in jobs
+        if (
+            len(dynamic) != 2
+            or summary.get("name") != SUMMARY_NAME
+            or early != watcher(summary.get("runs-on"), parallel)
+        ):
             raise ValueError("The early queue gate must use the exact reviewed context pair and verifier")
         if (
             jobs.get("reuse", {}).get("if")
@@ -178,8 +189,24 @@ def normalize(workflows: dict[str, dict]) -> dict[str, dict]:
         ):
             raise ValueError("The early queue gate requires the existing whole queue reuse exclusion")
         expected = REQUIRED | SKIPPED | {"unit", "unit-lost", "unit-rerun", "queue-fail-fast"}
+        if parallel:
+            expected = expected | {"queue-split"}
         if set(summary.get("needs", [])) != expected:
             raise ValueError("The early queue gate must preserve the reviewed graded inventory")
+        if parallel:
+            for step in summary.get("steps", []):
+                if "run" in step:
+                    step["run"] = (
+                        step["run"]
+                        .replace(
+                            '["select", "queue-split", "shard-check", "test-count"]',
+                            '["select", "split", "shard-check", "test-count"]',
+                        )
+                        .replace(
+                            ' or (.key == "queue-split" and .value.result == "skipped" and $event != "merge_group")',
+                            "",
+                        )
+                    )
         summary["name"] = "Gate — Required"
         early["name"] = "queue-fail-fast"
     return normalized
