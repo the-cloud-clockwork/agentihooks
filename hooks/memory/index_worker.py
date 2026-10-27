@@ -216,6 +216,9 @@ class IndexWorker:
         pending = self.pending(domain, generation, now)
         if not paused:
             report["state"] = "deferred" if report["failed"] else ("bounded" if pending["pending"] else "drained")
+        from hooks.memory.progress import indexed
+
+        indexed(self.catalog, domain, generation, now)
         return {**report, **pending}
 
     def pending(self, domain: str, generation: str, now: float) -> dict:

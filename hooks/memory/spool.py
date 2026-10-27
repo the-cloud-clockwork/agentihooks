@@ -9,6 +9,7 @@ from collections.abc import Callable
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Protocol
 
 from hooks.memory.collector import Batch
 from scripts.scheduler.process_interval import Interval
@@ -47,6 +48,12 @@ class Status:
     lost: list[int]
     transcript_spool_bytes: int
     archive_lag_seconds: float
+
+
+class Progress(Protocol):
+    def buffered(self, entry: Entry) -> None: ...
+
+    def archived(self, entry: Entry) -> None: ...
 
 
 @dataclass(frozen=True)
@@ -88,12 +95,20 @@ def _write_durably(path: Path, data: bytes) -> None:
 
 
 class Spool:
-    def __init__(self, config: SpoolConfig, clock: Callable[[], float] = time.time):
+    def __init__(
+        self, config: SpoolConfig, clock: Callable[[], float] = time.time, progress: Progress | None = None
+    ) -> None:
         self.config = config
         self.clock = clock
+        self.progress = progress
         self.batches = Path(config.root) / "batches"
         self.quarantine = Path(config.root) / "lost"
         self.ack_path = Path(config.root) / "ack.json"
+        if progress is not None:
+            with self._locked("spool"):
+                for path in self._files():
+                    if entry := self._read(path):
+                        self._buffered(entry)
 
     @contextmanager
     def _locked(self, name: str):
@@ -122,6 +137,11 @@ class Spool:
             return None
         return entry
 
+    def _buffered(self, entry: Entry) -> Entry:
+        if self.progress is not None:
+            self.progress.buffered(entry)
+        return entry
+
     def append(self, identity: str, records: list) -> Entry | None:
         """Returns the pending entry for a buffered identity, and None for one already acknowledged."""
         with self._locked("spool"):
@@ -131,7 +151,7 @@ class Spool:
             files = self._files()
             for path in files:
                 if path.name.endswith(f"-{_key(identity)}.json") and (entry := self._read(path)):
-                    return entry
+                    return self._buffered(entry)
             sequence = max([_sequence(path) for path in files] + [ack["settled"]]) + 1
             created = self.clock()
             body = {"sequence": sequence, "identity": identity, "created": created, "records": records}
@@ -141,7 +161,7 @@ class Spool:
                 raise SpoolFull("spool_full")
             path = self.batches / f"{sequence:020d}-{_key(identity)}.json"
             _write_durably(path, data)
-            return Entry(sequence, identity, created, records, len(data))
+            return self._buffered(Entry(sequence, identity, created, records, len(data)))
 
     def accept(self, batch: Batch) -> None:
         self.append(batch.identity, list(batch.records))
@@ -199,6 +219,8 @@ class Spool:
                 if entry is not None:
                     try:
                         upload(entry)
+                        if self.progress is not None:
+                            self.progress.archived(entry)
                     except Exception as error:
                         return FlushResult(uploaded, lost, type(error).__name__)
                 self._settle(path, lost=entry is None)

@@ -9,68 +9,83 @@ FIXTURE = Path(__file__).parent / "fixtures/swarm_v2/session-embeddings.json"
 
 
 def run_case(root):
+    from hooks.memory.progress import Recorder
+
     inputs = json.loads(FIXTURE.read_text())
     index = Index(inputs, root)
     session, caller = index.session, grant(inputs)
     scope = metrics.Scope(index.domain, inputs["session_uid"], session.generation)
-    meter = metrics.Metrics(session.catalog)
-    queue = spool.Spool(spool.SpoolConfig(root / "spool", max_bytes=1000000, warn_bytes=800000), clock=lambda: 110.0)
-    session.append(inputs["turns"][:1])
-    session.build()
-    index.worker.register(index.domain, index.generation, model(inputs))
-    index.enqueue(100.0)
-    index.drain(FixtureEmbedder(model(inputs)), 100.0)
-    for stage in metrics.STAGES:
-        meter.advance(caller, scope, stage, session.sequence, 100.0)
-    tail = inputs["turns"][1:3]
-    through = session.sequence + len(records(tail))
-    queue.append("fixture-tail", records(tail))
-    meter.advance(caller, scope, "local_spool", through, 110.0)
-    baseline = session.protected()
+    clock = [100.0]
+    recorder = Recorder(session.catalog, caller, scope, inputs["grant"]["projects"][0], clock=lambda: clock[0])
+    meter = recorder.meter
+    queue = spool.Spool(spool.SpoolConfig(root / "spool", 1000000, 800000), clock=lambda: clock[0], progress=recorder)
+
+    def upload(entry):
+        assert session.append([entry.records])["state"] == "committed"
+
+    def committed(source, through):
+        assert source == scope
+        return {"state": "committed", "through": through}
 
     def unavailable(entry):
         raise ConnectionError("fixture archive transport unavailable")
 
-    failed = queue.flush(unavailable)
-    assert failed.error == "ConnectionError"
-    assert queue.status().pending == [1]
-    assert session.protected() == baseline
-    archive_failed = meter.status(caller, scope, 150.0, stale_after=30.0)
-
-    def upload(entry):
-        assert entry.records == records(tail)
-        assert session.append(tail)["state"] == "committed"
-        meter.advance(caller, scope, "archive", session.sequence, 155.0)
-
+    queue.append("fixture-baseline", records(inputs["turns"][:1]))
     assert queue.flush(upload).uploaded == [1]
     session.build()
+    index.worker.register(index.domain, index.generation, model(inputs))
+    index.enqueue(100.0)
+    index.drain(FixtureEmbedder(model(inputs)), 100.0)
+    recorder.consume(session.sequence, committed)
+    clock[0] = 110.0
+    queue.append("fixture-tail", records(inputs["turns"][1:3]))
+    baseline = session.protected()
+    assert queue.flush(unavailable).error == "ConnectionError"
+    assert queue.status().pending == [2]
+    assert session.protected() == baseline
+    archive_failed = meter.status(caller, scope, 150.0, stale_after=30.0)
+    clock[0] = 155.0
+    assert queue.flush(upload).uploaded == [2]
+    session.build()
     index.enqueue(155.0)
-    deferred = index.drain(FixtureEmbedder(model(inputs), fail_calls=(1,)), 160.0)
-    assert deferred["state"] == "deferred"
+    assert index.drain(FixtureEmbedder(model(inputs), fail_calls=(1,)), 160.0)["state"] == "deferred"
     assert index.coverage()["state"] == "incomplete"
     embedding_failed = meter.status(caller, scope, 190.0, stale_after=30.0)
     assert index.drain(FixtureEmbedder(model(inputs)), 195.0)["state"] == "drained"
     assert index.coverage()["state"] == "indexed"
-    meter.advance(caller, scope, "indexed_chunk", session.sequence, 195.0)
     extraction_delayed = meter.status(caller, scope, 200.0, stale_after=30.0)
     answer = search.SessionSearch(session.catalog).search(caller, search.Query(index.domain, "backlog"))
     assert answer["coverage"]["state"] == "partial"
     before_restart = meter.snapshot()
     index.restart()
-    meter = metrics.Metrics(index.session.catalog)
+    session = index.session
+    recorder = Recorder(session.catalog, caller, scope, inputs["grant"]["projects"][0], clock=lambda: clock[0])
+    meter = recorder.meter
     assert meter.snapshot() == before_restart
-    meter.advance(caller, scope, "brain_consumed", index.session.sequence, 210.0)
+    clock[0] = 210.0
+    recorder.consume(session.sequence, committed)
     recovered = meter.status(caller, scope, 220.0, stale_after=30.0)
     rollback = meter.snapshot()
     index.worker.set_paused(index.domain, index.generation, True)
-    assert metrics.Metrics(index.session.catalog).snapshot() == rollback
-    index.session.catalog.close()
+    assert metrics.Metrics(session.catalog).snapshot() == rollback
+    first_scope = metrics.Scope(index.domain, "first-upload-fails", "new-source")
+    first = Recorder(session.catalog, caller, first_scope, inputs["grant"]["projects"][0], clock=lambda: 100.0)
+    first_queue = spool.Spool(
+        spool.SpoolConfig(root / "first-spool", 1000000, 800000), clock=lambda: 110.0, progress=first
+    )
+    first_queue.append("first", [{"kind": "user_text", "text": "fixture private tail"}])
+    assert first_queue.flush(unavailable).error == "ConnectionError"
+    assert session.catalog.session(index.domain, first_scope.session_uid) is None
+    first_failed = meter.status(caller, first_scope, 150.0, stale_after=30.0)
+    assert meter.coverage(caller, [], 220.0)["state"] == "partial"
+    session.catalog.close()
     return {
         "archive_failed": archive_failed,
         "embedding_failed": embedding_failed,
         "extraction_delayed": extraction_delayed,
         "recovered": recovered,
+        "first_upload_failed": first_failed,
         "restart_retained_watermarks": True,
         "rollback_retained_watermarks": True,
-        "evidence_class": "mocked transport and embedder; real local spool, catalog, archive objects and index worker",
+        "evidence_class": "mocked transport, extractor and embedder; real local spool, catalog, archive objects and index worker",
     }

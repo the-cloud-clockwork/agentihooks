@@ -1,8 +1,10 @@
 import json
+import os
+from pathlib import Path
 
 import pytest
 
-from hooks.memory import metrics, search
+from hooks.memory import metrics, progress, search, spool
 from hooks.memory.api.ingest import Grant
 from hooks.memory.archive import EvidenceRefused
 from hooks.memory.catalog import BatchCommit, Catalog, Conflict, SessionSource, StoredEvent
@@ -190,6 +192,12 @@ def test_real_capture_archive_and_embedding_boundaries(captured, tmp_path, run):
     assert report["extraction_delayed"]["alerts"] == ["extraction_stale"]
     assert report["recovered"]["coverage"] == "complete"
     assert report["recovered"]["alerts"] == []
+    assert report["first_upload_failed"]["archive_lag_seconds"] == 40.0
+    assert report["first_upload_failed"]["coverage"] == "partial"
+    if destination := os.environ.get("PROOF_REPORT_DIR"):
+        folder = Path(destination)
+        folder.mkdir(parents=True, exist_ok=True)
+        (folder / f"sv2-obs02-{run}.json").write_text(json.dumps(report, indent=2, sort_keys=True))
     print("SV2-OBS-02 " + json.dumps(report, sort_keys=True))
 
 
@@ -247,7 +255,100 @@ def test_session_inspection_displays_partial_coverage_without_changing_summary(c
     catalog, meter, scope = captured
     advance(meter, scope, "local_spool", 2, 100.0)
     tools = SessionTools(catalog, ObjectStore(tmp_path / "objects"))
-    answer = tools.session_get(GRANT, {"access_domain": GRANT.corpus, "session_uid": scope.session_uid}, 200.0)
+    answer = tools.session_get(
+        GRANT, {"schema_version": "1.0", "access_domain": GRANT.corpus, "session_uid": scope.session_uid}, 200.0
+    )
     assert answer["session"]["session_uid"] == scope.session_uid
     assert answer["coverage"][0]["coverage"] == "partial"
     assert answer["coverage"][0]["archive_lag_seconds"] == 100.0
+
+
+@pytest.mark.parametrize(
+    "receipt",
+    [
+        {"state": "accepted", "through": 2},
+        {"state": "committed", "through": 1},
+        {"state": "committed", "through": True},
+        {},
+    ],
+)
+def test_extraction_requires_a_durable_matching_receipt(captured, receipt):
+    catalog, meter, scope = captured
+    for stage in metrics.STAGES:
+        advance(meter, scope, stage, 1, 100.0)
+    advance(meter, scope, "local_spool", 2, 110.0)
+    advance(meter, scope, "archive", 2, 120.0)
+    recorder = progress.Recorder(catalog, GRANT, scope, "agentihooks", clock=lambda: 200.0)
+    before = meter.snapshot()
+    with pytest.raises(Conflict, match="acknowledge"):
+        recorder.consume(2, lambda source, through: receipt)
+    assert meter.snapshot() == before
+
+
+def test_extraction_replay_and_bad_cursors_never_call_the_extractor(captured):
+    catalog, meter, scope = captured
+    for stage in metrics.STAGES:
+        advance(meter, scope, stage, 1, 100.0)
+    recorder = progress.Recorder(catalog, GRANT, scope, "agentihooks", clock=lambda: 200.0)
+    calls = []
+    assert recorder.consume(1, lambda *args: calls.append(args)) == {"state": "replayed", "through": 1}
+    for through in [0, 2, True]:
+        with pytest.raises(Conflict, match="cursor"):
+            recorder.consume(through, lambda *args: calls.append(args))
+    assert calls == []
+
+
+def test_pending_spool_replays_observations_once_after_attach_or_restart(tmp_path):
+    catalog = Catalog(tmp_path / "catalog.sqlite")
+    scope = metrics.Scope(GRANT.corpus, "new-session", "source")
+    config = spool.SpoolConfig(tmp_path / "spool", 1000000, 800000)
+    queue = spool.Spool(config, clock=lambda: 100.0)
+    queue.append("one", [{"text": "private"}])
+    recorder = progress.Recorder(catalog, GRANT, scope, "agentihooks", clock=lambda: 200.0)
+    assert recorder.meter.status(GRANT, scope, 200.0)["coverage"] == "partial"
+    queue = spool.Spool(config, progress=recorder)
+    before = recorder.meter.snapshot()
+    queue.append("one", [{"text": "private"}])
+    assert recorder.meter.snapshot() == before
+    assert recorder.meter.status(GRANT, scope, 200.0)["archive_lag_seconds"] == 100.0
+    assert spool.Spool(config, progress=recorder).status().pending == [1]
+    assert recorder.meter.snapshot() == before
+    catalog.close()
+
+
+def test_binding_cannot_expand_or_relabel_a_source(captured):
+    _, meter, scope = captured
+    with pytest.raises(EvidenceRefused):
+        meter.bind(GRANT, scope, "other-project")
+    meter.bind(GRANT, scope, "agentihooks")
+    before = meter.snapshot()
+    broad = Grant(GRANT.principal, GRANT.corpus, frozenset({"agentihooks", "other-project"}))
+    with pytest.raises(Conflict, match="immutable"):
+        meter.bind(broad, scope, "other-project")
+    assert meter.snapshot() == before
+
+
+def test_archive_acknowledgement_requires_a_captured_batch(captured):
+    catalog, _, scope = captured
+    recorder = progress.Recorder(catalog, GRANT, scope, "agentihooks", clock=lambda: 200.0)
+    with pytest.raises(Conflict, match="captured batch"):
+        recorder.archived(spool.Entry(1, "not-captured", 100.0, [{}], 10))
+
+
+def test_metrics_never_load_transcript_records(captured, monkeypatch):
+    catalog, meter, scope = captured
+    monkeypatch.setattr(catalog, "events", lambda *args: pytest.fail("hydrated transcript"))
+    assert meter.status(GRANT, scope, 200.0)["coverage"] == "partial"
+    assert len(meter.coverage(GRANT, [], 200.0)["sources"]) == 1
+
+
+def test_revoked_source_binding_cannot_be_recreated_or_resurrected(captured):
+    catalog, meter, scope = captured
+    meter.bind(GRANT, scope, "agentihooks")
+    catalog.set_state(scope.access_domain, scope.session_uid, "deleted", 1)
+    before = meter.snapshot()
+    with pytest.raises(EvidenceRefused):
+        meter.bind(GRANT, scope, "agentihooks")
+    assert meter.snapshot() == before
+    catalog.db.execute("DELETE FROM session_record WHERE access_domain = ? AND session_uid = ?", scope.key()[:2])
+    assert meter.coverage(GRANT, [], 200.0)["sources"] == []
