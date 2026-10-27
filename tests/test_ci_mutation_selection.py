@@ -773,6 +773,24 @@ def test_statistics_parts_and_workers_use_the_same_observed_tracing_snapshot(tmp
     assert stats_shards(tmp_path, tests, 2) == parts
 
 
+def test_tracing_timings_prefer_the_latest_successful_observation(tmp_path, monkeypatch):
+    from scripts.ci_mutation.selection import recorded_seconds, traced_records
+
+    cache = tmp_path / "cache"
+    cache.mkdir()
+    monkeypatch.setenv("MUTATION_STATS_CACHE", str(cache))
+    test = "tests/test_sample.py::test_value"
+    records = {
+        "legacy": {"status": 0, "durations": {f"{test}@port": 500, "tests/test_old.py::test_old": 3}},
+        "z-older": {"status": 0, "observed_at": 10, "durations": {test: 7}},
+        "a-newer": {"status": 0, "observed_at": 20, "durations": {f"{test}@port": 2}},
+        "failed": {"status": 1, "observed_at": 30, "durations": {test: 1}},
+    }
+    for name, record in records.items():
+        (cache / f"{name}.json").write_text(json.dumps(record))
+    assert recorded_seconds(traced_records(tmp_path)) == {test: 2, "tests/test_old.py::test_old": 3}
+
+
 def test_statistics_collection_sets_the_mutmut_mode_and_preserves_runner_options(tmp_path, monkeypatch):
     from scripts.ci_mutation.selection import collect_test_ids
 

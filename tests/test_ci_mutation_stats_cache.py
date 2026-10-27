@@ -1169,6 +1169,20 @@ def test_stored_statistics_are_portable_across_metadata_ordering(tmp_path):
     assert len(list(folder.glob("*.json"))) == 1
 
 
+def test_stored_statistics_date_new_observations_without_changing_reused_results(tmp_path, monkeypatch):
+    import json
+
+    from scripts.ci_mutation.stats_dependencies import StoredStats
+
+    monkeypatch.setattr("time.time_ns", lambda: 123456)
+    store = StoredStats(tmp_path, tmp_path, {"inventory": []}, {})
+    result = {"status": 0, "tests": {}, "durations": {"test": 2}, "cpu": 1}
+    store.save("tests/test_sample.py", result, {}, True)
+    (record,) = tmp_path.glob("*.json")
+    assert json.loads(record.read_text())["observed_at"] == 123456
+    assert store.load("tests/test_sample.py") == {**result, "reused": True}
+
+
 def test_file_stats_pass_sorted_changed_lines_and_runner_options_to_the_cache(tmp_path, monkeypatch):
     import json
     from types import SimpleNamespace
