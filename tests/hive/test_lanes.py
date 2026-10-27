@@ -155,6 +155,27 @@ def test_a_lane_spoke_takes_an_offer_without_a_ledger_read_and_spawns_what_the_h
     assert json.loads(claim.value)["state"] == "started"
 
 
+def test_a_hive_event_launch_resolves_the_origin_to_its_own_checkout(hub, tmp_path, monkeypatch):
+    from scripts.hive.daemon import local_checkout
+    from scripts.swarm.store import SwarmConfig
+
+    root = tmp_path / "hive-repos"
+    checkout = root / "project"
+    git = checkout / ".git"
+    git.mkdir(parents=True)
+    (git / "config").write_text('[remote "origin"]\n\turl = https://github.com/team/project.git\n')
+    monkeypatch.setenv("HIVE_REPO_ROOT", str(root))
+    missing = tmp_path / "workstation-only"
+    config = SwarmConfig("rig", str(missing), 1, 1, repo_origin="github.com/team/project")
+
+    request = lanes.LaneTasks(hub.bus, "hive-a", lambda slug: config).request(offer())
+
+    assert request.config.repo == "github.com/team/project"
+    assert local_checkout(request.config.repo) == str(checkout)
+    assert config.repo == str(missing)
+    assert (request.lane, request.name, request.task) == ("eng", "eng@rig-0001", hub.admitted["task"])
+
+
 def test_the_lane_loop_waits_only_after_a_pass_with_nothing_started(monkeypatch):
     outcomes = iter([["empty"], ["started", "held"], []])
     seen = []
