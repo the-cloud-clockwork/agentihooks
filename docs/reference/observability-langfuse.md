@@ -476,7 +476,7 @@ Each scan joins it with:
 | `telemetry start unknown` | the binding has no positive start; see [Agent start](#agent-start) |
 | `trace reader unavailable` | the trace listing or any active read failed or ran out of its budget |
 | `trace coverage partial` | the historical backfill has not read every listed trace's observations yet; see [Trace coverage](#trace-coverage) |
-| `wait history partial` | the wait history of an agent with a turn gap over the limit was not read inside the 15 second wait budget or the 55 second step deadline it shares with the trace reads; its turn gaps are not judged that scan |
+| `wait history partial` | the wait history of a live agent with a turn gap over the limit was not read inside the 15 second wait budget or the 55 second step deadline it shares with the trace reads; its turn gaps are not judged that scan |
 
 Threshold `AGENTIHOOKS_DOCTOR_ACTIVE_STALE_SECONDS` (60), grace
 `AGENTIHOOKS_DOCTOR_ACTIVE_GRACE_SECONDS` (60), first turn bound
@@ -780,23 +780,26 @@ fewer agents to read.
 
 **Agents left unread.** An agent whose wait history was not read gets no turn
 gap judgement in that scan, so no turn gap finding is raised for it. The scan
-raises one `wait history partial` finding for the swarm instead.
-The finding's subject is the swarm slug and its number is the count of unread
-agents:
+raises one `wait history partial` finding for the swarm instead, but only
+when at least one of the unread agents is live (see
+[Live agents first](#live-agents-first)). The finding's subject is the swarm
+slug and its number is the count of unread live agents:
 
 ```text
-wait history of 6 agents with turn gaps over 30 minutes not read in budget
-unread: eng-3, eng-7, ci-1, eng-12, eng-4
-live agents unread: 2
+wait history of 2 live agents with turn gaps over 30 minutes not read in budget
+unread: eng-3, eng-7
+retired agents unread: 104
 turn gap findings skip agents whose wait history was not read
 each Doctor scan reads the wait history again within its budget
 ```
 
 The first line is the title. The `unread` line names the first five unread
-agents in read order. The threshold reads `every agent with a turn gap over the
-limit has its wait history read`. The finding is absent when every agent that
-needs its wait history was read. Each scan picks the agents again, so the next
-scan retries the unread ones.
+live agents in read order. The `retired agents unread` line counts the retired
+agents also left unread. The threshold reads `every live agent with a turn gap
+over the limit has its wait history read`. The finding is absent when every
+live agent that needs its wait history was read, even if retired agents were
+left unread: a retired agent's skipped turn gap judgement needs no verdict.
+Each scan picks the agents again, so the next scan retries the unread ones.
 
 #### Live agents first
 
@@ -817,23 +820,20 @@ step deadline, so the unread agents are always the tail of the list. A live
 agent is left unread only when every retired agent with a long gap was left
 unread too. For example, with 3 live and 100 retired agents with long gaps
 and time for 40 reads, the 3 live agents and the 37 retired agents whose newest
-gap ends latest are read. The 63 left unread are all retired, and the finding
-reads `live agents unread: 0`.
+gap ends latest are read. The 63 left unread are all retired, and no
+`wait history partial` finding is raised.
 
-The `live agents unread` evidence line of `wait history partial` counts every
-live agent among all unread agents, not only the five the `unread` line names.
-A value above 0 means even the live agents did not fit in the budget. Turn gap
-findings for those live agents are missing from that scan, and no retired agent
-was read at all.
-
-| `live agents unread` | Meaning | Action |
-|---|---|---|
-| `0` | every live agent with a long gap was judged; only retired agents were skipped | none for the live swarm; retired agents are retried on later scans |
-| above `0` | the wait reads covered fewer agents than the live agents with long gaps | read the trace step time below; the Langfuse reads or Redis used up the step |
+When the finding is raised, even the live agents did not fit in the budget.
+Turn gap findings for those live agents are missing from that scan, and no
+retired agent was read at all. Read the trace step time below; the Langfuse
+reads or Redis used up the step.
 
 The finding's number, which `doctor measure wait-history-partial/<slug>`
-prints, stays the count of all unread agents, live and retired. The live count
-appears only in the evidence line.
+prints, is the count of unread live agents. Pull request #5229 first counted
+all unread agents and showed the live count only as a `live agents unread`
+evidence line. On 27 October the finding fired with five unread retired agents
+and no live ones and was judged a false positive, so issue #8060 raised it only
+for unread live agents.
 
 **Why live agents come first.** Pull request #5176 bounded the wait reads and
 read the agents newest gap first. The next scans on rig-grade-swarm raised
@@ -924,7 +924,7 @@ otherwise it fails with `no finding wait-history-partial/<slug> has been seen`.
 | `wait history partial` with `doctor.trace` well under 55 seconds | the wait reads themselves used the 15 seconds; many agents have long gaps, or Redis answers slowly |
 | `doctor.trace` above 60 seconds | a Langfuse request or a wait read in flight finished past its budget; read the `trace reader unavailable` failure lines for timeouts |
 | a turn gap finding disappears while `wait history partial` is present | its agent was left unread in that scan; it is judged again once its wait history is read |
-| `wait history partial` evidence reads `live agents unread` above 0 | every retired agent with a long gap was also left unread and the live agents did not fit; see [Live agents first](#live-agents-first) |
+| `wait history partial` is raised at all | every retired agent with a long gap was also left unread and the live agents did not fit; see [Live agents first](#live-agents-first) |
 
 ### Historical findings
 
