@@ -464,7 +464,7 @@ def test_headroom_keeps_publishing_after_its_wait_loses_the_connection(monkeypat
 
     from scripts.hive import headroom
 
-    calls, paused = [], []
+    calls = []
     monkeypatch.setattr(headroom, "publish", lambda client, hive, now_ms: calls.append((client, hive, now_ms)))
     monkeypatch.setattr(registry, "touch", lambda client, hive, now_ms: None)
     monkeypatch.setattr(daemon.time, "time", lambda: 1)
@@ -479,24 +479,15 @@ def test_headroom_keeps_publishing_after_its_wait_loses_the_connection(monkeypat
             raise getattr(exceptions, error)("gone")
         paced(seconds, redis, timeout)
 
-    class Stop:
-        def is_set(self):
-            return stop.is_set()
-
-        def wait(self, seconds):
-            paused.append(seconds)
-            return False
-
     monkeypatch.setattr(daemon, "scheduled_wait", wait)
     redis = object()
-    PUBLISH_HEADROOM(redis, object(), "local", Stop())
-    assert paused == ([daemon.HEADROOM_SECONDS] if error == "ConnectionError" else [])
+    PUBLISH_HEADROOM(redis, object(), "local", stop)
     assert calls == [(redis, "local", 1_000)]
     assert beats == [(redis, "local")]
     assert capsys.readouterr().err == f"hive headroom wait failed ({error}: gone)\n"
 
 
-def test_headroom_stops_when_stopped_during_a_lost_wait_pause(monkeypatch):
+def test_headroom_stops_when_stopped_during_a_lost_wait(monkeypatch):
     import threading
 
     from redis import exceptions
@@ -637,10 +628,10 @@ def test_herdr_stats_keep_publishing_after_their_wait_loses_the_connection(redis
     from scripts.hive import herdr_stats
 
     redis.hset(registry.key("machine"), mapping={"name": "machine", "ui": "yes", "heartbeat_at": "1"})
-    calls, paused, lost = [], [], []
+    calls, lost = [], []
     monkeypatch.setattr(herdr_stats, "publish", lambda redis, now_ms: calls.append((redis, now_ms)))
     monkeypatch.setattr(daemon.time, "time", lambda: 12.3456)
-    stop, waits = ticks(monkeypatch, 1)
+    stop, waits = ticks(monkeypatch, 0)
     paced = daemon.scheduled_wait
 
     def wait(seconds, redis, timeout):
@@ -649,22 +640,13 @@ def test_herdr_stats_keep_publishing_after_their_wait_loses_the_connection(redis
             raise getattr(exceptions, error)("lost")
         paced(seconds, redis, timeout)
 
-    class Stop:
-        def is_set(self):
-            return stop.is_set()
-
-        def wait(self, seconds):
-            paused.append(seconds)
-            return False
-
     monkeypatch.setattr(daemon, "scheduled_wait", wait)
-    PUBLISH_HERDR_STATS(redis, "waiter", "machine", Stop())
-    assert paused == ([herdr_stats.EVERY_S] if error == "ConnectionError" else [])
+    PUBLISH_HERDR_STATS(redis, "waiter", "machine", stop)
     assert calls == [(redis, 12_345)]
     assert capsys.readouterr().err == f"hive herdr stats wait failed ({error}: lost)\n"
 
 
-def test_herdr_stats_stop_when_stopped_during_a_lost_wait_pause(monkeypatch):
+def test_herdr_stats_stop_when_stopped_during_a_lost_wait(monkeypatch):
     from redis.exceptions import ConnectionError
 
     from scripts.hive import herdr_stats
