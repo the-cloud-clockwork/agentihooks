@@ -143,8 +143,9 @@ follow up, question, blocked task and done task, each phase it ticks or reopens,
 
 The master recycles like any agent: at `AGENTIHOOKS_COMPACT_LIMIT` it writes a handoff document and runs
 `agentihooks swarm <id> handoff <doc>`. The next tick retires it and spawns the next master with the document,
-so one master is always online. `issue`, `pr`, `done` and `block` refuse the master. The swarm panel on the
-ledger page shows the master as the first card.
+so one master is always online. A master busy with no tool call past the stall threshold is recycled the same
+way without its own document: see [Stalled master recycle](#stalled-master-recycle). `issue`, `pr`, `done` and
+`block` refuse the master. The swarm panel on the ledger page shows the master as the first card.
 
 Before the tick retires a live master that reported its hook, for any reason (a live binding mismatch, a failed
 launch check, the idle limit or a stopping swarm), it sends that master an inbox item asking for a Handoff v2 and
@@ -5320,6 +5321,102 @@ A verdict suppresses the finding under the existing cooldown rules; it does
 not update the activity clock. See the `verdict` command above for recurrence
 behavior and [Outage holds and recovery](#outage-holds-and-recovery) for provider
 or Redis outages, which have their own hold and resume behavior.
+
+### Stalled master recycle
+
+A master that shows busy with no tool call past the stall threshold is recycled by its swarm's tick through a
+recovery handoff in the same seat, so a stalled master never waits on the operator to stop it. A proof swarm's
+controls accept only the operator and its own master, so no other agent can stop a stalled proof master.
+
+Every tick of a swarm that is not stopping or stopped checks the swarm's live master. Its stall clock runs only
+when all of these hold:
+
+| Clock runs only when | Reason |
+|---|---|
+| The master's pane reports `working` | An idle or waiting pane is not stalled. |
+| The master has no declared wait (`swarm <id> wait`) | A declared wait is work in progress. |
+| The master has recorded at least one tool call and its end | A master whose first call is still running is inside a tool call. |
+| No tool call it began is still open | A long Bash, Monitor or Agent call, including an Agent call whose subagent runs its own tools, is never interrupted. |
+| Its session started more than six minutes ago | The startup grace covers launch. |
+
+The quiet time counts from the later of the last tool call's end and the session start. Once it reaches
+`AGENTIHOOKS_HEALTH_STALLED_MINUTES` (default 10, the same threshold as the [stalled finding](#stalled-activity-findings)),
+the tick acts in this order:
+
+1. **Proof swarm with a blocked parent task.** When the swarm is a proof swarm (`proof-<code>-<task>-<n>`) whose
+   creating task in its parent swarm is blocked, the tick sets the swarm to `stopping` instead of recycling the master.
+   The task id is compared without case or punctuation, so `t1199` and `T-1199` match. The tick journal line is
+   `stopped proof swarm <id>: its parent task is blocked and its master <name> stalled`.
+2. **Ask for a handoff.** A live master gets the same inbox item every master retire sends, asking it to write a
+   Handoff v2 and submit it with `agentihooks swarm <id> handoff <doc>`, and the tick waits up to
+   `AGENTIHOOKS_MASTER_RETIRE_HANDOFF_MINUTES` (default 5). The journal lines are `asked <name> for a handoff before
+   retiring it: busy with no tool call for <n> minutes`, then `waiting on <name>'s handoff ...` on each later tick.
+   A master that hands off is replaced from its own document, as in [The master](#the-master).
+3. **Recycle.** At the deadline, or at once when the wait is 0 or the master is not live, the tick stores a recovery
+   handoff for the master seat, records a transfer with reason `stalled`, and marks the master `finished`. It never
+   kills the process here. The next master starts in the same seat from that handoff. The journal line is
+   `recycled master <name> in its seat after <n> minutes busy with no tool call`.
+
+While the ask is pending, the tick withdraws it as soon as the clock stops or falls back under the threshold: the
+master starts or finishes a tool call, declares a wait, or its pane leaves `working`. It closes the ask item as done
+with `the master resumed work` in every one of these cases, including a pane that went idle. Retire requests raised
+for other reasons are left alone.
+
+The recovery handoff is runtime written. Its envelope carries reason `recycle`, the master's name and seat and the
+ledger; its body marks Done, Stopped at and Decisions and promises as `unknown`, because the stalled master reported
+nothing, and its Next tells the successor to re-read the ledger and the master inbox. The successor reads the master
+inbox first.
+
+#### How the hooks feed the stall clock
+
+The clock reads the per agent activity records under `~/.agentihooks/swarm-activity/<id>/`, written by the swarm
+session's hooks:
+
+| Hook | Record |
+|---|---|
+| `PreToolUse` | The call's time (`<name>.last`) and an open marker named by its `tool_use_id` (`<name>.open/<id>`). |
+| `PostToolUse` and `PostToolUseFailure` | The call's end time (`<name>.done`), and removes its open marker. Claude reports failed calls only through `PostToolUseFailure`, which the base settings wire to the same hook. |
+| A `PreToolUse` the hook denies | Ends the call the same way, since a denied call gets neither post hook. |
+| `Stop` (heartbeat turns idle) | Drops every open marker left over at turn end. |
+
+A call id that is not 1 to 128 letters, digits, `_` or `-` records no open marker. An installation that predates the
+`PostToolUseFailure` entry needs `agentihooks init` again to install it; without it a failed call's marker stays until
+turn end.
+
+#### Configure
+
+The threshold and handoff wait are read by the process that runs the tick. For normal operation set them in the
+swarm timer's or controller's managed environment, as in [Configure the threshold](#configure-the-threshold), since
+the timer starts each tick as its own child process. A prefix on a manual tick affects only that invocation:
+
+```bash
+# Manual tick: recycle after 20 quiet minutes and give the master 3 minutes to hand off
+AGENTIHOOKS_HEALTH_STALLED_MINUTES=20 AGENTIHOOKS_MASTER_RETIRE_HANDOFF_MINUTES=3 agentihooks swarm tick
+```
+
+`AGENTIHOOKS_MASTER_RETIRE_HANDOFF_MINUTES=0` recycles without asking. There is no separate switch: raising the
+threshold delays the recycle.
+
+#### Check a recycle
+
+```bash
+# Ask, wait, recycle and proof swarm stop lines from the tick journal
+journalctl --user -t agentihooks-swarm --since "-1 day" --no-pager \
+  | grep -E "busy with no tool call|stopped proof swarm"
+
+# Recorded transfers; a stalled master recycle has reason "stalled"
+agentihooks swarm <id> status --json | jq '.transfers[] | select(.reason == "stalled")'
+
+# Tool calls the master still has open; an entry here holds the clock
+ls ~/.agentihooks/swarm-activity/<id>/<master name>.open/
+```
+
+| Symptom | Cause and check |
+|---|---|
+| A master busy for longer than the threshold is not recycled | A tool call is still open, it declared a wait, its pane does not read `working`, or the swarm is stopping. List its open markers; a leftover one from a failed call means the `PostToolUseFailure` hook is not installed. |
+| The ask arrives but the master keeps working | Expected: its next tool call withdraws the ask as resumed. |
+| A proof swarm stopped instead of recycling its master | Its parent task is blocked. Nothing restarts the proof swarm when the parent task is unblocked; run `agentihooks swarm <id> start` to continue the proof. |
+| The successor starts with unknown Done and Stopped at | Expected for a recovery handoff; it rebuilds its state from the ledger and the master inbox. |
 
 ### Spawn stall findings
 
