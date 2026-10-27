@@ -49,8 +49,16 @@ def _rebinds(node: ast.AST, name: str) -> bool:
         return isinstance(node.target, ast.Name) and node.target.id == name
     if isinstance(node, (ast.Global, ast.Nonlocal)):
         return name in node.names
+    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+        return node.name == name
+    if isinstance(node, ast.alias):
+        return (node.asname or node.name) == name
+    if isinstance(node, ast.Name):
+        return isinstance(node.ctx, ast.Del) and node.id == name
     if isinstance(node, (ast.Subscript, ast.Attribute)):
         return isinstance(node.ctx, (ast.Store, ast.Del)) and isinstance(node.value, ast.Name) and node.value.id == name
+    if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+        return node.func.id in ("globals", "vars", "setattr")
     if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
         return isinstance(node.func.value, ast.Name) and node.func.value.id == name and node.func.attr in MUTATORS
     return False
@@ -66,7 +74,12 @@ def constant(tree: Path, path: str, name: str):
         for node in module.body
         if isinstance(node, ast.Assign) and any(isinstance(t, ast.Name) and t.id == name for t in node.targets)
     ]
-    if len(bound) != 1 or any(_rebinds(node, name) for node in ast.walk(module)):
+    stores = [
+        node
+        for node in ast.walk(module)
+        if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store) and node.id == name
+    ]
+    if len(bound) != 1 or len(stores) != 1 or any(_rebinds(node, name) for node in ast.walk(module)):
         raise PinError(f"{path} must bind {name} once to a literal and never change it")
     return ast.literal_eval(bound[0].value)
 
