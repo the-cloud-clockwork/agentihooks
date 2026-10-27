@@ -7,7 +7,9 @@ import subprocess
 import zipfile
 import zlib
 from concurrent.futures import ThreadPoolExecutor
+from itertools import takewhile
 from pathlib import Path
+from time import monotonic, sleep
 from urllib.parse import urlencode
 
 from scripts.ci_budget import rate_limit
@@ -20,6 +22,7 @@ LISTED = 30
 PAGE_SIZE = 100
 PAGES = 5
 REQUESTS = 100
+POLL_SECONDS = 15
 COMMIT = re.compile(r"[0-9a-f]{40}(?:[0-9a-f]{24})?")
 LEG = re.compile(r"\d+", re.ASCII)
 LEG_JOB = re.compile(rf"(?:unit|unit-selected) \(3\.12, ({LEG.pattern})\)", re.ASCII)
@@ -118,11 +121,11 @@ def _record(data: bytes, name: str, run: dict, args: argparse.Namespace) -> dict
     return record
 
 
-def _present(root: Path, commit: str) -> bool:
-    return subprocess.run(["git", "-C", str(root), "fetch", "--no-tags", "origin", commit]).returncode == 0
+def _present(root: str, commit: str) -> bool:
+    return subprocess.run(["git", "-C", root, "fetch", "--no-tags", "origin", commit]).returncode == 0
 
 
-def _changes(root: Path, commit: str, cache: dict) -> list | None:
+def _changes(root: str, commit: str, cache: dict) -> list | None:
     if commit not in cache:
         cache[commit] = dep_manifest.changes(root, commit, "HEAD") if _present(root, commit) else None
     return cache[commit]
@@ -155,7 +158,7 @@ def _outcomes(record: dict, changed: list) -> tuple[set[str], set[str]]:
     return _nodes(record["passed"]) & valid, blocked & valid | blocked - known
 
 
-def _evaluate(root: Path, records: list[dict], cache: dict) -> list[tuple[dict, set[str], set[str]]]:
+def _evaluate(root: str, records: list[dict], cache: dict) -> list[tuple[dict, set[str], set[str]]]:
     usable, missing, unfetched = [], [], set()
     for record in records:
         changed = _changes(root, record["commit"], cache)
@@ -176,16 +179,28 @@ def _warn(run: dict, reason: object) -> None:
     )
 
 
+def _settled(actions: str, args: argparse.Namespace) -> tuple[list[dict], int]:
+    deadline = monotonic() + args.wait_seconds
+    runs, polls = _runs(actions, args), 1
+    while any(run["status"] != "completed" for run in runs) and monotonic() < deadline:
+        sleep(POLL_SECONDS)
+        runs, polls = _runs(actions, args), polls + 1
+    return runs, polls
+
+
 def considered(args: argparse.Namespace) -> tuple[list[tuple[dict, set[str], set[str]]], set[str]]:
     actions = f"repos/{args.repository}/actions"
     found, cache = [], {}
     with ThreadPoolExecutor() as pool:
-        runs = _runs(actions, args)
-        listings = [pool.submit(_listing, actions, run) for run in runs]
-        requests = 1 + sum(listing.result()[2] for listing in listings if listing.exception() is None)
-        for run, listing in zip(runs, listings):
+        runs, requests = _settled(actions, args)
+        done = takewhile(lambda run: run["status"] == "completed", runs)
+        listings = {run["id"]: pool.submit(_listing, actions, run) for run in done}
+        requests += sum(listing.result()[2] for listing in listings.values() if listing.exception() is None)
+        for run in runs:
             try:
-                items, required, _ = listing.result()
+                if run["status"] != "completed":
+                    raise Barrier(f"it was still {run['status']} after waiting {args.wait_seconds} seconds")
+                items, required, _ = listings[run["id"]].result()
                 if missing := sorted(required - {item["name"] for item in items}):
                     raise Barrier(f"started test legs left no {', '.join(missing)}")
                 if requests + len(items) > REQUESTS:
@@ -260,7 +275,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--environment", required=True)
     parser.add_argument("--event", default=os.environ.get("GITHUB_EVENT_NAME"))
     parser.add_argument("--dev-plan", type=Path)
-    parser.add_argument("--root", type=Path, required=True)
+    parser.add_argument("--wait-seconds", type=int, default=240)
+    parser.add_argument("--root", required=True)
     parser.add_argument("--out", type=Path, required=True)
     args = parser.parse_args(argv)
     try:
