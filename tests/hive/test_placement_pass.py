@@ -3,6 +3,7 @@ from unittest.mock import Mock
 
 import pytest
 
+from scripts.hive.launch import Selection
 from scripts.swarm import controller
 from scripts.swarm.tick import ACK_LATER, SpawnError, _room_wait, _spawn_order
 from scripts.swarm_v2.runtime.base import RuntimeRouter
@@ -275,3 +276,28 @@ def test_master_placement_and_spawn_hand_the_pass_memo_to_the_workstation_check(
             runtime.placement_refusal("master", {"id": "master"})
     assert len(memos) == 1
     assert memos[0] is pass_memo
+
+
+@pytest.mark.parametrize("in_pass", [False, True])
+def test_a_selection_in_one_pass_takes_its_hive_room_from_later_tasks(setup, in_pass):  # noqa: F811
+    from dataclasses import replace
+
+    from scripts.hive.placement import Wait
+    from tests.hive.test_controller_launch import publish_room
+
+    publish_room(setup.store, "remote", 1)
+    launch = setup.launcher
+    launch.placement_cache = {} if in_pass else None
+    first = launch.select(setup.config, "eng", {"id": "one"})
+    second = launch.select(setup.config, "eng", {"id": "two"})
+    assert isinstance(first, Selection)
+    assert first.hive == "remote"
+    if in_pass:
+        assert isinstance(second, Wait)
+        assert launch.select(setup.config, "eng", {"id": "one"}) is first
+        assert [hive["room"] for hive in launch.hives() if hive["id"] == "remote"] == [0]
+        master = replace(first, master_placement=Mock())
+        assert launch._spend(master) is master
+        assert [hive["room"] for hive in launch.hives() if hive["id"] == "remote"] == [0]
+    else:
+        assert isinstance(second, Selection)
