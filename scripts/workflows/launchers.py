@@ -10,6 +10,9 @@ from scripts.workflows.runner import StageResult
 from scripts.workflows.schema import Stage
 
 
+__all__ = ["HeadlessProfile"]
+
+
 @dataclass(frozen=True)
 class HeadlessProfile:
     harness: str = "auto"
