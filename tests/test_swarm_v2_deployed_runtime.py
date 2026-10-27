@@ -242,6 +242,97 @@ def test_the_controller_start_hands_the_tick_the_kubernetes_runtime_and_the_dist
     assert lease.current(store, SLUG) is None
 
 
+@pytest.fixture
+def proof_controller(tmp_path, monkeypatch):
+    monkeypatch.setattr("tests.test_swarm_v2_deployed_runtime.SLUG", "proof-123abc-t1-1")
+    store, pods = _store(), Pods("swarm-pod-proof")
+    settings = _environ(tmp_path, store)
+    for name, value in settings.items():
+        monkeypatch.setenv(name, value)
+    monkeypatch.setattr(deployed, "pod_api", lambda *_: pods)
+    service = _cs().host(settings, store, "hive-fixture")
+    try:
+        yield store, pods, service
+    finally:
+        service.stop()
+
+
+@pytest.mark.parametrize(
+    "selected,lane,backend",
+    [
+        ("proof-123abc-t1-1", "eng", BACKEND),
+        ("", "eng", "hive"),
+        ("proof-123abc-t2-1", "eng", "hive"),
+        ("proof-123abc-t1-1", "ci", "hive"),
+        ("proof-123abc-t1-1", "plan", "hive"),
+        ("proof-123abc-t1-1", "dispatch", "hive"),
+    ],
+)
+def test_proof_engineer_placement_preserves_other_swarms_and_lanes(
+    proof_controller, monkeypatch, selected, lane, backend
+):
+    from unittest.mock import Mock
+
+    from scripts.swarm.runtime import Placed
+
+    store, pods, service = proof_controller
+    monkeypatch.setenv("AGENTIHOOKS_CONTROL_KUBERNETES_PROOF", selected)
+    fenced = loop.FencedRuntime(store, SLUG, service.controller.held, service.runtime, "distributed")
+    hive = fenced.runtime.hive_launch
+    hive.select = Mock(return_value=object())
+    hive.spawn = Mock(return_value=Placed("hive-pane", "hive-window", placement="hive"))
+    task = {"id": "t1", "title": "Fixture", "seat": f"{lane}-1@{SLUG}", "profile": "engineer"}
+    assert fenced.placement_refusal(lane, task) == ""
+    placed = fenced.spawn(store.config(SLUG), lane, store.next_name(SLUG, lane), task)
+    assert placed.placement == backend
+    if backend == BACKEND:
+        hive.select.assert_not_called()
+        hive.spawn.assert_not_called()
+        assert len(pods.created) == 1
+    else:
+        hive.select.assert_called_once()
+        hive.spawn.assert_called_once()
+        assert pods.created == []
+
+
+def test_proof_engineer_placement_keeps_workstation_and_disabled_backend_refusals(proof_controller, monkeypatch):
+    store, pods, service = proof_controller
+    monkeypatch.setenv("AGENTIHOOKS_CONTROL_KUBERNETES_PROOF", SLUG)
+    fenced = loop.FencedRuntime(store, SLUG, service.controller.held, service.runtime, "distributed")
+    task = {"id": "t1", "workstation": True}
+    assert fenced.placement_refusal("eng", task) == loop.WORKSTATION.format(lane="eng")
+    service.runtime.router.disabled = frozenset((BACKEND,))
+    assert fenced.placement_refusal("eng", {"id": "t1"}) == loop.DISABLED.format(backend=BACKEND)
+    assert pods.created == []
+
+
+def test_proof_engineer_worker_launch_records_a_real_checkpoint(proof_controller, tmp_path, monkeypatch):
+    from scripts.swarm_v2.checkpoints import capture, runtime
+    from tests.test_swarm_v2_checkpoints_capture import portable
+
+    store, pods, service = proof_controller
+    monkeypatch.setenv("AGENTIHOOKS_CONTROL_KUBERNETES_PROOF", SLUG)
+    fenced = loop.FencedRuntime(store, SLUG, service.controller.held, service.runtime, "distributed")
+    task = {"id": "t1", "title": "Fixture", "seat": f"eng-1@{SLUG}", "profile": "engineer"}
+    assert fenced.placement_refusal("eng", task) == ""
+    placed = fenced.spawn(store.config(SLUG), "eng", store.next_name(SLUG, "eng"), task)
+    assert placed.placement == BACKEND
+    spec = json.loads(pods.maps[0]["data"]["launch.json"])
+    execution = spec["registration"]["execution_id"]
+    assert store.execution(SLUG, execution).runtime_backend == BACKEND
+    attempt, scope, environ, newest = portable.__wrapped__(tmp_path, monkeypatch)
+    original = json.loads((attempt / "launch.json").read_text())
+    original.update(registration=spec["registration"], authority=spec["authority"], image_digest=spec["image_digest"])
+    (attempt / "launch.json").write_text(json.dumps(original))
+    record = json.loads((attempt / "execution.json").read_text())
+    record["attempt"] = execution
+    (attempt / "execution.json").write_text(json.dumps(record))
+    scope["authority"] = spec["authority"]
+    acknowledgement = capture.publish(attempt, scope, environ, newest)
+    assert acknowledgement["status"] == "complete"
+    assert runtime.validate_export(attempt, f"ckp-{scope['incarnation']}", environ) is True
+
+
 def _launch_record(workers, account):
     config = SwarmConfig(SLUG, "agentihooks", 2, 0, api_url=API_URL)
     task = {
