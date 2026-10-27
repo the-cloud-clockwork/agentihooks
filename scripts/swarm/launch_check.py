@@ -290,5 +290,5 @@ def findings(store: RedisStore, slug: str) -> list[Finding]:
 def _observed(values: dict) -> str:
     observed = f"expected {values['expected']}; observed {values['actual']}"
     if reason := values.get("reason"):
-        return f"{observed} ({' '.join(str(part) for part in reason.values() if part)})"
+        return f"{observed} ({' '.join(str(reason[key]) for key in ('error', 'status', 'message') if reason[key])})"
     return observed
